@@ -123,7 +123,7 @@ jobs:
         if: >-
           steps.dependabot-metadata.outputs.update-type == 'version-update:semver-major' ||
           (steps.dependabot-metadata.outputs.package-ecosystem == 'npm' &&
-           contains(steps.dependabot-metadata.outputs.dependency-names, 'vite')))
+           contains(steps.dependabot-metadata.outputs.dependency-names, 'vite'))
         run: |
           echo "⚠️ Manual review required"
           echo "📦 Package: ${{ steps.dependabot-metadata.outputs.dependency-names }}"
