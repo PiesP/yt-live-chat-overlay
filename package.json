@@ -1,0 +1,44 @@
+{
+  "name": "yt-live-chat-overlay",
+  "version": "0.1.0",
+  "description": "Nico-nico style comment overlay for YouTube live chat (100% local processing)",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "vite build",
+    "build:dev": "vite build --mode development",
+    "check": "tsc --noEmit",
+    "lint": "biome lint ./src vite.config.ts",
+    "lint:fix": "biome lint --write ./src vite.config.ts",
+    "fmt": "biome check --linter-enabled=false ./src vite.config.ts",
+    "fmt:fix": "biome check --write --linter-enabled=false ./src vite.config.ts",
+    "quality": "pnpm check && biome check ./src vite.config.ts",
+    "quality:fix": "pnpm check && biome check --write ./src vite.config.ts",
+    "prebuild": "pnpm quality"
+  },
+  "keywords": [
+    "userscript",
+    "youtube",
+    "live-chat",
+    "overlay",
+    "nico-nico"
+  ],
+  "author": "PiesP",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24.0.0",
+    "pnpm": ">=10.0.0"
+  },
+  "packageManager": "pnpm@10.27.0",
+  "volta": {
+    "node": "24.13.0",
+    "pnpm": "10.27.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.3.14",
+    "@biomejs/cli-linux-x64": "^2.3.13",
+    "@types/node": "^25.2.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.1"
+  }
+}

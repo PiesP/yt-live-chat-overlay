@@ -1,0 +1,52 @@
+# ============================================================================
+# YouTube Live Chat Overlay - .gitignore
+# Stack: TypeScript | Vite | Biome
+# ============================================================================
+
+# Dependencies
+node_modules/
+
+# Build
+dist/
+build/
+
+# TypeScript
+*.tsbuildinfo
+
+# Testing
+coverage/
+test-results/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+*:Zone.Identifier
+
+# Logs & Temp
+*.log
+tmp/
+temp/
+*.tmp
+*.temp
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Documentation (keep essential files)
+!README.md
+!LICENSE
+!CHANGELOG.md
+
+# AI Instructions
+.claude/
+.github/copilot-instructions.md
+.github/prompts/
