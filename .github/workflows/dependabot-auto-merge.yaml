@@ -8,9 +8,6 @@ name: 🤖 Dependabot Auto-Merge
 on:
   pull_request_target:
     types: [opened, synchronize, reopened]
-  # Re-evaluate when check suites complete
-  check_suite:
-    types: [completed]
 
 permissions:
   contents: write
@@ -28,6 +25,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15 # Increased to accommodate check waiting time
     if: github.actor == 'dependabot[bot]'
+    env:
+      GH_REPO: ${{ github.repository }}
     steps:
       - name: 📥 Fetch Dependabot metadata
         id: dependabot-metadata
