@@ -44,6 +44,7 @@ export class Renderer {
       index: i,
       lastItemExitTime: 0,
       lastItemStartTime: 0,
+      lastItemWidthPx: 0,
     }));
   }
 
@@ -202,11 +203,14 @@ export class Renderer {
 
     // Calculate animation duration
     const textWidth = element.offsetWidth;
-    const distance = dimensions.width + textWidth + 100; // padding
+    const exitPadding = Math.max(this.settings.fontSize * 2, 80);
+    const distance = dimensions.width + textWidth + exitPadding;
     const duration = Math.max(
       4000,
       Math.min(14000, (distance / this.settings.speedPxPerSec) * 1000)
     );
+    const laneDelay = (lane.index % 3) * 80;
+    const totalDuration = duration + laneDelay;
 
     // Use Web Animations API for dynamic animation
     // Start from current position (right edge) and move to left edge (off-screen)
@@ -214,6 +218,7 @@ export class Renderer {
       [{ transform: 'translateX(0)' }, { transform: `translateX(-${distance}px)` }],
       {
         duration,
+        delay: laneDelay,
         easing: 'linear',
         fill: 'forwards',
       }
@@ -228,18 +233,21 @@ export class Renderer {
       width: textWidth,
       distance,
       duration,
+      delay: laneDelay,
+      totalDuration,
       dimensions,
     });
 
     // Update lane state
     const now = Date.now();
-    lane.lastItemStartTime = now;
-    lane.lastItemExitTime = now + duration;
+    lane.lastItemStartTime = now + laneDelay;
+    lane.lastItemExitTime = now + totalDuration;
+    lane.lastItemWidthPx = textWidth;
 
     // Setup cleanup timeout (duration + buffer)
     const timeoutId = window.setTimeout(() => {
       this.removeMessageByElement(element);
-    }, duration + 2000);
+    }, totalDuration + 2000);
 
     // Track active message
     const activeMessage: ActiveMessage = {
@@ -269,22 +277,19 @@ export class Renderer {
     const dimensions = this.overlay.getDimensions();
     if (!dimensions) return null;
 
-    // Calculate minimum safe gap to prevent overlap
-    // A message needs to move enough distance before next message can start
-    // to ensure they don't collide
-    const minSafeDistance = 200; // minimum 200px gap between messages
-    const safeTimeGap = (minSafeDistance / this.settings.speedPxPerSec) * 1000;
-
     for (const lane of this.lanes) {
+      if (lane.lastItemStartTime === 0) {
+        return lane;
+      }
+
+      const minSafeDistance = Math.max(this.settings.fontSize * 1.2, 60);
+      const requiredGapPx = Math.max(lane.lastItemWidthPx, minSafeDistance) + minSafeDistance;
+      const safeTimeGap = (requiredGapPx / this.settings.speedPxPerSec) * 1000;
+
       // Check if enough time has passed since last message started
       const timeSinceLastStart = now - lane.lastItemStartTime;
 
-      // Also check if the last message has exited enough
-      // This ensures previous message moved far enough into the screen
-      if (
-        timeSinceLastStart >= safeTimeGap &&
-        (lane.lastItemExitTime === 0 || now < lane.lastItemExitTime)
-      ) {
+      if (timeSinceLastStart >= safeTimeGap) {
         return lane;
       }
     }

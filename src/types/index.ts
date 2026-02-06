@@ -89,6 +89,8 @@ export interface LaneState {
   lastItemExitTime: number;
   /** Last item start time (timestamp) */
   lastItemStartTime: number;
+  /** Last item width in pixels */
+  lastItemWidthPx: number;
 }
 
 /**

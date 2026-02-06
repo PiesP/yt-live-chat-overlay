@@ -93,7 +93,7 @@ export class Overlay {
 
     if (width === 0 || height === 0) return;
 
-    const laneHeight = settings.fontSize * 1.4;
+    const laneHeight = settings.fontSize * 1.6;
     const usableHeight = height * (1 - settings.safeTop - settings.safeBottom);
     const laneCount = Math.floor(usableHeight / laneHeight);
 
