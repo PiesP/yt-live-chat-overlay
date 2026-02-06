@@ -1,0 +1,175 @@
+name: 🚀 Release
+
+# Responsibility: Release artifact creation (Node.js + pnpm)
+# - Version detection: git tag or manual trigger
+# - Production build: userscript + checksums + metadata
+# - GitHub Release: automated creation with downloadable assets
+# - dist/ build artifacts for GitHub Releases
+#
+# Trigger: Tag push (v*) or manual dispatch
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (e.g., 1.2.3)"
+        required: true
+        type: string
+
+env:
+  NODE_VERSION: "24"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: 🏗️ Build & Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: 📦 Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: 🟢 Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "pnpm"
+
+      - name: 📦 Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: 📝 Determine version
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "📦 Release version: $VERSION"
+
+      - name: 🏷️ Create Git tag (workflow_dispatch only)
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          set -euo pipefail
+          TAG=v${{ steps.version.outputs.version }}
+          if git rev-parse "${TAG}" >/dev/null 2>&1; then
+            echo "Tag ${TAG} already exists; skipping"
+          else
+            git config --local user.email "action@github.com"
+            git config --local user.name "GitHub Action"
+            git tag -a "${TAG}" -m "Release ${TAG}"
+            git push origin "${TAG}"
+            echo "✅ Tag created: ${TAG}"
+          fi
+
+      - name: 🏗️ Build userscript
+        run: |
+          BUILD_VERSION=${{ steps.version.outputs.version }} pnpm build
+          # Backup dist for later steps (survives git checkout)
+          mkdir -p /tmp/dist-backup
+          cp -r dist/* /tmp/dist-backup/
+          # List backed up files for verification
+          echo "📦 Built files:"
+          ls -la /tmp/dist-backup/
+
+      - name: 📦 Prepare release package
+        run: |
+          mkdir -p release
+          cp /tmp/dist-backup/yt-live-chat-overlay.user.js release/
+
+          # Generate checksums
+          cd release && sha256sum yt-live-chat-overlay.user.js > checksums.txt && cd ..
+
+          # Create metadata
+          cat > release/metadata.json << EOF
+          {
+            "version": "${{ steps.version.outputs.version }}",
+            "build_date": "$(date -u '+%Y-%m-%dT%H:%M:%SZ')",
+            "commit": "${{ github.sha }}",
+            "node_version": "${{ env.NODE_VERSION }}"
+          }
+          EOF
+
+          # Extract changelog for current version
+          CHANGELOG_CONTENT=""
+          if [ -f "CHANGELOG.md" ]; then
+            CHANGELOG_CONTENT=$(awk -v ver="${{ steps.version.outputs.version }}" '
+              /^## \[/ {
+                if (found) exit;
+                if ($0 ~ "\\[" ver "\\]") {
+                  found=1;
+                  next;
+                }
+              }
+              found { print }
+            ' CHANGELOG.md)
+          fi
+
+          # Create release notes with changelog content
+          PREV_TAG=$(git tag --list 'v*' --sort=-v:refname | grep -v "^v${{ steps.version.outputs.version }}$" | head -n 1 || true)
+          if [ -n "$PREV_TAG" ]; then
+            COMPARE_URL="https://github.com/${{ github.repository }}/compare/${PREV_TAG}...v${{ steps.version.outputs.version }}"
+          else
+            COMPARE_URL="https://github.com/${{ github.repository }}/releases/tag/v${{ steps.version.outputs.version }}"
+          fi
+
+          cat > release/RELEASE_NOTES.md << EOF
+          # 🚀 Release v${{ steps.version.outputs.version }}
+
+          ## 📥 Installation
+
+          **[📥 Click here to install](https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.version }}/yt-live-chat-overlay.user.js)**
+
+          ---
+
+          ## 📝 What's Changed
+
+          ${CHANGELOG_CONTENT:-No changelog entry found for this version.}
+
+          **[📋 Full Changelog](${COMPARE_URL})**
+
+          ---
+
+          ## 📋 Build Details
+
+          - **Commit**: \`${{ github.sha }}\`
+          - **Built**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+          - **Node.js**: \`${{ env.NODE_VERSION }}\`
+          EOF
+
+      - name: 🏷️ Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          body_path: release/RELEASE_NOTES.md
+          files: |
+            release/yt-live-chat-overlay.user.js
+            release/checksums.txt
+            release/metadata.json
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 📊 Upload release artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-v${{ steps.version.outputs.version }}
+          path: release/
+          retention-days: 30
