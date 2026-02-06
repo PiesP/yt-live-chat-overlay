@@ -124,8 +124,8 @@ export const DEFAULT_SETTINGS: Readonly<OverlaySettings> = {
   },
   outline: {
     enabled: true,
-    widthPx: 2,
-    blurPx: 3,
-    opacity: 0.75,
+    widthPx: 1,
+    blurPx: 1,
+    opacity: 0.5,
   },
 };
