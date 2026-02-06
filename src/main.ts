@@ -7,6 +7,7 @@
 
 import { DEFAULT_SETTINGS } from '@app-types';
 import { ChatSource } from '@core/chat-source';
+import { sleep } from '@core/dom';
 import { Overlay } from '@core/overlay';
 import { PageWatcher } from '@core/page-watcher';
 import { Renderer } from '@core/renderer';
@@ -153,7 +154,7 @@ class App {
 
       // Wait longer for YouTube's SPA navigation to complete
       // YouTube needs time to load the new page structure
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      await sleep(2000);
 
       // Check if we're still on a valid page after delay
       if (!this.pageWatcher.isValidPage()) {
@@ -186,7 +187,7 @@ class App {
 
         // Wait before next retry
         if (attempt < maxRetries) {
-          await new Promise((resolve) => setTimeout(resolve, 2000));
+          await sleep(2000);
         }
       }
 

@@ -6,6 +6,67 @@
  */
 
 import type { ChatMessage } from '@app-types';
+import { findElementMatch, sleep } from '@core/dom';
+
+const CHAT_FRAME_SELECTORS = ['ytd-live-chat-frame#chat', '#chat', 'ytd-live-chat-frame'] as const;
+
+const CHAT_IFRAME_SELECTORS = [
+  'iframe[src*="live_chat"]',
+  'iframe#chatframe',
+  'ytd-live-chat-frame iframe',
+  '#chat iframe',
+] as const;
+
+const CHAT_IFRAME_ITEM_SELECTORS = [
+  '#items.yt-live-chat-item-list-renderer',
+  '#items',
+  'yt-live-chat-item-list-renderer #items',
+] as const;
+
+const CHAT_CONTAINER_SELECTORS = [
+  // Most specific selectors first
+  '#chat #items.yt-live-chat-item-list-renderer',
+  '#items.yt-live-chat-item-list-renderer',
+  'yt-live-chat-item-list-renderer #items',
+  'ytd-live-chat-frame yt-live-chat-item-list-renderer',
+  'yt-live-chat-app yt-live-chat-item-list-renderer',
+
+  // Frame-based selectors
+  'ytd-live-chat-frame #items',
+
+  // App-based selectors
+  'yt-live-chat-app #items',
+
+  // Chat panel selectors
+  '#chat-container #items',
+  '#chat #items',
+  'ytd-live-chat #items',
+
+  // Tag-based selector
+  'yt-live-chat-item-list-renderer',
+
+  // Generic selectors (LAST - most likely to match wrong elements!)
+  // NOTE: #items can match sidebar elements, so we validate it
+  '#items',
+] as const;
+
+const CHAT_TOGGLE_BUTTON_SELECTORS = [
+  // Theater mode toggle button
+  'ytd-toggle-button-renderer button[aria-label*="chat" i]',
+  'ytd-toggle-button-renderer button[aria-label*="채팅" i]',
+  // Live chat button
+  'button#show-hide-button',
+  // Engagement panel toggle
+  'ytd-engagement-panel-title-header-renderer button',
+  // Engagement panel list buttons
+  'ytd-engagement-panel-section-list-renderer button[aria-label*="chat" i]',
+  'ytd-engagement-panel-section-list-renderer button[aria-label*="채팅" i]',
+  // Generic chat-related buttons (ignore overlay settings button)
+  'button:not(#yt-chat-overlay-settings-button)[aria-label*="show chat" i]',
+  'button:not(#yt-chat-overlay-settings-button)[aria-label*="open chat" i]',
+  'button:not(#yt-chat-overlay-settings-button)[aria-label*="chat" i]',
+  'button:not(#yt-chat-overlay-settings-button)[aria-label*="채팅" i]',
+] as const;
 
 export type MessageCallback = (message: ChatMessage) => void;
 
@@ -33,7 +94,7 @@ export class ChatSource {
         const iframeDoc = iframe.contentDocument;
         if (!iframeDoc) {
           console.log(`[YT Chat Overlay] iframe content attempt ${i + 1}: contentDocument is null`);
-          await new Promise((resolve) => setTimeout(resolve, intervalMs));
+          await sleep(intervalMs);
           continue;
         }
 
@@ -42,27 +103,18 @@ export class ChatSource {
           console.log(
             `[YT Chat Overlay] iframe content attempt ${i + 1}: readyState = ${iframeDoc.readyState}`
           );
-          await new Promise((resolve) => setTimeout(resolve, intervalMs));
+          await sleep(intervalMs);
           continue;
         }
 
-        // Document is complete, now look for #items
-        const container = iframeDoc.querySelector('#items.yt-live-chat-item-list-renderer');
-        if (container) {
-          console.log(`[YT Chat Overlay] iframe content ready on attempt ${i + 1}: #items found`);
-          return container;
-        }
-
-        // Try alternative selectors
-        const altSelectors = ['#items', 'yt-live-chat-item-list-renderer #items'];
-        for (const sel of altSelectors) {
-          const el = iframeDoc.querySelector(sel);
-          if (el) {
-            console.log(
-              `[YT Chat Overlay] iframe content ready on attempt ${i + 1}: found with selector "${sel}"`
-            );
-            return el;
-          }
+        const containerMatch = findElementMatch<Element>(CHAT_IFRAME_ITEM_SELECTORS, {
+          root: iframeDoc,
+        });
+        if (containerMatch) {
+          console.log(
+            `[YT Chat Overlay] iframe content ready on attempt ${i + 1}: found with selector "${containerMatch.selector}"`
+          );
+          return containerMatch.element;
         }
 
         console.log(
@@ -72,7 +124,7 @@ export class ChatSource {
         console.log(`[YT Chat Overlay] iframe content attempt ${i + 1}: error - ${error}`);
       }
 
-      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+      await sleep(intervalMs);
     }
 
     console.warn('[YT Chat Overlay] iframe content did not load within timeout');
@@ -92,18 +144,11 @@ export class ChatSource {
     this.debugLogChatElements();
 
     // Try iframe first (multiple selectors)
-    const iframeSelectors = [
-      'iframe[src*="live_chat"]',
-      'iframe#chatframe',
-      'ytd-live-chat-frame iframe',
-      '#chat iframe',
-    ];
-
     let iframe: HTMLIFrameElement | null = null;
-    for (const sel of iframeSelectors) {
-      iframe = document.querySelector<HTMLIFrameElement>(sel);
+    for (const selector of CHAT_IFRAME_SELECTORS) {
+      iframe = document.querySelector<HTMLIFrameElement>(selector);
       if (iframe) {
-        console.log(`[YT Chat Overlay] Chat iframe found with selector: ${sel}`);
+        console.log(`[YT Chat Overlay] Chat iframe found with selector: ${selector}`);
         console.log('[YT Chat Overlay] iframe src:', iframe.src);
         break;
       }
@@ -129,35 +174,8 @@ export class ChatSource {
     }
 
     // Try in-page chat (ordered by specificity - most specific first!)
-    const targets = [
-      // Most specific selectors first
-      '#chat #items.yt-live-chat-item-list-renderer',
-      '#items.yt-live-chat-item-list-renderer',
-      'yt-live-chat-item-list-renderer #items',
-      'ytd-live-chat-frame yt-live-chat-item-list-renderer',
-      'yt-live-chat-app yt-live-chat-item-list-renderer',
-
-      // Frame-based selectors
-      'ytd-live-chat-frame #items',
-
-      // App-based selectors
-      'yt-live-chat-app #items',
-
-      // Chat panel selectors
-      '#chat-container #items',
-      '#chat #items',
-      'ytd-live-chat #items',
-
-      // Tag-based selector
-      'yt-live-chat-item-list-renderer',
-
-      // Generic selectors (LAST - most likely to match wrong elements!)
-      // NOTE: #items can match sidebar elements, so we validate it
-      '#items',
-    ];
-
-    console.log(`[YT Chat Overlay] Trying ${targets.length} in-page selectors...`);
-    for (const selector of targets) {
+    console.log(`[YT Chat Overlay] Trying ${CHAT_CONTAINER_SELECTORS.length} in-page selectors...`);
+    for (const selector of CHAT_CONTAINER_SELECTORS) {
       const element = document.querySelector(selector);
       if (element) {
         // Validate: check if this is actually a chat-related element
@@ -282,10 +300,8 @@ export class ChatSource {
       `[YT Chat Overlay] Waiting for chat frame element (max ${maxAttempts} attempts, ${intervalMs}ms interval)...`
     );
 
-    const selectors = ['ytd-live-chat-frame#chat', '#chat', 'ytd-live-chat-frame'];
-
     for (let i = 0; i < maxAttempts; i++) {
-      for (const selector of selectors) {
+      for (const selector of CHAT_FRAME_SELECTORS) {
         const chatFrame = document.querySelector(selector) as HTMLElement;
         if (chatFrame) {
           console.log(
@@ -296,34 +312,11 @@ export class ChatSource {
       }
 
       console.log(`[YT Chat Overlay] Chat frame attempt ${i + 1}: not found yet`);
-      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+      await sleep(intervalMs);
     }
 
     console.warn('[YT Chat Overlay] Chat frame element not found within timeout');
     return null;
-  }
-
-  /**
-   * Chat panel toggle button selectors
-   */
-  private getChatToggleButtonSelectors(): string[] {
-    return [
-      // Theater mode toggle button
-      'ytd-toggle-button-renderer button[aria-label*="chat" i]',
-      'ytd-toggle-button-renderer button[aria-label*="채팅" i]',
-      // Live chat button
-      'button#show-hide-button',
-      // Engagement panel toggle
-      'ytd-engagement-panel-title-header-renderer button',
-      // Engagement panel list buttons
-      'ytd-engagement-panel-section-list-renderer button[aria-label*="chat" i]',
-      'ytd-engagement-panel-section-list-renderer button[aria-label*="채팅" i]',
-      // Generic chat-related buttons (ignore overlay settings button)
-      'button:not(#yt-chat-overlay-settings-button)[aria-label*="show chat" i]',
-      'button:not(#yt-chat-overlay-settings-button)[aria-label*="open chat" i]',
-      'button:not(#yt-chat-overlay-settings-button)[aria-label*="chat" i]',
-      'button:not(#yt-chat-overlay-settings-button)[aria-label*="채팅" i]',
-    ];
   }
 
   /**
@@ -356,7 +349,7 @@ export class ChatSource {
   private async tryOpenChatPanelWithoutFrame(): Promise<boolean> {
     console.log('[YT Chat Overlay] Chat frame missing, attempting to open chat panel...');
 
-    for (const selector of this.getChatToggleButtonSelectors()) {
+    for (const selector of CHAT_TOGGLE_BUTTON_SELECTORS) {
       try {
         const button = document.querySelector(selector) as HTMLButtonElement;
         if (button) {
@@ -394,7 +387,7 @@ export class ChatSource {
     console.log('[YT Chat Overlay] Chat panel is collapsed, attempting to open...');
 
     // Try to find and click the chat toggle button
-    for (const selector of this.getChatToggleButtonSelectors()) {
+    for (const selector of CHAT_TOGGLE_BUTTON_SELECTORS) {
       try {
         const button = document.querySelector(selector) as HTMLButtonElement;
         if (button) {
@@ -403,7 +396,7 @@ export class ChatSource {
           console.log('[YT Chat Overlay] Clicked chat toggle button');
 
           // Wait for panel to open
-          await new Promise((resolve) => setTimeout(resolve, 1000));
+          await sleep(1000);
 
           // Verify panel is now open
           const isNowOpen = !this.isChatFrameHidden(chatFrame);
@@ -434,7 +427,7 @@ export class ChatSource {
       }
       if (removed) {
         console.log('[YT Chat Overlay] Removed collapsed/hidden attributes from chat frame');
-        await new Promise((resolve) => setTimeout(resolve, 500));
+        await sleep(500);
         return true;
       }
     } catch (error) {
@@ -471,7 +464,7 @@ export class ChatSource {
     }
 
     // Wait a bit for chat iframe to load if it was just opened
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await sleep(500);
 
     // Find chat container (with retries)
     console.log('[YT Chat Overlay] Starting chat container search (10 attempts)...');
@@ -485,7 +478,7 @@ export class ChatSource {
       // Exponential backoff: 1s, 2s, 3s, 4s, 5s, 5s, 5s, 5s, 5s, 5s
       const delay = Math.min(1000 * (i + 1), 5000);
       console.log(`[YT Chat Overlay] Waiting ${delay}ms before next attempt...`);
-      await new Promise((resolve) => setTimeout(resolve, delay));
+      await sleep(delay);
     }
 
     if (!this.chatContainer) {

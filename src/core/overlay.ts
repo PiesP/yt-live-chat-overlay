@@ -6,6 +6,7 @@
  */
 
 import type { OverlayDimensions, OverlaySettings } from '@app-types';
+import { isVisibleElement, PLAYER_CONTAINER_SELECTORS, waitForElementMatch } from '@core/dom';
 
 export class Overlay {
   private container: HTMLDivElement | null = null;
@@ -16,24 +17,25 @@ export class Overlay {
   /**
    * Find player container
    */
-  private findPlayerContainer(): HTMLElement | null {
-    const candidates = ['#movie_player', '.html5-video-player', 'ytd-player', '#player-container'];
-
+  private async findPlayerContainer(): Promise<HTMLElement | null> {
     console.log('[YT Chat Overlay] Looking for player container...');
 
-    for (const selector of candidates) {
-      const element = document.querySelector<HTMLElement>(selector);
-      if (element && element.offsetWidth > 0 && element.offsetHeight > 0) {
-        console.log('[YT Chat Overlay] Player found with selector:', selector, {
-          width: element.offsetWidth,
-          height: element.offsetHeight,
-        });
-        return element;
-      }
+    const match = await waitForElementMatch<HTMLElement>(PLAYER_CONTAINER_SELECTORS, {
+      attempts: 5,
+      intervalMs: 1000,
+      predicate: isVisibleElement,
+    });
+
+    if (!match) {
+      console.warn('[YT Chat Overlay] No player container found');
+      return null;
     }
 
-    console.warn('[YT Chat Overlay] No player container found');
-    return null;
+    console.log('[YT Chat Overlay] Player found with selector:', match.selector, {
+      width: match.element.offsetWidth,
+      height: match.element.offsetHeight,
+    });
+    return match.element;
   }
 
   /**
@@ -41,14 +43,9 @@ export class Overlay {
    */
   async create(settings: OverlaySettings): Promise<boolean> {
     // Find player
-    for (let i = 0; i < 5; i++) {
-      this.playerElement = this.findPlayerContainer();
-      if (this.playerElement) break;
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-    }
+    this.playerElement = await this.findPlayerContainer();
 
     if (!this.playerElement) {
-      console.warn('[YT Chat Overlay] Player container not found');
       return false;
     }
 

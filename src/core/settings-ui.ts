@@ -1,4 +1,5 @@
 import type { OverlaySettings } from '@app-types';
+import { isVisibleElement, PLAYER_CONTAINER_SELECTORS, waitForElementMatch } from '@core/dom';
 
 const STYLE_ID = 'yt-chat-overlay-settings-style';
 const BUTTON_ID = 'yt-chat-overlay-settings-button';
@@ -44,20 +45,18 @@ export class SettingsUi {
   }
 
   private async findPlayerContainer(): Promise<HTMLElement | null> {
-    const candidates = ['#movie_player', '.html5-video-player', 'ytd-player', '#player-container'];
+    const match = await waitForElementMatch<HTMLElement>(PLAYER_CONTAINER_SELECTORS, {
+      attempts: 5,
+      intervalMs: 500,
+      predicate: isVisibleElement,
+    });
 
-    for (let attempt = 0; attempt < 5; attempt++) {
-      for (const selector of candidates) {
-        const element = document.querySelector<HTMLElement>(selector);
-        if (element && element.offsetWidth > 0 && element.offsetHeight > 0) {
-          return element;
-        }
-      }
-      await new Promise((resolve) => setTimeout(resolve, 500));
+    if (!match) {
+      console.warn('[YT Chat Overlay] Settings UI: player container not found');
+      return null;
     }
 
-    console.warn('[YT Chat Overlay] Settings UI: player container not found');
-    return null;
+    return match.element;
   }
 
   private ensureButton(player: HTMLElement): void {
