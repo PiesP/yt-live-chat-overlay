@@ -5,11 +5,13 @@
  * Displays YouTube live chat messages in Nico-nico style flowing overlay.
  */
 
+import { DEFAULT_SETTINGS } from '@app-types';
 import { ChatSource } from '@core/chat-source';
 import { Overlay } from '@core/overlay';
 import { PageWatcher } from '@core/page-watcher';
 import { Renderer } from '@core/renderer';
 import { Settings } from '@core/settings';
+import { SettingsUi } from '@core/settings-ui';
 
 /**
  * Application state
@@ -20,6 +22,7 @@ class App {
   private chatSource: ChatSource | null = null;
   private overlay: Overlay | null = null;
   private _renderer: Renderer | null = null;
+  private settingsUi: SettingsUi;
   private isInitialized = false;
   private restartTimer: number | null = null;
   private restartInProgress = false;
@@ -29,6 +32,11 @@ class App {
   constructor() {
     this.pageWatcher = new PageWatcher();
     this.settings = new Settings();
+    this.settingsUi = new SettingsUi(
+      () => this.settings.get(),
+      (partial) => this.updateSettings(partial),
+      () => this.resetSettings()
+    );
 
     // Register page change handler
     this.pageWatcher.onChange(() => {
@@ -47,6 +55,8 @@ class App {
       console.log('[YT Chat Overlay] Not on a video page, waiting...');
       return;
     }
+
+    await this.ensureSettingsUi();
 
     // Check if already initialized
     if (this.isInitialized) {
@@ -203,28 +213,60 @@ class App {
    * Update settings (for console access)
    */
   updateSettings(partial: Partial<import('@app-types').OverlaySettings>): void {
+    const wasEnabled = this.settings.get().enabled;
     this.settings.update(partial);
+    const nextSettings = this.settings.get();
 
-    // Update renderer if it exists
-    if (this._renderer) {
-      this._renderer.updateSettings(this.settings.get());
+    if (wasEnabled && !nextSettings.enabled) {
+      this.cleanup();
+      console.log('[YT Chat Overlay] Overlay disabled');
+      return;
     }
 
-    // Update overlay dimensions if safe zones changed
-    if (
-      this.overlay &&
+    if (!wasEnabled && nextSettings.enabled) {
+      void this.start();
+      console.log('[YT Chat Overlay] Overlay enabled');
+      return;
+    }
+
+    const currentOverlay = this.overlay;
+    const needsOverlayRefresh =
+      currentOverlay &&
       (partial.safeTop !== undefined ||
         partial.safeBottom !== undefined ||
-        partial.fontSize !== undefined)
-    ) {
-      this.overlay.destroy();
+        partial.fontSize !== undefined);
+
+    if (needsOverlayRefresh) {
+      if (this._renderer) {
+        this._renderer.destroy();
+        this._renderer = null;
+      }
+
+      currentOverlay.destroy();
       this.overlay = new Overlay();
-      this.overlay.create(this.settings.get()).catch((error) => {
-        console.error('[YT Chat Overlay] Failed to recreate overlay:', error);
-      });
+      this.overlay
+        .create(nextSettings)
+        .then((created) => {
+          if (!created) {
+            console.warn('[YT Chat Overlay] Failed to recreate overlay');
+            return;
+          }
+          const overlay = this.overlay;
+          if (!overlay) return;
+          this._renderer = new Renderer(overlay, nextSettings);
+        })
+        .catch((error) => {
+          console.error('[YT Chat Overlay] Failed to recreate overlay:', error);
+        });
+    } else if (this._renderer) {
+      this._renderer.updateSettings(nextSettings);
     }
 
-    console.log('[YT Chat Overlay] Settings updated:', this.settings.get());
+    console.log('[YT Chat Overlay] Settings updated:', nextSettings);
+  }
+
+  resetSettings(): void {
+    this.updateSettings(DEFAULT_SETTINGS);
   }
 
   /**
@@ -239,6 +281,7 @@ class App {
    */
   private cleanup(): void {
     console.log('[YT Chat Overlay] Starting cleanup...');
+    this.settingsUi.close();
 
     // Stop chat monitoring first to prevent new messages
     if (this.chatSource) {
@@ -291,6 +334,14 @@ class App {
   stop(): void {
     this.cleanup();
     this.pageWatcher.destroy();
+  }
+
+  private async ensureSettingsUi(): Promise<void> {
+    try {
+      await this.settingsUi.attach();
+    } catch (error) {
+      console.warn('[YT Chat Overlay] Settings UI error:', error);
+    }
   }
 }
 

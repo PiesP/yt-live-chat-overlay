@@ -54,7 +54,7 @@
 
 ## Configuration
 
-Settings are stored in `localStorage` and can be modified via browser console:
+Settings are stored in `localStorage`. Use the ⚙ button on the video player to open the settings panel, or update via browser console:
 
 ```javascript
 // Access settings (dev mode only)
@@ -63,13 +63,19 @@ __ytChatOverlay.settings.get();
 // Update settings
 __ytChatOverlay.settings.update({
   enabled: true,
-  speedPxPerSec: 280,
-  fontSize: 24,
-  opacity: 0.9,
-  safeTop: 0.06,
-  safeBottom: 0.12,
-  maxConcurrentMessages: 30,
-  maxMessagesPerSecond: 8,
+  speedPxPerSec: 240,
+  fontSize: 26,
+  opacity: 0.92,
+  safeTop: 0.08,
+  safeBottom: 0.15,
+  maxConcurrentMessages: 24,
+  maxMessagesPerSecond: 6,
+  outline: {
+    enabled: true,
+    widthPx: 2,
+    blurPx: 3,
+    opacity: 0.75,
+  },
 });
 ```
 

@@ -5,7 +5,7 @@
  * Manages lanes and collision detection.
  */
 
-import type { ChatMessage, LaneState, OverlaySettings } from '@app-types';
+import type { ChatMessage, LaneState, OutlineSettings, OverlaySettings } from '@app-types';
 import type { Overlay } from './overlay';
 
 interface ActiveMessage {
@@ -51,31 +51,22 @@ export class Renderer {
    * Inject CSS animations
    */
   private injectStyles(): void {
-    if (this.styleElement) return;
+    if (!this.styleElement) {
+      this.styleElement = document.createElement('style');
+      document.head.appendChild(this.styleElement);
+    }
 
-    this.styleElement = document.createElement('style');
+    const textShadow = this.buildTextShadow(this.settings.outline);
+    const textStroke = this.buildTextStroke(this.settings.outline);
+
     this.styleElement.textContent = `
       .yt-chat-overlay-message {
         position: absolute;
         white-space: nowrap;
         font-family: system-ui, -apple-system, sans-serif;
         font-weight: 700;
-        /* Multiple text-shadow layers for outline effect with semi-transparency */
-        text-shadow:
-          /* Black outline - 8 directions with semi-transparency */
-          -2px -2px 3px rgba(0, 0, 0, 0.7),
-          2px -2px 3px rgba(0, 0, 0, 0.7),
-          -2px 2px 3px rgba(0, 0, 0, 0.7),
-          2px 2px 3px rgba(0, 0, 0, 0.7),
-          -2px 0px 3px rgba(0, 0, 0, 0.7),
-          2px 0px 3px rgba(0, 0, 0, 0.7),
-          0px -2px 3px rgba(0, 0, 0, 0.7),
-          0px 2px 3px rgba(0, 0, 0, 0.7),
-          /* Additional blur for glow effect with semi-transparency */
-          0px 0px 4px rgba(0, 0, 0, 0.8),
-          0px 0px 8px rgba(0, 0, 0, 0.6);
-        /* Webkit stroke as backup with semi-transparency */
-        -webkit-text-stroke: 0.5px rgba(0, 0, 0, 0.5);
+        text-shadow: ${textShadow};
+        -webkit-text-stroke: ${textStroke};
         color: white;
         pointer-events: none;
         will-change: transform;
@@ -87,7 +78,46 @@ export class Renderer {
         -moz-osx-font-smoothing: grayscale;
       }
     `;
-    document.head.appendChild(this.styleElement);
+  }
+
+  private buildTextShadow(outline: OutlineSettings): string {
+    if (!outline.enabled || outline.widthPx <= 0 || outline.opacity <= 0) {
+      return 'none';
+    }
+
+    const offset = outline.widthPx;
+    const blur = Math.max(0, outline.blurPx);
+    const baseOpacity = Math.min(1, outline.opacity);
+    const glowOpacity = Math.min(1, baseOpacity * 0.85);
+    const glowStrongOpacity = Math.min(1, baseOpacity * 0.65);
+    const shadowColor = `rgba(0, 0, 0, ${baseOpacity})`;
+    const glowColor = `rgba(0, 0, 0, ${glowOpacity})`;
+    const glowStrongColor = `rgba(0, 0, 0, ${glowStrongOpacity})`;
+    const glowBlur = Math.max(1, blur * 1.5);
+    const glowStrongBlur = Math.max(1, blur * 2.5);
+
+    return [
+      `-${offset}px -${offset}px ${blur}px ${shadowColor}`,
+      `${offset}px -${offset}px ${blur}px ${shadowColor}`,
+      `-${offset}px ${offset}px ${blur}px ${shadowColor}`,
+      `${offset}px ${offset}px ${blur}px ${shadowColor}`,
+      `-${offset}px 0px ${blur}px ${shadowColor}`,
+      `${offset}px 0px ${blur}px ${shadowColor}`,
+      `0px -${offset}px ${blur}px ${shadowColor}`,
+      `0px ${offset}px ${blur}px ${shadowColor}`,
+      `0px 0px ${glowBlur}px ${glowColor}`,
+      `0px 0px ${glowStrongBlur}px ${glowStrongColor}`,
+    ].join(', ');
+  }
+
+  private buildTextStroke(outline: OutlineSettings): string {
+    if (!outline.enabled || outline.widthPx <= 0 || outline.opacity <= 0) {
+      return '0 transparent';
+    }
+
+    const strokeWidth = Math.max(0.2, outline.widthPx * 0.3);
+    const strokeOpacity = Math.min(1, outline.opacity * 0.7);
+    return `${strokeWidth}px rgba(0, 0, 0, ${strokeOpacity})`;
   }
 
   /**
@@ -289,6 +319,7 @@ export class Renderer {
   updateSettings(settings: OverlaySettings): void {
     this.settings = settings;
     this.initLanes();
+    this.injectStyles();
   }
 
   /**

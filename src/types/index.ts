@@ -40,6 +40,20 @@ export interface ColorSettings {
 }
 
 /**
+ * Outline settings for message text
+ */
+export interface OutlineSettings {
+  /** Enable/disable text outline */
+  enabled: boolean;
+  /** Outline thickness in pixels */
+  widthPx: number;
+  /** Outline blur in pixels */
+  blurPx: number;
+  /** Outline opacity (0.0-1.0) */
+  opacity: number;
+}
+
+/**
  * Overlay settings
  */
 export interface OverlaySettings {
@@ -61,6 +75,8 @@ export interface OverlaySettings {
   maxMessagesPerSecond: number;
   /** Color settings for different author types */
   colors: ColorSettings;
+  /** Text outline settings */
+  outline: OutlineSettings;
 }
 
 /**
@@ -90,18 +106,24 @@ export interface OverlayDimensions {
  */
 export const DEFAULT_SETTINGS: Readonly<OverlaySettings> = {
   enabled: true,
-  speedPxPerSec: 280,
-  fontSize: 24,
-  opacity: 0.9,
-  safeTop: 0.06,
-  safeBottom: 0.12,
-  maxConcurrentMessages: 30,
-  maxMessagesPerSecond: 8,
+  speedPxPerSec: 240,
+  fontSize: 26,
+  opacity: 0.92,
+  safeTop: 0.08,
+  safeBottom: 0.15,
+  maxConcurrentMessages: 24,
+  maxMessagesPerSecond: 6,
   colors: {
     normal: '#FFFFFF', // White for normal users
     member: '#0F9D58', // Green for members
     moderator: '#5E84F1', // Blue for moderators
     owner: '#FFD600', // Gold/Yellow for channel owner
     verified: '#AAAAAA', // Gray for verified users
+  },
+  outline: {
+    enabled: true,
+    widthPx: 2,
+    blurPx: 3,
+    opacity: 0.75,
   },
 };

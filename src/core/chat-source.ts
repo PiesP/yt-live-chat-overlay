@@ -318,11 +318,11 @@ export class ChatSource {
       // Engagement panel list buttons
       'ytd-engagement-panel-section-list-renderer button[aria-label*="chat" i]',
       'ytd-engagement-panel-section-list-renderer button[aria-label*="채팅" i]',
-      // Generic chat-related buttons
-      'button[aria-label*="show chat" i]',
-      'button[aria-label*="open chat" i]',
-      'button[aria-label*="chat" i]',
-      'button[aria-label*="채팅" i]',
+      // Generic chat-related buttons (ignore overlay settings button)
+      'button:not(#yt-chat-overlay-settings-button)[aria-label*="show chat" i]',
+      'button:not(#yt-chat-overlay-settings-button)[aria-label*="open chat" i]',
+      'button:not(#yt-chat-overlay-settings-button)[aria-label*="chat" i]',
+      'button:not(#yt-chat-overlay-settings-button)[aria-label*="채팅" i]',
     ];
   }
 

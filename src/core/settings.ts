@@ -33,6 +33,11 @@ export class Settings {
             ...DEFAULT_SETTINGS.colors,
             ...(parsed.colors || {}),
           },
+          // Deep merge outline to ensure all fields are present
+          outline: {
+            ...DEFAULT_SETTINGS.outline,
+            ...(parsed.outline || {}),
+          },
         };
       }
     } catch (error) {
@@ -63,7 +68,16 @@ export class Settings {
    * Update settings
    */
   update(partial: Partial<OverlaySettings>): void {
-    this.settings = { ...this.settings, ...partial };
+    this.settings = {
+      ...this.settings,
+      ...partial,
+      colors: partial.colors
+        ? { ...this.settings.colors, ...partial.colors }
+        : this.settings.colors,
+      outline: partial.outline
+        ? { ...this.settings.outline, ...partial.outline }
+        : this.settings.outline,
+    };
     this.saveSettings();
   }
 
