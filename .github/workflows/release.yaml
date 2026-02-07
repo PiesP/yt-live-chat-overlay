@@ -85,7 +85,7 @@ jobs:
           mkdir -p /tmp/dist-backup
           cp -r dist/* /tmp/dist-backup/
           # Generate meta.js from userscript header
-          awk 'BEGIN{p=0} /^\\/\\/ ==UserScript==/{p=1} {if(p) print} /^\\/\\/ ==\\/UserScript==/{exit}' /tmp/dist-backup/yt-live-chat-overlay.user.js > /tmp/dist-backup/yt-live-chat-overlay.meta.js
+          awk 'BEGIN{p=0} /^\/\/ ==UserScript==/{p=1} {if(p) print} /^\/\/ ==\/UserScript==/{exit}' /tmp/dist-backup/yt-live-chat-overlay.user.js > /tmp/dist-backup/yt-live-chat-overlay.meta.js
           # List backed up files for verification
           echo "📦 Built files:"
           ls -la /tmp/dist-backup/
