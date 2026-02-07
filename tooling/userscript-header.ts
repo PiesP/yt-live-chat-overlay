@@ -54,7 +54,7 @@ export function userscriptHeaderPlugin(mode: string): Plugin {
 
   const meta: UserscriptMeta = {
     name: 'YouTube Live Chat Overlay',
-    version: isDev ? '0.1.0-dev' : '0.1.0',
+    version: isDev ? '0.1.1-dev' : '0.1.1',
     description:
       'Displays YouTube live chat in Nico-nico style flowing overlay (100% local, no data collection)',
     author: 'PiesP',
