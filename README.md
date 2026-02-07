@@ -12,7 +12,9 @@ All processing happens locally in your browser, and chat content is never stored
 ## Install
 
 1. Install Tampermonkey or Violentmonkey
-2. Download `yt-live-chat-overlay.user.js` from [Releases](https://github.com/PiesP/yt-live-chat-overlay/releases)
+2. Install the latest release:
+   - Stable: [yt-live-chat-overlay.user.js](https://github.com/PiesP/yt-live-chat-overlay/releases/latest/download/yt-live-chat-overlay.user.js)
+   - Metadata (auto-update): [yt-live-chat-overlay.meta.js](https://cdn.jsdelivr.net/gh/PiesP/yt-live-chat-overlay@release/dist/yt-live-chat-overlay.meta.js)
 3. Open the file in your browser to install
 
 ## How to Use

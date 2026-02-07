@@ -4,7 +4,7 @@ name: 🚀 Release
 # - Version detection: git tag or manual trigger
 # - Production build: userscript + checksums + metadata
 # - GitHub Release: automated creation with downloadable assets
-# - dist/ build artifacts for GitHub Releases
+# - dist/ update: commit built scripts to 'release' branch for jsDelivr CDN
 #
 # Trigger: Tag push (v*) or manual dispatch
 
@@ -84,6 +84,8 @@ jobs:
           # Backup dist for later steps (survives git checkout)
           mkdir -p /tmp/dist-backup
           cp -r dist/* /tmp/dist-backup/
+          # Generate meta.js from userscript header
+          awk 'BEGIN{p=0} /^\\/\\/ ==UserScript==/{p=1} {if(p) print} /^\\/\\/ ==\\/UserScript==/{exit}' /tmp/dist-backup/yt-live-chat-overlay.user.js > /tmp/dist-backup/yt-live-chat-overlay.meta.js
           # List backed up files for verification
           echo "📦 Built files:"
           ls -la /tmp/dist-backup/
@@ -92,9 +94,10 @@ jobs:
         run: |
           mkdir -p release
           cp /tmp/dist-backup/yt-live-chat-overlay.user.js release/
+          cp /tmp/dist-backup/yt-live-chat-overlay.meta.js release/
 
           # Generate checksums
-          cd release && sha256sum yt-live-chat-overlay.user.js > checksums.txt && cd ..
+          cd release && sha256sum yt-live-chat-overlay.user.js yt-live-chat-overlay.meta.js > checksums.txt && cd ..
 
           # Create metadata
           cat > release/metadata.json << EOF
@@ -153,6 +156,65 @@ jobs:
           - **Node.js**: \`${{ env.NODE_VERSION }}\`
           EOF
 
+      - name: 📤 Deploy dist/ to release branch
+        run: |
+          set -euo pipefail
+
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+
+          # Check if release branch exists remotely
+          if git ls-remote --heads origin release | grep -q release; then
+            echo "📦 Fetching existing release branch..."
+            git fetch origin release:release
+            git checkout release
+          else
+            echo "📦 Creating new orphan release branch..."
+            git checkout --orphan release
+            git rm -rf . || true
+            echo "# Release Branch" > README.md
+            echo "" >> README.md
+            echo "This branch contains only the built userscript files for jsDelivr CDN." >> README.md
+            echo "" >> README.md
+            echo "**Do not commit to this branch manually.**" >> README.md
+            echo "" >> README.md
+            echo "Files are automatically updated by GitHub Actions on each release." >> README.md
+            git add README.md
+            git commit -m "chore: initialize release branch"
+          fi
+
+          # Copy built files from backup (user.js + meta.js for jsDelivr CDN)
+          mkdir -p dist
+          cp /tmp/dist-backup/yt-live-chat-overlay.user.js dist/
+          cp /tmp/dist-backup/yt-live-chat-overlay.meta.js dist/
+
+          # Add and commit
+          git add dist/yt-live-chat-overlay.user.js dist/yt-live-chat-overlay.meta.js
+
+          if git diff --staged --quiet; then
+            echo "📦 No changes to dist/ files"
+          else
+            git commit -m "chore: update dist/ for v${{ steps.version.outputs.version }}"
+            git push origin release
+            echo "✅ dist/ deployed to release branch"
+          fi
+
+      - name: 🔄 Purge jsDelivr CDN cache
+        run: |
+          echo "🔄 Purging jsDelivr CDN cache..."
+
+          # Purge main userscript file
+          PURGE_URL_USER="https://purge.jsdelivr.net/gh/${{ github.repository }}@release/dist/yt-live-chat-overlay.user.js"
+          echo "Purging: $PURGE_URL_USER"
+          curl -s "$PURGE_URL_USER" | jq '.' || echo "Purge request sent"
+
+          # Purge meta.js file
+          PURGE_URL_META="https://purge.jsdelivr.net/gh/${{ github.repository }}@release/dist/yt-live-chat-overlay.meta.js"
+          echo "Purging: $PURGE_URL_META"
+          curl -s "$PURGE_URL_META" | jq '.' || echo "Purge request sent"
+
+          echo "✅ jsDelivr cache purge completed"
+
       - name: 🏷️ Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -160,6 +222,7 @@ jobs:
           body_path: release/RELEASE_NOTES.md
           files: |
             release/yt-live-chat-overlay.user.js
+            release/yt-live-chat-overlay.meta.js
             release/checksums.txt
             release/metadata.json
           draft: false
