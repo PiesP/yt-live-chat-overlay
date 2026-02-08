@@ -494,9 +494,8 @@
       try {
         const messageElement = element.querySelector("#message");
         if (!messageElement) return null;
-        let text = messageElement.textContent?.trim() || "";
+        const { text, content } = this.parseMessageContent(messageElement);
         if (!text) return null;
-        text = this.normalizeText(text);
         let kind = "text";
         if (element.tagName.toLowerCase().includes("paid")) {
           kind = "superchat";
@@ -511,6 +510,9 @@
           kind,
           timestamp: Date.now()
         };
+        if (content.length > 0) {
+          message.content = content;
+        }
         if (authorName) {
           message.author = authorName;
         }
@@ -567,6 +569,106 @@
         normalized = `${normalized.substring(0, 77)}...`;
       }
       return normalized;
+    }
+    /**
+     * Validate image URL (security)
+     * Only allow YouTube CDN domains
+     */
+    isValidImageUrl(url) {
+      try {
+        const parsed = new URL(url);
+        const allowedDomains = [
+          "yt3.ggpht.com",
+          "yt4.ggpht.com",
+          "www.gstatic.com",
+          "lh3.googleusercontent.com"
+        ];
+        return allowedDomains.some((domain) => parsed.hostname.includes(domain));
+      } catch {
+        return false;
+      }
+    }
+    /**
+     * Detect emoji type (standard/custom/member)
+     */
+    detectEmojiType(img) {
+      const ariaLabel = img.getAttribute("aria-label")?.toLowerCase() || "";
+      const tooltip = img.getAttribute("shared-tooltip-text")?.toLowerCase() || img.getAttribute("tooltip")?.toLowerCase() || "";
+      const classList = img.className.toLowerCase();
+      if (img.hasAttribute("data-is-custom-emoji") || img.hasAttribute("data-membership-required") || classList.includes("member") || ariaLabel.includes("member") || tooltip.includes("member") || // Check parent for membership badge
+      img.closest('yt-live-chat-author-badge-renderer[type="member"]')) {
+        return "member";
+      }
+      if (classList.includes("custom") || classList.includes("yt-live-chat-custom-emoji") || img.hasAttribute("data-emoji-id")) {
+        return "custom";
+      }
+      return "standard";
+    }
+    /**
+     * Parse emoji from img element
+     */
+    parseEmoji(img) {
+      const src = img.src;
+      if (!src || !this.isValidImageUrl(src)) {
+        return null;
+      }
+      const alt = img.alt || img.getAttribute("shared-tooltip-text") || img.getAttribute("aria-label") || "";
+      const emojiType = this.detectEmojiType(img);
+      const emojiInfo = {
+        type: emojiType,
+        url: src,
+        alt
+      };
+      const width = img.naturalWidth || img.width;
+      if (width) {
+        emojiInfo.width = width;
+      }
+      const height = img.naturalHeight || img.height;
+      if (height) {
+        emojiInfo.height = height;
+      }
+      const id = img.id || img.getAttribute("data-emoji-id");
+      if (id) {
+        emojiInfo.id = id;
+      }
+      return emojiInfo;
+    }
+    /**
+     * Parse message content with emojis
+     * Returns both plain text and rich content segments
+     */
+    parseMessageContent(messageElement) {
+      const segments = [];
+      let plainText = "";
+      const processNode = (node) => {
+        if (node.nodeType === Node.TEXT_NODE) {
+          const text = node.textContent?.trim() || "";
+          if (text) {
+            segments.push({ type: "text", content: text });
+            plainText += text;
+          }
+        } else if (node.nodeType === Node.ELEMENT_NODE) {
+          const elem = node;
+          if (elem.tagName.toLowerCase() === "img" && (elem.classList.contains("emoji") || elem.hasAttribute("data-emoji-id") || elem.closest("#message") === messageElement)) {
+            const emojiInfo = this.parseEmoji(elem);
+            if (emojiInfo) {
+              segments.push({ type: "emoji", emoji: emojiInfo });
+              plainText += emojiInfo.alt || "[emoji]";
+              return;
+            }
+          }
+          for (const child of elem.childNodes) {
+            processNode(child);
+          }
+        }
+      };
+      for (const child of messageElement.childNodes) {
+        processNode(child);
+      }
+      return {
+        text: this.normalizeText(plainText),
+        content: segments
+      };
     }
     /**
      * Stop monitoring
@@ -835,6 +937,23 @@
         -webkit-font-smoothing: antialiased;
         -moz-osx-font-smoothing: grayscale;
       }
+
+      /* Emoji styling */
+      .yt-chat-overlay-emoji {
+        display: inline-block;
+        vertical-align: text-bottom;
+        margin: 0 2px;
+        pointer-events: none;
+        /* Match text outline */
+        filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.5));
+      }
+
+      /* Member-only emoji (special highlight) */
+      .yt-chat-overlay-emoji-member {
+        /* Green glow for member emojis */
+        filter: drop-shadow(0 0 2px rgba(15, 157, 88, 0.6))
+                drop-shadow(0 0 4px rgba(15, 157, 88, 0.4));
+      }
     `;
     }
     buildTextShadow(outline) {
@@ -871,6 +990,75 @@
       const strokeWidth = Math.max(0.2, outline.widthPx * 0.3);
       const strokeOpacity = Math.min(1, outline.opacity * 0.7);
       return `${strokeWidth}px rgba(0, 0, 0, ${strokeOpacity})`;
+    }
+    /**
+     * Validate image URL (security)
+     * Only allow YouTube CDN domains
+     * Duplicated from ChatSource for defense in depth
+     */
+    isValidImageUrl(url) {
+      try {
+        const parsed = new URL(url);
+        const allowedDomains = [
+          "yt3.ggpht.com",
+          "yt4.ggpht.com",
+          "www.gstatic.com",
+          "lh3.googleusercontent.com"
+        ];
+        return allowedDomains.some((domain) => parsed.hostname.includes(domain));
+      } catch {
+        return false;
+      }
+    }
+    /**
+     * Create emoji img element with proper styling
+     * SECURITY: Validates URL and creates element programmatically
+     */
+    createEmojiElement(emoji) {
+      if (!this.isValidImageUrl(emoji.url)) {
+        console.warn("[YT Chat Overlay] Invalid emoji URL:", emoji.url);
+        return null;
+      }
+      const img = document.createElement("img");
+      img.src = emoji.url;
+      img.alt = emoji.alt || "";
+      img.className = "yt-chat-overlay-emoji";
+      img.style.display = "inline-block";
+      img.style.verticalAlign = "text-bottom";
+      const sizeFactor = emoji.type === "member" ? 1.4 : 1.2;
+      const emojiSize = this.settings.fontSize * sizeFactor;
+      img.style.height = `${emojiSize}px`;
+      img.style.width = "auto";
+      if (emoji.type === "member") {
+        img.classList.add("yt-chat-overlay-emoji-member");
+      }
+      img.addEventListener(
+        "error",
+        () => {
+          img.style.display = "none";
+          console.warn("[YT Chat Overlay] Failed to load emoji:", emoji.url);
+        },
+        { once: true }
+      );
+      img.draggable = false;
+      return img;
+    }
+    /**
+     * Render mixed content (text + emoji) using DOM API
+     * SECURITY: No innerHTML - creates elements programmatically
+     */
+    renderMixedContent(container, segments) {
+      for (const segment of segments) {
+        if (segment.type === "text") {
+          const textNode = document.createTextNode(segment.content);
+          container.appendChild(textNode);
+        } else if (segment.type === "emoji") {
+          const img = this.createEmojiElement(segment.emoji);
+          if (img) {
+            container.appendChild(img);
+          }
+        }
+      }
     }
     /**
      * Add message to render queue
@@ -917,7 +1105,11 @@
       }
       const element = document.createElement("div");
       element.className = "yt-chat-overlay-message";
-      element.textContent = message.text;
+      if (message.content && message.content.length > 0) {
+        this.renderMixedContent(element, message.content);
+      } else {
+        element.textContent = message.text;
+      }
       element.style.fontSize = `${this.settings.fontSize}px`;
       element.style.opacity = `${this.settings.opacity}`;
       const authorType = message.authorType || "normal";
