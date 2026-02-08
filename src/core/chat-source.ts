@@ -5,7 +5,7 @@
  * Supports both iframe and in-page chat rendering.
  */
 
-import type { ChatMessage } from '@app-types';
+import type { ChatMessage, ContentSegment, EmojiInfo } from '@app-types';
 import { findElementMatch, sleep } from '@core/dom';
 
 const CHAT_FRAME_SELECTORS = ['ytd-live-chat-frame#chat', '#chat', 'ytd-live-chat-frame'] as const;
@@ -538,15 +538,14 @@ export class ChatSource {
     }
 
     try {
-      // Extract text content
+      // Extract text content and emojis
       const messageElement = element.querySelector('#message');
       if (!messageElement) return null;
 
-      let text = messageElement.textContent?.trim() || '';
-      if (!text) return null;
+      // Parse content with emojis
+      const { text, content } = this.parseMessageContent(messageElement);
 
-      // Normalize text
-      text = this.normalizeText(text);
+      if (!text) return null;
 
       // Determine message kind
       let kind: ChatMessage['kind'] = 'text';
@@ -568,6 +567,11 @@ export class ChatSource {
         kind,
         timestamp: Date.now(),
       };
+
+      // Add rich content if available
+      if (content.length > 0) {
+        message.content = content;
+      }
 
       // Only add optional fields if they have values
       if (authorName) {
@@ -653,6 +657,160 @@ export class ChatSource {
     }
 
     return normalized;
+  }
+
+  /**
+   * Validate image URL (security)
+   * Only allow YouTube CDN domains
+   */
+  private isValidImageUrl(url: string): boolean {
+    try {
+      const parsed = new URL(url);
+      // Only allow YouTube's CDN domains
+      const allowedDomains = [
+        'yt3.ggpht.com',
+        'yt4.ggpht.com',
+        'www.gstatic.com',
+        'lh3.googleusercontent.com',
+      ];
+      return allowedDomains.some((domain) => parsed.hostname.includes(domain));
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Detect emoji type (standard/custom/member)
+   */
+  private detectEmojiType(img: HTMLImageElement): EmojiInfo['type'] {
+    // Check for member-only indicators
+    const ariaLabel = img.getAttribute('aria-label')?.toLowerCase() || '';
+    const tooltip =
+      img.getAttribute('shared-tooltip-text')?.toLowerCase() ||
+      img.getAttribute('tooltip')?.toLowerCase() ||
+      '';
+    const classList = img.className.toLowerCase();
+
+    // Member-only emoji detection
+    // YouTube typically marks member emojis with specific classes or attributes
+    if (
+      img.hasAttribute('data-is-custom-emoji') ||
+      img.hasAttribute('data-membership-required') ||
+      classList.includes('member') ||
+      ariaLabel.includes('member') ||
+      tooltip.includes('member') ||
+      // Check parent for membership badge
+      img.closest('yt-live-chat-author-badge-renderer[type="member"]')
+    ) {
+      return 'member';
+    }
+
+    // Custom emoji (non-member)
+    if (
+      classList.includes('custom') ||
+      classList.includes('yt-live-chat-custom-emoji') ||
+      img.hasAttribute('data-emoji-id')
+    ) {
+      return 'custom';
+    }
+
+    // Standard emoji (Unicode)
+    return 'standard';
+  }
+
+  /**
+   * Parse emoji from img element
+   */
+  private parseEmoji(img: HTMLImageElement): EmojiInfo | null {
+    const src = img.src;
+    if (!src || !this.isValidImageUrl(src)) {
+      return null;
+    }
+
+    const alt =
+      img.alt || img.getAttribute('shared-tooltip-text') || img.getAttribute('aria-label') || '';
+
+    const emojiType = this.detectEmojiType(img);
+
+    const emojiInfo: EmojiInfo = {
+      type: emojiType,
+      url: src,
+      alt,
+    };
+
+    // Add optional properties only if they have values
+    const width = img.naturalWidth || img.width;
+    if (width) {
+      emojiInfo.width = width;
+    }
+
+    const height = img.naturalHeight || img.height;
+    if (height) {
+      emojiInfo.height = height;
+    }
+
+    const id = img.id || img.getAttribute('data-emoji-id');
+    if (id) {
+      emojiInfo.id = id;
+    }
+
+    return emojiInfo;
+  }
+
+  /**
+   * Parse message content with emojis
+   * Returns both plain text and rich content segments
+   */
+  private parseMessageContent(messageElement: Element): {
+    text: string;
+    content: ContentSegment[];
+  } {
+    const segments: ContentSegment[] = [];
+    let plainText = '';
+
+    // Traverse child nodes in order
+    const processNode = (node: Node): void => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        const text = node.textContent?.trim() || '';
+        if (text) {
+          segments.push({ type: 'text', content: text });
+          plainText += text;
+        }
+      } else if (node.nodeType === Node.ELEMENT_NODE) {
+        const elem = node as Element;
+
+        // Check if it's an emoji image
+        if (
+          elem.tagName.toLowerCase() === 'img' &&
+          (elem.classList.contains('emoji') ||
+            elem.hasAttribute('data-emoji-id') ||
+            elem.closest('#message') === messageElement)
+        ) {
+          const emojiInfo = this.parseEmoji(elem as HTMLImageElement);
+          if (emojiInfo) {
+            segments.push({ type: 'emoji', emoji: emojiInfo });
+            // Add alt text to plain text for fallback
+            plainText += emojiInfo.alt || '[emoji]';
+            return; // Don't process children of img
+          }
+        }
+
+        // Recursively process child nodes
+        for (const child of elem.childNodes) {
+          processNode(child);
+        }
+      }
+    };
+
+    // Process all child nodes
+    for (const child of messageElement.childNodes) {
+      processNode(child);
+    }
+
+    return {
+      text: this.normalizeText(plainText),
+      content: segments,
+    };
   }
 
   /**

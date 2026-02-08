@@ -8,11 +8,38 @@
 export type AuthorType = 'normal' | 'member' | 'moderator' | 'owner' | 'verified';
 
 /**
+ * Emoji/Emoticon information
+ */
+export interface EmojiInfo {
+  /** Emoji type classification */
+  type: 'standard' | 'custom' | 'member';
+  /** Image URL (sanitized, YouTube CDN only) */
+  url: string;
+  /** Alt text (e.g., ":emoji_name:") */
+  alt: string;
+  /** Original width (optional, for aspect ratio) */
+  width?: number;
+  /** Original height (optional, for aspect ratio) */
+  height?: number;
+  /** Emoji ID (for caching/identification) */
+  id?: string;
+}
+
+/**
+ * Content segment (text or emoji)
+ */
+export type ContentSegment =
+  | { type: 'text'; content: string }
+  | { type: 'emoji'; emoji: EmojiInfo };
+
+/**
  * Chat message structure (normalized)
  */
 export interface ChatMessage {
-  /** Message text content (sanitized, max 80 chars) */
+  /** Message text content (sanitized, max 80 chars) - plain text only */
   text: string;
+  /** Rich content segments (text + emoji) - for rendering mixed content */
+  content?: ContentSegment[];
   /** Message type */
   kind: 'text' | 'superchat' | 'membership' | 'other';
   /** Timestamp when the message was detected */

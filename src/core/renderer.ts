@@ -5,7 +5,14 @@
  * Manages lanes and collision detection.
  */
 
-import type { ChatMessage, LaneState, OutlineSettings, OverlaySettings } from '@app-types';
+import type {
+  ChatMessage,
+  ContentSegment,
+  EmojiInfo,
+  LaneState,
+  OutlineSettings,
+  OverlaySettings,
+} from '@app-types';
 import type { Overlay } from './overlay';
 
 interface ActiveMessage {
@@ -78,6 +85,23 @@ export class Renderer {
         -webkit-font-smoothing: antialiased;
         -moz-osx-font-smoothing: grayscale;
       }
+
+      /* Emoji styling */
+      .yt-chat-overlay-emoji {
+        display: inline-block;
+        vertical-align: text-bottom;
+        margin: 0 2px;
+        pointer-events: none;
+        /* Match text outline */
+        filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.5));
+      }
+
+      /* Member-only emoji (special highlight) */
+      .yt-chat-overlay-emoji-member {
+        /* Green glow for member emojis */
+        filter: drop-shadow(0 0 2px rgba(15, 157, 88, 0.6))
+                drop-shadow(0 0 4px rgba(15, 157, 88, 0.4));
+      }
     `;
   }
 
@@ -119,6 +143,100 @@ export class Renderer {
     const strokeWidth = Math.max(0.2, outline.widthPx * 0.3);
     const strokeOpacity = Math.min(1, outline.opacity * 0.7);
     return `${strokeWidth}px rgba(0, 0, 0, ${strokeOpacity})`;
+  }
+
+  /**
+   * Validate image URL (security)
+   * Only allow YouTube CDN domains
+   * Duplicated from ChatSource for defense in depth
+   */
+  private isValidImageUrl(url: string): boolean {
+    try {
+      const parsed = new URL(url);
+      const allowedDomains = [
+        'yt3.ggpht.com',
+        'yt4.ggpht.com',
+        'www.gstatic.com',
+        'lh3.googleusercontent.com',
+      ];
+      return allowedDomains.some((domain) => parsed.hostname.includes(domain));
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Create emoji img element with proper styling
+   * SECURITY: Validates URL and creates element programmatically
+   */
+  private createEmojiElement(emoji: EmojiInfo): HTMLImageElement | null {
+    // Re-validate URL (defense in depth)
+    if (!this.isValidImageUrl(emoji.url)) {
+      console.warn('[YT Chat Overlay] Invalid emoji URL:', emoji.url);
+      return null;
+    }
+
+    const img = document.createElement('img');
+
+    // Set source (validated)
+    img.src = emoji.url;
+
+    // Set alt text (textContent, safe)
+    img.alt = emoji.alt || '';
+
+    // Apply styling
+    img.className = 'yt-chat-overlay-emoji';
+    img.style.display = 'inline-block';
+    img.style.verticalAlign = 'text-bottom';
+
+    // Size emoji relative to font size
+    // Standard emoji: 1.2em (slightly larger than text)
+    // Member emoji: 1.4em (more prominent)
+    const sizeFactor = emoji.type === 'member' ? 1.4 : 1.2;
+    const emojiSize = this.settings.fontSize * sizeFactor;
+
+    img.style.height = `${emojiSize}px`;
+    img.style.width = 'auto'; // Maintain aspect ratio
+
+    // Add special styling for member emojis
+    if (emoji.type === 'member') {
+      img.classList.add('yt-chat-overlay-emoji-member');
+    }
+
+    // Error handling: hide on load failure
+    img.addEventListener(
+      'error',
+      () => {
+        img.style.display = 'none';
+        console.warn('[YT Chat Overlay] Failed to load emoji:', emoji.url);
+      },
+      { once: true }
+    );
+
+    // Prevent dragging
+    img.draggable = false;
+
+    return img;
+  }
+
+  /**
+   * Render mixed content (text + emoji) using DOM API
+   * SECURITY: No innerHTML - creates elements programmatically
+   */
+  private renderMixedContent(container: HTMLDivElement, segments: ContentSegment[]): void {
+    for (const segment of segments) {
+      if (segment.type === 'text') {
+        // Create text node (safe)
+        const textNode = document.createTextNode(segment.content);
+        container.appendChild(textNode);
+      } else if (segment.type === 'emoji') {
+        // Create img element programmatically (safe)
+        const img = this.createEmojiElement(segment.emoji);
+        if (img) {
+          container.appendChild(img);
+        }
+      }
+    }
   }
 
   /**
@@ -177,7 +295,15 @@ export class Renderer {
     // Create message element
     const element = document.createElement('div');
     element.className = 'yt-chat-overlay-message';
-    element.textContent = message.text; // SECURITY: textContent only, no innerHTML
+
+    // Render content (text + emojis)
+    if (message.content && message.content.length > 0) {
+      this.renderMixedContent(element, message.content);
+    } else {
+      // Fallback: plain text only
+      element.textContent = message.text; // SECURITY: textContent only, no innerHTML
+    }
+
     element.style.fontSize = `${this.settings.fontSize}px`;
     element.style.opacity = `${this.settings.opacity}`;
 

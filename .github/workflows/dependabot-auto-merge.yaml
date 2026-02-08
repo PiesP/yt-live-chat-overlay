@@ -1,8 +1,10 @@
 name: 🤖 Dependabot Auto-Merge
 
 # Responsibility: Auto-merge safe dependabot PRs
+# - Package manager: pnpm (managed via npm ecosystem in dependabot)
+# - Security updates: Auto-merge ALL updates (including major) if vulnerability detected
 # - GitHub Actions: patch/minor updates
-# - npm (root package): patch/minor updates for specific safe groups
+# - npm dependencies: patch/minor updates for safe groups (Biome, TypeScript, Vite)
 # - Requires CI to pass first
 
 on:
@@ -33,6 +35,56 @@ jobs:
         uses: dependabot/fetch-metadata@v2.5.0
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
+
+      - name: 🔍 Check for security vulnerability
+        id: security-check
+        run: |
+          echo "🔍 Checking if this is a security update..."
+
+          # Check if PR has security label
+          HAS_SECURITY_LABEL=$(gh pr view "$PR_NUMBER" --json labels --jq '.labels | map(select(.name == "security")) | length')
+
+          # Check alert-state from dependabot metadata
+          ALERT_STATE="${{ steps.dependabot-metadata.outputs.alert-state }}"
+          CVSS="${{ steps.dependabot-metadata.outputs.cvss }}"
+
+          if [ "$HAS_SECURITY_LABEL" -gt 0 ] || [ -n "$ALERT_STATE" ]; then
+            echo "🚨 Security vulnerability detected!"
+            echo "   - Alert State: ${ALERT_STATE:-none}"
+            echo "   - CVSS Score: ${CVSS:-unknown}"
+            echo "   - Labels: Security label present"
+            echo "is_security_update=true" >> $GITHUB_OUTPUT
+
+            # Determine severity
+            if [ -n "$CVSS" ]; then
+              CVSS_NUM=$(echo "$CVSS" | grep -oP '\d+(\.\d+)?' | head -1 || echo "0")
+              echo "severity_score=$CVSS_NUM" >> $GITHUB_OUTPUT
+
+              # Use awk for floating point comparison (more portable than bc)
+              HIGH=$(awk -v cvss="$CVSS_NUM" 'BEGIN {print (cvss >= 7.0)}')
+              MEDIUM=$(awk -v cvss="$CVSS_NUM" 'BEGIN {print (cvss >= 4.0)}')
+
+              if [ "$HIGH" = "1" ]; then
+                echo "severity=high" >> $GITHUB_OUTPUT
+                echo "⚠️ HIGH severity vulnerability (CVSS >= 7.0)"
+              elif [ "$MEDIUM" = "1" ]; then
+                echo "severity=medium" >> $GITHUB_OUTPUT
+                echo "⚠️ MEDIUM severity vulnerability (CVSS >= 4.0)"
+              else
+                echo "severity=low" >> $GITHUB_OUTPUT
+                echo "ℹ️ LOW severity vulnerability (CVSS < 4.0)"
+              fi
+            else
+              echo "severity=unknown" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "✅ Not a security update"
+            echo "is_security_update=false" >> $GITHUB_OUTPUT
+            echo "severity=none" >> $GITHUB_OUTPUT
+          fi
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: ⏳ Wait for required checks
         id: wait-checks
@@ -84,6 +136,43 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: 🛡️ Auto-merge security updates
+        if: >-
+          steps.wait-checks.outputs.checks_passed == 'true' &&
+          steps.security-check.outputs.is_security_update == 'true' &&
+          steps.dependabot-metadata.outputs.package-ecosystem == 'npm'
+        run: |
+          echo "🛡️ Auto-merging security update"
+          echo "📦 Package: ${{ steps.dependabot-metadata.outputs.dependency-names }}"
+          echo "📊 Update type: ${{ steps.dependabot-metadata.outputs.update-type }}"
+          echo "🚨 Severity: ${{ steps.security-check.outputs.severity }}"
+          echo "📈 CVSS Score: ${{ steps.security-check.outputs.severity_score }}"
+          echo ""
+          echo "⚠️ Security vulnerability detected - auto-merging regardless of semver"
+          echo "   This includes major version updates if necessary for security"
+
+          # Add comment explaining the auto-merge
+          gh pr comment "$PR_NUMBER" --body "🛡️ **Security Update Auto-Merge**
+
+          This PR addresses a security vulnerability and will be **automatically merged** after all checks pass.
+
+          - **Severity**: ${{ steps.security-check.outputs.severity }}
+          - **CVSS Score**: ${{ steps.security-check.outputs.severity_score }}
+          - **Update Type**: ${{ steps.dependabot-metadata.outputs.update-type }}
+          - **Package(s)**: ${{ steps.dependabot-metadata.outputs.dependency-names }}
+
+          Security updates are prioritized and may include breaking changes. Please review the changes after merge and test thoroughly.
+
+          ---
+          *Auto-merge policy: All security updates are automatically merged to ensure timely vulnerability remediation.*"
+
+          gh pr merge --auto --squash "$PR_URL"
+          echo "✅ Security update queued for auto-merge"
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: 🔄 Auto-merge GitHub Actions updates
         if: >-
           steps.wait-checks.outputs.checks_passed == 'true' &&
@@ -102,6 +191,7 @@ jobs:
       - name: 🔄 Auto-merge safe npm groups
         if: >-
           steps.wait-checks.outputs.checks_passed == 'true' &&
+          steps.security-check.outputs.is_security_update == 'false' &&
           steps.dependabot-metadata.outputs.package-ecosystem == 'npm' &&
           (steps.dependabot-metadata.outputs.update-type == 'version-update:semver-patch' ||
            steps.dependabot-metadata.outputs.update-type == 'version-update:semver-minor') &&
@@ -120,14 +210,15 @@ jobs:
 
       - name: ⏭️ Skip critical packages or major updates
         if: >-
-          steps.dependabot-metadata.outputs.update-type == 'version-update:semver-major' ||
-          (steps.dependabot-metadata.outputs.package-ecosystem == 'npm' &&
-           contains(steps.dependabot-metadata.outputs.dependency-names, 'vite'))
+          steps.security-check.outputs.is_security_update == 'false' &&
+          (steps.dependabot-metadata.outputs.update-type == 'version-update:semver-major' ||
+           (steps.dependabot-metadata.outputs.package-ecosystem == 'npm' &&
+            contains(steps.dependabot-metadata.outputs.dependency-names, 'vite')))
         run: |
           echo "⚠️ Manual review required"
           echo "📦 Package: ${{ steps.dependabot-metadata.outputs.dependency-names }}"
           echo "📊 Update type: ${{ steps.dependabot-metadata.outputs.update-type }}"
-          echo "📝 Reason: Major update or critical package"
+          echo "📝 Reason: Major update or critical package (not a security update)"
 
       - name: 🚨 Notify on merge failure
         if: failure()

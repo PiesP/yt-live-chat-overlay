@@ -1,10 +1,11 @@
 name: 🏗️ CI Pipeline
 
-# Responsibility: Continuous Integration (Node.js + pnpm + Biome)
-# - Linting (Biome)
-# - Format checking (Biome)
-# - Type checking (TypeScript via tsc)
-# - Build verification (Production mode)
+# Responsibility: Continuous Integration
+# - Package manager: pnpm v10+ (auto-detected from packageManager field)
+# - Linting: Biome
+# - Format checking: Biome
+# - Type checking: TypeScript via tsc
+# - Build verification: Vite (Production mode)
 #
 # Triggered on: Push/PR to master (excluding markdown/assets)
 

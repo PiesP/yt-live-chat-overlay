@@ -1,9 +1,11 @@
 name: 🔒 Security Scanning
 
-# Responsibility: Security analysis for Node.js + pnpm project
-# - OSV scanning: vulnerability detection in dependencies (via Google OSV-Scanner Action)
+# Responsibility: Security analysis
+# - Package manager: pnpm v10+ (lockfile: pnpm-lock.yaml)
+# - OSV scanning: vulnerability detection in dependencies
 # - SAST: static security analysis with Semgrep
 # - License check: verify LICENSE file presence
+#
 # Trigger: Weekly schedule + push to master + PR to master
 
 on:
