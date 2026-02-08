@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.0] - 2026-02-08
+
+### Added
+- Emoji support in chat messages with advanced rendering capabilities.
+- Security validation for chat message content to prevent XSS and injection attacks.
+
+### Fixed
+- Regex pattern in meta.js generation for userscript header metadata.
+
+### Changed
+- Enhanced chat message processing with improved text sanitization.
+- Updated Dependabot configuration and GitHub workflows for better automation.
+
 ## [0.1.1] - 2026-02-07
 
 ### Added

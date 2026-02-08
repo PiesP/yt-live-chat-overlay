@@ -31,7 +31,7 @@ const OUTPUT_FILE_NAMES = {
 
 export default defineConfig(({ mode }): UserConfig => {
   const isDev = mode === 'development';
-  const version = isDev ? '0.1.1-dev' : '0.1.1';
+  const version = isDev ? '0.2.0-dev' : '0.2.0';
   const buildTime = new Date().toISOString();
   const entryFile = resolve(REPO_ROOT, './src/main.ts');
   const outputFileName = isDev ? OUTPUT_FILE_NAMES.dev : OUTPUT_FILE_NAMES.prod;
