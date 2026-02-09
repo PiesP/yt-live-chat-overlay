@@ -13,6 +13,7 @@ import { PageWatcher } from '@core/page-watcher';
 import { Renderer } from '@core/renderer';
 import { Settings } from '@core/settings';
 import { SettingsUi } from '@core/settings-ui';
+import { VideoSync } from '@core/video-sync';
 
 /**
  * Application state
@@ -23,6 +24,7 @@ class App {
   private chatSource: ChatSource | null = null;
   private overlay: Overlay | null = null;
   private _renderer: Renderer | null = null;
+  private videoSync: VideoSync | null = null;
   private settingsUi: SettingsUi;
   private isInitialized = false;
   private restartTimer: number | null = null;
@@ -85,6 +87,32 @@ class App {
 
       // Create renderer
       this._renderer = new Renderer(this.overlay, currentSettings);
+
+      // Initialize video sync
+      this.videoSync = new VideoSync({
+        onPause: () => {
+          if (this._renderer) {
+            this._renderer.pause();
+          }
+        },
+        onPlay: () => {
+          if (this._renderer) {
+            this._renderer.resume();
+          }
+        },
+        onSeeking: () => {
+          // Optional: no action needed for now
+        },
+        onRateChange: (rate) => {
+          console.log('[App] Video playback rate changed:', rate);
+          if (this._renderer) {
+            this._renderer.setPlaybackRate(rate);
+          }
+        },
+      });
+
+      // Try to initialize (non-blocking)
+      await this.videoSync.init();
 
       // Start chat source
       this.chatSource = new ChatSource();
@@ -292,6 +320,16 @@ class App {
         console.warn('[YT Chat Overlay] Error stopping chat source:', error);
       }
       this.chatSource = null;
+    }
+
+    // Stop video sync
+    if (this.videoSync) {
+      try {
+        this.videoSync.destroy();
+      } catch (error) {
+        console.warn('[YT Chat Overlay] Error destroying video sync:', error);
+      }
+      this.videoSync = null;
     }
 
     // Destroy renderer to clear all active messages

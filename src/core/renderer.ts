@@ -21,6 +21,7 @@ interface ActiveMessage {
   startTime: number;
   duration: number;
   timeoutId: number;
+  animation: Animation;
 }
 
 export class Renderer {
@@ -31,6 +32,7 @@ export class Renderer {
   private messageQueue: ChatMessage[] = [];
   private lastProcessTime = 0;
   private processedInLastSecond = 0;
+  private isPaused = false;
   private styleElement: HTMLStyleElement | null = null;
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
@@ -256,13 +258,23 @@ export class Renderer {
     }
 
     this.messageQueue.push(message);
-    this.processQueue();
+
+    // Only process queue if not paused
+    if (!this.isPaused) {
+      this.processQueue();
+    }
+    // If paused, message stays in queue until resume()
   }
 
   /**
    * Process message queue
    */
   private processQueue(): void {
+    // Don't process while paused
+    if (this.isPaused) {
+      return;
+    }
+
     while (this.messageQueue.length > 0) {
       // Check concurrent message limit
       if (this.activeMessages.size >= this.settings.maxConcurrentMessages) {
@@ -382,6 +394,7 @@ export class Renderer {
       startTime: now,
       duration,
       timeoutId,
+      animation,
     };
     this.activeMessages.add(activeMessage);
 
@@ -454,6 +467,83 @@ export class Renderer {
   }
 
   /**
+   * Pause all active animations
+   */
+  pause(): void {
+    if (this.isPaused) {
+      return; // Already paused
+    }
+
+    console.log('[Renderer] Pausing all animations');
+    this.isPaused = true;
+
+    for (const active of this.activeMessages) {
+      try {
+        active.animation.pause();
+      } catch (error) {
+        console.warn('[Renderer] Failed to pause animation:', error);
+      }
+    }
+
+    console.log(`[Renderer] Paused ${this.activeMessages.size} animations`);
+  }
+
+  /**
+   * Resume all active animations and process queued messages
+   */
+  resume(): void {
+    if (!this.isPaused) {
+      return; // Not paused
+    }
+
+    console.log('[Renderer] Resuming all animations');
+    this.isPaused = false;
+
+    for (const active of this.activeMessages) {
+      try {
+        active.animation.play();
+      } catch (error) {
+        console.warn('[Renderer] Failed to resume animation:', error);
+      }
+    }
+
+    console.log(`[Renderer] Resumed ${this.activeMessages.size} animations`);
+
+    // Process any queued messages
+    this.processQueue();
+  }
+
+  /**
+   * Check if renderer is paused
+   */
+  isPausedState(): boolean {
+    return this.isPaused;
+  }
+
+  /**
+   * Set playback rate for all active animations
+   * Synchronizes animation speed with video playback rate
+   */
+  setPlaybackRate(rate: number): void {
+    if (rate <= 0) {
+      console.warn('[Renderer] Invalid playback rate:', rate);
+      return;
+    }
+
+    console.log(
+      `[Renderer] Setting playback rate to ${rate}x for ${this.activeMessages.size} animations`
+    );
+
+    for (const active of this.activeMessages) {
+      try {
+        active.animation.playbackRate = rate;
+      } catch (error) {
+        console.warn('[Renderer] Failed to set playback rate:', error);
+      }
+    }
+  }
+
+  /**
    * Clear all messages
    */
   clear(): void {
@@ -468,6 +558,7 @@ export class Renderer {
    * Destroy renderer
    */
   destroy(): void {
+    this.isPaused = false;
     this.clear();
     if (this.styleElement?.parentNode) {
       this.styleElement.parentNode.removeChild(this.styleElement);
