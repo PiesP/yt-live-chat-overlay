@@ -49,12 +49,12 @@ function generateHeader(meta: UserscriptMeta, isDev: boolean): string {
 /**
  * Vite plugin for userscript header injection
  */
-export function userscriptHeaderPlugin(mode: string): Plugin {
+export function userscriptHeaderPlugin(mode: string, version: string): Plugin {
   const isDev = mode === 'development';
 
   const meta: UserscriptMeta = {
     name: 'YouTube Live Chat Overlay',
-    version: isDev ? '0.1.1-dev' : '0.1.1',
+    version: version,
     description:
       'Displays YouTube live chat in Nico-nico style flowing overlay (100% local, no data collection)',
     author: 'PiesP',

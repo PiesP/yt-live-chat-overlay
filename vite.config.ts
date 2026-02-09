@@ -11,6 +11,7 @@
  *   pnpm build:dev  - Development build
  */
 
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { defineConfig, type UserConfig } from 'vite';
 import { userscriptHeaderPlugin } from './tooling/userscript-header';
@@ -31,13 +32,30 @@ const OUTPUT_FILE_NAMES = {
 
 export default defineConfig(({ mode }): UserConfig => {
   const isDev = mode === 'development';
-  const version = isDev ? '0.2.0-dev' : '0.2.0';
+
+  // Read version from BUILD_VERSION env var (set by release workflow)
+  // or fallback to package.json
+  const getVersion = (): string => {
+    const buildVersion = process.env.BUILD_VERSION;
+    if (buildVersion) {
+      return buildVersion;
+    }
+
+    // Fallback to package.json
+    const packageJsonPath = resolve(REPO_ROOT, 'package.json');
+    const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
+    return packageJson.version;
+  };
+
+  const baseVersion = getVersion();
+  const version = isDev ? `${baseVersion}-dev` : baseVersion;
+
   const buildTime = new Date().toISOString();
   const entryFile = resolve(REPO_ROOT, './src/main.ts');
   const outputFileName = isDev ? OUTPUT_FILE_NAMES.dev : OUTPUT_FILE_NAMES.prod;
 
   return {
-    plugins: [userscriptHeaderPlugin(mode)],
+    plugins: [userscriptHeaderPlugin(mode, version)],
 
     root: REPO_ROOT,
 
