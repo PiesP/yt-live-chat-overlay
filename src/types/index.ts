@@ -33,6 +33,24 @@ export type ContentSegment =
   | { type: 'emoji'; emoji: EmojiInfo };
 
 /**
+ * Super Chat tier information
+ */
+export interface SuperChatInfo {
+  /** Purchase amount (e.g., "5.00") */
+  amount: string;
+  /** Currency code (e.g., "USD", "JPY", "KRW") */
+  currency?: string;
+  /** Super Chat color tier (determines prominence) */
+  tier: 'blue' | 'cyan' | 'green' | 'yellow' | 'orange' | 'magenta' | 'red';
+  /** Background color from YouTube */
+  backgroundColor?: string;
+  /** Header background color (darker shade) */
+  headerBackgroundColor?: string;
+  /** Sticker image URL (for high-tier Super Chats) */
+  stickerUrl?: string;
+}
+
+/**
  * Chat message structure (normalized)
  */
 export interface ChatMessage {
@@ -48,6 +66,8 @@ export interface ChatMessage {
   author?: string;
   /** Author type classification */
   authorType?: AuthorType;
+  /** Super Chat information (only for kind='superchat') */
+  superChat?: SuperChatInfo;
 }
 
 /**

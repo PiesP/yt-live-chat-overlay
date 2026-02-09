@@ -5,7 +5,7 @@
  * Supports both iframe and in-page chat rendering.
  */
 
-import type { ChatMessage, ContentSegment, EmojiInfo } from '@app-types';
+import type { ChatMessage, ContentSegment, EmojiInfo, SuperChatInfo } from '@app-types';
 import { findElementMatch, sleep } from '@core/dom';
 
 const CHAT_FRAME_SELECTORS = ['ytd-live-chat-frame#chat', '#chat', 'ytd-live-chat-frame'] as const;
@@ -560,9 +560,6 @@ export class ChatSource {
         kind = 'membership';
       }
 
-      // For now, only process text messages
-      if (kind !== 'text') return null;
-
       // Extract author information
       const authorType = this.extractAuthorType(element);
       const authorName = this.extractAuthorName(element);
@@ -585,6 +582,17 @@ export class ChatSource {
       if (authorType) {
         message.authorType = authorType;
       }
+
+      // Parse Super Chat specific data
+      if (kind === 'superchat') {
+        const superChatInfo = this.parseSuperChatInfo(element);
+        if (superChatInfo) {
+          message.superChat = superChatInfo;
+        }
+      }
+
+      // For now, only process text and superchat messages
+      if (kind !== 'text' && kind !== 'superchat') return null;
 
       return message;
     } catch (error) {
@@ -845,6 +853,123 @@ export class ChatSource {
       text: this.normalizeText(plainText),
       content: segments,
     };
+  }
+
+  /**
+   * Parse Super Chat information from element
+   */
+  private parseSuperChatInfo(element: Element): SuperChatInfo | null {
+    try {
+      // Extract purchase amount and currency
+      const purchaseAmountElement = element.querySelector(
+        '#purchase-amount, yt-formatted-string#purchase-amount'
+      );
+      const amountText = purchaseAmountElement?.textContent?.trim() || '';
+
+      if (!amountText) {
+        console.warn('[YT Chat Overlay] Super Chat detected but no amount found');
+        return null;
+      }
+
+      // Parse amount and currency (e.g., "$5.00", "¥500", "₩5,000")
+      // Common formats: "$5.00", "5.00 USD", "¥500", "₩5,000", "€5.00"
+      const currencyMatch = amountText.match(/[A-Z]{3}/) || [];
+      const currency = currencyMatch[0];
+
+      // Extract colors from element styles
+      const computedStyle = window.getComputedStyle(element);
+      const backgroundColor =
+        computedStyle.backgroundColor ||
+        element.getAttribute('style')?.match(/background-color:\s*([^;]+)/)?.[1] ||
+        undefined;
+
+      // Try to find header background color (from card-header element)
+      const headerElement = element.querySelector(
+        '#card, #header, yt-live-chat-paid-message-renderer #card'
+      );
+      const headerBackgroundColor = headerElement
+        ? window.getComputedStyle(headerElement).backgroundColor || undefined
+        : undefined;
+
+      // Determine color tier based on background color or amount
+      const tier = this.determineSuperChatTier(backgroundColor, amountText);
+
+      // Check for sticker (high-tier Super Chats may have stickers)
+      const stickerImg = element.querySelector(
+        '#sticker img, yt-img-shadow#sticker img, img[id*="sticker"]'
+      ) as HTMLImageElement;
+      const stickerUrl =
+        stickerImg && this.isValidImageUrl(stickerImg.src) ? stickerImg.src : undefined;
+
+      const superChatInfo: SuperChatInfo = {
+        amount: amountText,
+        tier,
+      };
+
+      // Add optional fields only if they have values
+      if (currency) {
+        superChatInfo.currency = currency;
+      }
+      if (backgroundColor) {
+        superChatInfo.backgroundColor = backgroundColor;
+      }
+      if (headerBackgroundColor) {
+        superChatInfo.headerBackgroundColor = headerBackgroundColor;
+      }
+      if (stickerUrl) {
+        superChatInfo.stickerUrl = stickerUrl;
+      }
+
+      return superChatInfo;
+    } catch (error) {
+      console.warn('[YT Chat Overlay] Failed to parse Super Chat info:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Determine Super Chat tier based on background color or amount
+   * YouTube uses different colors for different price tiers
+   */
+  private determineSuperChatTier(
+    backgroundColor: string | undefined,
+    amountText: string
+  ): SuperChatInfo['tier'] {
+    if (!backgroundColor) {
+      // Fallback: estimate tier from amount text
+      const numericAmount = parseFloat(amountText.replace(/[^0-9.]/g, ''));
+      if (numericAmount >= 100) return 'red';
+      if (numericAmount >= 50) return 'magenta';
+      if (numericAmount >= 20) return 'orange';
+      if (numericAmount >= 10) return 'yellow';
+      if (numericAmount >= 5) return 'green';
+      if (numericAmount >= 2) return 'cyan';
+      return 'blue';
+    }
+
+    // Parse RGB values from backgroundColor
+    const rgbMatch = backgroundColor.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+    if (!rgbMatch) return 'blue'; // fallback
+
+    const r = parseInt(rgbMatch[1] || '0', 10);
+    const g = parseInt(rgbMatch[2] || '0', 10);
+    const b = parseInt(rgbMatch[3] || '0', 10);
+
+    // YouTube Super Chat color tiers (approximate RGB ranges)
+    // Red: $100+ (rgb(230, 33, 23))
+    if (r > 200 && g < 100 && b < 100) return 'red';
+    // Magenta: $50-$99 (rgb(233, 30, 99))
+    if (r > 200 && g < 100 && b > 80) return 'magenta';
+    // Orange: $20-$49 (rgb(245, 124, 0))
+    if (r > 200 && g > 100 && g < 150 && b < 50) return 'orange';
+    // Yellow: $10-$19 (rgb(255, 202, 40))
+    if (r > 200 && g > 180 && b < 100) return 'yellow';
+    // Green: $5-$9 (rgb(29, 233, 182))
+    if (r < 100 && g > 200 && b > 150) return 'green';
+    // Cyan: $2-$4 (rgb(0, 191, 255))
+    if (r < 100 && g > 150 && b > 200) return 'cyan';
+    // Blue: $1-$1.99 (rgb(30, 136, 229))
+    return 'blue';
   }
 
   /**

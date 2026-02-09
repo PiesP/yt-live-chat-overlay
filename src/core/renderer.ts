@@ -88,6 +88,74 @@ export class Renderer {
         -moz-osx-font-smoothing: grayscale;
       }
 
+      /* Super Chat styling */
+      .yt-chat-overlay-message-superchat {
+        padding: 8px 16px;
+        border-radius: 8px;
+        background: linear-gradient(135deg, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.6) 100%);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
+        border: 2px solid rgba(255, 255, 255, 0.3);
+      }
+
+      /* Super Chat amount badge */
+      .yt-chat-overlay-superchat-amount {
+        display: inline-block;
+        padding: 4px 12px;
+        margin-right: 12px;
+        border-radius: 12px;
+        font-weight: 900;
+        font-size: 0.9em;
+        vertical-align: middle;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+      }
+
+      /* Super Chat sticker */
+      .yt-chat-overlay-superchat-sticker {
+        display: inline-block;
+        vertical-align: middle;
+        margin-right: 8px;
+        filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
+      }
+
+      /* Super Chat tier colors */
+      .yt-chat-overlay-superchat-blue {
+        border-color: rgba(30, 136, 229, 0.8);
+        background: linear-gradient(135deg, rgba(30, 136, 229, 0.5) 0%, rgba(30, 136, 229, 0.3) 100%);
+      }
+      .yt-chat-overlay-superchat-cyan {
+        border-color: rgba(0, 191, 255, 0.8);
+        background: linear-gradient(135deg, rgba(0, 191, 255, 0.5) 0%, rgba(0, 191, 255, 0.3) 100%);
+      }
+      .yt-chat-overlay-superchat-green {
+        border-color: rgba(29, 233, 182, 0.8);
+        background: linear-gradient(135deg, rgba(29, 233, 182, 0.5) 0%, rgba(29, 233, 182, 0.3) 100%);
+      }
+      .yt-chat-overlay-superchat-yellow {
+        border-color: rgba(255, 202, 40, 0.8);
+        background: linear-gradient(135deg, rgba(255, 202, 40, 0.5) 0%, rgba(255, 202, 40, 0.3) 100%);
+      }
+      .yt-chat-overlay-superchat-orange {
+        border-color: rgba(245, 124, 0, 0.8);
+        background: linear-gradient(135deg, rgba(245, 124, 0, 0.5) 0%, rgba(245, 124, 0, 0.3) 100%);
+      }
+      .yt-chat-overlay-superchat-magenta {
+        border-color: rgba(233, 30, 99, 0.8);
+        background: linear-gradient(135deg, rgba(233, 30, 99, 0.5) 0%, rgba(233, 30, 99, 0.3) 100%);
+      }
+      .yt-chat-overlay-superchat-red {
+        border-color: rgba(230, 33, 23, 0.8);
+        background: linear-gradient(135deg, rgba(230, 33, 23, 0.5) 0%, rgba(230, 33, 23, 0.3) 100%);
+      }
+
+      /* Super Chat amount badge tier colors */
+      .yt-chat-overlay-superchat-amount-blue { background-color: rgb(30, 136, 229); }
+      .yt-chat-overlay-superchat-amount-cyan { background-color: rgb(0, 191, 255); }
+      .yt-chat-overlay-superchat-amount-green { background-color: rgb(29, 233, 182); }
+      .yt-chat-overlay-superchat-amount-yellow { background-color: rgb(255, 202, 40); color: #000; }
+      .yt-chat-overlay-superchat-amount-orange { background-color: rgb(245, 124, 0); }
+      .yt-chat-overlay-superchat-amount-magenta { background-color: rgb(233, 30, 99); }
+      .yt-chat-overlay-superchat-amount-red { background-color: rgb(230, 33, 23); }
+
       /* Emoji styling */
       .yt-chat-overlay-emoji {
         display: inline-block;
@@ -222,6 +290,42 @@ export class Renderer {
   }
 
   /**
+   * Create Super Chat sticker image element
+   * SECURITY: Validates URL and creates element programmatically
+   */
+  private createSuperChatSticker(stickerUrl: string): HTMLImageElement | null {
+    // Validate URL (defense in depth)
+    if (!this.isValidImageUrl(stickerUrl)) {
+      console.warn('[YT Chat Overlay] Invalid Super Chat sticker URL:', stickerUrl);
+      return null;
+    }
+
+    const img = document.createElement('img');
+    img.src = stickerUrl;
+    img.alt = 'Super Chat Sticker';
+    img.className = 'yt-chat-overlay-superchat-sticker';
+
+    // Size sticker relative to font size (larger than emoji)
+    const stickerSize = this.settings.fontSize * 2.0;
+    img.style.height = `${stickerSize}px`;
+    img.style.width = 'auto';
+
+    // Error handling: hide on load failure
+    img.addEventListener(
+      'error',
+      () => {
+        img.style.display = 'none';
+        console.warn('[YT Chat Overlay] Failed to load Super Chat sticker:', stickerUrl);
+      },
+      { once: true }
+    );
+
+    img.draggable = false;
+
+    return img;
+  }
+
+  /**
    * Render mixed content (text + emoji) using DOM API
    * SECURITY: No innerHTML - creates elements programmatically
    */
@@ -308,20 +412,45 @@ export class Renderer {
     const element = document.createElement('div');
     element.className = 'yt-chat-overlay-message';
 
+    // Apply Super Chat styling if applicable
+    const isSuperChat = message.kind === 'superchat' && message.superChat;
+    if (isSuperChat && message.superChat) {
+      element.classList.add('yt-chat-overlay-message-superchat');
+      element.classList.add(`yt-chat-overlay-superchat-${message.superChat.tier}`);
+
+      // Add sticker if available (high-tier Super Chats)
+      if (message.superChat.stickerUrl) {
+        const stickerImg = this.createSuperChatSticker(message.superChat.stickerUrl);
+        if (stickerImg) {
+          element.appendChild(stickerImg);
+        }
+      }
+
+      // Add amount badge
+      const amountBadge = document.createElement('span');
+      amountBadge.className = 'yt-chat-overlay-superchat-amount';
+      amountBadge.classList.add(`yt-chat-overlay-superchat-amount-${message.superChat.tier}`);
+      amountBadge.textContent = message.superChat.amount;
+      element.appendChild(amountBadge);
+    }
+
     // Render content (text + emojis)
     if (message.content && message.content.length > 0) {
       this.renderMixedContent(element, message.content);
     } else {
-      // Fallback: plain text only
       element.textContent = message.text; // SECURITY: textContent only, no innerHTML
     }
 
-    element.style.fontSize = `${this.settings.fontSize}px`;
+    // Calculate font size (Super Chats are larger)
+    const fontSize = isSuperChat ? this.settings.fontSize * 1.3 : this.settings.fontSize;
+    element.style.fontSize = `${fontSize}px`;
     element.style.opacity = `${this.settings.opacity}`;
 
-    // Apply color based on author type
-    const authorType = message.authorType || 'normal';
-    element.style.color = this.settings.colors[authorType];
+    // Apply color based on author type (unless it's a Super Chat with custom styling)
+    if (!isSuperChat) {
+      const authorType = message.authorType || 'normal';
+      element.style.color = this.settings.colors[authorType];
+    }
 
     // Find available lane
     const lane = this.findAvailableLane();
@@ -339,13 +468,21 @@ export class Renderer {
     // Add to container (temporarily to measure width)
     container.appendChild(element);
 
-    // Calculate animation duration
+    // Calculate animation duration (Super Chats move slower and stay longer)
     const textWidth = element.offsetWidth;
-    const exitPadding = Math.max(this.settings.fontSize * 2, 80);
+    const exitPadding = Math.max(fontSize * 2, 80);
     const distance = dimensions.width + textWidth + exitPadding;
+
+    // Super Chats move 30% slower and have base duration increased by 50%
+    const speedMultiplier = isSuperChat ? 0.7 : 1.0;
+    const baseDurationMultiplier = isSuperChat ? 1.5 : 1.0;
+
     const duration = Math.max(
-      4000,
-      Math.min(14000, (distance / this.settings.speedPxPerSec) * 1000)
+      4000 * baseDurationMultiplier,
+      Math.min(
+        14000 * baseDurationMultiplier,
+        ((distance / this.settings.speedPxPerSec) * 1000) / speedMultiplier
+      )
     );
     const laneDelay = (lane.index % 3) * 80;
     const totalDuration = duration + laneDelay;
@@ -366,7 +503,11 @@ export class Renderer {
       text: message.text.substring(0, 20),
       author: message.author,
       authorType: message.authorType || 'normal',
-      color: this.settings.colors[authorType],
+      kind: message.kind,
+      isSuperChat,
+      superChatTier: message.superChat?.tier,
+      superChatAmount: message.superChat?.amount,
+      color: isSuperChat ? 'tier-based' : this.settings.colors[message.authorType || 'normal'],
       lane: lane.index,
       width: textWidth,
       distance,
