@@ -537,6 +537,11 @@ export class ChatSource {
       return null;
     }
 
+    // Filter out system messages (e.g., "실시간 채팅 다시보기를 사용 중입니다")
+    if (!this.isUserMessage(element)) {
+      return null;
+    }
+
     try {
       // Extract text content and emojis
       const messageElement = element.querySelector('#message');
@@ -586,6 +591,35 @@ export class ChatSource {
       console.warn('[YT Chat Overlay] Failed to parse message:', error);
       return null;
     }
+  }
+
+  /**
+   * Check if an element represents a user message (not a system message)
+   * System messages don't have authors and use different renderer types
+   */
+  private isUserMessage(element: Element): boolean {
+    // Primary check: user messages always have an author element
+    const authorElement = element.querySelector('#author-name');
+    if (!authorElement || !authorElement.textContent?.trim()) {
+      return false; // No author = system message
+    }
+
+    // Secondary check: block known system message renderer types
+    const tagName = element.tagName.toLowerCase();
+    const systemMessageTypes = [
+      'placeholder', // "Using live chat replay" / "실시간 채팅 다시보기"
+      'timed-message', // Time-based notifications
+      'viewer-engagement', // Engagement notifications
+      'banner', // System banners
+    ];
+
+    for (const type of systemMessageTypes) {
+      if (tagName.includes(type)) {
+        return false; // Known system message type
+      }
+    }
+
+    return true; // Likely a user message
   }
 
   /**

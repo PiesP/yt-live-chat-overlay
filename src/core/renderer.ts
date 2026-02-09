@@ -470,21 +470,11 @@ export class Renderer {
    * Pause all active animations
    */
   pause(): void {
-    if (this.isPaused) {
-      return; // Already paused
-    }
+    if (this.isPaused) return;
 
     console.log('[Renderer] Pausing all animations');
     this.isPaused = true;
-
-    for (const active of this.activeMessages) {
-      try {
-        active.animation.pause();
-      } catch (error) {
-        console.warn('[Renderer] Failed to pause animation:', error);
-      }
-    }
-
+    this.forEachAnimation((animation) => animation.pause());
     console.log(`[Renderer] Paused ${this.activeMessages.size} animations`);
   }
 
@@ -492,21 +482,11 @@ export class Renderer {
    * Resume all active animations and process queued messages
    */
   resume(): void {
-    if (!this.isPaused) {
-      return; // Not paused
-    }
+    if (!this.isPaused) return;
 
     console.log('[Renderer] Resuming all animations');
     this.isPaused = false;
-
-    for (const active of this.activeMessages) {
-      try {
-        active.animation.play();
-      } catch (error) {
-        console.warn('[Renderer] Failed to resume animation:', error);
-      }
-    }
-
+    this.forEachAnimation((animation) => animation.play());
     console.log(`[Renderer] Resumed ${this.activeMessages.size} animations`);
 
     // Process any queued messages
@@ -533,12 +513,21 @@ export class Renderer {
     console.log(
       `[Renderer] Setting playback rate to ${rate}x for ${this.activeMessages.size} animations`
     );
+    this.forEachAnimation((animation) => {
+      animation.playbackRate = rate;
+    });
+  }
 
+  /**
+   * Helper method to apply an operation to all active animations
+   * Centralizes animation manipulation logic
+   */
+  private forEachAnimation(operation: (animation: Animation) => void): void {
     for (const active of this.activeMessages) {
       try {
-        active.animation.playbackRate = rate;
+        operation(active.animation);
       } catch (error) {
-        console.warn('[Renderer] Failed to set playback rate:', error);
+        console.warn('[Renderer] Animation operation failed:', error);
       }
     }
   }

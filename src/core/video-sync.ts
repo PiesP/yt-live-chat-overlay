@@ -28,6 +28,27 @@ const VIDEO_SELECTORS = [
 ] as const;
 
 /**
+ * Player container selectors for MutationObserver
+ */
+const PLAYER_CONTAINER_SELECTORS = '#movie_player, .html5-video-player';
+
+/**
+ * Configuration constants
+ */
+const CONFIG = {
+  /** Number of detection attempts with delay */
+  DETECTION_ATTEMPTS: 5,
+  /** Delay between detection attempts (ms) */
+  DETECTION_INTERVAL_MS: 500,
+  /** Periodic detection interval (ms) */
+  PERIODIC_DETECTION_INTERVAL_MS: 2000,
+  /** Delay before reinitializing after video replacement (ms) */
+  REINITIALIZATION_DELAY_MS: 1000,
+  /** Minimum video readyState for acceptance */
+  MIN_READY_STATE: 2,
+} as const;
+
+/**
  * VideoSync class
  *
  * Manages video element detection and playback state synchronization.
@@ -55,18 +76,15 @@ export class VideoSync {
    * @returns true if video element found, false if periodic detection started
    */
   async init(): Promise<boolean> {
-    // Detect video element (with retry)
-    this.videoElement = await this.detectVideoElement();
+    const videoElement = await this.detectVideoElement();
 
-    if (!this.videoElement) {
+    if (!videoElement) {
       console.warn('[VideoSync] Video element not found, starting periodic detection');
       this.startPeriodicDetection();
       return false;
     }
 
-    this.attachListeners();
-    this.observeVideoReplacement();
-    this.initialized = true;
+    this.setupVideoElement(videoElement);
     console.log('[VideoSync] Initialized with video element');
     return true;
   }
@@ -77,12 +95,9 @@ export class VideoSync {
    */
   private async detectVideoElement(): Promise<HTMLVideoElement | null> {
     const match = await waitForElementMatch<HTMLVideoElement>(VIDEO_SELECTORS, {
-      attempts: 5,
-      intervalMs: 500,
-      predicate: (video) => {
-        // Validate video is ready and has dimensions
-        return video.readyState >= 2 && video.videoWidth > 0;
-      },
+      attempts: CONFIG.DETECTION_ATTEMPTS,
+      intervalMs: CONFIG.DETECTION_INTERVAL_MS,
+      predicate: this.isVideoReady,
     });
 
     if (match) {
@@ -91,6 +106,23 @@ export class VideoSync {
     }
 
     return null;
+  }
+
+  /**
+   * Check if video element is ready for use
+   */
+  private isVideoReady(video: HTMLVideoElement): boolean {
+    return video.readyState >= CONFIG.MIN_READY_STATE && video.videoWidth > 0;
+  }
+
+  /**
+   * Setup video element with listeners and observers
+   */
+  private setupVideoElement(video: HTMLVideoElement): void {
+    this.videoElement = video;
+    this.attachListeners();
+    this.observeVideoReplacement();
+    this.initialized = true;
   }
 
   /**
@@ -106,20 +138,16 @@ export class VideoSync {
         return;
       }
 
-      // Try immediate detection (no wait)
       const match = findElementMatch<HTMLVideoElement>(VIDEO_SELECTORS, {
-        predicate: (video) => video.readyState >= 2 && video.videoWidth > 0,
+        predicate: this.isVideoReady,
       });
 
       if (match) {
-        this.videoElement = match.element;
-        this.attachListeners();
-        this.observeVideoReplacement();
-        this.initialized = true;
+        this.setupVideoElement(match.element);
         this.stopPeriodicDetection();
         console.log('[VideoSync] Video element detected via periodic check:', match.selector);
       }
-    }, 2000);
+    }, CONFIG.PERIODIC_DETECTION_INTERVAL_MS);
 
     console.log('[VideoSync] Periodic detection started (every 2 seconds)');
   }
@@ -150,20 +178,32 @@ export class VideoSync {
   }
 
   /**
+   * Detach event listeners from video element
+   */
+  private detachListeners(): void {
+    if (!this.videoElement) return;
+
+    this.videoElement.removeEventListener('pause', this.boundHandlers.pause);
+    this.videoElement.removeEventListener('play', this.boundHandlers.play);
+    this.videoElement.removeEventListener('seeking', this.boundHandlers.seeking);
+    this.videoElement.removeEventListener('ratechange', this.boundHandlers.ratechange);
+
+    console.log('[VideoSync] Event listeners detached');
+  }
+
+  /**
    * Observe video element replacement
    * Detects when video element is removed from DOM (e.g., during ad transitions)
    */
   private observeVideoReplacement(): void {
     if (!this.videoElement) return;
 
-    // Find the player container to observe
-    const playerContainer = document.querySelector('#movie_player, .html5-video-player');
+    const playerContainer = document.querySelector(PLAYER_CONTAINER_SELECTORS);
     if (!playerContainer) {
       console.warn('[VideoSync] Player container not found, cannot observe video replacement');
       return;
     }
 
-    // Create MutationObserver to watch for video element removal
     this.mutationObserver = new MutationObserver(() => {
       if (this.videoElement && !document.contains(this.videoElement)) {
         console.log('[VideoSync] Video element removed from DOM, reinitializing...');
@@ -171,7 +211,6 @@ export class VideoSync {
       }
     });
 
-    // Observe the player container for child changes
     this.mutationObserver.observe(playerContainer, {
       childList: true,
       subtree: true,
@@ -196,75 +235,53 @@ export class VideoSync {
    * Called when video element is removed from DOM
    */
   private handleVideoReplacement(): void {
-    // Clean up existing video
-    this.detachListeners();
-    this.stopObservingReplacement();
-    this.videoElement = null;
-    this.initialized = false;
+    this.cleanup();
 
-    // Try to reinitialize after a short delay
     setTimeout(() => {
       console.log('[VideoSync] Attempting to reacquire video element...');
       this.init().catch((error) => {
         console.warn('[VideoSync] Failed to reinitialize after video replacement:', error);
       });
-    }, 1000);
+    }, CONFIG.REINITIALIZATION_DELAY_MS);
   }
 
   /**
-   * Detach event listeners from video element
+   * Clean up video element state
    */
-  private detachListeners(): void {
-    if (!this.videoElement) return;
-
-    this.videoElement.removeEventListener('pause', this.boundHandlers.pause);
-    this.videoElement.removeEventListener('play', this.boundHandlers.play);
-    this.videoElement.removeEventListener('seeking', this.boundHandlers.seeking);
-    this.videoElement.removeEventListener('ratechange', this.boundHandlers.ratechange);
-
-    console.log('[VideoSync] Event listeners detached');
+  private cleanup(): void {
+    this.detachListeners();
+    this.stopObservingReplacement();
+    this.videoElement = null;
+    this.initialized = false;
   }
 
   /**
-   * Handle pause event
+   * Event handlers
    */
   private handlePause(): void {
     console.log('[VideoSync] Video paused');
-    if (this.callbacks.onPause) {
-      this.callbacks.onPause();
-    }
+    this.callbacks.onPause?.();
   }
 
-  /**
-   * Handle play event
-   */
   private handlePlay(): void {
     console.log('[VideoSync] Video playing');
-    if (this.callbacks.onPlay) {
-      this.callbacks.onPlay();
-    }
+    this.callbacks.onPlay?.();
   }
 
-  /**
-   * Handle seeking event
-   */
   private handleSeeking(): void {
     console.log('[VideoSync] Video seeking');
-    if (this.callbacks.onSeeking) {
-      this.callbacks.onSeeking();
-    }
+    this.callbacks.onSeeking?.();
   }
 
-  /**
-   * Handle playback rate change event
-   */
   private handleRateChange(): void {
     const rate = this.videoElement?.playbackRate ?? 1.0;
     console.log('[VideoSync] Playback rate changed:', rate);
-    if (this.callbacks.onRateChange) {
-      this.callbacks.onRateChange(rate);
-    }
+    this.callbacks.onRateChange?.(rate);
   }
+
+  /**
+   * Public API
+   */
 
   /**
    * Check if video is currently paused
@@ -290,14 +307,11 @@ export class VideoSync {
   }
 
   /**
-   * Destroy and cleanup
+   * Destroy and cleanup all resources
    */
   destroy(): void {
     this.stopPeriodicDetection();
-    this.stopObservingReplacement();
-    this.detachListeners();
-    this.videoElement = null;
-    this.initialized = false;
+    this.cleanup();
     console.log('[VideoSync] Destroyed');
   }
 }
