@@ -441,8 +441,8 @@ export class Renderer {
       element.textContent = message.text; // SECURITY: textContent only, no innerHTML
     }
 
-    // Calculate font size (Super Chats are larger)
-    const fontSize = isSuperChat ? this.settings.fontSize * 1.3 : this.settings.fontSize;
+    // Font size is same for all messages
+    const fontSize = this.settings.fontSize;
     element.style.fontSize = `${fontSize}px`;
     element.style.opacity = `${this.settings.opacity}`;
 
@@ -468,21 +468,14 @@ export class Renderer {
     // Add to container (temporarily to measure width)
     container.appendChild(element);
 
-    // Calculate animation duration (Super Chats move slower and stay longer)
+    // Calculate animation duration (same for all messages)
     const textWidth = element.offsetWidth;
     const exitPadding = Math.max(fontSize * 2, 80);
     const distance = dimensions.width + textWidth + exitPadding;
 
-    // Super Chats move 30% slower and have base duration increased by 50%
-    const speedMultiplier = isSuperChat ? 0.7 : 1.0;
-    const baseDurationMultiplier = isSuperChat ? 1.5 : 1.0;
-
     const duration = Math.max(
-      4000 * baseDurationMultiplier,
-      Math.min(
-        14000 * baseDurationMultiplier,
-        ((distance / this.settings.speedPxPerSec) * 1000) / speedMultiplier
-      )
+      4000,
+      Math.min(14000, (distance / this.settings.speedPxPerSec) * 1000)
     );
     const laneDelay = (lane.index % 3) * 80;
     const totalDuration = duration + laneDelay;
