@@ -236,6 +236,69 @@ export class Renderer {
   }
 
   /**
+   * Parse RGB/RGBA color string to components
+   * Handles formats: "rgb(r, g, b)" or "rgba(r, g, b, a)"
+   */
+  private parseRgbaColor(colorString: string): {
+    r: number;
+    g: number;
+    b: number;
+    a: number;
+  } | null {
+    const rgbaMatch = colorString.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
+    if (!rgbaMatch) return null;
+
+    return {
+      r: parseInt(rgbaMatch[1] || '0', 10),
+      g: parseInt(rgbaMatch[2] || '0', 10),
+      b: parseInt(rgbaMatch[3] || '0', 10),
+      a: rgbaMatch[4] ? parseFloat(rgbaMatch[4]) : 1.0,
+    };
+  }
+
+  /**
+   * Adjust color opacity for overlay rendering
+   * Creates semi-transparent version suitable for overlay backgrounds
+   */
+  private adjustColorOpacity(colorString: string, targetOpacity: number): string {
+    const parsed = this.parseRgbaColor(colorString);
+    if (!parsed) return colorString; // Return original if parsing fails
+
+    return `rgba(${parsed.r}, ${parsed.g}, ${parsed.b}, ${targetOpacity})`;
+  }
+
+  /**
+   * Create gradient background from base color
+   * Generates a subtle gradient for visual depth
+   */
+  private createGradientFromColor(colorString: string): string {
+    const parsed = this.parseRgbaColor(colorString);
+    if (!parsed) {
+      // Fallback to default gradient
+      return 'linear-gradient(135deg, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.6) 100%)';
+    }
+
+    // Create gradient with two opacity levels for depth
+    const color1 = `rgba(${parsed.r}, ${parsed.g}, ${parsed.b}, 0.5)`;
+    const color2 = `rgba(${parsed.r}, ${parsed.g}, ${parsed.b}, 0.3)`;
+
+    return `linear-gradient(135deg, ${color1} 0%, ${color2} 100%)`;
+  }
+
+  /**
+   * Determine if color is light or dark (for text contrast)
+   * Uses relative luminance formula
+   */
+  private isLightColor(colorString: string): boolean {
+    const parsed = this.parseRgbaColor(colorString);
+    if (!parsed) return false;
+
+    // Calculate relative luminance
+    const luminance = (0.299 * parsed.r + 0.587 * parsed.g + 0.114 * parsed.b) / 255;
+    return luminance > 0.5;
+  }
+
+  /**
    * Create emoji img element with proper styling
    * SECURITY: Validates URL and creates element programmatically
    */
@@ -416,7 +479,27 @@ export class Renderer {
     const isSuperChat = message.kind === 'superchat' && message.superChat;
     if (isSuperChat && message.superChat) {
       element.classList.add('yt-chat-overlay-message-superchat');
-      element.classList.add(`yt-chat-overlay-superchat-${message.superChat.tier}`);
+
+      // Use actual YouTube colors if available, otherwise fallback to tier-based CSS
+      if (message.superChat.backgroundColor) {
+        // Apply dynamic styling based on actual YouTube colors
+        const bgColor = message.superChat.backgroundColor;
+        const gradient = this.createGradientFromColor(bgColor);
+        const borderColor = this.adjustColorOpacity(bgColor, 0.8);
+
+        element.style.background = gradient;
+        element.style.borderColor = borderColor;
+
+        console.log('[YT Chat Overlay] Using actual YouTube color:', {
+          original: bgColor,
+          gradient,
+          borderColor,
+        });
+      } else {
+        // Fallback to tier-based CSS classes
+        element.classList.add(`yt-chat-overlay-superchat-${message.superChat.tier}`);
+        console.log('[YT Chat Overlay] Using fallback tier color:', message.superChat.tier);
+      }
 
       // Add sticker if available (high-tier Super Chats)
       if (message.superChat.stickerUrl) {
@@ -426,10 +509,31 @@ export class Renderer {
         }
       }
 
-      // Add amount badge
+      // Add amount badge with dynamic or tier-based color
       const amountBadge = document.createElement('span');
       amountBadge.className = 'yt-chat-overlay-superchat-amount';
-      amountBadge.classList.add(`yt-chat-overlay-superchat-amount-${message.superChat.tier}`);
+
+      // Use header background color for badge, or fallback to main background color
+      const badgeColor =
+        message.superChat.headerBackgroundColor || message.superChat.backgroundColor;
+
+      if (badgeColor) {
+        // Apply actual YouTube color to badge
+        amountBadge.style.backgroundColor = badgeColor;
+
+        // Adjust text color based on background brightness
+        const isLight = this.isLightColor(badgeColor);
+        amountBadge.style.color = isLight ? '#000' : '#fff';
+
+        console.log('[YT Chat Overlay] Badge color:', {
+          backgroundColor: badgeColor,
+          textColor: isLight ? '#000' : '#fff',
+        });
+      } else {
+        // Fallback to tier-based CSS class for badge
+        amountBadge.classList.add(`yt-chat-overlay-superchat-amount-${message.superChat.tier}`);
+      }
+
       amountBadge.textContent = message.superChat.amount;
       element.appendChild(amountBadge);
     }
