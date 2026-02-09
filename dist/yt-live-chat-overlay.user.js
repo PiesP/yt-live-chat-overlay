@@ -52,7 +52,7 @@
     }
   };
 
-  const PLAYER_CONTAINER_SELECTORS = [
+  const PLAYER_CONTAINER_SELECTORS$1 = [
     "#movie_player",
     ".html5-video-player",
     "ytd-player",
@@ -491,6 +491,9 @@
       if (!element.tagName.toLowerCase().includes("chat") || !element.querySelector("#message")) {
         return null;
       }
+      if (!this.isUserMessage(element)) {
+        return null;
+      }
       try {
         const messageElement = element.querySelector("#message");
         if (!messageElement) return null;
@@ -524,6 +527,33 @@
         console.warn("[YT Chat Overlay] Failed to parse message:", error);
         return null;
       }
+    }
+    /**
+     * Check if an element represents a user message (not a system message)
+     * System messages don't have authors and use different renderer types
+     */
+    isUserMessage(element) {
+      const authorElement = element.querySelector("#author-name");
+      if (!authorElement || !authorElement.textContent?.trim()) {
+        return false;
+      }
+      const tagName = element.tagName.toLowerCase();
+      const systemMessageTypes = [
+        "placeholder",
+        // "Using live chat replay" / "실시간 채팅 다시보기"
+        "timed-message",
+        // Time-based notifications
+        "viewer-engagement",
+        // Engagement notifications
+        "banner"
+        // System banners
+      ];
+      for (const type of systemMessageTypes) {
+        if (tagName.includes(type)) {
+          return false;
+        }
+      }
+      return true;
     }
     /**
      * Extract author type from badge information
@@ -701,7 +731,7 @@
      */
     async findPlayerContainer() {
       console.log("[YT Chat Overlay] Looking for player container...");
-      const match = await waitForElementMatch(PLAYER_CONTAINER_SELECTORS, {
+      const match = await waitForElementMatch(PLAYER_CONTAINER_SELECTORS$1, {
         attempts: 5,
         intervalMs: 1e3,
         predicate: isVisibleElement
@@ -889,6 +919,7 @@
     messageQueue = [];
     lastProcessTime = 0;
     processedInLastSecond = 0;
+    isPaused = false;
     styleElement = null;
     constructor(overlay, settings) {
       this.overlay = overlay;
@@ -1073,12 +1104,17 @@
         return;
       }
       this.messageQueue.push(message);
-      this.processQueue();
+      if (!this.isPaused) {
+        this.processQueue();
+      }
     }
     /**
      * Process message queue
      */
     processQueue() {
+      if (this.isPaused) {
+        return;
+      }
       while (this.messageQueue.length > 0) {
         if (this.activeMessages.size >= this.settings.maxConcurrentMessages) {
           const oldest = Array.from(this.activeMessages)[0];
@@ -1166,7 +1202,8 @@
         lane: lane.index,
         startTime: now,
         duration,
-        timeoutId
+        timeoutId,
+        animation
       };
       this.activeMessages.add(activeMessage);
       animation.addEventListener(
@@ -1226,6 +1263,62 @@
       this.injectStyles();
     }
     /**
+     * Pause all active animations
+     */
+    pause() {
+      if (this.isPaused) return;
+      console.log("[Renderer] Pausing all animations");
+      this.isPaused = true;
+      this.forEachAnimation((animation) => animation.pause());
+      console.log(`[Renderer] Paused ${this.activeMessages.size} animations`);
+    }
+    /**
+     * Resume all active animations and process queued messages
+     */
+    resume() {
+      if (!this.isPaused) return;
+      console.log("[Renderer] Resuming all animations");
+      this.isPaused = false;
+      this.forEachAnimation((animation) => animation.play());
+      console.log(`[Renderer] Resumed ${this.activeMessages.size} animations`);
+      this.processQueue();
+    }
+    /**
+     * Check if renderer is paused
+     */
+    isPausedState() {
+      return this.isPaused;
+    }
+    /**
+     * Set playback rate for all active animations
+     * Synchronizes animation speed with video playback rate
+     */
+    setPlaybackRate(rate) {
+      if (rate <= 0) {
+        console.warn("[Renderer] Invalid playback rate:", rate);
+        return;
+      }
+      console.log(
+        `[Renderer] Setting playback rate to ${rate}x for ${this.activeMessages.size} animations`
+      );
+      this.forEachAnimation((animation) => {
+        animation.playbackRate = rate;
+      });
+    }
+    /**
+     * Helper method to apply an operation to all active animations
+     * Centralizes animation manipulation logic
+     */
+    forEachAnimation(operation) {
+      for (const active of this.activeMessages) {
+        try {
+          operation(active.animation);
+        } catch (error) {
+          console.warn("[Renderer] Animation operation failed:", error);
+        }
+      }
+    }
+    /**
      * Clear all messages
      */
     clear() {
@@ -1239,6 +1332,7 @@
      * Destroy renderer
      */
     destroy() {
+      this.isPaused = false;
       this.clear();
       if (this.styleElement?.parentNode) {
         this.styleElement.parentNode.removeChild(this.styleElement);
@@ -1354,7 +1448,7 @@
       document.removeEventListener("keydown", this.handleKeydown);
     }
     async findPlayerContainer() {
-      const match = await waitForElementMatch(PLAYER_CONTAINER_SELECTORS, {
+      const match = await waitForElementMatch(PLAYER_CONTAINER_SELECTORS$1, {
         attempts: 5,
         intervalMs: 500,
         predicate: isVisibleElement
@@ -1704,12 +1798,255 @@
     }
   }
 
+  const VIDEO_SELECTORS = [
+    "#movie_player video",
+    ".html5-video-player video",
+    "video.html5-main-video",
+    "video[src]"
+  ];
+  const PLAYER_CONTAINER_SELECTORS = "#movie_player, .html5-video-player";
+  const CONFIG = {
+    /** Number of detection attempts with delay */
+    DETECTION_ATTEMPTS: 5,
+    /** Delay between detection attempts (ms) */
+    DETECTION_INTERVAL_MS: 500,
+    /** Periodic detection interval (ms) */
+    PERIODIC_DETECTION_INTERVAL_MS: 2e3,
+    /** Delay before reinitializing after video replacement (ms) */
+    REINITIALIZATION_DELAY_MS: 1e3,
+    /** Minimum video readyState for acceptance */
+    MIN_READY_STATE: 2
+  };
+  class VideoSync {
+    videoElement = null;
+    callbacks;
+    initialized = false;
+    detectInterval = null;
+    mutationObserver = null;
+    boundHandlers = {
+      pause: () => this.handlePause(),
+      play: () => this.handlePlay(),
+      seeking: () => this.handleSeeking(),
+      ratechange: () => this.handleRateChange()
+    };
+    constructor(callbacks) {
+      this.callbacks = callbacks;
+    }
+    /**
+     * Initialize video synchronization
+     * @returns true if video element found, false if periodic detection started
+     */
+    async init() {
+      const videoElement = await this.detectVideoElement();
+      if (!videoElement) {
+        console.warn("[VideoSync] Video element not found, starting periodic detection");
+        this.startPeriodicDetection();
+        return false;
+      }
+      this.setupVideoElement(videoElement);
+      console.log("[VideoSync] Initialized with video element");
+      return true;
+    }
+    /**
+     * Detect video element in player container
+     * Retries multiple times to handle slow page loads
+     */
+    async detectVideoElement() {
+      const match = await waitForElementMatch(VIDEO_SELECTORS, {
+        attempts: CONFIG.DETECTION_ATTEMPTS,
+        intervalMs: CONFIG.DETECTION_INTERVAL_MS,
+        predicate: this.isVideoReady
+      });
+      if (match) {
+        console.log("[VideoSync] Found video element:", match.selector);
+        return match.element;
+      }
+      return null;
+    }
+    /**
+     * Check if video element is ready for use
+     */
+    isVideoReady(video) {
+      return video.readyState >= CONFIG.MIN_READY_STATE && video.videoWidth > 0;
+    }
+    /**
+     * Setup video element with listeners and observers
+     */
+    setupVideoElement(video) {
+      this.videoElement = video;
+      this.attachListeners();
+      this.observeVideoReplacement();
+      this.initialized = true;
+    }
+    /**
+     * Start periodic detection for video element
+     * Used when video is not immediately available (ads, live stream loading, etc.)
+     */
+    startPeriodicDetection() {
+      if (this.detectInterval !== null) return;
+      this.detectInterval = window.setInterval(() => {
+        if (this.initialized) {
+          this.stopPeriodicDetection();
+          return;
+        }
+        const match = findElementMatch(VIDEO_SELECTORS, {
+          predicate: this.isVideoReady
+        });
+        if (match) {
+          this.setupVideoElement(match.element);
+          this.stopPeriodicDetection();
+          console.log("[VideoSync] Video element detected via periodic check:", match.selector);
+        }
+      }, CONFIG.PERIODIC_DETECTION_INTERVAL_MS);
+      console.log("[VideoSync] Periodic detection started (every 2 seconds)");
+    }
+    /**
+     * Stop periodic detection interval
+     */
+    stopPeriodicDetection() {
+      if (this.detectInterval !== null) {
+        window.clearInterval(this.detectInterval);
+        this.detectInterval = null;
+        console.log("[VideoSync] Periodic detection stopped");
+      }
+    }
+    /**
+     * Attach event listeners to video element
+     */
+    attachListeners() {
+      if (!this.videoElement) return;
+      this.videoElement.addEventListener("pause", this.boundHandlers.pause);
+      this.videoElement.addEventListener("play", this.boundHandlers.play);
+      this.videoElement.addEventListener("seeking", this.boundHandlers.seeking);
+      this.videoElement.addEventListener("ratechange", this.boundHandlers.ratechange);
+      console.log("[VideoSync] Event listeners attached");
+    }
+    /**
+     * Detach event listeners from video element
+     */
+    detachListeners() {
+      if (!this.videoElement) return;
+      this.videoElement.removeEventListener("pause", this.boundHandlers.pause);
+      this.videoElement.removeEventListener("play", this.boundHandlers.play);
+      this.videoElement.removeEventListener("seeking", this.boundHandlers.seeking);
+      this.videoElement.removeEventListener("ratechange", this.boundHandlers.ratechange);
+      console.log("[VideoSync] Event listeners detached");
+    }
+    /**
+     * Observe video element replacement
+     * Detects when video element is removed from DOM (e.g., during ad transitions)
+     */
+    observeVideoReplacement() {
+      if (!this.videoElement) return;
+      const playerContainer = document.querySelector(PLAYER_CONTAINER_SELECTORS);
+      if (!playerContainer) {
+        console.warn("[VideoSync] Player container not found, cannot observe video replacement");
+        return;
+      }
+      this.mutationObserver = new MutationObserver(() => {
+        if (this.videoElement && !document.contains(this.videoElement)) {
+          console.log("[VideoSync] Video element removed from DOM, reinitializing...");
+          this.handleVideoReplacement();
+        }
+      });
+      this.mutationObserver.observe(playerContainer, {
+        childList: true,
+        subtree: true
+      });
+      console.log("[VideoSync] Video replacement observer attached");
+    }
+    /**
+     * Stop observing video replacement
+     */
+    stopObservingReplacement() {
+      if (this.mutationObserver) {
+        this.mutationObserver.disconnect();
+        this.mutationObserver = null;
+        console.log("[VideoSync] Video replacement observer stopped");
+      }
+    }
+    /**
+     * Handle video element replacement
+     * Called when video element is removed from DOM
+     */
+    handleVideoReplacement() {
+      this.cleanup();
+      setTimeout(() => {
+        console.log("[VideoSync] Attempting to reacquire video element...");
+        this.init().catch((error) => {
+          console.warn("[VideoSync] Failed to reinitialize after video replacement:", error);
+        });
+      }, CONFIG.REINITIALIZATION_DELAY_MS);
+    }
+    /**
+     * Clean up video element state
+     */
+    cleanup() {
+      this.detachListeners();
+      this.stopObservingReplacement();
+      this.videoElement = null;
+      this.initialized = false;
+    }
+    /**
+     * Event handlers
+     */
+    handlePause() {
+      console.log("[VideoSync] Video paused");
+      this.callbacks.onPause?.();
+    }
+    handlePlay() {
+      console.log("[VideoSync] Video playing");
+      this.callbacks.onPlay?.();
+    }
+    handleSeeking() {
+      console.log("[VideoSync] Video seeking");
+      this.callbacks.onSeeking?.();
+    }
+    handleRateChange() {
+      const rate = this.videoElement?.playbackRate ?? 1;
+      console.log("[VideoSync] Playback rate changed:", rate);
+      this.callbacks.onRateChange?.(rate);
+    }
+    /**
+     * Public API
+     */
+    /**
+     * Check if video is currently paused
+     * @returns true if paused or video not found, false if playing
+     */
+    isPaused() {
+      return this.videoElement?.paused ?? true;
+    }
+    /**
+     * Get current playback rate
+     * @returns playback rate (1.0 = normal speed), defaults to 1.0 if no video
+     */
+    getPlaybackRate() {
+      return this.videoElement?.playbackRate ?? 1;
+    }
+    /**
+     * Check if video sync is initialized
+     */
+    isInitialized() {
+      return this.initialized;
+    }
+    /**
+     * Destroy and cleanup all resources
+     */
+    destroy() {
+      this.stopPeriodicDetection();
+      this.cleanup();
+      console.log("[VideoSync] Destroyed");
+    }
+  }
+
   class App {
     pageWatcher;
     settings;
     chatSource = null;
     overlay = null;
     _renderer = null;
+    videoSync = null;
     settingsUi;
     isInitialized = false;
     restartTimer = null;
@@ -1756,6 +2093,27 @@
           return;
         }
         this._renderer = new Renderer(this.overlay, currentSettings);
+        this.videoSync = new VideoSync({
+          onPause: () => {
+            if (this._renderer) {
+              this._renderer.pause();
+            }
+          },
+          onPlay: () => {
+            if (this._renderer) {
+              this._renderer.resume();
+            }
+          },
+          onSeeking: () => {
+          },
+          onRateChange: (rate) => {
+            console.log("[App] Video playback rate changed:", rate);
+            if (this._renderer) {
+              this._renderer.setPlaybackRate(rate);
+            }
+          }
+        });
+        await this.videoSync.init();
         this.chatSource = new ChatSource();
         const chatStarted = await this.chatSource.start((message) => {
           if (this._renderer) {
@@ -1915,6 +2273,14 @@
           console.warn("[YT Chat Overlay] Error stopping chat source:", error);
         }
         this.chatSource = null;
+      }
+      if (this.videoSync) {
+        try {
+          this.videoSync.destroy();
+        } catch (error) {
+          console.warn("[YT Chat Overlay] Error destroying video sync:", error);
+        }
+        this.videoSync = null;
       }
       if (this._renderer) {
         try {
