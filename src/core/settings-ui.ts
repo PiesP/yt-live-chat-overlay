@@ -173,6 +173,36 @@ export class SettingsUi {
           background: transparent;
           padding: 0;
         }
+        .yt-chat-overlay-settings-field input[type="checkbox"] {
+          width: 18px;
+          height: 18px;
+          cursor: pointer;
+        }
+        .yt-chat-overlay-settings-field select {
+          padding: 4px 6px;
+          border-radius: 6px;
+          border: 1px solid rgba(255, 255, 255, 0.2);
+          background: rgba(0, 0, 0, 0.4);
+          color: #fff;
+          cursor: pointer;
+        }
+        .yt-chat-overlay-author-grid {
+          display: grid;
+          grid-template-columns: auto 1fr auto;
+          gap: 8px 12px;
+          align-items: center;
+          padding: 8px 0;
+        }
+        .yt-chat-overlay-author-grid-label {
+          font-size: 14px;
+          min-width: 80px;
+        }
+        .yt-chat-overlay-author-grid-color {
+          justify-self: end;
+        }
+        .yt-chat-overlay-author-grid-checkbox {
+          justify-self: end;
+        }
         .yt-chat-overlay-settings-actions {
           display: flex;
           justify-content: flex-end;
@@ -252,37 +282,34 @@ export class SettingsUi {
           <span>Max messages/s</span>
           <input type="number" name="maxMessagesPerSecond" min="1" max="20" step="1" />
         </label>
-        <label class="yt-chat-overlay-settings-field">
-          <span>Show author</span>
-          <select name="showAuthor">
-            <option value="never">Never</option>
-            <option value="important">Important (Super Chats, Mods, Owners)</option>
-            <option value="always">Always</option>
-          </select>
-        </label>
       </div>
       <div class="yt-chat-overlay-settings-section">
-        <div class="yt-chat-overlay-settings-section-title">Colors</div>
-        <label class="yt-chat-overlay-settings-field">
-          <span>Normal</span>
-          <input type="color" name="color-normal" />
-        </label>
-        <label class="yt-chat-overlay-settings-field">
-          <span>Member</span>
-          <input type="color" name="color-member" />
-        </label>
-        <label class="yt-chat-overlay-settings-field">
-          <span>Moderator</span>
-          <input type="color" name="color-moderator" />
-        </label>
-        <label class="yt-chat-overlay-settings-field">
-          <span>Owner</span>
-          <input type="color" name="color-owner" />
-        </label>
-        <label class="yt-chat-overlay-settings-field">
-          <span>Verified</span>
-          <input type="color" name="color-verified" />
-        </label>
+        <div class="yt-chat-overlay-settings-section-title">Author Types (Color & Display)</div>
+        <div class="yt-chat-overlay-author-grid">
+          <span class="yt-chat-overlay-author-grid-label">Normal</span>
+          <input type="color" name="color-normal" class="yt-chat-overlay-author-grid-color" />
+          <input type="checkbox" name="showAuthor-normal" class="yt-chat-overlay-author-grid-checkbox" />
+
+          <span class="yt-chat-overlay-author-grid-label">Member</span>
+          <input type="color" name="color-member" class="yt-chat-overlay-author-grid-color" />
+          <input type="checkbox" name="showAuthor-member" class="yt-chat-overlay-author-grid-checkbox" />
+
+          <span class="yt-chat-overlay-author-grid-label">Moderator</span>
+          <input type="color" name="color-moderator" class="yt-chat-overlay-author-grid-color" />
+          <input type="checkbox" name="showAuthor-moderator" class="yt-chat-overlay-author-grid-checkbox" />
+
+          <span class="yt-chat-overlay-author-grid-label">Owner</span>
+          <input type="color" name="color-owner" class="yt-chat-overlay-author-grid-color" />
+          <input type="checkbox" name="showAuthor-owner" class="yt-chat-overlay-author-grid-checkbox" />
+
+          <span class="yt-chat-overlay-author-grid-label">Verified</span>
+          <input type="color" name="color-verified" class="yt-chat-overlay-author-grid-color" />
+          <input type="checkbox" name="showAuthor-verified" class="yt-chat-overlay-author-grid-checkbox" />
+
+          <span class="yt-chat-overlay-author-grid-label">Super Chat</span>
+          <span></span>
+          <input type="checkbox" name="showAuthor-superChat" class="yt-chat-overlay-author-grid-checkbox" />
+        </div>
       </div>
       <div class="yt-chat-overlay-settings-section">
         <div class="yt-chat-overlay-settings-section-title">Outline</div>
@@ -352,13 +379,19 @@ export class SettingsUi {
     this.setValue('safeBottom', (settings.safeBottom * 100).toFixed(1));
     this.setValue('maxConcurrentMessages', settings.maxConcurrentMessages);
     this.setValue('maxMessagesPerSecond', settings.maxMessagesPerSecond);
-    this.setValue('showAuthor', settings.showAuthor);
 
     this.setValue('color-normal', settings.colors.normal);
     this.setValue('color-member', settings.colors.member);
     this.setValue('color-moderator', settings.colors.moderator);
     this.setValue('color-owner', settings.colors.owner);
     this.setValue('color-verified', settings.colors.verified);
+
+    this.setCheckbox('showAuthor-normal', settings.showAuthor.normal);
+    this.setCheckbox('showAuthor-member', settings.showAuthor.member);
+    this.setCheckbox('showAuthor-moderator', settings.showAuthor.moderator);
+    this.setCheckbox('showAuthor-owner', settings.showAuthor.owner);
+    this.setCheckbox('showAuthor-verified', settings.showAuthor.verified);
+    this.setCheckbox('showAuthor-superChat', settings.showAuthor.superChat);
 
     this.setCheckbox('outline-enabled', settings.outline.enabled);
     this.setValue('outline-widthPx', settings.outline.widthPx);
@@ -389,7 +422,14 @@ export class SettingsUi {
       maxMessagesPerSecond: Math.round(
         clamp(readNumber('maxMessagesPerSecond', current.maxMessagesPerSecond), 1, 20)
       ),
-      showAuthor: this.getSelect('showAuthor', current.showAuthor),
+      showAuthor: {
+        normal: this.getCheckbox('showAuthor-normal', current.showAuthor.normal),
+        member: this.getCheckbox('showAuthor-member', current.showAuthor.member),
+        moderator: this.getCheckbox('showAuthor-moderator', current.showAuthor.moderator),
+        owner: this.getCheckbox('showAuthor-owner', current.showAuthor.owner),
+        verified: this.getCheckbox('showAuthor-verified', current.showAuthor.verified),
+        superChat: this.getCheckbox('showAuthor-superChat', current.showAuthor.superChat),
+      },
       colors: {
         normal: this.getColor('color-normal', current.colors.normal),
         member: this.getColor('color-member', current.colors.member),
@@ -410,11 +450,6 @@ export class SettingsUi {
     return this.modal?.querySelector<HTMLInputElement>(`input[name="${name}"]`) ?? null;
   }
 
-  private getSelect<T extends string>(name: string, fallback: T): T {
-    const select = this.modal?.querySelector<HTMLSelectElement>(`select[name="${name}"]`);
-    return (select?.value as T) || fallback;
-  }
-
   private getCheckbox(name: string, fallback: boolean): boolean {
     const input = this.getInput(name);
     return input ? input.checked : fallback;
@@ -429,11 +464,6 @@ export class SettingsUi {
     const input = this.getInput(name);
     if (input) {
       input.value = String(value);
-    }
-    // Also check for select elements
-    const select = this.modal?.querySelector<HTMLSelectElement>(`select[name="${name}"]`);
-    if (select) {
-      select.value = String(value);
     }
   }
 

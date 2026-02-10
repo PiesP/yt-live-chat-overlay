@@ -8,9 +8,22 @@
 export type AuthorType = 'normal' | 'member' | 'moderator' | 'owner' | 'verified';
 
 /**
- * Author display mode
+ * Author display settings (per author type)
  */
-export type AuthorDisplayMode = 'always' | 'important' | 'never';
+export interface AuthorDisplaySettings {
+  /** Show author for normal users */
+  normal: boolean;
+  /** Show author for members */
+  member: boolean;
+  /** Show author for moderators */
+  moderator: boolean;
+  /** Show author for channel owner */
+  owner: boolean;
+  /** Show author for verified users */
+  verified: boolean;
+  /** Show author for Super Chats */
+  superChat: boolean;
+}
 
 /**
  * Emoji/Emoticon information
@@ -127,8 +140,8 @@ export interface OverlaySettings {
   maxConcurrentMessages: number;
   /** Maximum messages per second */
   maxMessagesPerSecond: number;
-  /** Author display mode */
-  showAuthor: AuthorDisplayMode;
+  /** Author display settings */
+  showAuthor: AuthorDisplaySettings;
   /** Color settings for different author types */
   colors: ColorSettings;
   /** Text outline settings */
@@ -171,7 +184,14 @@ export const DEFAULT_SETTINGS: Readonly<OverlaySettings> = {
   safeBottom: 0.15,
   maxConcurrentMessages: 24,
   maxMessagesPerSecond: 6,
-  showAuthor: 'important', // Show author for Super Chats, moderators, and owners
+  showAuthor: {
+    normal: false,
+    member: false,
+    moderator: true,
+    owner: true,
+    verified: false,
+    superChat: true,
+  },
   colors: {
     normal: '#FFFFFF', // White for normal users
     member: '#0F9D58', // Green for members

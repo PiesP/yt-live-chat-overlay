@@ -433,28 +433,16 @@ export class Renderer {
    * Determine if author should be shown for a message
    */
   private shouldShowAuthor(message: ChatMessage): boolean {
-    const mode = this.settings.showAuthor;
+    const settings = this.settings.showAuthor;
 
-    // Never show
-    if (mode === 'never') {
-      return false;
+    // Check if Super Chat
+    if (message.kind === 'superchat') {
+      return settings.superChat;
     }
 
-    // Always show
-    if (mode === 'always') {
-      return true;
-    }
-
-    // Important only: Super Chats, moderators, and owners
-    if (mode === 'important') {
-      return (
-        message.kind === 'superchat' ||
-        message.authorType === 'moderator' ||
-        message.authorType === 'owner'
-      );
-    }
-
-    return false;
+    // Check author type
+    const authorType = message.authorType || 'normal';
+    return settings[authorType] || false;
   }
 
   /**
