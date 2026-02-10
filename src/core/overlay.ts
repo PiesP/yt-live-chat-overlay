@@ -93,23 +93,19 @@ export class Overlay {
 
     if (width === 0 || height === 0) return;
 
-    // Calculate lane height considering multi-line messages (with author info)
-    // Component heights:
-    // - Author photo: 24px
-    // - Author text: fontSize * 0.85
-    // - Gap: 4px
-    // - Message content: fontSize * 1.2 (line-height)
-    // - Super Chat padding: 16px (8px * 2)
-    // - Safe margin: fontSize * 0.5
-    // Total approximate: fontSize * 2.8 provides good spacing
-    const laneHeight = settings.fontSize * 2.8;
+    // Base lane height for dynamic allocation
+    // Single-line messages (without author) will use 1 lane (~1.4x fontSize)
+    // Two-line messages (with author info) will use 2 lanes (~2.8x fontSize)
+    // This allows more efficient space utilization - approximately 2x more lanes available
+    // The renderer will dynamically allocate multiple lanes based on actual message height
+    const baseLaneHeight = settings.fontSize * 1.4;
     const usableHeight = height * (1 - settings.safeTop - settings.safeBottom);
-    const laneCount = Math.floor(usableHeight / laneHeight);
+    const laneCount = Math.floor(usableHeight / baseLaneHeight);
 
     this.dimensions = {
       width,
       height,
-      laneHeight,
+      laneHeight: baseLaneHeight,
       laneCount: Math.max(1, laneCount),
     };
   }
