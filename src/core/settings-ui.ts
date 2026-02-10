@@ -252,6 +252,14 @@ export class SettingsUi {
           <span>Max messages/s</span>
           <input type="number" name="maxMessagesPerSecond" min="1" max="20" step="1" />
         </label>
+        <label class="yt-chat-overlay-settings-field">
+          <span>Show author</span>
+          <select name="showAuthor">
+            <option value="never">Never</option>
+            <option value="important">Important (Super Chats, Mods, Owners)</option>
+            <option value="always">Always</option>
+          </select>
+        </label>
       </div>
       <div class="yt-chat-overlay-settings-section">
         <div class="yt-chat-overlay-settings-section-title">Colors</div>
@@ -344,6 +352,7 @@ export class SettingsUi {
     this.setValue('safeBottom', (settings.safeBottom * 100).toFixed(1));
     this.setValue('maxConcurrentMessages', settings.maxConcurrentMessages);
     this.setValue('maxMessagesPerSecond', settings.maxMessagesPerSecond);
+    this.setValue('showAuthor', settings.showAuthor);
 
     this.setValue('color-normal', settings.colors.normal);
     this.setValue('color-member', settings.colors.member);
@@ -380,6 +389,7 @@ export class SettingsUi {
       maxMessagesPerSecond: Math.round(
         clamp(readNumber('maxMessagesPerSecond', current.maxMessagesPerSecond), 1, 20)
       ),
+      showAuthor: this.getSelect('showAuthor', current.showAuthor),
       colors: {
         normal: this.getColor('color-normal', current.colors.normal),
         member: this.getColor('color-member', current.colors.member),
@@ -400,6 +410,11 @@ export class SettingsUi {
     return this.modal?.querySelector<HTMLInputElement>(`input[name="${name}"]`) ?? null;
   }
 
+  private getSelect<T extends string>(name: string, fallback: T): T {
+    const select = this.modal?.querySelector<HTMLSelectElement>(`select[name="${name}"]`);
+    return (select?.value as T) || fallback;
+  }
+
   private getCheckbox(name: string, fallback: boolean): boolean {
     const input = this.getInput(name);
     return input ? input.checked : fallback;
@@ -414,6 +429,11 @@ export class SettingsUi {
     const input = this.getInput(name);
     if (input) {
       input.value = String(value);
+    }
+    // Also check for select elements
+    const select = this.modal?.querySelector<HTMLSelectElement>(`select[name="${name}"]`);
+    if (select) {
+      select.value = String(value);
     }
   }
 

@@ -8,6 +8,11 @@
 export type AuthorType = 'normal' | 'member' | 'moderator' | 'owner' | 'verified';
 
 /**
+ * Author display mode
+ */
+export type AuthorDisplayMode = 'always' | 'important' | 'never';
+
+/**
  * Emoji/Emoticon information
  */
 export interface EmojiInfo {
@@ -66,6 +71,8 @@ export interface ChatMessage {
   author?: string;
   /** Author type classification */
   authorType?: AuthorType;
+  /** Author photo URL (sanitized, YouTube CDN only) */
+  authorPhotoUrl?: string;
   /** Super Chat information (only for kind='superchat') */
   superChat?: SuperChatInfo;
 }
@@ -120,6 +127,8 @@ export interface OverlaySettings {
   maxConcurrentMessages: number;
   /** Maximum messages per second */
   maxMessagesPerSecond: number;
+  /** Author display mode */
+  showAuthor: AuthorDisplayMode;
   /** Color settings for different author types */
   colors: ColorSettings;
   /** Text outline settings */
@@ -162,6 +171,7 @@ export const DEFAULT_SETTINGS: Readonly<OverlaySettings> = {
   safeBottom: 0.15,
   maxConcurrentMessages: 24,
   maxMessagesPerSecond: 6,
+  showAuthor: 'important', // Show author for Super Chats, moderators, and owners
   colors: {
     normal: '#FFFFFF', // White for normal users
     member: '#0F9D58', // Green for members

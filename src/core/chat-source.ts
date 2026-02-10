@@ -563,6 +563,7 @@ export class ChatSource {
       // Extract author information
       const authorType = this.extractAuthorType(element);
       const authorName = this.extractAuthorName(element);
+      const authorPhotoUrl = this.extractAuthorPhotoUrl(element);
 
       const message: ChatMessage = {
         text,
@@ -581,6 +582,9 @@ export class ChatSource {
       }
       if (authorType) {
         message.authorType = authorType;
+      }
+      if (authorPhotoUrl) {
+        message.authorPhotoUrl = authorPhotoUrl;
       }
 
       // Parse Super Chat specific data
@@ -681,6 +685,35 @@ export class ChatSource {
       '#author-name, yt-live-chat-author-chip #author-name'
     );
     return authorElement?.textContent?.trim();
+  }
+
+  /**
+   * Extract author photo URL
+   */
+  private extractAuthorPhotoUrl(element: Element): string | undefined {
+    // Try multiple selectors for author photo
+    const authorPhotoElement = element.querySelector<HTMLImageElement>(
+      '#author-photo img, yt-live-chat-author-chip #author-photo img, #img'
+    );
+
+    if (!authorPhotoElement) {
+      return undefined;
+    }
+
+    // Get image URL (prefer src, fallback to srcset)
+    const photoUrl = authorPhotoElement.src || authorPhotoElement.getAttribute('src');
+
+    if (!photoUrl) {
+      return undefined;
+    }
+
+    // Validate URL for security
+    if (!this.isValidImageUrl(photoUrl)) {
+      console.warn('[YT Chat Overlay] Invalid author photo URL:', photoUrl);
+      return undefined;
+    }
+
+    return photoUrl;
   }
 
   /**
