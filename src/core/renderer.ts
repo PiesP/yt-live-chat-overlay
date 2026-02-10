@@ -54,6 +54,7 @@ export class Renderer {
       lastItemExitTime: 0,
       lastItemStartTime: 0,
       lastItemWidthPx: 0,
+      lastItemHeightPx: 0,
     }));
   }
 
@@ -655,32 +656,40 @@ export class Renderer {
       element.style.color = this.settings.colors[authorType];
     }
 
-    // Find available lane
-    const lane = this.findAvailableLane();
+    // Add to container temporarily to measure dimensions
+    element.style.visibility = 'hidden';
+    element.style.left = `${dimensions.width}px`;
+    element.style.top = '0px';
+    container.appendChild(element);
+
+    // Measure actual message dimensions
+    const textWidth = element.offsetWidth;
+    const messageHeight = element.offsetHeight;
+
+    // Find available lane based on message height
+    const lane = this.findAvailableLane(messageHeight);
     if (lane === null) {
       // No available lane, drop message
       console.log('[YT Chat Overlay] No available lane, dropping message');
+      container.removeChild(element);
       return;
     }
 
-    // Position element (start from right edge, off-screen)
+    // Position element at the assigned lane
     const laneY = dimensions.height * this.settings.safeTop + lane.index * dimensions.laneHeight;
     element.style.top = `${laneY}px`;
-    element.style.left = `${dimensions.width}px`;
-
-    // Add to container (temporarily to measure width)
-    container.appendChild(element);
-
-    // Calculate animation duration (same for all messages)
-    const textWidth = element.offsetWidth;
-    const exitPadding = Math.max(fontSize * 2, 80);
+    element.style.visibility = 'visible';
+    // Calculate animation duration and padding
+    const exitPadding = Math.max(fontSize * 3, 100); // Increased for smoother exit
     const distance = dimensions.width + textWidth + exitPadding;
 
+    // Optimized duration: 5-12 seconds range for better pacing
     const duration = Math.max(
-      4000,
-      Math.min(14000, (distance / this.settings.speedPxPerSec) * 1000)
+      5000,
+      Math.min(12000, (distance / this.settings.speedPxPerSec) * 1000)
     );
-    const laneDelay = (lane.index % 3) * 80;
+    // Staggered lane delay for visual variety
+    const laneDelay = (lane.index % 4) * 100;
     const totalDuration = duration + laneDelay;
 
     // Use Web Animations API for dynamic animation
@@ -706,6 +715,7 @@ export class Renderer {
       color: isSuperChat ? 'tier-based' : this.settings.colors[message.authorType || 'normal'],
       lane: lane.index,
       width: textWidth,
+      height: messageHeight,
       distance,
       duration,
       delay: laneDelay,
@@ -713,11 +723,12 @@ export class Renderer {
       dimensions,
     });
 
-    // Update lane state
+    // Update lane state with message dimensions
     const now = Date.now();
     lane.lastItemStartTime = now + laneDelay;
     lane.lastItemExitTime = now + totalDuration;
     lane.lastItemWidthPx = textWidth;
+    lane.lastItemHeightPx = messageHeight;
 
     // Setup cleanup timeout (duration + buffer)
     const timeoutId = window.setTimeout(() => {
@@ -747,30 +758,79 @@ export class Renderer {
 
   /**
    * Find available lane (collision avoidance)
+   * Considers both horizontal and vertical collision
    */
-  private findAvailableLane(): LaneState | null {
+  private findAvailableLane(messageHeight: number): LaneState | null {
     const now = Date.now();
     const dimensions = this.overlay.getDimensions();
     if (!dimensions) return null;
 
-    for (const lane of this.lanes) {
-      if (lane.lastItemStartTime === 0) {
-        return lane;
+    // Calculate how many lanes this message needs based on its height
+    const requiredLanes = Math.ceil(messageHeight / dimensions.laneHeight);
+
+    for (let i = 0; i <= this.lanes.length - requiredLanes; i++) {
+      const primaryLane = this.lanes[i];
+
+      // Check if primary lane is available (horizontal collision check)
+      if (primaryLane && primaryLane.lastItemStartTime === 0) {
+        // Check vertical space availability for adjacent lanes if needed
+        if (requiredLanes > 1 && !this.checkVerticalSpace(i, requiredLanes)) {
+          continue;
+        }
+        return primaryLane;
       }
 
-      const minSafeDistance = Math.max(this.settings.fontSize * 1.2, 60);
-      const requiredGapPx = Math.max(lane.lastItemWidthPx, minSafeDistance) + minSafeDistance;
-      const safeTimeGap = (requiredGapPx / this.settings.speedPxPerSec) * 1000;
+      // Calculate safe time gap for horizontal collision avoidance
+      if (primaryLane) {
+        // Dynamic safe distance based on message type and font size
+        const baseSafeDistance = this.settings.fontSize * 2;
+        const minSafeDistance = Math.max(baseSafeDistance, 100);
+        const requiredGapPx =
+          Math.max(primaryLane.lastItemWidthPx, minSafeDistance) + minSafeDistance;
+        const safeTimeGap = (requiredGapPx / this.settings.speedPxPerSec) * 1000;
 
-      // Check if enough time has passed since last message started
-      const timeSinceLastStart = now - lane.lastItemStartTime;
+        // Check if enough time has passed since last message started
+        const timeSinceLastStart = now - primaryLane.lastItemStartTime;
 
-      if (timeSinceLastStart >= safeTimeGap) {
-        return lane;
+        if (timeSinceLastStart >= safeTimeGap) {
+          // Check vertical space availability for adjacent lanes if needed
+          if (requiredLanes > 1 && !this.checkVerticalSpace(i, requiredLanes)) {
+            continue;
+          }
+          return primaryLane;
+        }
       }
     }
 
     return null; // No available lane
+  }
+
+  /**
+   * Check if vertical space is available for multi-lane messages
+   */
+  private checkVerticalSpace(startLaneIndex: number, requiredLanes: number): boolean {
+    const now = Date.now();
+
+    for (let i = startLaneIndex; i < startLaneIndex + requiredLanes && i < this.lanes.length; i++) {
+      const lane = this.lanes[i];
+      if (!lane) return false;
+
+      // Skip the primary lane (already checked)
+      if (i === startLaneIndex) continue;
+
+      // Check if adjacent lane is clear or will be clear soon
+      if (lane.lastItemStartTime > 0) {
+        const timeSinceLastStart = now - lane.lastItemStartTime;
+        // Shorter clear time for better space utilization
+        const minClearTime = 800; // 0.8 seconds
+
+        if (timeSinceLastStart < minClearTime) {
+          return false;
+        }
+      }
+    }
+
+    return true;
   }
 
   /**

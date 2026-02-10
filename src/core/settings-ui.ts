@@ -256,31 +256,31 @@ export class SettingsUi {
         </label>
         <label class="yt-chat-overlay-settings-field">
           <span>Speed (px/s)</span>
-          <input type="number" name="speedPxPerSec" min="120" max="500" step="5" />
+          <input type="number" name="speedPxPerSec" min="100" max="400" step="10" />
         </label>
         <label class="yt-chat-overlay-settings-field">
           <span>Font size (px)</span>
-          <input type="number" name="fontSize" min="16" max="48" step="1" />
+          <input type="number" name="fontSize" min="18" max="40" step="2" />
         </label>
         <label class="yt-chat-overlay-settings-field">
           <span>Opacity</span>
-          <input type="number" name="opacity" min="0.4" max="1" step="0.02" />
+          <input type="number" name="opacity" min="0.5" max="1" step="0.05" />
         </label>
         <label class="yt-chat-overlay-settings-field">
           <span>Safe top (%)</span>
-          <input type="number" name="safeTop" min="0" max="30" step="0.5" />
+          <input type="number" name="safeTop" min="0" max="25" step="1" />
         </label>
         <label class="yt-chat-overlay-settings-field">
           <span>Safe bottom (%)</span>
-          <input type="number" name="safeBottom" min="0" max="30" step="0.5" />
+          <input type="number" name="safeBottom" min="0" max="25" step="1" />
         </label>
         <label class="yt-chat-overlay-settings-field">
           <span>Max concurrent</span>
-          <input type="number" name="maxConcurrentMessages" min="5" max="60" step="1" />
+          <input type="number" name="maxConcurrentMessages" min="10" max="50" step="5" />
         </label>
         <label class="yt-chat-overlay-settings-field">
           <span>Max messages/s</span>
-          <input type="number" name="maxMessagesPerSecond" min="1" max="20" step="1" />
+          <input type="number" name="maxMessagesPerSecond" min="2" max="15" step="1" />
         </label>
       </div>
       <div class="yt-chat-overlay-settings-section">
@@ -319,15 +319,15 @@ export class SettingsUi {
         </label>
         <label class="yt-chat-overlay-settings-field">
           <span>Width (px)</span>
-          <input type="number" name="outline-widthPx" min="0" max="6" step="0.5" />
+          <input type="number" name="outline-widthPx" min="0" max="5" step="0.5" />
         </label>
         <label class="yt-chat-overlay-settings-field">
           <span>Blur (px)</span>
-          <input type="number" name="outline-blurPx" min="0" max="10" step="0.5" />
+          <input type="number" name="outline-blurPx" min="0" max="8" step="0.5" />
         </label>
         <label class="yt-chat-overlay-settings-field">
           <span>Opacity</span>
-          <input type="number" name="outline-opacity" min="0" max="1" step="0.05" />
+          <input type="number" name="outline-opacity" min="0" max="1" step="0.1" />
         </label>
       </div>
       <div class="yt-chat-overlay-settings-actions">
@@ -411,16 +411,16 @@ export class SettingsUi {
 
     return {
       enabled: this.getCheckbox('enabled', current.enabled),
-      speedPxPerSec: clamp(readNumber('speedPxPerSec', current.speedPxPerSec), 120, 500),
-      fontSize: clamp(readNumber('fontSize', current.fontSize), 16, 48),
-      opacity: clamp(readNumber('opacity', current.opacity), 0.4, 1),
-      safeTop: clamp(readNumber('safeTop', current.safeTop * 100), 0, 30) / 100,
-      safeBottom: clamp(readNumber('safeBottom', current.safeBottom * 100), 0, 30) / 100,
+      speedPxPerSec: clamp(readNumber('speedPxPerSec', current.speedPxPerSec), 100, 400),
+      fontSize: clamp(readNumber('fontSize', current.fontSize), 18, 40),
+      opacity: clamp(readNumber('opacity', current.opacity), 0.5, 1),
+      safeTop: clamp(readNumber('safeTop', current.safeTop * 100), 0, 25) / 100,
+      safeBottom: clamp(readNumber('safeBottom', current.safeBottom * 100), 0, 25) / 100,
       maxConcurrentMessages: Math.round(
-        clamp(readNumber('maxConcurrentMessages', current.maxConcurrentMessages), 5, 60)
+        clamp(readNumber('maxConcurrentMessages', current.maxConcurrentMessages), 10, 50)
       ),
       maxMessagesPerSecond: Math.round(
-        clamp(readNumber('maxMessagesPerSecond', current.maxMessagesPerSecond), 1, 20)
+        clamp(readNumber('maxMessagesPerSecond', current.maxMessagesPerSecond), 2, 15)
       ),
       showAuthor: {
         normal: this.getCheckbox('showAuthor-normal', current.showAuthor.normal),
@@ -439,8 +439,8 @@ export class SettingsUi {
       },
       outline: {
         enabled: this.getCheckbox('outline-enabled', current.outline.enabled),
-        widthPx: clamp(readNumber('outline-widthPx', current.outline.widthPx), 0, 6),
-        blurPx: clamp(readNumber('outline-blurPx', current.outline.blurPx), 0, 10),
+        widthPx: clamp(readNumber('outline-widthPx', current.outline.widthPx), 0, 5),
+        blurPx: clamp(readNumber('outline-blurPx', current.outline.blurPx), 0, 8),
         opacity: clamp(readNumber('outline-opacity', current.outline.opacity), 0, 1),
       },
     };

@@ -93,7 +93,16 @@ export class Overlay {
 
     if (width === 0 || height === 0) return;
 
-    const laneHeight = settings.fontSize * 1.6;
+    // Calculate lane height considering multi-line messages (with author info)
+    // Component heights:
+    // - Author photo: 24px
+    // - Author text: fontSize * 0.85
+    // - Gap: 4px
+    // - Message content: fontSize * 1.2 (line-height)
+    // - Super Chat padding: 16px (8px * 2)
+    // - Safe margin: fontSize * 0.5
+    // Total approximate: fontSize * 2.8 provides good spacing
+    const laneHeight = settings.fontSize * 2.8;
     const usableHeight = height * (1 - settings.safeTop - settings.safeBottom);
     const laneCount = Math.floor(usableHeight / laneHeight);
 

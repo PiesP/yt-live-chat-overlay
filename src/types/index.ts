@@ -160,6 +160,8 @@ export interface LaneState {
   lastItemStartTime: number;
   /** Last item width in pixels */
   lastItemWidthPx: number;
+  /** Last item height in pixels */
+  lastItemHeightPx: number;
 }
 
 /**
@@ -177,13 +179,13 @@ export interface OverlayDimensions {
  */
 export const DEFAULT_SETTINGS: Readonly<OverlaySettings> = {
   enabled: true,
-  speedPxPerSec: 240,
-  fontSize: 26,
-  opacity: 0.92,
-  safeTop: 0.08,
-  safeBottom: 0.15,
-  maxConcurrentMessages: 24,
-  maxMessagesPerSecond: 6,
+  speedPxPerSec: 200, // Slightly slower for better readability with multi-line messages
+  fontSize: 24, // Slightly smaller for better space utilization
+  opacity: 0.95, // Slightly more opaque for better visibility
+  safeTop: 0.1, // 10% - increased for better clearance from top UI elements
+  safeBottom: 0.12, // 12% - reduced since we handle multi-line messages better
+  maxConcurrentMessages: 30, // Increased thanks to improved collision detection
+  maxMessagesPerSecond: 8, // Increased for busier chats
   showAuthor: {
     normal: false,
     member: false,
@@ -201,8 +203,8 @@ export const DEFAULT_SETTINGS: Readonly<OverlaySettings> = {
   },
   outline: {
     enabled: true,
-    widthPx: 1,
-    blurPx: 1,
-    opacity: 0.5,
+    widthPx: 1.5, // Slightly thicker for better contrast
+    blurPx: 2, // Increased blur for better glow effect
+    opacity: 0.7, // Increased opacity for better visibility
   },
 };
