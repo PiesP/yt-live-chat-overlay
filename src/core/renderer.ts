@@ -11,7 +11,9 @@ import type {
   EmojiInfo,
   LaneState,
   OutlineSettings,
+  OverlayDimensions,
   OverlaySettings,
+  SuperChatInfo,
 } from '@app-types';
 import type { Overlay } from './overlay';
 
@@ -23,6 +25,39 @@ interface ActiveMessage {
   timeoutId: number;
   animation: Animation;
 }
+
+/**
+ * Layout and styling constants
+ */
+const LAYOUT = {
+  // Author display
+  AUTHOR_PHOTO_SIZE: 24, // px
+  AUTHOR_FONT_SCALE: 0.85, // relative to base fontSize
+  AUTHOR_CONTENT_GAP: 4, // px
+
+  // Emoji sizing
+  EMOJI_SIZE_STANDARD: 1.2, // relative to base fontSize
+  EMOJI_SIZE_MEMBER: 1.4, // relative to base fontSize
+
+  // Super Chat
+  SUPERCHAT_PADDING: 8, // px (vertical and horizontal)
+  SUPERCHAT_STICKER_SIZE: 2.0, // relative to base fontSize
+  SUPERCHAT_BORDER_WIDTH: 3, // px
+
+  // Animation
+  EXIT_PADDING_MIN: 100, // px
+  EXIT_PADDING_SCALE: 3, // relative to fontSize
+  DURATION_MIN: 5000, // ms
+  DURATION_MAX: 12000, // ms
+  LANE_DELAY_CYCLE: 4, // number of lanes before repeating delay pattern
+  LANE_DELAY_MS: 100, // ms per lane cycle
+  CLEANUP_BUFFER: 2000, // ms
+
+  // Collision detection
+  SAFE_DISTANCE_SCALE: 2, // relative to fontSize
+  SAFE_DISTANCE_MIN: 100, // px
+  VERTICAL_CLEAR_TIME: 800, // ms
+} as const;
 
 export class Renderer {
   private overlay: Overlay;
@@ -93,7 +128,7 @@ export class Renderer {
       .yt-chat-overlay-message-with-author {
         display: flex;
         flex-direction: column;
-        gap: 4px;
+        gap: ${LAYOUT.AUTHOR_CONTENT_GAP}px;
       }
 
       /* Author info line */
@@ -101,14 +136,14 @@ export class Renderer {
         display: flex;
         align-items: center;
         gap: 8px;
-        font-size: 0.85em;
+        font-size: ${LAYOUT.AUTHOR_FONT_SCALE}em;
         opacity: 0.95;
       }
 
       /* Author photo */
       .yt-chat-overlay-author-photo {
-        width: 24px;
-        height: 24px;
+        width: ${LAYOUT.AUTHOR_PHOTO_SIZE}px;
+        height: ${LAYOUT.AUTHOR_PHOTO_SIZE}px;
         border-radius: 50%;
         flex-shrink: 0;
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
@@ -126,11 +161,11 @@ export class Renderer {
 
       /* Super Chat styling */
       .yt-chat-overlay-message-superchat {
-        padding: 8px 16px;
+        padding: ${LAYOUT.SUPERCHAT_PADDING}px ${LAYOUT.SUPERCHAT_PADDING * 2}px;
         border-radius: 8px;
         background: rgba(0, 0, 0, 0.4);
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
-        border: 3px solid rgba(255, 255, 255, 0.9);
+        border: ${LAYOUT.SUPERCHAT_BORDER_WIDTH}px solid rgba(255, 255, 255, 0.9);
       }
 
       /* Super Chat amount badge */
@@ -272,6 +307,44 @@ export class Renderer {
   }
 
   /**
+   * Create a validated image element with error handling
+   * Common helper for emoji, stickers, and author photos
+   * SECURITY: Validates URL and creates element programmatically
+   */
+  private createImageElement(
+    url: string,
+    alt: string,
+    className: string,
+    sizePx: number
+  ): HTMLImageElement | null {
+    // Validate URL (defense in depth)
+    if (!this.isValidImageUrl(url)) {
+      console.warn('[YT Chat Overlay] Invalid image URL:', url);
+      return null;
+    }
+
+    const img = document.createElement('img');
+    img.src = url;
+    img.alt = alt;
+    img.className = className;
+    img.style.height = `${sizePx}px`;
+    img.style.width = 'auto'; // Maintain aspect ratio
+    img.draggable = false;
+
+    // Error handling: hide on load failure
+    img.addEventListener(
+      'error',
+      () => {
+        img.style.display = 'none';
+        console.warn('[YT Chat Overlay] Failed to load image:', url);
+      },
+      { once: true }
+    );
+
+    return img;
+  }
+
+  /**
    * Parse RGB/RGBA color string to components
    * Handles formats: "rgb(r, g, b)" or "rgba(r, g, b, a)"
    */
@@ -325,51 +398,29 @@ export class Renderer {
    * SECURITY: Validates URL and creates element programmatically
    */
   private createEmojiElement(emoji: EmojiInfo): HTMLImageElement | null {
-    // Re-validate URL (defense in depth)
-    if (!this.isValidImageUrl(emoji.url)) {
-      console.warn('[YT Chat Overlay] Invalid emoji URL:', emoji.url);
-      return null;
-    }
-
-    const img = document.createElement('img');
-
-    // Set source (validated)
-    img.src = emoji.url;
-
-    // Set alt text (textContent, safe)
-    img.alt = emoji.alt || '';
-
-    // Apply styling
-    img.className = 'yt-chat-overlay-emoji';
-    img.style.display = 'inline-block';
-    img.style.verticalAlign = 'text-bottom';
-
-    // Size emoji relative to font size
-    // Standard emoji: 1.2em (slightly larger than text)
-    // Member emoji: 1.4em (more prominent)
-    const sizeFactor = emoji.type === 'member' ? 1.4 : 1.2;
+    // Calculate size relative to font size
+    const sizeFactor =
+      emoji.type === 'member' ? LAYOUT.EMOJI_SIZE_MEMBER : LAYOUT.EMOJI_SIZE_STANDARD;
     const emojiSize = this.settings.fontSize * sizeFactor;
 
-    img.style.height = `${emojiSize}px`;
-    img.style.width = 'auto'; // Maintain aspect ratio
+    // Create image element using common helper
+    const img = this.createImageElement(
+      emoji.url,
+      emoji.alt || '',
+      'yt-chat-overlay-emoji',
+      emojiSize
+    );
+
+    if (!img) return null;
+
+    // Apply emoji-specific styling
+    img.style.display = 'inline-block';
+    img.style.verticalAlign = 'text-bottom';
 
     // Add special styling for member emojis
     if (emoji.type === 'member') {
       img.classList.add('yt-chat-overlay-emoji-member');
     }
-
-    // Error handling: hide on load failure
-    img.addEventListener(
-      'error',
-      () => {
-        img.style.display = 'none';
-        console.warn('[YT Chat Overlay] Failed to load emoji:', emoji.url);
-      },
-      { once: true }
-    );
-
-    // Prevent dragging
-    img.draggable = false;
 
     return img;
   }
@@ -379,35 +430,16 @@ export class Renderer {
    * SECURITY: Validates URL and creates element programmatically
    */
   private createSuperChatSticker(stickerUrl: string): HTMLImageElement | null {
-    // Validate URL (defense in depth)
-    if (!this.isValidImageUrl(stickerUrl)) {
-      console.warn('[YT Chat Overlay] Invalid Super Chat sticker URL:', stickerUrl);
-      return null;
-    }
+    // Calculate size relative to font size
+    const stickerSize = this.settings.fontSize * LAYOUT.SUPERCHAT_STICKER_SIZE;
 
-    const img = document.createElement('img');
-    img.src = stickerUrl;
-    img.alt = 'Super Chat Sticker';
-    img.className = 'yt-chat-overlay-superchat-sticker';
-
-    // Size sticker relative to font size (larger than emoji)
-    const stickerSize = this.settings.fontSize * 2.0;
-    img.style.height = `${stickerSize}px`;
-    img.style.width = 'auto';
-
-    // Error handling: hide on load failure
-    img.addEventListener(
-      'error',
-      () => {
-        img.style.display = 'none';
-        console.warn('[YT Chat Overlay] Failed to load Super Chat sticker:', stickerUrl);
-      },
-      { once: true }
+    // Create image element using common helper
+    return this.createImageElement(
+      stickerUrl,
+      'Super Chat Sticker',
+      'yt-chat-overlay-superchat-sticker',
+      stickerSize
     );
-
-    img.draggable = false;
-
-    return img;
   }
 
   /**
@@ -455,23 +487,17 @@ export class Renderer {
     authorInfoDiv.className = 'yt-chat-overlay-author-info';
 
     // Add author photo if available
-    if (message.authorPhotoUrl && this.isValidImageUrl(message.authorPhotoUrl)) {
-      const photoImg = document.createElement('img');
-      photoImg.src = message.authorPhotoUrl;
-      photoImg.alt = message.author || 'Author';
-      photoImg.className = 'yt-chat-overlay-author-photo';
-      photoImg.draggable = false;
-
-      // Error handling: hide on load failure
-      photoImg.addEventListener(
-        'error',
-        () => {
-          photoImg.style.display = 'none';
-        },
-        { once: true }
+    if (message.authorPhotoUrl) {
+      const photoImg = this.createImageElement(
+        message.authorPhotoUrl,
+        message.author || 'Author',
+        'yt-chat-overlay-author-photo',
+        LAYOUT.AUTHOR_PHOTO_SIZE
       );
 
-      authorInfoDiv.appendChild(photoImg);
+      if (photoImg) {
+        authorInfoDiv.appendChild(photoImg);
+      }
     }
 
     // Add author name
@@ -488,6 +514,142 @@ export class Renderer {
     }
 
     return authorInfoDiv;
+  }
+
+  /**
+   * Apply Super Chat styling and add Super Chat elements
+   */
+  private applySuperChatStyling(element: HTMLDivElement, superChat: SuperChatInfo): void {
+    element.classList.add('yt-chat-overlay-message-superchat');
+
+    // Use actual YouTube colors if available, otherwise fallback to tier-based CSS
+    if (superChat.backgroundColor) {
+      const bgColor = superChat.backgroundColor;
+      const semiTransparentBg = this.createSemiTransparentBackground(bgColor);
+      const borderColor = bgColor; // Use original color for border (solid)
+
+      element.style.background = semiTransparentBg;
+      element.style.borderColor = borderColor;
+
+      console.log('[YT Chat Overlay] Using actual YouTube color:', {
+        original: bgColor,
+        background: semiTransparentBg,
+        borderColor,
+      });
+    } else {
+      // Fallback to tier-based CSS classes
+      element.classList.add(`yt-chat-overlay-superchat-${superChat.tier}`);
+      console.log('[YT Chat Overlay] Using fallback tier color:', superChat.tier);
+    }
+
+    // Add sticker if available (high-tier Super Chats)
+    if (superChat.stickerUrl) {
+      const stickerImg = this.createSuperChatSticker(superChat.stickerUrl);
+      if (stickerImg) {
+        element.appendChild(stickerImg);
+      }
+    }
+
+    // Add amount badge with dynamic or tier-based color
+    const amountBadge = document.createElement('span');
+    amountBadge.className = 'yt-chat-overlay-superchat-amount';
+
+    // Use header background color for badge, or fallback to main background color
+    const badgeColor = superChat.headerBackgroundColor || superChat.backgroundColor;
+
+    if (badgeColor) {
+      // Apply actual YouTube color to badge
+      amountBadge.style.backgroundColor = badgeColor;
+
+      // Adjust text color based on background brightness
+      const isLight = this.isLightColor(badgeColor);
+      amountBadge.style.color = isLight ? '#000' : '#fff';
+
+      console.log('[YT Chat Overlay] Badge color:', {
+        backgroundColor: badgeColor,
+        textColor: isLight ? '#000' : '#fff',
+      });
+    } else {
+      // Fallback to tier-based CSS class for badge
+      amountBadge.classList.add(`yt-chat-overlay-superchat-amount-${superChat.tier}`);
+    }
+
+    amountBadge.textContent = superChat.amount;
+    element.appendChild(amountBadge);
+  }
+
+  /**
+   * Setup animation and positioning for a message element
+   * Returns ActiveMessage object for tracking
+   */
+  private setupMessageAnimation(
+    element: HTMLDivElement,
+    lane: LaneState,
+    textWidth: number,
+    messageHeight: number,
+    dimensions: OverlayDimensions
+  ): ActiveMessage {
+    const fontSize = this.settings.fontSize;
+
+    // Position element at the assigned lane
+    const laneY = dimensions.height * this.settings.safeTop + lane.index * dimensions.laneHeight;
+    element.style.top = `${laneY}px`;
+    element.style.visibility = 'visible';
+
+    // Calculate animation duration and padding
+    const exitPadding = Math.max(fontSize * LAYOUT.EXIT_PADDING_SCALE, LAYOUT.EXIT_PADDING_MIN);
+    const distance = dimensions.width + textWidth + exitPadding;
+
+    // Optimized duration for better pacing
+    const duration = Math.max(
+      LAYOUT.DURATION_MIN,
+      Math.min(LAYOUT.DURATION_MAX, (distance / this.settings.speedPxPerSec) * 1000)
+    );
+
+    // Staggered lane delay for visual variety
+    const laneDelay = (lane.index % LAYOUT.LANE_DELAY_CYCLE) * LAYOUT.LANE_DELAY_MS;
+    const totalDuration = duration + laneDelay;
+
+    // Create Web Animation
+    const animation = element.animate(
+      [{ transform: 'translateX(0)' }, { transform: `translateX(-${distance}px)` }],
+      {
+        duration,
+        delay: laneDelay,
+        easing: 'linear',
+        fill: 'forwards',
+      }
+    );
+
+    // Update lane state with message dimensions
+    const now = Date.now();
+    lane.lastItemStartTime = now + laneDelay;
+    lane.lastItemExitTime = now + totalDuration;
+    lane.lastItemWidthPx = textWidth;
+    lane.lastItemHeightPx = messageHeight;
+
+    // Setup cleanup timeout
+    const timeoutId = window.setTimeout(() => {
+      this.removeMessageByElement(element);
+    }, totalDuration + LAYOUT.CLEANUP_BUFFER);
+
+    // Auto-remove on animation end
+    animation.addEventListener(
+      'finish',
+      () => {
+        this.removeMessageByElement(element);
+      },
+      { once: true }
+    );
+
+    return {
+      element,
+      lane: lane.index,
+      startTime: now,
+      duration,
+      timeoutId,
+      animation,
+    };
   }
 
   /**
@@ -566,64 +728,7 @@ export class Renderer {
     // Apply Super Chat styling if applicable
     const isSuperChat = message.kind === 'superchat' && message.superChat;
     if (isSuperChat && message.superChat) {
-      element.classList.add('yt-chat-overlay-message-superchat');
-
-      // Use actual YouTube colors if available, otherwise fallback to tier-based CSS
-      if (message.superChat.backgroundColor) {
-        // Apply dynamic styling based on actual YouTube colors
-        const bgColor = message.superChat.backgroundColor;
-        const semiTransparentBg = this.createSemiTransparentBackground(bgColor);
-        const borderColor = bgColor; // Use original color for border (solid)
-
-        element.style.background = semiTransparentBg;
-        element.style.borderColor = borderColor;
-
-        console.log('[YT Chat Overlay] Using actual YouTube color:', {
-          original: bgColor,
-          background: semiTransparentBg,
-          borderColor,
-        });
-      } else {
-        // Fallback to tier-based CSS classes
-        element.classList.add(`yt-chat-overlay-superchat-${message.superChat.tier}`);
-        console.log('[YT Chat Overlay] Using fallback tier color:', message.superChat.tier);
-      }
-
-      // Add sticker if available (high-tier Super Chats)
-      if (message.superChat.stickerUrl) {
-        const stickerImg = this.createSuperChatSticker(message.superChat.stickerUrl);
-        if (stickerImg) {
-          element.appendChild(stickerImg);
-        }
-      }
-
-      // Add amount badge with dynamic or tier-based color
-      const amountBadge = document.createElement('span');
-      amountBadge.className = 'yt-chat-overlay-superchat-amount';
-
-      // Use header background color for badge, or fallback to main background color
-      const badgeColor =
-        message.superChat.headerBackgroundColor || message.superChat.backgroundColor;
-
-      if (badgeColor) {
-        // Apply actual YouTube color to badge
-        amountBadge.style.backgroundColor = badgeColor;
-
-        // Adjust text color based on background brightness
-        const isLight = this.isLightColor(badgeColor);
-        amountBadge.style.color = isLight ? '#000' : '#fff';
-
-        console.log('[YT Chat Overlay] Badge color:', {
-          backgroundColor: badgeColor,
-          textColor: isLight ? '#000' : '#fff',
-        });
-      } else {
-        // Fallback to tier-based CSS class for badge
-        amountBadge.classList.add(`yt-chat-overlay-superchat-amount-${message.superChat.tier}`);
-      }
-
-      amountBadge.textContent = message.superChat.amount;
-      element.appendChild(amountBadge);
+      this.applySuperChatStyling(element, message.superChat);
     }
 
     // Add author info if needed
@@ -675,34 +780,17 @@ export class Renderer {
       return;
     }
 
-    // Position element at the assigned lane
-    const laneY = dimensions.height * this.settings.safeTop + lane.index * dimensions.laneHeight;
-    element.style.top = `${laneY}px`;
-    element.style.visibility = 'visible';
-    // Calculate animation duration and padding
-    const exitPadding = Math.max(fontSize * 3, 100); // Increased for smoother exit
-    const distance = dimensions.width + textWidth + exitPadding;
-
-    // Optimized duration: 5-12 seconds range for better pacing
-    const duration = Math.max(
-      5000,
-      Math.min(12000, (distance / this.settings.speedPxPerSec) * 1000)
+    // Setup animation and positioning
+    const activeMessage = this.setupMessageAnimation(
+      element,
+      lane,
+      textWidth,
+      messageHeight,
+      dimensions
     );
-    // Staggered lane delay for visual variety
-    const laneDelay = (lane.index % 4) * 100;
-    const totalDuration = duration + laneDelay;
 
-    // Use Web Animations API for dynamic animation
-    // Start from current position (right edge) and move to left edge (off-screen)
-    const animation = element.animate(
-      [{ transform: 'translateX(0)' }, { transform: `translateX(-${distance}px)` }],
-      {
-        duration,
-        delay: laneDelay,
-        easing: 'linear',
-        fill: 'forwards',
-      }
-    );
+    // Track active message
+    this.activeMessages.add(activeMessage);
 
     console.log('[YT Chat Overlay] Rendering message:', {
       text: message.text.substring(0, 20),
@@ -716,44 +804,8 @@ export class Renderer {
       lane: lane.index,
       width: textWidth,
       height: messageHeight,
-      distance,
-      duration,
-      delay: laneDelay,
-      totalDuration,
       dimensions,
     });
-
-    // Update lane state with message dimensions
-    const now = Date.now();
-    lane.lastItemStartTime = now + laneDelay;
-    lane.lastItemExitTime = now + totalDuration;
-    lane.lastItemWidthPx = textWidth;
-    lane.lastItemHeightPx = messageHeight;
-
-    // Setup cleanup timeout (duration + buffer)
-    const timeoutId = window.setTimeout(() => {
-      this.removeMessageByElement(element);
-    }, totalDuration + 2000);
-
-    // Track active message
-    const activeMessage: ActiveMessage = {
-      element,
-      lane: lane.index,
-      startTime: now,
-      duration,
-      timeoutId,
-      animation,
-    };
-    this.activeMessages.add(activeMessage);
-
-    // Auto-remove on animation end
-    animation.addEventListener(
-      'finish',
-      () => {
-        this.removeMessageByElement(element);
-      },
-      { once: true }
-    );
   }
 
   /**
@@ -783,8 +835,8 @@ export class Renderer {
       // Calculate safe time gap for horizontal collision avoidance
       if (primaryLane) {
         // Dynamic safe distance based on message type and font size
-        const baseSafeDistance = this.settings.fontSize * 2;
-        const minSafeDistance = Math.max(baseSafeDistance, 100);
+        const baseSafeDistance = this.settings.fontSize * LAYOUT.SAFE_DISTANCE_SCALE;
+        const minSafeDistance = Math.max(baseSafeDistance, LAYOUT.SAFE_DISTANCE_MIN);
         const requiredGapPx =
           Math.max(primaryLane.lastItemWidthPx, minSafeDistance) + minSafeDistance;
         const safeTimeGap = (requiredGapPx / this.settings.speedPxPerSec) * 1000;
@@ -821,10 +873,8 @@ export class Renderer {
       // Check if adjacent lane is clear or will be clear soon
       if (lane.lastItemStartTime > 0) {
         const timeSinceLastStart = now - lane.lastItemStartTime;
-        // Shorter clear time for better space utilization
-        const minClearTime = 800; // 0.8 seconds
 
-        if (timeSinceLastStart < minClearTime) {
+        if (timeSinceLastStart < LAYOUT.VERTICAL_CLEAR_TIME) {
           return false;
         }
       }
