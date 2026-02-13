@@ -1,5 +1,6 @@
 import type { OverlaySettings } from '@app-types';
 import { isVisibleElement, PLAYER_CONTAINER_SELECTORS, waitForElementMatch } from '@core/dom';
+import { borderRadius, colors, shadows, spacing, typography, zIndex } from './design-tokens.js';
 
 const STYLE_ID = 'yt-chat-overlay-settings-style';
 const BUTTON_ID = 'yt-chat-overlay-settings-button';
@@ -87,15 +88,15 @@ export class SettingsUi {
       style.textContent = `
         .yt-chat-overlay-settings-button {
           position: absolute;
-          top: 8px;
-          right: 8px;
-          width: 32px;
-          height: 32px;
-          border-radius: 6px;
+          top: ${spacing.sm}px;
+          right: ${spacing.sm}px;
+          width: ${spacing.xxxl}px;
+          height: ${spacing.xxxl}px;
+          border-radius: ${borderRadius.sm};
           border: 1px solid rgba(255, 255, 255, 0.25);
           background: rgba(0, 0, 0, 0.6);
-          color: #fff;
-          font-size: 16px;
+          color: ${colors.ui.text};
+          font-size: ${typography.fontSize.base};
           cursor: pointer;
           z-index: 120;
           pointer-events: auto;
@@ -110,44 +111,44 @@ export class SettingsUi {
           align-items: center;
           justify-content: center;
           background: rgba(0, 0, 0, 0.55);
-          z-index: 9999;
+          z-index: ${zIndex.modal};
         }
         .yt-chat-overlay-settings-modal {
           width: 380px;
           max-height: 82vh;
           overflow: auto;
-          background: rgba(20, 20, 20, 0.96);
-          color: #fff;
-          border-radius: 10px;
-          padding: 16px;
+          background: ${colors.ui.background};
+          color: ${colors.ui.text};
+          border-radius: ${borderRadius.md};
+          padding: ${spacing.lg}px;
           display: flex;
           flex-direction: column;
-          gap: 14px;
+          gap: ${spacing.lg}px;
           font-family: system-ui, -apple-system, sans-serif;
-          box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+          box-shadow: ${shadows.box.lg};
         }
         .yt-chat-overlay-settings-header {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          font-weight: 700;
-          font-size: 16px;
+          font-weight: ${typography.fontWeight.bold};
+          font-size: ${typography.fontSize.base};
         }
         .yt-chat-overlay-settings-close {
           border: none;
           background: transparent;
-          color: #fff;
-          font-size: 18px;
+          color: ${colors.ui.text};
+          font-size: ${typography.fontSize.lg};
           cursor: pointer;
         }
         .yt-chat-overlay-settings-section {
           display: flex;
           flex-direction: column;
-          gap: 10px;
+          gap: ${spacing.md}px;
         }
         .yt-chat-overlay-settings-section-title {
-          font-size: 13px;
-          color: rgba(255, 255, 255, 0.7);
+          font-size: ${typography.fontSize.xs};
+          color: ${colors.ui.textMuted};
           text-transform: uppercase;
           letter-spacing: 0.04em;
         }
@@ -155,16 +156,16 @@ export class SettingsUi {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          gap: 12px;
-          font-size: 14px;
+          gap: ${spacing.md}px;
+          font-size: ${typography.fontSize.sm};
         }
         .yt-chat-overlay-settings-field input[type="number"] {
           width: 110px;
-          padding: 4px 6px;
-          border-radius: 6px;
-          border: 1px solid rgba(255, 255, 255, 0.2);
-          background: rgba(0, 0, 0, 0.4);
-          color: #fff;
+          padding: ${spacing.xs}px ${spacing.sm}px;
+          border-radius: ${borderRadius.sm};
+          border: 1px solid ${colors.ui.border};
+          background: ${colors.ui.backgroundLight};
+          color: ${colors.ui.text};
         }
         .yt-chat-overlay-settings-field input[type="color"] {
           width: 48px;
@@ -179,22 +180,22 @@ export class SettingsUi {
           cursor: pointer;
         }
         .yt-chat-overlay-settings-field select {
-          padding: 4px 6px;
-          border-radius: 6px;
-          border: 1px solid rgba(255, 255, 255, 0.2);
-          background: rgba(0, 0, 0, 0.4);
-          color: #fff;
+          padding: ${spacing.xs}px ${spacing.sm}px;
+          border-radius: ${borderRadius.sm};
+          border: 1px solid ${colors.ui.border};
+          background: ${colors.ui.backgroundLight};
+          color: ${colors.ui.text};
           cursor: pointer;
         }
         .yt-chat-overlay-author-grid {
           display: grid;
           grid-template-columns: auto 1fr auto;
-          gap: 8px 12px;
+          gap: ${spacing.sm}px ${spacing.md}px;
           align-items: center;
-          padding: 8px 0;
+          padding: ${spacing.sm}px 0;
         }
         .yt-chat-overlay-author-grid-label {
-          font-size: 14px;
+          font-size: ${typography.fontSize.sm};
           min-width: 80px;
         }
         .yt-chat-overlay-author-grid-color {
@@ -206,23 +207,23 @@ export class SettingsUi {
         .yt-chat-overlay-settings-actions {
           display: flex;
           justify-content: flex-end;
-          gap: 8px;
-          padding-top: 4px;
+          gap: ${spacing.sm}px;
+          padding-top: ${spacing.xs}px;
         }
         .yt-chat-overlay-settings-actions button {
           border: none;
-          border-radius: 6px;
-          padding: 6px 12px;
+          border-radius: ${borderRadius.sm};
+          padding: ${spacing.sm}px ${spacing.md}px;
           cursor: pointer;
-          font-weight: 600;
+          font-weight: ${typography.fontWeight.semibold};
         }
         .yt-chat-overlay-settings-actions button[data-action="reset"] {
-          background: rgba(255, 255, 255, 0.15);
-          color: #fff;
+          background: ${colors.ui.danger};
+          color: ${colors.ui.text};
         }
         .yt-chat-overlay-settings-actions button[data-action="apply"] {
-          background: #3ea6ff;
-          color: #111;
+          background: ${colors.ui.primary};
+          color: ${colors.ui.text};
         }
       `;
       document.head.appendChild(style);
@@ -275,12 +276,26 @@ export class SettingsUi {
           <input type="number" name="safeBottom" min="0" max="25" step="1" />
         </label>
         <label class="yt-chat-overlay-settings-field">
-          <span>Max concurrent</span>
-          <input type="number" name="maxConcurrentMessages" min="10" max="50" step="5" />
+          <span>Warning threshold</span>
+          <input
+            type="number"
+            name="maxConcurrentMessages"
+            min="30"
+            max="100"
+            step="10"
+            title="Performance warning threshold (not enforced)"
+          />
         </label>
         <label class="yt-chat-overlay-settings-field">
           <span>Max messages/s</span>
-          <input type="number" name="maxMessagesPerSecond" min="2" max="15" step="1" />
+          <input
+            type="number"
+            name="maxMessagesPerSecond"
+            min="5"
+            max="20"
+            step="1"
+            title="Rate limit for new messages (enforced)"
+          />
         </label>
       </div>
       <div class="yt-chat-overlay-settings-section">
@@ -417,10 +432,10 @@ export class SettingsUi {
       safeTop: clamp(readNumber('safeTop', current.safeTop * 100), 0, 25) / 100,
       safeBottom: clamp(readNumber('safeBottom', current.safeBottom * 100), 0, 25) / 100,
       maxConcurrentMessages: Math.round(
-        clamp(readNumber('maxConcurrentMessages', current.maxConcurrentMessages), 10, 50)
+        clamp(readNumber('maxConcurrentMessages', current.maxConcurrentMessages), 30, 100)
       ),
       maxMessagesPerSecond: Math.round(
-        clamp(readNumber('maxMessagesPerSecond', current.maxMessagesPerSecond), 2, 15)
+        clamp(readNumber('maxMessagesPerSecond', current.maxMessagesPerSecond), 5, 20)
       ),
       showAuthor: {
         normal: this.getCheckbox('showAuthor-normal', current.showAuthor.normal),

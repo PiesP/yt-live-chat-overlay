@@ -184,8 +184,8 @@ export const DEFAULT_SETTINGS: Readonly<OverlaySettings> = {
   opacity: 0.95, // Slightly more opaque for better visibility
   safeTop: 0.1, // 10% - increased for better clearance from top UI elements
   safeBottom: 0.12, // 12% - reduced since we handle multi-line messages better
-  maxConcurrentMessages: 30, // Increased thanks to improved collision detection
-  maxMessagesPerSecond: 8, // Increased for busier chats
+  maxConcurrentMessages: 50, // Soft cap for performance monitoring (not enforced)
+  maxMessagesPerSecond: 10, // Rate limit for incoming messages (enforced)
   showAuthor: {
     normal: false,
     member: false,

@@ -15,6 +15,15 @@ import type {
   OverlaySettings,
   SuperChatInfo,
 } from '@app-types';
+import {
+  borderRadius,
+  colors,
+  createGradient,
+  rgba,
+  shadows,
+  spacing,
+  typography,
+} from './design-tokens.js';
 import type { Overlay } from './overlay';
 
 interface ActiveMessage {
@@ -68,6 +77,8 @@ export class Renderer {
   private lastProcessTime = 0;
   private processedInLastSecond = 0;
   private isPaused = false;
+  private lastWarningTime = 0;
+  private readonly WARNING_INTERVAL_MS = 10000;
   private styleElement: HTMLStyleElement | null = null;
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
@@ -110,10 +121,10 @@ export class Renderer {
         position: absolute;
         white-space: nowrap;
         font-family: system-ui, -apple-system, sans-serif;
-        font-weight: 700;
+        font-weight: ${typography.fontWeight.bold};
         text-shadow: ${textShadow};
         -webkit-text-stroke: ${textStroke};
-        color: white;
+        color: ${colors.ui.text};
         pointer-events: none;
         will-change: transform;
         animation-timing-function: linear;
@@ -128,14 +139,14 @@ export class Renderer {
       .yt-chat-overlay-message-with-author {
         display: flex;
         flex-direction: column;
-        gap: ${LAYOUT.AUTHOR_CONTENT_GAP}px;
+        gap: ${spacing.xs}px;
       }
 
       /* Author info line */
       .yt-chat-overlay-author-info {
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: ${spacing.sm}px;
         font-size: ${LAYOUT.AUTHOR_FONT_SCALE}em;
         opacity: 0.95;
       }
@@ -144,14 +155,15 @@ export class Renderer {
       .yt-chat-overlay-author-photo {
         width: ${LAYOUT.AUTHOR_PHOTO_SIZE}px;
         height: ${LAYOUT.AUTHOR_PHOTO_SIZE}px;
-        border-radius: 50%;
+        border-radius: ${borderRadius.full};
         flex-shrink: 0;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        box-shadow: ${shadows.box.sm};
+        filter: ${shadows.filter.md};
       }
 
       /* Author name */
       .yt-chat-overlay-author-name {
-        font-weight: 600;
+        font-weight: ${typography.fontWeight.semibold};
       }
 
       /* Message content line */
@@ -159,73 +171,222 @@ export class Renderer {
         display: block;
       }
 
+      /* === YOUTUBE-STYLE SUPER CHAT CARD === */
+
+      /* Card container */
+      .yt-chat-overlay-superchat-card {
+        display: flex;
+        flex-direction: column;
+        border-radius: ${borderRadius.md};
+        overflow: hidden;
+        box-shadow: ${shadows.box.md};
+        backdrop-filter: blur(4px);
+      }
+
+      /* Header section */
+      .yt-chat-overlay-superchat-header {
+        position: relative;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: ${spacing.sm}px ${spacing.md}px;
+        min-height: 40px;
+        background: transparent;
+      }
+
+      .yt-chat-overlay-superchat-header-left {
+        display: flex;
+        align-items: center;
+        gap: ${spacing.sm}px;
+        flex: 1;
+        min-width: 0;
+      }
+
+      .yt-chat-overlay-superchat-header-right {
+        display: flex;
+        align-items: center;
+        gap: ${spacing.md}px;
+        flex-shrink: 0;
+        margin-left: ${spacing.md}px;
+      }
+
+      /* Header author inline */
+      .yt-chat-overlay-author-info-inline {
+        display: flex;
+        align-items: center;
+        gap: ${spacing.sm}px;
+        min-width: 0;
+      }
+
+      .yt-chat-overlay-author-info-inline .yt-chat-overlay-author-name {
+        font-size: 0.85em;
+        font-weight: ${typography.fontWeight.bold};
+        text-shadow: ${shadows.text.sm};
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      /* Enhanced amount badge */
+      .yt-chat-overlay-superchat-amount-badge {
+        display: inline-flex;
+        align-items: center;
+        padding: ${spacing.xs}px ${spacing.lg}px;
+        border-radius: ${borderRadius.xl};
+        font-weight: ${typography.fontWeight.bold};
+        font-size: 0.85em;
+        white-space: nowrap;
+        box-shadow: ${shadows.box.sm}, inset 0 1px 0 rgba(255, 255, 255, 0.2);
+        text-shadow: ${shadows.text.sm};
+        letter-spacing: 0.3px;
+      }
+
+      /* Timestamp */
+      .yt-chat-overlay-superchat-timestamp {
+        font-size: 0.75em;
+        font-weight: ${typography.fontWeight.semibold};
+        opacity: 0.85;
+        color: rgba(255, 255, 255, 0.9);
+        text-shadow: ${shadows.text.sm};
+        white-space: nowrap;
+      }
+
+      /* Content section */
+      .yt-chat-overlay-superchat-content {
+        display: flex;
+        flex-direction: column;
+        padding: ${spacing.md}px ${spacing.md}px;
+        gap: ${spacing.sm}px;
+        background: transparent;
+      }
+
+      .yt-chat-overlay-superchat-content .yt-chat-overlay-message-content {
+        font-size: 1em;
+        line-height: ${typography.lineHeight.normal};
+        text-shadow: ${shadows.text.md};
+        letter-spacing: 0.2px;
+      }
+
+      .yt-chat-overlay-superchat-content .yt-chat-overlay-superchat-sticker {
+        align-self: flex-start;
+        margin-bottom: ${spacing.xs}px;
+      }
+
+      /* Tier-specific gradients (7 tiers) - applied to card for seamless appearance */
+      .yt-chat-overlay-superchat-tier-blue {
+        background: ${createGradient(colors.superChat.blue, [0.75, 0.5, 0.35, 0.25])};
+      }
+
+      .yt-chat-overlay-superchat-tier-cyan {
+        background: ${createGradient(colors.superChat.cyan, [0.75, 0.5, 0.35, 0.25])};
+      }
+
+      .yt-chat-overlay-superchat-tier-green {
+        background: ${createGradient(colors.superChat.green, [0.75, 0.5, 0.35, 0.25])};
+      }
+
+      .yt-chat-overlay-superchat-tier-yellow {
+        background: ${createGradient(colors.superChat.yellow, [0.75, 0.5, 0.35, 0.25])};
+      }
+
+      .yt-chat-overlay-superchat-tier-orange {
+        background: ${createGradient(colors.superChat.orange, [0.75, 0.5, 0.35, 0.25])};
+      }
+
+      .yt-chat-overlay-superchat-tier-magenta {
+        background: ${createGradient(colors.superChat.magenta, [0.75, 0.5, 0.35, 0.25])};
+      }
+
+      .yt-chat-overlay-superchat-tier-red {
+        background: ${createGradient(colors.superChat.red, [0.75, 0.5, 0.35, 0.25])};
+      }
+
+      /* Enhanced regular message with author */
+      .yt-chat-overlay-message-with-author:not(.yt-chat-overlay-superchat-card) {
+        background: rgba(0, 0, 0, 0.25);
+        padding: ${spacing.sm}px ${spacing.md}px;
+        border-radius: ${borderRadius.sm};
+        backdrop-filter: blur(2px);
+      }
+
+      .yt-chat-overlay-message-with-author .yt-chat-overlay-author-photo {
+        box-shadow: ${shadows.box.sm};
+        border: 1px solid rgba(255, 255, 255, 0.15);
+      }
+
+      /* Improved text shadow for all messages */
+      .yt-chat-overlay-message:not(.yt-chat-overlay-superchat-card) {
+        text-shadow: ${shadows.text.md}, 0 0 8px rgba(0, 0, 0, 0.7);
+        letter-spacing: 0.3px;
+      }
+
       /* Super Chat styling */
       .yt-chat-overlay-message-superchat {
         padding: ${LAYOUT.SUPERCHAT_PADDING}px ${LAYOUT.SUPERCHAT_PADDING * 2}px;
-        border-radius: 8px;
+        border-radius: ${borderRadius.md};
         background: rgba(0, 0, 0, 0.4);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
+        box-shadow: ${shadows.box.md};
         border: ${LAYOUT.SUPERCHAT_BORDER_WIDTH}px solid rgba(255, 255, 255, 0.9);
       }
 
       /* Super Chat amount badge */
       .yt-chat-overlay-superchat-amount {
         display: inline-block;
-        padding: 4px 12px;
-        margin-right: 12px;
-        border-radius: 12px;
-        font-weight: 900;
+        padding: ${spacing.xs}px ${spacing.md}px;
+        margin-right: ${spacing.md}px;
+        border-radius: ${borderRadius.lg};
+        font-weight: ${typography.fontWeight.bold};
         font-size: 0.9em;
         vertical-align: middle;
-        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+        box-shadow: ${shadows.box.sm};
       }
 
       /* Super Chat sticker */
       .yt-chat-overlay-superchat-sticker {
         display: inline-block;
         vertical-align: middle;
-        margin-right: 8px;
-        filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
+        margin-right: ${spacing.sm}px;
+        filter: ${shadows.filter.md};
       }
 
       /* Super Chat tier colors */
       .yt-chat-overlay-superchat-blue {
-        border-color: rgb(30, 136, 229);
-        background: rgba(30, 136, 229, 0.4);
+        border-color: rgb(${colors.superChat.blue.r}, ${colors.superChat.blue.g}, ${colors.superChat.blue.b});
+        background: ${rgba(colors.superChat.blue, 0.4)};
       }
       .yt-chat-overlay-superchat-cyan {
-        border-color: rgb(0, 191, 255);
-        background: rgba(0, 191, 255, 0.4);
+        border-color: rgb(${colors.superChat.cyan.r}, ${colors.superChat.cyan.g}, ${colors.superChat.cyan.b});
+        background: ${rgba(colors.superChat.cyan, 0.4)};
       }
       .yt-chat-overlay-superchat-green {
-        border-color: rgb(29, 233, 182);
-        background: rgba(29, 233, 182, 0.4);
+        border-color: rgb(${colors.superChat.green.r}, ${colors.superChat.green.g}, ${colors.superChat.green.b});
+        background: ${rgba(colors.superChat.green, 0.4)};
       }
       .yt-chat-overlay-superchat-yellow {
-        border-color: rgb(255, 202, 40);
-        background: rgba(255, 202, 40, 0.4);
+        border-color: rgb(${colors.superChat.yellow.r}, ${colors.superChat.yellow.g}, ${colors.superChat.yellow.b});
+        background: ${rgba(colors.superChat.yellow, 0.4)};
       }
       .yt-chat-overlay-superchat-orange {
-        border-color: rgb(245, 124, 0);
-        background: rgba(245, 124, 0, 0.4);
+        border-color: rgb(${colors.superChat.orange.r}, ${colors.superChat.orange.g}, ${colors.superChat.orange.b});
+        background: ${rgba(colors.superChat.orange, 0.4)};
       }
       .yt-chat-overlay-superchat-magenta {
-        border-color: rgb(233, 30, 99);
-        background: rgba(233, 30, 99, 0.4);
+        border-color: rgb(${colors.superChat.magenta.r}, ${colors.superChat.magenta.g}, ${colors.superChat.magenta.b});
+        background: ${rgba(colors.superChat.magenta, 0.4)};
       }
       .yt-chat-overlay-superchat-red {
-        border-color: rgb(230, 33, 23);
-        background: rgba(230, 33, 23, 0.4);
+        border-color: rgb(${colors.superChat.red.r}, ${colors.superChat.red.g}, ${colors.superChat.red.b});
+        background: ${rgba(colors.superChat.red, 0.4)};
       }
 
       /* Super Chat amount badge tier colors */
-      .yt-chat-overlay-superchat-amount-blue { background-color: rgb(30, 136, 229); }
-      .yt-chat-overlay-superchat-amount-cyan { background-color: rgb(0, 191, 255); }
-      .yt-chat-overlay-superchat-amount-green { background-color: rgb(29, 233, 182); }
-      .yt-chat-overlay-superchat-amount-yellow { background-color: rgb(255, 202, 40); color: #000; }
-      .yt-chat-overlay-superchat-amount-orange { background-color: rgb(245, 124, 0); }
-      .yt-chat-overlay-superchat-amount-magenta { background-color: rgb(233, 30, 99); }
-      .yt-chat-overlay-superchat-amount-red { background-color: rgb(230, 33, 23); }
+      .yt-chat-overlay-superchat-amount-blue { background-color: rgb(${colors.superChat.blue.r}, ${colors.superChat.blue.g}, ${colors.superChat.blue.b}); }
+      .yt-chat-overlay-superchat-amount-cyan { background-color: rgb(${colors.superChat.cyan.r}, ${colors.superChat.cyan.g}, ${colors.superChat.cyan.b}); }
+      .yt-chat-overlay-superchat-amount-green { background-color: rgb(${colors.superChat.green.r}, ${colors.superChat.green.g}, ${colors.superChat.green.b}); }
+      .yt-chat-overlay-superchat-amount-yellow { background-color: rgb(${colors.superChat.yellow.r}, ${colors.superChat.yellow.g}, ${colors.superChat.yellow.b}); color: #000; }
+      .yt-chat-overlay-superchat-amount-orange { background-color: rgb(${colors.superChat.orange.r}, ${colors.superChat.orange.g}, ${colors.superChat.orange.b}); }
+      .yt-chat-overlay-superchat-amount-magenta { background-color: rgb(${colors.superChat.magenta.r}, ${colors.superChat.magenta.g}, ${colors.superChat.magenta.b}); }
+      .yt-chat-overlay-superchat-amount-red { background-color: rgb(${colors.superChat.red.r}, ${colors.superChat.red.g}, ${colors.superChat.red.b}); }
 
       /* Emoji styling */
       .yt-chat-overlay-emoji {
@@ -242,6 +403,49 @@ export class Renderer {
         /* Green glow for member emojis */
         filter: drop-shadow(0 0 2px rgba(15, 157, 88, 0.6))
                 drop-shadow(0 0 4px rgba(15, 157, 88, 0.4));
+      }
+
+      /* === MEMBERSHIP MESSAGE CARDS === */
+
+      /* Membership card container */
+      .yt-chat-overlay-membership-card {
+        display: flex;
+        flex-direction: column;
+        padding: ${spacing.md}px ${spacing.lg}px;
+        border-radius: ${borderRadius.md};
+        background: ${rgba(colors.superChat.green, 0.25)};
+        border: 2px solid ${rgba(colors.superChat.green, 0.5)};
+        box-shadow: ${shadows.box.md};
+        backdrop-filter: blur(4px);
+      }
+
+      /* Membership author section */
+      .yt-chat-overlay-membership-author {
+        display: flex;
+        align-items: center;
+        gap: ${spacing.md}px;
+      }
+
+      /* Membership text container */
+      .yt-chat-overlay-membership-text {
+        display: flex;
+        flex-direction: column;
+        gap: ${spacing.xs}px;
+      }
+
+      /* Membership author name */
+      .yt-chat-overlay-membership-author-name {
+        font-size: ${typography.fontSize.base};
+        font-weight: ${typography.fontWeight.bold};
+        text-shadow: ${shadows.text.md};
+      }
+
+      /* Membership message text */
+      .yt-chat-overlay-membership-message {
+        font-size: ${typography.fontSize.sm};
+        font-weight: ${typography.fontWeight.normal};
+        color: ${colors.ui.text};
+        text-shadow: ${shadows.text.sm};
       }
     `;
   }
@@ -366,21 +570,6 @@ export class Renderer {
   }
 
   /**
-   * Create semi-transparent background from base color
-   * Returns a solid semi-transparent background
-   */
-  private createSemiTransparentBackground(colorString: string): string {
-    const parsed = this.parseRgbaColor(colorString);
-    if (!parsed) {
-      // Fallback to default semi-transparent black
-      return 'rgba(0, 0, 0, 0.4)';
-    }
-
-    // Create semi-transparent background (40% opacity)
-    return `rgba(${parsed.r}, ${parsed.g}, ${parsed.b}, 0.4)`;
-  }
-
-  /**
    * Determine if color is light or dark (for text contrast)
    * Uses relative luminance formula
    */
@@ -391,6 +580,20 @@ export class Renderer {
     // Calculate relative luminance
     const luminance = (0.299 * parsed.r + 0.587 * parsed.g + 0.114 * parsed.b) / 255;
     return luminance > 0.5;
+  }
+
+  /**
+   * Create rgba color with specified alpha value
+   * Converts any rgb/rgba color to rgba with new alpha
+   */
+  private createRgbaWithAlpha(colorString: string, alpha: number): string {
+    const parsed = this.parseRgbaColor(colorString);
+    if (!parsed) {
+      // Fallback to semi-transparent black
+      return `rgba(0, 0, 0, ${alpha})`;
+    }
+
+    return `rgba(${parsed.r}, ${parsed.g}, ${parsed.b}, ${alpha})`;
   }
 
   /**
@@ -517,65 +720,171 @@ export class Renderer {
   }
 
   /**
-   * Apply Super Chat styling and add Super Chat elements
+   * Create Super Chat header section with author info and amount badge
    */
-  private applySuperChatStyling(element: HTMLDivElement, superChat: SuperChatInfo): void {
-    element.classList.add('yt-chat-overlay-message-superchat');
+  private createSuperChatHeader(message: ChatMessage, superChat: SuperChatInfo): HTMLDivElement {
+    const header = document.createElement('div');
+    header.className = 'yt-chat-overlay-superchat-header';
 
-    // Use actual YouTube colors if available, otherwise fallback to tier-based CSS
-    if (superChat.backgroundColor) {
-      const bgColor = superChat.backgroundColor;
-      const semiTransparentBg = this.createSemiTransparentBackground(bgColor);
-      const borderColor = bgColor; // Use original color for border (solid)
+    // Left section: author photo + name
+    const leftSection = document.createElement('div');
+    leftSection.className = 'yt-chat-overlay-superchat-header-left';
 
-      element.style.background = semiTransparentBg;
-      element.style.borderColor = borderColor;
-
-      console.log('[YT Chat Overlay] Using actual YouTube color:', {
-        original: bgColor,
-        background: semiTransparentBg,
-        borderColor,
-      });
-    } else {
-      // Fallback to tier-based CSS classes
-      element.classList.add(`yt-chat-overlay-superchat-${superChat.tier}`);
-      console.log('[YT Chat Overlay] Using fallback tier color:', superChat.tier);
+    // Always show author in Super Chat header
+    if (message.authorPhotoUrl) {
+      const photoImg = document.createElement('img');
+      photoImg.className = 'yt-chat-overlay-author-photo';
+      photoImg.src = message.authorPhotoUrl;
+      photoImg.alt = message.author || 'Author';
+      leftSection.appendChild(photoImg);
     }
+
+    if (message.author) {
+      const authorInfoInline = document.createElement('div');
+      authorInfoInline.className = 'yt-chat-overlay-author-info-inline';
+
+      const authorName = document.createElement('span');
+      authorName.className = 'yt-chat-overlay-author-name';
+      authorName.textContent = message.author;
+
+      // Set author color based on type
+      const authorType = message.authorType || 'normal';
+      authorName.style.color = this.settings.colors[authorType];
+
+      authorInfoInline.appendChild(authorName);
+      leftSection.appendChild(authorInfoInline);
+    }
+
+    header.appendChild(leftSection);
+
+    // Right section: amount badge + timestamp
+    const rightSection = document.createElement('div');
+    rightSection.className = 'yt-chat-overlay-superchat-header-right';
+
+    // Amount badge
+    const amountBadge = document.createElement('span');
+    amountBadge.className = 'yt-chat-overlay-superchat-amount-badge';
+    amountBadge.textContent = superChat.amount;
+
+    // Apply badge color
+    const badgeColor = superChat.headerBackgroundColor || superChat.backgroundColor;
+    if (badgeColor) {
+      amountBadge.style.backgroundColor = badgeColor;
+      const isLight = this.isLightColor(badgeColor);
+      amountBadge.style.color = isLight ? '#000' : '#fff';
+    } else {
+      amountBadge.classList.add(`yt-chat-overlay-superchat-amount-${superChat.tier}`);
+    }
+
+    rightSection.appendChild(amountBadge);
+
+    header.appendChild(rightSection);
+
+    return header;
+  }
+
+  /**
+   * Create Super Chat content section with sticker and message
+   */
+  private createSuperChatContent(message: ChatMessage, superChat: SuperChatInfo): HTMLDivElement {
+    const content = document.createElement('div');
+    content.className = 'yt-chat-overlay-superchat-content';
 
     // Add sticker if available (high-tier Super Chats)
     if (superChat.stickerUrl) {
       const stickerImg = this.createSuperChatSticker(superChat.stickerUrl);
       if (stickerImg) {
-        element.appendChild(stickerImg);
+        content.appendChild(stickerImg);
       }
     }
 
-    // Add amount badge with dynamic or tier-based color
-    const amountBadge = document.createElement('span');
-    amountBadge.className = 'yt-chat-overlay-superchat-amount';
+    // Message content
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'yt-chat-overlay-message-content';
 
-    // Use header background color for badge, or fallback to main background color
-    const badgeColor = superChat.headerBackgroundColor || superChat.backgroundColor;
-
-    if (badgeColor) {
-      // Apply actual YouTube color to badge
-      amountBadge.style.backgroundColor = badgeColor;
-
-      // Adjust text color based on background brightness
-      const isLight = this.isLightColor(badgeColor);
-      amountBadge.style.color = isLight ? '#000' : '#fff';
-
-      console.log('[YT Chat Overlay] Badge color:', {
-        backgroundColor: badgeColor,
-        textColor: isLight ? '#000' : '#fff',
-      });
+    if (message.content && message.content.length > 0) {
+      this.renderMixedContent(messageDiv, message.content);
     } else {
-      // Fallback to tier-based CSS class for badge
-      amountBadge.classList.add(`yt-chat-overlay-superchat-amount-${superChat.tier}`);
+      messageDiv.textContent = message.text;
     }
 
-    amountBadge.textContent = superChat.amount;
-    element.appendChild(amountBadge);
+    content.appendChild(messageDiv);
+
+    return content;
+  }
+
+  /**
+   * Create membership message card with author and message
+   */
+  private createMembershipCard(message: ChatMessage): HTMLDivElement {
+    const card = document.createElement('div');
+    card.className = 'yt-chat-overlay-membership-card';
+
+    // Author section with photo
+    const authorSection = document.createElement('div');
+    authorSection.className = 'yt-chat-overlay-membership-author';
+
+    if (message.authorPhotoUrl) {
+      const photo = document.createElement('img');
+      photo.className = 'yt-chat-overlay-author-photo';
+      photo.src = message.authorPhotoUrl;
+      photo.alt = message.author || 'Member';
+      authorSection.appendChild(photo);
+    }
+
+    const textContainer = document.createElement('div');
+    textContainer.className = 'yt-chat-overlay-membership-text';
+
+    // Author name
+    if (message.author) {
+      const authorName = document.createElement('div');
+      authorName.className = 'yt-chat-overlay-membership-author-name';
+      authorName.style.color = colors.author.member;
+      authorName.textContent = message.author;
+      textContainer.appendChild(authorName);
+    }
+
+    // Membership message
+    const membershipText = document.createElement('div');
+    membershipText.className = 'yt-chat-overlay-membership-message';
+
+    if (message.content && message.content.length > 0) {
+      this.renderMixedContent(membershipText, message.content);
+    } else {
+      membershipText.textContent = message.text;
+    }
+
+    textContainer.appendChild(membershipText);
+    authorSection.appendChild(textContainer);
+    card.appendChild(authorSection);
+
+    return card;
+  }
+
+  /**
+   * Apply Super Chat card styling with tier class
+   */
+  private applySuperChatStyling(element: HTMLDivElement, superChat: SuperChatInfo): void {
+    element.classList.add('yt-chat-overlay-superchat-card');
+
+    // Apply tier class for gradient styling
+    element.classList.add(`yt-chat-overlay-superchat-tier-${superChat.tier}`);
+
+    // If actual YouTube colors available, override with inline styles
+    if (superChat.backgroundColor) {
+      const headerBg = superChat.headerBackgroundColor || superChat.backgroundColor;
+
+      // Will be applied to header and content after they're created
+      element.setAttribute('data-header-color', headerBg);
+      element.setAttribute('data-content-color', superChat.backgroundColor);
+
+      console.log('[YT Chat Overlay] Using actual YouTube colors:', {
+        header: headerBg,
+        content: superChat.backgroundColor,
+      });
+    } else {
+      console.log('[YT Chat Overlay] Using tier gradients:', superChat.tier);
+    }
   }
 
   /**
@@ -687,13 +996,9 @@ export class Renderer {
     }
 
     while (this.messageQueue.length > 0) {
-      // Check concurrent message limit
+      // Soft cap warning (non-blocking)
       if (this.activeMessages.size >= this.settings.maxConcurrentMessages) {
-        // Remove oldest message
-        const oldest = Array.from(this.activeMessages)[0];
-        if (oldest) {
-          this.removeMessage(oldest);
-        }
+        this.logPerformanceWarning();
       }
 
       const message = this.messageQueue.shift();
@@ -702,6 +1007,24 @@ export class Renderer {
         this.processedInLastSecond++;
       }
     }
+  }
+
+  /**
+   * Log performance warning when concurrent message count is high
+   * Limited to once per 10 seconds to avoid log spam
+   */
+  private logPerformanceWarning(): void {
+    const now = Date.now();
+    if (now - this.lastWarningTime < this.WARNING_INTERVAL_MS) {
+      return;
+    }
+
+    this.lastWarningTime = now;
+    console.warn(
+      `[YT Chat Overlay] Performance warning: ${this.activeMessages.size} concurrent messages ` +
+        `(recommended max: ${this.settings.maxConcurrentMessages}). ` +
+        `Consider reducing maxMessagesPerSecond setting.`
+    );
   }
 
   /**
@@ -727,36 +1050,63 @@ export class Renderer {
 
     // Apply Super Chat styling if applicable
     const isSuperChat = message.kind === 'superchat' && message.superChat;
+    const isMembership = message.kind === 'membership';
+
     if (isSuperChat && message.superChat) {
+      // Apply card styling
       this.applySuperChatStyling(element, message.superChat);
-    }
 
-    // Add author info if needed
-    if (showAuthor) {
-      const authorElement = this.createAuthorElement(message);
-      element.appendChild(authorElement);
-    }
+      // Create structured header and content
+      const headerElement = this.createSuperChatHeader(message, message.superChat);
+      const contentElement = this.createSuperChatContent(message, message.superChat);
 
-    // Create content container
-    const contentDiv = document.createElement('div');
-    contentDiv.className = 'yt-chat-overlay-message-content';
+      // Apply dynamic colors if available
+      const headerColor = element.getAttribute('data-header-color');
+      const contentColor = element.getAttribute('data-content-color');
+      if (headerColor && contentColor) {
+        // Apply single continuous gradient to entire card
+        const seamlessGradient = `linear-gradient(
+          to bottom,
+          ${this.createRgbaWithAlpha(contentColor, 0.75)},
+          ${this.createRgbaWithAlpha(contentColor, 0.5)},
+          ${this.createRgbaWithAlpha(contentColor, 0.35)},
+          ${this.createRgbaWithAlpha(contentColor, 0.25)}
+        )`;
+        element.style.background = seamlessGradient;
+      }
 
-    // Render content (text + emojis)
-    if (message.content && message.content.length > 0) {
-      this.renderMixedContent(contentDiv, message.content);
+      element.appendChild(headerElement);
+      element.appendChild(contentElement);
+    } else if (isMembership) {
+      // Membership message
+      const membershipCard = this.createMembershipCard(message);
+      element.appendChild(membershipCard);
     } else {
-      contentDiv.textContent = message.text; // SECURITY: textContent only, no innerHTML
-    }
+      // Regular message (existing logic)
+      if (showAuthor) {
+        const authorElement = this.createAuthorElement(message);
+        element.appendChild(authorElement);
+      }
 
-    element.appendChild(contentDiv);
+      const contentDiv = document.createElement('div');
+      contentDiv.className = 'yt-chat-overlay-message-content';
+
+      if (message.content && message.content.length > 0) {
+        this.renderMixedContent(contentDiv, message.content);
+      } else {
+        contentDiv.textContent = message.text; // SECURITY: textContent only, no innerHTML
+      }
+
+      element.appendChild(contentDiv);
+    }
 
     // Font size is same for all messages
     const fontSize = this.settings.fontSize;
     element.style.fontSize = `${fontSize}px`;
     element.style.opacity = `${this.settings.opacity}`;
 
-    // Apply color based on author type (unless it's a Super Chat with custom styling)
-    if (!isSuperChat) {
+    // Apply color based on author type (unless it's a Super Chat or Membership with custom styling)
+    if (!isSuperChat && !isMembership) {
       const authorType = message.authorType || 'normal';
       element.style.color = this.settings.colors[authorType];
     }
@@ -775,7 +1125,12 @@ export class Renderer {
     const lane = this.findAvailableLane(messageHeight);
     if (lane === null) {
       // No available lane, drop message
-      console.log('[YT Chat Overlay] No available lane, dropping message');
+      const dimensions = this.overlay.getDimensions();
+      console.log(
+        `[YT Chat Overlay] No available lane for message (height: ${messageHeight}px). ` +
+          `Active messages: ${this.activeMessages.size}, Lanes: ${dimensions?.laneCount || 'unknown'}, ` +
+          `Queue size: ${this.messageQueue.length}`
+      );
       container.removeChild(element);
       return;
     }
