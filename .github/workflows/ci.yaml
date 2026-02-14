@@ -1,14 +1,5 @@
 name: 🏗️ CI Pipeline
 
-# Responsibility: Continuous Integration
-# - Package manager: pnpm v10+ (auto-detected from packageManager field)
-# - Linting: Biome
-# - Format checking: Biome
-# - Type checking: TypeScript via tsc
-# - Build verification: Vite (Production mode)
-#
-# Triggered on: Push/PR to master (excluding markdown/assets)
-
 on:
   push:
     branches: [master]
@@ -95,6 +86,9 @@ jobs:
       - name: 📐 Run TypeScript check
         run: pnpm check
 
+      - name: 🧩 Run Knip dependency check
+        run: pnpm knip
+
   lockfile-validation:
     name: 🔒 Lockfile Validation
     runs-on: ubuntu-latest
@@ -114,6 +108,7 @@ jobs:
 
       - name: 🔒 Validate lockfile integrity
         run: |
+          set -euo pipefail
           echo "🔍 Validating lockfile integrity..."
           pnpm install --frozen-lockfile --prefer-offline
 
@@ -121,6 +116,7 @@ jobs:
 
       - name: 🔍 Check for security vulnerabilities
         run: |
+          set -euo pipefail
           echo "🔍 Checking for known vulnerabilities..."
           # Run audit but don't fail on low/moderate (only high/critical)
           pnpm audit --audit-level=high || {

@@ -1,12 +1,5 @@
 name: 🧹 Cleanup Stale PRs
 
-# Responsibility: Close stale dependabot PRs that are superseded
-# - Identifies PRs older than 30 days
-# - Checks if newer PR exists for same dependency
-# - Auto-closes with informative comment
-#
-# Trigger: Weekly schedule + manual trigger
-
 on:
   schedule:
     - cron: "0 3 * * 1" # Weekly on Mondays at 3 AM UTC (after dependency checks)
@@ -31,13 +24,12 @@ jobs:
 
       - name: 🔍 Find and close stale PRs
         run: |
+          set -euo pipefail
           echo "🔍 Searching for stale Dependabot PRs..."
 
-          # Get all open dependabot PRs
           STALE_AGE_DAYS=30
           CURRENT_DATE=$(date +%s)
 
-          # Get PR list and process each one
           gh pr list \
             --author "dependabot[bot]" \
             --state open \
@@ -50,9 +42,8 @@ jobs:
             CREATED_AT=$(echo "$pr" | jq -r '.createdAt')
             HEAD_REF=$(echo "$pr" | jq -r '.headRefName')
 
-            # Calculate age in days
-            CREATED_TIMESTAMP=$(date -d "$CREATED_AT" +%s 2>/dev/null || date -j -f "%Y-%m-%dT%H:%M:%SZ" "$CREATED_AT" +%s 2>/dev/null || echo "0")
-            if [ "$CREATED_TIMESTAMP" == "0" ]; then
+            CREATED_TIMESTAMP=$(date -d "$CREATED_AT" +%s || echo "0")
+            if [ "$CREATED_TIMESTAMP" = "0" ]; then
               echo "⚠️ Could not parse date for PR #$PR_NUMBER, skipping"
               continue
             fi
@@ -94,10 +85,11 @@ jobs:
 
       - name: 📊 Generate summary
         run: |
+          set -euo pipefail
           echo "## 🧹 Stale PR Cleanup Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          CLOSED_COUNT=$(gh pr list --author "dependabot[bot]" --state closed --search "closed:>=$(date -d '1 hour ago' -Iseconds 2>/dev/null || date -v-1H -Iseconds 2>/dev/null)" --json number --jq 'length' || echo "0")
+          CLOSED_COUNT=$(gh pr list --author "dependabot[bot]" --state closed --search "closed:>=$(date -d '1 hour ago' -Iseconds)" --json number --jq 'length' || echo "0")
 
           echo "- **Closed PRs:** $CLOSED_COUNT" >> $GITHUB_STEP_SUMMARY
           echo "- **Criteria:** PRs older than 30 days with merge conflicts" >> $GITHUB_STEP_SUMMARY
