@@ -1,0 +1,13 @@
+{
+  "$schema": "https://unpkg.com/knip@5.83.1/schema.json",
+  "entry": ["src/main.ts", "tooling/userscript-header.ts"],
+  "project": ["src/**/*.ts", "tooling/**/*.ts"],
+  "paths": {
+    "@": ["src"],
+    "@core": ["src/core"],
+    "@app-types": ["src/types/index.ts"]
+  },
+  "ignore": ["dist/**", "**/*.d.ts"],
+  "ignoreDependencies": ["@biomejs/cli-linux-x64"],
+  "ignoreExportsUsedInFile": true
+}

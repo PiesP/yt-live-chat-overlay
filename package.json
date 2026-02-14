@@ -8,12 +8,14 @@
     "build": "vite build",
     "build:dev": "vite build --mode development",
     "check": "tsc --noEmit",
+    "knip": "knip --dependencies",
+    "knip:full": "knip --files --exports --dependencies --reporter compact --max-show-issues 50 --no-exit-code",
     "lint": "biome lint ./src vite.config.ts",
     "lint:fix": "biome lint --write ./src vite.config.ts",
     "fmt": "biome check --linter-enabled=false ./src vite.config.ts",
     "fmt:fix": "biome check --write --linter-enabled=false ./src vite.config.ts",
-    "quality": "pnpm check && biome check ./src vite.config.ts",
-    "quality:fix": "pnpm check && biome check --write ./src vite.config.ts",
+    "quality": "pnpm -s knip && pnpm check && biome check ./src vite.config.ts",
+    "quality:fix": "pnpm -s knip && pnpm check && biome check --write ./src vite.config.ts",
     "prebuild": "pnpm quality"
   },
   "keywords": [
@@ -38,6 +40,7 @@
     "@biomejs/biome": "^2.3.14",
     "@biomejs/cli-linux-x64": "^2.3.14",
     "@types/node": "^25.2.2",
+    "knip": "^5.83.1",
     "typescript": "^5.9.3",
     "vite": "^7.3.1"
   }
