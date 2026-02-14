@@ -40,7 +40,6 @@ jobs:
             PR_NUMBER=$(echo "$pr" | jq -r '.number')
             PR_TITLE=$(echo "$pr" | jq -r '.title')
             CREATED_AT=$(echo "$pr" | jq -r '.createdAt')
-            HEAD_REF=$(echo "$pr" | jq -r '.headRefName')
 
             CREATED_TIMESTAMP=$(date -d "$CREATED_AT" +%s || echo "0")
             if [ "$CREATED_TIMESTAMP" = "0" ]; then

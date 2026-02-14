@@ -1,14 +1,5 @@
 name: 🚀 Release
 
-# Responsibility: Release artifact creation
-# - Package manager: pnpm v10+ (auto-detected from packageManager field)
-# - Version detection: git tag or manual trigger
-# - Production build: Vite → userscript + checksums + metadata
-# - GitHub Release: automated creation with downloadable assets
-# - dist/ update: commit built scripts to 'release' branch for jsDelivr CDN
-#
-# Trigger: Tag push (v*) or manual dispatch
-
 on:
   push:
     tags:
@@ -56,6 +47,7 @@ jobs:
       - name: 📝 Determine version
         id: version
         run: |
+          set -euo pipefail
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             VERSION="${{ inputs.version }}"
           else
@@ -81,6 +73,7 @@ jobs:
 
       - name: 🏗️ Build userscript
         run: |
+          set -euo pipefail
           BUILD_VERSION=${{ steps.version.outputs.version }} pnpm build
           # Backup dist for later steps (survives git checkout)
           mkdir -p /tmp/dist-backup
@@ -93,6 +86,7 @@ jobs:
 
       - name: 📦 Prepare release package
         run: |
+          set -euo pipefail
           mkdir -p release
           cp /tmp/dist-backup/yt-live-chat-overlay.user.js release/
           cp /tmp/dist-backup/yt-live-chat-overlay.meta.js release/
@@ -202,6 +196,7 @@ jobs:
 
       - name: 🔄 Purge jsDelivr CDN cache
         run: |
+          set -euo pipefail
           echo "🔄 Purging jsDelivr CDN cache..."
 
           # Purge main userscript file

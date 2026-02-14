@@ -1,13 +1,5 @@
 name: 🔒 Security Scanning
 
-# Responsibility: Security analysis
-# - Package manager: pnpm v10+ (lockfile: pnpm-lock.yaml)
-# - OSV scanning: vulnerability detection in dependencies
-# - SAST: static security analysis with Semgrep
-# - License check: verify LICENSE file presence
-#
-# Trigger: Weekly schedule + push to master + PR to master
-
 on:
   schedule:
     - cron: "0 1 * * 0" # Weekly on Sundays at 1 AM UTC
@@ -20,7 +12,6 @@ on:
   workflow_dispatch:
 
 permissions:
-  # Required to upload SARIF file to CodeQL
   actions: read
   contents: read
   security-events: write
@@ -30,7 +21,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # OSV-Scanner: Scheduled/Push scans - reports all known vulnerabilities
   osv-scan-scheduled:
     name: 🛡️ OSV Vulnerability Scan (Full)
     if: ${{ github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
@@ -45,7 +35,6 @@ jobs:
         --lockfile=pnpm-lock.yaml
         ./
 
-  # OSV-Scanner: PR scans - only reports NEW vulnerabilities introduced in PR
   osv-scan-pr:
     name: 🛡️ OSV Vulnerability Scan (PR Diff)
     if: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
@@ -64,7 +53,6 @@ jobs:
     name: 🔍 Static Analysis (Semgrep)
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # Skip Dependabot PRs to avoid permission issues
     if: github.actor != 'dependabot[bot]'
     permissions:
       contents: read
@@ -139,7 +127,7 @@ jobs:
 
           if [ $FOUND_ISSUES -eq 1 ]; then
             echo "❌ Potential license compliance issues found"
-            # Don't fail, just warn - manual review needed
+            exit 1
           else
             echo "✅ No disallowed license patterns found"
           fi
@@ -153,6 +141,7 @@ jobs:
     steps:
       - name: 📊 Generate summary
         run: |
+          set -euo pipefail
           echo "## 🔒 Security Scan Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Status | Check | Result |" >> $GITHUB_STEP_SUMMARY

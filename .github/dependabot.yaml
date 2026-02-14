@@ -1,14 +1,5 @@
-# Dependabot configuration for yt-live-chat-overlay
-# Package manager: pnpm v10.27.0 (Dependabot handles pnpm via "npm" ecosystem)
-#
-# Security updates: Enabled by default via GitHub security advisory
-# - Creates immediate PRs for known vulnerabilities
-# - Does not count against open-pull-requests-limit
-# - Can include major version updates if needed for security
-
 version: 2
 updates:
-  # pnpm packages (managed via npm ecosystem)
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
@@ -16,7 +7,7 @@ updates:
       day: "monday"
       time: "09:00"
       timezone: "Asia/Seoul"
-    open-pull-requests-limit: 5  # Security updates don't count against this limit
+    open-pull-requests-limit: 5
     commit-message:
       prefix: "chore(deps)"
       prefix-development: "chore(deps-dev)"
@@ -26,12 +17,9 @@ updates:
     reviewers:
       - "PiesP"
 
-    # Auto-rebase to reduce merge conflicts
     rebase-strategy: "auto"
 
-    # Group updates by category to reduce PR noise
     groups:
-      # Build tooling (Vite + plugins)
       build:
         patterns:
           - "vite"
@@ -39,7 +27,6 @@ updates:
           - "minor"
           - "patch"
 
-      # TypeScript ecosystem
       typescript:
         patterns:
           - "typescript"
@@ -48,7 +35,6 @@ updates:
           - "minor"
           - "patch"
 
-      # Linting and formatting (Biome)
       quality:
         patterns:
           - "@biomejs/*"
@@ -56,13 +42,10 @@ updates:
           - "minor"
           - "patch"
 
-    # Ignore packages that require manual review for major updates
     ignore:
-      # Vite major updates need careful review
       - dependency-name: "vite"
         update-types: ["version-update:semver-major"]
 
-  # GitHub Actions updates
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
@@ -70,7 +53,7 @@ updates:
       day: "monday"
       time: "09:00"
       timezone: "Asia/Seoul"
-    open-pull-requests-limit: 3  # Limit concurrent PRs
+    open-pull-requests-limit: 3
     commit-message:
       prefix: "ci(deps)"
     labels:
