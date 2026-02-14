@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         YouTube Live Chat Overlay
-// @version      0.3.1
+// @version      0.4.0
 // @description  Displays YouTube live chat in Nico-nico style flowing overlay (100% local, no data collection)
 // @author       PiesP
 // @match        https://www.youtube.com/*
@@ -25,13 +25,30 @@
 
   const DEFAULT_SETTINGS = {
     enabled: true,
-    speedPxPerSec: 240,
-    fontSize: 26,
-    opacity: 0.92,
-    safeTop: 0.08,
-    safeBottom: 0.15,
-    maxConcurrentMessages: 24,
-    maxMessagesPerSecond: 6,
+    speedPxPerSec: 200,
+    // Slightly slower for better readability with multi-line messages
+    fontSize: 24,
+    // Slightly smaller for better space utilization
+    opacity: 0.95,
+    // Slightly more opaque for better visibility
+    superChatOpacity: 0.4,
+    // Higher default opacity for stronger Super Chat colors
+    safeTop: 0.1,
+    // 10% - increased for better clearance from top UI elements
+    safeBottom: 0.12,
+    // 12% - reduced since we handle multi-line messages better
+    maxConcurrentMessages: 50,
+    // Soft cap for performance monitoring (not enforced)
+    maxMessagesPerSecond: 10,
+    // Rate limit for incoming messages (enforced)
+    showAuthor: {
+      normal: false,
+      member: false,
+      moderator: true,
+      owner: true,
+      verified: false,
+      superChat: true
+    },
     colors: {
       normal: "#FFFFFF",
       // White for normal users
@@ -46,9 +63,12 @@
     },
     outline: {
       enabled: true,
-      widthPx: 1,
-      blurPx: 1,
-      opacity: 0.5
+      widthPx: 1.5,
+      // Slightly thicker for better contrast
+      blurPx: 2,
+      // Increased blur for better glow effect
+      opacity: 0.7
+      // Increased opacity for better visibility
     }
   };
 
@@ -505,9 +525,9 @@
         } else if (element.tagName.toLowerCase().includes("membership")) {
           kind = "membership";
         }
-        if (kind !== "text") return null;
         const authorType = this.extractAuthorType(element);
         const authorName = this.extractAuthorName(element);
+        const authorPhotoUrl = this.extractAuthorPhotoUrl(element);
         const message = {
           text,
           kind,
@@ -522,6 +542,16 @@
         if (authorType) {
           message.authorType = authorType;
         }
+        if (authorPhotoUrl) {
+          message.authorPhotoUrl = authorPhotoUrl;
+        }
+        if (kind === "superchat") {
+          const superChatInfo = this.parseSuperChatInfo(element);
+          if (superChatInfo) {
+            message.superChat = superChatInfo;
+          }
+        }
+        if (kind !== "text" && kind !== "superchat") return null;
         return message;
       } catch (error) {
         console.warn("[YT Chat Overlay] Failed to parse message:", error);
@@ -588,6 +618,26 @@
         "#author-name, yt-live-chat-author-chip #author-name"
       );
       return authorElement?.textContent?.trim();
+    }
+    /**
+     * Extract author photo URL
+     */
+    extractAuthorPhotoUrl(element) {
+      const authorPhotoElement = element.querySelector(
+        "#author-photo img, yt-live-chat-author-chip #author-photo img, #img"
+      );
+      if (!authorPhotoElement) {
+        return void 0;
+      }
+      const photoUrl = authorPhotoElement.src || authorPhotoElement.getAttribute("src");
+      if (!photoUrl) {
+        return void 0;
+      }
+      if (!this.isValidImageUrl(photoUrl)) {
+        console.warn("[YT Chat Overlay] Invalid author photo URL:", photoUrl);
+        return void 0;
+      }
+      return photoUrl;
     }
     /**
      * Normalize text content
@@ -701,6 +751,82 @@
       };
     }
     /**
+     * Parse Super Chat information from element
+     */
+    parseSuperChatInfo(element) {
+      try {
+        const purchaseAmountElement = element.querySelector(
+          "#purchase-amount, yt-formatted-string#purchase-amount"
+        );
+        const amountText = purchaseAmountElement?.textContent?.trim() || "";
+        if (!amountText) {
+          console.warn("[YT Chat Overlay] Super Chat detected but no amount found");
+          return null;
+        }
+        const currencyMatch = amountText.match(/[A-Z]{3}/) || [];
+        const currency = currencyMatch[0];
+        const computedStyle = window.getComputedStyle(element);
+        const backgroundColor = computedStyle.backgroundColor || element.getAttribute("style")?.match(/background-color:\s*([^;]+)/)?.[1] || void 0;
+        const headerElement = element.querySelector(
+          "#card, #header, yt-live-chat-paid-message-renderer #card"
+        );
+        const headerBackgroundColor = headerElement ? window.getComputedStyle(headerElement).backgroundColor || void 0 : void 0;
+        const tier = this.determineSuperChatTier(backgroundColor, amountText);
+        const stickerImg = element.querySelector(
+          '#sticker img, yt-img-shadow#sticker img, img[id*="sticker"]'
+        );
+        const stickerUrl = stickerImg && this.isValidImageUrl(stickerImg.src) ? stickerImg.src : void 0;
+        const superChatInfo = {
+          amount: amountText,
+          tier
+        };
+        if (currency) {
+          superChatInfo.currency = currency;
+        }
+        if (backgroundColor) {
+          superChatInfo.backgroundColor = backgroundColor;
+        }
+        if (headerBackgroundColor) {
+          superChatInfo.headerBackgroundColor = headerBackgroundColor;
+        }
+        if (stickerUrl) {
+          superChatInfo.stickerUrl = stickerUrl;
+        }
+        return superChatInfo;
+      } catch (error) {
+        console.warn("[YT Chat Overlay] Failed to parse Super Chat info:", error);
+        return null;
+      }
+    }
+    /**
+     * Determine Super Chat tier based on background color or amount
+     * YouTube uses different colors for different price tiers
+     */
+    determineSuperChatTier(backgroundColor, amountText) {
+      if (!backgroundColor) {
+        const numericAmount = parseFloat(amountText.replace(/[^0-9.]/g, ""));
+        if (numericAmount >= 100) return "red";
+        if (numericAmount >= 50) return "magenta";
+        if (numericAmount >= 20) return "orange";
+        if (numericAmount >= 10) return "yellow";
+        if (numericAmount >= 5) return "green";
+        if (numericAmount >= 2) return "cyan";
+        return "blue";
+      }
+      const rgbMatch = backgroundColor.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+      if (!rgbMatch) return "blue";
+      const r = parseInt(rgbMatch[1] || "0", 10);
+      const g = parseInt(rgbMatch[2] || "0", 10);
+      const b = parseInt(rgbMatch[3] || "0", 10);
+      if (r > 200 && g < 100 && b < 100) return "red";
+      if (r > 200 && g < 100 && b > 80) return "magenta";
+      if (r > 200 && g > 100 && g < 150 && b < 50) return "orange";
+      if (r > 200 && g > 180 && b < 100) return "yellow";
+      if (r < 100 && g > 200 && b > 150) return "green";
+      if (r < 100 && g > 150 && b > 200) return "cyan";
+      return "blue";
+    }
+    /**
      * Stop monitoring
      */
     stop() {
@@ -785,13 +911,13 @@
       const width = this.playerElement.offsetWidth;
       const height = this.playerElement.offsetHeight;
       if (width === 0 || height === 0) return;
-      const laneHeight = settings.fontSize * 1.6;
+      const baseLaneHeight = settings.fontSize * 1.3;
       const usableHeight = height * (1 - settings.safeTop - settings.safeBottom);
-      const laneCount = Math.floor(usableHeight / laneHeight);
+      const laneCount = Math.floor(usableHeight / baseLaneHeight);
       this.dimensions = {
         width,
         height,
-        laneHeight,
+        laneHeight: baseLaneHeight,
         laneCount: Math.max(1, laneCount)
       };
     }
@@ -911,6 +1037,136 @@
     }
   }
 
+  const colors = {
+    // Author type colors
+    author: {
+      // Verified users
+      member: "#0f9d58"},
+    // Super Chat tier colors
+    superChat: {
+      blue: { r: 30, g: 136, b: 229 },
+      // Tier 1
+      cyan: { r: 29, g: 233, b: 182 },
+      // Tier 2
+      green: { r: 0, g: 229, b: 255 },
+      // Tier 3
+      yellow: { r: 255, g: 202, b: 40 },
+      // Tier 4
+      orange: { r: 245, g: 124, b: 0 },
+      // Tier 5
+      magenta: { r: 233, g: 30, b: 99 },
+      // Tier 6
+      red: { r: 230, g: 33, b: 23 }
+      // Tier 7
+    },
+    // UI colors
+    ui: {
+      background: "#1a1a1a",
+      backgroundLight: "#222222",
+      border: "#444444",
+      text: "#ffffff",
+      textMuted: "#cccccc",
+      primary: "#1e88e5",
+      danger: "#e53935"
+    }};
+  const spacing = {
+    xs: 4,
+    // 4px
+    sm: 8,
+    // 8px
+    md: 12,
+    // 12px
+    lg: 16,
+    // 24px
+    xxxl: 32
+    // 32px
+  };
+  const typography = {
+    fontSize: {
+      xs: "12px",
+      sm: "14px",
+      base: "16px",
+      lg: "18px"},
+    fontWeight: {
+      normal: 400,
+      semibold: 600,
+      bold: 700
+    },
+    lineHeight: {
+      normal: 1.5}
+  };
+  const shadows = {
+    text: {
+      sm: "1px 1px 2px rgba(0, 0, 0, 0.8)",
+      md: "2px 2px 4px rgba(0, 0, 0, 0.8)"},
+    box: {
+      sm: "0 2px 8px rgba(0, 0, 0, 0.6)",
+      md: "0 4px 16px rgba(0, 0, 0, 0.8)",
+      lg: "0 8px 24px rgba(0, 0, 0, 0.9)"
+    },
+    filter: {
+      md: "drop-shadow(2px 2px 4px rgba(0, 0, 0, 0.8))"}
+  };
+  const borderRadius = {
+    sm: "6px",
+    md: "8px",
+    lg: "12px",
+    full: "50%"
+  };
+  const zIndex = {
+    modal: 10003
+  };
+  function rgba(color, alpha) {
+    return `rgba(${color.r}, ${color.g}, ${color.b}, ${alpha})`;
+  }
+
+  const LAYOUT = {
+    // Author display
+    AUTHOR_PHOTO_SIZE: 24,
+    // px
+    AUTHOR_FONT_SCALE: 0.85,
+    // relative to base fontSize
+    // Emoji sizing
+    EMOJI_SIZE_STANDARD: 1.2,
+    // relative to base fontSize
+    EMOJI_SIZE_MEMBER: 1.4,
+    // relative to base fontSize
+    // Super Chat
+    SUPERCHAT_STICKER_SIZE: 2,
+    // relative to base fontSize
+    // Animation
+    EXIT_PADDING_MIN: 100,
+    // px
+    EXIT_PADDING_SCALE: 3,
+    // relative to fontSize
+    DURATION_MIN: 5e3,
+    // ms
+    DURATION_MAX: 12e3,
+    // ms
+    LANE_DELAY_CYCLE: 3,
+    // number of lanes before repeating delay pattern
+    LANE_DELAY_MS: 40,
+    // ms per lane cycle
+    // Collision detection
+    SAFE_DISTANCE_SCALE: 0.7,
+    // relative to fontSize
+    SAFE_DISTANCE_MIN: 16,
+    // px
+    VERTICAL_CLEAR_TIME_MIN: 120,
+    // ms
+    VERTICAL_CLEAR_TIME_MAX: 320,
+    // ms
+    LANE_HEIGHT_PADDING_SCALE: 0.06,
+    // relative to fontSize
+    LANE_HEIGHT_PADDING_MIN: 1,
+    // px
+    RETRY_DELAY_MIN_MS: 16,
+    // ms
+    RETRY_DELAY_MAX_MS: 800,
+    // ms
+    QUEUE_LOOKAHEAD_LIMIT: 14
+    // queue scan window for scheduling
+  };
   class Renderer {
     overlay;
     settings;
@@ -920,7 +1176,12 @@
     lastProcessTime = 0;
     processedInLastSecond = 0;
     isPaused = false;
+    pausedAt = null;
+    playbackRate = 1;
+    lastWarningTime = 0;
+    WARNING_INTERVAL_MS = 1e4;
     styleElement = null;
+    retryTimer = null;
     constructor(overlay, settings) {
       this.overlay = overlay;
       this.settings = settings;
@@ -937,7 +1198,8 @@
         index: i,
         lastItemExitTime: 0,
         lastItemStartTime: 0,
-        lastItemWidthPx: 0
+        lastItemWidthPx: 0,
+        lastItemHeightPx: 0
       }));
     }
     /**
@@ -950,15 +1212,18 @@
       }
       const textShadow = this.buildTextShadow(this.settings.outline);
       const textStroke = this.buildTextStroke(this.settings.outline);
+      const superChatBaseOpacity = Math.min(1, Math.max(0.4, this.settings.superChatOpacity));
+      const superChatTopOpacity = Math.min(1, superChatBaseOpacity + 0.06);
+      const superChatBottomOpacity = Math.max(0.4, superChatBaseOpacity - 0.08);
       this.styleElement.textContent = `
       .yt-chat-overlay-message {
         position: absolute;
         white-space: nowrap;
         font-family: system-ui, -apple-system, sans-serif;
-        font-weight: 700;
+        font-weight: ${typography.fontWeight.bold};
         text-shadow: ${textShadow};
         -webkit-text-stroke: ${textStroke};
-        color: white;
+        color: ${colors.ui.text};
         pointer-events: none;
         will-change: transform;
         animation-timing-function: linear;
@@ -968,6 +1233,154 @@
         -webkit-font-smoothing: antialiased;
         -moz-osx-font-smoothing: grayscale;
       }
+
+      /* Message with author display */
+      .yt-chat-overlay-message-with-author {
+        display: flex;
+        flex-direction: column;
+        gap: ${spacing.xs}px;
+      }
+
+      /* Author info line */
+      .yt-chat-overlay-author-info {
+        display: flex;
+        align-items: center;
+        gap: ${spacing.sm}px;
+        font-size: ${LAYOUT.AUTHOR_FONT_SCALE}em;
+        opacity: 0.95;
+      }
+
+      /* Author photo */
+      .yt-chat-overlay-author-photo {
+        width: ${LAYOUT.AUTHOR_PHOTO_SIZE}px;
+        height: ${LAYOUT.AUTHOR_PHOTO_SIZE}px;
+        border-radius: ${borderRadius.full};
+        flex-shrink: 0;
+        box-shadow: ${shadows.box.sm};
+        filter: ${shadows.filter.md};
+      }
+
+      /* Author name */
+      .yt-chat-overlay-author-name {
+        font-weight: ${typography.fontWeight.semibold};
+      }
+
+      /* Message content line */
+      .yt-chat-overlay-message-content {
+        display: block;
+      }
+
+      /* === Unified Super Chat Card === */
+
+      .yt-chat-overlay-superchat-card {
+        --yt-sc-rgb: 30, 136, 229;
+        --yt-sc-border-rgb: 18, 92, 156;
+        display: flex;
+        flex-direction: column;
+        min-width: min(420px, 72vw);
+        max-width: min(640px, 86vw);
+        border-radius: ${borderRadius.md};
+        overflow: hidden;
+        border: 1px solid rgba(var(--yt-sc-border-rgb), 0.55);
+        background-color: rgb(30, 136, 229);
+        background: linear-gradient(
+          180deg,
+          rgba(var(--yt-sc-rgb), ${superChatTopOpacity}) 0%,
+          rgba(var(--yt-sc-rgb), ${superChatBaseOpacity}) 48%,
+          rgba(var(--yt-sc-rgb), ${superChatBottomOpacity}) 100%
+        );
+        box-shadow: ${shadows.box.md};
+        backdrop-filter: blur(4px);
+      }
+
+      .yt-chat-overlay-superchat-meta {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: ${spacing.md}px;
+        padding: ${spacing.sm}px ${spacing.md}px;
+        background: rgba(0, 0, 0, 0.12);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+      }
+
+      .yt-chat-overlay-superchat-author {
+        display: flex;
+        align-items: center;
+        gap: ${spacing.sm}px;
+        min-width: 0;
+      }
+
+      .yt-chat-overlay-superchat-author .yt-chat-overlay-author-name {
+        font-size: 0.88em;
+        font-weight: ${typography.fontWeight.bold};
+        text-shadow: ${shadows.text.sm};
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .yt-chat-overlay-superchat-amount {
+        display: inline-flex;
+        align-items: center;
+        flex-shrink: 0;
+        padding: ${spacing.xs}px ${spacing.md}px;
+        border-radius: ${borderRadius.lg};
+        font-weight: ${typography.fontWeight.bold};
+        font-size: 0.85em;
+        letter-spacing: 0.2px;
+        color: ${colors.ui.text};
+        background: rgba(255, 255, 255, 0.16);
+        border: 1px solid rgba(255, 255, 255, 0.22);
+        text-shadow: ${shadows.text.sm};
+      }
+
+      .yt-chat-overlay-superchat-body {
+        display: flex;
+        flex-direction: column;
+        padding: ${spacing.sm}px ${spacing.md}px ${spacing.md}px;
+        gap: ${spacing.sm}px;
+      }
+
+      .yt-chat-overlay-superchat-body .yt-chat-overlay-message-content {
+        line-height: ${typography.lineHeight.normal};
+        text-shadow: ${shadows.text.md};
+        letter-spacing: 0.2px;
+        white-space: normal;
+      }
+
+      .yt-chat-overlay-superchat-body .yt-chat-overlay-superchat-sticker {
+        align-self: flex-start;
+        margin-bottom: ${spacing.xs}px;
+      }
+
+      /* Enhanced regular message with author */
+      .yt-chat-overlay-message-with-author:not(.yt-chat-overlay-superchat-card) {
+        background: rgba(0, 0, 0, 0.25);
+        padding: ${spacing.sm}px ${spacing.md}px;
+        border-radius: ${borderRadius.sm};
+        backdrop-filter: blur(2px);
+      }
+
+      .yt-chat-overlay-message-with-author .yt-chat-overlay-author-photo {
+        box-shadow: ${shadows.box.sm};
+        border: 1px solid rgba(255, 255, 255, 0.15);
+      }
+
+      /* Improved text shadow for all messages */
+      .yt-chat-overlay-message:not(.yt-chat-overlay-superchat-card) {
+        text-shadow: ${shadows.text.md}, 0 0 8px rgba(0, 0, 0, 0.7);
+        letter-spacing: 0.3px;
+      }
+
+      /* Super Chat sticker */
+      .yt-chat-overlay-superchat-sticker {
+        display: inline-block;
+        vertical-align: middle;
+        margin-right: ${spacing.sm}px;
+        filter: ${shadows.filter.md};
+      }
+
+      /* Legacy styles removed - now using unified card-based system */
 
       /* Emoji styling */
       .yt-chat-overlay-emoji {
@@ -984,6 +1397,49 @@
         /* Green glow for member emojis */
         filter: drop-shadow(0 0 2px rgba(15, 157, 88, 0.6))
                 drop-shadow(0 0 4px rgba(15, 157, 88, 0.4));
+      }
+
+      /* === MEMBERSHIP MESSAGE CARDS === */
+
+      /* Membership card container */
+      .yt-chat-overlay-membership-card {
+        display: flex;
+        flex-direction: column;
+        padding: ${spacing.md}px ${spacing.lg}px;
+        border-radius: ${borderRadius.md};
+        background: ${rgba(colors.superChat.green, 0.25)};
+        border: 2px solid ${rgba(colors.superChat.green, 0.5)};
+        box-shadow: ${shadows.box.md};
+        backdrop-filter: blur(4px);
+      }
+
+      /* Membership author section */
+      .yt-chat-overlay-membership-author {
+        display: flex;
+        align-items: center;
+        gap: ${spacing.md}px;
+      }
+
+      /* Membership text container */
+      .yt-chat-overlay-membership-text {
+        display: flex;
+        flex-direction: column;
+        gap: ${spacing.xs}px;
+      }
+
+      /* Membership author name */
+      .yt-chat-overlay-membership-author-name {
+        font-size: ${typography.fontSize.base};
+        font-weight: ${typography.fontWeight.bold};
+        text-shadow: ${shadows.text.md};
+      }
+
+      /* Membership message text */
+      .yt-chat-overlay-membership-message {
+        font-size: ${typography.fontSize.sm};
+        font-weight: ${typography.fontWeight.normal};
+        color: ${colors.ui.text};
+        text-shadow: ${shadows.text.sm};
       }
     `;
     }
@@ -1042,37 +1498,122 @@
       }
     }
     /**
-     * Create emoji img element with proper styling
+     * Create a validated image element with error handling
+     * Common helper for emoji, stickers, and author photos
      * SECURITY: Validates URL and creates element programmatically
      */
-    createEmojiElement(emoji) {
-      if (!this.isValidImageUrl(emoji.url)) {
-        console.warn("[YT Chat Overlay] Invalid emoji URL:", emoji.url);
+    createImageElement(url, alt, className, sizePx) {
+      if (!this.isValidImageUrl(url)) {
+        console.warn("[YT Chat Overlay] Invalid image URL:", url);
         return null;
       }
       const img = document.createElement("img");
-      img.src = emoji.url;
-      img.alt = emoji.alt || "";
-      img.className = "yt-chat-overlay-emoji";
-      img.style.display = "inline-block";
-      img.style.verticalAlign = "text-bottom";
-      const sizeFactor = emoji.type === "member" ? 1.4 : 1.2;
-      const emojiSize = this.settings.fontSize * sizeFactor;
-      img.style.height = `${emojiSize}px`;
+      img.src = url;
+      img.alt = alt;
+      img.className = className;
+      img.style.height = `${sizePx}px`;
       img.style.width = "auto";
-      if (emoji.type === "member") {
-        img.classList.add("yt-chat-overlay-emoji-member");
-      }
+      img.draggable = false;
       img.addEventListener(
         "error",
         () => {
           img.style.display = "none";
-          console.warn("[YT Chat Overlay] Failed to load emoji:", emoji.url);
+          console.warn("[YT Chat Overlay] Failed to load image:", url);
         },
         { once: true }
       );
-      img.draggable = false;
       return img;
+    }
+    /**
+     * Create a standardized author photo element
+     */
+    createAuthorPhotoElement(photoUrl, alt) {
+      if (!photoUrl) {
+        return null;
+      }
+      return this.createImageElement(
+        photoUrl,
+        alt,
+        "yt-chat-overlay-author-photo",
+        LAYOUT.AUTHOR_PHOTO_SIZE
+      );
+    }
+    /**
+     * Create message text element (plain text or rich text + emoji)
+     */
+    createMessageTextElement(message, className = "yt-chat-overlay-message-content") {
+      const hasRichContent = Boolean(message.content && message.content.length > 0);
+      const hasPlainText = message.text.trim().length > 0;
+      if (!hasRichContent && !hasPlainText) {
+        return null;
+      }
+      const contentDiv = document.createElement("div");
+      contentDiv.className = className;
+      if (hasRichContent && message.content) {
+        this.renderMixedContent(contentDiv, message.content);
+      } else {
+        contentDiv.textContent = message.text;
+      }
+      return contentDiv;
+    }
+    /**
+     * Parse RGB/RGBA color string to components
+     * Handles formats: "rgb(r, g, b)" or "rgba(r, g, b, a)"
+     */
+    parseRgbaColor(colorString) {
+      const rgbaMatch = colorString.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
+      if (!rgbaMatch) return null;
+      return {
+        r: parseInt(rgbaMatch[1] || "0", 10),
+        g: parseInt(rgbaMatch[2] || "0", 10),
+        b: parseInt(rgbaMatch[3] || "0", 10),
+        a: rgbaMatch[4] ? parseFloat(rgbaMatch[4]) : 1
+      };
+    }
+    /**
+     * Resolve Super Chat RGB color from actual YouTube color or tier fallback
+     */
+    resolveSuperChatRgb(superChat) {
+      const sourceColor = superChat.headerBackgroundColor || superChat.backgroundColor;
+      const parsed = sourceColor ? this.parseRgbaColor(sourceColor) : null;
+      if (parsed) {
+        return { r: parsed.r, g: parsed.g, b: parsed.b };
+      }
+      return colors.superChat[superChat.tier];
+    }
+    /**
+     * Create emoji img element with proper styling
+     * SECURITY: Validates URL and creates element programmatically
+     */
+    createEmojiElement(emoji) {
+      const sizeFactor = emoji.type === "member" ? LAYOUT.EMOJI_SIZE_MEMBER : LAYOUT.EMOJI_SIZE_STANDARD;
+      const emojiSize = this.settings.fontSize * sizeFactor;
+      const img = this.createImageElement(
+        emoji.url,
+        emoji.alt || "",
+        "yt-chat-overlay-emoji",
+        emojiSize
+      );
+      if (!img) return null;
+      img.style.display = "inline-block";
+      img.style.verticalAlign = "text-bottom";
+      if (emoji.type === "member") {
+        img.classList.add("yt-chat-overlay-emoji-member");
+      }
+      return img;
+    }
+    /**
+     * Create Super Chat sticker image element
+     * SECURITY: Validates URL and creates element programmatically
+     */
+    createSuperChatSticker(stickerUrl) {
+      const stickerSize = this.settings.fontSize * LAYOUT.SUPERCHAT_STICKER_SIZE;
+      return this.createImageElement(
+        stickerUrl,
+        "Super Chat Sticker",
+        "yt-chat-overlay-superchat-sticker",
+        stickerSize
+      );
     }
     /**
      * Render mixed content (text + emoji) using DOM API
@@ -1092,6 +1633,202 @@
       }
     }
     /**
+     * Determine if author should be shown for a message
+     */
+    shouldShowAuthor(message) {
+      const settings = this.settings.showAuthor;
+      const authorType = message.authorType || "normal";
+      return settings[authorType] || false;
+    }
+    /**
+     * Create author info element (photo + name)
+     * SECURITY: Validates photo URL and creates elements programmatically
+     */
+    createAuthorElement(message) {
+      const authorInfoDiv = document.createElement("div");
+      authorInfoDiv.className = "yt-chat-overlay-author-info";
+      const photoImg = this.createAuthorPhotoElement(
+        message.authorPhotoUrl,
+        message.author || "Author"
+      );
+      if (photoImg) {
+        authorInfoDiv.appendChild(photoImg);
+      }
+      if (message.author) {
+        const nameSpan = document.createElement("span");
+        nameSpan.className = "yt-chat-overlay-author-name";
+        nameSpan.textContent = message.author;
+        const authorType = message.authorType || "normal";
+        nameSpan.style.color = this.settings.colors[authorType];
+        authorInfoDiv.appendChild(nameSpan);
+      }
+      return authorInfoDiv;
+    }
+    /**
+     * Create Super Chat header section with author info and amount badge
+     */
+    createSuperChatHeader(message, superChat, showAuthor) {
+      const header = document.createElement("div");
+      header.className = "yt-chat-overlay-superchat-meta";
+      if (showAuthor) {
+        const authorSection = document.createElement("div");
+        authorSection.className = "yt-chat-overlay-superchat-author";
+        const photoImg = this.createAuthorPhotoElement(
+          message.authorPhotoUrl,
+          message.author || "Author"
+        );
+        if (photoImg) {
+          authorSection.appendChild(photoImg);
+        }
+        if (message.author) {
+          const authorName = document.createElement("span");
+          authorName.className = "yt-chat-overlay-author-name";
+          authorName.textContent = message.author;
+          const authorType = message.authorType || "normal";
+          authorName.style.color = this.settings.colors[authorType];
+          authorSection.appendChild(authorName);
+        }
+        if (authorSection.childElementCount > 0) {
+          header.appendChild(authorSection);
+        }
+      }
+      const amountBadge = document.createElement("span");
+      amountBadge.className = "yt-chat-overlay-superchat-amount";
+      amountBadge.textContent = superChat.amount;
+      header.appendChild(amountBadge);
+      if (!showAuthor) {
+        header.style.justifyContent = "flex-end";
+      }
+      return header;
+    }
+    /**
+     * Create Super Chat content section with sticker and message
+     */
+    createSuperChatContent(message, superChat) {
+      const hasSticker = Boolean(superChat.stickerUrl);
+      const messageDiv = this.createMessageTextElement(message);
+      if (!messageDiv && !hasSticker) {
+        return null;
+      }
+      const content = document.createElement("div");
+      content.className = "yt-chat-overlay-superchat-body";
+      if (superChat.stickerUrl) {
+        const stickerImg = this.createSuperChatSticker(superChat.stickerUrl);
+        if (stickerImg) {
+          content.appendChild(stickerImg);
+        }
+      }
+      if (messageDiv) {
+        content.appendChild(messageDiv);
+      }
+      return content;
+    }
+    /**
+     * Create membership message card with author and message
+     */
+    createMembershipCard(message) {
+      const card = document.createElement("div");
+      card.className = "yt-chat-overlay-membership-card";
+      const authorSection = document.createElement("div");
+      authorSection.className = "yt-chat-overlay-membership-author";
+      const photo = this.createAuthorPhotoElement(message.authorPhotoUrl, message.author || "Member");
+      if (photo) {
+        authorSection.appendChild(photo);
+      }
+      const textContainer = document.createElement("div");
+      textContainer.className = "yt-chat-overlay-membership-text";
+      if (message.author) {
+        const authorName = document.createElement("div");
+        authorName.className = "yt-chat-overlay-membership-author-name";
+        authorName.style.color = colors.author.member;
+        authorName.textContent = message.author;
+        textContainer.appendChild(authorName);
+      }
+      const membershipText = this.createMessageTextElement(
+        message,
+        "yt-chat-overlay-membership-message"
+      );
+      if (membershipText) {
+        textContainer.appendChild(membershipText);
+      }
+      authorSection.appendChild(textContainer);
+      card.appendChild(authorSection);
+      return card;
+    }
+    /**
+     * Apply Super Chat card styling with color variables
+     */
+    applySuperChatStyling(element, superChat) {
+      element.classList.add("yt-chat-overlay-superchat-card");
+      const rgb = this.resolveSuperChatRgb(superChat);
+      const borderRgb = {
+        r: Math.max(0, rgb.r - 36),
+        g: Math.max(0, rgb.g - 36),
+        b: Math.max(0, rgb.b - 36)
+      };
+      element.style.setProperty("--yt-sc-rgb", `${rgb.r}, ${rgb.g}, ${rgb.b}`);
+      element.style.setProperty(
+        "--yt-sc-border-rgb",
+        `${borderRgb.r}, ${borderRgb.g}, ${borderRgb.b}`
+      );
+    }
+    /**
+     * Setup animation and positioning for a message element
+     * Returns ActiveMessage object for tracking
+     */
+    setupMessageAnimation(element, placement, textWidth, messageHeight, dimensions) {
+      const fontSize = this.settings.fontSize;
+      const { lane, laneSpan } = placement;
+      const laneY = dimensions.height * this.settings.safeTop + lane.index * dimensions.laneHeight;
+      element.style.top = `${laneY}px`;
+      element.style.visibility = "visible";
+      const exitPadding = Math.max(fontSize * LAYOUT.EXIT_PADDING_SCALE, LAYOUT.EXIT_PADDING_MIN);
+      const distance = dimensions.width + textWidth + exitPadding;
+      const effectiveSpeedPxPerSec = this.getEffectiveSpeedPxPerSec();
+      const duration = Math.max(
+        LAYOUT.DURATION_MIN,
+        Math.min(LAYOUT.DURATION_MAX, distance / effectiveSpeedPxPerSec * 1e3)
+      );
+      const laneDelay = lane.index % LAYOUT.LANE_DELAY_CYCLE * LAYOUT.LANE_DELAY_MS;
+      const totalDuration = duration + laneDelay;
+      const animation = element.animate(
+        [{ transform: "translateX(0)" }, { transform: `translateX(-${distance}px)` }],
+        {
+          duration,
+          delay: laneDelay,
+          easing: "linear",
+          fill: "forwards"
+        }
+      );
+      animation.playbackRate = this.playbackRate;
+      const now = Date.now();
+      const startTime = now + laneDelay;
+      const exitTime = now + totalDuration;
+      for (let i = lane.index; i < lane.index + laneSpan && i < this.lanes.length; i++) {
+        const laneState = this.lanes[i];
+        if (!laneState) continue;
+        laneState.lastItemStartTime = startTime;
+        laneState.lastItemExitTime = exitTime;
+        laneState.lastItemWidthPx = textWidth;
+        laneState.lastItemHeightPx = messageHeight;
+      }
+      animation.addEventListener(
+        "finish",
+        () => {
+          this.removeMessageByElement(element);
+        },
+        { once: true }
+      );
+      return {
+        element,
+        lane: lane.index,
+        laneSpan,
+        startTime: now,
+        duration,
+        animation
+      };
+    }
+    /**
      * Add message to render queue
      */
     addMessage(message) {
@@ -1103,7 +1840,10 @@
       if (this.processedInLastSecond >= this.settings.maxMessagesPerSecond) {
         return;
       }
-      this.messageQueue.push(message);
+      this.messageQueue.push({
+        message,
+        nextAttemptAt: 0
+      });
       if (!this.isPaused) {
         this.processQueue();
       }
@@ -1115,19 +1855,151 @@
       if (this.isPaused) {
         return;
       }
+      this.clearRetryTimer();
+      let shortestWaitMs = null;
       while (this.messageQueue.length > 0) {
-        if (this.activeMessages.size >= this.settings.maxConcurrentMessages) {
-          const oldest = Array.from(this.activeMessages)[0];
-          if (oldest) {
-            this.removeMessage(oldest);
+        let progressed = false;
+        const now = Date.now();
+        const lookaheadCount = Math.min(LAYOUT.QUEUE_LOOKAHEAD_LIMIT, this.messageQueue.length);
+        for (let i = 0; i < lookaheadCount; i++) {
+          const queued = this.messageQueue[i];
+          if (!queued) continue;
+          if (queued.nextAttemptAt > now) {
+            const waitMs = queued.nextAttemptAt - now;
+            shortestWaitMs = shortestWaitMs === null ? waitMs : Math.min(shortestWaitMs, waitMs);
+            continue;
           }
+          if (this.activeMessages.size >= this.settings.maxConcurrentMessages) {
+            this.logPerformanceWarning();
+          }
+          const result = this.renderMessage(queued.message);
+          if (result.status === "rendered") {
+            this.messageQueue.splice(i, 1);
+            this.processedInLastSecond++;
+            progressed = true;
+            break;
+          }
+          if (result.status === "dropped") {
+            this.messageQueue.splice(i, 1);
+            progressed = true;
+            break;
+          }
+          queued.nextAttemptAt = now + result.waitMs;
+          shortestWaitMs = shortestWaitMs === null ? result.waitMs : Math.min(shortestWaitMs, result.waitMs);
         }
-        const message = this.messageQueue.shift();
-        if (message) {
-          this.renderMessage(message);
-          this.processedInLastSecond++;
+        if (!progressed) {
+          break;
         }
       }
+      if (this.messageQueue.length > 0) {
+        this.scheduleRetry(shortestWaitMs ?? LAYOUT.RETRY_DELAY_MAX_MS);
+      }
+    }
+    /**
+     * Get effective message speed considering current video playback rate
+     */
+    getEffectiveSpeedPxPerSec() {
+      return Math.max(1, this.settings.speedPxPerSec * this.playbackRate);
+    }
+    /**
+     * Schedule queue processing retry when lanes are temporarily occupied
+     */
+    scheduleRetry(waitMs) {
+      if (this.isPaused) return;
+      const delay = Math.max(LAYOUT.RETRY_DELAY_MIN_MS, Math.min(waitMs, LAYOUT.RETRY_DELAY_MAX_MS));
+      this.clearRetryTimer();
+      this.retryTimer = window.setTimeout(() => {
+        this.retryTimer = null;
+        this.processQueue();
+      }, delay);
+    }
+    /**
+     * Clear pending queue retry timer
+     */
+    clearRetryTimer() {
+      if (this.retryTimer !== null) {
+        window.clearTimeout(this.retryTimer);
+        this.retryTimer = null;
+      }
+    }
+    /**
+     * Log performance warning when concurrent message count is high
+     * Limited to once per 10 seconds to avoid log spam
+     */
+    logPerformanceWarning() {
+      const now = Date.now();
+      if (now - this.lastWarningTime < this.WARNING_INTERVAL_MS) {
+        return;
+      }
+      this.lastWarningTime = now;
+      console.warn(
+        `[YT Chat Overlay] Performance warning: ${this.activeMessages.size} concurrent messages (recommended max: ${this.settings.maxConcurrentMessages}). Consider reducing maxMessagesPerSecond setting.`
+      );
+    }
+    /**
+     * Build message DOM element by message kind
+     */
+    buildMessageElement(message) {
+      const element = document.createElement("div");
+      element.className = "yt-chat-overlay-message";
+      const isSuperChat = message.kind === "superchat" && Boolean(message.superChat);
+      const isMembership = message.kind === "membership";
+      if (isSuperChat && message.superChat) {
+        this.applySuperChatStyling(element, message.superChat);
+        const headerElement = this.createSuperChatHeader(
+          message,
+          message.superChat,
+          this.settings.showAuthor.superChat
+        );
+        const contentElement = this.createSuperChatContent(message, message.superChat);
+        element.appendChild(headerElement);
+        if (contentElement) {
+          element.appendChild(contentElement);
+        }
+        return { element, isSuperChat, isMembership };
+      }
+      if (isMembership) {
+        const membershipCard = this.createMembershipCard(message);
+        element.appendChild(membershipCard);
+        return { element, isSuperChat, isMembership };
+      }
+      const showAuthor = this.shouldShowAuthor(message);
+      if (showAuthor) {
+        element.classList.add("yt-chat-overlay-message-with-author");
+        const authorElement = this.createAuthorElement(message);
+        element.appendChild(authorElement);
+      }
+      const contentDiv = this.createMessageTextElement(message);
+      if (!contentDiv) {
+        console.warn("[YT Chat Overlay] Skipping empty message");
+        return null;
+      }
+      element.appendChild(contentDiv);
+      return { element, isSuperChat, isMembership };
+    }
+    /**
+     * Apply common visual styles shared by all message kinds
+     */
+    applyCommonMessageStyles(element, message, isSuperChat, isMembership) {
+      element.style.fontSize = `${this.settings.fontSize}px`;
+      element.style.opacity = `${this.settings.opacity}`;
+      if (!isSuperChat && !isMembership) {
+        const authorType = message.authorType || "normal";
+        element.style.color = this.settings.colors[authorType];
+      }
+    }
+    /**
+     * Append message to DOM in hidden state and measure rendered size
+     */
+    measureMessageElement(container, element, overlayWidth) {
+      element.style.visibility = "hidden";
+      element.style.left = `${overlayWidth}px`;
+      element.style.top = "0px";
+      container.appendChild(element);
+      return {
+        textWidth: element.offsetWidth,
+        messageHeight: element.offsetHeight
+      };
     }
     /**
      * Render a single message
@@ -1137,103 +2009,123 @@
       const dimensions = this.overlay.getDimensions();
       if (!container || !dimensions) {
         console.warn("[YT Chat Overlay] Cannot render: container or dimensions missing");
-        return;
+        return { status: "dropped" };
       }
-      const element = document.createElement("div");
-      element.className = "yt-chat-overlay-message";
-      if (message.content && message.content.length > 0) {
-        this.renderMixedContent(element, message.content);
-      } else {
-        element.textContent = message.text;
+      const builtMessage = this.buildMessageElement(message);
+      if (!builtMessage) {
+        return { status: "dropped" };
       }
-      element.style.fontSize = `${this.settings.fontSize}px`;
-      element.style.opacity = `${this.settings.opacity}`;
-      const authorType = message.authorType || "normal";
-      element.style.color = this.settings.colors[authorType];
-      const lane = this.findAvailableLane();
-      if (lane === null) {
-        console.log("[YT Chat Overlay] No available lane, dropping message");
-        return;
-      }
-      const laneY = dimensions.height * this.settings.safeTop + lane.index * dimensions.laneHeight;
-      element.style.top = `${laneY}px`;
-      element.style.left = `${dimensions.width}px`;
-      container.appendChild(element);
-      const textWidth = element.offsetWidth;
-      const exitPadding = Math.max(this.settings.fontSize * 2, 80);
-      const distance = dimensions.width + textWidth + exitPadding;
-      const duration = Math.max(
-        4e3,
-        Math.min(14e3, distance / this.settings.speedPxPerSec * 1e3)
+      const { element, isSuperChat, isMembership } = builtMessage;
+      this.applyCommonMessageStyles(element, message, isSuperChat, isMembership);
+      const { textWidth, messageHeight } = this.measureMessageElement(
+        container,
+        element,
+        dimensions.width
       );
-      const laneDelay = lane.index % 3 * 80;
-      const totalDuration = duration + laneDelay;
-      const animation = element.animate(
-        [{ transform: "translateX(0)" }, { transform: `translateX(-${distance}px)` }],
-        {
-          duration,
-          delay: laneDelay,
-          easing: "linear",
-          fill: "forwards"
-        }
+      const placement = this.findLanePlacement(messageHeight);
+      if (placement === null) {
+        const dimensions2 = this.overlay.getDimensions();
+        console.log(
+          `[YT Chat Overlay] No available lane for message (height: ${messageHeight}px). Active messages: ${this.activeMessages.size}, Lanes: ${dimensions2?.laneCount || "unknown"}, Queue size: ${this.messageQueue.length}`
+        );
+        container.removeChild(element);
+        return { status: "dropped" };
+      }
+      if (placement.waitMs > 0) {
+        container.removeChild(element);
+        return { status: "deferred", waitMs: placement.waitMs };
+      }
+      const activeMessage = this.setupMessageAnimation(
+        element,
+        placement,
+        textWidth,
+        messageHeight,
+        dimensions
       );
+      this.activeMessages.add(activeMessage);
       console.log("[YT Chat Overlay] Rendering message:", {
         text: message.text.substring(0, 20),
         author: message.author,
         authorType: message.authorType || "normal",
-        color: this.settings.colors[authorType],
-        lane: lane.index,
+        kind: message.kind,
+        isSuperChat,
+        superChatTier: message.superChat?.tier,
+        superChatAmount: message.superChat?.amount,
+        color: isSuperChat ? "tier-based" : this.settings.colors[message.authorType || "normal"],
+        lane: placement.lane.index,
+        laneSpan: placement.laneSpan,
         width: textWidth,
-        distance,
-        duration,
-        delay: laneDelay,
-        totalDuration,
+        height: messageHeight,
         dimensions
       });
-      const now = Date.now();
-      lane.lastItemStartTime = now + laneDelay;
-      lane.lastItemExitTime = now + totalDuration;
-      lane.lastItemWidthPx = textWidth;
-      const timeoutId = window.setTimeout(() => {
-        this.removeMessageByElement(element);
-      }, totalDuration + 2e3);
-      const activeMessage = {
-        element,
-        lane: lane.index,
-        startTime: now,
-        duration,
-        timeoutId,
-        animation
-      };
-      this.activeMessages.add(activeMessage);
-      animation.addEventListener(
-        "finish",
-        () => {
-          this.removeMessageByElement(element);
-        },
-        { once: true }
-      );
+      return { status: "rendered" };
     }
     /**
-     * Find available lane (collision avoidance)
+     * Calculate required lane count for a message
      */
-    findAvailableLane() {
+    calculateRequiredLanes(messageHeight, laneHeight) {
+      const paddingPx = Math.max(
+        LAYOUT.LANE_HEIGHT_PADDING_MIN,
+        this.settings.fontSize * LAYOUT.LANE_HEIGHT_PADDING_SCALE
+      );
+      return Math.max(1, Math.ceil((messageHeight + paddingPx) / laneHeight));
+    }
+    /**
+     * Calculate lane ready time for a new message width
+     */
+    calculateLaneReadyTime(lane, now) {
+      if (lane.lastItemStartTime <= 0) {
+        return now;
+      }
+      const baseSafeDistance = this.settings.fontSize * LAYOUT.SAFE_DISTANCE_SCALE;
+      const minSafeDistance = Math.max(baseSafeDistance, LAYOUT.SAFE_DISTANCE_MIN);
+      const requiredGapPx = lane.lastItemWidthPx + minSafeDistance;
+      const safeTimeGap = requiredGapPx / this.getEffectiveSpeedPxPerSec() * 1e3;
+      const horizontalReadyTime = lane.lastItemStartTime + safeTimeGap;
+      const verticalClearTime = Math.min(
+        LAYOUT.VERTICAL_CLEAR_TIME_MAX,
+        Math.max(LAYOUT.VERTICAL_CLEAR_TIME_MIN, lane.lastItemHeightPx * 4)
+      );
+      const verticalReadyTime = lane.lastItemStartTime + verticalClearTime;
+      return Math.max(now, horizontalReadyTime, verticalReadyTime);
+    }
+    /**
+     * Find the best lane placement (position + timing)
+     */
+    findLanePlacement(messageHeight) {
       const now = Date.now();
       const dimensions = this.overlay.getDimensions();
       if (!dimensions) return null;
-      for (const lane of this.lanes) {
-        if (lane.lastItemStartTime === 0) {
-          return lane;
+      const requiredLanes = this.calculateRequiredLanes(messageHeight, dimensions.laneHeight);
+      if (requiredLanes > this.lanes.length) {
+        return null;
+      }
+      let bestLane = null;
+      let bestReadyTime = Number.POSITIVE_INFINITY;
+      for (let i = 0; i <= this.lanes.length - requiredLanes; i++) {
+        let blockReadyTime = now;
+        for (let offset = 0; offset < requiredLanes; offset++) {
+          const lane = this.lanes[i + offset];
+          if (!lane) {
+            blockReadyTime = Number.POSITIVE_INFINITY;
+            break;
+          }
+          const laneReadyTime = this.calculateLaneReadyTime(lane, now);
+          blockReadyTime = Math.max(blockReadyTime, laneReadyTime);
         }
-        const minSafeDistance = Math.max(this.settings.fontSize * 1.2, 60);
-        const requiredGapPx = Math.max(lane.lastItemWidthPx, minSafeDistance) + minSafeDistance;
-        const safeTimeGap = requiredGapPx / this.settings.speedPxPerSec * 1e3;
-        const timeSinceLastStart = now - lane.lastItemStartTime;
-        if (timeSinceLastStart >= safeTimeGap) {
-          return lane;
+        if (blockReadyTime < bestReadyTime || blockReadyTime === bestReadyTime && bestLane && i < bestLane.index) {
+          bestReadyTime = blockReadyTime;
+          bestLane = this.lanes[i] || null;
         }
       }
-      return null;
+      if (!bestLane || !Number.isFinite(bestReadyTime)) {
+        return null;
+      }
+      return {
+        lane: bestLane,
+        laneSpan: requiredLanes,
+        waitMs: Math.max(0, Math.ceil(bestReadyTime - now))
+      };
     }
     /**
      * Remove message by element
@@ -1248,10 +2140,15 @@
      * Remove active message
      */
     removeMessage(active) {
+      try {
+        if (active.animation.playState !== "finished") {
+          active.animation.cancel();
+        }
+      } catch {
+      }
       if (active.element.parentNode) {
         active.element.parentNode.removeChild(active.element);
       }
-      clearTimeout(active.timeoutId);
       this.activeMessages.delete(active);
     }
     /**
@@ -1269,6 +2166,8 @@
       if (this.isPaused) return;
       console.log("[Renderer] Pausing all animations");
       this.isPaused = true;
+      this.pausedAt = Date.now();
+      this.clearRetryTimer();
       this.forEachAnimation((animation) => animation.pause());
       console.log(`[Renderer] Paused ${this.activeMessages.size} animations`);
     }
@@ -1277,6 +2176,24 @@
      */
     resume() {
       if (!this.isPaused) return;
+      const now = Date.now();
+      if (this.pausedAt !== null) {
+        const pausedDuration = Math.max(0, now - this.pausedAt);
+        if (pausedDuration > 0) {
+          for (const lane of this.lanes) {
+            if (lane.lastItemStartTime > 0) {
+              lane.lastItemStartTime += pausedDuration;
+            }
+            if (lane.lastItemExitTime > 0) {
+              lane.lastItemExitTime += pausedDuration;
+            }
+          }
+          if (this.lastProcessTime > 0) {
+            this.lastProcessTime += pausedDuration;
+          }
+        }
+      }
+      this.pausedAt = null;
       console.log("[Renderer] Resuming all animations");
       this.isPaused = false;
       this.forEachAnimation((animation) => animation.play());
@@ -1298,6 +2215,7 @@
         console.warn("[Renderer] Invalid playback rate:", rate);
         return;
       }
+      this.playbackRate = rate;
       console.log(
         `[Renderer] Setting playback rate to ${rate}x for ${this.activeMessages.size} animations`
       );
@@ -1322,6 +2240,9 @@
      * Clear all messages
      */
     clear() {
+      this.clearRetryTimer();
+      this.pausedAt = null;
+      this.playbackRate = 1;
       for (const active of this.activeMessages) {
         this.removeMessage(active);
       }
@@ -1484,15 +2405,15 @@
         style.textContent = `
         .yt-chat-overlay-settings-button {
           position: absolute;
-          top: 8px;
-          right: 8px;
-          width: 32px;
-          height: 32px;
-          border-radius: 6px;
+          top: ${spacing.sm}px;
+          right: ${spacing.sm}px;
+          width: ${spacing.xxxl}px;
+          height: ${spacing.xxxl}px;
+          border-radius: ${borderRadius.sm};
           border: 1px solid rgba(255, 255, 255, 0.25);
           background: rgba(0, 0, 0, 0.6);
-          color: #fff;
-          font-size: 16px;
+          color: ${colors.ui.text};
+          font-size: ${typography.fontSize.base};
           cursor: pointer;
           z-index: 120;
           pointer-events: auto;
@@ -1507,44 +2428,44 @@
           align-items: center;
           justify-content: center;
           background: rgba(0, 0, 0, 0.55);
-          z-index: 9999;
+          z-index: ${zIndex.modal};
         }
         .yt-chat-overlay-settings-modal {
           width: 380px;
           max-height: 82vh;
           overflow: auto;
-          background: rgba(20, 20, 20, 0.96);
-          color: #fff;
-          border-radius: 10px;
-          padding: 16px;
+          background: ${colors.ui.background};
+          color: ${colors.ui.text};
+          border-radius: ${borderRadius.md};
+          padding: ${spacing.lg}px;
           display: flex;
           flex-direction: column;
-          gap: 14px;
+          gap: ${spacing.lg}px;
           font-family: system-ui, -apple-system, sans-serif;
-          box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+          box-shadow: ${shadows.box.lg};
         }
         .yt-chat-overlay-settings-header {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          font-weight: 700;
-          font-size: 16px;
+          font-weight: ${typography.fontWeight.bold};
+          font-size: ${typography.fontSize.base};
         }
         .yt-chat-overlay-settings-close {
           border: none;
           background: transparent;
-          color: #fff;
-          font-size: 18px;
+          color: ${colors.ui.text};
+          font-size: ${typography.fontSize.lg};
           cursor: pointer;
         }
         .yt-chat-overlay-settings-section {
           display: flex;
           flex-direction: column;
-          gap: 10px;
+          gap: ${spacing.md}px;
         }
         .yt-chat-overlay-settings-section-title {
-          font-size: 13px;
-          color: rgba(255, 255, 255, 0.7);
+          font-size: ${typography.fontSize.xs};
+          color: ${colors.ui.textMuted};
           text-transform: uppercase;
           letter-spacing: 0.04em;
         }
@@ -1552,16 +2473,16 @@
           display: flex;
           align-items: center;
           justify-content: space-between;
-          gap: 12px;
-          font-size: 14px;
+          gap: ${spacing.md}px;
+          font-size: ${typography.fontSize.sm};
         }
         .yt-chat-overlay-settings-field input[type="number"] {
           width: 110px;
-          padding: 4px 6px;
-          border-radius: 6px;
-          border: 1px solid rgba(255, 255, 255, 0.2);
-          background: rgba(0, 0, 0, 0.4);
-          color: #fff;
+          padding: ${spacing.xs}px ${spacing.sm}px;
+          border-radius: ${borderRadius.sm};
+          border: 1px solid ${colors.ui.border};
+          background: ${colors.ui.backgroundLight};
+          color: ${colors.ui.text};
         }
         .yt-chat-overlay-settings-field input[type="color"] {
           width: 48px;
@@ -1570,26 +2491,56 @@
           background: transparent;
           padding: 0;
         }
+        .yt-chat-overlay-settings-field input[type="checkbox"] {
+          width: 18px;
+          height: 18px;
+          cursor: pointer;
+        }
+        .yt-chat-overlay-settings-field select {
+          padding: ${spacing.xs}px ${spacing.sm}px;
+          border-radius: ${borderRadius.sm};
+          border: 1px solid ${colors.ui.border};
+          background: ${colors.ui.backgroundLight};
+          color: ${colors.ui.text};
+          cursor: pointer;
+        }
+        .yt-chat-overlay-author-grid {
+          display: grid;
+          grid-template-columns: auto 1fr auto;
+          gap: ${spacing.sm}px ${spacing.md}px;
+          align-items: center;
+          padding: ${spacing.sm}px 0;
+        }
+        .yt-chat-overlay-author-grid-label {
+          font-size: ${typography.fontSize.sm};
+          min-width: 80px;
+        }
+        .yt-chat-overlay-author-grid-color {
+          justify-self: end;
+        }
+        .yt-chat-overlay-author-grid-checkbox {
+          justify-self: end;
+        }
         .yt-chat-overlay-settings-actions {
           display: flex;
           justify-content: flex-end;
-          gap: 8px;
-          padding-top: 4px;
+          gap: ${spacing.sm}px;
+          padding-top: ${spacing.xs}px;
         }
         .yt-chat-overlay-settings-actions button {
           border: none;
-          border-radius: 6px;
-          padding: 6px 12px;
+          border-radius: ${borderRadius.sm};
+          padding: ${spacing.sm}px ${spacing.md}px;
           cursor: pointer;
-          font-weight: 600;
+          font-weight: ${typography.fontWeight.semibold};
         }
         .yt-chat-overlay-settings-actions button[data-action="reset"] {
-          background: rgba(255, 255, 255, 0.15);
-          color: #fff;
+          background: ${colors.ui.danger};
+          color: ${colors.ui.text};
         }
         .yt-chat-overlay-settings-actions button[data-action="apply"] {
-          background: #3ea6ff;
-          color: #111;
+          background: ${colors.ui.primary};
+          color: ${colors.ui.text};
         }
       `;
         document.head.appendChild(style);
@@ -1620,55 +2571,78 @@
         </label>
         <label class="yt-chat-overlay-settings-field">
           <span>Speed (px/s)</span>
-          <input type="number" name="speedPxPerSec" min="120" max="500" step="5" />
+          <input type="number" name="speedPxPerSec" min="100" max="400" step="10" />
         </label>
         <label class="yt-chat-overlay-settings-field">
           <span>Font size (px)</span>
-          <input type="number" name="fontSize" min="16" max="48" step="1" />
+          <input type="number" name="fontSize" min="18" max="40" step="2" />
         </label>
         <label class="yt-chat-overlay-settings-field">
           <span>Opacity</span>
-          <input type="number" name="opacity" min="0.4" max="1" step="0.02" />
+          <input type="number" name="opacity" min="0.5" max="1" step="0.05" />
+        </label>
+        <label class="yt-chat-overlay-settings-field">
+          <span>Super Chat color opacity (%)</span>
+          <input type="number" name="superChatOpacity" min="40" max="100" step="5" />
         </label>
         <label class="yt-chat-overlay-settings-field">
           <span>Safe top (%)</span>
-          <input type="number" name="safeTop" min="0" max="30" step="0.5" />
+          <input type="number" name="safeTop" min="0" max="25" step="1" />
         </label>
         <label class="yt-chat-overlay-settings-field">
           <span>Safe bottom (%)</span>
-          <input type="number" name="safeBottom" min="0" max="30" step="0.5" />
+          <input type="number" name="safeBottom" min="0" max="25" step="1" />
         </label>
         <label class="yt-chat-overlay-settings-field">
-          <span>Max concurrent</span>
-          <input type="number" name="maxConcurrentMessages" min="5" max="60" step="1" />
+          <span>Warning threshold</span>
+          <input
+            type="number"
+            name="maxConcurrentMessages"
+            min="30"
+            max="100"
+            step="10"
+            title="Performance warning threshold (not enforced)"
+          />
         </label>
         <label class="yt-chat-overlay-settings-field">
           <span>Max messages/s</span>
-          <input type="number" name="maxMessagesPerSecond" min="1" max="20" step="1" />
+          <input
+            type="number"
+            name="maxMessagesPerSecond"
+            min="5"
+            max="20"
+            step="1"
+            title="Rate limit for new messages (enforced)"
+          />
         </label>
       </div>
       <div class="yt-chat-overlay-settings-section">
-        <div class="yt-chat-overlay-settings-section-title">Colors</div>
-        <label class="yt-chat-overlay-settings-field">
-          <span>Normal</span>
-          <input type="color" name="color-normal" />
-        </label>
-        <label class="yt-chat-overlay-settings-field">
-          <span>Member</span>
-          <input type="color" name="color-member" />
-        </label>
-        <label class="yt-chat-overlay-settings-field">
-          <span>Moderator</span>
-          <input type="color" name="color-moderator" />
-        </label>
-        <label class="yt-chat-overlay-settings-field">
-          <span>Owner</span>
-          <input type="color" name="color-owner" />
-        </label>
-        <label class="yt-chat-overlay-settings-field">
-          <span>Verified</span>
-          <input type="color" name="color-verified" />
-        </label>
+        <div class="yt-chat-overlay-settings-section-title">Author Types (Color & Display)</div>
+        <div class="yt-chat-overlay-author-grid">
+          <span class="yt-chat-overlay-author-grid-label">Normal</span>
+          <input type="color" name="color-normal" class="yt-chat-overlay-author-grid-color" />
+          <input type="checkbox" name="showAuthor-normal" class="yt-chat-overlay-author-grid-checkbox" />
+
+          <span class="yt-chat-overlay-author-grid-label">Member</span>
+          <input type="color" name="color-member" class="yt-chat-overlay-author-grid-color" />
+          <input type="checkbox" name="showAuthor-member" class="yt-chat-overlay-author-grid-checkbox" />
+
+          <span class="yt-chat-overlay-author-grid-label">Moderator</span>
+          <input type="color" name="color-moderator" class="yt-chat-overlay-author-grid-color" />
+          <input type="checkbox" name="showAuthor-moderator" class="yt-chat-overlay-author-grid-checkbox" />
+
+          <span class="yt-chat-overlay-author-grid-label">Owner</span>
+          <input type="color" name="color-owner" class="yt-chat-overlay-author-grid-color" />
+          <input type="checkbox" name="showAuthor-owner" class="yt-chat-overlay-author-grid-checkbox" />
+
+          <span class="yt-chat-overlay-author-grid-label">Verified</span>
+          <input type="color" name="color-verified" class="yt-chat-overlay-author-grid-color" />
+          <input type="checkbox" name="showAuthor-verified" class="yt-chat-overlay-author-grid-checkbox" />
+
+          <span class="yt-chat-overlay-author-grid-label">Super Chat</span>
+          <span></span>
+          <input type="checkbox" name="showAuthor-superChat" class="yt-chat-overlay-author-grid-checkbox" />
+        </div>
       </div>
       <div class="yt-chat-overlay-settings-section">
         <div class="yt-chat-overlay-settings-section-title">Outline</div>
@@ -1678,15 +2652,15 @@
         </label>
         <label class="yt-chat-overlay-settings-field">
           <span>Width (px)</span>
-          <input type="number" name="outline-widthPx" min="0" max="6" step="0.5" />
+          <input type="number" name="outline-widthPx" min="0" max="5" step="0.5" />
         </label>
         <label class="yt-chat-overlay-settings-field">
           <span>Blur (px)</span>
-          <input type="number" name="outline-blurPx" min="0" max="10" step="0.5" />
+          <input type="number" name="outline-blurPx" min="0" max="8" step="0.5" />
         </label>
         <label class="yt-chat-overlay-settings-field">
           <span>Opacity</span>
-          <input type="number" name="outline-opacity" min="0" max="1" step="0.05" />
+          <input type="number" name="outline-opacity" min="0" max="1" step="0.1" />
         </label>
       </div>
       <div class="yt-chat-overlay-settings-actions">
@@ -1722,6 +2696,7 @@
       this.setValue("speedPxPerSec", settings.speedPxPerSec);
       this.setValue("fontSize", settings.fontSize);
       this.setValue("opacity", settings.opacity);
+      this.setValue("superChatOpacity", (settings.superChatOpacity * 100).toFixed(0));
       this.setValue("safeTop", (settings.safeTop * 100).toFixed(1));
       this.setValue("safeBottom", (settings.safeBottom * 100).toFixed(1));
       this.setValue("maxConcurrentMessages", settings.maxConcurrentMessages);
@@ -1731,6 +2706,12 @@
       this.setValue("color-moderator", settings.colors.moderator);
       this.setValue("color-owner", settings.colors.owner);
       this.setValue("color-verified", settings.colors.verified);
+      this.setCheckbox("showAuthor-normal", settings.showAuthor.normal);
+      this.setCheckbox("showAuthor-member", settings.showAuthor.member);
+      this.setCheckbox("showAuthor-moderator", settings.showAuthor.moderator);
+      this.setCheckbox("showAuthor-owner", settings.showAuthor.owner);
+      this.setCheckbox("showAuthor-verified", settings.showAuthor.verified);
+      this.setCheckbox("showAuthor-superChat", settings.showAuthor.superChat);
       this.setCheckbox("outline-enabled", settings.outline.enabled);
       this.setValue("outline-widthPx", settings.outline.widthPx);
       this.setValue("outline-blurPx", settings.outline.blurPx);
@@ -1747,17 +2728,26 @@
       };
       return {
         enabled: this.getCheckbox("enabled", current.enabled),
-        speedPxPerSec: clamp(readNumber("speedPxPerSec", current.speedPxPerSec), 120, 500),
-        fontSize: clamp(readNumber("fontSize", current.fontSize), 16, 48),
-        opacity: clamp(readNumber("opacity", current.opacity), 0.4, 1),
-        safeTop: clamp(readNumber("safeTop", current.safeTop * 100), 0, 30) / 100,
-        safeBottom: clamp(readNumber("safeBottom", current.safeBottom * 100), 0, 30) / 100,
+        speedPxPerSec: clamp(readNumber("speedPxPerSec", current.speedPxPerSec), 100, 400),
+        fontSize: clamp(readNumber("fontSize", current.fontSize), 18, 40),
+        opacity: clamp(readNumber("opacity", current.opacity), 0.5, 1),
+        superChatOpacity: clamp(readNumber("superChatOpacity", current.superChatOpacity * 100), 40, 100) / 100,
+        safeTop: clamp(readNumber("safeTop", current.safeTop * 100), 0, 25) / 100,
+        safeBottom: clamp(readNumber("safeBottom", current.safeBottom * 100), 0, 25) / 100,
         maxConcurrentMessages: Math.round(
-          clamp(readNumber("maxConcurrentMessages", current.maxConcurrentMessages), 5, 60)
+          clamp(readNumber("maxConcurrentMessages", current.maxConcurrentMessages), 30, 100)
         ),
         maxMessagesPerSecond: Math.round(
-          clamp(readNumber("maxMessagesPerSecond", current.maxMessagesPerSecond), 1, 20)
+          clamp(readNumber("maxMessagesPerSecond", current.maxMessagesPerSecond), 5, 20)
         ),
+        showAuthor: {
+          normal: this.getCheckbox("showAuthor-normal", current.showAuthor.normal),
+          member: this.getCheckbox("showAuthor-member", current.showAuthor.member),
+          moderator: this.getCheckbox("showAuthor-moderator", current.showAuthor.moderator),
+          owner: this.getCheckbox("showAuthor-owner", current.showAuthor.owner),
+          verified: this.getCheckbox("showAuthor-verified", current.showAuthor.verified),
+          superChat: this.getCheckbox("showAuthor-superChat", current.showAuthor.superChat)
+        },
         colors: {
           normal: this.getColor("color-normal", current.colors.normal),
           member: this.getColor("color-member", current.colors.member),
@@ -1767,8 +2757,8 @@
         },
         outline: {
           enabled: this.getCheckbox("outline-enabled", current.outline.enabled),
-          widthPx: clamp(readNumber("outline-widthPx", current.outline.widthPx), 0, 6),
-          blurPx: clamp(readNumber("outline-blurPx", current.outline.blurPx), 0, 10),
+          widthPx: clamp(readNumber("outline-widthPx", current.outline.widthPx), 0, 5),
+          blurPx: clamp(readNumber("outline-blurPx", current.outline.blurPx), 0, 8),
           opacity: clamp(readNumber("outline-opacity", current.outline.opacity), 0, 1)
         }
       };
@@ -1877,6 +2867,12 @@
       this.attachListeners();
       this.observeVideoReplacement();
       this.initialized = true;
+      this.callbacks.onRateChange?.(video.playbackRate || 1);
+      if (video.paused) {
+        this.callbacks.onPause?.();
+      } else {
+        this.callbacks.onPlay?.();
+      }
     }
     /**
      * Start periodic detection for video element
