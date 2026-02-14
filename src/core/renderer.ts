@@ -43,6 +43,12 @@ interface LanePlacement {
   waitMs: number;
 }
 
+interface BuiltMessage {
+  element: HTMLDivElement;
+  isSuperChat: boolean;
+  isMembership: boolean;
+}
+
 /**
  * Layout and styling constants
  */
@@ -63,18 +69,19 @@ const LAYOUT = {
   EXIT_PADDING_SCALE: 3, // relative to fontSize
   DURATION_MIN: 5000, // ms
   DURATION_MAX: 12000, // ms
-  LANE_DELAY_CYCLE: 4, // number of lanes before repeating delay pattern
-  LANE_DELAY_MS: 100, // ms per lane cycle
+  LANE_DELAY_CYCLE: 3, // number of lanes before repeating delay pattern
+  LANE_DELAY_MS: 40, // ms per lane cycle
 
   // Collision detection
-  SAFE_DISTANCE_SCALE: 2, // relative to fontSize
-  SAFE_DISTANCE_MIN: 100, // px
-  VERTICAL_CLEAR_TIME: 800, // ms
-  LANE_HEIGHT_PADDING_SCALE: 0.15, // relative to fontSize
-  LANE_HEIGHT_PADDING_MIN: 2, // px
+  SAFE_DISTANCE_SCALE: 0.7, // relative to fontSize
+  SAFE_DISTANCE_MIN: 16, // px
+  VERTICAL_CLEAR_TIME_MIN: 120, // ms
+  VERTICAL_CLEAR_TIME_MAX: 320, // ms
+  LANE_HEIGHT_PADDING_SCALE: 0.06, // relative to fontSize
+  LANE_HEIGHT_PADDING_MIN: 1, // px
   RETRY_DELAY_MIN_MS: 16, // ms
-  RETRY_DELAY_MAX_MS: 1000, // ms
-  QUEUE_LOOKAHEAD_LIMIT: 8, // queue scan window for scheduling
+  RETRY_DELAY_MAX_MS: 800, // ms
+  QUEUE_LOOKAHEAD_LIMIT: 14, // queue scan window for scheduling
 } as const;
 
 export class Renderer {
@@ -1019,29 +1026,19 @@ export class Renderer {
   }
 
   /**
-   * Render a single message
+   * Build message DOM element by message kind
    */
-  private renderMessage(message: ChatMessage): RenderResult {
-    const container = this.overlay.getContainer();
-    const dimensions = this.overlay.getDimensions();
-    if (!container || !dimensions) {
-      console.warn('[YT Chat Overlay] Cannot render: container or dimensions missing');
-      return { status: 'dropped' };
-    }
-
-    // Create message element
+  private buildMessageElement(message: ChatMessage): BuiltMessage | null {
     const element = document.createElement('div');
     element.className = 'yt-chat-overlay-message';
 
-    // Apply Super Chat styling if applicable
-    const isSuperChat = message.kind === 'superchat' && message.superChat;
+    const isSuperChat = message.kind === 'superchat' && Boolean(message.superChat);
     const isMembership = message.kind === 'membership';
 
     if (isSuperChat && message.superChat) {
-      // Apply card styling
+      // Super Chat card
       this.applySuperChatStyling(element, message.superChat);
 
-      // Create structured header and content
       const headerElement = this.createSuperChatHeader(
         message,
         message.superChat,
@@ -1053,54 +1050,101 @@ export class Renderer {
       if (contentElement) {
         element.appendChild(contentElement);
       }
-    } else if (isMembership) {
-      // Membership message
-      const membershipCard = this.createMembershipCard(message);
-      element.appendChild(membershipCard);
-    } else {
-      // Regular message (existing logic)
-      const showAuthor = this.shouldShowAuthor(message);
-      if (showAuthor) {
-        element.classList.add('yt-chat-overlay-message-with-author');
-      }
 
-      if (showAuthor) {
-        const authorElement = this.createAuthorElement(message);
-        element.appendChild(authorElement);
-      }
-
-      const contentDiv = this.createMessageTextElement(message);
-      if (!contentDiv) {
-        console.warn('[YT Chat Overlay] Skipping empty message');
-        return { status: 'dropped' };
-      }
-
-      element.appendChild(contentDiv);
+      return { element, isSuperChat, isMembership };
     }
 
-    // Font size is same for all messages
-    const fontSize = this.settings.fontSize;
-    element.style.fontSize = `${fontSize}px`;
+    if (isMembership) {
+      // Membership card
+      const membershipCard = this.createMembershipCard(message);
+      element.appendChild(membershipCard);
+      return { element, isSuperChat, isMembership };
+    }
+
+    // Regular message
+    const showAuthor = this.shouldShowAuthor(message);
+    if (showAuthor) {
+      element.classList.add('yt-chat-overlay-message-with-author');
+      const authorElement = this.createAuthorElement(message);
+      element.appendChild(authorElement);
+    }
+
+    const contentDiv = this.createMessageTextElement(message);
+    if (!contentDiv) {
+      console.warn('[YT Chat Overlay] Skipping empty message');
+      return null;
+    }
+
+    element.appendChild(contentDiv);
+    return { element, isSuperChat, isMembership };
+  }
+
+  /**
+   * Apply common visual styles shared by all message kinds
+   */
+  private applyCommonMessageStyles(
+    element: HTMLDivElement,
+    message: ChatMessage,
+    isSuperChat: boolean,
+    isMembership: boolean
+  ): void {
+    element.style.fontSize = `${this.settings.fontSize}px`;
     element.style.opacity = `${this.settings.opacity}`;
 
-    // Apply color based on author type (unless it's a Super Chat or Membership with custom styling)
+    // Apply author color only for regular messages
     if (!isSuperChat && !isMembership) {
       const authorType = message.authorType || 'normal';
       element.style.color = this.settings.colors[authorType];
     }
+  }
 
-    // Add to container temporarily to measure dimensions
+  /**
+   * Append message to DOM in hidden state and measure rendered size
+   */
+  private measureMessageElement(
+    container: HTMLDivElement,
+    element: HTMLDivElement,
+    overlayWidth: number
+  ): { textWidth: number; messageHeight: number } {
     element.style.visibility = 'hidden';
-    element.style.left = `${dimensions.width}px`;
+    element.style.left = `${overlayWidth}px`;
     element.style.top = '0px';
     container.appendChild(element);
 
-    // Measure actual message dimensions
-    const textWidth = element.offsetWidth;
-    const messageHeight = element.offsetHeight;
+    return {
+      textWidth: element.offsetWidth,
+      messageHeight: element.offsetHeight,
+    };
+  }
+
+  /**
+   * Render a single message
+   */
+  private renderMessage(message: ChatMessage): RenderResult {
+    const container = this.overlay.getContainer();
+    const dimensions = this.overlay.getDimensions();
+    if (!container || !dimensions) {
+      console.warn('[YT Chat Overlay] Cannot render: container or dimensions missing');
+      return { status: 'dropped' };
+    }
+
+    const builtMessage = this.buildMessageElement(message);
+    if (!builtMessage) {
+      return { status: 'dropped' };
+    }
+
+    const { element, isSuperChat, isMembership } = builtMessage;
+    this.applyCommonMessageStyles(element, message, isSuperChat, isMembership);
+
+    // Add in hidden state and measure actual rendered dimensions
+    const { textWidth, messageHeight } = this.measureMessageElement(
+      container,
+      element,
+      dimensions.width
+    );
 
     // Find available lane based on message height
-    const placement = this.findLanePlacement(messageHeight, textWidth);
+    const placement = this.findLanePlacement(messageHeight);
     if (placement === null) {
       // No available lane, drop message
       const dimensions = this.overlay.getDimensions();
@@ -1163,19 +1207,25 @@ export class Renderer {
   /**
    * Calculate lane ready time for a new message width
    */
-  private calculateLaneReadyTime(lane: LaneState, messageWidth: number, now: number): number {
+  private calculateLaneReadyTime(lane: LaneState, now: number): number {
     if (lane.lastItemStartTime <= 0) {
       return now;
     }
 
     const baseSafeDistance = this.settings.fontSize * LAYOUT.SAFE_DISTANCE_SCALE;
     const minSafeDistance = Math.max(baseSafeDistance, LAYOUT.SAFE_DISTANCE_MIN);
-    const requiredGapPx =
-      Math.max(lane.lastItemWidthPx, messageWidth, minSafeDistance) + minSafeDistance;
+
+    // Same-lane messages move at the same speed, so overlap is governed mainly by
+    // previous message width + a small visual buffer (new width does not shrink gap).
+    const requiredGapPx = lane.lastItemWidthPx + minSafeDistance;
     const safeTimeGap = (requiredGapPx / this.getEffectiveSpeedPxPerSec()) * 1000;
 
     const horizontalReadyTime = lane.lastItemStartTime + safeTimeGap;
-    const verticalReadyTime = lane.lastItemStartTime + LAYOUT.VERTICAL_CLEAR_TIME;
+    const verticalClearTime = Math.min(
+      LAYOUT.VERTICAL_CLEAR_TIME_MAX,
+      Math.max(LAYOUT.VERTICAL_CLEAR_TIME_MIN, lane.lastItemHeightPx * 4)
+    );
+    const verticalReadyTime = lane.lastItemStartTime + verticalClearTime;
 
     return Math.max(now, horizontalReadyTime, verticalReadyTime);
   }
@@ -1183,7 +1233,7 @@ export class Renderer {
   /**
    * Find the best lane placement (position + timing)
    */
-  private findLanePlacement(messageHeight: number, messageWidth: number): LanePlacement | null {
+  private findLanePlacement(messageHeight: number): LanePlacement | null {
     const now = Date.now();
     const dimensions = this.overlay.getDimensions();
     if (!dimensions) return null;
@@ -1206,7 +1256,7 @@ export class Renderer {
           break;
         }
 
-        const laneReadyTime = this.calculateLaneReadyTime(lane, messageWidth, now);
+        const laneReadyTime = this.calculateLaneReadyTime(lane, now);
         blockReadyTime = Math.max(blockReadyTime, laneReadyTime);
       }
 
