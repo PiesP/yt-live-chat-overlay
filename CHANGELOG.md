@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0] - 2026-02-14
+
+### Added
+- Super Chat 파싱/렌더링 지원 (동적 색상 매핑 및 그라디언트 배경 포함)
+- 작성자 프로필 이미지 표시 및 작성자 타입별 표시 옵션
+- 설정 UI에 Super Chat 전용 opacity 옵션 추가
+- 렌더러/설정 UI 스타일 일관성을 위한 design tokens 모듈 추가
+
+### Changed
+- 멀티라인 메시지 처리 및 lane 배치 로직 리팩터링으로 충돌 감소
+- lane 높이 계산과 메시지 요소 생성 흐름 최적화로 렌더링 안정성/성능 개선
+- 기본 Super Chat opacity 값 조정으로 가독성 향상
+
+### Fixed
+- 일반 메시지와 Super Chat 간 글꼴 크기 및 애니메이션 시간 처리 일관성 개선
+
+### CI/Tooling
+- Knip 설정 추가 및 의존성 분석을 quality/CI 파이프라인에 통합
+- CI, release, Dependabot, repository automation 워크플로 구성 개선
+
+## [0.3.1] - 2026-02-10
+
+### Changed
+- 버전 관리 기준을 `package.json`으로 단일화
+
 ## [0.3.0] - 2026-02-09
 
 ### Added
