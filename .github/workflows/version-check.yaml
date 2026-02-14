@@ -70,7 +70,7 @@ jobs:
       - name: 📬 Create/update automated PR
         id: create-pr
         if: steps.osv.outputs.needs_update == 'true'
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           commit-message: "ci(deps): bump OSV scanner to v${{ steps.osv.outputs.latest }}"
