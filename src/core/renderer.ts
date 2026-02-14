@@ -15,15 +15,7 @@ import type {
   OverlaySettings,
   SuperChatInfo,
 } from '@app-types';
-import {
-  borderRadius,
-  colors,
-  createGradient,
-  rgba,
-  shadows,
-  spacing,
-  typography,
-} from './design-tokens.js';
+import { borderRadius, colors, rgba, shadows, spacing, typography } from './design-tokens.js';
 import type { Overlay } from './overlay';
 
 interface ActiveMessage {
@@ -42,16 +34,13 @@ const LAYOUT = {
   // Author display
   AUTHOR_PHOTO_SIZE: 24, // px
   AUTHOR_FONT_SCALE: 0.85, // relative to base fontSize
-  AUTHOR_CONTENT_GAP: 4, // px
 
   // Emoji sizing
   EMOJI_SIZE_STANDARD: 1.2, // relative to base fontSize
   EMOJI_SIZE_MEMBER: 1.4, // relative to base fontSize
 
   // Super Chat
-  SUPERCHAT_PADDING: 8, // px (vertical and horizontal)
   SUPERCHAT_STICKER_SIZE: 2.0, // relative to base fontSize
-  SUPERCHAT_BORDER_WIDTH: 3, // px
 
   // Animation
   EXIT_PADDING_MIN: 100, // px
@@ -171,55 +160,48 @@ export class Renderer {
         display: block;
       }
 
-      /* === YOUTUBE-STYLE SUPER CHAT CARD === */
+      /* === Unified Super Chat Card === */
 
-      /* Card container */
       .yt-chat-overlay-superchat-card {
+        --yt-sc-rgb: 30, 136, 229;
+        --yt-sc-border-rgb: 18, 92, 156;
         display: flex;
         flex-direction: column;
+        min-width: min(420px, 72vw);
+        max-width: min(640px, 86vw);
         border-radius: ${borderRadius.md};
         overflow: hidden;
+        border: 1px solid rgba(var(--yt-sc-border-rgb), 0.55);
+        background-color: rgb(30, 136, 229);
+        background: linear-gradient(
+          180deg,
+          rgba(var(--yt-sc-rgb), 0.96) 0%,
+          rgba(var(--yt-sc-rgb), 0.9) 48%,
+          rgba(var(--yt-sc-rgb), 0.84) 100%
+        );
         box-shadow: ${shadows.box.md};
         backdrop-filter: blur(4px);
       }
 
-      /* Header section */
-      .yt-chat-overlay-superchat-header {
-        position: relative;
+      .yt-chat-overlay-superchat-meta {
         display: flex;
+        align-items: center;
         justify-content: space-between;
-        align-items: center;
-        padding: ${spacing.sm}px ${spacing.md}px;
-        min-height: 40px;
-        background: transparent;
-      }
-
-      .yt-chat-overlay-superchat-header-left {
-        display: flex;
-        align-items: center;
-        gap: ${spacing.sm}px;
-        flex: 1;
-        min-width: 0;
-      }
-
-      .yt-chat-overlay-superchat-header-right {
-        display: flex;
-        align-items: center;
         gap: ${spacing.md}px;
-        flex-shrink: 0;
-        margin-left: ${spacing.md}px;
+        padding: ${spacing.sm}px ${spacing.md}px;
+        background: rgba(0, 0, 0, 0.12);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.14);
       }
 
-      /* Header author inline */
-      .yt-chat-overlay-author-info-inline {
+      .yt-chat-overlay-superchat-author {
         display: flex;
         align-items: center;
         gap: ${spacing.sm}px;
         min-width: 0;
       }
 
-      .yt-chat-overlay-author-info-inline .yt-chat-overlay-author-name {
-        font-size: 0.85em;
+      .yt-chat-overlay-superchat-author .yt-chat-overlay-author-name {
+        font-size: 0.88em;
         font-weight: ${typography.fontWeight.bold};
         text-shadow: ${shadows.text.sm};
         white-space: nowrap;
@@ -227,78 +209,38 @@ export class Renderer {
         text-overflow: ellipsis;
       }
 
-      /* Enhanced amount badge */
-      .yt-chat-overlay-superchat-amount-badge {
+      .yt-chat-overlay-superchat-amount {
         display: inline-flex;
         align-items: center;
-        padding: ${spacing.xs}px ${spacing.lg}px;
-        border-radius: ${borderRadius.xl};
+        flex-shrink: 0;
+        padding: ${spacing.xs}px ${spacing.md}px;
+        border-radius: ${borderRadius.lg};
         font-weight: ${typography.fontWeight.bold};
         font-size: 0.85em;
-        white-space: nowrap;
-        box-shadow: ${shadows.box.sm}, inset 0 1px 0 rgba(255, 255, 255, 0.2);
+        letter-spacing: 0.2px;
+        color: ${colors.ui.text};
+        background: rgba(255, 255, 255, 0.16);
+        border: 1px solid rgba(255, 255, 255, 0.22);
         text-shadow: ${shadows.text.sm};
-        letter-spacing: 0.3px;
       }
 
-      /* Timestamp */
-      .yt-chat-overlay-superchat-timestamp {
-        font-size: 0.75em;
-        font-weight: ${typography.fontWeight.semibold};
-        opacity: 0.85;
-        color: rgba(255, 255, 255, 0.9);
-        text-shadow: ${shadows.text.sm};
-        white-space: nowrap;
-      }
-
-      /* Content section */
-      .yt-chat-overlay-superchat-content {
+      .yt-chat-overlay-superchat-body {
         display: flex;
         flex-direction: column;
-        padding: ${spacing.md}px ${spacing.md}px;
+        padding: ${spacing.sm}px ${spacing.md}px ${spacing.md}px;
         gap: ${spacing.sm}px;
-        background: transparent;
       }
 
-      .yt-chat-overlay-superchat-content .yt-chat-overlay-message-content {
-        font-size: 1em;
+      .yt-chat-overlay-superchat-body .yt-chat-overlay-message-content {
         line-height: ${typography.lineHeight.normal};
         text-shadow: ${shadows.text.md};
         letter-spacing: 0.2px;
+        white-space: normal;
       }
 
-      .yt-chat-overlay-superchat-content .yt-chat-overlay-superchat-sticker {
+      .yt-chat-overlay-superchat-body .yt-chat-overlay-superchat-sticker {
         align-self: flex-start;
         margin-bottom: ${spacing.xs}px;
-      }
-
-      /* Tier-specific gradients (7 tiers) - applied to card for seamless appearance */
-      .yt-chat-overlay-superchat-tier-blue {
-        background: ${createGradient(colors.superChat.blue, [0.75, 0.5, 0.35, 0.25])};
-      }
-
-      .yt-chat-overlay-superchat-tier-cyan {
-        background: ${createGradient(colors.superChat.cyan, [0.75, 0.5, 0.35, 0.25])};
-      }
-
-      .yt-chat-overlay-superchat-tier-green {
-        background: ${createGradient(colors.superChat.green, [0.75, 0.5, 0.35, 0.25])};
-      }
-
-      .yt-chat-overlay-superchat-tier-yellow {
-        background: ${createGradient(colors.superChat.yellow, [0.75, 0.5, 0.35, 0.25])};
-      }
-
-      .yt-chat-overlay-superchat-tier-orange {
-        background: ${createGradient(colors.superChat.orange, [0.75, 0.5, 0.35, 0.25])};
-      }
-
-      .yt-chat-overlay-superchat-tier-magenta {
-        background: ${createGradient(colors.superChat.magenta, [0.75, 0.5, 0.35, 0.25])};
-      }
-
-      .yt-chat-overlay-superchat-tier-red {
-        background: ${createGradient(colors.superChat.red, [0.75, 0.5, 0.35, 0.25])};
       }
 
       /* Enhanced regular message with author */
@@ -320,27 +262,6 @@ export class Renderer {
         letter-spacing: 0.3px;
       }
 
-      /* Super Chat styling */
-      .yt-chat-overlay-message-superchat {
-        padding: ${LAYOUT.SUPERCHAT_PADDING}px ${LAYOUT.SUPERCHAT_PADDING * 2}px;
-        border-radius: ${borderRadius.md};
-        background: rgba(0, 0, 0, 0.4);
-        box-shadow: ${shadows.box.md};
-        border: ${LAYOUT.SUPERCHAT_BORDER_WIDTH}px solid rgba(255, 255, 255, 0.9);
-      }
-
-      /* Super Chat amount badge */
-      .yt-chat-overlay-superchat-amount {
-        display: inline-block;
-        padding: ${spacing.xs}px ${spacing.md}px;
-        margin-right: ${spacing.md}px;
-        border-radius: ${borderRadius.lg};
-        font-weight: ${typography.fontWeight.bold};
-        font-size: 0.9em;
-        vertical-align: middle;
-        box-shadow: ${shadows.box.sm};
-      }
-
       /* Super Chat sticker */
       .yt-chat-overlay-superchat-sticker {
         display: inline-block;
@@ -349,44 +270,7 @@ export class Renderer {
         filter: ${shadows.filter.md};
       }
 
-      /* Super Chat tier colors */
-      .yt-chat-overlay-superchat-blue {
-        border-color: rgb(${colors.superChat.blue.r}, ${colors.superChat.blue.g}, ${colors.superChat.blue.b});
-        background: ${rgba(colors.superChat.blue, 0.4)};
-      }
-      .yt-chat-overlay-superchat-cyan {
-        border-color: rgb(${colors.superChat.cyan.r}, ${colors.superChat.cyan.g}, ${colors.superChat.cyan.b});
-        background: ${rgba(colors.superChat.cyan, 0.4)};
-      }
-      .yt-chat-overlay-superchat-green {
-        border-color: rgb(${colors.superChat.green.r}, ${colors.superChat.green.g}, ${colors.superChat.green.b});
-        background: ${rgba(colors.superChat.green, 0.4)};
-      }
-      .yt-chat-overlay-superchat-yellow {
-        border-color: rgb(${colors.superChat.yellow.r}, ${colors.superChat.yellow.g}, ${colors.superChat.yellow.b});
-        background: ${rgba(colors.superChat.yellow, 0.4)};
-      }
-      .yt-chat-overlay-superchat-orange {
-        border-color: rgb(${colors.superChat.orange.r}, ${colors.superChat.orange.g}, ${colors.superChat.orange.b});
-        background: ${rgba(colors.superChat.orange, 0.4)};
-      }
-      .yt-chat-overlay-superchat-magenta {
-        border-color: rgb(${colors.superChat.magenta.r}, ${colors.superChat.magenta.g}, ${colors.superChat.magenta.b});
-        background: ${rgba(colors.superChat.magenta, 0.4)};
-      }
-      .yt-chat-overlay-superchat-red {
-        border-color: rgb(${colors.superChat.red.r}, ${colors.superChat.red.g}, ${colors.superChat.red.b});
-        background: ${rgba(colors.superChat.red, 0.4)};
-      }
-
-      /* Super Chat amount badge tier colors */
-      .yt-chat-overlay-superchat-amount-blue { background-color: rgb(${colors.superChat.blue.r}, ${colors.superChat.blue.g}, ${colors.superChat.blue.b}); }
-      .yt-chat-overlay-superchat-amount-cyan { background-color: rgb(${colors.superChat.cyan.r}, ${colors.superChat.cyan.g}, ${colors.superChat.cyan.b}); }
-      .yt-chat-overlay-superchat-amount-green { background-color: rgb(${colors.superChat.green.r}, ${colors.superChat.green.g}, ${colors.superChat.green.b}); }
-      .yt-chat-overlay-superchat-amount-yellow { background-color: rgb(${colors.superChat.yellow.r}, ${colors.superChat.yellow.g}, ${colors.superChat.yellow.b}); color: #000; }
-      .yt-chat-overlay-superchat-amount-orange { background-color: rgb(${colors.superChat.orange.r}, ${colors.superChat.orange.g}, ${colors.superChat.orange.b}); }
-      .yt-chat-overlay-superchat-amount-magenta { background-color: rgb(${colors.superChat.magenta.r}, ${colors.superChat.magenta.g}, ${colors.superChat.magenta.b}); }
-      .yt-chat-overlay-superchat-amount-red { background-color: rgb(${colors.superChat.red.r}, ${colors.superChat.red.g}, ${colors.superChat.red.b}); }
+      /* Legacy styles removed - now using unified card-based system */
 
       /* Emoji styling */
       .yt-chat-overlay-emoji {
@@ -570,30 +454,17 @@ export class Renderer {
   }
 
   /**
-   * Determine if color is light or dark (for text contrast)
-   * Uses relative luminance formula
+   * Resolve Super Chat RGB color from actual YouTube color or tier fallback
    */
-  private isLightColor(colorString: string): boolean {
-    const parsed = this.parseRgbaColor(colorString);
-    if (!parsed) return false;
+  private resolveSuperChatRgb(superChat: SuperChatInfo): { r: number; g: number; b: number } {
+    const sourceColor = superChat.headerBackgroundColor || superChat.backgroundColor;
+    const parsed = sourceColor ? this.parseRgbaColor(sourceColor) : null;
 
-    // Calculate relative luminance
-    const luminance = (0.299 * parsed.r + 0.587 * parsed.g + 0.114 * parsed.b) / 255;
-    return luminance > 0.5;
-  }
-
-  /**
-   * Create rgba color with specified alpha value
-   * Converts any rgb/rgba color to rgba with new alpha
-   */
-  private createRgbaWithAlpha(colorString: string, alpha: number): string {
-    const parsed = this.parseRgbaColor(colorString);
-    if (!parsed) {
-      // Fallback to semi-transparent black
-      return `rgba(0, 0, 0, ${alpha})`;
+    if (parsed) {
+      return { r: parsed.r, g: parsed.g, b: parsed.b };
     }
 
-    return `rgba(${parsed.r}, ${parsed.g}, ${parsed.b}, ${alpha})`;
+    return colors.superChat[superChat.tier];
   }
 
   /**
@@ -724,25 +595,26 @@ export class Renderer {
    */
   private createSuperChatHeader(message: ChatMessage, superChat: SuperChatInfo): HTMLDivElement {
     const header = document.createElement('div');
-    header.className = 'yt-chat-overlay-superchat-header';
+    header.className = 'yt-chat-overlay-superchat-meta';
 
-    // Left section: author photo + name
-    const leftSection = document.createElement('div');
-    leftSection.className = 'yt-chat-overlay-superchat-header-left';
+    const authorSection = document.createElement('div');
+    authorSection.className = 'yt-chat-overlay-superchat-author';
 
     // Always show author in Super Chat header
     if (message.authorPhotoUrl) {
-      const photoImg = document.createElement('img');
-      photoImg.className = 'yt-chat-overlay-author-photo';
-      photoImg.src = message.authorPhotoUrl;
-      photoImg.alt = message.author || 'Author';
-      leftSection.appendChild(photoImg);
+      const photoImg = this.createImageElement(
+        message.authorPhotoUrl,
+        message.author || 'Author',
+        'yt-chat-overlay-author-photo',
+        LAYOUT.AUTHOR_PHOTO_SIZE
+      );
+
+      if (photoImg) {
+        authorSection.appendChild(photoImg);
+      }
     }
 
     if (message.author) {
-      const authorInfoInline = document.createElement('div');
-      authorInfoInline.className = 'yt-chat-overlay-author-info-inline';
-
       const authorName = document.createElement('span');
       authorName.className = 'yt-chat-overlay-author-name';
       authorName.textContent = message.author;
@@ -751,34 +623,16 @@ export class Renderer {
       const authorType = message.authorType || 'normal';
       authorName.style.color = this.settings.colors[authorType];
 
-      authorInfoInline.appendChild(authorName);
-      leftSection.appendChild(authorInfoInline);
+      authorSection.appendChild(authorName);
     }
 
-    header.appendChild(leftSection);
-
-    // Right section: amount badge + timestamp
-    const rightSection = document.createElement('div');
-    rightSection.className = 'yt-chat-overlay-superchat-header-right';
+    header.appendChild(authorSection);
 
     // Amount badge
     const amountBadge = document.createElement('span');
-    amountBadge.className = 'yt-chat-overlay-superchat-amount-badge';
+    amountBadge.className = 'yt-chat-overlay-superchat-amount';
     amountBadge.textContent = superChat.amount;
-
-    // Apply badge color
-    const badgeColor = superChat.headerBackgroundColor || superChat.backgroundColor;
-    if (badgeColor) {
-      amountBadge.style.backgroundColor = badgeColor;
-      const isLight = this.isLightColor(badgeColor);
-      amountBadge.style.color = isLight ? '#000' : '#fff';
-    } else {
-      amountBadge.classList.add(`yt-chat-overlay-superchat-amount-${superChat.tier}`);
-    }
-
-    rightSection.appendChild(amountBadge);
-
-    header.appendChild(rightSection);
+    header.appendChild(amountBadge);
 
     return header;
   }
@@ -786,9 +640,20 @@ export class Renderer {
   /**
    * Create Super Chat content section with sticker and message
    */
-  private createSuperChatContent(message: ChatMessage, superChat: SuperChatInfo): HTMLDivElement {
+  private createSuperChatContent(
+    message: ChatMessage,
+    superChat: SuperChatInfo
+  ): HTMLDivElement | null {
+    const hasRichContent = Boolean(message.content && message.content.length > 0);
+    const hasPlainText = message.text.trim().length > 0;
+    const hasSticker = Boolean(superChat.stickerUrl);
+
+    if (!hasRichContent && !hasPlainText && !hasSticker) {
+      return null;
+    }
+
     const content = document.createElement('div');
-    content.className = 'yt-chat-overlay-superchat-content';
+    content.className = 'yt-chat-overlay-superchat-body';
 
     // Add sticker if available (high-tier Super Chats)
     if (superChat.stickerUrl) {
@@ -798,17 +663,18 @@ export class Renderer {
       }
     }
 
-    // Message content
-    const messageDiv = document.createElement('div');
-    messageDiv.className = 'yt-chat-overlay-message-content';
+    if (hasRichContent || hasPlainText) {
+      const messageDiv = document.createElement('div');
+      messageDiv.className = 'yt-chat-overlay-message-content';
 
-    if (message.content && message.content.length > 0) {
-      this.renderMixedContent(messageDiv, message.content);
-    } else {
-      messageDiv.textContent = message.text;
+      if (message.content && message.content.length > 0) {
+        this.renderMixedContent(messageDiv, message.content);
+      } else {
+        messageDiv.textContent = message.text;
+      }
+
+      content.appendChild(messageDiv);
     }
-
-    content.appendChild(messageDiv);
 
     return content;
   }
@@ -862,29 +728,23 @@ export class Renderer {
   }
 
   /**
-   * Apply Super Chat card styling with tier class
+   * Apply Super Chat card styling with color variables
    */
   private applySuperChatStyling(element: HTMLDivElement, superChat: SuperChatInfo): void {
     element.classList.add('yt-chat-overlay-superchat-card');
 
-    // Apply tier class for gradient styling
-    element.classList.add(`yt-chat-overlay-superchat-tier-${superChat.tier}`);
+    const rgb = this.resolveSuperChatRgb(superChat);
+    const borderRgb = {
+      r: Math.max(0, rgb.r - 36),
+      g: Math.max(0, rgb.g - 36),
+      b: Math.max(0, rgb.b - 36),
+    };
 
-    // If actual YouTube colors available, override with inline styles
-    if (superChat.backgroundColor) {
-      const headerBg = superChat.headerBackgroundColor || superChat.backgroundColor;
-
-      // Will be applied to header and content after they're created
-      element.setAttribute('data-header-color', headerBg);
-      element.setAttribute('data-content-color', superChat.backgroundColor);
-
-      console.log('[YT Chat Overlay] Using actual YouTube colors:', {
-        header: headerBg,
-        content: superChat.backgroundColor,
-      });
-    } else {
-      console.log('[YT Chat Overlay] Using tier gradients:', superChat.tier);
-    }
+    element.style.setProperty('--yt-sc-rgb', `${rgb.r}, ${rgb.g}, ${rgb.b}`);
+    element.style.setProperty(
+      '--yt-sc-border-rgb',
+      `${borderRgb.r}, ${borderRgb.g}, ${borderRgb.b}`
+    );
   }
 
   /**
@@ -1060,23 +920,10 @@ export class Renderer {
       const headerElement = this.createSuperChatHeader(message, message.superChat);
       const contentElement = this.createSuperChatContent(message, message.superChat);
 
-      // Apply dynamic colors if available
-      const headerColor = element.getAttribute('data-header-color');
-      const contentColor = element.getAttribute('data-content-color');
-      if (headerColor && contentColor) {
-        // Apply single continuous gradient to entire card
-        const seamlessGradient = `linear-gradient(
-          to bottom,
-          ${this.createRgbaWithAlpha(contentColor, 0.75)},
-          ${this.createRgbaWithAlpha(contentColor, 0.5)},
-          ${this.createRgbaWithAlpha(contentColor, 0.35)},
-          ${this.createRgbaWithAlpha(contentColor, 0.25)}
-        )`;
-        element.style.background = seamlessGradient;
-      }
-
       element.appendChild(headerElement);
-      element.appendChild(contentElement);
+      if (contentElement) {
+        element.appendChild(contentElement);
+      }
     } else if (isMembership) {
       // Membership message
       const membershipCard = this.createMembershipCard(message);
