@@ -21,9 +21,26 @@ import type { Overlay } from './overlay';
 interface ActiveMessage {
   element: HTMLDivElement;
   lane: number;
+  laneSpan: number;
   startTime: number;
   duration: number;
   animation: Animation;
+}
+
+interface QueuedMessage {
+  message: ChatMessage;
+  nextAttemptAt: number;
+}
+
+type RenderResult =
+  | { status: 'rendered' }
+  | { status: 'dropped' }
+  | { status: 'deferred'; waitMs: number };
+
+interface LanePlacement {
+  lane: LaneState;
+  laneSpan: number;
+  waitMs: number;
 }
 
 /**
@@ -53,6 +70,11 @@ const LAYOUT = {
   SAFE_DISTANCE_SCALE: 2, // relative to fontSize
   SAFE_DISTANCE_MIN: 100, // px
   VERTICAL_CLEAR_TIME: 800, // ms
+  LANE_HEIGHT_PADDING_SCALE: 0.15, // relative to fontSize
+  LANE_HEIGHT_PADDING_MIN: 2, // px
+  RETRY_DELAY_MIN_MS: 16, // ms
+  RETRY_DELAY_MAX_MS: 1000, // ms
+  QUEUE_LOOKAHEAD_LIMIT: 8, // queue scan window for scheduling
 } as const;
 
 export class Renderer {
@@ -60,13 +82,16 @@ export class Renderer {
   private settings: OverlaySettings;
   private lanes: LaneState[] = [];
   private activeMessages: Set<ActiveMessage> = new Set();
-  private messageQueue: ChatMessage[] = [];
+  private messageQueue: QueuedMessage[] = [];
   private lastProcessTime = 0;
   private processedInLastSecond = 0;
   private isPaused = false;
+  private pausedAt: number | null = null;
+  private playbackRate = 1;
   private lastWarningTime = 0;
   private readonly WARNING_INTERVAL_MS = 10000;
   private styleElement: HTMLStyleElement | null = null;
+  private retryTimer: number | null = null;
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
     this.overlay = overlay;
@@ -778,12 +803,13 @@ export class Renderer {
    */
   private setupMessageAnimation(
     element: HTMLDivElement,
-    lane: LaneState,
+    placement: LanePlacement,
     textWidth: number,
     messageHeight: number,
     dimensions: OverlayDimensions
   ): ActiveMessage {
     const fontSize = this.settings.fontSize;
+    const { lane, laneSpan } = placement;
 
     // Position element at the assigned lane
     const laneY = dimensions.height * this.settings.safeTop + lane.index * dimensions.laneHeight;
@@ -795,9 +821,10 @@ export class Renderer {
     const distance = dimensions.width + textWidth + exitPadding;
 
     // Optimized duration for better pacing
+    const effectiveSpeedPxPerSec = this.getEffectiveSpeedPxPerSec();
     const duration = Math.max(
       LAYOUT.DURATION_MIN,
-      Math.min(LAYOUT.DURATION_MAX, (distance / this.settings.speedPxPerSec) * 1000)
+      Math.min(LAYOUT.DURATION_MAX, (distance / effectiveSpeedPxPerSec) * 1000)
     );
 
     // Staggered lane delay for visual variety
@@ -814,13 +841,22 @@ export class Renderer {
         fill: 'forwards',
       }
     );
+    animation.playbackRate = this.playbackRate;
 
     // Update lane state with message dimensions
     const now = Date.now();
-    lane.lastItemStartTime = now + laneDelay;
-    lane.lastItemExitTime = now + totalDuration;
-    lane.lastItemWidthPx = textWidth;
-    lane.lastItemHeightPx = messageHeight;
+    const startTime = now + laneDelay;
+    const exitTime = now + totalDuration;
+
+    for (let i = lane.index; i < lane.index + laneSpan && i < this.lanes.length; i++) {
+      const laneState = this.lanes[i];
+      if (!laneState) continue;
+
+      laneState.lastItemStartTime = startTime;
+      laneState.lastItemExitTime = exitTime;
+      laneState.lastItemWidthPx = textWidth;
+      laneState.lastItemHeightPx = messageHeight;
+    }
 
     // Auto-remove on animation end
     animation.addEventListener(
@@ -834,6 +870,7 @@ export class Renderer {
     return {
       element,
       lane: lane.index,
+      laneSpan,
       startTime: now,
       duration,
       animation,
@@ -856,7 +893,10 @@ export class Renderer {
       return;
     }
 
-    this.messageQueue.push(message);
+    this.messageQueue.push({
+      message,
+      nextAttemptAt: 0,
+    });
 
     // Only process queue if not paused
     if (!this.isPaused) {
@@ -874,17 +914,89 @@ export class Renderer {
       return;
     }
 
+    this.clearRetryTimer();
+
+    let shortestWaitMs: number | null = null;
+
     while (this.messageQueue.length > 0) {
-      // Soft cap warning (non-blocking)
-      if (this.activeMessages.size >= this.settings.maxConcurrentMessages) {
-        this.logPerformanceWarning();
+      let progressed = false;
+      const now = Date.now();
+      const lookaheadCount = Math.min(LAYOUT.QUEUE_LOOKAHEAD_LIMIT, this.messageQueue.length);
+
+      for (let i = 0; i < lookaheadCount; i++) {
+        const queued = this.messageQueue[i];
+        if (!queued) continue;
+
+        if (queued.nextAttemptAt > now) {
+          const waitMs = queued.nextAttemptAt - now;
+          shortestWaitMs = shortestWaitMs === null ? waitMs : Math.min(shortestWaitMs, waitMs);
+          continue;
+        }
+
+        // Soft cap warning (non-blocking)
+        if (this.activeMessages.size >= this.settings.maxConcurrentMessages) {
+          this.logPerformanceWarning();
+        }
+
+        const result = this.renderMessage(queued.message);
+
+        if (result.status === 'rendered') {
+          this.messageQueue.splice(i, 1);
+          this.processedInLastSecond++;
+          progressed = true;
+          break;
+        }
+
+        if (result.status === 'dropped') {
+          this.messageQueue.splice(i, 1);
+          progressed = true;
+          break;
+        }
+
+        queued.nextAttemptAt = now + result.waitMs;
+        shortestWaitMs =
+          shortestWaitMs === null ? result.waitMs : Math.min(shortestWaitMs, result.waitMs);
       }
 
-      const message = this.messageQueue.shift();
-      if (message) {
-        this.renderMessage(message);
-        this.processedInLastSecond++;
+      if (!progressed) {
+        break;
       }
+    }
+
+    if (this.messageQueue.length > 0) {
+      this.scheduleRetry(shortestWaitMs ?? LAYOUT.RETRY_DELAY_MAX_MS);
+    }
+  }
+
+  /**
+   * Get effective message speed considering current video playback rate
+   */
+  private getEffectiveSpeedPxPerSec(): number {
+    return Math.max(1, this.settings.speedPxPerSec * this.playbackRate);
+  }
+
+  /**
+   * Schedule queue processing retry when lanes are temporarily occupied
+   */
+  private scheduleRetry(waitMs: number): void {
+    if (this.isPaused) return;
+
+    const delay = Math.max(LAYOUT.RETRY_DELAY_MIN_MS, Math.min(waitMs, LAYOUT.RETRY_DELAY_MAX_MS));
+    this.clearRetryTimer();
+
+    this.retryTimer = window.setTimeout(() => {
+      this.retryTimer = null;
+      this.processQueue();
+    }, delay);
+  }
+
+  /**
+   * Clear pending queue retry timer
+   */
+  private clearRetryTimer(): void {
+    if (this.retryTimer !== null) {
+      window.clearTimeout(this.retryTimer);
+      this.retryTimer = null;
     }
   }
 
@@ -909,12 +1021,12 @@ export class Renderer {
   /**
    * Render a single message
    */
-  private renderMessage(message: ChatMessage): void {
+  private renderMessage(message: ChatMessage): RenderResult {
     const container = this.overlay.getContainer();
     const dimensions = this.overlay.getDimensions();
     if (!container || !dimensions) {
       console.warn('[YT Chat Overlay] Cannot render: container or dimensions missing');
-      return;
+      return { status: 'dropped' };
     }
 
     // Create message element
@@ -960,7 +1072,7 @@ export class Renderer {
       const contentDiv = this.createMessageTextElement(message);
       if (!contentDiv) {
         console.warn('[YT Chat Overlay] Skipping empty message');
-        return;
+        return { status: 'dropped' };
       }
 
       element.appendChild(contentDiv);
@@ -988,8 +1100,8 @@ export class Renderer {
     const messageHeight = element.offsetHeight;
 
     // Find available lane based on message height
-    const lane = this.findAvailableLane(messageHeight);
-    if (lane === null) {
+    const placement = this.findLanePlacement(messageHeight, textWidth);
+    if (placement === null) {
       // No available lane, drop message
       const dimensions = this.overlay.getDimensions();
       console.log(
@@ -998,13 +1110,18 @@ export class Renderer {
           `Queue size: ${this.messageQueue.length}`
       );
       container.removeChild(element);
-      return;
+      return { status: 'dropped' };
+    }
+
+    if (placement.waitMs > 0) {
+      container.removeChild(element);
+      return { status: 'deferred', waitMs: placement.waitMs };
     }
 
     // Setup animation and positioning
     const activeMessage = this.setupMessageAnimation(
       element,
-      lane,
+      placement,
       textWidth,
       messageHeight,
       dimensions
@@ -1022,86 +1139,95 @@ export class Renderer {
       superChatTier: message.superChat?.tier,
       superChatAmount: message.superChat?.amount,
       color: isSuperChat ? 'tier-based' : this.settings.colors[message.authorType || 'normal'],
-      lane: lane.index,
+      lane: placement.lane.index,
+      laneSpan: placement.laneSpan,
       width: textWidth,
       height: messageHeight,
       dimensions,
     });
+
+    return { status: 'rendered' };
   }
 
   /**
-   * Find available lane (collision avoidance)
-   * Considers both horizontal and vertical collision
+   * Calculate required lane count for a message
    */
-  private findAvailableLane(messageHeight: number): LaneState | null {
+  private calculateRequiredLanes(messageHeight: number, laneHeight: number): number {
+    const paddingPx = Math.max(
+      LAYOUT.LANE_HEIGHT_PADDING_MIN,
+      this.settings.fontSize * LAYOUT.LANE_HEIGHT_PADDING_SCALE
+    );
+    return Math.max(1, Math.ceil((messageHeight + paddingPx) / laneHeight));
+  }
+
+  /**
+   * Calculate lane ready time for a new message width
+   */
+  private calculateLaneReadyTime(lane: LaneState, messageWidth: number, now: number): number {
+    if (lane.lastItemStartTime <= 0) {
+      return now;
+    }
+
+    const baseSafeDistance = this.settings.fontSize * LAYOUT.SAFE_DISTANCE_SCALE;
+    const minSafeDistance = Math.max(baseSafeDistance, LAYOUT.SAFE_DISTANCE_MIN);
+    const requiredGapPx =
+      Math.max(lane.lastItemWidthPx, messageWidth, minSafeDistance) + minSafeDistance;
+    const safeTimeGap = (requiredGapPx / this.getEffectiveSpeedPxPerSec()) * 1000;
+
+    const horizontalReadyTime = lane.lastItemStartTime + safeTimeGap;
+    const verticalReadyTime = lane.lastItemStartTime + LAYOUT.VERTICAL_CLEAR_TIME;
+
+    return Math.max(now, horizontalReadyTime, verticalReadyTime);
+  }
+
+  /**
+   * Find the best lane placement (position + timing)
+   */
+  private findLanePlacement(messageHeight: number, messageWidth: number): LanePlacement | null {
     const now = Date.now();
     const dimensions = this.overlay.getDimensions();
     if (!dimensions) return null;
 
-    // Calculate how many lanes this message needs based on its height
-    const requiredLanes = Math.ceil(messageHeight / dimensions.laneHeight);
+    const requiredLanes = this.calculateRequiredLanes(messageHeight, dimensions.laneHeight);
+    if (requiredLanes > this.lanes.length) {
+      return null;
+    }
+
+    let bestLane: LaneState | null = null;
+    let bestReadyTime = Number.POSITIVE_INFINITY;
 
     for (let i = 0; i <= this.lanes.length - requiredLanes; i++) {
-      const primaryLane = this.lanes[i];
+      let blockReadyTime = now;
 
-      // Check if primary lane is available (horizontal collision check)
-      if (primaryLane && primaryLane.lastItemStartTime === 0) {
-        // Check vertical space availability for adjacent lanes if needed
-        if (requiredLanes > 1 && !this.checkVerticalSpace(i, requiredLanes)) {
-          continue;
+      for (let offset = 0; offset < requiredLanes; offset++) {
+        const lane = this.lanes[i + offset];
+        if (!lane) {
+          blockReadyTime = Number.POSITIVE_INFINITY;
+          break;
         }
-        return primaryLane;
+
+        const laneReadyTime = this.calculateLaneReadyTime(lane, messageWidth, now);
+        blockReadyTime = Math.max(blockReadyTime, laneReadyTime);
       }
 
-      // Calculate safe time gap for horizontal collision avoidance
-      if (primaryLane) {
-        // Dynamic safe distance based on message type and font size
-        const baseSafeDistance = this.settings.fontSize * LAYOUT.SAFE_DISTANCE_SCALE;
-        const minSafeDistance = Math.max(baseSafeDistance, LAYOUT.SAFE_DISTANCE_MIN);
-        const requiredGapPx =
-          Math.max(primaryLane.lastItemWidthPx, minSafeDistance) + minSafeDistance;
-        const safeTimeGap = (requiredGapPx / this.settings.speedPxPerSec) * 1000;
-
-        // Check if enough time has passed since last message started
-        const timeSinceLastStart = now - primaryLane.lastItemStartTime;
-
-        if (timeSinceLastStart >= safeTimeGap) {
-          // Check vertical space availability for adjacent lanes if needed
-          if (requiredLanes > 1 && !this.checkVerticalSpace(i, requiredLanes)) {
-            continue;
-          }
-          return primaryLane;
-        }
+      if (
+        blockReadyTime < bestReadyTime ||
+        (blockReadyTime === bestReadyTime && bestLane && i < bestLane.index)
+      ) {
+        bestReadyTime = blockReadyTime;
+        bestLane = this.lanes[i] || null;
       }
     }
 
-    return null; // No available lane
-  }
-
-  /**
-   * Check if vertical space is available for multi-lane messages
-   */
-  private checkVerticalSpace(startLaneIndex: number, requiredLanes: number): boolean {
-    const now = Date.now();
-
-    for (let i = startLaneIndex; i < startLaneIndex + requiredLanes && i < this.lanes.length; i++) {
-      const lane = this.lanes[i];
-      if (!lane) return false;
-
-      // Skip the primary lane (already checked)
-      if (i === startLaneIndex) continue;
-
-      // Check if adjacent lane is clear or will be clear soon
-      if (lane.lastItemStartTime > 0) {
-        const timeSinceLastStart = now - lane.lastItemStartTime;
-
-        if (timeSinceLastStart < LAYOUT.VERTICAL_CLEAR_TIME) {
-          return false;
-        }
-      }
+    if (!bestLane || !Number.isFinite(bestReadyTime)) {
+      return null;
     }
 
-    return true;
+    return {
+      lane: bestLane,
+      laneSpan: requiredLanes,
+      waitMs: Math.max(0, Math.ceil(bestReadyTime - now)),
+    };
   }
 
   /**
@@ -1149,6 +1275,8 @@ export class Renderer {
 
     console.log('[Renderer] Pausing all animations');
     this.isPaused = true;
+    this.pausedAt = Date.now();
+    this.clearRetryTimer();
     this.forEachAnimation((animation) => animation.pause());
     console.log(`[Renderer] Paused ${this.activeMessages.size} animations`);
   }
@@ -1158,6 +1286,26 @@ export class Renderer {
    */
   resume(): void {
     if (!this.isPaused) return;
+
+    const now = Date.now();
+    if (this.pausedAt !== null) {
+      const pausedDuration = Math.max(0, now - this.pausedAt);
+      if (pausedDuration > 0) {
+        for (const lane of this.lanes) {
+          if (lane.lastItemStartTime > 0) {
+            lane.lastItemStartTime += pausedDuration;
+          }
+          if (lane.lastItemExitTime > 0) {
+            lane.lastItemExitTime += pausedDuration;
+          }
+        }
+
+        if (this.lastProcessTime > 0) {
+          this.lastProcessTime += pausedDuration;
+        }
+      }
+    }
+    this.pausedAt = null;
 
     console.log('[Renderer] Resuming all animations');
     this.isPaused = false;
@@ -1185,6 +1333,8 @@ export class Renderer {
       return;
     }
 
+    this.playbackRate = rate;
+
     console.log(
       `[Renderer] Setting playback rate to ${rate}x for ${this.activeMessages.size} animations`
     );
@@ -1211,6 +1361,9 @@ export class Renderer {
    * Clear all messages
    */
   clear(): void {
+    this.clearRetryTimer();
+    this.pausedAt = null;
+    this.playbackRate = 1;
     for (const active of this.activeMessages) {
       this.removeMessage(active);
     }
