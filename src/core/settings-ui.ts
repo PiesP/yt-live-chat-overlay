@@ -268,6 +268,10 @@ export class SettingsUi {
           <input type="number" name="opacity" min="0.5" max="1" step="0.05" />
         </label>
         <label class="yt-chat-overlay-settings-field">
+          <span>Super Chat color opacity (%)</span>
+          <input type="number" name="superChatOpacity" min="40" max="100" step="5" />
+        </label>
+        <label class="yt-chat-overlay-settings-field">
           <span>Safe top (%)</span>
           <input type="number" name="safeTop" min="0" max="25" step="1" />
         </label>
@@ -390,6 +394,7 @@ export class SettingsUi {
     this.setValue('speedPxPerSec', settings.speedPxPerSec);
     this.setValue('fontSize', settings.fontSize);
     this.setValue('opacity', settings.opacity);
+    this.setValue('superChatOpacity', (settings.superChatOpacity * 100).toFixed(0));
     this.setValue('safeTop', (settings.safeTop * 100).toFixed(1));
     this.setValue('safeBottom', (settings.safeBottom * 100).toFixed(1));
     this.setValue('maxConcurrentMessages', settings.maxConcurrentMessages);
@@ -429,6 +434,8 @@ export class SettingsUi {
       speedPxPerSec: clamp(readNumber('speedPxPerSec', current.speedPxPerSec), 100, 400),
       fontSize: clamp(readNumber('fontSize', current.fontSize), 18, 40),
       opacity: clamp(readNumber('opacity', current.opacity), 0.5, 1),
+      superChatOpacity:
+        clamp(readNumber('superChatOpacity', current.superChatOpacity * 100), 40, 100) / 100,
       safeTop: clamp(readNumber('safeTop', current.safeTop * 100), 0, 25) / 100,
       safeBottom: clamp(readNumber('safeBottom', current.safeBottom * 100), 0, 25) / 100,
       maxConcurrentMessages: Math.round(

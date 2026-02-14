@@ -123,6 +123,14 @@ export class VideoSync {
     this.attachListeners();
     this.observeVideoReplacement();
     this.initialized = true;
+
+    // Sync initial playback state immediately (covers already-paused videos)
+    this.callbacks.onRateChange?.(video.playbackRate || 1.0);
+    if (video.paused) {
+      this.callbacks.onPause?.();
+    } else {
+      this.callbacks.onPlay?.();
+    }
   }
 
   /**

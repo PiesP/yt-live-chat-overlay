@@ -132,6 +132,8 @@ export interface OverlaySettings {
   fontSize: number;
   /** Opacity (0.0-1.0) */
   opacity: number;
+  /** Super Chat color opacity (0.4-1.0) */
+  superChatOpacity: number;
   /** Safe zone top percentage (0.0-1.0) */
   safeTop: number;
   /** Safe zone bottom percentage (0.0-1.0) */
@@ -182,6 +184,7 @@ export const DEFAULT_SETTINGS: Readonly<OverlaySettings> = {
   speedPxPerSec: 200, // Slightly slower for better readability with multi-line messages
   fontSize: 24, // Slightly smaller for better space utilization
   opacity: 0.95, // Slightly more opaque for better visibility
+  superChatOpacity: 0.95, // Higher default opacity for stronger Super Chat colors
   safeTop: 0.1, // 10% - increased for better clearance from top UI elements
   safeBottom: 0.12, // 12% - reduced since we handle multi-line messages better
   maxConcurrentMessages: 50, // Soft cap for performance monitoring (not enforced)

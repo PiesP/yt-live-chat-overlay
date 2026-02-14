@@ -23,7 +23,6 @@ interface ActiveMessage {
   lane: number;
   startTime: number;
   duration: number;
-  timeoutId: number;
   animation: Animation;
 }
 
@@ -49,7 +48,6 @@ const LAYOUT = {
   DURATION_MAX: 12000, // ms
   LANE_DELAY_CYCLE: 4, // number of lanes before repeating delay pattern
   LANE_DELAY_MS: 100, // ms per lane cycle
-  CLEANUP_BUFFER: 2000, // ms
 
   // Collision detection
   SAFE_DISTANCE_SCALE: 2, // relative to fontSize
@@ -104,6 +102,9 @@ export class Renderer {
 
     const textShadow = this.buildTextShadow(this.settings.outline);
     const textStroke = this.buildTextStroke(this.settings.outline);
+    const superChatBaseOpacity = Math.min(1, Math.max(0.4, this.settings.superChatOpacity));
+    const superChatTopOpacity = Math.min(1, superChatBaseOpacity + 0.06);
+    const superChatBottomOpacity = Math.max(0.4, superChatBaseOpacity - 0.08);
 
     this.styleElement.textContent = `
       .yt-chat-overlay-message {
@@ -175,9 +176,9 @@ export class Renderer {
         background-color: rgb(30, 136, 229);
         background: linear-gradient(
           180deg,
-          rgba(var(--yt-sc-rgb), 0.96) 0%,
-          rgba(var(--yt-sc-rgb), 0.9) 48%,
-          rgba(var(--yt-sc-rgb), 0.84) 100%
+          rgba(var(--yt-sc-rgb), ${superChatTopOpacity}) 0%,
+          rgba(var(--yt-sc-rgb), ${superChatBaseOpacity}) 48%,
+          rgba(var(--yt-sc-rgb), ${superChatBottomOpacity}) 100%
         );
         box-shadow: ${shadows.box.md};
         backdrop-filter: blur(4px);
@@ -821,11 +822,6 @@ export class Renderer {
     lane.lastItemWidthPx = textWidth;
     lane.lastItemHeightPx = messageHeight;
 
-    // Setup cleanup timeout
-    const timeoutId = window.setTimeout(() => {
-      this.removeMessageByElement(element);
-    }, totalDuration + LAYOUT.CLEANUP_BUFFER);
-
     // Auto-remove on animation end
     animation.addEventListener(
       'finish',
@@ -840,7 +836,6 @@ export class Renderer {
       lane: lane.index,
       startTime: now,
       duration,
-      timeoutId,
       animation,
     };
   }
@@ -1123,10 +1118,17 @@ export class Renderer {
    * Remove active message
    */
   private removeMessage(active: ActiveMessage): void {
+    try {
+      if (active.animation.playState !== 'finished') {
+        active.animation.cancel();
+      }
+    } catch {
+      // Ignore animation cancellation errors during cleanup
+    }
+
     if (active.element.parentNode) {
       active.element.parentNode.removeChild(active.element);
     }
-    clearTimeout(active.timeoutId);
     this.activeMessages.delete(active);
   }
 
