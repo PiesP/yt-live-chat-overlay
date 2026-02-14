@@ -433,6 +433,51 @@ export class Renderer {
   }
 
   /**
+   * Create a standardized author photo element
+   */
+  private createAuthorPhotoElement(
+    photoUrl: string | undefined,
+    alt: string
+  ): HTMLImageElement | null {
+    if (!photoUrl) {
+      return null;
+    }
+
+    return this.createImageElement(
+      photoUrl,
+      alt,
+      'yt-chat-overlay-author-photo',
+      LAYOUT.AUTHOR_PHOTO_SIZE
+    );
+  }
+
+  /**
+   * Create message text element (plain text or rich text + emoji)
+   */
+  private createMessageTextElement(
+    message: ChatMessage,
+    className = 'yt-chat-overlay-message-content'
+  ): HTMLDivElement | null {
+    const hasRichContent = Boolean(message.content && message.content.length > 0);
+    const hasPlainText = message.text.trim().length > 0;
+
+    if (!hasRichContent && !hasPlainText) {
+      return null;
+    }
+
+    const contentDiv = document.createElement('div');
+    contentDiv.className = className;
+
+    if (hasRichContent && message.content) {
+      this.renderMixedContent(contentDiv, message.content);
+    } else {
+      contentDiv.textContent = message.text;
+    }
+
+    return contentDiv;
+  }
+
+  /**
    * Parse RGB/RGBA color string to components
    * Handles formats: "rgb(r, g, b)" or "rgba(r, g, b, a)"
    */
@@ -541,13 +586,6 @@ export class Renderer {
    */
   private shouldShowAuthor(message: ChatMessage): boolean {
     const settings = this.settings.showAuthor;
-
-    // Check if Super Chat
-    if (message.kind === 'superchat') {
-      return settings.superChat;
-    }
-
-    // Check author type
     const authorType = message.authorType || 'normal';
     return settings[authorType] || false;
   }
@@ -561,17 +599,12 @@ export class Renderer {
     authorInfoDiv.className = 'yt-chat-overlay-author-info';
 
     // Add author photo if available
-    if (message.authorPhotoUrl) {
-      const photoImg = this.createImageElement(
-        message.authorPhotoUrl,
-        message.author || 'Author',
-        'yt-chat-overlay-author-photo',
-        LAYOUT.AUTHOR_PHOTO_SIZE
-      );
-
-      if (photoImg) {
-        authorInfoDiv.appendChild(photoImg);
-      }
+    const photoImg = this.createAuthorPhotoElement(
+      message.authorPhotoUrl,
+      message.author || 'Author'
+    );
+    if (photoImg) {
+      authorInfoDiv.appendChild(photoImg);
     }
 
     // Add author name
@@ -593,46 +626,52 @@ export class Renderer {
   /**
    * Create Super Chat header section with author info and amount badge
    */
-  private createSuperChatHeader(message: ChatMessage, superChat: SuperChatInfo): HTMLDivElement {
+  private createSuperChatHeader(
+    message: ChatMessage,
+    superChat: SuperChatInfo,
+    showAuthor: boolean
+  ): HTMLDivElement {
     const header = document.createElement('div');
     header.className = 'yt-chat-overlay-superchat-meta';
 
-    const authorSection = document.createElement('div');
-    authorSection.className = 'yt-chat-overlay-superchat-author';
+    if (showAuthor) {
+      const authorSection = document.createElement('div');
+      authorSection.className = 'yt-chat-overlay-superchat-author';
 
-    // Always show author in Super Chat header
-    if (message.authorPhotoUrl) {
-      const photoImg = this.createImageElement(
+      const photoImg = this.createAuthorPhotoElement(
         message.authorPhotoUrl,
-        message.author || 'Author',
-        'yt-chat-overlay-author-photo',
-        LAYOUT.AUTHOR_PHOTO_SIZE
+        message.author || 'Author'
       );
-
       if (photoImg) {
         authorSection.appendChild(photoImg);
       }
+
+      if (message.author) {
+        const authorName = document.createElement('span');
+        authorName.className = 'yt-chat-overlay-author-name';
+        authorName.textContent = message.author;
+
+        // Set author color based on type
+        const authorType = message.authorType || 'normal';
+        authorName.style.color = this.settings.colors[authorType];
+
+        authorSection.appendChild(authorName);
+      }
+
+      if (authorSection.childElementCount > 0) {
+        header.appendChild(authorSection);
+      }
     }
-
-    if (message.author) {
-      const authorName = document.createElement('span');
-      authorName.className = 'yt-chat-overlay-author-name';
-      authorName.textContent = message.author;
-
-      // Set author color based on type
-      const authorType = message.authorType || 'normal';
-      authorName.style.color = this.settings.colors[authorType];
-
-      authorSection.appendChild(authorName);
-    }
-
-    header.appendChild(authorSection);
 
     // Amount badge
     const amountBadge = document.createElement('span');
     amountBadge.className = 'yt-chat-overlay-superchat-amount';
     amountBadge.textContent = superChat.amount;
     header.appendChild(amountBadge);
+
+    if (!showAuthor) {
+      header.style.justifyContent = 'flex-end';
+    }
 
     return header;
   }
@@ -644,11 +683,10 @@ export class Renderer {
     message: ChatMessage,
     superChat: SuperChatInfo
   ): HTMLDivElement | null {
-    const hasRichContent = Boolean(message.content && message.content.length > 0);
-    const hasPlainText = message.text.trim().length > 0;
     const hasSticker = Boolean(superChat.stickerUrl);
+    const messageDiv = this.createMessageTextElement(message);
 
-    if (!hasRichContent && !hasPlainText && !hasSticker) {
+    if (!messageDiv && !hasSticker) {
       return null;
     }
 
@@ -663,16 +701,7 @@ export class Renderer {
       }
     }
 
-    if (hasRichContent || hasPlainText) {
-      const messageDiv = document.createElement('div');
-      messageDiv.className = 'yt-chat-overlay-message-content';
-
-      if (message.content && message.content.length > 0) {
-        this.renderMixedContent(messageDiv, message.content);
-      } else {
-        messageDiv.textContent = message.text;
-      }
-
+    if (messageDiv) {
       content.appendChild(messageDiv);
     }
 
@@ -690,11 +719,8 @@ export class Renderer {
     const authorSection = document.createElement('div');
     authorSection.className = 'yt-chat-overlay-membership-author';
 
-    if (message.authorPhotoUrl) {
-      const photo = document.createElement('img');
-      photo.className = 'yt-chat-overlay-author-photo';
-      photo.src = message.authorPhotoUrl;
-      photo.alt = message.author || 'Member';
+    const photo = this.createAuthorPhotoElement(message.authorPhotoUrl, message.author || 'Member');
+    if (photo) {
       authorSection.appendChild(photo);
     }
 
@@ -711,16 +737,14 @@ export class Renderer {
     }
 
     // Membership message
-    const membershipText = document.createElement('div');
-    membershipText.className = 'yt-chat-overlay-membership-message';
-
-    if (message.content && message.content.length > 0) {
-      this.renderMixedContent(membershipText, message.content);
-    } else {
-      membershipText.textContent = message.text;
+    const membershipText = this.createMessageTextElement(
+      message,
+      'yt-chat-overlay-membership-message'
+    );
+    if (membershipText) {
+      textContainer.appendChild(membershipText);
     }
 
-    textContainer.appendChild(membershipText);
     authorSection.appendChild(textContainer);
     card.appendChild(authorSection);
 
@@ -902,12 +926,6 @@ export class Renderer {
     const element = document.createElement('div');
     element.className = 'yt-chat-overlay-message';
 
-    // Check if we should show author info
-    const showAuthor = this.shouldShowAuthor(message);
-    if (showAuthor) {
-      element.classList.add('yt-chat-overlay-message-with-author');
-    }
-
     // Apply Super Chat styling if applicable
     const isSuperChat = message.kind === 'superchat' && message.superChat;
     const isMembership = message.kind === 'membership';
@@ -917,7 +935,11 @@ export class Renderer {
       this.applySuperChatStyling(element, message.superChat);
 
       // Create structured header and content
-      const headerElement = this.createSuperChatHeader(message, message.superChat);
+      const headerElement = this.createSuperChatHeader(
+        message,
+        message.superChat,
+        this.settings.showAuthor.superChat
+      );
       const contentElement = this.createSuperChatContent(message, message.superChat);
 
       element.appendChild(headerElement);
@@ -930,18 +952,20 @@ export class Renderer {
       element.appendChild(membershipCard);
     } else {
       // Regular message (existing logic)
+      const showAuthor = this.shouldShowAuthor(message);
+      if (showAuthor) {
+        element.classList.add('yt-chat-overlay-message-with-author');
+      }
+
       if (showAuthor) {
         const authorElement = this.createAuthorElement(message);
         element.appendChild(authorElement);
       }
 
-      const contentDiv = document.createElement('div');
-      contentDiv.className = 'yt-chat-overlay-message-content';
-
-      if (message.content && message.content.length > 0) {
-        this.renderMixedContent(contentDiv, message.content);
-      } else {
-        contentDiv.textContent = message.text; // SECURITY: textContent only, no innerHTML
+      const contentDiv = this.createMessageTextElement(message);
+      if (!contentDiv) {
+        console.warn('[YT Chat Overlay] Skipping empty message');
+        return;
       }
 
       element.appendChild(contentDiv);
