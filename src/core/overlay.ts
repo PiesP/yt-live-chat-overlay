@@ -127,26 +127,31 @@ export class Overlay {
   }
 
   /**
-   * Destroy overlay
+   * Destroy and cleanup all resources
    */
   destroy(): void {
+    // Disconnect observers
     if (this.resizeObserver) {
       this.resizeObserver.disconnect();
       this.resizeObserver = null;
     }
 
+    // Remove event listeners
     if (this.fullscreenHandler) {
       document.removeEventListener('fullscreenchange', this.fullscreenHandler);
       this.fullscreenHandler = null;
     }
 
+    // Remove DOM elements
     if (this.container?.parentNode) {
       this.container.parentNode.removeChild(this.container);
     }
 
+    // Clear references
     this.container = null;
     this.playerElement = null;
     this.dimensions = null;
-    console.log('[YT Chat Overlay] Overlay destroyed');
+
+    console.log('[Overlay] Destroyed');
   }
 }

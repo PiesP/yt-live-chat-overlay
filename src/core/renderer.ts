@@ -1422,18 +1422,25 @@ export class Renderer {
   }
 
   /**
-   * Destroy renderer
+   * Destroy and cleanup all resources
    */
   destroy(): void {
+    // Clear state
     this.isPaused = false;
+
+    // Clear all active messages and queue
     this.clear();
+
+    // Remove style element
     if (this.styleElement?.parentNode) {
       this.styleElement.parentNode.removeChild(this.styleElement);
     }
     this.styleElement = null;
 
-    // Clear reference to overlay to prevent memory leaks
+    // Clear overlay reference to prevent memory leaks
     // @ts-expect-error - Clearing readonly property for cleanup
     this.overlay = null;
+
+    console.log('[Renderer] Destroyed');
   }
 }

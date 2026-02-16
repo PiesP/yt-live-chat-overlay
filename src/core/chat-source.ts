@@ -1006,16 +1006,19 @@ export class ChatSource {
   }
 
   /**
-   * Stop monitoring
+   * Stop monitoring and cleanup resources
    */
   stop(): void {
-    if (this.observer) {
+    // Disconnect observer
       this.observer.disconnect();
       this.observer = null;
     }
+
+    // Clear references
     this.chatContainer = null;
     this.callback = null;
-    console.log('[YT Chat Overlay] Chat monitoring stopped');
+
+    console.log('[ChatSource] Stopped');
   }
 
   /**

@@ -46,7 +46,7 @@ class App {
       this.handlePageChange();
     });
 
-    console.log('[YT Chat Overlay] Application initialized');
+    console.log('[App] Initialized');
   }
 
   /**
@@ -55,7 +55,7 @@ class App {
   async start(): Promise<void> {
     // Check if we're on a valid page
     if (!this.pageWatcher.isValidPage()) {
-      console.log('[YT Chat Overlay] Not on a video page, waiting...');
+      console.log('[App] Not on a video page, waiting...');
       return;
     }
 
@@ -63,14 +63,14 @@ class App {
 
     // Check if already initialized
     if (this.isInitialized) {
-      console.log('[YT Chat Overlay] Already initialized');
+      console.log('[App] Already initialized');
       return;
     }
 
     // Check if enabled
     const currentSettings = this.settings.get();
     if (!currentSettings.enabled) {
-      console.log('[YT Chat Overlay] Overlay is disabled');
+      console.log('[App] Overlay is disabled');
       return;
     }
 
@@ -80,7 +80,7 @@ class App {
       this.overlay = new Overlay();
       const overlayCreated = await this.overlay.create(currentSettings);
       if (!overlayCreated) {
-        console.warn('[YT Chat Overlay] Failed to create overlay');
+        console.warn('[App] Failed to create overlay');
         this.cleanup();
         return;
       }
@@ -123,16 +123,16 @@ class App {
       });
 
       if (!chatStarted) {
-        console.warn('[YT Chat Overlay] Failed to start chat monitoring');
+        console.warn('[App] Failed to start chat monitoring');
         this.cleanup();
         return;
       }
 
       this.isInitialized = true;
       this.lastStartedUrl = location.href;
-      console.log('[YT Chat Overlay] Started successfully');
+      console.log('[App] Started successfully');
     } catch (error) {
-      console.error('[YT Chat Overlay] Initialization error:', error);
+      console.error('[App] Initialization error:', error);
       this.cleanup();
     }
   }
@@ -171,11 +171,11 @@ class App {
     try {
       const currentUrl = location.href;
       if (this.isInitialized && this.lastStartedUrl === currentUrl) {
-        console.log('[YT Chat Overlay] Navigation event on same URL, skipping restart');
+        console.log('[App] Navigation event on same URL, skipping restart');
         return;
       }
 
-      console.log('[YT Chat Overlay] Page changed, cleaning up and restarting...');
+      console.log('[App] Page changed, restarting...');
 
       // Cleanup existing instances thoroughly
       this.cleanup();
@@ -186,31 +186,31 @@ class App {
 
       // Check if we're still on a valid page after delay
       if (!this.pageWatcher.isValidPage()) {
-        console.log('[YT Chat Overlay] Not on a valid page after navigation');
+        console.log('[App] Not on a valid page after navigation');
         return;
       }
 
       // Check if enabled before trying to restart
       if (!this.settings.get().enabled) {
-        console.log('[YT Chat Overlay] Overlay is disabled, not restarting');
+        console.log('[App] Overlay is disabled, not restarting');
         return;
       }
 
       // Try to restart with retry logic
       const maxRetries = 3;
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        console.log(`[YT Chat Overlay] Restart attempt ${attempt}/${maxRetries}`);
+        console.log(`[App] Restart attempt ${attempt}/${maxRetries}`);
 
         try {
           await this.start();
 
           // If successful, break out of retry loop
           if (this.isInitialized) {
-            console.log('[YT Chat Overlay] Successfully restarted after navigation');
+            console.log('[App] Successfully restarted after navigation');
             return;
           }
         } catch (error) {
-          console.warn(`[YT Chat Overlay] Restart attempt ${attempt} failed:`, error);
+          console.warn(`[App] Restart attempt ${attempt} failed:`, error);
         }
 
         // Wait before next retry
@@ -219,9 +219,9 @@ class App {
         }
       }
 
-      console.warn('[YT Chat Overlay] Failed to restart after all retry attempts');
+      console.warn('[App] Failed to restart after all retry attempts');
     } catch (error) {
-      console.warn('[YT Chat Overlay] Restart error:', error);
+      console.warn('[App] Restart error:', error);
     } finally {
       this.restartInProgress = false;
       if (this.pendingRestart) {
@@ -248,13 +248,13 @@ class App {
 
     if (wasEnabled && !nextSettings.enabled) {
       this.cleanup();
-      console.log('[YT Chat Overlay] Overlay disabled');
+      console.log('[App] Overlay disabled');
       return;
     }
 
     if (!wasEnabled && nextSettings.enabled) {
       void this.start();
-      console.log('[YT Chat Overlay] Overlay enabled');
+      console.log('[App] Overlay enabled');
       return;
     }
 
@@ -277,7 +277,7 @@ class App {
         .create(nextSettings)
         .then((created) => {
           if (!created) {
-            console.warn('[YT Chat Overlay] Failed to recreate overlay');
+            console.warn('[App] Failed to recreate overlay');
             return;
           }
           const overlay = this.overlay;
@@ -285,13 +285,13 @@ class App {
           this._renderer = new Renderer(overlay, nextSettings);
         })
         .catch((error) => {
-          console.error('[YT Chat Overlay] Failed to recreate overlay:', error);
+          console.error('[App] Failed to recreate overlay:', error);
         });
     } else if (this._renderer) {
       this._renderer.updateSettings(nextSettings);
     }
 
-    console.log('[YT Chat Overlay] Settings updated:', nextSettings);
+    console.log('[App] Settings updated');
   }
 
   resetSettings(): void {
@@ -309,78 +309,63 @@ class App {
    * Cleanup all components
    */
   private cleanup(): void {
-    console.log('[YT Chat Overlay] Starting cleanup...');
+    console.log('[App] Starting cleanup...');
+
+    // Close settings UI
     this.settingsUi.close();
 
     // Stop chat monitoring first to prevent new messages
     if (this.chatSource) {
-      try {
-        this.chatSource.stop();
-      } catch (error) {
-        console.warn('[YT Chat Overlay] Error stopping chat source:', error);
-      }
+      this.chatSource.stop();
       this.chatSource = null;
     }
 
     // Stop video sync
     if (this.videoSync) {
-      try {
-        this.videoSync.destroy();
-      } catch (error) {
-        console.warn('[YT Chat Overlay] Error destroying video sync:', error);
-      }
+      this.videoSync.destroy();
       this.videoSync = null;
     }
 
     // Destroy renderer to clear all active messages
     if (this._renderer) {
-      try {
-        this._renderer.destroy();
-      } catch (error) {
-        console.warn('[YT Chat Overlay] Error destroying renderer:', error);
-      }
+      this._renderer.destroy();
       this._renderer = null;
     }
 
     // Destroy overlay last
     if (this.overlay) {
-      try {
-        this.overlay.destroy();
-      } catch (error) {
-        console.warn('[YT Chat Overlay] Error destroying overlay:', error);
-      }
+      this.overlay.destroy();
       this.overlay = null;
     }
 
     // Force remove any leftover overlay elements from DOM
-    try {
-      const leftoverOverlays = document.querySelectorAll('#yt-live-chat-overlay');
+    const leftoverOverlays = document.querySelectorAll('#yt-live-chat-overlay');
+    if (leftoverOverlays.length > 0) {
       for (const element of leftoverOverlays) {
         element.remove();
-        console.log('[YT Chat Overlay] Removed leftover overlay element');
       }
-    } catch (error) {
-      console.warn('[YT Chat Overlay] Error removing leftover elements:', error);
+      console.log(`[App] Removed ${leftoverOverlays.length} leftover overlay element(s)`);
     }
 
     this.isInitialized = false;
-    console.log('[YT Chat Overlay] Cleanup completed');
+    console.log('[App] Cleanup completed');
   }
 
   /**
-   * Stop application
+   * Stop application and destroy all resources
    */
   stop(): void {
     this.cleanup();
     this.pageWatcher.destroy();
     this.settingsUi.destroy();
+    console.log('[App] Stopped');
   }
 
   private async ensureSettingsUi(): Promise<void> {
     try {
       await this.settingsUi.attach();
     } catch (error) {
-      console.warn('[YT Chat Overlay] Settings UI error:', error);
+      console.warn('[App] Settings UI error:', error);
     }
   }
 }

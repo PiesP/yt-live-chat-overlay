@@ -110,17 +110,13 @@ export class PageWatcher {
   }
 
   /**
-   * Cleanup
+   * Destroy and cleanup all resources
    */
   destroy(): void {
-    // Restore original history methods
-    if (this.originalPushState) {
-      history.pushState = this.originalPushState;
-      this.originalPushState = null;
-    }
-    if (this.originalReplaceState) {
-      history.replaceState = this.originalReplaceState;
-      this.originalReplaceState = null;
+    // Clear interval
+    if (this.intervalId !== null) {
+      window.clearInterval(this.intervalId);
+      this.intervalId = null;
     }
 
     // Remove event listeners
@@ -133,12 +129,19 @@ export class PageWatcher {
       this.ytNavigateHandler = null;
     }
 
-    // Clear interval
-    if (this.intervalId !== null) {
-      window.clearInterval(this.intervalId);
-      this.intervalId = null;
+    // Restore original history methods
+    if (this.originalPushState) {
+      history.pushState = this.originalPushState;
+      this.originalPushState = null;
+    }
+    if (this.originalReplaceState) {
+      history.replaceState = this.originalReplaceState;
+      this.originalReplaceState = null;
     }
 
+    // Clear callbacks
     this.callbacks.clear();
+
+    console.log('[PageWatcher] Destroyed');
   }
 }
