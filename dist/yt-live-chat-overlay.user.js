@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         YouTube Live Chat Overlay
-// @version      0.4.0
+// @version      0.4.1
 // @description  Displays YouTube live chat in Nico-nico style flowing overlay (100% local, no data collection)
 // @author       PiesP
 // @match        https://www.youtube.com/*
@@ -827,7 +827,7 @@
       return "blue";
     }
     /**
-     * Stop monitoring
+     * Stop monitoring and cleanup resources
      */
     stop() {
       if (this.observer) {
@@ -836,7 +836,7 @@
       }
       this.chatContainer = null;
       this.callback = null;
-      console.log("[YT Chat Overlay] Chat monitoring stopped");
+      console.log("[ChatSource] Stopped");
     }
     /**
      * Check if chat is active (received messages recently)
@@ -852,6 +852,7 @@
     playerElement = null;
     resizeObserver = null;
     dimensions = null;
+    fullscreenHandler = null;
     /**
      * Find player container
      */
@@ -896,9 +897,10 @@
         this.updateDimensions(settings);
       });
       this.resizeObserver.observe(this.playerElement);
-      document.addEventListener("fullscreenchange", () => {
+      this.fullscreenHandler = () => {
         setTimeout(() => this.updateDimensions(settings), 100);
-      });
+      };
+      document.addEventListener("fullscreenchange", this.fullscreenHandler);
       this.updateDimensions(settings);
       console.log("[YT Chat Overlay] Overlay created");
       return true;
@@ -934,12 +936,16 @@
       return this.container;
     }
     /**
-     * Destroy overlay
+     * Destroy and cleanup all resources
      */
     destroy() {
       if (this.resizeObserver) {
         this.resizeObserver.disconnect();
         this.resizeObserver = null;
+      }
+      if (this.fullscreenHandler) {
+        document.removeEventListener("fullscreenchange", this.fullscreenHandler);
+        this.fullscreenHandler = null;
       }
       if (this.container?.parentNode) {
         this.container.parentNode.removeChild(this.container);
@@ -947,13 +953,18 @@
       this.container = null;
       this.playerElement = null;
       this.dimensions = null;
-      console.log("[YT Chat Overlay] Overlay destroyed");
+      console.log("[Overlay] Destroyed");
     }
   }
 
   class PageWatcher {
     currentUrl;
     callbacks;
+    originalPushState = null;
+    originalReplaceState = null;
+    popstateHandler = null;
+    ytNavigateHandler = null;
+    intervalId = null;
     constructor() {
       this.currentUrl = location.href;
       this.callbacks = /* @__PURE__ */ new Set();
@@ -963,24 +974,26 @@
      * Initialize page watcher
      */
     init() {
-      const originalPushState = history.pushState;
-      const originalReplaceState = history.replaceState;
+      this.originalPushState = history.pushState;
+      this.originalReplaceState = history.replaceState;
       history.pushState = (...args) => {
-        originalPushState.apply(history, args);
+        this.originalPushState.apply(history, args);
         this.checkUrlChange();
       };
       history.replaceState = (...args) => {
-        originalReplaceState.apply(history, args);
+        this.originalReplaceState.apply(history, args);
         this.checkUrlChange();
       };
-      window.addEventListener("popstate", () => {
+      this.popstateHandler = () => {
         this.checkUrlChange();
-      });
-      window.addEventListener("yt-navigate-finish", () => {
+      };
+      window.addEventListener("popstate", this.popstateHandler);
+      this.ytNavigateHandler = () => {
         console.log("[YT Chat Overlay] YouTube navigation finished");
         this.checkUrlChange(true);
-      });
-      setInterval(() => {
+      };
+      window.addEventListener("yt-navigate-finish", this.ytNavigateHandler);
+      this.intervalId = window.setInterval(() => {
         this.checkUrlChange();
       }, 2e3);
     }
@@ -1030,10 +1043,31 @@
       return url.includes("/watch") || url.includes("/live/");
     }
     /**
-     * Cleanup
+     * Destroy and cleanup all resources
      */
     destroy() {
+      if (this.intervalId !== null) {
+        window.clearInterval(this.intervalId);
+        this.intervalId = null;
+      }
+      if (this.popstateHandler) {
+        window.removeEventListener("popstate", this.popstateHandler);
+        this.popstateHandler = null;
+      }
+      if (this.ytNavigateHandler) {
+        window.removeEventListener("yt-navigate-finish", this.ytNavigateHandler);
+        this.ytNavigateHandler = null;
+      }
+      if (this.originalPushState) {
+        history.pushState = this.originalPushState;
+        this.originalPushState = null;
+      }
+      if (this.originalReplaceState) {
+        history.replaceState = this.originalReplaceState;
+        this.originalReplaceState = null;
+      }
       this.callbacks.clear();
+      console.log("[PageWatcher] Destroyed");
     }
   }
 
@@ -2250,7 +2284,7 @@
       this.messageQueue = [];
     }
     /**
-     * Destroy renderer
+     * Destroy and cleanup all resources
      */
     destroy() {
       this.isPaused = false;
@@ -2259,6 +2293,8 @@
         this.styleElement.parentNode.removeChild(this.styleElement);
       }
       this.styleElement = null;
+      this.overlay = null;
+      console.log("[Renderer] Destroyed");
     }
   }
 
@@ -2786,6 +2822,25 @@
         input.checked = value;
       }
     }
+    /**
+     * Destroy and cleanup all resources
+     */
+    destroy() {
+      this.close();
+      if (this.button?.parentElement) {
+        this.button.parentElement.removeChild(this.button);
+      }
+      if (this.backdrop?.parentElement) {
+        this.backdrop.parentElement.removeChild(this.backdrop);
+      }
+      const styleElement = document.getElementById(STYLE_ID);
+      styleElement?.remove();
+      this.button = null;
+      this.backdrop = null;
+      this.modal = null;
+      this.playerElement = null;
+      console.log("[SettingsUi] Destroyed");
+    }
   }
 
   const VIDEO_SELECTORS = [
@@ -3060,31 +3115,31 @@
       this.pageWatcher.onChange(() => {
         this.handlePageChange();
       });
-      console.log("[YT Chat Overlay] Application initialized");
+      console.log("[App] Initialized");
     }
     /**
      * Start application
      */
     async start() {
       if (!this.pageWatcher.isValidPage()) {
-        console.log("[YT Chat Overlay] Not on a video page, waiting...");
+        console.log("[App] Not on a video page, waiting...");
         return;
       }
       await this.ensureSettingsUi();
       if (this.isInitialized) {
-        console.log("[YT Chat Overlay] Already initialized");
+        console.log("[App] Already initialized");
         return;
       }
       const currentSettings = this.settings.get();
       if (!currentSettings.enabled) {
-        console.log("[YT Chat Overlay] Overlay is disabled");
+        console.log("[App] Overlay is disabled");
         return;
       }
       try {
         this.overlay = new Overlay();
         const overlayCreated = await this.overlay.create(currentSettings);
         if (!overlayCreated) {
-          console.warn("[YT Chat Overlay] Failed to create overlay");
+          console.warn("[App] Failed to create overlay");
           this.cleanup();
           return;
         }
@@ -3117,15 +3172,15 @@
           }
         });
         if (!chatStarted) {
-          console.warn("[YT Chat Overlay] Failed to start chat monitoring");
+          console.warn("[App] Failed to start chat monitoring");
           this.cleanup();
           return;
         }
         this.isInitialized = true;
         this.lastStartedUrl = location.href;
-        console.log("[YT Chat Overlay] Started successfully");
+        console.log("[App] Started successfully");
       } catch (error) {
-        console.error("[YT Chat Overlay] Initialization error:", error);
+        console.error("[App] Initialization error:", error);
         this.cleanup();
       }
     }
@@ -3158,39 +3213,39 @@
       try {
         const currentUrl = location.href;
         if (this.isInitialized && this.lastStartedUrl === currentUrl) {
-          console.log("[YT Chat Overlay] Navigation event on same URL, skipping restart");
+          console.log("[App] Navigation event on same URL, skipping restart");
           return;
         }
-        console.log("[YT Chat Overlay] Page changed, cleaning up and restarting...");
+        console.log("[App] Page changed, restarting...");
         this.cleanup();
         await sleep(2e3);
         if (!this.pageWatcher.isValidPage()) {
-          console.log("[YT Chat Overlay] Not on a valid page after navigation");
+          console.log("[App] Not on a valid page after navigation");
           return;
         }
         if (!this.settings.get().enabled) {
-          console.log("[YT Chat Overlay] Overlay is disabled, not restarting");
+          console.log("[App] Overlay is disabled, not restarting");
           return;
         }
         const maxRetries = 3;
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
-          console.log(`[YT Chat Overlay] Restart attempt ${attempt}/${maxRetries}`);
+          console.log(`[App] Restart attempt ${attempt}/${maxRetries}`);
           try {
             await this.start();
             if (this.isInitialized) {
-              console.log("[YT Chat Overlay] Successfully restarted after navigation");
+              console.log("[App] Successfully restarted after navigation");
               return;
             }
           } catch (error) {
-            console.warn(`[YT Chat Overlay] Restart attempt ${attempt} failed:`, error);
+            console.warn(`[App] Restart attempt ${attempt} failed:`, error);
           }
           if (attempt < maxRetries) {
             await sleep(2e3);
           }
         }
-        console.warn("[YT Chat Overlay] Failed to restart after all retry attempts");
+        console.warn("[App] Failed to restart after all retry attempts");
       } catch (error) {
-        console.warn("[YT Chat Overlay] Restart error:", error);
+        console.warn("[App] Restart error:", error);
       } finally {
         this.restartInProgress = false;
         if (this.pendingRestart) {
@@ -3214,12 +3269,12 @@
       const nextSettings = this.settings.get();
       if (wasEnabled && !nextSettings.enabled) {
         this.cleanup();
-        console.log("[YT Chat Overlay] Overlay disabled");
+        console.log("[App] Overlay disabled");
         return;
       }
       if (!wasEnabled && nextSettings.enabled) {
         void this.start();
-        console.log("[YT Chat Overlay] Overlay enabled");
+        console.log("[App] Overlay enabled");
         return;
       }
       const currentOverlay = this.overlay;
@@ -3233,19 +3288,19 @@
         this.overlay = new Overlay();
         this.overlay.create(nextSettings).then((created) => {
           if (!created) {
-            console.warn("[YT Chat Overlay] Failed to recreate overlay");
+            console.warn("[App] Failed to recreate overlay");
             return;
           }
           const overlay = this.overlay;
           if (!overlay) return;
           this._renderer = new Renderer(overlay, nextSettings);
         }).catch((error) => {
-          console.error("[YT Chat Overlay] Failed to recreate overlay:", error);
+          console.error("[App] Failed to recreate overlay:", error);
         });
       } else if (this._renderer) {
         this._renderer.updateSettings(nextSettings);
       }
-      console.log("[YT Chat Overlay] Settings updated:", nextSettings);
+      console.log("[App] Settings updated");
     }
     resetSettings() {
       this.updateSettings(DEFAULT_SETTINGS);
@@ -3260,64 +3315,48 @@
      * Cleanup all components
      */
     cleanup() {
-      console.log("[YT Chat Overlay] Starting cleanup...");
+      console.log("[App] Starting cleanup...");
       this.settingsUi.close();
       if (this.chatSource) {
-        try {
-          this.chatSource.stop();
-        } catch (error) {
-          console.warn("[YT Chat Overlay] Error stopping chat source:", error);
-        }
+        this.chatSource.stop();
         this.chatSource = null;
       }
       if (this.videoSync) {
-        try {
-          this.videoSync.destroy();
-        } catch (error) {
-          console.warn("[YT Chat Overlay] Error destroying video sync:", error);
-        }
+        this.videoSync.destroy();
         this.videoSync = null;
       }
       if (this._renderer) {
-        try {
-          this._renderer.destroy();
-        } catch (error) {
-          console.warn("[YT Chat Overlay] Error destroying renderer:", error);
-        }
+        this._renderer.destroy();
         this._renderer = null;
       }
       if (this.overlay) {
-        try {
-          this.overlay.destroy();
-        } catch (error) {
-          console.warn("[YT Chat Overlay] Error destroying overlay:", error);
-        }
+        this.overlay.destroy();
         this.overlay = null;
       }
-      try {
-        const leftoverOverlays = document.querySelectorAll("#yt-live-chat-overlay");
+      const leftoverOverlays = document.querySelectorAll("#yt-live-chat-overlay");
+      if (leftoverOverlays.length > 0) {
         for (const element of leftoverOverlays) {
           element.remove();
-          console.log("[YT Chat Overlay] Removed leftover overlay element");
         }
-      } catch (error) {
-        console.warn("[YT Chat Overlay] Error removing leftover elements:", error);
+        console.log(`[App] Removed ${leftoverOverlays.length} leftover overlay element(s)`);
       }
       this.isInitialized = false;
-      console.log("[YT Chat Overlay] Cleanup completed");
+      console.log("[App] Cleanup completed");
     }
     /**
-     * Stop application
+     * Stop application and destroy all resources
      */
     stop() {
       this.cleanup();
       this.pageWatcher.destroy();
+      this.settingsUi.destroy();
+      console.log("[App] Stopped");
     }
     async ensureSettingsUi() {
       try {
         await this.settingsUi.attach();
       } catch (error) {
-        console.warn("[YT Chat Overlay] Settings UI error:", error);
+        console.warn("[App] Settings UI error:", error);
       }
     }
   }
