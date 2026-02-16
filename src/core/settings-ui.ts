@@ -527,5 +527,9 @@ export class SettingsUi {
     }
 
     this.playerElement = null;
+
+    // Note: Constructor callback references (getSettings, updateSettings, resetSettings)
+    // are readonly and cannot be cleared. They will be garbage collected when this
+    // SettingsUi instance is no longer referenced.
   }
 }

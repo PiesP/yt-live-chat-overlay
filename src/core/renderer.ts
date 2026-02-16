@@ -1431,5 +1431,9 @@ export class Renderer {
       this.styleElement.parentNode.removeChild(this.styleElement);
     }
     this.styleElement = null;
+
+    // Clear reference to overlay to prevent memory leaks
+    // @ts-expect-error - Clearing readonly property for cleanup
+    this.overlay = null;
   }
 }
