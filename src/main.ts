@@ -373,6 +373,7 @@ class App {
   stop(): void {
     this.cleanup();
     this.pageWatcher.destroy();
+    this.settingsUi.destroy();
   }
 
   private async ensureSettingsUi(): Promise<void> {

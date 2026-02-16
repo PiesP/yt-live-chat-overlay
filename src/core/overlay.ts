@@ -13,6 +13,7 @@ export class Overlay {
   private playerElement: HTMLElement | null = null;
   private resizeObserver: ResizeObserver | null = null;
   private dimensions: OverlayDimensions | null = null;
+  private fullscreenHandler: (() => void) | null = null;
 
   /**
    * Find player container
@@ -72,9 +73,10 @@ export class Overlay {
     this.resizeObserver.observe(this.playerElement);
 
     // Monitor fullscreen changes
-    document.addEventListener('fullscreenchange', () => {
+    this.fullscreenHandler = () => {
       setTimeout(() => this.updateDimensions(settings), 100);
-    });
+    };
+    document.addEventListener('fullscreenchange', this.fullscreenHandler);
 
     this.updateDimensions(settings);
 
@@ -131,6 +133,11 @@ export class Overlay {
     if (this.resizeObserver) {
       this.resizeObserver.disconnect();
       this.resizeObserver = null;
+    }
+
+    if (this.fullscreenHandler) {
+      document.removeEventListener('fullscreenchange', this.fullscreenHandler);
+      this.fullscreenHandler = null;
     }
 
     if (this.container?.parentNode) {

@@ -10,6 +10,11 @@ export type PageChangeCallback = () => void;
 export class PageWatcher {
   private currentUrl: string;
   private callbacks: Set<PageChangeCallback>;
+  private originalPushState: typeof history.pushState | null = null;
+  private originalReplaceState: typeof history.replaceState | null = null;
+  private popstateHandler: (() => void) | null = null;
+  private ytNavigateHandler: (() => void) | null = null;
+  private intervalId: number | null = null;
 
   constructor() {
     this.currentUrl = location.href;
@@ -22,32 +27,34 @@ export class PageWatcher {
    */
   private init(): void {
     // Monitor History API changes (YouTube uses soft navigation)
-    const originalPushState = history.pushState;
-    const originalReplaceState = history.replaceState;
+    this.originalPushState = history.pushState;
+    this.originalReplaceState = history.replaceState;
 
     history.pushState = (...args) => {
-      originalPushState.apply(history, args);
+      this.originalPushState!.apply(history, args);
       this.checkUrlChange();
     };
 
     history.replaceState = (...args) => {
-      originalReplaceState.apply(history, args);
+      this.originalReplaceState!.apply(history, args);
       this.checkUrlChange();
     };
 
     // Also monitor popstate (back/forward buttons)
-    window.addEventListener('popstate', () => {
+    this.popstateHandler = () => {
       this.checkUrlChange();
-    });
+    };
+    window.addEventListener('popstate', this.popstateHandler);
 
     // Listen to YouTube's custom navigation event (more reliable for SPA navigation)
-    window.addEventListener('yt-navigate-finish', () => {
+    this.ytNavigateHandler = () => {
       console.log('[YT Chat Overlay] YouTube navigation finished');
       this.checkUrlChange(true);
-    });
+    };
+    window.addEventListener('yt-navigate-finish', this.ytNavigateHandler);
 
     // Periodic check as fallback (every 2 seconds)
-    setInterval(() => {
+    this.intervalId = window.setInterval(() => {
       this.checkUrlChange();
     }, 2000);
   }
@@ -106,6 +113,32 @@ export class PageWatcher {
    * Cleanup
    */
   destroy(): void {
+    // Restore original history methods
+    if (this.originalPushState) {
+      history.pushState = this.originalPushState;
+      this.originalPushState = null;
+    }
+    if (this.originalReplaceState) {
+      history.replaceState = this.originalReplaceState;
+      this.originalReplaceState = null;
+    }
+
+    // Remove event listeners
+    if (this.popstateHandler) {
+      window.removeEventListener('popstate', this.popstateHandler);
+      this.popstateHandler = null;
+    }
+    if (this.ytNavigateHandler) {
+      window.removeEventListener('yt-navigate-finish', this.ytNavigateHandler);
+      this.ytNavigateHandler = null;
+    }
+
+    // Clear interval
+    if (this.intervalId !== null) {
+      window.clearInterval(this.intervalId);
+      this.intervalId = null;
+    }
+
     this.callbacks.clear();
   }
 }

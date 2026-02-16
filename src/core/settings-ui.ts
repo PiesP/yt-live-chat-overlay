@@ -495,4 +495,37 @@ export class SettingsUi {
       input.checked = value;
     }
   }
+
+  /**
+   * Destroy settings UI and clean up all resources
+   */
+  destroy(): void {
+    // Close modal and remove keydown listener
+    this.close();
+
+    // Remove button from DOM
+    if (this.button) {
+      if (this.button.parentElement) {
+        this.button.parentElement.removeChild(this.button);
+      }
+      this.button = null;
+    }
+
+    // Remove backdrop and modal from DOM
+    if (this.backdrop) {
+      if (this.backdrop.parentElement) {
+        this.backdrop.parentElement.removeChild(this.backdrop);
+      }
+      this.backdrop = null;
+    }
+    this.modal = null;
+
+    // Remove style element from DOM
+    const styleElement = document.getElementById(STYLE_ID);
+    if (styleElement) {
+      styleElement.remove();
+    }
+
+    this.playerElement = null;
+  }
 }
