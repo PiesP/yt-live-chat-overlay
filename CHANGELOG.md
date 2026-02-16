@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.1] - 2026-02-16
+
+### Fixed
+- **메모리 누출 방지**: 모든 컴포넌트의 리소스 정리 개선
+  - PageWatcher: history API 래퍼, 이벤트 리스너, interval 완전 정리
+  - Overlay: fullscreenchange 이벤트 리스너 제거 추가
+  - Renderer: overlay 참조 명시적 정리로 순환 참조 방지
+  - ChatSource: MutationObserver 및 참조 정리 개선
+  - SettingsUi: DOM 요소 및 스타일 완전 제거
+- 페이지 이동 및 앱 재시작 시 리소스가 완전히 해제되도록 개선
+
+### Changed
+- **코드 일관성 개선**: 모든 destroy() 메서드를 표준화된 패턴으로 통일
+  - 타이머/인터벌 → 이벤트 리스너 → Observer → DOM 요소 → 참조 순서로 정리
+  - 섹션별 주석 추가로 가독성 향상
+- **로깅 통일**: 클래스별 일관된 로그 접두사 적용 (`[App]`, `[Overlay]`, `[Renderer]` 등)
+- **Main.ts 최적화**: cleanup() 플로우 간소화 및 불필요한 try-catch 제거
+- Optional chaining을 활용한 null 체크 패턴 개선
+
+### Dependencies
+- `@types/node` 버전 25.2.3으로 업데이트
+- 개발 의존성 (quality group) 업데이트
+
 ## [0.4.0] - 2026-02-14
 
 ### Added

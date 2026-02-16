@@ -1010,6 +1010,7 @@ export class ChatSource {
    */
   stop(): void {
     // Disconnect observer
+    if (this.observer) {
       this.observer.disconnect();
       this.observer = null;
     }
