@@ -542,7 +542,7 @@ export class ChatSource {
     const tagName = element.tagName.toLowerCase();
 
     // Must be a live-chat element
-      return null;
+    if (!tagName.startsWith('yt-live-chat-')) return null;
 
     // Determine message kind FIRST so per-kind filtering can follow
     let kind: ChatMessage['kind'];
@@ -560,7 +560,7 @@ export class ChatSource {
     }
 
     // Filter out system messages (elements without an author, e.g. replay notice)
-      return null;
+    if (!this.isUserMessage(element)) return null;
 
     try {
       let text = '';
@@ -696,6 +696,7 @@ export class ChatSource {
       const badgeText = `${ariaLabel} ${tooltip} ${iconType}`;
 
       // Check for channel owner (highest priority)
+      if (badgeText.includes('owner') || iconType.includes('owner')) {
         return 'owner';
       }
 
