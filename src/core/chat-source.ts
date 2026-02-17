@@ -530,34 +530,74 @@ export class ChatSource {
 
   /**
    * Parse message from DOM element
+   *
+   * Filtering policy for overlay display:
+   *   ✅ text        – yt-live-chat-text-message-renderer (regular chat messages)
+   *   ✅ superchat   – yt-live-chat-paid-message-renderer  (Super Chat with text)
+   *   ✅ membership  – yt-live-chat-membership-item-renderer (new/gifted member events)
+   *   ❌ sticker     – yt-live-chat-paid-sticker-renderer  (image-only, no readable text)
+   *   ❌ system      – viewer-engagement / banner / placeholder / timed-message
+   *   ❌ other       – anything that doesn't match the above
    */
   private parseMessage(element: Element): ChatMessage | null {
-    // Check for text message renderer
-    if (!element.tagName.toLowerCase().includes('chat') || !element.querySelector('#message')) {
+    const tagName = element.tagName.toLowerCase();
+
+    // Must be a live-chat element
+      return null;
+
+    // Determine message kind FIRST so per-kind filtering can follow
+    let kind: ChatMessage['kind'];
+    if (tagName.includes('membership')) {
+      kind = 'membership';
+    } else if (tagName.includes('paid')) {
+      // Super Stickers (image-only) – no readable text, skip
+      if (tagName.includes('sticker')) return null;
+      kind = 'superchat';
+    } else if (tagName.includes('text-message')) {
+      kind = 'text';
+    } else {
+      // viewer-engagement, banner, placeholder, timed-message, purchase-announcement, etc.
       return null;
     }
 
-    // Filter out system messages (e.g., "실시간 채팅 다시보기를 사용 중입니다")
-    if (!this.isUserMessage(element)) {
+    // Filter out system messages (elements without an author, e.g. replay notice)
       return null;
-    }
 
     try {
-      // Extract text content and emojis
-      const messageElement = element.querySelector('#message');
-      if (!messageElement) return null;
+      let text = '';
+      let content: ContentSegment[] = [];
 
-      // Parse content with emojis
-      const { text, content } = this.parseMessageContent(messageElement);
+      if (kind === 'membership') {
+        // Membership items: #message is optional (the member may have typed something).
+        // Always show – even text-less membership items convey a meaningful event.
+        const messageElement = element.querySelector('#message');
+        if (messageElement) {
+          const parsed = this.parseMessageContent(messageElement);
+          text = parsed.text;
+          content = parsed.content;
+        }
+      } else if (kind === 'superchat') {
+        // Super Chats: always show regardless of whether there is a text body.
+        // The purchase itself is the event; text is optional.
+        const messageElement = element.querySelector('#message');
+        if (messageElement) {
+          const parsed = this.parseMessageContent(messageElement);
+          text = parsed.text;
+          content = parsed.content;
+        }
+      } else {
+        // Regular text messages: must have a non-trivial text body.
+        const messageElement = element.querySelector('#message');
+        if (!messageElement) return null;
 
-      if (!text) return null;
+        const parsed = this.parseMessageContent(messageElement);
+        text = parsed.text;
+        content = parsed.content;
 
-      // Determine message kind
-      let kind: ChatMessage['kind'] = 'text';
-      if (element.tagName.toLowerCase().includes('paid')) {
-        kind = 'superchat';
-      } else if (element.tagName.toLowerCase().includes('membership')) {
-        kind = 'membership';
+        if (!this.isSubstantialText(text, element))
+          // Drop messages that are too short to be meaningful (e.g. single-char spam like "w").
+          // Exception: privileged authors (mods, owner, members) always pass through.
+          return null;
       }
 
       // Extract author information
@@ -571,13 +611,13 @@ export class ChatSource {
         timestamp: Date.now(),
       };
 
-      // Add rich content if available
       if (content.length > 0) {
+        // Add rich content if available
         message.content = content;
       }
 
-      // Only add optional fields if they have values
       if (authorName) {
+        // Only add optional fields if they have values
         message.author = authorName;
       }
       if (authorType) {
@@ -587,16 +627,13 @@ export class ChatSource {
         message.authorPhotoUrl = authorPhotoUrl;
       }
 
-      // Parse Super Chat specific data
       if (kind === 'superchat') {
+        // Parse Super Chat specific data
         const superChatInfo = this.parseSuperChatInfo(element);
         if (superChatInfo) {
           message.superChat = superChatInfo;
         }
       }
-
-      // For now, only process text and superchat messages
-      if (kind !== 'text' && kind !== 'superchat') return null;
 
       return message;
     } catch (error) {
@@ -607,31 +644,41 @@ export class ChatSource {
 
   /**
    * Check if an element represents a user message (not a system message)
-   * System messages don't have authors and use different renderer types
+   * Called AFTER kind detection in parseMessage, so purely an author-presence guard.
    */
   private isUserMessage(element: Element): boolean {
-    // Primary check: user messages always have an author element
+    // User messages always have a non-empty author element
     const authorElement = element.querySelector('#author-name');
-    if (!authorElement || !authorElement.textContent?.trim()) {
-      return false; // No author = system message
-    }
+    return Boolean(authorElement?.textContent?.trim());
+  }
 
-    // Secondary check: block known system message renderer types
-    const tagName = element.tagName.toLowerCase();
-    const systemMessageTypes = [
-      'placeholder', // "Using live chat replay" / "실시간 채팅 다시보기"
-      'timed-message', // Time-based notifications
-      'viewer-engagement', // Engagement notifications
-      'banner', // System banners
-    ];
+  /**
+   * Decide whether a plain text message is substantial enough to show on the overlay.
+   *
+   * Filters out low-signal noise that clutters the screen without adding viewing value:
+   *   – Single- or two-character reaction tokens ("w", "!!", "草")
+   *   – Messages that are purely whitespace after stripping emoji alt text
+   *
+   * Privileged authors (moderator / owner / member) bypass this filter because
+   * their short messages are more likely to be intentional and relevant.
+   */
+  private isSubstantialText(text: string, element: Element): boolean {
+    // Privileged authors always pass through
+    const privilegedBadge = element.querySelector(
+      'yt-live-chat-author-badge-renderer[type="moderator"], ' +
+        'yt-live-chat-author-badge-renderer[type="owner"], ' +
+        'yt-live-chat-author-badge-renderer[type="member"]'
+    );
+    if (privilegedBadge) return true;
 
-    for (const type of systemMessageTypes) {
-      if (tagName.includes(type)) {
-        return false; // Known system message type
-      }
-    }
+    // Strip emoji alt-text placeholders like "[emoji]", ":name:" to get real character count
+    const stripped = text
+      .replace(/\[.*?\]/g, '') // remove [emoji]
+      .replace(/:[-\w]+:/g, '') // remove :emoji_name:
+      .trim();
 
-    return true; // Likely a user message
+    // Require at least 3 visible characters to appear on the overlay
+    return stripped.length >= 3;
   }
 
   /**

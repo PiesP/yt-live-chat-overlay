@@ -77,7 +77,7 @@ export interface ChatMessage {
   /** Rich content segments (text + emoji) - for rendering mixed content */
   content?: ContentSegment[];
   /** Message type */
-  kind: 'text' | 'superchat' | 'membership' | 'other';
+  kind: 'text' | 'superchat' | 'membership';
   /** Timestamp when the message was detected */
   timestamp: number;
   /** Author display name (optional, for future use) */
@@ -181,33 +181,59 @@ export interface OverlayDimensions {
  */
 export const DEFAULT_SETTINGS: Readonly<OverlaySettings> = {
   enabled: true,
-  speedPxPerSec: 200, // Slightly slower for better readability with multi-line messages
-  fontSize: 24, // Slightly smaller for better space utilization
-  opacity: 0.95, // Slightly more opaque for better visibility
-  superChatOpacity: 0.4, // Higher default opacity for stronger Super Chat colors
-  safeTop: 0.1, // 10% - increased for better clearance from top UI elements
-  safeBottom: 0.12, // 12% - reduced since we handle multi-line messages better
-  maxConcurrentMessages: 50, // Soft cap for performance monitoring (not enforced)
-  maxMessagesPerSecond: 10, // Rate limit for incoming messages (enforced)
+  /**
+   * Faster scrolling = messages leave the screen sooner, reducing visual clutter.
+   * 280 px/s keeps text readable while minimising how long it occludes the video.
+   */
+  speedPxPerSec: 280,
+  /** Smaller font reduces the area of video blocked per message. */
+  fontSize: 20,
+  /**
+   * Semi-transparent so the video is still visible through overlay text.
+   * 0.85 gives good legibility without fully blocking the picture.
+   */
+  opacity: 0.85,
+  /** Super Chat card tint opacity – lower = more transparent over video. */
+  superChatOpacity: 0.35,
+  /** Keep the top 10 % clear (title bar / stream info area). */
+  safeTop: 0.1,
+  /**
+   * Keep the bottom 15 % clear (player controls, chat toggle, etc.).
+   * Slightly larger than the old default to avoid covering the control bar.
+   */
+  safeBottom: 0.15,
+  /** Soft cap for performance monitoring (not strictly enforced). */
+  maxConcurrentMessages: 30,
+  /**
+   * Hard rate limit: at most 4 messages per second reach the overlay.
+   * Keeps the screen from becoming unreadable during chat bursts.
+   */
+  maxMessagesPerSecond: 4,
   showAuthor: {
+    /** Hide author names for regular users – reduces visual noise. */
     normal: false,
+    /** Hide member names by default – membership badge already signals this. */
     member: false,
+    /** Always show moderator names so viewers can identify them. */
     moderator: true,
+    /** Always show channel owner name. */
     owner: true,
+    /** Verified users look like normal users visually – hide by default. */
     verified: false,
+    /** Super Chat author is essential context for the purchase. */
     superChat: true,
   },
   colors: {
-    normal: '#FFFFFF', // White for normal users
-    member: '#0F9D58', // Green for members
-    moderator: '#5E84F1', // Blue for moderators
-    owner: '#FFD600', // Gold/Yellow for channel owner
-    verified: '#AAAAAA', // Gray for verified users
+    normal: '#FFFFFF', // White – neutral and readable on any background
+    member: '#0F9D58', // Green – matches YouTube's membership colour
+    moderator: '#5E84F1', // Blue – matches YouTube's moderator badge colour
+    owner: '#FFD600', // Gold – clearly signals the channel owner
+    verified: '#AAAAAA', // Grey – de-emphasised; treated like a normal viewer
   },
   outline: {
     enabled: true,
-    widthPx: 1.5, // Slightly thicker for better contrast
-    blurPx: 2, // Increased blur for better glow effect
-    opacity: 0.7, // Increased opacity for better visibility
+    widthPx: 1.5,
+    blurPx: 2,
+    opacity: 0.7,
   },
 };
