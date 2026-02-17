@@ -70,18 +70,25 @@ const LAYOUT = {
   DURATION_MIN: 5000, // ms
   DURATION_MAX: 12000, // ms
   LANE_DELAY_CYCLE: 3, // number of lanes before repeating delay pattern
-  LANE_DELAY_MS: 40, // ms per lane cycle
+  LANE_DELAY_MS: 15, // ms per lane cycle (reduced from 40 for faster throughput)
 
   // Collision detection
-  SAFE_DISTANCE_SCALE: 0.7, // relative to fontSize
-  SAFE_DISTANCE_MIN: 16, // px
-  VERTICAL_CLEAR_TIME_MIN: 120, // ms
-  VERTICAL_CLEAR_TIME_MAX: 320, // ms
+  // Safe distance = minimum pixel gap between messages in the same lane.
+  // Reduced from 0.7/16 → 0.5/10 for denser horizontal packing while
+  // still preventing visual overlap at all supported font sizes.
+  SAFE_DISTANCE_SCALE: 0.5, // relative to fontSize
+  SAFE_DISTANCE_MIN: 10, // px
+  // Vertical clear time guards the brief window while the previous message
+  // is still partially behind the screen's right edge.  Reduced from
+  // 120/320 ms → 40/160 ms because the horizontal readiness check already
+  // dominates for any message wider than ~30 px.
+  VERTICAL_CLEAR_TIME_MIN: 40, // ms
+  VERTICAL_CLEAR_TIME_MAX: 160, // ms
   LANE_HEIGHT_PADDING_SCALE: 0.06, // relative to fontSize
   LANE_HEIGHT_PADDING_MIN: 1, // px
   RETRY_DELAY_MIN_MS: 16, // ms
   RETRY_DELAY_MAX_MS: 800, // ms
-  QUEUE_LOOKAHEAD_LIMIT: 14, // queue scan window for scheduling
+  QUEUE_LOOKAHEAD_LIMIT: 20, // queue scan window for scheduling (increased from 14)
 } as const;
 
 export class Renderer {
@@ -1231,7 +1238,12 @@ export class Renderer {
   }
 
   /**
-   * Find the best lane placement (position + timing)
+   * Find the best lane placement (position + timing).
+   *
+   * Tie-breaking strategy (when multiple blocks have the same readyTime):
+   * prefer the block whose lanes were used LEAST RECENTLY (LRU).  This
+   * distributes messages evenly across the full overlay height instead of
+   * clustering them in the top lanes.
    */
   private findLanePlacement(messageHeight: number): LanePlacement | null {
     const now = Date.now();
@@ -1245,9 +1257,15 @@ export class Renderer {
 
     let bestLane: LaneState | null = null;
     let bestReadyTime = Number.POSITIVE_INFINITY;
+    // Largest lastItemStartTime in the best block (for LRU tie-breaking).
+    // We prefer blocks with a SMALLER maxLastUsed (older = less recently used).
+    let bestBlockMaxLastUsed = Number.POSITIVE_INFINITY;
 
     for (let i = 0; i <= this.lanes.length - requiredLanes; i++) {
       let blockReadyTime = now;
+      // Track the most-recent lastItemStartTime within this block to detect
+      // how recently ANY lane in the block was used.
+      let blockMaxLastUsed = 0;
 
       for (let offset = 0; offset < requiredLanes; offset++) {
         const lane = this.lanes[i + offset];
@@ -1258,14 +1276,20 @@ export class Renderer {
 
         const laneReadyTime = this.calculateLaneReadyTime(lane, now);
         blockReadyTime = Math.max(blockReadyTime, laneReadyTime);
+        blockMaxLastUsed = Math.max(blockMaxLastUsed, lane.lastItemStartTime);
       }
 
+      // Primary   : prefer the block that becomes ready soonest.
+      // Tie-break : prefer the block least recently used (older lastItemStartTime
+      //             → smaller blockMaxLastUsed) so messages are spread evenly
+      //             across the full screen height rather than clumping at the top.
       if (
         blockReadyTime < bestReadyTime ||
-        (blockReadyTime === bestReadyTime && bestLane && i < bestLane.index)
+        (blockReadyTime === bestReadyTime && blockMaxLastUsed < bestBlockMaxLastUsed)
       ) {
         bestReadyTime = blockReadyTime;
         bestLane = this.lanes[i] || null;
+        bestBlockMaxLastUsed = blockMaxLastUsed;
       }
     }
 
