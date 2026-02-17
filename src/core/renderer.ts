@@ -1153,12 +1153,12 @@ export class Renderer {
           `Active messages: ${this.activeMessages.size}, Lanes: ${dimensions?.laneCount || 'unknown'}, ` +
           `Queue size: ${this.messageQueue.length}`
       );
-      container.removeChild(element);
+      element.remove();
       return { status: 'dropped' };
     }
 
     if (placement.waitMs > 0) {
-      container.removeChild(element);
+      element.remove();
       return { status: 'deferred', waitMs: placement.waitMs };
     }
 
@@ -1303,7 +1303,7 @@ export class Renderer {
     }
 
     if (active.element.parentNode) {
-      active.element.parentNode.removeChild(active.element);
+      active.element.remove();
     }
     this.activeMessages.delete(active);
   }
@@ -1432,9 +1432,7 @@ export class Renderer {
     this.clear();
 
     // Remove style element
-    if (this.styleElement?.parentNode) {
-      this.styleElement.parentNode.removeChild(this.styleElement);
-    }
+    this.styleElement?.remove();
     this.styleElement = null;
 
     // Clear overlay reference to prevent memory leaks

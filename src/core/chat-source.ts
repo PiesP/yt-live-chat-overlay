@@ -271,14 +271,13 @@ export class ChatSource {
       `[YT Chat Overlay] Found ${chatElements.length} elements with 'chat' in id/class or live chat tags`
     );
 
-    chatElements.forEach((el, i) => {
-      if (i < 5) {
-        // Limit to first 5 to avoid spam
-        console.log(
-          `  [${i}] ${el.tagName} id="${el.id}" class="${el.className.substring(0, 50)}"`
-        );
-      }
-    });
+    let count = 0;
+    for (const el of chatElements) {
+      if (count++ >= 5) break; // Limit to first 5 to avoid spam
+      console.log(
+        `  [${count - 1}] ${el.tagName} id="${el.id}" class="${el.className.substring(0, 50)}"`
+      );
+    }
 
     // Check for iframes
     const allIframes = document.querySelectorAll('iframe');
@@ -696,8 +695,7 @@ export class ChatSource {
 
       const badgeText = `${ariaLabel} ${tooltip} ${iconType}`;
 
-      // Check for owner/verified first (highest priority)
-      if (badgeText.includes('owner') || badgeText.includes('verified')) {
+      // Check for channel owner (highest priority)
         return 'owner';
       }
 
@@ -1066,7 +1064,7 @@ export class ChatSource {
     this.chatContainer = null;
     this.callback = null;
 
-    console.log('[ChatSource] Stopped');
+    console.log('[YT Chat Overlay] Chat monitoring stopped');
   }
 
   /**

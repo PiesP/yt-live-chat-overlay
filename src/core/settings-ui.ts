@@ -70,7 +70,7 @@ export class SettingsUi {
       this.button.setAttribute('aria-label', 'Chat overlay settings');
       this.button.addEventListener('click', () => this.open());
     } else if (this.button.parentElement) {
-      this.button.parentElement.removeChild(this.button);
+      this.button.remove();
     }
 
     const computedStyle = window.getComputedStyle(player);
@@ -504,14 +504,10 @@ export class SettingsUi {
     this.close();
 
     // Remove button from DOM
-    if (this.button?.parentElement) {
-      this.button.parentElement.removeChild(this.button);
-    }
+    this.button?.remove();
 
     // Remove backdrop and modal from DOM
-    if (this.backdrop?.parentElement) {
-      this.backdrop.parentElement.removeChild(this.backdrop);
-    }
+    this.backdrop?.remove();
 
     // Remove style element from DOM
     const styleElement = document.getElementById(STYLE_ID);

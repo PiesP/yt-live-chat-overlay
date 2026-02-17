@@ -143,9 +143,7 @@ export class Overlay {
     }
 
     // Remove DOM elements
-    if (this.container?.parentNode) {
-      this.container.parentNode.removeChild(this.container);
-    }
+    this.container?.remove();
 
     // Clear references
     this.container = null;

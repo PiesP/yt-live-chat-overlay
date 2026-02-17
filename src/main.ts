@@ -5,7 +5,7 @@
  * Displays YouTube live chat messages in Nico-nico style flowing overlay.
  */
 
-import { DEFAULT_SETTINGS } from '@app-types';
+import { DEFAULT_SETTINGS, type OverlaySettings } from '@app-types';
 import { ChatSource } from '@core/chat-source';
 import { sleep } from '@core/dom';
 import { Overlay } from '@core/overlay';
@@ -234,14 +234,14 @@ class App {
   /**
    * Get current settings
    */
-  getSettings(): Readonly<import('@app-types').OverlaySettings> {
+  getSettings(): Readonly<OverlaySettings> {
     return this.settings.get();
   }
 
   /**
    * Update settings (for console access)
    */
-  updateSettings(partial: Partial<import('@app-types').OverlaySettings>): void {
+  updateSettings(partial: Partial<OverlaySettings>): void {
     const wasEnabled = this.settings.get().enabled;
     this.settings.update(partial);
     const nextSettings = this.settings.get();
@@ -404,11 +404,8 @@ async function initApp(): Promise<void> {
     const app = new App();
     await app.start();
 
-    // Expose to window for debugging
-    interface WindowWithOverlay extends Window {
-      __ytChatOverlay?: App;
-    }
-    (window as WindowWithOverlay).__ytChatOverlay = app;
+    // Expose to window for debugging (type declared in globals.d.ts)
+    window.__ytChatOverlay = app;
     console.log('[YT Chat Overlay] App instance exposed to window.__ytChatOverlay');
   } catch (error) {
     console.error('[YT Chat Overlay] Fatal error:', error);
