@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         YouTube Live Chat Overlay
-// @version      0.4.1
+// @version      0.4.2
 // @description  Displays YouTube live chat in Nico-nico style flowing overlay (100% local, no data collection)
 // @author       PiesP
 // @match        https://www.youtube.com/*
@@ -25,50 +25,65 @@
 
   const DEFAULT_SETTINGS = {
     enabled: true,
-    speedPxPerSec: 200,
-    // Slightly slower for better readability with multi-line messages
-    fontSize: 24,
-    // Slightly smaller for better space utilization
-    opacity: 0.95,
-    // Slightly more opaque for better visibility
-    superChatOpacity: 0.4,
-    // Higher default opacity for stronger Super Chat colors
+    /**
+     * Faster scrolling = messages leave the screen sooner, reducing visual clutter.
+     * 280 px/s keeps text readable while minimising how long it occludes the video.
+     */
+    speedPxPerSec: 280,
+    /** Smaller font reduces the area of video blocked per message. */
+    fontSize: 20,
+    /**
+     * Semi-transparent so the video is still visible through overlay text.
+     * 0.85 gives good legibility without fully blocking the picture.
+     */
+    opacity: 0.85,
+    /** Super Chat card tint opacity – lower = more transparent over video. */
+    superChatOpacity: 0.35,
+    /** Keep the top 10 % clear (title bar / stream info area). */
     safeTop: 0.1,
-    // 10% - increased for better clearance from top UI elements
-    safeBottom: 0.12,
-    // 12% - reduced since we handle multi-line messages better
-    maxConcurrentMessages: 50,
-    // Soft cap for performance monitoring (not enforced)
-    maxMessagesPerSecond: 10,
-    // Rate limit for incoming messages (enforced)
+    /**
+     * Keep the bottom 15 % clear (player controls, chat toggle, etc.).
+     * Slightly larger than the old default to avoid covering the control bar.
+     */
+    safeBottom: 0.15,
+    /** Soft cap for performance monitoring (not strictly enforced). */
+    maxConcurrentMessages: 30,
+    /**
+     * Hard rate limit: at most 4 messages per second reach the overlay.
+     * Keeps the screen from becoming unreadable during chat bursts.
+     */
+    maxMessagesPerSecond: 4,
     showAuthor: {
+      /** Hide author names for regular users – reduces visual noise. */
       normal: false,
+      /** Hide member names by default – membership badge already signals this. */
       member: false,
+      /** Always show moderator names so viewers can identify them. */
       moderator: true,
+      /** Always show channel owner name. */
       owner: true,
+      /** Verified users look like normal users visually – hide by default. */
       verified: false,
+      /** Super Chat author is essential context for the purchase. */
       superChat: true
     },
     colors: {
       normal: "#FFFFFF",
-      // White for normal users
+      // White – neutral and readable on any background
       member: "#0F9D58",
-      // Green for members
+      // Green – matches YouTube's membership colour
       moderator: "#5E84F1",
-      // Blue for moderators
+      // Blue – matches YouTube's moderator badge colour
       owner: "#FFD600",
-      // Gold/Yellow for channel owner
+      // Gold – clearly signals the channel owner
       verified: "#AAAAAA"
-      // Gray for verified users
+      // Grey – de-emphasised; treated like a normal viewer
     },
     outline: {
       enabled: true,
       widthPx: 1.5,
-      // Slightly thicker for better contrast
       blurPx: 2,
-      // Increased blur for better glow effect
       opacity: 0.7
-      // Increased opacity for better visibility
     }
   };
 
@@ -301,13 +316,13 @@
       console.log(
         `[YT Chat Overlay] Found ${chatElements.length} elements with 'chat' in id/class or live chat tags`
       );
-      chatElements.forEach((el, i) => {
-        if (i < 5) {
-          console.log(
-            `  [${i}] ${el.tagName} id="${el.id}" class="${el.className.substring(0, 50)}"`
-          );
-        }
-      });
+      let count = 0;
+      for (const el of chatElements) {
+        if (count++ >= 5) break;
+        console.log(
+          `  [${count - 1}] ${el.tagName} id="${el.id}" class="${el.className.substring(0, 50)}"`
+        );
+      }
       const allIframes = document.querySelectorAll("iframe");
       console.log(`[YT Chat Overlay] Found ${allIframes.length} total iframes`);
       allIframes.forEach((iframe, i) => {
@@ -506,24 +521,55 @@
     }
     /**
      * Parse message from DOM element
+     *
+     * Filtering policy for overlay display:
+     *   ✅ text        – yt-live-chat-text-message-renderer (regular chat messages)
+     *   ✅ superchat   – yt-live-chat-paid-message-renderer  (Super Chat with text)
+     *   ✅ membership  – yt-live-chat-membership-item-renderer (new/gifted member events)
+     *   ❌ sticker     – yt-live-chat-paid-sticker-renderer  (image-only, no readable text)
+     *   ❌ system      – viewer-engagement / banner / placeholder / timed-message
+     *   ❌ other       – anything that doesn't match the above
      */
     parseMessage(element) {
-      if (!element.tagName.toLowerCase().includes("chat") || !element.querySelector("#message")) {
+      const tagName = element.tagName.toLowerCase();
+      if (!tagName.startsWith("yt-live-chat-")) return null;
+      let kind;
+      if (tagName.includes("membership")) {
+        kind = "membership";
+      } else if (tagName.includes("paid")) {
+        if (tagName.includes("sticker")) return null;
+        kind = "superchat";
+      } else if (tagName.includes("text-message")) {
+        kind = "text";
+      } else {
         return null;
       }
-      if (!this.isUserMessage(element)) {
-        return null;
-      }
+      if (!this.isUserMessage(element)) return null;
       try {
-        const messageElement = element.querySelector("#message");
-        if (!messageElement) return null;
-        const { text, content } = this.parseMessageContent(messageElement);
-        if (!text) return null;
-        let kind = "text";
-        if (element.tagName.toLowerCase().includes("paid")) {
-          kind = "superchat";
-        } else if (element.tagName.toLowerCase().includes("membership")) {
-          kind = "membership";
+        let text = "";
+        let content = [];
+        if (kind === "membership") {
+          const messageElement = element.querySelector("#message");
+          if (messageElement) {
+            const parsed = this.parseMessageContent(messageElement);
+            text = parsed.text;
+            content = parsed.content;
+          }
+        } else if (kind === "superchat") {
+          const messageElement = element.querySelector("#message");
+          if (messageElement) {
+            const parsed = this.parseMessageContent(messageElement);
+            text = parsed.text;
+            content = parsed.content;
+          }
+        } else {
+          const messageElement = element.querySelector("#message");
+          if (!messageElement) return null;
+          const parsed = this.parseMessageContent(messageElement);
+          text = parsed.text;
+          content = parsed.content;
+          if (!this.isSubstantialText(text, element))
+            return null;
         }
         const authorType = this.extractAuthorType(element);
         const authorName = this.extractAuthorName(element);
@@ -551,7 +597,6 @@
             message.superChat = superChatInfo;
           }
         }
-        if (kind !== "text" && kind !== "superchat") return null;
         return message;
       } catch (error) {
         console.warn("[YT Chat Overlay] Failed to parse message:", error);
@@ -560,30 +605,29 @@
     }
     /**
      * Check if an element represents a user message (not a system message)
-     * System messages don't have authors and use different renderer types
+     * Called AFTER kind detection in parseMessage, so purely an author-presence guard.
      */
     isUserMessage(element) {
       const authorElement = element.querySelector("#author-name");
-      if (!authorElement || !authorElement.textContent?.trim()) {
-        return false;
-      }
-      const tagName = element.tagName.toLowerCase();
-      const systemMessageTypes = [
-        "placeholder",
-        // "Using live chat replay" / "실시간 채팅 다시보기"
-        "timed-message",
-        // Time-based notifications
-        "viewer-engagement",
-        // Engagement notifications
-        "banner"
-        // System banners
-      ];
-      for (const type of systemMessageTypes) {
-        if (tagName.includes(type)) {
-          return false;
-        }
-      }
-      return true;
+      return Boolean(authorElement?.textContent?.trim());
+    }
+    /**
+     * Decide whether a plain text message is substantial enough to show on the overlay.
+     *
+     * Filters out low-signal noise that clutters the screen without adding viewing value:
+     *   – Single- or two-character reaction tokens ("w", "!!", "草")
+     *   – Messages that are purely whitespace after stripping emoji alt text
+     *
+     * Privileged authors (moderator / owner / member) bypass this filter because
+     * their short messages are more likely to be intentional and relevant.
+     */
+    isSubstantialText(text, element) {
+      const privilegedBadge = element.querySelector(
+        'yt-live-chat-author-badge-renderer[type="moderator"], yt-live-chat-author-badge-renderer[type="owner"], yt-live-chat-author-badge-renderer[type="member"]'
+      );
+      if (privilegedBadge) return true;
+      const stripped = text.replace(/\[.*?\]/g, "").replace(/:[-\w]+:/g, "").trim();
+      return stripped.length >= 3;
     }
     /**
      * Extract author type from badge information
@@ -595,7 +639,7 @@
         const tooltip = badge.querySelector("#tooltip")?.textContent?.toLowerCase() || "";
         const iconType = badge.getAttribute("type")?.toLowerCase() || "";
         const badgeText = `${ariaLabel} ${tooltip} ${iconType}`;
-        if (badgeText.includes("owner") || badgeText.includes("verified")) {
+        if (badgeText.includes("owner") || iconType.includes("owner")) {
           return "owner";
         }
         if (badgeText.includes("moderator") || badgeText.includes("mod")) {
@@ -836,7 +880,7 @@
       }
       this.chatContainer = null;
       this.callback = null;
-      console.log("[ChatSource] Stopped");
+      console.log("[YT Chat Overlay] Chat monitoring stopped");
     }
     /**
      * Check if chat is active (received messages recently)
@@ -947,9 +991,7 @@
         document.removeEventListener("fullscreenchange", this.fullscreenHandler);
         this.fullscreenHandler = null;
       }
-      if (this.container?.parentNode) {
-        this.container.parentNode.removeChild(this.container);
-      }
+      this.container?.remove();
       this.container = null;
       this.playerElement = null;
       this.dimensions = null;
@@ -1179,16 +1221,23 @@
     // ms
     LANE_DELAY_CYCLE: 3,
     // number of lanes before repeating delay pattern
-    LANE_DELAY_MS: 40,
-    // ms per lane cycle
+    LANE_DELAY_MS: 15,
+    // ms per lane cycle (reduced from 40 for faster throughput)
     // Collision detection
-    SAFE_DISTANCE_SCALE: 0.7,
+    // Safe distance = minimum pixel gap between messages in the same lane.
+    // Reduced from 0.7/16 → 0.5/10 for denser horizontal packing while
+    // still preventing visual overlap at all supported font sizes.
+    SAFE_DISTANCE_SCALE: 0.5,
     // relative to fontSize
-    SAFE_DISTANCE_MIN: 16,
+    SAFE_DISTANCE_MIN: 10,
     // px
-    VERTICAL_CLEAR_TIME_MIN: 120,
+    // Vertical clear time guards the brief window while the previous message
+    // is still partially behind the screen's right edge.  Reduced from
+    // 120/320 ms → 40/160 ms because the horizontal readiness check already
+    // dominates for any message wider than ~30 px.
+    VERTICAL_CLEAR_TIME_MIN: 40,
     // ms
-    VERTICAL_CLEAR_TIME_MAX: 320,
+    VERTICAL_CLEAR_TIME_MAX: 160,
     // ms
     LANE_HEIGHT_PADDING_SCALE: 0.06,
     // relative to fontSize
@@ -1198,8 +1247,8 @@
     // ms
     RETRY_DELAY_MAX_MS: 800,
     // ms
-    QUEUE_LOOKAHEAD_LIMIT: 14
-    // queue scan window for scheduling
+    QUEUE_LOOKAHEAD_LIMIT: 20
+    // queue scan window for scheduling (increased from 14)
   };
   class Renderer {
     overlay;
@@ -2062,11 +2111,11 @@
         console.log(
           `[YT Chat Overlay] No available lane for message (height: ${messageHeight}px). Active messages: ${this.activeMessages.size}, Lanes: ${dimensions2?.laneCount || "unknown"}, Queue size: ${this.messageQueue.length}`
         );
-        container.removeChild(element);
+        element.remove();
         return { status: "dropped" };
       }
       if (placement.waitMs > 0) {
-        container.removeChild(element);
+        element.remove();
         return { status: "deferred", waitMs: placement.waitMs };
       }
       const activeMessage = this.setupMessageAnimation(
@@ -2124,7 +2173,12 @@
       return Math.max(now, horizontalReadyTime, verticalReadyTime);
     }
     /**
-     * Find the best lane placement (position + timing)
+     * Find the best lane placement (position + timing).
+     *
+     * Tie-breaking strategy (when multiple blocks have the same readyTime):
+     * prefer the block whose lanes were used LEAST RECENTLY (LRU).  This
+     * distributes messages evenly across the full overlay height instead of
+     * clustering them in the top lanes.
      */
     findLanePlacement(messageHeight) {
       const now = Date.now();
@@ -2136,8 +2190,10 @@
       }
       let bestLane = null;
       let bestReadyTime = Number.POSITIVE_INFINITY;
+      let bestBlockMaxLastUsed = Number.POSITIVE_INFINITY;
       for (let i = 0; i <= this.lanes.length - requiredLanes; i++) {
         let blockReadyTime = now;
+        let blockMaxLastUsed = 0;
         for (let offset = 0; offset < requiredLanes; offset++) {
           const lane = this.lanes[i + offset];
           if (!lane) {
@@ -2146,10 +2202,12 @@
           }
           const laneReadyTime = this.calculateLaneReadyTime(lane, now);
           blockReadyTime = Math.max(blockReadyTime, laneReadyTime);
+          blockMaxLastUsed = Math.max(blockMaxLastUsed, lane.lastItemStartTime);
         }
-        if (blockReadyTime < bestReadyTime || blockReadyTime === bestReadyTime && bestLane && i < bestLane.index) {
+        if (blockReadyTime < bestReadyTime || blockReadyTime === bestReadyTime && blockMaxLastUsed < bestBlockMaxLastUsed) {
           bestReadyTime = blockReadyTime;
           bestLane = this.lanes[i] || null;
+          bestBlockMaxLastUsed = blockMaxLastUsed;
         }
       }
       if (!bestLane || !Number.isFinite(bestReadyTime)) {
@@ -2181,7 +2239,7 @@
       } catch {
       }
       if (active.element.parentNode) {
-        active.element.parentNode.removeChild(active.element);
+        active.element.remove();
       }
       this.activeMessages.delete(active);
     }
@@ -2289,9 +2347,7 @@
     destroy() {
       this.isPaused = false;
       this.clear();
-      if (this.styleElement?.parentNode) {
-        this.styleElement.parentNode.removeChild(this.styleElement);
-      }
+      this.styleElement?.remove();
       this.styleElement = null;
       this.overlay = null;
       console.log("[Renderer] Destroyed");
@@ -2426,7 +2482,7 @@
         this.button.setAttribute("aria-label", "Chat overlay settings");
         this.button.addEventListener("click", () => this.open());
       } else if (this.button.parentElement) {
-        this.button.parentElement.removeChild(this.button);
+        this.button.remove();
       }
       const computedStyle = window.getComputedStyle(player);
       if (computedStyle.position === "static") {
@@ -2827,12 +2883,8 @@
      */
     destroy() {
       this.close();
-      if (this.button?.parentElement) {
-        this.button.parentElement.removeChild(this.button);
-      }
-      if (this.backdrop?.parentElement) {
-        this.backdrop.parentElement.removeChild(this.backdrop);
-      }
+      this.button?.remove();
+      this.backdrop?.remove();
       const styleElement = document.getElementById(STYLE_ID);
       styleElement?.remove();
       this.button = null;
