@@ -2,6 +2,37 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.2] - 2026-02-18
+
+### Fixed
+- **메시지 필터링 개선**: `parseMessage()`에서 메시지 종류(kind)를 태그명 기반으로 먼저 판별 후 콘텐츠를 파싱하도록 순서 변경
+  - Super Sticker (이미지 전용, `yt-live-chat-paid-sticker-renderer`)를 명시적으로 필터링
+  - 시스템 메시지 (`viewer-engagement`, `banner`, `placeholder` 등) 필터링 강화
+  - 멤버십 아이템은 `#message`가 없어도 항상 표시 (메시지 없는 멤버십 이벤트 지원)
+  - Super Chat은 텍스트 본문 유무와 관계없이 항상 표시
+  - `ChatMessage.kind`에서 불필요한 `'other'` 타입 제거
+- **렌더러 레인 배치 최적화**: 메시지 흐름 및 간격 개선
+  - `LANE_DELAY_MS` 40ms → 15ms (처리량 향상)
+  - `SAFE_DISTANCE_SCALE` 0.7 → 0.5, `SAFE_DISTANCE_MIN` 16px → 10px (더 촘촘한 수평 배치)
+  - `VERTICAL_CLEAR_TIME` 120/320ms → 40/160ms (수평 준비 체크가 주된 조건이므로 단축)
+  - `QUEUE_LOOKAHEAD_LIMIT` 14 → 20 (더 넓은 스케줄링 윈도우)
+  - `findLanePlacement()`에 LRU 타이 브레이킹 추가: 대기 시간이 같을 때 가장 오래 사용되지 않은 블록 우선 → 화면 전체에 메시지가 고르게 분산
+
+### Changed
+- **기본 설정값 재조정**: 가독성·화면 점유 균형 개선
+  - `speedPxPerSec`: 200 → 280 (더 빠른 스크롤로 화면 점유 시간 단축)
+  - `fontSize`: 24 → 20 (메시지당 차지하는 영역 감소)
+  - `opacity`: 0.95 → 0.85 (영상이 더 잘 보이게)
+  - `superChatOpacity`: 0.4 → 0.35
+  - `safeBottom`: 0.12 → 0.15 (컨트롤 바 가림 방지)
+  - `maxConcurrentMessages`: 50 → 30
+  - `maxMessagesPerSecond`: 10 → 4 (채팅 폭주 시 화면 가독성 보호)
+- **DOM 정리 코드 간소화**: 불필요한 분기 제거, `element.remove()` 패턴 통일
+- **로그 개선**: 채팅 모니터링 관련 로그 메시지 보강
+
+### Dependencies
+- Biome 및 Biome CLI를 안정 버전으로 다운그레이드 (`@biomejs/biome`, `@biomejs/cli-linux-x64`)
+
 ## [0.4.1] - 2026-02-16
 
 ### Fixed
