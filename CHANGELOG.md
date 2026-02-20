@@ -2,6 +2,35 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0] - 2026-02-20
+
+### Added
+- **설정 UI 확장**
+  - 로그 레벨 선택(`warn`/`info`/`debug`) 옵션 추가
+  - 짧은 일반 메시지 필터 옵션 추가 (`allowShortTextMessages`, `minTextLength`)
+  - 작성자 타입별 표시 여부 및 색상 제어 옵션 강화
+- **로그 제어 모듈 추가**: 오버레이 로그에 대해 레벨 기반 출력 필터링 지원
+- **이미지 URL 검증 모듈 추가**: 작성자 프로필/이모지/스티커 이미지에 공통 도메인 검증 적용
+
+### Changed
+- **채팅 탐지 및 패널 오픈 안정성 개선**
+  - iframe/in-page 채팅 컨테이너 탐색 및 검증 로직 강화
+  - 채팅 패널이 닫혀 있는 경우 자동 오픈 시도 로직 개선
+- **설정 UI 입력 검증/보정 강화**
+  - 수치 입력을 범위 내로 clamp
+  - 일부 퍼센트 기반 설정의 UI 입력 단위 일관화
+- **렌더러 이미지 처리 공통화**
+  - 이모지/스티커/작성자 이미지 생성 경로를 공통 헬퍼로 정리
+
+### Fixed
+- **설정 마이그레이션 개선**
+  - 레거시 `debugLogging` 설정을 신규 `logLevel`로 안전하게 매핑
+- **설정 모달 접근성 개선**
+  - ESC 닫기, 포커스 트랩, 초기 포커스/포커스 복귀 처리 강화
+
+### Dependencies
+- Biome 및 Biome CLI를 `2.4.2`로 업데이트 (`@biomejs/biome`, `@biomejs/cli-linux-x64`)
+
 ## [0.4.2] - 2026-02-18
 
 ### Fixed
