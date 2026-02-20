@@ -23,11 +23,17 @@ export class Settings {
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
       if (stored) {
-        const parsed = JSON.parse(stored) as Partial<OverlaySettings>;
+        const parsedRaw = JSON.parse(stored) as Partial<OverlaySettings> & {
+          debugLogging?: boolean;
+        };
+        const { debugLogging, ...parsed } = parsedRaw;
+        const migratedLogLevel = parsed.logLevel ?? (debugLogging ? 'debug' : undefined);
+
         // Merge with defaults to ensure new fields (like colors) are included
         return {
           ...DEFAULT_SETTINGS,
           ...parsed,
+          ...(migratedLogLevel ? { logLevel: migratedLogLevel } : {}),
           // Deep merge colors to ensure all color fields are present
           colors: {
             ...DEFAULT_SETTINGS.colors,

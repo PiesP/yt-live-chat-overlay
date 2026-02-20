@@ -5,8 +5,15 @@
  * Supports both iframe and in-page chat rendering.
  */
 
-import type { ChatMessage, ContentSegment, EmojiInfo, SuperChatInfo } from '@app-types';
+import type {
+  ChatMessage,
+  ContentSegment,
+  EmojiInfo,
+  OverlaySettings,
+  SuperChatInfo,
+} from '@app-types';
 import { findElementMatch, sleep } from '@core/dom';
+import { isAllowedYouTubeImageUrl } from '@core/image-url';
 
 const CHAT_FRAME_SELECTORS = ['ytd-live-chat-frame#chat', '#chat', 'ytd-live-chat-frame'] as const;
 
@@ -75,6 +82,8 @@ export class ChatSource {
   private chatContainer: Element | null = null;
   private callback: MessageCallback | null = null;
   private lastMessageTime = 0;
+
+  constructor(private readonly getSettings: (() => Readonly<OverlaySettings>) | null = null) {}
 
   /**
    * Wait for iframe content to fully load
@@ -662,6 +671,11 @@ export class ChatSource {
    * their short messages are more likely to be intentional and relevant.
    */
   private isSubstantialText(text: string, element: Element): boolean {
+    const settings = this.getSettings?.();
+    if (settings?.allowShortTextMessages) {
+      return true;
+    }
+
     // Privileged authors always pass through
     const privilegedBadge = element.querySelector(
       'yt-live-chat-author-badge-renderer[type="moderator"], ' +
@@ -676,8 +690,8 @@ export class ChatSource {
       .replace(/:[-\w]+:/g, '') // remove :emoji_name:
       .trim();
 
-    // Require at least 3 visible characters to appear on the overlay
-    return stripped.length >= 3;
+    const minLength = Math.max(1, settings?.minTextLength ?? 3);
+    return stripped.length >= minLength;
   }
 
   /**
@@ -754,7 +768,7 @@ export class ChatSource {
     }
 
     // Validate URL for security
-    if (!this.isValidImageUrl(photoUrl)) {
+    if (!isAllowedYouTubeImageUrl(photoUrl)) {
       console.warn('[YT Chat Overlay] Invalid author photo URL:', photoUrl);
       return undefined;
     }
@@ -778,26 +792,6 @@ export class ChatSource {
     }
 
     return normalized;
-  }
-
-  /**
-   * Validate image URL (security)
-   * Only allow YouTube CDN domains
-   */
-  private isValidImageUrl(url: string): boolean {
-    try {
-      const parsed = new URL(url);
-      // Only allow YouTube's CDN domains
-      const allowedDomains = [
-        'yt3.ggpht.com',
-        'yt4.ggpht.com',
-        'www.gstatic.com',
-        'lh3.googleusercontent.com',
-      ];
-      return allowedDomains.some((domain) => parsed.hostname.includes(domain));
-    } catch {
-      return false;
-    }
   }
 
   /**
@@ -844,7 +838,7 @@ export class ChatSource {
    */
   private parseEmoji(img: HTMLImageElement): EmojiInfo | null {
     const src = img.src;
-    if (!src || !this.isValidImageUrl(src)) {
+    if (!src || !isAllowedYouTubeImageUrl(src)) {
       return null;
     }
 
@@ -978,7 +972,7 @@ export class ChatSource {
         '#sticker img, yt-img-shadow#sticker img, img[id*="sticker"]'
       ) as HTMLImageElement;
       const stickerUrl =
-        stickerImg && this.isValidImageUrl(stickerImg.src) ? stickerImg.src : undefined;
+        stickerImg && isAllowedYouTubeImageUrl(stickerImg.src) ? stickerImg.src : undefined;
 
       const superChatInfo: SuperChatInfo = {
         amount: amountText,

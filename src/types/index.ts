@@ -8,6 +8,11 @@
 export type AuthorType = 'normal' | 'member' | 'moderator' | 'owner' | 'verified';
 
 /**
+ * Console log level for overlay diagnostics
+ */
+export type LogLevel = 'warn' | 'info' | 'debug';
+
+/**
  * Author display settings (per author type)
  */
 export interface AuthorDisplaySettings {
@@ -126,13 +131,13 @@ export interface OutlineSettings {
 export interface OverlaySettings {
   /** Enable/disable overlay */
   enabled: boolean;
-  /** Speed in pixels per second (150-500) */
+  /** Speed in pixels per second (100-400) */
   speedPxPerSec: number;
   /** Font size in pixels */
   fontSize: number;
   /** Opacity (0.0-1.0) */
   opacity: number;
-  /** Super Chat color opacity (0.4-1.0) */
+  /** Super Chat color opacity (0.35-1.0) */
   superChatOpacity: number;
   /** Safe zone top percentage (0.0-1.0) */
   safeTop: number;
@@ -140,8 +145,14 @@ export interface OverlaySettings {
   safeBottom: number;
   /** Maximum concurrent messages */
   maxConcurrentMessages: number;
-  /** Maximum messages per second */
+  /** Maximum messages per second (1-20) */
   maxMessagesPerSecond: number;
+  /** Allow short plain-text messages below minTextLength threshold */
+  allowShortTextMessages: boolean;
+  /** Minimum visible character count for regular plain text messages (1-10) */
+  minTextLength: number;
+  /** Console log level for overlay diagnostics */
+  logLevel: LogLevel;
   /** Author display settings */
   showAuthor: AuthorDisplaySettings;
   /** Color settings for different author types */
@@ -177,6 +188,24 @@ export interface OverlayDimensions {
 }
 
 /**
+ * Shared setting bounds used by UI and runtime clamping.
+ */
+export const SETTINGS_LIMITS = {
+  speedPxPerSec: { min: 100, max: 400, step: 10 },
+  fontSize: { min: 18, max: 40, step: 2 },
+  opacity: { min: 0.5, max: 1, step: 0.05 },
+  superChatOpacity: { min: 0.35, max: 1, step: 0.05 },
+  safeTop: { min: 0, max: 0.25, step: 0.01 },
+  safeBottom: { min: 0, max: 0.25, step: 0.01 },
+  maxConcurrentMessages: { min: 30, max: 100, step: 10 },
+  maxMessagesPerSecond: { min: 1, max: 20, step: 1 },
+  minTextLength: { min: 1, max: 10, step: 1 },
+  outlineWidthPx: { min: 0, max: 5, step: 0.5 },
+  outlineBlurPx: { min: 0, max: 8, step: 0.5 },
+  outlineOpacity: { min: 0, max: 1, step: 0.1 },
+} as const;
+
+/**
  * Default settings
  */
 export const DEFAULT_SETTINGS: Readonly<OverlaySettings> = {
@@ -209,6 +238,12 @@ export const DEFAULT_SETTINGS: Readonly<OverlaySettings> = {
    * Keeps the screen from becoming unreadable during chat bursts.
    */
   maxMessagesPerSecond: 4,
+  /** Keep strict mode by default to reduce chat noise. */
+  allowShortTextMessages: false,
+  /** Require at least 3 visible characters for regular messages. */
+  minTextLength: 3,
+  /** Default to warnings/errors only for a clean console. */
+  logLevel: 'warn',
   showAuthor: {
     /** Hide author names for regular users – reduces visual noise. */
     normal: false,

@@ -8,6 +8,7 @@
 import { DEFAULT_SETTINGS, type OverlaySettings } from '@app-types';
 import { ChatSource } from '@core/chat-source';
 import { sleep } from '@core/dom';
+import { initOverlayLogLevel, setOverlayLogLevel } from '@core/logging';
 import { Overlay } from '@core/overlay';
 import { PageWatcher } from '@core/page-watcher';
 import { Renderer } from '@core/renderer';
@@ -40,6 +41,8 @@ class App {
       (partial) => this.updateSettings(partial),
       () => this.resetSettings()
     );
+
+    setOverlayLogLevel(this.settings.get().logLevel);
 
     // Register page change handler
     this.pageWatcher.onChange(() => {
@@ -115,7 +118,7 @@ class App {
       await this.videoSync.init();
 
       // Start chat source
-      this.chatSource = new ChatSource();
+      this.chatSource = new ChatSource(() => this.settings.get());
       const chatStarted = await this.chatSource.start((message) => {
         if (this._renderer) {
           this._renderer.addMessage(message);
@@ -245,6 +248,10 @@ class App {
     const wasEnabled = this.settings.get().enabled;
     this.settings.update(partial);
     const nextSettings = this.settings.get();
+
+    if (partial.logLevel !== undefined) {
+      setOverlayLogLevel(nextSettings.logLevel);
+    }
 
     if (wasEnabled && !nextSettings.enabled) {
       this.cleanup();
@@ -416,6 +423,7 @@ async function initApp(): Promise<void> {
 
 // Start the application
 try {
+  initOverlayLogLevel();
   main();
 } catch (error) {
   console.error('[YT Chat Overlay] Failed to start:', error);

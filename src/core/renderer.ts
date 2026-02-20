@@ -15,6 +15,7 @@ import type {
   OverlaySettings,
   SuperChatInfo,
 } from '@app-types';
+import { isAllowedYouTubeImageUrl } from '@core/image-url';
 import { borderRadius, colors, rgba, shadows, spacing, typography } from './design-tokens.js';
 import type { Overlay } from './overlay';
 
@@ -415,26 +416,6 @@ export class Renderer {
   }
 
   /**
-   * Validate image URL (security)
-   * Only allow YouTube CDN domains
-   * Duplicated from ChatSource for defense in depth
-   */
-  private isValidImageUrl(url: string): boolean {
-    try {
-      const parsed = new URL(url);
-      const allowedDomains = [
-        'yt3.ggpht.com',
-        'yt4.ggpht.com',
-        'www.gstatic.com',
-        'lh3.googleusercontent.com',
-      ];
-      return allowedDomains.some((domain) => parsed.hostname.includes(domain));
-    } catch {
-      return false;
-    }
-  }
-
-  /**
    * Create a validated image element with error handling
    * Common helper for emoji, stickers, and author photos
    * SECURITY: Validates URL and creates element programmatically
@@ -446,7 +427,7 @@ export class Renderer {
     sizePx: number
   ): HTMLImageElement | null {
     // Validate URL (defense in depth)
-    if (!this.isValidImageUrl(url)) {
+    if (!isAllowedYouTubeImageUrl(url)) {
       console.warn('[YT Chat Overlay] Invalid image URL:', url);
       return null;
     }
