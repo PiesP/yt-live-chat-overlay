@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         YouTube Live Chat Overlay
-// @version      0.4.2
+// @version      0.5.0
 // @description  Displays YouTube live chat in Nico-nico style flowing overlay (100% local, no data collection)
 // @author       PiesP
 // @match        https://www.youtube.com/*
@@ -23,6 +23,20 @@
 (function () {
   'use strict';
 
+  const SETTINGS_LIMITS = {
+    speedPxPerSec: { min: 100, max: 400, step: 10 },
+    fontSize: { min: 18, max: 40, step: 2 },
+    opacity: { min: 0.5, max: 1, step: 0.05 },
+    superChatOpacity: { min: 0.35, max: 1, step: 0.05 },
+    safeTop: { min: 0, max: 0.25, step: 0.01 },
+    safeBottom: { min: 0, max: 0.25, step: 0.01 },
+    maxConcurrentMessages: { min: 30, max: 100, step: 10 },
+    maxMessagesPerSecond: { min: 1, max: 20, step: 1 },
+    minTextLength: { min: 1, max: 10, step: 1 },
+    outlineWidthPx: { min: 0, max: 5, step: 0.5 },
+    outlineBlurPx: { min: 0, max: 8, step: 0.5 },
+    outlineOpacity: { min: 0, max: 1, step: 0.1 }
+  };
   const DEFAULT_SETTINGS = {
     enabled: true,
     /**
@@ -53,6 +67,12 @@
      * Keeps the screen from becoming unreadable during chat bursts.
      */
     maxMessagesPerSecond: 4,
+    /** Keep strict mode by default to reduce chat noise. */
+    allowShortTextMessages: false,
+    /** Require at least 3 visible characters for regular messages. */
+    minTextLength: 3,
+    /** Default to warnings/errors only for a clean console. */
+    logLevel: "warn",
     showAuthor: {
       /** Hide author names for regular users – reduces visual noise. */
       normal: false,
@@ -118,6 +138,21 @@
     return null;
   };
 
+  const ALLOWED_IMAGE_DOMAINS = [
+    "yt3.ggpht.com",
+    "yt4.ggpht.com",
+    "www.gstatic.com",
+    "lh3.googleusercontent.com"
+  ];
+  const isAllowedYouTubeImageUrl = (url) => {
+    try {
+      const parsed = new URL(url);
+      return ALLOWED_IMAGE_DOMAINS.some((domain) => parsed.hostname.includes(domain));
+    } catch {
+      return false;
+    }
+  };
+
   const CHAT_FRAME_SELECTORS = ["ytd-live-chat-frame#chat", "#chat", "ytd-live-chat-frame"];
   const CHAT_IFRAME_SELECTORS = [
     'iframe[src*="live_chat"]',
@@ -169,6 +204,9 @@
     'button:not(#yt-chat-overlay-settings-button)[aria-label*="채팅" i]'
   ];
   class ChatSource {
+    constructor(getSettings = null) {
+      this.getSettings = getSettings;
+    }
     observer = null;
     chatContainer = null;
     callback = null;
@@ -622,12 +660,17 @@
      * their short messages are more likely to be intentional and relevant.
      */
     isSubstantialText(text, element) {
+      const settings = this.getSettings?.();
+      if (settings?.allowShortTextMessages) {
+        return true;
+      }
       const privilegedBadge = element.querySelector(
         'yt-live-chat-author-badge-renderer[type="moderator"], yt-live-chat-author-badge-renderer[type="owner"], yt-live-chat-author-badge-renderer[type="member"]'
       );
       if (privilegedBadge) return true;
       const stripped = text.replace(/\[.*?\]/g, "").replace(/:[-\w]+:/g, "").trim();
-      return stripped.length >= 3;
+      const minLength = Math.max(1, settings?.minTextLength ?? 3);
+      return stripped.length >= minLength;
     }
     /**
      * Extract author type from badge information
@@ -677,7 +720,7 @@
       if (!photoUrl) {
         return void 0;
       }
-      if (!this.isValidImageUrl(photoUrl)) {
+      if (!isAllowedYouTubeImageUrl(photoUrl)) {
         console.warn("[YT Chat Overlay] Invalid author photo URL:", photoUrl);
         return void 0;
       }
@@ -693,24 +736,6 @@
         normalized = `${normalized.substring(0, 77)}...`;
       }
       return normalized;
-    }
-    /**
-     * Validate image URL (security)
-     * Only allow YouTube CDN domains
-     */
-    isValidImageUrl(url) {
-      try {
-        const parsed = new URL(url);
-        const allowedDomains = [
-          "yt3.ggpht.com",
-          "yt4.ggpht.com",
-          "www.gstatic.com",
-          "lh3.googleusercontent.com"
-        ];
-        return allowedDomains.some((domain) => parsed.hostname.includes(domain));
-      } catch {
-        return false;
-      }
     }
     /**
      * Detect emoji type (standard/custom/member)
@@ -733,7 +758,7 @@
      */
     parseEmoji(img) {
       const src = img.src;
-      if (!src || !this.isValidImageUrl(src)) {
+      if (!src || !isAllowedYouTubeImageUrl(src)) {
         return null;
       }
       const alt = img.alt || img.getAttribute("shared-tooltip-text") || img.getAttribute("aria-label") || "";
@@ -819,7 +844,7 @@
         const stickerImg = element.querySelector(
           '#sticker img, yt-img-shadow#sticker img, img[id*="sticker"]'
         );
-        const stickerUrl = stickerImg && this.isValidImageUrl(stickerImg.src) ? stickerImg.src : void 0;
+        const stickerUrl = stickerImg && isAllowedYouTubeImageUrl(stickerImg.src) ? stickerImg.src : void 0;
         const superChatInfo = {
           amount: amountText,
           tier
@@ -890,6 +915,95 @@
       return now - this.lastMessageTime < 3e4;
     }
   }
+
+  const SETTINGS_STORAGE_KEY = "yt-live-chat-overlay-settings";
+  const LOG_PREFIXES = [
+    "[YT Chat Overlay]",
+    "[App]",
+    "[Overlay]",
+    "[PageWatcher]",
+    "[SettingsUi]",
+    "[Renderer]",
+    "[VideoSync]"
+  ];
+  const VERBOSE_LOG_MARKERS = [
+    "attempt",
+    "waiting",
+    "selector",
+    "current url",
+    "iframe",
+    "chat frame",
+    "debug:",
+    "watching for new messages",
+    "rendering message",
+    "no available lane",
+    "paused",
+    "resumed"
+  ];
+  const DEFAULT_LOG_LEVEL = "warn";
+  let currentLogLevel = DEFAULT_LOG_LEVEL;
+  let isConsolePatched = false;
+  let originalConsoleLog = null;
+  const isOverlayLogCall = (args) => {
+    const [first] = args;
+    if (typeof first !== "string") {
+      return false;
+    }
+    return LOG_PREFIXES.some((prefix) => first.startsWith(prefix));
+  };
+  const isVerboseOverlayLog = (args) => {
+    const [first] = args;
+    if (typeof first !== "string") {
+      return false;
+    }
+    const normalized = first.toLowerCase();
+    return VERBOSE_LOG_MARKERS.some((marker) => normalized.includes(marker));
+  };
+  const shouldAllowOverlayLog = (args) => {
+    if (!isOverlayLogCall(args)) {
+      return true;
+    }
+    if (currentLogLevel === "debug") {
+      return true;
+    }
+    if (currentLogLevel === "info") {
+      return !isVerboseOverlayLog(args);
+    }
+    return false;
+  };
+  const patchConsoleLog = () => {
+    if (isConsolePatched) {
+      return;
+    }
+    originalConsoleLog = console.log.bind(console);
+    console.log = (...args) => {
+      if (shouldAllowOverlayLog(args)) {
+        originalConsoleLog?.(...args);
+      }
+    };
+    isConsolePatched = true;
+  };
+  const setOverlayLogLevel = (level) => {
+    patchConsoleLog();
+    currentLogLevel = level;
+  };
+  const initOverlayLogLevel = () => {
+    let level = DEFAULT_LOG_LEVEL;
+    try {
+      const stored = localStorage.getItem(SETTINGS_STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed.logLevel) {
+          level = parsed.logLevel;
+        } else if (parsed.debugLogging) {
+          level = "debug";
+        }
+      }
+    } catch {
+      level = DEFAULT_LOG_LEVEL;
+    }
+    setOverlayLogLevel(level);
+  };
 
   class Overlay {
     container = null;
@@ -1562,31 +1676,12 @@
       return `${strokeWidth}px rgba(0, 0, 0, ${strokeOpacity})`;
     }
     /**
-     * Validate image URL (security)
-     * Only allow YouTube CDN domains
-     * Duplicated from ChatSource for defense in depth
-     */
-    isValidImageUrl(url) {
-      try {
-        const parsed = new URL(url);
-        const allowedDomains = [
-          "yt3.ggpht.com",
-          "yt4.ggpht.com",
-          "www.gstatic.com",
-          "lh3.googleusercontent.com"
-        ];
-        return allowedDomains.some((domain) => parsed.hostname.includes(domain));
-      } catch {
-        return false;
-      }
-    }
-    /**
      * Create a validated image element with error handling
      * Common helper for emoji, stickers, and author photos
      * SECURITY: Validates URL and creates element programmatically
      */
     createImageElement(url, alt, className, sizePx) {
-      if (!this.isValidImageUrl(url)) {
+      if (!isAllowedYouTubeImageUrl(url)) {
         console.warn("[YT Chat Overlay] Invalid image URL:", url);
         return null;
       }
@@ -2367,10 +2462,13 @@
       try {
         const stored = localStorage.getItem(STORAGE_KEY);
         if (stored) {
-          const parsed = JSON.parse(stored);
+          const parsedRaw = JSON.parse(stored);
+          const { debugLogging, ...parsed } = parsedRaw;
+          const migratedLogLevel = parsed.logLevel ?? (debugLogging ? "debug" : void 0);
           return {
             ...DEFAULT_SETTINGS,
             ...parsed,
+            ...migratedLogLevel ? { logLevel: migratedLogLevel } : {},
             // Deep merge colors to ensure all color fields are present
             colors: {
               ...DEFAULT_SETTINGS.colors,
@@ -2428,6 +2526,25 @@
   const STYLE_ID = "yt-chat-overlay-settings-style";
   const BUTTON_ID = "yt-chat-overlay-settings-button";
   const BACKDROP_ID = "yt-chat-overlay-settings-backdrop";
+  const TITLE_ID = "yt-chat-overlay-settings-title";
+  const toPercent = (value) => Math.round(value * 100);
+  const UI_LIMITS = {
+    superChatOpacity: {
+      min: toPercent(SETTINGS_LIMITS.superChatOpacity.min),
+      max: toPercent(SETTINGS_LIMITS.superChatOpacity.max),
+      step: toPercent(SETTINGS_LIMITS.superChatOpacity.step)
+    },
+    safeTop: {
+      min: toPercent(SETTINGS_LIMITS.safeTop.min),
+      max: toPercent(SETTINGS_LIMITS.safeTop.max),
+      step: toPercent(SETTINGS_LIMITS.safeTop.step)
+    },
+    safeBottom: {
+      min: toPercent(SETTINGS_LIMITS.safeBottom.min),
+      max: toPercent(SETTINGS_LIMITS.safeBottom.max),
+      step: toPercent(SETTINGS_LIMITS.safeBottom.step)
+    }
+  };
   class SettingsUi {
     constructor(getSettings, updateSettings, resetSettings) {
       this.getSettings = getSettings;
@@ -2438,9 +2555,14 @@
     button = null;
     backdrop = null;
     modal = null;
+    previousFocus = null;
     handleKeydown = (event) => {
       if (event.key === "Escape") {
         this.close();
+        return;
+      }
+      if (event.key === "Tab") {
+        this.trapFocus(event);
       }
     };
     async attach() {
@@ -2458,7 +2580,12 @@
       if (!this.backdrop) return;
       this.backdrop.style.display = "none";
       this.backdrop.hidden = true;
+      this.backdrop.setAttribute("aria-hidden", "true");
       document.removeEventListener("keydown", this.handleKeydown);
+      if (this.previousFocus?.isConnected) {
+        this.previousFocus.focus();
+      }
+      this.previousFocus = null;
     }
     async findPlayerContainer() {
       const match = await waitForElementMatch(PLAYER_CONTAINER_SELECTORS$1, {
@@ -2643,6 +2770,7 @@
       this.backdrop.className = "yt-chat-overlay-settings-backdrop";
       this.backdrop.style.display = "none";
       this.backdrop.hidden = true;
+      this.backdrop.setAttribute("aria-hidden", "true");
       this.backdrop.addEventListener("click", (event) => {
         if (event.target === this.backdrop) {
           this.close();
@@ -2650,9 +2778,13 @@
       });
       this.modal = document.createElement("div");
       this.modal.className = "yt-chat-overlay-settings-modal";
+      this.modal.tabIndex = -1;
+      this.modal.setAttribute("role", "dialog");
+      this.modal.setAttribute("aria-modal", "true");
+      this.modal.setAttribute("aria-labelledby", TITLE_ID);
       this.modal.innerHTML = `
       <div class="yt-chat-overlay-settings-header">
-        <div>Chat Overlay Settings</div>
+        <div id="${TITLE_ID}">Chat Overlay Settings</div>
         <button type="button" class="yt-chat-overlay-settings-close" aria-label="Close settings">✕</button>
       </div>
       <div class="yt-chat-overlay-settings-section">
@@ -2663,36 +2795,72 @@
         </label>
         <label class="yt-chat-overlay-settings-field">
           <span>Speed (px/s)</span>
-          <input type="number" name="speedPxPerSec" min="100" max="400" step="10" />
+          <input
+            type="number"
+            name="speedPxPerSec"
+            min="${SETTINGS_LIMITS.speedPxPerSec.min}"
+            max="${SETTINGS_LIMITS.speedPxPerSec.max}"
+            step="${SETTINGS_LIMITS.speedPxPerSec.step}"
+          />
         </label>
         <label class="yt-chat-overlay-settings-field">
           <span>Font size (px)</span>
-          <input type="number" name="fontSize" min="18" max="40" step="2" />
+          <input
+            type="number"
+            name="fontSize"
+            min="${SETTINGS_LIMITS.fontSize.min}"
+            max="${SETTINGS_LIMITS.fontSize.max}"
+            step="${SETTINGS_LIMITS.fontSize.step}"
+          />
         </label>
         <label class="yt-chat-overlay-settings-field">
           <span>Opacity</span>
-          <input type="number" name="opacity" min="0.5" max="1" step="0.05" />
+          <input
+            type="number"
+            name="opacity"
+            min="${SETTINGS_LIMITS.opacity.min}"
+            max="${SETTINGS_LIMITS.opacity.max}"
+            step="${SETTINGS_LIMITS.opacity.step}"
+          />
         </label>
         <label class="yt-chat-overlay-settings-field">
           <span>Super Chat color opacity (%)</span>
-          <input type="number" name="superChatOpacity" min="40" max="100" step="5" />
+          <input
+            type="number"
+            name="superChatOpacity"
+            min="${UI_LIMITS.superChatOpacity.min}"
+            max="${UI_LIMITS.superChatOpacity.max}"
+            step="${UI_LIMITS.superChatOpacity.step}"
+          />
         </label>
         <label class="yt-chat-overlay-settings-field">
           <span>Safe top (%)</span>
-          <input type="number" name="safeTop" min="0" max="25" step="1" />
+          <input
+            type="number"
+            name="safeTop"
+            min="${UI_LIMITS.safeTop.min}"
+            max="${UI_LIMITS.safeTop.max}"
+            step="${UI_LIMITS.safeTop.step}"
+          />
         </label>
         <label class="yt-chat-overlay-settings-field">
           <span>Safe bottom (%)</span>
-          <input type="number" name="safeBottom" min="0" max="25" step="1" />
+          <input
+            type="number"
+            name="safeBottom"
+            min="${UI_LIMITS.safeBottom.min}"
+            max="${UI_LIMITS.safeBottom.max}"
+            step="${UI_LIMITS.safeBottom.step}"
+          />
         </label>
         <label class="yt-chat-overlay-settings-field">
           <span>Warning threshold</span>
           <input
             type="number"
             name="maxConcurrentMessages"
-            min="30"
-            max="100"
-            step="10"
+            min="${SETTINGS_LIMITS.maxConcurrentMessages.min}"
+            max="${SETTINGS_LIMITS.maxConcurrentMessages.max}"
+            step="${SETTINGS_LIMITS.maxConcurrentMessages.step}"
             title="Performance warning threshold (not enforced)"
           />
         </label>
@@ -2701,11 +2869,38 @@
           <input
             type="number"
             name="maxMessagesPerSecond"
-            min="5"
-            max="20"
-            step="1"
+            min="${SETTINGS_LIMITS.maxMessagesPerSecond.min}"
+            max="${SETTINGS_LIMITS.maxMessagesPerSecond.max}"
+            step="${SETTINGS_LIMITS.maxMessagesPerSecond.step}"
             title="Rate limit for new messages (enforced)"
           />
+        </label>
+        <label class="yt-chat-overlay-settings-field">
+          <span>Allow short texts</span>
+          <input
+            type="checkbox"
+            name="allowShortTextMessages"
+            title="Show short regular messages (e.g. 1-2 characters)"
+          />
+        </label>
+        <label class="yt-chat-overlay-settings-field">
+          <span>Min text length</span>
+          <input
+            type="number"
+            name="minTextLength"
+            min="${SETTINGS_LIMITS.minTextLength.min}"
+            max="${SETTINGS_LIMITS.minTextLength.max}"
+            step="${SETTINGS_LIMITS.minTextLength.step}"
+            title="Minimum visible character count for regular messages"
+          />
+        </label>
+        <label class="yt-chat-overlay-settings-field">
+          <span>Log level</span>
+          <select name="logLevel" title="Console diagnostics verbosity">
+            <option value="warn">Warn (default)</option>
+            <option value="info">Info</option>
+            <option value="debug">Debug</option>
+          </select>
         </label>
       </div>
       <div class="yt-chat-overlay-settings-section">
@@ -2744,15 +2939,33 @@
         </label>
         <label class="yt-chat-overlay-settings-field">
           <span>Width (px)</span>
-          <input type="number" name="outline-widthPx" min="0" max="5" step="0.5" />
+          <input
+            type="number"
+            name="outline-widthPx"
+            min="${SETTINGS_LIMITS.outlineWidthPx.min}"
+            max="${SETTINGS_LIMITS.outlineWidthPx.max}"
+            step="${SETTINGS_LIMITS.outlineWidthPx.step}"
+          />
         </label>
         <label class="yt-chat-overlay-settings-field">
           <span>Blur (px)</span>
-          <input type="number" name="outline-blurPx" min="0" max="8" step="0.5" />
+          <input
+            type="number"
+            name="outline-blurPx"
+            min="${SETTINGS_LIMITS.outlineBlurPx.min}"
+            max="${SETTINGS_LIMITS.outlineBlurPx.max}"
+            step="${SETTINGS_LIMITS.outlineBlurPx.step}"
+          />
         </label>
         <label class="yt-chat-overlay-settings-field">
           <span>Opacity</span>
-          <input type="number" name="outline-opacity" min="0" max="1" step="0.1" />
+          <input
+            type="number"
+            name="outline-opacity"
+            min="${SETTINGS_LIMITS.outlineOpacity.min}"
+            max="${SETTINGS_LIMITS.outlineOpacity.max}"
+            step="${SETTINGS_LIMITS.outlineOpacity.step}"
+          />
         </label>
       </div>
       <div class="yt-chat-overlay-settings-actions">
@@ -2767,11 +2980,15 @@
       document.body.appendChild(this.backdrop);
     }
     open() {
-      if (!this.backdrop) return;
+      if (!this.backdrop || !this.modal) return;
+      const activeElement = document.activeElement;
+      this.previousFocus = activeElement instanceof HTMLElement ? activeElement : null;
       this.populateForm(this.getSettings());
       this.backdrop.style.display = "flex";
       this.backdrop.hidden = false;
+      this.backdrop.setAttribute("aria-hidden", "false");
       document.addEventListener("keydown", this.handleKeydown);
+      this.focusInitialElement();
     }
     apply() {
       const partial = this.collectSettings();
@@ -2793,6 +3010,9 @@
       this.setValue("safeBottom", (settings.safeBottom * 100).toFixed(1));
       this.setValue("maxConcurrentMessages", settings.maxConcurrentMessages);
       this.setValue("maxMessagesPerSecond", settings.maxMessagesPerSecond);
+      this.setCheckbox("allowShortTextMessages", settings.allowShortTextMessages);
+      this.setValue("minTextLength", settings.minTextLength);
+      this.setSelect("logLevel", settings.logLevel);
       this.setValue("color-normal", settings.colors.normal);
       this.setValue("color-member", settings.colors.member);
       this.setValue("color-moderator", settings.colors.moderator);
@@ -2820,18 +3040,62 @@
       };
       return {
         enabled: this.getCheckbox("enabled", current.enabled),
-        speedPxPerSec: clamp(readNumber("speedPxPerSec", current.speedPxPerSec), 100, 400),
-        fontSize: clamp(readNumber("fontSize", current.fontSize), 18, 40),
-        opacity: clamp(readNumber("opacity", current.opacity), 0.5, 1),
-        superChatOpacity: clamp(readNumber("superChatOpacity", current.superChatOpacity * 100), 40, 100) / 100,
-        safeTop: clamp(readNumber("safeTop", current.safeTop * 100), 0, 25) / 100,
-        safeBottom: clamp(readNumber("safeBottom", current.safeBottom * 100), 0, 25) / 100,
+        speedPxPerSec: clamp(
+          readNumber("speedPxPerSec", current.speedPxPerSec),
+          SETTINGS_LIMITS.speedPxPerSec.min,
+          SETTINGS_LIMITS.speedPxPerSec.max
+        ),
+        fontSize: clamp(
+          readNumber("fontSize", current.fontSize),
+          SETTINGS_LIMITS.fontSize.min,
+          SETTINGS_LIMITS.fontSize.max
+        ),
+        opacity: clamp(
+          readNumber("opacity", current.opacity),
+          SETTINGS_LIMITS.opacity.min,
+          SETTINGS_LIMITS.opacity.max
+        ),
+        superChatOpacity: clamp(
+          readNumber("superChatOpacity", current.superChatOpacity * 100),
+          UI_LIMITS.superChatOpacity.min,
+          UI_LIMITS.superChatOpacity.max
+        ) / 100,
+        safeTop: clamp(
+          readNumber("safeTop", current.safeTop * 100),
+          UI_LIMITS.safeTop.min,
+          UI_LIMITS.safeTop.max
+        ) / 100,
+        safeBottom: clamp(
+          readNumber("safeBottom", current.safeBottom * 100),
+          UI_LIMITS.safeBottom.min,
+          UI_LIMITS.safeBottom.max
+        ) / 100,
         maxConcurrentMessages: Math.round(
-          clamp(readNumber("maxConcurrentMessages", current.maxConcurrentMessages), 30, 100)
+          clamp(
+            readNumber("maxConcurrentMessages", current.maxConcurrentMessages),
+            SETTINGS_LIMITS.maxConcurrentMessages.min,
+            SETTINGS_LIMITS.maxConcurrentMessages.max
+          )
         ),
         maxMessagesPerSecond: Math.round(
-          clamp(readNumber("maxMessagesPerSecond", current.maxMessagesPerSecond), 5, 20)
+          clamp(
+            readNumber("maxMessagesPerSecond", current.maxMessagesPerSecond),
+            SETTINGS_LIMITS.maxMessagesPerSecond.min,
+            SETTINGS_LIMITS.maxMessagesPerSecond.max
+          )
         ),
+        allowShortTextMessages: this.getCheckbox(
+          "allowShortTextMessages",
+          current.allowShortTextMessages
+        ),
+        minTextLength: Math.round(
+          clamp(
+            readNumber("minTextLength", current.minTextLength),
+            SETTINGS_LIMITS.minTextLength.min,
+            SETTINGS_LIMITS.minTextLength.max
+          )
+        ),
+        logLevel: this.getLogLevel("logLevel", current.logLevel),
         showAuthor: {
           normal: this.getCheckbox("showAuthor-normal", current.showAuthor.normal),
           member: this.getCheckbox("showAuthor-member", current.showAuthor.member),
@@ -2849,14 +3113,78 @@
         },
         outline: {
           enabled: this.getCheckbox("outline-enabled", current.outline.enabled),
-          widthPx: clamp(readNumber("outline-widthPx", current.outline.widthPx), 0, 5),
-          blurPx: clamp(readNumber("outline-blurPx", current.outline.blurPx), 0, 8),
-          opacity: clamp(readNumber("outline-opacity", current.outline.opacity), 0, 1)
+          widthPx: clamp(
+            readNumber("outline-widthPx", current.outline.widthPx),
+            SETTINGS_LIMITS.outlineWidthPx.min,
+            SETTINGS_LIMITS.outlineWidthPx.max
+          ),
+          blurPx: clamp(
+            readNumber("outline-blurPx", current.outline.blurPx),
+            SETTINGS_LIMITS.outlineBlurPx.min,
+            SETTINGS_LIMITS.outlineBlurPx.max
+          ),
+          opacity: clamp(
+            readNumber("outline-opacity", current.outline.opacity),
+            SETTINGS_LIMITS.outlineOpacity.min,
+            SETTINGS_LIMITS.outlineOpacity.max
+          )
         }
       };
     }
+    getFocusableElements() {
+      if (!this.modal) return [];
+      const selectors = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])';
+      return Array.from(this.modal.querySelectorAll(selectors)).filter((element) => {
+        if (element.tabIndex < 0) return false;
+        return !element.hasAttribute("hidden");
+      });
+    }
+    focusInitialElement() {
+      if (!this.modal) return;
+      const closeButton = this.modal.querySelector(
+        ".yt-chat-overlay-settings-close"
+      );
+      if (closeButton) {
+        closeButton.focus();
+        return;
+      }
+      const [first] = this.getFocusableElements();
+      if (first) {
+        first.focus();
+        return;
+      }
+      this.modal.focus();
+    }
+    trapFocus(event) {
+      if (!this.backdrop || this.backdrop.hidden) {
+        return;
+      }
+      const focusableElements = this.getFocusableElements();
+      if (focusableElements.length === 0) {
+        event.preventDefault();
+        this.modal?.focus();
+        return;
+      }
+      const first = focusableElements[0];
+      const last = focusableElements[focusableElements.length - 1];
+      if (!first || !last) return;
+      const activeElement = document.activeElement;
+      const isShiftTab = event.shiftKey;
+      if (isShiftTab && activeElement === first) {
+        event.preventDefault();
+        last.focus();
+        return;
+      }
+      if (!isShiftTab && activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
     getInput(name) {
       return this.modal?.querySelector(`input[name="${name}"]`) ?? null;
+    }
+    getSelect(name) {
+      return this.modal?.querySelector(`select[name="${name}"]`) ?? null;
     }
     getCheckbox(name, fallback) {
       const input = this.getInput(name);
@@ -2865,6 +3193,14 @@
     getColor(name, fallback) {
       const input = this.getInput(name);
       return input?.value || fallback;
+    }
+    getLogLevel(name, fallback) {
+      const select = this.getSelect(name);
+      if (!select) return fallback;
+      if (select.value === "warn" || select.value === "info" || select.value === "debug") {
+        return select.value;
+      }
+      return fallback;
     }
     setValue(name, value) {
       const input = this.getInput(name);
@@ -2876,6 +3212,12 @@
       const input = this.getInput(name);
       if (input) {
         input.checked = value;
+      }
+    }
+    setSelect(name, value) {
+      const select = this.getSelect(name);
+      if (select) {
+        select.value = value;
       }
     }
     /**
@@ -3164,6 +3506,7 @@
         (partial) => this.updateSettings(partial),
         () => this.resetSettings()
       );
+      setOverlayLogLevel(this.settings.get().logLevel);
       this.pageWatcher.onChange(() => {
         this.handlePageChange();
       });
@@ -3217,7 +3560,7 @@
           }
         });
         await this.videoSync.init();
-        this.chatSource = new ChatSource();
+        this.chatSource = new ChatSource(() => this.settings.get());
         const chatStarted = await this.chatSource.start((message) => {
           if (this._renderer) {
             this._renderer.addMessage(message);
@@ -3319,6 +3662,9 @@
       const wasEnabled = this.settings.get().enabled;
       this.settings.update(partial);
       const nextSettings = this.settings.get();
+      if (partial.logLevel !== void 0) {
+        setOverlayLogLevel(nextSettings.logLevel);
+      }
       if (wasEnabled && !nextSettings.enabled) {
         this.cleanup();
         console.log("[App] Overlay disabled");
@@ -3441,6 +3787,7 @@
     }
   }
   try {
+    initOverlayLogLevel();
     main();
   } catch (error) {
     console.error("[YT Chat Overlay] Failed to start:", error);

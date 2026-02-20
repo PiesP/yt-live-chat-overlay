@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         YouTube Live Chat Overlay
-// @version      0.4.2
+// @version      0.5.0
 // @description  Displays YouTube live chat in Nico-nico style flowing overlay (100% local, no data collection)
 // @author       PiesP
 // @match        https://www.youtube.com/*
