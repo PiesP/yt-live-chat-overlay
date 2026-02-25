@@ -1,5 +1,11 @@
 name: 🔍 Workflow Tools Version Check
 
+# Responsibility: Check for updates to tools used in workflows
+# - OSV Scanner reusable workflow version
+# - Creates PR when update is available
+#
+# Trigger: Weekly schedule + manual trigger
+
 on:
   schedule:
     - cron: "0 2 * * 1" # Weekly on Mondays at 2 AM UTC (after dependency checks)

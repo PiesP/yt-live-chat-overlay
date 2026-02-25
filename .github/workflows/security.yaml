@@ -1,5 +1,12 @@
 name: 🔒 Security Scanning
 
+# Responsibility: Security analysis for Node.js + pnpm project
+# - OSV scanning: vulnerability detection in dependencies (via Google OSV-Scanner Action)
+# - SAST: static security analysis with Semgrep
+# - License compliance: verify project LICENSE file
+#
+# Trigger: Weekly schedule + push to master + PR to master
+
 on:
   schedule:
     - cron: "0 1 * * 0" # Weekly on Sundays at 1 AM UTC

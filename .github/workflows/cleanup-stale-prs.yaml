@@ -1,5 +1,11 @@
 name: 🧹 Cleanup Stale PRs
 
+# Responsibility: Close stale dependabot PRs that are superseded
+# - Identifies PRs older than 30 days with merge conflicts
+# - Auto-closes with informative comment
+#
+# Trigger: Weekly schedule + manual trigger
+
 on:
   schedule:
     - cron: "0 3 * * 1" # Weekly on Mondays at 3 AM UTC (after dependency checks)

@@ -1,4 +1,9 @@
-name: 🤖 Bot PR Auto-Merge
+name: 🤖 Dependabot Auto-Merge
+
+# Responsibility: Auto-merge safe dependabot PRs
+# - GitHub Actions: patch/minor updates
+# - npm: patch/minor updates for specific safe packages
+# - Requires CI to pass first (via GitHub branch protection)
 
 on:
   pull_request_target:

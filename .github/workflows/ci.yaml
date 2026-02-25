@@ -1,5 +1,14 @@
 name: 🏗️ CI Pipeline
 
+# Responsibility: Continuous Integration (Node.js + pnpm + Biome)
+# - Linting (Biome)
+# - Format checking (Biome)
+# - Type checking (TypeScript via tsc)
+# - Knip dependency check
+# - Build verification (Production mode)
+#
+# Triggered on: Push/PR to master (excluding markdown/assets)
+
 on:
   push:
     branches: [master]
@@ -10,6 +19,7 @@ on:
       - "**/*.svg"
       - ".vscode/**"
       - ".github/*.md"
+      - "LICENSES/**"
   pull_request:
     branches: [master]
     paths-ignore:
@@ -19,6 +29,7 @@ on:
       - "**/*.svg"
       - ".vscode/**"
       - ".github/*.md"
+      - "LICENSES/**"
   merge_group:
     types: [checks_requested]
   workflow_dispatch:
