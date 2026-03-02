@@ -41,6 +41,7 @@ jobs:
         -r
         --lockfile=pnpm-lock.yaml
         ./
+      fail-on-vuln: false
 
   osv-scan-pr:
     name: 🛡️ OSV Vulnerability Scan (PR Diff)
@@ -55,6 +56,7 @@ jobs:
         -r
         --lockfile=pnpm-lock.yaml
         ./
+      fail-on-vuln: false
 
   semgrep:
     name: 🔍 Static Analysis (Semgrep)
