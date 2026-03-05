@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.1] - 2026-03-05
+
+### Fixed
+- **초기 페이지 로드 시 코멘트 2중 표시 버그 수정**
+  - `ChatSource.start()`에 취소 플래그(`stopped`) 추가: `stop()` 호출 이후에도 비동기 루프가 계속 실행되며 MutationObserver를 재연결하던 문제 수정. 모든 `await` 이후 취소 여부를 확인하여 정리된 인스턴스가 상태를 오염시키지 않도록 보호
+  - `App.start()`에 세대 기반 취소 토큰(`startGeneration`) 추가: `cleanup()` 실행 이후에도 완료되는 stale async task가 `isInitialized`·`lastStartedUrl` 등 앱 상태를 잘못 설정하던 경쟁 조건(race condition) 수정
+  - `yt-navigate-finish` 이벤트 핸들러의 `forceNotify` 제거: YouTube가 초기 페이지 설정 중 동일 URL로 이벤트를 발생시킬 때 불필요한 cleanup+restart 사이클이 유발되던 문제 수정. URL 변경 감지는 기존 `pushState`/`replaceState` 패치와 `popstate` 리스너가 담당
+  - `WeakSet` 기반 DOM 수준 메시지 중복 제거 추가: YouTube가 동일 DOM 노드를 `#items`에 두 번 삽입하는 경우(히스토리 리플레이, 채팅 패널 리셋 등)에도 같은 메시지가 중복 표시되지 않도록 방어
+  - `initApp()`에서 기존 App 인스턴스 사전 정리: 이전 인스턴스가 존재하면 `.stop()`으로 리소스를 완전히 해제한 뒤 새 인스턴스를 생성하여 observer 중첩 방지
+
+### Dependencies
+- devDependencies 최신화: Node.js 24.14.0·pnpm 10.27.0 고정, `@types/node` ^25.3.3, `@biomejs/biome` ^2.4.4, `knip` ^5.85.0, `vite` ^7.3.1, `typescript` ^5.9.3
+
+### CI
+- Rollup 전이 의존성 보안 취약점 오버라이드 추가
+- CI 보안 감사 게이트 및 OSV 스캔 조건 개선
+- 워크플로 트리거·주석 정비
+
 ## [0.5.0] - 2026-02-20
 
 ### Added
