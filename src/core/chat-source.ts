@@ -82,6 +82,10 @@ export class ChatSource {
   private chatContainer: Element | null = null;
   private callback: MessageCallback | null = null;
   private lastMessageTime = 0;
+  /** Set to true by stop() to cancel any in-flight start() async loops. */
+  private stopped = false;
+  /** Tracks processed DOM nodes to prevent firing the same element twice. */
+  private readonly seenElements = new WeakSet<Element>();
 
   constructor(private readonly getSettings: (() => Readonly<OverlaySettings>) | null = null) {}
 
@@ -450,10 +454,13 @@ export class ChatSource {
    * Start monitoring chat
    */
   async start(callback: MessageCallback): Promise<boolean> {
+    this.stopped = false;
     this.callback = callback;
 
     // First, wait for chat frame element to exist in DOM
     let chatFrame = await this.waitForChatFrame();
+    if (this.stopped) return false;
+
     if (!chatFrame) {
       console.warn(
         '[YT Chat Overlay] Chat frame element not found - chat may be disabled for this video'
@@ -461,24 +468,30 @@ export class ChatSource {
       const opened = await this.tryOpenChatPanelWithoutFrame();
       if (opened) {
         chatFrame = await this.waitForChatFrame(6, 500);
+        if (this.stopped) return false;
         if (chatFrame) {
           await this.ensureChatPanelOpen(chatFrame);
+          if (this.stopped) return false;
         }
       }
       // Continue anyway - might be in-page chat
     } else {
       // Ensure chat panel is open
       await this.ensureChatPanelOpen(chatFrame);
+      if (this.stopped) return false;
     }
 
     // Wait a bit for chat iframe to load if it was just opened
     await sleep(500);
+    if (this.stopped) return false;
 
     // Find chat container (with retries)
     console.log('[YT Chat Overlay] Starting chat container search (10 attempts)...');
     for (let i = 0; i < 10; i++) {
+      if (this.stopped) return false;
       console.log(`[YT Chat Overlay] Attempt ${i + 1}/10...`);
       this.chatContainer = await this.findChatContainer();
+      if (this.stopped) return false;
       if (this.chatContainer) {
         console.log(`[YT Chat Overlay] Chat container found on attempt ${i + 1}`);
         break;
@@ -489,6 +502,8 @@ export class ChatSource {
       await sleep(delay);
     }
 
+    if (this.stopped) return false;
+
     if (!this.chatContainer) {
       console.warn('[YT Chat Overlay] Chat container not found after 10 attempts');
       console.warn('[YT Chat Overlay] Possible reasons:');
@@ -498,6 +513,9 @@ export class ChatSource {
       console.warn('  4. Chat is in a cross-origin iframe (blocked by browser)');
       return false;
     }
+
+    // Final cancellation check before attaching observer
+    if (this.stopped) return false;
 
     // Setup MutationObserver
     this.observer = new MutationObserver((mutations) => {
@@ -527,6 +545,12 @@ export class ChatSource {
         if (node.nodeType !== Node.ELEMENT_NODE) continue;
 
         const element = node as Element;
+
+        // Skip elements we've already processed (guards against YouTube re-adding
+        // the same DOM node, e.g. during chat panel resets or history replays).
+        if (this.seenElements.has(element)) continue;
+        this.seenElements.add(element);
+
         const message = this.parseMessage(element);
         if (message) {
           this.lastMessageTime = now;
@@ -1049,6 +1073,9 @@ export class ChatSource {
    * Stop monitoring and cleanup resources
    */
   stop(): void {
+    // Signal any in-flight start() async loops to abort
+    this.stopped = true;
+
     // Disconnect observer
     if (this.observer) {
       this.observer.disconnect();

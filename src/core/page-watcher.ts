@@ -49,7 +49,11 @@ export class PageWatcher {
     // Listen to YouTube's custom navigation event (more reliable for SPA navigation)
     this.ytNavigateHandler = () => {
       console.log('[YT Chat Overlay] YouTube navigation finished');
-      this.checkUrlChange(true);
+      // Do NOT use forceNotify here. YouTube fires yt-navigate-finish on the
+      // same URL during initial page setup, which would trigger an unnecessary
+      // cleanup+restart race. URL changes are already detected by the pushState
+      // / replaceState patches and the popstate listener.
+      this.checkUrlChange();
     };
     window.addEventListener('yt-navigate-finish', this.ytNavigateHandler);
 

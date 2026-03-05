@@ -32,6 +32,12 @@ class App {
   private restartInProgress = false;
   private pendingRestart = false;
   private lastStartedUrl: string | null = null;
+  /**
+   * Incremented on every cleanup(). Each start() captures the generation at
+   * entry and aborts if it no longer matches, preventing stale async tasks
+   * from corrupting state after cleanup has been called.
+   */
+  private startGeneration = 0;
 
   constructor() {
     this.pageWatcher = new PageWatcher();
@@ -56,6 +62,11 @@ class App {
    * Start application
    */
   async start(): Promise<void> {
+    // Capture current generation. If cleanup() is called while we are awaiting,
+    // startGeneration will be incremented and we will bail out early.
+    const myGeneration = this.startGeneration;
+    const isCancelled = (): boolean => this.startGeneration !== myGeneration;
+
     // Check if we're on a valid page
     if (!this.pageWatcher.isValidPage()) {
       console.log('[App] Not on a video page, waiting...');
@@ -63,6 +74,7 @@ class App {
     }
 
     await this.ensureSettingsUi();
+    if (isCancelled()) return;
 
     // Check if already initialized
     if (this.isInitialized) {
@@ -82,6 +94,7 @@ class App {
       // Create overlay
       this.overlay = new Overlay();
       const overlayCreated = await this.overlay.create(currentSettings);
+      if (isCancelled()) return;
       if (!overlayCreated) {
         console.warn('[App] Failed to create overlay');
         this.cleanup();
@@ -116,6 +129,7 @@ class App {
 
       // Try to initialize (non-blocking)
       await this.videoSync.init();
+      if (isCancelled()) return;
 
       // Start chat source
       this.chatSource = new ChatSource(() => this.settings.get());
@@ -124,6 +138,7 @@ class App {
           this._renderer.addMessage(message);
         }
       });
+      if (isCancelled()) return;
 
       if (!chatStarted) {
         console.warn('[App] Failed to start chat monitoring');
@@ -318,6 +333,9 @@ class App {
   private cleanup(): void {
     console.log('[App] Starting cleanup...');
 
+    // Invalidate any in-flight start() async task so it aborts after its next await.
+    this.startGeneration++;
+
     // Close settings UI
     this.settingsUi.close();
 
@@ -408,6 +426,15 @@ async function initApp(): Promise<void> {
   console.log('[YT Chat Overlay] Initializing application...');
 
   try {
+    // Defensive: if a previous instance exists (e.g. Tampermonkey re-injected
+    // on the same page), stop it before creating a new one so its observers
+    // and event listeners are fully removed.
+    if (window.__ytChatOverlay) {
+      console.log('[YT Chat Overlay] Stopping previous instance before re-init');
+      (window.__ytChatOverlay as App).stop();
+      window.__ytChatOverlay = undefined;
+    }
+
     const app = new App();
     await app.start();
 
