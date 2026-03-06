@@ -16,7 +16,15 @@ import type {
   SuperChatInfo,
 } from '@app-types';
 import { isAllowedYouTubeImageUrl } from '@core/image-url';
-import { borderRadius, colors, rgba, shadows, spacing, typography } from './design-tokens.js';
+import {
+  borderRadius,
+  colors,
+  rgba,
+  shadows,
+  spacing,
+  typography,
+  type RgbColor,
+} from './design-tokens.js';
 import type { Overlay } from './overlay';
 
 interface ActiveMessage {
@@ -48,6 +56,17 @@ interface BuiltMessage {
   element: HTMLDivElement;
   isSuperChat: boolean;
   isMembership: boolean;
+}
+
+interface RenderContext {
+  container: HTMLDivElement;
+  dimensions: OverlayDimensions;
+}
+
+interface AuthorNameOptions {
+  className?: string;
+  color?: string;
+  tagName?: 'span' | 'div';
 }
 
 /**
@@ -472,6 +491,36 @@ export class Renderer {
     );
   }
 
+  private createContainer(className: string): HTMLDivElement {
+    const element = document.createElement('div');
+    element.className = className;
+    return element;
+  }
+
+  private getAuthorType(message: ChatMessage): NonNullable<ChatMessage['authorType']> {
+    return message.authorType || 'normal';
+  }
+
+  private createAuthorPhoto(message: ChatMessage, fallbackAlt = 'Author'): HTMLImageElement | null {
+    return this.createAuthorPhotoElement(message.authorPhotoUrl, message.author || fallbackAlt);
+  }
+
+  private createAuthorNameElement(
+    message: ChatMessage,
+    options: AuthorNameOptions = {}
+  ): HTMLElement | null {
+    if (!message.author) {
+      return null;
+    }
+
+    const { className = 'yt-chat-overlay-author-name', tagName = 'span' } = options;
+    const element = document.createElement(tagName);
+    element.className = className;
+    element.textContent = message.author;
+    element.style.color = options.color ?? this.settings.colors[this.getAuthorType(message)];
+    return element;
+  }
+
   /**
    * Create message text element (plain text or rich text + emoji)
    */
@@ -486,8 +535,7 @@ export class Renderer {
       return null;
     }
 
-    const contentDiv = document.createElement('div');
-    contentDiv.className = className;
+    const contentDiv = this.createContainer(className);
 
     if (hasRichContent && message.content) {
       this.renderMixedContent(contentDiv, message.content);
@@ -502,12 +550,7 @@ export class Renderer {
    * Parse RGB/RGBA color string to components
    * Handles formats: "rgb(r, g, b)" or "rgba(r, g, b, a)"
    */
-  private parseRgbaColor(colorString: string): {
-    r: number;
-    g: number;
-    b: number;
-    a: number;
-  } | null {
+  private parseRgbaColor(colorString: string): RgbColor | null {
     const rgbaMatch = colorString.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
     if (!rgbaMatch) return null;
 
@@ -515,19 +558,18 @@ export class Renderer {
       r: parseInt(rgbaMatch[1] || '0', 10),
       g: parseInt(rgbaMatch[2] || '0', 10),
       b: parseInt(rgbaMatch[3] || '0', 10),
-      a: rgbaMatch[4] ? parseFloat(rgbaMatch[4]) : 1.0,
     };
   }
 
   /**
    * Resolve Super Chat RGB color from actual YouTube color or tier fallback
    */
-  private resolveSuperChatRgb(superChat: SuperChatInfo): { r: number; g: number; b: number } {
+  private resolveSuperChatRgb(superChat: SuperChatInfo): RgbColor {
     const sourceColor = superChat.headerBackgroundColor || superChat.backgroundColor;
     const parsed = sourceColor ? this.parseRgbaColor(sourceColor) : null;
 
     if (parsed) {
-      return { r: parsed.r, g: parsed.g, b: parsed.b };
+      return parsed;
     }
 
     return colors.superChat[superChat.tier];
@@ -607,8 +649,7 @@ export class Renderer {
    */
   private shouldShowAuthor(message: ChatMessage): boolean {
     const settings = this.settings.showAuthor;
-    const authorType = message.authorType || 'normal';
-    return settings[authorType] || false;
+    return settings[this.getAuthorType(message)];
   }
 
   /**
@@ -616,32 +657,28 @@ export class Renderer {
    * SECURITY: Validates photo URL and creates elements programmatically
    */
   private createAuthorElement(message: ChatMessage): HTMLDivElement {
-    const authorInfoDiv = document.createElement('div');
-    authorInfoDiv.className = 'yt-chat-overlay-author-info';
+    const authorInfoDiv = this.createContainer('yt-chat-overlay-author-info');
 
     // Add author photo if available
-    const photoImg = this.createAuthorPhotoElement(
-      message.authorPhotoUrl,
-      message.author || 'Author'
-    );
+    const photoImg = this.createAuthorPhoto(message);
     if (photoImg) {
       authorInfoDiv.appendChild(photoImg);
     }
 
     // Add author name
-    if (message.author) {
-      const nameSpan = document.createElement('span');
-      nameSpan.className = 'yt-chat-overlay-author-name';
-      nameSpan.textContent = message.author;
-
-      // Apply color based on author type
-      const authorType = message.authorType || 'normal';
-      nameSpan.style.color = this.settings.colors[authorType];
-
+    const nameSpan = this.createAuthorNameElement(message);
+    if (nameSpan) {
       authorInfoDiv.appendChild(nameSpan);
     }
 
     return authorInfoDiv;
+  }
+
+  private createSuperChatAmountBadge(amount: string): HTMLSpanElement {
+    const amountBadge = document.createElement('span');
+    amountBadge.className = 'yt-chat-overlay-superchat-amount';
+    amountBadge.textContent = amount;
+    return amountBadge;
   }
 
   /**
@@ -652,30 +689,18 @@ export class Renderer {
     superChat: SuperChatInfo,
     showAuthor: boolean
   ): HTMLDivElement {
-    const header = document.createElement('div');
-    header.className = 'yt-chat-overlay-superchat-meta';
+    const header = this.createContainer('yt-chat-overlay-superchat-meta');
 
     if (showAuthor) {
-      const authorSection = document.createElement('div');
-      authorSection.className = 'yt-chat-overlay-superchat-author';
+      const authorSection = this.createContainer('yt-chat-overlay-superchat-author');
 
-      const photoImg = this.createAuthorPhotoElement(
-        message.authorPhotoUrl,
-        message.author || 'Author'
-      );
+      const photoImg = this.createAuthorPhoto(message);
       if (photoImg) {
         authorSection.appendChild(photoImg);
       }
 
-      if (message.author) {
-        const authorName = document.createElement('span');
-        authorName.className = 'yt-chat-overlay-author-name';
-        authorName.textContent = message.author;
-
-        // Set author color based on type
-        const authorType = message.authorType || 'normal';
-        authorName.style.color = this.settings.colors[authorType];
-
+      const authorName = this.createAuthorNameElement(message);
+      if (authorName) {
         authorSection.appendChild(authorName);
       }
 
@@ -685,10 +710,7 @@ export class Renderer {
     }
 
     // Amount badge
-    const amountBadge = document.createElement('span');
-    amountBadge.className = 'yt-chat-overlay-superchat-amount';
-    amountBadge.textContent = superChat.amount;
-    header.appendChild(amountBadge);
+    header.appendChild(this.createSuperChatAmountBadge(superChat.amount));
 
     if (!showAuthor) {
       header.style.justifyContent = 'flex-end';
@@ -711,8 +733,7 @@ export class Renderer {
       return null;
     }
 
-    const content = document.createElement('div');
-    content.className = 'yt-chat-overlay-superchat-body';
+    const content = this.createContainer('yt-chat-overlay-superchat-body');
 
     // Add sticker if available (high-tier Super Chats)
     if (superChat.stickerUrl) {
@@ -733,27 +754,25 @@ export class Renderer {
    * Create membership message card with author and message
    */
   private createMembershipCard(message: ChatMessage): HTMLDivElement {
-    const card = document.createElement('div');
-    card.className = 'yt-chat-overlay-membership-card';
+    const card = this.createContainer('yt-chat-overlay-membership-card');
 
     // Author section with photo
-    const authorSection = document.createElement('div');
-    authorSection.className = 'yt-chat-overlay-membership-author';
+    const authorSection = this.createContainer('yt-chat-overlay-membership-author');
 
-    const photo = this.createAuthorPhotoElement(message.authorPhotoUrl, message.author || 'Member');
+    const photo = this.createAuthorPhoto(message, 'Member');
     if (photo) {
       authorSection.appendChild(photo);
     }
 
-    const textContainer = document.createElement('div');
-    textContainer.className = 'yt-chat-overlay-membership-text';
+    const textContainer = this.createContainer('yt-chat-overlay-membership-text');
 
     // Author name
-    if (message.author) {
-      const authorName = document.createElement('div');
-      authorName.className = 'yt-chat-overlay-membership-author-name';
-      authorName.style.color = colors.author.member;
-      authorName.textContent = message.author;
+    const authorName = this.createAuthorNameElement(message, {
+      className: 'yt-chat-overlay-membership-author-name',
+      color: colors.author.member,
+      tagName: 'div',
+    });
+    if (authorName) {
       textContainer.appendChild(authorName);
     }
 
@@ -790,6 +809,61 @@ export class Renderer {
       '--yt-sc-border-rgb',
       `${borderRgb.r}, ${borderRgb.g}, ${borderRgb.b}`
     );
+  }
+
+  private buildRegularMessageElement(message: ChatMessage): BuiltMessage | null {
+    const element = this.createContainer('yt-chat-overlay-message');
+    const showAuthor = this.shouldShowAuthor(message);
+
+    if (showAuthor) {
+      element.classList.add('yt-chat-overlay-message-with-author');
+      element.appendChild(this.createAuthorElement(message));
+    }
+
+    const contentDiv = this.createMessageTextElement(message);
+    if (!contentDiv) {
+      console.warn('[YT Chat Overlay] Skipping empty message');
+      return null;
+    }
+
+    element.appendChild(contentDiv);
+    return { element, isSuperChat: false, isMembership: false };
+  }
+
+  private buildSuperChatElement(message: ChatMessage, superChat: SuperChatInfo): BuiltMessage {
+    const element = this.createContainer('yt-chat-overlay-message');
+    this.applySuperChatStyling(element, superChat);
+
+    const headerElement = this.createSuperChatHeader(
+      message,
+      superChat,
+      this.settings.showAuthor.superChat
+    );
+    const contentElement = this.createSuperChatContent(message, superChat);
+
+    element.appendChild(headerElement);
+    if (contentElement) {
+      element.appendChild(contentElement);
+    }
+
+    return { element, isSuperChat: true, isMembership: false };
+  }
+
+  private buildMembershipElement(message: ChatMessage): BuiltMessage {
+    const element = this.createContainer('yt-chat-overlay-message');
+    element.appendChild(this.createMembershipCard(message));
+    return { element, isSuperChat: false, isMembership: true };
+  }
+
+  private getRenderContext(): RenderContext | null {
+    const container = this.overlay.getContainer();
+    const dimensions = this.overlay.getDimensions();
+
+    if (!container || !dimensions) {
+      return null;
+    }
+
+    return { container, dimensions };
   }
 
   /**
@@ -1017,54 +1091,15 @@ export class Renderer {
    * Build message DOM element by message kind
    */
   private buildMessageElement(message: ChatMessage): BuiltMessage | null {
-    const element = document.createElement('div');
-    element.className = 'yt-chat-overlay-message';
-
-    const isSuperChat = message.kind === 'superchat' && Boolean(message.superChat);
-    const isMembership = message.kind === 'membership';
-
-    if (isSuperChat && message.superChat) {
-      // Super Chat card
-      this.applySuperChatStyling(element, message.superChat);
-
-      const headerElement = this.createSuperChatHeader(
-        message,
-        message.superChat,
-        this.settings.showAuthor.superChat
-      );
-      const contentElement = this.createSuperChatContent(message, message.superChat);
-
-      element.appendChild(headerElement);
-      if (contentElement) {
-        element.appendChild(contentElement);
-      }
-
-      return { element, isSuperChat, isMembership };
+    if (message.kind === 'superchat' && message.superChat) {
+      return this.buildSuperChatElement(message, message.superChat);
     }
 
-    if (isMembership) {
-      // Membership card
-      const membershipCard = this.createMembershipCard(message);
-      element.appendChild(membershipCard);
-      return { element, isSuperChat, isMembership };
+    if (message.kind === 'membership') {
+      return this.buildMembershipElement(message);
     }
 
-    // Regular message
-    const showAuthor = this.shouldShowAuthor(message);
-    if (showAuthor) {
-      element.classList.add('yt-chat-overlay-message-with-author');
-      const authorElement = this.createAuthorElement(message);
-      element.appendChild(authorElement);
-    }
-
-    const contentDiv = this.createMessageTextElement(message);
-    if (!contentDiv) {
-      console.warn('[YT Chat Overlay] Skipping empty message');
-      return null;
-    }
-
-    element.appendChild(contentDiv);
-    return { element, isSuperChat, isMembership };
+    return this.buildRegularMessageElement(message);
   }
 
   /**
@@ -1081,8 +1116,7 @@ export class Renderer {
 
     // Apply author color only for regular messages
     if (!isSuperChat && !isMembership) {
-      const authorType = message.authorType || 'normal';
-      element.style.color = this.settings.colors[authorType];
+      element.style.color = this.settings.colors[this.getAuthorType(message)];
     }
   }
 
@@ -1109,12 +1143,13 @@ export class Renderer {
    * Render a single message
    */
   private renderMessage(message: ChatMessage): RenderResult {
-    const container = this.overlay.getContainer();
-    const dimensions = this.overlay.getDimensions();
-    if (!container || !dimensions) {
+    const renderContext = this.getRenderContext();
+    if (!renderContext) {
       console.warn('[YT Chat Overlay] Cannot render: container or dimensions missing');
       return { status: 'dropped' };
     }
+
+    const { container, dimensions } = renderContext;
 
     const builtMessage = this.buildMessageElement(message);
     if (!builtMessage) {
@@ -1135,10 +1170,9 @@ export class Renderer {
     const placement = this.findLanePlacement(messageHeight);
     if (placement === null) {
       // No available lane, drop message
-      const dimensions = this.overlay.getDimensions();
       console.log(
         `[YT Chat Overlay] No available lane for message (height: ${messageHeight}px). ` +
-          `Active messages: ${this.activeMessages.size}, Lanes: ${dimensions?.laneCount || 'unknown'}, ` +
+          `Active messages: ${this.activeMessages.size}, Lanes: ${dimensions.laneCount}, ` +
           `Queue size: ${this.messageQueue.length}`
       );
       element.remove();
@@ -1165,12 +1199,12 @@ export class Renderer {
     console.log('[YT Chat Overlay] Rendering message:', {
       text: message.text.substring(0, 20),
       author: message.author,
-      authorType: message.authorType || 'normal',
+      authorType: this.getAuthorType(message),
       kind: message.kind,
       isSuperChat,
       superChatTier: message.superChat?.tier,
       superChatAmount: message.superChat?.amount,
-      color: isSuperChat ? 'tier-based' : this.settings.colors[message.authorType || 'normal'],
+      color: isSuperChat ? 'tier-based' : this.settings.colors[this.getAuthorType(message)],
       lane: placement.lane.index,
       laneSpan: placement.laneSpan,
       width: textWidth,
