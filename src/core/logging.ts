@@ -5,7 +5,10 @@ interface StoredSettingsLike {
   debugLogging?: boolean;
 }
 
-const SETTINGS_STORAGE_KEY = 'yt-live-chat-overlay-settings';
+type ConsoleLogArgs = Parameters<Console['log']>;
+
+const STORAGE_KEY = 'yt-live-chat-overlay-settings';
+const DEFAULT_LOG_LEVEL: LogLevel = 'warn';
 
 const LOG_PREFIXES = [
   '[YT Chat Overlay]',
@@ -32,32 +35,38 @@ const VERBOSE_LOG_MARKERS = [
   'resumed',
 ] as const;
 
-const DEFAULT_LOG_LEVEL: LogLevel = 'warn';
-
 let currentLogLevel: LogLevel = DEFAULT_LOG_LEVEL;
 let isConsolePatched = false;
 let originalConsoleLog: Console['log'] | null = null;
 
-const isOverlayLogCall = (args: unknown[]): boolean => {
+const getFirstMessage = (args: readonly unknown[]): string | null => {
   const [first] = args;
-  if (typeof first !== 'string') {
-    return false;
-  }
-
-  return LOG_PREFIXES.some((prefix) => first.startsWith(prefix));
+  return typeof first === 'string' ? first : null;
 };
 
-const isVerboseOverlayLog = (args: unknown[]): boolean => {
-  const [first] = args;
-  if (typeof first !== 'string') {
+const isValidLogLevel = (value: unknown): value is LogLevel =>
+  value === 'warn' || value === 'info' || value === 'debug';
+
+const isOverlayLogCall = (args: readonly unknown[]): boolean => {
+  const firstMessage = getFirstMessage(args);
+  if (!firstMessage) {
     return false;
   }
 
-  const normalized = first.toLowerCase();
+  return LOG_PREFIXES.some((prefix) => firstMessage.startsWith(prefix));
+};
+
+const isVerboseOverlayLog = (args: readonly unknown[]): boolean => {
+  const firstMessage = getFirstMessage(args);
+  if (!firstMessage) {
+    return false;
+  }
+
+  const normalized = firstMessage.toLowerCase();
   return VERBOSE_LOG_MARKERS.some((marker) => normalized.includes(marker));
 };
 
-const shouldAllowOverlayLog = (args: unknown[]): boolean => {
+const shouldAllowOverlayLog = (args: readonly unknown[]): boolean => {
   if (!isOverlayLogCall(args)) {
     return true;
   }
@@ -73,16 +82,39 @@ const shouldAllowOverlayLog = (args: unknown[]): boolean => {
   return false;
 };
 
+const readStoredLogLevel = (): LogLevel => {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (!stored) {
+      return DEFAULT_LOG_LEVEL;
+    }
+
+    const parsed = JSON.parse(stored) as StoredSettingsLike;
+    if (isValidLogLevel(parsed.logLevel)) {
+      return parsed.logLevel;
+    }
+
+    // Legacy compatibility: old boolean true maps to verbose debug.
+    if (parsed.debugLogging) {
+      return 'debug';
+    }
+  } catch {
+    return DEFAULT_LOG_LEVEL;
+  }
+
+  return DEFAULT_LOG_LEVEL;
+};
+
 const patchConsoleLog = (): void => {
   if (isConsolePatched) {
     return;
   }
 
-  originalConsoleLog = console.log.bind(console);
+  originalConsoleLog ??= console.log.bind(console);
 
-  console.log = (...args: unknown[]) => {
+  console.log = (...args: ConsoleLogArgs) => {
     if (shouldAllowOverlayLog(args)) {
-      originalConsoleLog?.(...(args as Parameters<Console['log']>));
+      originalConsoleLog?.(...args);
     }
   };
 
@@ -95,22 +127,5 @@ export const setOverlayLogLevel = (level: LogLevel): void => {
 };
 
 export const initOverlayLogLevel = (): void => {
-  let level: LogLevel = DEFAULT_LOG_LEVEL;
-
-  try {
-    const stored = localStorage.getItem(SETTINGS_STORAGE_KEY);
-    if (stored) {
-      const parsed = JSON.parse(stored) as StoredSettingsLike;
-      if (parsed.logLevel) {
-        level = parsed.logLevel;
-      } else if (parsed.debugLogging) {
-        // Legacy compatibility: old boolean true maps to verbose debug.
-        level = 'debug';
-      }
-    }
-  } catch {
-    level = DEFAULT_LOG_LEVEL;
-  }
-
-  setOverlayLogLevel(level);
+  setOverlayLogLevel(readStoredLogLevel());
 };
