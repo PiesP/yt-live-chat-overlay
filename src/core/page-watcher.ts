@@ -7,18 +7,42 @@
 
 export type PageChangeCallback = () => void;
 
+type HistoryMethodName = 'pushState' | 'replaceState';
+type HistoryStateMethod = typeof history.pushState;
+
+const YT_NAVIGATE_FINISH_EVENT = 'yt-navigate-finish';
+const URL_POLL_INTERVAL_MS = 2000;
+
+const isValidYouTubePageUrl = (url: string): boolean => {
+  try {
+    const { pathname } = new URL(url);
+    return pathname === '/watch' || pathname.startsWith('/live/');
+  } catch {
+    return url.includes('/watch') || url.includes('/live/');
+  }
+};
+
 export class PageWatcher {
-  private currentUrl: string;
-  private callbacks: Set<PageChangeCallback>;
+  private currentUrl = location.href;
+  private callbacks: Set<PageChangeCallback> = new Set();
   private originalPushState: typeof history.pushState | null = null;
   private originalReplaceState: typeof history.replaceState | null = null;
-  private popstateHandler: (() => void) | null = null;
-  private ytNavigateHandler: (() => void) | null = null;
   private intervalId: number | null = null;
 
+  private readonly handleUrlMutation = (): void => {
+    this.checkUrlChange();
+  };
+
+  private readonly handleYouTubeNavigateFinish = (): void => {
+    console.log('[YT Chat Overlay] YouTube navigation finished');
+    // Do NOT force notification here. YouTube fires yt-navigate-finish on the
+    // same URL during initial page setup, which would trigger an unnecessary
+    // cleanup+restart race. URL changes are already detected by the pushState,
+    // replaceState, and popstate listeners.
+    this.checkUrlChange();
+  };
+
   constructor() {
-    this.currentUrl = location.href;
-    this.callbacks = new Set();
     this.init();
   }
 
@@ -26,56 +50,76 @@ export class PageWatcher {
    * Initialize page watcher
    */
   private init(): void {
-    // Monitor History API changes (YouTube uses soft navigation)
-    this.originalPushState = history.pushState;
-    this.originalReplaceState = history.replaceState;
+    this.patchHistoryMethod('pushState');
+    this.patchHistoryMethod('replaceState');
+    this.attachEventListeners();
+    this.startPolling();
+  }
 
-    history.pushState = (...args) => {
-      this.originalPushState!.apply(history, args);
+  private patchHistoryMethod(methodName: HistoryMethodName): void {
+    const originalMethod = history[methodName].bind(history) as HistoryStateMethod;
+
+    if (methodName === 'pushState') {
+      this.originalPushState = history.pushState;
+    } else {
+      this.originalReplaceState = history.replaceState;
+    }
+
+    history[methodName] = ((...args: Parameters<HistoryStateMethod>) => {
+      originalMethod(...args);
       this.checkUrlChange();
-    };
+    }) as HistoryStateMethod;
+  }
 
-    history.replaceState = (...args) => {
-      this.originalReplaceState!.apply(history, args);
-      this.checkUrlChange();
-    };
+  private attachEventListeners(): void {
+    window.addEventListener('popstate', this.handleUrlMutation);
+    window.addEventListener(YT_NAVIGATE_FINISH_EVENT, this.handleYouTubeNavigateFinish);
+  }
 
-    // Also monitor popstate (back/forward buttons)
-    this.popstateHandler = () => {
-      this.checkUrlChange();
-    };
-    window.addEventListener('popstate', this.popstateHandler);
+  private detachEventListeners(): void {
+    window.removeEventListener('popstate', this.handleUrlMutation);
+    window.removeEventListener(YT_NAVIGATE_FINISH_EVENT, this.handleYouTubeNavigateFinish);
+  }
 
-    // Listen to YouTube's custom navigation event (more reliable for SPA navigation)
-    this.ytNavigateHandler = () => {
-      console.log('[YT Chat Overlay] YouTube navigation finished');
-      // Do NOT use forceNotify here. YouTube fires yt-navigate-finish on the
-      // same URL during initial page setup, which would trigger an unnecessary
-      // cleanup+restart race. URL changes are already detected by the pushState
-      // / replaceState patches and the popstate listener.
-      this.checkUrlChange();
-    };
-    window.addEventListener('yt-navigate-finish', this.ytNavigateHandler);
-
-    // Periodic check as fallback (every 2 seconds)
+  private startPolling(): void {
     this.intervalId = window.setInterval(() => {
       this.checkUrlChange();
-    }, 2000);
+    }, URL_POLL_INTERVAL_MS);
+  }
+
+  private stopPolling(): void {
+    if (this.intervalId === null) {
+      return;
+    }
+
+    window.clearInterval(this.intervalId);
+    this.intervalId = null;
+  }
+
+  private restoreHistoryMethods(): void {
+    if (this.originalPushState) {
+      history.pushState = this.originalPushState;
+      this.originalPushState = null;
+    }
+
+    if (this.originalReplaceState) {
+      history.replaceState = this.originalReplaceState;
+      this.originalReplaceState = null;
+    }
   }
 
   /**
    * Check if URL has changed
    */
-  private checkUrlChange(forceNotify = false): void {
+  private checkUrlChange(): void {
     const newUrl = location.href;
-    if (newUrl !== this.currentUrl) {
-      this.currentUrl = newUrl;
-      this.notifyCallbacks();
+
+    if (newUrl === this.currentUrl) {
       return;
     }
-    if (forceNotify) {
-      this.notifyCallbacks();
-    }
+
+    this.currentUrl = newUrl;
+    this.notifyCallbacks();
   }
 
   /**
@@ -109,39 +153,16 @@ export class PageWatcher {
    * Check if current page is a valid target (live/watch page)
    */
   isValidPage(): boolean {
-    const url = this.currentUrl;
-    return url.includes('/watch') || url.includes('/live/');
+    return isValidYouTubePageUrl(location.href);
   }
 
   /**
    * Destroy and cleanup all resources
    */
   destroy(): void {
-    // Clear interval
-    if (this.intervalId !== null) {
-      window.clearInterval(this.intervalId);
-      this.intervalId = null;
-    }
-
-    // Remove event listeners
-    if (this.popstateHandler) {
-      window.removeEventListener('popstate', this.popstateHandler);
-      this.popstateHandler = null;
-    }
-    if (this.ytNavigateHandler) {
-      window.removeEventListener('yt-navigate-finish', this.ytNavigateHandler);
-      this.ytNavigateHandler = null;
-    }
-
-    // Restore original history methods
-    if (this.originalPushState) {
-      history.pushState = this.originalPushState;
-      this.originalPushState = null;
-    }
-    if (this.originalReplaceState) {
-      history.replaceState = this.originalReplaceState;
-      this.originalReplaceState = null;
-    }
+    this.stopPolling();
+    this.detachEventListeners();
+    this.restoreHistoryMethods();
 
     // Clear callbacks
     this.callbacks.clear();
