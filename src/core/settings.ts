@@ -9,6 +9,40 @@ import { DEFAULT_SETTINGS, type OverlaySettings } from '@app-types';
 
 const STORAGE_KEY = 'yt-live-chat-overlay-settings';
 
+interface StoredSettings extends Partial<OverlaySettings> {
+  debugLogging?: boolean;
+}
+
+const cloneSettings = (settings: Readonly<OverlaySettings>): OverlaySettings => ({
+  ...settings,
+  showAuthor: { ...settings.showAuthor },
+  colors: { ...settings.colors },
+  outline: { ...settings.outline },
+});
+
+const mergeSettings = (
+  base: Readonly<OverlaySettings>,
+  partial: Partial<OverlaySettings>
+): OverlaySettings => ({
+  ...base,
+  ...partial,
+  showAuthor: partial.showAuthor
+    ? { ...base.showAuthor, ...partial.showAuthor }
+    : { ...base.showAuthor },
+  colors: partial.colors ? { ...base.colors, ...partial.colors } : { ...base.colors },
+  outline: partial.outline ? { ...base.outline, ...partial.outline } : { ...base.outline },
+});
+
+const normalizeStoredSettings = (stored: StoredSettings): OverlaySettings => {
+  const { debugLogging, ...parsed } = stored;
+  const migratedLogLevel = parsed.logLevel ?? (debugLogging ? 'debug' : undefined);
+
+  return mergeSettings(DEFAULT_SETTINGS, {
+    ...parsed,
+    ...(migratedLogLevel ? { logLevel: migratedLogLevel } : {}),
+  });
+};
+
 export class Settings {
   private settings: OverlaySettings;
 
@@ -23,33 +57,13 @@ export class Settings {
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
       if (stored) {
-        const parsedRaw = JSON.parse(stored) as Partial<OverlaySettings> & {
-          debugLogging?: boolean;
-        };
-        const { debugLogging, ...parsed } = parsedRaw;
-        const migratedLogLevel = parsed.logLevel ?? (debugLogging ? 'debug' : undefined);
-
-        // Merge with defaults to ensure new fields (like colors) are included
-        return {
-          ...DEFAULT_SETTINGS,
-          ...parsed,
-          ...(migratedLogLevel ? { logLevel: migratedLogLevel } : {}),
-          // Deep merge colors to ensure all color fields are present
-          colors: {
-            ...DEFAULT_SETTINGS.colors,
-            ...(parsed.colors || {}),
-          },
-          // Deep merge outline to ensure all fields are present
-          outline: {
-            ...DEFAULT_SETTINGS.outline,
-            ...(parsed.outline || {}),
-          },
-        };
+        return normalizeStoredSettings(JSON.parse(stored) as StoredSettings);
       }
     } catch (error) {
       console.warn('[YT Chat Overlay] Failed to load settings:', error);
     }
-    return { ...DEFAULT_SETTINGS };
+
+    return cloneSettings(DEFAULT_SETTINGS);
   }
 
   /**
@@ -67,23 +81,14 @@ export class Settings {
    * Get current settings
    */
   get(): Readonly<OverlaySettings> {
-    return { ...this.settings };
+    return cloneSettings(this.settings);
   }
 
   /**
    * Update settings
    */
   update(partial: Partial<OverlaySettings>): void {
-    this.settings = {
-      ...this.settings,
-      ...partial,
-      colors: partial.colors
-        ? { ...this.settings.colors, ...partial.colors }
-        : this.settings.colors,
-      outline: partial.outline
-        ? { ...this.settings.outline, ...partial.outline }
-        : this.settings.outline,
-    };
+    this.settings = mergeSettings(this.settings, partial);
     this.saveSettings();
   }
 
@@ -91,7 +96,7 @@ export class Settings {
    * Reset to defaults
    */
   reset(): void {
-    this.settings = { ...DEFAULT_SETTINGS };
+    this.settings = cloneSettings(DEFAULT_SETTINGS);
     this.saveSettings();
   }
 }
