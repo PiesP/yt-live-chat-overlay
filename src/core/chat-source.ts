@@ -77,6 +77,13 @@ const CHAT_TOGGLE_BUTTON_SELECTORS = [
 
 export type MessageCallback = (message: ChatMessage) => void;
 
+type ChatMessageKind = ChatMessage['kind'];
+
+interface ParsedMessageBody {
+  text: string;
+  content: ContentSegment[];
+}
+
 export class ChatSource {
   private observer: MutationObserver | null = null;
   private chatContainer: Element | null = null;
@@ -144,6 +151,47 @@ export class ChatSource {
     return null;
   }
 
+  private findChatIframe(): HTMLIFrameElement | null {
+    const match = findElementMatch<HTMLIFrameElement>(CHAT_IFRAME_SELECTORS);
+    if (!match) {
+      console.log('[YT Chat Overlay] Chat iframe: not found');
+      return null;
+    }
+
+    console.log(`[YT Chat Overlay] Chat iframe found with selector: ${match.selector}`);
+    console.log('[YT Chat Overlay] iframe src:', match.element.src);
+    return match.element;
+  }
+
+  private findChatFrame(): HTMLElement | null {
+    const match = findElementMatch<HTMLElement>(CHAT_FRAME_SELECTORS);
+    return match?.element ?? null;
+  }
+
+  private findChatToggleButton(): HTMLButtonElement | null {
+    const match = findElementMatch<HTMLButtonElement>(CHAT_TOGGLE_BUTTON_SELECTORS, {
+      predicate: (element) => !element.disabled,
+    });
+
+    if (!match) {
+      return null;
+    }
+
+    console.log(`[YT Chat Overlay] Found toggle button with selector: ${match.selector}`);
+    return match.element;
+  }
+
+  private clickChatToggleButton(): boolean {
+    const button = this.findChatToggleButton();
+    if (!button) {
+      return false;
+    }
+
+    button.click();
+    console.log('[YT Chat Overlay] Clicked chat toggle button');
+    return true;
+  }
+
   /**
    * Find chat container
    * Priority A: iframe access (if same-origin)
@@ -157,19 +205,7 @@ export class ChatSource {
     this.debugLogChatElements();
 
     // Try iframe first (multiple selectors)
-    let iframe: HTMLIFrameElement | null = null;
-    for (const selector of CHAT_IFRAME_SELECTORS) {
-      iframe = document.querySelector<HTMLIFrameElement>(selector);
-      if (iframe) {
-        console.log(`[YT Chat Overlay] Chat iframe found with selector: ${selector}`);
-        console.log('[YT Chat Overlay] iframe src:', iframe.src);
-        break;
-      }
-    }
-
-    if (!iframe) {
-      console.log('[YT Chat Overlay] Chat iframe: not found');
-    }
+    const iframe = this.findChatIframe();
 
     if (iframe) {
       try {
@@ -295,11 +331,13 @@ export class ChatSource {
     // Check for iframes
     const allIframes = document.querySelectorAll('iframe');
     console.log(`[YT Chat Overlay] Found ${allIframes.length} total iframes`);
-    allIframes.forEach((iframe, i) => {
+    let i = 0;
+    for (const iframe of allIframes) {
       if (iframe.src.includes('chat')) {
         console.log(`  iframe[${i}] src="${iframe.src}"`);
       }
-    });
+      i++;
+    }
 
     console.log('[YT Chat Overlay] === END DEBUG ===');
   }
@@ -313,14 +351,10 @@ export class ChatSource {
     );
 
     for (let i = 0; i < maxAttempts; i++) {
-      for (const selector of CHAT_FRAME_SELECTORS) {
-        const chatFrame = document.querySelector(selector) as HTMLElement;
-        if (chatFrame) {
-          console.log(
-            `[YT Chat Overlay] Chat frame found on attempt ${i + 1} with selector: ${selector}`
-          );
-          return chatFrame;
-        }
+      const chatFrame = this.findChatFrame();
+      if (chatFrame) {
+        console.log(`[YT Chat Overlay] Chat frame found on attempt ${i + 1}`);
+        return chatFrame;
       }
 
       console.log(`[YT Chat Overlay] Chat frame attempt ${i + 1}: not found yet`);
@@ -361,21 +395,12 @@ export class ChatSource {
   private async tryOpenChatPanelWithoutFrame(): Promise<boolean> {
     console.log('[YT Chat Overlay] Chat frame missing, attempting to open chat panel...');
 
-    for (const selector of CHAT_TOGGLE_BUTTON_SELECTORS) {
-      try {
-        const button = document.querySelector(selector) as HTMLButtonElement;
-        if (button) {
-          console.log(`[YT Chat Overlay] Found toggle button with selector: ${selector}`);
-          button.click();
-          console.log('[YT Chat Overlay] Clicked chat toggle button');
-          return true;
-        }
-      } catch (error) {
-        console.warn(
-          `[YT Chat Overlay] Error clicking toggle button with selector ${selector}:`,
-          error
-        );
+    try {
+      if (this.clickChatToggleButton()) {
+        return true;
       }
+    } catch (error) {
+      console.warn('[YT Chat Overlay] Error clicking chat toggle button:', error);
     }
 
     console.warn('[YT Chat Overlay] Could not find chat toggle button to open panel');
@@ -399,31 +424,19 @@ export class ChatSource {
     console.log('[YT Chat Overlay] Chat panel is collapsed, attempting to open...');
 
     // Try to find and click the chat toggle button
-    for (const selector of CHAT_TOGGLE_BUTTON_SELECTORS) {
-      try {
-        const button = document.querySelector(selector) as HTMLButtonElement;
-        if (button) {
-          console.log(`[YT Chat Overlay] Found toggle button with selector: ${selector}`);
-          button.click();
-          console.log('[YT Chat Overlay] Clicked chat toggle button');
+    try {
+      if (this.clickChatToggleButton()) {
+        // Wait for panel to open
+        await sleep(1000);
 
-          // Wait for panel to open
-          await sleep(1000);
-
-          // Verify panel is now open
-          const isNowOpen = !this.isChatFrameHidden(chatFrame);
-
-          if (isNowOpen) {
-            console.log('[YT Chat Overlay] Successfully opened chat panel');
-            return true;
-          }
+        // Verify panel is now open
+        if (!this.isChatFrameHidden(chatFrame)) {
+          console.log('[YT Chat Overlay] Successfully opened chat panel');
+          return true;
         }
-      } catch (error) {
-        console.warn(
-          `[YT Chat Overlay] Error clicking toggle button with selector ${selector}:`,
-          error
-        );
       }
+    } catch (error) {
+      console.warn('[YT Chat Overlay] Error clicking chat toggle button:', error);
     }
 
     // If no button found or click didn't work, try to remove collapsed attribute directly
@@ -578,59 +591,17 @@ export class ChatSource {
     if (!tagName.startsWith('yt-live-chat-')) return null;
 
     // Determine message kind FIRST so per-kind filtering can follow
-    let kind: ChatMessage['kind'];
-    if (tagName.includes('membership')) {
-      kind = 'membership';
-    } else if (tagName.includes('paid')) {
-      // Super Stickers (image-only) – no readable text, skip
-      if (tagName.includes('sticker')) return null;
-      kind = 'superchat';
-    } else if (tagName.includes('text-message')) {
-      kind = 'text';
-    } else {
-      // viewer-engagement, banner, placeholder, timed-message, purchase-announcement, etc.
-      return null;
-    }
+    const kind = this.getMessageKind(tagName);
+    if (!kind) return null;
 
     // Filter out system messages (elements without an author, e.g. replay notice)
     if (!this.isUserMessage(element)) return null;
 
     try {
-      let text = '';
-      let content: ContentSegment[] = [];
+      const parsedBody = this.extractMessageBody(element, kind);
+      if (!parsedBody) return null;
 
-      if (kind === 'membership') {
-        // Membership items: #message is optional (the member may have typed something).
-        // Always show – even text-less membership items convey a meaningful event.
-        const messageElement = element.querySelector('#message');
-        if (messageElement) {
-          const parsed = this.parseMessageContent(messageElement);
-          text = parsed.text;
-          content = parsed.content;
-        }
-      } else if (kind === 'superchat') {
-        // Super Chats: always show regardless of whether there is a text body.
-        // The purchase itself is the event; text is optional.
-        const messageElement = element.querySelector('#message');
-        if (messageElement) {
-          const parsed = this.parseMessageContent(messageElement);
-          text = parsed.text;
-          content = parsed.content;
-        }
-      } else {
-        // Regular text messages: must have a non-trivial text body.
-        const messageElement = element.querySelector('#message');
-        if (!messageElement) return null;
-
-        const parsed = this.parseMessageContent(messageElement);
-        text = parsed.text;
-        content = parsed.content;
-
-        if (!this.isSubstantialText(text, element))
-          // Drop messages that are too short to be meaningful (e.g. single-char spam like "w").
-          // Exception: privileged authors (mods, owner, members) always pass through.
-          return null;
-      }
+      const { text, content } = parsedBody;
 
       // Extract author information
       const authorType = this.extractAuthorType(element);
@@ -672,6 +643,44 @@ export class ChatSource {
       console.warn('[YT Chat Overlay] Failed to parse message:', error);
       return null;
     }
+  }
+
+  private getMessageKind(tagName: string): ChatMessageKind | null {
+    if (tagName.includes('membership')) {
+      return 'membership';
+    }
+
+    if (tagName.includes('paid')) {
+      // Super Stickers (image-only) – no readable text, skip.
+      if (tagName.includes('sticker')) {
+        return null;
+      }
+
+      return 'superchat';
+    }
+
+    if (tagName.includes('text-message')) {
+      return 'text';
+    }
+
+    // viewer-engagement, banner, placeholder, timed-message, purchase-announcement, etc.
+    return null;
+  }
+
+  private extractMessageBody(element: Element, kind: ChatMessageKind): ParsedMessageBody | null {
+    const messageElement = element.querySelector('#message');
+    if (!messageElement) {
+      return kind === 'text' ? null : { text: '', content: [] };
+    }
+
+    const parsed = this.parseMessageContent(messageElement);
+    if (kind === 'text' && !this.isSubstantialText(parsed.text, element)) {
+      // Drop messages that are too short to be meaningful (e.g. single-char spam like "w").
+      // Exception: privileged authors (mods, owner, members) always pass through.
+      return null;
+    }
+
+    return parsed;
   }
 
   /**
@@ -765,10 +774,7 @@ export class ChatSource {
    * Extract author name
    */
   private extractAuthorName(element: Element): string | undefined {
-    const authorElement = element.querySelector(
-      '#author-name, yt-live-chat-author-chip #author-name'
-    );
-    return authorElement?.textContent?.trim();
+    return this.getTextContent(element, '#author-name, yt-live-chat-author-chip #author-name');
   }
 
   /**
@@ -952,16 +958,19 @@ export class ChatSource {
     };
   }
 
+  private getTextContent(root: ParentNode, selector: string): string | undefined {
+    return root.querySelector(selector)?.textContent?.trim() || undefined;
+  }
+
   /**
    * Parse Super Chat information from element
    */
   private parseSuperChatInfo(element: Element): SuperChatInfo | null {
     try {
       // Extract purchase amount and currency
-      const purchaseAmountElement = element.querySelector(
-        '#purchase-amount, yt-formatted-string#purchase-amount'
-      );
-      const amountText = purchaseAmountElement?.textContent?.trim() || '';
+      const amountText =
+        this.getTextContent(element, '#purchase-amount, yt-formatted-string#purchase-amount') ||
+        '';
 
       if (!amountText) {
         console.warn('[YT Chat Overlay] Super Chat detected but no amount found');
