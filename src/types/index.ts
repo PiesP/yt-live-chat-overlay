@@ -2,40 +2,62 @@
  * Type definitions for YouTube Live Chat Overlay
  */
 
+type TupleValue<T extends readonly unknown[]> = T[number];
+
+const AUTHOR_TYPES = ['normal', 'member', 'moderator', 'owner', 'verified'] as const;
+const LOG_LEVELS = ['warn', 'info', 'debug'] as const;
+const AUTHOR_DISPLAY_KEYS = [...AUTHOR_TYPES, 'superChat'] as const;
+const EMOJI_TYPES = ['standard', 'custom', 'member'] as const;
+const CHAT_MESSAGE_KINDS = ['text', 'superchat', 'membership'] as const;
+const SUPER_CHAT_TIERS = ['blue', 'cyan', 'green', 'yellow', 'orange', 'magenta', 'red'] as const;
+
+type AuthorDisplayKey = TupleValue<typeof AUTHOR_DISPLAY_KEYS>;
+type EmojiType = TupleValue<typeof EMOJI_TYPES>;
+type ChatMessageKind = TupleValue<typeof CHAT_MESSAGE_KINDS>;
+type SuperChatTier = TupleValue<typeof SUPER_CHAT_TIERS>;
+
+type NumericSettingLimit = Readonly<{
+  min: number;
+  max: number;
+  step: number;
+}>;
+
+type SettingsLimitKey =
+  | 'speedPxPerSec'
+  | 'fontSize'
+  | 'opacity'
+  | 'superChatOpacity'
+  | 'safeTop'
+  | 'safeBottom'
+  | 'maxConcurrentMessages'
+  | 'maxMessagesPerSecond'
+  | 'minTextLength'
+  | 'outlineWidthPx'
+  | 'outlineBlurPx'
+  | 'outlineOpacity'
+  | 'laneSpacing';
+
 /**
  * Author type classification
  */
-export type AuthorType = 'normal' | 'member' | 'moderator' | 'owner' | 'verified';
+export type AuthorType = TupleValue<typeof AUTHOR_TYPES>;
 
 /**
  * Console log level for overlay diagnostics
  */
-export type LogLevel = 'warn' | 'info' | 'debug';
+export type LogLevel = TupleValue<typeof LOG_LEVELS>;
 
 /**
  * Author display settings (per author type)
  */
-export interface AuthorDisplaySettings {
-  /** Show author for normal users */
-  normal: boolean;
-  /** Show author for members */
-  member: boolean;
-  /** Show author for moderators */
-  moderator: boolean;
-  /** Show author for channel owner */
-  owner: boolean;
-  /** Show author for verified users */
-  verified: boolean;
-  /** Show author for Super Chats */
-  superChat: boolean;
-}
+export type AuthorDisplaySettings = Record<AuthorDisplayKey, boolean>;
 
 /**
  * Emoji/Emoticon information
  */
 export interface EmojiInfo {
   /** Emoji type classification */
-  type: 'standard' | 'custom' | 'member';
+  type: EmojiType;
   /** Image URL (sanitized, YouTube CDN only) */
   url: string;
   /** Alt text (e.g., ":emoji_name:") */
@@ -51,9 +73,17 @@ export interface EmojiInfo {
 /**
  * Content segment (text or emoji)
  */
-export type ContentSegment =
-  | { type: 'text'; content: string }
-  | { type: 'emoji'; emoji: EmojiInfo };
+export interface TextContentSegment {
+  type: 'text';
+  content: string;
+}
+
+export interface EmojiContentSegment {
+  type: 'emoji';
+  emoji: EmojiInfo;
+}
+
+export type ContentSegment = TextContentSegment | EmojiContentSegment;
 
 /**
  * Super Chat tier information
@@ -64,7 +94,7 @@ export interface SuperChatInfo {
   /** Currency code (e.g., "USD", "JPY", "KRW") */
   currency?: string;
   /** Super Chat color tier (determines prominence) */
-  tier: 'blue' | 'cyan' | 'green' | 'yellow' | 'orange' | 'magenta' | 'red';
+  tier: SuperChatTier;
   /** Background color from YouTube */
   backgroundColor?: string;
   /** Header background color (darker shade) */
@@ -82,7 +112,7 @@ export interface ChatMessage {
   /** Rich content segments (text + emoji) - for rendering mixed content */
   content?: ContentSegment[];
   /** Message type */
-  kind: 'text' | 'superchat' | 'membership';
+  kind: ChatMessageKind;
   /** Timestamp when the message was detected */
   timestamp: number;
   /** Author display name (optional, for future use) */
@@ -98,18 +128,7 @@ export interface ChatMessage {
 /**
  * Color settings for different author types
  */
-export interface ColorSettings {
-  /** Normal user color */
-  normal: string;
-  /** Member (membership subscriber) color */
-  member: string;
-  /** Moderator color */
-  moderator: string;
-  /** Channel owner color */
-  owner: string;
-  /** Verified user color */
-  verified: string;
-}
+export type ColorSettings = Record<AuthorType, string>;
 
 /**
  * Outline settings for message text
@@ -189,6 +208,30 @@ export interface OverlayDimensions {
   laneCount: number;
 }
 
+const DEFAULT_SHOW_AUTHOR: AuthorDisplaySettings = {
+  normal: false,
+  member: false,
+  moderator: true,
+  owner: true,
+  verified: false,
+  superChat: true,
+};
+
+const DEFAULT_COLORS: ColorSettings = {
+  normal: '#FFFFFF',
+  member: '#0F9D58',
+  moderator: '#5E84F1',
+  owner: '#FFD600',
+  verified: '#AAAAAA',
+};
+
+const DEFAULT_OUTLINE: OutlineSettings = {
+  enabled: true,
+  widthPx: 1.5,
+  blurPx: 2,
+  opacity: 0.7,
+};
+
 /**
  * Shared setting bounds used by UI and runtime clamping.
  */
@@ -206,12 +249,12 @@ export const SETTINGS_LIMITS = {
   outlineBlurPx: { min: 0, max: 8, step: 0.5 },
   outlineOpacity: { min: 0, max: 1, step: 0.1 },
   laneSpacing: { min: 0, max: 20, step: 1 },
-} as const;
+} as const satisfies Record<SettingsLimitKey, NumericSettingLimit>;
 
 /**
  * Default settings
  */
-export const DEFAULT_SETTINGS: Readonly<OverlaySettings> = {
+export const DEFAULT_SETTINGS = {
   enabled: true,
   /**
    * Faster scrolling = messages leave the screen sooner, reducing visual clutter.
@@ -247,33 +290,12 @@ export const DEFAULT_SETTINGS: Readonly<OverlaySettings> = {
   minTextLength: 3,
   /** Default to warnings/errors only for a clean console. */
   logLevel: 'warn',
-  showAuthor: {
-    /** Hide author names for regular users – reduces visual noise. */
-    normal: false,
-    /** Hide member names by default – membership badge already signals this. */
-    member: false,
-    /** Always show moderator names so viewers can identify them. */
-    moderator: true,
-    /** Always show channel owner name. */
-    owner: true,
-    /** Verified users look like normal users visually – hide by default. */
-    verified: false,
-    /** Super Chat author is essential context for the purchase. */
-    superChat: true,
-  },
-  colors: {
-    normal: '#FFFFFF', // White – neutral and readable on any background
-    member: '#0F9D58', // Green – matches YouTube's membership colour
-    moderator: '#5E84F1', // Blue – matches YouTube's moderator badge colour
-    owner: '#FFD600', // Gold – clearly signals the channel owner
-    verified: '#AAAAAA', // Grey – de-emphasised; treated like a normal viewer
-  },
-  outline: {
-    enabled: true,
-    widthPx: 1.5,
-    blurPx: 2,
-    opacity: 0.7,
-  },
+  /** Keep author labels selective to reduce visual noise by default. */
+  showAuthor: DEFAULT_SHOW_AUTHOR,
+  /** Author colors mirror familiar YouTube semantics for quick recognition. */
+  colors: DEFAULT_COLORS,
+  /** Light outline preserves readability on bright video frames. */
+  outline: DEFAULT_OUTLINE,
   /** No extra vertical gap by default – preserves existing compact layout. */
   laneSpacing: 0,
-};
+} as const satisfies Readonly<OverlaySettings>;
