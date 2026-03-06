@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.0] - 2026-03-06
+
+### Added
+- **레인 간격 설정 추가**
+  - `laneSpacing` 옵션을 도입해 메시지 레인 간 세로 간격을 조절할 수 있도록 개선
+  - 설정 UI에서 레인 간격을 직접 조정할 수 있도록 입력 항목과 범위 제한을 추가
+
+### Changed
+- **코어 전반 리팩토링으로 일관성 및 유지보수성 향상**
+  - `chat-source`, `overlay`, `page-watcher`, `renderer`, `settings`, `settings-ui`, `video-sync`, `main`의 책임 분리를 강화하고 중복 로직을 헬퍼/상수 중심으로 정리
+  - 앱 초기화·재시작·cleanup 플로우를 표준화하여 SPA 이동과 비동기 재초기화 시나리오를 더 안정적으로 처리
+  - `types/index.ts`, `globals.d.ts`를 정리해 공용 타입, 기본 설정, 디버그 핸들 계약을 더 명확하게 표현
+- **빌드/배포 메타데이터 생성 개선**
+  - `tooling/userscript-header.ts`를 상수·포맷 헬퍼 기반으로 재구성해 userscript 헤더 생성 로직을 간결하게 정리
+
+### Fixed
+- **이미지/DOM/상태 관리 안정성 개선**
+  - 이미지 URL 허용 호스트 검증을 강화해 프로필/이모지/스티커 처리 경로를 더 안전하게 정리
+  - 비디오 재획득, overlay 재생성, 설정 병합, 요소 대기 로직의 타입/상태 처리 일관성을 개선
+  - 기존 인스턴스 정리 및 전역 디버그 핸들 초기화 흐름을 보강해 재주입/재시작 시 충돌 가능성을 축소
+
+### Tooling
+- 품질 게이트(`pnpm quality`) 기준에 맞춰 타입/포맷/미사용 코드 정리를 수행하고 전체 워크스페이스 검증을 통과
+
 ## [0.5.1] - 2026-03-05
 
 ### Fixed
