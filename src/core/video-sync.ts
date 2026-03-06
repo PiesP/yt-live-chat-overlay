@@ -30,7 +30,7 @@ const VIDEO_SELECTORS = [
 /**
  * Player container selectors for MutationObserver
  */
-const PLAYER_CONTAINER_SELECTORS = '#movie_player, .html5-video-player';
+const PLAYER_CONTAINER_SELECTORS = ['#movie_player', '.html5-video-player'] as const;
 
 /**
  * Configuration constants
@@ -48,6 +48,9 @@ const CONFIG = {
   MIN_READY_STATE: 2,
 } as const;
 
+const isVideoReady = (video: HTMLVideoElement): boolean =>
+  video.readyState >= CONFIG.MIN_READY_STATE && video.videoWidth > 0;
+
 /**
  * VideoSync class
  *
@@ -60,6 +63,7 @@ export class VideoSync {
   private initialized = false;
   private detectInterval: number | null = null;
   private mutationObserver: MutationObserver | null = null;
+  private reinitializeTimer: number | null = null;
   private boundHandlers = {
     pause: () => this.handlePause(),
     play: () => this.handlePlay(),
@@ -89,6 +93,14 @@ export class VideoSync {
     return true;
   }
 
+  private findAvailableVideoElement(): HTMLVideoElement | null {
+    return (
+      findElementMatch<HTMLVideoElement>(VIDEO_SELECTORS, {
+        predicate: isVideoReady,
+      })?.element ?? null
+    );
+  }
+
   /**
    * Detect video element in player container
    * Retries multiple times to handle slow page loads
@@ -97,7 +109,7 @@ export class VideoSync {
     const match = await waitForElementMatch<HTMLVideoElement>(VIDEO_SELECTORS, {
       attempts: CONFIG.DETECTION_ATTEMPTS,
       intervalMs: CONFIG.DETECTION_INTERVAL_MS,
-      predicate: this.isVideoReady,
+      predicate: isVideoReady,
     });
 
     if (match) {
@@ -108,29 +120,45 @@ export class VideoSync {
     return null;
   }
 
-  /**
-   * Check if video element is ready for use
-   */
-  private isVideoReady(video: HTMLVideoElement): boolean {
-    return video.readyState >= CONFIG.MIN_READY_STATE && video.videoWidth > 0;
+  private findPlayerContainer(): HTMLElement | null {
+    return findElementMatch<HTMLElement>(PLAYER_CONTAINER_SELECTORS)?.element ?? null;
+  }
+
+  private syncInitialPlaybackState(video: HTMLVideoElement): void {
+    this.callbacks.onRateChange?.(video.playbackRate || 1.0);
+
+    if (video.paused) {
+      this.callbacks.onPause?.();
+      return;
+    }
+
+    this.callbacks.onPlay?.();
+  }
+
+  private clearReinitializationTimer(): void {
+    if (this.reinitializeTimer !== null) {
+      window.clearTimeout(this.reinitializeTimer);
+      this.reinitializeTimer = null;
+    }
+  }
+
+  private resetVideoState(): void {
+    this.detachListeners();
+    this.stopObservingReplacement();
+    this.videoElement = null;
+    this.initialized = false;
   }
 
   /**
    * Setup video element with listeners and observers
    */
   private setupVideoElement(video: HTMLVideoElement): void {
+    this.resetVideoState();
     this.videoElement = video;
     this.attachListeners();
     this.observeVideoReplacement();
     this.initialized = true;
-
-    // Sync initial playback state immediately (covers already-paused videos)
-    this.callbacks.onRateChange?.(video.playbackRate || 1.0);
-    if (video.paused) {
-      this.callbacks.onPause?.();
-    } else {
-      this.callbacks.onPlay?.();
-    }
+    this.syncInitialPlaybackState(video);
   }
 
   /**
@@ -146,14 +174,12 @@ export class VideoSync {
         return;
       }
 
-      const match = findElementMatch<HTMLVideoElement>(VIDEO_SELECTORS, {
-        predicate: this.isVideoReady,
-      });
+      const video = this.findAvailableVideoElement();
 
-      if (match) {
-        this.setupVideoElement(match.element);
+      if (video) {
+        this.setupVideoElement(video);
         this.stopPeriodicDetection();
-        console.log('[VideoSync] Video element detected via periodic check:', match.selector);
+        console.log('[VideoSync] Video element detected via periodic check');
       }
     }, CONFIG.PERIODIC_DETECTION_INTERVAL_MS);
 
@@ -206,7 +232,7 @@ export class VideoSync {
   private observeVideoReplacement(): void {
     if (!this.videoElement) return;
 
-    const playerContainer = document.querySelector(PLAYER_CONTAINER_SELECTORS);
+    const playerContainer = this.findPlayerContainer();
     if (!playerContainer) {
       console.warn('[VideoSync] Player container not found, cannot observe video replacement');
       return;
@@ -243,24 +269,16 @@ export class VideoSync {
    * Called when video element is removed from DOM
    */
   private handleVideoReplacement(): void {
-    this.cleanup();
+    this.resetVideoState();
+    this.clearReinitializationTimer();
 
-    setTimeout(() => {
+    this.reinitializeTimer = window.setTimeout(() => {
+      this.reinitializeTimer = null;
       console.log('[VideoSync] Attempting to reacquire video element...');
       this.init().catch((error) => {
         console.warn('[VideoSync] Failed to reinitialize after video replacement:', error);
       });
     }, CONFIG.REINITIALIZATION_DELAY_MS);
-  }
-
-  /**
-   * Clean up video element state
-   */
-  private cleanup(): void {
-    this.detachListeners();
-    this.stopObservingReplacement();
-    this.videoElement = null;
-    this.initialized = false;
   }
 
   /**
@@ -319,7 +337,8 @@ export class VideoSync {
    */
   destroy(): void {
     this.stopPeriodicDetection();
-    this.cleanup();
+    this.clearReinitializationTimer();
+    this.resetVideoState();
     console.log('[VideoSync] Destroyed');
   }
 }

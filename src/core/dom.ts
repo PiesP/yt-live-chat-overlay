@@ -57,9 +57,10 @@ export const waitForElementMatch = async <T extends Element>(
   options: WaitForElementMatchOptions<T> = {}
 ): Promise<SelectorMatch<T> | null> => {
   const { attempts, intervalMs, root, predicate } = normalizeWaitOptions(options);
+  const matchOptions = predicate ? { root, predicate } : { root };
 
   for (let attempt = 0; attempt < attempts; attempt++) {
-    const match = findElementMatch<T>(selectors, { root, predicate });
+    const match = findElementMatch<T>(selectors, matchOptions);
     if (match) return match;
 
     if (attempt === attempts - 1) {
