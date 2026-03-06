@@ -8,12 +8,48 @@
 import type { OverlayDimensions, OverlaySettings } from '@app-types';
 import { isVisibleElement, PLAYER_CONTAINER_SELECTORS, waitForElementMatch } from '@core/dom';
 
+const OVERLAY_ID = 'yt-live-chat-overlay';
+const PLAYER_LOOKUP_ATTEMPTS = 5;
+const PLAYER_LOOKUP_INTERVAL_MS = 1000;
+const FULLSCREEN_UPDATE_DELAY_MS = 100;
+const BASE_LANE_HEIGHT_MULTIPLIER = 1.3;
+const OVERLAY_Z_INDEX = '100';
+
+const calculateOverlayDimensions = (
+  playerElement: HTMLElement,
+  settings: OverlaySettings
+): OverlayDimensions | null => {
+  const width = playerElement.offsetWidth;
+  const height = playerElement.offsetHeight;
+
+  if (width === 0 || height === 0) {
+    return null;
+  }
+
+  // Base lane height for dynamic allocation
+  // Single-line messages (without author) will use 1 lane (~1.3x fontSize)
+  // Two-line messages (with author info) will use 2+ lanes dynamically
+  // This allows more efficient space utilization - approximately 2x more lanes available
+  // The renderer will dynamically allocate multiple lanes based on actual message height
+  const laneHeight = settings.fontSize * BASE_LANE_HEIGHT_MULTIPLIER + settings.laneSpacing;
+  const usableHeight = height * (1 - settings.safeTop - settings.safeBottom);
+  const laneCount = Math.max(1, Math.floor(usableHeight / laneHeight));
+
+  return {
+    width,
+    height,
+    laneHeight,
+    laneCount,
+  };
+};
+
 export class Overlay {
   private container: HTMLDivElement | null = null;
   private playerElement: HTMLElement | null = null;
   private resizeObserver: ResizeObserver | null = null;
   private dimensions: OverlayDimensions | null = null;
   private fullscreenHandler: (() => void) | null = null;
+  private fullscreenUpdateTimer: number | null = null;
 
   /**
    * Find player container
@@ -22,8 +58,8 @@ export class Overlay {
     console.log('[YT Chat Overlay] Looking for player container...');
 
     const match = await waitForElementMatch<HTMLElement>(PLAYER_CONTAINER_SELECTORS, {
-      attempts: 5,
-      intervalMs: 1000,
+      attempts: PLAYER_LOOKUP_ATTEMPTS,
+      intervalMs: PLAYER_LOOKUP_INTERVAL_MS,
       predicate: isVisibleElement,
     });
 
@@ -39,6 +75,83 @@ export class Overlay {
     return match.element;
   }
 
+  private ensurePlayerPositioning(playerElement: HTMLElement): void {
+    if (window.getComputedStyle(playerElement).position === 'static') {
+      playerElement.style.position = 'relative';
+    }
+  }
+
+  private createContainerElement(): HTMLDivElement {
+    const container = document.createElement('div');
+    container.id = OVERLAY_ID;
+    container.style.position = 'absolute';
+    container.style.inset = '0';
+    container.style.pointerEvents = 'none';
+    container.style.overflow = 'hidden';
+    container.style.zIndex = OVERLAY_Z_INDEX;
+    container.style.contain = 'layout style paint';
+    return container;
+  }
+
+  private updateDimensions(settings: OverlaySettings): void {
+    if (!this.playerElement || !this.container) {
+      this.dimensions = null;
+      return;
+    }
+
+    this.dimensions = calculateOverlayDimensions(this.playerElement, settings);
+  }
+
+  private clearFullscreenUpdateTimer(): void {
+    if (this.fullscreenUpdateTimer !== null) {
+      window.clearTimeout(this.fullscreenUpdateTimer);
+      this.fullscreenUpdateTimer = null;
+    }
+  }
+
+  private observeResize(settings: OverlaySettings): void {
+    if (!this.playerElement) {
+      return;
+    }
+
+    this.resizeObserver = new ResizeObserver(() => {
+      this.updateDimensions(settings);
+    });
+    this.resizeObserver.observe(this.playerElement);
+  }
+
+  private observeFullscreen(settings: OverlaySettings): void {
+    this.fullscreenHandler = () => {
+      this.clearFullscreenUpdateTimer();
+      this.fullscreenUpdateTimer = window.setTimeout(() => {
+        this.fullscreenUpdateTimer = null;
+        this.updateDimensions(settings);
+      }, FULLSCREEN_UPDATE_DELAY_MS);
+    };
+
+    document.addEventListener('fullscreenchange', this.fullscreenHandler);
+  }
+
+  private disconnectResizeObserver(): void {
+    if (!this.resizeObserver) {
+      return;
+    }
+
+    this.resizeObserver.disconnect();
+    this.resizeObserver = null;
+  }
+
+  private detachFullscreenHandler(): void {
+    this.clearFullscreenUpdateTimer();
+
+    if (!this.fullscreenHandler) {
+      return;
+    }
+
+    document.removeEventListener('fullscreenchange', this.fullscreenHandler);
+    this.fullscreenHandler = null;
+  }
+
   /**
    * Create overlay container
    */
@@ -51,65 +164,19 @@ export class Overlay {
     }
 
     // Create overlay container
-    this.container = document.createElement('div');
-    this.container.id = 'yt-live-chat-overlay';
-    this.container.style.cssText = `
-      position: absolute;
-      inset: 0;
-      pointer-events: none;
-      overflow: hidden;
-      z-index: 100;
-      contain: layout style paint;
-    `;
+    this.container = this.createContainerElement();
 
     // Insert into player
-    this.playerElement.style.position = 'relative';
+    this.ensurePlayerPositioning(this.playerElement);
     this.playerElement.appendChild(this.container);
 
-    // Setup resize observer
-    this.resizeObserver = new ResizeObserver(() => {
-      this.updateDimensions(settings);
-    });
-    this.resizeObserver.observe(this.playerElement);
-
-    // Monitor fullscreen changes
-    this.fullscreenHandler = () => {
-      setTimeout(() => this.updateDimensions(settings), 100);
-    };
-    document.addEventListener('fullscreenchange', this.fullscreenHandler);
+    this.observeResize(settings);
+    this.observeFullscreen(settings);
 
     this.updateDimensions(settings);
 
     console.log('[YT Chat Overlay] Overlay created');
     return true;
-  }
-
-  /**
-   * Update overlay dimensions
-   */
-  private updateDimensions(settings: OverlaySettings): void {
-    if (!this.container || !this.playerElement) return;
-
-    const width = this.playerElement.offsetWidth;
-    const height = this.playerElement.offsetHeight;
-
-    if (width === 0 || height === 0) return;
-
-    // Base lane height for dynamic allocation
-    // Single-line messages (without author) will use 1 lane (~1.3x fontSize)
-    // Two-line messages (with author info) will use 2+ lanes dynamically
-    // This allows more efficient space utilization - approximately 2x more lanes available
-    // The renderer will dynamically allocate multiple lanes based on actual message height
-    const baseLaneHeight = settings.fontSize * 1.3 + settings.laneSpacing;
-    const usableHeight = height * (1 - settings.safeTop - settings.safeBottom);
-    const laneCount = Math.floor(usableHeight / baseLaneHeight);
-
-    this.dimensions = {
-      width,
-      height,
-      laneHeight: baseLaneHeight,
-      laneCount: Math.max(1, laneCount),
-    };
   }
 
   /**
@@ -130,17 +197,8 @@ export class Overlay {
    * Destroy and cleanup all resources
    */
   destroy(): void {
-    // Disconnect observers
-    if (this.resizeObserver) {
-      this.resizeObserver.disconnect();
-      this.resizeObserver = null;
-    }
-
-    // Remove event listeners
-    if (this.fullscreenHandler) {
-      document.removeEventListener('fullscreenchange', this.fullscreenHandler);
-      this.fullscreenHandler = null;
-    }
+    this.disconnectResizeObserver();
+    this.detachFullscreenHandler();
 
     // Remove DOM elements
     this.container?.remove();
