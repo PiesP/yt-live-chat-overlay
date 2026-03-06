@@ -11,10 +11,7 @@ const isAllowedHostname = (hostname: string): boolean => {
   const normalizedHostname = hostname.toLowerCase();
 
   for (const allowedHost of ALLOWED_IMAGE_HOSTS) {
-    if (
-      normalizedHostname === allowedHost ||
-      normalizedHostname.endsWith(`.${allowedHost}`)
-    ) {
+    if (normalizedHostname === allowedHost || normalizedHostname.endsWith(`.${allowedHost}`)) {
       return true;
     }
   }

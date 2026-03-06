@@ -1,13 +1,27 @@
+import type { OverlaySettings } from '@app-types';
+
 /**
  * Global type definitions for build constants and window extensions
  */
 
-declare const __DEV__: boolean;
-declare const __VERSION__: string;
-declare const __BUILD_TIME__: string;
+interface YtChatOverlayDebugHandle {
+  start(): Promise<void>;
+  stop(): void;
+  getSettings(): Readonly<OverlaySettings>;
+  updateSettings(partial: Partial<OverlaySettings>): void;
+  resetSettings(): void;
+}
 
-// Augment the global Window interface so debugger access is typed
-interface Window {
-  /** Debug handle exposed by the overlay script (available in DevTools) */
-  __ytChatOverlay?: unknown;
+declare global {
+  /** Build-time development flag injected by Vite. */
+  const __DEV__: boolean;
+  /** Semantic version string injected at build time. */
+  const __VERSION__: string;
+  /** Build timestamp injected at build time. */
+  const __BUILD_TIME__: string;
+
+  interface Window {
+    /** Debug handle exposed by the overlay script (available in DevTools). */
+    __ytChatOverlay: YtChatOverlayDebugHandle | undefined;
+  }
 }

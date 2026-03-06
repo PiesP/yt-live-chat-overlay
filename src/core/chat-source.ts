@@ -969,8 +969,7 @@ export class ChatSource {
     try {
       // Extract purchase amount and currency
       const amountText =
-        this.getTextContent(element, '#purchase-amount, yt-formatted-string#purchase-amount') ||
-        '';
+        this.getTextContent(element, '#purchase-amount, yt-formatted-string#purchase-amount') || '';
 
       if (!amountText) {
         console.warn('[YT Chat Overlay] Super Chat detected but no amount found');

@@ -431,7 +431,7 @@ async function initApp(): Promise<void> {
     // and event listeners are fully removed.
     if (window.__ytChatOverlay) {
       console.log('[YT Chat Overlay] Stopping previous instance before re-init');
-      (window.__ytChatOverlay as App).stop();
+      window.__ytChatOverlay.stop();
       window.__ytChatOverlay = undefined;
     }
 

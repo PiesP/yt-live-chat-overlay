@@ -19,11 +19,11 @@ import { isAllowedYouTubeImageUrl } from '@core/image-url';
 import {
   borderRadius,
   colors,
+  type RgbColor,
   rgba,
   shadows,
   spacing,
   typography,
-  type RgbColor,
 } from './design-tokens.js';
 import type { Overlay } from './overlay';
 
