@@ -16,17 +16,28 @@ import { Settings } from '@core/settings';
 import { SettingsUi } from '@core/settings-ui';
 import { VideoSync } from '@core/video-sync';
 
+const RESTART_DEBOUNCE_MS = 500;
+const NAVIGATION_SETTLE_DELAY_MS = 2000;
+const RESTART_RETRY_DELAY_MS = 2000;
+const MAX_RESTART_ATTEMPTS = 3;
+const APP_INIT_DELAY_MS = 500;
+const OVERLAY_SELECTOR = '#yt-live-chat-overlay';
+
+interface StartGuard {
+  isCancelled(): boolean;
+}
+
 /**
  * Application state
  */
 class App {
-  private pageWatcher: PageWatcher;
-  private settings: Settings;
+  private readonly pageWatcher: PageWatcher;
+  private readonly settings: Settings;
   private chatSource: ChatSource | null = null;
   private overlay: Overlay | null = null;
   private _renderer: Renderer | null = null;
   private videoSync: VideoSync | null = null;
-  private settingsUi: SettingsUi;
+  private readonly settingsUi: SettingsUi;
   private isInitialized = false;
   private restartTimer: number | null = null;
   private restartInProgress = false;
@@ -38,6 +49,22 @@ class App {
    * from corrupting state after cleanup has been called.
    */
   private startGeneration = 0;
+  private readonly handlePageWatcherChange = (): void => {
+    this.handlePageChange();
+  };
+  private readonly handleVideoPause = (): void => {
+    this._renderer?.pause();
+  };
+  private readonly handleVideoPlay = (): void => {
+    this._renderer?.resume();
+  };
+  private readonly handleVideoSeeking = (): void => {
+    // Optional: no action needed for now
+  };
+  private readonly handleVideoRateChange = (rate: number): void => {
+    console.log('[App] Video playback rate changed:', rate);
+    this._renderer?.setPlaybackRate(rate);
+  };
 
   constructor() {
     this.pageWatcher = new PageWatcher();
@@ -50,95 +77,59 @@ class App {
 
     setOverlayLogLevel(this.settings.get().logLevel);
 
-    // Register page change handler
-    this.pageWatcher.onChange(() => {
-      this.handlePageChange();
-    });
+    this.pageWatcher.onChange(this.handlePageWatcherChange);
 
     console.log('[App] Initialized');
+  }
+
+  private createStartGuard(): StartGuard {
+    const generation = this.startGeneration;
+
+    return {
+      isCancelled: () => this.startGeneration !== generation,
+    };
   }
 
   /**
    * Start application
    */
   async start(): Promise<void> {
-    // Capture current generation. If cleanup() is called while we are awaiting,
-    // startGeneration will be incremented and we will bail out early.
-    const myGeneration = this.startGeneration;
-    const isCancelled = (): boolean => this.startGeneration !== myGeneration;
+    const guard = this.createStartGuard();
 
-    // Check if we're on a valid page
     if (!this.pageWatcher.isValidPage()) {
       console.log('[App] Not on a video page, waiting...');
       return;
     }
 
     await this.ensureSettingsUi();
-    if (isCancelled()) return;
+    if (guard.isCancelled()) return;
 
-    // Check if already initialized
     if (this.isInitialized) {
       console.log('[App] Already initialized');
       return;
     }
 
-    // Check if enabled
     const currentSettings = this.settings.get();
     if (!currentSettings.enabled) {
       console.log('[App] Overlay is disabled');
       return;
     }
 
-    // Initialize components
     try {
-      // Create overlay
-      this.overlay = new Overlay();
-      const overlayCreated = await this.overlay.create(currentSettings);
-      if (isCancelled()) return;
+      const overlayCreated = await this.createOverlayRuntime(currentSettings);
+      if (guard.isCancelled()) return;
       if (!overlayCreated) {
         console.warn('[App] Failed to create overlay');
         this.cleanup();
         return;
       }
 
-      // Create renderer
-      this._renderer = new Renderer(this.overlay, currentSettings);
-
-      // Initialize video sync
-      this.videoSync = new VideoSync({
-        onPause: () => {
-          if (this._renderer) {
-            this._renderer.pause();
-          }
-        },
-        onPlay: () => {
-          if (this._renderer) {
-            this._renderer.resume();
-          }
-        },
-        onSeeking: () => {
-          // Optional: no action needed for now
-        },
-        onRateChange: (rate) => {
-          console.log('[App] Video playback rate changed:', rate);
-          if (this._renderer) {
-            this._renderer.setPlaybackRate(rate);
-          }
-        },
-      });
-
-      // Try to initialize (non-blocking)
+      this.videoSync = this.createVideoSync();
       await this.videoSync.init();
-      if (isCancelled()) return;
+      if (guard.isCancelled()) return;
 
-      // Start chat source
-      this.chatSource = new ChatSource(() => this.settings.get());
-      const chatStarted = await this.chatSource.start((message) => {
-        if (this._renderer) {
-          this._renderer.addMessage(message);
-        }
-      });
-      if (isCancelled()) return;
+      const chatStarted = await this.startChatSource();
+      if (guard.isCancelled()) return;
 
       if (!chatStarted) {
         console.warn('[App] Failed to start chat monitoring');
@@ -155,6 +146,59 @@ class App {
     }
   }
 
+  private async createOverlayRuntime(settings: OverlaySettings): Promise<boolean> {
+    const overlay = new Overlay();
+    const created = await overlay.create(settings);
+
+    if (!created) {
+      overlay.destroy();
+      return false;
+    }
+
+    this.overlay = overlay;
+    this._renderer = new Renderer(overlay, settings);
+    return true;
+  }
+
+  private createVideoSync(): VideoSync {
+    return new VideoSync({
+      onPause: this.handleVideoPause,
+      onPlay: this.handleVideoPlay,
+      onSeeking: this.handleVideoSeeking,
+      onRateChange: this.handleVideoRateChange,
+    });
+  }
+
+  private async startChatSource(): Promise<boolean> {
+    const chatSource = new ChatSource(() => this.settings.get());
+    const started = await chatSource.start((message) => {
+      this._renderer?.addMessage(message);
+    });
+
+    if (!started) {
+      chatSource.stop();
+      return false;
+    }
+
+    this.chatSource = chatSource;
+    return true;
+  }
+
+  private clearRestartTimer(): void {
+    if (this.restartTimer !== null) {
+      window.clearTimeout(this.restartTimer);
+      this.restartTimer = null;
+    }
+  }
+
+  private queueRestart(): void {
+    this.clearRestartTimer();
+    this.restartTimer = window.setTimeout(() => {
+      this.restartTimer = null;
+      void this.restartAfterNavigation();
+    }, RESTART_DEBOUNCE_MS);
+  }
+
   /**
    * Handle page change (SPA navigation)
    */
@@ -164,14 +208,53 @@ class App {
       return;
     }
 
-    if (this.restartTimer !== null) {
-      window.clearTimeout(this.restartTimer);
+    this.queueRestart();
+  }
+
+  private shouldSkipRestart(currentUrl: string): boolean {
+    if (this.isInitialized && this.lastStartedUrl === currentUrl) {
+      console.log('[App] Navigation event on same URL, skipping restart');
+      return true;
     }
 
-    this.restartTimer = window.setTimeout(() => {
-      this.restartTimer = null;
-      void this.restartAfterNavigation();
-    }, 500);
+    return false;
+  }
+
+  private canRestartAfterNavigation(): boolean {
+    if (!this.pageWatcher.isValidPage()) {
+      console.log('[App] Not on a valid page after navigation');
+      return false;
+    }
+
+    if (!this.settings.get().enabled) {
+      console.log('[App] Overlay is disabled, not restarting');
+      return false;
+    }
+
+    return true;
+  }
+
+  private async attemptRestart(): Promise<boolean> {
+    for (let attempt = 1; attempt <= MAX_RESTART_ATTEMPTS; attempt++) {
+      console.log(`[App] Restart attempt ${attempt}/${MAX_RESTART_ATTEMPTS}`);
+
+      try {
+        await this.start();
+
+        if (this.isInitialized) {
+          console.log('[App] Successfully restarted after navigation');
+          return true;
+        }
+      } catch (error) {
+        console.warn(`[App] Restart attempt ${attempt} failed:`, error);
+      }
+
+      if (attempt < MAX_RESTART_ATTEMPTS) {
+        await sleep(RESTART_RETRY_DELAY_MS);
+      }
+    }
+
+    return false;
   }
 
   /**
@@ -188,56 +271,21 @@ class App {
 
     try {
       const currentUrl = location.href;
-      if (this.isInitialized && this.lastStartedUrl === currentUrl) {
-        console.log('[App] Navigation event on same URL, skipping restart');
+      if (this.shouldSkipRestart(currentUrl)) {
         return;
       }
 
       console.log('[App] Page changed, restarting...');
-
-      // Cleanup existing instances thoroughly
       this.cleanup();
+      await sleep(NAVIGATION_SETTLE_DELAY_MS);
 
-      // Wait longer for YouTube's SPA navigation to complete
-      // YouTube needs time to load the new page structure
-      await sleep(2000);
-
-      // Check if we're still on a valid page after delay
-      if (!this.pageWatcher.isValidPage()) {
-        console.log('[App] Not on a valid page after navigation');
+      if (!this.canRestartAfterNavigation()) {
         return;
       }
 
-      // Check if enabled before trying to restart
-      if (!this.settings.get().enabled) {
-        console.log('[App] Overlay is disabled, not restarting');
-        return;
+      if (!(await this.attemptRestart())) {
+        console.warn('[App] Failed to restart after all retry attempts');
       }
-
-      // Try to restart with retry logic
-      const maxRetries = 3;
-      for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        console.log(`[App] Restart attempt ${attempt}/${maxRetries}`);
-
-        try {
-          await this.start();
-
-          // If successful, break out of retry loop
-          if (this.isInitialized) {
-            console.log('[App] Successfully restarted after navigation');
-            return;
-          }
-        } catch (error) {
-          console.warn(`[App] Restart attempt ${attempt} failed:`, error);
-        }
-
-        // Wait before next retry
-        if (attempt < maxRetries) {
-          await sleep(2000);
-        }
-      }
-
-      console.warn('[App] Failed to restart after all retry attempts');
     } catch (error) {
       console.warn('[App] Restart error:', error);
     } finally {
@@ -260,60 +308,92 @@ class App {
    * Update settings (for console access)
    */
   updateSettings(partial: Partial<OverlaySettings>): void {
-    const wasEnabled = this.settings.get().enabled;
+    const previousSettings = this.settings.get();
+    const wasEnabled = previousSettings.enabled;
     this.settings.update(partial);
     const nextSettings = this.settings.get();
 
-    if (partial.logLevel !== undefined) {
-      setOverlayLogLevel(nextSettings.logLevel);
-    }
+    this.syncLogLevel(partial, nextSettings);
 
-    if (wasEnabled && !nextSettings.enabled) {
-      this.cleanup();
-      console.log('[App] Overlay disabled');
+    if (this.handleEnabledStateChange(wasEnabled, nextSettings.enabled)) {
       return;
     }
 
-    if (!wasEnabled && nextSettings.enabled) {
-      void this.start();
-      console.log('[App] Overlay enabled');
-      return;
-    }
-
-    const currentOverlay = this.overlay;
-    const needsOverlayRefresh =
-      currentOverlay &&
-      (partial.safeTop !== undefined ||
-        partial.safeBottom !== undefined ||
-        partial.fontSize !== undefined);
-
-    if (needsOverlayRefresh) {
-      if (this._renderer) {
-        this._renderer.destroy();
-        this._renderer = null;
-      }
-
-      currentOverlay.destroy();
-      this.overlay = new Overlay();
-      this.overlay
-        .create(nextSettings)
-        .then((created) => {
-          if (!created) {
-            console.warn('[App] Failed to recreate overlay');
-            return;
-          }
-          const overlay = this.overlay;
-          if (!overlay) return;
-          this._renderer = new Renderer(overlay, nextSettings);
-        })
-        .catch((error) => {
-          console.error('[App] Failed to recreate overlay:', error);
-        });
+    if (this.shouldRefreshOverlay(partial)) {
+      void this.recreateOverlay(nextSettings);
     } else if (this._renderer) {
       this._renderer.updateSettings(nextSettings);
     }
 
     console.log('[App] Settings updated');
+  }
+
+  private syncLogLevel(
+    partial: Partial<OverlaySettings>,
+    nextSettings: Readonly<OverlaySettings>
+  ): void {
+    if (partial.logLevel !== undefined) {
+      setOverlayLogLevel(nextSettings.logLevel);
+    }
+  }
+
+  private handleEnabledStateChange(wasEnabled: boolean, isEnabled: boolean): boolean {
+    if (wasEnabled && !isEnabled) {
+      this.cleanup();
+      console.log('[App] Overlay disabled');
+      return true;
+    }
+
+    if (!wasEnabled && isEnabled) {
+      void this.start();
+      console.log('[App] Overlay enabled');
+      return true;
+    }
+
+    return false;
+  }
+
+  private shouldRefreshOverlay(partial: Partial<OverlaySettings>): boolean {
+    return (
+      this.overlay !== null &&
+      (partial.safeTop !== undefined ||
+        partial.safeBottom !== undefined ||
+        partial.fontSize !== undefined)
+    );
+  }
+
+  private async recreateOverlay(settings: OverlaySettings): Promise<void> {
+    const currentOverlay = this.overlay;
+    if (!currentOverlay) return;
+
+    this.destroyRenderer();
+    currentOverlay.destroy();
+
+    const overlay = new Overlay();
+    this.overlay = overlay;
+
+    try {
+      const created = await overlay.create(settings);
+      if (!created) {
+        if (this.overlay === overlay) {
+          this.overlay = null;
+        }
+        console.warn('[App] Failed to recreate overlay');
+        return;
+      }
+
+      if (this.overlay !== overlay) {
+        overlay.destroy();
+        return;
+      }
+
+      this._renderer = new Renderer(overlay, settings);
+    } catch (error) {
+      if (this.overlay === overlay) {
+        this.overlay = null;
+      }
+      console.error('[App] Failed to recreate overlay:', error);
+    }
   }
 
   resetSettings(): void {
@@ -327,50 +407,61 @@ class App {
     return this._renderer;
   }
 
+  private destroyChatSource(): void {
+    if (!this.chatSource) return;
+
+    this.chatSource.stop();
+    this.chatSource = null;
+  }
+
+  private destroyVideoSync(): void {
+    if (!this.videoSync) return;
+
+    this.videoSync.destroy();
+    this.videoSync = null;
+  }
+
+  private destroyRenderer(): void {
+    if (!this._renderer) return;
+
+    this._renderer.destroy();
+    this._renderer = null;
+  }
+
+  private destroyOverlay(): void {
+    if (!this.overlay) return;
+
+    this.overlay.destroy();
+    this.overlay = null;
+  }
+
+  private removeLeftoverOverlays(): void {
+    const leftoverOverlays = document.querySelectorAll(OVERLAY_SELECTOR);
+    if (leftoverOverlays.length === 0) return;
+
+    for (const element of leftoverOverlays) {
+      element.remove();
+    }
+
+    console.log(`[App] Removed ${leftoverOverlays.length} leftover overlay element(s)`);
+  }
+
   /**
    * Cleanup all components
    */
   private cleanup(): void {
     console.log('[App] Starting cleanup...');
 
-    // Invalidate any in-flight start() async task so it aborts after its next await.
     this.startGeneration++;
-
-    // Close settings UI
+    this.clearRestartTimer();
+    this.pendingRestart = false;
     this.settingsUi.close();
 
-    // Stop chat monitoring first to prevent new messages
-    if (this.chatSource) {
-      this.chatSource.stop();
-      this.chatSource = null;
-    }
-
-    // Stop video sync
-    if (this.videoSync) {
-      this.videoSync.destroy();
-      this.videoSync = null;
-    }
-
-    // Destroy renderer to clear all active messages
-    if (this._renderer) {
-      this._renderer.destroy();
-      this._renderer = null;
-    }
-
-    // Destroy overlay last
-    if (this.overlay) {
-      this.overlay.destroy();
-      this.overlay = null;
-    }
-
-    // Force remove any leftover overlay elements from DOM
-    const leftoverOverlays = document.querySelectorAll('#yt-live-chat-overlay');
-    if (leftoverOverlays.length > 0) {
-      for (const element of leftoverOverlays) {
-        element.remove();
-      }
-      console.log(`[App] Removed ${leftoverOverlays.length} leftover overlay element(s)`);
-    }
+    this.destroyChatSource();
+    this.destroyVideoSync();
+    this.destroyRenderer();
+    this.destroyOverlay();
+    this.removeLeftoverOverlays();
 
     this.isInitialized = false;
     console.log('[App] Cleanup completed');
@@ -395,6 +486,12 @@ class App {
   }
 }
 
+const scheduleAppInitialization = (): void => {
+  window.setTimeout(() => {
+    void initApp();
+  }, APP_INIT_DELAY_MS);
+};
+
 /**
  * Main entry point
  */
@@ -409,15 +506,23 @@ function main(): void {
     console.log('[YT Chat Overlay] Waiting for DOMContentLoaded...');
     document.addEventListener('DOMContentLoaded', () => {
       console.log('[YT Chat Overlay] DOMContentLoaded fired');
-      // Small delay to let YouTube initialize
-      setTimeout(() => initApp(), 500);
+      scheduleAppInitialization();
     });
   } else {
     console.log('[YT Chat Overlay] Document already ready, initializing...');
-    // Small delay to let YouTube initialize
-    setTimeout(() => initApp(), 500);
+    scheduleAppInitialization();
   }
 }
+
+const stopPreviousAppInstance = (): void => {
+  if (!window.__ytChatOverlay) {
+    return;
+  }
+
+  console.log('[YT Chat Overlay] Stopping previous instance before re-init');
+  window.__ytChatOverlay.stop();
+  window.__ytChatOverlay = undefined;
+};
 
 /**
  * Initialize application
@@ -426,14 +531,7 @@ async function initApp(): Promise<void> {
   console.log('[YT Chat Overlay] Initializing application...');
 
   try {
-    // Defensive: if a previous instance exists (e.g. Tampermonkey re-injected
-    // on the same page), stop it before creating a new one so its observers
-    // and event listeners are fully removed.
-    if (window.__ytChatOverlay) {
-      console.log('[YT Chat Overlay] Stopping previous instance before re-init');
-      window.__ytChatOverlay.stop();
-      window.__ytChatOverlay = undefined;
-    }
+    stopPreviousAppInstance();
 
     const app = new App();
     await app.start();
