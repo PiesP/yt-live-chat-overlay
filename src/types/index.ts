@@ -159,6 +159,8 @@ export interface OverlaySettings {
   colors: ColorSettings;
   /** Text outline settings */
   outline: OutlineSettings;
+  /** Vertical spacing between lanes in pixels (0 = tight, higher = more gap) */
+  laneSpacing: number;
 }
 
 /**
@@ -203,6 +205,7 @@ export const SETTINGS_LIMITS = {
   outlineWidthPx: { min: 0, max: 5, step: 0.5 },
   outlineBlurPx: { min: 0, max: 8, step: 0.5 },
   outlineOpacity: { min: 0, max: 1, step: 0.1 },
+  laneSpacing: { min: 0, max: 20, step: 1 },
 } as const;
 
 /**
@@ -271,4 +274,6 @@ export const DEFAULT_SETTINGS: Readonly<OverlaySettings> = {
     blurPx: 2,
     opacity: 0.7,
   },
+  /** No extra vertical gap by default – preserves existing compact layout. */
+  laneSpacing: 0,
 };

@@ -100,7 +100,7 @@ export class Overlay {
     // Two-line messages (with author info) will use 2+ lanes dynamically
     // This allows more efficient space utilization - approximately 2x more lanes available
     // The renderer will dynamically allocate multiple lanes based on actual message height
-    const baseLaneHeight = settings.fontSize * 1.3;
+    const baseLaneHeight = settings.fontSize * 1.3 + settings.laneSpacing;
     const usableHeight = height * (1 - settings.safeTop - settings.safeBottom);
     const laneCount = Math.floor(usableHeight / baseLaneHeight);
 

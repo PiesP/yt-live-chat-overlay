@@ -402,6 +402,17 @@ export class SettingsUi {
             <option value="debug">Debug</option>
           </select>
         </label>
+        <label class="yt-chat-overlay-settings-field">
+          <span>Lane spacing (px)</span>
+          <input
+            type="number"
+            name="laneSpacing"
+            min="${SETTINGS_LIMITS.laneSpacing.min}"
+            max="${SETTINGS_LIMITS.laneSpacing.max}"
+            step="${SETTINGS_LIMITS.laneSpacing.step}"
+            title="Vertical gap between comment lanes"
+          />
+        </label>
       </div>
       <div class="yt-chat-overlay-settings-section">
         <div class="yt-chat-overlay-settings-section-title">Author Types (Color & Display)</div>
@@ -545,6 +556,7 @@ export class SettingsUi {
     this.setValue('outline-widthPx', settings.outline.widthPx);
     this.setValue('outline-blurPx', settings.outline.blurPx);
     this.setValue('outline-opacity', settings.outline.opacity);
+    this.setValue('laneSpacing', settings.laneSpacing);
   }
 
   private collectSettings(): Partial<OverlaySettings> {
@@ -651,6 +663,13 @@ export class SettingsUi {
           SETTINGS_LIMITS.outlineOpacity.max
         ),
       },
+      laneSpacing: Math.round(
+        clamp(
+          readNumber('laneSpacing', current.laneSpacing),
+          SETTINGS_LIMITS.laneSpacing.min,
+          SETTINGS_LIMITS.laneSpacing.max
+        )
+      ),
     };
   }
 
