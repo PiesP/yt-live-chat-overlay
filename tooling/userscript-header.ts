@@ -5,74 +5,91 @@
 import type { Plugin } from 'vite';
 
 interface UserscriptMeta {
-  name: string;
-  version: string;
-  description: string;
-  author: string;
-  match: string[];
-  grant: string[];
-  runAt: string;
+  readonly name: string;
+  readonly version: string;
+  readonly description: string;
+  readonly author: string;
+  readonly match: readonly string[];
+  readonly grant: readonly string[];
+  readonly runAt: string;
 }
+
+const PLUGIN_NAME = 'userscript-header';
+const REPOSITORY_URL = 'https://github.com/PiesP/yt-live-chat-overlay';
+const USERSCRIPT_ICON_URL = 'https://www.youtube.com/favicon.ico';
+const USERSCRIPT_MATCH_PATTERNS = ['https://www.youtube.com/*'] as const;
+const USERSCRIPT_GRANTS = ['none'] as const;
+const LEGAL_NOTICE_LINES = [
+  '/* LEGAL NOTICE:',
+  " * This userscript operates ENTIRELY in the user's browser (100% local processing).",
+  ' * NO chat data is stored, transmitted, or processed externally.',
+  ' * Only user settings (font size, speed, etc.) are stored in localStorage.',
+  ' * This is NOT an official YouTube or Nico-nico product.',
+  ' * YouTube UI/content is NOT modified - only an overlay is added.',
+  ' */',
+] as const;
+
+const formatDirective = (key: string, value: string): string =>
+  `// @${key.padEnd(12)} ${value}`;
+
+const createUserscriptMeta = (version: string, isDev: boolean): UserscriptMeta => ({
+  name: `YouTube Live Chat Overlay${isDev ? ' (dev)' : ''}`,
+  version,
+  description:
+    'Displays YouTube live chat in Nico-nico style flowing overlay (100% local, no data collection)',
+  author: 'PiesP',
+  match: USERSCRIPT_MATCH_PATTERNS,
+  grant: USERSCRIPT_GRANTS,
+  runAt: 'document-end',
+});
+
+const buildMetadataLines = (meta: UserscriptMeta): string[] => [
+  formatDirective('name', meta.name),
+  formatDirective('version', meta.version),
+  formatDirective('description', meta.description),
+  formatDirective('author', meta.author),
+  ...meta.match.map((pattern) => formatDirective('match', pattern)),
+  ...meta.grant.map((grant) => formatDirective('grant', grant)),
+  formatDirective('run-at', meta.runAt),
+  formatDirective('icon', USERSCRIPT_ICON_URL),
+  formatDirective('homepage', REPOSITORY_URL),
+  formatDirective('supportURL', `${REPOSITORY_URL}/issues`),
+  formatDirective('license', 'MIT'),
+  formatDirective('namespace', 'https://github.com/PiesP'),
+];
+
+const isUserscriptChunk = (fileName: string, chunk: { type: string }): boolean =>
+  fileName.endsWith('.user.js') && chunk.type === 'chunk';
 
 /**
  * Generate userscript metadata header
  */
-function generateHeader(meta: UserscriptMeta, isDev: boolean): string {
-  const lines = [
+function generateHeader(meta: UserscriptMeta): string {
+  return [
     '// ==UserScript==',
-    `// @name         ${meta.name}${isDev ? ' (dev)' : ''}`,
-    `// @version      ${meta.version}`,
-    `// @description  ${meta.description}`,
-    `// @author       ${meta.author}`,
-    ...meta.match.map((pattern) => `// @match        ${pattern}`),
-    ...meta.grant.map((perm) => `// @grant        ${perm}`),
-    `// @run-at       ${meta.runAt}`,
-    '// @icon         https://www.youtube.com/favicon.ico',
-    '// @homepage     https://github.com/PiesP/yt-live-chat-overlay',
-    '// @supportURL   https://github.com/PiesP/yt-live-chat-overlay/issues',
-    '// @license      MIT',
-    '// @namespace    https://github.com/PiesP',
+    ...buildMetadataLines(meta),
     '// ==/UserScript==',
     '',
-    '/* LEGAL NOTICE:',
-    ' * This userscript operates ENTIRELY in the user\'s browser (100% local processing).',
-    ' * NO chat data is stored, transmitted, or processed externally.',
-    ' * Only user settings (font size, speed, etc.) are stored in localStorage.',
-    ' * This is NOT an official YouTube or Nico-nico product.',
-    ' * YouTube UI/content is NOT modified - only an overlay is added.',
-    ' */',
+    ...LEGAL_NOTICE_LINES,
     '',
-  ];
-  return lines.join('\n');
+  ].join('\n');
 }
 
 /**
  * Vite plugin for userscript header injection
  */
 export function userscriptHeaderPlugin(mode: string, version: string): Plugin {
-  const isDev = mode === 'development';
-
-  const meta: UserscriptMeta = {
-    name: 'YouTube Live Chat Overlay',
-    version: version,
-    description:
-      'Displays YouTube live chat in Nico-nico style flowing overlay (100% local, no data collection)',
-    author: 'PiesP',
-    match: ['https://www.youtube.com/*'],
-    grant: ['none'],
-    runAt: 'document-end',
-  };
+  const meta = createUserscriptMeta(version, mode === 'development');
 
   return {
-    name: 'userscript-header',
+    name: PLUGIN_NAME,
     enforce: 'post',
 
     generateBundle(_, bundle) {
       for (const [fileName, chunk] of Object.entries(bundle)) {
-        if (fileName.endsWith('.user.js') && chunk.type === 'chunk') {
-          const header = generateHeader(meta, isDev);
-          chunk.code = header + chunk.code;
-        }
+        if (!isUserscriptChunk(fileName, chunk)) continue;
+
+        chunk.code = `${generateHeader(meta)}${chunk.code}`;
       }
     },
   };
