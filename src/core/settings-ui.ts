@@ -6,8 +6,24 @@ const STYLE_ID = 'yt-chat-overlay-settings-style';
 const BUTTON_ID = 'yt-chat-overlay-settings-button';
 const BACKDROP_ID = 'yt-chat-overlay-settings-backdrop';
 const TITLE_ID = 'yt-chat-overlay-settings-title';
+const PLAYER_LOOKUP_ATTEMPTS = 5;
+const PLAYER_LOOKUP_INTERVAL_MS = 500;
+
+const AUTHOR_COLOR_KEYS = ['normal', 'member', 'moderator', 'owner', 'verified'] as const;
+const SHOW_AUTHOR_KEYS = [
+  'normal',
+  'member',
+  'moderator',
+  'owner',
+  'verified',
+  'superChat',
+] as const;
 
 const toPercent = (value: number): number => Math.round(value * 100);
+const clamp = (value: number, min: number, max: number): number =>
+  Math.min(max, Math.max(min, value));
+const isLogLevel = (value: string): value is OverlaySettings['logLevel'] =>
+  value === 'warn' || value === 'info' || value === 'debug';
 
 const UI_LIMITS = {
   superChatOpacity: {
@@ -67,10 +83,7 @@ export class SettingsUi {
 
   close(): void {
     if (!this.backdrop) return;
-    this.backdrop.style.display = 'none';
-    this.backdrop.hidden = true;
-    this.backdrop.setAttribute('aria-hidden', 'true');
-    document.removeEventListener('keydown', this.handleKeydown);
+    this.setDialogOpen(false);
 
     if (this.previousFocus?.isConnected) {
       this.previousFocus.focus();
@@ -80,8 +93,8 @@ export class SettingsUi {
 
   private async findPlayerContainer(): Promise<HTMLElement | null> {
     const match = await waitForElementMatch<HTMLElement>(PLAYER_CONTAINER_SELECTORS, {
-      attempts: 5,
-      intervalMs: 500,
+      attempts: PLAYER_LOOKUP_ATTEMPTS,
+      intervalMs: PLAYER_LOOKUP_INTERVAL_MS,
       predicate: isVisibleElement,
     });
 
@@ -91,6 +104,12 @@ export class SettingsUi {
     }
 
     return match.element;
+  }
+
+  private ensurePlayerPositioning(player: HTMLElement): void {
+    if (window.getComputedStyle(player).position === 'static') {
+      player.style.position = 'relative';
+    }
   }
 
   private ensureButton(player: HTMLElement): void {
@@ -106,19 +125,19 @@ export class SettingsUi {
       this.button.remove();
     }
 
-    const computedStyle = window.getComputedStyle(player);
-    if (computedStyle.position === 'static') {
-      player.style.position = 'relative';
-    }
+    this.ensurePlayerPositioning(player);
 
     player.appendChild(this.button);
   }
 
-  private ensureModal(): void {
-    if (!document.getElementById(STYLE_ID)) {
-      const style = document.createElement('style');
-      style.id = STYLE_ID;
-      style.textContent = `
+  private ensureStyles(): void {
+    if (document.getElementById(STYLE_ID)) {
+      return;
+    }
+
+    const style = document.createElement('style');
+    style.id = STYLE_ID;
+    style.textContent = `
         .yt-chat-overlay-settings-button {
           position: absolute;
           top: ${spacing.sm}px;
@@ -269,17 +288,50 @@ export class SettingsUi {
           color: ${colors.ui.text};
         }
       `;
-      document.head.appendChild(style);
+    document.head.appendChild(style);
+  }
+
+  private setDialogOpen(isOpen: boolean): void {
+    if (!this.backdrop) {
+      return;
     }
+
+    this.backdrop.style.display = isOpen ? 'flex' : 'none';
+    this.backdrop.hidden = !isOpen;
+    this.backdrop.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+
+    if (isOpen) {
+      document.addEventListener('keydown', this.handleKeydown);
+      return;
+    }
+
+    document.removeEventListener('keydown', this.handleKeydown);
+  }
+
+  private bindModalEvents(): void {
+    this.modal
+      ?.querySelector<HTMLButtonElement>('.yt-chat-overlay-settings-close')
+      ?.addEventListener('click', () => this.close());
+    this.modal
+      ?.querySelector<HTMLButtonElement>('button[data-action="apply"]')
+      ?.addEventListener('click', () => this.apply());
+    this.modal
+      ?.querySelector<HTMLButtonElement>('button[data-action="reset"]')
+      ?.addEventListener('click', () => this.handleReset());
+
+    this.modal
+      ?.querySelector<HTMLInputElement>('input[name="allowShortTextMessages"]')
+      ?.addEventListener('change', () => this.syncMinTextLengthState());
+  }
+
+  private ensureModal(): void {
+    this.ensureStyles();
 
     if (this.backdrop) return;
 
     this.backdrop = document.createElement('div');
     this.backdrop.id = BACKDROP_ID;
     this.backdrop.className = 'yt-chat-overlay-settings-backdrop';
-    this.backdrop.style.display = 'none';
-    this.backdrop.hidden = true;
-    this.backdrop.setAttribute('aria-hidden', 'true');
     this.backdrop.addEventListener('click', (event) => {
       if (event.target === this.backdrop) {
         this.close();
@@ -545,22 +597,11 @@ export class SettingsUi {
       </div>
     `;
 
-    this.modal
-      .querySelector<HTMLButtonElement>('.yt-chat-overlay-settings-close')
-      ?.addEventListener('click', () => this.close());
-    this.modal
-      .querySelector<HTMLButtonElement>('button[data-action="apply"]')
-      ?.addEventListener('click', () => this.apply());
-    this.modal
-      .querySelector<HTMLButtonElement>('button[data-action="reset"]')
-      ?.addEventListener('click', () => this.handleReset());
-
-    this.modal
-      .querySelector<HTMLInputElement>('input[name="allowShortTextMessages"]')
-      ?.addEventListener('change', () => this.syncMinTextLengthState());
+    this.bindModalEvents();
 
     this.backdrop.appendChild(this.modal);
     document.body.appendChild(this.backdrop);
+    this.setDialogOpen(false);
   }
 
   private open(): void {
@@ -570,10 +611,7 @@ export class SettingsUi {
     this.previousFocus = activeElement instanceof HTMLElement ? activeElement : null;
 
     this.populateForm(this.getSettings());
-    this.backdrop.style.display = 'flex';
-    this.backdrop.hidden = false;
-    this.backdrop.setAttribute('aria-hidden', 'false');
-    document.addEventListener('keydown', this.handleKeydown);
+    this.setDialogOpen(true);
     this.focusInitialElement();
   }
 
@@ -589,6 +627,16 @@ export class SettingsUi {
     this.populateForm(this.getSettings());
   }
 
+  private setAuthorSettings(settings: Readonly<OverlaySettings>): void {
+    for (const key of AUTHOR_COLOR_KEYS) {
+      this.setValue(`color-${key}`, settings.colors[key]);
+    }
+
+    for (const key of SHOW_AUTHOR_KEYS) {
+      this.setCheckbox(`showAuthor-${key}`, settings.showAuthor[key]);
+    }
+  }
+
   private populateForm(settings: Readonly<OverlaySettings>): void {
     this.setCheckbox('enabled', settings.enabled);
     this.setValue('speedPxPerSec', settings.speedPxPerSec);
@@ -602,19 +650,7 @@ export class SettingsUi {
     this.setCheckbox('allowShortTextMessages', settings.allowShortTextMessages);
     this.setValue('minTextLength', settings.minTextLength);
     this.setSelect('logLevel', settings.logLevel);
-
-    this.setValue('color-normal', settings.colors.normal);
-    this.setValue('color-member', settings.colors.member);
-    this.setValue('color-moderator', settings.colors.moderator);
-    this.setValue('color-owner', settings.colors.owner);
-    this.setValue('color-verified', settings.colors.verified);
-
-    this.setCheckbox('showAuthor-normal', settings.showAuthor.normal);
-    this.setCheckbox('showAuthor-member', settings.showAuthor.member);
-    this.setCheckbox('showAuthor-moderator', settings.showAuthor.moderator);
-    this.setCheckbox('showAuthor-owner', settings.showAuthor.owner);
-    this.setCheckbox('showAuthor-verified', settings.showAuthor.verified);
-    this.setCheckbox('showAuthor-superChat', settings.showAuthor.superChat);
+    this.setAuthorSettings(settings);
 
     this.setCheckbox('outline-enabled', settings.outline.enabled);
     this.setValue('outline-widthPx', settings.outline.widthPx);
@@ -633,117 +669,130 @@ export class SettingsUi {
     }
   }
 
+  private readNumber(name: string, fallback: number): number {
+    const input = this.getInput(name);
+    if (!input) return fallback;
+
+    const parsed = Number.parseFloat(input.value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
+  private readClampedNumber(
+    name: string,
+    fallback: number,
+    limits: { min: number; max: number }
+  ): number {
+    return clamp(this.readNumber(name, fallback), limits.min, limits.max);
+  }
+
+  private readRoundedClampedNumber(
+    name: string,
+    fallback: number,
+    limits: { min: number; max: number }
+  ): number {
+    return Math.round(this.readClampedNumber(name, fallback, limits));
+  }
+
+  private readPercentSetting(
+    name: string,
+    fallbackFraction: number,
+    limits: { min: number; max: number }
+  ): number {
+    return this.readClampedNumber(name, fallbackFraction * 100, limits) / 100;
+  }
+
+  private collectAuthorColors(current: Readonly<OverlaySettings>): OverlaySettings['colors'] {
+    const nextColors: OverlaySettings['colors'] = { ...current.colors };
+
+    for (const key of AUTHOR_COLOR_KEYS) {
+      nextColors[key] = this.getColor(`color-${key}`, current.colors[key]);
+    }
+
+    return nextColors;
+  }
+
+  private collectShowAuthorSettings(
+    current: Readonly<OverlaySettings>
+  ): OverlaySettings['showAuthor'] {
+    const nextShowAuthor: OverlaySettings['showAuthor'] = { ...current.showAuthor };
+
+    for (const key of SHOW_AUTHOR_KEYS) {
+      nextShowAuthor[key] = this.getCheckbox(`showAuthor-${key}`, current.showAuthor[key]);
+    }
+
+    return nextShowAuthor;
+  }
+
   private collectSettings(): Partial<OverlaySettings> {
     const current = this.getSettings();
-    const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
-    const readNumber = (name: string, fallback: number) => {
-      const input = this.getInput(name);
-      if (!input) return fallback;
-      const parsed = Number.parseFloat(input.value);
-      return Number.isFinite(parsed) ? parsed : fallback;
-    };
 
     return {
       enabled: this.getCheckbox('enabled', current.enabled),
-      speedPxPerSec: clamp(
-        readNumber('speedPxPerSec', current.speedPxPerSec),
-        SETTINGS_LIMITS.speedPxPerSec.min,
-        SETTINGS_LIMITS.speedPxPerSec.max
+      speedPxPerSec: this.readClampedNumber('speedPxPerSec', current.speedPxPerSec, {
+        min: SETTINGS_LIMITS.speedPxPerSec.min,
+        max: SETTINGS_LIMITS.speedPxPerSec.max,
+      }),
+      fontSize: this.readClampedNumber('fontSize', current.fontSize, {
+        min: SETTINGS_LIMITS.fontSize.min,
+        max: SETTINGS_LIMITS.fontSize.max,
+      }),
+      opacity: this.readClampedNumber('opacity', current.opacity, {
+        min: SETTINGS_LIMITS.opacity.min,
+        max: SETTINGS_LIMITS.opacity.max,
+      }),
+      superChatOpacity: this.readPercentSetting(
+        'superChatOpacity',
+        current.superChatOpacity,
+        UI_LIMITS.superChatOpacity
       ),
-      fontSize: clamp(
-        readNumber('fontSize', current.fontSize),
-        SETTINGS_LIMITS.fontSize.min,
-        SETTINGS_LIMITS.fontSize.max
+      safeTop: this.readPercentSetting('safeTop', current.safeTop, UI_LIMITS.safeTop),
+      safeBottom: this.readPercentSetting('safeBottom', current.safeBottom, UI_LIMITS.safeBottom),
+      maxConcurrentMessages: this.readRoundedClampedNumber(
+        'maxConcurrentMessages',
+        current.maxConcurrentMessages,
+        {
+          min: SETTINGS_LIMITS.maxConcurrentMessages.min,
+          max: SETTINGS_LIMITS.maxConcurrentMessages.max,
+        }
       ),
-      opacity: clamp(
-        readNumber('opacity', current.opacity),
-        SETTINGS_LIMITS.opacity.min,
-        SETTINGS_LIMITS.opacity.max
-      ),
-      superChatOpacity:
-        clamp(
-          readNumber('superChatOpacity', current.superChatOpacity * 100),
-          UI_LIMITS.superChatOpacity.min,
-          UI_LIMITS.superChatOpacity.max
-        ) / 100,
-      safeTop:
-        clamp(
-          readNumber('safeTop', current.safeTop * 100),
-          UI_LIMITS.safeTop.min,
-          UI_LIMITS.safeTop.max
-        ) / 100,
-      safeBottom:
-        clamp(
-          readNumber('safeBottom', current.safeBottom * 100),
-          UI_LIMITS.safeBottom.min,
-          UI_LIMITS.safeBottom.max
-        ) / 100,
-      maxConcurrentMessages: Math.round(
-        clamp(
-          readNumber('maxConcurrentMessages', current.maxConcurrentMessages),
-          SETTINGS_LIMITS.maxConcurrentMessages.min,
-          SETTINGS_LIMITS.maxConcurrentMessages.max
-        )
-      ),
-      maxMessagesPerSecond: Math.round(
-        clamp(
-          readNumber('maxMessagesPerSecond', current.maxMessagesPerSecond),
-          SETTINGS_LIMITS.maxMessagesPerSecond.min,
-          SETTINGS_LIMITS.maxMessagesPerSecond.max
-        )
+      maxMessagesPerSecond: this.readRoundedClampedNumber(
+        'maxMessagesPerSecond',
+        current.maxMessagesPerSecond,
+        {
+          min: SETTINGS_LIMITS.maxMessagesPerSecond.min,
+          max: SETTINGS_LIMITS.maxMessagesPerSecond.max,
+        }
       ),
       allowShortTextMessages: this.getCheckbox(
         'allowShortTextMessages',
         current.allowShortTextMessages
       ),
-      minTextLength: Math.round(
-        clamp(
-          readNumber('minTextLength', current.minTextLength),
-          SETTINGS_LIMITS.minTextLength.min,
-          SETTINGS_LIMITS.minTextLength.max
-        )
-      ),
+      minTextLength: this.readRoundedClampedNumber('minTextLength', current.minTextLength, {
+        min: SETTINGS_LIMITS.minTextLength.min,
+        max: SETTINGS_LIMITS.minTextLength.max,
+      }),
       logLevel: this.getLogLevel('logLevel', current.logLevel),
-      showAuthor: {
-        normal: this.getCheckbox('showAuthor-normal', current.showAuthor.normal),
-        member: this.getCheckbox('showAuthor-member', current.showAuthor.member),
-        moderator: this.getCheckbox('showAuthor-moderator', current.showAuthor.moderator),
-        owner: this.getCheckbox('showAuthor-owner', current.showAuthor.owner),
-        verified: this.getCheckbox('showAuthor-verified', current.showAuthor.verified),
-        superChat: this.getCheckbox('showAuthor-superChat', current.showAuthor.superChat),
-      },
-      colors: {
-        normal: this.getColor('color-normal', current.colors.normal),
-        member: this.getColor('color-member', current.colors.member),
-        moderator: this.getColor('color-moderator', current.colors.moderator),
-        owner: this.getColor('color-owner', current.colors.owner),
-        verified: this.getColor('color-verified', current.colors.verified),
-      },
+      showAuthor: this.collectShowAuthorSettings(current),
+      colors: this.collectAuthorColors(current),
       outline: {
         enabled: this.getCheckbox('outline-enabled', current.outline.enabled),
-        widthPx: clamp(
-          readNumber('outline-widthPx', current.outline.widthPx),
-          SETTINGS_LIMITS.outlineWidthPx.min,
-          SETTINGS_LIMITS.outlineWidthPx.max
-        ),
-        blurPx: clamp(
-          readNumber('outline-blurPx', current.outline.blurPx),
-          SETTINGS_LIMITS.outlineBlurPx.min,
-          SETTINGS_LIMITS.outlineBlurPx.max
-        ),
-        opacity: clamp(
-          readNumber('outline-opacity', current.outline.opacity),
-          SETTINGS_LIMITS.outlineOpacity.min,
-          SETTINGS_LIMITS.outlineOpacity.max
-        ),
+        widthPx: this.readClampedNumber('outline-widthPx', current.outline.widthPx, {
+          min: SETTINGS_LIMITS.outlineWidthPx.min,
+          max: SETTINGS_LIMITS.outlineWidthPx.max,
+        }),
+        blurPx: this.readClampedNumber('outline-blurPx', current.outline.blurPx, {
+          min: SETTINGS_LIMITS.outlineBlurPx.min,
+          max: SETTINGS_LIMITS.outlineBlurPx.max,
+        }),
+        opacity: this.readClampedNumber('outline-opacity', current.outline.opacity, {
+          min: SETTINGS_LIMITS.outlineOpacity.min,
+          max: SETTINGS_LIMITS.outlineOpacity.max,
+        }),
       },
-      laneSpacing: Math.round(
-        clamp(
-          readNumber('laneSpacing', current.laneSpacing),
-          SETTINGS_LIMITS.laneSpacing.min,
-          SETTINGS_LIMITS.laneSpacing.max
-        )
-      ),
+      laneSpacing: this.readRoundedClampedNumber('laneSpacing', current.laneSpacing, {
+        min: SETTINGS_LIMITS.laneSpacing.min,
+        max: SETTINGS_LIMITS.laneSpacing.max,
+      }),
     };
   }
 
@@ -836,11 +885,7 @@ export class SettingsUi {
     const select = this.getSelect(name);
     if (!select) return fallback;
 
-    if (select.value === 'warn' || select.value === 'info' || select.value === 'debug') {
-      return select.value;
-    }
-
-    return fallback;
+    return isLogLevel(select.value) ? select.value : fallback;
   }
 
   private setValue(name: string, value: string | number): void {
