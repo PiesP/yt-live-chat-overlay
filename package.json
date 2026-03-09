@@ -37,9 +37,9 @@
     "pnpm": "10.27.0"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.4",
-    "@biomejs/cli-linux-x64": "^2.4.4",
-    "@types/node": "^25.3.3",
+    "@biomejs/biome": "^2.4.6",
+    "@biomejs/cli-linux-x64": "^2.4.6",
+    "@types/node": "^25.3.5",
     "knip": "^5.85.0",
     "typescript": "^5.9.3",
     "vite": "^7.3.1"
