@@ -2,6 +2,36 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.0] - 2026-03-31
+
+### Changed
+- **메시지 표시 밀도 향상**
+  - 레인 높이 승수(`BASE_LANE_HEIGHT_MULTIPLIER`) 1.3 → 1.2로 축소해 약 8% 더 많은 레인 확보
+  - 수평 안전 거리(`SAFE_DISTANCE_SCALE`) 0.5 → 0.3, 최소값 10px → 6px으로 줄여 레인 내 메시지를 더 촘촘하게 배치
+  - 수직 클리어 타임 40–160ms → 20–80ms로 단축해 레인 재사용 속도 향상
+  - 메시지 요소에 `line-height: 1.1` 명시 적용 — 모든 지원 폰트 크기(18–40px)에서 단일 라인 메시지가 정확히 1 레인에 수용되도록 보장
+- **기본 설정 조정**
+  - `safeTop` 기본값 0.1 → 0 (상단 안전 영역 제거, 비디오 최상단부터 표시)
+  - `safeBottom` 기본값 0.15 → 0.4 (하단 40%를 빈 영역으로 유지, 플레이어 컨트롤 완전 보호)
+  - `maxConcurrentMessages` 기본값 30 → 40 (추가된 레인 수에 맞게 상향)
+  - `maxMessagesPerSecond` 기본값 4 → 6 (밀도 향상에 맞춰 처리율 상향)
+  - `safeBottom` 설정 상한 0.25 → 0.5 (설정 UI에서 최대 50%까지 조정 가능)
+
+### Refactored
+- **공통 유틸리티 중복 제거**
+  - `parseRgbColor()` 함수를 `design-tokens.ts`로 추출 — `renderer.ts`·`chat-source.ts`의 인라인 RGB 파싱 중복 제거
+  - `findPlayerContainerElement()`·`ensurePlayerPositioning()`을 `dom.ts`로 이동 — `overlay.ts`·`settings-ui.ts`의 중복 구현 일원화
+  - `PLAYER_CONTAINER_SELECTORS`를 `dom.ts`로 통합 — `video-sync.ts`가 독자적으로 정의하던 2개 선택자를 4개 선택자 공유 배열로 교체
+  - `STORAGE_KEY`를 `settings.ts`에서 export하고 `logging.ts`의 중복 상수 제거
+- **기타 코드 품질 개선**
+  - `debugLogChatElements()` 호출을 `logLevel === 'debug'`일 때만 실행하도록 조건 추가
+  - `main.ts` 필드명 `_renderer` → `renderer` 정리, 빈 `handleVideoSeeking` 핸들러 제거
+  - `renderer.ts`의 `@ts-expect-error` 제거
+  - `design-tokens.ts`에서 미사용 `animation` 토큰 제거
+
+### Dependencies
+- 개발 의존성 최신화: knip ^6.1.0, Biome, Vite, TypeScript, @types/node 등
+
 ## [0.6.0] - 2026-03-06
 
 ### Added

@@ -19,6 +19,7 @@ import { isAllowedYouTubeImageUrl } from '@core/image-url';
 import {
   borderRadius,
   colors,
+  parseRgbColor,
   type RgbColor,
   rgba,
   shadows,
@@ -551,26 +552,11 @@ export class Renderer {
   }
 
   /**
-   * Parse RGB/RGBA color string to components
-   * Handles formats: "rgb(r, g, b)" or "rgba(r, g, b, a)"
-   */
-  private parseRgbaColor(colorString: string): RgbColor | null {
-    const rgbaMatch = colorString.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
-    if (!rgbaMatch) return null;
-
-    return {
-      r: parseInt(rgbaMatch[1] || '0', 10),
-      g: parseInt(rgbaMatch[2] || '0', 10),
-      b: parseInt(rgbaMatch[3] || '0', 10),
-    };
-  }
-
-  /**
    * Resolve Super Chat RGB color from actual YouTube color or tier fallback
    */
   private resolveSuperChatRgb(superChat: SuperChatInfo): RgbColor {
     const sourceColor = superChat.headerBackgroundColor || superChat.backgroundColor;
-    const parsed = sourceColor ? this.parseRgbaColor(sourceColor) : null;
+    const parsed = sourceColor ? parseRgbColor(sourceColor) : null;
 
     if (parsed) {
       return parsed;
@@ -1477,10 +1463,6 @@ export class Renderer {
     // Remove style element
     this.styleElement?.remove();
     this.styleElement = null;
-
-    // Clear overlay reference to prevent memory leaks
-    // @ts-expect-error - Clearing readonly property for cleanup
-    this.overlay = null;
 
     console.log('[Renderer] Destroyed');
   }

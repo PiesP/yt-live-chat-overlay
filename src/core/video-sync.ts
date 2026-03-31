@@ -5,7 +5,7 @@
  * Provides callbacks for pause/play events to synchronize overlay animations.
  */
 
-import { findElementMatch, waitForElementMatch } from '@core/dom';
+import { findElementMatch, PLAYER_CONTAINER_SELECTORS, waitForElementMatch } from '@core/dom';
 
 /**
  * Callbacks for video state changes
@@ -26,11 +26,6 @@ const VIDEO_SELECTORS = [
   'video.html5-main-video',
   'video[src]',
 ] as const;
-
-/**
- * Player container selectors for MutationObserver
- */
-const PLAYER_CONTAINER_SELECTORS = ['#movie_player', '.html5-video-player'] as const;
 
 /**
  * Configuration constants

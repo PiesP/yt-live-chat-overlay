@@ -1,12 +1,11 @@
 import { type OverlaySettings, SETTINGS_LIMITS } from '@app-types';
-import { isVisibleElement, PLAYER_CONTAINER_SELECTORS, waitForElementMatch } from '@core/dom';
+import { ensurePlayerPositioning, findPlayerContainerElement } from '@core/dom';
 import { borderRadius, colors, shadows, spacing, typography, zIndex } from './design-tokens.js';
 
 const STYLE_ID = 'yt-chat-overlay-settings-style';
 const BUTTON_ID = 'yt-chat-overlay-settings-button';
 const BACKDROP_ID = 'yt-chat-overlay-settings-backdrop';
 const TITLE_ID = 'yt-chat-overlay-settings-title';
-const PLAYER_LOOKUP_ATTEMPTS = 5;
 const PLAYER_LOOKUP_INTERVAL_MS = 500;
 
 const AUTHOR_COLOR_KEYS = ['normal', 'member', 'moderator', 'owner', 'verified'] as const;
@@ -92,24 +91,7 @@ export class SettingsUi {
   }
 
   private async findPlayerContainer(): Promise<HTMLElement | null> {
-    const match = await waitForElementMatch<HTMLElement>(PLAYER_CONTAINER_SELECTORS, {
-      attempts: PLAYER_LOOKUP_ATTEMPTS,
-      intervalMs: PLAYER_LOOKUP_INTERVAL_MS,
-      predicate: isVisibleElement,
-    });
-
-    if (!match) {
-      console.warn('[YT Chat Overlay] Settings UI: player container not found');
-      return null;
-    }
-
-    return match.element;
-  }
-
-  private ensurePlayerPositioning(player: HTMLElement): void {
-    if (window.getComputedStyle(player).position === 'static') {
-      player.style.position = 'relative';
-    }
+    return findPlayerContainerElement({ intervalMs: PLAYER_LOOKUP_INTERVAL_MS });
   }
 
   private ensureButton(player: HTMLElement): void {
@@ -125,7 +107,7 @@ export class SettingsUi {
       this.button.remove();
     }
 
-    this.ensurePlayerPositioning(player);
+    ensurePlayerPositioning(player);
 
     player.appendChild(this.button);
   }

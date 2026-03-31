@@ -12,6 +12,7 @@ import type {
   OverlaySettings,
   SuperChatInfo,
 } from '@app-types';
+import { parseRgbColor } from '@core/design-tokens';
 import { findElementMatch, sleep } from '@core/dom';
 import { isAllowedYouTubeImageUrl } from '@core/image-url';
 
@@ -201,8 +202,10 @@ export class ChatSource {
     console.log('[YT Chat Overlay] Looking for chat container...');
     console.log('[YT Chat Overlay] Current URL:', window.location.href);
 
-    // Debug: Log what chat-related elements exist
-    this.debugLogChatElements();
+    // Debug: Log what chat-related elements exist (debug level only)
+    if (this.getSettings?.().logLevel === 'debug') {
+      this.debugLogChatElements();
+    }
 
     // Try iframe first (multiple selectors)
     const iframe = this.findChatIframe();
@@ -1053,12 +1056,10 @@ export class ChatSource {
     }
 
     // Parse RGB values from backgroundColor
-    const rgbMatch = backgroundColor.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
-    if (!rgbMatch) return 'blue'; // fallback
+    const rgb = parseRgbColor(backgroundColor);
+    if (!rgb) return 'blue'; // fallback
 
-    const r = parseInt(rgbMatch[1] || '0', 10);
-    const g = parseInt(rgbMatch[2] || '0', 10);
-    const b = parseInt(rgbMatch[3] || '0', 10);
+    const { r, g, b } = rgb;
 
     // YouTube Super Chat color tiers (approximate RGB ranges)
     // Red: $100+ (rgb(230, 33, 23))

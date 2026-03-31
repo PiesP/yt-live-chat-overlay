@@ -72,3 +72,35 @@ export const waitForElementMatch = async <T extends Element>(
 
   return null;
 };
+
+/**
+ * Ensure a player element has CSS positioning so absolutely-positioned
+ * children (overlay, settings button) are placed relative to it.
+ */
+export const ensurePlayerPositioning = (element: HTMLElement): void => {
+  if (window.getComputedStyle(element).position === 'static') {
+    element.style.position = 'relative';
+  }
+};
+
+/**
+ * Find the YouTube player container element.
+ * Shared by Overlay and SettingsUi to avoid duplicated lookup logic.
+ */
+export const findPlayerContainerElement = async (
+  options: { attempts?: number; intervalMs?: number } = {}
+): Promise<HTMLElement | null> => {
+  const match = await waitForElementMatch<HTMLElement>(PLAYER_CONTAINER_SELECTORS, {
+    attempts: options.attempts ?? DEFAULT_WAIT_ATTEMPTS,
+    intervalMs: options.intervalMs ?? DEFAULT_WAIT_INTERVAL_MS,
+    predicate: isVisibleElement,
+  });
+
+  if (!match) {
+    console.warn('[YT Chat Overlay] No player container found');
+    return null;
+  }
+
+  console.log('[YT Chat Overlay] Player found with selector:', match.selector);
+  return match.element;
+};

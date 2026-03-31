@@ -7,7 +7,7 @@
 
 import { DEFAULT_SETTINGS, type OverlaySettings } from '@app-types';
 
-const STORAGE_KEY = 'yt-live-chat-overlay-settings';
+export const STORAGE_KEY = 'yt-live-chat-overlay-settings';
 
 interface StoredSettings extends Partial<OverlaySettings> {
   debugLogging?: boolean;

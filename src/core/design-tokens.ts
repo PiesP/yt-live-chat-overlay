@@ -105,14 +105,6 @@ export const borderRadius = {
   full: '50%',
 } as const;
 
-export const animation = {
-  duration: {
-    min: 5000,
-    max: 12000,
-  },
-  laneDelay: 300,
-} as const;
-
 export const zIndex = {
   base: 10000,
   messages: 10001,
@@ -121,6 +113,16 @@ export const zIndex = {
 } as const;
 
 const clampAlpha = (alpha: number): number => Math.min(1, Math.max(0, alpha));
+
+export function parseRgbColor(colorString: string): RgbColor | null {
+  const match = colorString.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+  if (!match) return null;
+  return {
+    r: parseInt(match[1] ?? '0', 10),
+    g: parseInt(match[2] ?? '0', 10),
+    b: parseInt(match[3] ?? '0', 10),
+  };
+}
 
 export function rgba(color: RgbColor, alpha: number): string {
   return `rgba(${color.r}, ${color.g}, ${color.b}, ${clampAlpha(alpha)})`;

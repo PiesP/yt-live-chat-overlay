@@ -35,7 +35,7 @@ class App {
   private readonly settings: Settings;
   private chatSource: ChatSource | null = null;
   private overlay: Overlay | null = null;
-  private _renderer: Renderer | null = null;
+  private renderer: Renderer | null = null;
   private videoSync: VideoSync | null = null;
   private readonly settingsUi: SettingsUi;
   private isInitialized = false;
@@ -53,17 +53,14 @@ class App {
     this.handlePageChange();
   };
   private readonly handleVideoPause = (): void => {
-    this._renderer?.pause();
+    this.renderer?.pause();
   };
   private readonly handleVideoPlay = (): void => {
-    this._renderer?.resume();
-  };
-  private readonly handleVideoSeeking = (): void => {
-    // Optional: no action needed for now
+    this.renderer?.resume();
   };
   private readonly handleVideoRateChange = (rate: number): void => {
     console.log('[App] Video playback rate changed:', rate);
-    this._renderer?.setPlaybackRate(rate);
+    this.renderer?.setPlaybackRate(rate);
   };
 
   constructor() {
@@ -146,25 +143,23 @@ class App {
     }
   }
 
-  private async createOverlayRuntime(settings: OverlaySettings): Promise<boolean> {
+  private createOverlayRuntime(settings: OverlaySettings): Promise<boolean> | false {
     const overlay = new Overlay();
-    const created = await overlay.create(settings);
-
-    if (!created) {
-      overlay.destroy();
-      return false;
-    }
-
-    this.overlay = overlay;
-    this._renderer = new Renderer(overlay, settings);
-    return true;
+    return overlay.create(settings).then((created) => {
+      if (!created) {
+        overlay.destroy();
+        return false;
+      }
+      this.overlay = overlay;
+      this.renderer = new Renderer(overlay, settings);
+      return true;
+    });
   }
 
   private createVideoSync(): VideoSync {
     return new VideoSync({
       onPause: this.handleVideoPause,
       onPlay: this.handleVideoPlay,
-      onSeeking: this.handleVideoSeeking,
       onRateChange: this.handleVideoRateChange,
     });
   }
@@ -172,7 +167,7 @@ class App {
   private async startChatSource(): Promise<boolean> {
     const chatSource = new ChatSource(() => this.settings.get());
     const started = await chatSource.start((message) => {
-      this._renderer?.addMessage(message);
+      this.renderer?.addMessage(message);
     });
 
     if (!started) {
@@ -321,8 +316,8 @@ class App {
 
     if (this.shouldRefreshOverlay(partial)) {
       void this.recreateOverlay(nextSettings);
-    } else if (this._renderer) {
-      this._renderer.updateSettings(nextSettings);
+    } else if (this.renderer) {
+      this.renderer.updateSettings(nextSettings);
     }
 
     console.log('[App] Settings updated');
@@ -387,7 +382,7 @@ class App {
         return;
       }
 
-      this._renderer = new Renderer(overlay, settings);
+      this.renderer = new Renderer(overlay, settings);
     } catch (error) {
       if (this.overlay === overlay) {
         this.overlay = null;
@@ -398,13 +393,6 @@ class App {
 
   resetSettings(): void {
     this.updateSettings(DEFAULT_SETTINGS);
-  }
-
-  /**
-   * Public access to renderer for manual testing
-   */
-  get renderer(): Renderer | null {
-    return this._renderer;
   }
 
   private destroyChatSource(): void {
@@ -422,10 +410,10 @@ class App {
   }
 
   private destroyRenderer(): void {
-    if (!this._renderer) return;
+    if (!this.renderer) return;
 
-    this._renderer.destroy();
-    this._renderer = null;
+    this.renderer.destroy();
+    this.renderer = null;
   }
 
   private destroyOverlay(): void {

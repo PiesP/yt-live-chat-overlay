@@ -1,4 +1,5 @@
 import type { LogLevel } from '@app-types';
+import { STORAGE_KEY } from '@core/settings';
 
 interface StoredSettingsLike {
   logLevel?: LogLevel;
@@ -7,7 +8,6 @@ interface StoredSettingsLike {
 
 type ConsoleLogArgs = Parameters<Console['log']>;
 
-const STORAGE_KEY = 'yt-live-chat-overlay-settings';
 const DEFAULT_LOG_LEVEL: LogLevel = 'warn';
 
 const LOG_PREFIXES = [

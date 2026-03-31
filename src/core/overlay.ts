@@ -6,10 +6,9 @@
  */
 
 import type { OverlayDimensions, OverlaySettings } from '@app-types';
-import { isVisibleElement, PLAYER_CONTAINER_SELECTORS, waitForElementMatch } from '@core/dom';
+import { ensurePlayerPositioning, findPlayerContainerElement } from '@core/dom';
 
 const OVERLAY_ID = 'yt-live-chat-overlay';
-const PLAYER_LOOKUP_ATTEMPTS = 5;
 const PLAYER_LOOKUP_INTERVAL_MS = 1000;
 const FULLSCREEN_UPDATE_DELAY_MS = 100;
 // Reduced from 1.3 → 1.2 to pack lanes more tightly (~8% more rows).
@@ -59,30 +58,14 @@ export class Overlay {
    * Find player container
    */
   private async findPlayerContainer(): Promise<HTMLElement | null> {
-    console.log('[YT Chat Overlay] Looking for player container...');
-
-    const match = await waitForElementMatch<HTMLElement>(PLAYER_CONTAINER_SELECTORS, {
-      attempts: PLAYER_LOOKUP_ATTEMPTS,
-      intervalMs: PLAYER_LOOKUP_INTERVAL_MS,
-      predicate: isVisibleElement,
-    });
-
-    if (!match) {
-      console.warn('[YT Chat Overlay] No player container found');
-      return null;
+    const player = await findPlayerContainerElement({ intervalMs: PLAYER_LOOKUP_INTERVAL_MS });
+    if (player) {
+      console.log('[YT Chat Overlay] Player dimensions:', {
+        width: player.offsetWidth,
+        height: player.offsetHeight,
+      });
     }
-
-    console.log('[YT Chat Overlay] Player found with selector:', match.selector, {
-      width: match.element.offsetWidth,
-      height: match.element.offsetHeight,
-    });
-    return match.element;
-  }
-
-  private ensurePlayerPositioning(playerElement: HTMLElement): void {
-    if (window.getComputedStyle(playerElement).position === 'static') {
-      playerElement.style.position = 'relative';
-    }
+    return player;
   }
 
   private createContainerElement(): HTMLDivElement {
@@ -171,7 +154,7 @@ export class Overlay {
     this.container = this.createContainerElement();
 
     // Insert into player
-    this.ensurePlayerPositioning(this.playerElement);
+    ensurePlayerPositioning(this.playerElement);
     this.playerElement.appendChild(this.container);
 
     this.observeResize(settings);
