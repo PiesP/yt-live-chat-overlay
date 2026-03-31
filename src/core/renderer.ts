@@ -886,8 +886,9 @@ export class Renderer {
       Math.min(LAYOUT.DURATION_MAX, (distance / effectiveSpeedPxPerSec) * 1000)
     );
 
-    // Staggered lane delay for visual variety
-    const laneDelay = (lane.index % LAYOUT.LANE_DELAY_CYCLE) * LAYOUT.LANE_DELAY_MS;
+    // Small random jitter so messages entering around the same time don't
+    // align into a visible diagonal staircase.
+    const laneDelay = Math.floor(Math.random() * LAYOUT.LANE_DELAY_CYCLE * LAYOUT.LANE_DELAY_MS);
     const totalDuration = duration + laneDelay;
 
     // Create Web Animation
@@ -1245,10 +1246,13 @@ export class Renderer {
   /**
    * Find the best lane placement (position + timing).
    *
-   * Tie-breaking strategy (when multiple blocks have the same readyTime):
-   * prefer the block whose lanes were used LEAST RECENTLY (LRU).  This
-   * distributes messages evenly across the full overlay height instead of
-   * clustering them in the top lanes.
+   * Selection strategy: collect all valid candidate blocks with their ready
+   * times, then pick **randomly** from those that are immediately available
+   * (readyTime <= now).  This prevents the staircase / diagonal pattern that
+   * arises when messages are placed in top-to-bottom sequential order during
+   * chat bursts.  When no lane is ready right now, pick randomly among the
+   * soonest-available group so the wait time is minimised while still
+   * avoiding visual clustering.
    */
   private findLanePlacement(messageHeight: number): LanePlacement | null {
     const now = Date.now();
@@ -1260,17 +1264,16 @@ export class Renderer {
       return null;
     }
 
-    let bestLane: LaneState | null = null;
-    let bestReadyTime = Number.POSITIVE_INFINITY;
-    // Largest lastItemStartTime in the best block (for LRU tie-breaking).
-    // We prefer blocks with a SMALLER maxLastUsed (older = less recently used).
-    let bestBlockMaxLastUsed = Number.POSITIVE_INFINITY;
+    interface BlockCandidate {
+      startIndex: number;
+      readyTime: number;
+    }
+
+    const candidates: BlockCandidate[] = [];
+    let minReadyTime = Number.POSITIVE_INFINITY;
 
     for (let i = 0; i <= this.lanes.length - requiredLanes; i++) {
       let blockReadyTime = now;
-      // Track the most-recent lastItemStartTime within this block to detect
-      // how recently ANY lane in the block was used.
-      let blockMaxLastUsed = 0;
 
       for (let offset = 0; offset < requiredLanes; offset++) {
         const lane = this.lanes[i + offset];
@@ -1278,34 +1281,35 @@ export class Renderer {
           blockReadyTime = Number.POSITIVE_INFINITY;
           break;
         }
-
-        const laneReadyTime = this.calculateLaneReadyTime(lane, now);
-        blockReadyTime = Math.max(blockReadyTime, laneReadyTime);
-        blockMaxLastUsed = Math.max(blockMaxLastUsed, lane.lastItemStartTime);
+        blockReadyTime = Math.max(blockReadyTime, this.calculateLaneReadyTime(lane, now));
       }
 
-      // Primary   : prefer the block that becomes ready soonest.
-      // Tie-break : prefer the block least recently used (older lastItemStartTime
-      //             → smaller blockMaxLastUsed) so messages are spread evenly
-      //             across the full screen height rather than clumping at the top.
-      if (
-        blockReadyTime < bestReadyTime ||
-        (blockReadyTime === bestReadyTime && blockMaxLastUsed < bestBlockMaxLastUsed)
-      ) {
-        bestReadyTime = blockReadyTime;
-        bestLane = this.lanes[i] || null;
-        bestBlockMaxLastUsed = blockMaxLastUsed;
-      }
+      if (!Number.isFinite(blockReadyTime)) continue;
+
+      candidates.push({ startIndex: i, readyTime: blockReadyTime });
+      minReadyTime = Math.min(minReadyTime, blockReadyTime);
     }
 
-    if (!bestLane || !Number.isFinite(bestReadyTime)) {
+    if (candidates.length === 0 || !Number.isFinite(minReadyTime)) {
       return null;
     }
 
+    // Prefer lanes that are ready right now; fall back to the soonest group.
+    const readyNow = candidates.filter((c) => c.readyTime <= now);
+    const pool =
+      readyNow.length > 0 ? readyNow : candidates.filter((c) => c.readyTime === minReadyTime);
+
+    // Random pick breaks the top-to-bottom sequential assignment pattern.
+    const chosen = pool[Math.floor(Math.random() * pool.length)];
+    if (!chosen) return null;
+
+    const chosenLane = this.lanes[chosen.startIndex];
+    if (!chosenLane) return null;
+
     return {
-      lane: bestLane,
+      lane: chosenLane,
       laneSpan: requiredLanes,
-      waitMs: Math.max(0, Math.ceil(bestReadyTime - now)),
+      waitMs: Math.max(0, Math.ceil(chosen.readyTime - now)),
     };
   }
 
