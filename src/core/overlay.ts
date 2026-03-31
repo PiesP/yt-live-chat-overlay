@@ -12,7 +12,11 @@ const OVERLAY_ID = 'yt-live-chat-overlay';
 const PLAYER_LOOKUP_ATTEMPTS = 5;
 const PLAYER_LOOKUP_INTERVAL_MS = 1000;
 const FULLSCREEN_UPDATE_DELAY_MS = 100;
-const BASE_LANE_HEIGHT_MULTIPLIER = 1.3;
+// Reduced from 1.3 → 1.2 to pack lanes more tightly (~8% more rows).
+// Requires the renderer to set line-height: 1.1 on messages so that the
+// rendered element height stays below (fontSize × 1.2 - padding), keeping
+// single-line messages in exactly 1 lane at all supported font sizes.
+const BASE_LANE_HEIGHT_MULTIPLIER = 1.2;
 const OVERLAY_Z_INDEX = '100';
 
 const calculateOverlayDimensions = (
@@ -26,11 +30,11 @@ const calculateOverlayDimensions = (
     return null;
   }
 
-  // Base lane height for dynamic allocation
-  // Single-line messages (without author) will use 1 lane (~1.3x fontSize)
-  // Two-line messages (with author info) will use 2+ lanes dynamically
-  // This allows more efficient space utilization - approximately 2x more lanes available
-  // The renderer will dynamically allocate multiple lanes based on actual message height
+  // Base lane height for dynamic allocation.
+  // Single-line messages (without author) use 1 lane (~1.2x fontSize).
+  // Two-line messages (with author info) use 2+ lanes dynamically.
+  // line-height: 1.1 is set on message elements so rendered height stays
+  // within one lane slot at all supported font sizes (18-40 px).
   const laneHeight = settings.fontSize * BASE_LANE_HEIGHT_MULTIPLIER + settings.laneSpacing;
   const usableHeight = height * (1 - settings.safeTop - settings.safeBottom);
   const laneCount = Math.max(1, Math.floor(usableHeight / laneHeight));

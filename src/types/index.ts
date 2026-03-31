@@ -241,7 +241,7 @@ export const SETTINGS_LIMITS = {
   opacity: { min: 0.5, max: 1, step: 0.05 },
   superChatOpacity: { min: 0.35, max: 1, step: 0.05 },
   safeTop: { min: 0, max: 0.25, step: 0.01 },
-  safeBottom: { min: 0, max: 0.25, step: 0.01 },
+  safeBottom: { min: 0, max: 0.5, step: 0.01 },
   maxConcurrentMessages: { min: 30, max: 100, step: 10 },
   maxMessagesPerSecond: { min: 1, max: 20, step: 1 },
   minTextLength: { min: 1, max: 10, step: 1 },
@@ -270,20 +270,24 @@ export const DEFAULT_SETTINGS = {
   opacity: 0.85,
   /** Super Chat card tint opacity – lower = more transparent over video. */
   superChatOpacity: 0.35,
-  /** Keep the top 10 % clear (title bar / stream info area). */
-  safeTop: 0.1,
+  /** Start from the very top of the video (no top safe zone). */
+  safeTop: 0,
   /**
-   * Keep the bottom 15 % clear (player controls, chat toggle, etc.).
-   * Slightly larger than the old default to avoid covering the control bar.
+   * Keep the bottom 40 % clear so comments only cover the top 60 % of the
+   * video area (safeTop 0 % + active 60 % + safeBottom 40 % = 100 %).
    */
-  safeBottom: 0.15,
-  /** Soft cap for performance monitoring (not strictly enforced). */
-  maxConcurrentMessages: 30,
+  safeBottom: 0.4,
   /**
-   * Hard rate limit: at most 4 messages per second reach the overlay.
-   * Keeps the screen from becoming unreadable during chat bursts.
+   * Soft cap for performance monitoring (not strictly enforced).
+   * Raised from 30 → 40 to accommodate the additional lanes created by the
+   * tighter BASE_LANE_HEIGHT_MULTIPLIER.
    */
-  maxMessagesPerSecond: 4,
+  maxConcurrentMessages: 40,
+  /**
+   * Hard rate limit: at most 6 messages per second reach the overlay.
+   * Raised from 4 → 6 for a denser default display while remaining readable.
+   */
+  maxMessagesPerSecond: 6,
   /** Keep strict mode by default to reduce chat noise. */
   allowShortTextMessages: false,
   /** Require at least 3 visible characters for regular messages. */
@@ -296,6 +300,7 @@ export const DEFAULT_SETTINGS = {
   colors: DEFAULT_COLORS,
   /** Light outline preserves readability on bright video frames. */
   outline: DEFAULT_OUTLINE,
-  /** No extra vertical gap by default – preserves existing compact layout. */
+  /** No extra vertical gap – the tight BASE_LANE_HEIGHT_MULTIPLIER already
+   *  gives a compact layout; increase this to add breathing room between lanes. */
   laneSpacing: 0,
 } as const satisfies Readonly<OverlaySettings>;

@@ -94,16 +94,16 @@ const LAYOUT = {
 
   // Collision detection
   // Safe distance = minimum pixel gap between messages in the same lane.
-  // Reduced from 0.7/16 → 0.5/10 for denser horizontal packing while
-  // still preventing visual overlap at all supported font sizes.
-  SAFE_DISTANCE_SCALE: 0.5, // relative to fontSize
-  SAFE_DISTANCE_MIN: 10, // px
+  // Reduced from 0.7/16 → 0.5/10 → 0.3/6 for tighter horizontal packing
+  // while still preventing visual overlap at all supported font sizes.
+  SAFE_DISTANCE_SCALE: 0.3, // relative to fontSize
+  SAFE_DISTANCE_MIN: 6, // px
   // Vertical clear time guards the brief window while the previous message
   // is still partially behind the screen's right edge.  Reduced from
-  // 120/320 ms → 40/160 ms because the horizontal readiness check already
-  // dominates for any message wider than ~30 px.
-  VERTICAL_CLEAR_TIME_MIN: 40, // ms
-  VERTICAL_CLEAR_TIME_MAX: 160, // ms
+  // 120/320 ms → 40/160 ms → 20/80 ms for faster lane turnover; the
+  // horizontal readiness check already dominates for messages wider than ~30 px.
+  VERTICAL_CLEAR_TIME_MIN: 20, // ms
+  VERTICAL_CLEAR_TIME_MAX: 80, // ms
   LANE_HEIGHT_PADDING_SCALE: 0.06, // relative to fontSize
   LANE_HEIGHT_PADDING_MIN: 1, // px
   RETRY_DELAY_MIN_MS: 16, // ms
@@ -171,6 +171,10 @@ export class Renderer {
         white-space: nowrap;
         font-family: system-ui, -apple-system, sans-serif;
         font-weight: ${typography.fontWeight.bold};
+        /* Explicit line-height keeps rendered element height at fontSize × 1.1.
+           This is required for single-line messages to fit in exactly 1 lane
+           slot when BASE_LANE_HEIGHT_MULTIPLIER = 1.2. */
+        line-height: 1.1;
         text-shadow: ${textShadow};
         -webkit-text-stroke: ${textStroke};
         color: ${colors.ui.text};
