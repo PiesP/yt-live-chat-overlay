@@ -165,17 +165,31 @@ class App {
   }
 
   private async startChatSource(): Promise<boolean> {
+    const generation = this.startGeneration;
     const chatSource = new ChatSource(() => this.settings.get());
+
+    // Register immediately so cleanup() can stop in-flight start() work.
+    this.chatSource = chatSource;
+
     const started = await chatSource.start((message) => {
+      if (this.startGeneration !== generation) return;
       this.renderer?.addMessage(message);
     });
 
-    if (!started) {
+    // If ownership changed during async start, ensure stale source is stopped.
+    if (this.chatSource !== chatSource) {
       chatSource.stop();
       return false;
     }
 
-    this.chatSource = chatSource;
+    if (!started) {
+      chatSource.stop();
+      if (this.chatSource === chatSource) {
+        this.chatSource = null;
+      }
+      return false;
+    }
+
     return true;
   }
 
@@ -265,14 +279,19 @@ class App {
     this.pendingRestart = false;
 
     try {
-      const currentUrl = location.href;
-      if (this.shouldSkipRestart(currentUrl)) {
+      const targetUrl = location.href;
+      if (this.shouldSkipRestart(targetUrl)) {
         return;
       }
 
       console.log('[App] Page changed, restarting...');
       this.cleanup();
       await sleep(NAVIGATION_SETTLE_DELAY_MS);
+
+      if (location.href !== targetUrl) {
+        console.log('[App] URL changed during settle delay, skipping stale restart');
+        return;
+      }
 
       if (!this.canRestartAfterNavigation()) {
         return;
