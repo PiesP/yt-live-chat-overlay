@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.2] - 2026-04-01
+
+### Fixed
+- **SPA 내비게이션 재시작 안정성 개선**
+  - 내비게이션 재시작 시 settle 대기 중 URL이 다시 바뀌면 stale 재시작을 건너뛰도록 보호 로직 추가
+  - `startChatSource()`에서 세대(`startGeneration`) 기반 가드와 소유권 검사(`this.chatSource !== chatSource`)를 적용해 비동기 시작 경합 중 이전 인스턴스가 메시지를 주입하거나 상태를 오염시키는 문제 방지
+  - 채팅 소스 시작 실패 시 `this.chatSource` 참조를 명시적으로 정리해 cleanup/재시작 경로의 일관성 향상
+
+### Dependencies
+- 개발 의존성 조정: `@biomejs/biome`, `@biomejs/cli-linux-x64`를 `2.4.9`로 하향 조정
+
 ## [0.7.1] - 2026-03-31
 
 ### Fixed
