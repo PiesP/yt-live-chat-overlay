@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.0] - 2026-04-12
+
+### Added
+- **백그라운드 탭 처리 개선 (Page Visibility API)**
+  - 탭이 숨겨질 때 렌더러를 자동 일시정지하여 브라우저 타이머 스로틀링으로 인한 복귀 시 메시지 폭발 방지
+  - 탭 복귀 시 비디오 재생 중인 경우에만 렌더러를 재개 (일시정지 상태 인식)
+- **채팅 MutationObserver 감시 및 재연결**
+  - 15초 주기로 옵저버 생존 여부를 확인하는 감시 루프 추가
+  - YouTube가 채팅 `#items` 컨테이너를 언마운트한 경우 옵저버를 자동으로 재연결
+- **탐색(Seek) 시 메시지 큐 초기화**
+  - 비디오 탐색 이벤트 발생 시 대기 중인 메시지 큐를 비워 탐색 후 구 메시지 표시 방지
+
+### Fixed
+- **메시지 큐 무한 증가 방지**
+  - 대기 큐 최대 크기를 150개로 제한하고, 초과 시 오래된 항목부터 제거
+- **애니메이션 취소 시 레인 누수 방지**
+  - `finish` 이벤트와 함께 `cancel` 이벤트도 처리하여 외부에서 애니메이션이 중단될 때 `activeMessages`에서 요소가 정리되지 않던 문제 수정
+
+### Changed
+- **설정 UI 탭 기반 재설계**
+  - 설정 항목을 Display / Style / Authors / Filter 4개 탭으로 분류
+  - 항목명을 직관적으로 개선 (예: "Safe top/bottom" → "Top/Bottom Clear Zone", "Speed (px/s)" → "Scroll Speed (px/s)")
+  - 탭 재진입 시 마지막 활성 탭 유지
+  - 숨겨진 탭 패널의 입력 요소가 포커스 트랩에 포함되지 않도록 개선
+
 ## [0.7.2] - 2026-04-01
 
 ### Fixed
