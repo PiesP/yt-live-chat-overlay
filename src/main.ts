@@ -49,6 +49,9 @@ class App {
    * from corrupting state after cleanup has been called.
    */
   private startGeneration = 0;
+  private visibilityHandler: (() => void) | null = null;
+  private chatWatchdogInterval: number | null = null;
+  private hiddenWhilePlaying = false;
   private readonly handlePageWatcherChange = (): void => {
     this.handlePageChange();
   };
@@ -61,6 +64,9 @@ class App {
   private readonly handleVideoRateChange = (rate: number): void => {
     console.log('[App] Video playback rate changed:', rate);
     this.renderer?.setPlaybackRate(rate);
+  };
+  private readonly handleVideoSeeking = (): void => {
+    this.renderer?.flushQueue();
   };
 
   constructor() {
@@ -125,6 +131,8 @@ class App {
       await this.videoSync.init();
       if (guard.isCancelled()) return;
 
+      this.setupVisibilityHandler();
+
       const chatStarted = await this.startChatSource();
       if (guard.isCancelled()) return;
 
@@ -133,6 +141,8 @@ class App {
         this.cleanup();
         return;
       }
+
+      this.setupChatWatchdog();
 
       this.isInitialized = true;
       this.lastStartedUrl = location.href;
@@ -161,6 +171,7 @@ class App {
       onPause: this.handleVideoPause,
       onPlay: this.handleVideoPlay,
       onRateChange: this.handleVideoRateChange,
+      onSeeking: this.handleVideoSeeking,
     });
   }
 
@@ -191,6 +202,45 @@ class App {
     }
 
     return true;
+  }
+
+  /**
+   * Listen for tab visibility changes. Pauses the renderer when the tab is
+   * hidden so that background timer throttling does not cause a burst of
+   * animations on return. Resumes only if the video is also playing.
+   */
+  private setupVisibilityHandler(): void {
+    this.visibilityHandler = () => {
+      if (document.hidden) {
+        if (!this.renderer?.isPausedState()) {
+          this.renderer?.pause();
+          this.hiddenWhilePlaying = true;
+        }
+      } else {
+        if (this.hiddenWhilePlaying && !this.videoSync?.isPaused()) {
+          this.renderer?.resume();
+        }
+        this.hiddenWhilePlaying = false;
+      }
+    };
+    document.addEventListener('visibilitychange', this.visibilityHandler);
+  }
+
+  /**
+   * Start a periodic check that re-attaches the MutationObserver if YouTube
+   * unmounts the chat #items container (e.g. on tab hide / chat collapse).
+   */
+  private setupChatWatchdog(): void {
+    const WATCHDOG_INTERVAL_MS = 15_000;
+    this.chatWatchdogInterval = window.setInterval(() => {
+      if (!this.chatSource || !this.isInitialized) return;
+      if (!this.chatSource.isObserverAlive()) {
+        console.warn('[App] Chat observer dead — attempting reconnect');
+        this.chatSource.reconnect().catch((err: unknown) => {
+          console.warn('[App] Chat reconnect failed:', err);
+        });
+      }
+    }, WATCHDOG_INTERVAL_MS);
   }
 
   private clearRestartTimer(): void {
@@ -463,6 +513,17 @@ class App {
     this.clearRestartTimer();
     this.pendingRestart = false;
     this.settingsUi.close();
+
+    if (this.visibilityHandler) {
+      document.removeEventListener('visibilitychange', this.visibilityHandler);
+      this.visibilityHandler = null;
+    }
+    this.hiddenWhilePlaying = false;
+
+    if (this.chatWatchdogInterval !== null) {
+      window.clearInterval(this.chatWatchdogInterval);
+      this.chatWatchdogInterval = null;
+    }
 
     this.destroyChatSource();
     this.destroyVideoSync();

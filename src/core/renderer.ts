@@ -110,6 +110,7 @@ const LAYOUT = {
   RETRY_DELAY_MIN_MS: 16, // ms
   RETRY_DELAY_MAX_MS: 800, // ms
   QUEUE_LOOKAHEAD_LIMIT: 20, // queue scan window for scheduling (increased from 14)
+  QUEUE_MAX_SIZE: 150, // max queued messages; oldest dropped on overflow
 } as const;
 
 export class Renderer {
@@ -927,6 +928,15 @@ export class Renderer {
       { once: true }
     );
 
+    // Also remove if animation is cancelled externally (e.g. element removed from DOM)
+    animation.addEventListener(
+      'cancel',
+      () => {
+        this.removeMessageByElement(element);
+      },
+      { once: true }
+    );
+
     return {
       element,
       lane: lane.index,
@@ -951,6 +961,12 @@ export class Renderer {
     if (this.processedInLastSecond >= this.settings.maxMessagesPerSecond) {
       // Drop message
       return;
+    }
+
+    // Drop oldest entries if queue is full to prevent animation flood after long pause
+    if (this.messageQueue.length >= LAYOUT.QUEUE_MAX_SIZE) {
+      const excess = this.messageQueue.length - LAYOUT.QUEUE_MAX_SIZE + 1;
+      this.messageQueue.splice(0, excess);
     }
 
     this.messageQueue.push({
@@ -1404,6 +1420,15 @@ export class Renderer {
    */
   isPausedState(): boolean {
     return this.isPaused;
+  }
+
+  /**
+   * Discard all queued (not yet rendered) messages.
+   * Called on seek to prevent stale messages from appearing after a position change.
+   */
+  flushQueue(): void {
+    this.messageQueue = [];
+    this.clearRetryTimer();
   }
 
   /**

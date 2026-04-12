@@ -1105,4 +1105,43 @@ export class ChatSource {
     const now = Date.now();
     return now - this.lastMessageTime < 30000; // 30 seconds
   }
+
+  /**
+   * Returns true if the MutationObserver is still attached to a live DOM node.
+   * Used by the watchdog in App to detect silent observer death (e.g. YouTube
+   * unmounting the chat #items container when the tab is backgrounded or the
+   * chat panel is collapsed/reconstructed).
+   */
+  isObserverAlive(): boolean {
+    return (
+      this.observer !== null && this.chatContainer !== null && document.contains(this.chatContainer)
+    );
+  }
+
+  /**
+   * Re-acquire the chat container and re-attach the MutationObserver.
+   * Called by the App watchdog when isObserverAlive() returns false.
+   * Performs a single attempt; the watchdog retries on the next interval tick.
+   */
+  async reconnect(): Promise<void> {
+    if (this.stopped || !this.callback) return;
+
+    console.log('[YT Chat Overlay] Reconnecting MutationObserver...');
+    this.observer?.disconnect();
+    this.observer = null;
+    this.chatContainer = null;
+
+    const container = await this.findChatContainer();
+    if (this.stopped || !container) return;
+
+    this.chatContainer = container;
+    this.observer = new MutationObserver((mutations) => {
+      this.handleMutations(mutations);
+    });
+    this.observer.observe(this.chatContainer, {
+      childList: true,
+      subtree: false,
+    });
+    console.log('[YT Chat Overlay] MutationObserver reconnected');
+  }
 }
