@@ -86,7 +86,6 @@ export default defineConfig(({ mode }): UserConfig => {
       rollupOptions: {
         output: {
           entryFileNames: outputFileName,
-          inlineDynamicImports: true,
           // This userscript bundle is consumed as a single IIFE
           exports: 'none',
         },

@@ -48,6 +48,7 @@ export class SettingsUi {
   private backdrop: HTMLDivElement | null = null;
   private modal: HTMLDivElement | null = null;
   private previousFocus: HTMLElement | null = null;
+  private activeTab = 'display';
 
   private readonly handleKeydown = (event: KeyboardEvent) => {
     if (event.key === 'Escape') {
@@ -91,7 +92,9 @@ export class SettingsUi {
   }
 
   private async findPlayerContainer(): Promise<HTMLElement | null> {
-    return findPlayerContainerElement({ intervalMs: PLAYER_LOOKUP_INTERVAL_MS });
+    return findPlayerContainerElement({
+      intervalMs: PLAYER_LOOKUP_INTERVAL_MS,
+    });
   }
 
   private ensureButton(player: HTMLElement): void {
@@ -120,156 +123,240 @@ export class SettingsUi {
     const style = document.createElement('style');
     style.id = STYLE_ID;
     style.textContent = `
-        .yt-chat-overlay-settings-button {
-          position: absolute;
-          top: ${spacing.sm}px;
-          right: ${spacing.sm}px;
-          width: ${spacing.xxxl}px;
-          height: ${spacing.xxxl}px;
-          border-radius: ${borderRadius.sm};
-          border: 1px solid rgba(255, 255, 255, 0.25);
-          background: rgba(0, 0, 0, 0.6);
-          color: ${colors.ui.text};
-          font-size: ${typography.fontSize.base};
-          cursor: pointer;
-          z-index: 120;
-          pointer-events: auto;
-        }
-        .yt-chat-overlay-settings-button:hover {
-          background: rgba(0, 0, 0, 0.75);
-        }
-        .yt-chat-overlay-settings-backdrop {
-          position: fixed;
-          inset: 0;
-          display: none;
-          align-items: center;
-          justify-content: center;
-          background: rgba(0, 0, 0, 0.55);
-          z-index: ${zIndex.modal};
-        }
-        .yt-chat-overlay-settings-modal {
-          width: 380px;
-          max-height: 82vh;
-          overflow: auto;
-          background: ${colors.ui.background};
-          color: ${colors.ui.text};
-          border-radius: ${borderRadius.md};
-          padding: ${spacing.lg}px;
-          display: flex;
-          flex-direction: column;
-          gap: ${spacing.lg}px;
-          font-family: system-ui, -apple-system, sans-serif;
-          box-shadow: ${shadows.box.lg};
-        }
-        .yt-chat-overlay-settings-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          font-weight: ${typography.fontWeight.bold};
-          font-size: ${typography.fontSize.base};
-        }
-        .yt-chat-overlay-settings-close {
-          border: none;
-          background: transparent;
-          color: ${colors.ui.text};
-          font-size: ${typography.fontSize.lg};
-          cursor: pointer;
-        }
-        .yt-chat-overlay-settings-section {
-          display: flex;
-          flex-direction: column;
-          gap: ${spacing.md}px;
-        }
-        .yt-chat-overlay-settings-section-title {
-          font-size: ${typography.fontSize.xs};
-          color: ${colors.ui.textMuted};
-          text-transform: uppercase;
-          letter-spacing: 0.04em;
-        }
-        .yt-chat-overlay-settings-field {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: ${spacing.md}px;
-          font-size: ${typography.fontSize.sm};
-        }
-        .yt-chat-overlay-settings-field input[type="number"] {
-          width: 110px;
-          padding: ${spacing.xs}px ${spacing.sm}px;
-          border-radius: ${borderRadius.sm};
-          border: 1px solid ${colors.ui.border};
-          background: ${colors.ui.backgroundLight};
-          color: ${colors.ui.text};
-        }
-        .yt-chat-overlay-settings-field input[type="color"] {
-          width: 48px;
-          height: 28px;
-          border: none;
-          background: transparent;
-          padding: 0;
-        }
-        .yt-chat-overlay-settings-field input[type="checkbox"] {
-          width: 18px;
-          height: 18px;
-          cursor: pointer;
-        }
-        .yt-chat-overlay-settings-field select {
-          padding: ${spacing.xs}px ${spacing.sm}px;
-          border-radius: ${borderRadius.sm};
-          border: 1px solid ${colors.ui.border};
-          background: ${colors.ui.backgroundLight};
-          color: ${colors.ui.text};
-          cursor: pointer;
-        }
-        .yt-chat-overlay-author-grid {
-          display: grid;
-          grid-template-columns: auto 1fr auto;
-          gap: ${spacing.sm}px ${spacing.md}px;
-          align-items: center;
-          padding: ${spacing.sm}px 0;
-        }
-        .yt-chat-overlay-author-grid-header {
-          font-size: ${typography.fontSize.xs};
-          color: ${colors.ui.textMuted};
-          text-align: center;
-        }
-        .yt-chat-overlay-author-grid-label {
-          font-size: ${typography.fontSize.sm};
-          min-width: 80px;
-        }
-        .yt-chat-overlay-author-grid-color {
-          justify-self: end;
-        }
-        .yt-chat-overlay-author-grid-checkbox {
-          justify-self: end;
-        }
-        .yt-chat-overlay-settings-field input[type="number"]:disabled,
-        .yt-chat-overlay-settings-field input[type="text"]:disabled {
-          opacity: 0.4;
-          cursor: not-allowed;
-        }
-        .yt-chat-overlay-settings-actions {
-          display: flex;
-          justify-content: flex-end;
-          gap: ${spacing.sm}px;
-          padding-top: ${spacing.xs}px;
-        }
-        .yt-chat-overlay-settings-actions button {
-          border: none;
-          border-radius: ${borderRadius.sm};
-          padding: ${spacing.sm}px ${spacing.md}px;
-          cursor: pointer;
-          font-weight: ${typography.fontWeight.semibold};
-        }
-        .yt-chat-overlay-settings-actions button[data-action="reset"] {
-          background: ${colors.ui.danger};
-          color: ${colors.ui.text};
-        }
-        .yt-chat-overlay-settings-actions button[data-action="apply"] {
-          background: ${colors.ui.primary};
-          color: ${colors.ui.text};
-        }
-      `;
+      .yt-chat-overlay-settings-button {
+        position: absolute;
+        top: ${spacing.sm}px;
+        right: ${spacing.sm}px;
+        width: ${spacing.xxxl}px;
+        height: ${spacing.xxxl}px;
+        border-radius: ${borderRadius.sm};
+        border: 1px solid rgba(255, 255, 255, 0.25);
+        background: rgba(0, 0, 0, 0.6);
+        color: ${colors.ui.text};
+        font-size: ${typography.fontSize.base};
+        cursor: pointer;
+        z-index: 120;
+        pointer-events: auto;
+      }
+      .yt-chat-overlay-settings-button:hover {
+        background: rgba(0, 0, 0, 0.75);
+      }
+      .yt-chat-overlay-settings-backdrop {
+        position: fixed;
+        inset: 0;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0, 0, 0, 0.55);
+        z-index: ${zIndex.modal};
+      }
+      .yt-chat-overlay-settings-modal {
+        width: 400px;
+        max-height: 82vh;
+        overflow: hidden;
+        background: ${colors.ui.background};
+        color: ${colors.ui.text};
+        border-radius: ${borderRadius.md};
+        padding: ${spacing.lg}px;
+        display: flex;
+        flex-direction: column;
+        gap: ${spacing.md}px;
+        font-family: system-ui, -apple-system, sans-serif;
+        box-shadow: ${shadows.box.lg};
+      }
+      /* Header */
+      .yt-chat-overlay-settings-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-weight: ${typography.fontWeight.bold};
+        font-size: ${typography.fontSize.base};
+        flex-shrink: 0;
+      }
+      .yt-chat-overlay-settings-close {
+        border: none;
+        background: transparent;
+        color: ${colors.ui.textMuted};
+        font-size: ${typography.fontSize.lg};
+        cursor: pointer;
+        padding: 0 ${spacing.xs}px;
+        line-height: 1;
+      }
+      .yt-chat-overlay-settings-close:hover {
+        color: ${colors.ui.text};
+      }
+      /* Tab bar */
+      .yt-chat-overlay-settings-tabs {
+        display: flex;
+        border-bottom: 1px solid ${colors.ui.border};
+        flex-shrink: 0;
+      }
+      .yt-chat-overlay-settings-tab {
+        flex: 1;
+        padding: ${spacing.sm}px ${spacing.xs}px;
+        border: none;
+        border-bottom: 2px solid transparent;
+        background: transparent;
+        color: ${colors.ui.textMuted};
+        font-size: ${typography.fontSize.xs};
+        font-weight: ${typography.fontWeight.semibold};
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        cursor: pointer;
+        margin-bottom: -1px;
+        transition: color 0.1s;
+      }
+      .yt-chat-overlay-settings-tab:hover {
+        color: ${colors.ui.text};
+      }
+      .yt-chat-overlay-settings-tab.active {
+        color: ${colors.ui.primary};
+        border-bottom-color: ${colors.ui.primary};
+      }
+      /* Tab panes */
+      .yt-chat-overlay-settings-pane {
+        display: flex;
+        flex-direction: column;
+        gap: ${spacing.md}px;
+        overflow-y: auto;
+        flex: 1;
+        min-height: 0;
+        padding-right: 2px;
+      }
+      .yt-chat-overlay-settings-pane[hidden] {
+        display: none;
+      }
+      /* Sections within a pane */
+      .yt-chat-overlay-settings-section {
+        display: flex;
+        flex-direction: column;
+        gap: ${spacing.md}px;
+      }
+      .yt-chat-overlay-settings-section-title {
+        font-size: ${typography.fontSize.xs};
+        color: ${colors.ui.textMuted};
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        padding-bottom: 4px;
+        border-bottom: 1px solid ${colors.ui.border};
+      }
+      /* Row fields */
+      .yt-chat-overlay-settings-field {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: ${spacing.md}px;
+        font-size: ${typography.fontSize.sm};
+      }
+      .yt-chat-overlay-settings-field input[type="number"] {
+        width: 86px;
+        padding: ${spacing.xs}px ${spacing.sm}px;
+        border-radius: ${borderRadius.sm};
+        border: 1px solid ${colors.ui.border};
+        background: ${colors.ui.backgroundLight};
+        color: ${colors.ui.text};
+        text-align: right;
+      }
+      .yt-chat-overlay-settings-field input[type="color"] {
+        width: 44px;
+        height: 26px;
+        border: none;
+        background: transparent;
+        padding: 0;
+        cursor: pointer;
+      }
+      .yt-chat-overlay-settings-field input[type="checkbox"] {
+        width: 18px;
+        height: 18px;
+        cursor: pointer;
+        accent-color: ${colors.ui.primary};
+      }
+      .yt-chat-overlay-settings-field select {
+        padding: ${spacing.xs}px ${spacing.sm}px;
+        border-radius: ${borderRadius.sm};
+        border: 1px solid ${colors.ui.border};
+        background: ${colors.ui.backgroundLight};
+        color: ${colors.ui.text};
+        cursor: pointer;
+      }
+      .yt-chat-overlay-settings-field input[type="number"]:disabled,
+      .yt-chat-overlay-settings-field input[type="text"]:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+      /* Enabled toggle — styled distinctly at top of Display tab */
+      .yt-chat-overlay-settings-enabled {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: ${spacing.sm}px ${spacing.md}px;
+        background: ${colors.ui.backgroundLight};
+        border-radius: ${borderRadius.sm};
+        font-size: ${typography.fontSize.sm};
+        font-weight: ${typography.fontWeight.semibold};
+        cursor: pointer;
+      }
+      .yt-chat-overlay-settings-enabled input[type="checkbox"] {
+        width: 18px;
+        height: 18px;
+        cursor: pointer;
+        accent-color: ${colors.ui.primary};
+      }
+      /* Authors grid */
+      .yt-chat-overlay-author-grid {
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        gap: ${spacing.sm}px ${spacing.md}px;
+        align-items: center;
+      }
+      .yt-chat-overlay-author-grid-header {
+        font-size: ${typography.fontSize.xs};
+        color: ${colors.ui.textMuted};
+        text-align: center;
+      }
+      .yt-chat-overlay-author-grid-label {
+        font-size: ${typography.fontSize.sm};
+      }
+      .yt-chat-overlay-author-grid-color {
+        justify-self: center;
+      }
+      .yt-chat-overlay-author-grid-checkbox {
+        justify-self: center;
+      }
+      /* Actions bar */
+      .yt-chat-overlay-settings-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: ${spacing.sm}px;
+        flex-shrink: 0;
+        padding-top: ${spacing.sm}px;
+        border-top: 1px solid ${colors.ui.border};
+      }
+      .yt-chat-overlay-settings-actions button {
+        border: none;
+        border-radius: ${borderRadius.sm};
+        padding: ${spacing.sm}px ${spacing.md}px;
+        cursor: pointer;
+        font-weight: ${typography.fontWeight.semibold};
+        font-size: ${typography.fontSize.sm};
+      }
+      .yt-chat-overlay-settings-actions button[data-action="reset"] {
+        background: transparent;
+        color: ${colors.ui.textMuted};
+        border: 1px solid ${colors.ui.border};
+      }
+      .yt-chat-overlay-settings-actions button[data-action="reset"]:hover {
+        color: ${colors.ui.danger};
+        border-color: ${colors.ui.danger};
+      }
+      .yt-chat-overlay-settings-actions button[data-action="apply"] {
+        background: ${colors.ui.primary};
+        color: ${colors.ui.text};
+      }
+      .yt-chat-overlay-settings-actions button[data-action="apply"]:hover {
+        background: ${colors.ui.primaryHover};
+      }
+    `;
     document.head.appendChild(style);
   }
 
@@ -290,6 +377,40 @@ export class SettingsUi {
     document.removeEventListener('keydown', this.handleKeydown);
   }
 
+  private bindTabEvents(): void {
+    this.modal
+      ?.querySelectorAll<HTMLButtonElement>('.yt-chat-overlay-settings-tab')
+      .forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const tabId = btn.dataset.tab;
+          if (tabId) this.switchTab(tabId);
+        });
+      });
+  }
+
+  private switchTab(tabId: string): void {
+    if (!this.modal) return;
+    this.activeTab = tabId;
+
+    this.modal
+      .querySelectorAll<HTMLButtonElement>('.yt-chat-overlay-settings-tab')
+      .forEach((btn) => {
+        const isActive = btn.dataset.tab === tabId;
+        btn.classList.toggle('active', isActive);
+        btn.setAttribute('aria-selected', String(isActive));
+      });
+
+    this.modal
+      .querySelectorAll<HTMLDivElement>('.yt-chat-overlay-settings-pane')
+      .forEach((pane) => {
+        if (pane.dataset.pane === tabId) {
+          pane.removeAttribute('hidden');
+        } else {
+          pane.setAttribute('hidden', '');
+        }
+      });
+  }
+
   private bindModalEvents(): void {
     this.modal
       ?.querySelector<HTMLButtonElement>('.yt-chat-overlay-settings-close')
@@ -304,6 +425,8 @@ export class SettingsUi {
     this.modal
       ?.querySelector<HTMLInputElement>('input[name="allowShortTextMessages"]')
       ?.addEventListener('change', () => this.syncMinTextLengthState());
+
+    this.bindTabEvents();
   }
 
   private ensureModal(): void {
@@ -328,26 +451,33 @@ export class SettingsUi {
     this.modal.setAttribute('aria-labelledby', TITLE_ID);
     this.modal.innerHTML = `
       <div class="yt-chat-overlay-settings-header">
-        <div id="${TITLE_ID}">Chat Overlay Settings</div>
+        <div id="${TITLE_ID}">Chat Overlay</div>
         <button
           type="button"
           class="yt-chat-overlay-settings-close"
           aria-label="Close settings"
-        >
-          ✕
-        </button>
+        >✕</button>
       </div>
-      <div class="yt-chat-overlay-settings-section">
-        <div class="yt-chat-overlay-settings-section-title">General</div>
-        <label class="yt-chat-overlay-settings-field">
-          <span>Enabled</span>
+
+      <nav class="yt-chat-overlay-settings-tabs" role="tablist" aria-label="Settings categories">
+        <button class="yt-chat-overlay-settings-tab active" data-tab="display"
+          role="tab" aria-selected="true" aria-controls="pane-display">Display</button>
+        <button class="yt-chat-overlay-settings-tab" data-tab="style"
+          role="tab" aria-selected="false" aria-controls="pane-style">Style</button>
+        <button class="yt-chat-overlay-settings-tab" data-tab="authors"
+          role="tab" aria-selected="false" aria-controls="pane-authors">Authors</button>
+        <button class="yt-chat-overlay-settings-tab" data-tab="filter"
+          role="tab" aria-selected="false" aria-controls="pane-filter">Filter</button>
+      </nav>
+
+      <!-- Display: core visibility controls -->
+      <div class="yt-chat-overlay-settings-pane" id="pane-display" data-pane="display" role="tabpanel">
+        <label class="yt-chat-overlay-settings-enabled">
+          <span>Overlay Enabled</span>
           <input type="checkbox" name="enabled" />
         </label>
-      </div>
-      <div class="yt-chat-overlay-settings-section">
-        <div class="yt-chat-overlay-settings-section-title">Display</div>
         <label class="yt-chat-overlay-settings-field">
-          <span>Font size (px)</span>
+          <span>Font Size (px)</span>
           <input
             type="number"
             name="fontSize"
@@ -357,7 +487,7 @@ export class SettingsUi {
           />
         </label>
         <label class="yt-chat-overlay-settings-field">
-          <span>Opacity</span>
+          <span>Text Opacity</span>
           <input
             type="number"
             name="opacity"
@@ -367,43 +497,7 @@ export class SettingsUi {
           />
         </label>
         <label class="yt-chat-overlay-settings-field">
-          <span>Super Chat opacity (%)</span>
-          <input
-            type="number"
-            name="superChatOpacity"
-            min="${UI_LIMITS.superChatOpacity.min}"
-            max="${UI_LIMITS.superChatOpacity.max}"
-            step="${UI_LIMITS.superChatOpacity.step}"
-            title="Color opacity for Super Chat card background"
-          />
-        </label>
-        <label class="yt-chat-overlay-settings-field">
-          <span>Safe top (%)</span>
-          <input
-            type="number"
-            name="safeTop"
-            min="${UI_LIMITS.safeTop.min}"
-            max="${UI_LIMITS.safeTop.max}"
-            step="${UI_LIMITS.safeTop.step}"
-            title="Keep top N% of the video clear of comments"
-          />
-        </label>
-        <label class="yt-chat-overlay-settings-field">
-          <span>Safe bottom (%)</span>
-          <input
-            type="number"
-            name="safeBottom"
-            min="${UI_LIMITS.safeBottom.min}"
-            max="${UI_LIMITS.safeBottom.max}"
-            step="${UI_LIMITS.safeBottom.step}"
-            title="Keep bottom N% of the video clear of comments"
-          />
-        </label>
-      </div>
-      <div class="yt-chat-overlay-settings-section">
-        <div class="yt-chat-overlay-settings-section-title">Scrolling</div>
-        <label class="yt-chat-overlay-settings-field">
-          <span>Speed (px/s)</span>
+          <span>Scroll Speed (px/s)</span>
           <input
             type="number"
             name="speedPxPerSec"
@@ -413,57 +507,98 @@ export class SettingsUi {
           />
         </label>
         <label class="yt-chat-overlay-settings-field">
-          <span>Lane spacing (px)</span>
+          <span>Top Clear Zone (%)</span>
+          <input
+            type="number"
+            name="safeTop"
+            min="${UI_LIMITS.safeTop.min}"
+            max="${UI_LIMITS.safeTop.max}"
+            step="${UI_LIMITS.safeTop.step}"
+            title="Keep top N% of video free of comments"
+          />
+        </label>
+        <label class="yt-chat-overlay-settings-field">
+          <span>Bottom Clear Zone (%)</span>
+          <input
+            type="number"
+            name="safeBottom"
+            min="${UI_LIMITS.safeBottom.min}"
+            max="${UI_LIMITS.safeBottom.max}"
+            step="${UI_LIMITS.safeBottom.step}"
+            title="Keep bottom N% of video free of comments"
+          />
+        </label>
+      </div>
+
+      <!-- Style: visual appearance -->
+      <div class="yt-chat-overlay-settings-pane" id="pane-style" data-pane="style" hidden role="tabpanel">
+        <label class="yt-chat-overlay-settings-field">
+          <span>SuperChat Opacity (%)</span>
+          <input
+            type="number"
+            name="superChatOpacity"
+            min="${UI_LIMITS.superChatOpacity.min}"
+            max="${UI_LIMITS.superChatOpacity.max}"
+            step="${UI_LIMITS.superChatOpacity.step}"
+            title="Background opacity of Super Chat cards"
+          />
+        </label>
+        <label class="yt-chat-overlay-settings-field">
+          <span>Lane Gap (px)</span>
           <input
             type="number"
             name="laneSpacing"
             min="${SETTINGS_LIMITS.laneSpacing.min}"
             max="${SETTINGS_LIMITS.laneSpacing.max}"
             step="${SETTINGS_LIMITS.laneSpacing.step}"
-            title="Vertical gap between comment lanes"
+            title="Extra vertical gap between comment rows"
           />
         </label>
+        <div class="yt-chat-overlay-settings-section">
+          <div class="yt-chat-overlay-settings-section-title">Text Outline</div>
+          <label class="yt-chat-overlay-settings-field">
+            <span>Enabled</span>
+            <input type="checkbox" name="outline-enabled" />
+          </label>
+          <label class="yt-chat-overlay-settings-field">
+            <span>Width (px)</span>
+            <input
+              type="number"
+              name="outline-widthPx"
+              min="${SETTINGS_LIMITS.outlineWidthPx.min}"
+              max="${SETTINGS_LIMITS.outlineWidthPx.max}"
+              step="${SETTINGS_LIMITS.outlineWidthPx.step}"
+            />
+          </label>
+          <label class="yt-chat-overlay-settings-field">
+            <span>Blur (px)</span>
+            <input
+              type="number"
+              name="outline-blurPx"
+              min="${SETTINGS_LIMITS.outlineBlurPx.min}"
+              max="${SETTINGS_LIMITS.outlineBlurPx.max}"
+              step="${SETTINGS_LIMITS.outlineBlurPx.step}"
+            />
+          </label>
+          <label class="yt-chat-overlay-settings-field">
+            <span>Opacity</span>
+            <input
+              type="number"
+              name="outline-opacity"
+              min="${SETTINGS_LIMITS.outlineOpacity.min}"
+              max="${SETTINGS_LIMITS.outlineOpacity.max}"
+              step="${SETTINGS_LIMITS.outlineOpacity.step}"
+            />
+          </label>
+        </div>
       </div>
-      <div class="yt-chat-overlay-settings-section">
-        <div class="yt-chat-overlay-settings-section-title">Filtering</div>
-        <label class="yt-chat-overlay-settings-field">
-          <span>Max messages/s</span>
-          <input
-            type="number"
-            name="maxMessagesPerSecond"
-            min="${SETTINGS_LIMITS.maxMessagesPerSecond.min}"
-            max="${SETTINGS_LIMITS.maxMessagesPerSecond.max}"
-            step="${SETTINGS_LIMITS.maxMessagesPerSecond.step}"
-            title="Rate limit: maximum new comments per second on screen"
-          />
-        </label>
-        <label class="yt-chat-overlay-settings-field">
-          <span>Allow short messages</span>
-          <input
-            type="checkbox"
-            name="allowShortTextMessages"
-            title="Show short regular messages (e.g. 1-2 characters)"
-          />
-        </label>
-        <label class="yt-chat-overlay-settings-field">
-          <span>Min text length</span>
-          <input
-            type="number"
-            name="minTextLength"
-            min="${SETTINGS_LIMITS.minTextLength.min}"
-            max="${SETTINGS_LIMITS.minTextLength.max}"
-            step="${SETTINGS_LIMITS.minTextLength.step}"
-            title="Minimum character count to show regular messages
-            (ignored when short messages allowed)"
-          />
-        </label>
-      </div>
-      <div class="yt-chat-overlay-settings-section">
-        <div class="yt-chat-overlay-settings-section-title">Author Types</div>
+
+      <!-- Authors: per-type color and name visibility -->
+      <div class="yt-chat-overlay-settings-pane" id="pane-authors" data-pane="authors" hidden role="tabpanel">
         <div class="yt-chat-overlay-author-grid">
           <span class="yt-chat-overlay-author-grid-label"></span>
           <span class="yt-chat-overlay-author-grid-header">Color</span>
-          <span class="yt-chat-overlay-author-grid-header">Show name</span>
+          <span class="yt-chat-overlay-author-grid-header">Show</span>
 
           <span class="yt-chat-overlay-author-grid-label">Normal</span>
           <input type="color" name="color-normal" class="yt-chat-overlay-author-grid-color" />
@@ -505,7 +640,7 @@ export class SettingsUi {
             class="yt-chat-overlay-author-grid-checkbox"
           />
 
-          <span class="yt-chat-overlay-author-grid-label">Super Chat</span>
+          <span class="yt-chat-overlay-author-grid-label">SuperChat</span>
           <span></span>
           <input
             type="checkbox"
@@ -514,65 +649,69 @@ export class SettingsUi {
           />
         </div>
       </div>
-      <div class="yt-chat-overlay-settings-section">
-        <div class="yt-chat-overlay-settings-section-title">Outline</div>
-        <label class="yt-chat-overlay-settings-field">
-          <span>Enabled</span>
-          <input type="checkbox" name="outline-enabled" />
-        </label>
-        <label class="yt-chat-overlay-settings-field">
-          <span>Width (px)</span>
-          <input
-            type="number"
-            name="outline-widthPx"
-            min="${SETTINGS_LIMITS.outlineWidthPx.min}"
-            max="${SETTINGS_LIMITS.outlineWidthPx.max}"
-            step="${SETTINGS_LIMITS.outlineWidthPx.step}"
-          />
-        </label>
-        <label class="yt-chat-overlay-settings-field">
-          <span>Blur (px)</span>
-          <input
-            type="number"
-            name="outline-blurPx"
-            min="${SETTINGS_LIMITS.outlineBlurPx.min}"
-            max="${SETTINGS_LIMITS.outlineBlurPx.max}"
-            step="${SETTINGS_LIMITS.outlineBlurPx.step}"
-          />
-        </label>
-        <label class="yt-chat-overlay-settings-field">
-          <span>Opacity</span>
-          <input
-            type="number"
-            name="outline-opacity"
-            min="${SETTINGS_LIMITS.outlineOpacity.min}"
-            max="${SETTINGS_LIMITS.outlineOpacity.max}"
-            step="${SETTINGS_LIMITS.outlineOpacity.step}"
-          />
-        </label>
+
+      <!-- Filter: rate limiting, text filtering, advanced -->
+      <div class="yt-chat-overlay-settings-pane" id="pane-filter" data-pane="filter" hidden role="tabpanel">
+        <div class="yt-chat-overlay-settings-section">
+          <div class="yt-chat-overlay-settings-section-title">Message Rate</div>
+          <label class="yt-chat-overlay-settings-field">
+            <span>Max per Second</span>
+            <input
+              type="number"
+              name="maxMessagesPerSecond"
+              min="${SETTINGS_LIMITS.maxMessagesPerSecond.min}"
+              max="${SETTINGS_LIMITS.maxMessagesPerSecond.max}"
+              step="${SETTINGS_LIMITS.maxMessagesPerSecond.step}"
+              title="Maximum new comments displayed per second"
+            />
+          </label>
+          <label class="yt-chat-overlay-settings-field">
+            <span>Show Short Messages</span>
+            <input
+              type="checkbox"
+              name="allowShortTextMessages"
+              title="Show messages shorter than Min Length"
+            />
+          </label>
+          <label class="yt-chat-overlay-settings-field">
+            <span>Min Length (chars)</span>
+            <input
+              type="number"
+              name="minTextLength"
+              min="${SETTINGS_LIMITS.minTextLength.min}"
+              max="${SETTINGS_LIMITS.minTextLength.max}"
+              step="${SETTINGS_LIMITS.minTextLength.step}"
+              title="Minimum character count (ignored when Show Short is on)"
+            />
+          </label>
+        </div>
+        <div class="yt-chat-overlay-settings-section">
+          <div class="yt-chat-overlay-settings-section-title">Performance</div>
+          <label class="yt-chat-overlay-settings-field">
+            <span>Max Visible</span>
+            <input
+              type="number"
+              name="maxConcurrentMessages"
+              min="${SETTINGS_LIMITS.maxConcurrentMessages.min}"
+              max="${SETTINGS_LIMITS.maxConcurrentMessages.max}"
+              step="${SETTINGS_LIMITS.maxConcurrentMessages.step}"
+              title="Performance warning threshold for simultaneous comments"
+            />
+          </label>
+        </div>
+        <div class="yt-chat-overlay-settings-section">
+          <div class="yt-chat-overlay-settings-section-title">Debug</div>
+          <label class="yt-chat-overlay-settings-field">
+            <span>Log Level</span>
+            <select name="logLevel" title="Console output verbosity">
+              <option value="warn">Warn</option>
+              <option value="info">Info</option>
+              <option value="debug">Debug</option>
+            </select>
+          </label>
+        </div>
       </div>
-      <div class="yt-chat-overlay-settings-section">
-        <div class="yt-chat-overlay-settings-section-title">Advanced</div>
-        <label class="yt-chat-overlay-settings-field">
-          <span>Log level</span>
-          <select name="logLevel" title="Console diagnostics verbosity">
-            <option value="warn">Warn (default)</option>
-            <option value="info">Info</option>
-            <option value="debug">Debug</option>
-          </select>
-        </label>
-        <label class="yt-chat-overlay-settings-field">
-          <span>Concurrent message limit</span>
-          <input
-            type="number"
-            name="maxConcurrentMessages"
-            min="${SETTINGS_LIMITS.maxConcurrentMessages.min}"
-            max="${SETTINGS_LIMITS.maxConcurrentMessages.max}"
-            step="${SETTINGS_LIMITS.maxConcurrentMessages.step}"
-            title="Performance warning threshold (not a hard limit)"
-          />
-        </label>
-      </div>
+
       <div class="yt-chat-overlay-settings-actions">
         <button type="button" data-action="reset">Reset</button>
         <button type="button" data-action="apply">Apply</button>
@@ -593,6 +732,7 @@ export class SettingsUi {
     this.previousFocus = activeElement instanceof HTMLElement ? activeElement : null;
 
     this.populateForm(this.getSettings());
+    this.switchTab(this.activeTab);
     this.setDialogOpen(true);
     this.focusInitialElement();
   }
@@ -696,7 +836,9 @@ export class SettingsUi {
   private collectShowAuthorSettings(
     current: Readonly<OverlaySettings>
   ): OverlaySettings['showAuthor'] {
-    const nextShowAuthor: OverlaySettings['showAuthor'] = { ...current.showAuthor };
+    const nextShowAuthor: OverlaySettings['showAuthor'] = {
+      ...current.showAuthor,
+    };
 
     for (const key of SHOW_AUTHOR_KEYS) {
       nextShowAuthor[key] = this.getCheckbox(`showAuthor-${key}`, current.showAuthor[key]);
@@ -787,7 +929,10 @@ export class SettingsUi {
 
     return Array.from(this.modal.querySelectorAll<HTMLElement>(selectors)).filter((element) => {
       if (element.tabIndex < 0) return false;
-      return !element.hasAttribute('hidden');
+      if (element.hasAttribute('hidden')) return false;
+      // Exclude elements inside a hidden tab pane
+      if (element.closest('[hidden]')) return false;
+      return true;
     });
   }
 
