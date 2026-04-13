@@ -50,3 +50,4 @@ temp/
 .claude/
 .github/copilot-instructions.md
 .github/prompts/
+.editorconfig
