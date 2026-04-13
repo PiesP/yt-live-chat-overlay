@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.0] - 2026-04-13
+
+### Added
+- **재생 복귀 시 최신 채팅 스냅샷 동기화 API 추가**
+  - `ChatSource.getLatestMessages(limit)` 추가: 현재 채팅 컨테이너에서 최신 유효 메시지를 역순 수집 후 시간순으로 반환
+
+### Changed
+- **정지→재생 복귀 플로우를 일관된 재동기화 방식으로 재설계**
+  - 재생 이벤트에서 단순 `resume()` 대신 재동기화 오케스트레이션 수행
+  - 정지 중 쌓인 구 backlog를 제거한 뒤 최신 채팅 상태를 재주입해 화면 코멘트를 즉시 갱신
+
+### Refactored
+- **렌더러 재동기화 초기화 메서드 도입**
+  - `Renderer.resetForResync()` 추가: 활성 애니메이션/대기 큐 정리 및 레인 상태 재초기화
+  - `App`에 중복 재동기화 방지 가드(`resumeSyncInProgress`) 추가로 재생 이벤트 경합 안정성 향상
+
 ## [0.8.0] - 2026-04-12
 
 ### Added

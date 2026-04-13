@@ -1432,6 +1432,23 @@ export class Renderer {
   }
 
   /**
+   * Reset rendered/queued message state for chat resynchronization.
+   * Keeps renderer instance and playbackRate, but clears visual backlog so
+   * only fresh synchronized messages are shown.
+   */
+  resetForResync(): void {
+    this.clearRetryTimer();
+
+    for (const active of this.activeMessages) {
+      this.removeMessage(active);
+    }
+
+    this.activeMessages.clear();
+    this.messageQueue = [];
+    this.initLanes();
+  }
+
+  /**
    * Set playback rate for all active animations
    * Synchronizes animation speed with video playback rate
    */

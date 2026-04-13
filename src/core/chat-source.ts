@@ -1144,4 +1144,36 @@ export class ChatSource {
     });
     console.log('[YT Chat Overlay] MutationObserver reconnected');
   }
+
+  /**
+   * Snapshot the latest valid chat messages from the currently attached chat
+   * container. Useful when resuming playback after pause: instead of replaying
+   * stale backlog, the overlay can render the current live-chat state.
+   */
+  getLatestMessages(limit: number): ChatMessage[] {
+    if (!this.chatContainer || limit <= 0) {
+      return [];
+    }
+
+    const children = Array.from(this.chatContainer.children);
+    if (children.length === 0) {
+      return [];
+    }
+
+    const latest: ChatMessage[] = [];
+
+    // Iterate from newest to oldest and keep only valid user messages.
+    for (let i = children.length - 1; i >= 0 && latest.length < limit; i--) {
+      const element = children[i];
+      if (!(element instanceof Element)) continue;
+
+      const message = this.parseMessage(element);
+      if (!message) continue;
+
+      latest.push(message);
+    }
+
+    // Return in chronological order (oldest -> newest) for natural rendering.
+    return latest.reverse();
+  }
 }

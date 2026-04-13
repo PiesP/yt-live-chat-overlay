@@ -22,6 +22,7 @@ const RESTART_RETRY_DELAY_MS = 2000;
 const MAX_RESTART_ATTEMPTS = 3;
 const APP_INIT_DELAY_MS = 500;
 const OVERLAY_SELECTOR = '#yt-live-chat-overlay';
+const RESUME_SYNC_MESSAGE_LIMIT = 20;
 
 interface StartGuard {
   isCancelled(): boolean;
@@ -52,6 +53,7 @@ class App {
   private visibilityHandler: (() => void) | null = null;
   private chatWatchdogInterval: number | null = null;
   private hiddenWhilePlaying = false;
+  private resumeSyncInProgress = false;
   private readonly handlePageWatcherChange = (): void => {
     this.handlePageChange();
   };
@@ -59,7 +61,7 @@ class App {
     this.renderer?.pause();
   };
   private readonly handleVideoPlay = (): void => {
-    this.renderer?.resume();
+    void this.syncLatestMessagesOnResume();
   };
   private readonly handleVideoRateChange = (rate: number): void => {
     console.log('[App] Video playback rate changed:', rate);
@@ -68,6 +70,39 @@ class App {
   private readonly handleVideoSeeking = (): void => {
     this.renderer?.flushQueue();
   };
+
+  /**
+   * Re-synchronize overlay content when playback resumes.
+   *
+   * Goal: avoid replaying stale paused backlog and instead render the latest
+   * visible chat state.
+   */
+  private async syncLatestMessagesOnResume(): Promise<void> {
+    if (this.resumeSyncInProgress) {
+      this.renderer?.resume();
+      return;
+    }
+
+    this.resumeSyncInProgress = true;
+
+    try {
+      const renderer = this.renderer;
+      if (!renderer) return;
+
+      renderer.resetForResync();
+      renderer.resume();
+
+      const latestMessages = this.chatSource?.getLatestMessages(RESUME_SYNC_MESSAGE_LIMIT) ?? [];
+      for (const message of latestMessages) {
+        renderer.addMessage(message);
+      }
+    } catch (error) {
+      console.warn('[App] Failed to sync latest messages on resume:', error);
+      this.renderer?.resume();
+    } finally {
+      this.resumeSyncInProgress = false;
+    }
+  }
 
   constructor() {
     this.pageWatcher = new PageWatcher();
@@ -513,6 +548,7 @@ class App {
     this.clearRestartTimer();
     this.pendingRestart = false;
     this.settingsUi.close();
+    this.resumeSyncInProgress = false;
 
     if (this.visibilityHandler) {
       document.removeEventListener('visibilitychange', this.visibilityHandler);
