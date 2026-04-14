@@ -12,63 +12,20 @@ import type {
   OverlaySettings,
   SuperChatInfo,
 } from "@app-types";
+import {
+  CHAT_CONTAINER_SELECTORS,
+  CHAT_FRAME_SELECTORS,
+  CHAT_IFRAME_ITEM_SELECTORS,
+  CHAT_IFRAME_SELECTORS,
+  CHAT_TOGGLE_BUTTON_SELECTORS,
+  debugLogChatElements,
+  isChatFrameHidden as isChatFrameHiddenElement,
+  validateChatElement,
+} from "@core/chat-dom";
 import { parseRgbColor } from "@core/design-tokens";
 import { findElementMatch, pollForValue, sleep } from "@core/dom";
 import { isAllowedYouTubeImageUrl } from "@core/image-url";
 import { overlayLog } from "@core/logging";
-
-const CHAT_FRAME_SELECTORS = [
-  "ytd-live-chat-frame#chat",
-  "#chat",
-  "ytd-live-chat-frame",
-] as const;
-
-const CHAT_IFRAME_SELECTORS = [
-  'iframe[src*="live_chat"]',
-  "iframe#chatframe",
-  "ytd-live-chat-frame iframe",
-  "#chat iframe",
-] as const;
-
-const CHAT_IFRAME_ITEM_SELECTORS = [
-  "#items.yt-live-chat-item-list-renderer",
-  "#items",
-  "yt-live-chat-item-list-renderer #items",
-] as const;
-
-const CHAT_CONTAINER_SELECTORS = [
-  // Most specific selectors first
-  "#chat #items.yt-live-chat-item-list-renderer",
-  "#items.yt-live-chat-item-list-renderer",
-  "yt-live-chat-item-list-renderer #items",
-
-  // Frame-based selectors
-  "ytd-live-chat-frame #items",
-
-  // App-based selectors
-  "yt-live-chat-app #items",
-
-  // Chat panel selectors
-  "#chat-container #items",
-  "#chat #items",
-  "ytd-live-chat #items",
-] as const;
-
-const CHAT_TOGGLE_BUTTON_SELECTORS = [
-  // Theater mode toggle button
-  'ytd-toggle-button-renderer button[aria-label*="chat" i]',
-  'ytd-toggle-button-renderer button[aria-label*="채팅" i]',
-  // Live chat button
-  "button#show-hide-button",
-  // Engagement panel toggle
-  "ytd-engagement-panel-title-header-renderer button",
-  // Engagement panel list buttons
-  'ytd-engagement-panel-section-list-renderer button[aria-label*="chat" i]',
-  'ytd-engagement-panel-section-list-renderer button[aria-label*="채팅" i]',
-  // Generic chat-related buttons (ignore overlay settings button)
-  'button:not(#yt-chat-overlay-settings-button)[aria-label*="show chat" i]',
-  'button:not(#yt-chat-overlay-settings-button)[aria-label*="open chat" i]',
-] as const;
 
 const CHAT_CONTAINER_SEARCH_ATTEMPTS = 8;
 const CHAT_CONTAINER_SEARCH_INTERVAL_MS = 1000;
@@ -191,7 +148,7 @@ export class ChatSource {
 
     // Debug: Log what chat-related elements exist (debug level only)
     if (this.getSettings?.().logLevel === "debug") {
-      this.debugLogChatElements();
+      debugLogChatElements();
     }
 
     // Try iframe first (multiple selectors)
@@ -216,7 +173,7 @@ export class ChatSource {
 
     // Try in-page chat (ordered by specificity - most specific first!)
     const inPageMatch = findElementMatch<Element>(CHAT_CONTAINER_SELECTORS, {
-      predicate: (element) => this.validateChatElement(element),
+      predicate: (element) => validateChatElement(element),
     });
 
     if (inPageMatch) {
@@ -228,99 +185,6 @@ export class ChatSource {
 
     console.warn("[YT Chat Overlay] No chat container found with any selector");
     return null;
-  }
-
-  /**
-   * Validate that an element is actually a chat container
-   * Prevents matching non-chat elements like sidebar menus
-   */
-  private validateChatElement(element: Element): boolean {
-    // Check parent chain for chat-related elements
-    let current: Element | null = element;
-    let depth = 0;
-    const maxDepth = 10;
-
-    while (current && depth < maxDepth) {
-      const tagName = current.tagName.toLowerCase();
-      const className = current.className.toLowerCase();
-      const id = current.id.toLowerCase();
-
-      // Positive indicators (chat-related)
-      if (
-        tagName.includes("chat") ||
-        className.includes("chat") ||
-        id.includes("chat") ||
-        tagName === "yt-live-chat-app" ||
-        tagName === "ytd-live-chat-frame" ||
-        tagName === "yt-live-chat-item-list-renderer"
-      ) {
-        overlayLog.info(
-          `[YT Chat Overlay] Element validated: found chat-related parent at depth ${depth}`,
-        );
-        return true;
-      }
-
-      // Negative indicators (not chat)
-      if (
-        tagName === "ytd-mini-guide-renderer" ||
-        tagName === "ytd-guide-renderer" ||
-        className.includes("guide") ||
-        className.includes("sidebar") ||
-        id.includes("guide")
-      ) {
-        overlayLog.info(
-          `[YT Chat Overlay] Element rejected: found non-chat parent "${tagName}" at depth ${depth}`,
-        );
-        return false;
-      }
-
-      current = current.parentElement;
-      depth++;
-    }
-
-    // If we didn't find clear indicators either way, be conservative
-    overlayLog.info(
-      "[YT Chat Overlay] Element validation inconclusive, rejecting",
-    );
-    return false;
-  }
-
-  /**
-   * Debug: Log available chat-related elements
-   */
-  private debugLogChatElements(): void {
-    overlayLog.info("[YT Chat Overlay] === DEBUG: Chat Elements ===");
-
-    // Check for common chat elements
-    const chatElements = document.querySelectorAll(
-      '[id*="chat"], [class*="chat"], yt-live-chat-app, ytd-live-chat-frame',
-    );
-    overlayLog.info(
-      `[YT Chat Overlay] Found ${chatElements.length} elements with 'chat' in id/class or live chat tags`,
-    );
-
-    let count = 0;
-    for (const el of chatElements) {
-      if (count++ >= 5) break; // Limit to first 5 to avoid spam
-      overlayLog.info(
-        `  [${count - 1}] ${el.tagName} id="${el.id}" class="${el.className.substring(0, 50)}"`,
-      );
-    }
-
-    // Check for iframes
-    const allIframes = document.querySelectorAll("iframe");
-    overlayLog.info(
-      `[YT Chat Overlay] Found ${allIframes.length} total iframes`,
-    );
-    let i = 0;
-    for (const iframe of allIframes) {
-      if (iframe.src.includes("chat")) {
-        overlayLog.info(`  iframe[${i}] src="${iframe.src}"`);
-      }
-      i++;
-    }
-
-    overlayLog.info("[YT Chat Overlay] === END DEBUG ===");
   }
 
   /**
@@ -387,27 +251,7 @@ export class ChatSource {
    * Check if chat frame is hidden or collapsed
    */
   private isChatFrameHidden(chatFrame: HTMLElement): boolean {
-    if (
-      chatFrame.hasAttribute("collapsed") ||
-      chatFrame.hasAttribute("hidden") ||
-      chatFrame.getAttribute("aria-hidden") === "true"
-    ) {
-      return true;
-    }
-
-    if (
-      chatFrame.style.display === "none" ||
-      chatFrame.style.visibility === "hidden"
-    ) {
-      return true;
-    }
-
-    if (chatFrame.offsetWidth === 0 || chatFrame.offsetHeight === 0) {
-      return true;
-    }
-
-    const hiddenAncestor = chatFrame.closest('[hidden], [aria-hidden="true"]');
-    return Boolean(hiddenAncestor);
+    return isChatFrameHiddenElement(chatFrame);
   }
 
   /**
