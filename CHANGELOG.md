@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.10.0] - 2026-04-14
+
+### Added
+- **채팅 DOM 책임 분리 모듈 추가**
+  - `src/core/chat-dom.ts` 신설: 채팅 프레임/iframe/컨테이너 선택자, 컨테이너 유효성 검증, 디버그 DOM 스캔, 채팅 프레임 가시성 판정 로직을 분리
+
+### Changed
+- **로깅 구조를 전역 패치 방식에서 명시적 래퍼 방식으로 전환**
+  - `overlayLog.debug/info/warn/error` API 도입
+  - 전역 `console.log` monkey patch 제거
+  - 기존 로그 레벨(`warn`/`info`/`debug`) 및 info 레벨 verbose 억제 정책 유지
+- **채팅 옵저버 복구 전략 개선**
+  - `ChatSource.reconnect()`에 중복 실행 방지 가드 및 bounded burst retry(3회) 추가
+  - reconnect 전 채팅 패널 상태 점검 절차 정리
+
+### Refactored
+- **`ChatSource` 클래스 단순화**
+  - DOM 탐색/검증 관련 내부 상수·헬퍼를 모듈로 추출해 책임 경계 명확화
+  - 채팅 소스는 메시지 파싱/관찰/재연결 오케스트레이션에 집중하도록 구조 정리
+
+### Fixed
+- **침습적 fallback 제거로 안정성 향상**
+  - 채팅 패널 오픈 실패 시 `collapsed`/`hidden` 속성을 직접 제거하던 경로 삭제
+  - YouTube DOM 직접 변조로 인한 예기치 않은 상태 오염 가능성 축소
+
 ## [0.9.0] - 2026-04-13
 
 ### Added
