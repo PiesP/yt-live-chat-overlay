@@ -1,3 +1,5 @@
+import { overlayLog } from "@core/logging";
+
 /**
  * Page Watcher
  *
@@ -7,18 +9,18 @@
 
 export type PageChangeCallback = () => void;
 
-type HistoryMethodName = 'pushState' | 'replaceState';
+type HistoryMethodName = "pushState" | "replaceState";
 type HistoryStateMethod = typeof history.pushState;
 
-const YT_NAVIGATE_FINISH_EVENT = 'yt-navigate-finish';
+const YT_NAVIGATE_FINISH_EVENT = "yt-navigate-finish";
 const URL_POLL_INTERVAL_MS = 2000;
 
 const isValidYouTubePageUrl = (url: string): boolean => {
   try {
     const { pathname } = new URL(url);
-    return pathname === '/watch' || pathname.startsWith('/live/');
+    return pathname === "/watch" || pathname.startsWith("/live/");
   } catch {
-    return url.includes('/watch') || url.includes('/live/');
+    return url.includes("/watch") || url.includes("/live/");
   }
 };
 
@@ -34,7 +36,7 @@ export class PageWatcher {
   };
 
   private readonly handleYouTubeNavigateFinish = (): void => {
-    console.log('[YT Chat Overlay] YouTube navigation finished');
+    overlayLog.info("[YT Chat Overlay] YouTube navigation finished");
     // Do NOT force notification here. YouTube fires yt-navigate-finish on the
     // same URL during initial page setup, which would trigger an unnecessary
     // cleanup+restart race. URL changes are already detected by the pushState,
@@ -50,16 +52,18 @@ export class PageWatcher {
    * Initialize page watcher
    */
   private init(): void {
-    this.patchHistoryMethod('pushState');
-    this.patchHistoryMethod('replaceState');
+    this.patchHistoryMethod("pushState");
+    this.patchHistoryMethod("replaceState");
     this.attachEventListeners();
     this.startPolling();
   }
 
   private patchHistoryMethod(methodName: HistoryMethodName): void {
-    const originalMethod = history[methodName].bind(history) as HistoryStateMethod;
+    const originalMethod = history[methodName].bind(
+      history,
+    ) as HistoryStateMethod;
 
-    if (methodName === 'pushState') {
+    if (methodName === "pushState") {
       this.originalPushState = history.pushState;
     } else {
       this.originalReplaceState = history.replaceState;
@@ -72,13 +76,19 @@ export class PageWatcher {
   }
 
   private attachEventListeners(): void {
-    window.addEventListener('popstate', this.handleUrlMutation);
-    window.addEventListener(YT_NAVIGATE_FINISH_EVENT, this.handleYouTubeNavigateFinish);
+    window.addEventListener("popstate", this.handleUrlMutation);
+    window.addEventListener(
+      YT_NAVIGATE_FINISH_EVENT,
+      this.handleYouTubeNavigateFinish,
+    );
   }
 
   private detachEventListeners(): void {
-    window.removeEventListener('popstate', this.handleUrlMutation);
-    window.removeEventListener(YT_NAVIGATE_FINISH_EVENT, this.handleYouTubeNavigateFinish);
+    window.removeEventListener("popstate", this.handleUrlMutation);
+    window.removeEventListener(
+      YT_NAVIGATE_FINISH_EVENT,
+      this.handleYouTubeNavigateFinish,
+    );
   }
 
   private startPolling(): void {
@@ -130,7 +140,7 @@ export class PageWatcher {
       try {
         callback();
       } catch (error) {
-        console.error('[YT Chat Overlay] Page change callback error:', error);
+        console.error("[YT Chat Overlay] Page change callback error:", error);
       }
     }
   }
@@ -167,6 +177,6 @@ export class PageWatcher {
     // Clear callbacks
     this.callbacks.clear();
 
-    console.log('[PageWatcher] Destroyed');
+    overlayLog.info("[PageWatcher] Destroyed");
   }
 }

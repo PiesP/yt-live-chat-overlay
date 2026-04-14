@@ -15,6 +15,7 @@ import type {
 import { parseRgbColor } from "@core/design-tokens";
 import { findElementMatch, pollForValue, sleep } from "@core/dom";
 import { isAllowedYouTubeImageUrl } from "@core/image-url";
+import { overlayLog } from "@core/logging";
 
 const CHAT_FRAME_SELECTORS = [
   "ytd-live-chat-frame#chat",
@@ -134,14 +135,14 @@ export class ChatSource {
   private findChatIframe(): HTMLIFrameElement | null {
     const match = findElementMatch<HTMLIFrameElement>(CHAT_IFRAME_SELECTORS);
     if (!match) {
-      console.log("[YT Chat Overlay] Chat iframe: not found");
+      overlayLog.info("[YT Chat Overlay] Chat iframe: not found");
       return null;
     }
 
-    console.log(
+    overlayLog.info(
       `[YT Chat Overlay] Chat iframe found with selector: ${match.selector}`,
     );
-    console.log("[YT Chat Overlay] iframe src:", match.element.src);
+    overlayLog.info("[YT Chat Overlay] iframe src:", match.element.src);
     return match.element;
   }
 
@@ -162,7 +163,7 @@ export class ChatSource {
       return null;
     }
 
-    console.log(
+    overlayLog.info(
       `[YT Chat Overlay] Found toggle button with selector: ${match.selector}`,
     );
     return match.element;
@@ -175,7 +176,7 @@ export class ChatSource {
     }
 
     button.click();
-    console.log("[YT Chat Overlay] Clicked chat toggle button");
+    overlayLog.info("[YT Chat Overlay] Clicked chat toggle button");
     return true;
   }
 
@@ -185,8 +186,8 @@ export class ChatSource {
    * Priority B: in-page render
    */
   async findChatContainer(): Promise<Element | null> {
-    console.log("[YT Chat Overlay] Looking for chat container...");
-    console.log("[YT Chat Overlay] Current URL:", window.location.href);
+    overlayLog.info("[YT Chat Overlay] Looking for chat container...");
+    overlayLog.info("[YT Chat Overlay] Current URL:", window.location.href);
 
     // Debug: Log what chat-related elements exist (debug level only)
     if (this.getSettings?.().logLevel === "debug") {
@@ -201,15 +202,15 @@ export class ChatSource {
         // Wait for iframe content to fully load
         const container = await this.waitForIframeContent(iframe);
         if (container) {
-          console.log("[YT Chat Overlay] Chat container found in iframe");
+          overlayLog.info("[YT Chat Overlay] Chat container found in iframe");
           return container;
         }
-        console.log(
+        overlayLog.info(
           "[YT Chat Overlay] iframe content timeout - no #items found",
         );
       } catch (error) {
         // Cross-origin access denied, fall through to in-page
-        console.log("[YT Chat Overlay] iframe access denied:", error);
+        overlayLog.info("[YT Chat Overlay] iframe access denied:", error);
       }
     }
 
@@ -219,7 +220,7 @@ export class ChatSource {
     });
 
     if (inPageMatch) {
-      console.log(
+      overlayLog.info(
         `[YT Chat Overlay] Chat container found with selector: ${inPageMatch.selector}`,
       );
       return inPageMatch.element;
@@ -253,7 +254,7 @@ export class ChatSource {
         tagName === "ytd-live-chat-frame" ||
         tagName === "yt-live-chat-item-list-renderer"
       ) {
-        console.log(
+        overlayLog.info(
           `[YT Chat Overlay] Element validated: found chat-related parent at depth ${depth}`,
         );
         return true;
@@ -267,7 +268,7 @@ export class ChatSource {
         className.includes("sidebar") ||
         id.includes("guide")
       ) {
-        console.log(
+        overlayLog.info(
           `[YT Chat Overlay] Element rejected: found non-chat parent "${tagName}" at depth ${depth}`,
         );
         return false;
@@ -278,7 +279,9 @@ export class ChatSource {
     }
 
     // If we didn't find clear indicators either way, be conservative
-    console.log("[YT Chat Overlay] Element validation inconclusive, rejecting");
+    overlayLog.info(
+      "[YT Chat Overlay] Element validation inconclusive, rejecting",
+    );
     return false;
   }
 
@@ -286,36 +289,38 @@ export class ChatSource {
    * Debug: Log available chat-related elements
    */
   private debugLogChatElements(): void {
-    console.log("[YT Chat Overlay] === DEBUG: Chat Elements ===");
+    overlayLog.info("[YT Chat Overlay] === DEBUG: Chat Elements ===");
 
     // Check for common chat elements
     const chatElements = document.querySelectorAll(
       '[id*="chat"], [class*="chat"], yt-live-chat-app, ytd-live-chat-frame',
     );
-    console.log(
+    overlayLog.info(
       `[YT Chat Overlay] Found ${chatElements.length} elements with 'chat' in id/class or live chat tags`,
     );
 
     let count = 0;
     for (const el of chatElements) {
       if (count++ >= 5) break; // Limit to first 5 to avoid spam
-      console.log(
+      overlayLog.info(
         `  [${count - 1}] ${el.tagName} id="${el.id}" class="${el.className.substring(0, 50)}"`,
       );
     }
 
     // Check for iframes
     const allIframes = document.querySelectorAll("iframe");
-    console.log(`[YT Chat Overlay] Found ${allIframes.length} total iframes`);
+    overlayLog.info(
+      `[YT Chat Overlay] Found ${allIframes.length} total iframes`,
+    );
     let i = 0;
     for (const iframe of allIframes) {
       if (iframe.src.includes("chat")) {
-        console.log(`  iframe[${i}] src="${iframe.src}"`);
+        overlayLog.info(`  iframe[${i}] src="${iframe.src}"`);
       }
       i++;
     }
 
-    console.log("[YT Chat Overlay] === END DEBUG ===");
+    overlayLog.info("[YT Chat Overlay] === END DEBUG ===");
   }
 
   /**
@@ -342,7 +347,7 @@ export class ChatSource {
 
       const container = await this.findChatContainer();
       if (container) {
-        console.log(
+        overlayLog.info(
           `[YT Chat Overlay] Chat container found on attempt ${attempt}`,
         );
         return container;
@@ -409,7 +414,7 @@ export class ChatSource {
    * Try to open chat panel when the frame isn't in the DOM yet
    */
   private async tryOpenChatPanelWithoutFrame(): Promise<boolean> {
-    console.log(
+    overlayLog.info(
       "[YT Chat Overlay] Chat frame missing, attempting to open chat panel...",
     );
 
@@ -434,7 +439,7 @@ export class ChatSource {
    * Check if chat panel is collapsed/hidden and try to open it
    */
   private async ensureChatPanelOpen(chatFrame: HTMLElement): Promise<boolean> {
-    console.log(
+    overlayLog.info(
       "[YT Chat Overlay] Checking if chat panel needs to be opened...",
     );
 
@@ -442,11 +447,11 @@ export class ChatSource {
     const isHidden = this.isChatFrameHidden(chatFrame);
 
     if (!isHidden) {
-      console.log("[YT Chat Overlay] Chat panel is already open");
+      overlayLog.info("[YT Chat Overlay] Chat panel is already open");
       return true;
     }
 
-    console.log(
+    overlayLog.info(
       "[YT Chat Overlay] Chat panel is collapsed, attempting to open...",
     );
 
@@ -458,7 +463,7 @@ export class ChatSource {
 
         // Verify panel is now open
         if (!this.isChatFrameHidden(chatFrame)) {
-          console.log("[YT Chat Overlay] Successfully opened chat panel");
+          overlayLog.info("[YT Chat Overlay] Successfully opened chat panel");
           return true;
         }
       }
@@ -548,8 +553,8 @@ export class ChatSource {
 
     this.attachObserver(this.chatContainer);
 
-    console.log("[YT Chat Overlay] Chat monitoring started successfully");
-    console.log("[YT Chat Overlay] Watching for new messages...");
+    overlayLog.info("[YT Chat Overlay] Chat monitoring started successfully");
+    overlayLog.info("[YT Chat Overlay] Watching for new messages...");
     return true;
   }
 
@@ -1127,7 +1132,7 @@ export class ChatSource {
     this.callback = null;
     this.recentMessages.length = 0;
 
-    console.log("[YT Chat Overlay] Chat monitoring stopped");
+    overlayLog.info("[YT Chat Overlay] Chat monitoring stopped");
   }
 
   /**
@@ -1163,7 +1168,7 @@ export class ChatSource {
     this.reconnectInProgress = true;
 
     try {
-      console.log("[YT Chat Overlay] Reconnecting MutationObserver...");
+      overlayLog.info("[YT Chat Overlay] Reconnecting MutationObserver...");
       this.observer?.disconnect();
       this.observer = null;
       this.chatContainer = null;
@@ -1178,7 +1183,7 @@ export class ChatSource {
       if (this.stopped || !container) return;
 
       this.attachObserver(container);
-      console.log("[YT Chat Overlay] MutationObserver reconnected");
+      overlayLog.info("[YT Chat Overlay] MutationObserver reconnected");
     } finally {
       this.reconnectInProgress = false;
     }

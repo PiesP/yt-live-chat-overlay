@@ -1,51 +1,51 @@
-import type { LogLevel } from '@app-types';
-import { STORAGE_KEY } from '@core/settings';
+import type { LogLevel } from "@app-types";
+import { STORAGE_KEY } from "@core/settings";
 
 interface StoredSettingsLike {
   logLevel?: LogLevel;
   debugLogging?: boolean;
 }
 
-type ConsoleLogArgs = Parameters<Console['log']>;
+type ConsoleLogArgs = Parameters<Console["log"]>;
+type ConsoleWarnArgs = Parameters<Console["warn"]>;
+type ConsoleErrorArgs = Parameters<Console["error"]>;
 
-const DEFAULT_LOG_LEVEL: LogLevel = 'warn';
+const DEFAULT_LOG_LEVEL: LogLevel = "warn";
 
 const LOG_PREFIXES = [
-  '[YT Chat Overlay]',
-  '[App]',
-  '[Overlay]',
-  '[PageWatcher]',
-  '[SettingsUi]',
-  '[Renderer]',
-  '[VideoSync]',
+  "[YT Chat Overlay]",
+  "[App]",
+  "[Overlay]",
+  "[PageWatcher]",
+  "[SettingsUi]",
+  "[Renderer]",
+  "[VideoSync]",
 ] as const;
 
 const VERBOSE_LOG_MARKERS = [
-  'attempt',
-  'waiting',
-  'selector',
-  'current url',
-  'iframe',
-  'chat frame',
-  'debug:',
-  'watching for new messages',
-  'rendering message',
-  'no available lane',
-  'paused',
-  'resumed',
+  "attempt",
+  "waiting",
+  "selector",
+  "current url",
+  "iframe",
+  "chat frame",
+  "debug:",
+  "watching for new messages",
+  "rendering message",
+  "no available lane",
+  "paused",
+  "resumed",
 ] as const;
 
 let currentLogLevel: LogLevel = DEFAULT_LOG_LEVEL;
-let isConsolePatched = false;
-let originalConsoleLog: Console['log'] | null = null;
 
 const getFirstMessage = (args: readonly unknown[]): string | null => {
   const [first] = args;
-  return typeof first === 'string' ? first : null;
+  return typeof first === "string" ? first : null;
 };
 
 const isValidLogLevel = (value: unknown): value is LogLevel =>
-  value === 'warn' || value === 'info' || value === 'debug';
+  value === "warn" || value === "info" || value === "debug";
 
 const isOverlayLogCall = (args: readonly unknown[]): boolean => {
   const firstMessage = getFirstMessage(args);
@@ -66,20 +66,20 @@ const isVerboseOverlayLog = (args: readonly unknown[]): boolean => {
   return VERBOSE_LOG_MARKERS.some((marker) => normalized.includes(marker));
 };
 
-const shouldAllowOverlayLog = (args: readonly unknown[]): boolean => {
+const shouldEmitInfo = (args: readonly unknown[]): boolean => {
+  if (currentLogLevel === "warn") {
+    return false;
+  }
+
+  if (currentLogLevel === "debug") {
+    return true;
+  }
+
   if (!isOverlayLogCall(args)) {
     return true;
   }
 
-  if (currentLogLevel === 'debug') {
-    return true;
-  }
-
-  if (currentLogLevel === 'info') {
-    return !isVerboseOverlayLog(args);
-  }
-
-  return false;
+  return !isVerboseOverlayLog(args);
 };
 
 const readStoredLogLevel = (): LogLevel => {
@@ -96,7 +96,7 @@ const readStoredLogLevel = (): LogLevel => {
 
     // Legacy compatibility: old boolean true maps to verbose debug.
     if (parsed.debugLogging) {
-      return 'debug';
+      return "debug";
     }
   } catch {
     return DEFAULT_LOG_LEVEL;
@@ -105,24 +105,26 @@ const readStoredLogLevel = (): LogLevel => {
   return DEFAULT_LOG_LEVEL;
 };
 
-const patchConsoleLog = (): void => {
-  if (isConsolePatched) {
-    return;
-  }
-
-  originalConsoleLog ??= console.log.bind(console);
-
-  console.log = (...args: ConsoleLogArgs) => {
-    if (shouldAllowOverlayLog(args)) {
-      originalConsoleLog?.(...args);
+export const overlayLog = {
+  debug: (...args: ConsoleLogArgs): void => {
+    if (currentLogLevel === "debug") {
+      console.log(...args);
     }
-  };
-
-  isConsolePatched = true;
-};
+  },
+  info: (...args: ConsoleLogArgs): void => {
+    if (shouldEmitInfo(args)) {
+      console.log(...args);
+    }
+  },
+  warn: (...args: ConsoleWarnArgs): void => {
+    console.warn(...args);
+  },
+  error: (...args: ConsoleErrorArgs): void => {
+    console.error(...args);
+  },
+} as const;
 
 export const setOverlayLogLevel = (level: LogLevel): void => {
-  patchConsoleLog();
   currentLogLevel = level;
 };
 

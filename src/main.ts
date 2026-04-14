@@ -5,23 +5,27 @@
  * Displays YouTube live chat messages in Nico-nico style flowing overlay.
  */
 
-import { DEFAULT_SETTINGS, type OverlaySettings } from '@app-types';
-import { ChatSource } from '@core/chat-source';
-import { sleep } from '@core/dom';
-import { initOverlayLogLevel, setOverlayLogLevel } from '@core/logging';
-import { Overlay } from '@core/overlay';
-import { PageWatcher } from '@core/page-watcher';
-import { Renderer } from '@core/renderer';
-import { Settings } from '@core/settings';
-import { SettingsUi } from '@core/settings-ui';
-import { VideoSync } from '@core/video-sync';
+import { DEFAULT_SETTINGS, type OverlaySettings } from "@app-types";
+import { ChatSource } from "@core/chat-source";
+import { sleep } from "@core/dom";
+import {
+  initOverlayLogLevel,
+  overlayLog,
+  setOverlayLogLevel,
+} from "@core/logging";
+import { Overlay } from "@core/overlay";
+import { PageWatcher } from "@core/page-watcher";
+import { Renderer } from "@core/renderer";
+import { Settings } from "@core/settings";
+import { SettingsUi } from "@core/settings-ui";
+import { VideoSync } from "@core/video-sync";
 
 const RESTART_DEBOUNCE_MS = 500;
 const NAVIGATION_SETTLE_DELAY_MS = 2000;
 const RESTART_RETRY_DELAY_MS = 2000;
 const MAX_RESTART_ATTEMPTS = 3;
 const APP_INIT_DELAY_MS = 500;
-const OVERLAY_SELECTOR = '#yt-live-chat-overlay';
+const OVERLAY_SELECTOR = "#yt-live-chat-overlay";
 const RESUME_SYNC_MESSAGE_LIMIT = 20;
 
 interface StartGuard {
@@ -64,7 +68,7 @@ class App {
     void this.syncLatestMessagesOnResume();
   };
   private readonly handleVideoRateChange = (rate: number): void => {
-    console.log('[App] Video playback rate changed:', rate);
+    overlayLog.info("[App] Video playback rate changed:", rate);
     this.renderer?.setPlaybackRate(rate);
   };
   private readonly handleVideoSeeking = (): void => {
@@ -92,12 +96,13 @@ class App {
       renderer.resetForResync();
       renderer.resume();
 
-      const latestMessages = this.chatSource?.getLatestMessages(RESUME_SYNC_MESSAGE_LIMIT) ?? [];
+      const latestMessages =
+        this.chatSource?.getLatestMessages(RESUME_SYNC_MESSAGE_LIMIT) ?? [];
       for (const message of latestMessages) {
         renderer.addMessage(message);
       }
     } catch (error) {
-      console.warn('[App] Failed to sync latest messages on resume:', error);
+      console.warn("[App] Failed to sync latest messages on resume:", error);
       this.renderer?.resume();
     } finally {
       this.resumeSyncInProgress = false;
@@ -110,14 +115,14 @@ class App {
     this.settingsUi = new SettingsUi(
       () => this.settings.get(),
       (partial) => this.updateSettings(partial),
-      () => this.resetSettings()
+      () => this.resetSettings(),
     );
 
     setOverlayLogLevel(this.settings.get().logLevel);
 
     this.pageWatcher.onChange(this.handlePageWatcherChange);
 
-    console.log('[App] Initialized');
+    overlayLog.info("[App] Initialized");
   }
 
   private createStartGuard(): StartGuard {
@@ -135,7 +140,7 @@ class App {
     const guard = this.createStartGuard();
 
     if (!this.pageWatcher.isValidPage()) {
-      console.log('[App] Not on a video page, waiting...');
+      overlayLog.info("[App] Not on a video page, waiting...");
       return;
     }
 
@@ -143,13 +148,13 @@ class App {
     if (guard.isCancelled()) return;
 
     if (this.isInitialized) {
-      console.log('[App] Already initialized');
+      overlayLog.info("[App] Already initialized");
       return;
     }
 
     const currentSettings = this.settings.get();
     if (!currentSettings.enabled) {
-      console.log('[App] Overlay is disabled');
+      overlayLog.info("[App] Overlay is disabled");
       return;
     }
 
@@ -157,7 +162,7 @@ class App {
       const overlayCreated = await this.createOverlayRuntime(currentSettings);
       if (guard.isCancelled()) return;
       if (!overlayCreated) {
-        console.warn('[App] Failed to create overlay');
+        console.warn("[App] Failed to create overlay");
         this.cleanup();
         return;
       }
@@ -172,7 +177,7 @@ class App {
       if (guard.isCancelled()) return;
 
       if (!chatStarted) {
-        console.warn('[App] Failed to start chat monitoring');
+        console.warn("[App] Failed to start chat monitoring");
         this.cleanup();
         return;
       }
@@ -181,14 +186,16 @@ class App {
 
       this.isInitialized = true;
       this.lastStartedUrl = location.href;
-      console.log('[App] Started successfully');
+      overlayLog.info("[App] Started successfully");
     } catch (error) {
-      console.error('[App] Initialization error:', error);
+      console.error("[App] Initialization error:", error);
       this.cleanup();
     }
   }
 
-  private createOverlayRuntime(settings: OverlaySettings): Promise<boolean> | false {
+  private createOverlayRuntime(
+    settings: OverlaySettings,
+  ): Promise<boolean> | false {
     const overlay = new Overlay();
     return overlay.create(settings).then((created) => {
       if (!created) {
@@ -258,7 +265,7 @@ class App {
         this.hiddenWhilePlaying = false;
       }
     };
-    document.addEventListener('visibilitychange', this.visibilityHandler);
+    document.addEventListener("visibilitychange", this.visibilityHandler);
   }
 
   /**
@@ -270,9 +277,9 @@ class App {
     this.chatWatchdogInterval = window.setInterval(() => {
       if (!this.chatSource || !this.isInitialized) return;
       if (!this.chatSource.isObserverAlive()) {
-        console.warn('[App] Chat observer dead — attempting reconnect');
+        console.warn("[App] Chat observer dead — attempting reconnect");
         this.chatSource.reconnect().catch((err: unknown) => {
-          console.warn('[App] Chat reconnect failed:', err);
+          console.warn("[App] Chat reconnect failed:", err);
         });
       }
     }, WATCHDOG_INTERVAL_MS);
@@ -307,7 +314,7 @@ class App {
 
   private shouldSkipRestart(currentUrl: string): boolean {
     if (this.isInitialized && this.lastStartedUrl === currentUrl) {
-      console.log('[App] Navigation event on same URL, skipping restart');
+      overlayLog.info("[App] Navigation event on same URL, skipping restart");
       return true;
     }
 
@@ -316,12 +323,12 @@ class App {
 
   private canRestartAfterNavigation(): boolean {
     if (!this.pageWatcher.isValidPage()) {
-      console.log('[App] Not on a valid page after navigation');
+      overlayLog.info("[App] Not on a valid page after navigation");
       return false;
     }
 
     if (!this.settings.get().enabled) {
-      console.log('[App] Overlay is disabled, not restarting');
+      overlayLog.info("[App] Overlay is disabled, not restarting");
       return false;
     }
 
@@ -330,13 +337,15 @@ class App {
 
   private async attemptRestart(): Promise<boolean> {
     for (let attempt = 1; attempt <= MAX_RESTART_ATTEMPTS; attempt++) {
-      console.log(`[App] Restart attempt ${attempt}/${MAX_RESTART_ATTEMPTS}`);
+      overlayLog.info(
+        `[App] Restart attempt ${attempt}/${MAX_RESTART_ATTEMPTS}`,
+      );
 
       try {
         await this.start();
 
         if (this.isInitialized) {
-          console.log('[App] Successfully restarted after navigation');
+          overlayLog.info("[App] Successfully restarted after navigation");
           return true;
         }
       } catch (error) {
@@ -369,12 +378,14 @@ class App {
         return;
       }
 
-      console.log('[App] Page changed, restarting...');
+      overlayLog.info("[App] Page changed, restarting...");
       this.cleanup();
       await sleep(NAVIGATION_SETTLE_DELAY_MS);
 
       if (location.href !== targetUrl) {
-        console.log('[App] URL changed during settle delay, skipping stale restart');
+        overlayLog.info(
+          "[App] URL changed during settle delay, skipping stale restart",
+        );
         return;
       }
 
@@ -383,10 +394,10 @@ class App {
       }
 
       if (!(await this.attemptRestart())) {
-        console.warn('[App] Failed to restart after all retry attempts');
+        console.warn("[App] Failed to restart after all retry attempts");
       }
     } catch (error) {
-      console.warn('[App] Restart error:', error);
+      console.warn("[App] Restart error:", error);
     } finally {
       this.restartInProgress = false;
       if (this.pendingRestart) {
@@ -424,28 +435,31 @@ class App {
       this.renderer.updateSettings(nextSettings);
     }
 
-    console.log('[App] Settings updated');
+    overlayLog.info("[App] Settings updated");
   }
 
   private syncLogLevel(
     partial: Partial<OverlaySettings>,
-    nextSettings: Readonly<OverlaySettings>
+    nextSettings: Readonly<OverlaySettings>,
   ): void {
     if (partial.logLevel !== undefined) {
       setOverlayLogLevel(nextSettings.logLevel);
     }
   }
 
-  private handleEnabledStateChange(wasEnabled: boolean, isEnabled: boolean): boolean {
+  private handleEnabledStateChange(
+    wasEnabled: boolean,
+    isEnabled: boolean,
+  ): boolean {
     if (wasEnabled && !isEnabled) {
       this.cleanup();
-      console.log('[App] Overlay disabled');
+      overlayLog.info("[App] Overlay disabled");
       return true;
     }
 
     if (!wasEnabled && isEnabled) {
       void this.start();
-      console.log('[App] Overlay enabled');
+      overlayLog.info("[App] Overlay enabled");
       return true;
     }
 
@@ -477,7 +491,7 @@ class App {
         if (this.overlay === overlay) {
           this.overlay = null;
         }
-        console.warn('[App] Failed to recreate overlay');
+        console.warn("[App] Failed to recreate overlay");
         return;
       }
 
@@ -491,7 +505,7 @@ class App {
       if (this.overlay === overlay) {
         this.overlay = null;
       }
-      console.error('[App] Failed to recreate overlay:', error);
+      console.error("[App] Failed to recreate overlay:", error);
     }
   }
 
@@ -535,14 +549,16 @@ class App {
       element.remove();
     }
 
-    console.log(`[App] Removed ${leftoverOverlays.length} leftover overlay element(s)`);
+    overlayLog.info(
+      `[App] Removed ${leftoverOverlays.length} leftover overlay element(s)`,
+    );
   }
 
   /**
    * Cleanup all components
    */
   private cleanup(): void {
-    console.log('[App] Starting cleanup...');
+    overlayLog.info("[App] Starting cleanup...");
 
     this.startGeneration++;
     this.clearRestartTimer();
@@ -551,7 +567,7 @@ class App {
     this.resumeSyncInProgress = false;
 
     if (this.visibilityHandler) {
-      document.removeEventListener('visibilitychange', this.visibilityHandler);
+      document.removeEventListener("visibilitychange", this.visibilityHandler);
       this.visibilityHandler = null;
     }
     this.hiddenWhilePlaying = false;
@@ -568,7 +584,7 @@ class App {
     this.removeLeftoverOverlays();
 
     this.isInitialized = false;
-    console.log('[App] Cleanup completed');
+    overlayLog.info("[App] Cleanup completed");
   }
 
   /**
@@ -578,14 +594,14 @@ class App {
     this.cleanup();
     this.pageWatcher.destroy();
     this.settingsUi.destroy();
-    console.log('[App] Stopped');
+    overlayLog.info("[App] Stopped");
   }
 
   private async ensureSettingsUi(): Promise<void> {
     try {
       await this.settingsUi.attach();
     } catch (error) {
-      console.warn('[App] Settings UI error:', error);
+      console.warn("[App] Settings UI error:", error);
     }
   }
 }
@@ -600,20 +616,22 @@ const scheduleAppInitialization = (): void => {
  * Main entry point
  */
 function main(): void {
-  console.log('[YT Chat Overlay] Script loaded', {
+  overlayLog.info("[YT Chat Overlay] Script loaded", {
     readyState: document.readyState,
     url: location.href,
   });
 
   // Wait for page to be ready
-  if (document.readyState === 'loading') {
-    console.log('[YT Chat Overlay] Waiting for DOMContentLoaded...');
-    document.addEventListener('DOMContentLoaded', () => {
-      console.log('[YT Chat Overlay] DOMContentLoaded fired');
+  if (document.readyState === "loading") {
+    overlayLog.info("[YT Chat Overlay] Waiting for DOMContentLoaded...");
+    document.addEventListener("DOMContentLoaded", () => {
+      overlayLog.info("[YT Chat Overlay] DOMContentLoaded fired");
       scheduleAppInitialization();
     });
   } else {
-    console.log('[YT Chat Overlay] Document already ready, initializing...');
+    overlayLog.info(
+      "[YT Chat Overlay] Document already ready, initializing...",
+    );
     scheduleAppInitialization();
   }
 }
@@ -623,7 +641,9 @@ const stopPreviousAppInstance = (): void => {
     return;
   }
 
-  console.log('[YT Chat Overlay] Stopping previous instance before re-init');
+  overlayLog.info(
+    "[YT Chat Overlay] Stopping previous instance before re-init",
+  );
   window.__ytChatOverlay.stop();
   window.__ytChatOverlay = undefined;
 };
@@ -632,7 +652,7 @@ const stopPreviousAppInstance = (): void => {
  * Initialize application
  */
 async function initApp(): Promise<void> {
-  console.log('[YT Chat Overlay] Initializing application...');
+  overlayLog.info("[YT Chat Overlay] Initializing application...");
 
   try {
     stopPreviousAppInstance();
@@ -642,9 +662,11 @@ async function initApp(): Promise<void> {
 
     // Expose to window for debugging (type declared in globals.d.ts)
     window.__ytChatOverlay = app;
-    console.log('[YT Chat Overlay] App instance exposed to window.__ytChatOverlay');
+    overlayLog.info(
+      "[YT Chat Overlay] App instance exposed to window.__ytChatOverlay",
+    );
   } catch (error) {
-    console.error('[YT Chat Overlay] Fatal error:', error);
+    console.error("[YT Chat Overlay] Fatal error:", error);
     // Re-throw to see stack trace
     throw error;
   }
@@ -655,5 +677,5 @@ try {
   initOverlayLogLevel();
   main();
 } catch (error) {
-  console.error('[YT Chat Overlay] Failed to start:', error);
+  console.error("[YT Chat Overlay] Failed to start:", error);
 }
