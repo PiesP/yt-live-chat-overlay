@@ -8,9 +8,7 @@ export interface ElementMatchOptions<T extends Element> {
   predicate?: (element: T) => boolean;
 }
 
-export interface WaitForElementMatchOptions<
-  T extends Element,
-> extends ElementMatchOptions<T> {
+export interface WaitForElementMatchOptions<T extends Element> extends ElementMatchOptions<T> {
   attempts?: number;
   intervalMs?: number;
 }
@@ -24,10 +22,10 @@ const DEFAULT_WAIT_ATTEMPTS = 5;
 const DEFAULT_WAIT_INTERVAL_MS = 500;
 
 export const PLAYER_CONTAINER_SELECTORS = [
-  "#movie_player",
-  ".html5-video-player",
-  "ytd-player",
-  "#player-container",
+  '#movie_player',
+  '.html5-video-player',
+  'ytd-player',
+  '#player-container',
 ] as const;
 
 export const sleep = (ms: number): Promise<void> =>
@@ -36,9 +34,7 @@ export const sleep = (ms: number): Promise<void> =>
 export const isVisibleElement = (element: HTMLElement): boolean =>
   element.offsetWidth > 0 && element.offsetHeight > 0;
 
-const normalizeWaitOptions = <T extends Element>(
-  options: WaitForElementMatchOptions<T>,
-) => ({
+const normalizeWaitOptions = <T extends Element>(options: WaitForElementMatchOptions<T>) => ({
   root: options.root ?? document,
   predicate: options.predicate,
   attempts: Math.max(1, Math.trunc(options.attempts ?? DEFAULT_WAIT_ATTEMPTS)),
@@ -52,7 +48,7 @@ const normalizePollOptions = (options: PollForValueOptions = {}) => ({
 
 export const findElementMatch = <T extends Element>(
   selectors: readonly string[],
-  options: ElementMatchOptions<T> = {},
+  options: ElementMatchOptions<T> = {}
 ): SelectorMatch<T> | null => {
   const { root = document, predicate } = options;
 
@@ -68,10 +64,9 @@ export const findElementMatch = <T extends Element>(
 
 export const waitForElementMatch = async <T extends Element>(
   selectors: readonly string[],
-  options: WaitForElementMatchOptions<T> = {},
+  options: WaitForElementMatchOptions<T> = {}
 ): Promise<SelectorMatch<T> | null> => {
-  const { attempts, intervalMs, root, predicate } =
-    normalizeWaitOptions(options);
+  const { attempts, intervalMs, root, predicate } = normalizeWaitOptions(options);
   const matchOptions = predicate ? { root, predicate } : { root };
 
   return pollForValue(() => findElementMatch<T>(selectors, matchOptions), {
@@ -82,7 +77,7 @@ export const waitForElementMatch = async <T extends Element>(
 
 export const pollForValue = async <T>(
   readValue: () => T | null | undefined,
-  options: PollForValueOptions = {},
+  options: PollForValueOptions = {}
 ): Promise<T | null> => {
   const { attempts, intervalMs } = normalizePollOptions(options);
 
@@ -105,8 +100,8 @@ export const pollForValue = async <T>(
  * children (overlay, settings button) are placed relative to it.
  */
 export const ensurePlayerPositioning = (element: HTMLElement): void => {
-  if (window.getComputedStyle(element).position === "static") {
-    element.style.position = "relative";
+  if (window.getComputedStyle(element).position === 'static') {
+    element.style.position = 'relative';
   }
 };
 
@@ -115,22 +110,19 @@ export const ensurePlayerPositioning = (element: HTMLElement): void => {
  * Shared by Overlay and SettingsUi to avoid duplicated lookup logic.
  */
 export const findPlayerContainerElement = async (
-  options: { attempts?: number; intervalMs?: number } = {},
+  options: { attempts?: number; intervalMs?: number } = {}
 ): Promise<HTMLElement | null> => {
-  const match = await waitForElementMatch<HTMLElement>(
-    PLAYER_CONTAINER_SELECTORS,
-    {
-      attempts: options.attempts ?? DEFAULT_WAIT_ATTEMPTS,
-      intervalMs: options.intervalMs ?? DEFAULT_WAIT_INTERVAL_MS,
-      predicate: isVisibleElement,
-    },
-  );
+  const match = await waitForElementMatch<HTMLElement>(PLAYER_CONTAINER_SELECTORS, {
+    attempts: options.attempts ?? DEFAULT_WAIT_ATTEMPTS,
+    intervalMs: options.intervalMs ?? DEFAULT_WAIT_INTERVAL_MS,
+    predicate: isVisibleElement,
+  });
 
   if (!match) {
-    console.warn("[YT Chat Overlay] No player container found");
+    console.warn('[YT Chat Overlay] No player container found');
     return null;
   }
 
-  console.log("[YT Chat Overlay] Player found with selector:", match.selector);
+  console.log('[YT Chat Overlay] Player found with selector:', match.selector);
   return match.element;
 };

@@ -72,6 +72,8 @@ const CHAT_TOGGLE_BUTTON_SELECTORS = [
 const CHAT_CONTAINER_SEARCH_ATTEMPTS = 8;
 const CHAT_CONTAINER_SEARCH_INTERVAL_MS = 1000;
 const RECENT_MESSAGE_BUFFER_SIZE = 100;
+const RECONNECT_ATTEMPTS = 3;
+const RECONNECT_RETRY_DELAY_MS = 1000;
 
 export type MessageCallback = (message: ChatMessage) => void;
 
@@ -89,6 +91,7 @@ export class ChatSource {
   private lastMessageTime = 0;
   /** Set to true by stop() to cancel any in-flight start() async loops. */
   private stopped = false;
+  private reconnectInProgress = false;
   /** Tracks processed DOM nodes to prevent firing the same element twice. */
   private readonly seenElements = new WeakSet<Element>();
   /** Recent normalized messages for resume synchronization. */
@@ -328,12 +331,11 @@ export class ChatSource {
     });
   }
 
-  private async findChatContainerWithRetries(): Promise<Element | null> {
-    for (
-      let attempt = 1;
-      attempt <= CHAT_CONTAINER_SEARCH_ATTEMPTS;
-      attempt++
-    ) {
+  private async findChatContainerWithRetries(
+    attempts = CHAT_CONTAINER_SEARCH_ATTEMPTS,
+    intervalMs = CHAT_CONTAINER_SEARCH_INTERVAL_MS,
+  ): Promise<Element | null> {
+    for (let attempt = 1; attempt <= attempts; attempt++) {
       if (this.stopped) {
         return null;
       }
@@ -346,8 +348,8 @@ export class ChatSource {
         return container;
       }
 
-      if (attempt < CHAT_CONTAINER_SEARCH_ATTEMPTS) {
-        await sleep(CHAT_CONTAINER_SEARCH_INTERVAL_MS);
+      if (attempt < attempts) {
+        await sleep(intervalMs);
       }
     }
 
@@ -467,33 +469,24 @@ export class ChatSource {
       );
     }
 
-    // If no button found or click didn't work, try to remove collapsed attribute directly
+    console.warn("[YT Chat Overlay] Could not open chat panel automatically");
+    return false;
+  }
+
+  private async prepareChatPanelForReconnect(): Promise<void> {
+    const chatFrame = this.findChatFrame();
+    if (!chatFrame) {
+      return;
+    }
+
     try {
-      let removed = false;
-      if (chatFrame.hasAttribute("collapsed")) {
-        chatFrame.removeAttribute("collapsed");
-        removed = true;
-      }
-      if (chatFrame.hasAttribute("hidden")) {
-        chatFrame.removeAttribute("hidden");
-        removed = true;
-      }
-      if (removed) {
-        console.log(
-          "[YT Chat Overlay] Removed collapsed/hidden attributes from chat frame",
-        );
-        await sleep(500);
-        return true;
-      }
+      await this.ensureChatPanelOpen(chatFrame);
     } catch (error) {
       console.warn(
-        "[YT Chat Overlay] Error removing collapsed/hidden attributes:",
+        "[YT Chat Overlay] Failed to reopen chat panel before reconnect:",
         error,
       );
     }
-
-    console.warn("[YT Chat Overlay] Could not open chat panel automatically");
-    return false;
   }
 
   /**
@@ -1165,18 +1158,30 @@ export class ChatSource {
    * Performs a single attempt; the watchdog retries on the next interval tick.
    */
   async reconnect(): Promise<void> {
-    if (this.stopped || !this.callback) return;
+    if (this.stopped || !this.callback || this.reconnectInProgress) return;
 
-    console.log("[YT Chat Overlay] Reconnecting MutationObserver...");
-    this.observer?.disconnect();
-    this.observer = null;
-    this.chatContainer = null;
+    this.reconnectInProgress = true;
 
-    const container = await this.findChatContainer();
-    if (this.stopped || !container) return;
+    try {
+      console.log("[YT Chat Overlay] Reconnecting MutationObserver...");
+      this.observer?.disconnect();
+      this.observer = null;
+      this.chatContainer = null;
 
-    this.attachObserver(container);
-    console.log("[YT Chat Overlay] MutationObserver reconnected");
+      await this.prepareChatPanelForReconnect();
+      if (this.stopped) return;
+
+      const container = await this.findChatContainerWithRetries(
+        RECONNECT_ATTEMPTS,
+        RECONNECT_RETRY_DELAY_MS,
+      );
+      if (this.stopped || !container) return;
+
+      this.attachObserver(container);
+      console.log("[YT Chat Overlay] MutationObserver reconnected");
+    } finally {
+      this.reconnectInProgress = false;
+    }
   }
 
   /**

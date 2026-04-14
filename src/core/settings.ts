@@ -5,33 +5,29 @@
  * Only settings are stored - no chat data.
  */
 
-import {
-  DEFAULT_SETTINGS,
-  type OverlaySettings,
-  SETTINGS_LIMITS,
-} from "@app-types";
+import { DEFAULT_SETTINGS, type OverlaySettings, SETTINGS_LIMITS } from '@app-types';
 
-export const STORAGE_KEY = "yt-live-chat-overlay-settings";
+export const STORAGE_KEY = 'yt-live-chat-overlay-settings';
 
 interface StoredSettings extends Partial<OverlaySettings> {
   debugLogging?: boolean;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
+  typeof value === 'object' && value !== null && !Array.isArray(value);
 
-const isLogLevel = (value: unknown): value is OverlaySettings["logLevel"] =>
-  value === "warn" || value === "info" || value === "debug";
+const isLogLevel = (value: unknown): value is OverlaySettings['logLevel'] =>
+  value === 'warn' || value === 'info' || value === 'debug';
 
 const isColorValue = (value: unknown): value is string =>
-  typeof value === "string" && /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(value);
+  typeof value === 'string' && /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(value);
 
 const clampNumber = (
   value: unknown,
   fallback: number,
-  limits: { min: number; max: number },
+  limits: { min: number; max: number }
 ): number => {
-  const numericValue = typeof value === "number" ? value : Number(value);
+  const numericValue = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(numericValue)) {
     return fallback;
   }
@@ -39,9 +35,7 @@ const clampNumber = (
   return Math.min(limits.max, Math.max(limits.min, numericValue));
 };
 
-const cloneSettings = (
-  settings: Readonly<OverlaySettings>,
-): OverlaySettings => ({
+const cloneSettings = (settings: Readonly<OverlaySettings>): OverlaySettings => ({
   ...settings,
   showAuthor: { ...settings.showAuthor },
   colors: { ...settings.colors },
@@ -50,109 +44,88 @@ const cloneSettings = (
 
 const mergeSettings = (
   base: Readonly<OverlaySettings>,
-  partial: Partial<OverlaySettings>,
+  partial: Partial<OverlaySettings>
 ): OverlaySettings => ({
   ...base,
   ...partial,
   showAuthor: isRecord(partial.showAuthor)
     ? { ...base.showAuthor, ...partial.showAuthor }
     : { ...base.showAuthor },
-  colors: isRecord(partial.colors)
-    ? { ...base.colors, ...partial.colors }
-    : { ...base.colors },
+  colors: isRecord(partial.colors) ? { ...base.colors, ...partial.colors } : { ...base.colors },
   outline: isRecord(partial.outline)
     ? { ...base.outline, ...partial.outline }
     : { ...base.outline },
 });
 
-const normalizeSettings = (
-  settings: Readonly<OverlaySettings>,
-): OverlaySettings => ({
-  enabled:
-    typeof settings.enabled === "boolean"
-      ? settings.enabled
-      : DEFAULT_SETTINGS.enabled,
+const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings => ({
+  enabled: typeof settings.enabled === 'boolean' ? settings.enabled : DEFAULT_SETTINGS.enabled,
   speedPxPerSec: clampNumber(
     settings.speedPxPerSec,
     DEFAULT_SETTINGS.speedPxPerSec,
-    SETTINGS_LIMITS.speedPxPerSec,
+    SETTINGS_LIMITS.speedPxPerSec
   ),
-  fontSize: clampNumber(
-    settings.fontSize,
-    DEFAULT_SETTINGS.fontSize,
-    SETTINGS_LIMITS.fontSize,
-  ),
-  opacity: clampNumber(
-    settings.opacity,
-    DEFAULT_SETTINGS.opacity,
-    SETTINGS_LIMITS.opacity,
-  ),
+  fontSize: clampNumber(settings.fontSize, DEFAULT_SETTINGS.fontSize, SETTINGS_LIMITS.fontSize),
+  opacity: clampNumber(settings.opacity, DEFAULT_SETTINGS.opacity, SETTINGS_LIMITS.opacity),
   superChatOpacity: clampNumber(
     settings.superChatOpacity,
     DEFAULT_SETTINGS.superChatOpacity,
-    SETTINGS_LIMITS.superChatOpacity,
+    SETTINGS_LIMITS.superChatOpacity
   ),
-  safeTop: clampNumber(
-    settings.safeTop,
-    DEFAULT_SETTINGS.safeTop,
-    SETTINGS_LIMITS.safeTop,
-  ),
+  safeTop: clampNumber(settings.safeTop, DEFAULT_SETTINGS.safeTop, SETTINGS_LIMITS.safeTop),
   safeBottom: clampNumber(
     settings.safeBottom,
     DEFAULT_SETTINGS.safeBottom,
-    SETTINGS_LIMITS.safeBottom,
+    SETTINGS_LIMITS.safeBottom
   ),
   maxConcurrentMessages: Math.round(
     clampNumber(
       settings.maxConcurrentMessages,
       DEFAULT_SETTINGS.maxConcurrentMessages,
-      SETTINGS_LIMITS.maxConcurrentMessages,
-    ),
+      SETTINGS_LIMITS.maxConcurrentMessages
+    )
   ),
   maxMessagesPerSecond: Math.round(
     clampNumber(
       settings.maxMessagesPerSecond,
       DEFAULT_SETTINGS.maxMessagesPerSecond,
-      SETTINGS_LIMITS.maxMessagesPerSecond,
-    ),
+      SETTINGS_LIMITS.maxMessagesPerSecond
+    )
   ),
   allowShortTextMessages:
-    typeof settings.allowShortTextMessages === "boolean"
+    typeof settings.allowShortTextMessages === 'boolean'
       ? settings.allowShortTextMessages
       : DEFAULT_SETTINGS.allowShortTextMessages,
   minTextLength: Math.round(
     clampNumber(
       settings.minTextLength,
       DEFAULT_SETTINGS.minTextLength,
-      SETTINGS_LIMITS.minTextLength,
-    ),
+      SETTINGS_LIMITS.minTextLength
+    )
   ),
-  logLevel: isLogLevel(settings.logLevel)
-    ? settings.logLevel
-    : DEFAULT_SETTINGS.logLevel,
+  logLevel: isLogLevel(settings.logLevel) ? settings.logLevel : DEFAULT_SETTINGS.logLevel,
   showAuthor: {
     normal:
-      typeof settings.showAuthor.normal === "boolean"
+      typeof settings.showAuthor.normal === 'boolean'
         ? settings.showAuthor.normal
         : DEFAULT_SETTINGS.showAuthor.normal,
     member:
-      typeof settings.showAuthor.member === "boolean"
+      typeof settings.showAuthor.member === 'boolean'
         ? settings.showAuthor.member
         : DEFAULT_SETTINGS.showAuthor.member,
     moderator:
-      typeof settings.showAuthor.moderator === "boolean"
+      typeof settings.showAuthor.moderator === 'boolean'
         ? settings.showAuthor.moderator
         : DEFAULT_SETTINGS.showAuthor.moderator,
     owner:
-      typeof settings.showAuthor.owner === "boolean"
+      typeof settings.showAuthor.owner === 'boolean'
         ? settings.showAuthor.owner
         : DEFAULT_SETTINGS.showAuthor.owner,
     verified:
-      typeof settings.showAuthor.verified === "boolean"
+      typeof settings.showAuthor.verified === 'boolean'
         ? settings.showAuthor.verified
         : DEFAULT_SETTINGS.showAuthor.verified,
     superChat:
-      typeof settings.showAuthor.superChat === "boolean"
+      typeof settings.showAuthor.superChat === 'boolean'
         ? settings.showAuthor.superChat
         : DEFAULT_SETTINGS.showAuthor.superChat,
   },
@@ -175,44 +148,39 @@ const normalizeSettings = (
   },
   outline: {
     enabled:
-      typeof settings.outline.enabled === "boolean"
+      typeof settings.outline.enabled === 'boolean'
         ? settings.outline.enabled
         : DEFAULT_SETTINGS.outline.enabled,
     widthPx: clampNumber(
       settings.outline.widthPx,
       DEFAULT_SETTINGS.outline.widthPx,
-      SETTINGS_LIMITS.outlineWidthPx,
+      SETTINGS_LIMITS.outlineWidthPx
     ),
     blurPx: clampNumber(
       settings.outline.blurPx,
       DEFAULT_SETTINGS.outline.blurPx,
-      SETTINGS_LIMITS.outlineBlurPx,
+      SETTINGS_LIMITS.outlineBlurPx
     ),
     opacity: clampNumber(
       settings.outline.opacity,
       DEFAULT_SETTINGS.outline.opacity,
-      SETTINGS_LIMITS.outlineOpacity,
+      SETTINGS_LIMITS.outlineOpacity
     ),
   },
   laneSpacing: Math.round(
-    clampNumber(
-      settings.laneSpacing,
-      DEFAULT_SETTINGS.laneSpacing,
-      SETTINGS_LIMITS.laneSpacing,
-    ),
+    clampNumber(settings.laneSpacing, DEFAULT_SETTINGS.laneSpacing, SETTINGS_LIMITS.laneSpacing)
   ),
 });
 
 const normalizeStoredSettings = (stored: StoredSettings): OverlaySettings => {
   const { debugLogging, ...parsed } = stored;
-  const migratedLogLevel =
-    parsed.logLevel ?? (debugLogging ? "debug" : undefined);
+  const migratedLogLevel = parsed.logLevel ?? (debugLogging ? 'debug' : undefined);
 
   return normalizeSettings(
     mergeSettings(DEFAULT_SETTINGS, {
       ...parsed,
       ...(migratedLogLevel ? { logLevel: migratedLogLevel } : {}),
-    }),
+    })
   );
 };
 
@@ -233,7 +201,7 @@ export class Settings {
         return normalizeStoredSettings(JSON.parse(stored) as StoredSettings);
       }
     } catch (error) {
-      console.warn("[YT Chat Overlay] Failed to load settings:", error);
+      console.warn('[YT Chat Overlay] Failed to load settings:', error);
     }
 
     return cloneSettings(DEFAULT_SETTINGS);
@@ -246,7 +214,7 @@ export class Settings {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(this.settings));
     } catch (error) {
-      console.warn("[YT Chat Overlay] Failed to save settings:", error);
+      console.warn('[YT Chat Overlay] Failed to save settings:', error);
     }
   }
 
