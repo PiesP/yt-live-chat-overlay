@@ -9,7 +9,8 @@ import type { OverlayDimensions, OverlaySettings } from '@app-types';
 import { ensurePlayerPositioning, findPlayerContainerElement } from '@core/dom';
 import { overlayLog } from '@core/logging';
 
-const OVERLAY_ID = 'yt-live-chat-overlay';
+export const OVERLAY_ID = 'yt-live-chat-overlay';
+export const OVERLAY_SELECTOR = `#${OVERLAY_ID}`;
 const PLAYER_LOOKUP_INTERVAL_MS = 1000;
 const FULLSCREEN_UPDATE_DELAY_MS = 100;
 // Reduced from 1.3 → 1.2 to pack lanes more tightly (~8% more rows).
@@ -52,15 +53,17 @@ export class Overlay {
   private playerElement: HTMLElement | null = null;
   private resizeObserver: ResizeObserver | null = null;
   private dimensions: OverlayDimensions | null = null;
+  private settings: OverlaySettings | null = null;
   private fullscreenHandler: (() => void) | null = null;
   private fullscreenUpdateTimer: number | null = null;
 
   /**
    * Find player container
    */
-  private async findPlayerContainer(): Promise<HTMLElement | null> {
+  private async findPlayerContainer(signal?: AbortSignal): Promise<HTMLElement | null> {
     const player = await findPlayerContainerElement({
       intervalMs: PLAYER_LOOKUP_INTERVAL_MS,
+      signal,
     });
     if (player) {
       overlayLog.info('[YT Chat Overlay] Player dimensions:', {
@@ -83,13 +86,13 @@ export class Overlay {
     return container;
   }
 
-  private updateDimensions(settings: OverlaySettings): void {
-    if (!this.playerElement || !this.container) {
+  private updateDimensions(): void {
+    if (!this.playerElement || !this.container || !this.settings) {
       this.dimensions = null;
       return;
     }
 
-    this.dimensions = calculateOverlayDimensions(this.playerElement, settings);
+    this.dimensions = calculateOverlayDimensions(this.playerElement, this.settings);
   }
 
   private clearFullscreenUpdateTimer(): void {
@@ -99,23 +102,23 @@ export class Overlay {
     }
   }
 
-  private observeResize(settings: OverlaySettings): void {
+  private observeResize(): void {
     if (!this.playerElement) {
       return;
     }
 
     this.resizeObserver = new ResizeObserver(() => {
-      this.updateDimensions(settings);
+      this.updateDimensions();
     });
     this.resizeObserver.observe(this.playerElement);
   }
 
-  private observeFullscreen(settings: OverlaySettings): void {
+  private observeFullscreen(): void {
     this.fullscreenHandler = () => {
       this.clearFullscreenUpdateTimer();
       this.fullscreenUpdateTimer = window.setTimeout(() => {
         this.fullscreenUpdateTimer = null;
-        this.updateDimensions(settings);
+        this.updateDimensions();
       }, FULLSCREEN_UPDATE_DELAY_MS);
     };
 
@@ -145,9 +148,10 @@ export class Overlay {
   /**
    * Create overlay container
    */
-  async create(settings: OverlaySettings): Promise<boolean> {
+  async create(settings: OverlaySettings, signal?: AbortSignal): Promise<boolean> {
     // Find player
-    this.playerElement = await this.findPlayerContainer();
+    this.playerElement = await this.findPlayerContainer(signal);
+    this.settings = settings;
 
     if (!this.playerElement) {
       return false;
@@ -160,13 +164,18 @@ export class Overlay {
     ensurePlayerPositioning(this.playerElement);
     this.playerElement.appendChild(this.container);
 
-    this.observeResize(settings);
-    this.observeFullscreen(settings);
+    this.observeResize();
+    this.observeFullscreen();
 
-    this.updateDimensions(settings);
+    this.updateDimensions();
 
     overlayLog.info('[YT Chat Overlay] Overlay created');
     return true;
+  }
+
+  updateSettings(settings: OverlaySettings): void {
+    this.settings = settings;
+    this.updateDimensions();
   }
 
   /**
@@ -197,6 +206,7 @@ export class Overlay {
     this.container = null;
     this.playerElement = null;
     this.dimensions = null;
+    this.settings = null;
 
     overlayLog.info('[Overlay] Destroyed');
   }

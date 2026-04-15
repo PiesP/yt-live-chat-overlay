@@ -13,11 +13,13 @@ export interface ElementMatchOptions<T extends Element> {
 export interface WaitForElementMatchOptions<T extends Element> extends ElementMatchOptions<T> {
   attempts?: number;
   intervalMs?: number;
+  signal?: AbortSignal | undefined;
 }
 
 export interface PollForValueOptions {
   attempts?: number;
   intervalMs?: number;
+  signal?: AbortSignal | undefined;
 }
 
 const DEFAULT_WAIT_ATTEMPTS = 5;
@@ -30,8 +32,39 @@ export const PLAYER_CONTAINER_SELECTORS = [
   '#player-container',
 ] as const;
 
-export const sleep = (ms: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, ms));
+const createAbortError = (reason?: unknown): DOMException | Error => {
+  if (reason instanceof DOMException || reason instanceof Error) {
+    return reason;
+  }
+
+  return new DOMException('The operation was aborted.', 'AbortError');
+};
+
+export const throwIfAborted = (signal?: AbortSignal): void => {
+  if (signal?.aborted) {
+    throw createAbortError(signal.reason);
+  }
+};
+
+export const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
+  new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(createAbortError(signal?.reason));
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      signal?.removeEventListener('abort', handleAbort);
+      resolve();
+    }, ms);
+
+    const handleAbort = (): void => {
+      window.clearTimeout(timeoutId);
+      reject(createAbortError(signal?.reason));
+    };
+
+    signal?.addEventListener('abort', handleAbort, { once: true });
+  });
 
 export const isVisibleElement = (element: HTMLElement): boolean =>
   element.offsetWidth > 0 && element.offsetHeight > 0;
@@ -41,11 +74,13 @@ const normalizeWaitOptions = <T extends Element>(options: WaitForElementMatchOpt
   predicate: options.predicate,
   attempts: Math.max(1, Math.trunc(options.attempts ?? DEFAULT_WAIT_ATTEMPTS)),
   intervalMs: Math.max(0, options.intervalMs ?? DEFAULT_WAIT_INTERVAL_MS),
+  signal: options.signal,
 });
 
 const normalizePollOptions = (options: PollForValueOptions = {}) => ({
   attempts: Math.max(1, Math.trunc(options.attempts ?? DEFAULT_WAIT_ATTEMPTS)),
   intervalMs: Math.max(0, options.intervalMs ?? DEFAULT_WAIT_INTERVAL_MS),
+  signal: options.signal,
 });
 
 export const findElementMatch = <T extends Element>(
@@ -68,12 +103,13 @@ export const waitForElementMatch = async <T extends Element>(
   selectors: readonly string[],
   options: WaitForElementMatchOptions<T> = {}
 ): Promise<SelectorMatch<T> | null> => {
-  const { attempts, intervalMs, root, predicate } = normalizeWaitOptions(options);
+  const { attempts, intervalMs, root, predicate, signal } = normalizeWaitOptions(options);
   const matchOptions = predicate ? { root, predicate } : { root };
 
   return pollForValue(() => findElementMatch<T>(selectors, matchOptions), {
     attempts,
     intervalMs,
+    signal,
   });
 };
 
@@ -81,9 +117,11 @@ export const pollForValue = async <T>(
   readValue: () => T | null | undefined,
   options: PollForValueOptions = {}
 ): Promise<T | null> => {
-  const { attempts, intervalMs } = normalizePollOptions(options);
+  const { attempts, intervalMs, signal } = normalizePollOptions(options);
 
   for (let attempt = 0; attempt < attempts; attempt++) {
+    throwIfAborted(signal);
+
     const value = readValue();
     if (value !== null && value !== undefined) return value;
 
@@ -91,9 +129,10 @@ export const pollForValue = async <T>(
       break;
     }
 
-    await sleep(intervalMs);
+    await sleep(intervalMs, signal);
   }
 
+  throwIfAborted(signal);
   return null;
 };
 
@@ -112,12 +151,13 @@ export const ensurePlayerPositioning = (element: HTMLElement): void => {
  * Shared by Overlay and SettingsUi to avoid duplicated lookup logic.
  */
 export const findPlayerContainerElement = async (
-  options: { attempts?: number; intervalMs?: number } = {}
+  options: { attempts?: number; intervalMs?: number; signal?: AbortSignal | undefined } = {}
 ): Promise<HTMLElement | null> => {
   const match = await waitForElementMatch<HTMLElement>(PLAYER_CONTAINER_SELECTORS, {
     attempts: options.attempts ?? DEFAULT_WAIT_ATTEMPTS,
     intervalMs: options.intervalMs ?? DEFAULT_WAIT_INTERVAL_MS,
     predicate: isVisibleElement,
+    signal: options.signal,
   });
 
   if (!match) {

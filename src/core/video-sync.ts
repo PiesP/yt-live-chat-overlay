@@ -5,7 +5,12 @@
  * Provides callbacks for pause/play events to synchronize overlay animations.
  */
 
-import { findElementMatch, PLAYER_CONTAINER_SELECTORS, waitForElementMatch } from '@core/dom';
+import {
+  findElementMatch,
+  PLAYER_CONTAINER_SELECTORS,
+  throwIfAborted,
+  waitForElementMatch,
+} from '@core/dom';
 import { overlayLog } from '@core/logging';
 
 /**
@@ -60,6 +65,7 @@ export class VideoSync {
   private detectInterval: number | null = null;
   private mutationObserver: MutationObserver | null = null;
   private reinitializeTimer: number | null = null;
+  private lifecycleSignal: AbortSignal | null = null;
   private boundHandlers = {
     pause: () => this.handlePause(),
     play: () => this.handlePlay(),
@@ -75,11 +81,14 @@ export class VideoSync {
    * Initialize video synchronization
    * @returns true if video element found, false if periodic detection started
    */
-  async init(): Promise<boolean> {
-    const videoElement = await this.detectVideoElement();
+  async init(signal?: AbortSignal): Promise<boolean> {
+    this.lifecycleSignal = signal ?? null;
+
+    const videoElement = await this.detectVideoElement(signal);
+    throwIfAborted(signal);
 
     if (!videoElement) {
-      console.warn('[VideoSync] Video element not found, starting periodic detection');
+      overlayLog.warn('[VideoSync] Video element not found, starting periodic detection');
       this.startPeriodicDetection();
       return false;
     }
@@ -101,11 +110,12 @@ export class VideoSync {
    * Detect video element in player container
    * Retries multiple times to handle slow page loads
    */
-  private async detectVideoElement(): Promise<HTMLVideoElement | null> {
+  private async detectVideoElement(signal?: AbortSignal): Promise<HTMLVideoElement | null> {
     const match = await waitForElementMatch<HTMLVideoElement>(VIDEO_SELECTORS, {
       attempts: CONFIG.DETECTION_ATTEMPTS,
       intervalMs: CONFIG.DETECTION_INTERVAL_MS,
       predicate: isVideoReady,
+      signal,
     });
 
     if (match) {
@@ -230,7 +240,7 @@ export class VideoSync {
 
     const playerContainer = this.findPlayerContainer();
     if (!playerContainer) {
-      console.warn('[VideoSync] Player container not found, cannot observe video replacement');
+      overlayLog.warn('[VideoSync] Player container not found, cannot observe video replacement');
       return;
     }
 
@@ -271,8 +281,8 @@ export class VideoSync {
     this.reinitializeTimer = window.setTimeout(() => {
       this.reinitializeTimer = null;
       overlayLog.info('[VideoSync] Attempting to reacquire video element...');
-      this.init().catch((error) => {
-        console.warn('[VideoSync] Failed to reinitialize after video replacement:', error);
+      this.init(this.lifecycleSignal ?? undefined).catch((error) => {
+        overlayLog.warn('[VideoSync] Failed to reinitialize after video replacement:', error);
       });
     }, CONFIG.REINITIALIZATION_DELAY_MS);
   }
