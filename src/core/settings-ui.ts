@@ -1,4 +1,4 @@
-import { type OverlaySettings, SETTINGS_LIMITS } from '@app-types';
+import { isLogLevel, type OverlaySettings, SETTINGS_LIMITS } from '@app-types';
 import { ensurePlayerPositioning, findPlayerContainerElement } from '@core/dom';
 import { overlayLog } from '@core/logging';
 import { borderRadius, colors, shadows, spacing, typography, zIndex } from './design-tokens.js';
@@ -22,9 +22,6 @@ const SHOW_AUTHOR_KEYS = [
 const toPercent = (value: number): number => Math.round(value * 100);
 const clamp = (value: number, min: number, max: number): number =>
   Math.min(max, Math.max(min, value));
-const isLogLevel = (value: string): value is OverlaySettings['logLevel'] =>
-  value === 'warn' || value === 'info' || value === 'debug';
-
 const UI_LIMITS = {
   superChatOpacity: {
     min: toPercent(SETTINGS_LIMITS.superChatOpacity.min),

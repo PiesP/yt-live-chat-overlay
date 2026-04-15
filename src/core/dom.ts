@@ -32,6 +32,13 @@ export const PLAYER_CONTAINER_SELECTORS = [
   '#player-container',
 ] as const;
 
+export const VIDEO_SELECTORS = [
+  '#movie_player video',
+  '.html5-video-player video',
+  'video.html5-main-video',
+  'video[src]',
+] as const;
+
 const createAbortError = (reason?: unknown): DOMException | Error => {
   if (reason instanceof DOMException || reason instanceof Error) {
     return reason;

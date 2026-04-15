@@ -1,4 +1,4 @@
-import type { LogLevel } from '@app-types';
+import { isLogLevel, type LogLevel } from '@app-types';
 import { STORAGE_KEY } from '@core/settings';
 
 interface StoredSettingsLike {
@@ -44,9 +44,6 @@ const getFirstMessage = (args: readonly unknown[]): string | null => {
   return typeof first === 'string' ? first : null;
 };
 
-const isValidLogLevel = (value: unknown): value is LogLevel =>
-  value === 'warn' || value === 'info' || value === 'debug';
-
 const isOverlayLogCall = (args: readonly unknown[]): boolean => {
   const firstMessage = getFirstMessage(args);
   if (!firstMessage) {
@@ -90,7 +87,7 @@ const readStoredLogLevel = (): LogLevel => {
     }
 
     const parsed = JSON.parse(stored) as StoredSettingsLike;
-    if (isValidLogLevel(parsed.logLevel)) {
+    if (isLogLevel(parsed.logLevel)) {
       return parsed.logLevel;
     }
 

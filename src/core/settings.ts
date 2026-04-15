@@ -5,7 +5,7 @@
  * Only settings are stored - no chat data.
  */
 
-import { DEFAULT_SETTINGS, type OverlaySettings, SETTINGS_LIMITS } from '@app-types';
+import { DEFAULT_SETTINGS, isLogLevel, type OverlaySettings, SETTINGS_LIMITS } from '@app-types';
 
 export const STORAGE_KEY = 'yt-live-chat-overlay-settings';
 
@@ -15,9 +15,6 @@ interface StoredSettings extends Partial<OverlaySettings> {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
-
-const isLogLevel = (value: unknown): value is OverlaySettings['logLevel'] =>
-  value === 'warn' || value === 'info' || value === 'debug';
 
 const isColorValue = (value: unknown): value is string =>
   typeof value === 'string' && /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(value);

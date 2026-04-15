@@ -2,6 +2,7 @@ import type { OverlaySettings } from '@app-types';
 import { overlayLog } from '@core/logging';
 import { RuntimeSession } from '@core/runtime-session';
 import { cloneSettings } from '@core/settings';
+import { clearTimeoutHandle } from '@core/timers';
 
 const NAVIGATION_SETTLE_DELAY_MS = 2000;
 const START_RETRY_DELAY_MS = 2000;
@@ -19,6 +20,11 @@ interface DesiredRuntimeState {
   shouldRun: boolean;
   url: string;
   settings: OverlaySettings;
+}
+
+interface StartFailureState {
+  url: string | null;
+  attempts: number;
 }
 
 /**
@@ -39,8 +45,10 @@ export class RuntimeManager {
   private scheduledReconcileTimer: number | null = null;
   private destroyed = false;
   private lastPageChangeAt = 0;
-  private failedStartUrl: string | null = null;
-  private failedStartAttempts = 0;
+  private startFailureState: StartFailureState = {
+    url: null,
+    attempts: 0,
+  };
 
   constructor(options: RuntimeManagerOptions) {
     this.getCurrentUrl = options.getCurrentUrl;
@@ -182,12 +190,7 @@ export class RuntimeManager {
   }
 
   private clearScheduledReconcile(): void {
-    if (this.scheduledReconcileTimer === null) {
-      return;
-    }
-
-    window.clearTimeout(this.scheduledReconcileTimer);
-    this.scheduledReconcileTimer = null;
+    this.scheduledReconcileTimer = clearTimeoutHandle(this.scheduledReconcileTimer);
   }
 
   private disposeActiveSessionIfStale(): void {
@@ -211,17 +214,11 @@ export class RuntimeManager {
   }
 
   private handleStartFailure(url: string): void {
-    if (this.failedStartUrl !== url) {
-      this.failedStartUrl = url;
-      this.failedStartAttempts = 0;
-    }
+    const attempts = this.startFailureState.url === url ? this.startFailureState.attempts + 1 : 1;
+    this.startFailureState = { url, attempts };
+    overlayLog.warn(`[RuntimeManager] Failed to start runtime (${attempts}/${MAX_START_ATTEMPTS})`);
 
-    this.failedStartAttempts += 1;
-    overlayLog.warn(
-      `[RuntimeManager] Failed to start runtime (${this.failedStartAttempts}/${MAX_START_ATTEMPTS})`
-    );
-
-    if (this.failedStartAttempts < MAX_START_ATTEMPTS) {
+    if (attempts < MAX_START_ATTEMPTS) {
       this.scheduleReconcile(START_RETRY_DELAY_MS);
       return;
     }
@@ -230,7 +227,9 @@ export class RuntimeManager {
   }
 
   private resetStartFailures(): void {
-    this.failedStartUrl = null;
-    this.failedStartAttempts = 0;
+    this.startFailureState = {
+      url: null,
+      attempts: 0,
+    };
   }
 }

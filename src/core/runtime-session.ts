@@ -4,6 +4,7 @@ import { throwIfAborted } from '@core/dom';
 import { overlayLog } from '@core/logging';
 import { OVERLAY_SELECTOR, Overlay } from '@core/overlay';
 import { Renderer } from '@core/renderer';
+import { clearIntervalHandle } from '@core/timers';
 import { VideoSync } from '@core/video-sync';
 
 const RESUME_SYNC_MESSAGE_LIMIT = 20;
@@ -150,10 +151,7 @@ export class RuntimeSession {
       this.visibilityHandler = null;
     }
 
-    if (this.chatWatchdogInterval !== null) {
-      window.clearInterval(this.chatWatchdogInterval);
-      this.chatWatchdogInterval = null;
-    }
+    this.chatWatchdogInterval = clearIntervalHandle(this.chatWatchdogInterval);
 
     this.hiddenWhilePlaying = false;
     this.lastVisibilityReturnAt = 0;

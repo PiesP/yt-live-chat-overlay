@@ -1,4 +1,5 @@
 import { overlayLog } from '@core/logging';
+import { clearIntervalHandle } from '@core/timers';
 
 /**
  * Page Watcher
@@ -90,12 +91,7 @@ export class PageWatcher {
   }
 
   private stopPolling(): void {
-    if (this.intervalId === null) {
-      return;
-    }
-
-    window.clearInterval(this.intervalId);
-    this.intervalId = null;
+    this.intervalId = clearIntervalHandle(this.intervalId);
   }
 
   private restoreHistoryMethods(): void {

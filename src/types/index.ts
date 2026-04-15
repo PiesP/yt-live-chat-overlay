@@ -5,7 +5,7 @@
 type TupleValue<T extends readonly unknown[]> = T[number];
 
 const AUTHOR_TYPES = ['normal', 'member', 'moderator', 'owner', 'verified'] as const;
-const LOG_LEVELS = ['warn', 'info', 'debug'] as const;
+export const LOG_LEVELS = ['warn', 'info', 'debug'] as const;
 const AUTHOR_DISPLAY_KEYS = [...AUTHOR_TYPES, 'superChat'] as const;
 const EMOJI_TYPES = ['standard', 'custom', 'member'] as const;
 const CHAT_MESSAGE_KINDS = ['text', 'superchat', 'membership'] as const;
@@ -46,6 +46,9 @@ export type AuthorType = TupleValue<typeof AUTHOR_TYPES>;
  * Console log level for overlay diagnostics
  */
 export type LogLevel = TupleValue<typeof LOG_LEVELS>;
+
+export const isLogLevel = (value: unknown): value is LogLevel =>
+  value === 'warn' || value === 'info' || value === 'debug';
 
 /**
  * Author display settings (per author type)

@@ -9,9 +9,11 @@ import {
   findElementMatch,
   PLAYER_CONTAINER_SELECTORS,
   throwIfAborted,
+  VIDEO_SELECTORS,
   waitForElementMatch,
 } from '@core/dom';
 import { overlayLog } from '@core/logging';
+import { clearIntervalHandle, clearTimeoutHandle } from '@core/timers';
 
 /**
  * Callbacks for video state changes
@@ -22,16 +24,6 @@ interface VideoSyncCallbacks {
   onSeeking?: () => void;
   onRateChange?: (rate: number) => void;
 }
-
-/**
- * Video element selectors (in priority order)
- */
-const VIDEO_SELECTORS = [
-  '#movie_player video',
-  '.html5-video-player video',
-  'video.html5-main-video',
-  'video[src]',
-] as const;
 
 /**
  * Configuration constants
@@ -142,10 +134,7 @@ export class VideoSync {
   }
 
   private clearReinitializationTimer(): void {
-    if (this.reinitializeTimer !== null) {
-      window.clearTimeout(this.reinitializeTimer);
-      this.reinitializeTimer = null;
-    }
+    this.reinitializeTimer = clearTimeoutHandle(this.reinitializeTimer);
   }
 
   private resetVideoState(): void {
@@ -200,8 +189,7 @@ export class VideoSync {
    */
   private stopPeriodicDetection(): void {
     if (this.detectInterval !== null) {
-      window.clearInterval(this.detectInterval);
-      this.detectInterval = null;
+      this.detectInterval = clearIntervalHandle(this.detectInterval);
       overlayLog.info('[VideoSync] Periodic detection stopped');
     }
   }

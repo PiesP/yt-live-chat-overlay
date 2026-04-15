@@ -8,6 +8,7 @@
 import type { OverlayDimensions, OverlaySettings } from '@app-types';
 import { ensurePlayerPositioning, findPlayerContainerElement } from '@core/dom';
 import { overlayLog } from '@core/logging';
+import { clearTimeoutHandle } from '@core/timers';
 
 export const OVERLAY_ID = 'yt-live-chat-overlay';
 export const OVERLAY_SELECTOR = `#${OVERLAY_ID}`;
@@ -96,10 +97,7 @@ export class Overlay {
   }
 
   private clearFullscreenUpdateTimer(): void {
-    if (this.fullscreenUpdateTimer !== null) {
-      window.clearTimeout(this.fullscreenUpdateTimer);
-      this.fullscreenUpdateTimer = null;
-    }
+    this.fullscreenUpdateTimer = clearTimeoutHandle(this.fullscreenUpdateTimer);
   }
 
   private observeResize(): void {

@@ -17,6 +17,7 @@ import type {
 } from '@app-types';
 import { isAllowedYouTubeImageUrl } from '@core/image-url';
 import { overlayLog } from '@core/logging';
+import { clearTimeoutHandle } from '@core/timers';
 import {
   borderRadius,
   colors,
@@ -1071,10 +1072,7 @@ export class Renderer {
    * Clear pending queue retry timer
    */
   private clearRetryTimer(): void {
-    if (this.retryTimer !== null) {
-      window.clearTimeout(this.retryTimer);
-      this.retryTimer = null;
-    }
+    this.retryTimer = clearTimeoutHandle(this.retryTimer);
   }
 
   /**
