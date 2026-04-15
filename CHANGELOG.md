@@ -2,6 +2,36 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.11.0] - 2026-04-15
+
+### Added
+- **백그라운드 복귀/채팅 헬스 복구 흐름 강화**
+  - visibility 복귀 이후 채팅 소스 생존 여부, 최근 활동 여부, 라이브 엣지 상태를 기반으로 재동기화/복구를 수행하는 런타임 세션 회복 경로 추가
+  - 채팅 옵저버 재연결 전 채팅 패널 상태를 다시 점검하고, 복구 시 최신 메시지 동기화 흐름을 더 안정적으로 오케스트레이션
+
+### Changed
+- **런타임 재시작 및 세션 관리 구조 재정비**
+  - `RuntimeManager`/`RuntimeSession` 중심으로 페이지 전환, 설정 반영, 재시작, 복구 흐름을 더 명확하게 직렬화
+  - 내비게이션 settle/retry 처리와 start failure 상태 관리를 단순화해 재시작 동작의 예측 가능성을 높임
+- **로그/DOM 유틸 정리**
+  - 채팅 DOM 검증 로그를 debug 중심으로 조정해 기본 콘솔 잡음을 축소
+  - video/player selector와 timer cleanup 유틸을 공용 모듈로 모아 DOM 조회/정리 책임을 일원화
+
+### Refactored
+- **설정/비디오 동기화 구현 단순화**
+  - 설정 정규화를 작은 helper들로 분리해 반복 코드를 줄이면서 `localStorage` 기반 런타임 검증은 유지
+  - `VideoSync` 내부 listener/observer 연결 코드를 정리해 불필요한 내부 null-check를 축소
+- **공통 타입/검증 로직 중복 제거**
+  - log level 검증 로직을 공용 타입 계층으로 이동해 settings/logging/UI 간 중복 제거
+
+### Fixed
+- **복구 경합 및 상태 오염 가능성 축소**
+  - 백그라운드 복귀, 채팅 health recovery, observer 재연결 과정에서 stale 작업이 현재 세션 상태를 오염시키는 가능성을 줄임
+  - 타이머/리스너 정리 경로를 공통화해 cleanup 누락 가능성을 더 낮춤
+
+### Tooling
+- Biome/Knip schema 경로를 최신 도구 버전에 맞게 정리
+
 ## [0.10.0] - 2026-04-14
 
 ### Added
