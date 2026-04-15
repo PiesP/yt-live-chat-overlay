@@ -76,7 +76,7 @@ export const validateChatElement = (element: Element): boolean => {
       tagName === 'ytd-live-chat-frame' ||
       tagName === 'yt-live-chat-item-list-renderer'
     ) {
-      overlayLog.info(
+      overlayLog.debug(
         `[YT Chat Overlay] Element validated: found chat-related parent at depth ${depth}`
       );
       return true;
@@ -90,7 +90,7 @@ export const validateChatElement = (element: Element): boolean => {
       className.includes('sidebar') ||
       id.includes('guide')
     ) {
-      overlayLog.info(
+      overlayLog.debug(
         `[YT Chat Overlay] Element rejected: found non-chat parent "${tagName}" at depth ${depth}`
       );
       return false;
@@ -100,39 +100,39 @@ export const validateChatElement = (element: Element): boolean => {
     depth++;
   }
 
-  overlayLog.info('[YT Chat Overlay] Element validation inconclusive, rejecting');
+  overlayLog.debug('[YT Chat Overlay] Element validation inconclusive, rejecting');
   return false;
 };
 
 export const debugLogChatElements = (): void => {
-  overlayLog.info('[YT Chat Overlay] === DEBUG: Chat Elements ===');
+  overlayLog.debug('[YT Chat Overlay] === DEBUG: Chat Elements ===');
 
   const chatElements = document.querySelectorAll(
     '[id*="chat"], [class*="chat"], yt-live-chat-app, ytd-live-chat-frame'
   );
-  overlayLog.info(
+  overlayLog.debug(
     `[YT Chat Overlay] Found ${chatElements.length} elements with 'chat' in id/class or live chat tags`
   );
 
   let count = 0;
   for (const el of chatElements) {
     if (count++ >= 5) break;
-    overlayLog.info(
+    overlayLog.debug(
       `  [${count - 1}] ${el.tagName} id="${el.id}" class="${el.className.substring(0, 50)}"`
     );
   }
 
   const allIframes = document.querySelectorAll('iframe');
-  overlayLog.info(`[YT Chat Overlay] Found ${allIframes.length} total iframes`);
+  overlayLog.debug(`[YT Chat Overlay] Found ${allIframes.length} total iframes`);
   let i = 0;
   for (const iframe of allIframes) {
     if (iframe.src.includes('chat')) {
-      overlayLog.info(`  iframe[${i}] src="${iframe.src}"`);
+      overlayLog.debug(`  iframe[${i}] src="${iframe.src}"`);
     }
     i++;
   }
 
-  overlayLog.info('[YT Chat Overlay] === END DEBUG ===');
+  overlayLog.debug('[YT Chat Overlay] === END DEBUG ===');
 };
 
 export const isChatFrameHidden = (chatFrame: HTMLElement): boolean => {

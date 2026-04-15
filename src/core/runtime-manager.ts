@@ -1,6 +1,7 @@
 import type { OverlaySettings } from '@app-types';
 import { overlayLog } from '@core/logging';
 import { RuntimeSession } from '@core/runtime-session';
+import { cloneSettings } from '@core/settings';
 
 const NAVIGATION_SETTLE_DELAY_MS = 2000;
 const START_RETRY_DELAY_MS = 2000;
@@ -19,13 +20,6 @@ interface DesiredRuntimeState {
   url: string;
   settings: OverlaySettings;
 }
-
-const cloneSettings = (settings: Readonly<OverlaySettings>): OverlaySettings => ({
-  ...settings,
-  showAuthor: { ...settings.showAuthor },
-  colors: { ...settings.colors },
-  outline: { ...settings.outline },
-});
 
 /**
  * Serializes all runtime transitions behind one reconcile loop.
@@ -170,6 +164,7 @@ export class RuntimeManager {
       return 0;
     }
 
+    // YouTube SPA navigation mutates the player/chat DOM after the URL changes.
     const elapsed = Date.now() - this.lastPageChangeAt;
     return Math.max(0, NAVIGATION_SETTLE_DELAY_MS - elapsed);
   }

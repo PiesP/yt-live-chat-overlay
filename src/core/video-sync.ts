@@ -149,7 +149,10 @@ export class VideoSync {
   }
 
   private resetVideoState(): void {
-    this.detachListeners();
+    const videoElement = this.videoElement;
+    if (videoElement !== null) {
+      this.detachListeners(videoElement);
+    }
     this.stopObservingReplacement();
     this.videoElement = null;
     this.initialized = false;
@@ -161,8 +164,8 @@ export class VideoSync {
   private setupVideoElement(video: HTMLVideoElement): void {
     this.resetVideoState();
     this.videoElement = video;
-    this.attachListeners();
-    this.observeVideoReplacement();
+    this.attachListeners(video);
+    this.observeVideoReplacement(video);
     this.initialized = true;
     this.syncInitialPlaybackState(video);
   }
@@ -206,13 +209,11 @@ export class VideoSync {
   /**
    * Attach event listeners to video element
    */
-  private attachListeners(): void {
-    if (!this.videoElement) return;
-
-    this.videoElement.addEventListener('pause', this.boundHandlers.pause);
-    this.videoElement.addEventListener('play', this.boundHandlers.play);
-    this.videoElement.addEventListener('seeking', this.boundHandlers.seeking);
-    this.videoElement.addEventListener('ratechange', this.boundHandlers.ratechange);
+  private attachListeners(video: HTMLVideoElement): void {
+    video.addEventListener('pause', this.boundHandlers.pause);
+    video.addEventListener('play', this.boundHandlers.play);
+    video.addEventListener('seeking', this.boundHandlers.seeking);
+    video.addEventListener('ratechange', this.boundHandlers.ratechange);
 
     overlayLog.info('[VideoSync] Event listeners attached');
   }
@@ -220,13 +221,11 @@ export class VideoSync {
   /**
    * Detach event listeners from video element
    */
-  private detachListeners(): void {
-    if (!this.videoElement) return;
-
-    this.videoElement.removeEventListener('pause', this.boundHandlers.pause);
-    this.videoElement.removeEventListener('play', this.boundHandlers.play);
-    this.videoElement.removeEventListener('seeking', this.boundHandlers.seeking);
-    this.videoElement.removeEventListener('ratechange', this.boundHandlers.ratechange);
+  private detachListeners(video: HTMLVideoElement): void {
+    video.removeEventListener('pause', this.boundHandlers.pause);
+    video.removeEventListener('play', this.boundHandlers.play);
+    video.removeEventListener('seeking', this.boundHandlers.seeking);
+    video.removeEventListener('ratechange', this.boundHandlers.ratechange);
 
     overlayLog.info('[VideoSync] Event listeners detached');
   }
@@ -235,9 +234,7 @@ export class VideoSync {
    * Observe video element replacement
    * Detects when video element is removed from DOM (e.g., during ad transitions)
    */
-  private observeVideoReplacement(): void {
-    if (!this.videoElement) return;
-
+  private observeVideoReplacement(video: HTMLVideoElement): void {
     const playerContainer = this.findPlayerContainer();
     if (!playerContainer) {
       overlayLog.warn('[VideoSync] Player container not found, cannot observe video replacement');
@@ -245,7 +242,7 @@ export class VideoSync {
     }
 
     this.mutationObserver = new MutationObserver(() => {
-      if (this.videoElement && !document.contains(this.videoElement)) {
+      if (!document.contains(video)) {
         overlayLog.info('[VideoSync] Video element removed from DOM, reinitializing...');
         this.handleVideoReplacement();
       }

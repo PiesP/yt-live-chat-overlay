@@ -35,7 +35,58 @@ const clampNumber = (
   return Math.min(limits.max, Math.max(limits.min, numericValue));
 };
 
-const cloneSettings = (settings: Readonly<OverlaySettings>): OverlaySettings => ({
+const normalizeBoolean = (value: unknown, fallback: boolean): boolean =>
+  typeof value === 'boolean' ? value : fallback;
+
+const normalizeRoundedNumber = (
+  value: unknown,
+  fallback: number,
+  limits: { min: number; max: number }
+): number => Math.round(clampNumber(value, fallback, limits));
+
+const normalizeShowAuthorSettings = (
+  showAuthor: Readonly<OverlaySettings['showAuthor']>
+): OverlaySettings['showAuthor'] => ({
+  normal: normalizeBoolean(showAuthor.normal, DEFAULT_SETTINGS.showAuthor.normal),
+  member: normalizeBoolean(showAuthor.member, DEFAULT_SETTINGS.showAuthor.member),
+  moderator: normalizeBoolean(showAuthor.moderator, DEFAULT_SETTINGS.showAuthor.moderator),
+  owner: normalizeBoolean(showAuthor.owner, DEFAULT_SETTINGS.showAuthor.owner),
+  verified: normalizeBoolean(showAuthor.verified, DEFAULT_SETTINGS.showAuthor.verified),
+  superChat: normalizeBoolean(showAuthor.superChat, DEFAULT_SETTINGS.showAuthor.superChat),
+});
+
+const normalizeColorSettings = (
+  colors: Readonly<OverlaySettings['colors']>
+): OverlaySettings['colors'] => ({
+  normal: isColorValue(colors.normal) ? colors.normal : DEFAULT_SETTINGS.colors.normal,
+  member: isColorValue(colors.member) ? colors.member : DEFAULT_SETTINGS.colors.member,
+  moderator: isColorValue(colors.moderator) ? colors.moderator : DEFAULT_SETTINGS.colors.moderator,
+  owner: isColorValue(colors.owner) ? colors.owner : DEFAULT_SETTINGS.colors.owner,
+  verified: isColorValue(colors.verified) ? colors.verified : DEFAULT_SETTINGS.colors.verified,
+});
+
+const normalizeOutlineSettings = (
+  outline: Readonly<OverlaySettings['outline']>
+): OverlaySettings['outline'] => ({
+  enabled: normalizeBoolean(outline.enabled, DEFAULT_SETTINGS.outline.enabled),
+  widthPx: clampNumber(
+    outline.widthPx,
+    DEFAULT_SETTINGS.outline.widthPx,
+    SETTINGS_LIMITS.outlineWidthPx
+  ),
+  blurPx: clampNumber(
+    outline.blurPx,
+    DEFAULT_SETTINGS.outline.blurPx,
+    SETTINGS_LIMITS.outlineBlurPx
+  ),
+  opacity: clampNumber(
+    outline.opacity,
+    DEFAULT_SETTINGS.outline.opacity,
+    SETTINGS_LIMITS.outlineOpacity
+  ),
+});
+
+export const cloneSettings = (settings: Readonly<OverlaySettings>): OverlaySettings => ({
   ...settings,
   showAuthor: { ...settings.showAuthor },
   colors: { ...settings.colors },
@@ -58,7 +109,7 @@ const mergeSettings = (
 });
 
 const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings => ({
-  enabled: typeof settings.enabled === 'boolean' ? settings.enabled : DEFAULT_SETTINGS.enabled,
+  enabled: normalizeBoolean(settings.enabled, DEFAULT_SETTINGS.enabled),
   speedPxPerSec: clampNumber(
     settings.speedPxPerSec,
     DEFAULT_SETTINGS.speedPxPerSec,
@@ -77,98 +128,33 @@ const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings
     DEFAULT_SETTINGS.safeBottom,
     SETTINGS_LIMITS.safeBottom
   ),
-  maxConcurrentMessages: Math.round(
-    clampNumber(
-      settings.maxConcurrentMessages,
-      DEFAULT_SETTINGS.maxConcurrentMessages,
-      SETTINGS_LIMITS.maxConcurrentMessages
-    )
+  maxConcurrentMessages: normalizeRoundedNumber(
+    settings.maxConcurrentMessages,
+    DEFAULT_SETTINGS.maxConcurrentMessages,
+    SETTINGS_LIMITS.maxConcurrentMessages
   ),
-  maxMessagesPerSecond: Math.round(
-    clampNumber(
-      settings.maxMessagesPerSecond,
-      DEFAULT_SETTINGS.maxMessagesPerSecond,
-      SETTINGS_LIMITS.maxMessagesPerSecond
-    )
+  maxMessagesPerSecond: normalizeRoundedNumber(
+    settings.maxMessagesPerSecond,
+    DEFAULT_SETTINGS.maxMessagesPerSecond,
+    SETTINGS_LIMITS.maxMessagesPerSecond
   ),
-  allowShortTextMessages:
-    typeof settings.allowShortTextMessages === 'boolean'
-      ? settings.allowShortTextMessages
-      : DEFAULT_SETTINGS.allowShortTextMessages,
-  minTextLength: Math.round(
-    clampNumber(
-      settings.minTextLength,
-      DEFAULT_SETTINGS.minTextLength,
-      SETTINGS_LIMITS.minTextLength
-    )
+  allowShortTextMessages: normalizeBoolean(
+    settings.allowShortTextMessages,
+    DEFAULT_SETTINGS.allowShortTextMessages
+  ),
+  minTextLength: normalizeRoundedNumber(
+    settings.minTextLength,
+    DEFAULT_SETTINGS.minTextLength,
+    SETTINGS_LIMITS.minTextLength
   ),
   logLevel: isLogLevel(settings.logLevel) ? settings.logLevel : DEFAULT_SETTINGS.logLevel,
-  showAuthor: {
-    normal:
-      typeof settings.showAuthor.normal === 'boolean'
-        ? settings.showAuthor.normal
-        : DEFAULT_SETTINGS.showAuthor.normal,
-    member:
-      typeof settings.showAuthor.member === 'boolean'
-        ? settings.showAuthor.member
-        : DEFAULT_SETTINGS.showAuthor.member,
-    moderator:
-      typeof settings.showAuthor.moderator === 'boolean'
-        ? settings.showAuthor.moderator
-        : DEFAULT_SETTINGS.showAuthor.moderator,
-    owner:
-      typeof settings.showAuthor.owner === 'boolean'
-        ? settings.showAuthor.owner
-        : DEFAULT_SETTINGS.showAuthor.owner,
-    verified:
-      typeof settings.showAuthor.verified === 'boolean'
-        ? settings.showAuthor.verified
-        : DEFAULT_SETTINGS.showAuthor.verified,
-    superChat:
-      typeof settings.showAuthor.superChat === 'boolean'
-        ? settings.showAuthor.superChat
-        : DEFAULT_SETTINGS.showAuthor.superChat,
-  },
-  colors: {
-    normal: isColorValue(settings.colors.normal)
-      ? settings.colors.normal
-      : DEFAULT_SETTINGS.colors.normal,
-    member: isColorValue(settings.colors.member)
-      ? settings.colors.member
-      : DEFAULT_SETTINGS.colors.member,
-    moderator: isColorValue(settings.colors.moderator)
-      ? settings.colors.moderator
-      : DEFAULT_SETTINGS.colors.moderator,
-    owner: isColorValue(settings.colors.owner)
-      ? settings.colors.owner
-      : DEFAULT_SETTINGS.colors.owner,
-    verified: isColorValue(settings.colors.verified)
-      ? settings.colors.verified
-      : DEFAULT_SETTINGS.colors.verified,
-  },
-  outline: {
-    enabled:
-      typeof settings.outline.enabled === 'boolean'
-        ? settings.outline.enabled
-        : DEFAULT_SETTINGS.outline.enabled,
-    widthPx: clampNumber(
-      settings.outline.widthPx,
-      DEFAULT_SETTINGS.outline.widthPx,
-      SETTINGS_LIMITS.outlineWidthPx
-    ),
-    blurPx: clampNumber(
-      settings.outline.blurPx,
-      DEFAULT_SETTINGS.outline.blurPx,
-      SETTINGS_LIMITS.outlineBlurPx
-    ),
-    opacity: clampNumber(
-      settings.outline.opacity,
-      DEFAULT_SETTINGS.outline.opacity,
-      SETTINGS_LIMITS.outlineOpacity
-    ),
-  },
-  laneSpacing: Math.round(
-    clampNumber(settings.laneSpacing, DEFAULT_SETTINGS.laneSpacing, SETTINGS_LIMITS.laneSpacing)
+  showAuthor: normalizeShowAuthorSettings(settings.showAuthor),
+  colors: normalizeColorSettings(settings.colors),
+  outline: normalizeOutlineSettings(settings.outline),
+  laneSpacing: normalizeRoundedNumber(
+    settings.laneSpacing,
+    DEFAULT_SETTINGS.laneSpacing,
+    SETTINGS_LIMITS.laneSpacing
   ),
 });
 
