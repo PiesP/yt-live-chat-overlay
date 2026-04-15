@@ -23,6 +23,10 @@ const MAX_RESTART_ATTEMPTS = 3;
 const APP_INIT_DELAY_MS = 500;
 const OVERLAY_SELECTOR = '#yt-live-chat-overlay';
 const RESUME_SYNC_MESSAGE_LIMIT = 20;
+const CHAT_WATCHDOG_INTERVAL_MS = 15_000;
+const CHAT_STALL_TIMEOUT_MS = 30_000;
+const CHAT_LIVE_EDGE_THRESHOLD_PX = 24;
+const CHAT_RECOVERY_GRACE_MS = 2_500;
 
 interface StartGuard {
   isCancelled(): boolean;
@@ -55,6 +59,8 @@ class App {
   private hiddenWhilePlaying = false;
   private visibilityRecoveryInProgress = false;
   private resumeSyncInProgress = false;
+  private chatRecoveryInProgress = false;
+  private lastVisibilityReturnAt = 0;
   private readonly handlePageWatcherChange = (): void => {
     this.handlePageChange();
   };
@@ -62,6 +68,7 @@ class App {
     this.renderer?.pause();
   };
   private readonly handleVideoPlay = (): void => {
+    this.chatSource?.ensureLiveEdge(CHAT_LIVE_EDGE_THRESHOLD_PX);
     void this.syncLatestMessagesOnResume();
   };
   private readonly handleVideoRateChange = (rate: number): void => {
@@ -71,6 +78,61 @@ class App {
   private readonly handleVideoSeeking = (): void => {
     this.renderer?.flushQueue();
   };
+
+  private async recoverChatHealth(reason: string, forceResync = false): Promise<void> {
+    if (this.chatRecoveryInProgress) {
+      return;
+    }
+
+    if (this.videoSync?.isPaused()) {
+      return;
+    }
+
+    const chatSource = this.chatSource;
+    if (!chatSource) {
+      return;
+    }
+
+    this.chatRecoveryInProgress = true;
+
+    try {
+      chatSource.ensureLiveEdge(CHAT_LIVE_EDGE_THRESHOLD_PX);
+
+      const health = chatSource.getHealthSnapshot({
+        activeTimeoutMs: CHAT_STALL_TIMEOUT_MS,
+        liveEdgeThresholdPx: CHAT_LIVE_EDGE_THRESHOLD_PX,
+      });
+
+      const needsReconnect = !health.observerAlive || !health.recentlyActive || !health.atLiveEdge;
+      let shouldResync = forceResync;
+
+      if (needsReconnect) {
+        overlayLog.info('[App] Recovering chat health:', {
+          reason,
+          health,
+        });
+
+        const reconnected = await chatSource.reconnect();
+        if (!reconnected) {
+          console.warn('[App] Failed to reconnect chat during health recovery');
+        }
+
+        chatSource.ensureLiveEdge(CHAT_LIVE_EDGE_THRESHOLD_PX);
+        shouldResync = true;
+      }
+
+      if (shouldResync) {
+        await this.syncLatestMessagesOnResume();
+      }
+    } catch (error) {
+      console.warn('[App] Chat health recovery failed:', error);
+      if (forceResync) {
+        await this.syncLatestMessagesOnResume();
+      }
+    } finally {
+      this.chatRecoveryInProgress = false;
+    }
+  }
 
   private async recoverAfterVisibilityReturn(): Promise<void> {
     if (this.visibilityRecoveryInProgress) {
@@ -85,15 +147,7 @@ class App {
     this.visibilityRecoveryInProgress = true;
 
     try {
-      if (this.chatSource && !this.chatSource.isObserverAlive()) {
-        overlayLog.info('[App] Chat observer dead on visibility return, reconnecting now');
-        const reconnected = await this.chatSource.reconnect();
-        if (!reconnected) {
-          console.warn('[App] Failed to reconnect chat observer on visibility return');
-        }
-      }
-
-      await this.syncLatestMessagesOnResume();
+      await this.recoverChatHealth('visibility-return', true);
     } finally {
       this.hiddenWhilePlaying = false;
       this.visibilityRecoveryInProgress = false;
@@ -281,6 +335,7 @@ class App {
           this.hiddenWhilePlaying = true;
         }
       } else {
+        this.lastVisibilityReturnAt = Date.now();
         void this.recoverAfterVisibilityReturn();
       }
     };
@@ -292,16 +347,34 @@ class App {
    * unmounts the chat #items container (e.g. on tab hide / chat collapse).
    */
   private setupChatWatchdog(): void {
-    const WATCHDOG_INTERVAL_MS = 15_000;
     this.chatWatchdogInterval = window.setInterval(() => {
-      if (!this.chatSource || !this.isInitialized) return;
-      if (!this.chatSource.isObserverAlive()) {
-        console.warn('[App] Chat observer dead — attempting reconnect');
-        this.chatSource.reconnect().catch((err: unknown) => {
-          console.warn('[App] Chat reconnect failed:', err);
-        });
+      if (!this.chatSource || !this.isInitialized || document.hidden) {
+        return;
       }
-    }, WATCHDOG_INTERVAL_MS);
+
+      if (this.videoSync?.isPaused()) {
+        return;
+      }
+
+      const health = this.chatSource.getHealthSnapshot({
+        activeTimeoutMs: CHAT_STALL_TIMEOUT_MS,
+        liveEdgeThresholdPx: CHAT_LIVE_EDGE_THRESHOLD_PX,
+      });
+
+      const now = Date.now();
+      const withinGrace = now - this.lastVisibilityReturnAt < CHAT_RECOVERY_GRACE_MS;
+      const stalled = !health.recentlyActive && !withinGrace;
+      const needsRecovery = !health.observerAlive || stalled || !health.atLiveEdge;
+
+      if (needsRecovery) {
+        console.warn('[App] Chat unhealthy — triggering recovery', {
+          health,
+          stalled,
+          withinGrace,
+        });
+        void this.recoverChatHealth('watchdog');
+      }
+    }, CHAT_WATCHDOG_INTERVAL_MS);
   }
 
   private clearRestartTimer(): void {
@@ -582,6 +655,8 @@ class App {
     }
     this.hiddenWhilePlaying = false;
     this.visibilityRecoveryInProgress = false;
+    this.chatRecoveryInProgress = false;
+    this.lastVisibilityReturnAt = 0;
 
     if (this.chatWatchdogInterval !== null) {
       window.clearInterval(this.chatWatchdogInterval);

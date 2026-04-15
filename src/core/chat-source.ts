@@ -32,6 +32,8 @@ const CHAT_CONTAINER_SEARCH_INTERVAL_MS = 1000;
 const RECENT_MESSAGE_BUFFER_SIZE = 100;
 const RECONNECT_ATTEMPTS = 3;
 const RECONNECT_RETRY_DELAY_MS = 1000;
+const DEFAULT_ACTIVITY_TIMEOUT_MS = 30000;
+const DEFAULT_LIVE_EDGE_THRESHOLD_PX = 24;
 
 export type MessageCallback = (message: ChatMessage) => void;
 
@@ -40,6 +42,17 @@ type ChatMessageKind = ChatMessage['kind'];
 interface ParsedMessageBody {
   text: string;
   content: ContentSegment[];
+}
+
+interface ChatHealthSnapshotOptions {
+  activeTimeoutMs?: number;
+  liveEdgeThresholdPx?: number;
+}
+
+export interface ChatHealthSnapshot {
+  observerAlive: boolean;
+  recentlyActive: boolean;
+  atLiveEdge: boolean;
 }
 
 export class ChatSource {
@@ -227,6 +240,82 @@ export class ChatSource {
     if (overflow > 0) {
       this.recentMessages.splice(0, overflow);
     }
+  }
+
+  private resolveScrollContainer(): HTMLElement | null {
+    const base = this.chatContainer;
+    if (!(base instanceof Element)) {
+      return null;
+    }
+
+    const ownerDocument = base.ownerDocument;
+    const candidates: Array<Element | null> = [
+      base,
+      base.parentElement,
+      base.closest('#item-scroller'),
+      base.closest('yt-live-chat-item-list-renderer'),
+      ownerDocument?.querySelector('#item-scroller'),
+      ownerDocument?.querySelector('yt-live-chat-item-list-renderer'),
+    ];
+
+    const visited = new Set<HTMLElement>();
+
+    for (const candidate of candidates) {
+      if (!(candidate instanceof HTMLElement) || visited.has(candidate)) {
+        continue;
+      }
+
+      visited.add(candidate);
+
+      const view = candidate.ownerDocument?.defaultView;
+      const overflowY = view?.getComputedStyle(candidate).overflowY ?? '';
+      const isScrollableStyle =
+        overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay';
+      const hasScrollableContent = candidate.scrollHeight > candidate.clientHeight + 1;
+
+      if (isScrollableStyle || hasScrollableContent) {
+        return candidate;
+      }
+    }
+
+    return null;
+  }
+
+  isAtLiveEdge(thresholdPx = DEFAULT_LIVE_EDGE_THRESHOLD_PX): boolean {
+    const container = this.resolveScrollContainer();
+    if (!container) {
+      // If container cannot be resolved, avoid false negatives.
+      return true;
+    }
+
+    const distance = Math.max(
+      0,
+      container.scrollHeight - container.clientHeight - container.scrollTop
+    );
+    return distance <= Math.max(0, thresholdPx);
+  }
+
+  ensureLiveEdge(thresholdPx = DEFAULT_LIVE_EDGE_THRESHOLD_PX): boolean {
+    const container = this.resolveScrollContainer();
+    if (!container) {
+      return false;
+    }
+
+    if (this.isAtLiveEdge(thresholdPx)) {
+      return true;
+    }
+
+    container.scrollTop = container.scrollHeight;
+    if (this.isAtLiveEdge(thresholdPx)) {
+      return true;
+    }
+
+    const lastChild = container.lastElementChild;
+    if (lastChild instanceof HTMLElement) {
+      lastChild.scrollIntoView({ block: 'end' });
+    }
+
+    return this.isAtLiveEdge(thresholdPx);
   }
 
   /**
@@ -920,9 +1009,20 @@ export class ChatSource {
   /**
    * Check if chat is active (received messages recently)
    */
-  isActive(): boolean {
+  isActive(timeoutMs = DEFAULT_ACTIVITY_TIMEOUT_MS): boolean {
     const now = Date.now();
-    return now - this.lastMessageTime < 30000; // 30 seconds
+    return now - this.lastMessageTime < Math.max(0, timeoutMs);
+  }
+
+  getHealthSnapshot(options: ChatHealthSnapshotOptions = {}): ChatHealthSnapshot {
+    const activeTimeoutMs = options.activeTimeoutMs ?? DEFAULT_ACTIVITY_TIMEOUT_MS;
+    const liveEdgeThresholdPx = options.liveEdgeThresholdPx ?? DEFAULT_LIVE_EDGE_THRESHOLD_PX;
+
+    return {
+      observerAlive: this.isObserverAlive(),
+      recentlyActive: this.isActive(activeTimeoutMs),
+      atLiveEdge: this.isAtLiveEdge(liveEdgeThresholdPx),
+    };
   }
 
   /**
