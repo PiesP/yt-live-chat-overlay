@@ -942,8 +942,8 @@ export class ChatSource {
    * Called by the App watchdog when isObserverAlive() returns false.
    * Performs a single attempt; the watchdog retries on the next interval tick.
    */
-  async reconnect(): Promise<void> {
-    if (this.stopped || !this.callback || this.reconnectInProgress) return;
+  async reconnect(): Promise<boolean> {
+    if (this.stopped || !this.callback || this.reconnectInProgress) return false;
 
     this.reconnectInProgress = true;
 
@@ -954,16 +954,17 @@ export class ChatSource {
       this.chatContainer = null;
 
       await this.prepareChatPanelForReconnect();
-      if (this.stopped) return;
+      if (this.stopped) return false;
 
       const container = await this.findChatContainerWithRetries(
         RECONNECT_ATTEMPTS,
         RECONNECT_RETRY_DELAY_MS
       );
-      if (this.stopped || !container) return;
+      if (this.stopped || !container) return false;
 
       this.attachObserver(container);
       overlayLog.info('[YT Chat Overlay] MutationObserver reconnected');
+      return true;
     } finally {
       this.reconnectInProgress = false;
     }

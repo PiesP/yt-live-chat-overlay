@@ -53,6 +53,7 @@ class App {
   private visibilityHandler: (() => void) | null = null;
   private chatWatchdogInterval: number | null = null;
   private hiddenWhilePlaying = false;
+  private visibilityRecoveryInProgress = false;
   private resumeSyncInProgress = false;
   private readonly handlePageWatcherChange = (): void => {
     this.handlePageChange();
@@ -70,6 +71,34 @@ class App {
   private readonly handleVideoSeeking = (): void => {
     this.renderer?.flushQueue();
   };
+
+  private async recoverAfterVisibilityReturn(): Promise<void> {
+    if (this.visibilityRecoveryInProgress) {
+      return;
+    }
+
+    if (!this.hiddenWhilePlaying || this.videoSync?.isPaused()) {
+      this.hiddenWhilePlaying = false;
+      return;
+    }
+
+    this.visibilityRecoveryInProgress = true;
+
+    try {
+      if (this.chatSource && !this.chatSource.isObserverAlive()) {
+        overlayLog.info('[App] Chat observer dead on visibility return, reconnecting now');
+        const reconnected = await this.chatSource.reconnect();
+        if (!reconnected) {
+          console.warn('[App] Failed to reconnect chat observer on visibility return');
+        }
+      }
+
+      await this.syncLatestMessagesOnResume();
+    } finally {
+      this.hiddenWhilePlaying = false;
+      this.visibilityRecoveryInProgress = false;
+    }
+  }
 
   /**
    * Re-synchronize overlay content when playback resumes.
@@ -252,10 +281,7 @@ class App {
           this.hiddenWhilePlaying = true;
         }
       } else {
-        if (this.hiddenWhilePlaying && !this.videoSync?.isPaused()) {
-          this.renderer?.resume();
-        }
-        this.hiddenWhilePlaying = false;
+        void this.recoverAfterVisibilityReturn();
       }
     };
     document.addEventListener('visibilitychange', this.visibilityHandler);
@@ -555,6 +581,7 @@ class App {
       this.visibilityHandler = null;
     }
     this.hiddenWhilePlaying = false;
+    this.visibilityRecoveryInProgress = false;
 
     if (this.chatWatchdogInterval !== null) {
       window.clearInterval(this.chatWatchdogInterval);
