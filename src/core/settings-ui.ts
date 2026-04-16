@@ -8,6 +8,20 @@ const BUTTON_ID = 'yt-chat-overlay-settings-button';
 const BACKDROP_ID = 'yt-chat-overlay-settings-backdrop';
 const TITLE_ID = 'yt-chat-overlay-settings-title';
 const PLAYER_LOOKUP_INTERVAL_MS = 500;
+const TRUSTED_TYPES_POLICY_NAME = 'yt-chat-overlay-settings-ui';
+
+interface TrustedTypesPolicyLike {
+  createHTML: (input: string) => string;
+}
+
+interface TrustedTypesFactoryLike {
+  createPolicy: (
+    name: string,
+    rules: {
+      createHTML: (input: string) => string;
+    }
+  ) => TrustedTypesPolicyLike;
+}
 
 const AUTHOR_COLOR_KEYS = ['normal', 'member', 'moderator', 'owner', 'verified'] as const;
 const SHOW_AUTHOR_KEYS = [
@@ -39,6 +53,26 @@ const UI_LIMITS = {
     step: toPercent(SETTINGS_LIMITS.safeBottom.step),
   },
 } as const;
+
+let trustedTypesPolicy: TrustedTypesPolicyLike | null | undefined;
+
+const getTrustedTypesFactory = (): TrustedTypesFactoryLike | null =>
+  (window as Window & { trustedTypes?: TrustedTypesFactoryLike }).trustedTypes ?? null;
+
+const createSettingsUiHtml = (html: string): string => {
+  const trustedTypes = getTrustedTypesFactory();
+  if (!trustedTypes) {
+    return html;
+  }
+
+  if (trustedTypesPolicy === undefined) {
+    trustedTypesPolicy = trustedTypes.createPolicy(TRUSTED_TYPES_POLICY_NAME, {
+      createHTML: (input) => input,
+    });
+  }
+
+  return trustedTypesPolicy ? trustedTypesPolicy.createHTML(html) : html;
+};
 
 export class SettingsUi {
   private playerElement: HTMLElement | null = null;
@@ -447,7 +481,7 @@ export class SettingsUi {
     this.modal.setAttribute('role', 'dialog');
     this.modal.setAttribute('aria-modal', 'true');
     this.modal.setAttribute('aria-labelledby', TITLE_ID);
-    this.modal.innerHTML = `
+    this.modal.innerHTML = createSettingsUiHtml(`
       <div class="yt-chat-overlay-settings-header">
         <div id="${TITLE_ID}">Chat Overlay</div>
         <button
@@ -714,7 +748,7 @@ export class SettingsUi {
         <button type="button" data-action="reset">Reset</button>
         <button type="button" data-action="apply">Apply</button>
       </div>
-    `;
+    `);
 
     this.bindModalEvents();
 

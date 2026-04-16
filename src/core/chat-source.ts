@@ -38,6 +38,10 @@ const RECONNECT_ATTEMPTS = 3;
 const RECONNECT_RETRY_DELAY_MS = 1000;
 const DEFAULT_ACTIVITY_TIMEOUT_MS = 30000;
 const DEFAULT_LIVE_EDGE_THRESHOLD_PX = 24;
+const CHAT_IFRAME_UNSUPPORTED_TEXT_MARKERS = [
+  'older version of your browser',
+  'update it to use live chat',
+] as const;
 
 export type MessageCallback = (message: ChatMessage) => void;
 export type ChatSourceStartStatus = 'started' | 'retryable' | 'unavailable';
@@ -61,6 +65,7 @@ export interface ChatHealthSnapshot {
 }
 
 type ChatResolutionStatus = 'ready' | 'closed' | 'retryable' | 'unavailable';
+type ChatContainerLookupStatus = 'ready' | 'not-found' | 'unsupported';
 
 interface ChatResolutionOptions {
   containerAttempts: number;
@@ -82,6 +87,15 @@ type ChatResolutionResult =
       chatFrame: HTMLElement | null;
     };
 
+type ChatContainerLookupResult =
+  | {
+      status: 'ready';
+      container: Element;
+    }
+  | {
+      status: Exclude<ChatContainerLookupStatus, 'ready'>;
+    };
+
 export class ChatSource {
   private observer: MutationObserver | null = null;
   private chatContainer: Element | null = null;
@@ -101,27 +115,53 @@ export class ChatSource {
    * Wait for iframe content to fully load
    * Returns the #items element when it appears in the iframe's DOM
    */
+  private inspectIframeContent(iframe: HTMLIFrameElement): ChatContainerLookupResult | null {
+    try {
+      const iframeDoc = iframe.contentDocument;
+      const iframeWindow = iframe.contentWindow;
+      if (!iframeDoc || iframeDoc.readyState !== 'complete') {
+        return null;
+      }
+
+      const container = findChatIframeItemMatch(iframeDoc)?.element;
+      if (container) {
+        return { status: 'ready', container };
+      }
+
+      const iframePath = iframeWindow?.location.pathname ?? '';
+      const bodyText = iframeDoc.body?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+      const normalizedBodyText = bodyText.toLowerCase();
+
+      if (
+        iframePath.startsWith('/live_chat') &&
+        !iframeDoc.querySelector('yt-live-chat-app') &&
+        CHAT_IFRAME_UNSUPPORTED_TEXT_MARKERS.some((marker) => normalizedBodyText.includes(marker))
+      ) {
+        overlayLog.warn(
+          '[YT Chat Overlay] Live chat iframe rendered an unsupported browser notice instead of chat content'
+        );
+        return { status: 'unsupported' };
+      }
+    } catch {
+      return null;
+    }
+
+    return null;
+  }
+
   private async waitForIframeContent(
     iframe: HTMLIFrameElement,
     maxAttempts = 20,
     intervalMs = 300,
     signal?: AbortSignal
-  ): Promise<Element | null> {
-    return pollForValue(
-      () => {
-        try {
-          const iframeDoc = iframe.contentDocument;
-          if (!iframeDoc || iframeDoc.readyState !== 'complete') {
-            return null;
-          }
+  ): Promise<ChatContainerLookupResult> {
+    const result = await pollForValue(() => this.inspectIframeContent(iframe), {
+      attempts: maxAttempts,
+      intervalMs,
+      signal,
+    });
 
-          return findChatIframeItemMatch(iframeDoc)?.element;
-        } catch {
-          return null;
-        }
-      },
-      { attempts: maxAttempts, intervalMs, signal }
-    );
+    return result ?? { status: 'not-found' };
   }
 
   private findChatIframe(): HTMLIFrameElement | null {
@@ -170,7 +210,7 @@ export class ChatSource {
    * Priority A: iframe access (if same-origin)
    * Priority B: in-page render
    */
-  async findChatContainer(signal?: AbortSignal): Promise<Element | null> {
+  async findChatContainer(signal?: AbortSignal): Promise<ChatContainerLookupResult> {
     overlayLog.info('[YT Chat Overlay] Looking for chat container...');
     overlayLog.info('[YT Chat Overlay] Current URL:', window.location.href);
 
@@ -185,11 +225,19 @@ export class ChatSource {
     if (iframe) {
       try {
         // Wait for iframe content to fully load
-        const container = await this.waitForIframeContent(iframe, 20, 300, signal);
-        if (container) {
+        const iframeResult = await this.waitForIframeContent(iframe, 20, 300, signal);
+        if (iframeResult.status === 'ready') {
           overlayLog.info('[YT Chat Overlay] Chat container found in iframe');
-          return container;
+          return iframeResult;
         }
+
+        if (iframeResult.status === 'unsupported') {
+          overlayLog.warn(
+            '[YT Chat Overlay] Chat iframe is unavailable in this browser/runtime environment'
+          );
+          return iframeResult;
+        }
+
         overlayLog.info('[YT Chat Overlay] iframe content timeout - no #items found');
       } catch (error) {
         // Cross-origin access denied, fall through to in-page
@@ -204,11 +252,11 @@ export class ChatSource {
         '[YT Chat Overlay] Chat container found:',
         describeChatSelector(inPageMatch.descriptor)
       );
-      return inPageMatch.element;
+      return { status: 'ready', container: inPageMatch.element };
     }
 
     overlayLog.warn('[YT Chat Overlay] No chat container found with any selector');
-    return null;
+    return { status: 'not-found' };
   }
 
   /**
@@ -230,18 +278,22 @@ export class ChatSource {
     attempts = CHAT_CONTAINER_SEARCH_ATTEMPTS,
     intervalMs = CHAT_CONTAINER_SEARCH_INTERVAL_MS,
     signal?: AbortSignal
-  ): Promise<Element | null> {
+  ): Promise<ChatContainerLookupResult> {
     for (let attempt = 1; attempt <= attempts; attempt++) {
       if (this.stopped) {
-        return null;
+        return { status: 'not-found' };
       }
 
       throwIfAborted(signal);
 
-      const container = await this.findChatContainer(signal);
-      if (container) {
+      const result = await this.findChatContainer(signal);
+      if (result.status === 'ready') {
         overlayLog.info(`[YT Chat Overlay] Chat container found on attempt ${attempt}`);
-        return container;
+        return result;
+      }
+
+      if (result.status === 'unsupported') {
+        return result;
       }
 
       if (attempt < attempts) {
@@ -249,7 +301,7 @@ export class ChatSource {
       }
     }
 
-    return null;
+    return { status: 'not-found' };
   }
 
   private async resolveChatContainer(
@@ -305,7 +357,7 @@ export class ChatSource {
     }
     throwIfAborted(signal);
 
-    const container = await this.findChatContainerWithRetries(
+    const containerLookup = await this.findChatContainerWithRetries(
       containerAttempts,
       containerIntervalMs,
       signal
@@ -315,12 +367,16 @@ export class ChatSource {
     }
     throwIfAborted(signal);
 
-    if (container) {
+    if (containerLookup.status === 'ready') {
       return {
         status: 'ready',
         chatFrame,
-        container,
+        container: containerLookup.container,
       };
+    }
+
+    if (containerLookup.status === 'unsupported') {
+      return { status: 'unavailable', chatFrame };
     }
 
     if (chatFrame && this.isChatFrameHidden(chatFrame)) {

@@ -38,7 +38,7 @@ class App {
     if (this.pageWatcher.isValidPage()) {
       void this.ensureSettingsUi();
     } else {
-      this.settingsUi.close();
+      this.settingsUi.destroy();
     }
 
     this.runtimeManager.requestReconcile('page-change');
