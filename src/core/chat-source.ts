@@ -13,7 +13,6 @@ import type {
   SuperChatInfo,
 } from '@app-types';
 import {
-  debugLogChatElements,
   describeChatSelector,
   findChatFrameMatch,
   findChatIframeItemMatch,
@@ -216,11 +215,6 @@ export class ChatSource {
   async findChatContainer(signal?: AbortSignal): Promise<ChatContainerLookupResult> {
     overlayLog.debug('[YT Chat Overlay] Looking for chat container...');
     overlayLog.debug('[YT Chat Overlay] Current URL:', window.location.href);
-
-    // Debug: Log what chat-related elements exist (debug level only)
-    if (this.getSettings?.().logLevel === 'debug') {
-      debugLogChatElements();
-    }
 
     // Try iframe first (multiple selectors)
     const iframe = this.findChatIframe();
@@ -456,36 +450,8 @@ export class ChatSource {
       return null;
     }
 
-    const ownerDocument = base.ownerDocument;
-    const candidates: Array<Element | null> = [
-      base,
-      base.parentElement,
-      base.closest('#item-scroller'),
-      base.closest('yt-live-chat-item-list-renderer'),
-      ownerDocument?.querySelector('#item-scroller, yt-live-chat-item-list-renderer'),
-    ];
-
-    const visited = new Set<HTMLElement>();
-
-    for (const candidate of candidates) {
-      if (!(candidate instanceof HTMLElement) || visited.has(candidate)) {
-        continue;
-      }
-
-      visited.add(candidate);
-
-      const view = candidate.ownerDocument?.defaultView;
-      const overflowY = view?.getComputedStyle(candidate).overflowY ?? '';
-      const isScrollableStyle =
-        overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay';
-      const hasScrollableContent = candidate.scrollHeight > candidate.clientHeight + 1;
-
-      if (isScrollableStyle || hasScrollableContent) {
-        return candidate;
-      }
-    }
-
-    return null;
+    const scroller = base.closest<HTMLElement>('#item-scroller') ?? base.parentElement;
+    return scroller instanceof HTMLElement ? scroller : null;
   }
 
   isAtLiveEdge(thresholdPx = DEFAULT_LIVE_EDGE_THRESHOLD_PX): boolean {
@@ -1006,8 +972,7 @@ export class ChatSource {
       return undefined;
     }
 
-    // Get image URL (prefer src, fallback to srcset)
-    const photoUrl = authorPhotoElement.src || authorPhotoElement.getAttribute('src');
+    const photoUrl = authorPhotoElement.src;
 
     if (!photoUrl) {
       return undefined;
@@ -1199,10 +1164,7 @@ export class ChatSource {
 
       // Extract colors from element styles
       const computedStyle = window.getComputedStyle(element);
-      const backgroundColor =
-        computedStyle.backgroundColor ||
-        element.getAttribute('style')?.match(/background-color:\s*([^;]+)/)?.[1] ||
-        undefined;
+      const backgroundColor = computedStyle.backgroundColor || undefined;
 
       // Try to find header background color (from card-header element)
       const headerElement = element.querySelector(
@@ -1212,8 +1174,7 @@ export class ChatSource {
         ? window.getComputedStyle(headerElement).backgroundColor || undefined
         : undefined;
 
-      // Determine color tier based on background color or amount
-      const tier = this.determineSuperChatTier(backgroundColor, amountText);
+      const tier = this.determineSuperChatTier(backgroundColor);
 
       // Check for sticker (high-tier Super Chats may have stickers)
       const stickerImg = element.querySelector(
@@ -1249,45 +1210,23 @@ export class ChatSource {
   }
 
   /**
-   * Determine Super Chat tier based on background color or amount
-   * YouTube uses different colors for different price tiers
+   * Determine Super Chat tier based on background color.
+   * YouTube uses different colors for different price tiers; we map the
+   * computed backgroundColor to the closest tier and fall back to 'blue'
+   * when the color cannot be parsed.
    */
-  private determineSuperChatTier(
-    backgroundColor: string | undefined,
-    amountText: string
-  ): SuperChatInfo['tier'] {
-    if (!backgroundColor) {
-      // Fallback: estimate tier from amount text
-      const numericAmount = parseFloat(amountText.replace(/[^0-9.]/g, ''));
-      if (numericAmount >= 100) return 'red';
-      if (numericAmount >= 50) return 'magenta';
-      if (numericAmount >= 20) return 'orange';
-      if (numericAmount >= 10) return 'yellow';
-      if (numericAmount >= 5) return 'green';
-      if (numericAmount >= 2) return 'cyan';
-      return 'blue';
-    }
-
-    // Parse RGB values from backgroundColor
-    const rgb = parseRgbColor(backgroundColor);
-    if (!rgb) return 'blue'; // fallback
+  private determineSuperChatTier(backgroundColor: string | undefined): SuperChatInfo['tier'] {
+    const rgb = backgroundColor ? parseRgbColor(backgroundColor) : null;
+    if (!rgb) return 'blue';
 
     const { r, g, b } = rgb;
 
-    // YouTube Super Chat color tiers (approximate RGB ranges)
-    // Red: $100+ (rgb(230, 33, 23))
     if (r > 200 && g < 100 && b < 100) return 'red';
-    // Magenta: $50-$99 (rgb(233, 30, 99))
     if (r > 200 && g < 100 && b > 80) return 'magenta';
-    // Orange: $20-$49 (rgb(245, 124, 0))
     if (r > 200 && g > 100 && g < 150 && b < 50) return 'orange';
-    // Yellow: $10-$19 (rgb(255, 202, 40))
     if (r > 200 && g > 180 && b < 100) return 'yellow';
-    // Green: $5-$9 (rgb(29, 233, 182))
     if (r < 100 && g > 200 && b > 150) return 'green';
-    // Cyan: $2-$4 (rgb(0, 191, 255))
     if (r < 100 && g > 150 && b > 200) return 'cyan';
-    // Blue: $1-$1.99 (rgb(30, 136, 229))
     return 'blue';
   }
 }

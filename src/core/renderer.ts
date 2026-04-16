@@ -368,7 +368,6 @@ export class Renderer {
 
     this.lanes = Array.from({ length: dimensions.laneCount }, (_, i) => ({
       index: i,
-      lastItemExitTime: 0,
       lastItemStartTime: 0,
       lastItemWidthPx: 0,
       lastItemHeightPx: 0,
@@ -461,25 +460,18 @@ export class Renderer {
     const offset = outline.widthPx;
     const blur = Math.max(0, outline.blurPx);
     const baseOpacity = Math.min(1, outline.opacity);
-    const glowOpacity = Math.min(1, baseOpacity * 0.85);
-    const glowStrongOpacity = Math.min(1, baseOpacity * 0.65);
     const shadowColor = `rgba(0, 0, 0, ${baseOpacity})`;
-    const glowColor = `rgba(0, 0, 0, ${glowOpacity})`;
-    const glowStrongColor = `rgba(0, 0, 0, ${glowStrongOpacity})`;
+    const glowColor = `rgba(0, 0, 0, ${Math.min(1, baseOpacity * 0.85)})`;
     const glowBlur = Math.max(1, blur * 1.5);
-    const glowStrongBlur = Math.max(1, blur * 2.5);
 
+    // 4 diagonal shadows + 1 soft glow. Combined with text-stroke below this
+    // gives a clean outline on every side without stacking 10 shadow layers.
     return [
       `-${offset}px -${offset}px ${blur}px ${shadowColor}`,
       `${offset}px -${offset}px ${blur}px ${shadowColor}`,
       `-${offset}px ${offset}px ${blur}px ${shadowColor}`,
       `${offset}px ${offset}px ${blur}px ${shadowColor}`,
-      `-${offset}px 0px ${blur}px ${shadowColor}`,
-      `${offset}px 0px ${blur}px ${shadowColor}`,
-      `0px -${offset}px ${blur}px ${shadowColor}`,
-      `0px ${offset}px ${blur}px ${shadowColor}`,
       `0px 0px ${glowBlur}px ${glowColor}`,
-      `0px 0px ${glowStrongBlur}px ${glowStrongColor}`,
     ].join(', ');
   }
 
@@ -943,7 +935,6 @@ export class Renderer {
     // Small random jitter so messages entering around the same time don't
     // align into a visible diagonal staircase.
     const laneDelay = Math.floor(Math.random() * LAYOUT.LANE_DELAY_CYCLE * LAYOUT.LANE_DELAY_MS);
-    const totalDuration = duration + laneDelay;
 
     // Create Web Animation
     const animation = element.animate(
@@ -960,14 +951,12 @@ export class Renderer {
     // Update lane state with message dimensions
     const now = Date.now();
     const startTime = now + laneDelay;
-    const exitTime = now + totalDuration;
 
     for (let i = lane.index; i < lane.index + laneSpan && i < this.lanes.length; i++) {
       const laneState = this.lanes[i];
       if (!laneState) continue;
 
       laneState.lastItemStartTime = startTime;
-      laneState.lastItemExitTime = exitTime;
       laneState.lastItemWidthPx = textWidth;
       laneState.lastItemHeightPx = messageHeight;
     }
@@ -1452,9 +1441,6 @@ export class Renderer {
         for (const lane of this.lanes) {
           if (lane.lastItemStartTime > 0) {
             lane.lastItemStartTime += pausedDuration;
-          }
-          if (lane.lastItemExitTime > 0) {
-            lane.lastItemExitTime += pausedDuration;
           }
         }
 

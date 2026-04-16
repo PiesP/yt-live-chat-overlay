@@ -191,8 +191,6 @@ export interface OverlaySettings {
 export interface LaneState {
   /** Lane index */
   index: number;
-  /** Last item exit time (timestamp) */
-  lastItemExitTime: number;
   /** Last item start time (timestamp) */
   lastItemStartTime: number;
   /** Last item width in pixels */
@@ -259,51 +257,19 @@ export const SETTINGS_LIMITS = {
  */
 export const DEFAULT_SETTINGS = {
   enabled: true,
-  /**
-   * Faster scrolling = messages leave the screen sooner, reducing visual clutter.
-   * 280 px/s keeps text readable while minimising how long it occludes the video.
-   */
   speedPxPerSec: 280,
-  /** Smaller font reduces the area of video blocked per message. */
   fontSize: 20,
-  /**
-   * Semi-transparent so the video is still visible through overlay text.
-   * 0.85 gives good legibility without fully blocking the picture.
-   */
   opacity: 0.85,
-  /** Super Chat card tint opacity – lower = more transparent over video. */
   superChatOpacity: 0.35,
-  /** Start from the very top of the video (no top safe zone). */
   safeTop: 0,
-  /**
-   * Keep the bottom 40 % clear so comments only cover the top 60 % of the
-   * video area (safeTop 0 % + active 60 % + safeBottom 40 % = 100 %).
-   */
   safeBottom: 0.4,
-  /**
-   * Soft cap for performance monitoring (not strictly enforced).
-   * Raised from 30 → 40 to accommodate the additional lanes created by the
-   * tighter BASE_LANE_HEIGHT_MULTIPLIER.
-   */
   maxConcurrentMessages: 40,
-  /**
-   * Hard rate limit: at most 6 messages per second reach the overlay.
-   * Raised from 4 → 6 for a denser default display while remaining readable.
-   */
   maxMessagesPerSecond: 6,
-  /** Keep strict mode by default to reduce chat noise. */
   allowShortTextMessages: false,
-  /** Require at least 3 visible characters for regular messages. */
   minTextLength: 3,
-  /** Default to warnings/errors only for a clean console. */
   logLevel: 'warn',
-  /** Keep author labels selective to reduce visual noise by default. */
   showAuthor: DEFAULT_SHOW_AUTHOR,
-  /** Author colors mirror familiar YouTube semantics for quick recognition. */
   colors: DEFAULT_COLORS,
-  /** Light outline preserves readability on bright video frames. */
   outline: DEFAULT_OUTLINE,
-  /** No extra vertical gap – the tight BASE_LANE_HEIGHT_MULTIPLIER already
-   *  gives a compact layout; increase this to add breathing room between lanes. */
   laneSpacing: 0,
 } as const satisfies Readonly<OverlaySettings>;

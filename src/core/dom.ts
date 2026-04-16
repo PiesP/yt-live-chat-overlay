@@ -25,19 +25,9 @@ export interface PollForValueOptions {
 const DEFAULT_WAIT_ATTEMPTS = 5;
 const DEFAULT_WAIT_INTERVAL_MS = 500;
 
-export const PLAYER_CONTAINER_SELECTORS = [
-  '#movie_player',
-  '.html5-video-player',
-  'ytd-player',
-  '#player-container',
-] as const;
+export const PLAYER_CONTAINER_SELECTORS = ['#movie_player', '.html5-video-player'] as const;
 
-export const VIDEO_SELECTORS = [
-  '#movie_player video',
-  '.html5-video-player video',
-  'video.html5-main-video',
-  'video[src]',
-] as const;
+export const VIDEO_SELECTORS = ['#movie_player video', 'video.html5-main-video'] as const;
 
 const createAbortError = (reason?: unknown): DOMException | Error => {
   if (reason instanceof DOMException || reason instanceof Error) {

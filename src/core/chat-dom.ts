@@ -24,7 +24,6 @@ const CHAT_FRAME_DESCRIPTORS = [
     purpose: 'live chat frame host',
     surface: 'frame',
   },
-  { selector: '#chat', purpose: 'generic chat root', surface: 'frame' },
   { selector: 'ytd-live-chat-frame', purpose: 'frame fallback', surface: 'frame' },
 ] as const satisfies readonly ChatSelectorDescriptor[];
 
@@ -35,32 +34,21 @@ const CHAT_IFRAME_DESCRIPTORS = [
     surface: 'iframe',
   },
   { selector: 'iframe#chatframe', purpose: 'chatframe id', surface: 'iframe' },
-  {
-    selector: 'ytd-live-chat-frame iframe',
-    purpose: 'iframe inside chat frame',
-    surface: 'iframe',
-  },
-  { selector: '#chat iframe', purpose: 'iframe under chat root', surface: 'iframe' },
 ] as const satisfies readonly ChatSelectorDescriptor[];
 
 const CHAT_IFRAME_ITEM_DESCRIPTORS = [
   {
     selector: '#items.yt-live-chat-item-list-renderer',
-    purpose: 'specific iframe item list',
+    purpose: 'iframe item list',
     surface: 'iframe-items',
   },
   { selector: '#items', purpose: 'iframe items fallback', surface: 'iframe-items' },
-  {
-    selector: 'yt-live-chat-item-list-renderer #items',
-    purpose: 'nested iframe item list',
-    surface: 'iframe-items',
-  },
 ] as const satisfies readonly ChatSelectorDescriptor[];
 
 const CHAT_CONTAINER_DESCRIPTORS = [
   {
     selector: '#chat #items.yt-live-chat-item-list-renderer',
-    purpose: 'specific in-page chat items',
+    purpose: 'in-page chat items',
     surface: 'container',
   },
   {
@@ -71,31 +59,6 @@ const CHAT_CONTAINER_DESCRIPTORS = [
   {
     selector: 'yt-live-chat-item-list-renderer #items',
     purpose: 'nested item list',
-    surface: 'container',
-  },
-  {
-    selector: 'ytd-live-chat-frame #items',
-    purpose: 'items under frame host',
-    surface: 'container',
-  },
-  {
-    selector: 'yt-live-chat-app #items',
-    purpose: 'app-root items',
-    surface: 'container',
-  },
-  {
-    selector: '#chat-container #items',
-    purpose: 'panel container items',
-    surface: 'container',
-  },
-  {
-    selector: '#chat #items',
-    purpose: 'chat-root items fallback',
-    surface: 'container',
-  },
-  {
-    selector: 'ytd-live-chat #items',
-    purpose: 'legacy host items',
     surface: 'container',
   },
 ] as const satisfies readonly ChatSelectorDescriptor[];
@@ -116,31 +79,6 @@ const CHAT_TOGGLE_BUTTON_DESCRIPTORS = [
     purpose: 'show/hide chat button',
     surface: 'toggle',
   },
-  {
-    selector: 'ytd-engagement-panel-title-header-renderer button',
-    purpose: 'engagement panel header button',
-    surface: 'toggle',
-  },
-  {
-    selector: 'ytd-engagement-panel-section-list-renderer button[aria-label*="chat" i]',
-    purpose: 'engagement panel list chat button',
-    surface: 'toggle',
-  },
-  {
-    selector: 'ytd-engagement-panel-section-list-renderer button[aria-label*="채팅" i]',
-    purpose: 'localized engagement panel list chat button',
-    surface: 'toggle',
-  },
-  {
-    selector: 'button:not(#yt-chat-overlay-settings-button)[aria-label*="show chat" i]',
-    purpose: 'generic show chat button',
-    surface: 'toggle',
-  },
-  {
-    selector: 'button:not(#yt-chat-overlay-settings-button)[aria-label*="open chat" i]',
-    purpose: 'generic open chat button',
-    surface: 'toggle',
-  },
 ] as const satisfies readonly ChatSelectorDescriptor[];
 
 const findChatSelectorMatch = <T extends Element>(
@@ -159,10 +97,7 @@ const findChatSelectorMatch = <T extends Element>(
       continue;
     }
 
-    return {
-      element,
-      descriptor,
-    };
+    return { element, descriptor };
   }
 
   return null;
@@ -191,85 +126,20 @@ export const findChatToggleButtonMatch = (): ChatSelectorMatch<HTMLButtonElement
   });
 
 /**
- * Validate that an element is actually a chat container
- * Prevents matching non-chat elements like sidebar menus
+ * Validate that an element lives inside a chat-related host. The
+ * CHAT_CONTAINER_DESCRIPTORS above already scope by `#chat` or live chat
+ * renderer ids, so we only need a cheap closest() guard to reject anything
+ * that escaped into an unrelated subtree.
  */
 export const validateChatElement = (element: Element): boolean => {
-  let current: Element | null = element;
-  let depth = 0;
-  const maxDepth = 10;
-
-  while (current && depth < maxDepth) {
-    const tagName = current.tagName.toLowerCase();
-    const className = current.className.toLowerCase();
-    const id = current.id.toLowerCase();
-
-    // Positive indicators (chat-related)
-    if (
-      tagName.includes('chat') ||
-      className.includes('chat') ||
-      id.includes('chat') ||
-      tagName === 'yt-live-chat-app' ||
-      tagName === 'ytd-live-chat-frame' ||
-      tagName === 'yt-live-chat-item-list-renderer'
-    ) {
-      overlayLog.debug(
-        `[YT Chat Overlay] Element validated: found chat-related parent at depth ${depth}`
-      );
-      return true;
-    }
-
-    // Negative indicators (not chat)
-    if (
-      tagName === 'ytd-mini-guide-renderer' ||
-      tagName === 'ytd-guide-renderer' ||
-      className.includes('guide') ||
-      className.includes('sidebar') ||
-      id.includes('guide')
-    ) {
-      overlayLog.debug(
-        `[YT Chat Overlay] Element rejected: found non-chat parent "${tagName}" at depth ${depth}`
-      );
-      return false;
-    }
-
-    current = current.parentElement;
-    depth++;
-  }
-
-  overlayLog.debug('[YT Chat Overlay] Element validation inconclusive, rejecting');
-  return false;
-};
-
-export const debugLogChatElements = (): void => {
-  overlayLog.debug('[YT Chat Overlay] === DEBUG: Chat Elements ===');
-
-  const chatElements = document.querySelectorAll(
-    '[id*="chat"], [class*="chat"], yt-live-chat-app, ytd-live-chat-frame'
+  const host = element.closest(
+    'ytd-live-chat-frame, yt-live-chat-app, yt-live-chat-item-list-renderer, #chat'
   );
-  overlayLog.debug(
-    `[YT Chat Overlay] Found ${chatElements.length} elements with 'chat' in id/class or live chat tags`
-  );
-
-  let count = 0;
-  for (const el of chatElements) {
-    if (count++ >= 5) break;
-    overlayLog.debug(
-      `  [${count - 1}] ${el.tagName} id="${el.id}" class="${el.className.substring(0, 50)}"`
-    );
+  if (!host) {
+    overlayLog.debug('[YT Chat Overlay] Element rejected: no chat host ancestor');
+    return false;
   }
-
-  const allIframes = document.querySelectorAll('iframe');
-  overlayLog.debug(`[YT Chat Overlay] Found ${allIframes.length} total iframes`);
-  let i = 0;
-  for (const iframe of allIframes) {
-    if (iframe.src.includes('chat')) {
-      overlayLog.debug(`  iframe[${i}] src="${iframe.src}"`);
-    }
-    i++;
-  }
-
-  overlayLog.debug('[YT Chat Overlay] === END DEBUG ===');
+  return true;
 };
 
 export const isChatFrameHidden = (chatFrame: HTMLElement): boolean => {
@@ -289,6 +159,5 @@ export const isChatFrameHidden = (chatFrame: HTMLElement): boolean => {
     return true;
   }
 
-  const hiddenAncestor = chatFrame.closest('[hidden], [aria-hidden="true"]');
-  return Boolean(hiddenAncestor);
+  return Boolean(chatFrame.closest('[hidden], [aria-hidden="true"]'));
 };

@@ -120,13 +120,6 @@ export class PageWatcher {
   }
 
   /**
-   * Unregister a callback
-   */
-  offChange(callback: PageChangeCallback): void {
-    this.callbacks.delete(callback);
-  }
-
-  /**
    * Check if current page is a valid target (live/watch page)
    */
   isValidPage(): boolean {

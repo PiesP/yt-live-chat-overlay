@@ -1,18 +1,10 @@
-import type { AuthorType, SuperChatInfo } from '@app-types';
+import type { SuperChatInfo } from '@app-types';
 
 export interface RgbColor {
   readonly r: number;
   readonly g: number;
   readonly b: number;
 }
-
-const authorColors = {
-  normal: '#ffffff',
-  member: '#0f9d58',
-  moderator: '#5e84f1',
-  owner: '#ffd600',
-  verified: '#ffffff',
-} as const satisfies Record<AuthorType, string>;
 
 const superChatColors = {
   blue: { r: 30, g: 136, b: 229 },
@@ -35,16 +27,10 @@ const uiColors = {
   danger: '#e53935',
 } as const;
 
-const emojiColors = {
-  standard: '#ffab00',
-  member: '#0f9d58',
-} as const;
-
 export const colors = {
-  author: authorColors,
+  author: { member: '#0f9d58' },
   superChat: superChatColors,
   ui: uiColors,
-  emoji: emojiColors,
 } as const;
 
 export const spacing = {
@@ -52,8 +38,6 @@ export const spacing = {
   sm: 8,
   md: 12,
   lg: 16,
-  xl: 20,
-  xxl: 24,
   xxxl: 32,
 } as const;
 
@@ -63,19 +47,14 @@ export const typography = {
     sm: '14px',
     base: '16px',
     lg: '18px',
-    xl: '24px',
-    xxl: '32px',
   },
   fontWeight: {
     normal: 400,
-    medium: 500,
     semibold: 600,
     bold: 700,
   },
   lineHeight: {
-    tight: 1.2,
     normal: 1.5,
-    relaxed: 1.75,
   },
 } as const;
 
@@ -83,7 +62,6 @@ export const shadows = {
   text: {
     sm: '1px 1px 2px rgba(0, 0, 0, 0.8)',
     md: '2px 2px 4px rgba(0, 0, 0, 0.8)',
-    lg: '3px 3px 6px rgba(0, 0, 0, 0.9)',
   },
   box: {
     sm: '0 2px 8px rgba(0, 0, 0, 0.6)',
@@ -91,9 +69,7 @@ export const shadows = {
     lg: '0 8px 24px rgba(0, 0, 0, 0.9)',
   },
   filter: {
-    sm: 'drop-shadow(1px 1px 2px rgba(0, 0, 0, 0.8))',
     md: 'drop-shadow(2px 2px 4px rgba(0, 0, 0, 0.8))',
-    lg: 'drop-shadow(3px 3px 6px rgba(0, 0, 0, 0.9))',
   },
 } as const;
 
@@ -101,14 +77,10 @@ export const borderRadius = {
   sm: '6px',
   md: '8px',
   lg: '12px',
-  xl: '14px',
   full: '50%',
 } as const;
 
 export const zIndex = {
-  base: 10000,
-  messages: 10001,
-  settings: 10002,
   modal: 10003,
 } as const;
 
