@@ -1,10 +1,5 @@
-import { isLogLevel, type LogLevel } from '@app-types';
-import { STORAGE_KEY } from '@core/settings';
-
-interface StoredSettingsLike {
-  logLevel?: LogLevel;
-  debugLogging?: boolean;
-}
+import type { LogLevel } from '@app-types';
+import { readStoredLogLevel } from '@core/settings';
 
 type ConsoleLogArgs = Parameters<Console['log']>;
 type ConsoleWarnArgs = Parameters<Console['warn']>;
@@ -77,29 +72,6 @@ const shouldEmitInfo = (args: readonly unknown[]): boolean => {
   }
 
   return !isVerboseOverlayLog(args);
-};
-
-const readStoredLogLevel = (): LogLevel => {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (!stored) {
-      return DEFAULT_LOG_LEVEL;
-    }
-
-    const parsed = JSON.parse(stored) as StoredSettingsLike;
-    if (isLogLevel(parsed.logLevel)) {
-      return parsed.logLevel;
-    }
-
-    // Legacy compatibility: old boolean true maps to verbose debug.
-    if (parsed.debugLogging) {
-      return 'debug';
-    }
-  } catch {
-    return DEFAULT_LOG_LEVEL;
-  }
-
-  return DEFAULT_LOG_LEVEL;
 };
 
 export const overlayLog = {

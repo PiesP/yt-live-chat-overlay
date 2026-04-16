@@ -251,6 +251,14 @@ export class ChatSource {
     }
   }
 
+  private getLiveEdgeDistance(container: HTMLElement): number {
+    return Math.max(0, container.scrollHeight - container.clientHeight - container.scrollTop);
+  }
+
+  private isWithinLiveEdgeThreshold(container: HTMLElement, thresholdPx: number): boolean {
+    return this.getLiveEdgeDistance(container) <= Math.max(0, thresholdPx);
+  }
+
   private resolveScrollContainer(): HTMLElement | null {
     const base = this.chatContainer;
     if (!(base instanceof Element)) {
@@ -296,11 +304,7 @@ export class ChatSource {
       return true;
     }
 
-    const distance = Math.max(
-      0,
-      container.scrollHeight - container.clientHeight - container.scrollTop
-    );
-    return distance <= Math.max(0, thresholdPx);
+    return this.isWithinLiveEdgeThreshold(container, thresholdPx);
   }
 
   ensureLiveEdge(thresholdPx = DEFAULT_LIVE_EDGE_THRESHOLD_PX): boolean {
@@ -309,12 +313,12 @@ export class ChatSource {
       return false;
     }
 
-    if (this.isAtLiveEdge(thresholdPx)) {
+    if (this.isWithinLiveEdgeThreshold(container, thresholdPx)) {
       return true;
     }
 
     container.scrollTop = container.scrollHeight;
-    if (this.isAtLiveEdge(thresholdPx)) {
+    if (this.isWithinLiveEdgeThreshold(container, thresholdPx)) {
       return true;
     }
 
@@ -323,7 +327,7 @@ export class ChatSource {
       lastChild.scrollIntoView({ block: 'end' });
     }
 
-    return this.isAtLiveEdge(thresholdPx);
+    return this.isWithinLiveEdgeThreshold(container, thresholdPx);
   }
 
   /**
@@ -336,7 +340,7 @@ export class ChatSource {
   /**
    * Try to open chat panel when the frame isn't in the DOM yet
    */
-  private async tryOpenChatPanelWithoutFrame(): Promise<boolean> {
+  private tryOpenChatPanelWithoutFrame(): boolean {
     overlayLog.info('[YT Chat Overlay] Chat frame missing, attempting to open chat panel...');
 
     try {
@@ -419,7 +423,7 @@ export class ChatSource {
       overlayLog.warn(
         '[YT Chat Overlay] Chat frame element not found - chat may be disabled for this video'
       );
-      const opened = await this.tryOpenChatPanelWithoutFrame();
+      const opened = this.tryOpenChatPanelWithoutFrame();
       if (opened) {
         chatFrame = await this.waitForChatFrame(6, 500, signal);
         if (this.stopped) return false;
@@ -1036,11 +1040,12 @@ export class ChatSource {
   getHealthSnapshot(options: ChatHealthSnapshotOptions = {}): ChatHealthSnapshot {
     const activeTimeoutMs = options.activeTimeoutMs ?? DEFAULT_ACTIVITY_TIMEOUT_MS;
     const liveEdgeThresholdPx = options.liveEdgeThresholdPx ?? DEFAULT_LIVE_EDGE_THRESHOLD_PX;
+    const observerAlive = this.isObserverAlive();
 
     return {
-      observerAlive: this.isObserverAlive(),
+      observerAlive,
       recentlyActive: this.isActive(activeTimeoutMs),
-      atLiveEdge: this.isAtLiveEdge(liveEdgeThresholdPx),
+      atLiveEdge: observerAlive ? this.isAtLiveEdge(liveEdgeThresholdPx) : false,
     };
   }
 

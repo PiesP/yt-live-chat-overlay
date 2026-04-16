@@ -54,6 +54,7 @@ export class VideoSync {
   private videoElement: HTMLVideoElement | null = null;
   private callbacks: VideoSyncCallbacks;
   private initialized = false;
+  private initPromise: Promise<boolean> | null = null;
   private detectInterval: number | null = null;
   private mutationObserver: MutationObserver | null = null;
   private reinitializeTimer: number | null = null;
@@ -74,6 +75,23 @@ export class VideoSync {
    * @returns true if video element found, false if periodic detection started
    */
   async init(signal?: AbortSignal): Promise<boolean> {
+    throwIfAborted(signal);
+
+    if (this.initPromise) {
+      return this.initPromise;
+    }
+
+    const initPromise = this.runInit(signal).finally(() => {
+      if (this.initPromise === initPromise) {
+        this.initPromise = null;
+      }
+    });
+
+    this.initPromise = initPromise;
+    return initPromise;
+  }
+
+  private async runInit(signal?: AbortSignal): Promise<boolean> {
     this.lifecycleSignal = signal ?? null;
 
     const videoElement = await this.detectVideoElement(signal);

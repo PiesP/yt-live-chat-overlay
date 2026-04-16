@@ -16,6 +16,38 @@ const CHAT_RECOVERY_GRACE_MS = 2_500;
 const isAbortError = (error: unknown): boolean =>
   error instanceof DOMException && error.name === 'AbortError';
 
+const shouldResetRendererForSettingsChange = (
+  previous: Readonly<OverlaySettings>,
+  next: Readonly<OverlaySettings>
+): boolean =>
+  previous.enabled !== next.enabled ||
+  previous.speedPxPerSec !== next.speedPxPerSec ||
+  previous.fontSize !== next.fontSize ||
+  previous.opacity !== next.opacity ||
+  previous.superChatOpacity !== next.superChatOpacity ||
+  previous.safeTop !== next.safeTop ||
+  previous.safeBottom !== next.safeBottom ||
+  previous.maxConcurrentMessages !== next.maxConcurrentMessages ||
+  previous.maxMessagesPerSecond !== next.maxMessagesPerSecond ||
+  previous.allowShortTextMessages !== next.allowShortTextMessages ||
+  previous.minTextLength !== next.minTextLength ||
+  previous.laneSpacing !== next.laneSpacing ||
+  previous.showAuthor.normal !== next.showAuthor.normal ||
+  previous.showAuthor.member !== next.showAuthor.member ||
+  previous.showAuthor.moderator !== next.showAuthor.moderator ||
+  previous.showAuthor.owner !== next.showAuthor.owner ||
+  previous.showAuthor.verified !== next.showAuthor.verified ||
+  previous.showAuthor.superChat !== next.showAuthor.superChat ||
+  previous.colors.normal !== next.colors.normal ||
+  previous.colors.member !== next.colors.member ||
+  previous.colors.moderator !== next.colors.moderator ||
+  previous.colors.owner !== next.colors.owner ||
+  previous.colors.verified !== next.colors.verified ||
+  previous.outline.enabled !== next.outline.enabled ||
+  previous.outline.widthPx !== next.outline.widthPx ||
+  previous.outline.blurPx !== next.outline.blurPx ||
+  previous.outline.opacity !== next.outline.opacity;
+
 export interface RuntimeSessionOptions {
   targetUrl: string;
   settings: OverlaySettings;
@@ -131,9 +163,25 @@ export class RuntimeSession {
       return;
     }
 
+    const shouldResetRenderer = shouldResetRendererForSettingsChange(this.settings, settings);
     this.settings = settings;
     this.overlay?.updateSettings(settings);
-    this.renderer?.updateSettings(settings);
+
+    const renderer = this.renderer;
+    if (!renderer) {
+      return;
+    }
+
+    renderer.updateSettings(settings, { resetState: shouldResetRenderer });
+
+    if (!shouldResetRenderer) {
+      return;
+    }
+
+    const latestMessages = this.chatSource?.getLatestMessages(RESUME_SYNC_MESSAGE_LIMIT) ?? [];
+    for (const message of latestMessages) {
+      renderer.addMessage(message);
+    }
   }
 
   dispose(): void {
@@ -153,9 +201,6 @@ export class RuntimeSession {
 
     this.chatWatchdogInterval = clearIntervalHandle(this.chatWatchdogInterval);
 
-    this.hiddenWhilePlaying = false;
-    this.lastVisibilityReturnAt = 0;
-
     this.chatSource?.stop();
     this.chatSource = null;
 
@@ -168,7 +213,6 @@ export class RuntimeSession {
     this.overlay?.destroy();
     this.overlay = null;
 
-    this.removeLeftoverOverlays();
     overlayLog.info('[RuntimeSession] Disposed');
   }
 

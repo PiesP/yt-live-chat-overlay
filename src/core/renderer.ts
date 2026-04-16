@@ -72,6 +72,10 @@ interface AuthorNameOptions {
   tagName?: 'span' | 'div';
 }
 
+interface RendererUpdateOptions {
+  resetState?: boolean;
+}
+
 /**
  * Layout and styling constants
  */
@@ -1359,10 +1363,18 @@ export class Renderer {
   /**
    * Update settings
    */
-  updateSettings(settings: OverlaySettings): void {
+  updateSettings(settings: OverlaySettings, options: RendererUpdateOptions = {}): void {
     this.settings = settings;
-    this.initLanes();
     this.injectStyles();
+
+    if (options.resetState) {
+      this.resetForResync();
+      return;
+    }
+
+    if (this.lanes.length === 0) {
+      this.initLanes();
+    }
   }
 
   /**

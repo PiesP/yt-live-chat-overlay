@@ -55,9 +55,6 @@ jobs:
         uses: actions/checkout@v6
 
       - name: 📦 Setup pnpm
-        # @v6 bootstraps itself with pnpm v11 beta and has a bug where it ignores
-        # packageManager in package.json, resulting in ERR_PNPM_BROKEN_LOCKFILE.
-        # @v5 correctly reads packageManager and is used by release.yaml as well.
         uses: pnpm/action-setup@v5
 
       - name: 🟢 Setup Node.js
@@ -128,9 +125,6 @@ jobs:
           pnpm install --frozen-lockfile --prefer-offline
 
           echo "✅ Lockfile validation passed"
-      # Dependency vulnerability scanning runs in the dedicated Security Scanning
-      # workflow. This keeps CI resilient to third-party audit endpoint outages
-      # while preserving security coverage via OSV and Semgrep.
 
   build:
     name: 🚀 Build

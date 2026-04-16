@@ -13,6 +13,25 @@ interface StoredSettings extends Partial<OverlaySettings> {
   debugLogging?: boolean;
 }
 
+const readStoredSettings = (): StoredSettings | null => {
+  const stored = localStorage.getItem(STORAGE_KEY);
+  if (!stored) {
+    return null;
+  }
+
+  return JSON.parse(stored) as StoredSettings;
+};
+
+const resolveStoredLogLevel = (
+  stored: Pick<StoredSettings, 'logLevel' | 'debugLogging'>
+): OverlaySettings['logLevel'] | undefined => {
+  if (isLogLevel(stored.logLevel)) {
+    return stored.logLevel;
+  }
+
+  return stored.debugLogging ? 'debug' : undefined;
+};
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
@@ -156,8 +175,8 @@ const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings
 });
 
 const normalizeStoredSettings = (stored: StoredSettings): OverlaySettings => {
-  const { debugLogging, ...parsed } = stored;
-  const migratedLogLevel = parsed.logLevel ?? (debugLogging ? 'debug' : undefined);
+  const { debugLogging: _legacyDebugLogging, ...parsed } = stored;
+  const migratedLogLevel = resolveStoredLogLevel(stored);
 
   return normalizeSettings(
     mergeSettings(DEFAULT_SETTINGS, {
@@ -165,6 +184,19 @@ const normalizeStoredSettings = (stored: StoredSettings): OverlaySettings => {
       ...(migratedLogLevel ? { logLevel: migratedLogLevel } : {}),
     })
   );
+};
+
+export const readStoredLogLevel = (): OverlaySettings['logLevel'] => {
+  try {
+    const stored = readStoredSettings();
+    if (!stored) {
+      return DEFAULT_SETTINGS.logLevel;
+    }
+
+    return resolveStoredLogLevel(stored) ?? DEFAULT_SETTINGS.logLevel;
+  } catch {
+    return DEFAULT_SETTINGS.logLevel;
+  }
 };
 
 export class Settings {
@@ -179,9 +211,9 @@ export class Settings {
    */
   private loadSettings(): OverlaySettings {
     try {
-      const stored = localStorage.getItem(STORAGE_KEY);
+      const stored = readStoredSettings();
       if (stored) {
-        return normalizeStoredSettings(JSON.parse(stored) as StoredSettings);
+        return normalizeStoredSettings(stored);
       }
     } catch (error) {
       console.warn('[YT Chat Overlay] Failed to load settings:', error);
@@ -213,14 +245,6 @@ export class Settings {
    */
   update(partial: Partial<OverlaySettings>): void {
     this.settings = normalizeSettings(mergeSettings(this.settings, partial));
-    this.saveSettings();
-  }
-
-  /**
-   * Reset to defaults
-   */
-  reset(): void {
-    this.settings = cloneSettings(DEFAULT_SETTINGS);
     this.saveSettings();
   }
 }

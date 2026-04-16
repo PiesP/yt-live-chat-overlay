@@ -12,8 +12,6 @@ import { RuntimeManager } from '@core/runtime-manager';
 import { Settings } from '@core/settings';
 import { SettingsUi } from '@core/settings-ui';
 
-const APP_INIT_DELAY_MS = 500;
-
 /**
  * Thin application shell.
  *
@@ -100,12 +98,6 @@ class App {
   }
 }
 
-const scheduleAppInitialization = (): void => {
-  window.setTimeout(() => {
-    void initApp();
-  }, APP_INIT_DELAY_MS);
-};
-
 function main(): void {
   overlayLog.info('[YT Chat Overlay] Script loaded', {
     readyState: document.readyState,
@@ -114,13 +106,17 @@ function main(): void {
 
   if (document.readyState === 'loading') {
     overlayLog.info('[YT Chat Overlay] Waiting for DOMContentLoaded...');
-    document.addEventListener('DOMContentLoaded', () => {
-      overlayLog.info('[YT Chat Overlay] DOMContentLoaded fired');
-      scheduleAppInitialization();
-    });
+    document.addEventListener(
+      'DOMContentLoaded',
+      () => {
+        overlayLog.info('[YT Chat Overlay] DOMContentLoaded fired');
+        void initApp();
+      },
+      { once: true }
+    );
   } else {
     overlayLog.info('[YT Chat Overlay] Document already ready, initializing...');
-    scheduleAppInitialization();
+    void initApp();
   }
 }
 
@@ -136,16 +132,25 @@ const stopPreviousAppInstance = (): void => {
 
 async function initApp(): Promise<void> {
   overlayLog.info('[YT Chat Overlay] Initializing application...');
+  let app: App | null = null;
 
   try {
     stopPreviousAppInstance();
 
-    const app = new App();
+    app = new App();
     await app.start();
 
     window.__ytChatOverlay = app;
     overlayLog.info('[YT Chat Overlay] App instance exposed to window.__ytChatOverlay');
   } catch (error) {
+    if (app) {
+      try {
+        app.stop();
+      } catch (cleanupError) {
+        console.error('[YT Chat Overlay] Cleanup after failed init also failed:', cleanupError);
+      }
+    }
+
     console.error('[YT Chat Overlay] Fatal error:', error);
     throw error;
   }
