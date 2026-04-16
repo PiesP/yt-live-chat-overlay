@@ -6,6 +6,7 @@ name: 🏗️ CI Pipeline
 # - Type checking (TypeScript via tsc)
 # - Knip dependency check
 # - Build verification (Production mode)
+# - Dependency vulnerability scanning is handled by the dedicated Security Scanning workflow
 #
 # Triggered on: Push/PR to master (excluding markdown/assets)
 
@@ -124,20 +125,9 @@ jobs:
           pnpm install --frozen-lockfile --prefer-offline
 
           echo "✅ Lockfile validation passed"
-
-      - name: 🔍 Check for security vulnerabilities
-        run: |
-          set -euo pipefail
-          echo "🔍 Checking for known vulnerabilities..."
-          # Fail only on critical vulnerabilities in CI.
-          # High vulnerabilities are still tracked via Security Scanning (OSV + SARIF).
-          pnpm audit --audit-level=critical || {
-            echo "⚠️ Critical vulnerabilities found"
-            echo "Please review and update affected packages"
-            exit 1
-          }
-
-          echo "✅ No critical vulnerabilities found"
+      # Dependency vulnerability scanning runs in the dedicated Security Scanning
+      # workflow. This keeps CI resilient to third-party audit endpoint outages
+      # while preserving security coverage via OSV and Semgrep.
 
   build:
     name: 🚀 Build
