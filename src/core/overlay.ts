@@ -49,6 +49,17 @@ const calculateOverlayDimensions = (
   };
 };
 
+type OverlayDimensionsChangeCallback = (dimensions: OverlayDimensions | null) => void;
+
+const areOverlayDimensionsEqual = (
+  previous: OverlayDimensions | null,
+  next: OverlayDimensions | null
+): boolean =>
+  previous?.width === next?.width &&
+  previous?.height === next?.height &&
+  previous?.laneHeight === next?.laneHeight &&
+  previous?.laneCount === next?.laneCount;
+
 export class Overlay {
   private container: HTMLDivElement | null = null;
   private playerElement: HTMLElement | null = null;
@@ -57,6 +68,7 @@ export class Overlay {
   private settings: OverlaySettings | null = null;
   private fullscreenHandler: (() => void) | null = null;
   private fullscreenUpdateTimer: number | null = null;
+  private readonly dimensionChangeCallbacks = new Set<OverlayDimensionsChangeCallback>();
 
   /**
    * Find player container
@@ -88,12 +100,17 @@ export class Overlay {
   }
 
   private updateDimensions(): void {
-    if (!this.playerElement || !this.container || !this.settings) {
-      this.dimensions = null;
+    const nextDimensions =
+      !this.playerElement || !this.container || !this.settings
+        ? null
+        : calculateOverlayDimensions(this.playerElement, this.settings);
+
+    if (areOverlayDimensionsEqual(this.dimensions, nextDimensions)) {
       return;
     }
 
-    this.dimensions = calculateOverlayDimensions(this.playerElement, this.settings);
+    this.dimensions = nextDimensions;
+    this.notifyDimensionChangeCallbacks();
   }
 
   private clearFullscreenUpdateTimer(): void {
@@ -183,11 +200,28 @@ export class Overlay {
     return this.dimensions;
   }
 
+  onDimensionsChanged(callback: OverlayDimensionsChangeCallback): () => void {
+    this.dimensionChangeCallbacks.add(callback);
+    return () => {
+      this.dimensionChangeCallbacks.delete(callback);
+    };
+  }
+
   /**
    * Get overlay container
    */
   getContainer(): HTMLDivElement | null {
     return this.container;
+  }
+
+  private notifyDimensionChangeCallbacks(): void {
+    for (const callback of this.dimensionChangeCallbacks) {
+      try {
+        callback(this.dimensions);
+      } catch (error) {
+        overlayLog.warn('[Overlay] Dimension change callback error:', error);
+      }
+    }
   }
 
   /**
@@ -205,6 +239,7 @@ export class Overlay {
     this.playerElement = null;
     this.dimensions = null;
     this.settings = null;
+    this.dimensionChangeCallbacks.clear();
 
     overlayLog.info('[Overlay] Destroyed');
   }

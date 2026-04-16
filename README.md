@@ -31,7 +31,7 @@ All processing happens locally in your browser, and chat content is never stored
 ## Privacy & Safety
 
 - Chat content is never stored or transmitted
-- The YouTube UI is not modified; only an overlay is added
+- The script injects an overlay and settings button into the player, and may open the live chat panel when needed
 
 ## Support
 

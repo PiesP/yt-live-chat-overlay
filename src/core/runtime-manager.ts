@@ -1,7 +1,6 @@
 import type { OverlaySettings } from '@app-types';
 import { overlayLog } from '@core/logging';
 import { RuntimeSession, type RuntimeSessionStartStatus } from '@core/runtime-session';
-import { cloneSettings } from '@core/settings';
 import { clearTimeoutHandle } from '@core/timers';
 
 const NAVIGATION_SETTLE_DELAY_MS = 2000;
@@ -163,7 +162,7 @@ export class RuntimeManager {
     return {
       shouldRun: this.isValidPage() && settings.enabled,
       url: this.getCurrentUrl(),
-      settings: cloneSettings(settings),
+      settings,
     };
   }
 

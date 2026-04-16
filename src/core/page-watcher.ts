@@ -1,5 +1,4 @@
 import { overlayLog } from '@core/logging';
-import { clearIntervalHandle } from '@core/timers';
 
 /**
  * Page Watcher
@@ -12,33 +11,17 @@ export type PageChangeCallback = () => void;
 
 type HistoryMethodName = 'pushState' | 'replaceState';
 type HistoryStateMethod = typeof history.pushState;
-type NavigationSignalSource =
-  | 'pushState'
-  | 'replaceState'
-  | 'popstate'
-  | 'yt-navigate-finish'
-  | 'polling';
+type NavigationSignalSource = 'pushState' | 'replaceState' | 'popstate' | 'yt-navigate-finish';
 
 const YT_NAVIGATE_FINISH_EVENT = 'yt-navigate-finish';
-const URL_POLL_INTERVAL_MS = 2000;
-const POLLING_SUPPRESSION_AFTER_PRIMARY_SIGNAL_MS = 4000;
-
-const isValidYouTubePageUrl = (url: string): boolean => {
-  try {
-    const { pathname } = new URL(url);
-    return pathname === '/watch' || pathname.startsWith('/live/');
-  } catch {
-    return url.includes('/watch') || url.includes('/live/');
-  }
-};
+const isSupportedYouTubePath = (pathname: string): boolean =>
+  pathname === '/watch' || pathname.startsWith('/live/');
 
 export class PageWatcher {
   private currentUrl = location.href;
   private callbacks: Set<PageChangeCallback> = new Set();
   private originalPushState: typeof history.pushState | null = null;
   private originalReplaceState: typeof history.replaceState | null = null;
-  private intervalId: number | null = null;
-  private lastPrimarySignalAt = 0;
 
   private readonly handleUrlMutation = (): void => {
     this.handlePotentialUrlChange('popstate');
@@ -60,7 +43,6 @@ export class PageWatcher {
     this.patchHistoryMethod('pushState');
     this.patchHistoryMethod('replaceState');
     this.attachEventListeners();
-    this.startPolling();
   }
 
   private patchHistoryMethod(methodName: HistoryMethodName): void {
@@ -88,20 +70,6 @@ export class PageWatcher {
     window.removeEventListener(YT_NAVIGATE_FINISH_EVENT, this.handleYouTubeNavigateFinish);
   }
 
-  private startPolling(): void {
-    this.intervalId = window.setInterval(() => {
-      if (Date.now() - this.lastPrimarySignalAt < POLLING_SUPPRESSION_AFTER_PRIMARY_SIGNAL_MS) {
-        return;
-      }
-
-      this.handlePotentialUrlChange('polling');
-    }, URL_POLL_INTERVAL_MS);
-  }
-
-  private stopPolling(): void {
-    this.intervalId = clearIntervalHandle(this.intervalId);
-  }
-
   private restoreHistoryMethods(): void {
     if (this.originalPushState) {
       history.pushState = this.originalPushState;
@@ -115,10 +83,6 @@ export class PageWatcher {
   }
 
   private handlePotentialUrlChange(source: NavigationSignalSource): void {
-    if (source !== 'polling') {
-      this.lastPrimarySignalAt = Date.now();
-    }
-
     const newUrl = location.href;
     if (newUrl === this.currentUrl) {
       return;
@@ -131,10 +95,6 @@ export class PageWatcher {
       from: previousUrl,
       to: newUrl,
     });
-
-    if (source === 'polling') {
-      overlayLog.warn('[PageWatcher] Polling watchdog detected a missed navigation signal');
-    }
 
     this.notifyCallbacks();
   }
@@ -170,14 +130,13 @@ export class PageWatcher {
    * Check if current page is a valid target (live/watch page)
    */
   isValidPage(): boolean {
-    return isValidYouTubePageUrl(location.href);
+    return isSupportedYouTubePath(location.pathname);
   }
 
   /**
    * Destroy and cleanup all resources
    */
   destroy(): void {
-    this.stopPolling();
     this.detachEventListeners();
     this.restoreHistoryMethods();
 

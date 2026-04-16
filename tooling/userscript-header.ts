@@ -25,7 +25,7 @@ const LEGAL_NOTICE_LINES = [
   ' * NO chat data is stored, transmitted, or processed externally.',
   ' * Only user settings (font size, speed, etc.) are stored in localStorage.',
   ' * This is NOT an official YouTube or Nico-nico product.',
-  ' * YouTube UI/content is NOT modified - only an overlay is added.',
+  ' * The script injects an overlay/settings control and may open the live chat panel when needed.',
   ' */',
 ] as const;
 

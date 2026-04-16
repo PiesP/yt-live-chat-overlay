@@ -127,7 +127,3 @@ export function parseRgbColor(colorString: string): RgbColor | null {
 export function rgba(color: RgbColor, alpha: number): string {
   return `rgba(${color.r}, ${color.g}, ${color.b}, ${clampAlpha(alpha)})`;
 }
-
-export function createGradient(color: RgbColor, stops: readonly number[]): string {
-  return `linear-gradient(to bottom, ${stops.map((alpha) => rgba(color, alpha)).join(', ')})`;
-}

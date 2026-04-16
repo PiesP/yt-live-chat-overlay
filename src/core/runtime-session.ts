@@ -1,5 +1,5 @@
 import type { OverlaySettings } from '@app-types';
-import { ChatSource, type ChatSourceStartStatus } from '@core/chat-source';
+import { ChatSource } from '@core/chat-source';
 import { throwIfAborted } from '@core/dom';
 import { overlayLog } from '@core/logging';
 import { OVERLAY_SELECTOR, Overlay } from '@core/overlay';
@@ -16,37 +16,59 @@ const CHAT_RECOVERY_GRACE_MS = 2_500;
 const isAbortError = (error: unknown): boolean =>
   error instanceof DOMException && error.name === 'AbortError';
 
+const RESETTABLE_SETTING_KEYS = [
+  'enabled',
+  'speedPxPerSec',
+  'fontSize',
+  'opacity',
+  'superChatOpacity',
+  'safeTop',
+  'safeBottom',
+  'maxConcurrentMessages',
+  'maxMessagesPerSecond',
+  'allowShortTextMessages',
+  'minTextLength',
+  'laneSpacing',
+] as const satisfies ReadonlyArray<keyof OverlaySettings>;
+
+const SHOW_AUTHOR_SETTING_KEYS = [
+  'normal',
+  'member',
+  'moderator',
+  'owner',
+  'verified',
+  'superChat',
+] as const satisfies ReadonlyArray<keyof OverlaySettings['showAuthor']>;
+
+const COLOR_SETTING_KEYS = [
+  'normal',
+  'member',
+  'moderator',
+  'owner',
+  'verified',
+] as const satisfies ReadonlyArray<keyof OverlaySettings['colors']>;
+
+const OUTLINE_SETTING_KEYS = [
+  'enabled',
+  'widthPx',
+  'blurPx',
+  'opacity',
+] as const satisfies ReadonlyArray<keyof OverlaySettings['outline']>;
+
+const hasAnyChanged = <T extends object>(
+  previous: Readonly<T>,
+  next: Readonly<T>,
+  keys: ReadonlyArray<keyof T>
+): boolean => keys.some((key) => previous[key] !== next[key]);
+
 const shouldResetRendererForSettingsChange = (
   previous: Readonly<OverlaySettings>,
   next: Readonly<OverlaySettings>
 ): boolean =>
-  previous.enabled !== next.enabled ||
-  previous.speedPxPerSec !== next.speedPxPerSec ||
-  previous.fontSize !== next.fontSize ||
-  previous.opacity !== next.opacity ||
-  previous.superChatOpacity !== next.superChatOpacity ||
-  previous.safeTop !== next.safeTop ||
-  previous.safeBottom !== next.safeBottom ||
-  previous.maxConcurrentMessages !== next.maxConcurrentMessages ||
-  previous.maxMessagesPerSecond !== next.maxMessagesPerSecond ||
-  previous.allowShortTextMessages !== next.allowShortTextMessages ||
-  previous.minTextLength !== next.minTextLength ||
-  previous.laneSpacing !== next.laneSpacing ||
-  previous.showAuthor.normal !== next.showAuthor.normal ||
-  previous.showAuthor.member !== next.showAuthor.member ||
-  previous.showAuthor.moderator !== next.showAuthor.moderator ||
-  previous.showAuthor.owner !== next.showAuthor.owner ||
-  previous.showAuthor.verified !== next.showAuthor.verified ||
-  previous.showAuthor.superChat !== next.showAuthor.superChat ||
-  previous.colors.normal !== next.colors.normal ||
-  previous.colors.member !== next.colors.member ||
-  previous.colors.moderator !== next.colors.moderator ||
-  previous.colors.owner !== next.colors.owner ||
-  previous.colors.verified !== next.colors.verified ||
-  previous.outline.enabled !== next.outline.enabled ||
-  previous.outline.widthPx !== next.outline.widthPx ||
-  previous.outline.blurPx !== next.outline.blurPx ||
-  previous.outline.opacity !== next.outline.opacity;
+  hasAnyChanged(previous, next, RESETTABLE_SETTING_KEYS) ||
+  hasAnyChanged(previous.showAuthor, next.showAuthor, SHOW_AUTHOR_SETTING_KEYS) ||
+  hasAnyChanged(previous.colors, next.colors, COLOR_SETTING_KEYS) ||
+  hasAnyChanged(previous.outline, next.outline, OUTLINE_SETTING_KEYS);
 
 export interface RuntimeSessionOptions {
   targetUrl: string;
@@ -144,7 +166,7 @@ export class RuntimeSession {
       throwIfAborted(signal);
 
       if (chatStarted !== 'started') {
-        return this.mapChatStartStatus(chatStarted);
+        return chatStarted;
       }
 
       this.setupChatWatchdog();
@@ -158,10 +180,6 @@ export class RuntimeSession {
       overlayLog.warn('[RuntimeSession] Failed to start:', error);
       return 'retryable';
     }
-  }
-
-  private mapChatStartStatus(status: ChatSourceStartStatus): RuntimeSessionStartStatus {
-    return status;
   }
 
   updateSettings(settings: OverlaySettings): void {

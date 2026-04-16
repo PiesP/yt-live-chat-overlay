@@ -134,12 +134,16 @@ export class Renderer {
   private readonly WARNING_INTERVAL_MS = 10000;
   private styleElement: HTMLStyleElement | null = null;
   private retryTimer: number | null = null;
+  private overlayDimensionsUnsubscribe: (() => void) | null = null;
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
     this.overlay = overlay;
     this.settings = settings;
     this.initLanes();
     this.injectStyles();
+    this.overlayDimensionsUnsubscribe = this.overlay.onDimensionsChanged((dimensions) => {
+      this.handleOverlayDimensionsChange(dimensions);
+    });
   }
 
   /**
@@ -147,7 +151,10 @@ export class Renderer {
    */
   private initLanes(): void {
     const dimensions = this.overlay.getDimensions();
-    if (!dimensions) return;
+    if (!dimensions) {
+      this.lanes = [];
+      return;
+    }
 
     this.lanes = Array.from({ length: dimensions.laneCount }, (_, i) => ({
       index: i,
@@ -156,6 +163,37 @@ export class Renderer {
       lastItemWidthPx: 0,
       lastItemHeightPx: 0,
     }));
+  }
+
+  private resetRenderedState(): void {
+    this.clearRetryTimer();
+
+    for (const active of Array.from(this.activeMessages)) {
+      this.removeMessage(active);
+    }
+
+    this.activeMessages.clear();
+    this.messageQueue = [];
+  }
+
+  private handleOverlayDimensionsChange(dimensions: OverlayDimensions | null): void {
+    if (!dimensions) {
+      this.resetRenderedState();
+      this.lanes = [];
+      return;
+    }
+
+    if (this.activeMessages.size > 0) {
+      this.resetRenderedState();
+      this.initLanes();
+      return;
+    }
+
+    this.initLanes();
+
+    if (!this.isPaused && this.messageQueue.length > 0) {
+      this.processQueue();
+    }
   }
 
   /**
@@ -1346,6 +1384,8 @@ export class Renderer {
    * Remove active message
    */
   private removeMessage(active: ActiveMessage): void {
+    this.activeMessages.delete(active);
+
     try {
       if (active.animation.playState !== 'finished') {
         active.animation.cancel();
@@ -1357,7 +1397,6 @@ export class Renderer {
     if (active.element.parentNode) {
       active.element.remove();
     }
-    this.activeMessages.delete(active);
   }
 
   /**
@@ -1448,14 +1487,7 @@ export class Renderer {
    * only fresh synchronized messages are shown.
    */
   resetForResync(): void {
-    this.clearRetryTimer();
-
-    for (const active of this.activeMessages) {
-      this.removeMessage(active);
-    }
-
-    this.activeMessages.clear();
-    this.messageQueue = [];
+    this.resetRenderedState();
     this.initLanes();
   }
 
@@ -1497,14 +1529,9 @@ export class Renderer {
    * Clear all messages
    */
   clear(): void {
-    this.clearRetryTimer();
+    this.resetRenderedState();
     this.pausedAt = null;
     this.playbackRate = 1;
-    for (const active of this.activeMessages) {
-      this.removeMessage(active);
-    }
-    this.activeMessages.clear();
-    this.messageQueue = [];
   }
 
   /**
@@ -1513,6 +1540,8 @@ export class Renderer {
   destroy(): void {
     // Clear state
     this.isPaused = false;
+    this.overlayDimensionsUnsubscribe?.();
+    this.overlayDimensionsUnsubscribe = null;
 
     // Clear all active messages and queue
     this.clear();

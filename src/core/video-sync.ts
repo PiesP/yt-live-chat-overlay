@@ -327,21 +327,6 @@ export class VideoSync {
   }
 
   /**
-   * Get current playback rate
-   * @returns playback rate (1.0 = normal speed), defaults to 1.0 if no video
-   */
-  getPlaybackRate(): number {
-    return this.videoElement?.playbackRate ?? 1.0;
-  }
-
-  /**
-   * Check if video sync is initialized
-   */
-  isInitialized(): boolean {
-    return this.initialized;
-  }
-
-  /**
    * Destroy and cleanup all resources
    */
   destroy(): void {
