@@ -1,7 +1,7 @@
 name: 🔒 Security Scanning
 
 # Responsibility: Security analysis for Node.js + pnpm project
-# - OSV scanning: vulnerability detection in dependencies (via Google OSV-Scanner Action)
+# - OSV scanning: dependency vulnerability detection (PRs block newly introduced issues)
 # - SAST: static security analysis with Semgrep
 # - License compliance: verify project LICENSE file
 #
@@ -41,6 +41,8 @@ jobs:
         -r
         --lockfile=pnpm-lock.yaml
         ./
+      # Full-repo scans publish SARIF and remain non-blocking so newly disclosed
+      # advisories don't retroactively break unrelated pushes after merge.
       fail-on-vuln: false
 
   osv-scan-pr:
@@ -56,7 +58,9 @@ jobs:
         -r
         --lockfile=pnpm-lock.yaml
         ./
-      fail-on-vuln: false
+      # PR diff scans fail when a change introduces new vulnerabilities, replacing
+      # the broken pnpm audit gate with a workflow-native regression check.
+      fail-on-vuln: true
 
   semgrep:
     name: 🔍 Static Analysis (Semgrep)
@@ -141,6 +145,7 @@ jobs:
             echo "✅ No disallowed license patterns found"
           fi
 
+  # Stable aggregate check for branch protection and merge queues.
   security-summary:
     name: 📊 Security Summary
     runs-on: ubuntu-latest
@@ -151,6 +156,8 @@ jobs:
       - name: 📊 Generate summary
         run: |
           set -euo pipefail
+          FAILURE=0
+
           echo "## 🔒 Security Scan Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Status | Check | Result |" >> $GITHUB_STEP_SUMMARY
@@ -159,26 +166,40 @@ jobs:
           # OSV Scanner (check both scheduled and PR jobs)
           OSV_SCHEDULED="${{ needs.osv-scan-scheduled.result }}"
           OSV_PR="${{ needs.osv-scan-pr.result }}"
-          if [ "$OSV_SCHEDULED" == "success" ] || [ "$OSV_PR" == "success" ]; then
-            echo "| ✅ | OSV Vulnerability Scan | Passed |" >> $GITHUB_STEP_SUMMARY
-          elif [ "$OSV_SCHEDULED" == "failure" ] || [ "$OSV_PR" == "failure" ]; then
+          if [ "$OSV_SCHEDULED" == "failure" ] || [ "$OSV_PR" == "failure" ] || [ "$OSV_SCHEDULED" == "cancelled" ] || [ "$OSV_PR" == "cancelled" ]; then
             echo "| ❌ | OSV Vulnerability Scan | Failed |" >> $GITHUB_STEP_SUMMARY
+            FAILURE=1
+          elif [ "$OSV_SCHEDULED" == "success" ] || [ "$OSV_PR" == "success" ]; then
+            echo "| ✅ | OSV Vulnerability Scan | Passed |" >> $GITHUB_STEP_SUMMARY
           elif [ "$OSV_SCHEDULED" == "skipped" ] && [ "$OSV_PR" == "skipped" ]; then
             echo "| ⏭️ | OSV Vulnerability Scan | Skipped |" >> $GITHUB_STEP_SUMMARY
           else
             echo "| ⚠️ | OSV Vulnerability Scan | Check required |" >> $GITHUB_STEP_SUMMARY
+            FAILURE=1
           fi
 
           # Semgrep
-          if [ "${{ needs.semgrep.result }}" == "success" ]; then
+          SEMGREP_RESULT="${{ needs.semgrep.result }}"
+          if [ "$SEMGREP_RESULT" == "success" ]; then
             echo "| ✅ | Static Analysis (Semgrep) | Passed |" >> $GITHUB_STEP_SUMMARY
+          elif [ "$SEMGREP_RESULT" == "skipped" ]; then
+            echo "| ⏭️ | Static Analysis (Semgrep) | Skipped |" >> $GITHUB_STEP_SUMMARY
           else
-            echo "| ⚠️ | Static Analysis (Semgrep) | Check required |" >> $GITHUB_STEP_SUMMARY
+            echo "| ❌ | Static Analysis (Semgrep) | Failed |" >> $GITHUB_STEP_SUMMARY
+            FAILURE=1
           fi
 
           # License
-          if [ "${{ needs.license-compliance.result }}" == "success" ]; then
+          LICENSE_RESULT="${{ needs.license-compliance.result }}"
+          if [ "$LICENSE_RESULT" == "success" ]; then
             echo "| ✅ | License Check | Passed |" >> $GITHUB_STEP_SUMMARY
           else
             echo "| ❌ | License Check | Failed |" >> $GITHUB_STEP_SUMMARY
+            FAILURE=1
+          fi
+
+          if [ "$FAILURE" -eq 1 ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "❌ Security gate failed." >> $GITHUB_STEP_SUMMARY
+            exit 1
           fi
