@@ -28,7 +28,7 @@ export class PageWatcher {
   };
 
   private readonly handleYouTubeNavigateFinish = (): void => {
-    overlayLog.info('[YT Chat Overlay] YouTube navigation finished');
+    overlayLog.debug('[YT Chat Overlay] YouTube navigation finished');
     this.handlePotentialUrlChange('yt-navigate-finish');
   };
 
@@ -107,7 +107,7 @@ export class PageWatcher {
       try {
         callback();
       } catch (error) {
-        console.error('[YT Chat Overlay] Page change callback error:', error);
+        overlayLog.error('[YT Chat Overlay] Page change callback error:', error);
       }
     }
   }
@@ -143,6 +143,6 @@ export class PageWatcher {
     // Clear callbacks
     this.callbacks.clear();
 
-    overlayLog.info('[PageWatcher] Destroyed');
+    overlayLog.debug('[PageWatcher] Destroyed');
   }
 }

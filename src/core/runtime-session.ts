@@ -1,9 +1,10 @@
 import type { OverlaySettings } from '@app-types';
-import { ChatSource } from '@core/chat-source';
+import { type ChatHealthSnapshot, ChatSource, type ChatSourceStartStatus } from '@core/chat-source';
 import { throwIfAborted } from '@core/dom';
 import { overlayLog } from '@core/logging';
 import { OVERLAY_SELECTOR, Overlay } from '@core/overlay';
 import { Renderer } from '@core/renderer';
+import { shouldResetRendererForSettingsChange } from '@core/settings-schema';
 import { clearIntervalHandle } from '@core/timers';
 import { VideoSync } from '@core/video-sync';
 
@@ -16,59 +17,7 @@ const CHAT_RECOVERY_GRACE_MS = 2_500;
 const isAbortError = (error: unknown): boolean =>
   error instanceof DOMException && error.name === 'AbortError';
 
-const RESETTABLE_SETTING_KEYS = [
-  'enabled',
-  'speedPxPerSec',
-  'fontSize',
-  'opacity',
-  'superChatOpacity',
-  'safeTop',
-  'safeBottom',
-  'maxConcurrentMessages',
-  'maxMessagesPerSecond',
-  'allowShortTextMessages',
-  'minTextLength',
-  'laneSpacing',
-] as const satisfies ReadonlyArray<keyof OverlaySettings>;
-
-const SHOW_AUTHOR_SETTING_KEYS = [
-  'normal',
-  'member',
-  'moderator',
-  'owner',
-  'verified',
-  'superChat',
-] as const satisfies ReadonlyArray<keyof OverlaySettings['showAuthor']>;
-
-const COLOR_SETTING_KEYS = [
-  'normal',
-  'member',
-  'moderator',
-  'owner',
-  'verified',
-] as const satisfies ReadonlyArray<keyof OverlaySettings['colors']>;
-
-const OUTLINE_SETTING_KEYS = [
-  'enabled',
-  'widthPx',
-  'blurPx',
-  'opacity',
-] as const satisfies ReadonlyArray<keyof OverlaySettings['outline']>;
-
-const hasAnyChanged = <T extends object>(
-  previous: Readonly<T>,
-  next: Readonly<T>,
-  keys: ReadonlyArray<keyof T>
-): boolean => keys.some((key) => previous[key] !== next[key]);
-
-const shouldResetRendererForSettingsChange = (
-  previous: Readonly<OverlaySettings>,
-  next: Readonly<OverlaySettings>
-): boolean =>
-  hasAnyChanged(previous, next, RESETTABLE_SETTING_KEYS) ||
-  hasAnyChanged(previous.showAuthor, next.showAuthor, SHOW_AUTHOR_SETTING_KEYS) ||
-  hasAnyChanged(previous.colors, next.colors, COLOR_SETTING_KEYS) ||
-  hasAnyChanged(previous.outline, next.outline, OUTLINE_SETTING_KEYS);
+type RecoveryReason = 'startup' | 'video-play' | 'visibility-return' | 'watchdog';
 
 export interface RuntimeSessionOptions {
   targetUrl: string;
@@ -152,24 +101,21 @@ export class RuntimeSession {
       throwIfAborted(signal);
 
       this.setupVisibilityHandler();
-
-      const chatSource = new ChatSource(() => this.settings);
-      this.chatSource = chatSource;
-
-      const chatStarted = await chatSource.start((message) => {
-        if (this.disposed) {
-          return;
-        }
-
-        this.renderer?.addMessage(message);
-      }, signal);
+      const chatStarted = await this.startChatSource(signal);
       throwIfAborted(signal);
 
-      if (chatStarted !== 'started') {
+      if (chatStarted === 'unavailable') {
         return chatStarted;
       }
 
       this.setupChatWatchdog();
+      if (chatStarted === 'retryable') {
+        overlayLog.warn(
+          '[RuntimeSession] Chat source was not ready during startup; recovery will continue in-session'
+        );
+        void this.recover('startup');
+      }
+
       overlayLog.info('[RuntimeSession] Started successfully');
       return 'started';
     } catch (error) {
@@ -240,6 +186,19 @@ export class RuntimeSession {
     overlayLog.info('[RuntimeSession] Disposed');
   }
 
+  private async startChatSource(signal: AbortSignal): Promise<ChatSourceStartStatus> {
+    const chatSource = new ChatSource(() => this.settings);
+    this.chatSource = chatSource;
+
+    return chatSource.start((message) => {
+      if (this.disposed) {
+        return;
+      }
+
+      this.renderer?.addMessage(message);
+    }, signal);
+  }
+
   private removeLeftoverOverlays(): void {
     const leftoverOverlays = document.querySelectorAll(OVERLAY_SELECTOR);
     for (const element of leftoverOverlays) {
@@ -273,6 +232,28 @@ export class RuntimeSession {
     document.addEventListener('visibilitychange', this.visibilityHandler);
   }
 
+  private getChatHealthSnapshot(chatSource: ChatSource): ChatHealthSnapshot {
+    return chatSource.getHealthSnapshot({
+      activeTimeoutMs: CHAT_STALL_TIMEOUT_MS,
+      liveEdgeThresholdPx: CHAT_LIVE_EDGE_THRESHOLD_PX,
+    });
+  }
+
+  private getWatchdogHealthState(health: ChatHealthSnapshot): {
+    stalled: boolean;
+    withinGrace: boolean;
+    needsRecovery: boolean;
+  } {
+    const withinGrace = Date.now() - this.lastVisibilityReturnAt < CHAT_RECOVERY_GRACE_MS;
+    const stalled = !health.recentlyActive && !withinGrace;
+
+    return {
+      stalled,
+      withinGrace,
+      needsRecovery: !health.observerAlive || stalled || !health.atLiveEdge,
+    };
+  }
+
   private setupChatWatchdog(): void {
     this.chatWatchdogInterval = window.setInterval(() => {
       const chatSource = this.chatSource;
@@ -284,14 +265,8 @@ export class RuntimeSession {
         return;
       }
 
-      const health = chatSource.getHealthSnapshot({
-        activeTimeoutMs: CHAT_STALL_TIMEOUT_MS,
-        liveEdgeThresholdPx: CHAT_LIVE_EDGE_THRESHOLD_PX,
-      });
-
-      const withinGrace = Date.now() - this.lastVisibilityReturnAt < CHAT_RECOVERY_GRACE_MS;
-      const stalled = !health.recentlyActive && !withinGrace;
-      const needsRecovery = !health.observerAlive || stalled || !health.atLiveEdge;
+      const health = this.getChatHealthSnapshot(chatSource);
+      const { stalled, withinGrace, needsRecovery } = this.getWatchdogHealthState(health);
 
       if (!needsRecovery) {
         return;
@@ -306,7 +281,7 @@ export class RuntimeSession {
     }, CHAT_WATCHDOG_INTERVAL_MS);
   }
 
-  private async recover(reason: string, forceResync = false): Promise<void> {
+  private async recover(reason: RecoveryReason, forceResync = false): Promise<void> {
     if (this.disposed) {
       return;
     }
@@ -329,7 +304,7 @@ export class RuntimeSession {
     await recoveryPromise;
   }
 
-  private async runRecovery(reason: string, forceResync: boolean): Promise<void> {
+  private async runRecovery(reason: RecoveryReason, forceResync: boolean): Promise<void> {
     if (this.disposed || this.videoSync?.isPaused()) {
       return;
     }
@@ -343,11 +318,7 @@ export class RuntimeSession {
     try {
       chatSource.ensureLiveEdge(CHAT_LIVE_EDGE_THRESHOLD_PX);
 
-      const health = chatSource.getHealthSnapshot({
-        activeTimeoutMs: CHAT_STALL_TIMEOUT_MS,
-        liveEdgeThresholdPx: CHAT_LIVE_EDGE_THRESHOLD_PX,
-      });
-
+      const health = this.getChatHealthSnapshot(chatSource);
       const needsReconnect = !health.observerAlive || !health.recentlyActive || !health.atLiveEdge;
       let shouldResync = forceResync;
 

@@ -79,7 +79,7 @@ export class Overlay {
       signal,
     });
     if (player) {
-      overlayLog.info('[YT Chat Overlay] Player dimensions:', {
+      overlayLog.debug('[YT Chat Overlay] Player dimensions:', {
         width: player.offsetWidth,
         height: player.offsetHeight,
       });
@@ -241,6 +241,6 @@ export class Overlay {
     this.settings = null;
     this.dimensionChangeCallbacks.clear();
 
-    overlayLog.info('[Overlay] Destroyed');
+    overlayLog.debug('[Overlay] Destroyed');
   }
 }

@@ -167,12 +167,15 @@ export class ChatSource {
   private findChatIframe(): HTMLIFrameElement | null {
     const match = findChatIframeMatch();
     if (!match) {
-      overlayLog.info('[YT Chat Overlay] Chat iframe: not found');
+      overlayLog.debug('[YT Chat Overlay] Chat iframe: not found');
       return null;
     }
 
-    overlayLog.info('[YT Chat Overlay] Chat iframe found:', describeChatSelector(match.descriptor));
-    overlayLog.info('[YT Chat Overlay] iframe src:', match.element.src);
+    overlayLog.debug(
+      '[YT Chat Overlay] Chat iframe found:',
+      describeChatSelector(match.descriptor)
+    );
+    overlayLog.debug('[YT Chat Overlay] iframe src:', match.element.src);
     return match.element;
   }
 
@@ -187,7 +190,7 @@ export class ChatSource {
       return null;
     }
 
-    overlayLog.info(
+    overlayLog.debug(
       '[YT Chat Overlay] Found toggle button:',
       describeChatSelector(match.descriptor)
     );
@@ -201,7 +204,7 @@ export class ChatSource {
     }
 
     button.click();
-    overlayLog.info('[YT Chat Overlay] Clicked chat toggle button');
+    overlayLog.debug('[YT Chat Overlay] Clicked chat toggle button');
     return true;
   }
 
@@ -211,8 +214,8 @@ export class ChatSource {
    * Priority B: in-page render
    */
   async findChatContainer(signal?: AbortSignal): Promise<ChatContainerLookupResult> {
-    overlayLog.info('[YT Chat Overlay] Looking for chat container...');
-    overlayLog.info('[YT Chat Overlay] Current URL:', window.location.href);
+    overlayLog.debug('[YT Chat Overlay] Looking for chat container...');
+    overlayLog.debug('[YT Chat Overlay] Current URL:', window.location.href);
 
     // Debug: Log what chat-related elements exist (debug level only)
     if (this.getSettings?.().logLevel === 'debug') {
@@ -227,7 +230,7 @@ export class ChatSource {
         // Wait for iframe content to fully load
         const iframeResult = await this.waitForIframeContent(iframe, 20, 300, signal);
         if (iframeResult.status === 'ready') {
-          overlayLog.info('[YT Chat Overlay] Chat container found in iframe');
+          overlayLog.debug('[YT Chat Overlay] Chat container found in iframe');
           return iframeResult;
         }
 
@@ -238,17 +241,17 @@ export class ChatSource {
           return iframeResult;
         }
 
-        overlayLog.info('[YT Chat Overlay] iframe content timeout - no #items found');
+        overlayLog.debug('[YT Chat Overlay] iframe content timeout - no #items found');
       } catch (error) {
         // Cross-origin access denied, fall through to in-page
-        overlayLog.info('[YT Chat Overlay] iframe access denied:', error);
+        overlayLog.debug('[YT Chat Overlay] iframe access denied:', error);
       }
     }
 
     // Try in-page chat (ordered by specificity - most specific first!)
     const inPageMatch = findInPageChatContainerMatch();
     if (inPageMatch) {
-      overlayLog.info(
+      overlayLog.debug(
         '[YT Chat Overlay] Chat container found:',
         describeChatSelector(inPageMatch.descriptor)
       );
@@ -288,7 +291,7 @@ export class ChatSource {
 
       const result = await this.findChatContainer(signal);
       if (result.status === 'ready') {
-        overlayLog.info(`[YT Chat Overlay] Chat container found on attempt ${attempt}`);
+        overlayLog.debug(`[YT Chat Overlay] Chat container found on attempt ${attempt}`);
         return result;
       }
 
@@ -529,7 +532,7 @@ export class ChatSource {
    * Try to open chat panel when the frame isn't in the DOM yet
    */
   private tryOpenChatPanelWithoutFrame(): boolean {
-    overlayLog.info('[YT Chat Overlay] Chat frame missing, attempting to open chat panel...');
+    overlayLog.debug('[YT Chat Overlay] Chat frame missing, attempting to open chat panel...');
 
     try {
       if (this.clickChatToggleButton()) {
@@ -550,17 +553,17 @@ export class ChatSource {
     chatFrame: HTMLElement,
     signal?: AbortSignal
   ): Promise<boolean> {
-    overlayLog.info('[YT Chat Overlay] Checking if chat panel needs to be opened...');
+    overlayLog.debug('[YT Chat Overlay] Checking if chat panel needs to be opened...');
 
     // Check if chat is collapsed (hidden)
     const isHidden = this.isChatFrameHidden(chatFrame);
 
     if (!isHidden) {
-      overlayLog.info('[YT Chat Overlay] Chat panel is already open');
+      overlayLog.debug('[YT Chat Overlay] Chat panel is already open');
       return true;
     }
 
-    overlayLog.info('[YT Chat Overlay] Chat panel is collapsed, attempting to open...');
+    overlayLog.debug('[YT Chat Overlay] Chat panel is collapsed, attempting to open...');
 
     // Try to find and click the chat toggle button
     try {
@@ -570,7 +573,7 @@ export class ChatSource {
 
         // Verify panel is now open
         if (!this.isChatFrameHidden(chatFrame)) {
-          overlayLog.info('[YT Chat Overlay] Successfully opened chat panel');
+          overlayLog.debug('[YT Chat Overlay] Successfully opened chat panel');
           return true;
         }
       }
@@ -620,7 +623,7 @@ export class ChatSource {
     this.attachObserver(this.chatContainer);
 
     overlayLog.info('[YT Chat Overlay] Chat monitoring started successfully');
-    overlayLog.info('[YT Chat Overlay] Watching for new messages...');
+    overlayLog.debug('[YT Chat Overlay] Watching for new messages...');
     return 'started';
   }
 
@@ -743,7 +746,7 @@ export class ChatSource {
     this.callback = null;
     this.recentMessages.length = 0;
 
-    overlayLog.info('[YT Chat Overlay] Chat monitoring stopped');
+    overlayLog.debug('[YT Chat Overlay] Chat monitoring stopped');
   }
 
   /**

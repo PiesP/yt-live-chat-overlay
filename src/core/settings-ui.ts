@@ -1,6 +1,20 @@
-import { isLogLevel, type OverlaySettings, SETTINGS_LIMITS } from '@app-types';
+import { isLogLevel, type OverlaySettings } from '@app-types';
 import { ensurePlayerPositioning, findPlayerContainerElement } from '@core/dom';
 import { overlayLog } from '@core/logging';
+import {
+  AUTHOR_COLOR_KEYS,
+  cloneSettings,
+  formatNumericSettingForInput,
+  getNumericInputAttributes,
+  normalizeNumericInputValue,
+  OUTLINE_SETTING_DEFINITIONS,
+  OUTLINE_SETTING_KEYS,
+  type OutlineSettingKey,
+  ROOT_SETTING_DEFINITIONS,
+  ROOT_SETTING_KEYS,
+  type RootScalarSettingKey,
+  SHOW_AUTHOR_KEYS,
+} from '@core/settings-schema';
 import { borderRadius, colors, shadows, spacing, typography, zIndex } from './design-tokens.js';
 
 const STYLE_ID = 'yt-chat-overlay-settings-style';
@@ -23,37 +37,6 @@ interface TrustedTypesFactoryLike {
   ) => TrustedTypesPolicyLike;
 }
 
-const AUTHOR_COLOR_KEYS = ['normal', 'member', 'moderator', 'owner', 'verified'] as const;
-const SHOW_AUTHOR_KEYS = [
-  'normal',
-  'member',
-  'moderator',
-  'owner',
-  'verified',
-  'superChat',
-] as const;
-
-const toPercent = (value: number): number => Math.round(value * 100);
-const clamp = (value: number, min: number, max: number): number =>
-  Math.min(max, Math.max(min, value));
-const UI_LIMITS = {
-  superChatOpacity: {
-    min: toPercent(SETTINGS_LIMITS.superChatOpacity.min),
-    max: toPercent(SETTINGS_LIMITS.superChatOpacity.max),
-    step: toPercent(SETTINGS_LIMITS.superChatOpacity.step),
-  },
-  safeTop: {
-    min: toPercent(SETTINGS_LIMITS.safeTop.min),
-    max: toPercent(SETTINGS_LIMITS.safeTop.max),
-    step: toPercent(SETTINGS_LIMITS.safeTop.step),
-  },
-  safeBottom: {
-    min: toPercent(SETTINGS_LIMITS.safeBottom.min),
-    max: toPercent(SETTINGS_LIMITS.safeBottom.max),
-    step: toPercent(SETTINGS_LIMITS.safeBottom.step),
-  },
-} as const;
-
 let trustedTypesPolicy: TrustedTypesPolicyLike | null | undefined;
 
 const getTrustedTypesFactory = (): TrustedTypesFactoryLike | null =>
@@ -72,6 +55,15 @@ const createSettingsUiHtml = (html: string): string => {
   }
 
   return trustedTypesPolicy ? trustedTypesPolicy.createHTML(html) : html;
+};
+
+const createNumberInputAttributes = (
+  definition:
+    | (typeof ROOT_SETTING_DEFINITIONS)[RootScalarSettingKey]
+    | (typeof OUTLINE_SETTING_DEFINITIONS)[OutlineSettingKey]
+): string => {
+  const { min, max, step } = getNumericInputAttributes(definition);
+  return `min="${min}" max="${max}" step="${step}"`;
 };
 
 export class SettingsUi {
@@ -513,9 +505,7 @@ export class SettingsUi {
           <input
             type="number"
             name="fontSize"
-            min="${SETTINGS_LIMITS.fontSize.min}"
-            max="${SETTINGS_LIMITS.fontSize.max}"
-            step="${SETTINGS_LIMITS.fontSize.step}"
+            ${createNumberInputAttributes(ROOT_SETTING_DEFINITIONS.fontSize)}
           />
         </label>
         <label class="yt-chat-overlay-settings-field">
@@ -523,9 +513,7 @@ export class SettingsUi {
           <input
             type="number"
             name="opacity"
-            min="${SETTINGS_LIMITS.opacity.min}"
-            max="${SETTINGS_LIMITS.opacity.max}"
-            step="${SETTINGS_LIMITS.opacity.step}"
+            ${createNumberInputAttributes(ROOT_SETTING_DEFINITIONS.opacity)}
           />
         </label>
         <label class="yt-chat-overlay-settings-field">
@@ -533,9 +521,7 @@ export class SettingsUi {
           <input
             type="number"
             name="speedPxPerSec"
-            min="${SETTINGS_LIMITS.speedPxPerSec.min}"
-            max="${SETTINGS_LIMITS.speedPxPerSec.max}"
-            step="${SETTINGS_LIMITS.speedPxPerSec.step}"
+            ${createNumberInputAttributes(ROOT_SETTING_DEFINITIONS.speedPxPerSec)}
           />
         </label>
         <label class="yt-chat-overlay-settings-field">
@@ -543,9 +529,7 @@ export class SettingsUi {
           <input
             type="number"
             name="safeTop"
-            min="${UI_LIMITS.safeTop.min}"
-            max="${UI_LIMITS.safeTop.max}"
-            step="${UI_LIMITS.safeTop.step}"
+            ${createNumberInputAttributes(ROOT_SETTING_DEFINITIONS.safeTop)}
             title="Keep top N% of video free of comments"
           />
         </label>
@@ -554,9 +538,7 @@ export class SettingsUi {
           <input
             type="number"
             name="safeBottom"
-            min="${UI_LIMITS.safeBottom.min}"
-            max="${UI_LIMITS.safeBottom.max}"
-            step="${UI_LIMITS.safeBottom.step}"
+            ${createNumberInputAttributes(ROOT_SETTING_DEFINITIONS.safeBottom)}
             title="Keep bottom N% of video free of comments"
           />
         </label>
@@ -569,9 +551,7 @@ export class SettingsUi {
           <input
             type="number"
             name="superChatOpacity"
-            min="${UI_LIMITS.superChatOpacity.min}"
-            max="${UI_LIMITS.superChatOpacity.max}"
-            step="${UI_LIMITS.superChatOpacity.step}"
+            ${createNumberInputAttributes(ROOT_SETTING_DEFINITIONS.superChatOpacity)}
             title="Background opacity of Super Chat cards"
           />
         </label>
@@ -580,9 +560,7 @@ export class SettingsUi {
           <input
             type="number"
             name="laneSpacing"
-            min="${SETTINGS_LIMITS.laneSpacing.min}"
-            max="${SETTINGS_LIMITS.laneSpacing.max}"
-            step="${SETTINGS_LIMITS.laneSpacing.step}"
+            ${createNumberInputAttributes(ROOT_SETTING_DEFINITIONS.laneSpacing)}
             title="Extra vertical gap between comment rows"
           />
         </label>
@@ -597,9 +575,7 @@ export class SettingsUi {
             <input
               type="number"
               name="outline-widthPx"
-              min="${SETTINGS_LIMITS.outlineWidthPx.min}"
-              max="${SETTINGS_LIMITS.outlineWidthPx.max}"
-              step="${SETTINGS_LIMITS.outlineWidthPx.step}"
+              ${createNumberInputAttributes(OUTLINE_SETTING_DEFINITIONS.widthPx)}
             />
           </label>
           <label class="yt-chat-overlay-settings-field">
@@ -607,9 +583,7 @@ export class SettingsUi {
             <input
               type="number"
               name="outline-blurPx"
-              min="${SETTINGS_LIMITS.outlineBlurPx.min}"
-              max="${SETTINGS_LIMITS.outlineBlurPx.max}"
-              step="${SETTINGS_LIMITS.outlineBlurPx.step}"
+              ${createNumberInputAttributes(OUTLINE_SETTING_DEFINITIONS.blurPx)}
             />
           </label>
           <label class="yt-chat-overlay-settings-field">
@@ -617,9 +591,7 @@ export class SettingsUi {
             <input
               type="number"
               name="outline-opacity"
-              min="${SETTINGS_LIMITS.outlineOpacity.min}"
-              max="${SETTINGS_LIMITS.outlineOpacity.max}"
-              step="${SETTINGS_LIMITS.outlineOpacity.step}"
+              ${createNumberInputAttributes(OUTLINE_SETTING_DEFINITIONS.opacity)}
             />
           </label>
         </div>
@@ -691,9 +663,7 @@ export class SettingsUi {
             <input
               type="number"
               name="maxMessagesPerSecond"
-              min="${SETTINGS_LIMITS.maxMessagesPerSecond.min}"
-              max="${SETTINGS_LIMITS.maxMessagesPerSecond.max}"
-              step="${SETTINGS_LIMITS.maxMessagesPerSecond.step}"
+              ${createNumberInputAttributes(ROOT_SETTING_DEFINITIONS.maxMessagesPerSecond)}
               title="Maximum new comments displayed per second"
             />
           </label>
@@ -710,9 +680,7 @@ export class SettingsUi {
             <input
               type="number"
               name="minTextLength"
-              min="${SETTINGS_LIMITS.minTextLength.min}"
-              max="${SETTINGS_LIMITS.minTextLength.max}"
-              step="${SETTINGS_LIMITS.minTextLength.step}"
+              ${createNumberInputAttributes(ROOT_SETTING_DEFINITIONS.minTextLength)}
               title="Minimum character count (ignored when Show Short is on)"
             />
           </label>
@@ -724,9 +692,7 @@ export class SettingsUi {
             <input
               type="number"
               name="maxConcurrentMessages"
-              min="${SETTINGS_LIMITS.maxConcurrentMessages.min}"
-              max="${SETTINGS_LIMITS.maxConcurrentMessages.max}"
-              step="${SETTINGS_LIMITS.maxConcurrentMessages.step}"
+              ${createNumberInputAttributes(ROOT_SETTING_DEFINITIONS.maxConcurrentMessages)}
               title="Performance warning threshold for simultaneous comments"
             />
           </label>
@@ -791,26 +757,52 @@ export class SettingsUi {
     }
   }
 
-  private populateForm(settings: Readonly<OverlaySettings>): void {
-    this.setCheckbox('enabled', settings.enabled);
-    this.setValue('speedPxPerSec', settings.speedPxPerSec);
-    this.setValue('fontSize', settings.fontSize);
-    this.setValue('opacity', settings.opacity);
-    this.setValue('superChatOpacity', (settings.superChatOpacity * 100).toFixed(0));
-    this.setValue('safeTop', (settings.safeTop * 100).toFixed(1));
-    this.setValue('safeBottom', (settings.safeBottom * 100).toFixed(1));
-    this.setValue('maxConcurrentMessages', settings.maxConcurrentMessages);
-    this.setValue('maxMessagesPerSecond', settings.maxMessagesPerSecond);
-    this.setCheckbox('allowShortTextMessages', settings.allowShortTextMessages);
-    this.setValue('minTextLength', settings.minTextLength);
-    this.setSelect('logLevel', settings.logLevel);
-    this.setAuthorSettings(settings);
+  private populateRootSetting(
+    key: RootScalarSettingKey,
+    settings: Readonly<OverlaySettings>
+  ): void {
+    const definition = ROOT_SETTING_DEFINITIONS[key];
+    const value = settings[key];
 
-    this.setCheckbox('outline-enabled', settings.outline.enabled);
-    this.setValue('outline-widthPx', settings.outline.widthPx);
-    this.setValue('outline-blurPx', settings.outline.blurPx);
-    this.setValue('outline-opacity', settings.outline.opacity);
-    this.setValue('laneSpacing', settings.laneSpacing);
+    switch (definition.kind) {
+      case 'boolean':
+        this.setCheckbox(definition.formName, value as boolean);
+        return;
+      case 'log-level':
+        this.setSelect(definition.formName, value as string);
+        return;
+      default:
+        this.setValue(
+          definition.formName,
+          formatNumericSettingForInput(definition, value as number)
+        );
+    }
+  }
+
+  private populateOutlineSetting<K extends OutlineSettingKey>(
+    key: K,
+    outline: Readonly<OverlaySettings['outline']>
+  ): void {
+    const definition = OUTLINE_SETTING_DEFINITIONS[key];
+    const value = outline[key];
+
+    if (definition.kind === 'boolean') {
+      this.setCheckbox(definition.formName, value as boolean);
+      return;
+    }
+
+    this.setValue(definition.formName, formatNumericSettingForInput(definition, value as number));
+  }
+
+  private populateForm(settings: Readonly<OverlaySettings>): void {
+    for (const key of ROOT_SETTING_KEYS) {
+      this.populateRootSetting(key, settings);
+    }
+
+    this.setAuthorSettings(settings);
+    for (const key of OUTLINE_SETTING_KEYS) {
+      this.populateOutlineSetting(key, settings.outline);
+    }
 
     this.syncMinTextLengthState();
   }
@@ -831,28 +823,17 @@ export class SettingsUi {
     return Number.isFinite(parsed) ? parsed : fallback;
   }
 
-  private readClampedNumber(
-    name: string,
-    fallback: number,
-    limits: { min: number; max: number }
+  private readNumericSetting(
+    definition:
+      | (typeof ROOT_SETTING_DEFINITIONS)[RootScalarSettingKey]
+      | (typeof OUTLINE_SETTING_DEFINITIONS)[OutlineSettingKey],
+    fallback: number
   ): number {
-    return clamp(this.readNumber(name, fallback), limits.min, limits.max);
-  }
-
-  private readRoundedClampedNumber(
-    name: string,
-    fallback: number,
-    limits: { min: number; max: number }
-  ): number {
-    return Math.round(this.readClampedNumber(name, fallback, limits));
-  }
-
-  private readPercentSetting(
-    name: string,
-    fallbackFraction: number,
-    limits: { min: number; max: number }
-  ): number {
-    return this.readClampedNumber(name, fallbackFraction * 100, limits) / 100;
+    return normalizeNumericInputValue(
+      definition,
+      this.readNumber(definition.formName, fallback),
+      fallback
+    );
   }
 
   private collectAuthorColors(current: Readonly<OverlaySettings>): OverlaySettings['colors'] {
@@ -879,77 +860,62 @@ export class SettingsUi {
     return nextShowAuthor;
   }
 
-  private collectSettings(): Partial<OverlaySettings> {
-    const current = this.getSettings();
+  private readRootSetting(
+    key: RootScalarSettingKey,
+    current: Readonly<OverlaySettings>
+  ): OverlaySettings[RootScalarSettingKey] {
+    const definition = ROOT_SETTING_DEFINITIONS[key];
+    const fallback = current[key];
 
-    return {
-      enabled: this.getCheckbox('enabled', current.enabled),
-      speedPxPerSec: this.readClampedNumber('speedPxPerSec', current.speedPxPerSec, {
-        min: SETTINGS_LIMITS.speedPxPerSec.min,
-        max: SETTINGS_LIMITS.speedPxPerSec.max,
-      }),
-      fontSize: this.readClampedNumber('fontSize', current.fontSize, {
-        min: SETTINGS_LIMITS.fontSize.min,
-        max: SETTINGS_LIMITS.fontSize.max,
-      }),
-      opacity: this.readClampedNumber('opacity', current.opacity, {
-        min: SETTINGS_LIMITS.opacity.min,
-        max: SETTINGS_LIMITS.opacity.max,
-      }),
-      superChatOpacity: this.readPercentSetting(
-        'superChatOpacity',
-        current.superChatOpacity,
-        UI_LIMITS.superChatOpacity
-      ),
-      safeTop: this.readPercentSetting('safeTop', current.safeTop, UI_LIMITS.safeTop),
-      safeBottom: this.readPercentSetting('safeBottom', current.safeBottom, UI_LIMITS.safeBottom),
-      maxConcurrentMessages: this.readRoundedClampedNumber(
-        'maxConcurrentMessages',
-        current.maxConcurrentMessages,
-        {
-          min: SETTINGS_LIMITS.maxConcurrentMessages.min,
-          max: SETTINGS_LIMITS.maxConcurrentMessages.max,
-        }
-      ),
-      maxMessagesPerSecond: this.readRoundedClampedNumber(
-        'maxMessagesPerSecond',
-        current.maxMessagesPerSecond,
-        {
-          min: SETTINGS_LIMITS.maxMessagesPerSecond.min,
-          max: SETTINGS_LIMITS.maxMessagesPerSecond.max,
-        }
-      ),
-      allowShortTextMessages: this.getCheckbox(
-        'allowShortTextMessages',
-        current.allowShortTextMessages
-      ),
-      minTextLength: this.readRoundedClampedNumber('minTextLength', current.minTextLength, {
-        min: SETTINGS_LIMITS.minTextLength.min,
-        max: SETTINGS_LIMITS.minTextLength.max,
-      }),
-      logLevel: this.getLogLevel('logLevel', current.logLevel),
-      showAuthor: this.collectShowAuthorSettings(current),
-      colors: this.collectAuthorColors(current),
-      outline: {
-        enabled: this.getCheckbox('outline-enabled', current.outline.enabled),
-        widthPx: this.readClampedNumber('outline-widthPx', current.outline.widthPx, {
-          min: SETTINGS_LIMITS.outlineWidthPx.min,
-          max: SETTINGS_LIMITS.outlineWidthPx.max,
-        }),
-        blurPx: this.readClampedNumber('outline-blurPx', current.outline.blurPx, {
-          min: SETTINGS_LIMITS.outlineBlurPx.min,
-          max: SETTINGS_LIMITS.outlineBlurPx.max,
-        }),
-        opacity: this.readClampedNumber('outline-opacity', current.outline.opacity, {
-          min: SETTINGS_LIMITS.outlineOpacity.min,
-          max: SETTINGS_LIMITS.outlineOpacity.max,
-        }),
-      },
-      laneSpacing: this.readRoundedClampedNumber('laneSpacing', current.laneSpacing, {
-        min: SETTINGS_LIMITS.laneSpacing.min,
-        max: SETTINGS_LIMITS.laneSpacing.max,
-      }),
-    };
+    switch (definition.kind) {
+      case 'boolean':
+        return this.getCheckbox(definition.formName, fallback as boolean);
+      case 'log-level':
+        return this.getLogLevel(definition.formName, fallback as OverlaySettings['logLevel']);
+      default:
+        return this.readNumericSetting(definition, fallback as number);
+    }
+  }
+
+  private readOutlineSetting<K extends OutlineSettingKey>(
+    key: K,
+    current: Readonly<OverlaySettings['outline']>
+  ): OverlaySettings['outline'][K] {
+    const definition = OUTLINE_SETTING_DEFINITIONS[key];
+    const fallback = current[key];
+
+    return (
+      definition.kind === 'boolean'
+        ? this.getCheckbox(definition.formName, fallback as boolean)
+        : this.readNumericSetting(definition, fallback as number)
+    ) as OverlaySettings['outline'][K];
+  }
+
+  private collectOutlineSettings(
+    current: Readonly<OverlaySettings['outline']>
+  ): OverlaySettings['outline'] {
+    const nextOutline: OverlaySettings['outline'] = { ...current };
+
+    for (const key of OUTLINE_SETTING_KEYS) {
+      nextOutline[key] = this.readOutlineSetting(key, current) as never;
+    }
+
+    return nextOutline;
+  }
+
+  private collectSettings(): OverlaySettings {
+    const current = this.getSettings();
+    const nextSettings = cloneSettings(current);
+
+    for (const key of ROOT_SETTING_KEYS) {
+      nextSettings[key] = this.readRootSetting(key, current) as never;
+    }
+
+    nextSettings.showAuthor = this.collectShowAuthorSettings(current);
+    nextSettings.colors = this.collectAuthorColors(current);
+    nextSettings.outline = this.collectOutlineSettings(current.outline);
+
+    return nextSettings;
   }
 
   private getFocusableElements(): HTMLElement[] {

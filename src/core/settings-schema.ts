@@ -1,0 +1,329 @@
+import {
+  type AuthorType,
+  DEFAULT_SETTINGS,
+  isLogLevel,
+  type OutlineSettings,
+  type OverlaySettings,
+  SETTINGS_LIMITS,
+} from '@app-types';
+
+type SettingDefinitionKind = 'boolean' | 'number' | 'rounded-number' | 'log-level';
+type RootScalarSettingKey = Exclude<keyof OverlaySettings, 'showAuthor' | 'colors' | 'outline'>;
+type OutlineSettingKey = keyof OutlineSettings;
+type SettingLimitsKey = keyof typeof SETTINGS_LIMITS;
+
+interface SettingDefinition {
+  readonly formName: string;
+  readonly kind: SettingDefinitionKind;
+  readonly limitsKey?: SettingLimitsKey;
+  readonly uiScale?: number;
+  readonly uiPrecision?: number;
+  readonly resetRenderer: boolean;
+}
+
+export type { OutlineSettingKey, RootScalarSettingKey };
+
+export const AUTHOR_COLOR_KEYS = [
+  'normal',
+  'member',
+  'moderator',
+  'owner',
+  'verified',
+] as const satisfies readonly AuthorType[];
+
+export const SHOW_AUTHOR_KEYS = [
+  ...AUTHOR_COLOR_KEYS,
+  'superChat',
+] as const satisfies ReadonlyArray<keyof OverlaySettings['showAuthor']>;
+
+export const ROOT_SETTING_DEFINITIONS = {
+  enabled: {
+    formName: 'enabled',
+    kind: 'boolean',
+    resetRenderer: true,
+  },
+  speedPxPerSec: {
+    formName: 'speedPxPerSec',
+    kind: 'number',
+    limitsKey: 'speedPxPerSec',
+    resetRenderer: true,
+  },
+  fontSize: {
+    formName: 'fontSize',
+    kind: 'number',
+    limitsKey: 'fontSize',
+    resetRenderer: true,
+  },
+  opacity: {
+    formName: 'opacity',
+    kind: 'number',
+    limitsKey: 'opacity',
+    resetRenderer: true,
+  },
+  superChatOpacity: {
+    formName: 'superChatOpacity',
+    kind: 'number',
+    limitsKey: 'superChatOpacity',
+    uiScale: 100,
+    uiPrecision: 0,
+    resetRenderer: true,
+  },
+  safeTop: {
+    formName: 'safeTop',
+    kind: 'number',
+    limitsKey: 'safeTop',
+    uiScale: 100,
+    uiPrecision: 1,
+    resetRenderer: true,
+  },
+  safeBottom: {
+    formName: 'safeBottom',
+    kind: 'number',
+    limitsKey: 'safeBottom',
+    uiScale: 100,
+    uiPrecision: 1,
+    resetRenderer: true,
+  },
+  maxConcurrentMessages: {
+    formName: 'maxConcurrentMessages',
+    kind: 'rounded-number',
+    limitsKey: 'maxConcurrentMessages',
+    resetRenderer: true,
+  },
+  maxMessagesPerSecond: {
+    formName: 'maxMessagesPerSecond',
+    kind: 'rounded-number',
+    limitsKey: 'maxMessagesPerSecond',
+    resetRenderer: true,
+  },
+  allowShortTextMessages: {
+    formName: 'allowShortTextMessages',
+    kind: 'boolean',
+    resetRenderer: true,
+  },
+  minTextLength: {
+    formName: 'minTextLength',
+    kind: 'rounded-number',
+    limitsKey: 'minTextLength',
+    resetRenderer: true,
+  },
+  logLevel: {
+    formName: 'logLevel',
+    kind: 'log-level',
+    resetRenderer: false,
+  },
+  laneSpacing: {
+    formName: 'laneSpacing',
+    kind: 'rounded-number',
+    limitsKey: 'laneSpacing',
+    resetRenderer: true,
+  },
+} as const satisfies Record<RootScalarSettingKey, SettingDefinition>;
+
+export const OUTLINE_SETTING_DEFINITIONS = {
+  enabled: {
+    formName: 'outline-enabled',
+    kind: 'boolean',
+    resetRenderer: true,
+  },
+  widthPx: {
+    formName: 'outline-widthPx',
+    kind: 'number',
+    limitsKey: 'outlineWidthPx',
+    resetRenderer: true,
+  },
+  blurPx: {
+    formName: 'outline-blurPx',
+    kind: 'number',
+    limitsKey: 'outlineBlurPx',
+    resetRenderer: true,
+  },
+  opacity: {
+    formName: 'outline-opacity',
+    kind: 'number',
+    limitsKey: 'outlineOpacity',
+    resetRenderer: true,
+  },
+} as const satisfies Record<OutlineSettingKey, SettingDefinition>;
+
+export const ROOT_SETTING_KEYS = Object.keys(
+  ROOT_SETTING_DEFINITIONS
+) as ReadonlyArray<RootScalarSettingKey>;
+export const OUTLINE_SETTING_KEYS = Object.keys(
+  OUTLINE_SETTING_DEFINITIONS
+) as ReadonlyArray<OutlineSettingKey>;
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const isColorValue = (value: unknown): value is string =>
+  typeof value === 'string' && /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(value);
+
+const clampNumber = (
+  value: unknown,
+  fallback: number,
+  limits: { min: number; max: number }
+): number => {
+  const numericValue = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return fallback;
+  }
+
+  return Math.min(limits.max, Math.max(limits.min, numericValue));
+};
+
+const normalizeBoolean = (value: unknown, fallback: boolean): boolean =>
+  typeof value === 'boolean' ? value : fallback;
+
+const normalizeSettingValue = <T>(
+  definition: SettingDefinition,
+  value: unknown,
+  fallback: T
+): T => {
+  if (definition.kind === 'boolean') {
+    return normalizeBoolean(value, fallback as boolean) as T;
+  }
+
+  if (definition.kind === 'log-level') {
+    return (isLogLevel(value) ? value : fallback) as T;
+  }
+
+  if (typeof fallback !== 'number' || !definition.limitsKey) {
+    return fallback;
+  }
+
+  const clamped = clampNumber(value, fallback, SETTINGS_LIMITS[definition.limitsKey]);
+  return (definition.kind === 'rounded-number' ? Math.round(clamped) : clamped) as T;
+};
+
+const assignRootSetting = (
+  target: OverlaySettings,
+  source: Readonly<OverlaySettings>,
+  key: RootScalarSettingKey
+): void => {
+  const definition = ROOT_SETTING_DEFINITIONS[key];
+  target[key] = normalizeSettingValue(definition, source[key], DEFAULT_SETTINGS[key]) as never;
+};
+
+const assignOutlineSetting = (
+  target: OutlineSettings,
+  source: Readonly<OutlineSettings>,
+  key: OutlineSettingKey
+): void => {
+  const definition = OUTLINE_SETTING_DEFINITIONS[key];
+  target[key] = normalizeSettingValue(
+    definition,
+    source[key],
+    DEFAULT_SETTINGS.outline[key]
+  ) as never;
+};
+
+const hasAnyChanged = <T extends object>(
+  previous: Readonly<T>,
+  next: Readonly<T>,
+  keys: readonly (keyof T)[]
+): boolean => keys.some((key) => previous[key] !== next[key]);
+
+const scaleUiValue = (value: number, scale: number): number => Number((value * scale).toFixed(4));
+
+const mergeNestedSettings = <T extends object>(
+  base: Readonly<T>,
+  partial: Partial<T> | undefined
+): T => (isRecord(partial) ? { ...base, ...partial } : { ...base });
+
+export const cloneSettings = (settings: Readonly<OverlaySettings>): OverlaySettings => ({
+  ...settings,
+  showAuthor: { ...settings.showAuthor },
+  colors: { ...settings.colors },
+  outline: { ...settings.outline },
+});
+
+export const mergeSettings = (
+  base: Readonly<OverlaySettings>,
+  partial: Partial<OverlaySettings>
+): OverlaySettings => ({
+  ...base,
+  ...partial,
+  showAuthor: mergeNestedSettings(base.showAuthor, partial.showAuthor),
+  colors: mergeNestedSettings(base.colors, partial.colors),
+  outline: mergeNestedSettings(base.outline, partial.outline),
+});
+
+export const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings => {
+  const normalized = cloneSettings(DEFAULT_SETTINGS);
+
+  for (const key of ROOT_SETTING_KEYS) {
+    assignRootSetting(normalized, settings, key);
+  }
+
+  for (const key of SHOW_AUTHOR_KEYS) {
+    normalized.showAuthor[key] = normalizeBoolean(
+      settings.showAuthor[key],
+      DEFAULT_SETTINGS.showAuthor[key]
+    );
+  }
+
+  for (const key of AUTHOR_COLOR_KEYS) {
+    normalized.colors[key] = isColorValue(settings.colors[key])
+      ? settings.colors[key]
+      : DEFAULT_SETTINGS.colors[key];
+  }
+
+  for (const key of OUTLINE_SETTING_KEYS) {
+    assignOutlineSetting(normalized.outline, settings.outline, key);
+  }
+
+  return normalized;
+};
+
+export const shouldResetRendererForSettingsChange = (
+  previous: Readonly<OverlaySettings>,
+  next: Readonly<OverlaySettings>
+): boolean =>
+  ROOT_SETTING_KEYS.some(
+    (key) => ROOT_SETTING_DEFINITIONS[key].resetRenderer && previous[key] !== next[key]
+  ) ||
+  hasAnyChanged(previous.showAuthor, next.showAuthor, SHOW_AUTHOR_KEYS) ||
+  hasAnyChanged(previous.colors, next.colors, AUTHOR_COLOR_KEYS) ||
+  OUTLINE_SETTING_KEYS.some(
+    (key) =>
+      OUTLINE_SETTING_DEFINITIONS[key].resetRenderer && previous.outline[key] !== next.outline[key]
+  );
+
+export const formatNumericSettingForInput = (
+  definition: SettingDefinition,
+  value: number
+): string | number => {
+  const scale = definition.uiScale ?? 1;
+  const scaledValue = scaleUiValue(value, scale);
+  return definition.uiPrecision === undefined
+    ? scaledValue
+    : scaledValue.toFixed(definition.uiPrecision);
+};
+
+export const normalizeNumericInputValue = (
+  definition: SettingDefinition,
+  value: unknown,
+  fallback: number
+): number => {
+  const scale = definition.uiScale ?? 1;
+  const scaledValue = typeof value === 'number' ? value / scale : Number(value) / scale;
+  return normalizeSettingValue(definition, scaledValue, fallback) as number;
+};
+
+export const getNumericInputAttributes = (
+  definition: SettingDefinition
+): Readonly<{ min: number; max: number; step: number }> => {
+  if (!definition.limitsKey) {
+    throw new TypeError(`Setting "${definition.formName}" does not define numeric limits.`);
+  }
+
+  const limits = SETTINGS_LIMITS[definition.limitsKey];
+  const scale = definition.uiScale ?? 1;
+
+  return {
+    min: scaleUiValue(limits.min, scale),
+    max: scaleUiValue(limits.max, scale),
+    step: scaleUiValue(limits.step, scale),
+  };
+};

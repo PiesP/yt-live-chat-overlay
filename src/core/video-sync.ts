@@ -104,7 +104,7 @@ export class VideoSync {
     }
 
     this.setupVideoElement(videoElement);
-    overlayLog.info('[VideoSync] Initialized with video element');
+    overlayLog.debug('[VideoSync] Initialized with video element');
     return true;
   }
 
@@ -129,7 +129,7 @@ export class VideoSync {
     });
 
     if (match) {
-      overlayLog.info('[VideoSync] Found video element:', match.selector);
+      overlayLog.debug('[VideoSync] Found video element:', match.selector);
       return match.element;
     }
 
@@ -195,11 +195,11 @@ export class VideoSync {
       if (video) {
         this.setupVideoElement(video);
         this.stopPeriodicDetection();
-        overlayLog.info('[VideoSync] Video element detected via periodic check');
+        overlayLog.debug('[VideoSync] Video element detected via periodic check');
       }
     }, CONFIG.PERIODIC_DETECTION_INTERVAL_MS);
 
-    overlayLog.info('[VideoSync] Periodic detection started (every 2 seconds)');
+    overlayLog.debug('[VideoSync] Periodic detection started (every 2 seconds)');
   }
 
   /**
@@ -208,7 +208,7 @@ export class VideoSync {
   private stopPeriodicDetection(): void {
     if (this.detectInterval !== null) {
       this.detectInterval = clearIntervalHandle(this.detectInterval);
-      overlayLog.info('[VideoSync] Periodic detection stopped');
+      overlayLog.debug('[VideoSync] Periodic detection stopped');
     }
   }
 
@@ -221,7 +221,7 @@ export class VideoSync {
     video.addEventListener('seeking', this.boundHandlers.seeking);
     video.addEventListener('ratechange', this.boundHandlers.ratechange);
 
-    overlayLog.info('[VideoSync] Event listeners attached');
+    overlayLog.debug('[VideoSync] Event listeners attached');
   }
 
   /**
@@ -233,7 +233,7 @@ export class VideoSync {
     video.removeEventListener('seeking', this.boundHandlers.seeking);
     video.removeEventListener('ratechange', this.boundHandlers.ratechange);
 
-    overlayLog.info('[VideoSync] Event listeners detached');
+    overlayLog.debug('[VideoSync] Event listeners detached');
   }
 
   /**
@@ -249,7 +249,7 @@ export class VideoSync {
 
     this.mutationObserver = new MutationObserver(() => {
       if (!document.contains(video)) {
-        overlayLog.info('[VideoSync] Video element removed from DOM, reinitializing...');
+        overlayLog.debug('[VideoSync] Video element removed from DOM, reinitializing...');
         this.handleVideoReplacement();
       }
     });
@@ -259,7 +259,7 @@ export class VideoSync {
       subtree: true,
     });
 
-    overlayLog.info('[VideoSync] Video replacement observer attached');
+    overlayLog.debug('[VideoSync] Video replacement observer attached');
   }
 
   /**
@@ -269,7 +269,7 @@ export class VideoSync {
     if (this.mutationObserver) {
       this.mutationObserver.disconnect();
       this.mutationObserver = null;
-      overlayLog.info('[VideoSync] Video replacement observer stopped');
+      overlayLog.debug('[VideoSync] Video replacement observer stopped');
     }
   }
 
@@ -283,7 +283,7 @@ export class VideoSync {
 
     this.reinitializeTimer = window.setTimeout(() => {
       this.reinitializeTimer = null;
-      overlayLog.info('[VideoSync] Attempting to reacquire video element...');
+      overlayLog.debug('[VideoSync] Attempting to reacquire video element...');
       this.init(this.lifecycleSignal ?? undefined).catch((error) => {
         overlayLog.warn('[VideoSync] Failed to reinitialize after video replacement:', error);
       });
@@ -294,23 +294,23 @@ export class VideoSync {
    * Event handlers
    */
   private handlePause(): void {
-    overlayLog.info('[VideoSync] Video paused');
+    overlayLog.debug('[VideoSync] Video paused');
     this.callbacks.onPause?.();
   }
 
   private handlePlay(): void {
-    overlayLog.info('[VideoSync] Video playing');
+    overlayLog.debug('[VideoSync] Video playing');
     this.callbacks.onPlay?.();
   }
 
   private handleSeeking(): void {
-    overlayLog.info('[VideoSync] Video seeking');
+    overlayLog.debug('[VideoSync] Video seeking');
     this.callbacks.onSeeking?.();
   }
 
   private handleRateChange(): void {
     const rate = this.videoElement?.playbackRate ?? 1.0;
-    overlayLog.info('[VideoSync] Playback rate changed:', rate);
+    overlayLog.debug('[VideoSync] Playback rate changed:', rate);
     this.callbacks.onRateChange?.(rate);
   }
 
@@ -333,6 +333,6 @@ export class VideoSync {
     this.stopPeriodicDetection();
     this.clearReinitializationTimer();
     this.resetVideoState();
-    overlayLog.info('[VideoSync] Destroyed');
+    overlayLog.debug('[VideoSync] Destroyed');
   }
 }

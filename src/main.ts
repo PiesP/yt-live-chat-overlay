@@ -47,7 +47,7 @@ class App {
   constructor() {
     setOverlayLogLevel(this.settings.get().logLevel);
     this.pageWatcher.onChange(this.handlePageWatcherChange);
-    overlayLog.info('[App] Initialized');
+    overlayLog.debug('[App] Initialized');
   }
 
   async start(): Promise<void> {
@@ -62,7 +62,7 @@ class App {
     this.runtimeManager.destroy();
     this.pageWatcher.destroy();
     this.settingsUi.destroy();
-    overlayLog.info('[App] Stopped');
+    overlayLog.debug('[App] Stopped');
   }
 
   getSettings(): Readonly<OverlaySettings> {
@@ -82,7 +82,7 @@ class App {
     }
 
     this.runtimeManager.requestReconcile('settings-change');
-    overlayLog.info('[App] Settings updated');
+    overlayLog.debug('[App] Settings updated');
   }
 
   resetSettings(): void {
@@ -99,23 +99,23 @@ class App {
 }
 
 function main(): void {
-  overlayLog.info('[YT Chat Overlay] Script loaded', {
+  overlayLog.debug('[YT Chat Overlay] Script loaded', {
     readyState: document.readyState,
     url: location.href,
   });
 
   if (document.readyState === 'loading') {
-    overlayLog.info('[YT Chat Overlay] Waiting for DOMContentLoaded...');
+    overlayLog.debug('[YT Chat Overlay] Waiting for DOMContentLoaded...');
     document.addEventListener(
       'DOMContentLoaded',
       () => {
-        overlayLog.info('[YT Chat Overlay] DOMContentLoaded fired');
+        overlayLog.debug('[YT Chat Overlay] DOMContentLoaded fired');
         void initApp();
       },
       { once: true }
     );
   } else {
-    overlayLog.info('[YT Chat Overlay] Document already ready, initializing...');
+    overlayLog.debug('[YT Chat Overlay] Document already ready, initializing...');
     void initApp();
   }
 }
@@ -125,13 +125,13 @@ const stopPreviousAppInstance = (): void => {
     return;
   }
 
-  overlayLog.info('[YT Chat Overlay] Stopping previous instance before re-init');
+  overlayLog.debug('[YT Chat Overlay] Stopping previous instance before re-init');
   window.__ytChatOverlay.stop();
   window.__ytChatOverlay = undefined;
 };
 
 async function initApp(): Promise<void> {
-  overlayLog.info('[YT Chat Overlay] Initializing application...');
+  overlayLog.debug('[YT Chat Overlay] Initializing application...');
   let app: App | null = null;
 
   try {
@@ -147,11 +147,11 @@ async function initApp(): Promise<void> {
       try {
         app.stop();
       } catch (cleanupError) {
-        console.error('[YT Chat Overlay] Cleanup after failed init also failed:', cleanupError);
+        overlayLog.error('[YT Chat Overlay] Cleanup after failed init also failed:', cleanupError);
       }
     }
 
-    console.error('[YT Chat Overlay] Fatal error:', error);
+    overlayLog.error('[YT Chat Overlay] Fatal error:', error);
     throw error;
   }
 }
@@ -160,5 +160,5 @@ try {
   initOverlayLogLevel();
   main();
 } catch (error) {
-  console.error('[YT Chat Overlay] Failed to start:', error);
+  overlayLog.error('[YT Chat Overlay] Failed to start:', error);
 }

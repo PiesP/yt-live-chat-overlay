@@ -168,10 +168,10 @@ export const findPlayerContainerElement = async (
   });
 
   if (!match) {
-    console.warn('[YT Chat Overlay] No player container found');
+    overlayLog.warn('[YT Chat Overlay] No player container found');
     return null;
   }
 
-  overlayLog.info('[YT Chat Overlay] Player found with selector:', match.selector);
+  overlayLog.debug('[YT Chat Overlay] Player found with selector:', match.selector);
   return match.element;
 };

@@ -119,6 +119,216 @@ const LAYOUT = {
   QUEUE_MAX_SIZE: 150, // max queued messages; oldest dropped on overflow
 } as const;
 
+const combineTextShadows = (...shadows: string[]): string => {
+  const normalizedShadows = shadows.filter((shadow) => shadow !== '' && shadow !== 'none');
+  return normalizedShadows.length > 0 ? normalizedShadows.join(', ') : 'none';
+};
+
+const RENDERER_STATIC_STYLES = `
+  .yt-chat-overlay-message {
+    position: absolute;
+    white-space: nowrap;
+    font-family: system-ui, -apple-system, sans-serif;
+    font-weight: ${typography.fontWeight.bold};
+    line-height: 1.1;
+    text-shadow: var(--yt-overlay-message-text-shadow, none);
+    -webkit-text-stroke: var(--yt-overlay-text-stroke, 0 transparent);
+    color: ${colors.ui.text};
+    pointer-events: none;
+    will-change: transform;
+    animation-timing-function: linear;
+    animation-fill-mode: forwards;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  .yt-chat-overlay-message-with-author {
+    display: flex;
+    flex-direction: column;
+    gap: ${spacing.xs}px;
+  }
+
+  .yt-chat-overlay-author-info {
+    display: flex;
+    align-items: center;
+    gap: ${spacing.sm}px;
+    font-size: ${LAYOUT.AUTHOR_FONT_SCALE}em;
+    opacity: 0.95;
+  }
+
+  .yt-chat-overlay-author-photo {
+    width: ${LAYOUT.AUTHOR_PHOTO_SIZE}px;
+    height: ${LAYOUT.AUTHOR_PHOTO_SIZE}px;
+    border-radius: ${borderRadius.full};
+    flex-shrink: 0;
+    box-shadow: ${shadows.box.sm};
+    filter: ${shadows.filter.md};
+  }
+
+  .yt-chat-overlay-author-name {
+    font-weight: ${typography.fontWeight.semibold};
+  }
+
+  .yt-chat-overlay-message-content {
+    display: block;
+  }
+
+  .yt-chat-overlay-superchat-card {
+    --yt-sc-rgb: 30, 136, 229;
+    --yt-sc-border-rgb: 18, 92, 156;
+    display: flex;
+    flex-direction: column;
+    min-width: min(420px, 72vw);
+    max-width: min(640px, 86vw);
+    border-radius: ${borderRadius.md};
+    overflow: hidden;
+    border: 1px solid rgba(var(--yt-sc-border-rgb), 0.55);
+    background-color: rgb(30, 136, 229);
+    background: linear-gradient(
+      180deg,
+      rgba(var(--yt-sc-rgb), var(--yt-overlay-superchat-top-opacity, 0.46)) 0%,
+      rgba(var(--yt-sc-rgb), var(--yt-overlay-superchat-base-opacity, 0.4)) 48%,
+      rgba(var(--yt-sc-rgb), var(--yt-overlay-superchat-bottom-opacity, 0.4)) 100%
+    );
+    box-shadow: ${shadows.box.md};
+    backdrop-filter: blur(4px);
+  }
+
+  .yt-chat-overlay-superchat-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: ${spacing.md}px;
+    padding: ${spacing.sm}px ${spacing.md}px;
+    background: rgba(0, 0, 0, 0.12);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+  }
+
+  .yt-chat-overlay-superchat-author {
+    display: flex;
+    align-items: center;
+    gap: ${spacing.sm}px;
+    min-width: 0;
+  }
+
+  .yt-chat-overlay-superchat-author .yt-chat-overlay-author-name {
+    font-size: 0.88em;
+    font-weight: ${typography.fontWeight.bold};
+    text-shadow: ${shadows.text.sm};
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .yt-chat-overlay-superchat-amount {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+    padding: ${spacing.xs}px ${spacing.md}px;
+    border-radius: ${borderRadius.lg};
+    font-weight: ${typography.fontWeight.bold};
+    font-size: 0.85em;
+    letter-spacing: 0.2px;
+    color: ${colors.ui.text};
+    background: rgba(255, 255, 255, 0.16);
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    text-shadow: ${shadows.text.sm};
+  }
+
+  .yt-chat-overlay-superchat-body {
+    display: flex;
+    flex-direction: column;
+    padding: ${spacing.sm}px ${spacing.md}px ${spacing.md}px;
+    gap: ${spacing.sm}px;
+  }
+
+  .yt-chat-overlay-superchat-body .yt-chat-overlay-message-content {
+    line-height: ${typography.lineHeight.normal};
+    text-shadow: ${shadows.text.md};
+    letter-spacing: 0.2px;
+    white-space: normal;
+  }
+
+  .yt-chat-overlay-superchat-body .yt-chat-overlay-superchat-sticker {
+    align-self: flex-start;
+    margin-bottom: ${spacing.xs}px;
+  }
+
+  .yt-chat-overlay-message-with-author:not(.yt-chat-overlay-superchat-card) {
+    background: rgba(0, 0, 0, 0.25);
+    padding: ${spacing.sm}px ${spacing.md}px;
+    border-radius: ${borderRadius.sm};
+    backdrop-filter: blur(2px);
+  }
+
+  .yt-chat-overlay-message-with-author .yt-chat-overlay-author-photo {
+    box-shadow: ${shadows.box.sm};
+    border: 1px solid rgba(255, 255, 255, 0.15);
+  }
+
+  .yt-chat-overlay-message:not(.yt-chat-overlay-superchat-card) {
+    text-shadow: var(--yt-overlay-regular-message-text-shadow, ${shadows.text.md});
+    letter-spacing: 0.3px;
+  }
+
+  .yt-chat-overlay-superchat-sticker {
+    display: inline-block;
+    vertical-align: middle;
+    margin-right: ${spacing.sm}px;
+    filter: ${shadows.filter.md};
+  }
+
+  .yt-chat-overlay-emoji {
+    display: inline-block;
+    vertical-align: text-bottom;
+    margin: 0 2px;
+    pointer-events: none;
+    filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.5));
+  }
+
+  .yt-chat-overlay-emoji-member {
+    filter: drop-shadow(0 0 2px rgba(15, 157, 88, 0.6))
+            drop-shadow(0 0 4px rgba(15, 157, 88, 0.4));
+  }
+
+  .yt-chat-overlay-membership-card {
+    display: flex;
+    flex-direction: column;
+    padding: ${spacing.md}px ${spacing.lg}px;
+    border-radius: ${borderRadius.md};
+    background: ${rgba(colors.superChat.green, 0.25)};
+    border: 2px solid ${rgba(colors.superChat.green, 0.5)};
+    box-shadow: ${shadows.box.md};
+    backdrop-filter: blur(4px);
+  }
+
+  .yt-chat-overlay-membership-author {
+    display: flex;
+    align-items: center;
+    gap: ${spacing.md}px;
+  }
+
+  .yt-chat-overlay-membership-text {
+    display: flex;
+    flex-direction: column;
+    gap: ${spacing.xs}px;
+  }
+
+  .yt-chat-overlay-membership-author-name {
+    font-size: ${typography.fontSize.base};
+    font-weight: ${typography.fontWeight.bold};
+    text-shadow: ${shadows.text.md};
+  }
+
+  .yt-chat-overlay-membership-message {
+    font-size: ${typography.fontSize.sm};
+    font-weight: ${typography.fontWeight.normal};
+    color: ${colors.ui.text};
+    text-shadow: ${shadows.text.sm};
+  }
+`;
+
 export class Renderer {
   private overlay: Overlay;
   private settings: OverlaySettings;
@@ -202,246 +412,45 @@ export class Renderer {
   private injectStyles(): void {
     if (!this.styleElement) {
       this.styleElement = document.createElement('style');
+      this.styleElement.textContent = RENDERER_STATIC_STYLES;
       document.head.appendChild(this.styleElement);
+    }
+
+    this.updateStyleVariables();
+  }
+
+  private updateStyleVariables(): void {
+    const container = this.overlay.getContainer();
+    if (!container) {
+      return;
     }
 
     const textShadow = this.buildTextShadow(this.settings.outline);
     const textStroke = this.buildTextStroke(this.settings.outline);
+    const regularMessageTextShadow = combineTextShadows(
+      textShadow,
+      shadows.text.md,
+      '0 0 8px rgba(0, 0, 0, 0.7)'
+    );
     const superChatBaseOpacity = Math.min(1, Math.max(0.4, this.settings.superChatOpacity));
     const superChatTopOpacity = Math.min(1, superChatBaseOpacity + 0.06);
     const superChatBottomOpacity = Math.max(0.4, superChatBaseOpacity - 0.08);
 
-    this.styleElement.textContent = `
-      .yt-chat-overlay-message {
-        position: absolute;
-        white-space: nowrap;
-        font-family: system-ui, -apple-system, sans-serif;
-        font-weight: ${typography.fontWeight.bold};
-        /* Explicit line-height keeps rendered element height at fontSize × 1.1.
-           This is required for single-line messages to fit in exactly 1 lane
-           slot when BASE_LANE_HEIGHT_MULTIPLIER = 1.2. */
-        line-height: 1.1;
-        text-shadow: ${textShadow};
-        -webkit-text-stroke: ${textStroke};
-        color: ${colors.ui.text};
-        pointer-events: none;
-        will-change: transform;
-        animation-timing-function: linear;
-        animation-fill-mode: forwards;
-        /* Better text rendering */
-        text-rendering: optimizeLegibility;
-        -webkit-font-smoothing: antialiased;
-        -moz-osx-font-smoothing: grayscale;
-      }
-
-      /* Message with author display */
-      .yt-chat-overlay-message-with-author {
-        display: flex;
-        flex-direction: column;
-        gap: ${spacing.xs}px;
-      }
-
-      /* Author info line */
-      .yt-chat-overlay-author-info {
-        display: flex;
-        align-items: center;
-        gap: ${spacing.sm}px;
-        font-size: ${LAYOUT.AUTHOR_FONT_SCALE}em;
-        opacity: 0.95;
-      }
-
-      /* Author photo */
-      .yt-chat-overlay-author-photo {
-        width: ${LAYOUT.AUTHOR_PHOTO_SIZE}px;
-        height: ${LAYOUT.AUTHOR_PHOTO_SIZE}px;
-        border-radius: ${borderRadius.full};
-        flex-shrink: 0;
-        box-shadow: ${shadows.box.sm};
-        filter: ${shadows.filter.md};
-      }
-
-      /* Author name */
-      .yt-chat-overlay-author-name {
-        font-weight: ${typography.fontWeight.semibold};
-      }
-
-      /* Message content line */
-      .yt-chat-overlay-message-content {
-        display: block;
-      }
-
-      /* === Unified Super Chat Card === */
-
-      .yt-chat-overlay-superchat-card {
-        --yt-sc-rgb: 30, 136, 229;
-        --yt-sc-border-rgb: 18, 92, 156;
-        display: flex;
-        flex-direction: column;
-        min-width: min(420px, 72vw);
-        max-width: min(640px, 86vw);
-        border-radius: ${borderRadius.md};
-        overflow: hidden;
-        border: 1px solid rgba(var(--yt-sc-border-rgb), 0.55);
-        background-color: rgb(30, 136, 229);
-        background: linear-gradient(
-          180deg,
-          rgba(var(--yt-sc-rgb), ${superChatTopOpacity}) 0%,
-          rgba(var(--yt-sc-rgb), ${superChatBaseOpacity}) 48%,
-          rgba(var(--yt-sc-rgb), ${superChatBottomOpacity}) 100%
-        );
-        box-shadow: ${shadows.box.md};
-        backdrop-filter: blur(4px);
-      }
-
-      .yt-chat-overlay-superchat-meta {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: ${spacing.md}px;
-        padding: ${spacing.sm}px ${spacing.md}px;
-        background: rgba(0, 0, 0, 0.12);
-        border-bottom: 1px solid rgba(255, 255, 255, 0.14);
-      }
-
-      .yt-chat-overlay-superchat-author {
-        display: flex;
-        align-items: center;
-        gap: ${spacing.sm}px;
-        min-width: 0;
-      }
-
-      .yt-chat-overlay-superchat-author .yt-chat-overlay-author-name {
-        font-size: 0.88em;
-        font-weight: ${typography.fontWeight.bold};
-        text-shadow: ${shadows.text.sm};
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-
-      .yt-chat-overlay-superchat-amount {
-        display: inline-flex;
-        align-items: center;
-        flex-shrink: 0;
-        padding: ${spacing.xs}px ${spacing.md}px;
-        border-radius: ${borderRadius.lg};
-        font-weight: ${typography.fontWeight.bold};
-        font-size: 0.85em;
-        letter-spacing: 0.2px;
-        color: ${colors.ui.text};
-        background: rgba(255, 255, 255, 0.16);
-        border: 1px solid rgba(255, 255, 255, 0.22);
-        text-shadow: ${shadows.text.sm};
-      }
-
-      .yt-chat-overlay-superchat-body {
-        display: flex;
-        flex-direction: column;
-        padding: ${spacing.sm}px ${spacing.md}px ${spacing.md}px;
-        gap: ${spacing.sm}px;
-      }
-
-      .yt-chat-overlay-superchat-body .yt-chat-overlay-message-content {
-        line-height: ${typography.lineHeight.normal};
-        text-shadow: ${shadows.text.md};
-        letter-spacing: 0.2px;
-        white-space: normal;
-      }
-
-      .yt-chat-overlay-superchat-body .yt-chat-overlay-superchat-sticker {
-        align-self: flex-start;
-        margin-bottom: ${spacing.xs}px;
-      }
-
-      /* Enhanced regular message with author */
-      .yt-chat-overlay-message-with-author:not(.yt-chat-overlay-superchat-card) {
-        background: rgba(0, 0, 0, 0.25);
-        padding: ${spacing.sm}px ${spacing.md}px;
-        border-radius: ${borderRadius.sm};
-        backdrop-filter: blur(2px);
-      }
-
-      .yt-chat-overlay-message-with-author .yt-chat-overlay-author-photo {
-        box-shadow: ${shadows.box.sm};
-        border: 1px solid rgba(255, 255, 255, 0.15);
-      }
-
-      /* Improved text shadow for all messages */
-      .yt-chat-overlay-message:not(.yt-chat-overlay-superchat-card) {
-        text-shadow: ${shadows.text.md}, 0 0 8px rgba(0, 0, 0, 0.7);
-        letter-spacing: 0.3px;
-      }
-
-      /* Super Chat sticker */
-      .yt-chat-overlay-superchat-sticker {
-        display: inline-block;
-        vertical-align: middle;
-        margin-right: ${spacing.sm}px;
-        filter: ${shadows.filter.md};
-      }
-
-      /* Legacy styles removed - now using unified card-based system */
-
-      /* Emoji styling */
-      .yt-chat-overlay-emoji {
-        display: inline-block;
-        vertical-align: text-bottom;
-        margin: 0 2px;
-        pointer-events: none;
-        /* Match text outline */
-        filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.5));
-      }
-
-      /* Member-only emoji (special highlight) */
-      .yt-chat-overlay-emoji-member {
-        /* Green glow for member emojis */
-        filter: drop-shadow(0 0 2px rgba(15, 157, 88, 0.6))
-                drop-shadow(0 0 4px rgba(15, 157, 88, 0.4));
-      }
-
-      /* === MEMBERSHIP MESSAGE CARDS === */
-
-      /* Membership card container */
-      .yt-chat-overlay-membership-card {
-        display: flex;
-        flex-direction: column;
-        padding: ${spacing.md}px ${spacing.lg}px;
-        border-radius: ${borderRadius.md};
-        background: ${rgba(colors.superChat.green, 0.25)};
-        border: 2px solid ${rgba(colors.superChat.green, 0.5)};
-        box-shadow: ${shadows.box.md};
-        backdrop-filter: blur(4px);
-      }
-
-      /* Membership author section */
-      .yt-chat-overlay-membership-author {
-        display: flex;
-        align-items: center;
-        gap: ${spacing.md}px;
-      }
-
-      /* Membership text container */
-      .yt-chat-overlay-membership-text {
-        display: flex;
-        flex-direction: column;
-        gap: ${spacing.xs}px;
-      }
-
-      /* Membership author name */
-      .yt-chat-overlay-membership-author-name {
-        font-size: ${typography.fontSize.base};
-        font-weight: ${typography.fontWeight.bold};
-        text-shadow: ${shadows.text.md};
-      }
-
-      /* Membership message text */
-      .yt-chat-overlay-membership-message {
-        font-size: ${typography.fontSize.sm};
-        font-weight: ${typography.fontWeight.normal};
-        color: ${colors.ui.text};
-        text-shadow: ${shadows.text.sm};
-      }
-    `;
+    container.style.setProperty('--yt-overlay-message-text-shadow', textShadow);
+    container.style.setProperty(
+      '--yt-overlay-regular-message-text-shadow',
+      regularMessageTextShadow
+    );
+    container.style.setProperty('--yt-overlay-text-stroke', textStroke);
+    container.style.setProperty(
+      '--yt-overlay-superchat-base-opacity',
+      String(superChatBaseOpacity)
+    );
+    container.style.setProperty('--yt-overlay-superchat-top-opacity', String(superChatTopOpacity));
+    container.style.setProperty(
+      '--yt-overlay-superchat-bottom-opacity',
+      String(superChatBottomOpacity)
+    );
   }
 
   private buildTextShadow(outline: OutlineSettings): string {
@@ -497,7 +506,7 @@ export class Renderer {
   ): HTMLImageElement | null {
     // Validate URL (defense in depth)
     if (!isAllowedYouTubeImageUrl(url)) {
-      console.warn('[YT Chat Overlay] Invalid image URL:', url);
+      overlayLog.warn('[YT Chat Overlay] Invalid image URL:', url);
       return null;
     }
 
@@ -514,7 +523,7 @@ export class Renderer {
       'error',
       () => {
         img.style.display = 'none';
-        console.warn('[YT Chat Overlay] Failed to load image:', url);
+        overlayLog.warn('[YT Chat Overlay] Failed to load image:', url);
       },
       { once: true }
     );
@@ -857,7 +866,7 @@ export class Renderer {
 
     const contentDiv = this.createMessageTextElement(message);
     if (!contentDiv) {
-      console.warn('[YT Chat Overlay] Skipping empty message');
+      overlayLog.debug('[YT Chat Overlay] Skipping empty message');
       return null;
     }
 
@@ -1128,7 +1137,7 @@ export class Renderer {
     }
 
     this.lastWarningTime = now;
-    console.warn(
+    overlayLog.warn(
       `[YT Chat Overlay] Performance warning: ${this.activeMessages.size} concurrent messages ` +
         `(recommended max: ${this.settings.maxConcurrentMessages}). ` +
         `Consider reducing maxMessagesPerSecond setting.`
@@ -1193,7 +1202,7 @@ export class Renderer {
   private renderMessage(message: ChatMessage): RenderResult {
     const renderContext = this.getRenderContext();
     if (!renderContext) {
-      console.warn('[YT Chat Overlay] Cannot render: container or dimensions missing');
+      overlayLog.debug('[YT Chat Overlay] Cannot render: container or dimensions missing');
       return { status: 'dropped' };
     }
 
@@ -1218,7 +1227,7 @@ export class Renderer {
     const placement = this.findLanePlacement(messageHeight);
     if (placement === null) {
       // No available lane, drop message
-      overlayLog.info(
+      overlayLog.debug(
         `[YT Chat Overlay] No available lane for message (height: ${messageHeight}px). ` +
           `Active messages: ${this.activeMessages.size}, Lanes: ${dimensions.laneCount}, ` +
           `Queue size: ${this.messageQueue.length}`
@@ -1244,7 +1253,7 @@ export class Renderer {
     // Track active message
     this.activeMessages.add(activeMessage);
 
-    overlayLog.info('[YT Chat Overlay] Rendering message:', {
+    overlayLog.debug('[YT Chat Overlay] Rendering message:', {
       text: message.text.substring(0, 20),
       author: message.author,
       authorType: this.getAuthorType(message),
@@ -1422,12 +1431,12 @@ export class Renderer {
   pause(): void {
     if (this.isPaused) return;
 
-    overlayLog.info('[Renderer] Pausing all animations');
+    overlayLog.debug('[Renderer] Pausing all animations');
     this.isPaused = true;
     this.pausedAt = Date.now();
     this.clearRetryTimer();
     this.forEachAnimation((animation) => animation.pause());
-    overlayLog.info(`[Renderer] Paused ${this.activeMessages.size} animations`);
+    overlayLog.debug(`[Renderer] Paused ${this.activeMessages.size} animations`);
   }
 
   /**
@@ -1456,10 +1465,10 @@ export class Renderer {
     }
     this.pausedAt = null;
 
-    overlayLog.info('[Renderer] Resuming all animations');
+    overlayLog.debug('[Renderer] Resuming all animations');
     this.isPaused = false;
     this.forEachAnimation((animation) => animation.play());
-    overlayLog.info(`[Renderer] Resumed ${this.activeMessages.size} animations`);
+    overlayLog.debug(`[Renderer] Resumed ${this.activeMessages.size} animations`);
 
     // Process any queued messages
     this.processQueue();
@@ -1497,13 +1506,13 @@ export class Renderer {
    */
   setPlaybackRate(rate: number): void {
     if (rate <= 0) {
-      console.warn('[Renderer] Invalid playback rate:', rate);
+      overlayLog.warn('[Renderer] Invalid playback rate:', rate);
       return;
     }
 
     this.playbackRate = rate;
 
-    overlayLog.info(
+    overlayLog.debug(
       `[Renderer] Setting playback rate to ${rate}x for ${this.activeMessages.size} animations`
     );
     this.forEachAnimation((animation) => {
@@ -1520,7 +1529,7 @@ export class Renderer {
       try {
         operation(active.animation);
       } catch (error) {
-        console.warn('[Renderer] Animation operation failed:', error);
+        overlayLog.warn('[Renderer] Animation operation failed:', error);
       }
     }
   }
@@ -1550,6 +1559,6 @@ export class Renderer {
     this.styleElement?.remove();
     this.styleElement = null;
 
-    overlayLog.info('[Renderer] Destroyed');
+    overlayLog.debug('[Renderer] Destroyed');
   }
 }
