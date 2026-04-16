@@ -2,6 +2,39 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.12.0] - 2026-04-16
+
+### Added
+- **명시적 채팅 시작/해결 상태 계약 도입**
+  - `ChatSource` / `RuntimeSession` / `RuntimeManager`가 `started` / `retryable` / `unavailable` 결과를 공유하도록 정리해, 채팅 표면은 있지만 시작할 수 없는 환경에서 무한 재시작하지 않도록 구조화
+- **채팅 선택자 메타데이터 구조화**
+  - `chat-dom.ts`의 frame / iframe / container / toggle 선택자를 목적, 우선순위, 표면 정보가 있는 descriptor로 재구성해 탐색 순서와 진단 로그를 더 명확하게 표현
+
+### Changed
+- **내비게이션 및 재조정 흐름 단순화**
+  - `PageWatcher`가 history hook, `yt-navigate-finish`, URL polling을 하나의 deduped signal contract로 통합
+  - URL polling은 기본 경로가 아닌 fallback / watchdog 역할로 축소해 SPA 이동 시 중복 재조정 가능성을 낮춤
+- **런타임/렌더러 설정 반영 안정화**
+  - 설정 변경 시 renderer reset / resync 필요 여부를 세션이 판단하도록 정리
+  - startup 지연 제거 및 실패한 초기화의 partial cleanup 추가로 앱 수명주기 예측 가능성을 높임
+- **비디오/설정 저장 로직 정리**
+  - `VideoSync` 초기화 / 재초기화를 직렬화해 비디오 교체 시 경합을 방지
+  - legacy `debugLogging` → `logLevel` 마이그레이션을 settings 모듈로 일원화
+
+### Fixed
+- **YouTube Trusted Types 환경에서 설정 UI가 열리지 않던 문제 수정**
+  - 설정 모달 HTML 생성을 Trusted Types 정책 경유로 바꿔 YouTube 문서 정책과 호환되도록 수정
+- **비대상 페이지 이동 후 UI 잔존 문제 수정**
+  - watch / live 대상이 아닌 페이지로 이동하면 settings button을 destroy하여 잔존 버튼이 남지 않도록 수정
+- **지원 불가 live chat iframe의 무한 재시도 문제 수정**
+  - live chat iframe이 실제 채팅 대신 “older browser” 안내 페이지를 반환할 때 `unavailable`로 정착시켜 불필요한 retry churn 제거
+
+### Tooling
+- **릴리스 노트 compare 기준 태그 선택 수정**
+  - release workflow가 현재 버전보다 낮은 직전 semver 태그를 선택하도록 바꿔, `v7.0.0` / `vv7.0.0` 같은 비정상 태그 때문에 잘못된 compare 링크가 생성되던 문제를 수정
+- **워크플로/품질 도구 유지보수 반영**
+  - security / CI 워크플로 정리와 dev dependency maintenance 변경을 이번 릴리스 범위에 포함
+
 ## [0.11.0] - 2026-04-15
 
 ### Added
