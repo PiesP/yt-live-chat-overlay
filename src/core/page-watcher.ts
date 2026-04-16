@@ -12,9 +12,16 @@ export type PageChangeCallback = () => void;
 
 type HistoryMethodName = 'pushState' | 'replaceState';
 type HistoryStateMethod = typeof history.pushState;
+type NavigationSignalSource =
+  | 'pushState'
+  | 'replaceState'
+  | 'popstate'
+  | 'yt-navigate-finish'
+  | 'polling';
 
 const YT_NAVIGATE_FINISH_EVENT = 'yt-navigate-finish';
 const URL_POLL_INTERVAL_MS = 2000;
+const POLLING_SUPPRESSION_AFTER_PRIMARY_SIGNAL_MS = 4000;
 
 const isValidYouTubePageUrl = (url: string): boolean => {
   try {
@@ -31,18 +38,15 @@ export class PageWatcher {
   private originalPushState: typeof history.pushState | null = null;
   private originalReplaceState: typeof history.replaceState | null = null;
   private intervalId: number | null = null;
+  private lastPrimarySignalAt = 0;
 
   private readonly handleUrlMutation = (): void => {
-    this.checkUrlChange();
+    this.handlePotentialUrlChange('popstate');
   };
 
   private readonly handleYouTubeNavigateFinish = (): void => {
     overlayLog.info('[YT Chat Overlay] YouTube navigation finished');
-    // Do NOT force notification here. YouTube fires yt-navigate-finish on the
-    // same URL during initial page setup, which would trigger an unnecessary
-    // cleanup+restart race. URL changes are already detected by the pushState,
-    // replaceState, and popstate listeners.
-    this.checkUrlChange();
+    this.handlePotentialUrlChange('yt-navigate-finish');
   };
 
   constructor() {
@@ -70,7 +74,7 @@ export class PageWatcher {
 
     history[methodName] = ((...args: Parameters<HistoryStateMethod>) => {
       originalMethod(...args);
-      this.checkUrlChange();
+      this.handlePotentialUrlChange(methodName);
     }) as HistoryStateMethod;
   }
 
@@ -86,7 +90,11 @@ export class PageWatcher {
 
   private startPolling(): void {
     this.intervalId = window.setInterval(() => {
-      this.checkUrlChange();
+      if (Date.now() - this.lastPrimarySignalAt < POLLING_SUPPRESSION_AFTER_PRIMARY_SIGNAL_MS) {
+        return;
+      }
+
+      this.handlePotentialUrlChange('polling');
     }, URL_POLL_INTERVAL_MS);
   }
 
@@ -106,17 +114,28 @@ export class PageWatcher {
     }
   }
 
-  /**
-   * Check if URL has changed
-   */
-  private checkUrlChange(): void {
-    const newUrl = location.href;
+  private handlePotentialUrlChange(source: NavigationSignalSource): void {
+    if (source !== 'polling') {
+      this.lastPrimarySignalAt = Date.now();
+    }
 
+    const newUrl = location.href;
     if (newUrl === this.currentUrl) {
       return;
     }
 
+    const previousUrl = this.currentUrl;
     this.currentUrl = newUrl;
+    overlayLog.info('[PageWatcher] URL changed', {
+      source,
+      from: previousUrl,
+      to: newUrl,
+    });
+
+    if (source === 'polling') {
+      overlayLog.warn('[PageWatcher] Polling watchdog detected a missed navigation signal');
+    }
+
     this.notifyCallbacks();
   }
 

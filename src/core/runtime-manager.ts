@@ -1,6 +1,6 @@
 import type { OverlaySettings } from '@app-types';
 import { overlayLog } from '@core/logging';
-import { RuntimeSession } from '@core/runtime-session';
+import { RuntimeSession, type RuntimeSessionStartStatus } from '@core/runtime-session';
 import { cloneSettings } from '@core/settings';
 import { clearTimeoutHandle } from '@core/timers';
 
@@ -140,16 +140,16 @@ export class RuntimeManager {
     });
 
     this.activeSession = session;
-    const started = await session.start();
+    const startStatus = await session.start();
 
     if (this.activeSession !== session || session.isDisposed()) {
       return;
     }
 
-    if (!started) {
+    if (startStatus !== 'started') {
       this.activeSession = null;
       session.dispose();
-      this.handleStartFailure(desired.url);
+      this.handleStartFailure(desired.url, startStatus);
       return;
     }
 
@@ -213,7 +213,16 @@ export class RuntimeManager {
     session.dispose();
   }
 
-  private handleStartFailure(url: string): void {
+  private handleStartFailure(
+    url: string,
+    status: Exclude<RuntimeSessionStartStatus, 'started'>
+  ): void {
+    if (status === 'unavailable') {
+      this.resetStartFailures();
+      overlayLog.warn('[RuntimeManager] Runtime unavailable; waiting for state changes');
+      return;
+    }
+
     const attempts = this.startFailureState.url === url ? this.startFailureState.attempts + 1 : 1;
     this.startFailureState = { url, attempts };
     overlayLog.warn(`[RuntimeManager] Failed to start runtime (${attempts}/${MAX_START_ATTEMPTS})`);

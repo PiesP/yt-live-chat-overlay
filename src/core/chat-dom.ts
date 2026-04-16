@@ -1,57 +1,216 @@
 import { overlayLog } from '@core/logging';
 
-export const CHAT_FRAME_SELECTORS = [
-  'ytd-live-chat-frame#chat',
-  '#chat',
-  'ytd-live-chat-frame',
-] as const;
+export type ChatSelectorSurface = 'frame' | 'iframe' | 'iframe-items' | 'container' | 'toggle';
 
-export const CHAT_IFRAME_SELECTORS = [
-  'iframe[src*="live_chat"]',
-  'iframe#chatframe',
-  'ytd-live-chat-frame iframe',
-  '#chat iframe',
-] as const;
+export interface ChatSelectorDescriptor {
+  selector: string;
+  purpose: string;
+  priority: number;
+  surface: ChatSelectorSurface;
+}
 
-export const CHAT_IFRAME_ITEM_SELECTORS = [
-  '#items.yt-live-chat-item-list-renderer',
-  '#items',
-  'yt-live-chat-item-list-renderer #items',
-] as const;
+export interface ChatSelectorMatch<T extends Element> {
+  element: T;
+  descriptor: ChatSelectorDescriptor;
+}
 
-export const CHAT_CONTAINER_SELECTORS = [
-  // Most specific selectors first
-  '#chat #items.yt-live-chat-item-list-renderer',
-  '#items.yt-live-chat-item-list-renderer',
-  'yt-live-chat-item-list-renderer #items',
+interface ChatMatchOptions<T extends Element> {
+  predicate?: (element: T) => boolean;
+  root?: ParentNode;
+}
 
-  // Frame-based selectors
-  'ytd-live-chat-frame #items',
+const CHAT_FRAME_DESCRIPTORS = [
+  {
+    selector: 'ytd-live-chat-frame#chat',
+    purpose: 'live chat frame host',
+    priority: 300,
+    surface: 'frame',
+  },
+  { selector: '#chat', purpose: 'generic chat root', priority: 200, surface: 'frame' },
+  { selector: 'ytd-live-chat-frame', purpose: 'frame fallback', priority: 100, surface: 'frame' },
+] as const satisfies readonly ChatSelectorDescriptor[];
 
-  // App-based selectors
-  'yt-live-chat-app #items',
+const CHAT_IFRAME_DESCRIPTORS = [
+  {
+    selector: 'iframe[src*="live_chat"]',
+    purpose: 'live chat iframe',
+    priority: 400,
+    surface: 'iframe',
+  },
+  { selector: 'iframe#chatframe', purpose: 'chatframe id', priority: 300, surface: 'iframe' },
+  {
+    selector: 'ytd-live-chat-frame iframe',
+    purpose: 'iframe inside chat frame',
+    priority: 200,
+    surface: 'iframe',
+  },
+  { selector: '#chat iframe', purpose: 'iframe under chat root', priority: 100, surface: 'iframe' },
+] as const satisfies readonly ChatSelectorDescriptor[];
 
-  // Chat panel selectors
-  '#chat-container #items',
-  '#chat #items',
-  'ytd-live-chat #items',
-] as const;
+const CHAT_IFRAME_ITEM_DESCRIPTORS = [
+  {
+    selector: '#items.yt-live-chat-item-list-renderer',
+    purpose: 'specific iframe item list',
+    priority: 300,
+    surface: 'iframe-items',
+  },
+  { selector: '#items', purpose: 'iframe items fallback', priority: 200, surface: 'iframe-items' },
+  {
+    selector: 'yt-live-chat-item-list-renderer #items',
+    purpose: 'nested iframe item list',
+    priority: 100,
+    surface: 'iframe-items',
+  },
+] as const satisfies readonly ChatSelectorDescriptor[];
 
-export const CHAT_TOGGLE_BUTTON_SELECTORS = [
-  // Theater mode toggle button
-  'ytd-toggle-button-renderer button[aria-label*="chat" i]',
-  'ytd-toggle-button-renderer button[aria-label*="채팅" i]',
-  // Live chat button
-  'button#show-hide-button',
-  // Engagement panel toggle
-  'ytd-engagement-panel-title-header-renderer button',
-  // Engagement panel list buttons
-  'ytd-engagement-panel-section-list-renderer button[aria-label*="chat" i]',
-  'ytd-engagement-panel-section-list-renderer button[aria-label*="채팅" i]',
-  // Generic chat-related buttons (ignore overlay settings button)
-  'button:not(#yt-chat-overlay-settings-button)[aria-label*="show chat" i]',
-  'button:not(#yt-chat-overlay-settings-button)[aria-label*="open chat" i]',
-] as const;
+const CHAT_CONTAINER_DESCRIPTORS = [
+  {
+    selector: '#chat #items.yt-live-chat-item-list-renderer',
+    purpose: 'specific in-page chat items',
+    priority: 700,
+    surface: 'container',
+  },
+  {
+    selector: '#items.yt-live-chat-item-list-renderer',
+    purpose: 'root item list',
+    priority: 600,
+    surface: 'container',
+  },
+  {
+    selector: 'yt-live-chat-item-list-renderer #items',
+    purpose: 'nested item list',
+    priority: 500,
+    surface: 'container',
+  },
+  {
+    selector: 'ytd-live-chat-frame #items',
+    purpose: 'items under frame host',
+    priority: 400,
+    surface: 'container',
+  },
+  {
+    selector: 'yt-live-chat-app #items',
+    purpose: 'app-root items',
+    priority: 300,
+    surface: 'container',
+  },
+  {
+    selector: '#chat-container #items',
+    purpose: 'panel container items',
+    priority: 200,
+    surface: 'container',
+  },
+  {
+    selector: '#chat #items',
+    purpose: 'chat-root items fallback',
+    priority: 100,
+    surface: 'container',
+  },
+  {
+    selector: 'ytd-live-chat #items',
+    purpose: 'legacy host items',
+    priority: 50,
+    surface: 'container',
+  },
+] as const satisfies readonly ChatSelectorDescriptor[];
+
+const CHAT_TOGGLE_BUTTON_DESCRIPTORS = [
+  {
+    selector: 'ytd-toggle-button-renderer button[aria-label*="chat" i]',
+    purpose: 'chat toggle button',
+    priority: 700,
+    surface: 'toggle',
+  },
+  {
+    selector: 'ytd-toggle-button-renderer button[aria-label*="채팅" i]',
+    purpose: 'localized chat toggle button',
+    priority: 650,
+    surface: 'toggle',
+  },
+  {
+    selector: 'button#show-hide-button',
+    purpose: 'show/hide chat button',
+    priority: 600,
+    surface: 'toggle',
+  },
+  {
+    selector: 'ytd-engagement-panel-title-header-renderer button',
+    purpose: 'engagement panel header button',
+    priority: 500,
+    surface: 'toggle',
+  },
+  {
+    selector: 'ytd-engagement-panel-section-list-renderer button[aria-label*="chat" i]',
+    purpose: 'engagement panel list chat button',
+    priority: 400,
+    surface: 'toggle',
+  },
+  {
+    selector: 'ytd-engagement-panel-section-list-renderer button[aria-label*="채팅" i]',
+    purpose: 'localized engagement panel list chat button',
+    priority: 350,
+    surface: 'toggle',
+  },
+  {
+    selector: 'button:not(#yt-chat-overlay-settings-button)[aria-label*="show chat" i]',
+    purpose: 'generic show chat button',
+    priority: 200,
+    surface: 'toggle',
+  },
+  {
+    selector: 'button:not(#yt-chat-overlay-settings-button)[aria-label*="open chat" i]',
+    purpose: 'generic open chat button',
+    priority: 100,
+    surface: 'toggle',
+  },
+] as const satisfies readonly ChatSelectorDescriptor[];
+
+const findChatSelectorMatch = <T extends Element>(
+  descriptors: readonly ChatSelectorDescriptor[],
+  options: ChatMatchOptions<T> = {}
+): ChatSelectorMatch<T> | null => {
+  const { root = document, predicate } = options;
+
+  for (const descriptor of descriptors) {
+    const element = root.querySelector<T>(descriptor.selector);
+    if (!element) {
+      continue;
+    }
+
+    if (predicate && !predicate(element)) {
+      continue;
+    }
+
+    return {
+      element,
+      descriptor,
+    };
+  }
+
+  return null;
+};
+
+export const describeChatSelector = (descriptor: ChatSelectorDescriptor): string =>
+  `${descriptor.surface}:${descriptor.purpose} (${descriptor.selector})`;
+
+export const findChatFrameMatch = (): ChatSelectorMatch<HTMLElement> | null =>
+  findChatSelectorMatch<HTMLElement>(CHAT_FRAME_DESCRIPTORS);
+
+export const findChatIframeMatch = (): ChatSelectorMatch<HTMLIFrameElement> | null =>
+  findChatSelectorMatch<HTMLIFrameElement>(CHAT_IFRAME_DESCRIPTORS);
+
+export const findChatIframeItemMatch = (root: ParentNode): ChatSelectorMatch<Element> | null =>
+  findChatSelectorMatch<Element>(CHAT_IFRAME_ITEM_DESCRIPTORS, { root });
+
+export const findInPageChatContainerMatch = (): ChatSelectorMatch<Element> | null =>
+  findChatSelectorMatch<Element>(CHAT_CONTAINER_DESCRIPTORS, {
+    predicate: (element) => validateChatElement(element),
+  });
+
+export const findChatToggleButtonMatch = (): ChatSelectorMatch<HTMLButtonElement> | null =>
+  findChatSelectorMatch<HTMLButtonElement>(CHAT_TOGGLE_BUTTON_DESCRIPTORS, {
+    predicate: (element) => !element.disabled,
+  });
 
 /**
  * Validate that an element is actually a chat container

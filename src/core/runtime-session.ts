@@ -1,5 +1,5 @@
 import type { OverlaySettings } from '@app-types';
-import { ChatSource } from '@core/chat-source';
+import { ChatSource, type ChatSourceStartStatus } from '@core/chat-source';
 import { throwIfAborted } from '@core/dom';
 import { overlayLog } from '@core/logging';
 import { OVERLAY_SELECTOR, Overlay } from '@core/overlay';
@@ -53,6 +53,8 @@ export interface RuntimeSessionOptions {
   settings: OverlaySettings;
 }
 
+export type RuntimeSessionStartStatus = 'started' | 'retryable' | 'unavailable';
+
 /**
  * Owns one full overlay runtime for a specific page URL.
  *
@@ -90,7 +92,7 @@ export class RuntimeSession {
     return this.disposed;
   }
 
-  async start(): Promise<boolean> {
+  async start(): Promise<RuntimeSessionStartStatus> {
     const signal = this.abortController.signal;
 
     try {
@@ -102,7 +104,7 @@ export class RuntimeSession {
 
       if (!overlayCreated) {
         overlay.destroy();
-        return false;
+        return 'retryable';
       }
 
       this.overlay = overlay;
@@ -141,21 +143,25 @@ export class RuntimeSession {
       }, signal);
       throwIfAborted(signal);
 
-      if (!chatStarted) {
-        return false;
+      if (chatStarted !== 'started') {
+        return this.mapChatStartStatus(chatStarted);
       }
 
       this.setupChatWatchdog();
       overlayLog.info('[RuntimeSession] Started successfully');
-      return true;
+      return 'started';
     } catch (error) {
       if (isAbortError(error)) {
-        return false;
+        return 'retryable';
       }
 
       overlayLog.warn('[RuntimeSession] Failed to start:', error);
-      return false;
+      return 'retryable';
     }
+  }
+
+  private mapChatStartStatus(status: ChatSourceStartStatus): RuntimeSessionStartStatus {
+    return status;
   }
 
   updateSettings(settings: OverlaySettings): void {
