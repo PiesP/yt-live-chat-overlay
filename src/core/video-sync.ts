@@ -17,9 +17,6 @@ import { clearIntervalHandle, clearTimeoutHandle } from '@core/timers';
 
 const log = createLogger('VideoSync');
 
-/**
- * Callbacks for video state changes
- */
 interface VideoSyncCallbacks {
   onPause?: () => void;
   onPlay?: () => void;
@@ -27,24 +24,17 @@ interface VideoSyncCallbacks {
   onRateChange?: (rate: number) => void;
 }
 
-/**
- * Configuration constants
- */
-const CONFIG = {
-  /** Number of detection attempts with delay */
-  DETECTION_ATTEMPTS: 5,
-  /** Delay between detection attempts (ms) */
-  DETECTION_INTERVAL_MS: 500,
-  /** Periodic detection interval (ms) */
-  PERIODIC_DETECTION_INTERVAL_MS: 2000,
-  /** Delay before reinitializing after video replacement (ms) */
-  REINITIALIZATION_DELAY_MS: 1000,
-  /** Minimum video readyState for acceptance */
-  MIN_READY_STATE: 2,
-} as const;
+const DETECTION_ATTEMPTS = 5;
+const DETECTION_INTERVAL_MS = 500;
+const PERIODIC_DETECTION_INTERVAL_MS = 2000;
+const REINITIALIZATION_DELAY_MS = 1000;
+const MIN_READY_STATE = 2;
 
 const isVideoReady = (video: HTMLVideoElement): boolean =>
-  video.readyState >= CONFIG.MIN_READY_STATE && video.videoWidth > 0;
+  video.readyState >= MIN_READY_STATE && video.videoWidth > 0;
+
+const findReadyVideoElement = (): HTMLVideoElement | null =>
+  findElementMatch<HTMLVideoElement>(VIDEO_SELECTORS, { predicate: isVideoReady })?.element ?? null;
 
 /**
  * VideoSync class
@@ -110,22 +100,14 @@ export class VideoSync {
     return true;
   }
 
-  private findAvailableVideoElement(): HTMLVideoElement | null {
-    return (
-      findElementMatch<HTMLVideoElement>(VIDEO_SELECTORS, {
-        predicate: isVideoReady,
-      })?.element ?? null
-    );
-  }
-
   /**
    * Detect video element in player container
    * Retries multiple times to handle slow page loads
    */
   private async detectVideoElement(signal?: AbortSignal): Promise<HTMLVideoElement | null> {
     const match = await waitForElementMatch<HTMLVideoElement>(VIDEO_SELECTORS, {
-      attempts: CONFIG.DETECTION_ATTEMPTS,
-      intervalMs: CONFIG.DETECTION_INTERVAL_MS,
+      attempts: DETECTION_ATTEMPTS,
+      intervalMs: DETECTION_INTERVAL_MS,
       predicate: isVideoReady,
       signal,
     });
@@ -192,14 +174,14 @@ export class VideoSync {
         return;
       }
 
-      const video = this.findAvailableVideoElement();
+      const video = findReadyVideoElement();
 
       if (video) {
         this.setupVideoElement(video);
         this.stopPeriodicDetection();
         log.debug('Video element detected via periodic check');
       }
-    }, CONFIG.PERIODIC_DETECTION_INTERVAL_MS);
+    }, PERIODIC_DETECTION_INTERVAL_MS);
 
     log.debug('Periodic detection started (every 2 seconds)');
   }
@@ -289,31 +271,26 @@ export class VideoSync {
       this.init(this.lifecycleSignal ?? undefined).catch((error) => {
         log.warn('Failed to reinitialize after video replacement:', error);
       });
-    }, CONFIG.REINITIALIZATION_DELAY_MS);
+    }, REINITIALIZATION_DELAY_MS);
   }
 
   /**
    * Event handlers
    */
   private handlePause(): void {
-    log.debug('Video paused');
     this.callbacks.onPause?.();
   }
 
   private handlePlay(): void {
-    log.debug('Video playing');
     this.callbacks.onPlay?.();
   }
 
   private handleSeeking(): void {
-    log.debug('Video seeking');
     this.callbacks.onSeeking?.();
   }
 
   private handleRateChange(): void {
-    const rate = this.videoElement?.playbackRate ?? 1.0;
-    log.debug('Playback rate changed:', rate);
-    this.callbacks.onRateChange?.(rate);
+    this.callbacks.onRateChange?.(this.videoElement?.playbackRate ?? 1.0);
   }
 
   /**

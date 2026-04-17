@@ -69,7 +69,10 @@ export class RuntimeManager {
     if (reason === 'page-change') {
       this.lastPageChangeAt = Date.now();
       this.resetStartFailures();
-      this.disposeActiveSessionIfStale();
+      const session = this.activeSession;
+      if (session && !session.matchesUrl(this.getCurrentUrl())) {
+        this.disposeActiveSession();
+      }
     }
 
     this.reconcileRequested = true;
@@ -192,16 +195,6 @@ export class RuntimeManager {
 
   private clearScheduledReconcile(): void {
     this.scheduledReconcileTimer = clearTimeoutHandle(this.scheduledReconcileTimer);
-  }
-
-  private disposeActiveSessionIfStale(): void {
-    const activeSession = this.activeSession;
-    if (!activeSession || activeSession.matchesUrl(this.getCurrentUrl())) {
-      return;
-    }
-
-    this.activeSession = null;
-    activeSession.dispose();
   }
 
   private disposeActiveSession(): void {

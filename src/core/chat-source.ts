@@ -710,43 +710,13 @@ export class ChatSource {
   }
 
   /**
-   * Snapshot the latest valid chat messages from the currently attached chat
-   * container. Useful when resuming playback after pause: instead of replaying
-   * stale backlog, the overlay can render the current live-chat state.
+   * Snapshot the latest normalized messages captured by the observer.
+   * Used when resuming playback after pause so the overlay renders the
+   * current live state instead of stale backlog.
    */
   getLatestMessages(limit: number): ChatMessage[] {
-    if (limit <= 0) {
-      return [];
-    }
-
-    if (this.recentMessages.length > 0) {
-      return this.recentMessages.slice(-limit);
-    }
-
-    if (!this.chatContainer) {
-      return [];
-    }
-
-    const children = Array.from(this.chatContainer.children);
-    if (children.length === 0) {
-      return [];
-    }
-
-    const latest: ChatMessage[] = [];
-
-    // Iterate from newest to oldest and keep only valid user messages.
-    for (let i = children.length - 1; i >= 0 && latest.length < limit; i--) {
-      const element = children[i];
-      if (!(element instanceof Element)) continue;
-
-      const message = this.parseMessage(element);
-      if (!message) continue;
-
-      latest.push(message);
-    }
-
-    // Return in chronological order (oldest -> newest) for natural rendering.
-    return latest.reverse();
+    if (limit <= 0) return [];
+    return this.recentMessages.slice(-limit);
   }
 
   private getMessageKind(tagName: string): ChatMessageKind | null {
@@ -835,40 +805,24 @@ export class ChatSource {
    * Extract author type from badge information
    */
   private extractAuthorType(element: Element): ChatMessage['authorType'] {
-    // Check for badges - these indicate special user roles
     const badges = element.querySelectorAll('yt-live-chat-author-badge-renderer');
 
     for (const badge of badges) {
-      // Check aria-label for role information
-      const ariaLabel = badge.getAttribute('aria-label')?.toLowerCase() || '';
-      const tooltip = badge.querySelector('#tooltip')?.textContent?.toLowerCase() || '';
-      const iconType = badge.getAttribute('type')?.toLowerCase() || '';
+      const iconType = badge.getAttribute('type')?.toLowerCase() ?? '';
+      if (iconType === 'owner') return 'owner';
+      if (iconType === 'moderator') return 'moderator';
+      if (iconType === 'member') return 'member';
+      if (iconType === 'verified') return 'verified';
 
-      const badgeText = `${ariaLabel} ${tooltip} ${iconType}`;
-
-      // Check for channel owner (highest priority)
-      if (badgeText.includes('owner') || iconType.includes('owner')) {
-        return 'owner';
-      }
-
-      // Check for moderator
-      if (badgeText.includes('moderator') || badgeText.includes('mod')) {
-        return 'moderator';
-      }
-
-      // Check for membership
-      if (
-        badgeText.includes('member') ||
-        badgeText.includes('membership') ||
-        iconType.includes('member')
-      ) {
-        return 'member';
-      }
-
-      // Check for verified badge
-      if (badgeText.includes('verified')) {
-        return 'verified';
-      }
+      const label = (
+        (badge.getAttribute('aria-label') ?? '') +
+        ' ' +
+        (badge.querySelector('#tooltip')?.textContent ?? '')
+      ).toLowerCase();
+      if (label.includes('owner')) return 'owner';
+      if (label.includes('moderator') || label.includes('mod')) return 'moderator';
+      if (label.includes('member') || label.includes('membership')) return 'member';
+      if (label.includes('verified')) return 'verified';
     }
 
     return 'normal';
@@ -885,22 +839,13 @@ export class ChatSource {
    * Extract author photo URL
    */
   private extractAuthorPhotoUrl(element: Element): string | undefined {
-    // Try multiple selectors for author photo
     const authorPhotoElement = element.querySelector<HTMLImageElement>(
-      '#author-photo img, yt-live-chat-author-chip #author-photo img, #img'
+      '#author-photo img, yt-live-chat-author-chip #author-photo img'
     );
 
-    if (!authorPhotoElement) {
-      return undefined;
-    }
+    const photoUrl = authorPhotoElement?.src;
+    if (!photoUrl) return undefined;
 
-    const photoUrl = authorPhotoElement.src;
-
-    if (!photoUrl) {
-      return undefined;
-    }
-
-    // Validate URL for security
     if (!isAllowedYouTubeImageUrl(photoUrl)) {
       log.warn('Invalid author photo URL:', photoUrl);
       return undefined;
@@ -931,38 +876,30 @@ export class ChatSource {
    * Detect emoji type (standard/custom/member)
    */
   private detectEmojiType(img: HTMLImageElement): EmojiInfo['type'] {
-    // Check for member-only indicators
-    const ariaLabel = img.getAttribute('aria-label')?.toLowerCase() || '';
+    const ariaLabel = img.getAttribute('aria-label')?.toLowerCase() ?? '';
     const tooltip =
-      img.getAttribute('shared-tooltip-text')?.toLowerCase() ||
-      img.getAttribute('tooltip')?.toLowerCase() ||
+      img.getAttribute('shared-tooltip-text')?.toLowerCase() ??
+      img.getAttribute('tooltip')?.toLowerCase() ??
       '';
     const classList = img.className.toLowerCase();
 
-    // Member-only emoji detection
-    // YouTube typically marks member emojis with specific classes or attributes
     if (
-      img.hasAttribute('data-is-custom-emoji') ||
       img.hasAttribute('data-membership-required') ||
       classList.includes('member') ||
       ariaLabel.includes('member') ||
-      tooltip.includes('member') ||
-      // Check parent for membership badge
-      img.closest('yt-live-chat-author-badge-renderer[type="member"]')
+      tooltip.includes('member')
     ) {
       return 'member';
     }
 
-    // Custom emoji (non-member)
     if (
-      classList.includes('custom') ||
       classList.includes('yt-live-chat-custom-emoji') ||
-      img.hasAttribute('data-emoji-id')
+      img.hasAttribute('data-emoji-id') ||
+      img.hasAttribute('data-is-custom-emoji')
     ) {
       return 'custom';
     }
 
-    // Standard emoji (Unicode)
     return 'standard';
   }
 
@@ -1027,19 +964,12 @@ export class ChatSource {
       } else if (node.nodeType === Node.ELEMENT_NODE) {
         const elem = node as Element;
 
-        // Check if it's an emoji image
-        if (
-          elem.tagName.toLowerCase() === 'img' &&
-          (elem.classList.contains('emoji') ||
-            elem.hasAttribute('data-emoji-id') ||
-            elem.closest('#message') === messageElement)
-        ) {
+        if (elem.tagName.toLowerCase() === 'img') {
           const emojiInfo = this.parseEmoji(elem as HTMLImageElement);
           if (emojiInfo) {
             segments.push({ type: 'emoji', emoji: emojiInfo });
-            // Add alt text to plain text for fallback
             plainText += emojiInfo.alt || '[emoji]';
-            return; // Don't process children of img
+            return;
           }
         }
 
@@ -1099,9 +1029,9 @@ export class ChatSource {
       const tier = this.determineSuperChatTier(backgroundColor);
 
       // Check for sticker (high-tier Super Chats may have stickers)
-      const stickerImg = element.querySelector(
-        '#sticker img, yt-img-shadow#sticker img, img[id*="sticker"]'
-      ) as HTMLImageElement;
+      const stickerImg = element.querySelector<HTMLImageElement>(
+        '#sticker img, yt-img-shadow#sticker img'
+      );
       const stickerUrl =
         stickerImg && isAllowedYouTubeImageUrl(stickerImg.src) ? stickerImg.src : undefined;
 

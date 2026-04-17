@@ -10,6 +10,7 @@ import {
   OUTLINE_SETTING_DEFINITIONS,
   OUTLINE_SETTING_KEYS,
   type OutlineSettingKey,
+  outlineFormName,
   ROOT_SETTING_DEFINITIONS,
   ROOT_SETTING_KEYS,
   type RootScalarSettingKey,
@@ -762,16 +763,13 @@ export class SettingsUi {
 
     switch (definition.kind) {
       case 'boolean':
-        this.setCheckbox(definition.formName, value as boolean);
+        this.setCheckbox(key, value as boolean);
         return;
       case 'log-level':
-        this.setSelect(definition.formName, value as string);
+        this.setSelect(key, value as string);
         return;
       default:
-        this.setValue(
-          definition.formName,
-          formatNumericSettingForInput(definition, value as number)
-        );
+        this.setValue(key, formatNumericSettingForInput(definition, value as number));
     }
   }
 
@@ -781,13 +779,14 @@ export class SettingsUi {
   ): void {
     const definition = OUTLINE_SETTING_DEFINITIONS[key];
     const value = outline[key];
+    const name = outlineFormName(key);
 
     if (definition.kind === 'boolean') {
-      this.setCheckbox(definition.formName, value as boolean);
+      this.setCheckbox(name, value as boolean);
       return;
     }
 
-    this.setValue(definition.formName, formatNumericSettingForInput(definition, value as number));
+    this.setValue(name, formatNumericSettingForInput(definition, value as number));
   }
 
   private populateForm(settings: Readonly<OverlaySettings>): void {
@@ -823,13 +822,10 @@ export class SettingsUi {
     definition:
       | (typeof ROOT_SETTING_DEFINITIONS)[RootScalarSettingKey]
       | (typeof OUTLINE_SETTING_DEFINITIONS)[OutlineSettingKey],
+    name: string,
     fallback: number
   ): number {
-    return normalizeNumericInputValue(
-      definition,
-      this.readNumber(definition.formName, fallback),
-      fallback
-    );
+    return normalizeNumericInputValue(definition, this.readNumber(name, fallback), fallback);
   }
 
   private collectAuthorColors(current: Readonly<OverlaySettings>): OverlaySettings['colors'] {
@@ -865,11 +861,11 @@ export class SettingsUi {
 
     switch (definition.kind) {
       case 'boolean':
-        return this.getCheckbox(definition.formName, fallback as boolean);
+        return this.getCheckbox(key, fallback as boolean);
       case 'log-level':
-        return this.getLogLevel(definition.formName, fallback as OverlaySettings['logLevel']);
+        return this.getLogLevel(key, fallback as OverlaySettings['logLevel']);
       default:
-        return this.readNumericSetting(definition, fallback as number);
+        return this.readNumericSetting(definition, key, fallback as number);
     }
   }
 
@@ -879,11 +875,12 @@ export class SettingsUi {
   ): OverlaySettings['outline'][K] {
     const definition = OUTLINE_SETTING_DEFINITIONS[key];
     const fallback = current[key];
+    const name = outlineFormName(key);
 
     return (
       definition.kind === 'boolean'
-        ? this.getCheckbox(definition.formName, fallback as boolean)
-        : this.readNumericSetting(definition, fallback as number)
+        ? this.getCheckbox(name, fallback as boolean)
+        : this.readNumericSetting(definition, name, fallback as number)
     ) as OverlaySettings['outline'][K];
   }
 

@@ -36,31 +36,16 @@ const CHAT_FRAME_DESCRIPTORS = [
     purpose: 'live chat frame host',
     surface: 'frame',
   },
-  {
-    selector: '#chat ytd-live-chat-frame',
-    purpose: 'chat frame inside host',
-    surface: 'frame',
-  },
   { selector: 'ytd-live-chat-frame', purpose: 'frame fallback', surface: 'frame' },
 ] as const satisfies readonly ChatSelectorDescriptor[];
 
 const CHAT_IFRAME_DESCRIPTORS = [
-  {
-    selector: '#chat iframe[src*="live_chat"]',
-    purpose: 'live chat iframe inside host',
-    surface: 'iframe',
-  },
+  { selector: 'iframe#chatframe', purpose: 'chatframe id', surface: 'iframe' },
   {
     selector: 'ytd-live-chat-frame iframe[src*="live_chat"]',
     purpose: 'live chat iframe inside frame',
     surface: 'iframe',
   },
-  {
-    selector: 'iframe[src*="live_chat"]',
-    purpose: 'live chat iframe',
-    surface: 'iframe',
-  },
-  { selector: 'iframe#chatframe', purpose: 'chatframe id', surface: 'iframe' },
 ] as const satisfies readonly ChatSelectorDescriptor[];
 
 const CHAT_IFRAME_ITEM_DESCRIPTORS = [
@@ -107,18 +92,8 @@ const CHAT_TOGGLE_BUTTON_DESCRIPTORS = [
     surface: 'toggle',
   },
   {
-    selector: '#chat button#show-hide-button',
-    purpose: 'chat host show/hide toggle',
-    surface: 'toggle',
-  },
-  {
-    selector: '#chat ytd-toggle-button-renderer button',
-    purpose: 'chat host toggle renderer button',
-    surface: 'toggle',
-  },
-  {
-    selector: '#chat button[aria-controls], #chat button[aria-expanded]',
-    purpose: 'chat host aria toggle button',
+    selector: 'button#show-hide-button',
+    purpose: 'show/hide chat button',
     surface: 'toggle',
   },
   {
@@ -127,28 +102,13 @@ const CHAT_TOGGLE_BUTTON_DESCRIPTORS = [
     surface: 'toggle',
   },
   {
-    selector:
-      '#secondary button[aria-controls], #secondary button[aria-expanded], #secondary button[aria-label], #secondary button[title]',
+    selector: '#secondary button[aria-controls], #secondary button[aria-expanded]',
     purpose: 'secondary column chat button candidate',
-    surface: 'toggle',
-  },
-  {
-    selector: 'button#show-hide-button',
-    purpose: 'show/hide chat button',
     surface: 'toggle',
   },
 ] as const satisfies readonly ChatSelectorDescriptor[];
 
-const CHAT_TOGGLE_MARKERS = [
-  'chat',
-  'live chat',
-  'chat replay',
-  '실시간 채팅',
-  '채팅 다시 보기',
-  '채팅',
-  'ライブチャット',
-  'チャット',
-] as const;
+const CHAT_TOGGLE_MARKERS = ['chat', '채팅', 'チャット'] as const;
 
 const normalizeChatToggleText = (value: string | null | undefined): string =>
   value?.replace(/\s+/g, ' ').trim().toLowerCase() ?? '';

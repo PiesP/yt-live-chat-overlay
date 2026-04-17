@@ -13,7 +13,6 @@ type OutlineSettingKey = keyof OutlineSettings;
 type SettingLimitsKey = keyof typeof SETTINGS_LIMITS;
 
 interface SettingDefinition {
-  readonly formName: string;
   readonly kind: SettingDefinitionKind;
   readonly limitsKey?: SettingLimitsKey;
   readonly uiScale?: number;
@@ -22,6 +21,8 @@ interface SettingDefinition {
 }
 
 export type { OutlineSettingKey, RootScalarSettingKey };
+
+export const outlineFormName = (key: OutlineSettingKey): string => `outline-${key}`;
 
 export const AUTHOR_COLOR_KEYS = [
   'normal',
@@ -38,30 +39,25 @@ export const SHOW_AUTHOR_KEYS = [
 
 export const ROOT_SETTING_DEFINITIONS = {
   enabled: {
-    formName: 'enabled',
     kind: 'boolean',
     resetRenderer: true,
   },
   speedPxPerSec: {
-    formName: 'speedPxPerSec',
     kind: 'number',
     limitsKey: 'speedPxPerSec',
     resetRenderer: true,
   },
   fontSize: {
-    formName: 'fontSize',
     kind: 'number',
     limitsKey: 'fontSize',
     resetRenderer: true,
   },
   opacity: {
-    formName: 'opacity',
     kind: 'number',
     limitsKey: 'opacity',
     resetRenderer: true,
   },
   superChatOpacity: {
-    formName: 'superChatOpacity',
     kind: 'number',
     limitsKey: 'superChatOpacity',
     uiScale: 100,
@@ -69,7 +65,6 @@ export const ROOT_SETTING_DEFINITIONS = {
     resetRenderer: true,
   },
   safeTop: {
-    formName: 'safeTop',
     kind: 'number',
     limitsKey: 'safeTop',
     uiScale: 100,
@@ -77,7 +72,6 @@ export const ROOT_SETTING_DEFINITIONS = {
     resetRenderer: true,
   },
   safeBottom: {
-    formName: 'safeBottom',
     kind: 'number',
     limitsKey: 'safeBottom',
     uiScale: 100,
@@ -85,35 +79,29 @@ export const ROOT_SETTING_DEFINITIONS = {
     resetRenderer: true,
   },
   maxConcurrentMessages: {
-    formName: 'maxConcurrentMessages',
     kind: 'rounded-number',
     limitsKey: 'maxConcurrentMessages',
     resetRenderer: true,
   },
   maxMessagesPerSecond: {
-    formName: 'maxMessagesPerSecond',
     kind: 'rounded-number',
     limitsKey: 'maxMessagesPerSecond',
     resetRenderer: true,
   },
   allowShortTextMessages: {
-    formName: 'allowShortTextMessages',
     kind: 'boolean',
     resetRenderer: true,
   },
   minTextLength: {
-    formName: 'minTextLength',
     kind: 'rounded-number',
     limitsKey: 'minTextLength',
     resetRenderer: true,
   },
   logLevel: {
-    formName: 'logLevel',
     kind: 'log-level',
     resetRenderer: false,
   },
   laneSpacing: {
-    formName: 'laneSpacing',
     kind: 'rounded-number',
     limitsKey: 'laneSpacing',
     resetRenderer: true,
@@ -122,24 +110,20 @@ export const ROOT_SETTING_DEFINITIONS = {
 
 export const OUTLINE_SETTING_DEFINITIONS = {
   enabled: {
-    formName: 'outline-enabled',
     kind: 'boolean',
     resetRenderer: true,
   },
   widthPx: {
-    formName: 'outline-widthPx',
     kind: 'number',
     limitsKey: 'outlineWidthPx',
     resetRenderer: true,
   },
   blurPx: {
-    formName: 'outline-blurPx',
     kind: 'number',
     limitsKey: 'outlineBlurPx',
     resetRenderer: true,
   },
   opacity: {
-    formName: 'outline-opacity',
     kind: 'number',
     limitsKey: 'outlineOpacity',
     resetRenderer: true,
@@ -318,7 +302,7 @@ export const getNumericInputAttributes = (
   definition: SettingDefinition
 ): Readonly<{ min: number; max: number; step: number }> => {
   if (!definition.limitsKey) {
-    throw new TypeError(`Setting "${definition.formName}" does not define numeric limits.`);
+    throw new TypeError('Setting does not define numeric limits.');
   }
 
   const limits = SETTINGS_LIMITS[definition.limitsKey];

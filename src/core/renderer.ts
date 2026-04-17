@@ -968,23 +968,11 @@ export class Renderer {
 
     this.lastRenderStartTime = startTime;
 
-    // Auto-remove on animation end
-    animation.addEventListener(
-      'finish',
-      () => {
-        this.removeMessageByElement(element);
-      },
-      { once: true }
-    );
-
-    // Also remove if animation is cancelled externally (e.g. element removed from DOM)
-    animation.addEventListener(
-      'cancel',
-      () => {
-        this.removeMessageByElement(element);
-      },
-      { once: true }
-    );
+    const cleanup = (): void => {
+      this.removeMessageByElement(element);
+    };
+    animation.addEventListener('finish', cleanup, { once: true });
+    animation.addEventListener('cancel', cleanup, { once: true });
 
     return {
       element,
@@ -1441,7 +1429,8 @@ export class Renderer {
     this.injectStyles();
 
     if (options.resetState) {
-      this.resetForResync();
+      this.resetRenderedState();
+      this.initLanes();
       return;
     }
 
@@ -1497,13 +1486,6 @@ export class Renderer {
   }
 
   /**
-   * Check if renderer is paused
-   */
-  isPausedState(): boolean {
-    return this.isPaused;
-  }
-
-  /**
    * Discard all queued (not yet rendered) messages.
    * Called on seek to prevent stale messages from appearing after a position change.
    * Recovery can also release queued ids so the latest-message replay may enqueue
@@ -1520,16 +1502,6 @@ export class Renderer {
 
     this.messageQueue = [];
     this.clearRetryTimer();
-  }
-
-  /**
-   * Reset rendered/queued message state for chat resynchronization.
-   * Keeps renderer instance and playbackRate, but clears visual backlog so
-   * only fresh synchronized messages are shown.
-   */
-  resetForResync(): void {
-    this.resetRenderedState();
-    this.initLanes();
   }
 
   /**
@@ -1565,28 +1537,18 @@ export class Renderer {
   }
 
   /**
-   * Clear all messages
-   */
-  clear(): void {
-    this.resetRenderedState();
-    this.seenMessageIds.clear();
-    this.pausedAt = null;
-    this.playbackRate = 1;
-  }
-
-  /**
    * Destroy and cleanup all resources
    */
   destroy(): void {
-    // Clear state
     this.isPaused = false;
     this.overlayDimensionsUnsubscribe?.();
     this.overlayDimensionsUnsubscribe = null;
 
-    // Clear all active messages and queue
-    this.clear();
+    this.resetRenderedState();
+    this.seenMessageIds.clear();
+    this.pausedAt = null;
+    this.playbackRate = 1;
 
-    // Remove style element
     this.styleElement?.remove();
     this.styleElement = null;
 
