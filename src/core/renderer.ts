@@ -78,6 +78,10 @@ interface RendererUpdateOptions {
   resetState?: boolean;
 }
 
+interface FlushQueueOptions {
+  releaseMessageIds?: boolean;
+}
+
 /**
  * Layout and styling constants
  */
@@ -1502,8 +1506,18 @@ export class Renderer {
   /**
    * Discard all queued (not yet rendered) messages.
    * Called on seek to prevent stale messages from appearing after a position change.
+   * Recovery can also release queued ids so the latest-message replay may enqueue
+   * still-relevant items again without clearing active on-screen animations.
    */
-  flushQueue(): void {
+  flushQueue(options: FlushQueueOptions = {}): void {
+    if (options.releaseMessageIds) {
+      for (const queued of this.messageQueue) {
+        if (queued.message.id) {
+          this.seenMessageIds.delete(queued.message.id);
+        }
+      }
+    }
+
     this.messageQueue = [];
     this.clearRetryTimer();
   }

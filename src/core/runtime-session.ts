@@ -360,7 +360,9 @@ export class RuntimeSession {
           return;
         }
 
-        renderer.resetForResync();
+        // Keep currently flowing comments alive; only drop stale queued backlog
+        // before replaying the latest messages after recovery.
+        renderer.flushQueue({ releaseMessageIds: true });
         renderer.resume();
 
         const latestMessages = this.chatSource?.getLatestMessages(RESUME_SYNC_MESSAGE_LIMIT) ?? [];
