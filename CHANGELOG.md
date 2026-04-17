@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.12.1] - 2026-04-17
+
+### Refactored
+- **설정/로깅 경로 정리**
+  - `RuntimeSession` / `Settings` / `logging` 흐름을 단순화해 중복 분기와 유지보수 부담을 줄임
+- **불필요한 코드 제거**
+  - `chat-dom` / `chat-source` / `renderer` / `overlay` 주변의 unused helper와 legacy 경로를 정리
+
+### Tooling
+- **실행 환경 갱신**
+  - Node.js 기준 버전을 24.15.0으로 맞추고 pnpm lockfile의 libc 지원을 반영
+
 ## [0.12.0] - 2026-04-16
 
 ### Added
