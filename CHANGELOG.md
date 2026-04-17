@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.12.2] - 2026-04-17
+
+### Changed
+- **코멘트 흐름 연속성 개선**
+  - 레인 간 cross-lane stagger를 추가해 채팅 burst가 한 번에 동기화되어 화면이 비는 현상을 줄임
+  - recovery/resume 재동기화가 active 코멘트를 유지하고 queued backlog만 정리하도록 바꿔, 흐르던 코멘트가 중간에 통째로 사라지지 않게 개선
+
+### Fixed
+- **재연결/재동기화 시 중복 및 누락 완화**
+  - 채팅 DOM 기반 message id를 dedup 키로 사용해 reconnect/resume 이후 동일 코멘트가 반복 표시되는 문제를 줄임
+  - recovery 중 큐에서 제거한 최신 코멘트는 필요 시 다시 재주입할 수 있게 해, 복구 직후 흐름이 더 자연스럽게 이어지도록 조정
+- **채팅 패널 확보 안정성 개선**
+  - 패널 오픈 경로에 polling을 추가해 YouTube DOM 반영 지연 상황에서도 live chat surface를 더 안정적으로 확보하도록 개선
+
+### Refactored
+- **로깅 API 일원화**
+  - overlay logging 호출 경로를 `createLogger` 기반으로 정리해 진단 흐름을 더 일관되게 유지
+
 ## [0.12.1] - 2026-04-17
 
 ### Refactored
