@@ -100,6 +100,10 @@ const LAYOUT = {
   DURATION_MAX: 12000, // ms
   LANE_DELAY_CYCLE: 3, // number of lanes before repeating delay pattern
   LANE_DELAY_MS: 15, // per lane cycle
+  // Min interval between successive message renders across all lanes. Prevents
+  // bursts from all starting simultaneously (which causes visible gap when they
+  // all exit together) and spreads them into a continuous flow.
+  GLOBAL_STAGGER_MS: 150,
 
   // Collision detection: minimum horizontal gap between messages in the same lane.
   SAFE_DISTANCE_SCALE: 0.3, // relative to fontSize
@@ -340,6 +344,7 @@ export class Renderer {
   private readonly WARNING_INTERVAL_MS = 10000;
   private styleElement: HTMLStyleElement | null = null;
   private retryTimer: number | null = null;
+  private lastRenderStartTime = 0;
   private overlayDimensionsUnsubscribe: (() => void) | null = null;
   /** Ids of messages already enqueued/rendered, for dedup across reconnect/resume. */
   private readonly seenMessageIds = new Set<string>();
@@ -957,6 +962,8 @@ export class Renderer {
       laneState.lastItemHeightPx = messageHeight;
     }
 
+    this.lastRenderStartTime = startTime;
+
     // Auto-remove on animation end
     animation.addEventListener(
       'finish',
@@ -1367,8 +1374,13 @@ export class Renderer {
       return null;
     }
 
+    // Cross-lane stagger: force min gap between successive renders so bursts
+    // spread into a continuous flow instead of syncing across lanes.
+    const staggerFloor = this.lastRenderStartTime + LAYOUT.GLOBAL_STAGGER_MS;
+    const effectiveNow = Math.max(now, staggerFloor);
+
     // Prefer lanes that are ready right now; fall back to the soonest group.
-    const readyNow = candidates.filter((c) => c.readyTime <= now);
+    const readyNow = candidates.filter((c) => c.readyTime <= effectiveNow);
     const pool =
       readyNow.length > 0 ? readyNow : candidates.filter((c) => c.readyTime === minReadyTime);
 
@@ -1379,10 +1391,12 @@ export class Renderer {
     const chosenLane = this.lanes[chosen.startIndex];
     if (!chosenLane) return null;
 
+    const scheduledTime = Math.max(chosen.readyTime, staggerFloor);
+
     return {
       lane: chosenLane,
       laneSpan: requiredLanes,
-      waitMs: Math.max(0, Math.ceil(chosen.readyTime - now)),
+      waitMs: Math.max(0, Math.ceil(scheduledTime - now)),
     };
   }
 
