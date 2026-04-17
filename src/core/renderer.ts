@@ -16,7 +16,7 @@ import type {
   SuperChatInfo,
 } from '@app-types';
 import { isAllowedYouTubeImageUrl } from '@core/image-url';
-import { overlayLog } from '@core/logging';
+import { createLogger } from '@core/logging';
 import { clearTimeoutHandle } from '@core/timers';
 import {
   borderRadius,
@@ -29,6 +29,8 @@ import {
   typography,
 } from './design-tokens.js';
 import type { Overlay } from './overlay';
+
+const log = createLogger('Renderer');
 
 interface ActiveMessage {
   element: HTMLDivElement;
@@ -97,25 +99,19 @@ const LAYOUT = {
   DURATION_MIN: 5000, // ms
   DURATION_MAX: 12000, // ms
   LANE_DELAY_CYCLE: 3, // number of lanes before repeating delay pattern
-  LANE_DELAY_MS: 15, // ms per lane cycle (reduced from 40 for faster throughput)
+  LANE_DELAY_MS: 15, // per lane cycle
 
-  // Collision detection
-  // Safe distance = minimum pixel gap between messages in the same lane.
-  // Reduced from 0.7/16 → 0.5/10 → 0.3/6 for tighter horizontal packing
-  // while still preventing visual overlap at all supported font sizes.
+  // Collision detection: minimum horizontal gap between messages in the same lane.
   SAFE_DISTANCE_SCALE: 0.3, // relative to fontSize
   SAFE_DISTANCE_MIN: 6, // px
-  // Vertical clear time guards the brief window while the previous message
-  // is still partially behind the screen's right edge.  Reduced from
-  // 120/320 ms → 40/160 ms → 20/80 ms for faster lane turnover; the
-  // horizontal readiness check already dominates for messages wider than ~30 px.
+  // Short grace window while the previous message is still partially off the right edge.
   VERTICAL_CLEAR_TIME_MIN: 20, // ms
   VERTICAL_CLEAR_TIME_MAX: 80, // ms
   LANE_HEIGHT_PADDING_SCALE: 0.06, // relative to fontSize
   LANE_HEIGHT_PADDING_MIN: 1, // px
   RETRY_DELAY_MIN_MS: 16, // ms
   RETRY_DELAY_MAX_MS: 800, // ms
-  QUEUE_LOOKAHEAD_LIMIT: 20, // queue scan window for scheduling (increased from 14)
+  QUEUE_LOOKAHEAD_LIMIT: 20, // queue scan window for scheduling
   QUEUE_MAX_SIZE: 150, // max queued messages; oldest dropped on overflow
 } as const;
 
@@ -498,7 +494,7 @@ export class Renderer {
   ): HTMLImageElement | null {
     // Validate URL (defense in depth)
     if (!isAllowedYouTubeImageUrl(url)) {
-      overlayLog.warn('[YT Chat Overlay] Invalid image URL:', url);
+      log.warn('Invalid image URL:', url);
       return null;
     }
 
@@ -515,7 +511,7 @@ export class Renderer {
       'error',
       () => {
         img.style.display = 'none';
-        overlayLog.warn('[YT Chat Overlay] Failed to load image:', url);
+        log.warn('Failed to load image:', url);
       },
       { once: true }
     );
@@ -858,7 +854,7 @@ export class Renderer {
 
     const contentDiv = this.createMessageTextElement(message);
     if (!contentDiv) {
-      overlayLog.debug('[YT Chat Overlay] Skipping empty message');
+      log.debug('Skipping empty message');
       return null;
     }
 
@@ -1126,8 +1122,8 @@ export class Renderer {
     }
 
     this.lastWarningTime = now;
-    overlayLog.warn(
-      `[YT Chat Overlay] Performance warning: ${this.activeMessages.size} concurrent messages ` +
+    log.warn(
+      `Performance warning: ${this.activeMessages.size} concurrent messages ` +
         `(recommended max: ${this.settings.maxConcurrentMessages}). ` +
         `Consider reducing maxMessagesPerSecond setting.`
     );
@@ -1191,7 +1187,7 @@ export class Renderer {
   private renderMessage(message: ChatMessage): RenderResult {
     const renderContext = this.getRenderContext();
     if (!renderContext) {
-      overlayLog.debug('[YT Chat Overlay] Cannot render: container or dimensions missing');
+      log.debug('Cannot render: container or dimensions missing');
       return { status: 'dropped' };
     }
 
@@ -1216,8 +1212,8 @@ export class Renderer {
     const placement = this.findLanePlacement(messageHeight);
     if (placement === null) {
       // No available lane, drop message
-      overlayLog.debug(
-        `[YT Chat Overlay] No available lane for message (height: ${messageHeight}px). ` +
+      log.debug(
+        `No available lane for message (height: ${messageHeight}px). ` +
           `Active messages: ${this.activeMessages.size}, Lanes: ${dimensions.laneCount}, ` +
           `Queue size: ${this.messageQueue.length}`
       );
@@ -1242,7 +1238,7 @@ export class Renderer {
     // Track active message
     this.activeMessages.add(activeMessage);
 
-    overlayLog.debug('[YT Chat Overlay] Rendering message:', {
+    log.debug('Rendering message:', {
       text: message.text.substring(0, 20),
       author: message.author,
       authorType: this.getAuthorType(message),
@@ -1420,12 +1416,12 @@ export class Renderer {
   pause(): void {
     if (this.isPaused) return;
 
-    overlayLog.debug('[Renderer] Pausing all animations');
+    log.debug('Pausing all animations');
     this.isPaused = true;
     this.pausedAt = Date.now();
     this.clearRetryTimer();
     this.forEachAnimation((animation) => animation.pause());
-    overlayLog.debug(`[Renderer] Paused ${this.activeMessages.size} animations`);
+    log.debug(`Paused ${this.activeMessages.size} animations`);
   }
 
   /**
@@ -1451,10 +1447,10 @@ export class Renderer {
     }
     this.pausedAt = null;
 
-    overlayLog.debug('[Renderer] Resuming all animations');
+    log.debug('Resuming all animations');
     this.isPaused = false;
     this.forEachAnimation((animation) => animation.play());
-    overlayLog.debug(`[Renderer] Resumed ${this.activeMessages.size} animations`);
+    log.debug(`Resumed ${this.activeMessages.size} animations`);
 
     // Process any queued messages
     this.processQueue();
@@ -1492,15 +1488,13 @@ export class Renderer {
    */
   setPlaybackRate(rate: number): void {
     if (rate <= 0) {
-      overlayLog.warn('[Renderer] Invalid playback rate:', rate);
+      log.warn('Invalid playback rate:', rate);
       return;
     }
 
     this.playbackRate = rate;
 
-    overlayLog.debug(
-      `[Renderer] Setting playback rate to ${rate}x for ${this.activeMessages.size} animations`
-    );
+    log.debug(`Setting playback rate to ${rate}x for ${this.activeMessages.size} animations`);
     this.forEachAnimation((animation) => {
       animation.playbackRate = rate;
     });
@@ -1515,7 +1509,7 @@ export class Renderer {
       try {
         operation(active.animation);
       } catch (error) {
-        overlayLog.warn('[Renderer] Animation operation failed:', error);
+        log.warn('Animation operation failed:', error);
       }
     }
   }
@@ -1545,6 +1539,6 @@ export class Renderer {
     this.styleElement?.remove();
     this.styleElement = null;
 
-    overlayLog.debug('[Renderer] Destroyed');
+    log.debug('Destroyed');
   }
 }

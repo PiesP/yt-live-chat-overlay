@@ -7,8 +7,10 @@
 
 import type { OverlayDimensions, OverlaySettings } from '@app-types';
 import { ensurePlayerPositioning, findPlayerContainerElement } from '@core/dom';
-import { overlayLog } from '@core/logging';
+import { createLogger } from '@core/logging';
 import { clearTimeoutHandle } from '@core/timers';
+
+const log = createLogger('Overlay');
 
 export const OVERLAY_ID = 'yt-live-chat-overlay';
 export const OVERLAY_SELECTOR = `#${OVERLAY_ID}`;
@@ -79,7 +81,7 @@ export class Overlay {
       signal,
     });
     if (player) {
-      overlayLog.debug('[YT Chat Overlay] Player dimensions:', {
+      log.debug('Player dimensions:', {
         width: player.offsetWidth,
         height: player.offsetHeight,
       });
@@ -184,7 +186,7 @@ export class Overlay {
 
     this.updateDimensions();
 
-    overlayLog.info('[YT Chat Overlay] Overlay created');
+    log.info('Overlay created');
     return true;
   }
 
@@ -219,7 +221,7 @@ export class Overlay {
       try {
         callback(this.dimensions);
       } catch (error) {
-        overlayLog.warn('[Overlay] Dimension change callback error:', error);
+        log.warn('Dimension change callback error:', error);
       }
     }
   }
@@ -241,6 +243,6 @@ export class Overlay {
     this.settings = null;
     this.dimensionChangeCallbacks.clear();
 
-    overlayLog.debug('[Overlay] Destroyed');
+    log.debug('Destroyed');
   }
 }

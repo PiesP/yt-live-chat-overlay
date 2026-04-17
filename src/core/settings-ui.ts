@@ -1,6 +1,6 @@
 import { isLogLevel, type OverlaySettings } from '@app-types';
 import { ensurePlayerPositioning, findPlayerContainerElement } from '@core/dom';
-import { overlayLog } from '@core/logging';
+import { createLogger } from '@core/logging';
 import {
   AUTHOR_COLOR_KEYS,
   cloneSettings,
@@ -16,6 +16,8 @@ import {
   SHOW_AUTHOR_KEYS,
 } from '@core/settings-schema';
 import { borderRadius, colors, shadows, spacing, typography, zIndex } from './design-tokens.js';
+
+const log = createLogger('SettingsUi');
 
 const STYLE_ID = 'yt-chat-overlay-settings-style';
 const BUTTON_ID = 'yt-chat-overlay-settings-button';
@@ -37,24 +39,18 @@ interface TrustedTypesFactoryLike {
   ) => TrustedTypesPolicyLike;
 }
 
-let trustedTypesPolicy: TrustedTypesPolicyLike | null | undefined;
-
-const getTrustedTypesFactory = (): TrustedTypesFactoryLike | null =>
-  (window as Window & { trustedTypes?: TrustedTypesFactoryLike }).trustedTypes ?? null;
+let trustedTypesPolicy: TrustedTypesPolicyLike | null = null;
 
 const createSettingsUiHtml = (html: string): string => {
-  const trustedTypes = getTrustedTypesFactory();
-  if (!trustedTypes) {
-    return html;
-  }
-
-  if (trustedTypesPolicy === undefined) {
+  if (!trustedTypesPolicy) {
+    const trustedTypes = (window as Window & { trustedTypes?: TrustedTypesFactoryLike })
+      .trustedTypes;
+    if (!trustedTypes) return html;
     trustedTypesPolicy = trustedTypes.createPolicy(TRUSTED_TYPES_POLICY_NAME, {
       createHTML: (input) => input,
     });
   }
-
-  return trustedTypesPolicy ? trustedTypesPolicy.createHTML(html) : html;
+  return trustedTypesPolicy.createHTML(html);
 };
 
 const createNumberInputAttributes = (
@@ -1047,6 +1043,6 @@ export class SettingsUi {
     this.modal = null;
     this.playerElement = null;
 
-    overlayLog.info('[SettingsUi] Destroyed');
+    log.info('Destroyed');
   }
 }

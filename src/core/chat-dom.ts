@@ -1,5 +1,3 @@
-import { overlayLog } from '@core/logging';
-
 export type ChatSelectorSurface = 'frame' | 'iframe' | 'iframe-items' | 'container' | 'toggle';
 
 export interface ChatSelectorDescriptor {
@@ -116,31 +114,12 @@ export const findChatIframeItemMatch = (root: ParentNode): ChatSelectorMatch<Ele
   findChatSelectorMatch<Element>(CHAT_IFRAME_ITEM_DESCRIPTORS, { root });
 
 export const findInPageChatContainerMatch = (): ChatSelectorMatch<Element> | null =>
-  findChatSelectorMatch<Element>(CHAT_CONTAINER_DESCRIPTORS, {
-    predicate: (element) => validateChatElement(element),
-  });
+  findChatSelectorMatch<Element>(CHAT_CONTAINER_DESCRIPTORS);
 
 export const findChatToggleButtonMatch = (): ChatSelectorMatch<HTMLButtonElement> | null =>
   findChatSelectorMatch<HTMLButtonElement>(CHAT_TOGGLE_BUTTON_DESCRIPTORS, {
     predicate: (element) => !element.disabled,
   });
-
-/**
- * Validate that an element lives inside a chat-related host. The
- * CHAT_CONTAINER_DESCRIPTORS above already scope by `#chat` or live chat
- * renderer ids, so we only need a cheap closest() guard to reject anything
- * that escaped into an unrelated subtree.
- */
-export const validateChatElement = (element: Element): boolean => {
-  const host = element.closest(
-    'ytd-live-chat-frame, yt-live-chat-app, yt-live-chat-item-list-renderer, #chat'
-  );
-  if (!host) {
-    overlayLog.debug('[YT Chat Overlay] Element rejected: no chat host ancestor');
-    return false;
-  }
-  return true;
-};
 
 export const isChatFrameHidden = (chatFrame: HTMLElement): boolean => {
   if (

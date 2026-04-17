@@ -12,8 +12,10 @@ import {
   VIDEO_SELECTORS,
   waitForElementMatch,
 } from '@core/dom';
-import { overlayLog } from '@core/logging';
+import { createLogger } from '@core/logging';
 import { clearIntervalHandle, clearTimeoutHandle } from '@core/timers';
+
+const log = createLogger('VideoSync');
 
 /**
  * Callbacks for video state changes
@@ -98,13 +100,13 @@ export class VideoSync {
     throwIfAborted(signal);
 
     if (!videoElement) {
-      overlayLog.warn('[VideoSync] Video element not found, starting periodic detection');
+      log.warn('Video element not found, starting periodic detection');
       this.startPeriodicDetection();
       return false;
     }
 
     this.setupVideoElement(videoElement);
-    overlayLog.debug('[VideoSync] Initialized with video element');
+    log.debug('Initialized with video element');
     return true;
   }
 
@@ -129,7 +131,7 @@ export class VideoSync {
     });
 
     if (match) {
-      overlayLog.debug('[VideoSync] Found video element:', match.selector);
+      log.debug('Found video element:', match.selector);
       return match.element;
     }
 
@@ -195,11 +197,11 @@ export class VideoSync {
       if (video) {
         this.setupVideoElement(video);
         this.stopPeriodicDetection();
-        overlayLog.debug('[VideoSync] Video element detected via periodic check');
+        log.debug('Video element detected via periodic check');
       }
     }, CONFIG.PERIODIC_DETECTION_INTERVAL_MS);
 
-    overlayLog.debug('[VideoSync] Periodic detection started (every 2 seconds)');
+    log.debug('Periodic detection started (every 2 seconds)');
   }
 
   /**
@@ -208,7 +210,7 @@ export class VideoSync {
   private stopPeriodicDetection(): void {
     if (this.detectInterval !== null) {
       this.detectInterval = clearIntervalHandle(this.detectInterval);
-      overlayLog.debug('[VideoSync] Periodic detection stopped');
+      log.debug('Periodic detection stopped');
     }
   }
 
@@ -221,7 +223,7 @@ export class VideoSync {
     video.addEventListener('seeking', this.boundHandlers.seeking);
     video.addEventListener('ratechange', this.boundHandlers.ratechange);
 
-    overlayLog.debug('[VideoSync] Event listeners attached');
+    log.debug('Event listeners attached');
   }
 
   /**
@@ -233,7 +235,7 @@ export class VideoSync {
     video.removeEventListener('seeking', this.boundHandlers.seeking);
     video.removeEventListener('ratechange', this.boundHandlers.ratechange);
 
-    overlayLog.debug('[VideoSync] Event listeners detached');
+    log.debug('Event listeners detached');
   }
 
   /**
@@ -243,13 +245,13 @@ export class VideoSync {
   private observeVideoReplacement(video: HTMLVideoElement): void {
     const playerContainer = this.findPlayerContainer();
     if (!playerContainer) {
-      overlayLog.warn('[VideoSync] Player container not found, cannot observe video replacement');
+      log.warn('Player container not found, cannot observe video replacement');
       return;
     }
 
     this.mutationObserver = new MutationObserver(() => {
       if (!document.contains(video)) {
-        overlayLog.debug('[VideoSync] Video element removed from DOM, reinitializing...');
+        log.debug('Video element removed from DOM, reinitializing...');
         this.handleVideoReplacement();
       }
     });
@@ -259,7 +261,7 @@ export class VideoSync {
       subtree: true,
     });
 
-    overlayLog.debug('[VideoSync] Video replacement observer attached');
+    log.debug('Video replacement observer attached');
   }
 
   /**
@@ -269,7 +271,7 @@ export class VideoSync {
     if (this.mutationObserver) {
       this.mutationObserver.disconnect();
       this.mutationObserver = null;
-      overlayLog.debug('[VideoSync] Video replacement observer stopped');
+      log.debug('Video replacement observer stopped');
     }
   }
 
@@ -283,9 +285,9 @@ export class VideoSync {
 
     this.reinitializeTimer = window.setTimeout(() => {
       this.reinitializeTimer = null;
-      overlayLog.debug('[VideoSync] Attempting to reacquire video element...');
+      log.debug('Attempting to reacquire video element...');
       this.init(this.lifecycleSignal ?? undefined).catch((error) => {
-        overlayLog.warn('[VideoSync] Failed to reinitialize after video replacement:', error);
+        log.warn('Failed to reinitialize after video replacement:', error);
       });
     }, CONFIG.REINITIALIZATION_DELAY_MS);
   }
@@ -294,23 +296,23 @@ export class VideoSync {
    * Event handlers
    */
   private handlePause(): void {
-    overlayLog.debug('[VideoSync] Video paused');
+    log.debug('Video paused');
     this.callbacks.onPause?.();
   }
 
   private handlePlay(): void {
-    overlayLog.debug('[VideoSync] Video playing');
+    log.debug('Video playing');
     this.callbacks.onPlay?.();
   }
 
   private handleSeeking(): void {
-    overlayLog.debug('[VideoSync] Video seeking');
+    log.debug('Video seeking');
     this.callbacks.onSeeking?.();
   }
 
   private handleRateChange(): void {
     const rate = this.videoElement?.playbackRate ?? 1.0;
-    overlayLog.debug('[VideoSync] Playback rate changed:', rate);
+    log.debug('Playback rate changed:', rate);
     this.callbacks.onRateChange?.(rate);
   }
 
@@ -333,6 +335,6 @@ export class VideoSync {
     this.stopPeriodicDetection();
     this.clearReinitializationTimer();
     this.resetVideoState();
-    overlayLog.debug('[VideoSync] Destroyed');
+    log.debug('Destroyed');
   }
 }

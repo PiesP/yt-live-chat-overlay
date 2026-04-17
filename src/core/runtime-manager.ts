@@ -1,7 +1,9 @@
 import type { OverlaySettings } from '@app-types';
-import { overlayLog } from '@core/logging';
+import { createLogger } from '@core/logging';
 import { RuntimeSession, type RuntimeSessionStartStatus } from '@core/runtime-session';
 import { clearTimeoutHandle } from '@core/timers';
+
+const log = createLogger('RuntimeManager');
 
 const NAVIGATION_SETTLE_DELAY_MS = 2000;
 const START_RETRY_DELAY_MS = 2000;
@@ -153,7 +155,7 @@ export class RuntimeManager {
     }
 
     this.resetStartFailures();
-    overlayLog.info('[RuntimeManager] Runtime session started');
+    log.info('Runtime session started');
   }
 
   private getDesiredState(): DesiredRuntimeState {
@@ -218,20 +220,20 @@ export class RuntimeManager {
   ): void {
     if (status === 'unavailable') {
       this.resetStartFailures();
-      overlayLog.warn('[RuntimeManager] Runtime unavailable; waiting for state changes');
+      log.warn('Runtime unavailable; waiting for state changes');
       return;
     }
 
     const attempts = this.startFailureState.url === url ? this.startFailureState.attempts + 1 : 1;
     this.startFailureState = { url, attempts };
-    overlayLog.warn(`[RuntimeManager] Failed to start runtime (${attempts}/${MAX_START_ATTEMPTS})`);
+    log.warn(`Failed to start runtime (${attempts}/${MAX_START_ATTEMPTS})`);
 
     if (attempts < MAX_START_ATTEMPTS) {
       this.scheduleReconcile(START_RETRY_DELAY_MS);
       return;
     }
 
-    overlayLog.warn('[RuntimeManager] Giving up on automatic restart until state changes');
+    log.warn('Giving up on automatic restart until state changes');
   }
 
   private resetStartFailures(): void {

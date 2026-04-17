@@ -44,3 +44,20 @@ export const setOverlayLogLevel = (level: LogLevel): void => {
 export const initOverlayLogLevel = (): void => {
   setOverlayLogLevel(readStoredLogLevel());
 };
+
+export interface ModuleLogger {
+  debug: (...args: ConsoleLogArgs) => void;
+  info: (...args: ConsoleLogArgs) => void;
+  warn: (...args: ConsoleWarnArgs) => void;
+  error: (...args: ConsoleErrorArgs) => void;
+}
+
+export const createLogger = (moduleName: string): ModuleLogger => {
+  const prefix = `[${moduleName}]`;
+  return {
+    debug: (...args) => overlayLog.debug(prefix, ...args),
+    info: (...args) => overlayLog.info(prefix, ...args),
+    warn: (...args) => overlayLog.warn(prefix, ...args),
+    error: (...args) => overlayLog.error(prefix, ...args),
+  };
+};

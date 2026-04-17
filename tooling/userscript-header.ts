@@ -19,15 +19,13 @@ const REPOSITORY_URL = 'https://github.com/PiesP/yt-live-chat-overlay';
 const USERSCRIPT_ICON_URL = 'https://www.youtube.com/favicon.ico';
 const USERSCRIPT_MATCH_PATTERNS = ['https://www.youtube.com/*'] as const;
 const USERSCRIPT_GRANTS = ['none'] as const;
-const LEGAL_NOTICE_LINES = [
-  '/* LEGAL NOTICE:',
-  " * This userscript operates ENTIRELY in the user's browser (100% local processing).",
-  ' * NO chat data is stored, transmitted, or processed externally.',
-  ' * Only user settings (font size, speed, etc.) are stored in localStorage.',
-  ' * This is NOT an official YouTube or Nico-nico product.',
-  ' * The script injects an overlay/settings control and may open the live chat panel when needed.',
-  ' */',
-] as const;
+const LEGAL_NOTICE = `/* LEGAL NOTICE:
+ * This userscript operates ENTIRELY in the user's browser (100% local processing).
+ * NO chat data is stored, transmitted, or processed externally.
+ * Only user settings (font size, speed, etc.) are stored in localStorage.
+ * This is NOT an official YouTube or Nico-nico product.
+ * The script injects an overlay/settings control and may open the live chat panel when needed.
+ */`;
 
 const formatDirective = (key: string, value: string): string =>
   `// @${key.padEnd(12)} ${value}`;
@@ -70,7 +68,7 @@ function generateHeader(meta: UserscriptMeta): string {
     ...buildMetadataLines(meta),
     '// ==/UserScript==',
     '',
-    ...LEGAL_NOTICE_LINES,
+    LEGAL_NOTICE,
     '',
   ].join('\n');
 }

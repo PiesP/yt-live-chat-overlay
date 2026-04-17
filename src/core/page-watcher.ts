@@ -1,4 +1,6 @@
-import { overlayLog } from '@core/logging';
+import { createLogger } from '@core/logging';
+
+const log = createLogger('PageWatcher');
 
 /**
  * Page Watcher
@@ -20,66 +22,36 @@ const isSupportedYouTubePath = (pathname: string): boolean =>
 export class PageWatcher {
   private currentUrl = location.href;
   private callbacks: Set<PageChangeCallback> = new Set();
-  private originalPushState: typeof history.pushState | null = null;
-  private originalReplaceState: typeof history.replaceState | null = null;
+  private readonly historyRestorers: Array<() => void> = [];
 
   private readonly handleUrlMutation = (): void => {
     this.handlePotentialUrlChange('popstate');
   };
 
   private readonly handleYouTubeNavigateFinish = (): void => {
-    overlayLog.debug('[YT Chat Overlay] YouTube navigation finished');
+    log.debug('YouTube navigation finished');
     this.handlePotentialUrlChange('yt-navigate-finish');
   };
 
   constructor() {
-    this.init();
-  }
-
-  /**
-   * Initialize page watcher
-   */
-  private init(): void {
     this.patchHistoryMethod('pushState');
     this.patchHistoryMethod('replaceState');
-    this.attachEventListeners();
-  }
-
-  private patchHistoryMethod(methodName: HistoryMethodName): void {
-    const originalMethod = history[methodName].bind(history) as HistoryStateMethod;
-
-    if (methodName === 'pushState') {
-      this.originalPushState = history.pushState;
-    } else {
-      this.originalReplaceState = history.replaceState;
-    }
-
-    history[methodName] = ((...args: Parameters<HistoryStateMethod>) => {
-      originalMethod(...args);
-      this.handlePotentialUrlChange(methodName);
-    }) as HistoryStateMethod;
-  }
-
-  private attachEventListeners(): void {
     window.addEventListener('popstate', this.handleUrlMutation);
     window.addEventListener(YT_NAVIGATE_FINISH_EVENT, this.handleYouTubeNavigateFinish);
   }
 
-  private detachEventListeners(): void {
-    window.removeEventListener('popstate', this.handleUrlMutation);
-    window.removeEventListener(YT_NAVIGATE_FINISH_EVENT, this.handleYouTubeNavigateFinish);
-  }
+  private patchHistoryMethod(methodName: HistoryMethodName): void {
+    const original = history[methodName];
+    const bound = original.bind(history);
 
-  private restoreHistoryMethods(): void {
-    if (this.originalPushState) {
-      history.pushState = this.originalPushState;
-      this.originalPushState = null;
-    }
+    history[methodName] = ((...args: Parameters<HistoryStateMethod>) => {
+      bound(...args);
+      this.handlePotentialUrlChange(methodName);
+    }) as HistoryStateMethod;
 
-    if (this.originalReplaceState) {
-      history.replaceState = this.originalReplaceState;
-      this.originalReplaceState = null;
-    }
+    this.historyRestorers.push(() => {
+      history[methodName] = original;
+    });
   }
 
   private handlePotentialUrlChange(source: NavigationSignalSource): void {
@@ -90,7 +62,7 @@ export class PageWatcher {
 
     const previousUrl = this.currentUrl;
     this.currentUrl = newUrl;
-    overlayLog.info('[PageWatcher] URL changed', {
+    log.info('URL changed', {
       source,
       from: previousUrl,
       to: newUrl,
@@ -107,7 +79,7 @@ export class PageWatcher {
       try {
         callback();
       } catch (error) {
-        overlayLog.error('[YT Chat Overlay] Page change callback error:', error);
+        log.error('Page change callback error:', error);
       }
     }
   }
@@ -130,12 +102,12 @@ export class PageWatcher {
    * Destroy and cleanup all resources
    */
   destroy(): void {
-    this.detachEventListeners();
-    this.restoreHistoryMethods();
-
-    // Clear callbacks
+    window.removeEventListener('popstate', this.handleUrlMutation);
+    window.removeEventListener(YT_NAVIGATE_FINISH_EVENT, this.handleYouTubeNavigateFinish);
+    for (const restore of this.historyRestorers) restore();
+    this.historyRestorers.length = 0;
     this.callbacks.clear();
 
-    overlayLog.debug('[PageWatcher] Destroyed');
+    log.debug('Destroyed');
   }
 }

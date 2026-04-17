@@ -1,4 +1,6 @@
-import { overlayLog } from '@core/logging';
+import { createLogger } from '@core/logging';
+
+const log = createLogger('Dom');
 
 export interface SelectorMatch<T extends Element> {
   readonly element: T;
@@ -66,15 +68,7 @@ export const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
 export const isVisibleElement = (element: HTMLElement): boolean =>
   element.offsetWidth > 0 && element.offsetHeight > 0;
 
-const normalizeWaitOptions = <T extends Element>(options: WaitForElementMatchOptions<T>) => ({
-  root: options.root ?? document,
-  predicate: options.predicate,
-  attempts: Math.max(1, Math.trunc(options.attempts ?? DEFAULT_WAIT_ATTEMPTS)),
-  intervalMs: Math.max(0, options.intervalMs ?? DEFAULT_WAIT_INTERVAL_MS),
-  signal: options.signal,
-});
-
-const normalizePollOptions = (options: PollForValueOptions = {}) => ({
+const normalizeCommonOptions = (options: PollForValueOptions) => ({
   attempts: Math.max(1, Math.trunc(options.attempts ?? DEFAULT_WAIT_ATTEMPTS)),
   intervalMs: Math.max(0, options.intervalMs ?? DEFAULT_WAIT_INTERVAL_MS),
   signal: options.signal,
@@ -100,21 +94,17 @@ export const waitForElementMatch = async <T extends Element>(
   selectors: readonly string[],
   options: WaitForElementMatchOptions<T> = {}
 ): Promise<SelectorMatch<T> | null> => {
-  const { attempts, intervalMs, root, predicate, signal } = normalizeWaitOptions(options);
+  const { root = document, predicate } = options;
   const matchOptions = predicate ? { root, predicate } : { root };
 
-  return pollForValue(() => findElementMatch<T>(selectors, matchOptions), {
-    attempts,
-    intervalMs,
-    signal,
-  });
+  return pollForValue(() => findElementMatch<T>(selectors, matchOptions), options);
 };
 
 export const pollForValue = async <T>(
   readValue: () => T | null | undefined,
   options: PollForValueOptions = {}
 ): Promise<T | null> => {
-  const { attempts, intervalMs, signal } = normalizePollOptions(options);
+  const { attempts, intervalMs, signal } = normalizeCommonOptions(options);
 
   for (let attempt = 0; attempt < attempts; attempt++) {
     throwIfAborted(signal);
@@ -122,14 +112,11 @@ export const pollForValue = async <T>(
     const value = readValue();
     if (value !== null && value !== undefined) return value;
 
-    if (attempt === attempts - 1) {
-      break;
-    }
+    if (attempt === attempts - 1) break;
 
     await sleep(intervalMs, signal);
   }
 
-  throwIfAborted(signal);
   return null;
 };
 
@@ -158,10 +145,10 @@ export const findPlayerContainerElement = async (
   });
 
   if (!match) {
-    overlayLog.warn('[YT Chat Overlay] No player container found');
+    log.warn('No player container found');
     return null;
   }
 
-  overlayLog.debug('[YT Chat Overlay] Player found with selector:', match.selector);
+  log.debug('Player found with selector:', match.selector);
   return match.element;
 };

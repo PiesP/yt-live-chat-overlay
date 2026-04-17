@@ -1,12 +1,14 @@
 import type { OverlaySettings } from '@app-types';
 import { type ChatHealthSnapshot, ChatSource, type ChatSourceStartStatus } from '@core/chat-source';
 import { throwIfAborted } from '@core/dom';
-import { overlayLog } from '@core/logging';
+import { createLogger } from '@core/logging';
 import { OVERLAY_SELECTOR, Overlay } from '@core/overlay';
 import { Renderer } from '@core/renderer';
 import { shouldResetRendererForSettingsChange } from '@core/settings-schema';
 import { clearIntervalHandle } from '@core/timers';
 import { VideoSync } from '@core/video-sync';
+
+const log = createLogger('RuntimeSession');
 
 const RESUME_SYNC_MESSAGE_LIMIT = 20;
 const CHAT_WATCHDOG_INTERVAL_MS = 15_000;
@@ -89,7 +91,7 @@ export class RuntimeSession {
           void this.recover('video-play', true);
         },
         onRateChange: (rate) => {
-          overlayLog.info('[RuntimeSession] Video playback rate changed:', rate);
+          log.info('Video playback rate changed:', rate);
           this.renderer?.setPlaybackRate(rate);
         },
         onSeeking: () => {
@@ -110,20 +112,18 @@ export class RuntimeSession {
 
       this.setupChatWatchdog();
       if (chatStarted === 'retryable') {
-        overlayLog.warn(
-          '[RuntimeSession] Chat source was not ready during startup; recovery will continue in-session'
-        );
+        log.warn('Chat source was not ready during startup; recovery will continue in-session');
         void this.recover('startup');
       }
 
-      overlayLog.info('[RuntimeSession] Started successfully');
+      log.info('Started successfully');
       return 'started';
     } catch (error) {
       if (isAbortError(error)) {
         return 'retryable';
       }
 
-      overlayLog.warn('[RuntimeSession] Failed to start:', error);
+      log.warn('Failed to start:', error);
       return 'retryable';
     }
   }
@@ -183,7 +183,7 @@ export class RuntimeSession {
     this.overlay?.destroy();
     this.overlay = null;
 
-    overlayLog.info('[RuntimeSession] Disposed');
+    log.info('Disposed');
   }
 
   private async startChatSource(signal: AbortSignal): Promise<ChatSourceStartStatus> {
@@ -272,7 +272,7 @@ export class RuntimeSession {
         return;
       }
 
-      overlayLog.warn('[RuntimeSession] Chat unhealthy - triggering recovery', {
+      log.warn('Chat unhealthy - triggering recovery', {
         health,
         stalled,
         withinGrace,
@@ -282,9 +282,7 @@ export class RuntimeSession {
   }
 
   private async recover(reason: RecoveryReason, forceResync = false): Promise<void> {
-    if (this.disposed) {
-      return;
-    }
+    if (this.disposed) return;
 
     if (this.recoveryPromise) {
       await this.recoveryPromise;
@@ -294,7 +292,7 @@ export class RuntimeSession {
       return;
     }
 
-    const recoveryPromise = this.runRecovery(reason, forceResync).finally(() => {
+    const recoveryPromise = this.runRecoveryBody(reason, forceResync).finally(() => {
       if (this.recoveryPromise === recoveryPromise) {
         this.recoveryPromise = null;
       }
@@ -304,16 +302,13 @@ export class RuntimeSession {
     await recoveryPromise;
   }
 
-  private async runRecovery(reason: RecoveryReason, forceResync: boolean): Promise<void> {
-    if (this.disposed || this.videoSync?.isPaused()) {
-      return;
-    }
+  private async runRecoveryBody(reason: RecoveryReason, forceResync: boolean): Promise<void> {
+    if (this.disposed || this.videoSync?.isPaused()) return;
+
+    const chatSource = this.chatSource;
+    if (!chatSource) return;
 
     const signal = this.abortController.signal;
-    const chatSource = this.chatSource;
-    if (!chatSource) {
-      return;
-    }
 
     try {
       chatSource.ensureLiveEdge(CHAT_LIVE_EDGE_THRESHOLD_PX);
@@ -323,16 +318,11 @@ export class RuntimeSession {
       let shouldResync = forceResync;
 
       if (needsReconnect) {
-        overlayLog.info('[RuntimeSession] Recovering chat health:', {
-          reason,
-          health,
-        });
+        log.info('Recovering chat health:', { reason, health });
 
         const reconnected = await chatSource.reconnect(signal);
-        throwIfAborted(signal);
-
         if (!reconnected) {
-          overlayLog.warn('[RuntimeSession] Failed to reconnect chat during recovery');
+          log.warn('Failed to reconnect chat during recovery');
         }
 
         chatSource.ensureLiveEdge(CHAT_LIVE_EDGE_THRESHOLD_PX);
@@ -343,11 +333,9 @@ export class RuntimeSession {
         await this.syncLatestMessagesOnResume();
       }
     } catch (error) {
-      if (isAbortError(error)) {
-        return;
-      }
+      if (isAbortError(error)) return;
 
-      overlayLog.warn('[RuntimeSession] Chat health recovery failed:', error);
+      log.warn('Chat health recovery failed:', error);
       if (forceResync) {
         await this.syncLatestMessagesOnResume();
       }
@@ -382,7 +370,7 @@ export class RuntimeSession {
       })
       .catch((error: unknown) => {
         if (!isAbortError(error)) {
-          overlayLog.warn('[RuntimeSession] Failed to sync latest messages on resume:', error);
+          log.warn('Failed to sync latest messages on resume:', error);
         }
         this.renderer?.resume();
       })

@@ -6,11 +6,13 @@
  */
 
 import { DEFAULT_SETTINGS, type OverlaySettings } from '@app-types';
-import { initOverlayLogLevel, overlayLog, setOverlayLogLevel } from '@core/logging';
+import { createLogger, initOverlayLogLevel, setOverlayLogLevel } from '@core/logging';
 import { PageWatcher } from '@core/page-watcher';
 import { RuntimeManager } from '@core/runtime-manager';
 import { Settings } from '@core/settings';
 import { SettingsUi } from '@core/settings-ui';
+
+const log = createLogger('App');
 
 /**
  * Thin application shell.
@@ -47,7 +49,7 @@ class App {
   constructor() {
     setOverlayLogLevel(this.settings.get().logLevel);
     this.pageWatcher.onChange(this.handlePageWatcherChange);
-    overlayLog.debug('[App] Initialized');
+    log.debug('Initialized');
   }
 
   async start(): Promise<void> {
@@ -62,7 +64,7 @@ class App {
     this.runtimeManager.destroy();
     this.pageWatcher.destroy();
     this.settingsUi.destroy();
-    overlayLog.debug('[App] Stopped');
+    log.debug('Stopped');
   }
 
   getSettings(): Readonly<OverlaySettings> {
@@ -82,7 +84,7 @@ class App {
     }
 
     this.runtimeManager.requestReconcile('settings-change');
-    overlayLog.debug('[App] Settings updated');
+    log.debug('Settings updated');
   }
 
   resetSettings(): void {
@@ -93,29 +95,29 @@ class App {
     try {
       await this.settingsUi.attach();
     } catch (error) {
-      overlayLog.warn('[App] Settings UI error:', error);
+      log.warn('Settings UI error:', error);
     }
   }
 }
 
 function main(): void {
-  overlayLog.debug('[YT Chat Overlay] Script loaded', {
+  log.debug('Script loaded', {
     readyState: document.readyState,
     url: location.href,
   });
 
   if (document.readyState === 'loading') {
-    overlayLog.debug('[YT Chat Overlay] Waiting for DOMContentLoaded...');
+    log.debug('Waiting for DOMContentLoaded...');
     document.addEventListener(
       'DOMContentLoaded',
       () => {
-        overlayLog.debug('[YT Chat Overlay] DOMContentLoaded fired');
+        log.debug('DOMContentLoaded fired');
         void initApp();
       },
       { once: true }
     );
   } else {
-    overlayLog.debug('[YT Chat Overlay] Document already ready, initializing...');
+    log.debug('Document already ready, initializing...');
     void initApp();
   }
 }
@@ -125,13 +127,13 @@ const stopPreviousAppInstance = (): void => {
     return;
   }
 
-  overlayLog.debug('[YT Chat Overlay] Stopping previous instance before re-init');
+  log.debug('Stopping previous instance before re-init');
   window.__ytChatOverlay.stop();
   window.__ytChatOverlay = undefined;
 };
 
 async function initApp(): Promise<void> {
-  overlayLog.debug('[YT Chat Overlay] Initializing application...');
+  log.debug('Initializing application...');
   let app: App | null = null;
 
   try {
@@ -141,17 +143,17 @@ async function initApp(): Promise<void> {
     await app.start();
 
     window.__ytChatOverlay = app;
-    overlayLog.info('[YT Chat Overlay] App instance exposed to window.__ytChatOverlay');
+    log.info('App instance exposed to window.__ytChatOverlay');
   } catch (error) {
     if (app) {
       try {
         app.stop();
       } catch (cleanupError) {
-        overlayLog.error('[YT Chat Overlay] Cleanup after failed init also failed:', cleanupError);
+        log.error('Cleanup after failed init also failed:', cleanupError);
       }
     }
 
-    overlayLog.error('[YT Chat Overlay] Fatal error:', error);
+    log.error('Fatal error:', error);
     throw error;
   }
 }
@@ -160,5 +162,5 @@ try {
   initOverlayLogLevel();
   main();
 } catch (error) {
-  overlayLog.error('[YT Chat Overlay] Failed to start:', error);
+  log.error('Failed to start:', error);
 }

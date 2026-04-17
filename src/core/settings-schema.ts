@@ -196,26 +196,14 @@ const normalizeSettingValue = <T>(
   return (definition.kind === 'rounded-number' ? Math.round(clamped) : clamped) as T;
 };
 
-const assignRootSetting = (
-  target: OverlaySettings,
-  source: Readonly<OverlaySettings>,
-  key: RootScalarSettingKey
+const assignNormalizedSetting = <Target extends object, K extends keyof Target>(
+  target: Target,
+  source: Readonly<Target>,
+  key: K,
+  definition: SettingDefinition,
+  defaults: Readonly<Target>
 ): void => {
-  const definition = ROOT_SETTING_DEFINITIONS[key];
-  target[key] = normalizeSettingValue(definition, source[key], DEFAULT_SETTINGS[key]) as never;
-};
-
-const assignOutlineSetting = (
-  target: OutlineSettings,
-  source: Readonly<OutlineSettings>,
-  key: OutlineSettingKey
-): void => {
-  const definition = OUTLINE_SETTING_DEFINITIONS[key];
-  target[key] = normalizeSettingValue(
-    definition,
-    source[key],
-    DEFAULT_SETTINGS.outline[key]
-  ) as never;
+  target[key] = normalizeSettingValue(definition, source[key], defaults[key]) as never;
 };
 
 const hasAnyChanged = <T extends object>(
@@ -226,11 +214,6 @@ const hasAnyChanged = <T extends object>(
 
 const scaleUiValue = (value: number, scale: number): number => Number((value * scale).toFixed(4));
 
-const mergeNestedSettings = <T extends object>(
-  base: Readonly<T>,
-  partial: Partial<T> | undefined
-): T => (isRecord(partial) ? { ...base, ...partial } : { ...base });
-
 export const cloneSettings = (settings: Readonly<OverlaySettings>): OverlaySettings => ({
   ...settings,
   showAuthor: { ...settings.showAuthor },
@@ -238,22 +221,31 @@ export const cloneSettings = (settings: Readonly<OverlaySettings>): OverlaySetti
   outline: { ...settings.outline },
 });
 
+const mergeNested = <T extends object>(base: Readonly<T>, partial: Partial<T> | undefined): T =>
+  isRecord(partial) ? { ...base, ...partial } : { ...base };
+
 export const mergeSettings = (
   base: Readonly<OverlaySettings>,
   partial: Partial<OverlaySettings>
 ): OverlaySettings => ({
   ...base,
   ...partial,
-  showAuthor: mergeNestedSettings(base.showAuthor, partial.showAuthor),
-  colors: mergeNestedSettings(base.colors, partial.colors),
-  outline: mergeNestedSettings(base.outline, partial.outline),
+  showAuthor: mergeNested(base.showAuthor, partial.showAuthor),
+  colors: mergeNested(base.colors, partial.colors),
+  outline: mergeNested(base.outline, partial.outline),
 });
 
 export const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings => {
   const normalized = cloneSettings(DEFAULT_SETTINGS);
 
   for (const key of ROOT_SETTING_KEYS) {
-    assignRootSetting(normalized, settings, key);
+    assignNormalizedSetting(
+      normalized,
+      settings,
+      key,
+      ROOT_SETTING_DEFINITIONS[key],
+      DEFAULT_SETTINGS
+    );
   }
 
   for (const key of SHOW_AUTHOR_KEYS) {
@@ -270,11 +262,22 @@ export const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlayS
   }
 
   for (const key of OUTLINE_SETTING_KEYS) {
-    assignOutlineSetting(normalized.outline, settings.outline, key);
+    assignNormalizedSetting(
+      normalized.outline,
+      settings.outline,
+      key,
+      OUTLINE_SETTING_DEFINITIONS[key],
+      DEFAULT_SETTINGS.outline
+    );
   }
 
   return normalized;
 };
+
+export const applySettings = (
+  base: Readonly<OverlaySettings>,
+  partial: Partial<OverlaySettings>
+): OverlaySettings => normalizeSettings(mergeSettings(base, partial));
 
 export const shouldResetRendererForSettingsChange = (
   previous: Readonly<OverlaySettings>,
