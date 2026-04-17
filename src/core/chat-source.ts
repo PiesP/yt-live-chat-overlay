@@ -15,6 +15,7 @@ import type {
 import {
   describeChatSelector,
   findChatFrameMatch,
+  findChatHostMatch,
   findChatIframeItemMatch,
   findChatIframeMatch,
   findChatToggleButtonMatch,
@@ -22,7 +23,7 @@ import {
   isChatFrameHidden as isChatFrameHiddenElement,
 } from '@core/chat-dom';
 import { parseRgbColor } from '@core/design-tokens';
-import { pollForValue, sleep, throwIfAborted } from '@core/dom';
+import { sleep, throwIfAborted } from '@core/dom';
 import { isAllowedYouTubeImageUrl } from '@core/image-url';
 import { createLogger } from '@core/logging';
 
@@ -30,12 +31,7 @@ const log = createLogger('ChatSource');
 
 const CHAT_CONTAINER_SEARCH_ATTEMPTS = 8;
 const CHAT_CONTAINER_SEARCH_INTERVAL_MS = 1000;
-const CHAT_FRAME_SEARCH_ATTEMPTS = 10;
-const CHAT_FRAME_SEARCH_INTERVAL_MS = 500;
-const CHAT_FRAME_RETRY_ATTEMPTS_AFTER_OPEN = 6;
 const CHAT_PANEL_SETTLE_DELAY_MS = 500;
-const CHAT_PANEL_OPEN_POLL_ATTEMPTS = 10;
-const CHAT_PANEL_OPEN_POLL_INTERVAL_MS = 300;
 const RECENT_MESSAGE_BUFFER_SIZE = 100;
 const RECONNECT_ATTEMPTS = 3;
 const RECONNECT_RETRY_DELAY_MS = 1000;
@@ -67,15 +63,12 @@ export interface ChatHealthSnapshot {
   atLiveEdge: boolean;
 }
 
-type ChatResolutionStatus = 'ready' | 'closed' | 'retryable' | 'unavailable';
+type ChatResolutionStatus = 'ready' | 'retryable' | 'unavailable';
 type ChatContainerLookupStatus = 'ready' | 'not-found' | 'unsupported';
 
 interface ChatResolutionOptions {
-  containerAttempts: number;
-  containerIntervalMs: number;
-  frameRetryAttempts: number;
-  frameWaitAttempts: number;
-  frameWaitIntervalMs: number;
+  attempts: number;
+  intervalMs: number;
   signal?: AbortSignal | undefined;
 }
 
@@ -89,6 +82,14 @@ type ChatResolutionResult =
       status: Exclude<ChatResolutionStatus, 'ready'>;
       chatFrame: HTMLElement | null;
     };
+
+interface ChatDomSnapshot {
+  chatHost: HTMLElement | null;
+  chatFrame: HTMLElement | null;
+  chatIframe: HTMLIFrameElement | null;
+  toggleButton: HTMLButtonElement | null;
+  containerLookup: ChatContainerLookupResult;
+}
 
 type ChatContainerLookupResult =
   | {
@@ -125,8 +126,7 @@ export class ChatSource {
   }
 
   /**
-   * Wait for iframe content to fully load
-   * Returns the #items element when it appears in the iframe's DOM
+   * Inspect the current iframe DOM and return the chat item container when ready.
    */
   private inspectIframeContent(iframe: HTMLIFrameElement): ChatContainerLookupResult | null {
     try {
@@ -160,57 +160,20 @@ export class ChatSource {
     return null;
   }
 
-  private async waitForIframeContent(
-    iframe: HTMLIFrameElement,
-    maxAttempts = 20,
-    intervalMs = 300,
-    signal?: AbortSignal
-  ): Promise<ChatContainerLookupResult> {
-    const result = await pollForValue(() => this.inspectIframeContent(iframe), {
-      attempts: maxAttempts,
-      intervalMs,
-      signal,
-    });
-
-    return result ?? { status: 'not-found' };
+  private findChatIframe(): HTMLIFrameElement | null {
+    return findChatIframeMatch()?.element ?? null;
   }
 
-  private findChatIframe(): HTMLIFrameElement | null {
-    const match = findChatIframeMatch();
-    if (!match) {
-      log.debug('Chat iframe: not found');
-      return null;
-    }
-
-    log.debug('Chat iframe found:', describeChatSelector(match.descriptor));
-    log.debug('iframe src:', match.element.src);
-    return match.element;
+  private findChatHost(): HTMLElement | null {
+    return findChatHostMatch()?.element ?? null;
   }
 
   private findChatFrame(): HTMLElement | null {
-    const match = findChatFrameMatch();
-    return match?.element ?? null;
+    return findChatFrameMatch()?.element ?? null;
   }
 
   private findChatToggleButton(): HTMLButtonElement | null {
-    const match = findChatToggleButtonMatch();
-    if (!match) {
-      return null;
-    }
-
-    log.debug('Found toggle button:', describeChatSelector(match.descriptor));
-    return match.element;
-  }
-
-  private clickChatToggleButton(): boolean {
-    const button = this.findChatToggleButton();
-    if (!button) {
-      return false;
-    }
-
-    button.click();
-    log.debug('Clicked chat toggle button');
-    return true;
+    return findChatToggleButtonMatch()?.element ?? null;
   }
 
   /**
@@ -218,28 +181,19 @@ export class ChatSource {
    * Priority A: iframe access (if same-origin)
    * Priority B: in-page render
    */
-  async findChatContainer(signal?: AbortSignal): Promise<ChatContainerLookupResult> {
-    log.debug('Looking for chat container...');
-    log.debug('Current URL:', window.location.href);
-
-    // Try iframe first (multiple selectors)
-    const iframe = this.findChatIframe();
-
+  private findChatContainer(iframe: HTMLIFrameElement | null): ChatContainerLookupResult {
     if (iframe) {
       try {
-        // Wait for iframe content to fully load
-        const iframeResult = await this.waitForIframeContent(iframe, 20, 300, signal);
-        if (iframeResult.status === 'ready') {
+        const iframeResult = this.inspectIframeContent(iframe);
+        if (iframeResult?.status === 'ready') {
           log.debug('Chat container found in iframe');
           return iframeResult;
         }
 
-        if (iframeResult.status === 'unsupported') {
+        if (iframeResult?.status === 'unsupported') {
           log.warn('Chat iframe is unavailable in this browser/runtime environment');
           return iframeResult;
         }
-
-        log.debug('iframe content timeout - no #items found');
       } catch (error) {
         // Cross-origin access denied, fall through to in-page
         log.debug('iframe access denied:', error);
@@ -253,41 +207,94 @@ export class ChatSource {
       return { status: 'ready', container: inPageMatch.element };
     }
 
-    log.warn('No chat container found with any selector');
     return { status: 'not-found' };
   }
 
-  /**
-   * Wait for chat frame element to appear in DOM
-   */
-  private async waitForChatFrame(
-    maxAttempts = 10,
-    intervalMs = 500,
-    signal?: AbortSignal
-  ): Promise<HTMLElement | null> {
-    return pollForValue(() => this.findChatFrame(), {
-      attempts: maxAttempts,
-      intervalMs,
-      signal,
-    });
+  private inspectChatDom(): ChatDomSnapshot {
+    const chatIframe = this.findChatIframe();
+
+    return {
+      chatHost: this.findChatHost(),
+      chatFrame: this.findChatFrame(),
+      chatIframe,
+      toggleButton: this.findChatToggleButton(),
+      containerLookup: this.findChatContainer(chatIframe),
+    };
   }
 
-  private async findChatContainerWithRetries(
-    attempts = CHAT_CONTAINER_SEARCH_ATTEMPTS,
-    intervalMs = CHAT_CONTAINER_SEARCH_INTERVAL_MS,
-    signal?: AbortSignal
-  ): Promise<ChatContainerLookupResult> {
+  private hasChatSurfaceEvidence(snapshot: ChatDomSnapshot): boolean {
+    return (
+      snapshot.chatHost !== null ||
+      snapshot.chatFrame !== null ||
+      snapshot.chatIframe !== null ||
+      snapshot.toggleButton !== null
+    );
+  }
+
+  private getToggleExpandedState(toggleButton: HTMLButtonElement): boolean | null {
+    const expanded = toggleButton.getAttribute('aria-expanded');
+    if (expanded === 'true') {
+      return true;
+    }
+
+    if (expanded === 'false') {
+      return false;
+    }
+
+    return null;
+  }
+
+  private tryOpenChatPanel(snapshot: ChatDomSnapshot): boolean {
+    if (snapshot.chatFrame && !this.isChatFrameHidden(snapshot.chatFrame)) {
+      return false;
+    }
+
+    const toggleButton = snapshot.toggleButton;
+    if (!toggleButton) {
+      return false;
+    }
+
+    if (this.getToggleExpandedState(toggleButton) === true) {
+      return false;
+    }
+
+    toggleButton.click();
+    log.debug('Clicked chat toggle button');
+    return true;
+  }
+
+  private async resolveChatContainer(
+    options: ChatResolutionOptions
+  ): Promise<ChatResolutionResult> {
+    const { attempts, intervalMs, signal } = options;
+
+    let clickedToggle = false;
+    let sawChatSurface = false;
+    let lastSnapshot: ChatDomSnapshot | null = null;
+
     for (let attempt = 1; attempt <= attempts; attempt++) {
       throwIfAborted(signal);
 
-      const result = await this.findChatContainer(signal);
-      if (result.status === 'ready') {
-        log.debug(`Chat container found on attempt ${attempt}`);
-        return result;
+      const snapshot = this.inspectChatDom();
+      lastSnapshot = snapshot;
+      sawChatSurface ||= this.hasChatSurfaceEvidence(snapshot);
+
+      if (snapshot.containerLookup.status === 'ready') {
+        return {
+          status: 'ready',
+          chatFrame: snapshot.chatFrame,
+          container: snapshot.containerLookup.container,
+        };
       }
 
-      if (result.status === 'unsupported') {
-        return result;
+      if (snapshot.containerLookup.status === 'unsupported') {
+        return { status: 'unavailable', chatFrame: snapshot.chatFrame };
+      }
+
+      if (!clickedToggle && this.tryOpenChatPanel(snapshot)) {
+        clickedToggle = true;
+        await sleep(CHAT_PANEL_SETTLE_DELAY_MS, signal);
+        continue;
       }
 
       if (attempt < attempts) {
@@ -295,84 +302,22 @@ export class ChatSource {
       }
     }
 
-    return { status: 'not-found' };
-  }
-
-  private async resolveChatContainer(
-    options: ChatResolutionOptions
-  ): Promise<ChatResolutionResult> {
-    const {
-      frameWaitAttempts,
-      frameRetryAttempts,
-      frameWaitIntervalMs,
-      containerAttempts,
-      containerIntervalMs,
-      signal,
-    } = options;
-
-    let chatFrame = await this.waitForChatFrame(frameWaitAttempts, frameWaitIntervalMs, signal);
-    let openedWithoutFrame = false;
-
-    if (!chatFrame) {
-      log.warn('Chat frame element not found - chat may be disabled for this video');
-
-      openedWithoutFrame = this.tryOpenChatPanelWithoutFrame();
-      if (openedWithoutFrame) {
-        chatFrame = await this.waitForChatFrame(frameRetryAttempts, frameWaitIntervalMs, signal);
-        if (chatFrame) {
-          await this.ensureChatPanelOpen(chatFrame, signal);
-        }
-      }
-    } else {
-      await this.ensureChatPanelOpen(chatFrame, signal);
-    }
-
-    await sleep(CHAT_PANEL_SETTLE_DELAY_MS, signal);
-
-    const containerLookup = await this.findChatContainerWithRetries(
-      containerAttempts,
-      containerIntervalMs,
-      signal
-    );
-
-    if (containerLookup.status === 'ready') {
-      return {
-        status: 'ready',
-        chatFrame,
-        container: containerLookup.container,
-      };
-    }
-
-    if (containerLookup.status === 'unsupported') {
-      return { status: 'unavailable', chatFrame };
-    }
-
-    if (chatFrame && this.isChatFrameHidden(chatFrame)) {
-      return { status: 'closed', chatFrame };
-    }
-
-    if (chatFrame || openedWithoutFrame) {
-      return { status: 'retryable', chatFrame };
-    }
-
-    return { status: 'unavailable', chatFrame };
+    const chatFrame = lastSnapshot?.chatFrame ?? this.findChatFrame();
+    return sawChatSurface
+      ? { status: 'retryable', chatFrame }
+      : { status: 'unavailable', chatFrame };
   }
 
   private logChatResolutionFailure(
     context: 'start' | 'reconnect',
     result: Exclude<ChatResolutionResult, { status: 'ready' }>,
-    containerAttempts: number
+    attempts: number
   ): void {
     const suffix = context === 'reconnect' ? ' (reconnect)' : '';
 
-    if (result.status === 'closed') {
-      log.warn(`Chat panel is still closed after attempting to open it${suffix}`);
-      return;
-    }
-
     if (result.status === 'retryable') {
       log.warn(
-        `Chat surface was found, but no container became available after ${containerAttempts} attempts${suffix}`
+        `Chat surface was found, but no container became available after ${attempts} attempts${suffix}`
       );
       return;
     }
@@ -466,64 +411,6 @@ export class ChatSource {
   }
 
   /**
-   * Try to open chat panel when the frame isn't in the DOM yet
-   */
-  private tryOpenChatPanelWithoutFrame(): boolean {
-    log.debug('Chat frame missing, attempting to open chat panel...');
-
-    try {
-      if (this.clickChatToggleButton()) {
-        return true;
-      }
-    } catch (error) {
-      log.warn('Error clicking chat toggle button:', error);
-    }
-
-    log.warn('Could not find chat toggle button to open panel');
-    return false;
-  }
-
-  /**
-   * Check if chat panel is collapsed/hidden and try to open it
-   */
-  private async ensureChatPanelOpen(
-    chatFrame: HTMLElement,
-    signal?: AbortSignal
-  ): Promise<boolean> {
-    log.debug('Checking if chat panel needs to be opened...');
-
-    // Check if chat is collapsed (hidden)
-    const isHidden = this.isChatFrameHidden(chatFrame);
-
-    if (!isHidden) {
-      log.debug('Chat panel is already open');
-      return true;
-    }
-
-    log.debug('Chat panel is collapsed, attempting to open...');
-
-    try {
-      if (this.clickChatToggleButton()) {
-        const opened = await pollForValue(() => (this.isChatFrameHidden(chatFrame) ? null : true), {
-          attempts: CHAT_PANEL_OPEN_POLL_ATTEMPTS,
-          intervalMs: CHAT_PANEL_OPEN_POLL_INTERVAL_MS,
-          signal,
-        });
-
-        if (opened) {
-          log.debug('Successfully opened chat panel');
-          return true;
-        }
-      }
-    } catch (error) {
-      log.warn('Error clicking chat toggle button:', error);
-    }
-
-    log.warn('Could not open chat panel automatically');
-    return false;
-  }
-
-  /**
    * Start monitoring chat
    */
   async start(callback: MessageCallback, signal?: AbortSignal): Promise<ChatSourceStartStatus> {
@@ -535,11 +422,8 @@ export class ChatSource {
 
     try {
       const resolution = await this.resolveChatContainer({
-        frameWaitAttempts: CHAT_FRAME_SEARCH_ATTEMPTS,
-        frameRetryAttempts: CHAT_FRAME_RETRY_ATTEMPTS_AFTER_OPEN,
-        frameWaitIntervalMs: CHAT_FRAME_SEARCH_INTERVAL_MS,
-        containerAttempts: CHAT_CONTAINER_SEARCH_ATTEMPTS,
-        containerIntervalMs: CHAT_CONTAINER_SEARCH_INTERVAL_MS,
+        attempts: CHAT_CONTAINER_SEARCH_ATTEMPTS,
+        intervalMs: CHAT_CONTAINER_SEARCH_INTERVAL_MS,
         signal: combinedSignal,
       });
 
@@ -723,9 +607,7 @@ export class ChatSource {
    * chat panel is collapsed/reconstructed).
    */
   isObserverAlive(): boolean {
-    return (
-      this.observer !== null && this.chatContainer !== null && document.contains(this.chatContainer)
-    );
+    return this.observer !== null && this.chatContainer?.isConnected === true;
   }
 
   /**
@@ -749,11 +631,8 @@ export class ChatSource {
       this.recentMessages.length = 0;
 
       const resolution = await this.resolveChatContainer({
-        frameWaitAttempts: CHAT_FRAME_RETRY_ATTEMPTS_AFTER_OPEN,
-        frameRetryAttempts: CHAT_FRAME_RETRY_ATTEMPTS_AFTER_OPEN,
-        frameWaitIntervalMs: CHAT_FRAME_SEARCH_INTERVAL_MS,
-        containerAttempts: RECONNECT_ATTEMPTS,
-        containerIntervalMs: RECONNECT_RETRY_DELAY_MS,
+        attempts: RECONNECT_ATTEMPTS,
+        intervalMs: RECONNECT_RETRY_DELAY_MS,
         signal: combinedSignal,
       });
 

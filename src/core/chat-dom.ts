@@ -1,4 +1,10 @@
-export type ChatSelectorSurface = 'frame' | 'iframe' | 'iframe-items' | 'container' | 'toggle';
+export type ChatSelectorSurface =
+  | 'host'
+  | 'frame'
+  | 'iframe'
+  | 'iframe-items'
+  | 'container'
+  | 'toggle';
 
 export interface ChatSelectorDescriptor {
   selector: string;
@@ -16,16 +22,39 @@ interface ChatMatchOptions<T extends Element> {
   root?: ParentNode;
 }
 
+const CHAT_HOST_DESCRIPTORS = [
+  {
+    selector: '#chat',
+    purpose: 'watch page chat host',
+    surface: 'host',
+  },
+] as const satisfies readonly ChatSelectorDescriptor[];
+
 const CHAT_FRAME_DESCRIPTORS = [
   {
     selector: 'ytd-live-chat-frame#chat',
     purpose: 'live chat frame host',
     surface: 'frame',
   },
+  {
+    selector: '#chat ytd-live-chat-frame',
+    purpose: 'chat frame inside host',
+    surface: 'frame',
+  },
   { selector: 'ytd-live-chat-frame', purpose: 'frame fallback', surface: 'frame' },
 ] as const satisfies readonly ChatSelectorDescriptor[];
 
 const CHAT_IFRAME_DESCRIPTORS = [
+  {
+    selector: '#chat iframe[src*="live_chat"]',
+    purpose: 'live chat iframe inside host',
+    surface: 'iframe',
+  },
+  {
+    selector: 'ytd-live-chat-frame iframe[src*="live_chat"]',
+    purpose: 'live chat iframe inside frame',
+    surface: 'iframe',
+  },
   {
     selector: 'iframe[src*="live_chat"]',
     purpose: 'live chat iframe',
@@ -50,6 +79,16 @@ const CHAT_CONTAINER_DESCRIPTORS = [
     surface: 'container',
   },
   {
+    selector: '#chat yt-live-chat-item-list-renderer #items',
+    purpose: 'chat host item list',
+    surface: 'container',
+  },
+  {
+    selector: '#chat #items',
+    purpose: 'chat host items fallback',
+    surface: 'container',
+  },
+  {
     selector: '#items.yt-live-chat-item-list-renderer',
     purpose: 'root item list',
     surface: 'container',
@@ -68,26 +107,83 @@ const CHAT_TOGGLE_BUTTON_DESCRIPTORS = [
     surface: 'toggle',
   },
   {
+    selector: '#chat button#show-hide-button',
+    purpose: 'chat host show/hide toggle',
+    surface: 'toggle',
+  },
+  {
+    selector: '#chat ytd-toggle-button-renderer button',
+    purpose: 'chat host toggle renderer button',
+    surface: 'toggle',
+  },
+  {
+    selector: '#chat button[aria-controls], #chat button[aria-expanded]',
+    purpose: 'chat host aria toggle button',
+    surface: 'toggle',
+  },
+  {
+    selector: '#secondary ytd-toggle-button-renderer button',
+    purpose: 'secondary column toggle renderer button',
+    surface: 'toggle',
+  },
+  {
+    selector:
+      '#secondary button[aria-controls], #secondary button[aria-expanded], #secondary button[aria-label], #secondary button[title]',
+    purpose: 'secondary column chat button candidate',
+    surface: 'toggle',
+  },
+  {
     selector: 'button#show-hide-button',
     purpose: 'show/hide chat button',
     surface: 'toggle',
   },
-  {
-    selector: 'ytd-toggle-button-renderer button[aria-label*="chat" i]',
-    purpose: 'chat toggle button',
-    surface: 'toggle',
-  },
-  {
-    selector: 'ytd-toggle-button-renderer button[aria-label*="채팅" i]',
-    purpose: 'localized chat toggle button (ko)',
-    surface: 'toggle',
-  },
-  {
-    selector: 'ytd-toggle-button-renderer button[aria-label*="チャット" i]',
-    purpose: 'localized chat toggle button (ja)',
-    surface: 'toggle',
-  },
 ] as const satisfies readonly ChatSelectorDescriptor[];
+
+const CHAT_TOGGLE_MARKERS = [
+  'chat',
+  'live chat',
+  'chat replay',
+  '실시간 채팅',
+  '채팅 다시 보기',
+  '채팅',
+  'ライブチャット',
+  'チャット',
+] as const;
+
+const normalizeChatToggleText = (value: string | null | undefined): string =>
+  value?.replace(/\s+/g, ' ').trim().toLowerCase() ?? '';
+
+const hasChatToggleMarker = (value: string | null | undefined): boolean => {
+  const normalized = normalizeChatToggleText(value);
+  return normalized.length > 0 && CHAT_TOGGLE_MARKERS.some((marker) => normalized.includes(marker));
+};
+
+const isLikelyChatToggleButton = (button: HTMLButtonElement): boolean => {
+  if (button.id === 'show-hide-button') {
+    return true;
+  }
+
+  const ariaControls = normalizeChatToggleText(button.getAttribute('aria-controls'));
+  if (ariaControls.includes('chat')) {
+    return true;
+  }
+
+  const hasChatLabel = [
+    button.getAttribute('aria-label'),
+    button.getAttribute('title'),
+    button.textContent,
+  ].some((candidate) => hasChatToggleMarker(candidate));
+
+  if (!hasChatLabel) {
+    return false;
+  }
+
+  if (button.closest('ytd-live-chat-frame') || button.closest('ytd-toggle-button-renderer')) {
+    return true;
+  }
+
+  return button.hasAttribute('aria-expanded');
+};
 
 const findChatSelectorMatch = <T extends Element>(
   descriptors: readonly ChatSelectorDescriptor[],
@@ -96,16 +192,14 @@ const findChatSelectorMatch = <T extends Element>(
   const { root = document, predicate } = options;
 
   for (const descriptor of descriptors) {
-    const element = root.querySelector<T>(descriptor.selector);
-    if (!element) {
-      continue;
-    }
+    const elements = Array.from(root.querySelectorAll(descriptor.selector)) as T[];
+    for (const element of elements) {
+      if (predicate && !predicate(element)) {
+        continue;
+      }
 
-    if (predicate && !predicate(element)) {
-      continue;
+      return { element, descriptor };
     }
-
-    return { element, descriptor };
   }
 
   return null;
@@ -113,6 +207,9 @@ const findChatSelectorMatch = <T extends Element>(
 
 export const describeChatSelector = (descriptor: ChatSelectorDescriptor): string =>
   `${descriptor.surface}:${descriptor.purpose} (${descriptor.selector})`;
+
+export const findChatHostMatch = (): ChatSelectorMatch<HTMLElement> | null =>
+  findChatSelectorMatch<HTMLElement>(CHAT_HOST_DESCRIPTORS);
 
 export const findChatFrameMatch = (): ChatSelectorMatch<HTMLElement> | null =>
   findChatSelectorMatch<HTMLElement>(CHAT_FRAME_DESCRIPTORS);
@@ -127,7 +224,9 @@ export const findInPageChatContainerMatch = (): ChatSelectorMatch<Element> | nul
   findChatSelectorMatch<Element>(CHAT_CONTAINER_DESCRIPTORS);
 
 export const findChatToggleButtonMatch = (): ChatSelectorMatch<HTMLButtonElement> | null =>
-  findChatSelectorMatch<HTMLButtonElement>(CHAT_TOGGLE_BUTTON_DESCRIPTORS);
+  findChatSelectorMatch<HTMLButtonElement>(CHAT_TOGGLE_BUTTON_DESCRIPTORS, {
+    predicate: isLikelyChatToggleButton,
+  });
 
 export const isChatFrameHidden = (chatFrame: HTMLElement): boolean => {
   if (

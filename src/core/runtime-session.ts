@@ -19,7 +19,7 @@ const CHAT_RECOVERY_GRACE_MS = 2_500;
 const isAbortError = (error: unknown): boolean =>
   error instanceof DOMException && error.name === 'AbortError';
 
-type RecoveryReason = 'startup' | 'video-play' | 'visibility-return' | 'watchdog';
+type RecoveryReason = 'startup' | 'video-play' | 'foreground-return' | 'watchdog';
 
 export interface RuntimeSessionOptions {
   targetUrl: string;
@@ -34,7 +34,7 @@ export type RuntimeSessionStartStatus = 'started' | 'retryable' | 'unavailable';
  * Invariants:
  * - A session owns exactly one Overlay/Renderer/ChatSource/VideoSync set.
  * - All async startup and recovery work is cancelled by one AbortController.
- * - Visibility, watchdog, and playback resume all converge on one recover() path.
+ * - Foreground return, watchdog, and playback resume all converge on one recover() path.
  */
 export class RuntimeSession {
   private settings: OverlaySettings;
@@ -45,9 +45,10 @@ export class RuntimeSession {
   private chatSource: ChatSource | null = null;
   private videoSync: VideoSync | null = null;
   private visibilityHandler: (() => void) | null = null;
+  private focusHandler: (() => void) | null = null;
+  private pageShowHandler: (() => void) | null = null;
   private chatWatchdogInterval: number | null = null;
-  private hiddenWhilePlaying = false;
-  private lastVisibilityReturnAt = 0;
+  private lastForegroundRecoveryAt = 0;
   private disposed = false;
   private recoveryPromise: Promise<void> | null = null;
   private resumeSyncPromise: Promise<void> | null = null;
@@ -102,7 +103,7 @@ export class RuntimeSession {
       await videoSync.init(signal);
       throwIfAborted(signal);
 
-      this.setupVisibilityHandler();
+      this.setupForegroundRecoveryHandlers();
       const chatStarted = await this.startChatSource(signal);
       throwIfAborted(signal);
 
@@ -169,6 +170,16 @@ export class RuntimeSession {
       this.visibilityHandler = null;
     }
 
+    if (this.focusHandler) {
+      window.removeEventListener('focus', this.focusHandler);
+      this.focusHandler = null;
+    }
+
+    if (this.pageShowHandler) {
+      window.removeEventListener('pageshow', this.pageShowHandler);
+      this.pageShowHandler = null;
+    }
+
     this.chatWatchdogInterval = clearIntervalHandle(this.chatWatchdogInterval);
 
     this.chatSource?.stop();
@@ -210,26 +221,36 @@ export class RuntimeSession {
     }
   }
 
-  private setupVisibilityHandler(): void {
-    this.visibilityHandler = () => {
-      if (document.hidden) {
-        if (!this.renderer?.isPausedState()) {
-          this.renderer?.pause();
-          this.hiddenWhilePlaying = true;
-        }
+  private setupForegroundRecoveryHandlers(): void {
+    const handleForegroundReturn = (): void => {
+      if (document.hidden || this.videoSync?.isPaused()) {
         return;
       }
 
-      this.lastVisibilityReturnAt = Date.now();
-      if (!this.hiddenWhilePlaying) {
+      const now = Date.now();
+      if (now - this.lastForegroundRecoveryAt < CHAT_RECOVERY_GRACE_MS) {
         return;
       }
 
-      this.hiddenWhilePlaying = false;
-      void this.recover('visibility-return', true);
+      this.lastForegroundRecoveryAt = now;
+      void this.recover('foreground-return', true);
     };
 
+    this.visibilityHandler = () => {
+      if (document.hidden) {
+        this.renderer?.pause();
+        return;
+      }
+
+      handleForegroundReturn();
+    };
+
+    this.focusHandler = handleForegroundReturn;
+    this.pageShowHandler = handleForegroundReturn;
+
     document.addEventListener('visibilitychange', this.visibilityHandler);
+    window.addEventListener('focus', this.focusHandler);
+    window.addEventListener('pageshow', this.pageShowHandler);
   }
 
   private getChatHealthSnapshot(chatSource: ChatSource): ChatHealthSnapshot {
@@ -244,7 +265,7 @@ export class RuntimeSession {
     withinGrace: boolean;
     needsRecovery: boolean;
   } {
-    const withinGrace = Date.now() - this.lastVisibilityReturnAt < CHAT_RECOVERY_GRACE_MS;
+    const withinGrace = Date.now() - this.lastForegroundRecoveryAt < CHAT_RECOVERY_GRACE_MS;
     const stalled = !health.recentlyActive && !withinGrace;
 
     return {
@@ -314,7 +335,7 @@ export class RuntimeSession {
       chatSource.ensureLiveEdge(CHAT_LIVE_EDGE_THRESHOLD_PX);
 
       const health = this.getChatHealthSnapshot(chatSource);
-      // forceResync marks user-visible resume events (visibility-return,
+      // forceResync marks user-visible resume events (foreground-return,
       // video-play). Background throttling can leave the iframe silently
       // stalled while health reports "alive" (observer attached, last
       // message timestamp recent, scroll still at live edge), so we always
