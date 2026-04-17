@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.13.0] - 2026-04-17
+
+### Added
+- **라이브 엣지 재동기화 도입**
+  - 채팅 reconnect/reopen 이후 live edge 기준으로 다시 맞추는 동기화 흐름을 추가해 최신 채팅 기준 복구를 강화
+  - 스크롤 보정과 live edge 추적을 묶어 패널 상태 변화 뒤에도 최신 메시지 흐름을 더 안정적으로 유지
+
+### Changed
+- **채팅 표면 탐색 범위 확장**
+  - watch page `#chat` host, `ytd-live-chat-frame`, secondary column toggle button까지 포함하도록 selector surface를 확장
+  - toggle button 판별을 aria/text 기반 휴리스틱으로 정리해 레이아웃·현지화 차이 대응 범위를 넓힘
+
+### Fixed
+- **disconnect/recovery 시 backlog 오염 완화**
+  - 연결 해제 시 stale queued message를 정리해 재연결 뒤 오래된 메시지가 뒤늦게 흐르는 문제를 줄임
+  - chat host/iframe 전환과 스크롤 회복 경로를 정리해 container 재획득 및 복구 안정성을 개선
+
+### Refactored
+- **코드 정리 및 fallback 축소**
+  - `renderer`, `chat-source`, `video-sync`, `runtime-manager`, `settings-schema`, `settings-ui` 주변 dead code와 중복 fallback을 제거
+  - selector/설정 schema 구조를 단순화해 유지보수 부담을 낮춤
+
 ## [0.12.2] - 2026-04-17
 
 ### Changed
