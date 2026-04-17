@@ -314,7 +314,14 @@ export class RuntimeSession {
       chatSource.ensureLiveEdge(CHAT_LIVE_EDGE_THRESHOLD_PX);
 
       const health = this.getChatHealthSnapshot(chatSource);
-      const needsReconnect = !health.observerAlive || !health.recentlyActive || !health.atLiveEdge;
+      // forceResync marks user-visible resume events (visibility-return,
+      // video-play). Background throttling can leave the iframe silently
+      // stalled while health reports "alive" (observer attached, last
+      // message timestamp recent, scroll still at live edge), so we always
+      // rebuild the observer + buffer on those resumes. Watchdog ticks keep
+      // their health-driven behavior to avoid churn during steady playback.
+      const needsReconnect =
+        forceResync || !health.observerAlive || !health.recentlyActive || !health.atLiveEdge;
       let shouldResync = forceResync;
 
       if (needsReconnect) {

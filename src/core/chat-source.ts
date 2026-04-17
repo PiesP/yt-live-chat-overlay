@@ -744,6 +744,9 @@ export class ChatSource {
       this.observer?.disconnect();
       this.observer = null;
       this.chatContainer = null;
+      // Drop cached backlog so the next resume sync pulls from fresh DOM state
+      // rather than replaying messages captured before background throttling.
+      this.recentMessages.length = 0;
 
       const resolution = await this.resolveChatContainer({
         frameWaitAttempts: CHAT_FRAME_RETRY_ATTEMPTS_AFTER_OPEN,

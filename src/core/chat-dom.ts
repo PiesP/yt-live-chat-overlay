@@ -63,18 +63,28 @@ const CHAT_CONTAINER_DESCRIPTORS = [
 
 const CHAT_TOGGLE_BUTTON_DESCRIPTORS = [
   {
+    selector: 'ytd-live-chat-frame button#show-hide-button',
+    purpose: 'live chat frame show/hide toggle',
+    surface: 'toggle',
+  },
+  {
+    selector: 'button#show-hide-button',
+    purpose: 'show/hide chat button',
+    surface: 'toggle',
+  },
+  {
     selector: 'ytd-toggle-button-renderer button[aria-label*="chat" i]',
     purpose: 'chat toggle button',
     surface: 'toggle',
   },
   {
     selector: 'ytd-toggle-button-renderer button[aria-label*="채팅" i]',
-    purpose: 'localized chat toggle button',
+    purpose: 'localized chat toggle button (ko)',
     surface: 'toggle',
   },
   {
-    selector: 'button#show-hide-button',
-    purpose: 'show/hide chat button',
+    selector: 'ytd-toggle-button-renderer button[aria-label*="チャット" i]',
+    purpose: 'localized chat toggle button (ja)',
     surface: 'toggle',
   },
 ] as const satisfies readonly ChatSelectorDescriptor[];
@@ -117,9 +127,7 @@ export const findInPageChatContainerMatch = (): ChatSelectorMatch<Element> | nul
   findChatSelectorMatch<Element>(CHAT_CONTAINER_DESCRIPTORS);
 
 export const findChatToggleButtonMatch = (): ChatSelectorMatch<HTMLButtonElement> | null =>
-  findChatSelectorMatch<HTMLButtonElement>(CHAT_TOGGLE_BUTTON_DESCRIPTORS, {
-    predicate: (element) => !element.disabled,
-  });
+  findChatSelectorMatch<HTMLButtonElement>(CHAT_TOGGLE_BUTTON_DESCRIPTORS);
 
 export const isChatFrameHidden = (chatFrame: HTMLElement): boolean => {
   if (
