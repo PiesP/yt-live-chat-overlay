@@ -108,6 +108,7 @@ export class ChatSource {
   /** Signals shutdown to in-flight async loops. Aborted by stop(). */
   private lifecycleController: AbortController | null = null;
   private reconnectInProgress = false;
+  private liveEdgeSyncFrame: number | null = null;
   /** Tracks processed DOM nodes to prevent firing the same element twice. */
   private readonly seenElements = new WeakSet<Element>();
   /** Recent normalized messages for resume synchronization. */
@@ -332,6 +333,7 @@ export class ChatSource {
 
   private attachObserver(container: Element): void {
     this.observer?.disconnect();
+    this.cancelScheduledLiveEdgeSync();
     this.chatContainer = container;
     this.observer = new MutationObserver((mutations) => {
       this.handleMutations(mutations);
@@ -341,6 +343,8 @@ export class ChatSource {
       childList: true,
       subtree: false,
     });
+
+    this.scheduleLiveEdgeSync();
   }
 
   private rememberMessage(message: ChatMessage): void {
@@ -350,6 +354,48 @@ export class ChatSource {
     if (overflow > 0) {
       this.recentMessages.splice(0, overflow);
     }
+  }
+
+  private cancelScheduledLiveEdgeSync(): void {
+    if (this.liveEdgeSyncFrame !== null) {
+      window.cancelAnimationFrame(this.liveEdgeSyncFrame);
+      this.liveEdgeSyncFrame = null;
+    }
+  }
+
+  private scheduleLiveEdgeSync(thresholdPx = DEFAULT_LIVE_EDGE_THRESHOLD_PX): void {
+    if (this.liveEdgeSyncFrame !== null) {
+      return;
+    }
+
+    this.liveEdgeSyncFrame = window.requestAnimationFrame(() => {
+      this.liveEdgeSyncFrame = null;
+      this.ensureLiveEdge(thresholdPx);
+    });
+  }
+
+  private findScrollableAncestor(base: Element): HTMLElement | null {
+    const fallback = base.parentElement;
+    let current = fallback;
+
+    while (current) {
+      if (current.id === 'item-scroller') {
+        return current;
+      }
+
+      const computedStyle = current.ownerDocument.defaultView?.getComputedStyle(current);
+      const overflowY = computedStyle?.overflowY ?? '';
+      if (
+        (overflowY === 'auto' || overflowY === 'scroll') &&
+        current.scrollHeight > current.clientHeight
+      ) {
+        return current;
+      }
+
+      current = current.parentElement;
+    }
+
+    return fallback instanceof HTMLElement ? fallback : null;
   }
 
   private getLiveEdgeDistance(container: HTMLElement): number {
@@ -366,7 +412,8 @@ export class ChatSource {
       return null;
     }
 
-    const scroller = base.closest<HTMLElement>('#item-scroller') ?? base.parentElement;
+    const scroller =
+      base.closest<HTMLElement>('#item-scroller') ?? this.findScrollableAncestor(base);
     return scroller instanceof HTMLElement ? scroller : null;
   }
 
@@ -395,7 +442,7 @@ export class ChatSource {
       return true;
     }
 
-    const lastChild = container.lastElementChild;
+    const lastChild = this.chatContainer?.lastElementChild;
     if (lastChild instanceof HTMLElement) {
       lastChild.scrollIntoView({ block: 'end' });
     }
@@ -463,10 +510,12 @@ export class ChatSource {
     if (!this.callback) return;
 
     const now = Date.now();
+    let shouldSyncLiveEdge = false;
 
     for (const mutation of mutations) {
       for (const node of mutation.addedNodes) {
         if (node.nodeType !== Node.ELEMENT_NODE) continue;
+        shouldSyncLiveEdge = true;
 
         const element = node as Element;
 
@@ -482,6 +531,10 @@ export class ChatSource {
           this.callback(message);
         }
       }
+    }
+
+    if (shouldSyncLiveEdge) {
+      this.scheduleLiveEdgeSync();
     }
   }
 
@@ -567,6 +620,7 @@ export class ChatSource {
   stop(): void {
     this.lifecycleController?.abort();
     this.lifecycleController = null;
+    this.cancelScheduledLiveEdgeSync();
 
     if (this.observer) {
       this.observer.disconnect();
@@ -625,6 +679,7 @@ export class ChatSource {
       log.info('Reconnecting MutationObserver...');
       this.observer?.disconnect();
       this.observer = null;
+      this.cancelScheduledLiveEdgeSync();
       this.chatContainer = null;
       // Drop cached backlog so the next resume sync pulls from fresh DOM state
       // rather than replaying messages captured before background throttling.
