@@ -110,6 +110,8 @@ export interface SuperChatInfo {
  * Chat message structure (normalized)
  */
 export interface ChatMessage {
+  /** Stable YouTube message id for deduplication (from renderer DOM id). */
+  id?: string;
   /** Message text content (sanitized, max 80 chars) - plain text only */
   text: string;
   /** Rich content segments (text + emoji) - for rendering mixed content */

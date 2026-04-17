@@ -341,6 +341,9 @@ export class Renderer {
   private styleElement: HTMLStyleElement | null = null;
   private retryTimer: number | null = null;
   private overlayDimensionsUnsubscribe: (() => void) | null = null;
+  /** Ids of messages already enqueued/rendered, for dedup across reconnect/resume. */
+  private readonly seenMessageIds = new Set<string>();
+  private static readonly MAX_SEEN_IDS = 1000;
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
     this.overlay = overlay;
@@ -388,12 +391,9 @@ export class Renderer {
       return;
     }
 
-    if (this.activeMessages.size > 0) {
-      this.resetRenderedState();
-      this.initLanes();
-      return;
-    }
-
+    // Re-init lane collision state but keep active animations running so
+    // messages finish flowing across the screen instead of vanishing mid-way
+    // when the player resizes or enters/exits fullscreen.
     this.initLanes();
 
     if (!this.isPaused && this.messageQueue.length > 0) {
@@ -989,6 +989,11 @@ export class Renderer {
    * Add message to render queue
    */
   addMessage(message: ChatMessage): void {
+    // Dedup across reconnect/resume replays.
+    if (message.id && this.seenMessageIds.has(message.id)) {
+      return;
+    }
+
     // Rate limiting check
     const now = Date.now();
     if (now - this.lastProcessTime > 1000) {
@@ -999,6 +1004,10 @@ export class Renderer {
     if (this.processedInLastSecond >= this.settings.maxMessagesPerSecond) {
       // Drop message
       return;
+    }
+
+    if (message.id) {
+      this.markMessageIdSeen(message.id);
     }
 
     // Drop oldest entries if queue is full to prevent animation flood after long pause
@@ -1017,6 +1026,19 @@ export class Renderer {
       this.processQueue();
     }
     // If paused, message stays in queue until resume()
+  }
+
+  private markMessageIdSeen(id: string): void {
+    this.seenMessageIds.add(id);
+    if (this.seenMessageIds.size > Renderer.MAX_SEEN_IDS) {
+      const iterator = this.seenMessageIds.values();
+      const excess = this.seenMessageIds.size - Renderer.MAX_SEEN_IDS;
+      for (let i = 0; i < excess; i++) {
+        const next = iterator.next();
+        if (next.done || next.value === undefined) break;
+        this.seenMessageIds.delete(next.value);
+      }
+    }
   }
 
   /**
@@ -1519,6 +1541,7 @@ export class Renderer {
    */
   clear(): void {
     this.resetRenderedState();
+    this.seenMessageIds.clear();
     this.pausedAt = null;
     this.playbackRate = 1;
   }

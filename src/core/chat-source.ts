@@ -639,6 +639,10 @@ export class ChatSource {
         timestamp: Date.now(),
       };
 
+      if (element.id) {
+        message.id = element.id;
+      }
+
       if (content.length > 0) {
         // Add rich content if available
         message.content = content;
