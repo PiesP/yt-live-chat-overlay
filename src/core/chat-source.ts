@@ -34,6 +34,8 @@ const CHAT_FRAME_SEARCH_ATTEMPTS = 10;
 const CHAT_FRAME_SEARCH_INTERVAL_MS = 500;
 const CHAT_FRAME_RETRY_ATTEMPTS_AFTER_OPEN = 6;
 const CHAT_PANEL_SETTLE_DELAY_MS = 500;
+const CHAT_PANEL_OPEN_POLL_ATTEMPTS = 10;
+const CHAT_PANEL_OPEN_POLL_INTERVAL_MS = 300;
 const RECENT_MESSAGE_BUFFER_SIZE = 100;
 const RECONNECT_ATTEMPTS = 3;
 const RECONNECT_RETRY_DELAY_MS = 1000;
@@ -500,14 +502,15 @@ export class ChatSource {
 
     log.debug('Chat panel is collapsed, attempting to open...');
 
-    // Try to find and click the chat toggle button
     try {
       if (this.clickChatToggleButton()) {
-        // Wait for panel to open
-        await sleep(1000, signal);
+        const opened = await pollForValue(() => (this.isChatFrameHidden(chatFrame) ? null : true), {
+          attempts: CHAT_PANEL_OPEN_POLL_ATTEMPTS,
+          intervalMs: CHAT_PANEL_OPEN_POLL_INTERVAL_MS,
+          signal,
+        });
 
-        // Verify panel is now open
-        if (!this.isChatFrameHidden(chatFrame)) {
+        if (opened) {
           log.debug('Successfully opened chat panel');
           return true;
         }
