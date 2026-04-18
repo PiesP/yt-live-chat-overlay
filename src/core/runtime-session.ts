@@ -19,7 +19,7 @@ const CHAT_RECOVERY_GRACE_MS = 2_500;
 const isAbortError = (error: unknown): boolean =>
   error instanceof DOMException && error.name === 'AbortError';
 
-type RecoveryReason = 'startup' | 'video-play' | 'foreground-return' | 'watchdog';
+type RecoveryReason = 'startup' | 'video-play' | 'foreground-return' | 'watchdog' | 'seeking';
 
 export interface RuntimeSessionOptions {
   targetUrl: string;
@@ -97,6 +97,7 @@ export class RuntimeSession {
         },
         onSeeking: () => {
           this.renderer?.flushQueue();
+          void this.recover('seeking', true);
         },
       });
       this.videoSync = videoSync;
@@ -336,11 +337,11 @@ export class RuntimeSession {
 
       const health = this.getChatHealthSnapshot(chatSource);
       // forceResync marks user-visible resume events (foreground-return,
-      // video-play). Background throttling can leave the iframe silently
-      // stalled while health reports "alive" (observer attached, last
-      // message timestamp recent, scroll still at live edge), so we always
-      // rebuild the observer + buffer on those resumes. Watchdog ticks keep
-      // their health-driven behavior to avoid churn during steady playback.
+      // video-play, seeking). Background throttling or replay seeks can
+      // leave the chat source logically stale while health still looks
+      // acceptable, so we always rebuild the source + recent buffer on
+      // those transitions. Watchdog ticks keep their health-driven
+      // behavior to avoid churn during steady playback.
       const needsReconnect =
         forceResync || !health.observerAlive || !health.recentlyActive || !health.atLiveEdge;
       let shouldResync = forceResync;

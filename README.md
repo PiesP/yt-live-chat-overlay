@@ -19,7 +19,7 @@ All processing happens locally in your browser, and chat content is never stored
 
 ## How to Use
 
-1. Open a YouTube live stream or premiere with chat
+1. Open a YouTube live stream, premiere, or replay with chat
 2. The overlay appears automatically when chat is detected
 3. Use the ⚙ button in the top-right of the player to open settings
 
@@ -31,7 +31,7 @@ All processing happens locally in your browser, and chat content is never stored
 ## Privacy & Safety
 
 - Chat content is never stored or transmitted
-- The script injects an overlay and settings button into the player, and may open the live chat panel when needed
+- The script injects an overlay and settings button into the player, and fetches chat directly inside your browser without relying on the visible chat panel
 
 ## Support
 

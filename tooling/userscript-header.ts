@@ -24,7 +24,7 @@ const LEGAL_NOTICE = `/* LEGAL NOTICE:
  * NO chat data is stored, transmitted, or processed externally.
  * Only user settings (font size, speed, etc.) are stored in localStorage.
  * This is NOT an official YouTube or Nico-nico product.
- * The script injects an overlay/settings control and may open the live chat panel when needed.
+ * The script injects an overlay/settings control and fetches chat directly in-browser without relying on the visible chat panel.
  */`;
 
 const formatDirective = (key: string, value: string): string =>
