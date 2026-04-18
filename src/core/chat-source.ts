@@ -39,7 +39,6 @@ const RECENT_MESSAGE_BUFFER_SIZE = 100;
 const RECONNECT_ATTEMPTS = 3;
 const RECONNECT_RETRY_DELAY_MS = 1000;
 const DEFAULT_ACTIVITY_TIMEOUT_MS = 30000;
-const DEFAULT_LIVE_EDGE_THRESHOLD_PX = 24;
 const LIVE_POLL_FALLBACK_DELAY_MS = 4000;
 const REPLAY_LOOP_DELAY_MS = 250;
 const REPLAY_FETCH_MIN_DELTA_MS = 1000;
@@ -61,13 +60,11 @@ interface ParsedMessageBody {
 
 interface ChatHealthSnapshotOptions {
   activeTimeoutMs?: number;
-  liveEdgeThresholdPx?: number;
 }
 
 export interface ChatHealthSnapshot {
   observerAlive: boolean;
   recentlyActive: boolean;
-  atLiveEdge: boolean;
 }
 
 interface ChatBootstrapResolution {
@@ -1314,7 +1311,6 @@ export class ChatSource {
     return {
       observerAlive: this.isObserverAlive(),
       recentlyActive: this.isActive(activeTimeoutMs),
-      atLiveEdge: this.isAtLiveEdge(),
     };
   }
 
@@ -1389,19 +1385,5 @@ export class ChatSource {
   getLatestMessages(limit: number): ChatMessage[] {
     if (limit <= 0) return [];
     return this.recentMessages.slice(-limit);
-  }
-
-  /**
-   * The fetch-based source has no scroll position to maintain.
-   */
-  isAtLiveEdge(_thresholdPx = DEFAULT_LIVE_EDGE_THRESHOLD_PX): boolean {
-    return true;
-  }
-
-  /**
-   * The fetch-based source has no scroll position to maintain.
-   */
-  ensureLiveEdge(_thresholdPx = DEFAULT_LIVE_EDGE_THRESHOLD_PX): boolean {
-    return true;
   }
 }

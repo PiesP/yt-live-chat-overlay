@@ -13,7 +13,6 @@ const log = createLogger('RuntimeSession');
 const RESUME_SYNC_MESSAGE_LIMIT = 20;
 const CHAT_WATCHDOG_INTERVAL_MS = 15_000;
 const CHAT_STALL_TIMEOUT_MS = 30_000;
-const CHAT_LIVE_EDGE_THRESHOLD_PX = 24;
 const CHAT_RECOVERY_GRACE_MS = 2_500;
 
 const isAbortError = (error: unknown): boolean =>
@@ -257,7 +256,6 @@ export class RuntimeSession {
   private getChatHealthSnapshot(chatSource: ChatSource): ChatHealthSnapshot {
     return chatSource.getHealthSnapshot({
       activeTimeoutMs: CHAT_STALL_TIMEOUT_MS,
-      liveEdgeThresholdPx: CHAT_LIVE_EDGE_THRESHOLD_PX,
     });
   }
 
@@ -272,7 +270,7 @@ export class RuntimeSession {
     return {
       stalled,
       withinGrace,
-      needsRecovery: !health.observerAlive || stalled || !health.atLiveEdge,
+      needsRecovery: !health.observerAlive || stalled,
     };
   }
 
@@ -333,8 +331,6 @@ export class RuntimeSession {
     const signal = this.abortController.signal;
 
     try {
-      chatSource.ensureLiveEdge(CHAT_LIVE_EDGE_THRESHOLD_PX);
-
       const health = this.getChatHealthSnapshot(chatSource);
       // forceResync marks user-visible resume events (foreground-return,
       // video-play, seeking). Background throttling or replay seeks can
@@ -342,8 +338,7 @@ export class RuntimeSession {
       // acceptable, so we always rebuild the source + recent buffer on
       // those transitions. Watchdog ticks keep their health-driven
       // behavior to avoid churn during steady playback.
-      const needsReconnect =
-        forceResync || !health.observerAlive || !health.recentlyActive || !health.atLiveEdge;
+      const needsReconnect = forceResync || !health.observerAlive || !health.recentlyActive;
       let shouldResync = forceResync;
 
       if (needsReconnect) {
@@ -354,7 +349,6 @@ export class RuntimeSession {
           log.warn('Failed to reconnect chat during recovery');
         }
 
-        chatSource.ensureLiveEdge(CHAT_LIVE_EDGE_THRESHOLD_PX);
         shouldResync = true;
       }
 
