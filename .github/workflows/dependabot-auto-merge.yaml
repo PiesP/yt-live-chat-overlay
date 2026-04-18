@@ -7,7 +7,7 @@ name: 🤖 Dependabot Auto-Merge
 
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened, labeled]
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: write
@@ -77,11 +77,9 @@ jobs:
         if: steps.decide.outputs.should_merge == 'true'
         run: |
           set -euo pipefail
-          gh pr comment "$PR_NUMBER" --body "🤖 Auto-merge queued: ${{ steps.decide.outputs.reason }}"
           gh pr merge --auto --squash "$PR_URL"
-          echo "✅ Auto-merge queued"
+          echo "✅ Auto-merge queued: ${{ steps.decide.outputs.reason }}"
         env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_URL: ${{ github.event.pull_request.html_url }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -90,21 +88,3 @@ jobs:
         run: |
           echo "⏭️ Manual review required"
           echo "Reason: ${{ steps.decide.outputs.reason }}"
-
-  workflow-bot:
-    name: ⚙️ Auto-Merge Workflow PRs
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    if: >-
-      github.event.pull_request.user.login == 'github-actions[bot]' &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      contains(github.event.pull_request.labels.*.name, 'automerge')
-    steps:
-      - name: 🔄 Queue auto-merge for workflow PR
-        run: |
-          set -euo pipefail
-          gh pr merge --auto --squash "$PR_URL"
-          echo "✅ Workflow-generated PR queued for auto-merge"
-        env:
-          PR_URL: ${{ github.event.pull_request.html_url }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

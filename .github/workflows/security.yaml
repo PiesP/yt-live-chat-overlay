@@ -1,21 +1,18 @@
 name: 🔒 Security Scanning
 
 # Responsibility: Security analysis for Node.js + pnpm project
-# - OSV scanning: dependency vulnerability detection (PRs block newly introduced issues)
-# - SAST: static security analysis with Semgrep
-# - License compliance: verify project LICENSE file
+# - PR/merge queue gate: OSV diff scan
+# - Scheduled/manual depth: OSV full scan + Semgrep SARIF upload
 #
-# Trigger: Weekly schedule + push to master + PR to master
+# Trigger: PR to master + merge queue + weekly schedule + manual
 
 on:
-  schedule:
-    - cron: "0 1 * * 0" # Weekly on Sundays at 1 AM UTC
-  push:
-    branches: [master]
   pull_request:
     branches: [master]
   merge_group:
     types: [checks_requested]
+  schedule:
+    - cron: "0 1 * * 0" # Weekly on Sundays at 1 AM UTC
   workflow_dispatch:
 
 permissions:
@@ -28,23 +25,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  osv-scan-scheduled:
-    name: 🛡️ OSV Vulnerability Scan (Full)
-    if: ${{ github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
-    uses: "google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@v2.3.5"
-    permissions:
-      actions: read
-      contents: read
-      security-events: write
-    with:
-      scan-args: |-
-        -r
-        --lockfile=pnpm-lock.yaml
-        ./
-      # Full-repo scans publish SARIF and remain non-blocking so newly disclosed
-      # advisories don't retroactively break unrelated pushes after merge.
-      fail-on-vuln: false
-
   osv-scan-pr:
     name: 🛡️ OSV Vulnerability Scan (PR Diff)
     if: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
@@ -62,11 +42,28 @@ jobs:
       # the broken pnpm audit gate with a workflow-native regression check.
       fail-on-vuln: true
 
+  osv-scan-full:
+    name: 🛡️ OSV Vulnerability Scan (Full)
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    uses: "google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@v2.3.5"
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    with:
+      scan-args: |-
+        -r
+        --lockfile=pnpm-lock.yaml
+        ./
+      # Full-repo scans publish SARIF and remain non-blocking so newly disclosed
+      # advisories don't retroactively break unrelated work.
+      fail-on-vuln: false
+
   semgrep:
     name: 🔍 Static Analysis (Semgrep)
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    if: github.actor != 'dependabot[bot]'
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
     permissions:
       contents: read
       security-events: write
@@ -91,115 +88,3 @@ jobs:
         if: always()
         with:
           sarif_file: semgrep.sarif
-
-  license-compliance:
-    name: 📜 License Check
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: 📥 Checkout code
-        uses: actions/checkout@v6
-
-      - name: 📜 Verify LICENSE file
-        run: |
-          set -euo pipefail
-          echo "📜 Checking LICENSE file..."
-
-          if [ ! -f "LICENSE" ]; then
-            echo "❌ LICENSE file not found"
-            exit 1
-          fi
-
-          echo "✅ LICENSE file present"
-          ls -la LICENSE
-
-      - name: 🔍 Check for disallowed licenses
-        run: |
-          set -euo pipefail
-          echo "🔍 Checking for disallowed license content..."
-
-          # List of disallowed license types (GPL variants, AGPL, proprietary)
-          DISALLOWED_PATTERNS=(
-            "GNU General Public License"
-            "GNU GPL"
-            "GNU AGPL"
-            "AGPL-3.0"
-            "GPL-2.0"
-            "GPL-3.0"
-            "proprietary"
-            "all rights reserved"
-          )
-
-          FOUND_ISSUES=0
-          for pattern in "${DISALLOWED_PATTERNS[@]}"; do
-            if grep -i "$pattern" LICENSE >/dev/null 2>&1; then
-              echo "⚠️ Found potentially disallowed license: $pattern"
-              FOUND_ISSUES=1
-            fi
-          done
-
-          if [ $FOUND_ISSUES -eq 1 ]; then
-            echo "❌ Potential license compliance issues found"
-            exit 1
-          else
-            echo "✅ No disallowed license patterns found"
-          fi
-
-  # Stable aggregate check for branch protection and merge queues.
-  security-summary:
-    name: 📊 Security Summary
-    runs-on: ubuntu-latest
-    needs: [osv-scan-scheduled, osv-scan-pr, semgrep, license-compliance]
-    if: always()
-    timeout-minutes: 5
-    steps:
-      - name: 📊 Generate summary
-        run: |
-          set -euo pipefail
-          FAILURE=0
-
-          echo "## 🔒 Security Scan Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Status | Check | Result |" >> $GITHUB_STEP_SUMMARY
-          echo "|--------|-------|--------|" >> $GITHUB_STEP_SUMMARY
-
-          # OSV Scanner (check both scheduled and PR jobs)
-          OSV_SCHEDULED="${{ needs.osv-scan-scheduled.result }}"
-          OSV_PR="${{ needs.osv-scan-pr.result }}"
-          if [ "$OSV_SCHEDULED" == "failure" ] || [ "$OSV_PR" == "failure" ] || [ "$OSV_SCHEDULED" == "cancelled" ] || [ "$OSV_PR" == "cancelled" ]; then
-            echo "| ❌ | OSV Vulnerability Scan | Failed |" >> $GITHUB_STEP_SUMMARY
-            FAILURE=1
-          elif [ "$OSV_SCHEDULED" == "success" ] || [ "$OSV_PR" == "success" ]; then
-            echo "| ✅ | OSV Vulnerability Scan | Passed |" >> $GITHUB_STEP_SUMMARY
-          elif [ "$OSV_SCHEDULED" == "skipped" ] && [ "$OSV_PR" == "skipped" ]; then
-            echo "| ⏭️ | OSV Vulnerability Scan | Skipped |" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "| ⚠️ | OSV Vulnerability Scan | Check required |" >> $GITHUB_STEP_SUMMARY
-            FAILURE=1
-          fi
-
-          # Semgrep
-          SEMGREP_RESULT="${{ needs.semgrep.result }}"
-          if [ "$SEMGREP_RESULT" == "success" ]; then
-            echo "| ✅ | Static Analysis (Semgrep) | Passed |" >> $GITHUB_STEP_SUMMARY
-          elif [ "$SEMGREP_RESULT" == "skipped" ]; then
-            echo "| ⏭️ | Static Analysis (Semgrep) | Skipped |" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "| ❌ | Static Analysis (Semgrep) | Failed |" >> $GITHUB_STEP_SUMMARY
-            FAILURE=1
-          fi
-
-          # License
-          LICENSE_RESULT="${{ needs.license-compliance.result }}"
-          if [ "$LICENSE_RESULT" == "success" ]; then
-            echo "| ✅ | License Check | Passed |" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "| ❌ | License Check | Failed |" >> $GITHUB_STEP_SUMMARY
-            FAILURE=1
-          fi
-
-          if [ "$FAILURE" -eq 1 ]; then
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "❌ Security gate failed." >> $GITHUB_STEP_SUMMARY
-            exit 1
-          fi

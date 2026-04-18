@@ -50,14 +50,14 @@ We aim to respond within **7 business days** and coordinate disclosure once a fi
 We use several mechanisms to keep the codebase secure:
 
 - **GitHub Security Suite** (`.github/workflows/security.yaml`)
-  - Dependency scanning (OSV Scanner, npm audit)
-  - Static analysis (Semgrep)
+  - Dependency scanning with OSV Scanner
+  - Static analysis with Semgrep on scheduled/manual security runs
 - **Dependabot** (`.github/dependabot.yaml`)
-  - Automated updates for npm packages and GitHub Actions
+  - Automated grouped updates for npm packages and GitHub Actions
 - **Quality & Testing**
   - TypeScript strict mode, Biome linter/formatter
 
-These checks run in CI for `master` and scheduled workflows; local development uses the same toolchain via `pnpm` commands.
+These checks run in pull requests, the merge queue, and scheduled/manual workflows; local development uses the same toolchain via `pnpm` commands.
 
 ---
 

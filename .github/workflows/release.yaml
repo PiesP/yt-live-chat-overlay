@@ -4,12 +4,6 @@ on:
   push:
     tags:
       - "v*"
-  workflow_dispatch:
-    inputs:
-      version:
-        description: "Version to release (e.g., 1.2.3)"
-        required: true
-        type: string
 
 env:
   NODE_VERSION: "24"
@@ -23,7 +17,7 @@ concurrency:
 
 jobs:
   release:
-    name: 🏗️ Build & Release
+    name: 🚀 Publish Release
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -48,28 +42,9 @@ jobs:
         id: version
         run: |
           set -euo pipefail
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            VERSION="${{ inputs.version }}"
-          else
-            VERSION="${GITHUB_REF#refs/tags/v}"
-          fi
+          VERSION="${GITHUB_REF_NAME#v}"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "📦 Release version: $VERSION"
-
-      - name: 🏷️ Create Git tag (workflow_dispatch only)
-        if: ${{ github.event_name == 'workflow_dispatch' }}
-        run: |
-          set -euo pipefail
-          TAG=v${{ steps.version.outputs.version }}
-          if git rev-parse "${TAG}" >/dev/null 2>&1; then
-            echo "Tag ${TAG} already exists; skipping"
-          else
-            git config --local user.email "action@github.com"
-            git config --local user.name "GitHub Action"
-            git tag -a "${TAG}" -m "Release ${TAG}"
-            git push origin "${TAG}"
-            echo "✅ Tag created: ${TAG}"
-          fi
 
       - name: 🏗️ Build userscript
         run: |

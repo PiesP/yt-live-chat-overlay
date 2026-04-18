@@ -14,12 +14,8 @@ branches:
       required_status_checks:
         strict: true
         contexts:
-          - "🧹 Biome (Lint + Format)"
-          - "🧪 TypeScript Checks"
-          - "🔒 Lockfile Validation"
-          - "🚀 Build"
+          - "✅ Verify"
           - "🛡️ OSV Vulnerability Scan (PR Diff)"
-          - "📜 License Check"
 
       enforce_admins: false
       required_linear_history: false

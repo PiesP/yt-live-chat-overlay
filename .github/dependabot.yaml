@@ -7,7 +7,7 @@ updates:
       day: "monday"
       time: "09:00"
       timezone: "Asia/Seoul"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 3
     commit-message:
       prefix: "chore(deps)"
       prefix-development: "chore(deps-dev)"
@@ -20,24 +20,13 @@ updates:
     rebase-strategy: "auto"
 
     groups:
-      build:
-        patterns:
-          - "vite"
-        update-types:
-          - "minor"
-          - "patch"
-
-      typescript:
-        patterns:
-          - "typescript"
-          - "@types/*"
-        update-types:
-          - "minor"
-          - "patch"
-
-      quality:
+      tooling:
         patterns:
           - "@biomejs/*"
+          - "@types/*"
+          - "knip"
+          - "typescript"
+          - "vite"
         update-types:
           - "minor"
           - "patch"
