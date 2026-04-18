@@ -7,12 +7,10 @@ type TupleValue<T extends readonly unknown[]> = T[number];
 const AUTHOR_TYPES = ['normal', 'member', 'moderator', 'owner', 'verified'] as const;
 export const LOG_LEVELS = ['warn', 'info', 'debug'] as const;
 const AUTHOR_DISPLAY_KEYS = [...AUTHOR_TYPES, 'superChat'] as const;
-const EMOJI_TYPES = ['standard', 'custom', 'member'] as const;
 const CHAT_MESSAGE_KINDS = ['text', 'superchat', 'membership'] as const;
 const SUPER_CHAT_TIERS = ['blue', 'cyan', 'green', 'yellow', 'orange', 'magenta', 'red'] as const;
 
 type AuthorDisplayKey = TupleValue<typeof AUTHOR_DISPLAY_KEYS>;
-type EmojiType = TupleValue<typeof EMOJI_TYPES>;
 type ChatMessageKind = TupleValue<typeof CHAT_MESSAGE_KINDS>;
 type SuperChatTier = TupleValue<typeof SUPER_CHAT_TIERS>;
 
@@ -35,19 +33,23 @@ export const isLogLevel = (value: unknown): value is LogLevel =>
 export type AuthorDisplaySettings = Record<AuthorDisplayKey, boolean>;
 
 /**
- * Emoji/Emoticon information
+ * Shared image asset metadata
  */
-export interface EmojiInfo {
-  /** Emoji type classification */
-  type: EmojiType;
+export interface ImageAsset {
   /** Image URL (sanitized, YouTube CDN only) */
   url: string;
-  /** Alt text (e.g., ":emoji_name:") */
+  /** Alt/fallback text */
   alt: string;
   /** Original width (optional, for aspect ratio) */
   width?: number;
   /** Original height (optional, for aspect ratio) */
   height?: number;
+}
+
+/**
+ * Image-based emoji/emoticon information
+ */
+export interface EmojiInfo extends ImageAsset {
   /** Emoji ID (for caching/identification) */
   id?: string;
 }
@@ -81,8 +83,8 @@ export interface SuperChatInfo {
   backgroundColor?: string;
   /** Header background color (darker shade) */
   headerBackgroundColor?: string;
-  /** Sticker image URL (for high-tier Super Chats) */
-  stickerUrl?: string;
+  /** Sticker image asset (for paid stickers / sticker-enhanced Super Chats) */
+  sticker?: ImageAsset;
 }
 
 /**
@@ -91,10 +93,10 @@ export interface SuperChatInfo {
 export interface ChatMessage {
   /** Stable YouTube message id for deduplication (from renderer DOM id). */
   id?: string;
-  /** Message text content (sanitized, max 80 chars) - plain text only */
+  /** Derived plain-text fallback from content (sanitized, max 80 chars) */
   text: string;
-  /** Rich content segments (text + emoji) - for rendering mixed content */
-  content?: ContentSegment[];
+  /** Canonical visible content segments used for rendering */
+  content: ContentSegment[];
   /** Message type */
   kind: ChatMessageKind;
   /** Timestamp when the message was detected */

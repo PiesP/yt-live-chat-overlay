@@ -9,14 +9,15 @@ import type {
   ChatMessage,
   ContentSegment,
   EmojiInfo,
+  ImageAsset,
   OverlaySettings,
   SuperChatInfo,
 } from '@app-types';
 import { combineAbortSignals, isAbortError } from '@core/abort';
 import { parseRgbColor } from '@core/design-tokens';
 import { findElementMatch, sleep, throwIfAborted, VIDEO_SELECTORS } from '@core/dom';
-import { isAllowedYouTubeImageUrl } from '@core/image-url';
-import { asRecord, getBoolean, getNumber, getString, isRecord, type JsonObject } from '@core/json';
+import { normalizeYouTubeImageUrl } from '@core/image-url';
+import { asRecord, getNumber, getString, isRecord, type JsonObject } from '@core/json';
 import { createLogger } from '@core/logging';
 import {
   bootstrapChatSession,
@@ -50,6 +51,7 @@ const REPLAY_FALLBACK_CATCHUP_BATCH_LIMIT = 12;
 const REPLAY_BUFFER_REFILL_THRESHOLD = 24;
 const MAX_BUFFERED_REPLAY_MESSAGES = 300;
 const MAX_TRACKED_REPLAY_KEYS = 2000;
+const EMOJI_TEXT_PATTERN = /\p{Extended_Pictographic}/u;
 
 type ReplayMode = 'playerSeek' | 'continuation';
 type ChatMessageKind = ChatMessage['kind'];
@@ -57,6 +59,7 @@ type ChatMessageKind = ChatMessage['kind'];
 interface ParsedMessageBody {
   text: string;
   content: ContentSegment[];
+  visibleLength: number;
 }
 
 interface ChatHealthSnapshotOptions {
@@ -835,6 +838,11 @@ export class ChatSource {
       return { kind: 'superchat', renderer: paidMessageRenderer };
     }
 
+    const paidStickerRenderer = asRecord(item.liveChatPaidStickerRenderer);
+    if (paidStickerRenderer) {
+      return { kind: 'superchat', renderer: paidStickerRenderer };
+    }
+
     const membershipRenderer = asRecord(item.liveChatMembershipItemRenderer);
     if (membershipRenderer) {
       return { kind: 'membership', renderer: membershipRenderer };
@@ -857,6 +865,7 @@ export class ChatSource {
 
     const message: ChatMessage = {
       text: parsedBody.text,
+      content: parsedBody.content,
       kind,
       timestamp: Date.now(),
     };
@@ -864,10 +873,6 @@ export class ChatSource {
     const id = getString(renderer.id);
     if (id) {
       message.id = id;
-    }
-
-    if (parsedBody.content.length > 0) {
-      message.content = parsedBody.content;
     }
 
     message.author = author;
@@ -893,17 +898,23 @@ export class ChatSource {
     kind: ChatMessageKind,
     authorType: NonNullable<ChatMessage['authorType']>
   ): ParsedMessageBody | null {
-    const messageData = renderer.message;
     const parsedBody =
-      kind === 'membership' && !isRecord(messageData)
-        ? { text: '', content: [] }
-        : this.parseMessageContent(messageData);
+      kind === 'membership'
+        ? this.parseMembershipBody(renderer)
+        : this.parseMessageContent(renderer.message);
 
-    if (kind === 'text' && !this.isSubstantialText(parsedBody.text, authorType)) {
+    if (kind === 'text' && !this.isSubstantialMessage(parsedBody, authorType)) {
       return null;
     }
 
     return parsedBody;
+  }
+
+  private parseMembershipBody(renderer: JsonObject): ParsedMessageBody {
+    const messageBody = this.parseMessageContent(renderer.message);
+    return messageBody.visibleLength > 0 || messageBody.text.length > 0
+      ? messageBody
+      : this.parseMessageContent(renderer.headerSubtext);
   }
 
   private extractDisplayText(value: unknown): string | undefined {
@@ -939,14 +950,17 @@ export class ChatSource {
 
   private parseMessageContent(value: unknown): ParsedMessageBody {
     if (!isRecord(value)) {
-      return { text: '', content: [] };
+      return this.createEmptyMessageBody();
     }
 
     const simpleText = getString(value.simpleText);
-    if (simpleText) {
+    if (simpleText !== undefined) {
+      const content: ContentSegment[] =
+        simpleText.length > 0 ? [{ type: 'text', content: simpleText }] : [];
       return {
         text: this.normalizeText(simpleText),
-        content: [{ type: 'text', content: simpleText }],
+        content,
+        visibleLength: this.getVisibleContentLength(content),
       };
     }
 
@@ -962,7 +976,7 @@ export class ChatSource {
       const runText = getString(run.text);
       if (runText !== undefined) {
         if (runText.length > 0) {
-          segments.push({ type: 'text', content: runText });
+          this.appendTextSegment(segments, runText);
           plainText += runText;
         }
         continue;
@@ -980,13 +994,62 @@ export class ChatSource {
         continue;
       }
 
-      plainText += this.getEmojiAlt(emojiData) || '[emoji]';
+      const fallbackText = this.getEmojiAlt(emojiData) || '[emoji]';
+      this.appendTextSegment(segments, fallbackText);
+      plainText += fallbackText;
     }
 
     return {
       text: this.normalizeText(plainText),
       content: segments,
+      visibleLength: this.getVisibleContentLength(segments),
     };
+  }
+
+  private createEmptyMessageBody(): ParsedMessageBody {
+    return { text: '', content: [], visibleLength: 0 };
+  }
+
+  private appendTextSegment(segments: ContentSegment[], content: string): void {
+    if (content.length === 0) {
+      return;
+    }
+
+    const lastSegment = segments[segments.length - 1];
+    if (lastSegment?.type === 'text') {
+      lastSegment.content += content;
+      return;
+    }
+
+    segments.push({ type: 'text', content });
+  }
+
+  private getVisibleContentLength(segments: readonly ContentSegment[]): number {
+    let visibleLength = 0;
+
+    for (const segment of segments) {
+      if (segment.type === 'emoji') {
+        visibleLength += 1;
+        continue;
+      }
+
+      visibleLength += Array.from(
+        this.stripControlCharacters(segment.content).replace(/\s+/g, '')
+      ).length;
+    }
+
+    return visibleLength;
+  }
+
+  private extractAccessibilityLabel(value: unknown): string | undefined {
+    const record = asRecord(value);
+    if (!record) {
+      return undefined;
+    }
+
+    return (
+      getString(asRecord(asRecord(record.accessibility)?.accessibilityData)?.label) || undefined
+    );
   }
 
   private getEmojiAlt(emojiData: JsonObject): string {
@@ -994,50 +1057,51 @@ export class ChatSource {
       ? emojiData.shortcuts.filter((shortcut): shortcut is string => typeof shortcut === 'string')
       : [];
 
-    return shortcuts[0] ?? getString(emojiData.emojiId) ?? '';
+    return (
+      shortcuts[0] ??
+      this.extractAccessibilityLabel(emojiData.image) ??
+      this.extractAccessibilityLabel(emojiData) ??
+      getString(emojiData.emojiId) ??
+      ''
+    );
   }
 
   private parseEmoji(emojiData: JsonObject): EmojiInfo | null {
-    const image = asRecord(emojiData.image);
-    const thumbnail = image ? this.extractBestThumbnail(image) : null;
+    const emojiAsset = this.createImageAsset(emojiData.image, this.getEmojiAlt(emojiData));
+    if (!emojiAsset) {
+      return null;
+    }
+
+    const emoji: EmojiInfo = { ...emojiAsset };
+
+    const id = getString(emojiData.emojiId);
+    if (id) {
+      emoji.id = id;
+    }
+
+    return emoji;
+  }
+
+  private createImageAsset(value: unknown, alt: string): ImageAsset | null {
+    const thumbnail = this.extractBestThumbnail(value);
     if (!thumbnail) {
       return null;
     }
 
-    const emojiInfo: EmojiInfo = {
-      type: this.detectEmojiType(emojiData),
+    const asset: ImageAsset = {
       url: thumbnail.url,
-      alt: this.getEmojiAlt(emojiData),
+      alt,
     };
 
     if (thumbnail.width !== undefined) {
-      emojiInfo.width = thumbnail.width;
+      asset.width = thumbnail.width;
     }
 
     if (thumbnail.height !== undefined) {
-      emojiInfo.height = thumbnail.height;
+      asset.height = thumbnail.height;
     }
 
-    const id = getString(emojiData.emojiId);
-    if (id) {
-      emojiInfo.id = id;
-    }
-
-    return emojiInfo;
-  }
-
-  private detectEmojiType(emojiData: JsonObject): EmojiInfo['type'] {
-    const searchTerms = Array.isArray(emojiData.searchTerms)
-      ? emojiData.searchTerms
-          .filter((term): term is string => typeof term === 'string')
-          .map((term) => term.toLowerCase())
-      : [];
-
-    if (searchTerms.some((term) => term.includes('member'))) {
-      return 'member';
-    }
-
-    return getBoolean(emojiData.isCustomEmoji) ? 'custom' : 'standard';
+    return asset;
   }
 
   private extractBestThumbnail(
@@ -1062,7 +1126,8 @@ export class ChatSource {
       }
 
       const url = getString(candidate.url);
-      if (!url || !isAllowedYouTubeImageUrl(url)) {
+      const normalizedUrl = url ? normalizeYouTubeImageUrl(url) : null;
+      if (!normalizedUrl) {
         continue;
       }
 
@@ -1072,7 +1137,9 @@ export class ChatSource {
       }
 
       bestWidth = width ?? 0;
-      const nextThumbnail: { url: string; width?: number; height?: number } = { url };
+      const nextThumbnail: { url: string; width?: number; height?: number } = {
+        url: normalizedUrl,
+      };
       if (width !== undefined) {
         nextThumbnail.width = width;
       }
@@ -1139,7 +1206,7 @@ export class ChatSource {
   }
 
   private normalizeText(text: string): string {
-    let normalized = text.replace(/[\u0000-\u001F\u007F-\u009F]/g, '');
+    let normalized = this.stripControlCharacters(text);
     normalized = normalized.replace(/\s+/g, ' ').trim();
 
     if (normalized.length > 80) {
@@ -1149,8 +1216,12 @@ export class ChatSource {
     return normalized;
   }
 
-  private isSubstantialText(
-    text: string,
+  private stripControlCharacters(text: string): string {
+    return text.replace(/[\u0000-\u001F\u007F-\u009F]/g, '');
+  }
+
+  private isSubstantialMessage(
+    body: ParsedMessageBody,
     authorType: NonNullable<ChatMessage['authorType']>
   ): boolean {
     const settings = this.getSettings?.();
@@ -1162,13 +1233,20 @@ export class ChatSource {
       return true;
     }
 
-    const stripped = text
-      .replace(/\[.*?\]/g, '')
-      .replace(/:[-\w]+:/g, '')
-      .trim();
+    if (this.hasEmojiContent(body.content)) {
+      return true;
+    }
 
     const minLength = Math.max(1, settings?.minTextLength ?? 3);
-    return stripped.length >= minLength;
+    return body.visibleLength >= minLength;
+  }
+
+  private hasEmojiContent(segments: readonly ContentSegment[]): boolean {
+    return segments.some(
+      (segment) =>
+        segment.type === 'emoji' ||
+        (segment.type === 'text' && EMOJI_TEXT_PATTERN.test(segment.content))
+    );
   }
 
   private colorIntToCss(value: unknown): string | undefined {
@@ -1197,7 +1275,9 @@ export class ChatSource {
       return null;
     }
 
-    const backgroundColor = this.colorIntToCss(renderer.bodyBackgroundColor);
+    const backgroundColor = this.colorIntToCss(
+      renderer.bodyBackgroundColor ?? renderer.backgroundColor
+    );
     const headerBackgroundColor = this.colorIntToCss(renderer.headerBackgroundColor);
     const sourceColor = headerBackgroundColor || backgroundColor;
     const tier = this.determineSuperChatTier(sourceColor);
@@ -1220,9 +1300,15 @@ export class ChatSource {
       superChatInfo.headerBackgroundColor = headerBackgroundColor;
     }
 
-    const stickerUrl = this.extractThumbnailUrl(renderer.headerOverlayImage);
-    if (stickerUrl) {
-      superChatInfo.stickerUrl = stickerUrl;
+    const stickerAlt =
+      this.extractAccessibilityLabel(renderer.sticker) ??
+      this.extractAccessibilityLabel(renderer.headerOverlayImage) ??
+      'Super Chat Sticker';
+    const sticker =
+      this.createImageAsset(renderer.sticker, stickerAlt) ??
+      this.createImageAsset(renderer.headerOverlayImage, stickerAlt);
+    if (sticker) {
+      superChatInfo.sticker = sticker;
     }
 
     return superChatInfo;

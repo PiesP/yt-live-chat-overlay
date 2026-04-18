@@ -9,12 +9,13 @@ import type {
   ChatMessage,
   ContentSegment,
   EmojiInfo,
+  ImageAsset,
   OutlineSettings,
   OverlayDimensions,
   OverlaySettings,
   SuperChatInfo,
 } from '@app-types';
-import { isAllowedYouTubeImageUrl } from '@core/image-url';
+import { normalizeYouTubeImageUrl } from '@core/image-url';
 import { createLogger } from '@core/logging';
 import { MessageIdRegistry, RenderQueue, RenderRateLimiter } from '@core/renderer-flow';
 import { LaneAllocator, type LanePlacement } from '@core/renderer-lanes';
@@ -72,6 +73,12 @@ interface FlushQueueOptions {
   releaseMessageIds?: boolean;
 }
 
+interface ImageElementOptions {
+  width?: number;
+  height?: number;
+  fallbackText?: string;
+}
+
 /**
  * Layout and styling constants
  */
@@ -81,8 +88,7 @@ const LAYOUT = {
   AUTHOR_FONT_SCALE: 0.85, // relative to base fontSize
 
   // Emoji sizing
-  EMOJI_SIZE_STANDARD: 1.2, // relative to base fontSize
-  EMOJI_SIZE_MEMBER: 1.4, // relative to base fontSize
+  EMOJI_SIZE: 1.2, // relative to base fontSize
 
   // Super Chat
   SUPERCHAT_STICKER_SIZE: 2.0, // relative to base fontSize
@@ -281,11 +287,6 @@ const RENDERER_STATIC_STYLES = `
     filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.5));
   }
 
-  .yt-chat-overlay-emoji-member {
-    filter: drop-shadow(0 0 2px rgba(15, 157, 88, 0.6))
-            drop-shadow(0 0 4px rgba(15, 157, 88, 0.4));
-  }
-
   .yt-chat-overlay-membership-card {
     display: flex;
     flex-direction: column;
@@ -480,28 +481,44 @@ export class Renderer {
     url: string,
     alt: string,
     className: string,
-    sizePx: number
+    sizePx: number,
+    options: ImageElementOptions = {}
   ): HTMLImageElement | null {
+    const normalizedUrl = normalizeYouTubeImageUrl(url);
+
     // Validate URL (defense in depth)
-    if (!isAllowedYouTubeImageUrl(url)) {
+    if (!normalizedUrl) {
       log.warn('Invalid image URL:', url);
       return null;
     }
 
     const img = document.createElement('img');
-    img.src = url;
+    img.src = normalizedUrl;
     img.alt = alt;
     img.className = className;
     img.style.height = `${sizePx}px`;
-    img.style.width = 'auto'; // Maintain aspect ratio
+    if (options.width !== undefined && options.height !== undefined && options.height > 0) {
+      const displayWidthPx = Math.max(1, (sizePx * options.width) / options.height);
+      img.style.width = `${displayWidthPx}px`;
+      img.style.aspectRatio = `${options.width} / ${options.height}`;
+    } else {
+      img.style.width = 'auto';
+    }
     img.draggable = false;
+    img.decoding = 'async';
 
     // Error handling: hide on load failure
     img.addEventListener(
       'error',
       () => {
-        img.style.display = 'none';
-        log.warn('Failed to load image:', url);
+        const fallbackText = options.fallbackText?.trim();
+        if (fallbackText && img.parentNode) {
+          img.replaceWith(document.createTextNode(fallbackText));
+        } else {
+          img.remove();
+        }
+
+        log.warn('Failed to load image:', normalizedUrl);
       },
       { once: true }
     );
@@ -565,7 +582,7 @@ export class Renderer {
     message: ChatMessage,
     className = 'yt-chat-overlay-message-content'
   ): HTMLDivElement | null {
-    const hasRichContent = Boolean(message.content && message.content.length > 0);
+    const hasRichContent = message.content.length > 0;
     const hasPlainText = message.text.trim().length > 0;
 
     if (!hasRichContent && !hasPlainText) {
@@ -574,9 +591,11 @@ export class Renderer {
 
     const contentDiv = this.createContainer(className);
 
-    if (hasRichContent && message.content) {
+    if (hasRichContent) {
       this.renderMixedContent(contentDiv, message.content);
-    } else {
+    }
+
+    if (!contentDiv.hasChildNodes() && hasPlainText) {
       contentDiv.textContent = message.text;
     }
 
@@ -603,46 +622,50 @@ export class Renderer {
    */
   private createEmojiElement(emoji: EmojiInfo): HTMLImageElement | null {
     // Calculate size relative to font size
-    const sizeFactor =
-      emoji.type === 'member' ? LAYOUT.EMOJI_SIZE_MEMBER : LAYOUT.EMOJI_SIZE_STANDARD;
-    const emojiSize = this.settings.fontSize * sizeFactor;
+    const emojiSize = this.settings.fontSize * LAYOUT.EMOJI_SIZE;
 
     // Create image element using common helper
-    const img = this.createImageElement(
+    const options: ImageElementOptions = {
+      fallbackText: emoji.alt || '[emoji]',
+    };
+    if (emoji.width !== undefined) {
+      options.width = emoji.width;
+    }
+    if (emoji.height !== undefined) {
+      options.height = emoji.height;
+    }
+
+    return this.createImageElement(
       emoji.url,
       emoji.alt || '',
       'yt-chat-overlay-emoji',
-      emojiSize
+      emojiSize,
+      options
     );
-
-    if (!img) return null;
-
-    // Apply emoji-specific styling
-    img.style.display = 'inline-block';
-    img.style.verticalAlign = 'text-bottom';
-
-    // Add special styling for member emojis
-    if (emoji.type === 'member') {
-      img.classList.add('yt-chat-overlay-emoji-member');
-    }
-
-    return img;
   }
 
   /**
    * Create Super Chat sticker image element
    * SECURITY: Validates URL and creates element programmatically
    */
-  private createSuperChatSticker(stickerUrl: string): HTMLImageElement | null {
+  private createSuperChatSticker(sticker: ImageAsset): HTMLImageElement | null {
     // Calculate size relative to font size
     const stickerSize = this.settings.fontSize * LAYOUT.SUPERCHAT_STICKER_SIZE;
+    const options: ImageElementOptions = {};
+    if (sticker.width !== undefined) {
+      options.width = sticker.width;
+    }
+    if (sticker.height !== undefined) {
+      options.height = sticker.height;
+    }
 
     // Create image element using common helper
     return this.createImageElement(
-      stickerUrl,
-      'Super Chat Sticker',
+      sticker.url,
+      sticker.alt || 'Super Chat Sticker',
       'yt-chat-overlay-superchat-sticker',
-      stickerSize
+      stickerSize,
+      options
     );
   }
 
@@ -661,6 +684,8 @@ export class Renderer {
         const img = this.createEmojiElement(segment.emoji);
         if (img) {
           container.appendChild(img);
+        } else if (segment.emoji.alt.length > 0) {
+          container.appendChild(document.createTextNode(segment.emoji.alt));
         }
       }
     }
@@ -748,7 +773,7 @@ export class Renderer {
     message: ChatMessage,
     superChat: SuperChatInfo
   ): HTMLDivElement | null {
-    const hasSticker = Boolean(superChat.stickerUrl);
+    const hasSticker = Boolean(superChat.sticker);
     const messageDiv = this.createMessageTextElement(message);
 
     if (!messageDiv && !hasSticker) {
@@ -758,8 +783,8 @@ export class Renderer {
     const content = this.createContainer('yt-chat-overlay-superchat-body');
 
     // Add sticker if available (high-tier Super Chats)
-    if (superChat.stickerUrl) {
-      const stickerImg = this.createSuperChatSticker(superChat.stickerUrl);
+    if (superChat.sticker) {
+      const stickerImg = this.createSuperChatSticker(superChat.sticker);
       if (stickerImg) {
         content.appendChild(stickerImg);
       }
