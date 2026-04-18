@@ -2,11 +2,16 @@ import { isLogLevel, type OverlaySettings } from '@app-types';
 import { ensurePlayerPositioning, findPlayerContainerElement } from '@core/dom';
 import { createLogger } from '@core/logging';
 import {
+  formatOutlineNumericSettingForInput,
+  formatRootNumericSettingForInput,
+  getOutlineNumericInputAttributes,
+  getRootNumericInputAttributes,
+  normalizeOutlineNumericInputValue,
+  normalizeRootNumericInputValue,
+} from '@core/settings-form';
+import {
   AUTHOR_COLOR_KEYS,
   cloneSettings,
-  formatNumericSettingForInput,
-  getNumericInputAttributes,
-  normalizeNumericInputValue,
   OUTLINE_SETTING_DEFINITIONS,
   OUTLINE_SETTING_KEYS,
   type OutlineSettingKey,
@@ -55,11 +60,13 @@ const createSettingsUiHtml = (html: string): string => {
 };
 
 const createNumberInputAttributes = (
-  definition:
-    | (typeof ROOT_SETTING_DEFINITIONS)[RootScalarSettingKey]
-    | (typeof OUTLINE_SETTING_DEFINITIONS)[OutlineSettingKey]
+  scope: 'root' | 'outline',
+  key: RootScalarSettingKey | OutlineSettingKey
 ): string => {
-  const { min, max, step } = getNumericInputAttributes(definition);
+  const { min, max, step } =
+    scope === 'root'
+      ? getRootNumericInputAttributes(key as RootScalarSettingKey)
+      : getOutlineNumericInputAttributes(key as OutlineSettingKey);
   return `min="${min}" max="${max}" step="${step}"`;
 };
 
@@ -502,7 +509,7 @@ export class SettingsUi {
           <input
             type="number"
             name="fontSize"
-            ${createNumberInputAttributes(ROOT_SETTING_DEFINITIONS.fontSize)}
+            ${createNumberInputAttributes('root', 'fontSize')}
           />
         </label>
         <label class="yt-chat-overlay-settings-field">
@@ -510,7 +517,7 @@ export class SettingsUi {
           <input
             type="number"
             name="opacity"
-            ${createNumberInputAttributes(ROOT_SETTING_DEFINITIONS.opacity)}
+            ${createNumberInputAttributes('root', 'opacity')}
           />
         </label>
         <label class="yt-chat-overlay-settings-field">
@@ -518,7 +525,7 @@ export class SettingsUi {
           <input
             type="number"
             name="speedPxPerSec"
-            ${createNumberInputAttributes(ROOT_SETTING_DEFINITIONS.speedPxPerSec)}
+            ${createNumberInputAttributes('root', 'speedPxPerSec')}
           />
         </label>
         <label class="yt-chat-overlay-settings-field">
@@ -526,7 +533,7 @@ export class SettingsUi {
           <input
             type="number"
             name="safeTop"
-            ${createNumberInputAttributes(ROOT_SETTING_DEFINITIONS.safeTop)}
+            ${createNumberInputAttributes('root', 'safeTop')}
             title="Keep top N% of video free of comments"
           />
         </label>
@@ -535,7 +542,7 @@ export class SettingsUi {
           <input
             type="number"
             name="safeBottom"
-            ${createNumberInputAttributes(ROOT_SETTING_DEFINITIONS.safeBottom)}
+            ${createNumberInputAttributes('root', 'safeBottom')}
             title="Keep bottom N% of video free of comments"
           />
         </label>
@@ -548,7 +555,7 @@ export class SettingsUi {
           <input
             type="number"
             name="superChatOpacity"
-            ${createNumberInputAttributes(ROOT_SETTING_DEFINITIONS.superChatOpacity)}
+            ${createNumberInputAttributes('root', 'superChatOpacity')}
             title="Background opacity of Super Chat cards"
           />
         </label>
@@ -557,7 +564,7 @@ export class SettingsUi {
           <input
             type="number"
             name="laneSpacing"
-            ${createNumberInputAttributes(ROOT_SETTING_DEFINITIONS.laneSpacing)}
+            ${createNumberInputAttributes('root', 'laneSpacing')}
             title="Extra vertical gap between comment rows"
           />
         </label>
@@ -572,7 +579,7 @@ export class SettingsUi {
             <input
               type="number"
               name="outline-widthPx"
-              ${createNumberInputAttributes(OUTLINE_SETTING_DEFINITIONS.widthPx)}
+              ${createNumberInputAttributes('outline', 'widthPx')}
             />
           </label>
           <label class="yt-chat-overlay-settings-field">
@@ -580,7 +587,7 @@ export class SettingsUi {
             <input
               type="number"
               name="outline-blurPx"
-              ${createNumberInputAttributes(OUTLINE_SETTING_DEFINITIONS.blurPx)}
+              ${createNumberInputAttributes('outline', 'blurPx')}
             />
           </label>
           <label class="yt-chat-overlay-settings-field">
@@ -588,7 +595,7 @@ export class SettingsUi {
             <input
               type="number"
               name="outline-opacity"
-              ${createNumberInputAttributes(OUTLINE_SETTING_DEFINITIONS.opacity)}
+              ${createNumberInputAttributes('outline', 'opacity')}
             />
           </label>
         </div>
@@ -660,7 +667,7 @@ export class SettingsUi {
             <input
               type="number"
               name="maxMessagesPerSecond"
-              ${createNumberInputAttributes(ROOT_SETTING_DEFINITIONS.maxMessagesPerSecond)}
+              ${createNumberInputAttributes('root', 'maxMessagesPerSecond')}
               title="Maximum new comments displayed per second"
             />
           </label>
@@ -677,7 +684,7 @@ export class SettingsUi {
             <input
               type="number"
               name="minTextLength"
-              ${createNumberInputAttributes(ROOT_SETTING_DEFINITIONS.minTextLength)}
+              ${createNumberInputAttributes('root', 'minTextLength')}
               title="Minimum character count (ignored when Show Short is on)"
             />
           </label>
@@ -689,7 +696,7 @@ export class SettingsUi {
             <input
               type="number"
               name="maxConcurrentMessages"
-              ${createNumberInputAttributes(ROOT_SETTING_DEFINITIONS.maxConcurrentMessages)}
+              ${createNumberInputAttributes('root', 'maxConcurrentMessages')}
               title="Performance warning threshold for simultaneous comments"
             />
           </label>
@@ -769,7 +776,7 @@ export class SettingsUi {
         this.setSelect(key, value as string);
         return;
       default:
-        this.setValue(key, formatNumericSettingForInput(definition, value as number));
+        this.setValue(key, formatRootNumericSettingForInput(key, value as number));
     }
   }
 
@@ -786,7 +793,7 @@ export class SettingsUi {
       return;
     }
 
-    this.setValue(name, formatNumericSettingForInput(definition, value as number));
+    this.setValue(name, formatOutlineNumericSettingForInput(key, value as number));
   }
 
   private populateForm(settings: Readonly<OverlaySettings>): void {
@@ -816,16 +823,6 @@ export class SettingsUi {
 
     const parsed = Number.parseFloat(input.value);
     return Number.isFinite(parsed) ? parsed : fallback;
-  }
-
-  private readNumericSetting(
-    definition:
-      | (typeof ROOT_SETTING_DEFINITIONS)[RootScalarSettingKey]
-      | (typeof OUTLINE_SETTING_DEFINITIONS)[OutlineSettingKey],
-    name: string,
-    fallback: number
-  ): number {
-    return normalizeNumericInputValue(definition, this.readNumber(name, fallback), fallback);
   }
 
   private collectAuthorColors(current: Readonly<OverlaySettings>): OverlaySettings['colors'] {
@@ -865,7 +862,11 @@ export class SettingsUi {
       case 'log-level':
         return this.getLogLevel(key, fallback as OverlaySettings['logLevel']);
       default:
-        return this.readNumericSetting(definition, key, fallback as number);
+        return normalizeRootNumericInputValue(
+          key,
+          this.readNumber(key, fallback as number),
+          fallback as number
+        );
     }
   }
 
@@ -880,7 +881,11 @@ export class SettingsUi {
     return (
       definition.kind === 'boolean'
         ? this.getCheckbox(name, fallback as boolean)
-        : this.readNumericSetting(definition, name, fallback as number)
+        : normalizeOutlineNumericInputValue(
+            key,
+            this.readNumber(name, fallback as number),
+            fallback as number
+          )
     ) as OverlaySettings['outline'][K];
   }
 

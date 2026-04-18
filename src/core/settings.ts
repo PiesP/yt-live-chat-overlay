@@ -1,8 +1,8 @@
 import type { OverlaySettings } from '@app-types';
 import { createLogger } from '@core/logging';
 import { DEFAULT_SETTINGS } from '@core/settings-definitions';
-import { applySettings, cloneSettings } from '@core/settings-schema';
-import { readStoredSettings, STORAGE_KEY } from '@core/settings-storage';
+import { applySettingsPatch, cloneSettings, normalizeStoredSettings } from '@core/settings-schema';
+import { readStoredSettings, writeStoredSettings } from '@core/settings-storage';
 
 const log = createLogger('Settings');
 
@@ -15,10 +15,7 @@ export class Settings {
 
   private loadSettings(): OverlaySettings {
     try {
-      const stored = readStoredSettings();
-      if (stored) {
-        return applySettings(DEFAULT_SETTINGS, stored);
-      }
+      return normalizeStoredSettings(readStoredSettings());
     } catch (error) {
       log.warn('Failed to load settings:', error);
     }
@@ -28,7 +25,7 @@ export class Settings {
 
   private saveSettings(): void {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.settings));
+      writeStoredSettings(this.settings);
     } catch (error) {
       log.warn('Failed to save settings:', error);
     }
@@ -39,7 +36,7 @@ export class Settings {
   }
 
   update(partial: Partial<OverlaySettings>): void {
-    this.settings = applySettings(this.settings, partial);
+    this.settings = applySettingsPatch(this.settings, partial);
     this.saveSettings();
   }
 }

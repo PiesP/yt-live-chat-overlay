@@ -5,6 +5,7 @@ import { throwIfAborted } from '@core/dom';
 import { createLogger } from '@core/logging';
 import { OVERLAY_SELECTOR, Overlay } from '@core/overlay';
 import { Renderer } from '@core/renderer';
+import { RecoveryCoordinator } from '@core/runtime-recovery';
 import { shouldResetRendererForSettingsChange } from '@core/settings-schema';
 import { clearIntervalHandle } from '@core/timers';
 import { VideoSync } from '@core/video-sync';
@@ -15,8 +16,6 @@ const RESUME_SYNC_MESSAGE_LIMIT = 20;
 const CHAT_WATCHDOG_INTERVAL_MS = 15_000;
 const CHAT_STALL_TIMEOUT_MS = 30_000;
 const CHAT_RECOVERY_GRACE_MS = 2_500;
-
-type RecoveryReason = 'startup' | 'video-play' | 'foreground-return' | 'watchdog' | 'seeking';
 
 export interface RuntimeSessionOptions {
   targetUrl: string;
@@ -41,18 +40,27 @@ export class RuntimeSession {
   private renderer: Renderer | null = null;
   private chatSource: ChatSource | null = null;
   private videoSync: VideoSync | null = null;
-  private visibilityHandler: (() => void) | null = null;
-  private focusHandler: (() => void) | null = null;
-  private pageShowHandler: (() => void) | null = null;
+  private foregroundRecoveryCleanup: (() => void) | null = null;
   private chatWatchdogInterval: number | null = null;
-  private lastForegroundRecoveryAt = 0;
   private disposed = false;
-  private recoveryPromise: Promise<void> | null = null;
-  private resumeSyncPromise: Promise<void> | null = null;
+  private readonly recoveryCoordinator: RecoveryCoordinator;
 
   constructor(options: RuntimeSessionOptions) {
     this.targetUrl = options.targetUrl;
     this.settings = options.settings;
+    this.recoveryCoordinator = new RecoveryCoordinator({
+      recoveryGraceMs: CHAT_RECOVERY_GRACE_MS,
+      getSignal: () => this.abortController.signal,
+      getHealthSnapshot: () => {
+        const chatSource = this.chatSource;
+        return chatSource ? this.getChatHealthSnapshot(chatSource) : null;
+      },
+      reconnect: async (signal) => this.chatSource?.reconnect(signal) ?? false,
+      syncLatestMessages: () => this.syncLatestMessagesOnResume(),
+      isDisposed: () => this.disposed,
+      isVideoPaused: () => this.videoSync?.isPaused() ?? false,
+      log,
+    });
   }
 
   matchesUrl(url: string): boolean {
@@ -86,7 +94,7 @@ export class RuntimeSession {
           this.renderer?.pause();
         },
         onPlay: () => {
-          void this.recover('video-play', true);
+          void this.recoveryCoordinator.recover('video-play', true);
         },
         onRateChange: (rate) => {
           log.info('Video playback rate changed:', rate);
@@ -94,7 +102,7 @@ export class RuntimeSession {
         },
         onSeeking: () => {
           this.renderer?.flushQueue();
-          void this.recover('seeking', true);
+          void this.recoveryCoordinator.recover('seeking', true);
         },
       });
       this.videoSync = videoSync;
@@ -112,7 +120,7 @@ export class RuntimeSession {
       this.setupChatWatchdog();
       if (chatStarted === 'retryable') {
         log.warn('Chat source was not ready during startup; recovery will continue in-session');
-        void this.recover('startup');
+        void this.recoveryCoordinator.recover('startup');
       }
 
       log.info('Started successfully');
@@ -147,10 +155,7 @@ export class RuntimeSession {
       return;
     }
 
-    const latestMessages = this.chatSource?.getLatestMessages(RESUME_SYNC_MESSAGE_LIMIT) ?? [];
-    for (const message of latestMessages) {
-      renderer.addMessage(message);
-    }
+    this.replayLatestMessages(renderer);
   }
 
   dispose(): void {
@@ -160,23 +165,9 @@ export class RuntimeSession {
 
     this.disposed = true;
     this.abortController.abort();
-    this.resumeSyncPromise = null;
-    this.recoveryPromise = null;
-
-    if (this.visibilityHandler) {
-      document.removeEventListener('visibilitychange', this.visibilityHandler);
-      this.visibilityHandler = null;
-    }
-
-    if (this.focusHandler) {
-      window.removeEventListener('focus', this.focusHandler);
-      this.focusHandler = null;
-    }
-
-    if (this.pageShowHandler) {
-      window.removeEventListener('pageshow', this.pageShowHandler);
-      this.pageShowHandler = null;
-    }
+    this.recoveryCoordinator.clear();
+    this.foregroundRecoveryCleanup?.();
+    this.foregroundRecoveryCleanup = null;
 
     this.chatWatchdogInterval = clearIntervalHandle(this.chatWatchdogInterval);
 
@@ -220,21 +211,23 @@ export class RuntimeSession {
   }
 
   private setupForegroundRecoveryHandlers(): void {
+    this.foregroundRecoveryCleanup?.();
+
     const handleForegroundReturn = (): void => {
       if (document.hidden || this.videoSync?.isPaused()) {
         return;
       }
 
       const now = Date.now();
-      if (now - this.lastForegroundRecoveryAt < CHAT_RECOVERY_GRACE_MS) {
+      if (this.recoveryCoordinator.isWithinGrace(now)) {
         return;
       }
 
-      this.lastForegroundRecoveryAt = now;
-      void this.recover('foreground-return', true);
+      this.recoveryCoordinator.noteForegroundRecovery(now);
+      void this.recoveryCoordinator.recover('foreground-return', true);
     };
 
-    this.visibilityHandler = () => {
+    const visibilityHandler = (): void => {
       if (document.hidden) {
         this.renderer?.pause();
         return;
@@ -243,33 +236,21 @@ export class RuntimeSession {
       handleForegroundReturn();
     };
 
-    this.focusHandler = handleForegroundReturn;
-    this.pageShowHandler = handleForegroundReturn;
+    document.addEventListener('visibilitychange', visibilityHandler);
+    window.addEventListener('focus', handleForegroundReturn);
+    window.addEventListener('pageshow', handleForegroundReturn);
 
-    document.addEventListener('visibilitychange', this.visibilityHandler);
-    window.addEventListener('focus', this.focusHandler);
-    window.addEventListener('pageshow', this.pageShowHandler);
+    this.foregroundRecoveryCleanup = () => {
+      document.removeEventListener('visibilitychange', visibilityHandler);
+      window.removeEventListener('focus', handleForegroundReturn);
+      window.removeEventListener('pageshow', handleForegroundReturn);
+    };
   }
 
   private getChatHealthSnapshot(chatSource: ChatSource): ChatHealthSnapshot {
     return chatSource.getHealthSnapshot({
       activeTimeoutMs: CHAT_STALL_TIMEOUT_MS,
     });
-  }
-
-  private getWatchdogHealthState(health: ChatHealthSnapshot): {
-    stalled: boolean;
-    withinGrace: boolean;
-    needsRecovery: boolean;
-  } {
-    const withinGrace = Date.now() - this.lastForegroundRecoveryAt < CHAT_RECOVERY_GRACE_MS;
-    const stalled = !health.recentlyActive && !withinGrace;
-
-    return {
-      stalled,
-      withinGrace,
-      needsRecovery: !health.observerAlive || stalled,
-    };
   }
 
   private setupChatWatchdog(): void {
@@ -279,12 +260,13 @@ export class RuntimeSession {
         return;
       }
 
-      if (this.videoSync?.isPaused() || this.recoveryPromise) {
+      if (this.videoSync?.isPaused() || this.recoveryCoordinator.isRecovering()) {
         return;
       }
 
       const health = this.getChatHealthSnapshot(chatSource);
-      const { stalled, withinGrace, needsRecovery } = this.getWatchdogHealthState(health);
+      const { stalled, withinGrace, needsRecovery } =
+        this.recoveryCoordinator.getWatchdogHealthState(health);
 
       if (!needsRecovery) {
         return;
@@ -295,71 +277,18 @@ export class RuntimeSession {
         stalled,
         withinGrace,
       });
-      void this.recover('watchdog');
+      void this.recoveryCoordinator.recover('watchdog');
     }, CHAT_WATCHDOG_INTERVAL_MS);
   }
 
-  private async recover(reason: RecoveryReason, forceResync = false): Promise<void> {
-    if (this.disposed) return;
-
-    if (this.recoveryPromise) {
-      await this.recoveryPromise;
-      if (forceResync) {
-        await this.syncLatestMessagesOnResume();
-      }
+  private replayLatestMessages(renderer = this.renderer, limit = RESUME_SYNC_MESSAGE_LIMIT): void {
+    if (!renderer) {
       return;
     }
 
-    const recoveryPromise = this.runRecoveryBody(reason, forceResync).finally(() => {
-      if (this.recoveryPromise === recoveryPromise) {
-        this.recoveryPromise = null;
-      }
-    });
-
-    this.recoveryPromise = recoveryPromise;
-    await recoveryPromise;
-  }
-
-  private async runRecoveryBody(reason: RecoveryReason, forceResync: boolean): Promise<void> {
-    if (this.disposed || this.videoSync?.isPaused()) return;
-
-    const chatSource = this.chatSource;
-    if (!chatSource) return;
-
-    const signal = this.abortController.signal;
-
-    try {
-      const health = this.getChatHealthSnapshot(chatSource);
-      // forceResync marks user-visible resume events (foreground-return,
-      // video-play, seeking). Background throttling or replay seeks can
-      // leave the chat source logically stale while health still looks
-      // acceptable, so we always rebuild the source + recent buffer on
-      // those transitions. Watchdog ticks keep their health-driven
-      // behavior to avoid churn during steady playback.
-      const needsReconnect = forceResync || !health.observerAlive || !health.recentlyActive;
-      let shouldResync = forceResync;
-
-      if (needsReconnect) {
-        log.info('Recovering chat health:', { reason, health });
-
-        const reconnected = await chatSource.reconnect(signal);
-        if (!reconnected) {
-          log.warn('Failed to reconnect chat during recovery');
-        }
-
-        shouldResync = true;
-      }
-
-      if (shouldResync) {
-        await this.syncLatestMessagesOnResume();
-      }
-    } catch (error) {
-      if (isAbortError(error)) return;
-
-      log.warn('Chat health recovery failed:', error);
-      if (forceResync) {
-        await this.syncLatestMessagesOnResume();
-      }
+    const latestMessages = this.chatSource?.getLatestMessages(limit) ?? [];
+    for (const message of latestMessages) {
+      renderer.addMessage(message);
     }
   }
 
@@ -368,42 +297,23 @@ export class RuntimeSession {
       return;
     }
 
-    if (this.resumeSyncPromise) {
-      this.renderer?.resume();
-      await this.resumeSyncPromise;
+    const renderer = this.renderer;
+    if (!renderer) {
       return;
     }
 
-    const syncPromise = Promise.resolve()
-      .then(() => {
-        const renderer = this.renderer;
-        if (!renderer) {
-          return;
-        }
-
-        // Keep currently flowing comments alive; only drop stale queued backlog
-        // before replaying the latest messages after recovery.
-        renderer.flushQueue({ releaseMessageIds: true });
-        renderer.resume();
-
-        const latestMessages = this.chatSource?.getLatestMessages(RESUME_SYNC_MESSAGE_LIMIT) ?? [];
-        for (const message of latestMessages) {
-          renderer.addMessage(message);
-        }
-      })
-      .catch((error: unknown) => {
-        if (!isAbortError(error)) {
-          log.warn('Failed to sync latest messages on resume:', error);
-        }
-        this.renderer?.resume();
-      })
-      .finally(() => {
-        if (this.resumeSyncPromise === syncPromise) {
-          this.resumeSyncPromise = null;
-        }
-      });
-
-    this.resumeSyncPromise = syncPromise;
-    await syncPromise;
+    try {
+      // Keep currently flowing comments alive; only drop stale queued backlog
+      // before replaying the latest messages after recovery.
+      renderer.flushQueue({ releaseMessageIds: true });
+      renderer.resume();
+      this.replayLatestMessages(renderer);
+    } catch (error) {
+      if (!isAbortError(error)) {
+        throw error;
+      }
+      renderer.resume();
+      throw error;
+    }
   }
 }

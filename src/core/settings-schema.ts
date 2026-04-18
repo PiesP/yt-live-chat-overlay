@@ -14,8 +14,6 @@ type SettingLimitsKey = keyof typeof SETTINGS_LIMITS;
 interface SettingDefinition {
   readonly kind: SettingDefinitionKind;
   readonly limitsKey?: SettingLimitsKey;
-  readonly uiScale?: number;
-  readonly uiPrecision?: number;
   readonly resetRenderer: boolean;
 }
 
@@ -59,22 +57,16 @@ export const ROOT_SETTING_DEFINITIONS = {
   superChatOpacity: {
     kind: 'number',
     limitsKey: 'superChatOpacity',
-    uiScale: 100,
-    uiPrecision: 0,
     resetRenderer: true,
   },
   safeTop: {
     kind: 'number',
     limitsKey: 'safeTop',
-    uiScale: 100,
-    uiPrecision: 1,
     resetRenderer: true,
   },
   safeBottom: {
     kind: 'number',
     limitsKey: 'safeBottom',
-    uiScale: 100,
-    uiPrecision: 1,
     resetRenderer: true,
   },
   maxConcurrentMessages: {
@@ -195,8 +187,6 @@ const hasAnyChanged = <T extends object>(
   keys: readonly (keyof T)[]
 ): boolean => keys.some((key) => previous[key] !== next[key]);
 
-const scaleUiValue = (value: number, scale: number): number => Number((value * scale).toFixed(4));
-
 export const cloneSettings = (settings: Readonly<OverlaySettings>): OverlaySettings => ({
   ...settings,
   showAuthor: { ...settings.showAuthor },
@@ -207,7 +197,7 @@ export const cloneSettings = (settings: Readonly<OverlaySettings>): OverlaySetti
 const mergeNested = <T extends object>(base: Readonly<T>, partial: Partial<T> | undefined): T =>
   isRecord(partial) ? { ...base, ...partial } : { ...base };
 
-export const mergeSettings = (
+const mergeSettings = (
   base: Readonly<OverlaySettings>,
   partial: Partial<OverlaySettings>
 ): OverlaySettings => ({
@@ -219,7 +209,7 @@ export const mergeSettings = (
 });
 
 export const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings => {
-  const normalized = cloneSettings(DEFAULT_SETTINGS);
+  const normalized = createDefaultSettings();
 
   for (const key of ROOT_SETTING_KEYS) {
     assignNormalizedSetting(
@@ -257,7 +247,14 @@ export const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlayS
   return normalized;
 };
 
-export const applySettings = (
+export const createDefaultSettings = (): OverlaySettings => cloneSettings(DEFAULT_SETTINGS);
+
+export const normalizeStoredSettings = (
+  stored: Partial<OverlaySettings> | null | undefined
+): OverlaySettings =>
+  stored ? applySettingsPatch(createDefaultSettings(), stored) : createDefaultSettings();
+
+export const applySettingsPatch = (
   base: Readonly<OverlaySettings>,
   partial: Partial<OverlaySettings>
 ): OverlaySettings => normalizeSettings(mergeSettings(base, partial));
@@ -275,41 +272,3 @@ export const shouldResetRendererForSettingsChange = (
     (key) =>
       OUTLINE_SETTING_DEFINITIONS[key].resetRenderer && previous.outline[key] !== next.outline[key]
   );
-
-export const formatNumericSettingForInput = (
-  definition: SettingDefinition,
-  value: number
-): string | number => {
-  const scale = definition.uiScale ?? 1;
-  const scaledValue = scaleUiValue(value, scale);
-  return definition.uiPrecision === undefined
-    ? scaledValue
-    : scaledValue.toFixed(definition.uiPrecision);
-};
-
-export const normalizeNumericInputValue = (
-  definition: SettingDefinition,
-  value: unknown,
-  fallback: number
-): number => {
-  const scale = definition.uiScale ?? 1;
-  const scaledValue = typeof value === 'number' ? value / scale : Number(value) / scale;
-  return normalizeSettingValue(definition, scaledValue, fallback) as number;
-};
-
-export const getNumericInputAttributes = (
-  definition: SettingDefinition
-): Readonly<{ min: number; max: number; step: number }> => {
-  if (!definition.limitsKey) {
-    throw new TypeError('Setting does not define numeric limits.');
-  }
-
-  const limits = SETTINGS_LIMITS[definition.limitsKey];
-  const scale = definition.uiScale ?? 1;
-
-  return {
-    min: scaleUiValue(limits.min, scale),
-    max: scaleUiValue(limits.max, scale),
-    step: scaleUiValue(limits.step, scale),
-  };
-};

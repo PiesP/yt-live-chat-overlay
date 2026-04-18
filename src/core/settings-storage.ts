@@ -14,6 +14,10 @@ export const readStoredSettings = (): StoredSettings | null => {
   return JSON.parse(stored) as StoredSettings;
 };
 
+export const writeStoredSettings = (settings: Readonly<OverlaySettings>): void => {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+};
+
 export const readStoredLogLevel = (): OverlaySettings['logLevel'] => {
   try {
     const stored = readStoredSettings();

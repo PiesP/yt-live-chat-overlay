@@ -9,7 +9,6 @@ import type {
   ChatMessage,
   ContentSegment,
   EmojiInfo,
-  LaneState,
   OutlineSettings,
   OverlayDimensions,
   OverlaySettings,
@@ -17,6 +16,8 @@ import type {
 } from '@app-types';
 import { isAllowedYouTubeImageUrl } from '@core/image-url';
 import { createLogger } from '@core/logging';
+import { MessageIdRegistry, RenderQueue, RenderRateLimiter } from '@core/renderer-flow';
+import { LaneAllocator, type LanePlacement } from '@core/renderer-lanes';
 import { clearTimeoutHandle } from '@core/timers';
 import {
   borderRadius,
@@ -41,21 +42,10 @@ interface ActiveMessage {
   animation: Animation;
 }
 
-interface QueuedMessage {
-  message: ChatMessage;
-  nextAttemptAt: number;
-}
-
 type RenderResult =
   | { status: 'rendered' }
   | { status: 'dropped' }
   | { status: 'deferred'; waitMs: number };
-
-interface LanePlacement {
-  lane: LaneState;
-  laneSpan: number;
-  waitMs: number;
-}
 
 interface BuiltMessage {
   element: HTMLDivElement;
@@ -336,11 +326,10 @@ const RENDERER_STATIC_STYLES = `
 export class Renderer {
   private overlay: Overlay;
   private settings: OverlaySettings;
-  private lanes: LaneState[] = [];
+  private readonly laneAllocator: LaneAllocator;
   private activeMessages: Set<ActiveMessage> = new Set();
-  private messageQueue: QueuedMessage[] = [];
-  private lastProcessTime = 0;
-  private processedInLastSecond = 0;
+  private readonly renderQueue = new RenderQueue(LAYOUT.QUEUE_MAX_SIZE);
+  private readonly rateLimiter: RenderRateLimiter;
   private isPaused = false;
   private pausedAt: number | null = null;
   private playbackRate = 1;
@@ -348,38 +337,30 @@ export class Renderer {
   private readonly WARNING_INTERVAL_MS = 10000;
   private styleElement: HTMLStyleElement | null = null;
   private retryTimer: number | null = null;
-  private lastRenderStartTime = 0;
   private overlayDimensionsUnsubscribe: (() => void) | null = null;
   /** Ids of messages already enqueued/rendered, for dedup across reconnect/resume. */
-  private readonly seenMessageIds = new Set<string>();
-  private static readonly MAX_SEEN_IDS = 1000;
+  private readonly seenMessageIds = new MessageIdRegistry(1000);
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
     this.overlay = overlay;
     this.settings = settings;
-    this.initLanes();
+    this.laneAllocator = new LaneAllocator({
+      getFontSize: () => this.settings.fontSize,
+      getEffectiveSpeedPxPerSec: () => this.getEffectiveSpeedPxPerSec(),
+      globalStaggerMs: LAYOUT.GLOBAL_STAGGER_MS,
+      safeDistanceScale: LAYOUT.SAFE_DISTANCE_SCALE,
+      safeDistanceMin: LAYOUT.SAFE_DISTANCE_MIN,
+      verticalClearTimeMin: LAYOUT.VERTICAL_CLEAR_TIME_MIN,
+      verticalClearTimeMax: LAYOUT.VERTICAL_CLEAR_TIME_MAX,
+      laneHeightPaddingScale: LAYOUT.LANE_HEIGHT_PADDING_SCALE,
+      laneHeightPaddingMin: LAYOUT.LANE_HEIGHT_PADDING_MIN,
+    });
+    this.rateLimiter = new RenderRateLimiter(() => this.settings.maxMessagesPerSecond);
+    this.laneAllocator.reset(this.overlay.getDimensions());
     this.injectStyles();
     this.overlayDimensionsUnsubscribe = this.overlay.onDimensionsChanged((dimensions) => {
       this.handleOverlayDimensionsChange(dimensions);
     });
-  }
-
-  /**
-   * Initialize lanes
-   */
-  private initLanes(): void {
-    const dimensions = this.overlay.getDimensions();
-    if (!dimensions) {
-      this.lanes = [];
-      return;
-    }
-
-    this.lanes = Array.from({ length: dimensions.laneCount }, (_, i) => ({
-      index: i,
-      lastItemStartTime: 0,
-      lastItemWidthPx: 0,
-      lastItemHeightPx: 0,
-    }));
   }
 
   private resetRenderedState(): void {
@@ -390,22 +371,22 @@ export class Renderer {
     }
 
     this.activeMessages.clear();
-    this.messageQueue = [];
+    this.renderQueue.clear();
   }
 
   private handleOverlayDimensionsChange(dimensions: OverlayDimensions | null): void {
     if (!dimensions) {
       this.resetRenderedState();
-      this.lanes = [];
+      this.laneAllocator.reset(null);
       return;
     }
 
     // Re-init lane collision state but keep active animations running so
     // messages finish flowing across the screen instead of vanishing mid-way
     // when the player resizes or enters/exits fullscreen.
-    this.initLanes();
+    this.laneAllocator.reset(dimensions);
 
-    if (!this.isPaused && this.messageQueue.length > 0) {
+    if (!this.isPaused && this.renderQueue.length > 0) {
       this.processQueue();
     }
   }
@@ -957,16 +938,7 @@ export class Renderer {
     const now = Date.now();
     const startTime = now + laneDelay;
 
-    for (let i = lane.index; i < lane.index + laneSpan && i < this.lanes.length; i++) {
-      const laneState = this.lanes[i];
-      if (!laneState) continue;
-
-      laneState.lastItemStartTime = startTime;
-      laneState.lastItemWidthPx = textWidth;
-      laneState.lastItemHeightPx = messageHeight;
-    }
-
-    this.lastRenderStartTime = startTime;
+    this.laneAllocator.commitPlacement(placement, textWidth, messageHeight, startTime);
 
     const cleanup = (): void => {
       this.removeMessageByElement(element);
@@ -995,49 +967,22 @@ export class Renderer {
 
     // Rate limiting check
     const now = Date.now();
-    if (now - this.lastProcessTime > 1000) {
-      this.processedInLastSecond = 0;
-      this.lastProcessTime = now;
-    }
-
-    if (this.processedInLastSecond >= this.settings.maxMessagesPerSecond) {
+    if (!this.rateLimiter.canAccept(now)) {
       // Drop message
       return;
     }
 
     if (message.id) {
-      this.markMessageIdSeen(message.id);
+      this.seenMessageIds.mark(message.id);
     }
 
-    // Drop oldest entries if queue is full to prevent animation flood after long pause
-    if (this.messageQueue.length >= LAYOUT.QUEUE_MAX_SIZE) {
-      const excess = this.messageQueue.length - LAYOUT.QUEUE_MAX_SIZE + 1;
-      this.messageQueue.splice(0, excess);
-    }
-
-    this.messageQueue.push({
-      message,
-      nextAttemptAt: 0,
-    });
+    this.renderQueue.enqueue(message);
 
     // Only process queue if not paused
     if (!this.isPaused) {
       this.processQueue();
     }
     // If paused, message stays in queue until resume()
-  }
-
-  private markMessageIdSeen(id: string): void {
-    this.seenMessageIds.add(id);
-    if (this.seenMessageIds.size > Renderer.MAX_SEEN_IDS) {
-      const iterator = this.seenMessageIds.values();
-      const excess = this.seenMessageIds.size - Renderer.MAX_SEEN_IDS;
-      for (let i = 0; i < excess; i++) {
-        const next = iterator.next();
-        if (next.done || next.value === undefined) break;
-        this.seenMessageIds.delete(next.value);
-      }
-    }
   }
 
   /**
@@ -1053,13 +998,13 @@ export class Renderer {
 
     let shortestWaitMs: number | null = null;
 
-    while (this.messageQueue.length > 0) {
+    while (this.renderQueue.length > 0) {
       let progressed = false;
       const now = Date.now();
-      const lookaheadCount = Math.min(LAYOUT.QUEUE_LOOKAHEAD_LIMIT, this.messageQueue.length);
+      const lookaheadCount = Math.min(LAYOUT.QUEUE_LOOKAHEAD_LIMIT, this.renderQueue.length);
 
       for (let i = 0; i < lookaheadCount; i++) {
-        const queued = this.messageQueue[i];
+        const queued = this.renderQueue.at(i);
         if (!queued) continue;
 
         if (queued.nextAttemptAt > now) {
@@ -1076,14 +1021,14 @@ export class Renderer {
         const result = this.renderMessage(queued.message);
 
         if (result.status === 'rendered') {
-          this.messageQueue.splice(i, 1);
-          this.processedInLastSecond++;
+          this.renderQueue.removeAt(i);
+          this.rateLimiter.markProcessed(now);
           progressed = true;
           break;
         }
 
         if (result.status === 'dropped') {
-          this.messageQueue.splice(i, 1);
+          this.renderQueue.removeAt(i);
           progressed = true;
           break;
         }
@@ -1098,7 +1043,7 @@ export class Renderer {
       }
     }
 
-    if (this.messageQueue.length > 0) {
+    if (this.renderQueue.length > 0) {
       this.scheduleRetry(shortestWaitMs ?? LAYOUT.RETRY_DELAY_MAX_MS);
     }
   }
@@ -1230,13 +1175,13 @@ export class Renderer {
     );
 
     // Find available lane based on message height
-    const placement = this.findLanePlacement(messageHeight);
+    const placement = this.laneAllocator.findPlacement(messageHeight, dimensions);
     if (placement === null) {
       // No available lane, drop message
       log.debug(
         `No available lane for message (height: ${messageHeight}px). ` +
           `Active messages: ${this.activeMessages.size}, Lanes: ${dimensions.laneCount}, ` +
-          `Queue size: ${this.messageQueue.length}`
+          `Queue size: ${this.renderQueue.length}`
       );
       element.remove();
       return { status: 'dropped' };
@@ -1279,120 +1224,6 @@ export class Renderer {
   }
 
   /**
-   * Calculate required lane count for a message
-   */
-  private calculateRequiredLanes(messageHeight: number, laneHeight: number): number {
-    const paddingPx = Math.max(
-      LAYOUT.LANE_HEIGHT_PADDING_MIN,
-      this.settings.fontSize * LAYOUT.LANE_HEIGHT_PADDING_SCALE
-    );
-    return Math.max(1, Math.ceil((messageHeight + paddingPx) / laneHeight));
-  }
-
-  /**
-   * Calculate lane ready time for a new message width
-   */
-  private calculateLaneReadyTime(lane: LaneState, now: number): number {
-    if (lane.lastItemStartTime <= 0) {
-      return now;
-    }
-
-    const baseSafeDistance = this.settings.fontSize * LAYOUT.SAFE_DISTANCE_SCALE;
-    const minSafeDistance = Math.max(baseSafeDistance, LAYOUT.SAFE_DISTANCE_MIN);
-
-    // Same-lane messages move at the same speed, so overlap is governed mainly by
-    // previous message width + a small visual buffer (new width does not shrink gap).
-    const requiredGapPx = lane.lastItemWidthPx + minSafeDistance;
-    const safeTimeGap = (requiredGapPx / this.getEffectiveSpeedPxPerSec()) * 1000;
-
-    const horizontalReadyTime = lane.lastItemStartTime + safeTimeGap;
-    const verticalClearTime = Math.min(
-      LAYOUT.VERTICAL_CLEAR_TIME_MAX,
-      Math.max(LAYOUT.VERTICAL_CLEAR_TIME_MIN, lane.lastItemHeightPx * 4)
-    );
-    const verticalReadyTime = lane.lastItemStartTime + verticalClearTime;
-
-    return Math.max(now, horizontalReadyTime, verticalReadyTime);
-  }
-
-  /**
-   * Find the best lane placement (position + timing).
-   *
-   * Selection strategy: collect all valid candidate blocks with their ready
-   * times, then pick **randomly** from those that are immediately available
-   * (readyTime <= now).  This prevents the staircase / diagonal pattern that
-   * arises when messages are placed in top-to-bottom sequential order during
-   * chat bursts.  When no lane is ready right now, pick randomly among the
-   * soonest-available group so the wait time is minimised while still
-   * avoiding visual clustering.
-   */
-  private findLanePlacement(messageHeight: number): LanePlacement | null {
-    const now = Date.now();
-    const dimensions = this.overlay.getDimensions();
-    if (!dimensions) return null;
-
-    const requiredLanes = this.calculateRequiredLanes(messageHeight, dimensions.laneHeight);
-    if (requiredLanes > this.lanes.length) {
-      return null;
-    }
-
-    interface BlockCandidate {
-      startIndex: number;
-      readyTime: number;
-    }
-
-    const candidates: BlockCandidate[] = [];
-    let minReadyTime = Number.POSITIVE_INFINITY;
-
-    for (let i = 0; i <= this.lanes.length - requiredLanes; i++) {
-      let blockReadyTime = now;
-
-      for (let offset = 0; offset < requiredLanes; offset++) {
-        const lane = this.lanes[i + offset];
-        if (!lane) {
-          blockReadyTime = Number.POSITIVE_INFINITY;
-          break;
-        }
-        blockReadyTime = Math.max(blockReadyTime, this.calculateLaneReadyTime(lane, now));
-      }
-
-      if (!Number.isFinite(blockReadyTime)) continue;
-
-      candidates.push({ startIndex: i, readyTime: blockReadyTime });
-      minReadyTime = Math.min(minReadyTime, blockReadyTime);
-    }
-
-    if (candidates.length === 0 || !Number.isFinite(minReadyTime)) {
-      return null;
-    }
-
-    // Cross-lane stagger: force min gap between successive renders so bursts
-    // spread into a continuous flow instead of syncing across lanes.
-    const staggerFloor = this.lastRenderStartTime + LAYOUT.GLOBAL_STAGGER_MS;
-    const effectiveNow = Math.max(now, staggerFloor);
-
-    // Prefer lanes that are ready right now; fall back to the soonest group.
-    const readyNow = candidates.filter((c) => c.readyTime <= effectiveNow);
-    const pool =
-      readyNow.length > 0 ? readyNow : candidates.filter((c) => c.readyTime === minReadyTime);
-
-    // Random pick breaks the top-to-bottom sequential assignment pattern.
-    const chosen = pool[Math.floor(Math.random() * pool.length)];
-    if (!chosen) return null;
-
-    const chosenLane = this.lanes[chosen.startIndex];
-    if (!chosenLane) return null;
-
-    const scheduledTime = Math.max(chosen.readyTime, staggerFloor);
-
-    return {
-      lane: chosenLane,
-      laneSpan: requiredLanes,
-      waitMs: Math.max(0, Math.ceil(scheduledTime - now)),
-    };
-  }
-
-  /**
    * Remove message by element
    */
   private removeMessageByElement(element: HTMLDivElement): void {
@@ -1430,12 +1261,13 @@ export class Renderer {
 
     if (options.resetState) {
       this.resetRenderedState();
-      this.initLanes();
+      this.laneAllocator.reset(this.overlay.getDimensions());
+      this.rateLimiter.reset();
       return;
     }
 
-    if (this.lanes.length === 0) {
-      this.initLanes();
+    if (this.laneAllocator.isEmpty()) {
+      this.laneAllocator.reset(this.overlay.getDimensions());
     }
   }
 
@@ -1463,15 +1295,8 @@ export class Renderer {
     if (this.pausedAt !== null) {
       const pausedDuration = Math.max(0, now - this.pausedAt);
       if (pausedDuration > 0) {
-        for (const lane of this.lanes) {
-          if (lane.lastItemStartTime > 0) {
-            lane.lastItemStartTime += pausedDuration;
-          }
-        }
-
-        if (this.lastProcessTime > 0) {
-          this.lastProcessTime += pausedDuration;
-        }
+        this.laneAllocator.shiftTimeline(pausedDuration);
+        this.rateLimiter.shiftWindow(pausedDuration);
       }
     }
     this.pausedAt = null;
@@ -1492,15 +1317,15 @@ export class Renderer {
    * still-relevant items again without clearing active on-screen animations.
    */
   flushQueue(options: FlushQueueOptions = {}): void {
-    if (options.releaseMessageIds) {
-      for (const queued of this.messageQueue) {
-        if (queued.message.id) {
-          this.seenMessageIds.delete(queued.message.id);
-        }
-      }
-    }
-
-    this.messageQueue = [];
+    this.renderQueue.clear(
+      options.releaseMessageIds
+        ? (message) => {
+            if (message.id) {
+              this.seenMessageIds.release(message.id);
+            }
+          }
+        : undefined
+    );
     this.clearRetryTimer();
   }
 
@@ -1545,6 +1370,7 @@ export class Renderer {
     this.overlayDimensionsUnsubscribe = null;
 
     this.resetRenderedState();
+    this.rateLimiter.reset();
     this.seenMessageIds.clear();
     this.pausedAt = null;
     this.playbackRate = 1;
