@@ -1,4 +1,5 @@
 import type { OverlaySettings } from '@app-types';
+import { isAbortError } from '@core/abort';
 import { type ChatHealthSnapshot, ChatSource, type ChatSourceStartStatus } from '@core/chat-source';
 import { throwIfAborted } from '@core/dom';
 import { createLogger } from '@core/logging';
@@ -14,9 +15,6 @@ const RESUME_SYNC_MESSAGE_LIMIT = 20;
 const CHAT_WATCHDOG_INTERVAL_MS = 15_000;
 const CHAT_STALL_TIMEOUT_MS = 30_000;
 const CHAT_RECOVERY_GRACE_MS = 2_500;
-
-const isAbortError = (error: unknown): boolean =>
-  error instanceof DOMException && error.name === 'AbortError';
 
 type RecoveryReason = 'startup' | 'video-play' | 'foreground-return' | 'watchdog' | 'seeking';
 

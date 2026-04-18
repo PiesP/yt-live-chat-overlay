@@ -12,9 +12,11 @@ import type {
   OverlaySettings,
   SuperChatInfo,
 } from '@app-types';
+import { combineAbortSignals, isAbortError } from '@core/abort';
 import { parseRgbColor } from '@core/design-tokens';
 import { findElementMatch, sleep, throwIfAborted, VIDEO_SELECTORS } from '@core/dom';
 import { isAllowedYouTubeImageUrl } from '@core/image-url';
+import { asRecord, getBoolean, getNumber, getString, isRecord, type JsonObject } from '@core/json';
 import { createLogger } from '@core/logging';
 import {
   bootstrapChatSession,
@@ -49,7 +51,6 @@ const REPLAY_BUFFER_REFILL_THRESHOLD = 24;
 const MAX_BUFFERED_REPLAY_MESSAGES = 300;
 const MAX_TRACKED_REPLAY_KEYS = 2000;
 
-type JsonObject = Record<string, unknown>;
 type ReplayMode = 'playerSeek' | 'continuation';
 type ChatMessageKind = ChatMessage['kind'];
 
@@ -97,30 +98,6 @@ interface SupportedRenderer {
 export type MessageCallback = (message: ChatMessage) => void;
 export type ChatSourceStartStatus = 'started' | 'retryable' | 'unavailable';
 
-const isRecord = (value: unknown): value is JsonObject =>
-  typeof value === 'object' && value !== null;
-
-const getString = (value: unknown): string | undefined =>
-  typeof value === 'string' && value.length > 0 ? value : undefined;
-
-const getNumber = (value: unknown): number | undefined => {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return value;
-  }
-
-  if (typeof value === 'string' && value.trim().length > 0) {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : undefined;
-  }
-
-  return undefined;
-};
-
-const getBoolean = (value: unknown): boolean | undefined =>
-  typeof value === 'boolean' ? value : undefined;
-
-const asRecord = (value: unknown): JsonObject | null => (isRecord(value) ? value : null);
-
 export class ChatSource {
   private callback: MessageCallback | null = null;
   /** Signals full shutdown to bootstrap/poll work. */
@@ -145,22 +122,62 @@ export class ChatSource {
 
   constructor(private readonly getSettings: (() => Readonly<OverlaySettings>) | null = null) {}
 
-  private createActiveSignal(external?: AbortSignal): AbortSignal | undefined {
-    const signals = [
-      external,
-      this.lifecycleController?.signal,
-      this.pollController?.signal,
-    ].filter((candidate): candidate is AbortSignal => Boolean(candidate));
+  private async bootstrapAndLaunchPolling(
+    context: 'start' | 'reconnect',
+    attempts: number,
+    intervalMs: number,
+    signal?: AbortSignal
+  ): Promise<ChatSourceStartStatus> {
+    const bootstrapResolution = await this.resolveBootstrap({
+      attempts,
+      intervalMs,
+      ...(signal ? { signal } : {}),
+    });
 
-    if (signals.length === 0) {
-      return undefined;
+    if (bootstrapResolution.status !== 'ready' || !bootstrapResolution.bootstrap) {
+      this.logBootstrapFailure(context, bootstrapResolution, attempts);
+      return bootstrapResolution.status === 'unavailable' ? 'unavailable' : 'retryable';
     }
 
-    if (signals.length === 1) {
-      return signals[0];
+    this.bootstrap = bootstrapResolution.bootstrap;
+
+    const seeded = await this.seedCurrentSession(signal);
+    if (!seeded) {
+      return 'retryable';
     }
 
-    return AbortSignal.any(signals);
+    this.launchCurrentPollLoop(signal);
+
+    log.info(
+      context === 'start'
+        ? `Chat monitoring started successfully via youtubei (${this.bootstrap.isReplay ? 'replay' : 'live'})`
+        : 'youtubei chat polling reconnected'
+    );
+
+    return 'started';
+  }
+
+  private async seedCurrentSession(signal?: AbortSignal): Promise<boolean> {
+    const bootstrap = this.bootstrap;
+    if (!bootstrap) {
+      return false;
+    }
+
+    return bootstrap.isReplay
+      ? this.initializeReplaySession(signal)
+      : this.initializeLiveSession(signal);
+  }
+
+  private launchCurrentPollLoop(signal?: AbortSignal): void {
+    const bootstrap = this.bootstrap;
+    if (!bootstrap) {
+      return;
+    }
+
+    this.launchPollLoop(
+      signal,
+      bootstrap.isReplay ? this.runReplayLoop.bind(this) : this.runLiveLoop.bind(this)
+    );
   }
 
   private isLifecycleAbort(): boolean {
@@ -236,7 +253,7 @@ export class ChatSource {
     void Promise.resolve()
       .then(() => runner(signal))
       .catch((error: unknown) => {
-        if (error instanceof DOMException && error.name === 'AbortError') {
+        if (isAbortError(error)) {
           return;
         }
 
@@ -361,6 +378,13 @@ export class ChatSource {
     return true;
   }
 
+  private async refreshLiveContinuation(signal?: AbortSignal): Promise<void> {
+    const refreshed = await this.refreshBootstrap(signal);
+    if (refreshed) {
+      this.liveContinuation = this.bootstrap?.initialContinuation ?? null;
+    }
+  }
+
   private handleLivePayload(payload: LiveChatPayload): void {
     const events = this.extractChatEvents(payload.actions);
     for (const event of events) {
@@ -384,7 +408,7 @@ export class ChatSource {
       this.handleLivePayload(payload);
       return true;
     } catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError') {
+      if (isAbortError(error)) {
         throw error;
       }
 
@@ -509,7 +533,7 @@ export class ChatSource {
 
       return nextPlayerSeekContinuation !== null || payload.actions.length > 0;
     } catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError') {
+      if (isAbortError(error)) {
         throw error;
       }
 
@@ -538,7 +562,7 @@ export class ChatSource {
 
       return this.replayContinuation !== null || events.length > 0;
     } catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError') {
+      if (isAbortError(error)) {
         throw error;
       }
 
@@ -616,7 +640,7 @@ export class ChatSource {
       this.flushReplayBuffer(currentOffsetMs);
       return true;
     } catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError') {
+      if (isAbortError(error)) {
         throw error;
       }
 
@@ -655,26 +679,20 @@ export class ChatSource {
 
       const continuation = this.liveContinuation;
       if (!continuation) {
-        const refreshed = await this.refreshBootstrap(signal);
-        if (refreshed) {
-          this.liveContinuation = this.bootstrap?.initialContinuation ?? null;
-        }
+        await this.refreshLiveContinuation(signal);
         continue;
       }
 
       try {
         const payload = await this.requestLivePayload(continuation, signal);
         if (!payload) {
-          const refreshed = await this.refreshBootstrap(signal);
-          if (refreshed) {
-            this.liveContinuation = this.bootstrap?.initialContinuation ?? null;
-          }
+          await this.refreshLiveContinuation(signal);
           continue;
         }
 
         this.handleLivePayload(payload);
       } catch (error) {
-        if (error instanceof DOMException && error.name === 'AbortError') {
+        if (isAbortError(error)) {
           throw error;
         }
 
@@ -684,10 +702,7 @@ export class ChatSource {
           log.warn('Live poll request failed:', error);
         }
 
-        const refreshed = await this.refreshBootstrap(signal);
-        if (refreshed) {
-          this.liveContinuation = this.bootstrap?.initialContinuation ?? null;
-        }
+        await this.refreshLiveContinuation(signal);
       }
     }
   }
@@ -1241,40 +1256,21 @@ export class ChatSource {
     this.reconnectInProgress = false;
     this.resetSessionState();
 
-    const combinedSignal = this.createActiveSignal(signal);
+    const combinedSignal = combineAbortSignals(
+      signal,
+      this.lifecycleController.signal,
+      this.pollController.signal
+    );
 
     try {
-      const bootstrapResolution = await this.resolveBootstrap({
-        attempts: BOOTSTRAP_ATTEMPTS,
-        intervalMs: BOOTSTRAP_RETRY_DELAY_MS,
-        ...(combinedSignal ? { signal: combinedSignal } : {}),
-      });
-
-      if (bootstrapResolution.status !== 'ready' || !bootstrapResolution.bootstrap) {
-        this.logBootstrapFailure('start', bootstrapResolution, BOOTSTRAP_ATTEMPTS);
-        return bootstrapResolution.status === 'unavailable' ? 'unavailable' : 'retryable';
-      }
-
-      this.bootstrap = bootstrapResolution.bootstrap;
-
-      const seeded = this.bootstrap.isReplay
-        ? await this.initializeReplaySession(combinedSignal)
-        : await this.initializeLiveSession(combinedSignal);
-      if (!seeded) {
-        return 'retryable';
-      }
-
-      this.launchPollLoop(
-        combinedSignal,
-        this.bootstrap.isReplay ? this.runReplayLoop.bind(this) : this.runLiveLoop.bind(this)
+      return await this.bootstrapAndLaunchPolling(
+        'start',
+        BOOTSTRAP_ATTEMPTS,
+        BOOTSTRAP_RETRY_DELAY_MS,
+        combinedSignal
       );
-
-      log.info(
-        `Chat monitoring started successfully via youtubei (${this.bootstrap.isReplay ? 'replay' : 'live'})`
-      );
-      return 'started';
     } catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError' && this.isLifecycleAbort()) {
+      if (isAbortError(error) && this.isLifecycleAbort()) {
         return 'retryable';
       }
 
@@ -1339,40 +1335,24 @@ export class ChatSource {
     this.pollLoopAlive = false;
     this.resetSessionState();
 
-    const combinedSignal = this.createActiveSignal(signal);
+    const combinedSignal = combineAbortSignals(
+      signal,
+      this.lifecycleController?.signal,
+      this.pollController.signal
+    );
 
     try {
       log.info('Reconnecting youtubei chat polling...');
-
-      const bootstrapResolution = await this.resolveBootstrap({
-        attempts: RECONNECT_ATTEMPTS,
-        intervalMs: RECONNECT_RETRY_DELAY_MS,
-        ...(combinedSignal ? { signal: combinedSignal } : {}),
-      });
-
-      if (bootstrapResolution.status !== 'ready' || !bootstrapResolution.bootstrap) {
-        this.logBootstrapFailure('reconnect', bootstrapResolution, RECONNECT_ATTEMPTS);
-        return false;
-      }
-
-      this.bootstrap = bootstrapResolution.bootstrap;
-
-      const seeded = this.bootstrap.isReplay
-        ? await this.initializeReplaySession(combinedSignal)
-        : await this.initializeLiveSession(combinedSignal);
-      if (!seeded) {
-        return false;
-      }
-
-      this.launchPollLoop(
-        combinedSignal,
-        this.bootstrap.isReplay ? this.runReplayLoop.bind(this) : this.runLiveLoop.bind(this)
+      return (
+        (await this.bootstrapAndLaunchPolling(
+          'reconnect',
+          RECONNECT_ATTEMPTS,
+          RECONNECT_RETRY_DELAY_MS,
+          combinedSignal
+        )) === 'started'
       );
-
-      log.info('youtubei chat polling reconnected');
-      return true;
     } catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError' && this.isLifecycleAbort()) {
+      if (isAbortError(error) && this.isLifecycleAbort()) {
         return false;
       }
 

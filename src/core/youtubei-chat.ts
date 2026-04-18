@@ -1,4 +1,5 @@
-type JsonObject = Record<string, unknown>;
+import { isAbortError } from '@core/abort';
+import { getNumber, getString, isRecord, type JsonObject } from '@core/json';
 
 export interface InnertubeContinuationData {
   readonly continuation: string;
@@ -41,25 +42,6 @@ export class YoutubeInnertubeRequestError extends Error {
     this.name = 'YoutubeInnertubeRequestError';
   }
 }
-
-const isRecord = (value: unknown): value is JsonObject =>
-  typeof value === 'object' && value !== null;
-
-const getString = (value: unknown): string | undefined =>
-  typeof value === 'string' && value.length > 0 ? value : undefined;
-
-const getNumber = (value: unknown): number | undefined => {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return value;
-  }
-
-  if (typeof value === 'string' && value.trim().length > 0) {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : undefined;
-  }
-
-  return undefined;
-};
 
 const getNestedRecord = (root: unknown, path: readonly string[]): JsonObject | null => {
   let current: unknown = root;
@@ -475,7 +457,7 @@ export const bootstrapChatSession = async (signal?: AbortSignal): Promise<ChatBo
       data,
     };
   } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') {
+    if (isAbortError(error)) {
       throw error;
     }
 

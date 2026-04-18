@@ -5,11 +5,12 @@
  * Displays YouTube live chat messages in Nico-nico style flowing overlay.
  */
 
-import { DEFAULT_SETTINGS, type OverlaySettings } from '@app-types';
+import type { OverlaySettings } from '@app-types';
 import { createLogger, initOverlayLogLevel, setOverlayLogLevel } from '@core/logging';
 import { PageWatcher } from '@core/page-watcher';
 import { RuntimeManager } from '@core/runtime-manager';
 import { Settings } from '@core/settings';
+import { DEFAULT_SETTINGS } from '@core/settings-definitions';
 import { SettingsUi } from '@core/settings-ui';
 
 const log = createLogger('App');

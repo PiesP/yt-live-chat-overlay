@@ -1,11 +1,10 @@
 import {
   type AuthorType,
-  DEFAULT_SETTINGS,
   isLogLevel,
   type OutlineSettings,
   type OverlaySettings,
-  SETTINGS_LIMITS,
 } from '@app-types';
+import { DEFAULT_SETTINGS, SETTINGS_LIMITS } from '@core/settings-definitions';
 
 type SettingDefinitionKind = 'boolean' | 'number' | 'rounded-number' | 'log-level';
 type RootScalarSettingKey = Exclude<keyof OverlaySettings, 'showAuthor' | 'colors' | 'outline'>;

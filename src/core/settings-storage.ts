@@ -1,4 +1,5 @@
-import { DEFAULT_SETTINGS, isLogLevel, type OverlaySettings } from '@app-types';
+import { isLogLevel, type OverlaySettings } from '@app-types';
+import { DEFAULT_SETTINGS } from '@core/settings-definitions';
 
 export const STORAGE_KEY = 'yt-live-chat-overlay-settings';
 

@@ -1,5 +1,6 @@
-import { DEFAULT_SETTINGS, type OverlaySettings } from '@app-types';
+import type { OverlaySettings } from '@app-types';
 import { createLogger } from '@core/logging';
+import { DEFAULT_SETTINGS } from '@core/settings-definitions';
 import { applySettings, cloneSettings } from '@core/settings-schema';
 import { readStoredSettings, STORAGE_KEY } from '@core/settings-storage';
 
