@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.15.0] - 2026-04-18
+
+### Added
+- **정규화된 rich-content 기반 채팅 표시 경로 도입**
+  - 일반 텍스트, 이모지, 멤버십 전용 이미지 이모티콘을 같은 `ContentSegment[]` 경로로 정규화해 렌더링 기준을 일원화
+  - `liveChatPaidStickerRenderer`와 멤버십 `headerSubtext` fallback을 지원해 이전에 빠지던 채팅 유형을 표시 범위에 포함
+
+### Changed
+- **이미지 자산 정규화 및 렌더 측정 안정화**
+  - protocol-relative / 허용 호스트 `http` 이미지 URL을 parse 단계에서 `https`로 정규화해 paid sticker와 기타 이미지 자산을 더 일관되게 처리
+  - 이모지/스티커 치수 메타데이터를 렌더러가 직접 사용하도록 바꿔 이미지 로드 전 측정과 lane 배치를 더 안정화
+- **메시지 모델 정리**
+  - `ChatMessage.content`를 실제 표시의 canonical source로 고정하고, `text`는 dedupe/logging/fallback용 파생 plain text로 정리
+
+### Fixed
+- **이모지 및 이미지 기반 채팅 누락 완화**
+  - 짧은 plain-text 필터가 이미지 이모지 중심 메시지를 비정상적으로 버리지 않도록 content-aware visible length 기준으로 조정
+  - 이미지 로드 실패 시 alt 텍스트로 폴백해 메시지 의미가 통째로 사라지지 않도록 보완
+
+### Tooling
+- **보안/CI 자동화 유지보수 반영**
+  - security, CI, release, version-check, Dependabot, stale PR workflow와 repository settings maintenance 변경을 이번 릴리스 범위에 포함
+
 ## [0.14.0] - 2026-04-18
 
 ### Added
