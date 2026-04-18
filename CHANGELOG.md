@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.14.0] - 2026-04-18
+
+### Added
+- **youtubei 기반 채팅 수집 경로 도입**
+  - 보이는 live chat 패널 DOM에 의존하지 않고 watch page / youtubei endpoint에서 채팅을 직접 bootstrap/polling 하도록 재구성
+  - 라이브와 리플레이를 같은 채팅 런타임에서 다루고, 재동기화에 필요한 continuation / payload 추출 경로를 추가
+- **탐색(seek) 전용 복구 이유 추가**
+  - seeking 이벤트를 별도 recovery reason으로 구분해 탐색 직후 채팅 재동기화 의도를 더 명확하게 표현
+
+### Changed
+- **채팅 세션 및 복구 수명주기 재설계**
+  - abort signal 결합, polling 교체, 세대 관리로 reconnect/restart 중 stale 작업이 현재 세션 상태를 오염시키지 않도록 정리
+  - live edge DOM 임계값 의존을 제거하고 observer/activity 중심 health 판단으로 복구 흐름을 단순화
+- **설정 정의/입력 정규화 구조 정리**
+  - 기본 설정, numeric limit, 입력 포맷/정규화 로직을 별도 모듈로 분리해 settings UI / schema / storage 간 책임을 명확히 정리
+
+### Fixed
+- **재연결/재동기화 경합 안정성 개선**
+  - resume sync 직렬화, replay buffer 관리, poll loop 교체를 통해 recovery 중 중복 작업과 상태 꼬임 가능성을 줄임
+
+### Tooling
+- **개발 도구 업데이트**
+  - `@biomejs/biome`를 `2.4.12`로 업데이트
+
 ## [0.13.0] - 2026-04-17
 
 ### Added
