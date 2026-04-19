@@ -27,8 +27,7 @@ const LEGAL_NOTICE = `/* LEGAL NOTICE:
  * The script injects an overlay/settings control and fetches chat directly in-browser without relying on the visible chat panel.
  */`;
 
-const formatDirective = (key: string, value: string): string =>
-  `// @${key.padEnd(12)} ${value}`;
+const formatDirective = (key: string, value: string): string => `// @${key.padEnd(12)} ${value}`;
 
 const createUserscriptMeta = (version: string, isDev: boolean): UserscriptMeta => ({
   name: `YouTube Live Chat Overlay${isDev ? ' (dev)' : ''}`,
@@ -56,8 +55,11 @@ const buildMetadataLines = (meta: UserscriptMeta): string[] => [
   formatDirective('namespace', 'https://github.com/PiesP'),
 ];
 
-const isUserscriptChunk = (fileName: string, chunk: { type: string }): boolean =>
-  fileName.endsWith('.user.js') && chunk.type === 'chunk';
+const isUserscriptChunk = (
+  fileName: string,
+  chunk: { type: string; code?: string }
+): chunk is { type: 'chunk'; code: string } =>
+  fileName.endsWith('.user.js') && chunk.type === 'chunk' && typeof chunk.code === 'string';
 
 /**
  * Generate userscript metadata header

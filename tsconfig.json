@@ -47,7 +47,9 @@
     "allowImportingTsExtensions": true
   },
   "include": [
-    "src/**/*"
+    "src/**/*",
+    "tooling/**/*.ts",
+    "vite.config.ts"
   ],
   "exclude": [
     "node_modules",

@@ -14,20 +14,20 @@ Explain **what** this pull request changes and **why**.
 Describe how reviewers can verify the change, including relevant npm scripts:
 
 ```bash
+pnpm quality
 pnpm build
-pnpm check
-pnpm lint
 ```
 
 If tests are not required, briefly explain why.
 
 ## Checklist
 
-- [ ] Code and comments are written in **English**
+- [ ] Code, commit messages, and inline comments are written in **English**
+- [ ] Documentation follows the established language/style of the files I touched
 - [ ] I used configured **path aliases** (no new long relative import chains)
 - [ ] I avoided dynamic code execution (`eval`, `new Function`, string-based
       `setTimeout`/`setInterval`)
-- [ ] I ran `pnpm build`
+- [ ] I ran the relevant local checks (`pnpm quality`, `pnpm build`, or explained why not)
 - [ ] I ran appropriate local tests for my changes (and explained in this PR
       if I could not)
 - [ ] I updated `README.md` if user-visible behavior changed

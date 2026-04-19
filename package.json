@@ -10,12 +10,12 @@
     "check": "tsc --noEmit",
     "knip": "knip --dependencies",
     "knip:full": "knip --files --exports --dependencies --reporter compact --max-show-issues 50 --no-exit-code",
-    "lint": "biome lint ./src vite.config.ts",
-    "lint:fix": "biome lint --write ./src vite.config.ts",
-    "fmt": "biome check --linter-enabled=false ./src vite.config.ts",
-    "fmt:fix": "biome check --write --linter-enabled=false ./src vite.config.ts",
-    "quality": "pnpm -s knip && pnpm check && biome check ./src vite.config.ts",
-    "quality:fix": "pnpm -s knip && pnpm check && biome check --write ./src vite.config.ts",
+    "lint": "biome lint ./src ./tooling vite.config.ts",
+    "lint:fix": "biome lint --write ./src ./tooling vite.config.ts",
+    "fmt": "biome check --linter-enabled=false ./src ./tooling vite.config.ts",
+    "fmt:fix": "biome check --write --linter-enabled=false ./src ./tooling vite.config.ts",
+    "quality": "pnpm -s knip && pnpm check && biome check ./src ./tooling vite.config.ts",
+    "quality:fix": "pnpm -s knip && pnpm check && biome check --write ./src ./tooling vite.config.ts",
     "prebuild": "pnpm quality"
   },
   "keywords": [

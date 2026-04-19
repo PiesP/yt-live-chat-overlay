@@ -5,33 +5,37 @@ All processing happens locally in your browser, and chat content is never stored
 
 ## Features
 
-- Live chat comments flow from right to left as an overlay
-- 100% local processing (no external servers)
+- Live chat comments flow from right to left as an overlay on the player
+- Works on YouTube live streams, premieres, and replays with chat
+- Fetches chat directly in your browser without depending on the visible chat panel
+- Renders rich chat content including text, emoji, membership items, and Super Chats
 - Quick settings via the ⚙ button on the player
+- 100% local processing (no external servers)
 
 ## Install
 
 1. Install Tampermonkey or Violentmonkey
 2. Install the latest release:
-   - Stable: [yt-live-chat-overlay.user.js](https://github.com/PiesP/yt-live-chat-overlay/releases/latest/download/yt-live-chat-overlay.user.js)
-   - Metadata (auto-update): [yt-live-chat-overlay.meta.js](https://cdn.jsdelivr.net/gh/PiesP/yt-live-chat-overlay@release/dist/yt-live-chat-overlay.meta.js)
-3. Open the file in your browser to install
+   - Stable install: [yt-live-chat-overlay.user.js](https://github.com/PiesP/yt-live-chat-overlay/releases/latest/download/yt-live-chat-overlay.user.js)
+   - Metadata/update URL: [yt-live-chat-overlay.meta.js](https://cdn.jsdelivr.net/gh/PiesP/yt-live-chat-overlay@release/dist/yt-live-chat-overlay.meta.js)
+3. Open the stable `.user.js` file in your browser or userscript manager to install
 
 ## How to Use
 
 1. Open a YouTube live stream, premiere, or replay with chat
-2. The overlay appears automatically when chat is detected
+2. The overlay starts automatically when the page is supported and chat is available
 3. Use the ⚙ button in the top-right of the player to open settings
 
 ## Settings
 
-- Adjust speed, font size, opacity, safe zones, colors, and outline
+- Adjust speed, font size, opacity, safe zones, lane spacing, author display, colors, and outline
 - Settings are saved in `localStorage` and can be reset anytime
 
 ## Privacy & Safety
 
+- All chat fetching, parsing, and rendering happen locally in your browser
 - Chat content is never stored or transmitted
-- The script injects an overlay and settings button into the player, and fetches chat directly inside your browser without relying on the visible chat panel
+- The script injects an overlay and settings button into the player, and renders content with DOM APIs instead of injecting chat HTML
 
 ## Support
 

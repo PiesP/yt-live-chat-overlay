@@ -2,7 +2,7 @@
 
 Thanks for your interest in contributing! This guide covers the basics for reporting issues and submitting pull requests.
 
-> **Language policy**: All source code, comments, commit messages, and documentation must be written in **English**.
+> **Language policy**: Source code, identifiers, inline comments, and commit messages must be written in **English**. Documentation should follow the established language and style of the file you are editing (for example, English guides and Korean changelog entries).
 
 ---
 
@@ -48,13 +48,13 @@ pnpm build:dev
 # TypeScript typecheck
 pnpm check
 
-# Lint source code
+# Lint source and build tooling
 pnpm lint
 
-# Format check
+# Format check for source and build tooling
 pnpm fmt
 
-# Run all quality checks
+# Run the full local quality gate
 pnpm quality
 ```
 
@@ -63,17 +63,17 @@ pnpm quality
 ## Before opening a pull request
 
 1. Sync with `master` and rebase if necessary.
-2. Run at least a build and basic static checks locally:
+2. Run the same checks used by local quality/release flows:
 
 ```bash
-pnpm build
-# or
 pnpm quality
+pnpm build
 ```
 
-3. Verify behavior on a desktop YouTube live stream.
+3. Verify behavior on a desktop YouTube live stream, premiere, or replay page when applicable.
 4. Update documentation if user-visible behavior changed:
    - `README.md` for user-facing changes
+   - Release notes / `CHANGELOG.md` in the existing file language when preparing a release
 
 ---
 
