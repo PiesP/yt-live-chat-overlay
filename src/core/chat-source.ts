@@ -6,6 +6,7 @@
  */
 
 import type {
+  AuthorType,
   ChatMessage,
   ContentSegment,
   EmojiInfo,
@@ -52,6 +53,14 @@ const REPLAY_BUFFER_REFILL_THRESHOLD = 24;
 const MAX_BUFFERED_REPLAY_MESSAGES = 300;
 const MAX_TRACKED_REPLAY_KEYS = 2000;
 const EMOJI_TEXT_PATTERN = /\p{Extended_Pictographic}/u;
+const EMOJI_ALIAS_PATTERN = /^:[^:\s][^:]*:$/u;
+const AUTHOR_TYPE_PRIORITY = {
+  normal: 0,
+  verified: 1,
+  member: 2,
+  moderator: 3,
+  owner: 4,
+} as const satisfies Record<AuthorType, number>;
 
 type ReplayMode = 'playerSeek' | 'continuation';
 type ChatMessageKind = ChatMessage['kind'];
@@ -96,6 +105,12 @@ interface ReplayBufferedMessage {
 interface SupportedRenderer {
   kind: ChatMessageKind;
   renderer: JsonObject;
+}
+
+interface ThumbnailCandidate {
+  url: string;
+  width?: number;
+  height?: number;
 }
 
 export type MessageCallback = (message: ChatMessage) => void;
@@ -940,7 +955,7 @@ export class ChatSource {
         }
 
         const emoji = asRecord(run.emoji);
-        return emoji ? this.getEmojiAlt(emoji) : '';
+        return emoji ? this.getEmojiVisibleFallbackText(emoji) : '';
       })
       .join('')
       .trim();
@@ -990,11 +1005,11 @@ export class ChatSource {
       const emoji = this.parseEmoji(emojiData);
       if (emoji) {
         segments.push({ type: 'emoji', emoji });
-        plainText += emoji.alt || '[emoji]';
+        plainText += emoji.fallbackText || '[emoji]';
         continue;
       }
 
-      const fallbackText = this.getEmojiAlt(emojiData) || '[emoji]';
+      const fallbackText = this.getEmojiVisibleFallbackText(emojiData) || '[emoji]';
       this.appendTextSegment(segments, fallbackText);
       plainText += fallbackText;
     }
@@ -1052,10 +1067,26 @@ export class ChatSource {
     );
   }
 
-  private getEmojiAlt(emojiData: JsonObject): string {
-    const shortcuts = Array.isArray(emojiData.shortcuts)
+  private getEmojiShortcuts(emojiData: JsonObject): string[] {
+    return Array.isArray(emojiData.shortcuts)
       ? emojiData.shortcuts.filter((shortcut): shortcut is string => typeof shortcut === 'string')
       : [];
+  }
+
+  private normalizeInlineText(text: string): string {
+    return this.stripControlCharacters(text).replace(/\s+/g, ' ').trim();
+  }
+
+  private humanizeEmojiAlias(alias: string): string {
+    if (!EMOJI_ALIAS_PATTERN.test(alias)) {
+      return this.normalizeInlineText(alias);
+    }
+
+    return this.normalizeInlineText(alias.slice(1, -1).replace(/[-_]+/g, ' '));
+  }
+
+  private getEmojiAltText(emojiData: JsonObject): string {
+    const shortcuts = this.getEmojiShortcuts(emojiData);
 
     return (
       shortcuts[0] ??
@@ -1066,8 +1097,29 @@ export class ChatSource {
     );
   }
 
+  private getEmojiVisibleFallbackText(emojiData: JsonObject): string {
+    const shortcuts = this.getEmojiShortcuts(emojiData);
+    const nonAliasShortcut = shortcuts.find((shortcut) => !EMOJI_ALIAS_PATTERN.test(shortcut));
+    if (nonAliasShortcut) {
+      return this.normalizeInlineText(nonAliasShortcut);
+    }
+
+    const accessibleLabel =
+      this.extractAccessibilityLabel(emojiData.image) ?? this.extractAccessibilityLabel(emojiData);
+    if (accessibleLabel && !EMOJI_ALIAS_PATTERN.test(accessibleLabel)) {
+      return this.normalizeInlineText(accessibleLabel);
+    }
+
+    const alias = shortcuts[0] ?? getString(emojiData.emojiId) ?? '';
+    return alias ? this.humanizeEmojiAlias(alias) : '';
+  }
+
   private parseEmoji(emojiData: JsonObject): EmojiInfo | null {
-    const emojiAsset = this.createImageAsset(emojiData.image, this.getEmojiAlt(emojiData));
+    const emojiAsset = this.createImageAsset(
+      emojiData.image,
+      this.getEmojiAltText(emojiData),
+      this.getEmojiVisibleFallbackText(emojiData)
+    );
     if (!emojiAsset) {
       return null;
     }
@@ -1082,7 +1134,7 @@ export class ChatSource {
     return emoji;
   }
 
-  private createImageAsset(value: unknown, alt: string): ImageAsset | null {
+  private createImageAsset(value: unknown, alt: string, fallbackText?: string): ImageAsset | null {
     const thumbnail = this.extractBestThumbnail(value);
     if (!thumbnail) {
       return null;
@@ -1092,6 +1144,14 @@ export class ChatSource {
       url: thumbnail.url,
       alt,
     };
+
+    if (thumbnail.candidateUrls && thumbnail.candidateUrls.length > 0) {
+      asset.candidateUrls = thumbnail.candidateUrls;
+    }
+
+    if (fallbackText && fallbackText.length > 0) {
+      asset.fallbackText = fallbackText;
+    }
 
     if (thumbnail.width !== undefined) {
       asset.width = thumbnail.width;
@@ -1104,11 +1164,9 @@ export class ChatSource {
     return asset;
   }
 
-  private extractBestThumbnail(
-    value: unknown
-  ): { url: string; width?: number; height?: number } | null {
+  private extractThumbnailCandidates(value: unknown): ThumbnailCandidate[] {
     if (!isRecord(value)) {
-      return null;
+      return [];
     }
 
     const thumbnails = Array.isArray(value.thumbnails)
@@ -1117,8 +1175,8 @@ export class ChatSource {
         ? value.sources
         : [];
 
-    let bestThumbnail: { url: string; width?: number; height?: number } | null = null;
-    let bestWidth = -1;
+    const candidates: ThumbnailCandidate[] = [];
+    const seenUrls = new Set<string>();
 
     for (const candidate of thumbnails) {
       if (!isRecord(candidate)) {
@@ -1127,17 +1185,13 @@ export class ChatSource {
 
       const url = getString(candidate.url);
       const normalizedUrl = url ? normalizeYouTubeImageUrl(url) : null;
-      if (!normalizedUrl) {
+      if (!normalizedUrl || seenUrls.has(normalizedUrl)) {
         continue;
       }
 
+      seenUrls.add(normalizedUrl);
       const width = getNumber(candidate.width);
-      if ((width ?? 0) < bestWidth) {
-        continue;
-      }
-
-      bestWidth = width ?? 0;
-      const nextThumbnail: { url: string; width?: number; height?: number } = {
+      const nextThumbnail: ThumbnailCandidate = {
         url: normalizedUrl,
       };
       if (width !== undefined) {
@@ -1149,10 +1203,27 @@ export class ChatSource {
         nextThumbnail.height = height;
       }
 
-      bestThumbnail = nextThumbnail;
+      candidates.push(nextThumbnail);
     }
 
-    return bestThumbnail;
+    candidates.sort((left, right) => (right.width ?? 0) - (left.width ?? 0));
+    return candidates;
+  }
+
+  private extractBestThumbnail(
+    value: unknown
+  ): { url: string; candidateUrls?: string[]; width?: number; height?: number } | null {
+    const [bestThumbnail, ...fallbackThumbnails] = this.extractThumbnailCandidates(value);
+    if (!bestThumbnail) {
+      return null;
+    }
+
+    return {
+      ...bestThumbnail,
+      ...(fallbackThumbnails.length > 0
+        ? { candidateUrls: fallbackThumbnails.map((thumbnail) => thumbnail.url) }
+        : {}),
+    };
   }
 
   private extractThumbnailUrl(value: unknown): string | undefined {
@@ -1160,46 +1231,70 @@ export class ChatSource {
   }
 
   private extractAuthorType(value: unknown): NonNullable<ChatMessage['authorType']> {
+    let resolvedType: NonNullable<ChatMessage['authorType']> = 'normal';
+
     if (!Array.isArray(value)) {
-      return 'normal';
+      return resolvedType;
     }
 
     for (const badgeEntry of value) {
-      if (!isRecord(badgeEntry)) {
-        continue;
+      const nextType = this.classifyAuthorBadge(badgeEntry);
+      if (AUTHOR_TYPE_PRIORITY[nextType] > AUTHOR_TYPE_PRIORITY[resolvedType]) {
+        resolvedType = nextType;
       }
+    }
 
-      const badge =
-        asRecord(badgeEntry.liveChatAuthorBadgeRenderer) ??
-        asRecord(badgeEntry.metadataBadgeRenderer) ??
-        badgeEntry;
-      const iconType =
-        getString(asRecord(badge.icon)?.iconType)?.toLowerCase() ??
-        getString(badge.style)?.toLowerCase() ??
-        '';
-      const label = [
-        getString(badge.tooltip),
-        getString(asRecord(asRecord(badge.accessibility)?.accessibilityData)?.label),
-      ]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase();
+    return resolvedType;
+  }
 
-      if (iconType.includes('owner') || label.includes('owner')) {
-        return 'owner';
-      }
+  private classifyAuthorBadge(value: unknown): NonNullable<ChatMessage['authorType']> {
+    const badgeEntry = asRecord(value);
+    if (!badgeEntry) {
+      return 'normal';
+    }
 
-      if (iconType.includes('moderator') || label.includes('moderator') || label.includes('mod')) {
-        return 'moderator';
-      }
+    const liveBadge = asRecord(badgeEntry.liveChatAuthorBadgeRenderer);
+    const metadataBadge = asRecord(badgeEntry.metadataBadgeRenderer);
+    const badge = liveBadge ?? metadataBadge ?? badgeEntry;
+    const iconType = getString(asRecord(badge.icon)?.iconType)?.toUpperCase() ?? '';
+    const style = getString(metadataBadge?.style ?? badge.style)?.toUpperCase() ?? '';
+    const label = [
+      getString(badge.tooltip),
+      this.extractAccessibilityLabel(badge),
+      this.extractAccessibilityLabel(liveBadge),
+      this.extractAccessibilityLabel(metadataBadge),
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toUpperCase();
 
-      if (iconType.includes('member') || label.includes('member') || label.includes('membership')) {
-        return 'member';
-      }
+    if (
+      style.includes('MEMBERS_ONLY') ||
+      isRecord(badge.customThumbnail) ||
+      isRecord(liveBadge?.customThumbnail) ||
+      iconType.includes('SPONSOR')
+    ) {
+      return 'member';
+    }
 
-      if (iconType.includes('verified') || label.includes('verified')) {
-        return 'verified';
-      }
+    if (style.includes('VERIFIED') || iconType.includes('VERIFIED')) {
+      return 'verified';
+    }
+
+    if (iconType.includes('OWNER') || label.includes('OWNER')) {
+      return 'owner';
+    }
+
+    if (iconType.includes('MODERATOR') || label.includes('MODERATOR') || label.includes(' MOD ')) {
+      return 'moderator';
+    }
+
+    if (label.includes('MEMBER') || label.includes('MEMBERSHIP') || label.includes('SPONSOR')) {
+      return 'member';
+    }
+
+    if (label.includes('VERIFIED')) {
+      return 'verified';
     }
 
     return 'normal';

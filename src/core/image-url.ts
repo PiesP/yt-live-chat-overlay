@@ -1,14 +1,14 @@
-const ALLOWED_IMAGE_HOSTS = [
-  'yt3.ggpht.com',
-  'yt4.ggpht.com',
-  'www.gstatic.com',
-  'lh3.googleusercontent.com',
+const ALLOWED_IMAGE_HOST_SUFFIXES = [
+  'ggpht.com',
+  'googleusercontent.com',
+  'gstatic.com',
+  'ytimg.com',
 ];
 
 const isAllowedHostname = (hostname: string): boolean => {
   const normalizedHostname = hostname.toLowerCase();
-  return ALLOWED_IMAGE_HOSTS.some(
-    (host) => normalizedHostname === host || normalizedHostname.endsWith(`.${host}`)
+  return ALLOWED_IMAGE_HOST_SUFFIXES.some(
+    (suffix) => normalizedHostname === suffix || normalizedHostname.endsWith(`.${suffix}`)
   );
 };
 

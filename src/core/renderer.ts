@@ -76,6 +76,7 @@ interface FlushQueueOptions {
 interface ImageElementOptions {
   width?: number;
   height?: number;
+  candidateUrls?: readonly string[];
   fallbackText?: string;
 }
 
@@ -122,6 +123,26 @@ const LAYOUT = {
 const combineTextShadows = (...shadows: string[]): string => {
   const normalizedShadows = shadows.filter((shadow) => shadow !== '' && shadow !== 'none');
   return normalizedShadows.length > 0 ? normalizedShadows.join(', ') : 'none';
+};
+
+const normalizeImageCandidateUrls = (
+  primaryUrl: string,
+  candidateUrls: readonly string[] = []
+): string[] => {
+  const normalizedUrls: string[] = [];
+  const seenUrls = new Set<string>();
+
+  for (const candidateUrl of [primaryUrl, ...candidateUrls]) {
+    const normalizedUrl = normalizeYouTubeImageUrl(candidateUrl);
+    if (!normalizedUrl || seenUrls.has(normalizedUrl)) {
+      continue;
+    }
+
+    seenUrls.add(normalizedUrl);
+    normalizedUrls.push(normalizedUrl);
+  }
+
+  return normalizedUrls;
 };
 
 const RENDERER_STATIC_STYLES = `
@@ -172,6 +193,7 @@ const RENDERER_STATIC_STYLES = `
 
   .yt-chat-overlay-message-content {
     display: block;
+    color: inherit;
   }
 
   .yt-chat-overlay-superchat-card {
@@ -484,16 +506,17 @@ export class Renderer {
     sizePx: number,
     options: ImageElementOptions = {}
   ): HTMLImageElement | null {
-    const normalizedUrl = normalizeYouTubeImageUrl(url);
+    const candidateUrls = normalizeImageCandidateUrls(url, options.candidateUrls);
 
     // Validate URL (defense in depth)
-    if (!normalizedUrl) {
+    if (candidateUrls.length === 0) {
       log.warn('Invalid image URL:', url);
       return null;
     }
 
     const img = document.createElement('img');
-    img.src = normalizedUrl;
+    let candidateIndex = 0;
+    img.src = candidateUrls[candidateIndex] ?? '';
     img.alt = alt;
     img.className = className;
     img.style.height = `${sizePx}px`;
@@ -508,20 +531,23 @@ export class Renderer {
     img.decoding = 'async';
 
     // Error handling: hide on load failure
-    img.addEventListener(
-      'error',
-      () => {
-        const fallbackText = options.fallbackText?.trim();
-        if (fallbackText && img.parentNode) {
-          img.replaceWith(document.createTextNode(fallbackText));
-        } else {
-          img.remove();
-        }
+    img.addEventListener('error', () => {
+      const nextCandidateUrl = candidateUrls[candidateIndex + 1];
+      if (nextCandidateUrl) {
+        candidateIndex += 1;
+        img.src = nextCandidateUrl;
+        return;
+      }
 
-        log.warn('Failed to load image:', normalizedUrl);
-      },
-      { once: true }
-    );
+      const fallbackText = options.fallbackText?.trim();
+      if (fallbackText && img.parentNode) {
+        img.replaceWith(document.createTextNode(fallbackText));
+      } else {
+        img.remove();
+      }
+
+      log.warn('Failed to load image:', candidateUrls[candidateIndex] ?? url);
+    });
 
     return img;
   }
@@ -580,7 +606,8 @@ export class Renderer {
    */
   private createMessageTextElement(
     message: ChatMessage,
-    className = 'yt-chat-overlay-message-content'
+    className = 'yt-chat-overlay-message-content',
+    color?: string
   ): HTMLDivElement | null {
     const hasRichContent = message.content.length > 0;
     const hasPlainText = message.text.trim().length > 0;
@@ -590,6 +617,9 @@ export class Renderer {
     }
 
     const contentDiv = this.createContainer(className);
+    if (color) {
+      contentDiv.style.color = color;
+    }
 
     if (hasRichContent) {
       this.renderMixedContent(contentDiv, message.content);
@@ -626,8 +656,11 @@ export class Renderer {
 
     // Create image element using common helper
     const options: ImageElementOptions = {
-      fallbackText: emoji.alt || '[emoji]',
+      fallbackText: emoji.fallbackText || '[emoji]',
     };
+    if (emoji.candidateUrls && emoji.candidateUrls.length > 0) {
+      options.candidateUrls = emoji.candidateUrls;
+    }
     if (emoji.width !== undefined) {
       options.width = emoji.width;
     }
@@ -652,6 +685,9 @@ export class Renderer {
     // Calculate size relative to font size
     const stickerSize = this.settings.fontSize * LAYOUT.SUPERCHAT_STICKER_SIZE;
     const options: ImageElementOptions = {};
+    if (sticker.candidateUrls && sticker.candidateUrls.length > 0) {
+      options.candidateUrls = sticker.candidateUrls;
+    }
     if (sticker.width !== undefined) {
       options.width = sticker.width;
     }
@@ -861,13 +897,18 @@ export class Renderer {
   private buildRegularMessageElement(message: ChatMessage): BuiltMessage | null {
     const element = this.createContainer('yt-chat-overlay-message');
     const showAuthor = this.shouldShowAuthor(message);
+    const color = this.settings.colors[this.getAuthorType(message)];
 
     if (showAuthor) {
       element.classList.add('yt-chat-overlay-message-with-author');
       element.appendChild(this.createAuthorElement(message));
     }
 
-    const contentDiv = this.createMessageTextElement(message);
+    const contentDiv = this.createMessageTextElement(
+      message,
+      'yt-chat-overlay-message-content',
+      color
+    );
     if (!contentDiv) {
       log.debug('Skipping empty message');
       return null;

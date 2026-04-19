@@ -36,10 +36,14 @@ export type AuthorDisplaySettings = Record<AuthorDisplayKey, boolean>;
  * Shared image asset metadata
  */
 export interface ImageAsset {
-  /** Image URL (sanitized, YouTube CDN only) */
+  /** Primary image URL (sanitized, YouTube CDN only) */
   url: string;
-  /** Alt/fallback text */
+  /** Additional image URLs to retry before visible text fallback */
+  candidateUrls?: readonly string[];
+  /** Accessible alt text */
   alt: string;
+  /** Visible text used if the image cannot be rendered */
+  fallbackText?: string;
   /** Original width (optional, for aspect ratio) */
   width?: number;
   /** Original height (optional, for aspect ratio) */
