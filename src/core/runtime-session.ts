@@ -5,36 +5,43 @@ import { throwIfAborted } from '@core/dom';
 import { createLogger } from '@core/logging';
 import { OVERLAY_SELECTOR, Overlay } from '@core/overlay';
 import { Renderer } from '@core/renderer';
-import { RecoveryCoordinator } from '@core/runtime-recovery';
 import { shouldResetRendererForSettingsChange } from '@core/settings-schema';
 import { clearIntervalHandle } from '@core/timers';
 import { VideoSync } from '@core/video-sync';
 
 const log = createLogger('RuntimeSession');
 
-const RESUME_SYNC_MESSAGE_LIMIT = 20;
+const RECENT_MESSAGE_REPLAY_LIMIT = 20;
 const CHAT_WATCHDOG_INTERVAL_MS = 15_000;
 const CHAT_STALL_TIMEOUT_MS = 30_000;
-const CHAT_RECOVERY_GRACE_MS = 2_500;
+const LONG_IDLE_RESTART_MS = 60_000;
 
 export interface RuntimeSessionOptions {
   targetUrl: string;
   settings: OverlaySettings;
+  requestRestart: (reason: RuntimeSessionRestartReason) => void;
 }
 
 export type RuntimeSessionStartStatus = 'started' | 'retryable' | 'unavailable';
+export type RuntimeSessionRestartReason =
+  | 'foreground-return'
+  | 'video-play'
+  | 'watchdog'
+  | 'seeking';
 
 /**
  * Owns one full overlay runtime for a specific page URL.
  *
  * Invariants:
  * - A session owns exactly one Overlay/Renderer/ChatSource/VideoSync set.
- * - All async startup and recovery work is cancelled by one AbortController.
- * - Foreground return, watchdog, and playback resume all converge on one recover() path.
+ * - All async startup work is cancelled by one AbortController.
+ * - Long-idle resume and unhealthy runtime state are handled by a managed
+ *   RuntimeSession recycle instead of in-place reconnect logic.
  */
 export class RuntimeSession {
   private settings: OverlaySettings;
   private readonly targetUrl: string;
+  private readonly requestRestart: RuntimeSessionOptions['requestRestart'];
   private readonly abortController = new AbortController();
   private overlay: Overlay | null = null;
   private renderer: Renderer | null = null;
@@ -43,24 +50,15 @@ export class RuntimeSession {
   private foregroundRecoveryCleanup: (() => void) | null = null;
   private chatWatchdogInterval: number | null = null;
   private disposed = false;
-  private readonly recoveryCoordinator: RecoveryCoordinator;
+  private sessionReady = false;
+  private restartRequested = false;
+  private hiddenSince: number | null = null;
+  private playbackPausedSince: number | null = null;
 
   constructor(options: RuntimeSessionOptions) {
     this.targetUrl = options.targetUrl;
     this.settings = options.settings;
-    this.recoveryCoordinator = new RecoveryCoordinator({
-      recoveryGraceMs: CHAT_RECOVERY_GRACE_MS,
-      getSignal: () => this.abortController.signal,
-      getHealthSnapshot: () => {
-        const chatSource = this.chatSource;
-        return chatSource ? this.getChatHealthSnapshot(chatSource) : null;
-      },
-      reconnect: async (signal) => this.chatSource?.reconnect(signal) ?? false,
-      syncLatestMessages: () => this.syncLatestMessagesOnResume(),
-      isDisposed: () => this.disposed,
-      isVideoPaused: () => this.videoSync?.isPaused() ?? false,
-      log,
-    });
+    this.requestRestart = options.requestRestart;
   }
 
   matchesUrl(url: string): boolean {
@@ -91,38 +89,44 @@ export class RuntimeSession {
 
       const videoSync = new VideoSync({
         onPause: () => {
+          this.notePlaybackPaused();
           this.renderer?.pause();
         },
         onPlay: () => {
-          void this.recoveryCoordinator.recover('video-play', true);
+          if (!this.sessionReady) {
+            this.clearPlaybackPaused();
+            this.renderer?.resume();
+            return;
+          }
+
+          this.handleRuntimeResume('video-play');
         },
         onRateChange: (rate) => {
           log.info('Video playback rate changed:', rate);
           this.renderer?.setPlaybackRate(rate);
         },
         onSeeking: () => {
-          this.renderer?.flushQueue();
-          void this.recoveryCoordinator.recover('seeking', true);
+          if (!this.sessionReady) {
+            return;
+          }
+
+          this.requestManagedRestart('seeking');
         },
       });
       this.videoSync = videoSync;
       await videoSync.init(signal);
       throwIfAborted(signal);
 
-      this.setupForegroundRecoveryHandlers();
       const chatStarted = await this.startChatSource(signal);
       throwIfAborted(signal);
 
-      if (chatStarted === 'unavailable') {
+      if (chatStarted !== 'started') {
         return chatStarted;
       }
 
+      this.sessionReady = true;
+      this.setupForegroundRecoveryHandlers();
       this.setupChatWatchdog();
-      if (chatStarted === 'retryable') {
-        log.warn('Chat source was not ready during startup; recovery will continue in-session');
-        void this.recoveryCoordinator.recover('startup');
-      }
-
       log.info('Started successfully');
       return 'started';
     } catch (error) {
@@ -164,8 +168,9 @@ export class RuntimeSession {
     }
 
     this.disposed = true;
+    this.sessionReady = false;
+    this.restartRequested = true;
     this.abortController.abort();
-    this.recoveryCoordinator.clear();
     this.foregroundRecoveryCleanup?.();
     this.foregroundRecoveryCleanup = null;
 
@@ -182,6 +187,8 @@ export class RuntimeSession {
 
     this.overlay?.destroy();
     this.overlay = null;
+    this.hiddenSince = null;
+    this.playbackPausedSince = null;
 
     log.info('Disposed');
   }
@@ -212,23 +219,32 @@ export class RuntimeSession {
 
   private setupForegroundRecoveryHandlers(): void {
     this.foregroundRecoveryCleanup?.();
+    if (document.hidden) {
+      this.noteHidden();
+    }
 
     const handleForegroundReturn = (): void => {
-      if (document.hidden || this.videoSync?.isPaused()) {
+      if (document.hidden || this.disposed) {
         return;
       }
 
-      const now = Date.now();
-      if (this.recoveryCoordinator.isWithinGrace(now)) {
+      const health = this.getRuntimeHealthSnapshot();
+      if (health.idleDurationMs >= LONG_IDLE_RESTART_MS) {
+        this.requestManagedRestart('foreground-return', health);
         return;
       }
 
-      this.recoveryCoordinator.noteForegroundRecovery(now);
-      void this.recoveryCoordinator.recover('foreground-return', true);
+      if (this.videoSync?.isPaused()) {
+        this.clearHidden();
+        return;
+      }
+
+      this.handleRuntimeResume('foreground-return', health);
     };
 
     const visibilityHandler = (): void => {
       if (document.hidden) {
+        this.noteHidden();
         this.renderer?.pause();
         return;
       }
@@ -253,35 +269,144 @@ export class RuntimeSession {
     });
   }
 
+  private noteHidden(now = Date.now()): void {
+    if (this.hiddenSince === null) {
+      this.hiddenSince = now;
+    }
+  }
+
+  private clearHidden(): void {
+    this.hiddenSince = null;
+  }
+
+  private notePlaybackPaused(now = Date.now()): void {
+    if (this.playbackPausedSince === null) {
+      this.playbackPausedSince = now;
+    }
+  }
+
+  private clearPlaybackPaused(): void {
+    this.playbackPausedSince = null;
+  }
+
+  private getIdleDurationMs(now = Date.now()): number {
+    const hiddenDuration = this.hiddenSince === null ? 0 : Math.max(0, now - this.hiddenSince);
+    const pausedDuration =
+      this.playbackPausedSince === null ? 0 : Math.max(0, now - this.playbackPausedSince);
+
+    return Math.max(hiddenDuration, pausedDuration);
+  }
+
+  private hasRenderableRuntime(): boolean {
+    const container = this.overlay?.getContainer();
+    const dimensions = this.overlay?.getDimensions();
+
+    return Boolean(container?.isConnected && dimensions && this.videoSync?.hasVideoElement());
+  }
+
+  private getRuntimeHealthSnapshot(now = Date.now()): {
+    idleDurationMs: number;
+    renderable: boolean;
+    chat: ChatHealthSnapshot | null;
+    shouldRestart: boolean;
+  } {
+    const chatSource = this.chatSource;
+    const chat = chatSource ? this.getChatHealthSnapshot(chatSource) : null;
+    const idleDurationMs = this.getIdleDurationMs(now);
+    const renderable = this.hasRenderableRuntime();
+    const shouldRestart =
+      !renderable ||
+      idleDurationMs >= LONG_IDLE_RESTART_MS ||
+      !chat ||
+      !chat.observerAlive ||
+      !chat.recentlyActive;
+
+    return {
+      idleDurationMs,
+      renderable,
+      chat,
+      shouldRestart,
+    };
+  }
+
+  private clearIdleMarkersForActiveState(): void {
+    if (!document.hidden) {
+      this.clearHidden();
+    }
+
+    if (!(this.videoSync?.isPaused() ?? false)) {
+      this.clearPlaybackPaused();
+    }
+  }
+
+  private requestManagedRestart(
+    reason: RuntimeSessionRestartReason,
+    details?: {
+      idleDurationMs: number;
+      renderable: boolean;
+      chat: ChatHealthSnapshot | null;
+      shouldRestart: boolean;
+    }
+  ): void {
+    if (this.disposed || this.restartRequested) {
+      return;
+    }
+
+    this.restartRequested = true;
+    log.warn('Requesting managed runtime restart', {
+      reason,
+      ...(details ? { health: details } : {}),
+    });
+    this.requestRestart(reason);
+  }
+
+  private handleRuntimeResume(
+    reason: Extract<RuntimeSessionRestartReason, 'foreground-return' | 'video-play'>,
+    health = this.getRuntimeHealthSnapshot()
+  ): void {
+    if (this.disposed) {
+      return;
+    }
+
+    if (health.shouldRestart) {
+      this.requestManagedRestart(reason, health);
+      return;
+    }
+
+    this.clearIdleMarkersForActiveState();
+    this.renderer?.resume();
+  }
+
   private setupChatWatchdog(): void {
     this.chatWatchdogInterval = window.setInterval(() => {
       const chatSource = this.chatSource;
-      if (!chatSource || this.disposed || document.hidden) {
+      if (!chatSource || this.disposed || document.hidden || this.restartRequested) {
         return;
       }
 
-      if (this.videoSync?.isPaused() || this.recoveryCoordinator.isRecovering()) {
+      const health = this.getRuntimeHealthSnapshot();
+      const paused = this.videoSync?.isPaused() ?? true;
+
+      if (paused && health.renderable) {
         return;
       }
 
-      const health = this.getChatHealthSnapshot(chatSource);
-      const { stalled, withinGrace, needsRecovery } =
-        this.recoveryCoordinator.getWatchdogHealthState(health);
-
-      if (!needsRecovery) {
+      if (!health.shouldRestart) {
         return;
       }
 
-      log.warn('Chat unhealthy - triggering recovery', {
+      log.warn('Runtime unhealthy - requesting restart', {
+        paused,
         health,
-        stalled,
-        withinGrace,
       });
-      void this.recoveryCoordinator.recover('watchdog');
+      this.requestManagedRestart('watchdog', health);
     }, CHAT_WATCHDOG_INTERVAL_MS);
   }
 
-  private replayLatestMessages(renderer = this.renderer, limit = RESUME_SYNC_MESSAGE_LIMIT): void {
+  private replayLatestMessages(
+    renderer = this.renderer,
+    limit = RECENT_MESSAGE_REPLAY_LIMIT
+  ): void {
     if (!renderer) {
       return;
     }
@@ -289,31 +414,6 @@ export class RuntimeSession {
     const latestMessages = this.chatSource?.getLatestMessages(limit) ?? [];
     for (const message of latestMessages) {
       renderer.addMessage(message);
-    }
-  }
-
-  private async syncLatestMessagesOnResume(): Promise<void> {
-    if (this.disposed) {
-      return;
-    }
-
-    const renderer = this.renderer;
-    if (!renderer) {
-      return;
-    }
-
-    try {
-      // Keep currently flowing comments alive; only drop stale queued backlog
-      // before replaying the latest messages after recovery.
-      renderer.flushQueue({ releaseMessageIds: true });
-      renderer.resume();
-      this.replayLatestMessages(renderer);
-    } catch (error) {
-      if (!isAbortError(error)) {
-        throw error;
-      }
-      renderer.resume();
-      throw error;
     }
   }
 }

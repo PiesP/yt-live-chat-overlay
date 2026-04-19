@@ -1,6 +1,10 @@
 import type { OverlaySettings } from '@app-types';
 import { createLogger } from '@core/logging';
-import { RuntimeSession, type RuntimeSessionStartStatus } from '@core/runtime-session';
+import {
+  RuntimeSession,
+  type RuntimeSessionRestartReason,
+  type RuntimeSessionStartStatus,
+} from '@core/runtime-session';
 import { clearTimeoutHandle } from '@core/timers';
 
 const log = createLogger('RuntimeManager');
@@ -9,7 +13,13 @@ const NAVIGATION_SETTLE_DELAY_MS = 2000;
 const START_RETRY_DELAY_MS = 2000;
 const MAX_START_ATTEMPTS = 3;
 
-export type ReconcileReason = 'startup' | 'page-change' | 'settings-change' | 'manual' | 'retry';
+export type ReconcileReason =
+  | 'startup'
+  | 'page-change'
+  | 'settings-change'
+  | 'manual'
+  | 'retry'
+  | 'session-restart';
 
 export interface RuntimeManagerOptions {
   getCurrentUrl: () => string;
@@ -138,9 +148,22 @@ export class RuntimeManager {
       return;
     }
 
-    const session = new RuntimeSession({
+    let session: RuntimeSession | null = null;
+    const handleSessionRestart = (reason: RuntimeSessionRestartReason): void => {
+      if (!session || this.destroyed || this.activeSession !== session) {
+        return;
+      }
+
+      log.warn('Runtime session requested managed restart', { reason });
+      this.disposeActiveSession();
+      this.resetStartFailures();
+      this.requestReconcile('session-restart');
+    };
+
+    session = new RuntimeSession({
       targetUrl: desired.url,
       settings: desired.settings,
+      requestRestart: handleSessionRestart,
     });
 
     this.activeSession = session;

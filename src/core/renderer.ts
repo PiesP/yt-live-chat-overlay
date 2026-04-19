@@ -906,7 +906,7 @@ export class Renderer {
     const container = this.overlay.getContainer();
     const dimensions = this.overlay.getDimensions();
 
-    if (!container || !dimensions) {
+    if (!container?.isConnected || !dimensions) {
       return null;
     }
 

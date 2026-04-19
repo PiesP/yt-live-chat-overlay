@@ -305,6 +305,10 @@ export class VideoSync {
     return this.videoElement?.paused ?? true;
   }
 
+  hasVideoElement(): boolean {
+    return this.videoElement !== null;
+  }
+
   /**
    * Destroy and cleanup all resources
    */
