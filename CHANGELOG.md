@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.16.0] - 2026-04-19
+
+### Added
+- **이미지 자산 다중 후보 URL 및 텍스트 폴백 지원**
+  - 이모지/스티커 썸네일에서 여러 candidate URL을 보존해 렌더 단계에서 순차 재시도하도록 확장
+  - 이미지가 끝내 로드되지 않으면 사람이 읽을 수 있는 fallback text로 대체해 메시지 의미를 최대한 유지
+
+### Changed
+- **런타임 세션 재시작/복구 흐름 재구성**
+  - foreground 복귀, 재생 재개, seeking, watchdog을 `RuntimeSession`/`RuntimeManager`의 managed restart 계약으로 통합
+  - 장시간 숨김/일시정지 뒤에는 in-place reconnect 대신 세션을 재생성해 stale state 누적을 줄임
+- **이모지/배지 정규화 개선**
+  - alias 형태 emoji shortcut을 사람이 읽기 쉬운 visible fallback text로 정리
+  - membership / verified / moderator / owner badge 분류 우선순위와 판별 범위를 넓혀 author type 표시 정확도를 개선
+
+### Fixed
+- **비디오/채팅 상태 불일치 복구 안정성 개선**
+  - overlay/video/chat surface가 renderable하지 않거나 observer가 비활성일 때 watchdog이 세션 재시작을 요청하도록 조정
+  - foreground return / playback resume 중 오래된 세션 상태가 이어지는 문제를 줄임
+- **이미지 로드 실패 시 메시지 손실 완화**
+  - 이미지 기반 이모지와 스티커가 첫 URL 실패만으로 사라지지 않도록 candidate retry 후 fallback text로 대체
+
+### Tooling
+- **의존성 유지보수 반영**
+  - `@napi-rs/wasm-runtime`, `postcss`, `@biomejs/biome` 관련 maintenance 변경을 이번 릴리스 범위에 포함
+
 ## [0.15.0] - 2026-04-18
 
 ### Added
