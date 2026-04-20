@@ -37,9 +37,30 @@ All processing happens locally in your browser, and chat content is never stored
 - Chat content is never stored or transmitted
 - The script injects an overlay and settings button into the player, and renders content with DOM APIs instead of injecting chat HTML
 
+## Development
+
+Prerequisites: Volta Node.js `24.15.0` (project default) or engines-compatible Node.js `>=24.0.0`, pnpm `>=10.29.2`
+
+```bash
+pnpm install
+pnpm build:dev
+pnpm check
+pnpm quality
+pnpm build
+```
+
+- `pnpm build` runs `prebuild`, so the repository quality gate is enforced before the production userscript is emitted.
+- Detailed contributor workflow: [CONTRIBUTING.md](./CONTRIBUTING.md)
+- Coding policy: [CODE_STANDARDS.md](./CODE_STANDARDS.md)
+- Manual verification checklist: [TESTING.md](./TESTING.md)
+
 ## Support
 
 - Bug reports and requests: [GitHub Issues](https://github.com/PiesP/yt-live-chat-overlay/issues)
+
+## Contributing
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for the expected development flow and PR checklist.
 
 ## License
 
