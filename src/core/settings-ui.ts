@@ -21,7 +21,7 @@ import {
   type RootScalarSettingKey,
   SHOW_AUTHOR_KEYS,
 } from '@core/settings-schema';
-import { borderRadius, colors, shadows, spacing, typography, zIndex } from './design-tokens.js';
+import { SETTINGS_UI_STYLES } from '@core/settings-ui-styles';
 
 const log = createLogger('SettingsUi');
 
@@ -30,44 +30,19 @@ const BUTTON_ID = 'yt-chat-overlay-settings-button';
 const BACKDROP_ID = 'yt-chat-overlay-settings-backdrop';
 const TITLE_ID = 'yt-chat-overlay-settings-title';
 const PLAYER_LOOKUP_INTERVAL_MS = 500;
-const TRUSTED_TYPES_POLICY_NAME = 'yt-chat-overlay-settings-ui';
 
-interface TrustedTypesPolicyLike {
-  createHTML: (input: string) => string;
-}
-
-interface TrustedTypesFactoryLike {
-  createPolicy: (
-    name: string,
-    rules: {
-      createHTML: (input: string) => string;
-    }
-  ) => TrustedTypesPolicyLike;
-}
-
-let trustedTypesPolicy: TrustedTypesPolicyLike | null = null;
-
-const createSettingsUiHtml = (html: string): string => {
-  if (!trustedTypesPolicy) {
-    const trustedTypes = (window as Window & { trustedTypes?: TrustedTypesFactoryLike })
-      .trustedTypes;
-    if (!trustedTypes) return html;
-    trustedTypesPolicy = trustedTypes.createPolicy(TRUSTED_TYPES_POLICY_NAME, {
-      createHTML: (input) => input,
-    });
-  }
-  return trustedTypesPolicy.createHTML(html);
-};
-
-const createNumberInputAttributes = (
+const applyNumberInputAttributes = (
+  input: HTMLInputElement,
   scope: 'root' | 'outline',
   key: RootScalarSettingKey | OutlineSettingKey
-): string => {
+): void => {
   const { min, max, step } =
     scope === 'root'
       ? getRootNumericInputAttributes(key as RootScalarSettingKey)
       : getOutlineNumericInputAttributes(key as OutlineSettingKey);
-  return `min="${min}" max="${max}" step="${step}"`;
+  input.min = String(min);
+  input.max = String(max);
+  input.step = String(step);
 };
 
 export class SettingsUi {
@@ -150,241 +125,7 @@ export class SettingsUi {
 
     const style = document.createElement('style');
     style.id = STYLE_ID;
-    style.textContent = `
-      .yt-chat-overlay-settings-button {
-        position: absolute;
-        top: ${spacing.sm}px;
-        right: ${spacing.sm}px;
-        width: ${spacing.xxxl}px;
-        height: ${spacing.xxxl}px;
-        border-radius: ${borderRadius.sm};
-        border: 1px solid rgba(255, 255, 255, 0.25);
-        background: rgba(0, 0, 0, 0.6);
-        color: ${colors.ui.text};
-        font-size: ${typography.fontSize.base};
-        cursor: pointer;
-        z-index: 120;
-        pointer-events: auto;
-      }
-      .yt-chat-overlay-settings-button:hover {
-        background: rgba(0, 0, 0, 0.75);
-      }
-      .yt-chat-overlay-settings-backdrop {
-        position: fixed;
-        inset: 0;
-        display: none;
-        align-items: center;
-        justify-content: center;
-        background: rgba(0, 0, 0, 0.55);
-        z-index: ${zIndex.modal};
-      }
-      .yt-chat-overlay-settings-modal {
-        width: 400px;
-        max-height: 82vh;
-        overflow: hidden;
-        background: ${colors.ui.background};
-        color: ${colors.ui.text};
-        border-radius: ${borderRadius.md};
-        padding: ${spacing.lg}px;
-        display: flex;
-        flex-direction: column;
-        gap: ${spacing.md}px;
-        font-family: system-ui, -apple-system, sans-serif;
-        box-shadow: ${shadows.box.lg};
-      }
-      /* Header */
-      .yt-chat-overlay-settings-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        font-weight: ${typography.fontWeight.bold};
-        font-size: ${typography.fontSize.base};
-        flex-shrink: 0;
-      }
-      .yt-chat-overlay-settings-close {
-        border: none;
-        background: transparent;
-        color: ${colors.ui.textMuted};
-        font-size: ${typography.fontSize.lg};
-        cursor: pointer;
-        padding: 0 ${spacing.xs}px;
-        line-height: 1;
-      }
-      .yt-chat-overlay-settings-close:hover {
-        color: ${colors.ui.text};
-      }
-      /* Tab bar */
-      .yt-chat-overlay-settings-tabs {
-        display: flex;
-        border-bottom: 1px solid ${colors.ui.border};
-        flex-shrink: 0;
-      }
-      .yt-chat-overlay-settings-tab {
-        flex: 1;
-        padding: ${spacing.sm}px ${spacing.xs}px;
-        border: none;
-        border-bottom: 2px solid transparent;
-        background: transparent;
-        color: ${colors.ui.textMuted};
-        font-size: ${typography.fontSize.xs};
-        font-weight: ${typography.fontWeight.semibold};
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        cursor: pointer;
-        margin-bottom: -1px;
-        transition: color 0.1s;
-      }
-      .yt-chat-overlay-settings-tab:hover {
-        color: ${colors.ui.text};
-      }
-      .yt-chat-overlay-settings-tab.active {
-        color: ${colors.ui.primary};
-        border-bottom-color: ${colors.ui.primary};
-      }
-      /* Tab panes */
-      .yt-chat-overlay-settings-pane {
-        display: flex;
-        flex-direction: column;
-        gap: ${spacing.md}px;
-        overflow-y: auto;
-        flex: 1;
-        min-height: 0;
-        padding-right: 2px;
-      }
-      .yt-chat-overlay-settings-pane[hidden] {
-        display: none;
-      }
-      /* Sections within a pane */
-      .yt-chat-overlay-settings-section {
-        display: flex;
-        flex-direction: column;
-        gap: ${spacing.md}px;
-      }
-      .yt-chat-overlay-settings-section-title {
-        font-size: ${typography.fontSize.xs};
-        color: ${colors.ui.textMuted};
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        padding-bottom: 4px;
-        border-bottom: 1px solid ${colors.ui.border};
-      }
-      /* Row fields */
-      .yt-chat-overlay-settings-field {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: ${spacing.md}px;
-        font-size: ${typography.fontSize.sm};
-      }
-      .yt-chat-overlay-settings-field input[type="number"] {
-        width: 86px;
-        padding: ${spacing.xs}px ${spacing.sm}px;
-        border-radius: ${borderRadius.sm};
-        border: 1px solid ${colors.ui.border};
-        background: ${colors.ui.backgroundLight};
-        color: ${colors.ui.text};
-        text-align: right;
-      }
-      .yt-chat-overlay-settings-field input[type="color"] {
-        width: 44px;
-        height: 26px;
-        border: none;
-        background: transparent;
-        padding: 0;
-        cursor: pointer;
-      }
-      .yt-chat-overlay-settings-field input[type="checkbox"] {
-        width: 18px;
-        height: 18px;
-        cursor: pointer;
-        accent-color: ${colors.ui.primary};
-      }
-      .yt-chat-overlay-settings-field select {
-        padding: ${spacing.xs}px ${spacing.sm}px;
-        border-radius: ${borderRadius.sm};
-        border: 1px solid ${colors.ui.border};
-        background: ${colors.ui.backgroundLight};
-        color: ${colors.ui.text};
-        cursor: pointer;
-      }
-      .yt-chat-overlay-settings-field input[type="number"]:disabled,
-      .yt-chat-overlay-settings-field input[type="text"]:disabled {
-        opacity: 0.4;
-        cursor: not-allowed;
-      }
-      /* Enabled toggle — styled distinctly at top of Display tab */
-      .yt-chat-overlay-settings-enabled {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: ${spacing.sm}px ${spacing.md}px;
-        background: ${colors.ui.backgroundLight};
-        border-radius: ${borderRadius.sm};
-        font-size: ${typography.fontSize.sm};
-        font-weight: ${typography.fontWeight.semibold};
-        cursor: pointer;
-      }
-      .yt-chat-overlay-settings-enabled input[type="checkbox"] {
-        width: 18px;
-        height: 18px;
-        cursor: pointer;
-        accent-color: ${colors.ui.primary};
-      }
-      /* Authors grid */
-      .yt-chat-overlay-author-grid {
-        display: grid;
-        grid-template-columns: 1fr auto auto;
-        gap: ${spacing.sm}px ${spacing.md}px;
-        align-items: center;
-      }
-      .yt-chat-overlay-author-grid-header {
-        font-size: ${typography.fontSize.xs};
-        color: ${colors.ui.textMuted};
-        text-align: center;
-      }
-      .yt-chat-overlay-author-grid-label {
-        font-size: ${typography.fontSize.sm};
-      }
-      .yt-chat-overlay-author-grid-color {
-        justify-self: center;
-      }
-      .yt-chat-overlay-author-grid-checkbox {
-        justify-self: center;
-      }
-      /* Actions bar */
-      .yt-chat-overlay-settings-actions {
-        display: flex;
-        justify-content: flex-end;
-        gap: ${spacing.sm}px;
-        flex-shrink: 0;
-        padding-top: ${spacing.sm}px;
-        border-top: 1px solid ${colors.ui.border};
-      }
-      .yt-chat-overlay-settings-actions button {
-        border: none;
-        border-radius: ${borderRadius.sm};
-        padding: ${spacing.sm}px ${spacing.md}px;
-        cursor: pointer;
-        font-weight: ${typography.fontWeight.semibold};
-        font-size: ${typography.fontSize.sm};
-      }
-      .yt-chat-overlay-settings-actions button[data-action="reset"] {
-        background: transparent;
-        color: ${colors.ui.textMuted};
-        border: 1px solid ${colors.ui.border};
-      }
-      .yt-chat-overlay-settings-actions button[data-action="reset"]:hover {
-        color: ${colors.ui.danger};
-        border-color: ${colors.ui.danger};
-      }
-      .yt-chat-overlay-settings-actions button[data-action="apply"] {
-        background: ${colors.ui.primary};
-        color: ${colors.ui.text};
-      }
-      .yt-chat-overlay-settings-actions button[data-action="apply"]:hover {
-        background: ${colors.ui.primaryHover};
-      }
-    `;
+    style.textContent = SETTINGS_UI_STYLES;
     document.head.appendChild(style);
   }
 
@@ -477,254 +218,322 @@ export class SettingsUi {
     this.modal.setAttribute('role', 'dialog');
     this.modal.setAttribute('aria-modal', 'true');
     this.modal.setAttribute('aria-labelledby', TITLE_ID);
-    this.modal.innerHTML = createSettingsUiHtml(`
-      <div class="yt-chat-overlay-settings-header">
-        <div id="${TITLE_ID}">Chat Overlay</div>
-        <button
-          type="button"
-          class="yt-chat-overlay-settings-close"
-          aria-label="Close settings"
-        >✕</button>
-      </div>
-
-      <nav class="yt-chat-overlay-settings-tabs" role="tablist" aria-label="Settings categories">
-        <button class="yt-chat-overlay-settings-tab active" data-tab="display"
-          role="tab" aria-selected="true" aria-controls="pane-display">Display</button>
-        <button class="yt-chat-overlay-settings-tab" data-tab="style"
-          role="tab" aria-selected="false" aria-controls="pane-style">Style</button>
-        <button class="yt-chat-overlay-settings-tab" data-tab="authors"
-          role="tab" aria-selected="false" aria-controls="pane-authors">Authors</button>
-        <button class="yt-chat-overlay-settings-tab" data-tab="filter"
-          role="tab" aria-selected="false" aria-controls="pane-filter">Filter</button>
-      </nav>
-
-      <!-- Display: core visibility controls -->
-      <div class="yt-chat-overlay-settings-pane" id="pane-display" data-pane="display" role="tabpanel">
-        <label class="yt-chat-overlay-settings-enabled">
-          <span>Overlay Enabled</span>
-          <input type="checkbox" name="enabled" />
-        </label>
-        <label class="yt-chat-overlay-settings-field">
-          <span>Font Size (px)</span>
-          <input
-            type="number"
-            name="fontSize"
-            ${createNumberInputAttributes('root', 'fontSize')}
-          />
-        </label>
-        <label class="yt-chat-overlay-settings-field">
-          <span>Text Opacity</span>
-          <input
-            type="number"
-            name="opacity"
-            ${createNumberInputAttributes('root', 'opacity')}
-          />
-        </label>
-        <label class="yt-chat-overlay-settings-field">
-          <span>Scroll Speed (px/s)</span>
-          <input
-            type="number"
-            name="speedPxPerSec"
-            ${createNumberInputAttributes('root', 'speedPxPerSec')}
-          />
-        </label>
-        <label class="yt-chat-overlay-settings-field">
-          <span>Top Clear Zone (%)</span>
-          <input
-            type="number"
-            name="safeTop"
-            ${createNumberInputAttributes('root', 'safeTop')}
-            title="Keep top N% of video free of comments"
-          />
-        </label>
-        <label class="yt-chat-overlay-settings-field">
-          <span>Bottom Clear Zone (%)</span>
-          <input
-            type="number"
-            name="safeBottom"
-            ${createNumberInputAttributes('root', 'safeBottom')}
-            title="Keep bottom N% of video free of comments"
-          />
-        </label>
-      </div>
-
-      <!-- Style: visual appearance -->
-      <div class="yt-chat-overlay-settings-pane" id="pane-style" data-pane="style" hidden role="tabpanel">
-        <label class="yt-chat-overlay-settings-field">
-          <span>SuperChat Opacity (%)</span>
-          <input
-            type="number"
-            name="superChatOpacity"
-            ${createNumberInputAttributes('root', 'superChatOpacity')}
-            title="Background opacity of Super Chat cards"
-          />
-        </label>
-        <label class="yt-chat-overlay-settings-field">
-          <span>Lane Gap (px)</span>
-          <input
-            type="number"
-            name="laneSpacing"
-            ${createNumberInputAttributes('root', 'laneSpacing')}
-            title="Extra vertical gap between comment rows"
-          />
-        </label>
-        <div class="yt-chat-overlay-settings-section">
-          <div class="yt-chat-overlay-settings-section-title">Text Outline</div>
-          <label class="yt-chat-overlay-settings-field">
-            <span>Enabled</span>
-            <input type="checkbox" name="outline-enabled" />
-          </label>
-          <label class="yt-chat-overlay-settings-field">
-            <span>Width (px)</span>
-            <input
-              type="number"
-              name="outline-widthPx"
-              ${createNumberInputAttributes('outline', 'widthPx')}
-            />
-          </label>
-          <label class="yt-chat-overlay-settings-field">
-            <span>Blur (px)</span>
-            <input
-              type="number"
-              name="outline-blurPx"
-              ${createNumberInputAttributes('outline', 'blurPx')}
-            />
-          </label>
-          <label class="yt-chat-overlay-settings-field">
-            <span>Opacity</span>
-            <input
-              type="number"
-              name="outline-opacity"
-              ${createNumberInputAttributes('outline', 'opacity')}
-            />
-          </label>
-        </div>
-      </div>
-
-      <!-- Authors: per-type color and name visibility -->
-      <div class="yt-chat-overlay-settings-pane" id="pane-authors" data-pane="authors" hidden role="tabpanel">
-        <div class="yt-chat-overlay-author-grid">
-          <span class="yt-chat-overlay-author-grid-label"></span>
-          <span class="yt-chat-overlay-author-grid-header">Color</span>
-          <span class="yt-chat-overlay-author-grid-header">Show</span>
-
-          <span class="yt-chat-overlay-author-grid-label">Normal</span>
-          <input type="color" name="color-normal" class="yt-chat-overlay-author-grid-color" />
-          <input
-            type="checkbox"
-            name="showAuthor-normal"
-            class="yt-chat-overlay-author-grid-checkbox"
-          />
-
-          <span class="yt-chat-overlay-author-grid-label">Member</span>
-          <input type="color" name="color-member" class="yt-chat-overlay-author-grid-color" />
-          <input
-            type="checkbox"
-            name="showAuthor-member"
-            class="yt-chat-overlay-author-grid-checkbox"
-          />
-
-          <span class="yt-chat-overlay-author-grid-label">Moderator</span>
-          <input type="color" name="color-moderator" class="yt-chat-overlay-author-grid-color" />
-          <input
-            type="checkbox"
-            name="showAuthor-moderator"
-            class="yt-chat-overlay-author-grid-checkbox"
-          />
-
-          <span class="yt-chat-overlay-author-grid-label">Owner</span>
-          <input type="color" name="color-owner" class="yt-chat-overlay-author-grid-color" />
-          <input
-            type="checkbox"
-            name="showAuthor-owner"
-            class="yt-chat-overlay-author-grid-checkbox"
-          />
-
-          <span class="yt-chat-overlay-author-grid-label">Verified</span>
-          <input type="color" name="color-verified" class="yt-chat-overlay-author-grid-color" />
-          <input
-            type="checkbox"
-            name="showAuthor-verified"
-            class="yt-chat-overlay-author-grid-checkbox"
-          />
-
-          <span class="yt-chat-overlay-author-grid-label">SuperChat</span>
-          <span></span>
-          <input
-            type="checkbox"
-            name="showAuthor-superChat"
-            class="yt-chat-overlay-author-grid-checkbox"
-          />
-        </div>
-      </div>
-
-      <!-- Filter: rate limiting, text filtering, advanced -->
-      <div class="yt-chat-overlay-settings-pane" id="pane-filter" data-pane="filter" hidden role="tabpanel">
-        <div class="yt-chat-overlay-settings-section">
-          <div class="yt-chat-overlay-settings-section-title">Message Rate</div>
-          <label class="yt-chat-overlay-settings-field">
-            <span>Max per Second</span>
-            <input
-              type="number"
-              name="maxMessagesPerSecond"
-              ${createNumberInputAttributes('root', 'maxMessagesPerSecond')}
-              title="Maximum new comments displayed per second"
-            />
-          </label>
-          <label class="yt-chat-overlay-settings-field">
-            <span>Show Short Messages</span>
-            <input
-              type="checkbox"
-              name="allowShortTextMessages"
-              title="Show messages shorter than Min Length"
-            />
-          </label>
-          <label class="yt-chat-overlay-settings-field">
-            <span>Min Length (chars)</span>
-            <input
-              type="number"
-              name="minTextLength"
-              ${createNumberInputAttributes('root', 'minTextLength')}
-              title="Minimum character count (ignored when Show Short is on)"
-            />
-          </label>
-        </div>
-        <div class="yt-chat-overlay-settings-section">
-          <div class="yt-chat-overlay-settings-section-title">Performance</div>
-          <label class="yt-chat-overlay-settings-field">
-            <span>Max Visible</span>
-            <input
-              type="number"
-              name="maxConcurrentMessages"
-              ${createNumberInputAttributes('root', 'maxConcurrentMessages')}
-              title="Performance warning threshold for simultaneous comments"
-            />
-          </label>
-        </div>
-        <div class="yt-chat-overlay-settings-section">
-          <div class="yt-chat-overlay-settings-section-title">Debug</div>
-          <label class="yt-chat-overlay-settings-field">
-            <span>Log Level</span>
-            <select name="logLevel" title="Console output verbosity">
-              <option value="warn">Warn</option>
-              <option value="info">Info</option>
-              <option value="debug">Debug</option>
-            </select>
-          </label>
-        </div>
-      </div>
-
-      <div class="yt-chat-overlay-settings-actions">
-        <button type="button" data-action="reset">Reset</button>
-        <button type="button" data-action="apply">Apply</button>
-      </div>
-    `);
+    this.modal.append(...this.createModalContent());
 
     this.bindModalEvents();
 
     this.backdrop.appendChild(this.modal);
     document.body.appendChild(this.backdrop);
     this.setDialogOpen(false);
+  }
+
+  private createModalContent(): Node[] {
+    return [
+      this.createHeader(),
+      this.createTabs(),
+      this.createDisplayPane(),
+      this.createStylePane(),
+      this.createAuthorsPane(),
+      this.createFilterPane(),
+      this.createActions(),
+    ];
+  }
+
+  private createHeader(): HTMLDivElement {
+    const header = this.createDiv('yt-chat-overlay-settings-header');
+    const title = document.createElement('div');
+    title.id = TITLE_ID;
+    title.textContent = 'Chat Overlay';
+
+    const closeButton = document.createElement('button');
+    closeButton.type = 'button';
+    closeButton.className = 'yt-chat-overlay-settings-close';
+    closeButton.setAttribute('aria-label', 'Close settings');
+    closeButton.textContent = 'x';
+
+    header.append(title, closeButton);
+    return header;
+  }
+
+  private createTabs(): HTMLElement {
+    const nav = document.createElement('nav');
+    nav.className = 'yt-chat-overlay-settings-tabs';
+    nav.setAttribute('role', 'tablist');
+    nav.setAttribute('aria-label', 'Settings categories');
+
+    for (const [tabId, label] of [
+      ['display', 'Display'],
+      ['style', 'Style'],
+      ['authors', 'Authors'],
+      ['filter', 'Filter'],
+    ] as const) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'yt-chat-overlay-settings-tab';
+      button.dataset.tab = tabId;
+      button.setAttribute('role', 'tab');
+      button.setAttribute('aria-selected', String(tabId === 'display'));
+      button.setAttribute('aria-controls', `pane-${tabId}`);
+      button.textContent = label;
+      if (tabId === 'display') {
+        button.classList.add('active');
+      }
+      nav.appendChild(button);
+    }
+
+    return nav;
+  }
+
+  private createDisplayPane(): HTMLDivElement {
+    const pane = this.createPane('display');
+    pane.append(
+      this.createEnabledField(),
+      this.createNumberField('Font Size (px)', 'fontSize'),
+      this.createNumberField('Text Opacity', 'opacity'),
+      this.createNumberField('Scroll Speed (px/s)', 'speedPxPerSec'),
+      this.createNumberField(
+        'Top Clear Zone (%)',
+        'safeTop',
+        'Keep top N% of video free of comments'
+      ),
+      this.createNumberField(
+        'Bottom Clear Zone (%)',
+        'safeBottom',
+        'Keep bottom N% of video free of comments'
+      )
+    );
+    return pane;
+  }
+
+  private createStylePane(): HTMLDivElement {
+    const pane = this.createPane('style', true);
+    const outlineSection = this.createSection('Text Outline');
+    outlineSection.append(
+      this.createCheckboxField('Enabled', outlineFormName('enabled')),
+      this.createOutlineNumberField('Width (px)', 'widthPx'),
+      this.createOutlineNumberField('Blur (px)', 'blurPx'),
+      this.createOutlineNumberField('Opacity', 'opacity')
+    );
+
+    pane.append(
+      this.createNumberField(
+        'SuperChat Opacity (%)',
+        'superChatOpacity',
+        'Background opacity of Super Chat cards'
+      ),
+      this.createNumberField(
+        'Lane Gap (px)',
+        'laneSpacing',
+        'Extra vertical gap between comment rows'
+      ),
+      outlineSection
+    );
+    return pane;
+  }
+
+  private createAuthorsPane(): HTMLDivElement {
+    const pane = this.createPane('authors', true);
+    const grid = this.createDiv('yt-chat-overlay-author-grid');
+    grid.append(
+      document.createElement('span'),
+      this.createGridHeader('Color'),
+      this.createGridHeader('Show')
+    );
+
+    for (const key of AUTHOR_COLOR_KEYS) {
+      grid.append(
+        this.createGridLabel(this.formatAuthorLabel(key)),
+        this.createColorInput(`color-${key}`),
+        this.createGridCheckbox(`showAuthor-${key}`)
+      );
+    }
+
+    grid.append(
+      this.createGridLabel('SuperChat'),
+      document.createElement('span'),
+      this.createGridCheckbox('showAuthor-superChat')
+    );
+
+    pane.appendChild(grid);
+    return pane;
+  }
+
+  private createFilterPane(): HTMLDivElement {
+    const pane = this.createPane('filter', true);
+    const rateSection = this.createSection('Message Rate');
+    rateSection.append(
+      this.createNumberField(
+        'Max per Second',
+        'maxMessagesPerSecond',
+        'Maximum new comments displayed per second'
+      ),
+      this.createCheckboxField(
+        'Show Short Messages',
+        'allowShortTextMessages',
+        'Show messages shorter than Min Length'
+      ),
+      this.createNumberField(
+        'Min Length (chars)',
+        'minTextLength',
+        'Minimum character count (ignored when Show Short is on)'
+      )
+    );
+
+    const performanceSection = this.createSection('Performance');
+    performanceSection.append(
+      this.createNumberField(
+        'Max Visible',
+        'maxConcurrentMessages',
+        'Performance warning threshold for simultaneous comments'
+      )
+    );
+
+    const debugSection = this.createSection('Debug');
+    debugSection.append(this.createLogLevelField());
+
+    pane.append(rateSection, performanceSection, debugSection);
+    return pane;
+  }
+
+  private createActions(): HTMLDivElement {
+    const actions = this.createDiv('yt-chat-overlay-settings-actions');
+    for (const [action, label] of [
+      ['reset', 'Reset'],
+      ['apply', 'Apply'],
+    ] as const) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.dataset.action = action;
+      button.textContent = label;
+      actions.appendChild(button);
+    }
+    return actions;
+  }
+
+  private createPane(id: string, hidden = false): HTMLDivElement {
+    const pane = this.createDiv('yt-chat-overlay-settings-pane');
+    pane.id = `pane-${id}`;
+    pane.dataset.pane = id;
+    pane.setAttribute('role', 'tabpanel');
+    if (hidden) {
+      pane.hidden = true;
+    }
+    return pane;
+  }
+
+  private createSection(titleText: string): HTMLDivElement {
+    const section = this.createDiv('yt-chat-overlay-settings-section');
+    const title = this.createDiv('yt-chat-overlay-settings-section-title');
+    title.textContent = titleText;
+    section.appendChild(title);
+    return section;
+  }
+
+  private createEnabledField(): HTMLLabelElement {
+    const label = document.createElement('label');
+    label.className = 'yt-chat-overlay-settings-enabled';
+    const text = document.createElement('span');
+    text.textContent = 'Overlay Enabled';
+    const input = this.createInput('checkbox', 'enabled');
+    label.append(text, input);
+    return label;
+  }
+
+  private createNumberField(
+    labelText: string,
+    name: RootScalarSettingKey,
+    title?: string
+  ): HTMLLabelElement {
+    const input = this.createInput('number', name);
+    applyNumberInputAttributes(input, 'root', name);
+    if (title) {
+      input.title = title;
+    }
+    return this.createField(labelText, input);
+  }
+
+  private createOutlineNumberField(labelText: string, key: OutlineSettingKey): HTMLLabelElement {
+    const name = outlineFormName(key);
+    const input = this.createInput('number', name);
+    applyNumberInputAttributes(input, 'outline', key);
+    return this.createField(labelText, input);
+  }
+
+  private createCheckboxField(labelText: string, name: string, title?: string): HTMLLabelElement {
+    const input = this.createInput('checkbox', name);
+    if (title) {
+      input.title = title;
+    }
+    return this.createField(labelText, input);
+  }
+
+  private createLogLevelField(): HTMLLabelElement {
+    const select = document.createElement('select');
+    select.name = 'logLevel';
+    select.title = 'Console output verbosity';
+    for (const [value, label] of [
+      ['warn', 'Warn'],
+      ['info', 'Info'],
+      ['debug', 'Debug'],
+    ] as const) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = label;
+      select.appendChild(option);
+    }
+    return this.createField('Log Level', select);
+  }
+
+  private createField(labelText: string, control: HTMLElement): HTMLLabelElement {
+    const label = document.createElement('label');
+    label.className = 'yt-chat-overlay-settings-field';
+    const text = document.createElement('span');
+    text.textContent = labelText;
+    label.append(text, control);
+    return label;
+  }
+
+  private createInput(type: string, name: string): HTMLInputElement {
+    const input = document.createElement('input');
+    input.type = type;
+    input.name = name;
+    return input;
+  }
+
+  private createColorInput(name: string): HTMLInputElement {
+    const input = this.createInput('color', name);
+    input.className = 'yt-chat-overlay-author-grid-color';
+    return input;
+  }
+
+  private createGridCheckbox(name: string): HTMLInputElement {
+    const input = this.createInput('checkbox', name);
+    input.className = 'yt-chat-overlay-author-grid-checkbox';
+    return input;
+  }
+
+  private createGridHeader(text: string): HTMLSpanElement {
+    const element = document.createElement('span');
+    element.className = 'yt-chat-overlay-author-grid-header';
+    element.textContent = text;
+    return element;
+  }
+
+  private createGridLabel(text: string): HTMLSpanElement {
+    const element = document.createElement('span');
+    element.className = 'yt-chat-overlay-author-grid-label';
+    element.textContent = text;
+    return element;
+  }
+
+  private createDiv(className: string): HTMLDivElement {
+    const element = document.createElement('div');
+    element.className = className;
+    return element;
+  }
+
+  private formatAuthorLabel(key: (typeof AUTHOR_COLOR_KEYS)[number]): string {
+    return key.charAt(0).toUpperCase() + key.slice(1);
   }
 
   private open(): void {

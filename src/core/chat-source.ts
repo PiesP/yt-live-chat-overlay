@@ -1,24 +1,12 @@
 /**
- * Chat Source
- *
- * Fetches YouTube live chat directly from youtubei endpoints without
- * depending on the visible chat panel DOM.
+ * Fetches YouTube live chat directly from youtubei endpoints without depending
+ * on the visible chat panel DOM.
  */
 
-import type {
-  AuthorType,
-  ChatMessage,
-  ContentSegment,
-  EmojiInfo,
-  ImageAsset,
-  OverlaySettings,
-  SuperChatInfo,
-} from '@app-types';
+import type { ChatMessage, OverlaySettings } from '@app-types';
 import { combineAbortSignals, isAbortError } from '@core/abort';
-import { parseRgbColor } from '@core/design-tokens';
+import { type ChatEvent, ChatMessageParser } from '@core/chat-message-parser';
 import { findElementMatch, sleep, throwIfAborted, VIDEO_SELECTORS } from '@core/dom';
-import { normalizeYouTubeImageUrl } from '@core/image-url';
-import { asRecord, getNumber, getString, isRecord, type JsonObject } from '@core/json';
 import { createLogger } from '@core/logging';
 import {
   bootstrapChatSession,
@@ -40,9 +28,8 @@ const log = createLogger('ChatSource');
 const BOOTSTRAP_ATTEMPTS = 4;
 const BOOTSTRAP_RETRY_DELAY_MS = 1000;
 const RECENT_MESSAGE_BUFFER_SIZE = 100;
-const RECONNECT_ATTEMPTS = 3;
 const RECONNECT_RETRY_DELAY_MS = 1000;
-const DEFAULT_ACTIVITY_TIMEOUT_MS = 30000;
+const DEFAULT_ACTIVITY_TIMEOUT_MS = 30_000;
 const LIVE_POLL_FALLBACK_DELAY_MS = 4000;
 const REPLAY_LOOP_DELAY_MS = 250;
 const REPLAY_FETCH_MIN_DELTA_MS = 1000;
@@ -52,24 +39,8 @@ const REPLAY_FALLBACK_CATCHUP_BATCH_LIMIT = 12;
 const REPLAY_BUFFER_REFILL_THRESHOLD = 24;
 const MAX_BUFFERED_REPLAY_MESSAGES = 300;
 const MAX_TRACKED_REPLAY_KEYS = 2000;
-const EMOJI_TEXT_PATTERN = /\p{Extended_Pictographic}/u;
-const EMOJI_ALIAS_PATTERN = /^:[^:\s][^:]*:$/u;
-const AUTHOR_TYPE_PRIORITY = {
-  normal: 0,
-  verified: 1,
-  member: 2,
-  moderator: 3,
-  owner: 4,
-} as const satisfies Record<AuthorType, number>;
 
 type ReplayMode = 'playerSeek' | 'continuation';
-type ChatMessageKind = ChatMessage['kind'];
-
-interface ParsedMessageBody {
-  text: string;
-  content: ContentSegment[];
-  visibleLength: number;
-}
 
 interface ChatHealthSnapshotOptions {
   activeTimeoutMs?: number;
@@ -91,38 +62,20 @@ interface PlaybackSnapshot {
   paused: boolean;
 }
 
-interface ChatEvent {
-  message: ChatMessage;
-  offsetMs?: number;
-}
-
 interface ReplayBufferedMessage {
   key: string;
   message: ChatMessage;
   offsetMs: number;
 }
 
-interface SupportedRenderer {
-  kind: ChatMessageKind;
-  renderer: JsonObject;
-}
-
-interface ThumbnailCandidate {
-  url: string;
-  width?: number;
-  height?: number;
-}
-
 export type MessageCallback = (message: ChatMessage) => void;
 export type ChatSourceStartStatus = 'started' | 'retryable' | 'unavailable';
 
 export class ChatSource {
+  private readonly parser: ChatMessageParser;
   private callback: MessageCallback | null = null;
-  /** Signals full shutdown to bootstrap/poll work. */
   private lifecycleController: AbortController | null = null;
-  /** Signals replacement of the active poll loop during reconnects. */
   private pollController: AbortController | null = null;
-  private reconnectInProgress = false;
   private pollLoopAlive = false;
   private pollGeneration = 0;
   private lastActivityTime = 0;
@@ -138,22 +91,83 @@ export class ChatSource {
   private readonly replayPendingKeys = new Set<string>();
   private replayBuffer: ReplayBufferedMessage[] = [];
 
-  constructor(private readonly getSettings: (() => Readonly<OverlaySettings>) | null = null) {}
+  constructor(getSettings: (() => Readonly<OverlaySettings>) | null = null) {
+    this.parser = new ChatMessageParser(getSettings);
+  }
 
-  private async bootstrapAndLaunchPolling(
-    context: 'start' | 'reconnect',
-    attempts: number,
-    intervalMs: number,
-    signal?: AbortSignal
-  ): Promise<ChatSourceStartStatus> {
-    const bootstrapResolution = await this.resolveBootstrap({
-      attempts,
-      intervalMs,
-      ...(signal ? { signal } : {}),
-    });
+  async start(callback: MessageCallback, signal?: AbortSignal): Promise<ChatSourceStartStatus> {
+    this.lifecycleController?.abort();
+    this.pollController?.abort();
+
+    this.lifecycleController = new AbortController();
+    this.pollController = new AbortController();
+    this.callback = callback;
+    this.resetSessionState();
+
+    const combinedSignal = combineAbortSignals(
+      signal,
+      this.lifecycleController.signal,
+      this.pollController.signal
+    );
+
+    try {
+      return await this.bootstrapAndLaunchPolling(combinedSignal);
+    } catch (error) {
+      if (isAbortError(error) && this.isLifecycleAbort()) {
+        return 'retryable';
+      }
+
+      throw error;
+    }
+  }
+
+  stop(): void {
+    this.lifecycleController?.abort();
+    this.lifecycleController = null;
+
+    this.pollController?.abort();
+    this.pollController = null;
+
+    this.pollGeneration += 1;
+    this.pollLoopAlive = false;
+    this.callback = null;
+    this.resetSessionState();
+
+    log.debug('Chat monitoring stopped');
+  }
+
+  isActive(timeoutMs = DEFAULT_ACTIVITY_TIMEOUT_MS): boolean {
+    return Date.now() - this.lastActivityTime < Math.max(0, timeoutMs);
+  }
+
+  getHealthSnapshot(options: ChatHealthSnapshotOptions = {}): ChatHealthSnapshot {
+    const activeTimeoutMs = options.activeTimeoutMs ?? DEFAULT_ACTIVITY_TIMEOUT_MS;
+
+    return {
+      observerAlive: this.isObserverAlive(),
+      recentlyActive: this.isActive(activeTimeoutMs),
+    };
+  }
+
+  getLatestMessages(limit: number): ChatMessage[] {
+    if (limit <= 0) return [];
+    return this.recentMessages.slice(-limit);
+  }
+
+  private isObserverAlive(): boolean {
+    return (
+      this.pollLoopAlive &&
+      this.pollController !== null &&
+      !this.pollController.signal.aborted &&
+      this.callback !== null
+    );
+  }
+
+  private async bootstrapAndLaunchPolling(signal?: AbortSignal): Promise<ChatSourceStartStatus> {
+    const bootstrapResolution = await this.resolveBootstrap(signal);
 
     if (bootstrapResolution.status !== 'ready' || !bootstrapResolution.bootstrap) {
-      this.logBootstrapFailure(context, bootstrapResolution, attempts);
+      this.logBootstrapFailure(bootstrapResolution);
       return bootstrapResolution.status === 'unavailable' ? 'unavailable' : 'retryable';
     }
 
@@ -167,9 +181,7 @@ export class ChatSource {
     this.launchCurrentPollLoop(signal);
 
     log.info(
-      context === 'start'
-        ? `Chat monitoring started successfully via youtubei (${this.bootstrap.isReplay ? 'replay' : 'live'})`
-        : 'youtubei chat polling reconnected'
+      `Chat monitoring started successfully via youtubei (${this.bootstrap.isReplay ? 'replay' : 'live'})`
     );
 
     return 'started';
@@ -196,6 +208,29 @@ export class ChatSource {
       signal,
       bootstrap.isReplay ? this.runReplayLoop.bind(this) : this.runLiveLoop.bind(this)
     );
+  }
+
+  private launchPollLoop(
+    signal: AbortSignal | undefined,
+    runner: (loopSignal: AbortSignal | undefined) => Promise<void>
+  ): void {
+    const generation = ++this.pollGeneration;
+    this.pollLoopAlive = true;
+
+    void Promise.resolve()
+      .then(() => runner(signal))
+      .catch((error: unknown) => {
+        if (isAbortError(error)) {
+          return;
+        }
+
+        log.warn('Chat polling loop stopped unexpectedly:', error);
+      })
+      .finally(() => {
+        if (generation === this.pollGeneration) {
+          this.pollLoopAlive = false;
+        }
+      });
   }
 
   private isLifecycleAbort(): boolean {
@@ -261,38 +296,10 @@ export class ChatSource {
     }
   }
 
-  private launchPollLoop(
-    signal: AbortSignal | undefined,
-    runner: (loopSignal: AbortSignal | undefined) => Promise<void>
-  ): void {
-    const generation = ++this.pollGeneration;
-    this.pollLoopAlive = true;
-
-    void Promise.resolve()
-      .then(() => runner(signal))
-      .catch((error: unknown) => {
-        if (isAbortError(error)) {
-          return;
-        }
-
-        log.warn('Chat polling loop stopped unexpectedly:', error);
-      })
-      .finally(() => {
-        if (generation === this.pollGeneration) {
-          this.pollLoopAlive = false;
-        }
-      });
-  }
-
-  private async resolveBootstrap(options: {
-    attempts: number;
-    intervalMs: number;
-    signal?: AbortSignal;
-  }): Promise<ChatBootstrapResolution> {
-    const { attempts, intervalMs, signal } = options;
+  private async resolveBootstrap(signal?: AbortSignal): Promise<ChatBootstrapResolution> {
     let lastRetryReason = 'Chat bootstrap did not become available';
 
-    for (let attempt = 1; attempt <= attempts; attempt++) {
+    for (let attempt = 1; attempt <= BOOTSTRAP_ATTEMPTS; attempt++) {
       throwIfAborted(signal);
 
       const result = await bootstrapChatSession(signal);
@@ -313,8 +320,8 @@ export class ChatSource {
 
       lastRetryReason = result.reason;
 
-      if (attempt < attempts) {
-        await sleep(intervalMs, signal);
+      if (attempt < BOOTSTRAP_ATTEMPTS) {
+        await sleep(BOOTSTRAP_RETRY_DELAY_MS, signal);
       }
     }
 
@@ -325,20 +332,16 @@ export class ChatSource {
   }
 
   private logBootstrapFailure(
-    context: 'start' | 'reconnect',
-    resolution: Exclude<ChatBootstrapResolution, { status: 'ready' }>,
-    attempts: number
+    resolution: Exclude<ChatBootstrapResolution, { status: 'ready' }>
   ): void {
-    const suffix = context === 'reconnect' ? ' (reconnect)' : '';
-
     if (resolution.status === 'retryable') {
       log.warn(
-        `Chat bootstrap was retryable after ${attempts} attempts${suffix}: ${resolution.reason}`
+        `Chat bootstrap was retryable after ${BOOTSTRAP_ATTEMPTS} attempts: ${resolution.reason}`
       );
       return;
     }
 
-    log.warn(`Chat source is unavailable${suffix}:`, resolution.reason);
+    log.warn('Chat source is unavailable:', resolution.reason);
   }
 
   private async requestLivePayload(
@@ -381,11 +384,7 @@ export class ChatSource {
   }
 
   private async refreshBootstrap(signal?: AbortSignal): Promise<boolean> {
-    const resolution = await this.resolveBootstrap({
-      attempts: 1,
-      intervalMs: 0,
-      ...(signal ? { signal } : {}),
-    });
+    const resolution = await this.resolveBootstrap(signal);
 
     if (resolution.status !== 'ready' || !resolution.bootstrap) {
       log.warn('Failed to refresh chat bootstrap:', resolution.reason);
@@ -404,7 +403,7 @@ export class ChatSource {
   }
 
   private handleLivePayload(payload: LiveChatPayload): void {
-    const events = this.extractChatEvents(payload.actions);
+    const events = this.parser.extractChatEvents(payload.actions);
     for (const event of events) {
       this.emitMessage(event.message);
     }
@@ -543,7 +542,7 @@ export class ChatSource {
 
       const nextPlayerSeekContinuation = extractPlayerSeekContinuation(payload.continuations);
       this.bufferReplayEvents(
-        this.extractChatEvents(payload.actions),
+        this.parser.extractChatEvents(payload.actions),
         Math.max(0, offsetMs - REPLAY_PREFETCH_WINDOW_MS)
       );
       this.replayPlayerSeekContinuation = nextPlayerSeekContinuation;
@@ -574,7 +573,7 @@ export class ChatSource {
         return false;
       }
 
-      const events = this.extractChatEvents(payload.actions);
+      const events = this.parser.extractChatEvents(payload.actions);
       this.replayFallbackLastOffsetMs = this.bufferReplayEvents(events, minimumOffsetMs);
       this.replayContinuation = extractReplayContinuation(payload.continuations);
 
@@ -651,7 +650,7 @@ export class ChatSource {
       const currentOffsetMs = this.getPlaybackSnapshot()?.offsetMs ?? 0;
       const minimumOffsetMs = Math.max(0, currentOffsetMs - REPLAY_PREFETCH_WINDOW_MS);
       this.replayFallbackLastOffsetMs = this.bufferReplayEvents(
-        this.extractChatEvents(initialPayload.actions),
+        this.parser.extractChatEvents(initialPayload.actions),
         minimumOffsetMs
       );
       await this.catchUpFallbackReplay(currentOffsetMs, signal);
@@ -738,813 +737,51 @@ export class ChatSource {
       }
 
       if (this.replayMode === 'playerSeek') {
-        if (!playback.paused && this.shouldFetchReplayAtOffset(currentOffsetMs)) {
-          const fetched = await this.fetchReplayPlayerSeek(currentOffsetMs, signal);
-          this.flushReplayBuffer(currentOffsetMs);
-
-          if (!fetched) {
-            const reinitialized = await this.reinitializeReplaySession(signal);
-            if (!reinitialized) {
-              await sleep(RECONNECT_RETRY_DELAY_MS, signal);
-              continue;
-            }
-          }
-        }
+        await this.pollPlayerSeekReplay(playback, signal);
       } else if (this.replayMode === 'continuation' && !playback.paused) {
-        await this.catchUpFallbackReplay(currentOffsetMs, signal);
-        const minimumOffsetMs = Math.max(0, currentOffsetMs - REPLAY_PREFETCH_WINDOW_MS);
-        const needsMoreMessages =
-          this.replayContinuation !== null &&
-          (this.replayBuffer.length < REPLAY_BUFFER_REFILL_THRESHOLD ||
-            this.replayFallbackLastOffsetMs < currentOffsetMs + REPLAY_PREFETCH_WINDOW_MS);
-
-        if (needsMoreMessages) {
-          await this.fetchNextReplayFallbackBatch(minimumOffsetMs, signal);
-        }
-
-        this.flushReplayBuffer(currentOffsetMs);
+        await this.pollContinuationReplay(currentOffsetMs, signal);
       }
 
       await sleep(REPLAY_LOOP_DELAY_MS, signal);
     }
   }
 
-  private extractChatEvents(actions: readonly unknown[]): ChatEvent[] {
-    const events: ChatEvent[] = [];
-
-    for (const action of actions) {
-      if (!isRecord(action)) {
-        continue;
-      }
-
-      const replayAction = asRecord(action.replayChatItemAction);
-      if (replayAction) {
-        const offsetMs = getNumber(replayAction.videoOffsetTimeMsec);
-        const nestedActions = Array.isArray(replayAction.actions) ? replayAction.actions : [];
-        for (const nestedAction of nestedActions) {
-          const event = this.extractChatEventFromAction(nestedAction, offsetMs);
-          if (event) {
-            events.push(event);
-          }
-        }
-        continue;
-      }
-
-      const event = this.extractChatEventFromAction(action, undefined);
-      if (event) {
-        events.push(event);
-      }
-    }
-
-    return events;
-  }
-
-  private extractChatEventFromAction(action: unknown, offsetMs?: number): ChatEvent | null {
-    if (!isRecord(action)) {
-      return null;
-    }
-
-    const item = this.extractActionItem(action);
-    if (!item) {
-      return null;
-    }
-
-    const supportedRenderer = this.extractSupportedRenderer(item);
-    if (!supportedRenderer) {
-      return null;
-    }
-
-    const message = this.parseRendererMessage(supportedRenderer.renderer, supportedRenderer.kind);
-    if (!message) {
-      return null;
-    }
-
-    return offsetMs === undefined ? { message } : { message, offsetMs };
-  }
-
-  private extractActionItem(action: JsonObject): JsonObject | null {
-    const addChatItemAction = asRecord(action.addChatItemAction);
-    if (addChatItemAction) {
-      const item = asRecord(addChatItemAction.item);
-      if (item) {
-        return item;
-      }
-    }
-
-    const replaceChatItemAction = asRecord(action.replaceChatItemAction);
-    if (replaceChatItemAction) {
-      const item = asRecord(replaceChatItemAction.item);
-      if (item) {
-        return item;
-      }
-    }
-
-    return null;
-  }
-
-  private extractSupportedRenderer(item: JsonObject): SupportedRenderer | null {
-    const textRenderer = asRecord(item.liveChatTextMessageRenderer);
-    if (textRenderer) {
-      return { kind: 'text', renderer: textRenderer };
-    }
-
-    const paidMessageRenderer = asRecord(item.liveChatPaidMessageRenderer);
-    if (paidMessageRenderer) {
-      return { kind: 'superchat', renderer: paidMessageRenderer };
-    }
-
-    const paidStickerRenderer = asRecord(item.liveChatPaidStickerRenderer);
-    if (paidStickerRenderer) {
-      return { kind: 'superchat', renderer: paidStickerRenderer };
-    }
-
-    const membershipRenderer = asRecord(item.liveChatMembershipItemRenderer);
-    if (membershipRenderer) {
-      return { kind: 'membership', renderer: membershipRenderer };
-    }
-
-    return null;
-  }
-
-  private parseRendererMessage(renderer: JsonObject, kind: ChatMessageKind): ChatMessage | null {
-    const author = this.extractDisplayText(renderer.authorName);
-    if (!author) {
-      return null;
-    }
-
-    const authorType = this.extractAuthorType(renderer.authorBadges);
-    const parsedBody = this.extractRendererBody(renderer, kind, authorType);
-    if (!parsedBody) {
-      return null;
-    }
-
-    const message: ChatMessage = {
-      text: parsedBody.text,
-      content: parsedBody.content,
-      kind,
-      timestamp: Date.now(),
-    };
-
-    const id = getString(renderer.id);
-    if (id) {
-      message.id = id;
-    }
-
-    message.author = author;
-    message.authorType = authorType;
-
-    const authorPhotoUrl = this.extractThumbnailUrl(renderer.authorPhoto);
-    if (authorPhotoUrl) {
-      message.authorPhotoUrl = authorPhotoUrl;
-    }
-
-    if (kind === 'superchat') {
-      const superChatInfo = this.parseSuperChatInfo(renderer);
-      if (superChatInfo) {
-        message.superChat = superChatInfo;
-      }
-    }
-
-    return message;
-  }
-
-  private extractRendererBody(
-    renderer: JsonObject,
-    kind: ChatMessageKind,
-    authorType: NonNullable<ChatMessage['authorType']>
-  ): ParsedMessageBody | null {
-    const parsedBody =
-      kind === 'membership'
-        ? this.parseMembershipBody(renderer)
-        : this.parseMessageContent(renderer.message);
-
-    if (kind === 'text' && !this.isSubstantialMessage(parsedBody, authorType)) {
-      return null;
-    }
-
-    return parsedBody;
-  }
-
-  private parseMembershipBody(renderer: JsonObject): ParsedMessageBody {
-    const messageBody = this.parseMessageContent(renderer.message);
-    return messageBody.visibleLength > 0 || messageBody.text.length > 0
-      ? messageBody
-      : this.parseMessageContent(renderer.headerSubtext);
-  }
-
-  private extractDisplayText(value: unknown): string | undefined {
-    if (!isRecord(value)) {
-      return undefined;
-    }
-
-    const simpleText = getString(value.simpleText);
-    if (simpleText) {
-      return simpleText.trim() || undefined;
-    }
-
-    const runs = Array.isArray(value.runs) ? value.runs : [];
-    const text = runs
-      .map((run) => {
-        if (!isRecord(run)) {
-          return '';
-        }
-
-        const runText = getString(run.text);
-        if (runText) {
-          return runText;
-        }
-
-        const emoji = asRecord(run.emoji);
-        return emoji ? this.getEmojiVisibleFallbackText(emoji) : '';
-      })
-      .join('')
-      .trim();
-
-    return text || undefined;
-  }
-
-  private parseMessageContent(value: unknown): ParsedMessageBody {
-    if (!isRecord(value)) {
-      return this.createEmptyMessageBody();
-    }
-
-    const simpleText = getString(value.simpleText);
-    if (simpleText !== undefined) {
-      const content: ContentSegment[] =
-        simpleText.length > 0 ? [{ type: 'text', content: simpleText }] : [];
-      return {
-        text: this.normalizeText(simpleText),
-        content,
-        visibleLength: this.getVisibleContentLength(content),
-      };
-    }
-
-    const runs = Array.isArray(value.runs) ? value.runs : [];
-    const segments: ContentSegment[] = [];
-    let plainText = '';
-
-    for (const run of runs) {
-      if (!isRecord(run)) {
-        continue;
-      }
-
-      const runText = getString(run.text);
-      if (runText !== undefined) {
-        if (runText.length > 0) {
-          this.appendTextSegment(segments, runText);
-          plainText += runText;
-        }
-        continue;
-      }
-
-      const emojiData = asRecord(run.emoji);
-      if (!emojiData) {
-        continue;
-      }
-
-      const emoji = this.parseEmoji(emojiData);
-      if (emoji) {
-        segments.push({ type: 'emoji', emoji });
-        plainText += emoji.fallbackText || '[emoji]';
-        continue;
-      }
-
-      const fallbackText = this.getEmojiVisibleFallbackText(emojiData) || '[emoji]';
-      this.appendTextSegment(segments, fallbackText);
-      plainText += fallbackText;
-    }
-
-    return {
-      text: this.normalizeText(plainText),
-      content: segments,
-      visibleLength: this.getVisibleContentLength(segments),
-    };
-  }
-
-  private createEmptyMessageBody(): ParsedMessageBody {
-    return { text: '', content: [], visibleLength: 0 };
-  }
-
-  private appendTextSegment(segments: ContentSegment[], content: string): void {
-    if (content.length === 0) {
+  private async pollPlayerSeekReplay(
+    playback: PlaybackSnapshot,
+    signal?: AbortSignal
+  ): Promise<void> {
+    if (playback.paused || !this.shouldFetchReplayAtOffset(playback.offsetMs)) {
       return;
     }
 
-    const lastSegment = segments[segments.length - 1];
-    if (lastSegment?.type === 'text') {
-      lastSegment.content += content;
+    const fetched = await this.fetchReplayPlayerSeek(playback.offsetMs, signal);
+    this.flushReplayBuffer(playback.offsetMs);
+
+    if (fetched) {
       return;
     }
 
-    segments.push({ type: 'text', content });
-  }
-
-  private getVisibleContentLength(segments: readonly ContentSegment[]): number {
-    let visibleLength = 0;
-
-    for (const segment of segments) {
-      if (segment.type === 'emoji') {
-        visibleLength += 1;
-        continue;
-      }
-
-      visibleLength += Array.from(
-        this.stripControlCharacters(segment.content).replace(/\s+/g, '')
-      ).length;
-    }
-
-    return visibleLength;
-  }
-
-  private extractAccessibilityLabel(value: unknown): string | undefined {
-    const record = asRecord(value);
-    if (!record) {
-      return undefined;
-    }
-
-    return (
-      getString(asRecord(asRecord(record.accessibility)?.accessibilityData)?.label) || undefined
-    );
-  }
-
-  private getEmojiShortcuts(emojiData: JsonObject): string[] {
-    return Array.isArray(emojiData.shortcuts)
-      ? emojiData.shortcuts.filter((shortcut): shortcut is string => typeof shortcut === 'string')
-      : [];
-  }
-
-  private normalizeInlineText(text: string): string {
-    return this.stripControlCharacters(text).replace(/\s+/g, ' ').trim();
-  }
-
-  private humanizeEmojiAlias(alias: string): string {
-    if (!EMOJI_ALIAS_PATTERN.test(alias)) {
-      return this.normalizeInlineText(alias);
-    }
-
-    return this.normalizeInlineText(alias.slice(1, -1).replace(/[-_]+/g, ' '));
-  }
-
-  private getEmojiAltText(emojiData: JsonObject): string {
-    const shortcuts = this.getEmojiShortcuts(emojiData);
-
-    return (
-      shortcuts[0] ??
-      this.extractAccessibilityLabel(emojiData.image) ??
-      this.extractAccessibilityLabel(emojiData) ??
-      getString(emojiData.emojiId) ??
-      ''
-    );
-  }
-
-  private getEmojiVisibleFallbackText(emojiData: JsonObject): string {
-    const shortcuts = this.getEmojiShortcuts(emojiData);
-    const nonAliasShortcut = shortcuts.find((shortcut) => !EMOJI_ALIAS_PATTERN.test(shortcut));
-    if (nonAliasShortcut) {
-      return this.normalizeInlineText(nonAliasShortcut);
-    }
-
-    const accessibleLabel =
-      this.extractAccessibilityLabel(emojiData.image) ?? this.extractAccessibilityLabel(emojiData);
-    if (accessibleLabel && !EMOJI_ALIAS_PATTERN.test(accessibleLabel)) {
-      return this.normalizeInlineText(accessibleLabel);
-    }
-
-    const alias = shortcuts[0] ?? getString(emojiData.emojiId) ?? '';
-    return alias ? this.humanizeEmojiAlias(alias) : '';
-  }
-
-  private parseEmoji(emojiData: JsonObject): EmojiInfo | null {
-    const emojiAsset = this.createImageAsset(
-      emojiData.image,
-      this.getEmojiAltText(emojiData),
-      this.getEmojiVisibleFallbackText(emojiData)
-    );
-    if (!emojiAsset) {
-      return null;
-    }
-
-    const emoji: EmojiInfo = { ...emojiAsset };
-
-    const id = getString(emojiData.emojiId);
-    if (id) {
-      emoji.id = id;
-    }
-
-    return emoji;
-  }
-
-  private createImageAsset(value: unknown, alt: string, fallbackText?: string): ImageAsset | null {
-    const thumbnail = this.extractBestThumbnail(value);
-    if (!thumbnail) {
-      return null;
-    }
-
-    const asset: ImageAsset = {
-      url: thumbnail.url,
-      alt,
-    };
-
-    if (thumbnail.candidateUrls && thumbnail.candidateUrls.length > 0) {
-      asset.candidateUrls = thumbnail.candidateUrls;
-    }
-
-    if (fallbackText && fallbackText.length > 0) {
-      asset.fallbackText = fallbackText;
-    }
-
-    if (thumbnail.width !== undefined) {
-      asset.width = thumbnail.width;
-    }
-
-    if (thumbnail.height !== undefined) {
-      asset.height = thumbnail.height;
-    }
-
-    return asset;
-  }
-
-  private extractThumbnailCandidates(value: unknown): ThumbnailCandidate[] {
-    if (!isRecord(value)) {
-      return [];
-    }
-
-    const thumbnails = Array.isArray(value.thumbnails)
-      ? value.thumbnails
-      : Array.isArray(value.sources)
-        ? value.sources
-        : [];
-
-    const candidates: ThumbnailCandidate[] = [];
-    const seenUrls = new Set<string>();
-
-    for (const candidate of thumbnails) {
-      if (!isRecord(candidate)) {
-        continue;
-      }
-
-      const url = getString(candidate.url);
-      const normalizedUrl = url ? normalizeYouTubeImageUrl(url) : null;
-      if (!normalizedUrl || seenUrls.has(normalizedUrl)) {
-        continue;
-      }
-
-      seenUrls.add(normalizedUrl);
-      const width = getNumber(candidate.width);
-      const nextThumbnail: ThumbnailCandidate = {
-        url: normalizedUrl,
-      };
-      if (width !== undefined) {
-        nextThumbnail.width = width;
-      }
-
-      const height = getNumber(candidate.height);
-      if (height !== undefined) {
-        nextThumbnail.height = height;
-      }
-
-      candidates.push(nextThumbnail);
-    }
-
-    candidates.sort((left, right) => (right.width ?? 0) - (left.width ?? 0));
-    return candidates;
-  }
-
-  private extractBestThumbnail(
-    value: unknown
-  ): { url: string; candidateUrls?: string[]; width?: number; height?: number } | null {
-    const [bestThumbnail, ...fallbackThumbnails] = this.extractThumbnailCandidates(value);
-    if (!bestThumbnail) {
-      return null;
-    }
-
-    return {
-      ...bestThumbnail,
-      ...(fallbackThumbnails.length > 0
-        ? { candidateUrls: fallbackThumbnails.map((thumbnail) => thumbnail.url) }
-        : {}),
-    };
-  }
-
-  private extractThumbnailUrl(value: unknown): string | undefined {
-    return this.extractBestThumbnail(value)?.url;
-  }
-
-  private extractAuthorType(value: unknown): NonNullable<ChatMessage['authorType']> {
-    let resolvedType: NonNullable<ChatMessage['authorType']> = 'normal';
-
-    if (!Array.isArray(value)) {
-      return resolvedType;
-    }
-
-    for (const badgeEntry of value) {
-      const nextType = this.classifyAuthorBadge(badgeEntry);
-      if (AUTHOR_TYPE_PRIORITY[nextType] > AUTHOR_TYPE_PRIORITY[resolvedType]) {
-        resolvedType = nextType;
-      }
-    }
-
-    return resolvedType;
-  }
-
-  private classifyAuthorBadge(value: unknown): NonNullable<ChatMessage['authorType']> {
-    const badgeEntry = asRecord(value);
-    if (!badgeEntry) {
-      return 'normal';
-    }
-
-    const liveBadge = asRecord(badgeEntry.liveChatAuthorBadgeRenderer);
-    const metadataBadge = asRecord(badgeEntry.metadataBadgeRenderer);
-    const badge = liveBadge ?? metadataBadge ?? badgeEntry;
-    const iconType = getString(asRecord(badge.icon)?.iconType)?.toUpperCase() ?? '';
-    const style = getString(metadataBadge?.style ?? badge.style)?.toUpperCase() ?? '';
-    const label = [
-      getString(badge.tooltip),
-      this.extractAccessibilityLabel(badge),
-      this.extractAccessibilityLabel(liveBadge),
-      this.extractAccessibilityLabel(metadataBadge),
-    ]
-      .filter(Boolean)
-      .join(' ')
-      .toUpperCase();
-
-    if (
-      style.includes('MEMBERS_ONLY') ||
-      isRecord(badge.customThumbnail) ||
-      isRecord(liveBadge?.customThumbnail) ||
-      iconType.includes('SPONSOR')
-    ) {
-      return 'member';
-    }
-
-    if (style.includes('VERIFIED') || iconType.includes('VERIFIED')) {
-      return 'verified';
-    }
-
-    if (iconType.includes('OWNER') || label.includes('OWNER')) {
-      return 'owner';
-    }
-
-    if (iconType.includes('MODERATOR') || label.includes('MODERATOR') || label.includes(' MOD ')) {
-      return 'moderator';
-    }
-
-    if (label.includes('MEMBER') || label.includes('MEMBERSHIP') || label.includes('SPONSOR')) {
-      return 'member';
-    }
-
-    if (label.includes('VERIFIED')) {
-      return 'verified';
-    }
-
-    return 'normal';
-  }
-
-  private normalizeText(text: string): string {
-    let normalized = this.stripControlCharacters(text);
-    normalized = normalized.replace(/\s+/g, ' ').trim();
-
-    if (normalized.length > 80) {
-      normalized = `${normalized.substring(0, 77)}...`;
-    }
-
-    return normalized;
-  }
-
-  private stripControlCharacters(text: string): string {
-    return text.replace(/[\u0000-\u001F\u007F-\u009F]/g, '');
-  }
-
-  private isSubstantialMessage(
-    body: ParsedMessageBody,
-    authorType: NonNullable<ChatMessage['authorType']>
-  ): boolean {
-    const settings = this.getSettings?.();
-    if (settings?.allowShortTextMessages) {
-      return true;
-    }
-
-    if (authorType === 'moderator' || authorType === 'owner' || authorType === 'member') {
-      return true;
-    }
-
-    if (this.hasEmojiContent(body.content)) {
-      return true;
-    }
-
-    const minLength = Math.max(1, settings?.minTextLength ?? 3);
-    return body.visibleLength >= minLength;
-  }
-
-  private hasEmojiContent(segments: readonly ContentSegment[]): boolean {
-    return segments.some(
-      (segment) =>
-        segment.type === 'emoji' ||
-        (segment.type === 'text' && EMOJI_TEXT_PATTERN.test(segment.content))
-    );
-  }
-
-  private colorIntToCss(value: unknown): string | undefined {
-    const intValue = getNumber(value);
-    if (intValue === undefined) {
-      return undefined;
-    }
-
-    const argb = intValue >>> 0;
-    const alpha = ((argb >>> 24) & 0xff) / 255;
-    const red = (argb >>> 16) & 0xff;
-    const green = (argb >>> 8) & 0xff;
-    const blue = argb & 0xff;
-
-    if (alpha >= 0.999) {
-      return `rgb(${red}, ${green}, ${blue})`;
-    }
-
-    return `rgba(${red}, ${green}, ${blue}, ${Number(alpha.toFixed(3))})`;
-  }
-
-  private parseSuperChatInfo(renderer: JsonObject): SuperChatInfo | null {
-    const amount = this.extractDisplayText(renderer.purchaseAmountText);
-    if (!amount) {
-      log.warn('Super Chat renderer did not include purchaseAmountText');
-      return null;
-    }
-
-    const backgroundColor = this.colorIntToCss(
-      renderer.bodyBackgroundColor ?? renderer.backgroundColor
-    );
-    const headerBackgroundColor = this.colorIntToCss(renderer.headerBackgroundColor);
-    const sourceColor = headerBackgroundColor || backgroundColor;
-    const tier = this.determineSuperChatTier(sourceColor);
-
-    const superChatInfo: SuperChatInfo = {
-      amount,
-      tier,
-    };
-
-    const currency = amount.match(/[A-Z]{3}/)?.[0];
-    if (currency) {
-      superChatInfo.currency = currency;
-    }
-
-    if (backgroundColor) {
-      superChatInfo.backgroundColor = backgroundColor;
-    }
-
-    if (headerBackgroundColor) {
-      superChatInfo.headerBackgroundColor = headerBackgroundColor;
-    }
-
-    const stickerAlt =
-      this.extractAccessibilityLabel(renderer.sticker) ??
-      this.extractAccessibilityLabel(renderer.headerOverlayImage) ??
-      'Super Chat Sticker';
-    const sticker =
-      this.createImageAsset(renderer.sticker, stickerAlt) ??
-      this.createImageAsset(renderer.headerOverlayImage, stickerAlt);
-    if (sticker) {
-      superChatInfo.sticker = sticker;
-    }
-
-    return superChatInfo;
-  }
-
-  private determineSuperChatTier(backgroundColor: string | undefined): SuperChatInfo['tier'] {
-    const rgb = backgroundColor ? parseRgbColor(backgroundColor) : null;
-    if (!rgb) return 'blue';
-
-    const { r, g, b } = rgb;
-
-    if (r > 200 && g < 100 && b < 100) return 'red';
-    if (r > 200 && g < 100 && b > 80) return 'magenta';
-    if (r > 200 && g > 100 && g < 150 && b < 50) return 'orange';
-    if (r > 200 && g > 180 && b < 100) return 'yellow';
-    if (r < 100 && g > 200 && b > 150) return 'green';
-    if (r < 100 && g > 150 && b > 200) return 'cyan';
-    return 'blue';
-  }
-
-  /**
-   * Start monitoring chat
-   */
-  async start(callback: MessageCallback, signal?: AbortSignal): Promise<ChatSourceStartStatus> {
-    this.lifecycleController?.abort();
-    this.pollController?.abort();
-
-    this.lifecycleController = new AbortController();
-    this.pollController = new AbortController();
-    this.callback = callback;
-    this.reconnectInProgress = false;
-    this.resetSessionState();
-
-    const combinedSignal = combineAbortSignals(
-      signal,
-      this.lifecycleController.signal,
-      this.pollController.signal
-    );
-
-    try {
-      return await this.bootstrapAndLaunchPolling(
-        'start',
-        BOOTSTRAP_ATTEMPTS,
-        BOOTSTRAP_RETRY_DELAY_MS,
-        combinedSignal
-      );
-    } catch (error) {
-      if (isAbortError(error) && this.isLifecycleAbort()) {
-        return 'retryable';
-      }
-
-      throw error;
+    const reinitialized = await this.reinitializeReplaySession(signal);
+    if (!reinitialized) {
+      await sleep(RECONNECT_RETRY_DELAY_MS, signal);
     }
   }
 
-  stop(): void {
-    this.lifecycleController?.abort();
-    this.lifecycleController = null;
+  private async pollContinuationReplay(
+    currentOffsetMs: number,
+    signal?: AbortSignal
+  ): Promise<void> {
+    await this.catchUpFallbackReplay(currentOffsetMs, signal);
+    const minimumOffsetMs = Math.max(0, currentOffsetMs - REPLAY_PREFETCH_WINDOW_MS);
+    const needsMoreMessages =
+      this.replayContinuation !== null &&
+      (this.replayBuffer.length < REPLAY_BUFFER_REFILL_THRESHOLD ||
+        this.replayFallbackLastOffsetMs < currentOffsetMs + REPLAY_PREFETCH_WINDOW_MS);
 
-    this.pollController?.abort();
-    this.pollController = null;
-
-    this.pollGeneration += 1;
-    this.pollLoopAlive = false;
-    this.callback = null;
-    this.resetSessionState();
-
-    log.debug('Chat monitoring stopped');
-  }
-
-  /**
-   * Check if chat polling is active recently.
-   */
-  isActive(timeoutMs = DEFAULT_ACTIVITY_TIMEOUT_MS): boolean {
-    const now = Date.now();
-    return now - this.lastActivityTime < Math.max(0, timeoutMs);
-  }
-
-  getHealthSnapshot(options: ChatHealthSnapshotOptions = {}): ChatHealthSnapshot {
-    const activeTimeoutMs = options.activeTimeoutMs ?? DEFAULT_ACTIVITY_TIMEOUT_MS;
-
-    return {
-      observerAlive: this.isObserverAlive(),
-      recentlyActive: this.isActive(activeTimeoutMs),
-    };
-  }
-
-  /**
-   * Compatibility shim for the existing watchdog contract.
-   * In the fetch-based source, "observer alive" means the poll loop is active.
-   */
-  isObserverAlive(): boolean {
-    return (
-      this.pollLoopAlive &&
-      this.pollController !== null &&
-      !this.pollController.signal.aborted &&
-      this.callback !== null
-    );
-  }
-
-  /**
-   * Re-bootstrap youtubei polling and clear buffered replay state.
-   */
-  async reconnect(signal?: AbortSignal): Promise<boolean> {
-    if (!this.callback || this.reconnectInProgress || this.isLifecycleAbort()) return false;
-
-    this.reconnectInProgress = true;
-    this.pollController?.abort();
-    this.pollController = new AbortController();
-    this.pollLoopAlive = false;
-    this.resetSessionState();
-
-    const combinedSignal = combineAbortSignals(
-      signal,
-      this.lifecycleController?.signal,
-      this.pollController.signal
-    );
-
-    try {
-      log.info('Reconnecting youtubei chat polling...');
-      return (
-        (await this.bootstrapAndLaunchPolling(
-          'reconnect',
-          RECONNECT_ATTEMPTS,
-          RECONNECT_RETRY_DELAY_MS,
-          combinedSignal
-        )) === 'started'
-      );
-    } catch (error) {
-      if (isAbortError(error) && this.isLifecycleAbort()) {
-        return false;
-      }
-
-      throw error;
-    } finally {
-      this.reconnectInProgress = false;
+    if (needsMoreMessages) {
+      await this.fetchNextReplayFallbackBatch(minimumOffsetMs, signal);
     }
-  }
 
-  getLatestMessages(limit: number): ChatMessage[] {
-    if (limit <= 0) return [];
-    return this.recentMessages.slice(-limit);
+    this.flushReplayBuffer(currentOffsetMs);
   }
 }

@@ -41,10 +41,3 @@ const parseAllowedImageUrl = (url: string): URL | null => {
  */
 export const normalizeYouTubeImageUrl = (url: string): string | null =>
   parseAllowedImageUrl(url)?.toString() ?? null;
-
-/**
- * Validate image URL for chat assets (author photos / emoji / stickers).
- * Only allows trusted YouTube/Google CDN domains over HTTPS.
- */
-export const isAllowedYouTubeImageUrl = (url: string): boolean =>
-  normalizeYouTubeImageUrl(url) !== null;

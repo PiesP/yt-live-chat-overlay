@@ -5,41 +5,21 @@
  * Manages lanes and collision detection.
  */
 
-import type {
-  ChatMessage,
-  ContentSegment,
-  EmojiInfo,
-  ImageAsset,
-  OutlineSettings,
-  OverlayDimensions,
-  OverlaySettings,
-  SuperChatInfo,
-} from '@app-types';
-import { normalizeYouTubeImageUrl } from '@core/image-url';
+import type { ChatMessage, OutlineSettings, OverlayDimensions, OverlaySettings } from '@app-types';
 import { createLogger } from '@core/logging';
 import { MessageIdRegistry, RenderQueue, RenderRateLimiter } from '@core/renderer-flow';
 import { LaneAllocator, type LanePlacement } from '@core/renderer-lanes';
+import { RENDERER_LAYOUT as LAYOUT } from '@core/renderer-layout';
+import { RendererMessageBuilder } from '@core/renderer-message-builder';
+import { RENDERER_STATIC_STYLES } from '@core/renderer-styles';
 import { clearTimeoutHandle } from '@core/timers';
-import {
-  borderRadius,
-  colors,
-  parseRgbColor,
-  type RgbColor,
-  rgba,
-  shadows,
-  spacing,
-  typography,
-} from './design-tokens.js';
+import { shadows } from './design-tokens.js';
 import type { Overlay } from './overlay';
 
 const log = createLogger('Renderer');
 
 interface ActiveMessage {
   element: HTMLDivElement;
-  lane: number;
-  laneSpan: number;
-  startTime: number;
-  duration: number;
   animation: Animation;
 }
 
@@ -48,308 +28,25 @@ type RenderResult =
   | { status: 'dropped' }
   | { status: 'deferred'; waitMs: number };
 
-interface BuiltMessage {
-  element: HTMLDivElement;
-  isSuperChat: boolean;
-  isMembership: boolean;
-}
-
 interface RenderContext {
   container: HTMLDivElement;
   dimensions: OverlayDimensions;
-}
-
-interface AuthorNameOptions {
-  className?: string;
-  color?: string;
-  tagName?: 'span' | 'div';
 }
 
 interface RendererUpdateOptions {
   resetState?: boolean;
 }
 
-interface FlushQueueOptions {
-  releaseMessageIds?: boolean;
-}
-
-interface ImageElementOptions {
-  width?: number;
-  height?: number;
-  candidateUrls?: readonly string[];
-  fallbackText?: string;
-}
-
-/**
- * Layout and styling constants
- */
-const LAYOUT = {
-  // Author display
-  AUTHOR_PHOTO_SIZE: 24, // px
-  AUTHOR_FONT_SCALE: 0.85, // relative to base fontSize
-
-  // Emoji sizing
-  EMOJI_SIZE: 1.2, // relative to base fontSize
-
-  // Super Chat
-  SUPERCHAT_STICKER_SIZE: 2.0, // relative to base fontSize
-
-  // Animation
-  EXIT_PADDING_MIN: 100, // px
-  EXIT_PADDING_SCALE: 3, // relative to fontSize
-  DURATION_MIN: 5000, // ms
-  DURATION_MAX: 12000, // ms
-  LANE_DELAY_CYCLE: 3, // number of lanes before repeating delay pattern
-  LANE_DELAY_MS: 15, // per lane cycle
-  // Min interval between successive message renders across all lanes. Prevents
-  // bursts from all starting simultaneously (which causes visible gap when they
-  // all exit together) and spreads them into a continuous flow.
-  GLOBAL_STAGGER_MS: 150,
-
-  // Collision detection: minimum horizontal gap between messages in the same lane.
-  SAFE_DISTANCE_SCALE: 0.3, // relative to fontSize
-  SAFE_DISTANCE_MIN: 6, // px
-  // Short grace window while the previous message is still partially off the right edge.
-  VERTICAL_CLEAR_TIME_MIN: 20, // ms
-  VERTICAL_CLEAR_TIME_MAX: 80, // ms
-  LANE_HEIGHT_PADDING_SCALE: 0.06, // relative to fontSize
-  LANE_HEIGHT_PADDING_MIN: 1, // px
-  RETRY_DELAY_MIN_MS: 16, // ms
-  RETRY_DELAY_MAX_MS: 800, // ms
-  QUEUE_LOOKAHEAD_LIMIT: 20, // queue scan window for scheduling
-  QUEUE_MAX_SIZE: 150, // max queued messages; oldest dropped on overflow
-} as const;
-
 const combineTextShadows = (...shadows: string[]): string => {
   const normalizedShadows = shadows.filter((shadow) => shadow !== '' && shadow !== 'none');
   return normalizedShadows.length > 0 ? normalizedShadows.join(', ') : 'none';
 };
 
-const normalizeImageCandidateUrls = (
-  primaryUrl: string,
-  candidateUrls: readonly string[] = []
-): string[] => {
-  const normalizedUrls: string[] = [];
-  const seenUrls = new Set<string>();
-
-  for (const candidateUrl of [primaryUrl, ...candidateUrls]) {
-    const normalizedUrl = normalizeYouTubeImageUrl(candidateUrl);
-    if (!normalizedUrl || seenUrls.has(normalizedUrl)) {
-      continue;
-    }
-
-    seenUrls.add(normalizedUrl);
-    normalizedUrls.push(normalizedUrl);
-  }
-
-  return normalizedUrls;
-};
-
-const RENDERER_STATIC_STYLES = `
-  .yt-chat-overlay-message {
-    position: absolute;
-    white-space: nowrap;
-    font-family: system-ui, -apple-system, sans-serif;
-    font-weight: ${typography.fontWeight.bold};
-    line-height: 1.1;
-    text-shadow: var(--yt-overlay-message-text-shadow, none);
-    -webkit-text-stroke: var(--yt-overlay-text-stroke, 0 transparent);
-    color: ${colors.ui.text};
-    pointer-events: none;
-    will-change: transform;
-    animation-timing-function: linear;
-    animation-fill-mode: forwards;
-    text-rendering: optimizeLegibility;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-  }
-
-  .yt-chat-overlay-message-with-author {
-    display: flex;
-    flex-direction: column;
-    gap: ${spacing.xs}px;
-  }
-
-  .yt-chat-overlay-author-info {
-    display: flex;
-    align-items: center;
-    gap: ${spacing.sm}px;
-    font-size: ${LAYOUT.AUTHOR_FONT_SCALE}em;
-    opacity: 0.95;
-  }
-
-  .yt-chat-overlay-author-photo {
-    width: ${LAYOUT.AUTHOR_PHOTO_SIZE}px;
-    height: ${LAYOUT.AUTHOR_PHOTO_SIZE}px;
-    border-radius: ${borderRadius.full};
-    flex-shrink: 0;
-    box-shadow: ${shadows.box.sm};
-    filter: ${shadows.filter.md};
-  }
-
-  .yt-chat-overlay-author-name {
-    font-weight: ${typography.fontWeight.semibold};
-  }
-
-  .yt-chat-overlay-message-content {
-    display: block;
-    color: inherit;
-  }
-
-  .yt-chat-overlay-superchat-card {
-    --yt-sc-rgb: 30, 136, 229;
-    --yt-sc-border-rgb: 18, 92, 156;
-    display: flex;
-    flex-direction: column;
-    min-width: min(420px, 72vw);
-    max-width: min(640px, 86vw);
-    border-radius: ${borderRadius.md};
-    overflow: hidden;
-    border: 1px solid rgba(var(--yt-sc-border-rgb), 0.55);
-    background-color: rgb(30, 136, 229);
-    background: linear-gradient(
-      180deg,
-      rgba(var(--yt-sc-rgb), var(--yt-overlay-superchat-top-opacity, 0.46)) 0%,
-      rgba(var(--yt-sc-rgb), var(--yt-overlay-superchat-base-opacity, 0.4)) 48%,
-      rgba(var(--yt-sc-rgb), var(--yt-overlay-superchat-bottom-opacity, 0.4)) 100%
-    );
-    box-shadow: ${shadows.box.md};
-    backdrop-filter: blur(4px);
-  }
-
-  .yt-chat-overlay-superchat-meta {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: ${spacing.md}px;
-    padding: ${spacing.sm}px ${spacing.md}px;
-    background: rgba(0, 0, 0, 0.12);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.14);
-  }
-
-  .yt-chat-overlay-superchat-author {
-    display: flex;
-    align-items: center;
-    gap: ${spacing.sm}px;
-    min-width: 0;
-  }
-
-  .yt-chat-overlay-superchat-author .yt-chat-overlay-author-name {
-    font-size: 0.88em;
-    font-weight: ${typography.fontWeight.bold};
-    text-shadow: ${shadows.text.sm};
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .yt-chat-overlay-superchat-amount {
-    display: inline-flex;
-    align-items: center;
-    flex-shrink: 0;
-    padding: ${spacing.xs}px ${spacing.md}px;
-    border-radius: ${borderRadius.lg};
-    font-weight: ${typography.fontWeight.bold};
-    font-size: 0.85em;
-    letter-spacing: 0.2px;
-    color: ${colors.ui.text};
-    background: rgba(255, 255, 255, 0.16);
-    border: 1px solid rgba(255, 255, 255, 0.22);
-    text-shadow: ${shadows.text.sm};
-  }
-
-  .yt-chat-overlay-superchat-body {
-    display: flex;
-    flex-direction: column;
-    padding: ${spacing.sm}px ${spacing.md}px ${spacing.md}px;
-    gap: ${spacing.sm}px;
-  }
-
-  .yt-chat-overlay-superchat-body .yt-chat-overlay-message-content {
-    line-height: ${typography.lineHeight.normal};
-    text-shadow: ${shadows.text.md};
-    letter-spacing: 0.2px;
-    white-space: normal;
-  }
-
-  .yt-chat-overlay-superchat-body .yt-chat-overlay-superchat-sticker {
-    align-self: flex-start;
-    margin-bottom: ${spacing.xs}px;
-  }
-
-  .yt-chat-overlay-message-with-author:not(.yt-chat-overlay-superchat-card) {
-    background: rgba(0, 0, 0, 0.25);
-    padding: ${spacing.sm}px ${spacing.md}px;
-    border-radius: ${borderRadius.sm};
-    backdrop-filter: blur(2px);
-  }
-
-  .yt-chat-overlay-message-with-author .yt-chat-overlay-author-photo {
-    box-shadow: ${shadows.box.sm};
-    border: 1px solid rgba(255, 255, 255, 0.15);
-  }
-
-  .yt-chat-overlay-message:not(.yt-chat-overlay-superchat-card) {
-    text-shadow: var(--yt-overlay-regular-message-text-shadow, ${shadows.text.md});
-    letter-spacing: 0.3px;
-  }
-
-  .yt-chat-overlay-superchat-sticker {
-    display: inline-block;
-    vertical-align: middle;
-    margin-right: ${spacing.sm}px;
-    filter: ${shadows.filter.md};
-  }
-
-  .yt-chat-overlay-emoji {
-    display: inline-block;
-    vertical-align: text-bottom;
-    margin: 0 2px;
-    pointer-events: none;
-    filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.5));
-  }
-
-  .yt-chat-overlay-membership-card {
-    display: flex;
-    flex-direction: column;
-    padding: ${spacing.md}px ${spacing.lg}px;
-    border-radius: ${borderRadius.md};
-    background: ${rgba(colors.superChat.green, 0.25)};
-    border: 2px solid ${rgba(colors.superChat.green, 0.5)};
-    box-shadow: ${shadows.box.md};
-    backdrop-filter: blur(4px);
-  }
-
-  .yt-chat-overlay-membership-author {
-    display: flex;
-    align-items: center;
-    gap: ${spacing.md}px;
-  }
-
-  .yt-chat-overlay-membership-text {
-    display: flex;
-    flex-direction: column;
-    gap: ${spacing.xs}px;
-  }
-
-  .yt-chat-overlay-membership-author-name {
-    font-size: ${typography.fontSize.base};
-    font-weight: ${typography.fontWeight.bold};
-    text-shadow: ${shadows.text.md};
-  }
-
-  .yt-chat-overlay-membership-message {
-    font-size: ${typography.fontSize.sm};
-    font-weight: ${typography.fontWeight.normal};
-    color: ${colors.ui.text};
-    text-shadow: ${shadows.text.sm};
-  }
-`;
-
 export class Renderer {
   private overlay: Overlay;
   private settings: OverlaySettings;
   private readonly laneAllocator: LaneAllocator;
+  private readonly messageBuilder: RendererMessageBuilder;
   private activeMessages: Set<ActiveMessage> = new Set();
   private readonly renderQueue = new RenderQueue(LAYOUT.QUEUE_MAX_SIZE);
   private readonly rateLimiter: RenderRateLimiter;
@@ -367,6 +64,7 @@ export class Renderer {
   constructor(overlay: Overlay, settings: OverlaySettings) {
     this.overlay = overlay;
     this.settings = settings;
+    this.messageBuilder = new RendererMessageBuilder(() => this.settings);
     this.laneAllocator = new LaneAllocator({
       getFontSize: () => this.settings.fontSize,
       getEffectiveSpeedPxPerSec: () => this.getEffectiveSpeedPxPerSec(),
@@ -494,455 +192,6 @@ export class Renderer {
     return `${strokeWidth}px rgba(0, 0, 0, ${strokeOpacity})`;
   }
 
-  /**
-   * Create a validated image element with error handling
-   * Common helper for emoji, stickers, and author photos
-   * SECURITY: Validates URL and creates element programmatically
-   */
-  private createImageElement(
-    url: string,
-    alt: string,
-    className: string,
-    sizePx: number,
-    options: ImageElementOptions = {}
-  ): HTMLImageElement | null {
-    const candidateUrls = normalizeImageCandidateUrls(url, options.candidateUrls);
-
-    // Validate URL (defense in depth)
-    if (candidateUrls.length === 0) {
-      log.warn('Invalid image URL:', url);
-      return null;
-    }
-
-    const img = document.createElement('img');
-    let candidateIndex = 0;
-    img.src = candidateUrls[candidateIndex] ?? '';
-    img.alt = alt;
-    img.className = className;
-    img.style.height = `${sizePx}px`;
-    if (options.width !== undefined && options.height !== undefined && options.height > 0) {
-      const displayWidthPx = Math.max(1, (sizePx * options.width) / options.height);
-      img.style.width = `${displayWidthPx}px`;
-      img.style.aspectRatio = `${options.width} / ${options.height}`;
-    } else {
-      img.style.width = 'auto';
-    }
-    img.draggable = false;
-    img.decoding = 'async';
-
-    // Error handling: hide on load failure
-    img.addEventListener('error', () => {
-      const nextCandidateUrl = candidateUrls[candidateIndex + 1];
-      if (nextCandidateUrl) {
-        candidateIndex += 1;
-        img.src = nextCandidateUrl;
-        return;
-      }
-
-      const fallbackText = options.fallbackText?.trim();
-      if (fallbackText && img.parentNode) {
-        img.replaceWith(document.createTextNode(fallbackText));
-      } else {
-        img.remove();
-      }
-
-      log.warn('Failed to load image:', candidateUrls[candidateIndex] ?? url);
-    });
-
-    return img;
-  }
-
-  /**
-   * Create a standardized author photo element
-   */
-  private createAuthorPhotoElement(
-    photoUrl: string | undefined,
-    alt: string
-  ): HTMLImageElement | null {
-    if (!photoUrl) {
-      return null;
-    }
-
-    return this.createImageElement(
-      photoUrl,
-      alt,
-      'yt-chat-overlay-author-photo',
-      LAYOUT.AUTHOR_PHOTO_SIZE
-    );
-  }
-
-  private createContainer(className: string): HTMLDivElement {
-    const element = document.createElement('div');
-    element.className = className;
-    return element;
-  }
-
-  private getAuthorType(message: ChatMessage): NonNullable<ChatMessage['authorType']> {
-    return message.authorType || 'normal';
-  }
-
-  private createAuthorPhoto(message: ChatMessage, fallbackAlt = 'Author'): HTMLImageElement | null {
-    return this.createAuthorPhotoElement(message.authorPhotoUrl, message.author || fallbackAlt);
-  }
-
-  private createAuthorNameElement(
-    message: ChatMessage,
-    options: AuthorNameOptions = {}
-  ): HTMLElement | null {
-    if (!message.author) {
-      return null;
-    }
-
-    const { className = 'yt-chat-overlay-author-name', tagName = 'span' } = options;
-    const element = document.createElement(tagName);
-    element.className = className;
-    element.textContent = message.author;
-    element.style.color = options.color ?? this.settings.colors[this.getAuthorType(message)];
-    return element;
-  }
-
-  /**
-   * Create message text element (plain text or rich text + emoji)
-   */
-  private createMessageTextElement(
-    message: ChatMessage,
-    className = 'yt-chat-overlay-message-content',
-    color?: string
-  ): HTMLDivElement | null {
-    const hasRichContent = message.content.length > 0;
-    const hasPlainText = message.text.trim().length > 0;
-
-    if (!hasRichContent && !hasPlainText) {
-      return null;
-    }
-
-    const contentDiv = this.createContainer(className);
-    if (color) {
-      contentDiv.style.color = color;
-    }
-
-    if (hasRichContent) {
-      this.renderMixedContent(contentDiv, message.content);
-    }
-
-    if (!contentDiv.hasChildNodes() && hasPlainText) {
-      contentDiv.textContent = message.text;
-    }
-
-    return contentDiv;
-  }
-
-  /**
-   * Resolve Super Chat RGB color from actual YouTube color or tier fallback
-   */
-  private resolveSuperChatRgb(superChat: SuperChatInfo): RgbColor {
-    const sourceColor = superChat.headerBackgroundColor || superChat.backgroundColor;
-    const parsed = sourceColor ? parseRgbColor(sourceColor) : null;
-
-    if (parsed) {
-      return parsed;
-    }
-
-    return colors.superChat[superChat.tier];
-  }
-
-  /**
-   * Create emoji img element with proper styling
-   * SECURITY: Validates URL and creates element programmatically
-   */
-  private createEmojiElement(emoji: EmojiInfo): HTMLImageElement | null {
-    // Calculate size relative to font size
-    const emojiSize = this.settings.fontSize * LAYOUT.EMOJI_SIZE;
-
-    // Create image element using common helper
-    const options: ImageElementOptions = {
-      fallbackText: emoji.fallbackText || '[emoji]',
-    };
-    if (emoji.candidateUrls && emoji.candidateUrls.length > 0) {
-      options.candidateUrls = emoji.candidateUrls;
-    }
-    if (emoji.width !== undefined) {
-      options.width = emoji.width;
-    }
-    if (emoji.height !== undefined) {
-      options.height = emoji.height;
-    }
-
-    return this.createImageElement(
-      emoji.url,
-      emoji.alt || '',
-      'yt-chat-overlay-emoji',
-      emojiSize,
-      options
-    );
-  }
-
-  /**
-   * Create Super Chat sticker image element
-   * SECURITY: Validates URL and creates element programmatically
-   */
-  private createSuperChatSticker(sticker: ImageAsset): HTMLImageElement | null {
-    // Calculate size relative to font size
-    const stickerSize = this.settings.fontSize * LAYOUT.SUPERCHAT_STICKER_SIZE;
-    const options: ImageElementOptions = {};
-    if (sticker.candidateUrls && sticker.candidateUrls.length > 0) {
-      options.candidateUrls = sticker.candidateUrls;
-    }
-    if (sticker.width !== undefined) {
-      options.width = sticker.width;
-    }
-    if (sticker.height !== undefined) {
-      options.height = sticker.height;
-    }
-
-    // Create image element using common helper
-    return this.createImageElement(
-      sticker.url,
-      sticker.alt || 'Super Chat Sticker',
-      'yt-chat-overlay-superchat-sticker',
-      stickerSize,
-      options
-    );
-  }
-
-  /**
-   * Render mixed content (text + emoji) using DOM API
-   * SECURITY: No innerHTML - creates elements programmatically
-   */
-  private renderMixedContent(container: HTMLDivElement, segments: ContentSegment[]): void {
-    for (const segment of segments) {
-      if (segment.type === 'text') {
-        // Create text node (safe)
-        const textNode = document.createTextNode(segment.content);
-        container.appendChild(textNode);
-      } else if (segment.type === 'emoji') {
-        // Create img element programmatically (safe)
-        const img = this.createEmojiElement(segment.emoji);
-        if (img) {
-          container.appendChild(img);
-        } else if (segment.emoji.alt.length > 0) {
-          container.appendChild(document.createTextNode(segment.emoji.alt));
-        }
-      }
-    }
-  }
-
-  /**
-   * Determine if author should be shown for a message
-   */
-  private shouldShowAuthor(message: ChatMessage): boolean {
-    const settings = this.settings.showAuthor;
-    return settings[this.getAuthorType(message)];
-  }
-
-  /**
-   * Create author info element (photo + name)
-   * SECURITY: Validates photo URL and creates elements programmatically
-   */
-  private createAuthorElement(message: ChatMessage): HTMLDivElement {
-    const authorInfoDiv = this.createContainer('yt-chat-overlay-author-info');
-
-    // Add author photo if available
-    const photoImg = this.createAuthorPhoto(message);
-    if (photoImg) {
-      authorInfoDiv.appendChild(photoImg);
-    }
-
-    // Add author name
-    const nameSpan = this.createAuthorNameElement(message);
-    if (nameSpan) {
-      authorInfoDiv.appendChild(nameSpan);
-    }
-
-    return authorInfoDiv;
-  }
-
-  private createSuperChatAmountBadge(amount: string): HTMLSpanElement {
-    const amountBadge = document.createElement('span');
-    amountBadge.className = 'yt-chat-overlay-superchat-amount';
-    amountBadge.textContent = amount;
-    return amountBadge;
-  }
-
-  /**
-   * Create Super Chat header section with author info and amount badge
-   */
-  private createSuperChatHeader(
-    message: ChatMessage,
-    superChat: SuperChatInfo,
-    showAuthor: boolean
-  ): HTMLDivElement {
-    const header = this.createContainer('yt-chat-overlay-superchat-meta');
-
-    if (showAuthor) {
-      const authorSection = this.createContainer('yt-chat-overlay-superchat-author');
-
-      const photoImg = this.createAuthorPhoto(message);
-      if (photoImg) {
-        authorSection.appendChild(photoImg);
-      }
-
-      const authorName = this.createAuthorNameElement(message);
-      if (authorName) {
-        authorSection.appendChild(authorName);
-      }
-
-      if (authorSection.childElementCount > 0) {
-        header.appendChild(authorSection);
-      }
-    }
-
-    // Amount badge
-    header.appendChild(this.createSuperChatAmountBadge(superChat.amount));
-
-    if (!showAuthor) {
-      header.style.justifyContent = 'flex-end';
-    }
-
-    return header;
-  }
-
-  /**
-   * Create Super Chat content section with sticker and message
-   */
-  private createSuperChatContent(
-    message: ChatMessage,
-    superChat: SuperChatInfo
-  ): HTMLDivElement | null {
-    const hasSticker = Boolean(superChat.sticker);
-    const messageDiv = this.createMessageTextElement(message);
-
-    if (!messageDiv && !hasSticker) {
-      return null;
-    }
-
-    const content = this.createContainer('yt-chat-overlay-superchat-body');
-
-    // Add sticker if available (high-tier Super Chats)
-    if (superChat.sticker) {
-      const stickerImg = this.createSuperChatSticker(superChat.sticker);
-      if (stickerImg) {
-        content.appendChild(stickerImg);
-      }
-    }
-
-    if (messageDiv) {
-      content.appendChild(messageDiv);
-    }
-
-    return content;
-  }
-
-  /**
-   * Create membership message card with author and message
-   */
-  private createMembershipCard(message: ChatMessage): HTMLDivElement {
-    const card = this.createContainer('yt-chat-overlay-membership-card');
-
-    // Author section with photo
-    const authorSection = this.createContainer('yt-chat-overlay-membership-author');
-
-    const photo = this.createAuthorPhoto(message, 'Member');
-    if (photo) {
-      authorSection.appendChild(photo);
-    }
-
-    const textContainer = this.createContainer('yt-chat-overlay-membership-text');
-
-    // Author name
-    const authorName = this.createAuthorNameElement(message, {
-      className: 'yt-chat-overlay-membership-author-name',
-      color: colors.author.member,
-      tagName: 'div',
-    });
-    if (authorName) {
-      textContainer.appendChild(authorName);
-    }
-
-    // Membership message
-    const membershipText = this.createMessageTextElement(
-      message,
-      'yt-chat-overlay-membership-message'
-    );
-    if (membershipText) {
-      textContainer.appendChild(membershipText);
-    }
-
-    authorSection.appendChild(textContainer);
-    card.appendChild(authorSection);
-
-    return card;
-  }
-
-  /**
-   * Apply Super Chat card styling with color variables
-   */
-  private applySuperChatStyling(element: HTMLDivElement, superChat: SuperChatInfo): void {
-    element.classList.add('yt-chat-overlay-superchat-card');
-
-    const rgb = this.resolveSuperChatRgb(superChat);
-    const borderRgb = {
-      r: Math.max(0, rgb.r - 36),
-      g: Math.max(0, rgb.g - 36),
-      b: Math.max(0, rgb.b - 36),
-    };
-
-    element.style.setProperty('--yt-sc-rgb', `${rgb.r}, ${rgb.g}, ${rgb.b}`);
-    element.style.setProperty(
-      '--yt-sc-border-rgb',
-      `${borderRgb.r}, ${borderRgb.g}, ${borderRgb.b}`
-    );
-  }
-
-  private buildRegularMessageElement(message: ChatMessage): BuiltMessage | null {
-    const element = this.createContainer('yt-chat-overlay-message');
-    const showAuthor = this.shouldShowAuthor(message);
-    const color = this.settings.colors[this.getAuthorType(message)];
-
-    if (showAuthor) {
-      element.classList.add('yt-chat-overlay-message-with-author');
-      element.appendChild(this.createAuthorElement(message));
-    }
-
-    const contentDiv = this.createMessageTextElement(
-      message,
-      'yt-chat-overlay-message-content',
-      color
-    );
-    if (!contentDiv) {
-      log.debug('Skipping empty message');
-      return null;
-    }
-
-    element.appendChild(contentDiv);
-    return { element, isSuperChat: false, isMembership: false };
-  }
-
-  private buildSuperChatElement(message: ChatMessage, superChat: SuperChatInfo): BuiltMessage {
-    const element = this.createContainer('yt-chat-overlay-message');
-    this.applySuperChatStyling(element, superChat);
-
-    const headerElement = this.createSuperChatHeader(
-      message,
-      superChat,
-      this.settings.showAuthor.superChat
-    );
-    const contentElement = this.createSuperChatContent(message, superChat);
-
-    element.appendChild(headerElement);
-    if (contentElement) {
-      element.appendChild(contentElement);
-    }
-
-    return { element, isSuperChat: true, isMembership: false };
-  }
-
-  private buildMembershipElement(message: ChatMessage): BuiltMessage {
-    const element = this.createContainer('yt-chat-overlay-message');
-    element.appendChild(this.createMembershipCard(message));
-    return { element, isSuperChat: false, isMembership: true };
-  }
-
   private getRenderContext(): RenderContext | null {
     const container = this.overlay.getContainer();
     const dimensions = this.overlay.getDimensions();
@@ -966,7 +215,7 @@ export class Renderer {
     dimensions: OverlayDimensions
   ): ActiveMessage {
     const fontSize = this.settings.fontSize;
-    const { lane, laneSpan } = placement;
+    const { lane } = placement;
 
     // Position element at the assigned lane
     const laneY = dimensions.height * this.settings.safeTop + lane.index * dimensions.laneHeight;
@@ -1014,10 +263,6 @@ export class Renderer {
 
     return {
       element,
-      lane: lane.index,
-      laneSpan,
-      startTime: now,
-      duration,
       animation,
     };
   }
@@ -1162,21 +407,6 @@ export class Renderer {
   }
 
   /**
-   * Build message DOM element by message kind
-   */
-  private buildMessageElement(message: ChatMessage): BuiltMessage | null {
-    if (message.kind === 'superchat' && message.superChat) {
-      return this.buildSuperChatElement(message, message.superChat);
-    }
-
-    if (message.kind === 'membership') {
-      return this.buildMembershipElement(message);
-    }
-
-    return this.buildRegularMessageElement(message);
-  }
-
-  /**
    * Apply common visual styles shared by all message kinds
    */
   private applyCommonMessageStyles(
@@ -1190,7 +420,7 @@ export class Renderer {
 
     // Apply author color only for regular messages
     if (!isSuperChat && !isMembership) {
-      element.style.color = this.settings.colors[this.getAuthorType(message)];
+      element.style.color = this.settings.colors[this.messageBuilder.getAuthorType(message)];
     }
   }
 
@@ -1225,7 +455,7 @@ export class Renderer {
 
     const { container, dimensions } = renderContext;
 
-    const builtMessage = this.buildMessageElement(message);
+    const builtMessage = this.messageBuilder.buildMessageElement(message);
     if (!builtMessage) {
       return { status: 'dropped' };
     }
@@ -1273,12 +503,14 @@ export class Renderer {
     log.debug('Rendering message:', {
       text: message.text.substring(0, 20),
       author: message.author,
-      authorType: this.getAuthorType(message),
+      authorType: this.messageBuilder.getAuthorType(message),
       kind: message.kind,
       isSuperChat,
       superChatTier: message.superChat?.tier,
       superChatAmount: message.superChat?.amount,
-      color: isSuperChat ? 'tier-based' : this.settings.colors[this.getAuthorType(message)],
+      color: isSuperChat
+        ? 'tier-based'
+        : this.settings.colors[this.messageBuilder.getAuthorType(message)],
       lane: placement.lane.index,
       laneSpan: placement.laneSpan,
       width: textWidth,
@@ -1374,25 +606,6 @@ export class Renderer {
 
     // Process any queued messages
     this.processQueue();
-  }
-
-  /**
-   * Discard all queued (not yet rendered) messages.
-   * Called on seek to prevent stale messages from appearing after a position change.
-   * Recovery can also release queued ids so the latest-message replay may enqueue
-   * still-relevant items again without clearing active on-screen animations.
-   */
-  flushQueue(options: FlushQueueOptions = {}): void {
-    this.renderQueue.clear(
-      options.releaseMessageIds
-        ? (message) => {
-            if (message.id) {
-              this.seenMessageIds.release(message.id);
-            }
-          }
-        : undefined
-    );
-    this.clearRetryTimer();
   }
 
   /**

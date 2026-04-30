@@ -20,6 +20,3 @@ export const getNumber = (value: unknown): number | undefined => {
 
   return undefined;
 };
-
-export const getBoolean = (value: unknown): boolean | undefined =>
-  typeof value === 'boolean' ? value : undefined;
