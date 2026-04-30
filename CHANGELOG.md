@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.17.0] - 2026-04-30
+
+### Changed
+- **의존성 업데이트**
+  - `@biomejs/biome`을 최신 버전으로 업데이트
+  - `typescript`, `vite` 등 주요 개발 의존성 유지보수 업데이트
+
+### Tooling
+- **프로젝트 설정 최신화**
+  - `package.json` 버전 0.17.0으로 업데이트
+  - Biome 설정 스키마 버전 최신화
+  - TypeScript 경로 별칭 및 빌드 설정 검증
+
 ## [0.16.0] - 2026-04-19
 
 ### Added
