@@ -170,7 +170,7 @@ export class VideoSync {
   private startPeriodicDetection(): void {
     if (this.detectInterval !== null) return;
 
-    this.detectInterval = window.setInterval(() => {
+    const intervalId = window.setInterval(() => {
       if (this.initialized) {
         this.stopPeriodicDetection();
         return;
@@ -185,6 +185,7 @@ export class VideoSync {
       }
     }, PERIODIC_DETECTION_INTERVAL_MS);
 
+    this.detectInterval = intervalId;
     log.debug('Periodic detection started (every 2 seconds)');
   }
 
