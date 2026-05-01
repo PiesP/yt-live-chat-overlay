@@ -589,7 +589,8 @@ export class ChatMessageParser {
   ): boolean {
     const settings = this.getSettings?.();
     if (settings?.allowShortTextMessages) return true;
-    if (authorType === 'moderator' || authorType === 'owner' || authorType === 'member') return true;
+    if (authorType === 'moderator' || authorType === 'owner' || authorType === 'member')
+      return true;
     if (this.hasEmojiContent(body.content) || EMOJI_TEXT_PATTERN.test(body.text)) return true;
 
     const minLength = Math.max(1, settings?.minTextLength ?? 3);
