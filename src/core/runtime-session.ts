@@ -6,7 +6,6 @@ import { createLogger } from '@core/logging';
 import { OVERLAY_SELECTOR, Overlay } from '@core/overlay';
 import { Renderer } from '@core/renderer';
 import { shouldResetRendererForSettingsChange } from '@core/settings-schema';
-import { clearIntervalHandle } from '@core/timers';
 import { VideoSync } from '@core/video-sync';
 
 const log = createLogger('RuntimeSession');
@@ -174,7 +173,10 @@ export class RuntimeSession {
     this.foregroundRecoveryCleanup?.();
     this.foregroundRecoveryCleanup = null;
 
-    this.chatWatchdogInterval = clearIntervalHandle(this.chatWatchdogInterval);
+    if (this.chatWatchdogInterval !== null) {
+      window.clearInterval(this.chatWatchdogInterval);
+      this.chatWatchdogInterval = null;
+    }
 
     this.chatSource?.stop();
     this.chatSource = null;

@@ -7,6 +7,5 @@
     "@core": ["src/core"],
     "@app-types": ["src/types/index.ts"]
   },
-  "ignoreDependencies": ["@biomejs/cli-linux-x64"],
   "ignoreExportsUsedInFile": true
 }

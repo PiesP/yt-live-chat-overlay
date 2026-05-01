@@ -13,7 +13,6 @@ import {
   waitForElementMatch,
 } from '@core/dom';
 import { createLogger } from '@core/logging';
-import { clearIntervalHandle, clearTimeoutHandle } from '@core/timers';
 
 const log = createLogger('VideoSync');
 
@@ -136,7 +135,10 @@ export class VideoSync {
   }
 
   private clearReinitializationTimer(): void {
-    this.reinitializeTimer = clearTimeoutHandle(this.reinitializeTimer);
+    if (this.reinitializeTimer !== null) {
+      window.clearTimeout(this.reinitializeTimer);
+      this.reinitializeTimer = null;
+    }
   }
 
   private resetVideoState(): void {
@@ -191,7 +193,8 @@ export class VideoSync {
    */
   private stopPeriodicDetection(): void {
     if (this.detectInterval !== null) {
-      this.detectInterval = clearIntervalHandle(this.detectInterval);
+      window.clearInterval(this.detectInterval);
+      this.detectInterval = null;
       log.debug('Periodic detection stopped');
     }
   }

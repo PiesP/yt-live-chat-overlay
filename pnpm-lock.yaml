@@ -4,18 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-overrides:
-  rollup: 4.59.0
-  minimatch: 10.2.3
-
 importers:
 
   .:
     devDependencies:
       '@biomejs/biome':
-        specifier: ^2.4.13
-        version: 2.4.13
-      '@biomejs/cli-linux-x64':
         specifier: ^2.4.13
         version: 2.4.13
       '@types/node':
@@ -874,7 +867,8 @@ snapshots:
   '@biomejs/cli-linux-x64-musl@2.4.13':
     optional: true
 
-  '@biomejs/cli-linux-x64@2.4.13': {}
+  '@biomejs/cli-linux-x64@2.4.13':
+    optional: true
 
   '@biomejs/cli-win32-arm64@2.4.13':
     optional: true

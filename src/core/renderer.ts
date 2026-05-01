@@ -12,7 +12,6 @@ import { LaneAllocator, type LanePlacement } from '@core/renderer-lanes';
 import { RENDERER_LAYOUT as LAYOUT } from '@core/renderer-layout';
 import { RendererMessageBuilder } from '@core/renderer-message-builder';
 import { RENDERER_STATIC_STYLES } from '@core/renderer-styles';
-import { clearTimeoutHandle } from '@core/timers';
 import { shadows } from './design-tokens.js';
 import type { Overlay } from './overlay';
 
@@ -59,7 +58,7 @@ export class Renderer {
   private retryTimer: number | null = null;
   private overlayDimensionsUnsubscribe: (() => void) | null = null;
   /** Ids of messages already enqueued/rendered, for dedup across reconnect/resume. */
-  private readonly seenMessageIds = new MessageIdRegistry(1000);
+  private readonly seenMessageIds = new MessageIdRegistry(200);
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
     this.overlay = overlay;
@@ -385,7 +384,10 @@ export class Renderer {
    * Clear pending queue retry timer
    */
   private clearRetryTimer(): void {
-    this.retryTimer = clearTimeoutHandle(this.retryTimer);
+    if (this.retryTimer !== null) {
+      window.clearTimeout(this.retryTimer);
+      this.retryTimer = null;
+    }
   }
 
   /**

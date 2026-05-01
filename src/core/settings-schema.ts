@@ -6,16 +6,8 @@ import {
 } from '@app-types';
 import { DEFAULT_SETTINGS, SETTINGS_LIMITS } from '@core/settings-definitions';
 
-type SettingDefinitionKind = 'boolean' | 'number' | 'rounded-number' | 'log-level';
 type RootScalarSettingKey = Exclude<keyof OverlaySettings, 'showAuthor' | 'colors' | 'outline'>;
 type OutlineSettingKey = keyof OutlineSettings;
-type SettingLimitsKey = keyof typeof SETTINGS_LIMITS;
-
-interface SettingDefinition {
-  readonly kind: SettingDefinitionKind;
-  readonly limitsKey?: SettingLimitsKey;
-  readonly resetRenderer: boolean;
-}
 
 export type { OutlineSettingKey, RootScalarSettingKey };
 
@@ -34,102 +26,50 @@ export const SHOW_AUTHOR_KEYS = [
   'superChat',
 ] as const satisfies ReadonlyArray<keyof OverlaySettings['showAuthor']>;
 
-export const ROOT_SETTING_DEFINITIONS = {
-  enabled: {
-    kind: 'boolean',
-    resetRenderer: true,
-  },
-  speedPxPerSec: {
-    kind: 'number',
-    limitsKey: 'speedPxPerSec',
-    resetRenderer: true,
-  },
-  fontSize: {
-    kind: 'number',
-    limitsKey: 'fontSize',
-    resetRenderer: true,
-  },
-  opacity: {
-    kind: 'number',
-    limitsKey: 'opacity',
-    resetRenderer: true,
-  },
-  superChatOpacity: {
-    kind: 'number',
-    limitsKey: 'superChatOpacity',
-    resetRenderer: true,
-  },
-  safeTop: {
-    kind: 'number',
-    limitsKey: 'safeTop',
-    resetRenderer: true,
-  },
-  safeBottom: {
-    kind: 'number',
-    limitsKey: 'safeBottom',
-    resetRenderer: true,
-  },
-  maxConcurrentMessages: {
-    kind: 'rounded-number',
-    limitsKey: 'maxConcurrentMessages',
-    resetRenderer: true,
-  },
-  maxMessagesPerSecond: {
-    kind: 'rounded-number',
-    limitsKey: 'maxMessagesPerSecond',
-    resetRenderer: true,
-  },
-  allowShortTextMessages: {
-    kind: 'boolean',
-    resetRenderer: true,
-  },
-  minTextLength: {
-    kind: 'rounded-number',
-    limitsKey: 'minTextLength',
-    resetRenderer: true,
-  },
-  logLevel: {
-    kind: 'log-level',
-    resetRenderer: false,
-  },
-  laneSpacing: {
-    kind: 'rounded-number',
-    limitsKey: 'laneSpacing',
-    resetRenderer: true,
-  },
-} as const satisfies Record<RootScalarSettingKey, SettingDefinition>;
+const RESET_RENDERER_ROOT_KEYS = [
+  'enabled',
+  'speedPxPerSec',
+  'fontSize',
+  'opacity',
+  'superChatOpacity',
+  'safeTop',
+  'safeBottom',
+  'maxConcurrentMessages',
+  'maxMessagesPerSecond',
+  'allowShortTextMessages',
+  'minTextLength',
+  'laneSpacing',
+] as const satisfies readonly RootScalarSettingKey[];
 
-export const OUTLINE_SETTING_DEFINITIONS = {
-  enabled: {
-    kind: 'boolean',
-    resetRenderer: true,
-  },
-  widthPx: {
-    kind: 'number',
-    limitsKey: 'outlineWidthPx',
-    resetRenderer: true,
-  },
-  blurPx: {
-    kind: 'number',
-    limitsKey: 'outlineBlurPx',
-    resetRenderer: true,
-  },
-  opacity: {
-    kind: 'number',
-    limitsKey: 'outlineOpacity',
-    resetRenderer: true,
-  },
-} as const satisfies Record<OutlineSettingKey, SettingDefinition>;
+const RESET_RENDERER_OUTLINE_KEYS = [
+  'enabled',
+  'widthPx',
+  'blurPx',
+  'opacity',
+] as const satisfies readonly OutlineSettingKey[];
 
-export const ROOT_SETTING_KEYS = Object.keys(
-  ROOT_SETTING_DEFINITIONS
-) as ReadonlyArray<RootScalarSettingKey>;
-export const OUTLINE_SETTING_KEYS = Object.keys(
-  OUTLINE_SETTING_DEFINITIONS
-) as ReadonlyArray<OutlineSettingKey>;
+export const ROOT_SETTING_KEYS = [
+  'enabled',
+  'speedPxPerSec',
+  'fontSize',
+  'opacity',
+  'superChatOpacity',
+  'safeTop',
+  'safeBottom',
+  'maxConcurrentMessages',
+  'maxMessagesPerSecond',
+  'allowShortTextMessages',
+  'minTextLength',
+  'logLevel',
+  'laneSpacing',
+] as const satisfies readonly RootScalarSettingKey[];
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
+export const OUTLINE_SETTING_KEYS = [
+  'enabled',
+  'widthPx',
+  'blurPx',
+  'opacity',
+] as const satisfies readonly OutlineSettingKey[];
 
 const isColorValue = (value: unknown): value is string =>
   typeof value === 'string' && /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(value);
@@ -137,55 +77,14 @@ const isColorValue = (value: unknown): value is string =>
 const clampNumber = (
   value: unknown,
   fallback: number,
-  limits: { min: number; max: number }
+  limits: Readonly<{ min: number; max: number }>,
+  rounded: boolean
 ): number => {
   const numericValue = typeof value === 'number' ? value : Number(value);
-  if (!Number.isFinite(numericValue)) {
-    return fallback;
-  }
-
-  return Math.min(limits.max, Math.max(limits.min, numericValue));
+  if (!Number.isFinite(numericValue)) return fallback;
+  const clamped = Math.min(limits.max, Math.max(limits.min, numericValue));
+  return rounded ? Math.round(clamped) : clamped;
 };
-
-const normalizeBoolean = (value: unknown, fallback: boolean): boolean =>
-  typeof value === 'boolean' ? value : fallback;
-
-const normalizeSettingValue = <T>(
-  definition: SettingDefinition,
-  value: unknown,
-  fallback: T
-): T => {
-  if (definition.kind === 'boolean') {
-    return normalizeBoolean(value, fallback as boolean) as T;
-  }
-
-  if (definition.kind === 'log-level') {
-    return (isLogLevel(value) ? value : fallback) as T;
-  }
-
-  if (typeof fallback !== 'number' || !definition.limitsKey) {
-    return fallback;
-  }
-
-  const clamped = clampNumber(value, fallback, SETTINGS_LIMITS[definition.limitsKey]);
-  return (definition.kind === 'rounded-number' ? Math.round(clamped) : clamped) as T;
-};
-
-const assignNormalizedSetting = <Target extends object, K extends keyof Target>(
-  target: Target,
-  source: Readonly<Target>,
-  key: K,
-  definition: SettingDefinition,
-  defaults: Readonly<Target>
-): void => {
-  target[key] = normalizeSettingValue(definition, source[key], defaults[key]) as never;
-};
-
-const hasAnyChanged = <T extends object>(
-  previous: Readonly<T>,
-  next: Readonly<T>,
-  keys: readonly (keyof T)[]
-): boolean => keys.some((key) => previous[key] !== next[key]);
 
 export const cloneSettings = (settings: Readonly<OverlaySettings>): OverlaySettings => ({
   ...settings,
@@ -194,81 +93,116 @@ export const cloneSettings = (settings: Readonly<OverlaySettings>): OverlaySetti
   outline: { ...settings.outline },
 });
 
-const mergeNested = <T extends object>(base: Readonly<T>, partial: Partial<T> | undefined): T =>
-  isRecord(partial) ? { ...base, ...partial } : { ...base };
-
-const mergeSettings = (
-  base: Readonly<OverlaySettings>,
-  partial: Partial<OverlaySettings>
-): OverlaySettings => ({
-  ...base,
-  ...partial,
-  showAuthor: mergeNested(base.showAuthor, partial.showAuthor),
-  colors: mergeNested(base.colors, partial.colors),
-  outline: mergeNested(base.outline, partial.outline),
-});
+export const createDefaultSettings = (): OverlaySettings => cloneSettings(DEFAULT_SETTINGS);
 
 export const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings => {
-  const normalized = createDefaultSettings();
+  const d = DEFAULT_SETTINGS;
+  const n = createDefaultSettings();
 
-  for (const key of ROOT_SETTING_KEYS) {
-    assignNormalizedSetting(
-      normalized,
-      settings,
-      key,
-      ROOT_SETTING_DEFINITIONS[key],
-      DEFAULT_SETTINGS
-    );
-  }
+  n.enabled = typeof settings.enabled === 'boolean' ? settings.enabled : d.enabled;
+  n.speedPxPerSec = clampNumber(
+    settings.speedPxPerSec,
+    d.speedPxPerSec,
+    SETTINGS_LIMITS.speedPxPerSec,
+    false
+  );
+  n.fontSize = clampNumber(settings.fontSize, d.fontSize, SETTINGS_LIMITS.fontSize, false);
+  n.opacity = clampNumber(settings.opacity, d.opacity, SETTINGS_LIMITS.opacity, false);
+  n.superChatOpacity = clampNumber(
+    settings.superChatOpacity,
+    d.superChatOpacity,
+    SETTINGS_LIMITS.superChatOpacity,
+    false
+  );
+  n.safeTop = clampNumber(settings.safeTop, d.safeTop, SETTINGS_LIMITS.safeTop, false);
+  n.safeBottom = clampNumber(settings.safeBottom, d.safeBottom, SETTINGS_LIMITS.safeBottom, false);
+  n.maxConcurrentMessages = clampNumber(
+    settings.maxConcurrentMessages,
+    d.maxConcurrentMessages,
+    SETTINGS_LIMITS.maxConcurrentMessages,
+    true
+  );
+  n.maxMessagesPerSecond = clampNumber(
+    settings.maxMessagesPerSecond,
+    d.maxMessagesPerSecond,
+    SETTINGS_LIMITS.maxMessagesPerSecond,
+    true
+  );
+  n.allowShortTextMessages =
+    typeof settings.allowShortTextMessages === 'boolean'
+      ? settings.allowShortTextMessages
+      : d.allowShortTextMessages;
+  n.minTextLength = clampNumber(
+    settings.minTextLength,
+    d.minTextLength,
+    SETTINGS_LIMITS.minTextLength,
+    true
+  );
+  n.logLevel = isLogLevel(settings.logLevel) ? settings.logLevel : d.logLevel;
+  n.laneSpacing = clampNumber(
+    settings.laneSpacing,
+    d.laneSpacing,
+    SETTINGS_LIMITS.laneSpacing,
+    true
+  );
 
   for (const key of SHOW_AUTHOR_KEYS) {
-    normalized.showAuthor[key] = normalizeBoolean(
-      settings.showAuthor[key],
-      DEFAULT_SETTINGS.showAuthor[key]
-    );
+    n.showAuthor[key] =
+      typeof settings.showAuthor[key] === 'boolean' ? settings.showAuthor[key] : d.showAuthor[key];
   }
 
   for (const key of AUTHOR_COLOR_KEYS) {
-    normalized.colors[key] = isColorValue(settings.colors[key])
-      ? settings.colors[key]
-      : DEFAULT_SETTINGS.colors[key];
+    n.colors[key] = isColorValue(settings.colors[key]) ? settings.colors[key] : d.colors[key];
   }
 
-  for (const key of OUTLINE_SETTING_KEYS) {
-    assignNormalizedSetting(
-      normalized.outline,
-      settings.outline,
-      key,
-      OUTLINE_SETTING_DEFINITIONS[key],
-      DEFAULT_SETTINGS.outline
-    );
-  }
+  n.outline.enabled =
+    typeof settings.outline.enabled === 'boolean' ? settings.outline.enabled : d.outline.enabled;
+  n.outline.widthPx = clampNumber(
+    settings.outline.widthPx,
+    d.outline.widthPx,
+    SETTINGS_LIMITS.outlineWidthPx,
+    false
+  );
+  n.outline.blurPx = clampNumber(
+    settings.outline.blurPx,
+    d.outline.blurPx,
+    SETTINGS_LIMITS.outlineBlurPx,
+    false
+  );
+  n.outline.opacity = clampNumber(
+    settings.outline.opacity,
+    d.outline.opacity,
+    SETTINGS_LIMITS.outlineOpacity,
+    false
+  );
 
-  return normalized;
+  return n;
 };
 
-export const createDefaultSettings = (): OverlaySettings => cloneSettings(DEFAULT_SETTINGS);
+export const applySettingsPatch = (
+  base: Readonly<OverlaySettings>,
+  partial: Partial<OverlaySettings>
+): OverlaySettings => {
+  const merged: OverlaySettings = {
+    ...base,
+    ...partial,
+    showAuthor: { ...base.showAuthor, ...partial.showAuthor },
+    colors: { ...base.colors, ...partial.colors },
+    outline: { ...base.outline, ...partial.outline },
+  };
+  return normalizeSettings(merged);
+};
 
 export const normalizeStoredSettings = (
   stored: Partial<OverlaySettings> | null | undefined
 ): OverlaySettings =>
   stored ? applySettingsPatch(createDefaultSettings(), stored) : createDefaultSettings();
 
-export const applySettingsPatch = (
-  base: Readonly<OverlaySettings>,
-  partial: Partial<OverlaySettings>
-): OverlaySettings => normalizeSettings(mergeSettings(base, partial));
-
 export const shouldResetRendererForSettingsChange = (
   previous: Readonly<OverlaySettings>,
   next: Readonly<OverlaySettings>
 ): boolean =>
-  ROOT_SETTING_KEYS.some(
-    (key) => ROOT_SETTING_DEFINITIONS[key].resetRenderer && previous[key] !== next[key]
-  ) ||
-  hasAnyChanged(previous.showAuthor, next.showAuthor, SHOW_AUTHOR_KEYS) ||
-  hasAnyChanged(previous.colors, next.colors, AUTHOR_COLOR_KEYS) ||
-  OUTLINE_SETTING_KEYS.some(
-    (key) =>
-      OUTLINE_SETTING_DEFINITIONS[key].resetRenderer && previous.outline[key] !== next.outline[key]
-  );
+  RESET_RENDERER_ROOT_KEYS.some((key) => previous[key] !== next[key]) ||
+  SHOW_AUTHOR_KEYS.some((key) => previous.showAuthor[key] !== next.showAuthor[key]) ||
+  AUTHOR_COLOR_KEYS.some((key) => previous.colors[key] !== next.colors[key]) ||
+  RESET_RENDERER_OUTLINE_KEYS.some((key) => previous.outline[key] !== next.outline[key]);

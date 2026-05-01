@@ -12,11 +12,9 @@ import {
 import {
   AUTHOR_COLOR_KEYS,
   cloneSettings,
-  OUTLINE_SETTING_DEFINITIONS,
   OUTLINE_SETTING_KEYS,
-  type OutlineSettingKey,
   outlineFormName,
-  ROOT_SETTING_DEFINITIONS,
+  type OutlineSettingKey,
   ROOT_SETTING_KEYS,
   type RootScalarSettingKey,
   SHOW_AUTHOR_KEYS,
@@ -574,18 +572,14 @@ export class SettingsUi {
     key: RootScalarSettingKey,
     settings: Readonly<OverlaySettings>
   ): void {
-    const definition = ROOT_SETTING_DEFINITIONS[key];
     const value = settings[key];
 
-    switch (definition.kind) {
-      case 'boolean':
-        this.setCheckbox(key, value as boolean);
-        return;
-      case 'log-level':
-        this.setSelect(key, value as string);
-        return;
-      default:
-        this.setValue(key, formatRootNumericSettingForInput(key, value as number));
+    if (key === 'enabled' || key === 'allowShortTextMessages') {
+      this.setCheckbox(key, value as boolean);
+    } else if (key === 'logLevel') {
+      this.setSelect(key, value as string);
+    } else {
+      this.setValue(key, formatRootNumericSettingForInput(key, value as number));
     }
   }
 
@@ -593,16 +587,14 @@ export class SettingsUi {
     key: K,
     outline: Readonly<OverlaySettings['outline']>
   ): void {
-    const definition = OUTLINE_SETTING_DEFINITIONS[key];
     const value = outline[key];
     const name = outlineFormName(key);
 
-    if (definition.kind === 'boolean') {
+    if (key === 'enabled') {
       this.setCheckbox(name, value as boolean);
-      return;
+    } else {
+      this.setValue(name, formatOutlineNumericSettingForInput(key, value as number));
     }
-
-    this.setValue(name, formatOutlineNumericSettingForInput(key, value as number));
   }
 
   private populateForm(settings: Readonly<OverlaySettings>): void {
@@ -662,33 +654,30 @@ export class SettingsUi {
     key: RootScalarSettingKey,
     current: Readonly<OverlaySettings>
   ): OverlaySettings[RootScalarSettingKey] {
-    const definition = ROOT_SETTING_DEFINITIONS[key];
     const fallback = current[key];
 
-    switch (definition.kind) {
-      case 'boolean':
-        return this.getCheckbox(key, fallback as boolean);
-      case 'log-level':
-        return this.getLogLevel(key, fallback as OverlaySettings['logLevel']);
-      default:
-        return normalizeRootNumericInputValue(
-          key,
-          this.readNumber(key, fallback as number),
-          fallback as number
-        );
+    if (key === 'enabled' || key === 'allowShortTextMessages') {
+      return this.getCheckbox(key, fallback as boolean);
     }
+    if (key === 'logLevel') {
+      return this.getLogLevel(key, fallback as OverlaySettings['logLevel']);
+    }
+    return normalizeRootNumericInputValue(
+      key,
+      this.readNumber(key, fallback as number),
+      fallback as number
+    );
   }
 
   private readOutlineSetting<K extends OutlineSettingKey>(
     key: K,
     current: Readonly<OverlaySettings['outline']>
   ): OverlaySettings['outline'][K] {
-    const definition = OUTLINE_SETTING_DEFINITIONS[key];
     const fallback = current[key];
     const name = outlineFormName(key);
 
     return (
-      definition.kind === 'boolean'
+      key === 'enabled'
         ? this.getCheckbox(name, fallback as boolean)
         : normalizeOutlineNumericInputValue(
             key,

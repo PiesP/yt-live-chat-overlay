@@ -5,7 +5,6 @@ import {
   type RuntimeSessionRestartReason,
   type RuntimeSessionStartStatus,
 } from '@core/runtime-session';
-import { clearTimeoutHandle } from '@core/timers';
 
 const log = createLogger('RuntimeManager');
 
@@ -217,7 +216,10 @@ export class RuntimeManager {
   }
 
   private clearScheduledReconcile(): void {
-    this.scheduledReconcileTimer = clearTimeoutHandle(this.scheduledReconcileTimer);
+    if (this.scheduledReconcileTimer !== null) {
+      window.clearTimeout(this.scheduledReconcileTimer);
+      this.scheduledReconcileTimer = null;
+    }
   }
 
   private disposeActiveSession(): void {

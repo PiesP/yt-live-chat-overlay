@@ -8,7 +8,6 @@
 import type { OverlayDimensions, OverlaySettings } from '@app-types';
 import { ensurePlayerPositioning, findPlayerContainerElement } from '@core/dom';
 import { createLogger } from '@core/logging';
-import { clearTimeoutHandle } from '@core/timers';
 
 const log = createLogger('Overlay');
 
@@ -116,7 +115,10 @@ export class Overlay {
   }
 
   private clearFullscreenUpdateTimer(): void {
-    this.fullscreenUpdateTimer = clearTimeoutHandle(this.fullscreenUpdateTimer);
+    if (this.fullscreenUpdateTimer !== null) {
+      window.clearTimeout(this.fullscreenUpdateTimer);
+      this.fullscreenUpdateTimer = null;
+    }
   }
 
   private observeResize(): void {

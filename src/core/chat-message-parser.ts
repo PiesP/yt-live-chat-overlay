@@ -358,14 +358,6 @@ export class ChatMessageParser {
     return this.stripControlCharacters(text).replace(/\s+/g, ' ').trim();
   }
 
-  private humanizeEmojiAlias(alias: string): string {
-    if (!EMOJI_ALIAS_PATTERN.test(alias)) {
-      return this.normalizeInlineText(alias);
-    }
-
-    return this.normalizeInlineText(alias.slice(1, -1).replace(/[-_]+/g, ' '));
-  }
-
   private getEmojiAltText(emojiData: JsonObject): string {
     const shortcuts = this.getEmojiShortcuts(emojiData);
 
@@ -380,19 +372,14 @@ export class ChatMessageParser {
 
   private getEmojiVisibleFallbackText(emojiData: JsonObject): string {
     const shortcuts = this.getEmojiShortcuts(emojiData);
-    const nonAliasShortcut = shortcuts.find((shortcut) => !EMOJI_ALIAS_PATTERN.test(shortcut));
-    if (nonAliasShortcut) {
-      return this.normalizeInlineText(nonAliasShortcut);
-    }
+    const nonAliasShortcut = shortcuts.find((s) => !EMOJI_ALIAS_PATTERN.test(s));
+    if (nonAliasShortcut) return this.normalizeInlineText(nonAliasShortcut);
 
-    const accessibleLabel =
+    const label =
       this.extractAccessibilityLabel(emojiData.image) ?? this.extractAccessibilityLabel(emojiData);
-    if (accessibleLabel && !EMOJI_ALIAS_PATTERN.test(accessibleLabel)) {
-      return this.normalizeInlineText(accessibleLabel);
-    }
+    if (label && !EMOJI_ALIAS_PATTERN.test(label)) return this.normalizeInlineText(label);
 
-    const alias = shortcuts[0] ?? getString(emojiData.emojiId) ?? '';
-    return alias ? this.humanizeEmojiAlias(alias) : '';
+    return '';
   }
 
   private parseEmoji(emojiData: JsonObject): EmojiInfo | null {
