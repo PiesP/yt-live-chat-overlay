@@ -98,6 +98,7 @@ export class ChatSource {
   async start(callback: MessageCallback, signal?: AbortSignal): Promise<ChatSourceStartStatus> {
     this.lifecycleController?.abort();
     this.pollController?.abort();
+    this.pollGeneration += 1;
 
     this.lifecycleController = new AbortController();
     this.pollController = new AbortController();
