@@ -1,7 +1,25 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.18.0] - 2026-05-01
 
+### Changed
+- **Codebase simplification** — reduced total code size by ~120 lines
+  - Removed `timers.ts` wrapper module, use `clearTimeout`/`clearInterval` directly
+  - Simplified `abort.ts` `combineAbortSignals` (removed redundant length checks)
+  - Rewrote `settings-schema.ts`: removed `SettingDefinition` type system, `normalizeSettingValue`/`assignNormalizedSetting` abstractions → direct `clampNumber` calls
+  - Rewrote `settings-form.ts`: removed `SettingDefinition` indirect refs, dead `getOutlineNumericInputOptions` → direct mapping tables
+  - Simplified `settings-ui.ts`: removed `ROOT_SETTING_DEFINITIONS`/`OUTLINE_SETTING_DEFINITIONS` dependencies → direct key checks
+  - Reduced `Renderer` queue size 150→30, lookahead 20→10, `MessageIdRegistry` 1000→200
+  - Removed duplicate `isRecord` from `settings-schema.ts` (use `@core/json`)
+  - Removed `@biomejs/cli-linux-x64` (bundled in `biome`), `pnpm.overrides`
+
+### Fixed
+- **ChatSource poll loop race condition** — increment `pollGeneration` in `start()` before creating new `AbortController` to prevent stale poll loops from doing extra work after restart
+- **VideoSync interval leak** — assign `setInterval` result to local variable first, then to `detectInterval` to eliminate re-entry window
+- **Emoji text message filter** — `isSubstantialMessage` now also checks `body.text` for unicode emoji pattern, preventing emoji-only messages from being filtered when emoji arrives as plain text
+- **Overlay animations during seeking** — `VideoSync.handleSeeking` now also fires `onPause` callback, preventing messages from flowing while user is scrubbing
+- **Overlay flicker on re-creation** — `Overlay.destroy()` hides container (`display:none`) instead of removing from DOM; `create()` reuses existing container if available
 ## [0.17.0] - 2026-04-30
 
 ### Changed
