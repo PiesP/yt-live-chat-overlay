@@ -290,6 +290,7 @@ export class VideoSync {
   }
 
   private handleSeeking(): void {
+    this.callbacks.onPause?.();
     this.callbacks.onSeeking?.();
   }
 
