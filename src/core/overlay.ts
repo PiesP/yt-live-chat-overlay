@@ -176,8 +176,12 @@ export class Overlay {
       return false;
     }
 
-    // Create overlay container
-    this.container = this.createContainerElement();
+    // Reuse existing container if available (was hidden by destroy), otherwise create new
+    if (this.container) {
+      this.container.style.display = '';
+    } else {
+      this.container = this.createContainerElement();
+    }
 
     // Insert into player
     ensurePlayerPositioning(this.playerElement);
@@ -235,8 +239,10 @@ export class Overlay {
     this.disconnectResizeObserver();
     this.detachFullscreenHandler();
 
-    // Remove DOM elements
-    this.container?.remove();
+    // Hide instead of remove to prevent flicker if re-created quickly
+    if (this.container) {
+      this.container.style.display = 'none';
+    }
 
     // Clear references
     this.container = null;
