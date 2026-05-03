@@ -1,6 +1,17 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.19.1] - 2026-05-03
+
+### Fixed
+- **Long pause timeline skew** — `Renderer` lane collision and rate limiter now cap timeline shifts at 60 seconds, preventing messages from being blocked after the user returns from a long idle (e.g., tab hidden for 30+ minutes).
+
+### Refactored
+- **UI formatting extracted** — moved `formatRootNumericSettingForInput`, `normalizeRootNumericInputValue`, `getRootNumericInputAttributes` and outline equivalents from `settings-schema.ts` into a new `settings-ui-format.ts` module. `settings-schema.ts` now focuses on pure data validation/sanitization.
+- **Runtime session restart logic simplified** — removed optional `details` parameter from `requestManagedRestart()`; health snapshot is computed inline instead of being passed around by callers, eliminating duplicate health calculations.
+- **Replay continuation catch-up inlined** — merged `catchUpFallbackReplay` logic directly into `pollContinuationReplay`; removed `REPLAY_FALLBACK_CATCHUP_BATCH_LIMIT` and `REPLAY_BUFFER_REFILL_THRESHOLD` constants.
+- **Dead code removed** — unused `@/` path alias removed from `vite.config.ts`, `tsconfig.json`, and `knip.json`.
+
 ## [0.19.0] - 2026-05-03
 
 ### Refactored
