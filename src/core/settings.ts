@@ -18,9 +18,8 @@ export class Settings {
       return normalizeStoredSettings(readStoredSettings());
     } catch (error) {
       log.warn('Failed to load settings:', error);
+      return cloneSettings(DEFAULT_SETTINGS);
     }
-
-    return cloneSettings(DEFAULT_SETTINGS);
   }
 
   private saveSettings(): void {
