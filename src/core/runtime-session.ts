@@ -225,9 +225,8 @@ export class RuntimeSession {
         return;
       }
 
-      const health = this.getRuntimeHealthSnapshot();
-      if (health.idleDurationMs >= LONG_IDLE_RESTART_MS) {
-        this.requestManagedRestart('foreground-return', health);
+      if (this.getIdleDurationMs() >= LONG_IDLE_RESTART_MS) {
+        this.requestManagedRestart('foreground-return');
         return;
       }
 
@@ -236,7 +235,7 @@ export class RuntimeSession {
         return;
       }
 
-      this.handleRuntimeResume('foreground-return', health);
+      this.handleRuntimeResume('foreground-return');
     };
 
     const visibilityHandler = (): void => {
@@ -336,37 +335,26 @@ export class RuntimeSession {
     }
   }
 
-  private requestManagedRestart(
-    reason: RuntimeSessionRestartReason,
-    details?: {
-      idleDurationMs: number;
-      renderable: boolean;
-      chat: ChatHealthSnapshot | null;
-      shouldRestart: boolean;
-    }
-  ): void {
+  private requestManagedRestart(reason: RuntimeSessionRestartReason): void {
     if (this.disposed || this.restartRequested) {
       return;
     }
 
     this.restartRequested = true;
-    log.warn('Requesting managed runtime restart', {
-      reason,
-      ...(details ? { health: details } : {}),
-    });
+    const health = this.getRuntimeHealthSnapshot();
+    log.warn('Requesting managed runtime restart', { reason, health });
     this.requestRestart(reason);
   }
 
   private handleRuntimeResume(
-    reason: Extract<RuntimeSessionRestartReason, 'foreground-return' | 'video-play'>,
-    health = this.getRuntimeHealthSnapshot()
+    reason: Extract<RuntimeSessionRestartReason, 'foreground-return' | 'video-play'>
   ): void {
     if (this.disposed) {
       return;
     }
 
-    if (health.shouldRestart) {
-      this.requestManagedRestart(reason, health);
+    if (this.getRuntimeHealthSnapshot().shouldRestart) {
+      this.requestManagedRestart(reason);
       return;
     }
 
@@ -392,11 +380,7 @@ export class RuntimeSession {
         return;
       }
 
-      log.warn('Runtime unhealthy - requesting restart', {
-        paused,
-        health,
-      });
-      this.requestManagedRestart('watchdog', health);
+      this.requestManagedRestart('watchdog');
     }, CHAT_WATCHDOG_INTERVAL_MS);
   }
 
