@@ -1,8 +1,37 @@
-import type { OverlaySettings } from '@app-types';
+import { isLogLevel, type OverlaySettings } from '@app-types';
 import { createLogger } from '@core/logging';
 import { DEFAULT_SETTINGS } from '@core/settings-definitions';
 import { applySettingsPatch, cloneSettings, normalizeStoredSettings } from '@core/settings-schema';
-import { readStoredSettings, writeStoredSettings } from '@core/settings-storage';
+
+export const STORAGE_KEY = 'yt-live-chat-overlay-settings';
+
+type StoredSettings = Partial<OverlaySettings>;
+
+const readStoredSettings = (): StoredSettings | null => {
+  const stored = localStorage.getItem(STORAGE_KEY);
+  if (!stored) {
+    return null;
+  }
+
+  return JSON.parse(stored) as StoredSettings;
+};
+
+const writeStoredSettings = (settings: Readonly<OverlaySettings>): void => {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+};
+
+export const readStoredLogLevel = (): OverlaySettings['logLevel'] => {
+  try {
+    const stored = readStoredSettings();
+    if (stored && isLogLevel(stored.logLevel)) {
+      return stored.logLevel;
+    }
+  } catch {
+    // fall through to default
+  }
+
+  return DEFAULT_SETTINGS.logLevel;
+};
 
 const log = createLogger('Settings');
 

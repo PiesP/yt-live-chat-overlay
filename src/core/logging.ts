@@ -1,5 +1,5 @@
 import type { LogLevel } from '@app-types';
-import { readStoredLogLevel } from '@core/settings-storage';
+import { readStoredLogLevel } from '@core/settings';
 
 type ConsoleLogArgs = Parameters<Console['log']>;
 type ConsoleWarnArgs = Parameters<Console['warn']>;
