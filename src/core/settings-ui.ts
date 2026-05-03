@@ -2,16 +2,14 @@ import { isLogLevel, type OverlaySettings } from '@app-types';
 import { ensurePlayerPositioning, findPlayerContainerElement } from '@core/dom';
 import { createLogger } from '@core/logging';
 import {
+  AUTHOR_COLOR_KEYS,
+  cloneSettings,
   formatOutlineNumericSettingForInput,
   formatRootNumericSettingForInput,
   getOutlineNumericInputAttributes,
   getRootNumericInputAttributes,
   normalizeOutlineNumericInputValue,
   normalizeRootNumericInputValue,
-} from '@core/settings-form';
-import {
-  AUTHOR_COLOR_KEYS,
-  cloneSettings,
   OUTLINE_SETTING_KEYS,
   type OutlineSettingKey,
   outlineFormName,
