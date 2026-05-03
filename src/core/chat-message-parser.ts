@@ -8,9 +8,15 @@ import type {
   SuperChatInfo,
 } from '@app-types';
 import { parseRgbColor } from '@core/design-tokens';
-import { normalizeYouTubeImageUrl } from '@core/image-url';
 import { createLogger } from '@core/logging';
-import { asRecord, getNumber, getString, isRecord, type JsonObject } from '@core/youtubei-chat';
+import {
+  asRecord,
+  getNumber,
+  getString,
+  isRecord,
+  type JsonObject,
+  normalizeYouTubeImageUrl,
+} from '@core/youtubei-chat';
 
 const log = createLogger('ChatMessageParser');
 

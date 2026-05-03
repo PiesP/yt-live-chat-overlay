@@ -7,8 +7,8 @@ import type {
   SuperChatInfo,
 } from '@app-types';
 import { colors, parseRgbColor, type RgbColor } from '@core/design-tokens';
-import { normalizeYouTubeImageUrl } from '@core/image-url';
 import { RENDERER_LAYOUT as LAYOUT } from '@core/renderer-layout';
+import { normalizeYouTubeImageUrl } from '@core/youtubei-chat';
 
 interface AuthorNameOptions {
   className?: string;
