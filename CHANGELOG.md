@@ -13,6 +13,7 @@ All notable changes to this project will be documented in this file.
   - Reduced `Renderer` queue size 150→30, lookahead 20→10, `MessageIdRegistry` 1000→200
   - Removed duplicate `isRecord` from `settings-schema.ts` (use `@core/json`)
   - Removed `@biomejs/cli-linux-x64` (bundled in `biome`), `pnpm.overrides`
+  - Tightened `ImageAsset.candidateUrls` from array to single `candidateUrl` to reflect max one fallback retry
 
 ### Fixed
 - **ChatSource poll loop race condition** — increment `pollGeneration` in `start()` before creating new `AbortController` to prevent stale poll loops from doing extra work after restart
