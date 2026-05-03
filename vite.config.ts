@@ -61,7 +61,6 @@ export default defineConfig(({ mode }): UserConfig => {
 
     resolve: {
       alias: {
-        '@': resolve(REPO_ROOT, 'src'),
         '@core': resolve(REPO_ROOT, 'src/core'),
         '@app-types': resolve(REPO_ROOT, 'src/types/index.ts'),
       },
