@@ -41,8 +41,6 @@ const REPLAY_LOOP_DELAY_MS = 250;
 const REPLAY_FETCH_MIN_DELTA_MS = 1000;
 const REPLAY_EMIT_TOLERANCE_MS = 300;
 const REPLAY_PREFETCH_WINDOW_MS = 5000;
-const REPLAY_FALLBACK_CATCHUP_BATCH_LIMIT = 12;
-const REPLAY_BUFFER_REFILL_THRESHOLD = 24;
 const MAX_BUFFERED_REPLAY_MESSAGES = 300;
 const MAX_TRACKED_REPLAY_KEYS = 2000;
 
@@ -599,13 +597,15 @@ export class ChatSource {
     currentOffsetMs: number,
     signal?: AbortSignal
   ): Promise<void> {
+    // Inline simpler version inside pollContinuationReplay.
+    // Keep signature for initializeReplaySession to call inline.
     const minimumOffsetMs = Math.max(0, currentOffsetMs - REPLAY_PREFETCH_WINDOW_MS);
     let batchesFetched = 0;
 
     while (
       this.replayContinuation &&
       this.replayFallbackLastOffsetMs < minimumOffsetMs &&
-      batchesFetched < REPLAY_FALLBACK_CATCHUP_BATCH_LIMIT
+      batchesFetched < 12
     ) {
       throwIfAborted(signal);
 
@@ -781,14 +781,30 @@ export class ChatSource {
     currentOffsetMs: number,
     signal?: AbortSignal
   ): Promise<void> {
-    await this.catchUpFallbackReplay(currentOffsetMs, signal);
+    // Fetch batches until buffer catches up to current position.
     const minimumOffsetMs = Math.max(0, currentOffsetMs - REPLAY_PREFETCH_WINDOW_MS);
-    const needsMoreMessages =
-      this.replayContinuation !== null &&
-      (this.replayBuffer.length < REPLAY_BUFFER_REFILL_THRESHOLD ||
-        this.replayFallbackLastOffsetMs < currentOffsetMs + REPLAY_PREFETCH_WINDOW_MS);
+    let batches = 0;
 
-    if (needsMoreMessages) {
+    while (
+      this.replayContinuation &&
+      this.replayFallbackLastOffsetMs < minimumOffsetMs &&
+      batches < 12
+    ) {
+      throwIfAborted(signal);
+
+      const fetched = await this.fetchNextReplayFallbackBatch(minimumOffsetMs, signal);
+      if (!fetched) {
+        break;
+      }
+
+      batches += 1;
+    }
+
+    // Keep buffer topped up while playback advances.
+    if (
+      this.replayContinuation &&
+      this.replayFallbackLastOffsetMs < currentOffsetMs + REPLAY_PREFETCH_WINDOW_MS
+    ) {
       await this.fetchNextReplayFallbackBatch(minimumOffsetMs, signal);
     }
 
