@@ -1,7 +1,6 @@
 import type { OverlaySettings } from '@app-types';
-import { isAbortError } from '@core/abort';
 import { type ChatHealthSnapshot, ChatSource, type ChatSourceStartStatus } from '@core/chat-source';
-import { throwIfAborted } from '@core/dom';
+import { isAbortError, throwIfAborted } from '@core/dom';
 import { createLogger } from '@core/logging';
 import { OVERLAY_SELECTOR, Overlay } from '@core/overlay';
 import { Renderer } from '@core/renderer';

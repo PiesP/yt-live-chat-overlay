@@ -4,9 +4,15 @@
  */
 
 import type { ChatMessage, OverlaySettings } from '@app-types';
-import { combineAbortSignals, isAbortError } from '@core/abort';
 import { type ChatEvent, ChatMessageParser } from '@core/chat-message-parser';
-import { findElementMatch, sleep, throwIfAborted, VIDEO_SELECTORS } from '@core/dom';
+import {
+  combineAbortSignals,
+  findElementMatch,
+  isAbortError,
+  sleep,
+  throwIfAborted,
+  VIDEO_SELECTORS,
+} from '@core/dom';
 import { createLogger } from '@core/logging';
 import {
   bootstrapChatSession,
@@ -715,7 +721,10 @@ export class ChatSource {
         }
 
         if (error instanceof YoutubeInnertubeRequestError) {
-          log.warn('Live poll request failed:', { status: error.status, message: error.message });
+          log.warn('Live poll request failed:', {
+            status: error.status,
+            message: error.message,
+          });
         } else {
           log.warn('Live poll request failed:', error);
         }

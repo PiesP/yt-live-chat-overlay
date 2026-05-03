@@ -1,4 +1,4 @@
-import { isAbortError } from '@core/abort';
+import { isAbortError } from '@core/dom';
 import { getNumber, getString, isRecord, type JsonObject } from '@core/json';
 
 export interface InnertubeContinuationData {
@@ -390,7 +390,10 @@ const resolveClientContext = (ytcfg: JsonObject): JsonObject | null => {
 export const bootstrapChatSession = async (signal?: AbortSignal): Promise<ChatBootstrapResult> => {
   const videoId = getVideoIdFromUrl();
   if (!videoId) {
-    return { status: 'unavailable', reason: 'Current URL is not a supported YouTube watch page' };
+    return {
+      status: 'unavailable',
+      reason: 'Current URL is not a supported YouTube watch page',
+    };
   }
 
   let html: string | null = null;
@@ -408,12 +411,18 @@ export const bootstrapChatSession = async (signal?: AbortSignal): Promise<ChatBo
     }
 
     if (!ytcfg) {
-      return { status: 'retryable', reason: 'Could not resolve YouTube page configuration' };
+      return {
+        status: 'retryable',
+        reason: 'Could not resolve YouTube page configuration',
+      };
     }
 
     const initialData = extractInitialDataFromHtml(await ensureHtml());
     if (!initialData) {
-      return { status: 'retryable', reason: 'Could not extract ytInitialData from watch page' };
+      return {
+        status: 'retryable',
+        reason: 'Could not extract ytInitialData from watch page',
+      };
     }
 
     const liveChatRenderer = findLiveChatRenderer(initialData);
@@ -434,7 +443,10 @@ export const bootstrapChatSession = async (signal?: AbortSignal): Promise<ChatBo
 
     const clientContext = resolveClientContext(ytcfg);
     if (!clientContext) {
-      return { status: 'retryable', reason: 'Could not build Innertube client context' };
+      return {
+        status: 'retryable',
+        reason: 'Could not build Innertube client context',
+      };
     }
 
     const apiKey = resolveApiKey(ytcfg);
@@ -520,7 +532,9 @@ const buildInnertubeBody = (
   };
 
   if (continuation.clickTrackingParams) {
-    body.clickTracking = { clickTrackingParams: continuation.clickTrackingParams };
+    body.clickTracking = {
+      clickTrackingParams: continuation.clickTrackingParams,
+    };
   }
 
   if (currentPlayerState) {
