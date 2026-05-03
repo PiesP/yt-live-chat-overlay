@@ -31,7 +31,7 @@ export class Settings {
   }
 
   get(): Readonly<OverlaySettings> {
-    return cloneSettings(this.settings);
+    return this.settings;
   }
 
   update(partial: Partial<OverlaySettings>): void {
