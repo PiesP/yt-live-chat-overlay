@@ -211,10 +211,6 @@ export class RuntimeSession {
   private removeLeftoverOverlays(): void {
     const leftoverOverlays = document.querySelectorAll(OVERLAY_SELECTOR);
     for (const element of leftoverOverlays) {
-      if (this.overlay?.getContainer() === element) {
-        continue;
-      }
-
       element.remove();
     }
   }
