@@ -2,12 +2,6 @@ import { isLogLevel, type OverlaySettings } from '@app-types';
 import {
   AUTHOR_COLOR_KEYS,
   cloneSettings,
-  formatOutlineNumericSettingForInput,
-  formatRootNumericSettingForInput,
-  getOutlineNumericInputAttributes,
-  getRootNumericInputAttributes,
-  normalizeOutlineNumericInputValue,
-  normalizeRootNumericInputValue,
   OUTLINE_SETTING_KEYS,
   type OutlineSettingKey,
   outlineFormName,
@@ -15,6 +9,14 @@ import {
   type RootScalarSettingKey,
   SHOW_AUTHOR_KEYS,
 } from '@core/settings-schema';
+import {
+  formatOutlineNumericSettingForInput,
+  formatRootNumericSettingForInput,
+  getOutlineNumericInputAttributes,
+  getRootNumericInputAttributes,
+  normalizeOutlineNumericInputValue,
+  normalizeRootNumericInputValue,
+} from '@core/settings-ui-format';
 
 // ── Constants shared with SettingsUi ────────────────────────────────────────
 
