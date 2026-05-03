@@ -1,6 +1,26 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.19.0] - 2026-05-03
+
+### Refactored
+- **Settings layer consolidation** — reduced from 6 files to 3 files (-50%)
+  - Merged `settings-form.ts` into `settings-schema.ts` (UI input formatting unified with schema)
+  - Merged `settings-storage.ts` into `settings.ts` (localStorage I/O inlined)
+  - Removed unused `tsconfig.build.json`
+  - Removed duplicate script aliases (`typecheck`, `fmt:check`, `quality:ci`)
+- **Utility files merged** — 3 standalone utility files eliminated
+  - `abort.ts` → `dom.ts` (isAbortError, combineAbortSignals)
+  - `json.ts` → `youtubei-chat.ts` (JSON helper types/functions)
+  - `image-url.ts` → `youtubei-chat.ts` (normalizeYouTubeImageUrl)
+- **SettingsUi split** — 851-line file reduced to 298 lines (-65%)
+  - Extracted DOM factory and form data methods into new `SettingsUiForm` class (`settings-ui-form.ts`, 601 lines)
+  - `SettingsUi` now owns only lifecycle (attach/open/close/destroy) and event binding
+- **Perfomance**: `Settings.get()` no longer deep-clones the settings object on every read
+- **Cleanup**: Removed unused `MessageIdRegistry.release()` method
+- **Bug fix**: Removed `removeLeftoverOverlays()` dead null-safe check (`overlay` always null at call site)
+- **Bug fix**: Fixed circular dependency `logging.ts` ↔ `settings.ts` by moving `readStoredLogLevel` to `settings-definitions.ts`
+
 ## [0.18.1] - 2026-05-03
 
 ### Changed
