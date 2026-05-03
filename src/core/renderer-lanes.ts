@@ -138,14 +138,17 @@ export class LaneAllocator {
       return;
     }
 
+    // Cap shift to avoid lanes being pushed into the far future after long pauses (e.g. tab hidden 30+ min).
+    const clampedMs = Math.min(deltaMs, 60_000);
+
     for (const lane of this.lanes) {
       if (lane.lastItemStartTime > 0) {
-        lane.lastItemStartTime += deltaMs;
+        lane.lastItemStartTime += clampedMs;
       }
     }
 
     if (this.lastRenderStartTime > 0) {
-      this.lastRenderStartTime += deltaMs;
+      this.lastRenderStartTime += clampedMs;
     }
   }
 

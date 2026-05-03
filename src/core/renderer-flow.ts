@@ -57,8 +57,9 @@ export class RenderRateLimiter {
   }
 
   shiftWindow(deltaMs: number): void {
+    // Cap shift to match lane timeline bound (60s).
     if (deltaMs > 0 && this.lastProcessTime > 0) {
-      this.lastProcessTime += deltaMs;
+      this.lastProcessTime += Math.min(deltaMs, 60_000);
     }
   }
 

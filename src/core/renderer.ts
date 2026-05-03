@@ -593,7 +593,8 @@ export class Renderer {
 
     const now = Date.now();
     if (this.pausedAt !== null) {
-      const pausedDuration = Math.max(0, now - this.pausedAt);
+      // Cap to 60s so lanes don't get pushed far into the future after long pauses.
+      const pausedDuration = Math.min(Math.max(0, now - this.pausedAt), 60_000);
       if (pausedDuration > 0) {
         this.laneAllocator.shiftTimeline(pausedDuration);
         this.rateLimiter.shiftWindow(pausedDuration);
