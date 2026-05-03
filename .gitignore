@@ -46,8 +46,13 @@ temp/
 !LICENSE
 !CHANGELOG.md
 
-# AI Instructions
+# AI Instructions (not shared to remote)
+AGENTS.md
+CODE_STANDARDS.md
 .claude/
+.github/copilot-instructions.md
+.github/prompts/
+.editorconfig
 .github/copilot-instructions.md
 .github/prompts/
 .editorconfig
