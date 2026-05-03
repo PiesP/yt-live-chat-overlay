@@ -157,8 +157,7 @@ export const SETTINGS_UI_STYLES = `
         color: ${colors.ui.text};
         cursor: pointer;
       }
-      .yt-chat-overlay-settings-field input[type="number"]:disabled,
-      .yt-chat-overlay-settings-field input[type="text"]:disabled {
+      .yt-chat-overlay-settings-field input[type="number"]:disabled {
         opacity: 0.4;
         cursor: not-allowed;
       }
