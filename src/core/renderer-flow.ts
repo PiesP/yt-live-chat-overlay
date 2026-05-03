@@ -32,10 +32,6 @@ export class MessageIdRegistry {
     }
   }
 
-  release(id: string): void {
-    this.ids.delete(id);
-  }
-
   clear(): void {
     this.ids.clear();
   }
