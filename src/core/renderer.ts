@@ -636,8 +636,8 @@ export class Renderer {
     for (const active of this.activeMessages) {
       try {
         operation(active.animation);
-      } catch (error) {
-        log.warn('Animation operation failed:', error);
+      } catch {
+        // Ignore individual animation failures during batch operations
       }
     }
   }
