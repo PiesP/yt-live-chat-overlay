@@ -413,8 +413,8 @@ export class ChatMessageParser {
       alt,
     };
 
-    if (thumbnail.candidateUrls && thumbnail.candidateUrls.length > 0) {
-      asset.candidateUrls = thumbnail.candidateUrls;
+    if (thumbnail.candidateUrl) {
+      asset.candidateUrl = thumbnail.candidateUrl;
     }
 
     if (fallbackText && fallbackText.length > 0) {
@@ -480,17 +480,16 @@ export class ChatMessageParser {
 
   private extractBestThumbnail(
     value: unknown
-  ): { url: string; candidateUrls?: string[]; width?: number; height?: number } | null {
+  ): { url: string; candidateUrl?: string; width?: number; height?: number } | null {
     const [bestThumbnail, ...fallbackThumbnails] = this.extractThumbnailCandidates(value);
     if (!bestThumbnail) {
       return null;
     }
 
+    const firstFallback = fallbackThumbnails[0];
     return {
       ...bestThumbnail,
-      ...(fallbackThumbnails.length > 0
-        ? { candidateUrls: fallbackThumbnails.map((thumbnail) => thumbnail.url) }
-        : {}),
+      ...(firstFallback ? { candidateUrl: firstFallback.url } : {}),
     };
   }
 

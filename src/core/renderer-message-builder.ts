@@ -19,7 +19,7 @@ interface AuthorNameOptions {
 interface ImageElementOptions {
   width?: number;
   height?: number;
-  candidateUrls?: readonly string[];
+  candidateUrl?: string;
   fallbackText?: string;
 }
 
@@ -29,21 +29,22 @@ export interface BuiltMessage {
   isMembership: boolean;
 }
 
-const normalizeImageCandidateUrls = (
-  primaryUrl: string,
-  candidateUrls: readonly string[] = []
-): string[] => {
+const normalizeImageCandidateUrls = (primaryUrl: string, candidateUrl?: string): string[] => {
   const normalizedUrls: string[] = [];
   const seenUrls = new Set<string>();
 
-  for (const candidateUrl of [primaryUrl, ...candidateUrls]) {
-    const normalizedUrl = normalizeYouTubeImageUrl(candidateUrl);
-    if (!normalizedUrl || seenUrls.has(normalizedUrl)) {
-      continue;
-    }
+  const primary = normalizeYouTubeImageUrl(primaryUrl);
+  if (primary && !seenUrls.has(primary)) {
+    seenUrls.add(primary);
+    normalizedUrls.push(primary);
+  }
 
-    seenUrls.add(normalizedUrl);
-    normalizedUrls.push(normalizedUrl);
+  if (candidateUrl) {
+    const fallback = normalizeYouTubeImageUrl(candidateUrl);
+    if (fallback && !seenUrls.has(fallback)) {
+      seenUrls.add(fallback);
+      normalizedUrls.push(fallback);
+    }
   }
 
   return normalizedUrls;
@@ -75,7 +76,7 @@ export class RendererMessageBuilder {
     sizePx: number,
     options: ImageElementOptions = {}
   ): HTMLImageElement | null {
-    const candidateUrls = normalizeImageCandidateUrls(url, options.candidateUrls);
+    const candidateUrls = normalizeImageCandidateUrls(url, options.candidateUrl);
     if (candidateUrls.length === 0) {
       return null;
     }
@@ -198,8 +199,8 @@ export class RendererMessageBuilder {
     const options: ImageElementOptions = {
       fallbackText: emoji.fallbackText || '[emoji]',
     };
-    if (emoji.candidateUrls && emoji.candidateUrls.length > 0) {
-      options.candidateUrls = emoji.candidateUrls;
+    if (emoji.candidateUrl) {
+      options.candidateUrl = emoji.candidateUrl;
     }
     if (emoji.width !== undefined) {
       options.width = emoji.width;
@@ -220,8 +221,8 @@ export class RendererMessageBuilder {
   private createSuperChatSticker(sticker: ImageAsset): HTMLImageElement | null {
     const stickerSize = this.getSettings().fontSize * LAYOUT.SUPERCHAT_STICKER_SIZE;
     const options: ImageElementOptions = {};
-    if (sticker.candidateUrls && sticker.candidateUrls.length > 0) {
-      options.candidateUrls = sticker.candidateUrls;
+    if (sticker.candidateUrl) {
+      options.candidateUrl = sticker.candidateUrl;
     }
     if (sticker.width !== undefined) {
       options.width = sticker.width;

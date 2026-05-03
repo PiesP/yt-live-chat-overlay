@@ -38,8 +38,8 @@ export type AuthorDisplaySettings = Record<AuthorDisplayKey, boolean>;
 export interface ImageAsset {
   /** Primary image URL (sanitized, YouTube CDN only) */
   url: string;
-  /** Additional image URLs to retry before visible text fallback */
-  candidateUrls?: readonly string[];
+  /** Single fallback URL to try before visible text fallback */
+  candidateUrl?: string;
   /** Accessible alt text */
   alt: string;
   /** Visible text used if the image cannot be rendered */
