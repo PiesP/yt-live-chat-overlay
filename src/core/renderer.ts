@@ -12,8 +12,8 @@ import { LaneAllocator, type LanePlacement } from '@core/renderer-lanes';
 import { RENDERER_LAYOUT as LAYOUT } from '@core/renderer-layout';
 import { RendererMessageBuilder } from '@core/renderer-message-builder';
 import { RENDERER_STATIC_STYLES } from '@core/renderer-styles';
-import { shadows } from './design-tokens.js';
-import type { Overlay } from './overlay';
+import { shadows } from '@core/design-tokens';
+import type { Overlay } from '@core/overlay';
 
 const log = createLogger('Renderer');
 

@@ -1,4 +1,4 @@
-import { borderRadius, colors, shadows, spacing, typography, zIndex } from './design-tokens.js';
+import { borderRadius, colors, shadows, spacing, typography, zIndex } from '@core/design-tokens';
 
 export const SETTINGS_UI_STYLES = `
       .yt-chat-overlay-settings-button {
