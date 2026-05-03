@@ -42,7 +42,6 @@ pnpm install
 pnpm build
 pnpm build:dev
 pnpm check
-pnpm typecheck
 pnpm lint
 pnpm fmt
 pnpm knip
