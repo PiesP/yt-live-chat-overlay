@@ -16,8 +16,10 @@ const ROOT_LIMITS_KEY: Partial<Record<RootScalarSettingKey, keyof typeof SETTING
   laneSpacing: 'laneSpacing',
 };
 
-const OUTLINE_LIMITS_KEY: Record<OutlineSettingKey, keyof typeof SETTINGS_LIMITS> = {
-  enabled: 'outlineOpacity', // boolean, not used for limits but kept for type safety
+const OUTLINE_NUMERIC_LIMITS_KEY: Record<
+  Exclude<OutlineSettingKey, 'enabled'>,
+  keyof typeof SETTINGS_LIMITS
+> = {
   widthPx: 'outlineWidthPx',
   blurPx: 'outlineBlurPx',
   opacity: 'outlineOpacity',
@@ -98,11 +100,11 @@ export const normalizeRootNumericInputValue = (
 };
 
 export const normalizeOutlineNumericInputValue = (
-  key: OutlineSettingKey,
+  key: Exclude<OutlineSettingKey, 'enabled'>,
   value: unknown,
   fallback: number
 ): number => {
-  const limitsKey = OUTLINE_LIMITS_KEY[key];
+  const limitsKey = OUTLINE_NUMERIC_LIMITS_KEY[key];
   return normalizeNumericValue(value, fallback, SETTINGS_LIMITS[limitsKey], false);
 };
 
@@ -123,9 +125,9 @@ export const getRootNumericInputAttributes = (
 };
 
 export const getOutlineNumericInputAttributes = (
-  key: OutlineSettingKey
+  key: Exclude<OutlineSettingKey, 'enabled'>
 ): Readonly<{ min: number; max: number; step: number }> => {
-  const limitsKey = OUTLINE_LIMITS_KEY[key];
+  const limitsKey = OUTLINE_NUMERIC_LIMITS_KEY[key];
   const limits = SETTINGS_LIMITS[limitsKey];
 
   return {

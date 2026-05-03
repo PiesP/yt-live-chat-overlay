@@ -32,12 +32,12 @@ const PLAYER_LOOKUP_INTERVAL_MS = 500;
 const applyNumberInputAttributes = (
   input: HTMLInputElement,
   scope: 'root' | 'outline',
-  key: RootScalarSettingKey | OutlineSettingKey
+  key: RootScalarSettingKey | Exclude<OutlineSettingKey, 'enabled'>
 ): void => {
   const { min, max, step } =
     scope === 'root'
       ? getRootNumericInputAttributes(key as RootScalarSettingKey)
-      : getOutlineNumericInputAttributes(key as OutlineSettingKey);
+      : getOutlineNumericInputAttributes(key as Exclude<OutlineSettingKey, 'enabled'>);
   input.min = String(min);
   input.max = String(max);
   input.step = String(step);
@@ -450,7 +450,10 @@ export class SettingsUi {
     return this.createField(labelText, input);
   }
 
-  private createOutlineNumberField(labelText: string, key: OutlineSettingKey): HTMLLabelElement {
+  private createOutlineNumberField(
+    labelText: string,
+    key: Exclude<OutlineSettingKey, 'enabled'>
+  ): HTMLLabelElement {
     const name = outlineFormName(key);
     const input = this.createInput('number', name);
     applyNumberInputAttributes(input, 'outline', key);
