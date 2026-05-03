@@ -4,6 +4,7 @@ import type {
   OutlineSettings,
   OverlaySettings,
 } from '@app-types';
+import { isLogLevel } from '@app-types';
 
 type NumericSettingLimit = Readonly<{
   min: number;
@@ -84,3 +85,18 @@ export const DEFAULT_SETTINGS = {
   outline: DEFAULT_OUTLINE,
   laneSpacing: 0,
 } as const satisfies Readonly<OverlaySettings>;
+
+export const readStoredLogLevel = (): OverlaySettings['logLevel'] => {
+  try {
+    const raw = localStorage.getItem('yt-live-chat-overlay-settings');
+    if (!raw) return DEFAULT_SETTINGS.logLevel;
+    const parsed = JSON.parse(raw) as Partial<OverlaySettings>;
+    if (parsed && isLogLevel(parsed.logLevel)) {
+      return parsed.logLevel;
+    }
+  } catch {
+    // fall through to default
+  }
+
+  return DEFAULT_SETTINGS.logLevel;
+};
