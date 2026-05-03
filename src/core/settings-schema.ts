@@ -93,9 +93,9 @@ export const cloneSettings = (settings: Readonly<OverlaySettings>): OverlaySetti
   outline: { ...settings.outline },
 });
 
-export const createDefaultSettings = (): OverlaySettings => cloneSettings(DEFAULT_SETTINGS);
+const createDefaultSettings = (): OverlaySettings => cloneSettings(DEFAULT_SETTINGS);
 
-export const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings => {
+const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings => {
   const d = DEFAULT_SETTINGS;
   const n = createDefaultSettings();
 

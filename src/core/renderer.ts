@@ -6,14 +6,14 @@
  */
 
 import type { ChatMessage, OutlineSettings, OverlayDimensions, OverlaySettings } from '@app-types';
+import { shadows } from '@core/design-tokens';
 import { createLogger } from '@core/logging';
+import type { Overlay } from '@core/overlay';
 import { MessageIdRegistry, RenderQueue, RenderRateLimiter } from '@core/renderer-flow';
 import { LaneAllocator, type LanePlacement } from '@core/renderer-lanes';
 import { RENDERER_LAYOUT as LAYOUT } from '@core/renderer-layout';
 import { RendererMessageBuilder } from '@core/renderer-message-builder';
 import { RENDERER_STATIC_STYLES } from '@core/renderer-styles';
-import { shadows } from '@core/design-tokens';
-import type { Overlay } from '@core/overlay';
 
 const log = createLogger('Renderer');
 
