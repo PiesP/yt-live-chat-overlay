@@ -8,14 +8,18 @@
     "build": "vite build",
     "build:dev": "vite build --mode development",
     "check": "tsc --noEmit",
+    "typecheck": "pnpm -s check",
     "knip": "knip --dependencies",
     "knip:full": "knip --files --exports --dependencies --reporter compact --max-show-issues 50 --no-exit-code",
     "lint": "biome lint .",
     "lint:fix": "biome lint --write .",
     "fmt": "biome check --linter-enabled=false .",
     "fmt:fix": "biome check --write --linter-enabled=false .",
+    "fmt:check": "pnpm -s fmt",
     "quality": "pnpm -s fmt && pnpm -s lint && pnpm -s check && pnpm -s knip",
     "quality:fix": "pnpm -s fmt:fix && pnpm -s lint:fix && pnpm -s check && pnpm -s knip",
+    "quality:ci": "pnpm -s quality",
+    "clean": "rimraf dist",
     "prebuild": "pnpm quality"
   },
   "keywords": [
@@ -40,6 +44,7 @@
     "@biomejs/biome": "^2.4.13",
     "@types/node": "^25.6.0",
     "knip": "^6.9.0",
+    "rimraf": "^6.1.3",
     "typescript": "^6.0.3",
     "vite": "^8.0.10"
   }

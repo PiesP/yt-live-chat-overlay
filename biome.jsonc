@@ -31,14 +31,18 @@
         "noParameterAssign": "warn"
       },
       "suspicious": {
-        "noExplicitAny": "warn",
+        "noExplicitAny": "error",
         "noConfusingVoidType": "off",
         "noDocumentCookie": "off",
-        "noControlCharactersInRegex": "off"
+        "noControlCharactersInRegex": "off",
+        "noImplicitAnyLet": "error"
       },
       "complexity": {
         "noForEach": "off",
         "noStaticOnlyClass": "off"
+      },
+      "performance": {
+        "noAccumulatingSpread": "warn"
       }
     }
   },
