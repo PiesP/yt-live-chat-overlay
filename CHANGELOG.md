@@ -1,6 +1,17 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.18.1] - 2026-05-03
+
+### Changed
+- **Codebase simplification** — reduced total code size by ~220 lines
+  - Removed `VideoSync` MutationObserver, periodic detection, and reinitialization timer (~211 lines removed); element replacement handling is now fully delegated to `RuntimeManager`'s session restart
+  - Simplified `Settings.loadSettings()` double-fallback (moved fallback into catch block)
+  - Unified import paths: replaced relative imports (`./design-tokens.js`, `./overlay`) with `@core/` alias across `renderer.ts` and `settings-ui-styles.ts`
+  - Removed dead CSS rule `input[type="text"]:disabled` from `settings-ui-styles.ts`
+  - Simplified `Renderer.forEachAnimation` by removing per-operation warn log (individual animation failures are negligible)
+  - Removed unused `export` from `normalizeSettings` and `createDefaultSettings` in `settings-schema.ts`
+
 ## [0.18.0] - 2026-05-01
 
 ### Changed
