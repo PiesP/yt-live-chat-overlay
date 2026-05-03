@@ -9,8 +9,8 @@ import type {
 } from '@app-types';
 import { parseRgbColor } from '@core/design-tokens';
 import { normalizeYouTubeImageUrl } from '@core/image-url';
-import { asRecord, getNumber, getString, isRecord, type JsonObject } from '@core/json';
 import { createLogger } from '@core/logging';
+import { asRecord, getNumber, getString, isRecord, type JsonObject } from '@core/youtubei-chat';
 
 const log = createLogger('ChatMessageParser');
 
@@ -478,9 +478,12 @@ export class ChatMessageParser {
     return candidates;
   }
 
-  private extractBestThumbnail(
-    value: unknown
-  ): { url: string; candidateUrl?: string; width?: number; height?: number } | null {
+  private extractBestThumbnail(value: unknown): {
+    url: string;
+    candidateUrl?: string;
+    width?: number;
+    height?: number;
+  } | null {
     const [bestThumbnail, ...fallbackThumbnails] = this.extractThumbnailCandidates(value);
     if (!bestThumbnail) {
       return null;
