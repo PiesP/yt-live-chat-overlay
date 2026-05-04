@@ -58,10 +58,10 @@ export class SettingsUiForm {
     return [
       this.createHeader(),
       this.createTabs(),
-      this.createDisplayPane(),
-      this.createStylePane(),
+      this.createCommentsPane(),
+      this.createColorsPane(),
       this.createAuthorsPane(),
-      this.createFilterPane(),
+      this.createAdvancedPane(),
       this.createActions(),
     ];
   }
@@ -89,20 +89,20 @@ export class SettingsUiForm {
     nav.setAttribute('aria-label', 'Settings categories');
 
     for (const [tabId, label] of [
-      ['display', 'Display'],
-      ['style', 'Style'],
+      ['comments', 'Comments'],
+      ['colors', 'Colors'],
       ['authors', 'Authors'],
-      ['filter', 'Filter'],
+      ['advanced', 'Advanced'],
     ] as const) {
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'yt-chat-overlay-settings-tab';
       button.dataset.tab = tabId;
       button.setAttribute('role', 'tab');
-      button.setAttribute('aria-selected', String(tabId === 'display'));
+      button.setAttribute('aria-selected', String(tabId === 'comments'));
       button.setAttribute('aria-controls', `pane-${tabId}`);
       button.textContent = label;
-      if (tabId === 'display') {
+      if (tabId === 'comments') {
         button.classList.add('active');
       }
       nav.appendChild(button);
@@ -111,29 +111,8 @@ export class SettingsUiForm {
     return nav;
   }
 
-  private createDisplayPane(): HTMLDivElement {
-    const pane = this.createPane('display');
-    pane.append(
-      this.createEnabledField(),
-      this.createNumberField('Font Size (px)', 'fontSize'),
-      this.createNumberField('Text Opacity', 'opacity'),
-      this.createNumberField('Scroll Speed (px/s)', 'speedPxPerSec'),
-      this.createNumberField(
-        'Top Clear Zone (%)',
-        'safeTop',
-        'Keep top N% of video free of comments (safe zone for stream info overlays)'
-      ),
-      this.createNumberField(
-        'Bottom Clear Zone (%)',
-        'safeBottom',
-        'Keep bottom N% of video free of comments (safe zone for YouTube controls)'
-      )
-    );
-    return pane;
-  }
-
-  private createStylePane(): HTMLDivElement {
-    const pane = this.createPane('style', true);
+  private createCommentsPane(): HTMLDivElement {
+    const pane = this.createPane('comments');
     const outlineSection = this.createSection('Text Outline');
     outlineSection.append(
       this.createCheckboxField('Enabled', outlineFormName('enabled')),
@@ -143,11 +122,10 @@ export class SettingsUiForm {
     );
 
     pane.append(
-      this.createNumberField(
-        'SuperChat Opacity (%)',
-        'superChatOpacity',
-        'Background opacity of Super Chat cards'
-      ),
+      this.createEnabledField(),
+      this.createNumberField('Font Size (px)', 'fontSize'),
+      this.createNumberField('Text Opacity', 'opacity'),
+      this.createNumberField('Scroll Speed (px/s)', 'speedPxPerSec'),
       this.createNumberField(
         'Lane Gap (px)',
         'laneSpacing',
@@ -158,8 +136,16 @@ export class SettingsUiForm {
     return pane;
   }
 
-  private createAuthorsPane(): HTMLDivElement {
-    const pane = this.createPane('authors', true);
+  private createColorsPane(): HTMLDivElement {
+    const pane = this.createPane('colors', true);
+    pane.append(
+      this.createNumberField(
+        'SuperChat Opacity (%)',
+        'superChatOpacity',
+        'Background opacity of Super Chat cards'
+      )
+    );
+    const authorSection = this.createSection('Author Colors');
     const grid = this.createDiv('yt-chat-overlay-author-grid');
     grid.append(
       document.createElement('span'),
@@ -181,12 +167,39 @@ export class SettingsUiForm {
       this.createGridCheckbox('showAuthor-superChat')
     );
 
-    pane.appendChild(grid);
+    authorSection.appendChild(grid);
+    pane.appendChild(authorSection);
     return pane;
   }
 
-  private createFilterPane(): HTMLDivElement {
-    const pane = this.createPane('filter', true);
+  private createAuthorsPane(): HTMLDivElement {
+    const pane = this.createPane('authors', true);
+    const showSection = this.createSection('Show Author');
+    for (const key of SHOW_AUTHOR_KEYS) {
+      const label = key === 'superChat' ? 'SuperChat' : this.formatAuthorLabel(key);
+      showSection.appendChild(this.createCheckboxField(label, `showAuthor-${key}`));
+    }
+    pane.appendChild(showSection);
+    return pane;
+  }
+
+  private createAdvancedPane(): HTMLDivElement {
+    const pane = this.createPane('advanced', true);
+
+    const safeZoneSection = this.createSection('Safe Zone');
+    safeZoneSection.append(
+      this.createNumberField(
+        'Top Clear Zone (%)',
+        'safeTop',
+        'Keep top N% of video free of comments (safe zone for stream info overlays)'
+      ),
+      this.createNumberField(
+        'Bottom Clear Zone (%)',
+        'safeBottom',
+        'Keep bottom N% of video free of comments (safe zone for YouTube controls)'
+      )
+    );
+
     const rateSection = this.createSection('Message Rate');
     rateSection.append(
       this.createNumberField(
@@ -218,7 +231,7 @@ export class SettingsUiForm {
     const debugSection = this.createSection('Debug');
     debugSection.append(this.createLogLevelField());
 
-    pane.append(rateSection, performanceSection, debugSection);
+    pane.append(safeZoneSection, rateSection, performanceSection, debugSection);
     return pane;
   }
 

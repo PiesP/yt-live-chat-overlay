@@ -14,7 +14,7 @@ export class SettingsUi {
   private backdrop: HTMLDivElement | null = null;
   private modal: HTMLDivElement | null = null;
   private previousFocus: HTMLElement | null = null;
-  private activeTab = 'display';
+  private activeTab = 'comments';
   private readonly form: SettingsUiForm;
 
   private readonly handleKeydown = (event: KeyboardEvent) => {
