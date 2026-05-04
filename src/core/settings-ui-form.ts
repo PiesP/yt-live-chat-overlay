@@ -45,25 +45,48 @@ const applyNumberInputAttributes = (
 
 export class SettingsUiForm {
   private modal: HTMLDivElement | null = null;
+  private isUpdating = false;
 
-  constructor(private readonly getSettings: () => Readonly<OverlaySettings>) {}
+  constructor(
+    private readonly getSettings: () => Readonly<OverlaySettings>,
+    private readonly onPreview?: (settings: OverlaySettings) => void
+  ) {}
 
   setModal(modal: HTMLDivElement | null): void {
     this.modal = modal;
   }
 
+  /** Attach input/change listeners to enable live preview on form fields. */
+  private attachLivePreview(element: HTMLElement): void {
+    if (!this.onPreview) return;
+
+    const handler = (): void => {
+      if (this.isUpdating) return;
+      this.onPreview?.(this.collectSettings());
+    };
+    const inputs = element.querySelectorAll<HTMLElement>('input, select');
+    for (const input of inputs) {
+      if (input instanceof HTMLInputElement && input.type === 'number') {
+        input.addEventListener('input', handler);
+      } else {
+        input.addEventListener('change', handler);
+      }
+    }
+  }
+
   // ── Modal content factory ──────────────────────────────────────────────
 
   createModalContent(): Node[] {
-    return [
-      this.createHeader(),
-      this.createTabs(),
+    const panes = [
       this.createCommentsPane(),
       this.createColorsPane(),
       this.createAuthorsPane(),
       this.createAdvancedPane(),
-      this.createActions(),
     ];
+    for (const pane of panes) {
+      this.attachLivePreview(pane);
+    }
+    return [this.createHeader(), this.createTabs(), ...panes, this.createActions()];
   }
 
   private createHeader(): HTMLDivElement {
@@ -239,7 +262,7 @@ export class SettingsUiForm {
     const actions = this.createDiv('yt-chat-overlay-settings-actions');
     for (const [action, label] of [
       ['reset', 'Reset'],
-      ['apply', 'Apply'],
+      ['apply', 'Done'],
     ] as const) {
       const button = document.createElement('button');
       button.type = 'button';
@@ -382,6 +405,7 @@ export class SettingsUiForm {
   // ── Form population ────────────────────────────────────────────────────
 
   populateForm(settings: Readonly<OverlaySettings>): void {
+    this.isUpdating = true;
     for (const key of ROOT_SETTING_KEYS) {
       this.populateRootSetting(key, settings);
     }
@@ -392,6 +416,7 @@ export class SettingsUiForm {
     }
 
     this.syncMinTextLengthState();
+    this.isUpdating = false;
   }
 
   private populateRootSetting(

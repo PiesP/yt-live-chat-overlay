@@ -33,7 +33,32 @@ export class SettingsUi {
     private readonly updateSettings: (partial: Partial<OverlaySettings>) => void,
     private readonly resetSettings: () => void
   ) {
-    this.form = new SettingsUiForm(getSettings);
+    this.form = new SettingsUiForm(getSettings, (preview) => {
+      this.queuePreview(preview);
+    });
+  }
+
+  /** Debounced live preview — applies settings immediately but persists on close. */
+  private previewTimer: number | null = null;
+  private readonly PREVIEW_DEBOUNCE_MS = 250;
+
+  private queuePreview(preview: OverlaySettings): void {
+    if (this.previewTimer !== null) {
+      window.clearTimeout(this.previewTimer);
+    }
+    this.previewTimer = window.setTimeout(() => {
+      this.previewTimer = null;
+      this.updateSettings(preview);
+      // Sync form with normalized values from the settings system
+      this.form.populateForm(this.getSettings());
+    }, this.PREVIEW_DEBOUNCE_MS);
+  }
+
+  private cancelPreview(): void {
+    if (this.previewTimer !== null) {
+      window.clearTimeout(this.previewTimer);
+      this.previewTimer = null;
+    }
   }
 
   async attach(): Promise<void> {
@@ -52,6 +77,7 @@ export class SettingsUi {
 
   close(): void {
     if (!this.backdrop) return;
+    this.cancelPreview();
     this.setDialogOpen(false);
 
     if (this.previousFocus?.isConnected) {
@@ -207,9 +233,8 @@ export class SettingsUi {
   }
 
   private apply(): void {
-    const partial = this.form.collectSettings();
-    this.updateSettings(partial);
-    this.form.populateForm(this.getSettings());
+    // Settings are already applied via live preview.
+    // Done — just close the modal.
     this.close();
   }
 
