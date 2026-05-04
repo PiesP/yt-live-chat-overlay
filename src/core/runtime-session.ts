@@ -369,12 +369,15 @@ export class RuntimeSession {
         return;
       }
 
-      const health = this.getRuntimeHealthSnapshot();
+      // Skip health checks while the video is paused — the resume handler
+      // (handleRuntimeResume) will perform a full health check and restart
+      // when playback resumes.
       const paused = this.videoSync?.isPaused() ?? true;
-
-      if (paused && health.renderable) {
+      if (paused) {
         return;
       }
+
+      const health = this.getRuntimeHealthSnapshot();
 
       if (!health.shouldRestart) {
         return;
