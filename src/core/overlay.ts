@@ -176,12 +176,12 @@ export class Overlay {
       return false;
     }
 
-    // Reuse existing container if available (was hidden by destroy), otherwise create new
-    if (this.container) {
-      this.container.style.display = '';
-    } else {
-      this.container = this.createContainerElement();
-    }
+    // Ensure a clean observer state before registering new ones
+    this.disconnectResizeObserver();
+    this.detachFullscreenHandler();
+
+    // Always create a fresh container (destroy() removes the previous one)
+    this.container = this.createContainerElement();
 
     // Insert into player
     ensurePlayerPositioning(this.playerElement);
@@ -239,9 +239,12 @@ export class Overlay {
     this.disconnectResizeObserver();
     this.detachFullscreenHandler();
 
-    // Hide instead of remove to prevent flicker if re-created quickly
+    // Remove the container from the DOM entirely so successive create() calls
+    // always start from a clean slate (no hidden ghost containers). The
+    // downstream RuntimeSession.removeLeftoverOverlays() provides a secondary
+    // defense against strays.
     if (this.container) {
-      this.container.style.display = 'none';
+      this.container.remove();
     }
 
     // Clear references
