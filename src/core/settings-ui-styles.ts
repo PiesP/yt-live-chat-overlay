@@ -35,9 +35,19 @@ export const SETTINGS_UI_STYLES = `
         justify-content: center;
         background: rgba(0, 0, 0, 0.55);
         z-index: ${zIndex.modal};
+        animation: yt-overlay-fade-in 0.15s ease-out;
+      }
+      @keyframes yt-overlay-fade-in {
+        from { opacity: 0; }
+        to { opacity: 1; }
+      }
+      @keyframes yt-overlay-modal-scale-in {
+        from { transform: scale(0.92); opacity: 0; }
+        to { transform: scale(1); opacity: 1; }
       }
       .yt-chat-overlay-settings-modal {
         width: 400px;
+        max-width: min(92vw, 420px);
         max-height: 82vh;
         overflow: hidden;
         background: ${colors.ui.background};
@@ -49,6 +59,7 @@ export const SETTINGS_UI_STYLES = `
         gap: ${spacing.md}px;
         font-family: system-ui, -apple-system, sans-serif;
         box-shadow: ${shadows.box.lg};
+        animation: yt-overlay-modal-scale-in 0.18s ease-out;
       }
       /* Header */
       .yt-chat-overlay-settings-header {
