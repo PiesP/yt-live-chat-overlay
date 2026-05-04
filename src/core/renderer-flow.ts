@@ -20,6 +20,8 @@ export class MessageIdRegistry {
       return;
     }
 
+    // Evict oldest entries when the registry overflows. Set preserves
+    // insertion order, so iterating yields entries in FIFO sequence.
     const iterator = this.ids.values();
     const excess = this.ids.size - this.maxSize;
     for (let index = 0; index < excess; index++) {

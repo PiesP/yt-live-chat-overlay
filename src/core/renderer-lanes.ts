@@ -138,7 +138,9 @@ export class LaneAllocator {
       return;
     }
 
-    // Cap shift to avoid lanes being pushed into the far future after long pauses (e.g. tab hidden 30+ min).
+    // Internal safety cap: prevents lanes from being pushed into the far
+    // future after long pauses (e.g. tab hidden 30+ min). Callers should
+    // also cap their input, but this ensures correctness either way.
     const clampedMs = Math.min(deltaMs, 60_000);
 
     for (const lane of this.lanes) {
