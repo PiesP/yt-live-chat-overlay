@@ -121,12 +121,12 @@ export class SettingsUiForm {
       this.createNumberField(
         'Top Clear Zone (%)',
         'safeTop',
-        'Keep top N% of video free of comments'
+        'Keep top N% of video free of comments (safe zone for stream info overlays)'
       ),
       this.createNumberField(
         'Bottom Clear Zone (%)',
         'safeBottom',
-        'Keep bottom N% of video free of comments'
+        'Keep bottom N% of video free of comments (safe zone for YouTube controls)'
       )
     );
     return pane;
