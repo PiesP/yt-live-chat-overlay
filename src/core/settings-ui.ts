@@ -214,6 +214,9 @@ export class SettingsUi {
   }
 
   private handleReset(): void {
+    if (!window.confirm('Reset all settings to defaults?')) {
+      return;
+    }
     this.resetSettings();
     this.form.populateForm(this.getSettings());
   }
