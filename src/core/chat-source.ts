@@ -40,6 +40,8 @@ const LIVE_POLL_FALLBACK_DELAY_MS = 4000;
 const REPLAY_LOOP_DELAY_MS = 250;
 const REPLAY_FETCH_MIN_DELTA_MS = 1000;
 const REPLAY_EMIT_TOLERANCE_MS = 300;
+const REPLAY_CONSECUTIVE_FAILURE_LIMIT = 5;
+const REPLAY_FAILURE_BACKOFF_MS = 5000;
 const REPLAY_PREFETCH_WINDOW_MS = 5000;
 const MAX_BUFFERED_REPLAY_MESSAGES = 300;
 const MAX_TRACKED_REPLAY_KEYS = 2000;
@@ -90,6 +92,8 @@ export class ChatSource {
   private replayContinuation: InnertubeContinuationData | null = null;
   private replayFallbackLastOffsetMs = -1;
   private lastReplayRequestedOffsetMs = -REPLAY_FETCH_MIN_DELTA_MS;
+  private replayConsecutiveFailures = 0;
+  private replayNextAllowedFetchAt = 0;
   private readonly recentMessages: ChatMessage[] = [];
   private readonly replaySeenKeys = new Set<string>();
   private readonly replayPendingKeys = new Set<string>();
@@ -248,6 +252,8 @@ export class ChatSource {
     this.replayContinuation = null;
     this.replayFallbackLastOffsetMs = -1;
     this.lastReplayRequestedOffsetMs = -REPLAY_FETCH_MIN_DELTA_MS;
+    this.replayConsecutiveFailures = 0;
+    this.replayNextAllowedFetchAt = 0;
     this.replayBuffer = [];
     this.replaySeenKeys.clear();
     this.replayPendingKeys.clear();
@@ -542,6 +548,7 @@ export class ChatSource {
         offsetMs
       );
       if (!payload) {
+        this.recordReplayFailure();
         return false;
       }
 
@@ -553,6 +560,9 @@ export class ChatSource {
       this.replayPlayerSeekContinuation = nextPlayerSeekContinuation;
       this.lastReplayRequestedOffsetMs = offsetMs;
 
+      this.replayConsecutiveFailures = 0;
+      this.replayNextAllowedFetchAt = 0;
+
       return nextPlayerSeekContinuation !== null || payload.actions.length > 0;
     } catch (error) {
       if (isAbortError(error)) {
@@ -560,6 +570,7 @@ export class ChatSource {
       }
 
       log.warn('Replay playerSeek request failed:', error);
+      this.recordReplayFailure();
       return false;
     }
   }
@@ -575,12 +586,17 @@ export class ChatSource {
     try {
       const payload = await this.requestReplayPayload(this.replayContinuation, signal);
       if (!payload) {
+        this.recordReplayFailure();
         return false;
       }
 
       const events = this.parser.extractChatEvents(payload.actions);
       this.replayFallbackLastOffsetMs = this.bufferReplayEvents(events, minimumOffsetMs);
       this.replayContinuation = extractReplayContinuation(payload.continuations);
+
+      // Successful fetch — reset failure counter.
+      this.replayConsecutiveFailures = 0;
+      this.replayNextAllowedFetchAt = 0;
 
       return this.replayContinuation !== null || events.length > 0;
     } catch (error) {
@@ -589,7 +605,25 @@ export class ChatSource {
       }
 
       log.warn('Replay continuation request failed:', error);
+      this.recordReplayFailure();
       return false;
+    }
+  }
+
+  /**
+   * Track consecutive replay fetch failures and back off when the threshold
+   * is exceeded so we don't busy-loop against a non-responsive endpoint.
+   */
+  private recordReplayFailure(): void {
+    this.replayConsecutiveFailures += 1;
+    if (this.replayConsecutiveFailures >= REPLAY_CONSECUTIVE_FAILURE_LIMIT) {
+      const backoffUntil = Date.now() + REPLAY_FAILURE_BACKOFF_MS;
+      this.replayNextAllowedFetchAt = backoffUntil;
+      this.replayConsecutiveFailures = 0;
+      log.warn(
+        `Replay fetch failed ${REPLAY_CONSECUTIVE_FAILURE_LIMIT} times consecutively; ` +
+          `backing off for ${REPLAY_FAILURE_BACKOFF_MS}ms`
+      );
     }
   }
 
@@ -781,6 +815,12 @@ export class ChatSource {
     currentOffsetMs: number,
     signal?: AbortSignal
   ): Promise<void> {
+    // Skip fetching while in backoff to avoid busy-looping against a
+    // non-responsive endpoint after consecutive failures.
+    if (Date.now() < this.replayNextAllowedFetchAt) {
+      return;
+    }
+
     // Fetch batches until buffer catches up to current position.
     const minimumOffsetMs = Math.max(0, currentOffsetMs - REPLAY_PREFETCH_WINDOW_MS);
     let batches = 0;
@@ -803,6 +843,7 @@ export class ChatSource {
     // Keep buffer topped up while playback advances.
     if (
       this.replayContinuation &&
+      this.replayNextAllowedFetchAt <= Date.now() &&
       this.replayFallbackLastOffsetMs < currentOffsetMs + REPLAY_PREFETCH_WINDOW_MS
     ) {
       await this.fetchNextReplayFallbackBatch(minimumOffsetMs, signal);
