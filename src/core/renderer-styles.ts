@@ -55,13 +55,15 @@ export const RENDERER_STATIC_STYLES = `
   .yt-chat-overlay-superchat-card {
     --yt-sc-rgb: 30, 136, 229;
     --yt-sc-border-rgb: 18, 92, 156;
+    --yt-sc-accent: rgb(var(--yt-sc-rgb));
     display: flex;
     flex-direction: column;
-    min-width: min(420px, 72vw);
+    min-width: min(280px, 60vw);
     max-width: min(640px, 86vw);
     border-radius: ${borderRadius.md};
     overflow: hidden;
     border: 1px solid rgba(var(--yt-sc-border-rgb), 0.55);
+    border-left: 4px solid var(--yt-sc-accent);
     background-color: rgb(30, 136, 229);
     background: linear-gradient(
       180deg,
@@ -170,10 +172,16 @@ export const RENDERER_STATIC_STYLES = `
     flex-direction: column;
     padding: ${spacing.md}px ${spacing.lg}px;
     border-radius: ${borderRadius.md};
-    background: ${rgba(colors.superChat.green, 0.25)};
-    border: 2px solid ${rgba(colors.superChat.green, 0.5)};
+    background: ${rgba(colors.superChat.green, 0.28)};
+    border: 2px solid ${rgba(colors.superChat.green, 0.6)};
     box-shadow: ${shadows.box.md};
     backdrop-filter: blur(4px);
+    animation: yt-overlay-membership-glow 2s ease-in-out infinite;
+  }
+
+  @keyframes yt-overlay-membership-glow {
+    0%, 100% { border-color: ${rgba(colors.superChat.green, 0.6)}; }
+    50% { border-color: ${rgba(colors.superChat.green, 0.9)}; }
   }
 
   .yt-chat-overlay-membership-author {
