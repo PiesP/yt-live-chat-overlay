@@ -4,20 +4,28 @@ export const SETTINGS_UI_STYLES = `
       .yt-chat-overlay-settings-button {
         position: absolute;
         top: ${spacing.sm}px;
-        right: ${spacing.sm}px;
-        width: ${spacing.xxxl}px;
-        height: ${spacing.xxxl}px;
-        border-radius: ${borderRadius.sm};
+        left: ${spacing.sm}px;
+        width: 36px;
+        height: 36px;
+        border-radius: ${borderRadius.full};
         border: 1px solid rgba(255, 255, 255, 0.25);
-        background: rgba(0, 0, 0, 0.6);
+        background: rgba(0, 0, 0, 0.55);
+        backdrop-filter: blur(4px);
         color: ${colors.ui.text};
-        font-size: ${typography.fontSize.base};
+        font-size: 18px;
+        line-height: 1;
         cursor: pointer;
         z-index: 120;
         pointer-events: auto;
+        transition: background 0.15s, transform 0.1s;
       }
       .yt-chat-overlay-settings-button:hover {
         background: rgba(0, 0, 0, 0.75);
+        transform: scale(1.1);
+      }
+      .yt-chat-overlay-settings-button:focus-visible {
+        outline: 2px solid ${colors.ui.primary};
+        outline-offset: 2px;
       }
       .yt-chat-overlay-settings-backdrop {
         position: fixed;
@@ -57,11 +65,21 @@ export const SETTINGS_UI_STYLES = `
         color: ${colors.ui.textMuted};
         font-size: ${typography.fontSize.lg};
         cursor: pointer;
-        padding: 0 ${spacing.xs}px;
+        padding: ${spacing.sm}px;
         line-height: 1;
+        min-width: 44px;
+        min-height: 44px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: ${borderRadius.sm};
       }
       .yt-chat-overlay-settings-close:hover {
         color: ${colors.ui.text};
+      }
+      .yt-chat-overlay-settings-close:focus-visible {
+        outline: 2px solid ${colors.ui.primary};
+        outline-offset: -2px;
       }
       /* Tab bar */
       .yt-chat-overlay-settings-tabs {
