@@ -627,31 +627,6 @@ export class ChatSource {
     }
   }
 
-  private async catchUpFallbackReplay(
-    currentOffsetMs: number,
-    signal?: AbortSignal
-  ): Promise<void> {
-    // Inline simpler version inside pollContinuationReplay.
-    // Keep signature for initializeReplaySession to call inline.
-    const minimumOffsetMs = Math.max(0, currentOffsetMs - REPLAY_PREFETCH_WINDOW_MS);
-    let batchesFetched = 0;
-
-    while (
-      this.replayContinuation &&
-      this.replayFallbackLastOffsetMs < minimumOffsetMs &&
-      batchesFetched < 12
-    ) {
-      throwIfAborted(signal);
-
-      const fetched = await this.fetchNextReplayFallbackBatch(minimumOffsetMs, signal);
-      if (!fetched) {
-        break;
-      }
-
-      batchesFetched += 1;
-    }
-  }
-
   private async initializeReplaySession(signal?: AbortSignal): Promise<boolean> {
     if (!this.bootstrap) {
       return false;
@@ -694,7 +669,18 @@ export class ChatSource {
         this.parser.extractChatEvents(initialPayload.actions),
         minimumOffsetMs
       );
-      await this.catchUpFallbackReplay(currentOffsetMs, signal);
+      // Catch up fallback replay buffer to current position
+      let batchesFetched = 0;
+      while (
+        this.replayContinuation &&
+        this.replayFallbackLastOffsetMs < minimumOffsetMs &&
+        batchesFetched < 12
+      ) {
+        throwIfAborted(signal);
+        const fetched = await this.fetchNextReplayFallbackBatch(minimumOffsetMs, signal);
+        if (!fetched) break;
+        batchesFetched += 1;
+      }
       this.flushReplayBuffer(currentOffsetMs);
       return true;
     } catch (error) {
