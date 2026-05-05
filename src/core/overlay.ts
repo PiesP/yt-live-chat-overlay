@@ -9,7 +9,7 @@ import type { OverlayDimensions, OverlaySettings } from '@app-types';
 import {
   ensurePlayerPositioning,
   findPlayerContainerElement,
-  OVERLAY_PLAYER_LOOKUP_INTERVAL_MS,
+  PLAYER_LOOKUP_INTERVAL_MS,
 } from '@core/dom';
 import { createLogger } from '@core/logging';
 
@@ -80,7 +80,7 @@ export class Overlay {
    */
   private async findPlayerContainer(signal?: AbortSignal): Promise<HTMLElement | null> {
     const player = await findPlayerContainerElement({
-      intervalMs: OVERLAY_PLAYER_LOOKUP_INTERVAL_MS,
+      intervalMs: PLAYER_LOOKUP_INTERVAL_MS,
       signal,
     });
     if (player) {

@@ -30,8 +30,6 @@ const AUTHOR_TYPE_PRIORITY = {
   owner: 4,
 } as const satisfies Record<AuthorType, number>;
 
-type ChatMessageKind = ChatMessage['kind'];
-
 interface ParsedMessageBody {
   text: string;
   content: ContentSegment[];
@@ -44,7 +42,7 @@ export interface ChatEvent {
 }
 
 interface SupportedRenderer {
-  kind: ChatMessageKind;
+  kind: ChatMessage['kind'];
   renderer: JsonObject;
 }
 
@@ -154,7 +152,10 @@ export class ChatMessageParser {
     return null;
   }
 
-  private parseRendererMessage(renderer: JsonObject, kind: ChatMessageKind): ChatMessage | null {
+  private parseRendererMessage(
+    renderer: JsonObject,
+    kind: ChatMessage['kind']
+  ): ChatMessage | null {
     const author = this.extractDisplayText(renderer.authorName);
     if (!author) {
       return null;
@@ -197,7 +198,7 @@ export class ChatMessageParser {
 
   private extractRendererBody(
     renderer: JsonObject,
-    kind: ChatMessageKind,
+    kind: ChatMessage['kind'],
     authorType: NonNullable<ChatMessage['authorType']>
   ): ParsedMessageBody | null {
     const parsedBody =

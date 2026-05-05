@@ -84,8 +84,6 @@ export const zIndex = {
   modal: 10003,
 } as const;
 
-const clampAlpha = (alpha: number): number => Math.min(1, Math.max(0, alpha));
-
 export function parseRgbColor(colorString: string): RgbColor | null {
   const match = colorString.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
   if (!match) return null;
@@ -97,5 +95,5 @@ export function parseRgbColor(colorString: string): RgbColor | null {
 }
 
 export function rgba(color: RgbColor, alpha: number): string {
-  return `rgba(${color.r}, ${color.g}, ${color.b}, ${clampAlpha(alpha)})`;
+  return `rgba(${color.r}, ${color.g}, ${color.b}, ${Math.min(1, Math.max(0, alpha))})`;
 }

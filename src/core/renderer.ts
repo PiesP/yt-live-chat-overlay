@@ -15,8 +15,6 @@ import { RENDERER_LAYOUT } from '@core/renderer-layout';
 import { RendererMessageBuilder } from '@core/renderer-message-builder';
 import { RENDERER_STATIC_STYLES } from '@core/renderer-styles';
 
-export { RENDERER_LAYOUT } from '@core/renderer-layout';
-
 const log = createLogger('Renderer');
 
 interface ActiveMessage {
@@ -60,7 +58,8 @@ export class Renderer {
   private retryTimer: number | null = null;
   private overlayDimensionsUnsubscribe: (() => void) | null = null;
   /** Ids of messages already enqueued/rendered, for dedup across reconnect/resume. */
-  private readonly seenMessageIds = new MessageIdRegistry(200);
+  private static readonly SEEN_MESSAGE_IDS_LIMIT = 200;
+  private readonly seenMessageIds = new MessageIdRegistry(Renderer.SEEN_MESSAGE_IDS_LIMIT);
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
     this.overlay = overlay;
