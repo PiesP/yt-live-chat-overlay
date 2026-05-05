@@ -97,21 +97,25 @@ export class RendererMessageBuilder {
     img.draggable = false;
     img.decoding = 'async';
 
-    img.addEventListener('error', () => {
-      const nextCandidateUrl = candidateUrls[candidateIndex + 1];
-      if (nextCandidateUrl) {
-        candidateIndex += 1;
-        img.src = nextCandidateUrl;
-        return;
-      }
+    img.addEventListener(
+      'error',
+      () => {
+        const nextCandidateUrl = candidateUrls[candidateIndex + 1];
+        if (nextCandidateUrl) {
+          candidateIndex += 1;
+          img.src = nextCandidateUrl;
+          return;
+        }
 
-      const fallbackText = options.fallbackText?.trim();
-      if (fallbackText && img.parentNode) {
-        img.replaceWith(document.createTextNode(fallbackText));
-      } else {
-        img.remove();
-      }
-    });
+        const fallbackText = options.fallbackText?.trim();
+        if (fallbackText && img.parentNode) {
+          img.replaceWith(document.createTextNode(fallbackText));
+        } else {
+          img.remove();
+        }
+      },
+      { once: true }
+    );
 
     return img;
   }

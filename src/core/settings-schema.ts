@@ -71,8 +71,13 @@ export const OUTLINE_SETTING_KEYS = [
   'opacity',
 ] as const satisfies readonly OutlineSettingKey[];
 
+/**
+ * Matches hex color strings: #RGB, #RRGGBB, #RGBA, #RRGGBBAA.
+ * YouTube predominantly uses 6-digit hex, but we also accept
+ * the extended formats for forward compatibility.
+ */
 const isColorValue = (value: unknown): value is string =>
-  typeof value === 'string' && /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(value);
+  typeof value === 'string' && /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6,8})$/i.test(value);
 
 const clampNumber = (
   value: unknown,
