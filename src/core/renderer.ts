@@ -20,6 +20,12 @@ const log = createLogger('Renderer');
 interface ActiveMessage {
   element: HTMLDivElement;
   animation: Animation;
+  /** Cleanup callback registered as finish/cancel listener on the animation.
+   *  Stored so removeMessage can detach it before calling cancel(),
+   *  preventing the event listener from needlessly re-entering the
+   *  removal path after the message has already been deleted from
+   *  activeMessages. */
+  readonly cleanup: () => void;
 }
 
 type RenderResult =
@@ -270,6 +276,7 @@ export class Renderer {
     return {
       element,
       animation,
+      cleanup,
     };
   }
 
@@ -574,9 +581,24 @@ export class Renderer {
 
   /**
    * Remove active message
+   *
+   * Detaches animation finish/cancel listeners *before* calling cancel()
+   * so the auto-cleanup callback does not re-enter the removal path.
+   * The message is already deleted from activeMessages at this point,
+   * but removing the listeners avoids an unnecessary Set iteration in
+   * removeMessageByElement for every intentionally-cancelled animation.
    */
   private removeMessage(active: ActiveMessage): void {
     this.activeMessages.delete(active);
+
+    // Detach listeners before cancel() to avoid the cancel event
+    // re-entering removeMessageByElement unnecessarily.
+    try {
+      active.animation.removeEventListener('finish', active.cleanup);
+      active.animation.removeEventListener('cancel', active.cleanup);
+    } catch {
+      // Animation may already be detached from the element — ignore.
+    }
 
     try {
       if (active.animation.playState !== 'finished') {

@@ -20,7 +20,18 @@ import {
 
 const log = createLogger('ChatMessageParser');
 
-const EMOJI_TEXT_PATTERN = /\p{Extended_Pictographic}/u;
+/**
+ * Matches any character with the Emoji Unicode property.
+ *
+ * Uses \p{Emoji} instead of \p{Extended_Pictographic} so that compound
+ * emoji sequences (skin-tone variants, ZWJ sequences, keycap sequences)
+ * are also detected.  The broader set may include a few text-default
+ * characters (digits, #, *) that happen to have emoji presentation, but
+ * in practice these are rare in chat content and the cost of a false
+ * positive (showing a short message that would otherwise be dropped) is
+ * negligible compared to the benefit of catching real emoji.
+ */
+const EMOJI_TEXT_PATTERN = /\p{Emoji}/u;
 const EMOJI_ALIAS_PATTERN = /^:[^:\s][^:]*:$/u;
 const AUTHOR_TYPE_PRIORITY = {
   normal: 0,

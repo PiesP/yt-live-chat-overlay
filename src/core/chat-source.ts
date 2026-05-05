@@ -669,7 +669,6 @@ export class ReplayChatSource extends ChatSource {
 
   private bufferReplayEvents(events: ChatEvent[], minimumOffsetMs = 0): number {
     let highestOffsetMs = this.replayFallbackLastOffsetMs;
-    let inserted = false;
 
     for (const event of events) {
       if (event.offsetMs === undefined) {
@@ -687,20 +686,36 @@ export class ReplayChatSource extends ChatSource {
       }
 
       this.replayPendingKeys.add(key);
-      this.replayBuffer.push({
-        key,
-        message: event.message,
-        offsetMs: event.offsetMs,
-      });
-      inserted = true;
+      this.insertBufferedEvent(key, event.message, event.offsetMs);
     }
 
-    if (inserted) {
-      this.replayBuffer.sort((left, right) => left.offsetMs - right.offsetMs);
-      this.trimReplayBuffer();
-    }
-
+    this.trimReplayBuffer();
     return highestOffsetMs;
+  }
+
+  /**
+   * Insert a single event into the replay buffer using binary search,
+   * avoiding a full sort of the buffer on every batch of incoming events.
+   */
+  private insertBufferedEvent(key: string, message: ChatMessage, offsetMs: number): void {
+    let low = 0;
+    let high = this.replayBuffer.length;
+
+    while (low < high) {
+      const mid = (low + high) >>> 1;
+      const midItem = this.replayBuffer[mid];
+      if (!midItem) {
+        break;
+      }
+
+      if (midItem.offsetMs <= offsetMs) {
+        low = mid + 1;
+      } else {
+        high = mid;
+      }
+    }
+
+    this.replayBuffer.splice(low, 0, { key, message, offsetMs });
   }
 
   private flushReplayBuffer(currentOffsetMs: number): void {
