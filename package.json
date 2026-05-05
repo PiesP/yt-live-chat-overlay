@@ -16,8 +16,9 @@
     "fmt": "biome check --linter-enabled=false .",
     "fmt:fix": "biome check --write --linter-enabled=false .",
     "fmt:check": "pnpm -s fmt",
-    "quality": "pnpm -s fmt && pnpm -s lint && pnpm -s check && pnpm -s knip",
-    "quality:fix": "pnpm -s fmt:fix && pnpm -s lint:fix && pnpm -s check && pnpm -s knip",
+    "circular": "pnpm dlx madge --circular src/core/*.ts",
+    "quality": "pnpm -s fmt && pnpm -s lint && pnpm -s check && pnpm -s circular && pnpm -s knip",
+    "quality:fix": "pnpm -s fmt:fix && pnpm -s lint:fix && pnpm -s check && pnpm -s circular && pnpm -s knip",
     "quality:ci": "pnpm -s quality",
     "clean": "rm -rf dist",
     "prebuild": "pnpm quality"
