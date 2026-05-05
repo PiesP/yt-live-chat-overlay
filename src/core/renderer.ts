@@ -38,8 +38,6 @@ export const RENDERER_LAYOUT = {
   QUEUE_MAX_SIZE: 30,
 } as const;
 
-const LAYOUT = RENDERER_LAYOUT;
-
 const log = createLogger('Renderer');
 
 interface ActiveMessage {
@@ -72,7 +70,7 @@ export class Renderer {
   private readonly laneAllocator: LaneAllocator;
   private readonly messageBuilder: RendererMessageBuilder;
   private activeMessages: Set<ActiveMessage> = new Set();
-  private readonly renderQueue = new RenderQueue(LAYOUT.QUEUE_MAX_SIZE);
+  private readonly renderQueue = new RenderQueue(RENDERER_LAYOUT.QUEUE_MAX_SIZE);
   private readonly rateLimiter: RenderRateLimiter;
   private isPaused = false;
   private pausedAt: number | null = null;
@@ -92,13 +90,13 @@ export class Renderer {
     this.laneAllocator = new LaneAllocator({
       getFontSize: () => this.settings.fontSize,
       getEffectiveSpeedPxPerSec: () => this.getEffectiveSpeedPxPerSec(),
-      globalStaggerMs: LAYOUT.GLOBAL_STAGGER_MS,
-      safeDistanceScale: LAYOUT.SAFE_DISTANCE_SCALE,
-      safeDistanceMin: LAYOUT.SAFE_DISTANCE_MIN,
-      verticalClearTimeMin: LAYOUT.VERTICAL_CLEAR_TIME_MIN,
-      verticalClearTimeMax: LAYOUT.VERTICAL_CLEAR_TIME_MAX,
-      laneHeightPaddingScale: LAYOUT.LANE_HEIGHT_PADDING_SCALE,
-      laneHeightPaddingMin: LAYOUT.LANE_HEIGHT_PADDING_MIN,
+      globalStaggerMs: RENDERER_LAYOUT.GLOBAL_STAGGER_MS,
+      safeDistanceScale: RENDERER_LAYOUT.SAFE_DISTANCE_SCALE,
+      safeDistanceMin: RENDERER_LAYOUT.SAFE_DISTANCE_MIN,
+      verticalClearTimeMin: RENDERER_LAYOUT.VERTICAL_CLEAR_TIME_MIN,
+      verticalClearTimeMax: RENDERER_LAYOUT.VERTICAL_CLEAR_TIME_MAX,
+      laneHeightPaddingScale: RENDERER_LAYOUT.LANE_HEIGHT_PADDING_SCALE,
+      laneHeightPaddingMin: RENDERER_LAYOUT.LANE_HEIGHT_PADDING_MIN,
     });
     this.rateLimiter = new RenderRateLimiter(() => this.settings.maxMessagesPerSecond);
     this.laneAllocator.reset(this.overlay.getDimensions());
@@ -248,19 +246,24 @@ export class Renderer {
     element.style.visibility = 'visible';
 
     // Calculate animation duration and padding
-    const exitPadding = Math.max(fontSize * LAYOUT.EXIT_PADDING_SCALE, LAYOUT.EXIT_PADDING_MIN);
+    const exitPadding = Math.max(
+      fontSize * RENDERER_LAYOUT.EXIT_PADDING_SCALE,
+      RENDERER_LAYOUT.EXIT_PADDING_MIN
+    );
     const distance = dimensions.width + textWidth + exitPadding;
 
     // Optimized duration for better pacing
     const effectiveSpeedPxPerSec = this.getEffectiveSpeedPxPerSec();
     const duration = Math.max(
-      LAYOUT.DURATION_MIN,
-      Math.min(LAYOUT.DURATION_MAX, (distance / effectiveSpeedPxPerSec) * 1000)
+      RENDERER_LAYOUT.DURATION_MIN,
+      Math.min(RENDERER_LAYOUT.DURATION_MAX, (distance / effectiveSpeedPxPerSec) * 1000)
     );
 
     // Small random jitter so messages entering around the same time don't
     // align into a visible diagonal staircase.
-    const laneDelay = Math.floor(Math.random() * LAYOUT.LANE_DELAY_CYCLE * LAYOUT.LANE_DELAY_MS);
+    const laneDelay = Math.floor(
+      Math.random() * RENDERER_LAYOUT.LANE_DELAY_CYCLE * RENDERER_LAYOUT.LANE_DELAY_MS
+    );
 
     // Create Web Animation
     const animation = element.animate(
@@ -353,7 +356,7 @@ export class Renderer {
     this.renderQueue.sortByTimestamp();
 
     const now = Date.now();
-    const lookaheadCount = Math.min(LAYOUT.QUEUE_LOOKAHEAD_LIMIT, this.renderQueue.length);
+    const lookaheadCount = Math.min(RENDERER_LAYOUT.QUEUE_LOOKAHEAD_LIMIT, this.renderQueue.length);
     let shortestWaitMs: number | null = null;
     const renderedOrDropped: number[] = [];
 
@@ -370,11 +373,11 @@ export class Renderer {
       // Rate limit: check at render time, not enqueue time, so bursts
       // don't bypass the limit while messages sit in the queue.
       if (!this.rateLimiter.canAccept(now)) {
-        queued.nextAttemptAt = now + LAYOUT.RETRY_DELAY_MIN_MS;
+        queued.nextAttemptAt = now + RENDERER_LAYOUT.RETRY_DELAY_MIN_MS;
         shortestWaitMs =
           shortestWaitMs === null
-            ? LAYOUT.RETRY_DELAY_MIN_MS
-            : Math.min(shortestWaitMs, LAYOUT.RETRY_DELAY_MIN_MS);
+            ? RENDERER_LAYOUT.RETRY_DELAY_MIN_MS
+            : Math.min(shortestWaitMs, RENDERER_LAYOUT.RETRY_DELAY_MIN_MS);
         continue;
       }
 
@@ -404,7 +407,7 @@ export class Renderer {
     }
 
     if (this.renderQueue.length > 0) {
-      this.scheduleRetry(shortestWaitMs ?? LAYOUT.RETRY_DELAY_MAX_MS);
+      this.scheduleRetry(shortestWaitMs ?? RENDERER_LAYOUT.RETRY_DELAY_MAX_MS);
     }
   }
 
@@ -421,7 +424,10 @@ export class Renderer {
   private scheduleRetry(waitMs: number): void {
     if (this.isPaused) return;
 
-    const delay = Math.max(LAYOUT.RETRY_DELAY_MIN_MS, Math.min(waitMs, LAYOUT.RETRY_DELAY_MAX_MS));
+    const delay = Math.max(
+      RENDERER_LAYOUT.RETRY_DELAY_MIN_MS,
+      Math.min(waitMs, RENDERER_LAYOUT.RETRY_DELAY_MAX_MS)
+    );
     this.clearRetryTimer();
 
     this.retryTimer = window.setTimeout(() => {
