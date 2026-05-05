@@ -323,6 +323,10 @@ export class Renderer {
       return;
     }
 
+    // Sort by message timestamp so earlier chat messages get rendered
+    // before later ones, keeping chat order approximately correct.
+    this.renderQueue.sortByTimestamp();
+
     const now = Date.now();
     const lookaheadCount = Math.min(LAYOUT.QUEUE_LOOKAHEAD_LIMIT, this.renderQueue.length);
     let shortestWaitMs: number | null = null;

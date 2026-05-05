@@ -116,4 +116,8 @@ export class RenderQueue {
 
     this.items = [];
   }
+
+  sortByTimestamp(): void {
+    this.items.sort((left, right) => left.message.timestamp - right.message.timestamp);
+  }
 }
