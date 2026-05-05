@@ -95,56 +95,58 @@ export const cloneSettings = (settings: Readonly<OverlaySettings>): OverlaySetti
 
 const createDefaultSettings = (): OverlaySettings => cloneSettings(DEFAULT_SETTINGS);
 
+const ROOT_NUMERIC_FIELDS: ReadonlyArray<{
+  key:
+    | 'speedPxPerSec'
+    | 'fontSize'
+    | 'opacity'
+    | 'superChatOpacity'
+    | 'safeTop'
+    | 'safeBottom'
+    | 'maxConcurrentMessages'
+    | 'maxMessagesPerSecond'
+    | 'minTextLength'
+    | 'laneSpacing';
+  limits: Readonly<{ min: number; max: number }>;
+  clamp: boolean;
+}> = [
+  { key: 'speedPxPerSec', limits: SETTINGS_LIMITS.speedPxPerSec, clamp: false },
+  { key: 'fontSize', limits: SETTINGS_LIMITS.fontSize, clamp: false },
+  { key: 'opacity', limits: SETTINGS_LIMITS.opacity, clamp: false },
+  { key: 'superChatOpacity', limits: SETTINGS_LIMITS.superChatOpacity, clamp: false },
+  { key: 'safeTop', limits: SETTINGS_LIMITS.safeTop, clamp: false },
+  { key: 'safeBottom', limits: SETTINGS_LIMITS.safeBottom, clamp: false },
+  { key: 'maxConcurrentMessages', limits: SETTINGS_LIMITS.maxConcurrentMessages, clamp: true },
+  { key: 'maxMessagesPerSecond', limits: SETTINGS_LIMITS.maxMessagesPerSecond, clamp: true },
+  { key: 'minTextLength', limits: SETTINGS_LIMITS.minTextLength, clamp: true },
+  { key: 'laneSpacing', limits: SETTINGS_LIMITS.laneSpacing, clamp: true },
+];
+
+const OUTLINE_NUMERIC_FIELDS: ReadonlyArray<{
+  key: 'widthPx' | 'blurPx' | 'opacity';
+  limits: Readonly<{ min: number; max: number }>;
+  clamp: boolean;
+}> = [
+  { key: 'widthPx', limits: SETTINGS_LIMITS.outlineWidthPx, clamp: false },
+  { key: 'blurPx', limits: SETTINGS_LIMITS.outlineBlurPx, clamp: false },
+  { key: 'opacity', limits: SETTINGS_LIMITS.outlineOpacity, clamp: false },
+];
+
 const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings => {
   const d = DEFAULT_SETTINGS;
   const n = createDefaultSettings();
 
   n.enabled = typeof settings.enabled === 'boolean' ? settings.enabled : d.enabled;
-  n.speedPxPerSec = clampNumber(
-    settings.speedPxPerSec,
-    d.speedPxPerSec,
-    SETTINGS_LIMITS.speedPxPerSec,
-    false
-  );
-  n.fontSize = clampNumber(settings.fontSize, d.fontSize, SETTINGS_LIMITS.fontSize, false);
-  n.opacity = clampNumber(settings.opacity, d.opacity, SETTINGS_LIMITS.opacity, false);
-  n.superChatOpacity = clampNumber(
-    settings.superChatOpacity,
-    d.superChatOpacity,
-    SETTINGS_LIMITS.superChatOpacity,
-    false
-  );
-  n.safeTop = clampNumber(settings.safeTop, d.safeTop, SETTINGS_LIMITS.safeTop, false);
-  n.safeBottom = clampNumber(settings.safeBottom, d.safeBottom, SETTINGS_LIMITS.safeBottom, false);
-  n.maxConcurrentMessages = clampNumber(
-    settings.maxConcurrentMessages,
-    d.maxConcurrentMessages,
-    SETTINGS_LIMITS.maxConcurrentMessages,
-    true
-  );
-  n.maxMessagesPerSecond = clampNumber(
-    settings.maxMessagesPerSecond,
-    d.maxMessagesPerSecond,
-    SETTINGS_LIMITS.maxMessagesPerSecond,
-    true
-  );
   n.allowShortTextMessages =
     typeof settings.allowShortTextMessages === 'boolean'
       ? settings.allowShortTextMessages
       : d.allowShortTextMessages;
-  n.minTextLength = clampNumber(
-    settings.minTextLength,
-    d.minTextLength,
-    SETTINGS_LIMITS.minTextLength,
-    true
-  );
+
+  for (const { key, limits, clamp } of ROOT_NUMERIC_FIELDS) {
+    n[key] = clampNumber(settings[key], d[key], limits, clamp);
+  }
+
   n.logLevel = isLogLevel(settings.logLevel) ? settings.logLevel : d.logLevel;
-  n.laneSpacing = clampNumber(
-    settings.laneSpacing,
-    d.laneSpacing,
-    SETTINGS_LIMITS.laneSpacing,
-    true
-  );
 
   for (const key of SHOW_AUTHOR_KEYS) {
     n.showAuthor[key] =
@@ -157,24 +159,9 @@ const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings
 
   n.outline.enabled =
     typeof settings.outline.enabled === 'boolean' ? settings.outline.enabled : d.outline.enabled;
-  n.outline.widthPx = clampNumber(
-    settings.outline.widthPx,
-    d.outline.widthPx,
-    SETTINGS_LIMITS.outlineWidthPx,
-    false
-  );
-  n.outline.blurPx = clampNumber(
-    settings.outline.blurPx,
-    d.outline.blurPx,
-    SETTINGS_LIMITS.outlineBlurPx,
-    false
-  );
-  n.outline.opacity = clampNumber(
-    settings.outline.opacity,
-    d.outline.opacity,
-    SETTINGS_LIMITS.outlineOpacity,
-    false
-  );
+  for (const { key, limits, clamp } of OUTLINE_NUMERIC_FIELDS) {
+    n.outline[key] = clampNumber(settings.outline[key], d.outline[key], limits, clamp);
+  }
 
   return n;
 };

@@ -14,6 +14,7 @@ import {
   VIDEO_SELECTORS,
 } from '@core/dom';
 import { createLogger } from '@core/logging';
+import { MessageIdRegistry } from '@core/message-id-registry';
 import {
   bootstrapChatSession,
   type ChatBootstrapData,
@@ -95,7 +96,7 @@ export class ChatSource {
   private replayConsecutiveFailures = 0;
   private replayNextAllowedFetchAt = 0;
   private readonly recentMessages: ChatMessage[] = [];
-  private readonly replaySeenKeys = new Set<string>();
+  private readonly replayKeyRegistry = new MessageIdRegistry(MAX_TRACKED_REPLAY_KEYS);
   private readonly replayPendingKeys = new Set<string>();
   private replayBuffer: ReplayBufferedMessage[] = [];
 
@@ -255,7 +256,7 @@ export class ChatSource {
     this.replayConsecutiveFailures = 0;
     this.replayNextAllowedFetchAt = 0;
     this.replayBuffer = [];
-    this.replaySeenKeys.clear();
+    this.replayKeyRegistry.clear();
     this.replayPendingKeys.clear();
   }
 
@@ -290,21 +291,7 @@ export class ChatSource {
   }
 
   private trackReplayKey(key: string): void {
-    this.replaySeenKeys.add(key);
-    if (this.replaySeenKeys.size <= MAX_TRACKED_REPLAY_KEYS) {
-      return;
-    }
-
-    const iterator = this.replaySeenKeys.values();
-    const overflow = this.replaySeenKeys.size - MAX_TRACKED_REPLAY_KEYS;
-    for (let index = 0; index < overflow; index++) {
-      const next = iterator.next();
-      if (next.done || next.value === undefined) {
-        break;
-      }
-
-      this.replaySeenKeys.delete(next.value);
-    }
+    this.replayKeyRegistry.mark(key);
   }
 
   private async resolveBootstrap(signal?: AbortSignal): Promise<ChatBootstrapResolution> {
@@ -355,18 +342,23 @@ export class ChatSource {
     log.warn('Chat source is unavailable:', resolution.reason);
   }
 
-  private async requestLivePayload(
+  private async requestPayload<TCallArgs extends unknown[]>(
+    fetchFn: (
+      bootstrap: ChatBootstrapData,
+      continuation: InnertubeContinuationData,
+      ...args: TCallArgs
+    ) => Promise<unknown>,
     continuation: InnertubeContinuationData,
-    signal?: AbortSignal
+    ...fetchArgs: TCallArgs
   ): Promise<LiveChatPayload | null> {
     if (!this.bootstrap) {
       return null;
     }
 
-    const response = await fetchLiveChat(this.bootstrap, continuation, signal);
+    const response = await fetchFn(this.bootstrap, continuation, ...fetchArgs);
     const payload = getLiveChatPayload(response);
     if (!payload) {
-      log.warn('Live chat response did not contain a liveChatContinuation payload');
+      log.warn('Failed to parse live chat payload from response');
       return null;
     }
 
@@ -374,24 +366,19 @@ export class ChatSource {
     return payload;
   }
 
-  private async requestReplayPayload(
+  private requestLivePayload(
+    continuation: InnertubeContinuationData,
+    signal?: AbortSignal
+  ): Promise<LiveChatPayload | null> {
+    return this.requestPayload(fetchLiveChat, continuation, signal);
+  }
+
+  private requestReplayPayload(
     continuation: InnertubeContinuationData,
     signal?: AbortSignal,
     playerOffsetMs?: number
   ): Promise<LiveChatPayload | null> {
-    if (!this.bootstrap) {
-      return null;
-    }
-
-    const response = await fetchReplayChat(this.bootstrap, continuation, playerOffsetMs, signal);
-    const payload = getLiveChatPayload(response);
-    if (!payload) {
-      log.warn('Replay chat response did not contain a liveChatContinuation payload');
-      return null;
-    }
-
-    this.markActivity();
-    return payload;
+    return this.requestPayload(fetchReplayChat, continuation, playerOffsetMs, signal);
   }
 
   private async refreshBootstrap(signal?: AbortSignal): Promise<boolean> {
@@ -493,7 +480,7 @@ export class ChatSource {
       }
 
       const key = this.makeReplayKey(event.message, event.offsetMs);
-      if (this.replaySeenKeys.has(key) || this.replayPendingKeys.has(key)) {
+      if (this.replayKeyRegistry.has(key) || this.replayPendingKeys.has(key)) {
         continue;
       }
 
