@@ -405,17 +405,20 @@ export class SettingsUiForm {
 
   populateForm(settings: Readonly<OverlaySettings>): void {
     this.isUpdating = true;
-    for (const key of ROOT_SETTING_KEYS) {
-      this.populateRootSetting(key, settings);
-    }
+    try {
+      for (const key of ROOT_SETTING_KEYS) {
+        this.populateRootSetting(key, settings);
+      }
 
-    this.setAuthorSettings(settings);
-    for (const key of OUTLINE_SETTING_KEYS) {
-      this.populateOutlineSetting(key, settings.outline);
-    }
+      this.setAuthorSettings(settings);
+      for (const key of OUTLINE_SETTING_KEYS) {
+        this.populateOutlineSetting(key, settings.outline);
+      }
 
-    this.syncMinTextLengthState();
-    this.isUpdating = false;
+      this.syncMinTextLengthState();
+    } finally {
+      this.isUpdating = false;
+    }
   }
 
   private populateRootSetting(

@@ -99,7 +99,7 @@ export class ChatSource {
   private readonly replayPendingKeys = new Set<string>();
   private replayBuffer: ReplayBufferedMessage[] = [];
 
-  constructor(getSettings: (() => Readonly<OverlaySettings>) | null = null) {
+  constructor(getSettings: () => Readonly<OverlaySettings>) {
     this.parser = new ChatMessageParser(getSettings);
   }
 

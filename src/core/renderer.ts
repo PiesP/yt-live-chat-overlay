@@ -307,7 +307,8 @@ export class Renderer {
           this.activeMessages.delete(active);
           active.element.remove();
         }
-      } catch {
+      } catch (error) {
+        log.debug('Failed to check animation playState during sweep:', error);
         this.activeMessages.delete(active);
       }
     }

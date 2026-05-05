@@ -13,10 +13,10 @@ import { createLogger } from '@core/logging';
 const log = createLogger('VideoSync');
 
 interface VideoSyncCallbacks {
-  onPause?: () => void;
-  onPlay?: () => void;
-  onSeeking?: () => void;
-  onRateChange?: (rate: number) => void;
+  onPause: () => void;
+  onPlay: () => void;
+  onSeeking: () => void;
+  onRateChange: (rate: number) => void;
 }
 
 const DETECTION_ATTEMPTS = 5;
@@ -31,12 +31,12 @@ export class VideoSync {
   private readonly callbacks: VideoSyncCallbacks;
   private initPromise: Promise<boolean> | null = null;
   private readonly boundHandlers = {
-    pause: () => this.callbacks.onPause?.(),
-    play: () => this.callbacks.onPlay?.(),
+    pause: () => this.callbacks.onPause(),
+    play: () => this.callbacks.onPlay(),
     seeking: () => {
-      this.callbacks.onSeeking?.();
+      this.callbacks.onSeeking();
     },
-    ratechange: () => this.callbacks.onRateChange?.(this.videoElement?.playbackRate ?? 1.0),
+    ratechange: () => this.callbacks.onRateChange(this.videoElement?.playbackRate ?? 1.0),
   };
 
   constructor(callbacks: VideoSyncCallbacks) {
@@ -79,11 +79,11 @@ export class VideoSync {
     video.addEventListener('seeking', this.boundHandlers.seeking);
     video.addEventListener('ratechange', this.boundHandlers.ratechange);
 
-    this.callbacks.onRateChange?.(video.playbackRate || 1.0);
+    this.callbacks.onRateChange(video.playbackRate || 1.0);
     if (video.paused) {
-      this.callbacks.onPause?.();
+      this.callbacks.onPause();
     } else {
-      this.callbacks.onPlay?.();
+      this.callbacks.onPlay();
     }
 
     log.debug('Initialized');
