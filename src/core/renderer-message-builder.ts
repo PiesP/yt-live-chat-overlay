@@ -6,8 +6,12 @@ import type {
   OverlaySettings,
   SuperChatInfo,
 } from '@app-types';
-import { colors, parseRgbColor, type RgbColor } from '@core/design-tokens';
-import { RENDERER_LAYOUT as LAYOUT } from '@core/renderer-layout';
+import {
+  colors,
+  RENDERER_LAYOUT as LAYOUT,
+  parseRgbColor,
+  type RgbColor,
+} from '@core/design-tokens';
 import { normalizeYouTubeImageUrl } from '@core/youtubei-chat';
 
 interface AuthorNameOptions {

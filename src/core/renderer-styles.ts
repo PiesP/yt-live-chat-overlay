@@ -1,5 +1,12 @@
-import { borderRadius, colors, rgba, shadows, spacing, typography } from '@core/design-tokens';
-import { RENDERER_LAYOUT } from '@core/renderer-layout';
+import {
+  borderRadius,
+  colors,
+  RENDERER_LAYOUT,
+  rgba,
+  shadows,
+  spacing,
+  typography,
+} from '@core/design-tokens';
 
 export const RENDERER_STATIC_STYLES = `
   .yt-chat-overlay-message {
