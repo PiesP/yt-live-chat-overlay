@@ -21,6 +21,7 @@ interface LaneAllocatorOptions {
 export class LaneAllocator {
   private lanes: LaneState[] = [];
   private lastRenderStartTime = 0;
+  private roundRobinIndex = 0;
 
   constructor(private readonly options: LaneAllocatorOptions) {}
 
@@ -90,10 +91,12 @@ export class LaneAllocator {
         ? readyNow
         : candidates.filter((candidate) => candidate.readyTime === minReadyTime);
 
-    const chosen = pool[Math.floor(Math.random() * pool.length)];
+    const chosen = pool[this.roundRobinIndex % pool.length] ?? pool[0];
     if (!chosen) {
       return null;
     }
+
+    this.roundRobinIndex = (this.roundRobinIndex + 1) % pool.length;
 
     const chosenLane = this.lanes[chosen.startIndex];
     if (!chosenLane) {
