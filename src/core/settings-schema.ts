@@ -26,28 +26,6 @@ export const SHOW_AUTHOR_KEYS = [
   'superChat',
 ] as const satisfies ReadonlyArray<keyof OverlaySettings['showAuthor']>;
 
-const RESET_RENDERER_ROOT_KEYS = [
-  'enabled',
-  'speedPxPerSec',
-  'fontSize',
-  'opacity',
-  'superChatOpacity',
-  'safeTop',
-  'safeBottom',
-  'maxConcurrentMessages',
-  'maxMessagesPerSecond',
-  'allowShortTextMessages',
-  'minTextLength',
-  'laneSpacing',
-] as const satisfies readonly RootScalarSettingKey[];
-
-const RESET_RENDERER_OUTLINE_KEYS = [
-  'enabled',
-  'widthPx',
-  'blurPx',
-  'opacity',
-] as const satisfies readonly OutlineSettingKey[];
-
 export const ROOT_SETTING_KEYS = [
   'enabled',
   'speedPxPerSec',
@@ -70,6 +48,10 @@ export const OUTLINE_SETTING_KEYS = [
   'blurPx',
   'opacity',
 ] as const satisfies readonly OutlineSettingKey[];
+
+const RESET_RENDERER_ROOT_KEYS: ReadonlyArray<RootScalarSettingKey> = ROOT_SETTING_KEYS.filter(
+  (k) => k !== 'logLevel'
+);
 
 /**
  * Matches hex color strings: #RGB, #RRGGBB, #RGBA, #RRGGBBAA.
@@ -197,4 +179,4 @@ export const shouldResetRendererForSettingsChange = (
   RESET_RENDERER_ROOT_KEYS.some((key) => previous[key] !== next[key]) ||
   SHOW_AUTHOR_KEYS.some((key) => previous.showAuthor[key] !== next.showAuthor[key]) ||
   AUTHOR_COLOR_KEYS.some((key) => previous.colors[key] !== next.colors[key]) ||
-  RESET_RENDERER_OUTLINE_KEYS.some((key) => previous.outline[key] !== next.outline[key]);
+  OUTLINE_SETTING_KEYS.some((key) => previous.outline[key] !== next.outline[key]);

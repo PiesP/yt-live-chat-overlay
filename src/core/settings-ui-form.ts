@@ -1,4 +1,5 @@
 import { isLogLevel, type OverlaySettings } from '@app-types';
+import { SETTINGS_LIMITS } from '@core/settings-definitions';
 import {
   AUTHOR_COLOR_KEYS,
   cloneSettings,
@@ -9,13 +10,6 @@ import {
   type RootScalarSettingKey,
   SHOW_AUTHOR_KEYS,
 } from '@core/settings-schema';
-import {
-  formatRootNumericSettingForInput,
-  getOutlineNumericInputAttributes,
-  getRootNumericInputAttributes,
-  normalizeOutlineNumericInputValue,
-  normalizeRootNumericInputValue,
-} from '@core/settings-ui-format';
 
 // ── Constants shared with SettingsUi ────────────────────────────────────────
 
@@ -23,6 +17,116 @@ export const STYLE_ID = 'yt-chat-overlay-settings-style';
 export const BUTTON_ID = 'yt-chat-overlay-settings-button';
 export const BACKDROP_ID = 'yt-chat-overlay-settings-backdrop';
 export const TITLE_ID = 'yt-chat-overlay-settings-title';
+
+// ── UI value formatting (inlined from settings-ui-format.ts) ────────────────
+
+const OUTLINE_NUMERIC_LIMITS_KEY: Record<
+  Exclude<OutlineSettingKey, 'enabled'>,
+  keyof typeof SETTINGS_LIMITS
+> = {
+  widthPx: 'outlineWidthPx',
+  blurPx: 'outlineBlurPx',
+  opacity: 'outlineOpacity',
+};
+
+const ROOT_ROUNDED_KEYS = new Set<RootScalarSettingKey>([
+  'maxConcurrentMessages',
+  'maxMessagesPerSecond',
+  'minTextLength',
+  'laneSpacing',
+]);
+
+interface NumericInputOptions {
+  readonly scale?: number;
+  readonly precision?: number;
+}
+
+/** Settings displayed as percentages in the UI (stored as 0-1 internally). */
+const ROOT_NUMERIC_INPUT_OPTIONS: Partial<Record<RootScalarSettingKey, NumericInputOptions>> = {
+  superChatOpacity: { scale: 100, precision: 0 },
+  safeTop: { scale: 100, precision: 1 },
+  safeBottom: { scale: 100, precision: 1 },
+};
+
+const scaleUiValue = (value: number, scale: number): number => Number((value * scale).toFixed(4));
+
+const getRootScale = (key: RootScalarSettingKey): number =>
+  ROOT_NUMERIC_INPUT_OPTIONS[key]?.scale ?? 1;
+
+const normalizeNumericValue = (
+  value: unknown,
+  fallback: number,
+  limits: Readonly<{ min: number; max: number }>,
+  rounded: boolean,
+  scale = 1
+): number => {
+  const scaledValue = typeof value === 'number' ? value / scale : Number(value) / scale;
+  const numericValue = Number.isFinite(scaledValue) ? scaledValue : fallback;
+  const clamped = Math.min(limits.max, Math.max(limits.min, numericValue));
+  return rounded ? Math.round(clamped) : clamped;
+};
+
+export const formatRootNumericSettingForInput = (
+  key: RootScalarSettingKey,
+  value: number
+): string | number => {
+  const options = ROOT_NUMERIC_INPUT_OPTIONS[key];
+  const scaledValue = scaleUiValue(value, options?.scale ?? 1);
+  return options?.precision === undefined ? scaledValue : scaledValue.toFixed(options.precision);
+};
+
+export const normalizeRootNumericInputValue = (
+  key: RootScalarSettingKey,
+  value: unknown,
+  fallback: number
+): number => {
+  if (!(key in SETTINGS_LIMITS)) return fallback;
+  return normalizeNumericValue(
+    value,
+    fallback,
+    SETTINGS_LIMITS[key as keyof typeof SETTINGS_LIMITS],
+    ROOT_ROUNDED_KEYS.has(key),
+    getRootScale(key)
+  );
+};
+
+export const normalizeOutlineNumericInputValue = (
+  key: Exclude<OutlineSettingKey, 'enabled'>,
+  value: unknown,
+  fallback: number
+): number => {
+  const limitsKey = OUTLINE_NUMERIC_LIMITS_KEY[key];
+  return normalizeNumericValue(value, fallback, SETTINGS_LIMITS[limitsKey], false);
+};
+
+export const getRootNumericInputAttributes = (
+  key: RootScalarSettingKey
+): Readonly<{ min: number; max: number; step: number }> => {
+  if (!(key in SETTINGS_LIMITS))
+    throw new TypeError(`Setting "${key}" does not define numeric limits.`);
+
+  const limits = SETTINGS_LIMITS[key as keyof typeof SETTINGS_LIMITS];
+  const scale = getRootScale(key);
+
+  return {
+    min: scaleUiValue(limits.min, scale),
+    max: scaleUiValue(limits.max, scale),
+    step: scaleUiValue(limits.step, scale),
+  };
+};
+
+export const getOutlineNumericInputAttributes = (
+  key: Exclude<OutlineSettingKey, 'enabled'>
+): Readonly<{ min: number; max: number; step: number }> => {
+  const limitsKey = OUTLINE_NUMERIC_LIMITS_KEY[key];
+  const limits = SETTINGS_LIMITS[limitsKey];
+
+  return {
+    min: limits.min,
+    max: limits.max,
+    step: limits.step,
+  };
+};
 
 // ── Helper ──────────────────────────────────────────────────────────────────
 
