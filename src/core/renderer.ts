@@ -63,6 +63,8 @@ export class Renderer {
   private styleElement: HTMLStyleElement | null = null;
   private retryTimer: number | null = null;
   private overlayDimensionsUnsubscribe: (() => void) | null = null;
+  private sweepCounter = 0;
+  private readonly SWEEP_INTERVAL = 8;
   /** Ids of messages already enqueued/rendered, for dedup across reconnect/resume. */
   private static readonly SEEN_MESSAGE_IDS_LIMIT = 200;
   private readonly seenMessageIds = new MessageIdRegistry(Renderer.SEEN_MESSAGE_IDS_LIMIT);
@@ -312,6 +314,10 @@ export class Renderer {
    * concurrent modification during iteration.
    */
   private sweepStaleAnimations(): void {
+    this.sweepCounter++;
+    if (this.sweepCounter % this.SWEEP_INTERVAL !== 0) return;
+    if (this.activeMessages.size === 0) return;
+
     this.activeMessages.forEach((active) => {
       try {
         if (active.animation.playState === 'finished') {
