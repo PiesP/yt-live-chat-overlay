@@ -12,7 +12,6 @@ import {
   PLAYER_LOOKUP_INTERVAL_MS,
 } from '@core/dom';
 import { createLogger } from '@core/logging';
-import type { OverlayView } from '@core/overlay-view';
 
 const log = createLogger('Overlay');
 
@@ -67,7 +66,7 @@ const areOverlayDimensionsEqual = (
   areFloatsEqual(previous?.laneHeight ?? 0, next?.laneHeight ?? 0) &&
   previous?.laneCount === next?.laneCount;
 
-export class Overlay implements OverlayView {
+export class Overlay {
   private container: HTMLDivElement | null = null;
   private playerElement: HTMLElement | null = null;
   private resizeObserver: ResizeObserver | null = null;
