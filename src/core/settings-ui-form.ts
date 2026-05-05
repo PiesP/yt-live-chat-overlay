@@ -20,7 +20,7 @@ export const TITLE_ID = 'yt-chat-overlay-settings-title';
 
 // ── UI value formatting (inlined from settings-ui-format.ts) ────────────────
 
-const OUTLINE_NUMERIC_LIMITS_KEY: Record<
+const OUTLINE_LIMITS_KEY: Record<
   Exclude<OutlineSettingKey, 'enabled'>,
   keyof typeof SETTINGS_LIMITS
 > = {
@@ -29,12 +29,12 @@ const OUTLINE_NUMERIC_LIMITS_KEY: Record<
   opacity: 'outlineOpacity',
 };
 
-const ROOT_ROUNDED_KEYS = new Set<RootScalarSettingKey>([
+const ROOT_ROUNDED_KEYS: readonly RootScalarSettingKey[] = [
   'maxConcurrentMessages',
   'maxMessagesPerSecond',
   'minTextLength',
   'laneSpacing',
-]);
+] as const;
 
 interface NumericInputOptions {
   readonly scale?: number;
@@ -85,7 +85,7 @@ export const normalizeRootNumericInputValue = (
     value,
     fallback,
     SETTINGS_LIMITS[key as keyof typeof SETTINGS_LIMITS],
-    ROOT_ROUNDED_KEYS.has(key),
+    ROOT_ROUNDED_KEYS.includes(key),
     getRootScale(key)
   );
 };
@@ -95,18 +95,20 @@ export const normalizeOutlineNumericInputValue = (
   value: unknown,
   fallback: number
 ): number => {
-  const limitsKey = OUTLINE_NUMERIC_LIMITS_KEY[key];
+  const limitsKey = OUTLINE_LIMITS_KEY[key];
   return normalizeNumericValue(value, fallback, SETTINGS_LIMITS[limitsKey], false);
 };
 
-export const getRootNumericInputAttributes = (
-  key: RootScalarSettingKey
+export const getNumericInputAttributes = (
+  key: RootScalarSettingKey | Exclude<OutlineSettingKey, 'enabled'>
 ): Readonly<{ min: number; max: number; step: number }> => {
-  if (!(key in SETTINGS_LIMITS))
-    throw new TypeError(`Setting "${key}" does not define numeric limits.`);
+  const limitsKey =
+    key in SETTINGS_LIMITS
+      ? (key as keyof typeof SETTINGS_LIMITS)
+      : OUTLINE_LIMITS_KEY[key as Exclude<OutlineSettingKey, 'enabled'>];
 
-  const limits = SETTINGS_LIMITS[key as keyof typeof SETTINGS_LIMITS];
-  const scale = getRootScale(key);
+  const limits = SETTINGS_LIMITS[limitsKey];
+  const scale = getRootScale(key as RootScalarSettingKey);
 
   return {
     min: scaleUiValue(limits.min, scale),
@@ -115,30 +117,14 @@ export const getRootNumericInputAttributes = (
   };
 };
 
-export const getOutlineNumericInputAttributes = (
-  key: Exclude<OutlineSettingKey, 'enabled'>
-): Readonly<{ min: number; max: number; step: number }> => {
-  const limitsKey = OUTLINE_NUMERIC_LIMITS_KEY[key];
-  const limits = SETTINGS_LIMITS[limitsKey];
-
-  return {
-    min: limits.min,
-    max: limits.max,
-    step: limits.step,
-  };
-};
-
 // ── Helper ──────────────────────────────────────────────────────────────────
 
 const applyNumberInputAttributes = (
   input: HTMLInputElement,
-  scope: 'root' | 'outline',
+  _scope: 'root' | 'outline',
   key: RootScalarSettingKey | Exclude<OutlineSettingKey, 'enabled'>
 ): void => {
-  const { min, max, step } =
-    scope === 'root'
-      ? getRootNumericInputAttributes(key as RootScalarSettingKey)
-      : getOutlineNumericInputAttributes(key as Exclude<OutlineSettingKey, 'enabled'>);
+  const { min, max, step } = getNumericInputAttributes(key);
   input.min = String(min);
   input.max = String(max);
   input.step = String(step);
