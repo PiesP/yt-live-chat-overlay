@@ -307,12 +307,16 @@ export class RuntimeSession {
       return;
     }
 
+    // Clear idle markers first so the health snapshot reflects current state.
+    // Otherwise stale markers (e.g. playbackPausedSince set while tab was hidden)
+    // can trigger an unnecessary restart on resume.
+    this.clearIdleMarkersForActiveState();
+
     if (this.getRuntimeHealthSnapshot().shouldRestart) {
       this.requestManagedRestart(reason);
       return;
     }
 
-    this.clearIdleMarkersForActiveState();
     this.renderer?.resume();
   }
 
