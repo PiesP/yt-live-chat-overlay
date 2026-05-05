@@ -261,7 +261,7 @@ export class ChatMessageParser {
       const content: ContentSegment[] =
         simpleText.length > 0 ? [{ type: 'text', content: simpleText }] : [];
       return {
-        text: this.normalizeText(simpleText),
+        text: this.truncateText(simpleText),
         content,
         visibleLength: this.getVisibleContentLength(content),
       };
@@ -303,7 +303,7 @@ export class ChatMessageParser {
     }
 
     return {
-      text: this.normalizeText(plainText),
+      text: this.truncateText(plainText),
       content: segments,
       visibleLength: this.getVisibleContentLength(segments),
     };
@@ -577,14 +577,11 @@ export class ChatMessageParser {
     return 'normal';
   }
 
-  private normalizeText(text: string): string {
-    let normalized = this.stripControlCharacters(text);
-    normalized = normalized.replace(/\s+/g, ' ').trim();
-
+  private truncateText(text: string): string {
+    const normalized = this.normalizeInlineText(text);
     if (normalized.length > 80) {
-      normalized = `${normalized.substring(0, 77)}...`;
+      return `${normalized.substring(0, 77)}...`;
     }
-
     return normalized;
   }
 

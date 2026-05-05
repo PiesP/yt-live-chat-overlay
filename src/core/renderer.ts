@@ -578,8 +578,8 @@ export class Renderer {
       if (active.animation.playState !== 'finished') {
         active.animation.cancel();
       }
-    } catch {
-      // Ignore animation cancellation errors during cleanup
+    } catch (error) {
+      log.warn('Error in callback:', error);
     }
 
     if (active.element.parentNode) {
@@ -673,7 +673,7 @@ export class Renderer {
       try {
         operation(active.animation);
       } catch (error) {
-        log.debug('Animation operation failed:', error);
+        log.warn('Animation operation failed:', error);
       }
     }
   }

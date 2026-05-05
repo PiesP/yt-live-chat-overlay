@@ -79,7 +79,7 @@ export class PageWatcher {
       try {
         callback();
       } catch (error) {
-        log.error('Page change callback error:', error);
+        log.warn('Page change callback error:', error);
       }
     }
   }

@@ -259,12 +259,6 @@ export class RuntimeSession {
     };
   }
 
-  private getChatHealthSnapshot(chatSource: ChatSource): ChatHealthSnapshot {
-    return chatSource.getHealthSnapshot({
-      activeTimeoutMs: CHAT_STALL_TIMEOUT_MS,
-    });
-  }
-
   private noteHidden(now = Date.now()): void {
     if (this.hiddenSince === null) {
       this.hiddenSince = now;
@@ -307,7 +301,9 @@ export class RuntimeSession {
     shouldRestart: boolean;
   } {
     const chatSource = this.chatSource;
-    const chat = chatSource ? this.getChatHealthSnapshot(chatSource) : null;
+    const chat = chatSource
+      ? chatSource.getHealthSnapshot({ activeTimeoutMs: CHAT_STALL_TIMEOUT_MS })
+      : null;
     const idleDurationMs = this.getIdleDurationMs(now);
     const renderable = this.hasRenderableRuntime();
     const shouldRestart =

@@ -1,21 +1,6 @@
 import { SETTINGS_LIMITS } from '@core/settings-definitions';
 import type { OutlineSettingKey, RootScalarSettingKey } from '@core/settings-schema';
 
-// ── Limit key lookups ──────────────────────────────────────────────────────
-
-const ROOT_LIMITS_KEY: Partial<Record<RootScalarSettingKey, keyof typeof SETTINGS_LIMITS>> = {
-  speedPxPerSec: 'speedPxPerSec',
-  fontSize: 'fontSize',
-  opacity: 'opacity',
-  superChatOpacity: 'superChatOpacity',
-  safeTop: 'safeTop',
-  safeBottom: 'safeBottom',
-  maxConcurrentMessages: 'maxConcurrentMessages',
-  maxMessagesPerSecond: 'maxMessagesPerSecond',
-  minTextLength: 'minTextLength',
-  laneSpacing: 'laneSpacing',
-};
-
 const OUTLINE_NUMERIC_LIMITS_KEY: Record<
   Exclude<OutlineSettingKey, 'enabled'>,
   keyof typeof SETTINGS_LIMITS
@@ -80,12 +65,11 @@ export const normalizeRootNumericInputValue = (
   value: unknown,
   fallback: number
 ): number => {
-  const limitsKey = ROOT_LIMITS_KEY[key];
-  if (!limitsKey) return fallback;
+  if (!(key in SETTINGS_LIMITS)) return fallback;
   return normalizeNumericValue(
     value,
     fallback,
-    SETTINGS_LIMITS[limitsKey],
+    SETTINGS_LIMITS[key as keyof typeof SETTINGS_LIMITS],
     ROOT_ROUNDED_KEYS.has(key),
     getRootScale(key)
   );
@@ -103,10 +87,10 @@ export const normalizeOutlineNumericInputValue = (
 export const getRootNumericInputAttributes = (
   key: RootScalarSettingKey
 ): Readonly<{ min: number; max: number; step: number }> => {
-  const limitsKey = ROOT_LIMITS_KEY[key];
-  if (!limitsKey) throw new TypeError(`Setting "${key}" does not define numeric limits.`);
+  if (!(key in SETTINGS_LIMITS))
+    throw new TypeError(`Setting "${key}" does not define numeric limits.`);
 
-  const limits = SETTINGS_LIMITS[limitsKey];
+  const limits = SETTINGS_LIMITS[key as keyof typeof SETTINGS_LIMITS];
   const scale = getRootScale(key);
 
   return {
