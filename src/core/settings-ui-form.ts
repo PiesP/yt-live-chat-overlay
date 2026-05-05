@@ -10,7 +10,6 @@ import {
   SHOW_AUTHOR_KEYS,
 } from '@core/settings-schema';
 import {
-  formatOutlineNumericSettingForInput,
   formatRootNumericSettingForInput,
   getOutlineNumericInputAttributes,
   getRootNumericInputAttributes,
@@ -444,7 +443,7 @@ export class SettingsUiForm {
     if (key === 'enabled') {
       this.setCheckbox(name, value as boolean);
     } else {
-      this.setValue(name, formatOutlineNumericSettingForInput(key, value as number));
+      this.setValue(name, String(value));
     }
   }
 

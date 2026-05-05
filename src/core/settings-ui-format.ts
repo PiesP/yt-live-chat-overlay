@@ -75,11 +75,6 @@ export const formatRootNumericSettingForInput = (
   return options?.precision === undefined ? scaledValue : scaledValue.toFixed(options.precision);
 };
 
-export const formatOutlineNumericSettingForInput = (
-  _key: OutlineSettingKey,
-  value: number
-): string | number => String(value);
-
 export const normalizeRootNumericInputValue = (
   key: RootScalarSettingKey,
   value: unknown,
