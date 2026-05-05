@@ -11,32 +11,11 @@ import { createLogger } from '@core/logging';
 import type { Overlay } from '@core/overlay';
 import { MessageIdRegistry, RenderQueue, RenderRateLimiter } from '@core/renderer-flow';
 import { LaneAllocator, type LanePlacement } from '@core/renderer-lanes';
+import { RENDERER_LAYOUT } from '@core/renderer-layout';
 import { RendererMessageBuilder } from '@core/renderer-message-builder';
 import { RENDERER_STATIC_STYLES } from '@core/renderer-styles';
 
-export const RENDERER_LAYOUT = {
-  AUTHOR_PHOTO_SIZE: 24,
-  AUTHOR_FONT_SCALE: 0.85,
-  EMOJI_SIZE: 1.2,
-  SUPERCHAT_STICKER_SIZE: 2,
-  EXIT_PADDING_MIN: 100,
-  EXIT_PADDING_SCALE: 3,
-  DURATION_MIN: 5000,
-  DURATION_MAX: 12000,
-  LANE_DELAY_CYCLE: 3,
-  LANE_DELAY_MS: 15,
-  GLOBAL_STAGGER_MS: 150,
-  SAFE_DISTANCE_SCALE: 0.3,
-  SAFE_DISTANCE_MIN: 6,
-  VERTICAL_CLEAR_TIME_MIN: 20,
-  VERTICAL_CLEAR_TIME_MAX: 80,
-  LANE_HEIGHT_PADDING_SCALE: 0.06,
-  LANE_HEIGHT_PADDING_MIN: 1,
-  RETRY_DELAY_MIN_MS: 16,
-  RETRY_DELAY_MAX_MS: 800,
-  QUEUE_LOOKAHEAD_LIMIT: 10,
-  QUEUE_MAX_SIZE: 30,
-} as const;
+export { RENDERER_LAYOUT } from '@core/renderer-layout';
 
 const log = createLogger('Renderer');
 
