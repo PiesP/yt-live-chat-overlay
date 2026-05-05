@@ -297,6 +297,24 @@ export class Renderer {
   }
 
   /**
+   * Remove stale activeMessage entries whose animation finished
+   * without triggering the cleanup callback (e.g. GC delay, rapid
+   * destroy/create cycles, tab-hidden edge cases).
+   */
+  private sweepStaleAnimations(): void {
+    for (const active of this.activeMessages) {
+      try {
+        if (active.animation.playState === 'finished') {
+          this.activeMessages.delete(active);
+          active.element.remove();
+        }
+      } catch {
+        this.activeMessages.delete(active);
+      }
+    }
+  }
+
+  /**
    * Process message queue
    */
   private processQueue(): void {
@@ -305,6 +323,7 @@ export class Renderer {
       return;
     }
 
+    this.sweepStaleAnimations();
     this.clearRetryTimer();
 
     let shortestWaitMs: number | null = null;
