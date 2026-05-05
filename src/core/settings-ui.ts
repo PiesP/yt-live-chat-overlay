@@ -1,12 +1,14 @@
 import type { OverlaySettings } from '@app-types';
-import { ensurePlayerPositioning, findPlayerContainerElement } from '@core/dom';
+import {
+  ensurePlayerPositioning,
+  findPlayerContainerElement,
+  PLAYER_LOOKUP_INTERVAL_MS,
+} from '@core/dom';
 import { createLogger } from '@core/logging';
 import { BACKDROP_ID, BUTTON_ID, SettingsUiForm, STYLE_ID } from '@core/settings-ui-form';
 import { SETTINGS_UI_STYLES } from '@core/settings-ui-styles';
 
 const log = createLogger('SettingsUi');
-
-const PLAYER_LOOKUP_INTERVAL_MS = 500;
 
 export class SettingsUi {
   private playerElement: HTMLElement | null = null;

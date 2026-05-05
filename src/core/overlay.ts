@@ -6,14 +6,18 @@
  */
 
 import type { OverlayDimensions, OverlaySettings } from '@app-types';
-import { ensurePlayerPositioning, findPlayerContainerElement } from '@core/dom';
+import {
+  ensurePlayerPositioning,
+  findPlayerContainerElement,
+  OVERLAY_PLAYER_LOOKUP_INTERVAL_MS,
+} from '@core/dom';
 import { createLogger } from '@core/logging';
 
 const log = createLogger('Overlay');
 
 export const OVERLAY_ID = 'yt-live-chat-overlay';
 export const OVERLAY_SELECTOR = `#${OVERLAY_ID}`;
-const PLAYER_LOOKUP_INTERVAL_MS = 1000;
+
 const FULLSCREEN_UPDATE_DELAY_MS = 100;
 // Reduced from 1.3 → 1.2 to pack lanes more tightly (~8% more rows).
 // Requires the renderer to set line-height: 1.1 on messages so that the
@@ -76,7 +80,7 @@ export class Overlay {
    */
   private async findPlayerContainer(signal?: AbortSignal): Promise<HTMLElement | null> {
     const player = await findPlayerContainerElement({
-      intervalMs: PLAYER_LOOKUP_INTERVAL_MS,
+      intervalMs: OVERLAY_PLAYER_LOOKUP_INTERVAL_MS,
       signal,
     });
     if (player) {

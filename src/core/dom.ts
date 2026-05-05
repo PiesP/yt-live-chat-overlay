@@ -27,6 +27,12 @@ export interface PollForValueOptions {
 const DEFAULT_WAIT_ATTEMPTS = 5;
 const DEFAULT_WAIT_INTERVAL_MS = 500;
 
+/** Interval for player container lookup polling (ms). */
+export const PLAYER_LOOKUP_INTERVAL_MS = 500;
+
+/** Interval for overlay player lookup — longer wait for full player init. */
+export const OVERLAY_PLAYER_LOOKUP_INTERVAL_MS = 1000;
+
 export const PLAYER_CONTAINER_SELECTORS = ['#movie_player', '.html5-video-player'] as const;
 
 export const VIDEO_SELECTORS = ['#movie_player video', 'video.html5-main-video'] as const;
