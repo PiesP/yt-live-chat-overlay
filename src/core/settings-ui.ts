@@ -236,8 +236,13 @@ export class SettingsUi {
 
   private apply(): void {
     // Settings are already applied via live preview.
-    // Done — just close the modal.
-    this.close();
+    // Show brief save confirmation, then close.
+    const applyButton = this.modal?.querySelector<HTMLButtonElement>('button[data-action="apply"]');
+    if (applyButton) {
+      applyButton.textContent = '✓ Saved';
+      applyButton.disabled = true;
+    }
+    window.setTimeout(() => this.close(), 400);
   }
 
   private handleReset(): void {
