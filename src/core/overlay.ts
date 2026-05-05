@@ -20,10 +20,7 @@ export const OVERLAY_ID = 'yt-live-chat-overlay';
 export const OVERLAY_SELECTOR = `#${OVERLAY_ID}`;
 
 const FULLSCREEN_UPDATE_DELAY_MS = 100;
-// Reduced from 1.3 → 1.2 to pack lanes more tightly (~8% more rows).
-// Requires the renderer to set line-height: 1.1 on messages so that the
-// rendered element height stays below (fontSize × 1.2 - padding), keeping
-// single-line messages in exactly 1 lane at all supported font sizes.
+// line-height: 1.1 on messages keeps single-line rendering within 1 lane slot.
 const BASE_LANE_HEIGHT_MULTIPLIER = 1.2;
 const OVERLAY_Z_INDEX = '100';
 

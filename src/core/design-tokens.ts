@@ -38,7 +38,6 @@ export const spacing = {
   sm: 8,
   md: 12,
   lg: 16,
-  xxxl: 32,
 } as const;
 
 export const typography = {

@@ -605,7 +605,7 @@ export class Renderer {
         active.animation.cancel();
       }
     } catch (error) {
-      log.warn('Error in callback:', error);
+      log.warn('Failed to cancel animation:', error);
     }
 
     if (active.element.parentNode) {
