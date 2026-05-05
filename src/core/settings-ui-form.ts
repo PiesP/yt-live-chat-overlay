@@ -578,15 +578,53 @@ export class SettingsUiForm {
     const current = this.getSettings();
     const nextSettings = cloneSettings(current);
 
-    for (const key of ROOT_SETTING_KEYS) {
-      nextSettings[key] = this.readRootSetting(key, current) as never;
-    }
+    this.applyRootSettingsTo(nextSettings, current);
 
     nextSettings.showAuthor = this.collectShowAuthorSettings(current);
     nextSettings.colors = this.collectAuthorColors(current);
     nextSettings.outline = this.collectOutlineSettings(current.outline);
 
     return nextSettings;
+  }
+
+  private applyRootSettingsTo(target: OverlaySettings, current: Readonly<OverlaySettings>): void {
+    target.enabled = this.getCheckbox('enabled', current.enabled);
+    target.allowShortTextMessages = this.getCheckbox(
+      'allowShortTextMessages',
+      current.allowShortTextMessages
+    );
+    target.logLevel = this.getLogLevel('logLevel', current.logLevel);
+
+    const numericKeys: ReadonlyArray<
+      | 'speedPxPerSec'
+      | 'fontSize'
+      | 'opacity'
+      | 'superChatOpacity'
+      | 'safeTop'
+      | 'safeBottom'
+      | 'maxConcurrentMessages'
+      | 'maxMessagesPerSecond'
+      | 'minTextLength'
+      | 'laneSpacing'
+    > = [
+      'speedPxPerSec',
+      'fontSize',
+      'opacity',
+      'superChatOpacity',
+      'safeTop',
+      'safeBottom',
+      'maxConcurrentMessages',
+      'maxMessagesPerSecond',
+      'minTextLength',
+      'laneSpacing',
+    ];
+    for (const key of numericKeys) {
+      target[key] = normalizeRootNumericInputValue(
+        key,
+        this.readNumber(key, current[key]),
+        current[key]
+      );
+    }
   }
 
   private readNumber(name: string, fallback: number): number {
@@ -621,52 +659,27 @@ export class SettingsUiForm {
     return nextShowAuthor;
   }
 
-  private readRootSetting(
-    key: RootScalarSettingKey,
-    current: Readonly<OverlaySettings>
-  ): OverlaySettings[RootScalarSettingKey] {
-    const fallback = current[key];
-
-    if (key === 'enabled' || key === 'allowShortTextMessages') {
-      return this.getCheckbox(key, fallback as boolean);
-    }
-    if (key === 'logLevel') {
-      return this.getLogLevel(key, fallback as OverlaySettings['logLevel']);
-    }
-    return normalizeRootNumericInputValue(
-      key,
-      this.readNumber(key, fallback as number),
-      fallback as number
-    );
-  }
-
-  private readOutlineSetting<K extends OutlineSettingKey>(
-    key: K,
+  private applyOutlineSettingsTo(
+    target: OverlaySettings['outline'],
     current: Readonly<OverlaySettings['outline']>
-  ): OverlaySettings['outline'][K] {
-    const fallback = current[key];
-    const name = outlineFormName(key);
+  ): void {
+    target.enabled = this.getCheckbox(outlineFormName('enabled'), current.enabled);
 
-    return (
-      key === 'enabled'
-        ? this.getCheckbox(name, fallback as boolean)
-        : normalizeOutlineNumericInputValue(
-            key,
-            this.readNumber(name, fallback as number),
-            fallback as number
-          )
-    ) as OverlaySettings['outline'][K];
+    for (const key of OUTLINE_SETTING_KEYS) {
+      if (key === 'enabled') continue;
+      target[key] = normalizeOutlineNumericInputValue(
+        key,
+        this.readNumber(outlineFormName(key), current[key]),
+        current[key]
+      );
+    }
   }
 
   private collectOutlineSettings(
     current: Readonly<OverlaySettings['outline']>
   ): OverlaySettings['outline'] {
     const nextOutline: OverlaySettings['outline'] = { ...current };
-
-    for (const key of OUTLINE_SETTING_KEYS) {
-      nextOutline[key] = this.readOutlineSetting(key, current) as never;
-    }
-
+    this.applyOutlineSettingsTo(nextOutline, current);
     return nextOutline;
   }
 

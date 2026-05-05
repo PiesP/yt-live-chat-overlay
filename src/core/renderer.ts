@@ -8,8 +8,9 @@
 import type { ChatMessage, OutlineSettings, OverlayDimensions, OverlaySettings } from '@app-types';
 import { RENDERER_LAYOUT, shadows } from '@core/design-tokens';
 import { createLogger } from '@core/logging';
+import { MessageIdRegistry } from '@core/message-id-registry';
 import type { Overlay } from '@core/overlay';
-import { MessageIdRegistry, RenderQueue, RenderRateLimiter } from '@core/renderer-flow';
+import { RenderQueue, RenderRateLimiter } from '@core/renderer-flow';
 import { LaneAllocator, type LanePlacement } from '@core/renderer-lanes';
 import { RendererMessageBuilder } from '@core/renderer-message-builder';
 import { RENDERER_STATIC_STYLES } from '@core/renderer-styles';

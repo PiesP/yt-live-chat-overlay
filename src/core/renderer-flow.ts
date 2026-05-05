@@ -1,7 +1,4 @@
 import type { ChatMessage } from '@app-types';
-import { MessageIdRegistry } from '@core/message-id-registry';
-
-export { MessageIdRegistry };
 
 export interface QueuedMessage {
   message: ChatMessage;
