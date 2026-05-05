@@ -1,6 +1,47 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.21.0] - 2026-05-05
+
+### Added
+- **Save confirmation feedback on apply button** — Settings apply button now shows visual feedback on successful save.
+
+### Fixed
+- **Replay buffer binary insertion and emoji detection** — Fixed binary insertion ordering for replay buffer continuity and broadened emoji detection patterns to catch more unicode emoji variants.
+- **Image error listener once-flag, float-tolerance comparison, RGBA hex support** — Added `{ once: true }` to image error listeners to prevent duplicate callbacks, applied epsilon-based float comparison for precision-safe operations, and added RGBA hex color format (`#RRGGBBAA`) support.
+- **Set iteration safety and apply button persistence** — Fixed `Set.prototype.entries()` iteration during mutation (converted to snapshot iteration) and prevented apply button from persisting across settings UI re-create cycles.
+- **Abort error, health snapshot, replay fetch critical bugs** — Corrected `isAbortError` type guard to properly detect DOMException-based aborts, fixed health snapshot stale reference in recovery flow, and resolved replay continuation fetch error handling.
+- **Idle marker clearing before health check** — Cleared idle markers before running health checks in `handleRuntimeResume` to prevent false-positive recovery triggers.
+- **Circular dependency causing RENDERER_LAYOUT undefined** — Resolved import cycle between renderer and layout modules.
+- **Stale queuePreview timer in settings** — Guarded `queuePreview` timer against stale callback execution after settings UI destruction.
+- **Render queue timestamp sorting** — Messages in render queue are now sorted by timestamp for correct chronological chat order.
+- **Rate limit check moved to render time** — Moved rate limiting from enqueue time to actual render time for accurate throttle measurement.
+- **Stale animation cleanup sweep in processQueue** — Added cleanup sweep for orphaned animations during queue processing.
+- **Replay dedup key limit increased** — Raised `seenMessageIds` limit from 2000 to 10000 to prevent premature dedup key eviction in long replay sessions.
+- **Renderer resetState clears seenMessageIds** — `resetState()` now properly clears message dedup tracking to prevent stale dedup keys after re-sync.
+
+### Performance
+- **Reduced sweepStaleAnimations frequency** — Counter-based throttling added to reduce expensive DOM queries during idle cleanup sweeps.
+- **Batch-process ready messages in single pass** — Messages ready for rendering are now processed in one batch pass instead of individually, reducing per-message overhead.
+
+### Refactored
+- **ChatSource split into LiveChatSource and ReplayChatSource** — Separated live and replay chat source implementations for clearer responsibility boundaries and reduced branching.
+- **OverlayView interface removed** — Inlined the `OverlayView` interface directly into `Overlay`, removing an unnecessary abstraction layer.
+- **RENDERER_LAYOUT merged into design-tokens** — Consolidated layout tokens into `design-tokens.ts` and removed the standalone `renderer-layout.ts` module.
+- **Settings modules consolidated** — Reduced settings module count through consolidation of closely related modules.
+- **Duplicate patterns consolidated** — Consolidated duplicate patterns across `MessageIdRegistry`, fetch payload construction, and settings schema validation.
+- **Round-robin lane selection** — Replaced `Math.random` lane selection with deterministic round-robin distribution for more consistent message placement across lanes.
+- **Excessive nullable fallbacks and defensive code removed** — Simplified code by removing unnecessary null checks and defensive patterns across core modules.
+- **renderer-layout.ts merged into renderer.ts** — Consolidated remaining layout logic directly into `Renderer`.
+- **Unused exports, redundant types, and trivial helpers removed** — General dead code cleanup across the codebase.
+
+### Dependencies
+- **devDependencies updated** — `@biomejs/biome`, `@types/node`, `knip`, `vite`, `typescript` updated to latest compatible versions.
+
+### Tooling
+- **build: replaced rimraf with native rm -rf** — Removed `rimraf` dev dependency in favor of native `rm -rf` shell command.
+- **chore: replaced npx with pnpm dlx** — Updated circular dependency check script to use `pnpm dlx` instead of `npx`.
+
 ## [0.20.0] - 2026-05-04
 
 ### Added
