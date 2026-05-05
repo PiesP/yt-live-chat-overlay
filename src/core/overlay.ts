@@ -53,17 +53,13 @@ const calculateOverlayDimensions = (
 
 type OverlayDimensionsChangeCallback = (dimensions: OverlayDimensions | null) => void;
 
-const FLOAT_TOLERANCE = 0.0001;
-
-const areFloatsEqual = (a: number, b: number): boolean => Math.abs(a - b) < FLOAT_TOLERANCE;
-
 const areOverlayDimensionsEqual = (
   previous: OverlayDimensions | null,
   next: OverlayDimensions | null
 ): boolean =>
   previous?.width === next?.width &&
   previous?.height === next?.height &&
-  areFloatsEqual(previous?.laneHeight ?? 0, next?.laneHeight ?? 0) &&
+  Math.abs((previous?.laneHeight ?? 0) - (next?.laneHeight ?? 0)) < 0.0001 &&
   previous?.laneCount === next?.laneCount;
 
 export class Overlay {
