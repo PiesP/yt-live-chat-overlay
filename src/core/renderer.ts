@@ -315,7 +315,7 @@ export class Renderer {
   }
 
   /**
-   * Process message queue
+   * Process message queue — render all ready messages in one pass.
    */
   private processQueue(): void {
     // Don't process while paused
@@ -326,51 +326,48 @@ export class Renderer {
     this.sweepStaleAnimations();
     this.clearRetryTimer();
 
+    if (this.renderQueue.length === 0) {
+      return;
+    }
+
+    const now = Date.now();
+    const lookaheadCount = Math.min(LAYOUT.QUEUE_LOOKAHEAD_LIMIT, this.renderQueue.length);
     let shortestWaitMs: number | null = null;
+    const renderedOrDropped: number[] = [];
 
-    while (this.renderQueue.length > 0) {
-      let progressed = false;
-      const now = Date.now();
-      const lookaheadCount = Math.min(LAYOUT.QUEUE_LOOKAHEAD_LIMIT, this.renderQueue.length);
+    for (let i = 0; i < lookaheadCount; i++) {
+      const queued = this.renderQueue.at(i);
+      if (!queued) continue;
 
-      for (let i = 0; i < lookaheadCount; i++) {
-        const queued = this.renderQueue.at(i);
-        if (!queued) continue;
+      if (queued.nextAttemptAt > now) {
+        const waitMs = queued.nextAttemptAt - now;
+        shortestWaitMs = shortestWaitMs === null ? waitMs : Math.min(shortestWaitMs, waitMs);
+        continue;
+      }
 
-        if (queued.nextAttemptAt > now) {
-          const waitMs = queued.nextAttemptAt - now;
-          shortestWaitMs = shortestWaitMs === null ? waitMs : Math.min(shortestWaitMs, waitMs);
-          continue;
-        }
+      // Soft cap warning (non-blocking)
+      if (this.activeMessages.size >= this.settings.maxConcurrentMessages) {
+        this.logPerformanceWarning();
+      }
 
-        // Soft cap warning (non-blocking)
-        if (this.activeMessages.size >= this.settings.maxConcurrentMessages) {
-          this.logPerformanceWarning();
-        }
+      const result = this.renderMessage(queued.message);
 
-        const result = this.renderMessage(queued.message);
-
-        if (result.status === 'rendered') {
-          this.renderQueue.removeAt(i);
-          this.rateLimiter.markProcessed(now);
-          progressed = true;
-          break;
-        }
-
-        if (result.status === 'dropped') {
-          this.renderQueue.removeAt(i);
-          progressed = true;
-          break;
-        }
-
+      if (result.status === 'rendered') {
+        renderedOrDropped.push(i);
+        this.rateLimiter.markProcessed(now);
+      } else if (result.status === 'dropped') {
+        renderedOrDropped.push(i);
+      } else {
         queued.nextAttemptAt = now + result.waitMs;
         shortestWaitMs =
           shortestWaitMs === null ? result.waitMs : Math.min(shortestWaitMs, result.waitMs);
       }
+    }
 
-      if (!progressed) {
-        break;
-      }
+    // Remove rendered/dropped items in reverse order so earlier removals
+    // don't shift indices that later items in the list reference.
+    for (let index = renderedOrDropped.length - 1; index >= 0; index--) {
+      this.renderQueue.removeAt(renderedOrDropped[index]!);
     }
 
     if (this.renderQueue.length > 0) {
