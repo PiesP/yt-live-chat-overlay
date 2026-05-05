@@ -92,6 +92,7 @@ export class Renderer {
 
     this.activeMessages.clear();
     this.renderQueue.clear();
+    this.seenMessageIds.clear();
   }
 
   private handleOverlayDimensionsChange(dimensions: OverlayDimensions | null): void {
