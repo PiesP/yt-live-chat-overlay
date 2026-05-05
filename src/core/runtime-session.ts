@@ -1,6 +1,8 @@
 import type { OverlaySettings } from '@app-types';
 import { type ChatHealthSnapshot, ChatSource, type ChatSourceStartStatus } from '@core/chat-source';
+import { ChatWatchdog } from '@core/chat-watchdog';
 import { isAbortError, throwIfAborted } from '@core/dom';
+import { ForegroundRecoveryManager } from '@core/foreground-recovery-manager';
 import { createLogger } from '@core/logging';
 import { OVERLAY_SELECTOR, Overlay } from '@core/overlay';
 import { Renderer } from '@core/renderer';
@@ -45,8 +47,8 @@ export class RuntimeSession {
   private renderer: Renderer | null = null;
   private chatSource: ChatSource | null = null;
   private videoSync: VideoSync | null = null;
-  private foregroundRecoveryCleanup: (() => void) | null = null;
-  private chatWatchdogInterval: number | null = null;
+  private readonly foregroundRecoveryManager = new ForegroundRecoveryManager();
+  private readonly chatWatchdog = new ChatWatchdog();
   private disposed = false;
   private sessionReady = false;
   private restartRequested = false;
@@ -123,8 +125,59 @@ export class RuntimeSession {
       }
 
       this.sessionReady = true;
-      this.setupForegroundRecoveryHandlers();
-      this.setupChatWatchdog();
+
+      // Foreground recovery: listen for tab/window visibility changes
+      if (document.hidden) {
+        this.noteHidden();
+      }
+
+      this.foregroundRecoveryManager.start({
+        onHide: () => {
+          this.noteHidden();
+          this.renderer?.pause();
+        },
+        onRecover: () => {
+          if (document.hidden || this.disposed) {
+            return;
+          }
+
+          if (this.getIdleDurationMs() >= LONG_IDLE_RESTART_MS) {
+            this.requestManagedRestart('foreground-return');
+            return;
+          }
+
+          if (this.videoSync?.isPaused()) {
+            this.clearHidden();
+            return;
+          }
+
+          this.handleRuntimeResume('foreground-return');
+        },
+      });
+
+      this.chatWatchdog.start(
+        {
+          checkHealth: () => {
+            // Skip checks while disposed, hidden, or mid-restart
+            if (this.disposed || document.hidden || this.restartRequested) {
+              return true;
+            }
+
+            // Skip checks while video is paused — the resume handler
+            // will perform a full health check when playback resumes.
+            if (this.videoSync?.isPaused() ?? true) {
+              return true;
+            }
+
+            return !this.getRuntimeHealthSnapshot().shouldRestart;
+          },
+          onStallDetected: () => {
+            this.requestManagedRestart('watchdog');
+          },
+        },
+        CHAT_WATCHDOG_INTERVAL_MS
+      );
+
       log.info('Started successfully');
       return 'started';
     } catch (error) {
@@ -169,13 +222,8 @@ export class RuntimeSession {
     this.sessionReady = false;
     this.restartRequested = true;
     this.abortController.abort();
-    this.foregroundRecoveryCleanup?.();
-    this.foregroundRecoveryCleanup = null;
-
-    if (this.chatWatchdogInterval !== null) {
-      window.clearInterval(this.chatWatchdogInterval);
-      this.chatWatchdogInterval = null;
-    }
+    this.foregroundRecoveryManager.stop();
+    this.chatWatchdog.stop();
 
     this.chatSource?.stop();
     this.chatSource = null;
@@ -212,51 +260,6 @@ export class RuntimeSession {
     for (const element of leftoverOverlays) {
       element.remove();
     }
-  }
-
-  private setupForegroundRecoveryHandlers(): void {
-    this.foregroundRecoveryCleanup?.();
-    if (document.hidden) {
-      this.noteHidden();
-    }
-
-    const handleForegroundReturn = (): void => {
-      if (document.hidden || this.disposed) {
-        return;
-      }
-
-      if (this.getIdleDurationMs() >= LONG_IDLE_RESTART_MS) {
-        this.requestManagedRestart('foreground-return');
-        return;
-      }
-
-      if (this.videoSync?.isPaused()) {
-        this.clearHidden();
-        return;
-      }
-
-      this.handleRuntimeResume('foreground-return');
-    };
-
-    const visibilityHandler = (): void => {
-      if (document.hidden) {
-        this.noteHidden();
-        this.renderer?.pause();
-        return;
-      }
-
-      handleForegroundReturn();
-    };
-
-    document.addEventListener('visibilitychange', visibilityHandler);
-    window.addEventListener('focus', handleForegroundReturn);
-    window.addEventListener('pageshow', handleForegroundReturn);
-
-    this.foregroundRecoveryCleanup = () => {
-      document.removeEventListener('visibilitychange', visibilityHandler);
-      window.removeEventListener('focus', handleForegroundReturn);
-      window.removeEventListener('pageshow', handleForegroundReturn);
-    };
   }
 
   private noteHidden(now = Date.now()): void {
@@ -356,31 +359,6 @@ export class RuntimeSession {
 
     this.clearIdleMarkersForActiveState();
     this.renderer?.resume();
-  }
-
-  private setupChatWatchdog(): void {
-    this.chatWatchdogInterval = window.setInterval(() => {
-      const chatSource = this.chatSource;
-      if (!chatSource || this.disposed || document.hidden || this.restartRequested) {
-        return;
-      }
-
-      // Skip health checks while the video is paused — the resume handler
-      // (handleRuntimeResume) will perform a full health check and restart
-      // when playback resumes.
-      const paused = this.videoSync?.isPaused() ?? true;
-      if (paused) {
-        return;
-      }
-
-      const health = this.getRuntimeHealthSnapshot();
-
-      if (!health.shouldRestart) {
-        return;
-      }
-
-      this.requestManagedRestart('watchdog');
-    }, CHAT_WATCHDOG_INTERVAL_MS);
   }
 
   private replayLatestMessages(
