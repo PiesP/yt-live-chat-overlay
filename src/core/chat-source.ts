@@ -1,6 +1,11 @@
 /**
  * Fetches YouTube live chat directly from youtubei endpoints without depending
  * on the visible chat panel DOM.
+ *
+ * Provides a class hierarchy:
+ * - ChatSource (abstract base) — shared bootstrap, parser, settings, health tracking
+ * - LiveChatSource — live polling loop, live continuation logic
+ * - ReplayChatSource — replay polling loop, playerSeek + continuation logic
  */
 
 import type { ChatMessage, OverlaySettings } from '@app-types';
@@ -78,31 +83,26 @@ interface ReplayBufferedMessage {
 export type MessageCallback = (message: ChatMessage) => void;
 export type ChatSourceStartStatus = 'started' | 'retryable' | 'unavailable';
 
-export class ChatSource {
-  private readonly parser: ChatMessageParser;
-  private callback: MessageCallback | null = null;
+// ====================================================================
+// Abstract base: shared bootstrap, parser, settings, health tracking
+// ====================================================================
+
+export abstract class ChatSource {
+  protected readonly parser: ChatMessageParser;
+  protected callback: MessageCallback | null = null;
   private lifecycleController: AbortController | null = null;
   private pollController: AbortController | null = null;
   private pollLoopAlive = false;
   private pollGeneration = 0;
   private lastActivityTime = 0;
-  private bootstrap: ChatBootstrapData | null = null;
-  private liveContinuation: InnertubeContinuationData | null = null;
-  private replayMode: ReplayMode | null = null;
-  private replayPlayerSeekContinuation: InnertubeContinuationData | null = null;
-  private replayContinuation: InnertubeContinuationData | null = null;
-  private replayFallbackLastOffsetMs = -1;
-  private lastReplayRequestedOffsetMs = -REPLAY_FETCH_MIN_DELTA_MS;
-  private replayConsecutiveFailures = 0;
-  private replayNextAllowedFetchAt = 0;
+  protected bootstrap: ChatBootstrapData | null = null;
   private readonly recentMessages: ChatMessage[] = [];
-  private readonly replayKeyRegistry = new MessageIdRegistry(MAX_TRACKED_REPLAY_KEYS);
-  private readonly replayPendingKeys = new Set<string>();
-  private replayBuffer: ReplayBufferedMessage[] = [];
 
   constructor(getSettings: () => Readonly<OverlaySettings>) {
     this.parser = new ChatMessageParser(getSettings);
   }
+
+  // ---- Public API (used by RuntimeSession) ----
 
   async start(callback: MessageCallback, signal?: AbortSignal): Promise<ChatSourceStartStatus> {
     this.lifecycleController?.abort();
@@ -164,7 +164,29 @@ export class ChatSource {
     return this.recentMessages.slice(-limit);
   }
 
-  private isObserverAlive(): boolean {
+  // ---- Static factory ----
+
+  /**
+   * Create the correct ChatSource subclass (LiveChatSource or ReplayChatSource)
+   * by performing a lightweight bootstrap check.
+   *
+   * The bootstrap result is not cached — start() will re-resolve internally.
+   * This is a one-time per-session cost and the response is small.
+   */
+  static async create(
+    getSettings: () => Readonly<OverlaySettings>,
+    signal?: AbortSignal
+  ): Promise<ChatSource> {
+    const result = await bootstrapChatSession(signal);
+    if (result.status === 'ready' && result.data?.isReplay) {
+      return new ReplayChatSource(getSettings);
+    }
+    return new LiveChatSource(getSettings);
+  }
+
+  // ---- Protected helpers (for subclass use) ----
+
+  protected isObserverAlive(): boolean {
     return (
       this.pollLoopAlive &&
       this.pollController !== null &&
@@ -173,106 +195,15 @@ export class ChatSource {
     );
   }
 
-  private async bootstrapAndLaunchPolling(signal?: AbortSignal): Promise<ChatSourceStartStatus> {
-    const bootstrapResolution = await this.resolveBootstrap(signal);
-
-    if (bootstrapResolution.status !== 'ready' || !bootstrapResolution.bootstrap) {
-      this.logBootstrapFailure(bootstrapResolution);
-      return bootstrapResolution.status === 'unavailable' ? 'unavailable' : 'retryable';
-    }
-
-    this.bootstrap = bootstrapResolution.bootstrap;
-
-    const seeded = await this.seedCurrentSession(signal);
-    if (!seeded) {
-      return 'retryable';
-    }
-
-    this.launchCurrentPollLoop(signal);
-
-    log.info(
-      `Chat monitoring started successfully via youtubei (${this.bootstrap.isReplay ? 'replay' : 'live'})`
-    );
-
-    return 'started';
-  }
-
-  private async seedCurrentSession(signal?: AbortSignal): Promise<boolean> {
-    const bootstrap = this.bootstrap;
-    if (!bootstrap) {
-      return false;
-    }
-
-    return bootstrap.isReplay
-      ? this.initializeReplaySession(signal)
-      : this.initializeLiveSession(signal);
-  }
-
-  private launchCurrentPollLoop(signal?: AbortSignal): void {
-    const bootstrap = this.bootstrap;
-    if (!bootstrap) {
-      return;
-    }
-
-    this.launchPollLoop(
-      signal,
-      bootstrap.isReplay ? this.runReplayLoop.bind(this) : this.runLiveLoop.bind(this)
-    );
-  }
-
-  private launchPollLoop(
-    signal: AbortSignal | undefined,
-    runner: (loopSignal: AbortSignal | undefined) => Promise<void>
-  ): void {
-    const generation = ++this.pollGeneration;
-    this.pollLoopAlive = true;
-
-    void Promise.resolve()
-      .then(() => runner(signal))
-      .catch((error: unknown) => {
-        if (isAbortError(error)) {
-          return;
-        }
-
-        log.warn('Chat polling loop stopped unexpectedly:', error);
-      })
-      .finally(() => {
-        if (generation === this.pollGeneration) {
-          this.pollLoopAlive = false;
-        }
-      });
-  }
-
-  private isLifecycleAbort(): boolean {
+  protected isLifecycleAbort(): boolean {
     return this.lifecycleController?.signal.aborted ?? false;
   }
 
-  private resetReplayState(): void {
-    this.replayMode = null;
-    this.replayPlayerSeekContinuation = null;
-    this.replayContinuation = null;
-    this.replayFallbackLastOffsetMs = -1;
-    this.lastReplayRequestedOffsetMs = -REPLAY_FETCH_MIN_DELTA_MS;
-    this.replayConsecutiveFailures = 0;
-    this.replayNextAllowedFetchAt = 0;
-    this.replayBuffer = [];
-    this.replayKeyRegistry.clear();
-    this.replayPendingKeys.clear();
-  }
-
-  private resetSessionState(): void {
-    this.bootstrap = null;
-    this.liveContinuation = null;
-    this.lastActivityTime = 0;
-    this.recentMessages.length = 0;
-    this.resetReplayState();
-  }
-
-  private markActivity(): void {
+  protected markActivity(): void {
     this.lastActivityTime = Date.now();
   }
 
-  private rememberMessage(message: ChatMessage): void {
+  protected rememberMessage(message: ChatMessage): void {
     this.recentMessages.push(message);
 
     const overflow = this.recentMessages.length - RECENT_MESSAGE_BUFFER_SIZE;
@@ -281,7 +212,7 @@ export class ChatSource {
     }
   }
 
-  private emitMessage(message: ChatMessage): void {
+  protected emitMessage(message: ChatMessage): void {
     if (!this.callback) {
       return;
     }
@@ -290,11 +221,31 @@ export class ChatSource {
     this.callback(message);
   }
 
-  private trackReplayKey(key: string): void {
-    this.replayKeyRegistry.mark(key);
+  protected async requestPayload<TCallArgs extends unknown[]>(
+    fetchFn: (
+      bootstrap: ChatBootstrapData,
+      continuation: InnertubeContinuationData,
+      ...args: TCallArgs
+    ) => Promise<unknown>,
+    continuation: InnertubeContinuationData,
+    ...fetchArgs: TCallArgs
+  ): Promise<LiveChatPayload | null> {
+    if (!this.bootstrap) {
+      return null;
+    }
+
+    const response = await fetchFn(this.bootstrap, continuation, ...fetchArgs);
+    const payload = getLiveChatPayload(response);
+    if (!payload) {
+      log.warn('Failed to parse live chat payload from response');
+      return null;
+    }
+
+    this.markActivity();
+    return payload;
   }
 
-  private async resolveBootstrap(signal?: AbortSignal): Promise<ChatBootstrapResolution> {
+  protected async resolveBootstrap(signal?: AbortSignal): Promise<ChatBootstrapResolution> {
     let lastRetryReason = 'Chat bootstrap did not become available';
 
     for (let attempt = 1; attempt <= BOOTSTRAP_ATTEMPTS; attempt++) {
@@ -329,7 +280,7 @@ export class ChatSource {
     };
   }
 
-  private logBootstrapFailure(
+  protected logBootstrapFailure(
     resolution: Exclude<ChatBootstrapResolution, { status: 'ready' }>
   ): void {
     if (resolution.status === 'retryable') {
@@ -342,46 +293,7 @@ export class ChatSource {
     log.warn('Chat source is unavailable:', resolution.reason);
   }
 
-  private async requestPayload<TCallArgs extends unknown[]>(
-    fetchFn: (
-      bootstrap: ChatBootstrapData,
-      continuation: InnertubeContinuationData,
-      ...args: TCallArgs
-    ) => Promise<unknown>,
-    continuation: InnertubeContinuationData,
-    ...fetchArgs: TCallArgs
-  ): Promise<LiveChatPayload | null> {
-    if (!this.bootstrap) {
-      return null;
-    }
-
-    const response = await fetchFn(this.bootstrap, continuation, ...fetchArgs);
-    const payload = getLiveChatPayload(response);
-    if (!payload) {
-      log.warn('Failed to parse live chat payload from response');
-      return null;
-    }
-
-    this.markActivity();
-    return payload;
-  }
-
-  private requestLivePayload(
-    continuation: InnertubeContinuationData,
-    signal?: AbortSignal
-  ): Promise<LiveChatPayload | null> {
-    return this.requestPayload(fetchLiveChat, continuation, signal);
-  }
-
-  private requestReplayPayload(
-    continuation: InnertubeContinuationData,
-    signal?: AbortSignal,
-    playerOffsetMs?: number
-  ): Promise<LiveChatPayload | null> {
-    return this.requestPayload(fetchReplayChat, continuation, playerOffsetMs, signal);
-  }
-
-  private async refreshBootstrap(signal?: AbortSignal): Promise<boolean> {
+  protected async refreshBootstrap(signal?: AbortSignal): Promise<boolean> {
     const resolution = await this.resolveBootstrap(signal);
 
     if (resolution.status !== 'ready' || !resolution.bootstrap) {
@@ -393,21 +305,98 @@ export class ChatSource {
     return true;
   }
 
-  private async refreshLiveContinuation(signal?: AbortSignal): Promise<void> {
-    const refreshed = await this.refreshBootstrap(signal);
-    if (refreshed) {
-      this.liveContinuation = this.bootstrap?.initialContinuation ?? null;
-    }
+  protected launchPollLoop(
+    signal: AbortSignal | undefined,
+    runner: (loopSignal: AbortSignal | undefined) => Promise<void>
+  ): void {
+    const generation = ++this.pollGeneration;
+    this.pollLoopAlive = true;
+
+    void Promise.resolve()
+      .then(() => runner(signal))
+      .catch((error: unknown) => {
+        if (isAbortError(error)) {
+          return;
+        }
+
+        log.warn('Chat polling loop stopped unexpectedly:', error);
+      })
+      .finally(() => {
+        if (generation === this.pollGeneration) {
+          this.pollLoopAlive = false;
+        }
+      });
   }
 
-  private handleLivePayload(payload: LiveChatPayload): void {
-    const events = this.parser.extractChatEvents(payload.actions);
-    for (const event of events) {
-      this.emitMessage(event.message);
+  protected resetSessionState(): void {
+    this.bootstrap = null;
+    this.lastActivityTime = 0;
+    this.recentMessages.length = 0;
+  }
+
+  // ---- Abstract hooks for subclass specialisation ----
+
+  /**
+   * Seed the session by fetching the first batch of messages.
+   * Subclass must check this.bootstrap (already resolved) and initialise
+   * its own continuation tracking.
+   */
+  protected abstract seedCurrentSession(signal?: AbortSignal): Promise<boolean>;
+
+  /**
+   * Launch the mode-specific polling loop (live or replay).
+   * Subclass must call this.launchPollLoop() with its loop runner.
+   */
+  protected abstract launchCurrentPollLoop(signal?: AbortSignal): void;
+
+  // ---- Private ----
+
+  private async bootstrapAndLaunchPolling(signal?: AbortSignal): Promise<ChatSourceStartStatus> {
+    const bootstrapResolution = await this.resolveBootstrap(signal);
+
+    if (bootstrapResolution.status !== 'ready' || !bootstrapResolution.bootstrap) {
+      this.logBootstrapFailure(bootstrapResolution);
+      return bootstrapResolution.status === 'unavailable' ? 'unavailable' : 'retryable';
     }
 
-    this.liveContinuation = extractNextLiveContinuation(payload.continuations);
+    this.bootstrap = bootstrapResolution.bootstrap;
+
+    const seeded = await this.seedCurrentSession(signal);
+    if (!seeded) {
+      return 'retryable';
+    }
+
+    this.launchCurrentPollLoop(signal);
+
+    log.info(
+      `Chat monitoring started successfully via youtubei (${this.bootstrap.isReplay ? 'replay' : 'live'})`
+    );
+
+    return 'started';
   }
+}
+
+// ====================================================================
+// Live chat source — live polling loop, live continuation
+// ====================================================================
+
+export class LiveChatSource extends ChatSource {
+  private liveContinuation: InnertubeContinuationData | null = null;
+
+  protected seedCurrentSession(signal?: AbortSignal): Promise<boolean> {
+    return this.initializeLiveSession(signal);
+  }
+
+  protected launchCurrentPollLoop(signal?: AbortSignal): void {
+    this.launchPollLoop(signal, this.runLiveLoop.bind(this));
+  }
+
+  protected resetSessionState(): void {
+    super.resetSessionState();
+    this.liveContinuation = null;
+  }
+
+  // ---- Live-specific ----
 
   private async initializeLiveSession(signal?: AbortSignal): Promise<boolean> {
     if (!this.bootstrap) {
@@ -430,6 +419,219 @@ export class ChatSource {
       log.warn('Failed to initialize live chat session:', error);
       return false;
     }
+  }
+
+  private async runLiveLoop(signal?: AbortSignal): Promise<void> {
+    while (!signal?.aborted) {
+      const delayMs = this.liveContinuation?.timeoutMs ?? LIVE_POLL_FALLBACK_DELAY_MS;
+      await sleep(delayMs, signal);
+
+      throwIfAborted(signal);
+
+      const continuation = this.liveContinuation;
+      if (!continuation) {
+        await this.refreshLiveContinuation(signal);
+        continue;
+      }
+
+      try {
+        const payload = await this.requestLivePayload(continuation, signal);
+        if (!payload) {
+          await this.refreshLiveContinuation(signal);
+          continue;
+        }
+
+        this.handleLivePayload(payload);
+      } catch (error) {
+        if (isAbortError(error)) {
+          throw error;
+        }
+
+        if (error instanceof YoutubeInnertubeRequestError) {
+          log.warn('Live poll request failed:', {
+            status: error.status,
+            message: error.message,
+          });
+        } else {
+          log.warn('Live poll request failed:', error);
+        }
+
+        await this.refreshLiveContinuation(signal);
+      }
+    }
+  }
+
+  private async requestLivePayload(
+    continuation: InnertubeContinuationData,
+    signal?: AbortSignal
+  ): Promise<LiveChatPayload | null> {
+    return this.requestPayload(fetchLiveChat, continuation, signal);
+  }
+
+  private handleLivePayload(payload: LiveChatPayload): void {
+    const events = this.parser.extractChatEvents(payload.actions);
+    for (const event of events) {
+      this.emitMessage(event.message);
+    }
+
+    this.liveContinuation = extractNextLiveContinuation(payload.continuations);
+  }
+
+  private async refreshLiveContinuation(signal?: AbortSignal): Promise<void> {
+    const refreshed = await this.refreshBootstrap(signal);
+    if (refreshed) {
+      this.liveContinuation = this.bootstrap?.initialContinuation ?? null;
+    }
+  }
+}
+
+// ====================================================================
+// Replay chat source — replay polling loop, playerSeek + continuation
+// ====================================================================
+
+export class ReplayChatSource extends ChatSource {
+  private replayMode: ReplayMode | null = null;
+  private replayPlayerSeekContinuation: InnertubeContinuationData | null = null;
+  private replayContinuation: InnertubeContinuationData | null = null;
+  private replayFallbackLastOffsetMs = -1;
+  private lastReplayRequestedOffsetMs = -REPLAY_FETCH_MIN_DELTA_MS;
+  private replayConsecutiveFailures = 0;
+  private replayNextAllowedFetchAt = 0;
+  private readonly replayKeyRegistry = new MessageIdRegistry(MAX_TRACKED_REPLAY_KEYS);
+  private readonly replayPendingKeys = new Set<string>();
+  private replayBuffer: ReplayBufferedMessage[] = [];
+
+  protected seedCurrentSession(signal?: AbortSignal): Promise<boolean> {
+    return this.initializeReplaySession(signal);
+  }
+
+  protected launchCurrentPollLoop(signal?: AbortSignal): void {
+    this.launchPollLoop(signal, this.runReplayLoop.bind(this));
+  }
+
+  protected resetSessionState(): void {
+    super.resetSessionState();
+    this.resetReplayState();
+  }
+
+  // ---- Replay-specific ----
+
+  private resetReplayState(): void {
+    this.replayMode = null;
+    this.replayPlayerSeekContinuation = null;
+    this.replayContinuation = null;
+    this.replayFallbackLastOffsetMs = -1;
+    this.lastReplayRequestedOffsetMs = -REPLAY_FETCH_MIN_DELTA_MS;
+    this.replayConsecutiveFailures = 0;
+    this.replayNextAllowedFetchAt = 0;
+    this.replayBuffer = [];
+    this.replayKeyRegistry.clear();
+    this.replayPendingKeys.clear();
+  }
+
+  private async initializeReplaySession(signal?: AbortSignal): Promise<boolean> {
+    if (!this.bootstrap) {
+      return false;
+    }
+
+    this.resetReplayState();
+
+    try {
+      const initialPayload = await this.requestReplayPayload(
+        this.bootstrap.initialContinuation,
+        signal
+      );
+      if (!initialPayload) {
+        return false;
+      }
+
+      const playerSeekContinuation = extractPlayerSeekContinuation(initialPayload.continuations);
+      if (playerSeekContinuation) {
+        this.replayMode = 'playerSeek';
+        this.replayPlayerSeekContinuation = playerSeekContinuation;
+
+        const currentOffsetMs = this.getPlaybackSnapshot()?.offsetMs ?? 0;
+        const seeded = await this.fetchReplayPlayerSeek(currentOffsetMs, signal);
+        this.flushReplayBuffer(currentOffsetMs);
+        return seeded;
+      }
+
+      const replayContinuation = extractReplayContinuation(initialPayload.continuations);
+      if (!replayContinuation) {
+        log.warn('Replay session did not expose playerSeek or replay continuation data');
+        return false;
+      }
+
+      this.replayMode = 'continuation';
+      this.replayContinuation = replayContinuation;
+
+      const currentOffsetMs = this.getPlaybackSnapshot()?.offsetMs ?? 0;
+      const minimumOffsetMs = Math.max(0, currentOffsetMs - REPLAY_PREFETCH_WINDOW_MS);
+      this.replayFallbackLastOffsetMs = this.bufferReplayEvents(
+        this.parser.extractChatEvents(initialPayload.actions),
+        minimumOffsetMs
+      );
+      // Catch up fallback replay buffer to current position
+      let batchesFetched = 0;
+      while (
+        this.replayContinuation &&
+        this.replayFallbackLastOffsetMs < minimumOffsetMs &&
+        batchesFetched < 12
+      ) {
+        throwIfAborted(signal);
+        const fetched = await this.fetchNextReplayFallbackBatch(minimumOffsetMs, signal);
+        if (!fetched) break;
+        batchesFetched += 1;
+      }
+      this.flushReplayBuffer(currentOffsetMs);
+      return true;
+    } catch (error) {
+      if (isAbortError(error)) {
+        throw error;
+      }
+
+      log.warn('Failed to initialize replay chat session:', error);
+      return false;
+    }
+  }
+
+  private async reinitializeReplaySession(signal?: AbortSignal): Promise<boolean> {
+    const refreshed = await this.refreshBootstrap(signal);
+    if (!refreshed || !this.bootstrap?.isReplay) {
+      return false;
+    }
+
+    return this.initializeReplaySession(signal);
+  }
+
+  private async runReplayLoop(signal?: AbortSignal): Promise<void> {
+    while (!signal?.aborted) {
+      const playback = this.getPlaybackSnapshot();
+      const currentOffsetMs = playback?.offsetMs ?? 0;
+
+      this.flushReplayBuffer(currentOffsetMs);
+
+      if (!playback) {
+        await sleep(REPLAY_LOOP_DELAY_MS, signal);
+        continue;
+      }
+
+      if (this.replayMode === 'playerSeek') {
+        await this.pollPlayerSeekReplay(playback, signal);
+      } else if (this.replayMode === 'continuation' && !playback.paused) {
+        await this.pollContinuationReplay(currentOffsetMs, signal);
+      }
+
+      await sleep(REPLAY_LOOP_DELAY_MS, signal);
+    }
+  }
+
+  private async requestReplayPayload(
+    continuation: InnertubeContinuationData,
+    signal?: AbortSignal,
+    playerOffsetMs?: number
+  ): Promise<LiveChatPayload | null> {
+    return this.requestPayload(fetchReplayChat, continuation, playerOffsetMs, signal);
   }
 
   private getPlaybackSnapshot(): PlaybackSnapshot | null {
@@ -518,7 +720,7 @@ export class ChatSource {
 
       this.replayBuffer.shift();
       this.replayPendingKeys.delete(next.key);
-      this.trackReplayKey(next.key);
+      this.replayKeyRegistry.mark(next.key);
       this.emitMessage(next.message);
     }
   }
@@ -614,81 +816,6 @@ export class ChatSource {
     }
   }
 
-  private async initializeReplaySession(signal?: AbortSignal): Promise<boolean> {
-    if (!this.bootstrap) {
-      return false;
-    }
-
-    this.resetReplayState();
-
-    try {
-      const initialPayload = await this.requestReplayPayload(
-        this.bootstrap.initialContinuation,
-        signal
-      );
-      if (!initialPayload) {
-        return false;
-      }
-
-      const playerSeekContinuation = extractPlayerSeekContinuation(initialPayload.continuations);
-      if (playerSeekContinuation) {
-        this.replayMode = 'playerSeek';
-        this.replayPlayerSeekContinuation = playerSeekContinuation;
-
-        const currentOffsetMs = this.getPlaybackSnapshot()?.offsetMs ?? 0;
-        const seeded = await this.fetchReplayPlayerSeek(currentOffsetMs, signal);
-        this.flushReplayBuffer(currentOffsetMs);
-        return seeded;
-      }
-
-      const replayContinuation = extractReplayContinuation(initialPayload.continuations);
-      if (!replayContinuation) {
-        log.warn('Replay session did not expose playerSeek or replay continuation data');
-        return false;
-      }
-
-      this.replayMode = 'continuation';
-      this.replayContinuation = replayContinuation;
-
-      const currentOffsetMs = this.getPlaybackSnapshot()?.offsetMs ?? 0;
-      const minimumOffsetMs = Math.max(0, currentOffsetMs - REPLAY_PREFETCH_WINDOW_MS);
-      this.replayFallbackLastOffsetMs = this.bufferReplayEvents(
-        this.parser.extractChatEvents(initialPayload.actions),
-        minimumOffsetMs
-      );
-      // Catch up fallback replay buffer to current position
-      let batchesFetched = 0;
-      while (
-        this.replayContinuation &&
-        this.replayFallbackLastOffsetMs < minimumOffsetMs &&
-        batchesFetched < 12
-      ) {
-        throwIfAborted(signal);
-        const fetched = await this.fetchNextReplayFallbackBatch(minimumOffsetMs, signal);
-        if (!fetched) break;
-        batchesFetched += 1;
-      }
-      this.flushReplayBuffer(currentOffsetMs);
-      return true;
-    } catch (error) {
-      if (isAbortError(error)) {
-        throw error;
-      }
-
-      log.warn('Failed to initialize replay chat session:', error);
-      return false;
-    }
-  }
-
-  private async reinitializeReplaySession(signal?: AbortSignal): Promise<boolean> {
-    const refreshed = await this.refreshBootstrap(signal);
-    if (!refreshed || !this.bootstrap?.isReplay) {
-      return false;
-    }
-
-    return this.initializeReplaySession(signal);
-  }
-
   private shouldFetchReplayAtOffset(currentOffsetMs: number): boolean {
     if (!this.replayPlayerSeekContinuation) {
       return false;
@@ -699,68 +826,6 @@ export class ChatSource {
     }
 
     return currentOffsetMs - this.lastReplayRequestedOffsetMs >= REPLAY_FETCH_MIN_DELTA_MS;
-  }
-
-  private async runLiveLoop(signal?: AbortSignal): Promise<void> {
-    while (!signal?.aborted) {
-      const delayMs = this.liveContinuation?.timeoutMs ?? LIVE_POLL_FALLBACK_DELAY_MS;
-      await sleep(delayMs, signal);
-
-      throwIfAborted(signal);
-
-      const continuation = this.liveContinuation;
-      if (!continuation) {
-        await this.refreshLiveContinuation(signal);
-        continue;
-      }
-
-      try {
-        const payload = await this.requestLivePayload(continuation, signal);
-        if (!payload) {
-          await this.refreshLiveContinuation(signal);
-          continue;
-        }
-
-        this.handleLivePayload(payload);
-      } catch (error) {
-        if (isAbortError(error)) {
-          throw error;
-        }
-
-        if (error instanceof YoutubeInnertubeRequestError) {
-          log.warn('Live poll request failed:', {
-            status: error.status,
-            message: error.message,
-          });
-        } else {
-          log.warn('Live poll request failed:', error);
-        }
-
-        await this.refreshLiveContinuation(signal);
-      }
-    }
-  }
-
-  private async runReplayLoop(signal?: AbortSignal): Promise<void> {
-    while (!signal?.aborted) {
-      const playback = this.getPlaybackSnapshot();
-      const currentOffsetMs = playback?.offsetMs ?? 0;
-
-      this.flushReplayBuffer(currentOffsetMs);
-
-      if (!playback) {
-        await sleep(REPLAY_LOOP_DELAY_MS, signal);
-        continue;
-      }
-
-      if (this.replayMode === 'playerSeek') {
-        await this.pollPlayerSeekReplay(playback, signal);
-      } else if (this.replayMode === 'continuation' && !playback.paused) {
-        await this.pollContinuationReplay(currentOffsetMs, signal);
-      }
-
-      await sleep(REPLAY_LOOP_DELAY_MS, signal);
-    }
   }
 
   private async pollPlayerSeekReplay(

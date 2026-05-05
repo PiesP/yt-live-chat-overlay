@@ -243,7 +243,7 @@ export class RuntimeSession {
   }
 
   private async startChatSource(signal: AbortSignal): Promise<ChatSourceStartStatus> {
-    const chatSource = new ChatSource(() => this.settings);
+    const chatSource = await ChatSource.create(() => this.settings, signal);
     this.chatSource = chatSource;
 
     return chatSource.start((message) => {
