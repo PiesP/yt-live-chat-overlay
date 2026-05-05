@@ -165,7 +165,8 @@ export class RuntimeSession {
 
             // Skip checks while video is paused — the resume handler
             // will perform a full health check when playback resumes.
-            if (this.videoSync?.isPaused() ?? true) {
+            const isPaused = this.videoSync?.isPaused();
+            if (isPaused === undefined || isPaused === true) {
               return true;
             }
 

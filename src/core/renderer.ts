@@ -299,9 +299,13 @@ export class Renderer {
    * Remove stale activeMessage entries whose animation finished
    * without triggering the cleanup callback (e.g. GC delay, rapid
    * destroy/create cycles, tab-hidden edge cases).
+   *
+   * Uses Set.forEach instead of for...of because the callback may
+   * delete entries from the Set, and forEach safely handles
+   * concurrent modification during iteration.
    */
   private sweepStaleAnimations(): void {
-    for (const active of this.activeMessages) {
+    this.activeMessages.forEach((active) => {
       try {
         if (active.animation.playState === 'finished') {
           this.activeMessages.delete(active);
@@ -311,7 +315,7 @@ export class Renderer {
         log.debug('Failed to check animation playState during sweep:', error);
         this.activeMessages.delete(active);
       }
-    }
+    });
   }
 
   /**

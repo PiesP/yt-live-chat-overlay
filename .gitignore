@@ -42,9 +42,12 @@ temp/
 .env.*.local
 
 # Documentation (keep essential files)
+*.md
 !README.md
 !LICENSE
 !CHANGELOG.md
+!pull_request_template.md
+!SECURITY.md
 
 # AI Instructions (not shared to remote)
 AGENTS.md

@@ -236,10 +236,25 @@ export class SettingsUi {
     const activeElement = document.activeElement;
     this.previousFocus = activeElement instanceof HTMLElement ? activeElement : null;
 
+    // Reset apply button state from any previous close-apply cycle
+    this.resetApplyButton();
+
     this.form.populateForm(this.getSettings());
     this.switchTab(this.activeTab);
     this.setDialogOpen(true);
     this.focusInitialElement();
+  }
+
+  /**
+   * Reset the apply button to its initial state so it's interactive
+   * when the modal is reopened after a previous apply-then-close cycle.
+   */
+  private resetApplyButton(): void {
+    const applyButton = this.modal?.querySelector<HTMLButtonElement>('button[data-action="apply"]');
+    if (applyButton) {
+      applyButton.textContent = 'Done';
+      applyButton.disabled = false;
+    }
   }
 
   private apply(): void {
