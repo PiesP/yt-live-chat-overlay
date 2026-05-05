@@ -8,7 +8,7 @@
 import type { ChatMessage, OutlineSettings, OverlayDimensions, OverlaySettings } from '@app-types';
 import { shadows } from '@core/design-tokens';
 import { createLogger } from '@core/logging';
-import type { Overlay } from '@core/overlay';
+import type { OverlayView } from '@core/overlay-view';
 import { MessageIdRegistry, RenderQueue, RenderRateLimiter } from '@core/renderer-flow';
 import { LaneAllocator, type LanePlacement } from '@core/renderer-lanes';
 import { RENDERER_LAYOUT } from '@core/renderer-layout';
@@ -42,7 +42,7 @@ const combineTextShadows = (...shadows: string[]): string => {
 };
 
 export class Renderer {
-  private overlay: Overlay;
+  private overlay: OverlayView;
   private settings: OverlaySettings;
   private readonly laneAllocator: LaneAllocator;
   private readonly messageBuilder: RendererMessageBuilder;
@@ -61,7 +61,7 @@ export class Renderer {
   private static readonly SEEN_MESSAGE_IDS_LIMIT = 200;
   private readonly seenMessageIds = new MessageIdRegistry(Renderer.SEEN_MESSAGE_IDS_LIMIT);
 
-  constructor(overlay: Overlay, settings: OverlaySettings) {
+  constructor(overlay: OverlayView, settings: OverlaySettings) {
     this.overlay = overlay;
     this.settings = settings;
     this.messageBuilder = new RendererMessageBuilder(() => this.settings);
