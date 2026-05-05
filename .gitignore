@@ -46,16 +46,13 @@ temp/
 !README.md
 !LICENSE
 !CHANGELOG.md
-!pull_request_template.md
-!SECURITY.md
+!.github/pull_request_template.md
+!.github/SECURITY.md
 
 # AI Instructions (not shared to remote)
 AGENTS.md
 CODE_STANDARDS.md
 .claude/
-.github/copilot-instructions.md
-.github/prompts/
-.editorconfig
 .github/copilot-instructions.md
 .github/prompts/
 .editorconfig

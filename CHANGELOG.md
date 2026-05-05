@@ -13,7 +13,7 @@ All notable changes to this project will be documented in this file.
 - **Replay fetch busy-loop** — `ChatSource` now applies consecutive-failure exponential backoff to prevent infinite retry loops when replay continuations consistently fail.
 - **Overlay container DOM leak** — `Overlay.destroy()` now removes the container from DOM and prevents duplicate `ResizeObserver` instances on repeated create/destroy cycles.
 
-### Perfomance
+### Performance
 - **Watchdog health check while paused** — `RuntimeSession` now skips chat source health checks when the video is paused, reducing unnecessary polling and CPU usage.
 
 ### Refactored
@@ -24,15 +24,6 @@ All notable changes to this project will be documented in this file.
 - **devDependencies updated** — `@biomejs/biome`, `@types/node`, `knip`, `vite` updated to latest compatible versions.
 
 ## [0.19.1] - 2026-05-03
-
-### Fixed
-- **Long pause timeline skew** — `Renderer` lane collision and rate limiter now cap timeline shifts at 60 seconds, preventing messages from being blocked after the user returns from a long idle (e.g., tab hidden for 30+ minutes).
-
-### Refactored
-- **UI formatting extracted** — moved `formatRootNumericSettingForInput`, `normalizeRootNumericInputValue`, `getRootNumericInputAttributes` and outline equivalents from `settings-schema.ts` into a new `settings-ui-format.ts` module. `settings-schema.ts` now focuses on pure data validation/sanitization.
-- **Runtime session restart logic simplified** — removed optional `details` parameter from `requestManagedRestart()`; health snapshot is computed inline instead of being passed around by callers, eliminating duplicate health calculations.
-- **Replay continuation catch-up inlined** — merged `catchUpFallbackReplay` logic directly into `pollContinuationReplay`; removed `REPLAY_FALLBACK_CATCHUP_BATCH_LIMIT` and `REPLAY_BUFFER_REFILL_THRESHOLD` constants.
-- **Dead code removed** — unused `@/` path alias removed from `vite.config.ts`, `tsconfig.json`, and `knip.json`.
 
 ### Fixed
 - **Long pause timeline skew** — `Renderer` lane collision and rate limiter now cap timeline shifts at 60 seconds, preventing messages from being blocked after the user returns from a long idle (e.g., tab hidden for 30+ minutes).

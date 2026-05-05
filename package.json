@@ -14,7 +14,7 @@
     "lint:fix": "biome lint --write .",
     "fmt": "biome check --linter-enabled=false .",
     "fmt:fix": "biome check --write --linter-enabled=false .",
-    "circular": "pnpm dlx madge --circular src/core/*.ts",
+    "circular": "pnpm dlx madge --ts-config tsconfig.json --circular src/core/*.ts",
     "quality": "pnpm -s fmt && pnpm -s lint && pnpm -s check && pnpm -s circular && pnpm -s knip",
     "quality:fix": "pnpm -s fmt:fix && pnpm -s lint:fix && pnpm -s check && pnpm -s circular && pnpm -s knip",
     "clean": "rm -rf dist",

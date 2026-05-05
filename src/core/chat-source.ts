@@ -832,7 +832,7 @@ export class ReplayChatSource extends ChatSource {
   }
 
   private shouldFetchReplayAtOffset(currentOffsetMs: number): boolean {
-    if (!this.replayPlayerSeekContinuation) {
+    if (this.replayMode !== 'playerSeek' || !this.replayPlayerSeekContinuation) {
       return false;
     }
 

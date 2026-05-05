@@ -52,7 +52,6 @@ pnpm build
 - `pnpm build` runs `prebuild`, so the repository quality gate is enforced before the production userscript is emitted.
 - Detailed contributor workflow: [CONTRIBUTING.md](./CONTRIBUTING.md)
 - Coding policy: [CODE_STANDARDS.md](./CODE_STANDARDS.md)
-- Manual verification checklist: [TESTING.md](./TESTING.md)
 
 ## Support
 

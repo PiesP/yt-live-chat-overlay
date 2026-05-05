@@ -267,9 +267,7 @@ export class RuntimeSession {
     const shouldRestart =
       !renderable ||
       idleDurationMs >= LONG_IDLE_RESTART_MS ||
-      !chat ||
-      !chat.observerAlive ||
-      !chat.recentlyActive;
+      (this.sessionReady && !!chat && (!chat.observerAlive || !chat.recentlyActive));
 
     return {
       idleDurationMs,

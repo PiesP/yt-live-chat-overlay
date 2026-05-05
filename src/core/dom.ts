@@ -34,9 +34,13 @@ export const PLAYER_CONTAINER_SELECTORS = ['#movie_player', '.html5-video-player
 
 export const VIDEO_SELECTORS = ['#movie_player video', 'video.html5-main-video'] as const;
 
-const createAbortError = (reason?: unknown): DOMException | Error => {
-  if (reason instanceof DOMException || reason instanceof Error) {
+const createAbortError = (reason?: unknown): DOMException => {
+  if (reason instanceof DOMException) {
     return reason;
+  }
+
+  if (reason instanceof Error) {
+    return new DOMException(reason.message, 'AbortError');
   }
 
   return new DOMException('The operation was aborted.', 'AbortError');

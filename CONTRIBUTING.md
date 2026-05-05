@@ -19,7 +19,7 @@ Please include:
 - Whether the page was a live stream, premiere, or replay with chat
 - Steps to reproduce and expected vs actual behavior
 - Script version (userscript header or release tag)
-- Relevant console output (prefixed with `[YT Chat Overlay]`)
+- Relevant console output (prefixed with module names like `[App]`, `[Renderer]`, etc.)
 
 Avoid posting private account information or sensitive browser data.
 
@@ -45,8 +45,12 @@ pnpm check
 pnpm lint
 pnpm fmt
 pnpm knip
+pnpm knip:full
+pnpm circular
 pnpm quality
 pnpm quality:fix
+pnpm fmt:fix
+pnpm lint:fix
 ```
 
 `pnpm build` runs the repository quality gate through `prebuild` before generating `dist/yt-live-chat-overlay.user.js`.
@@ -57,8 +61,7 @@ pnpm quality:fix
 2. Use `pnpm build:dev` for quick iteration while testing in your userscript manager.
 3. Run `pnpm quality`; use `pnpm quality:fix` first if you want standard format/lint fixes applied.
 4. Run `pnpm build` before opening a PR.
-5. Follow the manual verification checklist in [TESTING.md](./TESTING.md) whenever runtime behavior changed.
-6. Update `README.md` and release-facing notes if user-visible behavior changed.
+5. Update `README.md` and release-facing notes if user-visible behavior changed.
 
 ## Project constraints
 
@@ -71,7 +74,7 @@ pnpm quality:fix
 
 - Use the path aliases documented in [CODE_STANDARDS.md](./CODE_STANDARDS.md).
 - Prefer explicit return types for exported helpers and class methods.
-- Keep logs prefixed with `[YT Chat Overlay]` via the shared logger utilities.
+- Use `createLogger('[ModuleName]')` from `@core/logging` for structured runtime logging.
 - Keep changes small and reversible; update docs when behavior or workflow changes.
 
 ## Pull request expectations
@@ -86,6 +89,4 @@ A good PR includes:
 
 - [README.md](./README.md) — user-facing overview
 - [CODE_STANDARDS.md](./CODE_STANDARDS.md) — coding rules and repository constraints
-- [TESTING.md](./TESTING.md) — manual verification checklist
-
 Thanks for helping improve **YouTube Live Chat Overlay**!
