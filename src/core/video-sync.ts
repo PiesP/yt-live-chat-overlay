@@ -34,7 +34,6 @@ export class VideoSync {
     pause: () => this.callbacks.onPause?.(),
     play: () => this.callbacks.onPlay?.(),
     seeking: () => {
-      this.callbacks.onPause?.();
       this.callbacks.onSeeking?.();
     },
     ratechange: () => this.callbacks.onRateChange?.(this.videoElement?.playbackRate ?? 1.0),
