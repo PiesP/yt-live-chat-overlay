@@ -276,13 +276,6 @@ export class Renderer {
       return;
     }
 
-    // Rate limiting check
-    const now = Date.now();
-    if (!this.rateLimiter.canAccept(now)) {
-      // Drop message
-      return;
-    }
-
     if (message.id) {
       this.seenMessageIds.mark(message.id);
     }
@@ -342,6 +335,17 @@ export class Renderer {
       if (queued.nextAttemptAt > now) {
         const waitMs = queued.nextAttemptAt - now;
         shortestWaitMs = shortestWaitMs === null ? waitMs : Math.min(shortestWaitMs, waitMs);
+        continue;
+      }
+
+      // Rate limit: check at render time, not enqueue time, so bursts
+      // don't bypass the limit while messages sit in the queue.
+      if (!this.rateLimiter.canAccept(now)) {
+        queued.nextAttemptAt = now + LAYOUT.RETRY_DELAY_MIN_MS;
+        shortestWaitMs =
+          shortestWaitMs === null
+            ? LAYOUT.RETRY_DELAY_MIN_MS
+            : Math.min(shortestWaitMs, LAYOUT.RETRY_DELAY_MIN_MS);
         continue;
       }
 
