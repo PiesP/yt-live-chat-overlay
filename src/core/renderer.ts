@@ -99,7 +99,6 @@ export class Renderer {
       this.removeMessage(active);
     }
 
-    this.activeMessages.clear();
     this.renderQueue.clear();
     this.seenMessageIds.clear();
   }
