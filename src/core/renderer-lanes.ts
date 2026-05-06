@@ -91,11 +91,7 @@ export class LaneAllocator {
         ? readyNow
         : candidates.filter((candidate) => candidate.readyTime === minReadyTime);
 
-    const chosen = pool[this.roundRobinIndex % pool.length] ?? pool[0];
-    if (!chosen) {
-      return null;
-    }
-
+    const chosen = pool[this.roundRobinIndex % pool.length] ?? pool[0]!;
     this.roundRobinIndex = (this.roundRobinIndex + 1) % pool.length;
 
     const chosenLane = this.lanes[chosen.startIndex];
