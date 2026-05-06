@@ -20,7 +20,6 @@ interface LaneAllocatorOptions {
 
 export class LaneAllocator {
   private lanes: LaneState[] = [];
-  private roundRobinIndex = 0;
 
   constructor(private readonly options: LaneAllocatorOptions) {}
 
@@ -88,8 +87,13 @@ export class LaneAllocator {
         ? readyNow
         : candidates.filter((candidate) => candidate.readyTime === minReadyTime);
 
-    const chosen = pool[this.roundRobinIndex % pool.length] ?? pool[0]!;
-    this.roundRobinIndex = (this.roundRobinIndex + 1) % pool.length;
+    // Prefer the lane that has been idle the longest to distribute
+    // messages evenly across all lanes and avoid vertical clumping.
+    const chosen = pool.reduce((best, candidate) => {
+      const idleTime = now - (this.lanes[candidate.startIndex]?.lastItemStartTime ?? 0);
+      const bestIdleTime = now - (this.lanes[best.startIndex]?.lastItemStartTime ?? 0);
+      return idleTime > bestIdleTime ? candidate : best;
+    }, pool[0]!);
 
     const chosenLane = this.lanes[chosen.startIndex];
     if (!chosenLane) {
