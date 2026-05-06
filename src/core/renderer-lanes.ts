@@ -20,7 +20,6 @@ interface LaneAllocatorOptions {
 
 export class LaneAllocator {
   private lanes: LaneState[] = [];
-  private lastRenderStartTime = 0;
   private roundRobinIndex = 0;
 
   constructor(private readonly options: LaneAllocatorOptions) {}
@@ -83,9 +82,7 @@ export class LaneAllocator {
       return null;
     }
 
-    const staggerFloor = this.lastRenderStartTime + this.options.globalStaggerMs;
-    const effectiveNow = Math.max(now, staggerFloor);
-    const readyNow = candidates.filter((candidate) => candidate.readyTime <= effectiveNow);
+    const readyNow = candidates.filter((candidate) => candidate.readyTime <= now + 16);
     const pool =
       readyNow.length > 0
         ? readyNow
@@ -99,7 +96,7 @@ export class LaneAllocator {
       return null;
     }
 
-    const scheduledTime = Math.max(chosen.readyTime, staggerFloor);
+    const scheduledTime = chosen.readyTime;
 
     return {
       lane: chosenLane,
@@ -128,8 +125,6 @@ export class LaneAllocator {
       laneState.lastItemWidthPx = textWidth;
       laneState.lastItemHeightPx = messageHeight;
     }
-
-    this.lastRenderStartTime = startTime;
   }
 
   shiftTimeline(deltaMs: number): void {
@@ -146,10 +141,6 @@ export class LaneAllocator {
       if (lane.lastItemStartTime > 0) {
         lane.lastItemStartTime += clampedMs;
       }
-    }
-
-    if (this.lastRenderStartTime > 0) {
-      this.lastRenderStartTime += clampedMs;
     }
   }
 
@@ -176,7 +167,8 @@ export class LaneAllocator {
       Math.max(this.options.verticalClearTimeMin, lane.lastItemHeightPx * 4)
     );
     const verticalReadyTime = lane.lastItemStartTime + verticalClearTime;
+    const laneStaggerTime = lane.lastItemStartTime + this.options.globalStaggerMs;
 
-    return Math.max(now, horizontalReadyTime, verticalReadyTime);
+    return Math.max(now, horizontalReadyTime, verticalReadyTime, laneStaggerTime);
   }
 }
