@@ -111,6 +111,7 @@ export const RENDERER_LAYOUT = {
   RETRY_DELAY_MAX_MS: 800,
   QUEUE_LOOKAHEAD_LIMIT: 10,
   QUEUE_MAX_SIZE: 30,
+  ENTRY_OFFSET_MAX: 200,
 } as const;
 
 export function parseRgbColor(colorString: string): RgbColor | null {

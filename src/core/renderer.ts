@@ -237,11 +237,20 @@ export class Renderer {
     );
     const distance = dimensions.width + textWidth + exitPadding;
 
+    // Random entry offset so messages arriving at the same time don't
+    // all start from the exact same right-edge position, reducing
+    // visible horizontal clumping as they traverse the screen.
+    const entryOffset = Math.floor(Math.random() * RENDERER_LAYOUT.ENTRY_OFFSET_MAX);
+
+    // Adjust effective distance for entry offset so actual travel
+    // speed stays consistent regardless of the starting offset.
+    const adjustedDistance = distance + entryOffset;
+
     // Optimized duration for better pacing
     const effectiveSpeedPxPerSec = this.getEffectiveSpeedPxPerSec();
     const duration = Math.max(
       RENDERER_LAYOUT.DURATION_MIN,
-      Math.min(RENDERER_LAYOUT.DURATION_MAX, (distance / effectiveSpeedPxPerSec) * 1000)
+      Math.min(RENDERER_LAYOUT.DURATION_MAX, (adjustedDistance / effectiveSpeedPxPerSec) * 1000)
     );
 
     // Small random jitter so messages entering around the same time don't
@@ -250,9 +259,10 @@ export class Renderer {
       Math.random() * RENDERER_LAYOUT.LANE_DELAY_CYCLE * RENDERER_LAYOUT.LANE_DELAY_MS
     );
 
-    // Create Web Animation
+    // Create Web Animation — start at entryOffset to the right of the
+    // normal starting position, then travel the full distance leftward.
     const animation = element.animate(
-      [{ transform: 'translateX(0)' }, { transform: `translateX(-${distance}px)` }],
+      [{ transform: `translateX(${entryOffset}px)` }, { transform: `translateX(-${distance}px)` }],
       {
         duration,
         delay: laneDelay,
