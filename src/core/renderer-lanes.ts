@@ -1,5 +1,4 @@
 import type { LaneState, OverlayDimensions } from '@app-types';
-import { RENDERER_LAYOUT } from '@core/design-tokens';
 
 export interface LanePlacement {
   lane: LaneState;
@@ -42,11 +41,7 @@ export class LaneAllocator {
     return this.lanes.length === 0;
   }
 
-  findPlacement(
-    messageHeight: number,
-    dimensions: OverlayDimensions,
-    isClusterMessage?: boolean
-  ): LanePlacement | null {
+  findPlacement(messageHeight: number, dimensions: OverlayDimensions): LanePlacement | null {
     const now = Date.now();
     const requiredLanes = this.calculateRequiredLanes(messageHeight, dimensions.laneHeight);
     if (requiredLanes > this.lanes.length) {
@@ -71,10 +66,7 @@ export class LaneAllocator {
           break;
         }
 
-        blockReadyTime = Math.max(
-          blockReadyTime,
-          this.calculateLaneReadyTime(lane, now, isClusterMessage)
-        );
+        blockReadyTime = Math.max(blockReadyTime, this.calculateLaneReadyTime(lane, now));
       }
 
       if (!Number.isFinite(blockReadyTime)) {
@@ -169,15 +161,12 @@ export class LaneAllocator {
     return Math.max(1, Math.ceil((messageHeight + paddingPx) / laneHeight));
   }
 
-  private calculateLaneReadyTime(lane: LaneState, now: number, isClusterMessage?: boolean): number {
+  private calculateLaneReadyTime(lane: LaneState, now: number): number {
     if (lane.lastItemStartTime <= 0) {
       return now;
     }
 
-    const effectiveSafeDistanceScale = isClusterMessage
-      ? this.options.safeDistanceScale * RENDERER_LAYOUT.CLUSTER_COHESION_SCALE
-      : this.options.safeDistanceScale;
-    const baseSafeDistance = this.options.getFontSize() * effectiveSafeDistanceScale;
+    const baseSafeDistance = this.options.getFontSize() * this.options.safeDistanceScale;
     const minSafeDistance = Math.max(baseSafeDistance, this.options.safeDistanceMin);
     const requiredGapPx = lane.lastItemWidthPx + minSafeDistance;
     const safeTimeGap = (requiredGapPx / this.options.getEffectiveSpeedPxPerSec()) * 1000;
@@ -187,12 +176,6 @@ export class LaneAllocator {
       Math.max(this.options.verticalClearTimeMin, lane.lastItemHeightPx * 4)
     );
     const verticalReadyTime = lane.lastItemStartTime + verticalClearTime;
-
-    if (isClusterMessage) {
-      // Within a cluster, skip the global lane stagger to let messages
-      // flow more tightly together — mimics natural burst behavior.
-      return Math.max(now, horizontalReadyTime, verticalReadyTime);
-    }
 
     const laneStaggerTime = lane.lastItemStartTime + this.options.globalStaggerMs;
 
