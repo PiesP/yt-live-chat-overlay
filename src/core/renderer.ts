@@ -308,7 +308,7 @@ export class Renderer {
 
     // Only process queue if not paused
     if (!this.isPaused) {
-      this.processQueue();
+      queueMicrotask(() => this.processQueue());
     }
     // If paused, message stays in queue until resume()
   }
