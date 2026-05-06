@@ -22,7 +22,7 @@ export class RenderRateLimiter {
     return this.tokens >= 1;
   }
 
-  markProcessed(_now?: number): void {
+  markProcessed(): void {
     this.tokens = Math.max(0, this.tokens - 1);
   }
 

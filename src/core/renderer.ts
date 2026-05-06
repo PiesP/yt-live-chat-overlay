@@ -406,7 +406,7 @@ export class Renderer {
 
     if (result.status === 'rendered') {
       this.renderQueue.removeAt(0);
-      this.rateLimiter.markProcessed(now);
+      this.rateLimiter.markProcessed();
       this.updateClusterState();
     } else if (result.status === 'dropped') {
       this.renderQueue.removeAt(0);
@@ -526,7 +526,7 @@ export class Renderer {
     log.warn(
       `Performance warning: ${this.activeMessages.size} concurrent messages ` +
         `(recommended max: ${this.settings.maxConcurrentMessages}). ` +
-        `Consider reducing maxMessagesPerSecond setting.`
+        'Consider reducing maxMessagesPerSecond setting.'
     );
   }
 

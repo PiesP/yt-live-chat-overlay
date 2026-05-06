@@ -28,7 +28,9 @@
       "style": {
         "noNonNullAssertion": "off",
         "useConst": "error",
-        "noParameterAssign": "warn"
+        "noParameterAssign": "warn",
+        "noUnusedTemplateLiteral": "error",
+        "useExponentiationOperator": "error"
       },
       "suspicious": {
         "noExplicitAny": "error",
@@ -39,7 +41,11 @@
       },
       "complexity": {
         "noForEach": "off",
-        "noStaticOnlyClass": "off"
+        "noStaticOnlyClass": "off",
+        "noUselessTernary": "error",
+        "noUselessSwitchCase": "error",
+        "noUselessEmptyExport": "error",
+        "noUselessLoneBlockStatements": "error"
       },
       "performance": {
         "noAccumulatingSpread": "error"
