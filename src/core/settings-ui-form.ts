@@ -121,7 +121,6 @@ export const getNumericInputAttributes = (
 
 const applyNumberInputAttributes = (
   input: HTMLInputElement,
-  _scope: 'root' | 'outline',
   key: RootScalarSettingKey | Exclude<OutlineSettingKey, 'enabled'>
 ): void => {
   const { min, max, step } = getNumericInputAttributes(key);
@@ -397,7 +396,7 @@ export class SettingsUiForm {
     title?: string
   ): HTMLLabelElement {
     const input = this.createInput('number', name);
-    applyNumberInputAttributes(input, 'root', name);
+    applyNumberInputAttributes(input, name);
     if (title) {
       input.title = title;
     }
@@ -410,7 +409,7 @@ export class SettingsUiForm {
   ): HTMLLabelElement {
     const name = outlineFormName(key);
     const input = this.createInput('number', name);
-    applyNumberInputAttributes(input, 'outline', key);
+    applyNumberInputAttributes(input, key);
     return this.createField(labelText, input);
   }
 
