@@ -1,6 +1,21 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+
+## [0.21.1] - 2026-05-06
+
+### Refactored
+
+- **`authorType` made required on `ChatMessage`** — The field was declared optional but every code path always set it (parser defaults to `'normal'`). Making it required eliminates 5 `NonNullable<>` wrappers and the `|| 'normal'` fallback in `getAuthorType()`.
+
+- **Removed dead code and redundant checks** — Removed unreachable `if (!chosen)` guard in lane allocator (pool is always non-empty), deleted duplicate `activeMessages.clear()` after remove-message loop, eliminated unused `_scope` parameter from `applyNumberInputAttributes`.
+
+- **Inlined `TupleValue` utility type** — The one-line abstraction was used only in `types/index.ts`. Inlined all 5 usages to direct indexed-access patterns.
+
+- **Simplified fetch signal passing** — Replaced conditional object spread `...(signal ? { signal } : {})` with direct `signal: signal ?? null` in both `fetchWatchHtml` and `fetchChatEndpoint`.
+
+- **Optimized `sweepStaleAnimations` early-exit** — Moved the `activeMessages.size === 0` check before the counter modulo to avoid unnecessary integer ops when no messages are active.
+
 ## [0.21.0] - 2026-05-05
 
 ### Added
