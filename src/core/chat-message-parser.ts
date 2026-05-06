@@ -7,7 +7,7 @@ import type {
   OverlaySettings,
   SuperChatInfo,
 } from '@app-types';
-import { parseRgbColor } from '@core/design-tokens';
+import { colors, parseRgbColor } from '@core/design-tokens';
 import { createLogger } from '@core/logging';
 import {
   asRecord,
@@ -687,14 +687,24 @@ export class ChatMessageParser {
     const rgb = backgroundColor ? parseRgbColor(backgroundColor) : null;
     if (!rgb) return 'blue';
 
-    const { r, g, b } = rgb;
+    const tierKeys = Object.keys(colors.superChat) as SuperChatInfo['tier'][];
 
-    if (r > 200 && g < 100 && b < 100) return 'red';
-    if (r > 200 && g < 100 && b > 80) return 'magenta';
-    if (r > 200 && g > 100 && g < 150 && b < 50) return 'orange';
-    if (r > 200 && g > 180 && b < 100) return 'yellow';
-    if (r < 100 && g > 200 && b > 150) return 'green';
-    if (r < 100 && g > 150 && b > 200) return 'cyan';
-    return 'blue';
+    let bestTier: SuperChatInfo['tier'] = 'blue';
+    let bestSquaredDistance = Number.POSITIVE_INFINITY;
+
+    for (const tier of tierKeys) {
+      const tierColor = colors.superChat[tier];
+      const dr = rgb.r - tierColor.r;
+      const dg = rgb.g - tierColor.g;
+      const db = rgb.b - tierColor.b;
+      const squaredDistance = dr * dr + dg * dg + db * db;
+
+      if (squaredDistance < bestSquaredDistance) {
+        bestSquaredDistance = squaredDistance;
+        bestTier = tier;
+      }
+    }
+
+    return bestTier;
   }
 }
