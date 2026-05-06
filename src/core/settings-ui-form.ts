@@ -7,6 +7,7 @@ import {
   OUTLINE_SETTING_KEYS,
   type OutlineSettingKey,
   outlineFormName,
+  ROOT_NUMERIC_KEYS,
   ROOT_SETTING_KEYS,
   type RootScalarSettingKey,
   SHOW_AUTHOR_KEYS,
@@ -581,30 +582,7 @@ export class SettingsUiForm {
     );
     target.logLevel = this.getLogLevel('logLevel', current.logLevel);
 
-    const numericKeys: ReadonlyArray<
-      | 'speedPxPerSec'
-      | 'fontSize'
-      | 'opacity'
-      | 'superChatOpacity'
-      | 'safeTop'
-      | 'safeBottom'
-      | 'maxConcurrentMessages'
-      | 'maxMessagesPerSecond'
-      | 'minTextLength'
-      | 'laneSpacing'
-    > = [
-      'speedPxPerSec',
-      'fontSize',
-      'opacity',
-      'superChatOpacity',
-      'safeTop',
-      'safeBottom',
-      'maxConcurrentMessages',
-      'maxMessagesPerSecond',
-      'minTextLength',
-      'laneSpacing',
-    ];
-    for (const key of numericKeys) {
+    for (const key of ROOT_NUMERIC_KEYS) {
       target[key] = normalizeRootNumericInputValue(
         key,
         this.readNumber(key, current[key]),

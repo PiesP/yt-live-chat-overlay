@@ -26,6 +26,24 @@ export const SHOW_AUTHOR_KEYS = [
   'superChat',
 ] as const satisfies ReadonlyArray<keyof OverlaySettings['showAuthor']>;
 
+type RootNumericSettingKey = Exclude<
+  RootScalarSettingKey,
+  'enabled' | 'allowShortTextMessages' | 'logLevel'
+>;
+
+export const ROOT_NUMERIC_KEYS = [
+  'speedPxPerSec',
+  'fontSize',
+  'opacity',
+  'superChatOpacity',
+  'safeTop',
+  'safeBottom',
+  'maxConcurrentMessages',
+  'maxMessagesPerSecond',
+  'minTextLength',
+  'laneSpacing',
+] as const satisfies readonly RootNumericSettingKey[];
+
 export const ROOT_SETTING_KEYS = [
   'enabled',
   'speedPxPerSec',
