@@ -313,9 +313,9 @@ export class Renderer {
    * concurrent modification during iteration.
    */
   private sweepStaleAnimations(): void {
+    if (this.activeMessages.size === 0) return;
     this.sweepCounter++;
     if (this.sweepCounter % this.SWEEP_INTERVAL !== 0) return;
-    if (this.activeMessages.size === 0) return;
 
     this.activeMessages.forEach((active) => {
       try {
