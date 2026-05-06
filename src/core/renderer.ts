@@ -353,11 +353,11 @@ export class Renderer {
   }
 
   /**
-   * Process messages from the queue with cluster-aware batching.
+   * Process messages from the queue, paced by the SmoothPacer.
    *
-   * When the queue has ≥ 3 messages (a burst), they are processed rapidly
-   * with short intra-cluster gaps. Between bursts, longer gaps allow more
-   * messages to accumulate for the next cluster.
+   * Displays one message per cycle, respecting the arrival-rate-driven gap
+   * from SmoothPacer and lane availability.  Re-schedules itself when there
+   * are still messages waiting or lanes are temporarily busy.
    */
   private processQueue(): void {
     // Don't process while paused
@@ -400,9 +400,7 @@ export class Renderer {
 
     const result = this.renderMessage(queued.message);
 
-    if (result.status === 'rendered') {
-      this.renderQueue.removeAt(0);
-    } else if (result.status === 'dropped') {
+    if (result.status !== 'deferred') {
       this.renderQueue.removeAt(0);
     } else {
       queued.nextAttemptAt = now + result.waitMs;

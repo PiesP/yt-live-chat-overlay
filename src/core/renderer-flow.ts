@@ -21,7 +21,7 @@ export interface QueuedMessage {
 //
 // ─────────────────────────────────────────────────────────────────────────
 
-interface SmoothPacerOptions {
+export interface SmoothPacerOptions {
   /** Returns the user-configured max messages per second (hard cap). */
   readonly getMaxRate: () => number;
   /** Sliding window for arrival rate measurement (ms). */

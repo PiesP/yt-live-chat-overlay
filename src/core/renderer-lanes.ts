@@ -18,6 +18,9 @@ interface LaneAllocatorOptions {
   readonly laneHeightPaddingMin: number;
 }
 
+/** Random-noise range for top-weighted lane selection — larger = more spread across lanes. */
+const LANE_NOISE_RANGE = 4;
+
 export class LaneAllocator {
   private lanes: LaneState[] = [];
 
@@ -91,9 +94,7 @@ export class LaneAllocator {
     // ── Top-weighted lane selection with noise ──────────────────────────
     // Prefer upper lanes (lower startIndex) so messages fill from the top of
     // the screen, but add random jitter so adjacent messages don't pile up on
-    // the exact same lane every time.  LANE_NOISE_RANGE controls how often a
-    // slightly lower lane can "win" against a higher one — larger = more spread.
-    const LANE_NOISE_RANGE = 4;
+    // the exact same lane every time.
 
     let bestScore = Number.POSITIVE_INFINITY;
     let bestCandidate: BlockCandidate | null = null;
