@@ -239,8 +239,9 @@ export class Renderer {
     );
     const distance = dimensions.width + textWidth + exitPadding;
 
-    // Random entry offset so messages don't all start from the same X position.
-    const entryOffset = Math.floor(Math.random() * RENDERER_LAYOUT.ENTRY_OFFSET_MAX);
+    // Stagger entry offset by lane index so messages on different lanes
+    // start from different horizontal positions, creating a more natural look.
+    const entryOffset = (lane.index % 3) * 50 + Math.floor(Math.random() * 100);
 
     // Adjust effective distance for entry offset so actual travel
     // speed stays consistent regardless of the starting offset.
@@ -253,10 +254,20 @@ export class Renderer {
       Math.min(RENDERER_LAYOUT.DURATION_MAX, (adjustedDistance / effectiveSpeedPxPerSec) * 1000)
     );
 
-    // Lane delay jitter prevents messages from all starting at the same Y position.
-    const laneDelay = Math.floor(
-      Math.random() * RENDERER_LAYOUT.LANE_DELAY_CYCLE * RENDERER_LAYOUT.LANE_DELAY_MS
-    );
+    // Hierarchical delay: group lanes into tiers with base delay + small jitter.
+    // Same-tier messages start at similar times, reducing the staircase effect
+    // while maintaining natural variation between tiers.
+    let laneDelay: number;
+    if (lane.index <= 3) {
+      // Top tier (lanes 0-3): fastest start, minimal jitter
+      laneDelay = Math.floor(Math.random() * 20);
+    } else if (lane.index <= 7) {
+      // Middle tier (lanes 4-7): moderate start
+      laneDelay = 30 + Math.floor(Math.random() * 30);
+    } else {
+      // Bottom tier (lanes 8+): slightly delayed for natural flow
+      laneDelay = 60 + Math.floor(Math.random() * 40);
+    }
 
     // Create Web Animation — start at entryOffset to the right of the
     // normal starting position, then travel the full distance leftward.
