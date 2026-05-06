@@ -183,23 +183,34 @@ export class LaneAllocator {
       return now;
     }
 
-    const baseSafeDistance = this.options.getFontSize() * this.options.safeDistanceScale;
-    const minSafeDistance = Math.max(baseSafeDistance, this.options.safeDistanceMin);
-    const requiredGapPx = lane.lastItemWidthPx + minSafeDistance;
-    const safeTimeGap = (requiredGapPx / this.options.getEffectiveSpeedPxPerSec()) * 1000;
-    const horizontalReadyTime = lane.lastItemStartTime + safeTimeGap;
-    const verticalClearTime = Math.min(
-      this.options.verticalClearTimeMax,
-      Math.max(this.options.verticalClearTimeMin, lane.lastItemHeightPx * 4)
+    const speed = this.options.getEffectiveSpeedPxPerSec();
+    const fontSize = this.options.getFontSize();
+
+    // ── Dynamic safe distance ────────────────────────────────────────
+    // Scale safe distance with speed: low speed → wider gap, high speed → tighter.
+    // This prevents overlapping when messages move slowly.
+    const baseSafeDistance = Math.max(
+      fontSize * this.options.safeDistanceScale,
+      this.options.safeDistanceMin
     );
-    const verticalReadyTime = lane.lastItemStartTime + verticalClearTime;
+    const speedFactor = Math.max(0.5, Math.min(2.0, 100 / speed));
+    const minSafeDistance = baseSafeDistance * speedFactor;
+    const requiredGapPx = lane.lastItemWidthPx + minSafeDistance;
+    const safeTimeGap = (requiredGapPx / speed) * 1000;
+    const horizontalReadyTime = lane.lastItemStartTime + safeTimeGap;
+
+    // ── Dynamic vertical clear time ──────────────────────────────────
+    // Base on message travel time instead of fixed 20-80ms cap.
+    // At low speed (50px/s on 1920px screen): traverse ~960ms, 5% = 48ms, min 200ms
+    // At high speed (200px/s on 1920px screen): traverse ~240ms, 5% = 12ms, min 200ms
+    const traverseTimeMs = (window.innerWidth / speed) * 1000;
+    const dynamicClearMs = Math.max(traverseTimeMs * 0.05, 200);
+    const verticalReadyTime = lane.lastItemStartTime + dynamicClearMs;
 
     const laneStaggerTime = lane.lastItemStartTime + this.options.globalStaggerMs;
 
     // Absolute animation end time guard: the lane is never ready before the
-    // previous message's animation has finished playing.  This prevents
-    // overlaps that horizontal/vertical estimates miss (e.g. entry-offset
-    // jitter stretching the actual travel duration).
+    // previous message's animation has finished playing.
     const animationEndGuard = lane.lastItemEndTime;
 
     return Math.max(
