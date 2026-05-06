@@ -2,27 +2,25 @@
  * Type definitions for YouTube Live Chat Overlay
  */
 
-type TupleValue<T extends readonly unknown[]> = T[number];
-
 const AUTHOR_TYPES = ['normal', 'member', 'moderator', 'owner', 'verified'] as const;
 export const LOG_LEVELS = ['warn', 'info', 'debug'] as const;
 const AUTHOR_DISPLAY_KEYS = [...AUTHOR_TYPES, 'superChat'] as const;
 const CHAT_MESSAGE_KINDS = ['text', 'superchat', 'membership'] as const;
 const SUPER_CHAT_TIERS = ['blue', 'cyan', 'green', 'yellow', 'orange', 'magenta', 'red'] as const;
 
-type AuthorDisplayKey = TupleValue<typeof AUTHOR_DISPLAY_KEYS>;
-type ChatMessageKind = TupleValue<typeof CHAT_MESSAGE_KINDS>;
-type SuperChatTier = TupleValue<typeof SUPER_CHAT_TIERS>;
+type AuthorDisplayKey = (typeof AUTHOR_DISPLAY_KEYS)[number];
+type ChatMessageKind = (typeof CHAT_MESSAGE_KINDS)[number];
+type SuperChatTier = (typeof SUPER_CHAT_TIERS)[number];
 
 /**
  * Author type classification
  */
-export type AuthorType = TupleValue<typeof AUTHOR_TYPES>;
+export type AuthorType = (typeof AUTHOR_TYPES)[number];
 
 /**
  * Console log level for overlay diagnostics
  */
-export type LogLevel = TupleValue<typeof LOG_LEVELS>;
+export type LogLevel = (typeof LOG_LEVELS)[number];
 
 export const isLogLevel = (value: unknown): value is LogLevel =>
   value === 'warn' || value === 'info' || value === 'debug';
