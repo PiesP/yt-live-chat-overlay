@@ -167,6 +167,12 @@ export class LaneAllocator {
       if (lane.lastItemStartTime > 0) {
         lane.lastItemStartTime += clampedMs;
       }
+      // Also shift endTime to keep lane state consistent with real time.
+      // Without this, after resume the allocator may think a lane is free
+      // while the previous message's animation is still visible, causing overlaps.
+      if (lane.lastItemEndTime > 0) {
+        lane.lastItemEndTime += clampedMs;
+      }
     }
   }
 
