@@ -3,6 +3,7 @@ import { SETTINGS_LIMITS } from '@core/settings-definitions';
 import {
   AUTHOR_COLOR_KEYS,
   cloneSettings,
+  OUTLINE_NUMERIC_KEYS,
   OUTLINE_SETTING_KEYS,
   type OutlineSettingKey,
   outlineFormName,
@@ -644,27 +645,18 @@ export class SettingsUiForm {
     return nextShowAuthor;
   }
 
-  private applyOutlineSettingsTo(
-    target: OverlaySettings['outline'],
+  private collectOutlineSettings(
     current: Readonly<OverlaySettings['outline']>
-  ): void {
-    target.enabled = this.getCheckbox(outlineFormName('enabled'), current.enabled);
-
-    for (const key of OUTLINE_SETTING_KEYS) {
-      if (key === 'enabled') continue;
-      target[key] = normalizeOutlineNumericInputValue(
+  ): OverlaySettings['outline'] {
+    const nextOutline: OverlaySettings['outline'] = { ...current };
+    nextOutline.enabled = this.getCheckbox(outlineFormName('enabled'), current.enabled);
+    for (const key of OUTLINE_NUMERIC_KEYS) {
+      nextOutline[key] = normalizeOutlineNumericInputValue(
         key,
         this.readNumber(outlineFormName(key), current[key]),
         current[key]
       );
     }
-  }
-
-  private collectOutlineSettings(
-    current: Readonly<OverlaySettings['outline']>
-  ): OverlaySettings['outline'] {
-    const nextOutline: OverlaySettings['outline'] = { ...current };
-    this.applyOutlineSettingsTo(nextOutline, current);
     return nextOutline;
   }
 

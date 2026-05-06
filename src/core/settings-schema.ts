@@ -49,6 +49,12 @@ export const OUTLINE_SETTING_KEYS = [
   'opacity',
 ] as const satisfies readonly OutlineSettingKey[];
 
+export const OUTLINE_NUMERIC_KEYS = [
+  'widthPx',
+  'blurPx',
+  'opacity',
+] as const satisfies ReadonlyArray<Exclude<OutlineSettingKey, 'enabled'>>;
+
 /**
  * Matches hex color strings: #RGB, #RRGGBB, #RGBA, #RRGGBBAA.
  */
