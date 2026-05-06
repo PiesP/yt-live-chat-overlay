@@ -364,6 +364,7 @@ export class Renderer {
     const lookaheadCount = Math.min(RENDERER_LAYOUT.QUEUE_LOOKAHEAD_LIMIT, this.renderQueue.length);
     let shortestWaitMs: number | null = null;
     const renderedOrDropped: number[] = [];
+    let renderedCount = 0;
 
     for (let i = 0; i < lookaheadCount; i++) {
       const queued = this.renderQueue.at(i);
@@ -396,6 +397,7 @@ export class Renderer {
       if (result.status === 'rendered') {
         renderedOrDropped.push(i);
         this.rateLimiter.markProcessed(now);
+        renderedCount++;
       } else if (result.status === 'dropped') {
         renderedOrDropped.push(i);
       } else {
@@ -409,6 +411,20 @@ export class Renderer {
     // don't shift indices that later items in the list reference.
     for (let index = renderedOrDropped.length - 1; index >= 0; index--) {
       this.renderQueue.removeAt(renderedOrDropped[index]!);
+    }
+
+    // Burst spreader: if multiple messages were rendered consecutively and
+    // the queue still has items, introduce a randomized delay to break up
+    // the batch-processing pattern and spread messages across time.
+    if (renderedCount >= RENDERER_LAYOUT.BURST_THRESHOLD && this.renderQueue.length > 0) {
+      const spreadDelay =
+        RENDERER_LAYOUT.BURST_SPREAD_MIN_MS +
+        Math.floor(
+          Math.random() *
+            (RENDERER_LAYOUT.BURST_SPREAD_MAX_MS - RENDERER_LAYOUT.BURST_SPREAD_MIN_MS)
+        );
+      this.scheduleRetry(spreadDelay);
+      return;
     }
 
     if (this.renderQueue.length > 0) {

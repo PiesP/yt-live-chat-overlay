@@ -112,6 +112,9 @@ export const RENDERER_LAYOUT = {
   QUEUE_LOOKAHEAD_LIMIT: 10,
   QUEUE_MAX_SIZE: 30,
   ENTRY_OFFSET_MAX: 200,
+  BURST_THRESHOLD: 3,
+  BURST_SPREAD_MIN_MS: 100,
+  BURST_SPREAD_MAX_MS: 250,
 } as const;
 
 export function parseRgbColor(colorString: string): RgbColor | null {
