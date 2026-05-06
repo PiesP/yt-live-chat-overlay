@@ -221,7 +221,7 @@ const fetchWatchHtml = async (videoId: string, signal?: AbortSignal): Promise<st
     cache: 'no-store',
     mode: 'same-origin',
     referrerPolicy: 'origin-when-cross-origin',
-    ...(signal ? { signal } : {}),
+    signal: signal ?? null,
   });
 
   if (!response.ok) {
@@ -631,7 +631,7 @@ const fetchChatEndpoint = async (
         playerOffsetMs === undefined ? undefined : { playerOffsetMs: String(playerOffsetMs) }
       )
     ),
-    ...(signal ? { signal } : {}),
+    signal: signal ?? null,
   });
 
   if (!response.ok) {
