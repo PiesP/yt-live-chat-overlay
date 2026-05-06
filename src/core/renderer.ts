@@ -275,7 +275,13 @@ export class Renderer {
     const now = Date.now();
     const startTime = now + laneDelay;
 
-    this.laneAllocator.commitPlacement(placement, textWidth, messageHeight, startTime);
+    this.laneAllocator.commitPlacement(
+      placement,
+      textWidth,
+      messageHeight,
+      startTime,
+      startTime + duration
+    );
 
     const cleanup = (): void => {
       this.removeMessageByElement(element);

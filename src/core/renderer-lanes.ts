@@ -32,6 +32,7 @@ export class LaneAllocator {
     this.lanes = Array.from({ length: dimensions.laneCount }, (_, index) => ({
       index,
       lastItemStartTime: 0,
+      lastItemEndTime: 0,
       lastItemWidthPx: 0,
       lastItemHeightPx: 0,
     }));
@@ -128,7 +129,8 @@ export class LaneAllocator {
     placement: LanePlacement,
     textWidth: number,
     messageHeight: number,
-    startTime: number
+    startTime: number,
+    endTime: number
   ): void {
     for (
       let index = placement.lane.index;
@@ -141,6 +143,7 @@ export class LaneAllocator {
       }
 
       laneState.lastItemStartTime = startTime;
+      laneState.lastItemEndTime = endTime;
       laneState.lastItemWidthPx = textWidth;
       laneState.lastItemHeightPx = messageHeight;
     }
@@ -189,6 +192,18 @@ export class LaneAllocator {
 
     const laneStaggerTime = lane.lastItemStartTime + this.options.globalStaggerMs;
 
-    return Math.max(now, horizontalReadyTime, verticalReadyTime, laneStaggerTime);
+    // Absolute animation end time guard: the lane is never ready before the
+    // previous message's animation has finished playing.  This prevents
+    // overlaps that horizontal/vertical estimates miss (e.g. entry-offset
+    // jitter stretching the actual travel duration).
+    const animationEndGuard = lane.lastItemEndTime;
+
+    return Math.max(
+      now,
+      horizontalReadyTime,
+      verticalReadyTime,
+      laneStaggerTime,
+      animationEndGuard
+    );
   }
 }

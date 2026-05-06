@@ -178,6 +178,8 @@ export interface LaneState {
   index: number;
   /** Last item start time (timestamp) */
   lastItemStartTime: number;
+  /** Last item animation end time (timestamp) — hard deadline before next message can start. */
+  lastItemEndTime: number;
   /** Last item width in pixels */
   lastItemWidthPx: number;
   /** Last item height in pixels */
