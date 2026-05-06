@@ -87,18 +87,28 @@ export class LaneAllocator {
         ? readyNow
         : candidates.filter((candidate) => candidate.readyTime === minReadyTime);
 
-    // Prefer the lane that has been idle the longest to distribute
-    // messages evenly across all lanes and avoid vertical clumping.
-    const initial = pool[0] ?? candidates[0];
-    if (!initial) {
-      return null;
+    // ── Top-weighted lane selection with noise ──────────────────────────
+    // Prefer upper lanes (lower startIndex) so messages fill from the top of
+    // the screen, but add random jitter so adjacent messages don't pile up on
+    // the exact same lane every time.  LANE_NOISE_RANGE controls how often a
+    // slightly lower lane can "win" against a higher one — larger = more spread.
+    const LANE_NOISE_RANGE = 4;
+
+    let bestScore = Number.POSITIVE_INFINITY;
+    let bestCandidate: BlockCandidate | null = null;
+
+    for (const candidate of pool) {
+      const score = candidate.startIndex + Math.random() * LANE_NOISE_RANGE;
+      if (score < bestScore) {
+        bestScore = score;
+        bestCandidate = candidate;
+      }
     }
 
-    const chosen = pool.reduce((best, candidate) => {
-      const idleTime = now - (this.lanes[candidate.startIndex]?.lastItemStartTime ?? 0);
-      const bestIdleTime = now - (this.lanes[best.startIndex]?.lastItemStartTime ?? 0);
-      return idleTime > bestIdleTime ? candidate : best;
-    }, initial);
+    const chosen = bestCandidate ?? candidates[0];
+    if (!chosen) {
+      return null;
+    }
 
     const chosenLane = this.lanes[chosen.startIndex];
     if (!chosenLane) {
