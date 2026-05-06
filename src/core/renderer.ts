@@ -69,6 +69,8 @@ export class Renderer {
   private overlayDimensionsUnsubscribe: (() => void) | null = null;
   private sweepCounter = 0;
   private readonly SWEEP_INTERVAL = 8;
+  /** Tracks whether a processQueue microtask is already pending. */
+  private processQueueScheduled = false;
   /** Ids of messages already enqueued/rendered, for dedup across reconnect/resume. */
   private static readonly SEEN_MESSAGE_IDS_LIMIT = 200;
   private readonly seenMessageIds = new MessageIdRegistry(Renderer.SEEN_MESSAGE_IDS_LIMIT);
@@ -313,9 +315,15 @@ export class Renderer {
 
     this.renderQueue.enqueue(message);
 
-    // Only process queue if not paused
-    if (!this.isPaused) {
-      queueMicrotask(() => this.processQueue());
+    // Only process queue if not paused — debounce to a single microtask
+    // so that N synchronous addMessage calls schedule only one processQueue
+    // invocation, preventing interleaving with retry timers.
+    if (!this.isPaused && !this.processQueueScheduled) {
+      this.processQueueScheduled = true;
+      queueMicrotask(() => {
+        this.processQueueScheduled = false;
+        this.processQueue();
+      });
     }
     // If paused, message stays in queue until resume()
   }
@@ -418,7 +426,7 @@ export class Renderer {
    * Ends when max batch size is reached or queue depth drops below 3.
    */
   private updateClusterState(): void {
-    const queueSize = this.renderQueue.size();
+    const queueSize = this.renderQueue.length;
 
     if (!this.clusterInProgress) {
       // Start a new cluster when enough messages are waiting
@@ -458,7 +466,7 @@ export class Renderer {
     }
 
     // Between clusters — gap scales inversely with queue depth
-    const queueSize = this.renderQueue.size();
+    const queueSize = this.renderQueue.length;
     if (queueSize >= 3) {
       return RENDERER_LAYOUT.CLUSTER_INTER_GAP_MIN_MS;
     }
@@ -536,7 +544,7 @@ export class Renderer {
 
     // Apply author color only for regular messages
     if (!isSuperChat && !isMembership) {
-      element.style.color = this.settings.colors[this.messageBuilder.getAuthorType(message)];
+      element.style.color = this.settings.colors[message.authorType];
     }
   }
 
@@ -624,14 +632,12 @@ export class Renderer {
     log.debug('Rendering message:', {
       text: message.text.substring(0, 20),
       author: message.author,
-      authorType: this.messageBuilder.getAuthorType(message),
+      authorType: message.authorType,
       kind: message.kind,
       isSuperChat,
       superChatTier: message.superChat?.tier,
       superChatAmount: message.superChat?.amount,
-      color: isSuperChat
-        ? 'tier-based'
-        : this.settings.colors[this.messageBuilder.getAuthorType(message)],
+      color: isSuperChat ? 'tier-based' : this.settings.colors[message.authorType],
       lane: placement.lane.index,
       laneSpan: placement.laneSpan,
       width: textWidth,

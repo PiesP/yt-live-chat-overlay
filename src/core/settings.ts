@@ -1,6 +1,6 @@
 import type { OverlaySettings } from '@app-types';
 import { createLogger } from '@core/logging';
-import { DEFAULT_SETTINGS } from '@core/settings-definitions';
+import { DEFAULT_SETTINGS, readStoredSettingsRaw } from '@core/settings-definitions';
 import { applySettingsPatch, cloneSettings, normalizeStoredSettings } from '@core/settings-schema';
 
 const STORAGE_KEY = 'yt-live-chat-overlay-settings';
@@ -8,12 +8,7 @@ const STORAGE_KEY = 'yt-live-chat-overlay-settings';
 type StoredSettings = Partial<OverlaySettings>;
 
 const readStoredSettings = (): StoredSettings | null => {
-  const stored = localStorage.getItem(STORAGE_KEY);
-  if (!stored) {
-    return null;
-  }
-
-  return JSON.parse(stored) as StoredSettings;
+  return readStoredSettingsRaw<StoredSettings>();
 };
 
 const writeStoredSettings = (settings: Readonly<OverlaySettings>): void => {

@@ -24,9 +24,7 @@ export class MessageIdRegistry {
     const excess = this.ids.size - this.maxSize;
     for (let index = 0; index < excess; index++) {
       const next = iterator.next();
-      if (next.done || next.value === undefined) {
-        break;
-      }
+      if (next.done) break;
 
       this.ids.delete(next.value);
     }

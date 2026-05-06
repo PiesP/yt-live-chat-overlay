@@ -102,7 +102,7 @@ export interface LiveChatPayload {
 export class YoutubeInnertubeRequestError extends Error {
   constructor(
     message: string,
-    readonly status?: number
+    readonly status: number
   ) {
     super(message);
     this.name = 'YoutubeInnertubeRequestError';
@@ -123,11 +123,17 @@ const getNestedRecord = (root: unknown, path: readonly string[]): JsonObject | n
   return isRecord(current) ? current : null;
 };
 
-const findFirstNestedRecordByKey = (
+/**
+ * Generic DFS search through a nested object tree for a specific key.
+ * When the key is found, the extract callback decides whether the value
+ * is acceptable and what to return. If extract returns null/undefined
+ * the search continues.
+ */
+function findFirstNestedByKey<T>(
   root: unknown,
   key: string,
-  predicate?: (value: JsonObject) => boolean
-): JsonObject | null => {
+  extract: (value: unknown) => T | null
+): T | null {
   const stack: unknown[] = [root];
 
   while (stack.length > 0) {
@@ -137,8 +143,9 @@ const findFirstNestedRecordByKey = (
     }
 
     const candidate = current[key];
-    if (isRecord(candidate) && (!predicate || predicate(candidate))) {
-      return candidate;
+    const result = extract(candidate);
+    if (result !== null && result !== undefined) {
+      return result;
     }
 
     for (const value of Object.values(current)) {
@@ -152,33 +159,22 @@ const findFirstNestedRecordByKey = (
   }
 
   return null;
+}
+
+const findFirstNestedRecordByKey = (
+  root: unknown,
+  key: string,
+  predicate?: (value: JsonObject) => boolean
+): JsonObject | null => {
+  return findFirstNestedByKey(root, key, (v) => {
+    if (!isRecord(v)) return null;
+    if (predicate && !predicate(v)) return null;
+    return v;
+  });
 };
 
 const findFirstNestedStringByKey = (root: unknown, key: string): string | undefined => {
-  const stack: unknown[] = [root];
-
-  while (stack.length > 0) {
-    const current = stack.pop();
-    if (!isRecord(current)) {
-      continue;
-    }
-
-    const candidate = getString(current[key]);
-    if (candidate) {
-      return candidate;
-    }
-
-    for (const value of Object.values(current)) {
-      if (Array.isArray(value)) {
-        stack.push(...value);
-        continue;
-      }
-
-      stack.push(value);
-    }
-  }
-
-  return undefined;
+  return findFirstNestedByKey(root, key, (v) => getString(v) ?? null) ?? undefined;
 };
 
 export const getVideoIdFromUrl = (href = location.href): string | null => {

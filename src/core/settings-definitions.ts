@@ -86,16 +86,27 @@ export const DEFAULT_SETTINGS = {
   laneSpacing: 0,
 } as const satisfies Readonly<OverlaySettings>;
 
-export const readStoredLogLevel = (): OverlaySettings['logLevel'] => {
+const STORAGE_KEY = 'yt-live-chat-overlay-settings';
+
+/**
+ * Read and parse the raw stored settings blob from localStorage.
+ * Exported so that settings.ts can reuse the same parse-with-try/catch logic.
+ */
+export function readStoredSettingsRaw<T = Record<string, unknown>>(): T | null {
   try {
-    const raw = localStorage.getItem('yt-live-chat-overlay-settings');
-    if (!raw) return DEFAULT_SETTINGS.logLevel;
-    const parsed = JSON.parse(raw) as Partial<OverlaySettings>;
-    if (parsed && isLogLevel(parsed.logLevel)) {
-      return parsed.logLevel;
-    }
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as T;
   } catch {
-    // fall through to default
+    return null;
+  }
+}
+
+export const readStoredLogLevel = (): OverlaySettings['logLevel'] => {
+  const parsed = readStoredSettingsRaw<Record<string, unknown>>();
+  if (!parsed) return DEFAULT_SETTINGS.logLevel;
+  if (isLogLevel(parsed.logLevel)) {
+    return parsed.logLevel;
   }
 
   return DEFAULT_SETTINGS.logLevel;

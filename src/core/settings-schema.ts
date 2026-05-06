@@ -72,8 +72,6 @@ export const cloneSettings = (settings: Readonly<OverlaySettings>): OverlaySetti
   outline: { ...settings.outline },
 });
 
-const createDefaultSettings = (): OverlaySettings => cloneSettings(DEFAULT_SETTINGS);
-
 interface NumericFieldDef {
   limits: Readonly<{ min: number; max: number }>;
 }
@@ -106,7 +104,7 @@ const OUTLINE_NUMERIC_FIELDS: Readonly<
 
 const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings => {
   const d = DEFAULT_SETTINGS;
-  const n = createDefaultSettings();
+  const n = cloneSettings(DEFAULT_SETTINGS);
 
   n.enabled = typeof settings.enabled === 'boolean' ? settings.enabled : d.enabled;
   n.allowShortTextMessages =
@@ -163,7 +161,9 @@ export const applySettingsPatch = (
 export const normalizeStoredSettings = (
   stored: Partial<OverlaySettings> | null | undefined
 ): OverlaySettings =>
-  stored ? applySettingsPatch(createDefaultSettings(), stored) : createDefaultSettings();
+  stored
+    ? applySettingsPatch(cloneSettings(DEFAULT_SETTINGS), stored)
+    : cloneSettings(DEFAULT_SETTINGS);
 
 export const shouldResetRendererForSettingsChange = (
   previous: Readonly<OverlaySettings>,

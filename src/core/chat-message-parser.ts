@@ -556,32 +556,31 @@ export class ChatMessageParser {
       .join(' ')
       .toUpperCase();
 
-    if (
-      style.includes('MEMBERS_ONLY') ||
-      isRecord(badge.customThumbnail) ||
-      isRecord(liveBadge?.customThumbnail) ||
-      iconType.includes('SPONSOR')
-    ) {
-      return 'member';
-    }
-
-    if (style.includes('VERIFIED') || iconType.includes('VERIFIED')) {
-      return 'verified';
-    }
-
+    // Owner badges take highest priority.
     if (iconType.includes('OWNER') || label.includes('OWNER')) {
       return 'owner';
     }
 
+    // Moderator badges.
     if (iconType.includes('MODERATOR') || label.includes('MODERATOR') || label.includes(' MOD ')) {
       return 'moderator';
     }
 
-    if (label.includes('MEMBER') || label.includes('MEMBERSHIP') || label.includes('SPONSOR')) {
+    // Member badges: sponsor icon, membership style, custom thumbnail, or label hints.
+    if (
+      iconType.includes('SPONSOR') ||
+      style.includes('MEMBERS_ONLY') ||
+      isRecord(badge.customThumbnail) ||
+      isRecord(liveBadge?.customThumbnail) ||
+      label.includes('MEMBER') ||
+      label.includes('MEMBERSHIP') ||
+      label.includes('SPONSOR')
+    ) {
       return 'member';
     }
 
-    if (label.includes('VERIFIED')) {
+    // Verified badges (channel verification).
+    if (style.includes('VERIFIED') || iconType.includes('VERIFIED') || label.includes('VERIFIED')) {
       return 'verified';
     }
 

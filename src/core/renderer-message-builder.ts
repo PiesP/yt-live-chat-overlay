@@ -1,5 +1,4 @@
 import type {
-  AuthorType,
   ChatMessage,
   ContentSegment,
   EmojiInfo,
@@ -57,10 +56,6 @@ const normalizeImageCandidateUrls = (primaryUrl: string, candidateUrl?: string):
 
 export class RendererMessageBuilder {
   constructor(private readonly getSettings: () => Readonly<OverlaySettings>) {}
-
-  getAuthorType(message: ChatMessage): AuthorType {
-    return message.authorType;
-  }
 
   buildMessageElement(message: ChatMessage): BuiltMessage | null {
     if (message.kind === 'superchat' && message.superChat) {
@@ -164,7 +159,7 @@ export class RendererMessageBuilder {
     const settings = this.getSettings();
     element.className = className;
     element.textContent = message.author;
-    element.style.color = options.color ?? settings.colors[this.getAuthorType(message)];
+    element.style.color = options.color ?? settings.colors[message.authorType];
     return element;
   }
 
@@ -266,7 +261,7 @@ export class RendererMessageBuilder {
   }
 
   private shouldShowAuthor(message: ChatMessage): boolean {
-    return this.getSettings().showAuthor[this.getAuthorType(message)];
+    return this.getSettings().showAuthor[message.authorType];
   }
 
   private createAuthorElement(message: ChatMessage): HTMLDivElement {
@@ -366,7 +361,7 @@ export class RendererMessageBuilder {
 
     const authorName = this.createAuthorNameElement(message, {
       className: 'yt-chat-overlay-membership-author-name',
-      color: colors.author.member,
+      color: colors.authorMember,
       tagName: 'div',
     });
     if (authorName) {
@@ -408,7 +403,7 @@ export class RendererMessageBuilder {
     const element = this.createContainer('yt-chat-overlay-message');
     const showAuthor = this.shouldShowAuthor(message);
     const settings = this.getSettings();
-    const color = settings.colors[this.getAuthorType(message)];
+    const color = settings.colors[message.authorType];
 
     if (showAuthor) {
       element.classList.add('yt-chat-overlay-message-with-author');

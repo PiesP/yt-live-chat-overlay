@@ -63,10 +63,6 @@ export class RenderQueue {
     return this.items.length;
   }
 
-  size(): number {
-    return this.items.length;
-  }
-
   at(index: number): QueuedMessage | undefined {
     return this.items[index];
   }

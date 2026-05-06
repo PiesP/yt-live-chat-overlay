@@ -97,11 +97,16 @@ export class LaneAllocator {
 
     // Prefer the lane that has been idle the longest to distribute
     // messages evenly across all lanes and avoid vertical clumping.
+    const initial = pool[0] ?? candidates[0];
+    if (!initial) {
+      return null;
+    }
+
     const chosen = pool.reduce((best, candidate) => {
       const idleTime = now - (this.lanes[candidate.startIndex]?.lastItemStartTime ?? 0);
       const bestIdleTime = now - (this.lanes[best.startIndex]?.lastItemStartTime ?? 0);
       return idleTime > bestIdleTime ? candidate : best;
-    }, pool[0]!);
+    }, initial);
 
     const chosenLane = this.lanes[chosen.startIndex];
     if (!chosenLane) {

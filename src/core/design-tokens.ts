@@ -28,7 +28,7 @@ const uiColors = {
 } as const;
 
 export const colors = {
-  author: { member: '#0f9d58' },
+  authorMember: '#0f9d58',
   superChat: superChatColors,
   ui: uiColors,
 } as const;
@@ -123,7 +123,7 @@ export const RENDERER_LAYOUT = {
 } as const;
 
 export function parseRgbColor(colorString: string): RgbColor | null {
-  const match = colorString.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+  const match = colorString.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
   if (!match) return null;
   return {
     r: parseInt(match[1] ?? '0', 10),

@@ -15,7 +15,7 @@ const LOG_LEVEL_RANK: Readonly<Record<LogLevel, number>> = {
   debug: 2,
 };
 
-const shouldEmit = (level: Exclude<LogLevel, 'warn'>): boolean =>
+const shouldEmit = (level: 'debug' | 'info'): boolean =>
   LOG_LEVEL_RANK[currentLogLevel] >= LOG_LEVEL_RANK[level];
 
 export const overlayLog = {
@@ -35,7 +35,7 @@ export const overlayLog = {
   error: (...args: ConsoleErrorArgs): void => {
     console.error(...args);
   },
-} as const;
+};
 
 export const setOverlayLogLevel = (level: LogLevel): void => {
   currentLogLevel = level;
