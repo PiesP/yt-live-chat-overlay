@@ -112,9 +112,14 @@ export const RENDERER_LAYOUT = {
   QUEUE_LOOKAHEAD_LIMIT: 3,
   QUEUE_MAX_SIZE: 30,
   ENTRY_OFFSET_MAX: 200,
-  BURST_THRESHOLD: 1,
-  BURST_SPREAD_MIN_MS: 300,
-  BURST_SPREAD_MAX_MS: 800,
+  // Cluster/burst flow control
+  CLUSTER_THRESHOLD_MS: 800, // Messages arriving within 800ms form a cluster
+  CLUSTER_INTRA_GAP_MS: 60, // Gap between messages WITHIN a cluster (~16fps)
+  CLUSTER_INTER_GAP_MIN_MS: 400, // Min gap BETWEEN clusters when queue is active
+  CLUSTER_INTER_GAP_MAX_MS: 1200, // Max gap BETWEEN clusters when queue is nearly empty
+  CLUSTER_COHESION_SCALE: 0.5, // Safe distance reduction factor within cluster (50% closer)
+  CLUSTER_ENTRY_OFFSET_MAX: 60, // Reduced random entry offset within cluster (px)
+  CLUSTER_MAX_BATCH: 8, // Max messages to process in one cluster burst
 } as const;
 
 export function parseRgbColor(colorString: string): RgbColor | null {

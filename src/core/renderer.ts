@@ -60,8 +60,10 @@ export class Renderer {
   private playbackRate = 1;
   private lastWarningTime = 0;
   private readonly WARNING_INTERVAL_MS = 10000;
-  /** Fixed gap (ms) between individual message renders for a steady flow. */
-  private readonly INTER_MESSAGE_GAP_MS = 150;
+  /** Cluster state: tracks whether we are in the middle of a burst. */
+  private clusterInProgress = false;
+  /** Messages processed in the current cluster burst. */
+  private clusterMessageCount = 0;
   private styleElement: HTMLStyleElement | null = null;
   private retryTimer: number | null = null;
   private overlayDimensionsUnsubscribe: (() => void) | null = null;
@@ -239,10 +241,11 @@ export class Renderer {
     );
     const distance = dimensions.width + textWidth + exitPadding;
 
-    // Random entry offset so messages arriving at the same time don't
-    // all start from the exact same right-edge position, reducing
-    // visible horizontal clumping as they traverse the screen.
-    const entryOffset = Math.floor(Math.random() * RENDERER_LAYOUT.ENTRY_OFFSET_MAX);
+    // Within a cluster, use a smaller random range so messages in the
+    // same burst start closer together, creating a cohesive wall of text.
+    const entryOffset = this.clusterInProgress
+      ? Math.floor(Math.random() * RENDERER_LAYOUT.CLUSTER_ENTRY_OFFSET_MAX)
+      : Math.floor(Math.random() * RENDERER_LAYOUT.ENTRY_OFFSET_MAX);
 
     // Adjust effective distance for entry offset so actual travel
     // speed stays consistent regardless of the starting offset.
@@ -255,11 +258,13 @@ export class Renderer {
       Math.min(RENDERER_LAYOUT.DURATION_MAX, (adjustedDistance / effectiveSpeedPxPerSec) * 1000)
     );
 
-    // Small random jitter so messages entering around the same time don't
-    // align into a visible diagonal staircase.
-    const laneDelay = Math.floor(
-      Math.random() * RENDERER_LAYOUT.LANE_DELAY_CYCLE * RENDERER_LAYOUT.LANE_DELAY_MS
-    );
+    // Within a cluster, use a smaller jitter range so messages don't
+    // spread out vertically as much — they stay visually grouped.
+    const laneDelay = this.clusterInProgress
+      ? Math.floor(Math.random() * 7 * RENDERER_LAYOUT.LANE_DELAY_MS)
+      : Math.floor(
+          Math.random() * RENDERER_LAYOUT.LANE_DELAY_CYCLE * RENDERER_LAYOUT.LANE_DELAY_MS
+        );
 
     // Create Web Animation — start at entryOffset to the right of the
     // normal starting position, then travel the full distance leftward.
@@ -343,8 +348,11 @@ export class Renderer {
   }
 
   /**
-   * Process a single message from the queue, then schedule the next
-   * after a fixed inter-message gap for a steady, even flow.
+   * Process messages from the queue with cluster-aware batching.
+   *
+   * When the queue has ≥ 3 messages (a burst), they are processed rapidly
+   * with short intra-cluster gaps. Between bursts, longer gaps allow more
+   * messages to accumulate for the next cluster.
    */
   private processQueue(): void {
     // Don't process while paused
@@ -356,6 +364,7 @@ export class Renderer {
     this.clearRetryTimer();
 
     if (this.renderQueue.length === 0) {
+      this.endCluster();
       return;
     }
 
@@ -390,16 +399,74 @@ export class Renderer {
     if (result.status === 'rendered') {
       this.renderQueue.removeAt(0);
       this.rateLimiter.markProcessed(now);
+      this.updateClusterState();
     } else if (result.status === 'dropped') {
       this.renderQueue.removeAt(0);
     } else {
       queued.nextAttemptAt = now + result.waitMs;
     }
 
-    // Schedule next message after the inter-message gap for a steady flow.
+    // Schedule next using dynamic gap based on cluster state and queue depth.
     if (this.renderQueue.length > 0 && !this.isPaused) {
-      this.scheduleRetry(this.INTER_MESSAGE_GAP_MS);
+      this.scheduleRetry(this.getCurrentGap());
     }
+  }
+
+  /**
+   * Update cluster state after a successful render.
+   * A cluster starts when queue depth ≥ 3 and no cluster is in progress.
+   * Ends when max batch size is reached or queue depth drops below 3.
+   */
+  private updateClusterState(): void {
+    const queueSize = this.renderQueue.size();
+
+    if (!this.clusterInProgress) {
+      // Start a new cluster when enough messages are waiting
+      if (queueSize >= 3) {
+        this.clusterInProgress = true;
+        this.clusterMessageCount = 1;
+      }
+    } else {
+      this.clusterMessageCount++;
+
+      // End cluster if we hit the batch limit or queue is draining
+      if (this.clusterMessageCount >= RENDERER_LAYOUT.CLUSTER_MAX_BATCH || queueSize < 3) {
+        this.endCluster();
+      }
+    }
+  }
+
+  /** Reset cluster state — we're now between bursts. */
+  private endCluster(): void {
+    this.clusterInProgress = false;
+    this.clusterMessageCount = 0;
+  }
+
+  /**
+   * Get the current gap (ms) before the next message render.
+   *
+   * Within an active cluster: use a short intra-cluster gap so batch
+   * messages appear close together.
+   * Between clusters: use a larger gap that scales inversely with queue
+   * depth — when the queue is deep we poll faster, when it's sparse we
+   * wait longer to let more messages accumulate for the next cluster.
+   */
+  private getCurrentGap(): number {
+    if (this.clusterInProgress && this.clusterMessageCount < RENDERER_LAYOUT.CLUSTER_MAX_BATCH) {
+      // Still in active burst — tight gap between messages within the cluster
+      return RENDERER_LAYOUT.CLUSTER_INTRA_GAP_MS;
+    }
+
+    // Between clusters — gap scales inversely with queue depth
+    const queueSize = this.renderQueue.size();
+    if (queueSize >= 3) {
+      return RENDERER_LAYOUT.CLUSTER_INTER_GAP_MIN_MS;
+    }
+
+    return Math.max(
+      RENDERER_LAYOUT.CLUSTER_INTER_GAP_MIN_MS,
+      RENDERER_LAYOUT.CLUSTER_INTER_GAP_MAX_MS - queueSize * 200
+    );
   }
 
   /**
@@ -519,8 +586,13 @@ export class Renderer {
       dimensions.width
     );
 
-    // Find available lane based on message height
-    const placement = this.laneAllocator.findPlacement(messageHeight, dimensions);
+    // Find available lane based on message height.
+    // Within a cluster, use reduced safe distance for tighter grouping.
+    const placement = this.laneAllocator.findPlacement(
+      messageHeight,
+      dimensions,
+      this.clusterInProgress
+    );
     if (placement === null) {
       // No available lane, drop message
       log.debug(
