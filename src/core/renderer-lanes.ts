@@ -18,9 +18,6 @@ interface LaneAllocatorOptions {
   readonly laneHeightPaddingMin: number;
 }
 
-/** Random-noise range for top-weighted lane selection — larger = more spread across lanes. */
-const LANE_NOISE_RANGE = 4;
-
 export class LaneAllocator {
   private lanes: LaneState[] = [];
 
@@ -91,23 +88,29 @@ export class LaneAllocator {
         ? readyNow
         : candidates.filter((candidate) => candidate.readyTime === minReadyTime);
 
-    // ── Top-weighted lane selection with noise ──────────────────────────
-    // Prefer upper lanes (lower startIndex) so messages fill from the top of
-    // the screen, but add random jitter so adjacent messages don't pile up on
-    // the exact same lane every time.
+    // ── Load-balanced weighted-random lane selection ─────────────────────
+    // Spread messages across lanes by picking from top candidates with
+    // decreasing probability.  Upper lanes are still preferred, but lower
+    // lanes get a fair share, eliminating the staircase effect.
 
-    let bestScore = Number.POSITIVE_INFINITY;
-    let bestCandidate: BlockCandidate | null = null;
+    const sortedPool = [...pool].sort((a, b) => a.startIndex - b.startIndex);
+    const shortlistCount = Math.min(3, sortedPool.length);
+    const shortlist = sortedPool.slice(0, shortlistCount);
 
-    for (const candidate of pool) {
-      const score = candidate.startIndex + Math.random() * LANE_NOISE_RANGE;
-      if (score < bestScore) {
-        bestScore = score;
-        bestCandidate = candidate;
+    // Weights: [0.5, 0.3, 0.2] for top 3 candidates
+    const weights = [0.5, 0.3, 0.2];
+    const totalWeight = weights.slice(0, shortlistCount).reduce((a, b) => a + b, 0);
+    let random = Math.random() * totalWeight;
+    let chosen = shortlist[0];
+
+    for (let i = 0; i < shortlist.length; i++) {
+      random -= weights[i]!;
+      if (random <= 0) {
+        chosen = shortlist[i];
+        break;
       }
     }
 
-    const chosen = bestCandidate ?? candidates[0];
     if (!chosen) {
       return null;
     }
