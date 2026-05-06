@@ -42,6 +42,7 @@ temp/
 .env.*.local
 
 # Documentation (keep essential files)
+docs/
 *.md
 !README.md
 !LICENSE
@@ -52,6 +53,7 @@ temp/
 # AI Instructions (not shared to remote)
 AGENTS.md
 CODE_STANDARDS.md
+.hermes/
 .claude/
 .github/copilot-instructions.md
 .github/prompts/
