@@ -60,6 +60,8 @@ export class Renderer {
   private playbackRate = 1;
   private lastWarningTime = 0;
   private readonly WARNING_INTERVAL_MS = 10000;
+  /** Fixed gap (ms) between individual message renders for a steady flow. */
+  private readonly INTER_MESSAGE_GAP_MS = 150;
   private styleElement: HTMLStyleElement | null = null;
   private retryTimer: number | null = null;
   private overlayDimensionsUnsubscribe: (() => void) | null = null;
@@ -341,7 +343,8 @@ export class Renderer {
   }
 
   /**
-   * Process message queue — render all ready messages in one pass.
+   * Process a single message from the queue, then schedule the next
+   * after a fixed inter-message gap for a steady, even flow.
    */
   private processQueue(): void {
     // Don't process while paused
@@ -361,74 +364,41 @@ export class Renderer {
     this.renderQueue.sortByTimestamp();
 
     const now = Date.now();
-    const lookaheadCount = Math.min(RENDERER_LAYOUT.QUEUE_LOOKAHEAD_LIMIT, this.renderQueue.length);
-    let shortestWaitMs: number | null = null;
-    const renderedOrDropped: number[] = [];
-    let renderedCount = 0;
+    const queued = this.renderQueue.at(0);
+    if (!queued) return;
 
-    for (let i = 0; i < lookaheadCount; i++) {
-      const queued = this.renderQueue.at(i);
-      if (!queued) continue;
-
-      if (queued.nextAttemptAt > now) {
-        const waitMs = queued.nextAttemptAt - now;
-        shortestWaitMs = shortestWaitMs === null ? waitMs : Math.min(shortestWaitMs, waitMs);
-        continue;
-      }
-
-      // Rate limit: check at render time, not enqueue time, so bursts
-      // don't bypass the limit while messages sit in the queue.
-      if (!this.rateLimiter.canAccept(now)) {
-        queued.nextAttemptAt = now + RENDERER_LAYOUT.RETRY_DELAY_MIN_MS;
-        shortestWaitMs =
-          shortestWaitMs === null
-            ? RENDERER_LAYOUT.RETRY_DELAY_MIN_MS
-            : Math.min(shortestWaitMs, RENDERER_LAYOUT.RETRY_DELAY_MIN_MS);
-        continue;
-      }
-
-      // Soft cap warning (non-blocking)
-      if (this.activeMessages.size >= this.settings.maxConcurrentMessages) {
-        this.logPerformanceWarning();
-      }
-
-      const result = this.renderMessage(queued.message);
-
-      if (result.status === 'rendered') {
-        renderedOrDropped.push(i);
-        this.rateLimiter.markProcessed(now);
-        renderedCount++;
-      } else if (result.status === 'dropped') {
-        renderedOrDropped.push(i);
-      } else {
-        queued.nextAttemptAt = now + result.waitMs;
-        shortestWaitMs =
-          shortestWaitMs === null ? result.waitMs : Math.min(shortestWaitMs, result.waitMs);
-      }
-    }
-
-    // Remove rendered/dropped items in reverse order so earlier removals
-    // don't shift indices that later items in the list reference.
-    for (let index = renderedOrDropped.length - 1; index >= 0; index--) {
-      this.renderQueue.removeAt(renderedOrDropped[index]!);
-    }
-
-    // Burst spreader: if multiple messages were rendered consecutively and
-    // the queue still has items, introduce a randomized delay to break up
-    // the batch-processing pattern and spread messages across time.
-    if (renderedCount >= RENDERER_LAYOUT.BURST_THRESHOLD && this.renderQueue.length > 0) {
-      const spreadDelay =
-        RENDERER_LAYOUT.BURST_SPREAD_MIN_MS +
-        Math.floor(
-          Math.random() *
-            (RENDERER_LAYOUT.BURST_SPREAD_MAX_MS - RENDERER_LAYOUT.BURST_SPREAD_MIN_MS)
-        );
-      this.scheduleRetry(spreadDelay);
+    if (queued.nextAttemptAt > now) {
+      this.scheduleRetry(queued.nextAttemptAt - now);
       return;
     }
 
-    if (this.renderQueue.length > 0) {
-      this.scheduleRetry(shortestWaitMs ?? RENDERER_LAYOUT.RETRY_DELAY_MAX_MS);
+    // Rate limit: check at render time, not enqueue time, so bursts
+    // don't bypass the limit while messages sit in the queue.
+    if (!this.rateLimiter.canAccept(now)) {
+      queued.nextAttemptAt = now + RENDERER_LAYOUT.RETRY_DELAY_MIN_MS;
+      this.scheduleRetry(RENDERER_LAYOUT.RETRY_DELAY_MIN_MS);
+      return;
+    }
+
+    // Soft cap warning (non-blocking)
+    if (this.activeMessages.size >= this.settings.maxConcurrentMessages) {
+      this.logPerformanceWarning();
+    }
+
+    const result = this.renderMessage(queued.message);
+
+    if (result.status === 'rendered') {
+      this.renderQueue.removeAt(0);
+      this.rateLimiter.markProcessed(now);
+    } else if (result.status === 'dropped') {
+      this.renderQueue.removeAt(0);
+    } else {
+      queued.nextAttemptAt = now + result.waitMs;
+    }
+
+    // Schedule next message after the inter-message gap for a steady flow.
+    if (this.renderQueue.length > 0 && !this.isPaused) {
+      this.scheduleRetry(this.INTER_MESSAGE_GAP_MS);
     }
   }
 
