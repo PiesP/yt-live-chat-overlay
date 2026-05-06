@@ -210,7 +210,7 @@ export class ChatMessageParser {
   private extractRendererBody(
     renderer: JsonObject,
     kind: ChatMessage['kind'],
-    authorType: NonNullable<ChatMessage['authorType']>
+    authorType: AuthorType
   ): ParsedMessageBody | null {
     const parsedBody =
       kind === 'membership'
@@ -518,8 +518,8 @@ export class ChatMessageParser {
     return this.extractBestThumbnail(value)?.url;
   }
 
-  private extractAuthorType(value: unknown): NonNullable<ChatMessage['authorType']> {
-    let resolvedType: NonNullable<ChatMessage['authorType']> = 'normal';
+  private extractAuthorType(value: unknown): AuthorType {
+    let resolvedType: AuthorType = 'normal';
 
     if (!Array.isArray(value)) {
       return resolvedType;
@@ -535,7 +535,7 @@ export class ChatMessageParser {
     return resolvedType;
   }
 
-  private classifyAuthorBadge(value: unknown): NonNullable<ChatMessage['authorType']> {
+  private classifyAuthorBadge(value: unknown): AuthorType {
     const badgeEntry = asRecord(value);
     if (!badgeEntry) {
       return 'normal';
@@ -600,10 +600,7 @@ export class ChatMessageParser {
     return text.replace(/[\u0000-\u001F\u007F-\u009F]/g, '');
   }
 
-  private isSubstantialMessage(
-    body: ParsedMessageBody,
-    authorType: NonNullable<ChatMessage['authorType']>
-  ): boolean {
+  private isSubstantialMessage(body: ParsedMessageBody, authorType: AuthorType): boolean {
     const settings = this.getSettings();
     if (settings.allowShortTextMessages) return true;
     if (authorType === 'moderator' || authorType === 'owner' || authorType === 'member')

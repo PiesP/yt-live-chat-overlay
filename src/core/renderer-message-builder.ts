@@ -1,4 +1,5 @@
 import type {
+  AuthorType,
   ChatMessage,
   ContentSegment,
   EmojiInfo,
@@ -57,8 +58,8 @@ const normalizeImageCandidateUrls = (primaryUrl: string, candidateUrl?: string):
 export class RendererMessageBuilder {
   constructor(private readonly getSettings: () => Readonly<OverlaySettings>) {}
 
-  getAuthorType(message: ChatMessage): NonNullable<ChatMessage['authorType']> {
-    return message.authorType || 'normal';
+  getAuthorType(message: ChatMessage): AuthorType {
+    return message.authorType;
   }
 
   buildMessageElement(message: ChatMessage): BuiltMessage | null {

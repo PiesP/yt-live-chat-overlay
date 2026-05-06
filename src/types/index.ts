@@ -108,7 +108,7 @@ export interface ChatMessage {
   /** Author display name (optional, for future use) */
   author?: string;
   /** Author type classification */
-  authorType?: AuthorType;
+  authorType: AuthorType;
   /** Author photo URL (sanitized, YouTube CDN only) */
   authorPhotoUrl?: string;
   /** Super Chat information (only for kind='superchat') */
