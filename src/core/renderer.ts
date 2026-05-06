@@ -227,8 +227,19 @@ export class Renderer {
     const fontSize = this.settings.fontSize;
     const { lane } = placement;
 
-    // Position element at the assigned lane
-    const laneY = dimensions.height * this.settings.safeTop + lane.index * dimensions.laneHeight;
+    // Calculate Y position: for multi-lane messages (laneSpan > 1),
+    // center vertically within the occupied lane block to prevent
+    // boundary overlaps with adjacent messages.
+    const laneBlockTop =
+      dimensions.height * this.settings.safeTop + lane.index * dimensions.laneHeight;
+    let laneY: number;
+    if (placement.laneSpan > 1) {
+      const laneBlockHeight = placement.laneSpan * dimensions.laneHeight;
+      const messageHeight = element.offsetHeight;
+      laneY = laneBlockTop + Math.max(0, (laneBlockHeight - messageHeight) / 2);
+    } else {
+      laneY = laneBlockTop;
+    }
     element.style.top = `${laneY}px`;
     element.style.visibility = 'visible';
 
