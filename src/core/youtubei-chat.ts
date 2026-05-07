@@ -498,18 +498,18 @@ export const bootstrapChatSession = async (signal?: AbortSignal): Promise<ChatBo
     };
   }
 
-  let html: string | null = null;
-  const ensureHtml = async (): Promise<string> => {
-    if (html === null) {
-      html = await fetchWatchHtml(videoId, signal);
+  let cachedHtml: string | null = null;
+  const getHtml = async (): Promise<string> => {
+    if (cachedHtml === null) {
+      cachedHtml = await fetchWatchHtml(videoId, signal);
     }
-    return html;
+    return cachedHtml;
   };
 
   try {
     let ytcfg = readYtcfg();
     if (!ytcfg) {
-      ytcfg = extractYtcfgFromHtml(await ensureHtml());
+      ytcfg = extractYtcfgFromHtml(await getHtml());
     }
 
     if (!ytcfg) {
@@ -527,7 +527,7 @@ export const bootstrapChatSession = async (signal?: AbortSignal): Promise<ChatBo
       initialData = null;
     }
     if (!initialData) {
-      initialData = extractInitialDataFromHtml(await ensureHtml());
+      initialData = extractInitialDataFromHtml(await getHtml());
     }
     if (!initialData) {
       return {

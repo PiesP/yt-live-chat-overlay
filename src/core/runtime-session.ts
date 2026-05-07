@@ -305,9 +305,6 @@ export class RuntimeSession {
     document.addEventListener('visibilitychange', handleVisibility);
     cleanups.push(() => document.removeEventListener('visibilitychange', handleVisibility));
 
-    window.addEventListener('focus', handleVisibility);
-    cleanups.push(() => window.removeEventListener('focus', handleVisibility));
-
     window.addEventListener('pageshow', handleVisibility);
     cleanups.push(() => window.removeEventListener('pageshow', handleVisibility));
 

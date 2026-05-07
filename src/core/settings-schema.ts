@@ -116,48 +116,18 @@ export const cloneSettings = (settings: Readonly<OverlaySettings>): OverlaySetti
   outline: { ...settings.outline },
 });
 
-interface NumericFieldDef {
-  limits: Readonly<{ min: number; max: number }>;
-}
-
-const ROOT_NUMERIC_FIELDS: Readonly<
-  Record<
-    Exclude<
-      RootScalarSettingKey,
-      | 'enabled'
-      | 'allowShortTextMessages'
-      | 'logLevel'
-      | 'showDebugOverlay'
-      | 'enableDropLogging'
-      | 'authorRateLimitEnabled'
-      | 'showBacklogIndicator'
-    >,
-    NumericFieldDef
-  >
-> = {
-  speedPxPerSec: { limits: SETTINGS_LIMITS.speedPxPerSec },
-  fontSize: { limits: SETTINGS_LIMITS.fontSize },
-  opacity: { limits: SETTINGS_LIMITS.opacity },
-  superChatOpacity: { limits: SETTINGS_LIMITS.superChatOpacity },
-  safeTop: { limits: SETTINGS_LIMITS.safeTop },
-  safeBottom: { limits: SETTINGS_LIMITS.safeBottom },
-  maxConcurrentMessages: { limits: SETTINGS_LIMITS.maxConcurrentMessages },
-  maxMessagesPerSecond: { limits: SETTINGS_LIMITS.maxMessagesPerSecond },
-  minTextLength: { limits: SETTINGS_LIMITS.minTextLength },
-  laneSpacing: { limits: SETTINGS_LIMITS.laneSpacing },
-  debugOverlayOpacity: { limits: SETTINGS_LIMITS.debugOverlayOpacity },
-  authorRateLimitWindowMs: { limits: SETTINGS_LIMITS.authorRateLimitWindowMs },
-  authorRateLimitMaxMessages: { limits: SETTINGS_LIMITS.authorRateLimitMaxMessages },
-  backlogMaxRate: { limits: SETTINGS_LIMITS.backlogMaxRate },
-  backlogSpeedMultiplier: { limits: SETTINGS_LIMITS.backlogSpeedMultiplier },
+const resolveLimits = (key: string): Readonly<{ min: number; max: number }> => {
+  const direct = SETTINGS_LIMITS[key as keyof typeof SETTINGS_LIMITS];
+  if (direct) return direct;
+  const outlineKey = OUTLINE_LIMITS_MAP[key];
+  if (outlineKey) return SETTINGS_LIMITS[outlineKey];
+  return SETTINGS_LIMITS.speedPxPerSec; // fallback, should not happen
 };
 
-const OUTLINE_NUMERIC_FIELDS: Readonly<
-  Record<Exclude<OutlineSettingKey, 'enabled'>, NumericFieldDef>
-> = {
-  widthPx: { limits: SETTINGS_LIMITS.outlineWidthPx },
-  blurPx: { limits: SETTINGS_LIMITS.outlineBlurPx },
-  opacity: { limits: SETTINGS_LIMITS.outlineOpacity },
+const OUTLINE_LIMITS_MAP: Record<string, keyof typeof SETTINGS_LIMITS> = {
+  widthPx: 'outlineWidthPx',
+  blurPx: 'outlineBlurPx',
+  opacity: 'outlineOpacity',
 };
 
 const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings => {
@@ -184,12 +154,8 @@ const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings
       ? settings.showBacklogIndicator
       : d.showBacklogIndicator;
 
-  for (const [key, { limits }] of Object.entries(ROOT_NUMERIC_FIELDS)) {
-    n[key as keyof typeof ROOT_NUMERIC_FIELDS] = clampNumber(
-      settings[key as keyof typeof ROOT_NUMERIC_FIELDS],
-      d[key as keyof typeof ROOT_NUMERIC_FIELDS],
-      limits
-    );
+  for (const key of ROOT_NUMERIC_KEYS) {
+    n[key] = clampNumber(settings[key], d[key], resolveLimits(key));
   }
 
   n.logLevel = isLogLevel(settings.logLevel) ? settings.logLevel : d.logLevel;
@@ -205,12 +171,8 @@ const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings
 
   n.outline.enabled =
     typeof settings.outline.enabled === 'boolean' ? settings.outline.enabled : d.outline.enabled;
-  for (const [key, { limits }] of Object.entries(OUTLINE_NUMERIC_FIELDS)) {
-    n.outline[key as keyof typeof OUTLINE_NUMERIC_FIELDS] = clampNumber(
-      settings.outline[key as keyof typeof OUTLINE_NUMERIC_FIELDS],
-      d.outline[key as keyof typeof OUTLINE_NUMERIC_FIELDS],
-      limits
-    );
+  for (const key of OUTLINE_NUMERIC_KEYS) {
+    n.outline[key] = clampNumber(settings.outline[key], d.outline[key], resolveLimits(key));
   }
 
   return n;
