@@ -16,7 +16,6 @@ export type ReconcileReason =
   | 'startup'
   | 'page-change'
   | 'settings-change'
-  | 'manual'
   | 'retry'
   | 'session-restart';
 

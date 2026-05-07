@@ -190,13 +190,6 @@ export class RuntimeSession {
     return this.hiddenSince === null ? 0 : Math.max(0, now - this.hiddenSince);
   }
 
-  private hasRenderableRuntime(): boolean {
-    const container = this.overlay?.getContainer();
-    const dimensions = this.overlay?.getDimensions();
-
-    return Boolean(container?.isConnected && dimensions);
-  }
-
   private getRuntimeHealthSnapshot(now = Date.now()): {
     idleDurationMs: number;
     renderable: boolean;
@@ -208,7 +201,9 @@ export class RuntimeSession {
       ? chatSource.getHealthSnapshot({ activeTimeoutMs: CHAT_STALL_TIMEOUT_MS })
       : null;
     const idleDurationMs = this.getIdleDurationMs(now);
-    const renderable = this.hasRenderableRuntime();
+    const container = this.overlay?.getContainer();
+    const dimensions = this.overlay?.getDimensions();
+    const renderable = Boolean(container?.isConnected && dimensions);
     const shouldRestart =
       !renderable ||
       idleDurationMs >= LONG_IDLE_RESTART_MS ||
@@ -222,12 +217,6 @@ export class RuntimeSession {
     };
   }
 
-  private clearIdleMarkersForActiveState(): void {
-    if (!document.hidden) {
-      this.clearHidden();
-    }
-  }
-
   private requestManagedRestart(reason: RuntimeSessionRestartReason): void {
     if (this.disposed || this.restartRequested) {
       return;
@@ -237,24 +226,6 @@ export class RuntimeSession {
     const health = this.getRuntimeHealthSnapshot();
     log.warn('Requesting managed runtime restart', { reason, health });
     this.requestRestart(reason);
-  }
-
-  private handleRuntimeResume(
-    reason: Extract<RuntimeSessionRestartReason, 'foreground-return'>
-  ): void {
-    if (this.disposed) {
-      return;
-    }
-
-    // Clear idle markers first so the health snapshot reflects current state.
-    this.clearIdleMarkersForActiveState();
-
-    if (this.getRuntimeHealthSnapshot().shouldRestart) {
-      this.requestManagedRestart(reason);
-      return;
-    }
-
-    this.renderer?.resume();
   }
 
   private startForegroundListeners(): void {
@@ -271,28 +242,25 @@ export class RuntimeSession {
         return;
       }
 
-      if (this.getIdleDurationMs() >= LONG_IDLE_RESTART_MS) {
+      // Clear idle markers so the health snapshot reflects current state.
+      this.clearHidden();
+
+      if (this.getRuntimeHealthSnapshot().shouldRestart) {
         this.requestManagedRestart('foreground-return');
         return;
       }
 
-      this.handleRuntimeResume('foreground-return');
+      this.renderer?.resume();
     };
 
     document.addEventListener('visibilitychange', handleVisibility);
     cleanups.push(() => document.removeEventListener('visibilitychange', handleVisibility));
 
-    const handleRecover = (): void => {
-      if (!document.hidden && !this.disposed) {
-        handleVisibility();
-      }
-    };
+    window.addEventListener('focus', handleVisibility);
+    cleanups.push(() => window.removeEventListener('focus', handleVisibility));
 
-    window.addEventListener('focus', handleRecover);
-    cleanups.push(() => window.removeEventListener('focus', handleRecover));
-
-    window.addEventListener('pageshow', handleRecover);
-    cleanups.push(() => window.removeEventListener('pageshow', handleRecover));
+    window.addEventListener('pageshow', handleVisibility);
+    cleanups.push(() => window.removeEventListener('pageshow', handleVisibility));
 
     this.foregroundCleanup = () => {
       for (const fn of cleanups) {

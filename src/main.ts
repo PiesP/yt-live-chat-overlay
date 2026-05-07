@@ -135,25 +135,16 @@ const stopPreviousAppInstance = (): void => {
 
 async function initApp(): Promise<void> {
   log.debug('Initializing application...');
-  let app: App | null = null;
 
   try {
     stopPreviousAppInstance();
 
-    app = new App();
+    const app = new App();
     await app.start();
 
     window.__ytChatOverlay = app;
     log.info('App instance exposed to window.__ytChatOverlay');
   } catch (error) {
-    if (app) {
-      try {
-        app.stop();
-      } catch (cleanupError) {
-        log.error('Cleanup after failed init also failed:', cleanupError);
-      }
-    }
-
     log.error('Fatal error:', error);
     throw error;
   }
