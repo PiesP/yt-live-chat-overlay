@@ -109,6 +109,14 @@ export const rendererLayout = {
   retryDelayMaxMs: 800,
   queueMaxSize: 30,
   maxMessagesPerCycle: 5,
+  /** 밀도 기반 속도 조절: 낮은 밀도(< 0.3)에서의 속도 배수 */
+  speedDensityLow: 0.8,
+  /** 밀도 기반 속도 조절: 높은 밀도(> 0.8)에서의 속도 배수 */
+  speedDensityHigh: 1.5,
+  /** 밀도 기반 속도가 적용되기 시작하는 밀도 임계값 */
+  speedDensityThresholdLow: 0.3,
+  /** 밀도 기반 속도가 최대가 되는 밀도 임계값 */
+  speedDensityThresholdHigh: 0.8,
 } as const;
 
 export function parseRgbColor(colorString: string): RgbColor | null {

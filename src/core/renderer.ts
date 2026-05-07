@@ -482,6 +482,39 @@ export class Renderer {
   }
 
   /**
+   * 현재 메시지 밀도에 기반한 동적 속도 배수를 반환합니다.
+   * 밀도가 높을수록 속도가 빨라져 화면 혼잡을 완화합니다.
+   */
+  private getDynamicSpeedMultiplier(): number {
+    const activeCount = this.activeMessages.size;
+    const maxConcurrent = this.getMaxConcurrentMessages();
+    if (maxConcurrent <= 0) {
+      return 1;
+    }
+
+    const density = activeCount / maxConcurrent;
+
+    // 밀도가 임계값 이하면 기본 속도
+    if (density <= rendererLayout.speedDensityThresholdLow) {
+      return rendererLayout.speedDensityLow;
+    }
+
+    // 밀도가 임계값 이상이면 최대 속도
+    if (density >= rendererLayout.speedDensityThresholdHigh) {
+      return rendererLayout.speedDensityHigh;
+    }
+
+    // 밀도에 따라 선형 보간 (0.8 ~ 1.5)
+    const t =
+      (density - rendererLayout.speedDensityThresholdLow) /
+      (rendererLayout.speedDensityThresholdHigh - rendererLayout.speedDensityThresholdLow);
+    return (
+      rendererLayout.speedDensityLow +
+      t * (rendererLayout.speedDensityHigh - rendererLayout.speedDensityLow)
+    );
+  }
+
+  /**
    * Compute the retry delay based on queue pressure.
    *
    * When the queue is deep, reduce the gap between processQueue
@@ -627,7 +660,9 @@ export class Renderer {
    * Get effective message speed considering current video playback rate
    */
   private getEffectiveSpeedPxPerSec(): number {
-    return Math.max(1, this.settings.speedPxPerSec * this.playbackRate);
+    const baseSpeed = this.settings.speedPxPerSec;
+    const multiplier = this.getDynamicSpeedMultiplier();
+    return Math.max(1, baseSpeed * multiplier * this.playbackRate);
   }
 
   /**
