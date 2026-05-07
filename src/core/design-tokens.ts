@@ -105,14 +105,6 @@ export const rendererLayout = {
   laneHeightPaddingMin: 2,
   retryDelayMinMs: 4,
   retryDelayMaxMs: 800,
-  /** Density-based speed adjustment: speed multiplier for low density (< 0.3) */
-  speedDensityLow: 0.8,
-  /** Density-based speed adjustment: speed multiplier for high density (> 0.8) */
-  speedDensityHigh: 1.5,
-  /** Density threshold at which density-based speed adjustment begins to apply */
-  speedDensityThresholdLow: 0.3,
-  /** Density threshold at which density-based speed adjustment reaches its maximum */
-  speedDensityThresholdHigh: 0.8,
 } as const;
 
 export function parseRgbColor(colorString: string): RgbColor | null {

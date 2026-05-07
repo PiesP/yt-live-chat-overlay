@@ -13,17 +13,12 @@ import { createLogger } from '@core/logging';
 import { MessageIdRegistry } from '@core/message-id-registry';
 import { ObservabilityReporter } from '@core/observability';
 import type { Overlay } from '@core/overlay';
-import {
-  calculateProgressiveOverwriteMs,
-  LaneAllocator,
-  type LanePlacement,
-} from '@core/renderer-lanes';
+import { LaneAllocator, type LanePlacement } from '@core/renderer-lanes';
 import { RendererMessageBuilder } from '@core/renderer-message-builder';
 import { RENDERER_STATIC_STYLES } from '@core/renderer-styles';
 
 const log = createLogger('Renderer');
 
-/** @internal Queue entry wrapping a message with retry scheduling metadata and priority. */
 interface QueuedMessage {
   message: ChatMessage;
   nextAttemptAt: number;
@@ -32,13 +27,8 @@ interface QueuedMessage {
 
 interface ActiveMessage {
   element: HTMLDivElement;
-  /** performance.now() timestamp when the animation was started. */
   readonly startTime: DOMHighResTimeStamp;
-  /** Base duration before playbackRate adjustment. */
   readonly baseDuration: number;
-  /** Cleanup callback registered as animationend listener.
-   *  Stored so removeMessage can detach it before manually removing,
-   *  preventing re-entrant removal after the element is already deleted. */
   readonly cleanup: () => void;
 }
 
@@ -71,43 +61,21 @@ export class Renderer {
   private pausedAt: number | null = null;
   private playbackRate = 1;
   private lastWarningTime = 0;
-  /** Tolerance (ms) for sweepStaleAnimations: skip messages whose animation
-   *  has not had enough time to complete, to avoid false positives from
-   *  getAnimations() being unreliable shortly after start. */
   private static readonly SWEEP_TOLERANCE_MS = 500;
-  /** Maximum random delay (ms) added to each message's animation start to
-   *  stagger entries across lanes without creating a visible chat-to-overlay gap. */
   private static readonly MAX_ANIMATION_JITTER_MS = 15;
   private static readonly WARNING_INTERVAL_MS = 10_000;
-  /** Dynamic queue sizing: base capacity */
-  private static readonly QUEUE_DEFAULT_SIZE = 30;
-  /** Dynamic queue sizing: maximum capacity */
-  private static readonly QUEUE_MAX_SIZE = 100;
-  /** Dynamic queue sizing: minimum capacity */
-  private static readonly QUEUE_MIN_SIZE = 20;
-  /** Dynamic queue sizing: underflow threshold ratio (below 50% of max) */
-  private static readonly QUEUE_UNDERFLOW_RATIO = 0.5;
-  /** Dynamic queue sizing: sustained underflow duration before shrinking (30s) */
-  private static readonly QUEUE_UNDERFLOW_DURATION_MS = 30_000;
-  /** Dynamic queue sizing: consecutive underflow conditions needed before shrink */
-  private static readonly QUEUE_SHRINK_REQUIRED_COUNT = 2;
+  private static readonly QUEUE_MAX_SIZE = 50;
+  private static readonly BATCH_SIZE = 8;
+  private static readonly RETRY_DELAY_MS = 4;
   private styleElement: HTMLStyleElement | null = null;
   private retryTimer: number | null = null;
   private overlayDimensionsUnsubscribe: (() => void) | null = null;
   private sweepCounter = 0;
   private readonly SWEEP_INTERVAL = 8;
-  /** Ids of messages already enqueued/rendered, for dedup across reconnect/resume. */
   private static readonly SEEN_MESSAGE_IDS_LIMIT = 200;
   private readonly seenMessageIds = new MessageIdRegistry(Renderer.SEEN_MESSAGE_IDS_LIMIT);
   private visibilityHandler: (() => void) | null = null;
-  /** Maximum queue size when tab is in background. */
   private static readonly BACKGROUND_QUEUE_MAX = 10;
-  /** Current dynamic queue maximum size (hysteresis cache) */
-  private queueMaxSizeCache: number = 30;
-  /** Downcounter for queue shrinkage (requires 2 consecutive underflow conditions) */
-  private queueShrinkCountdown: number = 0;
-  /** Timestamp when queue underflow was first detected */
-  private queueUnderflowStart: number = 0;
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
     this.overlay = overlay;
@@ -132,7 +100,6 @@ export class Renderer {
       this.handleOverlayDimensionsChange(dimensions);
     });
 
-    // visibilitychange handler for tab visibility optimization
     this.visibilityHandler = () => {
       if (document.hidden) {
         this.handleBackgroundTab();
@@ -161,9 +128,6 @@ export class Renderer {
       return;
     }
 
-    // Re-init lane collision state but keep active animations running so
-    // messages finish flowing across the screen instead of vanishing mid-way
-    // when the player resizes or enters/exits fullscreen.
     this.laneAllocator.reset(dimensions);
 
     if (!this.isPaused && this.pendingQueue.length > 0) {
@@ -171,9 +135,6 @@ export class Renderer {
     }
   }
 
-  /**
-   * Inject CSS animations
-   */
   private injectStyles(): void {
     if (!this.styleElement) {
       this.styleElement = document.createElement('style');
@@ -228,8 +189,6 @@ export class Renderer {
     const glowColor = `rgba(0, 0, 0, ${Math.min(1, baseOpacity * 0.85)})`;
     const glowBlur = Math.max(1, blur * 1.5);
 
-    // 4 diagonal shadows + 1 soft glow. Combined with text-stroke below this
-    // gives a clean outline on every side without stacking 10 shadow layers.
     return [
       `-${offset}px -${offset}px ${blur}px ${shadowColor}`,
       `${offset}px -${offset}px ${blur}px ${shadowColor}`,
@@ -260,11 +219,6 @@ export class Renderer {
     return { container, dimensions };
   }
 
-  /**
-   * Setup CSS-animation-based positioning for a message element.
-   * Uses CSS @keyframes + custom properties instead of element.animate()
-   * so animation runs on the GPU compositor thread.
-   */
   private setupMessageAnimation(
     element: HTMLDivElement,
     placement: LanePlacement,
@@ -276,9 +230,6 @@ export class Renderer {
     const fontSize = this.settings.fontSize;
     const { lane } = placement;
 
-    // Calculate Y position: for multi-lane messages (laneSpan > 1),
-    // center vertically within the occupied lane block to prevent
-    // boundary overlaps with adjacent messages.
     const laneBlockTop =
       dimensions.height * this.settings.safeTop + lane.index * dimensions.laneHeight;
     let laneY: number;
@@ -292,28 +243,20 @@ export class Renderer {
     element.style.left = `${dimensions.width}px`;
     element.style.visibility = 'visible';
 
-    // Calculate animation distance and padding
     const exitPadding = Math.max(
       fontSize * rendererLayout.exitPaddingScale,
       rendererLayout.exitPaddingMin
     );
     const distance = dimensions.width + textWidth + exitPadding;
 
-    // Stagger entry offset by lane index so messages on different lanes
-    // start from different horizontal positions, creating a more natural look.
     const entryOffset = (lane.index % 3) * 50 + Math.floor(Math.random() * 100);
-
-    // Adjust effective distance for entry offset so actual travel
-    // speed stays consistent regardless of the starting offset.
     const adjustedDistance = distance + entryOffset;
 
-    // Optimized duration for better pacing
     const effectiveSpeedPxPerSec = this.getEffectiveSpeedPxPerSec();
     let baseDuration = Math.max(
       rendererLayout.durationMin,
       Math.min(rendererLayout.durationMax, (adjustedDistance / effectiveSpeedPxPerSec) * 1000)
     );
-    // Apply backlog speed multiplier: backlog messages scroll past faster
     if (message?.isBacklog && this.backlogSpeedMultiplier > 1) {
       baseDuration = Math.max(
         rendererLayout.durationMin,
@@ -322,20 +265,14 @@ export class Renderer {
     }
     const adjustedDuration = baseDuration / this.playbackRate;
 
-    // Minimal start-position stagger: small per-lane jitter so messages
-    // on different lanes don't begin at identical horizontal offsets.
-    // The maximum delay is kept very low (≤15ms) to minimise the
-    // chat-to-overlay visual gap.
     const laneDelay = Math.floor(Math.random() * Renderer.MAX_ANIMATION_JITTER_MS);
 
-    // ── CSS custom properties drive the @keyframes animation ───────────
     element.style.setProperty('--yt-msg-entry-offset', `${entryOffset}px`);
     element.style.setProperty('--yt-msg-exit-offset', `-${distance}px`);
     element.style.setProperty('--yt-msg-duration', `${adjustedDuration}ms`);
     element.style.setProperty('--yt-msg-delay', `${laneDelay}ms`);
     element.classList.add('yt-overlay-message-animate');
 
-    // Update lane state with message dimensions
     const now = Date.now();
     const startTime = now + laneDelay;
     this.laneAllocator.commitPlacement(
@@ -346,7 +283,6 @@ export class Renderer {
       startTime + adjustedDuration
     );
 
-    // Cleanup via animationend event.
     const cleanup = (): void => {
       element.removeEventListener('animationend', cleanup);
       this.removeMessageByElement(element);
@@ -361,77 +297,38 @@ export class Renderer {
     };
   }
 
-  /**
-   * Add message to render queue.
-   *
-   * Processing is triggered synchronously so the message starts flowing
-   * without waiting for a microtask boundary.  To avoid re-entrance and
-   * excessive work, processQueue() dynamically sizes the batch per cycle
-   * based on queue pressure and uses the retry-timer mechanism for
-   * remaining items.
-   */
   addMessage(message: ChatMessage): void {
-    // Dedup fast path: quick Set.has() check only.
     if (message.id && this.seenMessageIds.has(message.id)) {
       this.observability.onMessageDropped('dedup');
       return;
     }
 
-    // Track as received (passed dedup)
     this.observability.onMessageReceived();
     this.burstDetector.onMessageReceived();
 
-    // Apply author rate limiting
     const messagePriority = Renderer.getMessagePriority(message);
     if (!this.authorRateLimiter.allow(message.author ?? 'anonymous', messagePriority)) {
       this.observability.onMessageDropped('rate_limited');
       return;
     }
 
-    // Enqueue with dynamically bounded capacity — drop oldest when full.
-    // Under high load the queue grows up to 2x the base size so fewer
-    // messages are dropped during bursts.
-    const queueMaxSize = this.getDynamicQueueMaxSize();
-    if (this.pendingQueue.length >= queueMaxSize) {
-      const excess = this.pendingQueue.length - queueMaxSize + 1;
-      // Sort by priority ASC (lowest first), then timestamp ASC (oldest first),
-      // and drop the lowest-priority messages.
-      this.pendingQueue.sort(
-        (a, b) => a.priority - b.priority || a.message.timestamp - b.message.timestamp
-      );
-      this.pendingQueue.splice(0, excess);
+    if (this.pendingQueue.length >= Renderer.QUEUE_MAX_SIZE) {
+      this.pendingQueue.shift();
       this.observability.onMessageDropped('queue_overflow');
-      // Restore priority DESC + timestamp ASC order for processing.
-      this.pendingQueue.sort(
-        (a, b) => b.priority - a.priority || a.message.timestamp - b.message.timestamp
-      );
     }
 
     const priority = Renderer.getMessagePriority(message);
     this.pendingQueue.push({ message, nextAttemptAt: 0, priority });
 
-    // Register ID lazily — only after enqueue, so the hot path does not
-    // pay for potential Set eviction on every message.
     if (message.id) {
       this.seenMessageIds.mark(message.id);
     }
 
-    // Process immediately unless paused.
     if (!this.isPaused) {
       this.processQueue();
     }
-    // If paused, message stays in queue until resume()
   }
 
-  /**
-   * Remove stale activeMessage entries whose CSS animation finished
-   * without triggering the cleanup callback (e.g. GC delay, rapid
-   * destroy/create cycles, tab-hidden edge cases).
-   *
-   * Uses Set.forEach instead of for...of because the callback may
-   * delete entries from the Set, and forEach safely handles
-   * concurrent modification during iteration.
-   */
   private sweepStaleAnimations(): void {
     if (this.activeMessages.size === 0) return;
     this.sweepCounter++;
@@ -470,232 +367,26 @@ export class Renderer {
     }
   }
 
-  /**
-   * Compute the maximum number of messages to process per cycle.
-   *
-   * Adapts batch size based on both queue depth and active message density:
-   * - 5-level base batch size (4/7/10/15/20) based on queue depth
-   * - Utilization factor reduces batch when screen is congested
-   */
-  private getDynamicMaxPerCycle(): number {
-    const len = this.pendingQueue.length;
-    const activeCount = this.activeMessages.size;
-    const maxConcurrent = this.getMaxConcurrentMessages();
-    // Active message utilization ratio (0.0 ~ 1.0)
-    const utilization = maxConcurrent > 0 ? activeCount / maxConcurrent : 0;
-
-    // Base batch size based on queue depth (5 levels)
-    let base: number;
-    if (len >= 25) {
-      base = 20;
-    } else if (len >= 15) {
-      base = 15;
-    } else if (len >= 8) {
-      base = 10;
-    } else if (len >= 4) {
-      base = 7;
-    } else {
-      base = 4;
-    }
-
-    // When utilization is high (screen is congested), reduce batch size
-    // because new messages are likely to be deferred due to no available lanes
-    if (utilization > 0.8) {
-      // Screen nearly full → reduce batch size to lower deferred/failed retry load
-      return Math.max(3, Math.floor(base * 0.6));
-    }
-    if (utilization > 0.5) {
-      // Screen moderately full → mildly reduce
-      return Math.max(4, Math.floor(base * 0.8));
-    }
-
-    return base;
-  }
-
-  /** Expose current lane count for external use (e.g. backlog controller) */
   get laneCount(): number {
     return this.laneAllocator.getLaneCount();
   }
 
-  /**
-   * Set speed multiplier for backlog messages.
-   * Called by RuntimeSession when injecting backlog messages.
-   */
   setBacklogSpeedMultiplier(multiplier: number): void {
     this.backlogSpeedMultiplier = Math.max(1, multiplier);
   }
 
-  /**
-   * Estimates the maximum number of concurrent messages.
-   * Based on lane count, assuming each lane can handle 1-2 messages simultaneously.
-   */
-  private getMaxConcurrentMessages(): number {
-    const laneCount = this.laneAllocator.getLaneCount();
-    // Assume each lane handles up to 2 concurrent messages (displayed + pending)
-    return laneCount * 2;
-  }
-
-  /**
-   * Returns a dynamic speed multiplier based on current message density.
-   * Higher density increases speed to alleviate on-screen congestion.
-   */
-  private getDynamicSpeedMultiplier(): number {
-    const activeCount = this.activeMessages.size;
-    const maxConcurrent = this.getMaxConcurrentMessages();
-    if (maxConcurrent <= 0) {
-      return 1;
-    }
-
-    const density = activeCount / maxConcurrent;
-
-    // Below threshold density, use base speed
-    if (density <= rendererLayout.speedDensityThresholdLow) {
-      return rendererLayout.speedDensityLow;
-    }
-
-    // Above threshold density, use max speed
-    if (density >= rendererLayout.speedDensityThresholdHigh) {
-      return rendererLayout.speedDensityHigh;
-    }
-
-    // Linear interpolation based on density (0.8 ~ 1.5)
-    const t =
-      (density - rendererLayout.speedDensityThresholdLow) /
-      (rendererLayout.speedDensityThresholdHigh - rendererLayout.speedDensityThresholdLow);
-    return (
-      rendererLayout.speedDensityLow +
-      t * (rendererLayout.speedDensityHigh - rendererLayout.speedDensityLow)
-    );
-  }
-
-  /**
-   * Compute the retry delay based on queue pressure.
-   *
-   * When the queue is deep, reduce the gap between processQueue
-   * invocations so the backlog drains faster:
-   * - queue >= 15 ->  0ms  (immediate retry)
-   * - queue >=  5 ->  2ms  (half the min delay)
-   * - otherwise  ->  4ms  (default min delay)
-   */
-  private getDynamicRetryDelay(): number {
-    // Base delay based on queue pressure
-    const baseDelay =
-      this.pendingQueue.length >= 15
-        ? 0
-        : this.pendingQueue.length >= 5
-          ? 2
-          : rendererLayout.retryDelayMinMs;
-
-    // Adjust retry delay based on burst level — higher burst = retry sooner
-    const burstLevel = this.burstDetector.getLevel();
-    const burstMultiplier =
-      burstLevel === 'extreme'
-        ? 0
-        : burstLevel === 'high'
-          ? 0.5
-          : burstLevel === 'elevated'
-            ? 0.8
-            : 1;
-
-    return Math.max(0, Math.floor(baseDelay * burstMultiplier));
-  }
-
-  /**
-   * Compute the effective queue capacity.
-   *
-   * Under pressure the queue expands up to 2x the base size so bursty
-   * traffic causes fewer drops.  When pressure subsides, new messages
-   * that overflow the base size will still trigger the drop path, but
-   * only after the expanded capacity is genuinely exhausted.
-   */
-  /**
-   * Returns a priority score based on the message kind.
-   * Higher-priority messages are rendered first and survive queue overflow.
-   *
-   * @param message - The chat message to evaluate.
-   * @returns Priority score (superchat=200, membership=100, normal=0).
-   */
   private static getMessagePriority(message: ChatMessage): number {
-    // Cast to string to support future kind values not yet in ChatMessageKind.
-    switch (message.kind as string) {
+    switch (message.kind) {
       case 'superchat':
-      case 'superchat-paid-sticker':
         return 200;
       case 'membership':
-      case 'membership-gift-receipt':
         return 100;
       default:
         return 0;
     }
   }
 
-  /**
-   * Compute the effective queue capacity with exponential backoff and
-   * hysteresis to prevent frequent resizing oscillations.
-   *
-   * - **Overflow**: When the queue fills past DEFAULT_SIZE, capacity grows
-   *   exponentially (1.5x) up to MAX_SIZE (100).
-   * - **Underflow (Hysteresis)**: When queue length stays below
-   *   (maxSize * UNDERFLOW_RATIO) for at least UNDERFLOW_DURATION_MS and
-   *   the condition holds for SHRINK_REQUIRED_COUNT consecutive cycles,
-   *   capacity shrinks by half (down to MIN_SIZE = 20).
-   */
-  private getDynamicQueueMaxSize(): number {
-    const len = this.pendingQueue.length;
-
-    // --- Expansion (Overflow) ---
-    // When queue is full, expand exponentially by 1.5x (up to QUEUE_MAX_SIZE)
-    if (len >= Renderer.QUEUE_DEFAULT_SIZE && this.queueMaxSizeCache < Renderer.QUEUE_MAX_SIZE) {
-      const newSize = Math.min(Renderer.QUEUE_MAX_SIZE, Math.round(this.queueMaxSizeCache * 1.5));
-      this.queueMaxSizeCache = newSize;
-      this.queueShrinkCountdown = 0; // Reset shrinkage counter on expansion
-      this.queueUnderflowStart = 0; // Reset underflow detection
-      return newSize;
-    }
-
-    // --- Shrinkage (Underflow with Hysteresis) ---
-    // When queue size is below maxSize * QUEUE_UNDERFLOW_RATIO, shrinkage is possible
-    if (len < this.queueMaxSizeCache * Renderer.QUEUE_UNDERFLOW_RATIO) {
-      if (this.queueUnderflowStart === 0) {
-        this.queueUnderflowStart = Date.now();
-      }
-
-      const elapsed = Date.now() - this.queueUnderflowStart;
-
-      if (elapsed >= Renderer.QUEUE_UNDERFLOW_DURATION_MS) {
-        this.queueShrinkCountdown++;
-
-        if (this.queueShrinkCountdown >= Renderer.QUEUE_SHRINK_REQUIRED_COUNT) {
-          // N consecutive conditions met → execute shrinkage
-          const newSize = Math.max(Renderer.QUEUE_MIN_SIZE, Math.round(this.queueMaxSizeCache / 2));
-          this.queueMaxSizeCache = newSize;
-          this.queueShrinkCountdown = 0;
-          this.queueUnderflowStart = 0;
-          return newSize;
-        }
-      }
-    } else {
-      // Not in underflow state → reset counters
-      this.queueShrinkCountdown = 0;
-      this.queueUnderflowStart = 0;
-    }
-
-    return this.queueMaxSizeCache;
-  }
-
-  /**
-   * Process messages from the queue immediately.
-   *
-   * Renders up to getDynamicMaxPerCycle() messages per invocation to
-   * reduce per-message timer overhead when lanes are available.  Falls
-   * back to scheduleRetry when the next message is deferred or the
-   * batch limit is reached with more messages waiting.
-   *
-   * The retry delay is adjusted dynamically based on queue pressure
-   * so the backlog drains faster under high load.
-   */
   private processQueue(): void {
-    // Don't process while paused
     if (this.isPaused) {
       return;
     }
@@ -703,7 +394,6 @@ export class Renderer {
     this.sweepStaleAnimations();
     this.clearRetryTimer();
 
-    // Update observability metrics
     this.observability.updateQueueDepth(this.pendingQueue.length);
     this.observability.updateActiveMessages(this.activeMessages.size);
     this.observability.updateLaneUtilization(
@@ -714,8 +404,6 @@ export class Renderer {
       return;
     }
 
-    // Sort by priority descending (highest first), then by timestamp ascending
-    // so high-priority messages (superchat, membership) render before normal chat.
     this.pendingQueue.sort(
       (left, right) =>
         right.priority - left.priority || left.message.timestamp - right.message.timestamp
@@ -725,25 +413,18 @@ export class Renderer {
     const nextMessage = this.pendingQueue[0];
     if (!nextMessage) return;
 
-    // If the front message is still deferring, wait.
     if (nextMessage.nextAttemptAt > now) {
       this.scheduleRetry(nextMessage.nextAttemptAt - now);
       return;
     }
 
-    // Soft cap warning (non-blocking)
     if (this.activeMessages.size >= this.settings.maxConcurrentMessages) {
       this.logPerformanceWarning();
     }
 
-    // Dynamic batch size based on queue pressure.
     let processed = 0;
-    const maxPerCycle = this.getDynamicMaxPerCycle();
-    // Progressive overwrite: queue-depth-based force overwrite ms so lane
-    // overwriting ramps up gradually instead of flipping on abruptly.
-    const forceOverwriteMs = calculateProgressiveOverwriteMs(this.pendingQueue.length);
 
-    while (this.pendingQueue.length > 0 && processed < maxPerCycle) {
+    while (this.pendingQueue.length > 0 && processed < Renderer.BATCH_SIZE) {
       const queued = this.pendingQueue[0];
       if (!queued) break;
 
@@ -752,7 +433,7 @@ export class Renderer {
         return;
       }
 
-      const result = this.renderMessage(queued.message, forceOverwriteMs);
+      const result = this.renderMessage(queued.message);
 
       if (result.status === 'deferred') {
         queued.nextAttemptAt = Date.now() + result.waitMs;
@@ -764,24 +445,15 @@ export class Renderer {
       processed++;
     }
 
-    // Schedule next if there are still messages waiting.
     if (this.pendingQueue.length > 0 && !this.isPaused) {
-      this.scheduleRetry(this.getDynamicRetryDelay());
+      this.scheduleRetry(Renderer.RETRY_DELAY_MS);
     }
   }
 
-  /**
-   * Get effective message speed considering current video playback rate
-   */
   private getEffectiveSpeedPxPerSec(): number {
-    const baseSpeed = this.settings.speedPxPerSec;
-    const multiplier = this.getDynamicSpeedMultiplier();
-    return Math.max(1, baseSpeed * multiplier * this.playbackRate);
+    return Math.max(1, this.settings.speedPxPerSec * this.playbackRate);
   }
 
-  /**
-   * Schedule queue processing retry when lanes are temporarily occupied
-   */
   private scheduleRetry(waitMs: number): void {
     if (this.isPaused) return;
 
@@ -797,9 +469,6 @@ export class Renderer {
     }, delay);
   }
 
-  /**
-   * Clear pending queue retry timer
-   */
   private clearRetryTimer(): void {
     if (this.retryTimer !== null) {
       window.clearTimeout(this.retryTimer);
@@ -807,10 +476,6 @@ export class Renderer {
     }
   }
 
-  /**
-   * Log performance warning when concurrent message count is high
-   * Limited to once per 10 seconds to avoid log spam
-   */
   private logPerformanceWarning(): void {
     const now = Date.now();
     if (now - this.lastWarningTime < Renderer.WARNING_INTERVAL_MS) {
@@ -825,9 +490,6 @@ export class Renderer {
     );
   }
 
-  /**
-   * Apply common visual styles shared by all message kinds
-   */
   private applyCommonMessageStyles(
     element: HTMLDivElement,
     message: ChatMessage,
@@ -837,22 +499,12 @@ export class Renderer {
     element.style.fontSize = `${this.settings.fontSize}px`;
     element.style.opacity = `${this.settings.opacity}`;
 
-    // Apply author color only for regular messages
     if (!isSuperChat && !isMembership) {
       element.style.color = this.settings.colors[message.authorType];
     }
   }
 
-  /**
-   * Render a single message.
-   *
-   * Uses Canvas-based dimension estimation (no DOM reflow) and
-   * CSS animation (@keyframes) instead of element.animate().
-   *
-   * @param forceOverwriteMs - When set, lanes with a wait >= this value
-   *   are force-assigned (overwriting the occupant) to drain a deep queue.
-   */
-  private renderMessage(message: ChatMessage, forceOverwriteMs?: number): RenderResult {
+  private renderMessage(message: ChatMessage): RenderResult {
     const renderContext = this.getRenderContext();
     if (!renderContext) {
       log.debug('Cannot render: container or dimensions missing');
@@ -861,12 +513,10 @@ export class Renderer {
 
     const { container, dimensions } = renderContext;
 
-    // ── Step 1: Estimate dimensions via Canvas (no DOM append) ─────────
     const estimated = this.messageBuilder.estimateMessageDimensions(message);
     const messageHeight = estimated.height;
 
-    // ── Step 2: Find available lane ────────────────────────────────────
-    const placement = this.laneAllocator.findPlacement(messageHeight, dimensions, forceOverwriteMs);
+    const placement = this.laneAllocator.findPlacement(messageHeight, dimensions);
     if (placement === null) {
       this.observability.onMessageDropped('no_lane_available');
       log.debug(
@@ -881,7 +531,6 @@ export class Renderer {
       return { status: 'deferred', waitMs: placement.waitMs };
     }
 
-    // ── Step 3: Build element ──────────────────────────────────────────
     const builtMessage = this.messageBuilder.buildMessageElement(message);
     if (!builtMessage) {
       return { status: 'dropped' };
@@ -890,7 +539,6 @@ export class Renderer {
     const { element, isSuperChat, isMembership } = builtMessage;
     this.applyCommonMessageStyles(element, message, isSuperChat, isMembership);
 
-    // ── Step 4: Position, append, animate (single DOM touch) ──────────
     const activeMessage = this.setupMessageAnimation(
       element,
       placement,
@@ -900,11 +548,8 @@ export class Renderer {
       message
     );
 
-    // Append to container — now the element is at its final start
-    // position so there is no hidden measurement phase.
     container.appendChild(element);
 
-    // Track active message
     this.activeMessages.add(activeMessage);
     this.observability.onMessageRendered();
 
@@ -927,9 +572,6 @@ export class Renderer {
     return { status: 'rendered' };
   }
 
-  /**
-   * Remove message by element
-   */
   private removeMessageByElement(element: HTMLDivElement): void {
     const active = Array.from(this.activeMessages).find((m) => m.element === element);
     if (active) {
@@ -937,12 +579,6 @@ export class Renderer {
     }
   }
 
-  /**
-   * Remove active message
-   *
-   * Detaches animationend listener before removing the element
-   * so the auto-cleanup callback does not re-enter the removal path.
-   */
   private removeMessage(active: ActiveMessage): void {
     this.activeMessages.delete(active);
 
@@ -959,8 +595,6 @@ export class Renderer {
 
   private handleBackgroundTab(): void {
     this.pause();
-    // Limit queue size when tab is hidden to reduce memory usage.
-    // Drop lowest-priority messages first.
     if (this.pendingQueue.length > Renderer.BACKGROUND_QUEUE_MAX) {
       const excess = this.pendingQueue.length - Renderer.BACKGROUND_QUEUE_MAX;
       this.pendingQueue.sort(
@@ -974,16 +608,11 @@ export class Renderer {
     this.resume();
   }
 
-  /**
-   * Update settings
-   */
   updateSettings(settings: OverlaySettings, options: RendererUpdateOptions = {}): void {
     this.settings = settings;
     this.injectStyles();
-    // Sync debug overlay visibility with settings
     this.observability.setShowDebug(settings.showDebugOverlay);
 
-    // Sync author rate limiter config with settings
     this.authorRateLimiter.updateConfig({
       enabled: settings.authorRateLimitEnabled,
       windowMs: settings.authorRateLimitWindowMs,
@@ -1001,9 +630,6 @@ export class Renderer {
     }
   }
 
-  /**
-   * Pause all active CSS animations via animation-play-state
-   */
   pause(): void {
     if (this.isPaused) return;
 
@@ -1017,15 +643,11 @@ export class Renderer {
     log.debug(`Paused ${this.activeMessages.size} animations`);
   }
 
-  /**
-   * Resume all active CSS animations and process queued messages
-   */
   resume(): void {
     if (!this.isPaused) return;
 
     const now = Date.now();
     if (this.pausedAt !== null) {
-      // Cap to 60s so lanes don't get pushed far into the future after long pauses.
       const pausedDuration = Math.min(Math.max(0, now - this.pausedAt), 60_000);
       if (pausedDuration > 0) {
         this.laneAllocator.shiftTimeline(pausedDuration);
@@ -1040,17 +662,9 @@ export class Renderer {
     });
     log.debug(`Resumed ${this.activeMessages.size} animations`);
 
-    // Process any queued messages
     this.processQueue();
   }
 
-  /**
-   * Set playback rate for all active CSS animations.
-   *
-   * CSS animations lack a native playbackRate property, so we restart
-   * each animation with an adjusted duration and seek to the correct
-   * elapsed time via negative animation-delay.
-   */
   setPlaybackRate(rate: number): void {
     if (rate <= 0) {
       log.warn('Invalid playback rate:', rate);
@@ -1066,8 +680,6 @@ export class Renderer {
         const elapsed = performance.now() - active.startTime;
         const adjustedDuration = active.baseDuration / rate;
 
-        // Restart CSS animation with new duration, seeked to current position.
-        // Forced reflow here is acceptable since rate changes are infrequent.
         const el = active.element;
         el.style.animationName = 'none';
         void el.offsetWidth;
@@ -1080,10 +692,6 @@ export class Renderer {
     }
   }
 
-  /**
-   * Helper method to apply an operation to all active message elements.
-   * Replaces the old forEachAnimation that operated on Animation objects.
-   */
   private forEachElement(operation: (element: HTMLDivElement) => void): void {
     for (const active of Array.from(this.activeMessages)) {
       try {
@@ -1094,9 +702,6 @@ export class Renderer {
     }
   }
 
-  /**
-   * Destroy and cleanup all resources
-   */
   destroy(): void {
     this.isPaused = false;
     this.overlayDimensionsUnsubscribe?.();

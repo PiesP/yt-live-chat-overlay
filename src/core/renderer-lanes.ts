@@ -6,9 +6,6 @@ export interface LanePlacement {
   waitMs: number;
 }
 
-/** Threshold (ms) above which lane waiting is considered "congested". */
-const LANE_CONGESTION_THRESHOLD_MS = 100;
-
 interface LaneAllocatorOptions {
   readonly getFontSize: () => number;
   readonly getEffectiveSpeedPxPerSec: () => number;
@@ -49,32 +46,12 @@ export class LaneAllocator {
     return this.lanes.length;
   }
 
-  /**
-   * Find placement for a message with the given height.
-   *
-   * @param messageHeight  Estimated pixel height of the message.
-   * @param dimensions     Current overlay dimensions.
-   * @param forceOverwriteMs  Optional threshold (ms). When provided and the
-   *   best placement's wait time equals or exceeds this value, the wait is
-   *   clamped to zero so the caller can render immediately by overwriting
-   *   the lane's existing occupant.  The old CSS animation continues
-   *   independently — only the lane allocator's tracking is reset.
-   */
-  findPlacement(
-    messageHeight: number,
-    dimensions: OverlayDimensions,
-    forceOverwriteMs?: number
-  ): LanePlacement | null {
+  findPlacement(messageHeight: number, dimensions: OverlayDimensions): LanePlacement | null {
     const now = Date.now();
     const requiredLanes = this.calculateRequiredLanes(messageHeight, dimensions.laneHeight);
     if (requiredLanes > this.lanes.length) {
       return null;
     }
-
-    // ── Round-robin lane scan ────────────────────────────────────────────
-    // Start from nextLaneIndex and scan forward.  If a block is ready now
-    // (or with minimal wait), assign it immediately.  Otherwise track the
-    // block with the earliest ready time and return it as deferred.
 
     const maxStartIndex = this.lanes.length - requiredLanes;
     let bestStartIndex = -1;
@@ -99,14 +76,12 @@ export class LaneAllocator {
         continue;
       }
 
-      // Found a block that's ready now — use it immediately.
       if (blockReadyTime <= now + 16) {
         bestStartIndex = startIndex;
         bestReadyTime = blockReadyTime;
         break;
       }
 
-      // Track the block with the earliest ready time.
       if (blockReadyTime < bestReadyTime) {
         bestReadyTime = blockReadyTime;
         bestStartIndex = startIndex;
@@ -122,27 +97,9 @@ export class LaneAllocator {
       return null;
     }
 
-    // Advance round-robin pointer to the lane after this block so the next
-    // message starts scanning from a different position.
     this.nextLaneIndex = (bestStartIndex + 1) % (maxStartIndex + 1);
 
     const waitMs = Math.max(0, Math.ceil(bestReadyTime - now));
-
-    // ── Force-overwrite fast path ────────────────────────────────────────
-    // When the queue is congested (forceOverwriteMs set and wait exceeds
-    // threshold), return the placement with waitMs=0 so the caller renders
-    // immediately.  This overwrites the lane's occupant in the allocator's
-    // tracking state — the old CSS animation keeps running independently.
-    if (
-      forceOverwriteMs !== undefined &&
-      waitMs >= Math.max(forceOverwriteMs, LANE_CONGESTION_THRESHOLD_MS)
-    ) {
-      return {
-        lane: chosenLane,
-        laneSpan: requiredLanes,
-        waitMs: 0,
-      };
-    }
 
     return {
       lane: chosenLane,
@@ -180,8 +137,6 @@ export class LaneAllocator {
       return;
     }
 
-    // Internal safety cap: prevents lanes from being pushed into the far
-    // future after long pauses (e.g. tab hidden 30+ min).
     const clampedMs = Math.min(deltaMs, 60_000);
 
     for (const lane of this.lanes) {
@@ -210,7 +165,6 @@ export class LaneAllocator {
     const speed = this.options.getEffectiveSpeedPxPerSec();
     const fontSize = this.options.getFontSize();
 
-    // Dynamic safe distance: scale with speed so slow messages get more gap.
     const baseSafeDistance = Math.max(
       fontSize * this.options.safeDistanceScale,
       this.options.safeDistanceMin
@@ -221,14 +175,12 @@ export class LaneAllocator {
     const safeTimeGap = (requiredGapPx / speed) * 1000;
     const horizontalReadyTime = lane.lastItemStartTime + safeTimeGap;
 
-    // Dynamic vertical clear time: base on message travel time.
     const traverseTimeMs = (window.innerWidth / speed) * 1000;
     const dynamicClearMs = Math.max(traverseTimeMs * 0.05, 200);
     const verticalReadyTime = lane.lastItemStartTime + dynamicClearMs;
 
     const laneStaggerTime = lane.lastItemStartTime + this.options.globalStaggerMs;
 
-    // Absolute animation end time guard.
     const animationEndGuard = lane.lastItemEndTime;
 
     return Math.max(
@@ -239,30 +191,4 @@ export class LaneAllocator {
       animationEndGuard
     );
   }
-}
-
-/**
- * Progressive overwrite: queue-depth-based force overwrite ms.
- *
- * Returns a force-overwrite threshold (ms) that decreases linearly as the
- * queue deepens, so lane overwriting ramps up gradually instead of flipping
- * on abruptly at a single queue-depth threshold.
- *
- * @param queueDepth - Current number of items in the pending queue.
- * @returns Overwrite threshold in ms, or `undefined` if no overwrite should
- *   be attempted.
- *
- * | Queue depth | forceOverwriteMs | Effect |
- * |-------------|-----------------|--------|
- * |  0-4        | undefined       | No overwrite |
- * |  5          | 200ms           | Only lanes waiting ≥200ms |
- * | 10          | 100ms           | Only lanes waiting ≥100ms |
- * | 15          | 50ms            | Only lanes waiting ≥50ms |
- * | 20+         | 0ms             | Immediate overwrite |
- */
-export function calculateProgressiveOverwriteMs(queueDepth: number): number | undefined {
-  if (queueDepth < 5) return undefined; // No overwrite
-  if (queueDepth >= 20) return 0;
-  // Linear interpolation: from 200ms at depth=5 to 0ms at depth=20
-  return Math.round(200 * (1 - (queueDepth - 5) / 15));
 }
