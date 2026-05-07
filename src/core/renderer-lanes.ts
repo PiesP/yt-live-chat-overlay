@@ -47,6 +47,10 @@ export class LaneAllocator {
     return this.lanes.length === 0;
   }
 
+  getLaneCount(): number {
+    return this.lanes.length;
+  }
+
   /**
    * Find placement for a message with the given height.
    *

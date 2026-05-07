@@ -419,17 +419,53 @@ export class Renderer {
   /**
    * Compute the maximum number of messages to process per cycle.
    *
-   * Scales with queue pressure so bursts are cleared faster:
-   * - queue >= 20 -> base x 3 (15)
-   * - queue >= 10 -> base x 2 (10)
-   * - otherwise  -> base (5)
+   * Adapts batch size based on both queue depth and active message density:
+   * - 5-level base batch size (4/7/10/15/20) based on queue depth
+   * - Utilization factor reduces batch when screen is congested
    */
   private getDynamicMaxPerCycle(): number {
-    const base = rendererLayout.maxMessagesPerCycle;
-    const queueLen = this.pendingQueue.length;
-    if (queueLen >= 20) return base * 3;
-    if (queueLen >= 10) return base * 2;
+    const len = this.pendingQueue.length;
+    const activeCount = this.activeMessages.size;
+    const maxConcurrent = this.getMaxConcurrentMessages();
+    // 활성 메시지 밀도 (0.0 ~ 1.0)
+    const utilization = maxConcurrent > 0 ? activeCount / maxConcurrent : 0;
+
+    // 기본 배치 크기는 큐 깊이 기반 (5단계)
+    let base: number;
+    if (len >= 25) {
+      base = 20;
+    } else if (len >= 15) {
+      base = 15;
+    } else if (len >= 8) {
+      base = 10;
+    } else if (len >= 4) {
+      base = 7;
+    } else {
+      base = 4;
+    }
+
+    // utilization이 높으면(화면이 꽉 찼으면) 배치 크기 감소
+    // 새 메시지를 추가해도 레인을 찾지 못하고 deferred될 가능성이 높기 때문
+    if (utilization > 0.8) {
+      // 화면이 거의 꽉 참 → 배치 크기를 줄여 deferred/failed 재시도 부하 감소
+      return Math.max(3, Math.floor(base * 0.6));
+    }
+    if (utilization > 0.5) {
+      // 화면이 어느 정도 참 → 약간 감소
+      return Math.max(4, Math.floor(base * 0.8));
+    }
+
     return base;
+  }
+
+  /**
+   * 최대 동시 메시지 수를 추정합니다.
+   * 레인 수를 기반으로 각 레인이 동시에 1~2개 메시지를 처리할 수 있다고 가정합니다.
+   */
+  private getMaxConcurrentMessages(): number {
+    const laneCount = this.laneAllocator.getLaneCount();
+    // 각 레인은 최대 2개 메시지를 동시에 처리할 수 있다고 가정 (화면에 표시 중 + 대기)
+    return laneCount * 2;
   }
 
   /**
