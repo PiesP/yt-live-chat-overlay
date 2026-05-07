@@ -86,7 +86,7 @@ export const DEFAULT_SETTINGS = {
   laneSpacing: 0,
 } as const satisfies Readonly<OverlaySettings>;
 
-const STORAGE_KEY = 'yt-live-chat-overlay-settings';
+export const STORAGE_KEY = 'yt-live-chat-overlay-settings';
 
 /**
  * Read and parse the raw stored settings blob from localStorage.

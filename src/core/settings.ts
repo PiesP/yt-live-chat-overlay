@@ -1,9 +1,7 @@
 import type { OverlaySettings } from '@app-types';
 import { createLogger } from '@core/logging';
-import { DEFAULT_SETTINGS, readStoredSettingsRaw } from '@core/settings-definitions';
+import { DEFAULT_SETTINGS, readStoredSettingsRaw, STORAGE_KEY } from '@core/settings-definitions';
 import { applySettingsPatch, cloneSettings, normalizeStoredSettings } from '@core/settings-schema';
-
-const STORAGE_KEY = 'yt-live-chat-overlay-settings';
 
 type StoredSettings = Partial<OverlaySettings>;
 
