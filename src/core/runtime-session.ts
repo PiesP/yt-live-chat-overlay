@@ -126,6 +126,18 @@ export class RuntimeSession {
 
     renderer.updateSettings(settings, { resetState: shouldResetRenderer });
 
+    // Update backlog controller config if it exists
+    if (this.backlogController) {
+      this.backlogController.updateConfig({
+        backlogMaxRate: settings.backlogMaxRate,
+        backlogSpeedMultiplier: settings.backlogSpeedMultiplier,
+        showBacklogIndicator: settings.showBacklogIndicator,
+      });
+    }
+
+    // Sync backlog speed multiplier to renderer for any future backlog messages
+    renderer.setBacklogSpeedMultiplier(settings.backlogSpeedMultiplier);
+
     if (!shouldResetRenderer) {
       return;
     }

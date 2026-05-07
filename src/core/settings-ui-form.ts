@@ -348,6 +348,25 @@ export class SettingsUiForm {
       )
     );
 
+    const backlogSection = this.createSection('Backlog');
+    backlogSection.append(
+      this.createNumberField(
+        'Max backlog rate (msg/s)',
+        'backlogMaxRate',
+        'Maximum messages per second during backlog injection'
+      ),
+      this.createNumberField(
+        'Backlog speed multiplier',
+        'backlogSpeedMultiplier',
+        'Speed multiplier for backlog message animations'
+      ),
+      this.createCheckboxField(
+        'Show backlog loading indicator',
+        'showBacklogIndicator',
+        'Show loading indicator during backlog injection'
+      )
+    );
+
     const rateLimitSection = this.createSection('Rate Limiting');
     rateLimitSection.append(
       this.createCheckboxField(
@@ -387,7 +406,14 @@ export class SettingsUiForm {
       )
     );
 
-    pane.append(safeZoneSection, rateSection, performanceSection, rateLimitSection, debugSection);
+    pane.append(
+      safeZoneSection,
+      rateSection,
+      performanceSection,
+      backlogSection,
+      rateLimitSection,
+      debugSection
+    );
     return pane;
   }
 
@@ -558,7 +584,14 @@ export class SettingsUiForm {
   ): void {
     const value = settings[key];
 
-    if (key === 'enabled' || key === 'allowShortTextMessages') {
+    if (
+      key === 'enabled' ||
+      key === 'allowShortTextMessages' ||
+      key === 'showDebugOverlay' ||
+      key === 'enableDropLogging' ||
+      key === 'authorRateLimitEnabled' ||
+      key === 'showBacklogIndicator'
+    ) {
       this.setCheckbox(key, value as boolean);
     } else if (key === 'logLevel') {
       this.setSelect(key, value as string);
@@ -619,6 +652,16 @@ export class SettingsUiForm {
     target.allowShortTextMessages = this.getCheckbox(
       'allowShortTextMessages',
       current.allowShortTextMessages
+    );
+    target.showDebugOverlay = this.getCheckbox('showDebugOverlay', current.showDebugOverlay);
+    target.enableDropLogging = this.getCheckbox('enableDropLogging', current.enableDropLogging);
+    target.authorRateLimitEnabled = this.getCheckbox(
+      'authorRateLimitEnabled',
+      current.authorRateLimitEnabled
+    );
+    target.showBacklogIndicator = this.getCheckbox(
+      'showBacklogIndicator',
+      current.showBacklogIndicator
     );
     target.logLevel = this.getLogLevel('logLevel', current.logLevel);
 
