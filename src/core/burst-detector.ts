@@ -88,23 +88,21 @@ export class BurstDetector {
 
     if (newLevel !== this.currentLevel) {
       if (newLevel !== 'normal') {
-        this.lastBurstTime = performance.now();
+        this.lastBurstTime = Date.now();
       }
       this.currentLevel = newLevel;
       log.debug(`Burst level: ${newLevel} (rate=${avgRate.toFixed(1)} msg/s)`);
 
-      // Update observability if connected
       if (this.observability) {
         this.observability.updateBurstLevel(newLevel);
       }
     } else if (newLevel !== 'normal') {
-      // Same non-normal level - extend burst timer
-      this.lastBurstTime = performance.now();
+      this.lastBurstTime = Date.now();
     }
 
     // Cooldown: if we were in burst but rate dropped, wait for cooldown
     if (this.currentLevel !== 'normal' && newLevel === 'normal') {
-      const elapsed = performance.now() - this.lastBurstTime;
+      const elapsed = Date.now() - this.lastBurstTime;
       if (elapsed < BURST_COOLDOWN_MS) {
         // Stay at current level until cooldown expires
         // The level will be re-evaluated on next interval

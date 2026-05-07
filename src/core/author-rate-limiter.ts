@@ -1,7 +1,7 @@
 import type { BurstLevel } from '@app-types';
 import { createLogger } from '@core/logging';
 
-const log = createLogger('[AuthorRateLimiter]');
+const log = createLogger('AuthorRateLimiter');
 
 /** Default rate limit: max N messages per window */
 const DEFAULT_WINDOW_MS = 5_000;
@@ -15,10 +15,10 @@ const PRUNE_INTERVAL_MS = 10_000;
 
 /** Burst-level-based limit overrides */
 const BURST_LIMITS: Record<BurstLevel, number | null> = {
-  normal: null, // No limit during normal traffic
-  elevated: null, // No limit during elevated traffic
-  high: 3, // Max 3 per window during high burst
-  extreme: 2, // Max 2 per window during extreme burst
+  normal: null,
+  elevated: null,
+  high: 3,
+  extreme: 2,
 };
 
 export class PerAuthorRateLimiter {
@@ -27,33 +27,24 @@ export class PerAuthorRateLimiter {
   private maxPerWindow: number = DEFAULT_MAX_PER_WINDOW;
   private enabled: boolean = true;
   private burstEnabled: boolean = true;
-  private lastPruneTime: number = performance.now();
-  private getBurstLevel: () => BurstLevel;
+  private lastPruneTime: number = Date.now();
+  private readonly getBurstLevel: () => BurstLevel;
 
   constructor(getBurstLevel: () => BurstLevel) {
     this.getBurstLevel = getBurstLevel;
   }
 
-  /**
-   * Check if a message from this author should be allowed.
-   * @param authorId - Unique author identifier
-   * @param priority - Message priority (SuperChat=200, Membership=100, Normal=0)
-   * @returns true if allowed, false if rate-limited
-   */
   allow(authorId: string, priority: number): boolean {
     if (!this.enabled) return true;
 
-    // High-priority messages (SuperChat, Membership) are never rate-limited
     if (priority >= PRIORITY_EXEMPT_THRESHOLD) return true;
 
-    // Get current burst-adjusted limit
     const limit = this.getEffectiveLimit();
-    if (limit === null) return true; // No limit active
+    if (limit === null) return true;
 
-    const now = performance.now();
+    const now = Date.now();
     let timestamps = this.authorTimestamps.get(authorId);
 
-    // Prune old timestamps outside the window
     if (timestamps) {
       const cutoff = now - this.windowMs;
       timestamps = timestamps.filter((t) => t > cutoff);
@@ -67,16 +58,13 @@ export class PerAuthorRateLimiter {
       timestamps = [];
     }
 
-    // Add current timestamp
     timestamps.push(now);
     this.authorTimestamps.set(authorId, timestamps);
 
-    // Manage map size - evict LRU if over limit
     if (this.authorTimestamps.size > MAX_AUTHOR_ENTRIES) {
       this.pruneStaleEntries();
     }
 
-    // Periodic prune
     if (now - this.lastPruneTime > PRUNE_INTERVAL_MS) {
       this.pruneStaleEntries();
       this.lastPruneTime = now;
@@ -85,7 +73,6 @@ export class PerAuthorRateLimiter {
     return true;
   }
 
-  /** Get the effective rate limit considering burst level */
   private getEffectiveLimit(): number | null {
     if (!this.burstEnabled) return this.maxPerWindow;
 
@@ -96,9 +83,8 @@ export class PerAuthorRateLimiter {
     return this.maxPerWindow;
   }
 
-  /** Remove stale entries (empty timestamp arrays) to bound memory */
   private pruneStaleEntries(): void {
-    const cutoff = performance.now() - this.windowMs;
+    const cutoff = Date.now() - this.windowMs;
     for (const [authorId, timestamps] of this.authorTimestamps) {
       const valid = timestamps.filter((t) => t > cutoff);
       if (valid.length === 0) {
@@ -109,7 +95,6 @@ export class PerAuthorRateLimiter {
     }
   }
 
-  /** Update configuration at runtime */
   updateConfig(config: {
     enabled?: boolean;
     windowMs?: number;
@@ -122,12 +107,10 @@ export class PerAuthorRateLimiter {
     if (config.burstEnabled !== undefined) this.burstEnabled = config.burstEnabled;
   }
 
-  /** Number of tracked authors (for debugging) */
   size(): number {
     return this.authorTimestamps.size;
   }
 
-  /** Clean up all resources */
   destroy(): void {
     this.authorTimestamps.clear();
   }

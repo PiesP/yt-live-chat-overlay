@@ -437,39 +437,37 @@ export class Renderer {
     this.sweepCounter++;
     if (this.sweepCounter % this.SWEEP_INTERVAL !== 0) return;
 
-    this.activeMessages.forEach((active) => {
+    const toRemove: ActiveMessage[] = [];
+    for (const active of this.activeMessages) {
       try {
-        // Time-based guard: do not remove messages before their animation
-        // has had sufficient time to complete. getAnimations() / playState
-        // can be unreliable during the animation-delay period and shortly
-        // after start across different browsers.
         const elapsed = performance.now() - active.startTime;
         const minLifetimeMs = active.baseDuration + Renderer.SWEEP_TOLERANCE_MS;
-        if (elapsed < minLifetimeMs) return;
+        if (elapsed < minLifetimeMs) continue;
 
         const animations = active.element.getAnimations();
         if (animations.length === 0) {
-          this.activeMessages.delete(active);
-          if (active.element.parentNode) {
-            active.element.remove();
-          }
-          return;
+          toRemove.push(active);
+          continue;
         }
 
         for (const anim of animations) {
           if (anim.playState === 'finished') {
-            this.activeMessages.delete(active);
-            if (active.element.parentNode) {
-              active.element.remove();
-            }
-            return;
+            toRemove.push(active);
+            break;
           }
         }
       } catch (error) {
         log.debug('Failed to check animation state during sweep:', error);
-        this.activeMessages.delete(active);
+        toRemove.push(active);
       }
-    });
+    }
+
+    for (const active of toRemove) {
+      this.activeMessages.delete(active);
+      if (active.element.parentNode) {
+        active.element.remove();
+      }
+    }
   }
 
   /**
@@ -960,24 +958,20 @@ export class Renderer {
   }
 
   private handleBackgroundTab(): void {
+    this.pause();
     // Limit queue size when tab is hidden to reduce memory usage.
-    // Drop lowest-priority messages first using the priority system from Phase 1.
+    // Drop lowest-priority messages first.
     if (this.pendingQueue.length > Renderer.BACKGROUND_QUEUE_MAX) {
       const excess = this.pendingQueue.length - Renderer.BACKGROUND_QUEUE_MAX;
       this.pendingQueue.sort(
-        (a, b) => a.priority - b.priority || a.message.timestamp - b.message.timestamp
-      );
-      this.pendingQueue.splice(0, excess);
-      // Restore priority DESC + timestamp ASC order for processing.
-      this.pendingQueue.sort(
         (a, b) => b.priority - a.priority || a.message.timestamp - b.message.timestamp
       );
+      this.pendingQueue.splice(this.pendingQueue.length - excess, excess);
     }
   }
 
   private handleForegroundTab(): void {
-    // Resume queue processing immediately when returning to foreground.
-    this.processQueue();
+    this.resume();
   }
 
   /**

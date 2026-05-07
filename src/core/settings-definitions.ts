@@ -79,14 +79,14 @@ export const SETTINGS_LIMITS = {
 
 export const DEFAULT_SETTINGS = {
   enabled: true,
-  speedPxPerSec: 280,
+  speedPxPerSec: 250,
   fontSize: 20,
   opacity: 0.85,
   superChatOpacity: 0.35,
   safeTop: 0,
   safeBottom: 0.4,
-  maxConcurrentMessages: 40,
-  maxMessagesPerSecond: 6,
+  maxConcurrentMessages: 50,
+  maxMessagesPerSecond: 8,
   allowShortTextMessages: false,
   minTextLength: 3,
   logLevel: 'warn',

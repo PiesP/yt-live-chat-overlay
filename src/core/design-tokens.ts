@@ -97,7 +97,7 @@ export const rendererLayout = {
   exitPaddingMin: 100,
   exitPaddingScale: 3,
   durationMin: 5000,
-  durationMax: 12000,
+  durationMax: 30000,
   globalStaggerMs: 60,
   safeDistanceScale: 0.3,
   safeDistanceMin: 6,
