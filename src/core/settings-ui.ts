@@ -41,21 +41,15 @@ export class SettingsUi {
   }
 
   /** Debounced live preview — applies settings immediately but persists on close. */
-  private previewTimer: number | null = null;
+  private previewTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly PREVIEW_DEBOUNCE_MS = 250;
-  private previewGeneration = 0;
 
   private queuePreview(preview: OverlaySettings): void {
     if (this.previewTimer !== null) {
-      window.clearTimeout(this.previewTimer);
+      clearTimeout(this.previewTimer);
     }
-    const generation = ++this.previewGeneration;
-    this.previewTimer = window.setTimeout(() => {
+    this.previewTimer = setTimeout(() => {
       this.previewTimer = null;
-      // Guard: skip if the modal was destroyed or superseded by a newer preview.
-      if (generation !== this.previewGeneration || !this.modal) {
-        return;
-      }
       this.updateSettings(preview);
       // Sync form with normalized values from the settings system
       this.form.populateForm(this.getSettings());
@@ -64,11 +58,9 @@ export class SettingsUi {
 
   private cancelPreview(): void {
     if (this.previewTimer !== null) {
-      window.clearTimeout(this.previewTimer);
+      clearTimeout(this.previewTimer);
       this.previewTimer = null;
     }
-    // Bump generation so any in-flight timer callback becomes a no-op.
-    this.previewGeneration += 1;
   }
 
   async attach(): Promise<void> {
