@@ -6,12 +6,17 @@
  */
 
 import type { ChatMessage, OutlineSettings, OverlayDimensions, OverlaySettings } from '@app-types';
+import { BurstDetector } from '@core/burst-detector';
 import { rendererLayout, shadows } from '@core/design-tokens';
 import { createLogger } from '@core/logging';
 import { MessageIdRegistry } from '@core/message-id-registry';
 import { ObservabilityReporter } from '@core/observability';
 import type { Overlay } from '@core/overlay';
-import { LaneAllocator, type LanePlacement } from '@core/renderer-lanes';
+import {
+  calculateProgressiveOverwriteMs,
+  LaneAllocator,
+  type LanePlacement,
+} from '@core/renderer-lanes';
 import { RendererMessageBuilder } from '@core/renderer-message-builder';
 import { RENDERER_STATIC_STYLES } from '@core/renderer-styles';
 
@@ -52,6 +57,7 @@ interface RendererUpdateOptions {
 
 export class Renderer {
   readonly observability: ObservabilityReporter;
+  private burstDetector: BurstDetector;
   private overlay: Overlay;
   private settings: OverlaySettings;
   private readonly laneAllocator: LaneAllocator;
@@ -116,6 +122,8 @@ export class Renderer {
     this.laneAllocator.reset(this.overlay.getDimensions());
     this.injectStyles();
     this.observability = new ObservabilityReporter(this.settings.showDebugOverlay);
+    this.burstDetector = new BurstDetector(this.observability);
+    this.burstDetector.start();
     this.overlayDimensionsUnsubscribe = this.overlay.onDimensionsChanged((dimensions) => {
       this.handleOverlayDimensionsChange(dimensions);
     });
@@ -359,6 +367,7 @@ export class Renderer {
 
     // Track as received (passed dedup)
     this.observability.onMessageReceived();
+    this.burstDetector.onMessageReceived();
 
     // Enqueue with dynamically bounded capacity — drop oldest when full.
     // Under high load the queue grows up to 2x the base size so fewer
@@ -539,10 +548,26 @@ export class Renderer {
    * - otherwise  ->  4ms  (default min delay)
    */
   private getDynamicRetryDelay(): number {
-    const queueLen = this.pendingQueue.length;
-    if (queueLen >= 15) return 0;
-    if (queueLen >= 5) return Math.max(1, rendererLayout.retryDelayMinMs / 2);
-    return rendererLayout.retryDelayMinMs;
+    // Base delay based on queue pressure
+    const baseDelay =
+      this.pendingQueue.length >= 15
+        ? 0
+        : this.pendingQueue.length >= 5
+          ? 2
+          : rendererLayout.retryDelayMinMs;
+
+    // Adjust retry delay based on burst level — higher burst = retry sooner
+    const burstLevel = this.burstDetector.getLevel();
+    const burstMultiplier =
+      burstLevel === 'extreme'
+        ? 0
+        : burstLevel === 'high'
+          ? 0.5
+          : burstLevel === 'elevated'
+            ? 0.8
+            : 1;
+
+    return Math.max(0, Math.floor(baseDelay * burstMultiplier));
   }
 
   /**
@@ -684,9 +709,9 @@ export class Renderer {
     // Dynamic batch size based on queue pressure.
     let processed = 0;
     const maxPerCycle = this.getDynamicMaxPerCycle();
-    // When queue is deep (>=10), allow lane overwrite for congested lanes
-    // so the backlog drains even when all visible lanes are occupied.
-    const forceOverwriteMs = this.pendingQueue.length >= 10 ? 100 : undefined;
+    // Progressive overwrite: queue-depth-based force overwrite ms so lane
+    // overwriting ramps up gradually instead of flipping on abruptly.
+    const forceOverwriteMs = calculateProgressiveOverwriteMs(this.pendingQueue.length);
 
     while (this.pendingQueue.length > 0 && processed < maxPerCycle) {
       const queued = this.pendingQueue[0];
@@ -1057,6 +1082,7 @@ export class Renderer {
     this.styleElement?.remove();
     this.styleElement = null;
 
+    this.burstDetector.destroy();
     this.observability.destroy();
 
     log.debug('Destroyed');

@@ -240,3 +240,29 @@ export class LaneAllocator {
     );
   }
 }
+
+/**
+ * Progressive overwrite: queue-depth-based force overwrite ms.
+ *
+ * Returns a force-overwrite threshold (ms) that decreases linearly as the
+ * queue deepens, so lane overwriting ramps up gradually instead of flipping
+ * on abruptly at a single queue-depth threshold.
+ *
+ * @param queueDepth - Current number of items in the pending queue.
+ * @returns Overwrite threshold in ms, or `undefined` if no overwrite should
+ *   be attempted.
+ *
+ * | Queue depth | forceOverwriteMs | Effect |
+ * |-------------|-----------------|--------|
+ * |  0-4        | undefined       | No overwrite |
+ * |  5          | 200ms           | Only lanes waiting ≥200ms |
+ * | 10          | 100ms           | Only lanes waiting ≥100ms |
+ * | 15          | 50ms            | Only lanes waiting ≥50ms |
+ * | 20+         | 0ms             | Immediate overwrite |
+ */
+export function calculateProgressiveOverwriteMs(queueDepth: number): number | undefined {
+  if (queueDepth < 5) return undefined; // No overwrite
+  if (queueDepth >= 20) return 0;
+  // Linear interpolation: from 200ms at depth=5 to 0ms at depth=20
+  return Math.round(200 * (1 - (queueDepth - 5) / 15));
+}
