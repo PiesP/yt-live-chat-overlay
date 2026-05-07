@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.21.2] - 2026-05-07
+
+### Refactored
+
+- **Unified source code comments to English** — Translated JSDoc comments in `src/core/design-tokens.ts` from Korean to English for codebase-wide language consistency.
+
 ## [0.21.1] - 2026-05-06
 
 ### Refactored
