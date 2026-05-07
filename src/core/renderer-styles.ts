@@ -234,19 +234,4 @@ export const RENDERER_STATIC_STYLES = `
     animation-fill-mode: both;
     animation-play-state: var(--yt-msg-play-state, running);
   }
-
-  .yt-overlay-message-exit {
-    animation: yt-overlay-message-fadeout 300ms ease-out forwards;
-  }
-
-  @keyframes yt-overlay-message-fadeout {
-    from {
-      opacity: var(--yt-msg-current-opacity, 1);
-      transform: var(--yt-msg-current-transform, none);
-    }
-    to {
-      opacity: 0;
-      transform: translateY(10px);
-    }
-  }
 `;

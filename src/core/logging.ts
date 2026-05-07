@@ -45,7 +45,7 @@ export const initOverlayLogLevel = (): void => {
   setOverlayLogLevel(readStoredLogLevel());
 };
 
-export interface ModuleLogger {
+interface ModuleLogger {
   debug: (...args: ConsoleLogArgs) => void;
   info: (...args: ConsoleLogArgs) => void;
   warn: (...args: ConsoleWarnArgs) => void;

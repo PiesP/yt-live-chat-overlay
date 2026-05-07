@@ -20,7 +20,7 @@ export const BUTTON_ID = 'yt-chat-overlay-settings-button';
 export const BACKDROP_ID = 'yt-chat-overlay-settings-backdrop';
 export const TITLE_ID = 'yt-chat-overlay-settings-title';
 
-// ── UI value formatting (inlined from settings-ui-format.ts) ────────────────
+// ── UI value formatting ─────────────────────────────────────────────────────
 
 const OUTLINE_LIMITS_KEY: Record<
   Exclude<OutlineSettingKey, 'enabled'>,

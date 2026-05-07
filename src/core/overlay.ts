@@ -15,7 +15,7 @@ import { createLogger } from '@core/logging';
 
 const log = createLogger('Overlay');
 
-export const OVERLAY_ID = 'yt-live-chat-overlay';
+const OVERLAY_ID = 'yt-live-chat-overlay';
 export const OVERLAY_SELECTOR = `#${OVERLAY_ID}`;
 
 const FULLSCREEN_UPDATE_DELAY_MS = 100;
