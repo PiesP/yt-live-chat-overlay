@@ -521,6 +521,12 @@ export const bootstrapChatSession = async (signal?: AbortSignal): Promise<ChatBo
     }
 
     let initialData = tryGetInitialDataFromWindow();
+    // SPA navigation guard: window.ytInitialData may contain homepage/feed
+    // data that has no currentVideoEndpoint. When the returned data does not
+    // belong to a watch page, discard it and fall through to fetchWatchHtml().
+    if (initialData && !extractVideoIdFromInitialData(initialData)) {
+      initialData = null;
+    }
     if (!initialData) {
       initialData = extractInitialDataFromHtml(await ensureHtml());
     }
