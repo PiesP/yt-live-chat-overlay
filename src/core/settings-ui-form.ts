@@ -6,13 +6,14 @@ import {
   OUTLINE_NUMERIC_KEYS,
   OUTLINE_SETTING_KEYS,
   type OutlineSettingKey,
-  outlineFormName,
   ROOT_NUMERIC_KEYS,
   ROOT_SETTING_KEYS,
   type RootNumericSettingKey,
   type RootScalarSettingKey,
   SHOW_AUTHOR_KEYS,
 } from '@core/settings-schema';
+
+const outlineFormName = (key: OutlineSettingKey): string => `outline-${key}`;
 
 // ── Constants shared with SettingsUi ────────────────────────────────────────
 

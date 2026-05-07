@@ -11,8 +11,6 @@ type OutlineSettingKey = keyof OutlineSettings;
 
 export type { OutlineSettingKey, RootNumericSettingKey, RootScalarSettingKey };
 
-export const outlineFormName = (key: OutlineSettingKey): string => `outline-${key}`;
-
 export const AUTHOR_COLOR_KEYS = [
   'normal',
   'member',
