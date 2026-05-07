@@ -11,8 +11,6 @@ const log = createLogger('PageWatcher');
 
 export type PageChangeCallback = () => void;
 
-type HistoryMethodName = 'pushState' | 'replaceState';
-type HistoryStateMethod = typeof history.pushState;
 type NavigationSignalSource = 'pushState' | 'replaceState' | 'popstate' | 'yt-navigate-finish';
 
 const YT_NAVIGATE_FINISH_EVENT = 'yt-navigate-finish';
@@ -40,14 +38,14 @@ export class PageWatcher {
     window.addEventListener(YT_NAVIGATE_FINISH_EVENT, this.handleYouTubeNavigateFinish);
   }
 
-  private patchHistoryMethod(methodName: HistoryMethodName): void {
+  private patchHistoryMethod(methodName: 'pushState' | 'replaceState'): void {
     const original = history[methodName];
     const bound = original.bind(history);
 
-    history[methodName] = ((...args: Parameters<HistoryStateMethod>) => {
+    history[methodName] = ((...args: Parameters<typeof history.pushState>) => {
       bound(...args);
       this.handlePotentialUrlChange(methodName);
-    }) as HistoryStateMethod;
+    }) as typeof history.pushState;
 
     this.historyRestorers.push(() => {
       history[methodName] = original;
