@@ -146,13 +146,8 @@ async function initApp(): Promise<void> {
     log.info('App instance exposed to window.__ytChatOverlay');
   } catch (error) {
     log.error('Fatal error:', error);
-    throw error;
   }
 }
 
-try {
-  initOverlayLogLevel();
-  main();
-} catch (error) {
-  log.error('Failed to start:', error);
-}
+initOverlayLogLevel();
+main();
