@@ -118,8 +118,6 @@ export class Renderer {
   private overlayDimensionsUnsubscribe: (() => void) | null = null;
   private sweepCounter = 0;
   private readonly SWEEP_INTERVAL = 8;
-  /** Tracks whether a processQueue microtask is already pending. */
-  private processQueueScheduled = false;
   /** Ids of messages already enqueued/rendered, for dedup across reconnect/resume. */
   private static readonly SEEN_MESSAGE_IDS_LIMIT = 200;
   private readonly seenMessageIds = new MessageIdRegistry(Renderer.SEEN_MESSAGE_IDS_LIMIT);
@@ -319,15 +317,11 @@ export class Renderer {
     );
     const adjustedDuration = baseDuration / this.playbackRate;
 
-    // Hierarchical delay: group lanes into tiers with base delay + small jitter.
-    let laneDelay: number;
-    if (lane.index <= 3) {
-      laneDelay = Math.floor(Math.random() * 20);
-    } else if (lane.index <= 7) {
-      laneDelay = 30 + Math.floor(Math.random() * 30);
-    } else {
-      laneDelay = 60 + Math.floor(Math.random() * 40);
-    }
+    // Minimal start-position stagger: small per-lane jitter so messages
+    // on different lanes don't begin at identical horizontal offsets.
+    // The maximum delay is kept very low (≤15ms) to minimise the
+    // chat-to-overlay visual gap.
+    const laneDelay = Math.floor(Math.random() * 15);
 
     // ── CSS custom properties drive the @keyframes animation ───────────
     element.style.setProperty('--yt-msg-entry-offset', `${entryOffset}px`);
@@ -363,7 +357,13 @@ export class Renderer {
   }
 
   /**
-   * Add message to render queue
+   * Add message to render queue.
+   *
+   * Processing is triggered synchronously so the message starts flowing
+   * without waiting for a microtask boundary.  To avoid re-entrance and
+   * excessive work, processQueue() clamps the number of messages it
+   * processes per invocation via MAX_MESSAGES_PER_CYCLE and uses the
+   * retry-timer mechanism for remaining items.
    */
   addMessage(message: ChatMessage): void {
     // Dedup across reconnect/resume replays.
@@ -377,15 +377,9 @@ export class Renderer {
 
     this.renderQueue.enqueue(message);
 
-    // Only process queue if not paused — debounce to a single microtask
-    // so that N synchronous addMessage calls schedule only one processQueue
-    // invocation, preventing interleaving with retry timers.
-    if (!this.isPaused && !this.processQueueScheduled) {
-      this.processQueueScheduled = true;
-      queueMicrotask(() => {
-        this.processQueueScheduled = false;
-        this.processQueue();
-      });
+    // Process immediately unless paused.
+    if (!this.isPaused) {
+      this.processQueue();
     }
     // If paused, message stays in queue until resume()
   }
@@ -442,9 +436,10 @@ export class Renderer {
   /**
    * Process messages from the queue immediately.
    *
-   * Displays one message per cycle, respecting lane availability.
-   * Re-schedules itself when there are still messages waiting
-   * or lanes are temporarily busy.
+   * Renders up to MAX_MESSAGES_PER_CYCLE messages per invocation to
+   * reduce per-message timer overhead when lanes are available.  Falls
+   * back to scheduleRetry when the next message is deferred or the
+   * batch limit is reached with more messages waiting.
    */
   private processQueue(): void {
     // Don't process while paused
@@ -464,11 +459,12 @@ export class Renderer {
     this.renderQueue.sortByTimestamp();
 
     const now = Date.now();
-    const queued = this.renderQueue.at(0);
-    if (!queued) return;
+    const nextMessage = this.renderQueue.at(0);
+    if (!nextMessage) return;
 
-    if (queued.nextAttemptAt > now) {
-      this.scheduleRetry(queued.nextAttemptAt - now);
+    // If the front message is still deferring, wait.
+    if (nextMessage.nextAttemptAt > now) {
+      this.scheduleRetry(nextMessage.nextAttemptAt - now);
       return;
     }
 
@@ -477,12 +473,29 @@ export class Renderer {
       this.logPerformanceWarning();
     }
 
-    const result = this.renderMessage(queued.message);
+    // Process up to MAX_MESSAGES_PER_CYCLE messages in a single batch.
+    let processed = 0;
+    const maxPerCycle = RENDERER_LAYOUT.MAX_MESSAGES_PER_CYCLE;
 
-    if (result.status !== 'deferred') {
+    while (this.renderQueue.length > 0 && processed < maxPerCycle) {
+      const queued = this.renderQueue.at(0);
+      if (!queued) break;
+
+      if (queued.nextAttemptAt > Date.now()) {
+        this.scheduleRetry(queued.nextAttemptAt - Date.now());
+        return;
+      }
+
+      const result = this.renderMessage(queued.message);
+
+      if (result.status === 'deferred') {
+        queued.nextAttemptAt = Date.now() + result.waitMs;
+        this.scheduleRetry(result.waitMs);
+        return;
+      }
+
       this.renderQueue.removeAt(0);
-    } else {
-      queued.nextAttemptAt = now + result.waitMs;
+      processed++;
     }
 
     // Schedule next if there are still messages waiting.
