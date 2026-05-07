@@ -22,54 +22,6 @@ interface QueuedMessage {
   nextAttemptAt: number;
 }
 
-/**
- * Bounded message queue that drops oldest entries when full.
- * Used internally by Renderer to buffer messages when lanes are congested.
- */
-class RenderQueue {
-  private items: QueuedMessage[] = [];
-
-  constructor(private readonly maxSize: number) {}
-
-  get length(): number {
-    return this.items.length;
-  }
-
-  at(index: number): QueuedMessage | undefined {
-    return this.items[index];
-  }
-
-  enqueue(message: ChatMessage): void {
-    if (this.items.length >= this.maxSize) {
-      const excess = this.items.length - this.maxSize + 1;
-      this.items.splice(0, excess);
-    }
-
-    this.items.push({
-      message,
-      nextAttemptAt: 0,
-    });
-  }
-
-  removeAt(index: number): void {
-    this.items.splice(index, 1);
-  }
-
-  clear(onDiscard?: (message: ChatMessage) => void): void {
-    if (onDiscard) {
-      for (const item of this.items) {
-        onDiscard(item.message);
-      }
-    }
-
-    this.items = [];
-  }
-
-  sortByTimestamp(): void {
-    this.items.sort((left, right) => left.message.timestamp - right.message.timestamp);
-  }
-}
-
 interface ActiveMessage {
   element: HTMLDivElement;
   /** performance.now() timestamp when the animation was started. */
@@ -116,7 +68,7 @@ export class Renderer {
   private readonly laneAllocator: LaneAllocator;
   private readonly messageBuilder: RendererMessageBuilder;
   private activeMessages: Set<ActiveMessage> = new Set();
-  private readonly renderQueue = new RenderQueue(rendererLayout.queueMaxSize);
+  private readonly pendingQueue: QueuedMessage[] = [];
   private isPaused = false;
   private pausedAt: number | null = null;
   private playbackRate = 1;
@@ -160,7 +112,7 @@ export class Renderer {
       this.removeMessage(active);
     }
 
-    this.renderQueue.clear();
+    this.pendingQueue.length = 0;
     this.seenMessageIds.clear();
   }
 
@@ -176,7 +128,7 @@ export class Renderer {
     // when the player resizes or enters/exits fullscreen.
     this.laneAllocator.reset(dimensions);
 
-    if (!this.isPaused && this.renderQueue.length > 0) {
+    if (!this.isPaused && this.pendingQueue.length > 0) {
       this.processQueue();
     }
   }
@@ -384,7 +336,13 @@ export class Renderer {
       this.seenMessageIds.mark(message.id);
     }
 
-    this.renderQueue.enqueue(message);
+    // Enqueue with bounded capacity — drop oldest when full.
+    if (this.pendingQueue.length >= rendererLayout.queueMaxSize) {
+      const excess = this.pendingQueue.length - rendererLayout.queueMaxSize + 1;
+      this.pendingQueue.splice(0, excess);
+    }
+
+    this.pendingQueue.push({ message, nextAttemptAt: 0 });
 
     // Process immediately unless paused.
     if (!this.isPaused) {
@@ -459,16 +417,16 @@ export class Renderer {
     this.sweepStaleAnimations();
     this.clearRetryTimer();
 
-    if (this.renderQueue.length === 0) {
+    if (this.pendingQueue.length === 0) {
       return;
     }
 
     // Sort by message timestamp so earlier chat messages get rendered
     // before later ones, keeping chat order approximately correct.
-    this.renderQueue.sortByTimestamp();
+    this.pendingQueue.sort((left, right) => left.message.timestamp - right.message.timestamp);
 
     const now = Date.now();
-    const nextMessage = this.renderQueue.at(0);
+    const nextMessage = this.pendingQueue[0];
     if (!nextMessage) return;
 
     // If the front message is still deferring, wait.
@@ -486,8 +444,8 @@ export class Renderer {
     let processed = 0;
     const maxPerCycle = rendererLayout.maxMessagesPerCycle;
 
-    while (this.renderQueue.length > 0 && processed < maxPerCycle) {
-      const queued = this.renderQueue.at(0);
+    while (this.pendingQueue.length > 0 && processed < maxPerCycle) {
+      const queued = this.pendingQueue[0];
       if (!queued) break;
 
       if (queued.nextAttemptAt > Date.now()) {
@@ -503,12 +461,12 @@ export class Renderer {
         return;
       }
 
-      this.renderQueue.removeAt(0);
+      this.pendingQueue.shift();
       processed++;
     }
 
     // Schedule next if there are still messages waiting.
-    if (this.renderQueue.length > 0 && !this.isPaused) {
+    if (this.pendingQueue.length > 0 && !this.isPaused) {
       this.scheduleRetry(rendererLayout.retryDelayMinMs);
     }
   }
@@ -609,7 +567,7 @@ export class Renderer {
       log.debug(
         `No available lane for message (height: ${messageHeight}px). ` +
           `Active messages: ${this.activeMessages.size}, Lanes: ${dimensions.laneCount}, ` +
-          `Queue size: ${this.renderQueue.length}`
+          `Queue size: ${this.pendingQueue.length}`
       );
       return { status: 'dropped' };
     }
