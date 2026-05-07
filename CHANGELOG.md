@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **ObservabilityReporter**: Session metrics tracking, drop rate warnings, and debug overlay for monitoring chat rendering health
+- **BurstDetector**: 4-level burst detection (normal/elevated/high/extreme) with progressive queue management
+- **ProgressiveOverwriteManager**: Queue-depth-based linear force-overwrite (replaces binary on/off behavior)
+- **PerAuthorRateLimiter**: Per-author sliding window rate limiting with priority exemptions and burst awareness
+- **BacklogInjectionController**: Throttled initial backlog injection with statistical sampling, temporal compression, and progress indicator
+- **Settings**: Debug overlay, rate limiting, and backlog control configuration options
+
+### Changed
+
+- `forceOverwriteMs` now scales progressively with queue depth (5→200ms to 20→0ms) instead of binary on/off
+- Retry delay dynamically adjusts based on burst level
+- `MessageCallback` signature updated to support `isInitialSeed` flag for backlog detection
+
 ## [0.21.2] - 2026-05-07
 
 ### Refactored
