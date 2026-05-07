@@ -12,12 +12,6 @@ export interface ElementMatchOptions<T extends Element> {
   predicate?: (element: T) => boolean;
 }
 
-export interface WaitForElementMatchOptions<T extends Element> extends ElementMatchOptions<T> {
-  attempts?: number;
-  intervalMs?: number;
-  signal?: AbortSignal | undefined;
-}
-
 export interface PollForValueOptions {
   attempts?: number;
   intervalMs?: number;
@@ -97,16 +91,6 @@ export const findElementMatch = <T extends Element>(
   return null;
 };
 
-export const waitForElementMatch = async <T extends Element>(
-  selectors: readonly string[],
-  options: WaitForElementMatchOptions<T> = {}
-): Promise<SelectorMatch<T> | null> => {
-  const { root = document, predicate } = options;
-  const matchOptions = predicate ? { root, predicate } : { root };
-
-  return pollForValue(() => findElementMatch<T>(selectors, matchOptions), options);
-};
-
 export const pollForValue = async <T>(
   readValue: () => T | null | undefined,
   options: PollForValueOptions = {}
@@ -144,12 +128,17 @@ export const ensurePlayerPositioning = (element: HTMLElement): void => {
 export const findPlayerContainerElement = async (
   options: { attempts?: number; intervalMs?: number; signal?: AbortSignal | undefined } = {}
 ): Promise<HTMLElement | null> => {
-  const match = await waitForElementMatch<HTMLElement>(PLAYER_CONTAINER_SELECTORS, {
-    attempts: options.attempts ?? DEFAULT_WAIT_ATTEMPTS,
-    intervalMs: options.intervalMs ?? DEFAULT_WAIT_INTERVAL_MS,
-    predicate: isVisibleElement,
-    signal: options.signal,
-  });
+  const match = await pollForValue<SelectorMatch<HTMLElement>>(
+    () =>
+      findElementMatch<HTMLElement>(PLAYER_CONTAINER_SELECTORS, {
+        predicate: isVisibleElement,
+      }),
+    {
+      attempts: options.attempts ?? DEFAULT_WAIT_ATTEMPTS,
+      intervalMs: options.intervalMs ?? DEFAULT_WAIT_INTERVAL_MS,
+      signal: options.signal,
+    }
+  );
 
   if (!match) {
     log.warn('No player container found');
