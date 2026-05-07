@@ -86,6 +86,12 @@ export class Renderer {
   private visibilityHandler: (() => void) | null = null;
   /** Maximum queue size when tab is in background. */
   private static readonly BACKGROUND_QUEUE_MAX = 10;
+  /** 현재 동적 큐 최대 크기 (히스테리시스 캐시) */
+  private queueMaxSizeCache: number = 30;
+  /** 큐 크기 축소를 위한 다운카운트 (2회 연속 언더플로우 필요) */
+  private queueShrinkCountdown: number = 0;
+  /** 언더플로우 감지 시작 시간 */
+  private queueUnderflowStart: number = 0;
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
     this.overlay = overlay;
@@ -560,20 +566,64 @@ export class Renderer {
   }
 
   /**
-   * Compute the effective queue capacity.
+   * Compute the effective queue capacity with exponential backoff and
+   * hysteresis to prevent frequent resizing oscillations.
    *
-   * Under pressure the queue expands up to 2x the base size so bursty
-   * traffic causes fewer drops.  When pressure subsides, new messages
-   * that overflow the base size will still trigger the drop path, but
-   * only after the expanded capacity is genuinely exhausted.
+   * - **Overflow**: When the queue fills past DEFAULT_SIZE, capacity grows
+   *   exponentially (1.5x) up to MAX_SIZE (100).
+   * - **Underflow (Hysteresis)**: When queue length stays below
+   *   (maxSize * UNDERFLOW_RATIO) for at least UNDERFLOW_DURATION_MS and
+   *   the condition holds for SHRINK_REQUIRED_COUNT consecutive cycles,
+   *   capacity shrinks by half (down to MIN_SIZE = 20).
    */
   private getDynamicQueueMaxSize(): number {
-    const base = rendererLayout.queueMaxSize;
-    // Once the queue fills past the base, allow growth to reduce drops.
-    if (this.pendingQueue.length >= base) {
-      return Math.min(base * 2, 60);
+    const DEFAULT_SIZE = 30;
+    const MAX_SIZE = 100;
+    const MIN_SIZE = 20;
+    const UNDERFLOW_RATIO = 0.5; // maxSize의 50% 미만이면 언더플로우
+    const UNDERFLOW_DURATION_MS = 30_000; // 30초 지속 필요
+    const SHRINK_REQUIRED_COUNT = 2; // 2회 연속 조건 충족 필요
+
+    const len = this.pendingQueue.length;
+
+    // --- 확장 (Overflow) ---
+    // 큐가 가득 차면 1.5배씩 지수적으로 확장 (최대 MAX_SIZE)
+    if (len >= DEFAULT_SIZE && this.queueMaxSizeCache < MAX_SIZE) {
+      const newSize = Math.min(MAX_SIZE, Math.round(this.queueMaxSizeCache * 1.5));
+      this.queueMaxSizeCache = newSize;
+      this.queueShrinkCountdown = 0; // 확장 시 축소 카운트 리셋
+      this.queueUnderflowStart = 0; // 언더플로우 감지 리셋
+      return newSize;
     }
-    return base;
+
+    // --- 축소 (Underflow with Hysteresis) ---
+    // 큐 크기가 maxSize의 UNDERFLOW_RATIO 미만이면 축소 가능 상태
+    if (len < this.queueMaxSizeCache * UNDERFLOW_RATIO) {
+      if (this.queueUnderflowStart === 0) {
+        this.queueUnderflowStart = Date.now();
+      }
+
+      const elapsed = Date.now() - this.queueUnderflowStart;
+
+      if (elapsed >= UNDERFLOW_DURATION_MS) {
+        this.queueShrinkCountdown++;
+
+        if (this.queueShrinkCountdown >= SHRINK_REQUIRED_COUNT) {
+          // 2회 연속 조건 충족 → 축소 실행
+          const newSize = Math.max(MIN_SIZE, Math.round(this.queueMaxSizeCache / 2));
+          this.queueMaxSizeCache = newSize;
+          this.queueShrinkCountdown = 0;
+          this.queueUnderflowStart = 0;
+          return newSize;
+        }
+      }
+    } else {
+      // 언더플로우 상태가 아님 → 카운트 리셋
+      this.queueShrinkCountdown = 0;
+      this.queueUnderflowStart = 0;
+    }
+
+    return this.queueMaxSizeCache;
   }
 
   /**
