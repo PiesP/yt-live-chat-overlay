@@ -38,6 +38,8 @@ import {
 const log = createLogger('ChatSource');
 
 const BOOTSTRAP_ATTEMPTS = 4;
+/** Max retries for unavailable bootstrap (SPA navigation timing). */
+const BOOTSTRAP_MAX_UNAVAILABLE_RETRIES = 2;
 const BOOTSTRAP_RETRY_DELAY_MS = 1000;
 const RECENT_MESSAGE_BUFFER_SIZE = 100;
 const RECONNECT_RETRY_DELAY_MS = 1000;
@@ -270,6 +272,7 @@ export abstract class ChatSource {
 
   protected async resolveBootstrap(signal?: AbortSignal): Promise<ChatBootstrapResolution> {
     let lastRetryReason = 'Chat bootstrap did not become available';
+    let unavailableRetries = 0;
 
     for (let attempt = 1; attempt <= BOOTSTRAP_ATTEMPTS; attempt++) {
       throwIfAborted(signal);
@@ -284,10 +287,25 @@ export abstract class ChatSource {
       }
 
       if (result.status === 'unavailable') {
-        return {
-          status: 'unavailable',
-          reason: result.reason,
-        };
+        // SPA navigation: YouTube may not have updated window globals yet.
+        // Retry a few times before giving up permanently.
+        unavailableRetries++;
+        if (unavailableRetries > BOOTSTRAP_MAX_UNAVAILABLE_RETRIES) {
+          return {
+            status: 'unavailable',
+            reason: result.reason,
+          };
+        }
+
+        lastRetryReason = result.reason;
+        log.debug(
+          `Bootstrap unavailable (retry ${unavailableRetries}/${BOOTSTRAP_MAX_UNAVAILABLE_RETRIES}): ${result.reason}`
+        );
+
+        if (attempt < BOOTSTRAP_ATTEMPTS) {
+          await sleep(BOOTSTRAP_RETRY_DELAY_MS, signal);
+        }
+        continue;
       }
 
       lastRetryReason = result.reason;
