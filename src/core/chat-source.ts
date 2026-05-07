@@ -569,6 +569,8 @@ export class LiveChatSource extends ChatSource {
 // ====================================================================
 
 export class ReplayChatSource extends ChatSource {
+  private static readonly MAX_INITIAL_REPLAY_BATCHES = 12;
+
   private replayMode: ReplayMode | null = null;
   private replayPlayerSeekContinuation: InnertubeContinuationData | null = null;
   private replayContinuation: InnertubeContinuationData | null = null;
@@ -655,7 +657,7 @@ export class ReplayChatSource extends ChatSource {
       while (
         this.replayContinuation &&
         this.replayFallbackLastOffsetMs < minimumOffsetMs &&
-        batchesFetched < 12
+        batchesFetched < ReplayChatSource.MAX_INITIAL_REPLAY_BATCHES
       ) {
         throwIfAborted(signal);
         const fetched = await this.fetchNextReplayFallbackBatch(minimumOffsetMs, signal);
