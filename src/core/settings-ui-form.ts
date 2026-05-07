@@ -270,7 +270,11 @@ export class SettingsUiForm {
     for (const key of AUTHOR_COLOR_KEYS) {
       grid.append(
         this.createGridLabel(this.formatAuthorLabel(key)),
-        this.createColorInput(`color-${key}`),
+        this.createInput({
+          type: 'color',
+          name: `color-${key}`,
+          className: 'yt-chat-overlay-author-grid-color',
+        }),
         this.createGridCheckbox(`showAuthor-${key}`)
       );
     }
@@ -388,7 +392,7 @@ export class SettingsUiForm {
     label.className = 'yt-chat-overlay-settings-enabled';
     const text = document.createElement('span');
     text.textContent = 'Overlay Enabled';
-    const input = this.createInput('checkbox', 'enabled');
+    const input = this.createInput({ type: 'checkbox', name: 'enabled' });
     label.append(text, input);
     return label;
   }
@@ -398,7 +402,7 @@ export class SettingsUiForm {
     name: RootScalarSettingKey,
     title?: string
   ): HTMLLabelElement {
-    const input = this.createInput('number', name);
+    const input = this.createInput({ type: 'number', name });
     applyNumberInputAttributes(input, name);
     if (title) {
       input.title = title;
@@ -411,13 +415,13 @@ export class SettingsUiForm {
     key: Exclude<OutlineSettingKey, 'enabled'>
   ): HTMLLabelElement {
     const name = outlineFormName(key);
-    const input = this.createInput('number', name);
+    const input = this.createInput({ type: 'number', name });
     applyNumberInputAttributes(input, key);
     return this.createField(labelText, input);
   }
 
   private createCheckboxField(labelText: string, name: string, title?: string): HTMLLabelElement {
-    const input = this.createInput('checkbox', name);
+    const input = this.createInput({ type: 'checkbox', name });
     if (title) {
       input.title = title;
     }
@@ -450,21 +454,18 @@ export class SettingsUiForm {
     return label;
   }
 
-  private createInput(type: string, name: string): HTMLInputElement {
+  private createInput(props: { type: string; name: string; className?: string }): HTMLInputElement {
     const input = document.createElement('input');
-    input.type = type;
-    input.name = name;
-    return input;
-  }
-
-  private createColorInput(name: string): HTMLInputElement {
-    const input = this.createInput('color', name);
-    input.className = 'yt-chat-overlay-author-grid-color';
+    input.type = props.type;
+    input.name = props.name;
+    if (props.className) {
+      input.className = props.className;
+    }
     return input;
   }
 
   private createGridCheckbox(name: string): HTMLInputElement {
-    const input = this.createInput('checkbox', name);
+    const input = this.createInput({ type: 'checkbox', name });
     input.className = 'yt-chat-overlay-author-grid-checkbox';
     return input;
   }
