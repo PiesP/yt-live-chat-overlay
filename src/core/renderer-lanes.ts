@@ -15,8 +15,6 @@ interface LaneAllocatorOptions {
   readonly globalStaggerMs: number;
   readonly safeDistanceScale: number;
   readonly safeDistanceMin: number;
-  readonly verticalClearTimeMin: number;
-  readonly verticalClearTimeMax: number;
   readonly laneHeightPaddingScale: number;
   readonly laneHeightPaddingMin: number;
 }

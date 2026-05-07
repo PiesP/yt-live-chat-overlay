@@ -103,8 +103,6 @@ export class Renderer {
       globalStaggerMs: rendererLayout.globalStaggerMs,
       safeDistanceScale: rendererLayout.safeDistanceScale,
       safeDistanceMin: rendererLayout.safeDistanceMin,
-      verticalClearTimeMin: rendererLayout.verticalClearTimeMin,
-      verticalClearTimeMax: rendererLayout.verticalClearTimeMax,
       laneHeightPaddingScale: rendererLayout.laneHeightPaddingScale,
       laneHeightPaddingMin: rendererLayout.laneHeightPaddingMin,
     });
