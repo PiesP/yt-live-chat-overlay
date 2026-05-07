@@ -16,10 +16,11 @@ import { RENDERER_STATIC_STYLES } from '@core/renderer-styles';
 
 const log = createLogger('Renderer');
 
-/** @internal Queue entry wrapping a message with retry scheduling metadata. */
+/** @internal Queue entry wrapping a message with retry scheduling metadata and priority. */
 interface QueuedMessage {
   message: ChatMessage;
   nextAttemptAt: number;
+  priority: number;
 }
 
 interface ActiveMessage {
@@ -338,10 +339,20 @@ export class Renderer {
     const queueMaxSize = this.getDynamicQueueMaxSize();
     if (this.pendingQueue.length >= queueMaxSize) {
       const excess = this.pendingQueue.length - queueMaxSize + 1;
+      // Sort by priority ASC (lowest first), then timestamp ASC (oldest first),
+      // and drop the lowest-priority messages.
+      this.pendingQueue.sort(
+        (a, b) => a.priority - b.priority || a.message.timestamp - b.message.timestamp
+      );
       this.pendingQueue.splice(0, excess);
+      // Restore priority DESC + timestamp ASC order for processing.
+      this.pendingQueue.sort(
+        (a, b) => b.priority - a.priority || a.message.timestamp - b.message.timestamp
+      );
     }
 
-    this.pendingQueue.push({ message, nextAttemptAt: 0 });
+    const priority = Renderer.getMessagePriority(message);
+    this.pendingQueue.push({ message, nextAttemptAt: 0, priority });
 
     // Register ID lazily — only after enqueue, so the hot path does not
     // pay for potential Set eviction on every message.
@@ -445,6 +456,35 @@ export class Renderer {
    * that overflow the base size will still trigger the drop path, but
    * only after the expanded capacity is genuinely exhausted.
    */
+  /**
+   * Returns a priority score based on the message kind.
+   * Higher-priority messages are rendered first and survive queue overflow.
+   *
+   * @param message - The chat message to evaluate.
+   * @returns Priority score (superchat=200, membership=100, normal=0).
+   */
+  private static getMessagePriority(message: ChatMessage): number {
+    // Cast to string to support future kind values not yet in ChatMessageKind.
+    switch (message.kind as string) {
+      case 'superchat':
+      case 'superchat-paid-sticker':
+        return 200;
+      case 'membership':
+      case 'membership-gift-receipt':
+        return 100;
+      default:
+        return 0;
+    }
+  }
+
+  /**
+   * Compute the effective queue capacity.
+   *
+   * Under pressure the queue expands up to 2x the base size so bursty
+   * traffic causes fewer drops.  When pressure subsides, new messages
+   * that overflow the base size will still trigger the drop path, but
+   * only after the expanded capacity is genuinely exhausted.
+   */
   private getDynamicQueueMaxSize(): number {
     const base = rendererLayout.queueMaxSize;
     // Once the queue fills past the base, allow growth to reduce drops.
@@ -478,9 +518,12 @@ export class Renderer {
       return;
     }
 
-    // Sort by message timestamp so earlier chat messages get rendered
-    // before later ones, keeping chat order approximately correct.
-    this.pendingQueue.sort((left, right) => left.message.timestamp - right.message.timestamp);
+    // Sort by priority descending (highest first), then by timestamp ascending
+    // so high-priority messages (superchat, membership) render before normal chat.
+    this.pendingQueue.sort(
+      (left, right) =>
+        right.priority - left.priority || left.message.timestamp - right.message.timestamp
+    );
 
     const now = Date.now();
     const nextMessage = this.pendingQueue[0];
