@@ -6,20 +6,14 @@ import type {
   OverlaySettings,
   SuperChatInfo,
 } from '@app-types';
-import {
-  colors,
-  RENDERER_LAYOUT as LAYOUT,
-  parseRgbColor,
-  type RgbColor,
-  spacing,
-} from '@core/design-tokens';
+import { colors, parseRgbColor, type RgbColor, rendererLayout, spacing } from '@core/design-tokens';
 import { normalizeYouTubeImageUrl } from '@core/youtubei-chat';
 
 // ── Canvas text measurement (no DOM reflow) ──────────────────────────────
-let _textMeasureCtx: CanvasRenderingContext2D | null = null;
+let textMeasureCtx: CanvasRenderingContext2D | null = null;
 
 function getTextMeasureCtx(): CanvasRenderingContext2D {
-  if (!_textMeasureCtx) {
+  if (!textMeasureCtx) {
     const canvas = document.createElement('canvas');
     canvas.width = 0;
     canvas.height = 0;
@@ -27,9 +21,9 @@ function getTextMeasureCtx(): CanvasRenderingContext2D {
     if (!ctx) {
       throw new Error('Failed to initialize Canvas 2D context for text measurement');
     }
-    _textMeasureCtx = ctx;
+    textMeasureCtx = ctx;
   }
-  return _textMeasureCtx;
+  return textMeasureCtx;
 }
 
 /**
@@ -138,16 +132,16 @@ export class RendererMessageBuilder {
       };
     }
 
-    const authorFont = `${Math.round(fontSize * LAYOUT.AUTHOR_FONT_SCALE)}px system-ui, -apple-system, sans-serif`;
+    const authorFont = `${Math.round(fontSize * rendererLayout.authorFontScale)}px system-ui, -apple-system, sans-serif`;
     const authorNameWidth = measureTextWidth(message.author, authorFont);
-    const authorSectionWidth = LAYOUT.AUTHOR_PHOTO_SIZE + spacing.sm + authorNameWidth;
+    const authorSectionWidth = rendererLayout.authorPhotoSize + spacing.sm + authorNameWidth;
 
     // With-author container has padding: 8px 12px on each side
     const paddingH = spacing.md * 2;
     const totalWidth = Math.max(authorSectionWidth + paddingH, textWidth + paddingH);
 
-    const photoHeight = LAYOUT.AUTHOR_PHOTO_SIZE;
-    const nameHeight = Math.ceil(fontSize * LAYOUT.AUTHOR_FONT_SCALE * lineHeight);
+    const photoHeight = rendererLayout.authorPhotoSize;
+    const nameHeight = Math.ceil(fontSize * rendererLayout.authorFontScale * lineHeight);
     const authorSectionHeight = Math.max(photoHeight, nameHeight);
     const textHeight = Math.ceil(fontSize * lineHeight);
     const paddingV = spacing.sm * 2; // padding-top + padding-bottom
@@ -185,7 +179,7 @@ export class RendererMessageBuilder {
     const paddingH = spacing.lg * 2;
     const paddingV = spacing.md + spacing.lg;
 
-    const photoHeight = LAYOUT.AUTHOR_PHOTO_SIZE;
+    const photoHeight = rendererLayout.authorPhotoSize;
     const nameHeight = Math.ceil(fontSize * 1.1);
     const infoHeight = Math.max(photoHeight, nameHeight);
     const textHeight = Math.ceil(fontSize * 1.1);
@@ -207,7 +201,7 @@ export class RendererMessageBuilder {
         if (segment.type === 'text') {
           width += measureTextWidth(segment.content, font);
         } else if (segment.type === 'emoji') {
-          width += Math.ceil(fontSize * LAYOUT.EMOJI_SIZE) + 4; // 4px for margin + border
+          width += Math.ceil(fontSize * rendererLayout.emojiSize) + 4; // 4px for margin + border
         }
       }
     } else if (message.text) {
@@ -280,7 +274,7 @@ export class RendererMessageBuilder {
       photoUrl,
       alt,
       'yt-chat-overlay-author-photo',
-      LAYOUT.AUTHOR_PHOTO_SIZE
+      rendererLayout.authorPhotoSize
     );
   }
 
@@ -347,7 +341,7 @@ export class RendererMessageBuilder {
   }
 
   private createEmojiElement(emoji: EmojiInfo): HTMLImageElement | null {
-    const emojiSize = this.getSettings().fontSize * LAYOUT.EMOJI_SIZE;
+    const emojiSize = this.getSettings().fontSize * rendererLayout.emojiSize;
     const options: ImageElementOptions = {
       fallbackText: emoji.fallbackText || '[emoji]',
     };
@@ -371,7 +365,7 @@ export class RendererMessageBuilder {
   }
 
   private createSuperChatSticker(sticker: ImageAsset): HTMLImageElement | null {
-    const stickerSize = this.getSettings().fontSize * LAYOUT.SUPERCHAT_STICKER_SIZE;
+    const stickerSize = this.getSettings().fontSize * rendererLayout.superchatStickerSize;
     const options: ImageElementOptions = {};
     if (sticker.candidateUrl) {
       options.candidateUrl = sticker.candidateUrl;

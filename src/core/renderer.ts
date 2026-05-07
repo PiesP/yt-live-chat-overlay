@@ -6,7 +6,7 @@
  */
 
 import type { ChatMessage, OutlineSettings, OverlayDimensions, OverlaySettings } from '@app-types';
-import { RENDERER_LAYOUT, shadows } from '@core/design-tokens';
+import { rendererLayout, shadows } from '@core/design-tokens';
 import { createLogger } from '@core/logging';
 import { MessageIdRegistry } from '@core/message-id-registry';
 import type { Overlay } from '@core/overlay';
@@ -96,6 +96,15 @@ interface RendererUpdateOptions {
   resetState?: boolean;
 }
 
+/** Tolerance (ms) for sweepStaleAnimations: skip messages whose animation
+ *  has not had enough time to complete, to avoid false positives from
+ *  getAnimations() being unreliable shortly after start. */
+const SWEEP_TOLERANCE_MS = 500;
+
+/** Maximum random delay (ms) added to each message's animation start to
+ *  stagger entries across lanes without creating a visible chat-to-overlay gap. */
+const MAX_ANIMATION_JITTER_MS = 15;
+
 const combineTextShadows = (...shadows: string[]): string => {
   const normalizedShadows = shadows.filter((shadow) => shadow !== '' && shadow !== 'none');
   return normalizedShadows.length > 0 ? normalizedShadows.join(', ') : 'none';
@@ -107,7 +116,7 @@ export class Renderer {
   private readonly laneAllocator: LaneAllocator;
   private readonly messageBuilder: RendererMessageBuilder;
   private activeMessages: Set<ActiveMessage> = new Set();
-  private readonly renderQueue = new RenderQueue(RENDERER_LAYOUT.QUEUE_MAX_SIZE);
+  private readonly renderQueue = new RenderQueue(rendererLayout.queueMaxSize);
   private isPaused = false;
   private pausedAt: number | null = null;
   private playbackRate = 1;
@@ -129,13 +138,13 @@ export class Renderer {
     this.laneAllocator = new LaneAllocator({
       getFontSize: () => this.settings.fontSize,
       getEffectiveSpeedPxPerSec: () => this.getEffectiveSpeedPxPerSec(),
-      globalStaggerMs: RENDERER_LAYOUT.GLOBAL_STAGGER_MS,
-      safeDistanceScale: RENDERER_LAYOUT.SAFE_DISTANCE_SCALE,
-      safeDistanceMin: RENDERER_LAYOUT.SAFE_DISTANCE_MIN,
-      verticalClearTimeMin: RENDERER_LAYOUT.VERTICAL_CLEAR_TIME_MIN,
-      verticalClearTimeMax: RENDERER_LAYOUT.VERTICAL_CLEAR_TIME_MAX,
-      laneHeightPaddingScale: RENDERER_LAYOUT.LANE_HEIGHT_PADDING_SCALE,
-      laneHeightPaddingMin: RENDERER_LAYOUT.LANE_HEIGHT_PADDING_MIN,
+      globalStaggerMs: rendererLayout.globalStaggerMs,
+      safeDistanceScale: rendererLayout.safeDistanceScale,
+      safeDistanceMin: rendererLayout.safeDistanceMin,
+      verticalClearTimeMin: rendererLayout.verticalClearTimeMin,
+      verticalClearTimeMax: rendererLayout.verticalClearTimeMax,
+      laneHeightPaddingScale: rendererLayout.laneHeightPaddingScale,
+      laneHeightPaddingMin: rendererLayout.laneHeightPaddingMin,
     });
     this.laneAllocator.reset(this.overlay.getDimensions());
     this.injectStyles();
@@ -296,8 +305,8 @@ export class Renderer {
 
     // Calculate animation distance and padding
     const exitPadding = Math.max(
-      fontSize * RENDERER_LAYOUT.EXIT_PADDING_SCALE,
-      RENDERER_LAYOUT.EXIT_PADDING_MIN
+      fontSize * rendererLayout.exitPaddingScale,
+      rendererLayout.exitPaddingMin
     );
     const distance = dimensions.width + textWidth + exitPadding;
 
@@ -312,8 +321,8 @@ export class Renderer {
     // Optimized duration for better pacing
     const effectiveSpeedPxPerSec = this.getEffectiveSpeedPxPerSec();
     const baseDuration = Math.max(
-      RENDERER_LAYOUT.DURATION_MIN,
-      Math.min(RENDERER_LAYOUT.DURATION_MAX, (adjustedDistance / effectiveSpeedPxPerSec) * 1000)
+      rendererLayout.durationMin,
+      Math.min(rendererLayout.durationMax, (adjustedDistance / effectiveSpeedPxPerSec) * 1000)
     );
     const adjustedDuration = baseDuration / this.playbackRate;
 
@@ -321,7 +330,7 @@ export class Renderer {
     // on different lanes don't begin at identical horizontal offsets.
     // The maximum delay is kept very low (≤15ms) to minimise the
     // chat-to-overlay visual gap.
-    const laneDelay = Math.floor(Math.random() * 15);
+    const laneDelay = Math.floor(Math.random() * MAX_ANIMATION_JITTER_MS);
 
     // ── CSS custom properties drive the @keyframes animation ───────────
     element.style.setProperty('--yt-msg-entry-offset', `${entryOffset}px`);
@@ -405,7 +414,7 @@ export class Renderer {
         // can be unreliable during the animation-delay period and shortly
         // after start across different browsers.
         const elapsed = performance.now() - active.startTime;
-        const minLifetimeMs = active.baseDuration + 500;
+        const minLifetimeMs = active.baseDuration + SWEEP_TOLERANCE_MS;
         if (elapsed < minLifetimeMs) return;
 
         const animations = active.element.getAnimations();
@@ -475,7 +484,7 @@ export class Renderer {
 
     // Process up to MAX_MESSAGES_PER_CYCLE messages in a single batch.
     let processed = 0;
-    const maxPerCycle = RENDERER_LAYOUT.MAX_MESSAGES_PER_CYCLE;
+    const maxPerCycle = rendererLayout.maxMessagesPerCycle;
 
     while (this.renderQueue.length > 0 && processed < maxPerCycle) {
       const queued = this.renderQueue.at(0);
@@ -500,7 +509,7 @@ export class Renderer {
 
     // Schedule next if there are still messages waiting.
     if (this.renderQueue.length > 0 && !this.isPaused) {
-      this.scheduleRetry(RENDERER_LAYOUT.RETRY_DELAY_MIN_MS);
+      this.scheduleRetry(rendererLayout.retryDelayMinMs);
     }
   }
 
@@ -518,8 +527,8 @@ export class Renderer {
     if (this.isPaused) return;
 
     const delay = Math.max(
-      RENDERER_LAYOUT.RETRY_DELAY_MIN_MS,
-      Math.min(waitMs, RENDERER_LAYOUT.RETRY_DELAY_MAX_MS)
+      rendererLayout.retryDelayMinMs,
+      Math.min(waitMs, rendererLayout.retryDelayMaxMs)
     );
     this.clearRetryTimer();
 

@@ -1,7 +1,7 @@
 import {
   borderRadius,
   colors,
-  RENDERER_LAYOUT,
+  rendererLayout,
   rgba,
   shadows,
   spacing,
@@ -35,13 +35,13 @@ export const RENDERER_STATIC_STYLES = `
     display: flex;
     align-items: center;
     gap: ${spacing.sm}px;
-    font-size: ${RENDERER_LAYOUT.AUTHOR_FONT_SCALE}em;
+    font-size: ${rendererLayout.authorFontScale}em;
     opacity: 0.95;
   }
 
   .yt-chat-overlay-author-photo {
-    width: ${RENDERER_LAYOUT.AUTHOR_PHOTO_SIZE}px;
-    height: ${RENDERER_LAYOUT.AUTHOR_PHOTO_SIZE}px;
+    width: ${rendererLayout.authorPhotoSize}px;
+    height: ${rendererLayout.authorPhotoSize}px;
     border-radius: ${borderRadius.full};
     flex-shrink: 0;
     box-shadow: ${shadows.box.sm};

@@ -89,26 +89,26 @@ export const zIndex = {
  * Placed here to avoid circular imports between renderer.ts ↔ renderer-styles.ts
  * and renderer.ts ↔ renderer-message-builder.ts.
  */
-export const RENDERER_LAYOUT = {
-  AUTHOR_PHOTO_SIZE: 24,
-  AUTHOR_FONT_SCALE: 0.85,
-  EMOJI_SIZE: 1.2,
-  SUPERCHAT_STICKER_SIZE: 2,
-  EXIT_PADDING_MIN: 100,
-  EXIT_PADDING_SCALE: 3,
-  DURATION_MIN: 5000,
-  DURATION_MAX: 12000,
-  GLOBAL_STAGGER_MS: 60,
-  SAFE_DISTANCE_SCALE: 0.3,
-  SAFE_DISTANCE_MIN: 6,
-  VERTICAL_CLEAR_TIME_MIN: 100,
-  VERTICAL_CLEAR_TIME_MAX: 80,
-  LANE_HEIGHT_PADDING_SCALE: 0.15,
-  LANE_HEIGHT_PADDING_MIN: 2,
-  RETRY_DELAY_MIN_MS: 4,
-  RETRY_DELAY_MAX_MS: 800,
-  QUEUE_MAX_SIZE: 30,
-  MAX_MESSAGES_PER_CYCLE: 5,
+export const rendererLayout = {
+  authorPhotoSize: 24,
+  authorFontScale: 0.85,
+  emojiSize: 1.2,
+  superchatStickerSize: 2,
+  exitPaddingMin: 100,
+  exitPaddingScale: 3,
+  durationMin: 5000,
+  durationMax: 12000,
+  globalStaggerMs: 60,
+  safeDistanceScale: 0.3,
+  safeDistanceMin: 6,
+  verticalClearTimeMin: 100,
+  verticalClearTimeMax: 80,
+  laneHeightPaddingScale: 0.15,
+  laneHeightPaddingMin: 2,
+  retryDelayMinMs: 4,
+  retryDelayMaxMs: 800,
+  queueMaxSize: 30,
+  maxMessagesPerCycle: 5,
 } as const;
 
 export function parseRgbColor(colorString: string): RgbColor | null {
