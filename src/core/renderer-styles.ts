@@ -20,8 +20,6 @@ export const RENDERER_STATIC_STYLES = `
     color: ${colors.ui.text};
     pointer-events: none;
     will-change: transform;
-    animation-timing-function: linear;
-    animation-fill-mode: forwards;
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -233,7 +231,7 @@ export const RENDERER_STATIC_STYLES = `
     animation-duration: var(--yt-msg-duration, 8s);
     animation-delay: var(--yt-msg-delay, 0ms);
     animation-timing-function: linear;
-    animation-fill-mode: forwards;
+    animation-fill-mode: both;
     animation-play-state: var(--yt-msg-play-state, running);
   }
 
