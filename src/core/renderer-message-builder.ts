@@ -9,6 +9,11 @@ import type {
 import { colors, parseRgbColor, type RgbColor, rendererLayout, spacing } from '@core/design-tokens';
 import { normalizeYouTubeImageUrl } from '@core/youtubei-chat';
 
+/** Super Chat card minimum width in pixels (for layout estimation) */
+const SUPERCHAT_CARD_MIN_WIDTH = 280;
+/** Super Chat card maximum width in pixels (for layout estimation) */
+const SUPERCHAT_CARD_MAX_WIDTH = 640;
+
 // ── Canvas text measurement (no DOM reflow) ──────────────────────────────
 let textMeasureCtx: CanvasRenderingContext2D | null = null;
 
@@ -165,7 +170,10 @@ export class RendererMessageBuilder {
     const headerHeight = Math.ceil(fontSize * 0.85) + spacing.sm * 2;
 
     return {
-      width: Math.max(280, Math.min(640, textWidth + paddingH)),
+      width: Math.max(
+        SUPERCHAT_CARD_MIN_WIDTH,
+        Math.min(SUPERCHAT_CARD_MAX_WIDTH, textWidth + paddingH)
+      ),
       height: headerHeight + spacing.sm + textHeight + paddingV,
     };
   }
