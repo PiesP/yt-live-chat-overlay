@@ -211,12 +211,40 @@ const readYtcfg = (): JsonObject | null => {
   return isRecord(data) ? data : null;
 };
 
+/**
+ * Attempt to extract ytInitialData from the current page without fetching
+ * the watch page HTML. Checks:
+ *   1. `window.ytInitialData` global variable
+ *   2. DOM `<script id="initial-data">` tag content
+ */
+const tryGetInitialDataFromWindow = (): JsonObject | null => {
+  if (isRecord(window.ytInitialData)) {
+    return window.ytInitialData;
+  }
+
+  const script = document.getElementById('initial-data') as HTMLScriptElement | null;
+  if (script?.textContent) {
+    try {
+      const parsed = JSON.parse(script.textContent);
+      if (isRecord(parsed)) {
+        return parsed;
+      }
+    } catch {
+      /* ignore parse errors from malformed script content */
+    }
+  }
+
+  return null;
+};
 const fetchWatchHtml = async (videoId: string, signal?: AbortSignal): Promise<string> => {
   const response = await fetch(buildWatchUrl(videoId), {
     credentials: 'include',
     cache: 'no-store',
     mode: 'same-origin',
     referrerPolicy: 'origin-when-cross-origin',
+    headers: {
+      accept: 'text/html,application/json',
+    },
     signal: signal ?? null,
   });
 
@@ -479,7 +507,10 @@ export const bootstrapChatSession = async (signal?: AbortSignal): Promise<ChatBo
       };
     }
 
-    const initialData = extractInitialDataFromHtml(await ensureHtml());
+    let initialData = tryGetInitialDataFromWindow();
+    if (!initialData) {
+      initialData = extractInitialDataFromHtml(await ensureHtml());
+    }
     if (!initialData) {
       return {
         status: 'retryable',

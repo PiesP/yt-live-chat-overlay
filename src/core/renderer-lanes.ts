@@ -6,6 +6,9 @@ export interface LanePlacement {
   waitMs: number;
 }
 
+/** Threshold (ms) above which lane waiting is considered "congested". */
+const LANE_CONGESTION_THRESHOLD_MS = 100;
+
 interface LaneAllocatorOptions {
   readonly getFontSize: () => number;
   readonly getEffectiveSpeedPxPerSec: () => number;
@@ -44,7 +47,22 @@ export class LaneAllocator {
     return this.lanes.length === 0;
   }
 
-  findPlacement(messageHeight: number, dimensions: OverlayDimensions): LanePlacement | null {
+  /**
+   * Find placement for a message with the given height.
+   *
+   * @param messageHeight  Estimated pixel height of the message.
+   * @param dimensions     Current overlay dimensions.
+   * @param forceOverwriteMs  Optional threshold (ms). When provided and the
+   *   best placement's wait time equals or exceeds this value, the wait is
+   *   clamped to zero so the caller can render immediately by overwriting
+   *   the lane's existing occupant.  The old CSS animation continues
+   *   independently — only the lane allocator's tracking is reset.
+   */
+  findPlacement(
+    messageHeight: number,
+    dimensions: OverlayDimensions,
+    forceOverwriteMs?: number
+  ): LanePlacement | null {
     const now = Date.now();
     const requiredLanes = this.calculateRequiredLanes(messageHeight, dimensions.laneHeight);
     if (requiredLanes > this.lanes.length) {
@@ -106,10 +124,28 @@ export class LaneAllocator {
     // message starts scanning from a different position.
     this.nextLaneIndex = (bestStartIndex + 1) % (maxStartIndex + 1);
 
+    const waitMs = Math.max(0, Math.ceil(bestReadyTime - now));
+
+    // ── Force-overwrite fast path ────────────────────────────────────────
+    // When the queue is congested (forceOverwriteMs set and wait exceeds
+    // threshold), return the placement with waitMs=0 so the caller renders
+    // immediately.  This overwrites the lane's occupant in the allocator's
+    // tracking state — the old CSS animation keeps running independently.
+    if (
+      forceOverwriteMs !== undefined &&
+      waitMs >= Math.max(forceOverwriteMs, LANE_CONGESTION_THRESHOLD_MS)
+    ) {
+      return {
+        lane: chosenLane,
+        laneSpan: requiredLanes,
+        waitMs: 0,
+      };
+    }
+
     return {
       lane: chosenLane,
       laneSpan: requiredLanes,
-      waitMs: Math.max(0, Math.ceil(bestReadyTime - now)),
+      waitMs,
     };
   }
 

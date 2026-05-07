@@ -23,5 +23,9 @@ declare global {
   interface Window {
     /** Debug handle exposed by the overlay script (available in DevTools). */
     __ytChatOverlay: YtChatOverlayDebugHandle | undefined;
+    /** YouTube initial page data (available on watch pages). */
+    ytInitialData?: Record<string, unknown>;
+    /** YouTube page configuration object (available on YouTube pages). */
+    ytcfg?: { data_?: Record<string, unknown> };
   }
 }

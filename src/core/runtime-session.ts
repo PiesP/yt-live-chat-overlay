@@ -160,12 +160,25 @@ export class RuntimeSession {
     const chatSource = await ChatSource.create(() => this.settings, signal);
     this.chatSource = chatSource;
 
-    return chatSource.start((message) => {
+    return chatSource.start((messages) => {
       if (this.disposed) {
         return;
       }
 
-      this.renderer?.addMessage(message);
+      const renderer = this.renderer;
+      if (!renderer) {
+        return;
+      }
+
+      if (Array.isArray(messages)) {
+        // Batch path: all messages arrive in a single callback invocation,
+        // reducing per-message function-call overhead under high throughput.
+        for (const msg of messages) {
+          renderer.addMessage(msg);
+        }
+      } else {
+        renderer.addMessage(messages);
+      }
     }, signal);
   }
 

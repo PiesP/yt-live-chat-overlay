@@ -80,7 +80,11 @@ interface ReplayBufferedMessage {
   offsetMs: number;
 }
 
-export type MessageCallback = (message: ChatMessage) => void;
+/**
+ * Accepts either a single message (for individual emission like replay)
+ * or an array of messages (for batch emission like live polling).
+ */
+export type MessageCallback = (messages: ChatMessage | ChatMessage[]) => void;
 export type ChatSourceStartStatus = 'started' | 'retryable' | 'unavailable';
 
 // ====================================================================
@@ -212,6 +216,9 @@ export abstract class ChatSource {
     }
   }
 
+  /**
+   * Emit a single message — used by replay flush which delivers one-at-a-time.
+   */
   protected emitMessage(message: ChatMessage): void {
     if (!this.callback) {
       return;
@@ -219,6 +226,22 @@ export abstract class ChatSource {
 
     this.rememberMessage(message);
     this.callback(message);
+  }
+
+  /**
+   * Batch-emit messages in a single callback invocation.
+   * All messages are remembered individually, then delivered as an array
+   * to reduce per-message function-call overhead under high throughput.
+   */
+  protected emitBatch(messages: ChatMessage[]): void {
+    if (!this.callback || messages.length === 0) {
+      return;
+    }
+
+    for (const message of messages) {
+      this.rememberMessage(message);
+    }
+    this.callback(messages);
   }
 
   protected async requestPayload<TCallArgs extends unknown[]>(
@@ -382,6 +405,8 @@ export abstract class ChatSource {
 
 export class LiveChatSource extends ChatSource {
   private liveContinuation: InnertubeContinuationData | null = null;
+  private lastActionsCount = 0;
+  private consecutiveErrors = 0;
 
   protected seedCurrentSession(signal?: AbortSignal): Promise<boolean> {
     return this.initializeLiveSession(signal);
@@ -394,6 +419,8 @@ export class LiveChatSource extends ChatSource {
   protected resetSessionState(): void {
     super.resetSessionState();
     this.liveContinuation = null;
+    this.lastActionsCount = 0;
+    this.consecutiveErrors = 0;
   }
 
   // ---- Live-specific ----
@@ -421,9 +448,32 @@ export class LiveChatSource extends ChatSource {
     }
   }
 
+  private calculateAdaptiveDelay(timeoutMs: number): number {
+    if (this.consecutiveErrors > 0) {
+      // Error backoff: baseDelay * 2^errors (max 10000ms)
+      const baseDelay = timeoutMs > 0 ? timeoutMs : LIVE_POLL_FALLBACK_DELAY_MS;
+      return Math.min(10_000, baseDelay * 2 ** this.consecutiveErrors);
+    }
+
+    const baseDelay = timeoutMs > 0 ? timeoutMs : LIVE_POLL_FALLBACK_DELAY_MS;
+    let delay: number;
+
+    if (this.lastActionsCount >= 10) {
+      delay = baseDelay * 0.5; // High activity — poll more frequently
+    } else if (this.lastActionsCount >= 3) {
+      delay = baseDelay * 0.75; // Moderate activity — slightly faster
+    } else {
+      delay = baseDelay; // Low or no activity — default interval
+    }
+
+    // Hard limits: 2000ms – 5000ms
+    return Math.max(2000, Math.min(5000, delay));
+  }
+
   private async runLiveLoop(signal?: AbortSignal): Promise<void> {
     while (!signal?.aborted) {
-      const delayMs = this.liveContinuation?.timeoutMs ?? LIVE_POLL_FALLBACK_DELAY_MS;
+      const timeoutMs = this.liveContinuation?.timeoutMs ?? LIVE_POLL_FALLBACK_DELAY_MS;
+      const delayMs = this.calculateAdaptiveDelay(timeoutMs);
       await sleep(delayMs, signal);
 
       throwIfAborted(signal);
@@ -446,6 +496,8 @@ export class LiveChatSource extends ChatSource {
         if (isAbortError(error)) {
           throw error;
         }
+
+        this.consecutiveErrors += 1;
 
         if (error instanceof YoutubeInnertubeRequestError) {
           log.warn('Live poll request failed:', {
@@ -470,10 +522,22 @@ export class LiveChatSource extends ChatSource {
 
   private handleLivePayload(payload: LiveChatPayload): void {
     const events = this.parser.extractChatEvents(payload.actions);
-    for (const event of events) {
-      this.emitMessage(event.message);
+
+    // Batch-emit all messages in a single callback invocation to reduce
+    // per-message function-call overhead under high throughput.
+    if (events.length > 0) {
+      const messages: ChatMessage[] = [];
+      for (let index = 0; index < events.length; index++) {
+        const event = events[index];
+        if (event) {
+          messages.push(event.message);
+        }
+      }
+      this.emitBatch(messages);
     }
 
+    this.lastActionsCount = payload.actions.length;
+    this.consecutiveErrors = 0;
     this.liveContinuation = extractNextLiveContinuation(payload.continuations);
   }
 

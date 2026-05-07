@@ -322,27 +322,32 @@ export class Renderer {
    *
    * Processing is triggered synchronously so the message starts flowing
    * without waiting for a microtask boundary.  To avoid re-entrance and
-   * excessive work, processQueue() clamps the number of messages it
-   * processes per invocation via MAX_MESSAGES_PER_CYCLE and uses the
-   * retry-timer mechanism for remaining items.
+   * excessive work, processQueue() dynamically sizes the batch per cycle
+   * based on queue pressure and uses the retry-timer mechanism for
+   * remaining items.
    */
   addMessage(message: ChatMessage): void {
-    // Dedup across reconnect/resume replays.
+    // Dedup fast path: quick Set.has() check only.
     if (message.id && this.seenMessageIds.has(message.id)) {
       return;
     }
 
-    if (message.id) {
-      this.seenMessageIds.mark(message.id);
-    }
-
-    // Enqueue with bounded capacity — drop oldest when full.
-    if (this.pendingQueue.length >= rendererLayout.queueMaxSize) {
-      const excess = this.pendingQueue.length - rendererLayout.queueMaxSize + 1;
+    // Enqueue with dynamically bounded capacity — drop oldest when full.
+    // Under high load the queue grows up to 2x the base size so fewer
+    // messages are dropped during bursts.
+    const queueMaxSize = this.getDynamicQueueMaxSize();
+    if (this.pendingQueue.length >= queueMaxSize) {
+      const excess = this.pendingQueue.length - queueMaxSize + 1;
       this.pendingQueue.splice(0, excess);
     }
 
     this.pendingQueue.push({ message, nextAttemptAt: 0 });
+
+    // Register ID lazily — only after enqueue, so the hot path does not
+    // pay for potential Set eviction on every message.
+    if (message.id) {
+      this.seenMessageIds.mark(message.id);
+    }
 
     // Process immediately unless paused.
     if (!this.isPaused) {
@@ -401,12 +406,64 @@ export class Renderer {
   }
 
   /**
+   * Compute the maximum number of messages to process per cycle.
+   *
+   * Scales with queue pressure so bursts are cleared faster:
+   * - queue >= 20 -> base x 3 (15)
+   * - queue >= 10 -> base x 2 (10)
+   * - otherwise  -> base (5)
+   */
+  private getDynamicMaxPerCycle(): number {
+    const base = rendererLayout.maxMessagesPerCycle;
+    const queueLen = this.pendingQueue.length;
+    if (queueLen >= 20) return base * 3;
+    if (queueLen >= 10) return base * 2;
+    return base;
+  }
+
+  /**
+   * Compute the retry delay based on queue pressure.
+   *
+   * When the queue is deep, reduce the gap between processQueue
+   * invocations so the backlog drains faster:
+   * - queue >= 15 ->  0ms  (immediate retry)
+   * - queue >=  5 ->  2ms  (half the min delay)
+   * - otherwise  ->  4ms  (default min delay)
+   */
+  private getDynamicRetryDelay(): number {
+    const queueLen = this.pendingQueue.length;
+    if (queueLen >= 15) return 0;
+    if (queueLen >= 5) return Math.max(1, rendererLayout.retryDelayMinMs / 2);
+    return rendererLayout.retryDelayMinMs;
+  }
+
+  /**
+   * Compute the effective queue capacity.
+   *
+   * Under pressure the queue expands up to 2x the base size so bursty
+   * traffic causes fewer drops.  When pressure subsides, new messages
+   * that overflow the base size will still trigger the drop path, but
+   * only after the expanded capacity is genuinely exhausted.
+   */
+  private getDynamicQueueMaxSize(): number {
+    const base = rendererLayout.queueMaxSize;
+    // Once the queue fills past the base, allow growth to reduce drops.
+    if (this.pendingQueue.length >= base) {
+      return Math.min(base * 2, 60);
+    }
+    return base;
+  }
+
+  /**
    * Process messages from the queue immediately.
    *
-   * Renders up to MAX_MESSAGES_PER_CYCLE messages per invocation to
+   * Renders up to getDynamicMaxPerCycle() messages per invocation to
    * reduce per-message timer overhead when lanes are available.  Falls
    * back to scheduleRetry when the next message is deferred or the
    * batch limit is reached with more messages waiting.
+   *
+   * The retry delay is adjusted dynamically based on queue pressure
+   * so the backlog drains faster under high load.
    */
   private processQueue(): void {
     // Don't process while paused
@@ -440,9 +497,12 @@ export class Renderer {
       this.logPerformanceWarning();
     }
 
-    // Process up to MAX_MESSAGES_PER_CYCLE messages in a single batch.
+    // Dynamic batch size based on queue pressure.
     let processed = 0;
-    const maxPerCycle = rendererLayout.maxMessagesPerCycle;
+    const maxPerCycle = this.getDynamicMaxPerCycle();
+    // When queue is deep (>=10), allow lane overwrite for congested lanes
+    // so the backlog drains even when all visible lanes are occupied.
+    const forceOverwriteMs = this.pendingQueue.length >= 10 ? 100 : undefined;
 
     while (this.pendingQueue.length > 0 && processed < maxPerCycle) {
       const queued = this.pendingQueue[0];
@@ -453,7 +513,7 @@ export class Renderer {
         return;
       }
 
-      const result = this.renderMessage(queued.message);
+      const result = this.renderMessage(queued.message, forceOverwriteMs);
 
       if (result.status === 'deferred') {
         queued.nextAttemptAt = Date.now() + result.waitMs;
@@ -467,7 +527,7 @@ export class Renderer {
 
     // Schedule next if there are still messages waiting.
     if (this.pendingQueue.length > 0 && !this.isPaused) {
-      this.scheduleRetry(rendererLayout.retryDelayMinMs);
+      this.scheduleRetry(this.getDynamicRetryDelay());
     }
   }
 
@@ -547,8 +607,11 @@ export class Renderer {
    *
    * Uses Canvas-based dimension estimation (no DOM reflow) and
    * CSS animation (@keyframes) instead of element.animate().
+   *
+   * @param forceOverwriteMs - When set, lanes with a wait >= this value
+   *   are force-assigned (overwriting the occupant) to drain a deep queue.
    */
-  private renderMessage(message: ChatMessage): RenderResult {
+  private renderMessage(message: ChatMessage, forceOverwriteMs?: number): RenderResult {
     const renderContext = this.getRenderContext();
     if (!renderContext) {
       log.debug('Cannot render: container or dimensions missing');
@@ -562,7 +625,7 @@ export class Renderer {
     const messageHeight = estimated.height;
 
     // ── Step 2: Find available lane ────────────────────────────────────
-    const placement = this.laneAllocator.findPlacement(messageHeight, dimensions);
+    const placement = this.laneAllocator.findPlacement(messageHeight, dimensions, forceOverwriteMs);
     if (placement === null) {
       log.debug(
         `No available lane for message (height: ${messageHeight}px). ` +
