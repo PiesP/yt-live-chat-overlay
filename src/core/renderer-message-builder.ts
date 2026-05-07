@@ -35,7 +35,7 @@ function getTextMeasureCtx(): CanvasRenderingContext2D {
  * Measure the pixel width of a text string using Canvas measureText().
  * Font string must match the CSS `font` shorthand used at render time.
  */
-export function measureTextWidth(text: string, font: string): number {
+function measureTextWidth(text: string, font: string): number {
   const ctx = getTextMeasureCtx();
   ctx.font = font;
   const metrics = ctx.measureText(text);
