@@ -350,11 +350,10 @@ const extractYtcfgFromHtml = (html: string): JsonObject | null =>
  * Extract videoId from ytInitialData structure.
  * YouTube stores the current video's ID in currentVideoEndpoint.watchEndpoint.videoId.
  */
-const extractVideoIdFromInitialData = (initialData: JsonObject): string | null => {
+const extractVideoIdFromInitialData = (initialData: JsonObject): string | null | undefined => {
   const watchEndpoint = getNestedRecord(initialData, ['currentVideoEndpoint', 'watchEndpoint']);
   if (!watchEndpoint) return null;
-  const videoId = getString(watchEndpoint.videoId);
-  return videoId || null;
+  return getString(watchEndpoint.videoId);
 };
 
 const findLiveChatRenderer = (initialData: JsonObject): JsonObject | null => {
