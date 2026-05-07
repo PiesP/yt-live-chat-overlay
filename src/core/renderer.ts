@@ -86,11 +86,11 @@ export class Renderer {
   private visibilityHandler: (() => void) | null = null;
   /** Maximum queue size when tab is in background. */
   private static readonly BACKGROUND_QUEUE_MAX = 10;
-  /** 현재 동적 큐 최대 크기 (히스테리시스 캐시) */
+  /** Current dynamic queue maximum size (hysteresis cache) */
   private queueMaxSizeCache: number = 30;
-  /** 큐 크기 축소를 위한 다운카운트 (2회 연속 언더플로우 필요) */
+  /** Downcounter for queue shrinkage (requires 2 consecutive underflow conditions) */
   private queueShrinkCountdown: number = 0;
-  /** 언더플로우 감지 시작 시간 */
+  /** Timestamp when queue underflow was first detected */
   private queueUnderflowStart: number = 0;
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
@@ -444,10 +444,10 @@ export class Renderer {
     const len = this.pendingQueue.length;
     const activeCount = this.activeMessages.size;
     const maxConcurrent = this.getMaxConcurrentMessages();
-    // 활성 메시지 밀도 (0.0 ~ 1.0)
+    // Active message utilization ratio (0.0 ~ 1.0)
     const utilization = maxConcurrent > 0 ? activeCount / maxConcurrent : 0;
 
-    // 기본 배치 크기는 큐 깊이 기반 (5단계)
+    // Base batch size based on queue depth (5 levels)
     let base: number;
     if (len >= 25) {
       base = 20;
@@ -461,14 +461,14 @@ export class Renderer {
       base = 4;
     }
 
-    // utilization이 높으면(화면이 꽉 찼으면) 배치 크기 감소
-    // 새 메시지를 추가해도 레인을 찾지 못하고 deferred될 가능성이 높기 때문
+    // When utilization is high (screen is congested), reduce batch size
+    // because new messages are likely to be deferred due to no available lanes
     if (utilization > 0.8) {
-      // 화면이 거의 꽉 참 → 배치 크기를 줄여 deferred/failed 재시도 부하 감소
+      // Screen nearly full → reduce batch size to lower deferred/failed retry load
       return Math.max(3, Math.floor(base * 0.6));
     }
     if (utilization > 0.5) {
-      // 화면이 어느 정도 참 → 약간 감소
+      // Screen moderately full → mildly reduce
       return Math.max(4, Math.floor(base * 0.8));
     }
 
@@ -476,18 +476,18 @@ export class Renderer {
   }
 
   /**
-   * 최대 동시 메시지 수를 추정합니다.
-   * 레인 수를 기반으로 각 레인이 동시에 1~2개 메시지를 처리할 수 있다고 가정합니다.
+   * Estimates the maximum number of concurrent messages.
+   * Based on lane count, assuming each lane can handle 1-2 messages simultaneously.
    */
   private getMaxConcurrentMessages(): number {
     const laneCount = this.laneAllocator.getLaneCount();
-    // 각 레인은 최대 2개 메시지를 동시에 처리할 수 있다고 가정 (화면에 표시 중 + 대기)
+    // Assume each lane handles up to 2 concurrent messages (displayed + pending)
     return laneCount * 2;
   }
 
   /**
-   * 현재 메시지 밀도에 기반한 동적 속도 배수를 반환합니다.
-   * 밀도가 높을수록 속도가 빨라져 화면 혼잡을 완화합니다.
+   * Returns a dynamic speed multiplier based on current message density.
+   * Higher density increases speed to alleviate on-screen congestion.
    */
   private getDynamicSpeedMultiplier(): number {
     const activeCount = this.activeMessages.size;
@@ -498,17 +498,17 @@ export class Renderer {
 
     const density = activeCount / maxConcurrent;
 
-    // 밀도가 임계값 이하면 기본 속도
+    // Below threshold density, use base speed
     if (density <= rendererLayout.speedDensityThresholdLow) {
       return rendererLayout.speedDensityLow;
     }
 
-    // 밀도가 임계값 이상이면 최대 속도
+    // Above threshold density, use max speed
     if (density >= rendererLayout.speedDensityThresholdHigh) {
       return rendererLayout.speedDensityHigh;
     }
 
-    // 밀도에 따라 선형 보간 (0.8 ~ 1.5)
+    // Linear interpolation based on density (0.8 ~ 1.5)
     const t =
       (density - rendererLayout.speedDensityThresholdLow) /
       (rendererLayout.speedDensityThresholdHigh - rendererLayout.speedDensityThresholdLow);
@@ -578,24 +578,24 @@ export class Renderer {
     const DEFAULT_SIZE = 30;
     const MAX_SIZE = 100;
     const MIN_SIZE = 20;
-    const UNDERFLOW_RATIO = 0.5; // maxSize의 50% 미만이면 언더플로우
-    const UNDERFLOW_DURATION_MS = 30_000; // 30초 지속 필요
-    const SHRINK_REQUIRED_COUNT = 2; // 2회 연속 조건 충족 필요
+    const UNDERFLOW_RATIO = 0.5; // Underflow when below 50% of maxSize
+    const UNDERFLOW_DURATION_MS = 30_000; // Requires 30s sustained duration
+    const SHRINK_REQUIRED_COUNT = 2; // Requires 2 consecutive condition matches
 
     const len = this.pendingQueue.length;
 
-    // --- 확장 (Overflow) ---
-    // 큐가 가득 차면 1.5배씩 지수적으로 확장 (최대 MAX_SIZE)
+    // --- Expansion (Overflow) ---
+    // When queue is full, expand exponentially by 1.5x (up to MAX_SIZE)
     if (len >= DEFAULT_SIZE && this.queueMaxSizeCache < MAX_SIZE) {
       const newSize = Math.min(MAX_SIZE, Math.round(this.queueMaxSizeCache * 1.5));
       this.queueMaxSizeCache = newSize;
-      this.queueShrinkCountdown = 0; // 확장 시 축소 카운트 리셋
-      this.queueUnderflowStart = 0; // 언더플로우 감지 리셋
+      this.queueShrinkCountdown = 0; // Reset shrinkage counter on expansion
+      this.queueUnderflowStart = 0; // Reset underflow detection
       return newSize;
     }
 
-    // --- 축소 (Underflow with Hysteresis) ---
-    // 큐 크기가 maxSize의 UNDERFLOW_RATIO 미만이면 축소 가능 상태
+    // --- Shrinkage (Underflow with Hysteresis) ---
+    // When queue size is below maxSize * UNDERFLOW_RATIO, shrinkage is possible
     if (len < this.queueMaxSizeCache * UNDERFLOW_RATIO) {
       if (this.queueUnderflowStart === 0) {
         this.queueUnderflowStart = Date.now();
@@ -607,7 +607,7 @@ export class Renderer {
         this.queueShrinkCountdown++;
 
         if (this.queueShrinkCountdown >= SHRINK_REQUIRED_COUNT) {
-          // 2회 연속 조건 충족 → 축소 실행
+          // 2 consecutive conditions met → execute shrinkage
           const newSize = Math.max(MIN_SIZE, Math.round(this.queueMaxSizeCache / 2));
           this.queueMaxSizeCache = newSize;
           this.queueShrinkCountdown = 0;
@@ -616,7 +616,7 @@ export class Renderer {
         }
       }
     } else {
-      // 언더플로우 상태가 아님 → 카운트 리셋
+      // Not in underflow state → reset counters
       this.queueShrinkCountdown = 0;
       this.queueUnderflowStart = 0;
     }
