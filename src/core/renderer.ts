@@ -74,7 +74,19 @@ export class Renderer {
   private pausedAt: number | null = null;
   private playbackRate = 1;
   private lastWarningTime = 0;
-  private readonly WARNING_INTERVAL_MS = 10000;
+  private static readonly WARNING_INTERVAL_MS = 10_000;
+  /** Dynamic queue sizing: base capacity */
+  private static readonly QUEUE_DEFAULT_SIZE = 30;
+  /** Dynamic queue sizing: maximum capacity */
+  private static readonly QUEUE_MAX_SIZE = 100;
+  /** Dynamic queue sizing: minimum capacity */
+  private static readonly QUEUE_MIN_SIZE = 20;
+  /** Dynamic queue sizing: underflow threshold ratio (below 50% of max) */
+  private static readonly QUEUE_UNDERFLOW_RATIO = 0.5;
+  /** Dynamic queue sizing: sustained underflow duration before shrinking (30s) */
+  private static readonly QUEUE_UNDERFLOW_DURATION_MS = 30_000;
+  /** Dynamic queue sizing: consecutive underflow conditions needed before shrink */
+  private static readonly QUEUE_SHRINK_REQUIRED_COUNT = 2;
   private styleElement: HTMLStyleElement | null = null;
   private retryTimer: number | null = null;
   private overlayDimensionsUnsubscribe: (() => void) | null = null;
@@ -575,19 +587,12 @@ export class Renderer {
    *   capacity shrinks by half (down to MIN_SIZE = 20).
    */
   private getDynamicQueueMaxSize(): number {
-    const DEFAULT_SIZE = 30;
-    const MAX_SIZE = 100;
-    const MIN_SIZE = 20;
-    const UNDERFLOW_RATIO = 0.5; // Underflow when below 50% of maxSize
-    const UNDERFLOW_DURATION_MS = 30_000; // Requires 30s sustained duration
-    const SHRINK_REQUIRED_COUNT = 2; // Requires 2 consecutive condition matches
-
     const len = this.pendingQueue.length;
 
     // --- Expansion (Overflow) ---
-    // When queue is full, expand exponentially by 1.5x (up to MAX_SIZE)
-    if (len >= DEFAULT_SIZE && this.queueMaxSizeCache < MAX_SIZE) {
-      const newSize = Math.min(MAX_SIZE, Math.round(this.queueMaxSizeCache * 1.5));
+    // When queue is full, expand exponentially by 1.5x (up to QUEUE_MAX_SIZE)
+    if (len >= Renderer.QUEUE_DEFAULT_SIZE && this.queueMaxSizeCache < Renderer.QUEUE_MAX_SIZE) {
+      const newSize = Math.min(Renderer.QUEUE_MAX_SIZE, Math.round(this.queueMaxSizeCache * 1.5));
       this.queueMaxSizeCache = newSize;
       this.queueShrinkCountdown = 0; // Reset shrinkage counter on expansion
       this.queueUnderflowStart = 0; // Reset underflow detection
@@ -595,20 +600,20 @@ export class Renderer {
     }
 
     // --- Shrinkage (Underflow with Hysteresis) ---
-    // When queue size is below maxSize * UNDERFLOW_RATIO, shrinkage is possible
-    if (len < this.queueMaxSizeCache * UNDERFLOW_RATIO) {
+    // When queue size is below maxSize * QUEUE_UNDERFLOW_RATIO, shrinkage is possible
+    if (len < this.queueMaxSizeCache * Renderer.QUEUE_UNDERFLOW_RATIO) {
       if (this.queueUnderflowStart === 0) {
         this.queueUnderflowStart = Date.now();
       }
 
       const elapsed = Date.now() - this.queueUnderflowStart;
 
-      if (elapsed >= UNDERFLOW_DURATION_MS) {
+      if (elapsed >= Renderer.QUEUE_UNDERFLOW_DURATION_MS) {
         this.queueShrinkCountdown++;
 
-        if (this.queueShrinkCountdown >= SHRINK_REQUIRED_COUNT) {
-          // 2 consecutive conditions met → execute shrinkage
-          const newSize = Math.max(MIN_SIZE, Math.round(this.queueMaxSizeCache / 2));
+        if (this.queueShrinkCountdown >= Renderer.QUEUE_SHRINK_REQUIRED_COUNT) {
+          // N consecutive conditions met → execute shrinkage
+          const newSize = Math.max(Renderer.QUEUE_MIN_SIZE, Math.round(this.queueMaxSizeCache / 2));
           this.queueMaxSizeCache = newSize;
           this.queueShrinkCountdown = 0;
           this.queueUnderflowStart = 0;
@@ -747,7 +752,7 @@ export class Renderer {
    */
   private logPerformanceWarning(): void {
     const now = Date.now();
-    if (now - this.lastWarningTime < this.WARNING_INTERVAL_MS) {
+    if (now - this.lastWarningTime < Renderer.WARNING_INTERVAL_MS) {
       return;
     }
 
