@@ -1,0 +1,213 @@
+/**
+ * ObservabilityReporter
+ *
+ * Collects real-time session metrics (received, rendered, dropped counts,
+ * queue depth, lane utilization, burst level) and provides a debug overlay
+ * for visual inspection of the render pipeline health.
+ *
+ * Zero runtime dependencies — all metric processing is done with plain
+ * number counters and timestamps.
+ */
+
+import type { BurstLevel, DropReason, SessionMetrics } from '@app-types';
+import { createLogger } from '@core/logging';
+
+const log = createLogger('[Observability]');
+
+export class ObservabilityReporter {
+  private metrics: SessionMetrics;
+  private dropCounters: Record<DropReason, number>;
+  private totalDroppedInWindow: number;
+  private totalReceivedInWindow: number;
+  private windowStartTime: number;
+  private debugOverlayEl: HTMLElement | null;
+  private debugUpdateTimer: ReturnType<typeof setTimeout> | null;
+  private lastWarnTime: number;
+  private readonly WARN_COOLDOWN_MS = 30_000;
+  private readonly METRIC_WINDOW_MS = 60_000;
+  private showDebug: boolean;
+
+  constructor(initialShowDebug: boolean = false) {
+    this.metrics = this.createEmptyMetrics();
+    this.dropCounters = this.createEmptyDropCounters();
+    this.totalDroppedInWindow = 0;
+    this.totalReceivedInWindow = 0;
+    this.windowStartTime = performance.now();
+    this.debugOverlayEl = null;
+    this.debugUpdateTimer = null;
+    this.lastWarnTime = 0;
+    this.showDebug = initialShowDebug;
+  }
+
+  private createEmptyMetrics(): SessionMetrics {
+    return {
+      totalReceived: 0,
+      totalRendered: 0,
+      totalDropped: 0,
+      dropRate: 0,
+      queueDepth: 0,
+      burstLevel: 'normal',
+      activeMessages: 0,
+      laneUtilization: 0,
+      backlogProgress: 1,
+    };
+  }
+
+  private createEmptyDropCounters(): Record<DropReason, number> {
+    return {
+      queue_overflow: 0,
+      no_lane_available: 0,
+      rate_limited: 0,
+      sampled: 0,
+      dedup: 0,
+      other: 0,
+    };
+  }
+
+  // called when a message is received (before any processing)
+  onMessageReceived(count: number = 1): void {
+    this.metrics.totalReceived += count;
+    this.totalReceivedInWindow += count;
+  }
+
+  // called when a message is successfully rendered
+  onMessageRendered(): void {
+    this.metrics.totalRendered++;
+  }
+
+  // called when a message is dropped
+  onMessageDropped(reason: DropReason): void {
+    this.metrics.totalDropped++;
+    this.totalDroppedInWindow++;
+    this.dropCounters[reason]++;
+
+    // Warn if drop rate exceeds 20%
+    const rate = this.getCurrentDropRate();
+    if (rate > 0.2) {
+      const now = performance.now();
+      if (now - this.lastWarnTime > this.WARN_COOLDOWN_MS) {
+        this.lastWarnTime = now;
+        log.warn(
+          `High drop rate: ${(rate * 100).toFixed(1)}% ` +
+            `(queue=${this.metrics.queueDepth}, lanes=${(this.metrics.laneUtilization * 100).toFixed(0)}%)`
+        );
+      }
+    }
+  }
+
+  // called to update queue depth
+  updateQueueDepth(depth: number): void {
+    this.metrics.queueDepth = depth;
+  }
+
+  // called to update burst level
+  updateBurstLevel(level: BurstLevel): void {
+    this.metrics.burstLevel = level;
+  }
+
+  // called to update active messages count
+  updateActiveMessages(count: number): void {
+    this.metrics.activeMessages = count;
+  }
+
+  // called to update lane utilization
+  updateLaneUtilization(ratio: number): void {
+    this.metrics.laneUtilization = Math.max(0, Math.min(1, ratio));
+  }
+
+  // called during backlog injection to report progress (0-1)
+  updateBacklogProgress(progress: number): void {
+    this.metrics.backlogProgress = Math.max(0, Math.min(1, progress));
+  }
+
+  // get current metrics snapshot
+  getMetrics(): SessionMetrics {
+    this.refreshDerivedMetrics();
+    return { ...this.metrics };
+  }
+
+  // get drop counters breakdown
+  getDropBreakdown(): Record<DropReason, number> {
+    return { ...this.dropCounters };
+  }
+
+  private getCurrentDropRate(): number {
+    this.refreshDerivedMetrics();
+    return this.metrics.dropRate;
+  }
+
+  private refreshDerivedMetrics(): void {
+    const now = performance.now();
+    const elapsed = now - this.windowStartTime;
+    if (elapsed >= this.METRIC_WINDOW_MS) {
+      // Reset window
+      this.totalDroppedInWindow = 0;
+      this.totalReceivedInWindow = 0;
+      this.windowStartTime = now;
+      this.metrics.dropRate = 0;
+    } else if (this.totalReceivedInWindow > 0) {
+      this.metrics.dropRate = this.totalDroppedInWindow / this.totalReceivedInWindow;
+    }
+  }
+
+  // --- Debug overlay ---
+
+  setShowDebug(show: boolean): void {
+    this.showDebug = show;
+    if (show) {
+      this.createDebugOverlay();
+    } else {
+      this.destroyDebugOverlay();
+    }
+  }
+
+  private createDebugOverlay(): void {
+    if (this.debugOverlayEl) return;
+    const el = document.createElement('div');
+    el.id = 'yt-chat-overlay-debug';
+    el.style.cssText = `
+      position: fixed; top: 8px; right: 8px; z-index: 99999;
+      background: rgba(0,0,0,0.8); color: #0f0; font: 12px/1.4 monospace;
+      padding: 8px 12px; border-radius: 4px; min-width: 220px;
+      pointer-events: none; user-select: none;
+    `;
+    document.body.appendChild(el);
+    this.debugOverlayEl = el;
+    this.scheduleDebugUpdate();
+  }
+
+  private scheduleDebugUpdate(): void {
+    if (!this.showDebug || !this.debugOverlayEl) return;
+    this.debugUpdateTimer = setTimeout(() => {
+      this.updateDebugOverlay();
+      this.scheduleDebugUpdate();
+    }, 250); // 250ms throttle
+  }
+
+  private updateDebugOverlay(): void {
+    if (!this.debugOverlayEl) return;
+    const m = this.getMetrics();
+    this.debugOverlayEl.innerHTML = `
+      <div>Rcvd: ${m.totalReceived} | Rndr: ${m.totalRendered}</div>
+      <div>Drop: ${m.totalDropped} (${(m.dropRate * 100).toFixed(1)}%)</div>
+      <div>Queue: ${m.queueDepth} | Burst: ${m.burstLevel}</div>
+      <div>Active: ${m.activeMessages} | Lane: ${(m.laneUtilization * 100).toFixed(0)}%</div>
+      <div>Backlog: ${(m.backlogProgress * 100).toFixed(0)}%</div>
+    `;
+  }
+
+  private destroyDebugOverlay(): void {
+    if (this.debugUpdateTimer !== null) {
+      clearTimeout(this.debugUpdateTimer);
+      this.debugUpdateTimer = null;
+    }
+    if (this.debugOverlayEl) {
+      this.debugOverlayEl.remove();
+      this.debugOverlayEl = null;
+    }
+  }
+
+  destroy(): void {
+    this.destroyDebugOverlay();
+  }
+}

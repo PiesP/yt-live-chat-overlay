@@ -160,7 +160,44 @@ export interface OverlaySettings {
   outline: OutlineSettings;
   /** Vertical spacing between lanes in pixels (0 = tight, higher = more gap) */
   laneSpacing: number;
+  /** Show debug overlay with real-time metrics */
+  showDebugOverlay: boolean;
+  /** Log drop events at debug level */
+  enableDropLogging: boolean;
+  /** Debug overlay background opacity (0.1-1.0) */
+  debugOverlayOpacity: number;
 }
+
+/**
+ * Session metrics snapshot for ObservabilityReporter
+ */
+export interface SessionMetrics {
+  totalReceived: number;
+  totalRendered: number;
+  totalDropped: number;
+  dropRate: number; // 0-1, rolling window ~60s
+  queueDepth: number;
+  burstLevel: BurstLevel;
+  activeMessages: number;
+  laneUtilization: number; // 0-1
+  backlogProgress: number; // 0-1 (when in backlog injection phase)
+}
+
+/**
+ * Reason why a message was dropped
+ */
+export type DropReason =
+  | 'queue_overflow'
+  | 'no_lane_available'
+  | 'rate_limited'
+  | 'sampled'
+  | 'dedup'
+  | 'other';
+
+/**
+ * Burst level classification based on messages per second
+ */
+export type BurstLevel = 'normal' | 'elevated' | 'high' | 'extreme';
 
 /**
  * Lane state for message flow

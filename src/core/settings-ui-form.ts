@@ -348,7 +348,24 @@ export class SettingsUiForm {
     );
 
     const debugSection = this.createSection('Debug');
-    debugSection.append(this.createLogLevelField());
+    debugSection.append(
+      this.createLogLevelField(),
+      this.createCheckboxField(
+        'Show debug overlay',
+        'showDebugOverlay',
+        'Display real-time metrics overlay'
+      ),
+      this.createCheckboxField(
+        'Log drop events',
+        'enableDropLogging',
+        'Log message drop events at debug level'
+      ),
+      this.createNumberField(
+        'Debug overlay opacity (%)',
+        'debugOverlayOpacity',
+        'Background opacity of the debug overlay'
+      )
+    );
 
     pane.append(safeZoneSection, rateSection, performanceSection, debugSection);
     return pane;

@@ -28,7 +28,7 @@ export const SHOW_AUTHOR_KEYS = [
 
 type RootNumericSettingKey = Exclude<
   RootScalarSettingKey,
-  'enabled' | 'allowShortTextMessages' | 'logLevel'
+  'enabled' | 'allowShortTextMessages' | 'logLevel' | 'showDebugOverlay' | 'enableDropLogging'
 >;
 
 export const ROOT_NUMERIC_KEYS = [
@@ -42,6 +42,7 @@ export const ROOT_NUMERIC_KEYS = [
   'maxMessagesPerSecond',
   'minTextLength',
   'laneSpacing',
+  'debugOverlayOpacity',
 ] as const satisfies readonly RootNumericSettingKey[];
 
 export const ROOT_SETTING_KEYS = [
@@ -58,6 +59,9 @@ export const ROOT_SETTING_KEYS = [
   'minTextLength',
   'logLevel',
   'laneSpacing',
+  'showDebugOverlay',
+  'enableDropLogging',
+  'debugOverlayOpacity',
 ] as const satisfies readonly RootScalarSettingKey[];
 
 export const OUTLINE_SETTING_KEYS = [
@@ -102,7 +106,10 @@ interface NumericFieldDef {
 
 const ROOT_NUMERIC_FIELDS: Readonly<
   Record<
-    Exclude<RootScalarSettingKey, 'enabled' | 'allowShortTextMessages' | 'logLevel'>,
+    Exclude<
+      RootScalarSettingKey,
+      'enabled' | 'allowShortTextMessages' | 'logLevel' | 'showDebugOverlay' | 'enableDropLogging'
+    >,
     NumericFieldDef
   >
 > = {
@@ -116,6 +123,7 @@ const ROOT_NUMERIC_FIELDS: Readonly<
   maxMessagesPerSecond: { limits: SETTINGS_LIMITS.maxMessagesPerSecond },
   minTextLength: { limits: SETTINGS_LIMITS.minTextLength },
   laneSpacing: { limits: SETTINGS_LIMITS.laneSpacing },
+  debugOverlayOpacity: { limits: SETTINGS_LIMITS.debugOverlayOpacity },
 };
 
 const OUTLINE_NUMERIC_FIELDS: Readonly<
@@ -135,6 +143,12 @@ const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings
     typeof settings.allowShortTextMessages === 'boolean'
       ? settings.allowShortTextMessages
       : d.allowShortTextMessages;
+  n.showDebugOverlay =
+    typeof settings.showDebugOverlay === 'boolean' ? settings.showDebugOverlay : d.showDebugOverlay;
+  n.enableDropLogging =
+    typeof settings.enableDropLogging === 'boolean'
+      ? settings.enableDropLogging
+      : d.enableDropLogging;
 
   for (const [key, { limits }] of Object.entries(ROOT_NUMERIC_FIELDS)) {
     n[key as keyof typeof ROOT_NUMERIC_FIELDS] = clampNumber(

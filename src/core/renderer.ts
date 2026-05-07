@@ -9,6 +9,7 @@ import type { ChatMessage, OutlineSettings, OverlayDimensions, OverlaySettings }
 import { rendererLayout, shadows } from '@core/design-tokens';
 import { createLogger } from '@core/logging';
 import { MessageIdRegistry } from '@core/message-id-registry';
+import { ObservabilityReporter } from '@core/observability';
 import type { Overlay } from '@core/overlay';
 import { LaneAllocator, type LanePlacement } from '@core/renderer-lanes';
 import { RendererMessageBuilder } from '@core/renderer-message-builder';
@@ -50,6 +51,7 @@ interface RendererUpdateOptions {
 }
 
 export class Renderer {
+  readonly observability: ObservabilityReporter;
   private overlay: Overlay;
   private settings: OverlaySettings;
   private readonly laneAllocator: LaneAllocator;
@@ -113,6 +115,7 @@ export class Renderer {
     });
     this.laneAllocator.reset(this.overlay.getDimensions());
     this.injectStyles();
+    this.observability = new ObservabilityReporter(this.settings.showDebugOverlay);
     this.overlayDimensionsUnsubscribe = this.overlay.onDimensionsChanged((dimensions) => {
       this.handleOverlayDimensionsChange(dimensions);
     });
@@ -350,8 +353,12 @@ export class Renderer {
   addMessage(message: ChatMessage): void {
     // Dedup fast path: quick Set.has() check only.
     if (message.id && this.seenMessageIds.has(message.id)) {
+      this.observability.onMessageDropped('dedup');
       return;
     }
+
+    // Track as received (passed dedup)
+    this.observability.onMessageReceived();
 
     // Enqueue with dynamically bounded capacity — drop oldest when full.
     // Under high load the queue grows up to 2x the base size so fewer
@@ -365,6 +372,7 @@ export class Renderer {
         (a, b) => a.priority - b.priority || a.message.timestamp - b.message.timestamp
       );
       this.pendingQueue.splice(0, excess);
+      this.observability.onMessageDropped('queue_overflow');
       // Restore priority DESC + timestamp ASC order for processing.
       this.pendingQueue.sort(
         (a, b) => b.priority - a.priority || a.message.timestamp - b.message.timestamp
@@ -640,6 +648,13 @@ export class Renderer {
     this.sweepStaleAnimations();
     this.clearRetryTimer();
 
+    // Update observability metrics
+    this.observability.updateQueueDepth(this.pendingQueue.length);
+    this.observability.updateActiveMessages(this.activeMessages.size);
+    this.observability.updateLaneUtilization(
+      this.activeMessages.size / Math.max(1, this.laneAllocator.getLaneCount())
+    );
+
     if (this.pendingQueue.length === 0) {
       return;
     }
@@ -798,6 +813,7 @@ export class Renderer {
     // ── Step 2: Find available lane ────────────────────────────────────
     const placement = this.laneAllocator.findPlacement(messageHeight, dimensions, forceOverwriteMs);
     if (placement === null) {
+      this.observability.onMessageDropped('no_lane_available');
       log.debug(
         `No available lane for message (height: ${messageHeight}px). ` +
           `Active messages: ${this.activeMessages.size}, Lanes: ${dimensions.laneCount}, ` +
@@ -834,6 +850,7 @@ export class Renderer {
 
     // Track active message
     this.activeMessages.add(activeMessage);
+    this.observability.onMessageRendered();
 
     log.debug('Rendering message:', {
       text: message.text.substring(0, 20),
@@ -911,6 +928,9 @@ export class Renderer {
   updateSettings(settings: OverlaySettings, options: RendererUpdateOptions = {}): void {
     this.settings = settings;
     this.injectStyles();
+
+    // Sync debug overlay visibility with settings
+    this.observability.setShowDebug(settings.showDebugOverlay);
 
     if (options.resetState) {
       this.resetRenderedState();
@@ -1036,6 +1056,8 @@ export class Renderer {
 
     this.styleElement?.remove();
     this.styleElement = null;
+
+    this.observability.destroy();
 
     log.debug('Destroyed');
   }
