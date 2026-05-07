@@ -49,11 +49,6 @@ interface RendererUpdateOptions {
   resetState?: boolean;
 }
 
-const combineTextShadows = (...shadows: string[]): string => {
-  const normalizedShadows = shadows.filter((shadow) => shadow !== '' && shadow !== 'none');
-  return normalizedShadows.length > 0 ? normalizedShadows.join(', ') : 'none';
-};
-
 export class Renderer {
   private overlay: Overlay;
   private settings: OverlaySettings;
@@ -182,11 +177,9 @@ export class Renderer {
 
     const textShadow = this.buildTextShadow(this.settings.outline);
     const textStroke = this.buildTextStroke(this.settings.outline);
-    const regularMessageTextShadow = combineTextShadows(
-      textShadow,
-      shadows.text.md,
-      '0 0 8px rgba(0, 0, 0, 0.7)'
-    );
+    const regularMessageTextShadow = [textShadow, shadows.text.md, '0 0 8px rgba(0, 0, 0, 0.7)']
+      .filter(Boolean)
+      .join(', ');
     const superChatBaseOpacity = Math.min(1, Math.max(0.4, this.settings.superChatOpacity));
     const superChatTopOpacity = Math.min(1, superChatBaseOpacity + 0.06);
     const superChatBottomOpacity = Math.max(0.4, superChatBaseOpacity - 0.08);
