@@ -20,6 +20,7 @@ interface LaneAllocatorOptions {
 
 export class LaneAllocator {
   private lanes: LaneState[] = [];
+  private nextLaneIndex = 0;
 
   constructor(private readonly options: LaneAllocatorOptions) {}
 
@@ -36,6 +37,7 @@ export class LaneAllocator {
       lastItemWidthPx: 0,
       lastItemHeightPx: 0,
     }));
+    this.nextLaneIndex = 0;
   }
 
   isEmpty(): boolean {
@@ -49,83 +51,65 @@ export class LaneAllocator {
       return null;
     }
 
-    interface BlockCandidate {
-      startIndex: number;
-      readyTime: number;
-    }
+    // ── Round-robin lane scan ────────────────────────────────────────────
+    // Start from nextLaneIndex and scan forward.  If a block is ready now
+    // (or with minimal wait), assign it immediately.  Otherwise track the
+    // block with the earliest ready time and return it as deferred.
 
-    const candidates: BlockCandidate[] = [];
-    let minReadyTime = Number.POSITIVE_INFINITY;
+    const maxStartIndex = this.lanes.length - requiredLanes;
+    let bestStartIndex = -1;
+    let bestReadyTime = Number.POSITIVE_INFINITY;
 
-    for (let index = 0; index <= this.lanes.length - requiredLanes; index++) {
+    for (let scanOffset = 0; scanOffset <= maxStartIndex; scanOffset++) {
+      const startIndex = (this.nextLaneIndex + scanOffset) % (maxStartIndex + 1);
+
       let blockReadyTime = now;
+      let allValid = true;
 
       for (let offset = 0; offset < requiredLanes; offset++) {
-        const lane = this.lanes[index + offset];
+        const lane = this.lanes[startIndex + offset];
         if (!lane) {
-          blockReadyTime = Number.POSITIVE_INFINITY;
+          allValid = false;
           break;
         }
-
         blockReadyTime = Math.max(blockReadyTime, this.calculateLaneReadyTime(lane, now));
       }
 
-      if (!Number.isFinite(blockReadyTime)) {
+      if (!allValid || !Number.isFinite(blockReadyTime)) {
         continue;
       }
 
-      candidates.push({ startIndex: index, readyTime: blockReadyTime });
-      minReadyTime = Math.min(minReadyTime, blockReadyTime);
-    }
-
-    if (candidates.length === 0 || !Number.isFinite(minReadyTime)) {
-      return null;
-    }
-
-    const readyNow = candidates.filter((candidate) => candidate.readyTime <= now + 16);
-    const pool =
-      readyNow.length > 0
-        ? readyNow
-        : candidates.filter((candidate) => candidate.readyTime === minReadyTime);
-
-    // ── Load-balanced weighted-random lane selection ─────────────────────
-    // Spread messages across lanes by picking from top candidates with
-    // decreasing probability.  Upper lanes are still preferred, but lower
-    // lanes get a fair share, eliminating the staircase effect.
-
-    const sortedPool = [...pool].sort((a, b) => a.startIndex - b.startIndex);
-    const shortlistCount = Math.min(3, sortedPool.length);
-    const shortlist = sortedPool.slice(0, shortlistCount);
-
-    // Weights: [0.5, 0.3, 0.2] for top 3 candidates
-    const weights = [0.5, 0.3, 0.2];
-    const totalWeight = weights.slice(0, shortlistCount).reduce((a, b) => a + b, 0);
-    let random = Math.random() * totalWeight;
-    let chosen = shortlist[0];
-
-    for (let i = 0; i < shortlist.length; i++) {
-      random -= weights[i]!;
-      if (random <= 0) {
-        chosen = shortlist[i];
+      // Found a block that's ready now — use it immediately.
+      if (blockReadyTime <= now + 16) {
+        bestStartIndex = startIndex;
+        bestReadyTime = blockReadyTime;
         break;
+      }
+
+      // Track the block with the earliest ready time.
+      if (blockReadyTime < bestReadyTime) {
+        bestReadyTime = blockReadyTime;
+        bestStartIndex = startIndex;
       }
     }
 
-    if (!chosen) {
+    if (bestStartIndex === -1 || !Number.isFinite(bestReadyTime)) {
       return null;
     }
 
-    const chosenLane = this.lanes[chosen.startIndex];
+    const chosenLane = this.lanes[bestStartIndex];
     if (!chosenLane) {
       return null;
     }
 
-    const scheduledTime = chosen.readyTime;
+    // Advance round-robin pointer to the lane after this block so the next
+    // message starts scanning from a different position.
+    this.nextLaneIndex = (bestStartIndex + 1) % (maxStartIndex + 1);
 
     return {
       lane: chosenLane,
       laneSpan: requiredLanes,
-      waitMs: Math.max(0, Math.ceil(scheduledTime - now)),
+      waitMs: Math.max(0, Math.ceil(bestReadyTime - now)),
     };
   }
 
@@ -159,17 +143,13 @@ export class LaneAllocator {
     }
 
     // Internal safety cap: prevents lanes from being pushed into the far
-    // future after long pauses (e.g. tab hidden 30+ min). Callers should
-    // also cap their input, but this ensures correctness either way.
+    // future after long pauses (e.g. tab hidden 30+ min).
     const clampedMs = Math.min(deltaMs, 60_000);
 
     for (const lane of this.lanes) {
       if (lane.lastItemStartTime > 0) {
         lane.lastItemStartTime += clampedMs;
       }
-      // Also shift endTime to keep lane state consistent with real time.
-      // Without this, after resume the allocator may think a lane is free
-      // while the previous message's animation is still visible, causing overlaps.
       if (lane.lastItemEndTime > 0) {
         lane.lastItemEndTime += clampedMs;
       }
@@ -192,9 +172,7 @@ export class LaneAllocator {
     const speed = this.options.getEffectiveSpeedPxPerSec();
     const fontSize = this.options.getFontSize();
 
-    // ── Dynamic safe distance ────────────────────────────────────────
-    // Scale safe distance with speed: low speed → wider gap, high speed → tighter.
-    // This prevents overlapping when messages move slowly.
+    // Dynamic safe distance: scale with speed so slow messages get more gap.
     const baseSafeDistance = Math.max(
       fontSize * this.options.safeDistanceScale,
       this.options.safeDistanceMin
@@ -205,18 +183,14 @@ export class LaneAllocator {
     const safeTimeGap = (requiredGapPx / speed) * 1000;
     const horizontalReadyTime = lane.lastItemStartTime + safeTimeGap;
 
-    // ── Dynamic vertical clear time ──────────────────────────────────
-    // Base on message travel time instead of fixed 20-80ms cap.
-    // At low speed (50px/s on 1920px screen): traverse ~960ms, 5% = 48ms, min 200ms
-    // At high speed (200px/s on 1920px screen): traverse ~240ms, 5% = 12ms, min 200ms
+    // Dynamic vertical clear time: base on message travel time.
     const traverseTimeMs = (window.innerWidth / speed) * 1000;
     const dynamicClearMs = Math.max(traverseTimeMs * 0.05, 200);
     const verticalReadyTime = lane.lastItemStartTime + dynamicClearMs;
 
     const laneStaggerTime = lane.lastItemStartTime + this.options.globalStaggerMs;
 
-    // Absolute animation end time guard: the lane is never ready before the
-    // previous message's animation has finished playing.
+    // Absolute animation end time guard.
     const animationEndGuard = lane.lastItemEndTime;
 
     return Math.max(
