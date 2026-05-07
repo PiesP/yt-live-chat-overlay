@@ -2,25 +2,17 @@
  * Type definitions for YouTube Live Chat Overlay
  */
 
-const AUTHOR_TYPES = ['normal', 'member', 'moderator', 'owner', 'verified'] as const;
-export const LOG_LEVELS = ['warn', 'info', 'debug'] as const;
-const AUTHOR_DISPLAY_KEYS = [...AUTHOR_TYPES, 'superChat'] as const;
-const CHAT_MESSAGE_KINDS = ['text', 'superchat', 'membership'] as const;
-const SUPER_CHAT_TIERS = ['blue', 'cyan', 'green', 'yellow', 'orange', 'magenta', 'red'] as const;
-
-type AuthorDisplayKey = (typeof AUTHOR_DISPLAY_KEYS)[number];
-type ChatMessageKind = (typeof CHAT_MESSAGE_KINDS)[number];
-type SuperChatTier = (typeof SUPER_CHAT_TIERS)[number];
-
 /**
  * Author type classification
  */
-export type AuthorType = (typeof AUTHOR_TYPES)[number];
-
+export type AuthorType = 'normal' | 'member' | 'moderator' | 'owner' | 'verified';
 /**
  * Console log level for overlay diagnostics
  */
-export type LogLevel = (typeof LOG_LEVELS)[number];
+export type LogLevel = 'warn' | 'info' | 'debug';
+type AuthorDisplayKey = 'normal' | 'member' | 'moderator' | 'owner' | 'verified' | 'superChat';
+type ChatMessageKind = 'text' | 'superchat' | 'membership';
+type SuperChatTier = 'blue' | 'cyan' | 'green' | 'yellow' | 'orange' | 'magenta' | 'red';
 
 export const isLogLevel = (value: unknown): value is LogLevel =>
   value === 'warn' || value === 'info' || value === 'debug';
