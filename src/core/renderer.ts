@@ -6,6 +6,7 @@
  */
 
 import type { ChatMessage, OutlineSettings, OverlayDimensions, OverlaySettings } from '@app-types';
+import { PerAuthorRateLimiter } from '@core/author-rate-limiter';
 import { BurstDetector } from '@core/burst-detector';
 import { rendererLayout, shadows } from '@core/design-tokens';
 import { createLogger } from '@core/logging';
@@ -58,6 +59,7 @@ interface RendererUpdateOptions {
 export class Renderer {
   readonly observability: ObservabilityReporter;
   private burstDetector: BurstDetector;
+  private authorRateLimiter: PerAuthorRateLimiter;
   private overlay: Overlay;
   private settings: OverlaySettings;
   private readonly laneAllocator: LaneAllocator;
@@ -124,6 +126,7 @@ export class Renderer {
     this.observability = new ObservabilityReporter(this.settings.showDebugOverlay);
     this.burstDetector = new BurstDetector(this.observability);
     this.burstDetector.start();
+    this.authorRateLimiter = new PerAuthorRateLimiter(() => this.burstDetector.getLevel());
     this.overlayDimensionsUnsubscribe = this.overlay.onDimensionsChanged((dimensions) => {
       this.handleOverlayDimensionsChange(dimensions);
     });
@@ -368,6 +371,13 @@ export class Renderer {
     // Track as received (passed dedup)
     this.observability.onMessageReceived();
     this.burstDetector.onMessageReceived();
+
+    // Apply author rate limiting
+    const messagePriority = Renderer.getMessagePriority(message);
+    if (!this.authorRateLimiter.allow(message.author ?? 'anonymous', messagePriority)) {
+      this.observability.onMessageDropped('rate_limited');
+      return;
+    }
 
     // Enqueue with dynamically bounded capacity — drop oldest when full.
     // Under high load the queue grows up to 2x the base size so fewer
@@ -953,9 +963,15 @@ export class Renderer {
   updateSettings(settings: OverlaySettings, options: RendererUpdateOptions = {}): void {
     this.settings = settings;
     this.injectStyles();
-
     // Sync debug overlay visibility with settings
     this.observability.setShowDebug(settings.showDebugOverlay);
+
+    // Sync author rate limiter config with settings
+    this.authorRateLimiter.updateConfig({
+      enabled: settings.authorRateLimitEnabled,
+      windowMs: settings.authorRateLimitWindowMs,
+      maxPerWindow: settings.authorRateLimitMaxMessages,
+    });
 
     if (options.resetState) {
       this.resetRenderedState();
@@ -1083,6 +1099,7 @@ export class Renderer {
     this.styleElement = null;
 
     this.burstDetector.destroy();
+    this.authorRateLimiter.destroy();
     this.observability.destroy();
 
     log.debug('Destroyed');

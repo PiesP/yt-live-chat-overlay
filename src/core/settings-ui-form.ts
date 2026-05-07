@@ -37,6 +37,7 @@ const ROOT_ROUNDED_KEYS: readonly RootScalarSettingKey[] = [
   'maxMessagesPerSecond',
   'minTextLength',
   'laneSpacing',
+  'authorRateLimitMaxMessages',
 ] as const;
 
 interface NumericInputOptions {
@@ -347,6 +348,25 @@ export class SettingsUiForm {
       )
     );
 
+    const rateLimitSection = this.createSection('Rate Limiting');
+    rateLimitSection.append(
+      this.createCheckboxField(
+        'Enable author rate limiting',
+        'authorRateLimitEnabled',
+        'Limit messages per author per time window'
+      ),
+      this.createNumberField(
+        'Window (ms)',
+        'authorRateLimitWindowMs',
+        'Time window for rate limiting in milliseconds'
+      ),
+      this.createNumberField(
+        'Max per window',
+        'authorRateLimitMaxMessages',
+        'Maximum messages per author per window'
+      )
+    );
+
     const debugSection = this.createSection('Debug');
     debugSection.append(
       this.createLogLevelField(),
@@ -367,7 +387,7 @@ export class SettingsUiForm {
       )
     );
 
-    pane.append(safeZoneSection, rateSection, performanceSection, debugSection);
+    pane.append(safeZoneSection, rateSection, performanceSection, rateLimitSection, debugSection);
     return pane;
   }
 

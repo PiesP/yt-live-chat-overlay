@@ -26,7 +26,9 @@ type SettingsLimitKey =
   | 'outlineBlurPx'
   | 'outlineOpacity'
   | 'laneSpacing'
-  | 'debugOverlayOpacity';
+  | 'debugOverlayOpacity'
+  | 'authorRateLimitWindowMs'
+  | 'authorRateLimitMaxMessages';
 
 const DEFAULT_SHOW_AUTHOR: AuthorDisplaySettings = {
   normal: false,
@@ -67,6 +69,8 @@ export const SETTINGS_LIMITS = {
   outlineOpacity: { min: 0, max: 1, step: 0.1 },
   laneSpacing: { min: 0, max: 20, step: 1 },
   debugOverlayOpacity: { min: 0.1, max: 1, step: 0.1 },
+  authorRateLimitWindowMs: { min: 1000, max: 30000, step: 1000 },
+  authorRateLimitMaxMessages: { min: 1, max: 20, step: 1 },
 } as const satisfies Record<SettingsLimitKey, NumericSettingLimit>;
 
 export const DEFAULT_SETTINGS = {
@@ -89,6 +93,9 @@ export const DEFAULT_SETTINGS = {
   showDebugOverlay: false,
   enableDropLogging: true,
   debugOverlayOpacity: 0.8,
+  authorRateLimitEnabled: true,
+  authorRateLimitWindowMs: 5000,
+  authorRateLimitMaxMessages: 5,
 } as const satisfies Readonly<OverlaySettings>;
 
 export const STORAGE_KEY = 'yt-live-chat-overlay-settings';

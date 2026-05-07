@@ -166,6 +166,14 @@ export interface OverlaySettings {
   enableDropLogging: boolean;
   /** Debug overlay background opacity (0.1-1.0) */
   debugOverlayOpacity: number;
+
+  // ── Author Rate Limiting ──
+  /** Enable per-author rate limiting */
+  authorRateLimitEnabled: boolean;
+  /** Rate limit window in milliseconds */
+  authorRateLimitWindowMs: number;
+  /** Max messages per author per window */
+  authorRateLimitMaxMessages: number;
 }
 
 /**
