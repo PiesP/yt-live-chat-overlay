@@ -9,6 +9,7 @@ import {
   outlineFormName,
   ROOT_NUMERIC_KEYS,
   ROOT_SETTING_KEYS,
+  type RootNumericSettingKey,
   type RootScalarSettingKey,
   SHOW_AUTHOR_KEYS,
 } from '@core/settings-schema';
@@ -78,7 +79,7 @@ export const formatRootNumericSettingForInput = (
 };
 
 export const normalizeRootNumericInputValue = (
-  key: RootScalarSettingKey,
+  key: RootNumericSettingKey,
   value: unknown,
   fallback: number
 ): number => {

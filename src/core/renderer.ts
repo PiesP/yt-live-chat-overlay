@@ -1011,7 +1011,7 @@ export class Renderer {
    * Replaces the old forEachAnimation that operated on Animation objects.
    */
   private forEachElement(operation: (element: HTMLDivElement) => void): void {
-    for (const active of this.activeMessages) {
+    for (const active of Array.from(this.activeMessages)) {
       try {
         operation(active.element);
       } catch (error) {

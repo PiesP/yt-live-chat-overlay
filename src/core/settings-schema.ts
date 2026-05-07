@@ -9,7 +9,7 @@ import { DEFAULT_SETTINGS, SETTINGS_LIMITS } from '@core/settings-definitions';
 type RootScalarSettingKey = Exclude<keyof OverlaySettings, 'showAuthor' | 'colors' | 'outline'>;
 type OutlineSettingKey = keyof OutlineSettings;
 
-export type { OutlineSettingKey, RootScalarSettingKey };
+export type { OutlineSettingKey, RootNumericSettingKey, RootScalarSettingKey };
 
 export const outlineFormName = (key: OutlineSettingKey): string => `outline-${key}`;
 

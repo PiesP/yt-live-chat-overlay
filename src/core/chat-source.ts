@@ -527,11 +527,8 @@ export class LiveChatSource extends ChatSource {
     // per-message function-call overhead under high throughput.
     if (events.length > 0) {
       const messages: ChatMessage[] = [];
-      for (let index = 0; index < events.length; index++) {
-        const event = events[index];
-        if (event) {
-          messages.push(event.message);
-        }
+      for (const event of events) {
+        messages.push(event.message);
       }
       this.emitBatch(messages);
     }

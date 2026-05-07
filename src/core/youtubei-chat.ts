@@ -150,7 +150,9 @@ function findFirstNestedByKey<T>(
 
     for (const value of Object.values(current)) {
       if (Array.isArray(value)) {
-        stack.push(...value);
+        for (const item of value) {
+          stack.push(item);
+        }
         continue;
       }
 

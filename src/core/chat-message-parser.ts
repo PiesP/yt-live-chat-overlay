@@ -20,6 +20,12 @@ import {
 
 const log = createLogger('ChatMessageParser');
 
+const EMPTY_MESSAGE_BODY: ParsedMessageBody = Object.freeze({
+  text: '',
+  content: [],
+  visibleLength: 0,
+});
+
 /**
  * Matches any character with the Emoji Unicode property.
  *
@@ -321,7 +327,7 @@ export class ChatMessageParser {
   }
 
   private createEmptyMessageBody(): ParsedMessageBody {
-    return { text: '', content: [], visibleLength: 0 };
+    return EMPTY_MESSAGE_BODY;
   }
 
   private appendTextSegment(segments: ContentSegment[], content: string): void {
