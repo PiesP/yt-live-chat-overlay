@@ -346,6 +346,17 @@ const extractInitialDataFromHtml = (html: string): JsonObject | null =>
 const extractYtcfgFromHtml = (html: string): JsonObject | null =>
   extractJsonObjectFromHtml(html, ['ytcfg.set({', 'window.ytcfg.set({']);
 
+/**
+ * Extract videoId from ytInitialData structure.
+ * YouTube stores the current video's ID in currentVideoEndpoint.watchEndpoint.videoId.
+ */
+const extractVideoIdFromInitialData = (initialData: JsonObject): string | null => {
+  const watchEndpoint = getNestedRecord(initialData, ['currentVideoEndpoint', 'watchEndpoint']);
+  if (!watchEndpoint) return null;
+  const videoId = getString(watchEndpoint.videoId);
+  return videoId || null;
+};
+
 const findLiveChatRenderer = (initialData: JsonObject): JsonObject | null => {
   const directRenderer = getNestedRecord(initialData, [
     'contents',
@@ -517,6 +528,16 @@ export const bootstrapChatSession = async (signal?: AbortSignal): Promise<ChatBo
       return {
         status: 'retryable',
         reason: 'Could not extract ytInitialData from watch page',
+      };
+    }
+
+    // Verify videoId in initialData matches the current URL videoId.
+    // After SPA navigation, window.ytInitialData may still hold the previous video's data.
+    const dataVideoId = extractVideoIdFromInitialData(initialData);
+    if (dataVideoId && dataVideoId !== videoId) {
+      return {
+        status: 'retryable',
+        reason: `initialData videoId (${dataVideoId}) does not match current URL videoId (${videoId})`,
       };
     }
 
