@@ -51,7 +51,8 @@ const ROOT_NUMERIC_INPUT_OPTIONS: Partial<Record<RootScalarSettingKey, NumericIn
   safeBottom: { scale: 100, precision: 1 },
 };
 
-const scaleUiValue = (value: number, scale: number): number => Number((value * scale).toFixed(4));
+const scaleUiValue = (value: number, scale: number): number =>
+  Math.round(value * scale * 1e4) / 1e4;
 
 const getRootScale = (key: RootScalarSettingKey): number =>
   ROOT_NUMERIC_INPUT_OPTIONS[key]?.scale ?? 1;
