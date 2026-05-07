@@ -86,7 +86,10 @@ interface ReplayBufferedMessage {
  * Accepts either a single message (for individual emission like replay)
  * or an array of messages (for batch emission like live polling).
  */
-export type MessageCallback = (messages: ChatMessage | ChatMessage[]) => void;
+export type MessageCallback = (
+  messages: ChatMessage | ChatMessage[],
+  isInitialSeed?: boolean
+) => void;
 export type ChatSourceStartStatus = 'started' | 'retryable' | 'unavailable';
 
 // ====================================================================
@@ -234,8 +237,13 @@ export abstract class ChatSource {
    * Batch-emit messages in a single callback invocation.
    * All messages are remembered individually, then delivered as an array
    * to reduce per-message function-call overhead under high throughput.
+   *
+   * @param messages - Messages to emit.
+   * @param isInitialSeed - True when this batch is the initial seed (backlog)
+   *   from seedCurrentSession, so the runtime session can route to the backlog
+   *   controller for throttled injection.
    */
-  protected emitBatch(messages: ChatMessage[]): void {
+  protected emitBatch(messages: ChatMessage[], isInitialSeed: boolean = false): void {
     if (!this.callback || messages.length === 0) {
       return;
     }
@@ -243,7 +251,7 @@ export abstract class ChatSource {
     for (const message of messages) {
       this.rememberMessage(message);
     }
-    this.callback(messages);
+    this.callback(messages, isInitialSeed);
   }
 
   protected async requestPayload<TCallArgs extends unknown[]>(
@@ -509,7 +517,7 @@ export class LiveChatSource extends ChatSource {
           continue;
         }
 
-        this.handleLivePayload(payload);
+        this.handleLivePayload(payload, true);
       } catch (error) {
         if (isAbortError(error)) {
           throw error;
@@ -538,7 +546,7 @@ export class LiveChatSource extends ChatSource {
     return this.requestPayload(fetchLiveChat, continuation, signal);
   }
 
-  private handleLivePayload(payload: LiveChatPayload): void {
+  private handleLivePayload(payload: LiveChatPayload, isInitialSeed: boolean = false): void {
     const events = this.parser.extractChatEvents(payload.actions);
 
     // Batch-emit all messages in a single callback invocation to reduce
@@ -548,7 +556,7 @@ export class LiveChatSource extends ChatSource {
       for (const event of events) {
         messages.push(event.message);
       }
-      this.emitBatch(messages);
+      this.emitBatch(messages, isInitialSeed);
     }
 
     this.lastActionsCount = payload.actions.length;

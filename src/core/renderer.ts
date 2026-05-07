@@ -60,6 +60,7 @@ export class Renderer {
   readonly observability: ObservabilityReporter;
   private burstDetector: BurstDetector;
   private authorRateLimiter: PerAuthorRateLimiter;
+  private backlogSpeedMultiplier: number = 1;
   private overlay: Overlay;
   private settings: OverlaySettings;
   private readonly laneAllocator: LaneAllocator;
@@ -269,7 +270,8 @@ export class Renderer {
     placement: LanePlacement,
     textWidth: number,
     messageHeight: number,
-    dimensions: OverlayDimensions
+    dimensions: OverlayDimensions,
+    message?: ChatMessage
   ): ActiveMessage {
     const fontSize = this.settings.fontSize;
     const { lane } = placement;
@@ -307,10 +309,17 @@ export class Renderer {
 
     // Optimized duration for better pacing
     const effectiveSpeedPxPerSec = this.getEffectiveSpeedPxPerSec();
-    const baseDuration = Math.max(
+    let baseDuration = Math.max(
       rendererLayout.durationMin,
       Math.min(rendererLayout.durationMax, (adjustedDistance / effectiveSpeedPxPerSec) * 1000)
     );
+    // Apply backlog speed multiplier: backlog messages scroll past faster
+    if (message?.isBacklog && this.backlogSpeedMultiplier > 1) {
+      baseDuration = Math.max(
+        rendererLayout.durationMin,
+        baseDuration / this.backlogSpeedMultiplier
+      );
+    }
     const adjustedDuration = baseDuration / this.playbackRate;
 
     // Minimal start-position stagger: small per-lane jitter so messages
@@ -503,6 +512,19 @@ export class Renderer {
     }
 
     return base;
+  }
+
+  /** Expose current lane count for external use (e.g. backlog controller) */
+  get laneCount(): number {
+    return this.laneAllocator.getLaneCount();
+  }
+
+  /**
+   * Set speed multiplier for backlog messages.
+   * Called by RuntimeSession when injecting backlog messages.
+   */
+  setBacklogSpeedMultiplier(multiplier: number): void {
+    this.backlogSpeedMultiplier = Math.max(1, multiplier);
   }
 
   /**
@@ -876,7 +898,8 @@ export class Renderer {
       placement,
       estimated.width,
       messageHeight,
-      dimensions
+      dimensions,
+      message
     );
 
     // Append to container — now the element is at its final start

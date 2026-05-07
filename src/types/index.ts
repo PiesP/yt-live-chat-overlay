@@ -103,6 +103,8 @@ export interface ChatMessage {
   authorPhotoUrl?: string;
   /** Super Chat information (only for kind='superchat') */
   superChat?: SuperChatInfo;
+  /** True when the message is part of a backlog injection (initial seed) */
+  isBacklog?: boolean;
 }
 
 /**
@@ -174,6 +176,14 @@ export interface OverlaySettings {
   authorRateLimitWindowMs: number;
   /** Max messages per author per window */
   authorRateLimitMaxMessages: number;
+
+  // ── Backlog Injection ──
+  /** Max backlog messages injected per second (0 = no limit) */
+  backlogMaxRate: number;
+  /** Speed multiplier for backlog message animations */
+  backlogSpeedMultiplier: number;
+  /** Show backlog loading indicator */
+  showBacklogIndicator: boolean;
 }
 
 /**

@@ -1,4 +1,5 @@
-import type { OverlaySettings } from '@app-types';
+import type { ChatMessage, OverlaySettings } from '@app-types';
+import { BacklogInjectionController } from '@core/backlog-controller';
 import { type ChatHealthSnapshot, ChatSource, type ChatSourceStartStatus } from '@core/chat-source';
 import { isAbortError, throwIfAborted } from '@core/dom';
 import { createLogger } from '@core/logging';
@@ -40,6 +41,7 @@ export class RuntimeSession {
   private renderer: Renderer | null = null;
   private chatSource: ChatSource | null = null;
   private foregroundCleanup: (() => void) | null = null;
+  private backlogController: BacklogInjectionController | null = null;
   private chatWatchdogTimer: number | null = null;
   private disposed = false;
   private sessionReady = false;
@@ -143,6 +145,9 @@ export class RuntimeSession {
     this.stopForegroundListeners();
     this.stopChatWatchdog();
 
+    this.backlogController?.destroy();
+    this.backlogController = null;
+
     this.chatSource?.stop();
     this.chatSource = null;
 
@@ -160,7 +165,7 @@ export class RuntimeSession {
     const chatSource = await ChatSource.create(() => this.settings, signal);
     this.chatSource = chatSource;
 
-    return chatSource.start((messages) => {
+    return chatSource.start((messages: ChatMessage | ChatMessage[], isInitialSeed?: boolean) => {
       if (this.disposed) {
         return;
       }
@@ -170,14 +175,33 @@ export class RuntimeSession {
         return;
       }
 
-      if (Array.isArray(messages)) {
-        // Batch path: all messages arrive in a single callback invocation,
-        // reducing per-message function-call overhead under high throughput.
-        for (const msg of messages) {
-          renderer.addMessage(msg);
+      // Get messages array
+      const msgs = Array.isArray(messages) ? messages : [messages];
+
+      if (isInitialSeed && msgs.length > 50) {
+        // Route to backlog controller for throttled injection
+        if (!this.backlogController) {
+          this.backlogController = new BacklogInjectionController(
+            {
+              backlogMaxRate: this.settings.backlogMaxRate,
+              backlogSpeedMultiplier: this.settings.backlogSpeedMultiplier,
+              showBacklogIndicator: this.settings.showBacklogIndicator,
+            },
+            renderer.laneCount,
+            renderer.observability
+          );
+          this.backlogController.onBacklogMessage = (msg) => {
+            renderer.setBacklogSpeedMultiplier(this.backlogController?.getSpeedMultiplier() ?? 1);
+            renderer.addMessage(msg);
+          };
         }
-      } else {
-        renderer.addMessage(messages);
+        this.backlogController.startBacklogInjection(msgs);
+        return;
+      }
+
+      // Real-time message handling (also catches backlog under 50 messages)
+      for (const msg of msgs) {
+        renderer.addMessage(msg);
       }
     }, signal);
   }

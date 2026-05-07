@@ -28,7 +28,9 @@ type SettingsLimitKey =
   | 'laneSpacing'
   | 'debugOverlayOpacity'
   | 'authorRateLimitWindowMs'
-  | 'authorRateLimitMaxMessages';
+  | 'authorRateLimitMaxMessages'
+  | 'backlogMaxRate'
+  | 'backlogSpeedMultiplier';
 
 const DEFAULT_SHOW_AUTHOR: AuthorDisplaySettings = {
   normal: false,
@@ -71,6 +73,8 @@ export const SETTINGS_LIMITS = {
   debugOverlayOpacity: { min: 0.1, max: 1, step: 0.1 },
   authorRateLimitWindowMs: { min: 1000, max: 30000, step: 1000 },
   authorRateLimitMaxMessages: { min: 1, max: 20, step: 1 },
+  backlogMaxRate: { min: 0, max: 50, step: 5 },
+  backlogSpeedMultiplier: { min: 1, max: 5, step: 0.5 },
 } as const satisfies Record<SettingsLimitKey, NumericSettingLimit>;
 
 export const DEFAULT_SETTINGS = {
@@ -96,6 +100,9 @@ export const DEFAULT_SETTINGS = {
   authorRateLimitEnabled: true,
   authorRateLimitWindowMs: 5000,
   authorRateLimitMaxMessages: 5,
+  backlogMaxRate: 10,
+  backlogSpeedMultiplier: 2,
+  showBacklogIndicator: true,
 } as const satisfies Readonly<OverlaySettings>;
 
 export const STORAGE_KEY = 'yt-live-chat-overlay-settings';

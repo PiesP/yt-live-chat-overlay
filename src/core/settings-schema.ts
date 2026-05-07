@@ -34,6 +34,7 @@ type RootNumericSettingKey = Exclude<
   | 'showDebugOverlay'
   | 'enableDropLogging'
   | 'authorRateLimitEnabled'
+  | 'showBacklogIndicator'
 >;
 
 export const ROOT_NUMERIC_KEYS = [
@@ -50,6 +51,8 @@ export const ROOT_NUMERIC_KEYS = [
   'debugOverlayOpacity',
   'authorRateLimitWindowMs',
   'authorRateLimitMaxMessages',
+  'backlogMaxRate',
+  'backlogSpeedMultiplier',
 ] as const satisfies readonly RootNumericSettingKey[];
 
 export const ROOT_SETTING_KEYS = [
@@ -72,6 +75,9 @@ export const ROOT_SETTING_KEYS = [
   'authorRateLimitEnabled',
   'authorRateLimitWindowMs',
   'authorRateLimitMaxMessages',
+  'backlogMaxRate',
+  'backlogSpeedMultiplier',
+  'showBacklogIndicator',
 ] as const satisfies readonly RootScalarSettingKey[];
 
 export const OUTLINE_SETTING_KEYS = [
@@ -124,6 +130,7 @@ const ROOT_NUMERIC_FIELDS: Readonly<
       | 'showDebugOverlay'
       | 'enableDropLogging'
       | 'authorRateLimitEnabled'
+      | 'showBacklogIndicator'
     >,
     NumericFieldDef
   >
@@ -141,6 +148,8 @@ const ROOT_NUMERIC_FIELDS: Readonly<
   debugOverlayOpacity: { limits: SETTINGS_LIMITS.debugOverlayOpacity },
   authorRateLimitWindowMs: { limits: SETTINGS_LIMITS.authorRateLimitWindowMs },
   authorRateLimitMaxMessages: { limits: SETTINGS_LIMITS.authorRateLimitMaxMessages },
+  backlogMaxRate: { limits: SETTINGS_LIMITS.backlogMaxRate },
+  backlogSpeedMultiplier: { limits: SETTINGS_LIMITS.backlogSpeedMultiplier },
 };
 
 const OUTLINE_NUMERIC_FIELDS: Readonly<
@@ -170,6 +179,10 @@ const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings
     typeof settings.authorRateLimitEnabled === 'boolean'
       ? settings.authorRateLimitEnabled
       : d.authorRateLimitEnabled;
+  n.showBacklogIndicator =
+    typeof settings.showBacklogIndicator === 'boolean'
+      ? settings.showBacklogIndicator
+      : d.showBacklogIndicator;
 
   for (const [key, { limits }] of Object.entries(ROOT_NUMERIC_FIELDS)) {
     n[key as keyof typeof ROOT_NUMERIC_FIELDS] = clampNumber(
