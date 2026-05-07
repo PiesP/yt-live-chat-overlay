@@ -347,7 +347,7 @@ export class Renderer {
       startTime + adjustedDuration
     );
 
-    // Cleanup via animationend event
+    // Cleanup via animationend event.
     const cleanup = (): void => {
       element.removeEventListener('animationend', cleanup);
       this.removeMessageByElement(element);
@@ -406,14 +406,30 @@ export class Renderer {
 
     this.activeMessages.forEach((active) => {
       try {
+        // Time-based guard: do not remove messages before their animation
+        // has had sufficient time to complete. getAnimations() / playState
+        // can be unreliable during the animation-delay period and shortly
+        // after start across different browsers.
+        const elapsed = performance.now() - active.startTime;
+        const minLifetimeMs = active.baseDuration + 500;
+        if (elapsed < minLifetimeMs) return;
+
         const animations = active.element.getAnimations();
-        const isFinished =
-          animations.length === 0 ||
-          animations.some((a) => a.playState === 'finished' || a.playState === 'idle');
-        if (isFinished) {
+        if (animations.length === 0) {
           this.activeMessages.delete(active);
           if (active.element.parentNode) {
             active.element.remove();
+          }
+          return;
+        }
+
+        for (const anim of animations) {
+          if (anim.playState === 'finished') {
+            this.activeMessages.delete(active);
+            if (active.element.parentNode) {
+              active.element.remove();
+            }
+            return;
           }
         }
       } catch (error) {
