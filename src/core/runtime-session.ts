@@ -5,7 +5,6 @@ import { createLogger } from '@core/logging';
 import { OVERLAY_SELECTOR, Overlay } from '@core/overlay';
 import { Renderer } from '@core/renderer';
 import { shouldResetRendererForSettingsChange } from '@core/settings-schema';
-import { VideoSync } from '@core/video-sync';
 
 const log = createLogger('RuntimeSession');
 
@@ -21,17 +20,13 @@ export interface RuntimeSessionOptions {
 }
 
 export type RuntimeSessionStartStatus = 'started' | 'retryable' | 'unavailable';
-export type RuntimeSessionRestartReason =
-  | 'foreground-return'
-  | 'video-play'
-  | 'watchdog'
-  | 'seeking';
+export type RuntimeSessionRestartReason = 'foreground-return' | 'watchdog';
 
 /**
  * Owns one full overlay runtime for a specific page URL.
  *
  * Invariants:
- * - A session owns exactly one Overlay/Renderer/ChatSource/VideoSync set.
+ * - A session owns exactly one Overlay/Renderer/ChatSource set.
  * - All async startup work is cancelled by one AbortController.
  * - Long-idle resume and unhealthy runtime state are handled by a managed
  *   RuntimeSession recycle instead of in-place reconnect logic.
@@ -44,14 +39,12 @@ export class RuntimeSession {
   private overlay: Overlay | null = null;
   private renderer: Renderer | null = null;
   private chatSource: ChatSource | null = null;
-  private videoSync: VideoSync | null = null;
   private foregroundCleanup: (() => void) | null = null;
   private chatWatchdogTimer: number | null = null;
   private disposed = false;
   private sessionReady = false;
   private restartRequested = false;
   private hiddenSince: number | null = null;
-  private playbackPausedSince: number | null = null;
 
   constructor(options: RuntimeSessionOptions) {
     this.targetUrl = options.targetUrl;
@@ -84,36 +77,6 @@ export class RuntimeSession {
 
       this.overlay = overlay;
       this.renderer = new Renderer(overlay, this.settings);
-
-      const videoSync = new VideoSync({
-        onPause: () => {
-          this.notePlaybackPaused();
-          this.renderer?.pause();
-        },
-        onPlay: () => {
-          if (!this.sessionReady) {
-            this.clearPlaybackPaused();
-            this.renderer?.resume();
-            return;
-          }
-
-          this.handleRuntimeResume('video-play');
-        },
-        onRateChange: (rate) => {
-          log.info('Video playback rate changed:', rate);
-          this.renderer?.setPlaybackRate(rate);
-        },
-        onSeeking: () => {
-          if (!this.sessionReady) {
-            return;
-          }
-
-          this.requestManagedRestart('seeking');
-        },
-      });
-      this.videoSync = videoSync;
-      await videoSync.init(signal);
-      throwIfAborted(signal);
 
       const chatStarted = await this.startChatSource(signal);
       throwIfAborted(signal);
@@ -183,16 +146,12 @@ export class RuntimeSession {
     this.chatSource?.stop();
     this.chatSource = null;
 
-    this.videoSync?.destroy();
-    this.videoSync = null;
-
     this.renderer?.destroy();
     this.renderer = null;
 
     this.overlay?.destroy();
     this.overlay = null;
     this.hiddenSince = null;
-    this.playbackPausedSince = null;
 
     log.info('Disposed');
   }
@@ -227,29 +186,15 @@ export class RuntimeSession {
     this.hiddenSince = null;
   }
 
-  private notePlaybackPaused(now = Date.now()): void {
-    if (this.playbackPausedSince === null) {
-      this.playbackPausedSince = now;
-    }
-  }
-
-  private clearPlaybackPaused(): void {
-    this.playbackPausedSince = null;
-  }
-
   private getIdleDurationMs(now = Date.now()): number {
-    const hiddenDuration = this.hiddenSince === null ? 0 : Math.max(0, now - this.hiddenSince);
-    const pausedDuration =
-      this.playbackPausedSince === null ? 0 : Math.max(0, now - this.playbackPausedSince);
-
-    return Math.max(hiddenDuration, pausedDuration);
+    return this.hiddenSince === null ? 0 : Math.max(0, now - this.hiddenSince);
   }
 
   private hasRenderableRuntime(): boolean {
     const container = this.overlay?.getContainer();
     const dimensions = this.overlay?.getDimensions();
 
-    return Boolean(container?.isConnected && dimensions && this.videoSync?.hasVideoElement());
+    return Boolean(container?.isConnected && dimensions);
   }
 
   private getRuntimeHealthSnapshot(now = Date.now()): {
@@ -281,10 +226,6 @@ export class RuntimeSession {
     if (!document.hidden) {
       this.clearHidden();
     }
-
-    if (!(this.videoSync?.isPaused() ?? false)) {
-      this.clearPlaybackPaused();
-    }
   }
 
   private requestManagedRestart(reason: RuntimeSessionRestartReason): void {
@@ -299,15 +240,13 @@ export class RuntimeSession {
   }
 
   private handleRuntimeResume(
-    reason: Extract<RuntimeSessionRestartReason, 'foreground-return' | 'video-play'>
+    reason: Extract<RuntimeSessionRestartReason, 'foreground-return'>
   ): void {
     if (this.disposed) {
       return;
     }
 
     // Clear idle markers first so the health snapshot reflects current state.
-    // Otherwise stale markers (e.g. playbackPausedSince set while tab was hidden)
-    // can trigger an unnecessary restart on resume.
     this.clearIdleMarkersForActiveState();
 
     if (this.getRuntimeHealthSnapshot().shouldRestart) {
@@ -334,11 +273,6 @@ export class RuntimeSession {
 
       if (this.getIdleDurationMs() >= LONG_IDLE_RESTART_MS) {
         this.requestManagedRestart('foreground-return');
-        return;
-      }
-
-      if (this.videoSync?.isPaused()) {
-        this.clearHidden();
         return;
       }
 
@@ -377,13 +311,6 @@ export class RuntimeSession {
       try {
         // Skip checks while disposed, hidden, or mid-restart
         if (this.disposed || document.hidden || this.restartRequested) {
-          return;
-        }
-
-        // Skip checks while video is paused — the resume handler
-        // will perform a full health check when playback resumes.
-        const isPaused = this.videoSync?.isPaused();
-        if (isPaused === undefined || isPaused === true) {
           return;
         }
 
