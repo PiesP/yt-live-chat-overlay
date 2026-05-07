@@ -270,7 +270,7 @@ export class ChatMessageParser {
 
   private parseMessageContent(value: unknown): ParsedMessageBody {
     if (!isRecord(value)) {
-      return this.createEmptyMessageBody();
+      return EMPTY_MESSAGE_BODY;
     }
 
     const simpleText = getString(value.simpleText);
@@ -324,10 +324,6 @@ export class ChatMessageParser {
       content: segments,
       visibleLength: this.getVisibleContentLength(segments),
     };
-  }
-
-  private createEmptyMessageBody(): ParsedMessageBody {
-    return EMPTY_MESSAGE_BODY;
   }
 
   private appendTextSegment(segments: ContentSegment[], content: string): void {
