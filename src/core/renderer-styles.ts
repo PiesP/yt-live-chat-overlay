@@ -215,4 +215,40 @@ export const RENDERER_STATIC_STYLES = `
     color: ${colors.ui.text};
     text-shadow: ${shadows.text.sm};
   }
+
+  /* ── CSS slide animation (GPU accelerated) ──────────────────────────────── */
+  @keyframes yt-overlay-comment-slide {
+    from {
+      transform: translateX(var(--yt-msg-entry-offset, 0px));
+      opacity: var(--yt-msg-start-opacity, 1);
+    }
+    to {
+      transform: translateX(var(--yt-msg-exit-offset, -3000px));
+      opacity: var(--yt-msg-end-opacity, 1);
+    }
+  }
+
+  .yt-overlay-message-animate {
+    animation-name: yt-overlay-comment-slide;
+    animation-duration: var(--yt-msg-duration, 8s);
+    animation-delay: var(--yt-msg-delay, 0ms);
+    animation-timing-function: linear;
+    animation-fill-mode: forwards;
+    animation-play-state: var(--yt-msg-play-state, running);
+  }
+
+  .yt-overlay-message-exit {
+    animation: yt-overlay-message-fadeout 300ms ease-out forwards;
+  }
+
+  @keyframes yt-overlay-message-fadeout {
+    from {
+      opacity: var(--yt-msg-current-opacity, 1);
+      transform: var(--yt-msg-current-transform, none);
+    }
+    to {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+  }
 `;

@@ -11,8 +11,37 @@ import {
   RENDERER_LAYOUT as LAYOUT,
   parseRgbColor,
   type RgbColor,
+  spacing,
 } from '@core/design-tokens';
 import { normalizeYouTubeImageUrl } from '@core/youtubei-chat';
+
+// ── Canvas text measurement (no DOM reflow) ──────────────────────────────
+let _textMeasureCtx: CanvasRenderingContext2D | null = null;
+
+function getTextMeasureCtx(): CanvasRenderingContext2D {
+  if (!_textMeasureCtx) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 0;
+    canvas.height = 0;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      throw new Error('Failed to initialize Canvas 2D context for text measurement');
+    }
+    _textMeasureCtx = ctx;
+  }
+  return _textMeasureCtx;
+}
+
+/**
+ * Measure the pixel width of a text string using Canvas measureText().
+ * Font string must match the CSS `font` shorthand used at render time.
+ */
+export function measureTextWidth(text: string, font: string): number {
+  const ctx = getTextMeasureCtx();
+  ctx.font = font;
+  const metrics = ctx.measureText(text);
+  return Math.ceil(metrics.width);
+}
 
 interface AuthorNameOptions {
   className?: string;
@@ -67,6 +96,125 @@ export class RendererMessageBuilder {
     }
 
     return this.buildRegularMessageElement(message);
+  }
+
+  /**
+   * Estimate message element dimensions using Canvas measureText().
+   * No DOM append / reflow — uses pre-measured text widths + known layout constants.
+   *
+   * The estimates are close enough for lane collision detection and animation
+   * distance calculation.  Slight over-estimation is safe (extra gap between messages).
+   */
+  estimateMessageDimensions(message: ChatMessage): { width: number; height: number } {
+    const settings = this.getSettings();
+    const fontSize = settings.fontSize;
+    const font = `${fontSize}px system-ui, -apple-system, sans-serif`;
+    const lineHeight = 1.1;
+
+    if (message.kind === 'superchat' && message.superChat) {
+      return this.estimateSuperChatDimensions(message, font, fontSize);
+    }
+
+    if (message.kind === 'membership') {
+      return this.estimateMembershipDimensions(message, font, fontSize);
+    }
+
+    return this.estimateRegularMessageDimensions(message, font, fontSize, lineHeight);
+  }
+
+  private estimateRegularMessageDimensions(
+    message: ChatMessage,
+    font: string,
+    fontSize: number,
+    lineHeight: number
+  ): { width: number; height: number } {
+    const showAuthor = this.shouldShowAuthor(message);
+    const textWidth = this.measureContentWidth(message, font, fontSize);
+
+    if (!showAuthor || !message.author) {
+      return {
+        width: textWidth,
+        height: Math.ceil(fontSize * lineHeight),
+      };
+    }
+
+    const authorFont = `${Math.round(fontSize * LAYOUT.AUTHOR_FONT_SCALE)}px system-ui, -apple-system, sans-serif`;
+    const authorNameWidth = measureTextWidth(message.author, authorFont);
+    const authorSectionWidth = LAYOUT.AUTHOR_PHOTO_SIZE + spacing.sm + authorNameWidth;
+
+    // With-author container has padding: 8px 12px on each side
+    const paddingH = spacing.md * 2;
+    const totalWidth = Math.max(authorSectionWidth + paddingH, textWidth + paddingH);
+
+    const photoHeight = LAYOUT.AUTHOR_PHOTO_SIZE;
+    const nameHeight = Math.ceil(fontSize * LAYOUT.AUTHOR_FONT_SCALE * lineHeight);
+    const authorSectionHeight = Math.max(photoHeight, nameHeight);
+    const textHeight = Math.ceil(fontSize * lineHeight);
+    const paddingV = spacing.sm * 2; // padding-top + padding-bottom
+
+    return {
+      width: totalWidth,
+      height: authorSectionHeight + spacing.xs + textHeight + paddingV,
+    };
+  }
+
+  private estimateSuperChatDimensions(
+    message: ChatMessage,
+    font: string,
+    fontSize: number
+  ): { width: number; height: number } {
+    const textWidth = this.measureContentWidth(message, font, fontSize);
+    const paddingH = spacing.md * 2;
+    const paddingV = spacing.sm + spacing.md; // header padding + body padding
+    const lineCount = message.text.length > 80 ? 2 : 1;
+    const textHeight = Math.ceil(fontSize * 1.5 * lineCount); // 1.5 line-height for superchat body
+    const headerHeight = Math.ceil(fontSize * 0.85) + spacing.sm * 2;
+
+    return {
+      width: Math.max(280, Math.min(640, textWidth + paddingH)),
+      height: headerHeight + spacing.sm + textHeight + paddingV,
+    };
+  }
+
+  private estimateMembershipDimensions(
+    message: ChatMessage,
+    font: string,
+    fontSize: number
+  ): { width: number; height: number } {
+    const textWidth = this.measureContentWidth(message, font, fontSize);
+    const paddingH = spacing.lg * 2;
+    const paddingV = spacing.md + spacing.lg;
+
+    const photoHeight = LAYOUT.AUTHOR_PHOTO_SIZE;
+    const nameHeight = Math.ceil(fontSize * 1.1);
+    const infoHeight = Math.max(photoHeight, nameHeight);
+    const textHeight = Math.ceil(fontSize * 1.1);
+
+    return {
+      width: textWidth + paddingH,
+      height: infoHeight + spacing.xs + textHeight + paddingV,
+    };
+  }
+
+  /**
+   * Measure the pixel width of all text + emoji content segments.
+   */
+  private measureContentWidth(message: ChatMessage, font: string, fontSize: number): number {
+    let width = 0;
+
+    if (message.content.length > 0) {
+      for (const segment of message.content) {
+        if (segment.type === 'text') {
+          width += measureTextWidth(segment.content, font);
+        } else if (segment.type === 'emoji') {
+          width += Math.ceil(fontSize * LAYOUT.EMOJI_SIZE) + 4; // 4px for margin + border
+        }
+      }
+    } else if (message.text) {
+      width += measureTextWidth(message.text, font);
+    }
+
+    return Math.ceil(width);
   }
 
   private createImageElement(

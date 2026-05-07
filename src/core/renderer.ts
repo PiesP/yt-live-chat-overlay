@@ -19,12 +19,13 @@ const log = createLogger('Renderer');
 
 interface ActiveMessage {
   element: HTMLDivElement;
-  animation: Animation;
-  /** Cleanup callback registered as finish/cancel listener on the animation.
-   *  Stored so removeMessage can detach it before calling cancel(),
-   *  preventing the event listener from needlessly re-entering the
-   *  removal path after the message has already been deleted from
-   *  activeMessages. */
+  /** performance.now() timestamp when the animation was started. */
+  readonly startTime: DOMHighResTimeStamp;
+  /** Base duration before playbackRate adjustment. */
+  readonly baseDuration: number;
+  /** Cleanup callback registered as animationend listener.
+   *  Stored so removeMessage can detach it before manually removing,
+   *  preventing re-entrant removal after the element is already deleted. */
   readonly cleanup: () => void;
 }
 
@@ -212,8 +213,9 @@ export class Renderer {
   }
 
   /**
-   * Setup animation and positioning for a message element
-   * Returns ActiveMessage object for tracking
+   * Setup CSS-animation-based positioning for a message element.
+   * Uses CSS @keyframes + custom properties instead of element.animate()
+   * so animation runs on the GPU compositor thread.
    */
   private setupMessageAnimation(
     element: HTMLDivElement,
@@ -233,15 +235,15 @@ export class Renderer {
     let laneY: number;
     if (placement.laneSpan > 1) {
       const laneBlockHeight = placement.laneSpan * dimensions.laneHeight;
-      const messageHeight = element.offsetHeight;
       laneY = laneBlockTop + Math.max(0, (laneBlockHeight - messageHeight) / 2);
     } else {
       laneY = laneBlockTop;
     }
     element.style.top = `${laneY}px`;
+    element.style.left = `${dimensions.width}px`;
     element.style.visibility = 'visible';
 
-    // Calculate animation duration and padding
+    // Calculate animation distance and padding
     const exitPadding = Math.max(
       fontSize * RENDERER_LAYOUT.EXIT_PADDING_SCALE,
       RENDERER_LAYOUT.EXIT_PADDING_MIN
@@ -258,60 +260,51 @@ export class Renderer {
 
     // Optimized duration for better pacing
     const effectiveSpeedPxPerSec = this.getEffectiveSpeedPxPerSec();
-    const duration = Math.max(
+    const baseDuration = Math.max(
       RENDERER_LAYOUT.DURATION_MIN,
       Math.min(RENDERER_LAYOUT.DURATION_MAX, (adjustedDistance / effectiveSpeedPxPerSec) * 1000)
     );
+    const adjustedDuration = baseDuration / this.playbackRate;
 
     // Hierarchical delay: group lanes into tiers with base delay + small jitter.
-    // Same-tier messages start at similar times, reducing the staircase effect
-    // while maintaining natural variation between tiers.
     let laneDelay: number;
     if (lane.index <= 3) {
-      // Top tier (lanes 0-3): fastest start, minimal jitter
       laneDelay = Math.floor(Math.random() * 20);
     } else if (lane.index <= 7) {
-      // Middle tier (lanes 4-7): moderate start
       laneDelay = 30 + Math.floor(Math.random() * 30);
     } else {
-      // Bottom tier (lanes 8+): slightly delayed for natural flow
       laneDelay = 60 + Math.floor(Math.random() * 40);
     }
 
-    // Create Web Animation — start at entryOffset to the right of the
-    // normal starting position, then travel the full distance leftward.
-    const animation = element.animate(
-      [{ transform: `translateX(${entryOffset}px)` }, { transform: `translateX(-${distance}px)` }],
-      {
-        duration,
-        delay: laneDelay,
-        easing: 'linear',
-        fill: 'forwards',
-      }
-    );
-    animation.playbackRate = this.playbackRate;
+    // ── CSS custom properties drive the @keyframes animation ───────────
+    element.style.setProperty('--yt-msg-entry-offset', `${entryOffset}px`);
+    element.style.setProperty('--yt-msg-exit-offset', `-${distance}px`);
+    element.style.setProperty('--yt-msg-duration', `${adjustedDuration}ms`);
+    element.style.setProperty('--yt-msg-delay', `${laneDelay}ms`);
+    element.classList.add('yt-overlay-message-animate');
 
     // Update lane state with message dimensions
     const now = Date.now();
     const startTime = now + laneDelay;
-
     this.laneAllocator.commitPlacement(
       placement,
       textWidth,
       messageHeight,
       startTime,
-      startTime + duration
+      startTime + adjustedDuration
     );
 
+    // Cleanup via animationend event
     const cleanup = (): void => {
+      element.removeEventListener('animationend', cleanup);
       this.removeMessageByElement(element);
     };
-    animation.addEventListener('finish', cleanup, { once: true });
-    animation.addEventListener('cancel', cleanup, { once: true });
+    element.addEventListener('animationend', cleanup, { once: true });
 
     return {
       element,
-      animation,
+      startTime: performance.now(),
+      baseDuration,
       cleanup,
     };
   }
@@ -345,7 +338,7 @@ export class Renderer {
   }
 
   /**
-   * Remove stale activeMessage entries whose animation finished
+   * Remove stale activeMessage entries whose CSS animation finished
    * without triggering the cleanup callback (e.g. GC delay, rapid
    * destroy/create cycles, tab-hidden edge cases).
    *
@@ -360,12 +353,18 @@ export class Renderer {
 
     this.activeMessages.forEach((active) => {
       try {
-        if (active.animation.playState === 'finished') {
+        const animations = active.element.getAnimations();
+        const isFinished =
+          animations.length === 0 ||
+          animations.some((a) => a.playState === 'finished' || a.playState === 'idle');
+        if (isFinished) {
           this.activeMessages.delete(active);
-          active.element.remove();
+          if (active.element.parentNode) {
+            active.element.remove();
+          }
         }
       } catch (error) {
-        log.debug('Failed to check animation playState during sweep:', error);
+        log.debug('Failed to check animation state during sweep:', error);
         this.activeMessages.delete(active);
       }
     });
@@ -495,26 +494,10 @@ export class Renderer {
   }
 
   /**
-   * Append message to DOM in hidden state and measure rendered size
-   */
-  private measureMessageElement(
-    container: HTMLDivElement,
-    element: HTMLDivElement,
-    overlayWidth: number
-  ): { textWidth: number; messageHeight: number } {
-    element.style.visibility = 'hidden';
-    element.style.left = `${overlayWidth}px`;
-    element.style.top = '0px';
-    container.appendChild(element);
-
-    return {
-      textWidth: element.offsetWidth,
-      messageHeight: element.offsetHeight,
-    };
-  }
-
-  /**
-   * Render a single message
+   * Render a single message.
+   *
+   * Uses Canvas-based dimension estimation (no DOM reflow) and
+   * CSS animation (@keyframes) instead of element.animate().
    */
   private renderMessage(message: ChatMessage): RenderResult {
     const renderContext = this.getRenderContext();
@@ -525,6 +508,26 @@ export class Renderer {
 
     const { container, dimensions } = renderContext;
 
+    // ── Step 1: Estimate dimensions via Canvas (no DOM append) ─────────
+    const estimated = this.messageBuilder.estimateMessageDimensions(message);
+    const messageHeight = estimated.height;
+
+    // ── Step 2: Find available lane ────────────────────────────────────
+    const placement = this.laneAllocator.findPlacement(messageHeight, dimensions);
+    if (placement === null) {
+      log.debug(
+        `No available lane for message (height: ${messageHeight}px). ` +
+          `Active messages: ${this.activeMessages.size}, Lanes: ${dimensions.laneCount}, ` +
+          `Queue size: ${this.renderQueue.length}`
+      );
+      return { status: 'dropped' };
+    }
+
+    if (placement.waitMs > 0) {
+      return { status: 'deferred', waitMs: placement.waitMs };
+    }
+
+    // ── Step 3: Build element ──────────────────────────────────────────
     const builtMessage = this.messageBuilder.buildMessageElement(message);
     if (!builtMessage) {
       return { status: 'dropped' };
@@ -533,39 +536,18 @@ export class Renderer {
     const { element, isSuperChat, isMembership } = builtMessage;
     this.applyCommonMessageStyles(element, message, isSuperChat, isMembership);
 
-    // Add in hidden state and measure actual rendered dimensions
-    const { textWidth, messageHeight } = this.measureMessageElement(
-      container,
-      element,
-      dimensions.width
-    );
-
-    // Find available lane based on message height.
-    const placement = this.laneAllocator.findPlacement(messageHeight, dimensions);
-    if (placement === null) {
-      // No available lane, drop message
-      log.debug(
-        `No available lane for message (height: ${messageHeight}px). ` +
-          `Active messages: ${this.activeMessages.size}, Lanes: ${dimensions.laneCount}, ` +
-          `Queue size: ${this.renderQueue.length}`
-      );
-      element.remove();
-      return { status: 'dropped' };
-    }
-
-    if (placement.waitMs > 0) {
-      element.remove();
-      return { status: 'deferred', waitMs: placement.waitMs };
-    }
-
-    // Setup animation and positioning
+    // ── Step 4: Position, append, animate (single DOM touch) ──────────
     const activeMessage = this.setupMessageAnimation(
       element,
       placement,
-      textWidth,
+      estimated.width,
       messageHeight,
       dimensions
     );
+
+    // Append to container — now the element is at its final start
+    // position so there is no hidden measurement phase.
+    container.appendChild(element);
 
     // Track active message
     this.activeMessages.add(activeMessage);
@@ -581,7 +563,7 @@ export class Renderer {
       color: isSuperChat ? 'tier-based' : this.settings.colors[message.authorType],
       lane: placement.lane.index,
       laneSpan: placement.laneSpan,
-      width: textWidth,
+      width: estimated.width,
       height: messageHeight,
       dimensions,
     });
@@ -602,30 +584,16 @@ export class Renderer {
   /**
    * Remove active message
    *
-   * Detaches animation finish/cancel listeners *before* calling cancel()
+   * Detaches animationend listener before removing the element
    * so the auto-cleanup callback does not re-enter the removal path.
-   * The message is already deleted from activeMessages at this point,
-   * but removing the listeners avoids an unnecessary Set iteration in
-   * removeMessageByElement for every intentionally-cancelled animation.
    */
   private removeMessage(active: ActiveMessage): void {
     this.activeMessages.delete(active);
 
-    // Detach listeners before cancel() to avoid the cancel event
-    // re-entering removeMessageByElement unnecessarily.
     try {
-      active.animation.removeEventListener('finish', active.cleanup);
-      active.animation.removeEventListener('cancel', active.cleanup);
+      active.element.removeEventListener('animationend', active.cleanup);
     } catch {
-      // Animation may already be detached from the element — ignore.
-    }
-
-    try {
-      if (active.animation.playState !== 'finished') {
-        active.animation.cancel();
-      }
-    } catch (error) {
-      log.warn('Failed to cancel animation:', error);
+      // Element may already be detached — ignore.
     }
 
     if (active.element.parentNode) {
@@ -652,7 +620,7 @@ export class Renderer {
   }
 
   /**
-   * Pause all active animations
+   * Pause all active CSS animations via animation-play-state
    */
   pause(): void {
     if (this.isPaused) return;
@@ -661,12 +629,14 @@ export class Renderer {
     this.isPaused = true;
     this.pausedAt = Date.now();
     this.clearRetryTimer();
-    this.forEachAnimation((animation) => animation.pause());
+    this.forEachElement((el) => {
+      el.style.animationPlayState = 'paused';
+    });
     log.debug(`Paused ${this.activeMessages.size} animations`);
   }
 
   /**
-   * Resume all active animations and process queued messages
+   * Resume all active CSS animations and process queued messages
    */
   resume(): void {
     if (!this.isPaused) return;
@@ -683,7 +653,9 @@ export class Renderer {
 
     log.debug('Resuming all animations');
     this.isPaused = false;
-    this.forEachAnimation((animation) => animation.play());
+    this.forEachElement((el) => {
+      el.style.animationPlayState = 'running';
+    });
     log.debug(`Resumed ${this.activeMessages.size} animations`);
 
     // Process any queued messages
@@ -691,8 +663,11 @@ export class Renderer {
   }
 
   /**
-   * Set playback rate for all active animations
-   * Synchronizes animation speed with video playback rate
+   * Set playback rate for all active CSS animations.
+   *
+   * CSS animations lack a native playbackRate property, so we restart
+   * each animation with an adjusted duration and seek to the correct
+   * elapsed time via negative animation-delay.
    */
   setPlaybackRate(rate: number): void {
     if (rate <= 0) {
@@ -703,21 +678,36 @@ export class Renderer {
     this.playbackRate = rate;
 
     log.debug(`Setting playback rate to ${rate}x for ${this.activeMessages.size} animations`);
-    this.forEachAnimation((animation) => {
-      animation.playbackRate = rate;
-    });
+
+    for (const active of this.activeMessages) {
+      try {
+        const elapsed = performance.now() - active.startTime;
+        const adjustedDuration = active.baseDuration / rate;
+
+        // Restart CSS animation with new duration, seeked to current position.
+        // Forced reflow here is acceptable since rate changes are infrequent.
+        const el = active.element;
+        el.style.animationName = 'none';
+        void el.offsetWidth;
+        el.style.animationName = '';
+        el.style.setProperty('--yt-msg-duration', `${adjustedDuration}ms`);
+        el.style.setProperty('--yt-msg-delay', `${-Math.min(elapsed, active.baseDuration)}ms`);
+      } catch (error) {
+        log.warn('Failed to update animation rate:', error);
+      }
+    }
   }
 
   /**
-   * Helper method to apply an operation to all active animations
-   * Centralizes animation manipulation logic
+   * Helper method to apply an operation to all active message elements.
+   * Replaces the old forEachAnimation that operated on Animation objects.
    */
-  private forEachAnimation(operation: (animation: Animation) => void): void {
+  private forEachElement(operation: (element: HTMLDivElement) => void): void {
     for (const active of this.activeMessages) {
       try {
-        operation(active.animation);
+        operation(active.element);
       } catch (error) {
-        log.warn('Animation operation failed:', error);
+        log.warn('Element operation failed:', error);
       }
     }
   }
