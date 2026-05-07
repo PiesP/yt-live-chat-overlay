@@ -105,8 +105,6 @@ export const rendererLayout = {
   laneHeightPaddingMin: 2,
   retryDelayMinMs: 4,
   retryDelayMaxMs: 800,
-  queueMaxSize: 30,
-  maxMessagesPerCycle: 5,
   /** Density-based speed adjustment: speed multiplier for low density (< 0.3) */
   speedDensityLow: 0.8,
   /** Density-based speed adjustment: speed multiplier for high density (> 0.8) */
