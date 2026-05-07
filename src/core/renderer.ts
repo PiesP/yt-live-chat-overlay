@@ -83,6 +83,9 @@ export class Renderer {
   /** Ids of messages already enqueued/rendered, for dedup across reconnect/resume. */
   private static readonly SEEN_MESSAGE_IDS_LIMIT = 200;
   private readonly seenMessageIds = new MessageIdRegistry(Renderer.SEEN_MESSAGE_IDS_LIMIT);
+  private visibilityHandler: (() => void) | null = null;
+  /** Maximum queue size when tab is in background. */
+  private static readonly BACKGROUND_QUEUE_MAX = 10;
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
     this.overlay = overlay;
@@ -104,6 +107,16 @@ export class Renderer {
     this.overlayDimensionsUnsubscribe = this.overlay.onDimensionsChanged((dimensions) => {
       this.handleOverlayDimensionsChange(dimensions);
     });
+
+    // visibilitychange handler for tab visibility optimization
+    this.visibilityHandler = () => {
+      if (document.hidden) {
+        this.handleBackgroundTab();
+      } else {
+        this.handleForegroundTab();
+      }
+    };
+    document.addEventListener('visibilitychange', this.visibilityHandler);
   }
 
   private resetRenderedState(): void {
@@ -792,6 +805,27 @@ export class Renderer {
     }
   }
 
+  private handleBackgroundTab(): void {
+    // Limit queue size when tab is hidden to reduce memory usage.
+    // Drop lowest-priority messages first using the priority system from Phase 1.
+    if (this.pendingQueue.length > Renderer.BACKGROUND_QUEUE_MAX) {
+      const excess = this.pendingQueue.length - Renderer.BACKGROUND_QUEUE_MAX;
+      this.pendingQueue.sort(
+        (a, b) => a.priority - b.priority || a.message.timestamp - b.message.timestamp
+      );
+      this.pendingQueue.splice(0, excess);
+      // Restore priority DESC + timestamp ASC order for processing.
+      this.pendingQueue.sort(
+        (a, b) => b.priority - a.priority || a.message.timestamp - b.message.timestamp
+      );
+    }
+  }
+
+  private handleForegroundTab(): void {
+    // Resume queue processing immediately when returning to foreground.
+    this.processQueue();
+  }
+
   /**
    * Update settings
    */
@@ -914,6 +948,11 @@ export class Renderer {
     this.resetRenderedState();
     this.seenMessageIds.clear();
     this.pausedAt = null;
+
+    if (this.visibilityHandler) {
+      document.removeEventListener('visibilitychange', this.visibilityHandler);
+      this.visibilityHandler = null;
+    }
     this.playbackRate = 1;
 
     this.styleElement?.remove();
