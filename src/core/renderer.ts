@@ -49,15 +49,6 @@ interface RendererUpdateOptions {
   resetState?: boolean;
 }
 
-/** Tolerance (ms) for sweepStaleAnimations: skip messages whose animation
- *  has not had enough time to complete, to avoid false positives from
- *  getAnimations() being unreliable shortly after start. */
-const SWEEP_TOLERANCE_MS = 500;
-
-/** Maximum random delay (ms) added to each message's animation start to
- *  stagger entries across lanes without creating a visible chat-to-overlay gap. */
-const MAX_ANIMATION_JITTER_MS = 15;
-
 const combineTextShadows = (...shadows: string[]): string => {
   const normalizedShadows = shadows.filter((shadow) => shadow !== '' && shadow !== 'none');
   return normalizedShadows.length > 0 ? normalizedShadows.join(', ') : 'none';
@@ -74,6 +65,13 @@ export class Renderer {
   private pausedAt: number | null = null;
   private playbackRate = 1;
   private lastWarningTime = 0;
+  /** Tolerance (ms) for sweepStaleAnimations: skip messages whose animation
+   *  has not had enough time to complete, to avoid false positives from
+   *  getAnimations() being unreliable shortly after start. */
+  private static readonly SWEEP_TOLERANCE_MS = 500;
+  /** Maximum random delay (ms) added to each message's animation start to
+   *  stagger entries across lanes without creating a visible chat-to-overlay gap. */
+  private static readonly MAX_ANIMATION_JITTER_MS = 15;
   private static readonly WARNING_INTERVAL_MS = 10_000;
   /** Dynamic queue sizing: base capacity */
   private static readonly QUEUE_DEFAULT_SIZE = 30;
@@ -312,7 +310,7 @@ export class Renderer {
     // on different lanes don't begin at identical horizontal offsets.
     // The maximum delay is kept very low (≤15ms) to minimise the
     // chat-to-overlay visual gap.
-    const laneDelay = Math.floor(Math.random() * MAX_ANIMATION_JITTER_MS);
+    const laneDelay = Math.floor(Math.random() * Renderer.MAX_ANIMATION_JITTER_MS);
 
     // ── CSS custom properties drive the @keyframes animation ───────────
     element.style.setProperty('--yt-msg-entry-offset', `${entryOffset}px`);
@@ -417,7 +415,7 @@ export class Renderer {
         // can be unreliable during the animation-delay period and shortly
         // after start across different browsers.
         const elapsed = performance.now() - active.startTime;
-        const minLifetimeMs = active.baseDuration + SWEEP_TOLERANCE_MS;
+        const minLifetimeMs = active.baseDuration + Renderer.SWEEP_TOLERANCE_MS;
         if (elapsed < minLifetimeMs) return;
 
         const animations = active.element.getAnimations();
