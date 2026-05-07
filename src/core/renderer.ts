@@ -10,7 +10,7 @@ import { RENDERER_LAYOUT, shadows } from '@core/design-tokens';
 import { createLogger } from '@core/logging';
 import { MessageIdRegistry } from '@core/message-id-registry';
 import type { Overlay } from '@core/overlay';
-import { RenderQueue, SmoothPacer } from '@core/renderer-flow';
+import { RenderQueue } from '@core/renderer-flow';
 import { LaneAllocator, type LanePlacement } from '@core/renderer-lanes';
 import { RendererMessageBuilder } from '@core/renderer-message-builder';
 import { RENDERER_STATIC_STYLES } from '@core/renderer-styles';
@@ -54,7 +54,6 @@ export class Renderer {
   private readonly messageBuilder: RendererMessageBuilder;
   private activeMessages: Set<ActiveMessage> = new Set();
   private readonly renderQueue = new RenderQueue(RENDERER_LAYOUT.QUEUE_MAX_SIZE);
-  private readonly pacer: SmoothPacer;
   private isPaused = false;
   private pausedAt: number | null = null;
   private playbackRate = 1;
@@ -86,7 +85,6 @@ export class Renderer {
       laneHeightPaddingScale: RENDERER_LAYOUT.LANE_HEIGHT_PADDING_SCALE,
       laneHeightPaddingMin: RENDERER_LAYOUT.LANE_HEIGHT_PADDING_MIN,
     });
-    this.pacer = new SmoothPacer({ getMaxRate: () => this.settings.maxMessagesPerSecond });
     this.laneAllocator.reset(this.overlay.getDimensions());
     this.injectStyles();
     this.overlayDimensionsUnsubscribe = this.overlay.onDimensionsChanged((dimensions) => {
@@ -332,7 +330,6 @@ export class Renderer {
     }
 
     this.renderQueue.enqueue(message);
-    this.pacer.recordArrival();
 
     // Only process queue if not paused — debounce to a single microtask
     // so that N synchronous addMessage calls schedule only one processQueue
@@ -375,11 +372,11 @@ export class Renderer {
   }
 
   /**
-   * Process messages from the queue, paced by the SmoothPacer.
+   * Process messages from the queue immediately.
    *
-   * Displays one message per cycle, respecting the arrival-rate-driven gap
-   * from SmoothPacer and lane availability.  Re-schedules itself when there
-   * are still messages waiting or lanes are temporarily busy.
+   * Displays one message per cycle, respecting lane availability.
+   * Re-schedules itself when there are still messages waiting
+   * or lanes are temporarily busy.
    */
   private processQueue(): void {
     // Don't process while paused
@@ -407,14 +404,6 @@ export class Renderer {
       return;
     }
 
-    // Smooth pacer: display messages at a steady rate matching arrival velocity.
-    if (!this.pacer.canDisplay(now)) {
-      const pacerDelay = this.pacer.getDisplayDelay(now);
-      queued.nextAttemptAt = now + pacerDelay;
-      this.scheduleRetry(pacerDelay);
-      return;
-    }
-
     // Soft cap warning (non-blocking)
     if (this.activeMessages.size >= this.settings.maxConcurrentMessages) {
       this.logPerformanceWarning();
@@ -428,9 +417,9 @@ export class Renderer {
       queued.nextAttemptAt = now + result.waitMs;
     }
 
-    // Schedule next using pacer-based gap.
+    // Schedule next if there are still messages waiting.
     if (this.renderQueue.length > 0 && !this.isPaused) {
-      this.scheduleRetry(this.pacer.getDisplayDelay(now));
+      this.scheduleRetry(RENDERER_LAYOUT.RETRY_DELAY_MIN_MS);
     }
   }
 
@@ -654,7 +643,6 @@ export class Renderer {
     if (options.resetState) {
       this.resetRenderedState();
       this.laneAllocator.reset(this.overlay.getDimensions());
-      this.pacer.reset();
       return;
     }
 
@@ -689,7 +677,6 @@ export class Renderer {
       const pausedDuration = Math.min(Math.max(0, now - this.pausedAt), 60_000);
       if (pausedDuration > 0) {
         this.laneAllocator.shiftTimeline(pausedDuration);
-        this.pacer.shiftTimeline(pausedDuration);
       }
     }
     this.pausedAt = null;
@@ -744,7 +731,6 @@ export class Renderer {
     this.overlayDimensionsUnsubscribe = null;
 
     this.resetRenderedState();
-    this.pacer.reset();
     this.seenMessageIds.clear();
     this.pausedAt = null;
     this.playbackRate = 1;
