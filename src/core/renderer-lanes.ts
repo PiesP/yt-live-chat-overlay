@@ -69,7 +69,10 @@ export class LaneAllocator {
           allValid = false;
           break;
         }
-        blockReadyTime = Math.max(blockReadyTime, this.calculateLaneReadyTime(lane, now));
+        blockReadyTime = Math.max(
+          blockReadyTime,
+          this.calculateLaneReadyTime(lane, now, dimensions.width)
+        );
       }
 
       if (!allValid || !Number.isFinite(blockReadyTime)) {
@@ -157,7 +160,7 @@ export class LaneAllocator {
     return Math.max(1, Math.ceil((messageHeight + paddingPx) / laneHeight));
   }
 
-  private calculateLaneReadyTime(lane: LaneState, now: number): number {
+  private calculateLaneReadyTime(lane: LaneState, now: number, playerWidth: number): number {
     if (lane.lastItemStartTime <= 0) {
       return now;
     }
@@ -175,7 +178,7 @@ export class LaneAllocator {
     const safeTimeGap = (requiredGapPx / speed) * 1000;
     const horizontalReadyTime = lane.lastItemStartTime + safeTimeGap;
 
-    const traverseTimeMs = (window.innerWidth / speed) * 1000;
+    const traverseTimeMs = (playerWidth / speed) * 1000;
     const dynamicClearMs = Math.max(traverseTimeMs * 0.05, 200);
     const verticalReadyTime = lane.lastItemStartTime + dynamicClearMs;
 

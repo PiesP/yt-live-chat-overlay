@@ -165,12 +165,11 @@ export class ObservabilityReporter {
     if (this.debugOverlayEl) return;
     const el = document.createElement('div');
     el.id = 'yt-chat-overlay-debug';
-    el.style.cssText = `
-      position: fixed; top: 8px; right: 8px; z-index: 99999;
-      background: rgba(0,0,0,0.8); color: #0f0; font: 12px/1.4 monospace;
-      padding: 8px 12px; border-radius: 4px; min-width: 220px;
-      pointer-events: none; user-select: none;
-    `;
+    el.style.cssText =
+      'position:fixed;top:8px;right:8px;z-index:99999;' +
+      'background:rgba(0,0,0,0.8);color:#0f0;font:12px/1.4 monospace;' +
+      'padding:8px 12px;border-radius:4px;min-width:220px;' +
+      'pointer-events:none;user-select:none';
     document.body.appendChild(el);
     this.debugOverlayEl = el;
     this.scheduleDebugUpdate();
@@ -187,13 +186,14 @@ export class ObservabilityReporter {
   private updateDebugOverlay(): void {
     if (!this.debugOverlayEl) return;
     const m = this.getMetrics();
-    this.debugOverlayEl.innerHTML = `
-      <div>Rcvd: ${m.totalReceived} | Rndr: ${m.totalRendered}</div>
-      <div>Drop: ${m.totalDropped} (${(m.dropRate * 100).toFixed(1)}%)</div>
-      <div>Queue: ${m.queueDepth} | Burst: ${m.burstLevel}</div>
-      <div>Active: ${m.activeMessages} | Lane: ${(m.laneUtilization * 100).toFixed(0)}%</div>
-      <div>Backlog: ${(m.backlogProgress * 100).toFixed(0)}%</div>
-    `;
+    const lines = [
+      `Rcvd: ${m.totalReceived} | Rndr: ${m.totalRendered}`,
+      `Drop: ${m.totalDropped} (${(m.dropRate * 100).toFixed(1)}%)`,
+      `Queue: ${m.queueDepth} | Burst: ${m.burstLevel}`,
+      `Active: ${m.activeMessages} | Lane: ${(m.laneUtilization * 100).toFixed(0)}%`,
+      `Backlog: ${(m.backlogProgress * 100).toFixed(0)}%`,
+    ];
+    this.debugOverlayEl.innerHTML = lines.map((l) => `<div>${l}</div>`).join('');
   }
 
   private destroyDebugOverlay(): void {
