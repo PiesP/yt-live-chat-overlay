@@ -99,7 +99,6 @@ export type ChatSourceStartStatus = 'started' | 'retryable' | 'unavailable';
 export abstract class ChatSource {
   protected readonly parser: ChatMessageParser;
   protected callback: MessageCallback | null = null;
-  private lifecycleController: AbortController | null = null;
   private pollController: AbortController | null = null;
   private pollLoopAlive = false;
   private pollGeneration = 0;
@@ -114,25 +113,19 @@ export abstract class ChatSource {
   // ---- Public API (used by RuntimeSession) ----
 
   async start(callback: MessageCallback, signal?: AbortSignal): Promise<ChatSourceStartStatus> {
-    this.lifecycleController?.abort();
     this.pollController?.abort();
     this.pollGeneration += 1;
 
-    this.lifecycleController = new AbortController();
     this.pollController = new AbortController();
     this.callback = callback;
     this.resetSessionState();
 
-    const combinedSignal = combineAbortSignals(
-      signal,
-      this.lifecycleController.signal,
-      this.pollController.signal
-    );
+    const combinedSignal = combineAbortSignals(signal, this.pollController.signal);
 
     try {
       return await this.bootstrapAndLaunchPolling(combinedSignal);
     } catch (error) {
-      if (isAbortError(error) && this.isLifecycleAbort()) {
+      if (isAbortError(error) && this.isPollAbort()) {
         return 'retryable';
       }
 
@@ -141,9 +134,6 @@ export abstract class ChatSource {
   }
 
   stop(): void {
-    this.lifecycleController?.abort();
-    this.lifecycleController = null;
-
     this.pollController?.abort();
     this.pollController = null;
 
@@ -204,8 +194,8 @@ export abstract class ChatSource {
     );
   }
 
-  protected isLifecycleAbort(): boolean {
-    return this.lifecycleController?.signal.aborted ?? false;
+  protected isPollAbort(): boolean {
+    return this.pollController?.signal.aborted ?? false;
   }
 
   protected markActivity(): void {
@@ -577,7 +567,7 @@ export class LiveChatSource extends ChatSource {
 // ====================================================================
 
 export class ReplayChatSource extends ChatSource {
-  private static readonly MAX_INITIAL_REPLAY_BATCHES = 12;
+  private static readonly MAX_REPLAY_BATCHES = 12;
 
   private replayMode: ReplayMode | null = null;
   private replayPlayerSeekContinuation: InnertubeContinuationData | null = null;
@@ -587,7 +577,6 @@ export class ReplayChatSource extends ChatSource {
   private replayConsecutiveFailures = 0;
   private replayNextAllowedFetchAt = 0;
   private readonly replayKeyRegistry = new MessageIdRegistry(MAX_TRACKED_REPLAY_KEYS);
-  private readonly replayPendingKeys = new Set<string>();
   private replayBuffer: ReplayBufferedMessage[] = [];
 
   protected seedCurrentSession(signal?: AbortSignal): Promise<boolean> {
@@ -615,7 +604,6 @@ export class ReplayChatSource extends ChatSource {
     this.replayNextAllowedFetchAt = 0;
     this.replayBuffer = [];
     this.replayKeyRegistry.clear();
-    this.replayPendingKeys.clear();
   }
 
   private async initializeReplaySession(signal?: AbortSignal): Promise<boolean> {
@@ -665,7 +653,7 @@ export class ReplayChatSource extends ChatSource {
       while (
         this.replayContinuation &&
         this.replayFallbackLastOffsetMs < minimumOffsetMs &&
-        batchesFetched < ReplayChatSource.MAX_INITIAL_REPLAY_BATCHES
+        batchesFetched < ReplayChatSource.MAX_REPLAY_BATCHES
       ) {
         throwIfAborted(signal);
         const fetched = await this.fetchNextReplayFallbackBatch(minimumOffsetMs, signal);
@@ -750,9 +738,8 @@ export class ReplayChatSource extends ChatSource {
     }
 
     const overflow = this.replayBuffer.length - MAX_BUFFERED_REPLAY_MESSAGES;
-    const removed = this.replayBuffer.splice(0, overflow);
-    for (const item of removed) {
-      this.replayPendingKeys.delete(item.key);
+    if (overflow > 0) {
+      this.replayBuffer.splice(0, overflow);
     }
   }
 
@@ -770,11 +757,11 @@ export class ReplayChatSource extends ChatSource {
       }
 
       const key = this.makeReplayKey(event.message, event.offsetMs);
-      if (this.replayKeyRegistry.has(key) || this.replayPendingKeys.has(key)) {
+      if (this.replayKeyRegistry.has(key)) {
         continue;
       }
 
-      this.replayPendingKeys.add(key);
+      this.replayKeyRegistry.mark(key);
       this.insertBufferedEvent(key, event.message, event.offsetMs);
     }
 
@@ -823,7 +810,6 @@ export class ReplayChatSource extends ChatSource {
       }
 
       this.replayBuffer.shift();
-      this.replayPendingKeys.delete(next.key);
       this.replayKeyRegistry.mark(next.key);
       this.emitMessage(next.message);
     }
@@ -970,7 +956,7 @@ export class ReplayChatSource extends ChatSource {
     while (
       this.replayContinuation &&
       this.replayFallbackLastOffsetMs < minimumOffsetMs &&
-      batches < 12
+      batches < ReplayChatSource.MAX_REPLAY_BATCHES
     ) {
       throwIfAborted(signal);
 
