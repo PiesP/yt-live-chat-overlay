@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.23.0] - 2026-05-08
+
+### Fixed
+
+- **Tab visibility handling**: `handleBackgroundTab()` now properly pauses animations and trims queue; `handleForegroundTab()` resumes them — previously animations kept running in background and weren't resumed on return
+- **Rate limiter & burst detector timers**: Replaced `performance.now()` with `Date.now()` so rate limiting windows and burst cooldown survive tab sleep
+- **Stale animation sweep**: Replaced `Set.forEach` deletion during iteration with safe `for-of` + collect-to-remove pattern
+- **Defaults updated to optimized values**: `speedPxPerSec` 280→250, `maxConcurrentMessages` 40→50, `maxMessagesPerSecond` 6→8, `durationMax` 12000→30000ms
+
+### Refactored
+
+- **Removed dynamic queue sizing** — Fixed capacity (50) replaces exponential growth/hysteresis shrinkage system (~100 lines removed)
+- **Removed density-based speed multiplier** → chat speed is now consistent and fully user-controlled
+- **Removed progressive overwrite** — Lane allocator no longer has force-overwrite threshold; deep queue drops oldest instead
+- **Simplified batch/retry logic** — Fixed batch size (8) and fixed retry delay (4ms) replace 5-level dynamic scaling
+- **Removed unreachable priority cases** — `getMessagePriority()` only handles actual parser output kinds
+- **Removed duplicate `focus` listener** — `visibilitychange` + `pageshow` are sufficient for tab-switch detection
+- **Simplified settings-schema limit resolution** — `ROOT_NUMERIC_FIELDS`/`OUTLINE_NUMERIC_FIELDS` maps replaced with single `resolveLimits()` helper
+- **Moved `outlineFormName`** from `settings-schema.ts` to `settings-ui-form.ts` (internal helper)
+- **Simplified bootstrap HTML caching** closure in `bootstrapChatSession()`
+- **Removed 4 unused `speedDensity*` constants** from design-tokens
+
 ## [0.22.0] - 2026-05-07
 
 ### Added
