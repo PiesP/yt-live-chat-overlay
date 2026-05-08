@@ -3,12 +3,6 @@ import { createLogger } from '@core/logging';
 import { DEFAULT_SETTINGS, readStoredSettingsRaw, STORAGE_KEY } from '@core/settings-definitions';
 import { applySettingsPatch, cloneSettings, normalizeStoredSettings } from '@core/settings-schema';
 
-type StoredSettings = Partial<OverlaySettings>;
-
-const readStoredSettings = (): StoredSettings | null => {
-  return readStoredSettingsRaw<StoredSettings>();
-};
-
 const writeStoredSettings = (settings: Readonly<OverlaySettings>): void => {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
 };
@@ -24,7 +18,7 @@ export class Settings {
 
   private loadSettings(): OverlaySettings {
     try {
-      return normalizeStoredSettings(readStoredSettings());
+      return normalizeStoredSettings(readStoredSettingsRaw<Partial<OverlaySettings>>());
     } catch (error) {
       log.warn('Failed to load settings:', error);
       return cloneSettings(DEFAULT_SETTINGS);

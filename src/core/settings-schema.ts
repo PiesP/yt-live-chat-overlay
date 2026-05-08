@@ -119,7 +119,7 @@ const resolveLimits = (key: string): Readonly<{ min: number; max: number }> => {
   if (direct) return direct;
   const outlineKey = OUTLINE_LIMITS_MAP[key];
   if (outlineKey) return SETTINGS_LIMITS[outlineKey];
-  return SETTINGS_LIMITS.speedPxPerSec; // fallback, should not happen
+  return SETTINGS_LIMITS.speedPxPerSec;
 };
 
 const OUTLINE_LIMITS_MAP: Record<string, keyof typeof SETTINGS_LIMITS> = {

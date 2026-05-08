@@ -111,7 +111,7 @@ export const STORAGE_KEY = 'yt-live-chat-overlay-settings';
  * Read and parse the raw stored settings blob from localStorage.
  * Exported so that settings.ts can reuse the same parse-with-try/catch logic.
  */
-export function readStoredSettingsRaw<T = Record<string, unknown>>(): T | null {
+export function readStoredSettingsRaw<T>(): T | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
@@ -122,7 +122,7 @@ export function readStoredSettingsRaw<T = Record<string, unknown>>(): T | null {
 }
 
 export const readStoredLogLevel = (): OverlaySettings['logLevel'] => {
-  const parsed = readStoredSettingsRaw<Record<string, unknown>>();
+  const parsed = readStoredSettingsRaw<{ logLevel?: unknown }>();
   if (!parsed) return DEFAULT_SETTINGS.logLevel;
   if (isLogLevel(parsed.logLevel)) {
     return parsed.logLevel;
