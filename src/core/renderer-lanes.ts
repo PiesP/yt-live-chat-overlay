@@ -168,13 +168,23 @@ export class LaneAllocator {
     const speed = this.options.getEffectiveSpeedPxPerSec();
     const fontSize = this.options.getFontSize();
 
+    // Width-proportional safe distance: wider comments need more gap.
+    // When comment width approaches screen width, the gap grows so the
+    // trailing comment clears the screen before the next one enters.
+    // This mirrors the danmaku2ass thresholdTime approach:
+    //   threshold = startTime - duration * (1 - screenWidth / (commentWidth + screenWidth))
+    const commentWidth = lane.lastItemWidthPx;
+    const widthRatio = commentWidth / Math.max(1, commentWidth + playerWidth);
     const baseSafeDistance = Math.max(
       fontSize * this.options.safeDistanceScale,
       this.options.safeDistanceMin
     );
     const speedFactor = Math.max(0.5, Math.min(2.0, 100 / speed));
-    const minSafeDistance = baseSafeDistance * speedFactor;
-    const requiredGapPx = lane.lastItemWidthPx + minSafeDistance;
+    // Scale the safe distance proportionally to comment width relative to screen.
+    // Narrow comments → smaller gap, wide comments → larger gap.
+    const widthProportionalDistance = baseSafeDistance * (1 + widthRatio);
+    const minSafeDistance = widthProportionalDistance * speedFactor;
+    const requiredGapPx = commentWidth + minSafeDistance;
     const safeTimeGap = (requiredGapPx / speed) * 1000;
     const horizontalReadyTime = lane.lastItemStartTime + safeTimeGap;
 
