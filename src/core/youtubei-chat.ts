@@ -1,4 +1,7 @@
 import { isAbortError } from '@core/dom';
+import { createLogger } from '@core/logging';
+
+const log = createLogger('YoutubeiChat');
 
 export type JsonObject = Record<string, unknown>;
 
@@ -499,9 +502,19 @@ export const bootstrapChatSession = async (signal?: AbortSignal): Promise<ChatBo
   }
 
   let cachedHtml: string | null = null;
+
   const getHtml = async (): Promise<string> => {
     if (cachedHtml === null) {
       cachedHtml = await fetchWatchHtml(videoId, signal);
+      // Invalidate cache if the fetched HTML contains a different videoId
+      // (SPA navigation may return stale cached content).
+      const extractedId = extractVideoIdFromInitialData(
+        extractInitialDataFromHtml(cachedHtml) ?? {}
+      );
+      if (extractedId && extractedId !== videoId) {
+        log.debug(`Fetched HTML contains stale videoId (${extractedId}), re-fetching...`);
+        cachedHtml = await fetchWatchHtml(videoId, signal);
+      }
     }
     return cachedHtml;
   };

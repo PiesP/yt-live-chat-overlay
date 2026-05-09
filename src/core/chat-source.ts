@@ -37,10 +37,10 @@ import {
 
 const log = createLogger('ChatSource');
 
-const BOOTSTRAP_ATTEMPTS = 4;
+const BOOTSTRAP_ATTEMPTS = 8;
 /** Max retries for unavailable bootstrap (SPA navigation timing). */
-const BOOTSTRAP_MAX_UNAVAILABLE_RETRIES = 2;
-const BOOTSTRAP_RETRY_DELAY_MS = 1000;
+const BOOTSTRAP_MAX_UNAVAILABLE_RETRIES = 4;
+const BOOTSTRAP_RETRY_BASE_DELAY_MS = 800;
 const RECENT_MESSAGE_BUFFER_SIZE = 100;
 const RECONNECT_RETRY_DELAY_MS = 1000;
 const DEFAULT_ACTIVITY_TIMEOUT_MS = 30_000;
@@ -286,7 +286,7 @@ export abstract class ChatSource {
 
       if (result.status === 'unavailable') {
         // SPA navigation: YouTube may not have updated window globals yet.
-        // Retry a few times before giving up permanently.
+        // Retry with exponential backoff before giving up.
         unavailableRetries++;
         if (unavailableRetries > BOOTSTRAP_MAX_UNAVAILABLE_RETRIES) {
           return {
@@ -301,7 +301,9 @@ export abstract class ChatSource {
         );
 
         if (attempt < BOOTSTRAP_ATTEMPTS) {
-          await sleep(BOOTSTRAP_RETRY_DELAY_MS, signal);
+          // Exponential backoff: 800ms, 1600ms, 3200ms, 6400ms...
+          const backoffDelay = BOOTSTRAP_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1);
+          await sleep(Math.min(backoffDelay, 8000), signal);
         }
         continue;
       }
@@ -309,7 +311,9 @@ export abstract class ChatSource {
       lastRetryReason = result.reason;
 
       if (attempt < BOOTSTRAP_ATTEMPTS) {
-        await sleep(BOOTSTRAP_RETRY_DELAY_MS, signal);
+        // Exponential backoff for retryable failures too
+        const backoffDelay = BOOTSTRAP_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1);
+        await sleep(Math.min(backoffDelay, 8000), signal);
       }
     }
 

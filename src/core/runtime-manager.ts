@@ -235,17 +235,13 @@ export class RuntimeManager {
     url: string,
     status: Exclude<RuntimeSessionStartStatus, 'started'>
   ): void {
-    if (status === 'unavailable') {
-      this.resetStartFailures();
-      log.warn('Runtime unavailable; waiting for state changes');
-      return;
-    }
-
     const attempts = this.startFailureState.url === url ? this.startFailureState.attempts + 1 : 1;
     this.startFailureState = { url, attempts };
-    log.warn(`Failed to start runtime (${attempts}/${MAX_START_ATTEMPTS})`);
+    log.warn(`Failed to start runtime (${attempts}/${MAX_START_ATTEMPTS}) — status: ${status}`);
 
     if (attempts < MAX_START_ATTEMPTS) {
+      // Retry for both 'retryable' and 'unavailable' — SPA navigation may
+      // temporarily leave bootstrap in an unavailable state.
       this.scheduleReconcile(START_RETRY_DELAY_MS);
       return;
     }
