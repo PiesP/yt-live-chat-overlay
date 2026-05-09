@@ -36,12 +36,6 @@ export interface BacklogControllerConfig {
   backlogRecentMinutes: number;
 }
 
-export interface BacklogInjectionStats {
-  totalBacklog: number;
-  processedBacklog: number;
-  progress: number; // 0-1
-}
-
 export class BacklogInjectionController {
   private backlogQueue: ChatMessage[] = [];
   private isActive = false;
