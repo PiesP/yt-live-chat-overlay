@@ -29,7 +29,8 @@ type SettingsLimitKey =
   | 'authorRateLimitWindowMs'
   | 'authorRateLimitMaxMessages'
   | 'backlogMaxRate'
-  | 'backlogSpeedMultiplier';
+  | 'backlogSpeedMultiplier'
+  | 'backlogRecentMinutes';
 
 const DEFAULT_SHOW_AUTHOR: AuthorDisplaySettings = {
   normal: false,
@@ -73,6 +74,7 @@ export const SETTINGS_LIMITS = {
   authorRateLimitMaxMessages: { min: 1, max: 20, step: 1 },
   backlogMaxRate: { min: 0, max: 50, step: 5 },
   backlogSpeedMultiplier: { min: 1, max: 5, step: 0.5 },
+  backlogRecentMinutes: { min: 1, max: 30, step: 1 },
 } as const satisfies Record<SettingsLimitKey, NumericSettingLimit>;
 
 export const DEFAULT_SETTINGS = {
