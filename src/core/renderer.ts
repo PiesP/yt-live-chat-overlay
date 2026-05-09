@@ -569,16 +569,11 @@ export class Renderer {
     element: HTMLDivElement,
     message: ChatMessage,
     isSuperChat: boolean,
-    isMembership: boolean
+    isMembership: boolean,
+    effectiveOpacity: number
   ): void {
     element.style.fontSize = `${this.settings.fontSize}px`;
 
-    // Backlog messages are rendered at reduced opacity so they visually
-    // recede behind real-time messages without overwhelming the screen.
-    const baseOpacity = this.settings.opacity;
-    const effectiveOpacity = message.isBacklog
-      ? baseOpacity * Renderer.BACKLOG_OPACITY_SCALE
-      : baseOpacity;
     element.style.opacity = `${effectiveOpacity}`;
 
     if (!isSuperChat && !isMembership) {
@@ -619,12 +614,14 @@ export class Renderer {
     }
 
     const { element, isSuperChat, isMembership } = builtMessage;
-    this.applyCommonMessageStyles(element, message, isSuperChat, isMembership);
 
+    // Backlog messages rendered at reduced opacity so they recede behind
+    // real-time messages without overwhelming the screen.
     const baseOpacity = this.settings.opacity;
     const effectiveOpacity = message.isBacklog
       ? baseOpacity * Renderer.BACKLOG_OPACITY_SCALE
       : baseOpacity;
+    this.applyCommonMessageStyles(element, message, isSuperChat, isMembership, effectiveOpacity);
 
     const activeMessage = this.setupMessageAnimation(
       element,
