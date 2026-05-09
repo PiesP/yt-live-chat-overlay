@@ -251,7 +251,13 @@ export class Renderer {
     );
     const distance = dimensions.width + textWidth + exitPadding;
 
-    const entryOffset = (lane.index % 3) * 50 + Math.floor(Math.random() * 100);
+    // Deterministic entry offset based on lane position + small random jitter.
+    // Messages arriving at the same time are spread evenly across the right
+    // edge of the screen rather than clustering at 3 fixed positions.
+    const baseOffset =
+      dimensions.laneCount > 1 ? Math.round((lane.index / (dimensions.laneCount - 1)) * 200) : 100;
+    const jitter = Math.floor(Math.random() * 30);
+    const entryOffset = baseOffset + jitter;
     const adjustedDistance = distance + entryOffset;
 
     const effectiveSpeedPxPerSec = this.getEffectiveSpeedPxPerSec();
