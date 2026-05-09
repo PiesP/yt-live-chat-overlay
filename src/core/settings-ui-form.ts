@@ -742,7 +742,7 @@ export class SettingsUiForm {
 
   private getColor(name: string, fallback: string): string {
     const input = this.getInput(name);
-    return input?.value || fallback;
+    return input?.value ?? fallback;
   }
 
   private getLogLevel(
