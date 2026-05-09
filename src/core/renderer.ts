@@ -76,6 +76,7 @@ export class Renderer {
   private readonly seenMessageIds = new MessageIdRegistry(Renderer.SEEN_MESSAGE_IDS_LIMIT);
   private visibilityHandler: (() => void) | null = null;
   private static readonly BACKGROUND_QUEUE_MAX = 10;
+  private static readonly BACKLOG_OPACITY_SCALE = 0.5;
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
     this.overlay = overlay;
@@ -514,7 +515,14 @@ export class Renderer {
     isMembership: boolean
   ): void {
     element.style.fontSize = `${this.settings.fontSize}px`;
-    element.style.opacity = `${this.settings.opacity}`;
+
+    // Backlog messages are rendered at reduced opacity so they visually
+    // recede behind real-time messages without overwhelming the screen.
+    const baseOpacity = this.settings.opacity;
+    const effectiveOpacity = message.isBacklog
+      ? baseOpacity * Renderer.BACKLOG_OPACITY_SCALE
+      : baseOpacity;
+    element.style.opacity = `${effectiveOpacity}`;
 
     if (!isSuperChat && !isMembership) {
       element.style.color = this.settings.colors[message.authorType];
