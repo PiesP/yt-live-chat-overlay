@@ -53,6 +53,8 @@ export class BacklogInjectionController {
   private config: BacklogControllerConfig;
   private lanes: number;
   private observability: ObservabilityReporter | undefined;
+  private realTimeActivityCount = 0;
+  private readonly ADAPTIVE_COOLDOWN_MS = 2000;
 
   constructor(
     config: BacklogControllerConfig,
@@ -108,6 +110,17 @@ export class BacklogInjectionController {
     this.startInjection();
   }
 
+  /** Notify the controller that a real-time message arrived during injection. */
+  notifyRealTimeActivity(): void {
+    this.realTimeActivityCount++;
+    // Reset the counter after the cooldown period
+    if (this.realTimeActivityCount > 1) {
+      setTimeout(() => {
+        this.realTimeActivityCount = Math.max(0, this.realTimeActivityCount - 1);
+      }, this.ADAPTIVE_COOLDOWN_MS);
+    }
+  }
+
   /** Start the throttled injection loop */
   private startInjection(): void {
     if (this.isInjecting || !this.isActive || this.backlogQueue.length === 0) {
@@ -117,10 +130,8 @@ export class BacklogInjectionController {
 
     this.isInjecting = true;
 
-    // Calculate rate: min(config.maxRate, laneCount * 2), clamped to 4-20
+    // Calculate base rate: min(config.maxRate, laneCount * 2), clamped to 4-20
     const maxRate = Math.max(4, Math.min(20, Math.min(this.config.backlogMaxRate, this.lanes * 2)));
-    // Calculate interval between ticks
-    const tickInterval = maxRate > 0 ? Math.round(1000 / maxRate) : 250;
 
     const processTick = () => {
       if (!this.isActive || this.backlogQueue.length === 0) {
@@ -128,6 +139,11 @@ export class BacklogInjectionController {
         if (this.backlogQueue.length === 0) this.finishBacklogInjection();
         return;
       }
+
+      // Adaptive rate: if real-time messages are active, slow down proportionally.
+      const realTimeFactor = Math.max(0.25, 1 - this.realTimeActivityCount * 0.2);
+      const adaptiveRate = Math.max(1, Math.round(maxRate * realTimeFactor));
+      const tickInterval = Math.round(1000 / adaptiveRate);
 
       // Process one message per tick
       const message = this.backlogQueue.shift()!;
@@ -146,7 +162,7 @@ export class BacklogInjectionController {
       // Emit single message for rendering
       this.emitBacklogMessage(message);
 
-      // Schedule next tick
+      // Schedule next tick with adaptive interval
       this.injectionTimer = setTimeout(processTick, tickInterval);
     };
 

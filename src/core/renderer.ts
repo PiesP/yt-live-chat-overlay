@@ -384,14 +384,23 @@ export class Renderer {
   }
 
   private static getMessagePriority(message: ChatMessage): number {
+    let priority: number;
     switch (message.kind) {
       case 'superchat':
-        return 200;
+        priority = 200;
+        break;
       case 'membership':
-        return 100;
+        priority = 100;
+        break;
       default:
-        return 0;
+        priority = 0;
+        break;
     }
+    // Deprioritize backlog messages so real-time messages always render first.
+    if (message.isBacklog) {
+      priority -= 50;
+    }
+    return priority;
   }
 
   private processQueue(): void {

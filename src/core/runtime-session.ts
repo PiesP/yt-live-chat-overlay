@@ -217,6 +217,12 @@ export class RuntimeSession {
       for (const msg of msgs) {
         renderer.addMessage(msg);
       }
+
+      // If backlog injection is active, notify the controller so it can
+      // adapt its rate to leave room for real-time messages.
+      if (this.backlogController?.isBacklogActive) {
+        this.backlogController.notifyRealTimeActivity();
+      }
     }, signal);
   }
 
