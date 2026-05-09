@@ -473,13 +473,13 @@ export class LiveChatSource extends ChatSource {
   }
 
   private calculateAdaptiveDelay(timeoutMs: number): number {
+    const baseDelay = timeoutMs > 0 ? timeoutMs : LIVE_POLL_FALLBACK_DELAY_MS;
+
     if (this.consecutiveErrors > 0) {
       // Error backoff: baseDelay * 2^errors (max 10000ms)
-      const baseDelay = timeoutMs > 0 ? timeoutMs : LIVE_POLL_FALLBACK_DELAY_MS;
       return Math.min(10_000, baseDelay * 2 ** this.consecutiveErrors);
     }
 
-    const baseDelay = timeoutMs > 0 ? timeoutMs : LIVE_POLL_FALLBACK_DELAY_MS;
     let delay: number;
 
     if (this.lastActionsCount >= 10) {

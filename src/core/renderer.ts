@@ -681,11 +681,10 @@ export class Renderer {
   private handleBackgroundTab(): void {
     this.pause();
     if (this.pendingQueue.length > Renderer.BACKGROUND_QUEUE_MAX) {
-      const excess = this.pendingQueue.length - Renderer.BACKGROUND_QUEUE_MAX;
       this.pendingQueue.sort(
         (a, b) => b.priority - a.priority || a.message.timestamp - b.message.timestamp
       );
-      this.pendingQueue.splice(this.pendingQueue.length - excess, excess);
+      this.pendingQueue.length = Renderer.BACKGROUND_QUEUE_MAX;
     }
   }
 
