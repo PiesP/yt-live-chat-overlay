@@ -53,7 +53,6 @@ export const ROOT_NUMERIC_KEYS = [
   'authorRateLimitMaxMessages',
   'backlogMaxRate',
   'backlogSpeedMultiplier',
-  'backlogRecentMinutes',
 ] as const satisfies readonly RootNumericSettingKey[];
 
 export const ROOT_SETTING_KEYS = [
