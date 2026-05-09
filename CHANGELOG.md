@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.24.0] - 2026-05-09
+
+### Added
+
+- **Width-proportional collision threshold** — Lane allocator now scales safe distance based on comment width relative to screen width (inspired by danmaku2ass's thresholdTime formula). Wider comments naturally receive more trailing gap, while narrow comments pack tighter, improving screen utilization.
+- **Adaptive scroll speed based on burst level** — BurstDetector level changes now propagate to LaneAllocator, automatically increasing scroll speed during high-traffic periods (1.1x elevated, 1.2x high, 1.35x extreme). Per-author rate limiter still keeps individual authors in check.
+- **Deterministic entry offset distribution** — Messages arriving at the same time now spread evenly across the right edge of the screen (0–200px range) instead of clustering at 3 fixed positions, with 30px random jitter preserved.
+- **Relaxed collision check for single-lane messages** — Adjacent lanes that have already scrolled past the screen midpoint no longer block placement for single-lane messages. CSS `overflow:hidden` clips them, so only the target lane's full collision check applies.
+
+### Fixed
+
+- **Animation resume after pause** — When resuming from pause, active animations now recalculate remaining duration and reset from their current visual position instead of jumping to where they would be if they had been running during the pause.
+
 ## [0.23.0] - 2026-05-08
 
 ### Fixed
