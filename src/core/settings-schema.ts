@@ -11,6 +11,8 @@ type OutlineSettingKey = keyof OutlineSettings;
 
 export type { OutlineSettingKey, RootNumericSettingKey, RootScalarSettingKey };
 
+export const VALID_BACKLOG_MODES = ['playback', 'recent', 'full', 'none'] as const;
+
 export const AUTHOR_COLOR_KEYS = [
   'normal',
   'member',
@@ -156,9 +158,8 @@ const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings
       : d.showBacklogIndicator;
 
   // Backlog mode: validate against allowed values
-  const validBacklogModes = ['playback', 'recent', 'full', 'none'] as const;
-  n.backlogMode = validBacklogModes.includes(
-    settings.backlogMode as (typeof validBacklogModes)[number]
+  n.backlogMode = VALID_BACKLOG_MODES.includes(
+    settings.backlogMode as (typeof VALID_BACKLOG_MODES)[number]
   )
     ? settings.backlogMode
     : d.backlogMode;
