@@ -1,4 +1,4 @@
-import type { LaneState, OverlayDimensions } from '@app-types';
+import type { BurstLevel, LaneState, OverlayDimensions } from '@app-types';
 
 export interface LanePlacement {
   lane: LaneState;
@@ -16,11 +16,24 @@ interface LaneAllocatorOptions {
   readonly laneHeightPaddingMin: number;
 }
 
+/** Burst-level-based speed multiplier for adaptive scrolling. */
+const BURST_SPEED_MULTIPLIER: Record<BurstLevel, number> = {
+  normal: 1.0,
+  elevated: 1.1,
+  high: 1.2,
+  extreme: 1.35,
+};
+
 export class LaneAllocator {
   private lanes: LaneState[] = [];
   private nextLaneIndex = 0;
+  private burstLevel: BurstLevel = 'normal';
 
   constructor(private readonly options: LaneAllocatorOptions) {}
+
+  setBurstLevel(level: BurstLevel): void {
+    this.burstLevel = level;
+  }
 
   reset(dimensions: OverlayDimensions | null): void {
     if (!dimensions) {
@@ -168,6 +181,12 @@ export class LaneAllocator {
     const speed = this.options.getEffectiveSpeedPxPerSec();
     const fontSize = this.options.getFontSize();
 
+    // Adaptive speed: scale effective speed by burst level so that
+    // high-traffic periods scroll faster, improving throughput while
+    // the per-author rate limiter keeps individual authors in check.
+    const burstMultiplier = BURST_SPEED_MULTIPLIER[this.burstLevel];
+    const effectiveSpeed = speed * burstMultiplier;
+
     // Width-proportional safe distance: wider comments need more gap.
     // When comment width approaches screen width, the gap grows so the
     // trailing comment clears the screen before the next one enters.
@@ -179,16 +198,16 @@ export class LaneAllocator {
       fontSize * this.options.safeDistanceScale,
       this.options.safeDistanceMin
     );
-    const speedFactor = Math.max(0.5, Math.min(2.0, 100 / speed));
+    const speedFactor = Math.max(0.5, Math.min(2.0, 100 / effectiveSpeed));
     // Scale the safe distance proportionally to comment width relative to screen.
     // Narrow comments → smaller gap, wide comments → larger gap.
     const widthProportionalDistance = baseSafeDistance * (1 + widthRatio);
     const minSafeDistance = widthProportionalDistance * speedFactor;
     const requiredGapPx = commentWidth + minSafeDistance;
-    const safeTimeGap = (requiredGapPx / speed) * 1000;
+    const safeTimeGap = (requiredGapPx / effectiveSpeed) * 1000;
     const horizontalReadyTime = lane.lastItemStartTime + safeTimeGap;
 
-    const traverseTimeMs = (playerWidth / speed) * 1000;
+    const traverseTimeMs = (playerWidth / effectiveSpeed) * 1000;
     const dynamicClearMs = Math.max(traverseTimeMs * 0.05, 200);
     const verticalReadyTime = lane.lastItemStartTime + dynamicClearMs;
 

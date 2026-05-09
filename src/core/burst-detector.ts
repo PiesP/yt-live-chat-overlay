@@ -34,9 +34,11 @@ export class BurstDetector {
   private sampleInterval: ReturnType<typeof setInterval> | null = null;
   private samplesSinceLastCheck = 0;
   private observability: ObservabilityReporter | undefined;
+  private onLevelChange: ((level: BurstLevel) => void) | undefined;
 
-  constructor(observability?: ObservabilityReporter) {
+  constructor(observability?: ObservabilityReporter, onLevelChange?: (level: BurstLevel) => void) {
     this.observability = observability;
+    this.onLevelChange = onLevelChange;
   }
 
   /** Called whenever a message is received */
@@ -96,6 +98,7 @@ export class BurstDetector {
       if (this.observability) {
         this.observability.updateBurstLevel(newLevel);
       }
+      this.onLevelChange?.(newLevel);
     } else if (newLevel !== 'normal') {
       this.lastBurstTime = Date.now();
     }
@@ -112,6 +115,7 @@ export class BurstDetector {
       if (this.observability) {
         this.observability.updateBurstLevel('normal');
       }
+      this.onLevelChange?.('normal');
     }
   }
 

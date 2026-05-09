@@ -93,7 +93,9 @@ export class Renderer {
     this.laneAllocator.reset(this.overlay.getDimensions());
     this.injectStyles();
     this.observability = new ObservabilityReporter(this.settings.showDebugOverlay);
-    this.burstDetector = new BurstDetector(this.observability);
+    this.burstDetector = new BurstDetector(this.observability, (level) => {
+      this.laneAllocator.setBurstLevel(level);
+    });
     this.burstDetector.start();
     this.authorRateLimiter = new PerAuthorRateLimiter(() => this.burstDetector.getLevel());
     this.overlayDimensionsUnsubscribe = this.overlay.onDimensionsChanged((dimensions) => {
