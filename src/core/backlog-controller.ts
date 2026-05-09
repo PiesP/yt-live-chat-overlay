@@ -21,7 +21,7 @@ import type { ChatMessage } from '@app-types';
 import { createLogger } from '@core/logging';
 import type { ObservabilityReporter } from '@core/observability';
 
-const log = createLogger('[Backlog]');
+const log = createLogger('Backlog');
 
 export interface BacklogControllerConfig {
   /** How to handle past chat messages */

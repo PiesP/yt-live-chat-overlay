@@ -12,7 +12,7 @@
 import type { BurstLevel, DropReason, SessionMetrics } from '@app-types';
 import { createLogger } from '@core/logging';
 
-const log = createLogger('[Observability]');
+const log = createLogger('Observability');
 
 export class ObservabilityReporter {
   private metrics: SessionMetrics;

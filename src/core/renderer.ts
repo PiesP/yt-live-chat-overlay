@@ -70,12 +70,12 @@ export class Renderer {
   private static readonly RETRY_DELAY_MS = 4;
   private static readonly MAX_MESSAGE_AGE_MS = 60_000;
   private static readonly OPACITY_UPDATE_INTERVAL_MS = 250;
+  private static readonly SWEEP_INTERVAL = 8;
   private styleElement: HTMLStyleElement | null = null;
   private retryTimer: number | null = null;
   private opacityUpdateTimer: number | null = null;
   private overlayDimensionsUnsubscribe: (() => void) | null = null;
   private sweepCounter = 0;
-  private readonly SWEEP_INTERVAL = 8;
   private static readonly SEEN_MESSAGE_IDS_LIMIT = 200;
   private readonly seenMessageIds = new MessageIdRegistry(Renderer.SEEN_MESSAGE_IDS_LIMIT);
   private visibilityHandler: (() => void) | null = null;
@@ -349,7 +349,7 @@ export class Renderer {
   private sweepStaleAnimations(): void {
     if (this.activeMessages.size === 0) return;
     this.sweepCounter++;
-    if (this.sweepCounter % this.SWEEP_INTERVAL !== 0) return;
+    if (this.sweepCounter % Renderer.SWEEP_INTERVAL !== 0) return;
 
     const toRemove: ActiveMessage[] = [];
     for (const active of this.activeMessages) {

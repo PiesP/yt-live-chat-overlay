@@ -218,11 +218,9 @@ export const RENDERER_STATIC_STYLES = `
   @keyframes yt-overlay-comment-slide {
     from {
       transform: translateX(var(--yt-msg-entry-offset, 0px));
-      opacity: var(--yt-msg-start-opacity, 1);
     }
     to {
       transform: translateX(var(--yt-msg-exit-offset, -3000px));
-      opacity: var(--yt-msg-end-opacity, 1);
     }
   }
 
@@ -232,6 +230,5 @@ export const RENDERER_STATIC_STYLES = `
     animation-delay: var(--yt-msg-delay, 0ms);
     animation-timing-function: linear;
     animation-fill-mode: both;
-    animation-play-state: var(--yt-msg-play-state, running);
   }
 `;

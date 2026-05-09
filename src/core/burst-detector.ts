@@ -13,7 +13,7 @@ import type { BurstLevel } from '@app-types';
 import { createLogger } from '@core/logging';
 import type { ObservabilityReporter } from '@core/observability';
 
-const log = createLogger('[BurstDetector]');
+const log = createLogger('BurstDetector');
 
 /** How many samples to keep for rate calculation */
 const RATE_SAMPLE_WINDOW = 10;
