@@ -1,7 +1,7 @@
 import type { ChatMessage, OverlaySettings } from '@app-types';
 import { BacklogInjectionController } from '@core/backlog-controller';
 import { type ChatHealthSnapshot, ChatSource, type ChatSourceStartStatus } from '@core/chat-source';
-import { isAbortError, throwIfAborted } from '@core/dom';
+import { findElementMatch, isAbortError, throwIfAborted, VIDEO_SELECTORS } from '@core/dom';
 import { createLogger } from '@core/logging';
 import { OVERLAY_SELECTOR, Overlay } from '@core/overlay';
 import { Renderer } from '@core/renderer';
@@ -41,6 +41,7 @@ export class RuntimeSession {
   private renderer: Renderer | null = null;
   private chatSource: ChatSource | null = null;
   private foregroundCleanup: (() => void) | null = null;
+  private videoPauseCleanup: (() => void) | null = null;
   private backlogController: BacklogInjectionController | null = null;
   private chatWatchdogTimer: ReturnType<typeof setInterval> | null = null;
   private disposed = false;
@@ -95,6 +96,7 @@ export class RuntimeSession {
       }
 
       this.startForegroundListeners();
+      this.startVideoPauseListeners();
 
       this.startChatWatchdog();
 
@@ -155,6 +157,7 @@ export class RuntimeSession {
     this.restartRequested = true;
     this.abortController.abort();
     this.stopForegroundListeners();
+    this.stopVideoPauseListeners();
     this.stopChatWatchdog();
 
     this.backlogController?.destroy();
@@ -326,6 +329,46 @@ export class RuntimeSession {
 
   private stopForegroundListeners(): void {
     this.foregroundCleanup?.();
+  }
+
+  // ── Video pause/play listeners ────────────────────────────────────────────
+
+  private startVideoPauseListeners(): void {
+    const video = this.getVideoElement();
+    if (!video) {
+      log.debug('No video element found — video pause handling disabled');
+      return;
+    }
+
+    const handlePause = (): void => {
+      if (this.disposed) return;
+      log.debug('Video paused — pausing comment flow');
+      this.renderer?.pauseForVideo();
+    };
+
+    const handlePlay = (): void => {
+      if (this.disposed) return;
+      log.debug('Video playing — resuming comment flow');
+      this.renderer?.resumeForVideo();
+    };
+
+    video.addEventListener('pause', handlePause);
+    video.addEventListener('play', handlePlay);
+
+    this.videoPauseCleanup = () => {
+      video.removeEventListener('pause', handlePause);
+      video.removeEventListener('play', handlePlay);
+      this.videoPauseCleanup = null;
+    };
+  }
+
+  private stopVideoPauseListeners(): void {
+    this.videoPauseCleanup?.();
+  }
+
+  private getVideoElement(): HTMLVideoElement | null {
+    const match = findElementMatch<HTMLVideoElement>(VIDEO_SELECTORS);
+    return match?.element ?? null;
   }
 
   private startChatWatchdog(): void {

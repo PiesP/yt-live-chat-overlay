@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.24.4] - 2026-05-10
+
+### Added
+
+- **Video pause/play comment flow control** — Comments now pause when the video is paused and resume when playback starts. Previously, only tab visibility changes were handled; video pause left comments flowing and queueing up, causing a flood of stale messages on resume.
+  - `Renderer.pauseForVideo()` / `resumeForVideo()` — Distinct from tab-visibility pause, these methods track an `isVideoPaused` flag that drops incoming messages during pause (preventing queue overflow) while keeping animations frozen in place.
+  - `RuntimeSession.startVideoPauseListeners()` — Listens for `pause`/`play` events on the `<video>` element and routes them to the renderer. Cleanup is handled on session dispose.
+
 ## [0.24.3] - 2026-05-10
 
 ### Refactored

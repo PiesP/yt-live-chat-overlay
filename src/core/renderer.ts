@@ -59,6 +59,7 @@ export class Renderer {
   private activeMessages: Set<ActiveMessage> = new Set();
   private readonly pendingQueue: QueuedMessage[] = [];
   private isPaused = false;
+  private isVideoPaused = false;
   private pausedAt: number | null = null;
   private playbackRate = 1;
   private lastWarningTime = 0;
@@ -320,6 +321,12 @@ export class Renderer {
   addMessage(message: ChatMessage): void {
     if (message.id && this.seenMessageIds.has(message.id)) {
       this.observability.onMessageDropped('dedup');
+      return;
+    }
+
+    // Drop messages while video is paused — they would queue up and flood on resume.
+    if (this.isVideoPaused) {
+      this.observability.onMessageDropped('other');
       return;
     }
 
@@ -766,6 +773,20 @@ export class Renderer {
     this.processQueue();
   }
 
+  // ── Video pause/play (distinct from tab visibility pause) ─────────────────
+
+  pauseForVideo(): void {
+    if (this.isVideoPaused) return;
+    this.isVideoPaused = true;
+    this.pause();
+  }
+
+  resumeForVideo(): void {
+    if (!this.isVideoPaused) return;
+    this.isVideoPaused = false;
+    this.resume();
+  }
+
   setPlaybackRate(rate: number): void {
     if (rate <= 0) {
       log.warn('Invalid playback rate:', rate);
@@ -805,6 +826,7 @@ export class Renderer {
 
   destroy(): void {
     this.isPaused = false;
+    this.isVideoPaused = false;
     this.stopOpacityUpdates();
     this.overlayDimensionsUnsubscribe?.();
     this.overlayDimensionsUnsubscribe = null;
