@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.24.1] - 2026-05-09
+
+### Fixed
+
+- **SPA navigation chat bootstrap reliability** — Chat now reliably initializes after YouTube SPA navigation (switching between videos without page reload). Previously, `window.ytInitialData` and `window.ytcfg` could still reference the previous video, causing bootstrap to fail with `unavailable` and give up. Now retries up to 8 times with exponential backoff (800ms → 8s cap), detects stale cached HTML, and retries on `unavailable` status.
+
 ## [0.24.0] - 2026-05-09
 
 ### Added
