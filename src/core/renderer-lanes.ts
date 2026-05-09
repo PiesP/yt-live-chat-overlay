@@ -92,6 +92,17 @@ export class LaneAllocator {
         continue;
       }
 
+      // For single-lane messages, also check adjacent lanes but only for
+      // horizontal overlap (not vertical). Adjacent-lane comments that have
+      // already scrolled past the midpoint of the screen are safe to share
+      // vertical space with, since CSS overflow:hidden clips them.
+      if (requiredLanes === 1 && blockReadyTime > now + 16) {
+        const relaxedTime = this.calculateRelaxedReadyTime(startIndex, now, dimensions.width);
+        if (relaxedTime <= now + 16) {
+          blockReadyTime = relaxedTime;
+        }
+      }
+
       if (blockReadyTime <= now + 16) {
         bestStartIndex = startIndex;
         bestReadyTime = blockReadyTime;
@@ -163,6 +174,43 @@ export class LaneAllocator {
         lane.lastItemEndTime += clampedMs;
       }
     }
+  }
+
+  /**
+   * For single-lane messages, calculate a relaxed ready time that allows
+   * vertical overlap with adjacent lanes when their comments have already
+   * scrolled past the screen midpoint. CSS overflow:hidden clips them, so
+   * only horizontal overlap matters.
+   */
+  private calculateRelaxedReadyTime(laneIndex: number, now: number, playerWidth: number): number {
+    const speed = this.options.getEffectiveSpeedPxPerSec();
+    let relaxedTime = now;
+
+    for (const delta of [-1, 0, 1]) {
+      const idx = laneIndex + delta;
+      if (idx < 0 || idx >= this.lanes.length) continue;
+      const lane = this.lanes[idx];
+      if (!lane || lane.lastItemStartTime <= 0) continue;
+
+      if (delta === 0) {
+        // Target lane: full collision check
+        relaxedTime = Math.max(relaxedTime, this.calculateLaneReadyTime(lane, now, playerWidth));
+      } else {
+        // Adjacent lane: only check horizontal overlap.
+        // If the adjacent comment has scrolled past the midpoint, it is
+        // already clipping and safe to share vertical space with.
+        const halfScreenTime = (playerWidth / 2 / speed) * 1000;
+        const midpointReadyTime = lane.lastItemStartTime + halfScreenTime;
+        if (midpointReadyTime > now) {
+          // Adjacent comment hasn't passed midpoint yet — use stagger only
+          const staggerTime = lane.lastItemStartTime + this.options.globalStaggerMs;
+          relaxedTime = Math.max(relaxedTime, staggerTime);
+        }
+        // If past midpoint, adjacent lane imposes no constraint (overflow:hidden)
+      }
+    }
+
+    return relaxedTime;
   }
 
   private calculateRequiredLanes(messageHeight: number, laneHeight: number): number {
