@@ -122,16 +122,21 @@ export const cloneSettings = (settings: Readonly<OverlaySettings>): OverlaySetti
 const resolveLimits = (key: string): Readonly<{ min: number; max: number }> => {
   const direct = SETTINGS_LIMITS[key as keyof typeof SETTINGS_LIMITS];
   if (direct) return direct;
-  const outlineKey = OUTLINE_LIMITS_MAP[key];
+  const outlineKey = OUTLINE_LIMITS_MAP[key as keyof typeof OUTLINE_LIMITS_MAP];
   if (outlineKey) return SETTINGS_LIMITS[outlineKey];
   return SETTINGS_LIMITS.speedPxPerSec;
 };
 
-const OUTLINE_LIMITS_MAP: Record<string, keyof typeof SETTINGS_LIMITS> = {
+const OUTLINE_LIMITS_MAP: Record<
+  Exclude<OutlineSettingKey, 'enabled'>,
+  keyof typeof SETTINGS_LIMITS
+> = {
   widthPx: 'outlineWidthPx',
   blurPx: 'outlineBlurPx',
   opacity: 'outlineOpacity',
 };
+
+export { OUTLINE_LIMITS_MAP };
 
 const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings => {
   const d = DEFAULT_SETTINGS;

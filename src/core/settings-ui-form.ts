@@ -3,6 +3,7 @@ import { SETTINGS_LIMITS } from '@core/settings-definitions';
 import {
   AUTHOR_COLOR_KEYS,
   cloneSettings,
+  OUTLINE_LIMITS_MAP,
   OUTLINE_NUMERIC_KEYS,
   OUTLINE_SETTING_KEYS,
   type OutlineSettingKey,
@@ -23,15 +24,6 @@ export const BACKDROP_ID = 'yt-chat-overlay-settings-backdrop';
 export const TITLE_ID = 'yt-chat-overlay-settings-title';
 
 // ── UI value formatting ─────────────────────────────────────────────────────
-
-const OUTLINE_LIMITS_KEY: Record<
-  Exclude<OutlineSettingKey, 'enabled'>,
-  keyof typeof SETTINGS_LIMITS
-> = {
-  widthPx: 'outlineWidthPx',
-  blurPx: 'outlineBlurPx',
-  opacity: 'outlineOpacity',
-};
 
 const ROOT_ROUNDED_KEYS: readonly RootScalarSettingKey[] = [
   'maxConcurrentMessages',
@@ -101,7 +93,7 @@ export const normalizeOutlineNumericInputValue = (
   value: unknown,
   fallback: number
 ): number => {
-  const limitsKey = OUTLINE_LIMITS_KEY[key];
+  const limitsKey = OUTLINE_LIMITS_MAP[key];
   return normalizeNumericValue(value, fallback, SETTINGS_LIMITS[limitsKey], false);
 };
 
@@ -111,7 +103,7 @@ export const getNumericInputAttributes = (
   const limitsKey =
     key in SETTINGS_LIMITS
       ? (key as keyof typeof SETTINGS_LIMITS)
-      : OUTLINE_LIMITS_KEY[key as Exclude<OutlineSettingKey, 'enabled'>];
+      : OUTLINE_LIMITS_MAP[key as Exclude<OutlineSettingKey, 'enabled'>];
 
   const limits = SETTINGS_LIMITS[limitsKey];
   const scale = getRootScale(key as RootScalarSettingKey);
