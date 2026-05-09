@@ -310,19 +310,12 @@ export abstract class ChatSource {
         log.debug(
           `Bootstrap unavailable (retry ${unavailableRetries}/${BOOTSTRAP_MAX_UNAVAILABLE_RETRIES}): ${result.reason}`
         );
-
-        if (attempt < BOOTSTRAP_ATTEMPTS) {
-          // Exponential backoff: 800ms, 1600ms, 3200ms, 6400ms...
-          const backoffDelay = BOOTSTRAP_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1);
-          await sleep(Math.min(backoffDelay, 8000), signal);
-        }
-        continue;
+      } else {
+        lastRetryReason = result.reason;
       }
 
-      lastRetryReason = result.reason;
-
+      // Exponential backoff: 800ms, 1600ms, 3200ms, 6400ms...
       if (attempt < BOOTSTRAP_ATTEMPTS) {
-        // Exponential backoff for retryable failures too
         const backoffDelay = BOOTSTRAP_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1);
         await sleep(Math.min(backoffDelay, 8000), signal);
       }
