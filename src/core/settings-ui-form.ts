@@ -25,13 +25,13 @@ export const TITLE_ID = 'yt-chat-overlay-settings-title';
 
 // ── UI value formatting ─────────────────────────────────────────────────────
 
-const ROOT_ROUNDED_KEYS: readonly RootScalarSettingKey[] = [
+const ROOT_ROUNDED_KEYS = new Set<RootScalarSettingKey>([
   'maxConcurrentMessages',
   'maxMessagesPerSecond',
   'minTextLength',
   'laneSpacing',
   'authorRateLimitMaxMessages',
-] as const;
+]);
 
 interface NumericInputOptions {
   readonly scale?: number;
@@ -83,7 +83,7 @@ export const normalizeRootNumericInputValue = (
     value,
     fallback,
     SETTINGS_LIMITS[key as keyof typeof SETTINGS_LIMITS],
-    ROOT_ROUNDED_KEYS.includes(key),
+    ROOT_ROUNDED_KEYS.has(key),
     getRootScale(key)
   );
 };

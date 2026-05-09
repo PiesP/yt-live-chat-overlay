@@ -237,7 +237,7 @@ export abstract class ChatSource {
    *   from seedCurrentSession, so the runtime session can route to the backlog
    *   controller for throttled injection.
    */
-  protected emitBatch(messages: ChatMessage[], isInitialSeed: boolean = false): void {
+  protected emitBatch(messages: ChatMessage[], isInitialSeed: boolean): void {
     if (!this.callback || messages.length === 0) {
       return;
     }

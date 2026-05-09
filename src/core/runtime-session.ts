@@ -23,6 +23,13 @@ export interface RuntimeSessionOptions {
 export type RuntimeSessionStartStatus = 'started' | 'retryable' | 'unavailable';
 export type RuntimeSessionRestartReason = 'foreground-return' | 'watchdog';
 
+interface RuntimeHealth {
+  idleDurationMs: number;
+  renderable: boolean;
+  chat: ChatHealthSnapshot | null;
+  shouldRestart: boolean;
+}
+
 /**
  * Owns one full overlay runtime for a specific page URL.
  *
@@ -250,16 +257,9 @@ export class RuntimeSession {
     return this.hiddenSince === null ? 0 : Math.max(0, now - this.hiddenSince);
   }
 
-  private getRuntimeHealthSnapshot(now = Date.now()): {
-    idleDurationMs: number;
-    renderable: boolean;
-    chat: ChatHealthSnapshot | null;
-    shouldRestart: boolean;
-  } {
-    const chatSource = this.chatSource;
-    const chat = chatSource
-      ? chatSource.getHealthSnapshot({ activeTimeoutMs: CHAT_STALL_TIMEOUT_MS })
-      : null;
+  private getRuntimeHealthSnapshot(now = Date.now()): RuntimeHealth {
+    const chat =
+      this.chatSource?.getHealthSnapshot({ activeTimeoutMs: CHAT_STALL_TIMEOUT_MS }) ?? null;
     const idleDurationMs = this.getIdleDurationMs(now);
     const container = this.overlay?.getContainer();
     const dimensions = this.overlay?.getDimensions();
@@ -269,12 +269,7 @@ export class RuntimeSession {
       idleDurationMs >= LONG_IDLE_RESTART_MS ||
       (this.sessionReady && !!chat && (!chat.observerAlive || !chat.recentlyActive));
 
-    return {
-      idleDurationMs,
-      renderable,
-      chat,
-      shouldRestart,
-    };
+    return { idleDurationMs, renderable, chat, shouldRestart };
   }
 
   private requestManagedRestart(reason: RuntimeSessionRestartReason): void {
