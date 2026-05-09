@@ -198,6 +198,17 @@ export abstract class ChatSource {
     return this.pollController?.signal.aborted ?? false;
   }
 
+  protected getPlaybackSnapshot(): PlaybackSnapshot | null {
+    const match = findElementMatch<HTMLVideoElement>(VIDEO_SELECTORS);
+    if (!match) return null;
+    const { element: video } = match;
+    if (!Number.isFinite(video.currentTime)) return null;
+    return {
+      offsetMs: Math.max(0, Math.floor(video.currentTime * 1000)),
+      paused: video.paused,
+    };
+  }
+
   protected markActivity(): void {
     this.lastActivityTime = Date.now();
   }
@@ -587,17 +598,6 @@ export class LiveChatSource extends ChatSource {
     this.liveContinuation = extractNextLiveContinuation(payload.continuations);
   }
 
-  private getPlaybackSnapshot(): PlaybackSnapshot | null {
-    const match = findElementMatch<HTMLVideoElement>(VIDEO_SELECTORS);
-    if (!match) return null;
-    const { element: video } = match;
-    if (!Number.isFinite(video.currentTime)) return null;
-    return {
-      offsetMs: Math.max(0, Math.floor(video.currentTime * 1000)),
-      paused: video.paused,
-    };
-  }
-
   private async refreshLiveContinuation(signal?: AbortSignal): Promise<void> {
     const refreshed = await this.refreshBootstrap(signal);
     if (refreshed) {
@@ -753,23 +753,6 @@ export class ReplayChatSource extends ChatSource {
     playerOffsetMs?: number
   ): Promise<LiveChatPayload | null> {
     return this.requestPayload(fetchReplayChat, continuation, playerOffsetMs, signal);
-  }
-
-  private getPlaybackSnapshot(): PlaybackSnapshot | null {
-    const match = findElementMatch<HTMLVideoElement>(VIDEO_SELECTORS);
-    if (!match) {
-      return null;
-    }
-
-    const { element: video } = match;
-    if (!Number.isFinite(video.currentTime)) {
-      return null;
-    }
-
-    return {
-      offsetMs: Math.max(0, Math.floor(video.currentTime * 1000)),
-      paused: video.paused,
-    };
   }
 
   private makeReplayKey(message: ChatMessage, offsetMs: number): string {
