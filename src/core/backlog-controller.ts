@@ -140,50 +140,71 @@ export class BacklogInjectionController {
   /** Callback to be set by RuntimeSession */
   public onBacklogMessage: ((message: ChatMessage) => void) | null = null;
 
-  /** Apply sampling based on backlog size */
+  /** Apply smart sampling based on message importance and time distribution. */
   private sampleMessages(messages: ChatMessage[]): ChatMessage[] {
     const count = messages.length;
-    // Always keep high-priority messages (SuperChat, Membership)
-    // Use string comparison to handle runtime kind values not in the type.
-    const highPriority = messages.filter((m) => {
-      const kind = m.kind;
-      return kind === 'superchat' || kind === 'membership';
-    });
-    const normal = messages.filter((m) => {
-      const kind = m.kind;
-      return kind !== 'superchat' && kind !== 'membership';
+    if (count < 200) return messages; // Small backlog: keep all
+
+    // Tier 1: Always keep (SuperChat, Membership)
+    const tier1 = messages.filter((m) => m.kind === 'superchat' || m.kind === 'membership');
+
+    // Tier 2: Substantial text messages (3+ chars, not just reactions)
+    const tier2 = messages.filter((m) => {
+      if (m.kind === 'superchat' || m.kind === 'membership') return false;
+      const text = m.text.trim();
+      return text.length >= 3 && !/^[\sㅋㅎㅇㄱ]+$/.test(text);
     });
 
-    let sampleCount: number;
-    if (count < 200) {
-      sampleCount = count; // Keep all
-    } else if (count < 500) {
-      sampleCount = Math.floor(count * 0.5); // 50%
-    } else {
-      sampleCount = Math.floor(count * 0.25); // 25%
+    // Tier 3: Short reactions (ㅋㅋ, ㅇㅇ, etc.)
+    const tier3 = messages.filter((m) => {
+      if (m.kind === 'superchat' || m.kind === 'membership') return false;
+      return !tier2.includes(m);
+    });
+
+    // Determine how many normal messages to keep
+    const normalBudget =
+      count < 500
+        ? Math.floor(count * 0.6) // 60% for medium backlogs
+        : Math.floor(count * 0.35); // 35% for large backlogs
+
+    const selected: ChatMessage[] = [...tier1];
+    let remaining = normalBudget;
+
+    // Fill with tier 2 first (substantial messages), time-distributed
+    if (tier2.length > 0 && remaining > 0) {
+      const tier2Pick = Math.min(remaining, tier2.length);
+      selected.push(...this.timeDistributedPick(tier2, tier2Pick));
+      remaining -= tier2Pick;
     }
-    // Ensure high-priority messages are always included
-    sampleCount = Math.max(sampleCount, highPriority.length);
 
-    // Take high-priority + random sample of normal messages
-    const normalSample = this.randomSample(normal, Math.max(0, sampleCount - highPriority.length));
-    return [...highPriority, ...normalSample].sort((a, b) => {
-      // Sort by timestamp ascending (oldest first)
-      return a.timestamp - b.timestamp;
-    });
+    // Fill remaining with tier 3 (short reactions)
+    if (tier3.length > 0 && remaining > 0) {
+      const tier3Pick = Math.min(remaining, tier3.length);
+      selected.push(...this.timeDistributedPick(tier3, tier3Pick));
+    }
+
+    return selected.sort((a, b) => a.timestamp - b.timestamp);
   }
 
-  private randomSample<T>(arr: T[], count: number): T[] {
-    if (count >= arr.length) return [...arr];
-    const shuffled = [...arr];
-    for (let i = shuffled.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
-      const tmp = shuffled[i]!;
-      shuffled[i] = shuffled[j]!;
-      shuffled[j] = tmp;
+  /**
+   * Pick messages with even time distribution to avoid clustering.
+   * Divides the time range into buckets and picks one message per bucket.
+   */
+  private timeDistributedPick(messages: ChatMessage[], count: number): ChatMessage[] {
+    if (count >= messages.length) return [...messages];
+    if (count <= 0) return [];
+
+    const sorted = [...messages].sort((a, b) => a.timestamp - b.timestamp);
+    const step = Math.max(1, Math.floor(sorted.length / count));
+    const picked: ChatMessage[] = [];
+
+    for (let i = 0; i < count; i++) {
+      const idx = Math.min(i * step, sorted.length - 1);
+      const msg = sorted[idx];
+      if (msg) picked.push(msg);
     }
-    return shuffled.slice(0, count);
+
+    return picked;
   }
 
   /** Mark backlog injection as complete */
