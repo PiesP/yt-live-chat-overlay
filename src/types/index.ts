@@ -43,10 +43,7 @@ export interface ImageAsset {
 /**
  * Image-based emoji/emoticon information
  */
-export interface EmojiInfo extends ImageAsset {
-  /** Emoji ID (for caching/identification) */
-  id?: string;
-}
+export interface EmojiInfo extends ImageAsset {}
 
 /**
  * Content segment (text or emoji)
@@ -69,8 +66,6 @@ export type ContentSegment = TextContentSegment | EmojiContentSegment;
 export interface SuperChatInfo {
   /** Purchase amount (e.g., "5.00") */
   amount: string;
-  /** Currency code (e.g., "USD", "JPY", "KRW") */
-  currency?: string;
   /** Super Chat color tier (determines prominence) */
   tier: SuperChatTier;
   /** Background color from YouTube */

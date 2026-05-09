@@ -412,14 +412,7 @@ export class ChatMessageParser {
       return null;
     }
 
-    const emoji: EmojiInfo = { ...emojiAsset };
-
-    const id = getString(emojiData.emojiId);
-    if (id) {
-      emoji.id = id;
-    }
-
-    return emoji;
+    return emojiAsset;
   }
 
   private createImageAsset(value: unknown, alt: string, fallbackText?: string): ImageAsset | null {
@@ -657,11 +650,6 @@ export class ChatMessageParser {
       amount,
       tier,
     };
-
-    const currency = amount.match(/[A-Z]{3}/)?.[0];
-    if (currency) {
-      superChatInfo.currency = currency;
-    }
 
     if (backgroundColor) {
       superChatInfo.backgroundColor = backgroundColor;
