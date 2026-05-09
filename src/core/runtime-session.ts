@@ -396,14 +396,7 @@ export class RuntimeSession {
     }
   }
 
-  private replayLatestMessages(
-    renderer = this.renderer,
-    limit = RECENT_MESSAGE_REPLAY_LIMIT
-  ): void {
-    if (!renderer) {
-      return;
-    }
-
+  private replayLatestMessages(renderer: Renderer, limit = RECENT_MESSAGE_REPLAY_LIMIT): void {
     const latestMessages = this.chatSource?.getLatestMessages(limit) ?? [];
     for (const message of latestMessages) {
       renderer.addMessage(message);

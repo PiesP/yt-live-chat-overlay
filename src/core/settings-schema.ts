@@ -161,8 +161,7 @@ const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings
   n.logLevel = isLogLevel(settings.logLevel) ? settings.logLevel : d.logLevel;
 
   for (const key of SHOW_AUTHOR_KEYS) {
-    n.showAuthor[key] =
-      typeof settings.showAuthor[key] === 'boolean' ? settings.showAuthor[key] : d.showAuthor[key];
+    n.showAuthor[key] = pickBool(settings.showAuthor[key], d.showAuthor[key]);
   }
 
   for (const key of AUTHOR_COLOR_KEYS) {

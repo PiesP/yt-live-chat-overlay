@@ -191,10 +191,6 @@ export abstract class ChatSource {
     );
   }
 
-  protected isPollAbort(): boolean {
-    return this.pollController?.signal.aborted ?? false;
-  }
-
   protected getPlaybackSnapshot(): PlaybackSnapshot | null {
     const match = findElementMatch<HTMLVideoElement>(VIDEO_SELECTORS);
     if (!match) return null;
