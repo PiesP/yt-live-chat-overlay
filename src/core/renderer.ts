@@ -198,13 +198,16 @@ export class Renderer {
     const glowColor = `rgba(0, 0, 0, ${Math.min(1, baseOpacity * 0.85)})`;
     const glowBlur = Math.max(1, blur * 1.5);
 
-    return [
-      `-${offset}px -${offset}px ${blur}px ${shadowColor}`,
-      `${offset}px -${offset}px ${blur}px ${shadowColor}`,
-      `-${offset}px ${offset}px ${blur}px ${shadowColor}`,
-      `${offset}px ${offset}px ${blur}px ${shadowColor}`,
-      `0px 0px ${glowBlur}px ${glowColor}`,
-    ].join(', ');
+    const corners = (
+      [
+        [-1, -1],
+        [1, -1],
+        [-1, 1],
+        [1, 1],
+      ] as const
+    ).map(([dx, dy]) => `${dx * offset}px ${dy * offset}px ${blur}px ${shadowColor}`);
+
+    return [...corners, `0px 0px ${glowBlur}px ${glowColor}`].join(', ');
   }
 
   private buildTextStroke(outline: OutlineSettings): string {
@@ -657,9 +660,11 @@ export class Renderer {
   }
 
   private removeMessageByElement(element: HTMLDivElement): void {
-    const active = [...this.activeMessages].find((m) => m.element === element);
-    if (active) {
-      this.removeMessage(active);
+    for (const active of this.activeMessages) {
+      if (active.element === element) {
+        this.removeMessage(active);
+        return;
+      }
     }
   }
 

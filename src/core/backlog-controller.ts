@@ -106,13 +106,10 @@ export class BacklogInjectionController {
 
   /** Notify the controller that a real-time message arrived during injection. */
   notifyRealTimeActivity(): void {
-    this.realTimeActivityCount++;
-    // Reset the counter after the cooldown period
-    if (this.realTimeActivityCount > 1) {
-      setTimeout(() => {
-        this.realTimeActivityCount = Math.max(0, this.realTimeActivityCount - 1);
-      }, this.ADAPTIVE_COOLDOWN_MS);
-    }
+    this.realTimeActivityCount = Math.min(this.realTimeActivityCount + 1, 5);
+    setTimeout(() => {
+      this.realTimeActivityCount = Math.max(0, this.realTimeActivityCount - 1);
+    }, this.ADAPTIVE_COOLDOWN_MS);
   }
 
   /** Start the throttled injection loop */
@@ -177,23 +174,22 @@ export class BacklogInjectionController {
   /** Apply smart sampling based on message importance and time distribution. */
   private sampleMessages(messages: ChatMessage[]): ChatMessage[] {
     const count = messages.length;
-    if (count < 200) return messages; // Small backlog: keep all
+    if (count < 200) return messages;
 
     // Tier 1: Always keep (SuperChat, Membership)
     const tier1 = messages.filter((m) => m.kind === 'superchat' || m.kind === 'membership');
+    const tier1Set = new Set(tier1);
 
     // Tier 2: Substantial text messages (3+ chars, not just reactions)
     const tier2 = messages.filter((m) => {
-      if (m.kind === 'superchat' || m.kind === 'membership') return false;
+      if (tier1Set.has(m)) return false;
       const text = m.text.trim();
       return text.length >= 3 && !/^[\sㅋㅎㅇㄱ]+$/.test(text);
     });
+    const tier2Set = new Set(tier2);
 
     // Tier 3: Short reactions (ㅋㅋ, ㅇㅇ, etc.)
-    const tier3 = messages.filter((m) => {
-      if (m.kind === 'superchat' || m.kind === 'membership') return false;
-      return !tier2.includes(m);
-    });
+    const tier3 = messages.filter((m) => !tier1Set.has(m) && !tier2Set.has(m));
 
     // Determine how many normal messages to keep
     const normalBudget =

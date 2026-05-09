@@ -142,16 +142,10 @@ export class LaneAllocator {
     startTime: number,
     endTime: number
   ): void {
-    for (
-      let index = placement.lane.index;
-      index < placement.lane.index + placement.laneSpan && index < this.lanes.length;
-      index++
-    ) {
+    const end = Math.min(placement.lane.index + placement.laneSpan, this.lanes.length);
+    for (let index = placement.lane.index; index < end; index++) {
       const laneState = this.lanes[index];
-      if (!laneState) {
-        continue;
-      }
-
+      if (!laneState) continue;
       laneState.lastItemStartTime = startTime;
       laneState.lastItemEndTime = endTime;
       laneState.lastItemWidthPx = textWidth;

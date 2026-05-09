@@ -21,7 +21,7 @@ export class ObservabilityReporter {
   private totalReceivedInWindow: number;
   private windowStartTime: number;
   private debugOverlayEl: HTMLElement | null;
-  private debugUpdateTimer: ReturnType<typeof setTimeout> | null;
+  private debugUpdateTimer: ReturnType<typeof setInterval> | null;
   private lastWarnTime: number;
   private readonly WARN_COOLDOWN_MS = 30_000;
   private readonly METRIC_WINDOW_MS = 60_000;
@@ -177,10 +177,9 @@ export class ObservabilityReporter {
 
   private scheduleDebugUpdate(): void {
     if (!this.showDebug || !this.debugOverlayEl) return;
-    this.debugUpdateTimer = setTimeout(() => {
+    this.debugUpdateTimer = setInterval(() => {
       this.updateDebugOverlay();
-      this.scheduleDebugUpdate();
-    }, 250); // 250ms throttle
+    }, 250);
   }
 
   private updateDebugOverlay(): void {
@@ -198,7 +197,7 @@ export class ObservabilityReporter {
 
   private destroyDebugOverlay(): void {
     if (this.debugUpdateTimer !== null) {
-      clearTimeout(this.debugUpdateTimer);
+      clearInterval(this.debugUpdateTimer);
       this.debugUpdateTimer = null;
     }
     if (this.debugOverlayEl) {

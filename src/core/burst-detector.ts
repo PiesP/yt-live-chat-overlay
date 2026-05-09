@@ -76,7 +76,6 @@ export class BurstDetector {
   private evaluate(): void {
     if (this.samples.length === 0) return;
 
-    // Calculate average messages per second from samples
     const avgRate = this.samples.reduce((a, b) => a + b, 0) / this.samples.length;
 
     const newLevel: BurstLevel =
@@ -88,35 +87,28 @@ export class BurstDetector {
             ? 'elevated'
             : 'normal';
 
-    if (newLevel !== this.currentLevel) {
+    if (newLevel === this.currentLevel) {
       if (newLevel !== 'normal') {
         this.lastBurstTime = Date.now();
       }
-      this.currentLevel = newLevel;
-      log.debug(`Burst level: ${newLevel} (rate=${avgRate.toFixed(1)} msg/s)`);
+      return;
+    }
 
-      if (this.observability) {
-        this.observability.updateBurstLevel(newLevel);
+    // Cooldown: stay at current level if rate just dropped to normal
+    if (newLevel === 'normal' && this.currentLevel !== 'normal') {
+      if (Date.now() - this.lastBurstTime < BURST_COOLDOWN_MS) {
+        return;
       }
-      this.onLevelChange?.(newLevel);
-    } else if (newLevel !== 'normal') {
+    }
+
+    if (newLevel !== 'normal') {
       this.lastBurstTime = Date.now();
     }
 
-    // Cooldown: if we were in burst but rate dropped, wait for cooldown
-    if (this.currentLevel !== 'normal' && newLevel === 'normal') {
-      const elapsed = Date.now() - this.lastBurstTime;
-      if (elapsed < BURST_COOLDOWN_MS) {
-        // Stay at current level until cooldown expires
-        // The level will be re-evaluated on next interval
-        return;
-      }
-      this.currentLevel = 'normal';
-      if (this.observability) {
-        this.observability.updateBurstLevel('normal');
-      }
-      this.onLevelChange?.('normal');
-    }
+    this.currentLevel = newLevel;
+    log.debug(`Burst level: ${newLevel} (rate=${avgRate.toFixed(1)} msg/s)`);
+    this.observability?.updateBurstLevel(newLevel);
+    this.onLevelChange?.(newLevel);
   }
 
   /** Clean up */

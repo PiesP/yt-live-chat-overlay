@@ -40,13 +40,10 @@ export class PageWatcher {
 
   private patchHistoryMethod(methodName: 'pushState' | 'replaceState'): void {
     const original = history[methodName];
-    const bound = original.bind(history);
-
-    history[methodName] = ((...args: Parameters<typeof history.pushState>) => {
-      bound(...args);
+    history[methodName] = (...args: Parameters<typeof history.pushState>) => {
+      original.apply(history, args);
       this.handlePotentialUrlChange(methodName);
-    }) as typeof history.pushState;
-
+    };
     this.historyRestorers.push(() => {
       history[methodName] = original;
     });
