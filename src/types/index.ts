@@ -178,12 +178,16 @@ export interface OverlaySettings {
   authorRateLimitMaxMessages: number;
 
   // ── Backlog Injection ──
+  /** How to handle past chat messages on initial load */
+  backlogMode: 'playback' | 'recent' | 'full' | 'none';
   /** Max backlog messages injected per second (0 = no limit) */
   backlogMaxRate: number;
   /** Speed multiplier for backlog message animations */
   backlogSpeedMultiplier: number;
   /** Show backlog loading indicator */
   showBacklogIndicator: boolean;
+  /** For 'recent' mode: how many minutes of past chat to show (1-30) */
+  backlogRecentMinutes: number;
 }
 
 /**

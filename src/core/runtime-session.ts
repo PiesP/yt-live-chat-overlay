@@ -195,9 +195,11 @@ export class RuntimeSession {
         if (!this.backlogController) {
           this.backlogController = new BacklogInjectionController(
             {
+              backlogMode: this.settings.backlogMode,
               backlogMaxRate: this.settings.backlogMaxRate,
               backlogSpeedMultiplier: this.settings.backlogSpeedMultiplier,
               showBacklogIndicator: this.settings.showBacklogIndicator,
+              backlogRecentMinutes: this.settings.backlogRecentMinutes,
             },
             renderer.laneCount,
             renderer.observability

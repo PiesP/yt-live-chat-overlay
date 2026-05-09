@@ -51,6 +51,7 @@ export const ROOT_NUMERIC_KEYS = [
   'authorRateLimitMaxMessages',
   'backlogMaxRate',
   'backlogSpeedMultiplier',
+  'backlogRecentMinutes',
 ] as const satisfies readonly RootNumericSettingKey[];
 
 export const ROOT_SETTING_KEYS = [
@@ -76,6 +77,8 @@ export const ROOT_SETTING_KEYS = [
   'backlogMaxRate',
   'backlogSpeedMultiplier',
   'showBacklogIndicator',
+  'backlogMode',
+  'backlogRecentMinutes',
 ] as const satisfies readonly RootScalarSettingKey[];
 
 export const OUTLINE_SETTING_KEYS = [
@@ -151,6 +154,18 @@ const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings
     typeof settings.showBacklogIndicator === 'boolean'
       ? settings.showBacklogIndicator
       : d.showBacklogIndicator;
+
+  // Backlog mode: validate against allowed values
+  const validBacklogModes = ['playback', 'recent', 'full', 'none'] as const;
+  n.backlogMode = validBacklogModes.includes(
+    settings.backlogMode as (typeof validBacklogModes)[number]
+  )
+    ? settings.backlogMode
+    : d.backlogMode;
+  n.backlogRecentMinutes = clampNumber(settings.backlogRecentMinutes, d.backlogRecentMinutes, {
+    min: 1,
+    max: 30,
+  });
 
   for (const key of ROOT_NUMERIC_KEYS) {
     n[key] = clampNumber(settings[key], d[key], resolveLimits(key));

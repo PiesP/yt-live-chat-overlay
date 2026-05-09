@@ -351,6 +351,7 @@ export class SettingsUiForm {
 
     const backlogSection = this.createSection('Backlog');
     backlogSection.append(
+      this.createBacklogModeField(),
       this.createNumberField(
         'Max backlog rate (msg/s)',
         'backlogMaxRate',
@@ -360,6 +361,11 @@ export class SettingsUiForm {
         'Backlog speed multiplier',
         'backlogSpeedMultiplier',
         'Speed multiplier for backlog message animations'
+      ),
+      this.createNumberField(
+        'Recent minutes',
+        'backlogRecentMinutes',
+        'Show past chat from last N minutes (only for "Recent" mode)'
       ),
       this.createCheckboxField(
         'Show backlog loading indicator',
@@ -510,6 +516,24 @@ export class SettingsUiForm {
     return this.createField('Log Level', select);
   }
 
+  private createBacklogModeField(): HTMLLabelElement {
+    const select = document.createElement('select');
+    select.name = 'backlogMode';
+    select.title = 'How to show past chat messages on load';
+    for (const [value, label] of [
+      ['playback', 'Playback-based (recommended)'],
+      ['recent', 'Recent only'],
+      ['full', 'Full (show all)'],
+      ['none', 'None (skip backlog)'],
+    ] as const) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = label;
+      select.appendChild(option);
+    }
+    return this.createField('Backlog Mode', select);
+  }
+
   private createField(labelText: string, control: HTMLElement): HTMLLabelElement {
     const label = document.createElement('label');
     label.className = 'yt-chat-overlay-settings-field';
@@ -594,7 +618,7 @@ export class SettingsUiForm {
       key === 'showBacklogIndicator'
     ) {
       this.setCheckbox(key, value as boolean);
-    } else if (key === 'logLevel') {
+    } else if (key === 'logLevel' || key === 'backlogMode') {
       this.setSelect(key, value as string);
     } else {
       this.setValue(key, formatRootNumericSettingForInput(key, value as number));
@@ -665,6 +689,10 @@ export class SettingsUiForm {
       current.showBacklogIndicator
     );
     target.logLevel = this.getLogLevel('logLevel', current.logLevel);
+    target.backlogMode = this.getSelectValue(
+      'backlogMode',
+      current.backlogMode
+    ) as OverlaySettings['backlogMode'];
 
     for (const key of ROOT_NUMERIC_KEYS) {
       target[key] = normalizeRootNumericInputValue(
@@ -750,6 +778,11 @@ export class SettingsUiForm {
     if (!select) return fallback;
 
     return isLogLevel(select.value) ? select.value : fallback;
+  }
+
+  private getSelectValue(name: string, fallback: string): string {
+    const select = this.getSelect(name);
+    return select?.value ?? fallback;
   }
 
   private setValue(name: string, value: string | number): void {

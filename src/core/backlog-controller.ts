@@ -24,12 +24,16 @@ import type { ObservabilityReporter } from '@core/observability';
 const log = createLogger('[Backlog]');
 
 export interface BacklogControllerConfig {
+  /** How to handle past chat messages */
+  backlogMode: 'playback' | 'recent' | 'full' | 'none';
   /** Max messages per second during backlog injection */
   backlogMaxRate: number;
-  /** Speed multiplier for backlog messages (2 = twice as fast) */
+  /** Speed multiplier for backlog message animations (2 = twice as fast) */
   backlogSpeedMultiplier: number;
   /** Show backlog loading indicator */
   showBacklogIndicator: boolean;
+  /** For 'recent' mode: how many minutes of past chat to show */
+  backlogRecentMinutes: number;
 }
 
 export interface BacklogInjectionStats {
@@ -64,8 +68,27 @@ export class BacklogInjectionController {
   startBacklogInjection(messages: ChatMessage[]): void {
     if (messages.length === 0) return;
 
+    // 'none' mode: skip backlog entirely
+    if (this.config.backlogMode === 'none') {
+      log.debug('Backlog mode is "none", skipping injection');
+      this.finishBacklogInjection();
+      return;
+    }
+
+    // 'recent' mode: filter messages by time window
+    let filtered = messages;
+    if (this.config.backlogMode === 'recent') {
+      const cutoffMs = this.config.backlogRecentMinutes * 60 * 1000;
+      const now = Date.now();
+      filtered = messages.filter((m) => now - m.timestamp < cutoffMs);
+      log.debug(
+        `Backlog recent mode: ${messages.length} → ${filtered.length} ` +
+          `(last ${this.config.backlogRecentMinutes} min)`
+      );
+    }
+
     // Apply sampling based on backlog size
-    const sampled = this.sampleMessages(messages);
+    const sampled = this.sampleMessages(filtered);
     this.backlogQueue = sampled;
     this.totalBacklog = sampled.length;
     this.processedBacklog = 0;

@@ -103,6 +103,8 @@ export const DEFAULT_SETTINGS = {
   backlogMaxRate: 10,
   backlogSpeedMultiplier: 2,
   showBacklogIndicator: true,
+  backlogMode: 'playback',
+  backlogRecentMinutes: 5,
 } as const satisfies Readonly<OverlaySettings>;
 
 export const STORAGE_KEY = 'yt-live-chat-overlay-settings';
