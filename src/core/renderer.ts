@@ -394,23 +394,15 @@ export class Renderer {
     this.backlogSpeedMultiplier = Math.max(1, multiplier);
   }
 
+  private static readonly KIND_PRIORITY: Record<ChatMessage['kind'], number> = {
+    superchat: 200,
+    membership: 100,
+    text: 0,
+  };
+
   private static getMessagePriority(message: ChatMessage): number {
-    let priority: number;
-    switch (message.kind) {
-      case 'superchat':
-        priority = 200;
-        break;
-      case 'membership':
-        priority = 100;
-        break;
-      default:
-        priority = 0;
-        break;
-    }
-    // Deprioritize backlog messages so real-time messages always render first.
-    if (message.isBacklog) {
-      priority -= 50;
-    }
+    let priority = Renderer.KIND_PRIORITY[message.kind];
+    if (message.isBacklog) priority -= 50;
     return priority;
   }
 

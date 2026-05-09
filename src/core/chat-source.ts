@@ -125,10 +125,7 @@ export abstract class ChatSource {
     try {
       return await this.bootstrapAndLaunchPolling(combinedSignal);
     } catch (error) {
-      if (isAbortError(error) && this.isPollAbort()) {
-        return 'retryable';
-      }
-
+      if (isAbortError(error)) return 'retryable';
       throw error;
     }
   }

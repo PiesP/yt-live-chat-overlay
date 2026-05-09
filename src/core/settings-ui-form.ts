@@ -585,21 +585,28 @@ export class SettingsUiForm {
     }
   }
 
+  private static readonly BOOLEAN_ROOT_KEYS = new Set<RootScalarSettingKey>([
+    'enabled',
+    'allowShortTextMessages',
+    'showDebugOverlay',
+    'authorRateLimitEnabled',
+    'showBacklogIndicator',
+  ]);
+
+  private static readonly SELECT_ROOT_KEYS = new Set<RootScalarSettingKey>([
+    'logLevel',
+    'backlogMode',
+  ]);
+
   private populateRootSetting(
     key: RootScalarSettingKey,
     settings: Readonly<OverlaySettings>
   ): void {
     const value = settings[key];
 
-    if (
-      key === 'enabled' ||
-      key === 'allowShortTextMessages' ||
-      key === 'showDebugOverlay' ||
-      key === 'authorRateLimitEnabled' ||
-      key === 'showBacklogIndicator'
-    ) {
+    if (SettingsUiForm.BOOLEAN_ROOT_KEYS.has(key)) {
       this.setCheckbox(key, value as boolean);
-    } else if (key === 'logLevel' || key === 'backlogMode') {
+    } else if (SettingsUiForm.SELECT_ROOT_KEYS.has(key)) {
       this.setSelect(key, value as string);
     } else {
       this.setValue(key, formatRootNumericSettingForInput(key, value as number));
@@ -654,20 +661,12 @@ export class SettingsUiForm {
   }
 
   private applyRootSettingsTo(target: OverlaySettings, current: Readonly<OverlaySettings>): void {
-    target.enabled = this.getCheckbox('enabled', current.enabled);
-    target.allowShortTextMessages = this.getCheckbox(
-      'allowShortTextMessages',
-      current.allowShortTextMessages
-    );
-    target.showDebugOverlay = this.getCheckbox('showDebugOverlay', current.showDebugOverlay);
-    target.authorRateLimitEnabled = this.getCheckbox(
-      'authorRateLimitEnabled',
-      current.authorRateLimitEnabled
-    );
-    target.showBacklogIndicator = this.getCheckbox(
-      'showBacklogIndicator',
-      current.showBacklogIndicator
-    );
+    const cb = (name: string, fallback: boolean) => this.getCheckbox(name, fallback);
+    target.enabled = cb('enabled', current.enabled);
+    target.allowShortTextMessages = cb('allowShortTextMessages', current.allowShortTextMessages);
+    target.showDebugOverlay = cb('showDebugOverlay', current.showDebugOverlay);
+    target.authorRateLimitEnabled = cb('authorRateLimitEnabled', current.authorRateLimitEnabled);
+    target.showBacklogIndicator = cb('showBacklogIndicator', current.showBacklogIndicator);
     target.logLevel = this.getLogLevel('logLevel', current.logLevel);
     target.backlogMode = this.getSelectValue(
       'backlogMode',
@@ -704,15 +703,11 @@ export class SettingsUiForm {
   private collectShowAuthorSettings(
     current: Readonly<OverlaySettings>
   ): OverlaySettings['showAuthor'] {
-    const nextShowAuthor: OverlaySettings['showAuthor'] = {
-      ...current.showAuthor,
-    };
-
+    const next = { ...current.showAuthor };
     for (const key of SHOW_AUTHOR_KEYS) {
-      nextShowAuthor[key] = this.getCheckbox(`showAuthor-${key}`, current.showAuthor[key]);
+      next[key] = this.getCheckbox(`showAuthor-${key}`, current.showAuthor[key]);
     }
-
-    return nextShowAuthor;
+    return next;
   }
 
   private collectOutlineSettings(

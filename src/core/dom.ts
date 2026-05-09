@@ -29,15 +29,9 @@ export const PLAYER_CONTAINER_SELECTORS = ['#movie_player', '.html5-video-player
 export const VIDEO_SELECTORS = ['#movie_player video', 'video.html5-main-video'] as const;
 
 const createAbortError = (reason?: unknown): DOMException => {
-  if (reason instanceof DOMException) {
-    return reason;
-  }
-
-  if (reason instanceof Error) {
-    return new DOMException(reason.message, 'AbortError');
-  }
-
-  return new DOMException('The operation was aborted.', 'AbortError');
+  if (reason instanceof DOMException) return reason;
+  const message = reason instanceof Error ? reason.message : 'The operation was aborted.';
+  return new DOMException(message, 'AbortError');
 };
 
 export const throwIfAborted = (signal?: AbortSignal): void => {
@@ -49,7 +43,7 @@ export const throwIfAborted = (signal?: AbortSignal): void => {
 export const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
   new Promise((resolve, reject) => {
     if (signal?.aborted) {
-      reject(createAbortError(signal?.reason));
+      reject(createAbortError(signal.reason));
       return;
     }
 

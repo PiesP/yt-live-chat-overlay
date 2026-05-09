@@ -134,25 +134,18 @@ const OUTLINE_LIMITS_MAP: Record<
 
 export { OUTLINE_LIMITS_MAP };
 
+const pickBool = (value: unknown, fallback: boolean): boolean =>
+  typeof value === 'boolean' ? value : fallback;
+
 const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings => {
   const d = DEFAULT_SETTINGS;
   const n = cloneSettings(DEFAULT_SETTINGS);
 
-  n.enabled = typeof settings.enabled === 'boolean' ? settings.enabled : d.enabled;
-  n.allowShortTextMessages =
-    typeof settings.allowShortTextMessages === 'boolean'
-      ? settings.allowShortTextMessages
-      : d.allowShortTextMessages;
-  n.showDebugOverlay =
-    typeof settings.showDebugOverlay === 'boolean' ? settings.showDebugOverlay : d.showDebugOverlay;
-  n.authorRateLimitEnabled =
-    typeof settings.authorRateLimitEnabled === 'boolean'
-      ? settings.authorRateLimitEnabled
-      : d.authorRateLimitEnabled;
-  n.showBacklogIndicator =
-    typeof settings.showBacklogIndicator === 'boolean'
-      ? settings.showBacklogIndicator
-      : d.showBacklogIndicator;
+  n.enabled = pickBool(settings.enabled, d.enabled);
+  n.allowShortTextMessages = pickBool(settings.allowShortTextMessages, d.allowShortTextMessages);
+  n.showDebugOverlay = pickBool(settings.showDebugOverlay, d.showDebugOverlay);
+  n.authorRateLimitEnabled = pickBool(settings.authorRateLimitEnabled, d.authorRateLimitEnabled);
+  n.showBacklogIndicator = pickBool(settings.showBacklogIndicator, d.showBacklogIndicator);
 
   // Backlog mode: validate against allowed values
   n.backlogMode = VALID_BACKLOG_MODES.includes(
@@ -176,8 +169,7 @@ const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings
     n.colors[key] = isColorValue(settings.colors[key]) ? settings.colors[key] : d.colors[key];
   }
 
-  n.outline.enabled =
-    typeof settings.outline.enabled === 'boolean' ? settings.outline.enabled : d.outline.enabled;
+  n.outline.enabled = pickBool(settings.outline.enabled, d.outline.enabled);
   for (const key of OUTLINE_NUMERIC_KEYS) {
     n.outline[key] = clampNumber(settings.outline[key], d.outline[key], resolveLimits(key));
   }

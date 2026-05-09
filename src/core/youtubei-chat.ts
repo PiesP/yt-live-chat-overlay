@@ -178,9 +178,8 @@ const findFirstNestedRecordByKey = (
   });
 };
 
-const findFirstNestedStringByKey = (root: unknown, key: string): string | undefined => {
-  return findFirstNestedByKey(root, key, (v) => getString(v) ?? null) ?? undefined;
-};
+const findFirstNestedStringByKey = (root: unknown, key: string): string | undefined =>
+  findFirstNestedByKey(root, key, (v) => getString(v) ?? null) ?? undefined;
 
 export const getVideoIdFromUrl = (href = location.href): string | null => {
   try {

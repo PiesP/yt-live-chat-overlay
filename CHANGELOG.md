@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.24.3] - 2026-05-10
+
+### Refactored
+
+- **`createAbortError` simplified** — 3-branch if/else reduced to ternary expression in `dom.ts`.
+- **`sleep` signal argument deduplicated** — Removed redundant optional chain after abort guard in `dom.ts`.
+- **`PageWatcher` history restorers** — Replaced `Array<() => void>` + loop with two nullable closure variables (`restorePushState`/`restoreReplaceState`), simplifying destroy logic.
+- **`ChatSource.start` abort guard** — Removed redundant `isPollAbort()` check; `isAbortError` alone is sufficient since the combined signal already covers both external and internal aborts.
+- **`getMessagePriority` switch → lookup table** — Replaced 5-line switch statement with a 3-line `Record<ChatMessage['kind'], number>` in `Renderer`.
+- **`normalizeSettings` boolean guards** — Extracted `pickBool` helper to eliminate 5 repetitive `typeof x === 'boolean' ? x : default` patterns in `settings-schema.ts`.
+- **`applyRootSettingsTo` checkbox collection** — Extracted local `cb` helper to remove 5 duplicate `this.getCheckbox(name, fallback)` call sites in `SettingsUiForm`.
+- **`collectShowAuthorSettings` simplified** — Removed unnecessary intermediate variable and blank lines in `SettingsUiForm`.
+- **`populateRootSetting` branching** — Replaced 5-way OR chain + 2-way OR chain with `Set.has()` lookups (`BOOLEAN_ROOT_KEYS`, `SELECT_ROOT_KEYS`) for O(1) dispatch.
+- **`findFirstNestedStringByKey` body** — Converted block body to expression body in `youtubei-chat.ts`.
+
 ## [0.24.2] - 2026-05-09
 
 ### Refactored

@@ -20,7 +20,8 @@ const isSupportedYouTubePath = (pathname: string): boolean =>
 export class PageWatcher {
   private currentUrl = location.href;
   private callbacks: Set<PageChangeCallback> = new Set();
-  private readonly historyRestorers: Array<() => void> = [];
+  private restorePushState?: () => void;
+  private restoreReplaceState?: () => void;
 
   private readonly handleUrlMutation = (): void => {
     this.handlePotentialUrlChange('popstate');
@@ -32,21 +33,21 @@ export class PageWatcher {
   };
 
   constructor() {
-    this.patchHistoryMethod('pushState');
-    this.patchHistoryMethod('replaceState');
+    this.restorePushState = this.patchHistoryMethod('pushState');
+    this.restoreReplaceState = this.patchHistoryMethod('replaceState');
     window.addEventListener('popstate', this.handleUrlMutation);
     window.addEventListener(YT_NAVIGATE_FINISH_EVENT, this.handleYouTubeNavigateFinish);
   }
 
-  private patchHistoryMethod(methodName: 'pushState' | 'replaceState'): void {
+  private patchHistoryMethod(methodName: 'pushState' | 'replaceState'): () => void {
     const original = history[methodName];
     history[methodName] = (...args: Parameters<typeof history.pushState>) => {
       original.apply(history, args);
       this.handlePotentialUrlChange(methodName);
     };
-    this.historyRestorers.push(() => {
+    return () => {
       history[methodName] = original;
-    });
+    };
   }
 
   private handlePotentialUrlChange(source: NavigationSignalSource): void {
@@ -99,8 +100,8 @@ export class PageWatcher {
   destroy(): void {
     window.removeEventListener('popstate', this.handleUrlMutation);
     window.removeEventListener(YT_NAVIGATE_FINISH_EVENT, this.handleYouTubeNavigateFinish);
-    for (const restore of this.historyRestorers) restore();
-    this.historyRestorers.length = 0;
+    this.restorePushState?.();
+    this.restoreReplaceState?.();
     this.callbacks.clear();
 
     log.debug('Destroyed');
