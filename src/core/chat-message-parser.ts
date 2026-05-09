@@ -349,9 +349,7 @@ export class ChatMessageParser {
         continue;
       }
 
-      visibleLength += Array.from(
-        this.stripControlCharacters(segment.content).replace(/\s+/g, '')
-      ).length;
+      visibleLength += [...this.stripControlCharacters(segment.content).replace(/\s+/g, '')].length;
     }
 
     return visibleLength;
@@ -363,9 +361,7 @@ export class ChatMessageParser {
       return undefined;
     }
 
-    return (
-      getString(asRecord(asRecord(record.accessibility)?.accessibilityData)?.label) || undefined
-    );
+    return getString(asRecord(asRecord(record.accessibility)?.accessibilityData)?.label);
   }
 
   private getEmojiShortcuts(emojiData: JsonObject): string[] {
@@ -585,7 +581,7 @@ export class ChatMessageParser {
   private truncateText(text: string): string {
     const normalized = this.normalizeInlineText(text);
     if (normalized.length > 80) {
-      return `${normalized.substring(0, 77)}...`;
+      return `${normalized.slice(0, 77)}...`;
     }
     return normalized;
   }

@@ -257,7 +257,7 @@ export class SettingsUi {
       applyButton.textContent = '✓ Saved';
       applyButton.disabled = true;
     }
-    window.setTimeout(() => this.close(), 400);
+    setTimeout(() => this.close(), 400);
   }
 
   private handleReset(): void {

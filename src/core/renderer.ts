@@ -122,7 +122,7 @@ export class Renderer {
   private resetRenderedState(): void {
     this.clearRetryTimer();
 
-    for (const active of Array.from(this.activeMessages)) {
+    for (const active of [...this.activeMessages]) {
       this.removeMessage(active);
     }
 
@@ -639,7 +639,7 @@ export class Renderer {
     this.observability.onMessageRendered();
 
     log.debug('Rendering message:', {
-      text: message.text.substring(0, 20),
+      text: message.text.slice(0, 20),
       author: message.author,
       authorType: message.authorType,
       kind: message.kind,
@@ -658,7 +658,7 @@ export class Renderer {
   }
 
   private removeMessageByElement(element: HTMLDivElement): void {
-    const active = Array.from(this.activeMessages).find((m) => m.element === element);
+    const active = [...this.activeMessages].find((m) => m.element === element);
     if (active) {
       this.removeMessage(active);
     }
@@ -744,7 +744,7 @@ export class Renderer {
     // Reset active animations so they continue from their current visual
     // position with the remaining duration, rather than jumping to where
     // they would be if they had been running during the pause.
-    for (const active of Array.from(this.activeMessages)) {
+    for (const active of [...this.activeMessages]) {
       try {
         const elapsed = performance.now() - active.startTime;
         const remaining = active.baseDuration - elapsed;
@@ -798,7 +798,7 @@ export class Renderer {
   }
 
   private forEachElement(operation: (element: HTMLDivElement) => void): void {
-    for (const active of Array.from(this.activeMessages)) {
+    for (const active of [...this.activeMessages]) {
       try {
         operation(active.element);
       } catch (error) {

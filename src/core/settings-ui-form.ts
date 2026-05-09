@@ -795,7 +795,7 @@ export class SettingsUiForm {
       'button:not([disabled]), input:not([disabled]), select:not([disabled]), ' +
       'textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])';
 
-    return Array.from(this.modal.querySelectorAll<HTMLElement>(selectors)).filter((element) => {
+    return [...this.modal.querySelectorAll<HTMLElement>(selectors)].filter((element) => {
       if (element.tabIndex < 0) return false;
       if (element.hasAttribute('hidden')) return false;
       // Exclude elements inside a hidden tab pane

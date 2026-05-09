@@ -140,7 +140,8 @@ export class BacklogInjectionController {
       const tickInterval = Math.round(1000 / adaptiveRate);
 
       // Process one message per tick
-      const message = this.backlogQueue.shift()!;
+      const message = this.backlogQueue.shift();
+      if (!message) return;
       message.isBacklog = true;
       this.processedBacklog++;
 
