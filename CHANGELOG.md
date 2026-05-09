@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.24.2] - 2026-05-09
+
+### Refactored
+
+- **Deduplicated `getPlaybackSnapshot()`** — Hoisted identical private method from both `LiveChatSource` and `ReplayChatSource` to the abstract `ChatSource` base class.
+- **Consolidated outline key maps** — Replaced duplicate `OUTLINE_LIMITS_KEY` in settings UI with a single exported source of truth from `settings-schema.ts`.
+- **Removed unused `burstEnabled` code path** — The `AuthorRateLimiter.burstEnabled` field was never configured from outside. Removed the field, its guard, and the `updateConfig` parameter.
+- **Consolidated bootstrap backoff logic** — Two copies of identical exponential backoff in `resolveBootstrap()` merged into a single shared path.
+- **Reduced redundant opacity computation** — `effectiveOpacity` was computed twice per rendered message. Now computed once and passed to both `applyCommonMessageStyles()` and `setupMessageAnimation()`.
+- **Removed unused type fields** — `SuperChatInfo.currency` and `EmojiInfo.id` were set during parsing but never read by the renderer. Removed the type definitions and parsing code.
+
 ## [0.24.1] - 2026-05-09
 
 ### Fixed
