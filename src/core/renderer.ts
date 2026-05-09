@@ -29,6 +29,7 @@ interface ActiveMessage {
   element: HTMLDivElement;
   readonly startTime: DOMHighResTimeStamp;
   readonly baseDuration: number;
+  readonly baseOpacity: number;
   readonly cleanup: () => void;
 }
 
@@ -67,8 +68,11 @@ export class Renderer {
   private static readonly QUEUE_MAX_SIZE = 50;
   private static readonly BATCH_SIZE = 8;
   private static readonly RETRY_DELAY_MS = 4;
+  private static readonly MAX_MESSAGE_AGE_MS = 60_000;
+  private static readonly OPACITY_UPDATE_INTERVAL_MS = 250;
   private styleElement: HTMLStyleElement | null = null;
   private retryTimer: number | null = null;
+  private opacityUpdateTimer: number | null = null;
   private overlayDimensionsUnsubscribe: (() => void) | null = null;
   private sweepCounter = 0;
   private readonly SWEEP_INTERVAL = 8;
@@ -111,6 +115,8 @@ export class Renderer {
       }
     };
     document.addEventListener('visibilitychange', this.visibilityHandler);
+
+    this.startOpacityUpdates();
   }
 
   private resetRenderedState(): void {
@@ -228,7 +234,8 @@ export class Renderer {
     textWidth: number,
     messageHeight: number,
     dimensions: OverlayDimensions,
-    message?: ChatMessage
+    message?: ChatMessage,
+    baseOpacity?: number
   ): ActiveMessage {
     const fontSize = this.settings.fontSize;
     const { lane } = placement;
@@ -302,6 +309,7 @@ export class Renderer {
       element,
       startTime: performance.now(),
       baseDuration,
+      baseOpacity: baseOpacity ?? this.settings.opacity,
       cleanup,
     };
   }
@@ -494,6 +502,55 @@ export class Renderer {
     }
   }
 
+  /**
+   * Periodically fade active messages based on their age, and remove
+   * messages that exceed the 60-second playback-time window.
+   *
+   * Messages fade linearly from full opacity (age=0) to fully transparent
+   * (age=60s), creating a smooth "past messages grow faint" effect while
+   * keeping the visible window limited to recent chat.
+   */
+  private startOpacityUpdates(): void {
+    this.opacityUpdateTimer = window.setInterval(() => {
+      this.updateMessageOpacity();
+    }, Renderer.OPACITY_UPDATE_INTERVAL_MS);
+  }
+
+  private updateMessageOpacity(): void {
+    const now = performance.now();
+    const toRemove: ActiveMessage[] = [];
+
+    for (const active of this.activeMessages) {
+      try {
+        const elapsed = now - active.startTime;
+
+        if (elapsed >= Renderer.MAX_MESSAGE_AGE_MS) {
+          toRemove.push(active);
+          continue;
+        }
+
+        // Linear fade: full opacity at age=0, near-zero at age=60s
+        const ageRatio = elapsed / Renderer.MAX_MESSAGE_AGE_MS;
+        const fadeFactor = Math.max(0, 1 - ageRatio);
+        active.element.style.opacity = `${active.baseOpacity * fadeFactor}`;
+      } catch (error) {
+        log.debug('Failed to update message opacity:', error);
+        toRemove.push(active);
+      }
+    }
+
+    for (const active of toRemove) {
+      this.removeMessage(active);
+    }
+  }
+
+  private stopOpacityUpdates(): void {
+    if (this.opacityUpdateTimer !== null) {
+      window.clearInterval(this.opacityUpdateTimer);
+      this.opacityUpdateTimer = null;
+    }
+  }
+
   private logPerformanceWarning(): void {
     const now = Date.now();
     if (now - this.lastWarningTime < Renderer.WARNING_INTERVAL_MS) {
@@ -564,13 +621,19 @@ export class Renderer {
     const { element, isSuperChat, isMembership } = builtMessage;
     this.applyCommonMessageStyles(element, message, isSuperChat, isMembership);
 
+    const baseOpacity = this.settings.opacity;
+    const effectiveOpacity = message.isBacklog
+      ? baseOpacity * Renderer.BACKLOG_OPACITY_SCALE
+      : baseOpacity;
+
     const activeMessage = this.setupMessageAnimation(
       element,
       placement,
       estimated.width,
       messageHeight,
       dimensions,
-      message
+      message,
+      effectiveOpacity
     );
 
     container.appendChild(element);
@@ -750,6 +813,7 @@ export class Renderer {
 
   destroy(): void {
     this.isPaused = false;
+    this.stopOpacityUpdates();
     this.overlayDimensionsUnsubscribe?.();
     this.overlayDimensionsUnsubscribe = null;
 
