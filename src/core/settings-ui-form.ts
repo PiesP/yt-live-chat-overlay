@@ -392,16 +392,6 @@ export class SettingsUiForm {
         'Show debug overlay',
         'showDebugOverlay',
         'Display real-time metrics overlay'
-      ),
-      this.createCheckboxField(
-        'Log drop events',
-        'enableDropLogging',
-        'Log message drop events at debug level'
-      ),
-      this.createNumberField(
-        'Debug overlay opacity (%)',
-        'debugOverlayOpacity',
-        'Background opacity of the debug overlay'
       )
     );
 
@@ -605,7 +595,6 @@ export class SettingsUiForm {
       key === 'enabled' ||
       key === 'allowShortTextMessages' ||
       key === 'showDebugOverlay' ||
-      key === 'enableDropLogging' ||
       key === 'authorRateLimitEnabled' ||
       key === 'showBacklogIndicator'
     ) {
@@ -671,7 +660,6 @@ export class SettingsUiForm {
       current.allowShortTextMessages
     );
     target.showDebugOverlay = this.getCheckbox('showDebugOverlay', current.showDebugOverlay);
-    target.enableDropLogging = this.getCheckbox('enableDropLogging', current.enableDropLogging);
     target.authorRateLimitEnabled = this.getCheckbox(
       'authorRateLimitEnabled',
       current.authorRateLimitEnabled

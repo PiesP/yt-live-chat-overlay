@@ -26,7 +26,6 @@ type SettingsLimitKey =
   | 'outlineBlurPx'
   | 'outlineOpacity'
   | 'laneSpacing'
-  | 'debugOverlayOpacity'
   | 'authorRateLimitWindowMs'
   | 'authorRateLimitMaxMessages'
   | 'backlogMaxRate'
@@ -70,7 +69,6 @@ export const SETTINGS_LIMITS = {
   outlineBlurPx: { min: 0, max: 8, step: 0.5 },
   outlineOpacity: { min: 0, max: 1, step: 0.1 },
   laneSpacing: { min: 0, max: 20, step: 1 },
-  debugOverlayOpacity: { min: 0.1, max: 1, step: 0.1 },
   authorRateLimitWindowMs: { min: 1000, max: 30000, step: 1000 },
   authorRateLimitMaxMessages: { min: 1, max: 20, step: 1 },
   backlogMaxRate: { min: 0, max: 50, step: 5 },
@@ -95,8 +93,6 @@ export const DEFAULT_SETTINGS = {
   outline: DEFAULT_OUTLINE,
   laneSpacing: 0,
   showDebugOverlay: false,
-  enableDropLogging: true,
-  debugOverlayOpacity: 0.8,
   authorRateLimitEnabled: true,
   authorRateLimitWindowMs: 5000,
   authorRateLimitMaxMessages: 5,

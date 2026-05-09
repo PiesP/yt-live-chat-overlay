@@ -159,10 +159,6 @@ export interface OverlaySettings {
   laneSpacing: number;
   /** Show debug overlay with real-time metrics */
   showDebugOverlay: boolean;
-  /** Log drop events at debug level */
-  enableDropLogging: boolean;
-  /** Debug overlay background opacity (0.1-1.0) */
-  debugOverlayOpacity: number;
 
   // ── Author Rate Limiting ──
   /** Enable per-author rate limiting */

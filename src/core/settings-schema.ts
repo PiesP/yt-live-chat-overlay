@@ -32,7 +32,6 @@ type RootNumericSettingKey = Exclude<
   | 'allowShortTextMessages'
   | 'logLevel'
   | 'showDebugOverlay'
-  | 'enableDropLogging'
   | 'authorRateLimitEnabled'
   | 'showBacklogIndicator'
 >;
@@ -48,7 +47,6 @@ export const ROOT_NUMERIC_KEYS = [
   'maxMessagesPerSecond',
   'minTextLength',
   'laneSpacing',
-  'debugOverlayOpacity',
   'authorRateLimitWindowMs',
   'authorRateLimitMaxMessages',
   'backlogMaxRate',
@@ -70,8 +68,6 @@ export const ROOT_SETTING_KEYS = [
   'logLevel',
   'laneSpacing',
   'showDebugOverlay',
-  'enableDropLogging',
-  'debugOverlayOpacity',
   'authorRateLimitEnabled',
   'authorRateLimitWindowMs',
   'authorRateLimitMaxMessages',
@@ -148,10 +144,6 @@ const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings
       : d.allowShortTextMessages;
   n.showDebugOverlay =
     typeof settings.showDebugOverlay === 'boolean' ? settings.showDebugOverlay : d.showDebugOverlay;
-  n.enableDropLogging =
-    typeof settings.enableDropLogging === 'boolean'
-      ? settings.enableDropLogging
-      : d.enableDropLogging;
   n.authorRateLimitEnabled =
     typeof settings.authorRateLimitEnabled === 'boolean'
       ? settings.authorRateLimitEnabled
