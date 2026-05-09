@@ -26,7 +26,6 @@ export class PerAuthorRateLimiter {
   private windowMs: number = DEFAULT_WINDOW_MS;
   private maxPerWindow: number = DEFAULT_MAX_PER_WINDOW;
   private enabled: boolean = true;
-  private burstEnabled: boolean = true;
   private lastPruneTime: number = Date.now();
   private readonly getBurstLevel: () => BurstLevel;
 
@@ -74,8 +73,6 @@ export class PerAuthorRateLimiter {
   }
 
   private getEffectiveLimit(): number | null {
-    if (!this.burstEnabled) return this.maxPerWindow;
-
     const burstLevel = this.getBurstLevel();
     const burstLimit = BURST_LIMITS[burstLevel];
 
@@ -95,16 +92,10 @@ export class PerAuthorRateLimiter {
     }
   }
 
-  updateConfig(config: {
-    enabled?: boolean;
-    windowMs?: number;
-    maxPerWindow?: number;
-    burstEnabled?: boolean;
-  }): void {
+  updateConfig(config: { enabled?: boolean; windowMs?: number; maxPerWindow?: number }): void {
     if (config.enabled !== undefined) this.enabled = config.enabled;
     if (config.windowMs !== undefined) this.windowMs = config.windowMs;
     if (config.maxPerWindow !== undefined) this.maxPerWindow = config.maxPerWindow;
-    if (config.burstEnabled !== undefined) this.burstEnabled = config.burstEnabled;
   }
 
   size(): number {
