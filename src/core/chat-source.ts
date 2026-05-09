@@ -543,19 +543,59 @@ export class LiveChatSource extends ChatSource {
   private handleLivePayload(payload: LiveChatPayload, isInitialSeed: boolean = false): void {
     const events = this.parser.extractChatEvents(payload.actions);
 
-    // Batch-emit all messages in a single callback invocation to reduce
-    // per-message function-call overhead under high throughput.
     if (events.length > 0) {
-      const messages: ChatMessage[] = [];
-      for (const event of events) {
-        messages.push(event.message);
+      let messages: ChatMessage[];
+
+      if (isInitialSeed) {
+        // For initial seed, filter out messages that are far behind the
+        // current playback position. This prevents flooding the screen with
+        // old chat when joining a live stream mid-way or seeking in a VOD.
+        const playback = this.getPlaybackSnapshot();
+        const offsetMs = playback?.offsetMs ?? 0;
+        // Keep messages within 60 seconds of current playback, or all if
+        // playback position is near the start.
+        const cutoffMs = Math.max(0, offsetMs - 60_000);
+
+        const filtered = events.filter((e) => {
+          // Always keep SuperChat and Membership regardless of timing
+          if (e.message.kind === 'superchat' || e.message.kind === 'membership') return true;
+          // For live chat without offset info, keep all (real-time only)
+          if (e.offsetMs === undefined) return true;
+          // Keep messages near current playback position
+          return e.offsetMs >= cutoffMs;
+        });
+
+        messages = filtered.map((e) => e.message);
+
+        if (filtered.length < events.length) {
+          log.debug(
+            `Initial seed filtered: ${events.length} → ${filtered.length} ` +
+              `(playback at ${Math.round(offsetMs / 1000)}s)`
+          );
+        }
+      } else {
+        messages = events.map((e) => e.message);
       }
-      this.emitBatch(messages, isInitialSeed);
+
+      if (messages.length > 0) {
+        this.emitBatch(messages, isInitialSeed);
+      }
     }
 
     this.lastActionsCount = payload.actions.length;
     this.consecutiveErrors = 0;
     this.liveContinuation = extractNextLiveContinuation(payload.continuations);
+  }
+
+  private getPlaybackSnapshot(): PlaybackSnapshot | null {
+    const match = findElementMatch<HTMLVideoElement>(VIDEO_SELECTORS);
+    if (!match) return null;
+    const { element: video } = match;
+    if (!Number.isFinite(video.currentTime)) return null;
+    return {
+      offsetMs: Math.max(0, Math.floor(video.currentTime * 1000)),
+      paused: video.paused,
+    };
   }
 
   private async refreshLiveContinuation(signal?: AbortSignal): Promise<void> {
