@@ -1,7 +1,7 @@
 {
   "$schema": "./node_modules/knip/schema.json",
-  "entry": ["src/main.ts", "tooling/userscript-header.ts"],
-  "project": ["src/**/*.ts", "tooling/**/*.ts"],
+  "entry": ["src/main.ts"],
+  "project": ["src/**/*.ts"],
   "paths": {
     "@core": ["src/core"],
     "@app-types": ["src/types/index.ts"]

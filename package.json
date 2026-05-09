@@ -7,6 +7,7 @@
   "scripts": {
     "build": "vite build",
     "build:dev": "vite build --mode development",
+    "dev": "vite build --mode development --watch",
     "check": "tsc --noEmit",
     "knip": "knip --dependencies",
     "knip:full": "knip --files --exports --dependencies --reporter compact --max-show-issues 50 --no-exit-code",
@@ -43,6 +44,7 @@
     "@types/node": "^25.6.0",
     "knip": "^6.11.0",
     "typescript": "^6.0.3",
-    "vite": "^8.0.10"
+    "vite": "^8.0.10",
+    "vite-plugin-monkey": "^8.0.1"
   }
 }
