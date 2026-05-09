@@ -51,7 +51,7 @@ export class RuntimeManager {
   private activeSession: RuntimeSession | null = null;
   private reconcileRequested = false;
   private reconcilePromise: Promise<void> | null = null;
-  private scheduledReconcileTimer: number | null = null;
+  private scheduledReconcileTimer: ReturnType<typeof setTimeout> | null = null;
   private destroyed = false;
   private lastPageChangeAt = 0;
   private startFailureState: StartFailureState = {
@@ -208,7 +208,7 @@ export class RuntimeManager {
     }
 
     this.clearScheduledReconcile();
-    this.scheduledReconcileTimer = window.setTimeout(() => {
+    this.scheduledReconcileTimer = setTimeout(() => {
       this.scheduledReconcileTimer = null;
       this.requestReconcile('retry');
     }, delayMs);
@@ -216,7 +216,7 @@ export class RuntimeManager {
 
   private clearScheduledReconcile(): void {
     if (this.scheduledReconcileTimer !== null) {
-      window.clearTimeout(this.scheduledReconcileTimer);
+      clearTimeout(this.scheduledReconcileTimer);
       this.scheduledReconcileTimer = null;
     }
   }

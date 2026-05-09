@@ -42,7 +42,7 @@ export class RuntimeSession {
   private chatSource: ChatSource | null = null;
   private foregroundCleanup: (() => void) | null = null;
   private backlogController: BacklogInjectionController | null = null;
-  private chatWatchdogTimer: number | null = null;
+  private chatWatchdogTimer: ReturnType<typeof setInterval> | null = null;
   private disposed = false;
   private sessionReady = false;
   private restartRequested = false;
@@ -329,7 +329,7 @@ export class RuntimeSession {
   }
 
   private startChatWatchdog(): void {
-    this.chatWatchdogTimer = window.setInterval(() => {
+    this.chatWatchdogTimer = setInterval(() => {
       try {
         // Skip checks while disposed, hidden, or mid-restart
         if (this.disposed || document.hidden || this.restartRequested) {
@@ -348,7 +348,7 @@ export class RuntimeSession {
 
   private stopChatWatchdog(): void {
     if (this.chatWatchdogTimer !== null) {
-      window.clearInterval(this.chatWatchdogTimer);
+      clearInterval(this.chatWatchdogTimer);
       this.chatWatchdogTimer = null;
     }
   }

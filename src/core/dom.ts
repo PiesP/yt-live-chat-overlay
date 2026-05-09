@@ -53,13 +53,13 @@ export const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
       return;
     }
 
-    const timeoutId = window.setTimeout(() => {
+    const timeoutId: ReturnType<typeof setTimeout> = setTimeout(() => {
       signal?.removeEventListener('abort', handleAbort);
       resolve();
     }, ms);
 
     const handleAbort = (): void => {
-      window.clearTimeout(timeoutId);
+      clearTimeout(timeoutId);
       reject(createAbortError(signal?.reason));
     };
 

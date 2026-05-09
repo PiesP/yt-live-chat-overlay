@@ -72,8 +72,8 @@ export class Renderer {
   private static readonly OPACITY_UPDATE_INTERVAL_MS = 250;
   private static readonly SWEEP_INTERVAL = 8;
   private styleElement: HTMLStyleElement | null = null;
-  private retryTimer: number | null = null;
-  private opacityUpdateTimer: number | null = null;
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  private opacityUpdateTimer: ReturnType<typeof setInterval> | null = null;
   private overlayDimensionsUnsubscribe: (() => void) | null = null;
   private sweepCounter = 0;
   private static readonly SEEN_MESSAGE_IDS_LIMIT = 200;
@@ -323,8 +323,8 @@ export class Renderer {
     this.observability.onMessageReceived();
     this.burstDetector.onMessageReceived();
 
-    const messagePriority = Renderer.getMessagePriority(message);
-    if (!this.authorRateLimiter.allow(message.author ?? 'anonymous', messagePriority)) {
+    const priority = Renderer.getMessagePriority(message);
+    if (!this.authorRateLimiter.allow(message.author ?? 'anonymous', priority)) {
       this.observability.onMessageDropped('rate_limited');
       return;
     }
@@ -334,7 +334,6 @@ export class Renderer {
       this.observability.onMessageDropped('queue_overflow');
     }
 
-    const priority = Renderer.getMessagePriority(message);
     this.pendingQueue.push({ message, nextAttemptAt: 0, priority });
 
     if (message.id) {
@@ -489,7 +488,7 @@ export class Renderer {
     );
     this.clearRetryTimer();
 
-    this.retryTimer = window.setTimeout(() => {
+    this.retryTimer = setTimeout(() => {
       this.retryTimer = null;
       this.processQueue();
     }, delay);
@@ -497,7 +496,7 @@ export class Renderer {
 
   private clearRetryTimer(): void {
     if (this.retryTimer !== null) {
-      window.clearTimeout(this.retryTimer);
+      clearTimeout(this.retryTimer);
       this.retryTimer = null;
     }
   }
@@ -511,7 +510,7 @@ export class Renderer {
    * keeping the visible window limited to recent chat.
    */
   private startOpacityUpdates(): void {
-    this.opacityUpdateTimer = window.setInterval(() => {
+    this.opacityUpdateTimer = setInterval(() => {
       this.updateMessageOpacity();
     }, Renderer.OPACITY_UPDATE_INTERVAL_MS);
   }
@@ -546,7 +545,7 @@ export class Renderer {
 
   private stopOpacityUpdates(): void {
     if (this.opacityUpdateTimer !== null) {
-      window.clearInterval(this.opacityUpdateTimer);
+      clearInterval(this.opacityUpdateTimer);
       this.opacityUpdateTimer = null;
     }
   }

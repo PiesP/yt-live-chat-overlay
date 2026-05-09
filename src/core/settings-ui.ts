@@ -141,37 +141,33 @@ export class SettingsUi {
   }
 
   private bindTabEvents(): void {
-    this.modal
-      ?.querySelectorAll<HTMLButtonElement>('.yt-chat-overlay-settings-tab')
-      .forEach((btn) => {
-        btn.addEventListener('click', () => {
-          const tabId = btn.dataset.tab;
-          if (tabId) this.switchTab(tabId);
-        });
+    if (!this.modal) return;
+    for (const btn of this.modal.querySelectorAll<HTMLButtonElement>(
+      '.yt-chat-overlay-settings-tab'
+    )) {
+      btn.addEventListener('click', () => {
+        const tabId = btn.dataset.tab;
+        if (tabId) this.switchTab(tabId);
       });
+    }
   }
 
   private switchTab(tabId: string): void {
     if (!this.modal) return;
     this.activeTab = tabId;
 
-    this.modal
-      .querySelectorAll<HTMLButtonElement>('.yt-chat-overlay-settings-tab')
-      .forEach((btn) => {
-        const isActive = btn.dataset.tab === tabId;
-        btn.classList.toggle('active', isActive);
-        btn.setAttribute('aria-selected', String(isActive));
-      });
+    for (const btn of this.modal.querySelectorAll<HTMLButtonElement>(
+      '.yt-chat-overlay-settings-tab'
+    )) {
+      btn.classList.toggle('active', btn.dataset.tab === tabId);
+      btn.setAttribute('aria-selected', String(btn.dataset.tab === tabId));
+    }
 
-    this.modal
-      .querySelectorAll<HTMLDivElement>('.yt-chat-overlay-settings-pane')
-      .forEach((pane) => {
-        if (pane.dataset.pane === tabId) {
-          pane.removeAttribute('hidden');
-        } else {
-          pane.setAttribute('hidden', '');
-        }
-      });
+    for (const pane of this.modal.querySelectorAll<HTMLDivElement>(
+      '.yt-chat-overlay-settings-pane'
+    )) {
+      pane.toggleAttribute('hidden', pane.dataset.pane !== tabId);
+    }
   }
 
   private bindModalEvents(): void {

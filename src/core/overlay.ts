@@ -69,7 +69,7 @@ export class Overlay {
   private dimensions: OverlayDimensions | null = null;
   private settings: OverlaySettings | null = null;
   private fullscreenHandler: (() => void) | null = null;
-  private fullscreenUpdateTimer: number | null = null;
+  private fullscreenUpdateTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly dimensionChangeCallbacks = new Set<OverlayDimensionsChangeCallback>();
 
   /**
@@ -117,7 +117,7 @@ export class Overlay {
 
   private clearFullscreenUpdateTimer(): void {
     if (this.fullscreenUpdateTimer !== null) {
-      window.clearTimeout(this.fullscreenUpdateTimer);
+      clearTimeout(this.fullscreenUpdateTimer);
       this.fullscreenUpdateTimer = null;
     }
   }
@@ -136,7 +136,7 @@ export class Overlay {
   private observeFullscreen(): void {
     this.fullscreenHandler = () => {
       this.clearFullscreenUpdateTimer();
-      this.fullscreenUpdateTimer = window.setTimeout(() => {
+      this.fullscreenUpdateTimer = setTimeout(() => {
         this.fullscreenUpdateTimer = null;
         this.updateDimensions();
       }, FULLSCREEN_UPDATE_DELAY_MS);
