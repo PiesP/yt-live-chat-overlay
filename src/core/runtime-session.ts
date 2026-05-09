@@ -290,6 +290,7 @@ export class RuntimeSession {
       if (document.hidden) {
         this.noteHidden();
         this.renderer?.pause();
+        this.renderer?.trimBackgroundQueue();
         return;
       }
 

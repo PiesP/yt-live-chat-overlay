@@ -79,8 +79,7 @@ export class Renderer {
   private sweepCounter = 0;
   private static readonly SEEN_MESSAGE_IDS_LIMIT = 200;
   private readonly seenMessageIds = new MessageIdRegistry(Renderer.SEEN_MESSAGE_IDS_LIMIT);
-  private visibilityHandler: (() => void) | null = null;
-  private static readonly BACKGROUND_QUEUE_MAX = 10;
+  static readonly BACKGROUND_QUEUE_MAX = 10;
   private static readonly BACKLOG_OPACITY_SCALE = 0.5;
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
@@ -107,15 +106,6 @@ export class Renderer {
     this.overlayDimensionsUnsubscribe = this.overlay.onDimensionsChanged((dimensions) => {
       this.handleOverlayDimensionsChange(dimensions);
     });
-
-    this.visibilityHandler = () => {
-      if (document.hidden) {
-        this.handleBackgroundTab();
-      } else {
-        this.handleForegroundTab();
-      }
-    };
-    document.addEventListener('visibilitychange', this.visibilityHandler);
 
     this.startOpacityUpdates();
   }
@@ -681,18 +671,13 @@ export class Renderer {
     }
   }
 
-  private handleBackgroundTab(): void {
-    this.pause();
-    if (this.pendingQueue.length > Renderer.BACKGROUND_QUEUE_MAX) {
-      this.pendingQueue.sort(
-        (a, b) => b.priority - a.priority || a.message.timestamp - b.message.timestamp
-      );
-      this.pendingQueue.length = Renderer.BACKGROUND_QUEUE_MAX;
-    }
-  }
-
-  private handleForegroundTab(): void {
-    this.resume();
+  /** Trim the pending queue to BACKGROUND_QUEUE_MAX, keeping highest-priority messages. */
+  trimBackgroundQueue(): void {
+    if (this.pendingQueue.length <= Renderer.BACKGROUND_QUEUE_MAX) return;
+    this.pendingQueue.sort(
+      (a, b) => b.priority - a.priority || a.message.timestamp - b.message.timestamp
+    );
+    this.pendingQueue.length = Renderer.BACKGROUND_QUEUE_MAX;
   }
 
   updateSettings(settings: OverlaySettings, options: RendererUpdateOptions = {}): void {
@@ -835,10 +820,6 @@ export class Renderer {
     this.seenMessageIds.clear();
     this.pausedAt = null;
 
-    if (this.visibilityHandler) {
-      document.removeEventListener('visibilitychange', this.visibilityHandler);
-      this.visibilityHandler = null;
-    }
     this.playbackRate = 1;
 
     this.styleElement?.remove();
