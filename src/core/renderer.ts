@@ -657,13 +657,34 @@ export class Renderer {
     }
     this.pausedAt = null;
 
-    log.debug('Resuming all animations');
     this.isPaused = false;
-    this.forEachElement((el) => {
-      el.style.animationPlayState = 'running';
-    });
-    log.debug(`Resumed ${this.activeMessages.size} animations`);
 
+    // Reset active animations so they continue from their current visual
+    // position with the remaining duration, rather than jumping to where
+    // they would be if they had been running during the pause.
+    for (const active of Array.from(this.activeMessages)) {
+      try {
+        const elapsed = performance.now() - active.startTime;
+        const remaining = active.baseDuration - elapsed;
+        if (remaining <= 0) {
+          this.removeMessage(active);
+          continue;
+        }
+
+        const el = active.element;
+        el.style.animationName = 'none';
+        void el.offsetWidth;
+        el.style.animationName = '';
+        el.style.setProperty('--yt-msg-duration', `${remaining}ms`);
+        el.style.setProperty('--yt-msg-delay', '0ms');
+        el.style.animationPlayState = 'running';
+      } catch (error) {
+        log.warn('Failed to reset animation on resume:', error);
+        active.element.style.animationPlayState = 'running';
+      }
+    }
+
+    log.debug(`Resumed ${this.activeMessages.size} animations`);
     this.processQueue();
   }
 
