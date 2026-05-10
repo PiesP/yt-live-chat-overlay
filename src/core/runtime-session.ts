@@ -306,6 +306,9 @@ export class RuntimeSession {
         return;
       }
 
+      // Clear any messages that accumulated in the queue while the tab was
+      // hidden — they are stale and would flood the screen on resume.
+      this.renderer?.clearPendingQueue();
       this.renderer?.resume();
     };
 

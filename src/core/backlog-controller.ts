@@ -176,41 +176,34 @@ export class BacklogInjectionController {
     const count = messages.length;
     if (count < 200) return messages;
 
-    // Tier 1: Always keep (SuperChat, Membership)
-    const tier1 = messages.filter((m) => m.kind === 'superchat' || m.kind === 'membership');
-    const tier1Set = new Set(tier1);
+    const isPriority = (m: ChatMessage): boolean =>
+      m.kind === 'superchat' || m.kind === 'membership';
 
-    // Tier 2: Substantial text messages (3+ chars, not just reactions)
-    const tier2 = messages.filter((m) => {
-      if (tier1Set.has(m)) return false;
+    const isSubstantialText = (m: ChatMessage): boolean => {
+      if (isPriority(m)) return false;
       const text = m.text.trim();
       return text.length >= 3 && !/^[\sㅋㅎㅇㄱ]+$/.test(text);
-    });
-    const tier2Set = new Set(tier2);
+    };
 
-    // Tier 3: Short reactions (ㅋㅋ, ㅇㅇ, etc.)
-    const tier3 = messages.filter((m) => !tier1Set.has(m) && !tier2Set.has(m));
+    const tier1 = messages.filter(isPriority);
+    const tier2 = messages.filter(isSubstantialText);
+    const tier2Ids = new Set(tier2);
+    const tier3 = messages.filter((m) => !isPriority(m) && !tier2Ids.has(m));
 
-    // Determine how many normal messages to keep
-    const normalBudget =
-      count < 500
-        ? Math.floor(count * 0.6) // 60% for medium backlogs
-        : Math.floor(count * 0.35); // 35% for large backlogs
+    const normalBudget = count < 500 ? Math.floor(count * 0.6) : Math.floor(count * 0.35);
 
     const selected: ChatMessage[] = [...tier1];
     let remaining = normalBudget;
 
-    // Fill with tier 2 first (substantial messages), time-distributed
     if (tier2.length > 0 && remaining > 0) {
-      const tier2Pick = Math.min(remaining, tier2.length);
-      selected.push(...this.timeDistributedPick(tier2, tier2Pick));
-      remaining -= tier2Pick;
+      const pick = Math.min(remaining, tier2.length);
+      selected.push(...this.timeDistributedPick(tier2, pick));
+      remaining -= pick;
     }
 
-    // Fill remaining with tier 3 (short reactions)
     if (tier3.length > 0 && remaining > 0) {
-      const tier3Pick = Math.min(remaining, tier3.length);
-      selected.push(...this.timeDistributedPick(tier3, tier3Pick));
+      const pick = Math.min(remaining, tier3.length);
+      selected.push(...this.timeDistributedPick(tier3, pick));
     }
 
     return selected.sort((a, b) => a.timestamp - b.timestamp);

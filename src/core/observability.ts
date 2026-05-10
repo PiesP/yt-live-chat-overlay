@@ -192,7 +192,15 @@ export class ObservabilityReporter {
       `Active: ${m.activeMessages} | Lane: ${(m.laneUtilization * 100).toFixed(0)}%`,
       `Backlog: ${(m.backlogProgress * 100).toFixed(0)}%`,
     ];
-    this.debugOverlayEl.innerHTML = lines.map((l) => `<div>${l}</div>`).join('');
+    // Use DOM API instead of innerHTML to avoid any XSS surface
+    while (this.debugOverlayEl.firstChild) {
+      this.debugOverlayEl.firstChild.remove();
+    }
+    for (const line of lines) {
+      const div = document.createElement('div');
+      div.textContent = line;
+      this.debugOverlayEl.appendChild(div);
+    }
   }
 
   private destroyDebugOverlay(): void {

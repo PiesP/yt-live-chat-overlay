@@ -31,6 +31,8 @@ interface ActiveMessage {
   readonly baseDuration: number;
   readonly baseOpacity: number;
   readonly cleanup: () => void;
+  /** Accumulated time (ms) the message spent paused while tab was hidden. */
+  pausedDuration: number;
 }
 
 type RenderResult =
@@ -77,7 +79,7 @@ export class Renderer {
   private opacityUpdateTimer: ReturnType<typeof setInterval> | null = null;
   private overlayDimensionsUnsubscribe: (() => void) | null = null;
   private sweepCounter = 0;
-  private static readonly SEEN_MESSAGE_IDS_LIMIT = 200;
+  private static readonly SEEN_MESSAGE_IDS_LIMIT = 2000;
   private readonly seenMessageIds = new MessageIdRegistry(Renderer.SEEN_MESSAGE_IDS_LIMIT);
   static readonly BACKGROUND_QUEUE_MAX = 10;
   private static readonly BACKLOG_OPACITY_SCALE = 0.5;
@@ -305,6 +307,7 @@ export class Renderer {
       baseDuration,
       baseOpacity: baseOpacity ?? this.settings.opacity,
       cleanup,
+      pausedDuration: 0,
     };
   }
 
@@ -680,6 +683,12 @@ export class Renderer {
     this.pendingQueue.length = Renderer.BACKGROUND_QUEUE_MAX;
   }
 
+  /** Clear all pending messages — used when returning from a hidden tab. */
+  clearPendingQueue(): void {
+    this.pendingQueue.length = 0;
+    this.clearRetryTimer();
+  }
+
   updateSettings(settings: OverlaySettings, options: RendererUpdateOptions = {}): void {
     this.settings = settings;
     this.injectStyles();
@@ -719,8 +728,9 @@ export class Renderer {
     if (!this.isPaused) return;
 
     const now = Date.now();
+    let pausedDuration = 0;
     if (this.pausedAt !== null) {
-      const pausedDuration = Math.min(Math.max(0, now - this.pausedAt), 60_000);
+      pausedDuration = Math.min(Math.max(0, now - this.pausedAt), 60_000);
       if (pausedDuration > 0) {
         this.laneAllocator.shiftTimeline(pausedDuration);
       }
@@ -734,7 +744,10 @@ export class Renderer {
     // they would be if they had been running during the pause.
     for (const active of [...this.activeMessages]) {
       try {
-        const elapsed = performance.now() - active.startTime;
+        // Subtract accumulated paused time so the animation resumes from
+        // where it visually stopped, not from wall-clock elapsed time.
+        active.pausedDuration += pausedDuration;
+        const elapsed = performance.now() - active.startTime - active.pausedDuration;
         const remaining = active.baseDuration - elapsed;
         if (remaining <= 0) {
           this.removeMessage(active);

@@ -424,6 +424,7 @@ export class LiveChatSource extends ChatSource {
   private liveContinuation: InnertubeContinuationData | null = null;
   private lastActionsCount = 0;
   private consecutiveErrors = 0;
+  private readonly liveDedupRegistry = new MessageIdRegistry(MAX_TRACKED_REPLAY_KEYS);
 
   protected seedCurrentSession(signal?: AbortSignal): Promise<boolean> {
     return this.initializeLiveSession(signal);
@@ -438,6 +439,7 @@ export class LiveChatSource extends ChatSource {
     this.liveContinuation = null;
     this.lastActionsCount = 0;
     this.consecutiveErrors = 0;
+    this.liveDedupRegistry.clear();
   }
 
   // ---- Live-specific ----
@@ -574,8 +576,17 @@ export class LiveChatSource extends ChatSource {
         messages = events.map((e) => e.message);
       }
 
-      if (messages.length > 0) {
-        this.emitBatch(messages, isInitialSeed);
+      // Deduplicate by message ID — YouTube continuation can return
+      // the same actions across consecutive polls.
+      const deduped = messages.filter((msg) => {
+        if (!msg.id) return true;
+        if (this.liveDedupRegistry.has(msg.id)) return false;
+        this.liveDedupRegistry.mark(msg.id);
+        return true;
+      });
+
+      if (deduped.length > 0) {
+        this.emitBatch(deduped, isInitialSeed);
       }
     }
 
