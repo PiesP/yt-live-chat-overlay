@@ -84,7 +84,7 @@ export const DEFAULT_SETTINGS = {
   opacity: 0.85,
   superChatOpacity: 0.35,
   safeTop: 0,
-  safeBottom: 0.4,
+  safeBottom: 0.15,
   maxConcurrentMessages: 50,
   maxMessagesPerSecond: 8,
   allowShortTextMessages: false,
