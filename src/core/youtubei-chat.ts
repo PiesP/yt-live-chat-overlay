@@ -1,7 +1,4 @@
 import { isAbortError } from '@core/dom';
-import { createLogger } from '@core/logging';
-
-const log = createLogger('YoutubeiChat');
 
 export type JsonObject = Record<string, unknown>;
 
@@ -217,25 +214,11 @@ const readYtcfg = (): JsonObject | null => {
 
 /**
  * Attempt to extract ytInitialData from the current page without fetching
- * the watch page HTML. Checks:
- *   1. `window.ytInitialData` global variable
- *   2. DOM `<script id="initial-data">` tag content
+ * the watch page HTML. Reads `window.ytInitialData` global variable.
  */
 const tryGetInitialDataFromWindow = (): JsonObject | null => {
   if (isRecord(window.ytInitialData)) {
     return window.ytInitialData;
-  }
-
-  const script = document.getElementById('initial-data') as HTMLScriptElement | null;
-  if (script?.textContent) {
-    try {
-      const parsed = JSON.parse(script.textContent);
-      if (isRecord(parsed)) {
-        return parsed;
-      }
-    } catch {
-      /* ignore parse errors from malformed script content */
-    }
   }
 
   return null;
@@ -505,15 +488,6 @@ export const bootstrapChatSession = async (signal?: AbortSignal): Promise<ChatBo
   const getHtml = async (): Promise<string> => {
     if (cachedHtml === null) {
       cachedHtml = await fetchWatchHtml(videoId, signal);
-      // Invalidate cache if the fetched HTML contains a different videoId
-      // (SPA navigation may return stale cached content).
-      const extractedId = extractVideoIdFromInitialData(
-        extractInitialDataFromHtml(cachedHtml) ?? {}
-      );
-      if (extractedId && extractedId !== videoId) {
-        log.debug(`Fetched HTML contains stale videoId (${extractedId}), re-fetching...`);
-        cachedHtml = await fetchWatchHtml(videoId, signal);
-      }
     }
     return cachedHtml;
   };
