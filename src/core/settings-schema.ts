@@ -200,8 +200,10 @@ export const normalizeStoredSettings = (
 export const shouldResetRendererForSettingsChange = (
   previous: Readonly<OverlaySettings>,
   next: Readonly<OverlaySettings>
-): boolean =>
-  ROOT_SETTING_KEYS.some((key) => previous[key] !== next[key]) ||
-  SHOW_AUTHOR_KEYS.some((key) => previous.showAuthor[key] !== next.showAuthor[key]) ||
-  AUTHOR_COLOR_KEYS.some((key) => previous.colors[key] !== next.colors[key]) ||
-  OUTLINE_SETTING_KEYS.some((key) => previous.outline[key] !== next.outline[key]);
+): boolean => {
+  if (ROOT_SETTING_KEYS.some((key) => previous[key] !== next[key])) return true;
+  if (SHOW_AUTHOR_KEYS.some((key) => previous.showAuthor[key] !== next.showAuthor[key]))
+    return true;
+  if (AUTHOR_COLOR_KEYS.some((key) => previous.colors[key] !== next.colors[key])) return true;
+  return OUTLINE_SETTING_KEYS.some((key) => previous.outline[key] !== next.outline[key]);
+};
