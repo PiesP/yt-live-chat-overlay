@@ -29,7 +29,7 @@ const EMPTY_MESSAGE_BODY: ParsedMessageBody = Object.freeze({
 /**
  * Matches any character with the Emoji Unicode property.
  *
- * Uses \p{Emoji} instead of \p{Extended_Pictographic} so that compound
+ * Uses \\p{Emoji} instead of \\p{Extended_Pictographic} so that compound
  * emoji sequences (skin-tone variants, ZWJ sequences, keycap sequences)
  * are also detected.  The broader set may include a few text-default
  * characters (digits, #, *) that happen to have emoji presentation, but
@@ -38,7 +38,7 @@ const EMPTY_MESSAGE_BODY: ParsedMessageBody = Object.freeze({
  * negligible compared to the benefit of catching real emoji.
  */
 const EMOJI_TEXT_PATTERN = /\p{Emoji}/u;
-const EMOJI_ALIAS_PATTERN = /^:[^:\s][^:]*:$/u;
+const EMOJI_ALIAS_PATTERN = /^:[^:\\s][^:]*:$/u;
 const AUTHOR_TYPE_PRIORITY = {
   normal: 0,
   verified: 1,
@@ -69,55 +69,69 @@ interface ThumbnailCandidate {
   height?: number;
 }
 
-export class ChatMessageParser {
-  constructor(private readonly getSettings: () => Readonly<OverlaySettings>) {}
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
 
-  extractChatEvents(actions: readonly unknown[]): ChatEvent[] {
-    const events: ChatEvent[] = [];
+/**
+ * Extract {@link ChatEvent}s from a batch of raw YouTube actions.
+ *
+ * @param actions  Raw action objects from the YouTube innertube response.
+ * @param getSettings  Callback that returns the current overlay settings.
+ */
+export function extractChatEvents(
+  actions: readonly unknown[],
+  getSettings: () => Readonly<OverlaySettings>
+): ChatEvent[] {
+  const events: ChatEvent[] = [];
 
-    for (const action of actions) {
-      if (!isRecord(action)) {
-        continue;
-      }
-
-      const replayAction = asRecord(action.replayChatItemAction);
-      if (replayAction) {
-        const offsetMs = getNumber(replayAction.videoOffsetTimeMsec);
-        const nestedActions = Array.isArray(replayAction.actions) ? replayAction.actions : [];
-        for (const nestedAction of nestedActions) {
-          const event = this.extractChatEventFromAction(nestedAction, offsetMs);
-          if (event) {
-            events.push(event);
-          }
-        }
-        continue;
-      }
-
-      const event = this.extractChatEventFromAction(action, undefined);
-      if (event) {
-        events.push(event);
-      }
+  for (const action of actions) {
+    if (!isRecord(action)) {
+      continue;
     }
 
-    return events;
+    const replayAction = asRecord(action.replayChatItemAction);
+    if (replayAction) {
+      const offsetMs = getNumber(replayAction.videoOffsetTimeMsec);
+      const nestedActions = Array.isArray(replayAction.actions) ? replayAction.actions : [];
+      for (const nestedAction of nestedActions) {
+        const event = extractChatEventFromAction(nestedAction, offsetMs);
+        if (event) {
+          events.push(event);
+        }
+      }
+      continue;
+    }
+
+    const event = extractChatEventFromAction(action, undefined);
+    if (event) {
+      events.push(event);
+    }
   }
 
-  private extractChatEventFromAction(action: unknown, offsetMs?: number): ChatEvent | null {
+  return events;
+
+  // ---- Closures that depend on getSettings ----
+
+  function extractChatEventFromAction(
+    action: unknown,
+    offsetMs: number | undefined
+  ): ChatEvent | null {
     if (!isRecord(action)) {
       return null;
     }
 
-    const item = this.extractActionItem(action);
+    const item = extractActionItem(action);
     if (!item) {
       return null;
     }
 
-    const supportedRenderer = this.extractSupportedRenderer(item);
+    const supportedRenderer = extractSupportedRenderer(item);
     if (!supportedRenderer) {
       return null;
     }
 
-    const message = this.parseRendererMessage(supportedRenderer.renderer, supportedRenderer.kind);
+    const message = parseRendererMessage(supportedRenderer.renderer, supportedRenderer.kind);
     if (!message) {
       return null;
     }
@@ -125,61 +139,17 @@ export class ChatMessageParser {
     return offsetMs === undefined ? { message } : { message, offsetMs };
   }
 
-  private extractActionItem(action: JsonObject): JsonObject | null {
-    const addChatItemAction = asRecord(action.addChatItemAction);
-    if (addChatItemAction) {
-      const item = asRecord(addChatItemAction.item);
-      if (item) {
-        return item;
-      }
-    }
-
-    const replaceChatItemAction = asRecord(action.replaceChatItemAction);
-    if (replaceChatItemAction) {
-      const item = asRecord(replaceChatItemAction.item);
-      if (item) {
-        return item;
-      }
-    }
-
-    return null;
-  }
-
-  private extractSupportedRenderer(item: JsonObject): SupportedRenderer | null {
-    const textRenderer = asRecord(item.liveChatTextMessageRenderer);
-    if (textRenderer) {
-      return { kind: 'text', renderer: textRenderer };
-    }
-
-    const paidMessageRenderer = asRecord(item.liveChatPaidMessageRenderer);
-    if (paidMessageRenderer) {
-      return { kind: 'superchat', renderer: paidMessageRenderer };
-    }
-
-    const paidStickerRenderer = asRecord(item.liveChatPaidStickerRenderer);
-    if (paidStickerRenderer) {
-      return { kind: 'superchat', renderer: paidStickerRenderer };
-    }
-
-    const membershipRenderer = asRecord(item.liveChatMembershipItemRenderer);
-    if (membershipRenderer) {
-      return { kind: 'membership', renderer: membershipRenderer };
-    }
-
-    return null;
-  }
-
-  private parseRendererMessage(
+  function parseRendererMessage(
     renderer: JsonObject,
     kind: ChatMessage['kind']
   ): ChatMessage | null {
-    const author = this.extractDisplayText(renderer.authorName);
+    const author = extractDisplayText(renderer.authorName);
     if (!author) {
       return null;
     }
 
-    const authorType = this.extractAuthorType(renderer.authorBadges);
-    const parsedBody = this.extractRendererBody(renderer, kind, authorType);
+    const authorType = extractAuthorType(renderer.authorBadges);
+    const parsedBody = extractRendererBody(renderer, kind, authorType);
     if (!parsedBody) {
       return null;
     }
@@ -198,13 +168,13 @@ export class ChatMessageParser {
       message.id = id;
     }
 
-    const authorPhotoUrl = this.extractThumbnailUrl(renderer.authorPhoto);
+    const authorPhotoUrl = extractThumbnailUrl(renderer.authorPhoto);
     if (authorPhotoUrl) {
       message.authorPhotoUrl = authorPhotoUrl;
     }
 
     if (kind === 'superchat') {
-      const superChatInfo = this.parseSuperChatInfo(renderer);
+      const superChatInfo = parseSuperChatInfo(renderer);
       if (superChatInfo) {
         message.superChat = superChatInfo;
       }
@@ -213,434 +183,45 @@ export class ChatMessageParser {
     return message;
   }
 
-  private extractRendererBody(
+  function extractRendererBody(
     renderer: JsonObject,
     kind: ChatMessage['kind'],
     authorType: AuthorType
   ): ParsedMessageBody | null {
     const parsedBody =
-      kind === 'membership'
-        ? this.parseMembershipBody(renderer)
-        : this.parseMessageContent(renderer.message);
+      kind === 'membership' ? parseMembershipBody(renderer) : parseMessageContent(renderer.message);
 
-    if (kind === 'text' && !this.isSubstantialMessage(parsedBody, authorType)) {
+    if (kind === 'text' && !isSubstantialMessage(parsedBody, authorType)) {
       return null;
     }
 
     return parsedBody;
   }
 
-  private parseMembershipBody(renderer: JsonObject): ParsedMessageBody {
-    const messageBody = this.parseMessageContent(renderer.message);
-    return messageBody.visibleLength > 0 || messageBody.text.length > 0
-      ? messageBody
-      : this.parseMessageContent(renderer.headerSubtext);
-  }
-
-  private extractDisplayText(value: unknown): string | undefined {
-    if (!isRecord(value)) {
-      return undefined;
-    }
-
-    const simpleText = getString(value.simpleText);
-    if (simpleText) {
-      return simpleText.trim() || undefined;
-    }
-
-    const runs = Array.isArray(value.runs) ? value.runs : [];
-    const text = runs
-      .map((run) => {
-        if (!isRecord(run)) {
-          return '';
-        }
-
-        const runText = getString(run.text);
-        if (runText) {
-          return runText;
-        }
-
-        const emoji = asRecord(run.emoji);
-        return emoji ? this.getEmojiVisibleFallbackText(emoji) : '';
-      })
-      .join('')
-      .trim();
-
-    return text || undefined;
-  }
-
-  private parseMessageContent(value: unknown): ParsedMessageBody {
-    if (!isRecord(value)) {
-      return EMPTY_MESSAGE_BODY;
-    }
-
-    const simpleText = getString(value.simpleText);
-    if (simpleText !== undefined) {
-      const content: ContentSegment[] =
-        simpleText.length > 0 ? [{ type: 'text', content: simpleText }] : [];
-      return {
-        text: this.truncateText(simpleText),
-        content,
-        visibleLength: this.getVisibleContentLength(content),
-      };
-    }
-
-    const runs = Array.isArray(value.runs) ? value.runs : [];
-    const segments: ContentSegment[] = [];
-    let plainText = '';
-
-    for (const run of runs) {
-      if (!isRecord(run)) {
-        continue;
-      }
-
-      const runText = getString(run.text);
-      if (runText !== undefined) {
-        if (runText.length > 0) {
-          this.appendTextSegment(segments, runText);
-          plainText += runText;
-        }
-        continue;
-      }
-
-      const emojiData = asRecord(run.emoji);
-      if (!emojiData) {
-        continue;
-      }
-
-      const emoji = this.parseEmoji(emojiData);
-      if (emoji) {
-        segments.push({ type: 'emoji', emoji });
-        plainText += emoji.fallbackText || '[emoji]';
-        continue;
-      }
-
-      const fallbackText = this.getEmojiVisibleFallbackText(emojiData) || '[emoji]';
-      this.appendTextSegment(segments, fallbackText);
-      plainText += fallbackText;
-    }
-
-    return {
-      text: this.truncateText(plainText),
-      content: segments,
-      visibleLength: this.getVisibleContentLength(segments),
-    };
-  }
-
-  private appendTextSegment(segments: ContentSegment[], content: string): void {
-    if (content.length === 0) {
-      return;
-    }
-
-    const lastSegment = segments[segments.length - 1];
-    if (lastSegment?.type === 'text') {
-      lastSegment.content += content;
-      return;
-    }
-
-    segments.push({ type: 'text', content });
-  }
-
-  private getVisibleContentLength(segments: readonly ContentSegment[]): number {
-    let visibleLength = 0;
-
-    for (const segment of segments) {
-      if (segment.type === 'emoji') {
-        visibleLength += 1;
-        continue;
-      }
-
-      visibleLength += [...this.stripControlCharacters(segment.content).replace(/\s+/g, '')].length;
-    }
-
-    return visibleLength;
-  }
-
-  private extractAccessibilityLabel(value: unknown): string | undefined {
-    const record = asRecord(value);
-    if (!record) {
-      return undefined;
-    }
-
-    return getString(asRecord(asRecord(record.accessibility)?.accessibilityData)?.label);
-  }
-
-  private getEmojiShortcuts(emojiData: JsonObject): string[] {
-    return Array.isArray(emojiData.shortcuts)
-      ? emojiData.shortcuts.filter((shortcut): shortcut is string => typeof shortcut === 'string')
-      : [];
-  }
-
-  private normalizeInlineText(text: string): string {
-    return this.stripControlCharacters(text).replace(/\s+/g, ' ').trim();
-  }
-
-  private getEmojiAltText(emojiData: JsonObject): string {
-    const shortcuts = this.getEmojiShortcuts(emojiData);
-
-    return (
-      shortcuts[0] ??
-      this.extractAccessibilityLabel(emojiData.image) ??
-      this.extractAccessibilityLabel(emojiData) ??
-      getString(emojiData.emojiId) ??
-      ''
-    );
-  }
-
-  private getEmojiVisibleFallbackText(emojiData: JsonObject): string {
-    const shortcuts = this.getEmojiShortcuts(emojiData);
-    const nonAliasShortcut = shortcuts.find((s) => !EMOJI_ALIAS_PATTERN.test(s));
-    if (nonAliasShortcut) return this.normalizeInlineText(nonAliasShortcut);
-
-    const label =
-      this.extractAccessibilityLabel(emojiData.image) ?? this.extractAccessibilityLabel(emojiData);
-    if (label && !EMOJI_ALIAS_PATTERN.test(label)) return this.normalizeInlineText(label);
-
-    return '';
-  }
-
-  private parseEmoji(emojiData: JsonObject): EmojiInfo | null {
-    const emojiAsset = this.createImageAsset(
-      emojiData.image,
-      this.getEmojiAltText(emojiData),
-      this.getEmojiVisibleFallbackText(emojiData)
-    );
-    if (!emojiAsset) {
-      return null;
-    }
-
-    return emojiAsset;
-  }
-
-  private createImageAsset(value: unknown, alt: string, fallbackText?: string): ImageAsset | null {
-    const thumbnail = this.extractBestThumbnail(value);
-    if (!thumbnail) {
-      return null;
-    }
-
-    const asset: ImageAsset = {
-      url: thumbnail.url,
-      alt,
-    };
-
-    if (thumbnail.candidateUrl) {
-      asset.candidateUrl = thumbnail.candidateUrl;
-    }
-
-    if (fallbackText && fallbackText.length > 0) {
-      asset.fallbackText = fallbackText;
-    }
-
-    if (thumbnail.width !== undefined) {
-      asset.width = thumbnail.width;
-    }
-
-    if (thumbnail.height !== undefined) {
-      asset.height = thumbnail.height;
-    }
-
-    return asset;
-  }
-
-  private extractThumbnailCandidates(value: unknown): ThumbnailCandidate[] {
-    if (!isRecord(value)) {
-      return [];
-    }
-
-    const thumbnails = Array.isArray(value.thumbnails)
-      ? value.thumbnails
-      : Array.isArray(value.sources)
-        ? value.sources
-        : [];
-
-    const candidates: ThumbnailCandidate[] = [];
-    const seenUrls = new Set<string>();
-
-    for (const candidate of thumbnails) {
-      if (!isRecord(candidate)) {
-        continue;
-      }
-
-      const url = getString(candidate.url);
-      const normalizedUrl = url ? normalizeYouTubeImageUrl(url) : null;
-      if (!normalizedUrl || seenUrls.has(normalizedUrl)) {
-        continue;
-      }
-
-      seenUrls.add(normalizedUrl);
-      const width = getNumber(candidate.width);
-      const nextThumbnail: ThumbnailCandidate = {
-        url: normalizedUrl,
-      };
-      if (width !== undefined) {
-        nextThumbnail.width = width;
-      }
-
-      const height = getNumber(candidate.height);
-      if (height !== undefined) {
-        nextThumbnail.height = height;
-      }
-
-      candidates.push(nextThumbnail);
-    }
-
-    candidates.sort((left, right) => (right.width ?? 0) - (left.width ?? 0));
-    return candidates;
-  }
-
-  private extractBestThumbnail(value: unknown): {
-    url: string;
-    candidateUrl?: string;
-    width?: number;
-    height?: number;
-  } | null {
-    const [bestThumbnail, ...fallbackThumbnails] = this.extractThumbnailCandidates(value);
-    if (!bestThumbnail) {
-      return null;
-    }
-
-    const firstFallback = fallbackThumbnails[0];
-    return {
-      ...bestThumbnail,
-      ...(firstFallback ? { candidateUrl: firstFallback.url } : {}),
-    };
-  }
-
-  private extractThumbnailUrl(value: unknown): string | undefined {
-    return this.extractBestThumbnail(value)?.url;
-  }
-
-  private extractAuthorType(value: unknown): AuthorType {
-    let resolvedType: AuthorType = 'normal';
-
-    if (!Array.isArray(value)) {
-      return resolvedType;
-    }
-
-    for (const badgeEntry of value) {
-      const nextType = this.classifyAuthorBadge(badgeEntry);
-      if (AUTHOR_TYPE_PRIORITY[nextType] > AUTHOR_TYPE_PRIORITY[resolvedType]) {
-        resolvedType = nextType;
-      }
-    }
-
-    return resolvedType;
-  }
-
-  private classifyAuthorBadge(value: unknown): AuthorType {
-    const badgeEntry = asRecord(value);
-    if (!badgeEntry) {
-      return 'normal';
-    }
-
-    const liveBadge = asRecord(badgeEntry.liveChatAuthorBadgeRenderer);
-    const metadataBadge = asRecord(badgeEntry.metadataBadgeRenderer);
-    const badge = liveBadge ?? metadataBadge ?? badgeEntry;
-    const iconType = getString(asRecord(badge.icon)?.iconType)?.toUpperCase() ?? '';
-    const style = getString(metadataBadge?.style ?? badge.style)?.toUpperCase() ?? '';
-    const label = [
-      getString(badge.tooltip),
-      this.extractAccessibilityLabel(badge),
-      this.extractAccessibilityLabel(liveBadge),
-      this.extractAccessibilityLabel(metadataBadge),
-    ]
-      .filter(Boolean)
-      .join(' ')
-      .toUpperCase();
-
-    // Owner badges take highest priority.
-    if (iconType.includes('OWNER') || label.includes('OWNER')) {
-      return 'owner';
-    }
-
-    // Moderator badges.
-    if (iconType.includes('MODERATOR') || label.includes('MODERATOR') || label.includes(' MOD ')) {
-      return 'moderator';
-    }
-
-    // Member badges: sponsor icon, membership style, custom thumbnail, or label hints.
-    if (
-      iconType.includes('SPONSOR') ||
-      style.includes('MEMBERS_ONLY') ||
-      isRecord(badge.customThumbnail) ||
-      isRecord(liveBadge?.customThumbnail) ||
-      label.includes('MEMBER') ||
-      label.includes('MEMBERSHIP') ||
-      label.includes('SPONSOR')
-    ) {
-      return 'member';
-    }
-
-    // Verified badges (channel verification).
-    if (style.includes('VERIFIED') || iconType.includes('VERIFIED') || label.includes('VERIFIED')) {
-      return 'verified';
-    }
-
-    return 'normal';
-  }
-
-  private truncateText(text: string): string {
-    const normalized = this.normalizeInlineText(text);
-    if (normalized.length > 80) {
-      return `${normalized.slice(0, 77)}...`;
-    }
-    return normalized;
-  }
-
-  private stripControlCharacters(text: string): string {
-    return text.replace(/[\u0000-\u001F\u007F-\u009F]/g, '');
-  }
-
-  private isSubstantialMessage(body: ParsedMessageBody, authorType: AuthorType): boolean {
-    const settings = this.getSettings();
-    if (settings.allowShortTextMessages) return true;
-    if (authorType === 'moderator' || authorType === 'owner' || authorType === 'member')
+  function isSubstantialMessage(body: ParsedMessageBody, authorType: AuthorType): boolean {
+    if (getSettings().allowShortTextMessages) return true;
+    if (authorType === 'moderator' || authorType === 'owner' || authorType === 'member') {
       return true;
-    if (this.hasEmojiContent(body.content) || EMOJI_TEXT_PATTERN.test(body.text)) return true;
+    }
+    if (hasEmojiContent(body.content) || EMOJI_TEXT_PATTERN.test(body.text)) {
+      return true;
+    }
 
-    const minLength = Math.max(1, settings.minTextLength);
+    const minLength = Math.max(1, getSettings().minTextLength);
     return body.visibleLength >= minLength;
   }
 
-  private hasEmojiContent(segments: readonly ContentSegment[]): boolean {
-    return segments.some(
-      (segment) =>
-        segment.type === 'emoji' ||
-        (segment.type === 'text' && EMOJI_TEXT_PATTERN.test(segment.content))
-    );
-  }
-
-  private colorIntToCss(value: unknown): string | undefined {
-    const intValue = getNumber(value);
-    if (intValue === undefined) {
-      return undefined;
-    }
-
-    const argb = intValue >>> 0;
-    const alpha = ((argb >>> 24) & 0xff) / 255;
-    const red = (argb >>> 16) & 0xff;
-    const green = (argb >>> 8) & 0xff;
-    const blue = argb & 0xff;
-
-    if (alpha >= 0.999) {
-      return `rgb(${red}, ${green}, ${blue})`;
-    }
-
-    return `rgba(${red}, ${green}, ${blue}, ${Number(alpha.toFixed(3))})`;
-  }
-
-  private parseSuperChatInfo(renderer: JsonObject): SuperChatInfo | null {
-    const amount = this.extractDisplayText(renderer.purchaseAmountText);
+  function parseSuperChatInfo(renderer: JsonObject): SuperChatInfo | null {
+    const amount = extractDisplayText(renderer.purchaseAmountText);
     if (!amount) {
       log.warn('Super Chat renderer did not include purchaseAmountText');
       return null;
     }
 
-    const backgroundColor = this.colorIntToCss(
-      renderer.bodyBackgroundColor ?? renderer.backgroundColor
-    );
-    const headerBackgroundColor = this.colorIntToCss(renderer.headerBackgroundColor);
+    const backgroundColor = colorIntToCss(renderer.bodyBackgroundColor ?? renderer.backgroundColor);
+    const headerBackgroundColor = colorIntToCss(renderer.headerBackgroundColor);
     const sourceColor = headerBackgroundColor || backgroundColor;
-    const tier = this.determineSuperChatTier(sourceColor);
+    const tier = determineSuperChatTier(sourceColor);
 
     const superChatInfo: SuperChatInfo = {
       amount,
@@ -656,41 +237,477 @@ export class ChatMessageParser {
     }
 
     const stickerAlt =
-      this.extractAccessibilityLabel(renderer.sticker) ??
-      this.extractAccessibilityLabel(renderer.headerOverlayImage) ??
+      extractAccessibilityLabel(renderer.sticker) ??
+      extractAccessibilityLabel(renderer.headerOverlayImage) ??
       'Super Chat Sticker';
     const sticker =
-      this.createImageAsset(renderer.sticker, stickerAlt) ??
-      this.createImageAsset(renderer.headerOverlayImage, stickerAlt);
+      createImageAsset(renderer.sticker, stickerAlt) ??
+      createImageAsset(renderer.headerOverlayImage, stickerAlt);
     if (sticker) {
       superChatInfo.sticker = sticker;
     }
 
     return superChatInfo;
   }
+}
 
-  private determineSuperChatTier(backgroundColor: string | undefined): SuperChatInfo['tier'] {
-    const rgb = backgroundColor ? parseRgbColor(backgroundColor) : null;
-    if (!rgb) return 'blue';
+// ---------------------------------------------------------------------------
+// Pure helper functions (module-level, no settings dependency)
+// ---------------------------------------------------------------------------
 
-    const tierKeys = Object.keys(colors.superChat) as SuperChatInfo['tier'][];
+function extractActionItem(action: JsonObject): JsonObject | null {
+  const addChatItemAction = asRecord(action.addChatItemAction);
+  if (addChatItemAction) {
+    const item = asRecord(addChatItemAction.item);
+    if (item) {
+      return item;
+    }
+  }
 
-    let bestTier: SuperChatInfo['tier'] = 'blue';
-    let bestSquaredDistance = Number.POSITIVE_INFINITY;
+  const replaceChatItemAction = asRecord(action.replaceChatItemAction);
+  if (replaceChatItemAction) {
+    const item = asRecord(replaceChatItemAction.item);
+    if (item) {
+      return item;
+    }
+  }
 
-    for (const tier of tierKeys) {
-      const tierColor = colors.superChat[tier];
-      const dr = rgb.r - tierColor.r;
-      const dg = rgb.g - tierColor.g;
-      const db = rgb.b - tierColor.b;
-      const squaredDistance = dr * dr + dg * dg + db * db;
+  return null;
+}
 
-      if (squaredDistance < bestSquaredDistance) {
-        bestSquaredDistance = squaredDistance;
-        bestTier = tier;
+function extractSupportedRenderer(item: JsonObject): SupportedRenderer | null {
+  const textRenderer = asRecord(item.liveChatTextMessageRenderer);
+  if (textRenderer) {
+    return { kind: 'text', renderer: textRenderer };
+  }
+
+  const paidMessageRenderer = asRecord(item.liveChatPaidMessageRenderer);
+  if (paidMessageRenderer) {
+    return { kind: 'superchat', renderer: paidMessageRenderer };
+  }
+
+  const paidStickerRenderer = asRecord(item.liveChatPaidStickerRenderer);
+  if (paidStickerRenderer) {
+    return { kind: 'superchat', renderer: paidStickerRenderer };
+  }
+
+  const membershipRenderer = asRecord(item.liveChatMembershipItemRenderer);
+  if (membershipRenderer) {
+    return { kind: 'membership', renderer: membershipRenderer };
+  }
+
+  return null;
+}
+
+function parseMembershipBody(renderer: JsonObject): ParsedMessageBody {
+  const messageBody = parseMessageContent(renderer.message);
+  return messageBody.visibleLength > 0 || messageBody.text.length > 0
+    ? messageBody
+    : parseMessageContent(renderer.headerSubtext);
+}
+
+function extractDisplayText(value: unknown): string | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const simpleText = getString(value.simpleText);
+  if (simpleText) {
+    return simpleText.trim() || undefined;
+  }
+
+  const runs = Array.isArray(value.runs) ? value.runs : [];
+  const text = runs
+    .map((run) => {
+      if (!isRecord(run)) {
+        return '';
       }
+
+      const runText = getString(run.text);
+      if (runText) {
+        return runText;
+      }
+
+      const emoji = asRecord(run.emoji);
+      return emoji ? getEmojiVisibleFallbackText(emoji) : '';
+    })
+    .join('')
+    .trim();
+
+  return text || undefined;
+}
+
+function parseMessageContent(value: unknown): ParsedMessageBody {
+  if (!isRecord(value)) {
+    return EMPTY_MESSAGE_BODY;
+  }
+
+  const simpleText = getString(value.simpleText);
+  if (simpleText !== undefined) {
+    const content: ContentSegment[] =
+      simpleText.length > 0 ? [{ type: 'text', content: simpleText }] : [];
+    return {
+      text: truncateText(simpleText),
+      content,
+      visibleLength: getVisibleContentLength(content),
+    };
+  }
+
+  const runs = Array.isArray(value.runs) ? value.runs : [];
+  const segments: ContentSegment[] = [];
+  let plainText = '';
+
+  for (const run of runs) {
+    if (!isRecord(run)) {
+      continue;
     }
 
-    return bestTier;
+    const runText = getString(run.text);
+    if (runText !== undefined) {
+      if (runText.length > 0) {
+        appendTextSegment(segments, runText);
+        plainText += runText;
+      }
+      continue;
+    }
+
+    const emojiData = asRecord(run.emoji);
+    if (!emojiData) {
+      continue;
+    }
+
+    const emoji = parseEmoji(emojiData);
+    if (emoji) {
+      segments.push({ type: 'emoji', emoji });
+      plainText += emoji.fallbackText || '[emoji]';
+      continue;
+    }
+
+    const fallbackText = getEmojiVisibleFallbackText(emojiData) || '[emoji]';
+    appendTextSegment(segments, fallbackText);
+    plainText += fallbackText;
   }
+
+  return {
+    text: truncateText(plainText),
+    content: segments,
+    visibleLength: getVisibleContentLength(segments),
+  };
+}
+
+function appendTextSegment(segments: ContentSegment[], content: string): void {
+  if (content.length === 0) {
+    return;
+  }
+
+  const lastSegment = segments[segments.length - 1];
+  if (lastSegment?.type === 'text') {
+    lastSegment.content += content;
+    return;
+  }
+
+  segments.push({ type: 'text', content });
+}
+
+function getVisibleContentLength(segments: readonly ContentSegment[]): number {
+  let visibleLength = 0;
+
+  for (const segment of segments) {
+    if (segment.type === 'emoji') {
+      visibleLength += 1;
+      continue;
+    }
+
+    visibleLength += [...stripControlCharacters(segment.content).replace(/\s+/g, '')].length;
+  }
+
+  return visibleLength;
+}
+
+function extractAccessibilityLabel(value: unknown): string | undefined {
+  const record = asRecord(value);
+  if (!record) {
+    return undefined;
+  }
+
+  return getString(asRecord(asRecord(record.accessibility)?.accessibilityData)?.label);
+}
+
+function getEmojiShortcuts(emojiData: JsonObject): string[] {
+  return Array.isArray(emojiData.shortcuts)
+    ? emojiData.shortcuts.filter((shortcut): shortcut is string => typeof shortcut === 'string')
+    : [];
+}
+
+function normalizeInlineText(text: string): string {
+  return stripControlCharacters(text).replace(/\s+/g, ' ').trim();
+}
+
+function getEmojiAltText(emojiData: JsonObject): string {
+  const shortcuts = getEmojiShortcuts(emojiData);
+
+  return (
+    shortcuts[0] ??
+    extractAccessibilityLabel(emojiData.image) ??
+    extractAccessibilityLabel(emojiData) ??
+    getString(emojiData.emojiId) ??
+    ''
+  );
+}
+
+function getEmojiVisibleFallbackText(emojiData: JsonObject): string {
+  const shortcuts = getEmojiShortcuts(emojiData);
+  const nonAliasShortcut = shortcuts.find((s) => !EMOJI_ALIAS_PATTERN.test(s));
+  if (nonAliasShortcut) return normalizeInlineText(nonAliasShortcut);
+
+  const label = extractAccessibilityLabel(emojiData.image) ?? extractAccessibilityLabel(emojiData);
+  if (label && !EMOJI_ALIAS_PATTERN.test(label)) {
+    return normalizeInlineText(label);
+  }
+
+  return '';
+}
+
+function parseEmoji(emojiData: JsonObject): EmojiInfo | null {
+  const emojiAsset = createImageAsset(
+    emojiData.image,
+    getEmojiAltText(emojiData),
+    getEmojiVisibleFallbackText(emojiData)
+  );
+  if (!emojiAsset) {
+    return null;
+  }
+
+  return emojiAsset;
+}
+
+function createImageAsset(value: unknown, alt: string, fallbackText?: string): ImageAsset | null {
+  const thumbnail = extractBestThumbnail(value);
+  if (!thumbnail) {
+    return null;
+  }
+
+  const asset: ImageAsset = {
+    url: thumbnail.url,
+    alt,
+  };
+
+  if (thumbnail.candidateUrl) {
+    asset.candidateUrl = thumbnail.candidateUrl;
+  }
+
+  if (fallbackText && fallbackText.length > 0) {
+    asset.fallbackText = fallbackText;
+  }
+
+  if (thumbnail.width !== undefined) {
+    asset.width = thumbnail.width;
+  }
+
+  if (thumbnail.height !== undefined) {
+    asset.height = thumbnail.height;
+  }
+
+  return asset;
+}
+
+function extractThumbnailCandidates(value: unknown): ThumbnailCandidate[] {
+  if (!isRecord(value)) {
+    return [];
+  }
+
+  const thumbnails = Array.isArray(value.thumbnails)
+    ? value.thumbnails
+    : Array.isArray(value.sources)
+      ? value.sources
+      : [];
+
+  const candidates: ThumbnailCandidate[] = [];
+  const seenUrls = new Set<string>();
+
+  for (const candidate of thumbnails) {
+    if (!isRecord(candidate)) {
+      continue;
+    }
+
+    const url = getString(candidate.url);
+    const normalizedUrl = url ? normalizeYouTubeImageUrl(url) : null;
+    if (!normalizedUrl || seenUrls.has(normalizedUrl)) {
+      continue;
+    }
+
+    seenUrls.add(normalizedUrl);
+    const width = getNumber(candidate.width);
+    const nextThumbnail: ThumbnailCandidate = {
+      url: normalizedUrl,
+    };
+    if (width !== undefined) {
+      nextThumbnail.width = width;
+    }
+
+    const height = getNumber(candidate.height);
+    if (height !== undefined) {
+      nextThumbnail.height = height;
+    }
+
+    candidates.push(nextThumbnail);
+  }
+
+  candidates.sort((left, right) => (right.width ?? 0) - (left.width ?? 0));
+  return candidates;
+}
+
+function extractBestThumbnail(value: unknown): {
+  url: string;
+  candidateUrl?: string;
+  width?: number;
+  height?: number;
+} | null {
+  const [bestThumbnail, ...fallbackThumbnails] = extractThumbnailCandidates(value);
+  if (!bestThumbnail) {
+    return null;
+  }
+
+  const firstFallback = fallbackThumbnails[0];
+  return {
+    ...bestThumbnail,
+    ...(firstFallback ? { candidateUrl: firstFallback.url } : {}),
+  };
+}
+
+function extractThumbnailUrl(value: unknown): string | undefined {
+  return extractBestThumbnail(value)?.url;
+}
+
+function extractAuthorType(value: unknown): AuthorType {
+  let resolvedType: AuthorType = 'normal';
+
+  if (!Array.isArray(value)) {
+    return resolvedType;
+  }
+
+  for (const badgeEntry of value) {
+    const nextType = classifyAuthorBadge(badgeEntry);
+    if (AUTHOR_TYPE_PRIORITY[nextType] > AUTHOR_TYPE_PRIORITY[resolvedType]) {
+      resolvedType = nextType;
+    }
+  }
+
+  return resolvedType;
+}
+
+function classifyAuthorBadge(value: unknown): AuthorType {
+  const badgeEntry = asRecord(value);
+  if (!badgeEntry) {
+    return 'normal';
+  }
+
+  const liveBadge = asRecord(badgeEntry.liveChatAuthorBadgeRenderer);
+  const metadataBadge = asRecord(badgeEntry.metadataBadgeRenderer);
+  const badge = liveBadge ?? metadataBadge ?? badgeEntry;
+  const iconType = getString(asRecord(badge.icon)?.iconType)?.toUpperCase() ?? '';
+  const style = getString(metadataBadge?.style ?? badge.style)?.toUpperCase() ?? '';
+  const label = [
+    getString(badge.tooltip),
+    extractAccessibilityLabel(badge),
+    extractAccessibilityLabel(liveBadge),
+    extractAccessibilityLabel(metadataBadge),
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toUpperCase();
+
+  // Owner badges take highest priority.
+  if (iconType.includes('OWNER') || label.includes('OWNER')) {
+    return 'owner';
+  }
+
+  // Moderator badges.
+  if (iconType.includes('MODERATOR') || label.includes('MODERATOR') || label.includes(' MOD ')) {
+    return 'moderator';
+  }
+
+  // Member badges: sponsor icon, membership style, custom thumbnail, or label hints.
+  if (
+    iconType.includes('SPONSOR') ||
+    style.includes('MEMBERS_ONLY') ||
+    isRecord(badge.customThumbnail) ||
+    isRecord(liveBadge?.customThumbnail) ||
+    label.includes('MEMBER') ||
+    label.includes('MEMBERSHIP') ||
+    label.includes('SPONSOR')
+  ) {
+    return 'member';
+  }
+
+  // Verified badges (channel verification).
+  if (style.includes('VERIFIED') || iconType.includes('VERIFIED') || label.includes('VERIFIED')) {
+    return 'verified';
+  }
+
+  return 'normal';
+}
+
+function truncateText(text: string): string {
+  const normalized = normalizeInlineText(text);
+  if (normalized.length > 80) {
+    return `${normalized.slice(0, 77)}...`;
+  }
+  return normalized;
+}
+
+function stripControlCharacters(text: string): string {
+  return text.replace(/[\u0000-\u001F\u007F-\u009F]/g, '');
+}
+
+function hasEmojiContent(segments: readonly ContentSegment[]): boolean {
+  return segments.some(
+    (segment) =>
+      segment.type === 'emoji' ||
+      (segment.type === 'text' && EMOJI_TEXT_PATTERN.test(segment.content))
+  );
+}
+
+function colorIntToCss(value: unknown): string | undefined {
+  const intValue = getNumber(value);
+  if (intValue === undefined) {
+    return undefined;
+  }
+
+  const argb = intValue >>> 0;
+  const alpha = ((argb >>> 24) & 0xff) / 255;
+  const red = (argb >>> 16) & 0xff;
+  const green = (argb >>> 8) & 0xff;
+  const blue = argb & 0xff;
+
+  if (alpha >= 0.999) {
+    return `rgb(${red}, ${green}, ${blue})`;
+  }
+
+  return `rgba(${red}, ${green}, ${blue}, ${Number(alpha.toFixed(3))})`;
+}
+
+function determineSuperChatTier(backgroundColor: string | undefined): SuperChatInfo['tier'] {
+  const rgb = backgroundColor ? parseRgbColor(backgroundColor) : null;
+  if (!rgb) return 'blue';
+
+  const tierKeys = Object.keys(colors.superChat) as SuperChatInfo['tier'][];
+
+  let bestTier: SuperChatInfo['tier'] = 'blue';
+  let bestSquaredDistance = Number.POSITIVE_INFINITY;
+
+  for (const tier of tierKeys) {
+    const tierColor = colors.superChat[tier];
+    const dr = rgb.r - tierColor.r;
+    const dg = rgb.g - tierColor.g;
+    const db = rgb.b - tierColor.b;
+    const squaredDistance = dr * dr + dg * dg + db * db;
+
+    if (squaredDistance < bestSquaredDistance) {
+      bestSquaredDistance = squaredDistance;
+      bestTier = tier;
+    }
+  }
+
+  return bestTier;
 }

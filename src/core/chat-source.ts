@@ -9,7 +9,7 @@
  */
 
 import type { ChatMessage, OverlaySettings } from '@app-types';
-import { type ChatEvent, ChatMessageParser } from '@core/chat-message-parser';
+import { type ChatEvent, extractChatEvents } from '@core/chat-message-parser';
 import {
   combineAbortSignals,
   findElementMatch,
@@ -97,7 +97,7 @@ export type ChatSourceStartStatus = 'started' | 'retryable' | 'unavailable';
 // ====================================================================
 
 export abstract class ChatSource {
-  protected readonly parser: ChatMessageParser;
+  protected readonly getSettings: () => Readonly<OverlaySettings>;
   protected callback: MessageCallback | null = null;
   private pollController: AbortController | null = null;
   private pollLoopAlive = false;
@@ -107,7 +107,7 @@ export abstract class ChatSource {
   private readonly recentMessages: ChatMessage[] = [];
 
   constructor(getSettings: () => Readonly<OverlaySettings>) {
-    this.parser = new ChatMessageParser(getSettings);
+    this.getSettings = getSettings;
   }
 
   // ---- Public API (used by RuntimeSession) ----
@@ -547,7 +547,7 @@ export class LiveChatSource extends ChatSource {
   }
 
   private handleLivePayload(payload: LiveChatPayload, isInitialSeed: boolean = false): void {
-    const events = this.parser.extractChatEvents(payload.actions);
+    const events = extractChatEvents(payload.actions, this.getSettings);
 
     if (events.length > 0) {
       let messages: ChatMessage[];
@@ -693,7 +693,7 @@ export class ReplayChatSource extends ChatSource {
       const currentOffsetMs = this.getPlaybackSnapshot()?.offsetMs ?? 0;
       const minimumOffsetMs = Math.max(0, currentOffsetMs - REPLAY_PREFETCH_WINDOW_MS);
       this.replayFallbackLastOffsetMs = this.bufferReplayEvents(
-        this.parser.extractChatEvents(initialPayload.actions),
+        extractChatEvents(initialPayload.actions, this.getSettings),
         minimumOffsetMs
       );
       // Catch up fallback replay buffer to current position
@@ -864,7 +864,7 @@ export class ReplayChatSource extends ChatSource {
 
       const nextPlayerSeekContinuation = extractPlayerSeekContinuation(payload.continuations);
       this.bufferReplayEvents(
-        this.parser.extractChatEvents(payload.actions),
+        extractChatEvents(payload.actions, this.getSettings),
         Math.max(0, offsetMs - REPLAY_PREFETCH_WINDOW_MS)
       );
       this.replayPlayerSeekContinuation = nextPlayerSeekContinuation;
@@ -900,7 +900,7 @@ export class ReplayChatSource extends ChatSource {
         return false;
       }
 
-      const events = this.parser.extractChatEvents(payload.actions);
+      const events = extractChatEvents(payload.actions, this.getSettings);
       this.replayFallbackLastOffsetMs = this.bufferReplayEvents(events, minimumOffsetMs);
       this.replayContinuation = extractReplayContinuation(payload.continuations);
 
