@@ -63,7 +63,7 @@ interface QueuedMessage {
 
 interface ActiveMessage {
   element: HTMLDivElement;
-  readonly startTime: DOMHighResTimeStamp;
+  readonly startTime: number;
   readonly baseDuration: number;
   readonly baseOpacity: number;
   readonly cleanup: () => void;
@@ -300,7 +300,7 @@ export class Renderer {
 
     return {
       element,
-      startTime: performance.now(),
+      startTime: Date.now(),
       baseDuration,
       baseOpacity: baseOpacity ?? this.settings.opacity,
       cleanup,
@@ -353,7 +353,7 @@ export class Renderer {
     const toRemove: ActiveMessage[] = [];
     for (const active of this.activeMessages) {
       try {
-        const elapsed = performance.now() - active.startTime;
+        const elapsed = Date.now() - active.startTime;
         const minLifetimeMs = active.baseDuration + Renderer.SWEEP_TOLERANCE_MS;
         if (elapsed < minLifetimeMs) continue;
 
@@ -508,7 +508,7 @@ export class Renderer {
   }
 
   private updateMessageOpacity(): void {
-    const now = performance.now();
+    const now = Date.now();
     const toRemove: ActiveMessage[] = [];
 
     for (const active of this.activeMessages) {
@@ -744,7 +744,7 @@ export class Renderer {
         // Subtract accumulated paused time so the animation resumes from
         // where it visually stopped, not from wall-clock elapsed time.
         active.pausedDuration += pausedDuration;
-        const elapsed = performance.now() - active.startTime - active.pausedDuration;
+        const elapsed = Date.now() - active.startTime - active.pausedDuration;
         const remaining = active.baseDuration - elapsed;
         if (remaining <= 0) {
           this.removeMessage(active);
@@ -794,7 +794,7 @@ export class Renderer {
 
     for (const active of this.activeMessages) {
       try {
-        const elapsed = performance.now() - active.startTime;
+        const elapsed = Date.now() - active.startTime;
         const adjustedDuration = active.baseDuration / rate;
 
         const el = active.element;
