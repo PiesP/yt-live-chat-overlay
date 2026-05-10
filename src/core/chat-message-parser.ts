@@ -83,6 +83,7 @@ export function extractChatEvents(
   actions: readonly unknown[],
   getSettings: () => Readonly<OverlaySettings>
 ): ChatEvent[] {
+  const settings = getSettings();
   const events: ChatEvent[] = [];
 
   for (const action of actions) {
@@ -95,7 +96,7 @@ export function extractChatEvents(
       const offsetMs = getNumber(replayAction.videoOffsetTimeMsec);
       const nestedActions = Array.isArray(replayAction.actions) ? replayAction.actions : [];
       for (const nestedAction of nestedActions) {
-        const event = extractChatEventFromAction(nestedAction, offsetMs);
+        const event = parseChatEventFromAction(nestedAction, offsetMs, settings);
         if (event) {
           events.push(event);
         }
@@ -103,152 +104,165 @@ export function extractChatEvents(
       continue;
     }
 
-    const event = extractChatEventFromAction(action, undefined);
+    const event = parseChatEventFromAction(action, undefined, settings);
     if (event) {
       events.push(event);
     }
   }
 
   return events;
+}
 
-  // ---- Closures that depend on getSettings ----
+// ---------------------------------------------------------------------------
+// Settings-dependent pure functions (explicit parameter, no closure)
+// ---------------------------------------------------------------------------
 
-  function extractChatEventFromAction(
-    action: unknown,
-    offsetMs: number | undefined
-  ): ChatEvent | null {
-    if (!isRecord(action)) {
-      return null;
-    }
-
-    const item = extractActionItem(action);
-    if (!item) {
-      return null;
-    }
-
-    const supportedRenderer = extractSupportedRenderer(item);
-    if (!supportedRenderer) {
-      return null;
-    }
-
-    const message = parseRendererMessage(supportedRenderer.renderer, supportedRenderer.kind);
-    if (!message) {
-      return null;
-    }
-
-    return offsetMs === undefined ? { message } : { message, offsetMs };
+function parseChatEventFromAction(
+  action: unknown,
+  offsetMs: number | undefined,
+  settings: Readonly<OverlaySettings>
+): ChatEvent | null {
+  if (!isRecord(action)) {
+    return null;
   }
 
-  function parseRendererMessage(
-    renderer: JsonObject,
-    kind: ChatMessage['kind']
-  ): ChatMessage | null {
-    const author = extractDisplayText(renderer.authorName);
-    if (!author) {
-      return null;
-    }
-
-    const authorType = extractAuthorType(renderer.authorBadges);
-    const parsedBody = extractRendererBody(renderer, kind, authorType);
-    if (!parsedBody) {
-      return null;
-    }
-
-    const message: ChatMessage = {
-      text: parsedBody.text,
-      content: parsedBody.content,
-      kind,
-      timestamp: Date.now(),
-      author,
-      authorType,
-    };
-
-    const id = getString(renderer.id);
-    if (id) {
-      message.id = id;
-    }
-
-    const authorPhotoUrl = extractThumbnailUrl(renderer.authorPhoto);
-    if (authorPhotoUrl) {
-      message.authorPhotoUrl = authorPhotoUrl;
-    }
-
-    if (kind === 'superchat') {
-      const superChatInfo = parseSuperChatInfo(renderer);
-      if (superChatInfo) {
-        message.superChat = superChatInfo;
-      }
-    }
-
-    return message;
+  const item = extractActionItem(action);
+  if (!item) {
+    return null;
   }
 
-  function extractRendererBody(
-    renderer: JsonObject,
-    kind: ChatMessage['kind'],
-    authorType: AuthorType
-  ): ParsedMessageBody | null {
-    const parsedBody =
-      kind === 'membership' ? parseMembershipBody(renderer) : parseMessageContent(renderer.message);
-
-    if (kind === 'text' && !isSubstantialMessage(parsedBody, authorType)) {
-      return null;
-    }
-
-    return parsedBody;
+  const supportedRenderer = extractSupportedRenderer(item);
+  if (!supportedRenderer) {
+    return null;
   }
 
-  function isSubstantialMessage(body: ParsedMessageBody, authorType: AuthorType): boolean {
-    if (getSettings().allowShortTextMessages) return true;
-    if (authorType === 'moderator' || authorType === 'owner' || authorType === 'member') {
-      return true;
-    }
-    if (hasEmojiContent(body.content) || EMOJI_TEXT_PATTERN.test(body.text)) {
-      return true;
-    }
-
-    const minLength = Math.max(1, getSettings().minTextLength);
-    return body.visibleLength >= minLength;
+  const message = parseRendererMessage(
+    supportedRenderer.renderer,
+    supportedRenderer.kind,
+    settings
+  );
+  if (!message) {
+    return null;
   }
 
-  function parseSuperChatInfo(renderer: JsonObject): SuperChatInfo | null {
-    const amount = extractDisplayText(renderer.purchaseAmountText);
-    if (!amount) {
-      log.warn('Super Chat renderer did not include purchaseAmountText');
-      return null;
-    }
+  return offsetMs === undefined ? { message } : { message, offsetMs };
+}
 
-    const backgroundColor = colorIntToCss(renderer.bodyBackgroundColor ?? renderer.backgroundColor);
-    const headerBackgroundColor = colorIntToCss(renderer.headerBackgroundColor);
-    const sourceColor = headerBackgroundColor || backgroundColor;
-    const tier = determineSuperChatTier(sourceColor);
-
-    const superChatInfo: SuperChatInfo = {
-      amount,
-      tier,
-    };
-
-    if (backgroundColor) {
-      superChatInfo.backgroundColor = backgroundColor;
-    }
-
-    if (headerBackgroundColor) {
-      superChatInfo.headerBackgroundColor = headerBackgroundColor;
-    }
-
-    const stickerAlt =
-      extractAccessibilityLabel(renderer.sticker) ??
-      extractAccessibilityLabel(renderer.headerOverlayImage) ??
-      'Super Chat Sticker';
-    const sticker =
-      createImageAsset(renderer.sticker, stickerAlt) ??
-      createImageAsset(renderer.headerOverlayImage, stickerAlt);
-    if (sticker) {
-      superChatInfo.sticker = sticker;
-    }
-
-    return superChatInfo;
+function parseRendererMessage(
+  renderer: JsonObject,
+  kind: ChatMessage['kind'],
+  settings: Readonly<OverlaySettings>
+): ChatMessage | null {
+  const author = extractDisplayText(renderer.authorName);
+  if (!author) {
+    return null;
   }
+
+  const authorType = extractAuthorType(renderer.authorBadges);
+  const parsedBody = extractRendererBody(renderer, kind, authorType, settings);
+  if (!parsedBody) {
+    return null;
+  }
+
+  const message: ChatMessage = {
+    text: parsedBody.text,
+    content: parsedBody.content,
+    kind,
+    timestamp: Date.now(),
+    author,
+    authorType,
+  };
+
+  const id = getString(renderer.id);
+  if (id) {
+    message.id = id;
+  }
+
+  const authorPhotoUrl = extractThumbnailUrl(renderer.authorPhoto);
+  if (authorPhotoUrl) {
+    message.authorPhotoUrl = authorPhotoUrl;
+  }
+
+  if (kind === 'superchat') {
+    const superChatInfo = parseSuperChatInfo(renderer);
+    if (superChatInfo) {
+      message.superChat = superChatInfo;
+    }
+  }
+
+  return message;
+}
+
+function extractRendererBody(
+  renderer: JsonObject,
+  kind: ChatMessage['kind'],
+  authorType: AuthorType,
+  settings: Readonly<OverlaySettings>
+): ParsedMessageBody | null {
+  const parsedBody =
+    kind === 'membership' ? parseMembershipBody(renderer) : parseMessageContent(renderer.message);
+
+  if (kind === 'text' && !isSubstantialMessage(parsedBody, authorType, settings)) {
+    return null;
+  }
+
+  return parsedBody;
+}
+
+function isSubstantialMessage(
+  body: ParsedMessageBody,
+  authorType: AuthorType,
+  settings: Readonly<OverlaySettings>
+): boolean {
+  if (settings.allowShortTextMessages) return true;
+  if (authorType === 'moderator' || authorType === 'owner' || authorType === 'member') {
+    return true;
+  }
+  if (hasEmojiContent(body.content) || EMOJI_TEXT_PATTERN.test(body.text)) {
+    return true;
+  }
+
+  const minLength = Math.max(1, settings.minTextLength);
+  return body.visibleLength >= minLength;
+}
+
+function parseSuperChatInfo(renderer: JsonObject): SuperChatInfo | null {
+  const amount = extractDisplayText(renderer.purchaseAmountText);
+  if (!amount) {
+    log.warn('Super Chat renderer did not include purchaseAmountText');
+    return null;
+  }
+
+  const backgroundColor = colorIntToCss(renderer.bodyBackgroundColor ?? renderer.backgroundColor);
+  const headerBackgroundColor = colorIntToCss(renderer.headerBackgroundColor);
+  const sourceColor = headerBackgroundColor || backgroundColor;
+  const tier = determineSuperChatTier(sourceColor);
+
+  const superChatInfo: SuperChatInfo = {
+    amount,
+    tier,
+  };
+
+  if (backgroundColor) {
+    superChatInfo.backgroundColor = backgroundColor;
+  }
+
+  if (headerBackgroundColor) {
+    superChatInfo.headerBackgroundColor = headerBackgroundColor;
+  }
+
+  const stickerAlt =
+    extractAccessibilityLabel(renderer.sticker) ??
+    extractAccessibilityLabel(renderer.headerOverlayImage) ??
+    'Super Chat Sticker';
+  const sticker =
+    createImageAsset(renderer.sticker, stickerAlt) ??
+    createImageAsset(renderer.headerOverlayImage, stickerAlt);
+  if (sticker) {
+    superChatInfo.sticker = sticker;
+  }
+
+  return superChatInfo;
 }
 
 // ---------------------------------------------------------------------------
