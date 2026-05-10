@@ -240,13 +240,8 @@ export class Renderer {
 
     const laneBlockTop =
       dimensions.height * this.settings.safeTop + lane.index * dimensions.laneHeight;
-    let laneY: number;
-    if (placement.laneSpan > 1) {
-      const laneBlockHeight = placement.laneSpan * dimensions.laneHeight;
-      laneY = laneBlockTop + Math.max(0, (laneBlockHeight - messageHeight) / 2);
-    } else {
-      laneY = laneBlockTop;
-    }
+    const laneBlockHeight = placement.laneSpan * dimensions.laneHeight;
+    const laneY = laneBlockTop + Math.max(0, (laneBlockHeight - messageHeight) / 2);
     element.style.top = `${laneY}px`;
     element.style.left = `${dimensions.width}px`;
     element.style.visibility = 'visible';
