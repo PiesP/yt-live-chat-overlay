@@ -19,8 +19,9 @@ const OVERLAY_ID = 'yt-live-chat-overlay';
 export const OVERLAY_SELECTOR = `#${OVERLAY_ID}`;
 
 const FULLSCREEN_UPDATE_DELAY_MS = 100;
-// line-height: 1.1 on messages keeps single-line rendering within 1 lane slot.
-const BASE_LANE_HEIGHT_MULTIPLIER = 1.2;
+// line-height: 1.1 on messages; 1.12 adds just ~2% vertical slack so messages
+// stay within their lane slot without visible inter-lane gaps.
+const BASE_LANE_HEIGHT_MULTIPLIER = 1.12;
 const OVERLAY_Z_INDEX = '100';
 
 const calculateOverlayDimensions = (
