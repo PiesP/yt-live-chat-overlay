@@ -160,7 +160,7 @@ export class SettingsUi {
       '.yt-chat-overlay-settings-tab'
     )) {
       btn.classList.toggle('active', btn.dataset.tab === tabId);
-      btn.setAttribute('aria-selected', String(btn.dataset.tab === tabId));
+      btn.setAttribute('aria-selected', `${btn.dataset.tab === tabId}`);
     }
 
     for (const pane of this.modal.querySelectorAll<HTMLDivElement>(

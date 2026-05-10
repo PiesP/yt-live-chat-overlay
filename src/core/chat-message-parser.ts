@@ -7,7 +7,7 @@ import type {
   OverlaySettings,
   SuperChatInfo,
 } from '@app-types';
-import { colors, parseRgbColor } from '@core/design-tokens';
+import { colors, parseRgbColor, SUPERCHAT_TIER_KEYS } from '@core/design-tokens';
 import { createLogger } from '@core/logging';
 import {
   asRecord,
@@ -705,12 +705,10 @@ function determineSuperChatTier(backgroundColor: string | undefined): SuperChatI
   const rgb = backgroundColor ? parseRgbColor(backgroundColor) : null;
   if (!rgb) return 'blue';
 
-  const tierKeys = Object.keys(colors.superChat) as SuperChatInfo['tier'][];
-
   let bestTier: SuperChatInfo['tier'] = 'blue';
   let bestSquaredDistance = Number.POSITIVE_INFINITY;
 
-  for (const tier of tierKeys) {
+  for (const tier of SUPERCHAT_TIER_KEYS) {
     const tierColor = colors.superChat[tier];
     const dr = rgb.r - tierColor.r;
     const dg = rgb.g - tierColor.g;

@@ -431,7 +431,7 @@ export class LiveChatSource extends ChatSource {
   }
 
   protected launchCurrentPollLoop(signal?: AbortSignal): void {
-    this.launchPollLoop(signal, this.runLiveLoop.bind(this));
+    this.launchPollLoop(signal, (loopSignal) => this.runLiveLoop(loopSignal));
   }
 
   protected resetSessionState(): void {
@@ -632,7 +632,7 @@ export class ReplayChatSource extends ChatSource {
   }
 
   protected launchCurrentPollLoop(signal?: AbortSignal): void {
-    this.launchPollLoop(signal, this.runReplayLoop.bind(this));
+    this.launchPollLoop(signal, (loopSignal) => this.runReplayLoop(loopSignal));
   }
 
   protected resetSessionState(): void {

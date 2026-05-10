@@ -475,7 +475,7 @@ export class RendererMessageBuilder {
     message: ChatMessage,
     superChat: SuperChatInfo
   ): HTMLDivElement | null {
-    const hasSticker = Boolean(superChat.sticker);
+    const hasSticker = !!superChat.sticker;
     const messageDiv = this.createMessageTextElement(message);
 
     if (!messageDiv && !hasSticker) {

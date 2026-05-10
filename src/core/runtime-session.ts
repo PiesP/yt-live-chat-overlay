@@ -263,7 +263,7 @@ export class RuntimeSession {
     const idleDurationMs = this.getIdleDurationMs(now);
     const container = this.overlay?.getContainer();
     const dimensions = this.overlay?.getDimensions();
-    const renderable = Boolean(container?.isConnected && dimensions);
+    const renderable = !!(container?.isConnected && dimensions);
     const shouldRestart =
       !renderable ||
       idleDurationMs >= LONG_IDLE_RESTART_MS ||

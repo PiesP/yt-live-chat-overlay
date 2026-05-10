@@ -204,14 +204,11 @@ export class Renderer {
       regularMessageTextShadow
     );
     container.style.setProperty('--yt-overlay-text-stroke', textStroke);
-    container.style.setProperty(
-      '--yt-overlay-superchat-base-opacity',
-      String(superChatBaseOpacity)
-    );
-    container.style.setProperty('--yt-overlay-superchat-top-opacity', String(superChatTopOpacity));
+    container.style.setProperty('--yt-overlay-superchat-base-opacity', `${superChatBaseOpacity}`);
+    container.style.setProperty('--yt-overlay-superchat-top-opacity', `${superChatTopOpacity}`);
     container.style.setProperty(
       '--yt-overlay-superchat-bottom-opacity',
-      String(superChatBottomOpacity)
+      `${superChatBottomOpacity}`
     );
   }
 
