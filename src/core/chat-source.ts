@@ -491,6 +491,13 @@ export class LiveChatSource extends ChatSource {
 
   private async runLiveLoop(signal?: AbortSignal): Promise<void> {
     while (!signal?.aborted) {
+      // Skip polling while tab is hidden — saves bandwidth and prevents
+      // stale messages from accumulating in the renderer queue.
+      while (document.hidden && !signal?.aborted) {
+        await sleep(LIVE_POLL_FALLBACK_DELAY_MS, signal);
+      }
+      throwIfAborted(signal);
+
       const timeoutMs = this.liveContinuation?.timeoutMs ?? LIVE_POLL_FALLBACK_DELAY_MS;
       const delayMs = this.calculateAdaptiveDelay(timeoutMs);
       await sleep(delayMs, signal);
