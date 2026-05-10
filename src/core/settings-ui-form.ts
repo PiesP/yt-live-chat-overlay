@@ -662,11 +662,11 @@ export class SettingsUiForm {
 
   private applyRootSettingsTo(target: OverlaySettings, current: Readonly<OverlaySettings>): void {
     const cb = (name: string, fallback: boolean) => this.getCheckbox(name, fallback);
-    target.enabled = cb('enabled', current.enabled);
-    target.allowShortTextMessages = cb('allowShortTextMessages', current.allowShortTextMessages);
-    target.showDebugOverlay = cb('showDebugOverlay', current.showDebugOverlay);
-    target.authorRateLimitEnabled = cb('authorRateLimitEnabled', current.authorRateLimitEnabled);
-    target.showBacklogIndicator = cb('showBacklogIndicator', current.showBacklogIndicator);
+
+    for (const key of SettingsUiForm.BOOLEAN_ROOT_KEYS) {
+      (target[key] as boolean) = cb(key, current[key] as boolean);
+    }
+
     target.logLevel = this.getLogLevel('logLevel', current.logLevel);
     target.backlogMode = this.getSelectValue(
       'backlogMode',
