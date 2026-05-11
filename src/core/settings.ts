@@ -37,8 +37,20 @@ export class Settings {
     return this.settings;
   }
 
-  update(partial: Partial<OverlaySettings>): void {
+  /**
+   * Apply settings changes in memory only, without persisting to localStorage.
+   * Use this for live preview during slider/input changes.
+   */
+  preview(partial: Partial<OverlaySettings>): void {
     this.settings = applySettingsPatch(this.settings, partial);
+  }
+
+  /**
+   * Apply settings changes and persist to localStorage immediately.
+   * Use this for explicit save actions (close/apply/reset).
+   */
+  update(partial: Partial<OverlaySettings>): void {
+    this.preview(partial);
     this.saveSettings();
   }
 }

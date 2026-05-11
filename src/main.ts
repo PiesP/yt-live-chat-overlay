@@ -33,6 +33,7 @@ class App {
   });
   private readonly settingsUi = new SettingsUi(
     () => this.settings.get(),
+    (partial) => this.previewSettings(partial),
     (partial) => this.updateSettings(partial),
     () => this.resetSettings()
   );
@@ -72,6 +73,28 @@ class App {
     return this.settings.get();
   }
 
+  /**
+   * Apply settings changes for live preview — updates memory and runtime
+   * but does NOT persist to localStorage. Persistence happens on close/apply.
+   */
+  previewSettings(partial: Partial<OverlaySettings>): void {
+    this.settings.preview(partial);
+
+    const nextSettings = this.settings.get();
+    if (partial.logLevel !== undefined) {
+      setOverlayLogLevel(nextSettings.logLevel);
+    }
+
+    if (this.pageWatcher.isValidPage()) {
+      void this.ensureSettingsUi();
+    }
+
+    this.runtimeManager.requestReconcile('settings-change');
+  }
+
+  /**
+   * Apply settings changes and persist to localStorage immediately.
+   */
   updateSettings(partial: Partial<OverlaySettings>): void {
     this.settings.update(partial);
 

@@ -32,7 +32,8 @@ export class SettingsUi {
 
   constructor(
     private readonly getSettings: () => Readonly<OverlaySettings>,
-    private readonly updateSettings: (partial: Partial<OverlaySettings>) => void,
+    private readonly onPreview: (partial: Partial<OverlaySettings>) => void,
+    private readonly onPersist: (partial: Partial<OverlaySettings>) => void,
     private readonly resetSettings: () => void
   ) {
     this.form = new SettingsUiForm(getSettings, (preview) => {
@@ -50,7 +51,7 @@ export class SettingsUi {
     }
     this.previewTimer = setTimeout(() => {
       this.previewTimer = null;
-      this.updateSettings(preview);
+      this.onPreview(preview);
       // Sync form with normalized values from the settings system
       this.form.populateForm(this.getSettings());
     }, this.PREVIEW_DEBOUNCE_MS);
@@ -60,8 +61,8 @@ export class SettingsUi {
     if (this.previewTimer !== null) {
       clearTimeout(this.previewTimer);
       this.previewTimer = null;
-      // Persist the current form state immediately so it is not lost on close/navigation
-      this.updateSettings(this.form.collectSettings());
+      // Persist the current form state to localStorage on close/apply
+      this.onPersist(this.form.collectSettings());
     }
   }
 
