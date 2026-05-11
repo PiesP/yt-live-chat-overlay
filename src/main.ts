@@ -79,17 +79,7 @@ class App {
    */
   previewSettings(partial: Partial<OverlaySettings>): void {
     this.settings.preview(partial);
-
-    const nextSettings = this.settings.get();
-    if (partial.logLevel !== undefined) {
-      setOverlayLogLevel(nextSettings.logLevel);
-    }
-
-    if (this.pageWatcher.isValidPage()) {
-      void this.ensureSettingsUi();
-    }
-
-    this.runtimeManager.requestReconcile('settings-change');
+    this.applySettingsSideEffects(partial);
   }
 
   /**
@@ -97,10 +87,14 @@ class App {
    */
   updateSettings(partial: Partial<OverlaySettings>): void {
     this.settings.update(partial);
+    this.applySettingsSideEffects(partial);
+    log.debug('Settings updated');
+  }
 
-    const nextSettings = this.settings.get();
+  /** Shared side-effects after any settings change: log level, UI, runtime. */
+  private applySettingsSideEffects(partial: Partial<OverlaySettings>): void {
     if (partial.logLevel !== undefined) {
-      setOverlayLogLevel(nextSettings.logLevel);
+      setOverlayLogLevel(this.settings.get().logLevel);
     }
 
     if (this.pageWatcher.isValidPage()) {
@@ -108,7 +102,6 @@ class App {
     }
 
     this.runtimeManager.requestReconcile('settings-change');
-    log.debug('Settings updated');
   }
 
   resetSettings(): void {

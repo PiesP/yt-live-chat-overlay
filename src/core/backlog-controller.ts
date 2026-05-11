@@ -48,7 +48,6 @@ export class BacklogInjectionController {
   private lanes: number;
   private observability: ObservabilityReporter | undefined;
   private realTimeActivityCount = 0;
-  private realTimeActivityTimers: ReturnType<typeof setTimeout>[] = [];
   private readonly ADAPTIVE_COOLDOWN_MS = 2000;
 
   constructor(
@@ -108,10 +107,9 @@ export class BacklogInjectionController {
   /** Notify the controller that a real-time message arrived during injection. */
   notifyRealTimeActivity(): void {
     this.realTimeActivityCount = Math.min(this.realTimeActivityCount + 1, 5);
-    const timer = setTimeout(() => {
+    void setTimeout(() => {
       this.realTimeActivityCount = Math.max(0, this.realTimeActivityCount - 1);
     }, this.ADAPTIVE_COOLDOWN_MS);
-    this.realTimeActivityTimers.push(timer);
   }
 
   /** Start the throttled injection loop */
@@ -296,10 +294,6 @@ export class BacklogInjectionController {
       clearTimeout(this.injectionTimer);
       this.injectionTimer = null;
     }
-    for (const timer of this.realTimeActivityTimers) {
-      clearTimeout(timer);
-    }
-    this.realTimeActivityTimers = [];
     this.backlogQueue = [];
     this.hideIndicator();
     this.onBacklogMessage = null;

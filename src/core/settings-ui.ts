@@ -257,35 +257,47 @@ export class SettingsUi {
     dialog.setAttribute('role', 'alertdialog');
     dialog.setAttribute('aria-modal', 'true');
     dialog.setAttribute('aria-label', 'Reset settings confirmation');
-    dialog.innerHTML = `
-      <div class="yt-chat-overlay-settings-confirm-backdrop"></div>
-      <div class="yt-chat-overlay-settings-confirm-dialog">
-        <p class="yt-chat-overlay-settings-confirm-message">Reset all settings to defaults?</p>
-        <div class="yt-chat-overlay-settings-confirm-buttons">
-          <button type="button" class="yt-chat-overlay-settings-confirm-cancel">Cancel</button>
-          <button type="button" class="yt-chat-overlay-settings-confirm-ok">Reset</button>
-        </div>
-      </div>
-    `;
+
+    const backdrop = document.createElement('div');
+    backdrop.className = 'yt-chat-overlay-settings-confirm-backdrop';
+
+    const confirmDialog = document.createElement('div');
+    confirmDialog.className = 'yt-chat-overlay-settings-confirm-dialog';
+
+    const message = document.createElement('p');
+    message.className = 'yt-chat-overlay-settings-confirm-message';
+    message.textContent = 'Reset all settings to defaults?';
+
+    const buttons = document.createElement('div');
+    buttons.className = 'yt-chat-overlay-settings-confirm-buttons';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'yt-chat-overlay-settings-confirm-cancel';
+    cancelBtn.textContent = 'Cancel';
+
+    const okBtn = document.createElement('button');
+    okBtn.type = 'button';
+    okBtn.className = 'yt-chat-overlay-settings-confirm-ok';
+    okBtn.textContent = 'Reset';
+
+    buttons.append(cancelBtn, okBtn);
+    confirmDialog.append(message, buttons);
+    dialog.append(backdrop, confirmDialog);
 
     const cleanup = (): void => {
       dialog.remove();
     };
 
-    const cancelBtn = dialog.querySelector<HTMLButtonElement>(
-      '.yt-chat-overlay-settings-confirm-cancel'
-    );
-    const okBtn = dialog.querySelector<HTMLButtonElement>('.yt-chat-overlay-settings-confirm-ok');
-
-    cancelBtn?.addEventListener('click', cleanup);
-    okBtn?.addEventListener('click', () => {
+    cancelBtn.addEventListener('click', cleanup);
+    okBtn.addEventListener('click', () => {
       cleanup();
       this.resetSettings();
       this.form.populateForm(this.getSettings());
     });
 
     this.modal.appendChild(dialog);
-    cancelBtn?.focus();
+    cancelBtn.focus();
   }
 
   private focusInitialElement(): void {
