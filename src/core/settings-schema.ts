@@ -191,7 +191,7 @@ export const applySettingsPatch = (
 };
 
 export const normalizeStoredSettings = (
-  stored: Partial<OverlaySettings> | null | undefined
+  stored: Record<string, unknown> | null | undefined
 ): OverlaySettings =>
   stored
     ? applySettingsPatch(cloneSettings(DEFAULT_SETTINGS), stored)

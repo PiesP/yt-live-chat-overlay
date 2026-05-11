@@ -18,7 +18,7 @@ export class Settings {
 
   private loadSettings(): OverlaySettings {
     try {
-      return normalizeStoredSettings(readStoredSettingsRaw<Partial<OverlaySettings>>());
+      return normalizeStoredSettings(readStoredSettingsRaw());
     } catch (error) {
       log.warn('Failed to load settings:', error);
       return cloneSettings(DEFAULT_SETTINGS);
