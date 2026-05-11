@@ -142,8 +142,6 @@ export interface OverlaySettings {
   safeBottom: number;
   /** Maximum concurrent messages */
   maxConcurrentMessages: number;
-  /** Maximum messages per second (1-20) */
-  maxMessagesPerSecond: number;
   /** Allow short plain-text messages below minTextLength threshold */
   allowShortTextMessages: boolean;
   /** Minimum visible character count for regular plain text messages (1-10) */

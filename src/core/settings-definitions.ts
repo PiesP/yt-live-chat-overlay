@@ -20,7 +20,6 @@ type SettingsLimitKey =
   | 'safeTop'
   | 'safeBottom'
   | 'maxConcurrentMessages'
-  | 'maxMessagesPerSecond'
   | 'minTextLength'
   | 'outlineWidthPx'
   | 'outlineBlurPx'
@@ -64,7 +63,6 @@ export const SETTINGS_LIMITS = {
   safeTop: { min: 0, max: 0.25, step: 0.01 },
   safeBottom: { min: 0, max: 0.5, step: 0.01 },
   maxConcurrentMessages: { min: 30, max: 100, step: 10 },
-  maxMessagesPerSecond: { min: 1, max: 20, step: 1 },
   minTextLength: { min: 1, max: 10, step: 1 },
   outlineWidthPx: { min: 0, max: 5, step: 0.5 },
   outlineBlurPx: { min: 0, max: 8, step: 0.5 },
@@ -86,7 +84,6 @@ export const DEFAULT_SETTINGS = {
   safeTop: 0,
   safeBottom: 0.15,
   maxConcurrentMessages: 50,
-  maxMessagesPerSecond: 8,
   allowShortTextMessages: false,
   minTextLength: 3,
   logLevel: 'warn',

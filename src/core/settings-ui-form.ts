@@ -27,7 +27,6 @@ const TITLE_ID = 'yt-chat-overlay-settings-title';
 
 const ROOT_ROUNDED_KEYS = new Set<RootScalarSettingKey>([
   'maxConcurrentMessages',
-  'maxMessagesPerSecond',
   'minTextLength',
   'laneSpacing',
   'authorRateLimitMaxMessages',
@@ -315,11 +314,6 @@ export class SettingsUiForm {
 
     const rateSection = this.createSection('Message Rate');
     rateSection.append(
-      this.createNumberField(
-        'Max per Second',
-        'maxMessagesPerSecond',
-        'Maximum new comments displayed per second'
-      ),
       this.createCheckboxField(
         'Show Short Messages',
         'allowShortTextMessages',

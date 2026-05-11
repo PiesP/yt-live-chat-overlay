@@ -592,8 +592,7 @@ export class Renderer {
     this.lastWarningTime = now;
     log.warn(
       `Performance warning: ${this.activeMessages.size} concurrent messages ` +
-        `(recommended max: ${this.settings.maxConcurrentMessages}). ` +
-        'Consider reducing maxMessagesPerSecond setting.'
+        `(recommended max: ${this.settings.maxConcurrentMessages}).`
     );
   }
 
