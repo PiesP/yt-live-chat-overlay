@@ -56,10 +56,12 @@ export class SettingsUi {
     }, this.PREVIEW_DEBOUNCE_MS);
   }
 
-  private cancelPreview(): void {
+  private flushPendingPreview(): void {
     if (this.previewTimer !== null) {
       clearTimeout(this.previewTimer);
       this.previewTimer = null;
+      // Persist the current form state immediately so it is not lost on close/navigation
+      this.updateSettings(this.form.collectSettings());
     }
   }
 
@@ -67,7 +69,7 @@ export class SettingsUi {
     const player = await this.findPlayerContainer();
     if (!player) return;
 
-    if (this.playerElement === player && this.button?.isConnected) {
+    if (this.playerElement === player && this.button?.isConnected && this.backdrop?.isConnected) {
       return;
     }
 
@@ -79,7 +81,7 @@ export class SettingsUi {
 
   close(): void {
     if (!this.backdrop) return;
-    this.cancelPreview();
+    this.flushPendingPreview();
     this.setDialogOpen(false);
 
     if (this.previousFocus?.isConnected) {
@@ -191,7 +193,12 @@ export class SettingsUi {
   private ensureModal(): void {
     this.ensureStyles();
 
-    if (this.backdrop) return;
+    if (this.backdrop?.isConnected) return;
+
+    // Clean up previously detached DOM elements so they can be garbage-collected
+    this.backdrop?.remove();
+    this.backdrop = null;
+    this.modal = null;
 
     this.backdrop = document.createElement('div');
     this.backdrop.id = BACKDROP_ID;
@@ -352,7 +359,7 @@ export class SettingsUi {
 
   destroy(): void {
     this.close();
-    this.cancelPreview();
+    this.flushPendingPreview();
     this.button?.remove();
     this.backdrop?.remove();
 
