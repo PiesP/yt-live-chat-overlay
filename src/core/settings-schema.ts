@@ -93,6 +93,27 @@ export const OUTLINE_NUMERIC_KEYS = [
 ] as const satisfies ReadonlyArray<Exclude<OutlineSettingKey, 'enabled'>>;
 
 /**
+ * Root-level setting keys that affect visual rendering and therefore
+ * require a full renderer reset (clear messages + replay) when changed.
+ *
+ * Non-visual settings (logLevel, showDebugOverlay, backlog, rate limit
+ * configuration, etc.) are excluded — those are applied without reset.
+ */
+export const VISUAL_ROOT_KEYS = [
+  'speedPxPerSec',
+  'fontSize',
+  'opacity',
+  'superChatOpacity',
+  'safeTop',
+  'safeBottom',
+  'maxConcurrentMessages',
+  'maxMessagesPerSecond',
+  'allowShortTextMessages',
+  'minTextLength',
+  'laneSpacing',
+] as const satisfies readonly RootScalarSettingKey[];
+
+/**
  * Matches hex color strings: #RGB, #RRGGBB, #RGBA, #RRGGBBAA.
  */
 const isColorValue = (value: unknown): value is string =>
@@ -201,7 +222,8 @@ export const shouldResetRendererForSettingsChange = (
   previous: Readonly<OverlaySettings>,
   next: Readonly<OverlaySettings>
 ): boolean => {
-  if (ROOT_SETTING_KEYS.some((key) => previous[key] !== next[key])) return true;
+  // Only visual settings that affect rendered message appearance require reset
+  if (VISUAL_ROOT_KEYS.some((key) => previous[key] !== next[key])) return true;
   if (SHOW_AUTHOR_KEYS.some((key) => previous.showAuthor[key] !== next.showAuthor[key]))
     return true;
   if (AUTHOR_COLOR_KEYS.some((key) => previous.colors[key] !== next.colors[key])) return true;
