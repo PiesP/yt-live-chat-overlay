@@ -1,4 +1,4 @@
-import type { SuperChatInfo } from '@app-types';
+import type { OutlineSettings, SuperChatInfo } from '@app-types';
 
 export interface RgbColor {
   readonly r: number;
@@ -130,4 +130,45 @@ export function parseRgbColor(colorString: string): RgbColor | null {
 
 export function rgba(color: RgbColor, alpha: number): string {
   return `rgba(${color.r}, ${color.g}, ${color.b}, ${Math.min(1, Math.max(0, alpha))})`;
+}
+
+// ── Text outline helpers (shared between Renderer and future consumers) ───
+
+/**
+ * Build a CSS text-shadow string from outline settings.
+ * Produces a multi-directional shadow for a thick outline effect, plus a
+ * glow component for added legibility on bright backgrounds.
+ */
+export function buildTextShadow(outline: OutlineSettings): string {
+  if (!outline.enabled || outline.widthPx <= 0 || outline.opacity <= 0) {
+    return 'none';
+  }
+
+  const offset = outline.widthPx;
+  const blur = Math.max(0, outline.blurPx);
+  const baseOpacity = Math.min(1, outline.opacity);
+  const shadowColor = `rgba(0, 0, 0, ${baseOpacity})`;
+  const glowColor = `rgba(0, 0, 0, ${Math.min(1, baseOpacity * 0.85)})`;
+  const glowBlur = Math.max(1, blur * 1.5);
+
+  const corners = (
+    [[-1, -1] as const, [1, -1] as const, [-1, 1] as const, [1, 1] as const] as const
+  ).map(([dx, dy]) => `${dx * offset}px ${dy * offset}px ${blur}px ${shadowColor}`);
+
+  return [...corners, `0px 0px ${glowBlur}px ${glowColor}`].join(', ');
+}
+
+/**
+ * Build a CSS -webkit-text-stroke value from outline settings.
+ * The stroke width is a fraction of the shadow offset so both effects
+ * layer naturally without competing.
+ */
+export function buildTextStroke(outline: OutlineSettings): string {
+  if (!outline.enabled || outline.widthPx <= 0 || outline.opacity <= 0) {
+    return '0 transparent';
+  }
+
+  const strokeWidth = Math.max(0.2, outline.widthPx * 0.3);
+  const strokeOpacity = Math.min(1, outline.opacity * 0.7);
+  return `${strokeWidth}px rgba(0, 0, 0, ${strokeOpacity})`;
 }

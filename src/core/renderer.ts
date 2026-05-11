@@ -5,10 +5,10 @@
  * Manages lanes and collision detection.
  */
 
-import type { ChatMessage, OutlineSettings, OverlayDimensions, OverlaySettings } from '@app-types';
+import type { ChatMessage, OverlayDimensions, OverlaySettings } from '@app-types';
 import { PerAuthorRateLimiter } from '@core/author-rate-limiter';
 import { BurstDetector } from '@core/burst-detector';
-import { rendererLayout, shadows } from '@core/design-tokens';
+import { buildTextShadow, buildTextStroke, rendererLayout, shadows } from '@core/design-tokens';
 import { createLogger } from '@core/logging';
 import { MessageIdRegistry } from '@core/message-id-registry';
 import { ObservabilityReporter } from '@core/observability';
@@ -157,8 +157,8 @@ export class Renderer {
       return;
     }
 
-    const textShadow = this.buildTextShadow(this.settings.outline);
-    const textStroke = this.buildTextStroke(this.settings.outline);
+    const textShadow = buildTextShadow(this.settings.outline);
+    const textStroke = buildTextStroke(this.settings.outline);
     const regularMessageTextShadow = [textShadow, shadows.text.md, '0 0 8px rgba(0, 0, 0, 0.7)']
       .filter(Boolean)
       .join(', ');
@@ -862,34 +862,5 @@ export class Renderer {
     this.observability.destroy();
 
     log.debug('Destroyed');
-  }
-
-  private buildTextShadow(outline: OutlineSettings): string {
-    if (!outline.enabled || outline.widthPx <= 0 || outline.opacity <= 0) {
-      return 'none';
-    }
-
-    const offset = outline.widthPx;
-    const blur = Math.max(0, outline.blurPx);
-    const baseOpacity = Math.min(1, outline.opacity);
-    const shadowColor = `rgba(0, 0, 0, ${baseOpacity})`;
-    const glowColor = `rgba(0, 0, 0, ${Math.min(1, baseOpacity * 0.85)})`;
-    const glowBlur = Math.max(1, blur * 1.5);
-
-    const corners = [[-1, -1] as const, [1, -1] as const, [-1, 1] as const, [1, 1] as const].map(
-      ([dx, dy]) => `${dx * offset}px ${dy * offset}px ${blur}px ${shadowColor}`
-    );
-
-    return [...corners, `0px 0px ${glowBlur}px ${glowColor}`].join(', ');
-  }
-
-  private buildTextStroke(outline: OutlineSettings): string {
-    if (!outline.enabled || outline.widthPx <= 0 || outline.opacity <= 0) {
-      return '0 transparent';
-    }
-
-    const strokeWidth = Math.max(0.2, outline.widthPx * 0.3);
-    const strokeOpacity = Math.min(1, outline.opacity * 0.7);
-    return `${strokeWidth}px rgba(0, 0, 0, ${strokeOpacity})`;
   }
 }
