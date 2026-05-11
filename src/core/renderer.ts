@@ -103,10 +103,8 @@ export class Renderer {
   private lastWarningTime = 0;
   private static readonly SWEEP_TOLERANCE_MS = 500;
   private static readonly MAX_ANIMATION_JITTER_MS = 15;
-  private static readonly WARNING_INTERVAL_MS = 10_000;
   private static readonly QUEUE_MAX_SIZE = 50;
   private static readonly BATCH_SIZE = 8;
-  private static readonly RETRY_DELAY_MS = 4;
   private static readonly MAX_MESSAGE_AGE_MS = 60_000;
   private static readonly OPACITY_UPDATE_INTERVAL_MS = 250;
   private static readonly SWEEP_INTERVAL = 8;
@@ -118,7 +116,6 @@ export class Renderer {
   private static readonly SEEN_MESSAGE_IDS_LIMIT = 2000;
   private readonly seenMessageIds = new MessageIdRegistry(Renderer.SEEN_MESSAGE_IDS_LIMIT);
   static readonly BACKGROUND_QUEUE_MAX = 10;
-  private static readonly BACKLOG_OPACITY_SCALE = 0.5;
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
     this.overlay = overlay;
@@ -460,7 +457,7 @@ export class Renderer {
     }
 
     if (this.pendingQueue.length > 0 && !this.isPaused) {
-      this.scheduleRetry(Renderer.RETRY_DELAY_MS);
+      this.scheduleRetry(rendererLayout.retryDelayMinMs);
     }
   }
 
@@ -541,7 +538,7 @@ export class Renderer {
 
   private logPerformanceWarning(): void {
     const now = Date.now();
-    if (now - this.lastWarningTime < Renderer.WARNING_INTERVAL_MS) {
+    if (now - this.lastWarningTime < 10_000) {
       return;
     }
 
@@ -606,9 +603,7 @@ export class Renderer {
     // Backlog messages rendered at reduced opacity so they recede behind
     // real-time messages without overwhelming the screen.
     const baseOpacity = this.settings.opacity;
-    const effectiveOpacity = message.isBacklog
-      ? baseOpacity * Renderer.BACKLOG_OPACITY_SCALE
-      : baseOpacity;
+    const effectiveOpacity = message.isBacklog ? baseOpacity * 0.5 : baseOpacity;
     this.applyCommonMessageStyles(element, message, isSuperChat, isMembership, effectiveOpacity);
 
     const activeMessage = this.setupMessageAnimation(
