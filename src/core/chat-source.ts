@@ -40,7 +40,6 @@ const log = createLogger('ChatSource');
 const BOOTSTRAP_ATTEMPTS = 8;
 /** Max retries for unavailable bootstrap (SPA navigation timing). */
 const BOOTSTRAP_MAX_UNAVAILABLE_RETRIES = 4;
-const BOOTSTRAP_RETRY_BASE_DELAY_MS = 800;
 const RECENT_MESSAGE_BUFFER_SIZE = 100;
 const RECONNECT_RETRY_DELAY_MS = 1000;
 const DEFAULT_ACTIVITY_TIMEOUT_MS = 30_000;
@@ -304,10 +303,10 @@ export abstract class ChatSource {
         lastRetryReason = result.reason;
       }
 
-      // Exponential backoff: 800ms, 1600ms, 3200ms, 6400ms...
+      // Exponential backoff: 500ms, 1000ms, 2000ms, 4000ms (cap 4000ms)
       if (attempt < BOOTSTRAP_ATTEMPTS) {
-        const backoffDelay = BOOTSTRAP_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1);
-        await sleep(Math.min(backoffDelay, 8000), signal);
+        const backoffDelay = 500 * 2 ** (attempt - 1);
+        await sleep(Math.min(backoffDelay, 4000), signal);
       }
     }
 
@@ -419,7 +418,6 @@ export abstract class ChatSource {
 
 class LiveChatSource extends ChatSource {
   private liveContinuation: InnertubeContinuationData | null = null;
-  private lastActionsCount = 0;
   private consecutiveErrors = 0;
   private readonly liveDedupRegistry = new MessageIdRegistry(MAX_TRACKED_REPLAY_KEYS);
 
@@ -434,7 +432,6 @@ class LiveChatSource extends ChatSource {
   protected resetSessionState(): void {
     super.resetSessionState();
     this.liveContinuation = null;
-    this.lastActionsCount = 0;
     this.consecutiveErrors = 0;
     this.liveDedupRegistry.clear();
   }
@@ -468,22 +465,10 @@ class LiveChatSource extends ChatSource {
     const baseDelay = timeoutMs > 0 ? timeoutMs : LIVE_POLL_FALLBACK_DELAY_MS;
 
     if (this.consecutiveErrors > 0) {
-      // Error backoff: baseDelay * 2^errors (max 10000ms)
       return Math.min(10_000, baseDelay * 2 ** this.consecutiveErrors);
     }
 
-    let delay: number;
-
-    if (this.lastActionsCount >= 10) {
-      delay = baseDelay * 0.5; // High activity — poll more frequently
-    } else if (this.lastActionsCount >= 3) {
-      delay = baseDelay * 0.75; // Moderate activity — slightly faster
-    } else {
-      delay = baseDelay; // Low or no activity — default interval
-    }
-
-    // Hard limits: 2000ms – 5000ms
-    return Math.max(2000, Math.min(5000, delay));
+    return Math.max(2000, Math.min(5000, baseDelay));
   }
 
   private async runLiveLoop(signal?: AbortSignal): Promise<void> {
@@ -594,7 +579,6 @@ class LiveChatSource extends ChatSource {
       }
     }
 
-    this.lastActionsCount = payload.actions.length;
     this.consecutiveErrors = 0;
     this.liveContinuation = extractNextLiveContinuation(payload.continuations);
   }

@@ -120,7 +120,7 @@ const resolveLimits = (key: string): Readonly<{ min: number; max: number }> => {
   if (direct) return direct;
   const outlineKey = OUTLINE_LIMITS_MAP[key as keyof typeof OUTLINE_LIMITS_MAP];
   if (outlineKey) return SETTINGS_LIMITS[outlineKey];
-  return SETTINGS_LIMITS.speedPxPerSec;
+  throw new Error(`Unknown setting key: ${key}`);
 };
 
 const OUTLINE_LIMITS_MAP: Record<
