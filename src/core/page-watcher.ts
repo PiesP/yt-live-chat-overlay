@@ -37,7 +37,12 @@ export class PageWatcher {
     this.restoreReplaceState = this.patchHistoryMethod('replaceState');
     window.addEventListener('popstate', this.handleUrlMutation);
     window.addEventListener(YT_NAVIGATE_FINISH_EVENT, this.handleYouTubeNavigateFinish);
+    window.addEventListener('unload', this.handleUnload);
   }
+
+  private readonly handleUnload = (): void => {
+    this.destroy();
+  };
 
   private patchHistoryMethod(methodName: 'pushState' | 'replaceState'): () => void {
     const original = history[methodName];
@@ -100,6 +105,7 @@ export class PageWatcher {
   destroy(): void {
     window.removeEventListener('popstate', this.handleUrlMutation);
     window.removeEventListener(YT_NAVIGATE_FINISH_EVENT, this.handleYouTubeNavigateFinish);
+    window.removeEventListener('unload', this.handleUnload);
     this.restorePushState?.();
     this.restoreReplaceState?.();
     this.callbacks.clear();

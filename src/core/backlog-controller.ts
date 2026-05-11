@@ -293,7 +293,7 @@ export class BacklogInjectionController {
 
   /** Update config at runtime */
   updateConfig(config: Partial<BacklogControllerConfig>): void {
-    Object.assign(this.config, config);
+    this.config = { ...this.config, ...config };
   }
 
   /** Clean up */
