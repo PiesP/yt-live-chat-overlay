@@ -17,25 +17,19 @@ const log = createLogger('Observability');
 export class ObservabilityReporter {
   private metrics: SessionMetrics;
   private dropCounters: Record<DropReason, number>;
-  private totalDroppedInWindow: number;
-  private totalReceivedInWindow: number;
-  private windowStartTime: number;
-  private debugOverlayEl: HTMLElement | null;
-  private debugUpdateTimer: ReturnType<typeof setInterval> | null;
-  private lastWarnTime: number;
+  private totalDroppedInWindow = 0;
+  private totalReceivedInWindow = 0;
+  private windowStartTime = performance.now();
+  private debugOverlayEl: HTMLElement | null = null;
+  private debugUpdateTimer: ReturnType<typeof setInterval> | null = null;
+  private lastWarnTime = 0;
   private readonly WARN_COOLDOWN_MS = 30_000;
   private readonly METRIC_WINDOW_MS = 60_000;
-  private showDebug: boolean;
+  private showDebug = false;
 
   constructor(initialShowDebug: boolean = false) {
     this.metrics = this.createEmptyMetrics();
     this.dropCounters = this.createEmptyDropCounters();
-    this.totalDroppedInWindow = 0;
-    this.totalReceivedInWindow = 0;
-    this.windowStartTime = performance.now();
-    this.debugOverlayEl = null;
-    this.debugUpdateTimer = null;
-    this.lastWarnTime = 0;
     this.showDebug = initialShowDebug;
   }
 
