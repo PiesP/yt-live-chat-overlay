@@ -55,7 +55,7 @@ interface ImageElementOptions {
   fallbackText?: string;
 }
 
-export interface BuiltMessage {
+interface BuiltMessage {
   element: HTMLDivElement;
   isSuperChat: boolean;
   isMembership: boolean;

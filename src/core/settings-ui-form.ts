@@ -21,7 +21,7 @@ const outlineFormName = (key: OutlineSettingKey): string => `outline-${key}`;
 export const STYLE_ID = 'yt-chat-overlay-settings-style';
 export const BUTTON_ID = 'yt-chat-overlay-settings-button';
 export const BACKDROP_ID = 'yt-chat-overlay-settings-backdrop';
-export const TITLE_ID = 'yt-chat-overlay-settings-title';
+const TITLE_ID = 'yt-chat-overlay-settings-title';
 
 // ── UI value formatting ─────────────────────────────────────────────────────
 
@@ -64,7 +64,7 @@ const normalizeNumericValue = (
   return rounded ? Math.round(clamped) : clamped;
 };
 
-export const formatRootNumericSettingForInput = (
+const formatRootNumericSettingForInput = (
   key: RootScalarSettingKey,
   value: number
 ): string | number => {
@@ -73,7 +73,7 @@ export const formatRootNumericSettingForInput = (
   return options?.precision === undefined ? scaledValue : scaledValue.toFixed(options.precision);
 };
 
-export const normalizeRootNumericInputValue = (
+const normalizeRootNumericInputValue = (
   key: RootNumericSettingKey,
   value: unknown,
   fallback: number
@@ -88,7 +88,7 @@ export const normalizeRootNumericInputValue = (
   );
 };
 
-export const normalizeOutlineNumericInputValue = (
+const normalizeOutlineNumericInputValue = (
   key: Exclude<OutlineSettingKey, 'enabled'>,
   value: unknown,
   fallback: number
@@ -97,7 +97,7 @@ export const normalizeOutlineNumericInputValue = (
   return normalizeNumericValue(value, fallback, SETTINGS_LIMITS[limitsKey], false);
 };
 
-export const getNumericInputAttributes = (
+const getNumericInputAttributes = (
   key: RootScalarSettingKey | Exclude<OutlineSettingKey, 'enabled'>
 ): Readonly<{ min: number; max: number; step: number }> => {
   const limitsKey =

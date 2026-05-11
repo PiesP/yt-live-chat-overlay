@@ -14,7 +14,7 @@ const CHAT_WATCHDOG_INTERVAL_MS = 15_000;
 const CHAT_STALL_TIMEOUT_MS = 30_000;
 const LONG_IDLE_RESTART_MS = 60_000;
 
-export interface RuntimeSessionOptions {
+interface RuntimeSessionOptions {
   targetUrl: string;
   settings: OverlaySettings;
   requestRestart: (reason: RuntimeSessionRestartReason) => void;

@@ -12,14 +12,9 @@ const NAVIGATION_SETTLE_DELAY_MS = 3500;
 const START_RETRY_DELAY_MS = 2000;
 const MAX_START_ATTEMPTS = 3;
 
-export type ReconcileReason =
-  | 'startup'
-  | 'page-change'
-  | 'settings-change'
-  | 'retry'
-  | 'session-restart';
+type ReconcileReason = 'startup' | 'page-change' | 'settings-change' | 'retry' | 'session-restart';
 
-export interface RuntimeManagerOptions {
+interface RuntimeManagerOptions {
   getCurrentUrl: () => string;
   getSettings: () => Readonly<OverlaySettings>;
   isValidPage: () => boolean;

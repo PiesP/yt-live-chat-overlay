@@ -178,7 +178,7 @@ const findFirstNestedRecordByKey = (
 const findFirstNestedStringByKey = (root: unknown, key: string): string | undefined =>
   findFirstNestedByKey(root, key, (v) => getString(v) ?? null) ?? undefined;
 
-export const getVideoIdFromUrl = (href = location.href): string | null => {
+const getVideoIdFromUrl = (href = location.href): string | null => {
   try {
     const url = new URL(href, location.origin);
 
@@ -410,9 +410,7 @@ const pickContinuation = (
   return null;
 };
 
-export const extractInitialChatContinuation = (
-  renderer: JsonObject
-): InnertubeContinuationData | null =>
+const extractInitialChatContinuation = (renderer: JsonObject): InnertubeContinuationData | null =>
   pickContinuation(renderer.continuations, [
     'reloadContinuationData',
     'invalidationContinuationData',

@@ -86,10 +86,7 @@ interface ReplayBufferedMessage {
  * Accepts either a single message (for individual emission like replay)
  * or an array of messages (for batch emission like live polling).
  */
-export type MessageCallback = (
-  messages: ChatMessage | ChatMessage[],
-  isInitialSeed?: boolean
-) => void;
+type MessageCallback = (messages: ChatMessage | ChatMessage[], isInitialSeed?: boolean) => void;
 export type ChatSourceStartStatus = 'started' | 'retryable' | 'unavailable';
 
 // ====================================================================
@@ -420,7 +417,7 @@ export abstract class ChatSource {
 // Live chat source — live polling loop, live continuation
 // ====================================================================
 
-export class LiveChatSource extends ChatSource {
+class LiveChatSource extends ChatSource {
   private liveContinuation: InnertubeContinuationData | null = null;
   private lastActionsCount = 0;
   private consecutiveErrors = 0;
@@ -614,7 +611,7 @@ export class LiveChatSource extends ChatSource {
 // Replay chat source — replay polling loop, playerSeek + continuation
 // ====================================================================
 
-export class ReplayChatSource extends ChatSource {
+class ReplayChatSource extends ChatSource {
   private static readonly MAX_REPLAY_BATCHES = 12;
 
   private replayMode: ReplayMode | null = null;

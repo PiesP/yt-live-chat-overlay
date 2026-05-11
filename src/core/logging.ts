@@ -18,7 +18,7 @@ const LOG_LEVEL_RANK: Readonly<Record<LogLevel, number>> = {
 const shouldEmit = (level: 'debug' | 'info'): boolean =>
   LOG_LEVEL_RANK[currentLogLevel] >= LOG_LEVEL_RANK[level];
 
-export const overlayLog = {
+const overlayLog = {
   debug: (...args: ConsoleLogArgs): void => {
     if (shouldEmit('debug')) {
       console.debug(...args);

@@ -9,7 +9,7 @@ const log = createLogger('PageWatcher');
  * re-initialization when navigating between videos.
  */
 
-export type PageChangeCallback = () => void;
+type PageChangeCallback = () => void;
 
 type NavigationSignalSource = 'pushState' | 'replaceState' | 'popstate' | 'yt-navigate-finish';
 

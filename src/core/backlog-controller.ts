@@ -23,7 +23,7 @@ import type { ObservabilityReporter } from '@core/observability';
 
 const log = createLogger('Backlog');
 
-export interface BacklogControllerConfig {
+interface BacklogControllerConfig {
   /** How to handle past chat messages */
   backlogMode: 'playback' | 'recent' | 'full' | 'none';
   /** Max messages per second during backlog injection */
