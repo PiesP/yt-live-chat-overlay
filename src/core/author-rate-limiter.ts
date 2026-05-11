@@ -8,8 +8,6 @@ const DEFAULT_WINDOW_MS = 5_000;
 const DEFAULT_MAX_PER_WINDOW = 5;
 /** Priority threshold: messages with priority >= this are never rate-limited */
 const PRIORITY_EXEMPT_THRESHOLD = 100;
-/** Max entries in the author map to prevent memory leak */
-const MAX_AUTHOR_ENTRIES = 1_000;
 /** How often to prune stale entries (ms) */
 const PRUNE_INTERVAL_MS = 10_000;
 
@@ -60,14 +58,7 @@ export class PerAuthorRateLimiter {
     timestamps.push(now);
     this.authorTimestamps.set(authorId, timestamps);
 
-    if (this.authorTimestamps.size > MAX_AUTHOR_ENTRIES) {
-      this.pruneStaleEntries();
-    }
-
-    if (now - this.lastPruneTime > PRUNE_INTERVAL_MS) {
-      this.pruneStaleEntries();
-      this.lastPruneTime = now;
-    }
+    this.pruneStaleEntries(now);
 
     return true;
   }
@@ -80,8 +71,11 @@ export class PerAuthorRateLimiter {
     return this.maxPerWindow;
   }
 
-  private pruneStaleEntries(): void {
-    const cutoff = Date.now() - this.windowMs;
+  private pruneStaleEntries(now: number = Date.now()): void {
+    if (now - this.lastPruneTime < PRUNE_INTERVAL_MS) return;
+    this.lastPruneTime = now;
+
+    const cutoff = now - this.windowMs;
     for (const [authorId, timestamps] of this.authorTimestamps) {
       const valid = timestamps.filter((t) => t > cutoff);
       if (valid.length === 0) {
