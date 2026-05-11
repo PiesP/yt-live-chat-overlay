@@ -316,23 +316,13 @@ export class Renderer {
     if (this.sweepCounter % Renderer.SWEEP_INTERVAL !== 0) return;
 
     const toRemove: ActiveMessage[] = [];
+    const now = Date.now();
     for (const active of this.activeMessages) {
       try {
-        const elapsed = Date.now() - active.startTime;
-        const minLifetimeMs = active.baseDuration + Renderer.SWEEP_TOLERANCE_MS;
-        if (elapsed < minLifetimeMs) continue;
-
-        const animations = active.element.getAnimations();
-        if (animations.length === 0) {
+        // Remove messages that exceeded their expected lifetime + tolerance
+        const elapsed = now - active.startTime;
+        if (elapsed >= active.baseDuration + Renderer.SWEEP_TOLERANCE_MS) {
           toRemove.push(active);
-          continue;
-        }
-
-        for (const anim of animations) {
-          if (anim.playState === 'finished') {
-            toRemove.push(active);
-            break;
-          }
         }
       } catch (error) {
         log.debug('Failed to check animation state during sweep:', error);
