@@ -58,7 +58,6 @@ export class ObservabilityReporter {
       queue_overflow: 0,
       no_lane_available: 0,
       rate_limited: 0,
-      sampled: 0,
       dedup: 0,
       other: 0,
     };

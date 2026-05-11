@@ -202,7 +202,6 @@ export type DropReason =
   | 'queue_overflow'
   | 'no_lane_available'
   | 'rate_limited'
-  | 'sampled'
   | 'dedup'
   | 'other';
 
