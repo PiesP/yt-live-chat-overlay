@@ -805,13 +805,21 @@ export class Renderer {
   pauseForVideo(): void {
     if (this.isVideoPaused) return;
     this.isVideoPaused = true;
-    this.pause();
+    // Only pause animations if the tab isn't already hidden (isPaused handles that).
+    // When isPaused is already true, the video-pause is a no-op and resumeForVideo
+    // must not undo the tab-visibility pause.
+    if (!this.isPaused) {
+      this.pause();
+    }
   }
 
   resumeForVideo(): void {
     if (!this.isVideoPaused) return;
     this.isVideoPaused = false;
-    this.resume();
+    // Resume only if the tab-visibility pause isn't active.
+    if (!this.isPaused) {
+      this.resume();
+    }
   }
 
   setPlaybackRate(rate: number): void {
