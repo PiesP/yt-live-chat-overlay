@@ -162,12 +162,7 @@ export class SettingsUiForm {
   // ── Modal content factory ──────────────────────────────────────────────
 
   createModalContent(): Node[] {
-    const panes = [
-      this.createCommentsPane(),
-      this.createColorsPane(),
-      this.createAuthorsPane(),
-      this.createAdvancedPane(),
-    ];
+    const panes = [this.createCommentsPane(), this.createColorsPane(), this.createAdvancedPane()];
     for (const pane of panes) {
       this.attachLivePreview(pane);
     }
@@ -199,7 +194,6 @@ export class SettingsUiForm {
     for (const [tabId, label] of [
       ['comments', 'Comments'],
       ['colors', 'Colors'],
-      ['authors', 'Authors'],
       ['advanced', 'Advanced'],
     ] as const) {
       const button = document.createElement('button');
@@ -253,7 +247,7 @@ export class SettingsUiForm {
         'Background opacity of Super Chat cards'
       )
     );
-    const authorSection = this.createSection('Author Colors');
+    const authorSection = this.createSection('Author Colors & Visibility');
     const grid = this.createDiv('yt-chat-overlay-author-grid');
     grid.append(
       document.createElement('span'),
@@ -281,17 +275,6 @@ export class SettingsUiForm {
 
     authorSection.appendChild(grid);
     pane.appendChild(authorSection);
-    return pane;
-  }
-
-  private createAuthorsPane(): HTMLDivElement {
-    const pane = this.createPane('authors', true);
-    const showSection = this.createSection('Show Author');
-    for (const key of SHOW_AUTHOR_KEYS) {
-      const label = key === 'superChat' ? 'SuperChat' : this.formatAuthorLabel(key);
-      showSection.appendChild(this.createCheckboxField(label, `showAuthor-${key}`));
-    }
-    pane.appendChild(showSection);
     return pane;
   }
 
