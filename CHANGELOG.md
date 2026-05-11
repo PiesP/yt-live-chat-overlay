@@ -263,468 +263,466 @@ All notable changes to this project will be documented in this file.
 ## [0.17.0] - 2026-04-30
 
 ### Changed
-- **의존성 업데이트**
-  - `@biomejs/biome`을 최신 버전으로 업데이트
-  - `typescript`, `vite` 등 주요 개발 의존성 유지보수 업데이트
+- **Dependency updates**
+  - Updated `@biomejs/biome` to the latest version
+  - Maintenance updates for `typescript`, `vite`, and other key dev dependencies
 
 ### Tooling
-- **프로젝트 설정 최신화**
-  - `package.json` 버전 0.17.0으로 업데이트
-  - Biome 설정 스키마 버전 최신화
-  - TypeScript 경로 별칭 및 빌드 설정 검증
+- **Project configuration modernization**
+  - Bump `package.json` version to 0.17.0
+  - Update Biome config schema version
+  - Verify TypeScript path aliases and build configuration
 
 ## [0.16.0] - 2026-04-19
 
 ### Added
-- **이미지 자산 다중 후보 URL 및 텍스트 폴백 지원**
-  - 이모지/스티커 썸네일에서 여러 candidate URL을 보존해 렌더 단계에서 순차 재시도하도록 확장
-  - 이미지가 끝내 로드되지 않으면 사람이 읽을 수 있는 fallback text로 대체해 메시지 의미를 최대한 유지
+- **Multi-candidate image asset URLs and text fallback support**
+  - Preserve multiple candidate URLs for emoji/sticker thumbnails to enable sequential retry at render stage
+  - If an image ultimately fails to load, fall back to human-readable text to preserve message meaning
 
 ### Changed
-- **런타임 세션 재시작/복구 흐름 재구성**
-  - foreground 복귀, 재생 재개, seeking, watchdog을 `RuntimeSession`/`RuntimeManager`의 managed restart 계약으로 통합
-  - 장시간 숨김/일시정지 뒤에는 in-place reconnect 대신 세션을 재생성해 stale state 누적을 줄임
-- **이모지/배지 정규화 개선**
-  - alias 형태 emoji shortcut을 사람이 읽기 쉬운 visible fallback text로 정리
-  - membership / verified / moderator / owner badge 분류 우선순위와 판별 범위를 넓혀 author type 표시 정확도를 개선
+- **Runtime session restart/recovery flow restructured**
+  - Unified foreground return, playback resume, seeking, and watchdog into a managed restart contract for `RuntimeSession`/`RuntimeManager`
+  - Instead of in-place reconnect after long hidden/paused periods, recreate the session to reduce stale state accumulation
+- **Emoji/badge normalization improvements**
+  - Cleaned up alias-form emoji shortcuts into human-readable visible fallback text
+  - Expanded membership / verified / moderator / owner badge classification priority and detection scope to improve author type display accuracy
 
 ### Fixed
-- **비디오/채팅 상태 불일치 복구 안정성 개선**
-  - overlay/video/chat surface가 renderable하지 않거나 observer가 비활성일 때 watchdog이 세션 재시작을 요청하도록 조정
-  - foreground return / playback resume 중 오래된 세션 상태가 이어지는 문제를 줄임
-- **이미지 로드 실패 시 메시지 손실 완화**
-  - 이미지 기반 이모지와 스티커가 첫 URL 실패만으로 사라지지 않도록 candidate retry 후 fallback text로 대체
+- **Video/chat state inconsistency recovery stability**
+  - Adjusted watchdog to request session restart when overlay/video/chat surfaces are not renderable or observer is inactive
+  - Reduced lingering old session state issues during foreground return / playback resume
+- **Mitigated message loss on image load failure**
+  - Added candidate retry and fallback text for image-based emoji and stickers so they are not lost on first URL failure
 
 ### Tooling
-- **의존성 유지보수 반영**
-  - `@napi-rs/wasm-runtime`, `postcss`, `@biomejs/biome` 관련 maintenance 변경을 이번 릴리스 범위에 포함
+- **Dependency maintenance**
+  - Include maintenance changes for `@napi-rs/wasm-runtime`, `postcss`, `@biomejs/biome` in this release scope
 
 ## [0.15.0] - 2026-04-18
 
 ### Added
-- **정규화된 rich-content 기반 채팅 표시 경로 도입**
-  - 일반 텍스트, 이모지, 멤버십 전용 이미지 이모티콘을 같은 `ContentSegment[]` 경로로 정규화해 렌더링 기준을 일원화
-  - `liveChatPaidStickerRenderer`와 멤버십 `headerSubtext` fallback을 지원해 이전에 빠지던 채팅 유형을 표시 범위에 포함
+- **Unified rich-content based chat display path**
+  - Normalized plain text, emoji, and membership-only image emoticons into the same `ContentSegment[]` path to standardize rendering criteria
+  - Added support for `liveChatPaidStickerRenderer` and membership `headerSubtext` fallback to include previously missing chat types
 
 ### Changed
-- **이미지 자산 정규화 및 렌더 측정 안정화**
-  - protocol-relative / 허용 호스트 `http` 이미지 URL을 parse 단계에서 `https`로 정규화해 paid sticker와 기타 이미지 자산을 더 일관되게 처리
-  - 이모지/스티커 치수 메타데이터를 렌더러가 직접 사용하도록 바꿔 이미지 로드 전 측정과 lane 배치를 더 안정화
-- **메시지 모델 정리**
-  - `ChatMessage.content`를 실제 표시의 canonical source로 고정하고, `text`는 dedupe/logging/fallback용 파생 plain text로 정리
+- **Image asset normalization and render measurement stabilization**
+  - Normalize protocol-relative / permitted-host `http` image URLs to `https` at parse stage for more consistent paid sticker and other image asset handling
+  - Changed emoji/sticker dimension metadata to be used directly by renderer for more stable measurement and lane placement before image load
+- **Message model cleanup**
+  - Fixed `ChatMessage.content` as the canonical source for actual display; `text` is now a derived plain text field for dedup/logging/fallback
 
 ### Fixed
-- **이모지 및 이미지 기반 채팅 누락 완화**
-  - 짧은 plain-text 필터가 이미지 이모지 중심 메시지를 비정상적으로 버리지 않도록 content-aware visible length 기준으로 조정
-  - 이미지 로드 실패 시 alt 텍스트로 폴백해 메시지 의미가 통째로 사라지지 않도록 보완
+- **Mitigated emoji and image-based chat omission**
+  - Adjusted content-aware visible length criteria to prevent short plain-text filter from discarding image-centric messages
+  - Added alt text fallback on image load failure so message meaning is not completely lost
 
 ### Tooling
-- **보안/CI 자동화 유지보수 반영**
-  - security, CI, release, version-check, Dependabot, stale PR workflow와 repository settings maintenance 변경을 이번 릴리스 범위에 포함
+- **Security/CI automation maintenance**
+  - Include security, CI, release, version-check, Dependabot, stale PR workflow, and repository settings maintenance changes in this release scope
 
 ## [0.14.0] - 2026-04-18
 
 ### Added
-- **youtubei 기반 채팅 수집 경로 도입**
-  - 보이는 live chat 패널 DOM에 의존하지 않고 watch page / youtubei endpoint에서 채팅을 직접 bootstrap/polling 하도록 재구성
-  - 라이브와 리플레이를 같은 채팅 런타임에서 다루고, 재동기화에 필요한 continuation / payload 추출 경로를 추가
-- **탐색(seek) 전용 복구 이유 추가**
-  - seeking 이벤트를 별도 recovery reason으로 구분해 탐색 직후 채팅 재동기화 의도를 더 명확하게 표현
+- **youtubei-based chat collection path introduced**
+  - Restructured to bootstrap/poll chat directly from watch page / youtubei endpoint instead of relying on visible live chat panel DOM
+  - Handle live and replay through the same chat runtime; add continuation / payload extraction paths needed for resynchronization
+- **Seek-specific recovery reason added**
+  - Distinguish seeking events as a separate recovery reason to more clearly express the intent of chat resynchronization immediately after seeking
 
 ### Changed
-- **채팅 세션 및 복구 수명주기 재설계**
-  - abort signal 결합, polling 교체, 세대 관리로 reconnect/restart 중 stale 작업이 현재 세션 상태를 오염시키지 않도록 정리
-  - live edge DOM 임계값 의존을 제거하고 observer/activity 중심 health 판단으로 복구 흐름을 단순화
-- **설정 정의/입력 정규화 구조 정리**
-  - 기본 설정, numeric limit, 입력 포맷/정규화 로직을 별도 모듈로 분리해 settings UI / schema / storage 간 책임을 명확히 정리
+- **Chat session and recovery lifecycle redesigned**
+  - Abort signal combination, polling replacement, and generation management to prevent stale work from polluting current session state during reconnect/restart
+  - Removed live edge DOM threshold dependency; simplified recovery flow with observer/activity-centric health assessment
+- **Settings definition/input normalization structure cleanup**
+  - Separated default settings, numeric limits, input format / normalization logic into distinct modules; clearly delineated responsibilities among settings UI / schema / storage
 
 ### Fixed
-- **재연결/재동기화 경합 안정성 개선**
-  - resume sync 직렬화, replay buffer 관리, poll loop 교체를 통해 recovery 중 중복 작업과 상태 꼬임 가능성을 줄임
+- **Reconnection/resynchronization race stability improved**
+  - Reduced possibility of duplicate work and state entanglement during recovery through resume sync serialization, replay buffer management, and poll loop replacement
 
 ### Tooling
-- **개발 도구 업데이트**
-  - `@biomejs/biome`를 `2.4.12`로 업데이트
+- **Development tool updates**
+  - Updated `@biomejs/biome` to `2.4.12`
 
 ## [0.13.0] - 2026-04-17
 
 ### Added
-- **라이브 엣지 재동기화 도입**
-  - 채팅 reconnect/reopen 이후 live edge 기준으로 다시 맞추는 동기화 흐름을 추가해 최신 채팅 기준 복구를 강화
-  - 스크롤 보정과 live edge 추적을 묶어 패널 상태 변화 뒤에도 최신 메시지 흐름을 더 안정적으로 유지
+- **Live edge resynchronization introduced**
+  - Added synchronization flow to realign to live edge after chat reconnect/reopen, strengthening recovery based on latest chat timeline
+  - Combined scroll correction and live edge tracking for more stable message flow after panel state changes
 
 ### Changed
-- **채팅 표면 탐색 범위 확장**
-  - watch page `#chat` host, `ytd-live-chat-frame`, secondary column toggle button까지 포함하도록 selector surface를 확장
-  - toggle button 판별을 aria/text 기반 휴리스틱으로 정리해 레이아웃·현지화 차이 대응 범위를 넓힘
+- **Chat surface detection scope expanded**
+  - Expanded selector surface to include watch page `#chat` host, `ytd-live-chat-frame`, and secondary column toggle button
+  - Refined toggle button detection with aria/text-based heuristics to better accommodate layout and localization differences
 
 ### Fixed
-- **disconnect/recovery 시 backlog 오염 완화**
-  - 연결 해제 시 stale queued message를 정리해 재연결 뒤 오래된 메시지가 뒤늦게 흐르는 문제를 줄임
-  - chat host/iframe 전환과 스크롤 회복 경로를 정리해 container 재획득 및 복구 안정성을 개선
+- **Mitigated backlog contamination on disconnect/recovery**
+  - Clean up stale queued messages on disconnect to reduce delayed old message injection after reconnection
+  - Refined chat host/iframe transition and scroll restoration paths for more stable container reacquisition and recovery
 
 ### Refactored
-- **코드 정리 및 fallback 축소**
-  - `renderer`, `chat-source`, `video-sync`, `runtime-manager`, `settings-schema`, `settings-ui` 주변 dead code와 중복 fallback을 제거
-  - selector/설정 schema 구조를 단순화해 유지보수 부담을 낮춤
+- **Code cleanup and fallback reduction**
+  - Removed dead code and redundant fallbacks around `renderer`, `chat-source`, `video-sync`, `runtime-manager`, `settings-schema`, `settings-ui`
+  - Simplified selector/settings schema structure to reduce maintenance overhead
 
 ## [0.12.2] - 2026-04-17
 
 ### Changed
-- **코멘트 흐름 연속성 개선**
-  - 레인 간 cross-lane stagger를 추가해 채팅 burst가 한 번에 동기화되어 화면이 비는 현상을 줄임
-  - recovery/resume 재동기화가 active 코멘트를 유지하고 queued backlog만 정리하도록 바꿔, 흐르던 코멘트가 중간에 통째로 사라지지 않게 개선
+- **Comment flow continuity improved**
+  - Added cross-lane stagger so chat bursts don't synchronize and leave blank screens
+  - Changed recovery/resume resynchronization to keep active comments intact and only clean up the queued backlog, preventing in-flight comments from disappearing entirely
 
 ### Fixed
-- **재연결/재동기화 시 중복 및 누락 완화**
-  - 채팅 DOM 기반 message id를 dedup 키로 사용해 reconnect/resume 이후 동일 코멘트가 반복 표시되는 문제를 줄임
-  - recovery 중 큐에서 제거한 최신 코멘트는 필요 시 다시 재주입할 수 있게 해, 복구 직후 흐름이 더 자연스럽게 이어지도록 조정
-- **채팅 패널 확보 안정성 개선**
-  - 패널 오픈 경로에 polling을 추가해 YouTube DOM 반영 지연 상황에서도 live chat surface를 더 안정적으로 확보하도록 개선
+- **Mitigated duplicates and omissions on reconnect/resync**
+  - Use chat DOM-based message id as dedup key to reduce duplicate display of the same comment after reconnect/resume
+  - Allow re-injection of recently removed latest comments during recovery when needed, for a more natural flow after recovery
+- **Chat panel acquisition stability improved**
+  - Added polling to the panel open path to more reliably acquire the live chat surface even when YouTube DOM reflection is delayed
 
 ### Refactored
-- **로깅 API 일원화**
-  - overlay logging 호출 경로를 `createLogger` 기반으로 정리해 진단 흐름을 더 일관되게 유지
+- **Logging API unified**
+  - Consolidated overlay logging call paths to a `createLogger`-based approach for more consistent diagnostics
 
 ## [0.12.1] - 2026-04-17
 
 ### Refactored
-- **설정/로깅 경로 정리**
-  - `RuntimeSession` / `Settings` / `logging` 흐름을 단순화해 중복 분기와 유지보수 부담을 줄임
-- **불필요한 코드 제거**
-  - `chat-dom` / `chat-source` / `renderer` / `overlay` 주변의 unused helper와 legacy 경로를 정리
+- **Settings/logging path cleanup**
+  - Simplified `RuntimeSession` / `Settings` / `logging` flows to reduce redundant branching and maintenance burden
+- **Removed unnecessary code**
+  - Cleaned up unused helpers and legacy paths around `chat-dom` / `chat-source` / `renderer` / `overlay`
 
 ### Tooling
-- **실행 환경 갱신**
-  - Node.js 기준 버전을 24.15.0으로 맞추고 pnpm lockfile의 libc 지원을 반영
+- **Runtime environment updated**
+  - Aligned Node.js baseline version to 24.15.0 and reflected libc support in pnpm lockfile
 
 ## [0.12.0] - 2026-04-16
 
 ### Added
-- **명시적 채팅 시작/해결 상태 계약 도입**
-  - `ChatSource` / `RuntimeSession` / `RuntimeManager`가 `started` / `retryable` / `unavailable` 결과를 공유하도록 정리해, 채팅 표면은 있지만 시작할 수 없는 환경에서 무한 재시작하지 않도록 구조화
-- **채팅 선택자 메타데이터 구조화**
-  - `chat-dom.ts`의 frame / iframe / container / toggle 선택자를 목적, 우선순위, 표면 정보가 있는 descriptor로 재구성해 탐색 순서와 진단 로그를 더 명확하게 표현
+- **Explicit chat start/resolution state contract introduced**
+  - Structured `ChatSource` / `RuntimeSession` / `RuntimeManager` to share `started` / `retryable` / `unavailable` results, preventing infinite restart loops when a chat surface exists but cannot be started
+- **Chat selector metadata structured**
+  - Reorganized frame / iframe / container / toggle selectors in `chat-dom.ts` into descriptors with purpose, priority, and surface information for clearer detection order and diagnostic logging
 
 ### Changed
-- **내비게이션 및 재조정 흐름 단순화**
-  - `PageWatcher`가 history hook, `yt-navigate-finish`, URL polling을 하나의 deduped signal contract로 통합
-  - URL polling은 기본 경로가 아닌 fallback / watchdog 역할로 축소해 SPA 이동 시 중복 재조정 가능성을 낮춤
-- **런타임/렌더러 설정 반영 안정화**
-  - 설정 변경 시 renderer reset / resync 필요 여부를 세션이 판단하도록 정리
-  - startup 지연 제거 및 실패한 초기화의 partial cleanup 추가로 앱 수명주기 예측 가능성을 높임
-- **비디오/설정 저장 로직 정리**
-  - `VideoSync` 초기화 / 재초기화를 직렬화해 비디오 교체 시 경합을 방지
-  - legacy `debugLogging` → `logLevel` 마이그레이션을 settings 모듈로 일원화
+- **Navigation and reconfiguration flow simplified**
+  - `PageWatcher` now integrates history hook, `yt-navigate-finish`, and URL polling into a single deduped signal contract
+  - URL polling is reduced to a fallback / watchdog role instead of the default path, lowering the chance of duplicate reconfiguration during SPA navigation
+- **Runtime/renderer setting application stabilized**
+  - Session now determines whether a renderer reset/resync is needed when settings change
+  - Removed startup delay and added partial cleanup on failed initialization for more predictable app lifecycle
+- **Video/settings storage logic cleaned up**
+  - Serialized `VideoSync` initialization / re-initialization to prevent races on video replacement
+  - Unified legacy `debugLogging` → `logLevel` migration into the settings module
 
 ### Fixed
-- **YouTube Trusted Types 환경에서 설정 UI가 열리지 않던 문제 수정**
-  - 설정 모달 HTML 생성을 Trusted Types 정책 경유로 바꿔 YouTube 문서 정책과 호환되도록 수정
-- **비대상 페이지 이동 후 UI 잔존 문제 수정**
-  - watch / live 대상이 아닌 페이지로 이동하면 settings button을 destroy하여 잔존 버튼이 남지 않도록 수정
-- **지원 불가 live chat iframe의 무한 재시도 문제 수정**
-  - live chat iframe이 실제 채팅 대신 “older browser” 안내 페이지를 반환할 때 `unavailable`로 정착시켜 불필요한 retry churn 제거
+- **Settings UI not opening under YouTube Trusted Types environment**
+  - Changed settings modal HTML generation to use Trusted Types policy for compatibility with YouTube document policy
+- **UI remnant after navigating to non-target pages**
+  - Destroy settings button when navigating to non-watch/live pages to prevent leftover buttons
+- **Infinite retry on unsupported live chat iframe fixed**
+  - When live chat iframe returns an "older browser" notice instead of actual chat, settle as `unavailable` to eliminate unnecessary retry churn
 
 ### Tooling
-- **릴리스 노트 compare 기준 태그 선택 수정**
-  - release workflow가 현재 버전보다 낮은 직전 semver 태그를 선택하도록 바꿔, `v7.0.0` / `vv7.0.0` 같은 비정상 태그 때문에 잘못된 compare 링크가 생성되던 문제를 수정
-- **워크플로/품질 도구 유지보수 반영**
-  - security / CI 워크플로 정리와 dev dependency maintenance 변경을 이번 릴리스 범위에 포함
+- **Release note compare tag selection fixed**
+  - Changed release workflow to select the nearest lower semver tag rather than the current version, preventing incorrect compare links caused by malformed tags like `v7.0.0` / `vv7.0.0`
+- **Workflow/quality tool maintenance**
+  - Include security / CI workflow cleanup and dev dependency maintenance changes in this release scope
 
 ## [0.11.0] - 2026-04-15
 
 ### Added
-- **백그라운드 복귀/채팅 헬스 복구 흐름 강화**
-  - visibility 복귀 이후 채팅 소스 생존 여부, 최근 활동 여부, 라이브 엣지 상태를 기반으로 재동기화/복구를 수행하는 런타임 세션 회복 경로 추가
-  - 채팅 옵저버 재연결 전 채팅 패널 상태를 다시 점검하고, 복구 시 최신 메시지 동기화 흐름을 더 안정적으로 오케스트레이션
+- **Background return/chat health recovery flow strengthened**
+  - Added runtime session recovery path that performs resync/restore based on chat source survival, recent activity, and live edge status after visibility return
+  - Re-check chat panel state before reconnecting the chat observer; orchestrate latest message sync more reliably during recovery
 
 ### Changed
-- **런타임 재시작 및 세션 관리 구조 재정비**
-  - `RuntimeManager`/`RuntimeSession` 중심으로 페이지 전환, 설정 반영, 재시작, 복구 흐름을 더 명확하게 직렬화
-  - 내비게이션 settle/retry 처리와 start failure 상태 관리를 단순화해 재시작 동작의 예측 가능성을 높임
-- **로그/DOM 유틸 정리**
-  - 채팅 DOM 검증 로그를 debug 중심으로 조정해 기본 콘솔 잡음을 축소
-  - video/player selector와 timer cleanup 유틸을 공용 모듈로 모아 DOM 조회/정리 책임을 일원화
+- **Runtime restart and session management restructured**
+  - Serialized page transition, setting application, restart, and recovery flows more clearly around `RuntimeManager`/`RuntimeSession`
+  - Simplified navigation settle/retry handling and start failure state management for more predictable restart behavior
+- **Log/DOM utility cleanup**
+  - Adjusted chat DOM validation logging to debug level to reduce console noise
+  - Consolidated video/player selectors and timer cleanup utilities into shared modules for unified DOM query/cleanup responsibility
 
 ### Refactored
-- **설정/비디오 동기화 구현 단순화**
-  - 설정 정규화를 작은 helper들로 분리해 반복 코드를 줄이면서 `localStorage` 기반 런타임 검증은 유지
-  - `VideoSync` 내부 listener/observer 연결 코드를 정리해 불필요한 내부 null-check를 축소
-- **공통 타입/검증 로직 중복 제거**
-  - log level 검증 로직을 공용 타입 계층으로 이동해 settings/logging/UI 간 중복 제거
+- **Settings/video sync implementation simplified**
+  - Split setting normalization into small helpers to reduce repetitive code while retaining `localStorage`-based runtime validation
+  - Cleaned up internal listener/observer connection code in `VideoSync` to eliminate unnecessary null-checks
 
 ### Fixed
-- **복구 경합 및 상태 오염 가능성 축소**
-  - 백그라운드 복귀, 채팅 health recovery, observer 재연결 과정에서 stale 작업이 현재 세션 상태를 오염시키는 가능성을 줄임
-  - 타이머/리스너 정리 경로를 공통화해 cleanup 누락 가능성을 더 낮춤
+- **Reduced recovery race and state contamination possibility**
+  - Lowered the chance of stale work polluting current session state during background return, chat health recovery, and observer reconnection
+  - Unified timer/listener cleanup paths to further reduce the possibility of missed cleanup
 
 ### Tooling
-- Biome/Knip schema 경로를 최신 도구 버전에 맞게 정리
+- Aligned Biome/Knip schema paths with latest tool versions
 
 ## [0.10.0] - 2026-04-14
 
 ### Added
-- **채팅 DOM 책임 분리 모듈 추가**
-  - `src/core/chat-dom.ts` 신설: 채팅 프레임/iframe/컨테이너 선택자, 컨테이너 유효성 검증, 디버그 DOM 스캔, 채팅 프레임 가시성 판정 로직을 분리
+- **Chat DOM responsibility separation module added**
+  - New `src/core/chat-dom.ts`: separates frame/iframe/container selectors, container validation, debug DOM scanning, and chat frame visibility detection logic
 
 ### Changed
-- **로깅 구조를 전역 패치 방식에서 명시적 래퍼 방식으로 전환**
-  - `overlayLog.debug/info/warn/error` API 도입
-  - 전역 `console.log` monkey patch 제거
-  - 기존 로그 레벨(`warn`/`info`/`debug`) 및 info 레벨 verbose 억제 정책 유지
-- **채팅 옵저버 복구 전략 개선**
-  - `ChatSource.reconnect()`에 중복 실행 방지 가드 및 bounded burst retry(3회) 추가
-  - reconnect 전 채팅 패널 상태 점검 절차 정리
+- **Logging structure switched from global patch to explicit wrapper**
+  - Introduced `overlayLog.debug/info/warn/error` API
+  - Removed global `console.log` monkey patch
+  - Maintained existing log level (`warn`/`info`/`debug`) and info-level verbose suppression policy
+- **Chat observer recovery strategy improved**
+  - Added duplicate execution guard and bounded burst retry (3 attempts) to `ChatSource.reconnect()`
+  - Clarified chat panel state check procedure before reconnect
 
 ### Refactored
-- **`ChatSource` 클래스 단순화**
-  - DOM 탐색/검증 관련 내부 상수·헬퍼를 모듈로 추출해 책임 경계 명확화
-  - 채팅 소스는 메시지 파싱/관찰/재연결 오케스트레이션에 집중하도록 구조 정리
+- **`ChatSource` class simplified**
+  - Extracted internal constants/helpers for DOM navigation/validation into modules to clarify responsibility boundaries
+  - Chat source now focuses on message parsing/observation/reconnection orchestration
 
 ### Fixed
-- **침습적 fallback 제거로 안정성 향상**
-  - 채팅 패널 오픈 실패 시 `collapsed`/`hidden` 속성을 직접 제거하던 경로 삭제
-  - YouTube DOM 직접 변조로 인한 예기치 않은 상태 오염 가능성 축소
+- **Stability improved by removing aggressive fallback**
+  - Removed path that directly removed `collapsed`/`hidden` attributes on chat panel open failure
+  - Reduced possibility of unexpected state contamination from direct YouTube DOM manipulation
 
 ## [0.9.0] - 2026-04-13
 
 ### Added
-- **재생 복귀 시 최신 채팅 스냅샷 동기화 API 추가**
-  - `ChatSource.getLatestMessages(limit)` 추가: 현재 채팅 컨테이너에서 최신 유효 메시지를 역순 수집 후 시간순으로 반환
+- **Playback resume chat snapshot sync API added**
+  - Added `ChatSource.getLatestMessages(limit)`: collects latest valid messages from current chat container in reverse order and returns them chronologically
 
 ### Changed
-- **정지→재생 복귀 플로우를 일관된 재동기화 방식으로 재설계**
-  - 재생 이벤트에서 단순 `resume()` 대신 재동기화 오케스트레이션 수행
-  - 정지 중 쌓인 구 backlog를 제거한 뒤 최신 채팅 상태를 재주입해 화면 코멘트를 즉시 갱신
+- **Pause→play resume flow redesigned as consistent resync approach**
+  - Instead of simple `resume()` on play event, perform resync orchestration
+  - Clear old backlog accumulated during pause, then reinject latest chat state for instant comment refresh
 
 ### Refactored
-- **렌더러 재동기화 초기화 메서드 도입**
-  - `Renderer.resetForResync()` 추가: 활성 애니메이션/대기 큐 정리 및 레인 상태 재초기화
-  - `App`에 중복 재동기화 방지 가드(`resumeSyncInProgress`) 추가로 재생 이벤트 경합 안정성 향상
+- **Renderer resync initialization method introduced**
+  - Added `Renderer.resetForResync()`: clears active animations/queues and reinitializes lane state
+  - Added duplicate resync guard (`resumeSyncInProgress`) to `App` for improved race stability on play events
 
 ## [0.8.0] - 2026-04-12
 
 ### Added
-- **백그라운드 탭 처리 개선 (Page Visibility API)**
-  - 탭이 숨겨질 때 렌더러를 자동 일시정지하여 브라우저 타이머 스로틀링으로 인한 복귀 시 메시지 폭발 방지
-  - 탭 복귀 시 비디오 재생 중인 경우에만 렌더러를 재개 (일시정지 상태 인식)
-- **채팅 MutationObserver 감시 및 재연결**
-  - 15초 주기로 옵저버 생존 여부를 확인하는 감시 루프 추가
-  - YouTube가 채팅 `#items` 컨테이너를 언마운트한 경우 옵저버를 자동으로 재연결
-- **탐색(Seek) 시 메시지 큐 초기화**
-  - 비디오 탐색 이벤트 발생 시 대기 중인 메시지 큐를 비워 탐색 후 구 메시지 표시 방지
+- **Background tab handling improved (Page Visibility API)**
+  - Automatically pause renderer when tab is hidden to prevent message burst on return due to browser timer throttling
+  - Resume renderer on tab return only if video is playing (respecting pause state)
+- **Chat MutationObserver monitoring and reconnection**
+  - Added monitoring loop checking observer survival every 15 seconds
+  - Automatically reconnect observer when YouTube unmounts the chat `#items` container
+- **Message queue initialization on Seek**
+  - Clear pending message queue on video seek events to prevent stale messages after seeking
 
 ### Fixed
-- **메시지 큐 무한 증가 방지**
-  - 대기 큐 최대 크기를 150개로 제한하고, 초과 시 오래된 항목부터 제거
-- **애니메이션 취소 시 레인 누수 방지**
-  - `finish` 이벤트와 함께 `cancel` 이벤트도 처리하여 외부에서 애니메이션이 중단될 때 `activeMessages`에서 요소가 정리되지 않던 문제 수정
+- **Prevent infinite message queue growth**
+  - Cap pending queue at 150 items; remove oldest entries when exceeded
+- **Prevent lane leak on animation cancellation**
+  - Also handle `cancel` event alongside `finish` event to properly clean up elements from `activeMessages` when animation is externally interrupted
 
 ### Changed
-- **설정 UI 탭 기반 재설계**
-  - 설정 항목을 Display / Style / Authors / Filter 4개 탭으로 분류
-  - 항목명을 직관적으로 개선 (예: "Safe top/bottom" → "Top/Bottom Clear Zone", "Speed (px/s)" → "Scroll Speed (px/s)")
-  - 탭 재진입 시 마지막 활성 탭 유지
-  - 숨겨진 탭 패널의 입력 요소가 포커스 트랩에 포함되지 않도록 개선
+- **Settings UI redesigned with tabs**
+  - Categorized settings into 4 tabs: Display / Style / Authors / Filter
+  - Improved item names for intuitiveness (e.g., "Safe top/bottom" → "Top/Bottom Clear Zone", "Speed (px/s)" → "Scroll Speed (px/s)")
+  - Persist last active tab on tab re-entry
+  - Prevent hidden tab panel input elements from being included in focus trap
 
 ## [0.7.2] - 2026-04-01
 
 ### Fixed
-- **SPA 내비게이션 재시작 안정성 개선**
-  - 내비게이션 재시작 시 settle 대기 중 URL이 다시 바뀌면 stale 재시작을 건너뛰도록 보호 로직 추가
-  - `startChatSource()`에서 세대(`startGeneration`) 기반 가드와 소유권 검사(`this.chatSource !== chatSource`)를 적용해 비동기 시작 경합 중 이전 인스턴스가 메시지를 주입하거나 상태를 오염시키는 문제 방지
-  - 채팅 소스 시작 실패 시 `this.chatSource` 참조를 명시적으로 정리해 cleanup/재시작 경로의 일관성 향상
+- **SPA navigation restart stability improved**
+  - Added protection to skip stale restart when URL changes again while waiting for settle during navigation restart
+  - Applied generation-based guard (`startGeneration`) and ownership check (`this.chatSource !== chatSource`) in `startChatSource()` to prevent previous instance from injecting messages or polluting state during async start races
+  - Explicitly clean `this.chatSource` reference on chat source start failure for more consistent cleanup/restart paths
 
 ### Dependencies
-- 개발 의존성 조정: `@biomejs/biome`, `@biomejs/cli-linux-x64`를 `2.4.9`로 하향 조정
+- Dev dependency adjustment: downgraded `@biomejs/biome`, `@biomejs/cli-linux-x64` to `2.4.9`
 
 ## [0.7.1] - 2026-03-31
 
 ### Fixed
-- **코멘트 대각선 배치 패턴 수정**
-  - `findLanePlacement` 알고리즘을 결정론적 순차 선택에서 랜덤 선택 방식으로 교체: 채팅 폭발 시 메시지가 항상 위→아래 순서(레인 0→1→2→...)로 배정되어 발생하던 대각선 계단 패턴 수정
-  - 즉시 사용 가능한 레인이 여러 개일 때 전체 후보 풀에서 무작위 선택하여 화면 전체에 균일하게 분산
-  - 레인 딜레이를 레인 인덱스에 비례하는 결정론적 값(`(index % 3) × 15ms`)에서 0–45ms 범위의 랜덤 지터로 교체하여 동시 진입 메시지의 시각적 정렬 패턴 제거
+- **Comment diagonal placement pattern fixed**
+  - Replaced `findLanePlacement` algorithm from deterministic sequential selection to random selection: diagonal staircase pattern caused by messages always being assigned top→bottom (lane 0→1→2→...) during chat bursts
+  - When multiple lanes are immediately available, randomly select from the full candidate pool for uniform distribution across the screen
+  - Replaced lane delay from deterministic value proportional to lane index (`(index % 3) × 15ms`) with 0–45ms random jitter to remove visual alignment patterns for simultaneous entry messages
 
 ## [0.7.0] - 2026-03-31
 
 ### Changed
-- **메시지 표시 밀도 향상**
-  - 레인 높이 승수(`BASE_LANE_HEIGHT_MULTIPLIER`) 1.3 → 1.2로 축소해 약 8% 더 많은 레인 확보
-  - 수평 안전 거리(`SAFE_DISTANCE_SCALE`) 0.5 → 0.3, 최소값 10px → 6px으로 줄여 레인 내 메시지를 더 촘촘하게 배치
-  - 수직 클리어 타임 40–160ms → 20–80ms로 단축해 레인 재사용 속도 향상
-  - 메시지 요소에 `line-height: 1.1` 명시 적용 — 모든 지원 폰트 크기(18–40px)에서 단일 라인 메시지가 정확히 1 레인에 수용되도록 보장
-- **기본 설정 조정**
-  - `safeTop` 기본값 0.1 → 0 (상단 안전 영역 제거, 비디오 최상단부터 표시)
-  - `safeBottom` 기본값 0.15 → 0.4 (하단 40%를 빈 영역으로 유지, 플레이어 컨트롤 완전 보호)
-  - `maxConcurrentMessages` 기본값 30 → 40 (추가된 레인 수에 맞게 상향)
-  - `maxMessagesPerSecond` 기본값 4 → 6 (밀도 향상에 맞춰 처리율 상향)
-  - `safeBottom` 설정 상한 0.25 → 0.5 (설정 UI에서 최대 50%까지 조정 가능)
+- **Message display density improved**
+  - Reduced lane height multiplier (`BASE_LANE_HEIGHT_MULTIPLIER`) from 1.3 to 1.2 for approximately 8% more available lanes
+  - Reduced horizontal safe distance (`SAFE_DISTANCE_SCALE`) from 0.5 to 0.3, minimum from 10px to 6px for denser message packing within lanes
+  - Shortened vertical clear time from 40–160ms to 20–80ms for faster lane reuse
+  - Explicitly apply `line-height: 1.1` to message elements — ensures single-line messages fit exactly in one lane across all supported font sizes (18–40px)
+- **Default setting adjustments**
+  - `safeTop` default 0.1 → 0 (removed top safe zone, display from video top edge)
+  - `safeBottom` default 0.15 → 0.4 (keep bottom 40% clear for full player control protection)
+  - `maxConcurrentMessages` default 30 → 40 (raised to match additional lanes)
+  - `maxMessagesPerSecond` default 4 → 6 (raised throughput to match density improvement)
+  - `safeBottom` setting upper limit 0.25 → 0.5 (adjustable up to 50% in settings UI)
 
 ### Refactored
-- **공통 유틸리티 중복 제거**
-  - `parseRgbColor()` 함수를 `design-tokens.ts`로 추출 — `renderer.ts`·`chat-source.ts`의 인라인 RGB 파싱 중복 제거
-  - `findPlayerContainerElement()`·`ensurePlayerPositioning()`을 `dom.ts`로 이동 — `overlay.ts`·`settings-ui.ts`의 중복 구현 일원화
-  - `PLAYER_CONTAINER_SELECTORS`를 `dom.ts`로 통합 — `video-sync.ts`가 독자적으로 정의하던 2개 선택자를 4개 선택자 공유 배열로 교체
-  - `STORAGE_KEY`를 `settings.ts`에서 export하고 `logging.ts`의 중복 상수 제거
-- **기타 코드 품질 개선**
-  - `debugLogChatElements()` 호출을 `logLevel === 'debug'`일 때만 실행하도록 조건 추가
-  - `main.ts` 필드명 `_renderer` → `renderer` 정리, 빈 `handleVideoSeeking` 핸들러 제거
-  - `renderer.ts`의 `@ts-expect-error` 제거
-  - `design-tokens.ts`에서 미사용 `animation` 토큰 제거
+- **Removed common utility duplication**
+  - Extracted `parseRgbColor()` function to `design-tokens.ts` — eliminated inline RGB parsing duplication in `renderer.ts`·`chat-source.ts`
+  - Moved `findPlayerContainerElement()`·`ensurePlayerPositioning()` to `dom.ts` — unified duplicate implementations in `overlay.ts`·`settings-ui.ts`
+  - Consolidated `PLAYER_CONTAINER_SELECTORS` into `dom.ts` — replaced 2 independently defined selectors in `video-sync.ts` with a shared array of 4 selectors
+  - Exported `STORAGE_KEY` from `settings.ts` and removed duplicate constant in `logging.ts`
+- **Other code quality improvements**
+  - Added condition to only execute `debugLogChatElements()` when `logLevel === 'debug'`
+  - Cleaned up field name `_renderer` → `renderer` in `main.ts`, removed empty `handleVideoSeeking` handler
+  - Removed `@ts-expect-error` in `renderer.ts`
+  - Removed unused `animation` tokens from `design-tokens.ts`
 
 ### Dependencies
-- 개발 의존성 최신화: knip ^6.1.0, Biome, Vite, TypeScript, @types/node 등
+- Updated dev dependencies: knip ^6.1.0, Biome, Vite, TypeScript, @types/node, etc.
 
 ## [0.6.0] - 2026-03-06
 
 ### Added
-- **레인 간격 설정 추가**
-  - `laneSpacing` 옵션을 도입해 메시지 레인 간 세로 간격을 조절할 수 있도록 개선
-  - 설정 UI에서 레인 간격을 직접 조정할 수 있도록 입력 항목과 범위 제한을 추가
+- **Lane spacing setting added**
+  - Introduced `laneSpacing` option to allow adjusting vertical gap between message lanes
+  - Added input item and range limit in settings UI for direct lane spacing adjustment
 
 ### Changed
-- **코어 전반 리팩토링으로 일관성 및 유지보수성 향상**
-  - `chat-source`, `overlay`, `page-watcher`, `renderer`, `settings`, `settings-ui`, `video-sync`, `main`의 책임 분리를 강화하고 중복 로직을 헬퍼/상수 중심으로 정리
-  - 앱 초기화·재시작·cleanup 플로우를 표준화하여 SPA 이동과 비동기 재초기화 시나리오를 더 안정적으로 처리
-  - `types/index.ts`, `globals.d.ts`를 정리해 공용 타입, 기본 설정, 디버그 핸들 계약을 더 명확하게 표현
-- **빌드/배포 메타데이터 생성 개선**
-  - `tooling/userscript-header.ts`를 상수·포맷 헬퍼 기반으로 재구성해 userscript 헤더 생성 로직을 간결하게 정리
+- **Core-wide refactoring for consistency and maintainability**
+  - Enhanced responsibility separation in `chat-source`, `overlay`, `page-watcher`, `renderer`, `settings`, `settings-ui`, `video-sync`, `main`; consolidated redundant logic into helpers/constants
+  - Standardized app initialization/restart/cleanup flow for more stable handling of SPA navigation and async re-initialization scenarios
+  - Cleaned up `types/index.ts`, `globals.d.ts` for clearer expression of shared types, default settings, and debug handle contracts
+- **Build/deploy metadata generation improved**
+  - Restructured `tooling/userscript-header.ts` around constants and format helpers for concise userscript header generation
 
 ### Fixed
-- **이미지/DOM/상태 관리 안정성 개선**
-  - 이미지 URL 허용 호스트 검증을 강화해 프로필/이모지/스티커 처리 경로를 더 안전하게 정리
-  - 비디오 재획득, overlay 재생성, 설정 병합, 요소 대기 로직의 타입/상태 처리 일관성을 개선
-  - 기존 인스턴스 정리 및 전역 디버그 핸들 초기화 흐름을 보강해 재주입/재시작 시 충돌 가능성을 축소
+- **Image/DOM/state management stability improved**
+  - Strengthened image URL permitted host validation for safer profile/emoji/sticker processing paths
+  - Improved type/state handling consistency for video reacquisition, overlay re-creation, setting merging, and element waiting
+  - Reinforced existing instance cleanup and global debug handle initialization flow to reduce collision potential on reinjection/restart
 
 ### Tooling
-- 품질 게이트(`pnpm quality`) 기준에 맞춰 타입/포맷/미사용 코드 정리를 수행하고 전체 워크스페이스 검증을 통과
+- Performed type/format/dead code cleanup aligned with quality gate (`pnpm quality`) and passed full workspace validation
 
 ## [0.5.1] - 2026-03-05
 
 ### Fixed
-- **초기 페이지 로드 시 코멘트 2중 표시 버그 수정**
-  - `ChatSource.start()`에 취소 플래그(`stopped`) 추가: `stop()` 호출 이후에도 비동기 루프가 계속 실행되며 MutationObserver를 재연결하던 문제 수정. 모든 `await` 이후 취소 여부를 확인하여 정리된 인스턴스가 상태를 오염시키지 않도록 보호
-  - `App.start()`에 세대 기반 취소 토큰(`startGeneration`) 추가: `cleanup()` 실행 이후에도 완료되는 stale async task가 `isInitialized`·`lastStartedUrl` 등 앱 상태를 잘못 설정하던 경쟁 조건(race condition) 수정
-  - `yt-navigate-finish` 이벤트 핸들러의 `forceNotify` 제거: YouTube가 초기 페이지 설정 중 동일 URL로 이벤트를 발생시킬 때 불필요한 cleanup+restart 사이클이 유발되던 문제 수정. URL 변경 감지는 기존 `pushState`/`replaceState` 패치와 `popstate` 리스너가 담당
-  - `WeakSet` 기반 DOM 수준 메시지 중복 제거 추가: YouTube가 동일 DOM 노드를 `#items`에 두 번 삽입하는 경우(히스토리 리플레이, 채팅 패널 리셋 등)에도 같은 메시지가 중복 표시되지 않도록 방어
-  - `initApp()`에서 기존 App 인스턴스 사전 정리: 이전 인스턴스가 존재하면 `.stop()`으로 리소스를 완전히 해제한 뒤 새 인스턴스를 생성하여 observer 중첩 방지
+- **Double comment display on initial page load fixed**
+  - Added cancel flag (`stopped`) to `ChatSource.start()`: prevented MutationObserver from being reconnected after `stop()` call while async loop continued. Check cancel status after every `await` to prevent cleaned-up instances from polluting state
+  - Added generation-based cancel token (`startGeneration`) to `App.start()`: fixed race condition where stale async tasks completing after `cleanup()` would incorrectly set `isInitialized`·`lastStartedUrl` and other app state
+  - Removed `forceNotify` from `yt-navigate-finish` event handler: fixed issue where YouTube generated an event with the same URL during initial page setup, causing unnecessary cleanup+restart cycles. URL change detection is handled by existing `pushState`/`replaceState` patches and `popstate` listener
+  - Added `WeakSet`-based DOM-level message dedup: if YouTube inserts the same DOM node into `#items` twice (history replay, chat panel reset, etc.), prevent duplicate display
+  - Pre-clean existing App instance in `initApp()`: fully release resources via `.stop()` before creating new instance to prevent observer nesting
 
 ### Dependencies
-- devDependencies 최신화: Node.js 24.14.0·pnpm 10.27.0 고정, `@types/node` ^25.3.3, `@biomejs/biome` ^2.4.4, `knip` ^5.85.0, `vite` ^7.3.1, `typescript` ^5.9.3
+- Updated devDependencies: pinned Node.js 24.14.0·pnpm 10.27.0, `@types/node` ^25.3.3, `@biomejs/biome` ^2.4.4, `knip` ^5.85.0, `vite` ^7.3.1, `typescript` ^5.9.3
 
 ### CI
-- Rollup 전이 의존성 보안 취약점 오버라이드 추가
-- CI 보안 감사 게이트 및 OSV 스캔 조건 개선
-- 워크플로 트리거·주석 정비
+- Added Rollup transitive dependency security vulnerability override
+- Improved CI security audit gate and OSV scan conditions
+- Refined workflow triggers and annotations
 
 ## [0.5.0] - 2026-02-20
 
 ### Added
-- **설정 UI 확장**
-  - 로그 레벨 선택(`warn`/`info`/`debug`) 옵션 추가
-  - 짧은 일반 메시지 필터 옵션 추가 (`allowShortTextMessages`, `minTextLength`)
-  - 작성자 타입별 표시 여부 및 색상 제어 옵션 강화
-- **로그 제어 모듈 추가**: 오버레이 로그에 대해 레벨 기반 출력 필터링 지원
-- **이미지 URL 검증 모듈 추가**: 작성자 프로필/이모지/스티커 이미지에 공통 도메인 검증 적용
+- **Settings UI expansion**
+  - Added log level selection (`warn`/`info`/`debug`) option
+  - Added short text message filter options (`allowShortTextMessages`, `minTextLength`)
+  - Enhanced author-type display and color control options
+- **Log control module added**: level-based output filtering support for overlay logs
+- **Image URL validation module added**: common domain validation for author profile/emoji/sticker images
 
 ### Changed
-- **채팅 탐지 및 패널 오픈 안정성 개선**
-  - iframe/in-page 채팅 컨테이너 탐색 및 검증 로직 강화
-  - 채팅 패널이 닫혀 있는 경우 자동 오픈 시도 로직 개선
-- **설정 UI 입력 검증/보정 강화**
-  - 수치 입력을 범위 내로 clamp
-  - 일부 퍼센트 기반 설정의 UI 입력 단위 일관화
-- **렌더러 이미지 처리 공통화**
-  - 이모지/스티커/작성자 이미지 생성 경로를 공통 헬퍼로 정리
+- **Chat detection and panel open stability improved**
+  - Strengthened iframe/in-page chat container detection and validation logic
+  - Improved auto-open attempt logic when chat panel is closed
+- **Settings UI input validation/sanitization enhanced**
+  - Clamp numeric inputs to valid range
+  - Unified UI input units for some percentage-based settings
+- **Renderer image processing unified**
+  - Consolidated emoji/sticker/author image generation paths into common helper
 
 ### Fixed
-- **설정 마이그레이션 개선**
-  - 레거시 `debugLogging` 설정을 신규 `logLevel`로 안전하게 매핑
-- **설정 모달 접근성 개선**
-  - ESC 닫기, 포커스 트랩, 초기 포커스/포커스 복귀 처리 강화
+- **Settings migration improved**
+  - Safely map legacy `debugLogging` setting to new `logLevel`
+- **Settings modal accessibility improved**
+  - ESC close, focus trap, initial focus/focus return handling enhanced
 
 ### Dependencies
-- Biome 및 Biome CLI를 `2.4.2`로 업데이트 (`@biomejs/biome`, `@biomejs/cli-linux-x64`)
+- Updated Biome and Biome CLI to `2.4.2` (`@biomejs/biome`, `@biomejs/cli-linux-x64`)
 
 ## [0.4.2] - 2026-02-18
 
 ### Fixed
-- **메시지 필터링 개선**: `parseMessage()`에서 메시지 종류(kind)를 태그명 기반으로 먼저 판별 후 콘텐츠를 파싱하도록 순서 변경
-  - Super Sticker (이미지 전용, `yt-live-chat-paid-sticker-renderer`)를 명시적으로 필터링
-  - 시스템 메시지 (`viewer-engagement`, `banner`, `placeholder` 등) 필터링 강화
-  - 멤버십 아이템은 `#message`가 없어도 항상 표시 (메시지 없는 멤버십 이벤트 지원)
-  - Super Chat은 텍스트 본문 유무와 관계없이 항상 표시
-  - `ChatMessage.kind`에서 불필요한 `'other'` 타입 제거
-- **렌더러 레인 배치 최적화**: 메시지 흐름 및 간격 개선
-  - `LANE_DELAY_MS` 40ms → 15ms (처리량 향상)
-  - `SAFE_DISTANCE_SCALE` 0.7 → 0.5, `SAFE_DISTANCE_MIN` 16px → 10px (더 촘촘한 수평 배치)
-  - `VERTICAL_CLEAR_TIME` 120/320ms → 40/160ms (수평 준비 체크가 주된 조건이므로 단축)
-  - `QUEUE_LOOKAHEAD_LIMIT` 14 → 20 (더 넓은 스케줄링 윈도우)
-  - `findLanePlacement()`에 LRU 타이 브레이킹 추가: 대기 시간이 같을 때 가장 오래 사용되지 않은 블록 우선 → 화면 전체에 메시지가 고르게 분산
+- **Message filtering improved**: Changed `parseMessage()` to first determine message kind by tag name, then parse content
+  - Explicitly filter Super Sticker (image-only, `yt-live-chat-paid-sticker-renderer`)
+  - Strengthened system message filtering (`viewer-engagement`, `banner`, `placeholder`, etc.)
+  - Always display membership items even without `#message` (support for textless membership events)
+  - Always display Super Chat regardless of text body presence
+  - Removed unnecessary `'other'` type from `ChatMessage.kind`
+- **Renderer lane placement optimization**: Improved message flow and spacing
+  - `LANE_DELAY_MS` 40ms → 15ms (throughput improvement)
+  - `SAFE_DISTANCE_SCALE` 0.7 → 0.5, `SAFE_DISTANCE_MIN` 16px → 10px (tighter horizontal packing)
+  - `VERTICAL_CLEAR_TIME` 120/320ms → 40/160ms (reduced since horizontal readiness check is the primary factor)
+  - `QUEUE_LOOKAHEAD_LIMIT` 14 → 20 (wider scheduling window)
+  - Added LRU tie-breaking to `findLanePlacement()`: when wait times are equal, prioritize the least recently used block → even message distribution across screen
 
 ### Changed
-- **기본 설정값 재조정**: 가독성·화면 점유 균형 개선
-  - `speedPxPerSec`: 200 → 280 (더 빠른 스크롤로 화면 점유 시간 단축)
-  - `fontSize`: 24 → 20 (메시지당 차지하는 영역 감소)
-  - `opacity`: 0.95 → 0.85 (영상이 더 잘 보이게)
+- **Default setting values readjusted**: readability・screen occupancy balance improved
+  - `speedPxPerSec`: 200 → 280 (faster scroll reduces screen occupancy time)
+  - `fontSize`: 24 → 20 (reduced area per message)
+  - `opacity`: 0.95 → 0.85 (better video visibility)
   - `superChatOpacity`: 0.4 → 0.35
-  - `safeBottom`: 0.12 → 0.15 (컨트롤 바 가림 방지)
+  - `safeBottom`: 0.12 → 0.15 (prevent control bar occlusion)
   - `maxConcurrentMessages`: 50 → 30
-  - `maxMessagesPerSecond`: 10 → 4 (채팅 폭주 시 화면 가독성 보호)
-- **DOM 정리 코드 간소화**: 불필요한 분기 제거, `element.remove()` 패턴 통일
-- **로그 개선**: 채팅 모니터링 관련 로그 메시지 보강
+  - `maxMessagesPerSecond`: 10 → 4 (protect screen readability during chat bursts)
+- **DOM cleanup code simplified**: removed unnecessary branches, unified `element.remove()` pattern
+- **Logging improved**: enhanced chat monitoring related log messages
 
 ### Dependencies
-- Biome 및 Biome CLI를 안정 버전으로 다운그레이드 (`@biomejs/biome`, `@biomejs/cli-linux-x64`)
+- Downgraded Biome and Biome CLI to stable versions (`@biomejs/biome`, `@biomejs/cli-linux-x64`)
 
 ## [0.4.1] - 2026-02-16
 
 ### Fixed
-- **메모리 누출 방지**: 모든 컴포넌트의 리소스 정리 개선
-  - PageWatcher: history API 래퍼, 이벤트 리스너, interval 완전 정리
-  - Overlay: fullscreenchange 이벤트 리스너 제거 추가
-  - Renderer: overlay 참조 명시적 정리로 순환 참조 방지
-  - ChatSource: MutationObserver 및 참조 정리 개선
-  - SettingsUi: DOM 요소 및 스타일 완전 제거
-- 페이지 이동 및 앱 재시작 시 리소스가 완전히 해제되도록 개선
+- **Memory leak prevention**: improved resource cleanup across all components
+  - PageWatcher: fully clean history API wrappers, event listeners, intervals
+  - Overlay: added fullscreenchange event listener removal
+  - Renderer: explicitly clear overlay reference to prevent circular references
+  - ChatSource: improved MutationObserver and reference cleanup
+  - SettingsUi: complete removal of DOM elements and styles
+- Improved resource release on page navigation and app restart
 
 ### Changed
-- **코드 일관성 개선**: 모든 destroy() 메서드를 표준화된 패턴으로 통일
-  - 타이머/인터벌 → 이벤트 리스너 → Observer → DOM 요소 → 참조 순서로 정리
-  - 섹션별 주석 추가로 가독성 향상
-- **로깅 통일**: 클래스별 일관된 로그 접두사 적용 (`[App]`, `[Overlay]`, `[Renderer]` 등)
-- **Main.ts 최적화**: cleanup() 플로우 간소화 및 불필요한 try-catch 제거
-- Optional chaining을 활용한 null 체크 패턴 개선
+- **Code consistency improvement**: unified all destroy() methods with standardized pattern
+  - Cleanup order: timers/intervals → event listeners → Observer → DOM elements → references
+  - Added section comments for readability
+- **Logging unified**: applied consistent log prefixes per class (`[App]`, `[Overlay]`, `[Renderer]`, etc.)
+- **Main.ts optimization**: simplified cleanup() flow and removed unnecessary try-catch
+- Improved null check patterns using optional chaining
 
 ### Dependencies
-- `@types/node` 버전 25.2.3으로 업데이트
-- 개발 의존성 (quality group) 업데이트
+- Updated `@types/node` to version 25.2.3
+- Updated dev dependencies (quality group)
 
 ## [0.4.0] - 2026-02-14
 
 ### Added
-- Super Chat 파싱/렌더링 지원 (동적 색상 매핑 및 그라디언트 배경 포함)
-- 작성자 프로필 이미지 표시 및 작성자 타입별 표시 옵션
-- 설정 UI에 Super Chat 전용 opacity 옵션 추가
-- 렌더러/설정 UI 스타일 일관성을 위한 design tokens 모듈 추가
+- Super Chat parsing/rendering support (including dynamic color mapping and gradient background)
+- Author profile image display and author-type display options
+- Added Super Chat exclusive opacity option in settings UI
+- Added design tokens module for renderer/settings UI style consistency
 
 ### Changed
-- 멀티라인 메시지 처리 및 lane 배치 로직 리팩터링으로 충돌 감소
-- lane 높이 계산과 메시지 요소 생성 흐름 최적화로 렌더링 안정성/성능 개선
-- 기본 Super Chat opacity 값 조정으로 가독성 향상
+- Refactored multiline message handling and lane placement logic for reduced collision
+- Optimized lane height calculation and message element creation flow for rendering stability/performance
+- Adjusted default Super Chat opacity value for improved readability
 
 ### Fixed
-- 일반 메시지와 Super Chat 간 글꼴 크기 및 애니메이션 시간 처리 일관성 개선
+- Improved font size and animation time processing consistency between regular messages and Super Chat
 
 ### CI/Tooling
-- Knip 설정 추가 및 의존성 분석을 quality/CI 파이프라인에 통합
-- CI, release, Dependabot, repository automation 워크플로 구성 개선
+- Added Knip configuration and integrated dependency analysis into quality/CI pipeline
+- Improved CI, release, Dependabot, repository automation workflow configuration
 
 ## [0.3.1] - 2026-02-10
 
 ### Changed
-- 버전 관리 기준을 `package.json`으로 단일화
+- Unified version management baseline to `package.json`
 
 ## [0.3.0] - 2026-02-09
 
@@ -733,7 +731,7 @@ All notable changes to this project will be documented in this file.
 - Message queuing system: messages queue during pause and display when resumed
 - Playback rate synchronization: animation speed matches video playback speed (0.25x - 2x)
 - Video element replacement detection: auto-reinitialization during ad transitions
-- System message filtering: blocks "실시간 채팅 다시보기" and other system notifications
+- System message filtering: blocks "Live chat replay" and other system notifications
 - New VideoSync module for robust video element detection and monitoring
 
 ### Changed

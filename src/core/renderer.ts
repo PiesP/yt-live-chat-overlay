@@ -23,7 +23,7 @@ interface QueuedMessage {
   message: ChatMessage;
   nextAttemptAt: number;
   priority: number;
-  retries: number; // dropped 시 재시도 횟수 추적
+  retries: number; // retry count for dropped messages
 }
 
 interface ActiveMessage {
