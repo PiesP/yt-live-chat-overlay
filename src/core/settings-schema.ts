@@ -11,7 +11,7 @@ type OutlineSettingKey = keyof OutlineSettings;
 
 export type { OutlineSettingKey, RootNumericSettingKey, RootScalarSettingKey };
 
-export const VALID_BACKLOG_MODES = ['playback', 'recent', 'full', 'none'] as const;
+const VALID_BACKLOG_MODES = ['playback', 'recent', 'full', 'none'] as const;
 
 export const AUTHOR_COLOR_KEYS = [
   'normal',
