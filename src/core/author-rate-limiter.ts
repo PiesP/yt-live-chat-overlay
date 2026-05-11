@@ -5,7 +5,7 @@ const log = createLogger('AuthorRateLimiter');
 
 /** Default rate limit: max N messages per window */
 const DEFAULT_WINDOW_MS = 5_000;
-const DEFAULT_MAX_PER_WINDOW = 5;
+const DEFAULT_MAX_PER_WINDOW = 8;
 /** Priority threshold: messages with priority >= this are never rate-limited */
 const PRIORITY_EXEMPT_THRESHOLD = 100;
 /** How often to prune stale entries (ms) */

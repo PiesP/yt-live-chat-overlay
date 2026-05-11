@@ -21,6 +21,8 @@ const RATE_SAMPLE_WINDOW = 10;
 const SAMPLE_INTERVAL_MS = 1_000;
 /** How long after burst ends to return to normal (ms) */
 const BURST_COOLDOWN_MS = 5_000;
+/** EMA smoothing factor — higher = more reactive to recent changes */
+const EMA_ALPHA = 0.3;
 
 /** Messages per second thresholds */
 const ELEVATED_THRESHOLD = 5; // >5 msg/s
@@ -35,6 +37,7 @@ export class BurstDetector {
   private samplesSinceLastCheck = 0;
   private observability: ObservabilityReporter | undefined;
   private onLevelChange: ((level: BurstLevel) => void) | undefined;
+  private emaRate: number = 0; // EMA-smoothed message rate for real-time speed adjustment
 
   constructor(observability?: ObservabilityReporter, onLevelChange?: (level: BurstLevel) => void) {
     this.observability = observability;
@@ -59,6 +62,11 @@ export class BurstDetector {
     }, SAMPLE_INTERVAL_MS);
   }
 
+  /** Get current EMA-smoothed message rate for speed adaptation */
+  getEmaRate(): number {
+    return this.emaRate;
+  }
+
   /** Stop periodic sampling */
   stop(): void {
     if (this.sampleInterval !== null) {
@@ -78,6 +86,9 @@ export class BurstDetector {
     if (this.samples.length === 0) return;
 
     const avgRate = this.samples.reduce((a, b) => a + b, 0) / this.samples.length;
+
+    // Update EMA-smoothed rate for real-time speed adaptation
+    this.emaRate = EMA_ALPHA * avgRate + (1 - EMA_ALPHA) * this.emaRate;
 
     const newLevel: BurstLevel =
       avgRate > EXTREME_THRESHOLD
@@ -116,6 +127,7 @@ export class BurstDetector {
   destroy(): void {
     this.stop();
     this.samples = [];
+    this.emaRate = 0;
     this.observability = undefined;
   }
 }

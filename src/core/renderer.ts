@@ -383,16 +383,16 @@ export class Renderer {
   /** Find the index of the queued message with the lowest priority (for queue overflow replacement). */
   private findLowestPriorityIndex(): number {
     const queue = this.pendingQueue;
-    if (queue.length === 0) return -1;
-    let lowestIdx = 0;
-    let lowestPrio = queue[0]?.priority ?? Infinity;
-    for (let i = 1; i < queue.length; i++) {
-      const p = queue[i]?.priority;
-      if (p !== undefined && p < lowestPrio) {
-        lowestPrio = p;
+    let lowestIdx = -1;
+    let lowestPrio = Infinity;
+
+    queue.forEach((q, i) => {
+      if (q.priority < lowestPrio) {
+        lowestPrio = q.priority;
         lowestIdx = i;
       }
-    }
+    });
+
     return lowestIdx;
   }
 
@@ -719,12 +719,6 @@ export class Renderer {
     this.pendingQueue.length = Renderer.BACKGROUND_QUEUE_MAX;
   }
 
-  /** Clear all pending messages — used when returning from a hidden tab. */
-  clearPendingQueue(): void {
-    this.pendingQueue.length = 0;
-    this.clearRetryTimer();
-  }
-
   updateSettings(settings: OverlaySettings, options: RendererUpdateOptions = {}): void {
     this.settings = settings;
     this.injectStyles();
@@ -754,9 +748,9 @@ export class Renderer {
     this.isPaused = true;
     this.pausedAt = performance.now();
     this.clearRetryTimer();
-    this.forEachElement((el) => {
-      el.style.animationPlayState = 'paused';
-    });
+    for (const active of this.activeMessages) {
+      active.element.style.animationPlayState = 'paused';
+    }
     log.debug(`Paused ${this.activeMessages.size} animations`);
   }
 
@@ -848,16 +842,6 @@ export class Renderer {
     }
   }
 
-  private forEachElement(operation: (element: HTMLDivElement) => void): void {
-    for (const active of [...this.activeMessages]) {
-      try {
-        operation(active.element);
-      } catch (error) {
-        log.warn('Element operation failed:', error);
-      }
-    }
-  }
-
   destroy(): void {
     this.isPaused = false;
     this.isVideoPaused = false;
@@ -893,14 +877,9 @@ export class Renderer {
     const glowColor = `rgba(0, 0, 0, ${Math.min(1, baseOpacity * 0.85)})`;
     const glowBlur = Math.max(1, blur * 1.5);
 
-    const corners = (
-      [
-        [-1, -1],
-        [1, -1],
-        [-1, 1],
-        [1, 1],
-      ] as const
-    ).map(([dx, dy]) => `${dx * offset}px ${dy * offset}px ${blur}px ${shadowColor}`);
+    const corners = [[-1, -1] as const, [1, -1] as const, [-1, 1] as const, [1, 1] as const].map(
+      ([dx, dy]) => `${dx * offset}px ${dy * offset}px ${blur}px ${shadowColor}`
+    );
 
     return [...corners, `0px 0px ${glowBlur}px ${glowColor}`].join(', ');
   }

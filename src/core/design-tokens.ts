@@ -110,11 +110,11 @@ export const rendererLayout = {
   durationMin: 5000,
   durationMax: 30000,
   globalStaggerMs: 60,
-  safeDistanceScale: 0.3,
-  safeDistanceMin: 6,
+  safeDistanceScale: 0.2,
+  safeDistanceMin: 4,
   laneHeightPaddingScale: 0.05,
   laneHeightPaddingMin: 2,
-  retryDelayMinMs: 16,
+  retryDelayMinMs: 32,
   retryDelayMaxMs: 800,
 } as const;
 

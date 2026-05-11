@@ -309,9 +309,10 @@ export class RuntimeSession {
         return;
       }
 
-      // Clear any messages that accumulated in the queue while the tab was
-      // hidden — they are stale and would flood the screen on resume.
-      this.renderer?.clearPendingQueue();
+      // Trim stale queue entries but keep high-priority recent messages
+      // instead of flushing everything, which would drop important backlog
+      // or real-time messages accumulated during the hidden period.
+      this.renderer?.trimBackgroundQueue();
       this.renderer?.resume();
     };
 

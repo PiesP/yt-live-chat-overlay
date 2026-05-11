@@ -47,6 +47,7 @@ export class LaneAllocator {
       lastItemEndTime: 0,
       lastItemWidthPx: 0,
       lastItemHeightPx: 0,
+      totalMessages: 0,
     }));
     this.nextLaneIndex = 0;
   }
@@ -96,20 +97,35 @@ export class LaneAllocator {
       // horizontal overlap (not vertical). Adjacent-lane comments that have
       // already scrolled past the midpoint of the screen are safe to share
       // vertical space with, since CSS overflow:hidden clips them.
-      if (requiredLanes === 1 && blockReadyTime > now + 16) {
+      if (requiredLanes === 1 && blockReadyTime > now + 48) {
         const relaxedTime = this.calculateRelaxedReadyTime(startIndex, now, dimensions.width);
-        if (relaxedTime <= now + 16) {
+        if (relaxedTime <= now + 48) {
           blockReadyTime = relaxedTime;
         }
       }
 
-      if (blockReadyTime <= now + 16) {
-        bestStartIndex = startIndex;
-        bestReadyTime = blockReadyTime;
-        break;
+      const candidateTotalMsgs = this.getTotalMessages(startIndex, requiredLanes);
+      const bestTotalMsgs =
+        bestStartIndex >= 0 ? this.getTotalMessages(bestStartIndex, requiredLanes) : Infinity;
+
+      if (blockReadyTime <= now + 48) {
+        // Immediate dispatch: prefer lane(s) with fewer total messages
+        if (
+          bestStartIndex === -1 ||
+          candidateTotalMsgs < bestTotalMsgs ||
+          (candidateTotalMsgs === bestTotalMsgs && blockReadyTime < bestReadyTime)
+        ) {
+          bestStartIndex = startIndex;
+          bestReadyTime = blockReadyTime;
+        }
+        continue; // Keep scanning for an even less-loaded candidate
       }
 
-      if (blockReadyTime < bestReadyTime) {
+      // Fallback: prefer earliest ready time, break ties by load
+      if (
+        blockReadyTime < bestReadyTime ||
+        (blockReadyTime === bestReadyTime && candidateTotalMsgs < bestTotalMsgs)
+      ) {
         bestReadyTime = blockReadyTime;
         bestStartIndex = startIndex;
       }
@@ -150,7 +166,17 @@ export class LaneAllocator {
       laneState.lastItemEndTime = endTime;
       laneState.lastItemWidthPx = textWidth;
       laneState.lastItemHeightPx = messageHeight;
+      laneState.totalMessages++;
     }
+  }
+
+  /** Sum of totalMessages across a contiguous block of lanes. */
+  private getTotalMessages(startIndex: number, span: number): number {
+    let total = 0;
+    for (let i = startIndex; i < startIndex + span && i < this.lanes.length; i++) {
+      total += this.lanes[i]?.totalMessages ?? 0;
+    }
+    return total;
   }
 
   shiftTimeline(deltaMs: number): void {
@@ -250,7 +276,7 @@ export class LaneAllocator {
     const horizontalReadyTime = lane.lastItemStartTime + safeTimeGap;
 
     const traverseTimeMs = (playerWidth / effectiveSpeed) * 1000;
-    const dynamicClearMs = Math.max(traverseTimeMs * 0.05, 200);
+    const dynamicClearMs = Math.max(traverseTimeMs * 0.05, 100);
     const verticalReadyTime = lane.lastItemStartTime + dynamicClearMs;
 
     const laneStaggerTime = lane.lastItemStartTime + this.options.globalStaggerMs;

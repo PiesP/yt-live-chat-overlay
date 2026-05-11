@@ -5,8 +5,11 @@
  */
 export class MessageIdRegistry {
   private readonly ids = new Set<string>();
+  private readonly maxSize: number;
 
-  constructor(private readonly maxSize: number) {}
+  constructor(maxSize: number) {
+    this.maxSize = maxSize;
+  }
 
   has(id: string): boolean {
     return this.ids.has(id);
@@ -25,7 +28,6 @@ export class MessageIdRegistry {
     for (let index = 0; index < excess; index++) {
       const next = iterator.next();
       if (next.done) break;
-
       this.ids.delete(next.value);
     }
   }

@@ -227,6 +227,8 @@ export interface LaneState {
   lastItemWidthPx: number;
   /** Last item height in pixels */
   lastItemHeightPx: number;
+  /** Cumulative message count for load balancing (weighted lane selection) */
+  totalMessages: number;
 }
 
 /**
