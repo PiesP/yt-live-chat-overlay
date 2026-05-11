@@ -141,6 +141,8 @@ export class RuntimeSession {
         backlogMaxRate: settings.backlogMaxRate,
         backlogSpeedMultiplier: settings.backlogSpeedMultiplier,
         showBacklogIndicator: settings.showBacklogIndicator,
+        backlogMode: settings.backlogMode,
+        backlogRecentMinutes: settings.backlogRecentMinutes,
       });
     }
 
