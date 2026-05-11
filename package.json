@@ -45,6 +45,6 @@
     "knip": "^6.11.0",
     "typescript": "^6.0.3",
     "vite": "^8.0.10",
-    "vite-plugin-monkey": "^8.0.1"
+    "vite-plugin-monkey": "^8.0.2"
   }
 }
