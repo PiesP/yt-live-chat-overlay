@@ -60,7 +60,7 @@ export class LaneAllocator {
   }
 
   findPlacement(messageHeight: number, dimensions: OverlayDimensions): LanePlacement | null {
-    const now = Date.now();
+    const now = performance.now();
     const requiredLanes = this.calculateRequiredLanes(messageHeight, dimensions.laneHeight);
     if (requiredLanes > this.lanes.length) {
       return null;

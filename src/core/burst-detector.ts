@@ -65,6 +65,7 @@ export class BurstDetector {
       clearInterval(this.sampleInterval);
       this.sampleInterval = null;
     }
+    this.samplesSinceLastCheck = 0;
   }
 
   /** Get current burst level */
@@ -89,20 +90,20 @@ export class BurstDetector {
 
     if (newLevel === this.currentLevel) {
       if (newLevel !== 'normal') {
-        this.lastBurstTime = Date.now();
+        this.lastBurstTime = performance.now();
       }
       return;
     }
 
     // Cooldown: stay at current level if rate just dropped to normal
     if (newLevel === 'normal' && this.currentLevel !== 'normal') {
-      if (Date.now() - this.lastBurstTime < BURST_COOLDOWN_MS) {
+      if (performance.now() - this.lastBurstTime < BURST_COOLDOWN_MS) {
         return;
       }
     }
 
     if (newLevel !== 'normal') {
-      this.lastBurstTime = Date.now();
+      this.lastBurstTime = performance.now();
     }
 
     this.currentLevel = newLevel;

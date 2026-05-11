@@ -240,7 +240,7 @@ export class Renderer {
     element.style.setProperty('--yt-msg-delay', `${laneDelay}ms`);
     element.classList.add('yt-overlay-message-animate');
 
-    const now = Date.now();
+    const now = performance.now();
     const startTime = now + laneDelay;
     this.laneAllocator.commitPlacement(
       placement,
@@ -258,7 +258,7 @@ export class Renderer {
 
     return {
       element,
-      startTime: Date.now(),
+      startTime: performance.now(),
       baseDuration,
       baseOpacity: baseOpacity ?? this.settings.opacity,
       cleanup,
@@ -316,7 +316,7 @@ export class Renderer {
     if (this.sweepCounter % Renderer.SWEEP_INTERVAL !== 0) return;
 
     const toRemove: ActiveMessage[] = [];
-    const now = Date.now();
+    const now = performance.now();
     for (const active of this.activeMessages) {
       try {
         // Remove messages that exceeded their expected lifetime + tolerance
@@ -376,7 +376,7 @@ export class Renderer {
       return;
     }
 
-    const now = Date.now();
+    const now = performance.now();
     const nextMessage = this.pendingQueue[0];
     if (!nextMessage) return;
 
@@ -395,15 +395,15 @@ export class Renderer {
       const queued = this.pendingQueue[0];
       if (!queued) break;
 
-      if (queued.nextAttemptAt > Date.now()) {
-        this.scheduleRetry(queued.nextAttemptAt - Date.now());
+      if (queued.nextAttemptAt > performance.now()) {
+        this.scheduleRetry(queued.nextAttemptAt - performance.now());
         return;
       }
 
       const result = this.renderMessage(queued.message);
 
       if (result.status === 'deferred') {
-        queued.nextAttemptAt = Date.now() + result.waitMs;
+        queued.nextAttemptAt = performance.now() + result.waitMs;
         this.scheduleRetry(result.waitMs);
         return;
       }
@@ -458,7 +458,7 @@ export class Renderer {
   }
 
   private updateMessageOpacity(): void {
-    const now = Date.now();
+    const now = performance.now();
     const toRemove: ActiveMessage[] = [];
 
     for (const active of this.activeMessages) {
@@ -493,7 +493,7 @@ export class Renderer {
   }
 
   private logPerformanceWarning(): void {
-    const now = Date.now();
+    const now = performance.now();
     if (now - this.lastWarningTime < 10_000) {
       return;
     }
@@ -661,7 +661,7 @@ export class Renderer {
 
     log.debug('Pausing all animations');
     this.isPaused = true;
-    this.pausedAt = Date.now();
+    this.pausedAt = performance.now();
     this.clearRetryTimer();
     this.forEachElement((el) => {
       el.style.animationPlayState = 'paused';
@@ -672,7 +672,7 @@ export class Renderer {
   resume(): void {
     if (!this.isPaused) return;
 
-    const now = Date.now();
+    const now = performance.now();
     let pausedDuration = 0;
     if (this.pausedAt !== null) {
       pausedDuration = Math.min(Math.max(0, now - this.pausedAt), 60_000);
@@ -692,7 +692,7 @@ export class Renderer {
         // Subtract accumulated paused time so the animation resumes from
         // where it visually stopped, not from wall-clock elapsed time.
         active.pausedDuration += pausedDuration;
-        const elapsed = Date.now() - active.startTime - active.pausedDuration;
+        const elapsed = performance.now() - active.startTime - active.pausedDuration;
         const remaining = active.baseDuration - elapsed;
         if (remaining <= 0) {
           this.removeMessage(active);
@@ -742,7 +742,7 @@ export class Renderer {
 
     for (const active of this.activeMessages) {
       try {
-        const elapsed = Date.now() - active.startTime;
+        const elapsed = performance.now() - active.startTime;
         const adjustedDuration = active.baseDuration / rate;
 
         const el = active.element;

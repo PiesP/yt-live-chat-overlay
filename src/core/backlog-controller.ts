@@ -48,6 +48,7 @@ export class BacklogInjectionController {
   private lanes: number;
   private observability: ObservabilityReporter | undefined;
   private realTimeActivityCount = 0;
+  private realTimeActivityTimers: ReturnType<typeof setTimeout>[] = [];
   private readonly ADAPTIVE_COOLDOWN_MS = 2000;
 
   constructor(
@@ -75,7 +76,7 @@ export class BacklogInjectionController {
     let filtered = messages;
     if (this.config.backlogMode === 'recent') {
       const cutoffMs = this.config.backlogRecentMinutes * 60 * 1000;
-      const now = Date.now();
+      const now = performance.now();
       filtered = messages.filter((m) => now - m.timestamp < cutoffMs);
       log.debug(
         `Backlog recent mode: ${messages.length} → ${filtered.length} ` +
@@ -107,9 +108,10 @@ export class BacklogInjectionController {
   /** Notify the controller that a real-time message arrived during injection. */
   notifyRealTimeActivity(): void {
     this.realTimeActivityCount = Math.min(this.realTimeActivityCount + 1, 5);
-    setTimeout(() => {
+    const timer = setTimeout(() => {
       this.realTimeActivityCount = Math.max(0, this.realTimeActivityCount - 1);
     }, this.ADAPTIVE_COOLDOWN_MS);
+    this.realTimeActivityTimers.push(timer);
   }
 
   /** Start the throttled injection loop */
@@ -302,6 +304,10 @@ export class BacklogInjectionController {
       clearTimeout(this.injectionTimer);
       this.injectionTimer = null;
     }
+    for (const timer of this.realTimeActivityTimers) {
+      clearTimeout(timer);
+    }
+    this.realTimeActivityTimers = [];
     this.backlogQueue = [];
     this.hideIndicator();
     this.onBacklogMessage = null;

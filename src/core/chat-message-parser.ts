@@ -168,7 +168,7 @@ function parseRendererMessage(
     text: parsedBody.text,
     content: parsedBody.content,
     kind,
-    timestamp: Date.now(),
+    timestamp: performance.now(),
     author,
     authorType,
   };

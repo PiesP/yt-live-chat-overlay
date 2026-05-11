@@ -60,7 +60,6 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 
 - **Tab visibility handling**: `handleBackgroundTab()` now properly pauses animations and trims queue; `handleForegroundTab()` resumes them — previously animations kept running in background and weren't resumed on return
-- **Rate limiter & burst detector timers**: Replaced `performance.now()` with `Date.now()` so rate limiting windows and burst cooldown survive tab sleep
 - **Stale animation sweep**: Replaced `Set.forEach` deletion during iteration with safe `for-of` + collect-to-remove pattern
 - **Defaults updated to optimized values**: `speedPxPerSec` 280→250, `maxConcurrentMessages` 40→50, `maxMessagesPerSecond` 6→8, `durationMax` 12000→30000ms
 

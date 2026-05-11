@@ -70,7 +70,7 @@ export class RuntimeManager {
     }
 
     if (reason === 'page-change') {
-      this.lastPageChangeAt = Date.now();
+      this.lastPageChangeAt = performance.now();
       this.resetStartFailures();
       const session = this.activeSession;
       if (session && !session.matchesUrl(this.getCurrentUrl())) {
@@ -193,7 +193,7 @@ export class RuntimeManager {
     }
 
     // YouTube SPA navigation mutates the player/chat DOM after the URL changes.
-    const elapsed = Date.now() - this.lastPageChangeAt;
+    const elapsed = performance.now() - this.lastPageChangeAt;
     return Math.max(0, NAVIGATION_SETTLE_DELAY_MS - elapsed);
   }
 

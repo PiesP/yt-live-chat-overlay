@@ -24,7 +24,7 @@ export class PerAuthorRateLimiter {
   private windowMs: number = DEFAULT_WINDOW_MS;
   private maxPerWindow: number = DEFAULT_MAX_PER_WINDOW;
   private enabled: boolean = true;
-  private lastPruneTime: number = Date.now();
+  private lastPruneTime: number = performance.now();
   private readonly getBurstLevel: () => BurstLevel;
 
   constructor(getBurstLevel: () => BurstLevel) {
@@ -39,7 +39,7 @@ export class PerAuthorRateLimiter {
     const limit = this.getEffectiveLimit();
     if (limit === null) return true;
 
-    const now = Date.now();
+    const now = performance.now();
     let timestamps = this.authorTimestamps.get(authorId);
 
     if (timestamps) {
@@ -71,7 +71,7 @@ export class PerAuthorRateLimiter {
     return this.maxPerWindow;
   }
 
-  private pruneStaleEntries(now: number = Date.now()): void {
+  private pruneStaleEntries(now: number = performance.now()): void {
     if (now - this.lastPruneTime < PRUNE_INTERVAL_MS) return;
     this.lastPruneTime = now;
 

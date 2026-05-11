@@ -317,6 +317,7 @@ export class SettingsUi {
 
   destroy(): void {
     this.close();
+    this.cancelPreview();
     this.button?.remove();
     this.backdrop?.remove();
 
