@@ -35,6 +35,7 @@ const uiColors = {
   primary: '#1e88e5',
   primaryHover: '#1976d2',
   danger: '#e53935',
+  dangerHover: '#c62828',
 } as const;
 
 export const colors = {

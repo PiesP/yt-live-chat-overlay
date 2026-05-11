@@ -262,4 +262,63 @@ export const SETTINGS_UI_STYLES = `
       .yt-chat-overlay-settings-actions button[data-action="apply"]:hover {
         background: ${colors.ui.primaryHover};
       }
+
+      /* Reset confirmation dialog */
+      .yt-chat-overlay-settings-confirm {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1;
+      }
+      .yt-chat-overlay-settings-confirm-backdrop {
+        position: absolute;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.5);
+        border-radius: ${borderRadius.md};
+      }
+      .yt-chat-overlay-settings-confirm-dialog {
+        position: relative;
+        background: ${colors.ui.backgroundLight};
+        border: 1px solid ${colors.ui.border};
+        border-radius: ${borderRadius.md};
+        padding: ${spacing.lg}px;
+        min-width: 240px;
+        box-shadow: ${shadows.box.lg};
+      }
+      .yt-chat-overlay-settings-confirm-message {
+        margin: 0 0 ${spacing.md}px;
+        font-size: ${typography.fontSize.sm};
+        color: ${colors.ui.text};
+      }
+      .yt-chat-overlay-settings-confirm-buttons {
+        display: flex;
+        justify-content: flex-end;
+        gap: ${spacing.sm}px;
+      }
+      .yt-chat-overlay-settings-confirm-cancel,
+      .yt-chat-overlay-settings-confirm-ok {
+        border: none;
+        border-radius: ${borderRadius.sm};
+        padding: ${spacing.sm}px ${spacing.md}px;
+        cursor: pointer;
+        font-weight: ${typography.fontWeight.semibold};
+        font-size: ${typography.fontSize.sm};
+      }
+      .yt-chat-overlay-settings-confirm-cancel {
+        background: transparent;
+        color: ${colors.ui.textMuted};
+        border: 1px solid ${colors.ui.border};
+      }
+      .yt-chat-overlay-settings-confirm-cancel:hover {
+        color: ${colors.ui.text};
+      }
+      .yt-chat-overlay-settings-confirm-ok {
+        background: ${colors.ui.danger};
+        color: ${colors.ui.text};
+      }
+      .yt-chat-overlay-settings-confirm-ok:hover {
+        background: ${colors.ui.dangerHover};
+      }
 `;
