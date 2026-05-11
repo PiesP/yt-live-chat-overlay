@@ -193,14 +193,13 @@ export class ObservabilityReporter {
       `Backlog: ${(m.backlogProgress * 100).toFixed(0)}%`,
     ];
     // Use DOM API instead of innerHTML to avoid any XSS surface
-    while (this.debugOverlayEl.firstChild) {
-      this.debugOverlayEl.firstChild.remove();
-    }
-    for (const line of lines) {
-      const div = document.createElement('div');
-      div.textContent = line;
-      this.debugOverlayEl.appendChild(div);
-    }
+    this.debugOverlayEl.replaceChildren(
+      ...lines.map((line) => {
+        const div = document.createElement('div');
+        div.textContent = line;
+        return div;
+      })
+    );
   }
 
   private destroyDebugOverlay(): void {

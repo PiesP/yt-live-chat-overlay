@@ -24,6 +24,14 @@ const BURST_SPEED_MULTIPLIER: Record<BurstLevel, number> = {
   extreme: 1.35,
 };
 
+/**
+ * Threshold (ms) for treating a lane placement as "immediate".
+ * When the expected wait time is within this threshold of 'now', we
+ * consider the slot available rather than deferring, even if there's
+ * minor overlap with the preceding message's animation tail.
+ */
+const IMMEDIATE_PLACEMENT_THRESHOLD_MS = 48;
+
 export class LaneAllocator {
   private lanes: LaneState[] = [];
   private nextLaneIndex = 0;
@@ -97,9 +105,9 @@ export class LaneAllocator {
       // horizontal overlap (not vertical). Adjacent-lane comments that have
       // already scrolled past the midpoint of the screen are safe to share
       // vertical space with, since CSS overflow:hidden clips them.
-      if (requiredLanes === 1 && blockReadyTime > now + 48) {
+      if (requiredLanes === 1 && blockReadyTime > now + IMMEDIATE_PLACEMENT_THRESHOLD_MS) {
         const relaxedTime = this.calculateRelaxedReadyTime(startIndex, now, dimensions.width);
-        if (relaxedTime <= now + 48) {
+        if (relaxedTime <= now + IMMEDIATE_PLACEMENT_THRESHOLD_MS) {
           blockReadyTime = relaxedTime;
         }
       }
@@ -108,7 +116,7 @@ export class LaneAllocator {
       const bestTotalMsgs =
         bestStartIndex >= 0 ? this.getTotalMessages(bestStartIndex, requiredLanes) : Infinity;
 
-      if (blockReadyTime <= now + 48) {
+      if (blockReadyTime <= now + IMMEDIATE_PLACEMENT_THRESHOLD_MS) {
         // Immediate dispatch: prefer lane(s) with fewer total messages
         if (
           bestStartIndex === -1 ||
