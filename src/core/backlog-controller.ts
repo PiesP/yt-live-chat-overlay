@@ -122,45 +122,37 @@ export class BacklogInjectionController {
     }
 
     this.isInjecting = true;
+    this.processTick();
+  }
 
-    // Calculate base rate: min(config.maxRate, laneCount * 2), clamped to 4-20
+  /** Execute one injection tick */
+  private processTick(): void {
+    if (!this.isActive || this.backlogQueue.length === 0) {
+      this.isInjecting = false;
+      if (this.backlogQueue.length === 0) this.finishBacklogInjection();
+      return;
+    }
+
     const maxRate = Math.max(4, Math.min(20, Math.min(this.config.backlogMaxRate, this.lanes * 2)));
+    const realTimeFactor = Math.max(0.25, 1 - this.realTimeActivityCount * 0.2);
+    const adaptiveRate = Math.max(1, Math.round(maxRate * realTimeFactor));
+    const tickInterval = Math.round(1000 / adaptiveRate);
 
-    const processTick = () => {
-      if (!this.isActive || this.backlogQueue.length === 0) {
-        this.isInjecting = false;
-        if (this.backlogQueue.length === 0) this.finishBacklogInjection();
-        return;
-      }
+    const message = this.backlogQueue.shift();
+    if (!message) return;
+    message.isBacklog = true;
+    this.processedBacklog++;
 
-      // Adaptive rate: if real-time messages are active, slow down proportionally.
-      const realTimeFactor = Math.max(0.25, 1 - this.realTimeActivityCount * 0.2);
-      const adaptiveRate = Math.max(1, Math.round(maxRate * realTimeFactor));
-      const tickInterval = Math.round(1000 / adaptiveRate);
+    const progress = this.totalBacklog > 0 ? this.processedBacklog / this.totalBacklog : 1;
+    this.observability?.updateBacklogProgress(progress);
 
-      // Process one message per tick
-      const message = this.backlogQueue.shift();
-      if (!message) return;
-      message.isBacklog = true;
-      this.processedBacklog++;
+    if (this.config.showBacklogIndicator) {
+      this.updateIndicator(progress);
+    }
 
-      // Update progress
-      const progress = this.totalBacklog > 0 ? this.processedBacklog / this.totalBacklog : 1;
-      this.observability?.updateBacklogProgress(progress);
+    this.emitBacklogMessage(message);
 
-      // Update indicator
-      if (this.config.showBacklogIndicator) {
-        this.updateIndicator(progress);
-      }
-
-      // Emit single message for rendering
-      this.emitBacklogMessage(message);
-
-      // Schedule next tick with adaptive interval
-      this.injectionTimer = setTimeout(processTick, tickInterval);
-    };
-
-    processTick();
+    this.injectionTimer = setTimeout(() => this.processTick(), tickInterval);
   }
 
   /** Emit a single backlog message to the renderer via callback */
@@ -311,5 +303,19 @@ export class BacklogInjectionController {
     this.backlogQueue = [];
     this.hideIndicator();
     this.onBacklogMessage = null;
+  }
+
+  /** Pause/resume injection when the render queue is overloaded */
+  setPaused(paused: boolean): void {
+    if (paused) {
+      this.isInjecting = false;
+      if (this.injectionTimer !== null) {
+        clearTimeout(this.injectionTimer);
+        this.injectionTimer = null;
+      }
+    } else if (!this.isInjecting && this.isActive && this.backlogQueue.length > 0) {
+      this.isInjecting = true;
+      this.injectionTimer = setTimeout(() => this.processTick(), 500);
+    }
   }
 }

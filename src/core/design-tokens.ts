@@ -114,7 +114,7 @@ export const rendererLayout = {
   safeDistanceMin: 6,
   laneHeightPaddingScale: 0.05,
   laneHeightPaddingMin: 2,
-  retryDelayMinMs: 4,
+  retryDelayMinMs: 16,
   retryDelayMaxMs: 800,
 } as const;
 

@@ -23,6 +23,7 @@ interface QueuedMessage {
   message: ChatMessage;
   nextAttemptAt: number;
   priority: number;
+  retries: number; // dropped 시 재시도 횟수 추적
 }
 
 interface ActiveMessage {
@@ -65,6 +66,7 @@ export class Renderer {
   private pausedAt: number | null = null;
   private playbackRate = 1;
   private lastWarningTime = 0;
+  private backlogPaused = false;
   private static readonly SWEEP_TOLERANCE_MS = 500;
   private static readonly MAX_ANIMATION_JITTER_MS = 15;
   private static readonly QUEUE_MAX_SIZE = 50;
@@ -72,6 +74,7 @@ export class Renderer {
   private static readonly MAX_MESSAGE_AGE_MS = 60_000;
   private static readonly OPACITY_UPDATE_INTERVAL_MS = 250;
   private static readonly SWEEP_INTERVAL = 8;
+  private static readonly MAX_RETRY_ATTEMPTS = 3;
   private styleElement: HTMLStyleElement | null = null;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private opacityUpdateTimer: ReturnType<typeof setInterval> | null = null;
@@ -109,6 +112,9 @@ export class Renderer {
     this.startOpacityUpdates();
   }
 
+  /** Callback to signal RuntimeSession to pause/resume backlog injection */
+  onBacklogPauseChange: ((paused: boolean) => void) | null = null;
+
   private resetRenderedState(): void {
     this.clearRetryTimer();
 
@@ -118,6 +124,7 @@ export class Renderer {
 
     this.pendingQueue.length = 0;
     this.seenMessageIds.clear();
+    this.backlogPaused = false;
   }
 
   private handleOverlayDimensionsChange(dimensions: OverlayDimensions | null): void {
@@ -283,16 +290,47 @@ export class Renderer {
 
     const priority = Renderer.getMessagePriority(message);
     if (!this.authorRateLimiter.allow(message.author ?? 'anonymous', priority)) {
+      log.debug('Drop [rate_limited]:', message.author, message.kind, message.id);
       this.observability.onMessageDropped('rate_limited');
       return;
     }
 
     if (this.pendingQueue.length >= Renderer.QUEUE_MAX_SIZE) {
-      this.pendingQueue.shift();
-      this.observability.onMessageDropped('queue_overflow');
+      const lowestPriorityIndex = this.findLowestPriorityIndex();
+      if (lowestPriorityIndex >= 0) {
+        const removed = this.pendingQueue[lowestPriorityIndex];
+        if (removed && priority > removed.priority) {
+          log.debug(
+            'Drop [queue_overflow/replaced]:',
+            removed.message.author,
+            removed.message.kind,
+            'priority:',
+            removed.priority,
+            '← replaced by',
+            message.author,
+            'priority:',
+            priority
+          );
+          this.pendingQueue.splice(lowestPriorityIndex, 1);
+          this.observability.onMessageDropped('queue_overflow');
+        } else {
+          log.debug(
+            'Drop [queue_overflow/rejected]:',
+            message.author,
+            message.kind,
+            'priority:',
+            priority
+          );
+          this.observability.onMessageDropped('queue_overflow');
+          return;
+        }
+      } else {
+        this.pendingQueue.shift();
+        this.observability.onMessageDropped('queue_overflow');
+      }
     }
 
-    const queued: QueuedMessage = { message, nextAttemptAt: 0, priority };
+    const queued: QueuedMessage = { message, nextAttemptAt: 0, priority, retries: 0 };
     // Insert in priority order (highest first) so processQueue doesn't need to sort
     const insertIndex = this.pendingQueue.findIndex((q) => q.priority < priority);
     if (insertIndex === -1) {
@@ -340,6 +378,22 @@ export class Renderer {
 
   get laneCount(): number {
     return this.laneAllocator.getLaneCount();
+  }
+
+  /** Find the index of the queued message with the lowest priority (for queue overflow replacement). */
+  private findLowestPriorityIndex(): number {
+    const queue = this.pendingQueue;
+    if (queue.length === 0) return -1;
+    let lowestIdx = 0;
+    let lowestPrio = queue[0]?.priority ?? Infinity;
+    for (let i = 1; i < queue.length; i++) {
+      const p = queue[i]?.priority;
+      if (p !== undefined && p < lowestPrio) {
+        lowestPrio = p;
+        lowestIdx = i;
+      }
+    }
+    return lowestIdx;
   }
 
   setBacklogSpeedMultiplier(multiplier: number): void {
@@ -390,6 +444,7 @@ export class Renderer {
     }
 
     let processed = 0;
+    let droppedCount = 0;
 
     while (this.pendingQueue.length > 0 && processed < Renderer.BATCH_SIZE) {
       const queued = this.pendingQueue[0];
@@ -397,7 +452,7 @@ export class Renderer {
 
       if (queued.nextAttemptAt > performance.now()) {
         this.scheduleRetry(queued.nextAttemptAt - performance.now());
-        return;
+        break;
       }
 
       const result = this.renderMessage(queued.message);
@@ -408,8 +463,44 @@ export class Renderer {
         return;
       }
 
+      // Drop with retry: re-enqueue at lower priority if retries remain
+      if (result.status === 'dropped') {
+        this.pendingQueue.shift();
+        droppedCount++;
+        queued.retries++;
+        if (queued.retries < Renderer.MAX_RETRY_ATTEMPTS) {
+          // Find insertion point past higher-priority items to avoid starvation
+          const insertAfter = this.pendingQueue.findIndex((q) => q.priority <= queued.priority);
+          if (insertAfter === -1) {
+            this.pendingQueue.push(queued);
+          } else {
+            this.pendingQueue.splice(insertAfter, 0, queued);
+          }
+        } else {
+          log.debug('Drop [max_retries_exceeded]:', queued.message.author, queued.message.kind);
+          this.observability.onMessageDropped('other');
+        }
+        processed++;
+        continue;
+      }
+
+      // Successfully rendered or deduplicated — remove from queue
       this.pendingQueue.shift();
       processed++;
+    }
+
+    if (droppedCount > 0) {
+      log.debug(`${droppedCount} message(s) dropped, requeued with retry`);
+    }
+
+    // Pause backlog injection if queue is saturated
+    const queueRatio = this.pendingQueue.length / Renderer.QUEUE_MAX_SIZE;
+    if (queueRatio > 0.8 && this.backlogPaused === false) {
+      this.backlogPaused = true;
+      this.onBacklogPauseChange?.(true);
+    } else if (queueRatio < 0.4 && this.backlogPaused === true) {
+      this.backlogPaused = false;
+      this.onBacklogPauseChange?.(false);
     }
 
     if (this.pendingQueue.length > 0 && !this.isPaused) {

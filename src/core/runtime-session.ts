@@ -218,6 +218,9 @@ export class RuntimeSession {
             renderer.setBacklogSpeedMultiplier(this.backlogController?.getSpeedMultiplier() ?? 1);
             renderer.addMessage(msg);
           };
+          renderer.onBacklogPauseChange = (paused) => {
+            this.backlogController?.setPaused(paused);
+          };
         }
         this.backlogController.startBacklogInjection(msgs);
         return;
