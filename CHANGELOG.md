@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.25.0] - 2026-05-11
+
+### Fixed
+
+- **Timer leak in BacklogInjectionController** — `notifyRealTimeActivity()` timers are now tracked and cleared on `destroy()`, preventing callback execution on a destroyed instance.
+- **BurstDetector stale state on restart** — `stop()` now resets `samplesSinceLastCheck` to 0, preventing stale sample counts from corrupting burst level classification after rapid start/stop cycles.
+- **ObservabilityReporter duplicate intervals** — `scheduleDebugUpdate()` now guards against creating multiple intervals when called repeatedly.
+- **SettingsUi preview timer leak** — `destroy()` now cancels any pending preview timer, preventing callback execution on a destroyed instance.
+- **Prototype pollution in localStorage parsing** — `readStoredSettingsRaw()` now rejects arrays, `__proto__`, and `constructor` keys in parsed localStorage data.
+
+### Refactored
+
+- **Replaced `window.confirm` with custom modal dialog** — Settings reset confirmation now uses an in-modal dialog consistent with the settings UI design system, instead of a blocking native browser dialog.
+- **Simplified `getNumber()` in youtubei-chat.ts** — Merged two-branch type check into a single expression.
+- **Replaced `Object.assign` with spread** — `BacklogInjectionController.updateConfig()` now uses immutable config replacement.
+- **Added `unload` fallback cleanup to PageWatcher** — History method patches are now restored on page unload as a safety net.
+- **Added `dangerHover` color token** — Consistent danger button hover state across the settings UI.
+
+### Performance
+
+- **Author rate limiter cutoff hoisting** — Moved cutoff computation outside the branch to avoid redundant computation; persist filtered timestamps even when rate-limited to keep the map clean.
+
 ## [0.24.4] - 2026-05-10
 
 ### Added
