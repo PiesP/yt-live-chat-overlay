@@ -19,42 +19,6 @@ import { RENDERER_STATIC_STYLES } from '@core/renderer-styles';
 
 const log = createLogger('Renderer');
 
-// ── Pure outline helpers (module-level to keep Renderer focused) ─────────────
-
-function buildTextShadow(outline: OutlineSettings): string {
-  if (!outline.enabled || outline.widthPx <= 0 || outline.opacity <= 0) {
-    return 'none';
-  }
-
-  const offset = outline.widthPx;
-  const blur = Math.max(0, outline.blurPx);
-  const baseOpacity = Math.min(1, outline.opacity);
-  const shadowColor = `rgba(0, 0, 0, ${baseOpacity})`;
-  const glowColor = `rgba(0, 0, 0, ${Math.min(1, baseOpacity * 0.85)})`;
-  const glowBlur = Math.max(1, blur * 1.5);
-
-  const corners = (
-    [
-      [-1, -1],
-      [1, -1],
-      [-1, 1],
-      [1, 1],
-    ] as const
-  ).map(([dx, dy]) => `${dx * offset}px ${dy * offset}px ${blur}px ${shadowColor}`);
-
-  return [...corners, `0px 0px ${glowBlur}px ${glowColor}`].join(', ');
-}
-
-function buildTextStroke(outline: OutlineSettings): string {
-  if (!outline.enabled || outline.widthPx <= 0 || outline.opacity <= 0) {
-    return '0 transparent';
-  }
-
-  const strokeWidth = Math.max(0.2, outline.widthPx * 0.3);
-  const strokeOpacity = Math.min(1, outline.opacity * 0.7);
-  return `${strokeWidth}px rgba(0, 0, 0, ${strokeOpacity})`;
-}
-
 interface QueuedMessage {
   message: ChatMessage;
   nextAttemptAt: number;
@@ -186,8 +150,8 @@ export class Renderer {
       return;
     }
 
-    const textShadow = buildTextShadow(this.settings.outline);
-    const textStroke = buildTextStroke(this.settings.outline);
+    const textShadow = this.buildTextShadow(this.settings.outline);
+    const textStroke = this.buildTextStroke(this.settings.outline);
     const regularMessageTextShadow = [textShadow, shadows.text.md, '0 0 8px rgba(0, 0, 0, 0.7)']
       .filter(Boolean)
       .join(', ');
@@ -832,5 +796,39 @@ export class Renderer {
     this.observability.destroy();
 
     log.debug('Destroyed');
+  }
+
+  private buildTextShadow(outline: OutlineSettings): string {
+    if (!outline.enabled || outline.widthPx <= 0 || outline.opacity <= 0) {
+      return 'none';
+    }
+
+    const offset = outline.widthPx;
+    const blur = Math.max(0, outline.blurPx);
+    const baseOpacity = Math.min(1, outline.opacity);
+    const shadowColor = `rgba(0, 0, 0, ${baseOpacity})`;
+    const glowColor = `rgba(0, 0, 0, ${Math.min(1, baseOpacity * 0.85)})`;
+    const glowBlur = Math.max(1, blur * 1.5);
+
+    const corners = (
+      [
+        [-1, -1],
+        [1, -1],
+        [-1, 1],
+        [1, 1],
+      ] as const
+    ).map(([dx, dy]) => `${dx * offset}px ${dy * offset}px ${blur}px ${shadowColor}`);
+
+    return [...corners, `0px 0px ${glowBlur}px ${glowColor}`].join(', ');
+  }
+
+  private buildTextStroke(outline: OutlineSettings): string {
+    if (!outline.enabled || outline.widthPx <= 0 || outline.opacity <= 0) {
+      return '0 transparent';
+    }
+
+    const strokeWidth = Math.max(0.2, outline.widthPx * 0.3);
+    const strokeOpacity = Math.min(1, outline.opacity * 0.7);
+    return `${strokeWidth}px rgba(0, 0, 0, ${strokeOpacity})`;
   }
 }
