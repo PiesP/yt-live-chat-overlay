@@ -51,7 +51,7 @@ const REPLAY_CONSECUTIVE_FAILURE_LIMIT = 5;
 const REPLAY_FAILURE_BACKOFF_MS = 5000;
 const REPLAY_PREFETCH_WINDOW_MS = 5000;
 const MAX_BUFFERED_REPLAY_MESSAGES = 300;
-const MAX_TRACKED_REPLAY_KEYS = 10000;
+const MAX_TRACKED_MESSAGE_KEYS = 10000;
 
 type ReplayMode = 'playerSeek' | 'continuation';
 
@@ -419,7 +419,7 @@ export abstract class ChatSource {
 class LiveChatSource extends ChatSource {
   private liveContinuation: InnertubeContinuationData | null = null;
   private consecutiveErrors = 0;
-  private readonly liveDedupRegistry = new MessageIdRegistry(MAX_TRACKED_REPLAY_KEYS);
+  private readonly liveDedupRegistry = new MessageIdRegistry(MAX_TRACKED_MESSAGE_KEYS);
 
   protected seedCurrentSession(signal?: AbortSignal): Promise<boolean> {
     return this.initializeLiveSession(signal);
@@ -600,7 +600,7 @@ class ReplayChatSource extends ChatSource {
   private lastReplayRequestedOffsetMs = -REPLAY_FETCH_MIN_DELTA_MS;
   private replayConsecutiveFailures = 0;
   private replayNextAllowedFetchAt = 0;
-  private readonly replayKeyRegistry = new MessageIdRegistry(MAX_TRACKED_REPLAY_KEYS);
+  private readonly replayKeyRegistry = new MessageIdRegistry(MAX_TRACKED_MESSAGE_KEYS);
   private replayBuffer: ReplayBufferedMessage[] = [];
 
   protected seedCurrentSession(signal?: AbortSignal): Promise<boolean> {
