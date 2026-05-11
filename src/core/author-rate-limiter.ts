@@ -40,12 +40,13 @@ export class PerAuthorRateLimiter {
     if (limit === null) return true;
 
     const now = performance.now();
+    const cutoff = now - this.windowMs;
     let timestamps = this.authorTimestamps.get(authorId);
 
     if (timestamps) {
-      const cutoff = now - this.windowMs;
       timestamps = timestamps.filter((t) => t > cutoff);
       if (timestamps.length >= limit) {
+        this.authorTimestamps.set(authorId, timestamps);
         log.debug(
           `Rate limited author: ${authorId} (${timestamps.length}/${limit} in ${this.windowMs}ms)`
         );
