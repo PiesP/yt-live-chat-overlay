@@ -48,17 +48,18 @@ export interface EmojiInfo extends ImageAsset {}
 /**
  * Content segment (text or emoji)
  */
-export interface TextContentSegment {
+export type ContentSegment = TextContentSegment | EmojiContentSegment;
+
+// Internal union constituents — use ContentSegment for external typing.
+type TextContentSegment = {
   type: 'text';
   content: string;
-}
+};
 
-export interface EmojiContentSegment {
+type EmojiContentSegment = {
   type: 'emoji';
   emoji: EmojiInfo;
-}
-
-export type ContentSegment = TextContentSegment | EmojiContentSegment;
+};
 
 /**
  * Super Chat tier information
