@@ -2,17 +2,17 @@ import { createLogger } from '@core/logging';
 
 const log = createLogger('Dom');
 
-export interface SelectorMatch<T extends Element> {
+interface SelectorMatch<T extends Element> {
   readonly element: T;
   readonly selector: string;
 }
 
-export interface ElementMatchOptions<T extends Element> {
+interface ElementMatchOptions<T extends Element> {
   root?: ParentNode;
   predicate?: (element: T) => boolean;
 }
 
-export interface PollForValueOptions {
+interface PollForValueOptions {
   attempts?: number;
   intervalMs?: number;
   signal?: AbortSignal | undefined;
@@ -24,7 +24,7 @@ const DEFAULT_WAIT_INTERVAL_MS = 500;
 /** Interval (ms) between player element lookup retries in the overlay. */
 export const PLAYER_LOOKUP_INTERVAL_MS = 1000;
 
-export const PLAYER_CONTAINER_SELECTORS = ['#movie_player', '.html5-video-player'] as const;
+const PLAYER_CONTAINER_SELECTORS = ['#movie_player', '.html5-video-player'] as const;
 
 export const VIDEO_SELECTORS = ['#movie_player video', 'video.html5-main-video'] as const;
 
@@ -60,7 +60,7 @@ export const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
     signal?.addEventListener('abort', handleAbort, { once: true });
   });
 
-export const isVisibleElement = (element: HTMLElement): boolean =>
+const isVisibleElement = (element: HTMLElement): boolean =>
   element.offsetWidth > 0 && element.offsetHeight > 0;
 
 const normalizeCommonOptions = (options: PollForValueOptions) => ({
@@ -85,7 +85,7 @@ export const findElementMatch = <T extends Element>(
   return null;
 };
 
-export const pollForValue = async <T>(
+const pollForValue = async <T>(
   readValue: () => T | null | undefined,
   options: PollForValueOptions = {}
 ): Promise<T | null> => {
