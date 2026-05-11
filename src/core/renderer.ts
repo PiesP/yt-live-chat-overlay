@@ -5,7 +5,7 @@
  * Manages lanes and collision detection.
  */
 
-import type { ChatMessage, OverlayDimensions, OverlaySettings } from '@app-types';
+import type { BurstLevel, ChatMessage, OverlayDimensions, OverlaySettings } from '@app-types';
 import { PerAuthorRateLimiter } from '@core/author-rate-limiter';
 import { BurstDetector } from '@core/burst-detector';
 import { buildTextShadow, buildTextStroke, rendererLayout, shadows } from '@core/design-tokens';
@@ -100,11 +100,14 @@ export class Renderer {
     this.laneAllocator.reset(this.overlay.getDimensions());
     this.injectStyles();
     this.observability = new ObservabilityReporter(this.settings.showDebugOverlay);
-    this.burstDetector = new BurstDetector(this.observability, (level) => {
-      this.laneAllocator.setBurstLevel(level);
-    });
+    this.burstDetector = new BurstDetector(this.observability);
     this.burstDetector.start();
     this.authorRateLimiter = new PerAuthorRateLimiter(() => this.burstDetector.getLevel());
+    this.authorRateLimiter.updateConfig({
+      enabled: settings.authorRateLimitEnabled,
+      windowMs: settings.authorRateLimitWindowMs,
+      maxPerWindow: settings.authorRateLimitMaxMessages,
+    });
     this.overlayDimensionsUnsubscribe = this.overlay.onDimensionsChanged((dimensions) => {
       this.handleOverlayDimensionsChange(dimensions);
     });
@@ -508,8 +511,32 @@ export class Renderer {
     }
   }
 
+  /** Burst-level-based speed multiplier for adaptive scrolling. */
+  private static readonly BURST_SPEED_MULTIPLIER: Record<BurstLevel, number> = {
+    normal: 1.0,
+    elevated: 1.1,
+    high: 1.2,
+    extreme: 1.35,
+  };
+
   private getEffectiveSpeedPxPerSec(): number {
-    return Math.max(1, this.settings.speedPxPerSec * this.playbackRate);
+    let speed = this.settings.speedPxPerSec * this.playbackRate;
+
+    // EMA-based proactive speed adaptation — reacts faster than the 1s
+    // burst-level sampling interval, so a sudden flood of messages speeds
+    // up animations within milliseconds rather than waiting for the next
+    // burst-level evaluation tick.
+    const emaRate = this.burstDetector.getEmaRate();
+    if (emaRate > 5) {
+      const emaMultiplier = 1 + Math.min((emaRate - 5) / 15, 0.35);
+      speed *= emaMultiplier;
+    }
+
+    // Burst-level multiplier — the averaged, long-term component.
+    const burstLevel = this.burstDetector.getLevel();
+    speed *= Renderer.BURST_SPEED_MULTIPLIER[burstLevel];
+
+    return Math.max(1, speed);
   }
 
   private scheduleRetry(waitMs: number): void {

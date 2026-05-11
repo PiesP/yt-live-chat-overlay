@@ -37,7 +37,9 @@ export class BurstDetector {
   private samplesSinceLastCheck = 0;
   private observability: ObservabilityReporter | undefined;
   private onLevelChange: ((level: BurstLevel) => void) | undefined;
-  private emaRate: number = 0; // EMA-smoothed message rate for real-time speed adjustment
+  private emaRate: number = 0;
+  /** Timestamp of the most recently received message (for inter-message-interval EMA). */
+  private lastMessageTime: number = 0;
 
   constructor(observability?: ObservabilityReporter, onLevelChange?: (level: BurstLevel) => void) {
     this.observability = observability;
@@ -47,6 +49,17 @@ export class BurstDetector {
   /** Called whenever a message is received */
   onMessageReceived(): void {
     this.samplesSinceLastCheck++;
+
+    // Update EMA on every message using the inter-message interval for
+    // near-instantaneous speed adaptation — much faster than the 1s
+    // sampling interval used by burst level evaluation.
+    const now = performance.now();
+    if (this.lastMessageTime > 0) {
+      const intervalMs = now - this.lastMessageTime;
+      const instantRate = 1000 / Math.max(1, intervalMs); // msg/s, avoid div-by-zero
+      this.emaRate = EMA_ALPHA * instantRate + (1 - EMA_ALPHA) * this.emaRate;
+    }
+    this.lastMessageTime = now;
   }
 
   /** Start periodic sampling */
@@ -128,6 +141,7 @@ export class BurstDetector {
     this.stop();
     this.samples = [];
     this.emaRate = 0;
+    this.lastMessageTime = 0;
     this.observability = undefined;
   }
 }
