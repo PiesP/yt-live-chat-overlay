@@ -292,7 +292,14 @@ export class Renderer {
       this.observability.onMessageDropped('queue_overflow');
     }
 
-    this.pendingQueue.push({ message, nextAttemptAt: 0, priority });
+    const queued: QueuedMessage = { message, nextAttemptAt: 0, priority };
+    // Insert in priority order (highest first) so processQueue doesn't need to sort
+    const insertIndex = this.pendingQueue.findIndex((q) => q.priority < priority);
+    if (insertIndex === -1) {
+      this.pendingQueue.push(queued);
+    } else {
+      this.pendingQueue.splice(insertIndex, 0, queued);
+    }
 
     if (message.id) {
       this.seenMessageIds.mark(message.id);
@@ -378,11 +385,6 @@ export class Renderer {
     if (this.pendingQueue.length === 0) {
       return;
     }
-
-    this.pendingQueue.sort(
-      (left, right) =>
-        right.priority - left.priority || left.message.timestamp - right.message.timestamp
-    );
 
     const now = Date.now();
     const nextMessage = this.pendingQueue[0];
