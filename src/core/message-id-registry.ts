@@ -1,10 +1,10 @@
 /**
- * A Set-based FIFO eviction registry for tracking message IDs.
- * Preserves insertion order and evicts the oldest entries when the
+ * A Map-based FIFO eviction registry for tracking message IDs.
+ * Preserves insertion order and evicts the oldest entry when the
  * configured maximum size is exceeded.
  */
 export class MessageIdRegistry {
-  private readonly ids = new Set<string>();
+  private readonly ids = new Map<string, true>();
   private readonly maxSize: number;
 
   constructor(maxSize: number) {
@@ -16,19 +16,18 @@ export class MessageIdRegistry {
   }
 
   mark(id: string): void {
-    this.ids.add(id);
+    this.ids.set(id, true);
     if (this.ids.size <= this.maxSize) {
       return;
     }
 
-    // Evict oldest entries when the registry overflows. Set preserves
-    // insertion order, so iterating yields entries in FIFO sequence.
-    const iterator = this.ids.values();
+    // Evict the oldest entry when the registry overflows. Map preserves
+    // insertion order, so the first key is the oldest entry.
     const excess = this.ids.size - this.maxSize;
     for (let index = 0; index < excess; index++) {
-      const next = iterator.next();
-      if (next.done) break;
-      this.ids.delete(next.value);
+      const firstKey = this.ids.keys().next().value;
+      if (firstKey === undefined) break;
+      this.ids.delete(firstKey);
     }
   }
 
