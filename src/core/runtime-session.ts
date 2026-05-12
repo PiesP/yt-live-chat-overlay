@@ -253,9 +253,9 @@ export class RuntimeSession {
     }
   }
 
-  private noteHidden(now = performance.now()): void {
+  private noteHidden(): void {
     if (this.hiddenSince === null) {
-      this.hiddenSince = now;
+      this.hiddenSince = performance.now();
     }
   }
 
