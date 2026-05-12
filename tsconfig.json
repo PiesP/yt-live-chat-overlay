@@ -2,12 +2,13 @@
   "$schema": "https://json.schemastore.org/tsconfig",
   "compilerOptions": {
     // Target & Libraries
-    "target": "ESNext",
+    "target": "ES2025",
     "lib": [
       "ESNext",
       "DOM",
-      "DOM.Iterable"
     ],
+    // Determines ordering for union/intersection types (matches TS 7.0 Go port)
+    "stableTypeOrdering": true,
     // Module System (bundler mode for Vite compatibility)
     "module": "ESNext",
     "moduleResolution": "bundler",
