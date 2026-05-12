@@ -820,9 +820,11 @@ export class Renderer {
 
     this.isPaused = false;
 
-    // Reset active animations so they continue from their current visual
-    // position with the remaining duration, rather than jumping to where
-    // they would be if they had been running during the pause.
+    // Reset active animations using a negative animation-delay so they
+    // continue from their current visual position rather than jumping
+    // to the start of the animation timeline.  A negative delay tells
+    // the CSS engine "start as if already running for N ms," placing
+    // the element exactly where it was when paused.
     for (const active of [...this.activeMessages]) {
       try {
         // Subtract accumulated paused time so the animation resumes from
@@ -835,12 +837,15 @@ export class Renderer {
           continue;
         }
 
+        // Negative animation-delay places the element at the correct
+        // interpolated position without changing the animation definition.
+        // The original duration is preserved so the speed (px/s) remains
+        // identical to pre-pause.
         const el = active.element;
-        el.style.animationName = 'none';
+        el.style.animation = 'none';
         void el.offsetWidth;
-        el.style.animationName = '';
-        el.style.setProperty('--yt-msg-duration', `${remaining}ms`);
-        el.style.setProperty('--yt-msg-delay', '0ms');
+        el.style.animation = '';
+        el.style.setProperty('--yt-msg-delay', `${-elapsed}ms`);
         el.style.animationPlayState = 'running';
       } catch (error) {
         log.warn('Failed to reset animation on resume:', error);
