@@ -89,6 +89,31 @@ export class BurstDetector {
     this.samplesSinceLastCheck = 0;
   }
 
+  /**
+   * Pause burst detection and reset all internal state.
+   * Call when the tab becomes hidden so accumulated messages during
+   * the hidden period don't pollute the rate on return.
+   */
+  pause(): void {
+    this.stop();
+    this.emaRate = 0;
+    this.lastMessageTime = 0;
+    this.samples = [];
+    this.currentLevel = 'normal';
+    this.lastBurstTime = 0;
+  }
+
+  /**
+   * Resume burst detection from a clean state.
+   * Call when the tab becomes visible again.
+   */
+  resume(): void {
+    this.samples = [];
+    this.currentLevel = 'normal';
+    this.lastBurstTime = 0;
+    this.start();
+  }
+
   /** Get current burst level */
   getLevel(): BurstLevel {
     return this.currentLevel;
