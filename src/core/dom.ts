@@ -63,12 +63,6 @@ export const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
 const isVisibleElement = (element: HTMLElement): boolean =>
   element.offsetWidth > 0 && element.offsetHeight > 0;
 
-const normalizeCommonOptions = (options: PollForValueOptions) => ({
-  attempts: Math.max(1, Math.trunc(options.attempts ?? DEFAULT_WAIT_ATTEMPTS)),
-  intervalMs: Math.max(0, options.intervalMs ?? DEFAULT_WAIT_INTERVAL_MS),
-  signal: options.signal,
-});
-
 export const findElementMatch = <T extends Element>(
   selectors: readonly string[],
   options: ElementMatchOptions<T> = {}
@@ -89,7 +83,9 @@ const pollForValue = async <T>(
   readValue: () => T | null | undefined,
   options: PollForValueOptions = {}
 ): Promise<T | null> => {
-  const { attempts, intervalMs, signal } = normalizeCommonOptions(options);
+  const attempts = Math.max(1, Math.trunc(options.attempts ?? DEFAULT_WAIT_ATTEMPTS));
+  const intervalMs = Math.max(0, options.intervalMs ?? DEFAULT_WAIT_INTERVAL_MS);
+  const { signal } = options;
 
   for (let attempt = 0; attempt < attempts; attempt++) {
     throwIfAborted(signal);
