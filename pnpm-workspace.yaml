@@ -1,2 +1,10 @@
-minimumReleaseAge: 1440
+minimumReleaseAge: 10080
+
 minimumReleaseAgeExclude:
+
+allowBuilds:
+  esbuild: true
+  core-js: true
+strictDepBuilds: true
+
+blockExoticSubdeps: true

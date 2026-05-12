@@ -39,7 +39,11 @@ const uiColors = {
 } as const;
 
 export const colors = {
-  authorMember: '#0f9d58',
+  authorNormal: '#FFFFFF',
+  authorMember: '#0F9D58',
+  authorModerator: '#5E84F1',
+  authorOwner: '#FFD600',
+  authorVerified: '#AAAAAA',
   superChat: superChatColors,
   ui: uiColors,
 } as const;
@@ -114,6 +118,10 @@ export const rendererLayout = {
   safeDistanceMin: 4,
   laneHeightPaddingScale: 0.05,
   laneHeightPaddingMin: 2,
+  // Base lane height multiplier: fontSize * this value gives the lane slot height.
+  // line-height: 1.1 on messages; 1.12 adds ~2% vertical slack so messages
+  // stay within their lane slot without visible inter-lane gaps.
+  laneHeightMultiplier: 1.12,
   retryDelayMinMs: 32,
   retryDelayMaxMs: 800,
 } as const;

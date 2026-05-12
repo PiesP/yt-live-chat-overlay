@@ -5,6 +5,7 @@ import type {
   OverlaySettings,
 } from '@app-types';
 import { isLogLevel } from '@app-types';
+import { colors as designColors } from '@core/design-tokens';
 
 type NumericSettingLimit = Readonly<{
   min: number;
@@ -41,11 +42,11 @@ const DEFAULT_SHOW_AUTHOR: AuthorDisplaySettings = {
 };
 
 const DEFAULT_COLORS: ColorSettings = {
-  normal: '#FFFFFF',
-  member: '#0F9D58',
-  moderator: '#5E84F1',
-  owner: '#FFD600',
-  verified: '#AAAAAA',
+  normal: designColors.authorNormal,
+  member: designColors.authorMember,
+  moderator: designColors.authorModerator,
+  owner: designColors.authorOwner,
+  verified: designColors.authorVerified,
 };
 
 const DEFAULT_OUTLINE: OutlineSettings = {

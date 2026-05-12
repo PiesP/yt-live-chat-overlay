@@ -6,6 +6,7 @@
  */
 
 import type { OverlayDimensions, OverlaySettings } from '@app-types';
+import { rendererLayout } from '@core/design-tokens';
 import {
   ensurePlayerPositioning,
   findPlayerContainerElement,
@@ -19,9 +20,6 @@ const OVERLAY_ID = 'yt-live-chat-overlay';
 export const OVERLAY_SELECTOR = `#${OVERLAY_ID}`;
 
 const FULLSCREEN_UPDATE_DELAY_MS = 100;
-// line-height: 1.1 on messages; 1.12 adds just ~2% vertical slack so messages
-// stay within their lane slot without visible inter-lane gaps.
-const BASE_LANE_HEIGHT_MULTIPLIER = 1.12;
 const OVERLAY_Z_INDEX = '100';
 
 const calculateOverlayDimensions = (
@@ -40,7 +38,7 @@ const calculateOverlayDimensions = (
   // Two-line messages (with author info) use 2+ lanes dynamically.
   // line-height: 1.1 is set on message elements so rendered height stays
   // within one lane slot at all supported font sizes (18-40 px).
-  const laneHeight = settings.fontSize * BASE_LANE_HEIGHT_MULTIPLIER + settings.laneSpacing;
+  const laneHeight = settings.fontSize * rendererLayout.laneHeightMultiplier + settings.laneSpacing;
   const usableHeight = height * (1 - settings.safeTop - settings.safeBottom);
   const laneCount = Math.max(1, Math.floor(usableHeight / laneHeight));
 
