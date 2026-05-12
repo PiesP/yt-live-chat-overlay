@@ -19,7 +19,7 @@ export class ObservabilityReporter {
   private dropCounters: Record<DropReason, number>;
   private totalDroppedInWindow = 0;
   private totalReceivedInWindow = 0;
-  private windowStartTime = performance.now();
+  private windowStartTime = Date.now();
   private debugOverlayEl: HTMLElement | null = null;
   private debugUpdateTimer: ReturnType<typeof setInterval> | null = null;
   private lastWarnTime = 0;
@@ -72,7 +72,7 @@ export class ObservabilityReporter {
     // Warn if drop rate exceeds 20%
     this.refreshDerivedMetrics();
     if (this.metrics.dropRate > 0.2) {
-      const now = performance.now();
+      const now = Date.now();
       if (now - this.lastWarnTime > this.WARN_COOLDOWN_MS) {
         this.lastWarnTime = now;
         log.warn(
@@ -120,7 +120,7 @@ export class ObservabilityReporter {
   }
 
   private refreshDerivedMetrics(): void {
-    const now = performance.now();
+    const now = Date.now();
     const elapsed = now - this.windowStartTime;
     if (elapsed >= this.METRIC_WINDOW_MS) {
       // Reset window

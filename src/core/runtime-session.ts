@@ -255,7 +255,7 @@ export class RuntimeSession {
 
   private noteHidden(): void {
     if (this.hiddenSince === null) {
-      this.hiddenSince = performance.now();
+      this.hiddenSince = Date.now();
     }
   }
 
@@ -263,11 +263,11 @@ export class RuntimeSession {
     this.hiddenSince = null;
   }
 
-  private getIdleDurationMs(now = performance.now()): number {
+  private getIdleDurationMs(now = Date.now()): number {
     return this.hiddenSince === null ? 0 : Math.max(0, now - this.hiddenSince);
   }
 
-  private getRuntimeHealthSnapshot(now = performance.now()): RuntimeHealth {
+  private getRuntimeHealthSnapshot(now = Date.now()): RuntimeHealth {
     const chat =
       this.chatSource?.getHealthSnapshot({ activeTimeoutMs: CHAT_STALL_TIMEOUT_MS }) ?? null;
     const idleDurationMs = this.getIdleDurationMs(now);
