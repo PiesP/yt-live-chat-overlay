@@ -16,16 +16,23 @@ export const SETTINGS_UI_STYLES = `
         line-height: 1;
         cursor: pointer;
         z-index: 120;
-        pointer-events: auto;
-        transition: background 0.15s, transform 0.1s;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.15s, background 0.15s, transform 0.1s;
       }
-      .yt-chat-overlay-settings-button:hover {
+      .yt-chat-overlay-settings-button:hover,
+      .yt-chat-overlay-settings-button:focus-visible {
         background: rgba(0, 0, 0, 0.75);
         transform: scale(1.1);
       }
       .yt-chat-overlay-settings-button:focus-visible {
         outline: 2px solid ${colors.ui.primary};
         outline-offset: 2px;
+      }
+      #movie_player:hover .yt-chat-overlay-settings-button,
+      .html5-video-player:hover .yt-chat-overlay-settings-button {
+        opacity: 1;
+        pointer-events: auto;
       }
       .yt-chat-overlay-settings-backdrop {
         position: fixed;
