@@ -3,6 +3,36 @@
  *
  * Renders chat messages with Nico-nico style flowing animation.
  * Manages lanes and collision detection.
+ *
+ * ── Pause state machine ──────────────────────────────────────────────────
+ *
+ * Two independent pause flags combine to control animation playback:
+ *
+ *   isPaused      — tab visibility pause (visibilitychange event)
+ *   isVideoPaused — video element pause (pause/play events)
+ *
+ * State transitions:
+ *
+ *                    visibilitychange          visibilitychange
+ *   [both false] ─────────────────────▶ [isPaused=true, isVideoPaused=false]
+ *        ▲                               │
+ *        │ visibilitychange              │ pauseForVideo()
+ *        └───────────────────────────────┤
+ *                                        ▼
+ *   [isPaused=false, isVideoPaused=true]  [isPaused=true, isVideoPaused=true]
+ *        ▲                               │
+ *        │ resumeForVideo()              │ resume()
+ *        └───────────────────────────────┘
+ *                    (only if !document.hidden)
+ *
+ * Key invariants:
+ *   - pauseForVideo() is a no-op when isPaused is already true (tab hidden)
+ *   - resumeForVideo() checks document.hidden, not isPaused, to avoid
+ *     resuming animations while the tab is still hidden
+ *   - resume() early-returns when isVideoPaused is true, keeping animations
+ *     frozen until the user unpauses the video
+ *   - addMessage() drops messages when isVideoPaused is true
+ *   - ChatSource skips API polling when video is paused (bandwidth saving)
  */
 
 import type { BurstLevel, ChatMessage, OverlayDimensions, OverlaySettings } from '@app-types';
