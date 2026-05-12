@@ -12,6 +12,7 @@ type OutlineSettingKey = keyof OutlineSettings;
 export type { OutlineSettingKey, RootNumericSettingKey, RootScalarSettingKey };
 
 const VALID_BACKLOG_MODES = ['playback', 'recent', 'full', 'none'] as const;
+const VALID_DANMAKU_MODES = ['scroll', 'reverse', 'top', 'bottom'] as const;
 
 export const AUTHOR_COLOR_KEYS = [
   'normal',
@@ -55,6 +56,7 @@ export const ROOT_NUMERIC_KEYS = [
 
 export const ROOT_SETTING_KEYS = [
   'enabled',
+  'danmakuMode',
   'speedPxPerSec',
   'fontSize',
   'opacity',
@@ -171,6 +173,12 @@ const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings
   )
     ? settings.backlogMode
     : d.backlogMode;
+
+  n.danmakuMode = VALID_DANMAKU_MODES.includes(
+    settings.danmakuMode as (typeof VALID_DANMAKU_MODES)[number]
+  )
+    ? settings.danmakuMode
+    : d.danmakuMode;
 
   for (const key of ROOT_NUMERIC_KEYS) {
     n[key] = clampNumber(settings[key], d[key], resolveLimits(key));

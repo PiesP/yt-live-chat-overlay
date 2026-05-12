@@ -11,7 +11,8 @@ export type AuthorType = 'normal' | 'member' | 'moderator' | 'owner' | 'verified
  */
 export type LogLevel = 'warn' | 'info' | 'debug';
 type AuthorDisplayKey = 'normal' | 'member' | 'moderator' | 'owner' | 'verified' | 'superChat';
-type ChatMessageKind = 'text' | 'superchat' | 'membership';
+export type ChatMessageKind = 'text' | 'superchat' | 'membership';
+export type DanmakuMode = 'scroll' | 'reverse' | 'top' | 'bottom';
 type SuperChatTier = 'blue' | 'cyan' | 'green' | 'yellow' | 'orange' | 'magenta' | 'red';
 
 export const isLogLevel = (value: unknown): value is LogLevel =>
@@ -128,6 +129,8 @@ export interface OutlineSettings {
 export interface OverlaySettings {
   /** Enable/disable overlay */
   enabled: boolean;
+  /** Danmaku comment display mode */
+  danmakuMode: DanmakuMode;
   /** Speed in pixels per second (100-400) */
   speedPxPerSec: number;
   /** Font size in pixels */

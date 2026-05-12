@@ -225,6 +225,7 @@ export class SettingsUiForm {
 
     pane.append(
       this.createEnabledField(),
+      this.createDanmakuModeField(),
       this.createNumberField('Font Size (px)', 'fontSize'),
       this.createNumberField('Text Opacity', 'opacity'),
       this.createNumberField('Scroll Speed (px/s)', 'speedPxPerSec'),
@@ -495,6 +496,24 @@ export class SettingsUiForm {
     return this.createField('Backlog Mode', select);
   }
 
+  private createDanmakuModeField(): HTMLLabelElement {
+    const select = document.createElement('select');
+    select.name = 'danmakuMode';
+    select.title = 'Comment animation direction and behavior';
+    for (const [value, label] of [
+      ['scroll', 'Scroll (RTL)'],
+      ['reverse', 'Reverse (LTR)'],
+      ['top', 'Top Fixed'],
+      ['bottom', 'Bottom Fixed'],
+    ] as const) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = label;
+      select.appendChild(option);
+    }
+    return this.createField('Danmaku Mode', select);
+  }
+
   private createField(labelText: string, control: HTMLElement): HTMLLabelElement {
     const label = document.createElement('label');
     label.className = 'yt-chat-overlay-settings-field';
@@ -575,6 +594,7 @@ export class SettingsUiForm {
   private static readonly SELECT_ROOT_KEYS = new Set<RootScalarSettingKey>([
     'logLevel',
     'backlogMode',
+    'danmakuMode',
   ]);
 
   private populateRootSetting(
@@ -651,6 +671,10 @@ export class SettingsUiForm {
       'backlogMode',
       current.backlogMode
     ) as OverlaySettings['backlogMode'];
+    target.danmakuMode = this.getSelectValue(
+      'danmakuMode',
+      current.danmakuMode
+    ) as OverlaySettings['danmakuMode'];
 
     for (const key of ROOT_NUMERIC_KEYS) {
       target[key] = normalizeRootNumericInputValue(
