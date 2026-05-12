@@ -83,6 +83,8 @@ export class Renderer {
   private static readonly SEEN_MESSAGE_IDS_LIMIT = 2000;
   private readonly seenMessageIds = new MessageIdRegistry(Renderer.SEEN_MESSAGE_IDS_LIMIT);
   static readonly BACKGROUND_QUEUE_MAX = 10;
+  /** Timestamp until which the EMA speed multiplier is suppressed after resume. */
+  private resumeStabilizeUntil: number = 0;
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
     this.overlay = overlay;
@@ -522,14 +524,17 @@ export class Renderer {
   private getEffectiveSpeedPxPerSec(): number {
     let speed = this.settings.speedPxPerSec * this.playbackRate;
 
-    // EMA-based proactive speed adaptation — reacts faster than the 1s
-    // burst-level sampling interval, so a sudden flood of messages speeds
-    // up animations within milliseconds rather than waiting for the next
-    // burst-level evaluation tick.
-    const emaRate = this.burstDetector.getEmaRate();
-    if (emaRate > 5) {
-      const emaMultiplier = 1 + Math.min((emaRate - 5) / 15, 0.35);
-      speed *= emaMultiplier;
+    // Suppress the EMA-based proactive speed adaptation during the
+    // 2-second stabilisation window after a tab-visibility resume.
+    // The backlog drained from the pending queue can cause a transient
+    // EMA spike that would otherwise make animations visibly faster
+    // than intended.
+    if (performance.now() >= this.resumeStabilizeUntil) {
+      const emaRate = this.burstDetector.getEmaRate();
+      if (emaRate > 5) {
+        const emaMultiplier = 1 + Math.min((emaRate - 5) / 15, 0.35);
+        speed *= emaMultiplier;
+      }
     }
 
     // Burst-level multiplier — the averaged, long-term component.
@@ -790,6 +795,11 @@ export class Renderer {
     // burst level reflect post-hide real-time activity, not the backlog
     // that accumulated while the tab was hidden.
     this.burstDetector.resume();
+
+    // Suppress the EMA speed multiplier for 2s after resume so the
+    // backlog messages drained from the pending queue don't spike the
+    // animation speed before real-time activity stabilises.
+    this.resumeStabilizeUntil = performance.now() + 2000;
 
     const now = performance.now();
     let pausedDuration = 0;
