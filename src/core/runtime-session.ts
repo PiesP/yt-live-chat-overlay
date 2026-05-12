@@ -356,11 +356,13 @@ export class RuntimeSession {
       if (this.disposed) return;
       log.debug('Video paused — pausing comment flow');
       this.renderer?.pauseForVideo();
+      this.chatSource?.setPaused(true);
     };
 
     const handlePlay = (): void => {
       if (this.disposed) return;
       log.debug('Video playing — resuming comment flow');
+      this.chatSource?.setPaused(false);
       this.renderer?.resumeForVideo();
     };
 
