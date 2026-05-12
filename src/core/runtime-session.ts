@@ -6,6 +6,7 @@ import { createLogger } from '@core/logging';
 import { MessageIdRegistry } from '@core/message-id-registry';
 import { OVERLAY_SELECTOR, Overlay } from '@core/overlay';
 import { Renderer } from '@core/renderer';
+import { Canvas2DRenderer } from '@core/renderer-canvas2d';
 import { shouldResetRendererForSettingsChange } from '@core/settings-schema';
 
 const log = createLogger('RuntimeSession');
@@ -46,7 +47,7 @@ export class RuntimeSession {
   private readonly requestRestart: RuntimeSessionOptions['requestRestart'];
   private readonly abortController = new AbortController();
   private overlay: Overlay | null = null;
-  private renderer: Renderer | null = null;
+  private renderer: Renderer | Canvas2DRenderer | null = null;
   private chatSource: ChatSource | null = null;
   private foregroundCleanup: (() => void) | null = null;
   private videoPauseCleanup: (() => void) | null = null;
@@ -89,7 +90,11 @@ export class RuntimeSession {
       }
 
       this.overlay = overlay;
-      this.renderer = new Renderer(overlay, this.settings);
+      if (this.settings.rendererType === 'canvas') {
+        this.renderer = new Canvas2DRenderer(overlay, this.settings);
+      } else {
+        this.renderer = new Renderer(overlay, this.settings);
+      }
 
       const chatStarted = await this.startChatSource(signal);
       throwIfAborted(signal);
@@ -429,7 +434,10 @@ export class RuntimeSession {
     }
   }
 
-  private replayLatestMessages(renderer: Renderer, limit = RECENT_MESSAGE_REPLAY_LIMIT): void {
+  private replayLatestMessages(
+    renderer: Renderer | Canvas2DRenderer,
+    limit = RECENT_MESSAGE_REPLAY_LIMIT
+  ): void {
     const latestMessages = this.chatSource?.getLatestMessages(limit) ?? [];
     for (const message of latestMessages) {
       // sessionDedup check prevents re-rendering messages already shown

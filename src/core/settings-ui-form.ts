@@ -316,7 +316,8 @@ export class SettingsUiForm {
         'Max Visible',
         'maxConcurrentMessages',
         'Performance warning threshold for simultaneous comments'
-      )
+      ),
+      this.createRendererTypeField()
     );
 
     const backlogSection = this.createSection('Backlog');
@@ -514,6 +515,22 @@ export class SettingsUiForm {
     return this.createField('Danmaku Mode', select);
   }
 
+  private createRendererTypeField(): HTMLLabelElement {
+    const select = document.createElement('select');
+    select.name = 'rendererType';
+    select.title = 'Rendering backend (requires page reload)';
+    for (const [value, label] of [
+      ['css', 'CSS DOM'],
+      ['canvas', 'Canvas 2D'],
+    ] as const) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = label;
+      select.appendChild(option);
+    }
+    return this.createField('Renderer', select);
+  }
+
   private createField(labelText: string, control: HTMLElement): HTMLLabelElement {
     const label = document.createElement('label');
     label.className = 'yt-chat-overlay-settings-field';
@@ -595,6 +612,7 @@ export class SettingsUiForm {
     'logLevel',
     'backlogMode',
     'danmakuMode',
+    'rendererType',
   ]);
 
   private populateRootSetting(
@@ -675,6 +693,10 @@ export class SettingsUiForm {
       'danmakuMode',
       current.danmakuMode
     ) as OverlaySettings['danmakuMode'];
+    target.rendererType = this.getSelectValue(
+      'rendererType',
+      current.rendererType
+    ) as OverlaySettings['rendererType'];
 
     for (const key of ROOT_NUMERIC_KEYS) {
       target[key] = normalizeRootNumericInputValue(

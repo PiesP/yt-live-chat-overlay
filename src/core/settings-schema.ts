@@ -13,6 +13,7 @@ export type { OutlineSettingKey, RootNumericSettingKey, RootScalarSettingKey };
 
 const VALID_BACKLOG_MODES = ['playback', 'recent', 'full', 'none'] as const;
 const VALID_DANMAKU_MODES = ['scroll', 'reverse', 'top', 'bottom'] as const;
+const VALID_RENDERER_TYPES = ['css', 'canvas'] as const;
 
 export const AUTHOR_COLOR_KEYS = [
   'normal',
@@ -57,6 +58,7 @@ export const ROOT_NUMERIC_KEYS = [
 export const ROOT_SETTING_KEYS = [
   'enabled',
   'danmakuMode',
+  'rendererType',
   'speedPxPerSec',
   'fontSize',
   'opacity',
@@ -179,6 +181,12 @@ const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings
   )
     ? settings.danmakuMode
     : d.danmakuMode;
+
+  n.rendererType = VALID_RENDERER_TYPES.includes(
+    settings.rendererType as (typeof VALID_RENDERER_TYPES)[number]
+  )
+    ? settings.rendererType
+    : d.rendererType;
 
   for (const key of ROOT_NUMERIC_KEYS) {
     n[key] = clampNumber(settings[key], d[key], resolveLimits(key));
