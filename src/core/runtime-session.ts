@@ -122,6 +122,19 @@ export class RuntimeSession {
     }
   }
 
+  /**
+   * Propagate new settings to all owned subsystems.
+   *
+   * Propagation order is intentional:
+   *   1. Compute shouldResetRenderer against the *previous* settings
+   *   2. Update session-level settings reference (SSOT for this session)
+   *   3. Overlay — may trigger ResizeObserver via updateDimensions()
+   *   4. Renderer — uses the new settings for all subsequent rendering
+   *   5. BacklogController — syncs config then pushes multiplier to Renderer
+   *
+   * All subsystems receive the same settings object reference, so there
+   * is no stale-copy risk within a single updateSettings() call.
+   */
   updateSettings(settings: OverlaySettings): void {
     if (this.disposed) {
       return;
