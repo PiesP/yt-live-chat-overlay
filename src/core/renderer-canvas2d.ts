@@ -12,7 +12,7 @@
  * - No text-shadow CSS property — manual shadow via ctx.shadow*
  */
 
-import type { ChatMessage, OverlayDimensions, OverlaySettings } from '@app-types';
+import type { ChatMessage, ContentSegment, OverlayDimensions, OverlaySettings } from '@app-types';
 import { BurstDetector } from '@core/burst-detector';
 import { rendererLayout } from '@core/design-tokens';
 import { createLogger } from '@core/logging';
@@ -34,6 +34,13 @@ interface CanvasMessage {
   startTime: number;
   duration: number;
   laneIndex: number;
+  kind: 'text' | 'superchat' | 'membership';
+  tierColor?: string | undefined;
+  tierRgb?: string | undefined;
+  amount?: string | undefined;
+  authorName?: string | undefined;
+  content: ContentSegment[];
+  isBacklog?: boolean | undefined;
 }
 
 const OUTLINE_OFFSETS = [
@@ -133,7 +140,10 @@ export class Canvas2DRenderer {
     this.burstDetector.onMessageReceived();
     this.observability.onMessageReceived();
     const estimated = this.messageBuilder.estimateMessageDimensions(message);
-    const text = message.author ? `${message.author}: ${message.text}` : message.text;
+    const text = message.text;
+    const author = message.author ?? '';
+    const showAuthor = this.settings.showAuthor[message.authorType];
+    const displayText = showAuthor && author ? `${author}: ${text}` : text;
 
     const placement = this.laneAllocator.findPlacement(estimated.height, dims);
     if (!placement) {
@@ -164,9 +174,17 @@ export class Canvas2DRenderer {
     this.laneAllocator.commitPlacement(placement, textWidth, estimated.height, now, now + duration);
 
     const color = this.settings.colors[message.authorType];
+    const kind = message.kind;
+    const isSuperChat = kind === 'superchat' && !!message.superChat;
+    const isMembership = kind === 'membership';
+    const effectiveKind: CanvasMessage['kind'] = isSuperChat
+      ? 'superchat'
+      : isMembership
+        ? 'membership'
+        : 'text';
 
-    this.messages.push({
-      text,
+    const msg: CanvasMessage = {
+      text: displayText,
       x: dims.width + entryOffset,
       y,
       width: textWidth,
@@ -176,8 +194,19 @@ export class Canvas2DRenderer {
       startTime: now,
       duration,
       laneIndex: placement.lane.index,
-    });
+      kind: effectiveKind,
+      content: message.content,
+      authorName: author || undefined,
+      isBacklog: message.isBacklog,
+    };
 
+    if (isSuperChat && message.superChat) {
+      msg.tierColor = message.superChat.headerBackgroundColor || message.superChat.backgroundColor;
+      msg.tierRgb = message.superChat.tier;
+      msg.amount = message.superChat.amount;
+    }
+
+    this.messages.push(msg);
     this.observability.onMessageRendered();
   }
 
@@ -208,6 +237,7 @@ export class Canvas2DRenderer {
     const outlineEnabled = this.settings.outline.enabled;
     const outlineOpacity = this.settings.outline.opacity;
     const outlineWidth = this.settings.outline.widthPx;
+    const maxAgeMs = 60000;
 
     this.messages = this.messages.filter((msg) => {
       const elapsed = now - msg.startTime;
@@ -216,28 +246,22 @@ export class Canvas2DRenderer {
       const progress = elapsed / msg.duration;
       msg.x = canvas.width + (msg.x - canvas.width) - progress * (canvas.width + msg.width + 100);
 
-      const ageRatio = elapsed / Math.max(msg.duration, 60000);
+      const ageRatio = elapsed / Math.max(msg.duration, maxAgeMs);
       const fadeFactor = Math.max(0, 1 - ageRatio);
       const effectiveOpacity = msg.opacity * fadeFactor;
 
       ctx.save();
       ctx.globalAlpha = effectiveOpacity;
 
-      if (outlineEnabled && outlineWidth > 0) {
-        ctx.strokeStyle = `rgba(0, 0, 0, ${outlineOpacity})`;
-        ctx.lineWidth = outlineWidth * 2;
-        ctx.lineJoin = 'round';
-        for (const [dx, dy] of OUTLINE_OFFSETS) {
-          ctx.strokeText(msg.text, msg.x + dx, msg.y + dy);
-        }
+      if (msg.kind === 'superchat') {
+        this.drawSuperChat(ctx, msg, canvas);
+      } else if (msg.kind === 'membership') {
+        this.drawMembership(ctx, msg);
+      } else {
+        this.drawText(ctx, msg, outlineEnabled, outlineOpacity, outlineWidth);
       }
 
-      ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
-      ctx.shadowBlur = 4;
-      ctx.fillStyle = msg.color;
-      ctx.fillText(msg.text, msg.x, msg.y);
       ctx.restore();
-
       return true;
     });
 
@@ -245,6 +269,142 @@ export class Canvas2DRenderer {
     this.observability.updateLaneUtilization(
       this.messages.length / Math.max(1, this.laneAllocator.getLaneCount())
     );
+  }
+
+  private drawText(
+    ctx: CanvasRenderingContext2D,
+    msg: CanvasMessage,
+    outlineEnabled: boolean,
+    outlineOpacity: number,
+    outlineWidth: number
+  ): void {
+    if (outlineEnabled && outlineWidth > 0) {
+      ctx.strokeStyle = `rgba(0, 0, 0, ${outlineOpacity})`;
+      ctx.lineWidth = outlineWidth * 2;
+      ctx.lineJoin = 'round';
+      for (const [dx, dy] of OUTLINE_OFFSETS) {
+        ctx.strokeText(msg.text, msg.x + dx, msg.y + dy);
+      }
+    }
+
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
+    ctx.shadowBlur = 4;
+    ctx.fillStyle = msg.color;
+    ctx.fillText(msg.text, msg.x, msg.y);
+  }
+
+  private drawSuperChat(
+    ctx: CanvasRenderingContext2D,
+    msg: CanvasMessage,
+    canvas: HTMLCanvasElement
+  ): void {
+    const padding = 10;
+    const cardW = Math.max(240, Math.min(canvas.width * 0.6, msg.width + padding * 2));
+    const cardH = msg.height + padding * 2;
+
+    // Tier color
+    const tierColor = msg.tierColor || '#1e88e5';
+    const rgb = this.parseRgb(tierColor);
+
+    // Background gradient
+    const grad = ctx.createLinearGradient(msg.x, msg.y, msg.x, msg.y + cardH);
+    grad.addColorStop(0, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.5)`);
+    grad.addColorStop(1, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.35)`);
+
+    // Card background
+    ctx.fillStyle = grad;
+    this.roundRect(ctx, msg.x, msg.y, cardW, cardH, 6);
+    ctx.fill();
+
+    // Border
+    ctx.strokeStyle = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.6)`;
+    ctx.lineWidth = 1;
+    this.roundRect(ctx, msg.x, msg.y, cardW, cardH, 6);
+    ctx.stroke();
+
+    // Left accent
+    ctx.fillStyle = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
+    ctx.fillRect(msg.x, msg.y, 4, cardH);
+
+    // Amount badge
+    if (msg.amount) {
+      ctx.font = `bold ${this.settings.fontSize * 0.75}px system-ui, sans-serif`;
+      ctx.fillStyle = '#fff';
+      ctx.shadowColor = 'rgba(0,0,0,0.5)';
+      ctx.shadowBlur = 3;
+      ctx.fillText(msg.amount, msg.x + 14, msg.y + padding);
+    }
+
+    // Text
+    ctx.font = this.getFont();
+    ctx.fillStyle = '#fff';
+    ctx.shadowColor = 'rgba(0,0,0,0.5)';
+    ctx.shadowBlur = 3;
+    ctx.fillText(
+      msg.text,
+      msg.x + 14,
+      msg.y + padding + (msg.amount ? this.settings.fontSize * 0.85 + 6 : 0)
+    );
+  }
+
+  private drawMembership(ctx: CanvasRenderingContext2D, msg: CanvasMessage): void {
+    const padding = 12;
+    const cardW = msg.width + padding * 2;
+    const cardH = msg.height + padding * 2;
+
+    // Green background
+    ctx.fillStyle = 'rgba(76, 175, 80, 0.25)';
+    this.roundRect(ctx, msg.x, msg.y - padding / 2, cardW, cardH, 8);
+    ctx.fill();
+
+    // Green border
+    ctx.strokeStyle = 'rgba(76, 175, 80, 0.6)';
+    ctx.lineWidth = 2;
+    this.roundRect(ctx, msg.x, msg.y - padding / 2, cardW, cardH, 8);
+    ctx.stroke();
+
+    // Text
+    ctx.shadowColor = 'rgba(0,0,0,0.8)';
+    ctx.shadowBlur = 4;
+    ctx.fillStyle = msg.color;
+    ctx.fillText(msg.text, msg.x + padding, msg.y);
+  }
+
+  private roundRect(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    r: number
+  ): void {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.arcTo(x + w, y, x + w, y + r, r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+    ctx.lineTo(x + r, y + h);
+    ctx.arcTo(x, y + h, x, y + h - r, r);
+    ctx.lineTo(x, y + r);
+    ctx.arcTo(x, y, x + r, y, r);
+    ctx.closePath();
+  }
+
+  private parseRgb(color: string): { r: number; g: number; b: number } {
+    const match = color.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+    if (match) {
+      const r = Number.parseInt(match[1] ?? '30', 16);
+      const g = Number.parseInt(match[2] ?? '136', 16);
+      const b = Number.parseInt(match[3] ?? '229', 16);
+      return { r, g, b };
+    }
+    // Fallback: try rgb() format
+    const rgbMatch = color.match(/^rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)$/);
+    if (rgbMatch) {
+      return { r: Number(rgbMatch[1]), g: Number(rgbMatch[2]), b: Number(rgbMatch[3]) };
+    }
+    return { r: 30, g: 136, b: 229 }; // Default blue
   }
 
   pause(): void {
