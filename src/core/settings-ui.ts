@@ -132,7 +132,6 @@ export class SettingsUi {
     }
 
     this.backdrop.style.display = isOpen ? 'flex' : 'none';
-    this.backdrop.hidden = !isOpen;
     this.backdrop.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
 
     if (isOpen) {
