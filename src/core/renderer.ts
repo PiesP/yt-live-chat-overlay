@@ -363,7 +363,7 @@ export class Renderer {
     for (const active of this.activeMessages) {
       try {
         // Remove messages that exceeded their expected lifetime + tolerance
-        const elapsed = now - active.startTime;
+        const elapsed = now - active.startTime - active.pausedDuration;
         if (elapsed >= active.baseDuration + Renderer.SWEEP_TOLERANCE_MS) {
           toRemove.push(active);
         }
@@ -586,7 +586,7 @@ export class Renderer {
 
     for (const active of this.activeMessages) {
       try {
-        const elapsed = now - active.startTime;
+        const elapsed = now - active.startTime - active.pausedDuration;
 
         if (elapsed >= Renderer.MAX_MESSAGE_AGE_MS) {
           toRemove.push(active);
