@@ -296,6 +296,7 @@ export class RuntimeSession {
         this.noteHidden();
         this.renderer?.pause();
         this.renderer?.trimBackgroundQueue();
+        this.chatSource?.setPaused(true);
         return;
       }
 
@@ -305,6 +306,7 @@ export class RuntimeSession {
 
       // Clear idle markers so the health snapshot reflects current state.
       this.clearHidden();
+      this.chatSource?.setPaused(false);
 
       if (this.getRuntimeHealthSnapshot().shouldRestart) {
         this.requestManagedRestart('foreground-return');

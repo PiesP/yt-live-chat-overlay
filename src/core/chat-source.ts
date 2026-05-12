@@ -98,6 +98,7 @@ export abstract class ChatSource {
   private pollController: AbortController | null = null;
   private pollLoopAlive = false;
   private pollGeneration = 0;
+  protected _paused = false;
   private lastActivityTime = 0;
   protected bootstrap: ChatBootstrapData | null = null;
   private readonly recentMessages: ChatMessage[] = [];
@@ -370,6 +371,32 @@ export abstract class ChatSource {
     this.recentMessages.length = 0;
   }
 
+  /**
+   * Pause/resume chat polling. When paused, the poll loop skips API
+   * requests until resumed — used when the tab is hidden to save bandwidth.
+   */
+  setPaused(paused: boolean): void {
+    this._paused = paused;
+  }
+
+  /**
+   * Block while paused, polling every 500ms until unpaused or aborted.
+   * Called from the poll loop to defer API requests during tab hidden.
+   */
+  protected waitWhilePaused(): Promise<void> {
+    if (!this._paused) return Promise.resolve();
+    return new Promise((resolve) => {
+      const check = (): void => {
+        if (!this._paused) {
+          resolve();
+          return;
+        }
+        setTimeout(check, 500);
+      };
+      check();
+    });
+  }
+
   // ---- Abstract hooks for subclass specialisation ----
 
   /**
@@ -474,6 +501,8 @@ class LiveChatSource extends ChatSource {
   private async runLiveLoop(signal?: AbortSignal): Promise<void> {
     while (!signal?.aborted) {
       throwIfAborted(signal);
+
+      await this.waitWhilePaused();
 
       const timeoutMs = this.liveContinuation?.timeoutMs ?? LIVE_POLL_FALLBACK_DELAY_MS;
       const delayMs = this.calculateAdaptiveDelay(timeoutMs);
@@ -707,6 +736,8 @@ class ReplayChatSource extends ChatSource {
 
   private async runReplayLoop(signal?: AbortSignal): Promise<void> {
     while (!signal?.aborted) {
+      await this.waitWhilePaused();
+
       const playback = this.getPlaybackSnapshot();
       const currentOffsetMs = playback?.offsetMs ?? 0;
 
