@@ -1,10 +1,20 @@
 minimumReleaseAge: 10080
 
+# Security-critical packages that should bypass the minimum release age.
+# These packages receive immediate updates even within the 7-day cooling period:
+#   - minimatch: known supply-chain attack target
+#   - vite/vite-plugin-monkey: build toolchain for userscript
+#   - yaml: dependency of Vite config processing
 minimumReleaseAgeExclude:
+  - minimatch
+  - vite
+  - vite-plugin-monkey
+  - yaml
 
 allowBuilds:
-  esbuild: true
-  core-js: true
+  - esbuild
+  - core-js
+
 strictDepBuilds: true
 
 blockExoticSubdeps: true

@@ -4,6 +4,9 @@ name: 🤖 Dependabot Auto-Merge
 # - GitHub Actions: patch/minor updates
 # - npm: patch/minor updates for specific safe packages
 # - Requires CI to pass first (via GitHub branch protection)
+#
+# Security: Uses pull_request_target for auto-merge capability.
+# Only reads dependency metadata and queues squash merges — no untrusted code execution.
 
 on:
   pull_request_target:
@@ -28,7 +31,7 @@ jobs:
     steps:
       - name: 📥 Fetch Dependabot metadata
         id: dependabot-metadata
-        uses: dependabot/fetch-metadata@v3.1.0
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
 
