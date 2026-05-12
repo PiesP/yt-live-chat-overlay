@@ -47,6 +47,9 @@ export class ObservabilityReporter {
       backlogProgress: 1,
     };
     this.showDebug = initialShowDebug;
+    if (initialShowDebug) {
+      this.createDebugOverlay();
+    }
   }
 
   // called when a message is received (before any processing)
