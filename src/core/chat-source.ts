@@ -734,7 +734,9 @@ class ReplayChatSource extends ChatSource {
       const playback = this.getPlaybackSnapshot();
       const currentOffsetMs = playback?.offsetMs ?? 0;
 
-      this.flushReplayBuffer(currentOffsetMs);
+      if (playback && !playback.paused) {
+        this.flushReplayBuffer(currentOffsetMs);
+      }
 
       if (!playback) {
         await sleep(REPLAY_LOOP_DELAY_MS, signal);
