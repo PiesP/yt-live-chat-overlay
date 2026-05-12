@@ -5,11 +5,12 @@
  * Shares LaneAllocator with the CSS Renderer for consistent placement.
  * Uses RendererMessageBuilder for dimension estimation.
  *
- * ── Key differences from the CSS Renderer ──────────────────────────────
- * - rAF-based continuous render loop (no CSS @keyframes)
- * - No DOM nodes per message — renders directly to Canvas 2D
- * - 8-direction text outline (replaces -webkit-text-stroke)
- * - No text-shadow CSS property — manual shadow via ctx.shadow*
+ * ── Performance features ───────────────────────────────────────────────
+ * - Off-screen bitmap caching: text pre-rendered once, blitted each frame
+ * - Minimal save/restore: globalAlpha set directly per message
+ * - Depth-batched rendering: SuperChat/membership first, text second
+ * - Density-based adaptation: tightens spacing at high message rates
+ *   instead of increasing scroll speed (keeps comments readable)
  */
 
 import type {
@@ -28,6 +29,18 @@ import { LaneAllocator } from '@core/renderer-lanes';
 import { RendererMessageBuilder } from '@core/renderer-message-builder';
 
 const log = createLogger('Canvas2DRenderer');
+const OUTLINE_OFFSETS: ReadonlyArray<readonly [number, number]> = [
+  [-1, -1],
+  [-1, 0],
+  [-1, 1],
+  [0, -1],
+  [0, 1],
+  [1, -1],
+  [1, 0],
+  [1, 1],
+];
+const MAX_AGE_MS = 60_000;
+const PREVIEW_BITMAP_SIZE = 2048;
 
 interface CanvasMessage {
   text: string;
@@ -39,30 +52,27 @@ interface CanvasMessage {
   opacity: number;
   startTime: number;
   duration: number;
-  laneIndex: number;
   kind: 'text' | 'superchat' | 'membership';
   mode: DanmakuMode;
-  /** For top/bottom: entry opacity animation start time */
   fadeInEndTime?: number;
-  /** For top/bottom: fade-out start time */
   fadeOutStartTime?: number;
   tierColor?: string | undefined;
   amount?: string | undefined;
-  authorName?: string | undefined;
   content: ContentSegment[];
   isBacklog?: boolean | undefined;
+  /** Pre-rendered bitmap for this message text (null for rich-content messages). */
+  bitmap: HTMLCanvasElement | null;
+  /** True when the bitmap has been rendered at least once. */
+  bitmapReady: boolean;
 }
 
-const OUTLINE_OFFSETS = [
-  [-1, -1],
-  [-1, 0],
-  [-1, 1],
-  [0, -1],
-  [0, 1],
-  [1, -1],
-  [1, 0],
-  [1, 1],
-] as const;
+/** Density multiplier per burst level — tighter spacing = higher density. */
+const BURST_DENSITY: Record<string, number> = {
+  normal: 1.0,
+  elevated: 0.85,
+  high: 0.7,
+  extreme: 0.55,
+};
 
 export class Canvas2DRenderer {
   readonly observability: ObservabilityReporter;
@@ -77,6 +87,9 @@ export class Canvas2DRenderer {
   private burstDetector: BurstDetector;
   private dimensions: OverlayDimensions | null = null;
   private overlayDimensionsUnsubscribe: (() => void) | null = null;
+  private emojiCache = new Map<string, HTMLImageElement>();
+  private textMeasureCache = new Map<string, number>();
+  private measureCtx: CanvasRenderingContext2D | null = null;
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
     this.settings = settings;
@@ -96,15 +109,29 @@ export class Canvas2DRenderer {
     this.burstDetector.start();
 
     this.initCanvas(overlay);
+    this.initMeasureCanvas();
 
     this.overlayDimensionsUnsubscribe = overlay.onDimensionsChanged((dimensions) => {
       if (dimensions) {
         this.dimensions = dimensions;
         this.laneAllocator.reset(dimensions);
-        this.canvas!.width = dimensions.width;
-        this.canvas!.height = dimensions.height;
+        const cnv = this.canvas;
+        if (cnv) {
+          cnv.width = dimensions.width;
+          cnv.height = dimensions.height;
+        }
       }
     });
+  }
+
+  private initMeasureCanvas(): void {
+    const canvas = document.createElement('canvas');
+    canvas.width = PREVIEW_BITMAP_SIZE;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      this.measureCtx = ctx;
+    }
   }
 
   private initCanvas(overlay: Overlay): void {
@@ -143,20 +170,9 @@ export class Canvas2DRenderer {
     return `${this.settings.fontSize}px system-ui, -apple-system, sans-serif`;
   }
 
-  private emojiCache = new Map<string, HTMLImageElement>();
-  private textMeasureCache = new Map<string, number>();
-  private offscreenCanvas: HTMLCanvasElement | null = null;
-  private offscreenCtx: CanvasRenderingContext2D | null = null;
-
-  private getOffscreenCtx(): CanvasRenderingContext2D | null {
-    if (!this.offscreenCanvas) {
-      this.offscreenCanvas = document.createElement('canvas');
-      this.offscreenCanvas.width = 2048;
-      this.offscreenCanvas.height = 256;
-      const ctx = this.offscreenCanvas.getContext('2d');
-      if (ctx) this.offscreenCtx = ctx;
-    }
-    return this.offscreenCtx;
+  /** Density-based gap multiplier: tighter at high burst levels, keeps speed constant. */
+  private getDensityMultiplier(): number {
+    return BURST_DENSITY[this.burstDetector.getLevel()] ?? 1.0;
   }
 
   addMessage(message: ChatMessage): void {
@@ -182,20 +198,19 @@ export class Canvas2DRenderer {
     const mode = this.settings.danmakuMode;
     const now = performance.now();
     const speed = this.settings.speedPxPerSec;
+    const densityMul = this.getDensityMultiplier();
 
     let x: number;
     let y: number;
     let duration: number;
 
     if (mode === 'top' || mode === 'bottom') {
-      // Fixed modes: position at top/bottom of safe zone, fade in/out
       const xRange = Math.max(1, dims.width - textWidth);
       x = Math.random() * xRange;
-      if (mode === 'top') {
-        y = dims.height * this.settings.safeTop;
-      } else {
-        y = dims.height * (1 - this.settings.safeBottom) - estimated.height;
-      }
+      y =
+        mode === 'top'
+          ? dims.height * this.settings.safeTop
+          : dims.height * (1 - this.settings.safeBottom) - estimated.height;
       duration = 4000;
       this.laneAllocator.commitPlacement(
         placement,
@@ -205,10 +220,9 @@ export class Canvas2DRenderer {
         now + duration
       );
     } else {
-      // Scroll modes (RTL / LTR)
       const exitPadding = Math.max(
-        fontSize * rendererLayout.exitPaddingScale,
-        rendererLayout.exitPaddingMin
+        fontSize * rendererLayout.exitPaddingScale * densityMul,
+        rendererLayout.exitPaddingMin * densityMul
       );
       const baseOffset =
         dims.laneCount > 1 ? Math.round((placement.lane.index / (dims.laneCount - 1)) * 200) : 100;
@@ -222,11 +236,7 @@ export class Canvas2DRenderer {
       const distance = dims.width + textWidth + exitPadding + entryOffset;
       duration = Math.max(2000, (distance / speed) * 1000);
 
-      if (mode === 'reverse') {
-        x = -(textWidth + exitPadding); // start off-screen left
-      } else {
-        x = dims.width + entryOffset; // start off-screen right (RTL)
-      }
+      x = mode === 'reverse' ? -(textWidth + exitPadding) : dims.width + entryOffset;
 
       this.laneAllocator.commitPlacement(
         placement,
@@ -247,7 +257,7 @@ export class Canvas2DRenderer {
         ? 'membership'
         : 'text';
 
-    // Load emoji images
+    // Eager-load emoji images
     for (const seg of message.content) {
       if (seg.type === 'emoji' && !this.emojiCache.has(seg.emoji.url)) {
         const img = new Image();
@@ -268,17 +278,17 @@ export class Canvas2DRenderer {
       opacity: this.settings.opacity,
       startTime: now,
       duration,
-      laneIndex: placement.lane.index,
       kind: effectiveKind,
       mode,
       content: message.content,
-      authorName: author || undefined,
       isBacklog: message.isBacklog,
+      bitmap: null,
+      bitmapReady: false,
     };
 
     if (mode === 'top' || mode === 'bottom') {
-      msg.fadeInEndTime = now + 400; // 400ms fade in
-      msg.fadeOutStartTime = now + 3200; // fade out from 3.2s to 4s
+      msg.fadeInEndTime = now + 400;
+      msg.fadeOutStartTime = now + 3200;
     }
 
     if (isSuperChat && message.superChat) {
@@ -290,14 +300,18 @@ export class Canvas2DRenderer {
     this.observability.onMessageRendered();
   }
 
+  // ── Render loop ───────────────────────────────────────────────────────
+
   private startRenderLoop(): void {
     const loop = (): void => {
-      if (this.isPaused) {
-        this.animFrameId = requestAnimationFrame(loop);
-        return;
-      }
-      this.render();
-      this.animFrameId = requestAnimationFrame(loop);
+      this.animFrameId = requestAnimationFrame(
+        this.isPaused
+          ? loop
+          : () => {
+              this.render();
+              this.animFrameId = requestAnimationFrame(loop);
+            }
+      );
     };
     this.animFrameId = requestAnimationFrame(loop);
   }
@@ -316,60 +330,50 @@ export class Canvas2DRenderer {
     const outlineEnabled = this.settings.outline.enabled;
     const outlineOpacity = this.settings.outline.opacity;
     const outlineWidth = this.settings.outline.widthPx;
-    const maxAgeMs = 60000;
     const dims = this.dimensions;
+    const canvasW = canvas.width;
+
+    // Phase 1: update positions, build depth-sorted render list
+    const cards: Array<{ msg: CanvasMessage; elapsed: number; opacity: number }> = [];
+    const texts: Array<{ msg: CanvasMessage; elapsed: number; opacity: number }> = [];
 
     this.messages = this.messages.filter((msg) => {
       const elapsed = now - msg.startTime;
       if (elapsed >= msg.duration) return false;
 
-      // ── Position update per mode ────────────────────────────────────
+      let renderOpacity: number;
+
       if (msg.mode === 'top' || msg.mode === 'bottom') {
-        // No horizontal movement — stays in place, fades
-        const effectiveOpacity = this.computeFixedOpacity(elapsed, msg);
-        ctx.save();
-        ctx.globalAlpha = Math.min(1, Math.max(0, effectiveOpacity * msg.opacity));
-        if (msg.kind === 'superchat') {
-          this.drawSuperChat(ctx, msg, canvas);
-        } else if (msg.kind === 'membership') {
-          this.drawMembership(ctx, msg);
-        } else {
-          this.drawText(ctx, msg, outlineEnabled, outlineOpacity, outlineWidth);
-        }
-        ctx.restore();
+        renderOpacity = this.computeFixedOpacity(elapsed, msg) * msg.opacity;
+        // No position update needed — stays in place
       } else if (msg.mode === 'reverse') {
-        // LTR scroll
         const progress = elapsed / msg.duration;
-        const travelDistance = (dims?.width ?? canvas.width) + msg.width + 200;
+        const travelDistance = (dims?.width ?? canvasW) + msg.width + 200;
         msg.x = -msg.width + progress * travelDistance;
-        this.renderMessageContent(
-          ctx,
-          msg,
-          canvas,
-          elapsed,
-          maxAgeMs,
-          outlineEnabled,
-          outlineOpacity,
-          outlineWidth
-        );
+        renderOpacity = msg.opacity * Math.max(0, 1 - elapsed / Math.max(msg.duration, MAX_AGE_MS));
       } else {
-        // RTL scroll (default)
         const progress = elapsed / msg.duration;
-        msg.x = canvas.width + (msg.x - canvas.width) - progress * (canvas.width + msg.width + 100);
-        this.renderMessageContent(
-          ctx,
-          msg,
-          canvas,
-          elapsed,
-          maxAgeMs,
-          outlineEnabled,
-          outlineOpacity,
-          outlineWidth
-        );
+        msg.x = canvasW + (msg.x - canvasW) - progress * (canvasW + msg.width + 100);
+        renderOpacity = msg.opacity * Math.max(0, 1 - elapsed / Math.max(msg.duration, MAX_AGE_MS));
+      }
+
+      const entry = { msg, elapsed, opacity: renderOpacity };
+      if (msg.kind === 'superchat' || msg.kind === 'membership') {
+        cards.push(entry);
+      } else {
+        texts.push(entry);
       }
 
       return true;
     });
+
+    // Phase 2: depth-ordered rendering (cards behind text)
+    // Batch by type to minimize context state changes
+    ctx.textBaseline = 'top';
+    for (const entry of cards)
+      this.drawEntry(ctx, entry, canvas, font, outlineEnabled, outlineOpacity, outlineWidth);
+    for (const entry of texts)
+      this.drawEntry(ctx, entry, canvas, font, outlineEnabled, outlineOpacity, outlineWidth);
 
     this.observability.updateActiveMessages(this.messages.length);
     this.observability.updateLaneUtilization(
@@ -377,73 +381,95 @@ export class Canvas2DRenderer {
     );
   }
 
-  /** Compute opacity for top/bottom fixed modes: fade in → hold → fade out. */
-  private computeFixedOpacity(elapsed: number, msg: CanvasMessage): number {
-    const fadeInEnd = msg.fadeInEndTime !== undefined ? msg.fadeInEndTime - msg.startTime : 400;
-    const fadeOutStart =
-      msg.fadeOutStartTime !== undefined ? msg.fadeOutStartTime - msg.startTime : 3200;
-    const fadeOutEnd = msg.duration;
-
-    if (elapsed < fadeInEnd) return elapsed / fadeInEnd; // 0→1
-    if (elapsed < fadeOutStart) return 1; // hold
-    return Math.max(0, 1 - (elapsed - fadeOutStart) / (fadeOutEnd - fadeOutStart)); // 1→0
-  }
-
-  private renderMessageContent(
+  private drawEntry(
     ctx: CanvasRenderingContext2D,
-    msg: CanvasMessage,
+    entry: { msg: CanvasMessage; opacity: number },
     canvas: HTMLCanvasElement,
-    elapsed: number,
-    maxAgeMs: number,
+    font: string,
     outlineEnabled: boolean,
     outlineOpacity: number,
     outlineWidth: number
   ): void {
-    const ageRatio = elapsed / Math.max(msg.duration, maxAgeMs);
-    const fadeFactor = Math.max(0, 1 - ageRatio);
-    const effectiveOpacity = msg.opacity * fadeFactor;
-
-    ctx.save();
-    ctx.globalAlpha = effectiveOpacity;
+    const { msg, opacity } = entry;
+    ctx.globalAlpha = opacity;
 
     if (msg.kind === 'superchat') {
       this.drawSuperChat(ctx, msg, canvas);
     } else if (msg.kind === 'membership') {
       this.drawMembership(ctx, msg);
     } else {
-      this.drawText(ctx, msg, outlineEnabled, outlineOpacity, outlineWidth);
+      this.drawTextBitmap(ctx, msg, font, outlineEnabled, outlineOpacity, outlineWidth);
     }
-
-    ctx.restore();
   }
 
-  private drawText(
+  // ── Bitmap-cached text rendering ──────────────────────────────────────
+
+  /** Pre-render text to a bitmap canvas once, then blit each frame. */
+  private ensureBitmap(
+    msg: CanvasMessage,
+    font: string,
+    outlineEnabled: boolean,
+    outlineOpacity: number,
+    outlineWidth: number
+  ): HTMLCanvasElement | null {
+    if (msg.bitmapReady && msg.bitmap) return msg.bitmap;
+    if (msg.content.length > 0) return null; // rich content: no bitmap caching
+
+    const w = Math.ceil(msg.width);
+    const h = Math.ceil(msg.height);
+    if (w < 1 || h < 1) return null;
+
+    const bmp = document.createElement('canvas');
+    bmp.width = w;
+    bmp.height = h;
+    const bCtx = bmp.getContext('2d');
+    if (!bCtx) return null;
+
+    bCtx.font = font;
+    bCtx.textBaseline = 'top';
+
+    if (outlineEnabled && outlineWidth > 0) {
+      bCtx.strokeStyle = `rgba(0, 0, 0, ${outlineOpacity})`;
+      bCtx.lineWidth = outlineWidth * 2;
+      bCtx.lineJoin = 'round';
+      for (const [dx, dy] of OUTLINE_OFFSETS) {
+        bCtx.strokeText(msg.text, dx, dy);
+      }
+    }
+
+    bCtx.fillStyle = msg.color;
+    bCtx.fillText(msg.text, 0, 0);
+
+    msg.bitmap = bmp;
+    msg.bitmapReady = true;
+    return bmp;
+  }
+
+  private drawTextBitmap(
     ctx: CanvasRenderingContext2D,
     msg: CanvasMessage,
+    font: string,
     outlineEnabled: boolean,
     outlineOpacity: number,
     outlineWidth: number
   ): void {
+    // Rich content: render directly (text + emoji, can't precache easily)
     if (msg.content.length > 0) {
       this.drawRichContent(ctx, msg);
       return;
     }
 
-    // Plain text: try off-screen pre-rendering
-    if (outlineEnabled && outlineWidth > 0) {
-      ctx.strokeStyle = `rgba(0, 0, 0, ${outlineOpacity})`;
-      ctx.lineWidth = outlineWidth * 2;
-      ctx.lineJoin = 'round';
-      for (const [dx, dy] of OUTLINE_OFFSETS) {
-        ctx.strokeText(msg.text, msg.x + dx, msg.y + dy);
-      }
+    // Bitmap-cached path: pre-render once, blit each frame
+    const bmp = this.ensureBitmap(msg, font, outlineEnabled, outlineOpacity, outlineWidth);
+    if (bmp) {
+      ctx.drawImage(bmp, msg.x, msg.y);
+    } else {
+      // Fallback direct rendering (e.g. bitmap creation failed)
+      ctx.fillStyle = msg.color;
+      ctx.fillText(msg.text, msg.x, msg.y);
     }
-
-    ctx.fillStyle = msg.color;
-    ctx.fillText(msg.text, msg.x, msg.y);
   }
 
-  /** Render content with emoji images using inline Image elements. */
   private drawRichContent(ctx: CanvasRenderingContext2D, msg: CanvasMessage): void {
     let cursorX = msg.x;
     const y = msg.y;
@@ -455,12 +481,11 @@ export class Canvas2DRenderer {
         ctx.fillStyle = msg.color;
         ctx.fillText(seg.content, cursorX, y);
         cursorX += this.measureTextCached(seg.content);
-      } else if (seg.type === 'emoji') {
+      } else {
         const img = this.emojiCache.get(seg.emoji.url);
         if (img?.complete && img.naturalWidth > 0) {
           ctx.drawImage(img, cursorX, y, emojiSize, emojiSize);
         } else {
-          // Fallback: draw alt text
           const alt = seg.emoji.fallbackText || seg.emoji.alt || '[ ]';
           ctx.fillStyle = msg.color;
           ctx.fillText(alt, cursorX, y);
@@ -473,13 +498,27 @@ export class Canvas2DRenderer {
   private measureTextCached(text: string): number {
     const cached = this.textMeasureCache.get(text);
     if (cached !== undefined) return cached;
-    const ctx = this.getOffscreenCtx();
-    if (!ctx) return text.length * this.settings.fontSize * 0.6;
-    ctx.font = this.getFont();
-    const width = Math.ceil(ctx.measureText(text).width);
+    const mc = this.measureCtx;
+    if (!mc) return text.length * this.settings.fontSize * 0.6;
+    mc.font = this.getFont();
+    const width = Math.ceil(mc.measureText(text).width);
     this.textMeasureCache.set(text, width);
     return width;
   }
+
+  // ── Fixed-mode opacity ────────────────────────────────────────────────
+
+  private computeFixedOpacity(elapsed: number, msg: CanvasMessage): number {
+    const fadeInEnd = msg.fadeInEndTime !== undefined ? msg.fadeInEndTime - msg.startTime : 400;
+    const fadeOutStart =
+      msg.fadeOutStartTime !== undefined ? msg.fadeOutStartTime - msg.startTime : 3200;
+    const fadeOutEnd = msg.duration;
+    if (elapsed < fadeInEnd) return elapsed / fadeInEnd;
+    if (elapsed < fadeOutStart) return 1;
+    return Math.max(0, 1 - (elapsed - fadeOutStart) / (fadeOutEnd - fadeOutStart));
+  }
+
+  // ── Super Chat card (gradient + tier color) ───────────────────────────
 
   private drawSuperChat(
     ctx: CanvasRenderingContext2D,
@@ -489,45 +528,33 @@ export class Canvas2DRenderer {
     const padding = 10;
     const cardW = Math.max(240, Math.min(canvas.width * 0.6, msg.width + padding * 2));
     const cardH = msg.height + padding * 2;
-
-    // Tier color
     const tierColor = msg.tierColor || '#1e88e5';
     const rgb = this.parseRgb(tierColor);
 
-    // Background gradient
     const grad = ctx.createLinearGradient(msg.x, msg.y, msg.x, msg.y + cardH);
     grad.addColorStop(0, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.5)`);
     grad.addColorStop(1, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.35)`);
 
-    // Card background
-    ctx.fillStyle = grad;
     this.roundRect(ctx, msg.x, msg.y, cardW, cardH, 6);
+    ctx.fillStyle = grad;
     ctx.fill();
 
-    // Border
     ctx.strokeStyle = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.6)`;
     ctx.lineWidth = 1;
     this.roundRect(ctx, msg.x, msg.y, cardW, cardH, 6);
     ctx.stroke();
 
-    // Left accent
     ctx.fillStyle = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
     ctx.fillRect(msg.x, msg.y, 4, cardH);
 
-    // Amount badge
     if (msg.amount) {
       ctx.font = `bold ${this.settings.fontSize * 0.75}px system-ui, sans-serif`;
       ctx.fillStyle = '#fff';
-      ctx.shadowColor = 'rgba(0,0,0,0.5)';
-      ctx.shadowBlur = 3;
       ctx.fillText(msg.amount, msg.x + 14, msg.y + padding);
     }
 
-    // Text
     ctx.font = this.getFont();
     ctx.fillStyle = '#fff';
-    ctx.shadowColor = 'rgba(0,0,0,0.5)';
-    ctx.shadowBlur = 3;
     ctx.fillText(
       msg.text,
       msg.x + 14,
@@ -535,28 +562,27 @@ export class Canvas2DRenderer {
     );
   }
 
+  // ── Membership card (green border) ────────────────────────────────────
+
   private drawMembership(ctx: CanvasRenderingContext2D, msg: CanvasMessage): void {
     const padding = 12;
     const cardW = msg.width + padding * 2;
     const cardH = msg.height + padding * 2;
 
-    // Green background
     ctx.fillStyle = 'rgba(76, 175, 80, 0.25)';
     this.roundRect(ctx, msg.x, msg.y - padding / 2, cardW, cardH, 8);
     ctx.fill();
 
-    // Green border
     ctx.strokeStyle = 'rgba(76, 175, 80, 0.6)';
     ctx.lineWidth = 2;
     this.roundRect(ctx, msg.x, msg.y - padding / 2, cardW, cardH, 8);
     ctx.stroke();
 
-    // Text
-    ctx.shadowColor = 'rgba(0,0,0,0.8)';
-    ctx.shadowBlur = 4;
     ctx.fillStyle = msg.color;
     ctx.fillText(msg.text, msg.x + padding, msg.y);
   }
+
+  // ── Geometry helpers ──────────────────────────────────────────────────
 
   private roundRect(
     ctx: CanvasRenderingContext2D,
@@ -582,49 +608,42 @@ export class Canvas2DRenderer {
   private parseRgb(color: string): { r: number; g: number; b: number } {
     const match = color.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
     if (match) {
-      const r = Number.parseInt(match[1] ?? '30', 16);
-      const g = Number.parseInt(match[2] ?? '136', 16);
-      const b = Number.parseInt(match[3] ?? '229', 16);
-      return { r, g, b };
+      return {
+        r: Number.parseInt(match[1] ?? '30', 16),
+        g: Number.parseInt(match[2] ?? '136', 16),
+        b: Number.parseInt(match[3] ?? '229', 16),
+      };
     }
-    // Fallback: try rgb() format
     const rgbMatch = color.match(/^rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)$/);
     if (rgbMatch) {
       return { r: Number(rgbMatch[1]), g: Number(rgbMatch[2]), b: Number(rgbMatch[3]) };
     }
-    return { r: 30, g: 136, b: 229 }; // Default blue
+    return { r: 30, g: 136, b: 229 };
   }
+
+  // ── Lifecycle ─────────────────────────────────────────────────────────
 
   pause(): void {
     this.isPaused = true;
     this.burstDetector.pause();
   }
-
   resume(): void {
     this.isPaused = false;
     this.burstDetector.resume();
+  }
+  pauseForVideo(): void {
+    this.pause();
+  }
+  resumeForVideo(): void {
+    this.resume();
   }
 
   get laneCount(): number {
     return this.laneAllocator.getLaneCount();
   }
 
-  setBacklogSpeedMultiplier(_multiplier: number): void {
-    // Canvas2D renderer uses fixed speed settings; backlog multiplier is a no-op.
-  }
-
-  trimBackgroundQueue(): void {
-    // Canvas2D renderer has no background queue to trim.
-  }
-
-  pauseForVideo(): void {
-    this.pause();
-  }
-
-  resumeForVideo(): void {
-    this.resume();
-  }
-
+  setBacklogSpeedMultiplier(_multiplier: number): void {}
+  trimBackgroundQueue(): void {}
   onBacklogPauseChange: ((paused: boolean) => void) | null = null;
 
   updateSettings(settings: OverlaySettings, _options?: { resetState?: boolean }): void {
@@ -643,6 +662,8 @@ export class Canvas2DRenderer {
     this.canvas = null;
     this.ctx = null;
     this.messages = [];
+    this.emojiCache.clear();
+    this.textMeasureCache.clear();
     this.burstDetector.destroy();
     this.observability.destroy();
     log.debug('Destroyed');
