@@ -868,8 +868,10 @@ export class Renderer {
   resumeForVideo(): void {
     if (!this.isVideoPaused) return;
     this.isVideoPaused = false;
-    // Resume only if the tab-visibility pause isn't active.
-    if (!this.isPaused) {
+    // Resume only if the tab is visible.  Use document.hidden rather than
+    // isPaused because isPaused may have been set by pauseForVideo()
+    // itself (via pause()), not just by tab-visibility changes.
+    if (!document.hidden) {
       this.resume();
     }
   }
