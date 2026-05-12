@@ -138,7 +138,10 @@ export class RuntimeSession {
 
     renderer.updateSettings(settings, { resetState: shouldResetRenderer });
 
-    // Update backlog controller config if it exists
+    // Update backlog controller config if it exists, then sync the
+    // effective speed multiplier back to the renderer through a single
+    // code path. The backlog controller is the authoritative source for
+    // the multiplier applied to backlog message animations.
     if (this.backlogController) {
       this.backlogController.updateConfig({
         backlogMaxRate: settings.backlogMaxRate,
@@ -147,10 +150,10 @@ export class RuntimeSession {
         backlogMode: settings.backlogMode,
         backlogRecentMinutes: settings.backlogRecentMinutes,
       });
+      renderer.setBacklogSpeedMultiplier(this.backlogController.getSpeedMultiplier());
+    } else {
+      renderer.setBacklogSpeedMultiplier(settings.backlogSpeedMultiplier);
     }
-
-    // Sync backlog speed multiplier to renderer for any future backlog messages
-    renderer.setBacklogSpeedMultiplier(settings.backlogSpeedMultiplier);
 
     if (!shouldResetRenderer) {
       return;
@@ -219,6 +222,9 @@ export class RuntimeSession {
             renderer.laneCount,
             renderer.observability
           );
+          // Initial sync: backlog controller is the authoritative source for
+          // the speed multiplier. Subsequent updates flow through
+          // updateSettings() -> backlogController.updateConfig() -> getSpeedMultiplier().
           renderer.setBacklogSpeedMultiplier(this.backlogController.getSpeedMultiplier());
           this.backlogController.onBacklogMessage = (msg) => {
             if (!this.acceptForRenderer(msg)) return;
