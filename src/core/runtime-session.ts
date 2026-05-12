@@ -3,6 +3,7 @@ import { BacklogInjectionController } from '@core/backlog-controller';
 import { type ChatHealthSnapshot, ChatSource, type ChatSourceStartStatus } from '@core/chat-source';
 import { findElementMatch, isAbortError, throwIfAborted, VIDEO_SELECTORS } from '@core/dom';
 import { createLogger } from '@core/logging';
+import { MessageIdRegistry } from '@core/message-id-registry';
 import { OVERLAY_SELECTOR, Overlay } from '@core/overlay';
 import { Renderer } from '@core/renderer';
 import { shouldResetRendererForSettingsChange } from '@core/settings-schema';
@@ -55,6 +56,8 @@ export class RuntimeSession {
   private sessionReady = false;
   private restartRequested = false;
   private hiddenSince: number | null = null;
+  /** Session-scoped registry of message IDs already rendered once. Persists across renderer resets. */
+  private readonly sessionDedup = new MessageIdRegistry(5000);
 
   constructor(options: RuntimeSessionOptions) {
     this.targetUrl = options.targetUrl;
@@ -217,6 +220,7 @@ export class RuntimeSession {
             renderer.observability
           );
           this.backlogController.onBacklogMessage = (msg) => {
+            if (!this.acceptForRenderer(msg)) return;
             renderer.setBacklogSpeedMultiplier(this.backlogController?.getSpeedMultiplier() ?? 1);
             renderer.addMessage(msg);
           };
@@ -230,6 +234,7 @@ export class RuntimeSession {
 
       // Real-time message handling (also catches backlog under 50 messages)
       for (const msg of msgs) {
+        if (!this.acceptForRenderer(msg)) continue;
         renderer.addMessage(msg);
       }
 
@@ -406,7 +411,25 @@ export class RuntimeSession {
   private replayLatestMessages(renderer: Renderer, limit = RECENT_MESSAGE_REPLAY_LIMIT): void {
     const latestMessages = this.chatSource?.getLatestMessages(limit) ?? [];
     for (const message of latestMessages) {
+      // sessionDedup check prevents re-rendering messages already shown
+      // before the renderer was reset — their ids survive seenMessageIds.clear().
+      if (!this.acceptForRenderer(message)) continue;
       renderer.addMessage(message);
     }
+  }
+
+  /**
+   * Accept a message for rendering only if its id has not been rendered
+   * already in this session.  This guard survives renderer resets so that
+   * replayLatestMessages and backlog re-injection never re-emit messages
+   * that were already shown on screen.
+   *
+   * Messages without an id (rare edge case) are always accepted.
+   */
+  private acceptForRenderer(message: ChatMessage): boolean {
+    if (!message.id) return true;
+    if (this.sessionDedup.has(message.id)) return false;
+    this.sessionDedup.mark(message.id);
+    return true;
   }
 }
