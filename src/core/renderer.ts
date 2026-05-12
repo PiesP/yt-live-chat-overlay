@@ -774,6 +774,9 @@ export class Renderer {
     this.isPaused = true;
     this.pausedAt = performance.now();
     this.clearRetryTimer();
+    // Halt burst detection so messages accumulated while hidden
+    // don't pollute the rate on return.
+    this.burstDetector.pause();
     for (const active of this.activeMessages) {
       active.element.style.animationPlayState = 'paused';
     }
@@ -782,6 +785,11 @@ export class Renderer {
 
   resume(): void {
     if (!this.isPaused) return;
+
+    // Restart burst detection from a clean slate so the EMA rate and
+    // burst level reflect post-hide real-time activity, not the backlog
+    // that accumulated while the tab was hidden.
+    this.burstDetector.resume();
 
     const now = performance.now();
     let pausedDuration = 0;
