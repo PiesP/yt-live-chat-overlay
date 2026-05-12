@@ -12,7 +12,6 @@ import type { ChatMessage, OverlaySettings } from '@app-types';
 import { type ChatEvent, extractChatEvents } from '@core/chat-message-parser';
 import { findElementMatch, isAbortError, sleep, throwIfAborted, VIDEO_SELECTORS } from '@core/dom';
 import { createLogger } from '@core/logging';
-import { MessageIdRegistry } from '@core/message-id-registry';
 import {
   bootstrapChatSession,
   type ChatBootstrapData,
@@ -44,7 +43,6 @@ const REPLAY_CONSECUTIVE_FAILURE_LIMIT = 5;
 const REPLAY_FAILURE_BACKOFF_MS = 5000;
 const REPLAY_PREFETCH_WINDOW_MS = 5000;
 const MAX_BUFFERED_REPLAY_MESSAGES = 300;
-const MAX_TRACKED_MESSAGE_KEYS = 10000;
 
 type ReplayMode = 'playerSeek' | 'continuation';
 
@@ -439,7 +437,6 @@ export abstract class ChatSource {
 class LiveChatSource extends ChatSource {
   private liveContinuation: InnertubeContinuationData | null = null;
   private consecutiveErrors = 0;
-  private readonly liveDedupRegistry = new MessageIdRegistry(MAX_TRACKED_MESSAGE_KEYS);
 
   protected seedCurrentSession(signal?: AbortSignal): Promise<boolean> {
     return this.initializeLiveSession(signal);
@@ -453,7 +450,6 @@ class LiveChatSource extends ChatSource {
     super.resetSessionState();
     this.liveContinuation = null;
     this.consecutiveErrors = 0;
-    this.liveDedupRegistry.clear();
   }
 
   // ---- Live-specific ----
@@ -590,17 +586,12 @@ class LiveChatSource extends ChatSource {
         messages = events.map((e) => e.message);
       }
 
-      // Deduplicate by message ID — YouTube continuation can return
-      // the same actions across consecutive polls.
-      const deduped = messages.filter((msg) => {
-        if (!msg.id) return true;
-        if (this.liveDedupRegistry.has(msg.id)) return false;
-        this.liveDedupRegistry.mark(msg.id);
-        return true;
-      });
-
-      if (deduped.length > 0) {
-        this.emitBatch(deduped, isInitialSeed);
+      // Note: deduplication is handled by the session-level MessageIdRegistry
+      // in RuntimeSession.acceptForRenderer(). YouTube continuation can return
+      // the same actions across consecutive polls, so the session dedup prevents
+      // re-emission after a renderer reset.
+      if (messages.length > 0) {
+        this.emitBatch(messages, isInitialSeed);
       }
     }
 
@@ -630,7 +621,6 @@ class ReplayChatSource extends ChatSource {
   private lastReplayRequestedOffsetMs = -REPLAY_FETCH_MIN_DELTA_MS;
   private replayConsecutiveFailures = 0;
   private replayNextAllowedFetchAt = 0;
-  private readonly replayKeyRegistry = new MessageIdRegistry(MAX_TRACKED_MESSAGE_KEYS);
   private replayBuffer: ReplayBufferedMessage[] = [];
 
   protected seedCurrentSession(signal?: AbortSignal): Promise<boolean> {
@@ -657,7 +647,6 @@ class ReplayChatSource extends ChatSource {
     this.replayConsecutiveFailures = 0;
     this.replayNextAllowedFetchAt = 0;
     this.replayBuffer = [];
-    this.replayKeyRegistry.clear();
   }
 
   private async initializeReplaySession(signal?: AbortSignal): Promise<boolean> {
@@ -798,11 +787,6 @@ class ReplayChatSource extends ChatSource {
       }
 
       const key = this.makeReplayKey(event.message, event.offsetMs);
-      if (this.replayKeyRegistry.has(key)) {
-        continue;
-      }
-
-      this.replayKeyRegistry.mark(key);
       this.insertBufferedEvent(key, event.message, event.offsetMs);
     }
 
@@ -851,7 +835,6 @@ class ReplayChatSource extends ChatSource {
       }
 
       this.replayBuffer.shift();
-      this.replayKeyRegistry.mark(next.key);
       this.emitMessage(next.message);
     }
   }

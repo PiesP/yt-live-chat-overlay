@@ -10,7 +10,6 @@ import { PerAuthorRateLimiter } from '@core/author-rate-limiter';
 import { BurstDetector } from '@core/burst-detector';
 import { buildTextShadow, buildTextStroke, rendererLayout, shadows } from '@core/design-tokens';
 import { createLogger } from '@core/logging';
-import { MessageIdRegistry } from '@core/message-id-registry';
 import { ObservabilityReporter } from '@core/observability';
 import type { Overlay } from '@core/overlay';
 import { LaneAllocator, type LanePlacement } from '@core/renderer-lanes';
@@ -80,8 +79,6 @@ export class Renderer {
   private opacityUpdateTimer: ReturnType<typeof setInterval> | null = null;
   private overlayDimensionsUnsubscribe: (() => void) | null = null;
   private sweepCounter = 0;
-  private static readonly SEEN_MESSAGE_IDS_LIMIT = 2000;
-  private readonly seenMessageIds = new MessageIdRegistry(Renderer.SEEN_MESSAGE_IDS_LIMIT);
   static readonly BACKGROUND_QUEUE_MAX = 10;
   /** Timestamp until which the EMA speed multiplier is suppressed after resume. */
   private resumeStabilizeUntil: number = 0;
@@ -129,7 +126,6 @@ export class Renderer {
     }
 
     this.pendingQueue.length = 0;
-    this.seenMessageIds.clear();
     this.backlogPaused = false;
   }
 
@@ -282,10 +278,9 @@ export class Renderer {
   }
 
   addMessage(message: ChatMessage): void {
-    if (message.id && this.seenMessageIds.has(message.id)) {
-      this.observability.onMessageDropped('dedup');
-      return;
-    }
+    // Note: message deduplication is handled by RuntimeSession.acceptForRenderer()
+    // using the session-level MessageIdRegistry. The renderer trusts that messages
+    // it receives are already deduplicated.
 
     // Drop messages while video is paused — they would queue up and flood on resume.
     if (this.isVideoPaused) {
@@ -345,10 +340,6 @@ export class Renderer {
       this.pendingQueue.push(queued);
     } else {
       this.pendingQueue.splice(insertIndex, 0, queued);
-    }
-
-    if (message.id) {
-      this.seenMessageIds.mark(message.id);
     }
 
     if (!this.isPaused) {
@@ -934,7 +925,6 @@ export class Renderer {
     this.overlayDimensionsUnsubscribe = null;
 
     this.resetRenderedState();
-    this.seenMessageIds.clear();
     this.pausedAt = null;
 
     this.playbackRate = 1;
