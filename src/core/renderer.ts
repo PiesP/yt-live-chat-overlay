@@ -35,7 +35,13 @@
  *   - ChatSource skips API polling when video is paused (bandwidth saving)
  */
 
-import type { BurstLevel, ChatMessage, OverlayDimensions, OverlaySettings } from '@app-types';
+import type {
+  BurstLevel,
+  ChatMessage,
+  DanmakuMode,
+  OverlayDimensions,
+  OverlaySettings,
+} from '@app-types';
 import { PerAuthorRateLimiter } from '@core/author-rate-limiter';
 import { BurstDetector } from '@core/burst-detector';
 import { buildTextShadow, buildTextStroke, rendererLayout, shadows } from '@core/design-tokens';
@@ -92,6 +98,7 @@ export class Renderer {
   private readonly pendingQueue: QueuedMessage[] = [];
   private isPaused = false;
   private isVideoPaused = false;
+  private danmakuMode: DanmakuMode = 'scroll';
   private pausedAt: number | null = null;
   private playbackRate = 1;
   private lastWarningTime = 0;
@@ -130,6 +137,7 @@ export class Renderer {
     this.laneAllocator.reset(this.overlay.getDimensions());
     this.injectStyles();
     this.observability = new ObservabilityReporter(this.settings.showDebugOverlay);
+    this.danmakuMode = this.settings.danmakuMode;
     this.burstDetector = new BurstDetector(this.observability);
     this.burstDetector.start();
     this.authorRateLimiter = new PerAuthorRateLimiter(() => this.burstDetector.getLevel());
@@ -236,35 +244,84 @@ export class Renderer {
   ): ActiveMessage {
     const fontSize = this.settings.fontSize;
     const { lane } = placement;
+    const mode = this.danmakuMode;
 
     const laneBlockTop =
       dimensions.height * this.settings.safeTop + lane.index * dimensions.laneHeight;
     const laneBlockHeight = placement.laneSpan * dimensions.laneHeight;
     const laneY = laneBlockTop + Math.max(0, (laneBlockHeight - messageHeight) / 2);
-    element.style.top = `${laneY}px`;
-    element.style.left = `${dimensions.width}px`;
-    element.style.visibility = 'visible';
-
-    const exitPadding = Math.max(
-      fontSize * rendererLayout.exitPaddingScale,
-      rendererLayout.exitPaddingMin
-    );
-    const distance = dimensions.width + textWidth + exitPadding;
-
-    // Deterministic entry offset based on lane position + small random jitter.
-    // Messages arriving at the same time are spread evenly across the right
-    // edge of the screen rather than clustering at 3 fixed positions.
-    const baseOffset =
-      dimensions.laneCount > 1 ? Math.round((lane.index / (dimensions.laneCount - 1)) * 200) : 100;
-    const jitter = Math.floor(Math.random() * 30);
-    const entryOffset = baseOffset + jitter;
-    const adjustedDistance = distance + entryOffset;
 
     const effectiveSpeedPxPerSec = this.getEffectiveSpeedPxPerSec();
-    let baseDuration = Math.max(
-      rendererLayout.durationMin,
-      Math.min(rendererLayout.durationMax, (adjustedDistance / effectiveSpeedPxPerSec) * 1000)
+    const now = performance.now();
+
+    let baseDuration: number;
+    let laneDelay = Math.floor(Math.random() * Renderer.MAX_ANIMATION_JITTER_MS);
+    let startTime = now + laneDelay;
+
+    if (mode === 'top' || mode === 'bottom') {
+      // Fixed modes: stay visible for ~4s then fade
+      element.style.left = `${Math.random() * (dimensions.width - Math.min(textWidth, dimensions.width))}px`;
+      if (mode === 'top') {
+        element.style.top = `${dimensions.height * this.settings.safeTop}px`;
+      } else {
+        element.style.top = `${dimensions.height * (1 - this.settings.safeBottom) - messageHeight}px`;
+      }
+      element.style.visibility = 'visible';
+      baseDuration = 4000;
+      laneDelay = 0;
+      startTime = now;
+    } else if (mode === 'reverse') {
+      // LTR: start from left edge
+      const entryOffset = ((lane.index % 3) + 1) * 50;
+      const distance = dimensions.width + textWidth + 200;
+      const adjustedDistance = distance + entryOffset;
+      baseDuration = Math.max(
+        rendererLayout.durationMin,
+        Math.min(rendererLayout.durationMax, (adjustedDistance / effectiveSpeedPxPerSec) * 1000)
+      );
+
+      element.style.top = `${laneY}px`;
+      element.style.right = '0';
+      element.style.visibility = 'visible';
+      startTime = now + laneDelay;
+    } else {
+      // RTL (scroll): existing behaviour
+      element.style.top = `${laneY}px`;
+      element.style.left = `${dimensions.width}px`;
+      element.style.visibility = 'visible';
+
+      const exitPadding = Math.max(
+        fontSize * rendererLayout.exitPaddingScale,
+        rendererLayout.exitPaddingMin
+      );
+      const distance = dimensions.width + textWidth + exitPadding;
+
+      const baseOffset =
+        dimensions.laneCount > 1
+          ? Math.round((lane.index / (dimensions.laneCount - 1)) * 200)
+          : 100;
+      const jitter = Math.floor(Math.random() * 30);
+      const entryOffset = baseOffset + jitter;
+      const adjustedDistance = distance + entryOffset;
+
+      baseDuration = Math.max(
+        rendererLayout.durationMin,
+        Math.min(rendererLayout.durationMax, (adjustedDistance / effectiveSpeedPxPerSec) * 1000)
+      );
+
+      element.style.setProperty('--yt-msg-entry-offset', `${entryOffset}px`);
+      element.style.setProperty('--yt-msg-exit-offset', `-${distance}px`);
+      startTime = now + laneDelay;
+    }
+
+    this.laneAllocator.commitPlacement(
+      placement,
+      textWidth,
+      messageHeight,
+      startTime,
+      startTime + baseDuration
     );
+
     if (message?.isBacklog && this.backlogSpeedMultiplier > 1) {
       baseDuration = Math.max(
         rendererLayout.durationMin,
@@ -273,23 +330,18 @@ export class Renderer {
     }
     const adjustedDuration = baseDuration / this.playbackRate;
 
-    const laneDelay = Math.floor(Math.random() * Renderer.MAX_ANIMATION_JITTER_MS);
-
-    element.style.setProperty('--yt-msg-entry-offset', `${entryOffset}px`);
-    element.style.setProperty('--yt-msg-exit-offset', `-${distance}px`);
     element.style.setProperty('--yt-msg-duration', `${adjustedDuration}ms`);
     element.style.setProperty('--yt-msg-delay', `${laneDelay}ms`);
-    element.classList.add('yt-overlay-message-animate');
 
-    const now = performance.now();
-    const startTime = now + laneDelay;
-    this.laneAllocator.commitPlacement(
-      placement,
-      textWidth,
-      messageHeight,
-      startTime,
-      startTime + adjustedDuration
-    );
+    if (mode === 'reverse') {
+      element.classList.add('yt-overlay-message-animate-reverse');
+    } else if (mode === 'top') {
+      element.classList.add('yt-overlay-message-animate-top');
+    } else if (mode === 'bottom') {
+      element.classList.add('yt-overlay-message-animate-bottom');
+    } else {
+      element.classList.add('yt-overlay-message-animate');
+    }
 
     const cleanup = (): void => {
       element.removeEventListener('animationend', cleanup);
@@ -795,6 +847,7 @@ export class Renderer {
 
   updateSettings(settings: OverlaySettings, options: RendererUpdateOptions = {}): void {
     this.settings = settings;
+    this.danmakuMode = settings.danmakuMode;
     this.injectStyles();
     this.observability.setShowDebug(settings.showDebugOverlay);
 

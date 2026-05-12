@@ -224,11 +224,76 @@ export const RENDERER_STATIC_STYLES = `
     }
   }
 
+  @keyframes yt-overlay-comment-slide-reverse {
+    from {
+      transform: translateX(calc(-100vw - var(--yt-msg-entry-offset, 0px)));
+    }
+    to {
+      transform: translateX(calc(100vw + 100px));
+    }
+  }
+
+  @keyframes yt-overlay-comment-fixed-top {
+    from {
+      transform: translateY(-100%);
+      opacity: 0;
+    }
+    10% {
+      opacity: 1;
+    }
+    80% {
+      opacity: 1;
+    }
+    to {
+      opacity: 0;
+    }
+  }
+
+  @keyframes yt-overlay-comment-fixed-bottom {
+    from {
+      transform: translateY(100%);
+      opacity: 0;
+    }
+    10% {
+      opacity: 1;
+    }
+    80% {
+      opacity: 1;
+    }
+    to {
+      opacity: 0;
+    }
+  }
+
   .yt-overlay-message-animate {
     animation-name: yt-overlay-comment-slide;
     animation-duration: var(--yt-msg-duration, 8s);
     animation-delay: var(--yt-msg-delay, 0ms);
     animation-timing-function: linear;
+    animation-fill-mode: both;
+  }
+
+  .yt-overlay-message-animate-reverse {
+    animation-name: yt-overlay-comment-slide-reverse;
+    animation-duration: var(--yt-msg-duration, 8s);
+    animation-delay: var(--yt-msg-delay, 0ms);
+    animation-timing-function: linear;
+    animation-fill-mode: both;
+  }
+
+  .yt-overlay-message-animate-top {
+    animation-name: yt-overlay-comment-fixed-top;
+    animation-duration: var(--yt-msg-duration, 4s);
+    animation-delay: var(--yt-msg-delay, 0ms);
+    animation-timing-function: ease-out;
+    animation-fill-mode: both;
+  }
+
+  .yt-overlay-message-animate-bottom {
+    animation-name: yt-overlay-comment-fixed-bottom;
+    animation-duration: var(--yt-msg-duration, 4s);
+    animation-delay: var(--yt-msg-delay, 0ms);
+    animation-timing-function: ease-out;
     animation-fill-mode: both;
   }
 `;
