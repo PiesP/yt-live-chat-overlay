@@ -790,6 +790,13 @@ export class Renderer {
 
   resume(): void {
     if (!this.isPaused) return;
+    // When the video is paused, keep isPaused=true so active animations
+    // stay frozen until the user unpauses. Resume burst detection so
+    // the EMA rate is fresh when video playback resumes.
+    if (this.isVideoPaused) {
+      this.burstDetector.resume();
+      return;
+    }
 
     // Restart burst detection from a clean slate so the EMA rate and
     // burst level reflect post-hide real-time activity, not the backlog
