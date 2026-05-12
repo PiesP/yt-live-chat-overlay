@@ -28,13 +28,14 @@ export class ObservabilityReporter {
   private showDebug = false;
 
   constructor(initialShowDebug: boolean = false) {
-    this.metrics = this.createEmptyMetrics();
-    this.dropCounters = this.createEmptyDropCounters();
-    this.showDebug = initialShowDebug;
-  }
-
-  private createEmptyMetrics(): SessionMetrics {
-    return {
+    this.dropCounters = {
+      queue_overflow: 0,
+      no_lane_available: 0,
+      rate_limited: 0,
+      dedup: 0,
+      other: 0,
+    };
+    this.metrics = {
       totalReceived: 0,
       totalRendered: 0,
       totalDropped: 0,
@@ -45,22 +46,13 @@ export class ObservabilityReporter {
       laneUtilization: 0,
       backlogProgress: 1,
     };
-  }
-
-  private createEmptyDropCounters(): Record<DropReason, number> {
-    return {
-      queue_overflow: 0,
-      no_lane_available: 0,
-      rate_limited: 0,
-      dedup: 0,
-      other: 0,
-    };
+    this.showDebug = initialShowDebug;
   }
 
   // called when a message is received (before any processing)
-  onMessageReceived(count: number = 1): void {
-    this.metrics.totalReceived += count;
-    this.totalReceivedInWindow += count;
+  onMessageReceived(): void {
+    this.metrics.totalReceived++;
+    this.totalReceivedInWindow++;
   }
 
   // called when a message is successfully rendered
@@ -75,13 +67,13 @@ export class ObservabilityReporter {
     this.dropCounters[reason]++;
 
     // Warn if drop rate exceeds 20%
-    const rate = this.getCurrentDropRate();
-    if (rate > 0.2) {
+    this.refreshDerivedMetrics();
+    if (this.metrics.dropRate > 0.2) {
       const now = performance.now();
       if (now - this.lastWarnTime > this.WARN_COOLDOWN_MS) {
         this.lastWarnTime = now;
         log.warn(
-          `High drop rate: ${(rate * 100).toFixed(1)}% ` +
+          `High drop rate: ${(this.metrics.dropRate * 100).toFixed(1)}% ` +
             `(queue=${this.metrics.queueDepth}, lanes=${(this.metrics.laneUtilization * 100).toFixed(0)}%)`
         );
       }
@@ -122,11 +114,6 @@ export class ObservabilityReporter {
   // get drop counters breakdown
   getDropBreakdown(): Record<DropReason, number> {
     return { ...this.dropCounters };
-  }
-
-  private getCurrentDropRate(): number {
-    this.refreshDerivedMetrics();
-    return this.metrics.dropRate;
   }
 
   private refreshDerivedMetrics(): void {
