@@ -133,7 +133,7 @@ export abstract class ChatSource {
   }
 
   isActive(timeoutMs = DEFAULT_ACTIVITY_TIMEOUT_MS): boolean {
-    return performance.now() - this.lastActivityTime < Math.max(0, timeoutMs);
+    return Date.now() - this.lastActivityTime < Math.max(0, timeoutMs);
   }
 
   getHealthSnapshot(options: ChatHealthSnapshotOptions = {}): ChatHealthSnapshot {
@@ -193,7 +193,7 @@ export abstract class ChatSource {
   }
 
   protected markActivity(): void {
-    this.lastActivityTime = performance.now();
+    this.lastActivityTime = Date.now();
   }
 
   protected rememberMessage(message: ChatMessage): void {
@@ -927,7 +927,7 @@ class ReplayChatSource extends ChatSource {
   private recordReplayFailure(): void {
     this.replayConsecutiveFailures += 1;
     if (this.replayConsecutiveFailures >= REPLAY_CONSECUTIVE_FAILURE_LIMIT) {
-      const backoffUntil = performance.now() + REPLAY_FAILURE_BACKOFF_MS;
+      const backoffUntil = Date.now() + REPLAY_FAILURE_BACKOFF_MS;
       this.replayNextAllowedFetchAt = backoffUntil;
       this.replayConsecutiveFailures = 0;
       log.warn(
@@ -976,7 +976,7 @@ class ReplayChatSource extends ChatSource {
   ): Promise<void> {
     // Skip fetching while in backoff to avoid busy-looping against a
     // non-responsive endpoint after consecutive failures.
-    if (performance.now() < this.replayNextAllowedFetchAt) {
+    if (Date.now() < this.replayNextAllowedFetchAt) {
       return;
     }
 
@@ -1002,7 +1002,7 @@ class ReplayChatSource extends ChatSource {
     // Keep buffer topped up while playback advances.
     if (
       this.replayContinuation &&
-      this.replayNextAllowedFetchAt <= performance.now() &&
+      this.replayNextAllowedFetchAt <= Date.now() &&
       this.replayFallbackLastOffsetMs < currentOffsetMs + REPLAY_PREFETCH_WINDOW_MS
     ) {
       await this.fetchNextReplayFallbackBatch(minimumOffsetMs, signal);

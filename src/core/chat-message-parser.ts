@@ -168,7 +168,7 @@ function parseRendererMessage(
     text: parsedBody.text,
     content: parsedBody.content,
     kind,
-    timestamp: performance.now(),
+    timestamp: Date.now(),
     author,
     authorType,
   };
@@ -582,7 +582,7 @@ function extractBestThumbnail(value: unknown): {
     return null;
   }
 
-  const firstFallback = fallbackThumbnails[0];
+  const firstFallback = fallbackThumbnails[0] ?? null;
   return {
     ...bestThumbnail,
     ...(firstFallback ? { candidateUrl: firstFallback.url } : {}),
@@ -627,7 +627,7 @@ function classifyAuthorBadge(value: unknown): AuthorType {
     extractAccessibilityLabel(liveBadge),
     extractAccessibilityLabel(metadataBadge),
   ]
-    .filter(Boolean)
+    .filter((s): s is string => !!s)
     .join(' ')
     .toUpperCase();
 

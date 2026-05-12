@@ -180,7 +180,7 @@ const getVideoIdFromUrl = (href = location.href): string | null => {
     }
 
     if (url.pathname.startsWith('/live/')) {
-      const [, videoId] = url.pathname.split('/').filter(Boolean);
+      const [, videoId] = url.pathname.split('/').filter((s): s is string => s !== '');
       return videoId && videoId.trim().length > 0 ? videoId : null;
     }
   } catch {

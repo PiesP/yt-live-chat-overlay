@@ -75,7 +75,7 @@ export class BacklogInjectionController {
     let filtered = messages;
     if (this.config.backlogMode === 'recent') {
       const cutoffMs = this.config.backlogRecentMinutes * 60 * 1000;
-      const now = performance.now();
+      const now = Date.now();
       filtered = messages.filter((m) => now - m.timestamp < cutoffMs);
       log.debug(
         `Backlog recent mode: ${messages.length} → ${filtered.length} ` +

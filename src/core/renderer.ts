@@ -165,9 +165,11 @@ export class Renderer {
 
     const textShadow = buildTextShadow(this.settings.outline);
     const textStroke = buildTextStroke(this.settings.outline);
-    const regularMessageTextShadow = [textShadow, shadows.text.md, '0 0 8px rgba(0, 0, 0, 0.7)']
-      .filter(Boolean)
-      .join(', ');
+    const regularMessageTextShadow = [
+      textShadow,
+      shadows.text.md,
+      '0 0 8px rgba(0, 0, 0, 0.7)',
+    ].join(', ');
     const superChatBaseOpacity = Math.min(1, Math.max(0.4, this.settings.superChatOpacity));
     const superChatTopOpacity = Math.min(1, superChatBaseOpacity + 0.06);
     const superChatBottomOpacity = Math.max(0.4, superChatBaseOpacity - 0.08);
@@ -534,6 +536,13 @@ export class Renderer {
     extreme: 1.35,
   };
 
+  /** Force a CSS reflow to restart an animation after modifying its properties. */
+  private static triggerAnimationRestart(element: HTMLElement): void {
+    element.style.animation = 'none';
+    void element.offsetWidth;
+    element.style.animation = '';
+  }
+
   private getEffectiveSpeedPxPerSec(): number {
     let speed = this.settings.speedPxPerSec * this.playbackRate;
 
@@ -855,9 +864,7 @@ export class Renderer {
         // The original duration is preserved so the speed (px/s) remains
         // identical to pre-pause.
         const el = active.element;
-        el.style.animation = 'none';
-        void el.offsetWidth;
-        el.style.animation = '';
+        Renderer.triggerAnimationRestart(el);
         el.style.setProperty('--yt-msg-delay', `${-elapsed}ms`);
         el.style.animationPlayState = 'running';
       } catch (error) {
@@ -910,9 +917,7 @@ export class Renderer {
         const adjustedDuration = active.baseDuration / rate;
 
         const el = active.element;
-        el.style.animationName = 'none';
-        void el.offsetWidth;
-        el.style.animationName = '';
+        Renderer.triggerAnimationRestart(el);
         el.style.setProperty('--yt-msg-duration', `${adjustedDuration}ms`);
         el.style.setProperty('--yt-msg-delay', `${-Math.min(elapsed, active.baseDuration)}ms`);
       } catch (error) {
