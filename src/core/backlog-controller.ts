@@ -44,6 +44,7 @@ export class BacklogInjectionController {
   private totalBacklog = 0;
   private processedBacklog = 0;
   private indicatorEl: HTMLElement | null = null;
+  private hideIndicatorTimer: ReturnType<typeof setTimeout> | null = null;
   private config: BacklogControllerConfig;
   private lanes: number;
   private observability: ObservabilityReporter | undefined;
@@ -273,7 +274,8 @@ export class BacklogInjectionController {
   private hideIndicator(): void {
     if (!this.indicatorEl) return;
     this.indicatorEl.style.opacity = '0';
-    setTimeout(() => {
+    this.hideIndicatorTimer = setTimeout(() => {
+      this.hideIndicatorTimer = null;
       if (this.indicatorEl) {
         this.indicatorEl.remove();
         this.indicatorEl = null;
@@ -294,8 +296,15 @@ export class BacklogInjectionController {
       clearTimeout(this.injectionTimer);
       this.injectionTimer = null;
     }
+    if (this.hideIndicatorTimer !== null) {
+      clearTimeout(this.hideIndicatorTimer);
+      this.hideIndicatorTimer = null;
+    }
     this.backlogQueue = [];
-    this.hideIndicator();
+    if (this.indicatorEl) {
+      this.indicatorEl.remove();
+      this.indicatorEl = null;
+    }
     this.onBacklogMessage = null;
   }
 
