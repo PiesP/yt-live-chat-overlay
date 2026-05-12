@@ -497,6 +497,14 @@ class LiveChatSource extends ChatSource {
 
       await this.waitWhilePaused();
 
+      // Skip API polling when video is paused — the renderer already drops
+      // messages when isVideoPaused, but skipping the poll saves bandwidth.
+      const playback = this.getPlaybackSnapshot();
+      if (playback?.paused) {
+        await sleep(LIVE_POLL_FALLBACK_DELAY_MS, signal);
+        continue;
+      }
+
       const timeoutMs = this.liveContinuation?.timeoutMs ?? LIVE_POLL_FALLBACK_DELAY_MS;
       const delayMs = this.calculateAdaptiveDelay(timeoutMs);
       await sleep(delayMs, signal);
