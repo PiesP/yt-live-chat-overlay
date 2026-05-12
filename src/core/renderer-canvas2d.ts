@@ -60,6 +60,8 @@ interface CanvasMessage {
   amount?: string | undefined;
   content: ContentSegment[];
   isBacklog?: boolean | undefined;
+  /** Accumulated time (ms) the message spent paused while tab was hidden. */
+  pausedDuration: number;
   /** Pre-rendered bitmap for this message text (null for rich-content messages). */
   bitmap: HTMLCanvasElement | null;
   /** True when the bitmap has been rendered at least once. */
@@ -84,6 +86,8 @@ export class Canvas2DRenderer {
   private messages: CanvasMessage[] = [];
   private settings: OverlaySettings;
   private isPaused = false;
+  /** Timestamp when pause started, for accumulating pausedDuration across messages (null when not paused). */
+  private pausedAt: number | null = null;
   private burstDetector: BurstDetector;
   private dimensions: OverlayDimensions | null = null;
   private overlayDimensionsUnsubscribe: (() => void) | null = null;
@@ -282,6 +286,7 @@ export class Canvas2DRenderer {
       mode,
       content: message.content,
       isBacklog: message.isBacklog,
+      pausedDuration: 0,
       bitmap: null,
       bitmapReady: false,
     };
@@ -338,7 +343,7 @@ export class Canvas2DRenderer {
     const texts: Array<{ msg: CanvasMessage; elapsed: number; opacity: number }> = [];
 
     this.messages = this.messages.filter((msg) => {
-      const elapsed = now - msg.startTime;
+      const elapsed = now - msg.startTime - msg.pausedDuration;
       if (elapsed >= msg.duration) return false;
 
       let renderOpacity: number;
@@ -625,9 +630,21 @@ export class Canvas2DRenderer {
 
   pause(): void {
     this.isPaused = true;
+    this.pausedAt = performance.now();
     this.burstDetector.pause();
   }
   resume(): void {
+    if (this.pausedAt !== null) {
+      const pauseDuration = performance.now() - this.pausedAt;
+      // Accumulate pause time across all active messages so elapsed
+      // calculation in render() excludes time spent paused.
+      // Messages created during pause also receive the offset so they
+      // behave as if created at resume time (elapsed starts near 0).
+      for (const msg of this.messages) {
+        msg.pausedDuration += pauseDuration;
+      }
+      this.pausedAt = null;
+    }
     this.isPaused = false;
     this.burstDetector.resume();
   }
