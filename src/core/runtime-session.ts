@@ -219,9 +219,9 @@ export class RuntimeSession {
             renderer.laneCount,
             renderer.observability
           );
+          renderer.setBacklogSpeedMultiplier(this.backlogController.getSpeedMultiplier());
           this.backlogController.onBacklogMessage = (msg) => {
             if (!this.acceptForRenderer(msg)) return;
-            renderer.setBacklogSpeedMultiplier(this.backlogController?.getSpeedMultiplier() ?? 1);
             renderer.addMessage(msg);
           };
           renderer.onBacklogPauseChange = (paused) => {
