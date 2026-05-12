@@ -48,7 +48,6 @@ export class BacklogInjectionController {
   private lanes: number;
   private observability: ObservabilityReporter | undefined;
   private realTimeActivityCount = 0;
-  private readonly ADAPTIVE_COOLDOWN_MS = 2000;
 
   constructor(
     config: BacklogControllerConfig,
@@ -107,9 +106,6 @@ export class BacklogInjectionController {
   /** Notify the controller that a real-time message arrived during injection. */
   notifyRealTimeActivity(): void {
     this.realTimeActivityCount = Math.min(this.realTimeActivityCount + 1, 5);
-    void setTimeout(() => {
-      this.realTimeActivityCount = Math.max(0, this.realTimeActivityCount - 1);
-    }, this.ADAPTIVE_COOLDOWN_MS);
   }
 
   /** Start the throttled injection loop */
@@ -135,6 +131,10 @@ export class BacklogInjectionController {
     const realTimeFactor = Math.max(0.25, 1 - this.realTimeActivityCount * 0.2);
     const adaptiveRate = Math.max(1, Math.round(maxRate * realTimeFactor));
     const tickInterval = Math.round(1000 / adaptiveRate);
+
+    // Decay real-time activity count each tick so it naturally falls back
+    // to full backlog rate when real-time messages stop arriving.
+    this.realTimeActivityCount = Math.max(0, this.realTimeActivityCount - 1);
 
     const message = this.backlogQueue.shift();
     if (!message) return;
