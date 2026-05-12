@@ -10,14 +10,7 @@
 
 import type { ChatMessage, OverlaySettings } from '@app-types';
 import { type ChatEvent, extractChatEvents } from '@core/chat-message-parser';
-import {
-  combineAbortSignals,
-  findElementMatch,
-  isAbortError,
-  sleep,
-  throwIfAborted,
-  VIDEO_SELECTORS,
-} from '@core/dom';
+import { findElementMatch, isAbortError, sleep, throwIfAborted, VIDEO_SELECTORS } from '@core/dom';
 import { createLogger } from '@core/logging';
 import { MessageIdRegistry } from '@core/message-id-registry';
 import {
@@ -117,7 +110,7 @@ export abstract class ChatSource {
     this.callback = callback;
     this.resetSessionState();
 
-    const combinedSignal = combineAbortSignals(signal, this.pollController.signal);
+    const combinedSignal = signal || this.pollController?.signal;
 
     try {
       return await this.bootstrapAndLaunchPolling(combinedSignal);
