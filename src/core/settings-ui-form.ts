@@ -387,6 +387,8 @@ export class SettingsUiForm {
     const actions = this.createDiv('yt-chat-overlay-settings-actions');
     for (const [action, label] of [
       ['reset', 'Reset'],
+      ['export', 'Export'],
+      ['import', 'Import'],
       ['apply', 'Close'],
     ] as const) {
       const button = document.createElement('button');

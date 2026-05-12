@@ -5,6 +5,7 @@ import {
   PLAYER_LOOKUP_INTERVAL_MS,
 } from '@core/dom';
 import { createLogger } from '@core/logging';
+import { normalizeStoredSettings } from '@core/settings-schema';
 import { BACKDROP_ID, BUTTON_ID, SettingsUiForm, STYLE_ID } from '@core/settings-ui-form';
 import { SETTINGS_UI_STYLES } from '@core/settings-ui-styles';
 
@@ -184,6 +185,13 @@ export class SettingsUi {
       ?.addEventListener('click', () => this.handleReset());
 
     this.modal
+      ?.querySelector<HTMLButtonElement>('button[data-action="export"]')
+      ?.addEventListener('click', () => this.handleExport());
+    this.modal
+      ?.querySelector<HTMLButtonElement>('button[data-action="import"]')
+      ?.addEventListener('click', () => this.handleImport());
+
+    this.modal
       ?.querySelector<HTMLInputElement>('input[name="allowShortTextMessages"]')
       ?.addEventListener('change', () => this.form.syncMinTextLengthState());
 
@@ -309,6 +317,47 @@ export class SettingsUi {
     });
 
     this.modal.appendChild(dialog);
+  }
+
+  private handleExport(): void {
+    const settings = this.getSettings();
+    const json = JSON.stringify(settings, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'yt-chat-overlay-settings.json';
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  private handleImport(): void {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.addEventListener('change', () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.addEventListener('load', () => {
+        try {
+          const text = reader.result as string;
+          const parsed = JSON.parse(text) as Record<string, unknown>;
+          if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+            log.warn('Import failed: expected a settings object');
+            return;
+          }
+          const settings = normalizeStoredSettings(parsed);
+          this.onPreview(settings);
+          this.onPersist(settings);
+          this.form.populateForm(this.getSettings());
+        } catch (error) {
+          log.warn('Import failed: invalid JSON file', error);
+        }
+      });
+      reader.readAsText(file);
+    });
+    input.click();
   }
 
   private focusInitialElement(): void {
