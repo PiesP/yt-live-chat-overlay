@@ -270,7 +270,7 @@ export class Renderer {
 
     return {
       element,
-      startTime: performance.now(),
+      startTime,
       baseDuration,
       baseOpacity: baseOpacity ?? this.settings.opacity,
       cleanup,

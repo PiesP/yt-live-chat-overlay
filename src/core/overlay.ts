@@ -60,7 +60,7 @@ const areOverlayDimensionsEqual = (
 ): boolean =>
   previous?.width === next?.width &&
   previous?.height === next?.height &&
-  Math.abs((previous?.laneHeight ?? 0) - (next?.laneHeight ?? 0)) < 0.0001 &&
+  previous?.laneHeight === next?.laneHeight &&
   previous?.laneCount === next?.laneCount;
 
 export class Overlay {
