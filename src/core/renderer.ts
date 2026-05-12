@@ -85,6 +85,7 @@ export class Renderer {
   static readonly BACKGROUND_QUEUE_MAX = 10;
   /** Timestamp until which the EMA speed multiplier is suppressed after resume. */
   private resumeStabilizeUntil: number = 0;
+  private processQueueScheduled = false;
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
     this.overlay = overlay;
@@ -349,8 +350,20 @@ export class Renderer {
     }
 
     if (!this.isPaused) {
-      this.processQueue();
+      this.scheduleProcessQueue();
     }
+  }
+
+  /** Defer processQueue to the next microtask, collapsing multiple enqueue events. */
+  private scheduleProcessQueue(): void {
+    if (this.processQueueScheduled || this.isPaused) return;
+    this.processQueueScheduled = true;
+    queueMicrotask(() => {
+      this.processQueueScheduled = false;
+      if (!this.isPaused) {
+        this.processQueue();
+      }
+    });
   }
 
   private sweepStaleAnimations(): void {
