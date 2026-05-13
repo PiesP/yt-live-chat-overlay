@@ -20,7 +20,11 @@ export const RENDERER_STATIC_STYLES = `
     color: ${colors.ui.text};
     pointer-events: none;
     will-change: transform;
-    text-rendering: optimizeLegibility;
+    backface-visibility: hidden;
+    perspective: 1000;
+    transform: translateZ(0);
+    contain: paint layout style;
+    text-rendering: geometricPrecision;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
