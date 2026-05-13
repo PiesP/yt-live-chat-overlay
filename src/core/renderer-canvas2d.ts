@@ -249,6 +249,9 @@ export class Canvas2DRenderer {
 
     // Skip drawing while paused (positions frozen, but rAF loop keeps running)
     if (this.isPaused) return;
+    // Skip drawing while video is paused — prevents drainQueue from adding
+    // pending messages with timestamps that don't account for pause duration.
+    if (this.isVideoPaused) return;
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
