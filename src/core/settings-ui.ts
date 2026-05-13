@@ -339,7 +339,8 @@ export class SettingsUi {
       const reader = new FileReader();
       reader.addEventListener('load', () => {
         try {
-          const text = reader.result as string;
+          const text = reader.result;
+          if (typeof text !== 'string') return;
           const parsed = JSON.parse(text) as Record<string, unknown>;
           if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
             log.warn('Import failed: expected a settings object');
