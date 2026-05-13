@@ -245,7 +245,7 @@ export class Canvas2DRenderer {
       const entryOffset = baseOffset + jitter;
 
       const laneY = dims.height * this.settings.safeTop + placement.lane.index * dims.laneHeight;
-      y = laneY + Math.max(0, (dims.laneHeight - estimated.height) / 2);
+      y = laneY;
 
       duration = computeCrossDuration(dims.width, this.getEffectiveSpeedPxPerSec());
 

@@ -254,8 +254,7 @@ export class Renderer {
 
     const laneBlockTop =
       dimensions.height * this.settings.safeTop + lane.index * dimensions.laneHeight;
-    const laneBlockHeight = placement.laneSpan * dimensions.laneHeight;
-    const laneY = laneBlockTop + Math.max(0, (laneBlockHeight - messageHeight) / 2);
+    const laneY = laneBlockTop;
 
     const effectiveSpeedPxPerSec = this.getEffectiveSpeedPxPerSec();
     const now = performance.now();
