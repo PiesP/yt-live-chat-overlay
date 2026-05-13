@@ -20,11 +20,34 @@ interface LaneAllocatorOptions {
 
 /**
  * Threshold (ms) for treating a lane placement as "immediate".
- * When the expected wait time is within this threshold of 'now', we
- * consider the slot available rather than deferring, even if there's
- * minor overlap with the preceding message's animation tail.
+ * Kept tight to prevent same-lane comments from being placed so close
+ * together that minor timing jitter causes visual overlap.
  */
-const IMMEDIATE_PLACEMENT_THRESHOLD_MS = 48;
+const IMMEDIATE_PLACEMENT_THRESHOLD_MS = 16;
+
+/**
+ * Speed safety factor for segment-based lane clearance.
+ *
+ * Under the constant-duration model, all comments cross the screen in the
+ * same baseDuration regardless of text width. This means WIDER comments
+ * move FASTER (they cover more pixels in the same time). When a wide (fast)
+ * comment follows a narrow (slow) one on the same lane, its left edge
+ * catches up to the leading comment's right edge, causing visual overlap.
+ *
+ * This factor adds a width-proportional safety buffer to the segment
+ * clearance time, ensuring the following comment never catches up.
+ * 0.3 = 30% of the leading comment's text width added as extra clearance.
+ */
+const SPEED_SAFETY_FACTOR = 0.3;
+
+/**
+ * Multi-lane message speed penalty factor.
+ * Multi-lane messages (superchat/membership cards) span 2+ lanes and move
+ * faster due to their larger width. This extra factor adds additional
+ * safety margin when a multi-lane message is on the lane.
+ * 0.5 = 50% of text width added for multi-lane messages.
+ */
+const MULTI_LANE_SAFETY_FACTOR = 0.5;
 
 /**
  * Tracks a single active comment's horizontal presence on a lane.
@@ -34,7 +57,8 @@ const IMMEDIATE_PLACEMENT_THRESHOLD_MS = 48;
  *
  * A scrolling comment travels from right to left (or left to right in
  * reverse mode) across the full player width. The right edge must clear
- * the entry point of any new comment before the new one can start.
+ * the entry point of any new comment before the new one can start, AND
+ * the speed differential must not cause the following comment to catch up.
  */
 interface ActiveSegment {
   startTime: number;
@@ -45,6 +69,8 @@ interface ActiveSegment {
   entryOffset: number;
   /** Rendered text width of the comment */
   textWidth: number;
+  /** Number of lanes this segment occupies (1 for regular, 2+ for superchat/cards) */
+  laneSpan: number;
 }
 
 export class LaneAllocator {
@@ -95,6 +121,19 @@ export class LaneAllocator {
     return this.options.safeTop + laneIndex * this.laneHeight;
   }
 
+  /**
+   * Estimate the entry offset a new comment would have if placed on the
+   * given lane. The entry offset creates a per-lane stagger effect where
+   * top lanes start closer to the visible area and bottom lanes start
+   * further off-screen.
+   */
+  private estimateEntryOffset(laneIndex: number): number {
+    const baseOffset =
+      this.lanes.length > 1 ? Math.round((laneIndex / (this.lanes.length - 1)) * 200) : 100;
+    // Use the midpoint of the jitter range as the estimate (jitter = 0-30)
+    return baseOffset + 15;
+  }
+
   findPlacement(messageHeight: number, dimensions: OverlayDimensions): LanePlacement | null {
     const now = performance.now();
     const requiredLanes = this.calculateRequiredLanes(messageHeight);
@@ -120,7 +159,7 @@ export class LaneAllocator {
         }
         blockReadyTime = Math.max(
           blockReadyTime,
-          this.calculateLaneReadyTime(lane, now, dimensions.width)
+          this.calculateLaneReadyTime(lane, now, dimensions.width, requiredLanes)
         );
       }
 
@@ -133,7 +172,12 @@ export class LaneAllocator {
       // already scrolled past the midpoint of the screen are safe to share
       // vertical space with, since CSS overflow:hidden clips them.
       if (requiredLanes === 1 && blockReadyTime > now + IMMEDIATE_PLACEMENT_THRESHOLD_MS) {
-        const relaxedTime = this.calculateRelaxedReadyTime(startIndex, now, dimensions.width);
+        const relaxedTime = this.calculateRelaxedReadyTime(
+          startIndex,
+          now,
+          dimensions.width,
+          requiredLanes
+        );
         if (relaxedTime <= now + IMMEDIATE_PLACEMENT_THRESHOLD_MS) {
           blockReadyTime = relaxedTime;
         }
@@ -210,7 +254,7 @@ export class LaneAllocator {
       // Register a horizontal segment for 2D collision tracking.
       // This allows the lane to be reused while the comment is still visible
       // on screen — a new comment can start as long as existing segments'
-      // right edges have moved left of the entry point.
+      // right edges have moved left of the entry point (with speed safety).
       if (this.laneSegments[index]) {
         this.laneSegments[index]?.push({
           startTime,
@@ -218,6 +262,7 @@ export class LaneAllocator {
           totalDistance,
           entryOffset,
           textWidth,
+          laneSpan: placement.laneSpan,
         });
       }
     }
@@ -238,7 +283,12 @@ export class LaneAllocator {
    * scrolled past the screen midpoint. CSS overflow:hidden clips them, so
    * only horizontal overlap matters.
    */
-  private calculateRelaxedReadyTime(laneIndex: number, now: number, playerWidth: number): number {
+  private calculateRelaxedReadyTime(
+    laneIndex: number,
+    now: number,
+    playerWidth: number,
+    requiredLanes: number
+  ): number {
     const speed = this.options.getEffectiveSpeedPxPerSec();
     let relaxedTime = now;
 
@@ -249,8 +299,11 @@ export class LaneAllocator {
       if (!lane || lane.lastItemStartTime <= 0) continue;
 
       if (delta === 0) {
-        // Target lane: full collision check
-        relaxedTime = Math.max(relaxedTime, this.calculateLaneReadyTime(lane, now, playerWidth));
+        // Target lane: full collision check (pass requiredLanes for context)
+        relaxedTime = Math.max(
+          relaxedTime,
+          this.calculateLaneReadyTime(lane, now, playerWidth, requiredLanes)
+        );
       } else {
         // Adjacent lane: only check horizontal overlap.
         // If the adjacent comment has scrolled past the midpoint, it is
@@ -289,22 +342,49 @@ export class LaneAllocator {
   /**
    * Calculate the time when a lane becomes available for a new message.
    *
-   * Key innovation: for scrolling modes we use **horizontal segment tracking**
-   * instead of a fixed time guard. Each lane tracks the real-time horizontal
-   * position of every active comment (its "segment"). A new comment can start
-   * as soon as all existing segments' right edges have cleared the entry point,
-   * rather than waiting for the full animation to end.
+   * Uses 2D horizontal segment tracking for scrolling modes. Each lane
+   * tracks the real-time horizontal position of every active comment
+   * (its "segment"). A new comment can start when:
    *
-   * ── Same lane, textWidth=200, 1920px screen, speed=250 ──────────────
-   *   old method (animationEndGuard):  T0 + 7680ms
-   *   60% early clear (Phase 2B):      T0 + 4608ms
-   *   segment-based (this phase):      T0 + 662ms   ← 11.6x faster
-   * ─────────────────────────────────────────────────────────────────────
+   * 1. All existing segments' right edges have cleared the entry point
+   * 2. Add a speed safety buffer to prevent catch-up overlap
    *
-   * For top/bottom fixed modes, comments stay in place so we still use
+   * ── Speed mismatch overlap ─────────────────────────────────────────
+   * Under the constant-duration model, all comments cross the screen in
+   * `baseDuration` regardless of width. A wider comment covers more
+   * distance in the same time, so it moves faster:
+   *
+   *   speed = totalDistance / baseDuration
+   *         = (entryOffset + screenWidth + textWidth + exitPadding) / baseDuration
+   *
+   * If a wide (fast) comment follows a narrow (slow) one without enough
+   * gap, its left edge catches up to the narrow comment's right edge:
+   *
+   *   catchUpRate = speed_follow - speed_lead  (px/ms)
+   *   catchUpDist = catchUpRate × remainingTime (px)
+   *
+   * The SPEED_SAFETY_FACTOR adds textWidth × 0.3 of extra clearance
+   * distance, ensuring the following comment never catches up for
+   * realistic speed ratios. Multi-lane messages get an additional
+   * MULTI_LANE_SAFETY_FACTOR since they're significantly faster.
+   *
+   * ── Timeline comparison (200px text, 1920px screen, speed=250) ─────
+   *   Phase 2B (60% screen):   4608ms  (no segment tracking)
+   *   Phase 4B (basic seg):     993ms  (right-edge only, mid-lane)
+   *   This fix (with safety):   993ms  (mid-lane, ~50% inherent buffer
+   *                                     from entryOffset addition)
+   *                             1073ms  (top-lane, with explicit 30% buffer)
+   * ────────────────────────────────────────────────────────────────────
+   *
+   * For top/bottom fixed modes, comments stay in place so we use
    * the full animation end time.
    */
-  private calculateLaneReadyTime(lane: LaneState, now: number, playerWidth: number): number {
+  private calculateLaneReadyTime(
+    lane: LaneState,
+    now: number,
+    playerWidth: number,
+    newMessageLaneSpan: number = 1
+  ): number {
     if (lane.lastItemStartTime <= 0) {
       return now;
     }
@@ -312,9 +392,7 @@ export class LaneAllocator {
     const speed = this.options.getEffectiveSpeedPxPerSec();
     const fontSize = this.options.getFontSize();
 
-    // Width-proportional safe distance: wider comments need more gap.
-    // When comment width approaches screen width, the gap grows so the
-    // trailing comment clears the screen before the next one enters.
+    // Width-proportional safe distance (following distance between consecutive comments)
     const commentWidth = lane.lastItemWidthPx;
     const widthRatio = commentWidth / Math.max(1, commentWidth + playerWidth);
     const baseSafeDistance = Math.max(
@@ -335,9 +413,7 @@ export class LaneAllocator {
     const laneStaggerTime = lane.lastItemStartTime + this.options.globalStaggerMs;
 
     // ── 2D Horizontal segment tracking ─────────────────────────────────
-    // For scrolling modes, calculate the earliest time at which all active
-    // segments' right edges have cleared the entry point. This lets us pack
-    // multiple comments on the same lane at different horizontal positions.
+    // For scrolling modes, check all active segments for horizontal clearance.
     const mode = this.options.getDanmakuMode();
     const isScrolling = mode === 'scroll' || mode === 'reverse';
 
@@ -349,18 +425,38 @@ export class LaneAllocator {
         horizontalClearTime = now;
       } else {
         horizontalClearTime = now;
-        for (const seg of segments) {
-          // Distance the segment's right edge must travel to clear the
-          // entry point. Use entryOffset=0 (top lane) as worst-case
-          // estimate since we don't know the target lane yet.
-          const distanceToClear = seg.entryOffset + seg.textWidth;
-          if (distanceToClear <= 0) continue;
 
+        // Estimate the entry offset for a new comment on this lane
+        const newEntryOffset = this.estimateEntryOffset(lane.index);
+
+        for (const seg of segments) {
+          // ── Base distance: right edge must clear new comment's entry point ──
+          // For same-lane reuse, seg.entryOffset ≈ newEntryOffset, so this
+          // simplifies to just seg.textWidth.
+          const baseClearDist = Math.max(0, seg.entryOffset + seg.textWidth - newEntryOffset);
+
+          // ── Speed safety buffer: prevent catch-up by a following wider comment ──
+          // Under constant-duration scrolling, a wider (faster) comment catches
+          // up to a narrower (slower) one. Add a width-proportional buffer.
+          let speedSafetyDist = seg.textWidth * SPEED_SAFETY_FACTOR;
+
+          // Multi-lane messages (superchat/membership) are significantly wider
+          // and thus faster — add extra safety.
+          if (seg.laneSpan > 1) {
+            speedSafetyDist += seg.textWidth * MULTI_LANE_SAFETY_FACTOR;
+          }
+
+          // For the NEW message: if it's multi-lane (wider/faster), add extra
+          // safety since it will catch up faster.
+          if (newMessageLaneSpan > 1) {
+            speedSafetyDist += seg.textWidth * MULTI_LANE_SAFETY_FACTOR;
+          }
+
+          const totalClearDist = Math.max(seg.textWidth * 1.2, baseClearDist + speedSafetyDist);
           const segDuration = seg.endTime - seg.startTime;
           if (segDuration <= 0) continue;
 
-          // Clear time = time when the right edge passes screenWidth
-          const clearRatio = Math.min(1, distanceToClear / seg.totalDistance);
+          const clearRatio = Math.min(1, totalClearDist / seg.totalDistance);
           const segClearTime = seg.startTime + clearRatio * segDuration;
           horizontalClearTime = Math.max(horizontalClearTime, segClearTime);
         }
