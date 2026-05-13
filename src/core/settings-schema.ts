@@ -13,6 +13,7 @@ export type { OutlineSettingKey, RootNumericSettingKey, RootScalarSettingKey };
 
 const VALID_BACKLOG_MODES = ['playback', 'recent', 'full', 'none'] as const;
 const VALID_DANMAKU_MODES = ['scroll', 'reverse', 'top', 'bottom'] as const;
+const VALID_RENDERER_TYPES = ['css', 'canvas'] as const;
 
 export const AUTHOR_COLOR_KEYS = [
   'normal',
@@ -69,6 +70,7 @@ export const ROOT_SETTING_KEYS = [
   'logLevel',
   'laneSpacing',
   'showDebugOverlay',
+  'rendererType',
   'authorRateLimitEnabled',
   'authorRateLimitWindowMs',
   'authorRateLimitMaxMessages',
@@ -181,6 +183,7 @@ export const DEFAULT_SETTINGS = {
   outline: DEFAULT_OUTLINE,
   laneSpacing: 0,
   showDebugOverlay: false,
+  rendererType: 'css',
   authorRateLimitEnabled: true,
   authorRateLimitWindowMs: 5000,
   authorRateLimitMaxMessages: 5,
@@ -284,6 +287,12 @@ const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings
   )
     ? settings.danmakuMode
     : d.danmakuMode;
+
+  n.rendererType = VALID_RENDERER_TYPES.includes(
+    settings.rendererType as (typeof VALID_RENDERER_TYPES)[number]
+  )
+    ? settings.rendererType
+    : d.rendererType;
 
   for (const key of ROOT_NUMERIC_KEYS) {
     n[key] = clampNumber(settings[key], d[key], resolveLimits(key));

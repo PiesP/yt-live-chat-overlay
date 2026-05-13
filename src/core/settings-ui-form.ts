@@ -254,6 +254,14 @@ export class SettingsUiForm {
         ['bottom', 'Bottom Fixed'],
       ],
     },
+    rendererType: {
+      label: 'Renderer',
+      title: 'Rendering backend — CSS (DOM) or Canvas2D (rAF)',
+      options: [
+        ['css', 'CSS (DOM animations)'],
+        ['canvas', 'Canvas2D (rAF, stable)'],
+      ],
+    },
   };
 
   private createSelectField(name: string): HTMLLabelElement {
@@ -377,6 +385,9 @@ export class SettingsUiForm {
       )
     );
 
+    const rendererSection = this.createSection('Renderer');
+    rendererSection.append(this.createSelectField('rendererType'));
+
     const backlogSection = this.createSection('Backlog');
     backlogSection.append(
       this.createSelectField('backlogMode'),
@@ -435,6 +446,7 @@ export class SettingsUiForm {
       safeZoneSection,
       rateSection,
       performanceSection,
+      rendererSection,
       backlogSection,
       rateLimitSection,
       debugSection
@@ -594,6 +606,7 @@ export class SettingsUiForm {
     'logLevel',
     'backlogMode',
     'danmakuMode',
+    'rendererType',
   ]);
 
   private populateRootSetting(
@@ -678,6 +691,10 @@ export class SettingsUiForm {
       'danmakuMode',
       current.danmakuMode
     ) as OverlaySettings['danmakuMode'];
+    target.rendererType = this.getSelectValue(
+      'rendererType',
+      current.rendererType
+    ) as OverlaySettings['rendererType'];
 
     for (const key of ROOT_NUMERIC_KEYS) {
       target[key] = normalizeRootNumericInputValue(
