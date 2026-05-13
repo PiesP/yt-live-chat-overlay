@@ -27,7 +27,6 @@ const IMMEDIATE_PLACEMENT_THRESHOLD_MS = 48;
 
 export class LaneAllocator {
   private lanes: LaneState[] = [];
-  private nextLaneIndex = 0;
   private laneHeight = 0;
 
   constructor(private readonly options: LaneAllocatorOptions) {}
@@ -48,7 +47,6 @@ export class LaneAllocator {
       lastItemWidthPx: 0,
       totalMessages: 0,
     }));
-    this.nextLaneIndex = 0;
   }
 
   isEmpty(): boolean {
@@ -82,9 +80,9 @@ export class LaneAllocator {
     let bestStartIndex = -1;
     let bestReadyTime = Number.POSITIVE_INFINITY;
 
-    for (let scanOffset = 0; scanOffset <= maxStartIndex; scanOffset++) {
-      const startIndex = (this.nextLaneIndex + scanOffset) % (maxStartIndex + 1);
-
+    // Top-down scan: always start from lane 0 (top of screen)
+    // so the upper portion of the overlay gets filled first.
+    for (let startIndex = 0; startIndex <= maxStartIndex; startIndex++) {
       let blockReadyTime = now;
       let allValid = true;
 
@@ -120,11 +118,13 @@ export class LaneAllocator {
         bestStartIndex >= 0 ? this.getTotalMessages(bestStartIndex, requiredLanes) : Infinity;
 
       if (blockReadyTime <= now + IMMEDIATE_PLACEMENT_THRESHOLD_MS) {
-        // Immediate dispatch: prefer lane(s) with fewer total messages
+        // Immediate dispatch: prefer lane(s) with fewer total messages,
+        // then top-most (lower index) to keep the upper area filled.
         if (
           bestStartIndex === -1 ||
           candidateTotalMsgs < bestTotalMsgs ||
-          (candidateTotalMsgs === bestTotalMsgs && blockReadyTime < bestReadyTime)
+          (candidateTotalMsgs === bestTotalMsgs &&
+            (blockReadyTime < bestReadyTime || startIndex < bestStartIndex))
         ) {
           bestStartIndex = startIndex;
           bestReadyTime = blockReadyTime;
@@ -132,10 +132,13 @@ export class LaneAllocator {
         continue; // Keep scanning for an even less-loaded candidate
       }
 
-      // Fallback: prefer earliest ready time, break ties by load
+      // Fallback: prefer earliest ready time, break ties by load, then top-most
       if (
         blockReadyTime < bestReadyTime ||
-        (blockReadyTime === bestReadyTime && candidateTotalMsgs < bestTotalMsgs)
+        (blockReadyTime === bestReadyTime && candidateTotalMsgs < bestTotalMsgs) ||
+        (blockReadyTime === bestReadyTime &&
+          candidateTotalMsgs === bestTotalMsgs &&
+          startIndex < bestStartIndex)
       ) {
         bestReadyTime = blockReadyTime;
         bestStartIndex = startIndex;
@@ -150,8 +153,6 @@ export class LaneAllocator {
     if (!chosenLane) {
       return null;
     }
-
-    this.nextLaneIndex = (bestStartIndex + 1) % (maxStartIndex + 1);
 
     const waitMs = Math.max(0, Math.ceil(bestReadyTime - now));
 

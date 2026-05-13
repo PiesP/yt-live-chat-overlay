@@ -146,10 +146,17 @@ export class RendererMessageBuilder {
     const textWidth = this.measureContentWidth(message, font, fontSize);
     const textHeight = measureTextHeight(font, fontSize);
 
+    // All regular messages get consistent padding for visual uniformity.
+    // When author is hidden, we still apply the same padding so the element
+    // occupies exactly as much space as it renders — no mismatch between
+    // lane collision estimates and actual DOM layout.
+    const paddingH = spacing.md * 2;
+    const paddingV = spacing.sm * 2;
+
     if (!showAuthor || !message.author) {
       return {
-        width: textWidth,
-        height: textHeight,
+        width: textWidth + paddingH,
+        height: textHeight + paddingV,
       };
     }
 
@@ -158,14 +165,11 @@ export class RendererMessageBuilder {
     const authorNameWidth = measureTextWidth(message.author, authorFont);
     const authorSectionWidth = rendererLayout.authorPhotoSize + spacing.sm + authorNameWidth;
 
-    // With-author container has padding: 8px 12px on each side
-    const paddingH = spacing.md * 2;
     const totalWidth = Math.max(authorSectionWidth + paddingH, textWidth + paddingH);
 
     const photoHeight = rendererLayout.authorPhotoSize;
     const nameHeight = measureTextHeight(authorFont, authorFontSize);
     const authorSectionHeight = Math.max(photoHeight, nameHeight);
-    const paddingV = spacing.sm * 2; // padding-top + padding-bottom
 
     return {
       width: totalWidth,
@@ -572,8 +576,13 @@ export class RendererMessageBuilder {
     const settings = this.getSettings();
     const color = settings.colors[message.authorType];
 
+    // Always apply the with-author class for consistent padding/background.
+    // This ensures all comments have the same visual container regardless
+    // of whether the author name is shown — only the author info block
+    // inside differs.
+    element.classList.add('yt-chat-overlay-message-with-author');
+
     if (showAuthor) {
-      element.classList.add('yt-chat-overlay-message-with-author');
       element.appendChild(this.createAuthorElement(message));
     }
 
