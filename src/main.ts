@@ -166,4 +166,15 @@ async function initApp(): Promise<void> {
 }
 
 initOverlayLogLevel();
+registerMenuCommands();
 main();
+
+function registerMenuCommands(): void {
+  if (typeof GM_registerMenuCommand === 'undefined') return;
+  GM_registerMenuCommand('Reset overlay settings', () => {
+    const app = window.__ytChatOverlay;
+    if (app) {
+      app.resetSettings();
+    }
+  });
+}

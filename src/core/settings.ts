@@ -2,9 +2,11 @@ import type { OverlaySettings } from '@app-types';
 import { createLogger } from '@core/logging';
 import { DEFAULT_SETTINGS, readStoredSettingsRaw, STORAGE_KEY } from '@core/settings-definitions';
 import { applySettingsPatch, cloneSettings, normalizeStoredSettings } from '@core/settings-schema';
+import { getSettingsStorageAdapter } from '@core/settings-storage';
 
 const writeStoredSettings = (settings: Readonly<OverlaySettings>): void => {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+  const adapter = getSettingsStorageAdapter();
+  adapter.setItem(STORAGE_KEY, JSON.stringify(settings));
 };
 
 const log = createLogger('Settings');
@@ -38,7 +40,7 @@ export class Settings {
   }
 
   /**
-   * Apply settings changes in memory only, without persisting to localStorage.
+   * Apply settings changes in memory only, without persisting.
    * Use this for live preview during slider/input changes.
    */
   preview(partial: Partial<OverlaySettings>): void {
@@ -46,7 +48,7 @@ export class Settings {
   }
 
   /**
-   * Apply settings changes and persist to localStorage immediately.
+   * Apply settings changes and persist immediately.
    * Use this for explicit save actions (close/apply/reset).
    */
   update(partial: Partial<OverlaySettings>): void {

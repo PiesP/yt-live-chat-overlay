@@ -6,6 +6,7 @@ import type {
 } from '@app-types';
 import { isLogLevel } from '@app-types';
 import { colors as designColors } from '@core/design-tokens';
+import { getSettingsStorageAdapter } from '@core/settings-storage';
 
 type NumericSettingLimit = Readonly<{
   min: number;
@@ -108,12 +109,13 @@ export const DEFAULT_SETTINGS = {
 export const STORAGE_KEY = 'yt-live-chat-overlay-settings';
 
 /**
- * Read and parse the raw stored settings blob from localStorage.
+ * Read and parse the raw stored settings blob from storage.
  * Returns the parsed object or null on failure.
  */
 export function readStoredSettingsRaw(): Record<string, unknown> | null {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const adapter = getSettingsStorageAdapter();
+    const raw = adapter.getItem(STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (

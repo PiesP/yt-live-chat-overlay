@@ -67,7 +67,7 @@ export default defineConfig(({ mode }): UserConfig => {
             'Displays YouTube live chat in Nico-nico style flowing overlay (100% local, no data collection)',
           author: 'PiesP',
           match: [...USERSCRIPT_MATCH_PATTERNS],
-          grant: 'none',
+          grant: ['GM_setValue', 'GM_getValue', 'GM_registerMenuCommand'],
           'run-at': 'document-end',
           icon: 'https://www.youtube.com/favicon.ico',
           homepage: REPOSITORY_URL,
