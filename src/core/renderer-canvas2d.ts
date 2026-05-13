@@ -173,7 +173,7 @@ export class Canvas2DRenderer {
   }
 
   private getFont(): string {
-    return `${this.settings.fontSize}px system-ui, -apple-system, sans-serif`;
+    return `bold ${this.settings.fontSize}px system-ui, -apple-system, sans-serif`;
   }
 
   /** Density-based gap multiplier: tighter at high burst levels, keeps speed constant. */
@@ -411,7 +411,13 @@ export class Canvas2DRenderer {
 
   // ── Bitmap-cached text rendering ──────────────────────────────────────
 
-  /** Pre-render text to a bitmap canvas once, then blit each frame. */
+  /**
+   * Pre-render text to a bitmap canvas once, then blit each frame.
+   * Outline rendering matches CSS buildTextShadow + buildTextStroke:
+   *   1. 8-direction strokeText for corner outline (like CSS text-shadow corners)
+   *   2. shadowBlur glow pass (like CSS text-shadow glow)
+   *   3. fillText for the main glyphs on top
+   */
   private ensureBitmap(
     msg: CanvasMessage,
     font: string,
@@ -435,15 +441,30 @@ export class Canvas2DRenderer {
     bCtx.font = font;
     bCtx.textBaseline = 'top';
 
-    if (outlineEnabled && outlineWidth > 0) {
-      bCtx.strokeStyle = `rgba(0, 0, 0, ${outlineOpacity})`;
-      bCtx.lineWidth = outlineWidth * 2;
+    if (outlineEnabled && outlineWidth > 0 && outlineOpacity > 0) {
+      // Pass 1: 8-direction stroke for corner outline (matches CSS text-shadow corners)
+      const strokeAlpha = Math.min(1, outlineOpacity * 0.7);
+      bCtx.strokeStyle = `rgba(0, 0, 0, ${strokeAlpha})`;
+      bCtx.lineWidth = Math.max(1, outlineWidth * 0.6);
       bCtx.lineJoin = 'round';
       for (const [dx, dy] of OUTLINE_OFFSETS) {
         bCtx.strokeText(msg.text, dx, dy);
       }
+
+      // Pass 2: glow via shadowBlur (matches CSS text-shadow glow component)
+      const glowBlur = Math.max(1, outlineWidth * 1.5);
+      bCtx.shadowColor = `rgba(0, 0, 0, ${Math.min(1, outlineOpacity * 0.85)})`;
+      bCtx.shadowBlur = glowBlur;
+      bCtx.shadowOffsetX = 0;
+      bCtx.shadowOffsetY = 0;
+      bCtx.fillText(msg.text, 0, 0);
+
+      // Reset shadow for clean top pass
+      bCtx.shadowColor = 'transparent';
+      bCtx.shadowBlur = 0;
     }
 
+    // Final pass: main text fill on top
     bCtx.fillStyle = msg.color;
     bCtx.fillText(msg.text, 0, 0);
 
@@ -462,7 +483,7 @@ export class Canvas2DRenderer {
   ): void {
     // Rich content: render directly (text + emoji, can't precache easily)
     if (msg.content.length > 0) {
-      this.drawRichContent(ctx, msg);
+      this.drawRichContent(ctx, msg, outlineEnabled, outlineOpacity, outlineWidth);
       return;
     }
 
@@ -472,12 +493,36 @@ export class Canvas2DRenderer {
       ctx.drawImage(bmp, msg.x, msg.y);
     } else {
       // Fallback direct rendering (e.g. bitmap creation failed)
+      // Still draw outline to match bitmap-cached path
+      if (outlineEnabled && outlineWidth > 0 && outlineOpacity > 0) {
+        const strokeAlpha = Math.min(1, outlineOpacity * 0.7);
+        ctx.strokeStyle = `rgba(0, 0, 0, ${strokeAlpha})`;
+        ctx.lineWidth = Math.max(1, outlineWidth * 0.6);
+        ctx.lineJoin = 'round';
+        for (const [dx, dy] of OUTLINE_OFFSETS) {
+          ctx.strokeText(msg.text, msg.x + dx, msg.y + dy);
+        }
+        const glowBlur = Math.max(1, outlineWidth * 1.5);
+        ctx.shadowColor = `rgba(0, 0, 0, ${Math.min(1, outlineOpacity * 0.85)})`;
+        ctx.shadowBlur = glowBlur;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
+        ctx.fillText(msg.text, msg.x, msg.y);
+        ctx.shadowColor = 'transparent';
+        ctx.shadowBlur = 0;
+      }
       ctx.fillStyle = msg.color;
       ctx.fillText(msg.text, msg.x, msg.y);
     }
   }
 
-  private drawRichContent(ctx: CanvasRenderingContext2D, msg: CanvasMessage): void {
+  private drawRichContent(
+    ctx: CanvasRenderingContext2D,
+    msg: CanvasMessage,
+    outlineEnabled: boolean,
+    outlineOpacity: number,
+    outlineWidth: number
+  ): void {
     let cursorX = msg.x;
     const y = msg.y;
     const emojiSize = this.settings.fontSize * 1.2;
@@ -485,6 +530,25 @@ export class Canvas2DRenderer {
 
     for (const seg of msg.content) {
       if (seg.type === 'text') {
+        // Draw outline first (stroke pass) then fill, matching CSS text-shadow + text-stroke
+        if (outlineEnabled && outlineWidth > 0 && outlineOpacity > 0) {
+          const strokeAlpha = Math.min(1, outlineOpacity * 0.7);
+          ctx.strokeStyle = `rgba(0, 0, 0, ${strokeAlpha})`;
+          ctx.lineWidth = Math.max(1, outlineWidth * 0.6);
+          ctx.lineJoin = 'round';
+          for (const [dx, dy] of OUTLINE_OFFSETS) {
+            ctx.strokeText(seg.content, cursorX + dx, y + dy);
+          }
+          // Glow pass
+          const glowBlur = Math.max(1, outlineWidth * 1.5);
+          ctx.shadowColor = `rgba(0, 0, 0, ${Math.min(1, outlineOpacity * 0.85)})`;
+          ctx.shadowBlur = glowBlur;
+          ctx.shadowOffsetX = 0;
+          ctx.shadowOffsetY = 0;
+          ctx.fillText(seg.content, cursorX, y);
+          ctx.shadowColor = 'transparent';
+          ctx.shadowBlur = 0;
+        }
         ctx.fillStyle = msg.color;
         ctx.fillText(seg.content, cursorX, y);
         cursorX += this.measureTextCached(seg.content);
