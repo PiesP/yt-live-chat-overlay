@@ -66,6 +66,8 @@ interface CanvasMessage {
   bitmap: HTMLCanvasElement | null;
   /** True when the bitmap has been rendered at least once. */
   bitmapReady: boolean;
+  /** Initial X position at spawn time — used for stable per-frame position calculation. */
+  startX: number;
 }
 
 /** Density multiplier per burst level — tighter spacing = higher density. */
@@ -104,8 +106,8 @@ export class Canvas2DRenderer {
       globalStaggerMs: rendererLayout.globalStaggerMs,
       safeDistanceScale: rendererLayout.safeDistanceScale,
       safeDistanceMin: rendererLayout.safeDistanceMin,
-      laneHeightPaddingScale: rendererLayout.laneHeightPaddingScale,
-      laneHeightPaddingMin: rendererLayout.laneHeightPaddingMin,
+      laneHeightPaddingScale: 0,
+      laneHeightPaddingMin: 0,
     });
     this.laneAllocator.reset(overlay.getDimensions());
     this.observability = new ObservabilityReporter(settings.showDebugOverlay);
@@ -234,8 +236,7 @@ export class Canvas2DRenderer {
       const entryOffset = baseOffset + jitter;
 
       const laneY = dims.height * this.settings.safeTop + placement.lane.index * dims.laneHeight;
-      const laneSpanHeight = placement.laneSpan * dims.laneHeight;
-      y = laneY + Math.max(0, (laneSpanHeight - estimated.height) / 2);
+      y = laneY + Math.max(0, (dims.laneHeight - estimated.height) / 2);
 
       duration = computeCrossDuration(dims.width, speed);
 
@@ -288,6 +289,7 @@ export class Canvas2DRenderer {
       pausedDuration: 0,
       bitmap: null,
       bitmapReady: false,
+      startX: x,
     };
 
     if (mode === 'top' || mode === 'bottom') {
@@ -357,7 +359,8 @@ export class Canvas2DRenderer {
         renderOpacity = msg.opacity * Math.max(0, 1 - elapsed / Math.max(msg.duration, MAX_AGE_MS));
       } else {
         const progress = elapsed / msg.duration;
-        msg.x = canvasW + (msg.x - canvasW) - progress * (canvasW + msg.width + 100);
+        const travelDistance = canvasW + msg.width + 100;
+        msg.x = msg.startX - progress * travelDistance;
         renderOpacity = msg.opacity * Math.max(0, 1 - elapsed / Math.max(msg.duration, MAX_AGE_MS));
       }
 
