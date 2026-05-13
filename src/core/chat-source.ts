@@ -890,6 +890,7 @@ class ReplayChatSource extends ChatSource {
   /**
    * Insert a single event into the replay buffer using binary search,
    * avoiding a full sort of the buffer on every batch of incoming events.
+   * Skips insertion if the key already exists in the buffer.
    */
   private insertBufferedEvent(key: string, message: ChatMessage, offsetMs: number): void {
     let low = 0;
@@ -900,6 +901,10 @@ class ReplayChatSource extends ChatSource {
       const midItem = this.replayBuffer[mid];
       if (!midItem) {
         break;
+      }
+
+      if (midItem.key === key) {
+        return;
       }
 
       if (midItem.offsetMs <= offsetMs) {
