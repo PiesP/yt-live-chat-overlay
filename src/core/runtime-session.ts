@@ -386,8 +386,8 @@ export class RuntimeSession {
     const handlePlay = (): void => {
       if (this.disposed) return;
       log.debug('Video playing — resuming comment flow');
-      this.chatSource?.setPaused(false);
       this.renderer?.resumeForVideo();
+      this.chatSource?.setPaused(false);
     };
 
     const attachListeners = (video: HTMLVideoElement): void => {
