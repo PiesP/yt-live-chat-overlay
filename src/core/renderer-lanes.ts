@@ -174,23 +174,6 @@ export class LaneAllocator {
     return total;
   }
 
-  shiftTimeline(deltaMs: number): void {
-    if (deltaMs <= 0) {
-      return;
-    }
-
-    const clampedMs = Math.min(deltaMs, 60_000);
-
-    for (const lane of this.lanes) {
-      if (lane.lastItemStartTime > 0) {
-        lane.lastItemStartTime += clampedMs;
-      }
-      if (lane.lastItemEndTime > 0) {
-        lane.lastItemEndTime += clampedMs;
-      }
-    }
-  }
-
   /**
    * For single-lane messages, calculate a relaxed ready time that allows
    * vertical overlap with adjacent lanes when their comments have already
