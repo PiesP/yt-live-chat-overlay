@@ -6,7 +6,7 @@
  */
 
 import type { OverlaySettings } from '@app-types';
-import { createLogger, initOverlayLogLevel, setOverlayLogLevel } from '@core/logging';
+import { createLogger, setOverlayLogLevel } from '@core/logging';
 import { PageWatcher } from '@core/page-watcher';
 import { RuntimeManager } from '@core/runtime-manager';
 import { Settings } from '@core/settings';
@@ -148,7 +148,6 @@ async function initApp(): Promise<void> {
   }
 }
 
-initOverlayLogLevel();
 registerMenuCommands();
 main();
 
