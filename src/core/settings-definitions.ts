@@ -4,9 +4,7 @@ import type {
   OutlineSettings,
   OverlaySettings,
 } from '@app-types';
-import { isLogLevel } from '@app-types';
 import { colors as designColors } from '@core/design-tokens';
-import { getSettingsStorageAdapter } from '@core/settings-storage';
 
 type NumericSettingLimit = Readonly<{
   min: number;
@@ -107,38 +105,3 @@ export const DEFAULT_SETTINGS = {
 } as const satisfies Readonly<OverlaySettings>;
 
 export const STORAGE_KEY = 'yt-live-chat-overlay-settings';
-
-/**
- * Read and parse the raw stored settings blob from storage.
- * Returns the parsed object or null on failure.
- */
-export function readStoredSettingsRaw(): Record<string, unknown> | null {
-  try {
-    const adapter = getSettingsStorageAdapter();
-    const raw = adapter.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (
-      typeof parsed !== 'object' ||
-      parsed === null ||
-      Array.isArray(parsed) ||
-      '__proto__' in parsed ||
-      'constructor' in parsed
-    ) {
-      return null;
-    }
-    return parsed as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-}
-
-export const readStoredLogLevel = (): OverlaySettings['logLevel'] => {
-  const parsed = readStoredSettingsRaw();
-  if (!parsed) return DEFAULT_SETTINGS.logLevel;
-  if (isLogLevel(parsed.logLevel)) {
-    return parsed.logLevel;
-  }
-
-  return DEFAULT_SETTINGS.logLevel;
-};

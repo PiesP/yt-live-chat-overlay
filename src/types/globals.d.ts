@@ -8,7 +8,7 @@ interface YtChatOverlayDebugHandle {
   start(): Promise<void>;
   stop(): void;
   getSettings(): Readonly<OverlaySettings>;
-  updateSettings(partial: Partial<OverlaySettings>): void;
+  applySettings(partial: Partial<OverlaySettings>): void;
   resetSettings(): void;
 }
 

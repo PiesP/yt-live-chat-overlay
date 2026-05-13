@@ -33,8 +33,7 @@ class App {
   });
   private readonly settingsUi = new SettingsUi(
     () => this.settings.get(),
-    (partial) => this.previewSettings(partial),
-    (partial) => this.updateSettings(partial),
+    (partial) => this.applySettings(partial),
     () => this.resetSettings()
   );
 
@@ -76,35 +75,19 @@ class App {
   /**
    * Apply settings changes — updates memory, persists, and applies side-effects.
    */
-  previewSettings(partial: Partial<OverlaySettings>): void {
-    this.settings.preview(partial);
-    this.applySettingsSideEffects(partial);
-  }
-
-  /**
-   * Apply settings changes and persist immediately.
-   * Delegates to previewSettings() — all changes are now saved on every mutation.
-   */
-  updateSettings(partial: Partial<OverlaySettings>): void {
-    this.previewSettings(partial);
-    log.debug('Settings updated');
-  }
-
-  /** Shared side-effects after any settings change: log level, UI, runtime. */
-  private applySettingsSideEffects(partial: Partial<OverlaySettings>): void {
+  applySettings(partial: Partial<OverlaySettings>): void {
+    this.settings.set(partial);
     if (partial.logLevel !== undefined) {
       setOverlayLogLevel(this.settings.get().logLevel);
     }
-
     if (this.pageWatcher.isValidPage()) {
       void this.ensureSettingsUi();
     }
-
     this.runtimeManager.requestReconcile('settings-change');
   }
 
   resetSettings(): void {
-    this.updateSettings(DEFAULT_SETTINGS);
+    this.applySettings(DEFAULT_SETTINGS);
   }
 
   private async ensureSettingsUi(): Promise<void> {

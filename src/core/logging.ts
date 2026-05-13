@@ -1,5 +1,7 @@
 import type { LogLevel } from '@app-types';
-import { readStoredLogLevel } from '@core/settings-definitions';
+import { isLogLevel } from '@app-types';
+import { STORAGE_KEY } from '@core/settings-definitions';
+import { getSettingsStorageAdapter } from '@core/settings-storage';
 
 type ConsoleLogArgs = Parameters<Console['log']>;
 type ConsoleWarnArgs = Parameters<Console['warn']>;
@@ -42,7 +44,19 @@ export const setOverlayLogLevel = (level: LogLevel): void => {
 };
 
 export const initOverlayLogLevel = (): void => {
-  setOverlayLogLevel(readStoredLogLevel());
+  try {
+    const raw = getSettingsStorageAdapter().getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      if (isLogLevel(parsed.logLevel)) {
+        setOverlayLogLevel(parsed.logLevel);
+        return;
+      }
+    }
+  } catch {
+    // use default
+  }
+  setOverlayLogLevel(DEFAULT_LOG_LEVEL);
 };
 
 interface ModuleLogger {

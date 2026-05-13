@@ -33,8 +33,7 @@ export class SettingsUi {
 
   constructor(
     private readonly getSettings: () => Readonly<OverlaySettings>,
-    private readonly onPreview: (partial: Partial<OverlaySettings>) => void,
-    private readonly onPersist: (partial: Partial<OverlaySettings>) => void,
+    private readonly onChange: (partial: Partial<OverlaySettings>) => void,
     private readonly resetSettings: () => void
   ) {
     this.form = new SettingsUiForm(getSettings, (preview) => {
@@ -42,7 +41,7 @@ export class SettingsUi {
     });
   }
 
-  /** Debounced live preview — applies settings immediately but persists on close. */
+  /** Debounced live preview — applies settings immediately and persists. */
   private previewTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly PREVIEW_DEBOUNCE_MS = 250;
 
@@ -52,7 +51,7 @@ export class SettingsUi {
     }
     this.previewTimer = setTimeout(() => {
       this.previewTimer = null;
-      this.onPreview(preview);
+      this.onChange(preview);
       // Sync form with normalized values from the settings system
       this.form.populateForm(this.getSettings());
     }, this.PREVIEW_DEBOUNCE_MS);
@@ -62,8 +61,7 @@ export class SettingsUi {
     if (this.previewTimer !== null) {
       clearTimeout(this.previewTimer);
       this.previewTimer = null;
-      // Flush the last debounced preview and ensure it is persisted
-      this.onPersist(this.form.collectSettings());
+      this.onChange(this.form.collectSettings());
     }
   }
 
@@ -348,8 +346,7 @@ export class SettingsUi {
             return;
           }
           const settings = normalizeStoredSettings(parsed);
-          this.onPreview(settings);
-          this.onPersist(settings);
+          this.onChange(settings);
           this.form.populateForm(this.getSettings());
         } catch (error) {
           log.warn('Import failed: invalid JSON file', error);

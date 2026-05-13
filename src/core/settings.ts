@@ -1,35 +1,50 @@
 import type { OverlaySettings } from '@app-types';
 import { createLogger } from '@core/logging';
-import { DEFAULT_SETTINGS, readStoredSettingsRaw, STORAGE_KEY } from '@core/settings-definitions';
+import { DEFAULT_SETTINGS, STORAGE_KEY } from '@core/settings-definitions';
 import { applySettingsPatch, cloneSettings, normalizeStoredSettings } from '@core/settings-schema';
 import { getSettingsStorageAdapter } from '@core/settings-storage';
 
-const writeStoredSettings = (settings: Readonly<OverlaySettings>): void => {
-  const adapter = getSettingsStorageAdapter();
-  adapter.setItem(STORAGE_KEY, JSON.stringify(settings));
-};
-
 const log = createLogger('Settings');
+
+function readStoredRaw(): Record<string, unknown> | null {
+  try {
+    const raw = getSettingsStorageAdapter().getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (
+      typeof parsed !== 'object' ||
+      parsed === null ||
+      Array.isArray(parsed) ||
+      '__proto__' in parsed ||
+      'constructor' in parsed
+    ) {
+      return null;
+    }
+    return parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
 
 export class Settings {
   private settings: OverlaySettings;
 
   constructor() {
-    this.settings = this.loadSettings();
+    this.settings = this.load();
   }
 
-  private loadSettings(): OverlaySettings {
+  private load(): OverlaySettings {
     try {
-      return normalizeStoredSettings(readStoredSettingsRaw());
+      return normalizeStoredSettings(readStoredRaw());
     } catch (error) {
       log.warn('Failed to load settings:', error);
       return cloneSettings(DEFAULT_SETTINGS);
     }
   }
 
-  private saveSettings(): void {
+  private save(): void {
     try {
-      writeStoredSettings(this.settings);
+      getSettingsStorageAdapter().setItem(STORAGE_KEY, JSON.stringify(this.settings));
     } catch (error) {
       log.warn('Failed to save settings:', error);
     }
@@ -39,19 +54,8 @@ export class Settings {
     return this.settings;
   }
 
-  /**
-   * Apply settings changes in memory and persist immediately.
-   */
-  preview(partial: Partial<OverlaySettings>): void {
+  set(partial: Partial<OverlaySettings>): void {
     this.settings = applySettingsPatch(this.settings, partial);
-    this.saveSettings();
-  }
-
-  /**
-   * Apply settings changes and persist immediately.
-   * Alias for preview() — all changes are now saved on every mutation.
-   */
-  update(partial: Partial<OverlaySettings>): void {
-    this.preview(partial);
+    this.save();
   }
 }
