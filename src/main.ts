@@ -48,12 +48,13 @@ class App {
   };
 
   constructor() {
-    setOverlayLogLevel(this.settings.get().logLevel);
     this.pageWatcher.onChange(this.handlePageWatcherChange);
     log.debug('Initialized');
   }
 
   async start(): Promise<void> {
+    this.settings.initialize();
+    setOverlayLogLevel(this.settings.get().logLevel);
     if (this.pageWatcher.isValidPage()) {
       await this.ensureSettingsUi();
     }

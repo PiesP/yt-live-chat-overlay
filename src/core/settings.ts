@@ -30,15 +30,14 @@ export class Settings {
   private settings: OverlaySettings;
 
   constructor() {
-    this.settings = this.load();
+    this.settings = cloneSettings(DEFAULT_SETTINGS);
   }
 
-  private load(): OverlaySettings {
+  initialize(): void {
     try {
-      return normalizeStoredSettings(readStoredRaw());
+      this.settings = normalizeStoredSettings(readStoredRaw());
     } catch (error) {
       log.warn('Failed to load settings:', error);
-      return cloneSettings(DEFAULT_SETTINGS);
     }
   }
 
