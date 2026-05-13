@@ -272,6 +272,14 @@ export class Renderer {
       baseDuration = rendererLayout.topBottomDurationMs;
       laneDelay = 0;
       startTime = now;
+      this.laneAllocator.commitPlacement(
+        placement,
+        textWidth,
+        0,
+        0,
+        startTime,
+        startTime + baseDuration
+      );
     } else if (mode === 'reverse') {
       // LTR: start from left edge
       baseDuration = computeCrossDuration(dimensions.width, effectiveSpeedPxPerSec);
@@ -280,6 +288,14 @@ export class Renderer {
       element.style.right = '0';
       element.style.visibility = 'visible';
       startTime = now + laneDelay;
+      this.laneAllocator.commitPlacement(
+        placement,
+        textWidth,
+        0,
+        0,
+        startTime,
+        startTime + baseDuration
+      );
     } else {
       // RTL (scroll): existing behaviour
       element.style.top = `${laneY}px`;
@@ -290,7 +306,7 @@ export class Renderer {
         fontSize * rendererLayout.exitPaddingScale,
         rendererLayout.exitPaddingMin
       );
-      const distance = dimensions.width + textWidth + exitPadding;
+      const exitDistance = dimensions.width + textWidth + exitPadding;
 
       const baseOffset =
         dimensions.laneCount > 1
@@ -302,11 +318,17 @@ export class Renderer {
       baseDuration = computeCrossDuration(dimensions.width, effectiveSpeedPxPerSec);
 
       element.style.setProperty('--yt-msg-entry-offset', `${entryOffset}px`);
-      element.style.setProperty('--yt-msg-exit-offset', `-${distance}px`);
+      element.style.setProperty('--yt-msg-exit-offset', `-${exitDistance}px`);
       startTime = now + laneDelay;
+      this.laneAllocator.commitPlacement(
+        placement,
+        textWidth,
+        entryOffset,
+        entryOffset + exitDistance,
+        startTime,
+        startTime + baseDuration
+      );
     }
-
-    this.laneAllocator.commitPlacement(placement, textWidth, startTime, startTime + baseDuration);
 
     if (message?.isBacklog && this.backlogSpeedMultiplier > 1) {
       baseDuration = Math.max(

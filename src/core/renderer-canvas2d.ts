@@ -232,12 +232,18 @@ export class Canvas2DRenderer {
           ? dims.height * this.settings.safeTop
           : dims.height * (1 - this.settings.safeBottom) - estimated.height;
       duration = rendererLayout.topBottomDurationMs;
-      this.laneAllocator.commitPlacement(placement, textWidth, now, now + duration);
+      this.laneAllocator.commitPlacement(placement, textWidth, 0, 0, now, now + duration);
     } else {
       const baseOffset =
         dims.laneCount > 1 ? Math.round((placement.lane.index / (dims.laneCount - 1)) * 200) : 100;
       const jitter = Math.floor(Math.random() * 30);
       const entryOffset = baseOffset + jitter;
+      // Match CSS renderer's exitPadding for consistent segment tracking
+      const exitPadding = Math.max(
+        this.settings.fontSize * rendererLayout.exitPaddingScale,
+        rendererLayout.exitPaddingMin
+      );
+      const totalDistance = entryOffset + dims.width + textWidth + exitPadding;
 
       const laneY = this.laneAllocator.getLaneY(placement.lane.index);
       y = laneY;
@@ -246,7 +252,14 @@ export class Canvas2DRenderer {
 
       x = mode === 'reverse' ? -(dims.width + entryOffset) : dims.width + entryOffset;
 
-      this.laneAllocator.commitPlacement(placement, textWidth, now, now + duration);
+      this.laneAllocator.commitPlacement(
+        placement,
+        textWidth,
+        entryOffset,
+        totalDistance,
+        now,
+        now + duration
+      );
     }
 
     const color = this.settings.colors[message.authorType];
