@@ -231,13 +231,7 @@ export class Canvas2DRenderer {
           ? dims.height * this.settings.safeTop
           : dims.height * (1 - this.settings.safeBottom) - estimated.height;
       duration = rendererLayout.topBottomDurationMs;
-      this.laneAllocator.commitPlacement(
-        placement,
-        textWidth,
-        estimated.height,
-        now,
-        now + duration
-      );
+      this.laneAllocator.commitPlacement(placement, textWidth, now, now + duration);
     } else {
       const baseOffset =
         dims.laneCount > 1 ? Math.round((placement.lane.index / (dims.laneCount - 1)) * 200) : 100;
@@ -251,13 +245,7 @@ export class Canvas2DRenderer {
 
       x = mode === 'reverse' ? -(dims.width + entryOffset) : dims.width + entryOffset;
 
-      this.laneAllocator.commitPlacement(
-        placement,
-        textWidth,
-        estimated.height,
-        now,
-        now + duration
-      );
+      this.laneAllocator.commitPlacement(placement, textWidth, now, now + duration);
     }
 
     const color = this.settings.colors[message.authorType];

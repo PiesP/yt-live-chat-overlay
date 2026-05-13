@@ -305,13 +305,7 @@ export class Renderer {
       startTime = now + laneDelay;
     }
 
-    this.laneAllocator.commitPlacement(
-      placement,
-      textWidth,
-      messageHeight,
-      startTime,
-      startTime + baseDuration
-    );
+    this.laneAllocator.commitPlacement(placement, textWidth, startTime, startTime + baseDuration);
 
     if (message?.isBacklog && this.backlogSpeedMultiplier > 1) {
       baseDuration = Math.max(

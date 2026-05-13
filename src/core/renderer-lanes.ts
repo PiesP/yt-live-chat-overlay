@@ -46,7 +46,6 @@ export class LaneAllocator {
       lastItemStartTime: 0,
       lastItemEndTime: 0,
       lastItemWidthPx: 0,
-      lastItemHeightPx: 0,
       totalMessages: 0,
     }));
     this.nextLaneIndex = 0;
@@ -167,7 +166,6 @@ export class LaneAllocator {
   commitPlacement(
     placement: LanePlacement,
     textWidth: number,
-    messageHeight: number,
     startTime: number,
     endTime: number
   ): void {
@@ -178,7 +176,6 @@ export class LaneAllocator {
       laneState.lastItemStartTime = startTime;
       laneState.lastItemEndTime = endTime;
       laneState.lastItemWidthPx = textWidth;
-      laneState.lastItemHeightPx = messageHeight;
       laneState.totalMessages++;
     }
   }
