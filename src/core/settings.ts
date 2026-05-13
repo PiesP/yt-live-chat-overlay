@@ -40,19 +40,18 @@ export class Settings {
   }
 
   /**
-   * Apply settings changes in memory only, without persisting.
-   * Use this for live preview during slider/input changes.
+   * Apply settings changes in memory and persist immediately.
    */
   preview(partial: Partial<OverlaySettings>): void {
     this.settings = applySettingsPatch(this.settings, partial);
+    this.saveSettings();
   }
 
   /**
    * Apply settings changes and persist immediately.
-   * Use this for explicit save actions (close/apply/reset).
+   * Alias for preview() — all changes are now saved on every mutation.
    */
   update(partial: Partial<OverlaySettings>): void {
     this.preview(partial);
-    this.saveSettings();
   }
 }

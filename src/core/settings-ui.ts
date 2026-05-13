@@ -62,7 +62,7 @@ export class SettingsUi {
     if (this.previewTimer !== null) {
       clearTimeout(this.previewTimer);
       this.previewTimer = null;
-      // Persist the current form state to localStorage on close/apply
+      // Flush the last debounced preview and ensure it is persisted
       this.onPersist(this.form.collectSettings());
     }
   }

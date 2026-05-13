@@ -74,8 +74,7 @@ class App {
   }
 
   /**
-   * Apply settings changes for live preview — updates memory and runtime
-   * but does NOT persist to localStorage. Persistence happens on close/apply.
+   * Apply settings changes — updates memory, persists, and applies side-effects.
    */
   previewSettings(partial: Partial<OverlaySettings>): void {
     this.settings.preview(partial);
@@ -83,11 +82,11 @@ class App {
   }
 
   /**
-   * Apply settings changes and persist to localStorage immediately.
+   * Apply settings changes and persist immediately.
+   * Delegates to previewSettings() — all changes are now saved on every mutation.
    */
   updateSettings(partial: Partial<OverlaySettings>): void {
-    this.settings.update(partial);
-    this.applySettingsSideEffects(partial);
+    this.previewSettings(partial);
     log.debug('Settings updated');
   }
 
