@@ -451,18 +451,10 @@ export class Renderer {
 
   /** Find the index of the queued message with the lowest priority (for queue overflow replacement). */
   private findLowestPriorityIndex(): number {
-    const queue = this.pendingQueue;
-    let lowestIdx = -1;
-    let lowestPrio = Infinity;
-
-    queue.forEach((q, i) => {
-      if (q.priority < lowestPrio) {
-        lowestPrio = q.priority;
-        lowestIdx = i;
-      }
-    });
-
-    return lowestIdx;
+    const len = this.pendingQueue.length;
+    if (len === 0) return -1;
+    // Queue is maintained highest-first, so the last item has the lowest priority.
+    return len - 1;
   }
 
   setBacklogSpeedMultiplier(multiplier: number): void {
@@ -540,12 +532,14 @@ export class Renderer {
         droppedCount++;
         queued.retries++;
         if (queued.retries < Renderer.MAX_RETRY_ATTEMPTS) {
-          // Find insertion point past higher-priority items to avoid starvation
-          const insertAfter = this.pendingQueue.findIndex((q) => q.priority <= queued.priority);
-          if (insertAfter === -1) {
+          // Re-insert after existing messages of the same or higher priority
+          // to avoid starvation. The queue is highest-first, so we find the
+          // first message strictly lower priority and insert before it.
+          const insertBefore = this.pendingQueue.findIndex((q) => q.priority < queued.priority);
+          if (insertBefore === -1) {
             this.pendingQueue.push(queued);
           } else {
-            this.pendingQueue.splice(insertAfter, 0, queued);
+            this.pendingQueue.splice(insertBefore, 0, queued);
           }
         } else {
           log.debug('Drop [max_retries_exceeded]:', queued.message.author, queued.message.kind);
