@@ -102,7 +102,8 @@ export abstract class ChatSource {
   protected bootstrap: ChatBootstrapData | null = null;
   private readonly recentMessages: ChatMessage[] = [];
   private cachedPlayback: PlaybackSnapshot | null = null;
-  private timeupdateCleanup: (() => void) | null = null;
+  private rafCleanup: (() => void) | null = null;
+  private rafId: number | null = null;
   protected readonly eventBus = new ChatSourceEventBus();
 
   constructor(getSettings: () => Readonly<OverlaySettings>) {
@@ -202,30 +203,34 @@ export abstract class ChatSource {
     };
   }
 
-  protected installTimeupdateListener(): void {
+  protected installAnimationFrameSync(): void {
     const el = findElementMatch<HTMLVideoElement>(VIDEO_SELECTORS);
     if (!el) return;
     const v = el.element;
-    const onTimeupdate = (): void => {
+
+    const sync = (): void => {
       if (!Number.isFinite(v.currentTime)) {
         this.cachedPlayback = null;
-        return;
+      } else {
+        this.cachedPlayback = {
+          offsetMs: Math.max(0, Math.floor(v.currentTime * 1000)),
+          paused: v.paused,
+        };
       }
-      this.cachedPlayback = {
-        offsetMs: Math.max(0, Math.floor(v.currentTime * 1000)),
-        paused: v.paused,
-      };
+      this.rafId = requestAnimationFrame(sync);
     };
-    v.addEventListener('timeupdate', onTimeupdate);
-    this.timeupdateCleanup = () => {
-      v.removeEventListener('timeupdate', onTimeupdate);
+    this.rafId = requestAnimationFrame(sync);
+    this.rafCleanup = () => {
+      if (this.rafId !== null) {
+        cancelAnimationFrame(this.rafId);
+        this.rafId = null;
+      }
     };
-    onTimeupdate();
   }
 
-  protected removeTimeupdateListener(): void {
-    this.timeupdateCleanup?.();
-    this.timeupdateCleanup = null;
+  protected removeAnimationFrameSync(): void {
+    this.rafCleanup?.();
+    this.rafCleanup = null;
     this.cachedPlayback = null;
   }
 
@@ -404,7 +409,7 @@ export abstract class ChatSource {
     this.bootstrap = null;
     this.lastActivityTime = 0;
     this.recentMessages.length = 0;
-    this.removeTimeupdateListener();
+    this.removeAnimationFrameSync();
     this.eventBus.removeAllListeners();
   }
 
@@ -495,7 +500,7 @@ class LiveChatSource extends ChatSource {
 
   protected launchCurrentPollLoop(signal?: AbortSignal): void {
     this.launchPollLoop(signal, (loopSignal) => this.runLiveLoop(loopSignal));
-    this.installTimeupdateListener();
+    this.installAnimationFrameSync();
   }
 
   protected resetSessionState(): void {
@@ -707,7 +712,7 @@ class ReplayChatSource extends ChatSource {
   protected launchCurrentPollLoop(signal?: AbortSignal): void {
     this.launchPollLoop(signal, (loopSignal) => this.runReplayLoop(loopSignal));
     this.installSeekListeners(signal);
-    this.installTimeupdateListener();
+    this.installAnimationFrameSync();
   }
 
   protected resetSessionState(): void {
