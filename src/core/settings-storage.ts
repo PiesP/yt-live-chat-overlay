@@ -38,19 +38,27 @@ class LocalStorageAdapter implements SettingsStorageAdapter {
 }
 
 const gmAdapter = (): SettingsStorageAdapter | null => {
-  if (typeof GM_setValue === 'undefined' || typeof GM_getValue === 'undefined') {
-    return null;
-  }
+  const gmSetValue = typeof GM_setValue !== 'undefined' ? GM_setValue : undefined;
+  const gmGetValue = typeof GM_getValue !== 'undefined' ? GM_getValue : undefined;
+  const gmDeleteValue = typeof GM_deleteValue !== 'undefined' ? GM_deleteValue : undefined;
+
+  if (!gmSetValue || !gmGetValue) return null;
+
   return {
     getItem(key: string): string | null {
-      const value = GM_getValue(key);
-      return value !== '' ? value : null;
+      const value = gmGetValue(key);
+      if (value === undefined || value === null || value === '') return null;
+      return value;
     },
     setItem(key: string, value: string): void {
-      GM_setValue(key, value);
+      gmSetValue(key, value);
     },
     removeItem(key: string): void {
-      GM_setValue(key, '');
+      if (gmDeleteValue) {
+        gmDeleteValue(key);
+      } else {
+        gmSetValue(key, '');
+      }
     },
   };
 };
