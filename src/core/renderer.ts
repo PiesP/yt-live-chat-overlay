@@ -47,7 +47,7 @@ import { BurstDetector } from '@core/burst-detector';
 import {
   buildTextShadow,
   buildTextStroke,
-  computeCrossDuration,
+  computeDliosDuration,
   rendererLayout,
   shadows,
 } from '@core/design-tokens';
@@ -132,10 +132,8 @@ export class Renderer {
     this.settings = settings;
     this.messageBuilder = new RendererMessageBuilder(() => this.settings);
     this.laneAllocator = new LaneAllocator({
-      getFontSize: () => this.settings.fontSize,
       getEffectiveSpeedPxPerSec: () => this.getEffectiveSpeedPxPerSec(),
       getDanmakuMode: () => this.danmakuMode,
-      globalStaggerMs: rendererLayout.globalStaggerMs,
       safeTop: this.settings.safeTop,
       laneSpacing: this.settings.laneSpacing,
     });
@@ -272,8 +270,11 @@ export class Renderer {
       startTime = now;
       this.laneAllocator.commitPlacement(placement, textWidth, startTime);
     } else if (mode === 'reverse') {
-      // LTR: start from left edge
-      baseDuration = computeCrossDuration(dimensions.width, effectiveSpeedPxPerSec);
+      // LTR: constant-velocity from left to right
+      // The CSS animation for reverse covers 2*screenWidth + 100px.
+      // entryOffset defaults to 0 in CSS (var default).
+      const reverseTotalDistance = dimensions.width * 2 + 100;
+      baseDuration = computeDliosDuration(reverseTotalDistance, effectiveSpeedPxPerSec);
 
       element.style.top = `${laneY}px`;
       element.style.right = '0';
@@ -281,7 +282,8 @@ export class Renderer {
       startTime = now + laneDelay;
       this.laneAllocator.commitPlacement(placement, textWidth, startTime);
     } else {
-      // RTL (scroll): existing behaviour
+      // RTL (scroll): constant-velocity from right to left
+      // Duration varies per-comment so every comment scrolls at velocity
       element.style.top = `${laneY}px`;
       element.style.left = `${dimensions.width}px`;
       element.style.visibility = 'visible';
@@ -299,7 +301,9 @@ export class Renderer {
       const jitter = Math.floor(Math.random() * 30);
       const entryOffset = baseOffset + jitter;
 
-      baseDuration = computeCrossDuration(dimensions.width, effectiveSpeedPxPerSec);
+      // totalDistance = entryOffset + screenWidth + textWidth + exitPadding
+      const totalDistance = entryOffset + dimensions.width + textWidth + exitPadding;
+      baseDuration = computeDliosDuration(totalDistance, effectiveSpeedPxPerSec);
 
       element.style.setProperty('--yt-msg-entry-offset', `${entryOffset}px`);
       element.style.setProperty('--yt-msg-exit-offset', `-${exitDistance}px`);

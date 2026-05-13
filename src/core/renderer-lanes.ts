@@ -9,10 +9,8 @@ export interface LanePlacement {
 }
 
 interface LaneAllocatorOptions {
-  readonly getFontSize: () => number;
   readonly getEffectiveSpeedPxPerSec: () => number;
   readonly getDanmakuMode: () => DanmakuMode;
-  readonly globalStaggerMs: number;
   readonly safeTop: number;
   readonly laneSpacing: number;
 }

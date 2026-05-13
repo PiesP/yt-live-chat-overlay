@@ -21,7 +21,7 @@ import type {
   OverlaySettings,
 } from '@app-types';
 import { BurstDetector } from '@core/burst-detector';
-import { computeCrossDuration, rendererLayout } from '@core/design-tokens';
+import { computeDliosDuration, rendererLayout } from '@core/design-tokens';
 import { createLogger } from '@core/logging';
 import { ObservabilityReporter } from '@core/observability';
 import type { Overlay } from '@core/overlay';
@@ -101,10 +101,8 @@ export class Canvas2DRenderer {
     this.settings = settings;
     this.messageBuilder = new RendererMessageBuilder(() => this.settings);
     this.laneAllocator = new LaneAllocator({
-      getFontSize: () => this.settings.fontSize,
       getEffectiveSpeedPxPerSec: () => this.settings.speedPxPerSec,
       getDanmakuMode: () => this.settings.danmakuMode,
-      globalStaggerMs: rendererLayout.globalStaggerMs,
       safeTop: this.settings.safeTop,
       laneSpacing: this.settings.laneSpacing,
     });
@@ -240,7 +238,18 @@ export class Canvas2DRenderer {
       const laneY = this.laneAllocator.getLaneY(placement.lane.index);
       y = laneY;
 
-      duration = computeCrossDuration(dims.width, this.getEffectiveSpeedPxPerSec());
+      // Constant-velocity duration: proportional to total visual distance
+      if (mode === 'reverse') {
+        const reverseTotal = dims.width * 2 + 100;
+        duration = computeDliosDuration(reverseTotal, this.getEffectiveSpeedPxPerSec());
+      } else {
+        const exitPadding = Math.max(
+          this.settings.fontSize * rendererLayout.exitPaddingScale,
+          rendererLayout.exitPaddingMin
+        );
+        const totalDist = entryOffset + dims.width + textWidth + exitPadding;
+        duration = computeDliosDuration(totalDist, this.getEffectiveSpeedPxPerSec());
+      }
 
       x = mode === 'reverse' ? -(dims.width + entryOffset) : dims.width + entryOffset;
 
