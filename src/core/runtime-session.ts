@@ -365,8 +365,8 @@ export class RuntimeSession {
   // ── Video pause/play listeners ────────────────────────────────────────────
 
   private startVideoPauseListeners(): void {
-    const video = this.getVideoElement();
-    if (!video) {
+    let currentVideo = this.getVideoElement();
+    if (!currentVideo) {
       log.debug('No video element found — video pause handling disabled');
       return;
     }
@@ -385,14 +385,53 @@ export class RuntimeSession {
       this.renderer?.resumeForVideo();
     };
 
-    video.addEventListener('pause', handlePause);
-    video.addEventListener('play', handlePlay);
+    const attachListeners = (video: HTMLVideoElement): void => {
+      video.addEventListener('pause', handlePause);
+      video.addEventListener('play', handlePlay);
+    };
 
-    this.videoPauseCleanup = () => {
+    const detachListeners = (video: HTMLVideoElement | null): void => {
+      if (!video) return;
       video.removeEventListener('pause', handlePause);
       video.removeEventListener('play', handlePlay);
-      this.videoPauseCleanup = null;
     };
+
+    const rebindVideo = (): void => {
+      const nextVideo = this.getVideoElement();
+      if (nextVideo && nextVideo !== currentVideo) {
+        detachListeners(currentVideo);
+        currentVideo = nextVideo;
+        attachListeners(currentVideo);
+        log.debug('Re-bound video pause/play listeners to new <video> element');
+      }
+    };
+
+    attachListeners(currentVideo);
+
+    // Watch the player container for <video> element replacements (e.g. ad
+    // transitions, quality changes, or SPA navigation that swaps out the
+    // player DOM).  When detected, re-bind listeners to the new element so
+    // pause/play events keep working without a full session restart.
+    const playerContainer = document.querySelector<HTMLElement>(
+      '#movie_player, .html5-video-player'
+    );
+    if (playerContainer) {
+      const observer = new MutationObserver(() => {
+        rebindVideo();
+      });
+      observer.observe(playerContainer, { childList: true, subtree: true });
+
+      this.videoPauseCleanup = () => {
+        detachListeners(currentVideo);
+        observer.disconnect();
+        this.videoPauseCleanup = null;
+      };
+    } else {
+      this.videoPauseCleanup = () => {
+        detachListeners(currentVideo);
+        this.videoPauseCleanup = null;
+      };
+    }
   }
 
   private stopVideoPauseListeners(): void {
