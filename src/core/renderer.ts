@@ -4,35 +4,22 @@
  * Renders chat messages with Nico-nico style flowing animation.
  * Manages lanes and collision detection.
  *
- * ── Pause state machine ──────────────────────────────────────────────────
+ * Pause state machine: two flags control animation playback.
  *
- * Two independent pause flags combine to control animation playback:
- *
- *   isPaused      — tab visibility pause (visibilitychange event)
+ *   isPaused      — tab visibility (visibilitychange event)
  *   isVideoPaused — video element pause (pause/play events)
  *
- * State transitions:
+ *   pause()           → sets isPaused, freezes all active CSS animations
+ *   resume()          → clears isPaused, restarts animations via negative delay
+ *   pauseForVideo()   → sets isVideoPaused, calls pause() if tab is visible
+ *   resumeForVideo()  → clears isVideoPaused, calls resume() if tab is visible
  *
- *                    visibilitychange          visibilitychange
- *   [both false] ─────────────────────▶ [isPaused=true, isVideoPaused=false]
- *        ▲                               │
- *        │ visibilitychange              │ pauseForVideo()
- *        └───────────────────────────────┤
- *                                        ▼
- *   [isPaused=false, isVideoPaused=true]  [isPaused=true, isVideoPaused=true]
- *        ▲                               │
- *        │ resumeForVideo()              │ resume()
- *        └───────────────────────────────┘
- *                    (only if !document.hidden)
- *
- * Key invariants:
- *   - pauseForVideo() is a no-op when isPaused is already true (tab hidden)
- *   - resumeForVideo() checks document.hidden, not isPaused, to avoid
- *     resuming animations while the tab is still hidden
- *   - resume() early-returns when isVideoPaused is true, keeping animations
- *     frozen until the user unpauses the video
- *   - addMessage() drops messages when isVideoPaused is true
- *   - ChatSource skips API polling when video is paused (bandwidth saving)
+ * Invariants:
+ *   - pauseForVideo() is a no-op when isPaused is already true
+ *   - resumeForVideo() checks document.hidden, not isPaused
+ *   - resume() early-returns when isVideoPaused is true
+ *   - addMessage() drops messages while video is paused
+ *   - ChatSource skips API polling when video is paused
  */
 
 import type {
@@ -866,8 +853,6 @@ export class Renderer {
     this.isPaused = true;
     this.pausedAt = performance.now();
     this.clearRetryTimer();
-    // Halt burst detection so messages accumulated while hidden
-    // don't pollute the rate on return.
     this.burstDetector.pause();
     for (const active of this.activeMessages) {
       active.element.style.animationPlayState = 'paused';
@@ -877,22 +862,12 @@ export class Renderer {
 
   resume(): void {
     if (!this.isPaused) return;
-    // When the video is paused, keep isPaused=true so active animations
-    // stay frozen until the user unpauses. Resume burst detection so
-    // the EMA rate is fresh when video playback resumes.
     if (this.isVideoPaused) {
       this.burstDetector.resume();
       return;
     }
 
-    // Restart burst detection from a clean slate so the EMA rate and
-    // burst level reflect post-hide real-time activity, not the backlog
-    // that accumulated while the tab was hidden.
     this.burstDetector.resume();
-
-    // Suppress the EMA speed multiplier for 2s after resume so the
-    // backlog messages drained from the pending queue don't spike the
-    // animation speed before real-time activity stabilises.
     this.resumeStabilizeUntil = performance.now() + 2000;
 
     const now = performance.now();
@@ -902,24 +877,11 @@ export class Renderer {
     }
     this.pausedAt = null;
 
-    // Reset the lane allocator so new messages find free lanes immediately.
-    // Active messages are already on-screen and will finish their animation;
-    // shifting the timeline would push all lane bookings forward by the
-    // hidden duration, making every lane appear occupied well into the future
-    // and causing new messages to be deferred indefinitely.
     this.laneAllocator.reset(this.overlay.getDimensions());
-
     this.isPaused = false;
 
-    // Reset active animations using a negative animation-delay so they
-    // continue from their current visual position rather than jumping
-    // to the start of the animation timeline.  A negative delay tells
-    // the CSS engine "start as if already running for N ms," placing
-    // the element exactly where it was when paused.
     for (const active of [...this.activeMessages]) {
       try {
-        // Subtract accumulated paused time so the animation resumes from
-        // where it visually stopped, not from wall-clock elapsed time.
         active.pausedDuration += pausedDuration;
         const elapsed = performance.now() - active.startTime - active.pausedDuration;
         const remaining = active.baseDuration - elapsed;
@@ -927,11 +889,6 @@ export class Renderer {
           this.removeMessage(active);
           continue;
         }
-
-        // Negative animation-delay places the element at the correct
-        // interpolated position without changing the animation definition.
-        // The original duration is preserved so the speed (px/s) remains
-        // identical to pre-pause.
         const el = active.element;
         Renderer.triggerAnimationRestart(el);
         el.style.setProperty('--yt-msg-delay', `${-elapsed}ms`);
@@ -946,25 +903,19 @@ export class Renderer {
     this.processQueue();
   }
 
-  // ── Video pause/play (distinct from tab visibility pause) ─────────────────
-
+  /** Pause animations due to video playback pause. No-op when already paused for visibility. */
   pauseForVideo(): void {
     if (this.isVideoPaused) return;
     this.isVideoPaused = true;
-    // Only pause animations if the tab isn't already hidden (isPaused handles that).
-    // When isPaused is already true, the video-pause is a no-op and resumeForVideo
-    // must not undo the tab-visibility pause.
     if (!this.isPaused) {
       this.pause();
     }
   }
 
+  /** Resume animations after video playback resumes. Skips if tab is still hidden. */
   resumeForVideo(): void {
     if (!this.isVideoPaused) return;
     this.isVideoPaused = false;
-    // Resume only if the tab is visible.  Use document.hidden rather than
-    // isPaused because isPaused may have been set by pauseForVideo()
-    // itself (via pause()), not just by tab-visibility changes.
     if (!document.hidden) {
       this.resume();
     }
