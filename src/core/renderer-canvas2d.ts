@@ -10,11 +10,11 @@
  *   isPaused      — tab visibility
  *   isVideoPaused — video element pause
  *
- * Text outline: 3-pass rendering (stroke → shadowBlur glow → fill) to match
+ * Text outline: 3-pass rendering (stroke → shadowBlur glow → fill) matching
  * the CSS renderer's buildTextShadow + buildTextStroke.
  */
 
-import type { ChatMessage, OverlaySettings } from '@app-types';
+import type { ChatMessage, ContentSegment, OverlaySettings } from '@app-types';
 import { computeDliosDuration, rendererLayout } from '@core/design-tokens';
 import { createLogger } from '@core/logging';
 import { ObservabilityReporter } from '@core/observability';
@@ -45,10 +45,6 @@ interface CanvasMessage {
   pausedDuration: number;
   /** Lane index for cleanup */
   laneIndex: number;
-  /** True when this message carries rendered bitmap data */
-  bitmapRendered: boolean;
-  /** Pre-rendered bitmap for plain text messages (avoids fillText per frame) */
-  bitmap: HTMLCanvasElement | null;
 }
 
 // ── Renderer ──────────────────────────────────────────────────────────────
@@ -74,9 +70,7 @@ export class Canvas2DRenderer {
   private playbackRate = 1;
   private backlogSpeedMultiplier = 1;
 
-  /** Per-text bitmap cache: key=text|font|color|outlineKey */
-  private readonly bitmapCache = new Map<string, HTMLCanvasElement>();
-  /** Emoji image cache */
+  /** Emoji image cache: url → HTMLImageElement */
   private readonly emojiCache = new Map<string, HTMLImageElement>();
 
   private static readonly MAX_ACTIVE = 50;
@@ -89,7 +83,6 @@ export class Canvas2DRenderer {
     this.settings = settings;
     this.observability = new ObservabilityReporter(settings.showDebugOverlay);
 
-    // Create canvas
     const container = overlay.getContainer();
     const canvas = document.createElement('canvas');
     canvas.style.cssText =
@@ -104,7 +97,6 @@ export class Canvas2DRenderer {
       this.canvas.height = dims.height;
     }
 
-    // Lane allocator (tighter padding than CSS renderer)
     this.laneAllocator = new LaneAllocator({
       getEffectiveSpeedPxPerSec: () => this.getEffectiveSpeed(),
       getDanmakuMode: () => this.settings.danmakuMode,
@@ -113,7 +105,6 @@ export class Canvas2DRenderer {
     });
     if (dims) this.laneAllocator.reset(dims);
 
-    // Resize observer
     this.overlayDimensionsUnsubscribe = overlay.onDimensionsChanged((dims) => {
       if (dims && this.canvas) {
         this.canvas.width = dims.width;
@@ -137,6 +128,10 @@ export class Canvas2DRenderer {
       this.observability.onMessageDropped('other');
       return;
     }
+
+    // Pre-load emoji images when the message is first seen
+    this.prefetchEmojis(message);
+
     if (this.activeMessages.length >= Canvas2DRenderer.MAX_ACTIVE) {
       this.pendingQueue.push(message);
       return;
@@ -149,7 +144,6 @@ export class Canvas2DRenderer {
   }
 
   trimBackgroundQueue(): void {
-    // Keep at most 10 items — prefer recent
     if (this.pendingQueue.length > 10) {
       this.pendingQueue.length = 10;
     }
@@ -165,6 +159,7 @@ export class Canvas2DRenderer {
     if (this.isPaused) return;
     this.isPaused = true;
     this.pausedAt = performance.now();
+    log.debug('Paused');
   }
 
   resume(): void {
@@ -182,6 +177,10 @@ export class Canvas2DRenderer {
     }
     this.pausedAt = null;
     this.isPaused = false;
+
+    // Drain any messages that accumulated in the queue during pause
+    this.drainQueue();
+    log.debug(`Resumed: ${this.activeMessages.length} active, ${this.pendingQueue.length} queued`);
   }
 
   pauseForVideo(): void {
@@ -215,7 +214,6 @@ export class Canvas2DRenderer {
     this.ctx = null;
     this.activeMessages.length = 0;
     this.pendingQueue.length = 0;
-    this.bitmapCache.clear();
     this.emojiCache.clear();
     this.observability.destroy();
     log.debug('Destroyed');
@@ -225,7 +223,10 @@ export class Canvas2DRenderer {
 
   private startRenderLoop(): void {
     const loop = (): void => {
-      if (!this.canvas?.isConnected) return;
+      if (!this.canvas?.isConnected) {
+        this.animFrameId = null;
+        return;
+      }
       this.renderFrame();
       this.animFrameId = requestAnimationFrame(loop);
     };
@@ -246,7 +247,7 @@ export class Canvas2DRenderer {
     const canvas = this.canvas;
     if (!ctx || !canvas) return;
 
-    // Skip drawing while paused (positions frozen)
+    // Skip drawing while paused (positions frozen, but rAF loop keeps running)
     if (this.isPaused) return;
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -295,7 +296,6 @@ export class Canvas2DRenderer {
           opacity *= Math.max(0, (msg.duration - elapsed) / Canvas2DRenderer.FADE_DURATION_MS);
         }
       }
-      // Backlog messages at half opacity
       if (msg.message.isBacklog) opacity *= 0.5;
 
       // ── Render ───────────────────────────────────────────────────────
@@ -335,6 +335,27 @@ export class Canvas2DRenderer {
     }
   }
 
+  // ── Emoji Pre-fetching ──────────────────────────────────────────────────
+
+  private prefetchEmojis(message: ChatMessage): void {
+    for (const seg of message.content) {
+      if (seg.type === 'emoji' && !this.emojiCache.has(seg.emoji.url)) {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.src = seg.emoji.url;
+        img.alt = seg.emoji.alt || '';
+        img.onload = () => {
+          this.emojiCache.set(seg.emoji.url, img);
+        };
+        img.onerror = () => {
+          // Cache the URL as failed so we don't retry every frame
+          this.emojiCache.set(seg.emoji.url, img);
+        };
+        this.emojiCache.set(seg.emoji.url, img); // placeholder to avoid re-queue
+      }
+    }
+  }
+
   // ── Message Rendering ───────────────────────────────────────────────────
 
   private renderMessage(message: ChatMessage): void {
@@ -360,21 +381,17 @@ export class Canvas2DRenderer {
 
     let startX: number;
     if (mode === 'scroll') {
-      // Right-to-left: start off-screen right
       const entryOffset =
         dims.laneCount > 1 ? Math.round((placement.lane.index / (dims.laneCount - 1)) * 200) : 100;
       startX = dims.width + entryOffset;
     } else if (mode === 'reverse') {
-      // Left-to-right: start off-screen left
       startX = -(msgWidth + Canvas2DRenderer.EXIT_PADDING);
     } else {
-      // top / bottom: random X, Y determined by mode
       startX = Math.random() * Math.max(1, dims.width - msgWidth);
     }
 
     let laneY = placement.laneY;
     if (mode === 'bottom') {
-      // Bottom mode: Y position measured from bottom
       laneY = dims.height * (1 - this.settings.safeBottom) - msgHeight;
     } else if (mode === 'top') {
       laneY = dims.height * this.settings.safeTop;
@@ -393,8 +410,6 @@ export class Canvas2DRenderer {
       y: laneY,
       pausedDuration: 0,
       laneIndex: placement.lane.index,
-      bitmapRendered: false,
-      bitmap: null,
     };
 
     this.activeMessages.push(cm);
@@ -408,8 +423,8 @@ export class Canvas2DRenderer {
     const fontSize = this.settings.fontSize;
     const textWidth = this.measureContentWidth(message, fontSize);
     const textHeight = fontSize * 1.1;
-    const paddingH = 16; // 8px * 2
-    const paddingV = 8; // 4px * 2
+    const paddingH = 16;
+    const paddingV = 8;
 
     if (message.kind === 'superchat') {
       return {
@@ -423,7 +438,6 @@ export class Canvas2DRenderer {
         height: Math.max(24, fontSize) + 4 + textHeight + paddingV,
       };
     }
-    // Regular
     return {
       width: textWidth + paddingH,
       height: textHeight + paddingV,
@@ -433,7 +447,7 @@ export class Canvas2DRenderer {
   private measureContentWidth(message: ChatMessage, fontSize: number): number {
     const ctx = this.ctx;
     if (!ctx) return message.text.length * fontSize * 0.6;
-    const font = `bold ${fontSize}px system-ui, -apple-system, sans-serif`;
+    const font = this.getFont(fontSize);
     ctx.font = font;
 
     let width = 0;
@@ -451,13 +465,18 @@ export class Canvas2DRenderer {
     return Math.ceil(width);
   }
 
-  // ── Text Rendering ──────────────────────────────────────────────────────
+  // ── Font & Outline ──────────────────────────────────────────────────────
 
   private getFont(fontSize: number): string {
     return `bold ${fontSize}px system-ui, -apple-system, sans-serif`;
   }
 
-  private renderText(
+  /**
+   * Render a single text content segment to the canvas.
+   * Uses the same stroke+shadow+fill approach as the CSS renderer's
+   * buildTextShadow + buildTextStroke.
+   */
+  private renderSegment(
     ctx: CanvasRenderingContext2D,
     text: string,
     x: number,
@@ -470,34 +489,33 @@ export class Canvas2DRenderer {
     ctx.font = this.getFont(fontSize);
     ctx.textBaseline = 'top';
 
+    // Apply CSS-matched outline: stroke then shadow+fill
+    // stroke matches buildTextStroke (width=offset*0.3, opacity*0.7)
     const outline = this.settings.outline;
     if (outline.enabled && outline.widthPx > 0 && outline.opacity > 0) {
-      const offset = outline.widthPx;
-      const blur = Math.max(0, outline.blurPx);
-      const baseOpacity = Math.min(1, outline.opacity);
-
-      // Pass 1: stroke (outline border)
-      ctx.strokeStyle = `rgba(0,0,0,${baseOpacity * 0.7})`;
-      ctx.lineWidth = Math.max(0.2, offset * 0.3);
+      const strokeWidth = Math.max(0.2, outline.widthPx * 0.3);
+      const strokeOpacity = Math.min(1, outline.opacity * 0.7);
+      ctx.strokeStyle = `rgba(0, 0, 0, ${strokeOpacity})`;
+      ctx.lineWidth = strokeWidth;
       ctx.lineJoin = 'round';
       ctx.strokeText(text, x, y);
 
-      // Pass 2: shadowBlur glow
-      ctx.shadowColor = `rgba(0,0,0,${Math.min(1, baseOpacity * 0.85)})`;
-      ctx.shadowBlur = Math.max(1, blur * 1.5);
-      ctx.fillStyle = color;
-      ctx.fillText(text, x, y);
+      // shadowBlur glow matching buildTextShadow's central glow term
+      ctx.shadowColor = `rgba(0, 0, 0, ${Math.min(1, outline.opacity * 0.85)})`;
+      ctx.shadowBlur = Math.max(1, outline.blurPx * 1.5);
+    }
 
-      // Reset shadow for subsequent draws
+    ctx.fillStyle = color;
+    ctx.fillText(text, x, y);
+
+    // Reset shadow for subsequent draws
+    if (outline.enabled && outline.widthPx > 0 && outline.opacity > 0) {
       ctx.shadowColor = 'transparent';
       ctx.shadowBlur = 0;
-    } else {
-      ctx.fillStyle = color;
-      ctx.fillText(text, x, y);
     }
   }
 
-  // ── Regular Message (plain text) ────────────────────────────────────────
+  // ── Regular Message (mixed content: text + emoji) ───────────────────────
 
   private renderRegular(
     ctx: CanvasRenderingContext2D,
@@ -509,60 +527,48 @@ export class Canvas2DRenderer {
     const message = msg.message;
     const fontSize = this.settings.fontSize;
     const color = this.settings.colors[message.authorType];
-    const text = message.text;
 
-    // Use bitmap cache for plain text messages
-    if (!msg.bitmapRendered && msg.bitmap === null && text.length > 0) {
-      const bitmap = this.getOrCreateBitmap(text, fontSize, color);
-      msg.bitmap = bitmap;
-      msg.bitmapRendered = true;
-    }
-
-    const bitmap = msg.bitmap;
-    if (bitmap) {
-      ctx.globalAlpha = alpha;
-      ctx.drawImage(bitmap, x, y);
-    } else if (text.length > 0) {
-      // Fallback: direct fillText
-      this.renderText(ctx, text, x, y, color, alpha, fontSize);
+    if (message.content.length > 0) {
+      this.renderContentSegments(ctx, message.content, x, y, color, alpha, fontSize);
+    } else if (message.text.length > 0) {
+      this.renderSegment(ctx, message.text, x, y, color, alpha, fontSize);
     }
   }
 
-  // ── Bitmap Cache ────────────────────────────────────────────────────────
+  /**
+   * Render mixed content segments (text + emoji) in sequence.
+   * Positions advance horizontally per segment.
+   */
+  private renderContentSegments(
+    ctx: CanvasRenderingContext2D,
+    segments: readonly ContentSegment[],
+    startX: number,
+    y: number,
+    color: string,
+    alpha: number,
+    fontSize: number
+  ): void {
+    let cursorX = startX;
+    const emojiSize = Math.round(fontSize * 1.2);
 
-  private getOrCreateBitmap(text: string, fontSize: number, color: string): HTMLCanvasElement {
-    const font = this.getFont(fontSize);
-    const outline = this.settings.outline;
-    const outlineKey = outline.enabled
-      ? `${outline.widthPx}x${outline.blurPx}x${outline.opacity}`
-      : 'none';
-    const key = `${text}|${font}|${color}|${outlineKey}`;
+    for (const seg of segments) {
+      if (seg.type === 'text') {
+        this.renderSegment(ctx, seg.content, cursorX, y, color, alpha, fontSize);
+        cursorX += Math.ceil(ctx.measureText(seg.content).width);
+      } else {
+        // Emoji: try to draw the cached image, fall back to alt text
+        const cached = this.emojiCache.get(seg.emoji.url);
+        const img = cached?.complete && cached.naturalWidth > 0 ? cached : null;
 
-    const cached = this.bitmapCache.get(key);
-    if (cached) return cached;
-
-    const offscreen = document.createElement('canvas');
-    const octx = offscreen.getContext('2d');
-    if (!octx) {
-      // Fallback: return a tiny canvas (shouldn't happen)
-      offscreen.width = 1;
-      offscreen.height = 1;
-      this.bitmapCache.set(key, offscreen);
-      return offscreen;
+        if (img) {
+          ctx.globalAlpha = alpha;
+          ctx.drawImage(img, cursorX, y, emojiSize, emojiSize);
+        } else if (seg.emoji.alt) {
+          this.renderSegment(ctx, seg.emoji.alt, cursorX, y, color, alpha, fontSize);
+        }
+        cursorX += emojiSize + 4; // 4px gap between emoji and next segment
+      }
     }
-
-    // Measure text width
-    octx.font = font;
-    const textWidth = Math.ceil(octx.measureText(text).width);
-    const textHeight = Math.ceil(fontSize * 1.1);
-    offscreen.width = textWidth;
-    offscreen.height = textHeight;
-
-    // Render text with full styling
-    this.renderText(octx, text, 0, 0, color, 1, fontSize);
-
-    this.bitmapCache.set(key, offscreen);
-    return offscreen;
   }
 
   // ── Super Chat ──────────────────────────────────────────────────────────
@@ -584,7 +590,6 @@ export class Canvas2DRenderer {
 
     ctx.globalAlpha = alpha;
 
-    // Background gradient based on tier
     const tierColors: Record<string, string> = {
       blue: '#1e88e5',
       cyan: '#00bfff',
@@ -596,7 +601,7 @@ export class Canvas2DRenderer {
     };
     const baseColor = tierColors[superChat.tier] ?? '#1e88e5';
 
-    // Card background
+    // Card background gradient
     const grad = ctx.createLinearGradient(x, y, x, y + h);
     grad.addColorStop(0, `${baseColor}bb`);
     grad.addColorStop(0.5, `${baseColor}66`);
@@ -605,26 +610,22 @@ export class Canvas2DRenderer {
     this.roundRect(ctx, x, y, w, h, 6);
     ctx.fill();
 
-    // Border-left accent
+    // Left accent border
     ctx.fillStyle = baseColor;
     ctx.fillRect(x, y, 4, h);
 
-    // Text content
-    const textX = x + 12;
-    let textY = y + 8;
-
     // Amount badge
-    const amountText = superChat.amount;
+    const textX = x + 12;
+    const badgeY = y + 8;
     ctx.font = `bold ${Math.round(fontSize * 0.85)}px system-ui, -apple-system, sans-serif`;
     ctx.textBaseline = 'top';
     ctx.fillStyle = '#ffffff';
-    ctx.fillText(amountText, textX, textY);
+    ctx.fillText(superChat.amount, textX, badgeY);
 
-    // Body message
+    // Message text
     if (message.text) {
-      textY += Math.round(fontSize * 1.1) + 6;
-      ctx.font = this.getFont(fontSize);
-      this.renderText(ctx, message.text, textX, textY, '#ffffff', alpha, fontSize);
+      const msgY = badgeY + Math.round(fontSize * 1.1) + 6;
+      this.renderSegment(ctx, message.text, textX, msgY, '#ffffff', alpha, fontSize);
     }
   }
 
@@ -643,20 +644,20 @@ export class Canvas2DRenderer {
 
     ctx.globalAlpha = alpha;
 
-    // Green border card
+    // Green background
     ctx.fillStyle = 'rgba(15, 157, 88, 0.28)';
     this.roundRect(ctx, x, y, w, h, 6);
     ctx.fill();
 
+    // Green border
     ctx.strokeStyle = 'rgba(15, 157, 88, 0.6)';
     ctx.lineWidth = 2;
     ctx.stroke();
 
-    // Text content
+    // Content
     const textX = x + 12;
     let textY = y + 8;
 
-    // Author name
     if (msg.message.author) {
       ctx.font = this.getFont(fontSize);
       ctx.textBaseline = 'top';
@@ -665,7 +666,6 @@ export class Canvas2DRenderer {
       textY += fontSize + 4;
     }
 
-    // Message text
     if (msg.message.text) {
       ctx.font = `${fontSize}px system-ui, -apple-system, sans-serif`;
       ctx.fillStyle = '#ffffff';
@@ -675,7 +675,6 @@ export class Canvas2DRenderer {
 
   // ── Helpers ─────────────────────────────────────────────────────────────
 
-  /** Draw a filled rounded rectangle */
   private roundRect(
     ctx: CanvasRenderingContext2D,
     x: number,
