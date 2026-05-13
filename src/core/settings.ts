@@ -6,26 +6,6 @@ import { getSettingsStorageAdapter } from '@core/settings-storage';
 
 const log = createLogger('Settings');
 
-function readStoredRaw(): Record<string, unknown> | null {
-  try {
-    const raw = getSettingsStorageAdapter().getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (
-      typeof parsed !== 'object' ||
-      parsed === null ||
-      Array.isArray(parsed) ||
-      '__proto__' in parsed ||
-      'constructor' in parsed
-    ) {
-      return null;
-    }
-    return parsed as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-}
-
 export class Settings {
   private settings: OverlaySettings;
 
@@ -34,8 +14,21 @@ export class Settings {
   }
 
   initialize(): void {
+    console.warn('[Settings::diagnostic] GM_setValue:', typeof GM_setValue);
+    console.warn('[Settings::diagnostic] GM_getValue:', typeof GM_getValue);
+    console.warn('[Settings::diagnostic] GM_deleteValue:', typeof GM_deleteValue);
     try {
-      this.settings = normalizeStoredSettings(readStoredRaw());
+      const adapter = getSettingsStorageAdapter();
+      const raw = adapter.getItem(STORAGE_KEY);
+      console.warn('[Settings::diagnostic] raw from storage:', raw);
+      if (raw) {
+        const parsed = normalizeStoredSettings(JSON.parse(raw) as Record<string, unknown>);
+        console.warn('[Settings::diagnostic] loaded fontSize:', parsed.fontSize);
+        console.warn('[Settings::diagnostic] loaded rendererType:', parsed.rendererType);
+        this.settings = parsed;
+      } else {
+        console.warn('[Settings::diagnostic] no stored data, using defaults');
+      }
     } catch (error) {
       log.warn('Failed to load settings:', error);
     }
