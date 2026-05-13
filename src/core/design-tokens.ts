@@ -125,23 +125,42 @@ export const rendererLayout = {
   retryDelayMaxMs: 800,
   /** Duration (ms) for top/bottom fixed-position modes. */
   topBottomDurationMs: 4000,
+  /** DLIOS safety gap (pixels) — minimum separation between same-lane comments */
+  dliosSafetyGap: 4,
 } as const;
 
 /**
- * Compute the crossing duration for scroll/reverse danmaku modes.
+ * Compute animation duration using the DLIOS constant-velocity model.
+ * Each comment's duration is proportional to its total visual distance:
  *
- * All messages cross the visible area in the same duration regardless of
- * font size or text length, making perceived speed dependent only on the
- * speedPxPerSec setting and container width.
+ *   duration = totalDistance / velocity * 1000
  *
- * @param containerWidth  — width of the overlay container in pixels
- * @param speedPxPerSec   — effective scroll speed (includes burst adaptation)
- * @returns Animation duration in milliseconds, clamped to [durationMin, durationMax].
+ * where totalDistance = entryOffset + screenWidth + textWidth + exitPadding.
+ * All comments in the same lane move at the same velocity, guaranteeing
+ * the constant-velocity lemma: no comment can overtake another in the
+ * same lane (zero overlap).
  */
 export function computeCrossDuration(containerWidth: number, speedPxPerSec: number): number {
   return Math.max(
     rendererLayout.durationMin,
     Math.min(rendererLayout.durationMax, (containerWidth / speedPxPerSec) * 1000)
+  );
+}
+
+/**
+ * Compute scrolling duration for a single comment under the DLIOS
+ * constant-velocity model. Unlike computeCrossDuration (same duration
+ * for all comments), this returns a width-proportional duration so
+ * every comment scrolls at the same velocity.
+ *
+ * @param totalDistance  — entryOffset + screenWidth + textWidth + exitPadding
+ * @param velocity       — constant scroll velocity in px/sec
+ * @returns Animation duration in milliseconds, clamped to [durationMin, durationMax]
+ */
+export function computeDliosDuration(totalDistance: number, velocity: number): number {
+  return Math.max(
+    rendererLayout.durationMin,
+    Math.min(rendererLayout.durationMax, (totalDistance / velocity) * 1000)
   );
 }
 
