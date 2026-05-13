@@ -1,31 +1,18 @@
 /**
- * Type-safe event bus for decoupled communication between chat components.
+ * Minimal type-safe event bus for decoupled communication.
  *
  * Events:
  *   'messages'     — ChatMessage[] received from the API
- *   'error'        — Error occurred during fetching
- *   'stall'        — No messages received within the activity timeout
- *   'offset-jump'  — Playback position jumped (seek detected)
+ *   'offset-jump'  — Playback position jumped (seek detected in replay)
  */
 export type ChatSourceEventMap = {
   messages: ChatMessageBatchEvent;
-  error: ChatSourceErrorEvent;
-  stall: ChatSourceStallEvent;
   'offset-jump': ChatSourceOffsetJumpEvent;
 };
 
 export interface ChatMessageBatchEvent {
   messages: unknown[];
   isInitialSeed: boolean;
-}
-
-export interface ChatSourceErrorEvent {
-  error: Error;
-  retryable: boolean;
-}
-
-export interface ChatSourceStallEvent {
-  lastActivityTime: number;
 }
 
 export interface ChatSourceOffsetJumpEvent {
@@ -60,8 +47,8 @@ export class ChatSourceEventBus {
     for (const listener of set) {
       try {
         (listener as Listener<ChatSourceEventMap[K]>)(payload);
-      } catch (_err) {
-        // Prevent one listener error from breaking others
+      } catch {
+        // prevent one listener error from breaking others
       }
     }
   }
