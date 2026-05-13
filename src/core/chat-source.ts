@@ -10,6 +10,7 @@
 
 import type { ChatMessage, OverlaySettings } from '@app-types';
 import { type ChatEvent, extractChatEvents } from '@core/chat-message-parser';
+import { ChatSourceEventBus } from '@core/chat-source-events';
 import { findElementMatch, isAbortError, sleep, throwIfAborted, VIDEO_SELECTORS } from '@core/dom';
 import { createLogger } from '@core/logging';
 import {
@@ -95,6 +96,7 @@ export abstract class ChatSource {
   private readonly recentMessages: ChatMessage[] = [];
   private cachedPlayback: PlaybackSnapshot | null = null;
   private timeupdateCleanup: (() => void) | null = null;
+  protected readonly eventBus = new ChatSourceEventBus();
 
   constructor(getSettings: () => Readonly<OverlaySettings>) {
     this.getSettings = getSettings;
@@ -243,6 +245,10 @@ export abstract class ChatSource {
 
     this.rememberMessage(message);
     this.callback(message);
+    this.eventBus.emit('messages', {
+      messages: [message],
+      isInitialSeed: false,
+    });
   }
 
   /**
@@ -264,6 +270,7 @@ export abstract class ChatSource {
       this.rememberMessage(message);
     }
     this.callback(messages, isInitialSeed);
+    this.eventBus.emit('messages', { messages, isInitialSeed });
   }
 
   protected async requestPayload<TCallArgs extends unknown[]>(
@@ -391,6 +398,7 @@ export abstract class ChatSource {
     this.lastActivityTime = 0;
     this.recentMessages.length = 0;
     this.removeTimeupdateListener();
+    this.eventBus.removeAllListeners();
   }
 
   /**
@@ -682,6 +690,7 @@ class ReplayChatSource extends ChatSource {
   private replayNextAllowedFetchAt = 0;
   private replayBuffer: ReplayBufferedMessage[] = [];
   private seekListenerCleanup: (() => void) | null = null;
+  private lastKnownOffsetMs = 0;
 
   protected seedCurrentSession(signal?: AbortSignal): Promise<boolean> {
     return this.initializeReplaySession(signal);
@@ -716,8 +725,11 @@ class ReplayChatSource extends ChatSource {
   }
 
   private handleSeeked(offsetMs: number): void {
+    const fromOffsetMs = this.lastKnownOffsetMs;
+    this.lastKnownOffsetMs = offsetMs;
     this.replayBuffer = [];
     this.lastReplayRequestedOffsetMs = offsetMs;
+    this.eventBus.emit('offset-jump', { fromOffsetMs, toOffsetMs: offsetMs });
     if (this.replayMode === 'playerSeek' && this.replayPlayerSeekContinuation) {
       void this.fetchReplayPlayerSeek(offsetMs, undefined).then(() => {
         this.flushReplayBuffer(offsetMs);
@@ -738,6 +750,7 @@ class ReplayChatSource extends ChatSource {
     this.replayConsecutiveFailures = 0;
     this.replayNextAllowedFetchAt = 0;
     this.replayBuffer = [];
+    this.lastKnownOffsetMs = 0;
     this.seekListenerCleanup?.();
     this.seekListenerCleanup = null;
   }
