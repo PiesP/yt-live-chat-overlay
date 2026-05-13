@@ -11,7 +11,14 @@
 import type { ChatMessage, OverlaySettings } from '@app-types';
 import { type ChatEvent, extractChatEvents } from '@core/chat-message-parser';
 import { ChatSourceEventBus } from '@core/chat-source-events';
-import { findElementMatch, isAbortError, sleep, throwIfAborted, VIDEO_SELECTORS } from '@core/dom';
+import {
+  findElementMatch,
+  isAbortError,
+  schedulerYield,
+  sleep,
+  throwIfAborted,
+  VIDEO_SELECTORS,
+} from '@core/dom';
 import { createLogger } from '@core/logging';
 import {
   bootstrapChatSession,
@@ -410,8 +417,9 @@ export abstract class ChatSource {
   }
 
   /**
-   * Block while paused, polling every 500ms until unpaused or aborted.
-   * Called from the poll loop to defer API requests during tab hidden.
+   * Block while paused, yielding to the browser scheduler until
+   * unpaused or aborted. Uses scheduler.yield() when available
+   * for better cooperation with the browser's task scheduler.
    */
   protected waitWhilePaused(): Promise<void> {
     if (!this._paused) return Promise.resolve();
@@ -421,7 +429,7 @@ export abstract class ChatSource {
           resolve();
           return;
         }
-        setTimeout(check, 500);
+        void schedulerYield().then(check);
       };
       check();
     });

@@ -141,3 +141,16 @@ export const findPlayerContainerElement = async (
 
 export const isAbortError = (error: unknown): boolean =>
   error instanceof DOMException && error.name === 'AbortError';
+
+/**
+ * Yield to the browser scheduler, allowing higher-priority tasks
+ * (input, paint) to run before continuing. Falls back to
+ * setTimeout(0) when scheduler.yield is not available.
+ */
+export const schedulerYield = (): Promise<void> => {
+  const w = window as unknown as { scheduler?: { yield?: () => Promise<void> } };
+  if (typeof w.scheduler?.yield === 'function') {
+    return w.scheduler.yield();
+  }
+  return new Promise((resolve) => setTimeout(resolve, 0));
+};
