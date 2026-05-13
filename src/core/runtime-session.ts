@@ -420,6 +420,35 @@ export class RuntimeSession {
     const playerContainer = document.querySelector<HTMLElement>(
       '#movie_player, .html5-video-player'
     );
+
+    // Periodic poll of video.paused as a safety net for missed events
+    // (element swap race, non-standard playback APIs, etc).
+    const POLL_INTERVAL_MS = 1000;
+    let previouslyPaused = currentVideo.paused;
+    const pollTimer = setInterval(() => {
+      if (this.disposed || !currentVideo) {
+        clearInterval(pollTimer);
+        return;
+      }
+      // The video element may have been replaced — re-fetch it if stale
+      if (!currentVideo.isConnected) {
+        rebindVideo();
+        if (!currentVideo) {
+          clearInterval(pollTimer);
+          return;
+        }
+      }
+      const isPaused = currentVideo.paused;
+      if (isPaused !== previouslyPaused) {
+        previouslyPaused = isPaused;
+        if (isPaused) {
+          handlePause();
+        } else {
+          handlePlay();
+        }
+      }
+    }, POLL_INTERVAL_MS);
+
     if (playerContainer) {
       const observer = new MutationObserver(() => {
         rebindVideo();
@@ -428,12 +457,14 @@ export class RuntimeSession {
 
       this.videoPauseCleanup = () => {
         detachListeners(currentVideo);
+        clearInterval(pollTimer);
         observer.disconnect();
         this.videoPauseCleanup = null;
       };
     } else {
       this.videoPauseCleanup = () => {
         detachListeners(currentVideo);
+        clearInterval(pollTimer);
         this.videoPauseCleanup = null;
       };
     }
