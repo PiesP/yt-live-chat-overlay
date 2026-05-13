@@ -199,7 +199,12 @@ export class BacklogInjectionController {
       selected.push(...this.timeDistributedPick(tier3, pick));
     }
 
-    return selected.sort((a, b) => a.timestamp - b.timestamp);
+    return selected.sort((a, b) => {
+      const priorityA = a.kind === 'superchat' ? 0 : a.kind === 'membership' ? 1 : 2;
+      const priorityB = b.kind === 'superchat' ? 0 : b.kind === 'membership' ? 1 : 2;
+      if (priorityA !== priorityB) return priorityA - priorityB;
+      return a.timestamp - b.timestamp;
+    });
   }
 
   /**
