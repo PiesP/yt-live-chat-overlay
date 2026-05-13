@@ -1,4 +1,4 @@
-import type { LaneState, OverlayDimensions } from '@app-types';
+import type { DanmakuMode, LaneState, OverlayDimensions } from '@app-types';
 
 export interface LanePlacement {
   lane: LaneState;
@@ -10,6 +10,7 @@ export interface LanePlacement {
 interface LaneAllocatorOptions {
   readonly getFontSize: () => number;
   readonly getEffectiveSpeedPxPerSec: () => number;
+  readonly getDanmakuMode: () => DanmakuMode;
   readonly globalStaggerMs: number;
   readonly safeDistanceScale: number;
   readonly safeDistanceMin: number;
@@ -265,14 +266,27 @@ export class LaneAllocator {
 
     const laneStaggerTime = lane.lastItemStartTime + this.options.globalStaggerMs;
 
-    const animationEndGuard = lane.lastItemEndTime;
+    // ── Early lane reuse for scrolling modes ────────────────────────────
+    // For scroll/reverse (RTL/LTR), comments move across the screen and
+    // overflow:hidden clips the tail. We don't need to wait for the full
+    // animation to end — once the comment has scrolled past ~60% of the
+    // player width, the next comment can enter from the opposite side with
+    // no visible conflict. This dramatically reduces lane wait times:
+    //
+    //   animationEndGuard:  T0 + 7680ms (1920px / 250px/s)
+    //   earlyClearTime:     T0 + 4608ms (1920px * 0.6 / 250px/s)
+    //
+    // For top/bottom (fixed) modes, the full animation end time is used
+    // since the comment stays in place.
+    const mode = this.options.getDanmakuMode();
+    const isScrolling = mode === 'scroll' || mode === 'reverse';
+    const finalGuard = isScrolling
+      ? Math.min(
+          lane.lastItemEndTime,
+          lane.lastItemStartTime + ((playerWidth * 0.6) / speed) * 1000
+        )
+      : lane.lastItemEndTime;
 
-    return Math.max(
-      now,
-      horizontalReadyTime,
-      verticalReadyTime,
-      laneStaggerTime,
-      animationEndGuard
-    );
+    return Math.max(now, horizontalReadyTime, verticalReadyTime, laneStaggerTime, finalGuard);
   }
 }

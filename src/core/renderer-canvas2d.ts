@@ -103,6 +103,7 @@ export class Canvas2DRenderer {
     this.laneAllocator = new LaneAllocator({
       getFontSize: () => this.settings.fontSize,
       getEffectiveSpeedPxPerSec: () => this.settings.speedPxPerSec,
+      getDanmakuMode: () => this.settings.danmakuMode,
       globalStaggerMs: rendererLayout.globalStaggerMs,
       safeDistanceScale: rendererLayout.safeDistanceScale,
       safeDistanceMin: rendererLayout.safeDistanceMin,

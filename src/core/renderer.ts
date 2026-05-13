@@ -134,6 +134,7 @@ export class Renderer {
     this.laneAllocator = new LaneAllocator({
       getFontSize: () => this.settings.fontSize,
       getEffectiveSpeedPxPerSec: () => this.getEffectiveSpeedPxPerSec(),
+      getDanmakuMode: () => this.danmakuMode,
       globalStaggerMs: rendererLayout.globalStaggerMs,
       safeDistanceScale: rendererLayout.safeDistanceScale,
       safeDistanceMin: rendererLayout.safeDistanceMin,
