@@ -931,9 +931,9 @@ export class Renderer {
         const adjustedDuration = active.baseDuration / rate;
 
         const el = active.element;
-        Renderer.triggerAnimationRestart(el);
         el.style.setProperty('--yt-msg-duration', `${adjustedDuration}ms`);
         el.style.setProperty('--yt-msg-delay', `${-Math.min(elapsed, active.baseDuration)}ms`);
+        Renderer.triggerAnimationRestart(el);
       } catch (error) {
         log.warn('Failed to update animation rate:', error);
       }
