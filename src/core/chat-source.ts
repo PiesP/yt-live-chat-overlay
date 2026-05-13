@@ -93,6 +93,8 @@ export abstract class ChatSource {
   private lastActivityTime = 0;
   protected bootstrap: ChatBootstrapData | null = null;
   private readonly recentMessages: ChatMessage[] = [];
+  private cachedPlayback: PlaybackSnapshot | null = null;
+  private timeupdateCleanup: (() => void) | null = null;
 
   constructor(getSettings: () => Readonly<OverlaySettings>) {
     this.getSettings = getSettings;
@@ -180,6 +182,7 @@ export abstract class ChatSource {
   }
 
   protected getPlaybackSnapshot(): PlaybackSnapshot | null {
+    if (this.cachedPlayback) return this.cachedPlayback;
     const match = findElementMatch<HTMLVideoElement>(VIDEO_SELECTORS);
     if (!match) return null;
     const { element: video } = match;
@@ -188,6 +191,33 @@ export abstract class ChatSource {
       offsetMs: Math.max(0, Math.floor(video.currentTime * 1000)),
       paused: video.paused,
     };
+  }
+
+  protected installTimeupdateListener(): void {
+    const el = findElementMatch<HTMLVideoElement>(VIDEO_SELECTORS);
+    if (!el) return;
+    const v = el.element;
+    const onTimeupdate = (): void => {
+      if (!Number.isFinite(v.currentTime)) {
+        this.cachedPlayback = null;
+        return;
+      }
+      this.cachedPlayback = {
+        offsetMs: Math.max(0, Math.floor(v.currentTime * 1000)),
+        paused: v.paused,
+      };
+    };
+    v.addEventListener('timeupdate', onTimeupdate);
+    this.timeupdateCleanup = () => {
+      v.removeEventListener('timeupdate', onTimeupdate);
+    };
+    onTimeupdate();
+  }
+
+  protected removeTimeupdateListener(): void {
+    this.timeupdateCleanup?.();
+    this.timeupdateCleanup = null;
+    this.cachedPlayback = null;
   }
 
   protected markActivity(): void {
@@ -360,6 +390,7 @@ export abstract class ChatSource {
     this.bootstrap = null;
     this.lastActivityTime = 0;
     this.recentMessages.length = 0;
+    this.removeTimeupdateListener();
   }
 
   /**
@@ -444,6 +475,7 @@ class LiveChatSource extends ChatSource {
 
   protected launchCurrentPollLoop(signal?: AbortSignal): void {
     this.launchPollLoop(signal, (loopSignal) => this.runLiveLoop(loopSignal));
+    this.installTimeupdateListener();
   }
 
   protected resetSessionState(): void {
@@ -631,6 +663,7 @@ class ReplayChatSource extends ChatSource {
   protected launchCurrentPollLoop(signal?: AbortSignal): void {
     this.launchPollLoop(signal, (loopSignal) => this.runReplayLoop(loopSignal));
     this.installSeekListeners(signal);
+    this.installTimeupdateListener();
   }
 
   protected resetSessionState(): void {
