@@ -1,5 +1,4 @@
 import { isLogLevel, type OverlaySettings } from '@app-types';
-import { SETTINGS_LIMITS } from '@core/settings-definitions';
 import {
   AUTHOR_COLOR_KEYS,
   cloneSettings,
@@ -11,6 +10,7 @@ import {
   ROOT_SETTING_KEYS,
   type RootNumericSettingKey,
   type RootScalarSettingKey,
+  SETTINGS_LIMITS,
   SHOW_AUTHOR_KEYS,
 } from '@core/settings-schema';
 

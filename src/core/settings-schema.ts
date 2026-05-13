@@ -4,7 +4,7 @@ import {
   type OutlineSettings,
   type OverlaySettings,
 } from '@app-types';
-import { DEFAULT_SETTINGS, SETTINGS_LIMITS } from '@core/settings-definitions';
+import { colors as designColors } from '@core/design-tokens';
 
 type RootScalarSettingKey = Exclude<keyof OverlaySettings, 'showAuthor' | 'colors' | 'outline'>;
 type OutlineSettingKey = keyof OutlineSettings;
@@ -92,6 +92,107 @@ export const OUTLINE_NUMERIC_KEYS = [
   'opacity',
 ] as const satisfies ReadonlyArray<Exclude<OutlineSettingKey, 'enabled'>>;
 
+// ── Limits ──────────────────────────────────────────────────────────────────────
+
+type NumericSettingLimit = Readonly<{ min: number; max: number; step: number }>;
+
+type SettingsLimitKey =
+  | 'speedPxPerSec'
+  | 'fontSize'
+  | 'opacity'
+  | 'superChatOpacity'
+  | 'safeTop'
+  | 'safeBottom'
+  | 'maxConcurrentMessages'
+  | 'minTextLength'
+  | 'outlineWidthPx'
+  | 'outlineBlurPx'
+  | 'outlineOpacity'
+  | 'laneSpacing'
+  | 'authorRateLimitWindowMs'
+  | 'authorRateLimitMaxMessages'
+  | 'backlogMaxRate'
+  | 'backlogSpeedMultiplier'
+  | 'backlogRecentMinutes';
+
+export const SETTINGS_LIMITS = {
+  speedPxPerSec: { min: 100, max: 400, step: 10 },
+  fontSize: { min: 18, max: 40, step: 2 },
+  opacity: { min: 0.5, max: 1, step: 0.05 },
+  superChatOpacity: { min: 0.35, max: 1, step: 0.05 },
+  safeTop: { min: 0, max: 0.25, step: 0.01 },
+  safeBottom: { min: 0, max: 0.5, step: 0.01 },
+  maxConcurrentMessages: { min: 30, max: 100, step: 10 },
+  minTextLength: { min: 1, max: 10, step: 1 },
+  outlineWidthPx: { min: 0, max: 5, step: 0.5 },
+  outlineBlurPx: { min: 0, max: 8, step: 0.5 },
+  outlineOpacity: { min: 0, max: 1, step: 0.1 },
+  laneSpacing: { min: 0, max: 20, step: 1 },
+  authorRateLimitWindowMs: { min: 1000, max: 30000, step: 1000 },
+  authorRateLimitMaxMessages: { min: 1, max: 20, step: 1 },
+  backlogMaxRate: { min: 0, max: 50, step: 5 },
+  backlogSpeedMultiplier: { min: 1, max: 5, step: 0.5 },
+  backlogRecentMinutes: { min: 1, max: 30, step: 1 },
+} as const satisfies Record<SettingsLimitKey, NumericSettingLimit>;
+
+export const STORAGE_KEY = 'yt-live-chat-overlay-settings';
+
+// ── Defaults ────────────────────────────────────────────────────────────────────
+
+const DEFAULT_SHOW_AUTHOR: OverlaySettings['showAuthor'] = {
+  normal: false,
+  member: false,
+  moderator: true,
+  owner: true,
+  verified: false,
+  superChat: true,
+};
+
+const DEFAULT_COLORS: OverlaySettings['colors'] = {
+  normal: designColors.authorNormal,
+  member: designColors.authorMember,
+  moderator: designColors.authorModerator,
+  owner: designColors.authorOwner,
+  verified: designColors.authorVerified,
+};
+
+const DEFAULT_OUTLINE: OutlineSettings = {
+  enabled: true,
+  widthPx: 1.5,
+  blurPx: 2,
+  opacity: 0.7,
+};
+
+export const DEFAULT_SETTINGS = {
+  enabled: true,
+  danmakuMode: 'scroll',
+  speedPxPerSec: 250,
+  fontSize: 20,
+  opacity: 0.85,
+  superChatOpacity: 0.35,
+  safeTop: 0,
+  safeBottom: 0.15,
+  maxConcurrentMessages: 50,
+  allowShortTextMessages: false,
+  minTextLength: 3,
+  logLevel: 'warn',
+  showAuthor: DEFAULT_SHOW_AUTHOR,
+  colors: DEFAULT_COLORS,
+  outline: DEFAULT_OUTLINE,
+  laneSpacing: 0,
+  showDebugOverlay: false,
+  authorRateLimitEnabled: true,
+  authorRateLimitWindowMs: 5000,
+  authorRateLimitMaxMessages: 5,
+  backlogMaxRate: 10,
+  backlogSpeedMultiplier: 2,
+  showBacklogIndicator: true,
+  backlogMode: 'playback',
+  backlogRecentMinutes: 5,
+} as const satisfies Readonly<OverlaySettings>;
+
+// ── Visual reset keys ───────────────────────────────────────────────────────────
+
 /**
  * Root-level setting keys that affect visual rendering and therefore
  * require a full renderer reset (clear messages + replay) when changed.
@@ -111,6 +212,8 @@ export const VISUAL_ROOT_KEYS = [
   'minTextLength',
   'laneSpacing',
 ] as const satisfies readonly RootScalarSettingKey[];
+
+// ── Color validation ────────────────────────────────────────────────────────────
 
 /**
  * Matches hex color strings: #RGB, #RRGGBB, #RGBA, #RRGGBBAA.
@@ -153,6 +256,8 @@ const OUTLINE_LIMITS_MAP: Record<
 };
 
 export { OUTLINE_LIMITS_MAP };
+
+// ── Normalization ───────────────────────────────────────────────────────────────
 
 const pickBool = (value: unknown, fallback: boolean): boolean =>
   typeof value === 'boolean' ? value : fallback;
@@ -227,7 +332,6 @@ export const shouldResetRendererForSettingsChange = (
   previous: Readonly<OverlaySettings>,
   next: Readonly<OverlaySettings>
 ): boolean => {
-  // Only visual settings that affect rendered message appearance require reset
   if (VISUAL_ROOT_KEYS.some((key) => previous[key] !== next[key])) return true;
   if (SHOW_AUTHOR_KEYS.some((key) => previous.showAuthor[key] !== next.showAuthor[key]))
     return true;

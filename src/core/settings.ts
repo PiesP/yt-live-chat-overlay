@@ -1,7 +1,12 @@
 import type { OverlaySettings } from '@app-types';
 import { createLogger } from '@core/logging';
-import { DEFAULT_SETTINGS, STORAGE_KEY } from '@core/settings-definitions';
-import { applySettingsPatch, cloneSettings, normalizeStoredSettings } from '@core/settings-schema';
+import {
+  applySettingsPatch,
+  cloneSettings,
+  DEFAULT_SETTINGS,
+  normalizeStoredSettings,
+  STORAGE_KEY,
+} from '@core/settings-schema';
 import { getSettingsStorageAdapter } from '@core/settings-storage';
 
 const log = createLogger('Settings');
