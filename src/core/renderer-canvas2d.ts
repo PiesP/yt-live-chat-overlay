@@ -237,8 +237,7 @@ export class Canvas2DRenderer {
       const laneSpanHeight = placement.laneSpan * dims.laneHeight;
       y = laneY + Math.max(0, (laneSpanHeight - estimated.height) / 2);
 
-      const distance = dims.width + textWidth + exitPadding + entryOffset;
-      duration = Math.max(2000, (distance / speed) * 1000);
+      duration = Math.max(2000, (dims.width / speed) * 1000);
 
       x = mode === 'reverse' ? -(textWidth + exitPadding) : dims.width + entryOffset;
 

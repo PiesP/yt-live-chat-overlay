@@ -272,12 +272,9 @@ export class Renderer {
       startTime = now;
     } else if (mode === 'reverse') {
       // LTR: start from left edge
-      const entryOffset = ((lane.index % 3) + 1) * 50;
-      const distance = dimensions.width + textWidth + 200;
-      const adjustedDistance = distance + entryOffset;
       baseDuration = Math.max(
         rendererLayout.durationMin,
-        Math.min(rendererLayout.durationMax, (adjustedDistance / effectiveSpeedPxPerSec) * 1000)
+        Math.min(rendererLayout.durationMax, (dimensions.width / effectiveSpeedPxPerSec) * 1000)
       );
 
       element.style.top = `${laneY}px`;
@@ -302,11 +299,10 @@ export class Renderer {
           : 100;
       const jitter = Math.floor(Math.random() * 30);
       const entryOffset = baseOffset + jitter;
-      const adjustedDistance = distance + entryOffset;
 
       baseDuration = Math.max(
         rendererLayout.durationMin,
-        Math.min(rendererLayout.durationMax, (adjustedDistance / effectiveSpeedPxPerSec) * 1000)
+        Math.min(rendererLayout.durationMax, (dimensions.width / effectiveSpeedPxPerSec) * 1000)
       );
 
       element.style.setProperty('--yt-msg-entry-offset', `${entryOffset}px`);
