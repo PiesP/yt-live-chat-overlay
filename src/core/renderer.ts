@@ -884,8 +884,8 @@ export class Renderer {
           continue;
         }
         const el = active.element;
-        Renderer.triggerAnimationRestart(el);
         el.style.setProperty('--yt-msg-delay', `${-elapsed}ms`);
+        Renderer.triggerAnimationRestart(el);
         el.style.animationPlayState = 'running';
       } catch (error) {
         log.warn('Failed to reset animation on resume:', error);
