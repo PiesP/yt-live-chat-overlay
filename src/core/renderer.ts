@@ -44,7 +44,13 @@ import type {
 } from '@app-types';
 import { PerAuthorRateLimiter } from '@core/author-rate-limiter';
 import { BurstDetector } from '@core/burst-detector';
-import { buildTextShadow, buildTextStroke, rendererLayout, shadows } from '@core/design-tokens';
+import {
+  buildTextShadow,
+  buildTextStroke,
+  computeCrossDuration,
+  rendererLayout,
+  shadows,
+} from '@core/design-tokens';
 import { createLogger } from '@core/logging';
 import { ObservabilityReporter } from '@core/observability';
 import type { Overlay } from '@core/overlay';
@@ -267,15 +273,12 @@ export class Renderer {
         element.style.top = `${dimensions.height * (1 - this.settings.safeBottom) - messageHeight}px`;
       }
       element.style.visibility = 'visible';
-      baseDuration = 4000;
+      baseDuration = rendererLayout.topBottomDurationMs;
       laneDelay = 0;
       startTime = now;
     } else if (mode === 'reverse') {
       // LTR: start from left edge
-      baseDuration = Math.max(
-        rendererLayout.durationMin,
-        Math.min(rendererLayout.durationMax, (dimensions.width / effectiveSpeedPxPerSec) * 1000)
-      );
+      baseDuration = computeCrossDuration(dimensions.width, effectiveSpeedPxPerSec);
 
       element.style.top = `${laneY}px`;
       element.style.right = '0';
@@ -300,10 +303,7 @@ export class Renderer {
       const jitter = Math.floor(Math.random() * 30);
       const entryOffset = baseOffset + jitter;
 
-      baseDuration = Math.max(
-        rendererLayout.durationMin,
-        Math.min(rendererLayout.durationMax, (dimensions.width / effectiveSpeedPxPerSec) * 1000)
-      );
+      baseDuration = computeCrossDuration(dimensions.width, effectiveSpeedPxPerSec);
 
       element.style.setProperty('--yt-msg-entry-offset', `${entryOffset}px`);
       element.style.setProperty('--yt-msg-exit-offset', `-${distance}px`);

@@ -21,7 +21,7 @@ import type {
   OverlaySettings,
 } from '@app-types';
 import { BurstDetector } from '@core/burst-detector';
-import { rendererLayout } from '@core/design-tokens';
+import { computeCrossDuration, rendererLayout } from '@core/design-tokens';
 import { createLogger } from '@core/logging';
 import { ObservabilityReporter } from '@core/observability';
 import type { Overlay } from '@core/overlay';
@@ -215,7 +215,7 @@ export class Canvas2DRenderer {
         mode === 'top'
           ? dims.height * this.settings.safeTop
           : dims.height * (1 - this.settings.safeBottom) - estimated.height;
-      duration = 4000;
+      duration = rendererLayout.topBottomDurationMs;
       this.laneAllocator.commitPlacement(
         placement,
         textWidth,
@@ -237,7 +237,7 @@ export class Canvas2DRenderer {
       const laneSpanHeight = placement.laneSpan * dims.laneHeight;
       y = laneY + Math.max(0, (laneSpanHeight - estimated.height) / 2);
 
-      duration = Math.max(2000, (dims.width / speed) * 1000);
+      duration = computeCrossDuration(dims.width, speed);
 
       x = mode === 'reverse' ? -(textWidth + exitPadding) : dims.width + entryOffset;
 

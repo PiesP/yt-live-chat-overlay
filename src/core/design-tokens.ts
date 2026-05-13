@@ -124,7 +124,27 @@ export const rendererLayout = {
   laneHeightMultiplier: 1.12,
   retryDelayMinMs: 32,
   retryDelayMaxMs: 800,
+  /** Duration (ms) for top/bottom fixed-position modes. */
+  topBottomDurationMs: 4000,
 } as const;
+
+/**
+ * Compute the crossing duration for scroll/reverse danmaku modes.
+ *
+ * All messages cross the visible area in the same duration regardless of
+ * font size or text length, making perceived speed dependent only on the
+ * speedPxPerSec setting and container width.
+ *
+ * @param containerWidth  — width of the overlay container in pixels
+ * @param speedPxPerSec   — effective scroll speed (includes burst adaptation)
+ * @returns Animation duration in milliseconds, clamped to [durationMin, durationMax].
+ */
+export function computeCrossDuration(containerWidth: number, speedPxPerSec: number): number {
+  return Math.max(
+    rendererLayout.durationMin,
+    Math.min(rendererLayout.durationMax, (containerWidth / speedPxPerSec) * 1000)
+  );
+}
 
 export function parseRgbColor(colorString: string): RgbColor | null {
   const match = colorString.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
