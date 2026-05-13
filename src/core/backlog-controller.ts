@@ -120,7 +120,7 @@ export class BacklogInjectionController {
     this.processTick();
   }
 
-  /** Execute one injection tick */
+  /** Execute one injection tick using requestIdleCallback for scheduling. */
   private processTick(): void {
     if (!this.isActive || this.backlogQueue.length === 0) {
       this.isInjecting = false;
@@ -133,8 +133,6 @@ export class BacklogInjectionController {
     const adaptiveRate = Math.max(1, Math.round(maxRate * realTimeFactor));
     const tickInterval = Math.round(1000 / adaptiveRate);
 
-    // Decay real-time activity count each tick so it naturally falls back
-    // to full backlog rate when real-time messages stop arriving.
     this.realTimeActivityCount = Math.max(0, this.realTimeActivityCount - 1);
 
     const message = this.backlogQueue.shift();
@@ -151,7 +149,26 @@ export class BacklogInjectionController {
 
     this.emitBacklogMessage(message);
 
-    this.injectionTimer = setTimeout(() => this.processTick(), tickInterval);
+    this.scheduleNextTick(tickInterval);
+  }
+
+  private scheduleNextTick(tickInterval: number): void {
+    if (typeof requestIdleCallback !== 'undefined') {
+      this.injectionTimer = setTimeout(() => {
+        requestIdleCallback(
+          (deadline) => {
+            if (deadline.timeRemaining() > 0 || this.backlogQueue.length < 5) {
+              this.processTick();
+            } else {
+              this.scheduleNextTick(Math.max(50, tickInterval / 2));
+            }
+          },
+          { timeout: tickInterval * 2 }
+        );
+      }, tickInterval) as unknown as ReturnType<typeof setTimeout>;
+    } else {
+      this.injectionTimer = setTimeout(() => this.processTick(), tickInterval);
+    }
   }
 
   /** Emit a single backlog message to the renderer via callback */
