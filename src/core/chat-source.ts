@@ -192,7 +192,19 @@ export abstract class ChatSource {
   }
 
   protected getPlaybackSnapshot(): PlaybackSnapshot | null {
-    if (this.cachedPlayback) return this.cachedPlayback;
+    if (this.cachedPlayback) {
+      // Read actual video.paused from the DOM instead of the cached value,
+      // which can be stale right after a play/pause event (rAF sync hasn't
+      // fired yet). The cached offsetMs is sufficient for positioning.
+      const match = findElementMatch<HTMLVideoElement>(VIDEO_SELECTORS);
+      if (match && Number.isFinite(match.element.currentTime)) {
+        return {
+          offsetMs: this.cachedPlayback.offsetMs,
+          paused: match.element.paused,
+        };
+      }
+      return this.cachedPlayback;
+    }
     const match = findElementMatch<HTMLVideoElement>(VIDEO_SELECTORS);
     if (!match) return null;
     const { element: video } = match;
