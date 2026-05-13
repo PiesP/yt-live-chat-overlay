@@ -39,7 +39,6 @@ const OUTLINE_OFFSETS: ReadonlyArray<readonly [number, number]> = [
   [1, 0],
   [1, 1],
 ];
-const MAX_AGE_MS = 60_000;
 const PREVIEW_BITMAP_SIZE = 2048;
 
 interface CanvasMessage {
@@ -70,14 +69,6 @@ interface CanvasMessage {
   startX: number;
 }
 
-/** Density multiplier per burst level — tighter spacing = higher density. */
-const BURST_DENSITY: Record<string, number> = {
-  normal: 1.0,
-  elevated: 0.85,
-  high: 0.7,
-  extreme: 0.55,
-};
-
 export class Canvas2DRenderer {
   readonly observability: ObservabilityReporter;
   private canvas: HTMLCanvasElement | null = null;
@@ -96,6 +87,15 @@ export class Canvas2DRenderer {
   private emojiCache = new Map<string, HTMLImageElement>();
   private textMeasureCache = new Map<string, number>();
   private measureCtx: CanvasRenderingContext2D | null = null;
+  private playbackRate = 1;
+  /** Timestamp until which the EMA speed multiplier is suppressed after resume. */
+  private resumeStabilizeUntil: number = 0;
+  private static readonly BURST_SPEED_MULTIPLIER: Record<string, number> = {
+    normal: 1.0,
+    elevated: 1.1,
+    high: 1.2,
+    extreme: 1.35,
+  };
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
     this.settings = settings;
@@ -176,9 +176,25 @@ export class Canvas2DRenderer {
     return `bold ${this.settings.fontSize}px system-ui, -apple-system, sans-serif`;
   }
 
-  /** Density-based gap multiplier: tighter at high burst levels, keeps speed constant. */
-  private getDensityMultiplier(): number {
-    return BURST_DENSITY[this.burstDetector.getLevel()] ?? 1.0;
+  /**
+   * Compute effective scroll speed matching CSS renderer's getEffectiveSpeedPxPerSec.
+   * Includes playbackRate, EMA-based burst adaptation, and burst-level multiplier.
+   */
+  private getEffectiveSpeedPxPerSec(): number {
+    let speed = this.settings.speedPxPerSec * this.playbackRate;
+
+    if (performance.now() >= this.resumeStabilizeUntil) {
+      const emaRate = this.burstDetector.getEmaRate();
+      if (emaRate > 5) {
+        const emaMultiplier = 1 + Math.min((emaRate - 5) / 15, 0.35);
+        speed *= emaMultiplier;
+      }
+    }
+
+    const burstLevel = this.burstDetector.getLevel();
+    speed *= Canvas2DRenderer.BURST_SPEED_MULTIPLIER[burstLevel] ?? 1.0;
+
+    return Math.max(1, speed);
   }
 
   addMessage(message: ChatMessage): void {
@@ -200,11 +216,8 @@ export class Canvas2DRenderer {
     }
 
     const textWidth = estimated.width;
-    const fontSize = this.settings.fontSize;
     const mode = this.settings.danmakuMode;
     const now = performance.now();
-    const speed = this.settings.speedPxPerSec;
-    const densityMul = this.getDensityMultiplier();
 
     let x: number;
     let y: number;
@@ -226,10 +239,6 @@ export class Canvas2DRenderer {
         now + duration
       );
     } else {
-      const exitPadding = Math.max(
-        fontSize * rendererLayout.exitPaddingScale * densityMul,
-        rendererLayout.exitPaddingMin * densityMul
-      );
       const baseOffset =
         dims.laneCount > 1 ? Math.round((placement.lane.index / (dims.laneCount - 1)) * 200) : 100;
       const jitter = Math.floor(Math.random() * 30);
@@ -238,9 +247,9 @@ export class Canvas2DRenderer {
       const laneY = dims.height * this.settings.safeTop + placement.lane.index * dims.laneHeight;
       y = laneY + Math.max(0, (dims.laneHeight - estimated.height) / 2);
 
-      duration = computeCrossDuration(dims.width, speed);
+      duration = computeCrossDuration(dims.width, this.getEffectiveSpeedPxPerSec());
 
-      x = mode === 'reverse' ? -(textWidth + exitPadding) : dims.width + entryOffset;
+      x = mode === 'reverse' ? -(dims.width + entryOffset) : dims.width + entryOffset;
 
       this.laneAllocator.commitPlacement(
         placement,
@@ -336,7 +345,6 @@ export class Canvas2DRenderer {
     const outlineEnabled = this.settings.outline.enabled;
     const outlineOpacity = this.settings.outline.opacity;
     const outlineWidth = this.settings.outline.widthPx;
-    const dims = this.dimensions;
     const canvasW = canvas.width;
 
     // Phase 1: update positions, build depth-sorted render list
@@ -354,14 +362,14 @@ export class Canvas2DRenderer {
         // No position update needed — stays in place
       } else if (msg.mode === 'reverse') {
         const progress = elapsed / msg.duration;
-        const travelDistance = (dims?.width ?? canvasW) + msg.width + 200;
-        msg.x = -msg.width + progress * travelDistance;
-        renderOpacity = msg.opacity * Math.max(0, 1 - elapsed / Math.max(msg.duration, MAX_AGE_MS));
+        const travelDistance = canvasW + msg.startX * -1 + canvasW + 100;
+        msg.x = msg.startX + progress * travelDistance;
+        renderOpacity = msg.opacity;
       } else {
         const progress = elapsed / msg.duration;
         const travelDistance = canvasW + msg.width + 100;
         msg.x = msg.startX - progress * travelDistance;
-        renderOpacity = msg.opacity * Math.max(0, 1 - elapsed / Math.max(msg.duration, MAX_AGE_MS));
+        renderOpacity = msg.opacity;
       }
 
       const entry = { msg, elapsed, opacity: renderOpacity };
@@ -621,15 +629,18 @@ export class Canvas2DRenderer {
     if (msg.amount) {
       ctx.font = `bold ${this.settings.fontSize * 0.75}px system-ui, sans-serif`;
       ctx.fillStyle = '#fff';
-      ctx.fillText(msg.amount, msg.x + 14, msg.y + padding);
+      const amountWidth = ctx.measureText(msg.amount).width;
+      ctx.fillText(msg.amount, msg.x + cardW - amountWidth - padding, msg.y + padding);
     }
 
     ctx.font = this.getFont();
     ctx.fillStyle = '#fff';
+    const textMaxW = cardW - padding * 2 - (msg.amount ? this.settings.fontSize * 3 : 0);
     ctx.fillText(
       msg.text,
-      msg.x + 14,
-      msg.y + padding + (msg.amount ? this.settings.fontSize * 0.85 + 6 : 0)
+      msg.x + padding,
+      msg.y + padding + (msg.amount ? this.settings.fontSize * 0.85 + 6 : 0),
+      textMaxW
     );
   }
 
