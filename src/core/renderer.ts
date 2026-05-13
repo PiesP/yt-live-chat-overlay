@@ -906,11 +906,15 @@ export class Renderer {
     let pausedDuration = 0;
     if (this.pausedAt !== null) {
       pausedDuration = Math.min(Math.max(0, now - this.pausedAt), 60_000);
-      if (pausedDuration > 0) {
-        this.laneAllocator.shiftTimeline(pausedDuration);
-      }
     }
     this.pausedAt = null;
+
+    // Reset the lane allocator so new messages find free lanes immediately.
+    // Active messages are already on-screen and will finish their animation;
+    // shifting the timeline would push all lane bookings forward by the
+    // hidden duration, making every lane appear occupied well into the future
+    // and causing new messages to be deferred indefinitely.
+    this.laneAllocator.reset(this.overlay.getDimensions());
 
     this.isPaused = false;
 
