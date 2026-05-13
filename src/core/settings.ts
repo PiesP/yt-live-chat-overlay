@@ -14,20 +14,11 @@ export class Settings {
   }
 
   initialize(): void {
-    console.warn('[Settings::diagnostic] GM_setValue:', typeof GM_setValue);
-    console.warn('[Settings::diagnostic] GM_getValue:', typeof GM_getValue);
-    console.warn('[Settings::diagnostic] GM_deleteValue:', typeof GM_deleteValue);
     try {
       const adapter = getSettingsStorageAdapter();
       const raw = adapter.getItem(STORAGE_KEY);
-      console.warn('[Settings::diagnostic] raw from storage:', raw);
       if (raw) {
-        const parsed = normalizeStoredSettings(JSON.parse(raw) as Record<string, unknown>);
-        console.warn('[Settings::diagnostic] loaded fontSize:', parsed.fontSize);
-        console.warn('[Settings::diagnostic] loaded rendererType:', parsed.rendererType);
-        this.settings = parsed;
-      } else {
-        console.warn('[Settings::diagnostic] no stored data, using defaults');
+        this.settings = normalizeStoredSettings(JSON.parse(raw) as Record<string, unknown>);
       }
     } catch (error) {
       log.warn('Failed to load settings:', error);
