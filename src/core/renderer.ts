@@ -137,8 +137,8 @@ export class Renderer {
       globalStaggerMs: rendererLayout.globalStaggerMs,
       safeDistanceScale: rendererLayout.safeDistanceScale,
       safeDistanceMin: rendererLayout.safeDistanceMin,
-      laneHeightPaddingScale: rendererLayout.laneHeightPaddingScale,
-      laneHeightPaddingMin: rendererLayout.laneHeightPaddingMin,
+      safeTop: this.settings.safeTop,
+      laneSpacing: this.settings.laneSpacing,
     });
     this.laneAllocator.reset(this.overlay.getDimensions());
     this.injectStyles();
@@ -249,12 +249,8 @@ export class Renderer {
     baseOpacity?: number
   ): ActiveMessage {
     const fontSize = this.settings.fontSize;
-    const { lane } = placement;
+    const { lane, laneY } = placement;
     const mode = this.danmakuMode;
-
-    const laneBlockTop =
-      dimensions.height * this.settings.safeTop + lane.index * dimensions.laneHeight;
-    const laneY = laneBlockTop;
 
     const effectiveSpeedPxPerSec = this.getEffectiveSpeedPxPerSec();
     const now = performance.now();

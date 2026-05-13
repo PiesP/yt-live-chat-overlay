@@ -106,8 +106,8 @@ export class Canvas2DRenderer {
       globalStaggerMs: rendererLayout.globalStaggerMs,
       safeDistanceScale: rendererLayout.safeDistanceScale,
       safeDistanceMin: rendererLayout.safeDistanceMin,
-      laneHeightPaddingScale: 0,
-      laneHeightPaddingMin: 0,
+      safeTop: this.settings.safeTop,
+      laneSpacing: this.settings.laneSpacing,
     });
     this.laneAllocator.reset(overlay.getDimensions());
     this.observability = new ObservabilityReporter(settings.showDebugOverlay);
@@ -244,7 +244,7 @@ export class Canvas2DRenderer {
       const jitter = Math.floor(Math.random() * 30);
       const entryOffset = baseOffset + jitter;
 
-      const laneY = dims.height * this.settings.safeTop + placement.lane.index * dims.laneHeight;
+      const laneY = this.laneAllocator.getLaneY(placement.lane.index);
       y = laneY;
 
       duration = computeCrossDuration(dims.width, this.getEffectiveSpeedPxPerSec());

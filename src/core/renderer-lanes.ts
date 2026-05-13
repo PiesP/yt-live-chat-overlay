@@ -4,6 +4,7 @@ export interface LanePlacement {
   lane: LaneState;
   laneSpan: number;
   waitMs: number;
+  laneY: number;
 }
 
 interface LaneAllocatorOptions {
@@ -12,8 +13,8 @@ interface LaneAllocatorOptions {
   readonly globalStaggerMs: number;
   readonly safeDistanceScale: number;
   readonly safeDistanceMin: number;
-  readonly laneHeightPaddingScale: number;
-  readonly laneHeightPaddingMin: number;
+  readonly safeTop: number;
+  readonly laneSpacing: number;
 }
 
 /**
@@ -27,14 +28,18 @@ const IMMEDIATE_PLACEMENT_THRESHOLD_MS = 48;
 export class LaneAllocator {
   private lanes: LaneState[] = [];
   private nextLaneIndex = 0;
+  private laneHeight = 0;
 
   constructor(private readonly options: LaneAllocatorOptions) {}
 
   reset(dimensions: OverlayDimensions | null): void {
     if (!dimensions) {
       this.lanes = [];
+      this.laneHeight = 0;
       return;
     }
+
+    this.laneHeight = dimensions.laneHeight + this.options.laneSpacing;
 
     this.lanes = Array.from({ length: dimensions.laneCount }, (_, index) => ({
       index,
@@ -55,9 +60,21 @@ export class LaneAllocator {
     return this.lanes.length;
   }
 
+  getLaneHeight(): number {
+    return this.laneHeight;
+  }
+
+  /**
+   * Return the Y pixel position for a lane block, accounting for safeTop.
+   * This is the single source of truth for vertical message placement.
+   */
+  getLaneY(laneIndex: number): number {
+    return this.options.safeTop + laneIndex * this.laneHeight;
+  }
+
   findPlacement(messageHeight: number, dimensions: OverlayDimensions): LanePlacement | null {
     const now = performance.now();
-    const requiredLanes = this.calculateRequiredLanes(messageHeight, dimensions.laneHeight);
+    const requiredLanes = this.calculateRequiredLanes(messageHeight);
     if (requiredLanes > this.lanes.length) {
       return null;
     }
@@ -143,6 +160,7 @@ export class LaneAllocator {
       lane: chosenLane,
       laneSpan: requiredLanes,
       waitMs,
+      laneY: this.getLaneY(bestStartIndex),
     };
   }
 
@@ -211,12 +229,9 @@ export class LaneAllocator {
     return relaxedTime;
   }
 
-  private calculateRequiredLanes(messageHeight: number, laneHeight: number): number {
-    const paddingPx = Math.max(
-      this.options.laneHeightPaddingMin,
-      this.options.getFontSize() * this.options.laneHeightPaddingScale
-    );
-    return Math.max(1, Math.ceil((messageHeight + paddingPx) / laneHeight));
+  private calculateRequiredLanes(messageHeight: number): number {
+    if (this.laneHeight <= 0) return 1;
+    return Math.max(1, Math.ceil(messageHeight / this.laneHeight));
   }
 
   private calculateLaneReadyTime(lane: LaneState, now: number, playerWidth: number): number {
