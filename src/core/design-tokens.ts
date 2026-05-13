@@ -117,11 +117,12 @@ export const rendererLayout = {
   safeDistanceScale: 0.2,
   safeDistanceMin: 4,
   laneHeightPaddingScale: 0.05,
-  laneHeightPaddingMin: 2,
+  laneHeightPaddingMin: 1,
   // Base lane height multiplier: fontSize * this value gives the lane slot height.
-  // line-height: 1.1 on messages; 1.12 adds ~2% vertical slack so messages
-  // stay within their lane slot without visible inter-lane gaps.
-  laneHeightMultiplier: 1.12,
+  // line-height: 1.1 on messages; 1.02 adds ~2px vertical slack at
+  // fontSize=20 so messages stay within their lane slot without visible
+  // inter-lane gaps, while keeping wasted space to a minimum.
+  laneHeightMultiplier: 1.02,
   retryDelayMinMs: 32,
   retryDelayMaxMs: 800,
   /** Duration (ms) for top/bottom fixed-position modes. */
