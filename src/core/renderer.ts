@@ -548,8 +548,10 @@ export class Renderer {
 
       if (result.status === 'deferred') {
         queued.nextAttemptAt = performance.now() + result.waitMs;
-        this.scheduleRetry(result.waitMs);
-        return;
+        this.scheduleRetry(Math.min(result.waitMs, rendererLayout.retryDelayMaxMs));
+        this.pendingQueue.shift();
+        processed++;
+        continue;
       }
 
       // Drop with retry: re-enqueue at lower priority if retries remain
