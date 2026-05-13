@@ -622,6 +622,7 @@ class ReplayChatSource extends ChatSource {
   private replayConsecutiveFailures = 0;
   private replayNextAllowedFetchAt = 0;
   private replayBuffer: ReplayBufferedMessage[] = [];
+  private seekListenerCleanup: (() => void) | null = null;
 
   protected seedCurrentSession(signal?: AbortSignal): Promise<boolean> {
     return this.initializeReplaySession(signal);
@@ -629,11 +630,41 @@ class ReplayChatSource extends ChatSource {
 
   protected launchCurrentPollLoop(signal?: AbortSignal): void {
     this.launchPollLoop(signal, (loopSignal) => this.runReplayLoop(loopSignal));
+    this.installSeekListeners(signal);
   }
 
   protected resetSessionState(): void {
     super.resetSessionState();
     this.resetReplayState();
+  }
+
+  // ---- Seek event handling ----
+
+  private installSeekListeners(signal?: AbortSignal): void {
+    const el = findElementMatch<HTMLVideoElement>(VIDEO_SELECTORS);
+    if (!el) return;
+    const v = el.element;
+    const onSeeked = (): void => {
+      if (signal?.aborted) return;
+      const offsetMs = Math.max(0, Math.floor(v.currentTime * 1000));
+      this.handleSeeked(offsetMs);
+    };
+    v.addEventListener('seeked', onSeeked);
+    this.seekListenerCleanup = () => {
+      v.removeEventListener('seeked', onSeeked);
+    };
+  }
+
+  private handleSeeked(offsetMs: number): void {
+    this.replayBuffer = [];
+    this.lastReplayRequestedOffsetMs = offsetMs;
+    if (this.replayMode === 'playerSeek' && this.replayPlayerSeekContinuation) {
+      void this.fetchReplayPlayerSeek(offsetMs, undefined).then(() => {
+        this.flushReplayBuffer(offsetMs);
+      });
+    } else if (this.replayMode === 'continuation') {
+      void this.pollContinuationReplay(offsetMs, undefined);
+    }
   }
 
   // ---- Replay-specific ----
@@ -647,6 +678,8 @@ class ReplayChatSource extends ChatSource {
     this.replayConsecutiveFailures = 0;
     this.replayNextAllowedFetchAt = 0;
     this.replayBuffer = [];
+    this.seekListenerCleanup?.();
+    this.seekListenerCleanup = null;
   }
 
   private async initializeReplaySession(signal?: AbortSignal): Promise<boolean> {
