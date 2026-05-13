@@ -13,7 +13,6 @@ export type LogLevel = 'warn' | 'info' | 'debug';
 type AuthorDisplayKey = 'normal' | 'member' | 'moderator' | 'owner' | 'verified' | 'superChat';
 export type ChatMessageKind = 'text' | 'superchat' | 'membership';
 export type DanmakuMode = 'scroll' | 'reverse' | 'top' | 'bottom';
-export type RendererType = 'css' | 'canvas';
 type SuperChatTier = 'blue' | 'cyan' | 'green' | 'yellow' | 'orange' | 'magenta' | 'red';
 
 export const isLogLevel = (value: unknown): value is LogLevel =>
@@ -132,8 +131,6 @@ export interface OverlaySettings {
   enabled: boolean;
   /** Danmaku comment display mode */
   danmakuMode: DanmakuMode;
-  /** Renderer backend (CSS DOM or Canvas 2D) */
-  rendererType: RendererType;
   /** Speed in pixels per second (100-400) */
   speedPxPerSec: number;
   /** Font size in pixels */

@@ -78,7 +78,6 @@ export const SETTINGS_LIMITS = {
 export const DEFAULT_SETTINGS = {
   enabled: true,
   danmakuMode: 'scroll',
-  rendererType: 'css',
   speedPxPerSec: 250,
   fontSize: 20,
   opacity: 0.85,
