@@ -468,6 +468,10 @@ export abstract class ChatSource {
 class LiveChatSource extends ChatSource {
   private liveContinuation: InnertubeContinuationData | null = null;
   private consecutiveErrors = 0;
+  private readonly recentMessageCounts: number[] = [];
+  private static readonly DENSITY_WINDOW_SIZE = 5;
+  private static readonly DENSITY_HIGH_THRESHOLD = 10;
+  private static readonly DENSITY_LOW_THRESHOLD = 1;
 
   protected seedCurrentSession(signal?: AbortSignal): Promise<boolean> {
     return this.initializeLiveSession(signal);
@@ -509,6 +513,13 @@ class LiveChatSource extends ChatSource {
     }
   }
 
+  private recordMessageCount(count: number): void {
+    this.recentMessageCounts.push(count);
+    if (this.recentMessageCounts.length > LiveChatSource.DENSITY_WINDOW_SIZE) {
+      this.recentMessageCounts.shift();
+    }
+  }
+
   private calculateAdaptiveDelay(timeoutMs: number): number {
     const baseDelay = timeoutMs > 0 ? timeoutMs : LIVE_POLL_FALLBACK_DELAY_MS;
 
@@ -516,7 +527,21 @@ class LiveChatSource extends ChatSource {
       return Math.min(10_000, baseDelay * 2 ** this.consecutiveErrors);
     }
 
-    return Math.max(2000, Math.min(5000, baseDelay));
+    const base = Math.max(2000, Math.min(5000, baseDelay));
+
+    if (this.recentMessageCounts.length < 2) return base;
+
+    const avgCount =
+      this.recentMessageCounts.reduce((a, b) => a + b, 0) / this.recentMessageCounts.length;
+
+    if (avgCount >= LiveChatSource.DENSITY_HIGH_THRESHOLD) {
+      return Math.max(1000, Math.round(base * 0.6));
+    }
+    if (avgCount <= LiveChatSource.DENSITY_LOW_THRESHOLD) {
+      return Math.min(8000, Math.round(base * 1.5));
+    }
+
+    return base;
   }
 
   private async runLiveLoop(signal?: AbortSignal): Promise<void> {
@@ -625,6 +650,8 @@ class LiveChatSource extends ChatSource {
       if (messages.length > 0) {
         this.emitBatch(messages, isInitialSeed);
       }
+
+      this.recordMessageCount(messages.length);
     }
 
     this.consecutiveErrors = 0;
