@@ -42,6 +42,23 @@ function measureTextWidth(text: string, font: string): number {
   return Math.ceil(metrics.width);
 }
 
+/**
+ * Measure the actual rendered text height using font metrics.
+ * Returns the sum of fontBoundingBoxAscent and fontBoundingBoxDescent
+ * when available, falling back to fontSize * 1.1 for older browsers.
+ */
+function measureTextHeight(font: string, fontSize: number): number {
+  const ctx = getTextMeasureCtx();
+  ctx.font = font;
+  const metrics = ctx.measureText('Mg');
+  const ascent = metrics.fontBoundingBoxAscent;
+  const descent = metrics.fontBoundingBoxDescent;
+  if (ascent !== undefined && descent !== undefined && ascent > 0) {
+    return Math.ceil(ascent + descent);
+  }
+  return Math.ceil(fontSize * 1.1);
+}
+
 interface AuthorNameOptions {
   className?: string;
   color?: string;
@@ -108,7 +125,6 @@ export class RendererMessageBuilder {
     const settings = this.getSettings();
     const fontSize = settings.fontSize;
     const font = `${fontSize}px system-ui, -apple-system, sans-serif`;
-    const lineHeight = 1.1;
 
     if (message.kind === 'superchat' && message.superChat) {
       return this.estimateSuperChatDimensions(message, font, fontSize);
@@ -118,26 +134,27 @@ export class RendererMessageBuilder {
       return this.estimateMembershipDimensions(message, font, fontSize);
     }
 
-    return this.estimateRegularMessageDimensions(message, font, fontSize, lineHeight);
+    return this.estimateRegularMessageDimensions(message, font, fontSize);
   }
 
   private estimateRegularMessageDimensions(
     message: ChatMessage,
     font: string,
-    fontSize: number,
-    lineHeight: number
+    fontSize: number
   ): { width: number; height: number } {
     const showAuthor = this.shouldShowAuthor(message);
     const textWidth = this.measureContentWidth(message, font, fontSize);
+    const textHeight = measureTextHeight(font, fontSize);
 
     if (!showAuthor || !message.author) {
       return {
         width: textWidth,
-        height: Math.ceil(fontSize * lineHeight),
+        height: textHeight,
       };
     }
 
-    const authorFont = `${Math.round(fontSize * rendererLayout.authorFontScale)}px system-ui, -apple-system, sans-serif`;
+    const authorFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
+    const authorFont = `${authorFontSize}px system-ui, -apple-system, sans-serif`;
     const authorNameWidth = measureTextWidth(message.author, authorFont);
     const authorSectionWidth = rendererLayout.authorPhotoSize + spacing.sm + authorNameWidth;
 
@@ -146,9 +163,8 @@ export class RendererMessageBuilder {
     const totalWidth = Math.max(authorSectionWidth + paddingH, textWidth + paddingH);
 
     const photoHeight = rendererLayout.authorPhotoSize;
-    const nameHeight = Math.ceil(fontSize * rendererLayout.authorFontScale * lineHeight);
+    const nameHeight = measureTextHeight(authorFont, authorFontSize);
     const authorSectionHeight = Math.max(photoHeight, nameHeight);
-    const textHeight = Math.ceil(fontSize * lineHeight);
     const paddingV = spacing.sm * 2; // padding-top + padding-bottom
 
     return {
@@ -166,7 +182,8 @@ export class RendererMessageBuilder {
     const paddingH = spacing.md * 2;
     const paddingV = spacing.sm + spacing.md; // header padding + body padding
     const lineCount = message.text.length > 80 ? 2 : 1;
-    const textHeight = Math.ceil(fontSize * 1.5 * lineCount); // 1.5 line-height for superchat body
+    const bodyLineHeight = measureTextHeight(font, fontSize);
+    const textHeight = Math.ceil(bodyLineHeight * lineCount);
     const headerHeight = Math.ceil(fontSize * 0.85) + spacing.sm * 2;
 
     return {
@@ -188,9 +205,9 @@ export class RendererMessageBuilder {
     const paddingV = spacing.md + spacing.lg;
 
     const photoHeight = rendererLayout.authorPhotoSize;
-    const nameHeight = Math.ceil(fontSize * 1.1);
+    const nameHeight = measureTextHeight(font, fontSize);
     const infoHeight = Math.max(photoHeight, nameHeight);
-    const textHeight = Math.ceil(fontSize * 1.1);
+    const textHeight = measureTextHeight(font, fontSize);
 
     return {
       width: textWidth + paddingH,
