@@ -710,6 +710,14 @@ export class Canvas2DRenderer {
     }
   }
 
+  /** Convert a #RRGGBB hex color to an rgba() string with custom alpha. */
+  private static rgbaHex(hex: string, alpha: number): string {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }
+
   // ── Super Chat ──────────────────────────────────────────────────────────
 
   private renderSuperChat(
@@ -729,6 +737,10 @@ export class Canvas2DRenderer {
 
     ctx.globalAlpha = alpha;
 
+    const superChatAlpha = Math.min(1, Math.max(0.4, this.settings.superChatOpacity));
+    const topAlpha = Math.min(1, superChatAlpha + 0.06);
+    const bottomAlpha = Math.max(0.4, superChatAlpha - 0.08);
+
     const tierColors: Record<string, string> = {
       blue: '#1e88e5',
       cyan: '#00bfff',
@@ -740,11 +752,11 @@ export class Canvas2DRenderer {
     };
     const baseColor = tierColors[superChat.tier] ?? '#1e88e5';
 
-    // Card background gradient
+    // Card background gradient (matches CSS --yt-overlay-superchat-*-opacity)
     const grad = ctx.createLinearGradient(x, y, x, y + h);
-    grad.addColorStop(0, `${baseColor}bb`);
-    grad.addColorStop(0.5, `${baseColor}66`);
-    grad.addColorStop(1, `${baseColor}55`);
+    grad.addColorStop(0, Canvas2DRenderer.rgbaHex(baseColor, topAlpha));
+    grad.addColorStop(0.48, Canvas2DRenderer.rgbaHex(baseColor, superChatAlpha));
+    grad.addColorStop(1, Canvas2DRenderer.rgbaHex(baseColor, bottomAlpha));
     ctx.fillStyle = grad;
     this.roundRect(ctx, x, y, w, h, 6);
     ctx.fill();
