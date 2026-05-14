@@ -8,6 +8,7 @@ import { OVERLAY_SELECTOR, Overlay } from '@core/overlay';
 import { Renderer } from '@core/renderer';
 import { Canvas2DRenderer } from '@core/renderer-canvas2d';
 import { shouldResetRendererForSettingsChange } from '@core/settings-schema';
+import { VideoPauseController } from '@core/video-pause-controller';
 
 const log = createLogger('RuntimeSession');
 
@@ -50,7 +51,7 @@ export class RuntimeSession {
   private renderer: Renderer | Canvas2DRenderer | null = null;
   private chatSource: ChatSource | null = null;
   private foregroundCleanup: (() => void) | null = null;
-  private videoPauseCleanup: (() => void) | null = null;
+  private videoPauseController = new VideoPauseController();
   private backlogController: BacklogInjectionController | null = null;
   private chatWatchdogTimer: ReturnType<typeof setInterval> | null = null;
   private disposed = false;
@@ -387,113 +388,23 @@ export class RuntimeSession {
   // ── Video pause/play listeners ────────────────────────────────────────────
 
   private startVideoPauseListeners(): void {
-    let currentVideo = this.getVideoElement();
-    if (!currentVideo) {
-      log.debug('No video element found — video pause handling disabled');
-      return;
-    }
-
-    const handlePause = (): void => {
-      if (this.disposed) return;
-      log.debug('Video paused — pausing comment flow');
-      this.renderer?.pauseForVideo();
-      this.chatSource?.setPaused(true);
-    };
-
-    const handlePlay = (): void => {
-      if (this.disposed) return;
-      log.debug('Video playing — resuming comment flow');
-      this.renderer?.resumeForVideo();
-      // Only resume chat source polling when the tab is visible.
-      // When hidden, the renderer won't display messages, so polling
-      // would just accumulate stale messages that flood on tab return.
-      if (!document.hidden) {
-        this.chatSource?.setPaused(false);
-      }
-    };
-
-    const attachListeners = (video: HTMLVideoElement): void => {
-      video.addEventListener('pause', handlePause);
-      video.addEventListener('play', handlePlay);
-    };
-
-    const detachListeners = (video: HTMLVideoElement | null): void => {
-      if (!video) return;
-      video.removeEventListener('pause', handlePause);
-      video.removeEventListener('play', handlePlay);
-    };
-
-    const rebindVideo = (): void => {
-      const nextVideo = this.getVideoElement();
-      if (nextVideo && nextVideo !== currentVideo) {
-        detachListeners(currentVideo);
-        currentVideo = nextVideo;
-        attachListeners(currentVideo);
-        log.debug('Re-bound video pause/play listeners to new <video> element');
-      }
-    };
-
-    attachListeners(currentVideo);
-
-    // Watch the player container for <video> element replacements (e.g. ad
-    // transitions, quality changes, or SPA navigation that swaps out the
-    // player DOM).  When detected, re-bind listeners to the new element so
-    // pause/play events keep working without a full session restart.
-    const playerContainer = document.querySelector<HTMLElement>(
-      '#movie_player, .html5-video-player'
-    );
-
-    // Periodic poll of video.paused as a safety net for missed events
-    // (element swap race, non-standard playback APIs, etc).
-    const POLL_INTERVAL_MS = 1000;
-    let previouslyPaused = currentVideo.paused;
-    const pollTimer = setInterval(() => {
-      if (this.disposed || !currentVideo) {
-        clearInterval(pollTimer);
-        return;
-      }
-      // The video element may have been replaced — re-fetch it if stale
-      if (!currentVideo.isConnected) {
-        rebindVideo();
-        if (!currentVideo) {
-          clearInterval(pollTimer);
-          return;
+    this.videoPauseController.start({
+      onVideoPause: () => {
+        this.renderer?.pauseForVideo();
+        this.chatSource?.setPaused(true);
+      },
+      onVideoPlay: () => {
+        this.renderer?.resumeForVideo();
+        if (!document.hidden) {
+          this.chatSource?.setPaused(false);
         }
-      }
-      const isPaused = currentVideo.paused;
-      if (isPaused !== previouslyPaused) {
-        previouslyPaused = isPaused;
-        if (isPaused) {
-          handlePause();
-        } else {
-          handlePlay();
-        }
-      }
-    }, POLL_INTERVAL_MS);
-
-    if (playerContainer) {
-      const observer = new MutationObserver(() => {
-        rebindVideo();
-      });
-      observer.observe(playerContainer, { childList: true, subtree: true });
-
-      this.videoPauseCleanup = () => {
-        detachListeners(currentVideo);
-        clearInterval(pollTimer);
-        observer.disconnect();
-        this.videoPauseCleanup = null;
-      };
-    } else {
-      this.videoPauseCleanup = () => {
-        detachListeners(currentVideo);
-        clearInterval(pollTimer);
-        this.videoPauseCleanup = null;
-      };
-    }
+      },
+      isDisposed: () => this.disposed,
+    });
   }
 
   private stopVideoPauseListeners(): void {
-    this.videoPauseCleanup?.();
+    this.videoPauseController.stop();
   }
 
   private getVideoElement(): HTMLVideoElement | null {
