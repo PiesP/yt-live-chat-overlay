@@ -509,6 +509,11 @@ export class RuntimeSession {
           return;
         }
 
+        // Skip checks while video is paused — the renderer intentionally
+        // stops processing messages, so idle chat is expected.
+        const video = this.getVideoElement();
+        if (video?.paused) return;
+
         if (this.getRuntimeHealthSnapshot().shouldRestart) {
           log.warn('Chat health check failed, triggering recovery');
           this.requestManagedRestart('watchdog');
