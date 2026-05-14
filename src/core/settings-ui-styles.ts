@@ -1,28 +1,46 @@
 import { borderRadius, colors, shadows, spacing, typography, zIndex } from '@core/design-tokens';
 
+// ── UI sizing tokens (settings-specific, not shared with renderer) ──
+const S = {
+  buttonSize: 36,
+  buttonFontSize: 18,
+  buttonZ: 120,
+  inputWidth: 86,
+  colorSwatch: 44,
+  modalWidth: 400,
+  modalMaxVW: 92,
+  modalMaxWidth: 420,
+  modalMaxVH: 82,
+  confirmMinWidth: 240,
+  checkboxSize: 18,
+  borderAlpha: 0.25,
+  scrimAlpha: 0.55,
+  hoverScrimAlpha: 0.75,
+} as const;
+
 export const SETTINGS_UI_STYLES = `
       .yt-chat-overlay-settings-button {
         position: absolute;
         top: ${spacing.sm}px;
         left: ${spacing.sm}px;
-        width: 36px;
-        height: 36px;
+        width: ${S.buttonSize}px;
+        height: ${S.buttonSize}px;
         border-radius: ${borderRadius.full};
-        border: 1px solid rgba(255, 255, 255, 0.25);
-        background: rgba(0, 0, 0, 0.55);
+        border: 1px solid rgba(255, 255, 255, ${S.borderAlpha});
+        background: rgba(0, 0, 0, ${S.scrimAlpha});
         backdrop-filter: blur(4px);
         color: ${colors.ui.text};
-        font-size: 18px;
+        font-size: ${S.buttonFontSize}px;
         line-height: 1;
         cursor: pointer;
-        z-index: 120;
+        z-index: ${S.buttonZ};
         opacity: 0;
         pointer-events: none;
         transition: opacity 0.15s, background 0.15s, transform 0.1s;
       }
       .yt-chat-overlay-settings-button:hover,
       .yt-chat-overlay-settings-button:focus-visible {
-        background: rgba(0, 0, 0, 0.75);
+        background: rgba(0, 0, 0, ${S.hoverScrimAlpha});
         transform: scale(1.1);
       }
       .yt-chat-overlay-settings-button:focus-visible {
@@ -40,7 +58,7 @@ export const SETTINGS_UI_STYLES = `
         display: none;
         align-items: center;
         justify-content: center;
-        background: rgba(0, 0, 0, 0.55);
+        background: rgba(0, 0, 0, ${S.scrimAlpha});
         z-index: ${zIndex.modal};
         animation: yt-overlay-fade-in 0.15s ease-out;
       }
@@ -53,9 +71,9 @@ export const SETTINGS_UI_STYLES = `
         to { transform: scale(1); opacity: 1; }
       }
       .yt-chat-overlay-settings-modal {
-        width: 400px;
-        max-width: min(92vw, 420px);
-        max-height: 82vh;
+        width: ${S.modalWidth}px;
+        max-width: min(${S.modalMaxVW}vw, ${S.modalMaxWidth}px);
+        max-height: ${S.modalMaxVH}vh;
         overflow: hidden;
         background: ${colors.ui.background};
         color: ${colors.ui.text};
@@ -85,8 +103,8 @@ export const SETTINGS_UI_STYLES = `
         cursor: pointer;
         padding: ${spacing.sm}px;
         line-height: 1;
-        min-width: 44px;
-        min-height: 44px;
+        min-width: ${S.colorSwatch}px;
+        min-height: ${S.colorSwatch}px;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -163,7 +181,7 @@ export const SETTINGS_UI_STYLES = `
         font-size: ${typography.fontSize.sm};
       }
       .yt-chat-overlay-settings-field input[type="number"] {
-        width: 86px;
+        width: ${S.inputWidth}px;
         padding: ${spacing.xs}px ${spacing.sm}px;
         border-radius: ${borderRadius.sm};
         border: 1px solid ${colors.ui.border};
@@ -172,7 +190,7 @@ export const SETTINGS_UI_STYLES = `
         text-align: right;
       }
       .yt-chat-overlay-settings-field input[type="color"] {
-        width: 44px;
+        width: ${S.colorSwatch}px;
         height: 26px;
         border: none;
         background: transparent;
@@ -180,8 +198,8 @@ export const SETTINGS_UI_STYLES = `
         cursor: pointer;
       }
       .yt-chat-overlay-settings-field input[type="checkbox"] {
-        width: 18px;
-        height: 18px;
+        width: ${S.checkboxSize}px;
+        height: ${S.checkboxSize}px;
         cursor: pointer;
         accent-color: ${colors.ui.primary};
       }
@@ -197,7 +215,7 @@ export const SETTINGS_UI_STYLES = `
         opacity: 0.4;
         cursor: not-allowed;
       }
-      /* Enabled toggle — styled distinctly at top of Display tab */
+      /* Enabled toggle */
       .yt-chat-overlay-settings-enabled {
         display: flex;
         align-items: center;
@@ -210,8 +228,8 @@ export const SETTINGS_UI_STYLES = `
         cursor: pointer;
       }
       .yt-chat-overlay-settings-enabled input[type="checkbox"] {
-        width: 18px;
-        height: 18px;
+        width: ${S.checkboxSize}px;
+        height: ${S.checkboxSize}px;
         cursor: pointer;
         accent-color: ${colors.ui.primary};
       }
@@ -291,7 +309,7 @@ export const SETTINGS_UI_STYLES = `
         border: 1px solid ${colors.ui.border};
         border-radius: ${borderRadius.md};
         padding: ${spacing.lg}px;
-        min-width: 240px;
+        min-width: ${S.confirmMinWidth}px;
         box-shadow: ${shadows.box.lg};
       }
       .yt-chat-overlay-settings-confirm-message {
