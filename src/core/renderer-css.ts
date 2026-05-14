@@ -583,19 +583,14 @@ export class Renderer extends RendererBase {
     const priority = RendererBase.getMessagePriority(message);
 
     if (this.pendingQueue.length >= rendererLayout.queueMaxSize) {
-      const lowestPriorityIndex = this.findLowestPriorityIndex();
-      if (lowestPriorityIndex >= 0) {
-        const removed = this.pendingQueue[lowestPriorityIndex];
-        if (removed && priority > removed.priority) {
-          this.pendingQueue.splice(lowestPriorityIndex, 1);
-          this.observability.onMessageDropped('queue_overflow');
-        } else {
-          this.observability.onMessageDropped('queue_overflow');
-          return;
-        }
-      } else {
-        this.pendingQueue.shift();
+      const lastIndex = this.pendingQueue.length - 1;
+      const removed = this.pendingQueue[lastIndex];
+      if (removed && priority > removed.priority) {
+        this.pendingQueue.splice(lastIndex, 1);
         this.observability.onMessageDropped('queue_overflow');
+      } else {
+        this.observability.onMessageDropped('queue_overflow');
+        return;
       }
     }
 
@@ -982,12 +977,6 @@ export class Renderer extends RendererBase {
   }
 
   // ── Message lifecycle ────────────────────────────────────────────────
-
-  private findLowestPriorityIndex(): number {
-    const len = this.pendingQueue.length;
-    if (len === 0) return -1;
-    return len - 1;
-  }
 
   private removeMessageByElement(element: HTMLDivElement): void {
     for (const active of this.activeMessages) {

@@ -12,12 +12,6 @@ interface ElementMatchOptions<T extends Element> {
   predicate?: (element: T) => boolean;
 }
 
-interface PollForValueOptions {
-  attempts?: number;
-  intervalMs?: number;
-  signal?: AbortSignal | undefined;
-}
-
 const DEFAULT_WAIT_ATTEMPTS = 5;
 const DEFAULT_WAIT_INTERVAL_MS = 500;
 
@@ -79,10 +73,9 @@ export const findElementMatch = <T extends Element>(
   return null;
 };
 
-const pollForValue = async <T>(
-  readValue: () => T | null | undefined,
-  options: PollForValueOptions = {}
-): Promise<T | null> => {
+export const findPlayerContainerElement = async (
+  options: { attempts?: number; intervalMs?: number; signal?: AbortSignal | undefined } = {}
+): Promise<HTMLElement | null> => {
   const attempts = Math.max(1, Math.trunc(options.attempts ?? DEFAULT_WAIT_ATTEMPTS));
   const intervalMs = Math.max(0, options.intervalMs ?? DEFAULT_WAIT_INTERVAL_MS);
   const { signal } = options;
@@ -90,16 +83,26 @@ const pollForValue = async <T>(
   for (let attempt = 0; attempt < attempts; attempt++) {
     throwIfAborted(signal);
 
-    const value = readValue();
-    if (value != null) return value;
+    const element = findElementMatch<HTMLElement>(PLAYER_CONTAINER_SELECTORS, {
+      predicate: isVisibleElement,
+    });
+
+    if (element) {
+      log.debug('Player found with selector:', element.selector);
+      return element.element;
+    }
 
     if (attempt === attempts - 1) break;
 
     await sleep(intervalMs, signal);
   }
 
+  log.warn('No player container found');
   return null;
 };
+
+export const isAbortError = (error: unknown): boolean =>
+  error instanceof DOMException && error.name === 'AbortError';
 
 /**
  * Ensure a player element has CSS positioning so absolutely-positioned
@@ -110,40 +113,3 @@ export const ensurePlayerPositioning = (element: HTMLElement): void => {
     element.style.position = 'relative';
   }
 };
-
-/**
- * Find the YouTube player container element.
- * Shared by Overlay and SettingsUi to avoid duplicated lookup logic.
- */
-export const findPlayerContainerElement = async (
-  options: { attempts?: number; intervalMs?: number; signal?: AbortSignal | undefined } = {}
-): Promise<HTMLElement | null> => {
-  const match = await pollForValue<SelectorMatch<HTMLElement>>(
-    () =>
-      findElementMatch<HTMLElement>(PLAYER_CONTAINER_SELECTORS, {
-        predicate: isVisibleElement,
-      }),
-    {
-      attempts: options.attempts ?? DEFAULT_WAIT_ATTEMPTS,
-      intervalMs: options.intervalMs ?? DEFAULT_WAIT_INTERVAL_MS,
-      signal: options.signal,
-    }
-  );
-
-  if (!match) {
-    log.warn('No player container found');
-    return null;
-  }
-
-  log.debug('Player found with selector:', match.selector);
-  return match.element;
-};
-
-export const isAbortError = (error: unknown): boolean =>
-  error instanceof DOMException && error.name === 'AbortError';
-
-/**
- * Yield to the browser scheduler, allowing higher-priority tasks
- * (input, paint) to run before continuing. Falls back to
- * setTimeout(0) when scheduler.yield is not available.
- */

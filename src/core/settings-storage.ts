@@ -8,7 +8,6 @@
 export interface SettingsStorageAdapter {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
-  removeItem(key: string): void;
 }
 
 class LocalStorageAdapter implements SettingsStorageAdapter {
@@ -27,20 +26,11 @@ class LocalStorageAdapter implements SettingsStorageAdapter {
       // quota exceeded or private browsing — silently ignore
     }
   }
-
-  removeItem(key: string): void {
-    try {
-      localStorage.removeItem(key);
-    } catch {
-      // silently ignore
-    }
-  }
 }
 
 const gmAdapter = (): SettingsStorageAdapter | null => {
   const gmSetValue = typeof GM_setValue !== 'undefined' ? GM_setValue : undefined;
   const gmGetValue = typeof GM_getValue !== 'undefined' ? GM_getValue : undefined;
-  const gmDeleteValue = typeof GM_deleteValue !== 'undefined' ? GM_deleteValue : undefined;
 
   if (!gmSetValue || !gmGetValue) return null;
 
@@ -52,13 +42,6 @@ const gmAdapter = (): SettingsStorageAdapter | null => {
     },
     setItem(key: string, value: string): void {
       gmSetValue(key, value);
-    },
-    removeItem(key: string): void {
-      if (gmDeleteValue) {
-        gmDeleteValue(key);
-      } else {
-        gmSetValue(key, '');
-      }
     },
   };
 };

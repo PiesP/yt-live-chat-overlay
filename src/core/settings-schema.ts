@@ -225,7 +225,7 @@ const DEFAULT_OUTLINE: OutlineSettings = {
 export const DEFAULT_SETTINGS = {
   enabled: true,
   danmakuMode: 'scroll',
-  speedPxPerSec: 250,
+  speedPxPerSec: 150,
   fontSize: 32,
   opacity: 0.85,
   superChatOpacity: 0.85,
