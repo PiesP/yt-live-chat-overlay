@@ -9,14 +9,14 @@ import {
   SETTINGS_LIMITS,
 } from '@core/settings-schema';
 
-// ── Constants shared with SettingsUi ────────────────────────────────────────
+// ── Constants ────────────────────────────────────────────────────────────────
 
-export const STYLE_ID = 'yt-chat-overlay-settings-style';
+const STYLE_ID = 'yt-chat-overlay-settings-style';
 export const BUTTON_ID = 'yt-chat-overlay-settings-button';
 export const BACKDROP_ID = 'yt-chat-overlay-settings-backdrop';
-const TITLE_ID = 'yt-chat-overlay-settings-title';
+export { STYLE_ID };
 
-// ── UI value formatting ─────────────────────────────────────────────────────
+const TITLE_ID = 'yt-chat-overlay-settings-title';
 
 const ROOT_ROUNDED_KEYS = new Set<RootScalarSettingKey>([
   'maxConcurrentMessages',
@@ -25,23 +25,247 @@ const ROOT_ROUNDED_KEYS = new Set<RootScalarSettingKey>([
   'authorRateLimitMaxMessages',
 ]);
 
-interface NumericInputOptions {
-  readonly scale?: number;
-  readonly precision?: number;
-}
-
-/** Settings displayed as percentages in the UI (stored as 0-1 internally). */
-const ROOT_NUMERIC_INPUT_OPTIONS: Partial<Record<RootScalarSettingKey, NumericInputOptions>> = {
+const ROOT_NUMERIC_OPTIONS: Partial<
+  Record<RootScalarSettingKey, { scale?: number; precision?: number }>
+> = {
   superChatOpacity: { scale: 100, precision: 0 },
   safeTop: { scale: 100, precision: 1 },
   safeBottom: { scale: 100, precision: 1 },
 };
 
+// ── Schema-driven field helpers ──────────────────────────────────────────────
+
+interface BaseField {
+  label: string;
+  key: string;
+  title?: string;
+  modifier?: string;
+}
+
+interface NumberField extends BaseField {
+  type: 'number';
+}
+interface CheckboxField extends BaseField {
+  type: 'checkbox';
+}
+interface SelectField extends BaseField {
+  type: 'select';
+  options: ReadonlyArray<[string, string]>;
+}
+interface ColorField {
+  type: 'color';
+  label: string;
+  key: string;
+}
+interface EnabledField {
+  type: 'enabled';
+}
+
+type FieldDef = NumberField | CheckboxField | SelectField | ColorField | EnabledField;
+
+interface SectionDef {
+  title: string;
+  fields: FieldDef[];
+}
+
+interface PaneDef {
+  id: string;
+  label: string;
+  sections: SectionDef[];
+}
+
+// Shorthand constructors to reduce PANES boilerplate
+const num = (label: string, key: string, title?: string, modifier?: string): NumberField => ({
+  type: 'number' as const,
+  label,
+  key,
+  ...(title !== undefined ? { title } : {}),
+  ...(modifier !== undefined ? { modifier } : {}),
+});
+const chk = (label: string, key: string, title?: string, modifier?: string): CheckboxField => ({
+  type: 'checkbox' as const,
+  label,
+  key,
+  ...(title !== undefined ? { title } : {}),
+  ...(modifier !== undefined ? { modifier } : {}),
+});
+const sel = (
+  label: string,
+  key: string,
+  options: ReadonlyArray<[string, string]>,
+  title?: string
+): SelectField => ({
+  type: 'select' as const,
+  label,
+  key,
+  options,
+  ...(title !== undefined ? { title } : {}),
+});
+
+// ── Declarative field schemas ────────────────────────────────────────────────
+
+const PANES: PaneDef[] = [
+  {
+    id: 'comments',
+    label: 'Comments',
+    sections: [
+      { title: '', fields: [{ type: 'enabled' }] },
+      {
+        title: '',
+        fields: [
+          sel('Danmaku Mode', 'danmakuMode', [
+            ['scroll', 'Scroll (RTL)'],
+            ['reverse', 'Reverse (LTR)'],
+            ['top', 'Top Fixed'],
+            ['bottom', 'Bottom Fixed'],
+          ]),
+          num('Font Size (px)', 'fontSize'),
+          num('Text Opacity', 'opacity'),
+          num('Scroll Speed (px/s)', 'speedPxPerSec'),
+          num('Lane Gap (px)', 'laneSpacing', 'Extra vertical gap between comment rows'),
+        ],
+      },
+      {
+        title: 'Text Outline',
+        fields: [
+          chk('Enabled', 'enabled', undefined, 'outline'),
+          num('Width (px)', 'widthPx', undefined, 'outline'),
+          num('Blur (px)', 'blurPx', undefined, 'outline'),
+          num('Opacity', 'opacity', undefined, 'outline'),
+        ],
+      },
+    ],
+  },
+  {
+    id: 'colors',
+    label: 'Colors',
+    sections: [
+      {
+        title: '',
+        fields: [
+          num(
+            'SuperChat Opacity (%)',
+            'superChatOpacity',
+            'Background opacity of Super Chat cards'
+          ),
+        ],
+      },
+      { title: 'Author Colors & Visibility', fields: [] },
+    ],
+  },
+  {
+    id: 'advanced',
+    label: 'Advanced',
+    sections: [
+      {
+        title: 'Safe Zone',
+        fields: [
+          num('Top Clear Zone (%)', 'safeTop', 'Keep top N% of video free of comments'),
+          num('Bottom Clear Zone (%)', 'safeBottom', 'Keep bottom N% of video free of comments'),
+        ],
+      },
+      {
+        title: 'Message Rate',
+        fields: [
+          chk(
+            'Show Short Messages',
+            'allowShortTextMessages',
+            'Show messages shorter than Min Length'
+          ),
+          num('Min Length (chars)', 'minTextLength', 'Minimum character count'),
+        ],
+      },
+      {
+        title: 'Performance',
+        fields: [
+          num(
+            'Max Visible',
+            'maxConcurrentMessages',
+            'Performance warning threshold for simultaneous comments'
+          ),
+        ],
+      },
+      {
+        title: 'Renderer',
+        fields: [
+          sel('Renderer', 'rendererType', [
+            ['css', 'CSS (DOM animations)'],
+            ['canvas', 'Canvas2D (rAF, stable)'],
+          ]),
+        ],
+      },
+      {
+        title: 'Backlog',
+        fields: [
+          sel('Backlog Mode', 'backlogMode', [
+            ['playback', 'Playback-based (recommended)'],
+            ['recent', 'Recent only'],
+            ['full', 'Full (show all)'],
+            ['none', 'None (skip backlog)'],
+          ]),
+          num(
+            'Max backlog rate (msg/s)',
+            'backlogMaxRate',
+            'Maximum messages per second during backlog injection'
+          ),
+          num(
+            'Backlog speed multiplier',
+            'backlogSpeedMultiplier',
+            'Speed multiplier for backlog message animations'
+          ),
+          num(
+            'Recent minutes',
+            'backlogRecentMinutes',
+            'Show past chat from last N minutes (only for Recent mode)'
+          ),
+          chk(
+            'Show backlog loading indicator',
+            'showBacklogIndicator',
+            'Show loading indicator during backlog injection'
+          ),
+        ],
+      },
+      {
+        title: 'Rate Limiting',
+        fields: [
+          chk(
+            'Enable author rate limiting',
+            'authorRateLimitEnabled',
+            'Limit messages per author per time window'
+          ),
+          num(
+            'Window (ms)',
+            'authorRateLimitWindowMs',
+            'Time window for rate limiting in milliseconds'
+          ),
+          num(
+            'Max per window',
+            'authorRateLimitMaxMessages',
+            'Maximum messages per author per window'
+          ),
+        ],
+      },
+      {
+        title: 'Debug',
+        fields: [
+          sel('Log Level', 'logLevel', [
+            ['warn', 'Warn'],
+            ['info', 'Info'],
+            ['debug', 'Debug'],
+          ]),
+          chk('Show debug overlay', 'showDebugOverlay', 'Display real-time metrics overlay'),
+        ],
+      },
+    ],
+  },
+];
+
+// ── UI value formatting ──────────────────────────────────────────────────────
+
 const scaleUiValue = (value: number, scale: number): number =>
   Math.round(value * scale * 1e4) / 1e4;
 
-const getRootScale = (key: RootScalarSettingKey): number =>
-  ROOT_NUMERIC_INPUT_OPTIONS[key]?.scale ?? 1;
+const getRootScale = (key: RootScalarSettingKey): number => ROOT_NUMERIC_OPTIONS[key]?.scale ?? 1;
 
 const normalizeNumericValue = (
   value: unknown,
@@ -60,7 +284,7 @@ const formatRootNumericSettingForInput = (
   key: RootScalarSettingKey,
   value: number
 ): string | number => {
-  const options = ROOT_NUMERIC_INPUT_OPTIONS[key];
+  const options = ROOT_NUMERIC_OPTIONS[key];
   const scaledValue = scaleUiValue(value, options?.scale ?? 1);
   return options?.precision === undefined ? scaledValue : scaledValue.toFixed(options.precision);
 };
@@ -70,11 +294,12 @@ const normalizeRootNumericInputValue = (
   value: unknown,
   fallback: number
 ): number => {
-  if (!(key in SETTINGS_LIMITS)) return fallback;
+  const limits = SETTINGS_LIMITS[key as keyof typeof SETTINGS_LIMITS];
+  if (!limits) return fallback;
   return normalizeNumericValue(
     value,
     fallback,
-    SETTINGS_LIMITS[key as keyof typeof SETTINGS_LIMITS],
+    limits,
     ROOT_ROUNDED_KEYS.has(key),
     getRootScale(key)
   );
@@ -96,18 +321,14 @@ const getNumericInputAttributes = (
     key in SETTINGS_LIMITS
       ? (key as keyof typeof SETTINGS_LIMITS)
       : OUTLINE_LIMITS_MAP[key as Exclude<OutlineSettingKey, 'enabled'>];
-
   const limits = SETTINGS_LIMITS[limitsKey];
   const scale = getRootScale(key as RootScalarSettingKey);
-
   return {
     min: scaleUiValue(limits.min, scale),
     max: scaleUiValue(limits.max, scale),
     step: scaleUiValue(limits.step, scale),
   };
 };
-
-// ── Helper ──────────────────────────────────────────────────────────────────
 
 const applyNumberInputAttributes = (
   input: HTMLInputElement,
@@ -119,259 +340,7 @@ const applyNumberInputAttributes = (
   input.step = String(step);
 };
 
-// ── Declarative field schemas ────────────────────────────────────────────────
-
-type FieldDef =
-  | { type: 'number'; label: string; key: string; title?: string; modifier?: string }
-  | { type: 'checkbox'; label: string; key: string; title?: string; modifier?: string }
-  | {
-      type: 'select';
-      label: string;
-      key: string;
-      options: ReadonlyArray<[string, string]>;
-      title?: string;
-    }
-  | { type: 'color'; label: string; key: string }
-  | { type: 'enabled' };
-
-interface SectionDef {
-  title: string;
-  fields: FieldDef[];
-}
-
-interface PaneDef {
-  id: string;
-  label: string;
-  sections: SectionDef[];
-}
-
-const PANES: PaneDef[] = [
-  {
-    id: 'comments',
-    label: 'Comments',
-    sections: [
-      { title: '', fields: [{ type: 'enabled' }] },
-      {
-        title: '',
-        fields: [
-          {
-            type: 'select',
-            label: 'Danmaku Mode',
-            key: 'danmakuMode',
-            options: [
-              ['scroll', 'Scroll (RTL)'],
-              ['reverse', 'Reverse (LTR)'],
-              ['top', 'Top Fixed'],
-              ['bottom', 'Bottom Fixed'],
-            ],
-          },
-          { type: 'number', label: 'Font Size (px)', key: 'fontSize' },
-          { type: 'number', label: 'Text Opacity', key: 'opacity' },
-          { type: 'number', label: 'Scroll Speed (px/s)', key: 'speedPxPerSec' },
-          {
-            type: 'number',
-            label: 'Lane Gap (px)',
-            key: 'laneSpacing',
-            title: 'Extra vertical gap between comment rows',
-          },
-        ],
-      },
-      {
-        title: 'Text Outline',
-        fields: [
-          { type: 'checkbox', label: 'Enabled', key: 'outline-enabled', modifier: 'outline' },
-          {
-            type: 'number',
-            label: 'Width (px)',
-            key: 'outline-widthPx'.replace('outline-', '') as string,
-            modifier: 'outline',
-          },
-          {
-            type: 'number',
-            label: 'Blur (px)',
-            key: 'outline-blurPx'.replace('outline-', '') as string,
-            modifier: 'outline',
-          },
-          {
-            type: 'number',
-            label: 'Opacity',
-            key: 'outline-opacity'.replace('outline-', '') as string,
-            modifier: 'outline',
-          },
-        ],
-      },
-    ],
-  },
-  {
-    id: 'colors',
-    label: 'Colors',
-    sections: [
-      {
-        title: '',
-        fields: [
-          {
-            type: 'number',
-            label: 'SuperChat Opacity (%)',
-            key: 'superChatOpacity',
-            title: 'Background opacity of Super Chat cards',
-          },
-        ],
-      },
-      { title: 'Author Colors & Visibility', fields: [] }, // handled specially
-    ],
-  },
-  {
-    id: 'advanced',
-    label: 'Advanced',
-    sections: [
-      {
-        title: 'Safe Zone',
-        fields: [
-          {
-            type: 'number',
-            label: 'Top Clear Zone (%)',
-            key: 'safeTop',
-            title: 'Keep top N% of video free of comments',
-          },
-          {
-            type: 'number',
-            label: 'Bottom Clear Zone (%)',
-            key: 'safeBottom',
-            title: 'Keep bottom N% of video free of comments',
-          },
-        ],
-      },
-      {
-        title: 'Message Rate',
-        fields: [
-          {
-            type: 'checkbox',
-            label: 'Show Short Messages',
-            key: 'allowShortTextMessages',
-            title: 'Show messages shorter than Min Length',
-          },
-          {
-            type: 'number',
-            label: 'Min Length (chars)',
-            key: 'minTextLength',
-            title: 'Minimum character count',
-          },
-        ],
-      },
-      {
-        title: 'Performance',
-        fields: [
-          {
-            type: 'number',
-            label: 'Max Visible',
-            key: 'maxConcurrentMessages',
-            title: 'Performance warning threshold for simultaneous comments',
-          },
-        ],
-      },
-      {
-        title: 'Renderer',
-        fields: [
-          {
-            type: 'select',
-            label: 'Renderer',
-            key: 'rendererType',
-            options: [
-              ['css', 'CSS (DOM animations)'],
-              ['canvas', 'Canvas2D (rAF, stable)'],
-            ],
-          },
-        ],
-      },
-      {
-        title: 'Backlog',
-        fields: [
-          {
-            type: 'select',
-            label: 'Backlog Mode',
-            key: 'backlogMode',
-            options: [
-              ['playback', 'Playback-based (recommended)'],
-              ['recent', 'Recent only'],
-              ['full', 'Full (show all)'],
-              ['none', 'None (skip backlog)'],
-            ],
-          },
-          {
-            type: 'number',
-            label: 'Max backlog rate (msg/s)',
-            key: 'backlogMaxRate',
-            title: 'Maximum messages per second during backlog injection',
-          },
-          {
-            type: 'number',
-            label: 'Backlog speed multiplier',
-            key: 'backlogSpeedMultiplier',
-            title: 'Speed multiplier for backlog message animations',
-          },
-          {
-            type: 'number',
-            label: 'Recent minutes',
-            key: 'backlogRecentMinutes',
-            title: 'Show past chat from last N minutes (only for Recent mode)',
-          },
-          {
-            type: 'checkbox',
-            label: 'Show backlog loading indicator',
-            key: 'showBacklogIndicator',
-            title: 'Show loading indicator during backlog injection',
-          },
-        ],
-      },
-      {
-        title: 'Rate Limiting',
-        fields: [
-          {
-            type: 'checkbox',
-            label: 'Enable author rate limiting',
-            key: 'authorRateLimitEnabled',
-            title: 'Limit messages per author per time window',
-          },
-          {
-            type: 'number',
-            label: 'Window (ms)',
-            key: 'authorRateLimitWindowMs',
-            title: 'Time window for rate limiting in milliseconds',
-          },
-          {
-            type: 'number',
-            label: 'Max per window',
-            key: 'authorRateLimitMaxMessages',
-            title: 'Maximum messages per author per window',
-          },
-        ],
-      },
-      {
-        title: 'Debug',
-        fields: [
-          {
-            type: 'select',
-            label: 'Log Level',
-            key: 'logLevel',
-            options: [
-              ['warn', 'Warn'],
-              ['info', 'Info'],
-              ['debug', 'Debug'],
-            ],
-          },
-          {
-            type: 'checkbox',
-            label: 'Show debug overlay',
-            key: 'showDebugOverlay',
-            title: 'Display real-time metrics overlay',
-          },
-        ],
-      },
-    ],
-  },
-];
-
-// ── SettingsUiForm class ────────────────────────────────────────────────────
+// ── SettingsUiForm class ─────────────────────────────────────────────────────
 
 export class SettingsUiForm {
   private modal: HTMLDivElement | null = null;
@@ -386,10 +355,8 @@ export class SettingsUiForm {
     this.modal = modal;
   }
 
-  /** Attach input/change listeners to enable live preview on form fields. */
   private attachLivePreview(element: HTMLElement): void {
     if (!this.onPreview) return;
-
     const handler = (): void => {
       if (this.isUpdating) return;
       this.onPreview?.(this.collectSettings());
@@ -415,7 +382,7 @@ export class SettingsUiForm {
   }
 
   private buildPane(def: PaneDef): HTMLDivElement {
-    const pane = this.createDiv('yt-chat-overlay-settings-pane');
+    const pane = this.div('yt-chat-overlay-settings-pane');
     pane.id = `pane-${def.id}`;
     pane.dataset.pane = def.id;
     pane.setAttribute('role', 'tabpanel');
@@ -429,7 +396,7 @@ export class SettingsUiForm {
       if (section.fields.length === 0) continue;
 
       if (section.title) {
-        const secEl = this.createSection(section.title);
+        const secEl = this.section(section.title);
         for (const field of section.fields) {
           secEl.appendChild(this.buildField(field));
         }
@@ -452,13 +419,13 @@ export class SettingsUiForm {
       case 'checkbox':
         return this.createCheckboxField(def.label, def.key, def.title);
       case 'number': {
-        const input = this.createInput({ type: 'number', name: this.resolveKey(def) });
+        const input = this.input({ type: 'number', name: this.resolveKey(def) });
         applyNumberInputAttributes(
           input,
           def.key as RootScalarSettingKey | Exclude<OutlineSettingKey, 'enabled'>
         );
         if (def.title) input.title = def.title;
-        return this.createField(def.label, input);
+        return this.field(def.label, input);
       }
       case 'select': {
         const select = document.createElement('select');
@@ -470,7 +437,7 @@ export class SettingsUiForm {
           opt.textContent = label;
           select.appendChild(opt);
         }
-        return this.createField(def.label, select);
+        return this.field(def.label, select);
       }
       default:
         throw new Error('Unhandled field type');
@@ -482,54 +449,95 @@ export class SettingsUiForm {
   }
 
   private buildAuthorGrid(): HTMLDivElement {
-    const section = this.createSection('Author Colors & Visibility');
-    const grid = this.createDiv('yt-chat-overlay-author-grid');
-    grid.append(
-      document.createElement('span'),
-      this.createGridHeader('Color'),
-      this.createGridHeader('Show')
-    );
+    const section = this.section('Author Colors & Visibility');
+    const grid = this.div('yt-chat-overlay-author-grid');
+    grid.append(document.createElement('span'), this.gridHeader('Color'), this.gridHeader('Show'));
 
     for (const key of AUTHOR_COLOR_KEYS) {
       grid.append(
-        this.createGridLabel(key.charAt(0).toUpperCase() + key.slice(1)),
-        this.createInput({
+        this.gridLabel(key.charAt(0).toUpperCase() + key.slice(1)),
+        this.input({
           type: 'color',
           name: `color-${key}`,
           className: 'yt-chat-overlay-author-grid-color',
         }),
-        this.createGridCheckbox(`showAuthor-${key}`)
+        this.gridCheckbox(`showAuthor-${key}`)
       );
     }
 
     grid.append(
-      this.createGridLabel('SuperChat'),
+      this.gridLabel('SuperChat'),
       document.createElement('span'),
-      this.createGridCheckbox('showAuthor-superChat')
+      this.gridCheckbox('showAuthor-superChat')
     );
 
     section.appendChild(grid);
     return section;
   }
 
-  private createDiv(className: string): HTMLDivElement {
-    const element = document.createElement('div');
-    element.className = className;
-    return element;
+  // ── DOM helpers ────────────────────────────────────────────────────────
+
+  private div(className: string): HTMLDivElement {
+    const el = document.createElement('div');
+    el.className = className;
+    return el;
+  }
+
+  private input(props: { type: string; name: string; className?: string }): HTMLInputElement {
+    const el = document.createElement('input');
+    el.type = props.type;
+    el.name = props.name;
+    if (props.className) el.className = props.className;
+    return el;
+  }
+
+  private field(labelText: string, control: HTMLElement): HTMLLabelElement {
+    const label = document.createElement('label');
+    label.className = 'yt-chat-overlay-settings-field';
+    const text = document.createElement('span');
+    text.textContent = labelText;
+    label.append(text, control);
+    return label;
+  }
+
+  private section(titleText: string): HTMLDivElement {
+    const sec = this.div('yt-chat-overlay-settings-section');
+    const title = this.div('yt-chat-overlay-settings-section-title');
+    title.textContent = titleText;
+    sec.appendChild(title);
+    return sec;
+  }
+
+  private gridCheckbox(name: string): HTMLInputElement {
+    const el = this.input({ type: 'checkbox', name });
+    el.className = 'yt-chat-overlay-author-grid-checkbox';
+    return el;
+  }
+
+  private gridHeader(text: string): HTMLSpanElement {
+    const el = document.createElement('span');
+    el.className = 'yt-chat-overlay-author-grid-header';
+    el.textContent = text;
+    return el;
+  }
+
+  private gridLabel(text: string): HTMLSpanElement {
+    const el = document.createElement('span');
+    el.className = 'yt-chat-overlay-author-grid-label';
+    el.textContent = text;
+    return el;
   }
 
   private createHeader(): HTMLDivElement {
-    const header = this.createDiv('yt-chat-overlay-settings-header');
+    const header = this.div('yt-chat-overlay-settings-header');
     const title = document.createElement('div');
     title.id = TITLE_ID;
     title.textContent = 'Chat Overlay';
-
     const closeButton = document.createElement('button');
     closeButton.type = 'button';
     closeButton.className = 'yt-chat-overlay-settings-close';
     closeButton.setAttribute('aria-label', 'Close settings');
     closeButton.textContent = 'x';
-
     header.append(title, closeButton);
     return header;
   }
@@ -557,7 +565,7 @@ export class SettingsUiForm {
   }
 
   private createActions(): HTMLDivElement {
-    const actions = this.createDiv('yt-chat-overlay-settings-actions');
+    const actions = this.div('yt-chat-overlay-settings-actions');
     for (const [action, label] of [
       ['reset', 'Reset'],
       ['export', 'Export'],
@@ -578,63 +586,18 @@ export class SettingsUiForm {
     label.className = 'yt-chat-overlay-settings-enabled';
     const text = document.createElement('span');
     text.textContent = 'Overlay Enabled';
-    const input = this.createInput({ type: 'checkbox', name: 'enabled' });
+    const input = this.input({ type: 'checkbox', name: 'enabled' });
     label.append(text, input);
     return label;
   }
 
   private createCheckboxField(labelText: string, name: string, title?: string): HTMLLabelElement {
-    const input = this.createInput({ type: 'checkbox', name });
+    const input = this.input({ type: 'checkbox', name });
     if (title) input.title = title;
-    return this.createField(labelText, input);
+    return this.field(labelText, input);
   }
 
-  private createField(labelText: string, control: HTMLElement): HTMLLabelElement {
-    const label = document.createElement('label');
-    label.className = 'yt-chat-overlay-settings-field';
-    const text = document.createElement('span');
-    text.textContent = labelText;
-    label.append(text, control);
-    return label;
-  }
-
-  private createInput(props: { type: string; name: string; className?: string }): HTMLInputElement {
-    const input = document.createElement('input');
-    input.type = props.type;
-    input.name = props.name;
-    if (props.className) input.className = props.className;
-    return input;
-  }
-
-  private createGridCheckbox(name: string): HTMLInputElement {
-    const input = this.createInput({ type: 'checkbox', name });
-    input.className = 'yt-chat-overlay-author-grid-checkbox';
-    return input;
-  }
-
-  private createGridHeader(text: string): HTMLSpanElement {
-    const element = document.createElement('span');
-    element.className = 'yt-chat-overlay-author-grid-header';
-    element.textContent = text;
-    return element;
-  }
-
-  private createGridLabel(text: string): HTMLSpanElement {
-    const element = document.createElement('span');
-    element.className = 'yt-chat-overlay-author-grid-label';
-    element.textContent = text;
-    return element;
-  }
-
-  private createSection(titleText: string): HTMLDivElement {
-    const section = this.createDiv('yt-chat-overlay-settings-section');
-    const title = this.createDiv('yt-chat-overlay-settings-section-title');
-    title.textContent = titleText;
-    section.appendChild(title);
-    return section;
-  }
-
-  // ── Form population ────────────────────────────────────────────────────
+  // ── Form population (schema-driven) ────────────────────────────────────
 
   populateForm(settings: Readonly<OverlaySettings>): void {
     if (!this.modal) return;
@@ -644,13 +607,12 @@ export class SettingsUiForm {
     for (const el of els) {
       if (!el.name) continue;
 
+      // Outline fields
       if (el.name.startsWith('outline-')) {
         const key = el.name.slice(8) as keyof typeof settings.outline;
         const value = settings.outline[key];
         if (el instanceof HTMLInputElement && el.type === 'checkbox') {
           el.checked = Boolean(value);
-        } else if (el instanceof HTMLInputElement && el.type === 'color') {
-          el.value = String(value);
         } else {
           el.value = formatRootNumericSettingForInput(
             key as unknown as RootScalarSettingKey,
@@ -660,12 +622,14 @@ export class SettingsUiForm {
         continue;
       }
 
+      // Color fields
       if (el.name.startsWith('color-')) {
         const key = el.name.slice(6) as keyof typeof settings.colors;
         el.value = settings.colors[key];
         continue;
       }
 
+      // Author visibility fields
       if (el.name.startsWith('showAuthor-')) {
         const key = el.name.slice(11) as keyof typeof settings.showAuthor;
         if (el instanceof HTMLInputElement && el.type === 'checkbox') {
@@ -674,6 +638,7 @@ export class SettingsUiForm {
         continue;
       }
 
+      // Root scalar fields
       const scalarKey = el.name as RootScalarSettingKey;
       const value = settings[scalarKey];
       if (el instanceof HTMLInputElement && el.type === 'checkbox') {
@@ -701,7 +666,7 @@ export class SettingsUiForm {
     }
   }
 
-  // ── Form collection ────────────────────────────────────────────────────
+  // ── Form collection (schema-driven) ────────────────────────────────────
 
   collectSettings(): OverlaySettings {
     const partial: Record<string, unknown> = {};
