@@ -539,6 +539,25 @@ export class Renderer extends RendererBase {
     ctx.restore();
   }
 
+  /** Draw crisp black outline on text using current font and textBaseline. */
+  private strokeTextOutline(
+    ctx: CanvasRenderingContext2D,
+    text: string,
+    x: number,
+    y: number
+  ): void {
+    const outline = this.settings.outline;
+    if (!outline.enabled || outline.widthPx <= 0 || outline.opacity <= 0) return;
+    const strokeWidth = Math.max(0.5, outline.widthPx * 0.85);
+    ctx.save();
+    ctx.strokeStyle = `rgba(0, 0, 0, ${Math.min(1, outline.opacity)})`;
+    ctx.lineWidth = strokeWidth;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.strokeText(text, x, y);
+    ctx.restore();
+  }
+
   private renderContentSegments(
     ctx: CanvasRenderingContext2D,
     segments: readonly ContentSegment[],
@@ -612,6 +631,7 @@ export class Renderer extends RendererBase {
       const nameFont = `bold ${Math.round(fontSize * rendererLayout.authorFontScale)}px system-ui, -apple-system, sans-serif`;
       ctx.font = nameFont;
       ctx.textBaseline = 'top';
+      this.strokeTextOutline(ctx, message.author, textX + (photo ? 28 : 0), textY + 6);
       ctx.fillStyle = color;
       ctx.fillText(message.author, textX + (photo ? 28 : 0), textY + 6);
       textY += rendererLayout.authorSectionHeightPx;
@@ -688,6 +708,7 @@ export class Renderer extends RendererBase {
       }
       ctx.font = `bold ${Math.round(fontSize * rendererLayout.authorFontScale)}px system-ui, -apple-system, sans-serif`;
       ctx.textBaseline = 'top';
+      this.strokeTextOutline(ctx, msg.message.author, textX + (photo ? 28 : 0), contentY + 6);
       ctx.fillStyle = '#ffffff';
       ctx.fillText(msg.message.author, textX + (photo ? 28 : 0), contentY + 6);
       contentY += rendererLayout.authorSectionHeightPx;
@@ -765,6 +786,7 @@ export class Renderer extends RendererBase {
     if (msg.message.author) {
       ctx.font = this.getFont(fontSize);
       ctx.textBaseline = 'top';
+      this.strokeTextOutline(ctx, msg.message.author, textX, textY);
       ctx.fillStyle = '#ffffff';
       ctx.fillText(msg.message.author, textX, textY);
       textY += fontSize + 4;
