@@ -160,6 +160,7 @@ export class Canvas2DRenderer {
     if (this.isPaused) return;
     this.isPaused = true;
     this.pausedAt = performance.now();
+    this.stopRenderLoop();
     log.debug('Paused');
   }
 
@@ -178,6 +179,7 @@ export class Canvas2DRenderer {
     }
     this.pausedAt = null;
     this.isPaused = false;
+    this.startRenderLoop();
 
     // Drain any messages that accumulated in the queue during pause
     this.drainQueue();
@@ -223,6 +225,7 @@ export class Canvas2DRenderer {
   // ── Render Loop ─────────────────────────────────────────────────────────
 
   private startRenderLoop(): void {
+    if (this.animFrameId !== null) return;
     const loop = (): void => {
       if (!this.canvas?.isConnected) {
         this.animFrameId = null;
