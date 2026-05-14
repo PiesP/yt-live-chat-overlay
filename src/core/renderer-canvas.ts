@@ -1,13 +1,18 @@
 /**
- * Canvas2DRenderer
+ * RendererCanvas — Canvas 2D-based renderer.
  *
- * Canvas 2D-based renderer that uses requestAnimationFrame instead of CSS
- * @keyframes animations.  Each frame computes positions with Math.floor() to
- * snap to integer pixel coordinates, eliminating the sub-pixel text jitter
- * inherent in CSS transform interpolation.
+ * Uses requestAnimationFrame instead of CSS @keyframes animations.
+ * Each frame computes positions with Math.floor() to snap to integer pixel
+ * coordinates, eliminating the sub-pixel text jitter inherent in CSS
+ * transform interpolation.
  *
  * Extends RendererBase for shared state machine, rate limiting, burst
  * detection, and lane allocation.
+ *
+ * Fixes from audit:
+ * - BUG-1: updateSettings now propagates _options to super
+ * - BUG-4: reverse travel distance uses consistent exitPadding
+ * - BUG-5/6: image caches only store loaded images, errors don't cache
  */
 
 import type { ChatMessage, ContentSegment, OverlaySettings } from '@app-types';
@@ -19,16 +24,13 @@ import {
 } from '@core/design-tokens';
 import { createLogger } from '@core/logging';
 import type { Overlay } from '@core/overlay';
-import { RendererBase } from '@core/renderer-base';
+import { RendererBase, type RendererUpdateOptions } from '@core/renderer-base';
+import { estimateMessageDimensions as sharedEstimateDimensions } from '@core/renderer-shared';
 import { getFontString } from '@core/text-measure';
 
-const log = createLogger('Canvas2DRenderer');
+const log = createLogger('RendererCanvas');
 
 // ── Types ──────────────────────────────────────────────────────────────────
-
-export interface Canvas2DRendererUpdateOptions {
-  resetState?: boolean;
-}
 
 interface CanvasMessage {
   message: ChatMessage;
@@ -43,9 +45,9 @@ interface CanvasMessage {
   laneIndex: number;
 }
 
-// ── Renderer ───────────────────────────────────────────────────────────────
+// ── Renderer ─────────────────────────────────────────────────────────────────
 
-export class Canvas2DRenderer extends RendererBase {
+export class Renderer extends RendererBase {
   private canvas: HTMLCanvasElement | null = null;
   private ctx: CanvasRenderingContext2D | null = null;
   private animFrameId: number | null = null;
@@ -56,15 +58,11 @@ export class Canvas2DRenderer extends RendererBase {
 
   /** Emoji image cache: url → HTMLImageElement (bounded LRU, max 200 entries) */
   private readonly emojiCache = new Map<string, HTMLImageElement>();
-  private static readonly EMOJI_CACHE_MAX = 200;
   private readonly emojiFetching = new Set<string>();
-  private static readonly EMOJI_MAX_CONCURRENT = 6;
   private readonly authorPhotoCache = new Map<string, HTMLImageElement>();
   private readonly stickerCache = new Map<string, HTMLImageElement>();
 
-  private static readonly MAX_ACTIVE = 50;
   private static readonly FADE_DURATION_MS = 500;
-  private static readonly EXIT_PADDING = 100;
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
     super(overlay, settings);
@@ -92,7 +90,7 @@ export class Canvas2DRenderer extends RendererBase {
     });
 
     this.startRenderLoop();
-    log.info('Canvas2DRenderer created');
+    log.info('RendererCanvas created');
   }
 
   get laneCount(): number {
@@ -104,12 +102,12 @@ export class Canvas2DRenderer extends RendererBase {
   addMessage(message: ChatMessage): void {
     if (!this.isMessageAllowed(message)) return;
 
-    const priority = Canvas2DRenderer.getMessagePriority(message);
+    const priority = Renderer.getMessagePriority(message);
     this.prefetchImages(message);
 
-    if (this.pendingQueue.length >= 50) {
+    if (this.pendingQueue.length >= rendererLayout.queueMaxSize) {
       const last = this.pendingQueue[this.pendingQueue.length - 1];
-      if (last && priority <= Canvas2DRenderer.getMessagePriority(last)) {
+      if (last && priority <= Renderer.getMessagePriority(last)) {
         this.observability.onMessageDropped('queue_overflow');
         return;
       }
@@ -118,7 +116,7 @@ export class Canvas2DRenderer extends RendererBase {
     }
 
     const insertIndex = this.pendingQueue.findIndex(
-      (q) => Canvas2DRenderer.getMessagePriority(q) < priority
+      (q) => Renderer.getMessagePriority(q) < priority
     );
     if (insertIndex === -1) {
       this.pendingQueue.push(message);
@@ -126,7 +124,7 @@ export class Canvas2DRenderer extends RendererBase {
       this.pendingQueue.splice(insertIndex, 0, message);
     }
 
-    if (this.activeMessages.length < Canvas2DRenderer.MAX_ACTIVE) {
+    if (this.activeMessages.length < rendererLayout.maxConcurrent) {
       this.updateBacklogPause();
       const next = this.pendingQueue.shift();
       if (next) this.enqueueMessage(next);
@@ -134,27 +132,28 @@ export class Canvas2DRenderer extends RendererBase {
   }
 
   trimBackgroundQueue(): void {
-    if (this.pendingQueue.length <= 10) return;
+    if (this.pendingQueue.length <= rendererLayout.backgroundQueueMax) return;
     this.pendingQueue.sort((a, b) => {
-      const prioA = Canvas2DRenderer.getMessagePriority(a);
-      const prioB = Canvas2DRenderer.getMessagePriority(b);
+      const prioA = Renderer.getMessagePriority(a);
+      const prioB = Renderer.getMessagePriority(b);
       return prioB - prioA || a.timestamp - b.timestamp;
     });
-    this.pendingQueue.length = 10;
+    this.pendingQueue.length = rendererLayout.backgroundQueueMax;
   }
 
-  updateSettings(settings: OverlaySettings, _options?: Canvas2DRendererUpdateOptions): void {
-    super.updateSettings(settings);
+  /** BUG-1 fix: propagate _options to super */
+  updateSettings(settings: OverlaySettings, options?: RendererUpdateOptions): void {
+    super.updateSettings(settings, options);
   }
 
-  // ── Image pre-fetching ───────────────────────────────────────────────
+  // ── Image pre-fetching (BUG-5/6 fix) ─────────────────────────────────
 
   private prefetchImages(message: ChatMessage): void {
     for (const seg of message.content) {
       if (seg.type !== 'emoji') continue;
       if (this.emojiCache.has(seg.emoji.url)) continue;
       if (this.emojiFetching.has(seg.emoji.url)) continue;
-      if (this.emojiFetching.size >= Canvas2DRenderer.EMOJI_MAX_CONCURRENT) continue;
+      if (this.emojiFetching.size >= 6) continue;
 
       this.emojiFetching.add(seg.emoji.url);
       const img = new Image();
@@ -162,7 +161,7 @@ export class Canvas2DRenderer extends RendererBase {
       img.src = seg.emoji.url;
       img.onload = () => {
         this.emojiFetching.delete(seg.emoji.url);
-        if (this.emojiCache.size >= Canvas2DRenderer.EMOJI_CACHE_MAX) {
+        if (this.emojiCache.size >= 200) {
           const oldestKey = this.emojiCache.keys().next().value;
           if (oldestKey !== undefined) this.emojiCache.delete(oldestKey);
         }
@@ -179,7 +178,8 @@ export class Canvas2DRenderer extends RendererBase {
       img.crossOrigin = 'anonymous';
       img.src = photoUrl;
       img.onload = () => this.authorPhotoCache.set(photoUrl, img);
-      img.onerror = () => this.authorPhotoCache.set(photoUrl, img);
+      // BUG-6 fix: do NOT cache on error
+      img.onerror = () => {};
     }
 
     const sticker = message.superChat?.sticker;
@@ -189,7 +189,8 @@ export class Canvas2DRenderer extends RendererBase {
       img.crossOrigin = 'anonymous';
       img.src = stickerUrl;
       img.onload = () => this.stickerCache.set(stickerUrl, img);
-      this.stickerCache.set(stickerUrl, img);
+      // BUG-5 fix: do NOT set cache before onload
+      img.onerror = () => {};
     }
   }
 
@@ -248,25 +249,25 @@ export class Canvas2DRenderer extends RendererBase {
       const progress = Math.min(1, Math.max(0, elapsed / msg.duration));
 
       if (mode === 'scroll') {
-        const travelDistance = canvas.width + msg.width + Canvas2DRenderer.EXIT_PADDING;
+        const travelDistance = canvas.width + msg.width + rendererLayout.exitPaddingMin;
         msg.x = msg.startX - progress * travelDistance;
       } else if (mode === 'reverse') {
-        const travelDistance = canvas.width * 2 + Canvas2DRenderer.EXIT_PADDING;
+        // BUG-4 fix: consistent exitPadding usage
+        const travelDistance = canvas.width * 2 + rendererLayout.exitPaddingMin;
         msg.x = -msg.width + progress * travelDistance;
       }
 
       let opacity = this.settings.opacity;
       if (!isScrolling) {
-        if (elapsed < Canvas2DRenderer.FADE_DURATION_MS) {
-          opacity *= elapsed / Canvas2DRenderer.FADE_DURATION_MS;
-        } else if (elapsed > msg.duration - Canvas2DRenderer.FADE_DURATION_MS) {
-          opacity *= Math.max(0, (msg.duration - elapsed) / Canvas2DRenderer.FADE_DURATION_MS);
+        if (elapsed < Renderer.FADE_DURATION_MS) {
+          opacity *= elapsed / Renderer.FADE_DURATION_MS;
+        } else if (elapsed > msg.duration - Renderer.FADE_DURATION_MS) {
+          opacity *= Math.max(0, (msg.duration - elapsed) / Renderer.FADE_DURATION_MS);
         }
       }
       if (msg.message.isBacklog) opacity *= 0.5;
 
-      const maxAgeMs = 60_000;
-      const ageRatio = Math.min(1, elapsed / maxAgeMs);
+      const ageRatio = Math.min(1, elapsed / rendererLayout.maxMessageAgeMs);
       opacity *= Math.max(0, 1 - ageRatio);
 
       const snappedX = Math.floor(msg.x);
@@ -301,7 +302,7 @@ export class Canvas2DRenderer extends RendererBase {
   private drainQueue(): void {
     while (
       this.pendingQueue.length > 0 &&
-      this.activeMessages.length < Canvas2DRenderer.MAX_ACTIVE
+      this.activeMessages.length < rendererLayout.maxConcurrent
     ) {
       const msg = this.pendingQueue.shift();
       if (msg) this.enqueueMessage(msg);
@@ -331,7 +332,9 @@ export class Canvas2DRenderer extends RendererBase {
     const entryOffset =
       mode === 'scroll'
         ? dims.laneCount > 1
-          ? Math.round((placement.lane.index / (dims.laneCount - 1)) * 200)
+          ? Math.round(
+              (placement.lane.index / (dims.laneCount - 1)) * rendererLayout.entryOffsetRangeMs
+            )
           : 100
         : 0;
 
@@ -355,7 +358,7 @@ export class Canvas2DRenderer extends RendererBase {
     if (mode === 'scroll') {
       startX = dims.width + entryOffset;
     } else if (mode === 'reverse') {
-      startX = -(msgWidth + Canvas2DRenderer.EXIT_PADDING);
+      startX = -(msgWidth + rendererLayout.exitPaddingMin);
     } else {
       startX = Math.random() * Math.max(1, dims.width - msgWidth);
     }
@@ -386,30 +389,22 @@ export class Canvas2DRenderer extends RendererBase {
     this.observability.onMessageRendered();
   }
 
-  // ── Dimension estimation ─────────────────────────────────────────────
+  // ── Dimension estimation (uses shared + canvas ctx) ──────────────────
 
   private estimateDimensions(message: ChatMessage): { width: number; height: number } {
+    // Use shared estimation for regular/membership, canvas-specific for superchat
+    if (message.kind !== 'superchat') {
+      return sharedEstimateDimensions(message, this.settings.fontSize, false);
+    }
     const fontSize = this.settings.fontSize;
     const textWidth = this.measureContentWidth(message, fontSize);
-    const textHeight = this.measureTextHeight(fontSize);
-    const paddingH = 16;
-    const paddingV = 8;
-
-    if (message.kind === 'superchat') {
-      return {
-        width: Math.max(280, Math.min(640, textWidth + 24)),
-        height: Math.ceil(fontSize * 1.5) + 8 + textHeight + paddingV,
-      };
-    }
-    if (message.kind === 'membership') {
-      return {
-        width: textWidth + 32,
-        height: Math.max(24, fontSize) + 4 + textHeight + paddingV,
-      };
-    }
     return {
-      width: textWidth + paddingH,
-      height: textHeight + paddingV,
+      width: Math.max(
+        rendererLayout.superchatMinWidth,
+        Math.min(rendererLayout.superchatMaxWidth, textWidth + 24)
+      ),
+      height:
+        Math.ceil(fontSize * 1.5) + 8 + this.measureTextHeight(fontSize) + rendererLayout.paddingV,
     };
   }
 
@@ -455,7 +450,7 @@ export class Canvas2DRenderer extends RendererBase {
   // ── Backlog pause ────────────────────────────────────────────────────
 
   private updateBacklogPause(): void {
-    const queueRatio = this.pendingQueue.length / Canvas2DRenderer.MAX_ACTIVE;
+    const queueRatio = this.pendingQueue.length / rendererLayout.maxConcurrent;
     if (queueRatio > 0.8 && this.backlogPaused === false) {
       this.backlogPaused = true;
       this.onBacklogPauseChange?.(true);
@@ -558,21 +553,27 @@ export class Canvas2DRenderer extends RendererBase {
     ctx.globalAlpha = alpha;
 
     const showAuthor = this.settings.showAuthor[message.authorType];
-    const textX = x + 12;
-    let textY = y + 8;
+    const textX = x + rendererLayout.paddingH;
+    let textY = y + rendererLayout.paddingV;
     if (showAuthor && message.author) {
       const photo = message.authorPhotoUrl
         ? this.authorPhotoCache.get(message.authorPhotoUrl)
         : undefined;
       if (photo?.complete && photo.naturalWidth > 0) {
-        ctx.drawImage(photo, textX, textY, 24, 24);
+        ctx.drawImage(
+          photo,
+          textX,
+          textY,
+          rendererLayout.authorPhotoSize,
+          rendererLayout.authorPhotoSize
+        );
       }
-      const nameFont = `bold ${Math.round(fontSize * 0.85)}px system-ui, -apple-system, sans-serif`;
+      const nameFont = `bold ${Math.round(fontSize * rendererLayout.authorFontScale)}px system-ui, -apple-system, sans-serif`;
       ctx.font = nameFont;
       ctx.textBaseline = 'top';
       ctx.fillStyle = color;
       ctx.fillText(message.author, textX + (photo ? 28 : 0), textY + 6);
-      textY += 28;
+      textY += rendererLayout.authorSectionHeightPx;
     }
 
     if (message.content.length > 0) {
@@ -611,9 +612,9 @@ export class Canvas2DRenderer extends RendererBase {
     const baseColor = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
 
     const grad = ctx.createLinearGradient(x, y, x, y + h);
-    grad.addColorStop(0, Canvas2DRenderer.rgbaHex(baseColor, topAlpha));
-    grad.addColorStop(0.48, Canvas2DRenderer.rgbaHex(baseColor, superChatAlpha));
-    grad.addColorStop(1, Canvas2DRenderer.rgbaHex(baseColor, bottomAlpha));
+    grad.addColorStop(0, Renderer.rgbaHex(baseColor, topAlpha));
+    grad.addColorStop(0.48, Renderer.rgbaHex(baseColor, superChatAlpha));
+    grad.addColorStop(1, Renderer.rgbaHex(baseColor, bottomAlpha));
     ctx.fillStyle = grad;
     this.roundRect(ctx, x, y, w, h, 6);
     ctx.fill();
@@ -621,8 +622,8 @@ export class Canvas2DRenderer extends RendererBase {
     ctx.fillStyle = baseColor;
     ctx.fillRect(x, y, 4, h);
 
-    const textX = x + 12;
-    let contentY = y + 8;
+    const textX = x + rendererLayout.paddingH;
+    let contentY = y + rendererLayout.paddingV;
 
     const showAuthor = this.settings.showAuthor.superChat;
     if (showAuthor && msg.message.author) {
@@ -630,17 +631,23 @@ export class Canvas2DRenderer extends RendererBase {
         ? this.authorPhotoCache.get(msg.message.authorPhotoUrl)
         : undefined;
       if (photo?.complete && photo.naturalWidth > 0) {
-        ctx.drawImage(photo, textX, contentY, 24, 24);
+        ctx.drawImage(
+          photo,
+          textX,
+          contentY,
+          rendererLayout.authorPhotoSize,
+          rendererLayout.authorPhotoSize
+        );
       }
-      ctx.font = `bold ${Math.round(fontSize * 0.85)}px system-ui, -apple-system, sans-serif`;
+      ctx.font = `bold ${Math.round(fontSize * rendererLayout.authorFontScale)}px system-ui, -apple-system, sans-serif`;
       ctx.textBaseline = 'top';
       ctx.fillStyle = '#ffffff';
       ctx.fillText(msg.message.author, textX + (photo ? 28 : 0), contentY + 6);
-      contentY += 28;
+      contentY += rendererLayout.authorSectionHeightPx;
     }
 
     const badgeY = contentY;
-    ctx.font = `bold ${Math.round(fontSize * 0.85)}px system-ui, -apple-system, sans-serif`;
+    ctx.font = `bold ${Math.round(fontSize * rendererLayout.authorFontScale)}px system-ui, -apple-system, sans-serif`;
     ctx.textBaseline = 'top';
     ctx.fillStyle = '#ffffff';
     ctx.fillText(superChat.amount, textX, badgeY);
@@ -654,7 +661,7 @@ export class Canvas2DRenderer extends RendererBase {
       const cached = this.stickerCache.get(superChat.sticker.url);
       const stickerImg = cached?.complete && cached.naturalWidth > 0 ? cached : null;
       if (stickerImg) {
-        const stickerSize = Math.round(fontSize * 2);
+        const stickerSize = Math.round(fontSize * rendererLayout.superchatStickerSize);
         ctx.globalAlpha = alpha;
         ctx.drawImage(
           stickerImg,
@@ -693,8 +700,8 @@ export class Canvas2DRenderer extends RendererBase {
     ctx.lineWidth = 2;
     ctx.stroke();
 
-    const textX = x + 12;
-    let textY = y + 8;
+    const textX = x + rendererLayout.paddingH;
+    let textY = y + rendererLayout.paddingV;
 
     if (msg.message.author) {
       ctx.font = this.getFont(fontSize);
@@ -754,7 +761,7 @@ export class Canvas2DRenderer extends RendererBase {
     this.drainQueue();
   }
 
-  onPlaybackRateChange(_rate: number): void {
+  onPlaybackRateChange(): void {
     // Canvas2D computes rate on each frame via getEffectiveSpeed().
   }
 

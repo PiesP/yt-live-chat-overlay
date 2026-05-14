@@ -5,8 +5,8 @@ import { findElementMatch, isAbortError, throwIfAborted, VIDEO_SELECTORS } from 
 import { createLogger } from '@core/logging';
 import { MessageIdRegistry } from '@core/message-id-registry';
 import { OVERLAY_SELECTOR, Overlay } from '@core/overlay';
-import { Renderer } from '@core/renderer';
-import { Canvas2DRenderer } from '@core/renderer-canvas2d';
+import { Renderer as CanvasRenderer } from '@core/renderer-canvas';
+import { Renderer } from '@core/renderer-css';
 import { shouldResetRendererForSettingsChange } from '@core/settings-schema';
 import { VideoPauseController } from '@core/video-pause-controller';
 
@@ -48,7 +48,7 @@ export class RuntimeSession {
   private readonly requestRestart: RuntimeSessionOptions['requestRestart'];
   private readonly abortController = new AbortController();
   private overlay: Overlay | null = null;
-  private renderer: Renderer | Canvas2DRenderer | null = null;
+  private renderer: Renderer | CanvasRenderer | null = null;
   private chatSource: ChatSource | null = null;
   private foregroundCleanup: (() => void) | null = null;
   private videoPauseController = new VideoPauseController();
@@ -92,7 +92,7 @@ export class RuntimeSession {
 
       this.overlay = overlay;
       if (this.settings.rendererType === 'canvas') {
-        this.renderer = new Canvas2DRenderer(overlay, this.settings);
+        this.renderer = new CanvasRenderer(overlay, this.settings);
       } else {
         this.renderer = new Renderer(overlay, this.settings);
       }
@@ -249,7 +249,7 @@ export class RuntimeSession {
             if (!this.acceptForRenderer(msg)) return;
             renderer.addMessage(msg);
           };
-          renderer.onBacklogPauseChange = (paused) => {
+          renderer.onBacklogPauseChange = (paused: boolean) => {
             this.backlogController?.setPaused(paused);
           };
         }
@@ -443,7 +443,7 @@ export class RuntimeSession {
   }
 
   private replayLatestMessages(
-    renderer: Renderer | Canvas2DRenderer,
+    renderer: Renderer | CanvasRenderer,
     limit = RECENT_MESSAGE_REPLAY_LIMIT
   ): void {
     const latestMessages = this.chatSource?.getLatestMessages(limit) ?? [];

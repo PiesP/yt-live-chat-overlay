@@ -1,28 +1,43 @@
 /**
- * Renderer — CSS DOM-animation based renderer.
+ * RendererCSS — CSS DOM-animation based renderer.
  *
  * Extends RendererBase for shared state machine, rate limiting, burst
- * detection, and lane allocation.  This class owns only the CSS-specific
- * rendering: DOM element creation, @keyframes animation setup, opacity
- * fade timer, and style injection.
+ * detection, and lane allocation.  Owns CSS-specific rendering: DOM element
+ * creation, @keyframes animation setup, and style injection.
+ *
+ * All magic numbers come from rendererLayout in design-tokens.ts.
  */
 
-import type { ChatMessage, DanmakuMode, OverlayDimensions, OverlaySettings } from '@app-types';
+import type {
+  ChatMessage,
+  DanmakuMode,
+  OverlayDimensions,
+  OverlaySettings,
+  SuperChatInfo,
+} from '@app-types';
+import type { RgbColor } from '@core/design-tokens';
 import {
+  borderRadius,
   buildTextShadow,
   buildTextStroke,
   computeDliosDuration,
+  colors as designColors,
+  parseRgbColor,
   rendererLayout,
   shadows,
+  spacing,
+  typography,
 } from '@core/design-tokens';
 import type { LanePlacement } from '@core/lane-allocator';
 import { createLogger } from '@core/logging';
 import type { Overlay } from '@core/overlay';
 import { RendererBase, type RendererUpdateOptions } from '@core/renderer-base';
-import { RendererMessageBuilder } from '@core/renderer-message-builder';
-import { RENDERER_STATIC_STYLES } from '@core/renderer-styles';
+import { estimateMessageDimensions } from '@core/renderer-shared';
+import { normalizeYouTubeImageUrl } from '@core/youtubei-chat';
 
-const log = createLogger('Renderer');
+const log = createLogger('RendererCSS');
+
+// ── Internal types ──────────────────────────────────────────────────────────
 
 interface QueuedMessage {
   message: ChatMessage;
@@ -50,39 +65,509 @@ interface RenderContext {
   dimensions: OverlayDimensions;
 }
 
+// ── Static CSS styles ────────────────────────────────────────────────────────
+
+const STATIC_STYLES = `
+  .yt-chat-overlay-message {
+    position: absolute;
+    white-space: nowrap;
+    font-family: system-ui, -apple-system, sans-serif;
+    font-weight: ${typography.fontWeight.bold};
+    line-height: 1.1;
+    text-shadow: var(--yt-overlay-message-text-shadow, none);
+    -webkit-text-stroke: var(--yt-overlay-text-stroke, 0 transparent);
+    color: ${designColors.ui.text};
+    pointer-events: none;
+    will-change: transform;
+    backface-visibility: hidden;
+    perspective: 1000;
+    transform: translateZ(0);
+    contain: paint layout style;
+    text-rendering: geometricPrecision;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  .yt-chat-overlay-message-with-author {
+    display: flex;
+    flex-direction: column;
+    gap: ${spacing.xs}px;
+  }
+  .yt-chat-overlay-author-info {
+    display: flex;
+    align-items: center;
+    gap: ${spacing.sm}px;
+    font-size: ${rendererLayout.authorFontScale}em;
+    opacity: 0.95;
+  }
+  .yt-chat-overlay-author-photo {
+    width: ${rendererLayout.authorPhotoSize}px;
+    height: ${rendererLayout.authorPhotoSize}px;
+    border-radius: ${borderRadius.full};
+    flex-shrink: 0;
+    box-shadow: ${shadows.box.sm};
+    filter: ${shadows.filter.md};
+  }
+  .yt-chat-overlay-author-name {
+    font-weight: ${typography.fontWeight.semibold};
+  }
+  .yt-chat-overlay-message-content {
+    display: block;
+    color: inherit;
+  }
+  .yt-chat-overlay-superchat-card {
+    --yt-sc-rgb: 30, 136, 229;
+    --yt-sc-border-rgb: 18, 92, 156;
+    --yt-sc-accent: rgb(var(--yt-sc-rgb));
+    display: flex;
+    flex-direction: column;
+    min-width: min(280px, 60vw);
+    max-width: min(640px, 86vw);
+    border-radius: ${borderRadius.md};
+    overflow: hidden;
+    border: 1px solid rgba(var(--yt-sc-border-rgb), 0.55);
+    border-left: 4px solid var(--yt-sc-accent);
+    background-color: rgb(30, 136, 229);
+    background: linear-gradient(180deg,
+      rgba(var(--yt-sc-rgb), var(--yt-overlay-superchat-top-opacity, 0.46)) 0%,
+      rgba(var(--yt-sc-rgb), var(--yt-overlay-superchat-base-opacity, 0.4)) 48%,
+      rgba(var(--yt-sc-rgb), var(--yt-overlay-superchat-bottom-opacity, 0.4)) 100%);
+    box-shadow: ${shadows.box.md};
+    backdrop-filter: blur(4px);
+  }
+  .yt-chat-overlay-superchat-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: ${spacing.md}px;
+    padding: ${spacing.sm}px ${spacing.md}px;
+    background: rgba(0, 0, 0, 0.12);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+  }
+  .yt-chat-overlay-superchat-author {
+    display: flex;
+    align-items: center;
+    gap: ${spacing.sm}px;
+    min-width: 0;
+  }
+  .yt-chat-overlay-superchat-author .yt-chat-overlay-author-name {
+    font-size: 0.88em;
+    font-weight: ${typography.fontWeight.bold};
+    text-shadow: ${shadows.text.sm};
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .yt-chat-overlay-superchat-amount {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+    padding: ${spacing.xs}px ${spacing.md}px;
+    border-radius: ${borderRadius.lg};
+    font-weight: ${typography.fontWeight.bold};
+    font-size: 0.85em;
+    letter-spacing: 0.2px;
+    color: ${designColors.ui.text};
+    background: rgba(255, 255, 255, 0.16);
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    text-shadow: ${shadows.text.sm};
+  }
+  .yt-chat-overlay-superchat-body {
+    display: flex;
+    flex-direction: column;
+    padding: ${spacing.sm}px ${spacing.md}px ${spacing.md}px;
+    gap: ${spacing.sm}px;
+  }
+  .yt-chat-overlay-superchat-body .yt-chat-overlay-message-content {
+    line-height: ${typography.lineHeight.normal};
+    text-shadow: ${shadows.text.md};
+    letter-spacing: 0.2px;
+    white-space: normal;
+  }
+  .yt-chat-overlay-superchat-body .yt-chat-overlay-superchat-sticker {
+    align-self: flex-start;
+    margin-bottom: ${spacing.xs}px;
+  }
+  .yt-chat-overlay-message-with-author:not(.yt-chat-overlay-superchat-card) {
+    background: rgba(0, 0, 0, 0.25);
+    padding: ${spacing.sm}px ${spacing.md}px;
+    border-radius: ${borderRadius.sm};
+    backdrop-filter: blur(2px);
+  }
+  .yt-chat-overlay-message-with-author .yt-chat-overlay-author-photo {
+    box-shadow: ${shadows.box.sm};
+    border: 1px solid rgba(255, 255, 255, 0.15);
+  }
+  .yt-chat-overlay-message:not(.yt-chat-overlay-superchat-card) {
+    text-shadow: var(--yt-overlay-regular-message-text-shadow, ${shadows.text.md});
+    letter-spacing: 0.3px;
+  }
+  .yt-chat-overlay-superchat-sticker {
+    display: inline-block;
+    vertical-align: middle;
+    margin-right: ${spacing.sm}px;
+    filter: ${shadows.filter.md};
+  }
+  .yt-chat-overlay-emoji {
+    display: inline-block;
+    vertical-align: text-bottom;
+    margin: 0 2px;
+    pointer-events: none;
+    filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.5));
+  }
+  .yt-chat-overlay-membership-card {
+    display: flex;
+    flex-direction: column;
+    padding: ${spacing.md}px ${spacing.lg}px;
+    border-radius: ${borderRadius.md};
+    background: rgba(15, 157, 88, 0.28);
+    border: 2px solid rgba(15, 157, 88, 0.6);
+    box-shadow: ${shadows.box.md};
+    backdrop-filter: blur(4px);
+    animation: yt-overlay-membership-glow 2s ease-in-out infinite;
+  }
+  @keyframes yt-overlay-membership-glow {
+    0%, 100% { border-color: rgba(15, 157, 88, 0.6); }
+    50% { border-color: rgba(15, 157, 88, 0.9); }
+  }
+  .yt-chat-overlay-membership-author {
+    display: flex;
+    align-items: center;
+    gap: ${spacing.md}px;
+  }
+  .yt-chat-overlay-membership-text {
+    display: flex;
+    flex-direction: column;
+    gap: ${spacing.xs}px;
+  }
+  .yt-chat-overlay-membership-author-name {
+    font-size: ${typography.fontSize.base};
+    font-weight: ${typography.fontWeight.bold};
+    text-shadow: ${shadows.text.md};
+  }
+  .yt-chat-overlay-membership-message {
+    font-size: ${typography.fontSize.sm};
+    font-weight: ${typography.fontWeight.normal};
+    color: ${designColors.ui.text};
+    text-shadow: ${shadows.text.sm};
+  }
+  @keyframes yt-overlay-comment-slide {
+    from { transform: translateX(var(--yt-msg-entry-offset, 0px)); }
+    to { transform: translateX(var(--yt-msg-exit-offset, -3000px)); }
+  }
+  @keyframes yt-overlay-comment-slide-reverse {
+    from { transform: translateX(calc(-100vw - var(--yt-msg-entry-offset, 0px))); }
+    to { transform: translateX(calc(100vw + 100px)); }
+  }
+  @keyframes yt-overlay-comment-fixed-top {
+    from { transform: translateY(-100%); opacity: 0; }
+    10% { opacity: 1; }
+    80% { opacity: 1; }
+    to { opacity: 0; }
+  }
+  @keyframes yt-overlay-comment-fixed-bottom {
+    from { transform: translateY(100%); opacity: 0; }
+    10% { opacity: 1; }
+    80% { opacity: 1; }
+    to { opacity: 0; }
+  }
+  .yt-overlay-message-animate {
+    animation-name: yt-overlay-comment-slide;
+    animation-duration: var(--yt-msg-duration, 8s);
+    animation-delay: var(--yt-msg-delay, 0ms);
+    animation-timing-function: linear;
+    animation-fill-mode: both;
+  }
+  .yt-overlay-message-animate-reverse {
+    animation-name: yt-overlay-comment-slide-reverse;
+    animation-duration: var(--yt-msg-duration, 8s);
+    animation-delay: var(--yt-msg-delay, 0ms);
+    animation-timing-function: linear;
+    animation-fill-mode: both;
+  }
+  .yt-overlay-message-animate-top {
+    animation-name: yt-overlay-comment-fixed-top;
+    animation-duration: var(--yt-msg-duration, 4s);
+    animation-delay: var(--yt-msg-delay, 0ms);
+    animation-timing-function: ease-out;
+    animation-fill-mode: both;
+  }
+  .yt-overlay-message-animate-bottom {
+    animation-name: yt-overlay-comment-fixed-bottom;
+    animation-duration: var(--yt-msg-duration, 4s);
+    animation-delay: var(--yt-msg-delay, 0ms);
+    animation-timing-function: ease-out;
+    animation-fill-mode: both;
+  }
+`;
+
+// ── Image element builder ────────────────────────────────────────────────────
+
+function createImageElement(
+  url: string,
+  alt: string,
+  className: string,
+  sizePx: number,
+  candidateUrl?: string,
+  fallbackText?: string
+): HTMLImageElement | null {
+  const urls: string[] = [];
+  const normalized = normalizeYouTubeImageUrl(url);
+  if (normalized) urls.push(normalized);
+  if (candidateUrl) {
+    const normalizedCandidate = normalizeYouTubeImageUrl(candidateUrl);
+    if (normalizedCandidate && !urls.includes(normalizedCandidate)) {
+      urls.push(normalizedCandidate);
+    }
+  }
+  if (urls.length === 0) return null;
+
+  const img = document.createElement('img');
+  let candidateIndex = 0;
+  img.src = urls[candidateIndex] ?? '';
+  img.alt = alt;
+  img.className = className;
+  img.style.height = `${sizePx}px`;
+  img.style.width = 'auto';
+  img.draggable = false;
+  img.decoding = 'async';
+
+  img.addEventListener(
+    'error',
+    () => {
+      const nextUrl = urls[candidateIndex + 1];
+      if (nextUrl) {
+        candidateIndex += 1;
+        img.src = nextUrl;
+        return;
+      }
+      const fallback = fallbackText?.trim();
+      if (fallback && img.parentNode) {
+        img.replaceWith(document.createTextNode(fallback));
+      } else {
+        img.remove();
+      }
+    },
+    { once: true }
+  );
+
+  return img;
+}
+
+// ── DOM element builders ─────────────────────────────────────────────────────
+
+function createContainer(className: string): HTMLDivElement {
+  const el = document.createElement('div');
+  el.className = className;
+  return el;
+}
+
+function resolveSuperChatRgb(superChat: SuperChatInfo): RgbColor {
+  const sourceColor = superChat.headerBackgroundColor || superChat.backgroundColor;
+  const parsed = sourceColor ? parseRgbColor(sourceColor) : null;
+  return parsed ?? designColors.superChat[superChat.tier];
+}
+
+function buildSuperChatHeader(
+  message: ChatMessage,
+  superChat: SuperChatInfo,
+  showAuthor: boolean
+): HTMLDivElement {
+  const header = createContainer('yt-chat-overlay-superchat-meta');
+
+  if (showAuthor) {
+    const authorSection = createContainer('yt-chat-overlay-superchat-author');
+    if (message.authorPhotoUrl) {
+      const photo = createImageElement(
+        message.authorPhotoUrl,
+        message.author || 'Author',
+        'yt-chat-overlay-author-photo',
+        rendererLayout.authorPhotoSize
+      );
+      if (photo) authorSection.appendChild(photo);
+    }
+    if (message.author) {
+      const name = document.createElement('span');
+      name.className = 'yt-chat-overlay-author-name';
+      name.textContent = message.author;
+      authorSection.appendChild(name);
+    }
+    if (authorSection.childElementCount > 0) {
+      header.appendChild(authorSection);
+    }
+  }
+
+  const amountBadge = document.createElement('span');
+  amountBadge.className = 'yt-chat-overlay-superchat-amount';
+  amountBadge.textContent = superChat.amount;
+  header.appendChild(amountBadge);
+
+  if (!showAuthor) {
+    header.style.justifyContent = 'flex-end';
+  }
+
+  return header;
+}
+
+function buildSuperChatContent(
+  message: ChatMessage,
+  superChat: SuperChatInfo
+): HTMLDivElement | null {
+  const hasSticker = !!superChat.sticker;
+  const messageDiv = message.text.trim()
+    ? createContainer('yt-chat-overlay-message-content')
+    : null;
+  if (messageDiv) messageDiv.textContent = message.text;
+
+  if (!messageDiv && !hasSticker) return null;
+
+  const content = createContainer('yt-chat-overlay-superchat-body');
+
+  if (superChat.sticker) {
+    const stickerImg = createImageElement(
+      superChat.sticker.url,
+      superChat.sticker.alt || 'Super Chat Sticker',
+      'yt-chat-overlay-superchat-sticker',
+      Math.round(20 * rendererLayout.superchatStickerSize),
+      superChat.sticker.candidateUrl
+    );
+    if (stickerImg) content.appendChild(stickerImg);
+  }
+
+  if (messageDiv) content.appendChild(messageDiv);
+  return content;
+}
+
+function applySuperChatStyling(element: HTMLDivElement, superChat: SuperChatInfo): void {
+  element.classList.add('yt-chat-overlay-superchat-card');
+  const rgb = resolveSuperChatRgb(superChat);
+  const borderRgb = {
+    r: Math.max(0, rgb.r - 36),
+    g: Math.max(0, rgb.g - 36),
+    b: Math.max(0, rgb.b - 36),
+  };
+  element.style.setProperty('--yt-sc-rgb', `${rgb.r}, ${rgb.g}, ${rgb.b}`);
+  element.style.setProperty('--yt-sc-border-rgb', `${borderRgb.r}, ${borderRgb.g}, ${borderRgb.b}`);
+}
+
+function buildRegularMessageElement(
+  message: ChatMessage,
+  showAuthor: boolean,
+  color: string
+): BuiltMessage | null {
+  const element = createContainer('yt-chat-overlay-message');
+  element.classList.add('yt-chat-overlay-message-with-author');
+
+  if (showAuthor) {
+    const authorInfo = createContainer('yt-chat-overlay-author-info');
+    if (message.authorPhotoUrl) {
+      const photo = createImageElement(
+        message.authorPhotoUrl,
+        message.author || 'Author',
+        'yt-chat-overlay-author-photo',
+        rendererLayout.authorPhotoSize
+      );
+      if (photo) authorInfo.appendChild(photo);
+    }
+    if (message.author) {
+      const name = document.createElement('span');
+      name.className = 'yt-chat-overlay-author-name';
+      name.textContent = message.author;
+      name.style.color = color;
+      authorInfo.appendChild(name);
+    }
+    element.appendChild(authorInfo);
+  }
+
+  const contentDiv = createContainer('yt-chat-overlay-message-content');
+  contentDiv.style.color = color;
+  if (message.text.trim()) {
+    contentDiv.textContent = message.text;
+  }
+  if (!contentDiv.hasChildNodes()) return null;
+
+  element.appendChild(contentDiv);
+  return { element, isSuperChat: false, isMembership: false };
+}
+
+interface BuiltMessage {
+  element: HTMLDivElement;
+  isSuperChat: boolean;
+  isMembership: boolean;
+}
+
+function buildMessageElement(message: ChatMessage, settings: OverlaySettings): BuiltMessage | null {
+  const showAuthor = settings.showAuthor[message.authorType];
+  const color = settings.colors[message.authorType];
+
+  if (message.kind === 'superchat' && message.superChat) {
+    const element = createContainer('yt-chat-overlay-message');
+    applySuperChatStyling(element, message.superChat);
+    const header = buildSuperChatHeader(message, message.superChat, settings.showAuthor.superChat);
+    const content = buildSuperChatContent(message, message.superChat);
+    element.appendChild(header);
+    if (content) element.appendChild(content);
+    return { element, isSuperChat: true, isMembership: false };
+  }
+
+  if (message.kind === 'membership') {
+    const element = createContainer('yt-chat-overlay-message');
+    const card = createContainer('yt-chat-overlay-membership-card');
+    const authorSection = createContainer('yt-chat-overlay-membership-author');
+
+    if (message.authorPhotoUrl) {
+      const photo = createImageElement(
+        message.authorPhotoUrl,
+        message.author || 'Member',
+        'yt-chat-overlay-author-photo',
+        rendererLayout.authorPhotoSize
+      );
+      if (photo) authorSection.appendChild(photo);
+    }
+
+    const textContainer = createContainer('yt-chat-overlay-membership-text');
+    if (message.author) {
+      const name = document.createElement('div');
+      name.className = 'yt-chat-overlay-membership-author-name';
+      name.textContent = message.author;
+      name.style.color = designColors.authorMember;
+      textContainer.appendChild(name);
+    }
+    if (message.text.trim()) {
+      const msg = document.createElement('div');
+      msg.className = 'yt-chat-overlay-membership-message';
+      msg.textContent = message.text;
+      textContainer.appendChild(msg);
+    }
+    authorSection.appendChild(textContainer);
+    card.appendChild(authorSection);
+    element.appendChild(card);
+    return { element, isSuperChat: false, isMembership: true };
+  }
+
+  return buildRegularMessageElement(message, showAuthor, color);
+}
+
+// ── Renderer ─────────────────────────────────────────────────────────────────
+
 export class Renderer extends RendererBase {
-  private readonly messageBuilder: RendererMessageBuilder;
   private activeMessages: Set<ActiveMessage> = new Set();
   private readonly pendingQueue: QueuedMessage[] = [];
   private danmakuMode: DanmakuMode = 'scroll';
   private lastWarningTime = 0;
-  private static readonly SWEEP_TOLERANCE_MS = 500;
-  private static readonly MAX_ANIMATION_JITTER_MS = 15;
-  private static readonly QUEUE_MAX_SIZE = 50;
-  private static readonly BATCH_SIZE = 3;
-  private static readonly MAX_MESSAGE_AGE_MS = 60_000;
-  private static readonly OPACITY_UPDATE_INTERVAL_MS = 1000;
-  private static readonly SWEEP_INTERVAL = 8;
-  private static readonly MAX_RETRY_ATTEMPTS = 3;
   private styleElement: HTMLStyleElement | null = null;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
-  private opacityUpdateTimer: ReturnType<typeof setInterval> | null = null;
   private overlayDimensionsUnsubscribe: (() => void) | null = null;
   private sweepCounter = 0;
-  static readonly BACKGROUND_QUEUE_MAX = 10;
   private processQueueScheduled = false;
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
     super(overlay, settings);
-    this.messageBuilder = new RendererMessageBuilder(() => this.settings);
-    this.danmakuMode = this.settings.danmakuMode;
+    this.danmakuMode = settings.danmakuMode;
     this.injectStyles();
 
     this.overlayDimensionsUnsubscribe = this.overlay.onDimensionsChanged((dimensions) => {
       this.handleOverlayDimensionsChange(dimensions);
     });
-
-    this.startOpacityUpdates();
   }
 
   get laneCount(): number {
@@ -96,7 +581,7 @@ export class Renderer extends RendererBase {
 
     const priority = RendererBase.getMessagePriority(message);
 
-    if (this.pendingQueue.length >= Renderer.QUEUE_MAX_SIZE) {
+    if (this.pendingQueue.length >= rendererLayout.queueMaxSize) {
       const lowestPriorityIndex = this.findLowestPriorityIndex();
       if (lowestPriorityIndex >= 0) {
         const removed = this.pendingQueue[lowestPriorityIndex];
@@ -169,7 +654,7 @@ export class Renderer extends RendererBase {
     let processed = 0;
     let droppedCount = 0;
 
-    while (this.pendingQueue.length > 0 && processed < Renderer.BATCH_SIZE) {
+    while (this.pendingQueue.length > 0 && processed < rendererLayout.batchSize) {
       const queued = this.pendingQueue[0];
       if (!queued) break;
 
@@ -184,14 +669,11 @@ export class Renderer extends RendererBase {
         queued.nextAttemptAt = performance.now() + result.waitMs;
         this.scheduleRetry(Math.min(result.waitMs, rendererLayout.retryDelayMaxMs));
         this.pendingQueue.shift();
-        // Re-insert deferred message for retry after wait
-        const insertBeforeDeferred = this.pendingQueue.findIndex(
-          (q) => q.priority < queued.priority
-        );
-        if (insertBeforeDeferred === -1) {
+        const insertBefore = this.pendingQueue.findIndex((q) => q.priority < queued.priority);
+        if (insertBefore === -1) {
           this.pendingQueue.push(queued);
         } else {
-          this.pendingQueue.splice(insertBeforeDeferred, 0, queued);
+          this.pendingQueue.splice(insertBefore, 0, queued);
         }
         processed++;
         continue;
@@ -201,7 +683,7 @@ export class Renderer extends RendererBase {
         this.pendingQueue.shift();
         droppedCount++;
         queued.retries++;
-        if (queued.retries < Renderer.MAX_RETRY_ATTEMPTS) {
+        if (queued.retries < rendererLayout.maxRetries) {
           const insertBefore = this.pendingQueue.findIndex((q) => q.priority < queued.priority);
           if (insertBefore === -1) {
             this.pendingQueue.push(queued);
@@ -222,7 +704,7 @@ export class Renderer extends RendererBase {
       log.debug(`${droppedCount} message(s) dropped, requeued with retry`);
     }
 
-    const queueRatio = this.pendingQueue.length / Renderer.QUEUE_MAX_SIZE;
+    const queueRatio = this.pendingQueue.length / rendererLayout.queueMaxSize;
     if (queueRatio > 0.8 && this.backlogPaused === false) {
       this.backlogPaused = true;
       this.onBacklogPauseChange?.(true);
@@ -252,7 +734,11 @@ export class Renderer extends RendererBase {
     }
 
     const { container, dimensions } = renderContext;
-    const estimated = this.messageBuilder.estimateMessageDimensions(message);
+    const estimated = estimateMessageDimensions(
+      message,
+      this.settings.fontSize,
+      this.settings.showAuthor[message.authorType]
+    );
     const messageHeight = estimated.height;
 
     const placement = this.laneAllocator.findPlacement(messageHeight, dimensions);
@@ -265,7 +751,7 @@ export class Renderer extends RendererBase {
       return { status: 'deferred', waitMs: placement.waitMs };
     }
 
-    const builtMessage = this.messageBuilder.buildMessageElement(message);
+    const builtMessage = buildMessageElement(message, this.settings);
     if (!builtMessage) {
       return { status: 'dropped' };
     }
@@ -308,7 +794,7 @@ export class Renderer extends RendererBase {
     const now = performance.now();
 
     let baseDuration: number;
-    let laneDelay = Math.floor(Math.random() * Renderer.MAX_ANIMATION_JITTER_MS);
+    let laneDelay = Math.floor(Math.random() * rendererLayout.maxAnimationJitterMs);
     let startTime = now + laneDelay;
 
     if (mode === 'top' || mode === 'bottom') {
@@ -324,7 +810,7 @@ export class Renderer extends RendererBase {
       startTime = now;
       this.laneAllocator.commitPlacement(placement, textWidth, startTime);
     } else if (mode === 'reverse') {
-      const reverseTotalDistance = dimensions.width * 2 + 100;
+      const reverseTotalDistance = dimensions.width * 2 + rendererLayout.exitPaddingMin;
       baseDuration = computeDliosDuration(reverseTotalDistance, effectiveSpeedPxPerSec);
       element.style.top = `${laneY}px`;
       element.style.right = '0';
@@ -344,9 +830,11 @@ export class Renderer extends RendererBase {
 
       const baseOffset =
         dimensions.laneCount > 1
-          ? Math.round((lane.index / (dimensions.laneCount - 1)) * 200)
+          ? Math.round(
+              (lane.index / (dimensions.laneCount - 1)) * rendererLayout.entryOffsetRangeMs
+            )
           : 100;
-      const jitter = Math.floor(Math.random() * 30);
+      const jitter = Math.floor(Math.random() * rendererLayout.laneJitterMs);
       const entryOffset = baseOffset + jitter;
 
       const totalDistance = entryOffset + dimensions.width + textWidth + exitPadding;
@@ -400,7 +888,7 @@ export class Renderer extends RendererBase {
   private injectStyles(): void {
     if (!this.styleElement) {
       this.styleElement = document.createElement('style');
-      this.styleElement.textContent = RENDERER_STATIC_STYLES;
+      this.styleElement.textContent = STATIC_STYLES;
       document.head.appendChild(this.styleElement);
     }
     this.updateStyleVariables();
@@ -435,53 +923,6 @@ export class Renderer extends RendererBase {
     );
   }
 
-  // ── Opacity fade timer ───────────────────────────────────────────────
-
-  private startOpacityUpdates(): void {
-    this.opacityUpdateTimer = setInterval(() => {
-      this.updateMessageOpacity();
-    }, Renderer.OPACITY_UPDATE_INTERVAL_MS);
-  }
-
-  private updateMessageOpacity(): void {
-    const now = performance.now();
-    const toRemove: ActiveMessage[] = [];
-
-    for (const active of this.activeMessages) {
-      try {
-        const elapsed = now - active.startTime - active.pausedDuration;
-        if (elapsed >= Renderer.MAX_MESSAGE_AGE_MS) {
-          toRemove.push(active);
-          continue;
-        }
-        const ageRatio = elapsed / Renderer.MAX_MESSAGE_AGE_MS;
-        const fadeFactor = Math.max(0, 1 - ageRatio);
-        active.element.style.opacity = `${active.baseOpacity * fadeFactor}`;
-      } catch {
-        toRemove.push(active);
-      }
-    }
-
-    for (const active of toRemove) {
-      this.removeMessage(active);
-    }
-  }
-
-  private stopOpacityUpdates(): void {
-    if (this.opacityUpdateTimer !== null) {
-      clearInterval(this.opacityUpdateTimer);
-      this.opacityUpdateTimer = null;
-    }
-  }
-
-  // ── Animation restart helper ─────────────────────────────────────────
-
-  private static triggerAnimationRestart(element: HTMLElement): void {
-    element.style.animation = 'none';
-    void element.offsetWidth;
-    element.style.animation = '';
-  }
-
   // ── Retry scheduling ─────────────────────────────────────────────────
 
   private scheduleRetry(waitMs: number): void {
@@ -509,14 +950,14 @@ export class Renderer extends RendererBase {
   private sweepStaleAnimations(): void {
     if (this.activeMessages.size === 0) return;
     this.sweepCounter++;
-    if (this.sweepCounter % Renderer.SWEEP_INTERVAL !== 0) return;
+    if (this.sweepCounter % rendererLayout.sweepInterval !== 0) return;
 
     const toRemove: ActiveMessage[] = [];
     const now = performance.now();
     for (const active of this.activeMessages) {
       try {
         const elapsed = now - active.startTime - active.pausedDuration;
-        if (elapsed >= active.baseDuration + Renderer.SWEEP_TOLERANCE_MS) {
+        if (elapsed >= active.baseDuration + rendererLayout.sweepToleranceMs) {
           toRemove.push(active);
         }
       } catch {
@@ -588,11 +1029,11 @@ export class Renderer extends RendererBase {
   // ── Queue trimming ───────────────────────────────────────────────────
 
   trimBackgroundQueue(): void {
-    if (this.pendingQueue.length <= Renderer.BACKGROUND_QUEUE_MAX) return;
+    if (this.pendingQueue.length <= rendererLayout.backgroundQueueMax) return;
     this.pendingQueue.sort(
       (a, b) => b.priority - a.priority || a.message.timestamp - b.message.timestamp
     );
-    this.pendingQueue.length = Renderer.BACKGROUND_QUEUE_MAX;
+    this.pendingQueue.length = rendererLayout.backgroundQueueMax;
   }
 
   // ── Dimension change handler ─────────────────────────────────────────
@@ -621,14 +1062,12 @@ export class Renderer extends RendererBase {
 
   protected onPause(): void {
     this.clearRetryTimer();
-    this.stopOpacityUpdates();
     for (const active of this.activeMessages) {
       active.element.style.animationPlayState = 'paused';
     }
   }
 
   protected onResume(): void {
-    this.startOpacityUpdates();
     for (const active of [...this.activeMessages]) {
       try {
         const elapsed = performance.now() - active.startTime - active.pausedDuration;
@@ -679,7 +1118,6 @@ export class Renderer extends RendererBase {
   }
 
   protected onDestroy(): void {
-    this.stopOpacityUpdates();
     this.overlayDimensionsUnsubscribe?.();
     this.overlayDimensionsUnsubscribe = null;
     this.resetState();
@@ -687,5 +1125,11 @@ export class Renderer extends RendererBase {
     this.playbackRate = 1;
     this.styleElement?.remove();
     this.styleElement = null;
+  }
+
+  private static triggerAnimationRestart(element: HTMLElement): void {
+    element.style.animation = 'none';
+    void element.offsetWidth;
+    element.style.animation = '';
   }
 }
