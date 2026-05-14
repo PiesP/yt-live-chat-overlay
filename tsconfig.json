@@ -46,7 +46,6 @@
   },
   "include": [
     "src/**/*",
-    "tooling/**/*.ts",
     "vite.config.ts"
   ],
   "exclude": [
