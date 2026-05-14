@@ -937,7 +937,7 @@ export class Renderer {
 
     for (const active of this.activeMessages) {
       try {
-        const elapsed = performance.now() - active.startTime;
+        const elapsed = performance.now() - active.startTime - active.pausedDuration;
         const adjustedDuration = active.baseDuration / rate;
 
         const el = active.element;
