@@ -56,11 +56,15 @@ interface ColorField {
   label: string;
   key: string;
 }
+interface TextField extends BaseField {
+  type: 'text';
+  placeholder?: string;
+}
 interface EnabledField {
   type: 'enabled';
 }
 
-type FieldDef = NumberField | CheckboxField | SelectField | ColorField | EnabledField;
+type FieldDef = NumberField | CheckboxField | SelectField | ColorField | TextField | EnabledField;
 
 interface SectionDef {
   title: string;
@@ -100,6 +104,13 @@ const sel = (
   options,
   ...(title !== undefined ? { title } : {}),
 });
+const txt = (label: string, key: string, title?: string, placeholder?: string): TextField => ({
+  type: 'text' as const,
+  label,
+  key,
+  ...(title !== undefined ? { title } : {}),
+  ...(placeholder !== undefined ? { placeholder } : {}),
+});
 
 // ── Declarative field schemas ────────────────────────────────────────────────
 
@@ -130,6 +141,11 @@ const PANES: PaneDef[] = [
               ['normal', 'Normal (400)'],
             ],
             'Text weight: Bold is more readable, Normal uses less GPU memory'
+          ),
+          txt(
+            'Font Family',
+            'fontFamily',
+            'CSS font-family value, e.g. "Noto Sans KR", sans-serif. Falls back to system default if not found.'
           ),
         ],
       },
@@ -469,6 +485,12 @@ export class SettingsUiForm {
           select.appendChild(opt);
         }
         return this.field(def.label, select);
+      }
+      case 'text': {
+        const input = this.input({ type: 'text', name: def.key });
+        if (def.title) input.title = def.title;
+        if (def.placeholder) input.placeholder = def.placeholder;
+        return this.field(def.label, input);
       }
       default:
         throw new Error('Unhandled field type');

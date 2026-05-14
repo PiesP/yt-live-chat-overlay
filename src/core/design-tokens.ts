@@ -72,6 +72,20 @@ export const typography = {
   },
 } as const;
 
+/** Common font family presets for user selection.
+ *  The first entry is the default. Each entry includes a CSS-safe fallback. */
+export const FONT_FAMILIES = [
+  'system-ui, -apple-system, sans-serif',
+  '"Noto Sans KR", sans-serif',
+  '"Malgun Gothic", sans-serif',
+  '"Apple SD Gothic Neo", sans-serif',
+  '"Nanum Gothic", sans-serif',
+  '"Nanum Myeongjo", serif',
+  '"D2Coding", monospace',
+  '"Spoqa Han Sans Neo", sans-serif',
+  '"Pretendard", sans-serif',
+] as const satisfies readonly string[];
+
 export const shadows = {
   text: {
     sm: '1px 1px 2px rgba(0, 0, 0, 0.8)',

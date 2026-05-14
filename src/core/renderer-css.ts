@@ -71,7 +71,7 @@ const STATIC_STYLES = `
   .yt-chat-overlay-message {
     position: absolute;
     white-space: nowrap;
-    font-family: system-ui, -apple-system, sans-serif;
+    font-family: var(--yt-overlay-font-family, system-ui, -apple-system, sans-serif);
     font-weight: var(--yt-overlay-font-weight, 700);
     line-height: 1.1;
     text-shadow: var(--yt-overlay-message-text-shadow, none);
@@ -732,7 +732,8 @@ export class Renderer extends RendererBase {
       message,
       this.settings.fontSize,
       this.settings.showAuthor[message.authorType],
-      this.settings.fontWeight
+      this.settings.fontWeight,
+      this.settings.fontFamily
     );
     const messageHeight = estimated.height;
 
@@ -908,6 +909,7 @@ export class Renderer extends RendererBase {
       '--yt-overlay-font-weight',
       this.settings.fontWeight === 'bold' ? '700' : '400'
     );
+    container.style.setProperty('--yt-overlay-font-family', this.settings.fontFamily);
 
     container.style.setProperty('--yt-overlay-message-text-shadow', textShadow);
     container.style.setProperty(

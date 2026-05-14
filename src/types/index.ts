@@ -164,6 +164,8 @@ export interface OverlaySettings {
   laneSpacing: number;
   /** Text font weight: normal (400) or bold (700) */
   fontWeight: 'normal' | 'bold';
+  /** Font family (CSS font-family value, e.g. 'Noto Sans KR, sans-serif') */
+  fontFamily: string;
   /** Show debug overlay with real-time metrics */
   showDebugOverlay: boolean;
   /** Renderer backend: CSS DOM animations or Canvas2D rAF */

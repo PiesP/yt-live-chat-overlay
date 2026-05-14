@@ -416,7 +416,8 @@ export class Renderer extends RendererBase {
         message,
         this.settings.fontSize,
         false,
-        this.settings.fontWeight
+        this.settings.fontWeight,
+        this.settings.fontFamily
       );
     }
     const fontSize = this.settings.fontSize;
@@ -490,7 +491,7 @@ export class Renderer extends RendererBase {
   }
 
   private getFont(fontSize: number): string {
-    return getFontString(fontSize, this.settings.fontWeight);
+    return getFontString(fontSize, this.settings.fontWeight, this.settings.fontFamily);
   }
 
   // ── Backlog pause ────────────────────────────────────────────────────
@@ -623,7 +624,8 @@ export class Renderer extends RendererBase {
       }
       const nameFont = getFontString(
         Math.round(fontSize * rendererLayout.authorFontScale),
-        this.settings.fontWeight
+        this.settings.fontWeight,
+        this.settings.fontFamily
       );
       ctx.font = nameFont;
       ctx.textBaseline = 'top';
@@ -704,7 +706,8 @@ export class Renderer extends RendererBase {
       }
       ctx.font = getFontString(
         Math.round(fontSize * rendererLayout.authorFontScale),
-        this.settings.fontWeight
+        this.settings.fontWeight,
+        this.settings.fontFamily
       );
       ctx.textBaseline = 'top';
       this.strokeTextOutline(ctx, msg.message.author, textX + (photo ? 28 : 0), contentY + 6);

@@ -66,6 +66,7 @@ const ROOT_SETTING_META: Record<RootScalarSettingKey, SettingMeta> = {
   backlogMode: { type: 'string', visual: false },
   backlogRecentMinutes: { type: 'number', visual: false },
   fontWeight: { type: 'string', visual: true },
+  fontFamily: { type: 'string', visual: true },
   antiBlockEnabled: { type: 'boolean', visual: false },
   antiBlockFreeRatio: { type: 'number', visual: false },
   preserveUserColor: { type: 'boolean', visual: true },
@@ -115,6 +116,7 @@ export const ROOT_SETTING_KEYS = [
   'backlogMode',
   'backlogRecentMinutes',
   'fontWeight',
+  'fontFamily',
   'antiBlockEnabled',
   'antiBlockFreeRatio',
   'preserveUserColor',
@@ -133,6 +135,7 @@ export const VISUAL_ROOT_KEYS = [
   'minTextLength',
   'laneSpacing',
   'fontWeight',
+  'fontFamily',
   'preserveUserColor',
 ] as const satisfies readonly RootScalarSettingKey[];
 
@@ -250,6 +253,7 @@ export const DEFAULT_SETTINGS = {
   backlogMode: 'playback',
   backlogRecentMinutes: 5,
   fontWeight: 'bold',
+  fontFamily: 'system-ui, -apple-system, sans-serif',
   antiBlockEnabled: true,
   antiBlockFreeRatio: 0.15,
   preserveUserColor: false,
@@ -298,6 +302,7 @@ const STRING_VALIDATORS: Partial<Record<RootScalarSettingKey, (v: string) => boo
   rendererType: (v) => VALID_RENDERER_TYPES.includes(v as (typeof VALID_RENDERER_TYPES)[number]),
   logLevel: (v) => isLogLevel(v),
   fontWeight: (v) => v === 'normal' || v === 'bold',
+  fontFamily: (_v) => true,
 };
 
 const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings => {

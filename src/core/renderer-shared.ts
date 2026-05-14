@@ -7,7 +7,12 @@
 
 import type { ChatMessage } from '@app-types';
 import { rendererLayout, spacing } from '@core/design-tokens';
-import { getFontString, measureTextHeight, measureTextWidth } from '@core/text-measure';
+import {
+  FONT_FAMILY,
+  getFontString,
+  measureTextHeight,
+  measureTextWidth,
+} from '@core/text-measure';
 
 // ── Text measurement ────────────────────────────────────────────────────────
 
@@ -43,9 +48,10 @@ export function estimateMessageDimensions(
   message: ChatMessage,
   fontSize: number,
   showAuthor: boolean,
-  fontWeight: 'normal' | 'bold' = 'bold'
+  fontWeight: 'normal' | 'bold' = 'bold',
+  fontFamily: string = FONT_FAMILY
 ): MessageDimensions {
-  const font = getFontString(fontSize, fontWeight);
+  const font = getFontString(fontSize, fontWeight, fontFamily);
 
   if (message.kind === 'superchat') {
     return estimateSuperChatDimensions(message, font, fontSize);
@@ -53,14 +59,15 @@ export function estimateMessageDimensions(
   if (message.kind === 'membership') {
     return estimateMembershipDimensions(message, font, fontSize);
   }
-  return estimateRegularMessageDimensions(message, font, fontSize, showAuthor);
+  return estimateRegularMessageDimensions(message, font, fontSize, showAuthor, fontFamily);
 }
 
 function estimateRegularMessageDimensions(
   message: ChatMessage,
   font: string,
   fontSize: number,
-  showAuthor: boolean
+  showAuthor: boolean,
+  fontFamily: string
 ): MessageDimensions {
   const textWidth = measureContentWidth(message, font, fontSize);
   const textHeight = measureTextHeight(font, fontSize);
@@ -72,7 +79,7 @@ function estimateRegularMessageDimensions(
   }
 
   const authorFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
-  const authorFont = getFontString(authorFontSize);
+  const authorFont = getFontString(authorFontSize, undefined, fontFamily);
   const authorNameWidth = measureTextWidth(message.author, authorFont);
   const authorSectionWidth = rendererLayout.authorPhotoSize + spacing.sm + authorNameWidth;
   const totalWidth = Math.max(authorSectionWidth + paddingH, textWidth + paddingH);
