@@ -62,6 +62,10 @@ export class Renderer extends RendererBase {
   private readonly authorPhotoCache = new Map<string, HTMLImageElement>();
   private readonly stickerCache = new Map<string, HTMLImageElement>();
 
+  /** Text measurement caches (cleared on settings/font change) */
+  private readonly textWidthCache = new Map<string, number>();
+  private readonly textHeightCache = new Map<string, number>();
+
   private static readonly FADE_DURATION_MS = 500;
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
@@ -427,35 +431,58 @@ export class Renderer extends RendererBase {
     const ctx = this.ctx;
     if (!ctx) return message.text.length * fontSize * 0.6;
     const font = this.getFont(fontSize);
-    ctx.font = font;
 
     let width = 0;
     if (message.content.length > 0) {
       for (const seg of message.content) {
         if (seg.type === 'text') {
-          width += Math.ceil(ctx.measureText(seg.content).width);
+          width += Math.ceil(this.measureTextWidthCached(seg.content, font));
         } else {
           width += Math.ceil(fontSize * rendererLayout.emojiSize) + 4;
         }
       }
     } else if (message.text) {
-      width += Math.ceil(ctx.measureText(message.text).width);
+      width += Math.ceil(this.measureTextWidthCached(message.text, font));
     }
     return Math.ceil(width);
   }
 
+  private measureTextWidthCached(text: string, font: string): number {
+    const key = `${font}|${text}`;
+    const cached = this.textWidthCache.get(key);
+    if (cached !== undefined) return cached;
+    const ctx = this.ctx;
+    if (!ctx) return text.length * 8;
+    ctx.font = font;
+    const width = Math.ceil(ctx.measureText(text).width);
+    if (this.textWidthCache.size >= 500) {
+      const firstKey = this.textWidthCache.keys().next().value;
+      if (firstKey) this.textWidthCache.delete(firstKey);
+    }
+    this.textWidthCache.set(key, width);
+    return width;
+  }
+
   private measureTextHeight(fontSize: number): number {
+    const font = this.getFont(fontSize);
+    const cached = this.textHeightCache.get(font);
+    if (cached !== undefined) return cached;
     const ctx = this.ctx;
     if (!ctx) return Math.ceil(fontSize * 1.1);
-    const font = this.getFont(fontSize);
     ctx.font = font;
     const metrics = ctx.measureText('Mg');
     const ascent = metrics.fontBoundingBoxAscent;
     const descent = metrics.fontBoundingBoxDescent;
-    if (ascent !== undefined && descent !== undefined && ascent > 0) {
-      return Math.ceil(ascent + descent);
+    const height =
+      ascent !== undefined && descent !== undefined && ascent > 0
+        ? Math.ceil(ascent + descent)
+        : Math.ceil(fontSize * 1.1);
+    if (this.textHeightCache.size >= 50) {
+      const firstKey = this.textHeightCache.keys().next().value;
+      if (firstKey) this.textHeightCache.delete(firstKey);
     }
-    return Math.ceil(fontSize * 1.1);
+    this.textHeightCache.set(font, height);
+    return height;
   }
 
   private getFont(fontSize: number): string {
@@ -536,7 +563,7 @@ export class Renderer extends RendererBase {
     for (const seg of segments) {
       if (seg.type === 'text') {
         this.renderSegment(ctx, seg.content, cursorX, y, color, alpha, fontSize);
-        cursorX += Math.ceil(ctx.measureText(seg.content).width);
+        cursorX += Math.ceil(this.measureTextWidthCached(seg.content, this.getFont(fontSize)));
       } else {
         const cached = this.emojiCache.get(seg.emoji.url);
         const img = cached?.complete && cached.naturalWidth > 0 ? cached : null;
@@ -792,6 +819,8 @@ export class Renderer extends RendererBase {
     this.activeMessages.length = 0;
     this.pendingQueue.length = 0;
     this.backlogPaused = false;
+    this.textWidthCache.clear();
+    this.textHeightCache.clear();
   }
 
   protected onDestroy(): void {
