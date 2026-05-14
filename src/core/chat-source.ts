@@ -677,7 +677,6 @@ class ReplayChatSource extends ChatSource {
   private replayNextAllowedFetchAt = 0;
   private replayBuffer: ReplayBufferedMessage[] = [];
   private seekListenerCleanup: (() => void) | null = null;
-  private lastKnownOffsetMs = 0;
 
   protected seedCurrentSession(signal?: AbortSignal): Promise<boolean> {
     return this.initializeReplaySession(signal);
@@ -712,11 +711,8 @@ class ReplayChatSource extends ChatSource {
   }
 
   private handleSeeked(offsetMs: number): void {
-    const fromOffsetMs = this.lastKnownOffsetMs;
-    this.lastKnownOffsetMs = offsetMs;
     this.replayBuffer = [];
     this.lastReplayRequestedOffsetMs = offsetMs;
-    this.eventBus.emit('offset-jump', { fromOffsetMs, toOffsetMs: offsetMs });
     if (this.replayMode === 'playerSeek' && this.replayPlayerSeekContinuation) {
       void this.fetchReplayPlayerSeek(offsetMs, undefined)
         .then(() => {
@@ -743,7 +739,6 @@ class ReplayChatSource extends ChatSource {
     this.replayConsecutiveFailures = 0;
     this.replayNextAllowedFetchAt = 0;
     this.replayBuffer = [];
-    this.lastKnownOffsetMs = 0;
     this.seekListenerCleanup?.();
     this.seekListenerCleanup = null;
   }

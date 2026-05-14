@@ -3,21 +3,14 @@
  *
  * Events:
  *   'messages'     — ChatMessage[] received from the API
- *   'offset-jump'  — Playback position jumped (seek detected in replay)
  */
 export type ChatSourceEventMap = {
   messages: ChatMessageBatchEvent;
-  'offset-jump': ChatSourceOffsetJumpEvent;
 };
 
 export interface ChatMessageBatchEvent {
   messages: unknown[];
   isInitialSeed: boolean;
-}
-
-export interface ChatSourceOffsetJumpEvent {
-  fromOffsetMs: number;
-  toOffsetMs: number;
 }
 
 type Listener<T> = (payload: T) => void;
