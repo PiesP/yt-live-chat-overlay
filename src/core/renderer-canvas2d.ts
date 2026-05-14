@@ -89,6 +89,10 @@ export class Canvas2DRenderer {
   private readonly emojiFetching = new Set<string>();
   /** Max concurrent emoji image loads */
   private static readonly EMOJI_MAX_CONCURRENT = 6;
+  /** Author photo cache: url → HTMLImageElement */
+  private readonly authorPhotoCache = new Map<string, HTMLImageElement>();
+  /** SuperChat sticker cache: url → HTMLImageElement */
+  private readonly stickerCache = new Map<string, HTMLImageElement>();
 
   private static readonly MAX_ACTIVE = 50;
   private static readonly FADE_DURATION_MS = 500;
@@ -166,8 +170,8 @@ export class Canvas2DRenderer {
       return;
     }
 
-    // Pre-load emoji images when the message is first seen
-    this.prefetchEmojis(message);
+    // Pre-load emoji images, author photos, and stickers
+    this.prefetchImages(message);
 
     // Queue overflow: replace lowest-priority message if incoming is more important
     if (this.pendingQueue.length >= Canvas2DRenderer.QUEUE_MAX_SIZE) {
@@ -293,6 +297,8 @@ export class Canvas2DRenderer {
     this.activeMessages.length = 0;
     this.pendingQueue.length = 0;
     this.emojiCache.clear();
+    this.authorPhotoCache.clear();
+    this.stickerCache.clear();
     this.burstDetector.destroy();
     this.authorRateLimiter.destroy();
     this.observability.destroy();
@@ -428,9 +434,10 @@ export class Canvas2DRenderer {
     }
   }
 
-  // ── Emoji Pre-fetching ──────────────────────────────────────────────────
+  // ── Image Pre-fetching ──────────────────────────────────────────────────
 
-  private prefetchEmojis(message: ChatMessage): void {
+  private prefetchImages(message: ChatMessage): void {
+    // Pre-fetch emoji images
     for (const seg of message.content) {
       if (seg.type !== 'emoji') continue;
       if (this.emojiCache.has(seg.emoji.url)) continue;
@@ -444,7 +451,6 @@ export class Canvas2DRenderer {
       img.alt = seg.emoji.alt || '';
       img.onload = () => {
         this.emojiFetching.delete(seg.emoji.url);
-        // Evict oldest entry when cache is full (LRU via Map insertion order)
         if (this.emojiCache.size >= Canvas2DRenderer.EMOJI_CACHE_MAX) {
           const oldestKey = this.emojiCache.keys().next().value;
           if (oldestKey !== undefined) this.emojiCache.delete(oldestKey);
@@ -453,9 +459,33 @@ export class Canvas2DRenderer {
       };
       img.onerror = () => {
         this.emojiFetching.delete(seg.emoji.url);
-        // Cache the URL as failed so we don't retry every frame
         this.emojiCache.set(seg.emoji.url, img);
       };
+    }
+
+    // Pre-fetch author photo
+    const photoUrl = message.authorPhotoUrl;
+    if (photoUrl && !this.authorPhotoCache.has(photoUrl)) {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.src = photoUrl;
+      img.alt = message.author ?? 'Author';
+      img.onload = () => this.authorPhotoCache.set(photoUrl, img);
+      img.onerror = () => this.authorPhotoCache.set(photoUrl, img);
+      this.authorPhotoCache.set(photoUrl, img);
+    }
+
+    // Pre-fetch SuperChat sticker
+    const sticker = message.superChat?.sticker;
+    const stickerUrl = sticker?.url;
+    if (stickerUrl && !this.stickerCache.has(stickerUrl)) {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.src = stickerUrl;
+      img.alt = sticker?.alt || '';
+      img.onload = () => this.stickerCache.set(stickerUrl, img);
+      img.onerror = () => this.stickerCache.set(stickerUrl, img);
+      this.stickerCache.set(stickerUrl, img);
     }
   }
 
@@ -571,7 +601,7 @@ export class Canvas2DRenderer {
   private estimateDimensions(message: ChatMessage): { width: number; height: number } {
     const fontSize = this.settings.fontSize;
     const textWidth = this.measureContentWidth(message, fontSize);
-    const textHeight = fontSize * 1.1; // approximate, refined via font metrics when available
+    const textHeight = this.measureTextHeight(fontSize);
     const paddingH = 16;
     const paddingV = 8;
 
@@ -612,6 +642,24 @@ export class Canvas2DRenderer {
       width += Math.ceil(ctx.measureText(message.text).width);
     }
     return Math.ceil(width);
+  }
+
+  /**
+   * Measure actual text height using font bounding box metrics,
+   * falling back to fontSize * 1.1 (matches RendererMessageBuilder.measureTextHeight).
+   */
+  private measureTextHeight(fontSize: number): number {
+    const ctx = this.ctx;
+    if (!ctx) return Math.ceil(fontSize * 1.1);
+    const font = this.getFont(fontSize);
+    ctx.font = font;
+    const metrics = ctx.measureText('Mg');
+    const ascent = metrics.fontBoundingBoxAscent;
+    const descent = metrics.fontBoundingBoxDescent;
+    if (ascent !== undefined && descent !== undefined && ascent > 0) {
+      return Math.ceil(ascent + descent);
+    }
+    return Math.ceil(fontSize * 1.1);
   }
 
   // ── Font & Outline ──────────────────────────────────────────────────────
@@ -677,10 +725,36 @@ export class Canvas2DRenderer {
     const fontSize = this.settings.fontSize;
     const color = this.settings.colors[message.authorType];
 
+    // Semi-transparent background (matches CSS .yt-chat-overlay-message-with-author)
+    ctx.globalAlpha = alpha * 0.25;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
+    this.roundRect(ctx, x, y, msg.width, msg.height, 6);
+    ctx.fill();
+    ctx.globalAlpha = alpha;
+
+    // Author info (matches CSS showAuthor settings)
+    const showAuthor = this.settings.showAuthor[message.authorType];
+    const textX = x + 12;
+    let textY = y + 8;
+    if (showAuthor && message.author) {
+      const photo = message.authorPhotoUrl
+        ? this.authorPhotoCache.get(message.authorPhotoUrl)
+        : undefined;
+      if (photo?.complete && photo.naturalWidth > 0) {
+        ctx.drawImage(photo, textX, textY, 24, 24);
+      }
+      const nameFont = `bold ${Math.round(fontSize * 0.85)}px system-ui, -apple-system, sans-serif`;
+      ctx.font = nameFont;
+      ctx.textBaseline = 'top';
+      ctx.fillStyle = color;
+      ctx.fillText(message.author, textX + (photo ? 28 : 0), textY + 6);
+      textY += 28;
+    }
+
     if (message.content.length > 0) {
-      this.renderContentSegments(ctx, message.content, x, y, color, alpha, fontSize);
+      this.renderContentSegments(ctx, message.content, textX, textY, color, alpha, fontSize);
     } else if (message.text.length > 0) {
-      this.renderSegment(ctx, message.text, x, y, color, alpha, fontSize);
+      this.renderSegment(ctx, message.text, textX, textY, color, alpha, fontSize);
     }
   }
 
@@ -779,7 +853,26 @@ export class Canvas2DRenderer {
 
     // Amount badge
     const textX = x + 12;
-    const badgeY = y + 8;
+    let contentY = y + 8;
+
+    // Author photo + name (matches CSS renderer superchat header)
+    const showAuthor = this.settings.showAuthor.superChat;
+    if (showAuthor && msg.message.author) {
+      const photo = msg.message.authorPhotoUrl
+        ? this.authorPhotoCache.get(msg.message.authorPhotoUrl)
+        : undefined;
+      if (photo?.complete && photo.naturalWidth > 0) {
+        ctx.drawImage(photo, textX, contentY, 24, 24);
+      }
+      ctx.font = `bold ${Math.round(fontSize * 0.85)}px system-ui, -apple-system, sans-serif`;
+      ctx.textBaseline = 'top';
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(msg.message.author, textX + (photo ? 28 : 0), contentY + 6);
+      contentY += 28;
+    }
+
+    // Amount badge
+    const badgeY = contentY;
     ctx.font = `bold ${Math.round(fontSize * 0.85)}px system-ui, -apple-system, sans-serif`;
     ctx.textBaseline = 'top';
     ctx.fillStyle = '#ffffff';
@@ -789,6 +882,26 @@ export class Canvas2DRenderer {
     if (message.text) {
       const msgY = badgeY + Math.round(fontSize * 1.1) + 6;
       this.renderSegment(ctx, message.text, textX, msgY, '#ffffff', alpha, fontSize);
+    }
+
+    // Sticker
+    if (superChat.sticker) {
+      const cached = this.stickerCache.get(superChat.sticker.url);
+      const stickerImg = cached?.complete && cached.naturalWidth > 0 ? cached : null;
+      if (stickerImg) {
+        const stickerSize = Math.round(fontSize * 2);
+        ctx.globalAlpha = alpha;
+        ctx.drawImage(
+          stickerImg,
+          textX,
+          badgeY +
+            Math.round(fontSize * 1.1) +
+            6 +
+            (message.text ? Math.round(fontSize * 1.4) + 6 : 0),
+          stickerSize,
+          stickerSize
+        );
+      }
     }
   }
 
