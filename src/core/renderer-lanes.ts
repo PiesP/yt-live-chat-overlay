@@ -230,6 +230,21 @@ export class LaneAllocator {
     this.siftUp(idx);
   }
 
+  /** Shift all lane available times by a fixed offset (e.g., pause duration). */
+  shiftAll(offsetMs: number): void {
+    if (offsetMs <= 0 || this.heap.length === 0) return;
+    for (let i = 0; i < this.heap.length; i++) {
+      const entry = this.heap[i];
+      if (entry) {
+        this.heap[i] = [entry[0], entry[1] + offsetMs];
+      }
+    }
+    // Rebuild heap invariant after bulk update
+    for (let i = Math.floor(this.heap.length / 2) - 1; i >= 0; i--) {
+      this.siftDown(i);
+    }
+  }
+
   // ── Binary min-heap operations ──────────────────────────────────────
 
   private siftDown(startIdx: number): void {

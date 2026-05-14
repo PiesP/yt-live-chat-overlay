@@ -865,8 +865,9 @@ export class Renderer {
     // a subsequent visibility-change pause does not compute a stale,
     // inflated pausedDuration from an earlier pause point.
     const now = performance.now();
+    let pausedDuration = 0;
     if (this.pausedAt !== null) {
-      const pausedDuration = Math.min(Math.max(0, now - this.pausedAt), 60_000);
+      pausedDuration = Math.min(Math.max(0, now - this.pausedAt), 60_000);
       for (const active of [...this.activeMessages]) {
         active.pausedDuration += pausedDuration;
       }
@@ -881,7 +882,10 @@ export class Renderer {
 
     this.resumeStabilizeUntil = performance.now() + 2000;
 
-    this.laneAllocator.reset(this.overlay.getDimensions());
+    // Shift lane occupancy by paused duration instead of resetting —
+    // active messages still occupy their lanes with remaining duration,
+    // and resetting would let new messages be placed on occupied lanes.
+    this.laneAllocator.shiftAll(pausedDuration);
     this.isPaused = false;
     this.startOpacityUpdates();
 
