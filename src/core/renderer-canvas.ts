@@ -628,7 +628,10 @@ export class Renderer extends RendererBase {
         );
         ctx.restore();
       }
-      const nameFont = `bold ${Math.round(fontSize * rendererLayout.authorFontScale)}px system-ui, -apple-system, sans-serif`;
+      const nameFont = getFontString(
+        Math.round(fontSize * rendererLayout.authorFontScale),
+        this.settings.fontWeight
+      );
       ctx.font = nameFont;
       ctx.textBaseline = 'top';
       this.strokeTextOutline(ctx, message.author, textX + (photo ? 28 : 0), textY + 6);
@@ -706,7 +709,10 @@ export class Renderer extends RendererBase {
         );
         ctx.restore();
       }
-      ctx.font = `bold ${Math.round(fontSize * rendererLayout.authorFontScale)}px system-ui, -apple-system, sans-serif`;
+      ctx.font = getFontString(
+        Math.round(fontSize * rendererLayout.authorFontScale),
+        this.settings.fontWeight
+      );
       ctx.textBaseline = 'top';
       this.strokeTextOutline(ctx, msg.message.author, textX + (photo ? 28 : 0), contentY + 6);
       ctx.fillStyle = '#ffffff';
