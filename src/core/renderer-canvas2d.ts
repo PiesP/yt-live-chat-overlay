@@ -17,7 +17,12 @@
 import type { BurstLevel, ChatMessage, ContentSegment, OverlaySettings } from '@app-types';
 import { PerAuthorRateLimiter } from '@core/author-rate-limiter';
 import { BurstDetector } from '@core/burst-detector';
-import { computeDliosDuration, rendererLayout } from '@core/design-tokens';
+import {
+  computeDliosDuration,
+  colors as designColors,
+  parseRgbColor,
+  rendererLayout,
+} from '@core/design-tokens';
 import { createLogger } from '@core/logging';
 import { ObservabilityReporter } from '@core/observability';
 import type { Overlay } from '@core/overlay';
@@ -710,11 +715,17 @@ export class Canvas2DRenderer {
     }
   }
 
-  /** Convert a #RRGGBB hex color to an rgba() string with custom alpha. */
-  private static rgbaHex(hex: string, alpha: number): string {
-    const r = parseInt(hex.slice(1, 3), 16);
-    const g = parseInt(hex.slice(3, 5), 16);
-    const b = parseInt(hex.slice(5, 7), 16);
+  /** Convert a hex color or rgb() string to an rgba() string with custom alpha. */
+  private static rgbaHex(color: string, alpha: number): string {
+    // rgb(r, g, b) format from design-tokens RgbColor
+    const rgbMatch = color.match(/rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)/);
+    if (rgbMatch) {
+      return `rgba(${rgbMatch[1]}, ${rgbMatch[2]}, ${rgbMatch[3]}, ${alpha})`;
+    }
+    // #RRGGBB hex format
+    const r = parseInt(color.slice(1, 3), 16);
+    const g = parseInt(color.slice(3, 5), 16);
+    const b = parseInt(color.slice(5, 7), 16);
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
   }
 
@@ -741,16 +752,12 @@ export class Canvas2DRenderer {
     const topAlpha = Math.min(1, superChatAlpha + 0.06);
     const bottomAlpha = Math.max(0.4, superChatAlpha - 0.08);
 
-    const tierColors: Record<string, string> = {
-      blue: '#1e88e5',
-      cyan: '#00bfff',
-      green: '#1de9b6',
-      yellow: '#ffca28',
-      orange: '#f57c00',
-      magenta: '#e91e63',
-      red: '#e62117',
-    };
-    const baseColor = tierColors[superChat.tier] ?? '#1e88e5';
+    // Resolve tier color from actual YouTube SuperChat header color,
+    // falling back to design tokens (matches CSS renderer behavior).
+    const sourceColor = superChat.headerBackgroundColor || superChat.backgroundColor;
+    const parsed = sourceColor ? parseRgbColor(sourceColor) : null;
+    const rgb = parsed ?? designColors.superChat[superChat.tier];
+    const baseColor = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
 
     // Card background gradient (matches CSS --yt-overlay-superchat-*-opacity)
     const grad = ctx.createLinearGradient(x, y, x, y + h);
