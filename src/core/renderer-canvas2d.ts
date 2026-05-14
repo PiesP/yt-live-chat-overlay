@@ -14,7 +14,7 @@
  * the CSS renderer's buildTextShadow + buildTextStroke.
  */
 
-import type { ChatMessage, ContentSegment, OverlaySettings } from '@app-types';
+import type { BurstLevel, ChatMessage, ContentSegment, OverlaySettings } from '@app-types';
 import { PerAuthorRateLimiter } from '@core/author-rate-limiter';
 import { BurstDetector } from '@core/burst-detector';
 import { computeDliosDuration, rendererLayout } from '@core/design-tokens';
@@ -835,8 +835,27 @@ export class Canvas2DRenderer {
     ctx.closePath();
   }
 
+  private static readonly BURST_SPEED_MULTIPLIER: Record<BurstLevel, number> = {
+    normal: 1.0,
+    elevated: 1.1,
+    high: 1.2,
+    extreme: 1.35,
+  };
+
   private getEffectiveSpeed(): number {
-    const speed = this.settings.speedPxPerSec * this.playbackRate;
+    let speed = this.settings.speedPxPerSec * this.playbackRate;
+
+    // EMA-based proactive speed adaptation (matches CSS renderer)
+    const emaRate = this.burstDetector.getEmaRate();
+    if (emaRate > 5) {
+      const emaMultiplier = 1 + Math.min((emaRate - 5) / 15, 0.35);
+      speed *= emaMultiplier;
+    }
+
+    // Burst-level multiplier
+    const burstLevel = this.burstDetector.getLevel();
+    speed *= Canvas2DRenderer.BURST_SPEED_MULTIPLIER[burstLevel];
+
     return Math.max(1, speed);
   }
 
