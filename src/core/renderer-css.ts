@@ -619,6 +619,16 @@ export class Renderer extends RendererBase {
     });
   }
 
+  /** Re-insert a queued message into pendingQueue preserving priority order. */
+  private reinsertByPriority(queued: QueuedMessage): void {
+    const insertBefore = this.pendingQueue.findIndex((q) => q.priority < queued.priority);
+    if (insertBefore === -1) {
+      this.pendingQueue.push(queued);
+    } else {
+      this.pendingQueue.splice(insertBefore, 0, queued);
+    }
+  }
+
   private processQueue(): void {
     if (this.isPaused) return;
     if (this.isAntiBlockActive()) return;
@@ -665,12 +675,7 @@ export class Renderer extends RendererBase {
         queued.nextAttemptAt = performance.now() + result.waitMs;
         this.scheduleRetry(Math.min(result.waitMs, rendererLayout.retryDelayMaxMs));
         this.pendingQueue.shift();
-        const insertBefore = this.pendingQueue.findIndex((q) => q.priority < queued.priority);
-        if (insertBefore === -1) {
-          this.pendingQueue.push(queued);
-        } else {
-          this.pendingQueue.splice(insertBefore, 0, queued);
-        }
+        this.reinsertByPriority(queued);
         processed++;
         continue;
       }
@@ -680,12 +685,7 @@ export class Renderer extends RendererBase {
         droppedCount++;
         queued.retries++;
         if (queued.retries < rendererLayout.maxRetries) {
-          const insertBefore = this.pendingQueue.findIndex((q) => q.priority < queued.priority);
-          if (insertBefore === -1) {
-            this.pendingQueue.push(queued);
-          } else {
-            this.pendingQueue.splice(insertBefore, 0, queued);
-          }
+          this.reinsertByPriority(queued);
         } else {
           this.observability.onMessageDropped('other');
         }
