@@ -283,21 +283,12 @@ export const cloneSettings = (settings: Readonly<OverlaySettings>): OverlaySetti
 const resolveLimits = (key: string): Readonly<{ min: number; max: number }> => {
   const direct = SETTINGS_LIMITS[key as keyof typeof SETTINGS_LIMITS];
   if (direct) return direct;
-  const outlineKey = OUTLINE_LIMITS_MAP[key as keyof typeof OUTLINE_LIMITS_MAP];
-  if (outlineKey) return SETTINGS_LIMITS[outlineKey];
+  // Outline keys use separate limit entries to avoid clashing with root keys
+  if (key === 'widthPx') return SETTINGS_LIMITS.outlineWidthPx;
+  if (key === 'blurPx') return SETTINGS_LIMITS.outlineBlurPx;
+  if (key === 'opacity') return SETTINGS_LIMITS.outlineOpacity;
   throw new Error(`Unknown setting key: ${key}`);
 };
-
-const OUTLINE_LIMITS_MAP: Record<
-  Exclude<OutlineSettingKey, 'enabled'>,
-  keyof typeof SETTINGS_LIMITS
-> = {
-  widthPx: 'outlineWidthPx',
-  blurPx: 'outlineBlurPx',
-  opacity: 'outlineOpacity',
-};
-
-export { OUTLINE_LIMITS_MAP };
 
 // ── Normalization ───────────────────────────────────────────────────────────────
 

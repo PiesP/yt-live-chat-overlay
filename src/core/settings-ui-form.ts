@@ -2,7 +2,6 @@ import type { OverlaySettings } from '@app-types';
 import {
   AUTHOR_COLOR_KEYS,
   cloneSettings,
-  OUTLINE_LIMITS_MAP,
   type OutlineSettingKey,
   type RootNumericSettingKey,
   type RootScalarSettingKey,
@@ -329,12 +328,20 @@ const normalizeRootNumericInputValue = (
   );
 };
 
+const outlineLimitsKey = (
+  key: Exclude<OutlineSettingKey, 'enabled'>
+): keyof typeof SETTINGS_LIMITS => {
+  if (key === 'widthPx') return 'outlineWidthPx';
+  if (key === 'blurPx') return 'outlineBlurPx';
+  return 'outlineOpacity';
+};
+
 const normalizeOutlineNumericInputValue = (
   key: Exclude<OutlineSettingKey, 'enabled'>,
   value: unknown,
   fallback: number
 ): number => {
-  const limitsKey = OUTLINE_LIMITS_MAP[key];
+  const limitsKey = outlineLimitsKey(key);
   return normalizeNumericValue(value, fallback, SETTINGS_LIMITS[limitsKey], false);
 };
 
@@ -344,7 +351,7 @@ const getNumericInputAttributes = (
   const limitsKey =
     key in SETTINGS_LIMITS
       ? (key as keyof typeof SETTINGS_LIMITS)
-      : OUTLINE_LIMITS_MAP[key as Exclude<OutlineSettingKey, 'enabled'>];
+      : outlineLimitsKey(key as Exclude<OutlineSettingKey, 'enabled'>);
   const limits = SETTINGS_LIMITS[limitsKey];
   const scale = getRootScale(key as RootScalarSettingKey);
   return {
