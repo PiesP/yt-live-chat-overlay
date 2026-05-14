@@ -38,6 +38,36 @@ type RootNumericSettingKey = Exclude<
   | 'showBacklogIndicator'
 >;
 
+/** Root setting metadata: defines type, category, and visual-change flag.
+ *  Drives the normalizeSettings() loop — single source of truth for type routing. */
+type SettingMeta = { type: 'boolean' | 'number' | 'string'; visual: boolean };
+const ROOT_SETTING_META: Record<RootScalarSettingKey, SettingMeta> = {
+  enabled: { type: 'boolean', visual: false },
+  danmakuMode: { type: 'string', visual: false },
+  speedPxPerSec: { type: 'number', visual: true },
+  fontSize: { type: 'number', visual: true },
+  opacity: { type: 'number', visual: true },
+  superChatOpacity: { type: 'number', visual: true },
+  safeTop: { type: 'number', visual: true },
+  safeBottom: { type: 'number', visual: true },
+  maxConcurrentMessages: { type: 'number', visual: true },
+  allowShortTextMessages: { type: 'boolean', visual: true },
+  minTextLength: { type: 'number', visual: true },
+  logLevel: { type: 'string', visual: false },
+  laneSpacing: { type: 'number', visual: true },
+  showDebugOverlay: { type: 'boolean', visual: false },
+  rendererType: { type: 'string', visual: false },
+  authorRateLimitEnabled: { type: 'boolean', visual: false },
+  authorRateLimitWindowMs: { type: 'number', visual: false },
+  authorRateLimitMaxMessages: { type: 'number', visual: false },
+  backlogMaxRate: { type: 'number', visual: false },
+  backlogSpeedMultiplier: { type: 'number', visual: false },
+  showBacklogIndicator: { type: 'boolean', visual: false },
+  backlogMode: { type: 'string', visual: false },
+  backlogRecentMinutes: { type: 'number', visual: false },
+};
+
+/** Numeric root keys (subset of ROOT_SETTING_KEYS). */
 export const ROOT_NUMERIC_KEYS = [
   'speedPxPerSec',
   'fontSize',
@@ -79,6 +109,20 @@ export const ROOT_SETTING_KEYS = [
   'showBacklogIndicator',
   'backlogMode',
   'backlogRecentMinutes',
+] as const satisfies readonly RootScalarSettingKey[];
+
+/** Visual root keys: changes here require a full renderer reset. */
+export const VISUAL_ROOT_KEYS = [
+  'speedPxPerSec',
+  'fontSize',
+  'opacity',
+  'superChatOpacity',
+  'safeTop',
+  'safeBottom',
+  'maxConcurrentMessages',
+  'allowShortTextMessages',
+  'minTextLength',
+  'laneSpacing',
 ] as const satisfies readonly RootScalarSettingKey[];
 
 export const OUTLINE_SETTING_KEYS = [
@@ -194,28 +238,6 @@ export const DEFAULT_SETTINGS = {
   backlogRecentMinutes: 5,
 } as const satisfies Readonly<OverlaySettings>;
 
-// ── Visual reset keys ───────────────────────────────────────────────────────────
-
-/**
- * Root-level setting keys that affect visual rendering and therefore
- * require a full renderer reset (clear messages + replay) when changed.
- *
- * Non-visual settings (logLevel, showDebugOverlay, backlog, rate limit
- * configuration, etc.) are excluded — those are applied without reset.
- */
-export const VISUAL_ROOT_KEYS = [
-  'speedPxPerSec',
-  'fontSize',
-  'opacity',
-  'superChatOpacity',
-  'safeTop',
-  'safeBottom',
-  'maxConcurrentMessages',
-  'allowShortTextMessages',
-  'minTextLength',
-  'laneSpacing',
-] as const satisfies readonly RootScalarSettingKey[];
-
 // ── Color validation ────────────────────────────────────────────────────────────
 
 /**
@@ -262,43 +284,39 @@ export { OUTLINE_LIMITS_MAP };
 
 // ── Normalization ───────────────────────────────────────────────────────────────
 
-const pickBool = (value: unknown, fallback: boolean): boolean =>
-  typeof value === 'boolean' ? value : fallback;
+const STRING_VALIDATORS: Partial<Record<RootScalarSettingKey, (v: string) => boolean>> = {
+  backlogMode: (v) => VALID_BACKLOG_MODES.includes(v as (typeof VALID_BACKLOG_MODES)[number]),
+  danmakuMode: (v) => VALID_DANMAKU_MODES.includes(v as (typeof VALID_DANMAKU_MODES)[number]),
+  rendererType: (v) => VALID_RENDERER_TYPES.includes(v as (typeof VALID_RENDERER_TYPES)[number]),
+  logLevel: (v) => isLogLevel(v),
+};
 
 const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings => {
   const d = DEFAULT_SETTINGS;
   const n = cloneSettings(DEFAULT_SETTINGS);
 
-  n.enabled = pickBool(settings.enabled, d.enabled);
-  n.allowShortTextMessages = pickBool(settings.allowShortTextMessages, d.allowShortTextMessages);
-  n.showDebugOverlay = pickBool(settings.showDebugOverlay, d.showDebugOverlay);
-  n.authorRateLimitEnabled = pickBool(settings.authorRateLimitEnabled, d.authorRateLimitEnabled);
-  n.showBacklogIndicator = pickBool(settings.showBacklogIndicator, d.showBacklogIndicator);
+  const pickBool = (v: unknown, fallback: boolean): boolean =>
+    typeof v === 'boolean' ? v : fallback;
 
-  // Backlog mode: validate against allowed values
-  n.backlogMode = VALID_BACKLOG_MODES.includes(
-    settings.backlogMode as (typeof VALID_BACKLOG_MODES)[number]
-  )
-    ? settings.backlogMode
-    : d.backlogMode;
-
-  n.danmakuMode = VALID_DANMAKU_MODES.includes(
-    settings.danmakuMode as (typeof VALID_DANMAKU_MODES)[number]
-  )
-    ? settings.danmakuMode
-    : d.danmakuMode;
-
-  n.rendererType = VALID_RENDERER_TYPES.includes(
-    settings.rendererType as (typeof VALID_RENDERER_TYPES)[number]
-  )
-    ? settings.rendererType
-    : d.rendererType;
-
-  for (const key of ROOT_NUMERIC_KEYS) {
-    n[key] = clampNumber(settings[key], d[key], resolveLimits(key));
+  // Root scalar settings: type-routed via ROOT_SETTING_META
+  const s = n as unknown as Record<string, unknown>;
+  for (const keyStr of Object.keys(ROOT_SETTING_META)) {
+    const meta = ROOT_SETTING_META[keyStr as RootScalarSettingKey];
+    const raw = settings[keyStr as keyof OverlaySettings];
+    if (meta.type === 'boolean') {
+      s[keyStr] = typeof raw === 'boolean' ? raw : d[keyStr as keyof OverlaySettings];
+    } else if (meta.type === 'number') {
+      s[keyStr] = clampNumber(
+        raw,
+        d[keyStr as keyof OverlaySettings] as number,
+        resolveLimits(keyStr)
+      );
+    } else {
+      const validator = STRING_VALIDATORS[keyStr as RootScalarSettingKey];
+      s[keyStr] =
+        typeof raw === 'string' && validator?.(raw) ? raw : d[keyStr as keyof OverlaySettings];
+    }
   }
-
-  n.logLevel = isLogLevel(settings.logLevel) ? settings.logLevel : d.logLevel;
 
   for (const key of SHOW_AUTHOR_KEYS) {
     n.showAuthor[key] = pickBool(settings.showAuthor[key], d.showAuthor[key]);
