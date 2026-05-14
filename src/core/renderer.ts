@@ -1,30 +1,13 @@
 /**
- * Renderer
+ * Renderer — CSS DOM-animation based renderer.
  *
- * Renders chat messages with Nico-nico style flowing animation.
- * Manages lanes and collision detection.
- *
- * Pause state machine: two flags control animation playback.
- *
- *   isPaused      — tab visibility (visibilitychange event)
- *   isVideoPaused — video element pause (pause/play events)
- *
- *   pause()           → sets isPaused, freezes all active CSS animations
- *   resume()          → clears isPaused, restarts animations via negative delay
- *   pauseForVideo()   → sets isVideoPaused, calls pause() if tab is visible
- *   resumeForVideo()  → clears isVideoPaused, calls resume() if tab is visible
- *
- * Invariants:
- *   - pauseForVideo() is a no-op when isPaused is already true
- *   - resumeForVideo() checks document.hidden, not isPaused
- *   - resume() early-returns when isVideoPaused is true
- *   - addMessage() drops messages while video is paused
- *   - ChatSource skips API polling when video is paused
+ * Extends RendererBase for shared state machine, rate limiting, burst
+ * detection, and lane allocation.  This class owns only the CSS-specific
+ * rendering: DOM element creation, @keyframes animation setup, opacity
+ * fade timer, and style injection.
  */
 
 import type { ChatMessage, DanmakuMode, OverlayDimensions, OverlaySettings } from '@app-types';
-import { PerAuthorRateLimiter } from '@core/author-rate-limiter';
-import { BurstDetector } from '@core/burst-detector';
 import {
   buildTextShadow,
   buildTextStroke,
@@ -33,9 +16,9 @@ import {
   shadows,
 } from '@core/design-tokens';
 import { createLogger } from '@core/logging';
-import { ObservabilityReporter } from '@core/observability';
 import type { Overlay } from '@core/overlay';
-import { LaneAllocator, type LanePlacement } from '@core/renderer-lanes';
+import { RendererBase, type RendererUpdateOptions } from '@core/renderer-base';
+import type { LanePlacement } from '@core/renderer-lanes';
 import { RendererMessageBuilder } from '@core/renderer-message-builder';
 import { RENDERER_STATIC_STYLES } from '@core/renderer-styles';
 
@@ -45,7 +28,7 @@ interface QueuedMessage {
   message: ChatMessage;
   nextAttemptAt: number;
   priority: number;
-  retries: number; // retry count for dropped messages
+  retries: number;
 }
 
 interface ActiveMessage {
@@ -54,7 +37,6 @@ interface ActiveMessage {
   readonly baseDuration: number;
   readonly baseOpacity: number;
   readonly cleanup: () => void;
-  /** Accumulated time (ms) the message spent paused while tab was hidden. */
   pausedDuration: number;
 }
 
@@ -68,28 +50,12 @@ interface RenderContext {
   dimensions: OverlayDimensions;
 }
 
-interface RendererUpdateOptions {
-  resetState?: boolean;
-}
-
-export class Renderer {
-  readonly observability: ObservabilityReporter;
-  private burstDetector: BurstDetector;
-  private authorRateLimiter: PerAuthorRateLimiter;
-  private backlogSpeedMultiplier: number = 1;
-  private overlay: Overlay;
-  private settings: OverlaySettings;
-  private readonly laneAllocator: LaneAllocator;
+export class Renderer extends RendererBase {
   private readonly messageBuilder: RendererMessageBuilder;
   private activeMessages: Set<ActiveMessage> = new Set();
   private readonly pendingQueue: QueuedMessage[] = [];
-  private isPaused = false;
-  private isVideoPaused = false;
   private danmakuMode: DanmakuMode = 'scroll';
-  private pausedAt: number | null = null;
-  private playbackRate = 1;
   private lastWarningTime = 0;
-  private backlogPaused = false;
   private static readonly SWEEP_TOLERANCE_MS = 500;
   private static readonly MAX_ANIMATION_JITTER_MS = 15;
   private static readonly QUEUE_MAX_SIZE = 50;
@@ -104,32 +70,14 @@ export class Renderer {
   private overlayDimensionsUnsubscribe: (() => void) | null = null;
   private sweepCounter = 0;
   static readonly BACKGROUND_QUEUE_MAX = 10;
-  /** Timestamp until which the EMA speed multiplier is suppressed after resume. */
-  private resumeStabilizeUntil: number = 0;
   private processQueueScheduled = false;
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
-    this.overlay = overlay;
-    this.settings = settings;
+    super(overlay, settings);
     this.messageBuilder = new RendererMessageBuilder(() => this.settings);
-    this.laneAllocator = new LaneAllocator({
-      getEffectiveSpeedPxPerSec: () => this.getEffectiveSpeedPxPerSec(),
-      getDanmakuMode: () => this.danmakuMode,
-      safeTop: this.settings.safeTop,
-      laneSpacing: this.settings.laneSpacing,
-    });
-    this.laneAllocator.reset(this.overlay.getDimensions());
-    this.injectStyles();
-    this.observability = new ObservabilityReporter(this.settings.showDebugOverlay);
     this.danmakuMode = this.settings.danmakuMode;
-    this.burstDetector = new BurstDetector(this.observability);
-    this.burstDetector.start();
-    this.authorRateLimiter = new PerAuthorRateLimiter(() => this.burstDetector.getLevel());
-    this.authorRateLimiter.updateConfig({
-      enabled: settings.authorRateLimitEnabled,
-      windowMs: settings.authorRateLimitWindowMs,
-      maxPerWindow: settings.authorRateLimitMaxMessages,
-    });
+    this.injectStyles();
+
     this.overlayDimensionsUnsubscribe = this.overlay.onDimensionsChanged((dimensions) => {
       this.handleOverlayDimensionsChange(dimensions);
     });
@@ -137,84 +85,202 @@ export class Renderer {
     this.startOpacityUpdates();
   }
 
-  /** Callback to signal RuntimeSession to pause/resume backlog injection */
-  onBacklogPauseChange: ((paused: boolean) => void) | null = null;
+  get laneCount(): number {
+    return this.laneAllocator.getLaneCount();
+  }
 
-  private resetRenderedState(): void {
+  // ── Message ingress ──────────────────────────────────────────────────
+
+  addMessage(message: ChatMessage): void {
+    if (!this.isMessageAllowed(message)) return;
+
+    const priority = RendererBase.getMessagePriority(message);
+
+    if (this.pendingQueue.length >= Renderer.QUEUE_MAX_SIZE) {
+      const lowestPriorityIndex = this.findLowestPriorityIndex();
+      if (lowestPriorityIndex >= 0) {
+        const removed = this.pendingQueue[lowestPriorityIndex];
+        if (removed && priority > removed.priority) {
+          this.pendingQueue.splice(lowestPriorityIndex, 1);
+          this.observability.onMessageDropped('queue_overflow');
+        } else {
+          this.observability.onMessageDropped('queue_overflow');
+          return;
+        }
+      } else {
+        this.pendingQueue.shift();
+        this.observability.onMessageDropped('queue_overflow');
+      }
+    }
+
+    const queued: QueuedMessage = { message, nextAttemptAt: 0, priority, retries: 0 };
+    const insertIndex = this.pendingQueue.findIndex((q) => q.priority < priority);
+    if (insertIndex === -1) {
+      this.pendingQueue.push(queued);
+    } else {
+      this.pendingQueue.splice(insertIndex, 0, queued);
+    }
+
+    if (!this.isPaused) {
+      this.scheduleProcessQueue();
+    }
+  }
+
+  // ── Queue processing ─────────────────────────────────────────────────
+
+  private scheduleProcessQueue(): void {
+    if (this.processQueueScheduled || this.isPaused) return;
+    this.processQueueScheduled = true;
+    queueMicrotask(() => {
+      this.processQueueScheduled = false;
+      if (!this.isPaused) {
+        this.processQueue();
+      }
+    });
+  }
+
+  private processQueue(): void {
+    if (this.isPaused) return;
+
+    this.sweepStaleAnimations();
     this.clearRetryTimer();
 
-    for (const active of [...this.activeMessages]) {
-      this.removeMessage(active);
-    }
+    this.observability.updateQueueDepth(this.pendingQueue.length);
+    this.observability.updateActiveMessages(this.activeMessages.size);
+    this.observability.updateLaneUtilization(
+      this.activeMessages.size / Math.max(1, this.laneAllocator.getLaneCount())
+    );
 
-    this.pendingQueue.length = 0;
-    this.backlogPaused = false;
-  }
+    if (this.pendingQueue.length === 0) return;
 
-  private handleOverlayDimensionsChange(dimensions: OverlayDimensions | null): void {
-    if (!dimensions) {
-      this.resetRenderedState();
-      this.laneAllocator.reset(null);
+    const now = performance.now();
+    const nextMessage = this.pendingQueue[0];
+    if (!nextMessage) return;
+
+    if (nextMessage.nextAttemptAt > now) {
+      this.scheduleRetry(nextMessage.nextAttemptAt - now);
       return;
     }
 
-    this.laneAllocator.reset(dimensions);
+    if (this.activeMessages.size >= this.settings.maxConcurrentMessages) {
+      this.logPerformanceWarning();
+    }
 
-    if (!this.isPaused && !this.isVideoPaused && this.pendingQueue.length > 0) {
-      this.processQueue();
+    let processed = 0;
+    let droppedCount = 0;
+
+    while (this.pendingQueue.length > 0 && processed < Renderer.BATCH_SIZE) {
+      const queued = this.pendingQueue[0];
+      if (!queued) break;
+
+      if (queued.nextAttemptAt > performance.now()) {
+        this.scheduleRetry(queued.nextAttemptAt - performance.now());
+        break;
+      }
+
+      const result = this.renderOneMessage(queued.message);
+
+      if (result.status === 'deferred') {
+        queued.nextAttemptAt = performance.now() + result.waitMs;
+        this.scheduleRetry(Math.min(result.waitMs, rendererLayout.retryDelayMaxMs));
+        this.pendingQueue.shift();
+        processed++;
+        continue;
+      }
+
+      if (result.status === 'dropped') {
+        this.pendingQueue.shift();
+        droppedCount++;
+        queued.retries++;
+        if (queued.retries < Renderer.MAX_RETRY_ATTEMPTS) {
+          const insertBefore = this.pendingQueue.findIndex((q) => q.priority < queued.priority);
+          if (insertBefore === -1) {
+            this.pendingQueue.push(queued);
+          } else {
+            this.pendingQueue.splice(insertBefore, 0, queued);
+          }
+        } else {
+          this.observability.onMessageDropped('other');
+        }
+        continue;
+      }
+
+      this.pendingQueue.shift();
+      processed++;
+    }
+
+    if (droppedCount > 0) {
+      log.debug(`${droppedCount} message(s) dropped, requeued with retry`);
+    }
+
+    const queueRatio = this.pendingQueue.length / Renderer.QUEUE_MAX_SIZE;
+    if (queueRatio > 0.8 && this.backlogPaused === false) {
+      this.backlogPaused = true;
+      this.onBacklogPauseChange?.(true);
+    } else if (queueRatio < 0.4 && this.backlogPaused === true) {
+      this.backlogPaused = false;
+      this.onBacklogPauseChange?.(false);
+    }
+
+    if (this.pendingQueue.length > 0 && !this.isPaused) {
+      this.scheduleRetry(rendererLayout.retryDelayMinMs);
     }
   }
 
-  private injectStyles(): void {
-    if (!this.styleElement) {
-      this.styleElement = document.createElement('style');
-      this.styleElement.textContent = RENDERER_STATIC_STYLES;
-      document.head.appendChild(this.styleElement);
-    }
-
-    this.updateStyleVariables();
-  }
-
-  private updateStyleVariables(): void {
-    const container = this.overlay.getContainer();
-    if (!container) {
-      return;
-    }
-
-    const textShadow = buildTextShadow(this.settings.outline);
-    const textStroke = buildTextStroke(this.settings.outline);
-    const regularMessageTextShadow = [
-      textShadow,
-      shadows.text.md,
-      '0 0 8px rgba(0, 0, 0, 0.7)',
-    ].join(', ');
-    const superChatBaseOpacity = Math.min(1, Math.max(0.4, this.settings.superChatOpacity));
-    const superChatTopOpacity = Math.min(1, superChatBaseOpacity + 0.06);
-    const superChatBottomOpacity = Math.max(0.4, superChatBaseOpacity - 0.08);
-
-    container.style.setProperty('--yt-overlay-message-text-shadow', textShadow);
-    container.style.setProperty(
-      '--yt-overlay-regular-message-text-shadow',
-      regularMessageTextShadow
-    );
-    container.style.setProperty('--yt-overlay-text-stroke', textStroke);
-    container.style.setProperty('--yt-overlay-superchat-base-opacity', `${superChatBaseOpacity}`);
-    container.style.setProperty('--yt-overlay-superchat-top-opacity', `${superChatTopOpacity}`);
-    container.style.setProperty(
-      '--yt-overlay-superchat-bottom-opacity',
-      `${superChatBottomOpacity}`
-    );
-  }
+  // ── CSS rendering ────────────────────────────────────────────────────
 
   private getRenderContext(): RenderContext | null {
     const container = this.overlay.getContainer();
     const dimensions = this.overlay.getDimensions();
+    if (!container?.isConnected || !dimensions) return null;
+    return { container, dimensions };
+  }
 
-    if (!container?.isConnected || !dimensions) {
-      return null;
+  private renderOneMessage(message: ChatMessage): RenderResult {
+    const renderContext = this.getRenderContext();
+    if (!renderContext) {
+      return { status: 'dropped' };
     }
 
-    return { container, dimensions };
+    const { container, dimensions } = renderContext;
+    const estimated = this.messageBuilder.estimateMessageDimensions(message);
+    const messageHeight = estimated.height;
+
+    const placement = this.laneAllocator.findPlacement(messageHeight, dimensions);
+    if (placement === null) {
+      this.observability.onMessageDropped('no_lane_available');
+      return { status: 'dropped' };
+    }
+
+    if (placement.waitMs > 0) {
+      return { status: 'deferred', waitMs: placement.waitMs };
+    }
+
+    const builtMessage = this.messageBuilder.buildMessageElement(message);
+    if (!builtMessage) {
+      return { status: 'dropped' };
+    }
+
+    const { element, isSuperChat, isMembership } = builtMessage;
+    const baseOpacity = this.settings.opacity;
+    const effectiveOpacity = message.isBacklog ? baseOpacity * 0.5 : baseOpacity;
+    this.applyCommonMessageStyles(element, message, isSuperChat, isMembership, effectiveOpacity);
+
+    const activeMessage = this.setupMessageAnimation(
+      element,
+      placement,
+      estimated.width,
+      messageHeight,
+      dimensions,
+      message,
+      effectiveOpacity
+    );
+
+    container.appendChild(element);
+    this.activeMessages.add(activeMessage);
+    this.observability.onMessageRendered();
+
+    return { status: 'rendered' };
   }
 
   private setupMessageAnimation(
@@ -229,7 +295,6 @@ export class Renderer {
     const fontSize = this.settings.fontSize;
     const { lane, laneY } = placement;
     const mode = this.danmakuMode;
-
     const effectiveSpeedPxPerSec = this.getEffectiveSpeedPxPerSec();
     const now = performance.now();
 
@@ -238,7 +303,6 @@ export class Renderer {
     let startTime = now + laneDelay;
 
     if (mode === 'top' || mode === 'bottom') {
-      // Fixed modes: stay visible for ~4s then fade
       element.style.left = `${Math.random() * (dimensions.width - Math.min(textWidth, dimensions.width))}px`;
       if (mode === 'top') {
         element.style.top = `${dimensions.height * this.settings.safeTop}px`;
@@ -251,20 +315,14 @@ export class Renderer {
       startTime = now;
       this.laneAllocator.commitPlacement(placement, textWidth, startTime);
     } else if (mode === 'reverse') {
-      // LTR: constant-velocity from left to right
-      // The CSS animation for reverse covers 2*screenWidth + 100px.
-      // entryOffset defaults to 0 in CSS (var default).
       const reverseTotalDistance = dimensions.width * 2 + 100;
       baseDuration = computeDliosDuration(reverseTotalDistance, effectiveSpeedPxPerSec);
-
       element.style.top = `${laneY}px`;
       element.style.right = '0';
       element.style.visibility = 'visible';
       startTime = now + laneDelay;
       this.laneAllocator.commitPlacement(placement, textWidth, startTime);
     } else {
-      // RTL (scroll): constant-velocity from right to left
-      // Duration varies per-comment so every comment scrolls at velocity
       element.style.top = `${laneY}px`;
       element.style.left = `${dimensions.width}px`;
       element.style.visibility = 'visible';
@@ -282,7 +340,6 @@ export class Renderer {
       const jitter = Math.floor(Math.random() * 30);
       const entryOffset = baseOffset + jitter;
 
-      // totalDistance = entryOffset + screenWidth + textWidth + exitPadding
       const totalDistance = entryOffset + dimensions.width + textWidth + exitPadding;
       baseDuration = computeDliosDuration(totalDistance, effectiveSpeedPxPerSec);
 
@@ -329,300 +386,48 @@ export class Renderer {
     };
   }
 
-  addMessage(message: ChatMessage): void {
-    // Note: message deduplication is handled by RuntimeSession.acceptForRenderer()
-    // using the session-level MessageIdRegistry. The renderer trusts that messages
-    // it receives are already deduplicated.
+  // ── Style injection ──────────────────────────────────────────────────
 
-    // Drop messages while video is paused — they would queue up and flood on resume.
-    if (this.isVideoPaused) {
-      this.observability.onMessageDropped('other');
-      return;
+  private injectStyles(): void {
+    if (!this.styleElement) {
+      this.styleElement = document.createElement('style');
+      this.styleElement.textContent = RENDERER_STATIC_STYLES;
+      document.head.appendChild(this.styleElement);
     }
-
-    this.observability.onMessageReceived();
-    this.burstDetector.onMessageReceived();
-
-    const priority = Renderer.getMessagePriority(message);
-    if (!this.authorRateLimiter.allow(message.author ?? 'anonymous', priority)) {
-      log.debug('Drop [rate_limited]:', message.author, message.kind, message.id);
-      this.observability.onMessageDropped('rate_limited');
-      return;
-    }
-
-    if (this.pendingQueue.length >= Renderer.QUEUE_MAX_SIZE) {
-      const lowestPriorityIndex = this.findLowestPriorityIndex();
-      if (lowestPriorityIndex >= 0) {
-        const removed = this.pendingQueue[lowestPriorityIndex];
-        if (removed && priority > removed.priority) {
-          log.debug(
-            'Drop [queue_overflow/replaced]:',
-            removed.message.author,
-            removed.message.kind,
-            'priority:',
-            removed.priority,
-            '← replaced by',
-            message.author,
-            'priority:',
-            priority
-          );
-          this.pendingQueue.splice(lowestPriorityIndex, 1);
-          this.observability.onMessageDropped('queue_overflow');
-        } else {
-          log.debug(
-            'Drop [queue_overflow/rejected]:',
-            message.author,
-            message.kind,
-            'priority:',
-            priority
-          );
-          this.observability.onMessageDropped('queue_overflow');
-          return;
-        }
-      } else {
-        this.pendingQueue.shift();
-        this.observability.onMessageDropped('queue_overflow');
-      }
-    }
-
-    const queued: QueuedMessage = { message, nextAttemptAt: 0, priority, retries: 0 };
-    // Insert in priority order (highest first) so processQueue doesn't need to sort
-    const insertIndex = this.pendingQueue.findIndex((q) => q.priority < priority);
-    if (insertIndex === -1) {
-      this.pendingQueue.push(queued);
-    } else {
-      this.pendingQueue.splice(insertIndex, 0, queued);
-    }
-
-    if (!this.isPaused) {
-      this.scheduleProcessQueue();
-    }
+    this.updateStyleVariables();
   }
 
-  /** Defer processQueue to the next microtask, collapsing multiple enqueue events. */
-  private scheduleProcessQueue(): void {
-    if (this.processQueueScheduled || this.isPaused) return;
-    this.processQueueScheduled = true;
-    queueMicrotask(() => {
-      this.processQueueScheduled = false;
-      if (!this.isPaused) {
-        this.processQueue();
-      }
-    });
-  }
+  private updateStyleVariables(): void {
+    const container = this.overlay.getContainer();
+    if (!container) return;
 
-  private sweepStaleAnimations(): void {
-    if (this.activeMessages.size === 0) return;
-    this.sweepCounter++;
-    if (this.sweepCounter % Renderer.SWEEP_INTERVAL !== 0) return;
+    const textShadow = buildTextShadow(this.settings.outline);
+    const textStroke = buildTextStroke(this.settings.outline);
+    const regularMessageTextShadow = [
+      textShadow,
+      shadows.text.md,
+      '0 0 8px rgba(0, 0, 0, 0.7)',
+    ].join(', ');
+    const superChatBaseOpacity = Math.min(1, Math.max(0.4, this.settings.superChatOpacity));
+    const superChatTopOpacity = Math.min(1, superChatBaseOpacity + 0.06);
+    const superChatBottomOpacity = Math.max(0.4, superChatBaseOpacity - 0.08);
 
-    const toRemove: ActiveMessage[] = [];
-    const now = performance.now();
-    for (const active of this.activeMessages) {
-      try {
-        // Remove messages that exceeded their expected lifetime + tolerance
-        const elapsed = now - active.startTime - active.pausedDuration;
-        if (elapsed >= active.baseDuration + Renderer.SWEEP_TOLERANCE_MS) {
-          toRemove.push(active);
-        }
-      } catch (error) {
-        log.debug('Failed to check animation state during sweep:', error);
-        toRemove.push(active);
-      }
-    }
-
-    for (const active of toRemove) {
-      this.activeMessages.delete(active);
-      if (active.element.parentNode) {
-        active.element.remove();
-      }
-    }
-  }
-
-  get laneCount(): number {
-    return this.laneAllocator.getLaneCount();
-  }
-
-  /** Find the index of the queued message with the lowest priority (for queue overflow replacement). */
-  private findLowestPriorityIndex(): number {
-    const len = this.pendingQueue.length;
-    if (len === 0) return -1;
-    // Queue is maintained highest-first, so the last item has the lowest priority.
-    return len - 1;
-  }
-
-  setBacklogSpeedMultiplier(multiplier: number): void {
-    this.backlogSpeedMultiplier = Math.max(1, multiplier);
-  }
-
-  private static getMessagePriority(message: ChatMessage): number {
-    let priority = rendererLayout.kindPriority[message.kind];
-    if (message.isBacklog) priority -= 50;
-    return priority;
-  }
-
-  private processQueue(): void {
-    if (this.isPaused) {
-      return;
-    }
-
-    this.sweepStaleAnimations();
-    this.clearRetryTimer();
-
-    this.observability.updateQueueDepth(this.pendingQueue.length);
-    this.observability.updateActiveMessages(this.activeMessages.size);
-    this.observability.updateLaneUtilization(
-      this.activeMessages.size / Math.max(1, this.laneAllocator.getLaneCount())
+    container.style.setProperty('--yt-overlay-message-text-shadow', textShadow);
+    container.style.setProperty(
+      '--yt-overlay-regular-message-text-shadow',
+      regularMessageTextShadow
     );
-
-    if (this.pendingQueue.length === 0) {
-      return;
-    }
-
-    const now = performance.now();
-    const nextMessage = this.pendingQueue[0];
-    if (!nextMessage) return;
-
-    if (nextMessage.nextAttemptAt > now) {
-      this.scheduleRetry(nextMessage.nextAttemptAt - now);
-      return;
-    }
-
-    if (this.activeMessages.size >= this.settings.maxConcurrentMessages) {
-      this.logPerformanceWarning();
-    }
-
-    let processed = 0;
-    let droppedCount = 0;
-
-    while (this.pendingQueue.length > 0 && processed < Renderer.BATCH_SIZE) {
-      const queued = this.pendingQueue[0];
-      if (!queued) break;
-
-      if (queued.nextAttemptAt > performance.now()) {
-        this.scheduleRetry(queued.nextAttemptAt - performance.now());
-        break;
-      }
-
-      const result = this.renderMessage(queued.message);
-
-      if (result.status === 'deferred') {
-        queued.nextAttemptAt = performance.now() + result.waitMs;
-        this.scheduleRetry(Math.min(result.waitMs, rendererLayout.retryDelayMaxMs));
-        this.pendingQueue.shift();
-        processed++;
-        continue;
-      }
-
-      // Drop with retry: re-enqueue at lower priority if retries remain
-      if (result.status === 'dropped') {
-        this.pendingQueue.shift();
-        droppedCount++;
-        queued.retries++;
-        if (queued.retries < Renderer.MAX_RETRY_ATTEMPTS) {
-          // Re-insert after existing messages of the same or higher priority
-          // to avoid starvation. The queue is highest-first, so we find the
-          // first message strictly lower priority and insert before it.
-          const insertBefore = this.pendingQueue.findIndex((q) => q.priority < queued.priority);
-          if (insertBefore === -1) {
-            this.pendingQueue.push(queued);
-          } else {
-            this.pendingQueue.splice(insertBefore, 0, queued);
-          }
-        } else {
-          log.debug('Drop [max_retries_exceeded]:', queued.message.author, queued.message.kind);
-          this.observability.onMessageDropped('other');
-        }
-        // Do NOT increment processed — the message was not rendered and
-        // has been re-queued for a later retry. Counting it against the
-        // batch limit would reduce effective throughput.
-        continue;
-      }
-
-      // Successfully rendered or deduplicated — remove from queue
-      this.pendingQueue.shift();
-      processed++;
-    }
-
-    if (droppedCount > 0) {
-      log.debug(`${droppedCount} message(s) dropped, requeued with retry`);
-    }
-
-    // Pause backlog injection if queue is saturated
-    const queueRatio = this.pendingQueue.length / Renderer.QUEUE_MAX_SIZE;
-    if (queueRatio > 0.8 && this.backlogPaused === false) {
-      this.backlogPaused = true;
-      this.onBacklogPauseChange?.(true);
-    } else if (queueRatio < 0.4 && this.backlogPaused === true) {
-      this.backlogPaused = false;
-      this.onBacklogPauseChange?.(false);
-    }
-
-    if (this.pendingQueue.length > 0 && !this.isPaused) {
-      this.scheduleRetry(rendererLayout.retryDelayMinMs);
-    }
-  }
-
-  /** Force a CSS reflow to restart an animation after modifying its properties. */
-  private static triggerAnimationRestart(element: HTMLElement): void {
-    element.style.animation = 'none';
-    void element.offsetWidth;
-    element.style.animation = '';
-  }
-
-  private getEffectiveSpeedPxPerSec(): number {
-    let speed = this.settings.speedPxPerSec * this.playbackRate;
-
-    // Suppress the EMA-based proactive speed adaptation during the
-    // 2-second stabilisation window after a tab-visibility resume.
-    // The backlog drained from the pending queue can cause a transient
-    // EMA spike that would otherwise make animations visibly faster
-    // than intended.
-    if (performance.now() >= this.resumeStabilizeUntil) {
-      const emaRate = this.burstDetector.getEmaRate();
-      if (emaRate > 5) {
-        const emaMultiplier = 1 + Math.min((emaRate - 5) / 15, 0.35);
-        speed *= emaMultiplier;
-      }
-    }
-
-    // Burst-level multiplier — the averaged, long-term component.
-    const burstLevel = this.burstDetector.getLevel();
-    speed *= rendererLayout.burstSpeedMultiplier[burstLevel];
-
-    return Math.max(1, speed);
-  }
-
-  private scheduleRetry(waitMs: number): void {
-    if (this.isPaused) return;
-
-    const delay = Math.max(
-      rendererLayout.retryDelayMinMs,
-      Math.min(waitMs, rendererLayout.retryDelayMaxMs)
+    container.style.setProperty('--yt-overlay-text-stroke', textStroke);
+    container.style.setProperty('--yt-overlay-superchat-base-opacity', `${superChatBaseOpacity}`);
+    container.style.setProperty('--yt-overlay-superchat-top-opacity', `${superChatTopOpacity}`);
+    container.style.setProperty(
+      '--yt-overlay-superchat-bottom-opacity',
+      `${superChatBottomOpacity}`
     );
-    this.clearRetryTimer();
-
-    this.retryTimer = setTimeout(() => {
-      this.retryTimer = null;
-      this.processQueue();
-    }, delay);
   }
 
-  private clearRetryTimer(): void {
-    if (this.retryTimer !== null) {
-      clearTimeout(this.retryTimer);
-      this.retryTimer = null;
-    }
-  }
+  // ── Opacity fade timer ───────────────────────────────────────────────
 
-  /**
-   * Periodically fade active messages based on their age, and remove
-   * messages that exceed the 60-second playback-time window.
-   *
-   * Messages fade linearly from full opacity (age=0) to fully transparent
-   * (age=60s), creating a smooth "past messages grow faint" effect while
-   * keeping the visible window limited to recent chat.
-   */
   private startOpacityUpdates(): void {
     this.opacityUpdateTimer = setInterval(() => {
       this.updateMessageOpacity();
@@ -636,18 +441,14 @@ export class Renderer {
     for (const active of this.activeMessages) {
       try {
         const elapsed = now - active.startTime - active.pausedDuration;
-
         if (elapsed >= Renderer.MAX_MESSAGE_AGE_MS) {
           toRemove.push(active);
           continue;
         }
-
-        // Linear fade: full opacity at age=0, near-zero at age=60s
         const ageRatio = elapsed / Renderer.MAX_MESSAGE_AGE_MS;
         const fadeFactor = Math.max(0, 1 - ageRatio);
         active.element.style.opacity = `${active.baseOpacity * fadeFactor}`;
-      } catch (error) {
-        log.debug('Failed to update message opacity:', error);
+      } catch {
         toRemove.push(active);
       }
     }
@@ -664,107 +465,70 @@ export class Renderer {
     }
   }
 
-  private logPerformanceWarning(): void {
+  // ── Animation restart helper ─────────────────────────────────────────
+
+  private static triggerAnimationRestart(element: HTMLElement): void {
+    element.style.animation = 'none';
+    void element.offsetWidth;
+    element.style.animation = '';
+  }
+
+  // ── Retry scheduling ─────────────────────────────────────────────────
+
+  private scheduleRetry(waitMs: number): void {
+    if (this.isPaused) return;
+    const delay = Math.max(
+      rendererLayout.retryDelayMinMs,
+      Math.min(waitMs, rendererLayout.retryDelayMaxMs)
+    );
+    this.clearRetryTimer();
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null;
+      this.processQueue();
+    }, delay);
+  }
+
+  private clearRetryTimer(): void {
+    if (this.retryTimer !== null) {
+      clearTimeout(this.retryTimer);
+      this.retryTimer = null;
+    }
+  }
+
+  // ── Sweep stale animations ───────────────────────────────────────────
+
+  private sweepStaleAnimations(): void {
+    if (this.activeMessages.size === 0) return;
+    this.sweepCounter++;
+    if (this.sweepCounter % Renderer.SWEEP_INTERVAL !== 0) return;
+
+    const toRemove: ActiveMessage[] = [];
     const now = performance.now();
-    if (now - this.lastWarningTime < 10_000) {
-      return;
+    for (const active of this.activeMessages) {
+      try {
+        const elapsed = now - active.startTime - active.pausedDuration;
+        if (elapsed >= active.baseDuration + Renderer.SWEEP_TOLERANCE_MS) {
+          toRemove.push(active);
+        }
+      } catch {
+        toRemove.push(active);
+      }
     }
 
-    this.lastWarningTime = now;
-    log.warn(
-      `Performance warning: ${this.activeMessages.size} concurrent messages ` +
-        `(recommended max: ${this.settings.maxConcurrentMessages}).`
-    );
-  }
-
-  private applyCommonMessageStyles(
-    element: HTMLDivElement,
-    message: ChatMessage,
-    isSuperChat: boolean,
-    isMembership: boolean,
-    effectiveOpacity: number
-  ): void {
-    element.style.fontSize = `${this.settings.fontSize}px`;
-
-    element.style.opacity = `${effectiveOpacity}`;
-
-    if (!isSuperChat && !isMembership) {
-      element.style.color = this.settings.colors[message.authorType];
+    for (const active of toRemove) {
+      this.activeMessages.delete(active);
+      if (active.element.parentNode) {
+        active.element.remove();
+      }
     }
   }
 
-  private renderMessage(message: ChatMessage): RenderResult {
-    const renderContext = this.getRenderContext();
-    if (!renderContext) {
-      log.debug('Cannot render: container or dimensions missing');
-      return { status: 'dropped' };
-    }
+  // ── Message lifecycle ────────────────────────────────────────────────
 
-    const { container, dimensions } = renderContext;
-
-    const estimated = this.messageBuilder.estimateMessageDimensions(message);
-    const messageHeight = estimated.height;
-
-    const placement = this.laneAllocator.findPlacement(messageHeight, dimensions);
-    if (placement === null) {
-      this.observability.onMessageDropped('no_lane_available');
-      log.debug(
-        `No available lane for message (height: ${messageHeight}px). ` +
-          `Active messages: ${this.activeMessages.size}, Lanes: ${dimensions.laneCount}, ` +
-          `Queue size: ${this.pendingQueue.length}`
-      );
-      return { status: 'dropped' };
-    }
-
-    if (placement.waitMs > 0) {
-      return { status: 'deferred', waitMs: placement.waitMs };
-    }
-
-    const builtMessage = this.messageBuilder.buildMessageElement(message);
-    if (!builtMessage) {
-      return { status: 'dropped' };
-    }
-
-    const { element, isSuperChat, isMembership } = builtMessage;
-
-    // Backlog messages rendered at reduced opacity so they recede behind
-    // real-time messages without overwhelming the screen.
-    const baseOpacity = this.settings.opacity;
-    const effectiveOpacity = message.isBacklog ? baseOpacity * 0.5 : baseOpacity;
-    this.applyCommonMessageStyles(element, message, isSuperChat, isMembership, effectiveOpacity);
-
-    const activeMessage = this.setupMessageAnimation(
-      element,
-      placement,
-      estimated.width,
-      messageHeight,
-      dimensions,
-      message,
-      effectiveOpacity
-    );
-
-    container.appendChild(element);
-
-    this.activeMessages.add(activeMessage);
-    this.observability.onMessageRendered();
-
-    log.debug('Rendering message:', {
-      text: message.text.slice(0, 20),
-      author: message.author,
-      authorType: message.authorType,
-      kind: message.kind,
-      isSuperChat,
-      superChatTier: message.superChat?.tier,
-      superChatAmount: message.superChat?.amount,
-      color: isSuperChat ? 'tier-based' : this.settings.colors[message.authorType],
-      lane: placement.lane.index,
-      laneSpan: placement.laneSpan,
-      width: estimated.width,
-      height: messageHeight,
-      dimensions,
-    });
-
-    return { status: 'rendered' };
+  private findLowestPriorityIndex(): number {
+    const len = this.pendingQueue.length;
+    if (len === 0) return -1;
+    return len - 1;
   }
 
   private removeMessageByElement(element: HTMLDivElement): void {
@@ -778,19 +542,42 @@ export class Renderer {
 
   private removeMessage(active: ActiveMessage): void {
     this.activeMessages.delete(active);
-
     try {
       active.element.removeEventListener('animationend', active.cleanup);
     } catch {
-      // Element may already be detached — ignore.
+      // Element may already be detached.
     }
-
     if (active.element.parentNode) {
       active.element.remove();
     }
   }
 
-  /** Trim the pending queue to BACKGROUND_QUEUE_MAX, keeping highest-priority messages. */
+  private applyCommonMessageStyles(
+    element: HTMLDivElement,
+    message: ChatMessage,
+    isSuperChat: boolean,
+    isMembership: boolean,
+    effectiveOpacity: number
+  ): void {
+    element.style.fontSize = `${this.settings.fontSize}px`;
+    element.style.opacity = `${effectiveOpacity}`;
+    if (!isSuperChat && !isMembership) {
+      element.style.color = this.settings.colors[message.authorType];
+    }
+  }
+
+  private logPerformanceWarning(): void {
+    const now = performance.now();
+    if (now - this.lastWarningTime < 10_000) return;
+    this.lastWarningTime = now;
+    log.warn(
+      `Performance warning: ${this.activeMessages.size} concurrent messages ` +
+        `(recommended max: ${this.settings.maxConcurrentMessages}).`
+    );
+  }
+
+  // ── Queue trimming ───────────────────────────────────────────────────
+
   trimBackgroundQueue(): void {
     if (this.pendingQueue.length <= Renderer.BACKGROUND_QUEUE_MAX) return;
     this.pendingQueue.sort(
@@ -799,76 +586,40 @@ export class Renderer {
     this.pendingQueue.length = Renderer.BACKGROUND_QUEUE_MAX;
   }
 
-  updateSettings(settings: OverlaySettings, options: RendererUpdateOptions = {}): void {
-    this.settings = settings;
-    this.danmakuMode = settings.danmakuMode;
-    this.injectStyles();
-    this.observability.setShowDebug(settings.showDebugOverlay);
+  // ── Dimension change handler ─────────────────────────────────────────
 
-    this.authorRateLimiter.updateConfig({
-      enabled: settings.authorRateLimitEnabled,
-      windowMs: settings.authorRateLimitWindowMs,
-      maxPerWindow: settings.authorRateLimitMaxMessages,
-    });
-
-    if (options.resetState) {
-      this.resetRenderedState();
-      this.laneAllocator.reset(this.overlay.getDimensions());
+  private handleOverlayDimensionsChange(dimensions: OverlayDimensions | null): void {
+    if (!dimensions) {
+      this.resetState();
+      this.laneAllocator.reset(null);
       return;
     }
-
-    if (this.laneAllocator.isEmpty()) {
-      this.laneAllocator.reset(this.overlay.getDimensions());
+    this.laneAllocator.reset(dimensions);
+    if (!this.isPaused && !this.isVideoPaused && this.pendingQueue.length > 0) {
+      this.processQueue();
     }
   }
 
-  pause(): void {
-    if (this.isPaused) return;
+  // ── Settings update ──────────────────────────────────────────────────
 
-    log.debug('Pausing all animations');
-    this.isPaused = true;
-    this.pausedAt = performance.now();
+  updateSettings(settings: OverlaySettings, options: RendererUpdateOptions = {}): void {
+    super.updateSettings(settings, options);
+    this.danmakuMode = settings.danmakuMode;
+    this.injectStyles();
+  }
+
+  // ── Abstract hook implementations ────────────────────────────────────
+
+  protected onPause(): void {
     this.clearRetryTimer();
     this.stopOpacityUpdates();
-    this.burstDetector.pause();
     for (const active of this.activeMessages) {
       active.element.style.animationPlayState = 'paused';
     }
-    log.debug(`Paused ${this.activeMessages.size} animations`);
   }
 
-  resume(): void {
-    if (!this.isPaused) return;
-
-    // Always reset pausedAt and resume burstDetector, regardless of
-    // video pause state. The pausedAt timestamp must be cleared so that
-    // a subsequent visibility-change pause does not compute a stale,
-    // inflated pausedDuration from an earlier pause point.
-    const now = performance.now();
-    let pausedDuration = 0;
-    if (this.pausedAt !== null) {
-      pausedDuration = Math.min(Math.max(0, now - this.pausedAt), 60_000);
-      for (const active of [...this.activeMessages]) {
-        active.pausedDuration += pausedDuration;
-      }
-    }
-    this.pausedAt = null;
-
-    this.burstDetector.resume();
-
-    if (this.isVideoPaused) {
-      return;
-    }
-
-    this.resumeStabilizeUntil = performance.now() + 2000;
-
-    // Shift lane occupancy by paused duration instead of resetting —
-    // active messages still occupy their lanes with remaining duration,
-    // and resetting would let new messages be placed on occupied lanes.
-    this.laneAllocator.shiftAll(pausedDuration);
-    this.isPaused = false;
+  protected onResume(): void {
     this.startOpacityUpdates();
-
     for (const active of [...this.activeMessages]) {
       try {
         const elapsed = performance.now() - active.startTime - active.pausedDuration;
@@ -881,78 +632,51 @@ export class Renderer {
         el.style.setProperty('--yt-msg-delay', `${-elapsed}ms`);
         Renderer.triggerAnimationRestart(el);
         el.style.animationPlayState = 'running';
-      } catch (error) {
-        log.warn('Failed to reset animation on resume:', error);
+      } catch {
         active.element.style.animationPlayState = 'running';
       }
     }
-
-    log.debug(`Resumed ${this.activeMessages.size} animations`);
     this.processQueue();
   }
 
-  /** Pause animations due to video playback pause. No-op when already paused for visibility. */
-  pauseForVideo(): void {
-    if (this.isVideoPaused) return;
-    this.isVideoPaused = true;
-    if (!this.isPaused) {
-      this.pause();
-    }
-  }
-
-  /** Resume animations after video playback resumes. Skips if tab is still hidden. */
-  resumeForVideo(): void {
-    if (!this.isVideoPaused) return;
-    this.isVideoPaused = false;
-    if (!document.hidden) {
-      this.resume();
-    }
-  }
-
-  setPlaybackRate(rate: number): void {
-    if (rate <= 0) {
-      log.warn('Invalid playback rate:', rate);
-      return;
-    }
-
-    this.playbackRate = rate;
-
-    log.debug(`Setting playback rate to ${rate}x for ${this.activeMessages.size} animations`);
-
+  onPlaybackRateChange(rate: number): void {
     for (const active of this.activeMessages) {
       try {
         const elapsed = performance.now() - active.startTime - active.pausedDuration;
         const adjustedDuration = active.baseDuration / rate;
-
         const el = active.element;
         el.style.setProperty('--yt-msg-duration', `${adjustedDuration}ms`);
         el.style.setProperty('--yt-msg-delay', `${-Math.min(elapsed, active.baseDuration)}ms`);
         Renderer.triggerAnimationRestart(el);
-      } catch (error) {
-        log.warn('Failed to update animation rate:', error);
+      } catch {
+        // Best-effort update.
       }
     }
   }
 
-  destroy(): void {
-    this.isPaused = false;
-    this.isVideoPaused = false;
+  protected applyPausedDuration(pausedMs: number): void {
+    for (const active of [...this.activeMessages]) {
+      active.pausedDuration += pausedMs;
+    }
+  }
+
+  protected resetState(): void {
+    this.clearRetryTimer();
+    for (const active of [...this.activeMessages]) {
+      this.removeMessage(active);
+    }
+    this.pendingQueue.length = 0;
+    this.backlogPaused = false;
+  }
+
+  protected onDestroy(): void {
     this.stopOpacityUpdates();
     this.overlayDimensionsUnsubscribe?.();
     this.overlayDimensionsUnsubscribe = null;
-
-    this.resetRenderedState();
+    this.resetState();
     this.pausedAt = null;
-
     this.playbackRate = 1;
-
     this.styleElement?.remove();
     this.styleElement = null;
-
-    this.burstDetector.destroy();
-    this.authorRateLimiter.destroy();
-    this.observability.destroy();
-
-    log.debug('Destroyed');
   }
 }
