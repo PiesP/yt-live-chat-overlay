@@ -83,7 +83,7 @@ const STATIC_STYLES = `
     perspective: 1000;
     transform: translateZ(0);
     contain: paint layout style;
-    text-rendering: geometricPrecision;
+    text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
