@@ -10,7 +10,6 @@
 
 import type { ChatMessage, OverlaySettings } from '@app-types';
 import { type ChatEvent, extractChatEvents } from '@core/chat-message-parser';
-import { ChatSourceEventBus } from '@core/chat-source-events';
 import { findElementMatch, isAbortError, sleep, throwIfAborted, VIDEO_SELECTORS } from '@core/dom';
 import { createLogger } from '@core/logging';
 import {
@@ -94,7 +93,6 @@ export abstract class ChatSource {
   private lastActivityTime = 0;
   protected bootstrap: ChatBootstrapData | null = null;
   private readonly recentMessages: ChatMessage[] = [];
-  protected readonly eventBus = new ChatSourceEventBus();
 
   /** Polling interval (ms) used by waitWhilePaused while the tab is hidden. */
   private static readonly PAUSE_POLL_INTERVAL_MS = 250;
@@ -222,10 +220,6 @@ export abstract class ChatSource {
 
     this.rememberMessage(message);
     this.callback(message);
-    this.eventBus.emit('messages', {
-      messages: [message],
-      isInitialSeed: false,
-    });
   }
 
   /**
@@ -247,7 +241,6 @@ export abstract class ChatSource {
       this.rememberMessage(message);
     }
     this.callback(messages, isInitialSeed);
-    this.eventBus.emit('messages', { messages, isInitialSeed });
   }
 
   protected async requestPayload<TCallArgs extends unknown[]>(
@@ -374,7 +367,6 @@ export abstract class ChatSource {
     this.bootstrap = null;
     this.lastActivityTime = 0;
     this.recentMessages.length = 0;
-    this.eventBus.removeAllListeners();
   }
 
   /**
