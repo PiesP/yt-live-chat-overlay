@@ -387,7 +387,12 @@ export class RuntimeSession {
       if (this.disposed) return;
       log.debug('Video playing — resuming comment flow');
       this.renderer?.resumeForVideo();
-      this.chatSource?.setPaused(false);
+      // Only resume chat source polling when the tab is visible.
+      // When hidden, the renderer won't display messages, so polling
+      // would just accumulate stale messages that flood on tab return.
+      if (!document.hidden) {
+        this.chatSource?.setPaused(false);
+      }
     };
 
     const attachListeners = (video: HTMLVideoElement): void => {
