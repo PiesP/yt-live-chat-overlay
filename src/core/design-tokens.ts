@@ -218,7 +218,7 @@ export function buildTextShadow(outline: OutlineSettings): string {
   const baseOpacity = Math.min(1, outline.opacity);
   const shadowColor = `rgba(0, 0, 0, ${baseOpacity})`;
   const glowColor = `rgba(0, 0, 0, ${Math.min(1, baseOpacity * 0.85)})`;
-  const glowBlur = Math.max(1, blur * 1.5);
+  const glowBlur = Math.max(0.5, blur * 0.8);
 
   const corners = (
     [[-1, -1] as const, [1, -1] as const, [-1, 1] as const, [1, 1] as const] as const
@@ -237,7 +237,7 @@ export function buildTextStroke(outline: OutlineSettings): string {
     return '0 transparent';
   }
 
-  const strokeWidth = Math.max(0.2, outline.widthPx * 0.3);
-  const strokeOpacity = Math.min(1, outline.opacity * 0.7);
+  const strokeWidth = Math.max(0.3, outline.widthPx * 0.5);
+  const strokeOpacity = Math.min(1, outline.opacity * 0.8);
   return `${strokeWidth}px rgba(0, 0, 0, ${strokeOpacity})`;
 }
