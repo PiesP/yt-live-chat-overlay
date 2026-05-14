@@ -9,10 +9,10 @@ import type { ChatMessage, OverlaySettings } from '@app-types';
 import { PerAuthorRateLimiter } from '@core/author-rate-limiter';
 import { BurstDetector } from '@core/burst-detector';
 import { rendererLayout } from '@core/design-tokens';
+import { LaneAllocator } from '@core/lane-allocator';
 import { createLogger } from '@core/logging';
 import { ObservabilityReporter } from '@core/observability';
 import type { Overlay } from '@core/overlay';
-import { LaneAllocator } from '@core/renderer-lanes';
 
 const log = createLogger('RendererBase');
 

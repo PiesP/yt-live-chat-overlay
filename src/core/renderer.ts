@@ -15,10 +15,10 @@ import {
   rendererLayout,
   shadows,
 } from '@core/design-tokens';
+import type { LanePlacement } from '@core/lane-allocator';
 import { createLogger } from '@core/logging';
 import type { Overlay } from '@core/overlay';
 import { RendererBase, type RendererUpdateOptions } from '@core/renderer-base';
-import type { LanePlacement } from '@core/renderer-lanes';
 import { RendererMessageBuilder } from '@core/renderer-message-builder';
 import { RENDERER_STATIC_STYLES } from '@core/renderer-styles';
 

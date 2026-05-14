@@ -116,30 +116,57 @@ export const rendererLayout = {
   globalStaggerMs: 20,
   safeDistanceScale: 0.05,
   safeDistanceMin: 4,
-  // Base lane height multiplier: fontSize * this value gives the lane slot height.
-  // line-height: 1.1 on messages; 1.12 ensures the full rendered line-height
-  // (22px at fontSize=20) fits within the lane slot without overflow, while
-  // keeping wasted vertical space minimal.
   laneHeightMultiplier: 1.12,
   retryDelayMinMs: 32,
   retryDelayMaxMs: 800,
-  /** Duration (ms) for top/bottom fixed-position modes. */
   topBottomDurationMs: 4000,
-  /** DLIOS safety gap (pixels) — minimum separation between same-lane comments */
   dliosSafetyGap: 4,
-  /** Message kind priority for queue ordering (higher = more important) */
   kindPriority: {
     superchat: 200,
     membership: 100,
     text: 0,
   } as const,
-  /** Burst-level speed multiplier for adaptive scrolling */
   burstSpeedMultiplier: {
     normal: 1.0,
     elevated: 1.1,
     high: 1.2,
     extreme: 1.35,
   } as const,
+  // ── Extracted magic numbers ──
+  /** Horizontal entry offset range for scroll mode (spread across lanes) */
+  entryOffsetRangeMs: 200,
+  /** Random jitter added to lane delay (ms) */
+  laneJitterMs: 30,
+  /** Author section vertical gap in px (photo + name height) */
+  authorSectionHeightPx: 28,
+  /** Message padding: horizontal (px) */
+  paddingH: 12,
+  /** Message padding: vertical (px) */
+  paddingV: 8,
+  /** SuperChat card min width (px) */
+  superchatMinWidth: 280,
+  /** SuperChat card max width (px) */
+  superchatMaxWidth: 640,
+  /** Max concurrent messages per renderer */
+  maxConcurrent: 50,
+  /** Pending queue max size */
+  queueMaxSize: 50,
+  /** Batch size for queue processing */
+  batchSize: 3,
+  /** Max retry attempts for deferred messages */
+  maxRetries: 3,
+  /** Sweep interval (process every N calls) */
+  sweepInterval: 8,
+  /** Sweep tolerance (ms) */
+  sweepToleranceMs: 500,
+  /** Max animation jitter (ms) */
+  maxAnimationJitterMs: 15,
+  /** Opacity update interval (ms) — 0 = disabled (use frame-based fade) */
+  opacityUpdateIntervalMs: 0,
+  /** Background queue max */
+  backgroundQueueMax: 10,
+  /** Max message age for fade-out (ms) */
+  maxMessageAgeMs: 60_000,
 } as const;
 
 /**
