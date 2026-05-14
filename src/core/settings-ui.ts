@@ -421,6 +421,7 @@ export class SettingsUi {
     this.flushPendingPreview();
     this.button?.remove();
     this.backdrop?.remove();
+    document.removeEventListener('keydown', this.handleKeydown);
 
     const styleElement = document.getElementById(STYLE_ID);
     styleElement?.remove();
