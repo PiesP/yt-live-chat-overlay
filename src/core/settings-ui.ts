@@ -418,7 +418,6 @@ export class SettingsUi {
 
   destroy(): void {
     this.close();
-    this.flushPendingPreview();
     this.button?.remove();
     this.backdrop?.remove();
     document.removeEventListener('keydown', this.handleKeydown);
