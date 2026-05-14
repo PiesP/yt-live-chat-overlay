@@ -101,9 +101,6 @@ export abstract class ChatSource {
   private lastActivityTime = 0;
   protected bootstrap: ChatBootstrapData | null = null;
   private readonly recentMessages: ChatMessage[] = [];
-  private cachedPlayback: PlaybackSnapshot | null = null;
-  private rafCleanup: (() => void) | null = null;
-  private rafId: number | null = null;
   protected readonly eventBus = new ChatSourceEventBus();
 
   constructor(getSettings: () => Readonly<OverlaySettings>) {
@@ -192,19 +189,10 @@ export abstract class ChatSource {
   }
 
   protected getPlaybackSnapshot(): PlaybackSnapshot | null {
-    if (this.cachedPlayback) {
-      // Read actual video.paused from the DOM instead of the cached value,
-      // which can be stale right after a play/pause event (rAF sync hasn't
-      // fired yet). The cached offsetMs is sufficient for positioning.
-      const match = findElementMatch<HTMLVideoElement>(VIDEO_SELECTORS);
-      if (match && Number.isFinite(match.element.currentTime)) {
-        return {
-          offsetMs: this.cachedPlayback.offsetMs,
-          paused: match.element.paused,
-        };
-      }
-      return this.cachedPlayback;
-    }
+    // Always read fresh data from the DOM. The rAF cache (cachedPlayback)
+    // is only used for the paused flag optimization in replay mode;
+    // offsetMs must be current to avoid stale-position bugs after
+    // tab-hide/resume (rAF stops when hidden).
     const match = findElementMatch<HTMLVideoElement>(VIDEO_SELECTORS);
     if (!match) return null;
     const { element: video } = match;
@@ -216,34 +204,13 @@ export abstract class ChatSource {
   }
 
   protected installAnimationFrameSync(): void {
-    const el = findElementMatch<HTMLVideoElement>(VIDEO_SELECTORS);
-    if (!el) return;
-    const v = el.element;
-
-    const sync = (): void => {
-      if (!Number.isFinite(v.currentTime)) {
-        this.cachedPlayback = null;
-      } else {
-        this.cachedPlayback = {
-          offsetMs: Math.max(0, Math.floor(v.currentTime * 1000)),
-          paused: v.paused,
-        };
-      }
-      this.rafId = requestAnimationFrame(sync);
-    };
-    this.rafId = requestAnimationFrame(sync);
-    this.rafCleanup = () => {
-      if (this.rafId !== null) {
-        cancelAnimationFrame(this.rafId);
-        this.rafId = null;
-      }
-    };
+    // No-op. Previously installed an rAF loop to cache video.currentTime,
+    // but getPlaybackSnapshot() now reads fresh from the DOM to avoid
+    // stale-offset bugs after tab-hide/resume (rAF pauses when hidden).
   }
 
   protected removeAnimationFrameSync(): void {
-    this.rafCleanup?.();
-    this.rafCleanup = null;
-    this.cachedPlayback = null;
+    // No-op. rAF loop removed — getPlaybackSnapshot() reads fresh from DOM.
   }
 
   protected markActivity(): void {
@@ -421,7 +388,6 @@ export abstract class ChatSource {
     this.bootstrap = null;
     this.lastActivityTime = 0;
     this.recentMessages.length = 0;
-    this.removeAnimationFrameSync();
     this.eventBus.removeAllListeners();
   }
 
@@ -756,9 +722,15 @@ class ReplayChatSource extends ChatSource {
     this.lastReplayRequestedOffsetMs = offsetMs;
     this.eventBus.emit('offset-jump', { fromOffsetMs, toOffsetMs: offsetMs });
     if (this.replayMode === 'playerSeek' && this.replayPlayerSeekContinuation) {
-      void this.fetchReplayPlayerSeek(offsetMs, undefined).then(() => {
-        this.flushReplayBuffer(offsetMs);
-      });
+      void this.fetchReplayPlayerSeek(offsetMs, undefined)
+        .then(() => {
+          this.flushReplayBuffer(offsetMs);
+        })
+        .catch((error: unknown) => {
+          if (!isAbortError(error)) {
+            log.warn('Seek playerSeek fetch failed:', error);
+          }
+        });
     } else if (this.replayMode === 'continuation') {
       void this.pollContinuationReplay(offsetMs, undefined);
     }

@@ -545,7 +545,9 @@ export class Renderer {
           log.debug('Drop [max_retries_exceeded]:', queued.message.author, queued.message.kind);
           this.observability.onMessageDropped('other');
         }
-        processed++;
+        // Do NOT increment processed — the message was not rendered and
+        // has been re-queued for a later retry. Counting it against the
+        // batch limit would reduce effective throughput.
         continue;
       }
 
