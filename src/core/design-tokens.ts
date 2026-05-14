@@ -162,8 +162,6 @@ export const rendererLayout = {
   superchatMinWidth: 280,
   /** SuperChat card max width (px) */
   superchatMaxWidth: 640,
-  /** Max concurrent messages per renderer */
-  maxConcurrent: 50,
   /** Pending queue max size */
   queueMaxSize: 50,
   /** Batch size for queue processing */

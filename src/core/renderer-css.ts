@@ -988,11 +988,7 @@ export class Renderer extends RendererBase {
 
   private removeMessage(active: ActiveMessage): void {
     this.activeMessages.delete(active);
-    try {
-      active.element.removeEventListener('animationend', active.cleanup);
-    } catch {
-      // Element may already be detached.
-    }
+    active.element.removeEventListener('animationend', active.cleanup);
     if (active.element.parentNode) {
       active.element.remove();
     }

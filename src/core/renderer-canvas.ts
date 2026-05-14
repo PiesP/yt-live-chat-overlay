@@ -128,7 +128,7 @@ export class Renderer extends RendererBase {
       this.pendingQueue.splice(insertIndex, 0, message);
     }
 
-    if (this.activeMessages.length < rendererLayout.maxConcurrent) {
+    if (this.activeMessages.length < this.settings.maxConcurrentMessages) {
       this.updateBacklogPause();
       const next = this.pendingQueue.shift();
       if (next) this.enqueueMessage(next);
@@ -320,7 +320,7 @@ export class Renderer extends RendererBase {
     if (this.isAntiBlockActive()) return;
     while (
       this.pendingQueue.length > 0 &&
-      this.activeMessages.length < rendererLayout.maxConcurrent
+      this.activeMessages.length < this.settings.maxConcurrentMessages
     ) {
       const msg = this.pendingQueue.shift();
       if (msg) this.enqueueMessage(msg);
@@ -415,7 +415,7 @@ export class Renderer extends RendererBase {
       return sharedEstimateDimensions(
         message,
         this.settings.fontSize,
-        false,
+        this.settings.showAuthor[message.authorType],
         this.settings.fontWeight,
         this.settings.fontFamily
       );
@@ -718,7 +718,7 @@ export class Renderer extends RendererBase {
 
     const badgeY = contentY;
     const badgeFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
-    ctx.font = `bold ${badgeFontSize}px system-ui, -apple-system, sans-serif`;
+    ctx.font = `bold ${badgeFontSize}px ${this.settings.fontFamily}`;
     const badgeWidth = Math.ceil(ctx.measureText(superChat.amount).width) + 24;
     const badgeHeight = badgeFontSize + 8;
 
