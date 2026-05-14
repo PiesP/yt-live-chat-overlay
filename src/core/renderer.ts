@@ -166,7 +166,7 @@ export class Renderer {
 
     this.laneAllocator.reset(dimensions);
 
-    if (!this.isPaused && this.pendingQueue.length > 0) {
+    if (!this.isPaused && !this.isVideoPaused && this.pendingQueue.length > 0) {
       this.processQueue();
     }
   }
