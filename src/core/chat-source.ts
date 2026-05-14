@@ -11,14 +11,7 @@
 import type { ChatMessage, OverlaySettings } from '@app-types';
 import { type ChatEvent, extractChatEvents } from '@core/chat-message-parser';
 import { ChatSourceEventBus } from '@core/chat-source-events';
-import {
-  findElementMatch,
-  isAbortError,
-  schedulerYield,
-  sleep,
-  throwIfAborted,
-  VIDEO_SELECTORS,
-} from '@core/dom';
+import { findElementMatch, isAbortError, sleep, throwIfAborted, VIDEO_SELECTORS } from '@core/dom';
 import { createLogger } from '@core/logging';
 import {
   bootstrapChatSession,
@@ -102,6 +95,9 @@ export abstract class ChatSource {
   protected bootstrap: ChatBootstrapData | null = null;
   private readonly recentMessages: ChatMessage[] = [];
   protected readonly eventBus = new ChatSourceEventBus();
+
+  /** Polling interval (ms) used by waitWhilePaused while the tab is hidden. */
+  private static readonly PAUSE_POLL_INTERVAL_MS = 250;
 
   constructor(getSettings: () => Readonly<OverlaySettings>) {
     this.getSettings = getSettings;
@@ -400,9 +396,9 @@ export abstract class ChatSource {
   }
 
   /**
-   * Block while paused, yielding to the browser scheduler until
-   * unpaused or aborted. Uses scheduler.yield() when available
-   * for better cooperation with the browser's task scheduler.
+   * Block while paused, checking the pause flag periodically instead of
+   * busy-polling with schedulerYield (setTimeout(0)), which creates tens
+   * of thousands of callbacks during a long tab-hide.
    */
   protected waitWhilePaused(): Promise<void> {
     if (!this._paused) return Promise.resolve();
@@ -412,7 +408,7 @@ export abstract class ChatSource {
           resolve();
           return;
         }
-        void schedulerYield().then(check);
+        setTimeout(check, ChatSource.PAUSE_POLL_INTERVAL_MS);
       };
       check();
     });
