@@ -15,15 +15,16 @@ import type {
   OverlaySettings,
   SuperChatInfo,
 } from '@app-types';
-import type { RgbColor } from '@core/design-tokens';
+
 import {
   borderRadius,
   buildTextShadow,
   buildTextStroke,
   computeDliosDuration,
+  computeSuperChatOpacities,
   colors as designColors,
-  parseRgbColor,
   rendererLayout,
+  resolveSuperChatRgb,
   shadows,
   spacing,
   typography,
@@ -359,12 +360,6 @@ function createContainer(className: string): HTMLDivElement {
   return el;
 }
 
-function resolveSuperChatRgb(superChat: SuperChatInfo): RgbColor {
-  const sourceColor = superChat.headerBackgroundColor || superChat.backgroundColor;
-  const parsed = sourceColor ? parseRgbColor(sourceColor) : null;
-  return parsed ?? designColors.superChat[superChat.tier];
-}
-
 function buildSuperChatHeader(
   message: ChatMessage,
   superChat: SuperChatInfo,
@@ -437,7 +432,7 @@ function buildSuperChatContent(
 
 function applySuperChatStyling(element: HTMLDivElement, superChat: SuperChatInfo): void {
   element.classList.add('yt-chat-overlay-superchat-card');
-  const rgb = resolveSuperChatRgb(superChat);
+  const rgb = resolveSuperChatRgb(superChat, designColors.superChat);
   const borderRgb = {
     r: Math.max(0, rgb.r - 36),
     g: Math.max(0, rgb.g - 36),
@@ -901,9 +896,11 @@ export class Renderer extends RendererBase {
       shadows.text.md,
       '0 0 8px rgba(0, 0, 0, 0.7)',
     ].join(', ');
-    const superChatBaseOpacity = Math.min(1, Math.max(0.4, this.settings.superChatOpacity));
-    const superChatTopOpacity = Math.min(1, superChatBaseOpacity + 0.06);
-    const superChatBottomOpacity = Math.max(0.4, superChatBaseOpacity - 0.08);
+    const {
+      base: superChatBaseOpacity,
+      top: superChatTopOpacity,
+      bottom: superChatBottomOpacity,
+    } = computeSuperChatOpacities(this.settings.superChatOpacity);
 
     container.style.setProperty(
       '--yt-overlay-font-weight',

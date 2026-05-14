@@ -122,22 +122,13 @@ export const ROOT_SETTING_KEYS = [
   'preserveUserColor',
 ] as const satisfies readonly RootScalarSettingKey[];
 
-/** Visual root keys: changes here require a full renderer reset. */
-export const VISUAL_ROOT_KEYS = [
-  'speedPxPerSec',
-  'fontSize',
-  'opacity',
-  'superChatOpacity',
-  'safeTop',
-  'safeBottom',
-  'maxConcurrentMessages',
-  'allowShortTextMessages',
-  'minTextLength',
-  'laneSpacing',
-  'fontWeight',
-  'fontFamily',
-  'preserveUserColor',
-] as const satisfies readonly RootScalarSettingKey[];
+/**
+ * Visual root keys derived from ROOT_SETTING_META — single source of truth.
+ * Changes to visual settings require a full renderer reset.
+ */
+const VISUAL_ROOT_KEYS = Object.entries(ROOT_SETTING_META)
+  .filter(([, meta]) => meta.visual)
+  .map(([key]) => key as RootScalarSettingKey);
 
 export const OUTLINE_SETTING_KEYS = [
   'enabled',

@@ -14,7 +14,7 @@ type AuthorDisplayKey = 'normal' | 'member' | 'moderator' | 'owner' | 'verified'
 export type ChatMessageKind = 'text' | 'superchat' | 'membership';
 export type DanmakuMode = 'scroll' | 'reverse' | 'top' | 'bottom';
 export type RendererType = 'css' | 'canvas';
-type SuperChatTier = 'blue' | 'cyan' | 'green' | 'yellow' | 'orange' | 'magenta' | 'red';
+export type SuperChatTier = 'blue' | 'cyan' | 'green' | 'yellow' | 'orange' | 'magenta' | 'red';
 
 export const isLogLevel = (value: unknown): value is LogLevel =>
   value === 'warn' || value === 'info' || value === 'debug';

@@ -1,4 +1,4 @@
-import type { OutlineSettings, SuperChatInfo } from '@app-types';
+import type { OutlineSettings, SuperChatInfo, SuperChatTier } from '@app-types';
 
 export interface RgbColor {
   readonly r: number;
@@ -215,6 +215,30 @@ export function parseRgbColor(colorString: string): RgbColor | null {
 
 export function rgba(color: RgbColor, alpha: number): string {
   return `rgba(${color.r}, ${color.g}, ${color.b}, ${Math.min(1, Math.max(0, alpha))})`;
+}
+
+/** Resolve SuperChat display color: use YouTube's color if available, else tier default. */
+export function resolveSuperChatRgb(
+  superChat: { headerBackgroundColor?: string; backgroundColor?: string; tier: SuperChatTier },
+  colors: Record<SuperChatTier, RgbColor>
+): RgbColor {
+  const sourceColor = superChat.headerBackgroundColor || superChat.backgroundColor;
+  const parsed = sourceColor ? parseRgbColor(sourceColor) : null;
+  return parsed ?? colors[superChat.tier] ?? colors.blue;
+}
+
+/** Compute top/middle/bottom opacities for SuperChat card gradient. */
+export function computeSuperChatOpacities(superChatOpacity: number): {
+  base: number;
+  top: number;
+  bottom: number;
+} {
+  const base = Math.min(1, Math.max(0.4, superChatOpacity));
+  return {
+    base,
+    top: Math.min(1, base + 0.06),
+    bottom: Math.max(0.4, base - 0.08),
+  };
 }
 
 // ── Text outline helpers (shared between Renderer and future consumers) ───

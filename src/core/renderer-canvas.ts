@@ -18,9 +18,10 @@
 import type { ChatMessage, ContentSegment, OverlayDimensions, OverlaySettings } from '@app-types';
 import {
   computeDliosDuration,
+  computeSuperChatOpacities,
   colors as designColors,
-  parseRgbColor,
   rendererLayout,
+  resolveSuperChatRgb,
 } from '@core/design-tokens';
 import { createLogger } from '@core/logging';
 import type { Overlay } from '@core/overlay';
@@ -661,13 +662,13 @@ export class Renderer extends RendererBase {
 
     ctx.globalAlpha = alpha;
 
-    const superChatAlpha = Math.min(1, Math.max(0.4, this.settings.superChatOpacity));
-    const topAlpha = Math.min(1, superChatAlpha + 0.06);
-    const bottomAlpha = Math.max(0.4, superChatAlpha - 0.08);
+    const {
+      base: superChatAlpha,
+      top: topAlpha,
+      bottom: bottomAlpha,
+    } = computeSuperChatOpacities(this.settings.superChatOpacity);
 
-    const sourceColor = superChat.headerBackgroundColor || superChat.backgroundColor;
-    const parsed = sourceColor ? parseRgbColor(sourceColor) : null;
-    const rgb = parsed ?? designColors.superChat[superChat.tier];
+    const rgb = resolveSuperChatRgb(superChat, designColors.superChat);
     const baseColor = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
 
     const grad = ctx.createLinearGradient(x, y, x, y + h);
