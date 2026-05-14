@@ -114,6 +114,18 @@ export class BurstDetector {
     this.start();
   }
 
+  /**
+   * Pauseable interface: delegates to pause()/resume().
+   * Enables uniform handling via the Pauseable type.
+   */
+  setPaused(paused: boolean): void {
+    if (paused) {
+      this.pause();
+    } else {
+      this.resume();
+    }
+  }
+
   /** Get current burst level */
   getLevel(): BurstLevel {
     return this.currentLevel;

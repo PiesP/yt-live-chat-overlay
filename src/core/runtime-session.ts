@@ -1,4 +1,4 @@
-import type { ChatMessage, OverlaySettings } from '@app-types';
+import type { ChatMessage, OverlaySettings, Pauseable } from '@app-types';
 import { BacklogInjectionController } from '@core/backlog-controller';
 import { type ChatHealthSnapshot, ChatSource, type ChatSourceStartStatus } from '@core/chat-source';
 import { findElementMatch, isAbortError, throwIfAborted, VIDEO_SELECTORS } from '@core/dom';
@@ -388,17 +388,21 @@ export class RuntimeSession {
   // ── Video pause/play listeners ────────────────────────────────────────────
 
   private startVideoPauseListeners(): void {
-    this.videoPauseController.start({
-      onVideoPause: () => {
-        this.renderer?.pauseForVideo();
-        this.chatSource?.setPaused(true);
-      },
-      onVideoPlay: () => {
-        this.renderer?.resumeForVideo();
-        if (!document.hidden) {
-          this.chatSource?.setPaused(false);
+    const videoPauseable: Pauseable = {
+      setPaused: (paused: boolean) => {
+        if (paused) {
+          this.renderer?.pauseForVideo();
+          this.chatSource?.setPaused(true);
+        } else {
+          this.renderer?.resumeForVideo();
+          if (!document.hidden) {
+            this.chatSource?.setPaused(false);
+          }
         }
       },
+    };
+    this.videoPauseController.start({
+      pauseable: videoPauseable,
       isDisposed: () => this.disposed,
     });
   }

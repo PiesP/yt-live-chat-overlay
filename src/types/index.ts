@@ -226,6 +226,15 @@ export type DropReason =
   | 'other';
 
 /**
+ * Interface for objects that can be paused/resumed.
+ * Implemented by ChatSource, BacklogInjectionController,
+ * BurstDetector, and any other pause-aware subsystem.
+ */
+export interface Pauseable {
+  setPaused(paused: boolean): void;
+}
+
+/**
  * Burst level classification based on messages per second
  */
 export type BurstLevel = 'normal' | 'elevated' | 'high' | 'extreme';
