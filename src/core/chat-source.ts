@@ -379,8 +379,8 @@ export abstract class ChatSource {
 
   /**
    * Block while paused, checking the pause flag periodically instead of
-   * busy-polling with schedulerYield (setTimeout(0)), which creates tens
-   * of thousands of callbacks during a long tab-hide.
+   * busy-polling with setTimeout(0), which creates tens of thousands
+   * of callbacks during a long tab-hide.
    */
   protected waitWhilePaused(): Promise<void> {
     if (!this._paused) return Promise.resolve();
