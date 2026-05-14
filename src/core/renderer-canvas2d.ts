@@ -73,6 +73,10 @@ export class Canvas2DRenderer {
   /** Emoji image cache: url → HTMLImageElement (bounded LRU, max 200 entries) */
   private readonly emojiCache = new Map<string, HTMLImageElement>();
   private static readonly EMOJI_CACHE_MAX = 200;
+  /** Set of emoji URLs currently being fetched (prevents duplicate requests) */
+  private readonly emojiFetching = new Set<string>();
+  /** Max concurrent emoji image loads */
+  private static readonly EMOJI_MAX_CONCURRENT = 6;
 
   private static readonly MAX_ACTIVE = 50;
   private static readonly FADE_DURATION_MS = 500;
@@ -146,6 +150,12 @@ export class Canvas2DRenderer {
 
   trimBackgroundQueue(): void {
     if (this.pendingQueue.length > 10) {
+      // Sort by priority descending (SuperChat > Membership > text), then by timestamp
+      this.pendingQueue.sort((a, b) => {
+        const prioA = a.kind === 'superchat' ? 2 : a.kind === 'membership' ? 1 : 0;
+        const prioB = b.kind === 'superchat' ? 2 : b.kind === 'membership' ? 1 : 0;
+        return prioB - prioA || (a.timestamp ?? 0) - (b.timestamp ?? 0);
+      });
       this.pendingQueue.length = 10;
     }
   }
@@ -350,25 +360,30 @@ export class Canvas2DRenderer {
 
   private prefetchEmojis(message: ChatMessage): void {
     for (const seg of message.content) {
-      if (seg.type === 'emoji' && !this.emojiCache.has(seg.emoji.url)) {
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-        img.src = seg.emoji.url;
-        img.alt = seg.emoji.alt || '';
-        img.onload = () => {
-          this.emojiCache.set(seg.emoji.url, img);
-        };
-        img.onerror = () => {
-          // Cache the URL as failed so we don't retry every frame
-          this.emojiCache.set(seg.emoji.url, img);
-        };
+      if (seg.type !== 'emoji') continue;
+      if (this.emojiCache.has(seg.emoji.url)) continue;
+      if (this.emojiFetching.has(seg.emoji.url)) continue;
+      if (this.emojiFetching.size >= Canvas2DRenderer.EMOJI_MAX_CONCURRENT) continue;
+
+      this.emojiFetching.add(seg.emoji.url);
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.src = seg.emoji.url;
+      img.alt = seg.emoji.alt || '';
+      img.onload = () => {
+        this.emojiFetching.delete(seg.emoji.url);
         // Evict oldest entry when cache is full (LRU via Map insertion order)
         if (this.emojiCache.size >= Canvas2DRenderer.EMOJI_CACHE_MAX) {
           const oldestKey = this.emojiCache.keys().next().value;
           if (oldestKey !== undefined) this.emojiCache.delete(oldestKey);
         }
-        this.emojiCache.set(seg.emoji.url, img); // placeholder to avoid re-queue
-      }
+        this.emojiCache.set(seg.emoji.url, img);
+      };
+      img.onerror = () => {
+        this.emojiFetching.delete(seg.emoji.url);
+        // Cache the URL as failed so we don't retry every frame
+        this.emojiCache.set(seg.emoji.url, img);
+      };
     }
   }
 
