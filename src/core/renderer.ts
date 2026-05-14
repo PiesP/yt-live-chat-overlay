@@ -184,6 +184,15 @@ export class Renderer extends RendererBase {
         queued.nextAttemptAt = performance.now() + result.waitMs;
         this.scheduleRetry(Math.min(result.waitMs, rendererLayout.retryDelayMaxMs));
         this.pendingQueue.shift();
+        // Re-insert deferred message for retry after wait
+        const insertBeforeDeferred = this.pendingQueue.findIndex(
+          (q) => q.priority < queued.priority
+        );
+        if (insertBeforeDeferred === -1) {
+          this.pendingQueue.push(queued);
+        } else {
+          this.pendingQueue.splice(insertBeforeDeferred, 0, queued);
+        }
         processed++;
         continue;
       }

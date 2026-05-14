@@ -189,7 +189,6 @@ export class Canvas2DRenderer extends RendererBase {
       img.crossOrigin = 'anonymous';
       img.src = stickerUrl;
       img.onload = () => this.stickerCache.set(stickerUrl, img);
-      img.onerror = () => this.stickerCache.set(stickerUrl, img);
       this.stickerCache.set(stickerUrl, img);
     }
   }

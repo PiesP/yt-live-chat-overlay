@@ -125,9 +125,6 @@ export class BurstDetector {
 
     const avgRate = this.samples.reduce((a, b) => a + b, 0) / this.samples.length;
 
-    // Update EMA-smoothed rate for real-time speed adaptation
-    this.emaRate = EMA_ALPHA * avgRate + (1 - EMA_ALPHA) * this.emaRate;
-
     const newLevel: BurstLevel =
       avgRate > EXTREME_THRESHOLD
         ? 'extreme'
