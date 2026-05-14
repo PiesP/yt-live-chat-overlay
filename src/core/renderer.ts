@@ -101,7 +101,7 @@ export class Renderer {
   private static readonly QUEUE_MAX_SIZE = 50;
   private static readonly BATCH_SIZE = 3;
   private static readonly MAX_MESSAGE_AGE_MS = 60_000;
-  private static readonly OPACITY_UPDATE_INTERVAL_MS = 250;
+  private static readonly OPACITY_UPDATE_INTERVAL_MS = 1000;
   private static readonly SWEEP_INTERVAL = 8;
   private static readonly MAX_RETRY_ATTEMPTS = 3;
   private styleElement: HTMLStyleElement | null = null;

@@ -134,12 +134,19 @@ export class SettingsUi {
     this.backdrop.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
 
     if (isOpen) {
-      document.addEventListener('keydown', this.handleKeydown);
+      if (!this.keydownBound) {
+        document.addEventListener('keydown', this.handleKeydown);
+        this.keydownBound = true;
+      }
       return;
     }
-
-    document.removeEventListener('keydown', this.handleKeydown);
+    if (this.keydownBound) {
+      document.removeEventListener('keydown', this.handleKeydown);
+      this.keydownBound = false;
+    }
   }
+
+  private keydownBound = false;
 
   private bindTabEvents(): void {
     if (!this.modal) return;
@@ -422,6 +429,7 @@ export class SettingsUi {
     this.backdrop = null;
     this.modal = null;
     this.playerElement = null;
+    this.keydownBound = false;
 
     log.info('Destroyed');
   }

@@ -127,8 +127,16 @@ function findFirstNestedByKey<T>(
   extract: (value: unknown) => T | null
 ): T | null {
   const stack: unknown[] = [root];
+  // Limit total iterations to prevent unbounded traversal on pathological
+  // inputs. YouTube API responses are typically < 20 levels deep.
+  const MAX_PROCESSED = 10_000;
+  let processed = 0;
 
   while (stack.length > 0) {
+    if (++processed > MAX_PROCESSED) {
+      break;
+    }
+
     const current = stack.pop();
     if (!isRecord(current)) {
       continue;

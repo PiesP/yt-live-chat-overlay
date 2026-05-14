@@ -153,19 +153,20 @@ export class BacklogInjectionController {
   }
 
   private scheduleNextTick(tickInterval: number): void {
+    // Use requestIdleCallback directly when available, falling back to
+    // setTimeout. Previously wrapped setTimeout around requestIdleCallback,
+    // causing unnecessary delay and timer duplication.
     if (typeof requestIdleCallback !== 'undefined') {
-      this.injectionTimer = setTimeout(() => {
-        requestIdleCallback(
-          (deadline) => {
-            if (deadline.timeRemaining() > 0 || this.backlogQueue.length < 5) {
-              this.processTick();
-            } else {
-              this.scheduleNextTick(Math.max(50, tickInterval / 2));
-            }
-          },
-          { timeout: tickInterval * 2 }
-        );
-      }, tickInterval) as unknown as ReturnType<typeof setTimeout>;
+      requestIdleCallback(
+        (deadline) => {
+          if (deadline.timeRemaining() > 0 || this.backlogQueue.length < 5) {
+            this.processTick();
+          } else {
+            this.scheduleNextTick(Math.max(50, tickInterval / 2));
+          }
+        },
+        { timeout: tickInterval * 2 }
+      );
     } else {
       this.injectionTimer = setTimeout(() => this.processTick(), tickInterval);
     }

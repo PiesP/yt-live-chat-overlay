@@ -70,8 +70,9 @@ export class Canvas2DRenderer {
   private playbackRate = 1;
   private backlogSpeedMultiplier = 1;
 
-  /** Emoji image cache: url → HTMLImageElement */
+  /** Emoji image cache: url → HTMLImageElement (bounded LRU, max 200 entries) */
   private readonly emojiCache = new Map<string, HTMLImageElement>();
+  private static readonly EMOJI_CACHE_MAX = 200;
 
   private static readonly MAX_ACTIVE = 50;
   private static readonly FADE_DURATION_MS = 500;
@@ -354,6 +355,11 @@ export class Canvas2DRenderer {
           // Cache the URL as failed so we don't retry every frame
           this.emojiCache.set(seg.emoji.url, img);
         };
+        // Evict oldest entry when cache is full (LRU via Map insertion order)
+        if (this.emojiCache.size >= Canvas2DRenderer.EMOJI_CACHE_MAX) {
+          const oldestKey = this.emojiCache.keys().next().value;
+          if (oldestKey !== undefined) this.emojiCache.delete(oldestKey);
+        }
         this.emojiCache.set(seg.emoji.url, img); // placeholder to avoid re-queue
       }
     }
@@ -376,7 +382,7 @@ export class Canvas2DRenderer {
     }
 
     const now = performance.now();
-    const speed = this.getEffectiveSpeed();
+    const speed = message.isBacklog ? this.getEffectiveBacklogSpeed() : this.getEffectiveSpeed();
     const effectiveDuration =
       speed > 0
         ? computeDliosDuration(dims.width + msgWidth + Canvas2DRenderer.EXIT_PADDING, speed)
@@ -700,7 +706,14 @@ export class Canvas2DRenderer {
   }
 
   private getEffectiveSpeed(): number {
-    const speed = this.settings.speedPxPerSec * this.playbackRate * this.backlogSpeedMultiplier;
+    const speed = this.settings.speedPxPerSec * this.playbackRate;
+    return Math.max(1, speed);
+  }
+
+  /** Get speed for backlog messages, which scroll faster. */
+  private getEffectiveBacklogSpeed(): number {
+    const speed =
+      this.settings.speedPxPerSec * this.playbackRate * Math.max(1, this.backlogSpeedMultiplier);
     return Math.max(1, speed);
   }
 }
