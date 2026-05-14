@@ -75,6 +75,17 @@ export class LaneAllocator {
     return this.laneCount;
   }
 
+  /** Get current lane utilization ratio (0-1): occupied lanes / total lanes */
+  getUtilization(): number {
+    if (this.heap.length === 0) return 0;
+    const now = performance.now();
+    let occupied = 0;
+    for (const [, availableAt] of this.heap) {
+      if (availableAt > now) occupied++;
+    }
+    return occupied / this.heap.length;
+  }
+
   getLaneHeight(): number {
     return this.laneHeight;
   }

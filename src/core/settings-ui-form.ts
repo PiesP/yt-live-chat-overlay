@@ -123,6 +123,15 @@ const PANES: PaneDef[] = [
           num('Text Opacity', 'opacity'),
           num('Scroll Speed (px/s)', 'speedPxPerSec'),
           num('Lane Gap (px)', 'laneSpacing', 'Extra vertical gap between comment rows'),
+          sel(
+            'Font Weight',
+            'fontWeight',
+            [
+              ['bold', 'Bold (700)'],
+              ['normal', 'Normal (400)'],
+            ],
+            'Text weight: Bold is more readable, Normal uses less GPU memory'
+          ),
         ],
       },
       {
@@ -147,6 +156,11 @@ const PANES: PaneDef[] = [
             'SuperChat Opacity (%)',
             'superChatOpacity',
             'Background opacity of Super Chat cards'
+          ),
+          chk(
+            'Preserve User Colors',
+            'preserveUserColor',
+            "Use author's chosen text color from YouTube chat instead of overlay defaults"
           ),
         ],
       },
@@ -182,6 +196,16 @@ const PANES: PaneDef[] = [
             'Max Visible',
             'maxConcurrentMessages',
             'Performance warning threshold for simultaneous comments'
+          ),
+          chk(
+            'Anti-block (density guard)',
+            'antiBlockEnabled',
+            'Pause new comments when screen is too crowded (keeps ~15% visible area clear)'
+          ),
+          num(
+            'Free ratio',
+            'antiBlockFreeRatio',
+            'Minimum fraction of lanes that must remain free (0.15 = 15%). Lower = denser'
           ),
         ],
       },

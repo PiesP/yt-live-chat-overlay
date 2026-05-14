@@ -99,6 +99,8 @@ export interface ChatMessage {
   authorType: AuthorType;
   /** Author photo URL (sanitized, YouTube CDN only) */
   authorPhotoUrl?: string;
+  /** Author's self-chosen text color from YouTube chat (CSS hex/rgb string) */
+  userColor?: string;
   /** Super Chat information (only for kind='superchat') */
   superChat?: SuperChatInfo;
   /** True when the message is part of a backlog injection (initial seed) */
@@ -160,6 +162,8 @@ export interface OverlaySettings {
   outline: OutlineSettings;
   /** Vertical spacing between lanes in pixels (0 = tight, higher = more gap) */
   laneSpacing: number;
+  /** Text font weight: normal (400) or bold (700) */
+  fontWeight: 'normal' | 'bold';
   /** Show debug overlay with real-time metrics */
   showDebugOverlay: boolean;
   /** Renderer backend: CSS DOM animations or Canvas2D rAF */
@@ -184,6 +188,14 @@ export interface OverlaySettings {
   showBacklogIndicator: boolean;
   /** For 'recent' mode: how many minutes of past chat to show (1-30) */
   backlogRecentMinutes: number;
+
+  // ── Anti-block / Density Control ──
+  /** Enable anti-block: pause new messages when screen is too crowded */
+  antiBlockEnabled: boolean;
+  /** Minimum ratio of free lanes required (0.0-1.0). ~0.15 = 15% screen always clear */
+  antiBlockFreeRatio: number;
+  /** Preserve author's chosen text color from YouTube chat */
+  preserveUserColor: boolean;
 }
 
 /**

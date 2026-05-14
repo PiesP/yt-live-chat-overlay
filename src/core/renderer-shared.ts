@@ -42,9 +42,10 @@ export interface MessageDimensions {
 export function estimateMessageDimensions(
   message: ChatMessage,
   fontSize: number,
-  showAuthor: boolean
+  showAuthor: boolean,
+  fontWeight: 'normal' | 'bold' = 'bold'
 ): MessageDimensions {
-  const font = getFontString(fontSize);
+  const font = getFontString(fontSize, fontWeight);
 
   if (message.kind === 'superchat') {
     return estimateSuperChatDimensions(message, font, fontSize);

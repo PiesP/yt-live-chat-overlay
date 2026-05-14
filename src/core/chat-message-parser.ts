@@ -159,6 +159,7 @@ function parseRendererMessage(
   }
 
   const authorType = extractAuthorType(renderer.authorBadges);
+  const userColor = extractUserColor(renderer);
   const parsedBody = extractRendererBody(renderer, kind, authorType, settings);
   if (!parsedBody) {
     return null;
@@ -176,6 +177,10 @@ function parseRendererMessage(
   const id = getString(renderer.id);
   if (id) {
     message.id = id;
+  }
+
+  if (userColor) {
+    message.userColor = userColor;
   }
 
   const authorPhotoUrl = extractThumbnailUrl(renderer.authorPhoto);
@@ -722,4 +727,26 @@ function determineSuperChatTier(backgroundColor: string | undefined): SuperChatI
   }
 
   return bestTier;
+}
+
+/**
+ * Extract the user's self-chosen text color from YouTube's renderer data.
+ * YouTube stores this as an ARGB 32-bit integer in `authorNameTextColor`.
+ */
+function extractUserColor(renderer: JsonObject): string | undefined {
+  const colorInt = getNumber(renderer.authorNameTextColor);
+  if (colorInt === undefined) return undefined;
+  const cssColor = colorIntToCss(colorInt);
+  if (!cssColor) return undefined;
+  // Only use if it's a non-white, non-black color
+  const rgbaMatch = cssColor.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+  if (rgbaMatch) {
+    const r = parseInt(rgbaMatch[1] ?? '0', 10);
+    const g = parseInt(rgbaMatch[2] ?? '0', 10);
+    const b = parseInt(rgbaMatch[3] ?? '0', 10);
+    // Skip colors too close to white (YouTube default) or black
+    if (r > 240 && g > 240 && b > 240) return undefined;
+    if (r < 15 && g < 15 && b < 15) return undefined;
+  }
+  return cssColor;
 }

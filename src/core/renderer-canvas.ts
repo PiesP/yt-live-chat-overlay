@@ -300,6 +300,7 @@ export class Renderer extends RendererBase {
   // ── Queue drain ──────────────────────────────────────────────────────
 
   private drainQueue(): void {
+    if (this.isAntiBlockActive()) return;
     while (
       this.pendingQueue.length > 0 &&
       this.activeMessages.length < rendererLayout.maxConcurrent
@@ -394,7 +395,12 @@ export class Renderer extends RendererBase {
   private estimateDimensions(message: ChatMessage): { width: number; height: number } {
     // Use shared estimation for regular/membership, canvas-specific for superchat
     if (message.kind !== 'superchat') {
-      return sharedEstimateDimensions(message, this.settings.fontSize, false);
+      return sharedEstimateDimensions(
+        message,
+        this.settings.fontSize,
+        false,
+        this.settings.fontWeight
+      );
     }
     const fontSize = this.settings.fontSize;
     const textWidth = this.measureContentWidth(message, fontSize);
@@ -444,7 +450,7 @@ export class Renderer extends RendererBase {
   }
 
   private getFont(fontSize: number): string {
-    return getFontString(fontSize);
+    return getFontString(fontSize, this.settings.fontWeight);
   }
 
   // ── Backlog pause ────────────────────────────────────────────────────
@@ -547,7 +553,10 @@ export class Renderer extends RendererBase {
   ): void {
     const message = msg.message;
     const fontSize = this.settings.fontSize;
-    const color = this.settings.colors[message.authorType];
+    const color =
+      this.settings.preserveUserColor && message.userColor
+        ? message.userColor
+        : this.settings.colors[message.authorType];
 
     ctx.globalAlpha = alpha;
 

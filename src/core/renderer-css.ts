@@ -72,7 +72,7 @@ const STATIC_STYLES = `
     position: absolute;
     white-space: nowrap;
     font-family: system-ui, -apple-system, sans-serif;
-    font-weight: ${typography.fontWeight.bold};
+    font-weight: var(--yt-overlay-font-weight, 700);
     line-height: 1.1;
     text-shadow: var(--yt-overlay-message-text-shadow, none);
     -webkit-text-stroke: var(--yt-overlay-text-stroke, 0 transparent);
@@ -495,7 +495,10 @@ interface BuiltMessage {
 
 function buildMessageElement(message: ChatMessage, settings: OverlaySettings): BuiltMessage | null {
   const showAuthor = settings.showAuthor[message.authorType];
-  const color = settings.colors[message.authorType];
+  const color =
+    settings.preserveUserColor && message.userColor
+      ? message.userColor
+      : settings.colors[message.authorType];
 
   if (message.kind === 'superchat' && message.superChat) {
     const element = createContainer('yt-chat-overlay-message');
@@ -624,6 +627,7 @@ export class Renderer extends RendererBase {
 
   private processQueue(): void {
     if (this.isPaused) return;
+    if (this.isAntiBlockActive()) return;
 
     this.sweepStaleAnimations();
     this.clearRetryTimer();
@@ -735,7 +739,8 @@ export class Renderer extends RendererBase {
     const estimated = estimateMessageDimensions(
       message,
       this.settings.fontSize,
-      this.settings.showAuthor[message.authorType]
+      this.settings.showAuthor[message.authorType],
+      this.settings.fontWeight
     );
     const messageHeight = estimated.height;
 
@@ -906,6 +911,11 @@ export class Renderer extends RendererBase {
     const superChatBaseOpacity = Math.min(1, Math.max(0.4, this.settings.superChatOpacity));
     const superChatTopOpacity = Math.min(1, superChatBaseOpacity + 0.06);
     const superChatBottomOpacity = Math.max(0.4, superChatBaseOpacity - 0.08);
+
+    container.style.setProperty(
+      '--yt-overlay-font-weight',
+      this.settings.fontWeight === 'bold' ? '700' : '400'
+    );
 
     container.style.setProperty('--yt-overlay-message-text-shadow', textShadow);
     container.style.setProperty(

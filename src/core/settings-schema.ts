@@ -65,6 +65,10 @@ const ROOT_SETTING_META: Record<RootScalarSettingKey, SettingMeta> = {
   showBacklogIndicator: { type: 'boolean', visual: false },
   backlogMode: { type: 'string', visual: false },
   backlogRecentMinutes: { type: 'number', visual: false },
+  fontWeight: { type: 'string', visual: true },
+  antiBlockEnabled: { type: 'boolean', visual: false },
+  antiBlockFreeRatio: { type: 'number', visual: false },
+  preserveUserColor: { type: 'boolean', visual: true },
 };
 
 /** Numeric root keys (subset of ROOT_SETTING_KEYS). */
@@ -83,6 +87,7 @@ export const ROOT_NUMERIC_KEYS = [
   'backlogMaxRate',
   'backlogSpeedMultiplier',
   'backlogRecentMinutes',
+  'antiBlockFreeRatio',
 ] as const satisfies readonly RootNumericSettingKey[];
 
 export const ROOT_SETTING_KEYS = [
@@ -109,6 +114,10 @@ export const ROOT_SETTING_KEYS = [
   'showBacklogIndicator',
   'backlogMode',
   'backlogRecentMinutes',
+  'fontWeight',
+  'antiBlockEnabled',
+  'antiBlockFreeRatio',
+  'preserveUserColor',
 ] as const satisfies readonly RootScalarSettingKey[];
 
 /** Visual root keys: changes here require a full renderer reset. */
@@ -123,6 +132,8 @@ export const VISUAL_ROOT_KEYS = [
   'allowShortTextMessages',
   'minTextLength',
   'laneSpacing',
+  'fontWeight',
+  'preserveUserColor',
 ] as const satisfies readonly RootScalarSettingKey[];
 
 export const OUTLINE_SETTING_KEYS = [
@@ -159,11 +170,12 @@ type SettingsLimitKey =
   | 'authorRateLimitMaxMessages'
   | 'backlogMaxRate'
   | 'backlogSpeedMultiplier'
-  | 'backlogRecentMinutes';
+  | 'backlogRecentMinutes'
+  | 'antiBlockFreeRatio';
 
 export const SETTINGS_LIMITS = {
-  speedPxPerSec: { min: 100, max: 400, step: 10 },
-  fontSize: { min: 18, max: 40, step: 2 },
+  speedPxPerSec: { min: 50, max: 500, step: 10 },
+  fontSize: { min: 14, max: 50, step: 2 },
   opacity: { min: 0.5, max: 1, step: 0.05 },
   superChatOpacity: { min: 0.35, max: 1, step: 0.05 },
   safeTop: { min: 0, max: 0.25, step: 0.01 },
@@ -179,6 +191,7 @@ export const SETTINGS_LIMITS = {
   backlogMaxRate: { min: 0, max: 50, step: 5 },
   backlogSpeedMultiplier: { min: 1, max: 5, step: 0.5 },
   backlogRecentMinutes: { min: 1, max: 30, step: 1 },
+  antiBlockFreeRatio: { min: 0, max: 0.5, step: 0.05 },
 } as const satisfies Record<SettingsLimitKey, NumericSettingLimit>;
 
 export const STORAGE_KEY = 'yt-live-chat-overlay-settings';
@@ -236,6 +249,10 @@ export const DEFAULT_SETTINGS = {
   showBacklogIndicator: true,
   backlogMode: 'playback',
   backlogRecentMinutes: 5,
+  fontWeight: 'bold',
+  antiBlockEnabled: true,
+  antiBlockFreeRatio: 0.15,
+  preserveUserColor: false,
 } as const satisfies Readonly<OverlaySettings>;
 
 // ── Color validation ────────────────────────────────────────────────────────────
@@ -289,6 +306,7 @@ const STRING_VALIDATORS: Partial<Record<RootScalarSettingKey, (v: string) => boo
   danmakuMode: (v) => VALID_DANMAKU_MODES.includes(v as (typeof VALID_DANMAKU_MODES)[number]),
   rendererType: (v) => VALID_RENDERER_TYPES.includes(v as (typeof VALID_RENDERER_TYPES)[number]),
   logLevel: (v) => isLogLevel(v),
+  fontWeight: (v) => v === 'normal' || v === 'bold',
 };
 
 const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings => {

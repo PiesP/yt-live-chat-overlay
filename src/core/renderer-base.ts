@@ -180,6 +180,14 @@ export abstract class RendererBase {
     return true;
   }
 
+  /** Check whether anti-block is currently throttling new messages. */
+  protected isAntiBlockActive(): boolean {
+    if (!this.settings.antiBlockEnabled) return false;
+    const utilization = this.laneAllocator.getUtilization();
+    const threshold = 1 - this.settings.antiBlockFreeRatio;
+    return utilization >= threshold;
+  }
+
   protected static getMessagePriority(message: ChatMessage): number {
     let priority = rendererLayout.kindPriority[message.kind];
     if (message.isBacklog) priority -= 50;
