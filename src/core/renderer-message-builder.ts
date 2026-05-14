@@ -7,57 +7,13 @@ import type {
   SuperChatInfo,
 } from '@app-types';
 import { colors, parseRgbColor, type RgbColor, rendererLayout, spacing } from '@core/design-tokens';
+import { getFontString, measureTextHeight, measureTextWidth } from '@core/text-measure';
 import { normalizeYouTubeImageUrl } from '@core/youtubei-chat';
 
 /** Super Chat card minimum width in pixels (for layout estimation) */
 const SUPERCHAT_CARD_MIN_WIDTH = 280;
 /** Super Chat card maximum width in pixels (for layout estimation) */
 const SUPERCHAT_CARD_MAX_WIDTH = 640;
-
-// ── Canvas text measurement (no DOM reflow) ──────────────────────────────
-let textMeasureCtx: CanvasRenderingContext2D | null = null;
-
-function getTextMeasureCtx(): CanvasRenderingContext2D {
-  if (!textMeasureCtx) {
-    const canvas = document.createElement('canvas');
-    canvas.width = 0;
-    canvas.height = 0;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) {
-      throw new Error('Failed to initialize Canvas 2D context for text measurement');
-    }
-    textMeasureCtx = ctx;
-  }
-  return textMeasureCtx;
-}
-
-/**
- * Measure the pixel width of a text string using Canvas measureText().
- * Font string must match the CSS `font` shorthand used at render time.
- */
-function measureTextWidth(text: string, font: string): number {
-  const ctx = getTextMeasureCtx();
-  ctx.font = font;
-  const metrics = ctx.measureText(text);
-  return Math.ceil(metrics.width);
-}
-
-/**
- * Measure the actual rendered text height using font metrics.
- * Returns the sum of fontBoundingBoxAscent and fontBoundingBoxDescent
- * when available, falling back to fontSize * 1.1 for older browsers.
- */
-function measureTextHeight(font: string, fontSize: number): number {
-  const ctx = getTextMeasureCtx();
-  ctx.font = font;
-  const metrics = ctx.measureText('Mg');
-  const ascent = metrics.fontBoundingBoxAscent;
-  const descent = metrics.fontBoundingBoxDescent;
-  if (ascent !== undefined && descent !== undefined && ascent > 0) {
-    return Math.ceil(ascent + descent);
-  }
-  return Math.ceil(fontSize * 1.1);
-}
 
 interface AuthorNameOptions {
   className?: string;
@@ -124,7 +80,7 @@ export class RendererMessageBuilder {
   estimateMessageDimensions(message: ChatMessage): { width: number; height: number } {
     const settings = this.getSettings();
     const fontSize = settings.fontSize;
-    const font = `${fontSize}px system-ui, -apple-system, sans-serif`;
+    const font = getFontString(fontSize);
 
     if (message.kind === 'superchat' && message.superChat) {
       return this.estimateSuperChatDimensions(message, font, fontSize);
@@ -161,7 +117,7 @@ export class RendererMessageBuilder {
     }
 
     const authorFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
-    const authorFont = `${authorFontSize}px system-ui, -apple-system, sans-serif`;
+    const authorFont = getFontString(authorFontSize);
     const authorNameWidth = measureTextWidth(message.author, authorFont);
     const authorSectionWidth = rendererLayout.authorPhotoSize + spacing.sm + authorNameWidth;
 

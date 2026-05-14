@@ -20,6 +20,7 @@ import {
 import { createLogger } from '@core/logging';
 import type { Overlay } from '@core/overlay';
 import { RendererBase } from '@core/renderer-base';
+import { getFontString } from '@core/text-measure';
 
 const log = createLogger('Canvas2DRenderer');
 
@@ -449,7 +450,7 @@ export class Canvas2DRenderer extends RendererBase {
   }
 
   private getFont(fontSize: number): string {
-    return `bold ${fontSize}px system-ui, -apple-system, sans-serif`;
+    return getFontString(fontSize);
   }
 
   // ── Backlog pause ────────────────────────────────────────────────────
