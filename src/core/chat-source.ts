@@ -834,18 +834,26 @@ class ReplayChatSource extends ChatSource {
       const playback = this.getPlaybackSnapshot();
       const currentOffsetMs = playback?.offsetMs ?? 0;
 
-      if (playback && !playback.paused) {
-        this.flushReplayBuffer(currentOffsetMs);
-      }
+      // Always flush messages that have passed the current playback position,
+      // even while paused. Without this, messages accumulate in the buffer
+      // and flood the screen on resume.
+      this.flushReplayBuffer(currentOffsetMs);
 
       if (!playback) {
         await sleep(REPLAY_LOOP_DELAY_MS, signal);
         continue;
       }
 
+      // Only fetch new messages while the video is playing. Fetching during
+      // pause would accumulate messages that flood on resume.
+      if (playback.paused) {
+        await sleep(REPLAY_LOOP_DELAY_MS, signal);
+        continue;
+      }
+
       if (this.replayMode === 'playerSeek') {
         await this.pollPlayerSeekReplay(playback, signal);
-      } else if (this.replayMode === 'continuation' && !playback.paused) {
+      } else if (this.replayMode === 'continuation') {
         await this.pollContinuationReplay(currentOffsetMs, signal);
       }
 
