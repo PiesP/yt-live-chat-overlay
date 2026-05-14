@@ -67,47 +67,18 @@ export class VideoPauseController {
       '#movie_player, .html5-video-player'
     );
 
-    const POLL_INTERVAL_MS = 1000;
-    let previouslyPaused = currentVideo.paused;
-    const pollTimer = setInterval(() => {
-      if (callbacks.isDisposed() || !currentVideo) {
-        clearInterval(pollTimer);
-        return;
-      }
-      if (!currentVideo.isConnected) {
-        rebindVideo();
-        if (!currentVideo) {
-          clearInterval(pollTimer);
-          return;
-        }
-      }
-      const isPaused = currentVideo.paused;
-      if (isPaused !== previouslyPaused) {
-        previouslyPaused = isPaused;
-        if (isPaused) {
-          handlePause();
-        } else {
-          handlePlay();
-        }
-      }
-    }, POLL_INTERVAL_MS);
-
     if (playerContainer) {
-      const observer = new MutationObserver(() => {
-        rebindVideo();
-      });
+      const observer = new MutationObserver(() => rebindVideo());
       observer.observe(playerContainer, { childList: true, subtree: true });
 
       this.videoPauseCleanup = () => {
         detachListeners(currentVideo);
-        clearInterval(pollTimer);
         observer.disconnect();
         this.videoPauseCleanup = null;
       };
     } else {
       this.videoPauseCleanup = () => {
         detachListeners(currentVideo);
-        clearInterval(pollTimer);
         this.videoPauseCleanup = null;
       };
     }
