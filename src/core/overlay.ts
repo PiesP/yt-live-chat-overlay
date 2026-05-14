@@ -19,9 +19,6 @@ const log = createLogger('Overlay');
 const OVERLAY_ID = 'yt-live-chat-overlay';
 export const OVERLAY_SELECTOR = `#${OVERLAY_ID}`;
 
-const FULLSCREEN_UPDATE_DELAY_MS = 100;
-const OVERLAY_Z_INDEX = '100';
-
 const calculateOverlayDimensions = (
   playerElement: HTMLElement,
   settings: OverlaySettings
@@ -95,7 +92,7 @@ export class Overlay {
     container.style.inset = '0';
     container.style.pointerEvents = 'none';
     container.style.overflow = 'hidden';
-    container.style.zIndex = OVERLAY_Z_INDEX;
+    container.style.zIndex = rendererLayout.overlayZIndex;
     container.style.contain = 'layout style paint';
     return container;
   }
@@ -138,7 +135,7 @@ export class Overlay {
       this.fullscreenUpdateTimer = setTimeout(() => {
         this.fullscreenUpdateTimer = null;
         this.updateDimensions();
-      }, FULLSCREEN_UPDATE_DELAY_MS);
+      }, rendererLayout.fullscreenUpdateDelayMs);
     };
 
     document.addEventListener('fullscreenchange', this.fullscreenHandler);

@@ -168,6 +168,10 @@ export const rendererLayout = {
   backgroundQueueMax: 10,
   /** Max message age for fade-out (ms) */
   maxMessageAgeMs: 60_000,
+  /** Delay after fullscreen change before updating dimensions (ms) */
+  fullscreenUpdateDelayMs: 100,
+  /** Z-index for the overlay container */
+  overlayZIndex: '100',
 } as const;
 
 /**
