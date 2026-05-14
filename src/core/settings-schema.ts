@@ -226,7 +226,7 @@ export const DEFAULT_SETTINGS = {
   enabled: true,
   danmakuMode: 'scroll',
   speedPxPerSec: 250,
-  fontSize: 22,
+  fontSize: 32,
   opacity: 0.85,
   superChatOpacity: 0.85,
   safeTop: 0,

@@ -729,6 +729,7 @@ export class Renderer extends RendererBase {
     ctx.stroke();
 
     ctx.textBaseline = 'middle';
+    this.strokeTextOutline(ctx, superChat.amount, textX + 12, badgeY + badgeHeight / 2);
     ctx.fillStyle = '#ffffff';
     ctx.fillText(superChat.amount, textX + 12, badgeY + badgeHeight / 2);
 
