@@ -153,7 +153,11 @@ export class Canvas2DRenderer {
   updateSettings(settings: OverlaySettings, _options?: Canvas2DRendererUpdateOptions): void {
     this.settings = settings;
     this.observability.setShowDebug(settings.showDebugOverlay);
-    this.laneAllocator.reset(this.overlay.getDimensions());
+    // Only reset lane allocator when the overlay dimensions have changed,
+    // not on every settings update (mirrors CSS renderer behavior).
+    if (this.laneAllocator.isEmpty()) {
+      this.laneAllocator.reset(this.overlay.getDimensions());
+    }
   }
 
   pause(): void {
