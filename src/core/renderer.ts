@@ -856,27 +856,33 @@ export class Renderer {
 
   resume(): void {
     if (!this.isPaused) return;
+
+    // Always reset pausedAt and resume burstDetector, regardless of
+    // video pause state. The pausedAt timestamp must be cleared so that
+    // a subsequent visibility-change pause does not compute a stale,
+    // inflated pausedDuration from an earlier pause point.
+    const now = performance.now();
+    if (this.pausedAt !== null) {
+      const pausedDuration = Math.min(Math.max(0, now - this.pausedAt), 60_000);
+      for (const active of [...this.activeMessages]) {
+        active.pausedDuration += pausedDuration;
+      }
+    }
+    this.pausedAt = null;
+
+    this.burstDetector.resume();
+
     if (this.isVideoPaused) {
-      this.burstDetector.resume();
       return;
     }
 
-    this.burstDetector.resume();
     this.resumeStabilizeUntil = performance.now() + 2000;
-
-    const now = performance.now();
-    let pausedDuration = 0;
-    if (this.pausedAt !== null) {
-      pausedDuration = Math.min(Math.max(0, now - this.pausedAt), 60_000);
-    }
-    this.pausedAt = null;
 
     this.laneAllocator.reset(this.overlay.getDimensions());
     this.isPaused = false;
 
     for (const active of [...this.activeMessages]) {
       try {
-        active.pausedDuration += pausedDuration;
         const elapsed = performance.now() - active.startTime - active.pausedDuration;
         const remaining = active.baseDuration - elapsed;
         if (remaining <= 0) {
