@@ -85,6 +85,19 @@ export class PerAuthorRateLimiter {
         this.authorTimestamps.set(authorId, valid);
       }
     }
+
+    // Hard cap: prevent unbounded growth under extreme chat density
+    // (e.g. 500+ active authors). Evict oldest entries first.
+    const maxEntries = 500;
+    if (this.authorTimestamps.size > maxEntries) {
+      const sorted = [...this.authorTimestamps.entries()].sort(
+        (a, b) => (a[1][0] ?? 0) - (b[1][0] ?? 0)
+      );
+      const toRemove = sorted.slice(0, this.authorTimestamps.size - maxEntries);
+      for (const [authorId] of toRemove) {
+        this.authorTimestamps.delete(authorId);
+      }
+    }
   }
 
   updateConfig(config: { enabled?: boolean; windowMs?: number; maxPerWindow?: number }): void {
