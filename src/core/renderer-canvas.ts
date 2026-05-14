@@ -604,6 +604,11 @@ export class Renderer extends RendererBase {
         ? this.authorPhotoCache.get(message.authorPhotoUrl)
         : undefined;
       if (photo?.complete && photo.naturalWidth > 0) {
+        ctx.save();
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
+        ctx.shadowBlur = 4;
+        ctx.shadowOffsetX = 1;
+        ctx.shadowOffsetY = 1;
         ctx.drawImage(
           photo,
           textX,
@@ -611,6 +616,7 @@ export class Renderer extends RendererBase {
           rendererLayout.authorPhotoSize,
           rendererLayout.authorPhotoSize
         );
+        ctx.restore();
       }
       const nameFont = `bold ${Math.round(fontSize * rendererLayout.authorFontScale)}px system-ui, -apple-system, sans-serif`;
       ctx.font = nameFont;
@@ -675,6 +681,11 @@ export class Renderer extends RendererBase {
         ? this.authorPhotoCache.get(msg.message.authorPhotoUrl)
         : undefined;
       if (photo?.complete && photo.naturalWidth > 0) {
+        ctx.save();
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
+        ctx.shadowBlur = 4;
+        ctx.shadowOffsetX = 1;
+        ctx.shadowOffsetY = 1;
         ctx.drawImage(
           photo,
           textX,
@@ -682,6 +693,7 @@ export class Renderer extends RendererBase {
           rendererLayout.authorPhotoSize,
           rendererLayout.authorPhotoSize
         );
+        ctx.restore();
       }
       ctx.font = `bold ${Math.round(fontSize * rendererLayout.authorFontScale)}px system-ui, -apple-system, sans-serif`;
       ctx.textBaseline = 'top';
@@ -691,13 +703,25 @@ export class Renderer extends RendererBase {
     }
 
     const badgeY = contentY;
-    ctx.font = `bold ${Math.round(fontSize * rendererLayout.authorFontScale)}px system-ui, -apple-system, sans-serif`;
-    ctx.textBaseline = 'top';
+    const badgeFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
+    ctx.font = `bold ${badgeFontSize}px system-ui, -apple-system, sans-serif`;
+    const badgeWidth = Math.ceil(ctx.measureText(superChat.amount).width) + 24;
+    const badgeHeight = badgeFontSize + 8;
+
+    // Badge pill background
+    this.roundRect(ctx, textX, badgeY, badgeWidth, badgeHeight, 12);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.16)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.textBaseline = 'middle';
     ctx.fillStyle = '#ffffff';
-    ctx.fillText(superChat.amount, textX, badgeY);
+    ctx.fillText(superChat.amount, textX + 12, badgeY + badgeHeight / 2);
 
     if (message.text) {
-      const msgY = badgeY + Math.round(fontSize * 1.1) + 6;
+      const msgY = badgeY + badgeHeight + 6;
       this.renderSegment(ctx, message.text, textX, msgY, '#ffffff', alpha, fontSize);
     }
 
@@ -710,10 +734,7 @@ export class Renderer extends RendererBase {
         ctx.drawImage(
           stickerImg,
           textX,
-          badgeY +
-            Math.round(fontSize * 1.1) +
-            6 +
-            (message.text ? Math.round(fontSize * 1.4) + 6 : 0),
+          badgeY + badgeHeight + 6 + (message.text ? Math.round(fontSize * 1.4) + 6 : 0),
           stickerSize,
           stickerSize
         );
@@ -740,7 +761,10 @@ export class Renderer extends RendererBase {
     this.roundRect(ctx, x, y, w, h, 6);
     ctx.fill();
 
-    ctx.strokeStyle = 'rgba(15, 157, 88, 0.6)';
+    // Pulsing green glow border (CSS keyframes equivalent)
+    const elapsed = performance.now() - msg.startTime - msg.pausedDuration;
+    const pulse = Math.sin((elapsed / 1000) * Math.PI) * 0.15 + 0.75;
+    ctx.strokeStyle = `rgba(15, 157, 88, ${pulse})`;
     ctx.lineWidth = 2;
     ctx.stroke();
 
