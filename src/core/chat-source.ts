@@ -14,6 +14,7 @@ import { type ChatEvent, extractChatEvents } from '@core/chat-message-parser';
 import { findElementMatch, isAbortError, sleep, throwIfAborted, VIDEO_SELECTORS } from '@core/dom';
 import { createLogger } from '@core/logging';
 import { MessageBuffer } from '@core/message-buffer';
+import { PollLoopManager } from '@core/poll-loop-manager';
 import {
   bootstrapChatSession,
   type ChatBootstrapData,
@@ -79,8 +80,7 @@ export abstract class ChatSource {
   protected readonly getSettings: () => Readonly<OverlaySettings>;
   protected callback: MessageCallback | null = null;
   private pollController: AbortController | null = null;
-  private pollLoopAlive = false;
-  private pollGeneration = 0;
+  private readonly pollLoopManager = new PollLoopManager();
   protected _paused = false;
   private lastActivityTime = 0;
   protected bootstrap: ChatBootstrapData | null = null;
@@ -98,7 +98,7 @@ export abstract class ChatSource {
 
   async start(callback: MessageCallback, signal?: AbortSignal): Promise<ChatSourceStartStatus> {
     this.pollController?.abort();
-    this.pollGeneration += 1;
+    this.pollLoopManager.stop();
 
     this.pollController = new AbortController();
     this.callback = callback;
@@ -118,8 +118,7 @@ export abstract class ChatSource {
     this.pollController?.abort();
     this.pollController = null;
 
-    this.pollGeneration += 1;
-    this.pollLoopAlive = false;
+    this.pollLoopManager.stop();
     this.callback = null;
     this.resetSessionState();
 
@@ -167,7 +166,7 @@ export abstract class ChatSource {
 
   protected isObserverAlive(): boolean {
     return (
-      this.pollLoopAlive &&
+      this.pollLoopManager.isAlive() &&
       this.pollController !== null &&
       !this.pollController.signal.aborted &&
       this.callback !== null
@@ -258,23 +257,7 @@ export abstract class ChatSource {
     signal: AbortSignal | undefined,
     runner: (loopSignal: AbortSignal | undefined) => Promise<void>
   ): void {
-    const generation = ++this.pollGeneration;
-    this.pollLoopAlive = true;
-
-    void Promise.resolve()
-      .then(() => runner(signal))
-      .catch((error: unknown) => {
-        if (isAbortError(error)) {
-          return;
-        }
-
-        log.warn('Chat polling loop stopped unexpectedly:', error);
-      })
-      .finally(() => {
-        if (generation === this.pollGeneration) {
-          this.pollLoopAlive = false;
-        }
-      });
+    this.pollLoopManager.launch(runner, signal);
   }
 
   protected resetSessionState(): void {
