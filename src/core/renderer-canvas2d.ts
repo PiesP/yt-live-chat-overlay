@@ -467,10 +467,30 @@ export class Canvas2DRenderer {
 
     const now = performance.now();
     const speed = message.isBacklog ? this.getEffectiveBacklogSpeed() : this.getEffectiveSpeed();
-    const effectiveDuration =
-      speed > 0
-        ? computeDliosDuration(dims.width + msgWidth + Canvas2DRenderer.EXIT_PADDING, speed)
-        : rendererLayout.durationMin;
+
+    let effectiveDuration: number;
+    if (mode === 'scroll' || mode === 'reverse') {
+      // Match CSS renderer's totalDistance calculation:
+      // entryOffset + screenWidth + textWidth + exitPadding
+      const exitPadding = Math.max(
+        this.settings.fontSize * rendererLayout.exitPaddingScale,
+        rendererLayout.exitPaddingMin
+      );
+      const entryOffset =
+        mode === 'scroll'
+          ? dims.laneCount > 1
+            ? Math.round((placement.lane.index / (dims.laneCount - 1)) * 200)
+            : 100
+          : 0;
+      const totalDistance =
+        mode === 'reverse'
+          ? dims.width * 2 + exitPadding
+          : entryOffset + dims.width + msgWidth + exitPadding;
+      effectiveDuration =
+        speed > 0 ? computeDliosDuration(totalDistance, speed) : rendererLayout.durationMin;
+    } else {
+      effectiveDuration = rendererLayout.topBottomDurationMs;
+    }
 
     let startX: number;
     if (mode === 'scroll') {
