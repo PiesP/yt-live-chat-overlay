@@ -170,8 +170,8 @@ export const SETTINGS_LIMITS = {
   safeBottom: { min: 0, max: 0.5, step: 0.01 },
   maxConcurrentMessages: { min: 30, max: 100, step: 10 },
   minTextLength: { min: 1, max: 10, step: 1 },
-  outlineWidthPx: { min: 0, max: 5, step: 0.5 },
-  outlineBlurPx: { min: 0, max: 8, step: 0.5 },
+  outlineWidthPx: { min: 0, max: 8, step: 0.5 },
+  outlineBlurPx: { min: 0, max: 12, step: 0.5 },
   outlineOpacity: { min: 0, max: 1, step: 0.1 },
   laneSpacing: { min: 0, max: 20, step: 1 },
   authorRateLimitWindowMs: { min: 1000, max: 30000, step: 1000 },
@@ -204,9 +204,9 @@ const DEFAULT_COLORS: OverlaySettings['colors'] = {
 
 const DEFAULT_OUTLINE: OutlineSettings = {
   enabled: true,
-  widthPx: 1.5,
-  blurPx: 2,
-  opacity: 0.7,
+  widthPx: 2,
+  blurPx: 3,
+  opacity: 0.8,
 };
 
 export const DEFAULT_SETTINGS = {

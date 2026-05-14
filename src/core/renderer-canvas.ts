@@ -483,15 +483,18 @@ export class Renderer extends RendererBase {
 
     const outline = this.settings.outline;
     if (outline.enabled && outline.widthPx > 0 && outline.opacity > 0) {
-      const strokeWidth = Math.max(0.2, outline.widthPx * 0.3);
-      const strokeOpacity = Math.min(1, outline.opacity * 0.7);
+      const strokeWidth = Math.max(0.5, outline.widthPx * 0.5);
+      const strokeOpacity = Math.min(1, outline.opacity * 0.8);
       ctx.strokeStyle = `rgba(0, 0, 0, ${strokeOpacity})`;
       ctx.lineWidth = strokeWidth;
       ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
       ctx.strokeText(text, x, y);
 
-      ctx.shadowColor = `rgba(0, 0, 0, ${Math.min(1, outline.opacity * 0.85)})`;
-      ctx.shadowBlur = Math.max(1, outline.blurPx * 1.5);
+      ctx.shadowColor = `rgba(0, 0, 0, ${Math.min(1, outline.opacity * 0.9)})`;
+      ctx.shadowBlur = Math.max(2, outline.blurPx * 2);
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = 0;
     }
 
     ctx.fillStyle = color;
@@ -546,10 +549,6 @@ export class Renderer extends RendererBase {
     const fontSize = this.settings.fontSize;
     const color = this.settings.colors[message.authorType];
 
-    ctx.globalAlpha = alpha * 0.25;
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
-    this.roundRect(ctx, x, y, msg.width, msg.height, 6);
-    ctx.fill();
     ctx.globalAlpha = alpha;
 
     const showAuthor = this.settings.showAuthor[message.authorType];

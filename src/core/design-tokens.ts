@@ -76,6 +76,7 @@ export const shadows = {
   text: {
     sm: '1px 1px 2px rgba(0, 0, 0, 0.8)',
     md: '2px 2px 4px rgba(0, 0, 0, 0.8)',
+    lg: '2px 2px 6px rgba(0, 0, 0, 0.9), -1px -1px 4px rgba(0, 0, 0, 0.7)',
   },
   box: {
     sm: '0 2px 8px rgba(0, 0, 0, 0.6)',

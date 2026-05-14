@@ -188,17 +188,15 @@ const STATIC_STYLES = `
     margin-bottom: ${spacing.xs}px;
   }
   .yt-chat-overlay-message-with-author:not(.yt-chat-overlay-superchat-card) {
-    background: rgba(0, 0, 0, 0.25);
     padding: ${spacing.sm}px ${spacing.md}px;
     border-radius: ${borderRadius.sm};
-    backdrop-filter: blur(2px);
   }
   .yt-chat-overlay-message-with-author .yt-chat-overlay-author-photo {
     box-shadow: ${shadows.box.sm};
     border: 1px solid rgba(255, 255, 255, 0.15);
   }
   .yt-chat-overlay-message:not(.yt-chat-overlay-superchat-card) {
-    text-shadow: var(--yt-overlay-regular-message-text-shadow, ${shadows.text.md});
+    text-shadow: var(--yt-overlay-regular-message-text-shadow, ${shadows.text.lg});
     letter-spacing: 0.3px;
   }
   .yt-chat-overlay-superchat-sticker {
