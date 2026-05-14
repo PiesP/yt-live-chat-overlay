@@ -390,12 +390,16 @@ export class Canvas2DRenderer {
       }
     }
 
-    // Remove expired (reverse order to preserve indices)
+    // Remove expired (swap-with-last + pop to avoid O(n) splice shifts)
     for (let ri = toRemove.length - 1; ri >= 0; ri--) {
       const idx = toRemove[ri];
-      if (idx !== undefined) {
-        this.activeMessages.splice(idx, 1);
+      if (idx === undefined) continue;
+      const lastIdx = this.activeMessages.length - 1;
+      if (idx < lastIdx) {
+        const lastMsg = this.activeMessages[lastIdx];
+        if (lastMsg) this.activeMessages[idx] = lastMsg;
       }
+      this.activeMessages.pop();
     }
 
     this.observability.updateActiveMessages(this.activeMessages.length);
