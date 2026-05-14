@@ -81,6 +81,8 @@ export class Canvas2DRenderer {
   private pausedAt: number | null = null;
   private playbackRate = 1;
   private backlogSpeedMultiplier = 1;
+  /** Timestamp until which the EMA speed multiplier is suppressed after resume. */
+  private resumeStabilizeUntil: number = 0;
 
   /** Emoji image cache: url → HTMLImageElement (bounded LRU, max 200 entries) */
   private readonly emojiCache = new Map<string, HTMLImageElement>();
@@ -258,6 +260,7 @@ export class Canvas2DRenderer {
     }
     this.pausedAt = null;
     this.isPaused = false;
+    this.resumeStabilizeUntil = performance.now() + 2000;
     this.startRenderLoop();
 
     // Drain any messages that accumulated in the queue during pause
@@ -508,20 +511,22 @@ export class Canvas2DRenderer {
     const now = performance.now();
     const speed = message.isBacklog ? this.getEffectiveBacklogSpeed() : this.getEffectiveSpeed();
 
+    // Compute entry offset once for both duration and startX.
+    // Scroll mode: proportional to lane index (0-200px range).
+    // Reverse / fixed modes: no entry offset.
+    const entryOffset =
+      mode === 'scroll'
+        ? dims.laneCount > 1
+          ? Math.round((placement.lane.index / (dims.laneCount - 1)) * 200)
+          : 100
+        : 0;
+
     let effectiveDuration: number;
     if (mode === 'scroll' || mode === 'reverse') {
-      // Match CSS renderer's totalDistance calculation:
-      // entryOffset + screenWidth + textWidth + exitPadding
       const exitPadding = Math.max(
         this.settings.fontSize * rendererLayout.exitPaddingScale,
         rendererLayout.exitPaddingMin
       );
-      const entryOffset =
-        mode === 'scroll'
-          ? dims.laneCount > 1
-            ? Math.round((placement.lane.index / (dims.laneCount - 1)) * 200)
-            : 100
-          : 0;
       const totalDistance =
         mode === 'reverse'
           ? dims.width * 2 + exitPadding
@@ -534,8 +539,6 @@ export class Canvas2DRenderer {
 
     let startX: number;
     if (mode === 'scroll') {
-      const entryOffset =
-        dims.laneCount > 1 ? Math.round((placement.lane.index / (dims.laneCount - 1)) * 200) : 100;
       startX = dims.width + entryOffset;
     } else if (mode === 'reverse') {
       startX = -(msgWidth + Canvas2DRenderer.EXIT_PADDING);
@@ -980,11 +983,14 @@ export class Canvas2DRenderer {
   private getEffectiveSpeed(): number {
     let speed = this.settings.speedPxPerSec * this.playbackRate;
 
-    // EMA-based proactive speed adaptation (matches CSS renderer)
-    const emaRate = this.burstDetector.getEmaRate();
-    if (emaRate > 5) {
-      const emaMultiplier = 1 + Math.min((emaRate - 5) / 15, 0.35);
-      speed *= emaMultiplier;
+    // Suppress the EMA-based proactive speed adaptation during the
+    // 2-second stabilisation window after a tab-visibility resume.
+    if (performance.now() >= this.resumeStabilizeUntil) {
+      const emaRate = this.burstDetector.getEmaRate();
+      if (emaRate > 5) {
+        const emaMultiplier = 1 + Math.min((emaRate - 5) / 15, 0.35);
+        speed *= emaMultiplier;
+      }
     }
 
     // Burst-level multiplier
