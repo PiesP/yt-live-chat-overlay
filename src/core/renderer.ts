@@ -849,6 +849,7 @@ export class Renderer {
     this.isPaused = true;
     this.pausedAt = performance.now();
     this.clearRetryTimer();
+    this.stopOpacityUpdates();
     this.burstDetector.pause();
     for (const active of this.activeMessages) {
       active.element.style.animationPlayState = 'paused';
@@ -882,6 +883,7 @@ export class Renderer {
 
     this.laneAllocator.reset(this.overlay.getDimensions());
     this.isPaused = false;
+    this.startOpacityUpdates();
 
     for (const active of [...this.activeMessages]) {
       try {
