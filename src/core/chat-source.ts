@@ -13,6 +13,7 @@ import { BootstrapResolver } from '@core/bootstrap-resolver';
 import { type ChatEvent, extractChatEvents } from '@core/chat-message-parser';
 import { findElementMatch, isAbortError, sleep, throwIfAborted, VIDEO_SELECTORS } from '@core/dom';
 import { createLogger } from '@core/logging';
+import { MessageBuffer } from '@core/message-buffer';
 import {
   bootstrapChatSession,
   type ChatBootstrapData,
@@ -29,7 +30,6 @@ import {
 
 const log = createLogger('ChatSource');
 
-const RECENT_MESSAGE_BUFFER_SIZE = 100;
 const RECONNECT_RETRY_DELAY_MS = 1000;
 const DEFAULT_ACTIVITY_TIMEOUT_MS = 30_000;
 const LIVE_POLL_FALLBACK_DELAY_MS = 4000;
@@ -84,7 +84,7 @@ export abstract class ChatSource {
   protected _paused = false;
   private lastActivityTime = 0;
   protected bootstrap: ChatBootstrapData | null = null;
-  private readonly recentMessages: ChatMessage[] = [];
+  private readonly messageBuffer = new MessageBuffer();
   protected readonly bootstrapResolver = new BootstrapResolver();
 
   /** Polling interval (ms) used by waitWhilePaused while the tab is hidden. */
@@ -140,8 +140,7 @@ export abstract class ChatSource {
   }
 
   getLatestMessages(limit: number): ChatMessage[] {
-    if (limit <= 0) return [];
-    return this.recentMessages.slice(-limit);
+    return this.messageBuffer.getLatest(limit);
   }
 
   // ---- Static factory ----
@@ -195,12 +194,7 @@ export abstract class ChatSource {
   }
 
   protected rememberMessage(message: ChatMessage): void {
-    this.recentMessages.push(message);
-
-    const overflow = this.recentMessages.length - RECENT_MESSAGE_BUFFER_SIZE;
-    if (overflow > 0) {
-      this.recentMessages.splice(0, overflow);
-    }
+    this.messageBuffer.push(message);
   }
 
   /**
@@ -286,7 +280,7 @@ export abstract class ChatSource {
   protected resetSessionState(): void {
     this.bootstrap = null;
     this.lastActivityTime = 0;
-    this.recentMessages.length = 0;
+    this.messageBuffer.clear();
   }
 
   /**
