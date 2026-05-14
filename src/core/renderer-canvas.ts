@@ -15,7 +15,7 @@
  * - BUG-5/6: image caches only store loaded images, errors don't cache
  */
 
-import type { ChatMessage, ContentSegment, OverlaySettings } from '@app-types';
+import type { ChatMessage, ContentSegment, OverlayDimensions, OverlaySettings } from '@app-types';
 import {
   computeDliosDuration,
   colors as designColors,
@@ -76,15 +76,11 @@ export class Renderer extends RendererBase {
     this.ctx = canvas.getContext('2d');
 
     const dims = overlay.getDimensions();
-    if (dims && this.canvas) {
-      this.canvas.width = dims.width;
-      this.canvas.height = dims.height;
-    }
+    this.applyDevicePixelRatio(dims);
 
     this.overlayDimensionsUnsubscribe = overlay.onDimensionsChanged((d) => {
       if (d && this.canvas) {
-        this.canvas.width = d.width;
-        this.canvas.height = d.height;
+        this.applyDevicePixelRatio(d);
         this.laneAllocator.reset(d);
       }
     });
@@ -196,6 +192,16 @@ export class Renderer extends RendererBase {
 
   // ── Render loop ──────────────────────────────────────────────────────
 
+  private applyDevicePixelRatio(dims?: OverlayDimensions | null): void {
+    const canvas = this.canvas;
+    const ctx = this.ctx;
+    if (!canvas || !ctx || !dims) return;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = dims.width * dpr;
+    canvas.height = dims.height * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
   private startRenderLoop(): void {
     if (this.animFrameId !== null) return;
     const loop = (): void => {
@@ -223,11 +229,14 @@ export class Renderer extends RendererBase {
     if (this.isPaused) return;
     if (this.isVideoPaused) return;
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
     const now = performance.now();
     const dims = this.overlay.getDimensions();
     if (!dims) return;
+
+    // Reset device pixel ratio transform (canvas.width set may have reset it)
+    const dpr = window.devicePixelRatio || 1;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, dims.width, dims.height);
 
     const mode = this.settings.danmakuMode;
     const isScrolling = mode === 'scroll' || mode === 'reverse';
