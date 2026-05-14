@@ -15,6 +15,8 @@
  */
 
 import type { ChatMessage, ContentSegment, OverlaySettings } from '@app-types';
+import { PerAuthorRateLimiter } from '@core/author-rate-limiter';
+import { BurstDetector } from '@core/burst-detector';
 import { computeDliosDuration, rendererLayout } from '@core/design-tokens';
 import { createLogger } from '@core/logging';
 import { ObservabilityReporter } from '@core/observability';
@@ -64,6 +66,11 @@ export class Canvas2DRenderer {
   private readonly activeMessages: CanvasMessage[] = [];
   private readonly pendingQueue: ChatMessage[] = [];
 
+  private burstDetector: BurstDetector;
+  private authorRateLimiter: PerAuthorRateLimiter;
+  private backlogPaused = false;
+  private static readonly QUEUE_MAX_SIZE = 50;
+
   private isPaused = false;
   private isVideoPaused = false;
   private pausedAt: number | null = null;
@@ -110,6 +117,15 @@ export class Canvas2DRenderer {
     });
     if (dims) this.laneAllocator.reset(dims);
 
+    this.burstDetector = new BurstDetector(this.observability);
+    this.burstDetector.start();
+    this.authorRateLimiter = new PerAuthorRateLimiter(() => this.burstDetector.getLevel());
+    this.authorRateLimiter.updateConfig({
+      enabled: settings.authorRateLimitEnabled,
+      windowMs: settings.authorRateLimitWindowMs,
+      maxPerWindow: settings.authorRateLimitMaxMessages,
+    });
+
     this.overlayDimensionsUnsubscribe = overlay.onDimensionsChanged((dims) => {
       if (dims && this.canvas) {
         this.canvas.width = dims.width;
@@ -134,14 +150,49 @@ export class Canvas2DRenderer {
       return;
     }
 
+    this.observability.onMessageReceived();
+    this.burstDetector.onMessageReceived();
+
+    // Per-author rate limiting
+    const priority = this.getMessagePriority(message);
+    if (!this.authorRateLimiter.allow(message.author ?? 'anonymous', priority)) {
+      log.debug('Drop [rate_limited]:', message.author, message.kind, message.id);
+      this.observability.onMessageDropped('rate_limited');
+      return;
+    }
+
     // Pre-load emoji images when the message is first seen
     this.prefetchEmojis(message);
 
-    if (this.activeMessages.length >= Canvas2DRenderer.MAX_ACTIVE) {
-      this.pendingQueue.push(message);
-      return;
+    // Queue overflow: replace lowest-priority message if incoming is more important
+    if (this.pendingQueue.length >= Canvas2DRenderer.QUEUE_MAX_SIZE) {
+      // Last item is lowest priority (FIFO tail)
+      const last = this.pendingQueue[this.pendingQueue.length - 1];
+      if (last && priority <= this.getMessagePriority(last)) {
+        log.debug('Drop [queue_overflow]:', message.author, message.kind);
+        this.observability.onMessageDropped('queue_overflow');
+        return;
+      }
+      this.pendingQueue.pop();
+      this.observability.onMessageDropped('queue_overflow');
     }
-    this.renderMessage(message);
+
+    // Insert in priority order (highest first) for fairness
+    const insertIndex = this.pendingQueue.findIndex((q) => this.getMessagePriority(q) < priority);
+    if (insertIndex === -1) {
+      this.pendingQueue.push(message);
+    } else {
+      this.pendingQueue.splice(insertIndex, 0, message);
+    }
+
+    // If slots available, render immediately
+    if (this.activeMessages.length < Canvas2DRenderer.MAX_ACTIVE) {
+      // Pause backlog injection if queue is saturated
+      this.updateBacklogPause();
+
+      const next = this.pendingQueue.shift();
+      if (next) this.renderMessage(next);
+    }
   }
 
   setBacklogSpeedMultiplier(multiplier: number): void {
@@ -163,6 +214,11 @@ export class Canvas2DRenderer {
   updateSettings(settings: OverlaySettings, _options?: Canvas2DRendererUpdateOptions): void {
     this.settings = settings;
     this.observability.setShowDebug(settings.showDebugOverlay);
+    this.authorRateLimiter.updateConfig({
+      enabled: settings.authorRateLimitEnabled,
+      windowMs: settings.authorRateLimitWindowMs,
+      maxPerWindow: settings.authorRateLimitMaxMessages,
+    });
     // Only reset lane allocator when the overlay dimensions have changed,
     // not on every settings update (mirrors CSS renderer behavior).
     if (this.laneAllocator.isEmpty()) {
@@ -232,6 +288,8 @@ export class Canvas2DRenderer {
     this.activeMessages.length = 0;
     this.pendingQueue.length = 0;
     this.emojiCache.clear();
+    this.burstDetector.destroy();
+    this.authorRateLimiter.destroy();
     this.observability.destroy();
     log.debug('Destroyed');
   }
@@ -445,7 +503,33 @@ export class Canvas2DRenderer {
 
     this.activeMessages.push(cm);
     this.observability.onMessageRendered();
-    this.drainQueue();
+  }
+
+  // ── Message Priority ───────────────────────────────────────────────
+
+  private static readonly KIND_PRIORITY: Record<ChatMessage['kind'], number> = {
+    superchat: 200,
+    membership: 100,
+    text: 0,
+  };
+
+  private getMessagePriority(message: ChatMessage): number {
+    let priority = Canvas2DRenderer.KIND_PRIORITY[message.kind];
+    if (message.isBacklog) priority -= 50;
+    return priority;
+  }
+
+  // ── Backlog Pause ──────────────────────────────────────────────────
+
+  private updateBacklogPause(): void {
+    const queueRatio = this.pendingQueue.length / Canvas2DRenderer.QUEUE_MAX_SIZE;
+    if (queueRatio > 0.8 && this.backlogPaused === false) {
+      this.backlogPaused = true;
+      this.onBacklogPauseChange?.(true);
+    } else if (queueRatio < 0.4 && this.backlogPaused === true) {
+      this.backlogPaused = false;
+      this.onBacklogPauseChange?.(false);
+    }
   }
 
   // ── Dimension Estimation ────────────────────────────────────────────────
