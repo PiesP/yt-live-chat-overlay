@@ -236,7 +236,9 @@ export class LaneAllocator {
   private updateLane(laneIndex: number, newAvailableAt: number): void {
     const idx = this.laneIndexToHeapIndex.get(laneIndex);
     if (idx === undefined) return;
-    const old = this.heap[idx]![1];
+    const entry = this.heap[idx];
+    if (!entry) return;
+    const old = entry[1];
     this.heap[idx] = [laneIndex, newAvailableAt];
     if (newAvailableAt > old) {
       this.siftDown(idx);

@@ -308,7 +308,8 @@ export class Renderer extends RendererBase {
     if (toRemove.length === 0) return;
 
     for (let ri = toRemove.length - 1; ri >= 0; ri--) {
-      const idx = toRemove[ri]!;
+      const idx = toRemove[ri];
+      if (idx === undefined) break;
       const lastIdx = this.activeMessages.length - 1;
       if (idx < lastIdx) {
         const lastMsg = this.activeMessages[lastIdx];
