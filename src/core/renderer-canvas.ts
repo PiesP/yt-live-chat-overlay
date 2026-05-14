@@ -519,33 +519,24 @@ export class Renderer extends RendererBase {
     alpha: number,
     fontSize: number
   ): void {
+    ctx.save();
     ctx.globalAlpha = alpha;
     ctx.font = this.getFont(fontSize);
     ctx.textBaseline = 'top';
 
     const outline = this.settings.outline;
     if (outline.enabled && outline.widthPx > 0 && outline.opacity > 0) {
-      const strokeWidth = Math.max(0.5, outline.widthPx * 0.5);
-      const strokeOpacity = Math.min(1, outline.opacity * 0.8);
-      ctx.strokeStyle = `rgba(0, 0, 0, ${strokeOpacity})`;
+      const strokeWidth = Math.max(0.5, outline.widthPx * 0.85);
+      ctx.strokeStyle = `rgba(0, 0, 0, ${Math.min(1, outline.opacity)})`;
       ctx.lineWidth = strokeWidth;
       ctx.lineJoin = 'round';
       ctx.lineCap = 'round';
       ctx.strokeText(text, x, y);
-
-      ctx.shadowColor = `rgba(0, 0, 0, ${Math.min(1, outline.opacity * 0.9)})`;
-      ctx.shadowBlur = Math.max(2, outline.blurPx * 2);
-      ctx.shadowOffsetX = 0;
-      ctx.shadowOffsetY = 0;
     }
 
     ctx.fillStyle = color;
     ctx.fillText(text, x, y);
-
-    if (outline.enabled && outline.widthPx > 0 && outline.opacity > 0) {
-      ctx.shadowColor = 'transparent';
-      ctx.shadowBlur = 0;
-    }
+    ctx.restore();
   }
 
   private renderContentSegments(
