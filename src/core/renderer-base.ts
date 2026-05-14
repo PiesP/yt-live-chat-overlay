@@ -208,6 +208,7 @@ export abstract class RendererBase {
 
   abstract addMessage(message: ChatMessage): void;
   abstract get laneCount(): number;
+  protected abstract getQueueLength(): number;
 
   protected abstract onPause(): void;
   protected abstract onResume(): void;
@@ -215,4 +216,15 @@ export abstract class RendererBase {
   protected abstract applyPausedDuration(pausedMs: number): void;
   protected abstract resetState(): void;
   protected abstract onDestroy(): void;
+
+  protected updateBacklogPause(): void {
+    const queueRatio = this.getQueueLength() / rendererLayout.queueMaxSize;
+    if (queueRatio > 0.8 && this.backlogPaused === false) {
+      this.backlogPaused = true;
+      this.onBacklogPauseChange?.(true);
+    } else if (queueRatio < 0.4 && this.backlogPaused === true) {
+      this.backlogPaused = false;
+      this.onBacklogPauseChange?.(false);
+    }
+  }
 }

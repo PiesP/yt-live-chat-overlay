@@ -575,6 +575,10 @@ export class Renderer extends RendererBase {
     return this.laneAllocator.getLaneCount();
   }
 
+  protected getQueueLength(): number {
+    return this.pendingQueue.length;
+  }
+
   // ── Message ingress ──────────────────────────────────────────────────
 
   addMessage(message: ChatMessage): void {
@@ -701,14 +705,7 @@ export class Renderer extends RendererBase {
       log.debug(`${droppedCount} message(s) dropped, requeued with retry`);
     }
 
-    const queueRatio = this.pendingQueue.length / rendererLayout.queueMaxSize;
-    if (queueRatio > 0.8 && this.backlogPaused === false) {
-      this.backlogPaused = true;
-      this.onBacklogPauseChange?.(true);
-    } else if (queueRatio < 0.4 && this.backlogPaused === true) {
-      this.backlogPaused = false;
-      this.onBacklogPauseChange?.(false);
-    }
+    this.updateBacklogPause();
 
     if (this.pendingQueue.length > 0 && !this.isPaused) {
       this.scheduleRetry(rendererLayout.retryDelayMinMs);

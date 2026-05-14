@@ -97,6 +97,10 @@ export class Renderer extends RendererBase {
     return this.laneAllocator.getLaneCount();
   }
 
+  protected getQueueLength(): number {
+    return this.pendingQueue.length;
+  }
+
   // ── Message ingress ──────────────────────────────────────────────────
 
   addMessage(message: ChatMessage): void {
@@ -490,17 +494,6 @@ export class Renderer extends RendererBase {
   }
 
   // ── Backlog pause ────────────────────────────────────────────────────
-
-  private updateBacklogPause(): void {
-    const queueRatio = this.pendingQueue.length / rendererLayout.maxConcurrent;
-    if (queueRatio > 0.8 && this.backlogPaused === false) {
-      this.backlogPaused = true;
-      this.onBacklogPauseChange?.(true);
-    } else if (queueRatio < 0.4 && this.backlogPaused === true) {
-      this.backlogPaused = false;
-      this.onBacklogPauseChange?.(false);
-    }
-  }
 
   private getEffectiveBacklogSpeed(): number {
     const speed =
