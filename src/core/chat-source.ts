@@ -9,13 +9,13 @@
  */
 
 import type { ChatMessage, OverlaySettings } from '@app-types';
+import { BootstrapResolver } from '@core/bootstrap-resolver';
 import { type ChatEvent, extractChatEvents } from '@core/chat-message-parser';
 import { findElementMatch, isAbortError, sleep, throwIfAborted, VIDEO_SELECTORS } from '@core/dom';
 import { createLogger } from '@core/logging';
 import {
   bootstrapChatSession,
   type ChatBootstrapData,
-  type ChatBootstrapResult,
   extractNextLiveContinuation,
   extractPlayerSeekContinuation,
   extractReplayContinuation,
@@ -29,8 +29,6 @@ import {
 
 const log = createLogger('ChatSource');
 
-const BOOTSTRAP_ATTEMPTS = 8;
-const BOOTSTRAP_MAX_UNAVAILABLE_RETRIES = 4;
 const RECENT_MESSAGE_BUFFER_SIZE = 100;
 const RECONNECT_RETRY_DELAY_MS = 1000;
 const DEFAULT_ACTIVITY_TIMEOUT_MS = 30_000;
@@ -53,12 +51,6 @@ interface ChatHealthSnapshotOptions {
 export interface ChatHealthSnapshot {
   observerAlive: boolean;
   recentlyActive: boolean;
-}
-
-interface ChatBootstrapResolution {
-  status: ChatBootstrapResult['status'];
-  bootstrap?: ChatBootstrapData;
-  reason: string;
 }
 
 interface PlaybackSnapshot {
@@ -93,6 +85,7 @@ export abstract class ChatSource {
   private lastActivityTime = 0;
   protected bootstrap: ChatBootstrapData | null = null;
   private readonly recentMessages: ChatMessage[] = [];
+  protected readonly bootstrapResolver = new BootstrapResolver();
 
   /** Polling interval (ms) used by waitWhilePaused while the tab is hidden. */
   private static readonly PAUSE_POLL_INTERVAL_MS = 250;
@@ -267,79 +260,6 @@ export abstract class ChatSource {
     return payload;
   }
 
-  protected async resolveBootstrap(signal?: AbortSignal): Promise<ChatBootstrapResolution> {
-    let lastRetryReason = 'Chat bootstrap did not become available';
-    let unavailableRetries = 0;
-
-    for (let attempt = 1; attempt <= BOOTSTRAP_ATTEMPTS; attempt++) {
-      throwIfAborted(signal);
-
-      const result = await bootstrapChatSession(signal);
-      if (result.status === 'ready') {
-        return {
-          status: 'ready',
-          bootstrap: result.data,
-          reason: 'Chat bootstrap resolved successfully',
-        };
-      }
-
-      if (result.status === 'unavailable') {
-        // SPA navigation: YouTube may not have updated window globals yet.
-        // Retry with exponential backoff before giving up.
-        unavailableRetries++;
-        if (unavailableRetries > BOOTSTRAP_MAX_UNAVAILABLE_RETRIES) {
-          return {
-            status: 'unavailable',
-            reason: result.reason,
-          };
-        }
-
-        lastRetryReason = result.reason;
-        log.debug(
-          `Bootstrap unavailable (retry ${unavailableRetries}/${BOOTSTRAP_MAX_UNAVAILABLE_RETRIES}): ${result.reason}`
-        );
-      } else {
-        lastRetryReason = result.reason;
-      }
-
-      // Exponential backoff: 500ms, 1000ms, 2000ms, 4000ms (cap 4000ms)
-      if (attempt < BOOTSTRAP_ATTEMPTS) {
-        const backoffDelay = 500 * 2 ** (attempt - 1);
-        await sleep(Math.min(backoffDelay, 4000), signal);
-      }
-    }
-
-    return {
-      status: 'retryable',
-      reason: lastRetryReason,
-    };
-  }
-
-  protected logBootstrapFailure(
-    resolution: Exclude<ChatBootstrapResolution, { status: 'ready' }>
-  ): void {
-    if (resolution.status === 'retryable') {
-      log.warn(
-        `Chat bootstrap was retryable after ${BOOTSTRAP_ATTEMPTS} attempts: ${resolution.reason}`
-      );
-      return;
-    }
-
-    log.warn('Chat source is unavailable:', resolution.reason);
-  }
-
-  protected async refreshBootstrap(signal?: AbortSignal): Promise<boolean> {
-    const resolution = await this.resolveBootstrap(signal);
-
-    if (resolution.status !== 'ready' || !resolution.bootstrap) {
-      log.warn('Failed to refresh chat bootstrap:', resolution.reason);
-      return false;
-    }
-
-    this.bootstrap = resolution.bootstrap;
-    return true;
-  }
-
   protected launchPollLoop(
     signal: AbortSignal | undefined,
     runner: (loopSignal: AbortSignal | undefined) => Promise<void>
@@ -414,10 +334,10 @@ export abstract class ChatSource {
   // ---- Private ----
 
   private async bootstrapAndLaunchPolling(signal?: AbortSignal): Promise<ChatSourceStartStatus> {
-    const bootstrapResolution = await this.resolveBootstrap(signal);
+    const bootstrapResolution = await this.bootstrapResolver.resolve(signal);
 
     if (bootstrapResolution.status !== 'ready' || !bootstrapResolution.bootstrap) {
-      this.logBootstrapFailure(bootstrapResolution);
+      this.bootstrapResolver.logFailure(bootstrapResolution);
       return bootstrapResolution.status === 'unavailable' ? 'unavailable' : 'retryable';
     }
 
@@ -635,8 +555,9 @@ class LiveChatSource extends ChatSource {
   }
 
   private async refreshLiveContinuation(signal?: AbortSignal): Promise<void> {
-    const refreshed = await this.refreshBootstrap(signal);
-    if (refreshed) {
+    const bootstrap = await this.bootstrapResolver.refresh(signal);
+    if (bootstrap) {
+      this.bootstrap = bootstrap;
       this.liveContinuation = this.bootstrap?.initialContinuation ?? null;
     }
   }
@@ -790,10 +711,11 @@ class ReplayChatSource extends ChatSource {
   }
 
   private async reinitializeReplaySession(signal?: AbortSignal): Promise<boolean> {
-    const refreshed = await this.refreshBootstrap(signal);
-    if (!refreshed || !this.bootstrap?.isReplay) {
+    const bootstrap = await this.bootstrapResolver.refresh(signal);
+    if (!bootstrap?.isReplay) {
       return false;
     }
+    this.bootstrap = bootstrap;
 
     return this.initializeReplaySession(signal);
   }
