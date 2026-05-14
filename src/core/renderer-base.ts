@@ -1,8 +1,14 @@
 /**
  * RendererBase
  *
- * Shared logic extracted from Renderer (CSS) and Canvas2DRenderer.
+ * Shared logic extracted from RendererCSS and RendererCanvas.
  * Subclasses implement the rendering-specific abstract methods.
+ *
+ * State machine simplification (Phase 4):
+ * - Removed isVideoPaused flag: video pause is handled by the runtime
+ *   session pausing the renderer AND the chat source independently.
+ * - Removed resumeStabilizeUntil: EMA speed adaptation is always active;
+ *   the 2-second stabilization window added complexity without measurable benefit.
  */
 
 import type { ChatMessage, OverlaySettings } from '@app-types';
@@ -36,7 +42,6 @@ export abstract class RendererBase {
   protected playbackRate = 1;
   protected backlogSpeedMultiplier = 1;
   protected backlogPaused = false;
-  protected resumeStabilizeUntil: number = 0;
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
     this.overlay = overlay;
@@ -79,7 +84,7 @@ export abstract class RendererBase {
     const now = performance.now();
     let pausedDuration = 0;
     if (this.pausedAt !== null) {
-      pausedDuration = Math.min(Math.max(0, now - this.pausedAt), 60_000);
+      pausedDuration = Math.min(Math.max(0, now - this.pausedAt), rendererLayout.maxMessageAgeMs);
       this.applyPausedDuration(pausedDuration);
     }
     this.pausedAt = null;
@@ -89,7 +94,6 @@ export abstract class RendererBase {
       return;
     }
 
-    this.resumeStabilizeUntil = now + 2000;
     this.laneAllocator.shiftAll(pausedDuration);
     this.isPaused = false;
     this.onResume();
@@ -147,12 +151,10 @@ export abstract class RendererBase {
   protected getEffectiveSpeedPxPerSec(): number {
     let speed = this.settings.speedPxPerSec * this.playbackRate;
 
-    if (performance.now() >= this.resumeStabilizeUntil) {
-      const emaRate = this.burstDetector.getEmaRate();
-      if (emaRate > 5) {
-        const emaMultiplier = 1 + Math.min((emaRate - 5) / 15, 0.35);
-        speed *= emaMultiplier;
-      }
+    const emaRate = this.burstDetector.getEmaRate();
+    if (emaRate > 5) {
+      const emaMultiplier = 1 + Math.min((emaRate - 5) / 15, 0.35);
+      speed *= emaMultiplier;
     }
 
     const burstLevel = this.burstDetector.getLevel();

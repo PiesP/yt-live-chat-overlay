@@ -30,7 +30,6 @@ import {
 const log = createLogger('ChatSource');
 
 const BOOTSTRAP_ATTEMPTS = 8;
-/** Max retries for unavailable bootstrap (SPA navigation timing). */
 const BOOTSTRAP_MAX_UNAVAILABLE_RETRIES = 4;
 const RECENT_MESSAGE_BUFFER_SIZE = 100;
 const RECONNECT_RETRY_DELAY_MS = 1000;
@@ -43,6 +42,7 @@ const REPLAY_CONSECUTIVE_FAILURE_LIMIT = 5;
 const REPLAY_FAILURE_BACKOFF_MS = 5000;
 const REPLAY_PREFETCH_WINDOW_MS = 5000;
 const MAX_BUFFERED_REPLAY_MESSAGES = 300;
+const LIVE_SEED_CUTOFF_MS = 60_000; // filter initial seed messages older than 60s from playback
 
 type ReplayMode = 'playerSeek' | 'continuation';
 
@@ -596,7 +596,7 @@ class LiveChatSource extends ChatSource {
         const offsetMs = playback?.offsetMs ?? 0;
         // Keep messages within 60 seconds of current playback, or all if
         // playback position is near the start.
-        const cutoffMs = Math.max(0, offsetMs - 60_000);
+        const cutoffMs = Math.max(0, offsetMs - LIVE_SEED_CUTOFF_MS);
 
         const filtered = events.filter((e) => {
           // Always keep SuperChat and Membership regardless of timing
