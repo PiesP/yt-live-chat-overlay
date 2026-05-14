@@ -1,20 +1,13 @@
-import { isLogLevel, type OverlaySettings } from '@app-types';
+import type { OverlaySettings } from '@app-types';
 import {
   AUTHOR_COLOR_KEYS,
   cloneSettings,
   OUTLINE_LIMITS_MAP,
-  OUTLINE_NUMERIC_KEYS,
-  OUTLINE_SETTING_KEYS,
   type OutlineSettingKey,
-  ROOT_NUMERIC_KEYS,
-  ROOT_SETTING_KEYS,
   type RootNumericSettingKey,
   type RootScalarSettingKey,
   SETTINGS_LIMITS,
-  SHOW_AUTHOR_KEYS,
 } from '@core/settings-schema';
-
-const outlineFormName = (key: OutlineSettingKey): string => `outline-${key}`;
 
 // ── Constants shared with SettingsUi ────────────────────────────────────────
 
@@ -126,6 +119,258 @@ const applyNumberInputAttributes = (
   input.step = String(step);
 };
 
+// ── Declarative field schemas ────────────────────────────────────────────────
+
+type FieldDef =
+  | { type: 'number'; label: string; key: string; title?: string; modifier?: string }
+  | { type: 'checkbox'; label: string; key: string; title?: string; modifier?: string }
+  | {
+      type: 'select';
+      label: string;
+      key: string;
+      options: ReadonlyArray<[string, string]>;
+      title?: string;
+    }
+  | { type: 'color'; label: string; key: string }
+  | { type: 'enabled' };
+
+interface SectionDef {
+  title: string;
+  fields: FieldDef[];
+}
+
+interface PaneDef {
+  id: string;
+  label: string;
+  sections: SectionDef[];
+}
+
+const PANES: PaneDef[] = [
+  {
+    id: 'comments',
+    label: 'Comments',
+    sections: [
+      { title: '', fields: [{ type: 'enabled' }] },
+      {
+        title: '',
+        fields: [
+          {
+            type: 'select',
+            label: 'Danmaku Mode',
+            key: 'danmakuMode',
+            options: [
+              ['scroll', 'Scroll (RTL)'],
+              ['reverse', 'Reverse (LTR)'],
+              ['top', 'Top Fixed'],
+              ['bottom', 'Bottom Fixed'],
+            ],
+          },
+          { type: 'number', label: 'Font Size (px)', key: 'fontSize' },
+          { type: 'number', label: 'Text Opacity', key: 'opacity' },
+          { type: 'number', label: 'Scroll Speed (px/s)', key: 'speedPxPerSec' },
+          {
+            type: 'number',
+            label: 'Lane Gap (px)',
+            key: 'laneSpacing',
+            title: 'Extra vertical gap between comment rows',
+          },
+        ],
+      },
+      {
+        title: 'Text Outline',
+        fields: [
+          { type: 'checkbox', label: 'Enabled', key: 'outline-enabled', modifier: 'outline' },
+          {
+            type: 'number',
+            label: 'Width (px)',
+            key: 'outline-widthPx'.replace('outline-', '') as string,
+            modifier: 'outline',
+          },
+          {
+            type: 'number',
+            label: 'Blur (px)',
+            key: 'outline-blurPx'.replace('outline-', '') as string,
+            modifier: 'outline',
+          },
+          {
+            type: 'number',
+            label: 'Opacity',
+            key: 'outline-opacity'.replace('outline-', '') as string,
+            modifier: 'outline',
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'colors',
+    label: 'Colors',
+    sections: [
+      {
+        title: '',
+        fields: [
+          {
+            type: 'number',
+            label: 'SuperChat Opacity (%)',
+            key: 'superChatOpacity',
+            title: 'Background opacity of Super Chat cards',
+          },
+        ],
+      },
+      { title: 'Author Colors & Visibility', fields: [] }, // handled specially
+    ],
+  },
+  {
+    id: 'advanced',
+    label: 'Advanced',
+    sections: [
+      {
+        title: 'Safe Zone',
+        fields: [
+          {
+            type: 'number',
+            label: 'Top Clear Zone (%)',
+            key: 'safeTop',
+            title: 'Keep top N% of video free of comments',
+          },
+          {
+            type: 'number',
+            label: 'Bottom Clear Zone (%)',
+            key: 'safeBottom',
+            title: 'Keep bottom N% of video free of comments',
+          },
+        ],
+      },
+      {
+        title: 'Message Rate',
+        fields: [
+          {
+            type: 'checkbox',
+            label: 'Show Short Messages',
+            key: 'allowShortTextMessages',
+            title: 'Show messages shorter than Min Length',
+          },
+          {
+            type: 'number',
+            label: 'Min Length (chars)',
+            key: 'minTextLength',
+            title: 'Minimum character count',
+          },
+        ],
+      },
+      {
+        title: 'Performance',
+        fields: [
+          {
+            type: 'number',
+            label: 'Max Visible',
+            key: 'maxConcurrentMessages',
+            title: 'Performance warning threshold for simultaneous comments',
+          },
+        ],
+      },
+      {
+        title: 'Renderer',
+        fields: [
+          {
+            type: 'select',
+            label: 'Renderer',
+            key: 'rendererType',
+            options: [
+              ['css', 'CSS (DOM animations)'],
+              ['canvas', 'Canvas2D (rAF, stable)'],
+            ],
+          },
+        ],
+      },
+      {
+        title: 'Backlog',
+        fields: [
+          {
+            type: 'select',
+            label: 'Backlog Mode',
+            key: 'backlogMode',
+            options: [
+              ['playback', 'Playback-based (recommended)'],
+              ['recent', 'Recent only'],
+              ['full', 'Full (show all)'],
+              ['none', 'None (skip backlog)'],
+            ],
+          },
+          {
+            type: 'number',
+            label: 'Max backlog rate (msg/s)',
+            key: 'backlogMaxRate',
+            title: 'Maximum messages per second during backlog injection',
+          },
+          {
+            type: 'number',
+            label: 'Backlog speed multiplier',
+            key: 'backlogSpeedMultiplier',
+            title: 'Speed multiplier for backlog message animations',
+          },
+          {
+            type: 'number',
+            label: 'Recent minutes',
+            key: 'backlogRecentMinutes',
+            title: 'Show past chat from last N minutes (only for Recent mode)',
+          },
+          {
+            type: 'checkbox',
+            label: 'Show backlog loading indicator',
+            key: 'showBacklogIndicator',
+            title: 'Show loading indicator during backlog injection',
+          },
+        ],
+      },
+      {
+        title: 'Rate Limiting',
+        fields: [
+          {
+            type: 'checkbox',
+            label: 'Enable author rate limiting',
+            key: 'authorRateLimitEnabled',
+            title: 'Limit messages per author per time window',
+          },
+          {
+            type: 'number',
+            label: 'Window (ms)',
+            key: 'authorRateLimitWindowMs',
+            title: 'Time window for rate limiting in milliseconds',
+          },
+          {
+            type: 'number',
+            label: 'Max per window',
+            key: 'authorRateLimitMaxMessages',
+            title: 'Maximum messages per author per window',
+          },
+        ],
+      },
+      {
+        title: 'Debug',
+        fields: [
+          {
+            type: 'select',
+            label: 'Log Level',
+            key: 'logLevel',
+            options: [
+              ['warn', 'Warn'],
+              ['info', 'Info'],
+              ['debug', 'Debug'],
+            ],
+          },
+          {
+            type: 'checkbox',
+            label: 'Show debug overlay',
+            key: 'showDebugOverlay',
+            title: 'Display real-time metrics overlay',
+          },
+        ],
+      },
+    ],
+  },
+];
+
 // ── SettingsUiForm class ────────────────────────────────────────────────────
 
 export class SettingsUiForm {
@@ -162,11 +407,109 @@ export class SettingsUiForm {
   // ── Modal content factory ──────────────────────────────────────────────
 
   createModalContent(): Node[] {
-    const panes = [this.createCommentsPane(), this.createColorsPane(), this.createAdvancedPane()];
+    const panes = PANES.map((pane) => this.buildPane(pane));
     for (const pane of panes) {
       this.attachLivePreview(pane);
     }
     return [this.createHeader(), this.createTabs(), ...panes, this.createActions()];
+  }
+
+  private buildPane(def: PaneDef): HTMLDivElement {
+    const pane = this.createDiv('yt-chat-overlay-settings-pane');
+    pane.id = `pane-${def.id}`;
+    pane.dataset.pane = def.id;
+    pane.setAttribute('role', 'tabpanel');
+    if (def.id !== 'comments') pane.hidden = true;
+
+    for (const section of def.sections) {
+      if (section.title === 'Author Colors & Visibility') {
+        pane.appendChild(this.buildAuthorGrid());
+        continue;
+      }
+      if (section.fields.length === 0) continue;
+
+      if (section.title) {
+        const secEl = this.createSection(section.title);
+        for (const field of section.fields) {
+          secEl.appendChild(this.buildField(field));
+        }
+        pane.appendChild(secEl);
+      } else {
+        for (const field of section.fields) {
+          const el = this.buildField(field);
+          if (field.type === 'enabled') el.classList.add('yt-chat-overlay-settings-enabled');
+          pane.appendChild(el);
+        }
+      }
+    }
+    return pane;
+  }
+
+  private buildField(def: FieldDef): HTMLElement {
+    switch (def.type) {
+      case 'enabled':
+        return this.createEnabledField();
+      case 'checkbox':
+        return this.createCheckboxField(def.label, def.key, def.title);
+      case 'number': {
+        const input = this.createInput({ type: 'number', name: this.resolveKey(def) });
+        applyNumberInputAttributes(
+          input,
+          def.key as RootScalarSettingKey | Exclude<OutlineSettingKey, 'enabled'>
+        );
+        if (def.title) input.title = def.title;
+        return this.createField(def.label, input);
+      }
+      case 'select': {
+        const select = document.createElement('select');
+        select.name = def.key;
+        if (def.title) select.title = def.title;
+        for (const [value, label] of def.options) {
+          const opt = document.createElement('option');
+          opt.value = value;
+          opt.textContent = label;
+          select.appendChild(opt);
+        }
+        return this.createField(def.label, select);
+      }
+      default:
+        throw new Error('Unhandled field type');
+    }
+  }
+
+  private resolveKey(def: { key: string; modifier?: string }): string {
+    return def.modifier ? `${def.modifier}-${def.key}` : def.key;
+  }
+
+  private buildAuthorGrid(): HTMLDivElement {
+    const section = this.createSection('Author Colors & Visibility');
+    const grid = this.createDiv('yt-chat-overlay-author-grid');
+    grid.append(
+      document.createElement('span'),
+      this.createGridHeader('Color'),
+      this.createGridHeader('Show')
+    );
+
+    for (const key of AUTHOR_COLOR_KEYS) {
+      grid.append(
+        this.createGridLabel(key.charAt(0).toUpperCase() + key.slice(1)),
+        this.createInput({
+          type: 'color',
+          name: `color-${key}`,
+          className: 'yt-chat-overlay-author-grid-color',
+        }),
+        this.createGridCheckbox(`showAuthor-${key}`)
+      );
+    }
+
+    grid.append(
+      this.createGridLabel('SuperChat'),
+      document.createElement('span'),
+      this.createGridCheckbox('showAuthor-superChat')
+    );
+
+    section.appendChild(grid);
+    return section;
   }
 
   private createDiv(className: string): HTMLDivElement {
@@ -197,261 +540,20 @@ export class SettingsUiForm {
     nav.setAttribute('role', 'tablist');
     nav.setAttribute('aria-label', 'Settings categories');
 
-    for (const [tabId, label] of [
-      ['comments', 'Comments'],
-      ['colors', 'Colors'],
-      ['advanced', 'Advanced'],
-    ] as const) {
+    for (const pane of PANES) {
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'yt-chat-overlay-settings-tab';
-      button.dataset.tab = tabId;
+      button.dataset.tab = pane.id;
       button.setAttribute('role', 'tab');
-      button.setAttribute('aria-selected', String(tabId === 'comments'));
-      button.setAttribute('aria-controls', `pane-${tabId}`);
-      button.textContent = label;
-      if (tabId === 'comments') {
-        button.classList.add('active');
-      }
+      button.setAttribute('aria-selected', String(pane.id === 'comments'));
+      button.setAttribute('aria-controls', `pane-${pane.id}`);
+      button.textContent = pane.label;
+      if (pane.id === 'comments') button.classList.add('active');
       nav.appendChild(button);
     }
 
     return nav;
-  }
-
-  // ── Select field factory ───────────────────────────────────────────────
-
-  private static readonly SELECT_FIELD_OPTIONS: Record<
-    string,
-    { label: string; title: string; options: ReadonlyArray<[string, string]> }
-  > = {
-    logLevel: {
-      label: 'Log Level',
-      title: 'Console output verbosity',
-      options: [
-        ['warn', 'Warn'],
-        ['info', 'Info'],
-        ['debug', 'Debug'],
-      ],
-    },
-    backlogMode: {
-      label: 'Backlog Mode',
-      title: 'How to show past chat messages on load',
-      options: [
-        ['playback', 'Playback-based (recommended)'],
-        ['recent', 'Recent only'],
-        ['full', 'Full (show all)'],
-        ['none', 'None (skip backlog)'],
-      ],
-    },
-    danmakuMode: {
-      label: 'Danmaku Mode',
-      title: 'Comment animation direction and behavior',
-      options: [
-        ['scroll', 'Scroll (RTL)'],
-        ['reverse', 'Reverse (LTR)'],
-        ['top', 'Top Fixed'],
-        ['bottom', 'Bottom Fixed'],
-      ],
-    },
-    rendererType: {
-      label: 'Renderer',
-      title: 'Rendering backend — CSS (DOM) or Canvas2D (rAF)',
-      options: [
-        ['css', 'CSS (DOM animations)'],
-        ['canvas', 'Canvas2D (rAF, stable)'],
-      ],
-    },
-  };
-
-  private createSelectField(name: string): HTMLLabelElement {
-    const config = SettingsUiForm.SELECT_FIELD_OPTIONS[name];
-    if (!config) return this.createField(name, document.createElement('select'));
-    const select = document.createElement('select');
-    select.name = name;
-    select.title = config.title;
-    for (const [value, label] of config.options) {
-      const option = document.createElement('option');
-      option.value = value;
-      option.textContent = label;
-      select.appendChild(option);
-    }
-    return this.createField(config.label, select);
-  }
-
-  private createCommentsPane(): HTMLDivElement {
-    const pane = this.createPane('comments');
-    const outlineSection = this.createSection('Text Outline');
-    outlineSection.append(
-      this.createCheckboxField('Enabled', outlineFormName('enabled')),
-      this.createOutlineNumberField('Width (px)', 'widthPx'),
-      this.createOutlineNumberField('Blur (px)', 'blurPx'),
-      this.createOutlineNumberField('Opacity', 'opacity')
-    );
-
-    pane.append(
-      this.createEnabledField(),
-      this.createSelectField('danmakuMode'),
-      this.createNumberField('Font Size (px)', 'fontSize'),
-      this.createNumberField('Text Opacity', 'opacity'),
-      this.createNumberField('Scroll Speed (px/s)', 'speedPxPerSec'),
-      this.createNumberField(
-        'Lane Gap (px)',
-        'laneSpacing',
-        'Extra vertical gap between comment rows'
-      ),
-      outlineSection
-    );
-    return pane;
-  }
-
-  private createColorsPane(): HTMLDivElement {
-    const pane = this.createPane('colors', true);
-    pane.append(
-      this.createNumberField(
-        'SuperChat Opacity (%)',
-        'superChatOpacity',
-        'Background opacity of Super Chat cards'
-      )
-    );
-    const authorSection = this.createSection('Author Colors & Visibility');
-    const grid = this.createDiv('yt-chat-overlay-author-grid');
-    grid.append(
-      document.createElement('span'),
-      this.createGridHeader('Color'),
-      this.createGridHeader('Show')
-    );
-
-    for (const key of AUTHOR_COLOR_KEYS) {
-      grid.append(
-        this.createGridLabel(this.formatAuthorLabel(key)),
-        this.createInput({
-          type: 'color',
-          name: `color-${key}`,
-          className: 'yt-chat-overlay-author-grid-color',
-        }),
-        this.createGridCheckbox(`showAuthor-${key}`)
-      );
-    }
-
-    grid.append(
-      this.createGridLabel('SuperChat'),
-      document.createElement('span'),
-      this.createGridCheckbox('showAuthor-superChat')
-    );
-
-    authorSection.appendChild(grid);
-    pane.appendChild(authorSection);
-    return pane;
-  }
-
-  private createAdvancedPane(): HTMLDivElement {
-    const pane = this.createPane('advanced', true);
-
-    const safeZoneSection = this.createSection('Safe Zone');
-    safeZoneSection.append(
-      this.createNumberField(
-        'Top Clear Zone (%)',
-        'safeTop',
-        'Keep top N% of video free of comments (safe zone for stream info overlays)'
-      ),
-      this.createNumberField(
-        'Bottom Clear Zone (%)',
-        'safeBottom',
-        'Keep bottom N% of video free of comments (safe zone for YouTube controls)'
-      )
-    );
-
-    const rateSection = this.createSection('Message Rate');
-    rateSection.append(
-      this.createCheckboxField(
-        'Show Short Messages',
-        'allowShortTextMessages',
-        'Show messages shorter than Min Length'
-      ),
-      this.createNumberField(
-        'Min Length (chars)',
-        'minTextLength',
-        'Minimum character count (ignored when Show Short is on)'
-      )
-    );
-
-    const performanceSection = this.createSection('Performance');
-    performanceSection.append(
-      this.createNumberField(
-        'Max Visible',
-        'maxConcurrentMessages',
-        'Performance warning threshold for simultaneous comments'
-      )
-    );
-
-    const rendererSection = this.createSection('Renderer');
-    rendererSection.append(this.createSelectField('rendererType'));
-
-    const backlogSection = this.createSection('Backlog');
-    backlogSection.append(
-      this.createSelectField('backlogMode'),
-      this.createNumberField(
-        'Max backlog rate (msg/s)',
-        'backlogMaxRate',
-        'Maximum messages per second during backlog injection'
-      ),
-      this.createNumberField(
-        'Backlog speed multiplier',
-        'backlogSpeedMultiplier',
-        'Speed multiplier for backlog message animations'
-      ),
-      this.createNumberField(
-        'Recent minutes',
-        'backlogRecentMinutes',
-        'Show past chat from last N minutes (only for "Recent" mode)'
-      ),
-      this.createCheckboxField(
-        'Show backlog loading indicator',
-        'showBacklogIndicator',
-        'Show loading indicator during backlog injection'
-      )
-    );
-
-    const rateLimitSection = this.createSection('Rate Limiting');
-    rateLimitSection.append(
-      this.createCheckboxField(
-        'Enable author rate limiting',
-        'authorRateLimitEnabled',
-        'Limit messages per author per time window'
-      ),
-      this.createNumberField(
-        'Window (ms)',
-        'authorRateLimitWindowMs',
-        'Time window for rate limiting in milliseconds'
-      ),
-      this.createNumberField(
-        'Max per window',
-        'authorRateLimitMaxMessages',
-        'Maximum messages per author per window'
-      )
-    );
-
-    const debugSection = this.createSection('Debug');
-    debugSection.append(
-      this.createSelectField('logLevel'),
-      this.createCheckboxField(
-        'Show debug overlay',
-        'showDebugOverlay',
-        'Display real-time metrics overlay'
-      )
-    );
-
-    pane.append(
-      safeZoneSection,
-      rateSection,
-      performanceSection,
-      rendererSection,
-      backlogSection,
-      rateLimitSection,
-      debugSection
-    );
-    return pane;
   }
 
   private createActions(): HTMLDivElement {
@@ -471,25 +573,6 @@ export class SettingsUiForm {
     return actions;
   }
 
-  private createPane(id: string, hidden = false): HTMLDivElement {
-    const pane = this.createDiv('yt-chat-overlay-settings-pane');
-    pane.id = `pane-${id}`;
-    pane.dataset.pane = id;
-    pane.setAttribute('role', 'tabpanel');
-    if (hidden) {
-      pane.hidden = true;
-    }
-    return pane;
-  }
-
-  private createSection(titleText: string): HTMLDivElement {
-    const section = this.createDiv('yt-chat-overlay-settings-section');
-    const title = this.createDiv('yt-chat-overlay-settings-section-title');
-    title.textContent = titleText;
-    section.appendChild(title);
-    return section;
-  }
-
   private createEnabledField(): HTMLLabelElement {
     const label = document.createElement('label');
     label.className = 'yt-chat-overlay-settings-enabled';
@@ -500,34 +583,9 @@ export class SettingsUiForm {
     return label;
   }
 
-  private createNumberField(
-    labelText: string,
-    name: RootScalarSettingKey,
-    title?: string
-  ): HTMLLabelElement {
-    const input = this.createInput({ type: 'number', name });
-    applyNumberInputAttributes(input, name);
-    if (title) {
-      input.title = title;
-    }
-    return this.createField(labelText, input);
-  }
-
-  private createOutlineNumberField(
-    labelText: string,
-    key: Exclude<OutlineSettingKey, 'enabled'>
-  ): HTMLLabelElement {
-    const name = outlineFormName(key);
-    const input = this.createInput({ type: 'number', name });
-    applyNumberInputAttributes(input, key);
-    return this.createField(labelText, input);
-  }
-
   private createCheckboxField(labelText: string, name: string, title?: string): HTMLLabelElement {
     const input = this.createInput({ type: 'checkbox', name });
-    if (title) {
-      input.title = title;
-    }
+    if (title) input.title = title;
     return this.createField(labelText, input);
   }
 
@@ -544,9 +602,7 @@ export class SettingsUiForm {
     const input = document.createElement('input');
     input.type = props.type;
     input.name = props.name;
-    if (props.className) {
-      input.className = props.className;
-    }
+    if (props.className) input.className = props.className;
     return input;
   }
 
@@ -570,228 +626,148 @@ export class SettingsUiForm {
     return element;
   }
 
-  private formatAuthorLabel(key: (typeof AUTHOR_COLOR_KEYS)[number]): string {
-    return key.charAt(0).toUpperCase() + key.slice(1);
+  private createSection(titleText: string): HTMLDivElement {
+    const section = this.createDiv('yt-chat-overlay-settings-section');
+    const title = this.createDiv('yt-chat-overlay-settings-section-title');
+    title.textContent = titleText;
+    section.appendChild(title);
+    return section;
   }
 
   // ── Form population ────────────────────────────────────────────────────
 
   populateForm(settings: Readonly<OverlaySettings>): void {
+    if (!this.modal) return;
     this.isUpdating = true;
-    try {
-      for (const key of ROOT_SETTING_KEYS) {
-        this.populateRootSetting(key, settings);
-      }
 
-      this.setAuthorSettings(settings);
-      for (const key of OUTLINE_SETTING_KEYS) {
-        this.populateOutlineSetting(key, settings.outline);
-      }
+    const els = this.modal.querySelectorAll<HTMLInputElement | HTMLSelectElement>('input, select');
+    for (const el of els) {
+      if (!el.name) continue;
 
-      this.syncMinTextLengthState();
-    } finally {
-      this.isUpdating = false;
-    }
-  }
-
-  private static readonly BOOLEAN_ROOT_KEYS = new Set<RootScalarSettingKey>([
-    'enabled',
-    'allowShortTextMessages',
-    'showDebugOverlay',
-    'authorRateLimitEnabled',
-    'showBacklogIndicator',
-  ]);
-
-  private static readonly SELECT_ROOT_KEYS = new Set<RootScalarSettingKey>([
-    'logLevel',
-    'backlogMode',
-    'danmakuMode',
-    'rendererType',
-  ]);
-
-  private populateRootSetting(
-    key: RootScalarSettingKey,
-    settings: Readonly<OverlaySettings>
-  ): void {
-    const value = settings[key];
-
-    if (SettingsUiForm.BOOLEAN_ROOT_KEYS.has(key)) {
-      this.setCheckbox(key, value as boolean);
-    } else if (SettingsUiForm.SELECT_ROOT_KEYS.has(key)) {
-      this.setSelect(key, value as string);
-    } else {
-      this.setValue(key, formatRootNumericSettingForInput(key, value as number));
-    }
-  }
-
-  private populateOutlineSetting(
-    key: keyof OverlaySettings['outline'],
-    outline: OverlaySettings['outline']
-  ): void {
-    const inputName = outlineFormName(key);
-    if (key === 'enabled') {
-      this.setCheckbox(inputName, outline.enabled);
-    } else {
-      this.setValue(inputName, String(outline[key]));
-    }
-  }
-
-  private setAuthorSettings(settings: Readonly<OverlaySettings>): void {
-    for (const key of SHOW_AUTHOR_KEYS) {
-      this.setCheckbox(`showAuthor-${key}`, settings.showAuthor[key]);
-    }
-
-    const colorInputs = this.modal?.querySelectorAll<HTMLInputElement>(
-      'input[type="color"][name^="color-"]'
-    );
-    if (colorInputs) {
-      for (const input of colorInputs) {
-        const colorKey = input.name.replace('color-', '') as keyof OverlaySettings['colors'];
-        if (colorKey in settings.colors) {
-          input.value = settings.colors[colorKey];
+      if (el.name.startsWith('outline-')) {
+        const key = el.name.slice(8) as keyof typeof settings.outline;
+        const value = settings.outline[key];
+        if (el instanceof HTMLInputElement && el.type === 'checkbox') {
+          el.checked = Boolean(value);
+        } else if (el instanceof HTMLInputElement && el.type === 'color') {
+          el.value = String(value);
+        } else {
+          el.value = formatRootNumericSettingForInput(
+            key as unknown as RootScalarSettingKey,
+            value as number
+          ) as string;
         }
+        continue;
+      }
+
+      if (el.name.startsWith('color-')) {
+        const key = el.name.slice(6) as keyof typeof settings.colors;
+        el.value = settings.colors[key];
+        continue;
+      }
+
+      if (el.name.startsWith('showAuthor-')) {
+        const key = el.name.slice(11) as keyof typeof settings.showAuthor;
+        if (el instanceof HTMLInputElement && el.type === 'checkbox') {
+          el.checked = settings.showAuthor[key];
+        }
+        continue;
+      }
+
+      const scalarKey = el.name as RootScalarSettingKey;
+      const value = settings[scalarKey];
+      if (el instanceof HTMLInputElement && el.type === 'checkbox') {
+        el.checked = Boolean(value);
+      } else {
+        el.value =
+          typeof value === 'number'
+            ? String(formatRootNumericSettingForInput(scalarKey, value))
+            : String(value);
       }
     }
+
+    this.syncMinTextLengthState();
+    this.isUpdating = false;
   }
 
   syncMinTextLengthState(): void {
-    const allowShort = this.getInput('allowShortTextMessages');
-    const minLength = this.getInput('minTextLength');
-    if (allowShort && minLength) {
-      minLength.disabled = allowShort.checked;
+    if (!this.modal) return;
+    const allowShort = this.modal.querySelector<HTMLInputElement>(
+      'input[name="allowShortTextMessages"]'
+    );
+    const minText = this.modal.querySelector<HTMLInputElement>('input[name="minTextLength"]');
+    if (allowShort && minText) {
+      minText.disabled = allowShort.checked;
     }
   }
 
-  // ── Form data collection ───────────────────────────────────────────────
+  // ── Form collection ────────────────────────────────────────────────────
 
   collectSettings(): OverlaySettings {
-    const current = this.getSettings();
-    const nextSettings = cloneSettings(current);
+    const partial: Record<string, unknown> = {};
+    if (!this.modal) return cloneSettings(this.getSettings());
 
-    this.applyRootSettingsTo(nextSettings, current);
+    const els = this.modal.querySelectorAll<HTMLInputElement | HTMLSelectElement>('input, select');
+    for (const el of els) {
+      if (!el.name) continue;
 
-    nextSettings.showAuthor = this.collectShowAuthorSettings(current);
-    nextSettings.colors = this.collectAuthorColors(current);
-    nextSettings.outline = this.collectOutlineSettings(current.outline);
+      if (el.name.startsWith('outline-')) {
+        const key = el.name.slice(8) as Exclude<OutlineSettingKey, 'enabled'>;
+        if (el instanceof HTMLInputElement && el.type === 'checkbox') {
+          partial.outline = {
+            ...((partial.outline as Record<string, unknown>) ?? {}),
+            [key]: el.checked,
+          };
+        } else {
+          partial.outline = {
+            ...((partial.outline as Record<string, unknown>) ?? {}),
+            [key]: normalizeOutlineNumericInputValue(key, el.value, 0),
+          };
+        }
+        continue;
+      }
 
-    return nextSettings;
-  }
+      if (el.name.startsWith('color-')) {
+        if (!partial.colors) partial.colors = {};
+        (partial.colors as Record<string, string>)[el.name.slice(6)] = el.value;
+        continue;
+      }
 
-  private applyRootSettingsTo(target: OverlaySettings, current: Readonly<OverlaySettings>): void {
-    for (const key of SettingsUiForm.BOOLEAN_ROOT_KEYS) {
-      (target[key] as boolean) = this.getCheckbox(key, current[key] as boolean);
-    }
+      if (el.name.startsWith('showAuthor-')) {
+        if (!partial.showAuthor) partial.showAuthor = {};
+        (partial.showAuthor as Record<string, boolean>)[el.name.slice(11)] = (
+          el as HTMLInputElement
+        ).checked;
+        continue;
+      }
 
-    target.logLevel = this.getLogLevel('logLevel', current.logLevel);
-    target.backlogMode = this.getSelectValue(
-      'backlogMode',
-      current.backlogMode
-    ) as OverlaySettings['backlogMode'];
-    target.danmakuMode = this.getSelectValue(
-      'danmakuMode',
-      current.danmakuMode
-    ) as OverlaySettings['danmakuMode'];
-    target.rendererType = this.getSelectValue(
-      'rendererType',
-      current.rendererType
-    ) as OverlaySettings['rendererType'];
-
-    for (const key of ROOT_NUMERIC_KEYS) {
-      target[key] = normalizeRootNumericInputValue(
-        key,
-        this.readNumber(key, current[key]),
-        current[key]
-      );
-    }
-  }
-
-  private readNumber(name: string, fallback: number): number {
-    const input = this.getInput(name);
-    if (!input) return fallback;
-    const parsed = Number.parseFloat(input.value);
-    return Number.isFinite(parsed) ? parsed : fallback;
-  }
-
-  // ── DOM access helpers ─────────────────────────────────────────────────
-
-  private getInput(name: string): HTMLInputElement | null {
-    return this.modal?.querySelector<HTMLInputElement>(`input[name="${name}"]`) ?? null;
-  }
-
-  private getCheckbox(name: string, fallback: boolean): boolean {
-    const input = this.getInput(name);
-    return input ? input.checked : fallback;
-  }
-
-  private setCheckbox(name: string, checked: boolean): void {
-    const input = this.getInput(name);
-    if (input) input.checked = checked;
-  }
-
-  private setValue(name: string, value: string | number): void {
-    const input = this.getInput(name);
-    if (input) input.value = String(value);
-  }
-
-  private getSelectValue(name: string, fallback: string): string {
-    const select = this.modal?.querySelector<HTMLSelectElement>(`select[name="${name}"]`);
-    return select?.value ?? fallback;
-  }
-
-  private setSelect(name: string, value: string): void {
-    const select = this.modal?.querySelector<HTMLSelectElement>(`select[name="${name}"]`);
-    if (select) select.value = value;
-  }
-
-  private getLogLevel(
-    name: string,
-    fallback: OverlaySettings['logLevel']
-  ): OverlaySettings['logLevel'] {
-    const select = this.modal?.querySelector<HTMLSelectElement>(`select[name="${name}"]`);
-    const value = select?.value;
-    return isLogLevel(value) ? value : fallback;
-  }
-
-  private collectShowAuthorSettings(
-    current: Readonly<OverlaySettings>
-  ): OverlaySettings['showAuthor'] {
-    const showAuthor = { ...current.showAuthor };
-    for (const key of SHOW_AUTHOR_KEYS) {
-      showAuthor[key] = this.getCheckbox(`showAuthor-${key}`, current.showAuthor[key]);
-    }
-    return showAuthor;
-  }
-
-  private collectAuthorColors(current: Readonly<OverlaySettings>): OverlaySettings['colors'] {
-    const colors = { ...current.colors };
-    for (const key of AUTHOR_COLOR_KEYS) {
-      const input = this.getInput(`color-${key}`);
-      if (input) colors[key] = input.value;
-    }
-    return colors;
-  }
-
-  private collectOutlineSettings(current: OverlaySettings['outline']): OverlaySettings['outline'] {
-    const outline = { ...current };
-    outline.enabled = this.getCheckbox(outlineFormName('enabled'), current.enabled);
-    for (const key of OUTLINE_NUMERIC_KEYS) {
-      const input = this.getInput(outlineFormName(key));
-      if (input) {
-        outline[key] = normalizeOutlineNumericInputValue(key, input.value, current[key]);
+      const scalarKey = el.name as keyof OverlaySettings;
+      if (el instanceof HTMLInputElement) {
+        if (el.type === 'checkbox') {
+          partial[scalarKey] = el.checked;
+        } else if (el.type === 'number') {
+          partial[scalarKey] = normalizeRootNumericInputValue(
+            scalarKey as RootNumericSettingKey,
+            el.value,
+            this.getSettings()[scalarKey] as number
+          );
+        } else {
+          partial[scalarKey] = el.value;
+        }
+      } else if (el instanceof HTMLSelectElement) {
+        partial[scalarKey] = el.value;
       }
     }
-    return outline;
+
+    return cloneSettings({ ...this.getSettings(), ...partial } as OverlaySettings);
   }
 
   getFocusableElements(): HTMLElement[] {
     if (!this.modal) return [];
-    return Array.from(
-      this.modal.querySelectorAll<HTMLElement>(
-        'input:not([type="hidden"]), select, button, textarea, [tabindex]:not([tabindex="-1"])'
-      )
-    ).filter((el) => {
-      if (el instanceof HTMLElement && el.offsetParent !== null) return true;
-      return false;
-    });
+    return [
+      ...this.modal.querySelectorAll<HTMLElement>(
+        'input:not([disabled]), select:not([disabled]), button, [tabindex]:not([tabindex="-1"])'
+      ),
+    ];
   }
 }
