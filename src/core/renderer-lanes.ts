@@ -40,6 +40,8 @@ interface LaneAllocatorOptions {
 export class LaneAllocator {
   /** Binary min-heap of [laneIndex, availableAtMs] pairs, sorted by availableAtMs */
   private heap: [number, number][] = [];
+  /** Reverse map: laneIndex → heap index for O(1) lookup and update */
+  private laneIndexToHeapIndex: Map<number, number> = new Map();
   private laneHeight = 0;
   private laneCount = 0;
 
@@ -47,6 +49,7 @@ export class LaneAllocator {
 
   reset(dimensions: OverlayDimensions | null): void {
     this.heap = [];
+    this.laneIndexToHeapIndex = new Map();
     if (!dimensions) {
       this.laneHeight = 0;
       this.laneCount = 0;
@@ -56,6 +59,7 @@ export class LaneAllocator {
     this.laneCount = dimensions.laneCount;
     for (let i = 0; i < dimensions.laneCount; i++) {
       this.heap.push([i, 0]);
+      this.laneIndexToHeapIndex.set(i, i);
     }
     // Build min-heap
     for (let i = Math.floor(this.heap.length / 2) - 1; i >= 0; i--) {
@@ -210,15 +214,17 @@ export class LaneAllocator {
     return { startIndex: bestStart, waitMs: bestWait };
   }
 
-  /** Find a lane entry by its index in the heap (linear scan). */
+  /** Find a lane entry by its index in the heap (O(1) via reverse map). */
   private findLaneEntry(laneIndex: number): [number, number] | undefined {
-    return this.heap.find(([idx]) => idx === laneIndex);
+    const heapIdx = this.laneIndexToHeapIndex.get(laneIndex);
+    if (heapIdx === undefined) return undefined;
+    return this.heap[heapIdx];
   }
 
   /** Update a lane's available time in the heap. */
   private updateLane(laneIndex: number, newAvailableAt: number): void {
-    const idx = this.heap.findIndex(([i]) => i === laneIndex);
-    if (idx < 0) return;
+    const idx = this.laneIndexToHeapIndex.get(laneIndex);
+    if (idx === undefined) return;
     this.heap[idx] = [laneIndex, newAvailableAt];
     this.siftDown(idx);
     this.siftUp(idx);
@@ -246,6 +252,9 @@ export class LaneAllocator {
       if (!current || !smallestEntrySwap) break;
       this.heap[idx] = smallestEntrySwap;
       this.heap[smallest] = current;
+      // Update reverse map for both swapped entries
+      this.laneIndexToHeapIndex.set(current[0], smallest);
+      this.laneIndexToHeapIndex.set(smallestEntrySwap[0], idx);
       idx = smallest;
     }
   }
@@ -260,6 +269,9 @@ export class LaneAllocator {
       if (parentEntry[1] <= currentEntry[1]) break;
       this.heap[parent] = currentEntry;
       this.heap[idx] = parentEntry;
+      // Update reverse map for both swapped entries
+      this.laneIndexToHeapIndex.set(parentEntry[0], idx);
+      this.laneIndexToHeapIndex.set(currentEntry[0], parent);
       idx = parent;
     }
   }

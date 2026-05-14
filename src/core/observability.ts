@@ -136,6 +136,7 @@ export class ObservabilityReporter {
   // --- Debug overlay ---
 
   setShowDebug(show: boolean): void {
+    if (this.showDebug === show) return;
     this.showDebug = show;
     if (show) {
       this.createDebugOverlay();
@@ -145,7 +146,7 @@ export class ObservabilityReporter {
   }
 
   private createDebugOverlay(): void {
-    if (this.debugOverlayEl) return;
+    if (this.debugOverlayEl || !this.showDebug) return;
     const el = document.createElement('div');
     el.id = 'yt-chat-overlay-debug';
     el.style.cssText =
