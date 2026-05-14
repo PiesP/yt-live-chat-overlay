@@ -199,16 +199,6 @@ export abstract class ChatSource {
     };
   }
 
-  protected installAnimationFrameSync(): void {
-    // No-op. Previously installed an rAF loop to cache video.currentTime,
-    // but getPlaybackSnapshot() now reads fresh from the DOM to avoid
-    // stale-offset bugs after tab-hide/resume (rAF pauses when hidden).
-  }
-
-  protected removeAnimationFrameSync(): void {
-    // No-op. rAF loop removed — getPlaybackSnapshot() reads fresh from DOM.
-  }
-
   protected markActivity(): void {
     this.lastActivityTime = Date.now();
   }
@@ -474,7 +464,6 @@ class LiveChatSource extends ChatSource {
 
   protected launchCurrentPollLoop(signal?: AbortSignal): void {
     this.launchPollLoop(signal, (loopSignal) => this.runLiveLoop(loopSignal));
-    this.installAnimationFrameSync();
   }
 
   protected resetSessionState(): void {
@@ -685,7 +674,6 @@ class ReplayChatSource extends ChatSource {
   protected launchCurrentPollLoop(signal?: AbortSignal): void {
     this.launchPollLoop(signal, (loopSignal) => this.runReplayLoop(loopSignal));
     this.installSeekListeners(signal);
-    this.installAnimationFrameSync();
   }
 
   protected resetSessionState(): void {

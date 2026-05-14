@@ -135,9 +135,9 @@ export class Canvas2DRenderer extends RendererBase {
   trimBackgroundQueue(): void {
     if (this.pendingQueue.length <= 10) return;
     this.pendingQueue.sort((a, b) => {
-      const prioA = a.kind === 'superchat' ? 2 : a.kind === 'membership' ? 1 : 0;
-      const prioB = b.kind === 'superchat' ? 2 : b.kind === 'membership' ? 1 : 0;
-      return prioB - prioA || (a.timestamp ?? 0) - (b.timestamp ?? 0);
+      const prioA = Canvas2DRenderer.getMessagePriority(a);
+      const prioB = Canvas2DRenderer.getMessagePriority(b);
+      return prioB - prioA || a.timestamp - b.timestamp;
     });
     this.pendingQueue.length = 10;
   }
@@ -179,7 +179,6 @@ export class Canvas2DRenderer extends RendererBase {
       img.src = photoUrl;
       img.onload = () => this.authorPhotoCache.set(photoUrl, img);
       img.onerror = () => this.authorPhotoCache.set(photoUrl, img);
-      this.authorPhotoCache.set(photoUrl, img);
     }
 
     const sticker = message.superChat?.sticker;
