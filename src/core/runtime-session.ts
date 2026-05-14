@@ -298,10 +298,19 @@ export class RuntimeSession {
     const container = this.overlay?.getContainer();
     const dimensions = this.overlay?.getDimensions();
     const renderable = !!(container?.isConnected && dimensions);
+
+    // When the video is paused, chat is intentionally idle — don't treat
+    // it as stalled. Without this guard the watchdog would trigger a
+    // restart every CHAT_STALL_TIMEOUT_MS (30 s) and the new session
+    // would immediately hit the same state, causing a restart loop.
+    const video = this.getVideoElement();
+    const isVideoPaused = video?.paused ?? true;
+
     const shouldRestart =
-      !renderable ||
-      idleDurationMs >= LONG_IDLE_RESTART_MS ||
-      (this.sessionReady && !!chat && (!chat.observerAlive || !chat.recentlyActive));
+      !isVideoPaused &&
+      (!renderable ||
+        idleDurationMs >= LONG_IDLE_RESTART_MS ||
+        (this.sessionReady && !!chat && (!chat.observerAlive || !chat.recentlyActive)));
 
     return { idleDurationMs, renderable, chat, shouldRestart };
   }
@@ -335,9 +344,17 @@ export class RuntimeSession {
 
       // Clear idle markers so the health snapshot reflects current state.
       this.clearHidden();
-      this.chatSource?.setPaused(false);
 
-      if (this.getRuntimeHealthSnapshot().shouldRestart) {
+      // When video is paused, keep chat paused too — the renderer won't
+      // display comments (resume() early-returns on isVideoPaused), so
+      // polling would just waste API calls and YouTube quota.
+      const video = this.getVideoElement();
+      const isVideoPaused = video?.paused ?? true;
+      if (!isVideoPaused) {
+        this.chatSource?.setPaused(false);
+      }
+
+      if (!isVideoPaused && this.getRuntimeHealthSnapshot().shouldRestart) {
         this.requestManagedRestart('foreground-return');
         return;
       }
