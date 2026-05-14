@@ -231,6 +231,8 @@ export class Renderer extends RendererBase {
     }
   }
 
+  private lastDpr = 0;
+
   private renderFrame(): void {
     const ctx = this.ctx;
     const canvas = this.canvas;
@@ -244,7 +246,10 @@ export class Renderer extends RendererBase {
 
     // Reset device pixel ratio transform (canvas.width set may have reset it)
     const dpr = window.devicePixelRatio || 1;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (dpr !== this.lastDpr) {
+      this.lastDpr = dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
     ctx.clearRect(0, 0, dims.width, dims.height);
 
     const mode = this.settings.danmakuMode;
@@ -301,8 +306,7 @@ export class Renderer extends RendererBase {
     }
 
     for (let ri = toRemove.length - 1; ri >= 0; ri--) {
-      const idx = toRemove[ri];
-      if (idx === undefined) continue;
+      const idx = toRemove[ri]!;
       const lastIdx = this.activeMessages.length - 1;
       if (idx < lastIdx) {
         const lastMsg = this.activeMessages[lastIdx];
@@ -844,10 +848,6 @@ export class Renderer extends RendererBase {
   protected onResume(): void {
     this.startRenderLoop();
     this.drainQueue();
-  }
-
-  onPlaybackRateChange(): void {
-    // Canvas2D computes rate on each frame via getEffectiveSpeed().
   }
 
   protected applyPausedDuration(pausedMs: number): void {

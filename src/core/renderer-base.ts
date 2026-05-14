@@ -212,7 +212,10 @@ export abstract class RendererBase {
 
   protected abstract onPause(): void;
   protected abstract onResume(): void;
-  abstract onPlaybackRateChange(rate: number): void;
+  /** Override to react to playback rate changes. No-op by default. */
+  onPlaybackRateChange(_rate: number): void {
+    // Subclass override
+  }
   protected abstract applyPausedDuration(pausedMs: number): void;
   protected abstract resetState(): void;
   protected abstract onDestroy(): void;

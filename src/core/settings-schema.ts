@@ -275,7 +275,9 @@ export const cloneSettings = (settings: Readonly<OverlaySettings>): OverlaySetti
   outline: { ...settings.outline },
 });
 
-const resolveLimits = (key: string): Readonly<{ min: number; max: number }> => {
+export const resolveLimits = (
+  key: string
+): Readonly<{ min: number; max: number; step: number }> => {
   const direct = SETTINGS_LIMITS[key as keyof typeof SETTINGS_LIMITS];
   if (direct) return direct;
   // Outline keys use separate limit entries to avoid clashing with root keys

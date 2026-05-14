@@ -236,9 +236,13 @@ export class LaneAllocator {
   private updateLane(laneIndex: number, newAvailableAt: number): void {
     const idx = this.laneIndexToHeapIndex.get(laneIndex);
     if (idx === undefined) return;
+    const old = this.heap[idx]![1];
     this.heap[idx] = [laneIndex, newAvailableAt];
-    this.siftDown(idx);
-    this.siftUp(idx);
+    if (newAvailableAt > old) {
+      this.siftDown(idx);
+    } else if (newAvailableAt < old) {
+      this.siftUp(idx);
+    }
   }
 
   /** Shift all lane available times by a fixed offset (e.g., pause duration). */

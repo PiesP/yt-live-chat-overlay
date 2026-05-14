@@ -5,7 +5,7 @@ import {
   type OutlineSettingKey,
   type RootNumericSettingKey,
   type RootScalarSettingKey,
-  SETTINGS_LIMITS,
+  resolveLimits,
 } from '@core/settings-schema';
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -333,23 +333,13 @@ const normalizeRootNumericInputValue = (
   value: unknown,
   fallback: number
 ): number => {
-  const limits = SETTINGS_LIMITS[key as keyof typeof SETTINGS_LIMITS];
-  if (!limits) return fallback;
   return normalizeNumericValue(
     value,
     fallback,
-    limits,
+    resolveLimits(key),
     ROOT_ROUNDED_KEYS.has(key),
     getRootScale(key)
   );
-};
-
-const outlineLimitsKey = (
-  key: Exclude<OutlineSettingKey, 'enabled'>
-): keyof typeof SETTINGS_LIMITS => {
-  if (key === 'widthPx') return 'outlineWidthPx';
-  if (key === 'blurPx') return 'outlineBlurPx';
-  return 'outlineOpacity';
 };
 
 const normalizeOutlineNumericInputValue = (
@@ -357,18 +347,13 @@ const normalizeOutlineNumericInputValue = (
   value: unknown,
   fallback: number
 ): number => {
-  const limitsKey = outlineLimitsKey(key);
-  return normalizeNumericValue(value, fallback, SETTINGS_LIMITS[limitsKey], false);
+  return normalizeNumericValue(value, fallback, resolveLimits(key), false);
 };
 
 const getNumericInputAttributes = (
   key: RootScalarSettingKey | Exclude<OutlineSettingKey, 'enabled'>
 ): Readonly<{ min: number; max: number; step: number }> => {
-  const limitsKey =
-    key in SETTINGS_LIMITS
-      ? (key as keyof typeof SETTINGS_LIMITS)
-      : outlineLimitsKey(key as Exclude<OutlineSettingKey, 'enabled'>);
-  const limits = SETTINGS_LIMITS[limitsKey];
+  const limits = resolveLimits(key);
   const scale = getRootScale(key as RootScalarSettingKey);
   return {
     min: scaleUiValue(limits.min, scale),
