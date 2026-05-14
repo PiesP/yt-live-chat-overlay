@@ -240,7 +240,7 @@ export const DEFAULT_SETTINGS = {
   outline: DEFAULT_OUTLINE,
   laneSpacing: 3,
   showDebugOverlay: false,
-  rendererType: 'css',
+  rendererType: 'canvas',
   authorRateLimitEnabled: true,
   authorRateLimitWindowMs: 5000,
   authorRateLimitMaxMessages: 5,
