@@ -382,6 +382,11 @@ export class Canvas2DRenderer {
       }
       if (msg.message.isBacklog) opacity *= 0.5;
 
+      // Long-term age fade (matches CSS renderer's 60s linear fade)
+      const maxAgeMs = 60_000;
+      const ageRatio = Math.min(1, elapsed / maxAgeMs);
+      opacity *= Math.max(0, 1 - ageRatio);
+
       // ── Render ───────────────────────────────────────────────────────
       const snappedX = Math.floor(msg.x);
       const snappedY = Math.floor(msg.y);
@@ -566,7 +571,7 @@ export class Canvas2DRenderer {
   private estimateDimensions(message: ChatMessage): { width: number; height: number } {
     const fontSize = this.settings.fontSize;
     const textWidth = this.measureContentWidth(message, fontSize);
-    const textHeight = fontSize * 1.1;
+    const textHeight = fontSize * 1.1; // approximate, refined via font metrics when available
     const paddingH = 16;
     const paddingV = 8;
 
@@ -825,9 +830,7 @@ export class Canvas2DRenderer {
     }
 
     if (msg.message.text) {
-      ctx.font = `${fontSize}px system-ui, -apple-system, sans-serif`;
-      ctx.fillStyle = '#ffffff';
-      ctx.fillText(msg.message.text, textX, textY);
+      this.renderSegment(ctx, msg.message.text, textX, textY, '#ffffff', 1, fontSize);
     }
   }
 
