@@ -127,6 +127,19 @@ export const rendererLayout = {
   topBottomDurationMs: 4000,
   /** DLIOS safety gap (pixels) — minimum separation between same-lane comments */
   dliosSafetyGap: 4,
+  /** Message kind priority for queue ordering (higher = more important) */
+  kindPriority: {
+    superchat: 200,
+    membership: 100,
+    text: 0,
+  } as const,
+  /** Burst-level speed multiplier for adaptive scrolling */
+  burstSpeedMultiplier: {
+    normal: 1.0,
+    elevated: 1.1,
+    high: 1.2,
+    extreme: 1.35,
+  } as const,
 } as const;
 
 /**

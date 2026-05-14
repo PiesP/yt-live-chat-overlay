@@ -14,7 +14,7 @@
  * the CSS renderer's buildTextShadow + buildTextStroke.
  */
 
-import type { BurstLevel, ChatMessage, ContentSegment, OverlaySettings } from '@app-types';
+import type { ChatMessage, ContentSegment, OverlaySettings } from '@app-types';
 import { PerAuthorRateLimiter } from '@core/author-rate-limiter';
 import { BurstDetector } from '@core/burst-detector';
 import {
@@ -572,16 +572,8 @@ export class Canvas2DRenderer {
     this.observability.onMessageRendered();
   }
 
-  // ── Message Priority ───────────────────────────────────────────────
-
-  private static readonly KIND_PRIORITY: Record<ChatMessage['kind'], number> = {
-    superchat: 200,
-    membership: 100,
-    text: 0,
-  };
-
   private getMessagePriority(message: ChatMessage): number {
-    let priority = Canvas2DRenderer.KIND_PRIORITY[message.kind];
+    let priority = rendererLayout.kindPriority[message.kind];
     if (message.isBacklog) priority -= 50;
     return priority;
   }
@@ -775,7 +767,7 @@ export class Canvas2DRenderer {
     fontSize: number
   ): void {
     let cursorX = startX;
-    const emojiSize = Math.round(fontSize * 1.2);
+    const emojiSize = Math.round(fontSize * rendererLayout.emojiSize);
 
     for (const seg of segments) {
       if (seg.type === 'text') {
@@ -973,12 +965,7 @@ export class Canvas2DRenderer {
     ctx.closePath();
   }
 
-  private static readonly BURST_SPEED_MULTIPLIER: Record<BurstLevel, number> = {
-    normal: 1.0,
-    elevated: 1.1,
-    high: 1.2,
-    extreme: 1.35,
-  };
+  // ── Helpers ─────────────────────────────────────────────────────────────
 
   private getEffectiveSpeed(): number {
     let speed = this.settings.speedPxPerSec * this.playbackRate;
@@ -995,7 +982,7 @@ export class Canvas2DRenderer {
 
     // Burst-level multiplier
     const burstLevel = this.burstDetector.getLevel();
-    speed *= Canvas2DRenderer.BURST_SPEED_MULTIPLIER[burstLevel];
+    speed *= rendererLayout.burstSpeedMultiplier[burstLevel];
 
     return Math.max(1, speed);
   }

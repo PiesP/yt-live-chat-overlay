@@ -22,13 +22,7 @@
  *   - ChatSource skips API polling when video is paused
  */
 
-import type {
-  BurstLevel,
-  ChatMessage,
-  DanmakuMode,
-  OverlayDimensions,
-  OverlaySettings,
-} from '@app-types';
+import type { ChatMessage, DanmakuMode, OverlayDimensions, OverlaySettings } from '@app-types';
 import { PerAuthorRateLimiter } from '@core/author-rate-limiter';
 import { BurstDetector } from '@core/burst-detector';
 import {
@@ -461,14 +455,8 @@ export class Renderer {
     this.backlogSpeedMultiplier = Math.max(1, multiplier);
   }
 
-  private static readonly KIND_PRIORITY: Record<ChatMessage['kind'], number> = {
-    superchat: 200,
-    membership: 100,
-    text: 0,
-  };
-
   private static getMessagePriority(message: ChatMessage): number {
-    let priority = Renderer.KIND_PRIORITY[message.kind];
+    let priority = rendererLayout.kindPriority[message.kind];
     if (message.isBacklog) priority -= 50;
     return priority;
   }
@@ -575,14 +563,6 @@ export class Renderer {
     }
   }
 
-  /** Burst-level-based speed multiplier for adaptive scrolling. */
-  private static readonly BURST_SPEED_MULTIPLIER: Record<BurstLevel, number> = {
-    normal: 1.0,
-    elevated: 1.1,
-    high: 1.2,
-    extreme: 1.35,
-  };
-
   /** Force a CSS reflow to restart an animation after modifying its properties. */
   private static triggerAnimationRestart(element: HTMLElement): void {
     element.style.animation = 'none';
@@ -608,7 +588,7 @@ export class Renderer {
 
     // Burst-level multiplier — the averaged, long-term component.
     const burstLevel = this.burstDetector.getLevel();
-    speed *= Renderer.BURST_SPEED_MULTIPLIER[burstLevel];
+    speed *= rendererLayout.burstSpeedMultiplier[burstLevel];
 
     return Math.max(1, speed);
   }
