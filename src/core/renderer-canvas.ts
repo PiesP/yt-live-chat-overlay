@@ -542,18 +542,19 @@ export class CanvasRenderer extends RendererBase {
     ctx.restore();
   }
 
-  /** Draw crisp black outline on text using current font and textBaseline. */
+  /** Draw crisp auto-contrast outline on text using current font and textBaseline. */
   private strokeTextOutline(
     ctx: CanvasRenderingContext2D,
     text: string,
     x: number,
-    y: number
+    y: number,
+    textColor: string
   ): void {
     const outline = this.settings.outline;
     if (!outline.enabled || outline.widthPx <= 0 || outline.opacity <= 0) return;
     const strokeWidth = Math.max(0.5, outline.widthPx * 0.85);
     ctx.save();
-    ctx.strokeStyle = `rgba(0, 0, 0, ${Math.min(1, outline.opacity)})`;
+    ctx.strokeStyle = computeOutlineColor(textColor, Math.min(1, outline.opacity));
     ctx.lineWidth = strokeWidth;
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
@@ -638,7 +639,7 @@ export class CanvasRenderer extends RendererBase {
       );
       ctx.font = nameFont;
       ctx.textBaseline = 'top';
-      this.strokeTextOutline(ctx, message.author, textX + (photo ? 28 : 0), textY + 6);
+      this.strokeTextOutline(ctx, message.author, textX + (photo ? 28 : 0), textY + 6, color);
       ctx.fillStyle = color;
       ctx.fillText(message.author, textX + (photo ? 28 : 0), textY + 6);
       textY += rendererLayout.authorSectionHeightPx;
@@ -719,7 +720,13 @@ export class CanvasRenderer extends RendererBase {
         this.settings.fontFamily
       );
       ctx.textBaseline = 'top';
-      this.strokeTextOutline(ctx, msg.message.author, textX + (photo ? 28 : 0), contentY + 6);
+      this.strokeTextOutline(
+        ctx,
+        msg.message.author,
+        textX + (photo ? 28 : 0),
+        contentY + 6,
+        '#ffffff'
+      );
       ctx.fillStyle = '#ffffff';
       ctx.fillText(msg.message.author, textX + (photo ? 28 : 0), contentY + 6);
       contentY += rendererLayout.authorSectionHeightPx;
@@ -740,7 +747,7 @@ export class CanvasRenderer extends RendererBase {
     ctx.stroke();
 
     ctx.textBaseline = 'middle';
-    this.strokeTextOutline(ctx, superChat.amount, textX + 12, badgeY + badgeHeight / 2);
+    this.strokeTextOutline(ctx, superChat.amount, textX + 12, badgeY + badgeHeight / 2, '#ffffff');
     ctx.fillStyle = '#ffffff';
     ctx.fillText(superChat.amount, textX + 12, badgeY + badgeHeight / 2);
 
@@ -798,7 +805,7 @@ export class CanvasRenderer extends RendererBase {
     if (msg.message.author) {
       ctx.font = this.getFont(fontSize);
       ctx.textBaseline = 'top';
-      this.strokeTextOutline(ctx, msg.message.author, textX, textY);
+      this.strokeTextOutline(ctx, msg.message.author, textX, textY, '#ffffff');
       ctx.fillStyle = '#ffffff';
       ctx.fillText(msg.message.author, textX, textY);
       textY += fontSize + 4;
