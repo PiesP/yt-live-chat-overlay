@@ -5,8 +5,8 @@ import { bootstrapChatSession } from '@core/youtubei-chat';
 
 const log = createLogger('BootstrapResolver');
 
-const BOOTSTRAP_ATTEMPTS = 8;
-const BOOTSTRAP_MAX_UNAVAILABLE_RETRIES = 4;
+const BOOTSTRAP_MAX_ATTEMPTS = 5;
+const BOOTSTRAP_RETRY_DELAY_MS = 1000;
 
 export interface ChatBootstrapResolution {
   status: ChatBootstrapResult['status'];
@@ -16,10 +16,9 @@ export interface ChatBootstrapResolution {
 
 export class BootstrapResolver {
   async resolve(signal?: AbortSignal): Promise<ChatBootstrapResolution> {
-    let lastRetryReason = 'Chat bootstrap did not become available';
-    let unavailableRetries = 0;
+    let lastResult: ChatBootstrapResult | null = null;
 
-    for (let attempt = 1; attempt <= BOOTSTRAP_ATTEMPTS; attempt++) {
+    for (let attempt = 1; attempt <= BOOTSTRAP_MAX_ATTEMPTS; attempt++) {
       throwIfAborted(signal);
 
       const result = await bootstrapChatSession(signal);
@@ -31,35 +30,15 @@ export class BootstrapResolver {
         };
       }
 
-      if (result.status === 'unavailable') {
-        // SPA navigation: YouTube may not have updated window globals yet.
-        // Retry with exponential backoff before giving up.
-        unavailableRetries++;
-        if (unavailableRetries > BOOTSTRAP_MAX_UNAVAILABLE_RETRIES) {
-          return {
-            status: 'unavailable',
-            reason: result.reason,
-          };
-        }
-
-        lastRetryReason = result.reason;
-        log.debug(
-          `Bootstrap unavailable (retry ${unavailableRetries}/${BOOTSTRAP_MAX_UNAVAILABLE_RETRIES}): ${result.reason}`
-        );
-      } else {
-        lastRetryReason = result.reason;
-      }
-
-      // Exponential backoff: 500ms, 1000ms, 2000ms, 4000ms (cap 4000ms)
-      if (attempt < BOOTSTRAP_ATTEMPTS) {
-        const backoffDelay = 500 * 2 ** (attempt - 1);
-        await sleep(Math.min(backoffDelay, 4000), signal);
+      lastResult = result;
+      if (attempt < BOOTSTRAP_MAX_ATTEMPTS) {
+        await sleep(BOOTSTRAP_RETRY_DELAY_MS, signal);
       }
     }
 
     return {
-      status: 'retryable',
-      reason: lastRetryReason,
+      status: lastResult?.status ?? 'retryable',
+      reason: lastResult?.reason ?? 'Chat bootstrap did not become available',
     };
   }
 
@@ -77,7 +56,7 @@ export class BootstrapResolver {
   logFailure(resolution: Exclude<ChatBootstrapResolution, { status: 'ready' }>): void {
     if (resolution.status === 'retryable') {
       log.warn(
-        `Chat bootstrap was retryable after ${BOOTSTRAP_ATTEMPTS} attempts: ${resolution.reason}`
+        `Chat bootstrap was retryable after ${BOOTSTRAP_MAX_ATTEMPTS} attempts: ${resolution.reason}`
       );
       return;
     }
