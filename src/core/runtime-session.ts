@@ -6,7 +6,6 @@ import { createLogger } from '@core/logging';
 import { MessageIdRegistry } from '@core/message-id-registry';
 import { OVERLAY_SELECTOR, Overlay } from '@core/overlay';
 import { CanvasRenderer } from '@core/renderer-canvas';
-import { Renderer } from '@core/renderer-css';
 import { shouldResetRendererForSettingsChange } from '@core/settings-schema';
 import { VideoPauseController } from '@core/video-pause-controller';
 
@@ -48,7 +47,7 @@ export class RuntimeSession {
   private readonly requestRestart: RuntimeSessionOptions['requestRestart'];
   private readonly abortController = new AbortController();
   private overlay: Overlay | null = null;
-  private renderer: Renderer | CanvasRenderer | null = null;
+  private renderer: CanvasRenderer | null = null;
   private chatSource: ChatSource | null = null;
   private foregroundCleanup: (() => void) | null = null;
   private videoPauseController = new VideoPauseController();
@@ -91,11 +90,7 @@ export class RuntimeSession {
       }
 
       this.overlay = overlay;
-      if (this.settings.rendererType === 'canvas') {
-        this.renderer = new CanvasRenderer(overlay, this.settings);
-      } else {
-        this.renderer = new Renderer(overlay, this.settings);
-      }
+      this.renderer = new CanvasRenderer(overlay, this.settings);
 
       const chatStarted = await this.startChatSource(signal);
       throwIfAborted(signal);
@@ -447,7 +442,7 @@ export class RuntimeSession {
   }
 
   private replayLatestMessages(
-    renderer: Renderer | CanvasRenderer,
+    renderer: CanvasRenderer,
     limit = RECENT_MESSAGE_REPLAY_LIMIT
   ): void {
     const latestMessages = this.chatSource?.getLatestMessages(limit) ?? [];
