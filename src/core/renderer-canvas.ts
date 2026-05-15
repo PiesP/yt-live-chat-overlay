@@ -527,15 +527,7 @@ export class CanvasRenderer extends RendererBase {
     ctx.font = this.getFont(fontSize);
     ctx.textBaseline = 'top';
 
-    const outline = this.settings.outline;
-    if (outline.enabled && outline.widthPx > 0 && outline.opacity > 0) {
-      const strokeWidth = Math.max(0.5, outline.widthPx * 0.85);
-      ctx.strokeStyle = computeOutlineColor(color, Math.min(1, outline.opacity));
-      ctx.lineWidth = strokeWidth;
-      ctx.lineJoin = 'round';
-      ctx.lineCap = 'round';
-      ctx.strokeText(text, x, y);
-    }
+    this.strokeTextOutline(ctx, text, x, y, color);
 
     ctx.fillStyle = color;
     ctx.fillText(text, x, y);
