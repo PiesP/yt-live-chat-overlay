@@ -123,14 +123,12 @@ export class ObservabilityReporter {
     const now = Date.now();
     const elapsed = now - this.windowStartTime;
     if (elapsed >= this.METRIC_WINDOW_MS) {
-      // Reset window
       this.totalDroppedInWindow = 0;
       this.totalReceivedInWindow = 0;
       this.windowStartTime = now;
-      this.metrics.dropRate = 0;
-    } else if (this.totalReceivedInWindow > 0) {
-      this.metrics.dropRate = this.totalDroppedInWindow / this.totalReceivedInWindow;
     }
+    this.metrics.dropRate =
+      this.totalReceivedInWindow > 0 ? this.totalDroppedInWindow / this.totalReceivedInWindow : 0;
   }
 
   // --- Debug overlay ---
