@@ -39,16 +39,23 @@ type RootNumericSettingKey = Exclude<
 
 /** Root setting metadata: defines type, category, and visual-change flag.
  *  Drives the normalizeSettings() loop — single source of truth for type routing. */
-type SettingMeta = { type: 'boolean' | 'number' | 'string'; visual: boolean };
+type SettingMeta = {
+  type: 'boolean' | 'number' | 'string';
+  visual: boolean;
+  /** Display scale factor for UI (e.g. 100 for percentages). Only meaningful for 'number'. */
+  displayScale?: number;
+  /** Number of fractional digits to show in UI. Only meaningful when displayScale > 1. */
+  displayPrecision?: number;
+};
 const ROOT_SETTING_META: Record<RootScalarSettingKey, SettingMeta> = {
   enabled: { type: 'boolean', visual: false },
   danmakuMode: { type: 'string', visual: false },
   speedPxPerSec: { type: 'number', visual: true },
   fontSize: { type: 'number', visual: true },
   opacity: { type: 'number', visual: true },
-  superChatOpacity: { type: 'number', visual: true },
-  safeTop: { type: 'number', visual: true },
-  safeBottom: { type: 'number', visual: true },
+  superChatOpacity: { type: 'number', visual: true, displayScale: 100, displayPrecision: 0 },
+  safeTop: { type: 'number', visual: true, displayScale: 100, displayPrecision: 1 },
+  safeBottom: { type: 'number', visual: true, displayScale: 100, displayPrecision: 1 },
   maxConcurrentMessages: { type: 'number', visual: true },
   allowShortTextMessages: { type: 'boolean', visual: true },
   minTextLength: { type: 'number', visual: true },
@@ -226,6 +233,18 @@ export const resolveLimits = (
   if (key === 'opacity') return SETTINGS_LIMITS.outlineOpacity;
   throw new Error(`Unknown setting key: ${key}`);
 };
+
+/** Get display scale/precision from ROOT_SETTING_META for a root numeric key. */
+export function getRootDisplayMeta(key: RootScalarSettingKey): {
+  scale: number;
+  precision: number;
+} {
+  const meta = ROOT_SETTING_META[key];
+  if (meta?.displayScale) {
+    return { scale: meta.displayScale, precision: meta.displayPrecision ?? 0 };
+  }
+  return { scale: 1, precision: 0 };
+}
 
 // ── Normalization ───────────────────────────────────────────────────────────────
 

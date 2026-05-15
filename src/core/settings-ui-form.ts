@@ -2,6 +2,7 @@ import type { OverlaySettings } from '@app-types';
 import {
   AUTHOR_COLOR_KEYS,
   cloneSettings,
+  getRootDisplayMeta,
   type OutlineSettingKey,
   type RootNumericSettingKey,
   type RootScalarSettingKey,
@@ -25,14 +26,6 @@ const ROOT_ROUNDED_KEYS = new Set<RootScalarSettingKey>([
   'authorRateLimitMaxMessages',
 ]);
 
-const ROOT_NUMERIC_OPTIONS: Partial<
-  Record<RootScalarSettingKey, { scale?: number; precision?: number }>
-> = {
-  superChatOpacity: { scale: 100, precision: 0 },
-  safeTop: { scale: 100, precision: 1 },
-  safeBottom: { scale: 100, precision: 1 },
-};
-
 import type { FieldDef, PaneDef } from '@core/settings-ui-types';
 
 // ── UI value formatting ──────────────────────────────────────────────────────
@@ -40,7 +33,7 @@ import type { FieldDef, PaneDef } from '@core/settings-ui-types';
 const scaleUiValue = (value: number, scale: number): number =>
   Math.round(value * scale * 1e4) / 1e4;
 
-const getRootScale = (key: RootScalarSettingKey): number => ROOT_NUMERIC_OPTIONS[key]?.scale ?? 1;
+const getRootScale = (key: RootScalarSettingKey): number => getRootDisplayMeta(key).scale;
 
 const normalizeNumericValue = (
   value: unknown,
@@ -59,9 +52,9 @@ const formatRootNumericSettingForInput = (
   key: RootScalarSettingKey,
   value: number
 ): string | number => {
-  const options = ROOT_NUMERIC_OPTIONS[key];
-  const scaledValue = scaleUiValue(value, options?.scale ?? 1);
-  return options?.precision === undefined ? scaledValue : scaledValue.toFixed(options.precision);
+  const { scale, precision } = getRootDisplayMeta(key);
+  const scaledValue = scaleUiValue(value, scale);
+  return precision > 0 ? scaledValue.toFixed(precision) : scaledValue;
 };
 
 const normalizeRootNumericInputValue = (
