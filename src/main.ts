@@ -37,6 +37,8 @@ class App {
     () => this.resetSettings(),
     (partial) => this.applySettings(partial)
   );
+  /** Unsubscribe from cross-tab settings sync. */
+  private unsubscribeCrossTab: (() => void) | null = null;
 
   private readonly handlePageWatcherChange = (): void => {
     if (this.pageWatcher.isValidPage()) {
@@ -56,6 +58,15 @@ class App {
   async start(): Promise<void> {
     this.settings.initialize();
     setOverlayLogLevel(this.settings.get().logLevel);
+
+    // Subscribe to cross-tab settings sync — reconcile runtime when
+    // another tab changes settings via localStorage or GM storage.
+    this.unsubscribeCrossTab = this.settings.subscribe(() => {
+      log.debug('Cross-tab settings change — reconciling runtime');
+      setOverlayLogLevel(this.settings.get().logLevel);
+      this.runtimeManager.requestReconcile('settings-change');
+    });
+
     if (this.pageWatcher.isValidPage()) {
       await this.ensureSettingsUi();
     }
@@ -67,6 +78,8 @@ class App {
     this.runtimeManager.destroy();
     this.pageWatcher.destroy();
     this.settingsUi.destroy();
+    this.unsubscribeCrossTab?.();
+    this.settings.destroy();
     log.debug('Stopped');
   }
 
