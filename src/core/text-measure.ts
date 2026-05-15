@@ -39,12 +39,10 @@ export function measureTextHeight(font: string, fontSize: number): number {
   return Math.ceil(fontSize * 1.1);
 }
 
-export const FONT_FAMILY = 'system-ui, -apple-system, sans-serif';
-
 export function getFontString(
   sizePx: number,
   weight: 'normal' | 'bold' = 'bold',
-  fontFamily: string = FONT_FAMILY
+  fontFamily: string = 'system-ui, -apple-system, sans-serif'
 ): string {
   return `${weight === 'bold' ? 'bold' : '400'} ${sizePx}px ${fontFamily}`;
 }

@@ -7,12 +7,11 @@
 
 import type { ChatMessage } from '@app-types';
 import { rendererLayout, spacing } from '@core/design-tokens';
-import {
-  FONT_FAMILY,
-  getFontString,
-  measureTextHeight,
-  measureTextWidth,
-} from '@core/text-measure';
+import { DEFAULT_SETTINGS } from '@core/settings-schema';
+import { getFontString, measureTextHeight, measureTextWidth } from '@core/text-measure';
+
+// Derived from DEFAULT_SETTINGS (SSOT) to avoid hardcoded string duplication.
+const FONT_FAMILY = DEFAULT_SETTINGS.fontFamily;
 
 // ── Text measurement ────────────────────────────────────────────────────────
 
