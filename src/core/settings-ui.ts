@@ -34,7 +34,9 @@ export class SettingsUi {
   constructor(
     private readonly getSettings: () => Readonly<OverlaySettings>,
     private readonly onChange: (partial: Partial<OverlaySettings>) => void,
-    private readonly resetSettings: () => void
+    private readonly resetSettings: () => void,
+    /** Called when settings should be persisted (modal close). Falls back to onChange. */
+    private readonly onPersist?: (partial: Partial<OverlaySettings>) => void
   ) {
     this.form = new SettingsUiForm(getSettings, (preview) => {
       this.queuePreview(preview);
@@ -57,14 +59,6 @@ export class SettingsUi {
     }, this.PREVIEW_DEBOUNCE_MS);
   }
 
-  private flushPendingPreview(): void {
-    if (this.previewTimer !== null) {
-      clearTimeout(this.previewTimer);
-      this.previewTimer = null;
-      this.onChange(this.form.collectSettings());
-    }
-  }
-
   async attach(): Promise<void> {
     const player = await this.findPlayerContainer();
     if (!player) return;
@@ -81,7 +75,13 @@ export class SettingsUi {
 
   close(): void {
     if (!this.backdrop) return;
-    this.flushPendingPreview();
+    // Persist any pending preview changes
+    if (this.previewTimer !== null) {
+      clearTimeout(this.previewTimer);
+      this.previewTimer = null;
+      const persist = this.onPersist ?? this.onChange;
+      persist(this.form.collectSettings());
+    }
     this.setDialogOpen(false);
 
     if (this.previousFocus?.isConnected) {
@@ -365,6 +365,8 @@ export class SettingsUi {
           const settings = normalizeStoredSettings(sanitized);
           this.onChange(settings);
           this.form.populateForm(this.getSettings());
+          const persist = this.onPersist ?? this.onChange;
+          persist(settings);
           this.showToast('Settings imported successfully');
         } catch (error) {
           this.showToast('Import failed: invalid JSON');

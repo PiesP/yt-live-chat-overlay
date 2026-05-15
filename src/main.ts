@@ -33,8 +33,9 @@ class App {
   });
   private readonly settingsUi = new SettingsUi(
     () => this.settings.get(),
-    (partial) => this.applySettings(partial),
-    () => this.resetSettings()
+    (partial) => this.previewSettings(partial),
+    () => this.resetSettings(),
+    (partial) => this.applySettings(partial)
   );
 
   private readonly handlePageWatcherChange = (): void => {
@@ -78,6 +79,19 @@ class App {
    */
   applySettings(partial: Partial<OverlaySettings>): void {
     this.settings.set(partial);
+    this.applySettingsSideEffects(partial);
+  }
+
+  /**
+   * Preview settings changes — memory only. Side-effects still apply
+   * (log level, settings UI, runtime reconcile) but no storage write.
+   */
+  previewSettings(partial: Partial<OverlaySettings>): void {
+    this.settings.preview(partial);
+    this.applySettingsSideEffects(partial);
+  }
+
+  private applySettingsSideEffects(partial: Partial<OverlaySettings>): void {
     if (partial.logLevel !== undefined) {
       setOverlayLogLevel(this.settings.get().logLevel);
     }

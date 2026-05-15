@@ -42,8 +42,14 @@ export class Settings {
     return this.settings;
   }
 
+  /** Apply settings and persist to storage. */
   set(partial: Partial<OverlaySettings>): void {
     this.settings = applySettingsPatch(this.settings, partial);
     this.save();
+  }
+
+  /** Apply settings to memory only (no storage write). Used for live preview. */
+  preview(partial: Partial<OverlaySettings>): void {
+    this.settings = applySettingsPatch(this.settings, partial);
   }
 }
