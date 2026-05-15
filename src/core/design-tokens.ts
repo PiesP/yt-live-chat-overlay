@@ -199,6 +199,79 @@ export function parseRgbColor(colorString: string): RgbColor | null {
   };
 }
 
+/** Parse a hex color string (#RGB, #RRGGBB, #RGBA, #RRGGBBAA) to RgbColor. */
+export function parseHexColor(colorString: string): RgbColor | null {
+  const hex = colorString.replace('#', '');
+  if (hex.length === 3) {
+    return {
+      r: parseInt(hex.charAt(0) + hex.charAt(0), 16),
+      g: parseInt(hex.charAt(1) + hex.charAt(1), 16),
+      b: parseInt(hex.charAt(2) + hex.charAt(2), 16),
+    };
+  }
+  if (hex.length === 4) {
+    return {
+      r: parseInt(hex.charAt(0) + hex.charAt(0), 16),
+      g: parseInt(hex.charAt(1) + hex.charAt(1), 16),
+      b: parseInt(hex.charAt(2) + hex.charAt(2), 16),
+    };
+  }
+  if (hex.length === 6) {
+    return {
+      r: parseInt(hex.slice(0, 2), 16),
+      g: parseInt(hex.slice(2, 4), 16),
+      b: parseInt(hex.slice(4, 6), 16),
+    };
+  }
+  if (hex.length === 8) {
+    return {
+      r: parseInt(hex.slice(0, 2), 16),
+      g: parseInt(hex.slice(2, 4), 16),
+      b: parseInt(hex.slice(4, 6), 16),
+    };
+  }
+  return null;
+}
+
+/** Parse any supported color string (hex or rgb/rgba) to RgbColor. */
+function parseAnyColor(colorString: string): RgbColor | null {
+  if (colorString.startsWith('#')) return parseHexColor(colorString);
+  return parseRgbColor(colorString);
+}
+
+/**
+ * Relative luminance per WCAG 2.0.
+ * https://www.w3.org/TR/WCAG20/#relativeluminancedef
+ */
+function relativeLuminance(rgb: RgbColor): number {
+  const [rs, gs, bs] = [rgb.r / 255, rgb.g / 255, rgb.b / 255];
+  const r = rs <= 0.03928 ? rs / 12.92 : ((rs + 0.055) / 1.055) ** 2.4;
+  const g = gs <= 0.03928 ? gs / 12.92 : ((gs + 0.055) / 1.055) ** 2.4;
+  const b = bs <= 0.03928 ? bs / 12.92 : ((bs + 0.055) / 1.055) ** 2.4;
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/**
+ * Compute an outline color that contrasts with the given text color.
+ *
+ * Uses WCAG 2.0 relative luminance: light text (L > 0.5) gets a dark
+ * outline, dark text gets a light outline. This ensures the outline is
+ * always visible regardless of the text color or background.
+ *
+ * @param textColor - CSS color string (hex or rgb/rgba)
+ * @param opacity   - Outline opacity (0-1)
+ * @returns CSS rgba string for the outline stroke
+ */
+export function computeOutlineColor(textColor: string, opacity: number): string {
+  const rgb = parseAnyColor(textColor);
+  if (!rgb) return `rgba(0, 0, 0, ${opacity})`;
+  const lum = relativeLuminance(rgb);
+  if (lum > 0.5) {
+    return `rgba(0, 0, 0, ${opacity})`;
+  }
+  return `rgba(255, 255, 255, ${opacity})`;
+}
+
 /** Resolve SuperChat display color: use YouTube's color if available, else tier default. */
 export function resolveSuperChatRgb(
   superChat: { headerBackgroundColor?: string; backgroundColor?: string; tier: SuperChatTier },
