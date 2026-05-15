@@ -350,13 +350,24 @@ export class SettingsUi {
           if (typeof text !== 'string') return;
           const parsed = JSON.parse(text) as Record<string, unknown>;
           if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+            this.showToast('Import failed: invalid settings format');
             log.warn('Import failed: expected a settings object');
             return;
           }
-          const settings = normalizeStoredSettings(parsed);
+
+          // Strip prototype-pollution keys before passing to normalizeStoredSettings
+          const sanitized: Record<string, unknown> = {};
+          for (const key of Object.keys(parsed)) {
+            if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue;
+            sanitized[key] = parsed[key];
+          }
+
+          const settings = normalizeStoredSettings(sanitized);
           this.onChange(settings);
           this.form.populateForm(this.getSettings());
+          this.showToast('Settings imported successfully');
         } catch (error) {
+          this.showToast('Import failed: invalid JSON');
           log.warn('Import failed: invalid JSON file', error);
         }
       });
@@ -414,6 +425,23 @@ export class SettingsUi {
       event.preventDefault();
       first.focus();
     }
+  }
+
+  /** Show a transient toast notification in the settings modal. */
+  private showToast(message: string): void {
+    if (!this.modal) return;
+    const existing = this.modal.querySelector('.yt-chat-overlay-settings-toast');
+    if (existing) existing.remove();
+    const toast = document.createElement('div');
+    toast.className = 'yt-chat-overlay-settings-toast';
+    toast.textContent = message;
+    toast.style.cssText =
+      'position:absolute;bottom:60px;left:50%;transform:translateX(-50%);' +
+      'background:rgba(0,0,0,0.85);color:#fff;font:12px/1.4 sans-serif;' +
+      'padding:6px 14px;border-radius:6px;z-index:2;pointer-events:none;' +
+      'animation:yt-overlay-fade-in 0.15s ease-out';
+    this.modal.appendChild(toast);
+    setTimeout(() => toast.remove(), 2500);
   }
 
   destroy(): void {
