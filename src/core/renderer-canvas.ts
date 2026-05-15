@@ -610,19 +610,7 @@ export class CanvasRenderer extends RendererBase {
         ? this.authorPhotoCache.get(message.authorPhotoUrl)
         : undefined;
       if (photo?.complete && photo.naturalWidth > 0) {
-        ctx.save();
-        ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
-        ctx.shadowBlur = 4;
-        ctx.shadowOffsetX = 1;
-        ctx.shadowOffsetY = 1;
-        ctx.drawImage(
-          photo,
-          textX,
-          textY,
-          rendererLayout.authorPhotoSize,
-          rendererLayout.authorPhotoSize
-        );
-        ctx.restore();
+        this.drawAuthorPhoto(ctx, photo, textX, textY);
       }
       const nameFont = getFontString(
         Math.round(fontSize * rendererLayout.authorFontScale),
@@ -692,19 +680,7 @@ export class CanvasRenderer extends RendererBase {
         ? this.authorPhotoCache.get(msg.message.authorPhotoUrl)
         : undefined;
       if (photo?.complete && photo.naturalWidth > 0) {
-        ctx.save();
-        ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
-        ctx.shadowBlur = 4;
-        ctx.shadowOffsetX = 1;
-        ctx.shadowOffsetY = 1;
-        ctx.drawImage(
-          photo,
-          textX,
-          contentY,
-          rendererLayout.authorPhotoSize,
-          rendererLayout.authorPhotoSize
-        );
-        ctx.restore();
+        this.drawAuthorPhoto(ctx, photo, textX, contentY);
       }
       ctx.font = getFontString(
         Math.round(fontSize * rendererLayout.authorFontScale),
@@ -809,6 +785,22 @@ export class CanvasRenderer extends RendererBase {
   }
 
   // ── Helpers ──────────────────────────────────────────────────────────
+
+  /** Draw an author photo with shadow effects. */
+  private drawAuthorPhoto(
+    ctx: CanvasRenderingContext2D,
+    photo: HTMLImageElement,
+    x: number,
+    y: number
+  ): void {
+    ctx.save();
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
+    ctx.shadowBlur = 4;
+    ctx.shadowOffsetX = 1;
+    ctx.shadowOffsetY = 1;
+    ctx.drawImage(photo, x, y, rendererLayout.authorPhotoSize, rendererLayout.authorPhotoSize);
+    ctx.restore();
+  }
 
   private roundRect(
     ctx: CanvasRenderingContext2D,
