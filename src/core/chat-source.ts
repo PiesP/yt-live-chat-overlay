@@ -81,7 +81,7 @@ export abstract class ChatSource {
   protected callback: MessageCallback | null = null;
   private pollController: AbortController | null = null;
   private readonly pollLoopManager = new PollLoopManager();
-  protected _paused = false;
+  protected chatPaused = false;
   private lastActivityTime = 0;
   protected bootstrap: ChatBootstrapData | null = null;
   private readonly messageBuffer = new MessageBuffer();
@@ -271,19 +271,19 @@ export abstract class ChatSource {
    * requests until resumed — used when the tab is hidden to save bandwidth.
    */
   setPaused(paused: boolean): void {
-    this._paused = paused;
+    this.chatPaused = paused;
   }
 
   /**
-   * Block while paused, checking the pause flag periodically instead of
+   * Block while paused, checking this.chatPaused periodically instead of
    * busy-polling with setTimeout(0), which creates tens of thousands
    * of callbacks during a long tab-hide.
    */
   protected waitWhilePaused(): Promise<void> {
-    if (!this._paused) return Promise.resolve();
+    if (!this.chatPaused) return Promise.resolve();
     return new Promise((resolve) => {
       const check = (): void => {
-        if (!this._paused) {
+        if (!this.chatPaused) {
           resolve();
           return;
         }
