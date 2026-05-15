@@ -153,25 +153,7 @@ export class BacklogInjectionController {
   }
 
   private scheduleNextTick(tickInterval: number): void {
-    if (typeof requestIdleCallback !== 'undefined') {
-      requestIdleCallback(
-        (deadline) => {
-          // Process now if there's idle budget or the timeout is near.
-          // The rIC timeout (tickInterval * 2) guarantees forward progress
-          // without recursive re-registration preventing callback stacking.
-          if (deadline.timeRemaining() > 0 || deadline.didTimeout || this.backlogQueue.length < 5) {
-            this.processTick();
-          } else {
-            // Browser is busy — reschedule with the same interval instead of
-            // halving, which caused rapid stacking of outstanding callbacks.
-            this.scheduleNextTick(tickInterval);
-          }
-        },
-        { timeout: tickInterval * 2 }
-      );
-    } else {
-      this.injectionTimer = setTimeout(() => this.processTick(), tickInterval);
-    }
+    this.injectionTimer = setTimeout(() => this.processTick(), tickInterval);
   }
 
   /** Emit a single backlog message to the renderer via callback */
