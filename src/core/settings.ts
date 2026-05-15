@@ -5,6 +5,7 @@ import {
   cloneSettings,
   DEFAULT_SETTINGS,
   normalizeStoredSettings,
+  SETTINGS_VERSION,
   STORAGE_KEY,
 } from '@core/settings-schema';
 import { getSettingsStorageAdapter } from '@core/settings-storage';
@@ -32,7 +33,8 @@ export class Settings {
 
   private save(): void {
     try {
-      getSettingsStorageAdapter().setItem(STORAGE_KEY, JSON.stringify(this.settings));
+      const data = { ...this.settings, _version: SETTINGS_VERSION };
+      getSettingsStorageAdapter().setItem(STORAGE_KEY, JSON.stringify(data));
     } catch (error) {
       log.warn('Failed to save settings:', error);
     }

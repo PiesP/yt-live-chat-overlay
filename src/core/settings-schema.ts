@@ -139,6 +139,25 @@ export const SETTINGS_LIMITS = {
 } as const satisfies Record<SettingsLimitKey, NumericSettingLimit>;
 
 export const STORAGE_KEY = 'yt-live-chat-overlay-settings';
+export const SETTINGS_VERSION = 1;
+
+type SettingsMigration = (raw: Record<string, unknown>) => Record<string, unknown>;
+
+const MIGRATIONS: Record<number, SettingsMigration> = {
+  // 1: initial version — no migrations yet
+};
+
+/** Apply schema migrations to raw stored settings in order. */
+export function migrateSettings(raw: Record<string, unknown>): Record<string, unknown> {
+  const version = (raw._version as number) ?? 1;
+  let current = { ...raw };
+  for (let v = version; v < SETTINGS_VERSION; v++) {
+    const migrate = MIGRATIONS[v];
+    if (migrate) current = migrate(current);
+  }
+  current._version = SETTINGS_VERSION;
+  return current;
+}
 
 // ── Defaults ────────────────────────────────────────────────────────────────────
 
@@ -315,10 +334,11 @@ export const applySettingsPatch = (
 
 export const normalizeStoredSettings = (
   stored: Record<string, unknown> | null | undefined
-): OverlaySettings =>
-  stored
-    ? applySettingsPatch(cloneSettings(DEFAULT_SETTINGS), stored as Partial<OverlaySettings>)
-    : cloneSettings(DEFAULT_SETTINGS);
+): OverlaySettings => {
+  if (!stored) return cloneSettings(DEFAULT_SETTINGS);
+  const migrated = migrateSettings(stored);
+  return applySettingsPatch(cloneSettings(DEFAULT_SETTINGS), migrated as Partial<OverlaySettings>);
+};
 
 export const shouldResetRendererForSettingsChange = (
   previous: Readonly<OverlaySettings>,

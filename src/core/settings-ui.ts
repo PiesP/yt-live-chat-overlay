@@ -5,7 +5,7 @@ import {
   PLAYER_LOOKUP_INTERVAL_MS,
 } from '@core/dom';
 import { createLogger } from '@core/logging';
-import { normalizeStoredSettings } from '@core/settings-schema';
+import { normalizeStoredSettings, SETTINGS_VERSION } from '@core/settings-schema';
 import { BACKDROP_ID, BUTTON_ID, SettingsUiForm, STYLE_ID } from '@core/settings-ui-form';
 import { SETTINGS_UI_STYLES } from '@core/settings-ui-styles';
 
@@ -326,7 +326,7 @@ export class SettingsUi {
 
   private handleExport(): void {
     const settings = this.getSettings();
-    const json = JSON.stringify(settings, null, 2);
+    const json = JSON.stringify({ ...settings, _version: SETTINGS_VERSION }, null, 2);
     const blob = new Blob([json], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
