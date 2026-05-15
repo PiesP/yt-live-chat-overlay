@@ -18,6 +18,7 @@
 import type { ChatMessage, ContentSegment, OverlayDimensions, OverlaySettings } from '@app-types';
 import {
   computeDliosDuration,
+  computeOutlineColor,
   computeSuperChatOpacities,
   colors as designColors,
   rendererLayout,
@@ -529,7 +530,7 @@ export class CanvasRenderer extends RendererBase {
     const outline = this.settings.outline;
     if (outline.enabled && outline.widthPx > 0 && outline.opacity > 0) {
       const strokeWidth = Math.max(0.5, outline.widthPx * 0.85);
-      ctx.strokeStyle = `rgba(0, 0, 0, ${Math.min(1, outline.opacity)})`;
+      ctx.strokeStyle = computeOutlineColor(color, Math.min(1, outline.opacity));
       ctx.lineWidth = strokeWidth;
       ctx.lineJoin = 'round';
       ctx.lineCap = 'round';
