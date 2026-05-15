@@ -4,11 +4,17 @@
  * Shared logic for the Canvas2D renderer.
  * Subclasses implement the rendering-specific abstract methods.
  *
- * State machine simplification (Phase 4):
- * - Removed isVideoPaused flag: video pause is handled by the runtime
- *   session pausing the renderer AND the chat source independently.
- * - Removed resumeStabilizeUntil: EMA speed adaptation is always active;
- *   the 2-second stabilization window added complexity without measurable benefit.
+ * Two-layer pause state machine:
+ * - isPaused: tab-visibility pause (document.hidden). Pauses animations
+ *   and stops the render loop. triggerPausedDuration is accumulated so
+ *   animations resume from the correct position.
+ * - isVideoPaused: video-level pause (video.paused). Drops incoming
+ *   messages during pause to prevent queue overflow. Both render loop
+ *   and message ingress check this flag.
+ *
+ * resumeStabilizeUntil was intentionally removed: EMA speed adaptation
+ * is always active; the 2-second stabilization window added complexity
+ * without measurable benefit.
  */
 
 import type { ChatMessage, OverlaySettings } from '@app-types';
