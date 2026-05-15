@@ -133,7 +133,7 @@ export class CanvasRenderer extends RendererBase {
     if (this.activeMessages.length < this.settings.maxConcurrentMessages) {
       this.updateBacklogPause();
       const next = this.pendingQueue.shift();
-      if (next) this.enqueueMessage(next);
+      if (next) this.enqueueMessage(next, performance.now());
     }
   }
 
@@ -256,7 +256,7 @@ export class CanvasRenderer extends RendererBase {
     const mode = this.settings.danmakuMode;
     const isScrolling = mode === 'scroll' || mode === 'reverse';
 
-    this.drainQueue();
+    this.drainQueue(now);
 
     const toRemove: number[] = [];
 
@@ -319,20 +319,20 @@ export class CanvasRenderer extends RendererBase {
 
   // ── Queue drain ──────────────────────────────────────────────────────
 
-  private drainQueue(): void {
+  private drainQueue(now: number): void {
     if (this.isAntiBlockActive()) return;
     while (
       this.pendingQueue.length > 0 &&
       this.activeMessages.length < this.settings.maxConcurrentMessages
     ) {
       const msg = this.pendingQueue.shift();
-      if (msg) this.enqueueMessage(msg);
+      if (msg) this.enqueueMessage(msg, now);
     }
   }
 
   // ── Message enqueue ──────────────────────────────────────────────────
 
-  private enqueueMessage(message: ChatMessage): void {
+  private enqueueMessage(message: ChatMessage, now: number): void {
     const dims = this.overlay.getDimensions();
     if (!dims) return;
 
@@ -345,7 +345,6 @@ export class CanvasRenderer extends RendererBase {
       return;
     }
 
-    const now = performance.now();
     const speed = message.isBacklog
       ? this.getEffectiveBacklogSpeed()
       : this.getEffectiveSpeedPxPerSec();
@@ -836,7 +835,7 @@ export class CanvasRenderer extends RendererBase {
 
   protected onResume(): void {
     this.startRenderLoop();
-    this.drainQueue();
+    this.drainQueue(performance.now());
   }
 
   protected applyPausedDuration(pausedMs: number): void {
