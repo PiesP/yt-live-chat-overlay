@@ -183,7 +183,7 @@ export class SettingsUi {
       ?.querySelector<HTMLButtonElement>('.yt-chat-overlay-settings-close')
       ?.addEventListener('click', () => this.close());
     this.modal
-      ?.querySelector<HTMLButtonElement>('button[data-action="apply"]')
+      ?.querySelector<HTMLButtonElement>('button[data-action="close"]')
       ?.addEventListener('click', () => this.apply());
     this.modal
       ?.querySelector<HTMLButtonElement>('button[data-action="reset"]')

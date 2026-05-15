@@ -280,11 +280,11 @@ export const SETTINGS_UI_STYLES = `
         color: ${colors.ui.danger};
         border-color: ${colors.ui.danger};
       }
-      .yt-chat-overlay-settings-actions button[data-action="apply"] {
+      .yt-chat-overlay-settings-actions button[data-action="close"] {
         background: ${colors.ui.primary};
         color: ${colors.ui.text};
       }
-      .yt-chat-overlay-settings-actions button[data-action="apply"]:hover {
+      .yt-chat-overlay-settings-actions button[data-action="close"]:hover {
         background: ${colors.ui.primaryHover};
       }
 

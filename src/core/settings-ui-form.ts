@@ -337,7 +337,7 @@ export class SettingsUiForm {
       ['reset', 'Reset'],
       ['export', 'Export'],
       ['import', 'Import'],
-      ['apply', 'Close'],
+      ['close', 'Close'],
     ] as const) {
       const button = document.createElement('button');
       button.type = 'button';
