@@ -119,8 +119,6 @@ export interface OutlineSettings {
   enabled: boolean;
   /** Outline thickness in pixels */
   widthPx: number;
-  /** Outline blur in pixels */
-  blurPx: number;
   /** Outline opacity (0.0-1.0) */
   opacity: number;
 }

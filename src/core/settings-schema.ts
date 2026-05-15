@@ -81,15 +81,12 @@ export const VISUAL_ROOT_KEYS = Object.entries(ROOT_SETTING_META)
 export const OUTLINE_SETTING_KEYS = [
   'enabled',
   'widthPx',
-  'blurPx',
   'opacity',
 ] as const satisfies readonly OutlineSettingKey[];
 
-export const OUTLINE_NUMERIC_KEYS = [
-  'widthPx',
-  'blurPx',
-  'opacity',
-] as const satisfies ReadonlyArray<Exclude<OutlineSettingKey, 'enabled'>>;
+export const OUTLINE_NUMERIC_KEYS = ['widthPx', 'opacity'] as const satisfies ReadonlyArray<
+  Exclude<OutlineSettingKey, 'enabled'>
+>;
 
 // ── Limits ──────────────────────────────────────────────────────────────────────
 
@@ -105,7 +102,6 @@ type SettingsLimitKey =
   | 'maxConcurrentMessages'
   | 'minTextLength'
   | 'outlineWidthPx'
-  | 'outlineBlurPx'
   | 'outlineOpacity'
   | 'laneSpacing'
   | 'authorRateLimitWindowMs'
@@ -125,7 +121,6 @@ export const SETTINGS_LIMITS = {
   maxConcurrentMessages: { min: 30, max: 100, step: 10 },
   minTextLength: { min: 1, max: 10, step: 1 },
   outlineWidthPx: { min: 0, max: 8, step: 0.5 },
-  outlineBlurPx: { min: 0, max: 12, step: 0.5 },
   outlineOpacity: { min: 0, max: 1, step: 0.1 },
   laneSpacing: { min: 0, max: 20, step: 1 },
   authorRateLimitWindowMs: { min: 1000, max: 30000, step: 1000 },
@@ -160,7 +155,6 @@ const DEFAULT_COLORS: OverlaySettings['colors'] = {
 const DEFAULT_OUTLINE: OutlineSettings = {
   enabled: true,
   widthPx: 2,
-  blurPx: 3,
   opacity: 0.8,
 };
 
@@ -229,7 +223,6 @@ export const resolveLimits = (
   if (direct) return direct;
   // Outline keys use separate limit entries to avoid clashing with root keys
   if (key === 'widthPx') return SETTINGS_LIMITS.outlineWidthPx;
-  if (key === 'blurPx') return SETTINGS_LIMITS.outlineBlurPx;
   if (key === 'opacity') return SETTINGS_LIMITS.outlineOpacity;
   throw new Error(`Unknown setting key: ${key}`);
 };

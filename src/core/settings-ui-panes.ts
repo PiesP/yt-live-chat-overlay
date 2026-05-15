@@ -84,7 +84,6 @@ export const PANES: PaneDef[] = [
         fields: [
           chk('Enabled', 'enabled', undefined, 'outline'),
           num('Width (px)', 'widthPx', undefined, 'outline'),
-          num('Blur (px)', 'blurPx', undefined, 'outline'),
           num('Opacity', 'opacity', undefined, 'outline'),
         ],
       },
