@@ -155,15 +155,6 @@ export const PANES: PaneDef[] = [
         ],
       },
       {
-        title: 'Renderer',
-        fields: [
-          sel('Renderer', 'rendererType', [
-            ['css', 'CSS (DOM animations)'],
-            ['canvas', 'Canvas2D (rAF, stable)'],
-          ]),
-        ],
-      },
-      {
         title: 'Backlog',
         fields: [
           sel('Backlog Mode', 'backlogMode', [
