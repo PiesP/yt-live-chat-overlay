@@ -48,7 +48,7 @@ interface CanvasMessage {
 
 // ── Renderer ─────────────────────────────────────────────────────────────────
 
-export class Renderer extends RendererBase {
+export class CanvasRenderer extends RendererBase {
   private canvas: HTMLCanvasElement | null = null;
   private ctx: CanvasRenderingContext2D | null = null;
   private animFrameId: number | null = null;
@@ -107,12 +107,12 @@ export class Renderer extends RendererBase {
   addMessage(message: ChatMessage): void {
     if (!this.isMessageAllowed(message)) return;
 
-    const priority = Renderer.getMessagePriority(message);
+    const priority = CanvasRenderer.getMessagePriority(message);
     this.prefetchImages(message);
 
     if (this.pendingQueue.length >= rendererLayout.queueMaxSize) {
       const last = this.pendingQueue[this.pendingQueue.length - 1];
-      if (last && priority <= Renderer.getMessagePriority(last)) {
+      if (last && priority <= CanvasRenderer.getMessagePriority(last)) {
         this.observability.onMessageDropped('queue_overflow');
         return;
       }
@@ -121,7 +121,7 @@ export class Renderer extends RendererBase {
     }
 
     const insertIndex = this.pendingQueue.findIndex(
-      (q) => Renderer.getMessagePriority(q) < priority
+      (q) => CanvasRenderer.getMessagePriority(q) < priority
     );
     if (insertIndex === -1) {
       this.pendingQueue.push(message);
@@ -139,8 +139,8 @@ export class Renderer extends RendererBase {
   trimBackgroundQueue(): void {
     if (this.pendingQueue.length <= rendererLayout.backgroundQueueMax) return;
     this.pendingQueue.sort((a, b) => {
-      const prioA = Renderer.getMessagePriority(a);
-      const prioB = Renderer.getMessagePriority(b);
+      const prioA = CanvasRenderer.getMessagePriority(a);
+      const prioB = CanvasRenderer.getMessagePriority(b);
       return prioB - prioA || a.timestamp - b.timestamp;
     });
     this.pendingQueue.length = rendererLayout.backgroundQueueMax;
@@ -282,10 +282,10 @@ export class Renderer extends RendererBase {
 
       let opacity = this.settings.opacity;
       if (!isScrolling) {
-        if (elapsed < Renderer.FADE_DURATION_MS) {
-          opacity *= elapsed / Renderer.FADE_DURATION_MS;
-        } else if (elapsed > msg.duration - Renderer.FADE_DURATION_MS) {
-          opacity *= Math.max(0, (msg.duration - elapsed) / Renderer.FADE_DURATION_MS);
+        if (elapsed < CanvasRenderer.FADE_DURATION_MS) {
+          opacity *= elapsed / CanvasRenderer.FADE_DURATION_MS;
+        } else if (elapsed > msg.duration - CanvasRenderer.FADE_DURATION_MS) {
+          opacity *= Math.max(0, (msg.duration - elapsed) / CanvasRenderer.FADE_DURATION_MS);
         }
       }
       if (msg.message.isBacklog) opacity *= 0.5;
@@ -679,9 +679,9 @@ export class Renderer extends RendererBase {
     const baseColor = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
 
     const grad = ctx.createLinearGradient(x, y, x, y + h);
-    grad.addColorStop(0, Renderer.rgbaHex(baseColor, topAlpha));
-    grad.addColorStop(0.48, Renderer.rgbaHex(baseColor, superChatAlpha));
-    grad.addColorStop(1, Renderer.rgbaHex(baseColor, bottomAlpha));
+    grad.addColorStop(0, CanvasRenderer.rgbaHex(baseColor, topAlpha));
+    grad.addColorStop(0.48, CanvasRenderer.rgbaHex(baseColor, superChatAlpha));
+    grad.addColorStop(1, CanvasRenderer.rgbaHex(baseColor, bottomAlpha));
     ctx.fillStyle = grad;
     this.roundRect(ctx, x, y, w, h, 6);
     ctx.fill();

@@ -5,7 +5,7 @@ import { findElementMatch, isAbortError, throwIfAborted, VIDEO_SELECTORS } from 
 import { createLogger } from '@core/logging';
 import { MessageIdRegistry } from '@core/message-id-registry';
 import { OVERLAY_SELECTOR, Overlay } from '@core/overlay';
-import { Renderer as CanvasRenderer } from '@core/renderer-canvas';
+import { CanvasRenderer } from '@core/renderer-canvas';
 import { Renderer } from '@core/renderer-css';
 import { shouldResetRendererForSettingsChange } from '@core/settings-schema';
 import { VideoPauseController } from '@core/video-pause-controller';

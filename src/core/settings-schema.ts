@@ -76,7 +76,7 @@ const ROOT_SETTING_META: Record<RootScalarSettingKey, SettingMeta> = {
  * Visual root keys derived from ROOT_SETTING_META — single source of truth.
  * Changes to visual settings require a full renderer reset.
  */
-const VISUAL_ROOT_KEYS = Object.entries(ROOT_SETTING_META)
+export const VISUAL_ROOT_KEYS = Object.entries(ROOT_SETTING_META)
   .filter(([, meta]) => meta.visual)
   .map(([key]) => key as RootScalarSettingKey);
 
