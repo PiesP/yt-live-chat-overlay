@@ -72,20 +72,6 @@ export const typography = {
   },
 } as const;
 
-/** Common font family presets for user selection.
- *  The first entry is the default. Each entry includes a CSS-safe fallback. */
-export const FONT_FAMILIES = [
-  'system-ui, -apple-system, sans-serif',
-  '"Noto Sans KR", sans-serif',
-  '"Malgun Gothic", sans-serif',
-  '"Apple SD Gothic Neo", sans-serif',
-  '"Nanum Gothic", sans-serif',
-  '"Nanum Myeongjo", serif',
-  '"D2Coding", monospace',
-  '"Spoqa Han Sans Neo", sans-serif',
-  '"Pretendard", sans-serif',
-] as const satisfies readonly string[];
-
 export const shadows = {
   text: {
     sm: '1px 1px 2px rgba(0, 0, 0, 0.8)',
@@ -211,10 +197,6 @@ export function parseRgbColor(colorString: string): RgbColor | null {
     g: parseInt(match[2] ?? '0', 10),
     b: parseInt(match[3] ?? '0', 10),
   };
-}
-
-export function rgba(color: RgbColor, alpha: number): string {
-  return `rgba(${color.r}, ${color.g}, ${color.b}, ${Math.min(1, Math.max(0, alpha))})`;
 }
 
 /** Resolve SuperChat display color: use YouTube's color if available, else tier default. */

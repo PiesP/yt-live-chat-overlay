@@ -3,10 +3,6 @@ import { createLogger } from '@core/logging';
 
 const log = createLogger('PollLoop');
 
-export interface PollLoopState {
-  alive: boolean;
-}
-
 export class PollLoopManager {
   private generation = 0;
   private alive = false;

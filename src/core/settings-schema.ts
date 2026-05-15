@@ -72,56 +72,6 @@ const ROOT_SETTING_META: Record<RootScalarSettingKey, SettingMeta> = {
   preserveUserColor: { type: 'boolean', visual: true },
 };
 
-/** Numeric root keys (subset of ROOT_SETTING_KEYS). */
-export const ROOT_NUMERIC_KEYS = [
-  'speedPxPerSec',
-  'fontSize',
-  'opacity',
-  'superChatOpacity',
-  'safeTop',
-  'safeBottom',
-  'maxConcurrentMessages',
-  'minTextLength',
-  'laneSpacing',
-  'authorRateLimitWindowMs',
-  'authorRateLimitMaxMessages',
-  'backlogMaxRate',
-  'backlogSpeedMultiplier',
-  'backlogRecentMinutes',
-  'antiBlockFreeRatio',
-] as const satisfies readonly RootNumericSettingKey[];
-
-export const ROOT_SETTING_KEYS = [
-  'enabled',
-  'danmakuMode',
-  'speedPxPerSec',
-  'fontSize',
-  'opacity',
-  'superChatOpacity',
-  'safeTop',
-  'safeBottom',
-  'maxConcurrentMessages',
-  'allowShortTextMessages',
-  'minTextLength',
-  'logLevel',
-  'laneSpacing',
-  'showDebugOverlay',
-  'rendererType',
-  'authorRateLimitEnabled',
-  'authorRateLimitWindowMs',
-  'authorRateLimitMaxMessages',
-  'backlogMaxRate',
-  'backlogSpeedMultiplier',
-  'showBacklogIndicator',
-  'backlogMode',
-  'backlogRecentMinutes',
-  'fontWeight',
-  'fontFamily',
-  'antiBlockEnabled',
-  'antiBlockFreeRatio',
-  'preserveUserColor',
-] as const satisfies readonly RootScalarSettingKey[];
-
 /**
  * Visual root keys derived from ROOT_SETTING_META — single source of truth.
  * Changes to visual settings require a full renderer reset.
