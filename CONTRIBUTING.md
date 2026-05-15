@@ -1,92 +1,66 @@
 # Contributing to YouTube Live Chat Overlay
 
-Thanks for improving **YouTube Live Chat Overlay**. This repository ships a single-file userscript that renders YouTube live chat as a Nico-nico style overlay with 100% local processing.
+Thanks for improving **YouTube Live Chat Overlay** — a single-file userscript that renders YouTube live chat as a Nico-nico style overlay with 100% local processing.
 
-> **Language policy**: Source code, comments, commit messages, and development documentation in this repository must be written in **English**.
-
-## Communication
-
-- Bugs / feature requests: GitHub Issues
-- Security-sensitive reports: see [.github/SECURITY.md](./.github/SECURITY.md)
-- Questions: GitHub Discussions if enabled; otherwise open an issue with clear context
+> **Language policy**: Code, comments, commits, and docs — English only.
 
 ## Before opening an issue
 
-Please include:
-
-- Browser + version
-- OS + userscript manager
-- Whether the page was a live stream, premiere, or replay with chat
-- Steps to reproduce and expected vs actual behavior
-- Script version (userscript header or release tag)
-- Relevant console output (prefixed with module names like `[App]`, `[Renderer]`, etc.)
-
-Avoid posting private account information or sensitive browser data.
+Include: browser + version, OS + userscript manager, stream type (live/premiere/replay), repro steps, script version, and console output (prefixed with module names like `[App]`, `[Renderer]`).
 
 ## Development setup
 
 ### Prerequisites
 
-- Volta Node.js `24.15.0` (project default) or engines-compatible Node.js `>=24.0.0`
-- pnpm `>=10.29.2`
+- Node.js `>=24.0.0`, pnpm `>=10.29.2`
 
-### Install
+### Commands
 
 ```bash
 pnpm install
+pnpm build           # prod bundle (quality gate via prebuild)
+pnpm build:dev       # dev bundle with source maps
+pnpm dev             # dev watch mode
+pnpm quality         # fmt + lint + check + circular + knip
+pnpm quality:fix     # auto-fix then check
+pnpm check           # tsc --noEmit
+pnpm lint            # Biome lint
+pnpm fmt             # Biome format
+pnpm circular        # madge circular dependency detection
+pnpm knip            # unused dependencies scan
+pnpm knip:full       # full unused files/exports/deps scan
 ```
 
-### Common commands
+`pnpm build` runs the quality gate via `prebuild` before producing `dist/yt-live-chat-overlay.user.js`.
 
-```bash
-pnpm build
-pnpm build:dev
-pnpm check
-pnpm lint
-pnpm fmt
-pnpm knip
-pnpm knip:full
-pnpm circular
-pnpm quality
-pnpm quality:fix
-pnpm fmt:fix
-pnpm lint:fix
-```
+### Testing
 
-`pnpm build` runs the repository quality gate through `prebuild` before generating `dist/yt-live-chat-overlay.user.js`.
-
-## Recommended development flow
-
-1. Make a focused change under `src/` or `tooling/`.
-2. Use `pnpm build:dev` for quick iteration while testing in your userscript manager.
-3. Run `pnpm quality`; use `pnpm quality:fix` first if you want standard format/lint fixes applied.
-4. Run `pnpm build` before opening a PR.
-5. Update `README.md` and release-facing notes if user-visible behavior changed.
+1. Install `dist/yt-live-chat-overlay.dev.user.js` in Violentmonkey with "Track local file".
+2. Run `pnpm dev` — auto-rebuilds on changes; Violentmonkey picks up the update.
+3. Reload YouTube to see changes.
 
 ## Project constraints
 
-- All processing must remain local to the browser; do not add external data services.
-- Keep the overlay root non-interfering with the player (`pointer-events: none`).
-- Use DOM-safe rendering only (`textContent`, sanitized attributes); do not inject raw chat HTML.
-- Preserve the single-file userscript output model (no code splitting or runtime `import()`).
+- **Zero runtime dependencies** — no external libs, no code splitting.
+- **All processing stays in-browser** — no server-side data fetching.
+- **Greasy Fork rules** — no minification or obfuscation.
+- **DOM-safe rendering** — `textContent`, sanitized attributes; no raw HTML injection.
+- **SSOT principle** — single source of truth for settings, dedup, measurement.
 
 ## Code style
 
-- Use the path aliases documented in [CODE_STANDARDS.md](./CODE_STANDARDS.md).
-- Prefer explicit return types for exported helpers and class methods.
-- Use `createLogger('[ModuleName]')` from `@core/logging` for structured runtime logging.
-- Keep changes small and reversible; update docs when behavior or workflow changes.
+See [CODE_STANDARDS.md](./CODE_STANDARDS.md) for detailed conventions. Key points:
 
-## Pull request expectations
+- Path aliases: `@core/*` → `src/core/*`, `@app-types` → `src/types/index.ts`
+- Use `createLogger('[ModuleName]')` from `@core/logging`
+- Non-null assertions (`!`) and `any` are forbidden
+- Prefer Canvas2D renderer for new rendering features
 
-A good PR includes:
+## Pull requests
 
-- A clear title and concise explanation of **what** changed and **why**
+- Clear title + explanation of **what** and **why**
 - Small, focused commits with descriptive messages
-- A short validation note (`pnpm quality`, `pnpm build`, manual checks) or why a smaller check set was enough
+- Validation note: `pnpm quality` + `pnpm build` passed, or why a smaller set was sufficient
+- Update README / CHANGELOG if user-visible behavior changed
 
-## Reference documents
-
-- [README.md](./README.md) — user-facing overview
-- [CODE_STANDARDS.md](./CODE_STANDARDS.md) — coding rules and repository constraints
 Thanks for helping improve **YouTube Live Chat Overlay**!

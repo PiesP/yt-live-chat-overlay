@@ -2,6 +2,38 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.26.0] - 2026-05-15
+
+### Added
+
+- **Cross-tab settings sync** — Settings changes in one tab propagate to other tabs via `StorageEvent` + `GM_addValueChangeListener`. Settings class subscribes to both channels and notifies registered callbacks. ([`cadd26f`](https://github.com/PiesP/yt-live-chat-overlay/commit/cadd26f))
+- **Settings schema versioning** — `SETTINGS_VERSION=1` with `migrateSettings()` pipeline. Raw stored settings are migrated on load to support future breaking schema changes. ([`12b2b86`](https://github.com/PiesP/yt-live-chat-overlay/commit/12b2b86))
+- **Settings preview/persistence separation** — `Settings.preview()` writes to memory only; `Settings.persist()` writes to storage. Settings UI now uses `onPreview` (slider drag) and `onPersist` (modal close) callbacks, reducing localStorage writes to once per settings dialog session. ([`6fc41c5`](https://github.com/PiesP/yt-live-chat-overlay/commit/6fc41c5))
+- **Import feedback toast** — Visual confirmation when importing settings JSON, with sanitized prototype-pollution key rejection. ([`10b2ffa`](https://github.com/PiesP/yt-live-chat-overlay/commit/10b2ffa))
+- **Auto outline color** — `renderSegment()` now computes outline color via `computeOutlineColor()` using WCAG 2.0 relative luminance, selecting black or white outline based on text color brightness. ([`e2ce29c`](https://github.com/PiesP/yt-live-chat-overlay/commit/e2ce29c), [`6b45103`](https://github.com/PiesP/yt-live-chat-overlay/commit/6b45103))
+
+### Refactored
+
+- **Display scale/precision moved to ROOT_SETTING_META (SSOT)** — `displayScale` and `displayPrecision` are now fields in `ROOT_SETTING_META` instead of a separate `ROOT_NUMERIC_OPTIONS` map. ([`0f09559`](https://github.com/PiesP/yt-live-chat-overlay/commit/0f09559))
+- **Backlog tick timer** — `requestIdleCallback` replaced with simple `setTimeout` for broader compatibility and fewer edge cases. ([`f76554d`](https://github.com/PiesP/yt-live-chat-overlay/commit/f76554d))
+- **BootstrapResolver retry logic simplified** — Single-loop implementation with exponential backoff, no nested counters. ([`113e787`](https://github.com/PiesP/yt-live-chat-overlay/commit/113e787))
+- **`_paused` renamed to `chatPaused`** — Clarifies the flag applies to chat polling, not renderer animations. ([`2229be1`](https://github.com/PiesP/yt-live-chat-overlay/commit/2229be1))
+- **Expired message removal** — `filter()` replaces swap-pop pattern for clarity. ([`f9cf5cb`](https://github.com/PiesP/yt-live-chat-overlay/commit/f9cf5cb))
+- **Drop rate computation simplified** — `refreshDerivedMetrics()` streamlined. ([`5370e13`](https://github.com/PiesP/yt-live-chat-overlay/commit/5370e13))
+- **`drawAuthorPhoto()` extracted** — Eliminates duplicate photo rendering in `renderSuperChat()` and `renderRegular()`. ([`dad08be`](https://github.com/PiesP/yt-live-chat-overlay/commit/dad08be))
+- **Outline stroke logic deduplicated** via `strokeTextOutline()` helper. ([`ecdc1c1`](https://github.com/PiesP/yt-live-chat-overlay/commit/ecdc1c1))
+- **FONT_FAMILY SSOT** — `DEFAULT_SETTINGS.fontFamily` is now the single source; `text-measure.ts` derives its default from it. ([`51d94cc`](https://github.com/PiesP/yt-live-chat-overlay/commit/51d94cc))
+- **RendererBase JSDoc fixed** — Updated to match actual `isVideoPaused` architecture (video pause vs tab visibility). ([`4d8dd51`](https://github.com/PiesP/yt-live-chat-overlay/commit/4d8dd51))
+
+### Removed
+
+- **`pnpm-workspace.yaml`** — Single-package project; workspace config was unused. ([`f333aad`](https://github.com/PiesP/yt-live-chat-overlay/commit/f333aad))
+- **`blurPx` from `OutlineSettings`** — Unused field; CSS renderer uses `text-shadow` blur, Canvas2D uses `strokeText` which has no blur parameter. ([`a32037c`](https://github.com/PiesP/yt-live-chat-overlay/commit/a32037c))
+
+### Performance
+
+- **Reduced `performance.now()` calls** — From 3 to 1 per render frame in the Canvas2D render loop. ([`8676b6b`](https://github.com/PiesP/yt-live-chat-overlay/commit/8676b6b))
+
 ## [0.25.0] - 2026-05-11
 
 ### Fixed

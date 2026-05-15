@@ -1,36 +1,24 @@
 # Support
 
-Thanks for using **YouTube Live Chat Overlay**.
+## Self-check
 
-## Self-check first
+- [README.md](./README.md) for usage
+- [existing issues](https://github.com/PiesP/yt-live-chat-overlay/issues) for duplicates
 
-Before opening a support request, please check:
+## Bug report
 
-- `README.md` for usage instructions
-- Existing issues for duplicates
+Open a [GitHub issue](https://github.com/PiesP/yt-live-chat-overlay/issues/new). Include:
 
-## I have a question
+- Browser + version, OS, userscript manager
+- Stream type (live / premiere / replay)
+- Steps to reproduce, expected vs actual behavior
+- Script version (from userscript header)
+- Console output (prefixed module names: `[App]`, `[Renderer]`, etc.)
 
-If GitHub Discussions are enabled for this repository, please use Discussions for Q&A.
+## Feature request
 
-If not, you can open a GitHub issue, but please keep it focused and include as much context as possible.
+Open a [GitHub issue](https://github.com/PiesP/yt-live-chat-overlay/issues/new) with a clear description of the problem and proposed solution.
 
-## I found a bug
+## Security
 
-Please open a GitHub issue using the Bug Report template.
-
-Include:
-
-- Browser + version
-- OS + device
-- Repro steps
-- Expected vs actual behavior
-- Relevant console logs
-
-## I have a feature request
-
-Please open a GitHub issue using the Feature Request template.
-
-## Security or privacy issue
-
-Please follow `.github/SECURITY.md`.
+For security or privacy issues, please contact the maintainer directly via GitHub.
