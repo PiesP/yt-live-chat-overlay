@@ -308,16 +308,10 @@ export class CanvasRenderer extends RendererBase {
 
     if (toRemove.length === 0) return;
 
-    for (let ri = toRemove.length - 1; ri >= 0; ri--) {
-      const idx = toRemove[ri];
-      if (idx === undefined) break;
-      const lastIdx = this.activeMessages.length - 1;
-      if (idx < lastIdx) {
-        const lastMsg = this.activeMessages[lastIdx];
-        if (lastMsg) this.activeMessages[idx] = lastMsg;
-      }
-      this.activeMessages.pop();
-    }
+    // Filter out expired messages (swap-pop pattern avoided for clarity)
+    const surviving = this.activeMessages.filter((_, i) => !toRemove.includes(i));
+    this.activeMessages.length = 0;
+    this.activeMessages.push(...surviving);
 
     this.observability.updateActiveMessages(this.activeMessages.length);
     this.observability.updateQueueDepth(this.pendingQueue.length);
