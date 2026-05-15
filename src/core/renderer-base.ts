@@ -1,7 +1,7 @@
 /**
  * RendererBase
  *
- * Shared logic extracted from RendererCSS and RendererCanvas.
+ * Shared logic for the Canvas2D renderer.
  * Subclasses implement the rendering-specific abstract methods.
  *
  * State machine simplification (Phase 4):
