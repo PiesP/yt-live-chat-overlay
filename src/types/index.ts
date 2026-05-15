@@ -13,7 +13,6 @@ export type LogLevel = 'warn' | 'info' | 'debug';
 type AuthorDisplayKey = 'normal' | 'member' | 'moderator' | 'owner' | 'verified' | 'superChat';
 export type ChatMessageKind = 'text' | 'superchat' | 'membership';
 export type DanmakuMode = 'scroll' | 'reverse' | 'top' | 'bottom';
-export type RendererType = 'css' | 'canvas';
 export type SuperChatTier = 'blue' | 'cyan' | 'green' | 'yellow' | 'orange' | 'magenta' | 'red';
 
 export const isLogLevel = (value: unknown): value is LogLevel =>
@@ -168,8 +167,6 @@ export interface OverlaySettings {
   fontFamily: string;
   /** Show debug overlay with real-time metrics */
   showDebugOverlay: boolean;
-  /** Renderer backend: CSS DOM animations or Canvas2D rAF */
-  rendererType: RendererType;
 
   // ── Author Rate Limiting ──
   /** Enable per-author rate limiting */

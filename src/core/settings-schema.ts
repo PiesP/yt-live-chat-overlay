@@ -13,7 +13,6 @@ export type { OutlineSettingKey, RootNumericSettingKey, RootScalarSettingKey };
 
 const VALID_BACKLOG_MODES = ['playback', 'recent', 'full', 'none'] as const;
 const VALID_DANMAKU_MODES = ['scroll', 'reverse', 'top', 'bottom'] as const;
-const VALID_RENDERER_TYPES = ['css', 'canvas'] as const;
 
 export const AUTHOR_COLOR_KEYS = [
   'normal',
@@ -56,7 +55,6 @@ const ROOT_SETTING_META: Record<RootScalarSettingKey, SettingMeta> = {
   logLevel: { type: 'string', visual: false },
   laneSpacing: { type: 'number', visual: true },
   showDebugOverlay: { type: 'boolean', visual: false },
-  rendererType: { type: 'string', visual: false },
   authorRateLimitEnabled: { type: 'boolean', visual: false },
   authorRateLimitWindowMs: { type: 'number', visual: false },
   authorRateLimitMaxMessages: { type: 'number', visual: false },
@@ -184,7 +182,6 @@ export const DEFAULT_SETTINGS = {
   outline: DEFAULT_OUTLINE,
   laneSpacing: 3,
   showDebugOverlay: false,
-  rendererType: 'canvas',
   authorRateLimitEnabled: true,
   authorRateLimitWindowMs: 5000,
   authorRateLimitMaxMessages: 5,
@@ -242,7 +239,6 @@ export const resolveLimits = (
 const STRING_VALIDATORS: Partial<Record<RootScalarSettingKey, (v: string) => boolean>> = {
   backlogMode: (v) => VALID_BACKLOG_MODES.includes(v as (typeof VALID_BACKLOG_MODES)[number]),
   danmakuMode: (v) => VALID_DANMAKU_MODES.includes(v as (typeof VALID_DANMAKU_MODES)[number]),
-  rendererType: (v) => VALID_RENDERER_TYPES.includes(v as (typeof VALID_RENDERER_TYPES)[number]),
   logLevel: (v) => isLogLevel(v),
   fontWeight: (v) => v === 'normal' || v === 'bold',
   fontFamily: (_v) => true,
