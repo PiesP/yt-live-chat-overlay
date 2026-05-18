@@ -5,11 +5,11 @@ name: 🤖 Dependabot Auto-Merge
 # - npm: patch/minor updates for specific safe packages
 # - Requires CI to pass first (via GitHub branch protection)
 #
-# Security: Uses pull_request_target for auto-merge capability.
+# Security: Uses pull_request for auto-merge capability.
 # Only reads dependency metadata and queues squash merges — no untrusted code execution.
 
 on:
-  pull_request_target:
+  pull_request:
     types: [opened, synchronize, reopened]
 
 permissions:
