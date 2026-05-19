@@ -174,6 +174,21 @@ export class CanvasRenderer extends RendererBase {
     super.updateSettings(settings, options);
   }
 
+  // ── Lane partition control ──────────────────────────────────────────
+
+  /**
+   * Enable lane partitioning: backlog messages use lanes [0, partitionEnd),
+   * real-time messages use [partitionEnd, laneCount).
+   */
+  setBacklogPartition(partitionEnd: number): void {
+    this.laneAllocator.setBacklogPartition(true, partitionEnd);
+  }
+
+  /** Disable lane partitioning: all lanes are shared. */
+  clearBacklogPartition(): void {
+    this.laneAllocator.setBacklogPartition(false, 0);
+  }
+
   // ── Image pre-fetching (BUG-5/6 fix) ─────────────────────────────────
 
   private prefetchImages(message: ChatMessage): void {
@@ -375,7 +390,7 @@ export class CanvasRenderer extends RendererBase {
     }
 
     // ── Scroll/Reverse modes: use DLIOS lane allocator ────────────────
-    const placement = this.laneAllocator.findPlacement(msgHeight, dims);
+    const placement = this.laneAllocator.findPlacement(msgHeight, dims, message.isBacklog ?? false);
     if (!placement) {
       this.observability.onMessageDropped('no_lane_available');
       return;

@@ -247,6 +247,15 @@ export class RuntimeSession {
           renderer.onBacklogPauseChange = (paused: boolean) => {
             this.backlogController?.setPaused(paused);
           };
+          this.backlogController.onBacklogStateChange = (active: boolean) => {
+            if (active) {
+              // Reserve the top half of lanes for backlog messages.
+              const partitionEnd = Math.max(1, Math.floor(renderer.laneCount / 2));
+              renderer.setBacklogPartition(partitionEnd);
+            } else {
+              renderer.clearBacklogPartition();
+            }
+          };
         }
         this.backlogController.startBacklogInjection(msgs);
         return;

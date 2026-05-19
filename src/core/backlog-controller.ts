@@ -53,6 +53,9 @@ export class BacklogInjectionController {
   private realTimeActivityCount = 0;
   private injectionStartTime = 0;
 
+  /** Called when backlog injection starts/stops to enable lane partitioning. */
+  public onBacklogStateChange: ((active: boolean) => void) | null = null;
+
   /**
    * Density ramp duration (ms).
    * During this window the injection rate linearly ramps from 25% to 100%
@@ -100,6 +103,9 @@ export class BacklogInjectionController {
     this.processedBacklog = 0;
     this.isActive = true;
     this.injectionStartTime = Date.now();
+
+    // Notify listeners that backlog injection has started (for lane partitioning).
+    this.onBacklogStateChange?.(true);
 
     log.debug(`Backlog injection: ${messages.length} messages, sampled to ${sampled.length}`);
 
@@ -260,6 +266,8 @@ export class BacklogInjectionController {
     this.backlogQueue = [];
     this.observability?.updateBacklogProgress(1);
     this.hideIndicator();
+    // Notify listeners that backlog injection has ended (disable lane partitioning).
+    this.onBacklogStateChange?.(false);
     log.debug('Backlog injection complete');
   }
 
@@ -336,6 +344,7 @@ export class BacklogInjectionController {
       this.indicatorEl = null;
     }
     this.onBacklogMessage = null;
+    this.onBacklogStateChange?.(false);
   }
 
   /** Pause/resume injection when the render queue is overloaded */

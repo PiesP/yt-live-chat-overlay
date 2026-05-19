@@ -46,6 +46,15 @@ export class LaneAllocator {
   private laneHeight = 0;
   private laneCount = 0;
 
+  /**
+   * When backlog partitioning is active, backlog messages are restricted
+   * to lanes [0, backlogLaneEnd) and real-time messages use
+   * [backlogLaneEnd, laneCount). This prevents visual overlap during
+   * the initial backlog injection phase.
+   * -1 means partitioning is disabled (all lanes shared).
+   */
+  private backlogLaneEnd = -1;
+
   constructor(private readonly options: LaneAllocatorOptions) {}
 
   reset(dimensions: OverlayDimensions | null): void {
@@ -97,9 +106,28 @@ export class LaneAllocator {
     return this.options.safeTop + laneIndex * this.laneHeight;
   }
 
-  findPlacement(messageHeight: number, dimensions: OverlayDimensions): LanePlacement | null {
+  findPlacement(
+    messageHeight: number,
+    dimensions: OverlayDimensions,
+    isBacklog = false
+  ): LanePlacement | null {
     const now = performance.now();
-    const requiredLanes = this.calculateRequiredLanes(messageHeight, dimensions.laneCount);
+    const totalLanes = dimensions.laneCount;
+
+    // Determine the effective lane range based on partition state.
+    let laneStart = 0;
+    let laneEnd = totalLanes;
+    if (this.backlogLaneEnd > 0) {
+      if (isBacklog) {
+        laneEnd = this.backlogLaneEnd;
+      } else {
+        laneStart = this.backlogLaneEnd;
+      }
+    }
+    const effectiveLaneCount = laneEnd - laneStart;
+    if (effectiveLaneCount <= 0) return null;
+
+    const requiredLanes = this.calculateRequiredLanes(messageHeight, effectiveLaneCount);
     if (requiredLanes === 0) return null;
 
     const mode = this.options.getDanmakuMode();
@@ -109,16 +137,14 @@ export class LaneAllocator {
     let waitMs: number;
 
     if (requiredLanes === 1) {
-      // ── Single-lane: O(log n) min-heap ──────────────────────────────
-      const result = this.allocateSingleLane(now, isScrolling);
+      const result = this.allocateSingleLane(now, isScrolling, laneStart, laneEnd);
       if (!result) return null;
       laneIndex = result.laneIndex;
       waitMs = result.waitMs;
     } else {
-      // ── Multi-lane (superchat, membership): linear block scan ──────
-      const result = this.allocateBlock(requiredLanes, now, isScrolling);
+      const result = this.allocateBlock(requiredLanes, now, isScrolling, laneStart, laneEnd);
       if (!result) return null;
-      laneIndex = result.startIndex;
+      laneIndex = result.startIndex + laneStart;
       waitMs = result.waitMs;
     }
 
@@ -174,6 +200,23 @@ export class LaneAllocator {
     }
   }
 
+  // ── Partition control ────────────────────────────────────────────────
+
+  /**
+   * Enable or disable backlog lane partitioning.
+   * When active, backlog messages use lanes [0, partitionEnd) and
+   * real-time messages use [partitionEnd, laneCount).
+   * @param active - true to enable partitioning
+   * @param partitionEnd - exclusive end index for the backlog partition
+   */
+  setBacklogPartition(active: boolean, partitionEnd: number): void {
+    if (active) {
+      this.backlogLaneEnd = Math.max(1, Math.min(partitionEnd, this.laneCount - 1));
+    } else {
+      this.backlogLaneEnd = -1;
+    }
+  }
+
   // ── Private helpers ─────────────────────────────────────────────────
 
   private calculateRequiredLanes(messageHeight: number, totalLanes: number): number {
@@ -185,31 +228,48 @@ export class LaneAllocator {
    * Allocate a single lane using the min-heap.
    * When the best lane is available now, use message-count weighting
    * to spread messages evenly across lanes.
+   *
+   * @param laneStart - inclusive start of the lane range to consider
+   * @param laneEnd - exclusive end of the lane range to consider
    */
   private allocateSingleLane(
     now: number,
-    isScrolling: boolean
+    isScrolling: boolean,
+    laneStart: number,
+    laneEnd: number
   ): { laneIndex: number; waitMs: number } | null {
     if (this.heap.length === 0) return null;
 
-    const top = this.heap[0];
-    if (!top) return null;
-    const [laneIndex, availableAt] = top;
-    const waitMs = Math.max(0, Math.ceil(availableAt - now));
+    // Find the best lane within the restricted range.
+    let bestLane = -1;
+    let bestWait = Infinity;
 
-    // Overload policy: if the best lane isn't available within a reasonable
-    // window, drop the message rather than letting it queue up.
+    for (let i = 0; i < this.heap.length; i++) {
+      const entry = this.heap[i];
+      if (!entry) continue;
+      const [idx, avail] = entry;
+      if (idx < laneStart || idx >= laneEnd) continue;
+      const wait = Math.max(0, Math.ceil(avail - now));
+      if (wait < bestWait) {
+        bestWait = wait;
+        bestLane = idx;
+        if (wait === 0) break;
+      }
+    }
+
+    if (bestLane === -1) return null;
+
     const maxWaitMs = isScrolling ? rendererLayout.durationMax : rendererLayout.topBottomDurationMs;
-    if (waitMs > maxWaitMs) return null;
+    if (bestWait > maxWaitMs) return null;
 
-    // When the top lane is available now, check nearby candidates for
-    // better load balance. This prevents clustering on the same lane.
-    if (waitMs === 0) {
-      const best = this.findBestAvailableLane(now, maxWaitMs);
+    // When the best lane is available now, check nearby candidates for
+    // better load balance within the partition.
+    if (bestWait === 0) {
+      const best = this.findBestAvailableLane(now, maxWaitMs, laneStart, laneEnd);
       if (best) return best;
     }
 
-    return { laneIndex, waitMs };
+    return { laneIndex: bestLane, waitMs: bestWait };
   }
 
   /**
@@ -218,7 +278,9 @@ export class LaneAllocator {
    */
   private findBestAvailableLane(
     now: number,
-    maxWaitMs: number
+    maxWaitMs: number,
+    laneStart: number,
+    laneEnd: number
   ): { laneIndex: number; waitMs: number } | null {
     let bestLane = -1;
     let bestWait = maxWaitMs + 1;
@@ -228,6 +290,7 @@ export class LaneAllocator {
       const entry = this.heap[i];
       if (!entry) continue;
       const [idx, avail] = entry;
+      if (idx < laneStart || idx >= laneEnd) continue;
       const wait = Math.max(0, Math.ceil(avail - now));
       if (wait > maxWaitMs) continue;
 
@@ -249,15 +312,17 @@ export class LaneAllocator {
   private allocateBlock(
     required: number,
     now: number,
-    isScrolling: boolean
+    isScrolling: boolean,
+    laneStart: number,
+    laneEnd: number
   ): { startIndex: number; waitMs: number } | null {
-    const maxStartIndex = this.laneCount - required;
-    if (maxStartIndex < 0) return null;
+    const maxStartIndex = laneEnd - required;
+    if (maxStartIndex < laneStart) return null;
 
     let bestStart = -1;
     let bestWait = Infinity;
 
-    for (let start = 0; start <= maxStartIndex; start++) {
+    for (let start = laneStart; start <= maxStartIndex; start++) {
       let maxAvail = 0;
       let allFound = true;
 
