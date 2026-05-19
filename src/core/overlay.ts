@@ -6,7 +6,7 @@
  */
 
 import type { OverlayDimensions, OverlaySettings } from '@app-types';
-import { rendererLayout, spacing } from '@core/design-tokens';
+import { rendererLayout } from '@core/design-tokens';
 import {
   ensurePlayerPositioning,
   findPlayerContainerElement,
@@ -21,7 +21,7 @@ export const OVERLAY_SELECTOR = `#${OVERLAY_ID}`;
 
 const calculateOverlayDimensions = (
   playerElement: HTMLElement,
-  settings: OverlaySettings
+  _settings: OverlaySettings
 ): OverlayDimensions | null => {
   const width = playerElement.offsetWidth;
   const height = playerElement.offsetHeight;
@@ -30,29 +30,7 @@ const calculateOverlayDimensions = (
     return null;
   }
 
-  // Base lane height for dynamic allocation.
-  // Single-line messages (without author) use 1 lane.
-  // Two-line messages (with author info) use 2+ lanes dynamically.
-  // The lane height formula mirrors estimateMessageDimensions:
-  //   laneHeight = fontSize * textRatio + paddingV + laneSpacing
-  // where textRatio (1.25) approximates measureTextHeight/fontSize and
-  // paddingV (spacing.sm*2 = 16) matches the vertical padding in
-  // estimateMessageDimensions. This keeps messages within 1 lane slot
-  // at all supported font sizes (14-50 px).
-  const paddingV = spacing.sm * 2;
-  const laneHeight = Math.max(
-    1,
-    settings.fontSize * rendererLayout.laneHeightMultiplier + paddingV + settings.laneSpacing
-  );
-  const usableHeight = height * (1 - settings.safeTop - settings.safeBottom);
-  const laneCount = Math.max(1, Math.floor(usableHeight / laneHeight));
-
-  return {
-    width,
-    height,
-    laneHeight,
-    laneCount,
-  };
+  return { width, height };
 };
 
 type OverlayDimensionsChangeCallback = (dimensions: OverlayDimensions | null) => void;
@@ -60,11 +38,7 @@ type OverlayDimensionsChangeCallback = (dimensions: OverlayDimensions | null) =>
 const areOverlayDimensionsEqual = (
   previous: OverlayDimensions | null,
   next: OverlayDimensions | null
-): boolean =>
-  previous?.width === next?.width &&
-  previous?.height === next?.height &&
-  previous?.laneHeight === next?.laneHeight &&
-  previous?.laneCount === next?.laneCount;
+): boolean => previous?.width === next?.width && previous?.height === next?.height;
 
 export class Overlay {
   private container: HTMLDivElement | null = null;

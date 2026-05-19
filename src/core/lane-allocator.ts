@@ -1,5 +1,6 @@
 import type { DanmakuMode, LaneState, OverlayDimensions } from '@app-types';
 import { rendererLayout } from '@core/design-tokens';
+import { measureTextHeight } from '@core/text-measure';
 
 export interface LanePlacement {
   lane: LaneState;
@@ -12,6 +13,11 @@ interface LaneAllocatorOptions {
   readonly getEffectiveSpeedPxPerSec: () => number;
   readonly getDanmakuMode: () => DanmakuMode;
   readonly safeTop: number;
+  readonly safeBottom: number;
+  readonly fontSize: number;
+  readonly fontWeight: 'normal' | 'bold';
+  readonly fontFamily: string;
+  readonly laneSpacing: number;
 }
 
 /**
@@ -67,14 +73,26 @@ export class LaneAllocator {
       this.laneCount = 0;
       return;
     }
-    this.laneHeight = dimensions.laneHeight;
-    this.laneCount = dimensions.laneCount;
+
+    // Compute lane height from actual font metrics, not a hardcoded multiplier.
+    // This ensures laneHeight == measureTextHeight + paddingV + laneSpacing,
+    // which is exactly the same formula used by estimateMessageDimensions().
+    // Result: msgHeight <= laneHeight always holds at laneSpacing >= 0,
+    // and the 1-slot/2-slot transition happens at a predictable laneSpacing.
+    const paddingV = 8 * 2; // spacing.sm * 2, inlined to avoid circular import
+    const font = `${this.options.fontWeight === 'bold' ? 'bold' : '400'} ${this.options.fontSize}px ${this.options.fontFamily}`;
+    const textHeight = measureTextHeight(font, this.options.fontSize);
+    this.laneHeight = Math.max(1, textHeight + paddingV + this.options.laneSpacing);
+
+    const usableHeight = dimensions.height * (1 - this.options.safeTop - this.options.safeBottom);
+    this.laneCount = Math.max(1, Math.floor(usableHeight / this.laneHeight));
+
     // Stagger initial lane availability so the first messages don't all
     // start at exactly the same time. Each lane gets a small offset
     // proportional to its index (max ~100ms spread across all lanes).
     const now = performance.now();
-    const staggerMs = Math.min(100, Math.max(10, 200 / dimensions.laneCount));
-    for (let i = 0; i < dimensions.laneCount; i++) {
+    const staggerMs = Math.min(100, Math.max(10, 200 / this.laneCount));
+    for (let i = 0; i < this.laneCount; i++) {
       this.heap.push([i, now + i * staggerMs]);
       this.laneIndexToHeapIndex.set(i, i);
       this.laneMessageCounts.push(0);
@@ -114,11 +132,11 @@ export class LaneAllocator {
 
   findPlacement(
     messageHeight: number,
-    dimensions: OverlayDimensions,
+    _dimensions: OverlayDimensions,
     isBacklog = false
   ): LanePlacement | null {
     const now = performance.now();
-    const totalLanes = dimensions.laneCount;
+    const totalLanes = this.laneCount;
 
     // Determine the effective lane range based on partition state.
     let laneStart = 0;

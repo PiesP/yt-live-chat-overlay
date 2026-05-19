@@ -251,11 +251,11 @@ export interface LaneState {
 }
 
 /**
- * Overlay dimensions
+ * Overlay dimensions — pure pixel measurements from the player container.
+ * Lane geometry (laneHeight, laneCount) is computed by LaneAllocator using
+ * actual font metrics, so it is not included here.
  */
 export interface OverlayDimensions {
   width: number;
   height: number;
-  laneHeight: number;
-  laneCount: number;
 }
