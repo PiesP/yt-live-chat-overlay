@@ -37,6 +37,12 @@ export const colors = {
   authorOwner: '#FFD600',
   authorVerified: '#AAAAAA',
   superChat: superChatColors,
+  membership: {
+    background: { r: 15, g: 157, b: 88 },
+    backgroundAlpha: 0.28,
+    borderAlpha: 0.75,
+    borderAlphaAmplitude: 0.15,
+  },
   ui: uiColors,
 } as const;
 

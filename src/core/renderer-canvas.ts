@@ -882,18 +882,17 @@ export class CanvasRenderer extends RendererBase {
     const fontSize = this.settings.fontSize;
     const w = msg.width;
     const h = msg.height;
+    const mem = designColors.membership;
 
     ctx.globalAlpha = alpha;
 
-    // Background
-    ctx.fillStyle = 'rgba(15, 157, 88, 0.28)';
+    ctx.fillStyle = `rgba(${mem.background.r}, ${mem.background.g}, ${mem.background.b}, ${mem.backgroundAlpha})`;
     this.roundRect(ctx, x, y, w, h, 6);
     ctx.fill();
 
-    // Pulsing green glow border
     const elapsed = performance.now() - msg.startTime - msg.pausedDuration;
-    const pulse = Math.sin((elapsed / 1000) * Math.PI) * 0.15 + 0.75;
-    ctx.strokeStyle = `rgba(15, 157, 88, ${pulse})`;
+    const pulse = Math.sin((elapsed / 1000) * Math.PI) * mem.borderAlphaAmplitude + mem.borderAlpha;
+    ctx.strokeStyle = `rgba(${mem.background.r}, ${mem.background.g}, ${mem.background.b}, ${pulse})`;
     ctx.lineWidth = 2;
     ctx.stroke();
 
@@ -902,12 +901,10 @@ export class CanvasRenderer extends RendererBase {
     const textX = x + padH;
     let textY = y + padV;
 
-    // Author name (no photo for membership)
     if (msg.message.author) {
       textY = this.drawAuthorSection(ctx, msg, textX, textY, '#ffffff');
     }
 
-    // Body text
     if (msg.message.text) {
       const bodyMaxWidth = w - padH * 2;
       this.renderWrappedText(
