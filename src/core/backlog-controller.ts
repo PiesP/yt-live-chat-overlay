@@ -13,7 +13,9 @@
  * 3. Statistical sampling — when backlog exceeds 200/500 messages, apply
  *    50%/25% sampling. High-priority messages (SuperChat, Membership) are
  *    always included.
- * 4. Progress indicator — shows a "Loading chat history..." overlay indicator
+ * 4. Density ramp — injection rate starts low and linearly ramps up over
+ *    the first few seconds to avoid visual flooding on startup.
+ * 5. Progress indicator — shows a "Loading chat history..." overlay indicator
  *    that auto-removes when backlog injection completes.
  */
 
@@ -49,6 +51,14 @@ export class BacklogInjectionController {
   private lanes: number;
   private observability: ObservabilityReporter | undefined;
   private realTimeActivityCount = 0;
+  private injectionStartTime = 0;
+
+  /**
+   * Density ramp duration (ms).
+   * During this window the injection rate linearly ramps from 25% to 100%
+   * of the computed adaptive rate, avoiding visual flooding on startup.
+   */
+  private static readonly DENSITY_RAMP_MS = 4000;
 
   constructor(
     config: BacklogControllerConfig,
@@ -89,6 +99,7 @@ export class BacklogInjectionController {
     this.totalBacklog = sampled.length;
     this.processedBacklog = 0;
     this.isActive = true;
+    this.injectionStartTime = Date.now();
 
     log.debug(`Backlog injection: ${messages.length} messages, sampled to ${sampled.length}`);
 
@@ -130,7 +141,8 @@ export class BacklogInjectionController {
 
     const maxRate = Math.max(4, Math.min(20, Math.min(this.config.backlogMaxRate, this.lanes * 2)));
     const realTimeFactor = Math.max(0.25, 1 - this.realTimeActivityCount * 0.2);
-    const adaptiveRate = Math.max(1, Math.round(maxRate * realTimeFactor));
+    const rampFactor = this.getDensityRampFactor();
+    const adaptiveRate = Math.max(1, Math.round(maxRate * realTimeFactor * rampFactor));
     const tickInterval = Math.round(1000 / adaptiveRate);
 
     this.realTimeActivityCount = Math.max(0, this.realTimeActivityCount - 1);
@@ -154,6 +166,17 @@ export class BacklogInjectionController {
 
   private scheduleNextTick(tickInterval: number): void {
     this.injectionTimer = setTimeout(() => this.processTick(), tickInterval);
+  }
+
+  /**
+   * Compute the density ramp factor (0.25-1.0).
+   * Linearly interpolates from 0.25 to 1.0 over DENSITY_RAMP_MS.
+   * After the ramp window, returns 1.0 (full rate).
+   */
+  private getDensityRampFactor(): number {
+    const elapsed = Date.now() - this.injectionStartTime;
+    if (elapsed >= BacklogInjectionController.DENSITY_RAMP_MS) return 1;
+    return 0.25 + 0.75 * (elapsed / BacklogInjectionController.DENSITY_RAMP_MS);
   }
 
   /** Emit a single backlog message to the renderer via callback */

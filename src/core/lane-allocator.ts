@@ -141,14 +141,25 @@ export class LaneAllocator {
   /**
    * Commit the placement — update the lane's available time for the
    * next message.
+   *
+   * @param speedMultiplier - Multiplier applied to the effective velocity
+   *   when computing lane occupancy. Backlog messages use a higher speed
+   *   (e.g. 2x) and thus free up lanes sooner, preventing unnecessary
+   *   collisions with real-time messages.
    */
-  commitPlacement(placement: LanePlacement, textWidth: number, startTime: number): void {
+  commitPlacement(
+    placement: LanePlacement,
+    textWidth: number,
+    startTime: number,
+    speedMultiplier = 1
+  ): void {
     const mode = this.options.getDanmakuMode();
     const isScrolling = mode === 'scroll' || mode === 'reverse';
     const velocity = this.options.getEffectiveSpeedPxPerSec();
 
+    const effectiveVelocity = velocity * speedMultiplier;
     const occupancyMs = isScrolling
-      ? ((textWidth + rendererLayout.dliosSafetyGap) / velocity) * 1000
+      ? ((textWidth + rendererLayout.dliosSafetyGap) / effectiveVelocity) * 1000
       : rendererLayout.topBottomDurationMs;
 
     const nextAvailable = startTime + occupancyMs;

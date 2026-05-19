@@ -412,7 +412,10 @@ export class CanvasRenderer extends RendererBase {
 
     const laneY = placement.laneY;
 
-    this.laneAllocator.commitPlacement(placement, msgWidth, now);
+    // For backlog messages, pass the speed multiplier so the lane allocator
+    // can account for the faster scroll speed when computing lane occupancy.
+    const backlogSpeed = message.isBacklog ? this.settings.backlogSpeedMultiplier : 1;
+    this.laneAllocator.commitPlacement(placement, msgWidth, now, backlogSpeed);
 
     const startX =
       mode === 'scroll' ? dims.width + entryOffset : -(msgWidth + rendererLayout.exitPaddingMin);
