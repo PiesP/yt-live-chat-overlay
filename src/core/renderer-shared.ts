@@ -142,13 +142,17 @@ function estimateMembershipDimensions(
   const textWidth = measureContentWidth(message, font, fontSize);
   const paddingH = spacing.lg * 2;
   const paddingV = spacing.md + spacing.lg;
-  const photoHeight = rendererLayout.authorPhotoSize;
   const nameHeight = measureTextHeight(font, fontSize);
-  const infoHeight = Math.max(photoHeight, nameHeight);
   const textHeight = measureTextHeight(font, fontSize);
+
+  // Author name is rendered as text (no photo in membership).
+  // Gap after author name matches renderMembership: fontSize + 4,
+  // which is approximated by spacing.xs here.
+  const infoHeight = nameHeight;
+  const authorGap = spacing.xs;
 
   return {
     width: textWidth + paddingH,
-    height: infoHeight + spacing.xs + textHeight + paddingV,
+    height: infoHeight + authorGap + textHeight + paddingV,
   };
 }
