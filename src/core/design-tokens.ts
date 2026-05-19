@@ -178,54 +178,23 @@ export function computeDliosDuration(totalDistance: number, velocity: number): n
   );
 }
 
-export function parseRgbColor(colorString: string): RgbColor | null {
-  const match = colorString.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
-  if (!match) return null;
-  return {
-    r: parseInt(match[1] ?? '0', 10),
-    g: parseInt(match[2] ?? '0', 10),
-    b: parseInt(match[3] ?? '0', 10),
-  };
-}
-
-/** Parse a hex color string (#RGB, #RRGGBB, #RGBA, #RRGGBBAA) to RgbColor. */
-export function parseHexColor(colorString: string): RgbColor | null {
-  const hex = colorString.replace('#', '');
-  if (hex.length === 3) {
-    return {
-      r: parseInt(hex.charAt(0) + hex.charAt(0), 16),
-      g: parseInt(hex.charAt(1) + hex.charAt(1), 16),
-      b: parseInt(hex.charAt(2) + hex.charAt(2), 16),
-    };
-  }
-  if (hex.length === 4) {
-    return {
-      r: parseInt(hex.charAt(0) + hex.charAt(0), 16),
-      g: parseInt(hex.charAt(1) + hex.charAt(1), 16),
-      b: parseInt(hex.charAt(2) + hex.charAt(2), 16),
-    };
-  }
-  if (hex.length === 6) {
-    return {
-      r: parseInt(hex.slice(0, 2), 16),
-      g: parseInt(hex.slice(2, 4), 16),
-      b: parseInt(hex.slice(4, 6), 16),
-    };
-  }
-  if (hex.length === 8) {
-    return {
-      r: parseInt(hex.slice(0, 2), 16),
-      g: parseInt(hex.slice(2, 4), 16),
-      b: parseInt(hex.slice(4, 6), 16),
-    };
-  }
-  return null;
-}
-
 /** Parse any supported color string (hex or rgb/rgba) to RgbColor. */
 export function parseAnyColor(colorString: string): RgbColor | null {
-  if (colorString.startsWith('#')) return parseHexColor(colorString);
-  return parseRgbColor(colorString);
+  if (colorString.startsWith('#')) {
+    const hex = colorString.slice(1);
+    if (hex.length < 3) return null;
+    const expand = hex.length <= 4;
+    const h0 = hex[0] ?? '0';
+    const h1 = hex[1] ?? '0';
+    const h2 = hex[2] ?? '0';
+    const r = parseInt(expand ? h0 + h0 : hex.slice(0, 2), 16);
+    const g = parseInt(expand ? h1 + h1 : hex.slice(2, 4), 16);
+    const b = parseInt(expand ? h2 + h2 : hex.slice(4, 6), 16);
+    return Number.isFinite(r) && Number.isFinite(g) && Number.isFinite(b) ? { r, g, b } : null;
+  }
+  const match = colorString.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+  if (!match) return null;
+  return { r: Number(match[1]), g: Number(match[2]), b: Number(match[3]) };
 }
 
 /**
@@ -267,7 +236,7 @@ export function resolveSuperChatRgb(
   colors: Record<SuperChatTier, RgbColor>
 ): RgbColor {
   const sourceColor = superChat.headerBackgroundColor || superChat.backgroundColor;
-  const parsed = sourceColor ? parseRgbColor(sourceColor) : null;
+  const parsed = sourceColor ? parseAnyColor(sourceColor) : null;
   return parsed ?? colors[superChat.tier] ?? colors.blue;
 }
 

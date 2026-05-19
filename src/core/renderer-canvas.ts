@@ -60,7 +60,7 @@ export class CanvasRenderer extends RendererBase {
   private readonly activeMessages: CanvasMessage[] = [];
   private readonly pendingQueue: ChatMessage[] = [];
 
-  /** Emoji image cache: url → HTMLImageElement (bounded LRU, max 200 entries) */
+  /** Image caches (bounded LRU). */
   private readonly emojiCache = new Map<string, HTMLImageElement>();
   private readonly emojiFetching = new Set<string>();
   private readonly authorPhotoCache = new Map<string, HTMLImageElement>();
@@ -191,51 +191,47 @@ export class CanvasRenderer extends RendererBase {
     this.laneAllocator.setBacklogPartition(false, 0);
   }
 
-  // ── Image pre-fetching (BUG-5/6 fix) ─────────────────────────────────
+  // ── Image pre-fetching ────────────────────────────────────────────────
+
+  /** Load an image and store it in the given cache on success. */
+  private loadImage(url: string, cache: Map<string, HTMLImageElement>, maxEntries: number): void {
+    if (cache.has(url)) return;
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.src = url;
+    img.onload = () => {
+      if (cache.size >= maxEntries) {
+        const oldestKey = cache.keys().next().value;
+        if (oldestKey !== undefined) cache.delete(oldestKey);
+      }
+      cache.set(url, img);
+    };
+  }
 
   private prefetchImages(message: ChatMessage): void {
     for (const seg of message.content) {
       if (seg.type !== 'emoji') continue;
-      if (this.emojiCache.has(seg.emoji.url)) continue;
       if (this.emojiFetching.has(seg.emoji.url)) continue;
       if (this.emojiFetching.size >= 6) continue;
-
       this.emojiFetching.add(seg.emoji.url);
+      const url = seg.emoji.url;
       const img = new Image();
       img.crossOrigin = 'anonymous';
-      img.src = seg.emoji.url;
+      img.src = url;
       img.onload = () => {
-        this.emojiFetching.delete(seg.emoji.url);
-        if (this.emojiCache.size >= 200) {
-          const oldestKey = this.emojiCache.keys().next().value;
-          if (oldestKey !== undefined) this.emojiCache.delete(oldestKey);
-        }
-        this.emojiCache.set(seg.emoji.url, img);
+        this.emojiFetching.delete(url);
+        this.loadImage(url, this.emojiCache, 200);
       };
-      img.onerror = () => {
-        this.emojiFetching.delete(seg.emoji.url);
-      };
+      img.onerror = () => this.emojiFetching.delete(url);
     }
 
-    const photoUrl = message.authorPhotoUrl;
-    if (photoUrl && !this.authorPhotoCache.has(photoUrl)) {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.src = photoUrl;
-      img.onload = () => this.authorPhotoCache.set(photoUrl, img);
-      // BUG-6 fix: do NOT cache on error
-      img.onerror = () => {};
+    if (message.authorPhotoUrl) {
+      this.loadImage(message.authorPhotoUrl, this.authorPhotoCache, 100);
     }
 
-    const sticker = message.superChat?.sticker;
-    const stickerUrl = sticker?.url;
-    if (stickerUrl && !this.stickerCache.has(stickerUrl)) {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.src = stickerUrl;
-      img.onload = () => this.stickerCache.set(stickerUrl, img);
-      // BUG-5 fix: do NOT set cache before onload
-      img.onerror = () => {};
+    const stickerUrl = message.superChat?.sticker?.url;
+    if (stickerUrl) {
+      this.loadImage(stickerUrl, this.stickerCache, 50);
     }
   }
 
