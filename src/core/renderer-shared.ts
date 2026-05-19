@@ -75,8 +75,7 @@ function estimateRegularMessageDimensions(
 ): MessageDimensions {
   const textWidth = measureContentWidth(message, font, fontSize);
   const textHeight = measureTextHeight(font, fontSize);
-  const paddingH = spacing.md * 2;
-  const paddingV = spacing.sm * 2;
+  const { paddingH, paddingV } = rendererLayout;
 
   if (!showAuthor || !message.author) {
     return { width: textWidth + paddingH, height: textHeight + paddingV };
