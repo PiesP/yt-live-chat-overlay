@@ -12,7 +12,7 @@ import {
   getFontString,
   measureTextHeight,
   measureTextWidth,
-  measureWrappedLineCount,
+  wrapTextLines,
 } from '@core/text-measure';
 
 // Derived from DEFAULT_SETTINGS (SSOT) to avoid hardcoded string duplication.
@@ -105,29 +105,52 @@ function estimateSuperChatDimensions(
 ): MessageDimensions {
   const { paddingH, paddingV } = rendererLayout.superchat;
   const bodyLineHeight = measureTextHeight(font, fontSize);
-
-  // ── Body text: accurate wrapped line count ──
   const innerWidth = rendererLayout.superchatMaxWidth - paddingH;
-  const lineCount = measureWrappedLineCount(message.text, font, Math.max(1, innerWidth));
+
+  // ── Body text: wrapped line count using shared algorithm ──
+  const wrappedLines = wrapTextLines(message.text, font, Math.max(1, innerWidth));
+  const lineCount = wrappedLines.length;
   const textHeight = Math.ceil(bodyLineHeight * lineCount);
 
-  // ── Author section height (matches drawAuthorSection) ──
+  // ── Wrapped text width: widest line determines content width ──
+  let maxLineWidth = 0;
+  for (const line of wrappedLines) {
+    const w = measureTextWidth(line, font);
+    if (w > maxLineWidth) maxLineWidth = w;
+  }
+
+  // ── Author section width ──
+  let authorSectionWidth = 0;
+  if (showAuthor && message.author) {
+    const authorFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
+    const authorFont = getFontString(authorFontSize, undefined, FONT_FAMILY);
+    const authorNameWidth = measureTextWidth(message.author, authorFont);
+    authorSectionWidth = rendererLayout.authorPhotoSize + spacing.sm + authorNameWidth;
+  }
+
+  // ── Badge width (amount pill) ──
+  const badgeFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
+  const badgeFont = getFontString(badgeFontSize, 'bold', FONT_FAMILY);
+  const badgeWidth = Math.ceil(measureTextWidth(message.superChat?.amount ?? '', badgeFont)) + 24;
+
+  // ── Card width: fit content, clamped to [min, max] ──
+  const contentWidth = Math.max(authorSectionWidth, badgeWidth, maxLineWidth);
+  const width = Math.max(
+    rendererLayout.superchatMinWidth,
+    Math.min(rendererLayout.superchatMaxWidth, contentWidth + paddingH)
+  );
+
+  // ── Author section height ──
   const authorHeight = showAuthor ? rendererLayout.authorSectionHeightPx : 0;
 
-  // ── Badge height (amount pill) ──
-  const badgeFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
+  // ── Badge height ──
   const badgeHeight = badgeFontSize + spacing.sm * 2;
 
   // Layout: paddingV + author + xs + badge + xs + text + paddingV
   const contentHeight = authorHeight + spacing.xs + badgeHeight + spacing.xs + textHeight;
 
-  const textWidth = measureContentWidth(message, font, fontSize);
-
   return {
-    width: Math.max(
-      rendererLayout.superchatMinWidth,
-      Math.min(rendererLayout.superchatMaxWidth, textWidth + paddingH)
-    ),
+    width,
     height: contentHeight + paddingV,
   };
 }
@@ -141,13 +164,17 @@ function estimateMembershipDimensions(
   const paddingH = spacing.lg * 2;
   const paddingV = spacing.md + spacing.lg;
   const nameHeight = measureTextHeight(font, fontSize);
-  const textHeight = measureTextHeight(font, fontSize);
+  const bodyLineHeight = measureTextHeight(font, fontSize);
 
   // Author name is rendered as text (no photo in membership).
-  // Gap after author name matches renderMembership: fontSize + 4,
-  // which is approximated by spacing.xs here.
   const infoHeight = nameHeight;
   const authorGap = spacing.xs;
+
+  // Body text: wrapped line count
+  const innerWidth = rendererLayout.superchatMaxWidth - paddingH;
+  const wrappedLines = wrapTextLines(message.text, font, Math.max(1, innerWidth));
+  const bodyLineCount = wrappedLines.length;
+  const textHeight = Math.ceil(bodyLineHeight * bodyLineCount);
 
   return {
     width: textWidth + paddingH,
