@@ -19,10 +19,7 @@ const log = createLogger('Overlay');
 const OVERLAY_ID = 'yt-live-chat-overlay';
 export const OVERLAY_SELECTOR = `#${OVERLAY_ID}`;
 
-const calculateOverlayDimensions = (
-  playerElement: HTMLElement,
-  _settings: OverlaySettings
-): OverlayDimensions | null => {
+const calculateOverlayDimensions = (playerElement: HTMLElement): OverlayDimensions | null => {
   const width = playerElement.offsetWidth;
   const height = playerElement.offsetHeight;
 
@@ -83,7 +80,7 @@ export class Overlay {
     const nextDimensions =
       !this.playerElement || !this.container || !this.settings
         ? null
-        : calculateOverlayDimensions(this.playerElement, this.settings);
+        : calculateOverlayDimensions(this.playerElement);
 
     if (areOverlayDimensionsEqual(this.dimensions, nextDimensions)) {
       return;

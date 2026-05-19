@@ -117,7 +117,6 @@ export const rendererLayout = {
   globalStaggerMs: 20,
   safeDistanceScale: 0.05,
   safeDistanceMin: 4,
-  laneHeightMultiplier: 1.25,
   retryDelayMinMs: 32,
   retryDelayMaxMs: 800,
   topBottomDurationMs: 4000,
