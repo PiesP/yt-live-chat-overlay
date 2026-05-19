@@ -308,34 +308,40 @@ export class LaneAllocator {
       }
     }
     // Rebuild heap invariant after bulk update
-    for (let i = Math.floor(this.heap.length / 2) - 1; i >= 0; i--) {
+    for (let i = Math.floor((this.heap.length - 1) / 4); i >= 0; i--) {
       this.siftDown(i);
     }
   }
 
-  // ── Binary min-heap operations ──────────────────────────────────────
+  // ── 4-ary min-heap operations ──────────────────────────────────────
+  // 4-ary heap: children of node i are at 4i+1..4i+4, parent at (i-1)/4.
+  // Sift-down does up to 4 comparisons per level but traverses ~half the
+  // levels of a binary heap. Net win for cache locality and total comparisons.
 
   private siftDown(startIdx: number): void {
     const size = this.heap.length;
     let idx = startIdx;
     while (true) {
       let smallest = idx;
-      const left = 2 * idx + 1;
-      const right = 2 * idx + 2;
-      const leftEntry = left < size ? this.heap[left] : undefined;
-      const rightEntry = right < size ? this.heap[right] : undefined;
-      const smallestEntry = this.heap[smallest];
-      if (!smallestEntry) break;
-      if (leftEntry && leftEntry[1] < smallestEntry[1]) smallest = left;
-      const smallestAfterLeft = this.heap[smallest];
-      if (smallestAfterLeft && rightEntry && rightEntry[1] < smallestAfterLeft[1]) smallest = right;
+      const firstChild = 4 * idx + 1;
+
+      // Check up to 4 children
+      for (let c = 0; c < 4; c++) {
+        const childIdx = firstChild + c;
+        if (childIdx >= size) break;
+        const childEntry = this.heap[childIdx];
+        const smallestEntry = this.heap[smallest];
+        if (childEntry && smallestEntry && childEntry[1] < smallestEntry[1]) {
+          smallest = childIdx;
+        }
+      }
+
       if (smallest === idx) break;
       const current = this.heap[idx];
       const smallestEntrySwap = this.heap[smallest];
       if (!current || !smallestEntrySwap) break;
       this.heap[idx] = smallestEntrySwap;
       this.heap[smallest] = current;
-      // Update reverse map for both swapped entries
       this.laneIndexToHeapIndex.set(current[0], smallest);
       this.laneIndexToHeapIndex.set(smallestEntrySwap[0], idx);
       idx = smallest;
@@ -345,14 +351,13 @@ export class LaneAllocator {
   private siftUp(startIdx: number): void {
     let idx = startIdx;
     while (idx > 0) {
-      const parent = Math.floor((idx - 1) / 2);
+      const parent = Math.floor((idx - 1) / 4);
       const parentEntry = this.heap[parent];
       const currentEntry = this.heap[idx];
       if (!parentEntry || !currentEntry) break;
       if (parentEntry[1] <= currentEntry[1]) break;
       this.heap[parent] = currentEntry;
       this.heap[idx] = parentEntry;
-      // Update reverse map for both swapped entries
       this.laneIndexToHeapIndex.set(parentEntry[0], idx);
       this.laneIndexToHeapIndex.set(currentEntry[0], parent);
       idx = parent;
