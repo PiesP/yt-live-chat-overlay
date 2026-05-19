@@ -40,8 +40,10 @@ const calculateOverlayDimensions = (
   // estimateMessageDimensions. This keeps messages within 1 lane slot
   // at all supported font sizes (14-50 px).
   const paddingV = spacing.sm * 2;
-  const laneHeight =
-    settings.fontSize * rendererLayout.laneHeightMultiplier + paddingV + settings.laneSpacing;
+  const laneHeight = Math.max(
+    1,
+    settings.fontSize * rendererLayout.laneHeightMultiplier + paddingV + settings.laneSpacing
+  );
   const usableHeight = height * (1 - settings.safeTop - settings.safeBottom);
   const laneCount = Math.max(1, Math.floor(usableHeight / laneHeight));
 

@@ -157,7 +157,7 @@ export interface OverlaySettings {
   colors: ColorSettings;
   /** Text outline settings */
   outline: OutlineSettings;
-  /** Vertical spacing between lanes in pixels (0 = tight, higher = more gap) */
+  /** Vertical spacing between lanes in pixels (negative = overlap, 0 = tight, higher = more gap) */
   laneSpacing: number;
   /** Text font weight: normal (400) or bold (700) */
   fontWeight: 'normal' | 'bold';

@@ -62,7 +62,11 @@ export const PANES: PaneDef[] = [
           num('Font Size (px)', 'fontSize'),
           num('Text Opacity', 'opacity'),
           num('Scroll Speed (px/s)', 'speedPxPerSec'),
-          num('Lane Gap (px)', 'laneSpacing', 'Extra vertical gap between comment rows'),
+          num(
+            'Lane Gap (px)',
+            'laneSpacing',
+            'Vertical gap between comment rows (negative = overlap)'
+          ),
           sel(
             'Font Weight',
             'fontWeight',
