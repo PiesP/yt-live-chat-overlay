@@ -4,7 +4,6 @@ import { measureTextHeight } from '@core/text-measure';
 
 export interface LanePlacement {
   lane: LaneState;
-  laneSpan: number;
   waitMs: number;
   laneY: number;
 }
@@ -131,7 +130,7 @@ export class LaneAllocator {
   }
 
   findPlacement(
-    messageHeight: number,
+    _messageHeight: number,
     _dimensions: OverlayDimensions,
     isBacklog = false
   ): LanePlacement | null {
@@ -151,29 +150,19 @@ export class LaneAllocator {
     const effectiveLaneCount = laneEnd - laneStart;
     if (effectiveLaneCount <= 0) return null;
 
-    const requiredLanes = this.calculateRequiredLanes(messageHeight, effectiveLaneCount);
-    if (requiredLanes === 0) return null;
-
+    // Messages always occupy exactly 1 lane slot.
+    // Negative laneSpacing reduces laneHeight below msgHeight, causing
+    // adjacent-lane overlap — this is the intended "negative = overlap" behavior.
+    // The 2-slot allocation path has been removed because it caused sudden
+    // visible gaps when laneHeight dropped below msgHeight.
     const mode = this.options.getDanmakuMode();
     const isScrolling = mode === 'scroll' || mode === 'reverse';
 
-    let laneIndex: number;
-    let waitMs: number;
-
-    if (requiredLanes === 1) {
-      const result = this.allocateSingleLane(now, isScrolling, laneStart, laneEnd);
-      if (!result) return null;
-      laneIndex = result.laneIndex;
-      waitMs = result.waitMs;
-    } else {
-      const result = this.allocateBlock(requiredLanes, now, isScrolling, laneStart, laneEnd);
-      if (!result) return null;
-      laneIndex = result.startIndex + laneStart;
-      waitMs = result.waitMs;
-    }
+    const result = this.allocateSingleLane(now, isScrolling, laneStart, laneEnd);
+    if (!result) return null;
 
     const lane: LaneState = {
-      index: laneIndex,
+      index: result.laneIndex,
       lastItemStartTime: now,
       lastItemEndTime: 0,
       lastItemWidthPx: 0,
@@ -182,9 +171,8 @@ export class LaneAllocator {
 
     return {
       lane,
-      laneSpan: requiredLanes,
-      waitMs,
-      laneY: this.getLaneY(laneIndex),
+      waitMs: result.waitMs,
+      laneY: this.getLaneY(result.laneIndex),
     };
   }
 
@@ -213,14 +201,10 @@ export class LaneAllocator {
       : rendererLayout.topBottomDurationMs;
 
     const nextAvailable = startTime + occupancyMs;
-    const end = Math.min(placement.lane.index + placement.laneSpan, this.laneCount);
-
-    for (let i = placement.lane.index; i < end; i++) {
-      this.updateLane(i, nextAvailable);
-      const count = this.laneMessageCounts[i];
-      if (count !== undefined) {
-        this.laneMessageCounts[i] = count + 1;
-      }
+    this.updateLane(placement.lane.index, nextAvailable);
+    const count = this.laneMessageCounts[placement.lane.index];
+    if (count !== undefined) {
+      this.laneMessageCounts[placement.lane.index] = count + 1;
     }
   }
 
@@ -242,11 +226,6 @@ export class LaneAllocator {
   }
 
   // ── Private helpers ─────────────────────────────────────────────────
-
-  private calculateRequiredLanes(messageHeight: number, totalLanes: number): number {
-    if (this.laneHeight <= 0 || totalLanes <= 0) return 0;
-    return Math.max(1, Math.min(totalLanes, Math.ceil(messageHeight / this.laneHeight)));
-  }
 
   /**
    * Allocate a single lane using the min-heap.
@@ -330,57 +309,6 @@ export class LaneAllocator {
 
     if (bestLane === -1) return null;
     return { laneIndex: bestLane, waitMs: bestWait };
-  }
-
-  /** Allocate a contiguous block of lanes for multi-lane messages. */
-  private allocateBlock(
-    required: number,
-    now: number,
-    isScrolling: boolean,
-    laneStart: number,
-    laneEnd: number
-  ): { startIndex: number; waitMs: number } | null {
-    const maxStartIndex = laneEnd - required;
-    if (maxStartIndex < laneStart) return null;
-
-    let bestStart = -1;
-    let bestWait = Infinity;
-
-    for (let start = laneStart; start <= maxStartIndex; start++) {
-      let maxAvail = 0;
-      let allFound = true;
-
-      for (let i = start; i < start + required; i++) {
-        const entry = this.findLaneEntry(i);
-        if (!entry) {
-          allFound = false;
-          break;
-        }
-        if (entry[1] > maxAvail) maxAvail = entry[1];
-      }
-
-      if (!allFound) continue;
-
-      const wait = Math.max(0, Math.ceil(maxAvail - now));
-      if (wait < bestWait) {
-        bestWait = wait;
-        bestStart = start;
-      }
-    }
-
-    if (bestStart === -1) return null;
-
-    const maxWaitMs = isScrolling ? rendererLayout.durationMax : rendererLayout.topBottomDurationMs;
-    if (bestWait > maxWaitMs) return null;
-
-    return { startIndex: bestStart, waitMs: bestWait };
-  }
-
-  /** Find a lane entry by its index in the heap (O(1) via reverse map). */
-  private findLaneEntry(laneIndex: number): [number, number] | undefined {
-    const heapIdx = this.laneIndexToHeapIndex.get(laneIndex);
-    if (heapIdx === undefined) return undefined;
-    return this.heap[heapIdx];
   }
 
   /** Update a lane's available time in the heap. */
