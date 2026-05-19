@@ -85,12 +85,136 @@ export function getFontString(
 }
 
 /**
- * Measure the number of wrapped lines a text string will occupy when
- * constrained to `maxWidth` pixels, using the given font.
+ * Split a single line of text into wrapped line segments constrained to
+ * `maxWidth` pixels, using the given font.
  *
  * Uses a greedy word-wrapping algorithm: words are accumulated until
  * adding the next word would exceed `maxWidth`, then a new line starts.
- * Explicit newlines (\n) in the text are always honoured.
+ * For CJK text without spaces, falls back to character-level wrapping so
+ * that long CJK strings are never wider than `maxWidth`.
+ *
+ * @param line     - A single line of text (no newlines).
+ * @param ctx      - Canvas rendering context with font already set.
+ * @param maxWidth - Maximum line width in pixels.
+ * @returns Array of line segments (always >= 1 for non-empty input, 0 for empty).
+ */
+function wrapLine(line: string, ctx: CanvasRenderingContext2D, maxWidth: number): string[] {
+  if (line.length === 0) return [''];
+
+  const words = line.split(/\s+/).filter((w) => w.length > 0);
+  if (words.length === 0) return [''];
+
+  const spaceWidth = ctx.measureText(' ').width;
+  const lines: string[] = [];
+  let currentLine = words[0] ?? '';
+  let currentWidth = ctx.measureText(currentLine).width;
+
+  for (let i = 1; i < words.length; i++) {
+    const word = words[i];
+    if (!word) continue;
+    const wordWidth = ctx.measureText(word).width;
+
+    // If a single word exceeds maxWidth, use character-level wrapping
+    if (wordWidth > maxWidth) {
+      // Flush the current line first if it has content
+      if (currentLine.length > 0) {
+        lines.push(currentLine);
+        currentLine = '';
+        currentWidth = 0;
+      }
+      // Wrap the long word character by character
+      const charWrapped = wrapChars(word, ctx, maxWidth);
+      // All but the last char segment become their own lines
+      for (let j = 0; j < charWrapped.length - 1; j++) {
+        lines.push(charWrapped[j] ?? '');
+      }
+      const lastChar = charWrapped[charWrapped.length - 1] ?? '';
+      currentLine = lastChar;
+      currentWidth = ctx.measureText(lastChar).width;
+      continue;
+    }
+
+    if (currentWidth + spaceWidth + wordWidth > maxWidth) {
+      lines.push(currentLine);
+      currentLine = word;
+      currentWidth = wordWidth;
+    } else {
+      currentLine += ` ${word}`;
+      currentWidth += spaceWidth + wordWidth;
+    }
+  }
+
+  if (currentLine.length > 0 || lines.length === 0) {
+    lines.push(currentLine);
+  }
+
+  return lines;
+}
+
+/**
+ * Wrap a single word (no spaces) at character boundaries so each segment
+ * fits within `maxWidth`.
+ */
+function wrapChars(word: string, ctx: CanvasRenderingContext2D, maxWidth: number): string[] {
+  const segments: string[] = [];
+  let current = '';
+  let currentWidth = 0;
+
+  for (const ch of word) {
+    const chWidth = ctx.measureText(ch).width;
+    if (currentWidth + chWidth > maxWidth && current.length > 0) {
+      segments.push(current);
+      current = ch;
+      currentWidth = chWidth;
+    } else {
+      current += ch;
+      currentWidth += chWidth;
+    }
+  }
+
+  if (current.length > 0) {
+    segments.push(current);
+  }
+
+  return segments;
+}
+
+/**
+ * Wrap text into lines constrained to `maxWidth` pixels.
+ *
+ * Honors explicit newlines (`\n`) in the text. Each paragraph is wrapped
+ * independently. CJK text without spaces is wrapped at character boundaries.
+ *
+ * @param text     - The text to wrap.
+ * @param font     - CSS font string (e.g. "bold 16px sans-serif").
+ * @param maxWidth - Maximum line width in pixels.
+ * @returns Array of wrapped lines (always >= 1 for non-empty text, 0 for empty).
+ */
+export function wrapTextLines(text: string, font: string, maxWidth: number): string[] {
+  if (text.length === 0) return [];
+
+  const ctx = getCtx();
+  ctx.font = font;
+
+  const paragraphs = text.split('\n');
+  const result: string[] = [];
+
+  for (const paragraph of paragraphs) {
+    const wrapped = wrapLine(paragraph, ctx, maxWidth);
+    for (const line of wrapped) {
+      result.push(line);
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Measure the number of wrapped lines a text string will occupy when
+ * constrained to `maxWidth` pixels, using the given font.
+ *
+ * Delegates to `wrapTextLines()` so measurement and rendering always
+ * agree on line breaks.
  *
  * @param text     - The text to measure.
  * @param font     - CSS font string (e.g. "bold 16px sans-serif").
@@ -98,45 +222,5 @@ export function getFontString(
  * @returns The number of lines (always >= 1 for non-empty text, 0 for empty).
  */
 export function measureWrappedLineCount(text: string, font: string, maxWidth: number): number {
-  if (text.length === 0) return 0;
-
-  const ctx = getCtx();
-  ctx.font = font;
-
-  const lines = text.split('\n');
-  let totalLines = 0;
-
-  for (const line of lines) {
-    if (line.length === 0) {
-      totalLines++;
-      continue;
-    }
-
-    const words = line.split(/\s+/).filter((w) => w.length > 0);
-    if (words.length === 0) {
-      totalLines++;
-      continue;
-    }
-
-    let currentLineWidth = ctx.measureText(words[0] ?? '').width;
-    let lineCount = 1;
-
-    for (let i = 1; i < words.length; i++) {
-      const word = words[i];
-      if (!word) continue;
-      const wordWidth = ctx.measureText(word).width;
-      const spaceWidth = ctx.measureText(' ').width;
-
-      if (currentLineWidth + spaceWidth + wordWidth > maxWidth) {
-        lineCount++;
-        currentLineWidth = wordWidth;
-      } else {
-        currentLineWidth += spaceWidth + wordWidth;
-      }
-    }
-
-    totalLines += lineCount;
-  }
-
-  return totalLines;
+  return wrapTextLines(text, font, maxWidth).length;
 }
