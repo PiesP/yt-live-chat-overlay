@@ -137,7 +137,7 @@ export class BacklogInjectionController {
     this.processTick();
   }
 
-  /** Execute one injection tick using requestIdleCallback for scheduling. */
+  /** Execute one injection tick. Uses setTimeout for throttled scheduling. */
   private processTick(): void {
     if (!this.isActive || this.backlogQueue.length === 0) {
       this.isInjecting = false;
