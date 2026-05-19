@@ -891,31 +891,31 @@ export class CanvasRenderer extends RendererBase {
 
     ctx.globalAlpha = alpha;
 
+    // Background
     ctx.fillStyle = 'rgba(15, 157, 88, 0.28)';
     this.roundRect(ctx, x, y, w, h, 6);
     ctx.fill();
 
-    // Pulsing green glow border (CSS keyframes equivalent)
+    // Pulsing green glow border
     const elapsed = performance.now() - msg.startTime - msg.pausedDuration;
     const pulse = Math.sin((elapsed / 1000) * Math.PI) * 0.15 + 0.75;
     ctx.strokeStyle = `rgba(15, 157, 88, ${pulse})`;
     ctx.lineWidth = 2;
     ctx.stroke();
 
-    const textX = x + rendererLayout.paddingH;
-    let textY = y + rendererLayout.paddingV;
+    const padH = spacing.lg;
+    const padV = spacing.md;
+    const textX = x + padH;
+    let textY = y + padV;
 
+    // Author name (no photo for membership)
     if (msg.message.author) {
-      ctx.font = this.getFont(fontSize);
-      ctx.textBaseline = 'top';
-      this.strokeTextOutline(ctx, msg.message.author, textX, textY, '#ffffff');
-      ctx.fillStyle = '#ffffff';
-      ctx.fillText(msg.message.author, textX, textY);
-      textY += fontSize + 4;
+      textY = this.drawAuthorSection(ctx, msg, textX, textY, '#ffffff');
     }
 
+    // Body text
     if (msg.message.text) {
-      const bodyMaxWidth = w - rendererLayout.paddingH * 2;
+      const bodyMaxWidth = w - padH * 2;
       this.renderWrappedText(
         ctx,
         msg.message.text,
