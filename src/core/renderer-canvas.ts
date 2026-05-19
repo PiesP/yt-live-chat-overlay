@@ -53,15 +53,9 @@ interface CanvasMessage {
 
 // ── Renderer ─────────────────────────────────────────────────────────────────
 
-/** Convert an rgb(...) or #rrggbb color string to rgba(...) with the given alpha. */
+/** Convert an rgb(...) color string to rgba(...) with the given alpha. */
 function rgbaHex(color: string, alpha: number): string {
-  if (color.startsWith('rgb(')) {
-    return `rgba${color.slice(3, -1)}, ${alpha})`;
-  }
-  const r = parseInt(color.slice(1, 3), 16);
-  const g = parseInt(color.slice(3, 5), 16);
-  const b = parseInt(color.slice(5, 7), 16);
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  return `rgba(${color.slice(4, -1)}, ${alpha})`;
 }
 
 export class CanvasRenderer extends RendererBase {

@@ -58,21 +58,12 @@ export function measureTextHeight(font: string, fontSize: number): number {
   ctx.font = font;
   const m = ctx.measureText('Mg');
 
-  // Prefer actual (per-glyph) bounding box — most accurate.
   const actualAscent = m.actualBoundingBoxAscent;
   const actualDescent = m.actualBoundingBoxDescent;
   if (actualAscent !== undefined && actualDescent !== undefined && actualAscent > 0) {
     return Math.ceil(actualAscent + actualDescent);
   }
 
-  // Fallback: font-level bounding box (em-square based).
-  const fontAscent = m.fontBoundingBoxAscent;
-  const fontDescent = m.fontBoundingBoxDescent;
-  if (fontAscent !== undefined && fontDescent !== undefined && fontAscent > 0) {
-    return Math.ceil(fontAscent + fontDescent);
-  }
-
-  // Last resort: rough estimate from font size.
   return Math.ceil(fontSize * 1.1);
 }
 
