@@ -41,6 +41,8 @@ export class LaneAllocator {
   private heap: [number, number][] = [];
   /** Reverse map: laneIndex → heap index for O(1) lookup and update */
   private laneIndexToHeapIndex: Map<number, number> = new Map();
+  /** Per-lane message count for weighted selection */
+  private laneMessageCounts: number[] = [];
   private laneHeight = 0;
   private laneCount = 0;
 
@@ -49,6 +51,7 @@ export class LaneAllocator {
   reset(dimensions: OverlayDimensions | null): void {
     this.heap = [];
     this.laneIndexToHeapIndex = new Map();
+    this.laneMessageCounts = [];
     if (!dimensions) {
       this.laneHeight = 0;
       this.laneCount = 0;
@@ -59,6 +62,7 @@ export class LaneAllocator {
     for (let i = 0; i < dimensions.laneCount; i++) {
       this.heap.push([i, 0]);
       this.laneIndexToHeapIndex.set(i, i);
+      this.laneMessageCounts.push(0);
     }
     // Build min-heap
     for (let i = Math.floor(this.heap.length / 2) - 1; i >= 0; i--) {
@@ -152,6 +156,10 @@ export class LaneAllocator {
 
     for (let i = placement.lane.index; i < end; i++) {
       this.updateLane(i, nextAvailable);
+      const count = this.laneMessageCounts[i];
+      if (count !== undefined) {
+        this.laneMessageCounts[i] = count + 1;
+      }
     }
   }
 
@@ -162,7 +170,11 @@ export class LaneAllocator {
     return Math.max(1, Math.min(totalLanes, Math.ceil(messageHeight / this.laneHeight)));
   }
 
-  /** Allocate a single lane using the min-heap. */
+  /**
+   * Allocate a single lane using the min-heap.
+   * When the best lane is available now, use message-count weighting
+   * to spread messages evenly across lanes.
+   */
   private allocateSingleLane(
     now: number,
     isScrolling: boolean
@@ -179,7 +191,47 @@ export class LaneAllocator {
     const maxWaitMs = isScrolling ? rendererLayout.durationMax : rendererLayout.topBottomDurationMs;
     if (waitMs > maxWaitMs) return null;
 
+    // When the top lane is available now, check nearby candidates for
+    // better load balance. This prevents clustering on the same lane.
+    if (waitMs === 0) {
+      const best = this.findBestAvailableLane(now, maxWaitMs);
+      if (best) return best;
+    }
+
     return { laneIndex, waitMs };
+  }
+
+  /**
+   * Among lanes that are available within the grace window, pick the one
+   * with the fewest total messages for visual balance.
+   */
+  private findBestAvailableLane(
+    now: number,
+    maxWaitMs: number
+  ): { laneIndex: number; waitMs: number } | null {
+    let bestLane = -1;
+    let bestWait = maxWaitMs + 1;
+    let bestCount = Infinity;
+
+    for (let i = 0; i < this.heap.length; i++) {
+      const entry = this.heap[i];
+      if (!entry) continue;
+      const [idx, avail] = entry;
+      const wait = Math.max(0, Math.ceil(avail - now));
+      if (wait > maxWaitMs) continue;
+
+      const count = this.laneMessageCounts[idx] ?? 0;
+      // Prefer: lower wait, then lower message count as tiebreaker
+      if (wait < bestWait || (wait === bestWait && count < bestCount)) {
+        bestWait = wait;
+        bestCount = count;
+        bestLane = idx;
+        if (wait === 0 && count === 0) break; // can't do better
+      }
+    }
+
+    if (bestLane === -1) return null;
+    return { laneIndex: bestLane, waitMs: bestWait };
   }
 
   /** Allocate a contiguous block of lanes for multi-lane messages. */
