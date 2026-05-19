@@ -134,8 +134,6 @@ export const rendererLayout = {
     extreme: 1.35,
   } as const,
   // ── Extracted magic numbers ──
-  /** Horizontal entry offset range for scroll mode (spread across lanes) */
-  entryOffsetRangeMs: 200,
   /** Random jitter added to lane delay (ms) */
   laneJitterMs: 30,
   /** Author section vertical gap in px (photo + name height) */
@@ -178,7 +176,7 @@ export const rendererLayout = {
  * duration for all comments), this returns a width-proportional duration
  * so every comment scrolls at the same velocity.
  *
- * @param totalDistance  — entryOffset + screenWidth + textWidth + exitPadding
+ * @param totalDistance  — screenWidth + textWidth + exitPadding
  * @param velocity       — constant scroll velocity in px/sec
  * @returns Animation duration in milliseconds, clamped to [durationMin, durationMax]
  */

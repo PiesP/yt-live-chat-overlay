@@ -45,6 +45,8 @@ interface CanvasMessage {
   y: number;
   pausedDuration: number;
   laneIndex: number;
+  /** Time stagger delay (ms) applied to this message's start. */
+  staggerDelay: number;
 }
 
 // ── Renderer ─────────────────────────────────────────────────────────────────
@@ -382,6 +384,14 @@ export class CanvasRenderer extends RendererBase {
   private static readonly FIXED_MODE_MIN_INTERVAL_MS = 100;
   private lastFixedModeEnqueueTime = 0;
 
+  /**
+   * Per-lane stagger interval (ms) for scroll/reverse modes.
+   * Higher lanes start slightly later, spreading messages evenly
+   * across time without causing diagonal entry patterns.
+   * 5ms × 20 lanes = 100ms total spread.
+   */
+  private static readonly LANE_STAGGER_MS = 5;
+
   private enqueueMessage(message: ChatMessage, now: number): void {
     const dims = this.overlay.getDimensions();
     if (!dims) return;
@@ -406,14 +416,10 @@ export class CanvasRenderer extends RendererBase {
       ? this.getEffectiveBacklogSpeed()
       : this.getEffectiveSpeedPxPerSec();
 
-    const entryOffset =
-      mode === 'scroll'
-        ? dims.laneCount > 1
-          ? Math.round(
-              (placement.lane.index / (dims.laneCount - 1)) * rendererLayout.entryOffsetRangeMs
-            )
-          : 100
-        : 0;
+    // Time stagger: higher lanes start slightly later so messages don't
+    // all launch simultaneously. The delay is proportional to lane index
+    // and kept small (max ~100ms spread) to avoid visible diagonal patterns.
+    const staggerDelay = placement.lane.index * CanvasRenderer.LANE_STAGGER_MS;
 
     let effectiveDuration: number;
     if (mode === 'scroll' || mode === 'reverse') {
@@ -421,10 +427,11 @@ export class CanvasRenderer extends RendererBase {
         this.settings.fontSize * rendererLayout.exitPaddingScale,
         rendererLayout.exitPaddingMin
       );
+      // All lanes use the same total distance → uniform scroll speed.
+      // The old per-lane entryOffset was removed because it caused different
+      // lanes to move at different speeds, producing diagonal entry patterns.
       const totalDistance =
-        mode === 'reverse'
-          ? dims.width * 2 + exitPadding
-          : entryOffset + dims.width + msgWidth + exitPadding;
+        mode === 'reverse' ? dims.width * 2 + exitPadding : dims.width + msgWidth + exitPadding;
       effectiveDuration =
         speed > 0 ? computeDliosDuration(totalDistance, speed) : rendererLayout.durationMin;
     } else {
@@ -436,20 +443,21 @@ export class CanvasRenderer extends RendererBase {
     // For backlog messages, pass the speed multiplier so the lane allocator
     // can account for the faster scroll speed when computing lane occupancy.
     const backlogSpeed = message.isBacklog ? this.settings.backlogSpeedMultiplier : 1;
-    this.laneAllocator.commitPlacement(placement, msgWidth, now, backlogSpeed);
+    this.laneAllocator.commitPlacement(placement, msgWidth, now + staggerDelay, backlogSpeed);
 
-    const startX =
-      mode === 'scroll' ? dims.width + entryOffset : -(msgWidth + rendererLayout.exitPaddingMin);
+    // All messages in scroll mode start from the same vertical line.
+    const startX = mode === 'scroll' ? dims.width : -(msgWidth + rendererLayout.exitPaddingMin);
 
     this.activateMessage(
       message,
-      now,
+      now + staggerDelay,
       msgWidth,
       msgHeight,
       laneY,
       effectiveDuration,
       startX,
-      placement.lane.index
+      placement.lane.index,
+      staggerDelay
     );
   }
 
@@ -486,7 +494,8 @@ export class CanvasRenderer extends RendererBase {
     laneY: number,
     duration?: number,
     startX?: number,
-    laneIndex?: number
+    laneIndex?: number,
+    staggerDelay = 0
   ): void {
     const cm: CanvasMessage = {
       message,
@@ -499,6 +508,7 @@ export class CanvasRenderer extends RendererBase {
       y: laneY,
       pausedDuration: 0,
       laneIndex: laneIndex ?? 0,
+      staggerDelay,
     };
 
     this.activeMessages.push(cm);
