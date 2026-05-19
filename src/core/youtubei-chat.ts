@@ -278,7 +278,7 @@ const extractJsonObjectFromHtml = (html: string, markers: readonly string[]): Js
         continue;
       }
 
-      if (current === '"' || current === "'" || current === '`') {
+      if (current === '"' || current === "'") {
         if (!inString) {
           inString = true;
           stringDelimiter = current;

@@ -232,7 +232,7 @@ export function parseHexColor(colorString: string): RgbColor | null {
 }
 
 /** Parse any supported color string (hex or rgb/rgba) to RgbColor. */
-function parseAnyColor(colorString: string): RgbColor | null {
+export function parseAnyColor(colorString: string): RgbColor | null {
   if (colorString.startsWith('#')) return parseHexColor(colorString);
   return parseRgbColor(colorString);
 }

@@ -9,14 +9,14 @@ import type {
 // ── Shorthand constructors ──────────────────────────────────────────────────
 
 const num = (label: string, key: string, title?: string, modifier?: string): NumberField => ({
-  type: 'number' as const,
+  type: 'number',
   label,
   key,
   ...(title !== undefined ? { title } : {}),
   ...(modifier !== undefined ? { modifier } : {}),
 });
 const chk = (label: string, key: string, title?: string, modifier?: string): CheckboxField => ({
-  type: 'checkbox' as const,
+  type: 'checkbox',
   label,
   key,
   ...(title !== undefined ? { title } : {}),

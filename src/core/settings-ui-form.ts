@@ -444,16 +444,20 @@ export class SettingsUiForm {
       if (!el.name) continue;
 
       if (el.name.startsWith('outline-')) {
-        const key = el.name.slice(8) as Exclude<OutlineSettingKey, 'enabled'>;
-        if (el instanceof HTMLInputElement && el.type === 'checkbox') {
+        const key = el.name.slice(8) as OutlineSettingKey;
+        if (key === 'enabled') {
           partial.outline = {
             ...((partial.outline as Record<string, unknown>) ?? {}),
-            [key]: el.checked,
+            enabled: (el as HTMLInputElement).checked,
           };
         } else {
           partial.outline = {
             ...((partial.outline as Record<string, unknown>) ?? {}),
-            [key]: normalizeOutlineNumericInputValue(key, el.value, 0),
+            [key]: normalizeOutlineNumericInputValue(
+              key as Exclude<OutlineSettingKey, 'enabled'>,
+              el.value,
+              0
+            ),
           };
         }
         continue;
