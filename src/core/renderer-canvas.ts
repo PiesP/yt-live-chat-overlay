@@ -411,34 +411,23 @@ export class CanvasRenderer extends RendererBase {
       effectiveDuration = rendererLayout.topBottomDurationMs;
     }
 
-    let startX: number;
-    if (mode === 'scroll') {
-      startX = dims.width + entryOffset;
-    } else if (mode === 'reverse') {
-      startX = -(msgWidth + rendererLayout.exitPaddingMin);
-    } else {
-      startX = Math.random() * Math.max(1, dims.width - msgWidth);
-    }
-
-    const laneY = this.getLaneY(placement);
+    const laneY = placement.laneY;
 
     this.laneAllocator.commitPlacement(placement, msgWidth, now);
 
-    const cm: CanvasMessage = {
-      message,
-      startTime: now,
-      duration: effectiveDuration,
-      width: msgWidth,
-      height: msgHeight,
-      startX,
-      x: startX,
-      y: laneY,
-      pausedDuration: 0,
-      laneIndex: placement.lane.index,
-    };
+    const startX =
+      mode === 'scroll' ? dims.width + entryOffset : -(msgWidth + rendererLayout.exitPaddingMin);
 
-    this.activeMessages.push(cm);
-    this.observability.onMessageRendered();
+    this.activateMessage(
+      message,
+      now,
+      msgWidth,
+      msgHeight,
+      laneY,
+      effectiveDuration,
+      startX,
+      placement.lane.index
+    );
   }
 
   /** Enqueue a message in top/bottom fixed mode — no lane allocation needed. */
@@ -462,28 +451,35 @@ export class CanvasRenderer extends RendererBase {
         ? dims.height * (1 - this.settings.safeBottom) - msgHeight
         : dims.height * this.settings.safeTop;
 
-    const startX = Math.random() * Math.max(1, dims.width - msgWidth);
+    this.activateMessage(message, now, msgWidth, msgHeight, laneY);
+  }
 
+  /** Finalize and activate a message (shared by scroll/reverse and fixed modes). */
+  private activateMessage(
+    message: ChatMessage,
+    now: number,
+    msgWidth: number,
+    msgHeight: number,
+    laneY: number,
+    duration?: number,
+    startX?: number,
+    laneIndex?: number
+  ): void {
     const cm: CanvasMessage = {
       message,
       startTime: now,
-      duration: rendererLayout.topBottomDurationMs,
+      duration: duration ?? rendererLayout.topBottomDurationMs,
       width: msgWidth,
       height: msgHeight,
-      startX,
-      x: startX,
+      startX: startX ?? 0,
+      x: startX ?? 0,
       y: laneY,
       pausedDuration: 0,
-      laneIndex: 0,
+      laneIndex: laneIndex ?? 0,
     };
 
     this.activeMessages.push(cm);
     this.observability.onMessageRendered();
-  }
-
-  /** Compute lane Y from placement for scroll/reverse modes. */
-  private getLaneY(placement: { laneY: number }): number {
-    return placement.laneY;
   }
 
   // ── Dimension estimation (uses shared + canvas ctx) ──────────────────

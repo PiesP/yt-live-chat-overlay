@@ -37,7 +37,7 @@ interface LaneAllocatorOptions {
  * estimation, and speed-safety heuristics used in earlier implementations.
  */
 export class LaneAllocator {
-  /** Binary min-heap of [laneIndex, availableAtMs] pairs, sorted by availableAtMs */
+  /** 4-ary min-heap of [laneIndex, availableAtMs] pairs, sorted by availableAtMs */
   private heap: [number, number][] = [];
   /** Reverse map: laneIndex → heap index for O(1) lookup and update */
   private laneIndexToHeapIndex: Map<number, number> = new Map();
@@ -64,8 +64,8 @@ export class LaneAllocator {
       this.laneIndexToHeapIndex.set(i, i);
       this.laneMessageCounts.push(0);
     }
-    // Build min-heap
-    for (let i = Math.floor(this.heap.length / 2) - 1; i >= 0; i--) {
+    // Build min-heap (4-ary): start from last non-leaf node
+    for (let i = Math.floor((this.heap.length - 2) / 4); i >= 0; i--) {
       this.siftDown(i);
     }
   }
@@ -307,8 +307,8 @@ export class LaneAllocator {
         this.heap[i] = [entry[0], entry[1] + offsetMs];
       }
     }
-    // Rebuild heap invariant after bulk update
-    for (let i = Math.floor((this.heap.length - 1) / 4); i >= 0; i--) {
+    // Rebuild heap invariant after bulk update (4-ary)
+    for (let i = Math.floor((this.heap.length - 2) / 4); i >= 0; i--) {
       this.siftDown(i);
     }
   }
