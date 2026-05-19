@@ -105,6 +105,16 @@ export const PANES: PaneDef[] = [
             'superChatOpacity',
             'Background opacity of Super Chat cards'
           ),
+          num(
+            'SuperChat Max Lines',
+            'superChatMaxBodyLines',
+            'Max body text lines before truncation (2-10)'
+          ),
+          num(
+            'Membership Max Lines',
+            'membershipMaxBodyLines',
+            'Max body text lines for membership messages (1-5)'
+          ),
           chk(
             'Preserve User Colors',
             'preserveUserColor',

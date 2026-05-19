@@ -193,6 +193,10 @@ export interface OverlaySettings {
   antiBlockFreeRatio: number;
   /** Preserve author's chosen text color from YouTube chat */
   preserveUserColor: boolean;
+  /** Maximum body text lines for SuperChat cards (2-10, default 5) */
+  superChatMaxBodyLines: number;
+  /** Maximum body text lines for Membership messages (1-5, default 3) */
+  membershipMaxBodyLines: number;
 }
 
 /**

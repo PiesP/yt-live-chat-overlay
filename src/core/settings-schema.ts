@@ -75,6 +75,8 @@ const ROOT_SETTING_META: Record<RootScalarSettingKey, SettingMeta> = {
   antiBlockEnabled: { type: 'boolean', visual: false },
   antiBlockFreeRatio: { type: 'number', visual: false },
   preserveUserColor: { type: 'boolean', visual: true },
+  superChatMaxBodyLines: { type: 'number', visual: true },
+  membershipMaxBodyLines: { type: 'number', visual: true },
 };
 
 /**
@@ -116,7 +118,9 @@ type SettingsLimitKey =
   | 'backlogMaxRate'
   | 'backlogSpeedMultiplier'
   | 'backlogRecentMinutes'
-  | 'antiBlockFreeRatio';
+  | 'antiBlockFreeRatio'
+  | 'superChatMaxBodyLines'
+  | 'membershipMaxBodyLines';
 
 export const SETTINGS_LIMITS = {
   speedPxPerSec: { min: 50, max: 500, step: 10 },
@@ -136,6 +140,8 @@ export const SETTINGS_LIMITS = {
   backlogSpeedMultiplier: { min: 1, max: 5, step: 0.5 },
   backlogRecentMinutes: { min: 1, max: 30, step: 1 },
   antiBlockFreeRatio: { min: 0, max: 0.5, step: 0.05 },
+  superChatMaxBodyLines: { min: 2, max: 10, step: 1 },
+  membershipMaxBodyLines: { min: 1, max: 5, step: 1 },
 } as const satisfies Record<SettingsLimitKey, NumericSettingLimit>;
 
 export const STORAGE_KEY = 'yt-live-chat-overlay-settings';
@@ -202,6 +208,8 @@ export const DEFAULT_SETTINGS = {
   antiBlockEnabled: true,
   antiBlockFreeRatio: 0.15,
   preserveUserColor: false,
+  superChatMaxBodyLines: 5,
+  membershipMaxBodyLines: 3,
 } as const satisfies Readonly<OverlaySettings>;
 
 // ── Color validation ────────────────────────────────────────────────────────────

@@ -90,10 +90,6 @@ export class CanvasRenderer extends RendererBase {
   private static readonly TEXT_BITMAP_MAX = 200;
 
   private static readonly FADE_DURATION_MS = 500;
-  /** Maximum body text lines for SuperChat cards before ellipsis truncation. */
-  private static readonly SUPER_CHAT_MAX_BODY_LINES = 5;
-  /** Maximum body text lines for Membership messages before ellipsis truncation. */
-  private static readonly MEMBERSHIP_MAX_BODY_LINES = 3;
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
     super(overlay, settings);
@@ -859,7 +855,7 @@ export class CanvasRenderer extends RendererBase {
         textX,
         msgY,
         bodyMaxWidth,
-        CanvasRenderer.SUPER_CHAT_MAX_BODY_LINES,
+        this.settings.superChatMaxBodyLines,
         '#ffffff',
         alpha,
         fontSize
@@ -924,7 +920,7 @@ export class CanvasRenderer extends RendererBase {
         textX,
         textY,
         bodyMaxWidth,
-        CanvasRenderer.MEMBERSHIP_MAX_BODY_LINES,
+        this.settings.membershipMaxBodyLines,
         '#ffffff',
         1,
         fontSize

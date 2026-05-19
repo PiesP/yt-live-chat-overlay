@@ -24,6 +24,8 @@ const ROOT_ROUNDED_KEYS = new Set<RootScalarSettingKey>([
   'minTextLength',
   'laneSpacing',
   'authorRateLimitMaxMessages',
+  'superChatMaxBodyLines',
+  'membershipMaxBodyLines',
 ]);
 
 import type { FieldDef, PaneDef } from '@core/settings-ui-types';
