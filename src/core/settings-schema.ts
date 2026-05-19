@@ -200,7 +200,7 @@ export const DEFAULT_SETTINGS = {
   showAuthor: DEFAULT_SHOW_AUTHOR,
   colors: DEFAULT_COLORS,
   outline: DEFAULT_OUTLINE,
-  laneSpacing: 3,
+  laneSpacing: -12,
   showDebugOverlay: false,
   authorRateLimitEnabled: true,
   authorRateLimitWindowMs: 5000,
