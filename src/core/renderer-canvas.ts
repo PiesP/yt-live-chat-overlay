@@ -121,10 +121,8 @@ export class CanvasRenderer extends RendererBase {
       this.observability.onMessageDropped('queue_overflow');
     }
 
-    const insertIndex = this.pendingQueue.findIndex(
-      (q) => CanvasRenderer.getMessagePriority(q) < priority
-    );
-    if (insertIndex === -1) {
+    const insertIndex = this.findQueueInsertIndex(priority);
+    if (insertIndex === this.pendingQueue.length) {
       this.pendingQueue.push(message);
     } else {
       this.pendingQueue.splice(insertIndex, 0, message);
@@ -135,6 +133,23 @@ export class CanvasRenderer extends RendererBase {
       const next = this.pendingQueue.shift();
       if (next) this.enqueueMessage(next, performance.now());
     }
+  }
+
+  /** Binary search for insertion point in the priority-sorted pending queue. */
+  private findQueueInsertIndex(priority: number): number {
+    const queue = this.pendingQueue;
+    let lo = 0;
+    let hi = queue.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      const midMsg = queue[mid];
+      if (midMsg && CanvasRenderer.getMessagePriority(midMsg) >= priority) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
+    }
+    return lo;
   }
 
   trimBackgroundQueue(): void {
