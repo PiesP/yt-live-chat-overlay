@@ -29,7 +29,7 @@ import { createLogger } from '@core/logging';
 import type { Overlay } from '@core/overlay';
 import { RendererBase, type RendererUpdateOptions } from '@core/renderer-base';
 import { estimateMessageDimensions as sharedEstimateDimensions } from '@core/renderer-shared';
-import { getFontString, measureTextHeight } from '@core/text-measure';
+import { getFontString, measureTextHeight, wrapTextLines } from '@core/text-measure';
 
 const log = createLogger('RendererCanvas');
 
@@ -90,6 +90,8 @@ export class CanvasRenderer extends RendererBase {
   private static readonly TEXT_BITMAP_MAX = 200;
 
   private static readonly FADE_DURATION_MS = 500;
+  /** Maximum body text lines for SuperChat cards before ellipsis truncation. */
+  private static readonly SUPER_CHAT_MAX_BODY_LINES = 5;
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
     super(overlay, settings);
@@ -705,6 +707,46 @@ export class CanvasRenderer extends RendererBase {
     }
   }
 
+  // ── Wrapped text rendering ────────────────────────────────────────────
+
+  /**
+   * Render text with word-wrapping, respecting `maxWidth` and `maxLines`.
+   *
+   * Uses the same `wrapTextLines()` algorithm as the dimension estimator so
+   * rendered output always matches the predicted layout.
+   *
+   * @returns The Y position after the last rendered line.
+   */
+  private renderWrappedText(
+    ctx: CanvasRenderingContext2D,
+    text: string,
+    x: number,
+    y: number,
+    maxWidth: number,
+    maxLines: number,
+    color: string,
+    alpha: number,
+    fontSize: number
+  ): number {
+    const font = this.getFont(fontSize);
+    const allLines = wrapTextLines(text, font, maxWidth);
+    const lineHeight = Math.ceil(measureTextHeight(font, fontSize));
+    const lines = allLines.length > maxLines ? allLines.slice(0, maxLines) : allLines;
+
+    let cursorY = y;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i] ?? '';
+      const isLastLine = i === lines.length - 1;
+      const isTruncated = isLastLine && allLines.length > maxLines;
+
+      const renderText = isTruncated ? `${line}\u2026` : line;
+      this.renderSegment(ctx, renderText, x, cursorY, color, alpha, fontSize);
+      cursorY += lineHeight;
+    }
+
+    return cursorY;
+  }
+
   // ── Regular message ──────────────────────────────────────────────────
 
   private renderRegular(
@@ -804,12 +846,22 @@ export class CanvasRenderer extends RendererBase {
     ctx.fillStyle = '#ffffff';
     ctx.fillText(superChat.amount, textX + 12, badgeY + badgeHeight / 2);
 
-    // Body text — spaced below badge
+    // Body text — spaced below badge, wrapped to card width
     let textBottomY = badgeY + badgeHeight;
     if (message.text) {
+      const bodyMaxWidth = w - scPad.paddingH * 2;
       const msgY = textBottomY + spacing.xs;
-      this.renderSegment(ctx, message.text, textX, msgY, '#ffffff', alpha, fontSize);
-      textBottomY = msgY + Math.ceil(measureTextHeight(this.getFont(fontSize), fontSize));
+      textBottomY = this.renderWrappedText(
+        ctx,
+        message.text,
+        textX,
+        msgY,
+        bodyMaxWidth,
+        CanvasRenderer.SUPER_CHAT_MAX_BODY_LINES,
+        '#ffffff',
+        alpha,
+        fontSize
+      );
     }
 
     // Sticker — positioned below text, with consistent gap
