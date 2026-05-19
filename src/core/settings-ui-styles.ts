@@ -346,4 +346,19 @@ export const SETTINGS_UI_STYLES = `
       .yt-chat-overlay-settings-confirm-ok:hover {
         background: ${colors.ui.dangerHover};
       }
+      /* Toast notification */
+      .yt-chat-overlay-settings-toast {
+        position: absolute;
+        bottom: 60px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(0, 0, 0, 0.85);
+        color: #fff;
+        font: 12px/1.4 sans-serif;
+        padding: 6px 14px;
+        border-radius: 6px;
+        z-index: 2;
+        pointer-events: none;
+        animation: yt-overlay-fade-in 0.15s ease-out;
+      }
 `;
