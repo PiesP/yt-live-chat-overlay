@@ -61,6 +61,7 @@ export class LaneAllocator {
     this.heap = [];
     this.laneIndexToHeapIndex = new Map();
     this.laneMessageCounts = [];
+    this.backlogLaneEnd = -1;
     if (!dimensions) {
       this.laneHeight = 0;
       this.laneCount = 0;
@@ -68,8 +69,13 @@ export class LaneAllocator {
     }
     this.laneHeight = dimensions.laneHeight;
     this.laneCount = dimensions.laneCount;
+    // Stagger initial lane availability so the first messages don't all
+    // start at exactly the same time. Each lane gets a small offset
+    // proportional to its index (max ~100ms spread across all lanes).
+    const now = performance.now();
+    const staggerMs = Math.min(100, Math.max(10, 200 / dimensions.laneCount));
     for (let i = 0; i < dimensions.laneCount; i++) {
-      this.heap.push([i, 0]);
+      this.heap.push([i, now + i * staggerMs]);
       this.laneIndexToHeapIndex.set(i, i);
       this.laneMessageCounts.push(0);
     }

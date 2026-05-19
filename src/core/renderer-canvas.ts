@@ -319,13 +319,19 @@ export class CanvasRenderer extends RendererBase {
       }
 
       let opacity = this.settings.opacity;
-      if (!isScrolling) {
-        if (elapsed < CanvasRenderer.FADE_DURATION_MS) {
-          opacity *= elapsed / CanvasRenderer.FADE_DURATION_MS;
-        } else if (elapsed > msg.duration - CanvasRenderer.FADE_DURATION_MS) {
-          opacity *= Math.max(0, (msg.duration - elapsed) / CanvasRenderer.FADE_DURATION_MS);
-        }
+
+      // Fade-in for the first moment a message appears on screen.
+      // In scroll/reverse modes this applies only to backlog messages to
+      // soften the initial visual burst. In top/bottom modes it applies
+      // to all messages.
+      const shouldFadeIn = !isScrolling || (msg.message.isBacklog ?? false);
+      if (shouldFadeIn && elapsed < CanvasRenderer.FADE_DURATION_MS) {
+        opacity *= elapsed / CanvasRenderer.FADE_DURATION_MS;
       }
+      if (!isScrolling && elapsed > msg.duration - CanvasRenderer.FADE_DURATION_MS) {
+        opacity *= Math.max(0, (msg.duration - elapsed) / CanvasRenderer.FADE_DURATION_MS);
+      }
+
       if (msg.message.isBacklog) opacity *= 0.5;
 
       const ageRatio = Math.min(1, elapsed / rendererLayout.maxMessageAgeMs);
