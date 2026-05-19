@@ -92,6 +92,8 @@ export class CanvasRenderer extends RendererBase {
   private static readonly FADE_DURATION_MS = 500;
   /** Maximum body text lines for SuperChat cards before ellipsis truncation. */
   private static readonly SUPER_CHAT_MAX_BODY_LINES = 5;
+  /** Maximum body text lines for Membership messages before ellipsis truncation. */
+  private static readonly MEMBERSHIP_MAX_BODY_LINES = 3;
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
     super(overlay, settings);
@@ -915,7 +917,18 @@ export class CanvasRenderer extends RendererBase {
     }
 
     if (msg.message.text) {
-      this.renderSegment(ctx, msg.message.text, textX, textY, '#ffffff', 1, fontSize);
+      const bodyMaxWidth = w - rendererLayout.paddingH * 2;
+      this.renderWrappedText(
+        ctx,
+        msg.message.text,
+        textX,
+        textY,
+        bodyMaxWidth,
+        CanvasRenderer.MEMBERSHIP_MAX_BODY_LINES,
+        '#ffffff',
+        1,
+        fontSize
+      );
     }
   }
 
