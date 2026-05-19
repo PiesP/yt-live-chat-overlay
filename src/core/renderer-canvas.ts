@@ -68,6 +68,14 @@ export class CanvasRenderer extends RendererBase {
   private readonly textWidthCache = new Map<string, number>();
   private readonly textHeightCache = new Map<string, number>();
 
+  /**
+   * Text bitmap cache: pre-rendered text with outline as offscreen canvas.
+   * Key = `${font}|${text}|${color}|${strokeWidth}|${strokeColor}`.
+   * On cache hit, drawImage() replaces fillText()+strokeText() in the hot path.
+   */
+  private readonly textBitmapCache = new Map<string, HTMLCanvasElement>();
+  private static readonly TEXT_BITMAP_MAX = 200;
+
   private static readonly FADE_DURATION_MS = 500;
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
@@ -530,16 +538,83 @@ export class CanvasRenderer extends RendererBase {
     alpha: number,
     fontSize: number
   ): void {
+    const outline = this.settings.outline;
+    const font = this.getFont(fontSize);
+
+    // Try bitmap cache first (includes outline rendering)
+    if (outline.enabled && outline.widthPx > 0 && outline.opacity > 0) {
+      const strokeWidth = Math.max(0.5, outline.widthPx * 0.85);
+      const strokeColor = computeOutlineColor(color, Math.min(1, outline.opacity));
+      const key = `${font}|${text}|${color}|${strokeWidth.toFixed(1)}|${strokeColor}`;
+      const bitmap = this.textBitmapCache.get(key);
+      if (bitmap) {
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.drawImage(bitmap, x, y);
+        ctx.restore();
+        return;
+      }
+
+      // Cache miss — render to offscreen canvas and cache
+      this.cacheTextBitmap(key, text, font, color, strokeWidth, strokeColor);
+    }
+
+    // Fallback: direct fillText + strokeText
     ctx.save();
     ctx.globalAlpha = alpha;
-    ctx.font = this.getFont(fontSize);
+    ctx.font = font;
     ctx.textBaseline = 'top';
-
     this.strokeTextOutline(ctx, text, x, y, color);
-
     ctx.fillStyle = color;
     ctx.fillText(text, x, y);
     ctx.restore();
+  }
+
+  /** Render text with outline to an offscreen canvas and store in bitmap cache. */
+  private cacheTextBitmap(
+    key: string,
+    text: string,
+    font: string,
+    fillColor: string,
+    strokeWidth: number,
+    strokeColor: string
+  ): void {
+    if (this.textBitmapCache.size >= CanvasRenderer.TEXT_BITMAP_MAX) {
+      const oldestKey = this.textBitmapCache.keys().next().value;
+      if (oldestKey) this.textBitmapCache.delete(oldestKey);
+    }
+
+    const ctx = this.ctx;
+    if (!ctx) return;
+
+    ctx.save();
+    ctx.font = font;
+    const metrics = ctx.measureText(text);
+    const width = Math.ceil(metrics.width) + Math.ceil(strokeWidth) + 2;
+    const height =
+      Math.ceil(ctx.measureText('Mg').fontBoundingBoxAscent ?? 0) +
+      Math.ceil(ctx.measureText('Mg').fontBoundingBoxDescent ?? 0) +
+      Math.ceil(strokeWidth) +
+      2;
+    ctx.restore();
+
+    const offscreen = document.createElement('canvas');
+    offscreen.width = width;
+    offscreen.height = height;
+    const offCtx = offscreen.getContext('2d');
+    if (!offCtx) return;
+
+    offCtx.font = font;
+    offCtx.textBaseline = 'top';
+    offCtx.strokeStyle = strokeColor;
+    offCtx.lineWidth = strokeWidth;
+    offCtx.lineJoin = 'round';
+    offCtx.lineCap = 'round';
+    offCtx.strokeText(text, strokeWidth / 2 + 1, strokeWidth / 2 + 1);
+    offCtx.fillStyle = fillColor;
+    offCtx.fillText(text, strokeWidth / 2 + 1, strokeWidth / 2 + 1);
+
+    this.textBitmapCache.set(key, offscreen);
   }
 
   /** Draw crisp auto-contrast outline on text using current font and textBaseline. */
@@ -865,6 +940,7 @@ export class CanvasRenderer extends RendererBase {
     this.backlogPaused = false;
     this.textWidthCache.clear();
     this.textHeightCache.clear();
+    this.textBitmapCache.clear();
   }
 
   protected onDestroy(): void {
@@ -876,5 +952,6 @@ export class CanvasRenderer extends RendererBase {
     this.emojiCache.clear();
     this.authorPhotoCache.clear();
     this.stickerCache.clear();
+    this.textBitmapCache.clear();
   }
 }
