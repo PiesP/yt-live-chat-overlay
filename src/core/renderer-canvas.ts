@@ -51,6 +51,17 @@ interface CanvasMessage {
 
 // ── Renderer ─────────────────────────────────────────────────────────────────
 
+/** Convert an rgb(...) or #rrggbb color string to rgba(...) with the given alpha. */
+function rgbaHex(color: string, alpha: number): string {
+  if (color.startsWith('rgb(')) {
+    return `rgba${color.slice(3, -1)}, ${alpha})`;
+  }
+  const r = parseInt(color.slice(1, 3), 16);
+  const g = parseInt(color.slice(3, 5), 16);
+  const b = parseInt(color.slice(5, 7), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 export class CanvasRenderer extends RendererBase {
   private canvas: HTMLCanvasElement | null = null;
   private ctx: CanvasRenderingContext2D | null = null;
@@ -171,7 +182,6 @@ export class CanvasRenderer extends RendererBase {
     this.pendingQueue.length = rendererLayout.backgroundQueueMax;
   }
 
-  /** BUG-1 fix: propagate _options to super */
   updateSettings(settings: OverlaySettings, options?: RendererUpdateOptions): void {
     super.updateSettings(settings, options);
   }
@@ -311,7 +321,6 @@ export class CanvasRenderer extends RendererBase {
         const travelDistance = canvas.width + msg.width + rendererLayout.exitPaddingMin;
         msg.x = msg.startX - progress * travelDistance;
       } else if (mode === 'reverse') {
-        // BUG-4 fix: consistent exitPadding usage
         const travelDistance = canvas.width * 2 + rendererLayout.exitPaddingMin;
         msg.x = -msg.width + progress * travelDistance;
       }
@@ -756,9 +765,9 @@ export class CanvasRenderer extends RendererBase {
     const baseColor = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
 
     const grad = ctx.createLinearGradient(x, y, x, y + h);
-    grad.addColorStop(0, CanvasRenderer.rgbaHex(baseColor, topAlpha));
-    grad.addColorStop(0.48, CanvasRenderer.rgbaHex(baseColor, superChatAlpha));
-    grad.addColorStop(1, CanvasRenderer.rgbaHex(baseColor, bottomAlpha));
+    grad.addColorStop(0, rgbaHex(baseColor, topAlpha));
+    grad.addColorStop(0.48, rgbaHex(baseColor, superChatAlpha));
+    grad.addColorStop(1, rgbaHex(baseColor, bottomAlpha));
     ctx.fillStyle = grad;
     this.roundRect(ctx, x, y, w, h, 6);
     ctx.fill();
@@ -928,19 +937,6 @@ export class CanvasRenderer extends RendererBase {
     ctx.lineTo(x, y + r);
     ctx.arcTo(x, y, x + r, y, r);
     ctx.closePath();
-  }
-
-  private static rgbaHex(color: string, alpha: number): string {
-    // Fast path: rgb(r, g, b) → rgba(r, g, b, a)
-    const prefix = 'rgb(';
-    if (color.startsWith(prefix)) {
-      return `rgba${color.slice(3, -1)}, ${alpha})`;
-    }
-    // Fallback: hex color
-    const r = parseInt(color.slice(1, 3), 16);
-    const g = parseInt(color.slice(3, 5), 16);
-    const b = parseInt(color.slice(5, 7), 16);
-    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
   }
 
   // ── Abstract hook implementations ────────────────────────────────────
