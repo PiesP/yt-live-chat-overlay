@@ -125,8 +125,8 @@ export class LaneAllocator {
     return this.laneHeight;
   }
 
-  getLaneY(laneIndex: number): number {
-    return this.options.safeTop + laneIndex * this.laneHeight;
+  getLaneY(laneIndex: number, viewportHeight: number): number {
+    return viewportHeight * this.options.safeTop + laneIndex * this.laneHeight;
   }
 
   findPlacement(
@@ -172,7 +172,7 @@ export class LaneAllocator {
     return {
       lane,
       waitMs: result.waitMs,
-      laneY: this.getLaneY(result.laneIndex),
+      laneY: this.getLaneY(result.laneIndex, _dimensions.height),
     };
   }
 
