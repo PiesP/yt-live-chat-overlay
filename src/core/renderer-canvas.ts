@@ -79,7 +79,7 @@ export class CanvasRenderer extends RendererBase {
       'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none';
     if (container) container.appendChild(canvas);
     this.canvas = canvas;
-    this.ctx = canvas.getContext('2d');
+    this.ctx = canvas.getContext('2d', { alpha: false });
 
     const dims = overlay.getDimensions();
     this.applyDevicePixelRatio(dims);

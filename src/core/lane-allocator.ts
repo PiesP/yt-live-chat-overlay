@@ -12,7 +12,6 @@ interface LaneAllocatorOptions {
   readonly getEffectiveSpeedPxPerSec: () => number;
   readonly getDanmakuMode: () => DanmakuMode;
   readonly safeTop: number;
-  readonly laneSpacing: number;
 }
 
 /**
@@ -55,7 +54,7 @@ export class LaneAllocator {
       this.laneCount = 0;
       return;
     }
-    this.laneHeight = dimensions.laneHeight + this.options.laneSpacing;
+    this.laneHeight = dimensions.laneHeight;
     this.laneCount = dimensions.laneCount;
     for (let i = 0; i < dimensions.laneCount; i++) {
       this.heap.push([i, 0]);

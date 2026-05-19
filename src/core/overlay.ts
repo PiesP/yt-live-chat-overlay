@@ -6,7 +6,7 @@
  */
 
 import type { OverlayDimensions, OverlaySettings } from '@app-types';
-import { rendererLayout } from '@core/design-tokens';
+import { rendererLayout, spacing } from '@core/design-tokens';
 import {
   ensurePlayerPositioning,
   findPlayerContainerElement,
@@ -31,11 +31,17 @@ const calculateOverlayDimensions = (
   }
 
   // Base lane height for dynamic allocation.
-  // Single-line messages (without author) use 1 lane (~1.2x fontSize).
+  // Single-line messages (without author) use 1 lane.
   // Two-line messages (with author info) use 2+ lanes dynamically.
-  // line-height: 1.1 is set on message elements so rendered height stays
-  // within one lane slot at all supported font sizes (18-40 px).
-  const laneHeight = settings.fontSize * rendererLayout.laneHeightMultiplier + settings.laneSpacing;
+  // The lane height formula mirrors estimateMessageDimensions:
+  //   laneHeight = fontSize * textRatio + paddingV + laneSpacing
+  // where textRatio (1.25) approximates measureTextHeight/fontSize and
+  // paddingV (spacing.sm*2 = 16) matches the vertical padding in
+  // estimateMessageDimensions. This keeps messages within 1 lane slot
+  // at all supported font sizes (14-50 px).
+  const paddingV = spacing.sm * 2;
+  const laneHeight =
+    settings.fontSize * rendererLayout.laneHeightMultiplier + paddingV + settings.laneSpacing;
   const usableHeight = height * (1 - settings.safeTop - settings.safeBottom);
   const laneCount = Math.max(1, Math.floor(usableHeight / laneHeight));
 

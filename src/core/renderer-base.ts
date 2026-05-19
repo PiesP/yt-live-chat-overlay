@@ -58,7 +58,6 @@ export abstract class RendererBase {
       getEffectiveSpeedPxPerSec: () => this.getEffectiveSpeedPxPerSec(),
       getDanmakuMode: () => this.settings.danmakuMode,
       safeTop: this.settings.safeTop,
-      laneSpacing: this.settings.laneSpacing,
     });
     this.laneAllocator.reset(this.overlay.getDimensions());
 
