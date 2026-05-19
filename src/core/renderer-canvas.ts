@@ -66,7 +66,6 @@ export class CanvasRenderer extends RendererBase {
 
   /** Text measurement caches (cleared on settings/font change) */
   private readonly textWidthCache = new Map<string, number>();
-  private readonly textHeightCache = new Map<string, number>();
 
   /**
    * Text bitmap cache: pre-rendered text with outline as offscreen canvas.
@@ -587,12 +586,14 @@ export class CanvasRenderer extends RendererBase {
     ctx.save();
     ctx.font = font;
     const metrics = ctx.measureText(text);
-    const width = Math.ceil(metrics.width) + Math.ceil(strokeWidth) + 2;
-    const height =
-      Math.ceil(ctx.measureText('Mg').fontBoundingBoxAscent ?? 0) +
-      Math.ceil(ctx.measureText('Mg').fontBoundingBoxDescent ?? 0) +
-      Math.ceil(strokeWidth) +
-      2;
+    const bbWidth =
+      Math.abs(metrics.actualBoundingBoxLeft) + Math.abs(metrics.actualBoundingBoxRight);
+    const textWidth = bbWidth > 0 ? Math.ceil(bbWidth) : Math.ceil(metrics.width);
+    const width = textWidth + Math.ceil(strokeWidth) + 2;
+    const mgMetrics = ctx.measureText('Mg');
+    const ascent = mgMetrics.actualBoundingBoxAscent ?? mgMetrics.fontBoundingBoxAscent ?? 0;
+    const descent = mgMetrics.actualBoundingBoxDescent ?? mgMetrics.fontBoundingBoxDescent ?? 0;
+    const height = Math.ceil(ascent) + Math.ceil(descent) + Math.ceil(strokeWidth) + 2;
     ctx.restore();
 
     const offscreen = document.createElement('canvas');
@@ -936,7 +937,6 @@ export class CanvasRenderer extends RendererBase {
     this.pendingQueue.length = 0;
     this.backlogPaused = false;
     this.textWidthCache.clear();
-    this.textHeightCache.clear();
     this.textBitmapCache.clear();
   }
 
