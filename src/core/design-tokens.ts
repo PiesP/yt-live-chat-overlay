@@ -16,15 +16,7 @@ const superChatColors = {
   red: { r: 230, g: 33, b: 23 },
 } as const satisfies Readonly<Record<SuperChatInfo['tier'], RgbColor>>;
 
-export const SUPERCHAT_TIER_KEYS = [
-  'blue',
-  'cyan',
-  'green',
-  'yellow',
-  'orange',
-  'magenta',
-  'red',
-] as const satisfies readonly SuperChatInfo['tier'][];
+export const SUPERCHAT_TIER_KEYS = Object.keys(superChatColors) as Array<SuperChatInfo['tier']>;
 
 const uiColors = {
   background: '#1a1a1a',

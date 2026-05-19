@@ -141,22 +141,9 @@ export const SETTINGS_LIMITS = {
 export const STORAGE_KEY = 'yt-live-chat-overlay-settings';
 export const SETTINGS_VERSION = 1;
 
-type SettingsMigration = (raw: Record<string, unknown>) => Record<string, unknown>;
-
-const MIGRATIONS: Record<number, SettingsMigration> = {
-  // 1: initial version — no migrations yet
-};
-
-/** Apply schema migrations to raw stored settings in order. */
+/** Placeholder for future schema migrations. Currently at version 1. */
 export function migrateSettings(raw: Record<string, unknown>): Record<string, unknown> {
-  const version = (raw._version as number) ?? 1;
-  let current = { ...raw };
-  for (let v = version; v < SETTINGS_VERSION; v++) {
-    const migrate = MIGRATIONS[v];
-    if (migrate) current = migrate(current);
-  }
-  current._version = SETTINGS_VERSION;
-  return current;
+  return { ...raw, _version: SETTINGS_VERSION };
 }
 
 // ── Defaults ────────────────────────────────────────────────────────────────────

@@ -11,10 +11,6 @@
  * - isVideoPaused: video-level pause (video.paused). Drops incoming
  *   messages during pause to prevent queue overflow. Both render loop
  *   and message ingress check this flag.
- *
- * resumeStabilizeUntil was intentionally removed: EMA speed adaptation
- * is always active; the 2-second stabilization window added complexity
- * without measurable benefit.
  */
 
 import type { ChatMessage, OverlaySettings } from '@app-types';
@@ -223,9 +219,7 @@ export abstract class RendererBase {
   protected abstract onPause(): void;
   protected abstract onResume(): void;
   /** Override to react to playback rate changes. No-op by default. */
-  onPlaybackRateChange(_rate: number): void {
-    // Subclass override
-  }
+  protected onPlaybackRateChange(_rate: number): void {}
   protected abstract applyPausedDuration(pausedMs: number): void;
   protected abstract resetState(): void;
   protected abstract onDestroy(): void;
