@@ -209,11 +209,10 @@ export class BacklogInjectionController {
       return text.length >= 3 && !/^[\sㅋㅎㅇㄱ]+$/.test(text);
     };
 
+    // Partition into priority / substantial / other tiers.
     const tier1 = messages.filter(isPriority);
-    const tier1Ids = new Set(tier1.map((m) => m.id).filter((id): id is string => !!id));
-    const tier2 = messages.filter((m) => isSubstantialText(m) && !tier1Ids.has(m.id ?? ''));
-    const tier2Ids = new Set(tier2.map((m) => m.id).filter((id): id is string => !!id));
-    const tier3 = messages.filter((m) => !isPriority(m) && !tier2Ids.has(m.id ?? ''));
+    const tier2 = messages.filter(isSubstantialText);
+    const tier3 = messages.filter((m) => !isPriority(m) && !isSubstantialText(m));
 
     const normalBudget = count < 500 ? Math.floor(count * 0.6) : Math.floor(count * 0.35);
 

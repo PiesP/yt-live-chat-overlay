@@ -114,11 +114,6 @@ export class ObservabilityReporter {
     return { ...this.metrics };
   }
 
-  // get drop counters breakdown
-  getDropBreakdown(): Record<DropReason, number> {
-    return { ...this.dropCounters };
-  }
-
   private refreshDerivedMetrics(): void {
     const now = Date.now();
     const elapsed = now - this.windowStartTime;
