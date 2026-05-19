@@ -2,6 +2,72 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.29.0] - 2026-05-19
+
+### Added
+
+- **Accurate SuperChat text wrapping** — New `measureWrappedLineCount()` in `text-measure.ts` uses Canvas `measureText` with a greedy word-wrapping algorithm to compute exact line counts. Handles explicit newlines and space-separated words correctly, replacing the previous `ceil(totalWidth / maxWidth)` approximation. ([`c462812`](https://github.com/PiesP/yt-live-chat-overlay/commit/c462812))
+- **SuperChat-specific padding tokens** — `rendererLayout.superchat.paddingH` (24px) and `paddingV` (20px) added to `design-tokens.ts`, replacing inline `spacing.md * 2` / `spacing.sm + spacing.md` arithmetic in dimension estimation and rendering. ([`c462812`](https://github.com/PiesP/yt-live-chat-overlay/commit/c462812))
+
+### Fixed
+
+- **trapFocus visibility check** — `settings-ui.ts` used `backdrop.hidden` (HTML attribute) but `setDialogOpen` controls `display` CSS. Changed to `backdrop.style.display === 'none'` for correct state detection. ([`a16fef8`](https://github.com/PiesP/yt-live-chat-overlay/commit/a16fef8))
+- **GM storage type safety** — `settings-storage.ts` `gmAdapter.getItem` now wraps return value in `String()` to ensure type safety when `GM_getValue` returns non-string values. ([`a16fef8`](https://github.com/PiesP/yt-live-chat-overlay/commit/a16fef8))
+- **Unnecessary type casts removed** — `youtubei-chat.ts` removed redundant `window as unknown as { ytcfg?: unknown }` cast (already declared in `globals.d.ts`). `settings-schema.ts` replaced `as unknown as Record<string, unknown>` with explicit spread. `settings-ui-form.ts` replaced `as unknown as RootScalarSettingKey` with `as string as RootScalarSettingKey`. ([`d990151`](https://github.com/PiesP/yt-live-chat-overlay/commit/d990151))
+- **SuperChat dimension estimation accuracy** — `estimateSuperChatDimensions` now uses `rendererLayout.authorSectionHeightPx` for author height (matching `drawAuthorSection` output) instead of recalculating from font metrics. Estimated height now exactly matches rendered height. ([`69db0d8`](https://github.com/PiesP/yt-live-chat-overlay/commit/69db0d8))
+
+### Refactored
+
+- **SuperChat badge-text-sticker layout** — Added `spacing.xs` gap between author section and badge (previously zero gap). Badge height uses `spacing.sm * 2` instead of hardcoded 8. Sticker positioned below actual text bottom instead of `fontSize * 1.4` approximation. All sub-element gaps unified to `spacing.xs`. ([`07ce8ef`](https://github.com/PiesP/yt-live-chat-overlay/commit/07ce8ef))
+- **Color parser consolidation** — `parseRgbColor` and `parseHexColor` merged into single `parseAnyColor` function in `design-tokens.ts` (50 lines → 18 lines). All callers updated. ([`3a9a9c4`](https://github.com/PiesP/yt-live-chat-overlay/commit/3a9a9c4))
+- **Image loading deduplication** — `renderer-canvas.ts` extracted `loadImage()` helper to eliminate duplicate image loading/caching logic across emoji, author photo, and sticker prefetch paths. ([`3a9a9c4`](https://github.com/PiesP/yt-live-chat-overlay/commit/3a9a9c4))
+- **rgbaHex utility extraction** — Moved from `CanvasRenderer` static class method to module-level function in `renderer-canvas.ts` (not renderer-specific). ([`b923626`](https://github.com/PiesP/yt-live-chat-overlay/commit/b923626))
+- **Toast styles moved to CSS** — `showToast` inline styles moved to `.yt-chat-overlay-settings-toast` CSS class in `settings-ui-styles.ts`. ([`df6804e`](https://github.com/PiesP/yt-live-chat-overlay/commit/df6804e))
+- **Backlog sampling simplified** — `backlog-controller.ts` removed redundant ID-based deduplication Sets in `sampleMessages` tier partitioning. `isPriority` and `isSubstantialText` are already mutually exclusive. ([`fb85aa0`](https://github.com/PiesP/yt-live-chat-overlay/commit/fb85aa0))
+- **Backlog controller initialization extracted** — `runtime-session.ts` extracted `ensureBacklogController()` from the 60-line `startChatSource` callback, reducing it to 15 lines. ([`e9f4971`](https://github.com/PiesP/yt-live-chat-overlay/commit/e9f4971))
+- **Author section rendering deduplicated** — `renderer-canvas.ts` extracted `drawAuthorSection()` helper, eliminating ~30 lines of duplicate author photo+name rendering code shared between `renderRegular` and `renderSuperChat`. ([`a16fef8`](https://github.com/PiesP/yt-live-chat-overlay/commit/a16fef8))
+
+### Removed
+
+- **Unused `getDropBreakdown()`** — Removed from `ObservabilityReporter` (no callers). ([`fb85aa0`](https://github.com/PiesP/yt-live-chat-overlay/commit/fb85aa0))
+- **Stale fix comments** — Removed BUG-1/BUG-4 fix comments from `renderer-canvas.ts` (already fixed). ([`b923626`](https://github.com/PiesP/yt-live-chat-overlay/commit/b923626))
+
+## [0.28.0] - 2026-05-19
+
+### Added
+
+- **Backlog density ramp** — Injection rate linearly ramps from 25% to 100% over 4 seconds on startup, avoiding visual flooding. ([`63ad955`](https://github.com/PiesP/yt-live-chat-overlay/commit/63ad955))
+- **Backlog/realtime lane partitioning** — Backlog messages use top half of lanes, realtime messages use bottom half during injection, preventing visual overlap. ([`5ed9e1c`](https://github.com/PiesP/yt-live-chat-overlay/commit/5ed9e1c))
+- **Scroll mode fade-in for backlog** — Backlog messages fade in over 500ms in scroll/reverse modes to soften initial visual burst. Lane stagger on reset spreads messages evenly. ([`c328192`](https://github.com/PiesP/yt-live-chat-overlay/commit/c328192))
+- **Negative lane spacing** — `laneSpacing` now supports negative values (-12 to 20) for tighter lane overlap. Default changed from 3 to -12. ([`9e7bcc8`](https://github.com/PiesP/yt-live-chat-overlay/commit/9e7bcc8), [`1e5e438`](https://github.com/PiesP/yt-live-chat-overlay/commit/1e5e438))
+
+### Fixed
+
+- **Diagonal entry patterns** — Removed per-lane `entryOffset` that caused different lanes to move at different speeds. All messages now start from the same vertical line. ([`668c933`](https://github.com/PiesP/yt-live-chat-overlay/commit/668c933))
+- **Author photo offset and backlog sampling bug** — Fixed incorrect author photo Y offset and backlog sampling edge case. ([`3bc4949`](https://github.com/PiesP/yt-live-chat-overlay/commit/3bc4949))
+- **Lane height computation** — `LaneAllocator` now computes `laneHeight` from actual font metrics instead of hardcoded multiplier, ensuring `msgHeight <= laneHeight` at `laneSpacing >= 0`. ([`e3b2a69`](https://github.com/PiesP/yt-live-chat-overlay/commit/e3b2a69))
+- **Multi-slot allocation removed** — Messages always occupy exactly 1 lane slot. The 2-slot path was removed because it caused visible gaps when `laneHeight` dropped below `msgHeight`. ([`73f0668`](https://github.com/PiesP/yt-live-chat-overlay/commit/73f0668))
+
+### Refactored
+
+- **SuperChat dimension estimation unified** — `estimateSuperChatDimensions` now uses shared `computeSuperChatOpacities` and `resolveSuperChatRgb` from `design-tokens`. `VISUAL_ROOT_KEYS` derived from `ROOT_SETTING_META`. ([`a397a25`](https://github.com/PiesP/yt-live-chat-overlay/commit/a397a25))
+- **Text measurement precision** — Switched from `TextMetrics.width` (advance width) to `actualBoundingBoxLeft + actualBoundingBoxRight` for glyph overshoot accuracy. ([`2e475fe`](https://github.com/PiesP/yt-live-chat-overlay/commit/2e475fe))
+- **4-ary heap** — Lane allocator priority queue converted from binary to 4-ary heap for better cache locality. ([`83da2dc`](https://github.com/PiesP/yt-live-chat-overlay/commit/83da2dc))
+- **Text bitmap cache** — Pre-rendered text with outline stored as offscreen canvas, replacing repeated `fillText()`/`strokeText()` calls in the hot path. ([`463540d`](https://github.com/PiesP/yt-live-chat-overlay/commit/463540d))
+- **Priority queue binary search** — `findQueueInsertIndex` uses binary search for O(log n) insertion into the priority-sorted pending queue. ([`dbc321f`](https://github.com/PiesP/yt-live-chat-overlay/commit/dbc321f))
+- **Weighted lane selection** — Lane selection now prefers lanes with fewer total messages for visual balance. ([`cc1d6cd`](https://github.com/PiesP/yt-live-chat-overlay/commit/cc1d6cd))
+- **Top/bottom mode bypass** — Fixed modes bypass `LaneAllocator` entirely, using direct Y positioning. ([`5a2dfe3`](https://github.com/PiesP/yt-live-chat-overlay/commit/5a2dfe3))
+
+### Performance
+
+- **Canvas alpha disabled** — `alpha: false` on canvas context for GPU compositing savings (reverted in v0.28.0 due to black screen on some GPUs). ([`ab98dc6`](https://github.com/PiesP/yt-live-chat-overlay/commit/ab98dc6))
+
+## [0.27.0] - 2026-05-19
+
+### Refactored
+
+- **Duplicate code consolidation** — Consolidated duplicate code patterns and fixed 4-ary heap build index. ([`d06a2e7`](https://github.com/PiesP/yt-live-chat-overlay/commit/d06a2e7))
+
 ## [0.26.0] - 2026-05-15
 
 ### Added
