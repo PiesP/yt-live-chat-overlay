@@ -38,7 +38,7 @@ const gmAdapter = (): SettingsStorageAdapter | null => {
     getItem(key: string): string | null {
       const value = gmGetValue(key);
       if (value === undefined || value === null) return null;
-      return value;
+      return String(value);
     },
     setItem(key: string, value: string): void {
       gmSetValue(key, value);

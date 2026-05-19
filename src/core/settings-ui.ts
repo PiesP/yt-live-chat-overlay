@@ -399,7 +399,7 @@ export class SettingsUi {
   }
 
   private trapFocus(event: KeyboardEvent): void {
-    if (!this.backdrop || this.backdrop.hidden) {
+    if (!this.backdrop || this.backdrop.style.display === 'none') {
       return;
     }
 

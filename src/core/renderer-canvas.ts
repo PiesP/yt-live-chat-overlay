@@ -721,33 +721,7 @@ export class CanvasRenderer extends RendererBase {
     const textX = x + rendererLayout.paddingH;
     let textY = y + rendererLayout.paddingV;
     if (showAuthor && message.author) {
-      const photo = message.authorPhotoUrl
-        ? this.authorPhotoCache.get(message.authorPhotoUrl)
-        : undefined;
-      if (photo?.complete && photo.naturalWidth > 0) {
-        this.drawAuthorPhoto(ctx, photo, textX, textY);
-      }
-      const nameFont = getFontString(
-        Math.round(fontSize * rendererLayout.authorFontScale),
-        this.settings.fontWeight,
-        this.settings.fontFamily
-      );
-      ctx.font = nameFont;
-      ctx.textBaseline = 'top';
-      this.strokeTextOutline(
-        ctx,
-        message.author,
-        textX + (photo ? rendererLayout.authorPhotoSize + 4 : 0),
-        textY + 6,
-        color
-      );
-      ctx.fillStyle = color;
-      ctx.fillText(
-        message.author,
-        textX + (photo ? rendererLayout.authorPhotoSize + 4 : 0),
-        textY + 6
-      );
-      textY += rendererLayout.authorSectionHeightPx;
+      textY = this.drawAuthorSection(ctx, msg, textX, textY, color);
     }
 
     if (message.content.length > 0) {
@@ -801,32 +775,7 @@ export class CanvasRenderer extends RendererBase {
 
     const showAuthor = this.settings.showAuthor.superChat;
     if (showAuthor && msg.message.author) {
-      const photo = msg.message.authorPhotoUrl
-        ? this.authorPhotoCache.get(msg.message.authorPhotoUrl)
-        : undefined;
-      if (photo?.complete && photo.naturalWidth > 0) {
-        this.drawAuthorPhoto(ctx, photo, textX, contentY);
-      }
-      ctx.font = getFontString(
-        Math.round(fontSize * rendererLayout.authorFontScale),
-        this.settings.fontWeight,
-        this.settings.fontFamily
-      );
-      ctx.textBaseline = 'top';
-      this.strokeTextOutline(
-        ctx,
-        msg.message.author,
-        textX + (photo ? rendererLayout.authorPhotoSize + 4 : 0),
-        contentY + 6,
-        '#ffffff'
-      );
-      ctx.fillStyle = '#ffffff';
-      ctx.fillText(
-        msg.message.author,
-        textX + (photo ? rendererLayout.authorPhotoSize + 4 : 0),
-        contentY + 6
-      );
-      contentY += rendererLayout.authorSectionHeightPx;
+      contentY = this.drawAuthorSection(ctx, msg, textX, contentY, '#ffffff');
     }
 
     const badgeY = contentY;
@@ -914,6 +863,39 @@ export class CanvasRenderer extends RendererBase {
   }
 
   // ── Helpers ──────────────────────────────────────────────────────────
+
+  /** Draw author photo + name section. Returns the Y offset after the section. */
+  private drawAuthorSection(
+    ctx: CanvasRenderingContext2D,
+    msg: CanvasMessage,
+    textX: number,
+    startY: number,
+    color: string
+  ): number {
+    const message = msg.message;
+    if (!message.author) return startY;
+
+    const fontSize = this.settings.fontSize;
+    const photo = message.authorPhotoUrl
+      ? this.authorPhotoCache.get(message.authorPhotoUrl)
+      : undefined;
+    if (photo?.complete && photo.naturalWidth > 0) {
+      this.drawAuthorPhoto(ctx, photo, textX, startY);
+    }
+    const nameX = textX + (photo ? rendererLayout.authorPhotoSize + 4 : 0);
+    const nameY = startY + 6;
+    const nameFont = getFontString(
+      Math.round(fontSize * rendererLayout.authorFontScale),
+      this.settings.fontWeight,
+      this.settings.fontFamily
+    );
+    ctx.font = nameFont;
+    ctx.textBaseline = 'top';
+    this.strokeTextOutline(ctx, message.author, nameX, nameY, color);
+    ctx.fillStyle = color;
+    ctx.fillText(message.author, nameX, nameY);
+    return startY + rendererLayout.authorSectionHeightPx;
+  }
 
   /** Draw an author photo with shadow effects. */
   private drawAuthorPhoto(
