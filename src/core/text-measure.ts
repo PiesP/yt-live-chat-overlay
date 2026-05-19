@@ -83,3 +83,60 @@ export function getFontString(
 ): string {
   return `${weight === 'bold' ? 'bold' : '400'} ${sizePx}px ${fontFamily}`;
 }
+
+/**
+ * Measure the number of wrapped lines a text string will occupy when
+ * constrained to `maxWidth` pixels, using the given font.
+ *
+ * Uses a greedy word-wrapping algorithm: words are accumulated until
+ * adding the next word would exceed `maxWidth`, then a new line starts.
+ * Explicit newlines (\n) in the text are always honoured.
+ *
+ * @param text     - The text to measure.
+ * @param font     - CSS font string (e.g. "bold 16px sans-serif").
+ * @param maxWidth - Maximum line width in pixels.
+ * @returns The number of lines (always >= 1 for non-empty text, 0 for empty).
+ */
+export function measureWrappedLineCount(text: string, font: string, maxWidth: number): number {
+  if (text.length === 0) return 0;
+
+  const ctx = getCtx();
+  ctx.font = font;
+
+  const lines = text.split('\n');
+  let totalLines = 0;
+
+  for (const line of lines) {
+    if (line.length === 0) {
+      totalLines++;
+      continue;
+    }
+
+    const words = line.split(/\s+/).filter((w) => w.length > 0);
+    if (words.length === 0) {
+      totalLines++;
+      continue;
+    }
+
+    let currentLineWidth = ctx.measureText(words[0] ?? '').width;
+    let lineCount = 1;
+
+    for (let i = 1; i < words.length; i++) {
+      const word = words[i];
+      if (!word) continue;
+      const wordWidth = ctx.measureText(word).width;
+      const spaceWidth = ctx.measureText(' ').width;
+
+      if (currentLineWidth + spaceWidth + wordWidth > maxWidth) {
+        lineCount++;
+        currentLineWidth = wordWidth;
+      } else {
+        currentLineWidth += spaceWidth + wordWidth;
+      }
+    }
+
+    totalLines += lineCount;
+  }
+
+  return totalLines;
+}

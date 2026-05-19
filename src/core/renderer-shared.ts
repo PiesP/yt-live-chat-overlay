@@ -8,7 +8,12 @@
 import type { ChatMessage } from '@app-types';
 import { rendererLayout, spacing } from '@core/design-tokens';
 import { DEFAULT_SETTINGS } from '@core/settings-schema';
-import { getFontString, measureTextHeight, measureTextWidth } from '@core/text-measure';
+import {
+  getFontString,
+  measureTextHeight,
+  measureTextWidth,
+  measureWrappedLineCount,
+} from '@core/text-measure';
 
 // Derived from DEFAULT_SETTINGS (SSOT) to avoid hardcoded string duplication.
 const FONT_FAMILY = DEFAULT_SETTINGS.fontFamily;
@@ -96,23 +101,15 @@ function estimateSuperChatDimensions(
   message: ChatMessage,
   font: string,
   fontSize: number,
-  showAuthor: boolean = true
+  showAuthor: boolean
 ): MessageDimensions {
-  const paddingH = spacing.md * 2;
-  const paddingV = spacing.sm + spacing.md;
+  const { paddingH, paddingV } = rendererLayout.superchat;
   const bodyLineHeight = measureTextHeight(font, fontSize);
 
-  // ── Body text: width-proportional line count ──
-  const textWidth = measureContentWidth(message, font, fontSize);
-  const maxTextWidth = rendererLayout.superchatMaxWidth - paddingH;
-  const effectiveTextWidth = Math.min(textWidth, maxTextWidth);
-  // Ceiling division: how many lines the text needs within the max width.
-  // At least 1 line even for empty messages.
-  const lineCount = Math.max(1, Math.ceil(effectiveTextWidth / Math.max(1, maxTextWidth)));
-  // But also account for explicit newlines in the text.
-  const newlineCount = message.text.split('\n').length;
-  const finalLineCount = Math.max(lineCount, newlineCount);
-  const textHeight = Math.ceil(bodyLineHeight * finalLineCount);
+  // ── Body text: accurate wrapped line count ──
+  const innerWidth = rendererLayout.superchatMaxWidth - paddingH;
+  const lineCount = measureWrappedLineCount(message.text, font, Math.max(1, innerWidth));
+  const textHeight = Math.ceil(bodyLineHeight * lineCount);
 
   // ── Author section height ──
   const authorHeight = showAuthor
@@ -124,6 +121,8 @@ function estimateSuperChatDimensions(
   const badgeHeight = badgeFontSize + spacing.sm * 2;
 
   const contentHeight = authorHeight + spacing.xs + badgeHeight + spacing.xs + textHeight;
+
+  const textWidth = measureContentWidth(message, font, fontSize);
 
   return {
     width: Math.max(

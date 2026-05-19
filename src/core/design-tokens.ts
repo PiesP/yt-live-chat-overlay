@@ -137,6 +137,13 @@ export const rendererLayout = {
   superchatMinWidth: 280,
   /** SuperChat card max width (px) */
   superchatMaxWidth: 640,
+  /** SuperChat card padding */
+  superchat: {
+    /** Horizontal padding inside the card (px) */
+    paddingH: 24,
+    /** Vertical padding inside the card (px) */
+    paddingV: 20,
+  },
   /** Pending queue max size */
   queueMaxSize: 50,
   /** Batch size for queue processing */
