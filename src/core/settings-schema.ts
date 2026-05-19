@@ -270,7 +270,8 @@ const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings
     typeof v === 'boolean' ? v : fallback;
 
   // Root scalar settings: type-routed via ROOT_SETTING_META
-  const s = n as unknown as Record<string, unknown>;
+  // Use a mutable copy for dynamic key assignment.
+  const s: Record<string, unknown> = { ...n };
   for (const keyStr of Object.keys(ROOT_SETTING_META)) {
     const meta = ROOT_SETTING_META[keyStr as RootScalarSettingKey];
     const raw = settings[keyStr as keyof OverlaySettings];

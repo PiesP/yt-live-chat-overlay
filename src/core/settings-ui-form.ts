@@ -381,8 +381,10 @@ export class SettingsUiForm {
         if (el instanceof HTMLInputElement && el.type === 'checkbox') {
           el.checked = Boolean(value);
         } else {
+          // Outline numeric keys overlap with root keys (widthPx, opacity);
+          // cast through string to satisfy both union types.
           el.value = formatRootNumericSettingForInput(
-            key as unknown as RootScalarSettingKey,
+            key as string as RootScalarSettingKey,
             value as number
           ) as string;
         }
@@ -454,7 +456,7 @@ export class SettingsUiForm {
           partial.outline = {
             ...((partial.outline as Record<string, unknown>) ?? {}),
             [key]: normalizeOutlineNumericInputValue(
-              key as Exclude<OutlineSettingKey, 'enabled'>,
+              key as string as Exclude<OutlineSettingKey, 'enabled'>,
               el.value,
               0
             ),

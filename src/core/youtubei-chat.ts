@@ -202,7 +202,7 @@ const buildWatchUrl = (videoId: string): string =>
   `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
 
 const readYtcfg = (): JsonObject | null => {
-  const ytcfg = (window as unknown as { ytcfg?: unknown }).ytcfg;
+  const ytcfg = window.ytcfg;
   if (!isRecord(ytcfg)) {
     return null;
   }
