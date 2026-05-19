@@ -734,9 +734,19 @@ export class CanvasRenderer extends RendererBase {
       );
       ctx.font = nameFont;
       ctx.textBaseline = 'top';
-      this.strokeTextOutline(ctx, message.author, textX + (photo ? 28 : 0), textY + 6, color);
+      this.strokeTextOutline(
+        ctx,
+        message.author,
+        textX + (photo ? rendererLayout.authorPhotoSize + 4 : 0),
+        textY + 6,
+        color
+      );
       ctx.fillStyle = color;
-      ctx.fillText(message.author, textX + (photo ? 28 : 0), textY + 6);
+      ctx.fillText(
+        message.author,
+        textX + (photo ? rendererLayout.authorPhotoSize + 4 : 0),
+        textY + 6
+      );
       textY += rendererLayout.authorSectionHeightPx;
     }
 
@@ -806,12 +816,16 @@ export class CanvasRenderer extends RendererBase {
       this.strokeTextOutline(
         ctx,
         msg.message.author,
-        textX + (photo ? 28 : 0),
+        textX + (photo ? rendererLayout.authorPhotoSize + 4 : 0),
         contentY + 6,
         '#ffffff'
       );
       ctx.fillStyle = '#ffffff';
-      ctx.fillText(msg.message.author, textX + (photo ? 28 : 0), contentY + 6);
+      ctx.fillText(
+        msg.message.author,
+        textX + (photo ? rendererLayout.authorPhotoSize + 4 : 0),
+        contentY + 6
+      );
       contentY += rendererLayout.authorSectionHeightPx;
     }
 

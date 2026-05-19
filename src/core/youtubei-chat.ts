@@ -468,7 +468,7 @@ const resolveClientContext = (ytcfg: JsonObject): JsonObject | null => {
     client.utcOffsetMinutes = -new Date().getTimezoneOffset();
   }
 
-  return isRecord(client) ? client : null;
+  return client;
 };
 
 export const bootstrapChatSession = async (signal?: AbortSignal): Promise<ChatBootstrapResult> => {
