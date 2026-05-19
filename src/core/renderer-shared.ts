@@ -111,15 +111,14 @@ function estimateSuperChatDimensions(
   const lineCount = measureWrappedLineCount(message.text, font, Math.max(1, innerWidth));
   const textHeight = Math.ceil(bodyLineHeight * lineCount);
 
-  // ── Author section height ──
-  const authorHeight = showAuthor
-    ? Math.ceil(fontSize * rendererLayout.authorFontScale) + spacing.sm * 2
-    : 0;
+  // ── Author section height (matches drawAuthorSection) ──
+  const authorHeight = showAuthor ? rendererLayout.authorSectionHeightPx : 0;
 
   // ── Badge height (amount pill) ──
   const badgeFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
   const badgeHeight = badgeFontSize + spacing.sm * 2;
 
+  // Layout: paddingV + author + xs + badge + xs + text + paddingV
   const contentHeight = authorHeight + spacing.xs + badgeHeight + spacing.xs + textHeight;
 
   const textWidth = measureContentWidth(message, font, fontSize);
