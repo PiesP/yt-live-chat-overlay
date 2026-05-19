@@ -260,3 +260,14 @@ export function computeSuperChatOpacities(superChatOpacity: number): {
     bottom: Math.max(0.4, base - 0.08),
   };
 }
+
+/**
+ * Choose a readable text color (black or white) for a given background color.
+ * Uses WCAG 2.0 relative luminance: returns '#000000' for light backgrounds,
+ * '#ffffff' for dark backgrounds.
+ */
+export function computeReadableTextColor(backgroundColor: string): string {
+  const rgb = parseAnyColor(backgroundColor);
+  if (!rgb) return '#ffffff';
+  return relativeLuminance(rgb) > 0.5 ? '#000000' : '#ffffff';
+}

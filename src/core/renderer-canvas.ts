@@ -19,6 +19,7 @@ import type { ChatMessage, ContentSegment, OverlayDimensions, OverlaySettings } 
 import {
   computeDliosDuration,
   computeOutlineColor,
+  computeReadableTextColor,
   computeSuperChatOpacities,
   colors as designColors,
   rendererLayout,
@@ -797,22 +798,24 @@ export class CanvasRenderer extends RendererBase {
     ctx.globalAlpha = alpha;
 
     const {
-      base: superChatAlpha,
+      base: scAlpha,
       top: topAlpha,
       bottom: bottomAlpha,
     } = computeSuperChatOpacities(this.settings.superChatOpacity);
-
     const rgb = resolveSuperChatRgb(superChat, designColors.superChat);
     const baseColor = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
+    const textColor = computeReadableTextColor(baseColor);
 
+    // Background gradient
     const grad = ctx.createLinearGradient(x, y, x, y + h);
     grad.addColorStop(0, rgbaHex(baseColor, topAlpha));
-    grad.addColorStop(0.48, rgbaHex(baseColor, superChatAlpha));
+    grad.addColorStop(0.48, rgbaHex(baseColor, scAlpha));
     grad.addColorStop(1, rgbaHex(baseColor, bottomAlpha));
     ctx.fillStyle = grad;
     this.roundRect(ctx, x, y, w, h, 6);
     ctx.fill();
 
+    // Left accent bar
     ctx.fillStyle = baseColor;
     ctx.fillRect(x, y, 4, h);
 
@@ -820,17 +823,17 @@ export class CanvasRenderer extends RendererBase {
     const textX = x + scPad.paddingH;
     let contentY = y + scPad.paddingV;
 
-    const showAuthor = this.settings.showAuthor.superChat;
-    if (showAuthor && msg.message.author) {
-      contentY = this.drawAuthorSection(ctx, msg, textX, contentY, '#ffffff');
+    // Author section
+    if (this.settings.showAuthor.superChat && message.author) {
+      contentY = this.drawAuthorSection(ctx, msg, textX, contentY, textColor);
     }
 
-    // Badge pill — spaced from author section
+    // Amount badge pill
     const badgeY = contentY + spacing.xs;
     const badgeFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
+    const badgeHeight = badgeFontSize + spacing.sm * 2;
     ctx.font = `bold ${badgeFontSize}px ${this.settings.fontFamily}`;
     const badgeWidth = Math.ceil(ctx.measureText(superChat.amount).width) + 24;
-    const badgeHeight = badgeFontSize + spacing.sm * 2;
 
     this.roundRect(ctx, textX, badgeY, badgeWidth, badgeHeight, 12);
     ctx.fillStyle = 'rgba(255, 255, 255, 0.16)';
@@ -840,29 +843,28 @@ export class CanvasRenderer extends RendererBase {
     ctx.stroke();
 
     ctx.textBaseline = 'middle';
-    this.strokeTextOutline(ctx, superChat.amount, textX + 12, badgeY + badgeHeight / 2, '#ffffff');
-    ctx.fillStyle = '#ffffff';
+    this.strokeTextOutline(ctx, superChat.amount, textX + 12, badgeY + badgeHeight / 2, textColor);
+    ctx.fillStyle = textColor;
     ctx.fillText(superChat.amount, textX + 12, badgeY + badgeHeight / 2);
 
-    // Body text — spaced below badge, wrapped to card width
+    // Body text
     let textBottomY = badgeY + badgeHeight;
     if (message.text) {
       const bodyMaxWidth = w - scPad.paddingH * 2;
-      const msgY = textBottomY + spacing.xs;
       textBottomY = this.renderWrappedText(
         ctx,
         message.text,
         textX,
-        msgY,
+        textBottomY + spacing.xs,
         bodyMaxWidth,
         this.settings.superChatMaxBodyLines,
-        '#ffffff',
+        textColor,
         alpha,
         fontSize
       );
     }
 
-    // Sticker — positioned below text, with consistent gap
+    // Sticker
     if (superChat.sticker) {
       const cached = this.stickerCache.get(superChat.sticker.url);
       const stickerImg = cached?.complete && cached.naturalWidth > 0 ? cached : null;

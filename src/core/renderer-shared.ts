@@ -107,19 +107,15 @@ function estimateSuperChatDimensions(
   const bodyLineHeight = measureTextHeight(font, fontSize);
   const innerWidth = rendererLayout.superchatMaxWidth - paddingH;
 
-  // ── Body text: wrapped line count using shared algorithm ──
   const wrappedLines = wrapTextLines(message.text, font, Math.max(1, innerWidth));
-  const lineCount = wrappedLines.length;
-  const textHeight = Math.ceil(bodyLineHeight * lineCount);
+  const textHeight = Math.ceil(bodyLineHeight * wrappedLines.length);
 
-  // ── Wrapped text width: widest line determines content width ──
   let maxLineWidth = 0;
   for (const line of wrappedLines) {
     const w = measureTextWidth(line, font);
     if (w > maxLineWidth) maxLineWidth = w;
   }
 
-  // ── Author section width ──
   let authorSectionWidth = 0;
   if (showAuthor && message.author) {
     const authorFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
@@ -128,31 +124,29 @@ function estimateSuperChatDimensions(
     authorSectionWidth = rendererLayout.authorPhotoSize + spacing.sm + authorNameWidth;
   }
 
-  // ── Badge width (amount pill) ──
   const badgeFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
   const badgeFont = getFontString(badgeFontSize, 'bold', FONT_FAMILY);
   const badgeWidth = Math.ceil(measureTextWidth(message.superChat?.amount ?? '', badgeFont)) + 24;
+  const badgeHeight = badgeFontSize + spacing.sm * 2;
 
-  // ── Card width: fit content, clamped to [min, max] ──
   const contentWidth = Math.max(authorSectionWidth, badgeWidth, maxLineWidth);
   const width = Math.max(
     rendererLayout.superchatMinWidth,
     Math.min(rendererLayout.superchatMaxWidth, contentWidth + paddingH)
   );
 
-  // ── Author section height ──
   const authorHeight = showAuthor ? rendererLayout.authorSectionHeightPx : 0;
 
-  // ── Badge height ──
-  const badgeHeight = badgeFontSize + spacing.sm * 2;
+  // Sticker height: included so the card fully contains the sticker image
+  let stickerHeight = 0;
+  if (message.superChat?.sticker) {
+    stickerHeight = Math.round(fontSize * rendererLayout.superchatStickerSize) + spacing.xs;
+  }
 
-  // Layout: paddingV + author + xs + badge + xs + text + paddingV
-  const contentHeight = authorHeight + spacing.xs + badgeHeight + spacing.xs + textHeight;
+  const contentHeight =
+    authorHeight + spacing.xs + badgeHeight + spacing.xs + textHeight + stickerHeight;
 
-  return {
-    width,
-    height: contentHeight + paddingV,
-  };
+  return { width, height: contentHeight + paddingV };
 }
 
 function estimateMembershipDimensions(
@@ -166,18 +160,22 @@ function estimateMembershipDimensions(
   const nameHeight = measureTextHeight(font, fontSize);
   const bodyLineHeight = measureTextHeight(font, fontSize);
 
-  // Author name is rendered as text (no photo in membership).
   const infoHeight = nameHeight;
   const authorGap = spacing.xs;
 
-  // Body text: wrapped line count
   const innerWidth = rendererLayout.superchatMaxWidth - paddingH;
   const wrappedLines = wrapTextLines(message.text, font, Math.max(1, innerWidth));
   const bodyLineCount = wrappedLines.length;
   const textHeight = Math.ceil(bodyLineHeight * bodyLineCount);
 
+  // Clamp width to the same bounds as SuperChat for visual consistency
+  const width = Math.max(
+    rendererLayout.superchatMinWidth,
+    Math.min(rendererLayout.superchatMaxWidth, textWidth + paddingH)
+  );
+
   return {
-    width: textWidth + paddingH,
+    width,
     height: infoHeight + authorGap + textHeight + paddingV,
   };
 }
