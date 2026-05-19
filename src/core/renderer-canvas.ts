@@ -355,6 +355,13 @@ export class CanvasRenderer extends RendererBase {
 
   // ── Message enqueue ──────────────────────────────────────────────────
 
+  /**
+   * Minimum interval between messages in top/bottom fixed modes (ms).
+   * Prevents message flooding when lane allocation is bypassed.
+   */
+  private static readonly FIXED_MODE_MIN_INTERVAL_MS = 100;
+  private lastFixedModeEnqueueTime = 0;
+
   private enqueueMessage(message: ChatMessage, now: number): void {
     const dims = this.overlay.getDimensions();
     if (!dims) return;
@@ -362,6 +369,13 @@ export class CanvasRenderer extends RendererBase {
     const mode = this.settings.danmakuMode;
     const { width: msgWidth, height: msgHeight } = this.estimateDimensions(message);
 
+    // ── Top/Bottom fixed modes: bypass LaneAllocator ──────────────────
+    if (mode === 'top' || mode === 'bottom') {
+      this.enqueueFixedMode(message, now, dims, msgWidth, msgHeight, mode);
+      return;
+    }
+
+    // ── Scroll/Reverse modes: use DLIOS lane allocator ────────────────
     const placement = this.laneAllocator.findPlacement(msgHeight, dims);
     if (!placement) {
       this.observability.onMessageDropped('no_lane_available');
@@ -406,12 +420,7 @@ export class CanvasRenderer extends RendererBase {
       startX = Math.random() * Math.max(1, dims.width - msgWidth);
     }
 
-    let laneY = placement.laneY;
-    if (mode === 'bottom') {
-      laneY = dims.height * (1 - this.settings.safeBottom) - msgHeight;
-    } else if (mode === 'top') {
-      laneY = dims.height * this.settings.safeTop;
-    }
+    const laneY = this.getLaneY(placement);
 
     this.laneAllocator.commitPlacement(placement, msgWidth, now);
 
@@ -430,6 +439,51 @@ export class CanvasRenderer extends RendererBase {
 
     this.activeMessages.push(cm);
     this.observability.onMessageRendered();
+  }
+
+  /** Enqueue a message in top/bottom fixed mode — no lane allocation needed. */
+  private enqueueFixedMode(
+    message: ChatMessage,
+    now: number,
+    dims: { width: number; height: number },
+    msgWidth: number,
+    msgHeight: number,
+    mode: 'top' | 'bottom'
+  ): void {
+    // Simple time-based gate to prevent flooding
+    if (now - this.lastFixedModeEnqueueTime < CanvasRenderer.FIXED_MODE_MIN_INTERVAL_MS) {
+      this.observability.onMessageDropped('no_lane_available');
+      return;
+    }
+    this.lastFixedModeEnqueueTime = now;
+
+    const laneY =
+      mode === 'bottom'
+        ? dims.height * (1 - this.settings.safeBottom) - msgHeight
+        : dims.height * this.settings.safeTop;
+
+    const startX = Math.random() * Math.max(1, dims.width - msgWidth);
+
+    const cm: CanvasMessage = {
+      message,
+      startTime: now,
+      duration: rendererLayout.topBottomDurationMs,
+      width: msgWidth,
+      height: msgHeight,
+      startX,
+      x: startX,
+      y: laneY,
+      pausedDuration: 0,
+      laneIndex: 0,
+    };
+
+    this.activeMessages.push(cm);
+    this.observability.onMessageRendered();
+  }
+
+  /** Compute lane Y from placement for scroll/reverse modes. */
+  private getLaneY(placement: { laneY: number }): number {
+    return placement.laneY;
   }
 
   // ── Dimension estimation (uses shared + canvas ctx) ──────────────────
