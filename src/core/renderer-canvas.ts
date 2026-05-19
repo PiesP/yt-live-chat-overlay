@@ -775,8 +775,9 @@ export class CanvasRenderer extends RendererBase {
     ctx.fillStyle = baseColor;
     ctx.fillRect(x, y, 4, h);
 
-    const textX = x + rendererLayout.paddingH;
-    let contentY = y + rendererLayout.paddingV;
+    const scPad = rendererLayout.superchat;
+    const textX = x + scPad.paddingH;
+    let contentY = y + scPad.paddingV;
 
     const showAuthor = this.settings.showAuthor.superChat;
     if (showAuthor && msg.message.author) {
