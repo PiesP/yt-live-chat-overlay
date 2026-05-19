@@ -23,12 +23,13 @@ import {
   colors as designColors,
   rendererLayout,
   resolveSuperChatRgb,
+  spacing,
 } from '@core/design-tokens';
 import { createLogger } from '@core/logging';
 import type { Overlay } from '@core/overlay';
 import { RendererBase, type RendererUpdateOptions } from '@core/renderer-base';
 import { estimateMessageDimensions as sharedEstimateDimensions } from '@core/renderer-shared';
-import { getFontString } from '@core/text-measure';
+import { getFontString, measureTextHeight } from '@core/text-measure';
 
 const log = createLogger('RendererCanvas');
 
@@ -784,13 +785,13 @@ export class CanvasRenderer extends RendererBase {
       contentY = this.drawAuthorSection(ctx, msg, textX, contentY, '#ffffff');
     }
 
-    const badgeY = contentY;
+    // Badge pill — spaced from author section
+    const badgeY = contentY + spacing.xs;
     const badgeFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
     ctx.font = `bold ${badgeFontSize}px ${this.settings.fontFamily}`;
     const badgeWidth = Math.ceil(ctx.measureText(superChat.amount).width) + 24;
-    const badgeHeight = badgeFontSize + 8;
+    const badgeHeight = badgeFontSize + spacing.sm * 2;
 
-    // Badge pill background
     this.roundRect(ctx, textX, badgeY, badgeWidth, badgeHeight, 12);
     ctx.fillStyle = 'rgba(255, 255, 255, 0.16)';
     ctx.fill();
@@ -803,24 +804,22 @@ export class CanvasRenderer extends RendererBase {
     ctx.fillStyle = '#ffffff';
     ctx.fillText(superChat.amount, textX + 12, badgeY + badgeHeight / 2);
 
+    // Body text — spaced below badge
+    let textBottomY = badgeY + badgeHeight;
     if (message.text) {
-      const msgY = badgeY + badgeHeight + 6;
+      const msgY = textBottomY + spacing.xs;
       this.renderSegment(ctx, message.text, textX, msgY, '#ffffff', alpha, fontSize);
+      textBottomY = msgY + Math.ceil(measureTextHeight(this.getFont(fontSize), fontSize));
     }
 
+    // Sticker — positioned below text, with consistent gap
     if (superChat.sticker) {
       const cached = this.stickerCache.get(superChat.sticker.url);
       const stickerImg = cached?.complete && cached.naturalWidth > 0 ? cached : null;
       if (stickerImg) {
         const stickerSize = Math.round(fontSize * rendererLayout.superchatStickerSize);
         ctx.globalAlpha = alpha;
-        ctx.drawImage(
-          stickerImg,
-          textX,
-          badgeY + badgeHeight + 6 + (message.text ? Math.round(fontSize * 1.4) + 6 : 0),
-          stickerSize,
-          stickerSize
-        );
+        ctx.drawImage(stickerImg, textX, textBottomY + spacing.xs, stickerSize, stickerSize);
       }
     }
   }
