@@ -3,6 +3,12 @@
  *
  * Uses a single hidden canvas context so callers can measure text without
  * DOM reflow or creating their own context.
+ *
+ * Width measurement uses `actualBoundingBoxLeft + actualBoundingBoxRight`
+ * instead of `TextMetrics.width` (advance width) to capture glyph
+ * overshoot (e.g. italic fonts, CJK characters that extend beyond the
+ * advance width). Height uses `actualBoundingBoxAscent + Descent` for
+ * the tightest fit around rendered glyphs.
  */
 
 let measureCtx: CanvasRenderingContext2D | null = null;
@@ -19,23 +25,54 @@ function getCtx(): CanvasRenderingContext2D {
   return measureCtx;
 }
 
-/** Pixel width of a text string at the given font CSS shorthand. */
+/**
+ * Measure the full bounding-box width of a text string.
+ *
+ * Uses `actualBoundingBoxLeft + actualBoundingBoxRight` so that glyph
+ * overshoot (common with italic fonts and some CJK glyphs) is included.
+ * Falls back to `TextMetrics.width` when the bounding-box API returns
+ * zeros (empty or whitespace-only strings).
+ */
 export function measureTextWidth(text: string, font: string): number {
   const ctx = getCtx();
   ctx.font = font;
-  return Math.ceil(ctx.measureText(text).width);
+  const m = ctx.measureText(text);
+  const bbWidth = Math.abs(m.actualBoundingBoxLeft) + Math.abs(m.actualBoundingBoxRight);
+  if (bbWidth > 0) {
+    return Math.ceil(bbWidth);
+  }
+  // Fallback: empty / whitespace-only strings report 0 for bounding box.
+  return Math.ceil(m.width);
 }
 
-/** Pixel height of rendered text at the given font and size. */
+/**
+ * Measure the full bounding-box height of the font's rendered glyphs.
+ *
+ * Uses `actualBoundingBoxAscent + actualBoundingBoxDescent` measured
+ * against a representative string ("Mg") for the tightest vertical fit.
+ * Falls back to `fontBoundingBoxAscent + Descent` and then to a
+ * fontSize-based estimate.
+ */
 export function measureTextHeight(font: string, fontSize: number): number {
   const ctx = getCtx();
   ctx.font = font;
   const m = ctx.measureText('Mg');
-  const ascent = m.fontBoundingBoxAscent;
-  const descent = m.fontBoundingBoxDescent;
-  if (ascent !== undefined && descent !== undefined && ascent > 0) {
-    return Math.ceil(ascent + descent);
+
+  // Prefer actual (per-glyph) bounding box — most accurate.
+  const actualAscent = m.actualBoundingBoxAscent;
+  const actualDescent = m.actualBoundingBoxDescent;
+  if (actualAscent !== undefined && actualDescent !== undefined && actualAscent > 0) {
+    return Math.ceil(actualAscent + actualDescent);
   }
+
+  // Fallback: font-level bounding box (em-square based).
+  const fontAscent = m.fontBoundingBoxAscent;
+  const fontDescent = m.fontBoundingBoxDescent;
+  if (fontAscent !== undefined && fontDescent !== undefined && fontAscent > 0) {
+    return Math.ceil(fontAscent + fontDescent);
+  }
+
+  // Last resort: rough estimate from font size.
   return Math.ceil(fontSize * 1.1);
 }
 
