@@ -209,70 +209,64 @@ export class RuntimeSession {
     const chatSource = await ChatSource.create(() => this.settings, signal);
     this.chatSource = chatSource;
 
-    return chatSource.start((messages: ChatMessage | ChatMessage[], isInitialSeed?: boolean) => {
-      if (this.disposed) {
-        return;
-      }
-
+    return chatSource.start((messages, isInitialSeed) => {
+      if (this.disposed) return;
       const renderer = this.renderer;
-      if (!renderer) {
-        return;
-      }
+      if (!renderer) return;
 
-      // Get messages array
       const msgs = Array.isArray(messages) ? messages : [messages];
 
       if (isInitialSeed && msgs.length > 50) {
-        // Route to backlog controller for throttled injection
-        if (!this.backlogController) {
-          this.backlogController = new BacklogInjectionController(
-            {
-              backlogMode: this.settings.backlogMode,
-              backlogMaxRate: this.settings.backlogMaxRate,
-              backlogSpeedMultiplier: this.settings.backlogSpeedMultiplier,
-              showBacklogIndicator: this.settings.showBacklogIndicator,
-              backlogRecentMinutes: this.settings.backlogRecentMinutes,
-            },
-            renderer.laneCount,
-            renderer.observability
-          );
-          // Initial sync: backlog controller is the authoritative source for
-          // the speed multiplier. Subsequent updates flow through
-          // updateSettings() -> backlogController.updateConfig() -> getSpeedMultiplier().
-          renderer.setBacklogSpeedMultiplier(this.backlogController.getSpeedMultiplier());
-          this.backlogController.onBacklogMessage = (msg) => {
-            if (!this.acceptForRenderer(msg)) return;
-            renderer.addMessage(msg);
-          };
-          renderer.onBacklogPauseChange = (paused: boolean) => {
-            this.backlogController?.setPaused(paused);
-          };
-          this.backlogController.onBacklogStateChange = (active: boolean) => {
-            if (active) {
-              // Reserve the top half of lanes for backlog messages.
-              const partitionEnd = Math.max(1, Math.floor(renderer.laneCount / 2));
-              renderer.setBacklogPartition(partitionEnd);
-            } else {
-              renderer.clearBacklogPartition();
-            }
-          };
-        }
-        this.backlogController.startBacklogInjection(msgs);
+        this.ensureBacklogController(renderer);
+        this.backlogController?.startBacklogInjection(msgs);
         return;
       }
 
-      // Real-time message handling (also catches backlog under 50 messages)
       for (const msg of msgs) {
         if (!this.acceptForRenderer(msg)) continue;
         renderer.addMessage(msg);
       }
 
-      // If backlog injection is active, notify the controller so it can
-      // adapt its rate to leave room for real-time messages.
       if (this.backlogController?.isBacklogActive) {
         this.backlogController.notifyRealTimeActivity();
       }
     }, signal);
+  }
+
+  private ensureBacklogController(renderer: CanvasRenderer): void {
+    if (this.backlogController) return;
+
+    this.backlogController = new BacklogInjectionController(
+      {
+        backlogMode: this.settings.backlogMode,
+        backlogMaxRate: this.settings.backlogMaxRate,
+        backlogSpeedMultiplier: this.settings.backlogSpeedMultiplier,
+        showBacklogIndicator: this.settings.showBacklogIndicator,
+        backlogRecentMinutes: this.settings.backlogRecentMinutes,
+      },
+      renderer.laneCount,
+      renderer.observability
+    );
+
+    renderer.setBacklogSpeedMultiplier(this.backlogController.getSpeedMultiplier());
+
+    this.backlogController.onBacklogMessage = (msg) => {
+      if (!this.acceptForRenderer(msg)) return;
+      renderer.addMessage(msg);
+    };
+
+    renderer.onBacklogPauseChange = (paused: boolean) => {
+      this.backlogController?.setPaused(paused);
+    };
+
+    this.backlogController.onBacklogStateChange = (active: boolean) => {
+      if (active) {
+        const partitionEnd = Math.max(1, Math.floor(renderer.laneCount / 2));
+        renderer.setBacklogPartition(partitionEnd);
+      } else {
+        renderer.clearBacklogPartition();
+      }
+    };
   }
 
   private removeLeftoverOverlays(): void {
