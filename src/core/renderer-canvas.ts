@@ -482,49 +482,16 @@ export class CanvasRenderer extends RendererBase {
     this.observability.onMessageRendered();
   }
 
-  // ── Dimension estimation (uses shared + canvas ctx) ──────────────────
+  // ── Dimension estimation (delegates to shared functions) ──────────────
 
   private estimateDimensions(message: ChatMessage): { width: number; height: number } {
-    // Use shared estimation for regular/membership, canvas-specific for superchat
-    if (message.kind !== 'superchat') {
-      return sharedEstimateDimensions(
-        message,
-        this.settings.fontSize,
-        this.settings.showAuthor[message.authorType],
-        this.settings.fontWeight,
-        this.settings.fontFamily
-      );
-    }
-    const fontSize = this.settings.fontSize;
-    const textWidth = this.measureContentWidth(message, fontSize);
-    return {
-      width: Math.max(
-        rendererLayout.superchatMinWidth,
-        Math.min(rendererLayout.superchatMaxWidth, textWidth + 24)
-      ),
-      height:
-        Math.ceil(fontSize * 1.5) + 8 + this.measureTextHeight(fontSize) + rendererLayout.paddingV,
-    };
-  }
-
-  private measureContentWidth(message: ChatMessage, fontSize: number): number {
-    const ctx = this.ctx;
-    if (!ctx) return message.text.length * fontSize * 0.6;
-    const font = this.getFont(fontSize);
-
-    let width = 0;
-    if (message.content.length > 0) {
-      for (const seg of message.content) {
-        if (seg.type === 'text') {
-          width += Math.ceil(this.measureTextWidthCached(seg.content, font));
-        } else {
-          width += Math.ceil(fontSize * rendererLayout.emojiSize) + 4;
-        }
-      }
-    } else if (message.text) {
-      width += Math.ceil(this.measureTextWidthCached(message.text, font));
-    }
-    return Math.ceil(width);
+    return sharedEstimateDimensions(
+      message,
+      this.settings.fontSize,
+      this.settings.showAuthor[message.authorType],
+      this.settings.fontWeight,
+      this.settings.fontFamily
+    );
   }
 
   private measureTextWidthCached(text: string, font: string): number {
@@ -534,35 +501,15 @@ export class CanvasRenderer extends RendererBase {
     const ctx = this.ctx;
     if (!ctx) return text.length * 8;
     ctx.font = font;
-    const width = Math.ceil(ctx.measureText(text).width);
+    const m = ctx.measureText(text);
+    const bbWidth = Math.abs(m.actualBoundingBoxLeft) + Math.abs(m.actualBoundingBoxRight);
+    const width = bbWidth > 0 ? Math.ceil(bbWidth) : Math.ceil(m.width);
     if (this.textWidthCache.size >= 500) {
       const firstKey = this.textWidthCache.keys().next().value;
       if (firstKey) this.textWidthCache.delete(firstKey);
     }
     this.textWidthCache.set(key, width);
     return width;
-  }
-
-  private measureTextHeight(fontSize: number): number {
-    const font = this.getFont(fontSize);
-    const cached = this.textHeightCache.get(font);
-    if (cached !== undefined) return cached;
-    const ctx = this.ctx;
-    if (!ctx) return Math.ceil(fontSize * 1.1);
-    ctx.font = font;
-    const metrics = ctx.measureText('Mg');
-    const ascent = metrics.fontBoundingBoxAscent;
-    const descent = metrics.fontBoundingBoxDescent;
-    const height =
-      ascent !== undefined && descent !== undefined && ascent > 0
-        ? Math.ceil(ascent + descent)
-        : Math.ceil(fontSize * 1.1);
-    if (this.textHeightCache.size >= 50) {
-      const firstKey = this.textHeightCache.keys().next().value;
-      if (firstKey) this.textHeightCache.delete(firstKey);
-    }
-    this.textHeightCache.set(font, height);
-    return height;
   }
 
   private getFont(fontSize: number): string {

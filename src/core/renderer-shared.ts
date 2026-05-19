@@ -53,7 +53,7 @@ export function estimateMessageDimensions(
   const font = getFontString(fontSize, fontWeight, fontFamily);
 
   if (message.kind === 'superchat') {
-    return estimateSuperChatDimensions(message, font, fontSize);
+    return estimateSuperChatDimensions(message, font, fontSize, true);
   }
   if (message.kind === 'membership') {
     return estimateMembershipDimensions(message, font, fontSize);
@@ -95,22 +95,42 @@ function estimateRegularMessageDimensions(
 function estimateSuperChatDimensions(
   message: ChatMessage,
   font: string,
-  fontSize: number
+  fontSize: number,
+  showAuthor: boolean = true
 ): MessageDimensions {
-  const textWidth = measureContentWidth(message, font, fontSize);
   const paddingH = spacing.md * 2;
   const paddingV = spacing.sm + spacing.md;
-  const lineCount = message.text.length > 80 ? 2 : 1;
   const bodyLineHeight = measureTextHeight(font, fontSize);
-  const textHeight = Math.ceil(bodyLineHeight * lineCount);
-  const headerHeight = Math.ceil(fontSize * 0.85) + spacing.sm * 2;
+
+  // ── Body text: width-proportional line count ──
+  const textWidth = measureContentWidth(message, font, fontSize);
+  const maxTextWidth = rendererLayout.superchatMaxWidth - paddingH;
+  const effectiveTextWidth = Math.min(textWidth, maxTextWidth);
+  // Ceiling division: how many lines the text needs within the max width.
+  // At least 1 line even for empty messages.
+  const lineCount = Math.max(1, Math.ceil(effectiveTextWidth / Math.max(1, maxTextWidth)));
+  // But also account for explicit newlines in the text.
+  const newlineCount = message.text.split('\n').length;
+  const finalLineCount = Math.max(lineCount, newlineCount);
+  const textHeight = Math.ceil(bodyLineHeight * finalLineCount);
+
+  // ── Author section height ──
+  const authorHeight = showAuthor
+    ? Math.ceil(fontSize * rendererLayout.authorFontScale) + spacing.sm * 2
+    : 0;
+
+  // ── Badge height (amount pill) ──
+  const badgeFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
+  const badgeHeight = badgeFontSize + spacing.sm * 2;
+
+  const contentHeight = authorHeight + spacing.xs + badgeHeight + spacing.xs + textHeight;
 
   return {
     width: Math.max(
       rendererLayout.superchatMinWidth,
       Math.min(rendererLayout.superchatMaxWidth, textWidth + paddingH)
     ),
-    height: headerHeight + spacing.sm + textHeight + paddingV,
+    height: contentHeight + paddingV,
   };
 }
 
