@@ -947,6 +947,15 @@ export class CanvasRenderer extends RendererBase {
     if (!message.author) return startY;
 
     const fontSize = this.settings.fontSize;
+    const authorFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
+    const nameFont = getFontString(
+      authorFontSize,
+      this.settings.fontWeight,
+      this.settings.fontFamily
+    );
+    const nameHeight = measureTextHeight(nameFont, authorFontSize);
+    const sectionHeight = Math.max(rendererLayout.authorPhotoSize, nameHeight);
+
     const photo = message.authorPhotoUrl
       ? this.authorPhotoCache.get(message.authorPhotoUrl)
       : undefined;
@@ -954,18 +963,13 @@ export class CanvasRenderer extends RendererBase {
       this.drawAuthorPhoto(ctx, photo, textX, startY);
     }
     const nameX = textX + (photo ? rendererLayout.authorPhotoSize + 4 : 0);
-    const nameY = startY + 6;
-    const nameFont = getFontString(
-      Math.round(fontSize * rendererLayout.authorFontScale),
-      this.settings.fontWeight,
-      this.settings.fontFamily
-    );
+    const nameY = startY + Math.max(0, Math.floor((sectionHeight - nameHeight) / 2));
     ctx.font = nameFont;
     ctx.textBaseline = 'top';
     this.strokeTextOutline(ctx, message.author, nameX, nameY, color);
     ctx.fillStyle = color;
     ctx.fillText(message.author, nameX, nameY);
-    return startY + rendererLayout.authorSectionHeightPx;
+    return startY + sectionHeight;
   }
 
   /** Draw an author photo with shadow effects. */
