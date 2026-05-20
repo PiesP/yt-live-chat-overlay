@@ -135,7 +135,19 @@ function estimateSuperChatDimensions(
     Math.min(rendererLayout.superchatMaxWidth, contentWidth + paddingH * 2)
   );
 
-  const authorHeight = showAuthor ? rendererLayout.authorSectionHeightPx : 0;
+  const authorHeight = showAuthor
+    ? Math.max(
+        rendererLayout.authorPhotoSize,
+        measureTextHeight(
+          getFontString(
+            Math.round(fontSize * rendererLayout.authorFontScale),
+            undefined,
+            FONT_FAMILY
+          ),
+          Math.round(fontSize * rendererLayout.authorFontScale)
+        )
+      )
+    : 0;
 
   // Sticker height: included so the card fully contains the sticker image
   let stickerHeight = 0;
