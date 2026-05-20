@@ -1,6 +1,7 @@
 import type { ChatMessage, OverlaySettings, Pauseable } from '@app-types';
 import { BacklogInjectionController } from '@core/backlog-controller';
-import { type ChatHealthSnapshot, ChatSource, type ChatSourceStartStatus } from '@core/chat-source';
+import type { ChatHealthSnapshot, ChatSource, ChatSourceStartStatus } from '@core/chat-source';
+import { createChatSource } from '@core/chat-source-factory';
 import { findElementMatch, isAbortError, throwIfAborted, VIDEO_SELECTORS } from '@core/dom';
 import { createLogger } from '@core/logging';
 import { MessageIdRegistry } from '@core/message-id-registry';
@@ -206,7 +207,7 @@ export class RuntimeSession {
   }
 
   private async startChatSource(signal: AbortSignal): Promise<ChatSourceStartStatus> {
-    const chatSource = await ChatSource.create(() => this.settings, signal);
+    const chatSource = await createChatSource(() => this.settings, signal);
     this.chatSource = chatSource;
 
     return chatSource.start((messages, isInitialSeed) => {

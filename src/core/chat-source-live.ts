@@ -1,0 +1,208 @@
+/**
+ * LiveChatSource — live polling loop with adaptive delay and density-aware seeding.
+ *
+ * Extracted from chat-source.ts to separate live and replay chat concerns.
+ */
+
+import type { ChatMessage } from '@app-types';
+import { extractChatEvents } from '@core/chat-message-parser';
+import { ChatSource } from '@core/chat-source-base';
+import { isAbortError, sleep, throwIfAborted } from '@core/dom';
+import { createLogger } from '@core/logging';
+import {
+  extractNextLiveContinuation,
+  fetchLiveChat,
+  type InnertubeContinuationData,
+  type LiveChatPayload,
+  YoutubeInnertubeRequestError,
+} from '@core/youtubei-chat';
+
+const log = createLogger('LiveChatSource');
+
+const LIVE_POLL_FALLBACK_DELAY_MS = 4000;
+const LIVE_SEED_CUTOFF_MS = 60_000;
+
+export class LiveChatSource extends ChatSource {
+  private liveContinuation: InnertubeContinuationData | null = null;
+  private consecutiveErrors = 0;
+  private readonly recentMessageCounts: number[] = [];
+  private static readonly DENSITY_WINDOW_SIZE = 5;
+  private static readonly DENSITY_HIGH_THRESHOLD = 10;
+  private static readonly DENSITY_LOW_THRESHOLD = 1;
+
+  protected seedCurrentSession(signal?: AbortSignal): Promise<boolean> {
+    return this.initializeLiveSession(signal);
+  }
+
+  protected launchCurrentPollLoop(signal?: AbortSignal): void {
+    this.launchPollLoop(signal, (loopSignal) => this.runLiveLoop(loopSignal));
+  }
+
+  protected resetSessionState(): void {
+    super.resetSessionState();
+    this.liveContinuation = null;
+    this.consecutiveErrors = 0;
+  }
+
+  private async initializeLiveSession(signal?: AbortSignal): Promise<boolean> {
+    if (!this.bootstrap) {
+      return false;
+    }
+
+    try {
+      const payload = await this.requestLivePayload(this.bootstrap.initialContinuation, signal);
+      if (!payload) {
+        return false;
+      }
+
+      this.handleLivePayload(payload);
+      return true;
+    } catch (error) {
+      if (isAbortError(error)) {
+        throw error;
+      }
+
+      log.warn('Failed to initialize live chat session:', error);
+      return false;
+    }
+  }
+
+  private recordMessageCount(count: number): void {
+    this.recentMessageCounts.push(count);
+    if (this.recentMessageCounts.length > LiveChatSource.DENSITY_WINDOW_SIZE) {
+      this.recentMessageCounts.shift();
+    }
+  }
+
+  private calculateAdaptiveDelay(timeoutMs: number): number {
+    const baseDelay = timeoutMs > 0 ? timeoutMs : LIVE_POLL_FALLBACK_DELAY_MS;
+
+    if (this.consecutiveErrors > 0) {
+      return Math.min(10_000, baseDelay * 2 ** this.consecutiveErrors);
+    }
+
+    const base = Math.max(2000, Math.min(5000, baseDelay));
+
+    if (this.recentMessageCounts.length < 2) return base;
+
+    const avgCount =
+      this.recentMessageCounts.reduce((a, b) => a + b, 0) / this.recentMessageCounts.length;
+
+    if (avgCount >= LiveChatSource.DENSITY_HIGH_THRESHOLD) {
+      return Math.max(1000, Math.round(base * 0.6));
+    }
+    if (avgCount <= LiveChatSource.DENSITY_LOW_THRESHOLD) {
+      return Math.min(8000, Math.round(base * 1.5));
+    }
+
+    return base;
+  }
+
+  private async runLiveLoop(signal?: AbortSignal): Promise<void> {
+    while (!signal?.aborted) {
+      throwIfAborted(signal);
+
+      await this.waitWhilePaused();
+
+      const playback = this.getPlaybackSnapshot();
+      if (playback?.paused) {
+        await sleep(LIVE_POLL_FALLBACK_DELAY_MS, signal);
+        continue;
+      }
+
+      const timeoutMs = this.liveContinuation?.timeoutMs ?? LIVE_POLL_FALLBACK_DELAY_MS;
+      const delayMs = this.calculateAdaptiveDelay(timeoutMs);
+      await sleep(delayMs, signal);
+
+      throwIfAborted(signal);
+
+      const continuation = this.liveContinuation;
+      if (!continuation) {
+        await this.refreshLiveContinuation(signal);
+        continue;
+      }
+
+      try {
+        const payload = await this.requestLivePayload(continuation, signal);
+        if (!payload) {
+          await this.refreshLiveContinuation(signal);
+          continue;
+        }
+
+        this.handleLivePayload(payload, true);
+      } catch (error) {
+        if (isAbortError(error)) {
+          throw error;
+        }
+
+        this.consecutiveErrors += 1;
+
+        if (error instanceof YoutubeInnertubeRequestError) {
+          log.warn('Live poll request failed:', {
+            status: error.status,
+            message: error.message,
+          });
+        } else {
+          log.warn('Live poll request failed:', error);
+        }
+
+        await this.refreshLiveContinuation(signal);
+      }
+    }
+  }
+
+  private async requestLivePayload(
+    continuation: InnertubeContinuationData,
+    signal?: AbortSignal
+  ): Promise<LiveChatPayload | null> {
+    return this.requestPayload(fetchLiveChat, continuation, signal);
+  }
+
+  private handleLivePayload(payload: LiveChatPayload, isInitialSeed: boolean = false): void {
+    const events = extractChatEvents(payload.actions, this.getSettings);
+
+    if (events.length > 0) {
+      let messages: ChatMessage[];
+
+      if (isInitialSeed) {
+        const playback = this.getPlaybackSnapshot();
+        const offsetMs = playback?.offsetMs ?? 0;
+        const cutoffMs = Math.max(0, offsetMs - LIVE_SEED_CUTOFF_MS);
+
+        const filtered = events.filter((e) => {
+          if (e.message.kind === 'superchat' || e.message.kind === 'membership') return true;
+          if (e.offsetMs === undefined) return true;
+          return e.offsetMs >= cutoffMs;
+        });
+
+        messages = filtered.map((e) => e.message);
+
+        if (filtered.length < events.length) {
+          log.debug(
+            `Initial seed filtered: ${events.length} → ${filtered.length} ` +
+              `(playback at ${Math.round(offsetMs / 1000)}s)`
+          );
+        }
+      } else {
+        messages = events.map((e) => e.message);
+      }
+
+      if (messages.length > 0) {
+        this.emitBatch(messages, isInitialSeed);
+      }
+
+      this.recordMessageCount(messages.length);
+    }
+
+    this.consecutiveErrors = 0;
+    this.liveContinuation = extractNextLiveContinuation(payload.continuations);
+  }
+
+  private async refreshLiveContinuation(signal?: AbortSignal): Promise<void> {
+    const bootstrap = await this.bootstrapResolver.refresh(signal);
+    if (bootstrap) {
+      this.bootstrap = bootstrap;
+      this.liveContinuation = this.bootstrap?.initialContinuation ?? null;
+    }
+  }
+}
