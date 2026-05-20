@@ -338,7 +338,7 @@ export class BacklogInjectionController {
   private updateIndicator(progress: number): void {
     if (!this.indicatorEl) return;
     const pct = Math.round(progress * 100);
-    this.indicatorEl.textContent = `Loading chat history... ${pct}%`;
+    this.indicatorEl.textContent = `Loading chat history... ${this.processedBacklog}/${this.totalBacklog} (${pct}%)`;
   }
 
   private hideIndicator(): void {
