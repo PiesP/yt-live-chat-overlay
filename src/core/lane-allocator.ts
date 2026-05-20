@@ -224,18 +224,13 @@ export class LaneAllocator {
     const nextAvailable = startTime + occupancyMs;
     const startIdx = placement.lane.index;
 
-    // Update all slots occupied by this message.
-    // For multi-slot messages, apply a gradient: top slots become
-    // available sooner than bottom slots. This prevents the "simultaneous
-    // unlock" problem where all slots free at once, causing the next
-    // batch of messages to cluster in the same region.
+    // Update all slots occupied by this message with the SAME available time.
+    // This prevents partial-slot availability where a new message could enter
+    // a "released" top slot while the bottom slot is still occupied, causing
+    // visual overlap with the multi-slot message (e.g. SuperChat cards).
     for (let s = 0; s < placement.slotCount; s++) {
       const laneIdx = startIdx + s;
-      // Top slots (s=0) unlock first; bottom slots unlock progressively later.
-      // The gradient is 30% of total occupancy, distributed across slots.
-      const slotGradient =
-        placement.slotCount > 1 ? (s / (placement.slotCount - 1)) * occupancyMs * 0.3 : 0;
-      this.updateLane(laneIdx, nextAvailable + slotGradient);
+      this.updateLane(laneIdx, nextAvailable);
       const count = this.laneMessageCounts[laneIdx];
       if (count !== undefined) {
         this.laneMessageCounts[laneIdx] = count + 1;

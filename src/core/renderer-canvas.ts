@@ -510,7 +510,11 @@ export class CanvasRenderer extends RendererBase {
       this.settings.fontSize,
       this.settings.showAuthor[message.authorType],
       this.settings.fontWeight,
-      this.settings.fontFamily
+      this.settings.fontFamily,
+      {
+        superchat: this.settings.superChatMaxBodyLines,
+        membership: this.settings.membershipMaxBodyLines,
+      }
     );
   }
 
