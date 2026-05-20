@@ -78,10 +78,12 @@ export class LaneAllocator {
     // which is exactly the same formula used by estimateMessageDimensions().
     // Result: msgHeight <= laneHeight always holds at laneSpacing >= 0,
     // and the 1-slot/2-slot transition happens at a predictable laneSpacing.
-    const paddingV = 8 * 2; // spacing.sm * 2, inlined to avoid circular import
+    // Use paddingV * 2 (top + bottom) for lane height, matching the total
+    // vertical padding applied by estimateMessageDimensions.
+    const totalPaddingV = rendererLayout.paddingV * 2;
     const font = `${this.options.fontWeight === 'bold' ? 'bold' : '400'} ${this.options.fontSize}px ${this.options.fontFamily}`;
     const textHeight = measureTextHeight(font, this.options.fontSize);
-    this.laneHeight = Math.max(1, textHeight + paddingV + this.options.laneSpacing);
+    this.laneHeight = Math.max(1, textHeight + totalPaddingV + this.options.laneSpacing);
 
     const usableHeight = dimensions.height * (1 - this.options.safeTop - this.options.safeBottom);
     this.laneCount = Math.max(1, Math.floor(usableHeight / this.laneHeight));

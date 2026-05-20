@@ -160,7 +160,6 @@ function estimateMembershipDimensions(
   const bodyLineHeight = measureTextHeight(font, fontSize);
 
   const infoHeight = nameHeight;
-  const authorGap = spacing.xs;
 
   const innerWidth = rendererLayout.superchatMaxWidth - paddingH;
   const wrappedLines = wrapTextLines(message.text, font, Math.max(1, innerWidth));
@@ -173,8 +172,12 @@ function estimateMembershipDimensions(
     Math.min(rendererLayout.superchatMaxWidth, textWidth + paddingH)
   );
 
+  // Include author-to-body gap when author section is present (matching renderMembership)
+  const hasAuthor = message.author !== undefined;
+  const authorBodyGap = hasAuthor ? spacing.xs : 0;
+
   return {
     width,
-    height: infoHeight + authorGap + textHeight + paddingV,
+    height: infoHeight + authorBodyGap + textHeight + paddingV,
   };
 }

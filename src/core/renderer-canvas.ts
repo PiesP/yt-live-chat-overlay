@@ -858,6 +858,7 @@ export class CanvasRenderer extends RendererBase {
       textX + rendererLayout.superchatBadge.paddingH,
       badgeY + badgeHeight / 2
     );
+    ctx.textBaseline = 'top';
 
     // Body text
     let textBottomY = badgeY + badgeHeight;
@@ -930,11 +931,12 @@ export class CanvasRenderer extends RendererBase {
 
     if (msg.message.text) {
       const bodyMaxWidth = w - padH * 2;
+      const bodyY = msg.message.author ? textY + spacing.xs : textY;
       this.renderWrappedText(
         ctx,
         msg.message.text,
         textX,
-        textY,
+        bodyY,
         bodyMaxWidth,
         this.settings.membershipMaxBodyLines,
         '#ffffff',
