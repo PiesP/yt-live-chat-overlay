@@ -881,9 +881,14 @@ export class CanvasRenderer extends RendererBase {
       const cached = this.stickerCache.get(superChat.sticker.url);
       const stickerImg = cached?.complete && cached.naturalWidth > 0 ? cached : null;
       if (stickerImg) {
-        const stickerSize = Math.round(fontSize * rendererLayout.superchatStickerSize);
-        ctx.globalAlpha = alpha;
-        ctx.drawImage(stickerImg, textX, textBottomY + spacing.xs, stickerSize, stickerSize);
+        const maxStickerSize = Math.round(fontSize * rendererLayout.superchatStickerSize);
+        const stickerY = textBottomY + spacing.xs;
+        const availableHeight = y + h - scPad.paddingV - stickerY;
+        const stickerSize = Math.max(0, Math.min(maxStickerSize, availableHeight));
+        if (stickerSize > 0) {
+          ctx.globalAlpha = alpha;
+          ctx.drawImage(stickerImg, textX, stickerY, stickerSize, stickerSize);
+        }
       }
     }
   }
