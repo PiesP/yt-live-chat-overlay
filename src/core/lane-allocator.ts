@@ -6,6 +6,8 @@ export interface LanePlacement {
   lane: LaneState;
   waitMs: number;
   laneY: number;
+  /** Number of lane slots this message occupies (1 for regular, 2+ for superchat/membership) */
+  slotCount: number;
 }
 
 interface LaneAllocatorOptions {
@@ -136,7 +138,7 @@ export class LaneAllocator {
   }
 
   findPlacement(
-    _messageHeight: number,
+    messageHeight: number,
     _dimensions: OverlayDimensions,
     isBacklog = false
   ): LanePlacement | null {
@@ -156,15 +158,15 @@ export class LaneAllocator {
     const effectiveLaneCount = laneEnd - laneStart;
     if (effectiveLaneCount <= 0) return null;
 
-    // Messages always occupy exactly 1 lane slot.
-    // Negative laneSpacing reduces laneHeight below msgHeight, causing
-    // adjacent-lane overlap — this is the intended "negative = overlap" behavior.
-    // The 2-slot allocation path has been removed because it caused sudden
-    // visible gaps when laneHeight dropped below msgHeight.
+    // Calculate how many lane slots this message needs.
+    // A superchat card may be 3-5x taller than a regular message.
+    const slotCount = Math.max(1, Math.ceil(messageHeight / this.laneHeight));
     const mode = this.options.getDanmakuMode();
     const isScrolling = mode === 'scroll' || mode === 'reverse';
 
-    const result = this.allocateSingleLane(now, isScrolling, laneStart, laneEnd);
+    // For multi-slot messages, find the best starting lane such that
+    // all slots [laneIndex, laneIndex + slotCount) are within range.
+    const result = this.allocateMultiSlot(now, isScrolling, laneStart, laneEnd, slotCount);
     if (!result) return null;
 
     const lane: LaneState = {
@@ -179,12 +181,13 @@ export class LaneAllocator {
       lane,
       waitMs: result.waitMs,
       laneY: this.getLaneY(result.laneIndex, _dimensions.height),
+      slotCount,
     };
   }
 
   /**
    * Commit the placement — update the lane's available time for the
-   * next message.
+   * next message. For multi-slot messages, all occupied lanes are updated.
    *
    * @param speedMultiplier - Multiplier applied to the effective velocity
    *   when computing lane occupancy. Backlog messages use a higher speed
@@ -207,12 +210,18 @@ export class LaneAllocator {
       : rendererLayout.topBottomDurationMs;
 
     const nextAvailable = startTime + occupancyMs;
-    this.updateLane(placement.lane.index, nextAvailable);
-    const count = this.laneMessageCounts[placement.lane.index];
-    if (count !== undefined) {
-      this.laneMessageCounts[placement.lane.index] = count + 1;
+    const startIdx = placement.lane.index;
+
+    // Update all slots occupied by this message
+    for (let s = 0; s < placement.slotCount; s++) {
+      const laneIdx = startIdx + s;
+      this.updateLane(laneIdx, nextAvailable);
+      const count = this.laneMessageCounts[laneIdx];
+      if (count !== undefined) {
+        this.laneMessageCounts[laneIdx] = count + 1;
+      }
+      this.laneLastUsedAt[laneIdx] = startTime;
     }
-    this.laneLastUsedAt[placement.lane.index] = startTime;
   }
 
   // ── Partition control ────────────────────────────────────────────────
@@ -310,6 +319,84 @@ export class LaneAllocator {
 
     if (bestLane === -1) return null;
     return { laneIndex: bestLane, waitMs: bestWait };
+  }
+
+  /**
+   * Allocate a contiguous block of `slotCount` lanes for tall messages
+   * (superchat, membership). Finds the starting lane where all slots
+   * [laneIndex, laneIndex + slotCount) fit within [laneStart, laneEnd).
+   *
+   * Uses the minimum wait time across all slots as the effective wait,
+   * and the average spatial density for scoring.
+   */
+  private allocateMultiSlot(
+    now: number,
+    isScrolling: boolean,
+    laneStart: number,
+    laneEnd: number,
+    slotCount: number
+  ): { laneIndex: number; waitMs: number } | null {
+    if (this.heap.length === 0) return null;
+    if (slotCount <= 1) {
+      return this.allocateSingleLane(now, isScrolling, laneStart, laneEnd);
+    }
+
+    const maxWaitMs = isScrolling ? rendererLayout.durationMax : rendererLayout.topBottomDurationMs;
+    // The starting lane must leave room for all slots
+    const maxStartLane = laneEnd - slotCount;
+    if (maxStartLane < laneStart) return null;
+
+    let bestLane = -1;
+    let bestWait = Infinity;
+    let bestScore = Infinity;
+
+    for (let i = 0; i < this.heap.length; i++) {
+      const entry = this.heap[i];
+      if (!entry) continue;
+      const [startIdx] = entry;
+      if (startIdx < laneStart || startIdx > maxStartLane) continue;
+
+      // Check all slots in the block
+      let blockMaxWait = 0;
+      let blockDensitySum = 0;
+      let blockCountSum = 0;
+      let allValid = true;
+
+      for (let s = 0; s < slotCount; s++) {
+        const slotIdx = startIdx + s;
+        const slotWait = Math.max(0, Math.ceil((this.getSlotAvailableAt(slotIdx) ?? 0) - now));
+        if (slotWait > maxWaitMs) {
+          allValid = false;
+          break;
+        }
+        blockMaxWait = Math.max(blockMaxWait, slotWait);
+        blockDensitySum += this.spatialDensity(slotIdx, now);
+        blockCountSum += this.laneMessageCounts[slotIdx] ?? 0;
+      }
+
+      if (!allValid) continue;
+
+      // Score uses max wait across block (bottleneck), average density, average count
+      const avgDensity = blockDensitySum / slotCount;
+      const avgCount = blockCountSum / slotCount;
+      const score = blockMaxWait * 10 + avgDensity * 3000 + avgCount * 50;
+
+      if (score < bestScore) {
+        bestScore = score;
+        bestWait = blockMaxWait;
+        bestLane = startIdx;
+      }
+    }
+
+    if (bestLane === -1) return null;
+    return { laneIndex: bestLane, waitMs: bestWait };
+  }
+
+  /** Get the available-at time for a lane by its index. */
+  private getSlotAvailableAt(laneIndex: number): number | undefined {
+    const heapIdx = this.laneIndexToHeapIndex.get(laneIndex);
+    if (heapIdx === undefined) return undefined;
+    return this.heap[heapIdx]?.[1];
   }
 
   /** Update a lane's available time in the heap. */
