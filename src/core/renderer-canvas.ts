@@ -377,13 +377,6 @@ export class CanvasRenderer extends RendererBase {
 
   // ── Message enqueue ──────────────────────────────────────────────────
 
-  /**
-   * Minimum interval between messages in top/bottom fixed modes (ms).
-   * Prevents message flooding when lane allocation is bypassed.
-   */
-  private static readonly FIXED_MODE_MIN_INTERVAL_MS = 100;
-  private lastFixedModeEnqueueTime = 0;
-
   private enqueueMessage(message: ChatMessage, now: number): void {
     const dims = this.overlay.getDimensions();
     if (!dims) return;
@@ -391,32 +384,26 @@ export class CanvasRenderer extends RendererBase {
     const mode = this.settings.danmakuMode;
     const { width: msgWidth, height: msgHeight } = this.estimateDimensions(message);
 
-    // ── Top/Bottom fixed modes: bypass LaneAllocator ──────────────────
-    if (mode === 'top' || mode === 'bottom') {
-      this.enqueueFixedMode(message, now, dims, msgWidth, msgHeight, mode);
-      return;
-    }
-
-    // ── Scroll/Reverse modes: use DLIOS lane allocator ────────────────
+    // All modes use LaneAllocator for lane-based placement.
+    // Scroll/reverse modes animate messages across the screen;
+    // top/bottom modes display them at fixed positions.
     const placement = this.laneAllocator.findPlacement(msgHeight, dims, message.isBacklog ?? false);
     if (!placement) {
       this.observability.onMessageDropped('no_lane_available');
       return;
     }
 
-    const speed = message.isBacklog
-      ? this.getEffectiveBacklogSpeed()
-      : this.getEffectiveSpeedPxPerSec();
+    const isScrolling = mode === 'scroll' || mode === 'reverse';
 
     let effectiveDuration: number;
-    if (mode === 'scroll' || mode === 'reverse') {
+    if (isScrolling) {
+      const speed = message.isBacklog
+        ? this.getEffectiveBacklogSpeed()
+        : this.getEffectiveSpeedPxPerSec();
       const exitPadding = Math.max(
         this.settings.fontSize * rendererLayout.exitPaddingScale,
         rendererLayout.exitPaddingMin
       );
-      // All lanes use the same total distance → uniform scroll speed.
-      // The old per-lane entryOffset was removed because it caused different
-      // lanes to move at different speeds, producing diagonal entry patterns.
       const totalDistance =
         mode === 'reverse' ? dims.width * 2 + exitPadding : dims.width + msgWidth + exitPadding;
       effectiveDuration =
@@ -427,13 +414,13 @@ export class CanvasRenderer extends RendererBase {
 
     const laneY = placement.laneY;
 
-    // For backlog messages, the effectiveDuration already accounts for the
-    // backlog speed multiplier (via getEffectiveBacklogSpeed()), so we pass
-    // it directly — the lane will be held for the full animation duration.
     this.laneAllocator.commitPlacement(placement, now, effectiveDuration);
 
-    // All messages in scroll mode start from the same vertical line.
-    const startX = mode === 'scroll' ? dims.width : -(msgWidth + rendererLayout.exitPaddingMin);
+    const startX = isScrolling
+      ? mode === 'scroll'
+        ? dims.width
+        : -(msgWidth + rendererLayout.exitPaddingMin)
+      : 0;
 
     this.activateMessage(
       message,
@@ -448,31 +435,7 @@ export class CanvasRenderer extends RendererBase {
     );
   }
 
-  /** Enqueue a message in top/bottom fixed mode — no lane allocation needed. */
-  private enqueueFixedMode(
-    message: ChatMessage,
-    now: number,
-    dims: { width: number; height: number },
-    msgWidth: number,
-    msgHeight: number,
-    mode: 'top' | 'bottom'
-  ): void {
-    // Simple time-based gate to prevent flooding
-    if (now - this.lastFixedModeEnqueueTime < CanvasRenderer.FIXED_MODE_MIN_INTERVAL_MS) {
-      this.observability.onMessageDropped('no_lane_available');
-      return;
-    }
-    this.lastFixedModeEnqueueTime = now;
-
-    const laneY =
-      mode === 'bottom'
-        ? dims.height * (1 - this.settings.safeBottom) - msgHeight
-        : dims.height * this.settings.safeTop;
-
-    this.activateMessage(message, now, msgWidth, msgHeight, laneY);
-  }
-
-  /** Finalize and activate a message (shared by scroll/reverse and fixed modes). */
+  /** Finalize and activate a message. */
   private activateMessage(
     message: ChatMessage,
     now: number,
