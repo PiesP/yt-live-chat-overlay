@@ -205,9 +205,20 @@ export class LaneAllocator {
     const velocity = this.options.getEffectiveSpeedPxPerSec();
 
     const effectiveVelocity = velocity * speedMultiplier;
-    const occupancyMs = isScrolling
+
+    // Density-based occupancy reduction: when screen is crowded,
+    // reduce lane occupancy time to free up lanes faster.
+    // Utilization 0% -> no reduction, 90%+ -> up to 40% reduction.
+    const utilization = this.getUtilization();
+    const densityFactor =
+      utilization > 0.5
+        ? 1 - (utilization - 0.5) * 0.8 // 0.5->1.0, 0.9->0.68, 1.0->0.6
+        : 1;
+
+    const baseOccupancyMs = isScrolling
       ? ((textWidth + rendererLayout.dliosSafetyGap) / effectiveVelocity) * 1000
       : rendererLayout.topBottomDurationMs;
+    const occupancyMs = baseOccupancyMs * densityFactor;
 
     const nextAvailable = startTime + occupancyMs;
     const startIdx = placement.lane.index;
