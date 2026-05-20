@@ -316,6 +316,63 @@ export class LaneAllocator {
   }
 
   /**
+   * Normalized score for a multi-slot block.
+   * Uses the same normalization as laneScore but operates on block-aggregate
+   * values (max wait, avg density, avg count) plus an adjacency penalty.
+   */
+  private blockScore(
+    blockMaxWait: number,
+    avgDensity: number,
+    avgCount: number,
+    startIdx: number,
+    slotCount: number,
+    now: number
+  ): number {
+    const maxWait = rendererLayout.durationMax;
+    const normalizedWait = Math.min(1, blockMaxWait / maxWait);
+
+    const maxRawDensity = this.laneCount * 0.5;
+    const normalizedDensity = Math.min(1, avgDensity / maxRawDensity);
+
+    const maxCount = Math.max(1, ...this.laneMessageCounts);
+    const normalizedCount = avgCount / maxCount;
+
+    // Adjacent penalty: check if lanes immediately above or below the
+    // block were recently used. This prevents tall messages from being
+    // stacked directly on top of each other.
+    const adjacentPenalty = this.adjacentPenalty(startIdx, slotCount, now);
+
+    return normalizedWait * 0.5 + normalizedDensity * 0.3 + normalizedCount * 0.2 + adjacentPenalty;
+  }
+
+  /**
+   * Penalty for placing a block adjacent to recently used lanes.
+   * Returns 0 if no adjacent lanes were recently used, or a value in
+   * (0, 0.3] proportional to how recently the adjacent lane was used.
+   */
+  private adjacentPenalty(startIdx: number, slotCount: number, now: number): number {
+    const ADJACENT_WINDOW_MS = 2_000;
+    let penalty = 0;
+    // Check lane immediately above the block
+    const above = startIdx - 1;
+    if (above >= 0) {
+      const lastUsed = this.laneLastUsedAt[above] ?? 0;
+      if (lastUsed > 0 && now - lastUsed < ADJACENT_WINDOW_MS) {
+        penalty = Math.max(penalty, (1 - (now - lastUsed) / ADJACENT_WINDOW_MS) * 0.3);
+      }
+    }
+    // Check lane immediately below the block
+    const below = startIdx + slotCount;
+    if (below < this.laneCount) {
+      const lastUsed = this.laneLastUsedAt[below] ?? 0;
+      if (lastUsed > 0 && now - lastUsed < ADJACENT_WINDOW_MS) {
+        penalty = Math.max(penalty, (1 - (now - lastUsed) / ADJACENT_WINDOW_MS) * 0.3);
+      }
+    }
+    return penalty;
+  }
+
+  /**
    * Extract the top-K lanes from the heap by available-at time.
    * Uses a temporary min-heap of size K for O(n log K) selection.
    * Returns lanes sorted by availableAt (earliest first).
@@ -454,9 +511,11 @@ export class LaneAllocator {
 
       if (!allValid) continue;
 
+      // Use the same normalized scoring as single-lane allocation,
+      // applied to the block's aggregate values.
       const avgDensity = blockDensitySum / slotCount;
       const avgCount = blockCountSum / slotCount;
-      const score = blockMaxWait * 10 + avgDensity * 3000 + avgCount * 50;
+      const score = this.blockScore(blockMaxWait, avgDensity, avgCount, startIdx, slotCount, now);
 
       if (score < bestScore) {
         bestScore = score;
