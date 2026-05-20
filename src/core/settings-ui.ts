@@ -363,7 +363,7 @@ export class SettingsUi {
           }
 
           // Strip prototype-pollution keys before passing to normalizeStoredSettings
-          const sanitized: Record<string, unknown> = {};
+          const sanitized: Record<string, unknown> = Object.create(null);
           for (const key of Object.keys(parsed)) {
             if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue;
             sanitized[key] = parsed[key];
