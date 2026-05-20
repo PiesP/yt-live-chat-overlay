@@ -53,9 +53,11 @@ interface CanvasMessage {
 
 // ── Renderer ─────────────────────────────────────────────────────────────────
 
-/** Convert an rgb(...) color string to rgba(...) with the given alpha. */
-function rgbaHex(color: string, alpha: number): string {
-  return `rgba(${color.slice(4, -1)}, ${alpha})`;
+/** Convert an rgb(...) or rgba(...) color string to rgba(...) with the given alpha. */
+function toRgba(color: string, alpha: number): string {
+  const match = color.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,[^)]*)?\)/);
+  if (!match) return color;
+  return `rgba(${match[1]}, ${match[2]}, ${match[3]}, ${alpha})`;
 }
 
 export class CanvasRenderer extends RendererBase {
@@ -789,9 +791,9 @@ export class CanvasRenderer extends RendererBase {
 
     // Background gradient
     const grad = ctx.createLinearGradient(x, y, x, y + h);
-    grad.addColorStop(0, rgbaHex(baseColor, topAlpha));
-    grad.addColorStop(0.48, rgbaHex(baseColor, scAlpha));
-    grad.addColorStop(1, rgbaHex(baseColor, bottomAlpha));
+    grad.addColorStop(0, toRgba(baseColor, topAlpha));
+    grad.addColorStop(0.48, toRgba(baseColor, scAlpha));
+    grad.addColorStop(1, toRgba(baseColor, bottomAlpha));
     ctx.fillStyle = grad;
     this.roundRect(ctx, x, y, w, h, 6);
     ctx.fill();
