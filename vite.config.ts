@@ -114,9 +114,7 @@ export default defineConfig(({ mode }): UserConfig => {
       write: true,
 
       rollupOptions: {
-        output: {
-          exports: 'none',
-        },
+        output: {},
       },
     },
 
