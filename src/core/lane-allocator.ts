@@ -40,8 +40,13 @@ interface LaneAllocatorOptions {
  *   3. Min-heap selection — the lane with the minimum t_available is
  *      selected in O(log n) time.
  *
- * This completely eliminates the need for segment tracking, entry-offset
- * estimation, and speed-safety heuristics used in earlier implementations.
+ * Extensions over base DLIOS:
+ *   - Lane cooldown: minimum time between consecutive uses of the same lane
+ *     prevents vertical clustering.
+ *   - Normalized composite scoring: wait time, spatial density, and message
+ *     count are all normalized to [0, 1] so no single term dominates.
+ *   - Uniform initialization: all lanes start at the same available time;
+ *     spatial spread order prevents diagonal entry patterns.
  */
 export class LaneAllocator {
   /** 4-ary min-heap of [laneIndex, availableAtMs] pairs, sorted by availableAtMs */
@@ -54,6 +59,12 @@ export class LaneAllocator {
   private laneLastUsedAt: number[] = [];
   private laneHeight = 0;
   private laneCount = 0;
+
+  /**
+   * Minimum cooldown between consecutive uses of the same lane (ms).
+   * Prevents vertical clustering by ensuring a lane is not reused too soon.
+   */
+  private static readonly LANE_COOLDOWN_MS = 500;
 
   /**
    * When backlog partitioning is active, backlog messages are restricted
@@ -93,13 +104,12 @@ export class LaneAllocator {
     const usableHeight = dimensions.height * (1 - this.options.safeTop - this.options.safeBottom);
     this.laneCount = Math.max(1, Math.floor(usableHeight / this.laneHeight));
 
-    // Stagger initial lane availability so the first messages don't all
-    // start at exactly the same time. Each lane gets a small offset
-    // proportional to its index (max ~100ms spread across all lanes).
+    // Uniform initialization: all lanes start at the same available time.
+    // This prevents diagonal entry patterns caused by staggered offsets.
+    // Spatial distribution is handled by the composite lane score instead.
     const now = performance.now();
-    const staggerMs = Math.min(100, Math.max(10, 200 / this.laneCount));
     for (let i = 0; i < this.laneCount; i++) {
-      this.heap.push([i, now + i * staggerMs]);
+      this.heap.push([i, now]);
       this.laneIndexToHeapIndex.set(i, i);
       this.laneMessageCounts.push(0);
       this.laneLastUsedAt.push(0);
@@ -206,19 +216,10 @@ export class LaneAllocator {
 
     const effectiveVelocity = velocity * speedMultiplier;
 
-    // Density-based occupancy reduction: when screen is crowded,
-    // reduce lane occupancy time to free up lanes faster.
-    // Utilization 0% -> no reduction, 90%+ -> up to 40% reduction.
-    const utilization = this.getUtilization();
-    const densityFactor =
-      utilization > 0.5
-        ? 1 - (utilization - 0.5) * 0.8 // 0.5->1.0, 0.9->0.68, 1.0->0.6
-        : 1;
-
     const baseOccupancyMs = isScrolling
       ? ((textWidth + rendererLayout.dliosSafetyGap) / effectiveVelocity) * 1000
       : rendererLayout.topBottomDurationMs;
-    const occupancyMs = baseOccupancyMs * densityFactor;
+    const occupancyMs = baseOccupancyMs + LaneAllocator.LANE_COOLDOWN_MS;
 
     const nextAvailable = startTime + occupancyMs;
     const startIdx = placement.lane.index;
@@ -279,15 +280,29 @@ export class LaneAllocator {
 
   /**
    * Composite lane score: lower is better.
-   * Combines wait time, spatial density, and message count to produce
-   * a balanced lane selection that avoids vertical clustering and
-   * diagonal patterns.
+   * All three components are normalized to [0, 1] so no single term dominates.
+   *
+   * Components:
+   *   - wait: normalized wait time (primary — DLIOS invariant)
+   *   - density: global spatial density (secondary — prevents clustering)
+   *   - count: normalized message count (tertiary — load balancing)
    */
   private laneScore(laneIndex: number, waitMs: number, now: number): number {
-    const density = this.spatialDensity(laneIndex, now);
-    const count = this.laneMessageCounts[laneIndex] ?? 0;
-    // waitMs is primary (DLIOS invariant), density secondary, count tertiary
-    return waitMs * 10 + density * 3000 + count * 50;
+    // Normalize wait to [0, 1] using the max scroll duration as upper bound
+    const maxWait = rendererLayout.durationMax;
+    const normalizedWait = Math.min(1, waitMs / maxWait);
+
+    // Normalize spatial density to [0, 1]
+    const rawDensity = this.spatialDensity(laneIndex, now);
+    const maxRawDensity = this.laneCount * 0.5; // theoretical upper bound
+    const normalizedDensity = Math.min(1, rawDensity / maxRawDensity);
+
+    // Normalize message count to [0, 1]
+    const maxCount = Math.max(1, ...this.laneMessageCounts);
+    const normalizedCount = (this.laneMessageCounts[laneIndex] ?? 0) / maxCount;
+
+    // Weighted combination: wait is primary, density secondary, count tertiary
+    return normalizedWait * 0.5 + normalizedDensity * 0.3 + normalizedCount * 0.2;
   }
 
   /**
