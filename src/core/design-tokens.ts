@@ -269,17 +269,26 @@ export function resolveSuperChatRgb(
   return parsed ?? colors[superChat.tier] ?? colors.blue;
 }
 
+/** Opacity boost applied to the top of a SuperChat card gradient. */
+export const SUPERCHAT_TOP_OPACITY_BOOST = 0.06;
+
+/** Opacity reduction applied to the bottom of a SuperChat card gradient. */
+export const SUPERCHAT_BOTTOM_OPACITY_REDUCTION = 0.08;
+
+/** Minimum opacity for SuperChat card gradient (clamps base and bottom). */
+export const SUPERCHAT_MIN_OPACITY = 0.4;
+
 /** Compute top/middle/bottom opacities for SuperChat card gradient. */
 export function computeSuperChatOpacities(superChatOpacity: number): {
   base: number;
   top: number;
   bottom: number;
 } {
-  const base = Math.min(1, Math.max(0.4, superChatOpacity));
+  const base = Math.min(1, Math.max(SUPERCHAT_MIN_OPACITY, superChatOpacity));
   return {
     base,
-    top: Math.min(1, base + 0.06),
-    bottom: Math.max(0.4, base - 0.08),
+    top: Math.min(1, base + SUPERCHAT_TOP_OPACITY_BOOST),
+    bottom: Math.max(SUPERCHAT_MIN_OPACITY, base - SUPERCHAT_BOTTOM_OPACITY_REDUCTION),
   };
 }
 
