@@ -57,11 +57,16 @@ export class BacklogInjectionController {
   public onBacklogStateChange: ((active: boolean) => void) | null = null;
 
   /**
-   * Density ramp duration (ms).
+   * Base density ramp duration (ms).
    * During this window the injection rate linearly ramps from 25% to 100%
    * of the computed adaptive rate, avoiding visual flooding on startup.
+   *
+   * Scales with backlog size: small backlogs (<200) use the base value,
+   * large backlogs (>=500) extend to 4000ms to prevent visual flooding.
    */
-  private static readonly DENSITY_RAMP_MS = 4000;
+  private static readonly DENSITY_RAMP_BASE_MS = 2500;
+  private static readonly DENSITY_RAMP_MAX_MS = 4000;
+  private densityRampMs = BacklogInjectionController.DENSITY_RAMP_BASE_MS;
 
   constructor(
     config: BacklogControllerConfig,
@@ -103,6 +108,24 @@ export class BacklogInjectionController {
     this.processedBacklog = 0;
     this.isActive = true;
     this.injectionStartTime = Date.now();
+
+    // Adapt density ramp duration to backlog size.
+    // Small backlogs (<200) use the base ramp; large backlogs (>=500)
+    // extend up to DENSITY_RAMP_MAX_MS to prevent visual flooding.
+    const backlogSize = sampled.length;
+    if (backlogSize >= 500) {
+      this.densityRampMs = BacklogInjectionController.DENSITY_RAMP_MAX_MS;
+    } else if (backlogSize >= 200) {
+      const t = (backlogSize - 200) / 300; // 0 at 200, 1 at 500
+      this.densityRampMs = Math.round(
+        BacklogInjectionController.DENSITY_RAMP_BASE_MS +
+          t *
+            (BacklogInjectionController.DENSITY_RAMP_MAX_MS -
+              BacklogInjectionController.DENSITY_RAMP_BASE_MS)
+      );
+    } else {
+      this.densityRampMs = BacklogInjectionController.DENSITY_RAMP_BASE_MS;
+    }
 
     // Notify listeners that backlog injection has started (for lane partitioning).
     this.onBacklogStateChange?.(true);
@@ -176,13 +199,13 @@ export class BacklogInjectionController {
 
   /**
    * Compute the density ramp factor (0.25-1.0).
-   * Linearly interpolates from 0.25 to 1.0 over DENSITY_RAMP_MS.
+   * Linearly interpolates from 0.25 to 1.0 over the adaptive density ramp window.
    * After the ramp window, returns 1.0 (full rate).
    */
   private getDensityRampFactor(): number {
     const elapsed = Date.now() - this.injectionStartTime;
-    if (elapsed >= BacklogInjectionController.DENSITY_RAMP_MS) return 1;
-    return 0.25 + 0.75 * (elapsed / BacklogInjectionController.DENSITY_RAMP_MS);
+    if (elapsed >= this.densityRampMs) return 1;
+    return 0.25 + 0.75 * (elapsed / this.densityRampMs);
   }
 
   /** Emit a single backlog message to the renderer via callback */

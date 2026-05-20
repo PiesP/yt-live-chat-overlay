@@ -8,7 +8,7 @@ import {
 
 const log = createLogger('RuntimeManager');
 
-const NAVIGATION_SETTLE_DELAY_MS = 3500;
+const NAVIGATION_SETTLE_DELAY_MS = 2000;
 const START_RETRY_DELAY_MS = 2000;
 const MAX_START_ATTEMPTS = 3;
 

@@ -45,7 +45,7 @@ export class SettingsUi {
 
   /** Debounced live preview — applies settings immediately and persists. */
   private previewTimer: ReturnType<typeof setTimeout> | null = null;
-  private readonly PREVIEW_DEBOUNCE_MS = 250;
+  private readonly PREVIEW_DEBOUNCE_MS = 100;
 
   private queuePreview(preview: OverlaySettings): void {
     if (this.previewTimer !== null) {
