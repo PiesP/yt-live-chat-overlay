@@ -326,11 +326,8 @@ export class CanvasRenderer extends RendererBase {
       let opacity = this.settings.opacity;
 
       // Fade-in for the first moment a message appears on screen.
-      // In scroll/reverse modes this applies only to backlog messages to
-      // soften the initial visual burst. In top/bottom modes it applies
-      // to all messages.
-      const shouldFadeIn = !isScrolling || (msg.message.isBacklog ?? false);
-      if (shouldFadeIn && elapsed < CanvasRenderer.FADE_DURATION_MS) {
+      // Applied to all messages in every mode for a smooth entrance.
+      if (elapsed < CanvasRenderer.FADE_DURATION_MS) {
         opacity *= elapsed / CanvasRenderer.FADE_DURATION_MS;
       }
       if (!isScrolling && elapsed > msg.duration - CanvasRenderer.FADE_DURATION_MS) {
@@ -795,7 +792,7 @@ export class CanvasRenderer extends RendererBase {
     grad.addColorStop(0.48, toRgba(baseColor, scAlpha));
     grad.addColorStop(1, toRgba(baseColor, bottomAlpha));
     ctx.fillStyle = grad;
-    this.roundRect(ctx, x, y, w, h, 6);
+    this.roundRect(ctx, x, y, w, h, rendererLayout.superchatCardRadius);
     ctx.fill();
 
     // Left accent bar
@@ -900,7 +897,7 @@ export class CanvasRenderer extends RendererBase {
     ctx.globalAlpha = alpha;
 
     ctx.fillStyle = `rgba(${mem.background.r}, ${mem.background.g}, ${mem.background.b}, ${mem.backgroundAlpha})`;
-    this.roundRect(ctx, x, y, w, h, 6);
+    this.roundRect(ctx, x, y, w, h, rendererLayout.membershipCardRadius);
     ctx.fill();
 
     const elapsed = performance.now() - msg.startTime - msg.pausedDuration;
