@@ -232,10 +232,19 @@ export class BacklogInjectionController {
       return text.length >= 3 && !/^[\sㅋㅎㅇㄱ]+$/.test(text);
     };
 
-    // Partition into priority / substantial / other tiers.
-    const tier1 = messages.filter(isPriority);
-    const tier2 = messages.filter(isSubstantialText);
-    const tier3 = messages.filter((m) => !isPriority(m) && !isSubstantialText(m));
+    // Partition into priority / substantial / other tiers in a single pass.
+    const tier1: ChatMessage[] = [];
+    const tier2: ChatMessage[] = [];
+    const tier3: ChatMessage[] = [];
+    for (const m of messages) {
+      if (isPriority(m)) {
+        tier1.push(m);
+      } else if (isSubstantialText(m)) {
+        tier2.push(m);
+      } else {
+        tier3.push(m);
+      }
+    }
 
     const normalBudget = count < 500 ? Math.floor(count * 0.6) : Math.floor(count * 0.35);
 
