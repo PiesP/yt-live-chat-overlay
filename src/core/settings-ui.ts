@@ -150,14 +150,14 @@ export class SettingsUi {
 
   private bindTabEvents(): void {
     if (!this.modal) return;
-    for (const btn of this.modal.querySelectorAll<HTMLButtonElement>(
-      '.yt-chat-overlay-settings-tab'
-    )) {
-      btn.addEventListener('click', () => {
-        const tabId = btn.dataset.tab;
+    this.modal.addEventListener('click', (event) => {
+      const target = event.target as HTMLElement | null;
+      const tabBtn = target?.closest<HTMLButtonElement>('.yt-chat-overlay-settings-tab');
+      if (tabBtn) {
+        const tabId = tabBtn.dataset.tab;
         if (tabId) this.switchTab(tabId);
-      });
-    }
+      }
+    });
   }
 
   private switchTab(tabId: string): void {
@@ -179,26 +179,33 @@ export class SettingsUi {
   }
 
   private bindModalEvents(): void {
-    this.modal
-      ?.querySelector<HTMLButtonElement>('.yt-chat-overlay-settings-close')
-      ?.addEventListener('click', () => this.close());
-    this.modal
-      ?.querySelector<HTMLButtonElement>('button[data-action="close"]')
-      ?.addEventListener('click', () => this.apply());
-    this.modal
-      ?.querySelector<HTMLButtonElement>('button[data-action="reset"]')
-      ?.addEventListener('click', () => this.handleReset());
+    if (!this.modal) return;
 
-    this.modal
-      ?.querySelector<HTMLButtonElement>('button[data-action="export"]')
-      ?.addEventListener('click', () => this.handleExport());
-    this.modal
-      ?.querySelector<HTMLButtonElement>('button[data-action="import"]')
-      ?.addEventListener('click', () => this.handleImport());
+    // Single delegated handler for all action buttons
+    this.modal.addEventListener('click', (event) => {
+      const target = event.target as HTMLElement | null;
+      const actionBtn = target?.closest<HTMLButtonElement>('button[data-action]');
+      if (actionBtn) {
+        const action = actionBtn.dataset.action;
+        if (action === 'close') this.apply();
+        else if (action === 'reset') this.handleReset();
+        else if (action === 'export') this.handleExport();
+        else if (action === 'import') this.handleImport();
+        return;
+      }
+      const closeBtn = target?.closest<HTMLButtonElement>('.yt-chat-overlay-settings-close');
+      if (closeBtn) {
+        this.close();
+      }
+    });
 
-    this.modal
-      ?.querySelector<HTMLInputElement>('input[name="allowShortTextMessages"]')
-      ?.addEventListener('change', () => this.form.syncMinTextLengthState());
+    // Delegated handler for allowShortTextMessages toggle
+    this.modal.addEventListener('change', (event) => {
+      const target = event.target as HTMLElement | null;
+      if (target instanceof HTMLInputElement && target.name === 'allowShortTextMessages') {
+        this.form.syncMinTextLengthState();
+      }
+    });
 
     this.bindTabEvents();
   }

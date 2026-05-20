@@ -10,9 +10,9 @@ import type {
 import {
   colorIntToCss,
   determineSuperChatTier,
+  EMOJI_ALIAS_PATTERN,
+  EMOJI_TEXT_PATTERN,
   extractUserColor,
-  getEmojiAliasPattern,
-  getEmojiTextPattern,
   hasEmojiContent,
   stripControlCharacters,
   truncateText,
@@ -219,7 +219,7 @@ function isSubstantialMessage(
   if (authorType === 'moderator' || authorType === 'owner' || authorType === 'member') {
     return true;
   }
-  if (hasEmojiContent(body.content) || getEmojiTextPattern().test(body.text)) {
+  if (hasEmojiContent(body.content) || EMOJI_TEXT_PATTERN.test(body.text)) {
     return true;
   }
 
@@ -472,7 +472,7 @@ function getEmojiAltText(emojiData: JsonObject): string {
 
 function getEmojiVisibleFallbackText(emojiData: JsonObject): string {
   const shortcuts = getEmojiShortcuts(emojiData);
-  const aliasPattern = getEmojiAliasPattern();
+  const aliasPattern = EMOJI_ALIAS_PATTERN;
   const nonAliasShortcut = shortcuts.find((s) => !aliasPattern.test(s));
   if (nonAliasShortcut) return normalizeInlineText(nonAliasShortcut);
 

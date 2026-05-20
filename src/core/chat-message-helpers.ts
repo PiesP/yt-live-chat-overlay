@@ -17,17 +17,8 @@ import type { JsonObject } from '@core/youtubei-chat';
  * emoji sequences (skin-tone variants, ZWJ sequences, keycap sequences)
  * are also detected.
  */
-const EMOJI_TEXT_PATTERN = /\p{Emoji}/u;
-
-const EMOJI_ALIAS_PATTERN = /^:[^:\\s][^:]*:$/u;
-
-export function getEmojiTextPattern(): RegExp {
-  return EMOJI_TEXT_PATTERN;
-}
-
-export function getEmojiAliasPattern(): RegExp {
-  return EMOJI_ALIAS_PATTERN;
-}
+export const EMOJI_TEXT_PATTERN = /\p{Emoji}/u;
+export const EMOJI_ALIAS_PATTERN = /^:[^:\\s][^:]*:$/u;
 
 export function stripControlCharacters(text: string): string {
   return text.replace(/[\u0000-\u001F\u007F-\u009F]/g, '');
@@ -125,7 +116,7 @@ export function extractUserColor(renderer: JsonObject): string | undefined {
   if (rgbaMatch) {
     const r = parseInt(rgbaMatch[1] ?? '0', 10);
     const g = parseInt(rgbaMatch[2] ?? '0', 10);
-    const b = parseInt(rgbaMatch[3] ?? '10', 10);
+    const b = parseInt(rgbaMatch[3] ?? '0', 10);
     // Skip colors too close to white (YouTube default) or black
     if (r > 240 && g > 240 && b > 240) return undefined;
     if (r < 15 && g < 15 && b < 15) return undefined;
