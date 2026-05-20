@@ -172,7 +172,8 @@ export class LiveChatSource extends ChatSource {
         const filtered = events.filter((e) => {
           if (e.message.kind === 'superchat' || e.message.kind === 'membership') return true;
           if (e.offsetMs === undefined) return true;
-          return e.offsetMs >= cutoffMs;
+          if (e.offsetMs < cutoffMs) return false;
+          return e.offsetMs <= offsetMs + LIVE_SEED_CUTOFF_MS;
         });
 
         messages = filtered.map((e) => e.message);

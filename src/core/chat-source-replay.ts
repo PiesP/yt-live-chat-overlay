@@ -298,6 +298,11 @@ export class ReplayChatSource extends ChatSource {
       }
 
       this.replayBuffer.shift();
+
+      if (next.offsetMs < currentOffsetMs - REPLAY_EMIT_TOLERANCE_MS) {
+        continue;
+      }
+
       this.emitMessage(next.message);
     }
   }
