@@ -78,21 +78,21 @@ function estimateRegularMessageDimensions(
   const { paddingH, paddingV } = rendererLayout;
 
   if (!showAuthor || !message.author) {
-    return { width: textWidth + paddingH, height: textHeight + paddingV };
+    return { width: textWidth + paddingH * 2, height: textHeight + paddingV * 2 };
   }
 
   const authorFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
   const authorFont = getFontString(authorFontSize, undefined, fontFamily);
   const authorNameWidth = measureTextWidth(message.author, authorFont);
   const authorSectionWidth = rendererLayout.authorPhotoSize + spacing.sm + authorNameWidth;
-  const totalWidth = Math.max(authorSectionWidth + paddingH, textWidth + paddingH);
+  const totalWidth = Math.max(authorSectionWidth + paddingH * 2, textWidth + paddingH * 2);
   const photoHeight = rendererLayout.authorPhotoSize;
   const nameHeight = measureTextHeight(authorFont, authorFontSize);
   const authorSectionHeight = Math.max(photoHeight, nameHeight);
 
   return {
     width: totalWidth,
-    height: authorSectionHeight + spacing.xs + textHeight + paddingV,
+    height: authorSectionHeight + spacing.xs + textHeight + paddingV * 2,
   };
 }
 
@@ -104,7 +104,7 @@ function estimateSuperChatDimensions(
 ): MessageDimensions {
   const { paddingH, paddingV } = rendererLayout.superchat;
   const bodyLineHeight = measureTextHeight(font, fontSize);
-  const innerWidth = rendererLayout.superchatMaxWidth - paddingH;
+  const innerWidth = rendererLayout.superchatMaxWidth - paddingH * 2;
 
   const wrappedLines = wrapTextLines(message.text, font, Math.max(1, innerWidth));
   const textHeight = Math.ceil(bodyLineHeight * wrappedLines.length);
@@ -132,7 +132,7 @@ function estimateSuperChatDimensions(
   const contentWidth = Math.max(authorSectionWidth, badgeWidth, maxLineWidth);
   const width = Math.max(
     rendererLayout.superchatMinWidth,
-    Math.min(rendererLayout.superchatMaxWidth, contentWidth + paddingH)
+    Math.min(rendererLayout.superchatMaxWidth, contentWidth + paddingH * 2)
   );
 
   const authorHeight = showAuthor ? rendererLayout.authorSectionHeightPx : 0;
@@ -146,7 +146,7 @@ function estimateSuperChatDimensions(
   const contentHeight =
     authorHeight + spacing.xs + badgeHeight + spacing.xs + textHeight + stickerHeight;
 
-  return { width, height: contentHeight + paddingV };
+  return { width, height: contentHeight + paddingV * 2 };
 }
 
 function estimateMembershipDimensions(
@@ -161,7 +161,7 @@ function estimateMembershipDimensions(
 
   const infoHeight = nameHeight;
 
-  const innerWidth = rendererLayout.superchatMaxWidth - paddingH;
+  const innerWidth = rendererLayout.superchatMaxWidth - paddingH * 2;
   const wrappedLines = wrapTextLines(message.text, font, Math.max(1, innerWidth));
   const bodyLineCount = wrappedLines.length;
   const textHeight = Math.ceil(bodyLineHeight * bodyLineCount);
@@ -169,7 +169,7 @@ function estimateMembershipDimensions(
   // Clamp width to the same bounds as SuperChat for visual consistency
   const width = Math.max(
     rendererLayout.superchatMinWidth,
-    Math.min(rendererLayout.superchatMaxWidth, textWidth + paddingH)
+    Math.min(rendererLayout.superchatMaxWidth, textWidth + paddingH * 2)
   );
 
   // Include author-to-body gap when author section is present (matching renderMembership)
@@ -178,6 +178,6 @@ function estimateMembershipDimensions(
 
   return {
     width,
-    height: infoHeight + authorBodyGap + textHeight + paddingV,
+    height: infoHeight + authorBodyGap + textHeight + paddingV * 2,
   };
 }
