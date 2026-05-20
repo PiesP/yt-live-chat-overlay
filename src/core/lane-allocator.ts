@@ -48,6 +48,8 @@ export class LaneAllocator {
   private laneIndexToHeapIndex: Map<number, number> = new Map();
   /** Per-lane message count for weighted selection */
   private laneMessageCounts: number[] = [];
+  /** Per-lane last commit timestamp for spatial density calculation */
+  private laneLastUsedAt: number[] = [];
   private laneHeight = 0;
   private laneCount = 0;
 
@@ -66,6 +68,7 @@ export class LaneAllocator {
     this.heap = [];
     this.laneIndexToHeapIndex = new Map();
     this.laneMessageCounts = [];
+    this.laneLastUsedAt = [];
     this.backlogLaneEnd = -1;
     if (!dimensions) {
       this.laneHeight = 0;
@@ -97,6 +100,7 @@ export class LaneAllocator {
       this.heap.push([i, now + i * staggerMs]);
       this.laneIndexToHeapIndex.set(i, i);
       this.laneMessageCounts.push(0);
+      this.laneLastUsedAt.push(0);
     }
     // Build min-heap (4-ary): start from last non-leaf node
     for (let i = Math.floor((this.heap.length - 2) / 4); i >= 0; i--) {
@@ -208,6 +212,7 @@ export class LaneAllocator {
     if (count !== undefined) {
       this.laneMessageCounts[placement.lane.index] = count + 1;
     }
+    this.laneLastUsedAt[placement.lane.index] = startTime;
   }
 
   // ── Partition control ────────────────────────────────────────────────
@@ -230,12 +235,48 @@ export class LaneAllocator {
   // ── Private helpers ─────────────────────────────────────────────────
 
   /**
-   * Allocate a single lane using the min-heap.
-   * When the best lane is available now, use message-count weighting
-   * to spread messages evenly across lanes.
-   *
-   * @param laneStart - inclusive start of the lane range to consider
-   * @param laneEnd - exclusive end of the lane range to consider
+   * Spatial density at a lane: weighted sum of recent usage in nearby lanes.
+   * Lanes used within the last 10 seconds contribute to density, with
+   * closer lanes weighted higher. This prevents vertical clustering by
+   * preferring lanes that have been idle or are far from recently used lanes.
+   */
+  private spatialDensity(laneIndex: number, now: number): number {
+    let density = 0;
+    const DECAY_WINDOW_MS = 10_000;
+    for (let offset = -2; offset <= 2; offset++) {
+      const idx = laneIndex + offset;
+      if (idx < 0 || idx >= this.laneCount) continue;
+      const lastUsed = this.laneLastUsedAt[idx] ?? 0;
+      if (lastUsed === 0) continue;
+      const age = now - lastUsed;
+      if (age >= DECAY_WINDOW_MS) continue;
+      const proximityWeight = 1 / (1 + Math.abs(offset));
+      const recency = 1 - age / DECAY_WINDOW_MS;
+      density += proximityWeight * recency;
+    }
+    return density;
+  }
+
+  /**
+   * Composite lane score: lower is better.
+   * Combines wait time, spatial density, and message count to produce
+   * a balanced lane selection that avoids vertical clustering and
+   * diagonal patterns.
+   */
+  private laneScore(laneIndex: number, waitMs: number, now: number): number {
+    const density = this.spatialDensity(laneIndex, now);
+    const count = this.laneMessageCounts[laneIndex] ?? 0;
+    // waitMs is primary (DLIOS invariant), density secondary, count tertiary
+    return waitMs * 10 + density * 3000 + count * 50;
+  }
+
+  /**
+   * Allocate a single lane using spatial-density-aware selection.
+   * Replaces the old two-phase (best-wait + best-count) approach with
+   * a single unified score that considers:
+   *   1. Wait time (DLIOS available-time invariant)
+   *   2. Spatial density (prevents vertical clustering)
+   *   3. Message count (load balancing tiebreaker)
    */
   private allocateSingleLane(
     now: number,
@@ -245,51 +286,11 @@ export class LaneAllocator {
   ): { laneIndex: number; waitMs: number } | null {
     if (this.heap.length === 0) return null;
 
-    // Find the best lane within the restricted range.
+    const maxWaitMs = isScrolling ? rendererLayout.durationMax : rendererLayout.topBottomDurationMs;
+
     let bestLane = -1;
     let bestWait = Infinity;
-
-    for (let i = 0; i < this.heap.length; i++) {
-      const entry = this.heap[i];
-      if (!entry) continue;
-      const [idx, avail] = entry;
-      if (idx < laneStart || idx >= laneEnd) continue;
-      const wait = Math.max(0, Math.ceil(avail - now));
-      if (wait < bestWait) {
-        bestWait = wait;
-        bestLane = idx;
-        if (wait === 0) break;
-      }
-    }
-
-    if (bestLane === -1) return null;
-
-    const maxWaitMs = isScrolling ? rendererLayout.durationMax : rendererLayout.topBottomDurationMs;
-    if (bestWait > maxWaitMs) return null;
-
-    // When the best lane is available now, check nearby candidates for
-    // better load balance within the partition.
-    if (bestWait === 0) {
-      const best = this.findBestAvailableLane(now, maxWaitMs, laneStart, laneEnd);
-      if (best) return best;
-    }
-
-    return { laneIndex: bestLane, waitMs: bestWait };
-  }
-
-  /**
-   * Among lanes that are available within the grace window, pick the one
-   * with the fewest total messages for visual balance.
-   */
-  private findBestAvailableLane(
-    now: number,
-    maxWaitMs: number,
-    laneStart: number,
-    laneEnd: number
-  ): { laneIndex: number; waitMs: number } | null {
-    let bestLane = -1;
-    let bestWait = maxWaitMs + 1;
-    let bestCount = Infinity;
+    let bestScore = Infinity;
 
     for (let i = 0; i < this.heap.length; i++) {
       const entry = this.heap[i];
@@ -299,13 +300,11 @@ export class LaneAllocator {
       const wait = Math.max(0, Math.ceil(avail - now));
       if (wait > maxWaitMs) continue;
 
-      const count = this.laneMessageCounts[idx] ?? 0;
-      // Prefer: lower wait, then lower message count as tiebreaker
-      if (wait < bestWait || (wait === bestWait && count < bestCount)) {
+      const score = this.laneScore(idx, wait, now);
+      if (score < bestScore) {
+        bestScore = score;
         bestWait = wait;
-        bestCount = count;
         bestLane = idx;
-        if (wait === 0 && count === 0) break; // can't do better
       }
     }
 
