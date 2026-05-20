@@ -47,7 +47,7 @@ type SettingMeta = {
   /** Number of fractional digits to show in UI. Only meaningful when displayScale > 1. */
   displayPrecision?: number;
 };
-const ROOT_SETTING_META: Record<RootScalarSettingKey, SettingMeta> = {
+const ROOT_SETTING_META = {
   enabled: { type: 'boolean', visual: false },
   danmakuMode: { type: 'string', visual: false },
   speedPxPerSec: { type: 'number', visual: true },
@@ -77,7 +77,7 @@ const ROOT_SETTING_META: Record<RootScalarSettingKey, SettingMeta> = {
   preserveUserColor: { type: 'boolean', visual: true },
   superChatMaxBodyLines: { type: 'number', visual: true },
   membershipMaxBodyLines: { type: 'number', visual: true },
-};
+} as const satisfies Record<RootScalarSettingKey, SettingMeta>;
 
 /**
  * Visual root keys derived from ROOT_SETTING_META — single source of truth.
@@ -154,28 +154,28 @@ export function migrateSettings(raw: Record<string, unknown>): Record<string, un
 
 // ── Defaults ────────────────────────────────────────────────────────────────────
 
-const DEFAULT_SHOW_AUTHOR: OverlaySettings['showAuthor'] = {
+const DEFAULT_SHOW_AUTHOR = {
   normal: false,
   member: false,
   moderator: true,
   owner: true,
   verified: false,
   superChat: true,
-};
+} as const satisfies OverlaySettings['showAuthor'];
 
-const DEFAULT_COLORS: OverlaySettings['colors'] = {
+const DEFAULT_COLORS = {
   normal: designColors.authorNormal,
   member: designColors.authorMember,
   moderator: designColors.authorModerator,
   owner: designColors.authorOwner,
   verified: designColors.authorVerified,
-};
+} as const satisfies OverlaySettings['colors'];
 
-const DEFAULT_OUTLINE: OutlineSettings = {
+const DEFAULT_OUTLINE = {
   enabled: true,
   widthPx: 2,
   opacity: 0.8,
-};
+} as const satisfies OutlineSettings;
 
 export const DEFAULT_SETTINGS = {
   enabled: true,
@@ -253,7 +253,7 @@ export function getRootDisplayMeta(key: RootScalarSettingKey): {
   scale: number;
   precision: number;
 } {
-  const meta = ROOT_SETTING_META[key];
+  const meta: SettingMeta = ROOT_SETTING_META[key];
   if (meta?.displayScale) {
     return { scale: meta.displayScale, precision: meta.displayPrecision ?? 0 };
   }

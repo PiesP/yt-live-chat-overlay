@@ -8,11 +8,11 @@ const DEFAULT_LOG_LEVEL: LogLevel = 'warn';
 
 let currentLogLevel: LogLevel = DEFAULT_LOG_LEVEL;
 
-const LOG_LEVEL_RANK: Readonly<Record<LogLevel, number>> = {
+const LOG_LEVEL_RANK = {
   warn: 0,
   info: 1,
   debug: 2,
-};
+} as const satisfies Readonly<Record<LogLevel, number>>;
 
 const shouldEmit = (level: 'debug' | 'info'): boolean =>
   LOG_LEVEL_RANK[currentLogLevel] >= LOG_LEVEL_RANK[level];

@@ -1,69 +1,27 @@
 import { isAbortError } from '@core/dom';
+import {
+  extractInitialChatContinuation,
+  type InnertubeContinuationData,
+} from '@core/youtubei-continuation';
+import {
+  findFirstNestedRecordByKey,
+  findFirstNestedStringByKey,
+  getNestedRecord,
+  getNumber,
+  getString,
+  isRecord,
+  type JsonObject,
+} from '@core/youtubei-json';
 
-export type JsonObject = Record<string, unknown>;
-
-export const isRecord = (value: unknown): value is JsonObject =>
-  typeof value === 'object' && value !== null;
-
-export const asRecord = (value: unknown): JsonObject | null => (isRecord(value) ? value : null);
-
-export const getString = (value: unknown): string | undefined =>
-  typeof value === 'string' && value.length > 0 ? value : undefined;
-
-export const getNumber = (value: unknown): number | undefined => {
-  const n = typeof value === 'string' ? Number(value) : value;
-  return typeof n === 'number' && Number.isFinite(n) ? n : undefined;
-};
-
-const ALLOWED_IMAGE_HOST_SUFFIXES = [
-  'ggpht.com',
-  'googleusercontent.com',
-  'gstatic.com',
-  'ytimg.com',
-];
-
-const isAllowedHostname = (hostname: string): boolean => {
-  const normalizedHostname = hostname.toLowerCase();
-  return ALLOWED_IMAGE_HOST_SUFFIXES.some(
-    (suffix) => normalizedHostname === suffix || normalizedHostname.endsWith(`.${suffix}`)
-  );
-};
-
-const parseAllowedImageUrl = (url: string): URL | null => {
-  const trimmed = url.trim();
-  if (trimmed.length === 0) {
-    return null;
-  }
-
-  try {
-    const normalizedUrl = trimmed.startsWith('//') ? `https:${trimmed}` : trimmed;
-    const parsed = new URL(normalizedUrl);
-
-    if (!isAllowedHostname(parsed.hostname)) {
-      return null;
-    }
-
-    if (parsed.protocol === 'http:') {
-      parsed.protocol = 'https:';
-    }
-
-    return parsed.protocol === 'https:' ? parsed : null;
-  } catch {
-    return null;
-  }
-};
-
-/**
- * Normalize trusted chat asset URLs into absolute HTTPS URLs.
- */
-export const normalizeYouTubeImageUrl = (url: string): string | null =>
-  parseAllowedImageUrl(url)?.toString() ?? null;
-
-export interface InnertubeContinuationData {
-  readonly continuation: string;
-  readonly clickTrackingParams?: string;
-  readonly timeoutMs?: number;
-}
+export type { InnertubeContinuationData } from '@core/youtubei-continuation';
+export {
+  extractNextLiveContinuation,
+  extractPlayerSeekContinuation,
+  extractReplayContinuation,
+} from '@core/youtubei-continuation';
+export { normalizeYouTubeImageUrl } from '@core/youtubei-image';
+export type { JsonObject } from '@core/youtubei-json';
+export { asRecord, getNumber, getString, isRecord } from '@core/youtubei-json';
 
 export interface ChatBootstrapData {
   readonly videoId: string;
@@ -100,83 +58,6 @@ export class YoutubeInnertubeRequestError extends Error {
     this.name = 'YoutubeInnertubeRequestError';
   }
 }
-
-const getNestedRecord = (root: unknown, path: readonly string[]): JsonObject | null => {
-  let current: unknown = root;
-
-  for (const key of path) {
-    if (!isRecord(current)) {
-      return null;
-    }
-
-    current = current[key];
-  }
-
-  return isRecord(current) ? current : null;
-};
-
-/**
- * Generic DFS search through a nested object tree for a specific key.
- * When the key is found, the extract callback decides whether the value
- * is acceptable and what to return. If extract returns null/undefined
- * the search continues.
- */
-function findFirstNestedByKey<T>(
-  root: unknown,
-  key: string,
-  extract: (value: unknown) => T | null
-): T | null {
-  const stack: unknown[] = [root];
-  // Limit total iterations to prevent unbounded traversal on pathological
-  // inputs. YouTube API responses are typically < 20 levels deep.
-  const MAX_PROCESSED = 500;
-  let processed = 0;
-
-  while (stack.length > 0) {
-    if (++processed > MAX_PROCESSED) {
-      break;
-    }
-
-    const current = stack.pop();
-    if (!isRecord(current)) {
-      continue;
-    }
-
-    const candidate = current[key];
-    const result = extract(candidate);
-    if (result != null) {
-      return result;
-    }
-
-    for (const value of Object.values(current)) {
-      if (Array.isArray(value)) {
-        for (const item of value) {
-          stack.push(item);
-        }
-        continue;
-      }
-
-      stack.push(value);
-    }
-  }
-
-  return null;
-}
-
-const findFirstNestedRecordByKey = (
-  root: unknown,
-  key: string,
-  predicate?: (value: JsonObject) => boolean
-): JsonObject | null => {
-  return findFirstNestedByKey(root, key, (v) => {
-    if (!isRecord(v)) return null;
-    if (predicate && !predicate(v)) return null;
-    return v;
-  });
-};
-
-const findFirstNestedStringByKey = (root: unknown, key: string): string | undefined =>
-  findFirstNestedByKey(root, key, (v) => getString(v) ?? null) ?? undefined;
 
 const getVideoIdFromUrl = (href = location.href): string | null => {
   try {
@@ -222,7 +103,8 @@ const tryGetInitialDataFromWindow = (): JsonObject | null => {
 
   return null;
 };
-const fetchWatchHtml = async (videoId: string, signal?: AbortSignal): Promise<string> => {
+
+export const fetchWatchHtml = async (videoId: string, signal?: AbortSignal): Promise<string> => {
   const response = await fetch(buildWatchUrl(videoId), {
     credentials: 'include',
     cache: 'no-store',
@@ -320,14 +202,14 @@ const extractJsonObjectFromHtml = (html: string, markers: readonly string[]): Js
   return null;
 };
 
-const extractInitialDataFromHtml = (html: string): JsonObject | null =>
+export const extractInitialDataFromHtml = (html: string): JsonObject | null =>
   extractJsonObjectFromHtml(html, [
     'var ytInitialData = ',
     'window["ytInitialData"] = ',
     'window.ytInitialData = ',
   ]);
 
-const extractYtcfgFromHtml = (html: string): JsonObject | null =>
+export const extractYtcfgFromHtml = (html: string): JsonObject | null =>
   extractJsonObjectFromHtml(html, ['ytcfg.set({', 'window.ytcfg.set({']);
 
 /**
@@ -356,87 +238,6 @@ const findLiveChatRenderer = (initialData: JsonObject): JsonObject | null => {
     Array.isArray(value.continuations)
   );
 };
-
-const toContinuationData = (value: unknown): InnertubeContinuationData | null => {
-  if (!isRecord(value)) {
-    return null;
-  }
-
-  const continuation = getString(value.continuation);
-  if (!continuation) {
-    return null;
-  }
-
-  const result: {
-    continuation: string;
-    clickTrackingParams?: string;
-    timeoutMs?: number;
-  } = { continuation };
-
-  const clickTrackingParams = getString(value.clickTrackingParams);
-  if (clickTrackingParams) {
-    result.clickTrackingParams = clickTrackingParams;
-  }
-
-  const timeoutMs = getNumber(value.timeoutMs);
-  if (timeoutMs !== undefined) {
-    result.timeoutMs = timeoutMs;
-  }
-
-  return result;
-};
-
-const pickContinuation = (
-  continuations: unknown,
-  keys: readonly string[]
-): InnertubeContinuationData | null => {
-  if (!Array.isArray(continuations)) {
-    return null;
-  }
-
-  for (const item of continuations) {
-    if (!isRecord(item)) {
-      continue;
-    }
-
-    for (const key of keys) {
-      const continuation = toContinuationData(item[key]);
-      if (continuation) {
-        return continuation;
-      }
-    }
-  }
-
-  return null;
-};
-
-const extractInitialChatContinuation = (renderer: JsonObject): InnertubeContinuationData | null =>
-  pickContinuation(renderer.continuations, [
-    'reloadContinuationData',
-    'invalidationContinuationData',
-    'timedContinuationData',
-    'liveChatReplayContinuationData',
-    'playerSeekContinuationData',
-  ]);
-
-export const extractNextLiveContinuation = (
-  continuations: unknown
-): InnertubeContinuationData | null =>
-  pickContinuation(continuations, [
-    'invalidationContinuationData',
-    'timedContinuationData',
-    'reloadContinuationData',
-  ]);
-
-export const extractReplayContinuation = (
-  continuations: unknown
-): InnertubeContinuationData | null =>
-  pickContinuation(continuations, ['liveChatReplayContinuationData']);
-
-export const extractPlayerSeekContinuation = (
-  continuations: unknown
-): InnertubeContinuationData | null =>
-  pickContinuation(continuations, ['playerSeekContinuationData']);
 
 const resolveApiKey = (ytcfg: JsonObject): string | undefined =>
   getString(ytcfg.INNERTUBE_API_KEY) ?? findFirstNestedStringByKey(ytcfg, 'innertubeApiKey');

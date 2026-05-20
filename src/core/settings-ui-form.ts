@@ -9,6 +9,20 @@ import {
   type RootScalarSettingKey,
   resolveLimits,
 } from '@core/settings-schema';
+import {
+  createActions,
+  createCheckboxField,
+  createEnabledField,
+  createHeader,
+  createTabs,
+  domDiv,
+  domField,
+  domGridCheckbox,
+  domGridHeader,
+  domGridLabel,
+  domInput,
+  domSection,
+} from '@core/settings-ui-dom';
 import { PANES } from '@core/settings-ui-panes';
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -17,8 +31,6 @@ const STYLE_ID = 'yt-chat-overlay-settings-style';
 export const BUTTON_ID = 'yt-chat-overlay-settings-button';
 export const BACKDROP_ID = 'yt-chat-overlay-settings-backdrop';
 export { STYLE_ID };
-
-const TITLE_ID = 'yt-chat-overlay-settings-title';
 
 const ROOT_ROUNDED_KEYS = new Set<RootScalarSettingKey>([
   'maxConcurrentMessages',
@@ -153,11 +165,11 @@ export class SettingsUiForm {
     for (const pane of panes) {
       this.attachLivePreview(pane);
     }
-    return [this.createHeader(), this.createTabs(), ...panes, this.createActions()];
+    return [createHeader(), createTabs(), ...panes, createActions()];
   }
 
   private buildPane(def: PaneDef): HTMLDivElement {
-    const pane = this.div('yt-chat-overlay-settings-pane');
+    const pane = domDiv('yt-chat-overlay-settings-pane');
     pane.id = `pane-${def.id}`;
     pane.dataset.pane = def.id;
     pane.setAttribute('role', 'tabpanel');
@@ -171,7 +183,7 @@ export class SettingsUiForm {
       if (section.fields.length === 0) continue;
 
       if (section.title) {
-        const secEl = this.section(section.title);
+        const secEl = domSection(section.title);
         for (const field of section.fields) {
           secEl.appendChild(this.buildField(field));
         }
@@ -190,17 +202,17 @@ export class SettingsUiForm {
   private buildField(def: FieldDef): HTMLElement {
     switch (def.type) {
       case 'enabled':
-        return this.createEnabledField();
+        return createEnabledField();
       case 'checkbox':
-        return this.createCheckboxField(def.label, def.key, def.title);
+        return createCheckboxField(def.label, def.key, def.title);
       case 'number': {
-        const input = this.input({ type: 'number', name: this.resolveKey(def) });
+        const input = domInput({ type: 'number', name: this.resolveKey(def) });
         applyNumberInputAttributes(
           input,
           def.key as RootScalarSettingKey | Exclude<OutlineSettingKey, 'enabled'>
         );
         if (def.title) input.title = def.title;
-        return this.field(def.label, input);
+        return domField(def.label, input);
       }
       case 'select': {
         const select = document.createElement('select');
@@ -212,13 +224,13 @@ export class SettingsUiForm {
           opt.textContent = label;
           select.appendChild(opt);
         }
-        return this.field(def.label, select);
+        return domField(def.label, select);
       }
       case 'text': {
-        const input = this.input({ type: 'text', name: def.key });
+        const input = domInput({ type: 'text', name: def.key });
         if (def.title) input.title = def.title;
         if (def.placeholder) input.placeholder = def.placeholder;
-        return this.field(def.label, input);
+        return domField(def.label, input);
       }
       default:
         throw new Error('Unhandled field type');
@@ -230,152 +242,30 @@ export class SettingsUiForm {
   }
 
   private buildAuthorGrid(): HTMLDivElement {
-    const section = this.section('Author Colors & Visibility');
-    const grid = this.div('yt-chat-overlay-author-grid');
-    grid.append(document.createElement('span'), this.gridHeader('Color'), this.gridHeader('Show'));
+    const section = domSection('Author Colors & Visibility');
+    const grid = domDiv('yt-chat-overlay-author-grid');
+    grid.append(document.createElement('span'), domGridHeader('Color'), domGridHeader('Show'));
 
     for (const key of AUTHOR_COLOR_KEYS) {
       grid.append(
-        this.gridLabel(key.charAt(0).toUpperCase() + key.slice(1)),
-        this.input({
+        domGridLabel(key.charAt(0).toUpperCase() + key.slice(1)),
+        domInput({
           type: 'color',
           name: `color-${key}`,
           className: 'yt-chat-overlay-author-grid-color',
         }),
-        this.gridCheckbox(`showAuthor-${key}`)
+        domGridCheckbox(`showAuthor-${key}`)
       );
     }
 
     grid.append(
-      this.gridLabel('SuperChat'),
+      domGridLabel('SuperChat'),
       document.createElement('span'),
-      this.gridCheckbox('showAuthor-superChat')
+      domGridCheckbox('showAuthor-superChat')
     );
 
     section.appendChild(grid);
     return section;
-  }
-
-  // ── DOM helpers ────────────────────────────────────────────────────────
-
-  private div(className: string): HTMLDivElement {
-    const el = document.createElement('div');
-    el.className = className;
-    return el;
-  }
-
-  private input(props: { type: string; name: string; className?: string }): HTMLInputElement {
-    const el = document.createElement('input');
-    el.type = props.type;
-    el.name = props.name;
-    if (props.className) el.className = props.className;
-    return el;
-  }
-
-  private field(labelText: string, control: HTMLElement): HTMLLabelElement {
-    const label = document.createElement('label');
-    label.className = 'yt-chat-overlay-settings-field';
-    const text = document.createElement('span');
-    text.textContent = labelText;
-    label.append(text, control);
-    return label;
-  }
-
-  private section(titleText: string): HTMLDivElement {
-    const sec = this.div('yt-chat-overlay-settings-section');
-    const title = this.div('yt-chat-overlay-settings-section-title');
-    title.textContent = titleText;
-    sec.appendChild(title);
-    return sec;
-  }
-
-  private gridCheckbox(name: string): HTMLInputElement {
-    const el = this.input({ type: 'checkbox', name });
-    el.className = 'yt-chat-overlay-author-grid-checkbox';
-    return el;
-  }
-
-  private gridHeader(text: string): HTMLSpanElement {
-    const el = document.createElement('span');
-    el.className = 'yt-chat-overlay-author-grid-header';
-    el.textContent = text;
-    return el;
-  }
-
-  private gridLabel(text: string): HTMLSpanElement {
-    const el = document.createElement('span');
-    el.className = 'yt-chat-overlay-author-grid-label';
-    el.textContent = text;
-    return el;
-  }
-
-  private createHeader(): HTMLDivElement {
-    const header = this.div('yt-chat-overlay-settings-header');
-    const title = document.createElement('div');
-    title.id = TITLE_ID;
-    title.textContent = 'Chat Overlay';
-    const closeButton = document.createElement('button');
-    closeButton.type = 'button';
-    closeButton.className = 'yt-chat-overlay-settings-close';
-    closeButton.setAttribute('aria-label', 'Close settings');
-    closeButton.textContent = 'x';
-    header.append(title, closeButton);
-    return header;
-  }
-
-  private createTabs(): HTMLElement {
-    const nav = document.createElement('nav');
-    nav.className = 'yt-chat-overlay-settings-tabs';
-    nav.setAttribute('role', 'tablist');
-    nav.setAttribute('aria-label', 'Settings categories');
-
-    for (const pane of PANES) {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'yt-chat-overlay-settings-tab';
-      button.dataset.tab = pane.id;
-      button.setAttribute('role', 'tab');
-      button.setAttribute('aria-selected', String(pane.id === 'comments'));
-      button.setAttribute('aria-controls', `pane-${pane.id}`);
-      button.textContent = pane.label;
-      if (pane.id === 'comments') button.classList.add('active');
-      nav.appendChild(button);
-    }
-
-    return nav;
-  }
-
-  private createActions(): HTMLDivElement {
-    const actions = this.div('yt-chat-overlay-settings-actions');
-    for (const [action, label] of [
-      ['reset', 'Reset'],
-      ['export', 'Export'],
-      ['import', 'Import'],
-      ['close', 'Close'],
-    ] as const) {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.dataset.action = action;
-      button.textContent = label;
-      actions.appendChild(button);
-    }
-    return actions;
-  }
-
-  private createEnabledField(): HTMLLabelElement {
-    const label = document.createElement('label');
-    label.className = 'yt-chat-overlay-settings-enabled';
-    const text = document.createElement('span');
-    text.textContent = 'Overlay Enabled';
-    const input = this.input({ type: 'checkbox', name: 'enabled' });
-    label.append(text, input);
-    return label;
-  }
-
-  private createCheckboxField(labelText: string, name: string, title?: string): HTMLLabelElement {
-    const input = this.input({ type: 'checkbox', name });
-    if (title) input.title = title;
-    return this.field(labelText, input);
   }
 
   // ── Form population (schema-driven) ────────────────────────────────────
