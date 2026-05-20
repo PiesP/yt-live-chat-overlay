@@ -389,7 +389,7 @@ export class BacklogInjectionController {
       }
     } else if (!this.isInjecting && this.isActive && this.backlogQueue.length > 0) {
       this.isInjecting = true;
-      this.injectionTimer = setTimeout(() => this.processTick(), 500);
+      this.processTick();
     }
   }
 }
