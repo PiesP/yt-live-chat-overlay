@@ -199,27 +199,14 @@ export class LaneAllocator {
    * Commit the placement — update the lane's available time for the
    * next message. For multi-slot messages, all occupied lanes are updated.
    *
-   * @param speedMultiplier - Multiplier applied to the effective velocity
-   *   when computing lane occupancy. Backlog messages use a higher speed
-   *   (e.g. 2x) and thus free up lanes sooner, preventing unnecessary
-   *   collisions with real-time messages.
+   * @param placement   - The lane placement returned by findPlacement()
+   * @param startTime   - The timestamp (performance.now()) when the message starts
+   * @param durationMs  - The actual animation duration in milliseconds. This must
+   *   match the duration used by the renderer so that the lane is not released
+   *   before the message has fully exited the screen.
    */
-  commitPlacement(
-    placement: LanePlacement,
-    textWidth: number,
-    startTime: number,
-    speedMultiplier = 1
-  ): void {
-    const mode = this.options.getDanmakuMode();
-    const isScrolling = mode === 'scroll' || mode === 'reverse';
-    const velocity = this.options.getEffectiveSpeedPxPerSec();
-
-    const effectiveVelocity = velocity * speedMultiplier;
-
-    const baseOccupancyMs = isScrolling
-      ? ((textWidth + rendererLayout.dliosSafetyGap) / effectiveVelocity) * 1000
-      : rendererLayout.topBottomDurationMs;
-    const occupancyMs = baseOccupancyMs + LaneAllocator.LANE_COOLDOWN_MS;
+  commitPlacement(placement: LanePlacement, startTime: number, durationMs: number): void {
+    const occupancyMs = durationMs + LaneAllocator.LANE_COOLDOWN_MS;
 
     const nextAvailable = startTime + occupancyMs;
     const startIdx = placement.lane.index;

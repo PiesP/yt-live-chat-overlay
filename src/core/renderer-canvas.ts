@@ -427,10 +427,10 @@ export class CanvasRenderer extends RendererBase {
 
     const laneY = placement.laneY;
 
-    // For backlog messages, pass the speed multiplier so the lane allocator
-    // can account for the faster scroll speed when computing lane occupancy.
-    const backlogSpeed = message.isBacklog ? this.settings.backlogSpeedMultiplier : 1;
-    this.laneAllocator.commitPlacement(placement, msgWidth, now, backlogSpeed);
+    // For backlog messages, the effectiveDuration already accounts for the
+    // backlog speed multiplier (via getEffectiveBacklogSpeed()), so we pass
+    // it directly — the lane will be held for the full animation duration.
+    this.laneAllocator.commitPlacement(placement, now, effectiveDuration);
 
     // All messages in scroll mode start from the same vertical line.
     const startX = mode === 'scroll' ? dims.width : -(msgWidth + rendererLayout.exitPaddingMin);
