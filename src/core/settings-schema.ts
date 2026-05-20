@@ -133,7 +133,7 @@ export const SETTINGS_LIMITS = {
   minTextLength: { min: 1, max: 10, step: 1 },
   outlineWidthPx: { min: 0, max: 8, step: 0.5 },
   outlineOpacity: { min: 0, max: 1, step: 0.1 },
-  laneSpacing: { min: -12, max: 20, step: 1 },
+  laneSpacing: { min: 0, max: 20, step: 1 },
   authorRateLimitWindowMs: { min: 1000, max: 30000, step: 1000 },
   authorRateLimitMaxMessages: { min: 1, max: 20, step: 1 },
   backlogMaxRate: { min: 0, max: 50, step: 5 },
