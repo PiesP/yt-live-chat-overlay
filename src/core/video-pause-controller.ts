@@ -80,7 +80,7 @@ export class VideoPauseController {
 
     if (playerContainer) {
       const observer = new MutationObserver(() => scheduleRebind());
-      observer.observe(playerContainer, { childList: true, subtree: true });
+      observer.observe(playerContainer, { childList: true });
 
       this.videoPauseCleanup = () => {
         if (this.rebindTimer !== null) {
