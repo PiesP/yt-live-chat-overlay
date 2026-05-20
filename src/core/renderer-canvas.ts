@@ -376,8 +376,84 @@ export class CanvasRenderer extends RendererBase {
       this.activeMessages.length < this.settings.maxConcurrentMessages
     ) {
       const msg = this.pendingQueue.shift();
-      if (msg) this.enqueueMessage(msg, now);
+      if (!msg) continue;
+
+      // Per-frame collision check: verify that placing this message at its
+      // target lane would not overlap with any currently visible message.
+      // If it would, put it back and stop draining — the next frame will
+      // retry when existing messages have moved further.
+      if (this.wouldOverlap(msg, now)) {
+        this.pendingQueue.unshift(msg);
+        break;
+      }
+
+      this.enqueueMessage(msg, now);
     }
+  }
+
+  /**
+   * Check whether placing a new message at its target lane would cause
+   * visual overlap with any currently active (visible) message.
+   *
+   * For scrolling modes, overlap occurs when a new message enters from the
+   * right edge while an existing message in the same or adjacent lane has
+   * not yet fully exited from the left edge. We use the actual bounding
+   * boxes of active messages rather than the lane allocator's theoretical
+   * available-time, which can be inaccurate after pause/resume.
+   *
+   * For top/bottom modes, overlap occurs when an active message in the same
+   * lane has not yet expired.
+   */
+  private wouldOverlap(message: ChatMessage, now: number): boolean {
+    const dims = this.overlay.getDimensions();
+    if (!dims) return true;
+
+    const mode = this.settings.danmakuMode;
+    const isScrolling = mode === 'scroll' || mode === 'reverse';
+    const { height: msgHeight } = this.estimateDimensions(message);
+
+    // Find the target lane Y position via the allocator (without committing).
+    const placement = this.laneAllocator.findPlacement(msgHeight, dims, message.isBacklog ?? false);
+    if (!placement) return true; // no lane available → treat as overlap
+
+    const newLaneY = placement.laneY;
+    const laneHeight = this.laneAllocator.getLaneHeight();
+
+    // Check against all active messages for bounding-box overlap.
+    for (const active of this.activeMessages) {
+      const activeElapsed = now - active.startTime - active.pausedDuration;
+      if (activeElapsed < 0) continue; // not yet started
+
+      // Vertical overlap: check if the two messages occupy the same vertical space.
+      // Use lane-height granularity to account for padding/spacing.
+      const verticalGap = Math.abs(active.y - newLaneY);
+      if (verticalGap >= laneHeight) continue; // different lanes, no overlap
+
+      if (isScrolling) {
+        // Horizontal overlap: the active message's right edge must have exited
+        // the screen before the new message enters from the right.
+        const travelDistance = dims.width + active.width + rendererLayout.exitPaddingMin;
+        const activeProgress = Math.min(1, activeElapsed / active.duration);
+        const activeRightEdge = active.startX - activeProgress * travelDistance + active.width;
+
+        // The new message starts at the right edge (or left for reverse).
+        // Overlap if the active message's right edge is still on screen.
+        if (mode === 'scroll') {
+          if (activeRightEdge > 0) return true;
+        } else {
+          // reverse mode: messages enter from left, travel right
+          const reverseTravel = dims.width * 2 + rendererLayout.exitPaddingMin;
+          const activeX = -active.width + activeProgress * reverseTravel;
+          if (activeX + active.width > 0) return true;
+        }
+      } else {
+        // Top/bottom modes: overlap if the active message in the same lane
+        // has not yet expired.
+        if (activeElapsed < active.duration) return true;
+      }
+    }
+
+    return false;
   }
 
   // ── Message enqueue ──────────────────────────────────────────────────

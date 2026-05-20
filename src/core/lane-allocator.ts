@@ -1,5 +1,5 @@
 import type { LaneState, OverlayDimensions } from '@app-types';
-import { rendererLayout } from '@core/design-tokens';
+import { rendererLayout, spacing } from '@core/design-tokens';
 import { measureTextHeight } from '@core/text-measure';
 
 export interface LanePlacement {
@@ -60,9 +60,19 @@ export class LaneAllocator {
 
   /**
    * Minimum cooldown between consecutive uses of the same lane (ms).
-   * Prevents vertical clustering by ensuring a lane is not reused too soon.
+   * This is the floor value; the actual cooldown scales with message duration
+   * to ensure the previous message has fully exited the screen before the next
+   * one enters, even under variable playback rates or pause/resume cycles.
    */
-  private static readonly LANE_COOLDOWN_MS = 500;
+  private static readonly LANE_COOLDOWN_MIN_MS = 500;
+
+  /**
+   * Safety margin ratio applied to message duration.
+   * The total cooldown = max(LANE_COOLDOWN_MIN_MS, durationMs * SAFETY_MARGIN_RATIO).
+   * A 15% margin ensures that even if the timer is slightly imprecise (e.g.
+   * after pause/resume), the previous message has cleared the screen.
+   */
+  private static readonly SAFETY_MARGIN_RATIO = 0.15;
 
   /**
    * When backlog partitioning is active, backlog messages are restricted
@@ -88,16 +98,26 @@ export class LaneAllocator {
     }
 
     // Compute lane height from actual font metrics, not a hardcoded multiplier.
-    // This ensures laneHeight == measureTextHeight + paddingV + laneSpacing,
-    // which is exactly the same formula used by estimateMessageDimensions().
-    // Result: msgHeight <= laneHeight always holds at laneSpacing >= 0,
-    // and the 1-slot/2-slot transition happens at a predictable laneSpacing.
-    // Use paddingV * 2 (top + bottom) for lane height, matching the total
-    // vertical padding applied by estimateMessageDimensions.
+    // Must account for the author section (photo + name) which adds height
+    // beyond the text body. Without this, messages with showAuthor enabled
+    // would exceed the lane height and overlap adjacent lanes.
+    //
+    // Formula: laneHeight = authorSection + gap + textHeight + paddingV*2 + laneSpacing
+    // where authorSection = max(authorPhotoSize, authorNameHeight)
     const totalPaddingV = rendererLayout.paddingV * 2;
     const font = `${this.options.fontWeight === 'bold' ? 'bold' : '400'} ${this.options.fontSize}px ${this.options.fontFamily}`;
     const textHeight = measureTextHeight(font, this.options.fontSize);
-    this.laneHeight = Math.max(1, textHeight + totalPaddingV + this.options.laneSpacing);
+
+    // Author section height: max of photo size and rendered name height.
+    const authorFontSize = Math.round(this.options.fontSize * rendererLayout.authorFontScale);
+    const authorFont = `${this.options.fontWeight === 'bold' ? 'bold' : '400'} ${authorFontSize}px ${this.options.fontFamily}`;
+    const authorNameHeight = measureTextHeight(authorFont, authorFontSize);
+    const authorSectionHeight = Math.max(rendererLayout.authorPhotoSize, authorNameHeight);
+
+    this.laneHeight = Math.max(
+      1,
+      authorSectionHeight + spacing.xs + textHeight + totalPaddingV + this.options.laneSpacing
+    );
 
     const usableHeight = dimensions.height * (1 - this.options.safeTop - this.options.safeBottom);
     this.laneCount = Math.max(1, Math.floor(usableHeight / this.laneHeight));
@@ -202,7 +222,12 @@ export class LaneAllocator {
    *   before the message has fully exited the screen.
    */
   commitPlacement(placement: LanePlacement, startTime: number, durationMs: number): void {
-    const occupancyMs = durationMs + LaneAllocator.LANE_COOLDOWN_MS;
+    // Dynamic cooldown: max of fixed minimum or duration-proportional safety margin.
+    // This ensures long messages get enough clearance time, while short messages
+    // still benefit from the minimum cooldown to prevent vertical clustering.
+    const safetyMargin = Math.round(durationMs * LaneAllocator.SAFETY_MARGIN_RATIO);
+    const cooldownMs = Math.max(LaneAllocator.LANE_COOLDOWN_MIN_MS, safetyMargin);
+    const occupancyMs = durationMs + cooldownMs;
 
     const nextAvailable = startTime + occupancyMs;
     const startIdx = placement.lane.index;
