@@ -22,6 +22,7 @@ export class ObservabilityReporter {
   private windowStartTime = Date.now();
   private debugOverlayEl: HTMLElement | null = null;
   private debugUpdateTimer: ReturnType<typeof setInterval> | null = null;
+  private boundVisibilityHandler: (() => void) | null = null;
   private lastWarnTime = 0;
   private readonly WARN_COOLDOWN_MS = 30_000;
   private readonly METRIC_WINDOW_MS = 60_000;
@@ -149,7 +150,33 @@ export class ObservabilityReporter {
       'pointer-events:none;user-select:none';
     document.body.appendChild(el);
     this.debugOverlayEl = el;
+    this.registerVisibilityHandler();
     this.scheduleDebugUpdate();
+  }
+
+  private registerVisibilityHandler(): void {
+    if (this.boundVisibilityHandler) return;
+    this.boundVisibilityHandler = () => {
+      if (document.hidden) {
+        this.pauseDebugUpdate();
+      } else {
+        this.resumeDebugUpdate();
+      }
+    };
+    document.addEventListener('visibilitychange', this.boundVisibilityHandler);
+  }
+
+  private pauseDebugUpdate(): void {
+    if (this.debugUpdateTimer !== null) {
+      clearInterval(this.debugUpdateTimer);
+      this.debugUpdateTimer = null;
+    }
+  }
+
+  private resumeDebugUpdate(): void {
+    if (this.showDebug) {
+      this.scheduleDebugUpdate();
+    }
   }
 
   private scheduleDebugUpdate(): void {
@@ -183,6 +210,10 @@ export class ObservabilityReporter {
     if (this.debugUpdateTimer !== null) {
       clearInterval(this.debugUpdateTimer);
       this.debugUpdateTimer = null;
+    }
+    if (this.boundVisibilityHandler) {
+      document.removeEventListener('visibilitychange', this.boundVisibilityHandler);
+      this.boundVisibilityHandler = null;
     }
     if (this.debugOverlayEl) {
       this.debugOverlayEl.remove();
