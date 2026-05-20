@@ -96,12 +96,16 @@ export abstract class RendererBase {
     this.pausedAt = null;
     this.burstDetector.resume();
 
+    // Always shift lane timers regardless of video pause state.
+    // The lane allocator tracks wall-clock availability, so it must be
+    // advanced by the paused duration even if the video is still paused.
+    this.laneAllocator.shiftAll(pausedDuration);
+    this.isPaused = false;
+
     if (this.isVideoPaused) {
       return;
     }
 
-    this.laneAllocator.shiftAll(pausedDuration);
-    this.isPaused = false;
     this.onResume();
     log.debug('Resumed');
   }
