@@ -57,6 +57,13 @@ export class BacklogInjectionController {
   public onBacklogStateChange: ((active: boolean) => void) | null = null;
 
   /**
+   * Callback to query current lane utilization (0–1).
+   * When set, the injection rate is throttled proportionally to how full
+   * the screen is — high utilization → slower injection.
+   */
+  public onUtilizationQuery: (() => number) | null = null;
+
+  /**
    * Base density ramp duration (ms).
    * During this window the injection rate linearly ramps from 25% to 100%
    * of the computed adaptive rate, avoiding visual flooding on startup.
@@ -171,8 +178,12 @@ export class BacklogInjectionController {
     const maxRate = Math.max(4, Math.min(20, Math.min(this.config.backlogMaxRate, this.lanes * 2)));
     const realTimeFactor = Math.max(0.25, 1 - this.realTimeActivityCount * 0.2);
     const rampFactor = this.getDensityRampFactor();
-    const adaptiveRate = Math.max(1, Math.round(maxRate * realTimeFactor * rampFactor));
-    const tickInterval = Math.round(1000 / adaptiveRate);
+    const utilizationFactor = this.getUtilizationFactor();
+    const adaptiveRate = Math.max(
+      1,
+      Math.round(maxRate * realTimeFactor * rampFactor * utilizationFactor)
+    );
+    const meanInterval = Math.round(1000 / adaptiveRate);
 
     this.realTimeActivityCount = Math.max(0, this.realTimeActivityCount - 1);
 
@@ -190,11 +201,45 @@ export class BacklogInjectionController {
 
     this.emitBacklogMessage(message);
 
-    this.scheduleNextTick(tickInterval);
+    this.scheduleNextTick(meanInterval);
   }
 
-  private scheduleNextTick(tickInterval: number): void {
-    this.injectionTimer = setTimeout(() => this.processTick(), tickInterval);
+  /**
+   * Compute a utilization-based throttle factor (0.1–1.0).
+   * When the screen is heavily occupied, injection slows down to prevent
+   * visual crowding. Uses the lane utilization ratio from the allocator.
+   */
+  private getUtilizationFactor(): number {
+    if (!this.onUtilizationQuery) return 1;
+    const utilization = this.onUtilizationQuery();
+    // Linear falloff: 0% utilized → 1.0, 100% utilized → 0.1
+    return Math.max(0.1, 1 - utilization * 0.9);
+  }
+
+  /**
+   * Schedule the next injection tick using Poisson-distributed spacing.
+   *
+   * Instead of a fixed interval, the delay is sampled from an exponential
+   * distribution with the given mean. This produces a Poisson process whose
+   * long-term rate matches the target, but whose individual intervals vary
+   * naturally — eliminating the "train" pattern caused by uniform spacing.
+   *
+   * The result is clamped to [16ms, 2×mean] to prevent extreme outliers.
+   */
+  private scheduleNextTick(meanInterval: number): void {
+    const poissonDelay = Math.max(
+      16,
+      Math.min(meanInterval * 2, this.sampleExponential(meanInterval))
+    );
+    this.injectionTimer = setTimeout(() => this.processTick(), poissonDelay);
+  }
+
+  /**
+   * Sample from an exponential distribution with the given mean.
+   * Uses the inverse-CDF method: -mean * ln(1 - U) where U ~ Uniform(0, 1).
+   */
+  private sampleExponential(mean: number): number {
+    return -mean * Math.log(1 - Math.random());
   }
 
   /**

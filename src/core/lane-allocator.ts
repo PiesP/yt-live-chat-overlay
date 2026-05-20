@@ -172,7 +172,7 @@ export class LaneAllocator {
 
     // For multi-slot messages, find the best starting lane such that
     // all slots [laneIndex, laneIndex + slotCount) are within range.
-    const result = this.allocateMultiSlot(now, laneStart, laneEnd, slotCount);
+    const result = this.allocateMultiSlot(now, laneStart, laneEnd, slotCount, isBacklog);
     if (!result) return null;
 
     const lane: LaneState = {
@@ -394,11 +394,16 @@ export class LaneAllocator {
    * Allocate a single lane using spatial-density-aware selection.
    * Scans the top-K earliest-available lanes and picks the one with
    * the best composite score (wait time + spatial density + message count).
+   *
+   * When `isBacklog` is true, an additional adjacency gap penalty is
+   * applied to spread messages vertically and prevent clustering during
+   * the initial backlog injection phase.
    */
   private allocateSingleLane(
     now: number,
     laneStart: number,
-    laneEnd: number
+    laneEnd: number,
+    isBacklog = false
   ): { laneIndex: number; waitMs: number } | null {
     if (this.heap.length === 0) return null;
 
@@ -417,7 +422,14 @@ export class LaneAllocator {
       const wait = Math.max(0, Math.ceil(avail - now));
       if (wait > maxWaitMs) continue;
 
-      const score = this.laneScore(idx, wait, now);
+      let score = this.laneScore(idx, wait, now);
+
+      // During backlog injection, penalize lanes that are close to
+      // recently-used lanes to enforce vertical spread.
+      if (isBacklog) {
+        score += this.backlogAdjacencyPenalty(idx, now);
+      }
+
       if (score < bestScore) {
         bestScore = score;
         bestWait = wait;
@@ -436,16 +448,20 @@ export class LaneAllocator {
    *
    * Uses the top-K earliest-available starting lanes and picks the one
    * with the best composite score (max wait + avg density + avg count).
+   *
+   * When `isBacklog` is true, single-slot messages are routed through
+   * `allocateSingleLane` with the backlog adjacency penalty applied.
    */
   private allocateMultiSlot(
     now: number,
     laneStart: number,
     laneEnd: number,
-    slotCount: number
+    slotCount: number,
+    isBacklog = false
   ): { laneIndex: number; waitMs: number } | null {
     if (this.heap.length === 0) return null;
     if (slotCount <= 1) {
-      return this.allocateSingleLane(now, laneStart, laneEnd);
+      return this.allocateSingleLane(now, laneStart, laneEnd, isBacklog);
     }
 
     const maxWaitMs = rendererLayout.durationMax;
@@ -502,6 +518,37 @@ export class LaneAllocator {
 
     if (bestLane === -1) return null;
     return { laneIndex: bestLane, waitMs: bestWait };
+  }
+
+  /**
+   * Penalty for placing a backlog message in a lane whose immediate
+   * neighbours were recently used. This enforces vertical spread during
+   * the initial backlog injection phase, preventing messages from
+   * clustering together.
+   *
+   * Returns 0 if no adjacent lanes were recently used, or a value in
+   * (0, 0.4] proportional to how recently the adjacent lane was used.
+   */
+  private backlogAdjacencyPenalty(laneIndex: number, now: number): number {
+    const ADJACENT_WINDOW_MS = 3_000;
+    let penalty = 0;
+    // Check lane immediately above
+    const above = laneIndex - 1;
+    if (above >= 0) {
+      const lastUsed = this.laneLastUsedAt[above] ?? 0;
+      if (lastUsed > 0 && now - lastUsed < ADJACENT_WINDOW_MS) {
+        penalty = Math.max(penalty, (1 - (now - lastUsed) / ADJACENT_WINDOW_MS) * 0.4);
+      }
+    }
+    // Check lane immediately below
+    const below = laneIndex + 1;
+    if (below < this.laneCount) {
+      const lastUsed = this.laneLastUsedAt[below] ?? 0;
+      if (lastUsed > 0 && now - lastUsed < ADJACENT_WINDOW_MS) {
+        penalty = Math.max(penalty, (1 - (now - lastUsed) / ADJACENT_WINDOW_MS) * 0.4);
+      }
+    }
+    return penalty;
   }
 
   /** Get the available-at time for a lane by its index. */

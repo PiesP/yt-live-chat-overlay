@@ -117,6 +117,11 @@ export class CanvasRenderer extends RendererBase {
     return this.laneAllocator.getLaneCount();
   }
 
+  /** Get current lane utilization ratio (0–1): occupied lanes / total lanes. */
+  getLaneUtilization(): number {
+    return this.laneAllocator.getUtilization();
+  }
+
   protected getQueueLength(): number {
     return this.pendingQueue.length;
   }

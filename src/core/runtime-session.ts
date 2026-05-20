@@ -268,6 +268,8 @@ export class RuntimeSession {
         renderer.clearBacklogPartition();
       }
     };
+
+    this.backlogController.onUtilizationQuery = () => renderer.getLaneUtilization();
   }
 
   private removeLeftoverOverlays(): void {
