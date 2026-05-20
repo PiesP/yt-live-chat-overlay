@@ -224,10 +224,18 @@ export class LaneAllocator {
     const nextAvailable = startTime + occupancyMs;
     const startIdx = placement.lane.index;
 
-    // Update all slots occupied by this message
+    // Update all slots occupied by this message.
+    // For multi-slot messages, apply a gradient: top slots become
+    // available sooner than bottom slots. This prevents the "simultaneous
+    // unlock" problem where all slots free at once, causing the next
+    // batch of messages to cluster in the same region.
     for (let s = 0; s < placement.slotCount; s++) {
       const laneIdx = startIdx + s;
-      this.updateLane(laneIdx, nextAvailable);
+      // Top slots (s=0) unlock first; bottom slots unlock progressively later.
+      // The gradient is 30% of total occupancy, distributed across slots.
+      const slotGradient =
+        placement.slotCount > 1 ? (s / (placement.slotCount - 1)) * occupancyMs * 0.3 : 0;
+      this.updateLane(laneIdx, nextAvailable + slotGradient);
       const count = this.laneMessageCounts[laneIdx];
       if (count !== undefined) {
         this.laneMessageCounts[laneIdx] = count + 1;
@@ -256,22 +264,24 @@ export class LaneAllocator {
   // ── Private helpers ─────────────────────────────────────────────────
 
   /**
-   * Spatial density at a lane: weighted sum of recent usage in nearby lanes.
-   * Lanes used within the last 10 seconds contribute to density, with
-   * closer lanes weighted higher. This prevents vertical clustering by
-   * preferring lanes that have been idle or are far from recently used lanes.
+   * Global spatial density at a lane: weighted sum of recent usage across
+   * ALL lanes (not just immediate neighbors). Lanes used within the decay
+   * window contribute to density, with closer lanes weighted higher.
+   *
+   * This prevents vertical clustering by preferring lanes that are far from
+   * recently used lanes across the entire screen, not just locally.
    */
   private spatialDensity(laneIndex: number, now: number): number {
     let density = 0;
-    const DECAY_WINDOW_MS = 10_000;
-    for (let offset = -2; offset <= 2; offset++) {
-      const idx = laneIndex + offset;
-      if (idx < 0 || idx >= this.laneCount) continue;
-      const lastUsed = this.laneLastUsedAt[idx] ?? 0;
+    const DECAY_WINDOW_MS = 8_000;
+    for (let i = 0; i < this.laneCount; i++) {
+      if (i === laneIndex) continue;
+      const lastUsed = this.laneLastUsedAt[i] ?? 0;
       if (lastUsed === 0) continue;
       const age = now - lastUsed;
       if (age >= DECAY_WINDOW_MS) continue;
-      const proximityWeight = 1 / (1 + Math.abs(offset));
+      const distance = Math.abs(i - laneIndex);
+      const proximityWeight = 1 / (1 + distance * 0.1);
       const recency = 1 - age / DECAY_WINDOW_MS;
       density += proximityWeight * recency;
     }
@@ -360,8 +370,8 @@ export class LaneAllocator {
 
     const maxWaitMs = isScrolling ? rendererLayout.durationMax : rendererLayout.topBottomDurationMs;
 
-    // Consider top 5 earliest-available lanes, then pick by composite score
-    const CANDIDATE_COUNT = 5;
+    // Consider top 8 earliest-available lanes, then pick by composite score
+    const CANDIDATE_COUNT = 8;
     const candidates = this.topKLanes(CANDIDATE_COUNT, laneStart, laneEnd);
     if (candidates.length === 0) return null;
 
@@ -410,7 +420,7 @@ export class LaneAllocator {
     if (maxStartLane < laneStart) return null;
 
     // Get top-K candidate starting lanes
-    const CANDIDATE_COUNT = 5;
+    const CANDIDATE_COUNT = 8;
     const candidates = this.topKLanes(CANDIDATE_COUNT, laneStart, maxStartLane + 1);
     if (candidates.length === 0) return null;
 
