@@ -188,6 +188,10 @@ export const rendererLayout = {
   fullscreenUpdateDelayMs: 100,
   /** Z-index for the overlay container */
   overlayZIndex: '100',
+  /** SuperChat card border radius (px) */
+  superchatCardRadius: 6,
+  /** Membership card border radius (px) */
+  membershipCardRadius: 6,
 } as const;
 
 /**
