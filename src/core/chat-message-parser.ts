@@ -7,7 +7,16 @@ import type {
   OverlaySettings,
   SuperChatInfo,
 } from '@app-types';
-import { colors, parseAnyColor, SUPERCHAT_TIER_KEYS } from '@core/design-tokens';
+import {
+  colorIntToCss,
+  determineSuperChatTier,
+  extractUserColor,
+  getEmojiAliasPattern,
+  getEmojiTextPattern,
+  hasEmojiContent,
+  stripControlCharacters,
+  truncateText,
+} from '@core/chat-message-helpers';
 import { createLogger } from '@core/logging';
 import {
   asRecord,
@@ -26,19 +35,6 @@ const EMPTY_MESSAGE_BODY: ParsedMessageBody = Object.freeze({
   visibleLength: 0,
 });
 
-/**
- * Matches any character with the Emoji Unicode property.
- *
- * Uses \\p{Emoji} instead of \\p{Extended_Pictographic} so that compound
- * emoji sequences (skin-tone variants, ZWJ sequences, keycap sequences)
- * are also detected.  The broader set may include a few text-default
- * characters (digits, #, *) that happen to have emoji presentation, but
- * in practice these are rare in chat content and the cost of a false
- * positive (showing a short message that would otherwise be dropped) is
- * negligible compared to the benefit of catching real emoji.
- */
-const EMOJI_TEXT_PATTERN = /\p{Emoji}/u;
-const EMOJI_ALIAS_PATTERN = /^:[^:\\s][^:]*:$/u;
 const AUTHOR_TYPE_PRIORITY = {
   normal: 0,
   verified: 1,
@@ -223,7 +219,7 @@ function isSubstantialMessage(
   if (authorType === 'moderator' || authorType === 'owner' || authorType === 'member') {
     return true;
   }
-  if (hasEmojiContent(body.content) || EMOJI_TEXT_PATTERN.test(body.text)) {
+  if (hasEmojiContent(body.content) || getEmojiTextPattern().test(body.text)) {
     return true;
   }
 
@@ -476,11 +472,12 @@ function getEmojiAltText(emojiData: JsonObject): string {
 
 function getEmojiVisibleFallbackText(emojiData: JsonObject): string {
   const shortcuts = getEmojiShortcuts(emojiData);
-  const nonAliasShortcut = shortcuts.find((s) => !EMOJI_ALIAS_PATTERN.test(s));
+  const aliasPattern = getEmojiAliasPattern();
+  const nonAliasShortcut = shortcuts.find((s) => !aliasPattern.test(s));
   if (nonAliasShortcut) return normalizeInlineText(nonAliasShortcut);
 
   const label = extractAccessibilityLabel(emojiData.image) ?? extractAccessibilityLabel(emojiData);
-  if (label && !EMOJI_ALIAS_PATTERN.test(label)) {
+  if (label && !aliasPattern.test(label)) {
     return normalizeInlineText(label);
   }
 
@@ -665,88 +662,4 @@ function classifyAuthorBadge(value: unknown): AuthorType {
   }
 
   return 'normal';
-}
-
-function truncateText(text: string): string {
-  const normalized = normalizeInlineText(text);
-  if (normalized.length > 80) {
-    return `${normalized.slice(0, 77)}...`;
-  }
-  return normalized;
-}
-
-function stripControlCharacters(text: string): string {
-  return text.replace(/[\u0000-\u001F\u007F-\u009F]/g, '');
-}
-
-function hasEmojiContent(segments: readonly ContentSegment[]): boolean {
-  return segments.some(
-    (segment) =>
-      segment.type === 'emoji' ||
-      (segment.type === 'text' && EMOJI_TEXT_PATTERN.test(segment.content))
-  );
-}
-
-function colorIntToCss(value: unknown): string | undefined {
-  const intValue = getNumber(value);
-  if (intValue === undefined) {
-    return undefined;
-  }
-
-  const argb = intValue >>> 0;
-  const alpha = ((argb >>> 24) & 0xff) / 255;
-  const red = (argb >>> 16) & 0xff;
-  const green = (argb >>> 8) & 0xff;
-  const blue = argb & 0xff;
-
-  if (alpha >= 0.999) {
-    return `rgb(${red}, ${green}, ${blue})`;
-  }
-
-  return `rgba(${red}, ${green}, ${blue}, ${Number(alpha.toFixed(3))})`;
-}
-
-function determineSuperChatTier(backgroundColor: string | undefined): SuperChatInfo['tier'] {
-  const rgb = backgroundColor ? parseAnyColor(backgroundColor) : null;
-  if (!rgb) return 'blue';
-
-  let bestTier: SuperChatInfo['tier'] = 'blue';
-  let bestSquaredDistance = Number.POSITIVE_INFINITY;
-
-  for (const tier of SUPERCHAT_TIER_KEYS) {
-    const tierColor = colors.superChat[tier];
-    const dr = rgb.r - tierColor.r;
-    const dg = rgb.g - tierColor.g;
-    const db = rgb.b - tierColor.b;
-    const squaredDistance = dr * dr + dg * dg + db * db;
-
-    if (squaredDistance < bestSquaredDistance) {
-      bestSquaredDistance = squaredDistance;
-      bestTier = tier;
-    }
-  }
-
-  return bestTier;
-}
-
-/**
- * Extract the user's self-chosen text color from YouTube's renderer data.
- * YouTube stores this as an ARGB 32-bit integer in `authorNameTextColor`.
- */
-function extractUserColor(renderer: JsonObject): string | undefined {
-  const colorInt = getNumber(renderer.authorNameTextColor);
-  if (colorInt === undefined) return undefined;
-  const cssColor = colorIntToCss(colorInt);
-  if (!cssColor) return undefined;
-  // Only use if it's a non-white, non-black color
-  const rgbaMatch = cssColor.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
-  if (rgbaMatch) {
-    const r = parseInt(rgbaMatch[1] ?? '0', 10);
-    const g = parseInt(rgbaMatch[2] ?? '0', 10);
-    const b = parseInt(rgbaMatch[3] ?? '0', 10);
-    // Skip colors too close to white (YouTube default) or black
-    if (r > 240 && g > 240 && b > 240) return undefined;
-    if (r < 15 && g < 15 && b < 15) return undefined;
-  }
-  return cssColor;
 }

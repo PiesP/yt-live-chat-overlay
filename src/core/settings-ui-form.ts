@@ -3,6 +3,7 @@ import {
   AUTHOR_COLOR_KEYS,
   cloneSettings,
   getRootDisplayMeta,
+  OUTLINE_NUMERIC_KEYS,
   type OutlineSettingKey,
   type RootNumericSettingKey,
   type RootScalarSettingKey,
@@ -29,6 +30,10 @@ const ROOT_ROUNDED_KEYS = new Set<RootScalarSettingKey>([
 ]);
 
 import type { FieldDef, PaneDef } from '@core/settings-ui-types';
+
+const OUTLINE_NUMERIC_KEY_SET = new Set<string>(OUTLINE_NUMERIC_KEYS);
+const isOutlineNumericKey = (key: string): key is Exclude<OutlineSettingKey, 'enabled'> =>
+  OUTLINE_NUMERIC_KEY_SET.has(key);
 
 // ── UI value formatting ──────────────────────────────────────────────────────
 
@@ -79,6 +84,13 @@ const normalizeOutlineNumericInputValue = (
   fallback: number
 ): number => {
   return normalizeNumericValue(value, fallback, resolveLimits(key), false);
+};
+
+const formatOutlineNumericSettingForInput = (
+  key: Exclude<OutlineSettingKey, 'enabled'>,
+  value: number
+): string | number => {
+  return formatRootNumericSettingForInput(key as unknown as RootScalarSettingKey, value);
 };
 
 const getNumericInputAttributes = (
@@ -378,17 +390,16 @@ export class SettingsUiForm {
 
       // Outline fields
       if (el.name.startsWith('outline-')) {
-        const key = el.name.slice(8) as keyof typeof settings.outline;
+        const rawKey = el.name.slice(8);
+        const key = rawKey as keyof typeof settings.outline;
         const value = settings.outline[key];
         if (el instanceof HTMLInputElement && el.type === 'checkbox') {
           el.checked = Boolean(value);
         } else {
-          // Outline numeric keys overlap with root keys (widthPx, opacity);
-          // cast through string to satisfy both union types.
-          el.value = formatRootNumericSettingForInput(
-            key as string as RootScalarSettingKey,
-            value as number
-          ) as string;
+          const numericKey = isOutlineNumericKey(rawKey) ? rawKey : null;
+          if (numericKey) {
+            el.value = formatOutlineNumericSettingForInput(numericKey, value as number) as string;
+          }
         }
         continue;
       }
@@ -448,19 +459,22 @@ export class SettingsUiForm {
       if (!el.name) continue;
 
       if (el.name.startsWith('outline-')) {
-        const key = el.name.slice(8) as OutlineSettingKey;
+        const rawKey = el.name.slice(8);
+        const key = rawKey as OutlineSettingKey;
         if (key === 'enabled') {
           partial.outline = {
             ...((partial.outline as Record<string, unknown>) ?? {}),
             enabled: (el as HTMLInputElement).checked,
           };
         } else {
+          const numericKey = isOutlineNumericKey(rawKey) ? rawKey : null;
+          if (!numericKey) continue;
           partial.outline = {
             ...((partial.outline as Record<string, unknown>) ?? {}),
             [key]: normalizeOutlineNumericInputValue(
-              key as string as Exclude<OutlineSettingKey, 'enabled'>,
+              numericKey,
               el.value,
-              0
+              this.getSettings().outline[key]
             ),
           };
         }
