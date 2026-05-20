@@ -825,11 +825,19 @@ export class CanvasRenderer extends RendererBase {
     // Amount badge pill
     const badgeY = contentY + spacing.xs;
     const badgeFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
-    const badgeHeight = badgeFontSize + spacing.sm * 2;
+    const badgeHeight = badgeFontSize + rendererLayout.superchatBadge.paddingV * 2;
     ctx.font = `bold ${badgeFontSize}px ${this.settings.fontFamily}`;
-    const badgeWidth = Math.ceil(ctx.measureText(superChat.amount).width) + 24;
+    const badgeTextWidth = Math.ceil(ctx.measureText(superChat.amount).width);
+    const badgeWidth = badgeTextWidth + rendererLayout.superchatBadge.paddingH * 2;
 
-    this.roundRect(ctx, textX, badgeY, badgeWidth, badgeHeight, 12);
+    this.roundRect(
+      ctx,
+      textX,
+      badgeY,
+      badgeWidth,
+      badgeHeight,
+      rendererLayout.superchatBadge.radius
+    );
     ctx.fillStyle = 'rgba(255, 255, 255, 0.16)';
     ctx.fill();
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
@@ -837,9 +845,19 @@ export class CanvasRenderer extends RendererBase {
     ctx.stroke();
 
     ctx.textBaseline = 'middle';
-    this.strokeTextOutline(ctx, superChat.amount, textX + 12, badgeY + badgeHeight / 2, textColor);
+    this.strokeTextOutline(
+      ctx,
+      superChat.amount,
+      textX + rendererLayout.superchatBadge.paddingH,
+      badgeY + badgeHeight / 2,
+      textColor
+    );
     ctx.fillStyle = textColor;
-    ctx.fillText(superChat.amount, textX + 12, badgeY + badgeHeight / 2);
+    ctx.fillText(
+      superChat.amount,
+      textX + rendererLayout.superchatBadge.paddingH,
+      badgeY + badgeHeight / 2
+    );
 
     // Body text
     let textBottomY = badgeY + badgeHeight;
@@ -896,8 +914,8 @@ export class CanvasRenderer extends RendererBase {
     ctx.lineWidth = 2;
     ctx.stroke();
 
-    const padH = spacing.lg;
-    const padV = spacing.md;
+    const padH = rendererLayout.membership.paddingH;
+    const padV = rendererLayout.membership.paddingV;
     const textX = x + padH;
     let textY = y + padV;
 

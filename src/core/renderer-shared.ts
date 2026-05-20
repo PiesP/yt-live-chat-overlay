@@ -125,8 +125,9 @@ function estimateSuperChatDimensions(
 
   const badgeFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
   const badgeFont = getFontString(badgeFontSize, 'bold', FONT_FAMILY);
-  const badgeWidth = Math.ceil(measureTextWidth(message.superChat?.amount ?? '', badgeFont)) + 24;
-  const badgeHeight = badgeFontSize + spacing.sm * 2;
+  const badgeTextWidth = measureTextWidth(message.superChat?.amount ?? '', badgeFont);
+  const badgeWidth = badgeTextWidth + rendererLayout.superchatBadge.paddingH * 2;
+  const badgeHeight = badgeFontSize + rendererLayout.superchatBadge.paddingV * 2;
 
   const contentWidth = Math.max(authorSectionWidth, badgeWidth, maxLineWidth);
   const width = Math.max(
@@ -154,8 +155,7 @@ function estimateMembershipDimensions(
   fontSize: number
 ): MessageDimensions {
   const textWidth = measureContentWidth(message, font, fontSize);
-  const paddingH = spacing.lg * 2;
-  const paddingV = spacing.md + spacing.lg;
+  const { paddingH, paddingV } = rendererLayout.membership;
   const nameHeight = measureTextHeight(font, fontSize);
   const bodyLineHeight = measureTextHeight(font, fontSize);
 

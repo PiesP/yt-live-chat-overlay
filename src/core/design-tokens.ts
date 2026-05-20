@@ -150,6 +150,22 @@ export const rendererLayout = {
     /** Vertical padding inside the card (px) */
     paddingV: 20,
   },
+  /** Membership card padding */
+  membership: {
+    /** Horizontal padding inside the card (px) */
+    paddingH: 16,
+    /** Vertical padding inside the card (px) */
+    paddingV: 12,
+  },
+  /** SuperChat amount badge pill metrics */
+  superchatBadge: {
+    /** Horizontal padding inside the badge pill (px) */
+    paddingH: 12,
+    /** Vertical padding inside the badge pill (px) */
+    paddingV: 8,
+    /** Border radius of the badge pill (px) */
+    radius: 12,
+  },
   /** Pending queue max size */
   queueMaxSize: 50,
   /** Batch size for queue processing */
