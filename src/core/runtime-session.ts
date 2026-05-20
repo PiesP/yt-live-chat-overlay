@@ -1,6 +1,6 @@
 import type { ChatMessage, OverlaySettings, Pauseable } from '@app-types';
 import { BacklogInjectionController } from '@core/backlog-controller';
-import type { ChatHealthSnapshot, ChatSource, ChatSourceStartStatus } from '@core/chat-source';
+import type { ChatHealthSnapshot, ChatSource, ChatSourceStartStatus } from '@core/chat-source-base';
 import { createChatSource } from '@core/chat-source-factory';
 import { findElementMatch, isAbortError, throwIfAborted, VIDEO_SELECTORS } from '@core/dom';
 import { createLogger } from '@core/logging';
