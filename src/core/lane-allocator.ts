@@ -280,12 +280,49 @@ export class LaneAllocator {
   }
 
   /**
+   * Extract the top-K lanes from the heap by available-at time.
+   * Uses a temporary min-heap of size K for O(n log K) selection.
+   * Returns lanes sorted by availableAt (earliest first).
+   */
+  private topKLanes(
+    k: number,
+    laneStart: number,
+    laneEnd: number
+  ): Array<{ laneIndex: number; availableAt: number }> {
+    const result: Array<{ laneIndex: number; availableAt: number }> = [];
+    // Simple approach: scan heap entries and maintain a sorted array of top K
+    // Since heap is small (20-50 entries), O(n) scan is efficient
+    for (let i = 0; i < this.heap.length; i++) {
+      const entry = this.heap[i];
+      if (!entry) continue;
+      const [idx, avail] = entry;
+      if (idx < laneStart || idx >= laneEnd) continue;
+
+      // Insert into sorted position (insertion sort on small array)
+      const item = { laneIndex: idx, availableAt: avail };
+      let inserted = false;
+      for (let j = 0; j < result.length; j++) {
+        const candidate = result[j];
+        if (candidate && avail < candidate.availableAt) {
+          result.splice(j, 0, item);
+          inserted = true;
+          break;
+        }
+      }
+      if (!inserted) result.push(item);
+
+      // Keep only top K
+      if (result.length > k) {
+        result.pop();
+      }
+    }
+    return result;
+  }
+
+  /**
    * Allocate a single lane using spatial-density-aware selection.
-   * Replaces the old two-phase (best-wait + best-count) approach with
-   * a single unified score that considers:
-   *   1. Wait time (DLIOS available-time invariant)
-   *   2. Spatial density (prevents vertical clustering)
-   *   3. Message count (load balancing tiebreaker)
+   * Scans the top-K earliest-available lanes and picks the one with
+   * the best composite score (wait time + spatial density + message count).
    */
   private allocateSingleLane(
     now: number,
@@ -297,15 +334,16 @@ export class LaneAllocator {
 
     const maxWaitMs = isScrolling ? rendererLayout.durationMax : rendererLayout.topBottomDurationMs;
 
+    // Consider top 5 earliest-available lanes, then pick by composite score
+    const CANDIDATE_COUNT = 5;
+    const candidates = this.topKLanes(CANDIDATE_COUNT, laneStart, laneEnd);
+    if (candidates.length === 0) return null;
+
     let bestLane = -1;
     let bestWait = Infinity;
     let bestScore = Infinity;
 
-    for (let i = 0; i < this.heap.length; i++) {
-      const entry = this.heap[i];
-      if (!entry) continue;
-      const [idx, avail] = entry;
-      if (idx < laneStart || idx >= laneEnd) continue;
+    for (const { laneIndex: idx, availableAt: avail } of candidates) {
       const wait = Math.max(0, Math.ceil(avail - now));
       if (wait > maxWaitMs) continue;
 
@@ -326,8 +364,8 @@ export class LaneAllocator {
    * (superchat, membership). Finds the starting lane where all slots
    * [laneIndex, laneIndex + slotCount) fit within [laneStart, laneEnd).
    *
-   * Uses the minimum wait time across all slots as the effective wait,
-   * and the average spatial density for scoring.
+   * Uses the top-K earliest-available starting lanes and picks the one
+   * with the best composite score (max wait + avg density + avg count).
    */
   private allocateMultiSlot(
     now: number,
@@ -342,20 +380,19 @@ export class LaneAllocator {
     }
 
     const maxWaitMs = isScrolling ? rendererLayout.durationMax : rendererLayout.topBottomDurationMs;
-    // The starting lane must leave room for all slots
     const maxStartLane = laneEnd - slotCount;
     if (maxStartLane < laneStart) return null;
+
+    // Get top-K candidate starting lanes
+    const CANDIDATE_COUNT = 5;
+    const candidates = this.topKLanes(CANDIDATE_COUNT, laneStart, maxStartLane + 1);
+    if (candidates.length === 0) return null;
 
     let bestLane = -1;
     let bestWait = Infinity;
     let bestScore = Infinity;
 
-    for (let i = 0; i < this.heap.length; i++) {
-      const entry = this.heap[i];
-      if (!entry) continue;
-      const [startIdx] = entry;
-      if (startIdx < laneStart || startIdx > maxStartLane) continue;
-
+    for (const { laneIndex: startIdx } of candidates) {
       // Check all slots in the block
       let blockMaxWait = 0;
       let blockDensitySum = 0;
@@ -364,7 +401,12 @@ export class LaneAllocator {
 
       for (let s = 0; s < slotCount; s++) {
         const slotIdx = startIdx + s;
-        const slotWait = Math.max(0, Math.ceil((this.getSlotAvailableAt(slotIdx) ?? 0) - now));
+        const slotAvail = this.getSlotAvailableAt(slotIdx);
+        if (slotAvail === undefined) {
+          allValid = false;
+          break;
+        }
+        const slotWait = Math.max(0, Math.ceil(slotAvail - now));
         if (slotWait > maxWaitMs) {
           allValid = false;
           break;
@@ -376,7 +418,6 @@ export class LaneAllocator {
 
       if (!allValid) continue;
 
-      // Score uses max wait across block (bottleneck), average density, average count
       const avgDensity = blockDensitySum / slotCount;
       const avgCount = blockCountSum / slotCount;
       const score = blockMaxWait * 10 + avgDensity * 3000 + avgCount * 50;
