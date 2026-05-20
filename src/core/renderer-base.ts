@@ -51,8 +51,6 @@ export abstract class RendererBase {
     this.observability = new ObservabilityReporter(settings.showDebugOverlay);
 
     this.laneAllocator = new LaneAllocator({
-      getEffectiveSpeedPxPerSec: () => this.getEffectiveSpeedPxPerSec(),
-      getDanmakuMode: () => this.settings.danmakuMode,
       safeTop: this.settings.safeTop,
       safeBottom: this.settings.safeBottom,
       fontSize: this.settings.fontSize,

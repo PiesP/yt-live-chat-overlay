@@ -1,4 +1,4 @@
-import type { DanmakuMode, LaneState, OverlayDimensions } from '@app-types';
+import type { LaneState, OverlayDimensions } from '@app-types';
 import { rendererLayout } from '@core/design-tokens';
 import { measureTextHeight } from '@core/text-measure';
 
@@ -11,8 +11,6 @@ export interface LanePlacement {
 }
 
 interface LaneAllocatorOptions {
-  readonly getEffectiveSpeedPxPerSec: () => number;
-  readonly getDanmakuMode: () => DanmakuMode;
   readonly safeTop: number;
   readonly safeBottom: number;
   readonly fontSize: number;
@@ -171,12 +169,10 @@ export class LaneAllocator {
     // Calculate how many lane slots this message needs.
     // A superchat card may be 3-5x taller than a regular message.
     const slotCount = Math.max(1, Math.ceil(messageHeight / this.laneHeight));
-    const mode = this.options.getDanmakuMode();
-    const isScrolling = mode === 'scroll' || mode === 'reverse';
 
     // For multi-slot messages, find the best starting lane such that
     // all slots [laneIndex, laneIndex + slotCount) are within range.
-    const result = this.allocateMultiSlot(now, isScrolling, laneStart, laneEnd, slotCount);
+    const result = this.allocateMultiSlot(now, laneStart, laneEnd, slotCount);
     if (!result) return null;
 
     const lane: LaneState = {
@@ -401,13 +397,12 @@ export class LaneAllocator {
    */
   private allocateSingleLane(
     now: number,
-    isScrolling: boolean,
     laneStart: number,
     laneEnd: number
   ): { laneIndex: number; waitMs: number } | null {
     if (this.heap.length === 0) return null;
 
-    const maxWaitMs = isScrolling ? rendererLayout.durationMax : rendererLayout.topBottomDurationMs;
+    const maxWaitMs = rendererLayout.durationMax;
 
     // Consider top 8 earliest-available lanes, then pick by composite score
     const CANDIDATE_COUNT = 8;
@@ -444,17 +439,16 @@ export class LaneAllocator {
    */
   private allocateMultiSlot(
     now: number,
-    isScrolling: boolean,
     laneStart: number,
     laneEnd: number,
     slotCount: number
   ): { laneIndex: number; waitMs: number } | null {
     if (this.heap.length === 0) return null;
     if (slotCount <= 1) {
-      return this.allocateSingleLane(now, isScrolling, laneStart, laneEnd);
+      return this.allocateSingleLane(now, laneStart, laneEnd);
     }
 
-    const maxWaitMs = isScrolling ? rendererLayout.durationMax : rendererLayout.topBottomDurationMs;
+    const maxWaitMs = rendererLayout.durationMax;
     const maxStartLane = laneEnd - slotCount;
     if (maxStartLane < laneStart) return null;
 
