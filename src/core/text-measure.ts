@@ -13,6 +13,10 @@
 
 let measureCtx: CanvasRenderingContext2D | null = null;
 
+/** LRU cache for measureTextWidth. Keyed by `${font}|${text}`. */
+const widthCache = new Map<string, number>();
+const WIDTH_CACHE_MAX = 500;
+
 function getCtx(): CanvasRenderingContext2D {
   if (!measureCtx) {
     const canvas = document.createElement('canvas');
@@ -26,23 +30,41 @@ function getCtx(): CanvasRenderingContext2D {
 }
 
 /**
+ * Clear the text measurement caches.
+ * Call when settings change (font, fontSize) to avoid stale entries.
+ */
+export function clearTextMeasurementCaches(): void {
+  widthCache.clear();
+}
+
+/**
  * Measure the full bounding-box width of a text string.
  *
  * Uses `actualBoundingBoxLeft + actualBoundingBoxRight` so that glyph
  * overshoot (common with italic fonts and some CJK glyphs) is included.
  * Falls back to `TextMetrics.width` when the bounding-box API returns
  * zeros (empty or whitespace-only strings).
+ *
+ * Results are cached in an LRU cache (max 500 entries) for performance
+ * in hot paths like the Canvas2D render loop.
  */
 export function measureTextWidth(text: string, font: string): number {
+  const key = `${font}|${text}`;
+  const cached = widthCache.get(key);
+  if (cached !== undefined) return cached;
+
   const ctx = getCtx();
   ctx.font = font;
   const m = ctx.measureText(text);
   const bbWidth = Math.abs(m.actualBoundingBoxLeft) + Math.abs(m.actualBoundingBoxRight);
-  if (bbWidth > 0) {
-    return Math.ceil(bbWidth);
+  const width = bbWidth > 0 ? Math.ceil(bbWidth) : Math.ceil(m.width);
+
+  if (widthCache.size >= WIDTH_CACHE_MAX) {
+    const oldestKey = widthCache.keys().next().value;
+    if (oldestKey !== undefined) widthCache.delete(oldestKey);
   }
-  // Fallback: empty / whitespace-only strings report 0 for bounding box.
-  return Math.ceil(m.width);
+  widthCache.set(key, width);
+  return width;
 }
 
 /**

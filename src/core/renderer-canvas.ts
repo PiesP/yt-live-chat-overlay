@@ -30,7 +30,13 @@ import { createLogger } from '@core/logging';
 import type { Overlay } from '@core/overlay';
 import { RendererBase, type RendererUpdateOptions } from '@core/renderer-base';
 import { estimateMessageDimensions as sharedEstimateDimensions } from '@core/renderer-shared';
-import { getFontString, measureTextHeight, wrapTextLines } from '@core/text-measure';
+import {
+  clearTextMeasurementCaches,
+  getFontString,
+  measureTextHeight,
+  measureTextWidth,
+  wrapTextLines,
+} from '@core/text-measure';
 
 const log = createLogger('RendererCanvas');
 
@@ -74,9 +80,6 @@ export class CanvasRenderer extends RendererBase {
   private readonly emojiFetching = new Set<string>();
   private readonly authorPhotoCache = new Map<string, HTMLImageElement>();
   private readonly stickerCache = new Map<string, HTMLImageElement>();
-
-  /** Text measurement caches (cleared on settings/font change) */
-  private readonly textWidthCache = new Map<string, number>();
 
   /**
    * Text bitmap cache: pre-rendered text with outline as offscreen canvas.
@@ -562,24 +565,6 @@ export class CanvasRenderer extends RendererBase {
     );
   }
 
-  private measureTextWidthCached(text: string, font: string): number {
-    const key = `${font}|${text}`;
-    const cached = this.textWidthCache.get(key);
-    if (cached !== undefined) return cached;
-    const ctx = this.ctx;
-    if (!ctx) return text.length * 8;
-    ctx.font = font;
-    const m = ctx.measureText(text);
-    const bbWidth = Math.abs(m.actualBoundingBoxLeft) + Math.abs(m.actualBoundingBoxRight);
-    const width = bbWidth > 0 ? Math.ceil(bbWidth) : Math.ceil(m.width);
-    if (this.textWidthCache.size >= 500) {
-      const firstKey = this.textWidthCache.keys().next().value;
-      if (firstKey) this.textWidthCache.delete(firstKey);
-    }
-    this.textWidthCache.set(key, width);
-    return width;
-  }
-
   private getFont(fontSize: number): string {
     return getFontString(fontSize, this.settings.fontWeight, this.settings.fontFamily);
   }
@@ -719,7 +704,7 @@ export class CanvasRenderer extends RendererBase {
     for (const seg of segments) {
       if (seg.type === 'text') {
         this.renderSegment(ctx, seg.content, cursorX, y, color, alpha, fontSize);
-        cursorX += Math.ceil(this.measureTextWidthCached(seg.content, this.getFont(fontSize)));
+        cursorX += measureTextWidth(seg.content, this.getFont(fontSize));
       } else {
         const cached = this.emojiCache.get(seg.emoji.url);
         const img = cached?.complete && cached.naturalWidth > 0 ? cached : null;
@@ -1077,7 +1062,7 @@ export class CanvasRenderer extends RendererBase {
     this.activeMessages.length = 0;
     this.pendingQueue.length = 0;
     this.backlogPaused = false;
-    this.textWidthCache.clear();
+    clearTextMeasurementCaches();
     this.textBitmapCache.clear();
   }
 
