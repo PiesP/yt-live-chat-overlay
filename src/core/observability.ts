@@ -16,7 +16,6 @@ const log = createLogger('Observability');
 
 export class ObservabilityReporter {
   private metrics: SessionMetrics;
-  private dropCounters: Record<DropReason, number>;
   private totalDroppedInWindow = 0;
   private totalReceivedInWindow = 0;
   private windowStartTime = Date.now();
@@ -29,13 +28,6 @@ export class ObservabilityReporter {
   private showDebug = false;
 
   constructor(initialShowDebug: boolean = false) {
-    this.dropCounters = {
-      queue_overflow: 0,
-      no_lane_available: 0,
-      rate_limited: 0,
-      dedup: 0,
-      other: 0,
-    };
     this.metrics = {
       totalReceived: 0,
       totalRendered: 0,
@@ -65,10 +57,9 @@ export class ObservabilityReporter {
   }
 
   // called when a message is dropped
-  onMessageDropped(reason: DropReason): void {
+  onMessageDropped(_reason: DropReason): void {
     this.metrics.totalDropped++;
     this.totalDroppedInWindow++;
-    this.dropCounters[reason]++;
 
     // Warn if drop rate exceeds 20%
     this.refreshDerivedMetrics();

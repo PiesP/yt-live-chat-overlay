@@ -112,13 +112,7 @@ export const rendererLayout = {
   exitPaddingScale: 3,
   durationMin: 5000,
   durationMax: 30000,
-  globalStaggerMs: 20,
-  safeDistanceScale: 0.05,
-  safeDistanceMin: 4,
-  retryDelayMinMs: 32,
-  retryDelayMaxMs: 800,
   topBottomDurationMs: 4000,
-  dliosSafetyGap: 4,
   kindPriority: {
     superchat: 200,
     membership: 100,
@@ -130,11 +124,7 @@ export const rendererLayout = {
     high: 1.2,
     extreme: 1.35,
   } as const,
-  // ── Extracted magic numbers ──
-  /** Random jitter added to lane delay (ms) */
-  laneJitterMs: 30,
-  /** Author section vertical gap in px (photo + name height) */
-  authorSectionHeightPx: 28,
+  // ── Message padding ──
   /** Message padding: horizontal (px) */
   paddingH: 12,
   /** Message padding: vertical (px) */
@@ -168,18 +158,6 @@ export const rendererLayout = {
   },
   /** Pending queue max size */
   queueMaxSize: 50,
-  /** Batch size for queue processing */
-  batchSize: 3,
-  /** Max retry attempts for deferred messages */
-  maxRetries: 3,
-  /** Sweep interval (process every N calls) */
-  sweepInterval: 8,
-  /** Sweep tolerance (ms) */
-  sweepToleranceMs: 500,
-  /** Max animation jitter (ms) */
-  maxAnimationJitterMs: 15,
-  /** Opacity update interval (ms) — 0 = disabled (use frame-based fade) */
-  opacityUpdateIntervalMs: 0,
   /** Background queue max */
   backgroundQueueMax: 10,
   /** Max message age for fade-out (ms) */
