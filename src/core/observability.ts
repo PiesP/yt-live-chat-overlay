@@ -20,7 +20,6 @@ export class ObservabilityReporter {
   private totalReceivedInWindow = 0;
   private windowStartTime = Date.now();
   private debugOverlayEl: HTMLElement | null = null;
-  private debugUpdateTimer: ReturnType<typeof setInterval> | null = null;
   private lastWarnTime = 0;
   private readonly WARN_COOLDOWN_MS = 30_000;
   private readonly METRIC_WINDOW_MS = 60_000;
