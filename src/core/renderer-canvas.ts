@@ -16,6 +16,7 @@
  */
 
 import type { ChatMessage, ContentSegment, OverlayDimensions, OverlaySettings } from '@app-types';
+import { EMOJI_ALIAS_PATTERN } from '@core/chat-message-helpers';
 import {
   computeDliosDuration,
   computeOutlineColor,
@@ -749,7 +750,9 @@ export class CanvasRenderer extends RendererBase {
         if (img) {
           ctx.globalAlpha = alpha;
           ctx.drawImage(img, cursorX, y, emojiSize, emojiSize);
-        } else if (seg.emoji.alt) {
+        } else if (seg.emoji.fallbackText) {
+          this.renderSegment(ctx, seg.emoji.fallbackText, cursorX, y, color, alpha, fontSize);
+        } else if (seg.emoji.alt && !EMOJI_ALIAS_PATTERN.test(seg.emoji.alt)) {
           this.renderSegment(ctx, seg.emoji.alt, cursorX, y, color, alpha, fontSize);
         }
         cursorX += emojiSize + 4;
