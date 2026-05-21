@@ -9,6 +9,7 @@ import { extractChatEvents } from '@core/chat-message-parser';
 import { ChatSource } from '@core/chat-source-base';
 import { isAbortError, sleep, throwIfAborted } from '@core/dom';
 import { createLogger } from '@core/logging';
+import { SpreadEmitter } from '@core/spread-emitter';
 import {
   extractNextLiveContinuation,
   fetchLiveChat,
@@ -30,6 +31,8 @@ export class LiveChatSource extends ChatSource {
   private static readonly DENSITY_HIGH_THRESHOLD = 10;
   private static readonly DENSITY_LOW_THRESHOLD = 1;
 
+  private spreadEmitter: SpreadEmitter | null = null;
+
   protected seedCurrentSession(signal?: AbortSignal): Promise<boolean> {
     return this.initializeLiveSession(signal);
   }
@@ -42,6 +45,8 @@ export class LiveChatSource extends ChatSource {
     super.resetSessionState();
     this.liveContinuation = null;
     this.consecutiveErrors = 0;
+    this.spreadEmitter?.destroy();
+    this.spreadEmitter = null;
   }
 
   private async initializeLiveSession(signal?: AbortSignal): Promise<boolean> {
@@ -106,12 +111,20 @@ export class LiveChatSource extends ChatSource {
 
       const playback = this.getPlaybackSnapshot();
       if (playback?.paused) {
+        this.spreadEmitter?.pause();
         await sleep(LIVE_POLL_FALLBACK_DELAY_MS, signal);
         continue;
       }
 
       const timeoutMs = this.liveContinuation?.timeoutMs ?? LIVE_POLL_FALLBACK_DELAY_MS;
       const delayMs = this.calculateAdaptiveDelay(timeoutMs);
+
+      // Sync spread emitter with current poll interval
+      this.ensureSpreadEmitter();
+      const spreadInterval = this.calculateSpreadInterval(delayMs);
+      this.spreadEmitter?.setSpreadInterval(spreadInterval);
+      this.spreadEmitter?.resume();
+
       await sleep(delayMs, signal);
 
       throwIfAborted(signal);
@@ -189,13 +202,13 @@ export class LiveChatSource extends ChatSource {
       }
 
       if (messages.length > 0) {
-        this.emitBatch(messages, isInitialSeed);
+        this.emitMessages(messages, isInitialSeed);
+        this.recordMessageCount(messages.length);
       }
 
-      this.recordMessageCount(messages.length);
+      this.consecutiveErrors = 0;
     }
 
-    this.consecutiveErrors = 0;
     this.liveContinuation = extractNextLiveContinuation(payload.continuations);
   }
 
@@ -205,5 +218,51 @@ export class LiveChatSource extends ChatSource {
       this.bootstrap = bootstrap;
       this.liveContinuation = this.bootstrap?.initialContinuation ?? null;
     }
+  }
+
+  /**
+   * Emit messages — priority messages go directly to the callback,
+   * normal messages are routed through the spread emitter when enabled.
+   */
+  private emitMessages(messages: ChatMessage[], isInitialSeed: boolean): void {
+    if (isInitialSeed) {
+      // Initial seed is handled by BacklogInjectionController in RuntimeSession
+      this.emitBatch(messages, isInitialSeed);
+      return;
+    }
+
+    const settings = this.getSettings();
+    if (!settings.spreadEnabled) {
+      this.emitBatch(messages, false);
+      return;
+    }
+
+    this.ensureSpreadEmitter();
+    this.spreadEmitter?.enqueue(messages);
+  }
+
+  /**
+   * Lazily create the spread emitter on first use.
+   */
+  private ensureSpreadEmitter(): void {
+    if (this.spreadEmitter) return;
+    this.spreadEmitter = new SpreadEmitter((msg) => {
+      this.emitMessage(msg);
+    });
+  }
+
+  /**
+   * Calculate the ideal spread interval from the poll delay and message count.
+   * Attempts to distribute messages evenly across the poll interval.
+   */
+  private calculateSpreadInterval(pollDelayMs: number): number {
+    // Use the previous poll's message count as an estimate for the next batch
+    const avgCount =
+      this.recentMessageCounts.length > 0
+        ? this.recentMessageCounts.reduce((a, b) => a + b, 0) / this.recentMessageCounts.length
+        : 1;
+
+    if (avgCount <= 1) return pollDelayMs;
+    return Math.max(50, Math.round(pollDelayMs / avgCount));
   }
 }

@@ -197,6 +197,10 @@ export interface OverlaySettings {
   superChatMaxBodyLines: number;
   /** Maximum body text lines for Membership messages (1-5, default 3) */
   membershipMaxBodyLines: number;
+
+  // ── Spread Emission ──
+  /** Spread poll messages evenly across the poll interval instead of emitting in a burst */
+  spreadEnabled: boolean;
 }
 
 /**

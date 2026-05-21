@@ -199,6 +199,16 @@ export const PANES: PaneDef[] = [
         ],
       },
       {
+        title: 'Timing',
+        fields: [
+          chk(
+            'Spread poll messages',
+            'spreadEnabled',
+            'Distribute poll messages evenly across the poll interval for a steadier flow'
+          ),
+        ],
+      },
+      {
         title: 'Rate Limiting',
         fields: [
           chk(

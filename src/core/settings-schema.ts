@@ -77,6 +77,7 @@ const ROOT_SETTING_META = {
   preserveUserColor: { type: 'boolean', visual: true },
   superChatMaxBodyLines: { type: 'number', visual: true },
   membershipMaxBodyLines: { type: 'number', visual: true },
+  spreadEnabled: { type: 'boolean', visual: false },
 } as const satisfies Record<RootScalarSettingKey, SettingMeta>;
 
 /**
@@ -210,6 +211,7 @@ export const DEFAULT_SETTINGS = {
   preserveUserColor: false,
   superChatMaxBodyLines: 5,
   membershipMaxBodyLines: 3,
+  spreadEnabled: true,
 } as const satisfies Readonly<OverlaySettings>;
 
 // ── Color validation ────────────────────────────────────────────────────────────
