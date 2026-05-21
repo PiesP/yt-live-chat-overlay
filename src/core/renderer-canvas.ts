@@ -879,7 +879,8 @@ export class CanvasRenderer extends RendererBase {
 
     // Author section
     if (this.settings.showAuthor.superChat && message.author) {
-      contentY = this.drawAuthorSection(ctx, msg, textX, contentY, textColor);
+      const nameMaxWidth = w - scPad.paddingH * 2;
+      contentY = this.drawAuthorSection(ctx, msg, textX, contentY, textColor, nameMaxWidth);
     }
 
     // Amount badge pill
@@ -986,7 +987,8 @@ export class CanvasRenderer extends RendererBase {
     let textY = y + padV;
 
     if (msg.message.author) {
-      textY = this.drawAuthorSection(ctx, msg, textX, textY, '#ffffff');
+      const nameMaxWidth = w - padH * 2;
+      textY = this.drawAuthorSection(ctx, msg, textX, textY, '#ffffff', nameMaxWidth);
     }
 
     if (msg.message.text) {
@@ -1014,7 +1016,8 @@ export class CanvasRenderer extends RendererBase {
     msg: CanvasMessage,
     textX: number,
     startY: number,
-    color: string
+    color: string,
+    maxNameWidth?: number
   ): number {
     const message = msg.message;
     if (!message.author) return startY;
@@ -1037,11 +1040,29 @@ export class CanvasRenderer extends RendererBase {
     }
     const nameX = textX + (photo ? rendererLayout.authorPhotoSize + 4 : 0);
     const nameY = startY + Math.max(0, Math.floor((sectionHeight - nameHeight) / 2));
+
+    // Truncate author name with ellipsis if it exceeds the allowed width
+    let displayName = message.author;
+    if (maxNameWidth !== undefined && maxNameWidth > 0) {
+      ctx.font = nameFont;
+      ctx.textBaseline = 'top';
+      let nameWidth = ctx.measureText(displayName).width;
+      if (nameWidth > maxNameWidth) {
+        const ellipsis = '\u2026';
+        const ellipsisWidth = ctx.measureText(ellipsis).width;
+        while (displayName.length > 0 && nameWidth + ellipsisWidth > maxNameWidth) {
+          displayName = displayName.slice(0, -1);
+          nameWidth = ctx.measureText(displayName).width;
+        }
+        displayName += ellipsis;
+      }
+    }
+
     ctx.font = nameFont;
     ctx.textBaseline = 'top';
-    this.strokeTextOutline(ctx, message.author, nameX, nameY, color);
+    this.strokeTextOutline(ctx, displayName, nameX, nameY, color);
     ctx.fillStyle = color;
-    ctx.fillText(message.author, nameX, nameY);
+    ctx.fillText(displayName, nameX, nameY);
     return startY + sectionHeight;
   }
 

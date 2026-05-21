@@ -192,6 +192,10 @@ export const rendererLayout = {
   superchatCardRadius: 6,
   /** Membership card border radius (px) */
   membershipCardRadius: 6,
+  /** Maximum author name width inside a card (px).
+   *  Derived from: superchatMaxWidth - paddingH*2 - authorPhotoSize - spacing.sm
+   *  = 640 - 48 - 24 - 8 = 560. Prevents long names from overflowing the card. */
+  authorNameMaxWidth: 560,
 } as const;
 
 /**

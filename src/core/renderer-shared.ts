@@ -118,7 +118,8 @@ function estimateSuperChatDimensions(
   if (showAuthor && message.author) {
     const authorFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
     const authorFont = getFontString(authorFontSize, fontWeight, fontFamily);
-    const authorNameWidth = measureTextWidth(message.author, authorFont);
+    const rawNameWidth = measureTextWidth(message.author, authorFont);
+    const authorNameWidth = Math.min(rawNameWidth, rendererLayout.authorNameMaxWidth);
     authorSectionWidth = rendererLayout.authorPhotoSize + spacing.sm + authorNameWidth;
     const nameHeight = measureTextHeight(authorFont, authorFontSize);
     authorSectionHeight = Math.max(rendererLayout.authorPhotoSize, nameHeight);
