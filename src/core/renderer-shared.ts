@@ -65,7 +65,8 @@ export function estimateMessageDimensions(
       fontSize,
       true,
       fontFamily,
-      maxBodyLines?.superchat ?? 5
+      maxBodyLines?.superchat ?? 5,
+      fontWeight
     );
   }
   if (message.kind === 'membership') {
@@ -110,7 +111,8 @@ function estimateSuperChatDimensions(
   fontSize: number,
   showAuthor: boolean,
   fontFamily: string,
-  maxBodyLines: number
+  maxBodyLines: number,
+  fontWeight: 'normal' | 'bold' = 'bold'
 ): MessageDimensions {
   const { paddingH, paddingV } = rendererLayout.superchat;
   const bodyLineHeight = measureTextHeight(font, fontSize);
@@ -131,7 +133,7 @@ function estimateSuperChatDimensions(
   if (showAuthor && message.author) {
     const authorFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
     // Use the SAME font construction as renderSuperChat for consistent metrics
-    const authorFont = getFontString(authorFontSize, 'bold', fontFamily);
+    const authorFont = getFontString(authorFontSize, fontWeight, fontFamily);
     const authorNameWidth = measureTextWidth(message.author, authorFont);
     authorSectionWidth = rendererLayout.authorPhotoSize + spacing.sm + authorNameWidth;
     const nameHeight = measureTextHeight(authorFont, authorFontSize);

@@ -6,7 +6,7 @@
  * testable and reusable.
  */
 
-import type { ContentSegment, SuperChatInfo } from '@app-types';
+import type { ChatMessage, ContentSegment, SuperChatInfo } from '@app-types';
 import { colors, parseAnyColor, SUPERCHAT_TIER_KEYS } from '@core/design-tokens';
 import type { JsonObject } from '@core/youtubei-chat';
 
@@ -40,6 +40,17 @@ export function truncateText(text: string): string {
     return `${normalized.slice(0, MAX_MESSAGE_TEXT_LENGTH - TRUNCATION_ELLIPSIS_LENGTH)}...`;
   }
   return normalized;
+}
+
+/**
+ * Truncate text based on message kind.
+ * Only regular text messages are truncated to MAX_MESSAGE_TEXT_LENGTH.
+ * SuperChat and membership messages preserve their full text — the renderer
+ * already limits visible lines via `maxBodyLines` with ellipsis.
+ */
+export function truncateForKind(text: string, kind: ChatMessage['kind']): string {
+  if (kind === 'text') return truncateText(text);
+  return normalizeInlineText(text);
 }
 
 export function hasEmojiContent(segments: readonly ContentSegment[]): boolean {

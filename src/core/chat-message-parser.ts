@@ -15,7 +15,7 @@ import {
   extractUserColor,
   hasEmojiContent,
   stripControlCharacters,
-  truncateText,
+  truncateForKind,
 } from '@core/chat-message-helpers';
 import { createLogger } from '@core/logging';
 import {
@@ -201,7 +201,9 @@ function extractRendererBody(
   settings: Readonly<OverlaySettings>
 ): ParsedMessageBody | null {
   const parsedBody =
-    kind === 'membership' ? parseMembershipBody(renderer) : parseMessageContent(renderer.message);
+    kind === 'membership'
+      ? parseMembershipBody(renderer)
+      : parseMessageContent(renderer.message, kind);
 
   if (kind === 'text' && !isSubstantialMessage(parsedBody, authorType, settings)) {
     return null;
@@ -352,7 +354,10 @@ function extractDisplayText(value: unknown): string | undefined {
   return text || undefined;
 }
 
-function parseMessageContent(value: unknown): ParsedMessageBody {
+function parseMessageContent(
+  value: unknown,
+  kind: ChatMessage['kind'] = 'text'
+): ParsedMessageBody {
   if (!isRecord(value)) {
     return EMPTY_MESSAGE_BODY;
   }
@@ -362,7 +367,7 @@ function parseMessageContent(value: unknown): ParsedMessageBody {
     const content: ContentSegment[] =
       simpleText.length > 0 ? [{ type: 'text', content: simpleText }] : [];
     return {
-      text: truncateText(simpleText),
+      text: truncateForKind(simpleText, kind),
       content,
       visibleLength: getVisibleContentLength(content),
     };
@@ -404,7 +409,7 @@ function parseMessageContent(value: unknown): ParsedMessageBody {
   }
 
   return {
-    text: truncateText(plainText),
+    text: truncateForKind(plainText, kind),
     content: segments,
     visibleLength: getVisibleContentLength(segments),
   };
