@@ -94,10 +94,13 @@ export abstract class RendererBase {
     this.pausedAt = null;
     this.burstDetector.resume();
 
-    // Always shift lane timers regardless of video pause state.
-    // The lane allocator tracks wall-clock availability, so it must be
-    // advanced by the paused duration even if the video is still paused.
-    this.laneAllocator.shiftAll(pausedDuration);
+    // BUG-4 fix: only shift lane timers if the video is actually playing.
+    // When isVideoPaused is true, the tab was hidden while the video was
+    // paused — shifting lanes would advance availability past the pause,
+    // causing messages to disappear prematurely when the video resumes.
+    if (!this.isVideoPaused) {
+      this.laneAllocator.shiftAll(pausedDuration);
+    }
     this.isPaused = false;
 
     if (this.isVideoPaused) {

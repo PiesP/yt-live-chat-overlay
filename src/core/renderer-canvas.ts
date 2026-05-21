@@ -157,7 +157,25 @@ export class CanvasRenderer extends RendererBase {
     if (this.activeMessages.length < this.settings.maxConcurrentMessages) {
       this.updateBacklogPause();
       const next = this.pendingQueue.shift();
-      if (next) this.enqueueMessage(next, performance.now());
+      if (next) {
+        // BUG-2 fix: run the same collision + anti-block checks that
+        // drainQueue performs, so the direct path is consistent.
+        if (this.isAntiBlockActive()) {
+          this.pendingQueue.unshift(next);
+        } else {
+          const result = this.checkPlacement(next, performance.now());
+          if (!result.ok) {
+            if (result.reason === 'no_lane') {
+              this.observability.onMessageDropped('no_lane_available');
+            } else {
+              // Collision: put back, next frame will retry.
+              this.pendingQueue.unshift(next);
+            }
+          } else {
+            this.enqueueMessageWithPlacement(next, performance.now(), result.placement);
+          }
+        }
+      }
     }
   }
 
@@ -307,19 +325,33 @@ export class CanvasRenderer extends RendererBase {
     const mode = this.settings.danmakuMode;
     const isScrolling = mode === 'scroll' || mode === 'reverse';
 
-    this.drainQueue(now);
-
+    // BUG-3 fix: remove expired messages BEFORE draining the queue.
+    // Previously drainQueue ran first, so activeMessages.length included
+    // about-to-expire entries, artificially limiting how many new messages
+    // could be admitted in this frame.
     const toRemove: number[] = [];
+    for (let i = 0; i < this.activeMessages.length; i++) {
+      const msg = this.activeMessages[i];
+      if (!msg) continue;
+      const elapsed = now - msg.startTime - msg.pausedDuration;
+      if (elapsed >= msg.duration) {
+        toRemove.push(i);
+      }
+    }
+    if (toRemove.length > 0) {
+      const surviving = this.activeMessages.filter((_, i) => !toRemove.includes(i));
+      this.activeMessages.length = 0;
+      this.activeMessages.push(...surviving);
+      this.observability.updateActiveMessages(this.activeMessages.length);
+      this.observability.updateQueueDepth(this.pendingQueue.length);
+    }
+
+    this.drainQueue(now);
 
     for (let i = 0; i < this.activeMessages.length; i++) {
       const msg = this.activeMessages[i];
       if (!msg) continue;
       const elapsed = now - msg.startTime - msg.pausedDuration;
-
-      if (elapsed >= msg.duration) {
-        toRemove.push(i);
-        continue;
-      }
 
       const progress = Math.min(1, Math.max(0, elapsed / msg.duration));
 
@@ -358,16 +390,6 @@ export class CanvasRenderer extends RendererBase {
         this.renderRegular(ctx, msg, snappedX, snappedY, opacity);
       }
     }
-
-    if (toRemove.length === 0) return;
-
-    // Filter out expired messages (swap-pop pattern avoided for clarity)
-    const surviving = this.activeMessages.filter((_, i) => !toRemove.includes(i));
-    this.activeMessages.length = 0;
-    this.activeMessages.push(...surviving);
-
-    this.observability.updateActiveMessages(this.activeMessages.length);
-    this.observability.updateQueueDepth(this.pendingQueue.length);
   }
 
   // ── Queue drain ──────────────────────────────────────────────────────
@@ -381,22 +403,31 @@ export class CanvasRenderer extends RendererBase {
       const msg = this.pendingQueue.shift();
       if (!msg) continue;
 
-      // Per-frame collision check: verify that placing this message at its
-      // target lane would not overlap with any currently visible message.
-      // If it would, put it back and stop draining — the next frame will
-      // retry when existing messages have moved further.
-      if (this.wouldOverlap(msg, now)) {
+      // Obtain placement and check collision in a single step to avoid
+      // double-finding (BUG-1: findPlacement was called twice, causing
+      // lane mismatch between the overlap check and the actual enqueue).
+      const result = this.checkPlacement(msg, now);
+      if (!result.ok) {
+        if (result.reason === 'no_lane') {
+          // No lane available at all — drop to prevent infinite loop (BUG-5).
+          this.observability.onMessageDropped('no_lane_available');
+          continue;
+        }
+        // Collision: put back and stop draining — retry next frame.
         this.pendingQueue.unshift(msg);
         break;
       }
 
-      this.enqueueMessage(msg, now);
+      this.enqueueMessageWithPlacement(msg, now, result.placement);
     }
   }
 
   /**
    * Check whether placing a new message at its target lane would cause
    * visual overlap with any currently active (visible) message.
+   *
+   * Unlike the old wouldOverlap, this returns the LanePlacement on success
+   * so the caller can reuse it without calling findPlacement a second time.
    *
    * For scrolling modes, overlap occurs when a new message enters from the
    * right edge while an existing message in the same or adjacent lane has
@@ -407,9 +438,17 @@ export class CanvasRenderer extends RendererBase {
    * For top/bottom modes, overlap occurs when an active message in the same
    * lane has not yet expired.
    */
-  private wouldOverlap(message: ChatMessage, now: number): boolean {
+  private checkPlacement(
+    message: ChatMessage,
+    now: number
+  ):
+    | { ok: true; placement: import('@core/lane-allocator').LanePlacement }
+    | {
+        ok: false;
+        reason: 'collision' | 'no_lane';
+      } {
     const dims = this.overlay.getDimensions();
-    if (!dims) return true;
+    if (!dims) return { ok: false, reason: 'no_lane' as const };
 
     const mode = this.settings.danmakuMode;
     const isScrolling = mode === 'scroll' || mode === 'reverse';
@@ -417,7 +456,7 @@ export class CanvasRenderer extends RendererBase {
 
     // Find the target lane Y position via the allocator (without committing).
     const placement = this.laneAllocator.findPlacement(msgHeight, dims, message.isBacklog ?? false);
-    if (!placement) return true; // no lane available → treat as overlap
+    if (!placement) return { ok: false, reason: 'no_lane' as const };
 
     const newLaneY = placement.laneY;
     const laneHeight = this.laneAllocator.getLaneHeight();
@@ -442,40 +481,39 @@ export class CanvasRenderer extends RendererBase {
         // The new message starts at the right edge (or left for reverse).
         // Overlap if the active message's right edge is still on screen.
         if (mode === 'scroll') {
-          if (activeRightEdge > 0) return true;
+          if (activeRightEdge > 0) return { ok: false, reason: 'collision' as const };
         } else {
           // reverse mode: messages enter from left, travel right
           const reverseTravel = dims.width * 2 + rendererLayout.exitPaddingMin;
           const activeX = -active.width + activeProgress * reverseTravel;
-          if (activeX + active.width > 0) return true;
+          if (activeX + active.width > 0) return { ok: false, reason: 'collision' as const };
         }
       } else {
         // Top/bottom modes: overlap if the active message in the same lane
         // has not yet expired.
-        if (activeElapsed < active.duration) return true;
+        if (activeElapsed < active.duration) return { ok: false, reason: 'collision' as const };
       }
     }
 
-    return false;
+    return { ok: true, placement };
   }
 
   // ── Message enqueue ──────────────────────────────────────────────────
 
-  private enqueueMessage(message: ChatMessage, now: number): void {
+  /**
+   * Enqueue a message using a pre-computed placement (from checkPlacement).
+   * This avoids the double findPlacement call that caused BUG-1.
+   */
+  private enqueueMessageWithPlacement(
+    message: ChatMessage,
+    now: number,
+    placement: import('@core/lane-allocator').LanePlacement
+  ): void {
     const dims = this.overlay.getDimensions();
     if (!dims) return;
 
     const mode = this.settings.danmakuMode;
     const { width: msgWidth, height: msgHeight } = this.estimateDimensions(message);
-
-    // All modes use LaneAllocator for lane-based placement.
-    // Scroll/reverse modes animate messages across the screen;
-    // top/bottom modes display them at fixed positions.
-    const placement = this.laneAllocator.findPlacement(msgHeight, dims, message.isBacklog ?? false);
-    if (!placement) {
-      this.observability.onMessageDropped('no_lane_available');
-      return;
-    }
 
     const isScrolling = mode === 'scroll' || mode === 'reverse';
 
