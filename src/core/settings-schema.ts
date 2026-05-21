@@ -274,29 +274,26 @@ const STRING_VALIDATORS: Partial<Record<RootScalarSettingKey, (v: string) => boo
 
 const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings => {
   const d = DEFAULT_SETTINGS;
+  // Start from defaults, then overlay valid values from the input
   const n = cloneSettings(DEFAULT_SETTINGS);
 
   const pickBool = (v: unknown, fallback: boolean): boolean =>
     typeof v === 'boolean' ? v : fallback;
 
-  // Root scalar settings: type-routed via ROOT_SETTING_META
-  // Use a mutable copy for dynamic key assignment.
-  const s: Record<string, unknown> = { ...n };
-  for (const keyStr of Object.keys(ROOT_SETTING_META)) {
-    const meta = ROOT_SETTING_META[keyStr as RootScalarSettingKey];
-    const raw = settings[keyStr as keyof OverlaySettings];
+  // Root scalar settings: type-routed via ROOT_SETTING_META.
+  // Write into a mutable copy since OverlaySettings has no index signature.
+  const out = n as unknown as Record<string, unknown>;
+  const defaults = d as unknown as Record<string, unknown>;
+  for (const key of Object.keys(ROOT_SETTING_META) as RootScalarSettingKey[]) {
+    const meta = ROOT_SETTING_META[key];
+    const raw = settings[key];
     if (meta.type === 'boolean') {
-      s[keyStr] = typeof raw === 'boolean' ? raw : d[keyStr as keyof OverlaySettings];
+      out[key] = typeof raw === 'boolean' ? raw : defaults[key];
     } else if (meta.type === 'number') {
-      s[keyStr] = clampNumber(
-        raw,
-        d[keyStr as keyof OverlaySettings] as number,
-        resolveLimits(keyStr)
-      );
+      out[key] = clampNumber(raw, defaults[key] as number, resolveLimits(key));
     } else {
-      const validator = STRING_VALIDATORS[keyStr as RootScalarSettingKey];
-      s[keyStr] =
-        typeof raw === 'string' && validator?.(raw) ? raw : d[keyStr as keyof OverlaySettings];
+      const validator = STRING_VALIDATORS[key];
+      out[key] = typeof raw === 'string' && validator?.(raw) ? raw : defaults[key];
     }
   }
 
