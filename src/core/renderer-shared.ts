@@ -7,16 +7,12 @@
 
 import type { ChatMessage } from '@app-types';
 import { rendererLayout, spacing } from '@core/design-tokens';
-import { DEFAULT_SETTINGS } from '@core/settings-schema';
 import {
   getFontString,
   measureTextHeight,
   measureTextWidth,
   wrapTextLines,
 } from '@core/text-measure';
-
-// Derived from DEFAULT_SETTINGS (SSOT) to avoid hardcoded string duplication.
-const FONT_FAMILY = DEFAULT_SETTINGS.fontFamily;
 
 // ── Text measurement ────────────────────────────────────────────────────────
 
@@ -53,7 +49,7 @@ export function estimateMessageDimensions(
   fontSize: number,
   showAuthor: boolean,
   fontWeight: 'normal' | 'bold' = 'bold',
-  fontFamily: string = FONT_FAMILY,
+  fontFamily: string = 'system-ui, -apple-system, sans-serif',
   maxBodyLines?: { superchat?: number; membership?: number }
 ): MessageDimensions {
   const font = getFontString(fontSize, fontWeight, fontFamily);

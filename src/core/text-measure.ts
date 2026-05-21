@@ -112,10 +112,8 @@ export function getFontString(
  * @returns Array of line segments (always >= 1 for non-empty input, 0 for empty).
  */
 function wrapLine(line: string, ctx: CanvasRenderingContext2D, maxWidth: number): string[] {
-  if (line.length === 0) return [''];
-
   const words = line.split(/\s+/).filter((w) => w.length > 0);
-  if (words.length === 0) return [''];
+  if (words.length === 0) return [];
 
   const spaceWidth = ctx.measureText(' ').width;
   const lines: string[] = [];
@@ -157,7 +155,7 @@ function wrapLine(line: string, ctx: CanvasRenderingContext2D, maxWidth: number)
     }
   }
 
-  if (currentLine.length > 0 || lines.length === 0) {
+  if (currentLine.length > 0) {
     lines.push(currentLine);
   }
 
