@@ -112,23 +112,11 @@ function estimateSuperChatDimensions(
 ): MessageDimensions {
   const { paddingH, paddingV } = rendererLayout.superchat;
   const bodyLineHeight = measureTextHeight(font, fontSize);
-  const innerWidth = rendererLayout.superchatMaxWidth - paddingH * 2;
-
-  const wrappedLines = wrapTextLines(message.text, font, Math.max(1, innerWidth));
-  const textHeight = Math.ceil(bodyLineHeight * Math.min(wrappedLines.length, maxBodyLines));
-
-  let maxLineWidth = 0;
-  const linesToMeasure = wrappedLines.slice(0, maxBodyLines);
-  for (const line of linesToMeasure) {
-    const w = measureTextWidth(line, font);
-    if (w > maxLineWidth) maxLineWidth = w;
-  }
 
   let authorSectionWidth = 0;
   let authorSectionHeight = 0;
   if (showAuthor && message.author) {
     const authorFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
-    // Use the SAME font construction as renderSuperChat for consistent metrics
     const authorFont = getFontString(authorFontSize, fontWeight, fontFamily);
     const authorNameWidth = measureTextWidth(message.author, authorFont);
     authorSectionWidth = rendererLayout.authorPhotoSize + spacing.sm + authorNameWidth;
@@ -136,18 +124,35 @@ function estimateSuperChatDimensions(
     authorSectionHeight = Math.max(rendererLayout.authorPhotoSize, nameHeight);
   }
 
-  // Use the SAME font construction as renderSuperChat for the badge
   const badgeFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
   const badgeFont = getFontString(badgeFontSize, 'bold', fontFamily);
   const badgeTextWidth = measureTextWidth(message.superChat?.amount ?? '', badgeFont);
   const badgeWidth = badgeTextWidth + rendererLayout.superchatBadge.paddingH * 2;
   const badgeHeight = badgeFontSize + rendererLayout.superchatBadge.paddingV * 2;
 
+  // Pass 1: measure text at max inner width to get max line width
+  const maxInnerWidth = rendererLayout.superchatMaxWidth - paddingH * 2;
+  const pass1Lines = wrapTextLines(message.text, font, Math.max(1, maxInnerWidth));
+  let maxLineWidth = 0;
+  for (const line of pass1Lines.slice(0, maxBodyLines)) {
+    const w = measureTextWidth(line, font);
+    if (w > maxLineWidth) maxLineWidth = w;
+  }
+
+  // Determine card width from the widest element
   const contentWidth = Math.max(authorSectionWidth, badgeWidth, maxLineWidth);
   const width = Math.max(
     rendererLayout.superchatMinWidth,
     Math.min(rendererLayout.superchatMaxWidth, contentWidth + paddingH * 2)
   );
+
+  // Pass 2: re-wrap text at the actual card inner width so line count
+  // matches what renderSuperChat will produce. Without this, a card clamped
+  // to superchatMinWidth (or narrowed by content) would estimate fewer lines
+  // than actually rendered, causing text to overflow the background.
+  const actualInnerWidth = Math.max(1, width - paddingH * 2);
+  const wrappedLines = wrapTextLines(message.text, font, actualInnerWidth);
+  const textHeight = Math.ceil(bodyLineHeight * Math.min(wrappedLines.length, maxBodyLines));
 
   let stickerHeight = 0;
   if (message.superChat?.sticker) {
@@ -173,16 +178,18 @@ function estimateMembershipDimensions(
 
   const infoHeight = nameHeight;
 
-  const innerWidth = rendererLayout.superchatMaxWidth - paddingH * 2;
-  const wrappedLines = wrapTextLines(message.text, font, Math.max(1, innerWidth));
-  const bodyLineCount = Math.min(wrappedLines.length, maxBodyLines);
-  const textHeight = Math.ceil(bodyLineHeight * bodyLineCount);
-
   // Clamp width to the same bounds as SuperChat for visual consistency
   const width = Math.max(
     rendererLayout.superchatMinWidth,
     Math.min(rendererLayout.superchatMaxWidth, textWidth + paddingH * 2)
   );
+
+  // Re-wrap text at the actual card inner width so line count matches
+  // what renderMembership will produce (same 2-pass pattern as superchat).
+  const actualInnerWidth = Math.max(1, width - paddingH * 2);
+  const wrappedLines = wrapTextLines(message.text, font, actualInnerWidth);
+  const bodyLineCount = Math.min(wrappedLines.length, maxBodyLines);
+  const textHeight = Math.ceil(bodyLineHeight * bodyLineCount);
 
   // Include author-to-body gap when author section is present (matching renderMembership)
   const hasAuthor = message.author !== undefined;
