@@ -248,14 +248,6 @@ export type BurstLevel = 'normal' | 'elevated' | 'high' | 'extreme';
 export interface LaneState {
   /** Lane index */
   index: number;
-  /** Last item start time (timestamp) */
-  lastItemStartTime: number;
-  /** Last item animation end time (timestamp) — hard deadline before next message can start. */
-  lastItemEndTime: number;
-  /** Last item width in pixels */
-  lastItemWidthPx: number;
-  /** Cumulative message count for load balancing (weighted lane selection) */
-  totalMessages: number;
 }
 
 /**

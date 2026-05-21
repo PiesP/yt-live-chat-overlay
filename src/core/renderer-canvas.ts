@@ -585,8 +585,7 @@ export class CanvasRenderer extends RendererBase {
   // ── Backlog pause ────────────────────────────────────────────────────
 
   private getEffectiveBacklogSpeed(): number {
-    const speed =
-      this.settings.speedPxPerSec * Math.max(1, this.backlogSpeedMultiplier);
+    const speed = this.settings.speedPxPerSec * Math.max(1, this.backlogSpeedMultiplier);
     return Math.max(1, speed);
   }
 

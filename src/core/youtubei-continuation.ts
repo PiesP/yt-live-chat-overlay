@@ -59,7 +59,7 @@ const pickContinuation = (
   return null;
 };
 
-const extractInitialChatContinuation = (
+export const extractInitialChatContinuation = (
   renderer: Record<string, unknown>
 ): InnertubeContinuationData | null =>
   pickContinuation(renderer.continuations, [
@@ -88,5 +88,3 @@ export const extractPlayerSeekContinuation = (
   continuations: unknown
 ): InnertubeContinuationData | null =>
   pickContinuation(continuations, ['playerSeekContinuationData']);
-
-export { extractInitialChatContinuation };

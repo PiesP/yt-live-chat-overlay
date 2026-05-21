@@ -197,10 +197,6 @@ export class LaneAllocator {
 
     const lane: LaneState = {
       index: result.laneIndex,
-      lastItemStartTime: now,
-      lastItemEndTime: 0,
-      lastItemWidthPx: 0,
-      totalMessages: 0,
     };
 
     return {
