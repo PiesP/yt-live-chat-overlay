@@ -14,6 +14,7 @@ import {
   EMOJI_TEXT_PATTERN,
   extractUserColor,
   hasEmojiContent,
+  normalizeInlineText,
   stripControlCharacters,
   truncateForKind,
 } from '@core/chat-message-helpers';
@@ -457,10 +458,6 @@ function getEmojiShortcuts(emojiData: JsonObject): string[] {
   return Array.isArray(emojiData.shortcuts)
     ? emojiData.shortcuts.filter((shortcut): shortcut is string => typeof shortcut === 'string')
     : [];
-}
-
-function normalizeInlineText(text: string): string {
-  return stripControlCharacters(text).replace(/\s+/g, ' ').trim();
 }
 
 function getEmojiAltText(emojiData: JsonObject): string {
