@@ -72,8 +72,8 @@ export function measureTextWidth(text: string, font: string): number {
  *
  * Uses `actualBoundingBoxAscent + actualBoundingBoxDescent` measured
  * against a representative string ("Mg") for the tightest vertical fit.
- * Falls back to `fontBoundingBoxAscent + Descent` and then to a
- * fontSize-based estimate.
+ * Falls back to a fontSize-based estimate when the bounding-box API is
+ * unavailable (very old browsers).
  */
 export function measureTextHeight(font: string, fontSize: number): number {
   const ctx = getCtx();
@@ -82,7 +82,7 @@ export function measureTextHeight(font: string, fontSize: number): number {
 
   const actualAscent = m.actualBoundingBoxAscent;
   const actualDescent = m.actualBoundingBoxDescent;
-  if (actualAscent !== undefined && actualDescent !== undefined && actualAscent > 0) {
+  if (actualAscent > 0 && actualDescent > 0) {
     return Math.ceil(actualAscent + actualDescent);
   }
 
