@@ -343,6 +343,8 @@ export class CanvasRenderer extends RendererBase {
 
     this.drainQueue(now);
 
+    this.observability.tick();
+
     for (let i = 0; i < this.activeMessages.length; i++) {
       const msg = this.activeMessages[i];
       if (!msg) continue;
@@ -606,7 +608,7 @@ export class CanvasRenderer extends RendererBase {
 
   private getEffectiveBacklogSpeed(): number {
     const speed =
-      this.settings.speedPxPerSec * this.playbackRate * Math.max(1, this.backlogSpeedMultiplier);
+      this.settings.speedPxPerSec * Math.max(1, this.backlogSpeedMultiplier);
     return Math.max(1, speed);
   }
 

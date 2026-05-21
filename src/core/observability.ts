@@ -21,7 +21,6 @@ export class ObservabilityReporter {
   private windowStartTime = Date.now();
   private debugOverlayEl: HTMLElement | null = null;
   private debugUpdateTimer: ReturnType<typeof setInterval> | null = null;
-  private boundVisibilityHandler: (() => void) | null = null;
   private lastWarnTime = 0;
   private readonly WARN_COOLDOWN_MS = 30_000;
   private readonly METRIC_WINDOW_MS = 60_000;
@@ -130,8 +129,17 @@ export class ObservabilityReporter {
     }
   }
 
+  /**
+   * Update the debug HUD — call from the rAF loop (every frame).
+   * Avoids a separate setInterval and visibility-change management.
+   */
+  tick(): void {
+    if (!this.showDebug || !this.debugOverlayEl) return;
+    this.updateDebugOverlay();
+  }
+
   private createDebugOverlay(): void {
-    if (this.debugOverlayEl || !this.showDebug) return;
+    if (this.debugOverlayEl) return;
     const el = document.createElement('div');
     el.id = 'yt-chat-overlay-debug';
     el.style.cssText =
@@ -141,40 +149,6 @@ export class ObservabilityReporter {
       'pointer-events:none;user-select:none';
     document.body.appendChild(el);
     this.debugOverlayEl = el;
-    this.registerVisibilityHandler();
-    this.scheduleDebugUpdate();
-  }
-
-  private registerVisibilityHandler(): void {
-    if (this.boundVisibilityHandler) return;
-    this.boundVisibilityHandler = () => {
-      if (document.hidden) {
-        this.pauseDebugUpdate();
-      } else {
-        this.resumeDebugUpdate();
-      }
-    };
-    document.addEventListener('visibilitychange', this.boundVisibilityHandler);
-  }
-
-  private pauseDebugUpdate(): void {
-    if (this.debugUpdateTimer !== null) {
-      clearInterval(this.debugUpdateTimer);
-      this.debugUpdateTimer = null;
-    }
-  }
-
-  private resumeDebugUpdate(): void {
-    if (this.showDebug) {
-      this.scheduleDebugUpdate();
-    }
-  }
-
-  private scheduleDebugUpdate(): void {
-    if (!this.showDebug || !this.debugOverlayEl || this.debugUpdateTimer !== null) return;
-    this.debugUpdateTimer = setInterval(() => {
-      this.updateDebugOverlay();
-    }, 250);
   }
 
   private updateDebugOverlay(): void {
@@ -198,14 +172,6 @@ export class ObservabilityReporter {
   }
 
   private destroyDebugOverlay(): void {
-    if (this.debugUpdateTimer !== null) {
-      clearInterval(this.debugUpdateTimer);
-      this.debugUpdateTimer = null;
-    }
-    if (this.boundVisibilityHandler) {
-      document.removeEventListener('visibilitychange', this.boundVisibilityHandler);
-      this.boundVisibilityHandler = null;
-    }
     if (this.debugOverlayEl) {
       this.debugOverlayEl.remove();
       this.debugOverlayEl = null;

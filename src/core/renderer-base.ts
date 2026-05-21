@@ -41,7 +41,6 @@ export abstract class RendererBase {
   protected isPaused = false;
   protected isVideoPaused = false;
   protected pausedAt: number | null = null;
-  protected playbackRate = 1;
   protected backlogSpeedMultiplier = 1;
   protected backlogPaused = false;
 
@@ -127,12 +126,6 @@ export abstract class RendererBase {
     }
   }
 
-  setPlaybackRate(rate: number): void {
-    if (rate <= 0) return;
-    this.playbackRate = rate;
-    this.onPlaybackRateChange(rate);
-  }
-
   setBacklogSpeedMultiplier(multiplier: number): void {
     this.backlogSpeedMultiplier = Math.max(1, multiplier);
   }
@@ -160,7 +153,7 @@ export abstract class RendererBase {
   // ── Shared helpers ────────────────────────────────────────────────────
 
   protected getEffectiveSpeedPxPerSec(): number {
-    let speed = this.settings.speedPxPerSec * this.playbackRate;
+    let speed = this.settings.speedPxPerSec;
 
     const emaRate = this.burstDetector.getEmaRate();
     if (emaRate > 5) {
@@ -223,8 +216,6 @@ export abstract class RendererBase {
 
   protected abstract onPause(): void;
   protected abstract onResume(): void;
-  /** Override to react to playback rate changes. No-op by default. */
-  protected onPlaybackRateChange(_rate: number): void {}
   protected abstract applyPausedDuration(pausedMs: number): void;
   protected abstract resetState(): void;
   protected abstract onDestroy(): void;
