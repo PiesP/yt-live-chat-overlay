@@ -149,29 +149,7 @@ export class CanvasRenderer extends RendererBase {
       this.pendingQueue.splice(insertIndex, 0, message);
     }
 
-    if (this.activeMessages.length < this.settings.maxConcurrentMessages) {
-      this.updateBacklogPause();
-      const next = this.pendingQueue.shift();
-      if (next) {
-        // BUG-2 fix: run the same collision + anti-block checks that
-        // drainQueue performs, so the direct path is consistent.
-        if (this.isAntiBlockActive()) {
-          this.pendingQueue.unshift(next);
-        } else {
-          const result = this.checkPlacement(next, performance.now());
-          if (!result.ok) {
-            if (result.reason === 'no_lane') {
-              this.observability.onMessageDropped('no_lane_available');
-            } else {
-              // Collision: put back, next frame will retry.
-              this.pendingQueue.unshift(next);
-            }
-          } else {
-            this.enqueueMessageWithPlacement(next, performance.now(), result.placement);
-          }
-        }
-      }
-    }
+    this.updateBacklogPause();
   }
 
   /** Binary search for insertion point in the priority-sorted pending queue. */
