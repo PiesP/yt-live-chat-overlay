@@ -26,6 +26,7 @@ import {
   rendererLayout,
   resolveSuperChatRgb,
   spacing,
+  toRgba,
 } from '@core/design-tokens';
 import { createLogger } from '@core/logging';
 import type { Overlay } from '@core/overlay';
@@ -84,13 +85,6 @@ export class CanvasRenderer extends RendererBase {
   private static readonly TEXT_BITMAP_MAX = 200;
 
   private static readonly FADE_DURATION_MS = 500;
-
-  /** Convert an rgb(...) or rgba(...) color string to rgba(...) with the given alpha. */
-  private toRgba(color: string, alpha: number): string {
-    const match = color.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,[^)]*)?\)/);
-    if (!match) return color;
-    return `rgba(${match[1]}, ${match[2]}, ${match[3]}, ${alpha})`;
-  }
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
     super(overlay, settings);
@@ -862,9 +856,9 @@ export class CanvasRenderer extends RendererBase {
 
     // Background gradient
     const grad = ctx.createLinearGradient(x, y, x, y + h);
-    grad.addColorStop(0, this.toRgba(baseColor, topAlpha));
-    grad.addColorStop(0.48, this.toRgba(baseColor, scAlpha));
-    grad.addColorStop(1, this.toRgba(baseColor, bottomAlpha));
+    grad.addColorStop(0, toRgba(baseColor, topAlpha));
+    grad.addColorStop(0.48, toRgba(baseColor, scAlpha));
+    grad.addColorStop(1, toRgba(baseColor, bottomAlpha));
     ctx.fillStyle = grad;
     this.roundRect(ctx, x, y, w, h, rendererLayout.superchatCardRadius);
     ctx.fill();

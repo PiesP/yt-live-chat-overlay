@@ -26,7 +26,7 @@ export class SettingsUi {
       return;
     }
 
-    if (event.key === 'Tab') {
+    if (event.key === 'Tab' && this.backdrop && this.backdrop.style.display !== 'none') {
       this.trapFocus(event);
     }
   };
@@ -41,6 +41,8 @@ export class SettingsUi {
     this.form = new SettingsUiForm(getSettings, (preview) => {
       this.queuePreview(preview);
     });
+    // Always bound — handler checks visibility state internally
+    document.addEventListener('keydown', this.handleKeydown);
   }
 
   /** Debounced live preview — applies settings immediately and persists. */
@@ -132,21 +134,7 @@ export class SettingsUi {
 
     this.backdrop.style.display = isOpen ? 'flex' : 'none';
     this.backdrop.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
-
-    if (isOpen) {
-      if (!this.keydownBound) {
-        document.addEventListener('keydown', this.handleKeydown);
-        this.keydownBound = true;
-      }
-      return;
-    }
-    if (this.keydownBound) {
-      document.removeEventListener('keydown', this.handleKeydown);
-      this.keydownBound = false;
-    }
   }
-
-  private keydownBound = false;
 
   private bindTabEvents(): void {
     if (!this.modal) return;
@@ -192,10 +180,6 @@ export class SettingsUi {
         else if (action === 'export') this.handleExport();
         else if (action === 'import') this.handleImport();
         return;
-      }
-      const closeBtn = target?.closest<HTMLButtonElement>('.yt-chat-overlay-settings-close');
-      if (closeBtn) {
-        this.close();
       }
     });
 
@@ -461,7 +445,6 @@ export class SettingsUi {
     this.backdrop = null;
     this.modal = null;
     this.playerElement = null;
-    this.keydownBound = false;
 
     log.info('Destroyed');
   }

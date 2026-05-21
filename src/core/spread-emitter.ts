@@ -10,6 +10,7 @@
  */
 
 import type { ChatMessage } from '@app-types';
+import { sampleExponential } from '@core/design-tokens';
 import { createLogger } from '@core/logging';
 
 const log = createLogger('SpreadEmitter');
@@ -19,14 +20,6 @@ const MAX_SPREAD_BUFFER = 100;
 
 function isPriorityMessage(message: ChatMessage): boolean {
   return message.kind === 'superchat' || message.kind === 'membership';
-}
-
-/**
- * Sample from an exponential distribution with the given mean.
- * Uses the inverse-CDF method: -mean * ln(1 - U) where U ~ Uniform(0, 1).
- */
-function sampleExponential(mean: number): number {
-  return -mean * Math.log(1 - Math.random());
 }
 
 export class SpreadEmitter {

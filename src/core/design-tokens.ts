@@ -279,6 +279,23 @@ export function computeSuperChatOpacities(superChatOpacity: number): {
 }
 
 /**
+ * Convert an rgb(...) or rgba(...) color string to rgba(...) with the given alpha.
+ */
+export function toRgba(color: string, alpha: number): string {
+  const match = color.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,[^)]*)?\)/);
+  if (!match) return color;
+  return `rgba(${match[1]}, ${match[2]}, ${match[3]}, ${alpha})`;
+}
+
+/**
+ * Sample from an exponential distribution with the given mean.
+ * Uses the inverse-CDF method: -mean * ln(1 - U) where U ~ Uniform(0, 1).
+ */
+export function sampleExponential(mean: number): number {
+  return -mean * Math.log(1 - Math.random());
+}
+
+/**
  * Choose a readable text color (black or white) for a given background color.
  * Uses WCAG 2.0 relative luminance: returns '#000000' for light backgrounds,
  * '#ffffff' for dark backgrounds.

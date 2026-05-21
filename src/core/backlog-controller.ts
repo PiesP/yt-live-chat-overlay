@@ -20,6 +20,7 @@
  */
 
 import type { ChatMessage } from '@app-types';
+import { sampleExponential } from '@core/design-tokens';
 import { createLogger } from '@core/logging';
 import type { ObservabilityReporter } from '@core/observability';
 
@@ -227,19 +228,8 @@ export class BacklogInjectionController {
    * The result is clamped to [16ms, 2×mean] to prevent extreme outliers.
    */
   private scheduleNextTick(meanInterval: number): void {
-    const poissonDelay = Math.max(
-      16,
-      Math.min(meanInterval * 2, this.sampleExponential(meanInterval))
-    );
+    const poissonDelay = Math.max(16, Math.min(meanInterval * 2, sampleExponential(meanInterval)));
     this.injectionTimer = setTimeout(() => this.processTick(), poissonDelay);
-  }
-
-  /**
-   * Sample from an exponential distribution with the given mean.
-   * Uses the inverse-CDF method: -mean * ln(1 - U) where U ~ Uniform(0, 1).
-   */
-  private sampleExponential(mean: number): number {
-    return -mean * Math.log(1 - Math.random());
   }
 
   /**

@@ -219,19 +219,3 @@ export function wrapTextLines(text: string, font: string, maxWidth: number): str
 
   return result;
 }
-
-/**
- * Measure the number of wrapped lines a text string will occupy when
- * constrained to `maxWidth` pixels, using the given font.
- *
- * Delegates to `wrapTextLines()` so measurement and rendering always
- * agree on line breaks.
- *
- * @param text     - The text to measure.
- * @param font     - CSS font string (e.g. "bold 16px sans-serif").
- * @param maxWidth - Maximum line width in pixels.
- * @returns The number of lines (always >= 1 for non-empty text, 0 for empty).
- */
-export function measureWrappedLineCount(text: string, font: string, maxWidth: number): number {
-  return wrapTextLines(text, font, maxWidth).length;
-}
