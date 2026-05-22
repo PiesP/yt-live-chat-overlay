@@ -204,6 +204,20 @@ export abstract class ChatSource {
     });
   }
 
+  /**
+   * Inject messages obtained from an external source (e.g. fetch interceptor
+   * that eavesdrops on YouTube's own chat requests).  Messages bypass the
+   * normal poll loop and are delivered through the standard callback path
+   * so they flow through dedup, spread emission, and the renderer.
+   */
+  injectExternalMessages(messages: ChatMessage[]): void {
+    if (!this.callback || messages.length === 0) return;
+    for (const message of messages) {
+      this.rememberMessage(message);
+    }
+    this.callback(messages, false);
+  }
+
   protected abstract seedCurrentSession(signal?: AbortSignal): Promise<boolean>;
   protected abstract launchCurrentPollLoop(signal?: AbortSignal): void;
 

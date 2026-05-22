@@ -3,6 +3,7 @@ import { BacklogInjectionController } from '@core/backlog-controller';
 import type { ChatHealthSnapshot, ChatSource, ChatSourceStartStatus } from '@core/chat-source-base';
 import { createChatSource } from '@core/chat-source-factory';
 import { findElementMatch, isAbortError, throwIfAborted, VIDEO_SELECTORS } from '@core/dom';
+import { type InterceptorUnsubscribe, installFetchInterceptor } from '@core/fetch-interceptor';
 import { createLogger } from '@core/logging';
 import { MessageIdRegistry } from '@core/message-id-registry';
 import { OVERLAY_SELECTOR, Overlay } from '@core/overlay';
@@ -60,6 +61,8 @@ export class RuntimeSession {
   private hiddenSince: number | null = null;
   /** Session-scoped registry of message IDs already rendered once. Persists across renderer resets. */
   private readonly sessionDedup = new MessageIdRegistry(5000);
+  /** Unsubscribe handle for the fetch interceptor. */
+  private fetchInterceptorUnsubscribe: InterceptorUnsubscribe | null = null;
 
   constructor(options: RuntimeSessionOptions) {
     this.targetUrl = options.targetUrl;
@@ -196,6 +199,9 @@ export class RuntimeSession {
     this.chatSource?.stop();
     this.chatSource = null;
 
+    this.fetchInterceptorUnsubscribe?.();
+    this.fetchInterceptorUnsubscribe = null;
+
     this.renderer?.destroy();
     this.renderer = null;
 
@@ -209,6 +215,10 @@ export class RuntimeSession {
   private async startChatSource(signal: AbortSignal): Promise<ChatSourceStartStatus> {
     const chatSource = await createChatSource(() => this.settings, signal);
     this.chatSource = chatSource;
+
+    // Install fetch interceptor to eavesdrop on YouTube's own chat requests.
+    // This delivers messages ~1 poll interval earlier than our own polling.
+    this.installFetchInterceptor(chatSource);
 
     return chatSource.start((messages, isInitialSeed) => {
       if (this.disposed) return;
@@ -232,6 +242,24 @@ export class RuntimeSession {
         this.backlogController.notifyRealTimeActivity();
       }
     }, signal);
+  }
+
+  /**
+   * Install a fetch interceptor that eavesdrops on YouTube's own
+   * get_live_chat requests and forwards parsed messages to the ChatSource.
+   */
+  private installFetchInterceptor(chatSource: ChatSource): void {
+    try {
+      this.fetchInterceptorUnsubscribe = installFetchInterceptor(
+        () => this.settings,
+        (messages) => {
+          if (this.disposed) return;
+          chatSource.injectExternalMessages(messages);
+        }
+      );
+    } catch (error) {
+      log.warn('Failed to install fetch interceptor:', error);
+    }
   }
 
   private ensureBacklogController(renderer: CanvasRenderer): void {
