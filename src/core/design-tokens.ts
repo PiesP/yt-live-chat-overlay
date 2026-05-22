@@ -157,7 +157,7 @@ export const rendererLayout = {
     radius: 12,
   },
   /** Pending queue max size */
-  queueMaxSize: 50,
+  queueMaxSize: 100,
   /** Background queue max */
   backgroundQueueMax: 10,
   /** Max message age for fade-out (ms) */

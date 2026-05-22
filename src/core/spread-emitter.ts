@@ -127,6 +127,12 @@ export class SpreadEmitter {
   private scheduleNext(): void {
     const factor = this.getSpreadFactor();
 
+    // Zero spread: emit immediately (no timer needed)
+    if (factor === 0) {
+      this.tick();
+      return;
+    }
+
     // Ultra-low spread: emit immediately (no timer needed)
     if (factor <= 0.2) {
       this.tick();

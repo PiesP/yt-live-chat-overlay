@@ -82,7 +82,7 @@ export class CanvasRenderer extends RendererBase {
    * On cache hit, drawImage() replaces fillText()+strokeText() in the hot path.
    */
   private readonly textBitmapCache = new Map<string, HTMLCanvasElement>();
-  private static readonly TEXT_BITMAP_MAX = 200;
+  private static readonly TEXT_BITMAP_MAX = 500;
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
     super(overlay, settings);

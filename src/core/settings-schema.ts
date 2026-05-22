@@ -203,9 +203,9 @@ export const DEFAULT_SETTINGS = {
   superChatMaxBodyLines: 5,
   membershipMaxBodyLines: 3,
   spreadEnabled: true,
-  spreadFactor: 1.0,
+  spreadFactor: 0,
   fadeDurationMs: 500,
-  minPollIntervalMs: 100,
+  minPollIntervalMs: 50,
   maxPollIntervalMs: 2000,
 } as const satisfies Readonly<OverlaySettings>;
 
