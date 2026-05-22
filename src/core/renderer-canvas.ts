@@ -9,6 +9,15 @@
  * Extends RendererBase for shared state machine, rate limiting, burst
  * detection, and lane allocation.
  *
+ * Stagger delay: messages in the same drainQueue batch are given an
+ * exponentially-distributed time offset (0-200ms) before they start
+ * scrolling. This spreads simultaneous entries across time, preventing
+ * the visual clumping that occurs when multiple messages enter from the
+ * right edge in the same frame. During the stagger period the message
+ * sits at the start position (right edge) but is not rendered. The lane
+ * allocator reservation is unaffected — the lane is locked from the
+ * actual commit time, not the visual start time.
+ *
  * Fixes from audit:
  * - BUG-1: updateSettings now propagates _options to super
  * - BUG-4: reverse travel distance uses consistent exitPadding

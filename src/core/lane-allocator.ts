@@ -39,12 +39,27 @@ interface LaneAllocatorOptions {
  *      selected in O(log n) time.
  *
  * Extensions over base DLIOS:
- *   - Lane cooldown: minimum time between consecutive uses of the same lane
- *     prevents vertical clustering.
- *   - Normalized composite scoring: wait time, spatial density, and message
- *     count are all normalized to [0, 1] so no single term dominates.
- *   - Uniform initialization: all lanes start at the same available time;
- *     spatial spread order prevents diagonal entry patterns.
+ *   - Precision exit-time: for scrolling mode, lane occupancy is computed
+ *     as the exact time until the comment's right edge exits the screen,
+ *     plus a small headway gap (30-200ms). This replaces the old blanket
+ *     duration + 15% cooldown — reducing horizontal dead-space between
+ *     consecutive comments from ~433px to ~10-20px at 200px/s.
+ *   - Normalized composite scoring: wait time, spatial density, message
+ *     count, temporal batch density, and batch-adjacent penalty are all
+ *     normalized to [0, 1] so no single term dominates.
+ *   - Temporal density: per-batch lane assignment counters spread messages
+ *     across lanes within the same drainQueue batch, preventing vertical
+ *     clumping when multiple comments arrive simultaneously.
+ *   - Batch-adjacent penalty: prevents diagonal entry patterns by penalizing
+ *     consecutive batch assignments to the same or adjacent lanes.
+ *   - Epsilon-greedy selection: 10% of allocations randomly explore a
+ *     non-optimal lane from the top-K candidates, breaking deterministic
+ *     long-term diagonal bands.
+ *   - Backlog adjacency penalty: during backlog injection, penalizes lanes
+ *     whose neighbours were recently used, enforcing vertical spread.
+ *   - Backlog lane partitioning: during backlog injection, a subset of lanes
+ *     is reserved for backlog messages, preventing visual overlap with
+ *     real-time messages.
  */
 export class LaneAllocator {
   /** 4-ary min-heap of [laneIndex, availableAtMs] pairs, sorted by availableAtMs */
@@ -591,7 +606,12 @@ export class LaneAllocator {
   /**
    * Allocate a single lane using spatial-density-aware selection.
    * Scans the top-K earliest-available lanes and picks the one with
-   * the best composite score (wait time + spatial density + message count).
+   * the best composite score (wait time + spatial density + message count
+   * + temporal batch density + batch-adjacent penalty).
+   *
+   * With probability EPSILON (10%), a random lane from the non-best
+   * top-K candidates is selected instead (epsilon-greedy exploration).
+   * This breaks deterministic diagonal bands in the steady state.
    *
    * When `isBacklog` is true, an additional adjacency gap penalty is
    * applied to spread messages vertically and prevent clustering during
