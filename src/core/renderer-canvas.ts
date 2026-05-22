@@ -24,11 +24,15 @@
  * - BUG-5/6: image caches only store loaded images, errors don't cache
  */
 
-import type { ChatMessage, ContentSegment, OverlayDimensions, OverlaySettings } from '@app-types';
-import { EMOJI_ALIAS_PATTERN } from '@core/chat-message-helpers';
+import type { ChatMessage, OverlayDimensions, OverlaySettings } from '@app-types';
+import {
+  renderContentSegments,
+  renderSegment,
+  renderWrappedText,
+  strokeTextOutline,
+} from '@core/canvas-text-renderer';
 import {
   computeDliosDuration,
-  computeOutlineColor,
   computeReadableTextColor,
   computeSuperChatOpacities,
   colors as designColors,
@@ -42,13 +46,7 @@ import { createLogger } from '@core/logging';
 import type { Overlay } from '@core/overlay';
 import { RendererBase } from '@core/renderer-base';
 import { estimateMessageDimensions as sharedEstimateDimensions } from '@core/renderer-shared';
-import {
-  clearTextMeasurementCaches,
-  getFontString,
-  measureTextHeight,
-  measureTextWidth,
-  wrapTextLines,
-} from '@core/text-measure';
+import { clearTextMeasurementCaches, getFontString, measureTextHeight } from '@core/text-measure';
 
 const log = createLogger('RendererCanvas');
 
@@ -102,7 +100,6 @@ export class CanvasRenderer extends RendererBase {
    * On cache hit, drawImage() replaces fillText()+strokeText() in the hot path.
    */
   private readonly textBitmapCache = new Map<string, HTMLCanvasElement>();
-  private static readonly TEXT_BITMAP_MAX = 500;
 
   /**
    * Horizontal stagger per batch index step (px).
@@ -666,192 +663,6 @@ export class CanvasRenderer extends RendererBase {
     return Math.max(1, speed);
   }
 
-  // ── Text rendering ───────────────────────────────────────────────────
-
-  private renderSegment(
-    ctx: CanvasRenderingContext2D,
-    text: string,
-    x: number,
-    y: number,
-    color: string,
-    alpha: number,
-    fontSize: number
-  ): void {
-    const outline = this.settings.outline;
-    const font = this.getFont(fontSize);
-
-    // Try bitmap cache first (includes outline rendering)
-    if (outline.enabled && outline.widthPx > 0 && outline.opacity > 0) {
-      const strokeWidth = Math.max(0.5, outline.widthPx * 0.85);
-      const strokeColor = computeOutlineColor(color, Math.min(1, outline.opacity));
-      const key = `${font}|${text}|${color}|${strokeWidth.toFixed(1)}|${strokeColor}`;
-      const bitmap = this.textBitmapCache.get(key);
-      if (bitmap) {
-        ctx.save();
-        ctx.globalAlpha = alpha;
-        ctx.drawImage(bitmap, x, y);
-        ctx.restore();
-        return;
-      }
-
-      // Cache miss — render to offscreen canvas and cache
-      this.cacheTextBitmap(key, text, font, color, strokeWidth, strokeColor);
-    }
-
-    // Fallback: direct fillText + strokeText
-    ctx.save();
-    ctx.globalAlpha = alpha;
-    ctx.font = font;
-    ctx.textBaseline = 'top';
-    this.strokeTextOutline(ctx, text, x, y, color);
-    ctx.fillStyle = color;
-    ctx.fillText(text, x, y);
-    ctx.restore();
-  }
-
-  /** Render text with outline to an offscreen canvas and store in bitmap cache. */
-  private cacheTextBitmap(
-    key: string,
-    text: string,
-    font: string,
-    fillColor: string,
-    strokeWidth: number,
-    strokeColor: string
-  ): void {
-    if (this.textBitmapCache.size >= CanvasRenderer.TEXT_BITMAP_MAX) {
-      const oldestKey = this.textBitmapCache.keys().next().value;
-      if (oldestKey) this.textBitmapCache.delete(oldestKey);
-    }
-
-    const ctx = this.ctx;
-    if (!ctx) return;
-
-    ctx.save();
-    ctx.font = font;
-    const metrics = ctx.measureText(text);
-    const bbWidth =
-      Math.abs(metrics.actualBoundingBoxLeft) + Math.abs(metrics.actualBoundingBoxRight);
-    const textWidth = bbWidth > 0 ? Math.ceil(bbWidth) : Math.ceil(metrics.width);
-    const width = textWidth + Math.ceil(strokeWidth) + 2;
-    const mgMetrics = ctx.measureText('Mg');
-    const ascent = mgMetrics.actualBoundingBoxAscent ?? mgMetrics.fontBoundingBoxAscent ?? 0;
-    const descent = mgMetrics.actualBoundingBoxDescent ?? mgMetrics.fontBoundingBoxDescent ?? 0;
-    const height = Math.ceil(ascent) + Math.ceil(descent) + Math.ceil(strokeWidth) + 2;
-    ctx.restore();
-
-    const offscreen = document.createElement('canvas');
-    offscreen.width = width;
-    offscreen.height = height;
-    const offCtx = offscreen.getContext('2d');
-    if (!offCtx) return;
-
-    offCtx.font = font;
-    offCtx.textBaseline = 'top';
-    offCtx.strokeStyle = strokeColor;
-    offCtx.lineWidth = strokeWidth;
-    offCtx.lineJoin = 'round';
-    offCtx.lineCap = 'round';
-    offCtx.strokeText(text, strokeWidth / 2 + 1, strokeWidth / 2 + 1);
-    offCtx.fillStyle = fillColor;
-    offCtx.fillText(text, strokeWidth / 2 + 1, strokeWidth / 2 + 1);
-
-    this.textBitmapCache.set(key, offscreen);
-  }
-
-  /** Draw crisp auto-contrast outline on text using current font and textBaseline. */
-  private strokeTextOutline(
-    ctx: CanvasRenderingContext2D,
-    text: string,
-    x: number,
-    y: number,
-    textColor: string
-  ): void {
-    const outline = this.settings.outline;
-    if (!outline.enabled || outline.widthPx <= 0 || outline.opacity <= 0) return;
-    const strokeWidth = Math.max(0.5, outline.widthPx * 0.85);
-    ctx.save();
-    ctx.strokeStyle = computeOutlineColor(textColor, Math.min(1, outline.opacity));
-    ctx.lineWidth = strokeWidth;
-    ctx.lineJoin = 'round';
-    ctx.lineCap = 'round';
-    ctx.strokeText(text, x, y);
-    ctx.restore();
-  }
-
-  private renderContentSegments(
-    ctx: CanvasRenderingContext2D,
-    segments: readonly ContentSegment[],
-    startX: number,
-    y: number,
-    color: string,
-    alpha: number,
-    fontSize: number
-  ): void {
-    let cursorX = startX;
-    const emojiSize = Math.round(fontSize * rendererLayout.emojiSize);
-
-    for (const seg of segments) {
-      if (seg.type === 'text') {
-        this.renderSegment(ctx, seg.content, cursorX, y, color, alpha, fontSize);
-        cursorX += measureTextWidth(seg.content, this.getFont(fontSize));
-      } else {
-        const cached = this.emojiCache.get(seg.emoji.url);
-        const img = cached?.complete && cached.naturalWidth > 0 ? cached : null;
-        if (img) {
-          ctx.save();
-          ctx.globalAlpha = alpha;
-          ctx.drawImage(img, cursorX, y, emojiSize, emojiSize);
-          ctx.restore();
-        } else if (seg.emoji.fallbackText) {
-          this.renderSegment(ctx, seg.emoji.fallbackText, cursorX, y, color, alpha, fontSize);
-        } else if (seg.emoji.alt && !EMOJI_ALIAS_PATTERN.test(seg.emoji.alt)) {
-          this.renderSegment(ctx, seg.emoji.alt, cursorX, y, color, alpha, fontSize);
-        }
-        cursorX += emojiSize + 4;
-      }
-    }
-  }
-
-  // ── Wrapped text rendering ────────────────────────────────────────────
-
-  /**
-   * Render text with word-wrapping, respecting `maxWidth` and `maxLines`.
-   *
-   * Uses the same `wrapTextLines()` algorithm as the dimension estimator so
-   * rendered output always matches the predicted layout.
-   *
-   * @returns The Y position after the last rendered line.
-   */
-  private renderWrappedText(
-    ctx: CanvasRenderingContext2D,
-    text: string,
-    x: number,
-    y: number,
-    maxWidth: number,
-    maxLines: number,
-    color: string,
-    alpha: number,
-    fontSize: number
-  ): number {
-    const font = this.getFont(fontSize);
-    const allLines = wrapTextLines(text, font, maxWidth);
-    const lineHeight = Math.ceil(measureTextHeight(font, fontSize));
-    const lines = allLines.length > maxLines ? allLines.slice(0, maxLines) : allLines;
-
-    let cursorY = y;
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i] ?? '';
-      const isLastLine = i === lines.length - 1;
-      const isTruncated = isLastLine && allLines.length > maxLines;
-
-      const renderText = isTruncated ? `${line}\u2026` : line;
-      this.renderSegment(ctx, renderText, x, cursorY, color, alpha, fontSize);
-      cursorY += lineHeight;
-    }
-
-    return cursorY;
-  }
-
   // ── Opacity ──────────────────────────────────────────────────────────
 
   /**
@@ -923,9 +734,33 @@ export class CanvasRenderer extends RendererBase {
     }
 
     if (message.content.length > 0) {
-      this.renderContentSegments(ctx, message.content, textX, textY, color, 1, fontSize);
+      renderContentSegments(
+        ctx,
+        message.content,
+        textX,
+        textY,
+        color,
+        1,
+        fontSize,
+        this.settings,
+        this.textBitmapCache,
+        this.emojiCache,
+        (fs) => this.getFont(fs)
+      );
     } else if (message.text.length > 0) {
-      this.renderSegment(ctx, message.text, textX, textY, color, 1, fontSize);
+      renderSegment(
+        ctx,
+        message.text,
+        textX,
+        textY,
+        color,
+        1,
+        fontSize,
+        this.settings,
+        this.textBitmapCache,
+        this.emojiCache,
+        (fs) => this.getFont(fs)
+      );
     }
   }
 
@@ -1003,12 +838,13 @@ export class CanvasRenderer extends RendererBase {
     ctx.stroke();
 
     ctx.textBaseline = 'middle';
-    this.strokeTextOutline(
+    strokeTextOutline(
       ctx,
       superChat.amount,
       textX + rendererLayout.superchatBadge.paddingH,
       badgeY + badgeHeight / 2,
-      textColor
+      textColor,
+      this.settings
     );
     ctx.fillStyle = textColor;
     ctx.fillText(
@@ -1022,7 +858,7 @@ export class CanvasRenderer extends RendererBase {
     let textBottomY = badgeY + badgeHeight;
     if (message.text) {
       const bodyMaxWidth = w - scPad.paddingH * 2;
-      textBottomY = this.renderWrappedText(
+      textBottomY = renderWrappedText(
         ctx,
         message.text,
         textX,
@@ -1031,7 +867,11 @@ export class CanvasRenderer extends RendererBase {
         this.settings.superChatMaxBodyLines,
         textColor,
         alpha,
-        fontSize
+        fontSize,
+        this.settings,
+        this.textBitmapCache,
+        this.emojiCache,
+        (fs) => this.getFont(fs)
       );
     }
 
@@ -1091,7 +931,7 @@ export class CanvasRenderer extends RendererBase {
     if (msg.message.text) {
       const bodyMaxWidth = w - padH * 2;
       const bodyY = msg.message.author ? textY + spacing.xs : textY;
-      this.renderWrappedText(
+      renderWrappedText(
         ctx,
         msg.message.text,
         textX,
@@ -1100,7 +940,11 @@ export class CanvasRenderer extends RendererBase {
         this.settings.membershipMaxBodyLines,
         '#ffffff',
         alpha,
-        fontSize
+        fontSize,
+        this.settings,
+        this.textBitmapCache,
+        this.emojiCache,
+        (fs) => this.getFont(fs)
       );
     }
   }
@@ -1157,7 +1001,7 @@ export class CanvasRenderer extends RendererBase {
 
     ctx.font = nameFont;
     ctx.textBaseline = 'top';
-    this.strokeTextOutline(ctx, displayName, nameX, nameY, color);
+    strokeTextOutline(ctx, displayName, nameX, nameY, color, this.settings);
     ctx.fillStyle = color;
     ctx.fillText(displayName, nameX, nameY);
     return startY + sectionHeight;
