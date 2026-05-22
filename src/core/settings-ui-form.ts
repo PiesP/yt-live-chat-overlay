@@ -313,7 +313,7 @@ export class SettingsUiForm {
       case 'enabled':
         return createEnabledField();
       case 'checkbox':
-        return createCheckboxField(def.label, def.key, def.title);
+        return createCheckboxField(def.label, this.resolveKey(def), def.title);
       case 'number': {
         const input = domInput({ type: 'number', name: this.resolveKey(def) });
         applyNumberInputAttributes(
@@ -325,7 +325,7 @@ export class SettingsUiForm {
       }
       case 'select': {
         const select = document.createElement('select');
-        select.name = def.key;
+        select.name = this.resolveKey(def);
         if (def.title) select.title = def.title;
         for (const [value, label] of def.options) {
           const opt = document.createElement('option');
@@ -336,7 +336,7 @@ export class SettingsUiForm {
         return domField(def.label, select);
       }
       case 'text': {
-        const input = domInput({ type: 'text', name: def.key });
+        const input = domInput({ type: 'text', name: this.resolveKey(def) });
         if (def.title) input.title = def.title;
         if (def.placeholder) input.placeholder = def.placeholder;
         return domField(def.label, input);
