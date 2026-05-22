@@ -93,6 +93,21 @@ export class CanvasRenderer extends RendererBase {
   private readonly textBitmapCache = new Map<string, HTMLCanvasElement>();
   private static readonly TEXT_BITMAP_MAX = 500;
 
+  /**
+   * Horizontal stagger per batch index step (px).
+   * Each successive message in a drainQueue batch starts this many pixels
+   * further to the right, spreading them horizontally so they don't all
+   * enter from the same right-edge position.
+   */
+  private static readonly HORIZONTAL_STAGGER_PER_STEP = 40;
+
+  /**
+   * Maximum horizontal stagger offset (px).
+   * Prevents messages from starting too far off-screen, which would
+   * increase scroll duration unnecessarily.
+   */
+  private static readonly HORIZONTAL_STAGGER_MAX = 200;
+
   constructor(overlay: Overlay, settings: OverlaySettings) {
     super(overlay, settings);
 
@@ -349,7 +364,7 @@ export class CanvasRenderer extends RendererBase {
       const progress = Math.min(1, Math.max(0, elapsed / msg.duration));
 
       if (mode === 'scroll') {
-        const travelDistance = canvas.width + msg.width + rendererLayout.exitPaddingMin;
+        const travelDistance = msg.startX + msg.width + rendererLayout.exitPaddingMin;
         msg.x = msg.startX - progress * travelDistance;
       } else if (mode === 'reverse') {
         // Reverse: message enters from left and scrolls right.
@@ -479,7 +494,9 @@ export class CanvasRenderer extends RendererBase {
       if (isScrolling) {
         // Horizontal overlap: the active message's right edge must have exited
         // the screen before the new message enters from the right.
-        const travelDistance = dims.width + active.width + rendererLayout.exitPaddingMin;
+        // Use active.startX for travel distance to correctly handle messages
+        // with horizontal stagger offset.
+        const travelDistance = active.startX + active.width + rendererLayout.exitPaddingMin;
         const activeProgress = Math.min(1, activeElapsed / active.duration);
         const activeRightEdge = active.startX - activeProgress * travelDistance + active.width;
 
@@ -523,12 +540,33 @@ export class CanvasRenderer extends RendererBase {
 
     const isScrolling = mode === 'scroll' || mode === 'reverse';
 
+    // Horizontal stagger: progressively offset batch messages from the right
+    // edge so they don't all enter in a vertical column. Each successive batch
+    // message starts further to the right, spreading them horizontally and
+    // breaking the vertical "wall" effect of same-timing comments.
+    const horizontalStagger =
+      isScrolling && mode === 'scroll' && batchIndex > 0
+        ? Math.min(
+            CanvasRenderer.HORIZONTAL_STAGGER_MAX,
+            batchIndex * CanvasRenderer.HORIZONTAL_STAGGER_PER_STEP
+          )
+        : 0;
+
+    const startX = isScrolling
+      ? mode === 'scroll'
+        ? dims.width + horizontalStagger
+        : -(msgWidth + rendererLayout.exitPaddingMin)
+      : 0;
+
     let effectiveDuration: number;
     if (isScrolling) {
       const speed = message.isBacklog
         ? this.getEffectiveBacklogSpeed()
         : this.getEffectiveSpeedPxPerSec();
-      const totalDistance = dims.width + msgWidth + rendererLayout.exitPaddingMin;
+      // Total travel distance must account for horizontal stagger to maintain
+      // constant velocity — a message starting further right travels farther
+      // at the same speed, so duration adjusts proportionally.
+      const totalDistance = startX + msgWidth + rendererLayout.exitPaddingMin;
       effectiveDuration =
         speed > 0 ? computeDliosDuration(totalDistance, speed) : rendererLayout.durationMin;
     } else {
@@ -557,12 +595,6 @@ export class CanvasRenderer extends RendererBase {
       msgWidth,
       dims.width
     );
-
-    const startX = isScrolling
-      ? mode === 'scroll'
-        ? dims.width
-        : -(msgWidth + rendererLayout.exitPaddingMin)
-      : 0;
 
     this.activateMessage(
       message,
