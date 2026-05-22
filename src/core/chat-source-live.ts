@@ -10,12 +10,14 @@ import { ChatSource } from '@core/chat-source-base';
 import { isAbortError, sleep, throwIfAborted } from '@core/dom';
 import { createLogger } from '@core/logging';
 import {
-  extractNextLiveContinuation,
   fetchLiveChat,
-  type InnertubeContinuationData,
   type LiveChatPayload,
   YoutubeInnertubeRequestError,
 } from '@core/youtubei-chat';
+import {
+  extractNextLiveContinuation,
+  type InnertubeContinuationData,
+} from '@core/youtubei-continuation';
 
 const log = createLogger('LiveChatSource');
 

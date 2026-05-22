@@ -13,16 +13,6 @@ import {
   type JsonObject,
 } from '@core/youtubei-json';
 
-export type { InnertubeContinuationData } from '@core/youtubei-continuation';
-export {
-  extractNextLiveContinuation,
-  extractPlayerSeekContinuation,
-  extractReplayContinuation,
-} from '@core/youtubei-continuation';
-export { normalizeYouTubeImageUrl } from '@core/youtubei-image';
-export type { JsonObject } from '@core/youtubei-json';
-export { asRecord, getNumber, getString, isRecord } from '@core/youtubei-json';
-
 export interface ChatBootstrapData {
   readonly videoId: string;
   readonly isReplay: boolean;

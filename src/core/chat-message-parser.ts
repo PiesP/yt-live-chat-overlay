@@ -18,14 +18,8 @@ import {
   truncateForKind,
 } from '@core/chat-message-helpers';
 import { createLogger } from '@core/logging';
-import {
-  asRecord,
-  getNumber,
-  getString,
-  isRecord,
-  type JsonObject,
-  normalizeYouTubeImageUrl,
-} from '@core/youtubei-chat';
+import { normalizeYouTubeImageUrl } from '@core/youtubei-image';
+import { asRecord, getNumber, getString, isRecord, type JsonObject } from '@core/youtubei-json';
 
 const log = createLogger('ChatMessageParser');
 

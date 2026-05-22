@@ -205,17 +205,6 @@ export interface SessionMetrics {
 }
 
 /**
- * Reason why a message was dropped
- */
-export type DropReason =
-  | 'queue_overflow'
-  | 'no_lane_available'
-  | 'rate_limited'
-  | 'dedup'
-  | 'collision'
-  | 'other';
-
-/**
  * Interface for objects that can be paused/resumed.
  * Implemented by ChatSource, BacklogInjectionController,
  * BurstDetector, and any other pause-aware subsystem.
@@ -228,14 +217,6 @@ export interface Pauseable {
  * Burst level classification based on messages per second
  */
 export type BurstLevel = 'normal' | 'elevated' | 'high' | 'extreme';
-
-/**
- * Lane state for message flow
- */
-export interface LaneState {
-  /** Lane index */
-  index: number;
-}
 
 /**
  * Overlay dimensions — pure pixel measurements from the player container.

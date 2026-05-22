@@ -8,7 +8,7 @@
 
 import type { ChatMessage, ContentSegment, SuperChatInfo } from '@app-types';
 import { colors, parseAnyColor, SUPERCHAT_TIER_KEYS } from '@core/design-tokens';
-import type { JsonObject } from '@core/youtubei-chat';
+import type { JsonObject } from '@core/youtubei-json';
 
 /**
  * Matches any character with the Emoji Unicode property.

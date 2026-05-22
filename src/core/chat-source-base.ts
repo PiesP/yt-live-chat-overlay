@@ -14,9 +14,9 @@ import { PollLoopManager } from '@core/poll-loop-manager';
 import {
   type ChatBootstrapData,
   getLiveChatPayload,
-  type InnertubeContinuationData,
   type LiveChatPayload,
 } from '@core/youtubei-chat';
+import type { InnertubeContinuationData } from '@core/youtubei-continuation';
 
 const log = createLogger('ChatSource');
 

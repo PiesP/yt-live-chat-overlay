@@ -1,9 +1,9 @@
-import type { LaneState, OverlayDimensions } from '@app-types';
+import type { OverlayDimensions } from '@app-types';
 import { rendererLayout } from '@core/design-tokens';
 import { measureTextHeight } from '@core/text-measure';
 
 export interface LanePlacement {
-  lane: LaneState;
+  laneIndex: number;
   waitMs: number;
   laneY: number;
   /** Number of lane slots this message occupies (1 for regular, 2+ for superchat/membership) */
@@ -197,12 +197,8 @@ export class LaneAllocator {
     const result = this.allocateMultiSlot(now, 0, totalLanes, slotCount, isBacklog);
     if (!result) return null;
 
-    const lane: LaneState = {
-      index: result.laneIndex,
-    };
-
     return {
-      lane,
+      laneIndex: result.laneIndex,
       waitMs: result.waitMs,
       laneY: this.getLaneY(result.laneIndex, _dimensions.height),
       slotCount,
@@ -239,7 +235,7 @@ export class LaneAllocator {
   ): void {
     const occupancyMs = this.computeOccupancyMs(durationMs, msgWidth, screenWidth);
     const nextAvailable = startTime + occupancyMs;
-    const startIdx = placement.lane.index;
+    const startIdx = placement.laneIndex;
 
     // Update all slots occupied by this message with the SAME available time.
     // This prevents partial-slot availability where a new message could enter

@@ -37,6 +37,7 @@ import {
   spacing,
   toRgba,
 } from '@core/design-tokens';
+import type { LanePlacement } from '@core/lane-allocator';
 import { createLogger } from '@core/logging';
 import type { Overlay } from '@core/overlay';
 import { RendererBase } from '@core/renderer-base';
@@ -453,7 +454,7 @@ export class CanvasRenderer extends RendererBase {
     message: ChatMessage,
     now: number
   ):
-    | { ok: true; placement: import('@core/lane-allocator').LanePlacement }
+    | { ok: true; placement: LanePlacement }
     | {
         ok: false;
         reason: 'collision' | 'no_lane';
@@ -505,7 +506,7 @@ export class CanvasRenderer extends RendererBase {
         // right edge minus headway gap.
         if (mode === 'scroll') {
           if (activeRightEdge > dims.width - headwayPx) {
-            this.laneAllocator.markCollision(placement.lane.index);
+            this.laneAllocator.markCollision(placement.laneIndex);
             return { ok: false, reason: 'collision' as const };
           }
         } else {
@@ -513,7 +514,7 @@ export class CanvasRenderer extends RendererBase {
           const reverseTravel = dims.width + active.width + rendererLayout.exitPaddingMin;
           const activeX = -active.width + activeProgress * reverseTravel;
           if (activeX + active.width > 0) {
-            this.laneAllocator.markCollision(placement.lane.index);
+            this.laneAllocator.markCollision(placement.laneIndex);
             return { ok: false, reason: 'collision' as const };
           }
         }
@@ -521,7 +522,7 @@ export class CanvasRenderer extends RendererBase {
         // Top/bottom modes: overlap if the active message in the same lane
         // has not yet expired.
         if (activeElapsed < active.duration) {
-          this.laneAllocator.markCollision(placement.lane.index);
+          this.laneAllocator.markCollision(placement.laneIndex);
           return { ok: false, reason: 'collision' as const };
         }
       }
@@ -539,7 +540,7 @@ export class CanvasRenderer extends RendererBase {
   private enqueueMessageWithPlacement(
     message: ChatMessage,
     now: number,
-    placement: import('@core/lane-allocator').LanePlacement,
+    placement: LanePlacement,
     batchIndex = 0
   ): void {
     const dims = this.overlay.getDimensions();
@@ -614,7 +615,7 @@ export class CanvasRenderer extends RendererBase {
       laneY,
       effectiveDuration,
       startX,
-      placement.lane.index,
+      placement.laneIndex,
       staggerDelay
     );
   }

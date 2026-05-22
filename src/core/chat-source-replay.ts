@@ -9,13 +9,12 @@ import { type ChatEvent, extractChatEvents } from '@core/chat-message-parser';
 import { ChatSource, type PlaybackSnapshot } from '@core/chat-source-base';
 import { findElementMatch, isAbortError, sleep, throwIfAborted, VIDEO_SELECTORS } from '@core/dom';
 import { createLogger } from '@core/logging';
+import { fetchReplayChat, type LiveChatPayload } from '@core/youtubei-chat';
 import {
   extractPlayerSeekContinuation,
   extractReplayContinuation,
-  fetchReplayChat,
   type InnertubeContinuationData,
-  type LiveChatPayload,
-} from '@core/youtubei-chat';
+} from '@core/youtubei-continuation';
 
 const log = createLogger('ReplayChatSource');
 
