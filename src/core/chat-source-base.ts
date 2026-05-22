@@ -71,7 +71,7 @@ export abstract class ChatSource {
     this.callback = callback;
     this.resetSessionState();
 
-    const combinedSignal = signal || this.pollController?.signal;
+    const combinedSignal = signal ?? this.pollController.signal;
 
     try {
       return await this.bootstrapAndLaunchPolling(combinedSignal);

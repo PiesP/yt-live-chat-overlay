@@ -207,10 +207,10 @@ const normalizeOutlineNumericInputValue = (
 };
 
 const formatOutlineNumericSettingForInput = (
-  key: Exclude<OutlineSettingKey, 'enabled'>,
+  _key: Exclude<OutlineSettingKey, 'enabled'>,
   value: number
 ): string | number => {
-  return formatRootNumericSettingForInput(key as unknown as RootScalarSettingKey, value);
+  return value;
 };
 
 const getNumericInputAttributes = (
