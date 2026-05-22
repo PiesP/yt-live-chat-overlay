@@ -68,10 +68,10 @@ export function installDomChatWatcher(onMessages: DomMessageCallback): DomWatche
 
       if (!text) continue;
 
-      const id = textRenderer.id ?? undefined;
+      const rawId = textRenderer.id;
 
       const message: ChatMessage = {
-        id,
+        ...(rawId ? { id: rawId } : {}),
         text,
         content: [{ type: 'text', content: text }],
         kind: 'text',

@@ -360,7 +360,7 @@ export const bootstrapChatSession = async (signal?: AbortSignal): Promise<ChatBo
 
     const data: ChatBootstrapData = {
       videoId,
-      isReplay: Boolean(liveChatRenderer.isReplay),
+      isReplay: liveChatRenderer.isReplay === true,
       ...(apiKey ? { apiKey } : {}),
       clientContext,
       clientNameHeader: getString(ytcfg.INNERTUBE_CONTEXT_CLIENT_NAME) ?? '1',

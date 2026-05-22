@@ -102,6 +102,15 @@ export class SettingsUi {
 
   close(): void {
     if (!this.backdrop) return;
+    // Only persist form state when the dialog is actually visible.
+    // attach() and destroy() call close() even when the dialog has never
+    // been opened — in that case the form inputs are unpopulated and
+    // collectSettings() would return minimum values (Number('') → 0),
+    // corrupting saved settings on every page load / SPA navigation.
+    if (!this.isDialogOpen()) {
+      this.setDialogOpen(false);
+      return;
+    }
     // Persist current form state on close. This is the only path that
     // writes settings to storage — preview (memory only) never writes.
     // Covers: X button, Close button, Escape, backdrop click, and
@@ -203,7 +212,7 @@ export class SettingsUi {
       const actionBtn = target?.closest<HTMLButtonElement>('button[data-action]');
       if (actionBtn) {
         const action = actionBtn.dataset.action;
-        if (action === 'close') this.apply();
+        if (action === 'close') this.close();
         else if (action === 'reset') this.handleReset();
         else if (action === 'export') this.handleExport();
         else if (action === 'import') this.handleImport();
@@ -267,13 +276,6 @@ export class SettingsUi {
     this.switchTab(this.activeTab);
     this.setDialogOpen(true);
     this.focusInitialElement();
-  }
-
-  /**
-   * Close button handler — persists preview settings and closes the modal.
-   */
-  private apply(): void {
-    this.close();
   }
 
   /** Create a reusable confirmation dialog overlay for destructive actions. */
@@ -461,7 +463,14 @@ export class SettingsUi {
   }
 
   destroy(): void {
-    this.close();
+    // Explicit cleanup — does NOT persist settings. Policy: settings are
+    // saved only when the user explicitly closes the dialog (Close button,
+    // Escape, backdrop click). Implicit teardown from SPA navigation, page
+    // refresh, or App.stop() must NOT write to storage.
+    if (this.previewTimer !== null) {
+      clearTimeout(this.previewTimer);
+      this.previewTimer = null;
+    }
     this.button?.remove();
     this.backdrop?.remove();
     document.removeEventListener('keydown', this.handleKeydown);

@@ -82,7 +82,7 @@ export class ReplayChatSource extends ChatSource {
     this.replayBuffer = [];
     this.lastReplayRequestedOffsetMs = offsetMs;
     if (this.replayMode === 'playerSeek' && this.replayPlayerSeekContinuation) {
-      void this.fetchReplayPlayerSeek(offsetMs, undefined)
+      void this.fetchReplayPlayerSeek(offsetMs)
         .then(() => {
           this.flushReplayBuffer(offsetMs);
         })
@@ -92,7 +92,7 @@ export class ReplayChatSource extends ChatSource {
           }
         });
     } else if (this.replayMode === 'continuation') {
-      void this.pollContinuationReplay(offsetMs, undefined);
+      void this.pollContinuationReplay(offsetMs);
     }
   }
 

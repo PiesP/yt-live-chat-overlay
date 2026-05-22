@@ -147,15 +147,7 @@ export const SETTINGS_VERSION = 1;
 /** Version-aware migration. Stamps version if absent; preserves existing version for chained migration support. */
 export function migrateSettings(raw: Record<string, unknown>): Record<string, unknown> {
   const version = (raw._version as number) ?? 0;
-  let current = version;
-  // v0 → v1: initial schema (no actual migration needed, just version stamping)
-  if (current < 1) {
-    current = 1;
-  }
-  if (current === version) {
-    return { ...raw, _version: version };
-  }
-  return { ...raw, _version: current };
+  return { ...raw, _version: Math.max(version, 1) };
 }
 
 // ── Defaults ────────────────────────────────────────────────────────────────────
@@ -186,7 +178,7 @@ const DEFAULT_OUTLINE = {
 export const DEFAULT_SETTINGS = {
   enabled: true,
   danmakuMode: 'scroll',
-  speedPxPerSec: 150,
+  speedPxPerSec: 250,
   fontSize: 32,
   opacity: 0.85,
   superChatOpacity: 0.85,
