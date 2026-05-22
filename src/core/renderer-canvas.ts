@@ -542,12 +542,13 @@ export class CanvasRenderer extends RendererBase {
     // Stagger delay: spread batch entries across time to prevent vertical
     // clumping. Computed BEFORE commitPlacement so the allocator accounts
     // for the effective visual start time, not the raw 'now' timestamp.
-    // Previously commitPlacement used 'now' while activateMessage used
-    // 'now + staggerDelay', creating dead time where the lane appeared
-    // occupied but had no visible message.
+    //
+    // When the pending queue backs up, stagger is reduced to avoid
+    // compounding the delay — deep queue → zero stagger (backlog mode).
+    const maxStagger = this.pendingQueue.length > 50 ? 0 : this.pendingQueue.length > 30 ? 80 : 200;
     const staggerDelay =
-      isScrolling && batchIndex > 0
-        ? Math.round(Math.min(200, batchIndex * -25 * Math.log(1 - Math.random())))
+      isScrolling && batchIndex > 0 && maxStagger > 0
+        ? Math.round(Math.min(maxStagger, batchIndex * -25 * Math.log(1 - Math.random())))
         : 0;
 
     const effectiveStartTime = now + staggerDelay;

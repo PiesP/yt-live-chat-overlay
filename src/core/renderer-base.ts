@@ -182,7 +182,7 @@ export abstract class RendererBase {
 
   /** Check whether anti-block is currently throttling new messages. */
   protected isAntiBlockActive(): boolean {
-    const ANTI_BLOCK_FREE_RATIO = 0.15;
+    const ANTI_BLOCK_FREE_RATIO = 0.05;
     const utilization = this.laneAllocator.getUtilization();
     const threshold = 1 - ANTI_BLOCK_FREE_RATIO;
     return utilization >= threshold;
