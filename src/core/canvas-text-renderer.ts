@@ -353,7 +353,7 @@ export function drawAuthorSection(
     ctx.textBaseline = 'top';
     let nameWidth = ctx.measureText(displayName).width;
     if (nameWidth > maxNameWidth) {
-      const ellipsis = '\\u2026';
+      const ellipsis = '\u2026';
       const ellipsisWidth = ctx.measureText(ellipsis).width;
       while (displayName.length > 0 && nameWidth + ellipsisWidth > maxNameWidth) {
         displayName = displayName.slice(0, -1);
