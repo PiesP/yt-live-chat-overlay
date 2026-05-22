@@ -176,18 +176,24 @@ export const rendererLayout = {
 } as const;
 
 /**
- * Compute scrolling duration for a single comment under the DLIOS
- * constant-velocity model. Unlike the old computeCrossDuration (same
- * duration for all comments), this returns a width-proportional duration
- * so every comment scrolls at the same velocity.
+ * Compute DLIOS animation duration from total travel distance and velocity.
+ *
+ * The minimum duration is velocity-aware so that short messages at high
+ * scroll speeds are not artificially slowed down by a static floor.
+ * Without this, at speedPxPerSec=500 a 3-char message's computed duration
+ * (~3070ms) was clamped to rendererLayout.durationMin (5000ms), capping
+ * the effective speed at 307px/s instead of the user-configured 500px/s.
  *
  * @param totalDistance  — screenWidth + textWidth + exitPadding
  * @param velocity       — constant scroll velocity in px/sec
- * @returns Animation duration in milliseconds, clamped to [durationMin, durationMax]
+ * @returns Animation duration in milliseconds
  */
 export function computeDliosDuration(totalDistance: number, velocity: number): number {
+  // Velocity-based floor: at minimum, allow the message to travel
+  // exitPadding pixels at the configured velocity, but no less than 3s.
+  const velocityFloor = Math.max(3000, (rendererLayout.exitPaddingMin / velocity) * 1000);
   return Math.max(
-    rendererLayout.durationMin,
+    velocityFloor,
     Math.min(rendererLayout.durationMax, (totalDistance / velocity) * 1000)
   );
 }
