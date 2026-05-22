@@ -92,6 +92,20 @@ export class LaneAllocator {
   private static readonly HEADWAY_GAP_TIME_RATIO = 0.025;
 
   /**
+   * Epsilon-greedy lane selection probability (0–1).
+   * With this probability, instead of picking the absolute best lane by
+   * composite score, a random lane is chosen from the remaining top-K
+   * candidates. This breaks deterministic diagonal patterns that emerge
+   * when the scoring function always picks the same lane order.
+   *
+   * 0.10 = 10% of allocations explore alternatives (roughly 1 in 10
+   * messages in a batch). Low enough to not degrade primary DLIOS
+   * invariant (constant velocity), high enough to disrupt steady-state
+   * diagonal bands.
+   */
+  private static readonly EPSILON = 0.1;
+
+  /**
    * When backlog partitioning is active, backlog messages are restricted
    * to lanes [0, backlogLaneEnd) and real-time messages use
    * [backlogLaneEnd, laneCount). This prevents visual overlap during
@@ -622,6 +636,23 @@ export class LaneAllocator {
     }
 
     if (bestLane === -1) return null;
+
+    // Epsilon-greedy: with EPSILON probability, pick a random lane from the
+    // remaining candidates instead of the absolute best. This breaks
+    // deterministic diagonal patterns in the steady state.
+    if (candidates.length > 1 && Math.random() < LaneAllocator.EPSILON) {
+      // Pick a random candidate that scored well but isn't the absolute best
+      const exploreCount = Math.min(candidates.length - 1, 4);
+      const exploreIdx = 1 + Math.floor(Math.random() * exploreCount);
+      const explore = candidates[exploreIdx];
+      if (explore) {
+        const wait = Math.max(0, Math.ceil(explore.availableAt - now));
+        if (wait <= maxWaitMs) {
+          return { laneIndex: explore.laneIndex, waitMs: wait };
+        }
+      }
+    }
+
     return { laneIndex: bestLane, waitMs: bestWait };
   }
 
