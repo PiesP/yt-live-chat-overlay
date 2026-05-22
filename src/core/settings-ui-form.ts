@@ -94,6 +94,7 @@ function createHeader(): HTMLDivElement {
   const closeButton = document.createElement('button');
   closeButton.type = 'button';
   closeButton.className = 'yt-chat-overlay-settings-close';
+  closeButton.setAttribute('data-action', 'close');
   closeButton.setAttribute('aria-label', 'Close settings');
   closeButton.textContent = 'x';
   header.append(title, closeButton);

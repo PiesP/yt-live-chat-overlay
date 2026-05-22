@@ -85,13 +85,15 @@ export class SettingsUi {
 
   close(): void {
     if (!this.backdrop) return;
-    // Persist any pending preview changes
+    // Always persist current form state on close — ensures settings are
+    // saved to storage even when the preview debounce timer has already
+    // fired (which only applies to memory via onChange/previewSettings).
     if (this.previewTimer !== null) {
       clearTimeout(this.previewTimer);
       this.previewTimer = null;
-      const persist = this.onPersist ?? this.onChange;
-      persist(this.form.collectSettings());
     }
+    const persist = this.onPersist ?? this.onChange;
+    persist(this.form.collectSettings());
     this.setDialogOpen(false);
 
     if (this.previousFocus?.isConnected) {
