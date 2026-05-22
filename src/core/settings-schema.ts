@@ -226,8 +226,8 @@ export const DEFAULT_SETTINGS = {
   spreadEnabled: true,
   spreadFactor: 1.0,
   fadeDurationMs: 500,
-  minPollIntervalMs: 200,
-  maxPollIntervalMs: 5000,
+  minPollIntervalMs: 100,
+  maxPollIntervalMs: 2000,
 } as const satisfies Readonly<OverlaySettings>;
 
 // ── Color validation ────────────────────────────────────────────────────────────

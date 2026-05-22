@@ -20,7 +20,7 @@ import {
 
 const log = createLogger('LiveChatSource');
 
-const LIVE_POLL_FALLBACK_DELAY_MS = 4000;
+const LIVE_POLL_FALLBACK_DELAY_MS = 2000;
 const LIVE_SEED_CUTOFF_MS = 60_000;
 
 export class LiveChatSource extends ChatSource {
@@ -100,10 +100,10 @@ export class LiveChatSource extends ChatSource {
       this.recentMessageCounts.reduce((a, b) => a + b, 0) / this.recentMessageCounts.length;
 
     if (avgCount >= LiveChatSource.DENSITY_HIGH_THRESHOLD) {
-      base = Math.max(settings.minPollIntervalMs, Math.round(base * 0.6));
+      base = Math.max(settings.minPollIntervalMs, Math.round(base * 0.4));
     }
     if (avgCount <= LiveChatSource.DENSITY_LOW_THRESHOLD) {
-      base = Math.min(settings.maxPollIntervalMs, Math.round(base * 1.5));
+      base = Math.min(settings.maxPollIntervalMs, Math.round(base * 1.2));
     }
 
     // Clamp again after adjustments
