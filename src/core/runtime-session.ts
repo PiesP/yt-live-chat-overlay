@@ -407,11 +407,17 @@ export class RuntimeSession {
         return;
       }
 
-      // Trim stale queue entries but keep high-priority recent messages
-      // instead of flushing everything, which would drop important backlog
-      // or real-time messages accumulated during the hidden period.
-      this.renderer?.trimBackgroundQueue();
-      this.renderer?.resume();
+      // When video is paused, keep renderer paused too. Calling resume()
+      // while video is paused clears isPaused prematurely — when the user
+      // later presses play, resumeForVideo() -> resume() would early-return
+      // because isPaused is already false, leaving the render loop stopped.
+      if (!isVideoPaused) {
+        // Trim stale queue entries but keep high-priority recent messages
+        // instead of flushing everything, which would drop important backlog
+        // or real-time messages accumulated during the hidden period.
+        this.renderer?.trimBackgroundQueue();
+        this.renderer?.resume();
+      }
     };
 
     document.addEventListener('visibilitychange', handleVisibility);
