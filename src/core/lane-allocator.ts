@@ -60,19 +60,32 @@ export class LaneAllocator {
 
   /**
    * Minimum cooldown between consecutive uses of the same lane (ms).
-   * This is the floor value; the actual cooldown scales with message duration
-   * to ensure the previous message has fully exited the screen before the next
-   * one enters, even under variable playback rates or pause/resume cycles.
+   * Used only for top/bottom (non-scrolling) modes where the message
+   * stays visible for the full duration. For scrolling mode, precision
+   * exit-time is used instead.
    */
   private static readonly LANE_COOLDOWN_MIN_MS = 500;
 
   /**
    * Safety margin ratio applied to message duration.
-   * The total cooldown = max(LANE_COOLDOWN_MIN_MS, durationMs * SAFETY_MARGIN_RATIO).
-   * A 15% margin ensures that even if the timer is slightly imprecise (e.g.
-   * after pause/resume), the previous message has cleared the screen.
+   * Used only for top/bottom (non-scrolling) modes.
    */
   private static readonly SAFETY_MARGIN_RATIO = 0.15;
+
+  /**
+   * Headway gap between consecutive scrolling comments on the same lane (ms).
+   * This replaces the duration-proportional cooldown for scrolling mode.
+   * After the previous comment's right edge exits the screen, we wait only
+   * this short gap before releasing the lane — dramatically reducing visual
+   * dead space between consecutive comments on the same row.
+   *
+   * The gap is clamped between HEADWAY_GAP_MS_MIN and HEADWAY_GAP_MS_MAX,
+   * with a time-proportional component for natural feel at various speeds.
+   * At 200px/s: ~50-100ms headway → ~10-20px gap (vs 433px before).
+   */
+  private static readonly HEADWAY_GAP_MS_MIN = 30;
+  private static readonly HEADWAY_GAP_MS_MAX = 200;
+  private static readonly HEADWAY_GAP_TIME_RATIO = 0.025;
 
   /**
    * When backlog partitioning is active, backlog messages are restricted
@@ -211,19 +224,29 @@ export class LaneAllocator {
    * Commit the placement — update the lane's available time for the
    * next message. For multi-slot messages, all occupied lanes are updated.
    *
+   * For scrolling mode, uses precision exit-time:
+   *   occupancyMs = visualExitTime + HEADWAY_GAP
+   * where visualExitTime is when the comment's right edge exits the screen.
+   * This replaces the old duration + cooldown model and dramatically reduces
+   * dead space between consecutive comments on the same lane.
+   *
+   * For top/bottom mode, msgWidth/screenWidth are omitted and the old
+   * duration + cooldown model applies (message stays visible for full duration).
+   *
    * @param placement   - The lane placement returned by findPlacement()
    * @param startTime   - The timestamp (performance.now()) when the message starts
-   * @param durationMs  - The actual animation duration in milliseconds. This must
-   *   match the duration used by the renderer so that the lane is not released
-   *   before the message has fully exited the screen.
+   * @param durationMs  - The actual animation duration in milliseconds
+   * @param msgWidth    - Message pixel width (scrolling mode only)
+   * @param screenWidth - Viewport width (scrolling mode only)
    */
-  commitPlacement(placement: LanePlacement, startTime: number, durationMs: number): void {
-    // Dynamic cooldown: max of fixed minimum or duration-proportional safety margin.
-    // This ensures long messages get enough clearance time, while short messages
-    // still benefit from the minimum cooldown to prevent vertical clustering.
-    const safetyMargin = Math.round(durationMs * LaneAllocator.SAFETY_MARGIN_RATIO);
-    const cooldownMs = Math.max(LaneAllocator.LANE_COOLDOWN_MIN_MS, safetyMargin);
-    const occupancyMs = durationMs + cooldownMs;
+  commitPlacement(
+    placement: LanePlacement,
+    startTime: number,
+    durationMs: number,
+    msgWidth?: number,
+    screenWidth?: number
+  ): void {
+    const occupancyMs = this.computeOccupancyMs(durationMs, msgWidth, screenWidth);
 
     const nextAvailable = startTime + occupancyMs;
     const startIdx = placement.lane.index;
@@ -263,6 +286,50 @@ export class LaneAllocator {
   }
 
   // ── Private helpers ─────────────────────────────────────────────────
+
+  /**
+   * Compute the effective time this message occupies its lane.
+   *
+   * For scrolling mode: the comment exits the frame when its right edge
+   * passes the left edge. This happens before `duration` ends because
+   * duration includes the exitPadding. We compute the exact exit time
+   * and add only a small headway gap.
+   *
+   * For top/bottom mode: the message stays visible for the full duration,
+   * so the old cooldown model applies.
+   */
+  private computeOccupancyMs(
+    durationMs: number,
+    msgWidthPx?: number,
+    screenWidth?: number
+  ): number {
+    // Top/bottom mode: full duration + safety cooldown
+    if (msgWidthPx === undefined || screenWidth === undefined) {
+      const safetyMargin = Math.round(durationMs * LaneAllocator.SAFETY_MARGIN_RATIO);
+      return durationMs + Math.max(LaneAllocator.LANE_COOLDOWN_MIN_MS, safetyMargin);
+    }
+
+    // Scrolling mode: precision exit-time
+    const exitPadding = Math.max(
+      this.options.fontSize * rendererLayout.exitPaddingScale,
+      rendererLayout.exitPaddingMin
+    );
+    const totalDistance = screenWidth + msgWidthPx + exitPadding;
+    // Fraction of duration until the right edge passes x=0
+    const visibleFraction = (screenWidth + msgWidthPx) / totalDistance;
+    const visualExitMs = Math.round(visibleFraction * durationMs);
+    // Headway gap: proportional but clamped
+    const headwayMs = Math.round(
+      Math.max(
+        LaneAllocator.HEADWAY_GAP_MS_MIN,
+        Math.min(
+          LaneAllocator.HEADWAY_GAP_MS_MAX,
+          durationMs * LaneAllocator.HEADWAY_GAP_TIME_RATIO
+        )
+      )
+    );
+    return visualExitMs + headwayMs;
+  }
 
   /**
    * Per-lane cached spatial density score.

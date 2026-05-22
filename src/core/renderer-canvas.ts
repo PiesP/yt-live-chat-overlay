@@ -523,7 +523,7 @@ export class CanvasRenderer extends RendererBase {
 
     const laneY = placement.laneY;
 
-    this.laneAllocator.commitPlacement(placement, now, effectiveDuration);
+    this.laneAllocator.commitPlacement(placement, now, effectiveDuration, msgWidth, dims.width);
 
     const startX = isScrolling
       ? mode === 'scroll'
