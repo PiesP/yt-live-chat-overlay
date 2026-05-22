@@ -37,6 +37,12 @@ const createGmAdapter = (): SettingsStorageAdapter | null => {
     getItem(key: string): string | null {
       const value = GM_getValue(key);
       if (value === undefined || value === null) return null;
+      // Some userscript managers (Violentmonkey, Greasemonkey 4+) auto-parse
+      // JSON on GM_getValue, returning an object instead of the raw string.
+      // Re-serialize to string so JSON.parse in the caller works correctly.
+      if (typeof value === 'object') {
+        return JSON.stringify(value);
+      }
       return String(value);
     },
     setItem(key: string, value: string): void {
