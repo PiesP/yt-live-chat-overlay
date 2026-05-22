@@ -38,6 +38,32 @@ export class SettingsUi {
     }
   };
 
+  /**
+   * Check whether the settings dialog is currently visible to the user.
+   */
+  private isDialogOpen(): boolean {
+    return this.backdrop !== null && this.backdrop.style.display !== 'none';
+  }
+
+  /**
+   * Re-populate the settings form from current settings.
+   * Called on cross-tab settings sync to keep the form in sync with
+   * changes made in another tab. Only updates when the dialog is open.
+   */
+  syncForm(): void {
+    if (!this.isDialogOpen()) return;
+    this.form.populateForm(this.getSettings());
+  }
+
+  private readonly handleBeforeUnload = (): void => {
+    // Persist settings when the page unloads with the dialog open.
+    // Without this, preview-only changes (never persisted via close())
+    // would be lost on refresh or tab close.
+    if (!this.isDialogOpen()) return;
+    const persist = this.onPersist ?? this.onChange;
+    persist(this.form.collectSettings());
+  };
+
   constructor(
     private readonly getSettings: () => Readonly<OverlaySettings>,
     private readonly onChange: (partial: Partial<OverlaySettings>) => void,
@@ -51,6 +77,10 @@ export class SettingsUi {
     });
     // Always bound — handler checks visibility state internally
     document.addEventListener('keydown', this.handleKeydown);
+    // Persist settings on page unload (refresh, tab close) when the
+    // settings dialog is open. Without this, preview-only changes that
+    // were never persisted via close() would be lost.
+    window.addEventListener('beforeunload', this.handleBeforeUnload);
   }
 
   /** Debounced live preview — applies settings immediately and persists. */
@@ -447,6 +477,7 @@ export class SettingsUi {
     this.button?.remove();
     this.backdrop?.remove();
     document.removeEventListener('keydown', this.handleKeydown);
+    window.removeEventListener('beforeunload', this.handleBeforeUnload);
 
     const styleElement = document.getElementById(STYLE_ID);
     styleElement?.remove();

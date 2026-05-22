@@ -64,6 +64,9 @@ class App {
     this.unsubscribeCrossTab = this.settings.subscribe(() => {
       log.debug('Cross-tab settings change — reconciling runtime');
       setOverlayLogLevel(this.settings.get().logLevel);
+      // Sync the settings form if it is open, so cross-tab changes are
+      // visible and don't get overwritten by stale form values on close.
+      this.settingsUi.syncForm();
       this.runtimeManager.requestReconcile('settings-change');
     });
 
