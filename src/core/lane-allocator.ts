@@ -1,5 +1,5 @@
 import type { LaneState, OverlayDimensions } from '@app-types';
-import { rendererLayout, spacing } from '@core/design-tokens';
+import { rendererLayout } from '@core/design-tokens';
 import { measureTextHeight } from '@core/text-measure';
 
 export interface LanePlacement {
@@ -150,27 +150,16 @@ export class LaneAllocator {
       return;
     }
 
-    // Compute lane height from actual font metrics, not a hardcoded multiplier.
-    // Must account for the author section (photo + name) which adds height
-    // beyond the text body. Without this, messages with showAuthor enabled
-    // would exceed the lane height and overlap adjacent lanes.
-    //
-    // Formula: laneHeight = authorSection + gap + textHeight + paddingV*2 + laneSpacing
-    // where authorSection = max(authorPhotoSize, authorNameHeight)
+    // Formula: laneHeight = textHeight + paddingV*2 + laneSpacing
+    // The author section is NOT included because most messages have
+    // showAuthor=false by default. Messages WITH author (moderator,
+    // owner, superChat) report a taller msgHeight from estimateDimensions,
+    // so slotCount = ceil(msgHeight / laneHeight) auto-assigns 2+ slots.
     const totalPaddingV = rendererLayout.paddingV * 2;
     const font = `${this.options.fontWeight === 'bold' ? 'bold' : '400'} ${this.options.fontSize}px ${this.options.fontFamily}`;
     const textHeight = measureTextHeight(font, this.options.fontSize);
 
-    // Author section height: max of photo size and rendered name height.
-    const authorFontSize = Math.round(this.options.fontSize * rendererLayout.authorFontScale);
-    const authorFont = `${this.options.fontWeight === 'bold' ? 'bold' : '400'} ${authorFontSize}px ${this.options.fontFamily}`;
-    const authorNameHeight = measureTextHeight(authorFont, authorFontSize);
-    const authorSectionHeight = Math.max(rendererLayout.authorPhotoSize, authorNameHeight);
-
-    this.laneHeight = Math.max(
-      1,
-      authorSectionHeight + spacing.xs + textHeight + totalPaddingV + this.options.laneSpacing
-    );
+    this.laneHeight = Math.max(1, textHeight + totalPaddingV + this.options.laneSpacing);
 
     const usableHeight = dimensions.height * (1 - this.options.safeTop - this.options.safeBottom);
     this.laneCount = Math.max(1, Math.floor(usableHeight / this.laneHeight));
