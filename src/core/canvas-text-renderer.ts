@@ -8,30 +8,18 @@
 import type { ContentSegment, OverlaySettings } from '@app-types';
 import { EMOJI_ALIAS_PATTERN } from '@core/chat-message-helpers';
 import { computeOutlineColor, rendererLayout } from '@core/design-tokens';
-import {
-  getFontString,
-  measureTextHeight,
-  measureTextWidth,
-  wrapTextLines,
-} from '@core/text-measure';
+import { measureTextHeight, measureTextWidth, wrapTextLines } from '@core/text-measure';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-export const TEXT_BITMAP_MAX = 500;
-
-// ─── Font helper ────────────────────────────────────────────────────────────
-
-/** Build the CSS font string from fontSize + settings. */
-export function getFont(fontSize: number, settings: OverlaySettings): string {
-  return getFontString(fontSize, settings.fontWeight, settings.fontFamily);
-}
+const TEXT_BITMAP_MAX = 500;
 
 // ── Text bitmap cache ──────────────────────────────────────────────────────
 
 /**
  * Render text with outline to an offscreen canvas and store in bitmap cache.
  */
-export function cacheTextBitmap(
+function cacheTextBitmap(
   key: string,
   text: string,
   font: string,

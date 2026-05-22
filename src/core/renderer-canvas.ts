@@ -217,9 +217,6 @@ export class CanvasRenderer extends RendererBase {
     this.pendingQueue.length = rendererLayout.backgroundQueueMax;
   }
 
-  // ── Backlog pause control ──────────────────────────────────────────
-
-  /**
   // ── Image pre-fetching
 
   /** Load an image and store it in the given cache on success. */

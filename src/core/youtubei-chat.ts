@@ -94,7 +94,7 @@ const tryGetInitialDataFromWindow = (): JsonObject | null => {
   return null;
 };
 
-export const fetchWatchHtml = async (videoId: string, signal?: AbortSignal): Promise<string> => {
+const fetchWatchHtml = async (videoId: string, signal?: AbortSignal): Promise<string> => {
   const response = await fetch(buildWatchUrl(videoId), {
     credentials: 'include',
     cache: 'no-store',
@@ -192,14 +192,14 @@ const extractJsonObjectFromHtml = (html: string, markers: readonly string[]): Js
   return null;
 };
 
-export const extractInitialDataFromHtml = (html: string): JsonObject | null =>
+const extractInitialDataFromHtml = (html: string): JsonObject | null =>
   extractJsonObjectFromHtml(html, [
     'var ytInitialData = ',
     'window["ytInitialData"] = ',
     'window.ytInitialData = ',
   ]);
 
-export const extractYtcfgFromHtml = (html: string): JsonObject | null =>
+const extractYtcfgFromHtml = (html: string): JsonObject | null =>
   extractJsonObjectFromHtml(html, ['ytcfg.set({', 'window.ytcfg.set({']);
 
 /**
