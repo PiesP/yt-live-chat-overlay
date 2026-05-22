@@ -135,6 +135,10 @@ export abstract class RendererBase {
       preset: settings.authorRateLimit,
     });
 
+    // Propagate safe-zone changes to lane allocator even without full reset.
+    // This ensures new lane placements use the correct Y positions immediately.
+    this.laneAllocator.updateSafeZone(settings.safeTop, settings.safeBottom);
+
     if (options.resetState) {
       this.resetState();
       this.laneAllocator.reset(this.overlay.getDimensions());

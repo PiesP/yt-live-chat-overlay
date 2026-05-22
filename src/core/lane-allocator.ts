@@ -11,8 +11,8 @@ export interface LanePlacement {
 }
 
 interface LaneAllocatorOptions {
-  readonly safeTop: number;
-  readonly safeBottom: number;
+  safeTop: number;
+  safeBottom: number;
   readonly fontSize: number;
   readonly fontWeight: 'normal' | 'bold';
   readonly fontFamily: string;
@@ -129,6 +129,12 @@ export class LaneAllocator {
   private backlogLaneEnd = -1;
 
   constructor(private readonly options: LaneAllocatorOptions) {}
+
+  /** Update safe-zone ratios without rebuilding lane state. */
+  updateSafeZone(safeTop: number, safeBottom: number): void {
+    this.options.safeTop = safeTop;
+    this.options.safeBottom = safeBottom;
+  }
 
   reset(dimensions: OverlayDimensions | null): void {
     this.heap = [];
