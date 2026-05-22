@@ -267,42 +267,42 @@ const STRING_VALIDATORS: Partial<Record<RootScalarSettingKey, (v: string) => boo
 const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings => {
   const d = DEFAULT_SETTINGS;
   // Start from defaults, then overlay valid values from the input
-  const n = cloneSettings(DEFAULT_SETTINGS);
+  const out = cloneSettings(DEFAULT_SETTINGS);
 
   const pickBool = (v: unknown, fallback: boolean): boolean =>
     typeof v === 'boolean' ? v : fallback;
 
   // Root scalar settings: type-routed via ROOT_SETTING_META.
   // Write into a mutable copy since OverlaySettings has no index signature.
-  const out = n as unknown as Record<string, unknown>;
+  const cast = out as unknown as Record<string, unknown>;
   const defaults = d as unknown as Record<string, unknown>;
   for (const key of Object.keys(ROOT_SETTING_META) as RootScalarSettingKey[]) {
     const meta = ROOT_SETTING_META[key];
     const raw = settings[key];
     if (meta.type === 'boolean') {
-      out[key] = typeof raw === 'boolean' ? raw : defaults[key];
+      cast[key] = typeof raw === 'boolean' ? raw : defaults[key];
     } else if (meta.type === 'number') {
-      out[key] = clampNumber(raw, defaults[key] as number, resolveLimits(key));
+      cast[key] = clampNumber(raw, defaults[key] as number, resolveLimits(key));
     } else {
       const validator = STRING_VALIDATORS[key];
-      out[key] = typeof raw === 'string' && validator?.(raw) ? raw : defaults[key];
+      cast[key] = typeof raw === 'string' && validator?.(raw) ? raw : defaults[key];
     }
   }
 
   for (const key of SHOW_AUTHOR_KEYS) {
-    n.showAuthor[key] = pickBool(settings.showAuthor[key], d.showAuthor[key]);
+    out.showAuthor[key] = pickBool(settings.showAuthor[key], d.showAuthor[key]);
   }
 
   for (const key of AUTHOR_COLOR_KEYS) {
-    n.colors[key] = isColorValue(settings.colors[key]) ? settings.colors[key] : d.colors[key];
+    out.colors[key] = isColorValue(settings.colors[key]) ? settings.colors[key] : d.colors[key];
   }
 
-  n.outline.enabled = pickBool(settings.outline.enabled, d.outline.enabled);
+  out.outline.enabled = pickBool(settings.outline.enabled, d.outline.enabled);
   for (const key of OUTLINE_NUMERIC_KEYS) {
-    n.outline[key] = clampNumber(settings.outline[key], d.outline[key], resolveLimits(key));
+    out.outline[key] = clampNumber(settings.outline[key], d.outline[key], resolveLimits(key));
   }
 
-  return n;
+  return out;
 };
 
 export const applySettingsPatch = (
