@@ -1,6 +1,9 @@
 import type { OverlayDimensions } from '@app-types';
 import { rendererLayout } from '@core/design-tokens';
+import { createLogger } from '@core/logging';
 import { measureTextHeight } from '@core/text-measure';
+
+const log = createLogger('LaneAllocator');
 
 export interface LanePlacement {
   laneIndex: number;
@@ -159,6 +162,8 @@ export class LaneAllocator {
 
     const usableHeight = dimensions.height * (1 - this.options.safeTop - this.options.safeBottom);
     this.laneCount = Math.max(1, Math.floor(usableHeight / this.laneHeight));
+
+    log.debug('Reset', { lanes: this.laneCount, height: Math.round(this.laneHeight) });
 
     // Uniform initialization: all lanes start at the same available time.
     const now = performance.now();

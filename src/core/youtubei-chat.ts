@@ -1,4 +1,5 @@
 import { isAbortError } from '@core/dom';
+import { createLogger } from '@core/logging';
 import {
   extractInitialChatContinuation,
   type InnertubeContinuationData,
@@ -12,6 +13,8 @@ import {
   isRecord,
   type JsonObject,
 } from '@core/youtubei-json';
+
+const log = createLogger('Youtubei');
 
 export interface ChatBootstrapData {
   readonly videoId: string;
@@ -359,6 +362,7 @@ export const bootstrapChatSession = async (signal?: AbortSignal): Promise<ChatBo
       initialContinuation,
     };
 
+    log.debug('Bootstrap ready', { videoId, isReplay: data.isReplay });
     return {
       status: 'ready',
       data,

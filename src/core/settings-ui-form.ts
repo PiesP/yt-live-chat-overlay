@@ -1,4 +1,5 @@
 import type { OverlaySettings } from '@app-types';
+import { createLogger } from '@core/logging';
 import {
   AUTHOR_COLOR_KEYS,
   cloneSettings,
@@ -11,6 +12,8 @@ import {
 } from '@core/settings-schema';
 import { PANES } from '@core/settings-ui-panes';
 import type { FieldDef, PaneDef } from '@core/settings-ui-types';
+
+const log = createLogger('SettingsUiForm');
 
 const STYLE_ID = 'yt-chat-overlay-settings-style';
 export const BUTTON_ID = 'yt-chat-overlay-settings-button';
@@ -242,6 +245,7 @@ export class SettingsUiForm {
 
   setModal(modal: HTMLDivElement | null): void {
     this.modal = modal;
+    log.debug('Modal set', { attached: modal !== null });
   }
 
   private attachLivePreview(element: HTMLElement): void {
