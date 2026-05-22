@@ -222,6 +222,7 @@ export type DropReason =
   | 'no_lane_available'
   | 'rate_limited'
   | 'dedup'
+  | 'collision'
   | 'other';
 
 /**

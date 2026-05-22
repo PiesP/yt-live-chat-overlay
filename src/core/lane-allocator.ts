@@ -241,6 +241,8 @@ export class LaneAllocator {
       }
       this.laneLastUsedAt[laneIdx] = startTime;
     }
+    // Update density cache for spatial scoring
+    this.updateDensityOnCommit(startIdx, startTime);
   }
 
   // ── Partition control ────────────────────────────────────────────────
@@ -263,28 +265,38 @@ export class LaneAllocator {
   // ── Private helpers ─────────────────────────────────────────────────
 
   /**
-   * Global spatial density at a lane: weighted sum of recent usage across
-   * ALL lanes (not just immediate neighbors). Lanes used within the decay
-   * window contribute to density, with closer lanes weighted higher.
-   *
-   * This prevents vertical clustering by preferring lanes that are far from
-   * recently used lanes across the entire screen, not just locally.
+   * Per-lane cached spatial density score.
+   * Updated incrementally on commitPlacement instead of O(n) scan.
+   * Decays exponentially over DECAY_WINDOW_MS.
    */
-  private spatialDensity(laneIndex: number, now: number): number {
-    let density = 0;
-    const DECAY_WINDOW_MS = 8_000;
+  private readonly laneDensityScore: number[] = [];
+  private static readonly DENSITY_DECAY_WINDOW_MS = 8_000;
+
+  /** Incrementally update density scores when a lane is committed. */
+  private updateDensityOnCommit(laneIndex: number, now: number): void {
+    // Boost the committed lane and its neighbors
     for (let i = 0; i < this.laneCount; i++) {
-      if (i === laneIndex) continue;
-      const lastUsed = this.laneLastUsedAt[i] ?? 0;
-      if (lastUsed === 0) continue;
-      const age = now - lastUsed;
-      if (age >= DECAY_WINDOW_MS) continue;
       const distance = Math.abs(i - laneIndex);
       const proximityWeight = 1 / (1 + distance * 0.1);
-      const recency = 1 - age / DECAY_WINDOW_MS;
-      density += proximityWeight * recency;
+      const current = this.laneDensityScore[i] ?? 0;
+      this.laneDensityScore[i] = current + proximityWeight;
     }
-    return density;
+    this.laneLastUsedAt[laneIndex] = now;
+  }
+
+  /** Get normalized spatial density for a lane (O(1) cached). */
+  private getCachedDensity(laneIndex: number, now: number): number {
+    const rawDensity = this.laneDensityScore[laneIndex] ?? 0;
+    // Apply time-based decay to the cached score
+    const lastUsed = this.laneLastUsedAt[laneIndex] ?? 0;
+    if (lastUsed === 0) return 0;
+    const age = now - lastUsed;
+    if (age >= LaneAllocator.DENSITY_DECAY_WINDOW_MS) {
+      this.laneDensityScore[laneIndex] = 0;
+      return 0;
+    }
+    const decay = 1 - age / LaneAllocator.DENSITY_DECAY_WINDOW_MS;
+    return rawDensity * decay;
   }
 
   /**
@@ -301,8 +313,8 @@ export class LaneAllocator {
     const maxWait = rendererLayout.durationMax;
     const normalizedWait = Math.min(1, waitMs / maxWait);
 
-    // Normalize spatial density to [0, 1]
-    const rawDensity = this.spatialDensity(laneIndex, now);
+    // Normalize spatial density to [0, 1] — O(1) cached
+    const rawDensity = this.getCachedDensity(laneIndex, now);
     const maxRawDensity = this.laneCount * 0.5; // theoretical upper bound
     const normalizedDensity = Math.min(1, rawDensity / maxRawDensity);
 
@@ -518,7 +530,7 @@ export class LaneAllocator {
           break;
         }
         blockMaxWait = Math.max(blockMaxWait, slotWait);
-        blockDensitySum += this.spatialDensity(slotIdx, now);
+        blockDensitySum += this.getCachedDensity(slotIdx, now);
         blockCountSum += this.laneMessageCounts[slotIdx] ?? 0;
       }
 

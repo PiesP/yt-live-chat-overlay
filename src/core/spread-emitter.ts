@@ -1,12 +1,12 @@
 /**
- * SpreadEmitter — evenly distributes poll messages across the poll interval.
+ * SpreadEmitter — low-latency message distribution with adaptive spread.
  *
- * Instead of emitting an entire poll batch at once (burst → silence → burst),
- * messages are released one at a time on a Poisson-distributed schedule,
- * producing a steady visual flow.
- *
- * Priority messages (SuperChat, Membership) bypass the spread buffer and are
- * emitted immediately so paid content is never delayed.
+ * Design:
+ * - First message in each batch is emitted immediately (zero delay).
+ * - Subsequent messages are spread using a Poisson-like distribution
+ *   controlled by spreadFactor: lower = tighter/faster, wider = smoother.
+ * - Priority messages (SuperChat, Membership) always bypass the buffer.
+ * - When spreadFactor <= 0.2, all messages emit immediately (no spread).
  */
 
 import type { ChatMessage } from '@app-types';
@@ -14,7 +14,6 @@ import { createLogger } from '@core/logging';
 
 const log = createLogger('SpreadEmitter');
 
-const MIN_SPREAD_INTERVAL_MS = 50;
 const MAX_SPREAD_BUFFER = 100;
 
 function isPriorityMessage(message: ChatMessage): boolean {
@@ -24,9 +23,10 @@ function isPriorityMessage(message: ChatMessage): boolean {
 export class SpreadEmitter {
   private readonly buffer: ChatMessage[] = [];
   private timer: ReturnType<typeof setTimeout> | null = null;
-  private baseSpreadInterval = MIN_SPREAD_INTERVAL_MS;
+  private baseSpreadInterval = 50;
   private paused = false;
   private destroyed = false;
+  private burstCount = 0;
 
   constructor(
     private readonly emitMessage: (msg: ChatMessage) => void,
@@ -35,23 +35,39 @@ export class SpreadEmitter {
 
   /**
    * Enqueue messages for spread emission.
-   * Priority messages (superchat, membership) are emitted immediately.
-   * Normal messages are buffered and released gradually.
+   * Priority messages are always emitted immediately.
+   * The first normal message is emitted immediately; subsequent ones are spread.
    */
   enqueue(messages: ChatMessage[]): void {
     if (this.destroyed || messages.length === 0) return;
+
+    const normalMessages: ChatMessage[] = [];
 
     for (const msg of messages) {
       if (isPriorityMessage(msg)) {
         this.emitMessage(msg);
         continue;
       }
-      this.buffer.push(msg);
+      normalMessages.push(msg);
     }
 
-    if (this.buffer.length > MAX_SPREAD_BUFFER) {
+    if (normalMessages.length === 0) return;
+
+    if (this.buffer.length + normalMessages.length > MAX_SPREAD_BUFFER) {
+      this.buffer.push(...normalMessages);
       this.flushAll();
       return;
+    }
+
+    this.buffer.push(...normalMessages);
+
+    // Emit the first message immediately if this is a new burst
+    if (this.timer === null && !this.paused) {
+      const msg = this.buffer.shift();
+      if (msg) {
+        this.emitMessage(msg);
+        this.burstCount = 1;
+      }
     }
 
     this.ensureTimer();
@@ -59,25 +75,17 @@ export class SpreadEmitter {
 
   /**
    * Set the target spread interval (ms) between emitted messages.
-   * Called by LiveChatSource after each poll to adapt to the current
-   * poll interval.
    */
   setSpreadInterval(intervalMs: number): void {
-    this.baseSpreadInterval = Math.max(MIN_SPREAD_INTERVAL_MS, intervalMs);
+    this.baseSpreadInterval = Math.max(16, intervalMs);
   }
 
-  /**
-   * Pause spread emission (e.g. when video is paused).
-   */
   pause(): void {
     if (this.paused) return;
     this.paused = true;
     this.clearTimer();
   }
 
-  /**
-   * Resume spread emission.
-   */
   resume(): void {
     if (!this.paused) return;
     this.paused = false;
@@ -88,7 +96,6 @@ export class SpreadEmitter {
 
   /**
    * Flush all buffered messages immediately.
-   * Called on destroy, settings change, or buffer overflow.
    */
   flushAll(): void {
     this.clearTimer();
@@ -98,18 +105,13 @@ export class SpreadEmitter {
       const msg = this.buffer.shift();
       if (msg) this.emitMessage(msg);
     }
+    this.burstCount = 0;
   }
 
-  /**
-   * Current buffer size (for observability).
-   */
   getBufferSize(): number {
     return this.buffer.length;
   }
 
-  /**
-   * Clean up all resources.
-   */
   destroy(): void {
     this.destroyed = true;
     this.clearTimer();
@@ -124,8 +126,18 @@ export class SpreadEmitter {
 
   private scheduleNext(): void {
     const factor = this.getSpreadFactor();
-    const effectiveInterval = this.baseSpreadInterval * factor;
-    const delay = Math.max(MIN_SPREAD_INTERVAL_MS, Math.random() * (effectiveInterval * 2));
+
+    // Ultra-low spread: emit immediately (no timer needed)
+    if (factor <= 0.2) {
+      this.tick();
+      return;
+    }
+
+    // Adaptive delay: decreases as burst count increases (ramp-up)
+    const rampMultiplier = Math.max(0.3, 1 - this.burstCount * 0.1);
+    const effectiveInterval = this.baseSpreadInterval * factor * rampMultiplier;
+    const delay = Math.max(16, Math.round(effectiveInterval * (0.5 + Math.random())));
+
     this.timer = setTimeout(() => {
       this.timer = null;
       this.tick();
@@ -137,7 +149,10 @@ export class SpreadEmitter {
     if (this.buffer.length === 0) return;
 
     const msg = this.buffer.shift();
-    if (msg) this.emitMessage(msg);
+    if (msg) {
+      this.emitMessage(msg);
+      this.burstCount++;
+    }
 
     if (this.buffer.length > 0) {
       this.scheduleNext();

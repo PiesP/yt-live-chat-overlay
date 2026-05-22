@@ -369,29 +369,32 @@ export class CanvasRenderer extends RendererBase {
 
   private drainQueue(now: number): void {
     if (this.isAntiBlockActive()) return;
+    let skipped = 0;
+    const maxSkip = 3; // prevent scanning entire queue when all collide
     while (
       this.pendingQueue.length > 0 &&
-      this.activeMessages.length < this.settings.maxConcurrentMessages
+      this.activeMessages.length < this.settings.maxConcurrentMessages &&
+      skipped <= maxSkip
     ) {
       const msg = this.pendingQueue.shift();
       if (!msg) continue;
 
-      // Obtain placement and check collision in a single step to avoid
-      // double-finding (BUG-1: findPlacement was called twice, causing
-      // lane mismatch between the overlap check and the actual enqueue).
       const result = this.checkPlacement(msg, now);
       if (!result.ok) {
         if (result.reason === 'no_lane') {
-          // No lane available at all — drop to prevent infinite loop (BUG-5).
           this.observability.onMessageDropped('no_lane_available');
+          skipped = 0; // reset after drop
           continue;
         }
-        // Collision: put back and stop draining — retry next frame.
-        this.pendingQueue.unshift(msg);
-        break;
+        // Collision: skip this message and try the next one.
+        // Only retry the skipped message if we haven't exceeded maxSkip.
+        skipped++;
+        this.observability.onMessageDropped('collision');
+        continue;
       }
 
       this.enqueueMessageWithPlacement(msg, now, result.placement);
+      skipped = 0; // reset after successful enqueue
     }
   }
 
@@ -434,8 +437,10 @@ export class CanvasRenderer extends RendererBase {
     const newLaneY = placement.laneY;
     const laneHeight = this.laneAllocator.getLaneHeight();
 
-    // Check against all active messages for bounding-box overlap.
-    for (const active of this.activeMessages) {
+    // Check active messages in reverse (newest first) for early exit on collision.
+    for (let i = this.activeMessages.length - 1; i >= 0; i--) {
+      const active = this.activeMessages[i];
+      if (!active) continue;
       const activeElapsed = now - active.startTime - active.pausedDuration;
       if (activeElapsed < 0) continue; // not yet started
 
