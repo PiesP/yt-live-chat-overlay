@@ -53,7 +53,7 @@ export class BootstrapResolver {
     return resolution.bootstrap;
   }
 
-  logFailure(resolution: Exclude<ChatBootstrapResolution, { status: 'ready' }>): void {
+  logFailure(resolution: ChatBootstrapResolution): void {
     if (resolution.status === 'retryable') {
       log.warn(
         `Chat bootstrap was retryable after ${BOOTSTRAP_MAX_ATTEMPTS} attempts: ${resolution.reason}`
