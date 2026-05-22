@@ -351,7 +351,9 @@ export class CanvasRenderer extends RendererBase {
         const travelDistance = canvas.width + msg.width + rendererLayout.exitPaddingMin;
         msg.x = msg.startX - progress * travelDistance;
       } else if (mode === 'reverse') {
-        const travelDistance = canvas.width * 2 + rendererLayout.exitPaddingMin;
+        // Reverse: message enters from left and scrolls right.
+        // Total travel = screenWidth + msgWidth + exitPadding.
+        const travelDistance = dims.width + msg.width + rendererLayout.exitPaddingMin;
         msg.x = -msg.width + progress * travelDistance;
       }
 
@@ -486,7 +488,7 @@ export class CanvasRenderer extends RendererBase {
           if (activeRightEdge > 0) return { ok: false, reason: 'collision' as const };
         } else {
           // reverse mode: messages enter from left, travel right
-          const reverseTravel = dims.width * 2 + rendererLayout.exitPaddingMin;
+          const reverseTravel = dims.width + active.width + rendererLayout.exitPaddingMin;
           const activeX = -active.width + activeProgress * reverseTravel;
           if (activeX + active.width > 0) return { ok: false, reason: 'collision' as const };
         }
@@ -529,8 +531,7 @@ export class CanvasRenderer extends RendererBase {
         this.settings.fontSize * rendererLayout.exitPaddingScale,
         rendererLayout.exitPaddingMin
       );
-      const totalDistance =
-        mode === 'reverse' ? dims.width * 2 + exitPadding : dims.width + msgWidth + exitPadding;
+      const totalDistance = dims.width + msgWidth + exitPadding;
       effectiveDuration =
         speed > 0 ? computeDliosDuration(totalDistance, speed) : rendererLayout.durationMin;
     } else {
