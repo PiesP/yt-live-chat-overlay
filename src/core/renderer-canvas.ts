@@ -539,22 +539,31 @@ export class CanvasRenderer extends RendererBase {
 
     const laneY = placement.laneY;
 
-    this.laneAllocator.commitPlacement(placement, now, effectiveDuration, msgWidth, dims.width);
+    // Stagger delay: spread batch entries across time to prevent vertical
+    // clumping. Computed BEFORE commitPlacement so the allocator accounts
+    // for the effective visual start time, not the raw 'now' timestamp.
+    // Previously commitPlacement used 'now' while activateMessage used
+    // 'now + staggerDelay', creating dead time where the lane appeared
+    // occupied but had no visible message.
+    const staggerDelay =
+      isScrolling && batchIndex > 0
+        ? Math.round(Math.min(200, batchIndex * -25 * Math.log(1 - Math.random())))
+        : 0;
+
+    const effectiveStartTime = now + staggerDelay;
+    this.laneAllocator.commitPlacement(
+      placement,
+      effectiveStartTime,
+      effectiveDuration,
+      msgWidth,
+      dims.width
+    );
 
     const startX = isScrolling
       ? mode === 'scroll'
         ? dims.width
         : -(msgWidth + rendererLayout.exitPaddingMin)
       : 0;
-
-    // Stagger delay: spread batch entries across time to prevent vertical
-    // clumping. Uses exponential distribution so most get 0-50ms, a few
-    // get up to 200ms. Only for scrolling mode (top/bottom don't scroll,
-    // so stagger doesn't help).
-    const staggerDelay =
-      isScrolling && batchIndex > 0
-        ? Math.round(Math.min(200, batchIndex * -25 * Math.log(1 - Math.random())))
-        : 0;
 
     this.activateMessage(
       message,
