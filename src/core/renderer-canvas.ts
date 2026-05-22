@@ -335,6 +335,7 @@ export class CanvasRenderer extends RendererBase {
 
     this.drainQueue(now);
 
+    this.observability.updateLaneUtilization(this.laneAllocator.getUtilization());
     this.observability.tick();
 
     for (let i = 0; i < this.activeMessages.length; i++) {
@@ -527,11 +528,7 @@ export class CanvasRenderer extends RendererBase {
       const speed = message.isBacklog
         ? this.getEffectiveBacklogSpeed()
         : this.getEffectiveSpeedPxPerSec();
-      const exitPadding = Math.max(
-        this.settings.fontSize * rendererLayout.exitPaddingScale,
-        rendererLayout.exitPaddingMin
-      );
-      const totalDistance = dims.width + msgWidth + exitPadding;
+      const totalDistance = dims.width + msgWidth + rendererLayout.exitPaddingMin;
       effectiveDuration =
         speed > 0 ? computeDliosDuration(totalDistance, speed) : rendererLayout.durationMin;
     } else {
