@@ -3,6 +3,7 @@ import { BacklogInjectionController } from '@core/backlog-controller';
 import type { ChatHealthSnapshot, ChatSource, ChatSourceStartStatus } from '@core/chat-source-base';
 import { createChatSource } from '@core/chat-source-factory';
 import { findElementMatch, isAbortError, throwIfAborted, VIDEO_SELECTORS } from '@core/dom';
+import { type DomWatcherUnsubscribe, installDomChatWatcher } from '@core/dom-chat-watcher';
 import { type InterceptorUnsubscribe, installFetchInterceptor } from '@core/fetch-interceptor';
 import { createLogger } from '@core/logging';
 import { MessageIdRegistry } from '@core/message-id-registry';
@@ -63,6 +64,8 @@ export class RuntimeSession {
   private readonly sessionDedup = new MessageIdRegistry(5000);
   /** Unsubscribe handle for the fetch interceptor. */
   private fetchInterceptorUnsubscribe: InterceptorUnsubscribe | null = null;
+  /** Unsubscribe handle for the DOM chat watcher (fallback). */
+  private domWatcherUnsubscribe: DomWatcherUnsubscribe | null = null;
 
   constructor(options: RuntimeSessionOptions) {
     this.targetUrl = options.targetUrl;
@@ -202,6 +205,9 @@ export class RuntimeSession {
     this.fetchInterceptorUnsubscribe?.();
     this.fetchInterceptorUnsubscribe = null;
 
+    this.domWatcherUnsubscribe?.();
+    this.domWatcherUnsubscribe = null;
+
     this.renderer?.destroy();
     this.renderer = null;
 
@@ -259,6 +265,18 @@ export class RuntimeSession {
       );
     } catch (error) {
       log.warn('Failed to install fetch interceptor:', error);
+    }
+
+    // Install DOM watcher as a fallback. It captures messages from
+    // YouTube's own chat UI rendering, which works even if the fetch
+    // interceptor misses a response (URL pattern change, etc.).
+    try {
+      this.domWatcherUnsubscribe = installDomChatWatcher((messages) => {
+        if (this.disposed) return;
+        chatSource.injectExternalMessages(messages);
+      });
+    } catch (error) {
+      log.warn('Failed to install DOM chat watcher:', error);
     }
   }
 
