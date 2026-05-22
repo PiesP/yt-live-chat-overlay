@@ -227,7 +227,7 @@ export class RuntimeSession {
     // This delivers messages ~1 poll interval earlier than our own polling.
     this.installFetchInterceptor(chatSource);
 
-    return chatSource.start((messages, _isInitialSeed) => {
+    return chatSource.start((messages) => {
       if (this.disposed) return;
       const renderer = this.renderer;
       if (!renderer) return;

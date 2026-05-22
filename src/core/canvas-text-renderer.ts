@@ -27,7 +27,6 @@ function cacheTextBitmap(
   strokeWidth: number,
   strokeColor: string,
   ctx: CanvasRenderingContext2D,
-  _settings: OverlaySettings,
   textBitmapCache: Map<string, HTMLCanvasElement>
 ): void {
   if (textBitmapCache.size >= TEXT_BITMAP_MAX) {
@@ -104,7 +103,6 @@ export function renderSegment(
   fontSize: number,
   settings: OverlaySettings,
   textBitmapCache: Map<string, HTMLCanvasElement>,
-  _emojiCache: Map<string, HTMLImageElement>,
   getFontFn: (fontSize: number) => string
 ): void {
   const outline = settings.outline;
@@ -125,17 +123,7 @@ export function renderSegment(
     }
 
     // Cache miss — render to offscreen canvas and cache
-    cacheTextBitmap(
-      key,
-      text,
-      font,
-      color,
-      strokeWidth,
-      strokeColor,
-      ctx,
-      settings,
-      textBitmapCache
-    );
+    cacheTextBitmap(key, text, font, color, strokeWidth, strokeColor, ctx, textBitmapCache);
   }
 
   // Fallback: direct fillText + strokeText
@@ -179,7 +167,6 @@ export function renderContentSegments(
         fontSize,
         settings,
         textBitmapCache,
-        emojiCache,
         getFontFn
       );
       cursorX += measureTextWidth(seg.content, getFontFn(fontSize));
@@ -202,7 +189,6 @@ export function renderContentSegments(
           fontSize,
           settings,
           textBitmapCache,
-          emojiCache,
           getFontFn
         );
       } else if (seg.emoji.alt && !EMOJI_ALIAS_PATTERN.test(seg.emoji.alt)) {
@@ -216,7 +202,6 @@ export function renderContentSegments(
           fontSize,
           settings,
           textBitmapCache,
-          emojiCache,
           getFontFn
         );
       }
@@ -247,7 +232,6 @@ export function renderWrappedText(
   fontSize: number,
   settings: OverlaySettings,
   textBitmapCache: Map<string, HTMLCanvasElement>,
-  emojiCache: Map<string, HTMLImageElement>,
   getFontFn: (fontSize: number) => string
 ): number {
   const font = getFontFn(fontSize);
@@ -272,7 +256,6 @@ export function renderWrappedText(
       fontSize,
       settings,
       textBitmapCache,
-      emojiCache,
       getFontFn
     );
     cursorY += lineHeight;

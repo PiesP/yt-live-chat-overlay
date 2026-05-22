@@ -775,7 +775,6 @@ export class CanvasRenderer extends RendererBase {
         fontSize,
         this.settings,
         this.textBitmapCache,
-        this.emojiCache,
         (fs) => this.getFont(fs)
       );
     }
@@ -890,7 +889,6 @@ export class CanvasRenderer extends RendererBase {
         fontSize,
         this.settings,
         this.textBitmapCache,
-        this.emojiCache,
         (fs) => this.getFont(fs)
       );
     }
@@ -965,7 +963,6 @@ export class CanvasRenderer extends RendererBase {
         fontSize,
         this.settings,
         this.textBitmapCache,
-        this.emojiCache,
         (fs) => this.getFont(fs)
       );
     }

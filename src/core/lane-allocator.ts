@@ -192,7 +192,7 @@ export class LaneAllocator {
 
   findPlacement(
     messageHeight: number,
-    _dimensions: OverlayDimensions,
+    dimensions: OverlayDimensions,
     isBacklog = false
   ): LanePlacement | null {
     const now = performance.now();
@@ -210,7 +210,7 @@ export class LaneAllocator {
     return {
       laneIndex: result.laneIndex,
       waitMs: result.waitMs,
-      laneY: this.getLaneY(result.laneIndex, _dimensions.height),
+      laneY: this.getLaneY(result.laneIndex, dimensions.height),
       slotCount,
       verticalOffset: Math.floor((slotCount * this.laneHeight - messageHeight) / 2),
     };
