@@ -55,6 +55,10 @@ export class LaneAllocator {
   private laneMessageCounts: number[] = [];
   /** Per-lane last commit timestamp for spatial density calculation */
   private laneLastUsedAt: number[] = [];
+  /** Per-lane batch assignment count (reset per drainQueue batch). */
+  private batchMessageCounts: number[] = [];
+  /** Index of the last lane assigned in the current batch (diagonal prevention). */
+  private lastBatchLane: number | null = null;
   private laneHeight = 0;
   private laneCount = 0;
 
@@ -103,6 +107,8 @@ export class LaneAllocator {
     this.laneIndexToHeapIndex = new Map();
     this.laneMessageCounts = [];
     this.laneLastUsedAt = [];
+    this.batchMessageCounts = [];
+    this.lastBatchLane = null;
     this.backlogLaneEnd = -1;
     if (!dimensions) {
       this.laneHeight = 0;
@@ -144,6 +150,7 @@ export class LaneAllocator {
       this.laneIndexToHeapIndex.set(i, i);
       this.laneMessageCounts.push(0);
       this.laneLastUsedAt.push(0);
+      this.batchMessageCounts.push(0);
     }
     // Build min-heap (4-ary): start from last non-leaf node
     for (let i = Math.floor((this.heap.length - 2) / 4); i >= 0; i--) {
@@ -263,12 +270,19 @@ export class LaneAllocator {
         this.laneMessageCounts[laneIdx] = count + 1;
       }
       this.laneLastUsedAt[laneIdx] = startTime;
+      // Track batch assignment count for temporal density scoring
+      const batchCount = this.batchMessageCounts[laneIdx];
+      if (batchCount !== undefined) {
+        this.batchMessageCounts[laneIdx] = batchCount + 1;
+      }
     }
     // Update density cache for spatial scoring
     this.updateDensityOnCommit(startIdx, startTime);
+    // Track last batch lane for anti-diagonal penalty
+    this.lastBatchLane = startIdx;
   }
 
-  // ── Partition control ────────────────────────────────────────────────
+  // ── Partition and batch control ───────────────────────────────────────
 
   /**
    * Enable or disable backlog lane partitioning.
@@ -283,6 +297,19 @@ export class LaneAllocator {
     } else {
       this.backlogLaneEnd = -1;
     }
+  }
+
+  /**
+   * Reset per-batch tracking state. Must be called at the start of each
+   * drainQueue batch (typically once per render frame).
+   *
+   * Resets:
+   *   - batchMessageCounts: per-lane assignment counters
+   *   - lastBatchLane: the most recently assigned lane index
+   */
+  resetBatch(): void {
+    this.batchMessageCounts.fill(0);
+    this.lastBatchLane = null;
   }
 
   // ── Private helpers ─────────────────────────────────────────────────
@@ -373,12 +400,14 @@ export class LaneAllocator {
 
   /**
    * Composite lane score: lower is better.
-   * All three components are normalized to [0, 1] so no single term dominates.
+   * All components are normalized to [0, 1] so no single term dominates.
    *
    * Components:
    *   - wait: normalized wait time (primary — DLIOS invariant)
    *   - density: global spatial density (secondary — prevents clustering)
    *   - count: normalized message count (tertiary — load balancing)
+   *   - temporal: batch-internal lane assignment count (vertical spread)
+   *   - batchAdjacent: penalty for placing near the last batch lane (diagonal break)
    */
   private laneScore(laneIndex: number, waitMs: number, now: number): number {
     // Normalize wait to [0, 1] using the max scroll duration as upper bound
@@ -394,14 +423,45 @@ export class LaneAllocator {
     const maxCount = Math.max(1, ...this.laneMessageCounts);
     const normalizedCount = (this.laneMessageCounts[laneIndex] ?? 0) / maxCount;
 
-    // Weighted combination: wait is primary, density secondary, count tertiary
-    return normalizedWait * 0.5 + normalizedDensity * 0.3 + normalizedCount * 0.2;
+    // Temporal density: how many messages in this batch went to this lane
+    const maxBatch = Math.max(1, ...this.batchMessageCounts);
+    const normalizedTemporal = (this.batchMessageCounts[laneIndex] ?? 0) / maxBatch;
+
+    // Batch-adjacent penalty: avoid placing consecutive batch messages
+    // in the same or adjacent lanes (breaks diagonal patterns).
+    const batchAdjacent = this.computeBatchAdjacent(laneIndex);
+
+    // Weighted combination: wait is primary, density/count secondary,
+    // temporal and batch-adjacent are tertiary (prevent clustering).
+    return (
+      normalizedWait * 0.4 +
+      normalizedDensity * 0.25 +
+      normalizedCount * 0.15 +
+      normalizedTemporal * 0.1 +
+      batchAdjacent * 0.1
+    );
+  }
+
+  /**
+   * Penalty for placing a message near the most recently assigned lane
+   * in the current batch. This prevents sequential lane assignment patterns
+   * (diagonal entry) when multiple messages are drained in a single frame.
+   *
+   * Returns 1.0 for the same lane, 0.5 for adjacent, 0 otherwise.
+   */
+  private computeBatchAdjacent(laneIndex: number): number {
+    if (this.lastBatchLane === null) return 0;
+    const dist = Math.abs(laneIndex - this.lastBatchLane);
+    if (dist === 0) return 1.0;
+    if (dist === 1) return 0.5;
+    return 0;
   }
 
   /**
    * Normalized score for a multi-slot block.
    * Uses the same normalization as laneScore but operates on block-aggregate
-   * values (max wait, avg density, avg count) plus an adjacency penalty.
+   * values (max wait, avg density, avg count, avg batch) plus an adjacency
+   * penalty and batch-adjacent penalty.
    */
   private blockScore(
     blockMaxWait: number,
@@ -420,12 +480,31 @@ export class LaneAllocator {
     const maxCount = Math.max(1, ...this.laneMessageCounts);
     const normalizedCount = avgCount / maxCount;
 
+    // Temporal density for the block (average batch count across slots)
+    const maxBatch = Math.max(1, ...this.batchMessageCounts);
+    let avgBatch = 0;
+    for (let s = 0; s < slotCount; s++) {
+      avgBatch += this.batchMessageCounts[startIdx + s] ?? 0;
+    }
+    avgBatch /= slotCount;
+    const normalizedTemporal = avgBatch / maxBatch;
+
+    // Batch-adjacent penalty
+    const batchAdjacent = this.computeBatchAdjacent(startIdx);
+
     // Adjacent penalty: check if lanes immediately above or below the
     // block were recently used. This prevents tall messages from being
     // stacked directly on top of each other.
     const adjacentPenalty = this.adjacentPenalty(startIdx, slotCount, now);
 
-    return normalizedWait * 0.5 + normalizedDensity * 0.3 + normalizedCount * 0.2 + adjacentPenalty;
+    return (
+      normalizedWait * 0.4 +
+      normalizedDensity * 0.25 +
+      normalizedCount * 0.15 +
+      normalizedTemporal * 0.1 +
+      batchAdjacent * 0.1 +
+      adjacentPenalty
+    );
   }
 
   /**

@@ -333,6 +333,9 @@ export class CanvasRenderer extends RendererBase {
       if (!msg) continue;
       const elapsed = now - msg.startTime - msg.pausedDuration;
 
+      // Skip messages still in stagger delay period (haven't visually started)
+      if (elapsed < 0) continue;
+
       const progress = Math.min(1, Math.max(0, elapsed / msg.duration));
 
       if (mode === 'scroll') {
@@ -380,6 +383,8 @@ export class CanvasRenderer extends RendererBase {
     if (this.isAntiBlockActive()) return;
     let skipped = 0;
     const maxSkip = 3; // prevent scanning entire queue when all collide
+    let batchIndex = 0; // for stagger delay computation
+    this.laneAllocator.resetBatch();
     while (
       this.pendingQueue.length > 0 &&
       this.activeMessages.length < this.settings.maxConcurrentMessages &&
@@ -402,8 +407,9 @@ export class CanvasRenderer extends RendererBase {
         continue;
       }
 
-      this.enqueueMessageWithPlacement(msg, now, result.placement);
+      this.enqueueMessageWithPlacement(msg, now, result.placement, batchIndex);
       skipped = 0; // reset after successful enqueue
+      batchIndex++;
     }
   }
 
@@ -494,7 +500,8 @@ export class CanvasRenderer extends RendererBase {
   private enqueueMessageWithPlacement(
     message: ChatMessage,
     now: number,
-    placement: import('@core/lane-allocator').LanePlacement
+    placement: import('@core/lane-allocator').LanePlacement,
+    batchIndex = 0
   ): void {
     const dims = this.overlay.getDimensions();
     if (!dims) return;
@@ -531,6 +538,15 @@ export class CanvasRenderer extends RendererBase {
         : -(msgWidth + rendererLayout.exitPaddingMin)
       : 0;
 
+    // Stagger delay: spread batch entries across time to prevent vertical
+    // clumping. Uses exponential distribution so most get 0-50ms, a few
+    // get up to 200ms. Only for scrolling mode (top/bottom don't scroll,
+    // so stagger doesn't help).
+    const staggerDelay =
+      isScrolling && batchIndex > 0
+        ? Math.round(Math.min(200, batchIndex * -25 * Math.log(1 - Math.random())))
+        : 0;
+
     this.activateMessage(
       message,
       now,
@@ -540,7 +556,7 @@ export class CanvasRenderer extends RendererBase {
       effectiveDuration,
       startX,
       placement.lane.index,
-      0
+      staggerDelay
     );
   }
 
@@ -558,7 +574,7 @@ export class CanvasRenderer extends RendererBase {
   ): void {
     const cm: CanvasMessage = {
       message,
-      startTime: now,
+      startTime: now + staggerDelay, // effective start — message waits at right edge
       duration: duration ?? rendererLayout.topBottomDurationMs,
       width: msgWidth,
       height: msgHeight,
