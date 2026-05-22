@@ -27,62 +27,47 @@ interface LaneAllocatorOptions {
 }
 
 /**
- * DLIOS constant-velocity lane scheduler.
+ * Top-first lane scheduler.
  *
- * Core algorithm (from DLIOS / ByteDance TikTok paper):
+ * Fills lanes from the top of the screen down:
  *
- *   1. Constant-velocity lemma — all comments in the same lane move at
- *      the same velocity `v`. Therefore a later-starting comment can
- *      NEVER overtake an earlier one (zero rear-end collision).
+ *   1. Scan lanes from index 0 (topmost) to laneCount (bottommost).
+ *   2. Phase 1 (zero-wait): return the first lane with waitMs === 0.
+ *      During a burst this distributes across all lanes: msg1 → lane 0,
+ *      msg2 → lane 1, ..., msgN → lane N-1.
+ *   3. Phase 2 (all busy): return the topmost busy lane. The collision
+ *      check in checkPlacement rejects it (right edge near entry), pushing
+ *      the message back for retry rather than dropping it.
+ *   4. Collision feedback: when checkPlacement detects a collision,
+ *      markCollision(laneIndex) is called so subsequent calls in the
+ *      same batch skip that lane and try the next one below.
+ *   5. Multi-slot messages (superchats, memberships) scan for the first
+ *      contiguous block of free lanes, also from the top.
+ *   6. Backlog priority: backlog messages skip Phase 2 (busy lane fallback).
+ *      They only use completely free lanes; if none exist, they accept
+ *      a dropped message rather than competing with real-time traffic.
  *
- *   2. Available-time launch rule — each lane tracks the earliest time
- *      it becomes available for the next message:
- *
- *        t_available(k) = t_start + (w + g) / v
- *
- *      where w = text width, g = safety gap, v = constant velocity.
- *
- *   3. Min-heap selection — the lane with the minimum t_available is
- *      selected in O(log n) time.
- *
- * Extensions over base DLIOS:
- *   - Precision exit-time: for scrolling mode, lane occupancy is computed
- *     as the exact time until the comment's right edge exits the screen,
- *     plus a small headway gap (30-200ms). This replaces the old blanket
- *     duration + 15% cooldown — reducing horizontal dead-space between
- *     consecutive comments from ~433px to ~10-20px at 200px/s.
- *   - Normalized composite scoring: wait time, spatial density, message
- *     count, temporal batch density, and batch-adjacent penalty are all
- *     normalized to [0, 1] so no single term dominates.
- *   - Temporal density: per-batch lane assignment counters spread messages
- *     across lanes within the same drainQueue batch, preventing vertical
- *     clumping when multiple comments arrive simultaneously.
- *   - Batch-adjacent penalty: prevents diagonal entry patterns by penalizing
- *     consecutive batch assignments to the same or adjacent lanes.
- *   - Epsilon-greedy selection: 10% of allocations randomly explore a
- *     non-optimal lane from the top-K candidates, breaking deterministic
- *     long-term diagonal bands.
- *   - Backlog adjacency penalty: during backlog injection, penalizes lanes
- *     whose neighbours were recently used, enforcing vertical spread.
- *   - Backlog lane partitioning: during backlog injection, a subset of lanes
- *     is reserved for backlog messages, preventing visual overlap with
- *     real-time messages.
+ * Supports:
+ *   - Precision exit-time occupancy for multi-message lane sharing
+ *   - Adaptive headway gap (8% of msg width, 16-60px clamp)
+ *   - Velocity-aware durationMin (via computeDliosDuration)
  */
 export class LaneAllocator {
   /** 4-ary min-heap of [laneIndex, availableAtMs] pairs, sorted by availableAtMs */
   private heap: [number, number][] = [];
   /** Reverse map: laneIndex → heap index for O(1) lookup and update */
   private laneIndexToHeapIndex: Map<number, number> = new Map();
-  /** Per-lane message count for weighted selection */
-  private laneMessageCounts: number[] = [];
-  /** Per-lane last commit timestamp for spatial density calculation */
-  private laneLastUsedAt: number[] = [];
-  /** Per-lane batch assignment count (reset per drainQueue batch). */
-  private batchMessageCounts: number[] = [];
-  /** Index of the last lane assigned in the current batch (diagonal prevention). */
-  private lastBatchLane: number | null = null;
   private laneHeight = 0;
   private laneCount = 0;
+
+  /**
+   * Set of lane indices that collided with an active message in the current
+   * batch. Updated via markCollision() from renderer-canvas.ts checkPlacement.
+   * Cleared on resetBatch(). When a lane is in this set, allocateSingleLane
+   * skips it and tries the next lane down, avoiding repeated collisions on
+   * the same lane within a single frame.
+   */
+  private collidedLanes: Set<number> = new Set();
 
   /**
    * Minimum cooldown between consecutive uses of the same lane (ms).
@@ -117,27 +102,12 @@ export class LaneAllocator {
   private static readonly HEADWAY_GAP_MAX_PX = 60;
 
   /**
-   * Epsilon-greedy lane selection probability (0–1).
-   * With this probability, instead of picking the absolute best lane by
-   * composite score, a random lane is chosen from the remaining top-K
-   * candidates. This breaks deterministic diagonal patterns that emerge
-   * when the scoring function always picks the same lane order.
-   *
-   * 0.10 = 10% of allocations explore alternatives (roughly 1 in 10
-   * messages in a batch). Low enough to not degrade primary DLIOS
-   * invariant (constant velocity), high enough to disrupt steady-state
-   * diagonal bands.
+   * Epsilon-greedy selection probability (0–1).
+   * 5% chance to skip the strict topmost zero-wait lane and pick the
+   * next one below. Prevents all traffic from consolidating on lane 0
+   * when the incoming message rate is low.
    */
-  private static readonly EPSILON = 0.1;
-
-  /**
-   * When backlog partitioning is active, backlog messages are restricted
-   * to lanes [0, backlogLaneEnd) and real-time messages use
-   * [backlogLaneEnd, laneCount). This prevents visual overlap during
-   * the initial backlog injection phase.
-   * -1 means partitioning is disabled (all lanes shared).
-   */
-  private backlogLaneEnd = -1;
+  private static readonly EPSILON = 0.05;
 
   constructor(private readonly options: LaneAllocatorOptions) {}
 
@@ -150,11 +120,7 @@ export class LaneAllocator {
   reset(dimensions: OverlayDimensions | null): void {
     this.heap = [];
     this.laneIndexToHeapIndex = new Map();
-    this.laneMessageCounts = [];
-    this.laneLastUsedAt = [];
-    this.batchMessageCounts = [];
-    this.lastBatchLane = null;
-    this.backlogLaneEnd = -1;
+    this.collidedLanes.clear();
     if (!dimensions) {
       this.laneHeight = 0;
       this.laneCount = 0;
@@ -176,15 +142,10 @@ export class LaneAllocator {
     this.laneCount = Math.max(1, Math.floor(usableHeight / this.laneHeight));
 
     // Uniform initialization: all lanes start at the same available time.
-    // This prevents diagonal entry patterns caused by staggered offsets.
-    // Spatial distribution is handled by the composite lane score instead.
     const now = performance.now();
     for (let i = 0; i < this.laneCount; i++) {
       this.heap.push([i, now]);
       this.laneIndexToHeapIndex.set(i, i);
-      this.laneMessageCounts.push(0);
-      this.laneLastUsedAt.push(0);
-      this.batchMessageCounts.push(0);
     }
     // Build min-heap (4-ary): start from last non-leaf node
     for (let i = Math.floor((this.heap.length - 2) / 4); i >= 0; i--) {
@@ -226,27 +187,14 @@ export class LaneAllocator {
   ): LanePlacement | null {
     const now = performance.now();
     const totalLanes = this.laneCount;
-
-    // Determine the effective lane range based on partition state.
-    let laneStart = 0;
-    let laneEnd = totalLanes;
-    if (this.backlogLaneEnd > 0) {
-      if (isBacklog) {
-        laneEnd = this.backlogLaneEnd;
-      } else {
-        laneStart = this.backlogLaneEnd;
-      }
-    }
-    const effectiveLaneCount = laneEnd - laneStart;
-    if (effectiveLaneCount <= 0) return null;
+    if (totalLanes <= 0) return null;
 
     // Calculate how many lane slots this message needs.
     // A superchat card may be 3-5x taller than a regular message.
     const slotCount = Math.max(1, Math.ceil(messageHeight / this.laneHeight));
 
-    // For multi-slot messages, find the best starting lane such that
-    // all slots [laneIndex, laneIndex + slotCount) are within range.
-    const result = this.allocateMultiSlot(now, laneStart, laneEnd, slotCount, isBacklog);
+    // Scan from the top for the first free lane/block.
+    const result = this.allocateMultiSlot(now, 0, totalLanes, slotCount, isBacklog);
     if (!result) return null;
 
     const lane: LaneState = {
@@ -267,10 +215,11 @@ export class LaneAllocator {
    * next message. For multi-slot messages, all occupied lanes are updated.
    *
    * For scrolling mode, uses precision exit-time:
-   *   occupancyMs = visualExitTime + HEADWAY_GAP
-   * where visualExitTime is when the comment's right edge exits the screen.
-   * This replaces the old duration + cooldown model and dramatically reduces
-   * dead space between consecutive comments on the same lane.
+   *   occupancyMs = rightEdgePassMs
+   * where rightEdgePassMs is when the comment's right edge exits the
+   * screen plus a small headway gap. This replaces the old duration +
+   * cooldown model and dramatically reduces dead space between consecutive
+   * comments on the same lane.
    *
    * For top/bottom mode, msgWidth/screenWidth are omitted and the old
    * duration + cooldown model applies (message stays visible for full duration).
@@ -289,7 +238,6 @@ export class LaneAllocator {
     screenWidth?: number
   ): void {
     const occupancyMs = this.computeOccupancyMs(durationMs, msgWidth, screenWidth);
-
     const nextAvailable = startTime + occupancyMs;
     const startIdx = placement.lane.index;
 
@@ -298,53 +246,27 @@ export class LaneAllocator {
     // a "released" top slot while the bottom slot is still occupied, causing
     // visual overlap with the multi-slot message (e.g. SuperChat cards).
     for (let s = 0; s < placement.slotCount; s++) {
-      const laneIdx = startIdx + s;
-      this.updateLane(laneIdx, nextAvailable);
-      const count = this.laneMessageCounts[laneIdx];
-      if (count !== undefined) {
-        this.laneMessageCounts[laneIdx] = count + 1;
-      }
-      this.laneLastUsedAt[laneIdx] = startTime;
-      // Track batch assignment count for temporal density scoring
-      const batchCount = this.batchMessageCounts[laneIdx];
-      if (batchCount !== undefined) {
-        this.batchMessageCounts[laneIdx] = batchCount + 1;
-      }
-    }
-    // Update density cache for spatial scoring
-    this.updateDensityOnCommit(startIdx, startTime);
-    // Track last batch lane for anti-diagonal penalty
-    this.lastBatchLane = startIdx;
-  }
-
-  // ── Partition and batch control ───────────────────────────────────────
-
-  /**
-   * Enable or disable backlog lane partitioning.
-   * When active, backlog messages use lanes [0, partitionEnd) and
-   * real-time messages use [partitionEnd, laneCount).
-   * @param active - true to enable partitioning
-   * @param partitionEnd - exclusive end index for the backlog partition
-   */
-  setBacklogPartition(active: boolean, partitionEnd: number): void {
-    if (active) {
-      this.backlogLaneEnd = Math.max(1, Math.min(partitionEnd, this.laneCount - 1));
-    } else {
-      this.backlogLaneEnd = -1;
+      this.updateLane(startIdx + s, nextAvailable);
     }
   }
 
+  // ── Batch control ─────────────────────────────────────────────────────
+
   /**
-   * Reset per-batch tracking state. Must be called at the start of each
-   * drainQueue batch (typically once per render frame).
-   *
-   * Resets:
-   *   - batchMessageCounts: per-lane assignment counters
-   *   - lastBatchLane: the most recently assigned lane index
+   * Called at the start of each drainQueue batch. Clears per-frame collision
+   * tracking so lanes can be retried on the next frame.
    */
   resetBatch(): void {
-    this.batchMessageCounts.fill(0);
-    this.lastBatchLane = null;
+    this.collidedLanes.clear();
+  }
+
+  /**
+   * Mark a lane as having collided with an active message in this batch.
+   * Subsequent findPlacement() calls in the same batch skip this lane,
+   * falling through to the next available lane below.
+   */
+  markCollision(laneIndex: number): void {
+    this.collidedLanes.add(laneIndex);
   }
 
   // ── Private helpers ─────────────────────────────────────────────────
@@ -399,234 +321,15 @@ export class LaneAllocator {
   }
 
   /**
-   * Per-lane cached spatial density score.
-   * Updated incrementally on commitPlacement instead of O(n) scan.
-   * Decays exponentially over DECAY_WINDOW_MS.
-   */
-  private readonly laneDensityScore: number[] = [];
-  private static readonly DENSITY_DECAY_WINDOW_MS = 8_000;
-
-  /** Incrementally update density scores when a lane is committed. */
-  private updateDensityOnCommit(laneIndex: number, now: number): void {
-    // Only update the committed lane and nearby lanes (distance <= 3).
-    // Distant lanes get negligible weight (1/(1+3*0.1) ≈ 0.77 at dist=3,
-    // decaying rapidly), so skipping them saves O(n) per commit.
-    const range = 3;
-    const start = Math.max(0, laneIndex - range);
-    const end = Math.min(this.laneCount - 1, laneIndex + range);
-    for (let i = start; i <= end; i++) {
-      const distance = Math.abs(i - laneIndex);
-      const proximityWeight = 1 / (1 + distance * 0.1);
-      const current = this.laneDensityScore[i] ?? 0;
-      this.laneDensityScore[i] = current + proximityWeight;
-    }
-    this.laneLastUsedAt[laneIndex] = now;
-  }
-
-  /** Get normalized spatial density for a lane (O(1) cached). */
-  private getCachedDensity(laneIndex: number, now: number): number {
-    const rawDensity = this.laneDensityScore[laneIndex] ?? 0;
-    // Apply time-based decay to the cached score
-    const lastUsed = this.laneLastUsedAt[laneIndex] ?? 0;
-    if (lastUsed === 0) return 0;
-    const age = now - lastUsed;
-    if (age >= LaneAllocator.DENSITY_DECAY_WINDOW_MS) {
-      this.laneDensityScore[laneIndex] = 0;
-      return 0;
-    }
-    const decay = 1 - age / LaneAllocator.DENSITY_DECAY_WINDOW_MS;
-    return rawDensity * decay;
-  }
-
-  /**
-   * Composite lane score: lower is better.
-   * All components are normalized to [0, 1] so no single term dominates.
+   * Allocate a single lane — scan from top (lowest index) to bottom.
    *
-   * Components:
-   *   - wait: normalized wait time (primary — DLIOS invariant)
-   *   - density: global spatial density (secondary — prevents clustering)
-   *   - count: normalized message count (tertiary — load balancing)
-   *   - temporal: batch-internal lane assignment count (vertical spread)
-   *   - batchAdjacent: penalty for placing near the last batch lane (diagonal break)
-   */
-  private laneScore(laneIndex: number, waitMs: number, now: number): number {
-    // Normalize wait to [0, 1] using the max scroll duration as upper bound
-    const maxWait = rendererLayout.durationMax;
-    const normalizedWait = Math.min(1, waitMs / maxWait);
-
-    // Normalize spatial density to [0, 1] — O(1) cached
-    const rawDensity = this.getCachedDensity(laneIndex, now);
-    const maxRawDensity = this.laneCount * 0.5; // theoretical upper bound
-    const normalizedDensity = Math.min(1, rawDensity / maxRawDensity);
-
-    // Normalize message count to [0, 1]
-    const maxCount = Math.max(1, ...this.laneMessageCounts);
-    const normalizedCount = (this.laneMessageCounts[laneIndex] ?? 0) / maxCount;
-
-    // Temporal density: how many messages in this batch went to this lane
-    const maxBatch = Math.max(1, ...this.batchMessageCounts);
-    const normalizedTemporal = (this.batchMessageCounts[laneIndex] ?? 0) / maxBatch;
-
-    // Batch-adjacent penalty: avoid placing consecutive batch messages
-    // in the same or adjacent lanes (breaks diagonal patterns).
-    const batchAdjacent = this.computeBatchAdjacent(laneIndex);
-
-    // Weighted combination: wait is primary, density/count secondary,
-    // temporal and batch-adjacent are tertiary (prevent clustering).
-    return (
-      normalizedWait * 0.4 +
-      normalizedDensity * 0.25 +
-      normalizedCount * 0.15 +
-      normalizedTemporal * 0.1 +
-      batchAdjacent * 0.1
-    );
-  }
-
-  /**
-   * Penalty for placing a message near the most recently assigned lane
-   * in the current batch. This prevents sequential lane assignment patterns
-   * (diagonal entry) when multiple messages are drained in a single frame.
+   * Phase 1 — strict zero-wait: return the first lane with waitMs === 0
+   * (completely free right now). This distributes messages across lanes
+   * during a burst: msg1 → lane 0, msg2 → lane 1, ..., msgN → lane N-1.
    *
-   * Returns 1.0 for the same lane, 0.5 for adjacent, 0 otherwise.
-   */
-  private computeBatchAdjacent(laneIndex: number): number {
-    if (this.lastBatchLane === null) return 0;
-    const dist = Math.abs(laneIndex - this.lastBatchLane);
-    if (dist === 0) return 1.0;
-    if (dist === 1) return 0.5;
-    return 0;
-  }
-
-  /**
-   * Normalized score for a multi-slot block.
-   * Uses the same normalization as laneScore but operates on block-aggregate
-   * values (max wait, avg density, avg count, avg batch) plus an adjacency
-   * penalty and batch-adjacent penalty.
-   */
-  private blockScore(
-    blockMaxWait: number,
-    avgDensity: number,
-    avgCount: number,
-    startIdx: number,
-    slotCount: number,
-    now: number
-  ): number {
-    const maxWait = rendererLayout.durationMax;
-    const normalizedWait = Math.min(1, blockMaxWait / maxWait);
-
-    const maxRawDensity = this.laneCount * 0.5;
-    const normalizedDensity = Math.min(1, avgDensity / maxRawDensity);
-
-    const maxCount = Math.max(1, ...this.laneMessageCounts);
-    const normalizedCount = avgCount / maxCount;
-
-    // Temporal density for the block (average batch count across slots)
-    const maxBatch = Math.max(1, ...this.batchMessageCounts);
-    let avgBatch = 0;
-    for (let s = 0; s < slotCount; s++) {
-      avgBatch += this.batchMessageCounts[startIdx + s] ?? 0;
-    }
-    avgBatch /= slotCount;
-    const normalizedTemporal = avgBatch / maxBatch;
-
-    // Batch-adjacent penalty
-    const batchAdjacent = this.computeBatchAdjacent(startIdx);
-
-    // Adjacent penalty: check if lanes immediately above or below the
-    // block were recently used. This prevents tall messages from being
-    // stacked directly on top of each other.
-    const adjacentPenalty = this.adjacentPenalty(startIdx, slotCount, now);
-
-    return (
-      normalizedWait * 0.4 +
-      normalizedDensity * 0.25 +
-      normalizedCount * 0.15 +
-      normalizedTemporal * 0.1 +
-      batchAdjacent * 0.1 +
-      adjacentPenalty
-    );
-  }
-
-  /**
-   * Penalty for placing a block adjacent to recently used lanes.
-   * Returns 0 if no adjacent lanes were recently used, or a value in
-   * (0, 0.3] proportional to how recently the adjacent lane was used.
-   */
-  private adjacentPenalty(startIdx: number, slotCount: number, now: number): number {
-    const ADJACENT_WINDOW_MS = 2_000;
-    let penalty = 0;
-    // Check lane immediately above the block
-    const above = startIdx - 1;
-    if (above >= 0) {
-      const lastUsed = this.laneLastUsedAt[above] ?? 0;
-      if (lastUsed > 0 && now - lastUsed < ADJACENT_WINDOW_MS) {
-        penalty = Math.max(penalty, (1 - (now - lastUsed) / ADJACENT_WINDOW_MS) * 0.3);
-      }
-    }
-    // Check lane immediately below the block
-    const below = startIdx + slotCount;
-    if (below < this.laneCount) {
-      const lastUsed = this.laneLastUsedAt[below] ?? 0;
-      if (lastUsed > 0 && now - lastUsed < ADJACENT_WINDOW_MS) {
-        penalty = Math.max(penalty, (1 - (now - lastUsed) / ADJACENT_WINDOW_MS) * 0.3);
-      }
-    }
-    return penalty;
-  }
-
-  /**
-   * Extract the top-K lanes from the heap by available-at time.
-   * Uses a temporary min-heap of size K for O(n log K) selection.
-   * Returns lanes sorted by availableAt (earliest first).
-   */
-  private topKLanes(
-    k: number,
-    laneStart: number,
-    laneEnd: number
-  ): Array<{ laneIndex: number; availableAt: number }> {
-    const result: Array<{ laneIndex: number; availableAt: number }> = [];
-    // Simple approach: scan heap entries and maintain a sorted array of top K
-    // Since heap is small (20-50 entries), O(n) scan is efficient
-    for (let i = 0; i < this.heap.length; i++) {
-      const entry = this.heap[i];
-      if (!entry) continue;
-      const [idx, avail] = entry;
-      if (idx < laneStart || idx >= laneEnd) continue;
-
-      // Insert into sorted position (insertion sort on small array)
-      const item = { laneIndex: idx, availableAt: avail };
-      let inserted = false;
-      for (let j = 0; j < result.length; j++) {
-        const candidate = result[j];
-        if (candidate && avail < candidate.availableAt) {
-          result.splice(j, 0, item);
-          inserted = true;
-          break;
-        }
-      }
-      if (!inserted) result.push(item);
-
-      // Keep only top K
-      if (result.length > k) {
-        result.pop();
-      }
-    }
-    return result;
-  }
-
-  /**
-   * Allocate a single lane using spatial-density-aware selection.
-   * Scans the top-K earliest-available lanes and picks the one with
-   * the best composite score (wait time + spatial density + message count
-   * + temporal batch density + batch-adjacent penalty).
-   *
-   * With probability EPSILON (10%), a random lane from the non-best
-   * top-K candidates is selected instead (epsilon-greedy exploration).
-   * This breaks deterministic diagonal bands in the steady state.
-   *
-   * When `isBacklog` is true, an additional adjacency gap penalty is
-   * applied to spread messages vertically and prevent clustering during
-   * the initial backlog injection phase.
+   * Phase 2 — all lanes busy: return the topmost busy lane (only for
+   * real-time messages). Backlog messages skip Phase 2 — they only use
+   * truly free lanes, accepting a dropped message over visual crowding.
    */
   private allocateSingleLane(
     now: number,
@@ -637,66 +340,44 @@ export class LaneAllocator {
     if (this.heap.length === 0) return null;
 
     const maxWaitMs = rendererLayout.durationMax;
+    let firstBusy: { laneIndex: number; waitMs: number } | null = null;
 
-    // Consider top 8 earliest-available lanes, then pick by composite score
-    const CANDIDATE_COUNT = 8;
-    const candidates = this.topKLanes(CANDIDATE_COUNT, laneStart, laneEnd);
-    if (candidates.length === 0) return null;
-
-    let bestLane = -1;
-    let bestWait = Infinity;
-    let bestScore = Infinity;
-
-    for (const { laneIndex: idx, availableAt: avail } of candidates) {
+    // Phase 1: scan for a zero-wait lane (truly free right now).
+    // Skip lanes that previously collided in this batch — they're visually
+    // occupied even if their availableAt has technically expired.
+    for (let i = laneStart; i < laneEnd; i++) {
+      if (this.collidedLanes.has(i)) continue;
+      const avail = this.getSlotAvailableAt(i);
+      if (avail === undefined) continue;
       const wait = Math.max(0, Math.ceil(avail - now));
-      if (wait > maxWaitMs) continue;
-
-      let score = this.laneScore(idx, wait, now);
-
-      // During backlog injection, penalize lanes that are close to
-      // recently-used lanes to enforce vertical spread.
-      if (isBacklog) {
-        score += this.backlogAdjacencyPenalty(idx, now);
+      if (wait > 0) {
+        // Track the topmost busy lane for phase 2 fallback.
+        if (!firstBusy) firstBusy = { laneIndex: i, waitMs: wait };
+        continue;
       }
-
-      if (score < bestScore) {
-        bestScore = score;
-        bestWait = wait;
-        bestLane = idx;
-      }
+      // Found a zero-wait lane. Epsilon-greedy: 5% chance to skip this
+      // lane and pick the next zero-wait lane for visual variety.
+      if (Math.random() < LaneAllocator.EPSILON) continue;
+      return { laneIndex: i, waitMs: 0 };
     }
 
-    if (bestLane === -1) return null;
-
-    // Epsilon-greedy: with EPSILON probability, pick a random lane from the
-    // remaining candidates instead of the absolute best. This breaks
-    // deterministic diagonal patterns in the steady state.
-    if (candidates.length > 1 && Math.random() < LaneAllocator.EPSILON) {
-      // Pick a random candidate that scored well but isn't the absolute best
-      const exploreCount = Math.min(candidates.length - 1, 4);
-      const exploreIdx = 1 + Math.floor(Math.random() * exploreCount);
-      const explore = candidates[exploreIdx];
-      if (explore) {
-        const wait = Math.max(0, Math.ceil(explore.availableAt - now));
-        if (wait <= maxWaitMs) {
-          return { laneIndex: explore.laneIndex, waitMs: wait };
-        }
-      }
-    }
-
-    return { laneIndex: bestLane, waitMs: bestWait };
+    // Phase 2: no zero-wait lane — all lanes are busy.
+    // Backlog messages skip this phase — they only use truly free lanes
+    // and accept a dropped message rather than competing with real-time
+    // traffic on busy lanes. Real-time messages get the topmost busy lane
+    // so the collision check can push them back for retry (not dropped).
+    if (!isBacklog && firstBusy && firstBusy.waitMs <= maxWaitMs) return firstBusy;
+    return null;
   }
 
   /**
    * Allocate a contiguous block of `slotCount` lanes for tall messages
-   * (superchat, membership). Finds the starting lane where all slots
-   * [laneIndex, laneIndex + slotCount) fit within [laneStart, laneEnd).
+   * (superchat, membership). Scans from top to bottom for the first
+   * block where ALL slots are zero-wait (truly free). Multi-slot
+   * messages are rare so the busy-lane fallback from allocateSingleLane
+   * handles them when no free block exists.
    *
-   * Uses the top-K earliest-available starting lanes and picks the one
-   * with the best composite score (max wait + avg density + avg count).
-   *
-   * When `isBacklog` is true, single-slot messages are routed through
-   * `allocateSingleLane` with the backlog adjacency penalty applied.
+   * Single-slot messages are forwarded to allocateSingleLane.
    */
   private allocateMultiSlot(
     now: number,
@@ -714,87 +395,30 @@ export class LaneAllocator {
     const maxStartLane = laneEnd - slotCount;
     if (maxStartLane < laneStart) return null;
 
-    // Get top-K candidate starting lanes
-    const CANDIDATE_COUNT = 8;
-    const candidates = this.topKLanes(CANDIDATE_COUNT, laneStart, maxStartLane + 1);
-    if (candidates.length === 0) return null;
-
-    let bestLane = -1;
-    let bestWait = Infinity;
-    let bestScore = Infinity;
-
-    for (const { laneIndex: startIdx } of candidates) {
-      // Check all slots in the block
+    // Phase 1: scan for a block where ALL slots have waitMs === 0.
+    for (let startIdx = laneStart; startIdx <= maxStartLane; startIdx++) {
+      let allZeroWait = true;
       let blockMaxWait = 0;
-      let blockDensitySum = 0;
-      let blockCountSum = 0;
-      let allValid = true;
-
       for (let s = 0; s < slotCount; s++) {
-        const slotIdx = startIdx + s;
-        const slotAvail = this.getSlotAvailableAt(slotIdx);
+        const slotAvail = this.getSlotAvailableAt(startIdx + s);
         if (slotAvail === undefined) {
-          allValid = false;
+          allZeroWait = false;
           break;
         }
         const slotWait = Math.max(0, Math.ceil(slotAvail - now));
+        if (slotWait > 0) allZeroWait = false;
         if (slotWait > maxWaitMs) {
-          allValid = false;
+          allZeroWait = false;
           break;
         }
         blockMaxWait = Math.max(blockMaxWait, slotWait);
-        blockDensitySum += this.getCachedDensity(slotIdx, now);
-        blockCountSum += this.laneMessageCounts[slotIdx] ?? 0;
       }
-
-      if (!allValid) continue;
-
-      // Use the same normalized scoring as single-lane allocation,
-      // applied to the block's aggregate values.
-      const avgDensity = blockDensitySum / slotCount;
-      const avgCount = blockCountSum / slotCount;
-      const score = this.blockScore(blockMaxWait, avgDensity, avgCount, startIdx, slotCount, now);
-
-      if (score < bestScore) {
-        bestScore = score;
-        bestWait = blockMaxWait;
-        bestLane = startIdx;
-      }
+      if (allZeroWait) return { laneIndex: startIdx, waitMs: blockMaxWait };
     }
 
-    if (bestLane === -1) return null;
-    return { laneIndex: bestLane, waitMs: bestWait };
-  }
-
-  /**
-   * Penalty for placing a backlog message in a lane whose immediate
-   * neighbours were recently used. This enforces vertical spread during
-   * the initial backlog injection phase, preventing messages from
-   * clustering together.
-   *
-   * Returns 0 if no adjacent lanes were recently used, or a value in
-   * (0, 0.4] proportional to how recently the adjacent lane was used.
-   */
-  private backlogAdjacencyPenalty(laneIndex: number, now: number): number {
-    const ADJACENT_WINDOW_MS = 3_000;
-    let penalty = 0;
-    // Check lane immediately above
-    const above = laneIndex - 1;
-    if (above >= 0) {
-      const lastUsed = this.laneLastUsedAt[above] ?? 0;
-      if (lastUsed > 0 && now - lastUsed < ADJACENT_WINDOW_MS) {
-        penalty = Math.max(penalty, (1 - (now - lastUsed) / ADJACENT_WINDOW_MS) * 0.4);
-      }
-    }
-    // Check lane immediately below
-    const below = laneIndex + 1;
-    if (below < this.laneCount) {
-      const lastUsed = this.laneLastUsedAt[below] ?? 0;
-      if (lastUsed > 0 && now - lastUsed < ADJACENT_WINDOW_MS) {
-        penalty = Math.max(penalty, (1 - (now - lastUsed) / ADJACENT_WINDOW_MS) * 0.4);
-      }
-    }
-    return penalty;
+    // Phase 2: no zero-wait block — delegate to single-lane allocator
+    // which returns the topmost busy lane (or null for backlog).
+    return this.allocateSingleLane(now, laneStart, laneEnd, isBacklog);
   }
 
   /** Get the available-at time for a lane by its index. */

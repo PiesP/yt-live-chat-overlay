@@ -54,20 +54,28 @@ export class ObservabilityReporter {
     this.metrics.totalRendered++;
   }
 
-  // called when a message is dropped
-  onMessageDropped(): void {
+  // called when a message is dropped, with optional reason for diagnostics
+  onMessageDropped(reason?: string): void {
     this.metrics.totalDropped++;
     this.totalDroppedInWindow++;
 
-    // Warn if drop rate exceeds 20%
+    // Refresh derived metrics for accurate drop rate check
     this.refreshDerivedMetrics();
+
+    // Skip high-drop warning for expected video-pause drops — they are
+    // intentional and not indicative of a render pipeline issue.
+    if (reason === 'video_paused') return;
+
+    // Warn if drop rate exceeds 20%
     if (this.metrics.dropRate > 0.2) {
       const now = Date.now();
       if (now - this.lastWarnTime > this.WARN_COOLDOWN_MS) {
         this.lastWarnTime = now;
         log.warn(
           `High drop rate: ${(this.metrics.dropRate * 100).toFixed(1)}% ` +
-            `(queue=${this.metrics.queueDepth}, lanes=${(this.metrics.laneUtilization * 100).toFixed(0)}%)`
+            `(queue=${this.metrics.queueDepth}, ` +
+            `lanes=${(this.metrics.laneUtilization * 100).toFixed(0)}%, ` +
+            `reason=${reason ?? 'unknown'})`
         );
       }
     }

@@ -89,6 +89,13 @@ export class CanvasRenderer extends RendererBase {
   private lastDpr = 0;
 
   /**
+   * Backlog messages are rendered at this fraction of the configured opacity.
+   * 0.35 = 35% opacity relative to settings.opacity, making backlog messages
+   * clearly distinguishable from real-time messages without being invisible.
+   */
+  private static readonly BACKLOG_OPACITY_MULTIPLIER = 0.35;
+
+  /**
    * Text bitmap cache: pre-rendered text with outline as offscreen canvas.
    * Key = `${font}|${text}|${color}|${strokeWidth}|${strokeColor}`.
    * On cache hit, drawImage() replaces fillText()+strokeText() in the hot path.
@@ -160,11 +167,11 @@ export class CanvasRenderer extends RendererBase {
     if (this.pendingQueue.length >= rendererLayout.queueMaxSize) {
       const last = this.pendingQueue[this.pendingQueue.length - 1];
       if (last && priority <= CanvasRenderer.getMessagePriority(last)) {
-        this.observability.onMessageDropped();
+        this.observability.onMessageDropped('queue_priority');
         return;
       }
       this.pendingQueue.pop();
-      this.observability.onMessageDropped();
+      this.observability.onMessageDropped('queue_full');
     }
 
     const insertIndex = this.findQueueInsertIndex(priority);
@@ -212,19 +219,19 @@ export class CanvasRenderer extends RendererBase {
     this.pendingQueue.length = rendererLayout.backgroundQueueMax;
   }
 
-  // ── Lane partition control ──────────────────────────────────────────
+  // ── Backlog pause control ──────────────────────────────────────────
 
   /**
    * Enable lane partitioning: backlog messages use lanes [0, partitionEnd),
    * real-time messages use [partitionEnd, laneCount).
    */
-  setBacklogPartition(partitionEnd: number): void {
-    this.laneAllocator.setBacklogPartition(true, partitionEnd);
+  setBacklogPartition(_partitionEnd: number): void {
+    // Partition removed — all messages share all lanes.
   }
 
   /** Disable lane partitioning: all lanes are shared. */
   clearBacklogPartition(): void {
-    this.laneAllocator.setBacklogPartition(false, 0);
+    // Partition removed — all messages share all lanes.
   }
 
   // ── Image pre-fetching ────────────────────────────────────────────────
@@ -370,23 +377,7 @@ export class CanvasRenderer extends RendererBase {
         msg.x = -msg.width + progress * travelDistance;
       }
 
-      let opacity = this.settings.opacity;
-
-      // Fade-in / fade-out. Skip entirely when fadeDurationMs is 0.
-      const fadeDuration = this.settings.fadeDurationMs;
-      if (fadeDuration > 0) {
-        if (elapsed < fadeDuration) {
-          opacity *= elapsed / fadeDuration;
-        }
-        if (!isScrolling && elapsed > msg.duration - fadeDuration) {
-          opacity *= Math.max(0, (msg.duration - elapsed) / fadeDuration);
-        }
-      }
-
-      if (msg.message.isBacklog) opacity *= 0.5;
-
-      const ageRatio = Math.min(1, elapsed / rendererLayout.maxMessageAgeMs);
-      opacity *= Math.max(0, 1 - ageRatio);
+      const opacity = this.computeMessageOpacity(msg.message, elapsed, msg.duration, isScrolling);
 
       const snappedX = Math.floor(msg.x);
       const snappedY = Math.floor(msg.y);
@@ -423,7 +414,7 @@ export class CanvasRenderer extends RendererBase {
           // No lane available — the allocator found no free lane for this
           // message. Dropping is correct because retrying won't help until
           // an existing message expires (several seconds later).
-          this.observability.onMessageDropped();
+          this.observability.onMessageDropped('no_lane');
           skipped = 0; // reset after drop
           continue;
         }
@@ -515,18 +506,26 @@ export class CanvasRenderer extends RendererBase {
         // Overlap if the active message's right edge is still past the
         // right edge minus headway gap.
         if (mode === 'scroll') {
-          if (activeRightEdge > dims.width - headwayPx)
+          if (activeRightEdge > dims.width - headwayPx) {
+            this.laneAllocator.markCollision(placement.lane.index);
             return { ok: false, reason: 'collision' as const };
+          }
         } else {
           // reverse mode: messages enter from left, travel right
           const reverseTravel = dims.width + active.width + rendererLayout.exitPaddingMin;
           const activeX = -active.width + activeProgress * reverseTravel;
-          if (activeX + active.width > 0) return { ok: false, reason: 'collision' as const };
+          if (activeX + active.width > 0) {
+            this.laneAllocator.markCollision(placement.lane.index);
+            return { ok: false, reason: 'collision' as const };
+          }
         }
       } else {
         // Top/bottom modes: overlap if the active message in the same lane
         // has not yet expired.
-        if (activeElapsed < active.duration) return { ok: false, reason: 'collision' as const };
+        if (activeElapsed < active.duration) {
+          this.laneAllocator.markCollision(placement.lane.index);
+          return { ok: false, reason: 'collision' as const };
+        }
       }
     }
 
@@ -811,8 +810,10 @@ export class CanvasRenderer extends RendererBase {
         const cached = this.emojiCache.get(seg.emoji.url);
         const img = cached?.complete && cached.naturalWidth > 0 ? cached : null;
         if (img) {
+          ctx.save();
           ctx.globalAlpha = alpha;
           ctx.drawImage(img, cursorX, y, emojiSize, emojiSize);
+          ctx.restore();
         } else if (seg.emoji.fallbackText) {
           this.renderSegment(ctx, seg.emoji.fallbackText, cursorX, y, color, alpha, fontSize);
         } else if (seg.emoji.alt && !EMOJI_ALIAS_PATTERN.test(seg.emoji.alt)) {
@@ -861,6 +862,51 @@ export class CanvasRenderer extends RendererBase {
     }
 
     return cursorY;
+  }
+
+  // ── Opacity ──────────────────────────────────────────────────────────
+
+  /**
+   * Compute the final rendering opacity for a message by composing the
+   * user-configured opacity with fade-in/out, backlog dimming, and age-based
+   * fade-out. All effects are multiplicative, forming a single SSOT path.
+   *
+   * Order of application:
+   *   1. settings.opacity (base, default 0.85)
+   *   2. Fade-in: linear ramp over fadeDurationMs at start of life
+   *   3. Fade-out: linear ramp over fadeDurationMs at end (top/bottom only)
+   *   4. Backlog dimming: BACKLOG_OPACITY_MULTIPLIER (0.35) if isBacklog
+   *   5. Age fade-out: linear ramp to 0 over maxMessageAgeMs (60s)
+   */
+  private computeMessageOpacity(
+    message: ChatMessage,
+    elapsed: number,
+    duration: number,
+    isScrolling: boolean
+  ): number {
+    let opacity = this.settings.opacity;
+
+    const fadeDuration = this.settings.fadeDurationMs;
+    if (fadeDuration > 0) {
+      // Fade-in: ramp from 0 to 1 over fadeDuration at message start
+      if (elapsed < fadeDuration) {
+        opacity *= elapsed / fadeDuration;
+      }
+      // Fade-out: ramp from 1 to 0 over fadeDuration at message end
+      // Skip for scrolling messages — they exit the screen naturally.
+      if (!isScrolling && elapsed > duration - fadeDuration) {
+        opacity *= Math.max(0, (duration - elapsed) / fadeDuration);
+      }
+    }
+
+    // Backlog dimming: clearly distinguishes replayed from live messages
+    if (message.isBacklog) opacity *= CanvasRenderer.BACKLOG_OPACITY_MULTIPLIER;
+
+    // Age fade-out: gradually fade after maxMessageAgeMs (default 60s)
+    const ageRatio = Math.min(1, elapsed / rendererLayout.maxMessageAgeMs);
+    opacity *= Math.max(0, 1 - ageRatio);
+
+    return opacity;
   }
 
   // ── Regular message ──────────────────────────────────────────────────
@@ -1065,7 +1111,7 @@ export class CanvasRenderer extends RendererBase {
         bodyMaxWidth,
         this.settings.membershipMaxBodyLines,
         '#ffffff',
-        1,
+        alpha,
         fontSize
       );
     }

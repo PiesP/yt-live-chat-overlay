@@ -168,17 +168,21 @@ export abstract class RendererBase {
   }
 
   protected isMessageAllowed(message: ChatMessage): boolean {
+    // Count every incoming message regardless of outcome for accurate
+    // drop-rate accounting. Previously onVideoPaused drops skipped
+    // onMessageReceived(), freezing the denominator and inflating the ratio.
+    this.observability.onMessageReceived();
+
     if (this.isVideoPaused) {
-      this.observability.onMessageDropped();
+      this.observability.onMessageDropped('video_paused');
       return false;
     }
-    this.observability.onMessageReceived();
     this.burstDetector.onMessageReceived();
 
     const priority = RendererBase.getMessagePriority(message);
     if (!this.authorRateLimiter.allow(message.author ?? 'anonymous', priority)) {
       log.debug('Drop [rate_limited]:', message.author, message.kind, message.id);
-      this.observability.onMessageDropped();
+      this.observability.onMessageDropped('rate_limited');
       return false;
     }
     return true;
