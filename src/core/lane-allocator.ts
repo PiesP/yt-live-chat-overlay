@@ -70,6 +70,15 @@ export class LaneAllocator {
   private collidedLanes: Set<number> = new Set();
 
   /**
+   * Tracks until when each lane has active real-time content (non-backlog).
+   * Map laneIndex → timestamp (performance.now()) until which the lane is
+   * considered to have real-time occupancy. Backlog messages skip these
+   * lanes when zero-wait lanes exist without recent real-time traffic.
+   * Stale entries (timestamp < now) are cleared on each resetBatch().
+   */
+  private realTimeLanesUntil: Map<number, number> = new Map();
+
+  /**
    * Minimum cooldown between consecutive uses of the same lane (ms).
    * Used only for top/bottom (non-scrolling) modes where the message
    * stays visible for the full duration. For scrolling mode, precision
@@ -121,6 +130,7 @@ export class LaneAllocator {
     this.heap = [];
     this.laneIndexToHeapIndex = new Map();
     this.collidedLanes.clear();
+    this.realTimeLanesUntil.clear();
     if (!dimensions) {
       this.laneHeight = 0;
       this.laneCount = 0;
@@ -231,11 +241,21 @@ export class LaneAllocator {
     startTime: number,
     durationMs: number,
     msgWidth?: number,
-    screenWidth?: number
+    screenWidth?: number,
+    isBacklog = false
   ): void {
     const occupancyMs = this.computeOccupancyMs(durationMs, msgWidth, screenWidth);
     const nextAvailable = startTime + occupancyMs;
     const startIdx = placement.laneIndex;
+
+    // Store real-time occupancy end-time per lane so backlog messages
+    // can prefer lanes without recent real-time traffic.
+    if (!isBacklog) {
+      const until = startTime + occupancyMs;
+      for (let s = 0; s < placement.slotCount; s++) {
+        this.realTimeLanesUntil.set(startIdx + s, until);
+      }
+    }
 
     // Update all slots occupied by this message with the SAME available time.
     // This prevents partial-slot availability where a new message could enter
@@ -254,6 +274,12 @@ export class LaneAllocator {
    */
   resetBatch(): void {
     this.collidedLanes.clear();
+    // Prune expired real-time lane entries (availableAt <= now means
+    // the lane's occupancy has passed and it's safe to reuse).
+    const now = performance.now();
+    for (const [laneIdx, until] of this.realTimeLanesUntil) {
+      if (until <= now) this.realTimeLanesUntil.delete(laneIdx);
+    }
   }
 
   /**
@@ -341,8 +367,10 @@ export class LaneAllocator {
     // Phase 1: scan for a zero-wait lane (truly free right now).
     // Skip lanes that previously collided in this batch — they're visually
     // occupied even if their availableAt has technically expired.
+    // For backlog messages, also skip lanes with recent real-time traffic.
     for (let i = laneStart; i < laneEnd; i++) {
       if (this.collidedLanes.has(i)) continue;
+      if (isBacklog && (this.realTimeLanesUntil.get(i) ?? 0) > now) continue;
       const avail = this.getSlotAvailableAt(i);
       if (avail === undefined) continue;
       const wait = Math.max(0, Math.ceil(avail - now));

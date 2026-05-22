@@ -604,7 +604,8 @@ export class CanvasRenderer extends RendererBase {
       effectiveStartTime,
       effectiveDuration,
       msgWidth,
-      dims.width
+      dims.width,
+      message.isBacklog
     );
 
     this.activateMessage(
