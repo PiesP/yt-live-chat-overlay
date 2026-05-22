@@ -66,8 +66,6 @@ const ROOT_SETTING_META = {
   preserveUserColor: { type: 'boolean', visual: true },
   superChatMaxBodyLines: { type: 'number', visual: true },
   membershipMaxBodyLines: { type: 'number', visual: true },
-  spreadEnabled: { type: 'boolean', visual: false },
-  spreadFactor: { type: 'number', visual: false },
   fadeDurationMs: { type: 'number', visual: false },
   minPollIntervalMs: { type: 'number', visual: false },
   maxPollIntervalMs: { type: 'number', visual: false },
@@ -112,7 +110,6 @@ type SettingsLimitKey =
   | 'backlogRecentMinutes'
   | 'superChatMaxBodyLines'
   | 'membershipMaxBodyLines'
-  | 'spreadFactor'
   | 'fadeDurationMs'
   | 'minPollIntervalMs'
   | 'maxPollIntervalMs';
@@ -134,7 +131,6 @@ const SETTINGS_LIMITS = {
   backlogRecentMinutes: { min: 1, max: 30, step: 1 },
   superChatMaxBodyLines: { min: 2, max: 10, step: 1 },
   membershipMaxBodyLines: { min: 1, max: 5, step: 1 },
-  spreadFactor: { min: 0.1, max: 2, step: 0.1 }, // 0.1 = minimal spread, 2 = double spread
   fadeDurationMs: { min: 0, max: 1000, step: 50 }, // 0 = no fade, up to 1s
   minPollIntervalMs: { min: 50, max: 5000, step: 50 }, // 50ms minimum polling
   maxPollIntervalMs: { min: 1000, max: 30000, step: 1000 }, // 1s to 30s maximum
@@ -202,8 +198,6 @@ export const DEFAULT_SETTINGS = {
   preserveUserColor: false,
   superChatMaxBodyLines: 5,
   membershipMaxBodyLines: 3,
-  spreadEnabled: true,
-  spreadFactor: 0,
   fadeDurationMs: 500,
   minPollIntervalMs: 50,
   maxPollIntervalMs: 2000,

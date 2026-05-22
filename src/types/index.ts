@@ -181,12 +181,7 @@ export interface OverlaySettings {
   /** Maximum body text lines for Membership messages (1-5, default 3) */
   membershipMaxBodyLines: number;
 
-  // ── Spread Emission ──
-  /** Spread poll messages evenly across the poll interval instead of emitting in a burst */
-  spreadEnabled: boolean;
-  /** Spread intensity factor (0.1 = minimal spread, 2.0 = double spread) */
-  spreadFactor: number;
-  /** Fade-in duration in milliseconds (0 = no fade) */
+  // ── Fade / Poll Timing ──
   fadeDurationMs: number;
   /** Minimum polling interval in milliseconds */
   minPollIntervalMs: number;
