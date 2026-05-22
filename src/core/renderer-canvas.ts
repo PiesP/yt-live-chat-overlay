@@ -160,11 +160,11 @@ export class CanvasRenderer extends RendererBase {
     if (this.pendingQueue.length >= rendererLayout.queueMaxSize) {
       const last = this.pendingQueue[this.pendingQueue.length - 1];
       if (last && priority <= CanvasRenderer.getMessagePriority(last)) {
-        this.observability.onMessageDropped('queue_overflow');
+        this.observability.onMessageDropped();
         return;
       }
       this.pendingQueue.pop();
-      this.observability.onMessageDropped('queue_overflow');
+      this.observability.onMessageDropped();
     }
 
     const insertIndex = this.findQueueInsertIndex(priority);
@@ -420,14 +420,14 @@ export class CanvasRenderer extends RendererBase {
       const result = this.checkPlacement(msg, now);
       if (!result.ok) {
         if (result.reason === 'no_lane') {
-          this.observability.onMessageDropped('no_lane_available');
+          this.observability.onMessageDropped();
           skipped = 0; // reset after drop
           continue;
         }
         // Collision: skip this message and try the next one.
         // Only retry the skipped message if we haven't exceeded maxSkip.
         skipped++;
-        this.observability.onMessageDropped('collision');
+        this.observability.onMessageDropped();
         continue;
       }
 

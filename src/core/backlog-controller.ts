@@ -126,7 +126,7 @@ export class BacklogInjectionController {
     if (priorityMessages.length > 0) {
       for (const msg of priorityMessages) {
         msg.isBacklog = true;
-        this.emitBacklogMessage(msg);
+        this.onBacklogMessage?.(msg);
       }
       log.debug(`Backlog: emitted ${priorityMessages.length} priority messages immediately`);
     }
@@ -217,7 +217,7 @@ export class BacklogInjectionController {
 
     this.updateIndicator(progress);
 
-    this.emitBacklogMessage(message);
+    this.onBacklogMessage?.(message);
 
     this.scheduleNextTick(meanInterval);
   }
@@ -258,13 +258,6 @@ export class BacklogInjectionController {
     const elapsed = Date.now() - this.injectionStartTime;
     if (elapsed >= this.densityRampMs) return 1;
     return 0.25 + 0.75 * (elapsed / this.densityRampMs);
-  }
-
-  /** Emit a single backlog message to the renderer via callback */
-  private emitBacklogMessage(message: ChatMessage): void {
-    if (this.onBacklogMessage) {
-      this.onBacklogMessage(message);
-    }
   }
 
   /** Callback to be set by RuntimeSession */

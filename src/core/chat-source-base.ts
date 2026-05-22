@@ -130,20 +130,16 @@ export abstract class ChatSource {
     this.lastActivityTime = Date.now();
   }
 
-  protected rememberMessage(message: ChatMessage): void {
-    this.messageBuffer.push(message);
-  }
-
   protected emitMessage(message: ChatMessage): void {
     if (!this.callback) return;
-    this.rememberMessage(message);
+    this.messageBuffer.push(message);
     this.callback(message);
   }
 
   protected emitBatch(messages: ChatMessage[], isInitialSeed: boolean): void {
     if (!this.callback || messages.length === 0) return;
     for (const message of messages) {
-      this.rememberMessage(message);
+      this.messageBuffer.push(message);
     }
     this.callback(messages, isInitialSeed);
   }
@@ -210,7 +206,7 @@ export abstract class ChatSource {
   injectExternalMessages(messages: ChatMessage[]): void {
     if (!this.callback || messages.length === 0) return;
     for (const message of messages) {
-      this.rememberMessage(message);
+      this.messageBuffer.push(message);
     }
     this.callback(messages, false);
   }

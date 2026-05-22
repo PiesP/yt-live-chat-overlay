@@ -9,7 +9,7 @@
  * number counters and timestamps.
  */
 
-import type { BurstLevel, DropReason, SessionMetrics } from '@app-types';
+import type { BurstLevel, SessionMetrics } from '@app-types';
 import { createLogger } from '@core/logging';
 
 const log = createLogger('Observability');
@@ -55,7 +55,7 @@ export class ObservabilityReporter {
   }
 
   // called when a message is dropped
-  onMessageDropped(_reason: DropReason): void {
+  onMessageDropped(): void {
     this.metrics.totalDropped++;
     this.totalDroppedInWindow++;
 

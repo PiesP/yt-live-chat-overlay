@@ -165,7 +165,7 @@ export abstract class RendererBase {
 
   protected isMessageAllowed(message: ChatMessage): boolean {
     if (this.isVideoPaused) {
-      this.observability.onMessageDropped('other');
+      this.observability.onMessageDropped();
       return false;
     }
     this.observability.onMessageReceived();
@@ -174,7 +174,7 @@ export abstract class RendererBase {
     const priority = RendererBase.getMessagePriority(message);
     if (!this.authorRateLimiter.allow(message.author ?? 'anonymous', priority)) {
       log.debug('Drop [rate_limited]:', message.author, message.kind, message.id);
-      this.observability.onMessageDropped('rate_limited');
+      this.observability.onMessageDropped();
       return false;
     }
     return true;
