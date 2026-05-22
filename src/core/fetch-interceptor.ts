@@ -24,7 +24,7 @@ const log = createLogger('FetchInterceptor');
  */
 const CHAT_ENDPOINT_RE = /youtubei\/v1\/live_chat\/(get_live_chat|get_live_chat_replay)/;
 
-export type InterceptorCallback = (messages: ChatMessage[]) => void;
+type InterceptorCallback = (messages: ChatMessage[]) => void;
 
 export type InterceptorUnsubscribe = () => void;
 

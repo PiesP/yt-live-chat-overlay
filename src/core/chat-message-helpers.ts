@@ -29,12 +29,11 @@ export function normalizeInlineText(text: string): string {
 }
 
 /** Maximum allowed message text length before truncation. */
-export const MAX_MESSAGE_TEXT_LENGTH = 80;
+const MAX_MESSAGE_TEXT_LENGTH = 80;
 
-/** Length of the ellipsis appended to truncated text. */
-export const TRUNCATION_ELLIPSIS_LENGTH = 3;
+const TRUNCATION_ELLIPSIS_LENGTH = 3;
 
-export function truncateText(text: string): string {
+function truncateText(text: string): string {
   const normalized = normalizeInlineText(text);
   if (normalized.length > MAX_MESSAGE_TEXT_LENGTH) {
     return `${normalized.slice(0, MAX_MESSAGE_TEXT_LENGTH - TRUNCATION_ELLIPSIS_LENGTH)}...`;

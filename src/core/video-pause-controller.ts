@@ -14,7 +14,7 @@ const log = createLogger('VideoPauseController');
 
 const REBIND_DEBOUNCE_MS = 100;
 
-export interface VideoPauseCallbacks {
+interface VideoPauseCallbacks {
   pauseable: Pauseable;
   isDisposed: () => boolean;
 }

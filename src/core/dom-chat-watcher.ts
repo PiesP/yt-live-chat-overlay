@@ -31,7 +31,7 @@ const CHAT_CONTAINER_SELECTORS = [
   'yt-live-chat-item-list-renderer',
 ] as const;
 
-export type DomMessageCallback = (messages: ChatMessage[]) => void;
+type DomMessageCallback = (messages: ChatMessage[]) => void;
 
 export type DomWatcherUnsubscribe = () => void;
 
