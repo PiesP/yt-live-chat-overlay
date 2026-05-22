@@ -186,7 +186,7 @@ export class ReplayChatSource extends ChatSource {
 
   private async runReplayLoop(signal?: AbortSignal): Promise<void> {
     while (!signal?.aborted) {
-      await this.waitWhilePaused();
+      await this.waitWhilePaused(signal);
 
       const playback = this.getPlaybackSnapshot();
       const currentOffsetMs = playback?.offsetMs ?? 0;

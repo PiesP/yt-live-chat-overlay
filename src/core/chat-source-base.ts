@@ -183,10 +183,14 @@ export abstract class ChatSource {
     this.chatPaused = paused;
   }
 
-  protected waitWhilePaused(): Promise<void> {
+  protected waitWhilePaused(signal?: AbortSignal): Promise<void> {
     if (!this.chatPaused) return Promise.resolve();
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const check = (): void => {
+        if (signal?.aborted) {
+          reject(new DOMException('Aborted', 'AbortError'));
+          return;
+        }
         if (!this.chatPaused) {
           resolve();
           return;

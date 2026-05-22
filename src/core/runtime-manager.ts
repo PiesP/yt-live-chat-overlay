@@ -113,7 +113,11 @@ export class RuntimeManager {
   private async runReconcileLoop(): Promise<void> {
     while (this.reconcileRequested && !this.destroyed) {
       this.reconcileRequested = false;
-      await this.reconcileOnce();
+      try {
+        await this.reconcileOnce();
+      } catch (err) {
+        console.error('[RuntimeManager] reconcileOnce() threw an error, continuing loop:', err);
+      }
     }
   }
 

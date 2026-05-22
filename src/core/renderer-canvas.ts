@@ -243,7 +243,7 @@ export class CanvasRenderer extends RendererBase {
     img.crossOrigin = 'anonymous';
     img.src = url;
     img.onload = () => {
-      if (cache.size >= maxEntries) {
+      while (cache.size >= maxEntries) {
         const oldestKey = cache.keys().next().value;
         if (oldestKey !== undefined) cache.delete(oldestKey);
       }
@@ -332,22 +332,20 @@ export class CanvasRenderer extends RendererBase {
     const mode = this.settings.danmakuMode;
     const isScrolling = mode === 'scroll' || mode === 'reverse';
 
-    // BUG-3 fix: remove expired messages BEFORE draining the queue.
-    // Previously drainQueue ran first, so activeMessages.length included
-    // about-to-expire entries, artificially limiting how many new messages
-    // could be admitted in this frame.
-    // Optimized: reverse iteration with splice avoids O(n*m) filter+includes.
-    let removed = false;
-    for (let i = this.activeMessages.length - 1; i >= 0; i--) {
+    // O(n) single-pass cleanup using in-place filter (avoids readonly reassignment)
+    const oldLength = this.activeMessages.length;
+    let writeIdx = 0;
+    for (let i = 0; i < oldLength; i++) {
       const msg = this.activeMessages[i];
       if (!msg) continue;
       const elapsed = now - msg.startTime - msg.pausedDuration;
-      if (elapsed >= msg.duration) {
-        this.activeMessages.splice(i, 1);
-        removed = true;
+      if (elapsed < msg.duration) {
+        this.activeMessages[writeIdx] = msg;
+        writeIdx++;
       }
     }
-    if (removed) {
+    if (writeIdx < oldLength) {
+      this.activeMessages.length = writeIdx;
       this.observability.updateActiveMessages(this.activeMessages.length);
       this.observability.updateQueueDepth(this.pendingQueue.length);
     }
@@ -1247,5 +1245,6 @@ export class CanvasRenderer extends RendererBase {
     this.authorPhotoCache.clear();
     this.stickerCache.clear();
     this.textBitmapCache.clear();
+    clearTextMeasurementCaches();
   }
 }

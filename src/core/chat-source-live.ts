@@ -120,7 +120,7 @@ export class LiveChatSource extends ChatSource {
     while (!signal?.aborted) {
       throwIfAborted(signal);
 
-      await this.waitWhilePaused();
+      await this.waitWhilePaused(signal);
 
       const playback = this.getPlaybackSnapshot();
       if (playback?.paused) {
