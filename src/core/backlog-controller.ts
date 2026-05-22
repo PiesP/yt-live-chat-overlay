@@ -109,10 +109,32 @@ export class BacklogInjectionController {
 
     // Apply sampling based on backlog size
     const sampled = this.sampleMessages(filtered);
-    this.backlogQueue = sampled;
-    this.totalBacklog = sampled.length;
+
+    // Priority messages (SuperChat, Membership) bypass the throttled queue
+    // and are emitted immediately for minimum display latency.
+    const priorityMessages: ChatMessage[] = [];
+    const normalMessages: ChatMessage[] = [];
+    for (const m of sampled) {
+      if (m.kind === 'superchat' || m.kind === 'membership') {
+        priorityMessages.push(m);
+      } else {
+        normalMessages.push(m);
+      }
+    }
+
+    // Emit priority messages immediately through the renderer callback
+    if (priorityMessages.length > 0) {
+      for (const msg of priorityMessages) {
+        msg.isBacklog = true;
+        this.emitBacklogMessage(msg);
+      }
+      log.debug(`Backlog: emitted ${priorityMessages.length} priority messages immediately`);
+    }
+
+    this.backlogQueue = normalMessages;
+    this.totalBacklog = normalMessages.length;
     this.processedBacklog = 0;
-    this.isActive = true;
+    this.isActive = normalMessages.length > 0;
     this.injectionStartTime = Date.now();
 
     // Adapt density ramp duration to backlog size.
