@@ -148,16 +148,6 @@ export const PANES: PaneDef[] = [
         ],
       },
       {
-        title: 'Performance',
-        fields: [
-          num(
-            'Max Visible',
-            'maxConcurrentMessages',
-            'Performance warning threshold for simultaneous comments'
-          ),
-        ],
-      },
-      {
         title: 'Backlog',
         fields: [
           sel('Backlog Mode', 'backlogMode', [
@@ -166,21 +156,6 @@ export const PANES: PaneDef[] = [
             ['full', 'Full (show all)'],
             ['none', 'None (skip backlog)'],
           ]),
-          num(
-            'Max backlog rate (msg/s)',
-            'backlogMaxRate',
-            'Maximum messages per second during backlog injection'
-          ),
-          num(
-            'Backlog speed multiplier',
-            'backlogSpeedMultiplier',
-            'Speed multiplier for backlog message animations'
-          ),
-          num(
-            'Recent minutes',
-            'backlogRecentMinutes',
-            'Show past chat from last N minutes (only for Recent mode)'
-          ),
         ],
       },
       {
@@ -191,17 +166,6 @@ export const PANES: PaneDef[] = [
             ['normal', 'Normal (5 msg / 5s)'],
             ['strict', 'Strict (2 msg / 5s)'],
           ]),
-        ],
-      },
-      {
-        title: 'Debug',
-        fields: [
-          sel('Log Level', 'logLevel', [
-            ['warn', 'Warn'],
-            ['info', 'Info'],
-            ['debug', 'Debug'],
-          ]),
-          chk('Show debug overlay', 'showDebugOverlay', 'Display real-time metrics overlay'),
         ],
       },
     ],
