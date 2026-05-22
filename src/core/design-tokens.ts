@@ -109,7 +109,6 @@ export const rendererLayout = {
   emojiSize: 1.2,
   superchatStickerSize: 2,
   exitPaddingMin: 100,
-  exitPaddingScale: 3,
   durationMin: 5000,
   durationMax: 30000,
   topBottomDurationMs: 4000,

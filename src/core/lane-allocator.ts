@@ -365,11 +365,8 @@ export class LaneAllocator {
     }
 
     // Scrolling mode: precision exit-time
-    const exitPadding = Math.max(
-      this.options.fontSize * rendererLayout.exitPaddingScale,
-      rendererLayout.exitPaddingMin
-    );
-    const totalDistance = screenWidth + msgWidthPx + exitPadding;
+    // exitPadding must match renderFrame's travel distance computation.
+    const totalDistance = screenWidth + msgWidthPx + rendererLayout.exitPaddingMin;
     // Fraction of duration until the right edge passes x=0
     const visibleFraction = (screenWidth + msgWidthPx) / totalDistance;
     const visualExitMs = Math.round(visibleFraction * durationMs);
