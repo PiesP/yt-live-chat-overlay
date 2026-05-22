@@ -99,12 +99,13 @@ class App {
   }
 
   /**
-   * Preview settings changes — applies immediately and persists to storage.
-   * Every preview timer fire writes to storage, ensuring settings survive
-   * page refresh or crash regardless of whether close() is called.
+   * Preview settings changes — memory only. Side-effects still apply
+   * (log level, settings UI, runtime reconcile) but no storage write.
+   * Settings are persisted to storage when the user explicitly closes
+   * the settings dialog (onPersist → applySettings).
    */
   previewSettings(partial: Partial<OverlaySettings>): void {
-    this.settings.set(partial);
+    this.settings.preview(partial);
     this.applySettingsSideEffects(partial);
   }
 
