@@ -7,7 +7,7 @@
  */
 
 import type { Pauseable } from '@app-types';
-import { findElementMatch, VIDEO_SELECTORS } from '@core/dom';
+import { findElementMatch, PLAYER_CONTAINER_SELECTORS, VIDEO_SELECTORS } from '@core/dom';
 import { createLogger } from '@core/logging';
 
 const log = createLogger('VideoPauseController');
@@ -74,9 +74,8 @@ export class VideoPauseController {
       }
     };
 
-    const playerContainer = document.querySelector<HTMLElement>(
-      '#movie_player, .html5-video-player'
-    );
+    const playerContainer =
+      findElementMatch<HTMLElement>(PLAYER_CONTAINER_SELECTORS)?.element ?? null;
 
     if (playerContainer) {
       const observer = new MutationObserver(() => scheduleRebind());

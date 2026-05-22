@@ -85,6 +85,9 @@ export class CanvasRenderer extends RendererBase {
   private readonly authorPhotoCache = new Map<string, HTMLImageElement>();
   private readonly stickerCache = new Map<string, HTMLImageElement>();
 
+  /** Last devicePixelRatio seen — used to detect DPR changes. */
+  private lastDpr = 0;
+
   /**
    * Text bitmap cache: pre-rendered text with outline as offscreen canvas.
    * Key = `${font}|${text}|${color}|${strokeWidth}|${strokeColor}`.
@@ -299,8 +302,6 @@ export class CanvasRenderer extends RendererBase {
       this.animFrameId = null;
     }
   }
-
-  private lastDpr = 0;
 
   private renderFrame(): void {
     const ctx = this.ctx;

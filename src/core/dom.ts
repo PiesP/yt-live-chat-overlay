@@ -18,7 +18,7 @@ const DEFAULT_WAIT_INTERVAL_MS = 500;
 /** Interval (ms) between player element lookup retries in the overlay. */
 export const PLAYER_LOOKUP_INTERVAL_MS = 1000;
 
-const PLAYER_CONTAINER_SELECTORS = ['#movie_player', '.html5-video-player'] as const;
+export const PLAYER_CONTAINER_SELECTORS = ['#movie_player', '.html5-video-player'] as const;
 
 export const VIDEO_SELECTORS = ['#movie_player video', 'video.html5-main-video'] as const;
 
