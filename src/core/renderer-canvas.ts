@@ -473,7 +473,7 @@ export class CanvasRenderer extends RendererBase {
     const placement = this.laneAllocator.findPlacement(msgHeight, dims, message.isBacklog ?? false);
     if (!placement) return { ok: false, reason: 'no_lane' as const };
 
-    const newLaneY = placement.laneY;
+    const newLaneY = placement.laneY + placement.verticalOffset;
     const laneHeight = this.laneAllocator.getLaneHeight();
 
     // Check active messages in reverse (newest first) for early exit on collision.
@@ -570,7 +570,7 @@ export class CanvasRenderer extends RendererBase {
       effectiveDuration = rendererLayout.topBottomDurationMs;
     }
 
-    const laneY = placement.laneY;
+    const laneY = placement.laneY + placement.verticalOffset;
 
     // Stagger delay: spread batch entries across time to prevent vertical
     // clumping. Computed BEFORE commitPlacement so the allocator accounts

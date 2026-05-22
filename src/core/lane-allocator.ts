@@ -8,6 +8,13 @@ export interface LanePlacement {
   laneY: number;
   /** Number of lane slots this message occupies (1 for regular, 2+ for superchat/membership) */
   slotCount: number;
+  /**
+   * Vertical centering offset within the allocated lane block (px).
+   * Tall messages (with author, multi-line cards) are centered in their
+   * multi-slot block to distribute empty space evenly above and below.
+   * Single-slot messages return 0 (close to the lane top, no visible gap).
+   */
+  verticalOffset: number;
 }
 
 interface LaneAllocatorOptions {
@@ -247,6 +254,7 @@ export class LaneAllocator {
       waitMs: result.waitMs,
       laneY: this.getLaneY(result.laneIndex, _dimensions.height),
       slotCount,
+      verticalOffset: Math.floor((slotCount * this.laneHeight - messageHeight) / 2),
     };
   }
 
