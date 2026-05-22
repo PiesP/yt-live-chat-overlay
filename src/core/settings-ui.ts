@@ -115,9 +115,10 @@ export class SettingsUi {
 
   close(): void {
     if (!this.backdrop) return;
-    // Always persist current form state on close — ensures settings are
-    // saved to storage even when the preview debounce timer has already
-    // fired (which only applies to memory via onChange/previewSettings).
+    // Persist current form state on close to capture any pending changes
+    // within the 100ms debounce window (preview timer hasn't fired yet).
+    // Preview changes are already persisted in real-time once the timer
+    // fires, so this is a safety net for rapid close-after-change.
     if (this.previewTimer !== null) {
       clearTimeout(this.previewTimer);
       this.previewTimer = null;
