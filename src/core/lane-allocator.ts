@@ -27,25 +27,26 @@ interface LaneAllocatorOptions {
 }
 
 /**
- * Top-first lane scheduler.
+ * Top-first lane scheduler with speed-isolated lane allocation.
  *
- * Fills lanes from the top of the screen down:
+ * Fills lanes from the top of the screen down using a three-phase strategy
+ * that naturally groups messages with similar speeds together:
  *
- *   1. Scan lanes from index 0 (topmost) to laneCount (bottommost).
- *   2. Phase 1 (zero-wait): return the first lane with waitMs === 0.
+ *   1. Phase 1 (zero-wait, speed-filtered): return the first lane with
+ *      waitMs === 0 that also passes the speed compatibility check.
+ *      Real-time messages skip lanes with active backlog content;
+ *      backlog messages skip lanes with active real-time content.
  *      During a burst this distributes across all lanes: msg1 → lane 0,
  *      msg2 → lane 1, ..., msgN → lane N-1.
- *   3. Phase 2 (all busy): return the topmost busy lane. The collision
- *      check in checkPlacement rejects it (right edge near entry), pushing
- *      the message back for retry rather than dropping it.
- *   4. Collision feedback: when checkPlacement detects a collision,
- *      markCollision(laneIndex) is called so subsequent calls in the
- *      same batch skip that lane and try the next one below.
- *   5. Multi-slot messages (superchats, memberships) scan for the first
- *      contiguous block of free lanes, also from the top.
- *   6. Backlog priority: backlog messages skip Phase 2 (busy lane fallback).
- *      They only use completely free lanes; if none exist, they accept
- *      a dropped message rather than competing with real-time traffic.
+ *
+ *   2. Phase 2 (speed-matched): when all lanes are busy, prefer lanes
+ *      that already have same-speed content. Real-time messages cluster
+ *      with real-time, backlog with backlog. This produces natural
+ *      visual zones without hard-coded partitions.
+ *
+ *   3. Phase 3 (fastest-free): for real-time messages only, return the
+ *      topmost busy lane (shortest wait). Backlog messages stop here
+ *      and accept a drop rather than competing with real-time traffic.
  *
  * Supports:
  *   - Precision exit-time occupancy for multi-message lane sharing
@@ -77,6 +78,13 @@ export class LaneAllocator {
    * Stale entries (timestamp < now) are cleared on each resetBatch().
    */
   private realTimeLanesUntil: Map<number, number> = new Map();
+
+  /**
+   * Tracks until when each lane has active backlog content.
+   * Real-time messages skip these lanes in Phase 1 so they naturally
+   * cluster together, forming visually distinct speed zones.
+   */
+  private backlogLanesUntil: Map<number, number> = new Map();
 
   /**
    * Minimum cooldown between consecutive uses of the same lane (ms).
@@ -131,6 +139,7 @@ export class LaneAllocator {
     this.laneIndexToHeapIndex = new Map();
     this.collidedLanes.clear();
     this.realTimeLanesUntil.clear();
+    this.backlogLanesUntil.clear();
     if (!dimensions) {
       this.laneHeight = 0;
       this.laneCount = 0;
@@ -248,10 +257,15 @@ export class LaneAllocator {
     const nextAvailable = startTime + occupancyMs;
     const startIdx = placement.laneIndex;
 
-    // Store real-time occupancy end-time per lane so backlog messages
-    // can prefer lanes without recent real-time traffic.
-    if (!isBacklog) {
-      const until = startTime + occupancyMs;
+    // Store speed-profile occupancy end-time per lane so that
+    // subsequent allocations can group messages by speed profile.
+    // Real-time → realTimeLanesUntil, backlog → backlogLanesUntil.
+    const until = startTime + occupancyMs;
+    if (isBacklog) {
+      for (let s = 0; s < placement.slotCount; s++) {
+        this.backlogLanesUntil.set(startIdx + s, until);
+      }
+    } else {
       for (let s = 0; s < placement.slotCount; s++) {
         this.realTimeLanesUntil.set(startIdx + s, until);
       }
@@ -274,11 +288,13 @@ export class LaneAllocator {
    */
   resetBatch(): void {
     this.collidedLanes.clear();
-    // Prune expired real-time lane entries (availableAt <= now means
-    // the lane's occupancy has passed and it's safe to reuse).
+    // Prune expired speed-profile lane entries.
     const now = performance.now();
     for (const [laneIdx, until] of this.realTimeLanesUntil) {
       if (until <= now) this.realTimeLanesUntil.delete(laneIdx);
+    }
+    for (const [laneIdx, until] of this.backlogLanesUntil) {
+      if (until <= now) this.backlogLanesUntil.delete(laneIdx);
     }
   }
 
@@ -343,15 +359,23 @@ export class LaneAllocator {
   }
 
   /**
-   * Allocate a single lane — scan from top (lowest index) to bottom.
+   * Allocate a single lane with three-phase speed-isolated scanning.
    *
-   * Phase 1 — strict zero-wait: return the first lane with waitMs === 0
-   * (completely free right now). This distributes messages across lanes
-   * during a burst: msg1 → lane 0, msg2 → lane 1, ..., msgN → lane N-1.
+   * Phase 1 — zero-wait with speed filter: return the first completely
+   * free lane (waitMs === 0) that is compatible with this message's speed
+   * profile. Real-time skips backlog-occupied lanes; backlog skips
+   * real-time-occupied lanes. Epsilon-greedy (5%) skips the first match
+   * for visual variety.
    *
-   * Phase 2 — all lanes busy: return the topmost busy lane (only for
-   * real-time messages). Backlog messages skip Phase 2 — they only use
-   * truly free lanes, accepting a dropped message over visual crowding.
+   * Phase 2 — speed-matched busy lane: if no zero-wait lane is compatible,
+   * prefer lanes that already have same-speed content (shortest wait first).
+   * Both real-time and backlog benefit from clustering with their own kind.
+   *
+   * Phase 3 — fastest-free lane (real-time only): fall back to the topmost
+   * busy lane regardless of speed profile. Backlog messages stop here and
+   * return null — they don't compete with real-time on busy lanes.
+   *
+   * Collided lanes (from markCollision feedback) are excluded from all phases.
    */
   private allocateSingleLane(
     now: number,
@@ -363,33 +387,48 @@ export class LaneAllocator {
 
     const maxWaitMs = rendererLayout.durationMax;
     let firstBusy: { laneIndex: number; waitMs: number } | null = null;
+    let speedMatched: { laneIndex: number; waitMs: number } | null = null;
 
-    // Phase 1: scan for a zero-wait lane (truly free right now).
-    // Skip lanes that previously collided in this batch — they're visually
-    // occupied even if their availableAt has technically expired.
-    // For backlog messages, also skip lanes with recent real-time traffic.
+    // ── Phase 1: zero-wait lane with speed compatibility filter ──
     for (let i = laneStart; i < laneEnd; i++) {
       if (this.collidedLanes.has(i)) continue;
-      if (isBacklog && (this.realTimeLanesUntil.get(i) ?? 0) > now) continue;
+
+      // Speed compatibility check
+      if (isBacklog) {
+        // Backlog: skip lanes with active real-time content
+        if ((this.realTimeLanesUntil.get(i) ?? 0) > now) continue;
+      } else {
+        // Real-time: skip lanes with active backlog content
+        if ((this.backlogLanesUntil.get(i) ?? 0) > now) continue;
+      }
+
       const avail = this.getSlotAvailableAt(i);
       if (avail === undefined) continue;
       const wait = Math.max(0, Math.ceil(avail - now));
       if (wait > 0) {
-        // Track the topmost busy lane for phase 2 fallback.
+        // Track for phases 2-3
         if (!firstBusy) firstBusy = { laneIndex: i, waitMs: wait };
+        // Track speed-matched candidate for phase 2
+        if (!speedMatched || wait < speedMatched.waitMs) {
+          const hasSameSpeed = isBacklog
+            ? (this.backlogLanesUntil.get(i) ?? 0) > now
+            : (this.realTimeLanesUntil.get(i) ?? 0) > now;
+          if (hasSameSpeed) speedMatched = { laneIndex: i, waitMs: wait };
+        }
         continue;
       }
-      // Found a zero-wait lane. Epsilon-greedy: 5% chance to skip this
-      // lane and pick the next zero-wait lane for visual variety.
+      // Found a zero-wait compatible lane.
+      // Epsilon-greedy: 5% chance to skip for visual variety.
       if (Math.random() < LaneAllocator.EPSILON) continue;
       return { laneIndex: i, waitMs: 0 };
     }
 
-    // Phase 2: no zero-wait lane — all lanes are busy.
-    // Backlog messages skip this phase — they only use truly free lanes
-    // and accept a dropped message rather than competing with real-time
-    // traffic on busy lanes. Real-time messages get the topmost busy lane
-    // so the collision check can push them back for retry (not dropped).
+    // ── Phase 2: speed-matched busy lane ──
+    // Prefer lanes already running at the same speed profile.
+    if (speedMatched && speedMatched.waitMs <= maxWaitMs) return speedMatched;
+
+    // ── Phase 3: fastest-free lane (real-time only) ──
+    // Backlog messages stop here — they don't compete with real-time on busy lanes.
     if (!isBacklog && firstBusy && firstBusy.waitMs <= maxWaitMs) return firstBusy;
     return null;
   }
@@ -419,12 +458,26 @@ export class LaneAllocator {
     const maxStartLane = laneEnd - slotCount;
     if (maxStartLane < laneStart) return null;
 
-    // Phase 1: scan for a block where ALL slots have waitMs === 0.
+    // Phase 1: scan for a block where ALL slots have waitMs === 0 and
+    // are compatible with this message's speed profile.
     for (let startIdx = laneStart; startIdx <= maxStartLane; startIdx++) {
       let allZeroWait = true;
       let blockMaxWait = 0;
       for (let s = 0; s < slotCount; s++) {
-        const slotAvail = this.getSlotAvailableAt(startIdx + s);
+        const slotIdx = startIdx + s;
+        // Speed compatibility check for the block
+        if (isBacklog) {
+          if ((this.realTimeLanesUntil.get(slotIdx) ?? 0) > now) {
+            allZeroWait = false;
+            break;
+          }
+        } else {
+          if ((this.backlogLanesUntil.get(slotIdx) ?? 0) > now) {
+            allZeroWait = false;
+            break;
+          }
+        }
+        const slotAvail = this.getSlotAvailableAt(slotIdx);
         if (slotAvail === undefined) {
           allZeroWait = false;
           break;
