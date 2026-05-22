@@ -26,27 +26,17 @@
 
 import type { ChatMessage, OverlayDimensions, OverlaySettings } from '@app-types';
 import {
-  renderContentSegments,
-  renderSegment,
-  renderWrappedText,
-  strokeTextOutline,
+  renderMembershipCard,
+  renderRegularMessage,
+  renderSuperChatCard,
 } from '@core/canvas-text-renderer';
-import {
-  computeDliosDuration,
-  computeReadableTextColor,
-  computeSuperChatOpacities,
-  colors as designColors,
-  rendererLayout,
-  resolveSuperChatRgb,
-  spacing,
-  toRgba,
-} from '@core/design-tokens';
+import { computeDliosDuration, rendererLayout } from '@core/design-tokens';
 import type { LanePlacement } from '@core/lane-allocator';
 import { createLogger } from '@core/logging';
 import type { Overlay } from '@core/overlay';
 import { RendererBase } from '@core/renderer-base';
 import { estimateMessageDimensions as sharedEstimateDimensions } from '@core/renderer-shared';
-import { clearTextMeasurementCaches, getFontString, measureTextHeight } from '@core/text-measure';
+import { clearTextMeasurementCaches, getFontString } from '@core/text-measure';
 
 const log = createLogger('RendererCanvas');
 
@@ -383,11 +373,48 @@ export class CanvasRenderer extends RendererBase {
       const snappedY = Math.floor(msg.y);
 
       if (msg.message.kind === 'superchat') {
-        this.renderSuperChat(ctx, msg, snappedX, snappedY, opacity);
+        renderSuperChatCard(
+          ctx,
+          msg.message,
+          msg.width,
+          msg.height,
+          snappedX,
+          snappedY,
+          opacity,
+          this.settings,
+          this.textBitmapCache,
+          this.authorPhotoCache,
+          this.stickerCache,
+          (fs) => this.getFont(fs)
+        );
       } else if (msg.message.kind === 'membership') {
-        this.renderMembership(ctx, msg, snappedX, snappedY, opacity);
+        renderMembershipCard(
+          ctx,
+          msg.message,
+          msg.width,
+          msg.height,
+          snappedX,
+          snappedY,
+          opacity,
+          elapsed,
+          this.settings,
+          this.textBitmapCache,
+          this.authorPhotoCache,
+          (fs) => this.getFont(fs)
+        );
       } else {
-        this.renderRegular(ctx, msg, snappedX, snappedY, opacity);
+        renderRegularMessage(
+          ctx,
+          msg.message,
+          snappedX,
+          snappedY,
+          opacity,
+          this.settings,
+          this.textBitmapCache,
+          this.emojiCache,
+          this.authorPhotoCache,
+          (fs) => this.getFont(fs)
+        );
       }
     }
   }
@@ -722,347 +749,6 @@ export class CanvasRenderer extends RendererBase {
     opacity *= Math.max(0, 1 - ageRatio);
 
     return opacity;
-  }
-
-  // ── Regular message ──────────────────────────────────────────────────
-
-  private renderRegular(
-    ctx: CanvasRenderingContext2D,
-    msg: CanvasMessage,
-    x: number,
-    y: number,
-    alpha: number
-  ): void {
-    const message = msg.message;
-    const fontSize = this.settings.fontSize;
-    const color =
-      this.settings.preserveUserColor && message.userColor
-        ? message.userColor
-        : this.settings.colors[message.authorType];
-
-    ctx.save();
-    ctx.globalAlpha = alpha;
-
-    const showAuthor = this.settings.showAuthor[message.authorType];
-    const textX = x + rendererLayout.paddingH;
-    let textY = y + rendererLayout.paddingV;
-    if (showAuthor && message.author) {
-      textY = this.drawAuthorSection(ctx, msg, textX, textY, color);
-    }
-
-    if (message.content.length > 0) {
-      renderContentSegments(
-        ctx,
-        message.content,
-        textX,
-        textY,
-        color,
-        1,
-        fontSize,
-        this.settings,
-        this.textBitmapCache,
-        this.emojiCache,
-        (fs) => this.getFont(fs)
-      );
-    } else if (message.text.length > 0) {
-      renderSegment(
-        ctx,
-        message.text,
-        textX,
-        textY,
-        color,
-        1,
-        fontSize,
-        this.settings,
-        this.textBitmapCache,
-        (fs) => this.getFont(fs)
-      );
-    }
-
-    ctx.restore();
-  }
-
-  // ── Super chat ───────────────────────────────────────────────────────
-
-  private renderSuperChat(
-    ctx: CanvasRenderingContext2D,
-    msg: CanvasMessage,
-    x: number,
-    y: number,
-    alpha: number
-  ): void {
-    const message = msg.message;
-    const superChat = message.superChat;
-    if (!superChat) return;
-
-    const fontSize = this.settings.fontSize;
-    const w = msg.width;
-    const h = msg.height;
-
-    ctx.save();
-    ctx.globalAlpha = alpha;
-
-    const {
-      base: scAlpha,
-      top: topAlpha,
-      bottom: bottomAlpha,
-    } = computeSuperChatOpacities(this.settings.superChatOpacity);
-    const rgb = resolveSuperChatRgb(superChat, designColors.superChat);
-    const baseColor = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
-    const textColor = computeReadableTextColor(baseColor);
-
-    // Background gradient
-    const grad = ctx.createLinearGradient(x, y, x, y + h);
-    grad.addColorStop(0, toRgba(baseColor, topAlpha));
-    grad.addColorStop(0.48, toRgba(baseColor, scAlpha));
-    grad.addColorStop(1, toRgba(baseColor, bottomAlpha));
-    ctx.fillStyle = grad;
-    this.roundRect(ctx, x, y, w, h, rendererLayout.superchatCardRadius);
-    ctx.fill();
-
-    // Left accent bar
-    ctx.fillStyle = baseColor;
-    ctx.fillRect(x, y, 4, h);
-
-    const scPad = rendererLayout.superchat;
-    const textX = x + scPad.paddingH;
-    let contentY = y + scPad.paddingV;
-
-    // Author section
-    if (this.settings.showAuthor.superChat && message.author) {
-      const nameMaxWidth = w - scPad.paddingH * 2;
-      contentY = this.drawAuthorSection(ctx, msg, textX, contentY, textColor, nameMaxWidth);
-    }
-
-    // Amount badge pill
-    const badgeY = contentY + spacing.xs;
-    const badgeFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
-    const badgeHeight = badgeFontSize + rendererLayout.superchatBadge.paddingV * 2;
-    ctx.font = `bold ${badgeFontSize}px ${this.settings.fontFamily}`;
-    const badgeTextWidth = Math.ceil(ctx.measureText(superChat.amount).width);
-    const badgeWidth = badgeTextWidth + rendererLayout.superchatBadge.paddingH * 2;
-
-    this.roundRect(
-      ctx,
-      textX,
-      badgeY,
-      badgeWidth,
-      badgeHeight,
-      rendererLayout.superchatBadge.radius
-    );
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.16)';
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
-    ctx.lineWidth = 1;
-    ctx.stroke();
-
-    ctx.textBaseline = 'middle';
-    strokeTextOutline(
-      ctx,
-      superChat.amount,
-      textX + rendererLayout.superchatBadge.paddingH,
-      badgeY + badgeHeight / 2,
-      textColor,
-      this.settings
-    );
-    ctx.fillStyle = textColor;
-    ctx.fillText(
-      superChat.amount,
-      textX + rendererLayout.superchatBadge.paddingH,
-      badgeY + badgeHeight / 2
-    );
-    ctx.textBaseline = 'top';
-
-    // Body text
-    let textBottomY = badgeY + badgeHeight;
-    if (message.text) {
-      const bodyMaxWidth = w - scPad.paddingH * 2;
-      textBottomY = renderWrappedText(
-        ctx,
-        message.text,
-        textX,
-        textBottomY + spacing.xs,
-        bodyMaxWidth,
-        this.settings.superChatMaxBodyLines,
-        textColor,
-        alpha,
-        fontSize,
-        this.settings,
-        this.textBitmapCache,
-        (fs) => this.getFont(fs)
-      );
-    }
-
-    // Sticker
-    if (superChat.sticker) {
-      const cached = this.stickerCache.get(superChat.sticker.url);
-      const stickerImg = cached?.complete && cached.naturalWidth > 0 ? cached : null;
-      if (stickerImg) {
-        const maxStickerSize = Math.round(fontSize * rendererLayout.superchatStickerSize);
-        const stickerY = textBottomY + spacing.xs;
-        const availableHeight = y + h - scPad.paddingV - stickerY;
-        const stickerSize = Math.max(0, Math.min(maxStickerSize, availableHeight));
-        if (stickerSize > 0) {
-          ctx.drawImage(stickerImg, textX, stickerY, stickerSize, stickerSize);
-        }
-      }
-    }
-
-    ctx.restore();
-  }
-
-  // ── Membership ───────────────────────────────────────────────────────
-
-  private renderMembership(
-    ctx: CanvasRenderingContext2D,
-    msg: CanvasMessage,
-    x: number,
-    y: number,
-    alpha: number
-  ): void {
-    const fontSize = this.settings.fontSize;
-    const w = msg.width;
-    const h = msg.height;
-    const mem = designColors.membership;
-
-    ctx.save();
-    ctx.globalAlpha = alpha;
-
-    ctx.fillStyle = `rgba(${mem.background.r}, ${mem.background.g}, ${mem.background.b}, ${mem.backgroundAlpha})`;
-    this.roundRect(ctx, x, y, w, h, rendererLayout.membershipCardRadius);
-    ctx.fill();
-
-    const elapsed = performance.now() - msg.startTime - msg.pausedDuration;
-    const pulse = Math.sin((elapsed / 1000) * Math.PI) * mem.borderAlphaAmplitude + mem.borderAlpha;
-    ctx.strokeStyle = `rgba(${mem.background.r}, ${mem.background.g}, ${mem.background.b}, ${pulse})`;
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    const padH = rendererLayout.membership.paddingH;
-    const padV = rendererLayout.membership.paddingV;
-    const textX = x + padH;
-    let textY = y + padV;
-
-    if (msg.message.author) {
-      const nameMaxWidth = w - padH * 2;
-      textY = this.drawAuthorSection(ctx, msg, textX, textY, '#ffffff', nameMaxWidth);
-    }
-
-    if (msg.message.text) {
-      const bodyMaxWidth = w - padH * 2;
-      const bodyY = msg.message.author ? textY + spacing.xs : textY;
-      renderWrappedText(
-        ctx,
-        msg.message.text,
-        textX,
-        bodyY,
-        bodyMaxWidth,
-        this.settings.membershipMaxBodyLines,
-        '#ffffff',
-        alpha,
-        fontSize,
-        this.settings,
-        this.textBitmapCache,
-        (fs) => this.getFont(fs)
-      );
-    }
-
-    ctx.restore();
-  }
-
-  // ── Helpers ──────────────────────────────────────────────────────────
-
-  /** Draw author photo + name section. Returns the Y offset after the section. */
-  private drawAuthorSection(
-    ctx: CanvasRenderingContext2D,
-    msg: CanvasMessage,
-    textX: number,
-    startY: number,
-    color: string,
-    maxNameWidth?: number
-  ): number {
-    const message = msg.message;
-    if (!message.author) return startY;
-
-    const fontSize = this.settings.fontSize;
-    const authorFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
-    const nameFont = getFontString(
-      authorFontSize,
-      this.settings.fontWeight,
-      this.settings.fontFamily
-    );
-    const nameHeight = measureTextHeight(nameFont, authorFontSize);
-    const sectionHeight = Math.max(rendererLayout.authorPhotoSize, nameHeight);
-
-    const photo = message.authorPhotoUrl
-      ? this.authorPhotoCache.get(message.authorPhotoUrl)
-      : undefined;
-    if (photo?.complete && photo.naturalWidth > 0) {
-      this.drawAuthorPhoto(ctx, photo, textX, startY);
-    }
-    const nameX = textX + (photo ? rendererLayout.authorPhotoSize + 4 : 0);
-    const nameY = startY + Math.max(0, Math.floor((sectionHeight - nameHeight) / 2));
-
-    // Truncate author name with ellipsis if it exceeds the allowed width
-    let displayName = message.author;
-    if (maxNameWidth !== undefined && maxNameWidth > 0) {
-      ctx.font = nameFont;
-      ctx.textBaseline = 'top';
-      let nameWidth = ctx.measureText(displayName).width;
-      if (nameWidth > maxNameWidth) {
-        const ellipsis = '\u2026';
-        const ellipsisWidth = ctx.measureText(ellipsis).width;
-        while (displayName.length > 0 && nameWidth + ellipsisWidth > maxNameWidth) {
-          displayName = displayName.slice(0, -1);
-          nameWidth = ctx.measureText(displayName).width;
-        }
-        displayName += ellipsis;
-      }
-    }
-
-    ctx.font = nameFont;
-    ctx.textBaseline = 'top';
-    strokeTextOutline(ctx, displayName, nameX, nameY, color, this.settings);
-    ctx.fillStyle = color;
-    ctx.fillText(displayName, nameX, nameY);
-    return startY + sectionHeight;
-  }
-
-  /** Draw an author photo with shadow effects. */
-  private drawAuthorPhoto(
-    ctx: CanvasRenderingContext2D,
-    photo: HTMLImageElement,
-    x: number,
-    y: number
-  ): void {
-    ctx.save();
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
-    ctx.shadowBlur = 4;
-    ctx.shadowOffsetX = 1;
-    ctx.shadowOffsetY = 1;
-    ctx.drawImage(photo, x, y, rendererLayout.authorPhotoSize, rendererLayout.authorPhotoSize);
-    ctx.restore();
-  }
-
-  private roundRect(
-    ctx: CanvasRenderingContext2D,
-    x: number,
-    y: number,
-    w: number,
-    h: number,
-    r: number
-  ): void {
-    ctx.beginPath();
-    ctx.moveTo(x + r, y);
-    ctx.lineTo(x + w - r, y);
-    ctx.arcTo(x + w, y, x + w, y + r, r);
-    ctx.lineTo(x + w, y + h - r);
-    ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
-    ctx.lineTo(x + r, y + h);
-    ctx.arcTo(x, y + h, x, y + h - r, r);
-    ctx.lineTo(x, y + r);
-    ctx.arcTo(x, y, x + r, y, r);
-    ctx.closePath();
   }
 
   // ── Abstract hook implementations ────────────────────────────────────
