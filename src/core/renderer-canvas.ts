@@ -241,6 +241,7 @@ export class CanvasRenderer extends RendererBase {
     for (const seg of message.content) {
       if (seg.type !== 'emoji') continue;
       if (this.emojiFetching.has(seg.emoji.url)) continue;
+      if (this.emojiCache.has(seg.emoji.url)) continue;
       if (this.emojiFetching.size >= 6) continue;
       this.emojiFetching.add(seg.emoji.url);
       const url = seg.emoji.url;
@@ -249,7 +250,22 @@ export class CanvasRenderer extends RendererBase {
       img.src = url;
       img.onload = () => {
         this.emojiFetching.delete(url);
-        this.loadImage(url, this.emojiCache, 200);
+        // Direct cache write instead of delegating to loadImage() —
+        // the old path created a second Image for the same URL,
+        // doubling the load latency before the emoji appeared.
+        while (this.emojiCache.size >= 200) {
+          const key = this.emojiCache.keys().next().value;
+          if (key !== undefined) this.emojiCache.delete(key);
+        }
+        this.emojiCache.set(url, img);
+
+        // Trigger an immediate render frame so the emoji appears within
+        // ~1 frame instead of waiting for the next natural rAF tick.
+        if (this.animFrameId !== null) {
+          cancelAnimationFrame(this.animFrameId);
+          this.animFrameId = null;
+          this.startRenderLoop();
+        }
       };
       img.onerror = () => this.emojiFetching.delete(url);
     }
