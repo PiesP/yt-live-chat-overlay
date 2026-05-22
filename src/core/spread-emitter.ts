@@ -10,7 +10,6 @@
  */
 
 import type { ChatMessage } from '@app-types';
-import { sampleExponential } from '@core/design-tokens';
 import { createLogger } from '@core/logging';
 
 const log = createLogger('SpreadEmitter');
@@ -25,11 +24,14 @@ function isPriorityMessage(message: ChatMessage): boolean {
 export class SpreadEmitter {
   private readonly buffer: ChatMessage[] = [];
   private timer: ReturnType<typeof setTimeout> | null = null;
-  private spreadInterval = MIN_SPREAD_INTERVAL_MS;
+  private baseSpreadInterval = MIN_SPREAD_INTERVAL_MS;
   private paused = false;
   private destroyed = false;
 
-  constructor(private readonly emitMessage: (msg: ChatMessage) => void) {}
+  constructor(
+    private readonly emitMessage: (msg: ChatMessage) => void,
+    private readonly getSpreadFactor: () => number
+  ) {}
 
   /**
    * Enqueue messages for spread emission.
@@ -61,7 +63,7 @@ export class SpreadEmitter {
    * poll interval.
    */
   setSpreadInterval(intervalMs: number): void {
-    this.spreadInterval = Math.max(MIN_SPREAD_INTERVAL_MS, intervalMs);
+    this.baseSpreadInterval = Math.max(MIN_SPREAD_INTERVAL_MS, intervalMs);
   }
 
   /**
@@ -121,10 +123,9 @@ export class SpreadEmitter {
   }
 
   private scheduleNext(): void {
-    const delay = Math.max(
-      MIN_SPREAD_INTERVAL_MS,
-      Math.min(this.spreadInterval * 2, sampleExponential(this.spreadInterval))
-    );
+    const factor = this.getSpreadFactor();
+    const effectiveInterval = this.baseSpreadInterval * factor;
+    const delay = Math.max(MIN_SPREAD_INTERVAL_MS, Math.random() * (effectiveInterval * 2));
     this.timer = setTimeout(() => {
       this.timer = null;
       this.tick();

@@ -80,13 +80,19 @@ export class LiveChatSource extends ChatSource {
   }
 
   private calculateAdaptiveDelay(timeoutMs: number): number {
+    const settings = this.getSettings();
     const baseDelay = timeoutMs > 0 ? timeoutMs : LIVE_POLL_FALLBACK_DELAY_MS;
 
     if (this.consecutiveErrors > 0) {
-      return Math.min(10_000, baseDelay * 2 ** this.consecutiveErrors);
+      const delayed = baseDelay * 2 ** this.consecutiveErrors;
+      return Math.min(settings.maxPollIntervalMs, Math.max(settings.minPollIntervalMs, delayed));
     }
 
-    const base = Math.max(2000, Math.min(5000, baseDelay));
+    // Base adaptive delay within bounds
+    let base = Math.max(
+      settings.minPollIntervalMs,
+      Math.min(settings.maxPollIntervalMs, baseDelay)
+    );
 
     if (this.recentMessageCounts.length < 2) return base;
 
@@ -94,13 +100,14 @@ export class LiveChatSource extends ChatSource {
       this.recentMessageCounts.reduce((a, b) => a + b, 0) / this.recentMessageCounts.length;
 
     if (avgCount >= LiveChatSource.DENSITY_HIGH_THRESHOLD) {
-      return Math.max(1000, Math.round(base * 0.6));
+      base = Math.max(settings.minPollIntervalMs, Math.round(base * 0.6));
     }
     if (avgCount <= LiveChatSource.DENSITY_LOW_THRESHOLD) {
-      return Math.min(8000, Math.round(base * 1.5));
+      base = Math.min(settings.maxPollIntervalMs, Math.round(base * 1.5));
     }
 
-    return base;
+    // Clamp again after adjustments
+    return Math.max(settings.minPollIntervalMs, Math.min(settings.maxPollIntervalMs, base));
   }
 
   private async runLiveLoop(signal?: AbortSignal): Promise<void> {
@@ -246,15 +253,14 @@ export class LiveChatSource extends ChatSource {
    */
   private ensureSpreadEmitter(): void {
     if (this.spreadEmitter) return;
-    this.spreadEmitter = new SpreadEmitter((msg) => {
-      this.emitMessage(msg);
-    });
+    this.spreadEmitter = new SpreadEmitter(
+      (msg) => {
+        this.emitMessage(msg);
+      },
+      () => this.getSettings().spreadFactor
+    );
   }
 
-  /**
-   * Calculate the ideal spread interval from the poll delay and message count.
-   * Attempts to distribute messages evenly across the poll interval.
-   */
   private calculateSpreadInterval(pollDelayMs: number): number {
     // Use the previous poll's message count as an estimate for the next batch
     const avgCount =

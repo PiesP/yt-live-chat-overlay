@@ -78,6 +78,10 @@ const ROOT_SETTING_META = {
   superChatMaxBodyLines: { type: 'number', visual: true },
   membershipMaxBodyLines: { type: 'number', visual: true },
   spreadEnabled: { type: 'boolean', visual: false },
+  spreadFactor: { type: 'number', visual: false },
+  fadeDurationMs: { type: 'number', visual: false },
+  minPollIntervalMs: { type: 'number', visual: false },
+  maxPollIntervalMs: { type: 'number', visual: false },
 } as const satisfies Record<RootScalarSettingKey, SettingMeta>;
 
 /**
@@ -121,7 +125,11 @@ type SettingsLimitKey =
   | 'backlogRecentMinutes'
   | 'antiBlockFreeRatio'
   | 'superChatMaxBodyLines'
-  | 'membershipMaxBodyLines';
+  | 'membershipMaxBodyLines'
+  | 'spreadFactor'
+  | 'fadeDurationMs'
+  | 'minPollIntervalMs'
+  | 'maxPollIntervalMs';
 
 export const SETTINGS_LIMITS = {
   speedPxPerSec: { min: 50, max: 500, step: 10 },
@@ -143,6 +151,10 @@ export const SETTINGS_LIMITS = {
   antiBlockFreeRatio: { min: 0, max: 0.5, step: 0.05 },
   superChatMaxBodyLines: { min: 2, max: 10, step: 1 },
   membershipMaxBodyLines: { min: 1, max: 5, step: 1 },
+  spreadFactor: { min: 0.1, max: 2, step: 0.1 }, // 0.1 = minimal spread, 2 = double spread
+  fadeDurationMs: { min: 0, max: 1000, step: 50 }, // 0 = no fade, up to 1s
+  minPollIntervalMs: { min: 100, max: 5000, step: 100 }, // 100ms minimum polling
+  maxPollIntervalMs: { min: 1000, max: 30000, step: 1000 }, // 1s to 30s maximum
 } as const satisfies Record<SettingsLimitKey, NumericSettingLimit>;
 
 export const STORAGE_KEY = 'yt-live-chat-overlay-settings';
@@ -212,6 +224,10 @@ export const DEFAULT_SETTINGS = {
   superChatMaxBodyLines: 5,
   membershipMaxBodyLines: 3,
   spreadEnabled: true,
+  spreadFactor: 1.0,
+  fadeDurationMs: 500,
+  minPollIntervalMs: 200,
+  maxPollIntervalMs: 5000,
 } as const satisfies Readonly<OverlaySettings>;
 
 // ── Color validation ────────────────────────────────────────────────────────────

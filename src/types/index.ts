@@ -201,6 +201,14 @@ export interface OverlaySettings {
   // ── Spread Emission ──
   /** Spread poll messages evenly across the poll interval instead of emitting in a burst */
   spreadEnabled: boolean;
+  /** Spread intensity factor (0.1 = minimal spread, 2.0 = double spread) */
+  spreadFactor: number;
+  /** Fade-in duration in milliseconds (0 = no fade) */
+  fadeDurationMs: number;
+  /** Minimum polling interval in milliseconds */
+  minPollIntervalMs: number;
+  /** Maximum polling interval in milliseconds */
+  maxPollIntervalMs: number;
 }
 
 /**

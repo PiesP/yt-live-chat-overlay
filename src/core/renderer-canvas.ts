@@ -84,8 +84,6 @@ export class CanvasRenderer extends RendererBase {
   private readonly textBitmapCache = new Map<string, HTMLCanvasElement>();
   private static readonly TEXT_BITMAP_MAX = 200;
 
-  private static readonly FADE_DURATION_MS = 500;
-
   constructor(overlay: Overlay, settings: OverlaySettings) {
     super(overlay, settings);
 
@@ -342,11 +340,11 @@ export class CanvasRenderer extends RendererBase {
 
       // Fade-in for the first moment a message appears on screen.
       // Applied to all messages in every mode for a smooth entrance.
-      if (elapsed < CanvasRenderer.FADE_DURATION_MS) {
-        opacity *= elapsed / CanvasRenderer.FADE_DURATION_MS;
+      if (elapsed < this.settings.fadeDurationMs) {
+        opacity *= elapsed / this.settings.fadeDurationMs;
       }
-      if (!isScrolling && elapsed > msg.duration - CanvasRenderer.FADE_DURATION_MS) {
-        opacity *= Math.max(0, (msg.duration - elapsed) / CanvasRenderer.FADE_DURATION_MS);
+      if (!isScrolling && elapsed > msg.duration - this.settings.fadeDurationMs) {
+        opacity *= Math.max(0, (msg.duration - elapsed) / this.settings.fadeDurationMs);
       }
 
       if (msg.message.isBacklog) opacity *= 0.5;
