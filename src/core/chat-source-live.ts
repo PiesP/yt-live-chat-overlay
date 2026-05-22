@@ -30,6 +30,8 @@ export class LiveChatSource extends ChatSource {
   private static readonly DENSITY_WINDOW_SIZE = 5;
   private static readonly DENSITY_HIGH_THRESHOLD = 10;
   private static readonly DENSITY_LOW_THRESHOLD = 1;
+  /** When avg messages per poll exceeds this, skip sleep entirely (chained polling). */
+  private static readonly EXTREME_DENSITY_THRESHOLD = 30;
 
   private spreadEmitter: SpreadEmitter | null = null;
 
@@ -81,17 +83,27 @@ export class LiveChatSource extends ChatSource {
 
   private calculateAdaptiveDelay(timeoutMs: number): number {
     const settings = this.getSettings();
-    const baseDelay = timeoutMs > 0 ? timeoutMs : LIVE_POLL_FALLBACK_DELAY_MS;
 
     if (this.consecutiveErrors > 0) {
-      const delayed = baseDelay * 2 ** this.consecutiveErrors;
+      const delayed =
+        (timeoutMs > 0 ? timeoutMs : LIVE_POLL_FALLBACK_DELAY_MS) * 2 ** this.consecutiveErrors;
       return Math.min(settings.maxPollIntervalMs, Math.max(settings.minPollIntervalMs, delayed));
+    }
+
+    // Extreme density: skip sleep entirely (chained polling).
+    // The next request fires immediately after the previous one completes.
+    if (this.recentMessageCounts.length >= 2) {
+      const avgCount =
+        this.recentMessageCounts.reduce((a, b) => a + b, 0) / this.recentMessageCounts.length;
+      if (avgCount >= LiveChatSource.EXTREME_DENSITY_THRESHOLD) {
+        return 0;
+      }
     }
 
     // Base adaptive delay within bounds
     let base = Math.max(
       settings.minPollIntervalMs,
-      Math.min(settings.maxPollIntervalMs, baseDelay)
+      Math.min(settings.maxPollIntervalMs, timeoutMs > 0 ? timeoutMs : LIVE_POLL_FALLBACK_DELAY_MS)
     );
 
     if (this.recentMessageCounts.length < 2) return base;
@@ -106,7 +118,6 @@ export class LiveChatSource extends ChatSource {
       base = Math.min(settings.maxPollIntervalMs, Math.round(base * 1.2));
     }
 
-    // Clamp again after adjustments
     return Math.max(settings.minPollIntervalMs, Math.min(settings.maxPollIntervalMs, base));
   }
 
@@ -128,11 +139,19 @@ export class LiveChatSource extends ChatSource {
 
       // Sync spread emitter with current poll interval
       this.ensureSpreadEmitter();
-      const spreadInterval = this.calculateSpreadInterval(delayMs);
+      const spreadInterval = this.calculateSpreadInterval(
+        Math.max(delayMs, LIVE_POLL_FALLBACK_DELAY_MS)
+      );
       this.spreadEmitter?.setSpreadInterval(spreadInterval);
       this.spreadEmitter?.resume();
 
-      await sleep(delayMs, signal);
+      // Extreme density: skip sleep entirely (chained polling).
+      // When delayMs is 0, the next fetch fires immediately after the
+      // previous response is processed, achieving sub-200ms effective
+      // poll intervals during high-activity bursts.
+      if (delayMs > 0) {
+        await sleep(delayMs, signal);
+      }
 
       throwIfAborted(signal);
 
