@@ -14,6 +14,10 @@ type AuthorDisplayKey = 'normal' | 'member' | 'moderator' | 'owner' | 'verified'
 export type ChatMessageKind = 'text' | 'superchat' | 'membership';
 export type DanmakuMode = 'scroll' | 'reverse' | 'top' | 'bottom';
 export type SuperChatTier = 'blue' | 'cyan' | 'green' | 'yellow' | 'orange' | 'magenta' | 'red';
+/** Author rate-limiting preset modes */
+export type AuthorRateLimitPreset = 'off' | 'normal' | 'strict';
+/** Backlog injection modes */
+export type BacklogMode = 'playback' | 'recent' | 'full' | 'none';
 
 export const isLogLevel = (value: unknown): value is LogLevel =>
   value === 'warn' || value === 'info' || value === 'debug';
@@ -163,11 +167,11 @@ export interface OverlaySettings {
 
   // ── Author Rate Limiting ──
   /** Per-author rate limiting preset */
-  authorRateLimit: 'off' | 'normal' | 'strict';
+  authorRateLimit: AuthorRateLimitPreset;
 
   // ── Backlog Injection ──
   /** How to handle past chat messages on initial load */
-  backlogMode: 'playback' | 'recent' | 'full' | 'none';
+  backlogMode: BacklogMode;
   /** Max backlog messages injected per second (0 = no limit) */
   backlogMaxRate: number;
   /** Speed multiplier for backlog message animations */

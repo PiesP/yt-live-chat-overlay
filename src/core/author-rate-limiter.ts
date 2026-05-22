@@ -1,4 +1,4 @@
-import type { BurstLevel } from '@app-types';
+import type { AuthorRateLimitPreset, BurstLevel } from '@app-types';
 import { createLogger } from '@core/logging';
 
 const log = createLogger('AuthorRateLimiter');
@@ -100,7 +100,7 @@ export class PerAuthorRateLimiter {
     }
   }
 
-  updateConfig(config: { preset: 'off' | 'normal' | 'strict' }): void {
+  updateConfig(config: { preset: AuthorRateLimitPreset }): void {
     if (config.preset === 'off') {
       this.enabled = false;
     } else if (config.preset === 'normal') {

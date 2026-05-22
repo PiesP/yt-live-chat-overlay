@@ -19,7 +19,7 @@
  *    that auto-removes when backlog injection completes.
  */
 
-import type { ChatMessage } from '@app-types';
+import type { BacklogMode, ChatMessage } from '@app-types';
 import { sampleExponential } from '@core/design-tokens';
 import { createLogger } from '@core/logging';
 import type { ObservabilityReporter } from '@core/observability';
@@ -28,7 +28,7 @@ const log = createLogger('Backlog');
 
 interface BacklogControllerConfig {
   /** How to handle past chat messages */
-  backlogMode: 'playback' | 'recent' | 'full' | 'none';
+  backlogMode: BacklogMode;
   /** Max messages per second during backlog injection */
   backlogMaxRate: number;
   /** Speed multiplier for backlog message animations (2 = twice as fast) */
