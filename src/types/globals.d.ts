@@ -1,7 +1,8 @@
 import type { OverlaySettings } from '@app-types';
 
 /**
- * Global type definitions for build constants and window extensions
+ * Global type definitions for build constants, window extensions,
+ * and Tampermonkey GM storage APIs.
  */
 
 interface YtChatOverlayDebugHandle {
@@ -28,4 +29,23 @@ declare global {
     /** YouTube page configuration object (available on YouTube pages). */
     ytcfg?: { data_?: Record<string, unknown> };
   }
+
+  /**
+   * Minimal type declarations for Tampermonkey GM storage APIs.
+   * Full types are provided by vite-plugin-monkey/client when grant is set,
+   * but we need these declarations available at all times for the storage adapter.
+   */
+  function GM_setValue(key: string, value: string): void;
+  function GM_getValue(key: string, defaultValue?: string): string | undefined;
+  function GM_deleteValue(key: string): void;
+  function GM_registerMenuCommand(name: string, fn: () => void): number;
+  /**
+   * Listen for changes to a GM storage key. Returns a listener ID for removal.
+   * Fires on all tabs, including the tab that made the change.
+   */
+  function GM_addValueChangeListener(
+    key: string,
+    callback: (key: string, oldValue: unknown, newValue: unknown, remote: boolean) => void
+  ): number;
+  function GM_removeValueChangeListener(listenerId: number): void;
 }

@@ -71,6 +71,20 @@ export class BacklogInjectionController {
   private static readonly DENSITY_RAMP_MAX_MS = 4000;
   private densityRampMs = BacklogInjectionController.DENSITY_RAMP_BASE_MS;
 
+  // ── Injection rate constants ────────────────────────────────────
+  private static readonly INJECTION_RATE_MIN = 4;
+  private static readonly INJECTION_RATE_MAX = 20;
+  private static readonly REAL_TIME_ACTIVITY_CAP = 5;
+  private static readonly REAL_TIME_FACTOR_MIN = 0.25;
+  private static readonly REAL_TIME_FACTOR_STEP = 0.2;
+  private static readonly UTILIZATION_FACTOR_MIN = 0.1;
+  private static readonly UTILIZATION_FACTOR_SLOPE = 0.9;
+  private static readonly DENSITY_SMALL_THRESHOLD = 200;
+  private static readonly DENSITY_LARGE_THRESHOLD = 500;
+  private static readonly SAMPLE_RATIO_SMALL = 0.6;
+  private static readonly SAMPLE_RATIO_LARGE = 0.35;
+  private static readonly INDICATOR_HIDE_DELAY_MS = 300;
+
   constructor(
     config: BacklogControllerConfig,
     lanes: number,
@@ -138,10 +152,13 @@ export class BacklogInjectionController {
     // Small backlogs (<200) use the base ramp; large backlogs (>=500)
     // extend up to DENSITY_RAMP_MAX_MS to prevent visual flooding.
     const backlogSize = sampled.length;
-    if (backlogSize >= 500) {
+    if (backlogSize >= BacklogInjectionController.DENSITY_LARGE_THRESHOLD) {
       this.densityRampMs = BacklogInjectionController.DENSITY_RAMP_MAX_MS;
-    } else if (backlogSize >= 200) {
-      const t = (backlogSize - 200) / 300; // 0 at 200, 1 at 500
+    } else if (backlogSize >= BacklogInjectionController.DENSITY_SMALL_THRESHOLD) {
+      const t =
+        (backlogSize - BacklogInjectionController.DENSITY_SMALL_THRESHOLD) /
+        (BacklogInjectionController.DENSITY_LARGE_THRESHOLD -
+          BacklogInjectionController.DENSITY_SMALL_THRESHOLD); // 0 at 200, 1 at 500
       this.densityRampMs = Math.round(
         BacklogInjectionController.DENSITY_RAMP_BASE_MS +
           t *
@@ -166,7 +183,10 @@ export class BacklogInjectionController {
 
   /** Notify the controller that a real-time message arrived during injection. */
   notifyRealTimeActivity(): void {
-    this.realTimeActivityCount = Math.min(this.realTimeActivityCount + 1, 5);
+    this.realTimeActivityCount = Math.min(
+      this.realTimeActivityCount + 1,
+      BacklogInjectionController.REAL_TIME_ACTIVITY_CAP
+    );
   }
 
   /** Start the throttled injection loop */
@@ -188,8 +208,18 @@ export class BacklogInjectionController {
       return;
     }
 
-    const maxRate = Math.max(4, Math.min(20, this.config.backlogMaxRate, this.lanes * 2));
-    const realTimeFactor = Math.max(0.25, 1 - this.realTimeActivityCount * 0.2);
+    const maxRate = Math.max(
+      BacklogInjectionController.INJECTION_RATE_MIN,
+      Math.min(
+        BacklogInjectionController.INJECTION_RATE_MAX,
+        this.config.backlogMaxRate,
+        this.lanes * 2
+      )
+    );
+    const realTimeFactor = Math.max(
+      BacklogInjectionController.REAL_TIME_FACTOR_MIN,
+      1 - this.realTimeActivityCount * BacklogInjectionController.REAL_TIME_FACTOR_STEP
+    );
     const rampFactor = this.getDensityRampFactor();
     const utilizationFactor = this.getUtilizationFactor();
     const adaptiveRate = Math.max(
@@ -225,7 +255,10 @@ export class BacklogInjectionController {
     if (!this.onUtilizationQuery) return 1;
     const utilization = this.onUtilizationQuery();
     // Linear falloff: 0% utilized → 1.0, 100% utilized → 0.1
-    return Math.max(0.1, 1 - utilization * 0.9);
+    return Math.max(
+      BacklogInjectionController.UTILIZATION_FACTOR_MIN,
+      1 - utilization * BacklogInjectionController.UTILIZATION_FACTOR_SLOPE
+    );
   }
 
   /**
@@ -291,7 +324,10 @@ export class BacklogInjectionController {
       }
     }
 
-    const normalBudget = count < 500 ? Math.floor(count * 0.6) : Math.floor(count * 0.35);
+    const normalBudget =
+      count < BacklogInjectionController.DENSITY_LARGE_THRESHOLD
+        ? Math.floor(count * BacklogInjectionController.SAMPLE_RATIO_SMALL)
+        : Math.floor(count * BacklogInjectionController.SAMPLE_RATIO_LARGE);
 
     const selected: ChatMessage[] = [...tier1];
     let remaining = normalBudget;
@@ -393,7 +429,7 @@ export class BacklogInjectionController {
         this.indicatorEl.remove();
         this.indicatorEl = null;
       }
-    }, 300);
+    }, BacklogInjectionController.INDICATOR_HIDE_DELAY_MS);
   }
 
   /** Update config at runtime */
