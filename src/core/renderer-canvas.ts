@@ -345,13 +345,15 @@ export class CanvasRenderer extends RendererBase {
 
       let opacity = this.settings.opacity;
 
-      // Fade-in for the first moment a message appears on screen.
-      // Applied to all messages in every mode for a smooth entrance.
-      if (elapsed < this.settings.fadeDurationMs) {
-        opacity *= elapsed / this.settings.fadeDurationMs;
-      }
-      if (!isScrolling && elapsed > msg.duration - this.settings.fadeDurationMs) {
-        opacity *= Math.max(0, (msg.duration - elapsed) / this.settings.fadeDurationMs);
+      // Fade-in / fade-out. Skip entirely when fadeDurationMs is 0.
+      const fadeDuration = this.settings.fadeDurationMs;
+      if (fadeDuration > 0) {
+        if (elapsed < fadeDuration) {
+          opacity *= elapsed / fadeDuration;
+        }
+        if (!isScrolling && elapsed > msg.duration - fadeDuration) {
+          opacity *= Math.max(0, (msg.duration - elapsed) / fadeDuration);
+        }
       }
 
       if (msg.message.isBacklog) opacity *= 0.5;

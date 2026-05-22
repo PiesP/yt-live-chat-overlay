@@ -274,8 +274,13 @@ export class LaneAllocator {
 
   /** Incrementally update density scores when a lane is committed. */
   private updateDensityOnCommit(laneIndex: number, now: number): void {
-    // Boost the committed lane and its neighbors
-    for (let i = 0; i < this.laneCount; i++) {
+    // Only update the committed lane and nearby lanes (distance <= 3).
+    // Distant lanes get negligible weight (1/(1+3*0.1) ≈ 0.77 at dist=3,
+    // decaying rapidly), so skipping them saves O(n) per commit.
+    const range = 3;
+    const start = Math.max(0, laneIndex - range);
+    const end = Math.min(this.laneCount - 1, laneIndex + range);
+    for (let i = start; i <= end; i++) {
       const distance = Math.abs(i - laneIndex);
       const proximityWeight = 1 / (1 + distance * 0.1);
       const current = this.laneDensityScore[i] ?? 0;
