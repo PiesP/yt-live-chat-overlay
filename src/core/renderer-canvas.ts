@@ -148,6 +148,14 @@ export class CanvasRenderer extends RendererBase {
     }
 
     this.updateBacklogPause();
+
+    // Trigger an immediate render frame so the message appears within
+    // one frame (~16ms) instead of waiting for the next natural rAF.
+    if (this.pendingQueue.length === 1 && this.animFrameId !== null) {
+      cancelAnimationFrame(this.animFrameId);
+      this.animFrameId = null;
+      this.startRenderLoop();
+    }
   }
 
   /** Binary search for insertion point in the priority-sorted pending queue. */
@@ -300,19 +308,18 @@ export class CanvasRenderer extends RendererBase {
     // Previously drainQueue ran first, so activeMessages.length included
     // about-to-expire entries, artificially limiting how many new messages
     // could be admitted in this frame.
-    const toRemove: number[] = [];
-    for (let i = 0; i < this.activeMessages.length; i++) {
+    // Optimized: reverse iteration with splice avoids O(n*m) filter+includes.
+    let removed = false;
+    for (let i = this.activeMessages.length - 1; i >= 0; i--) {
       const msg = this.activeMessages[i];
       if (!msg) continue;
       const elapsed = now - msg.startTime - msg.pausedDuration;
       if (elapsed >= msg.duration) {
-        toRemove.push(i);
+        this.activeMessages.splice(i, 1);
+        removed = true;
       }
     }
-    if (toRemove.length > 0) {
-      const surviving = this.activeMessages.filter((_, i) => !toRemove.includes(i));
-      this.activeMessages.length = 0;
-      this.activeMessages.push(...surviving);
+    if (removed) {
       this.observability.updateActiveMessages(this.activeMessages.length);
       this.observability.updateQueueDepth(this.pendingQueue.length);
     }
