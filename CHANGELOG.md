@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.31.0] - 2026-07-20
+
+### Added
+
+- **Top-first lane allocation** — The lane scheduler now scans from the top of the screen down, picking the first zero-wait lane. Previously the composite scoring (weighted by density/count/temporal terms) dominated the DLIOS wait term (42:1 ratio), causing persistent downward drift and top-lane underutilization. ([`aab1263`](https://github.com/PiesP/yt-live-chat-overlay/commit/aab1263))
+- **Collision feedback** — When `checkPlacement` detects a lane collision, `markCollision(laneIndex)` tells the allocator to skip that lane for the rest of the batch, allowing subsequent messages to fall through to the next free lane below. Previously every message in the same batch was assigned the same lane and rejected. ([`bb0ce52`](https://github.com/PiesP/yt-live-chat-overlay/commit/bb0ce52))
+- **Backlog real-time lane preference** — Backlog messages prefer lanes that have no recent real-time traffic (`realTimeLanesUntil` map on the allocator). When zero-wait lanes exist without recent real-time messages, backlog uses those first, accepting a dropped message rather than mixing with real-time traffic on busy lanes. ([`aab1263`](https://github.com/PiesP/yt-live-chat-overlay/commit/aab1263))
+
+### Fixed
+
+- **Poll loop hang on dispose while paused** — `waitWhilePaused()` now checks the AbortSignal on each polling tick. Previously, when the session was disposed while chat was paused, the recursive `setTimeout` loop never resolved, blocking the entire start/restart chain. ([`30815bf`](https://github.com/PiesP/yt-live-chat-overlay/commit/30815bf))
+- **text-measure widthCache not cleared on session destroy** — `clearTextMeasurementCaches()` added to `onDestroy()`. Stale entries from a previous session's font settings could return incorrect widths after a user changes font size. ([`30815bf`](https://github.com/PiesP/yt-live-chat-overlay/commit/30815bf))
+- **Emitter frame-time spikes on mass expiry** — Replaced O(n²) `splice(i, 1)` reverse-iteration with an O(n) in-place filter pass in `renderFrame()`. ([`30815bf`](https://github.com/PiesP/yt-live-chat-overlay/commit/30815bf))
+- **Drop-rate metric skew during video pause** — `onMessageReceived()` now called before the `isVideoPaused` check. Previously video-pause drops skipped `onMessageReceived()`, freezing the denominator and inflating the drop-rate ratio during video format transitions. ([`954b7b1`](https://github.com/PiesP/yt-live-chat-overlay/commit/954b7b1))
+- **Emoji double HTTP request causing text→image flicker** — `prefetchImages()` created an Image whose `onload` called `loadImage()`, which created a second Image for the same URL. Emoji only appeared after the second request completed, doubling network latency. Now cached directly in `onload`. ([`be8d925`](https://github.com/PiesP/yt-live-chat-overlay/commit/be8d925))
+- **Unhandled promise rejection in `pollContinuationReplay`** — Added `.catch()` guard to `void`-ed seek handler call. ([`eb3ea9a`](https://github.com/PiesP/yt-live-chat-overlay/commit/eb3ea9a))
+
+### Refactored
+
+- **Settings drop-rate warning** — Now includes the drop reason (`video_paused`, `rate_limited`, `queue_full`, `no_lane`) and suppresses warnings for expected video-pause drops. ([`954b7b1`](https://github.com/PiesP/yt-live-chat-overlay/commit/954b7b1))
+- **Dead code removed** — `DropReason` type, `LaneState` 1-field interface (inlined into `laneIndex`), `setBacklogPartition`/`clearBacklogPartition` no-op methods, `onBacklogStateChange` no-op callback and all 3 call sites. 9 files changed, −94 lines. ([`3b61810`](https://github.com/PiesP/yt-live-chat-overlay/commit/3b61810), [`eb3ea9a`](https://github.com/PiesP/yt-live-chat-overlay/commit/eb3ea9a))
+- **Barrel re-exports eliminated** — `youtubei-chat.ts` no longer re-exports types from sub-modules. Consumers import `InnertubeContinuationData`, `JsonObject`, etc. directly from `youtubei-continuation` or `youtubei-json`. ([`3b61810`](https://github.com/PiesP/yt-live-chat-overlay/commit/3b61810))
+- **Async/promise hygiene** — Nested `.then()` in `fetch-interceptor` converted to async IIFE; `PollLoopManager` `.then/.catch/.finally` converted to async IIFE; `waitWhilePaused` rewritten to use `sleep()`+loop; 3 superfluous `async` keywords removed. ([`eb3ea9a`](https://github.com/PiesP/yt-live-chat-overlay/commit/eb3ea9a))
+- **Text rendering extracted** — `renderSegment`, `renderContentSegments`, `renderWrappedText`, `cacheTextBitmap`, `strokeTextOutline` moved to `canvas-text-renderer.ts`. CanvasRenderer now -140 lines with clearer separation of concerns. ([`6e6aba2`](https://github.com/PiesP/yt-live-chat-overlay/commit/6e6aba2))
+
 ## [0.30.0] - 2026-05-22
 
 ### Added
