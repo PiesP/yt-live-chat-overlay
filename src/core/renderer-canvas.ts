@@ -420,14 +420,21 @@ export class CanvasRenderer extends RendererBase {
       const result = this.checkPlacement(msg, now);
       if (!result.ok) {
         if (result.reason === 'no_lane') {
+          // No lane available — the allocator found no free lane for this
+          // message. Dropping is correct because retrying won't help until
+          // an existing message expires (several seconds later).
           this.observability.onMessageDropped();
           skipped = 0; // reset after drop
           continue;
         }
-        // Collision: skip this message and try the next one.
-        // Only retry the skipped message if we haven't exceeded maxSkip.
+        // Collision: the allocator found a lane but the bounding-box check
+        // against active (visible) messages detected overlap near the entry
+        // edge. Keep the message in the queue and retry next frame — the
+        // collision window is often <100ms as the existing message scrolls
+        // left. Previously this was a hard drop, causing 80%+ loss during
+        // high-density bursts despite available lanes (queue=0, lanes=75%).
         skipped++;
-        this.observability.onMessageDropped();
+        this.pendingQueue.push(msg); // retry next frame
         continue;
       }
 
