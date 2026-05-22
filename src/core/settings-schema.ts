@@ -22,10 +22,9 @@ export const AUTHOR_COLOR_KEYS = [
   'verified',
 ] as const satisfies readonly AuthorType[];
 
-export const SHOW_AUTHOR_KEYS = [
-  ...AUTHOR_COLOR_KEYS,
-  'superChat',
-] as const satisfies ReadonlyArray<keyof OverlaySettings['showAuthor']>;
+const SHOW_AUTHOR_KEYS = [...AUTHOR_COLOR_KEYS, 'superChat'] as const satisfies ReadonlyArray<
+  keyof OverlaySettings['showAuthor']
+>;
 
 type RootNumericSettingKey = Exclude<
   RootScalarSettingKey,
@@ -78,11 +77,11 @@ const ROOT_SETTING_META = {
  * Visual root keys derived from ROOT_SETTING_META — single source of truth.
  * Changes to visual settings require a full renderer reset.
  */
-export const VISUAL_ROOT_KEYS = Object.entries(ROOT_SETTING_META)
+const VISUAL_ROOT_KEYS = Object.entries(ROOT_SETTING_META)
   .filter(([, meta]) => meta.visual)
   .map(([key]) => key as RootScalarSettingKey);
 
-export const OUTLINE_SETTING_KEYS = [
+const OUTLINE_SETTING_KEYS = [
   'enabled',
   'widthPx',
   'opacity',
@@ -118,7 +117,7 @@ type SettingsLimitKey =
   | 'minPollIntervalMs'
   | 'maxPollIntervalMs';
 
-export const SETTINGS_LIMITS = {
+const SETTINGS_LIMITS = {
   speedPxPerSec: { min: 50, max: 500, step: 10 },
   fontSize: { min: 14, max: 50, step: 2 },
   opacity: { min: 0.5, max: 1, step: 0.05 },

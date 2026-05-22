@@ -22,7 +22,7 @@ const log = createLogger('ChatSource');
 
 const DEFAULT_ACTIVITY_TIMEOUT_MS = 30_000;
 
-export interface ChatHealthSnapshotOptions {
+interface ChatHealthSnapshotOptions {
   activeTimeoutMs?: number;
 }
 
@@ -40,10 +40,7 @@ export interface PlaybackSnapshot {
  * Accepts either a single message (for individual emission like replay)
  * or an array of messages (for batch emission like live polling).
  */
-export type MessageCallback = (
-  messages: ChatMessage | ChatMessage[],
-  isInitialSeed?: boolean
-) => void;
+type MessageCallback = (messages: ChatMessage | ChatMessage[], isInitialSeed?: boolean) => void;
 export type ChatSourceStartStatus = 'started' | 'retryable' | 'unavailable';
 
 export abstract class ChatSource {

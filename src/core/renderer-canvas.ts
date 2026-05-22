@@ -39,7 +39,7 @@ import {
 } from '@core/design-tokens';
 import { createLogger } from '@core/logging';
 import type { Overlay } from '@core/overlay';
-import { RendererBase, type RendererUpdateOptions } from '@core/renderer-base';
+import { RendererBase } from '@core/renderer-base';
 import { estimateMessageDimensions as sharedEstimateDimensions } from '@core/renderer-shared';
 import {
   clearTextMeasurementCaches,
@@ -207,10 +207,6 @@ export class CanvasRenderer extends RendererBase {
       return prioB - prioA || a.timestamp - b.timestamp;
     });
     this.pendingQueue.length = rendererLayout.backgroundQueueMax;
-  }
-
-  updateSettings(settings: OverlaySettings, options?: RendererUpdateOptions): void {
-    super.updateSettings(settings, options);
   }
 
   // ── Lane partition control ──────────────────────────────────────────

@@ -207,13 +207,6 @@ const normalizeOutlineNumericInputValue = (
   return normalizeNumericValue(value, fallback, resolveLimits(key), false);
 };
 
-const formatOutlineNumericSettingForInput = (
-  _key: Exclude<OutlineSettingKey, 'enabled'>,
-  value: number
-): string | number => {
-  return value;
-};
-
 const getNumericInputAttributes = (
   key: RootScalarSettingKey | Exclude<OutlineSettingKey, 'enabled'>
 ): Readonly<{ min: number; max: number; step: number }> => {
@@ -397,7 +390,7 @@ export class SettingsUiForm {
         } else {
           const numericKey = isOutlineNumericKey(rawKey) ? rawKey : null;
           if (numericKey) {
-            el.value = formatOutlineNumericSettingForInput(numericKey, value as number) as string;
+            el.value = String(value as number);
           }
         }
         continue;

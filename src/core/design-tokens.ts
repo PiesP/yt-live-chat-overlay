@@ -1,6 +1,6 @@
 import type { SuperChatInfo, SuperChatTier } from '@app-types';
 
-export interface RgbColor {
+interface RgbColor {
   readonly r: number;
   readonly g: number;
   readonly b: number;
@@ -255,13 +255,13 @@ export function resolveSuperChatRgb(
 }
 
 /** Opacity boost applied to the top of a SuperChat card gradient. */
-export const SUPERCHAT_TOP_OPACITY_BOOST = 0.06;
+const SUPERCHAT_TOP_OPACITY_BOOST = 0.06;
 
 /** Opacity reduction applied to the bottom of a SuperChat card gradient. */
-export const SUPERCHAT_BOTTOM_OPACITY_REDUCTION = 0.08;
+const SUPERCHAT_BOTTOM_OPACITY_REDUCTION = 0.08;
 
 /** Minimum opacity for SuperChat card gradient (clamps base and bottom). */
-export const SUPERCHAT_MIN_OPACITY = 0.4;
+const SUPERCHAT_MIN_OPACITY = 0.4;
 
 /** Compute top/middle/bottom opacities for SuperChat card gradient. */
 export function computeSuperChatOpacities(superChatOpacity: number): {

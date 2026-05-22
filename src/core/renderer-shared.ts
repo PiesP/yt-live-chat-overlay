@@ -38,7 +38,7 @@ function measureContentWidth(message: ChatMessage, font: string, fontSize: numbe
 
 // ── Dimension estimation ────────────────────────────────────────────────────
 
-export interface MessageDimensions {
+interface MessageDimensions {
   width: number;
   height: number;
 }
