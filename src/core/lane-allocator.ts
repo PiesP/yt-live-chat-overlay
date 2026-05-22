@@ -71,15 +71,6 @@ export class LaneAllocator {
   private collidedLanes: Set<number> = new Set();
 
   /**
-   * Rotation pointer for backlog lane allocation.
-   * Each new backlog message starts scanning from the lane AFTER the
-   * previous placement, ensuring sequential backlog messages spread
-   * evenly across lanes instead of clustering on lane 0.
-   * Real-time messages ignore this — they use top-first scanning.
-   */
-  private lastBacklogLane = -1;
-
-  /**
    * Tracks until when each lane has active real-time content (non-backlog).
    * Map laneIndex → timestamp (performance.now()) until which the lane is
    * considered to have real-time occupancy. Backlog messages skip these
@@ -149,7 +140,6 @@ export class LaneAllocator {
     this.collidedLanes.clear();
     this.realTimeLanesUntil.clear();
     this.backlogLanesUntil.clear();
-    this.lastBacklogLane = -1;
     if (!dimensions) {
       this.laneHeight = 0;
       this.laneCount = 0;
@@ -399,15 +389,8 @@ export class LaneAllocator {
     let firstBusy: { laneIndex: number; waitMs: number } | null = null;
     let speedMatched: { laneIndex: number; waitMs: number } | null = null;
 
-    // For backlog messages, rotate the scan start position so sequential
-    // injections spread evenly across lanes instead of all hitting lane 0.
-    // Real-time messages use top-first linear scan (laneStart → laneEnd).
-    const totalLanes = laneEnd - laneStart;
-    const scanStart = isBacklog ? (this.lastBacklogLane + 1) % totalLanes : 0;
-
     // ── Phase 1: zero-wait lane with speed compatibility filter ──
-    for (let offset = 0; offset < totalLanes; offset++) {
-      const i = (scanStart + offset) % totalLanes;
+    for (let i = laneStart; i < laneEnd; i++) {
       if (this.collidedLanes.has(i)) continue;
 
       // Speed compatibility check
@@ -437,16 +420,12 @@ export class LaneAllocator {
       // Found a zero-wait compatible lane.
       // Epsilon-greedy: 5% chance to skip for visual variety.
       if (Math.random() < LaneAllocator.EPSILON) continue;
-      if (isBacklog) this.lastBacklogLane = i;
       return { laneIndex: i, waitMs: 0 };
     }
 
     // ── Phase 2: speed-matched busy lane ──
     // Prefer lanes already running at the same speed profile.
-    if (speedMatched && speedMatched.waitMs <= maxWaitMs) {
-      if (isBacklog) this.lastBacklogLane = speedMatched.laneIndex;
-      return speedMatched;
-    }
+    if (speedMatched && speedMatched.waitMs <= maxWaitMs) return speedMatched;
 
     // ── Phase 3: fastest-free lane (real-time only) ──
     // Backlog messages stop here — they don't compete with real-time on busy lanes.
@@ -511,10 +490,7 @@ export class LaneAllocator {
         }
         blockMaxWait = Math.max(blockMaxWait, slotWait);
       }
-      if (allZeroWait) {
-        if (isBacklog) this.lastBacklogLane = startIdx;
-        return { laneIndex: startIdx, waitMs: blockMaxWait };
-      }
+      if (allZeroWait) return { laneIndex: startIdx, waitMs: blockMaxWait };
     }
 
     // Phase 2: no zero-wait block — delegate to single-lane allocator

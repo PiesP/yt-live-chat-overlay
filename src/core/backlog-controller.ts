@@ -236,10 +236,16 @@ export class BacklogInjectionController {
    * long-term rate matches the target, but whose individual intervals vary
    * naturally — eliminating the "train" pattern caused by uniform spacing.
    *
-   * The result is clamped to [16ms, 2×mean] to prevent extreme outliers.
+   * The result is clamped to [floorMs, 2×mean] to prevent both sub-32ms
+   * clustering (vertical bunching on nearby lanes) and extreme outliers.
+   * floorMs = max(32, meanInterval × 0.6) adapts to the injection rate.
    */
   private scheduleNextTick(meanInterval: number): void {
-    const poissonDelay = Math.max(16, Math.min(meanInterval * 2, sampleExponential(meanInterval)));
+    const floorMs = Math.max(32, Math.round(meanInterval * 0.6));
+    const poissonDelay = Math.max(
+      floorMs,
+      Math.min(meanInterval * 2, sampleExponential(meanInterval))
+    );
     this.injectionTimer = setTimeout(() => this.processTick(), poissonDelay);
   }
 
