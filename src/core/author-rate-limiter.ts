@@ -100,10 +100,18 @@ export class PerAuthorRateLimiter {
     }
   }
 
-  updateConfig(config: { enabled?: boolean; windowMs?: number; maxPerWindow?: number }): void {
-    if (config.enabled !== undefined) this.enabled = config.enabled;
-    if (config.windowMs !== undefined) this.windowMs = config.windowMs;
-    if (config.maxPerWindow !== undefined) this.maxPerWindow = config.maxPerWindow;
+  updateConfig(config: { preset: 'off' | 'normal' | 'strict' }): void {
+    if (config.preset === 'off') {
+      this.enabled = false;
+    } else if (config.preset === 'normal') {
+      this.enabled = true;
+      this.windowMs = 5000;
+      this.maxPerWindow = 5;
+    } else if (config.preset === 'strict') {
+      this.enabled = true;
+      this.windowMs = 5000;
+      this.maxPerWindow = 2;
+    }
   }
 
   size(): number {

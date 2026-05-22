@@ -167,7 +167,6 @@ export class RuntimeSession {
       this.backlogController.updateConfig({
         backlogMaxRate: settings.backlogMaxRate,
         backlogSpeedMultiplier: settings.backlogSpeedMultiplier,
-        showBacklogIndicator: settings.showBacklogIndicator,
         backlogMode: settings.backlogMode,
         backlogRecentMinutes: settings.backlogRecentMinutes,
       });
@@ -288,7 +287,6 @@ export class RuntimeSession {
         backlogMode: this.settings.backlogMode,
         backlogMaxRate: this.settings.backlogMaxRate,
         backlogSpeedMultiplier: this.settings.backlogSpeedMultiplier,
-        showBacklogIndicator: this.settings.showBacklogIndicator,
         backlogRecentMinutes: this.settings.backlogRecentMinutes,
       },
       renderer.laneCount,

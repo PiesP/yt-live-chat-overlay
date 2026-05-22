@@ -33,8 +33,6 @@ interface BacklogControllerConfig {
   backlogMaxRate: number;
   /** Speed multiplier for backlog message animations (2 = twice as fast) */
   backlogSpeedMultiplier: number;
-  /** Show backlog loading indicator */
-  showBacklogIndicator: boolean;
   /** For 'recent' mode: how many minutes of past chat to show */
   backlogRecentMinutes: number;
 }
@@ -141,9 +139,7 @@ export class BacklogInjectionController {
     log.debug(`Backlog injection: ${messages.length} messages, sampled to ${sampled.length}`);
 
     // Show indicator
-    if (this.config.showBacklogIndicator) {
-      this.showIndicator();
-    }
+    this.showIndicator();
 
     // Report to observability
     this.observability?.updateBacklogProgress(0);
@@ -196,9 +192,7 @@ export class BacklogInjectionController {
     const progress = this.totalBacklog > 0 ? this.processedBacklog / this.totalBacklog : 1;
     this.observability?.updateBacklogProgress(progress);
 
-    if (this.config.showBacklogIndicator) {
-      this.updateIndicator(progress);
-    }
+    this.updateIndicator(progress);
 
     this.emitBacklogMessage(message);
 

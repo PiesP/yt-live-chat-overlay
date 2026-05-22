@@ -167,12 +167,8 @@ export interface OverlaySettings {
   showDebugOverlay: boolean;
 
   // ── Author Rate Limiting ──
-  /** Enable per-author rate limiting */
-  authorRateLimitEnabled: boolean;
-  /** Rate limit window in milliseconds */
-  authorRateLimitWindowMs: number;
-  /** Max messages per author per window */
-  authorRateLimitMaxMessages: number;
+  /** Per-author rate limiting preset */
+  authorRateLimit: 'off' | 'normal' | 'strict';
 
   // ── Backlog Injection ──
   /** How to handle past chat messages on initial load */
@@ -181,16 +177,8 @@ export interface OverlaySettings {
   backlogMaxRate: number;
   /** Speed multiplier for backlog message animations */
   backlogSpeedMultiplier: number;
-  /** Show backlog loading indicator */
-  showBacklogIndicator: boolean;
   /** For 'recent' mode: how many minutes of past chat to show (1-30) */
   backlogRecentMinutes: number;
-
-  // ── Anti-block / Density Control ──
-  /** Enable anti-block: pause new messages when screen is too crowded */
-  antiBlockEnabled: boolean;
-  /** Minimum ratio of free lanes required (0.0-1.0). ~0.15 = 15% screen always clear */
-  antiBlockFreeRatio: number;
   /** Preserve author's chosen text color from YouTube chat */
   preserveUserColor: boolean;
   /** Maximum body text lines for SuperChat cards (2-10, default 5) */

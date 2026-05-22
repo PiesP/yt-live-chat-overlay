@@ -29,12 +29,7 @@ export const SHOW_AUTHOR_KEYS = [
 
 type RootNumericSettingKey = Exclude<
   RootScalarSettingKey,
-  | 'enabled'
-  | 'allowShortTextMessages'
-  | 'logLevel'
-  | 'showDebugOverlay'
-  | 'authorRateLimitEnabled'
-  | 'showBacklogIndicator'
+  'enabled' | 'allowShortTextMessages' | 'logLevel' | 'showDebugOverlay' | 'authorRateLimit'
 >;
 
 /** Root setting metadata: defines type, category, and visual-change flag.
@@ -62,18 +57,13 @@ const ROOT_SETTING_META = {
   logLevel: { type: 'string', visual: false },
   laneSpacing: { type: 'number', visual: true },
   showDebugOverlay: { type: 'boolean', visual: false },
-  authorRateLimitEnabled: { type: 'boolean', visual: false },
-  authorRateLimitWindowMs: { type: 'number', visual: false },
-  authorRateLimitMaxMessages: { type: 'number', visual: false },
+  authorRateLimit: { type: 'string', visual: false },
   backlogMaxRate: { type: 'number', visual: false },
   backlogSpeedMultiplier: { type: 'number', visual: false },
-  showBacklogIndicator: { type: 'boolean', visual: false },
   backlogMode: { type: 'string', visual: false },
   backlogRecentMinutes: { type: 'number', visual: false },
   fontWeight: { type: 'string', visual: true },
   fontFamily: { type: 'string', visual: true },
-  antiBlockEnabled: { type: 'boolean', visual: false },
-  antiBlockFreeRatio: { type: 'number', visual: false },
   preserveUserColor: { type: 'boolean', visual: true },
   superChatMaxBodyLines: { type: 'number', visual: true },
   membershipMaxBodyLines: { type: 'number', visual: true },
@@ -118,12 +108,9 @@ type SettingsLimitKey =
   | 'outlineWidthPx'
   | 'outlineOpacity'
   | 'laneSpacing'
-  | 'authorRateLimitWindowMs'
-  | 'authorRateLimitMaxMessages'
   | 'backlogMaxRate'
   | 'backlogSpeedMultiplier'
   | 'backlogRecentMinutes'
-  | 'antiBlockFreeRatio'
   | 'superChatMaxBodyLines'
   | 'membershipMaxBodyLines'
   | 'spreadFactor'
@@ -143,12 +130,9 @@ export const SETTINGS_LIMITS = {
   outlineWidthPx: { min: 0, max: 8, step: 0.5 },
   outlineOpacity: { min: 0, max: 1, step: 0.1 },
   laneSpacing: { min: 0, max: 20, step: 1 },
-  authorRateLimitWindowMs: { min: 1000, max: 30000, step: 1000 },
-  authorRateLimitMaxMessages: { min: 1, max: 20, step: 1 },
   backlogMaxRate: { min: 0, max: 50, step: 5 },
   backlogSpeedMultiplier: { min: 1, max: 5, step: 0.5 },
   backlogRecentMinutes: { min: 1, max: 30, step: 1 },
-  antiBlockFreeRatio: { min: 0, max: 0.5, step: 0.05 },
   superChatMaxBodyLines: { min: 2, max: 10, step: 1 },
   membershipMaxBodyLines: { min: 1, max: 5, step: 1 },
   spreadFactor: { min: 0.1, max: 2, step: 0.1 }, // 0.1 = minimal spread, 2 = double spread
@@ -208,18 +192,13 @@ export const DEFAULT_SETTINGS = {
   outline: DEFAULT_OUTLINE,
   laneSpacing: 3,
   showDebugOverlay: false,
-  authorRateLimitEnabled: true,
-  authorRateLimitWindowMs: 5000,
-  authorRateLimitMaxMessages: 5,
+  authorRateLimit: 'normal',
   backlogMaxRate: 10,
   backlogSpeedMultiplier: 2,
-  showBacklogIndicator: true,
   backlogMode: 'playback',
   backlogRecentMinutes: 5,
   fontWeight: 'bold',
   fontFamily: 'system-ui, -apple-system, sans-serif',
-  antiBlockEnabled: true,
-  antiBlockFreeRatio: 0.15,
   preserveUserColor: false,
   superChatMaxBodyLines: 5,
   membershipMaxBodyLines: 3,
@@ -286,6 +265,7 @@ const STRING_VALIDATORS: Partial<Record<RootScalarSettingKey, (v: string) => boo
   logLevel: (v) => isLogLevel(v),
   fontWeight: (v) => v === 'normal' || v === 'bold',
   fontFamily: (_v) => true,
+  authorRateLimit: (v) => v === 'off' || v === 'normal' || v === 'strict',
 };
 
 const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings => {

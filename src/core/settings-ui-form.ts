@@ -21,7 +21,6 @@ const ROOT_ROUNDED_KEYS = new Set<RootScalarSettingKey>([
   'maxConcurrentMessages',
   'minTextLength',
   'laneSpacing',
-  'authorRateLimitMaxMessages',
   'superChatMaxBodyLines',
   'membershipMaxBodyLines',
 ]);

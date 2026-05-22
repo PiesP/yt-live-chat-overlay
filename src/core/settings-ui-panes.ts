@@ -155,16 +155,6 @@ export const PANES: PaneDef[] = [
             'maxConcurrentMessages',
             'Performance warning threshold for simultaneous comments'
           ),
-          chk(
-            'Anti-block (density guard)',
-            'antiBlockEnabled',
-            'Pause new comments when screen is too crowded (keeps ~15% visible area clear)'
-          ),
-          num(
-            'Free ratio',
-            'antiBlockFreeRatio',
-            'Minimum fraction of lanes that must remain free (0.15 = 15%). Lower = denser'
-          ),
         ],
       },
       {
@@ -191,11 +181,6 @@ export const PANES: PaneDef[] = [
             'backlogRecentMinutes',
             'Show past chat from last N minutes (only for Recent mode)'
           ),
-          chk(
-            'Show backlog loading indicator',
-            'showBacklogIndicator',
-            'Show loading indicator during backlog injection'
-          ),
         ],
       },
       {
@@ -211,21 +196,11 @@ export const PANES: PaneDef[] = [
       {
         title: 'Rate Limiting',
         fields: [
-          chk(
-            'Enable author rate limiting',
-            'authorRateLimitEnabled',
-            'Limit messages per author per time window'
-          ),
-          num(
-            'Window (ms)',
-            'authorRateLimitWindowMs',
-            'Time window for rate limiting in milliseconds'
-          ),
-          num(
-            'Max per window',
-            'authorRateLimitMaxMessages',
-            'Maximum messages per author per window'
-          ),
+          sel('Author Rate Limit', 'authorRateLimit', [
+            ['off', 'Off'],
+            ['normal', 'Normal (5 msg / 5s)'],
+            ['strict', 'Strict (2 msg / 5s)'],
+          ]),
         ],
       },
       {

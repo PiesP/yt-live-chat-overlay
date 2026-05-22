@@ -64,9 +64,7 @@ export abstract class RendererBase {
 
     this.authorRateLimiter = new PerAuthorRateLimiter(() => this.burstDetector.getLevel());
     this.authorRateLimiter.updateConfig({
-      enabled: settings.authorRateLimitEnabled,
-      windowMs: settings.authorRateLimitWindowMs,
-      maxPerWindow: settings.authorRateLimitMaxMessages,
+      preset: settings.authorRateLimit,
     });
   }
 
@@ -134,9 +132,7 @@ export abstract class RendererBase {
     this.settings = settings;
     this.observability.setShowDebug(settings.showDebugOverlay);
     this.authorRateLimiter.updateConfig({
-      enabled: settings.authorRateLimitEnabled,
-      windowMs: settings.authorRateLimitWindowMs,
-      maxPerWindow: settings.authorRateLimitMaxMessages,
+      preset: settings.authorRateLimit,
     });
 
     if (options.resetState) {
@@ -186,9 +182,9 @@ export abstract class RendererBase {
 
   /** Check whether anti-block is currently throttling new messages. */
   protected isAntiBlockActive(): boolean {
-    if (!this.settings.antiBlockEnabled) return false;
+    const ANTI_BLOCK_FREE_RATIO = 0.15;
     const utilization = this.laneAllocator.getUtilization();
-    const threshold = 1 - this.settings.antiBlockFreeRatio;
+    const threshold = 1 - ANTI_BLOCK_FREE_RATIO;
     return utilization >= threshold;
   }
 
