@@ -100,15 +100,20 @@ export class LaneAllocator {
 
   /**
    * Headway gap between consecutive scrolling comments on the same lane.
-   * After the previous comment's right edge exits the screen, we wait for
-   * the time it takes to travel HEADWAY_GAP_PX pixels before releasing the
-   * lane. This produces a consistent pixel gap regardless of scroll speed.
+   * Dynamically computed as a fraction of message width so short messages
+   * get a tighter gap (higher density) while long messages still maintain
+   * a readable separation.
+   *
+   * Formula: headwayPx = clamp(msgWidth * HEADWAY_GAP_RATIO, MIN, MAX)
    *
    * The resulting time is clamped between HEADWAY_GAP_MS_MIN and
    * HEADWAY_GAP_MS_MAX.
-   * At 200px/s: 40px headway → 200ms → ~40px gap (vs 433px before).
+   * At font-size 32, "hello" (~80px) → 16px gap (was 40px, 60% reduction).
+   * At font-size 32, long msg (~500px) → 40px gap.
    */
-  private static readonly HEADWAY_GAP_PX = 40;
+  private static readonly HEADWAY_GAP_RATIO = 0.08;
+  private static readonly HEADWAY_GAP_MIN_PX = 16;
+  private static readonly HEADWAY_GAP_MAX_PX = 60;
   private static readonly HEADWAY_GAP_MS_MIN = 30;
   private static readonly HEADWAY_GAP_MS_MAX = 200;
 
@@ -373,16 +378,21 @@ export class LaneAllocator {
     // Fraction of duration until the right edge passes x=0
     const visibleFraction = (screenWidth + msgWidthPx) / totalDistance;
     const visualExitMs = Math.round(visibleFraction * durationMs);
-    // Headway gap: consistent pixel gap regardless of scroll speed.
-    // headwayMs = HEADWAY_GAP_PX * durationMs / totalDistance
-    // This gives ~40px at any speed, clamped to [30ms, 200ms].
+    // Adaptive headway gap: proportional to message width so short messages
+    // get tighter spacing (higher lane density) while long messages maintain
+    // readable separation. At font-size 32, a 3-char message (~80px) gets
+    // 16px gap, a long message (~500px) gets 40px gap.
+    const headwayPx = Math.max(
+      LaneAllocator.HEADWAY_GAP_MIN_PX,
+      Math.min(
+        LaneAllocator.HEADWAY_GAP_MAX_PX,
+        Math.round(msgWidthPx * LaneAllocator.HEADWAY_GAP_RATIO)
+      )
+    );
     const headwayMs = Math.round(
       Math.max(
         LaneAllocator.HEADWAY_GAP_MS_MIN,
-        Math.min(
-          LaneAllocator.HEADWAY_GAP_MS_MAX,
-          (LaneAllocator.HEADWAY_GAP_PX * durationMs) / totalDistance
-        )
+        Math.min(LaneAllocator.HEADWAY_GAP_MS_MAX, (headwayPx * durationMs) / totalDistance)
       )
     );
     return visualExitMs + headwayMs;
