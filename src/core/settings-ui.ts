@@ -7,6 +7,7 @@ import {
 import { createLogger } from '@core/logging';
 import { normalizeStoredSettings, SETTINGS_VERSION } from '@core/settings-schema';
 import { BACKDROP_ID, BUTTON_ID, SettingsUiForm, STYLE_ID } from '@core/settings-ui-form';
+import { PANES } from '@core/settings-ui-panes';
 import { SETTINGS_UI_STYLES } from '@core/settings-ui-styles';
 
 const log = createLogger('SettingsUi');
@@ -17,7 +18,13 @@ export class SettingsUi {
   private backdrop: HTMLDivElement | null = null;
   private modal: HTMLDivElement | null = null;
   private previousFocus: HTMLElement | null = null;
-  private activeTab = 'comments';
+  private activeTab: string;
+
+  private get defaultTabId(): string {
+    const first = PANES[0];
+    return first ? first.id : 'comments';
+  }
+
   private readonly form: SettingsUiForm;
 
   private readonly handleKeydown = (event: KeyboardEvent) => {
@@ -38,6 +45,7 @@ export class SettingsUi {
     /** Called when settings should be persisted (modal close). Falls back to onChange. */
     private readonly onPersist?: (partial: Partial<OverlaySettings>) => void
   ) {
+    this.activeTab = this.defaultTabId;
     this.form = new SettingsUiForm(getSettings, (preview) => {
       this.queuePreview(preview);
     });

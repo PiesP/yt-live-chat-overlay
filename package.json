@@ -19,7 +19,7 @@
     "quality": "pnpm -s fmt && pnpm -s lint && pnpm -s check && pnpm -s circular && pnpm -s knip",
     "quality:fix": "pnpm -s fmt:fix && pnpm -s lint:fix && pnpm -s check && pnpm -s circular && pnpm -s knip",
     "clean": "rm -rf dist",
-    "prebuild": "pnpm quality:fix"
+    "prebuild": "pnpm quality"
   },
   "keywords": [
     "userscript",

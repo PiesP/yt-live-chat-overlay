@@ -194,7 +194,7 @@ export class BacklogInjectionController {
       return;
     }
 
-    const maxRate = Math.max(4, Math.min(20, Math.min(this.config.backlogMaxRate, this.lanes * 2)));
+    const maxRate = Math.max(4, Math.min(20, this.config.backlogMaxRate, this.lanes * 2));
     const realTimeFactor = Math.max(0.25, 1 - this.realTimeActivityCount * 0.2);
     const rampFactor = this.getDensityRampFactor();
     const utilizationFactor = this.getUtilizationFactor();
