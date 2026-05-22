@@ -496,18 +496,27 @@ export class CanvasRenderer extends RendererBase {
       if (verticalGap >= laneHeight) continue; // different lanes, no overlap
 
       if (isScrolling) {
-        // Horizontal overlap: the active message's right edge must have exited
-        // the screen before the new message enters from the right.
-        // Use active.startX for travel distance to correctly handle messages
-        // with horizontal stagger offset.
+        // Horizontal overlap: the active message's right edge must have
+        // moved past the screen's RIGHT edge (not left) before a new
+        // message can enter. This allows multiple comments to share the
+        // same lane simultaneously — the new one enters from the right
+        // while the previous one is still visible on the left.
+        //
+        // The headway gap (HEADWAY_GAP_MIN_PX = 16px) provides a small
+        // visual separation between the trailing right edge and the
+        // new entry. Previously the check was activeRightEdge > 0 (full
+        // exit to left), which blocked the lane for ~95% of duration.
+        const headwayPx = Math.max(16, Math.min(60, Math.round(active.width * 0.08)));
         const travelDistance = active.startX + active.width + rendererLayout.exitPaddingMin;
         const activeProgress = Math.min(1, activeElapsed / active.duration);
         const activeRightEdge = active.startX - activeProgress * travelDistance + active.width;
 
         // The new message starts at the right edge (or left for reverse).
-        // Overlap if the active message's right edge is still on screen.
+        // Overlap if the active message's right edge is still past the
+        // right edge minus headway gap.
         if (mode === 'scroll') {
-          if (activeRightEdge > 0) return { ok: false, reason: 'collision' as const };
+          if (activeRightEdge > dims.width - headwayPx)
+            return { ok: false, reason: 'collision' as const };
         } else {
           // reverse mode: messages enter from left, travel right
           const reverseTravel = dims.width + active.width + rendererLayout.exitPaddingMin;

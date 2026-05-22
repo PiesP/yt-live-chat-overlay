@@ -106,16 +106,15 @@ export class LaneAllocator {
    *
    * Formula: headwayPx = clamp(msgWidth * HEADWAY_GAP_RATIO, MIN, MAX)
    *
-   * The resulting time is clamped between HEADWAY_GAP_MS_MIN and
-   * HEADWAY_GAP_MS_MAX.
-   * At font-size 32, "hello" (~80px) → 16px gap (was 40px, 60% reduction).
-   * At font-size 32, long msg (~500px) → 40px gap.
+   * Also used as the lane-reuse gap: a new message can enter when the
+   * previous message's right edge has passed the screen's right edge by
+   * headwayPx pixels — enabling multiple messages per lane.
+   * At font-size 32, "hello" (~80px) → headway 16px (was 40px, -60%).
+   * At font-size 32, long msg (~500px) → headway 40px.
    */
   private static readonly HEADWAY_GAP_RATIO = 0.08;
   private static readonly HEADWAY_GAP_MIN_PX = 16;
   private static readonly HEADWAY_GAP_MAX_PX = 60;
-  private static readonly HEADWAY_GAP_MS_MIN = 30;
-  private static readonly HEADWAY_GAP_MS_MAX = 200;
 
   /**
    * Epsilon-greedy lane selection probability (0–1).
@@ -375,9 +374,6 @@ export class LaneAllocator {
     // Scrolling mode: precision exit-time
     // exitPadding must match renderFrame's travel distance computation.
     const totalDistance = screenWidth + msgWidthPx + rendererLayout.exitPaddingMin;
-    // Fraction of duration until the right edge passes x=0
-    const visibleFraction = (screenWidth + msgWidthPx) / totalDistance;
-    const visualExitMs = Math.round(visibleFraction * durationMs);
     // Adaptive headway gap: proportional to message width so short messages
     // get tighter spacing (higher lane density) while long messages maintain
     // readable separation. At font-size 32, a 3-char message (~80px) gets
@@ -389,13 +385,17 @@ export class LaneAllocator {
         Math.round(msgWidthPx * LaneAllocator.HEADWAY_GAP_RATIO)
       )
     );
-    const headwayMs = Math.round(
-      Math.max(
-        LaneAllocator.HEADWAY_GAP_MS_MIN,
-        Math.min(LaneAllocator.HEADWAY_GAP_MS_MAX, (headwayPx * durationMs) / totalDistance)
-      )
-    );
-    return visualExitMs + headwayMs;
+    // Multi-message lane sharing: the lane is freed when the message has
+    // scrolled just beyond its own width + headway gap. This allows a new
+    // message to enter from the right while the previous message is still
+    // visible on screen — they simply share the same lane without overlap.
+    // Previously the lane was held until the message fully exited the left
+    // edge (visualExitMs), which blocked the lane for ~95% of its duration.
+    const rightEdgePassFraction = (msgWidthPx + headwayPx) / totalDistance;
+    const rightEdgePassMs = Math.round(rightEdgePassFraction * durationMs);
+    // The headway gap in time is already accounted for in rightEdgePassMs
+    // (via headwayPx). No separate headwayMs needed.
+    return rightEdgePassMs;
   }
 
   /**
