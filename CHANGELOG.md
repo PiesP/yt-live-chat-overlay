@@ -2,6 +2,48 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.30.0] - 2026-05-22
+
+### Added
+
+- **Multi-message lane sharing** — Lanes are freed when a message's right edge passes the screen's RIGHT edge (plus headway gap), not the LEFT edge. Previously each lane held one message until it fully scrolled off-screen (~95% of duration). Now a new message can enter after only ~6% of duration, allowing ~16 messages to share the same lane simultaneously. Up to 120 concurrent messages on screen (up from 50). ([`6851be1`](https://github.com/PiesP/yt-live-chat-overlay/commit/6851be1))
+- **Adaptive headway gap** — Gap between consecutive scrolling comments in the same lane is now proportional to message width: `clamp(msgWidth × 0.08, 16px, 60px)`. Short messages get 16px gap (vs fixed 40px, 60% reduction), long messages maintain 40px gap. ([`b351988`](https://github.com/PiesP/yt-live-chat-overlay/commit/b351988))
+- **Velocity-aware durationMin** — `computeDliosDuration` now computes a speed-based floor: `max(3000, exitPaddingMin / velocity × 1000)`. At speedPxPerSec=500, short messages were previously clamped to 5000ms (capping effective speed at 307px/s). Now they run at the configured 500px/s. ([`7a04c1b`](https://github.com/PiesP/yt-live-chat-overlay/commit/7a04c1b))
+- **Collision retry** — Messages that fail the bounding-box collision check are pushed to the back of the pending queue and retried next frame (instead of being permanently dropped). This significantly reduces drop rates during high-density bursts. ([`2789997`](https://github.com/PiesP/yt-live-chat-overlay/commit/2789997))
+- **Large burst backlog routing** — `injectExternalMessages` (fetch interceptor / DOM watcher) and `flushReplayBuffer` now route batches >50 through the backlog controller instead of flooding the renderer directly. Eliminated the initial 90% drop spike on replay startup. ([`02d1ead`](https://github.com/PiesP/yt-live-chat-overlay/commit/02d1ead))
+- **Height-aware lane allocation with vertical centering** — Messages with author shown (moderator, owner, superchat) are vertically centered within their multi-slot block via `LanePlacement.verticalOffset`, distributing empty space evenly. ([`f093f0b`](https://github.com/PiesP/yt-live-chat-overlay/commit/f093f0b))
+
+### Fixed
+
+- **Settings lost on page refresh** — `SettingsUi.close()` now only persists when the dialog is visible. `attach()` and `destroy()` no longer save unpopulated form values, which previously corrupted storage by clamping empty number inputs to minimum limits. ([`0ca39d6`](https://github.com/PiesP/yt-live-chat-overlay/commit/0ca39d6))
+- **Settings X button not closing** — The header close button (X) was missing `data-action="close"` attribute, causing the delegated event handler to ignore it. ([`47a001b`](https://github.com/PiesP/yt-live-chat-overlay/commit/47a001b))
+- **Multi-tab settings corruption** — Cross-tab `storage` event listener and `GM_addValueChangeListener` now trigger `SettingsUi.syncForm()` to update the open form, preventing stale form values from overwriting changes made in another tab. ([`f47c218`](https://github.com/PiesP/yt-live-chat-overlay/commit/f47c218))
+- **GM storage returning `[object Object]`** — `settings-storage.ts` GM adapter now detects auto-parsed JSON objects from Violentmonkey/Greasemonkey 4+ and re-serializes them before returning. ([`ad54b58`](https://github.com/PiesP/yt-live-chat-overlay/commit/ad54b58))
+- **Checkbox name collision** — Outline `enabled` and Overlay `enabled` checkboxes had the same HTML `name="enabled"`, causing one to overwrite the other on save. Fixed by using `resolveKey()` consistently in `buildField`. ([`973e5d8`](https://github.com/PiesP/yt-live-chat-overlay/commit/973e5d8))
+- **Resume after tab switch with video paused** — `handleVisibility` no longer calls `renderer.resume()` when the video is paused. Previously it cleared `isPaused` while the video was still paused, causing `resumeForVideo()` → `resume()` to early-return when the user pressed play. ([`0ca15d3`](https://github.com/PiesP/yt-live-chat-overlay/commit/0ca15d3))
+- **Gap between comments** — Lane height now excludes the author section (`authorSectionHeight + spacing.xs`). Most messages (`showAuthor.normal: false`) don't render an author, so the previous formula added ~31px of empty space between lanes. Author-shown messages auto-assign `slotCount=2` via the multi-slot allocator. ([`7cd805b`](https://github.com/PiesP/yt-live-chat-overlay/commit/7cd805b))
+- **Safe zone not updating** — `RendererBase.updateSettings()` now calls `laneAllocator.updateSafeZone()` on every settings change. Previously safeTop/safeBottom changes only took effect on full renderer reset. ([`9d2b3d4`](https://github.com/PiesP/yt-live-chat-overlay/commit/9d2b3d4))
+
+### Changed
+
+- **maxConcurrentMessages default increased**: 50 → 120 (limit expanded to 300) to support multi-message lane sharing. ([`80f8ff3`](https://github.com/PiesP/yt-live-chat-overlay/commit/80f8ff3))
+- **queueMaxSize increased**: 100 → 200 to prevent head-of-line blocking at higher concurrency. ([`80f8ff3`](https://github.com/PiesP/yt-live-chat-overlay/commit/80f8ff3))
+- **backlogMaxRate default increased**: 10 → 20 msg/s to match higher lane throughput. ([`80f8ff3`](https://github.com/PiesP/yt-live-chat-overlay/commit/80f8ff3))
+
+### Removed
+
+- **"Timing Spread poll messages" setting** — `spreadEnabled` / `spreadFactor` settings and the SpreadEmitter class (168 lines) removed. Poll messages are now emitted as batches directly. ([`674544f`](https://github.com/PiesP/yt-live-chat-overlay/commit/674544f))
+- **Over-engineered settings from UI** — Removed 6 settings that regular users don't need: `maxConcurrentMessages` (Performance), `backlogMaxRate` / `backlogSpeedMultiplier` / `backlogRecentMinutes` (Backlog technicals), `logLevel` / `showDebugOverlay` (Debug). Their defaults are sufficient. Backlog Mode selector remains. ([`c8ee4ce`](https://github.com/PiesP/yt-live-chat-overlay/commit/c8ee4ce))
+- **Unused exports** — `RgbColor`, `MessageDimensions`, `SETTINGS_LIMITS`, `OUTLINE_SETTING_KEYS`, `VISUAL_ROOT_KEYS`, `SHOW_AUTHOR_KEYS`, `ChatHealthSnapshotOptions`, `MessageCallback`, `DropReason`, and 3 SuperChat opacity constants made internal. ([`95eb139`](https://github.com/PiesP/yt-live-chat-overlay/commit/95eb139))
+- **No-op methods** — `updateSettings()` override in CanvasRenderer (pure pass-through), `apply()` wrapper in SettingsUi, `formatOutlineNumericSettingForInput` (pass-through), `emitBacklogMessage` wrapper, `rememberMessage` one-liner. ([`03b52b6`](https://github.com/PiesP/yt-live-chat-overlay/commit/03b52b6))
+- **`HEADWAY_GAP_MS_MIN` / `HEADWAY_GAP_MS_MAX`** — No longer needed after multi-message lane sharing replaced the headway-time model with a pixel-gap model. ([`6851be1`](https://github.com/PiesP/yt-live-chat-overlay/commit/6851be1))
+
+### Refactored
+
+- **Codebase audit** — 5-phase refactoring across 47 source files: dead exports removed, import styles unified, no-op methods inlined, code complexity reduced, bug fixes applied. Net -96 lines across 20 files. ([`03b52b6`](https://github.com/PiesP/yt-live-chat-overlay/commit/03b52b6)..[`2e48d07`](https://github.com/PiesP/yt-live-chat-overlay/commit/2e48d07))
+- **Lane allocator `computeOccupancyMs` simplified** — Removed separate `headwayMs` computation; the headway gap is now directly included in `rightEdgePassFraction`. ([`6851be1`](https://github.com/PiesP/yt-live-chat-overlay/commit/6851be1))
+- **Player container selectors unified** — `PLAYER_CONTAINER_SELECTORS` exported from `dom.ts`, `video-pause-controller.ts` uses `findElementMatch()` instead of hardcoded selectors. ([`748dd8b`](https://github.com/PiesP/yt-live-chat-overlay/commit/748dd8b))
+
 ## [0.29.0] - 2026-05-19
 
 ### Added
