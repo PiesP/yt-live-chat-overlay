@@ -287,11 +287,13 @@ export class ReplayChatSource extends ChatSource {
       return;
     }
 
-    while (this.replayBuffer.length > 0) {
+    // Collect a batch of messages (up to 50 at a time) and emit as a group.
+    // This lets the runtime session route the batch through the backlog
+    // controller instead of flooding the renderer with individual messages.
+    const batch: ChatMessage[] = [];
+    while (this.replayBuffer.length > 0 && batch.length < 50) {
       const next = this.replayBuffer[0];
-      if (!next) {
-        break;
-      }
+      if (!next) break;
 
       if (next.offsetMs > currentOffsetMs + REPLAY_EMIT_TOLERANCE_MS) {
         break;
@@ -303,8 +305,11 @@ export class ReplayChatSource extends ChatSource {
         continue;
       }
 
-      this.emitMessage(next.message);
+      batch.push(next.message);
     }
+
+    if (batch.length === 0) return;
+    this.emitBatch(batch, false);
   }
 
   private async fetchReplayPlayerSeek(offsetMs: number, signal?: AbortSignal): Promise<boolean> {
