@@ -207,6 +207,7 @@ export class BacklogInjectionController {
     this.realTimeActivityCount = Math.max(0, this.realTimeActivityCount - 1);
 
     const message = this.backlogQueue.shift();
+    /* v8 ignore next 1 — TypeScript guard: queue non-empty checked above */
     if (!message) return;
     message.isBacklog = true;
     this.processedBacklog++;

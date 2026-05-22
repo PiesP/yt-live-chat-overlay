@@ -15,11 +15,6 @@ export interface SelectField extends BaseField {
   type: 'select';
   options: ReadonlyArray<[string, string]>;
 }
-export interface ColorField {
-  type: 'color';
-  label: string;
-  key: string;
-}
 export interface TextField extends BaseField {
   type: 'text';
   placeholder?: string;
@@ -28,13 +23,7 @@ export interface EnabledField {
   type: 'enabled';
 }
 
-export type FieldDef =
-  | NumberField
-  | CheckboxField
-  | SelectField
-  | ColorField
-  | TextField
-  | EnabledField;
+export type FieldDef = NumberField | CheckboxField | SelectField | TextField | EnabledField;
 
 export interface SectionDef {
   title: string;

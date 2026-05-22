@@ -42,11 +42,6 @@ export interface ImageAsset {
 }
 
 /**
- * Image-based emoji/emoticon information
- */
-export interface EmojiInfo extends ImageAsset {}
-
-/**
  * Content segment (text or emoji)
  */
 export type ContentSegment = TextContentSegment | EmojiContentSegment;
@@ -57,10 +52,10 @@ type TextContentSegment = {
   content: string;
 };
 
-type EmojiContentSegment = {
+export interface EmojiContentSegment {
   type: 'emoji';
-  emoji: EmojiInfo;
-};
+  emoji: ImageAsset;
+}
 
 /**
  * Super Chat tier information

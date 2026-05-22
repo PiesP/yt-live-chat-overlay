@@ -2,7 +2,6 @@ import type {
   AuthorType,
   ChatMessage,
   ContentSegment,
-  EmojiInfo,
   ImageAsset,
   OverlaySettings,
   SuperChatInfo,
@@ -486,7 +485,7 @@ function getEmojiVisibleFallbackText(emojiData: JsonObject): string {
   return '';
 }
 
-function parseEmoji(emojiData: JsonObject): EmojiInfo | null {
+function parseEmoji(emojiData: JsonObject): ImageAsset | null {
   const emojiAsset = createImageAsset(
     emojiData.image,
     getEmojiAltText(emojiData),
