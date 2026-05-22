@@ -92,19 +92,18 @@ export class LaneAllocator {
   private static readonly SAFETY_MARGIN_RATIO = 0.15;
 
   /**
-   * Headway gap between consecutive scrolling comments on the same lane (ms).
-   * This replaces the duration-proportional cooldown for scrolling mode.
-   * After the previous comment's right edge exits the screen, we wait only
-   * this short gap before releasing the lane — dramatically reducing visual
-   * dead space between consecutive comments on the same row.
+   * Headway gap between consecutive scrolling comments on the same lane.
+   * After the previous comment's right edge exits the screen, we wait for
+   * the time it takes to travel HEADWAY_GAP_PX pixels before releasing the
+   * lane. This produces a consistent pixel gap regardless of scroll speed.
    *
-   * The gap is clamped between HEADWAY_GAP_MS_MIN and HEADWAY_GAP_MS_MAX,
-   * with a time-proportional component for natural feel at various speeds.
-   * At 200px/s: ~50-100ms headway → ~10-20px gap (vs 433px before).
+   * The resulting time is clamped between HEADWAY_GAP_MS_MIN and
+   * HEADWAY_GAP_MS_MAX.
+   * At 200px/s: 40px headway → 200ms → ~40px gap (vs 433px before).
    */
+  private static readonly HEADWAY_GAP_PX = 40;
   private static readonly HEADWAY_GAP_MS_MIN = 30;
   private static readonly HEADWAY_GAP_MS_MAX = 200;
-  private static readonly HEADWAY_GAP_TIME_RATIO = 0.025;
 
   /**
    * Epsilon-greedy lane selection probability (0–1).
@@ -374,13 +373,15 @@ export class LaneAllocator {
     // Fraction of duration until the right edge passes x=0
     const visibleFraction = (screenWidth + msgWidthPx) / totalDistance;
     const visualExitMs = Math.round(visibleFraction * durationMs);
-    // Headway gap: proportional but clamped
+    // Headway gap: consistent pixel gap regardless of scroll speed.
+    // headwayMs = HEADWAY_GAP_PX * durationMs / totalDistance
+    // This gives ~40px at any speed, clamped to [30ms, 200ms].
     const headwayMs = Math.round(
       Math.max(
         LaneAllocator.HEADWAY_GAP_MS_MIN,
         Math.min(
           LaneAllocator.HEADWAY_GAP_MS_MAX,
-          durationMs * LaneAllocator.HEADWAY_GAP_TIME_RATIO
+          (LaneAllocator.HEADWAY_GAP_PX * durationMs) / totalDistance
         )
       )
     );
