@@ -1,5 +1,8 @@
 import type { SuperChatInfo, SuperChatTier } from '@app-types';
 
+/** Default font family stack for overlay text rendering. */
+export const DEFAULT_FONT_FAMILY = 'system-ui, -apple-system, sans-serif';
+
 interface RgbColor {
   readonly r: number;
   readonly g: number;

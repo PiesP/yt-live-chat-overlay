@@ -24,7 +24,7 @@ import type { Overlay } from '@core/overlay';
 
 const log = createLogger('RendererBase');
 
-export interface RendererUpdateOptions {
+interface RendererUpdateOptions {
   resetState?: boolean;
 }
 

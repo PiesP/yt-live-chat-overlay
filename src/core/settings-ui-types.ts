@@ -25,10 +25,10 @@ export interface EnabledField {
 
 export type FieldDef = NumberField | CheckboxField | SelectField | TextField | EnabledField;
 
-export interface SectionDef {
+type SectionDef = {
   title: string;
   fields: FieldDef[];
-}
+};
 
 export interface PaneDef {
   id: string;

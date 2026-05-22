@@ -6,7 +6,7 @@
  */
 
 import type { ChatMessage } from '@app-types';
-import { rendererLayout, spacing } from '@core/design-tokens';
+import { DEFAULT_FONT_FAMILY, rendererLayout, spacing } from '@core/design-tokens';
 import {
   getFontString,
   measureTextHeight,
@@ -49,7 +49,7 @@ export function estimateMessageDimensions(
   fontSize: number,
   showAuthor: boolean,
   fontWeight: 'normal' | 'bold' = 'bold',
-  fontFamily: string = 'system-ui, -apple-system, sans-serif',
+  fontFamily: string = DEFAULT_FONT_FAMILY,
   maxBodyLines?: { superchat?: number; membership?: number }
 ): MessageDimensions {
   const font = getFontString(fontSize, fontWeight, fontFamily);

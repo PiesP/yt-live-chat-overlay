@@ -11,6 +11,8 @@
  * the tightest fit around rendered glyphs.
  */
 
+import { DEFAULT_FONT_FAMILY } from '@core/design-tokens';
+
 let measureCtx: CanvasRenderingContext2D | null = null;
 
 /** LRU cache for measureTextWidth. Keyed by `${font}|${text}`. */
@@ -92,7 +94,7 @@ export function measureTextHeight(font: string, fontSize: number): number {
 export function getFontString(
   sizePx: number,
   weight: 'normal' | 'bold' = 'bold',
-  fontFamily: string = 'system-ui, -apple-system, sans-serif'
+  fontFamily: string = DEFAULT_FONT_FAMILY
 ): string {
   return `${weight === 'bold' ? 'bold' : '400'} ${sizePx}px ${fontFamily}`;
 }

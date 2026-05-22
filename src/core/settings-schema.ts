@@ -4,7 +4,7 @@ import {
   type OutlineSettings,
   type OverlaySettings,
 } from '@app-types';
-import { colors as designColors } from '@core/design-tokens';
+import { DEFAULT_FONT_FAMILY, colors as designColors } from '@core/design-tokens';
 
 type RootScalarSettingKey = Exclude<keyof OverlaySettings, 'showAuthor' | 'colors' | 'outline'>;
 type OutlineSettingKey = keyof OutlineSettings;
@@ -194,7 +194,7 @@ export const DEFAULT_SETTINGS = {
   backlogMode: 'playback',
   backlogRecentMinutes: 5,
   fontWeight: 'bold',
-  fontFamily: 'system-ui, -apple-system, sans-serif',
+  fontFamily: DEFAULT_FONT_FAMILY,
   preserveUserColor: false,
   superChatMaxBodyLines: 5,
   membershipMaxBodyLines: 3,
