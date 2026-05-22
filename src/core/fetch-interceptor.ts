@@ -72,25 +72,24 @@ export function installFetchInterceptor(
 
     // Clone the response so the original consumer (YouTube's UI) is unaffected.
     // Read the clone asynchronously; errors here must not propagate.
-    response.then((res) => {
-      const cloned = res.clone();
-      cloned
-        .json()
-        .then((data: unknown) => {
-          const payload = getLiveChatPayload(data);
-          if (!payload || payload.actions.length === 0) return;
-
+    void (async () => {
+      try {
+        const res = await response;
+        const cloned = res.clone();
+        const data: unknown = await cloned.json();
+        const payload = getLiveChatPayload(data);
+        if (payload && payload.actions.length > 0) {
           const events = extractChatEvents(payload.actions, getSettings);
-          if (events.length === 0) return;
-
-          const messages = events.map((e) => e.message);
-          log.debug(`Intercepted ${messages.length} chat message(s) from YouTube client`);
-          onMessages(messages);
-        })
-        .catch(() => {
-          // Silently ignore parse failures — the fallback poll loop handles this.
-        });
-    });
+          if (events.length > 0) {
+            const messages = events.map((e) => e.message);
+            log.debug(`Intercepted ${messages.length} chat message(s) from YouTube client`);
+            onMessages(messages);
+          }
+        }
+      } catch {
+        // Silently ignore parse failures — the fallback poll loop handles this.
+      }
+    })();
 
     return response;
   }

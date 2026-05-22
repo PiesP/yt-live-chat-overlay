@@ -173,7 +173,7 @@ function parseRendererMessage(
     message.userColor = userColor;
   }
 
-  const authorPhotoUrl = extractThumbnailUrl(renderer.authorPhoto);
+  const authorPhotoUrl = extractBestThumbnail(renderer.authorPhoto)?.url;
   if (authorPhotoUrl) {
     message.authorPhotoUrl = authorPhotoUrl;
   }
@@ -585,11 +585,6 @@ function extractBestThumbnail(value: unknown): {
     ...(firstFallback ? { candidateUrl: firstFallback.url } : {}),
   };
 }
-
-function extractThumbnailUrl(value: unknown): string | undefined {
-  return extractBestThumbnail(value)?.url;
-}
-
 function extractAuthorType(value: unknown): AuthorType {
   let resolvedType: AuthorType = 'normal';
 

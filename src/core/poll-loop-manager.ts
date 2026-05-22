@@ -12,17 +12,19 @@ export class PollLoopManager {
     const generation = ++this.generation;
     this.alive = true;
 
-    void Promise.resolve()
-      .then(() => runner(signal))
-      .catch((error: unknown) => {
-        if (isAbortError(error)) return;
-        log.warn('Polling loop stopped unexpectedly:', error);
-      })
-      .finally(() => {
+    void (async () => {
+      try {
+        await runner(signal);
+      } catch (error: unknown) {
+        if (!isAbortError(error)) {
+          log.warn('Polling loop stopped unexpectedly:', error);
+        }
+      } finally {
         if (generation === this.generation) {
           this.alive = false;
         }
-      });
+      }
+    })();
   }
 
   stop(): void {

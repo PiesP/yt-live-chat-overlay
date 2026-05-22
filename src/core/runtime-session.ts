@@ -309,10 +309,6 @@ export class RuntimeSession {
       this.backlogController?.setPaused(paused);
     };
 
-    this.backlogController.onBacklogStateChange = (_active: boolean) => {
-      // Backlog lane partitioning removed — all messages share all lanes.
-    };
-
     this.backlogController.onUtilizationQuery = () => renderer.getLaneUtilization();
   }
 

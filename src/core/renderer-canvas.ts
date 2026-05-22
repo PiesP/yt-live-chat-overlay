@@ -223,19 +223,7 @@ export class CanvasRenderer extends RendererBase {
   // ── Backlog pause control ──────────────────────────────────────────
 
   /**
-   * Enable lane partitioning: backlog messages use lanes [0, partitionEnd),
-   * real-time messages use [partitionEnd, laneCount).
-   */
-  setBacklogPartition(_partitionEnd: number): void {
-    // Partition removed — all messages share all lanes.
-  }
-
-  /** Disable lane partitioning: all lanes are shared. */
-  clearBacklogPartition(): void {
-    // Partition removed — all messages share all lanes.
-  }
-
-  // ── Image pre-fetching ────────────────────────────────────────────────
+  // ── Image pre-fetching
 
   /** Load an image and store it in the given cache on success. */
   private loadImage(url: string, cache: Map<string, HTMLImageElement>, maxEntries: number): void {

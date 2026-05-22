@@ -116,7 +116,7 @@ export class RuntimeManager {
       try {
         await this.reconcileOnce();
       } catch (err) {
-        console.error('[RuntimeManager] reconcileOnce() threw an error, continuing loop:', err);
+        log.error('[RuntimeManager] reconcileOnce() threw an error, continuing loop:', err);
       }
     }
   }

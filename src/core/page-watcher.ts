@@ -14,8 +14,6 @@ type PageChangeCallback = () => void;
 type NavigationSignalSource = 'pushState' | 'replaceState' | 'popstate' | 'yt-navigate-finish';
 
 const YT_NAVIGATE_FINISH_EVENT = 'yt-navigate-finish';
-const isSupportedYouTubePath = (pathname: string): boolean =>
-  pathname === '/watch' || pathname.startsWith('/live/');
 
 export class PageWatcher {
   private currentUrl = location.href;
@@ -96,7 +94,7 @@ export class PageWatcher {
    * Check if current page is a valid target (live/watch page)
    */
   isValidPage(): boolean {
-    return isSupportedYouTubePath(location.pathname);
+    return location.pathname === '/watch' || location.pathname.startsWith('/live/');
   }
 
   /**

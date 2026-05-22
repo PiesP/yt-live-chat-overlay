@@ -178,7 +178,7 @@ export class LiveChatSource extends ChatSource {
     }
   }
 
-  private async requestLivePayload(
+  private requestLivePayload(
     continuation: InnertubeContinuationData,
     signal?: AbortSignal
   ): Promise<LiveChatPayload | null> {
@@ -238,12 +238,6 @@ export class LiveChatSource extends ChatSource {
    * Emit messages — all messages go directly to the callback.
    */
   private emitMessages(messages: ChatMessage[], isInitialSeed: boolean): void {
-    if (isInitialSeed) {
-      // Initial seed is handled by BacklogInjectionController in RuntimeSession
-      this.emitBatch(messages, isInitialSeed);
-      return;
-    }
-
-    this.emitBatch(messages, false);
+    this.emitBatch(messages, isInitialSeed);
   }
 }

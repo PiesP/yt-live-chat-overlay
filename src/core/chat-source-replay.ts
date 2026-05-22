@@ -91,7 +91,11 @@ export class ReplayChatSource extends ChatSource {
           }
         });
     } else if (this.replayMode === 'continuation') {
-      void this.pollContinuationReplay(offsetMs);
+      void this.pollContinuationReplay(offsetMs).catch((error: unknown) => {
+        if (!isAbortError(error)) {
+          log.warn('Continuation poll in seek handler failed:', error);
+        }
+      });
     }
   }
 
@@ -212,7 +216,7 @@ export class ReplayChatSource extends ChatSource {
     }
   }
 
-  private async requestReplayPayload(
+  private requestReplayPayload(
     continuation: InnertubeContinuationData,
     signal?: AbortSignal,
     playerOffsetMs?: number

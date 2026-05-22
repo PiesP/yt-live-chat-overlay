@@ -129,7 +129,7 @@ export class SettingsUi {
     this.previousFocus = null;
   }
 
-  private async findPlayerContainer(): Promise<HTMLElement | null> {
+  private findPlayerContainer(): Promise<HTMLElement | null> {
     return findPlayerContainerElement({
       intervalMs: PLAYER_LOOKUP_INTERVAL_MS,
     });

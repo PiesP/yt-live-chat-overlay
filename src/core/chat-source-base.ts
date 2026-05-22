@@ -7,7 +7,7 @@
 
 import type { ChatMessage, OverlaySettings } from '@app-types';
 import { BootstrapResolver } from '@core/bootstrap-resolver';
-import { findElementMatch, isAbortError, VIDEO_SELECTORS } from '@core/dom';
+import { findElementMatch, isAbortError, sleep, VIDEO_SELECTORS } from '@core/dom';
 import { createLogger } from '@core/logging';
 import { MessageBuffer } from '@core/message-buffer';
 import { PollLoopManager } from '@core/poll-loop-manager';
@@ -183,22 +183,11 @@ export abstract class ChatSource {
     this.chatPaused = paused;
   }
 
-  protected waitWhilePaused(signal?: AbortSignal): Promise<void> {
-    if (!this.chatPaused) return Promise.resolve();
-    return new Promise((resolve, reject) => {
-      const check = (): void => {
-        if (signal?.aborted) {
-          reject(new DOMException('Aborted', 'AbortError'));
-          return;
-        }
-        if (!this.chatPaused) {
-          resolve();
-          return;
-        }
-        setTimeout(check, ChatSource.PAUSE_POLL_INTERVAL_MS);
-      };
-      check();
-    });
+  protected async waitWhilePaused(signal?: AbortSignal): Promise<void> {
+    while (this.chatPaused) {
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+      await sleep(ChatSource.PAUSE_POLL_INTERVAL_MS, signal);
+    }
   }
 
   /**
