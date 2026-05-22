@@ -520,11 +520,15 @@ export class CanvasRenderer extends RendererBase {
         // same lane simultaneously — the new one enters from the right
         // while the previous one is still visible on the left.
         //
-        // The headway gap (HEADWAY_GAP_MIN_PX = 16px) provides a small
-        // visual separation between the trailing right edge and the
-        // new entry. Previously the check was activeRightEdge > 0 (full
-        // exit to left), which blocked the lane for ~95% of duration.
-        const headwayPx = Math.max(16, Math.min(60, Math.round(active.width * 0.08)));
+        // The headway gap is speed-aware: when the new message is faster
+        // (backlog entering real-time lane), headway scales up by the
+        // speed multiplier so the slower message has more lead time,
+        // preventing the faster chaser from visually crossing through.
+        const headwayPx = this.computeHeadwayPx(
+          active.width,
+          active.message.isBacklog ?? false,
+          message.isBacklog ?? false
+        );
         const travelDistance = active.startX + active.width + rendererLayout.exitPaddingMin;
         const activeProgress = Math.min(1, activeElapsed / active.duration);
         const activeRightEdge = active.startX - activeProgress * travelDistance + active.width;
@@ -697,6 +701,31 @@ export class CanvasRenderer extends RendererBase {
 
   private getFont(fontSize: number): string {
     return getFontString(fontSize, this.settings.fontWeight, this.settings.fontFamily);
+  }
+
+  /**
+   * Compute the headway gap (px) between a new message and an active one
+   * on the same lane, accounting for speed differences.
+   *
+   * When the new message is faster than the active one (backlog entering
+   * real-time lane), the headway is scaled up by the speed multiplier so
+   * the active message has more lead time — preventing the faster chaser
+   * from catching up and visually crossing through.
+   *
+   * Same-speed messages use the standard adaptive formula:
+   *   headwayPx = clamp(msgWidth × 0.08, 16, 60)
+   */
+  private computeHeadwayPx(
+    activeWidth: number,
+    activeIsBacklog: boolean,
+    newIsBacklog: boolean
+  ): number {
+    const base = Math.max(16, Math.min(60, Math.round(activeWidth * 0.08)));
+    // Only adjust when speeds differ and the new message is faster.
+    if (!activeIsBacklog && newIsBacklog) {
+      return Math.round(base * this.backlogSpeedMultiplier);
+    }
+    return base;
   }
 
   // ── Backlog pause ────────────────────────────────────────────────────
