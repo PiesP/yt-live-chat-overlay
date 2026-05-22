@@ -63,6 +63,8 @@ export class ReplayChatSource extends ChatSource {
   }
 
   private installSeekListeners(signal?: AbortSignal): void {
+    // Clean up any previous listener before installing a new one
+    this.seekListenerCleanup?.();
     const el = findElementMatch<HTMLVideoElement>(VIDEO_SELECTORS);
     if (!el) return;
     const v = el.element;

@@ -232,6 +232,9 @@ export class CanvasRenderer extends RendererBase {
       }
       cache.set(url, img);
     };
+    img.onerror = () => {
+      // Silently skip — don't retry broken URLs on every frame.
+    };
   }
 
   private prefetchImages(message: ChatMessage): void {
@@ -737,6 +740,7 @@ export class CanvasRenderer extends RendererBase {
         ? message.userColor
         : this.settings.colors[message.authorType];
 
+    ctx.save();
     ctx.globalAlpha = alpha;
 
     const showAuthor = this.settings.showAuthor[message.authorType];
@@ -775,6 +779,8 @@ export class CanvasRenderer extends RendererBase {
         (fs) => this.getFont(fs)
       );
     }
+
+    ctx.restore();
   }
 
   // ── Super chat ───────────────────────────────────────────────────────
@@ -794,6 +800,7 @@ export class CanvasRenderer extends RendererBase {
     const w = msg.width;
     const h = msg.height;
 
+    ctx.save();
     ctx.globalAlpha = alpha;
 
     const {
@@ -898,11 +905,12 @@ export class CanvasRenderer extends RendererBase {
         const availableHeight = y + h - scPad.paddingV - stickerY;
         const stickerSize = Math.max(0, Math.min(maxStickerSize, availableHeight));
         if (stickerSize > 0) {
-          ctx.globalAlpha = alpha;
           ctx.drawImage(stickerImg, textX, stickerY, stickerSize, stickerSize);
         }
       }
     }
+
+    ctx.restore();
   }
 
   // ── Membership ───────────────────────────────────────────────────────
@@ -919,6 +927,7 @@ export class CanvasRenderer extends RendererBase {
     const h = msg.height;
     const mem = designColors.membership;
 
+    ctx.save();
     ctx.globalAlpha = alpha;
 
     ctx.fillStyle = `rgba(${mem.background.r}, ${mem.background.g}, ${mem.background.b}, ${mem.backgroundAlpha})`;
@@ -960,6 +969,8 @@ export class CanvasRenderer extends RendererBase {
         (fs) => this.getFont(fs)
       );
     }
+
+    ctx.restore();
   }
 
   // ── Helpers ──────────────────────────────────────────────────────────

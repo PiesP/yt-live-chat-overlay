@@ -66,8 +66,6 @@ export class SettingsUi {
     this.form = new SettingsUiForm(getSettings, (preview) => {
       this.queuePreview(preview);
     });
-    // Always bound — handler checks visibility state internally
-    document.addEventListener('keydown', this.handleKeydown);
   }
 
   /** Debounced live preview — applies settings immediately and persists. */
@@ -264,6 +262,9 @@ export class SettingsUi {
     this.backdrop.appendChild(this.modal);
     document.body.appendChild(this.backdrop);
     this.setDialogOpen(false);
+
+    // Activate keydown listener now that modal DOM exists
+    document.addEventListener('keydown', this.handleKeydown);
   }
 
   private open(): void {
