@@ -140,10 +140,10 @@ export const STORAGE_KEY = 'yt-live-chat-overlay-settings';
 export const SETTINGS_VERSION = 1;
 
 /** Version-aware migration. Stamps version if absent; preserves existing version for chained migration support. */
-export function migrateSettings(raw: Record<string, unknown>): Record<string, unknown> {
+export const migrateSettings = (raw: Record<string, unknown>): Record<string, unknown> => {
   const version = (raw._version as number) ?? 0;
   return { ...raw, _version: Math.max(version, 1) };
-}
+};
 
 // ── Defaults ────────────────────────────────────────────────────────────────────
 
@@ -240,16 +240,18 @@ export const resolveLimits = (
 };
 
 /** Get display scale/precision from ROOT_SETTING_META for a root numeric key. */
-export function getRootDisplayMeta(key: RootScalarSettingKey): {
+export const getRootDisplayMeta = (
+  key: RootScalarSettingKey
+): {
   scale: number;
   precision: number;
-} {
+} => {
   const meta: SettingMeta = ROOT_SETTING_META[key];
   if (meta?.displayScale) {
     return { scale: meta.displayScale, precision: meta.displayPrecision ?? 0 };
   }
   return { scale: 1, precision: 0 };
-}
+};
 
 // ── Normalization ───────────────────────────────────────────────────────────────
 
