@@ -62,7 +62,7 @@ export class LiveChatSource extends ChatSource {
         return false;
       }
 
-      this.handleLivePayload(payload);
+      this.handleLivePayload(payload, true); // isInitialSeed: apply time-based filtering
       return true;
     } catch (error) {
       if (isAbortError(error)) {
@@ -168,7 +168,7 @@ export class LiveChatSource extends ChatSource {
           continue;
         }
 
-        this.handleLivePayload(payload, true);
+        this.handleLivePayload(payload);
       } catch (error) {
         if (isAbortError(error)) {
           throw error;
