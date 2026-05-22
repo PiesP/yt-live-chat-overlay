@@ -19,7 +19,7 @@
  *    that auto-removes when backlog injection completes.
  */
 
-import type { BacklogMode, ChatMessage } from '@app-types';
+import type { BacklogMode, ChatMessage, Pauseable } from '@app-types';
 import { sampleExponential } from '@core/design-tokens';
 import { createLogger } from '@core/logging';
 import type { ObservabilityReporter } from '@core/observability';
@@ -37,7 +37,7 @@ interface BacklogControllerConfig {
   backlogRecentMinutes: number;
 }
 
-export class BacklogInjectionController {
+export class BacklogInjectionController implements Pauseable {
   private backlogQueue: ChatMessage[] = [];
   private isActive = false;
   private isInjecting = false;

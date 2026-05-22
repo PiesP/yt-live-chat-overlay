@@ -99,10 +99,10 @@ class App {
   }
 
   /**
-   * Preview settings changes — memory only. Side-effects still apply
-   * (log level, settings UI, runtime reconcile) but no storage write.
-   * Settings are persisted to storage when the user explicitly closes
-   * the settings dialog (onPersist → applySettings).
+   * Preview settings changes — applies to memory + live side-effects
+   * (log level, runtime reconcile) but no storage write. Settings are
+   * persisted to storage only when the user explicitly closes the
+   * settings dialog (onPersist → applySettings).
    */
   previewSettings(partial: Partial<OverlaySettings>): void {
     this.settings.preview(partial);

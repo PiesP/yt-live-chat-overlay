@@ -9,7 +9,7 @@
  * standard browser timers.
  */
 
-import type { BurstLevel } from '@app-types';
+import type { BurstLevel, Pauseable } from '@app-types';
 import { createLogger } from '@core/logging';
 import type { ObservabilityReporter } from '@core/observability';
 
@@ -29,7 +29,7 @@ const ELEVATED_THRESHOLD = 5; // >5 msg/s
 const HIGH_THRESHOLD = 15; // >15 msg/s
 const EXTREME_THRESHOLD = 30; // >30 msg/s
 
-export class BurstDetector {
+export class BurstDetector implements Pauseable {
   private samples: number[] = [];
   private currentLevel: BurstLevel = 'normal';
   private lastBurstTime: number = 0;

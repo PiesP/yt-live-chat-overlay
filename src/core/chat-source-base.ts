@@ -5,7 +5,7 @@
  * the base class and its concrete implementations (LiveChatSource, ReplayChatSource).
  */
 
-import type { ChatMessage, OverlaySettings } from '@app-types';
+import type { ChatMessage, OverlaySettings, Pauseable } from '@app-types';
 import { BootstrapResolver } from '@core/bootstrap-resolver';
 import { findElementMatch, isAbortError, sleep, VIDEO_SELECTORS } from '@core/dom';
 import { createLogger } from '@core/logging';
@@ -43,7 +43,7 @@ export interface PlaybackSnapshot {
 type MessageCallback = (messages: ChatMessage | ChatMessage[], isInitialSeed?: boolean) => void;
 export type ChatSourceStartStatus = 'started' | 'retryable' | 'unavailable';
 
-export abstract class ChatSource {
+export abstract class ChatSource implements Pauseable {
   protected readonly getSettings: () => Readonly<OverlaySettings>;
   protected callback: MessageCallback | null = null;
   private pollController: AbortController | null = null;

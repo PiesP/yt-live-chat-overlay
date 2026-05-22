@@ -6,7 +6,7 @@
  *
  * Two-layer pause state machine:
  * - isPaused: tab-visibility pause (document.hidden). Pauses animations
- *   and stops the render loop. triggerPausedDuration is accumulated so
+ *   and stops the render loop. Paused duration is accumulated so
  *   animations resume from the correct position.
  * - isVideoPaused: video-level pause (video.paused). Drops incoming
  *   messages during pause to prevent queue overflow. Both render loop

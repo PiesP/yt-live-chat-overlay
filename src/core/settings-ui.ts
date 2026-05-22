@@ -68,7 +68,7 @@ export class SettingsUi {
     });
   }
 
-  /** Debounced live preview — applies settings immediately and persists. */
+  /** Debounced live preview — applies settings immediately (memory only, no storage write). */
   private previewTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly PREVIEW_DEBOUNCE_MS = 100;
 
