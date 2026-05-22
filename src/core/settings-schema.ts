@@ -137,7 +137,7 @@ export const SETTINGS_LIMITS = {
   membershipMaxBodyLines: { min: 1, max: 5, step: 1 },
   spreadFactor: { min: 0.1, max: 2, step: 0.1 }, // 0.1 = minimal spread, 2 = double spread
   fadeDurationMs: { min: 0, max: 1000, step: 50 }, // 0 = no fade, up to 1s
-  minPollIntervalMs: { min: 100, max: 5000, step: 100 }, // 100ms minimum polling
+  minPollIntervalMs: { min: 50, max: 5000, step: 50 }, // 50ms minimum polling
   maxPollIntervalMs: { min: 1000, max: 30000, step: 1000 }, // 1s to 30s maximum
 } as const satisfies Record<SettingsLimitKey, NumericSettingLimit>;
 
