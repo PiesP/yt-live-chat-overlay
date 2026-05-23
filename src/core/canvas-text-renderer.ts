@@ -7,16 +7,7 @@
 
 import type { ChatMessage, ContentSegment, OverlaySettings } from '@app-types';
 import { EMOJI_ALIAS_PATTERN } from '@core/chat-message-helpers';
-import {
-  computeOutlineColor,
-  computeReadableTextColor,
-  computeSuperChatOpacities,
-  colors as designColors,
-  rendererLayout,
-  resolveSuperChatRgb,
-  spacing,
-  toRgba,
-} from '@core/design-tokens';
+import { computeOutlineColor, rendererLayout } from '@core/design-tokens';
 import {
   getFontString,
   measureTextHeight,
@@ -278,31 +269,7 @@ export function renderWrappedText(
   return cursorY;
 }
 
-// ── Canvas utility ────────────────────────────────────────────────────────
-
-/** Draw a rounded rectangle path (no fill/stroke — path only). */
-export function drawRoundRect(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  r: number
-): void {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.lineTo(x + w - r, y);
-  ctx.arcTo(x + w, y, x + w, y + r, r);
-  ctx.lineTo(x + w, y + h - r);
-  ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
-  ctx.lineTo(x + r, y + h);
-  ctx.arcTo(x, y + h, x, y + h - r, r);
-  ctx.lineTo(x, y + r);
-  ctx.arcTo(x, y, x + r, y, r);
-  ctx.closePath();
-}
-
-// ── Author rendering ──────────────────────────────────────────────────────
+// ── Author rendering ────────────────────────────────────────────────────────
 
 /** Draw an author photo with shadow effects. */
 function drawAuthorPhoto(
@@ -371,6 +338,28 @@ export function drawAuthorSection(
   return startY + sectionHeight;
 }
 
+/** Draw a rounded rectangle path (no fill/stroke — path only). */
+export function drawRoundRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number
+): void {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.arcTo(x + w, y, x + w, y + r, r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+  ctx.lineTo(x + r, y + h);
+  ctx.arcTo(x, y + h, x, y + h - r, r);
+  ctx.lineTo(x, y + r);
+  ctx.arcTo(x, y, x + r, y, r);
+  ctx.closePath();
+}
+
 // ── Message card rendering ───────────────────────────────────────────────
 
 /** Render a regular text message at (x, y) with alpha blending. */
@@ -433,215 +422,6 @@ export function renderRegularMessage(
       textY,
       color,
       1,
-      fontSize,
-      settings,
-      textBitmapCache,
-      getFontFn
-    );
-  }
-
-  ctx.restore();
-}
-
-/** Render a SuperChat card at (x, y) with alpha blending. */
-export function renderSuperChatCard(
-  ctx: CanvasRenderingContext2D,
-  message: ChatMessage,
-  msgWidth: number,
-  msgHeight: number,
-  x: number,
-  y: number,
-  alpha: number,
-  settings: OverlaySettings,
-  textBitmapCache: Map<string, HTMLCanvasElement>,
-  authorPhotoCache: Map<string, HTMLImageElement>,
-  stickerCache: Map<string, HTMLImageElement>,
-  getFontFn: (fontSize: number) => string
-): void {
-  const superChat = message.superChat;
-  if (!superChat) return;
-
-  const fontSize = settings.fontSize;
-  const w = msgWidth;
-  const h = msgHeight;
-
-  ctx.save();
-  ctx.globalAlpha = alpha;
-
-  const {
-    base: scAlpha,
-    top: topAlpha,
-    bottom: bottomAlpha,
-  } = computeSuperChatOpacities(settings.superChatOpacity);
-  const rgb = resolveSuperChatRgb(superChat, designColors.superChat);
-  const baseColor = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
-  const textColor = computeReadableTextColor(baseColor);
-
-  // Background gradient
-  const grad = ctx.createLinearGradient(x, y, x, y + h);
-  grad.addColorStop(0, toRgba(baseColor, topAlpha));
-  grad.addColorStop(0.48, toRgba(baseColor, scAlpha));
-  grad.addColorStop(1, toRgba(baseColor, bottomAlpha));
-  ctx.fillStyle = grad;
-  drawRoundRect(ctx, x, y, w, h, rendererLayout.superchatCardRadius);
-  ctx.fill();
-
-  // Left accent bar
-  ctx.fillStyle = baseColor;
-  ctx.fillRect(x, y, 4, h);
-
-  const scPad = rendererLayout.superchat;
-  const textX = x + scPad.paddingH;
-  let contentY = y + scPad.paddingV;
-
-  // Author section
-  if (settings.showAuthor.superChat && message.author) {
-    const nameMaxWidth = w - scPad.paddingH * 2;
-    contentY = drawAuthorSection(
-      ctx,
-      message,
-      textX,
-      contentY,
-      textColor,
-      nameMaxWidth,
-      settings,
-      authorPhotoCache
-    );
-  }
-
-  // Amount badge pill
-  const badgeY = contentY + spacing.xs;
-  const badgeFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
-  const badgeHeight = badgeFontSize + rendererLayout.superchatBadge.paddingV * 2;
-  ctx.font = `bold ${badgeFontSize}px ${settings.fontFamily}`;
-  const badgeTextWidth = Math.ceil(ctx.measureText(superChat.amount).width);
-  const badgeWidth = badgeTextWidth + rendererLayout.superchatBadge.paddingH * 2;
-
-  drawRoundRect(ctx, textX, badgeY, badgeWidth, badgeHeight, rendererLayout.superchatBadge.radius);
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.16)';
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
-  ctx.lineWidth = 1;
-  ctx.stroke();
-
-  ctx.textBaseline = 'middle';
-  strokeTextOutline(
-    ctx,
-    superChat.amount,
-    textX + rendererLayout.superchatBadge.paddingH,
-    badgeY + badgeHeight / 2,
-    textColor,
-    settings
-  );
-  ctx.fillStyle = textColor;
-  ctx.fillText(
-    superChat.amount,
-    textX + rendererLayout.superchatBadge.paddingH,
-    badgeY + badgeHeight / 2
-  );
-  ctx.textBaseline = 'top';
-
-  // Body text
-  let textBottomY = badgeY + badgeHeight;
-  if (message.text) {
-    const bodyMaxWidth = w - scPad.paddingH * 2;
-    textBottomY = renderWrappedText(
-      ctx,
-      message.text,
-      textX,
-      textBottomY + spacing.xs,
-      bodyMaxWidth,
-      settings.superChatMaxBodyLines,
-      textColor,
-      alpha,
-      fontSize,
-      settings,
-      textBitmapCache,
-      getFontFn
-    );
-  }
-
-  // Sticker
-  if (superChat.sticker) {
-    const cached = stickerCache.get(superChat.sticker.url);
-    const stickerImg = cached?.complete && cached.naturalWidth > 0 ? cached : null;
-    if (stickerImg) {
-      const maxStickerSize = Math.round(fontSize * rendererLayout.superchatStickerSize);
-      const stickerY = textBottomY + spacing.xs;
-      const availableHeight = y + h - scPad.paddingV - stickerY;
-      const stickerSize = Math.max(0, Math.min(maxStickerSize, availableHeight));
-      if (stickerSize > 0) {
-        ctx.drawImage(stickerImg, textX, stickerY, stickerSize, stickerSize);
-      }
-    }
-  }
-
-  ctx.restore();
-}
-
-/** Render a Membership card at (x, y) with alpha blending. */
-export function renderMembershipCard(
-  ctx: CanvasRenderingContext2D,
-  message: ChatMessage,
-  msgWidth: number,
-  msgHeight: number,
-  x: number,
-  y: number,
-  alpha: number,
-  elapsed: number,
-  settings: OverlaySettings,
-  textBitmapCache: Map<string, HTMLCanvasElement>,
-  authorPhotoCache: Map<string, HTMLImageElement>,
-  getFontFn: (fontSize: number) => string
-): void {
-  const fontSize = settings.fontSize;
-  const w = msgWidth;
-  const h = msgHeight;
-  const mem = designColors.membership;
-
-  ctx.save();
-  ctx.globalAlpha = alpha;
-
-  ctx.fillStyle = `rgba(${mem.background.r}, ${mem.background.g}, ${mem.background.b}, ${mem.backgroundAlpha})`;
-  drawRoundRect(ctx, x, y, w, h, rendererLayout.membershipCardRadius);
-  ctx.fill();
-
-  const pulse = Math.sin((elapsed / 1000) * Math.PI) * mem.borderAlphaAmplitude + mem.borderAlpha;
-  ctx.strokeStyle = `rgba(${mem.background.r}, ${mem.background.g}, ${mem.background.b}, ${pulse})`;
-  ctx.lineWidth = 2;
-  ctx.stroke();
-
-  const padH = rendererLayout.membership.paddingH;
-  const padV = rendererLayout.membership.paddingV;
-  const textX = x + padH;
-  let textY = y + padV;
-
-  if (message.author) {
-    const nameMaxWidth = w - padH * 2;
-    textY = drawAuthorSection(
-      ctx,
-      message,
-      textX,
-      textY,
-      '#ffffff',
-      nameMaxWidth,
-      settings,
-      authorPhotoCache
-    );
-  }
-
-  if (message.text) {
-    const bodyMaxWidth = w - padH * 2;
-    const bodyY = message.author ? textY + spacing.xs : textY;
-    renderWrappedText(
-      ctx,
-      message.text,
-      textX,
-      bodyY,
-      bodyMaxWidth,
-      settings.membershipMaxBodyLines,
-      '#ffffff',
-      alpha,
       fontSize,
       settings,
       textBitmapCache,

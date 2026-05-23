@@ -25,11 +25,14 @@
  */
 
 import type { ChatMessage, OverlayDimensions, OverlaySettings } from '@app-types';
+import { renderMembershipCard, renderSuperChatCard } from '@core/canvas-card-renderers';
 import {
-  renderMembershipCard,
-  renderRegularMessage,
-  renderSuperChatCard,
-} from '@core/canvas-text-renderer';
+  applyPausedDurationToMessages,
+  type CanvasMessage,
+  cleanupExpiredMessages,
+  createCanvasMessage,
+} from '@core/canvas-message-lifecycle';
+import { renderRegularMessage } from '@core/canvas-text-renderer';
 import { computeDliosDuration, rendererLayout } from '@core/design-tokens';
 import type { LanePlacement } from '@core/lane-allocator';
 import { createLogger } from '@core/logging';
@@ -39,25 +42,6 @@ import { estimateMessageDimensions as sharedEstimateDimensions } from '@core/ren
 import { clearTextMeasurementCaches, getFontString } from '@core/text-measure';
 
 const log = createLogger('RendererCanvas');
-
-// ── Types ──────────────────────────────────────────────────────────────────
-
-interface CanvasMessage {
-  message: ChatMessage;
-  startTime: number;
-  duration: number;
-  width: number;
-  height: number;
-  startX: number;
-  x: number;
-  y: number;
-  pausedDuration: number;
-  laneIndex: number;
-  /** Time stagger delay (ms) applied to this message's start. */
-  staggerDelay: number;
-}
-
-// ── Renderer ─────────────────────────────────────────────────────────────────
 
 export class CanvasRenderer extends RendererBase {
   private canvas: HTMLCanvasElement | null = null;
@@ -368,20 +352,10 @@ export class CanvasRenderer extends RendererBase {
     const mode = this.settings.danmakuMode;
     const isScrolling = mode === 'scroll' || mode === 'reverse';
 
-    // O(n) single-pass cleanup using in-place filter (avoids readonly reassignment)
-    const oldLength = this.activeMessages.length;
-    let writeIdx = 0;
-    for (let i = 0; i < oldLength; i++) {
-      const msg = this.activeMessages[i];
-      if (!msg) continue;
-      const elapsed = now - msg.startTime - msg.pausedDuration;
-      if (elapsed < msg.duration) {
-        this.activeMessages[writeIdx] = msg;
-        writeIdx++;
-      }
-    }
-    if (writeIdx < oldLength) {
-      this.activeMessages.length = writeIdx;
+    // O(n) single-pass cleanup of expired messages
+    const newLength = cleanupExpiredMessages(this.activeMessages, now);
+    if (newLength < this.activeMessages.length) {
+      this.activeMessages.length = newLength;
       this.observability.updateActiveMessages(this.activeMessages.length);
       this.observability.updateQueueDepth(this.pendingQueue.length);
     }
@@ -721,19 +695,17 @@ export class CanvasRenderer extends RendererBase {
     laneIndex?: number,
     staggerDelay = 0
   ): void {
-    const cm: CanvasMessage = {
+    const cm = createCanvasMessage({
       message,
-      startTime: now + staggerDelay, // effective start — message waits at right edge
-      duration: duration ?? rendererLayout.topBottomDurationMs,
-      width: msgWidth,
-      height: msgHeight,
-      startX: startX ?? 0,
-      x: startX ?? 0,
-      y: laneY,
-      pausedDuration: 0,
-      laneIndex: laneIndex ?? 0,
+      now,
+      msgWidth,
+      msgHeight,
+      laneY,
+      duration,
+      startX,
+      laneIndex,
       staggerDelay,
-    };
+    });
 
     this.activeMessages.push(cm);
     this.observability.onMessageRendered();
@@ -848,9 +820,7 @@ export class CanvasRenderer extends RendererBase {
   }
 
   protected applyPausedDuration(pausedMs: number): void {
-    for (const msg of this.activeMessages) {
-      msg.pausedDuration += pausedMs;
-    }
+    applyPausedDurationToMessages(this.activeMessages, pausedMs);
   }
 
   protected resetState(): void {
