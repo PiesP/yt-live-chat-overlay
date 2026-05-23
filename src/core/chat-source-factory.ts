@@ -9,15 +9,28 @@ import type { OverlaySettings } from '@app-types';
 import type { ChatSource } from '@core/chat-source-base';
 import { LiveChatSource } from '@core/chat-source-live';
 import { ReplayChatSource } from '@core/chat-source-replay';
+import type { ChatBootstrapResult } from '@core/youtubei-chat';
 import { bootstrapChatSession } from '@core/youtubei-chat';
 
 export async function createChatSource(
   getSettings: () => Readonly<OverlaySettings>,
   signal?: AbortSignal
-): Promise<ChatSource> {
+): Promise<{ chatSource: ChatSource; bootstrapResult: ChatBootstrapResult }> {
   const result = await bootstrapChatSession(signal);
-  if (result.status === 'ready' && result.data?.isReplay) {
-    return new ReplayChatSource(getSettings);
+  const chatSource =
+    result.status === 'ready' && result.data?.isReplay
+      ? new ReplayChatSource(getSettings)
+      : new LiveChatSource(getSettings);
+
+  return { chatSource, bootstrapResult: result };
+}
+
+/**
+ * Seed a ChatSource with pre-resolved bootstrap data from the factory call.
+ * This avoids a duplicate ~200KB watch page HTTP request in bootstrapAndLaunchPolling.
+ */
+export function seedBootstrapIfReady(chatSource: ChatSource, result: ChatBootstrapResult): void {
+  if (result.status === 'ready') {
+    chatSource.setInitialBootstrap(result.data);
   }
-  return new LiveChatSource(getSettings);
 }

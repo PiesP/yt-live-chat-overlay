@@ -46,6 +46,7 @@ export class LiveChatSource extends ChatSource {
     super.resetSessionState();
     this.liveContinuation = null;
     this.consecutiveErrors = 0;
+    this.recentMessageCounts.length = 0;
   }
 
   private async initializeLiveSession(signal?: AbortSignal): Promise<boolean> {

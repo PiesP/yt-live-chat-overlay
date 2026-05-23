@@ -60,6 +60,15 @@ export abstract class ChatSource implements Pauseable {
     this.getSettings = getSettings;
   }
 
+  /**
+   * Pre-seed bootstrap data from a prior resolution (e.g. factory call).
+   * When set, bootstrapAndLaunchPolling skips the resolver's own bootstrap
+   * fetch, eliminating a duplicate ~200KB watch page HTTP request.
+   */
+  setInitialBootstrap(data: ChatBootstrapData): void {
+    this.bootstrap = data;
+  }
+
   async start(callback: MessageCallback, signal?: AbortSignal): Promise<ChatSourceStartStatus> {
     this.pollController?.abort();
     this.pollLoopManager.stop();
@@ -208,14 +217,17 @@ export abstract class ChatSource implements Pauseable {
   protected abstract launchCurrentPollLoop(signal?: AbortSignal): void;
 
   private async bootstrapAndLaunchPolling(signal?: AbortSignal): Promise<ChatSourceStartStatus> {
-    const bootstrapResolution = await this.bootstrapResolver.resolve(signal);
+    // Skip resolver when bootstrap was pre-seeded by factory call
+    if (!this.bootstrap) {
+      const bootstrapResolution = await this.bootstrapResolver.resolve(signal);
 
-    if (bootstrapResolution.status !== 'ready' || !bootstrapResolution.bootstrap) {
-      this.bootstrapResolver.logFailure(bootstrapResolution);
-      return bootstrapResolution.status === 'unavailable' ? 'unavailable' : 'retryable';
+      if (bootstrapResolution.status !== 'ready' || !bootstrapResolution.bootstrap) {
+        this.bootstrapResolver.logFailure(bootstrapResolution);
+        return bootstrapResolution.status === 'unavailable' ? 'unavailable' : 'retryable';
+      }
+
+      this.bootstrap = bootstrapResolution.bootstrap;
     }
-
-    this.bootstrap = bootstrapResolution.bootstrap;
 
     const seeded = await this.seedCurrentSession(signal);
     if (!seeded) {

@@ -148,18 +148,30 @@ export class CanvasRenderer extends RendererBase {
 
   addMessage(message: ChatMessage): void {
     if (!this.isMessageAllowed(message)) return;
+    this.enqueueMessage(message, true);
+  }
 
+  /**
+   * Replay a previously received message without observability tracking.
+   * Used by replayLatestMessages so replayed messages don't inflate
+   * drop-rate denominators or trigger burst detection / rate limiting.
+   */
+  replayMessage(message: ChatMessage): void {
+    this.enqueueMessage(message, false);
+  }
+
+  private enqueueMessage(message: ChatMessage, trackDrops: boolean): void {
     const priority = CanvasRenderer.getMessagePriority(message);
     this.prefetchImages(message);
 
     if (this.pendingQueue.length >= rendererLayout.queueMaxSize) {
       const last = this.pendingQueue[this.pendingQueue.length - 1];
       if (last && priority <= CanvasRenderer.getMessagePriority(last)) {
-        this.observability.onMessageDropped('queue_priority');
+        if (trackDrops) this.observability.onMessageDropped('queue_priority');
         return;
       }
       this.pendingQueue.pop();
-      this.observability.onMessageDropped('queue_full');
+      if (trackDrops) this.observability.onMessageDropped('queue_full');
     }
 
     const insertIndex = this.findQueueInsertIndex(priority);

@@ -1,7 +1,7 @@
 import type { ChatMessage, OverlaySettings, Pauseable } from '@app-types';
 import { BacklogInjectionController } from '@core/backlog-controller';
 import type { ChatHealthSnapshot, ChatSource, ChatSourceStartStatus } from '@core/chat-source-base';
-import { createChatSource } from '@core/chat-source-factory';
+import { createChatSource, seedBootstrapIfReady } from '@core/chat-source-factory';
 import { findElementMatch, isAbortError, throwIfAborted, VIDEO_SELECTORS } from '@core/dom';
 import type { DomWatcherUnsubscribe } from '@core/dom-chat-watcher';
 import { installDomChatWatcher } from '@core/dom-chat-watcher';
@@ -220,8 +220,11 @@ export class RuntimeSession {
   }
 
   private async startChatSource(signal: AbortSignal): Promise<ChatSourceStartStatus> {
-    const chatSource = await createChatSource(() => this.settings, signal);
+    const { chatSource, bootstrapResult } = await createChatSource(() => this.settings, signal);
     this.chatSource = chatSource;
+
+    // Seed bootstrap data from factory call to avoid duplicate watch page fetch
+    seedBootstrapIfReady(chatSource, bootstrapResult);
 
     // Install fetch interceptor to eavesdrop on YouTube's own chat requests.
     // This delivers messages ~1 poll interval earlier than our own polling.
@@ -502,7 +505,7 @@ export class RuntimeSession {
       // sessionDedup check prevents re-rendering messages already shown
       // before the renderer was reset — their ids survive seenMessageIds.clear().
       if (!this.acceptForRenderer(message)) continue;
-      renderer.addMessage(message);
+      renderer.replayMessage(message);
     }
   }
 
