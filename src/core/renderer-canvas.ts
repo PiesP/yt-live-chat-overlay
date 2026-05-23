@@ -64,6 +64,7 @@ export class CanvasRenderer extends RendererBase {
   private ctx: CanvasRenderingContext2D | null = null;
   private animFrameId: number | null = null;
   private overlayDimensionsUnsubscribe: (() => void) | null = null;
+  private emojiCleanupIntervalId: ReturnType<typeof setInterval> | null = null;
 
   private readonly activeMessages: CanvasMessage[] = [];
   private readonly pendingQueue: ChatMessage[] = [];
@@ -71,6 +72,7 @@ export class CanvasRenderer extends RendererBase {
   /** Image caches (bounded LRU). */
   private readonly emojiCache = new Map<string, HTMLImageElement>();
   private readonly emojiFetching = new Set<string>();
+  private readonly emojiFetchingStarted = new Map<string, number>();
   private readonly authorPhotoCache = new Map<string, HTMLImageElement>();
   private readonly stickerCache = new Map<string, HTMLImageElement>();
 
@@ -128,6 +130,9 @@ export class CanvasRenderer extends RendererBase {
     });
 
     this.startRenderLoop();
+    this.emojiCleanupIntervalId = setInterval(() => {
+      this.cleanupStaleEmojiFetching();
+    }, 5_000);
     log.info('RendererCanvas created');
   }
 
@@ -244,14 +249,17 @@ export class CanvasRenderer extends RendererBase {
       if (seg.type !== 'emoji') continue;
       if (this.emojiFetching.has(seg.emoji.url)) continue;
       if (this.emojiCache.has(seg.emoji.url)) continue;
+      this.cleanupStaleEmojiFetching();
       if (this.emojiFetching.size >= 6) continue;
       this.emojiFetching.add(seg.emoji.url);
+      this.emojiFetchingStarted.set(seg.emoji.url, performance.now());
       const url = seg.emoji.url;
       const img = new Image();
       img.crossOrigin = 'anonymous';
       img.src = url;
       img.onload = () => {
         this.emojiFetching.delete(url);
+        this.emojiFetchingStarted.delete(url);
         // Direct cache write instead of delegating to loadImage() —
         // the old path created a second Image for the same URL,
         // doubling the load latency before the emoji appeared.
@@ -269,7 +277,10 @@ export class CanvasRenderer extends RendererBase {
           this.startRenderLoop();
         }
       };
-      img.onerror = () => this.emojiFetching.delete(url);
+      img.onerror = () => {
+        this.emojiFetching.delete(url);
+        this.emojiFetchingStarted.delete(url);
+      };
     }
 
     if (message.authorPhotoUrl) {
@@ -279,6 +290,24 @@ export class CanvasRenderer extends RendererBase {
     const stickerUrl = message.superChat?.sticker?.url;
     if (stickerUrl) {
       this.loadImage(stickerUrl, this.stickerCache, 50);
+    }
+  }
+
+  /**
+   * Remove stale entries from emojiFetching that never resolved.
+   * If an image fetch hasn't completed within 30 seconds, the fetch
+   * likely failed silently (e.g. CORS block), so evict it to unblock
+   * future retries.
+   */
+  private static readonly EMOJI_FETCH_TIMEOUT_MS = 30_000;
+
+  private cleanupStaleEmojiFetching(): void {
+    const now = performance.now();
+    for (const [url, startedAt] of this.emojiFetchingStarted) {
+      if (now - startedAt > CanvasRenderer.EMOJI_FETCH_TIMEOUT_MS) {
+        this.emojiFetching.delete(url);
+        this.emojiFetchingStarted.delete(url);
+      }
     }
   }
 
@@ -824,11 +853,17 @@ export class CanvasRenderer extends RendererBase {
 
   protected onDestroy(): void {
     this.stopRenderLoop();
+    if (this.emojiCleanupIntervalId !== null) {
+      clearInterval(this.emojiCleanupIntervalId);
+      this.emojiCleanupIntervalId = null;
+    }
     this.overlayDimensionsUnsubscribe?.();
     this.canvas?.remove();
     this.canvas = null;
     this.ctx = null;
     this.emojiCache.clear();
+    this.emojiFetching.clear();
+    this.emojiFetchingStarted.clear();
     this.authorPhotoCache.clear();
     this.stickerCache.clear();
     this.textBitmapCache.clear();
