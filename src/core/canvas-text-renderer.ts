@@ -26,7 +26,7 @@ import {
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-const TEXT_BITMAP_MAX = 500;
+const TEXT_BITMAP_CACHE_MAX = 200;
 
 // ── Text bitmap cache ──────────────────────────────────────────────────────
 
@@ -43,11 +43,6 @@ function cacheTextBitmap(
   ctx: CanvasRenderingContext2D,
   textBitmapCache: Map<string, HTMLCanvasElement>
 ): void {
-  if (textBitmapCache.size >= TEXT_BITMAP_MAX) {
-    const oldestKey = textBitmapCache.keys().next().value;
-    if (oldestKey) textBitmapCache.delete(oldestKey);
-  }
-
   if (!ctx) return;
 
   ctx.save();
@@ -80,6 +75,11 @@ function cacheTextBitmap(
   offCtx.fillText(text, strokeWidth / 2 + 1, strokeWidth / 2 + 1);
 
   textBitmapCache.set(key, offscreen);
+
+  if (textBitmapCache.size > TEXT_BITMAP_CACHE_MAX) {
+    const oldestKey = textBitmapCache.keys().next().value;
+    if (oldestKey !== undefined) textBitmapCache.delete(oldestKey);
+  }
 }
 
 // ── Outline stroke ──────────────────────────────────────────────────────────
