@@ -556,10 +556,13 @@ export class CanvasRenderer extends RendererBase {
             return { ok: false, reason: 'collision' as const };
           }
         } else {
-          // reverse mode: messages enter from left, travel right
+          // reverse mode: messages enter from left, travel right.
+          // Speed-aware headway: when a fast backlog message enters a lane
+          // with a slow reverse message, headway scales up to prevent the
+          // faster chaser from catching up and visually crossing through.
           const reverseTravel = dims.width + active.width + rendererLayout.exitPaddingMin;
           const activeX = -active.width + activeProgress * reverseTravel;
-          if (activeX + active.width > 0) {
+          if (activeX + active.width > -headwayPx) {
             this.laneAllocator.markCollision(placement.laneIndex);
             return { ok: false, reason: 'collision' as const };
           }

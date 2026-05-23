@@ -63,6 +63,8 @@ export class LaneAllocator {
   private laneIndexToHeapIndex: Map<number, number> = new Map();
   private laneHeight = 0;
   private laneCount = 0;
+  /** Cached utilization value, recomputed in resetBatch for O(1) reads. */
+  private cachedUtilization = 0;
 
   /**
    * Set of lane indices that collided with an active message in the current
@@ -143,6 +145,7 @@ export class LaneAllocator {
     this.collidedLanes.clear();
     this.realTimeLanesUntil.clear();
     this.backlogLanesUntil.clear();
+    this.cachedUtilization = 0;
     if (!dimensions) {
       this.laneHeight = 0;
       this.laneCount = 0;
@@ -185,15 +188,10 @@ export class LaneAllocator {
     return this.laneCount;
   }
 
-  /** Get current lane utilization ratio (0-1): occupied lanes / total lanes */
+  /** Get current lane utilization ratio (0-1): occupied lanes / total lanes. O(1) cached value. */
   getUtilization(): number {
     if (this.heap.length === 0) return 0;
-    const now = performance.now();
-    let occupied = 0;
-    for (const [, availableAt] of this.heap) {
-      if (availableAt > now) occupied++;
-    }
-    return occupied / this.heap.length;
+    return this.cachedUtilization;
   }
 
   getLaneHeight(): number {
@@ -301,6 +299,12 @@ export class LaneAllocator {
     for (const [laneIdx, until] of this.backlogLanesUntil) {
       if (until <= now) this.backlogLanesUntil.delete(laneIdx);
     }
+    // Recompute cached utilization for O(1) getUtilization().
+    let occupied = 0;
+    for (const [, availableAt] of this.heap) {
+      if (availableAt > now) occupied++;
+    }
+    this.cachedUtilization = this.heap.length > 0 ? occupied / this.heap.length : 0;
   }
 
   /**
