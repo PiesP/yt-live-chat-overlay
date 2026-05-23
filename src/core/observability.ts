@@ -149,11 +149,12 @@ export class ObservabilityReporter {
     if (this.debugOverlayEl) return;
     const el = document.createElement('div');
     el.id = 'yt-chat-overlay-debug';
-    el.style.cssText =
-      'position:fixed;top:8px;right:8px;z-index:99999;' +
-      'background:rgba(0,0,0,0.8);color:#0f0;font:12px/1.4 monospace;' +
-      'padding:8px 12px;border-radius:4px;min-width:220px;' +
-      'pointer-events:none;user-select:none';
+    el.style.cssText = [
+      'position:fixed;top:8px;right:8px;z-index:99999;',
+      'background:rgba(0,0,0,0.8);color:#0f0;font:12px/1.4 monospace;',
+      'padding:8px 12px;border-radius:4px;min-width:220px;',
+      'pointer-events:none;user-select:none',
+    ].join('');
     document.body.appendChild(el);
     this.debugOverlayEl = el;
   }

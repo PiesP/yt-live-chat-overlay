@@ -325,10 +325,12 @@ export class CanvasRenderer extends RendererBase {
     const dims = this.overlay.getDimensions();
     if (!dims) return;
 
-    // Reset device pixel ratio transform (canvas.width set may have reset it)
+    // Reset device pixel ratio (canvas buffer size may need update on DPR change)
     const dpr = window.devicePixelRatio || 1;
     if (dpr !== this.lastDpr) {
       this.lastDpr = dpr;
+      canvas.width = dims.width * dpr;
+      canvas.height = dims.height * dpr;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
     ctx.clearRect(0, 0, dims.width, dims.height);

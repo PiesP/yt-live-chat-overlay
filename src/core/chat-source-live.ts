@@ -208,8 +208,7 @@ export class LiveChatSource extends ChatSource {
 
         if (filtered.length < events.length) {
           log.debug(
-            `Initial seed filtered: ${events.length} → ${filtered.length} ` +
-              `(playback at ${Math.round(offsetMs / 1000)}s)`
+            `Initial seed filtered: ${events.length} → ${filtered.length} (playback at ${Math.round(offsetMs / 1000)}s)`
           );
         }
       } else {

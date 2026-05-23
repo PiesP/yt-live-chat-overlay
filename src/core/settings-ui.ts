@@ -70,7 +70,7 @@ export class SettingsUi {
 
   /** Debounced live preview — applies settings immediately (memory only, no storage write). */
   private previewTimer: ReturnType<typeof setTimeout> | null = null;
-  private readonly PREVIEW_DEBOUNCE_MS = 100;
+  private static readonly PREVIEW_DEBOUNCE_MS = 100;
 
   private queuePreview(preview: OverlaySettings): void {
     if (this.previewTimer !== null) {
@@ -81,7 +81,7 @@ export class SettingsUi {
       this.onChange(preview);
       // Sync form with normalized values from the settings system
       this.form.populateForm(this.getSettings());
-    }, this.PREVIEW_DEBOUNCE_MS);
+    }, SettingsUi.PREVIEW_DEBOUNCE_MS);
   }
 
   async attach(): Promise<void> {

@@ -83,21 +83,26 @@ export class ReplayChatSource extends ChatSource {
     this.replayBuffer = [];
     this.lastReplayRequestedOffsetMs = offsetMs;
     if (this.replayMode === 'playerSeek' && this.replayPlayerSeekContinuation) {
-      void this.fetchReplayPlayerSeek(offsetMs)
-        .then(() => {
+      void (async () => {
+        try {
+          await this.fetchReplayPlayerSeek(offsetMs);
           this.flushReplayBuffer(offsetMs);
-        })
-        .catch((error: unknown) => {
+        } catch (error: unknown) {
           if (!isAbortError(error)) {
-            log.warn('Seek playerSeek fetch failed:', error);
+            log.warn('Seek replay fetch failed:', error);
           }
-        });
-    } else if (this.replayMode === 'continuation') {
-      void this.pollContinuationReplay(offsetMs).catch((error: unknown) => {
-        if (!isAbortError(error)) {
-          log.warn('Continuation poll in seek handler failed:', error);
         }
-      });
+      })();
+    } else if (this.replayMode === 'continuation') {
+      void (async () => {
+        try {
+          await this.pollContinuationReplay(offsetMs);
+        } catch (error: unknown) {
+          if (!isAbortError(error)) {
+            log.warn('Continuation poll in seek handler failed:', error);
+          }
+        }
+      })();
     }
   }
 
