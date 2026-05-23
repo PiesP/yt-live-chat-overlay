@@ -252,17 +252,21 @@ export class RuntimeSession {
     // This delivers messages ~1 poll interval earlier than our own polling.
     this.installFetchInterceptor(chatSource);
 
-    return chatSource.start((messages) => {
+    return chatSource.start((messages, isInitialSeed) => {
       if (this.disposed) return;
       const renderer = this.renderer;
       if (!renderer) return;
 
       const msgs = Array.isArray(messages) ? messages : [messages];
 
-      // Route large batches through the backlog controller regardless of
-      // isInitialSeed. This prevents overwhelming the renderer when a burst
-      // arrives via fetch interceptor or replay buffer flush.
-      if (msgs.length > 50) {
+      // Route replay batches (isInitialSeed === false) through the backlog
+      // controller so they are throttled via Poisson-distributed injection
+      // instead of flooding the pending queue. This prevents the queue_priority
+      // drops that occur when the replay loop emits up to 50 messages per tick
+      // while the render loop cannot drain them fast enough.
+      // Also route large live batches (> 50) as before for burst protection.
+      const isReplayBatch = isInitialSeed === false && msgs.length >= 2;
+      if (isReplayBatch || msgs.length > 50) {
         this.ensureBacklogController(renderer);
         this.backlogController?.startBacklogInjection(msgs);
         return;
