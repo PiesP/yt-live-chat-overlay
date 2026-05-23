@@ -68,6 +68,7 @@ export class CanvasRenderer extends RendererBase {
 
   private readonly activeMessages: CanvasMessage[] = [];
   private readonly pendingQueue: ChatMessage[] = [];
+  private readonly retryQueue: ChatMessage[] = [];
 
   /** Image caches (bounded LRU). */
   private readonly emojiCache = new Map<string, HTMLImageElement>();
@@ -490,18 +491,27 @@ export class CanvasRenderer extends RendererBase {
         }
         // Collision: the allocator found a lane but the bounding-box check
         // against active (visible) messages detected overlap near the entry
-        // edge. Keep the message in the queue and retry next frame — the
-        // collision window is often <100ms as the existing message scrolls
-        // left. Previously this was a hard drop, causing 80%+ loss during
-        // high-density bursts despite available lanes (queue=0, lanes=75%).
+        // edge. Keep the message in a separate retry queue and retry next
+        // frame — the collision window is often <100ms as the existing
+        // message scrolls left. Previously this was a hard drop, causing
+        // 80%+ loss during high-density bursts despite available lanes
+        // (queue=0, lanes=75%). Pushing to a separate queue avoids O(n²)
+        // push-back into the main pending queue.
         skipped++;
-        this.pendingQueue.push(msg); // retry next frame
+        this.retryQueue.push(msg);
         continue;
       }
 
       this.enqueueMessageWithPlacement(msg, now, result.placement, batchIndex);
       skipped = 0; // reset after successful enqueue
       batchIndex++;
+    }
+
+    // Merge retry queue back into pending queue for next frame.
+    // This avoids O(n²) push-back into the main queue during bursts.
+    if (this.retryQueue.length > 0) {
+      this.pendingQueue.push(...this.retryQueue);
+      this.retryQueue.length = 0;
     }
   }
 

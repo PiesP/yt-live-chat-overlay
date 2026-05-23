@@ -10,8 +10,8 @@ import {
   type RootScalarSettingKey,
   resolveLimits,
 } from '@core/settings-schema';
+import type { FieldDef, PaneDef } from '@core/settings-ui-panes';
 import { PANES } from '@core/settings-ui-panes';
-import type { FieldDef, PaneDef } from '@core/settings-ui-types';
 
 const log = createLogger('SettingsUiForm');
 

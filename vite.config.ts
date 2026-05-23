@@ -106,16 +106,11 @@ export default defineConfig(({ mode }): UserConfig => {
     build: {
       target: 'esnext',
       // Greasy Fork rule: scripts must not be minified/obfuscated.
-      // vite-plugin-monkey also enforces this by default.
       minify: false,
       sourcemap: isDev ? 'inline' : false,
       outDir: 'dist',
       emptyOutDir: true,
       write: true,
-
-      rollupOptions: {
-        output: {},
-      },
     },
 
     define: {
