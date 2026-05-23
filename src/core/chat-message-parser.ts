@@ -2,63 +2,26 @@ import type {
   AuthorType,
   ChatMessage,
   ContentSegment,
-  ImageAsset,
   OverlaySettings,
   SuperChatInfo,
 } from '@app-types';
 import {
+  createImageAsset,
+  extractBestThumbnail,
+  getEmojiVisibleFallbackText,
+  parseEmoji,
+} from '@core/chat-emoji-parser';
+import {
   AUTHOR_TYPE_PRIORITY,
   colorIntToCss,
   determineSuperChatTier,
-  EMOJI_ALIAS_PATTERN,
   EMOJI_TEXT_PATTERN,
   extractUserColor,
   hasEmojiContent,
-  normalizeInlineText,
   stripControlCharacters,
   truncateForKind,
 } from '@core/chat-message-helpers';
 import { createLogger } from '@core/logging';
-
-// ── Inline helpers (formerly youtubei-image.ts) ─────────────────────
-
-const ALLOWED_IMAGE_HOST_SUFFIXES = [
-  'ggpht.com',
-  'googleusercontent.com',
-  'gstatic.com',
-  'ytimg.com',
-];
-
-const isAllowedHostname = (hostname: string): boolean => {
-  const normalizedHostname = hostname.toLowerCase();
-  return ALLOWED_IMAGE_HOST_SUFFIXES.some(
-    (suffix) => normalizedHostname === suffix || normalizedHostname.endsWith(`.${suffix}`)
-  );
-};
-
-const parseAllowedImageUrl = (url: string): URL | null => {
-  const trimmed = url.trim();
-  if (trimmed.length === 0) return null;
-
-  try {
-    const normalizedUrl = trimmed.startsWith('//') ? `https:${trimmed}` : trimmed;
-    const parsed = new URL(normalizedUrl);
-
-    if (!isAllowedHostname(parsed.hostname)) return null;
-
-    if (parsed.protocol === 'http:') {
-      parsed.protocol = 'https:';
-    }
-
-    return parsed.protocol === 'https:' ? parsed : null;
-  } catch {
-    return null;
-  }
-};
-
-const normalizeYouTubeImageUrl = (url: string): string | null =>
-  parseAllowedImageUrl(url)?.toString() ?? null;
-
 import { asRecord, getNumber, getString, isRecord, type JsonObject } from '@core/youtubei-json';
 
 const log = createLogger('ChatMessageParser');
@@ -83,12 +46,6 @@ export interface ChatEvent {
 interface SupportedRenderer {
   kind: ChatMessage['kind'];
   renderer: JsonObject;
-}
-
-interface ThumbnailCandidate {
-  url: string;
-  width?: number;
-  height?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -470,6 +427,8 @@ function getVisibleContentLength(segments: readonly ContentSegment[]): number {
   return visibleLength;
 }
 
+// ── Accessibility helpers ────────────────────────────────────────────────────
+
 function extractAccessibilityLabel(value: unknown): string | undefined {
   const record = asRecord(value);
   if (!record) {
@@ -479,144 +438,7 @@ function extractAccessibilityLabel(value: unknown): string | undefined {
   return getString(asRecord(asRecord(record.accessibility)?.accessibilityData)?.label);
 }
 
-function getEmojiShortcuts(emojiData: JsonObject): string[] {
-  return Array.isArray(emojiData.shortcuts)
-    ? emojiData.shortcuts.filter((shortcut): shortcut is string => typeof shortcut === 'string')
-    : [];
-}
-
-function getEmojiAltText(emojiData: JsonObject): string {
-  const shortcuts = getEmojiShortcuts(emojiData);
-
-  return (
-    shortcuts[0] ??
-    extractAccessibilityLabel(emojiData.image) ??
-    extractAccessibilityLabel(emojiData) ??
-    getString(emojiData.emojiId) ??
-    ''
-  );
-}
-
-function getEmojiVisibleFallbackText(emojiData: JsonObject): string {
-  const shortcuts = getEmojiShortcuts(emojiData);
-  const aliasPattern = EMOJI_ALIAS_PATTERN;
-  const nonAliasShortcut = shortcuts.find((s) => !aliasPattern.test(s));
-  if (nonAliasShortcut) return normalizeInlineText(nonAliasShortcut);
-
-  const label = extractAccessibilityLabel(emojiData.image) ?? extractAccessibilityLabel(emojiData);
-  if (label && !aliasPattern.test(label)) {
-    return normalizeInlineText(label);
-  }
-
-  return '';
-}
-
-function parseEmoji(emojiData: JsonObject): ImageAsset | null {
-  const emojiAsset = createImageAsset(
-    emojiData.image,
-    getEmojiAltText(emojiData),
-    getEmojiVisibleFallbackText(emojiData)
-  );
-  if (!emojiAsset) {
-    return null;
-  }
-
-  return emojiAsset;
-}
-
-function createImageAsset(value: unknown, alt: string, fallbackText?: string): ImageAsset | null {
-  const thumbnail = extractBestThumbnail(value);
-  if (!thumbnail) {
-    return null;
-  }
-
-  const asset: ImageAsset = {
-    url: thumbnail.url,
-    alt,
-  };
-
-  if (thumbnail.candidateUrl) {
-    asset.candidateUrl = thumbnail.candidateUrl;
-  }
-
-  if (fallbackText && fallbackText.length > 0) {
-    asset.fallbackText = fallbackText;
-  }
-
-  if (thumbnail.width !== undefined) {
-    asset.width = thumbnail.width;
-  }
-
-  if (thumbnail.height !== undefined) {
-    asset.height = thumbnail.height;
-  }
-
-  return asset;
-}
-
-function extractThumbnailCandidates(value: unknown): ThumbnailCandidate[] {
-  if (!isRecord(value)) {
-    return [];
-  }
-
-  const thumbnails = Array.isArray(value.thumbnails)
-    ? value.thumbnails
-    : Array.isArray(value.sources)
-      ? value.sources
-      : [];
-
-  const candidates: ThumbnailCandidate[] = [];
-  const seenUrls = new Set<string>();
-
-  for (const candidate of thumbnails) {
-    if (!isRecord(candidate)) {
-      continue;
-    }
-
-    const url = getString(candidate.url);
-    const normalizedUrl = url ? normalizeYouTubeImageUrl(url) : null;
-    if (!normalizedUrl || seenUrls.has(normalizedUrl)) {
-      continue;
-    }
-
-    seenUrls.add(normalizedUrl);
-    const width = getNumber(candidate.width);
-    const nextThumbnail: ThumbnailCandidate = {
-      url: normalizedUrl,
-    };
-    if (width !== undefined) {
-      nextThumbnail.width = width;
-    }
-
-    const height = getNumber(candidate.height);
-    if (height !== undefined) {
-      nextThumbnail.height = height;
-    }
-
-    candidates.push(nextThumbnail);
-  }
-
-  candidates.sort((left, right) => (right.width ?? 0) - (left.width ?? 0));
-  return candidates;
-}
-
-function extractBestThumbnail(value: unknown): {
-  url: string;
-  candidateUrl?: string;
-  width?: number;
-  height?: number;
-} | null {
-  const [bestThumbnail, ...fallbackThumbnails] = extractThumbnailCandidates(value);
-  if (!bestThumbnail) {
-    return null;
-  }
-
-  const firstFallback = fallbackThumbnails[0] ?? null;
-  return {
-    ...bestThumbnail,
-    ...(firstFallback ? { candidateUrl: firstFallback.url } : {}),
-  };
-}
+// ── Author type extraction ───────────────────────────────────────────────────
 function extractAuthorType(value: unknown): AuthorType {
   let resolvedType: AuthorType = 'normal';
 
