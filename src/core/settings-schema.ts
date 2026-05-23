@@ -1,10 +1,8 @@
-import {
-  type AuthorType,
-  isLogLevel,
-  type OutlineSettings,
-  type OverlaySettings,
-} from '@app-types';
+import type { AuthorType, LogLevel, OutlineSettings, OverlaySettings } from '@app-types';
 import { DEFAULT_FONT_FAMILY, colors as designColors } from '@core/design-tokens';
+
+const isLogLevel = (value: unknown): value is LogLevel =>
+  value === 'warn' || value === 'info' || value === 'debug';
 
 type RootScalarSettingKey = Exclude<keyof OverlaySettings, 'showAuthor' | 'colors' | 'outline'>;
 type OutlineSettingKey = keyof OutlineSettings;

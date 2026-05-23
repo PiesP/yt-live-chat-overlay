@@ -19,9 +19,6 @@ export type AuthorRateLimitPreset = 'off' | 'normal' | 'strict';
 /** Backlog injection modes */
 export type BacklogMode = 'playback' | 'recent' | 'full' | 'none';
 
-export const isLogLevel = (value: unknown): value is LogLevel =>
-  value === 'warn' || value === 'info' || value === 'debug';
-
 /**
  * Author display settings (per author type)
  */

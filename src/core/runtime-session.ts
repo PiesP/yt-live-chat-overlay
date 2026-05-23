@@ -1,7 +1,8 @@
 import type { ChatMessage, OverlaySettings, Pauseable } from '@app-types';
 import { BacklogInjectionController } from '@core/backlog-controller';
 import type { ChatHealthSnapshot, ChatSource, ChatSourceStartStatus } from '@core/chat-source-base';
-import { createChatSource, seedBootstrapIfReady } from '@core/chat-source-factory';
+import { LiveChatSource } from '@core/chat-source-live';
+import { ReplayChatSource } from '@core/chat-source-replay';
 import { findElementMatch, isAbortError, throwIfAborted, VIDEO_SELECTORS } from '@core/dom';
 import type { DomWatcherUnsubscribe } from '@core/dom-chat-watcher';
 import { installDomChatWatcher } from '@core/dom-chat-watcher';
@@ -13,11 +14,32 @@ import { OVERLAY_SELECTOR, Overlay } from '@core/overlay';
 import { CanvasRenderer } from '@core/renderer-canvas';
 import { shouldResetRendererForSettingsChange } from '@core/settings-schema';
 import { VideoPauseController } from '@core/video-pause-controller';
+import type { ChatBootstrapResult } from '@core/youtubei-chat';
+import { bootstrapChatSession } from '@core/youtubei-chat';
 
 const log = createLogger('RuntimeSession');
 
 const RECENT_MESSAGE_REPLAY_LIMIT = 20;
 const CHAT_WATCHDOG_INTERVAL_MS = 15_000;
+
+async function createChatSource(
+  getSettings: () => Readonly<OverlaySettings>,
+  signal?: AbortSignal
+): Promise<{ chatSource: ChatSource; bootstrapResult: ChatBootstrapResult }> {
+  const result = await bootstrapChatSession(signal);
+  const chatSource =
+    result.status === 'ready' && result.data?.isReplay
+      ? new ReplayChatSource(getSettings)
+      : new LiveChatSource(getSettings);
+
+  return { chatSource, bootstrapResult: result };
+}
+
+function seedBootstrapIfReady(chatSource: ChatSource, result: ChatBootstrapResult): void {
+  if (result.status === 'ready') {
+    chatSource.setInitialBootstrap(result.data);
+  }
+}
 const CHAT_STALL_TIMEOUT_MS = 30_000;
 const LONG_IDLE_RESTART_MS = 60_000;
 

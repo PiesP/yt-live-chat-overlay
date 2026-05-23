@@ -15,10 +15,9 @@ import type { FieldDef, PaneDef } from '@core/settings-ui-types';
 
 const log = createLogger('SettingsUiForm');
 
-const STYLE_ID = 'yt-chat-overlay-settings-style';
+export const STYLE_ID = 'yt-chat-overlay-settings-style';
 export const BUTTON_ID = 'yt-chat-overlay-settings-button';
 export const BACKDROP_ID = 'yt-chat-overlay-settings-backdrop';
-export { STYLE_ID };
 
 const ROOT_ROUNDED_KEYS = new Set<RootScalarSettingKey>([
   'maxConcurrentMessages',

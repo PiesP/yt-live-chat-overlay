@@ -6,9 +6,17 @@
  * testable and reusable.
  */
 
-import type { ChatMessage, ContentSegment, SuperChatInfo } from '@app-types';
+import type { AuthorType, ChatMessage, ContentSegment, SuperChatInfo } from '@app-types';
 import { colors, parseAnyColor, SUPERCHAT_TIER_KEYS } from '@core/design-tokens';
 import type { JsonObject } from '@core/youtubei-json';
+
+export const AUTHOR_TYPE_PRIORITY: Record<AuthorType, number> = {
+  normal: 0,
+  verified: 1,
+  member: 2,
+  moderator: 3,
+  owner: 4,
+};
 
 /**
  * Matches any character with the Emoji Unicode property.

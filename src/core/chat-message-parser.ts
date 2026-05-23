@@ -7,6 +7,7 @@ import type {
   SuperChatInfo,
 } from '@app-types';
 import {
+  AUTHOR_TYPE_PRIORITY,
   colorIntToCss,
   determineSuperChatTier,
   EMOJI_ALIAS_PATTERN,
@@ -18,7 +19,46 @@ import {
   truncateForKind,
 } from '@core/chat-message-helpers';
 import { createLogger } from '@core/logging';
-import { normalizeYouTubeImageUrl } from '@core/youtubei-image';
+
+// ── Inline helpers (formerly youtubei-image.ts) ─────────────────────
+
+const ALLOWED_IMAGE_HOST_SUFFIXES = [
+  'ggpht.com',
+  'googleusercontent.com',
+  'gstatic.com',
+  'ytimg.com',
+];
+
+const isAllowedHostname = (hostname: string): boolean => {
+  const normalizedHostname = hostname.toLowerCase();
+  return ALLOWED_IMAGE_HOST_SUFFIXES.some(
+    (suffix) => normalizedHostname === suffix || normalizedHostname.endsWith(`.${suffix}`)
+  );
+};
+
+const parseAllowedImageUrl = (url: string): URL | null => {
+  const trimmed = url.trim();
+  if (trimmed.length === 0) return null;
+
+  try {
+    const normalizedUrl = trimmed.startsWith('//') ? `https:${trimmed}` : trimmed;
+    const parsed = new URL(normalizedUrl);
+
+    if (!isAllowedHostname(parsed.hostname)) return null;
+
+    if (parsed.protocol === 'http:') {
+      parsed.protocol = 'https:';
+    }
+
+    return parsed.protocol === 'https:' ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
+const normalizeYouTubeImageUrl = (url: string): string | null =>
+  parseAllowedImageUrl(url)?.toString() ?? null;
+
 import { asRecord, getNumber, getString, isRecord, type JsonObject } from '@core/youtubei-json';
 
 const log = createLogger('ChatMessageParser');
@@ -28,14 +68,6 @@ const EMPTY_MESSAGE_BODY: ParsedMessageBody = Object.freeze({
   content: [],
   visibleLength: 0,
 });
-
-const AUTHOR_TYPE_PRIORITY = {
-  normal: 0,
-  verified: 1,
-  member: 2,
-  moderator: 3,
-  owner: 4,
-} as const satisfies Record<AuthorType, number>;
 
 interface ParsedMessageBody {
   text: string;

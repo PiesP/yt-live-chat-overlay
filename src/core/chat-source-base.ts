@@ -9,8 +9,6 @@ import type { ChatMessage, OverlaySettings, Pauseable } from '@app-types';
 import { BootstrapResolver } from '@core/bootstrap-resolver';
 import { findElementMatch, isAbortError, sleep, VIDEO_SELECTORS } from '@core/dom';
 import { createLogger } from '@core/logging';
-import { MessageBuffer } from '@core/message-buffer';
-import { PollLoopManager } from '@core/poll-loop-manager';
 import {
   type ChatBootstrapData,
   getLiveChatPayload,
@@ -42,6 +40,66 @@ export interface PlaybackSnapshot {
  */
 type MessageCallback = (messages: ChatMessage | ChatMessage[], isInitialSeed?: boolean) => void;
 export type ChatSourceStartStatus = 'started' | 'retryable' | 'unavailable';
+
+// ── Inline helpers (formerly separate modules) ─────────────────────
+
+const RECENT_MESSAGE_BUFFER_SIZE = 100;
+
+class MessageBuffer {
+  private readonly messages: ChatMessage[] = [];
+
+  push(message: ChatMessage): void {
+    this.messages.push(message);
+    const overflow = this.messages.length - RECENT_MESSAGE_BUFFER_SIZE;
+    if (overflow > 0) {
+      this.messages.splice(0, overflow);
+    }
+  }
+
+  getLatest(limit: number): ChatMessage[] {
+    if (limit <= 0) return [];
+    return this.messages.slice(-limit);
+  }
+
+  clear(): void {
+    this.messages.length = 0;
+  }
+}
+
+const pollLoopLog = createLogger('PollLoop');
+
+class PollLoopManager {
+  private generation = 0;
+  private alive = false;
+
+  launch(runner: (signal?: AbortSignal) => Promise<void>, signal?: AbortSignal): void {
+    const generation = ++this.generation;
+    this.alive = true;
+
+    void (async () => {
+      try {
+        await runner(signal);
+      } catch (error: unknown) {
+        if (!isAbortError(error)) {
+          pollLoopLog.warn('Polling loop stopped unexpectedly:', error);
+        }
+      } finally {
+        if (generation === this.generation) {
+          this.alive = false;
+        }
+      }
+    })();
+  }
+
+  stop(): void {
+    this.generation += 1;
+    this.alive = false;
+  }
+
+  isAlive(): boolean {
+    return this.alive;
+  }
+}
 
 export abstract class ChatSource implements Pauseable {
   protected readonly getSettings: () => Readonly<OverlaySettings>;
