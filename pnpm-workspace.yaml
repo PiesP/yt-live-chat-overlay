@@ -1,3 +1,16 @@
 overrides:
   minimatch@<3.1.3: '>=3.1.3'
   minimatch@<3.1.4: '>=3.1.4'
+engineStrict: true
+lockfileVersion: 3
+publicHoistPattern:
+  - '*types*'
+  - '*biome*'
+preferFrozenLockfile: true
+autoInstallPeers: true
+strictPeerDependencies: false
+preferOffline: true
+minimumReleaseAgeExclude:
+  - vite
+  - vite-plugin-monkey
+  - yaml
