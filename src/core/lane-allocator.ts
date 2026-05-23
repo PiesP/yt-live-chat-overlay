@@ -440,10 +440,19 @@ export class LaneAllocator {
 
   /**
    * Allocate a contiguous block of `slotCount` lanes for tall messages
-   * (superchat, membership). Scans from top to bottom for the first
-   * block where ALL slots are zero-wait (truly free). Multi-slot
-   * messages are rare so the busy-lane fallback from allocateSingleLane
-   * handles them when no free block exists.
+   * (superchat, membership). Uses a 3-phase strategy:
+   *
+   * Phase 1 — zero-wait block: scan for a block where ALL slots are free
+   * and speed-compatible. First match wins (epsilon-greedy not needed here
+   * since multi-slot messages are rare).
+   *
+   * Phase 2 — busy block within maxWaitMs: scan for a contiguous block
+   * where ALL slots pass speed-compatibility AND have waitMs <= maxWaitMs.
+   * Among valid blocks, pick the one with the shortest max wait.
+   *
+   * Phase 3 — fallback: backlog messages return null (don't compete with
+   * real-time on busy lanes). Real-time messages fall back to the
+   * single-lane allocator as a last resort.
    *
    * Single-slot messages are forwarded to allocateSingleLane.
    */
@@ -498,8 +507,51 @@ export class LaneAllocator {
       if (allZeroWait) return { laneIndex: startIdx, waitMs: blockMaxWait };
     }
 
-    // Phase 2: no zero-wait block — delegate to single-lane allocator
-    // which returns the topmost busy lane (or null for backlog).
+    // Phase 2: scan for a contiguous block where ALL slots are busy but
+    // within maxWaitMs and pass speed-compatibility. Pick the block with
+    // the shortest maximum wait (same strategy as allocateSingleLane Phase 2).
+    let bestBlock: { laneIndex: number; waitMs: number } | null = null;
+    for (let startIdx = laneStart; startIdx <= maxStartLane; startIdx++) {
+      let allCompatible = true;
+      let blockMaxWait = 0;
+      for (let s = 0; s < slotCount; s++) {
+        const slotIdx = startIdx + s;
+        // Speed compatibility check (same as Phase 1)
+        if (isBacklog) {
+          if ((this.realTimeLanesUntil.get(slotIdx) ?? 0) > now) {
+            allCompatible = false;
+            break;
+          }
+        } else {
+          if ((this.backlogLanesUntil.get(slotIdx) ?? 0) > now) {
+            allCompatible = false;
+            break;
+          }
+        }
+        const slotAvail = this.getSlotAvailableAt(slotIdx);
+        if (slotAvail === undefined) {
+          allCompatible = false;
+          break;
+        }
+        const slotWait = Math.max(0, Math.ceil(slotAvail - now));
+        if (slotWait > maxWaitMs) {
+          allCompatible = false;
+          break;
+        }
+        blockMaxWait = Math.max(blockMaxWait, slotWait);
+      }
+      if (allCompatible && blockMaxWait <= maxWaitMs) {
+        if (!bestBlock || blockMaxWait < bestBlock.waitMs) {
+          bestBlock = { laneIndex: startIdx, waitMs: blockMaxWait };
+        }
+      }
+    }
+    if (bestBlock) return bestBlock;
+
+    // Phase 3: no multi-slot block found.
+    // Backlog messages stop here — they don't compete with real-time on busy lanes.
+    // Real-time messages fall back to the single-lane allocator as a last resort.
+    if (isBacklog) return null;
     return this.allocateSingleLane(now, laneStart, laneEnd, isBacklog);
   }
 
