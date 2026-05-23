@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.32.0] - 2026-05-23
+
+### Fixed
+
+- **Double bootstrap API call** — `createChatSource()` now returns bootstrap data alongside the ChatSource, and `seedBootstrapIfReady()` pre-seeds it before `start()`. Previously each session start fetched the ~200KB watch page HTML twice (once in the factory, once in `bootstrapResolver.resolve()`). ([`236f67a`](https://github.com/PiesP/yt-live-chat-overlay/commit/236f67a))
+- **Replay messages inflating observability metrics** — `replayMessage()` bypasses `isMessageAllowed()` observability tracking. Previously `replayLatestMessages` called `addMessage()` which incremented `totalReceived`, skewing drop-rate calculations. ([`236f67a`](https://github.com/PiesP/yt-live-chat-overlay/commit/236f67a))
+- **Fetch interceptor not handling Request objects** — URL resolution now handles `input instanceof Request` in addition to string and URL types. ([`236f67a`](https://github.com/PiesP/yt-live-chat-overlay/commit/236f67a))
+- **Stale density data across sessions** — `recentMessageCounts` now cleared on `resetSessionState()`. Previously old message counts leaked into `calculateAdaptiveDelay()` in new sessions. ([`236f67a`](https://github.com/PiesP/yt-live-chat-overlay/commit/236f67a))
+- **DPR change without canvas buffer resize** — `renderFrame()` now resizes `canvas.width`/`canvas.height` when `devicePixelRatio` changes (e.g. moving window between monitors). Previously only the transform was updated, leaving the buffer at the old physical resolution. ([`0a2e674`](https://github.com/PiesP/yt-live-chat-overlay/commit/0a2e674))
+- **handleSeeked void promise chain** — Rewritten as async IIFEs with try/catch, ensuring `flushReplayBuffer` errors are properly caught alongside fetch errors. ([`0a2e674`](https://github.com/PiesP/yt-live-chat-overlay/commit/0a2e674))
+
+### Refactored
+
+- **Merged 4 small files into consumers** — `message-buffer.ts` + `poll-loop-manager.ts` → `chat-source-base.ts`, `youtubei-image.ts` → `chat-message-parser.ts`, `chat-source-factory.ts` → `runtime-session.ts`. Each had exactly 1 consumer. 4 files removed, navigation friction reduced. ([`e9bd899`](https://github.com/PiesP/yt-live-chat-overlay/commit/e9bd899))
+- **`isLogLevel` moved to its sole consumer** — Runtime validation function extracted from `types/index.ts` to `settings-schema.ts`. Keeps the `@app-types` module purely for type exports. ([`e9bd899`](https://github.com/PiesP/yt-live-chat-overlay/commit/e9bd899))
+- **`AUTHOR_TYPE_PRIORITY` moved to helpers** — Moved from `chat-message-parser.ts` to `chat-message-helpers.ts` where all other author-type utilities live. ([`e9bd899`](https://github.com/PiesP/yt-live-chat-overlay/commit/e9bd899))
+- **`STYLE_ID` export simplified** — Changed from `const STYLE_ID = ...; export { STYLE_ID };` to `export const STYLE_ID = ...;` (matching `BUTTON_ID`/`BACKDROP_ID` pattern). ([`e9bd899`](https://github.com/PiesP/yt-live-chat-overlay/commit/e9bd899))
+- **String concatenation modernized** — Replaced `+`-concatenated strings in `chat-source-live.ts` and `observability.ts` with template literals and `.join()` array literals. ([`0a2e674`](https://github.com/PiesP/yt-live-chat-overlay/commit/0a2e674))
+- **`PREVIEW_DEBOUNCE_MS` made static** — Changed from `private readonly` to `private static readonly`, matching all other class-level constants in the project. ([`0a2e674`](https://github.com/PiesP/yt-live-chat-overlay/commit/0a2e674))
+
 ## [0.31.0] - 2026-07-20
 
 ### Added
