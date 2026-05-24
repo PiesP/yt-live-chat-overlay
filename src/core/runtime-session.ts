@@ -211,9 +211,6 @@ export class RuntimeSession {
         backlogMode: settings.backlogMode,
         backlogRecentMinutes: settings.backlogRecentMinutes,
       });
-      renderer.setBacklogSpeedMultiplier(this.backlogController.getSpeedMultiplier());
-    } else {
-      renderer.setBacklogSpeedMultiplier(settings.backlogSpeedMultiplier);
     }
 
     if (!shouldResetRenderer) {
@@ -361,8 +358,6 @@ export class RuntimeSession {
       renderer.laneCount,
       renderer.observability
     );
-
-    renderer.setBacklogSpeedMultiplier(this.backlogController.getSpeedMultiplier());
 
     this.backlogController.onBacklogMessage = (msg) => {
       if (!this.acceptForRenderer(msg)) return;

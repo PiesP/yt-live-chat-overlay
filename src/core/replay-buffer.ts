@@ -19,7 +19,6 @@ const REPLAY_EMIT_TOLERANCE_MS = 300;
 
 export class ReplayBuffer {
   private buffer: BufferedReplayMessage[] = [];
-  private readonly seenIds = new Set<string>();
 
   /** Number of buffered messages awaiting emission. */
   get length(): number {
@@ -38,13 +37,6 @@ export class ReplayBuffer {
    * message ID so the same message is never buffered twice.
    */
   insert(message: ChatMessage, offsetMs: number): void {
-    const id = message.id;
-    if (id !== undefined && this.seenIds.has(id)) return;
-
-    if (id !== undefined) {
-      this.seenIds.add(id);
-    }
-
     let lo = 0;
     let hi = this.buffer.length;
     while (lo < hi) {
@@ -108,7 +100,6 @@ export class ReplayBuffer {
 
       // Too far in the past — drop silently
       if (next.offsetMs < currentOffsetMs - REPLAY_EMIT_TOLERANCE_MS) {
-        if (next.message.id) this.seenIds.delete(next.message.id);
         continue;
       }
 
@@ -121,7 +112,6 @@ export class ReplayBuffer {
   /** Clear all buffered messages (e.g. on seek). */
   clear(): void {
     this.buffer = [];
-    this.seenIds.clear();
   }
 
   /** Peek at the oldest message without removing it. */
@@ -137,9 +127,6 @@ export class ReplayBuffer {
     if (this.buffer.length <= maxSize) return;
 
     const overflow = this.buffer.length - maxSize;
-    const removed = this.buffer.splice(0, overflow);
-    for (const item of removed) {
-      if (item.message.id) this.seenIds.delete(item.message.id);
-    }
+    this.buffer.splice(0, overflow);
   }
 }

@@ -21,6 +21,7 @@ import { LaneAllocator } from '@core/lane-allocator';
 import { createLogger } from '@core/logging';
 import { ObservabilityReporter } from '@core/observability';
 import type { Overlay } from '@core/overlay';
+import { clearTextMeasurementCaches } from '@core/text-measure';
 
 const log = createLogger('RendererBase');
 
@@ -41,7 +42,6 @@ export abstract class RendererBase {
   protected isPaused = false;
   protected isVideoPaused = false;
   protected pausedAt: number | null = null;
-  protected backlogSpeedMultiplier = 1;
   protected backlogPaused = false;
 
   private static readonly SPEED_BOOST_THRESHOLD = 5;
@@ -131,14 +131,16 @@ export abstract class RendererBase {
     }
   }
 
-  setBacklogSpeedMultiplier(multiplier: number): void {
-    this.backlogSpeedMultiplier = Math.max(1, multiplier);
-  }
-
   updateSettings(settings: OverlaySettings, options: RendererUpdateOptions = {}): void {
-    // Capture previous safe-zone before overwriting settings
-    const prevSafeTop = this.settings.safeTop;
-    const prevSafeBottom = this.settings.safeBottom;
+    // Capture previous values for change detection
+    const prev = {
+      safeTop: this.settings.safeTop,
+      safeBottom: this.settings.safeBottom,
+      fontSize: this.settings.fontSize,
+      fontWeight: this.settings.fontWeight,
+      fontFamily: this.settings.fontFamily,
+      laneSpacing: this.settings.laneSpacing,
+    };
 
     this.settings = settings;
     this.observability.setShowDebug(settings.showDebugOverlay);
@@ -146,10 +148,21 @@ export abstract class RendererBase {
       preset: settings.authorRateLimit,
     });
 
+    // Font change invalidates cached text measurements (LRU width cache).
+    // Must clear before lane allocator reset to ensure laneHeight recalculation
+    // uses fresh font metrics.
+    if (
+      settings.fontSize !== prev.fontSize ||
+      settings.fontWeight !== prev.fontWeight ||
+      settings.fontFamily !== prev.fontFamily
+    ) {
+      clearTextMeasurementCaches();
+    }
+
     // Propagate safe-zone changes to lane allocator even without full reset.
     // This ensures new lane placements use the correct Y positions immediately.
     const safeZoneChanged =
-      settings.safeTop !== prevSafeTop || settings.safeBottom !== prevSafeBottom;
+      settings.safeTop !== prev.safeTop || settings.safeBottom !== prev.safeBottom;
     this.laneAllocator.updateSafeZone(settings.safeTop, settings.safeBottom);
 
     if (options.resetState) {

@@ -126,4 +126,10 @@ export class Settings {
   preview(partial: Partial<OverlaySettings>): void {
     this.settings = applySettingsPatch(this.settings, partial);
   }
+
+  /** Reset settings to factory defaults and persist. */
+  reset(): void {
+    this.settings = cloneSettings(DEFAULT_SETTINGS);
+    this.save();
+  }
 }

@@ -10,7 +10,6 @@ import { createLogger, setOverlayLogLevel } from '@core/logging';
 import { PageWatcher } from '@core/page-watcher';
 import { RuntimeManager } from '@core/runtime-manager';
 import { Settings } from '@core/settings';
-import { DEFAULT_SETTINGS } from '@core/settings-schema';
 import { SettingsUi } from '@core/settings-ui';
 
 const log = createLogger('App');
@@ -120,7 +119,8 @@ class App {
   }
 
   resetSettings(): void {
-    this.applySettings(DEFAULT_SETTINGS);
+    this.settings.reset();
+    this.applySettingsSideEffects({});
   }
 
   private async ensureSettingsUi(): Promise<void> {

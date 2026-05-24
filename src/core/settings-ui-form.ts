@@ -21,14 +21,6 @@ export const STYLE_ID = 'yt-chat-overlay-settings-style';
 export const BUTTON_ID = 'yt-chat-overlay-settings-button';
 export const BACKDROP_ID = 'yt-chat-overlay-settings-backdrop';
 
-const ROOT_ROUNDED_KEYS = new Set<RootScalarSettingKey>([
-  'maxConcurrentMessages',
-  'minTextLength',
-  'laneSpacing',
-  'superChatMaxBodyLines',
-  'membershipMaxBodyLines',
-]);
-
 const OUTLINE_NUMERIC_KEY_SET = new Set<string>(OUTLINE_NUMERIC_KEYS);
 const isOutlineNumericKey = (key: string): key is Exclude<OutlineSettingKey, 'enabled'> =>
   OUTLINE_NUMERIC_KEY_SET.has(key);
@@ -200,7 +192,7 @@ const normalizeRootNumericInputValue = (
     value,
     fallback,
     resolveLimits(key),
-    ROOT_ROUNDED_KEYS.has(key),
+    getRootDisplayMeta(key).precision <= 0,
     getRootScale(key)
   );
 };

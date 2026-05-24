@@ -1,5 +1,5 @@
 /**
- * RendererShared — utilities shared between CSS and Canvas2D renderers.
+ * RendererShared — utilities shared between renderer subsystems.
  *
  * Extracted from RendererMessageBuilder and Canvas2DRenderer to eliminate
  * duplicate text measurement and dimension estimation logic.

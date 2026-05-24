@@ -246,6 +246,7 @@ export class CanvasRenderer extends RendererBase {
    * drop-rate denominators or trigger burst detection / rate limiting.
    */
   replayMessage(message: ChatMessage): void {
+    if (this.isVideoPaused) return;
     this.enqueueMessage(message, false);
   }
 
@@ -492,9 +493,10 @@ export class CanvasRenderer extends RendererBase {
         msg.x = msg.startX - progress * travelDistance;
       } else if (mode === 'reverse') {
         // Reverse: message enters from left and scrolls right.
-        // Total travel = screenWidth + msgWidth + exitPadding.
-        const travelDistance = dims.width + msg.width + rendererLayout.exitPaddingMin;
-        msg.x = -msg.width + progress * travelDistance;
+        // Compute travel from startX (left edge) to off-screen right edge,
+        // accounting for horizontal stagger in the start position.
+        const travelDistance = dims.width - msg.startX + rendererLayout.exitPaddingMin;
+        msg.x = msg.startX + progress * travelDistance;
       }
 
       const opacity = this.computeMessageOpacity(msg.message, elapsed, msg.duration, isScrolling);
@@ -687,8 +689,8 @@ export class CanvasRenderer extends RendererBase {
           // Speed-aware headway: when a fast backlog message enters a lane
           // with a slow reverse message, headway scales up to prevent the
           // faster chaser from catching up and visually crossing through.
-          const reverseTravel = dims.width + active.width + rendererLayout.exitPaddingMin;
-          const activeX = -active.width + activeProgress * reverseTravel;
+          const reverseTravel = dims.width - active.startX + rendererLayout.exitPaddingMin;
+          const activeX = active.startX + activeProgress * reverseTravel;
           if (activeX + active.width > -headwayPx) {
             forEachSlot(placement.laneIndex, placement.slotCount, (slotIdx) => {
               this.laneAllocator.markCollision(slotIdx);
@@ -731,23 +733,28 @@ export class CanvasRenderer extends RendererBase {
 
     const isScrolling = mode === 'scroll' || mode === 'reverse';
 
-    // Horizontal stagger: progressively offset batch messages from the right
-    // edge so they don't all enter in a vertical column. Each successive batch
-    // message starts further to the right, spreading them horizontally and
-    // breaking the vertical "wall" effect of same-timing comments.
+    // Horizontal stagger: progressively offset batch messages from the
+    // entry edge so they don't all enter in a vertical column. Each
+    // successive batch message starts further from the entry edge,
+    // spreading them horizontally and breaking the vertical "wall" effect.
     const horizontalStagger =
-      isScrolling && mode === 'scroll' && batchIndex > 0
+      isScrolling && batchIndex > 0
         ? Math.min(
             CanvasRenderer.HORIZONTAL_STAGGER_MAX,
             batchIndex * CanvasRenderer.HORIZONTAL_STAGGER_PER_STEP
           )
         : 0;
 
+    // startX: off-screen entry position for scrolling modes,
+    // horizontal center for top/bottom fixed modes.
+    //   scroll  → dims.width + horizontalStagger  (right edge + stagger)
+    //   reverse → -(msgWidth + horizontalStagger)    (left edge − stagger)
+    //   top/bottom → center of viewport
     const startX = isScrolling
       ? mode === 'scroll'
         ? dims.width + horizontalStagger
-        : -(msgWidth + rendererLayout.exitPaddingMin)
-      : 0;
+        : -(msgWidth + horizontalStagger)
+      : Math.max(0, Math.floor((dims.width - msgWidth) / 2));
 
     let effectiveDuration: number;
     if (isScrolling) {
@@ -755,12 +762,12 @@ export class CanvasRenderer extends RendererBase {
         ? this.getEffectiveBacklogSpeed()
         : this.getEffectiveSpeedPxPerSec();
       // Total travel distance must account for horizontal stagger to maintain
-      // constant velocity — a message starting further right travels farther
-      // at the same speed, so duration adjusts proportionally.
+      // constant velocity — a message starting further from the entry edge
+      // travels farther at the same speed, so duration adjusts proportionally.
       const totalDistance =
         mode === 'scroll'
           ? startX + msgWidth + rendererLayout.exitPaddingMin
-          : dims.width + msgWidth + rendererLayout.exitPaddingMin;
+          : dims.width + msgWidth + rendererLayout.exitPaddingMin + horizontalStagger;
       effectiveDuration =
         speed > 0 ? computeScrollDuration(totalDistance, speed) : rendererLayout.durationMin;
     } else {
@@ -782,7 +789,7 @@ export class CanvasRenderer extends RendererBase {
           ? CanvasRenderer.STAGGER_MED_MS
           : CanvasRenderer.STAGGER_MAX_MS;
     const staggerDelay =
-      isScrolling && batchIndex > 0 && maxStagger > 0
+      batchIndex > 0 && maxStagger > 0
         ? Math.round(Math.min(maxStagger, batchIndex * -25 * Math.log(1 - Math.random())))
         : 0;
 
@@ -791,8 +798,8 @@ export class CanvasRenderer extends RendererBase {
       placement,
       effectiveStartTime,
       effectiveDuration,
-      msgWidth,
-      dims.width,
+      isScrolling ? msgWidth : undefined,
+      isScrolling ? dims.width : undefined,
       message.isBacklog
     );
 
@@ -890,7 +897,7 @@ export class CanvasRenderer extends RendererBase {
     );
     // Only adjust when speeds differ and the new message is faster.
     if (!activeIsBacklog && newIsBacklog) {
-      return Math.round(base * this.backlogSpeedMultiplier);
+      return Math.round(base * this.settings.backlogSpeedMultiplier);
     }
     return base;
   }
@@ -898,7 +905,7 @@ export class CanvasRenderer extends RendererBase {
   // ── Backlog pause ────────────────────────────────────────────────────
 
   private getEffectiveBacklogSpeed(): number {
-    const speed = this.settings.speedPxPerSec * Math.max(1, this.backlogSpeedMultiplier);
+    const speed = this.settings.speedPxPerSec * Math.max(1, this.settings.backlogSpeedMultiplier);
     return Math.max(1, speed);
   }
 
