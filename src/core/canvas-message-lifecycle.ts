@@ -23,7 +23,7 @@ export interface CanvasMessage {
   staggerDelay: number;
 }
 
-export interface CreateCanvasMessageParams {
+interface CreateCanvasMessageParams {
   message: ChatMessage;
   now: number;
   msgWidth: number;

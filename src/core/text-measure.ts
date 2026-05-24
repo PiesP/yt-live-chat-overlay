@@ -108,6 +108,17 @@ export function measureTextHeight(font: string, fontSize: number): number {
   return Math.ceil(fontSize * 1.1);
 }
 
+/**
+ * Build a CSS font shorthand string for Canvas2D rendering.
+ *
+ * Normalizes the weight token: `'bold'` stays as the keyword `'bold'`,
+ * everything else (including `'normal'`) maps to the numeric `'400'`.
+ * Both are valid CSS `font-weight` values and produce identical rendering.
+ *
+ * @param sizePx     - Font size in pixels.
+ * @param weight     - Font weight token (`'bold'` or `'normal'`).
+ * @param fontFamily - CSS font-family stack (defaults to `DEFAULT_FONT_FAMILY`).
+ */
 export function getFontString(
   sizePx: number,
   weight: 'normal' | 'bold' = 'bold',
@@ -229,7 +240,7 @@ function wrapChars(word: string, ctx: CanvasRenderingContext2D, maxWidth: number
  * independently. CJK text without spaces is wrapped at character boundaries.
  *
  * @param text     - The text to wrap.
- * @param font     - CSS font string (e.g. "bold 16px sans-serif").
+ * @param font     - CSS font string from `getFontString()` (e.g. "bold 16px system-ui").
  * @param maxWidth - Maximum line width in pixels.
  * @returns Array of wrapped lines (always >= 1 for non-empty text, 0 for empty).
  */

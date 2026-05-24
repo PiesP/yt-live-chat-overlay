@@ -87,7 +87,7 @@ function estimateRegularMessageDimensions(
   }
 
   const authorFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
-  const authorFont = getFontString(authorFontSize, undefined, fontFamily);
+  const authorFont = getFontString(authorFontSize, 'bold', fontFamily);
   const authorNameWidth = measureTextWidth(message.author, authorFont);
   const authorSectionWidth = rendererLayout.authorPhotoSize + spacing.sm + authorNameWidth;
   const totalWidth = Math.max(authorSectionWidth + paddingH * 2, textWidth + paddingH * 2);
