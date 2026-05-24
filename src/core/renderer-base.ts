@@ -50,6 +50,11 @@ export abstract class RendererBase {
   private static readonly BACKLOG_PRIORITY_OFFSET = 50;
   private static readonly BACKLOG_PAUSE_THRESHOLD = 0.8;
   private static readonly BACKLOG_RESUME_THRESHOLD = 0.4;
+  // Minimum interval between backlog pause toggles to prevent oscillation
+  // when the queue ratio hovers near the hysteresis thresholds.
+  private static readonly BACKLOG_TOGGLE_COOLDOWN_MS = 2_000;
+
+  private lastBacklogToggleTime = 0;
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
     this.overlay = overlay;
@@ -105,12 +110,16 @@ export abstract class RendererBase {
     if (!this.isVideoPaused) {
       this.laneAllocator.shiftAll(pausedDuration);
     }
-    this.isPaused = false;
 
     if (this.isVideoPaused) {
       return;
     }
 
+    // Set isPaused=false AFTER the isVideoPaused guard so future
+    // callers of resume() (including resumeForVideo()) cannot
+    // silently corrupt state by clearing isPaused without
+    // restarting the render loop.
+    this.isPaused = false;
     this.onResume();
     log.debug('Resumed');
   }
@@ -261,12 +270,17 @@ export abstract class RendererBase {
   setStandbyStatus(_standby: boolean): void {}
 
   protected updateBacklogPause(): void {
+    const now = Date.now();
+    if (now - this.lastBacklogToggleTime < RendererBase.BACKLOG_TOGGLE_COOLDOWN_MS) return;
+
     const queueRatio = this.getQueueLength() / rendererLayout.queueMaxSize;
     if (queueRatio > RendererBase.BACKLOG_PAUSE_THRESHOLD && !this.backlogPaused) {
       this.backlogPaused = true;
+      this.lastBacklogToggleTime = now;
       this.onBacklogPauseChange?.(true);
     } else if (queueRatio < RendererBase.BACKLOG_RESUME_THRESHOLD && this.backlogPaused) {
       this.backlogPaused = false;
+      this.lastBacklogToggleTime = now;
       this.onBacklogPauseChange?.(false);
     }
   }

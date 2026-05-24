@@ -52,6 +52,7 @@ export class ReplayChatSource extends ChatSource {
   private replayNextAllowedFetchAt = 0;
   private replayBuffer = new ReplayBuffer();
   private seekListenerCleanup: (() => void) | null = null;
+  private seekSignal: AbortSignal | null = null;
   private rafHandle: ReturnType<typeof requestAnimationFrame> | null = null;
   private backgroundFetchTimer: ReturnType<typeof setInterval> | null = null;
   private backgroundFetchFailures = 0;
@@ -265,6 +266,7 @@ export class ReplayChatSource extends ChatSource {
 
   private installSeekListeners(signal?: AbortSignal): void {
     this.seekListenerCleanup?.();
+    this.seekSignal = signal ?? null;
     const el = findElementMatch<HTMLVideoElement>(VIDEO_SELECTORS);
     if (!el) return;
     const v = el.element;
@@ -293,9 +295,10 @@ export class ReplayChatSource extends ChatSource {
     this.stopPrefetch();
 
     if (this.replayMode === 'playerSeek' && this.replayPlayerSeekContinuation) {
+      const signal = this.seekSignal ?? undefined;
       void (async () => {
         try {
-          await this.fetchReplayPlayerSeek(offsetMs);
+          await this.fetchReplayPlayerSeek(offsetMs, signal);
           this.flushReplayBuffer(offsetMs);
           this.startPrefetch();
         } catch (error: unknown) {
@@ -305,9 +308,10 @@ export class ReplayChatSource extends ChatSource {
         }
       })();
     } else if (this.replayMode === 'continuation') {
+      const signal = this.seekSignal ?? undefined;
       void (async () => {
         try {
-          await this.pollContinuationReplay(offsetMs);
+          await this.pollContinuationReplay(offsetMs, signal);
           this.startPrefetch();
         } catch (error: unknown) {
           if (!isAbortError(error)) {
