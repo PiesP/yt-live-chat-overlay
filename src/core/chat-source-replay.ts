@@ -67,16 +67,13 @@ export class ReplayChatSource extends ChatSource {
   }
 
   /**
-   * Override health check to reflect rAF + background-fetch lifetime
-   * instead of the base class's pollLoopManager, which is unused by
-   * ReplayChatSource.
+   * Override health check to reflect rAF flush loop lifetime.
+   * The rAF flush loop and callback are the primary liveness indicators.
+   * Background fetch and prefetch are secondary data sources — their
+   * absence does not mean the observer is dead (buffer may still drain).
    */
   protected isObserverAlive(): boolean {
-    return (
-      this.rafHandle !== null &&
-      this.callback !== null &&
-      (this.backgroundFetchTimer !== null || this.prefetchAbortController !== null)
-    );
+    return this.rafHandle !== null && this.callback !== null;
   }
 
   protected resetSessionState(): void {
