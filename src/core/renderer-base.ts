@@ -215,6 +215,7 @@ export abstract class RendererBase {
     return utilization >= threshold;
   }
 
+  /** Compute priority score for a chat message (higher = more important, rendered first). */
   protected static getMessagePriority(message: ChatMessage): number {
     let priority = rendererLayout.kindPriority[message.kind];
     if (message.isBacklog) priority -= RendererBase.BACKLOG_PRIORITY_OFFSET;

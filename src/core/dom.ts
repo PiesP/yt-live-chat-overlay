@@ -101,6 +101,7 @@ export const findPlayerContainerElement = async (
   return null;
 };
 
+/** Check whether an error is an AbortError (used to ignore abort-related rejections). */
 export const isAbortError = (error: unknown): boolean =>
   error instanceof DOMException && error.name === 'AbortError';
 

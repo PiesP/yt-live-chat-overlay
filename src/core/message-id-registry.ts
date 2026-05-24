@@ -15,10 +15,12 @@ export class MessageIdRegistry {
     this.maxSize = maxSize;
   }
 
+  /** Check if a message ID has already been registered. */
   has(id: string): boolean {
     return this.ids.has(id);
   }
 
+  /** Register a message ID, evicting oldest if at capacity. */
   mark(id: string): void {
     this.ids.set(id, true);
 
@@ -34,6 +36,7 @@ export class MessageIdRegistry {
     }
   }
 
+  /** Remove all registered message IDs. */
   clear(): void {
     this.ids.clear();
   }

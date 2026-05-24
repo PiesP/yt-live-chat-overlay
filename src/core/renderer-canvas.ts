@@ -149,6 +149,7 @@ export class CanvasRenderer extends RendererBase {
     log.info('RendererCanvas created');
   }
 
+  /** Total number of lanes in the allocator. */
   get laneCount(): number {
     return this.laneAllocator.getLaneCount();
   }

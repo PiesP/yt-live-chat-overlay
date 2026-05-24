@@ -53,6 +53,7 @@ const createGmAdapter = (): SettingsStorageAdapter | null => {
 
 let cachedAdapter: SettingsStorageAdapter | null = null;
 
+/** Returns the singleton settings storage adapter (GM API primary, localStorage fallback). */
 export function getSettingsStorageAdapter(): SettingsStorageAdapter {
   if (cachedAdapter) return cachedAdapter;
   cachedAdapter = createGmAdapter() ?? new LocalStorageAdapter();
