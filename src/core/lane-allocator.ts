@@ -580,19 +580,33 @@ export class LaneAllocator {
     }
   }
 
-  /** Shift all lane available times by a fixed offset (e.g., pause duration). */
+  /** Shift all lane timers and speed-isolation tracking by a fixed offset. */
   shiftAll(offsetMs: number): void {
     const capped = Math.min(offsetMs, rendererLayout.maxMessageAgeMs);
-    if (capped <= 0 || this.heap.length === 0) return;
-    for (let i = 0; i < this.heap.length; i++) {
-      const entry = this.heap[i];
-      if (entry) {
-        this.heap[i] = [entry[0], entry[1] + capped];
+    if (capped <= 0) return;
+
+    // Shift lane occupancy timers (4-ary min-heap)
+    if (this.heap.length > 0) {
+      for (let i = 0; i < this.heap.length; i++) {
+        const entry = this.heap[i];
+        if (entry) {
+          this.heap[i] = [entry[0], entry[1] + capped];
+        }
+      }
+      // Rebuild heap invariant after bulk update (4-ary)
+      for (let i = Math.floor((this.heap.length - 2) / 4); i >= 0; i--) {
+        this.siftDown(i);
       }
     }
-    // Rebuild heap invariant after bulk update (4-ary)
-    for (let i = Math.floor((this.heap.length - 2) / 4); i >= 0; i--) {
-      this.siftDown(i);
+
+    // Shift speed-isolation tracking so real-time/backlog lane profiles
+    // survive pause/resume. Without this, resetBatch() prunes all speed
+    // entries as expired, allowing cross-speed overtaking after resume.
+    for (const [idx, until] of this.realTimeLanesUntil) {
+      this.realTimeLanesUntil.set(idx, until + capped);
+    }
+    for (const [idx, until] of this.backlogLanesUntil) {
+      this.backlogLanesUntil.set(idx, until + capped);
     }
   }
 
