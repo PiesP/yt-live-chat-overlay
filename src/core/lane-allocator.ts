@@ -2,7 +2,7 @@ import type { OverlayDimensions } from '@app-types';
 import { rendererLayout } from '@core/design-tokens';
 import { forEachSlot } from '@core/dom';
 import { createLogger } from '@core/logging';
-import { measureTextHeight } from '@core/text-measure';
+import { getFontString, measureTextHeight } from '@core/text-measure';
 
 const log = createLogger('LaneAllocator');
 
@@ -144,7 +144,11 @@ export class LaneAllocator {
     // owner, superChat) report a taller msgHeight from estimateDimensions,
     // so slotCount = ceil(msgHeight / laneHeight) auto-assigns 2+ slots.
     const totalPaddingV = rendererLayout.paddingV * 2;
-    const font = `${this.options.fontWeight === 'bold' ? 'bold' : '400'} ${this.options.fontSize}px ${this.options.fontFamily}`;
+    const font = getFontString(
+      this.options.fontSize,
+      this.options.fontWeight,
+      this.options.fontFamily
+    );
     const textHeight = measureTextHeight(font, this.options.fontSize);
 
     this.laneHeight = Math.max(1, textHeight + totalPaddingV + this.options.laneSpacing);

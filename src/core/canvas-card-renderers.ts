@@ -23,6 +23,7 @@ import {
   spacing,
   toRgba,
 } from '@core/design-tokens';
+import { getFontString } from '@core/text-measure';
 
 // ── SuperChat card ───────────────────────────────────────────────────────────
 
@@ -96,7 +97,7 @@ export function renderSuperChatCard(
   const badgeY = contentY + spacing.xs;
   const badgeFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
   const badgeHeight = badgeFontSize + rendererLayout.superchatBadge.paddingV * 2;
-  ctx.font = `bold ${badgeFontSize}px ${settings.fontFamily}`;
+  ctx.font = getFontString(badgeFontSize, 'bold', settings.fontFamily);
   const badgeTextWidth = Math.ceil(ctx.measureText(superChat.amount).width);
   const badgeWidth = badgeTextWidth + rendererLayout.superchatBadge.paddingH * 2;
 

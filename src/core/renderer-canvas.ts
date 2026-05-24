@@ -338,6 +338,7 @@ export class CanvasRenderer extends RendererBase {
     canvas.width = dims.width * dpr;
     canvas.height = dims.height * dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.lastDpr = dpr;
   }
 
   private startRenderLoop(): void {

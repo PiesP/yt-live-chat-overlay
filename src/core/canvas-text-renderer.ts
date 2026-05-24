@@ -7,7 +7,12 @@
 
 import type { ChatMessage, ContentSegment, OverlaySettings } from '@app-types';
 import { EMOJI_ALIAS_PATTERN } from '@core/chat-message-helpers';
-import { AUTHOR_PHOTO_SHADOW, computeOutlineColor, rendererLayout } from '@core/design-tokens';
+import {
+  AUTHOR_PHOTO_SHADOW,
+  computeOutlineColor,
+  rendererLayout,
+  spacing,
+} from '@core/design-tokens';
 import {
   getFontString,
   measureTextHeight,
@@ -210,7 +215,7 @@ function renderContentSegments(
           getFontFn
         );
       }
-      cursorX += emojiSize + 4;
+      cursorX += emojiSize + spacing.xs;
     }
   }
 }
@@ -300,6 +305,8 @@ export function drawAuthorSection(
 ): number {
   if (!message.author) return startY;
 
+  ctx.save();
+
   const fontSize = settings.fontSize;
   const authorFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
   const nameFont = getFontString(authorFontSize, settings.fontWeight, settings.fontFamily);
@@ -310,7 +317,7 @@ export function drawAuthorSection(
   if (photo?.complete && photo.naturalWidth > 0) {
     drawAuthorPhoto(ctx, photo, textX, startY);
   }
-  const nameX = textX + (photo ? rendererLayout.authorPhotoSize + 4 : 0);
+  const nameX = textX + (photo ? rendererLayout.authorPhotoSize + spacing.xs : 0);
   const nameY = startY + Math.max(0, Math.floor((sectionHeight - nameHeight) / 2));
 
   // Truncate author name with ellipsis if it exceeds the allowed width
@@ -322,6 +329,12 @@ export function drawAuthorSection(
     if (nameWidth > maxNameWidth) {
       const ellipsis = '\u2026';
       const ellipsisWidth = ctx.measureText(ellipsis).width;
+      // Guard: if the ellipsis character alone exceeds maxNameWidth
+      // (extremely narrow container), skip rendering the name entirely.
+      if (ellipsisWidth >= maxNameWidth) {
+        ctx.restore();
+        return startY + sectionHeight;
+      }
       while (displayName.length > 0 && nameWidth + ellipsisWidth > maxNameWidth) {
         displayName = displayName.slice(0, -1);
         nameWidth = ctx.measureText(displayName).width;
@@ -335,6 +348,8 @@ export function drawAuthorSection(
   strokeTextOutline(ctx, displayName, nameX, nameY, color, settings);
   ctx.fillStyle = color;
   ctx.fillText(displayName, nameX, nameY);
+
+  ctx.restore();
   return startY + sectionHeight;
 }
 

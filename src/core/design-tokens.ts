@@ -119,7 +119,7 @@ export const CONFIRM_BACKDROP_ALPHA = 0.5;
 
 // ── Toast notification ──
 export const TOAST_BG = 'rgba(0, 0, 0, 0.85)';
-export const TOAST_FONT = '12px/1.4 sans-serif';
+export const TOAST_FONT = `12px/1.4 ${DEFAULT_FONT_FAMILY}`;
 export const TOAST_PADDING = '6px 14px';
 
 // ── Backlog indicator ──

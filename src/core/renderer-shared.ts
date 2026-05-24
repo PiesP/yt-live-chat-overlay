@@ -19,7 +19,7 @@ import {
 /** Measure pixel width of all text + emoji content segments. */
 function measureContentWidth(message: ChatMessage, font: string, fontSize: number): number {
   let width = 0;
-  const emojiWidth = Math.ceil(fontSize * rendererLayout.emojiSize) + 4;
+  const emojiWidth = Math.ceil(fontSize * rendererLayout.emojiSize) + spacing.xs;
 
   if (message.content.length > 0) {
     for (const seg of message.content) {
