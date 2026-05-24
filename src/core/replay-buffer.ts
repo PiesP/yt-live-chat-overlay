@@ -72,12 +72,13 @@ export class ReplayBuffer {
     let highestOffsetMs = -1;
 
     for (const event of events) {
-      if (event.offsetMs === undefined) continue;
+      const offsetMs = event.message.videoOffsetMs ?? event.offsetMs;
+      if (offsetMs === undefined) continue;
 
-      highestOffsetMs = Math.max(highestOffsetMs, event.offsetMs);
+      highestOffsetMs = Math.max(highestOffsetMs, offsetMs);
 
-      if (event.offsetMs < minimumOffsetMs) continue;
-      this.insert(event.message, event.offsetMs);
+      if (offsetMs < minimumOffsetMs) continue;
+      this.insert(event.message, offsetMs);
     }
 
     return highestOffsetMs;
