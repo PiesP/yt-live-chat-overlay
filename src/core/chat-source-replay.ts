@@ -258,6 +258,11 @@ export class ReplayChatSource extends ChatSource {
   }
 
   private handleSeeked(offsetMs: number): void {
+    // If the session was already stopped, callback is null and all downstream
+    // operations (flushReplayBuffer, startPrefetch, pollContinuationReplay)
+    // will no-op. Bail out early to avoid unnecessary async work.
+    if (!this.callback) return;
+
     this.replayBuffer.clear();
     this.lastReplayRequestedOffsetMs = offsetMs;
     this.replayConsecutiveFailures = 0;
