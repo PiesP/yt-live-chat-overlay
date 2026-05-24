@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.33.1] - 2026-05-25
+
+### Fixed
+
+- **`cachedUtilization` deadlock causing permanent anti-block stall** — `laneAllocator.resetBatch()` was called inside `drainQueue()` after the anti-block gate. When anti-block activated (utilization ≥95%), `drainQueue` returned immediately without calling `resetBatch()`, so `cachedUtilization` was never updated. This caused a permanent deadlock: messages scrolled off screen, `activeMessages` emptied, but lanes stuck at 100% — screen empty, queue piling up with `queue_priority` drops. `resetBatch()` now runs in `renderFrame()` before `drainQueue` regardless of anti-block state. ([`9c00617`](https://github.com/PiesP/yt-live-chat-overlay/commit/9c00617))
+- **`no_lane` dropped highest-priority messages first during bursts** — `drainQueue` hard-dropped messages on `'no_lane'` from the front of the priority-sorted queue. Since the queue is sorted descending by priority, SuperChat (priority=100) was discarded before text (priority=0) when all lanes were saturated. Now pushes to `retryQueue` for next-frame retry. ([`1c628d5`](https://github.com/PiesP/yt-live-chat-overlay/commit/1c628d5))
+- **`canvas.getContext('2d')` silent null → invisible renderer** — Context creation can fail (detached DOM, GPU exhaustion) but was never checked. rAF loop kept running with zero output. Now logs a warning and checks canvas connectivity. ([`1c628d5`](https://github.com/PiesP/yt-live-chat-overlay/commit/1c628d5))
+- **Anti-block binary gate → on/off oscillation** — The 95% utilization threshold was a hard binary gate. At 94.9%: full drain. At 95.0%: zero drain. Now uses a gradual probabilistic throttle: acceptance probability = `(1-utilization) / 0.05`, producing smooth transitions. ([`e36d983`](https://github.com/PiesP/yt-live-chat-overlay/commit/e36d983))
+- **Backlog messages permanently dropped during all-lanes-busy** — `LaneAllocator` Phase 3 returned null for backlog messages, causing hard drops when all lanes had real-time content. Backlog now passes through Phase 3 (fastest-free lane) same as real-time, with speed-isolated headway scaling preventing visual overtaking. ([`e36d983`](https://github.com/PiesP/yt-live-chat-overlay/commit/e36d983))
+- **Burst detection delayed by poll interval** — `LiveChatSource.calculateAdaptiveDelay` needed ≥2 poll samples (2+ poll intervals) to detect bursts. `BurstDetector` EMA rate (per-message, instant) was never connected to the poll loop. Now wired via `burstRateProvider` for sub-poll-interval reactivity. ([`e36d983`](https://github.com/PiesP/yt-live-chat-overlay/commit/e36d983))
+- **Live poll batches bypassed BacklogController during bursts** — Live poll responses (20-50 msgs) hit the renderer directly, flooding the pending queue. Now routes through `BacklogInjectionController` (Poisson spacing) when lane utilization ≥80% and batch size ≥5. ([`e36d983`](https://github.com/PiesP/yt-live-chat-overlay/commit/e36d983))
+- **Player container lookup: 5s polling → instant MutationObserver** — Replaced polling `#movie_player` (up to 5s wait) with MutationObserver that detects the element immediately when it appears in DOM. Fast-path immediate lookup first; polling fallback if MutationObserver unavailable. ([`e36d983`](https://github.com/PiesP/yt-live-chat-overlay/commit/e36d983))
+- **Retry queue priority inversion after collision** — Retried messages were `push()`ed to the end of `pendingQueue`, behind freshly-arrived lower-priority messages. Now re-inserted via priority-sorted `splice`. ([`2c0da32`](https://github.com/PiesP/yt-live-chat-overlay/commit/2c0da32))
+- **Anti-block blocked SuperChat/Membership alongside text** — High-priority messages (SuperChat ≥100, Membership ≥80) now bypass the anti-block gate. Paid interactions are never blocked by lane saturation. ([`2c0da32`](https://github.com/PiesP/yt-live-chat-overlay/commit/2c0da32))
+- **Bootstrap retries gave zero progress indication** — `BootstrapResolver` now logs at debug level on each retry attempt (`"Bootstrap attempt 3/5 — retryable: ..."`). ([`2c0da32`](https://github.com/PiesP/yt-live-chat-overlay/commit/2c0da32))
+- **Post-burst cooldown fixed at 5s regardless of burst duration** — A 1-second surge and a 30-second surge both triggered 5s of elevated rate limiting. Cooldown is now proportional: `base 2s + 0.3 × burst_duration`, capped at 8s. A 1-second burst cools down in ~2.3s. ([`2c0da32`](https://github.com/PiesP/yt-live-chat-overlay/commit/2c0da32))
+
 ## [0.33.0] - 2026-05-24
 
 ### Added
