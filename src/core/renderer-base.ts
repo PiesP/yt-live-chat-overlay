@@ -129,6 +129,10 @@ export abstract class RendererBase {
   }
 
   updateSettings(settings: OverlaySettings, options: RendererUpdateOptions = {}): void {
+    // Capture previous safe-zone before overwriting settings
+    const prevSafeTop = this.settings.safeTop;
+    const prevSafeBottom = this.settings.safeBottom;
+
     this.settings = settings;
     this.observability.setShowDebug(settings.showDebugOverlay);
     this.authorRateLimiter.updateConfig({
@@ -137,6 +141,8 @@ export abstract class RendererBase {
 
     // Propagate safe-zone changes to lane allocator even without full reset.
     // This ensures new lane placements use the correct Y positions immediately.
+    const safeZoneChanged =
+      settings.safeTop !== prevSafeTop || settings.safeBottom !== prevSafeBottom;
     this.laneAllocator.updateSafeZone(settings.safeTop, settings.safeBottom);
 
     if (options.resetState) {
@@ -145,7 +151,8 @@ export abstract class RendererBase {
       return;
     }
 
-    if (this.laneAllocator.isEmpty()) {
+    // Safe zone changes affect lane count (usable height), so recalculate.
+    if (safeZoneChanged || this.laneAllocator.isEmpty()) {
       this.laneAllocator.reset(this.overlay.getDimensions());
     }
   }

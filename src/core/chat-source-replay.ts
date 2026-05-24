@@ -82,6 +82,9 @@ export class ReplayChatSource extends ChatSource {
   private handleSeeked(offsetMs: number): void {
     this.replayBuffer = [];
     this.lastReplayRequestedOffsetMs = offsetMs;
+    // Reset failure counter so the backoff timer from previous failures
+    // doesn't delay the seek fetch unnecessarily.
+    this.replayConsecutiveFailures = 0;
     if (this.replayMode === 'playerSeek' && this.replayPlayerSeekContinuation) {
       void (async () => {
         try {
