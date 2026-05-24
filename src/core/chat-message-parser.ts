@@ -16,6 +16,7 @@ import {
   colorIntToCss,
   determineSuperChatTier,
   EMOJI_TEXT_PATTERN,
+  extractAccessibilityLabel,
   extractUserColor,
   hasEmojiContent,
   stripControlCharacters,
@@ -425,17 +426,6 @@ function getVisibleContentLength(segments: readonly ContentSegment[]): number {
   }
 
   return visibleLength;
-}
-
-// ── Accessibility helpers ────────────────────────────────────────────────────
-
-function extractAccessibilityLabel(value: unknown): string | undefined {
-  const record = asRecord(value);
-  if (!record) {
-    return undefined;
-  }
-
-  return getString(asRecord(asRecord(record.accessibility)?.accessibilityData)?.label);
 }
 
 // ── Author type extraction ───────────────────────────────────────────────────

@@ -757,7 +757,10 @@ export class CanvasRenderer extends RendererBase {
     activeIsBacklog: boolean,
     newIsBacklog: boolean
   ): number {
-    const base = Math.max(16, Math.min(60, Math.round(activeWidth * 0.08)));
+    const base = Math.max(
+      16,
+      Math.min(60, Math.round(activeWidth * rendererLayout.headwayGapRatio))
+    );
     // Only adjust when speeds differ and the new message is faster.
     if (!activeIsBacklog && newIsBacklog) {
       return Math.round(base * this.backlogSpeedMultiplier);

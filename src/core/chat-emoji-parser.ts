@@ -6,8 +6,12 @@
  */
 
 import type { ImageAsset } from '@app-types';
-import { EMOJI_ALIAS_PATTERN, normalizeInlineText } from '@core/chat-message-helpers';
-import { asRecord, getNumber, getString, isRecord, type JsonObject } from '@core/youtubei-json';
+import {
+  EMOJI_ALIAS_PATTERN,
+  extractAccessibilityLabel,
+  normalizeInlineText,
+} from '@core/chat-message-helpers';
+import { getNumber, getString, isRecord, type JsonObject } from '@core/youtubei-json';
 
 // ── Image URL validation ─────────────────────────────────────────────────────
 
@@ -152,15 +156,6 @@ export function createImageAsset(
 }
 
 // ── Emoji parsing ────────────────────────────────────────────────────────────
-
-function extractAccessibilityLabel(value: unknown): string | undefined {
-  const record = asRecord(value);
-  if (!record) {
-    return undefined;
-  }
-
-  return getString(asRecord(asRecord(record.accessibility)?.accessibilityData)?.label);
-}
 
 export function getEmojiShortcuts(emojiData: JsonObject): string[] {
   return Array.isArray(emojiData.shortcuts)

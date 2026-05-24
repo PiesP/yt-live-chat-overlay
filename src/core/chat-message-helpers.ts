@@ -9,6 +9,7 @@
 import type { AuthorType, ChatMessage, ContentSegment, SuperChatInfo } from '@app-types';
 import { colors, parseAnyColor, SUPERCHAT_TIER_KEYS } from '@core/design-tokens';
 import type { JsonObject } from '@core/youtubei-json';
+import { asRecord, getString } from '@core/youtubei-json';
 
 export const AUTHOR_TYPE_PRIORITY: Record<AuthorType, number> = {
   normal: 0,
@@ -147,4 +148,13 @@ export function extractUserColor(renderer: JsonObject): string | undefined {
   }
 
   return cssColor;
+}
+
+export function extractAccessibilityLabel(value: unknown): string | undefined {
+  const record = asRecord(value);
+  if (!record) {
+    return undefined;
+  }
+
+  return getString(asRecord(asRecord(record.accessibility)?.accessibilityData)?.label);
 }

@@ -105,21 +105,6 @@ export class LaneAllocator {
    */
   private static readonly SAFETY_MARGIN_RATIO = 0.15;
 
-  /**
-   * Headway gap between consecutive scrolling comments on the same lane.
-   * Dynamically computed as a fraction of message width so short messages
-   * get a tighter gap (higher density) while long messages still maintain
-   * a readable separation.
-   *
-   * Formula: headwayPx = clamp(msgWidth * HEADWAY_GAP_RATIO, MIN, MAX)
-   *
-   * Also used as the lane-reuse gap: a new message can enter when the
-   * previous message's right edge has passed the screen's right edge by
-   * headwayPx pixels — enabling multiple messages per lane.
-   * At font-size 32, "hello" (~80px) → headway 16px (was 40px, -60%).
-   * At font-size 32, long msg (~500px) → headway 40px.
-   */
-  private static readonly HEADWAY_GAP_RATIO = 0.08;
   private static readonly HEADWAY_GAP_MIN_PX = 16;
   private static readonly HEADWAY_GAP_MAX_PX = 60;
 
@@ -351,7 +336,7 @@ export class LaneAllocator {
       LaneAllocator.HEADWAY_GAP_MIN_PX,
       Math.min(
         LaneAllocator.HEADWAY_GAP_MAX_PX,
-        Math.round(msgWidthPx * LaneAllocator.HEADWAY_GAP_RATIO)
+        Math.round(msgWidthPx * rendererLayout.headwayGapRatio)
       )
     );
     // Multi-message lane sharing: the lane is freed when the message has
