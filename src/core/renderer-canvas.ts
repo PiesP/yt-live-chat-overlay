@@ -823,10 +823,17 @@ export class CanvasRenderer extends RendererBase {
   // ── Dimension estimation (delegates to shared functions) ──────────────
 
   private estimateDimensions(message: ChatMessage): { width: number; height: number } {
+    // SuperChat rendering uses showAuthor.superChat (canvas-card-renderers.ts:82),
+    // not showAuthor[authorType]. Match the rendering's key so that estimation
+    // and rendering agree on whether the author section is included.
+    const showAuthor =
+      message.kind === 'superchat'
+        ? this.settings.showAuthor.superChat
+        : this.settings.showAuthor[message.authorType];
     return sharedEstimateDimensions(
       message,
       this.settings.fontSize,
-      this.settings.showAuthor[message.authorType],
+      showAuthor,
       this.settings.fontWeight,
       this.settings.fontFamily,
       {

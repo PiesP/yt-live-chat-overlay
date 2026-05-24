@@ -109,7 +109,6 @@ function renderSegment(
   x: number,
   y: number,
   color: string,
-  alpha: number,
   fontSize: number,
   settings: OverlaySettings,
   textBitmapCache: Map<string, HTMLCanvasElement>,
@@ -125,10 +124,7 @@ function renderSegment(
     const key = `${font}|${text}|${color}|${strokeWidth.toFixed(1)}|${strokeColor}`;
     const bitmap = textBitmapCache.get(key);
     if (bitmap) {
-      ctx.save();
-      ctx.globalAlpha = alpha;
       ctx.drawImage(bitmap, x, y);
-      ctx.restore();
       return;
     }
 
@@ -138,7 +134,6 @@ function renderSegment(
 
   // Fallback: direct fillText + strokeText
   ctx.save();
-  ctx.globalAlpha = alpha;
   ctx.font = font;
   ctx.textBaseline = 'top';
   strokeTextOutline(ctx, text, x, y, color, settings);
@@ -155,7 +150,6 @@ function renderContentSegments(
   startX: number,
   y: number,
   color: string,
-  alpha: number,
   fontSize: number,
   settings: OverlaySettings,
   textBitmapCache: Map<string, HTMLCanvasElement>,
@@ -173,7 +167,6 @@ function renderContentSegments(
         cursorX,
         y,
         color,
-        alpha,
         fontSize,
         settings,
         textBitmapCache,
@@ -184,10 +177,7 @@ function renderContentSegments(
       const cached = emojiCache.get(seg.emoji.url);
       const img = cached?.complete && cached.naturalWidth > 0 ? cached : null;
       if (img) {
-        ctx.save();
-        ctx.globalAlpha = alpha;
         ctx.drawImage(img, cursorX, y, emojiSize, emojiSize);
-        ctx.restore();
       } else if (seg.emoji.fallbackText) {
         renderSegment(
           ctx,
@@ -195,7 +185,6 @@ function renderContentSegments(
           cursorX,
           y,
           color,
-          alpha,
           fontSize,
           settings,
           textBitmapCache,
@@ -208,7 +197,6 @@ function renderContentSegments(
           cursorX,
           y,
           color,
-          alpha,
           fontSize,
           settings,
           textBitmapCache,
@@ -238,7 +226,6 @@ export function renderWrappedText(
   maxWidth: number,
   maxLines: number,
   color: string,
-  alpha: number,
   fontSize: number,
   settings: OverlaySettings,
   textBitmapCache: Map<string, HTMLCanvasElement>,
@@ -262,7 +249,6 @@ export function renderWrappedText(
       x,
       cursorY,
       color,
-      alpha,
       fontSize,
       settings,
       textBitmapCache,
@@ -422,7 +408,6 @@ export function renderRegularMessage(
       textX,
       textY,
       color,
-      alpha,
       fontSize,
       settings,
       textBitmapCache,
@@ -436,7 +421,6 @@ export function renderRegularMessage(
       textX,
       textY,
       color,
-      alpha,
       fontSize,
       settings,
       textBitmapCache,
