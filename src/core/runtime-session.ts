@@ -250,7 +250,13 @@ export class RuntimeSession {
 
     // Install fetch interceptor to eavesdrop on YouTube's own chat requests.
     // This delivers messages ~1 poll interval earlier than our own polling.
-    this.installFetchInterceptor(chatSource);
+    //
+    // Disabled for replay — ReplayChatSource handles its own fetching via the
+    // background fetch interval and the interceptor would inject duplicate
+    // messages, flooding the queue.
+    if (!(chatSource instanceof ReplayChatSource)) {
+      this.installFetchInterceptor(chatSource);
+    }
 
     return chatSource.start((messages, isInitialSeed) => {
       if (this.disposed) return;
@@ -259,12 +265,22 @@ export class RuntimeSession {
 
       const msgs = Array.isArray(messages) ? messages : [messages];
 
-      // Route replay batches (isInitialSeed === false) through the backlog
-      // controller so they are throttled via Poisson-distributed injection
-      // instead of flooding the pending queue. This prevents the queue_priority
-      // drops that occur when the replay loop emits up to 50 messages per tick
-      // while the render loop cannot drain them fast enough.
-      // Also route large live batches (> 50) as before for burst protection.
+      // Replay messages carry videoOffsetMs from YouTube's API — they have
+      // exact timing and should bypass the backlog controller entirely.
+      // The rAF flush loop in ReplayChatSource already handles frame-accurate
+      // emission; Poisson spacing would distort the timing.
+      //
+      // Live chat initial seed batches (> 50 messages) still go through the
+      // backlog controller for burst protection.
+      const hasVideoTimestamps = msgs.some((m) => m.videoOffsetMs !== undefined);
+      if (hasVideoTimestamps) {
+        for (const msg of msgs) {
+          if (!this.acceptForRenderer(msg)) continue;
+          renderer.addMessage(msg);
+        }
+        return;
+      }
+
       const isReplayBatch = isInitialSeed === false && msgs.length >= 2;
       if (isReplayBatch || msgs.length > 50) {
         this.ensureBacklogController(renderer);
