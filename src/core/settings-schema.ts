@@ -199,7 +199,7 @@ export const DEFAULT_SETTINGS = {
   backlogSpeedMultiplier: 2,
   backlogMode: 'playback',
   backlogRecentMinutes: 5,
-  backlogOpacityMultiplier: 0.75,
+  backlogOpacityMultiplier: 0.85,
   fontWeight: 'bold',
   fontFamily: DEFAULT_FONT_FAMILY,
   preserveUserColor: false,
