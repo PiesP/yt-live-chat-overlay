@@ -41,7 +41,11 @@ temp/
 .env.local
 .env.*.local
 
-# Documentation (keep essential files)
+# ──────────────────────────────────────────────
+# Local-only (AI instructions, testing, docs)
+# ──────────────────────────────────────────────
+
+# Documentation (keep essential files tracked)
 docs/
 *.md
 !README.md
@@ -52,9 +56,16 @@ docs/
 
 # AI Instructions (not shared to remote)
 AGENTS.md
+CLAUDE.md
+GEMINI.md
 CODE_STANDARDS.md
+CODING_STANDARDS.md
+TESTING.md
 .hermes/
 .claude/
 .github/copilot-instructions.md
 .github/prompts/
 .editorconfig
+
+# Local tests
+test/
