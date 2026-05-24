@@ -191,6 +191,11 @@ export class CanvasRenderer extends RendererBase {
     if (container) container.appendChild(canvas);
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
+    if (!this.ctx) {
+      log.warn('Failed to get CanvasRenderingContext2D — renderer will be inactive');
+    } else if (!canvas.isConnected) {
+      log.warn('Canvas created but not connected to DOM — renderer will be inactive');
+    }
 
     const dims = overlay.getDimensions();
     this.applyDevicePixelRatio(dims);
@@ -570,11 +575,15 @@ export class CanvasRenderer extends RendererBase {
       const result = this.checkPlacement(msg, now);
       if (!result.ok) {
         if (result.reason === 'no_lane') {
-          // No lane available — the allocator found no free lane for this
-          // message. Dropping is correct because retrying won't help until
-          // an existing message expires (several seconds later).
-          this.observability.onMessageDropped('no_lane');
-          skipped = 0; // reset after drop
+          // No lane available from the allocator — all lanes are occupied.
+          // Push back to retry queue so the message gets retried next frame
+          // when existing messages may have expired. Previously this was a
+          // hard drop, which meant the highest-priority message (front of
+          // priority-sorted queue) was discarded first during bursts.
+          // The skip counter limits deferrals per frame to prevent infinite
+          // retry loops when lanes are truly saturated for extended periods.
+          skipped++;
+          this.retryQueue.push(msg);
           continue;
         }
         // Collision: the allocator found a lane but the bounding-box check
