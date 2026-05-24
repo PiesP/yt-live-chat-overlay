@@ -1,13 +1,15 @@
 import type { OverlaySettings } from '@app-types';
 import { createLogger } from '@core/logging';
+import type {
+  OutlineSettingKey,
+  RootNumericSettingKey,
+  RootScalarSettingKey,
+} from '@core/settings-schema';
 import {
   AUTHOR_COLOR_KEYS,
   cloneSettings,
   getRootDisplayMeta,
   OUTLINE_NUMERIC_KEYS,
-  type OutlineSettingKey,
-  type RootNumericSettingKey,
-  type RootScalarSettingKey,
   resolveLimits,
 } from '@core/settings-schema';
 import type { FieldDef, PaneDef } from '@core/settings-ui-panes';
@@ -160,8 +162,10 @@ function createCheckboxField(labelText: string, name: string, title?: string): H
 
 // ── UI value formatting ──────────────────────────────────────────────────────
 
+const ROUNDING_PRECISION = 1e4;
+
 const scaleUiValue = (value: number, scale: number): number =>
-  Math.round(value * scale * 1e4) / 1e4;
+  Math.round(value * scale * ROUNDING_PRECISION) / ROUNDING_PRECISION;
 
 const getRootScale = (key: RootScalarSettingKey): number => getRootDisplayMeta(key).scale;
 
@@ -385,7 +389,7 @@ export class SettingsUiForm {
 
       // Outline fields
       if (el.name.startsWith('outline-')) {
-        const rawKey = el.name.slice(8);
+        const rawKey = el.name.slice('outline-'.length);
         const key = rawKey as keyof typeof settings.outline;
         const value = settings.outline[key];
         if (el instanceof HTMLInputElement && el.type === 'checkbox') {
@@ -401,14 +405,14 @@ export class SettingsUiForm {
 
       // Color fields
       if (el.name.startsWith('color-')) {
-        const key = el.name.slice(6) as keyof typeof settings.colors;
+        const key = el.name.slice('color-'.length) as keyof typeof settings.colors;
         el.value = settings.colors[key];
         continue;
       }
 
       // Author visibility fields
       if (el.name.startsWith('showAuthor-')) {
-        const key = el.name.slice(11) as keyof typeof settings.showAuthor;
+        const key = el.name.slice('showAuthor-'.length) as keyof typeof settings.showAuthor;
         if (el instanceof HTMLInputElement && el.type === 'checkbox') {
           el.checked = settings.showAuthor[key];
         }
@@ -454,7 +458,7 @@ export class SettingsUiForm {
       if (!el.name) continue;
 
       if (el.name.startsWith('outline-')) {
-        const rawKey = el.name.slice(8);
+        const rawKey = el.name.slice('outline-'.length);
         const key = rawKey as OutlineSettingKey;
         if (key === 'enabled') {
           partial.outline = {

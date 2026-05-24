@@ -7,7 +7,8 @@
  */
 
 import { extractChatEvents } from '@core/chat-message-parser';
-import { ChatSource, type PlaybackSnapshot } from '@core/chat-source-base';
+import type { PlaybackSnapshot } from '@core/chat-source-base';
+import { ChatSource } from '@core/chat-source-base';
 import {
   clearSafeAnimationFrame,
   clearSafeInterval,
@@ -19,11 +20,12 @@ import {
 } from '@core/dom';
 import { createLogger } from '@core/logging';
 import { ReplayBuffer } from '@core/replay-buffer';
-import { fetchReplayChat, type LiveChatPayload } from '@core/youtubei-chat';
+import type { LiveChatPayload } from '@core/youtubei-chat';
+import { fetchReplayChat } from '@core/youtubei-chat';
+import type { InnertubeContinuationData } from '@core/youtubei-continuation';
 import {
   extractPlayerSeekContinuation,
   extractReplayContinuation,
-  type InnertubeContinuationData,
 } from '@core/youtubei-continuation';
 
 const log = createLogger('ReplayChatSource');

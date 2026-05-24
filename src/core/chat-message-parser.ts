@@ -23,7 +23,8 @@ import {
   truncateForKind,
 } from '@core/chat-message-helpers';
 import { createLogger } from '@core/logging';
-import { asRecord, getNumber, getString, isRecord, type JsonObject } from '@core/youtubei-json';
+import type { JsonObject } from '@core/youtubei-json';
+import { asRecord, getNumber, getString, isRecord } from '@core/youtubei-json';
 
 const log = createLogger('ChatMessageParser');
 
