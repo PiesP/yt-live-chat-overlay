@@ -59,7 +59,7 @@ export function estimateMessageDimensions(
       message,
       font,
       fontSize,
-      true,
+      showAuthor && message.author !== undefined,
       fontFamily,
       maxBodyLines?.superchat ?? 5,
       fontWeight
@@ -153,7 +153,11 @@ function estimateSuperChatDimensions(
   // than actually rendered, causing text to overflow the background.
   const actualInnerWidth = Math.max(1, width - paddingH * 2);
   const wrappedLines = wrapTextLines(message.text, font, actualInnerWidth);
-  const textHeight = Math.ceil(bodyLineHeight * Math.min(wrappedLines.length, maxBodyLines));
+  const lineCount = Math.min(wrappedLines.length, maxBodyLines);
+  // Per-line rounding matches renderWrappedText(), which rounds each line's
+  // height individually via Math.ceil(measureTextHeight(...)).
+  const lineHeight = Math.ceil(bodyLineHeight);
+  const textHeight = lineHeight * lineCount;
 
   let stickerHeight = 0;
   if (message.superChat?.sticker) {
@@ -190,7 +194,8 @@ function estimateMembershipDimensions(
   const actualInnerWidth = Math.max(1, width - paddingH * 2);
   const wrappedLines = wrapTextLines(message.text, font, actualInnerWidth);
   const bodyLineCount = Math.min(wrappedLines.length, maxBodyLines);
-  const textHeight = Math.ceil(bodyLineHeight * bodyLineCount);
+  // Per-line rounding matches renderWrappedText() (rounds each line individually).
+  const textHeight = Math.ceil(bodyLineHeight) * bodyLineCount;
 
   // Include author-to-body gap when author section is present (matching renderMembership)
   const hasAuthor = message.author !== undefined;

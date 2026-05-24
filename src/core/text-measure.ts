@@ -139,6 +139,19 @@ function wrapLine(line: string, ctx: CanvasRenderingContext2D, maxWidth: number)
   let currentLine = words[0] ?? '';
   let currentWidth = ctx.measureText(currentLine).width;
 
+  // If the first word exceeds maxWidth, wrap it character by character.
+  // Without this check, a spaceless string or a very long first word that
+  // exceeds maxWidth is pushed as a single line without character-level
+  // wrapping, causing text to overflow the container.
+  if (currentWidth > maxWidth) {
+    const charWrapped = wrapChars(currentLine, ctx, maxWidth);
+    for (let j = 0; j < charWrapped.length - 1; j++) {
+      lines.push(charWrapped[j] ?? '');
+    }
+    currentLine = charWrapped[charWrapped.length - 1] ?? '';
+    currentWidth = ctx.measureText(currentLine).width;
+  }
+
   for (let i = 1; i < words.length; i++) {
     const word = words[i];
     if (!word) continue;
