@@ -86,13 +86,15 @@ export class BurstDetector implements Pauseable {
   }
 
   /**
-   * Pause burst detection and reset all internal state.
-   * Call when the tab becomes hidden so accumulated messages during
-   * the hidden period don't pollute the rate on return.
+   * Pause burst detection. Preserves EMA rate so speed adaptation
+   * restarts from a reasonable value instead of zero — resetting to 0
+   * creates a 3-5 message blind spot before the EMA converges to the
+   * actual rate. lastMessageTime is reset to 0 so the first
+   * post-resume onMessageReceived() call skips interval computation
+   * (avoiding a stale time delta from the pre-pause message).
    */
   pause(): void {
     this.stop();
-    this.emaRate = 0;
     this.lastMessageTime = 0;
     this.samples = [];
     this.currentLevel = 'normal';

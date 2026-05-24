@@ -78,6 +78,26 @@ export class ReplayChatSource extends ChatSource {
     return this.rafHandle !== null && this.callback !== null;
   }
 
+  /**
+   * Override setPaused to reset fetch throttles on unpause.
+   *
+   * When the tab is hidden for more than a few seconds, the background
+   * fetch interval skips every tick (`chatPaused` check). If the video
+   * kept playing during hidden, the buffer will be empty at the new
+   * playback position on return. Resetting the throttles here causes
+   * the very next background fetch tick to fire without delay — the
+   * first tick after unpause is at most BACKGROUND_FETCH_INTERVAL_MS
+   * (1s) away, vs waiting for the normal min-delta throttle (1s) to
+   * elapse from the last (stale) fetch offset.
+   */
+  setPaused(paused: boolean): void {
+    super.setPaused(paused);
+    if (!paused) {
+      this.lastReplayRequestedOffsetMs = -REPLAY_FETCH_MIN_DELTA_MS;
+      this.replayNextAllowedFetchAt = 0;
+    }
+  }
+
   protected resetSessionState(): void {
     super.resetSessionState();
     this.resetReplayState();

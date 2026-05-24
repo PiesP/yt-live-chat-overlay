@@ -278,7 +278,7 @@ export abstract class ChatSource implements Pauseable {
    * so they flow through dedup, spread emission, and the renderer.
    */
   injectExternalMessages(messages: ChatMessage[]): void {
-    if (!this.callback || messages.length === 0) return;
+    if (this.chatPaused || !this.callback || messages.length === 0) return;
     const deduped = this.filterNewMessages(messages);
     if (deduped.length === 0) return;
     for (const message of deduped) {

@@ -444,6 +444,10 @@ export class RuntimeSession {
       const video = this.getVideoElement();
       const isVideoPaused = video?.paused ?? true;
       if (!isVideoPaused) {
+        // Trim stale queue entries BEFORE unpausing chat — otherwise
+        // freshly arrived messages in the window between setPaused(false)
+        // and resume() would be dropped by the trim.
+        this.renderer?.trimBackgroundQueue();
         this.chatSource?.setPaused(false);
       }
 
@@ -457,10 +461,6 @@ export class RuntimeSession {
       // later presses play, resumeForVideo() -> resume() would early-return
       // because isPaused is already false, leaving the render loop stopped.
       if (!isVideoPaused) {
-        // Trim stale queue entries but keep high-priority recent messages
-        // instead of flushing everything, which would drop important backlog
-        // or real-time messages accumulated during the hidden period.
-        this.renderer?.trimBackgroundQueue();
         this.renderer?.resume();
       }
     };
@@ -492,6 +492,12 @@ export class RuntimeSession {
           this.renderer?.pauseForVideo();
           this.chatSource?.setPaused(true);
         } else {
+          // Trim stale queue entries before resuming — when the user
+          // returns from hidden+video-paused state, handleVisibility
+          // skipped trim+resume. The pendingQueue may have accumulated
+          // messages during the hidden period. Trimming here prevents
+          // a visual flood when drainQueue fires on resume.
+          this.renderer?.trimBackgroundQueue();
           this.renderer?.resumeForVideo();
           if (!document.hidden) {
             this.chatSource?.setPaused(false);
