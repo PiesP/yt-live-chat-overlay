@@ -54,6 +54,15 @@ export class ReplayChatSource extends ChatSource {
     this.installSeekListeners(signal);
   }
 
+  /**
+   * Override health check to reflect rAF + background-fetch lifetime
+   * instead of the base class's pollLoopManager, which is unused by
+   * ReplayChatSource.
+   */
+  protected isObserverAlive(): boolean {
+    return this.rafHandle !== null && this.backgroundFetchTimer !== null && this.callback !== null;
+  }
+
   protected resetSessionState(): void {
     super.resetSessionState();
     this.resetReplayState();
