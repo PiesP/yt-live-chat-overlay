@@ -125,7 +125,10 @@ function parseChatEventFromAction(
     return null;
   }
 
-  return offsetMs === undefined ? { message } : { message, offsetMs };
+  if (offsetMs !== undefined) {
+    message.videoOffsetMs = offsetMs;
+  }
+  return { message };
 }
 
 function parseRendererMessage(

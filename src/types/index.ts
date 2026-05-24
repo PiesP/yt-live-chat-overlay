@@ -100,6 +100,8 @@ export interface ChatMessage {
   superChat?: SuperChatInfo;
   /** True when the message is part of a backlog injection (initial seed) */
   isBacklog?: boolean;
+  /** YouTube video offset in milliseconds (from videoOffsetTimeMsec, replay only) */
+  videoOffsetMs?: number;
 }
 
 /**

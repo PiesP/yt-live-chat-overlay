@@ -318,6 +318,7 @@ export class ReplayChatSource extends ChatSource {
         continue;
       }
 
+      next.message.videoOffsetMs = next.offsetMs;
       batch.push(next.message);
     }
 
