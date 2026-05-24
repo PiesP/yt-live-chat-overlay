@@ -171,6 +171,14 @@ export class RuntimeManager {
       return;
     }
 
+    if (startStatus === 'waiting') {
+      // Session entered standby mode — keep it alive.
+      // The session itself handles periodic recheck and transition.
+      this.resetStartFailures();
+      log.info('Runtime session in standby (waiting for stream start)');
+      return;
+    }
+
     if (startStatus !== 'started') {
       this.activeSession = null;
       session.dispose();
