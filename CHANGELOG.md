@@ -2,6 +2,52 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.33.0] - 2026-05-24
+
+### Added
+
+- **Standby mode for pre-live pages** — The overlay now detects pre-live ("waiting") pages and renders a standby status message. `RuntimeManager` keeps the standby session alive and periodically rechecks for live status. ([`3738e4b`](https://github.com/PiesP/yt-live-chat-overlay/commit/3738e4b), [`4bcca4e`](https://github.com/PiesP/yt-live-chat-overlay/commit/4bcca4e), [`756f9a8`](https://github.com/PiesP/yt-live-chat-overlay/commit/756f9a8), [`51bab7b`](https://github.com/PiesP/yt-live-chat-overlay/commit/51bab7b))
+- **`backlogOpacityMultiplier` setting** — Configurable opacity for backlog messages (default 0.85, was hardcoded 0.35). Added to settings UI with live preview. ([`f87f421`](https://github.com/PiesP/yt-live-chat-overlay/commit/f87f421))
+- **rAF exact-timing replay flush** — Replaced the 250ms `setInterval` timer loop with `requestAnimationFrame`-based flush (±8ms precision). Background fetch interval runs independently at 100ms. ([`35dad04`](https://github.com/PiesP/yt-live-chat-overlay/commit/35dad04))
+- **ReplayBuffer** — Time-indexed sorted buffer with binary-search insertion and deduplication. Guarantees replay messages are emitted in correct temporal order. ([`b8fbc3b`](https://github.com/PiesP/yt-live-chat-overlay/commit/b8fbc3b))
+- **`videoOffsetMs` on ChatMessage** — YouTube's native `videoOffsetTimeMsec` now propagated through the full parse→buffer→flush pipeline, enabling exact replay timing. ([`190b99d`](https://github.com/PiesP/yt-live-chat-overlay/commit/190b99d))
+- **Full-chat background prefetch** — `ReplayChatSource` walks the entire continuation chain at 1 req/s in the background, building a complete buffer for instant replay navigation. ([`12bd2d7`](https://github.com/PiesP/yt-live-chat-overlay/commit/12bd2d7))
+
+### Fixed
+
+- **Replay BacklogInjectionController bypass** — Replay messages with video timestamps now skip the Poisson-distributed backlog injection delay, routing directly to the renderer. Fetch interceptor also disabled for replay to prevent double-capture. ([`b6d97cf`](https://github.com/PiesP/yt-live-chat-overlay/commit/b6d97cf))
+- **5 tab-switch pause/resume bugs** — Fixed `isPaused` reposition on resume, `resumeForVideo` guard, `trimBackgroundQueue` execution order, `ReplayChatSource` fetch starvation, and `BurstDetector` EMA re-initialization. ([`f003857`](https://github.com/PiesP/yt-live-chat-overlay/commit/f003857))
+- **5 additional audit bugs** — rAF `chatPaused` guard, backlog batch drop on pause, fetch/prefetch pause, image retry after failure, and disposed-session guard in `handleSeeked`. ([`75104d8`](https://github.com/PiesP/yt-live-chat-overlay/commit/75104d8), [`512324c`](https://github.com/PiesP/yt-live-chat-overlay/commit/512324c))
+- **SuperChat rendering SSOT fixes** — `alpha²` stacking bug (double-`globalAlpha`), showAuthor key mismatch between estimation and rendering, and card padding SSOT violations. ([`455728c`](https://github.com/PiesP/yt-live-chat-overlay/commit/455728c))
+- **SuperChat text overflow** — First-word `maxWidth` check, line-height `Math.ceil` alignment between estimation and rendering, and `estimateSuperChatDimensions` showAuthor hardcoding. ([`f440093`](https://github.com/PiesP/yt-live-chat-overlay/commit/f440093))
+- **Speed-isolation map shift on pause/resume** — `LaneAllocator.shiftAll()` now shifts both `realTimeLanesUntil` and `backlogLanesUntil` maps, preventing cross-speed overtaking after tab-switch resume. ([`a8ab645`](https://github.com/PiesP/yt-live-chat-overlay/commit/a8ab645))
+- **Cross-speed overtaking prevention** — Speed-isolation tracking extended to full message duration (not just right-edge-pass). Faster backlog messages can no longer enter lanes where slower real-time messages are still visible. ([`110c554`](https://github.com/PiesP/yt-live-chat-overlay/commit/110c554))
+- **Watchdog false restart on replay** — `ReplayChatSource` now correctly overrides `isObserverAlive()` to check rAF + background fetch, and `markActivity()` is called in the rAF flush loop. ([`304e02b`](https://github.com/PiesP/yt-live-chat-overlay/commit/304e02b), [`3c0ed12`](https://github.com/PiesP/yt-live-chat-overlay/commit/3c0ed12))
+- **4 remaining bugs** — Dedup FIFO capacity, `shiftAll` cap, background-fetch guard on pause, and CSP safety for inline event handlers. ([`5507588`](https://github.com/PiesP/yt-live-chat-overlay/commit/5507588))
+- **`videoOffsetMs` read location** — `ReplayBuffer.appendEvents` now reads `videoOffsetMs` from `ChatMessage` (not the removed `ChatEvent.offsetMs`), restoring replay message display. ([`a397957`](https://github.com/PiesP/yt-live-chat-overlay/commit/a397957))
+- **Multi-slot collision detection & reverse duration** — Collision check now handles multi-slot messages correctly; reverse-mode scroll duration uses correct travel distance. ([`9029437`](https://github.com/PiesP/yt-live-chat-overlay/commit/9029437))
+- **Replay batches through backlog controller** — Large replay batches (>50) now route through `BacklogInjectionController` to prevent `queue_priority` drops. ([`9a0ca61`](https://github.com/PiesP/yt-live-chat-overlay/commit/9a0ca61))
+- **Emoji fetch timeout cleanup** — `emojiFetching` set now prunes stale entries via timeout to prevent silent accumulation. ([`3214e23`](https://github.com/PiesP/yt-live-chat-overlay/commit/3214e23))
+- **Speed-aware headway in reverse mode** — Reverse-mode lane occupancy now uses speed-aware headway matching scroll-mode behavior. `watch subtree` on video pause controller. O(1) lane utilization metric. ([`e7b6528`](https://github.com/PiesP/yt-live-chat-overlay/commit/e7b6528))
+- **Contiguous multi-slot allocation** — `allocateMultiSlot` Phase 2 now scans for contiguous busy blocks before falling back to single-lane placement. ([`ef2dc4d`](https://github.com/PiesP/yt-live-chat-overlay/commit/ef2dc4d))
+- **Bitmap cache unbounded growth** — LRU eviction added to `textBitmapCache` to prevent memory leak during long sessions. ([`3f158a0`](https://github.com/PiesP/yt-live-chat-overlay/commit/3f158a0))
+
+### Changed
+
+- **`backlogOpacityMultiplier` default**: 0.75 → 0.85 for better readability of backlog messages. ([`87fd1ff`](https://github.com/PiesP/yt-live-chat-overlay/commit/87fd1ff))
+
+### Refactored
+
+- **Canvas text rendering extracted** — `renderSegment`, `renderContentSegments`, `renderWrappedText`, card renderers, and `strokeTextOutline` moved to `canvas-text-renderer.ts`. `renderer-canvas.ts` -340 lines with clear render/logic separation. ([`d394691`](https://github.com/PiesP/yt-live-chat-overlay/commit/d394691), etc.)
+- **Emoji/image parsing extracted** — `chat-emoji-parser.ts` handles emoji alias resolution and image asset URL extraction from chat renderer data. ([`fd51c73`](https://github.com/PiesP/yt-live-chat-overlay/commit/fd51c73))
+- **UI tokens extracted** — `settings-ui-tokens.ts` separated from `design-tokens.ts` for settings-specific CSS values. ([`52d7fe3`](https://github.com/PiesP/yt-live-chat-overlay/commit/52d7fe3))
+- **CanvasMessage lifecycle inlined** — `canvas-message-lifecycle.ts` merged into `renderer-canvas.ts` (single consumer). ([`6333bad`](https://github.com/PiesP/yt-live-chat-overlay/commit/6333bad))
+- **Defensive patterns** — Overlay, FetchInterceptor, and BacklogController hardened with null guards and error isolation. ([`e924b66`](https://github.com/PiesP/yt-live-chat-overlay/commit/e924b66))
+- **Dead code / unused exports removed** — `ChatBootstrapResolution` de-exported, retry queue separated, settings-ui-types inlined, tooling config cleaned. ([`173f130`](https://github.com/PiesP/yt-live-chat-overlay/commit/173f130), [`3acb498`](https://github.com/PiesP/yt-live-chat-overlay/commit/3acb498), [`2d136b6`](https://github.com/PiesP/yt-live-chat-overlay/commit/2d136b6))
+- **Magic numbers extracted** — Standby message tokens, card renderer padding/radius, and canvas constants consolidated into `design-tokens.ts`. ([`1691012`](https://github.com/PiesP/yt-live-chat-overlay/commit/1691012), [`d8eec15`](https://github.com/PiesP/yt-live-chat-overlay/commit/d8eec15))
+- **Code style unification** — Hardcoded design tokens migrated, `!= null` consistency fixes, `computeDliosDuration` → `computeScrollDuration` rename, `clearSafeTimer` utility added. ([`96a18c1`](https://github.com/PiesP/yt-live-chat-overlay/commit/96a18c1), [`46df44a`](https://github.com/PiesP/yt-live-chat-overlay/commit/46df44a), [`d3fb294`](https://github.com/PiesP/yt-live-chat-overlay/commit/d3fb294))
+- **JSDoc added** — All previously undocumented public/protected exports now have documentation. ([`547124c`](https://github.com/PiesP/yt-live-chat-overlay/commit/547124c), [`56d12f2`](https://github.com/PiesP/yt-live-chat-overlay/commit/56d12f2))
+
 ## [0.32.0] - 2026-05-23
 
 ### Fixed
