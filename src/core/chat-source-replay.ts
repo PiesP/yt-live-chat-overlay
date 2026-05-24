@@ -4,11 +4,11 @@
  * Extracted from chat-source.ts to separate live and replay chat concerns.
  */
 
-import type { ChatMessage } from '@app-types';
-import { type ChatEvent, extractChatEvents } from '@core/chat-message-parser';
+import { extractChatEvents } from '@core/chat-message-parser';
 import { ChatSource, type PlaybackSnapshot } from '@core/chat-source-base';
 import { findElementMatch, isAbortError, sleep, throwIfAborted, VIDEO_SELECTORS } from '@core/dom';
 import { createLogger } from '@core/logging';
+import { ReplayBuffer } from '@core/replay-buffer';
 import { fetchReplayChat, type LiveChatPayload } from '@core/youtubei-chat';
 import {
   extractPlayerSeekContinuation,
@@ -20,20 +20,12 @@ const log = createLogger('ReplayChatSource');
 
 const REPLAY_LOOP_DELAY_MS = 250;
 const REPLAY_FETCH_MIN_DELTA_MS = 1000;
-const REPLAY_EMIT_TOLERANCE_MS = 300;
 const REPLAY_CONSECUTIVE_FAILURE_LIMIT = 5;
 const REPLAY_FAILURE_BACKOFF_MS = 5000;
 const REPLAY_PREFETCH_WINDOW_MS = 5000;
-const MAX_BUFFERED_REPLAY_MESSAGES = 300;
 const RECONNECT_RETRY_DELAY_MS = 1000;
 
 type ReplayMode = 'playerSeek' | 'continuation';
-
-interface ReplayBufferedMessage {
-  key: string;
-  message: ChatMessage;
-  offsetMs: number;
-}
 
 export class ReplayChatSource extends ChatSource {
   private static readonly MAX_REPLAY_BATCHES = 12;
@@ -45,7 +37,7 @@ export class ReplayChatSource extends ChatSource {
   private lastReplayRequestedOffsetMs = -REPLAY_FETCH_MIN_DELTA_MS;
   private replayConsecutiveFailures = 0;
   private replayNextAllowedFetchAt = 0;
-  private replayBuffer: ReplayBufferedMessage[] = [];
+  private replayBuffer = new ReplayBuffer();
   private seekListenerCleanup: (() => void) | null = null;
 
   protected seedCurrentSession(signal?: AbortSignal): Promise<boolean> {
@@ -63,7 +55,6 @@ export class ReplayChatSource extends ChatSource {
   }
 
   private installSeekListeners(signal?: AbortSignal): void {
-    // Clean up any previous listener before installing a new one
     this.seekListenerCleanup?.();
     const el = findElementMatch<HTMLVideoElement>(VIDEO_SELECTORS);
     if (!el) return;
@@ -80,10 +71,8 @@ export class ReplayChatSource extends ChatSource {
   }
 
   private handleSeeked(offsetMs: number): void {
-    this.replayBuffer = [];
+    this.replayBuffer.clear();
     this.lastReplayRequestedOffsetMs = offsetMs;
-    // Reset failure counter so the backoff timer from previous failures
-    // doesn't delay the seek fetch unnecessarily.
     this.replayConsecutiveFailures = 0;
     if (this.replayMode === 'playerSeek' && this.replayPlayerSeekContinuation) {
       void (async () => {
@@ -117,7 +106,7 @@ export class ReplayChatSource extends ChatSource {
     this.lastReplayRequestedOffsetMs = -REPLAY_FETCH_MIN_DELTA_MS;
     this.replayConsecutiveFailures = 0;
     this.replayNextAllowedFetchAt = 0;
-    this.replayBuffer = [];
+    this.replayBuffer.clear();
     this.seekListenerCleanup?.();
     this.seekListenerCleanup = null;
   }
@@ -160,7 +149,7 @@ export class ReplayChatSource extends ChatSource {
 
       const currentOffsetMs = this.getPlaybackSnapshot()?.offsetMs ?? 0;
       const minimumOffsetMs = Math.max(0, currentOffsetMs - REPLAY_PREFETCH_WINDOW_MS);
-      this.replayFallbackLastOffsetMs = this.bufferReplayEvents(
+      this.replayFallbackLastOffsetMs = this.replayBuffer.appendEvents(
         extractChatEvents(initialPayload.actions, this.getSettings),
         minimumOffsetMs
       );
@@ -234,93 +223,12 @@ export class ReplayChatSource extends ChatSource {
     return this.requestPayload(fetchReplayChat, continuation, playerOffsetMs, signal);
   }
 
-  private makeReplayKey(message: ChatMessage, offsetMs: number): string {
-    return message.id ?? `${message.kind}:${offsetMs}:${message.author ?? ''}:${message.text}`;
-  }
-
-  private trimReplayBuffer(): void {
-    if (this.replayBuffer.length <= MAX_BUFFERED_REPLAY_MESSAGES) {
-      return;
-    }
-
-    const overflow = this.replayBuffer.length - MAX_BUFFERED_REPLAY_MESSAGES;
-    if (overflow > 0) {
-      this.replayBuffer.splice(0, overflow);
-    }
-  }
-
-  private bufferReplayEvents(events: ChatEvent[], minimumOffsetMs = 0): number {
-    let highestOffsetMs = this.replayFallbackLastOffsetMs;
-
-    for (const event of events) {
-      if (event.offsetMs === undefined) {
-        continue;
-      }
-
-      highestOffsetMs = Math.max(highestOffsetMs, event.offsetMs);
-      if (event.offsetMs < minimumOffsetMs) {
-        continue;
-      }
-
-      const key = this.makeReplayKey(event.message, event.offsetMs);
-      this.insertBufferedEvent(key, event.message, event.offsetMs);
-    }
-
-    this.trimReplayBuffer();
-    return highestOffsetMs;
-  }
-
-  private insertBufferedEvent(key: string, message: ChatMessage, offsetMs: number): void {
-    let low = 0;
-    let high = this.replayBuffer.length;
-
-    while (low < high) {
-      const mid = (low + high) >>> 1;
-      const midItem = this.replayBuffer[mid];
-      if (!midItem) {
-        break;
-      }
-
-      if (midItem.key === key) {
-        return;
-      }
-
-      if (midItem.offsetMs <= offsetMs) {
-        low = mid + 1;
-      } else {
-        high = mid;
-      }
-    }
-
-    this.replayBuffer.splice(low, 0, { key, message, offsetMs });
-  }
-
   private flushReplayBuffer(currentOffsetMs: number): void {
-    if (!this.callback || this.replayBuffer.length === 0) {
-      return;
-    }
+    if (!this.callback) return;
 
-    // Collect a batch of messages (up to 50 at a time) and emit as a group.
-    // This lets the runtime session route the batch through the backlog
-    // controller instead of flooding the renderer with individual messages.
-    const batch: ChatMessage[] = [];
-    while (this.replayBuffer.length > 0 && batch.length < 50) {
-      const next = this.replayBuffer[0];
-      if (!next) break;
-
-      if (next.offsetMs > currentOffsetMs + REPLAY_EMIT_TOLERANCE_MS) {
-        break;
-      }
-
-      this.replayBuffer.shift();
-
-      if (next.offsetMs < currentOffsetMs - REPLAY_EMIT_TOLERANCE_MS) {
-        continue;
-      }
-
-      next.message.videoOffsetMs = next.offsetMs;
-      batch.push(next.message);
-    }
+    // Collect messages whose video time has been reached.
+    // Tolerance window (±300ms) filters out messages too far from current playback position.
+    const batch = this.replayBuffer.flushUpTo(currentOffsetMs, 50);
 
     if (batch.length === 0) return;
     this.emitBatch(batch, false);
@@ -343,7 +251,7 @@ export class ReplayChatSource extends ChatSource {
       }
 
       const nextPlayerSeekContinuation = extractPlayerSeekContinuation(payload.continuations);
-      this.bufferReplayEvents(
+      this.replayBuffer.appendEvents(
         extractChatEvents(payload.actions, this.getSettings),
         Math.max(0, offsetMs - REPLAY_PREFETCH_WINDOW_MS)
       );
@@ -381,7 +289,7 @@ export class ReplayChatSource extends ChatSource {
       }
 
       const events = extractChatEvents(payload.actions, this.getSettings);
-      this.replayFallbackLastOffsetMs = this.bufferReplayEvents(events, minimumOffsetMs);
+      this.replayFallbackLastOffsetMs = this.replayBuffer.appendEvents(events, minimumOffsetMs);
       this.replayContinuation = extractReplayContinuation(payload.continuations);
 
       this.replayConsecutiveFailures = 0;
@@ -417,7 +325,7 @@ export class ReplayChatSource extends ChatSource {
       return false;
     }
 
-    if (this.replayBuffer.length === 0) {
+    if (this.replayBuffer.isEmpty) {
       return true;
     }
 
