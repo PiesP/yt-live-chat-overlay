@@ -245,10 +245,15 @@ export class LaneAllocator {
     const nextAvailable = startTime + occupancyMs;
     const startIdx = placement.laneIndex;
 
-    // Store speed-profile occupancy end-time per lane so that
+    // Store speed-profile visibility end-time per lane so that
     // subsequent allocations can group messages by speed profile.
+    // Uses durationMs (full on-screen time) rather than occupancyMs
+    // (right-edge-pass time) to prevent cross-speed overtaking.
+    // A faster backlog message must never enter a lane where a slower
+    // real-time message is still visible, even if its right edge has
+    // already passed the screen edge.
     // Real-time → realTimeLanesUntil, backlog → backlogLanesUntil.
-    const until = startTime + occupancyMs;
+    const until = startTime + durationMs;
     if (isBacklog) {
       for (let s = 0; s < placement.slotCount; s++) {
         this.backlogLanesUntil.set(startIdx + s, until);
