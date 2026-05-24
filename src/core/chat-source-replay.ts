@@ -1,12 +1,14 @@
 /**
- * ReplayChatSource — replay polling loop with playerSeek + continuation.
+ * ReplayChatSource — replay chat source with rAF-based exact-timing flush.
  *
- * Extracted from chat-source.ts to separate live and replay chat concerns.
+ * Separated from chat-source.ts. Uses a requestAnimationFrame loop for
+ * frame-accurate message emission synchronized with video playback position.
+ * API fetching runs in a decoupled background interval.
  */
 
 import { extractChatEvents } from '@core/chat-message-parser';
 import { ChatSource, type PlaybackSnapshot } from '@core/chat-source-base';
-import { findElementMatch, isAbortError, sleep, throwIfAborted, VIDEO_SELECTORS } from '@core/dom';
+import { findElementMatch, isAbortError, throwIfAborted, VIDEO_SELECTORS } from '@core/dom';
 import { createLogger } from '@core/logging';
 import { ReplayBuffer } from '@core/replay-buffer';
 import { fetchReplayChat, type LiveChatPayload } from '@core/youtubei-chat';
@@ -18,12 +20,12 @@ import {
 
 const log = createLogger('ReplayChatSource');
 
-const REPLAY_LOOP_DELAY_MS = 250;
 const REPLAY_FETCH_MIN_DELTA_MS = 1000;
 const REPLAY_CONSECUTIVE_FAILURE_LIMIT = 5;
 const REPLAY_FAILURE_BACKOFF_MS = 5000;
 const REPLAY_PREFETCH_WINDOW_MS = 5000;
-const RECONNECT_RETRY_DELAY_MS = 1000;
+const BACKGROUND_FETCH_INTERVAL_MS = 1000;
+const RAF_FLUSH_BATCH_SIZE = 5;
 
 type ReplayMode = 'playerSeek' | 'continuation';
 
@@ -39,13 +41,16 @@ export class ReplayChatSource extends ChatSource {
   private replayNextAllowedFetchAt = 0;
   private replayBuffer = new ReplayBuffer();
   private seekListenerCleanup: (() => void) | null = null;
+  private rafHandle: ReturnType<typeof requestAnimationFrame> | null = null;
+  private backgroundFetchTimer: ReturnType<typeof setInterval> | null = null;
 
   protected seedCurrentSession(signal?: AbortSignal): Promise<boolean> {
     return this.initializeReplaySession(signal);
   }
 
   protected launchCurrentPollLoop(signal?: AbortSignal): void {
-    this.launchPollLoop(signal, (loopSignal) => this.runReplayLoop(loopSignal));
+    this.startRafFlush(signal);
+    this.startBackgroundFetch(signal);
     this.installSeekListeners(signal);
   }
 
@@ -53,6 +58,85 @@ export class ReplayChatSource extends ChatSource {
     super.resetSessionState();
     this.resetReplayState();
   }
+
+  // ── rAF flush loop ──────────────────────────────────────────────────────
+
+  /**
+   * Start a requestAnimationFrame loop that flushes replay messages
+   * at the exact video playback position every frame (~16ms precision).
+   */
+  private startRafFlush(signal?: AbortSignal): void {
+    this.stopRafFlush();
+
+    const tick = (): void => {
+      if (signal?.aborted) {
+        this.rafHandle = null;
+        return;
+      }
+
+      const playback = this.getPlaybackSnapshot();
+      if (playback && !playback.paused) {
+        this.flushReplayBuffer(playback.offsetMs);
+      }
+
+      this.rafHandle = requestAnimationFrame(tick);
+    };
+
+    this.rafHandle = requestAnimationFrame(tick);
+  }
+
+  private stopRafFlush(): void {
+    if (this.rafHandle !== null) {
+      cancelAnimationFrame(this.rafHandle);
+      this.rafHandle = null;
+    }
+  }
+
+  // ── Background fetch ────────────────────────────────────────────────────
+
+  /**
+   * Periodically fetch new replay pages from YouTube so the buffer
+   * stays ahead of the playback position.
+   *
+   * In a future phase this will be replaced by a full-chat prefetch
+   * that walks the entire continuation chain in advance.
+   */
+  private startBackgroundFetch(signal?: AbortSignal): void {
+    this.stopBackgroundFetch();
+
+    this.backgroundFetchTimer = setInterval(() => {
+      if (signal?.aborted) {
+        this.stopBackgroundFetch();
+        return;
+      }
+
+      const playback = this.getPlaybackSnapshot();
+      if (!playback || playback.paused) return;
+
+      void (async () => {
+        try {
+          if (this.replayMode === 'playerSeek') {
+            await this.pollPlayerSeekReplay(playback, signal);
+          } else if (this.replayMode === 'continuation') {
+            await this.pollContinuationReplay(playback.offsetMs, signal);
+          }
+        } catch (error: unknown) {
+          if (!isAbortError(error)) {
+            log.warn('Background fetch iteration failed:', error);
+          }
+        }
+      })();
+    }, BACKGROUND_FETCH_INTERVAL_MS);
+  }
+
+  private stopBackgroundFetch(): void {
+    if (this.backgroundFetchTimer !== null) {
+      clearInterval(this.backgroundFetchTimer);
+      this.backgroundFetchTimer = null;
+    }
+  }
+
+  // ── Seek listeners ──────────────────────────────────────────────────────
 
   private installSeekListeners(signal?: AbortSignal): void {
     this.seekListenerCleanup?.();
@@ -98,6 +182,8 @@ export class ReplayChatSource extends ChatSource {
     }
   }
 
+  // ── State management ────────────────────────────────────────────────────
+
   private resetReplayState(): void {
     this.replayMode = null;
     this.replayPlayerSeekContinuation = null;
@@ -109,6 +195,8 @@ export class ReplayChatSource extends ChatSource {
     this.replayBuffer.clear();
     this.seekListenerCleanup?.();
     this.seekListenerCleanup = null;
+    this.stopRafFlush();
+    this.stopBackgroundFetch();
   }
 
   private async initializeReplaySession(signal?: AbortSignal): Promise<boolean> {
@@ -176,44 +264,7 @@ export class ReplayChatSource extends ChatSource {
     }
   }
 
-  private async reinitializeReplaySession(signal?: AbortSignal): Promise<boolean> {
-    const bootstrap = await this.bootstrapResolver.refresh(signal);
-    if (!bootstrap?.isReplay) {
-      return false;
-    }
-    this.bootstrap = bootstrap;
-
-    return this.initializeReplaySession(signal);
-  }
-
-  private async runReplayLoop(signal?: AbortSignal): Promise<void> {
-    while (!signal?.aborted) {
-      await this.waitWhilePaused(signal);
-
-      const playback = this.getPlaybackSnapshot();
-      const currentOffsetMs = playback?.offsetMs ?? 0;
-
-      if (!playback) {
-        await sleep(REPLAY_LOOP_DELAY_MS, signal);
-        continue;
-      }
-
-      if (playback.paused) {
-        await sleep(REPLAY_LOOP_DELAY_MS, signal);
-        continue;
-      }
-
-      this.flushReplayBuffer(currentOffsetMs);
-
-      if (this.replayMode === 'playerSeek') {
-        await this.pollPlayerSeekReplay(playback, signal);
-      } else if (this.replayMode === 'continuation') {
-        await this.pollContinuationReplay(currentOffsetMs, signal);
-      }
-
-      await sleep(REPLAY_LOOP_DELAY_MS, signal);
-    }
-  }
+  // ── API helpers ─────────────────────────────────────────────────────────
 
   private requestReplayPayload(
     continuation: InnertubeContinuationData,
@@ -223,16 +274,23 @@ export class ReplayChatSource extends ChatSource {
     return this.requestPayload(fetchReplayChat, continuation, playerOffsetMs, signal);
   }
 
+  /**
+   * Flush messages whose video time has been reached.
+   *
+   * Emits at most RAF_FLUSH_BATCH_SIZE (5) messages per frame to prevent
+   * visual clumping — same-timestamp messages spread naturally across
+   * multiple frames (~16ms each) for a smooth stream.
+   */
   private flushReplayBuffer(currentOffsetMs: number): void {
     if (!this.callback) return;
 
-    // Collect messages whose video time has been reached.
-    // Tolerance window (±300ms) filters out messages too far from current playback position.
-    const batch = this.replayBuffer.flushUpTo(currentOffsetMs, 50);
+    const batch = this.replayBuffer.flushUpTo(currentOffsetMs, RAF_FLUSH_BATCH_SIZE);
 
     if (batch.length === 0) return;
     this.emitBatch(batch, false);
   }
+
+  // ── Fetch methods ───────────────────────────────────────────────────────
 
   private async fetchReplayPlayerSeek(offsetMs: number, signal?: AbortSignal): Promise<boolean> {
     if (!this.replayPlayerSeekContinuation) {
@@ -320,17 +378,7 @@ export class ReplayChatSource extends ChatSource {
     }
   }
 
-  private shouldFetchReplayAtOffset(currentOffsetMs: number): boolean {
-    if (this.replayMode !== 'playerSeek' || !this.replayPlayerSeekContinuation) {
-      return false;
-    }
-
-    if (this.replayBuffer.isEmpty) {
-      return true;
-    }
-
-    return currentOffsetMs - this.lastReplayRequestedOffsetMs >= REPLAY_FETCH_MIN_DELTA_MS;
-  }
+  // ── Poll methods (fetch + backoff only — flush is handled by rAF) ───────
 
   private async pollPlayerSeekReplay(
     playback: PlaybackSnapshot,
@@ -341,16 +389,30 @@ export class ReplayChatSource extends ChatSource {
     }
 
     const fetched = await this.fetchReplayPlayerSeek(playback.offsetMs, signal);
-    this.flushReplayBuffer(playback.offsetMs);
+    // Flush is handled by the rAF loop — no explicit flush call here.
 
     if (fetched) {
       return;
     }
 
-    const reinitialized = await this.reinitializeReplaySession(signal);
-    if (!reinitialized) {
-      await sleep(RECONNECT_RETRY_DELAY_MS, signal);
+    const bootstrap = await this.bootstrapResolver.refresh(signal);
+    if (!bootstrap?.isReplay) {
+      return;
     }
+    this.bootstrap = bootstrap;
+    await this.initializeReplaySession(signal);
+  }
+
+  private shouldFetchReplayAtOffset(currentOffsetMs: number): boolean {
+    if (this.replayMode !== 'playerSeek' || !this.replayPlayerSeekContinuation) {
+      return false;
+    }
+
+    if (this.replayBuffer.isEmpty) {
+      return true;
+    }
+
+    return currentOffsetMs - this.lastReplayRequestedOffsetMs >= REPLAY_FETCH_MIN_DELTA_MS;
   }
 
   private async pollContinuationReplay(
@@ -387,6 +449,6 @@ export class ReplayChatSource extends ChatSource {
       await this.fetchNextReplayFallbackBatch(minimumOffsetMs, signal);
     }
 
-    this.flushReplayBuffer(currentOffsetMs);
+    // Flush is handled by the rAF loop — no explicit flush call here.
   }
 }
