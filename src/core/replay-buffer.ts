@@ -1,0 +1,144 @@
+/**
+ * ReplayBuffer — time-indexed sorted buffer for replay chat messages.
+ *
+ * Stores messages sorted by videoOffsetMs with O(log n) binary search
+ * insertion and deduplication by message ID. Flush emits messages whose
+ * offsetMs has passed, in batches capped per frame to prevent visual clumping.
+ */
+
+import type { ChatMessage } from '@app-types';
+import type { ChatEvent } from '@core/chat-message-parser';
+
+interface BufferedReplayMessage {
+  message: ChatMessage;
+  offsetMs: number;
+}
+
+const MAX_BUFFERED_REPLAY_MESSAGES = 3000;
+const REPLAY_EMIT_TOLERANCE_MS = 300;
+
+export class ReplayBuffer {
+  private buffer: BufferedReplayMessage[] = [];
+  private readonly seenIds = new Set<string>();
+
+  /** Number of buffered messages awaiting emission. */
+  get length(): number {
+    return this.buffer.length;
+  }
+
+  /** Whether the buffer has no messages. */
+  get isEmpty(): boolean {
+    return this.buffer.length === 0;
+  }
+
+  /**
+   * Insert a single message with its video offset.
+   *
+   * Uses binary search to maintain sort order and deduplicates by
+   * message ID so the same message is never buffered twice.
+   */
+  insert(message: ChatMessage, offsetMs: number): void {
+    const id = message.id;
+    if (id !== undefined && this.seenIds.has(id)) return;
+
+    if (id !== undefined) {
+      this.seenIds.add(id);
+    }
+
+    let lo = 0;
+    let hi = this.buffer.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      const item = this.buffer[mid];
+      if (!item) break;
+      if (item.offsetMs <= offsetMs) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
+    }
+
+    this.buffer.splice(lo, 0, { message, offsetMs });
+    this.trim(MAX_BUFFERED_REPLAY_MESSAGES);
+  }
+
+  /**
+   * Bulk-insert pre-parsed chat events.
+   *
+   * Events whose offsetMs falls below `minimumOffsetMs` are skipped.
+   * Returns the highest offsetMs seen across all inserted events.
+   */
+  appendEvents(events: ChatEvent[], minimumOffsetMs = 0): number {
+    let highestOffsetMs = -1;
+
+    for (const event of events) {
+      if (event.offsetMs === undefined) continue;
+
+      highestOffsetMs = Math.max(highestOffsetMs, event.offsetMs);
+
+      if (event.offsetMs < minimumOffsetMs) continue;
+      this.insert(event.message, event.offsetMs);
+    }
+
+    return highestOffsetMs;
+  }
+
+  /**
+   * Flush messages whose video offset has been reached.
+   *
+   * Collects up to `maxBatch` messages where `offsetMs <= currentOffsetMs`.
+   * Past messages (too far behind) are silently dropped.
+   * Messages still in the future stay in the buffer.
+   */
+  flushUpTo(currentOffsetMs: number, maxBatch: number): ChatMessage[] {
+    if (this.buffer.length === 0) return [];
+
+    const batch: ChatMessage[] = [];
+
+    while (this.buffer.length > 0 && batch.length < maxBatch) {
+      const next = this.buffer[0];
+      if (!next) break;
+
+      // Future messages — stop, they're not ready yet
+      if (next.offsetMs > currentOffsetMs + REPLAY_EMIT_TOLERANCE_MS) break;
+
+      // Remove from buffer regardless of whether we emit
+      this.buffer.shift();
+
+      // Too far in the past — drop silently
+      if (next.offsetMs < currentOffsetMs - REPLAY_EMIT_TOLERANCE_MS) {
+        if (next.message.id) this.seenIds.delete(next.message.id);
+        continue;
+      }
+
+      batch.push(next.message);
+    }
+
+    return batch;
+  }
+
+  /** Clear all buffered messages (e.g. on seek). */
+  clear(): void {
+    this.buffer = [];
+    this.seenIds.clear();
+  }
+
+  /** Peek at the oldest message without removing it. */
+  peek(): BufferedReplayMessage | undefined {
+    return this.buffer[0];
+  }
+
+  /**
+   * Trim the buffer to `maxSize` by removing oldest entries.
+   * Oldest messages are from the past — they won't be needed again.
+   */
+  private trim(maxSize: number): void {
+    if (this.buffer.length <= maxSize) return;
+
+    const overflow = this.buffer.length - maxSize;
+    const removed = this.buffer.splice(0, overflow);
+    for (const item of removed) {
+      if (item.message.id) this.seenIds.delete(item.message.id);
+    }
+  }
+}
