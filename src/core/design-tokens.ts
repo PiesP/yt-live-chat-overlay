@@ -132,12 +132,33 @@ export const rendererLayout = {
   superchatCardRadius: 6,
   /** Membership card border radius (px) */
   membershipCardRadius: 6,
+  /** SuperChat left accent bar width (px) */
+  superchatAccentBarWidth: 4,
+  /** SuperChat amount badge stroke width (px) */
+  superchatBadgeStrokeWidth: 1,
+  /** Membership card glow border stroke width (px) */
+  membershipBorderWidth: 2,
   /** Maximum author name width inside a card (px).
    *  Derived from: superchatMaxWidth - paddingH*2 - authorPhotoSize - spacing.sm
    *  = 640 - 48 - 24 - 8 = 560. Prevents long names from overflowing the card. */
   authorNameMaxWidth: 560,
   /** Headway gap ratio: fraction of message width used as gap between consecutive messages on the same lane. */
   headwayGapRatio: 0.08,
+} as const;
+
+/** Standby status message constants (pre-live overlay). */
+export const standbyMessageLayout = {
+  fontSize: 16,
+  paddingX: 16,
+  paddingY: 8,
+  /** Vertical distance from bottom edge of viewport. */
+  bottomOffset: 24,
+  /** Rounded corner radius for the pill background. */
+  pillRadius: 6,
+  /** Semi-transparent background color. */
+  fillStyle: 'rgba(0, 0, 0, 0.5)',
+  /** Text color. */
+  textFillStyle: 'rgba(255, 255, 255, 0.7)',
 } as const;
 
 /**

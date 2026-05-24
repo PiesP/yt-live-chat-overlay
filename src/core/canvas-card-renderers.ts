@@ -72,7 +72,7 @@ export function renderSuperChatCard(
 
   // Left accent bar
   ctx.fillStyle = baseColor;
-  ctx.fillRect(x, y, 4, h);
+  ctx.fillRect(x, y, rendererLayout.superchatAccentBarWidth, h);
 
   const scPad = rendererLayout.superchat;
   const textX = x + scPad.paddingH;
@@ -105,7 +105,7 @@ export function renderSuperChatCard(
   ctx.fillStyle = SUPERCHAT_AMOUNT_BADGE_FILL;
   ctx.fill();
   ctx.strokeStyle = SUPERCHAT_AMOUNT_BADGE_STROKE;
-  ctx.lineWidth = 1;
+  ctx.lineWidth = rendererLayout.superchatBadgeStrokeWidth;
   ctx.stroke();
 
   ctx.textBaseline = 'middle';
@@ -193,7 +193,7 @@ export function renderMembershipCard(
 
   const pulse = Math.sin((elapsed / 1000) * Math.PI) * mem.borderAlphaAmplitude + mem.borderAlpha;
   ctx.strokeStyle = `rgba(${mem.background.r}, ${mem.background.g}, ${mem.background.b}, ${pulse})`;
-  ctx.lineWidth = 2;
+  ctx.lineWidth = rendererLayout.membershipBorderWidth;
   ctx.stroke();
 
   const padH = rendererLayout.membership.paddingH;

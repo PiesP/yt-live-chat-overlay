@@ -26,8 +26,8 @@
 
 import type { ChatMessage, OverlayDimensions, OverlaySettings } from '@app-types';
 import { renderMembershipCard, renderSuperChatCard } from '@core/canvas-card-renderers';
-import { renderRegularMessage } from '@core/canvas-text-renderer';
-import { computeScrollDuration, rendererLayout } from '@core/design-tokens';
+import { drawRoundRect, renderRegularMessage } from '@core/canvas-text-renderer';
+import { computeScrollDuration, rendererLayout, standbyMessageLayout } from '@core/design-tokens';
 import { clearSafeAnimationFrame, clearSafeInterval, forEachSlot } from '@core/dom';
 import type { LanePlacement } from '@core/lane-allocator';
 import { LaneAllocator } from '@core/lane-allocator';
@@ -1000,38 +1000,26 @@ export class CanvasRenderer extends RendererBase {
     dims: { width: number; height: number }
   ): void {
     const message = 'Waiting for live stream\u2026';
-    const fontSize = 16;
+    const { fontSize, paddingX, paddingY, bottomOffset, pillRadius, fillStyle, textFillStyle } =
+      standbyMessageLayout;
     const font = getFontString(fontSize, 'normal', this.settings.fontFamily);
     ctx.font = font;
     ctx.textBaseline = 'middle';
     ctx.textAlign = 'center';
 
     const textWidth = ctx.measureText(message).width;
-    const paddingX = 16;
-    const paddingY = 8;
     const boxW = textWidth + paddingX * 2;
     const boxH = fontSize * 1.5 + paddingY * 2;
     const boxX = (dims.width - boxW) / 2;
-    const boxY = dims.height - boxH - 24;
+    const boxY = dims.height - boxH - bottomOffset;
 
     // Semi-transparent background pill
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-    ctx.beginPath();
-    const r = 6;
-    ctx.moveTo(boxX + r, boxY);
-    ctx.lineTo(boxX + boxW - r, boxY);
-    ctx.arcTo(boxX + boxW, boxY, boxX + boxW, boxY + r, r);
-    ctx.lineTo(boxX + boxW, boxY + boxH - r);
-    ctx.arcTo(boxX + boxW, boxY + boxH, boxX + boxW - r, boxY + boxH, r);
-    ctx.lineTo(boxX + r, boxY + boxH);
-    ctx.arcTo(boxX, boxY + boxH, boxX, boxY + boxH - r, r);
-    ctx.lineTo(boxX, boxY + r);
-    ctx.arcTo(boxX, boxY, boxX + r, boxY, r);
-    ctx.closePath();
+    ctx.fillStyle = fillStyle;
+    drawRoundRect(ctx, boxX, boxY, boxW, boxH, pillRadius);
     ctx.fill();
 
     // Text on top
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+    ctx.fillStyle = textFillStyle;
     ctx.fillText(message, dims.width / 2, boxY + boxH / 2);
   }
 }
