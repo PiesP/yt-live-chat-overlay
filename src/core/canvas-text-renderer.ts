@@ -7,7 +7,7 @@
 
 import type { ChatMessage, ContentSegment, OverlaySettings } from '@app-types';
 import { EMOJI_ALIAS_PATTERN } from '@core/chat-message-helpers';
-import { computeOutlineColor, rendererLayout } from '@core/design-tokens';
+import { AUTHOR_PHOTO_SHADOW, computeOutlineColor, rendererLayout } from '@core/design-tokens';
 import {
   getFontString,
   measureTextHeight,
@@ -279,7 +279,7 @@ function drawAuthorPhoto(
   y: number
 ): void {
   ctx.save();
-  ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
+  ctx.shadowColor = AUTHOR_PHOTO_SHADOW;
   ctx.shadowBlur = 4;
   ctx.shadowOffsetX = 1;
   ctx.shadowOffsetY = 1;

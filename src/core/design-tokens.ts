@@ -100,6 +100,30 @@ export const zIndex = {
   modal: 10003,
 } as const;
 
+// ── SuperChat amount badge ──
+export const SUPERCHAT_AMOUNT_BADGE_FILL = 'rgba(255, 255, 255, 0.16)';
+export const SUPERCHAT_AMOUNT_BADGE_STROKE = 'rgba(255, 255, 255, 0.22)';
+
+// ── Author photo shadow ──
+export const AUTHOR_PHOTO_SHADOW = 'rgba(0, 0, 0, 0.6)';
+
+// ── Debug overlay ──
+export const DEBUG_OVERLAY_BG = 'rgba(0, 0, 0, 0.8)';
+export const DEBUG_OVERLAY_TOP = '8px';
+export const DEBUG_OVERLAY_RIGHT = '8px';
+export const DEBUG_OVERLAY_Z_INDEX = '99999';
+
+// ── UI confirm backdrop alpha ──
+export const CONFIRM_BACKDROP_ALPHA = 0.5;
+
+// ── Toast notification ──
+export const TOAST_BG = 'rgba(0, 0, 0, 0.85)';
+export const TOAST_FONT = '12px/1.4 sans-serif';
+export const TOAST_PADDING = '6px 14px';
+
+// ── Backlog indicator ──
+export const BACKLOG_INDICATOR_BG = 'rgba(0, 0, 0, 0.75)';
+
 /**
  * Renderer layout constants.
  *

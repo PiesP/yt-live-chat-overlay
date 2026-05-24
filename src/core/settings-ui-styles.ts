@@ -1,4 +1,15 @@
-import { borderRadius, colors, shadows, spacing, typography, zIndex } from '@core/design-tokens';
+import {
+  borderRadius,
+  CONFIRM_BACKDROP_ALPHA,
+  colors,
+  shadows,
+  spacing,
+  TOAST_BG,
+  TOAST_FONT,
+  TOAST_PADDING,
+  typography,
+  zIndex,
+} from '@core/design-tokens';
 
 // ── UI sizing tokens (settings-specific, not shared with renderer) ──
 const S = {
@@ -300,7 +311,7 @@ export const SETTINGS_UI_STYLES = `
       .yt-chat-overlay-settings-confirm-backdrop {
         position: absolute;
         inset: 0;
-        background: rgba(0, 0, 0, 0.5);
+        background: rgba(0, 0, 0, ${CONFIRM_BACKDROP_ALPHA});
         border-radius: ${borderRadius.md};
       }
       .yt-chat-overlay-settings-confirm-dialog {
@@ -352,11 +363,11 @@ export const SETTINGS_UI_STYLES = `
         bottom: 60px;
         left: 50%;
         transform: translateX(-50%);
-        background: rgba(0, 0, 0, 0.85);
-        color: #fff;
-        font: 12px/1.4 sans-serif;
-        padding: 6px 14px;
-        border-radius: 6px;
+        background: ${TOAST_BG};
+        color: ${colors.ui.text};
+        font: ${TOAST_FONT};
+        padding: ${TOAST_PADDING};
+        border-radius: ${borderRadius.sm};
         z-index: 2;
         pointer-events: none;
         animation: yt-overlay-fade-in 0.15s ease-out;

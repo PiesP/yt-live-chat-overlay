@@ -20,7 +20,7 @@
  */
 
 import type { BacklogMode, ChatMessage, Pauseable } from '@app-types';
-import { sampleExponential } from '@core/design-tokens';
+import { BACKLOG_INDICATOR_BG, sampleExponential } from '@core/design-tokens';
 import { createLogger } from '@core/logging';
 import type { ObservabilityReporter } from '@core/observability';
 
@@ -408,7 +408,7 @@ export class BacklogInjectionController implements Pauseable {
     el.id = 'yt-chat-overlay-backlog-indicator';
     el.style.cssText = `
       position: fixed; top: 40px; right: 8px; z-index: 99999;
-      background: rgba(0,0,0,0.75); color: #fff;
+      background: ${BACKLOG_INDICATOR_BG}; color: #fff;
       font: 12px/1.4 sans-serif; padding: 6px 10px;
       border-radius: 4px; pointer-events: none; user-select: none;
       opacity: 0; transition: opacity 0.3s ease;

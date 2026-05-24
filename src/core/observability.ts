@@ -10,6 +10,12 @@
  */
 
 import type { BurstLevel, SessionMetrics } from '@app-types';
+import {
+  DEBUG_OVERLAY_BG,
+  DEBUG_OVERLAY_RIGHT,
+  DEBUG_OVERLAY_TOP,
+  DEBUG_OVERLAY_Z_INDEX,
+} from '@core/design-tokens';
 import { createLogger } from '@core/logging';
 
 const log = createLogger('Observability');
@@ -150,8 +156,8 @@ export class ObservabilityReporter {
     const el = document.createElement('div');
     el.id = 'yt-chat-overlay-debug';
     el.style.cssText = [
-      'position:fixed;top:8px;right:8px;z-index:99999;',
-      'background:rgba(0,0,0,0.8);color:#0f0;font:12px/1.4 monospace;',
+      `position:fixed;top:${DEBUG_OVERLAY_TOP};right:${DEBUG_OVERLAY_RIGHT};z-index:${DEBUG_OVERLAY_Z_INDEX};`,
+      `background:${DEBUG_OVERLAY_BG};color:#0f0;font:12px/1.4 monospace;`,
       'padding:8px 12px;border-radius:4px;min-width:220px;',
       'pointer-events:none;user-select:none',
     ].join('');

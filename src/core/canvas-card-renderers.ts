@@ -18,6 +18,8 @@ import {
   colors as designColors,
   rendererLayout,
   resolveSuperChatRgb,
+  SUPERCHAT_AMOUNT_BADGE_FILL,
+  SUPERCHAT_AMOUNT_BADGE_STROKE,
   spacing,
   toRgba,
 } from '@core/design-tokens';
@@ -99,9 +101,9 @@ export function renderSuperChatCard(
   const badgeWidth = badgeTextWidth + rendererLayout.superchatBadge.paddingH * 2;
 
   drawRoundRect(ctx, textX, badgeY, badgeWidth, badgeHeight, rendererLayout.superchatBadge.radius);
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.16)';
+  ctx.fillStyle = SUPERCHAT_AMOUNT_BADGE_FILL;
   ctx.fill();
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
+  ctx.strokeStyle = SUPERCHAT_AMOUNT_BADGE_STROKE;
   ctx.lineWidth = 1;
   ctx.stroke();
 

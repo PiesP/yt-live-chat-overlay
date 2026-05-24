@@ -55,7 +55,7 @@ function findFirstNestedByKey<T>(
 
     const candidate = current[key];
     const result = extract(candidate);
-    if (result != null) {
+    if (result !== null) {
       return result;
     }
 
