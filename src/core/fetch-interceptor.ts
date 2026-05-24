@@ -19,6 +19,13 @@ import { getLiveChatPayload } from '@core/youtubei-chat';
 const log = createLogger('FetchInterceptor');
 
 /**
+ * Captured once at module load time — the true browser fetch.
+ * Storing this at scope level ensures we always wrap the real fetch,
+ * not a patch applied by another extension before this module loads.
+ */
+const ORIGINAL_FETCH = window.fetch;
+
+/**
  * Matches YouTube Innertube live-chat fetch URLs.
  * Covers both live and replay endpoints.
  */
@@ -29,7 +36,6 @@ type InterceptorCallback = (messages: ChatMessage[]) => void;
 export type InterceptorUnsubscribe = () => void;
 
 let activeInterceptor: {
-  originalFetch: typeof window.fetch;
   restore: InterceptorUnsubscribe;
 } | null = null;
 
@@ -52,8 +58,6 @@ export function installFetchInterceptor(
     activeInterceptor = null;
   }
 
-  const originalFetch = window.fetch;
-
   function interceptedFetch(
     this: typeof window,
     input: RequestInfo | URL,
@@ -71,11 +75,11 @@ export function installFetchInterceptor(
     const isChatRequest = CHAT_ENDPOINT_RE.test(url);
 
     if (!isChatRequest) {
-      return originalFetch.call(this, input, init);
+      return ORIGINAL_FETCH.call(this, input, init);
     }
 
     // Let the original request proceed normally — we only eavesdrop.
-    const response = originalFetch.call(this, input, init);
+    const response = ORIGINAL_FETCH.call(this, input, init);
 
     // Clone the response so the original consumer (YouTube's UI) is unaffected.
     // Read the clone asynchronously; errors here must not propagate.
@@ -105,7 +109,7 @@ export function installFetchInterceptor(
 
   const restore = (): void => {
     if (window.fetch === interceptedFetch) {
-      window.fetch = originalFetch;
+      window.fetch = ORIGINAL_FETCH;
     }
     if (activeInterceptor?.restore === restore) {
       activeInterceptor = null;
@@ -113,7 +117,7 @@ export function installFetchInterceptor(
     log.info('Fetch interceptor removed');
   };
 
-  activeInterceptor = { originalFetch, restore };
+  activeInterceptor = { restore };
 
   log.info('Fetch interceptor installed for YouTube live chat');
   return restore;

@@ -144,6 +144,23 @@ export class Overlay {
    * Create overlay container
    */
   async create(settings: OverlaySettings, signal?: AbortSignal): Promise<boolean> {
+    // Ensure a clean observer state before re-initializing
+    this.disconnectResizeObserver();
+    this.detachFullscreenHandler();
+
+    // Remove any existing container before creating a new one
+    if (this.container) {
+      this.container.remove();
+      this.container = null;
+    }
+
+    // Clean up stray overlay elements from previous sessions where destroy()
+    // was never called (e.g. RuntimeSession restart without full teardown)
+    const strayOverlays = document.querySelectorAll(OVERLAY_SELECTOR);
+    for (const el of strayOverlays) {
+      el.remove();
+    }
+
     // Find player
     this.playerElement = await this.findPlayerContainer(signal);
     this.settings = settings;
@@ -152,11 +169,7 @@ export class Overlay {
       return false;
     }
 
-    // Ensure a clean observer state before registering new ones
-    this.disconnectResizeObserver();
-    this.detachFullscreenHandler();
-
-    // Always create a fresh container (destroy() removes the previous one)
+    // Always create a fresh container
     this.container = this.createContainerElement();
 
     // Insert into player

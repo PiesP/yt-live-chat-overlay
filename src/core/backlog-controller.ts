@@ -99,6 +99,13 @@ export class BacklogInjectionController implements Pauseable {
   startBacklogInjection(messages: ChatMessage[]): void {
     if (messages.length === 0) return;
 
+    // If already injecting, ignore duplicate calls — the current injection
+    // is still in progress and resetting state would lose queued messages.
+    if (this.isInjecting) {
+      log.debug('Backlog injection already in progress, skipping duplicate call');
+      return;
+    }
+
     // 'none' mode: skip backlog entirely
     if (this.config.backlogMode === 'none') {
       log.debug('Backlog mode is "none", skipping injection');
