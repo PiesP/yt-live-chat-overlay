@@ -8,7 +8,7 @@ const log = createLogger('BootstrapResolver');
 const BOOTSTRAP_MAX_ATTEMPTS = 5;
 const BOOTSTRAP_RETRY_DELAY_MS = 1000;
 
-export interface ChatBootstrapResolution {
+interface ChatBootstrapResolution {
   status: ChatBootstrapResult['status'];
   bootstrap?: ChatBootstrapData;
   reason: string;
