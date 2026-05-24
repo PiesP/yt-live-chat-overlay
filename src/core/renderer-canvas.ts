@@ -60,6 +60,7 @@ export class CanvasRenderer extends RendererBase {
   private readonly emojiFetchingStarted = new Map<string, number>();
   private readonly authorPhotoCache = new Map<string, HTMLImageElement>();
   private readonly stickerCache = new Map<string, HTMLImageElement>();
+  private readonly failedEmojiFetches = new Set<string>();
 
   /** Last devicePixelRatio seen — used to detect DPR changes. */
   private lastDpr = 0;
@@ -227,6 +228,7 @@ export class CanvasRenderer extends RendererBase {
       cache.set(url, img);
     };
     img.onerror = () => {
+      this.failedEmojiFetches.add(url);
       // Silently skip — don't retry broken URLs on every frame.
     };
   }
@@ -236,6 +238,7 @@ export class CanvasRenderer extends RendererBase {
       if (seg.type !== 'emoji') continue;
       if (this.emojiFetching.has(seg.emoji.url)) continue;
       if (this.emojiCache.has(seg.emoji.url)) continue;
+      if (this.failedEmojiFetches.has(seg.emoji.url)) continue;
       this.cleanupStaleEmojiFetching();
       if (this.emojiFetching.size >= 6) continue;
       this.emojiFetching.add(seg.emoji.url);
@@ -267,6 +270,7 @@ export class CanvasRenderer extends RendererBase {
       img.onerror = () => {
         this.emojiFetching.delete(url);
         this.emojiFetchingStarted.delete(url);
+        this.failedEmojiFetches.add(url);
       };
     }
 
@@ -295,6 +299,11 @@ export class CanvasRenderer extends RendererBase {
         this.emojiFetching.delete(url);
         this.emojiFetchingStarted.delete(url);
       }
+    }
+
+    // Clear stale failure entries periodically to allow retry after transient errors
+    if (this.failedEmojiFetches.size > 0) {
+      this.failedEmojiFetches.clear();
     }
   }
 

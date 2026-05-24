@@ -89,6 +89,11 @@ export class ReplayChatSource extends ChatSource {
         return;
       }
 
+      if (this.chatPaused) {
+        this.rafHandle = requestAnimationFrame(tick);
+        return;
+      }
+
       const playback = this.getPlaybackSnapshot();
       if (playback && !playback.paused) {
         this.markActivity();
@@ -125,6 +130,8 @@ export class ReplayChatSource extends ChatSource {
         this.stopBackgroundFetch();
         return;
       }
+
+      if (this.chatPaused) return;
 
       const playback = this.getPlaybackSnapshot();
       if (!playback || playback.paused) return;
@@ -193,6 +200,11 @@ export class ReplayChatSource extends ChatSource {
     while (continuation && pages < MAX_PREFETCH_PAGES && !signal?.aborted) {
       if (pages > 0) {
         await sleep(1000, signal);
+      }
+
+      if (this.chatPaused) {
+        await sleep(250, signal);
+        continue;
       }
 
       try {

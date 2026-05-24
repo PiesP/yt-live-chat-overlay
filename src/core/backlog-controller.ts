@@ -102,7 +102,8 @@ export class BacklogInjectionController implements Pauseable {
     // If already injecting, ignore duplicate calls — the current injection
     // is still in progress and resetting state would lose queued messages.
     if (this.isInjecting) {
-      log.debug('Backlog injection already in progress, skipping duplicate call');
+      this.backlogQueue.push(...messages);
+      log.debug(`Backlog injection in progress, queued ${messages.length} additional`);
       return;
     }
 
