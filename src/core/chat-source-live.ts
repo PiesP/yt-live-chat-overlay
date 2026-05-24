@@ -219,10 +219,9 @@ export class LiveChatSource extends ChatSource {
         this.emitMessages(messages, isInitialSeed);
         this.recordMessageCount(messages.length);
       }
-
-      this.consecutiveErrors = 0;
     }
 
+    this.consecutiveErrors = 0;
     this.liveContinuation = extractNextLiveContinuation(payload.continuations);
   }
 

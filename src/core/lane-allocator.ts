@@ -483,6 +483,10 @@ export class LaneAllocator {
       let blockMaxWait = 0;
       for (let s = 0; s < slotCount; s++) {
         const slotIdx = startIdx + s;
+        if (this.collidedLanes.has(slotIdx)) {
+          allZeroWait = false;
+          break;
+        }
         // Speed compatibility check for the block
         if (isBacklog) {
           if ((this.realTimeLanesUntil.get(slotIdx) ?? 0) > now) {
@@ -520,6 +524,10 @@ export class LaneAllocator {
       let blockMaxWait = 0;
       for (let s = 0; s < slotCount; s++) {
         const slotIdx = startIdx + s;
+        if (this.collidedLanes.has(slotIdx)) {
+          allCompatible = false;
+          break;
+        }
         // Speed compatibility check (same as Phase 1)
         if (isBacklog) {
           if ((this.realTimeLanesUntil.get(slotIdx) ?? 0) > now) {

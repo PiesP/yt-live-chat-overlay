@@ -565,7 +565,9 @@ export class CanvasRenderer extends RendererBase {
         // right edge minus headway gap.
         if (mode === 'scroll') {
           if (activeRightEdge > dims.width - headwayPx) {
-            this.laneAllocator.markCollision(placement.laneIndex);
+            for (let s = 0; s < placement.slotCount; s++) {
+              this.laneAllocator.markCollision(placement.laneIndex + s);
+            }
             return { ok: false, reason: 'collision' as const };
           }
         } else {
@@ -576,7 +578,9 @@ export class CanvasRenderer extends RendererBase {
           const reverseTravel = dims.width + active.width + rendererLayout.exitPaddingMin;
           const activeX = -active.width + activeProgress * reverseTravel;
           if (activeX + active.width > -headwayPx) {
-            this.laneAllocator.markCollision(placement.laneIndex);
+            for (let s = 0; s < placement.slotCount; s++) {
+              this.laneAllocator.markCollision(placement.laneIndex + s);
+            }
             return { ok: false, reason: 'collision' as const };
           }
         }
@@ -584,7 +588,9 @@ export class CanvasRenderer extends RendererBase {
         // Top/bottom modes: overlap if the active message in the same lane
         // has not yet expired.
         if (activeElapsed < active.duration) {
-          this.laneAllocator.markCollision(placement.laneIndex);
+          for (let s = 0; s < placement.slotCount; s++) {
+            this.laneAllocator.markCollision(placement.laneIndex + s);
+          }
           return { ok: false, reason: 'collision' as const };
         }
       }
@@ -639,7 +645,10 @@ export class CanvasRenderer extends RendererBase {
       // Total travel distance must account for horizontal stagger to maintain
       // constant velocity — a message starting further right travels farther
       // at the same speed, so duration adjusts proportionally.
-      const totalDistance = startX + msgWidth + rendererLayout.exitPaddingMin;
+      const totalDistance =
+        mode === 'scroll'
+          ? startX + msgWidth + rendererLayout.exitPaddingMin
+          : dims.width + msgWidth + rendererLayout.exitPaddingMin;
       effectiveDuration =
         speed > 0 ? computeDliosDuration(totalDistance, speed) : rendererLayout.durationMin;
     } else {
