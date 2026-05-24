@@ -39,6 +39,7 @@ type ReplayMode = 'playerSeek' | 'continuation';
 
 export class ReplayChatSource extends ChatSource {
   private static readonly MAX_REPLAY_BATCHES = 12;
+  private static readonly BG_FETCH_MAX_FAILURES = 5;
 
   private replayMode: ReplayMode | null = null;
   private replayPlayerSeekContinuation: InnertubeContinuationData | null = null;
@@ -51,6 +52,7 @@ export class ReplayChatSource extends ChatSource {
   private seekListenerCleanup: (() => void) | null = null;
   private rafHandle: ReturnType<typeof requestAnimationFrame> | null = null;
   private backgroundFetchTimer: ReturnType<typeof setInterval> | null = null;
+  private backgroundFetchFailures = 0;
   private prefetchAbortController: AbortController | null = null;
 
   protected seedCurrentSession(signal?: AbortSignal): Promise<boolean> {
@@ -129,6 +131,7 @@ export class ReplayChatSource extends ChatSource {
    */
   private startBackgroundFetch(signal?: AbortSignal): void {
     this.stopBackgroundFetch();
+    this.backgroundFetchFailures = 0;
 
     this.backgroundFetchTimer = setInterval(() => {
       if (signal?.aborted) {
@@ -148,9 +151,15 @@ export class ReplayChatSource extends ChatSource {
           } else if (this.replayMode === 'continuation') {
             await this.pollContinuationReplay(playback.offsetMs, signal);
           }
+          this.backgroundFetchFailures = 0;
         } catch (error: unknown) {
           if (!isAbortError(error)) {
+            this.backgroundFetchFailures += 1;
             log.warn('Background fetch iteration failed:', error);
+            if (this.backgroundFetchFailures >= ReplayChatSource.BG_FETCH_MAX_FAILURES) {
+              log.error('Background fetch failed repeatedly — stopping');
+              this.stopBackgroundFetch();
+            }
           }
         }
       })();

@@ -582,11 +582,12 @@ export class LaneAllocator {
 
   /** Shift all lane available times by a fixed offset (e.g., pause duration). */
   shiftAll(offsetMs: number): void {
-    if (offsetMs <= 0 || this.heap.length === 0) return;
+    const capped = Math.min(offsetMs, rendererLayout.maxMessageAgeMs);
+    if (capped <= 0 || this.heap.length === 0) return;
     for (let i = 0; i < this.heap.length; i++) {
       const entry = this.heap[i];
       if (entry) {
-        this.heap[i] = [entry[0], entry[1] + offsetMs];
+        this.heap[i] = [entry[0], entry[1] + capped];
       }
     }
     // Rebuild heap invariant after bulk update (4-ary)

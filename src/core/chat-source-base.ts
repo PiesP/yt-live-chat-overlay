@@ -109,6 +109,14 @@ export abstract class ChatSource implements Pauseable {
   private readonly messageBuffer = new MessageBuffer();
   protected readonly bootstrapResolver = new BootstrapResolver();
 
+  /**
+   * Message IDs already delivered this session (deduplicates fetch-interceptor
+   * and poll-loop messages — both capture the same YouTube API responses).
+   * Capped at SEEN_IDS_MAX to prevent unbounded growth during long sessions.
+   */
+  private readonly seenMessageIds = new Set<string>();
+  private static readonly SEEN_IDS_MAX = 5000;
+
   private static readonly PAUSE_POLL_INTERVAL_MS = 250;
   private static readonly PAUSE_POLL_INTERVAL_MAX_MS = 5000;
 
@@ -197,16 +205,21 @@ export abstract class ChatSource implements Pauseable {
 
   protected emitMessage(message: ChatMessage): void {
     if (!this.callback) return;
-    this.messageBuffer.push(message);
-    this.callback(message);
+    const deduped = this.filterNewMessages([message]);
+    if (deduped.length === 0) return;
+    const msg = deduped[0] ?? message;
+    this.messageBuffer.push(msg);
+    this.callback(msg);
   }
 
   protected emitBatch(messages: ChatMessage[], isInitialSeed: boolean): void {
     if (!this.callback || messages.length === 0) return;
-    for (const message of messages) {
+    const deduped = this.filterNewMessages(messages);
+    if (deduped.length === 0) return;
+    for (const message of deduped) {
       this.messageBuffer.push(message);
     }
-    this.callback(messages, isInitialSeed);
+    this.callback(deduped, isInitialSeed);
   }
 
   protected async requestPayload<TCallArgs extends unknown[]>(
@@ -242,6 +255,7 @@ export abstract class ChatSource implements Pauseable {
     this.bootstrap = null;
     this.lastActivityTime = 0;
     this.messageBuffer.clear();
+    this.seenMessageIds.clear();
   }
 
   setPaused(paused: boolean): void {
@@ -265,10 +279,34 @@ export abstract class ChatSource implements Pauseable {
    */
   injectExternalMessages(messages: ChatMessage[]): void {
     if (!this.callback || messages.length === 0) return;
-    for (const message of messages) {
+    const deduped = this.filterNewMessages(messages);
+    if (deduped.length === 0) return;
+    for (const message of deduped) {
       this.messageBuffer.push(message);
     }
-    this.callback(messages, false);
+    this.callback(deduped, false);
+  }
+
+  /** Filter out messages already seen this session, tracking new ones. */
+  private filterNewMessages(messages: ChatMessage[]): ChatMessage[] {
+    const result: ChatMessage[] = [];
+    for (const msg of messages) {
+      if (msg.id !== undefined && this.seenMessageIds.has(msg.id)) continue;
+      if (msg.id !== undefined) {
+        if (this.seenMessageIds.size >= ChatSource.SEEN_IDS_MAX) {
+          // Evict oldest half to prevent unbounded memory growth
+          const toDelete = Math.floor(this.seenMessageIds.size / 2);
+          let deleted = 0;
+          for (const id of this.seenMessageIds) {
+            this.seenMessageIds.delete(id);
+            if (++deleted >= toDelete) break;
+          }
+        }
+        this.seenMessageIds.add(msg.id);
+      }
+      result.push(msg);
+    }
+    return result;
   }
 
   protected abstract seedCurrentSession(signal?: AbortSignal): Promise<boolean>;

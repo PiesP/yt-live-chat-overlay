@@ -13,20 +13,29 @@
 
 import { DEFAULT_FONT_FAMILY } from '@core/design-tokens';
 
-let measureCtx: CanvasRenderingContext2D | null = null;
+let measureCtx: CanvasRenderingContext2D | null | false = null;
 
 /** LRU cache for measureTextWidth. Keyed by `${font}|${text}`. */
 const widthCache = new Map<string, number>();
 const WIDTH_CACHE_MAX = 500;
 
-function getCtx(): CanvasRenderingContext2D {
+function getCtx(): CanvasRenderingContext2D | null {
+  if (measureCtx === false) return null;
   if (!measureCtx) {
-    const canvas = document.createElement('canvas');
-    canvas.width = 0;
-    canvas.height = 0;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('Failed to create Canvas 2D context for text measurement');
-    measureCtx = ctx;
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = 0;
+      canvas.height = 0;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        measureCtx = false;
+        return null;
+      }
+      measureCtx = ctx;
+    } catch {
+      measureCtx = false;
+      return null;
+    }
   }
   return measureCtx;
 }
@@ -56,6 +65,13 @@ export function measureTextWidth(text: string, font: string): number {
   if (cached !== undefined) return cached;
 
   const ctx = getCtx();
+  if (!ctx) {
+    // CSP-restricted environment — fall back to character-count estimate
+    const match = font.match(/(\d+)px/);
+    const capture = match?.[1];
+    const fontSize = capture ? Number.parseInt(capture, 10) : 16;
+    return Math.ceil(text.length * fontSize * 0.6);
+  }
   ctx.font = font;
   const m = ctx.measureText(text);
   const bbWidth = Math.abs(m.actualBoundingBoxLeft) + Math.abs(m.actualBoundingBoxRight);
@@ -79,6 +95,7 @@ export function measureTextWidth(text: string, font: string): number {
  */
 export function measureTextHeight(font: string, fontSize: number): number {
   const ctx = getCtx();
+  if (!ctx) return Math.ceil(fontSize * 1.1);
   ctx.font = font;
   const m = ctx.measureText('Mg');
 
@@ -207,6 +224,7 @@ export function wrapTextLines(text: string, font: string, maxWidth: number): str
   if (text.length === 0) return [];
 
   const ctx = getCtx();
+  if (!ctx) return [text]; // CSP fallback: return original text as single line
   ctx.font = font;
 
   const paragraphs = text.split('\n');
