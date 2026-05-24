@@ -55,7 +55,7 @@ interface RuntimeSessionOptions {
   requestRestart: (reason: RuntimeSessionRestartReason) => void;
 }
 
-export type RuntimeSessionStartStatus = 'started' | 'retryable' | 'unavailable';
+export type RuntimeSessionStartStatus = 'started' | 'retryable' | 'unavailable' | 'waiting';
 export type RuntimeSessionRestartReason = 'foreground-return' | 'watchdog';
 
 interface RuntimeHealth {

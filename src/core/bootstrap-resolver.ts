@@ -9,7 +9,7 @@ const BOOTSTRAP_MAX_ATTEMPTS = 5;
 const BOOTSTRAP_RETRY_DELAY_MS = 1000;
 
 interface ChatBootstrapResolution {
-  status: ChatBootstrapResult['status'];
+  status: 'ready' | 'retryable' | 'unavailable' | 'waiting';
   bootstrap?: ChatBootstrapData;
   reason: string;
 }
@@ -72,6 +72,10 @@ export class BootstrapResolver {
    * @param resolution - The resolution object containing status and reason.
    */
   logFailure(resolution: ChatBootstrapResolution): void {
+    if (resolution.status === 'waiting') {
+      log.info(`Chat bootstrap waiting — stream not yet started (${resolution.reason})`);
+      return;
+    }
     if (resolution.status === 'retryable') {
       log.warn(
         `Chat bootstrap was retryable after ${BOOTSTRAP_MAX_ATTEMPTS} attempts: ${resolution.reason}`

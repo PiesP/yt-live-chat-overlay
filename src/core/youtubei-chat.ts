@@ -33,7 +33,7 @@ export type ChatBootstrapResult =
       data: ChatBootstrapData;
     }
   | {
-      status: 'retryable' | 'unavailable';
+      status: 'retryable' | 'unavailable' | 'waiting';
       reason: string;
     };
 
@@ -331,6 +331,18 @@ export const bootstrapChatSession = async (signal?: AbortSignal): Promise<ChatBo
 
     const liveChatRenderer = findLiveChatRenderer(initialData);
     if (!liveChatRenderer) {
+      // Check if this is a scheduled/premiere stream that hasn't started yet.
+      // YouTube sets playabilityStatus.status to 'LIVE_STREAM_OFFLINE' for
+      // upcoming streams where the live chat panel is not yet available.
+      const playabilityStatus = getNestedRecord(initialData, ['playabilityStatus']);
+      const playbackStatus = playabilityStatus ? getString(playabilityStatus.status) : undefined;
+      if (playbackStatus === 'LIVE_STREAM_OFFLINE') {
+        return {
+          status: 'waiting',
+          reason: 'Stream not yet started — live chat renderer unavailable',
+        };
+      }
+
       return {
         status: 'unavailable',
         reason: 'Watch page does not expose a live chat renderer for this video',
