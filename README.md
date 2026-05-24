@@ -52,6 +52,8 @@ MIT — see [LICENSE](./LICENSE).
 
 <div align="center">
 
-**🌟 Star this repo if you find it useful! 🌟**
+**🌟 If you find this project useful, please give it a Star! 🌟**
+
+**Made with ❤️ and GitHub Copilot by [PiesP](https://github.com/PiesP)**
 
 </div>
