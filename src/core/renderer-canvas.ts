@@ -131,6 +131,8 @@ export class CanvasRenderer extends RendererBase {
 
   /** Last devicePixelRatio seen — used to detect DPR changes. */
   private lastDpr = 0;
+  /** Whether the session is in standby mode (pre-live, waiting for stream). */
+  private standbyStatus = false;
 
   /**
    * Text bitmap cache: pre-rendered text with outline as offscreen canvas.
@@ -215,6 +217,16 @@ export class CanvasRenderer extends RendererBase {
   /** Get current lane utilization ratio (0–1): occupied lanes / total lanes. */
   getLaneUtilization(): number {
     return this.laneAllocator.getUtilization();
+  }
+
+  /** Update standby status and ensure render loop is running for message display. */
+  setStandbyStatus(standby: boolean): void {
+    this.standbyStatus = standby;
+    if (!standby) return;
+    // Ensure render loop is running to draw the standby message.
+    if (this.animFrameId === null) {
+      this.startRenderLoop();
+    }
   }
 
   protected getQueueLength(): number {
@@ -443,6 +455,11 @@ export class CanvasRenderer extends RendererBase {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
     ctx.clearRect(0, 0, dims.width, dims.height);
+
+    // Draw standby status message when in pre-live standby mode
+    if (this.standbyStatus) {
+      this.renderStandbyMessage(ctx, dims);
+    }
 
     const mode = this.settings.danmakuMode;
     const isScrolling = mode === 'scroll' || mode === 'reverse';
@@ -967,5 +984,47 @@ export class CanvasRenderer extends RendererBase {
     this.stickerCache.clear();
     this.textBitmapCache.clear();
     clearTextMeasurementCaches();
+  }
+
+  // ── Standby message rendering ─────────────────────────────────────────
+
+  private renderStandbyMessage(
+    ctx: CanvasRenderingContext2D,
+    dims: { width: number; height: number }
+  ): void {
+    const message = 'Waiting for live stream\u2026';
+    const fontSize = 16;
+    const font = getFontString(fontSize, 'normal', this.settings.fontFamily);
+    ctx.font = font;
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'center';
+
+    const textWidth = ctx.measureText(message).width;
+    const paddingX = 16;
+    const paddingY = 8;
+    const boxW = textWidth + paddingX * 2;
+    const boxH = fontSize * 1.5 + paddingY * 2;
+    const boxX = (dims.width - boxW) / 2;
+    const boxY = dims.height - boxH - 24;
+
+    // Semi-transparent background pill
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+    ctx.beginPath();
+    const r = 6;
+    ctx.moveTo(boxX + r, boxY);
+    ctx.lineTo(boxX + boxW - r, boxY);
+    ctx.arcTo(boxX + boxW, boxY, boxX + boxW, boxY + r, r);
+    ctx.lineTo(boxX + boxW, boxY + boxH - r);
+    ctx.arcTo(boxX + boxW, boxY + boxH, boxX + boxW - r, boxY + boxH, r);
+    ctx.lineTo(boxX + r, boxY + boxH);
+    ctx.arcTo(boxX, boxY + boxH, boxX, boxY + boxH - r, r);
+    ctx.lineTo(boxX, boxY + r);
+    ctx.arcTo(boxX, boxY, boxX + r, boxY, r);
+    ctx.closePath();
+    ctx.fill();
+
+    // Text on top
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+    ctx.fillText(message, dims.width / 2, boxY + boxH / 2);
   }
 }
