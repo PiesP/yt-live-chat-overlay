@@ -85,6 +85,7 @@ export class ReplayChatSource extends ChatSource {
 
       const playback = this.getPlaybackSnapshot();
       if (playback && !playback.paused) {
+        this.markActivity();
         this.flushReplayBuffer(playback.offsetMs);
       }
 
