@@ -14,7 +14,16 @@ interface ChatBootstrapResolution {
   reason: string;
 }
 
+/**
+ * Resolves YouTube chat bootstrap configuration from the page's embedded data.
+ * Retries up to BOOTSTRAP_MAX_ATTEMPTS times if the initial attempt fails.
+ */
 export class BootstrapResolver {
+  /**
+   * Resolves bootstrap data by scanning ytInitialData and page source.
+   * @param signal - Optional AbortSignal to cancel resolution.
+   * @returns A resolution object with status, bootstrap data (if ready), and reason.
+   */
   async resolve(signal?: AbortSignal): Promise<ChatBootstrapResolution> {
     let lastResult: ChatBootstrapResult | null = null;
 
@@ -42,6 +51,11 @@ export class BootstrapResolver {
     };
   }
 
+  /**
+   * Clears cached bootstrap data to force re-resolution on next access.
+   * @param signal - Optional AbortSignal to cancel resolution.
+   * @returns The bootstrap data if resolution succeeds, or null.
+   */
   async refresh(signal?: AbortSignal): Promise<ChatBootstrapData | null> {
     const resolution = await this.resolve(signal);
 
@@ -53,6 +67,10 @@ export class BootstrapResolver {
     return resolution.bootstrap;
   }
 
+  /**
+   * Logs a bootstrap resolution failure reason.
+   * @param resolution - The resolution object containing status and reason.
+   */
   logFailure(resolution: ChatBootstrapResolution): void {
     if (resolution.status === 'retryable') {
       log.warn(

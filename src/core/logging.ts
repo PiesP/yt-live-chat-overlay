@@ -47,6 +47,11 @@ interface ModuleLogger {
   error: (...args: ConsoleErrorArgs) => void;
 }
 
+/**
+ * Creates a structured logger instance with a module name prefix.
+ * Returns an object with debug/info/warn/error methods.
+ * @param moduleName - The module name to prefix log messages with.
+ */
 export const createLogger = (moduleName: string): ModuleLogger => {
   const prefix = `[${moduleName}]`;
   return {

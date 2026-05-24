@@ -1,18 +1,23 @@
 export type JsonObject = Record<string, unknown>;
 
+/** Type guard that checks if a value is a non-null object record. */
 export const isRecord = (value: unknown): value is JsonObject =>
   typeof value === 'object' && value !== null;
 
+/** Casts a value to a JsonObject if it passes the record type guard, otherwise returns null. */
 export const asRecord = (value: unknown): JsonObject | null => (isRecord(value) ? value : null);
 
+/** Returns the value if it is a non-empty string, otherwise returns undefined. */
 export const getString = (value: unknown): string | undefined =>
   typeof value === 'string' && value.length > 0 ? value : undefined;
 
+/** Returns the value coerced to a finite number, or undefined if not numeric. */
 export const getNumber = (value: unknown): number | undefined => {
   const n = typeof value === 'string' ? Number(value) : value;
   return typeof n === 'number' && Number.isFinite(n) ? n : undefined;
 };
 
+/** Traverses a nested object along the given path and returns the final value if it is a record, or null. */
 export const getNestedRecord = (root: unknown, path: readonly string[]): JsonObject | null => {
   let current: unknown = root;
 
@@ -74,6 +79,12 @@ function findFirstNestedByKey<T>(
   return null;
 }
 
+/**
+ * DFS search for the first record containing the given key whose value passes the optional predicate.
+ * @param root - The root object to search.
+ * @param key - The key to look for at each level.
+ * @param predicate - Optional filter applied to records found.
+ */
 export const findFirstNestedRecordByKey = (
   root: unknown,
   key: string,
@@ -86,5 +97,10 @@ export const findFirstNestedRecordByKey = (
   });
 };
 
+/**
+ * DFS search for the first non-empty string value for the given key in a nested structure.
+ * @param root - The root object to search.
+ * @param key - The key to look for at each level.
+ */
 export const findFirstNestedStringByKey = (root: unknown, key: string): string | undefined =>
   findFirstNestedByKey(root, key, (v) => getString(v) ?? null) ?? undefined;

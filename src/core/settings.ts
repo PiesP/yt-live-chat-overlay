@@ -108,6 +108,10 @@ export class Settings {
     }
   }
 
+  /**
+   * Returns the current settings object. Do NOT modify the returned object
+   * directly — use updateSettings() for mutations.
+   */
   get(): Readonly<OverlaySettings> {
     return this.settings;
   }

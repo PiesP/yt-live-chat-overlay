@@ -59,6 +59,10 @@ const pickContinuation = (
   return null;
 };
 
+/**
+ * Extracts the initial chat continuation token from a YouTube live chat bootstrap response.
+ * @param renderer - The liveChatRenderer object from the bootstrap payload.
+ */
 export const extractInitialChatContinuation = (
   renderer: Record<string, unknown>
 ): InnertubeContinuationData | null =>
@@ -70,6 +74,10 @@ export const extractInitialChatContinuation = (
     'playerSeekContinuationData',
   ]);
 
+/**
+ * Extracts the next live chat continuation token from a polling response.
+ * @param continuations - The continuations array from the Innertube response.
+ */
 export const extractNextLiveContinuation = (
   continuations: unknown
 ): InnertubeContinuationData | null =>
@@ -79,11 +87,19 @@ export const extractNextLiveContinuation = (
     'reloadContinuationData',
   ]);
 
+/**
+ * Extracts the replay chat continuation token for sequential page fetching.
+ * @param continuations - The continuations array from the Innertube response.
+ */
 export const extractReplayContinuation = (
   continuations: unknown
 ): InnertubeContinuationData | null =>
   pickContinuation(continuations, ['liveChatReplayContinuationData']);
 
+/**
+ * Extracts the player seek continuation token for seeking in replay chat.
+ * @param continuations - The continuations array from the Innertube response.
+ */
 export const extractPlayerSeekContinuation = (
   continuations: unknown
 ): InnertubeContinuationData | null =>
