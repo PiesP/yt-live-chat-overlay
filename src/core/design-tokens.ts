@@ -217,7 +217,7 @@ export const rendererLayout = {
  * @param velocity       — constant scroll velocity in px/sec
  * @returns Animation duration in milliseconds
  */
-export function computeDliosDuration(totalDistance: number, velocity: number): number {
+export function computeScrollDuration(totalDistance: number, velocity: number): number {
   // Velocity-based floor: at minimum, allow the message to travel
   // exitPadding pixels at the configured velocity, but no less than 3s.
   const velocityFloor = Math.max(3000, (rendererLayout.exitPaddingMin / velocity) * 1000);

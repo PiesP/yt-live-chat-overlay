@@ -33,7 +33,7 @@ import {
   createCanvasMessage,
 } from '@core/canvas-message-lifecycle';
 import { renderRegularMessage } from '@core/canvas-text-renderer';
-import { computeDliosDuration, rendererLayout } from '@core/design-tokens';
+import { computeScrollDuration, rendererLayout } from '@core/design-tokens';
 import { clearSafeAnimationFrame, clearSafeInterval, forEachSlot } from '@core/dom';
 import type { LanePlacement } from '@core/lane-allocator';
 import { createLogger } from '@core/logging';
@@ -663,7 +663,7 @@ export class CanvasRenderer extends RendererBase {
           ? startX + msgWidth + rendererLayout.exitPaddingMin
           : dims.width + msgWidth + rendererLayout.exitPaddingMin;
       effectiveDuration =
-        speed > 0 ? computeDliosDuration(totalDistance, speed) : rendererLayout.durationMin;
+        speed > 0 ? computeScrollDuration(totalDistance, speed) : rendererLayout.durationMin;
     } else {
       effectiveDuration = rendererLayout.topBottomDurationMs;
     }

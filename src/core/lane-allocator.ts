@@ -55,7 +55,7 @@ interface LaneAllocatorOptions {
  * Supports:
  *   - Precision exit-time occupancy for multi-message lane sharing
  *   - Adaptive headway gap (8% of msg width, 16-60px clamp)
- *   - Velocity-aware durationMin (via computeDliosDuration)
+ *   - Velocity-aware durationMin (via computeScrollDuration)
  */
 export class LaneAllocator {
   /** 4-ary min-heap of [laneIndex, availableAtMs] pairs, sorted by availableAtMs */
