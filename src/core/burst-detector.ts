@@ -20,8 +20,12 @@ const log = createLogger('BurstDetector');
 const RATE_SAMPLE_WINDOW = 10;
 /** Sample interval in ms */
 const SAMPLE_INTERVAL_MS = 1_000;
-/** How long after burst ends to return to normal (ms) */
-const BURST_COOLDOWN_MS = 5_000;
+/** How long after burst ends to return to normal (ms) — base value,
+ * scaled proportionally to burst duration. Short bursts cool down faster. */
+const BURST_COOLDOWN_BASE_MS = 2_000;
+const BURST_COOLDOWN_MAX_MS = 8_000;
+/** Cooldown ratio: N ms of cooldown per ms of burst duration. */
+const BURST_COOLDOWN_RATIO = 0.3;
 /** EMA smoothing factor — higher = more reactive to recent changes */
 const EMA_ALPHA = 0.3;
 
@@ -34,6 +38,7 @@ export class BurstDetector {
   private samples: number[] = [];
   private currentLevel: BurstLevel = 'normal';
   private lastBurstTime: number = 0;
+  private burstStartTime: number = 0;
   private sampleInterval: ReturnType<typeof setInterval> | null = null;
   private samplesSinceLastCheck = 0;
   private observability: ObservabilityReporter | undefined;
@@ -99,6 +104,7 @@ export class BurstDetector {
     this.samples = [];
     this.currentLevel = 'normal';
     this.lastBurstTime = 0;
+    this.burstStartTime = 0;
   }
 
   /**
@@ -109,6 +115,7 @@ export class BurstDetector {
     this.samples = [];
     this.currentLevel = 'normal';
     this.lastBurstTime = 0;
+    this.burstStartTime = 0;
     this.start();
   }
 
@@ -135,19 +142,31 @@ export class BurstDetector {
     if (newLevel === this.currentLevel) {
       if (newLevel !== 'normal') {
         this.lastBurstTime = performance.now();
+        if (this.burstStartTime === 0) this.burstStartTime = performance.now();
       }
       return;
     }
 
-    // Cooldown: stay at current level if rate just dropped to normal
+    // Adaptive cooldown: proportional to burst duration.
+    // A 1-second burst cools down in ~2.3s. A 10-second burst cools down
+    // in ~5s (capped at 8s). Prevents over-strict rate limiting after
+    // short surges while maintaining protection after sustained spikes.
     if (newLevel === 'normal' && this.currentLevel !== 'normal') {
-      if (performance.now() - this.lastBurstTime < BURST_COOLDOWN_MS) {
+      const burstDuration = performance.now() - this.burstStartTime;
+      const cooldown = Math.min(
+        BURST_COOLDOWN_MAX_MS,
+        BURST_COOLDOWN_BASE_MS + burstDuration * BURST_COOLDOWN_RATIO
+      );
+      if (performance.now() - this.lastBurstTime < cooldown) {
         return;
       }
     }
 
     if (newLevel !== 'normal') {
       this.lastBurstTime = performance.now();
+      if (this.burstStartTime === 0) this.burstStartTime = performance.now();
+    } else {
+      this.burstStartTime = 0;
     }
 
     this.currentLevel = newLevel;
@@ -161,6 +180,8 @@ export class BurstDetector {
     this.samples = [];
     this.emaRate = 0;
     this.lastMessageTime = 0;
+    this.lastBurstTime = 0;
+    this.burstStartTime = 0;
     this.observability = undefined;
   }
 }

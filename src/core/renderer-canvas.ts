@@ -559,7 +559,14 @@ export class CanvasRenderer extends RendererBase {
   // ── Queue drain ──────────────────────────────────────────────────────
 
   private drainQueue(now: number): void {
-    if (this.isAntiBlockActive()) return;
+    // Anti-block throttle: when lane utilization is critically high, pause
+    // new placements to prevent visual chaos. High-priority messages
+    // (SuperChat priority ≥100, Membership ≥80) bypass the gate so paid
+    // interactions are never blocked by lane saturation.
+    if (this.isAntiBlockActive()) {
+      const front = this.pendingQueue[0];
+      if (!front || CanvasRenderer.getMessagePriority(front) < 80) return;
+    }
     let skipped = 0;
     const maxSkip = CanvasRenderer.DRAIN_QUEUE_MAX_SKIP;
     let batchIndex = 0; // for stagger delay computation
@@ -605,9 +612,15 @@ export class CanvasRenderer extends RendererBase {
     }
 
     // Merge retry queue back into pending queue for next frame.
-    // This avoids O(n²) push-back into the main queue during bursts.
+    // Re-insert via priority-sorted splice instead of blind push to preserve
+    // ordering: a collided superchat retry shouldn't sit behind newly-arrived
+    // text messages. Each insert is O(n) splice, but retryQueue is typically
+    // ≤3 elements (limited by maxSkip).
     if (this.retryQueue.length > 0) {
-      this.pendingQueue.push(...this.retryQueue);
+      for (const msg of this.retryQueue) {
+        const idx = this.findQueueInsertIndex(CanvasRenderer.getMessagePriority(msg));
+        this.pendingQueue.splice(idx, 0, msg);
+      }
       this.retryQueue.length = 0;
     }
   }

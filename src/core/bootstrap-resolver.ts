@@ -41,6 +41,9 @@ export class BootstrapResolver {
 
       lastResult = result;
       if (attempt < BOOTSTRAP_MAX_ATTEMPTS) {
+        log.debug(
+          `Bootstrap attempt ${attempt}/${BOOTSTRAP_MAX_ATTEMPTS} — ${result.status}: ${result.reason}`
+        );
         await sleep(BOOTSTRAP_RETRY_DELAY_MS, signal);
       }
     }
