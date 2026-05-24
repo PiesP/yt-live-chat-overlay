@@ -113,6 +113,7 @@ export abstract class ChatSource implements Pauseable {
   protected readonly bootstrapResolver = new BootstrapResolver();
 
   private static readonly PAUSE_POLL_INTERVAL_MS = 250;
+  private static readonly PAUSE_POLL_INTERVAL_MAX_MS = 5000;
 
   constructor(getSettings: () => Readonly<OverlaySettings>) {
     this.getSettings = getSettings;
@@ -251,9 +252,11 @@ export abstract class ChatSource implements Pauseable {
   }
 
   protected async waitWhilePaused(signal?: AbortSignal): Promise<void> {
+    let backoffMs = ChatSource.PAUSE_POLL_INTERVAL_MS;
     while (this.chatPaused) {
       if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
-      await sleep(ChatSource.PAUSE_POLL_INTERVAL_MS, signal);
+      await sleep(backoffMs, signal);
+      backoffMs = Math.min(backoffMs * 2, ChatSource.PAUSE_POLL_INTERVAL_MAX_MS);
     }
   }
 

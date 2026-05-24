@@ -29,6 +29,8 @@ export class VideoPauseController {
   private rebindTimer: ReturnType<typeof setTimeout> | null = null;
 
   start(callbacks: VideoPauseCallbacks): void {
+    // Clean up any previous observer/listeners from a prior start() call
+    this.videoPauseCleanup?.();
     const handlePause = (): void => {
       if (callbacks.isDisposed()) return;
       log.debug('Video paused — pausing comment flow');

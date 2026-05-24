@@ -42,6 +42,7 @@ export class BacklogInjectionController implements Pauseable {
   private backlogQueue: ChatMessage[] = [];
   private isActive = false;
   private isInjecting = false;
+  private paused = false;
   private injectionTimer: ReturnType<typeof setTimeout> | null = null;
   private totalBacklog = 0;
   private processedBacklog = 0;
@@ -143,7 +144,7 @@ export class BacklogInjectionController implements Pauseable {
     }
 
     // Emit priority messages immediately through the renderer callback
-    if (priorityMessages.length > 0) {
+    if (priorityMessages.length > 0 && !this.paused) {
       for (const msg of priorityMessages) {
         msg.isBacklog = true;
         this.onBacklogMessage?.(msg);
@@ -462,6 +463,7 @@ export class BacklogInjectionController implements Pauseable {
 
   /** Pause/resume injection when the render queue is overloaded */
   setPaused(paused: boolean): void {
+    this.paused = paused;
     if (paused) {
       this.isInjecting = false;
       this.injectionTimer = clearSafeTimeout(this.injectionTimer);
