@@ -36,7 +36,7 @@ export interface PlaybackSnapshot {
  * or an array of messages (for batch emission like live polling).
  */
 type MessageCallback = (messages: ChatMessage | ChatMessage[], isInitialSeed?: boolean) => void;
-export type ChatSourceStartStatus = 'started' | 'retryable' | 'unavailable';
+export type ChatSourceStartStatus = 'started' | 'retryable' | 'unavailable' | 'waiting';
 
 // ── Inline helpers (formerly separate modules) ─────────────────────
 
@@ -319,6 +319,7 @@ export abstract class ChatSource implements Pauseable {
 
       if (bootstrapResolution.status !== 'ready' || !bootstrapResolution.bootstrap) {
         this.bootstrapResolver.logFailure(bootstrapResolution);
+        if (bootstrapResolution.status === 'waiting') return 'waiting';
         return bootstrapResolution.status === 'unavailable' ? 'unavailable' : 'retryable';
       }
 

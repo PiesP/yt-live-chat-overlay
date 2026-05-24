@@ -27,6 +27,7 @@ const log = createLogger('RuntimeSession');
 
 const RECENT_MESSAGE_REPLAY_LIMIT = 20;
 const CHAT_WATCHDOG_INTERVAL_MS = 15_000;
+const STANDBY_RECHECK_INTERVAL_MS = 15_000;
 
 async function createChatSource(
   getSettings: () => Readonly<OverlaySettings>,
@@ -56,7 +57,7 @@ interface RuntimeSessionOptions {
 }
 
 export type RuntimeSessionStartStatus = 'started' | 'retryable' | 'unavailable' | 'waiting';
-export type RuntimeSessionRestartReason = 'foreground-return' | 'watchdog';
+export type RuntimeSessionRestartReason = 'foreground-return' | 'watchdog' | 'standby-resolved';
 
 interface RuntimeHealth {
   idleDurationMs: number;
@@ -96,6 +97,10 @@ export class RuntimeSession {
   private fetchInterceptorUnsubscribe: InterceptorUnsubscribe | null = null;
   /** Unsubscribe handle for the DOM chat watcher (fallback). */
   private domWatcherUnsubscribe: DomWatcherUnsubscribe | null = null;
+  /** Timer for standby periodic recheck (pre-live waiting mode). */
+  private standbyPollTimer: ReturnType<typeof setInterval> | null = null;
+  /** Whether this session is in standby mode (pre-live, waiting for stream). */
+  private standbyMode = false;
 
   constructor(options: RuntimeSessionOptions) {
     this.targetUrl = options.targetUrl;
@@ -131,6 +136,12 @@ export class RuntimeSession {
 
       const chatStarted = await this.startChatSource(signal);
       throwIfAborted(signal);
+
+      if (chatStarted === 'waiting') {
+        this.enterStandbyMode();
+        log.info('Entered standby mode — waiting for stream to start');
+        return 'started';
+      }
 
       if (chatStarted !== 'started') {
         return chatStarted;
@@ -216,6 +227,8 @@ export class RuntimeSession {
     if (this.disposed) {
       return;
     }
+
+    this.exitStandbyMode();
 
     this.disposed = true;
     this.sessionReady = false;
@@ -545,6 +558,44 @@ export class RuntimeSession {
 
   private stopChatWatchdog(): void {
     this.chatWatchdogTimer = clearSafeInterval(this.chatWatchdogTimer);
+  }
+
+  // ── Standby mode (pre-live waiting) ─────────────────────────────────────
+
+  private enterStandbyMode(): void {
+    this.standbyMode = true;
+    this.renderer?.setStandbyStatus(true);
+
+    this.standbyPollTimer = setInterval(() => {
+      void this.pollStandbyResolution();
+    }, STANDBY_RECHECK_INTERVAL_MS);
+  }
+
+  private exitStandbyMode(): void {
+    this.standbyMode = false;
+    this.stopStandbyPolling();
+    this.renderer?.setStandbyStatus(false);
+  }
+
+  private stopStandbyPolling(): void {
+    this.standbyPollTimer = clearSafeInterval(this.standbyPollTimer);
+  }
+
+  private async pollStandbyResolution(): Promise<void> {
+    if (this.disposed || !this.standbyMode) return;
+
+    try {
+      const result = await bootstrapChatSession(this.abortController.signal);
+      if (result.status === 'ready') {
+        log.info('Stream detected — requesting managed restart from standby');
+        this.stopStandbyPolling();
+        this.requestManagedRestart('standby-resolved');
+      }
+    } catch (error) {
+      if (!isAbortError(error)) {
+        log.warn('Standby poll failed:', error);
+      }
+    }
   }
 
   private replayLatestMessages(

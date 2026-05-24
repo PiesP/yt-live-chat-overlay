@@ -244,6 +244,9 @@ export abstract class RendererBase {
   protected abstract resetState(): void;
   protected abstract onDestroy(): void;
 
+  /** Inform the renderer that the session entered or exited standby mode. */
+  setStandbyStatus(_standby: boolean): void {}
+
   protected updateBacklogPause(): void {
     const queueRatio = this.getQueueLength() / rendererLayout.queueMaxSize;
     if (queueRatio > RendererBase.BACKLOG_PAUSE_THRESHOLD && !this.backlogPaused) {
