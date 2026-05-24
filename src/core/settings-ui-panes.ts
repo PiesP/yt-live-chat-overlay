@@ -188,6 +188,11 @@ export const PANES: PaneDef[] = [
             ['full', 'Full (show all)'],
             ['none', 'None (skip backlog)'],
           ]),
+          num(
+            'Backlog Opacity (%)',
+            'backlogOpacityMultiplier',
+            'Opacity of past messages relative to real-time messages'
+          ),
         ],
       },
       {

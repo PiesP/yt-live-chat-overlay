@@ -68,13 +68,6 @@ export class CanvasRenderer extends RendererBase {
   private lastDpr = 0;
 
   /**
-   * Backlog messages are rendered at this fraction of the configured opacity.
-   * 0.35 = 35% opacity relative to settings.opacity, making backlog messages
-   * clearly distinguishable from real-time messages without being invisible.
-   */
-  private static readonly BACKLOG_OPACITY_MULTIPLIER = 0.35;
-
-  /**
    * Text bitmap cache: pre-rendered text with outline as offscreen canvas.
    * Key = `${font}|${text}|${color}|${strokeWidth}|${strokeColor}`.
    * On cache hit, drawImage() replaces fillText()+strokeText() in the hot path.
@@ -830,7 +823,7 @@ export class CanvasRenderer extends RendererBase {
    *   1. settings.opacity (base, default 0.85)
    *   2. Fade-in: linear ramp over fadeDurationMs at start of life
    *   3. Fade-out: linear ramp over fadeDurationMs at end (top/bottom only)
-   *   4. Backlog dimming: BACKLOG_OPACITY_MULTIPLIER (0.35) if isBacklog
+   *   4. Backlog dimming: backlogOpacityMultiplier setting (default 0.75) if isBacklog
    *   5. Age fade-out: linear ramp to 0 over maxMessageAgeMs (60s)
    */
   private computeMessageOpacity(
@@ -854,8 +847,8 @@ export class CanvasRenderer extends RendererBase {
       }
     }
 
-    // Backlog dimming: clearly distinguishes replayed from live messages
-    if (message.isBacklog) opacity *= CanvasRenderer.BACKLOG_OPACITY_MULTIPLIER;
+    // Backlog dimming: uses backlogOpacityMultiplier setting (default 0.75)
+    if (message.isBacklog) opacity *= this.settings.backlogOpacityMultiplier;
 
     // Age fade-out: gradually fade after maxMessageAgeMs (default 60s)
     const ageRatio = Math.min(1, elapsed / rendererLayout.maxMessageAgeMs);

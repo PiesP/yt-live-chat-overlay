@@ -177,6 +177,8 @@ export interface OverlaySettings {
   backlogSpeedMultiplier: number;
   /** For 'recent' mode: how many minutes of past chat to show (1-30) */
   backlogRecentMinutes: number;
+  /** Backlog message opacity multiplier (0.1-1.0, default 0.75 = 75% of live opacity) */
+  backlogOpacityMultiplier: number;
   /** Preserve author's chosen text color from YouTube chat */
   preserveUserColor: boolean;
   /** Maximum body text lines for SuperChat cards (2-10, default 5) */
