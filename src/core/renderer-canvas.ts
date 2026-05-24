@@ -75,6 +75,8 @@ export class CanvasRenderer extends RendererBase {
    * Text bitmap cache: pre-rendered text with outline as offscreen canvas.
    * Key = `${font}|${text}|${color}|${strokeWidth}|${strokeColor}`.
    * On cache hit, drawImage() replaces fillText()+strokeText() in the hot path.
+   * Bounded to 200 entries (LRU eviction) to prevent unbounded memory growth
+   * in long-running streams.
    */
   private readonly textBitmapCache = new Map<string, HTMLCanvasElement>();
 

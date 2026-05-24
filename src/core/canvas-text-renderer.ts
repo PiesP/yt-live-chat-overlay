@@ -17,7 +17,7 @@ import {
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-const TEXT_BITMAP_CACHE_MAX = 200;
+export const TEXT_BITMAP_CACHE_MAX = 200;
 
 // ── Text bitmap cache ──────────────────────────────────────────────────────
 
