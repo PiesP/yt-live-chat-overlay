@@ -8,7 +8,7 @@
 
 import { extractChatEvents } from '@core/chat-message-parser';
 import { ChatSource, type PlaybackSnapshot } from '@core/chat-source-base';
-import { findElementMatch, isAbortError, throwIfAborted, VIDEO_SELECTORS } from '@core/dom';
+import { findElementMatch, isAbortError, sleep, throwIfAborted, VIDEO_SELECTORS } from '@core/dom';
 import { createLogger } from '@core/logging';
 import { ReplayBuffer } from '@core/replay-buffer';
 import { fetchReplayChat, type LiveChatPayload } from '@core/youtubei-chat';
@@ -43,6 +43,7 @@ export class ReplayChatSource extends ChatSource {
   private seekListenerCleanup: (() => void) | null = null;
   private rafHandle: ReturnType<typeof requestAnimationFrame> | null = null;
   private backgroundFetchTimer: ReturnType<typeof setInterval> | null = null;
+  private prefetchAbortController: AbortController | null = null;
 
   protected seedCurrentSession(signal?: AbortSignal): Promise<boolean> {
     return this.initializeReplaySession(signal);
@@ -51,6 +52,7 @@ export class ReplayChatSource extends ChatSource {
   protected launchCurrentPollLoop(signal?: AbortSignal): void {
     this.startRafFlush(signal);
     this.startBackgroundFetch(signal);
+    this.startPrefetch(signal);
     this.installSeekListeners(signal);
   }
 
@@ -60,7 +62,11 @@ export class ReplayChatSource extends ChatSource {
    * ReplayChatSource.
    */
   protected isObserverAlive(): boolean {
-    return this.rafHandle !== null && this.backgroundFetchTimer !== null && this.callback !== null;
+    return (
+      this.rafHandle !== null &&
+      this.callback !== null &&
+      (this.backgroundFetchTimer !== null || this.prefetchAbortController !== null)
+    );
   }
 
   protected resetSessionState(): void {
@@ -146,6 +152,73 @@ export class ReplayChatSource extends ChatSource {
     }
   }
 
+  // ── Background prefetch ──────────────────────────────────────────────────
+
+  /**
+   * Start a full-chat prefetch that walks the entire continuation chain
+   * after session init.  Runs at 1 req/s in the background, buffering all
+   * messages regardless of playback position so seeking is instant.
+   *
+   * The prefetch uses its own continuation tracking — it does not mutate
+   * the shared continuation fields used by the background fetch interval.
+   */
+  private startPrefetch(_signal?: AbortSignal): void {
+    this.stopPrefetch();
+
+    const continuation =
+      this.replayMode === 'playerSeek'
+        ? this.replayPlayerSeekContinuation
+        : this.replayContinuation;
+
+    if (!continuation || !this.replayMode) return;
+
+    this.prefetchAbortController = new AbortController();
+    void this.prefetchFullChat(continuation, this.replayMode, this.prefetchAbortController.signal);
+  }
+
+  private stopPrefetch(): void {
+    this.prefetchAbortController?.abort();
+    this.prefetchAbortController = null;
+  }
+
+  private async prefetchFullChat(
+    initialContinuation: InnertubeContinuationData,
+    mode: ReplayMode,
+    signal?: AbortSignal
+  ): Promise<void> {
+    let pages = 0;
+    const MAX_PREFETCH_PAGES = 200;
+    let continuation: InnertubeContinuationData | null = initialContinuation;
+
+    while (continuation && pages < MAX_PREFETCH_PAGES && !signal?.aborted) {
+      if (pages > 0) {
+        await sleep(1000, signal);
+      }
+
+      try {
+        const payload = await this.requestReplayPayload(continuation, signal);
+        if (!payload) break;
+
+        const events = extractChatEvents(payload.actions, this.getSettings);
+        this.replayBuffer.appendEvents(events, -1);
+        this.markActivity();
+
+        continuation =
+          mode === 'playerSeek'
+            ? extractPlayerSeekContinuation(payload.continuations)
+            : extractReplayContinuation(payload.continuations);
+
+        pages += 1;
+      } catch (error) {
+        if (isAbortError(error)) break;
+        log.warn('Prefetch page failed:', error);
+        await sleep(5000, signal);
+      }
+    }
+
+    log.info(`Prefetch: ${pages} pages (aborted=${signal?.aborted ?? false})`);
+  }
+
   // ── Seek listeners ──────────────────────────────────────────────────────
 
   private installSeekListeners(signal?: AbortSignal): void {
@@ -168,11 +241,16 @@ export class ReplayChatSource extends ChatSource {
     this.replayBuffer.clear();
     this.lastReplayRequestedOffsetMs = offsetMs;
     this.replayConsecutiveFailures = 0;
+
+    // Cancel in-flight prefetch — new one starts from seek position below.
+    this.stopPrefetch();
+
     if (this.replayMode === 'playerSeek' && this.replayPlayerSeekContinuation) {
       void (async () => {
         try {
           await this.fetchReplayPlayerSeek(offsetMs);
           this.flushReplayBuffer(offsetMs);
+          this.startPrefetch();
         } catch (error: unknown) {
           if (!isAbortError(error)) {
             log.warn('Seek replay fetch failed:', error);
@@ -183,6 +261,7 @@ export class ReplayChatSource extends ChatSource {
       void (async () => {
         try {
           await this.pollContinuationReplay(offsetMs);
+          this.startPrefetch();
         } catch (error: unknown) {
           if (!isAbortError(error)) {
             log.warn('Continuation poll in seek handler failed:', error);
@@ -207,6 +286,7 @@ export class ReplayChatSource extends ChatSource {
     this.seekListenerCleanup = null;
     this.stopRafFlush();
     this.stopBackgroundFetch();
+    this.stopPrefetch();
   }
 
   private async initializeReplaySession(signal?: AbortSignal): Promise<boolean> {
