@@ -9,11 +9,8 @@ import type { ChatMessage, OverlaySettings, Pauseable } from '@app-types';
 import { BootstrapResolver } from '@core/bootstrap-resolver';
 import { findElementMatch, isAbortError, sleep, VIDEO_SELECTORS } from '@core/dom';
 import { createLogger } from '@core/logging';
-import {
-  type ChatBootstrapData,
-  getLiveChatPayload,
-  type LiveChatPayload,
-} from '@core/youtubei-chat';
+import type { ChatBootstrapData, LiveChatPayload } from '@core/youtubei-chat';
+import { getLiveChatPayload } from '@core/youtubei-chat';
 import type { InnertubeContinuationData } from '@core/youtubei-continuation';
 
 const log = createLogger('ChatSource');

@@ -11,7 +11,7 @@
  * Zero runtime dependencies — patches window.fetch in-place.
  */
 
-import type { ChatMessage } from '@app-types';
+import type { ChatMessage, OverlaySettings } from '@app-types';
 import { extractChatEvents } from '@core/chat-message-parser';
 import { createLogger } from '@core/logging';
 import { getLiveChatPayload } from '@core/youtubei-chat';
@@ -49,7 +49,7 @@ let activeInterceptor: {
  * @returns            Unsubscribe function that restores the original fetch.
  */
 export function installFetchInterceptor(
-  getSettings: () => Readonly<import('@app-types').OverlaySettings>,
+  getSettings: () => Readonly<OverlaySettings>,
   onMessages: InterceptorCallback
 ): InterceptorUnsubscribe {
   // Remove any previously installed interceptor first.

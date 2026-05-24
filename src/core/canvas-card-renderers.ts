@@ -208,7 +208,7 @@ export function renderMembershipCard(
       message,
       textX,
       textY,
-      '#ffffff',
+      designColors.membership.text,
       nameMaxWidth,
       settings,
       authorPhotoCache
@@ -225,7 +225,7 @@ export function renderMembershipCard(
       bodyY,
       bodyMaxWidth,
       settings.membershipMaxBodyLines,
-      '#ffffff',
+      designColors.membership.text,
       alpha,
       fontSize,
       settings,

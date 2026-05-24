@@ -45,6 +45,7 @@ export const colors = {
     backgroundAlpha: 0.28,
     borderAlpha: 0.75,
     borderAlphaAmplitude: 0.15,
+    text: '#ffffff',
   },
   ui: uiColors,
 } as const;

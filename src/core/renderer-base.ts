@@ -44,6 +44,13 @@ export abstract class RendererBase {
   protected backlogSpeedMultiplier = 1;
   protected backlogPaused = false;
 
+  private static readonly SPEED_BOOST_THRESHOLD = 5;
+  private static readonly SPEED_BOOST_DENOMINATOR = 15;
+  private static readonly SPEED_BOOST_MAX = 0.35;
+  private static readonly BACKLOG_PRIORITY_OFFSET = 50;
+  private static readonly BACKLOG_PAUSE_THRESHOLD = 0.8;
+  private static readonly BACKLOG_RESUME_THRESHOLD = 0.4;
+
   constructor(overlay: Overlay, settings: OverlaySettings) {
     this.overlay = overlay;
     this.settings = settings;
@@ -163,8 +170,13 @@ export abstract class RendererBase {
     let speed = this.settings.speedPxPerSec;
 
     const emaRate = this.burstDetector.getEmaRate();
-    if (emaRate > 5) {
-      const emaMultiplier = 1 + Math.min((emaRate - 5) / 15, 0.35);
+    if (emaRate > RendererBase.SPEED_BOOST_THRESHOLD) {
+      const emaMultiplier =
+        1 +
+        Math.min(
+          (emaRate - RendererBase.SPEED_BOOST_THRESHOLD) / RendererBase.SPEED_BOOST_DENOMINATOR,
+          RendererBase.SPEED_BOOST_MAX
+        );
       speed *= emaMultiplier;
     }
 
@@ -205,7 +217,7 @@ export abstract class RendererBase {
 
   protected static getMessagePriority(message: ChatMessage): number {
     let priority = rendererLayout.kindPriority[message.kind];
-    if (message.isBacklog) priority -= 50;
+    if (message.isBacklog) priority -= RendererBase.BACKLOG_PRIORITY_OFFSET;
     return priority;
   }
 
@@ -233,10 +245,10 @@ export abstract class RendererBase {
 
   protected updateBacklogPause(): void {
     const queueRatio = this.getQueueLength() / rendererLayout.queueMaxSize;
-    if (queueRatio > 0.8 && !this.backlogPaused) {
+    if (queueRatio > RendererBase.BACKLOG_PAUSE_THRESHOLD && !this.backlogPaused) {
       this.backlogPaused = true;
       this.onBacklogPauseChange?.(true);
-    } else if (queueRatio < 0.4 && this.backlogPaused) {
+    } else if (queueRatio < RendererBase.BACKLOG_RESUME_THRESHOLD && this.backlogPaused) {
       this.backlogPaused = false;
       this.onBacklogPauseChange?.(false);
     }

@@ -36,6 +36,7 @@ import { renderRegularMessage } from '@core/canvas-text-renderer';
 import { computeScrollDuration, rendererLayout } from '@core/design-tokens';
 import { clearSafeAnimationFrame, clearSafeInterval, forEachSlot } from '@core/dom';
 import type { LanePlacement } from '@core/lane-allocator';
+import { LaneAllocator } from '@core/lane-allocator';
 import { createLogger } from '@core/logging';
 import type { Overlay } from '@core/overlay';
 import { RendererBase } from '@core/renderer-base';
@@ -102,6 +103,23 @@ export class CanvasRenderer extends RendererBase {
    * Prevents scanning the entire pending queue when all entries collide.
    */
   private static readonly DRAIN_QUEUE_MAX_SKIP = 3;
+
+  /** Max concurrent emoji fetch operations. */
+  private static readonly EMOJI_FETCH_MAX_CONCURRENT = 6;
+  /** Max entries in the emoji image cache. */
+  private static readonly EMOJI_CACHE_MAX = 200;
+  /** Max entries in the author photo cache. */
+  private static readonly AUTHOR_PHOTO_CACHE_MAX = 100;
+  /** Max entries in the sticker image cache. */
+  private static readonly STICKER_CACHE_MAX = 50;
+
+  /** Stagger queue depth thresholds. */
+  private static readonly STAGGER_QUEUE_HIGH = 50;
+  private static readonly STAGGER_QUEUE_MED = 30;
+  /** Stagger delay when queue is medium depth (ms). */
+  private static readonly STAGGER_MED_MS = 80;
+  /** Stagger delay when queue is shallow (ms). */
+  private static readonly STAGGER_MAX_MS = 200;
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
     super(overlay, settings);
@@ -246,7 +264,7 @@ export class CanvasRenderer extends RendererBase {
       if (this.emojiCache.has(seg.emoji.url)) continue;
       if (this.failedEmojiFetches.has(seg.emoji.url)) continue;
       this.cleanupStaleEmojiFetching();
-      if (this.emojiFetching.size >= 6) continue;
+      if (this.emojiFetching.size >= CanvasRenderer.EMOJI_FETCH_MAX_CONCURRENT) continue;
       this.emojiFetching.add(seg.emoji.url);
       this.emojiFetchingStarted.set(seg.emoji.url, performance.now());
       const url = seg.emoji.url;
@@ -259,7 +277,7 @@ export class CanvasRenderer extends RendererBase {
         // Direct cache write instead of delegating to loadImage() —
         // the old path created a second Image for the same URL,
         // doubling the load latency before the emoji appeared.
-        while (this.emojiCache.size >= 200) {
+        while (this.emojiCache.size >= CanvasRenderer.EMOJI_CACHE_MAX) {
           const key = this.emojiCache.keys().next().value;
           if (key !== undefined) this.emojiCache.delete(key);
         }
@@ -280,12 +298,16 @@ export class CanvasRenderer extends RendererBase {
     }
 
     if (message.authorPhotoUrl) {
-      this.loadImage(message.authorPhotoUrl, this.authorPhotoCache, 100);
+      this.loadImage(
+        message.authorPhotoUrl,
+        this.authorPhotoCache,
+        CanvasRenderer.AUTHOR_PHOTO_CACHE_MAX
+      );
     }
 
     const stickerUrl = message.superChat?.sticker?.url;
     if (stickerUrl) {
-      this.loadImage(stickerUrl, this.stickerCache, 50);
+      this.loadImage(stickerUrl, this.stickerCache, CanvasRenderer.STICKER_CACHE_MAX);
     }
   }
 
@@ -676,7 +698,12 @@ export class CanvasRenderer extends RendererBase {
     //
     // When the pending queue backs up, stagger is reduced to avoid
     // compounding the delay — deep queue → zero stagger (backlog mode).
-    const maxStagger = this.pendingQueue.length > 50 ? 0 : this.pendingQueue.length > 30 ? 80 : 200;
+    const maxStagger =
+      this.pendingQueue.length > CanvasRenderer.STAGGER_QUEUE_HIGH
+        ? 0
+        : this.pendingQueue.length > CanvasRenderer.STAGGER_QUEUE_MED
+          ? CanvasRenderer.STAGGER_MED_MS
+          : CanvasRenderer.STAGGER_MAX_MS;
     const staggerDelay =
       isScrolling && batchIndex > 0 && maxStagger > 0
         ? Math.round(Math.min(maxStagger, batchIndex * -25 * Math.log(1 - Math.random())))
@@ -771,8 +798,11 @@ export class CanvasRenderer extends RendererBase {
     newIsBacklog: boolean
   ): number {
     const base = Math.max(
-      16,
-      Math.min(60, Math.round(activeWidth * rendererLayout.headwayGapRatio))
+      LaneAllocator.HEADWAY_GAP_MIN_PX,
+      Math.min(
+        LaneAllocator.HEADWAY_GAP_MAX_PX,
+        Math.round(activeWidth * rendererLayout.headwayGapRatio)
+      )
     );
     // Only adjust when speeds differ and the new message is faster.
     if (!activeIsBacklog && newIsBacklog) {

@@ -106,8 +106,8 @@ export class LaneAllocator {
    */
   private static readonly SAFETY_MARGIN_RATIO = 0.15;
 
-  private static readonly HEADWAY_GAP_MIN_PX = 16;
-  private static readonly HEADWAY_GAP_MAX_PX = 60;
+  static readonly HEADWAY_GAP_MIN_PX = 16;
+  static readonly HEADWAY_GAP_MAX_PX = 60;
 
   /**
    * Epsilon-greedy selection probability (0–1).
