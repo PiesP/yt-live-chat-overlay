@@ -20,18 +20,13 @@ const REPLAY_EMIT_TOLERANCE_MS = 300;
 export class ReplayBuffer {
   private buffer: BufferedReplayMessage[] = [];
 
-  /** Number of buffered messages awaiting emission. */
-  get length(): number {
-    return this.buffer.length;
-  }
-
-  /** Whether the buffer has no messages. */
+  /** True when the buffer has no messages. */
   get isEmpty(): boolean {
     return this.buffer.length === 0;
   }
 
   /**
-   * Insert a single message with its video offset.
+   * Insert a message in sorted order by offsetMs.
    *
    * Uses binary search to maintain sort order and deduplicates by
    * message ID so the same message is never buffered twice.
@@ -112,11 +107,6 @@ export class ReplayBuffer {
   /** Clear all buffered messages (e.g. on seek). */
   clear(): void {
     this.buffer = [];
-  }
-
-  /** Peek at the oldest message without removing it. */
-  peek(): BufferedReplayMessage | undefined {
-    return this.buffer[0];
   }
 
   /**

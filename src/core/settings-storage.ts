@@ -5,7 +5,7 @@
  * otherwise falls back to localStorage.
  */
 
-export interface SettingsStorageAdapter {
+interface SettingsStorageAdapter {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
 }

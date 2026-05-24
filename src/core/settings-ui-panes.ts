@@ -1,27 +1,27 @@
 // ── Field & pane type definitions ─────────────────────────────────────────────
 
-export interface BaseField {
+interface BaseField {
   label: string;
   key: string;
   title?: string;
   modifier?: string;
 }
 
-export interface NumberField extends BaseField {
+interface NumberField extends BaseField {
   type: 'number';
 }
-export interface CheckboxField extends BaseField {
+interface CheckboxField extends BaseField {
   type: 'checkbox';
 }
-export interface SelectField extends BaseField {
+interface SelectField extends BaseField {
   type: 'select';
   options: ReadonlyArray<[string, string]>;
 }
-export interface TextField extends BaseField {
+interface TextField extends BaseField {
   type: 'text';
   placeholder?: string;
 }
-export interface EnabledField {
+interface EnabledField {
   type: 'enabled';
 }
 

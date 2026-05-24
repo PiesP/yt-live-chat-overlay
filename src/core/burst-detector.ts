@@ -9,7 +9,7 @@
  * standard browser timers.
  */
 
-import type { BurstLevel, Pauseable } from '@app-types';
+import type { BurstLevel } from '@app-types';
 import { clearSafeInterval } from '@core/dom';
 import { createLogger } from '@core/logging';
 import type { ObservabilityReporter } from '@core/observability';
@@ -30,7 +30,7 @@ const ELEVATED_THRESHOLD = 5; // >5 msg/s
 const HIGH_THRESHOLD = 15; // >15 msg/s
 const EXTREME_THRESHOLD = 30; // >30 msg/s
 
-export class BurstDetector implements Pauseable {
+export class BurstDetector {
   private samples: number[] = [];
   private currentLevel: BurstLevel = 'normal';
   private lastBurstTime: number = 0;
@@ -110,18 +110,6 @@ export class BurstDetector implements Pauseable {
     this.currentLevel = 'normal';
     this.lastBurstTime = 0;
     this.start();
-  }
-
-  /**
-   * Pauseable interface: delegates to pause()/resume().
-   * Enables uniform handling via the Pauseable type.
-   */
-  setPaused(paused: boolean): void {
-    if (paused) {
-      this.pause();
-    } else {
-      this.resume();
-    }
   }
 
   /** Get current burst level */

@@ -148,7 +148,6 @@ export abstract class RendererBase {
       fontSize: this.settings.fontSize,
       fontWeight: this.settings.fontWeight,
       fontFamily: this.settings.fontFamily,
-      laneSpacing: this.settings.laneSpacing,
     };
 
     this.settings = settings;
