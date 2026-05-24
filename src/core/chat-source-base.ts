@@ -110,6 +110,13 @@ export abstract class ChatSource implements Pauseable {
   protected readonly bootstrapResolver = new BootstrapResolver();
 
   /**
+   * Optional provider for the current burst EMA rate (msg/s).
+   * When set, LiveChatSource uses it for sub-poll-interval burst reactivity.
+   * Wired by RuntimeSession from the renderer's BurstDetector.
+   */
+  burstRateProvider?: () => number;
+
+  /**
    * Message IDs already delivered this session (deduplicates fetch-interceptor
    * and poll-loop messages — both capture the same YouTube API responses).
    * Capped at SEEN_IDS_MAX to prevent unbounded growth during long sessions.

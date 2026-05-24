@@ -73,13 +73,11 @@ export const findElementMatch = <T extends Element>(
   return null;
 };
 
-export const findPlayerContainerElement = async (
-  options: { attempts?: number; intervalMs?: number; signal?: AbortSignal | undefined } = {}
-): Promise<HTMLElement | null> => {
-  const attempts = Math.max(1, Math.trunc(options.attempts ?? DEFAULT_WAIT_ATTEMPTS));
-  const intervalMs = Math.max(0, options.intervalMs ?? DEFAULT_WAIT_INTERVAL_MS);
-  const { signal } = options;
-
+async function pollForPlayerContainer(
+  attempts: number,
+  intervalMs: number,
+  signal?: AbortSignal
+): Promise<HTMLElement | null> {
   for (let attempt = 0; attempt < attempts; attempt++) {
     throwIfAborted(signal);
 
@@ -88,7 +86,7 @@ export const findPlayerContainerElement = async (
     });
 
     if (element) {
-      log.debug('Player found with selector:', element.selector);
+      log.debug('Player found via polling with selector:', element.selector);
       return element.element;
     }
 
@@ -99,6 +97,72 @@ export const findPlayerContainerElement = async (
 
   log.warn('No player container found');
   return null;
+}
+
+export const findPlayerContainerElement = async (
+  options: { attempts?: number; intervalMs?: number; signal?: AbortSignal | undefined } = {}
+): Promise<HTMLElement | null> => {
+  const attempts = Math.max(1, Math.trunc(options.attempts ?? DEFAULT_WAIT_ATTEMPTS));
+  const intervalMs = Math.max(0, options.intervalMs ?? DEFAULT_WAIT_INTERVAL_MS);
+  const { signal } = options;
+
+  // Fast path: try immediate lookup before setting up observer or polling.
+  const immediate = findElementMatch<HTMLElement>(PLAYER_CONTAINER_SELECTORS, {
+    predicate: isVisibleElement,
+  });
+  if (immediate) {
+    log.debug('Player found immediately with selector:', immediate.selector);
+    return immediate.element;
+  }
+
+  // Use MutationObserver for instant detection when the player element
+  // appears in the DOM (SPA navigation, slow rendering). Falls back to
+  // polling if MutationObserver is not available or times out.
+  if (typeof MutationObserver !== 'undefined') {
+    return new Promise<HTMLElement | null>((resolve: (value: HTMLElement | null) => void) => {
+      let fallbackTimer: ReturnType<typeof setTimeout>;
+
+      const observer = new MutationObserver(() => {
+        const element = findElementMatch<HTMLElement>(PLAYER_CONTAINER_SELECTORS, {
+          predicate: isVisibleElement,
+        });
+        if (element) {
+          observer.disconnect();
+          clearTimeout(fallbackTimer);
+          log.debug('Player found via MutationObserver with selector:', element.selector);
+          resolve(element.element);
+        }
+      });
+
+      observer.observe(document.documentElement, {
+        childList: true,
+        subtree: true,
+      });
+
+      // Fallback polling timer: if the observer doesn't find the element
+      // within the polling window, clean up and switch to polling.
+      fallbackTimer = setTimeout(() => {
+        observer.disconnect();
+        resolve(null); // will trigger polling fallback below
+      }, intervalMs * attempts);
+
+      signal?.addEventListener(
+        'abort',
+        () => {
+          observer.disconnect();
+          clearTimeout(fallbackTimer);
+          resolve(null);
+        },
+        { once: true }
+      );
+    }).then((found) => {
+      if (found) return found;
+      // Fall back to polling if observer didn't find anything.
+      return pollForPlayerContainer(attempts, intervalMs, signal);
+    });
+  }
+
+  return pollForPlayerContainer(attempts, intervalMs, signal);
 };
 
 /** Check whether an error is an AbortError (used to ignore abort-related rejections). */

@@ -80,6 +80,13 @@ export abstract class RendererBase {
     });
   }
 
+  // ── Public accessors for external coordination ─────────────────────────
+
+  /** Get the current EMA-smoothed message rate (msg/s) for adaptive polling. */
+  getBurstEmaRate(): number {
+    return this.burstDetector.getEmaRate();
+  }
+
   // ── Shared state machine ──────────────────────────────────────────────
 
   pause(): void {
@@ -228,12 +235,20 @@ export abstract class RendererBase {
     return true;
   }
 
-  /** Check whether anti-block is currently throttling new messages. */
+  /**
+   * Check whether anti-block is currently throttling new messages.
+   *
+   * Uses a gradual probabilistic throttle instead of a binary gate.
+   * At ≥95% lane utilization the acceptance probability approaches 0%,
+   * at ≤90% it approaches 100%. This prevents the on/off oscillation
+   * pattern that a binary threshold causes when utilization hovers near 95%.
+   */
   protected isAntiBlockActive(): boolean {
-    const ANTI_BLOCK_FREE_RATIO = 0.05;
+    const FREE_RATIO = 0.05;
     const utilization = this.laneAllocator.getUtilization();
-    const threshold = 1 - ANTI_BLOCK_FREE_RATIO;
-    return utilization >= threshold;
+    if (utilization < 1 - FREE_RATIO) return false;
+    const acceptProb = (1 - utilization) / FREE_RATIO;
+    return Math.random() >= acceptProb;
   }
 
   /** Compute priority score for a chat message (higher = more important, rendered first). */

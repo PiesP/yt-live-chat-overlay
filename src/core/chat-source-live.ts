@@ -88,6 +88,23 @@ export class LiveChatSource extends ChatSource {
       return Math.min(settings.maxPollIntervalMs, Math.max(settings.minPollIntervalMs, delayed));
     }
 
+    // ── Instant burst detection via EMA rate (sub-poll-interval reactivity) ──
+    // Falls back to the 5-sample rolling window if provider is not wired.
+    const emaRate = this.burstRateProvider?.();
+    if (emaRate !== undefined && emaRate >= LiveChatSource.EXTREME_DENSITY_THRESHOLD) {
+      return 0; // chain polling — next request fires immediately
+    }
+    if (emaRate !== undefined && emaRate >= LiveChatSource.DENSITY_HIGH_THRESHOLD) {
+      const base = Math.max(
+        settings.minPollIntervalMs,
+        Math.min(
+          settings.maxPollIntervalMs,
+          timeoutMs > 0 ? timeoutMs : LIVE_POLL_FALLBACK_DELAY_MS
+        )
+      );
+      return Math.max(settings.minPollIntervalMs, Math.round(base * 0.3));
+    }
+
     // Extreme density: skip sleep entirely (chained polling).
     // The next request fires immediately after the previous one completes.
     if (this.recentMessageCounts.length >= 2) {

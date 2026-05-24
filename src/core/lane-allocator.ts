@@ -48,9 +48,11 @@ interface LaneAllocatorOptions {
  *      with real-time, backlog with backlog. This produces natural
  *      visual zones without hard-coded partitions.
  *
- *   3. Phase 3 (fastest-free): for real-time messages only, return the
- *      topmost busy lane (shortest wait). Backlog messages stop here
- *      and accept a drop rather than competing with real-time traffic.
+ *   3. Phase 3 (fastest-free): when no speed-matched lane is available,
+ *      return the topmost busy lane (shortest wait) for all message types.
+ *      Speed-isolated headway scaling in checkPlacement() prevents visual
+ *      overtaking when a fast backlog message shares a lane with a slower
+ *      real-time message.
  *
  * Supports:
  *   - Precision exit-time occupancy for multi-message lane sharing
@@ -431,9 +433,13 @@ export class LaneAllocator {
     // Prefer lanes already running at the same speed profile.
     if (speedMatched && speedMatched.waitMs <= maxWaitMs) return speedMatched;
 
-    // ── Phase 3: fastest-free lane (real-time only) ──
-    // Backlog messages stop here — they don't compete with real-time on busy lanes.
-    if (!isBacklog && firstBusy && firstBusy.waitMs <= maxWaitMs) return firstBusy;
+    // ── Phase 3: fastest-free lane (all message types) ──
+    // Real-time and backlog both fall back to the soonest-available lane.
+    // Backlog previously returned null here (hard drop), but with drainQueue
+    // now retrying 'no_lane' via retryQueue, backlog messages can wait for
+    // a lane to free up naturally. Speed-isolated headway scaling in
+    // checkPlacement() prevents visual overtaking on cross-speed lanes.
+    if (firstBusy && firstBusy.waitMs <= maxWaitMs) return firstBusy;
     return null;
   }
 
@@ -556,9 +562,7 @@ export class LaneAllocator {
     if (bestBlock) return bestBlock;
 
     // Phase 3: no multi-slot block found.
-    // Backlog messages stop here — they don't compete with real-time on busy lanes.
-    // Real-time messages fall back to the single-lane allocator as a last resort.
-    if (isBacklog) return null;
+    // Both real-time and backlog fall back to the single-lane allocator.
     return this.allocateSingleLane(now, laneStart, laneEnd, isBacklog);
   }
 

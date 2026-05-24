@@ -274,6 +274,14 @@ export class RuntimeSession {
       this.installFetchInterceptor(chatSource);
     }
 
+    // Wire renderer's BurstDetector EMA rate into the chat source for
+    // sub-poll-interval burst reactivity in adaptive delay calculation.
+    // Without this, the poll loop needs ≥2 samples (2 poll intervals) before
+    // it can detect a burst and shorten its poll delay.
+    if (this.renderer) {
+      chatSource.burstRateProvider = () => this.renderer?.getBurstEmaRate() ?? 0;
+    }
+
     return chatSource.start((messages, isInitialSeed) => {
       if (this.disposed) return;
       const renderer = this.renderer;
@@ -299,6 +307,18 @@ export class RuntimeSession {
 
       const isReplayBatch = isInitialSeed === false && msgs.length >= 2;
       if (isReplayBatch || msgs.length > 50) {
+        this.ensureBacklogController(renderer);
+        this.backlogController?.startBacklogInjection(msgs);
+        return;
+      }
+
+      // Utilization-aware throttle for live bursts: when lanes are >80% full,
+      // route through the backlog controller even for small batches so messages
+      // get Poisson-spaced injection instead of hitting the pendingQueue all at
+      // once. Without this, live poll responses (20-50 msgs) bypass the backlog
+      // controller entirely, flooding the queue during bursts.
+      const utilization = renderer.getLaneUtilization();
+      if (utilization >= 0.8 && msgs.length >= 5) {
         this.ensureBacklogController(renderer);
         this.backlogController?.startBacklogInjection(msgs);
         return;
