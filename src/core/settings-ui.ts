@@ -1,5 +1,6 @@
 import type { OverlaySettings } from '@app-types';
 import {
+  clearSafeTimeout,
   ensurePlayerPositioning,
   findPlayerContainerElement,
   PLAYER_LOOKUP_INTERVAL_MS,
@@ -73,9 +74,7 @@ export class SettingsUi {
   private static readonly PREVIEW_DEBOUNCE_MS = 100;
 
   private queuePreview(preview: OverlaySettings): void {
-    if (this.previewTimer !== null) {
-      clearTimeout(this.previewTimer);
-    }
+    this.previewTimer = clearSafeTimeout(this.previewTimer);
     this.previewTimer = setTimeout(() => {
       this.previewTimer = null;
       this.onChange(preview);
@@ -114,8 +113,7 @@ export class SettingsUi {
     // Covers: X button, Close button, Escape, backdrop click, and
     // SPA navigation (destroy() calls close()).
     if (this.previewTimer !== null) {
-      clearTimeout(this.previewTimer);
-      this.previewTimer = null;
+      this.previewTimer = clearSafeTimeout(this.previewTimer);
     }
     const persist = this.onPersist ?? this.onChange;
     persist(this.form.collectSettings());
@@ -469,8 +467,7 @@ export class SettingsUi {
     // Escape, backdrop click). Implicit teardown from SPA navigation, page
     // refresh, or App.stop() must NOT write to storage.
     if (this.previewTimer !== null) {
-      clearTimeout(this.previewTimer);
-      this.previewTimer = null;
+      this.previewTimer = clearSafeTimeout(this.previewTimer);
     }
     this.button?.remove();
     this.backdrop?.remove();

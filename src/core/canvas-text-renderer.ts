@@ -17,7 +17,7 @@ import {
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-export const TEXT_BITMAP_CACHE_MAX = 200;
+const TEXT_BITMAP_CACHE_MAX = 200;
 
 // ── Text bitmap cache ──────────────────────────────────────────────────────
 
@@ -98,7 +98,7 @@ export function strokeTextOutline(
 
 // ── Segment rendering ───────────────────────────────────────────────────────
 
-export function renderSegment(
+function renderSegment(
   ctx: CanvasRenderingContext2D,
   text: string,
   x: number,
@@ -144,7 +144,7 @@ export function renderSegment(
 
 // ── Content segments (text + emoji) ─────────────────────────────────────────
 
-export function renderContentSegments(
+function renderContentSegments(
   ctx: CanvasRenderingContext2D,
   segments: readonly ContentSegment[],
   startX: number,

@@ -54,7 +54,7 @@ const normalizeYouTubeImageUrl = (url: string): string | null =>
 
 // ── Thumbnail extraction ─────────────────────────────────────────────────────
 
-export interface ThumbnailCandidate {
+interface ThumbnailCandidate {
   url: string;
   candidateUrl?: string;
   width?: number;
@@ -157,13 +157,13 @@ export function createImageAsset(
 
 // ── Emoji parsing ────────────────────────────────────────────────────────────
 
-export function getEmojiShortcuts(emojiData: JsonObject): string[] {
+function getEmojiShortcuts(emojiData: JsonObject): string[] {
   return Array.isArray(emojiData.shortcuts)
     ? emojiData.shortcuts.filter((shortcut): shortcut is string => typeof shortcut === 'string')
     : [];
 }
 
-export function getEmojiAltText(emojiData: JsonObject): string {
+function getEmojiAltText(emojiData: JsonObject): string {
   const shortcuts = getEmojiShortcuts(emojiData);
 
   return (

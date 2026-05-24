@@ -7,7 +7,12 @@
  */
 
 import type { Pauseable } from '@app-types';
-import { findElementMatch, PLAYER_CONTAINER_SELECTORS, VIDEO_SELECTORS } from '@core/dom';
+import {
+  clearSafeTimeout,
+  findElementMatch,
+  PLAYER_CONTAINER_SELECTORS,
+  VIDEO_SELECTORS,
+} from '@core/dom';
 import { createLogger } from '@core/logging';
 
 const log = createLogger('VideoPauseController');
@@ -82,10 +87,7 @@ export class VideoPauseController {
       observer.observe(playerContainer, { childList: true, subtree: true });
 
       this.videoPauseCleanup = () => {
-        if (this.rebindTimer !== null) {
-          clearTimeout(this.rebindTimer);
-          this.rebindTimer = null;
-        }
+        this.rebindTimer = clearSafeTimeout(this.rebindTimer);
         detachListeners(currentVideo);
         observer.disconnect();
         this.videoPauseCleanup = null;

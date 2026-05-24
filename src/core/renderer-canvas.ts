@@ -34,6 +34,7 @@ import {
 } from '@core/canvas-message-lifecycle';
 import { renderRegularMessage } from '@core/canvas-text-renderer';
 import { computeDliosDuration, rendererLayout } from '@core/design-tokens';
+import { clearSafeAnimationFrame, clearSafeInterval, forEachSlot } from '@core/dom';
 import type { LanePlacement } from '@core/lane-allocator';
 import { createLogger } from '@core/logging';
 import type { Overlay } from '@core/overlay';
@@ -95,6 +96,12 @@ export class CanvasRenderer extends RendererBase {
    * increase scroll duration unnecessarily.
    */
   private static readonly HORIZONTAL_STAGGER_MAX = 200;
+
+  /**
+   * Max number of consecutive collision skips in the drain queue.
+   * Prevents scanning the entire pending queue when all entries collide.
+   */
+  private static readonly DRAIN_QUEUE_MAX_SKIP = 3;
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
     super(overlay, settings);
@@ -179,8 +186,7 @@ export class CanvasRenderer extends RendererBase {
     // Trigger an immediate render frame so the message appears within
     // one frame (~16ms) instead of waiting for the next natural rAF.
     if (this.pendingQueue.length === 1 && this.animFrameId !== null) {
-      cancelAnimationFrame(this.animFrameId);
-      this.animFrameId = null;
+      this.animFrameId = clearSafeAnimationFrame(this.animFrameId);
       this.startRenderLoop();
     }
   }
@@ -262,8 +268,7 @@ export class CanvasRenderer extends RendererBase {
         // Trigger an immediate render frame so the emoji appears within
         // ~1 frame instead of waiting for the next natural rAF tick.
         if (this.animFrameId !== null) {
-          cancelAnimationFrame(this.animFrameId);
-          this.animFrameId = null;
+          this.animFrameId = clearSafeAnimationFrame(this.animFrameId);
           this.startRenderLoop();
         }
       };
@@ -333,10 +338,7 @@ export class CanvasRenderer extends RendererBase {
   }
 
   private stopRenderLoop(): void {
-    if (this.animFrameId !== null) {
-      cancelAnimationFrame(this.animFrameId);
-      this.animFrameId = null;
-    }
+    this.animFrameId = clearSafeAnimationFrame(this.animFrameId);
   }
 
   private renderFrame(): void {
@@ -453,7 +455,7 @@ export class CanvasRenderer extends RendererBase {
   private drainQueue(now: number): void {
     if (this.isAntiBlockActive()) return;
     let skipped = 0;
-    const maxSkip = 3; // prevent scanning entire queue when all collide
+    const maxSkip = CanvasRenderer.DRAIN_QUEUE_MAX_SKIP;
     let batchIndex = 0; // for stagger delay computation
     this.laneAllocator.resetBatch();
     while (
@@ -576,9 +578,9 @@ export class CanvasRenderer extends RendererBase {
         // right edge minus headway gap.
         if (mode === 'scroll') {
           if (activeRightEdge > dims.width - headwayPx) {
-            for (let s = 0; s < placement.slotCount; s++) {
-              this.laneAllocator.markCollision(placement.laneIndex + s);
-            }
+            forEachSlot(placement.laneIndex, placement.slotCount, (slotIdx) => {
+              this.laneAllocator.markCollision(slotIdx);
+            });
             return { ok: false, reason: 'collision' as const };
           }
         } else {
@@ -589,9 +591,9 @@ export class CanvasRenderer extends RendererBase {
           const reverseTravel = dims.width + active.width + rendererLayout.exitPaddingMin;
           const activeX = -active.width + activeProgress * reverseTravel;
           if (activeX + active.width > -headwayPx) {
-            for (let s = 0; s < placement.slotCount; s++) {
-              this.laneAllocator.markCollision(placement.laneIndex + s);
-            }
+            forEachSlot(placement.laneIndex, placement.slotCount, (slotIdx) => {
+              this.laneAllocator.markCollision(slotIdx);
+            });
             return { ok: false, reason: 'collision' as const };
           }
         }
@@ -599,9 +601,9 @@ export class CanvasRenderer extends RendererBase {
         // Top/bottom modes: overlap if the active message in the same lane
         // has not yet expired.
         if (activeElapsed < active.duration) {
-          for (let s = 0; s < placement.slotCount; s++) {
-            this.laneAllocator.markCollision(placement.laneIndex + s);
-          }
+          forEachSlot(placement.laneIndex, placement.slotCount, (slotIdx) => {
+            this.laneAllocator.markCollision(slotIdx);
+          });
           return { ok: false, reason: 'collision' as const };
         }
       }
@@ -856,10 +858,7 @@ export class CanvasRenderer extends RendererBase {
 
   protected onDestroy(): void {
     this.stopRenderLoop();
-    if (this.emojiCleanupIntervalId !== null) {
-      clearInterval(this.emojiCleanupIntervalId);
-      this.emojiCleanupIntervalId = null;
-    }
+    this.emojiCleanupIntervalId = clearSafeInterval(this.emojiCleanupIntervalId);
     this.overlayDimensionsUnsubscribe?.();
     this.canvas?.remove();
     this.canvas = null;

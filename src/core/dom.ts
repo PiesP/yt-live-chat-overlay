@@ -104,6 +104,35 @@ export const findPlayerContainerElement = async (
 export const isAbortError = (error: unknown): boolean =>
   error instanceof DOMException && error.name === 'AbortError';
 
+/** Clear a timeout timer and null the reference. Idempotent if already null. */
+export function clearSafeTimeout(timer: ReturnType<typeof setTimeout> | null): null {
+  if (timer !== null) clearTimeout(timer);
+  return null;
+}
+
+/** Clear an interval timer and null the reference. Idempotent if already null. */
+export function clearSafeInterval(timer: ReturnType<typeof setInterval> | null): null {
+  if (timer !== null) clearInterval(timer);
+  return null;
+}
+
+/** Cancel an animation frame handle and null the reference. */
+export function clearSafeAnimationFrame(handle: number | null): null {
+  if (handle !== null) cancelAnimationFrame(handle);
+  return null;
+}
+
+/** Iterate over slot indices for a multi-slot placement. */
+export function forEachSlot(
+  laneIndex: number,
+  slotCount: number,
+  fn: (slotIndex: number, slotOffset: number) => void
+): void {
+  for (let offset = 0; offset < slotCount; offset++) {
+    fn(laneIndex + offset, offset);
+  }
+}
+
 /**
  * Ensure a player element has CSS positioning so absolutely-positioned
  * children (overlay, settings button) are placed relative to it.

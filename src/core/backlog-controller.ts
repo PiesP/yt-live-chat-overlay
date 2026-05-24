@@ -21,6 +21,7 @@
 
 import type { BacklogMode, ChatMessage, Pauseable } from '@app-types';
 import { BACKLOG_INDICATOR_BG, sampleExponential } from '@core/design-tokens';
+import { clearSafeTimeout } from '@core/dom';
 import { createLogger } from '@core/logging';
 import type { ObservabilityReporter } from '@core/observability';
 
@@ -449,14 +450,8 @@ export class BacklogInjectionController implements Pauseable {
   destroy(): void {
     this.isActive = false;
     this.isInjecting = false;
-    if (this.injectionTimer !== null) {
-      clearTimeout(this.injectionTimer);
-      this.injectionTimer = null;
-    }
-    if (this.hideIndicatorTimer !== null) {
-      clearTimeout(this.hideIndicatorTimer);
-      this.hideIndicatorTimer = null;
-    }
+    this.injectionTimer = clearSafeTimeout(this.injectionTimer);
+    this.hideIndicatorTimer = clearSafeTimeout(this.hideIndicatorTimer);
     this.backlogQueue = [];
     if (this.indicatorEl) {
       this.indicatorEl.remove();
@@ -469,10 +464,7 @@ export class BacklogInjectionController implements Pauseable {
   setPaused(paused: boolean): void {
     if (paused) {
       this.isInjecting = false;
-      if (this.injectionTimer !== null) {
-        clearTimeout(this.injectionTimer);
-        this.injectionTimer = null;
-      }
+      this.injectionTimer = clearSafeTimeout(this.injectionTimer);
     } else if (!this.isInjecting && this.isActive && this.backlogQueue.length > 0) {
       this.isInjecting = true;
       this.processTick();

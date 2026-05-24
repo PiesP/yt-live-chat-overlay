@@ -8,7 +8,15 @@
 
 import { extractChatEvents } from '@core/chat-message-parser';
 import { ChatSource, type PlaybackSnapshot } from '@core/chat-source-base';
-import { findElementMatch, isAbortError, sleep, throwIfAborted, VIDEO_SELECTORS } from '@core/dom';
+import {
+  clearSafeAnimationFrame,
+  clearSafeInterval,
+  findElementMatch,
+  isAbortError,
+  sleep,
+  throwIfAborted,
+  VIDEO_SELECTORS,
+} from '@core/dom';
 import { createLogger } from '@core/logging';
 import { ReplayBuffer } from '@core/replay-buffer';
 import { fetchReplayChat, type LiveChatPayload } from '@core/youtubei-chat';
@@ -107,10 +115,7 @@ export class ReplayChatSource extends ChatSource {
   }
 
   private stopRafFlush(): void {
-    if (this.rafHandle !== null) {
-      cancelAnimationFrame(this.rafHandle);
-      this.rafHandle = null;
-    }
+    this.rafHandle = clearSafeAnimationFrame(this.rafHandle);
   }
 
   // ── Background fetch ────────────────────────────────────────────────────
@@ -153,10 +158,7 @@ export class ReplayChatSource extends ChatSource {
   }
 
   private stopBackgroundFetch(): void {
-    if (this.backgroundFetchTimer !== null) {
-      clearInterval(this.backgroundFetchTimer);
-      this.backgroundFetchTimer = null;
-    }
+    this.backgroundFetchTimer = clearSafeInterval(this.backgroundFetchTimer);
   }
 
   // ── Background prefetch ──────────────────────────────────────────────────

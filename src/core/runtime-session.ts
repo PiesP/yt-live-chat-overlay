@@ -3,7 +3,13 @@ import { BacklogInjectionController } from '@core/backlog-controller';
 import type { ChatHealthSnapshot, ChatSource, ChatSourceStartStatus } from '@core/chat-source-base';
 import { LiveChatSource } from '@core/chat-source-live';
 import { ReplayChatSource } from '@core/chat-source-replay';
-import { findElementMatch, isAbortError, throwIfAborted, VIDEO_SELECTORS } from '@core/dom';
+import {
+  clearSafeInterval,
+  findElementMatch,
+  isAbortError,
+  throwIfAborted,
+  VIDEO_SELECTORS,
+} from '@core/dom';
 import type { DomWatcherUnsubscribe } from '@core/dom-chat-watcher';
 import { installDomChatWatcher } from '@core/dom-chat-watcher';
 import type { InterceptorUnsubscribe } from '@core/fetch-interceptor';
@@ -532,10 +538,7 @@ export class RuntimeSession {
   }
 
   private stopChatWatchdog(): void {
-    if (this.chatWatchdogTimer !== null) {
-      clearInterval(this.chatWatchdogTimer);
-      this.chatWatchdogTimer = null;
-    }
+    this.chatWatchdogTimer = clearSafeInterval(this.chatWatchdogTimer);
   }
 
   private replayLatestMessages(

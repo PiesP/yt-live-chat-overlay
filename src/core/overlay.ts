@@ -8,6 +8,7 @@
 import type { OverlayDimensions, OverlaySettings } from '@app-types';
 import { rendererLayout } from '@core/design-tokens';
 import {
+  clearSafeTimeout,
   ensurePlayerPositioning,
   findPlayerContainerElement,
   PLAYER_LOOKUP_INTERVAL_MS,
@@ -91,10 +92,7 @@ export class Overlay {
   }
 
   private clearFullscreenUpdateTimer(): void {
-    if (this.fullscreenUpdateTimer !== null) {
-      clearTimeout(this.fullscreenUpdateTimer);
-      this.fullscreenUpdateTimer = null;
-    }
+    this.fullscreenUpdateTimer = clearSafeTimeout(this.fullscreenUpdateTimer);
   }
 
   private observeResize(): void {

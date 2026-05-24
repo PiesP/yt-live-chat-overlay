@@ -1,4 +1,5 @@
 import type { OverlaySettings } from '@app-types';
+import { clearSafeTimeout } from '@core/dom';
 import { createLogger } from '@core/logging';
 import {
   RuntimeSession,
@@ -214,10 +215,7 @@ export class RuntimeManager {
   }
 
   private clearScheduledReconcile(): void {
-    if (this.scheduledReconcileTimer !== null) {
-      clearTimeout(this.scheduledReconcileTimer);
-      this.scheduledReconcileTimer = null;
-    }
+    this.scheduledReconcileTimer = clearSafeTimeout(this.scheduledReconcileTimer);
   }
 
   private disposeActiveSession(): void {

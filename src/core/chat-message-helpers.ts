@@ -42,6 +42,15 @@ const MAX_MESSAGE_TEXT_LENGTH = 80;
 
 const TRUNCATION_ELLIPSIS_LENGTH = 3;
 
+/** Fully opaque alpha threshold for CSS color conversion. */
+const FULLY_OPAQUE_THRESHOLD = 0.999;
+
+/** Near-white color component threshold (each channel exceeds this). */
+const NEAR_WHITE_THRESHOLD = 240;
+
+/** Near-black color component threshold (each channel is below this). */
+const NEAR_BLACK_THRESHOLD = 15;
+
 function truncateText(text: string): string {
   const normalized = normalizeInlineText(text);
   if (normalized.length > MAX_MESSAGE_TEXT_LENGTH) {
@@ -82,7 +91,7 @@ export function colorIntToCss(value: unknown): string | undefined {
   const green = (argb >>> 8) & 0xff;
   const blue = argb & 0xff;
 
-  if (alpha >= 0.999) {
+  if (alpha >= FULLY_OPAQUE_THRESHOLD) {
     return `rgb(${red}, ${green}, ${blue})`;
   }
   return `rgba(${red}, ${green}, ${blue}, ${Number(alpha.toFixed(3))})`;
@@ -143,8 +152,10 @@ export function extractUserColor(renderer: JsonObject): string | undefined {
     const g = parseInt(rgbaMatch[2] ?? '0', 10);
     const b = parseInt(rgbaMatch[3] ?? '0', 10);
     // Skip colors too close to white (YouTube default) or black
-    if (r > 240 && g > 240 && b > 240) return undefined;
-    if (r < 15 && g < 15 && b < 15) return undefined;
+    if (r > NEAR_WHITE_THRESHOLD && g > NEAR_WHITE_THRESHOLD && b > NEAR_WHITE_THRESHOLD)
+      return undefined;
+    if (r < NEAR_BLACK_THRESHOLD && g < NEAR_BLACK_THRESHOLD && b < NEAR_BLACK_THRESHOLD)
+      return undefined;
   }
 
   return cssColor;

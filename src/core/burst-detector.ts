@@ -10,6 +10,7 @@
  */
 
 import type { BurstLevel, Pauseable } from '@app-types';
+import { clearSafeInterval } from '@core/dom';
 import { createLogger } from '@core/logging';
 import type { ObservabilityReporter } from '@core/observability';
 
@@ -80,10 +81,7 @@ export class BurstDetector implements Pauseable {
 
   /** Stop periodic sampling */
   stop(): void {
-    if (this.sampleInterval !== null) {
-      clearInterval(this.sampleInterval);
-      this.sampleInterval = null;
-    }
+    this.sampleInterval = clearSafeInterval(this.sampleInterval);
     this.samplesSinceLastCheck = 0;
   }
 

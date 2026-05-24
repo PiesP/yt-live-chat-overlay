@@ -1,5 +1,6 @@
 import type { OverlayDimensions } from '@app-types';
 import { rendererLayout } from '@core/design-tokens';
+import { forEachSlot } from '@core/dom';
 import { createLogger } from '@core/logging';
 import { measureTextHeight } from '@core/text-measure';
 
@@ -255,22 +256,22 @@ export class LaneAllocator {
     // Real-time → realTimeLanesUntil, backlog → backlogLanesUntil.
     const until = startTime + durationMs;
     if (isBacklog) {
-      for (let s = 0; s < placement.slotCount; s++) {
-        this.backlogLanesUntil.set(startIdx + s, until);
-      }
+      forEachSlot(startIdx, placement.slotCount, (slotIdx) => {
+        this.backlogLanesUntil.set(slotIdx, until);
+      });
     } else {
-      for (let s = 0; s < placement.slotCount; s++) {
-        this.realTimeLanesUntil.set(startIdx + s, until);
-      }
+      forEachSlot(startIdx, placement.slotCount, (slotIdx) => {
+        this.realTimeLanesUntil.set(slotIdx, until);
+      });
     }
 
     // Update all slots occupied by this message with the SAME available time.
     // This prevents partial-slot availability where a new message could enter
     // a "released" top slot while the bottom slot is still occupied, causing
     // visual overlap with the multi-slot message (e.g. SuperChat cards).
-    for (let s = 0; s < placement.slotCount; s++) {
-      this.updateLane(startIdx + s, nextAvailable);
-    }
+    forEachSlot(startIdx, placement.slotCount, (slotIdx) => {
+      this.updateLane(slotIdx, nextAvailable);
+    });
   }
 
   // ── Batch control ─────────────────────────────────────────────────────
