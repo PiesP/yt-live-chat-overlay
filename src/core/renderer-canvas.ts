@@ -478,6 +478,14 @@ export class CanvasRenderer extends RendererBase {
       this.observability.updateQueueDepth(this.pendingQueue.length);
     }
 
+    // Recalculate lane utilization BEFORE drainQueue so anti-block sees
+    // accurate state. Previously resetBatch() was inside drainQueue() and
+    // never called when anti-block was active, causing a deadlock:
+    // activeMessages emptied → cachedUtilization stuck at 100% →
+    // anti-block always true → drainQueue never runs → resetBatch never
+    // called → cachedUtilization never updated → permanent stall.
+    this.laneAllocator.resetBatch();
+
     this.drainQueue(now);
 
     this.observability.updateLaneUtilization(this.laneAllocator.getUtilization());
@@ -570,7 +578,6 @@ export class CanvasRenderer extends RendererBase {
     let skipped = 0;
     const maxSkip = CanvasRenderer.DRAIN_QUEUE_MAX_SKIP;
     let batchIndex = 0; // for stagger delay computation
-    this.laneAllocator.resetBatch();
     while (
       this.pendingQueue.length > 0 &&
       this.activeMessages.length < this.settings.maxConcurrentMessages &&
