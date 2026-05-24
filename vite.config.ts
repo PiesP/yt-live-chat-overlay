@@ -81,6 +81,10 @@ export default defineConfig(({ mode }): UserConfig => {
           supportURL: `${REPOSITORY_URL}/issues`,
           license: 'MIT',
           namespace: 'https://github.com/PiesP',
+          downloadURL:
+            'https://cdn.jsdelivr.net/gh/PiesP/yt-live-chat-overlay@release/dist/yt-live-chat-overlay.user.js',
+          updateURL:
+            'https://cdn.jsdelivr.net/gh/PiesP/yt-live-chat-overlay@release/dist/yt-live-chat-overlay.meta.js',
         },
         build: {
           fileName: outputFileName,
