@@ -430,7 +430,7 @@ export class SettingsUi {
           const persist = this.onPersist ?? this.onChange;
           persist(settings);
           this.showToast(t('Settings imported successfully'));
-        } catch (error) {
+        } catch (error: unknown) {
           this.showToast(t('Import failed: invalid JSON'));
           log.warn('Import failed: invalid JSON file', error);
         }

@@ -97,7 +97,7 @@ export function installFetchInterceptor(
             onMessages(messages);
           }
         }
-      } catch (error) {
+      } catch (error: unknown) {
         log.debug('Fetch interceptor parse failed:', error);
         // Silently ignore parse failures — the fallback poll loop handles this.
       }

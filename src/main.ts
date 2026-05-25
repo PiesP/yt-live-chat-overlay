@@ -146,7 +146,7 @@ class App {
   private async ensureSettingsUi(): Promise<void> {
     try {
       await this.settingsUi.attach();
-    } catch (error) {
+    } catch (error: unknown) {
       log.warn('Settings UI error:', error);
     }
   }
@@ -195,7 +195,7 @@ async function initApp(): Promise<void> {
 
     window.__ytChatOverlay = app;
     log.info('App instance exposed to window.__ytChatOverlay');
-  } catch (error) {
+  } catch (error: unknown) {
     log.error('Fatal error:', error);
   }
 }

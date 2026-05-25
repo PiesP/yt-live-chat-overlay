@@ -385,7 +385,7 @@ export const bootstrapChatSession = async (signal?: AbortSignal): Promise<ChatBo
       status: 'ready',
       data,
     };
-  } catch (error) {
+  } catch (error: unknown) {
     if (isAbortError(error)) {
       throw error;
     }

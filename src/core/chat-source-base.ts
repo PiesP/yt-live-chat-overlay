@@ -152,7 +152,7 @@ export abstract class ChatSource implements Pauseable {
 
     try {
       return await this.bootstrapAndLaunchPolling(combinedSignal);
-    } catch (error) {
+    } catch (error: unknown) {
       if (isAbortError(error)) return 'retryable';
       throw error;
     }

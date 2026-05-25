@@ -38,7 +38,7 @@ export class Settings {
       if (raw) {
         this.settings = normalizeStoredSettings(JSON.parse(raw) as Record<string, unknown>);
       }
-    } catch (error) {
+    } catch (error: unknown) {
       log.warn('Failed to load settings:', error);
     }
 
@@ -91,7 +91,7 @@ export class Settings {
       const loaded = normalizeStoredSettings(JSON.parse(raw) as Record<string, unknown>);
       this.settings = loaded;
       for (const cb of this.onChangeCallbacks) cb();
-    } catch (error) {
+    } catch (error: unknown) {
       log.warn('Failed to reload settings from storage:', error);
     }
   }
@@ -101,7 +101,7 @@ export class Settings {
       this.isSaving = true;
       const data = { ...this.settings, _version: SETTINGS_VERSION };
       getSettingsStorageAdapter().setItem(STORAGE_KEY, JSON.stringify(data));
-    } catch (error) {
+    } catch (error: unknown) {
       log.warn('Failed to save settings:', error);
     } finally {
       this.isSaving = false;

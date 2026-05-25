@@ -77,7 +77,7 @@ export class PageWatcher {
     for (const callback of this.callbacks) {
       try {
         callback();
-      } catch (error) {
+      } catch (error: unknown) {
         log.warn('Page change callback error:', error);
       }
     }
