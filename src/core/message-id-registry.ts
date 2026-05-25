@@ -35,9 +35,4 @@ export class MessageIdRegistry {
       this.ids.delete(firstKey);
     }
   }
-
-  /** Remove all registered message IDs. */
-  clear(): void {
-    this.ids.clear();
-  }
 }
