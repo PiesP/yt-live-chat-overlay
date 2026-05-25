@@ -266,7 +266,7 @@ export class CanvasRenderer extends RendererBase {
         return;
       }
       this.pendingQueue.pop();
-      if (trackDrops) this.observability.onMessageDropped('queue_full');
+      if (trackDrops) this.observability.onMessageDropped('queue_replaced');
     }
 
     const insertIndex = this.findQueueInsertIndex(priority);
@@ -819,7 +819,9 @@ export class CanvasRenderer extends RendererBase {
           : CanvasRenderer.STAGGER_MAX_MS;
     const staggerDelay =
       batchIndex > 0 && maxStagger > 0
-        ? Math.round(Math.min(maxStagger, batchIndex * -25 * Math.log(1 - Math.random())))
+        ? Math.round(
+            Math.min(maxStagger, Math.min(batchIndex, 3) * -25 * Math.log(1 - Math.random()))
+          )
         : 0;
 
     const effectiveStartTime = now + staggerDelay;
@@ -991,6 +993,7 @@ export class CanvasRenderer extends RendererBase {
 
   protected onResume(): void {
     this.startRenderLoop();
+    this.laneAllocator.resetBatch();
     this.drainQueue(performance.now());
   }
 

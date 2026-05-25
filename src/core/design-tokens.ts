@@ -121,7 +121,7 @@ export const rendererLayout = {
   /** Pending queue max size */
   queueMaxSize: 200,
   /** Background queue max */
-  backgroundQueueMax: 10,
+  backgroundQueueMax: 50,
   /** Max message age for fade-out (ms) */
   maxMessageAgeMs: 60_000,
   /** Delay after fullscreen change before updating dimensions (ms) */

@@ -59,7 +59,7 @@ export function estimateMessageDimensions(
       message,
       font,
       fontSize,
-      showAuthor && message.author !== undefined,
+      showAuthor,
       fontFamily,
       maxBodyLines?.superchat ?? 5,
       fontWeight
