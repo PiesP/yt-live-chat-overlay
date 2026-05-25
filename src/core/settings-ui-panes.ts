@@ -204,6 +204,19 @@ export const PANES: PaneDef[] = [
         ],
       },
       {
+        title: 'Depth Layers',
+        fields: [
+          chk(
+            'Enabled',
+            'depthLayersEnabled',
+            'Speed-based depth perception: fast messages appear near, slow messages appear far'
+          ),
+          num('Near Speed (%)', 'depthNearSpeedMul', 'Speed boost for near-layer messages'),
+          num('Far Speed (%)', 'depthFarSpeedMul', 'Speed reduction for far-layer messages'),
+          num('Far Opacity (%)', 'depthFarOpacityMul', 'Opacity dimming for far-layer messages'),
+        ],
+      },
+      {
         title: 'Rate Limiting',
         fields: [
           sel('Author Rate Limit', 'authorRateLimit', [
