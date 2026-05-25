@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.34.0] - 2026-05-25
+
+### Added
+
+- **Multi-language i18n support** — Settings UI now supports 5 languages (English, 한국어, 日本語, Español, 中文). `src/core/i18n.ts` implements a lightweight gettext model with 82 translated strings per language. Language defaults to `'auto'` (browser detection), users can select manually. Language switching during preview rebuilds the settings modal in-place; on persist, the dialog reopens with translated strings. ([`ac2a2ad`](https://github.com/PiesP/yt-live-chat-overlay/commit/ac2a2ad), [`f5c1a25`](https://github.com/PiesP/yt-live-chat-overlay/commit/f5c1a25))
+
+### Fixed
+
+- **Settings dialog forced-close and infinite recursion from i18n** — `collectSettings()` always included `language` in the partial, causing `applySettingsSideEffects` to trigger `close()` on every setting change. Fixed by comparing `partial.language` with the previous value before acting, and removing the re-entrant `close()` call from `applySettings` (since `applySettings` is always called from `close`). ([`ac2a2ad`](https://github.com/PiesP/yt-live-chat-overlay/commit/ac2a2ad))
+
 ## [0.33.1] - 2026-05-25
 
 ### Fixed
