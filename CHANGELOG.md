@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.34.1] - 2026-05-26
+
+### Fixed
+
+- **`LaneAllocator` stale font options after settings change** — `LaneAllocatorOptions.fontSize`/`fontWeight`/`fontFamily`/`laneSpacing` were marked `readonly`, preventing settings changes from propagating. Added `updateFontMetrics()` method and wired it from `RendererBase.updateSettings()` when font or lane spacing changes are detected. ([`b922b1a`](https://github.com/PiesP/yt-live-chat-overlay/commit/b922b1a))
+- **`Boolean(chat)` narrowing failure** — `Boolean(chat)` does not narrow TypeScript's nullable type. Replaced with `chat != null` to enable property access after the null check. ([`b81bc96`](https://github.com/PiesP/yt-live-chat-overlay/commit/b81bc96))
+
+### Refactored
+
+- **`resolveLimits()` outline key resolution** — Replaced hard-coded string comparisons (`key === 'widthPx'`) with explicit `OUTLINE_LIMIT_KEYS` map. Deduplicated return type by reusing `NumericSettingLimit`. ([`71d1fd2`](https://github.com/PiesP/yt-live-chat-overlay/commit/71d1fd2))
+
+### Changed
+
+- **Standardized catch blocks** — 22 `catch (error)` → `catch (error: unknown)` across 11 files for strict type safety. ([`dc3fec1`](https://github.com/PiesP/yt-live-chat-overlay/commit/dc3fec1))
+- **Standardized `.cssText` and magic numbers** — `observability.ts` switched from `Array.join()` to string concatenation. `text-measure.ts` extracted `CSP_WIDTH_FACTOR` (0.6) and `HEIGHT_FALLBACK_FACTOR` (1.1) as named constants. ([`b097b07`](https://github.com/PiesP/yt-live-chat-overlay/commit/b097b07))
+- **Standardized Boolean coercion to `Boolean()`** — Replaced 2 `!!` usages with `Boolean()` in `runtime-session.ts` and `chat-message-parser.ts`. ([`3a9f722`](https://github.com/PiesP/yt-live-chat-overlay/commit/3a9f722))
+- **Standardized function style in `dom.ts` and `youtubei-json.ts`** — Converted remaining `export function` declarations (4 in dom, 1 in youtubei-json) to arrow functions for file-level consistency. ([`4bc257c`](https://github.com/PiesP/yt-live-chat-overlay/commit/4bc257c))
+- **Added JSDoc to undocumented exports** — `setOverlayLogLevel`, `stripControlCharacters`, `normalizeInlineText`, `hasEmojiContent`. ([`0982047`](https://github.com/PiesP/yt-live-chat-overlay/commit/0982047))
+
 ## [0.34.0] - 2026-05-25
 
 ### Added
