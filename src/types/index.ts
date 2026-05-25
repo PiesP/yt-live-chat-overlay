@@ -181,6 +181,14 @@ export interface OverlaySettings {
   backlogRecentMinutes: number;
   /** Backlog message opacity multiplier (0.1-1.0, default 0.75 = 75% of live opacity) */
   backlogOpacityMultiplier: number;
+  /** Enable multi-layer depth effect via speed variation (off by default) */
+  depthLayersEnabled: boolean;
+  /** Speed multiplier for Near layer messages (1.0-2.0, default 1.4) */
+  depthNearSpeedMul: number;
+  /** Speed multiplier for Far layer messages (0.3-1.0, default 0.6) */
+  depthFarSpeedMul: number;
+  /** Opacity multiplier for Far layer messages (0.4-1.0, default 0.65) */
+  depthFarOpacityMul: number;
   /** Preserve author's chosen text color from YouTube chat */
   preserveUserColor: boolean;
   /** Maximum body text lines for SuperChat cards (2-10, default 5) */
