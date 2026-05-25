@@ -155,12 +155,10 @@ export class ObservabilityReporter {
     if (this.debugOverlayEl) return;
     const el = document.createElement('div');
     el.id = 'yt-chat-overlay-debug';
-    el.style.cssText = [
-      `position:fixed;top:${DEBUG_OVERLAY_TOP};right:${DEBUG_OVERLAY_RIGHT};z-index:${DEBUG_OVERLAY_Z_INDEX};`,
-      `background:${DEBUG_OVERLAY_BG};color:#0f0;font:12px/1.4 monospace;`,
-      'padding:8px 12px;border-radius:4px;min-width:220px;',
-      'pointer-events:none;user-select:none',
-    ].join('');
+    el.style.cssText =
+      `position:fixed;top:${DEBUG_OVERLAY_TOP};right:${DEBUG_OVERLAY_RIGHT};z-index:${DEBUG_OVERLAY_Z_INDEX};` +
+      `background:${DEBUG_OVERLAY_BG};color:#0f0;font:12px/1.4 monospace;` +
+      'padding:8px 12px;border-radius:4px;min-width:220px;pointer-events:none;user-select:none';
     document.body.appendChild(el);
     this.debugOverlayEl = el;
   }
