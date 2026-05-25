@@ -516,15 +516,32 @@ export class CanvasRenderer extends RendererBase {
         msg.x = msg.startX + progress * travelDistance;
       }
 
-      const opacity = this.computeMessageOpacity(msg.message, elapsed, msg.duration, isScrolling);
+      const opacity = this.computeMessageOpacity(
+        msg.message,
+        elapsed,
+        msg.duration,
+        isScrolling,
+        msg.speedTier
+      );
 
       const snappedX = Math.floor(msg.x);
       const snappedY = Math.floor(msg.y);
 
+      // Apply atmospheric perspective to Far layer: desaturate author colors
+      const renderMessage =
+        this.settings.depthLayersEnabled &&
+        msg.speedTier === SPEED_TIER.FAR &&
+        msg.message.userColor
+          ? {
+              ...msg.message,
+              userColor: CanvasRenderer.desaturateColor(msg.message.userColor, 0.3),
+            }
+          : msg.message;
+
       if (msg.message.kind === 'superchat') {
         renderSuperChatCard(
           ctx,
-          msg.message,
+          renderMessage,
           msg.width,
           msg.height,
           snappedX,
@@ -539,7 +556,7 @@ export class CanvasRenderer extends RendererBase {
       } else if (msg.message.kind === 'membership') {
         renderMembershipCard(
           ctx,
-          msg.message,
+          renderMessage,
           msg.width,
           msg.height,
           snappedX,
@@ -554,7 +571,7 @@ export class CanvasRenderer extends RendererBase {
       } else {
         renderRegularMessage(
           ctx,
-          msg.message,
+          renderMessage,
           snappedX,
           snappedY,
           opacity,
@@ -983,43 +1000,63 @@ export class CanvasRenderer extends RendererBase {
     return (hash >>> 0) / 4294967296;
   }
 
+  /**
+   * Desaturate a hex color toward gray by a given factor.
+   * factor 0 = original, 1 = full grayscale.
+   * Uses luminance-preserving weights (ITU-R BT.601).
+   */
+  private static desaturateColor(hex: string, factor: number): string {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+    const nr = Math.round(r + (gray - r) * factor);
+    const ng = Math.round(g + (gray - g) * factor);
+    const nb = Math.round(b + (gray - b) * factor);
+    return `rgb(${nr},${ng},${nb})`;
+  }
+
   // ── Opacity ──────────────────────────────────────────────────────────
 
   /**
    * Compute the final rendering opacity for a message by composing the
-   * user-configured opacity with fade-in/out, backlog dimming, and age-based
-   * fade-out. All effects are multiplicative, forming a single SSOT path.
+   * user-configured opacity with fade-in/out, backlog dimming, depth layer
+   * dimming, and age-based fade-out. All effects are multiplicative.
    *
    * Order of application:
    *   1. settings.opacity (base, default 0.85)
    *   2. Fade-in: linear ramp over fadeDurationMs at start of life
    *   3. Fade-out: linear ramp over fadeDurationMs at end (top/bottom only)
-   *   4. Backlog dimming: backlogOpacityMultiplier setting (default 0.75) if isBacklog
-   *   5. Age fade-out: linear ramp to 0 over maxMessageAgeMs (60s)
+   *   4. Backlog dimming: backlogOpacityMultiplier if isBacklog
+   *   5. Far depth dimming: depthFarOpacityMul for Far tier messages
+   *   6. Age fade-out: linear ramp to 0 over maxMessageAgeMs (60s)
    */
   private computeMessageOpacity(
     message: ChatMessage,
     elapsed: number,
     duration: number,
-    isScrolling: boolean
+    isScrolling: boolean,
+    speedTier: number
   ): number {
     let opacity = this.settings.opacity;
 
     const fadeDuration = this.settings.fadeDurationMs;
     if (fadeDuration > 0) {
-      // Fade-in: ramp from 0 to 1 over fadeDuration at message start
       if (elapsed < fadeDuration) {
         opacity *= elapsed / fadeDuration;
       }
-      // Fade-out: ramp from 1 to 0 over fadeDuration at message end
-      // Skip for scrolling messages — they exit the screen naturally.
       if (!isScrolling && elapsed > duration - fadeDuration) {
         opacity *= Math.max(0, (duration - elapsed) / fadeDuration);
       }
     }
 
-    // Backlog dimming: uses backlogOpacityMultiplier setting (default 0.75)
+    // Backlog dimming
     if (message.isBacklog) opacity *= this.settings.backlogOpacityMultiplier;
+
+    // Far depth layer dimming
+    if (this.settings.depthLayersEnabled && speedTier === SPEED_TIER.FAR) {
+      opacity *= this.settings.depthFarOpacityMul;
+    }
 
     // Age fade-out: gradually fade after maxMessageAgeMs (default 60s)
     const ageRatio = Math.min(1, elapsed / rendererLayout.maxMessageAgeMs);
