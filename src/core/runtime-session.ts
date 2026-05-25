@@ -431,7 +431,7 @@ export class RuntimeSession {
       !isVideoPaused &&
       (!renderable ||
         idleDurationMs >= LONG_IDLE_RESTART_MS ||
-        (this.sessionReady && !!chat && (!chat.observerAlive || !chat.recentlyActive)));
+        (this.sessionReady && Boolean(chat) && (!chat.observerAlive || !chat.recentlyActive)));
 
     return { idleDurationMs, renderable, chat, shouldRestart };
   }

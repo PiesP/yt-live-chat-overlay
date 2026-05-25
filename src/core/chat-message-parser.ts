@@ -467,7 +467,7 @@ function classifyAuthorBadge(value: unknown): AuthorType {
     extractAccessibilityLabel(liveBadge),
     extractAccessibilityLabel(metadataBadge),
   ]
-    .filter((s): s is string => !!s)
+    .filter((s): s is string => Boolean(s))
     .join(' ')
     .toUpperCase();
 
