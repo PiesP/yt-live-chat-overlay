@@ -34,9 +34,11 @@ type RootNumericSettingKey = Exclude<
 type SettingMeta = {
   type: 'boolean' | 'number' | 'string';
   visual: boolean;
-  /** Display scale factor for UI (e.g. 100 for percentages). Only meaningful for 'number'. */
+  /** Display scale factor for UI (e.g. 100 for percentages, 1 for raw values). Only meaningful for 'number'. */
   displayScale?: number;
-  /** Number of fractional digits to show in UI. Only meaningful when displayScale > 1. */
+  /** Number of fractional digits to show in UI and control rounding behavior.
+   *  When 0, integer rounding is applied to the display value before scaling.
+   *  When > 0, fractional input is preserved (and formatted with toFixed). */
   displayPrecision?: number;
 };
 const ROOT_SETTING_META = {
@@ -56,7 +58,7 @@ const ROOT_SETTING_META = {
   showDebugOverlay: { type: 'boolean', visual: false },
   authorRateLimit: { type: 'string', visual: false },
   backlogMaxRate: { type: 'number', visual: false },
-  backlogSpeedMultiplier: { type: 'number', visual: false },
+  backlogSpeedMultiplier: { type: 'number', visual: false, displayScale: 1, displayPrecision: 1 },
   backlogMode: { type: 'string', visual: false },
   backlogRecentMinutes: { type: 'number', visual: false },
   backlogOpacityMultiplier: {
