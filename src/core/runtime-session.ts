@@ -161,7 +161,7 @@ export class RuntimeSession {
 
       log.info('Started successfully');
       return 'started';
-    } catch (error) {
+    } catch (error: unknown) {
       if (isAbortError(error)) {
         return 'retryable';
       }
@@ -348,7 +348,7 @@ export class RuntimeSession {
           chatSource.injectExternalMessages(messages);
         }
       );
-    } catch (error) {
+    } catch (error: unknown) {
       log.warn('Failed to install fetch interceptor:', error);
     }
 
@@ -360,7 +360,7 @@ export class RuntimeSession {
         if (this.disposed) return;
         chatSource.injectExternalMessages(messages);
       });
-    } catch (error) {
+    } catch (error: unknown) {
       log.warn('Failed to install DOM chat watcher:', error);
     }
   }
@@ -431,7 +431,7 @@ export class RuntimeSession {
       !isVideoPaused &&
       (!renderable ||
         idleDurationMs >= LONG_IDLE_RESTART_MS ||
-        (this.sessionReady && !!chat && (!chat.observerAlive || !chat.recentlyActive)));
+        (this.sessionReady && chat != null && (!chat.observerAlive || !chat.recentlyActive)));
 
     return { idleDurationMs, renderable, chat, shouldRestart };
   }
@@ -561,7 +561,7 @@ export class RuntimeSession {
           log.warn('Chat health check failed, triggering recovery');
           this.requestManagedRestart('watchdog');
         }
-      } catch (error) {
+      } catch (error: unknown) {
         log.error('Chat watchdog check error:', error);
       }
     }, CHAT_WATCHDOG_INTERVAL_MS);
@@ -602,7 +602,7 @@ export class RuntimeSession {
         this.stopStandbyPolling();
         this.requestManagedRestart('standby-resolved');
       }
-    } catch (error) {
+    } catch (error: unknown) {
       if (!isAbortError(error)) {
         log.warn('Standby poll failed:', error);
       }

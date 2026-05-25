@@ -29,10 +29,12 @@ export const AUTHOR_TYPE_PRIORITY: Record<AuthorType, number> = {
 export const EMOJI_TEXT_PATTERN = /\p{Emoji}/u;
 export const EMOJI_ALIAS_PATTERN = /^:[^:\\s][^:]*:$/u;
 
+/** Strip ASCII control characters (U+0000–U+001F, U+007F–U+009F) from text. */
 export function stripControlCharacters(text: string): string {
   return text.replace(/[\u0000-\u001F\u007F-\u009F]/g, '');
 }
 
+/** Collapse whitespace and trim after stripping control characters. */
 export function normalizeInlineText(text: string): string {
   return stripControlCharacters(text).replace(/\s+/g, ' ').trim();
 }
@@ -70,6 +72,7 @@ export function truncateForKind(text: string, kind: ChatMessage['kind']): string
   return normalizeInlineText(text);
 }
 
+/** Check whether any content segment contains emoji text or imagery. */
 export function hasEmojiContent(segments: readonly ContentSegment[]): boolean {
   return segments.some(
     (segment) =>

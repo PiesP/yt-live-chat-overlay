@@ -252,7 +252,7 @@ export class ReplayChatSource extends ChatSource {
             : extractReplayContinuation(payload.continuations);
 
         pages += 1;
-      } catch (error) {
+      } catch (error: unknown) {
         if (isAbortError(error)) break;
         log.warn('Prefetch page failed:', error);
         await sleep(5000, signal);
@@ -395,7 +395,7 @@ export class ReplayChatSource extends ChatSource {
       }
       this.flushReplayBuffer(currentOffsetMs);
       return true;
-    } catch (error) {
+    } catch (error: unknown) {
       if (isAbortError(error)) {
         throw error;
       }
@@ -461,7 +461,7 @@ export class ReplayChatSource extends ChatSource {
       this.replayNextAllowedFetchAt = 0;
 
       return nextPlayerSeekContinuation !== null || payload.actions.length > 0;
-    } catch (error) {
+    } catch (error: unknown) {
       if (isAbortError(error)) {
         throw error;
       }
@@ -495,7 +495,7 @@ export class ReplayChatSource extends ChatSource {
       this.replayNextAllowedFetchAt = 0;
 
       return this.replayContinuation !== null || events.length > 0;
-    } catch (error) {
+    } catch (error: unknown) {
       if (isAbortError(error)) {
         throw error;
       }

@@ -213,7 +213,7 @@ export class Overlay {
     for (const callback of this.dimensionChangeCallbacks) {
       try {
         callback(this.dimensions);
-      } catch (error) {
+      } catch (error: unknown) {
         log.warn('Dimension change callback error:', error);
       }
     }

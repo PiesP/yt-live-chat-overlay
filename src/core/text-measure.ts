@@ -19,6 +19,11 @@ let measureCtx: CanvasRenderingContext2D | null | false = null;
 const widthCache = new Map<string, number>();
 const WIDTH_CACHE_MAX = 500;
 
+/** Character-width estimate multiplier for CSP-restricted environments (no canvas). */
+const CSP_WIDTH_FACTOR = 0.6;
+/** Line-height fallback factor when font bounding-box metrics are unavailable. */
+const HEIGHT_FALLBACK_FACTOR = 1.1;
+
 function getCtx(): CanvasRenderingContext2D | null {
   if (measureCtx === false) return null;
   if (!measureCtx) {
@@ -70,7 +75,7 @@ export function measureTextWidth(text: string, font: string): number {
     const match = font.match(/(\d+)px/);
     const capture = match?.[1];
     const fontSize = capture ? Number.parseInt(capture, 10) : 16;
-    return Math.ceil(text.length * fontSize * 0.6);
+    return Math.ceil(text.length * fontSize * CSP_WIDTH_FACTOR);
   }
   ctx.font = font;
   const m = ctx.measureText(text);
@@ -95,7 +100,7 @@ export function measureTextWidth(text: string, font: string): number {
  */
 export function measureTextHeight(font: string, fontSize: number): number {
   const ctx = getCtx();
-  if (!ctx) return Math.ceil(fontSize * 1.1);
+  if (!ctx) return Math.ceil(fontSize * HEIGHT_FALLBACK_FACTOR);
   ctx.font = font;
   const m = ctx.measureText('Mg');
 
@@ -105,7 +110,7 @@ export function measureTextHeight(font: string, fontSize: number): number {
     return Math.ceil(actualAscent + actualDescent);
   }
 
-  return Math.ceil(fontSize * 1.1);
+  return Math.ceil(fontSize * HEIGHT_FALLBACK_FACTOR);
 }
 
 /**

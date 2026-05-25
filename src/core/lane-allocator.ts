@@ -24,10 +24,10 @@ export interface LanePlacement {
 interface LaneAllocatorOptions {
   safeTop: number;
   safeBottom: number;
-  readonly fontSize: number;
-  readonly fontWeight: 'normal' | 'bold';
-  readonly fontFamily: string;
-  readonly laneSpacing: number;
+  fontSize: number;
+  fontWeight: 'normal' | 'bold';
+  fontFamily: string;
+  laneSpacing: number;
 }
 
 /**
@@ -127,6 +127,19 @@ export class LaneAllocator {
   updateSafeZone(safeTop: number, safeBottom: number): void {
     this.options.safeTop = safeTop;
     this.options.safeBottom = safeBottom;
+  }
+
+  /** Update font metrics — caller must call `reset()` afterwards to apply. */
+  updateFontMetrics(
+    fontSize: number,
+    fontWeight: 'normal' | 'bold',
+    fontFamily: string,
+    laneSpacing: number
+  ): void {
+    this.options.fontSize = fontSize;
+    this.options.fontWeight = fontWeight;
+    this.options.fontFamily = fontFamily;
+    this.options.laneSpacing = laneSpacing;
   }
 
   reset(dimensions: OverlayDimensions | null): void {
