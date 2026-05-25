@@ -44,7 +44,7 @@ const ROOT_SETTING_META = {
   danmakuMode: { type: 'string', visual: false },
   speedPxPerSec: { type: 'number', visual: true },
   fontSize: { type: 'number', visual: true },
-  opacity: { type: 'number', visual: true },
+  opacity: { type: 'number', visual: true, displayScale: 100, displayPrecision: 0 },
   superChatOpacity: { type: 'number', visual: true, displayScale: 100, displayPrecision: 0 },
   safeTop: { type: 'number', visual: true, displayScale: 100, displayPrecision: 1 },
   safeBottom: { type: 'number', visual: true, displayScale: 100, displayPrecision: 1 },
