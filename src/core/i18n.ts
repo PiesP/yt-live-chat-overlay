@@ -13,11 +13,10 @@
  *   element.textContent = t('Chat Overlay'); // in DOM construction
  */
 
-/** Supported language codes. */
-export type SupportedLanguage = 'en' | 'ko' | 'ja' | 'es' | 'zh';
+import type { LanguageSetting } from '@app-types';
 
-/** Setting value: auto-detect or explicit language. */
-export type LanguageSetting = 'auto' | SupportedLanguage;
+/** Language codes with actual translations (excluding 'auto'). Derived from LanguageSetting. */
+type SupportedLanguage = Exclude<LanguageSetting, 'auto'>;
 
 // ── Module-level active language ─────────────────────────────────────────
 

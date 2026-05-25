@@ -14,6 +14,8 @@ import { SETTINGS_UI_STYLES } from '@core/settings-ui-styles';
 
 const log = createLogger('SettingsUi');
 
+const TOAST_DURATION_MS = 2500;
+
 export class SettingsUi {
   private playerElement: HTMLElement | null = null;
   private button: HTMLButtonElement | null = null;
@@ -327,7 +329,7 @@ export class SettingsUi {
     dialog.className = 'yt-chat-overlay-settings-confirm';
     dialog.setAttribute('role', 'alertdialog');
     dialog.setAttribute('aria-modal', 'true');
-    dialog.setAttribute('aria-label', options.message);
+    dialog.setAttribute('aria-label', t(options.message));
 
     const backdrop = document.createElement('div');
     backdrop.className = 'yt-chat-overlay-settings-confirm-backdrop';
@@ -498,7 +500,7 @@ export class SettingsUi {
     toast.className = 'yt-chat-overlay-settings-toast';
     toast.textContent = message;
     this.modal.appendChild(toast);
-    setTimeout(() => toast.remove(), 2500);
+    setTimeout(() => toast.remove(), TOAST_DURATION_MS);
   }
 
   destroy(): void {

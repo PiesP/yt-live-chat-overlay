@@ -479,13 +479,13 @@ export class SettingsUiForm {
 
       if (el.name.startsWith('color-')) {
         if (!partial.colors) partial.colors = {};
-        (partial.colors as Record<string, string>)[el.name.slice(6)] = el.value;
+        (partial.colors as Record<string, string>)[el.name.slice('color-'.length)] = el.value;
         continue;
       }
 
       if (el.name.startsWith('showAuthor-')) {
         if (!partial.showAuthor) partial.showAuthor = {};
-        (partial.showAuthor as Record<string, boolean>)[el.name.slice(11)] = (
+        (partial.showAuthor as Record<string, boolean>)[el.name.slice('showAuthor-'.length)] = (
           el as HTMLInputElement
         ).checked;
         continue;
