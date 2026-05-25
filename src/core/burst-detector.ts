@@ -113,7 +113,6 @@ export class BurstDetector {
    */
   resume(): void {
     this.samples = [];
-    this.currentLevel = 'normal';
     this.lastBurstTime = 0;
     this.burstStartTime = 0;
     this.start();
