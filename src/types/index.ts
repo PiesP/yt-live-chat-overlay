@@ -18,6 +18,8 @@ export type SuperChatTier = 'blue' | 'cyan' | 'green' | 'yellow' | 'orange' | 'm
 export type AuthorRateLimitPreset = 'off' | 'normal' | 'strict';
 /** Backlog injection modes */
 export type BacklogMode = 'playback' | 'recent' | 'full' | 'none';
+/** Language setting: auto-detect or explicit locale */
+export type LanguageSetting = 'auto' | 'en' | 'ko' | 'ja' | 'es' | 'zh';
 
 /**
  * Author display settings (per author type)
@@ -192,6 +194,8 @@ export interface OverlaySettings {
   minPollIntervalMs: number;
   /** Maximum polling interval in milliseconds */
   maxPollIntervalMs: number;
+  /** UI language: auto-detect or explicit locale */
+  language: LanguageSetting;
 }
 
 /**

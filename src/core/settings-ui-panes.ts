@@ -85,6 +85,14 @@ export const PANES: PaneDef[] = [
       {
         title: '',
         fields: [
+          sel('Language', 'language', [
+            ['auto', 'Auto (Browser)'],
+            ['en', 'English'],
+            ['ko', '한국어'],
+            ['ja', '日本語'],
+            ['es', 'Español'],
+            ['zh', '中文'],
+          ]),
           sel('Danmaku Mode', 'danmakuMode', [
             ['scroll', 'Scroll (RTL)'],
             ['reverse', 'Reverse (LTR)'],

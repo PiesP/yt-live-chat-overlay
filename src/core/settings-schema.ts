@@ -73,6 +73,7 @@ const ROOT_SETTING_META = {
   fadeDurationMs: { type: 'number', visual: false },
   minPollIntervalMs: { type: 'number', visual: false },
   maxPollIntervalMs: { type: 'number', visual: false },
+  language: { type: 'string', visual: false },
 } as const satisfies Record<RootScalarSettingKey, SettingMeta>;
 
 /**
@@ -208,6 +209,7 @@ export const DEFAULT_SETTINGS = {
   fadeDurationMs: 500,
   minPollIntervalMs: 50,
   maxPollIntervalMs: 2000,
+  language: 'auto',
 } as const satisfies Readonly<OverlaySettings>;
 
 // ── Color validation ────────────────────────────────────────────────────────────
@@ -269,6 +271,8 @@ const STRING_VALIDATORS: Partial<Record<RootScalarSettingKey, (v: string) => boo
   fontWeight: (v) => v === 'normal' || v === 'bold',
   fontFamily: (_v) => true,
   authorRateLimit: (v) => v === 'off' || v === 'normal' || v === 'strict',
+  language: (v) =>
+    v === 'auto' || v === 'en' || v === 'ko' || v === 'ja' || v === 'es' || v === 'zh',
 };
 
 const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings => {

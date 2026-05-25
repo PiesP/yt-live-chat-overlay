@@ -6,6 +6,7 @@
  */
 
 import type { OverlaySettings } from '@app-types';
+import { resolveActiveLanguage, t } from '@core/i18n';
 import { createLogger, setOverlayLogLevel } from '@core/logging';
 import { PageWatcher } from '@core/page-watcher';
 import { RuntimeManager } from '@core/runtime-manager';
@@ -56,12 +57,14 @@ class App {
 
   async start(): Promise<void> {
     this.settings.initialize();
+    resolveActiveLanguage(this.settings.get().language);
     setOverlayLogLevel(this.settings.get().logLevel);
 
     // Subscribe to cross-tab settings sync — reconcile runtime when
     // another tab changes settings via localStorage or GM storage.
     this.unsubscribeCrossTab = this.settings.subscribe(() => {
       log.debug('Cross-tab settings change — reconciling runtime');
+      resolveActiveLanguage(this.settings.get().language);
       setOverlayLogLevel(this.settings.get().logLevel);
       // Sync the settings form if it is open, so cross-tab changes are
       // visible and don't get overwritten by stale form values on close.
@@ -93,7 +96,15 @@ class App {
    * Apply settings changes — updates memory, persists, and applies side-effects.
    */
   applySettings(partial: Partial<OverlaySettings>): void {
+    const prevLanguage = this.settings.get().language;
     this.settings.set(partial);
+    // Re-resolve language when it changes so t() picks up the new locale
+    // on the next open (DOM strings are baked at construction time, so a
+    // dialog close/reopen cycle is required for visible effect — the
+    // caller (close/handleImport) already handles dialog lifecycle).
+    if (partial.language !== undefined && partial.language !== prevLanguage) {
+      resolveActiveLanguage(this.settings.get().language);
+    }
     this.applySettingsSideEffects(partial);
   }
 
@@ -104,7 +115,14 @@ class App {
    * settings dialog (onPersist → applySettings).
    */
   previewSettings(partial: Partial<OverlaySettings>): void {
+    const prevLanguage = this.settings.get().language;
     this.settings.preview(partial);
+    // Re-resolve language and rebuild modal in-place so translated
+    // strings take effect immediately (no storage write — memory only).
+    if (partial.language !== undefined && partial.language !== prevLanguage) {
+      resolveActiveLanguage(partial.language);
+      this.settingsUi.syncLanguage();
+    }
     this.applySettingsSideEffects(partial);
   }
 
@@ -120,6 +138,7 @@ class App {
 
   resetSettings(): void {
     this.settings.reset();
+    resolveActiveLanguage(this.settings.get().language);
     this.applySettingsSideEffects({});
   }
 
@@ -185,7 +204,7 @@ main();
 
 function registerMenuCommands(): void {
   if (typeof GM_registerMenuCommand === 'undefined') return;
-  GM_registerMenuCommand('Reset overlay settings', () => {
+  GM_registerMenuCommand(t('Reset overlay settings'), () => {
     const app = window.__ytChatOverlay;
     if (app) {
       app.resetSettings();

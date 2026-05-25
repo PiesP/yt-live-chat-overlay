@@ -5,6 +5,7 @@ import {
   findPlayerContainerElement,
   PLAYER_LOOKUP_INTERVAL_MS,
 } from '@core/dom';
+import { getActiveLanguage, t } from '@core/i18n';
 import { createLogger } from '@core/logging';
 import { normalizeStoredSettings, SETTINGS_VERSION } from '@core/settings-schema';
 import { BACKDROP_ID, BUTTON_ID, SettingsUiForm, STYLE_ID } from '@core/settings-ui-form';
@@ -20,6 +21,8 @@ export class SettingsUi {
   private modal: HTMLDivElement | null = null;
   private previousFocus: HTMLElement | null = null;
   private activeTab: string;
+  /** Language code that was active when the modal content was last built. */
+  private modalLanguage: string | null = null;
 
   private get defaultTabId(): string {
     const first = PANES[0];
@@ -138,7 +141,7 @@ export class SettingsUi {
       this.button.type = 'button';
       this.button.className = 'yt-chat-overlay-settings-button';
       this.button.textContent = '⚙';
-      this.button.setAttribute('aria-label', 'Chat overlay settings');
+      this.button.setAttribute('aria-label', t('Chat overlay settings'));
       this.button.addEventListener('click', () => this.open());
     } else if (this.button.parentElement) {
       this.button.remove();
@@ -256,6 +259,7 @@ export class SettingsUi {
 
     this.form.setModal(this.modal);
     this.bindModalEvents();
+    this.modalLanguage = getActiveLanguage();
 
     this.backdrop.appendChild(this.modal);
     document.body.appendChild(this.backdrop);
@@ -268,6 +272,12 @@ export class SettingsUi {
   private open(): void {
     if (!this.backdrop || !this.modal) return;
 
+    // Rebuild modal content when language changed — DOM strings are
+    // baked at construction time so a full rebuild is required.
+    if (this.modalLanguage !== getActiveLanguage()) {
+      this.rebuildModalContent();
+    }
+
     const activeElement = document.activeElement;
     this.previousFocus = activeElement instanceof HTMLElement ? activeElement : null;
 
@@ -275,6 +285,36 @@ export class SettingsUi {
     this.switchTab(this.activeTab);
     this.setDialogOpen(true);
     this.focusInitialElement();
+  }
+
+  /** Rebuild modal DOM content from scratch (called on language change). */
+  private rebuildModalContent(): void {
+    if (!this.modal) return;
+    // Clear existing content
+    while (this.modal.firstChild) {
+      this.modal.removeChild(this.modal.firstChild);
+    }
+    // Rebuild with current language.
+    // Event listeners on the modal element itself (from bindModalEvents) are
+    // retained — only children are replaced.
+    this.modal.append(...this.form.createModalContent());
+    this.form.setModal(this.modal);
+    this.modalLanguage = getActiveLanguage();
+  }
+
+  /**
+   * Rebuild the modal in-place when the language changes during preview.
+   * Preserves the current tab and form values so the change appears seamless.
+   * No storage write — only the in-memory DOM is updated.
+   */
+  syncLanguage(): void {
+    if (!this.isDialogOpen() || !this.modal) return;
+    if (this.modalLanguage === getActiveLanguage()) return;
+
+    const savedTab = this.activeTab;
+    this.rebuildModalContent();
+    this.form.populateForm(this.getSettings());
+    this.switchTab(savedTab);
   }
 
   /** Create a reusable confirmation dialog overlay for destructive actions. */
@@ -297,7 +337,7 @@ export class SettingsUi {
 
     const message = document.createElement('p');
     message.className = 'yt-chat-overlay-settings-confirm-message';
-    message.textContent = options.message;
+    message.textContent = t(options.message);
 
     const buttons = document.createElement('div');
     buttons.className = 'yt-chat-overlay-settings-confirm-buttons';
@@ -305,12 +345,12 @@ export class SettingsUi {
     const cancelBtn = document.createElement('button');
     cancelBtn.type = 'button';
     cancelBtn.className = 'yt-chat-overlay-settings-confirm-cancel';
-    cancelBtn.textContent = 'Cancel';
+    cancelBtn.textContent = t('Cancel');
 
     const okBtn = document.createElement('button');
     okBtn.type = 'button';
     okBtn.className = 'yt-chat-overlay-settings-confirm-ok';
-    okBtn.textContent = options.confirmLabel;
+    okBtn.textContent = t(options.confirmLabel);
 
     buttons.append(cancelBtn, okBtn);
     confirmDialog.append(message, buttons);
@@ -370,7 +410,7 @@ export class SettingsUi {
           if (typeof text !== 'string') return;
           const parsed = JSON.parse(text) as Record<string, unknown>;
           if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-            this.showToast('Import failed: invalid settings format');
+            this.showToast(t('Import failed: invalid settings format'));
             log.warn('Import failed: expected a settings object');
             return;
           }
@@ -387,9 +427,9 @@ export class SettingsUi {
           this.form.populateForm(this.getSettings());
           const persist = this.onPersist ?? this.onChange;
           persist(settings);
-          this.showToast('Settings imported successfully');
+          this.showToast(t('Settings imported successfully'));
         } catch (error) {
-          this.showToast('Import failed: invalid JSON');
+          this.showToast(t('Import failed: invalid JSON'));
           log.warn('Import failed: invalid JSON file', error);
         }
       });

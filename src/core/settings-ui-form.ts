@@ -1,4 +1,5 @@
 import type { OverlaySettings } from '@app-types';
+import { t } from '@core/i18n';
 import { createLogger } from '@core/logging';
 import type {
   OutlineSettingKey,
@@ -86,12 +87,12 @@ function createHeader(): HTMLDivElement {
   const header = domDiv('yt-chat-overlay-settings-header');
   const title = document.createElement('div');
   title.id = TITLE_ID;
-  title.textContent = 'Chat Overlay';
+  title.textContent = t('Chat Overlay');
   const closeButton = document.createElement('button');
   closeButton.type = 'button';
   closeButton.className = 'yt-chat-overlay-settings-close';
   closeButton.setAttribute('data-action', 'close');
-  closeButton.setAttribute('aria-label', 'Close settings');
+  closeButton.setAttribute('aria-label', t('Close settings'));
   closeButton.textContent = 'x';
   header.append(title, closeButton);
   return header;
@@ -101,7 +102,7 @@ function createTabs(): HTMLElement {
   const nav = document.createElement('nav');
   nav.className = 'yt-chat-overlay-settings-tabs';
   nav.setAttribute('role', 'tablist');
-  nav.setAttribute('aria-label', 'Settings categories');
+  nav.setAttribute('aria-label', t('Settings categories'));
 
   for (const pane of PANES) {
     const button = document.createElement('button');
@@ -111,7 +112,7 @@ function createTabs(): HTMLElement {
     button.setAttribute('role', 'tab');
     button.setAttribute('aria-selected', String(pane.id === 'comments'));
     button.setAttribute('aria-controls', `pane-${pane.id}`);
-    button.textContent = pane.label;
+    button.textContent = t(pane.label);
     if (pane.id === 'comments') button.classList.add('active');
     nav.appendChild(button);
   }
@@ -130,7 +131,7 @@ function createActions(): HTMLDivElement {
     const button = document.createElement('button');
     button.type = 'button';
     button.dataset.action = action;
-    button.textContent = label;
+    button.textContent = t(label);
     actions.appendChild(button);
   }
   return actions;
@@ -140,7 +141,7 @@ function createEnabledField(): HTMLLabelElement {
   const label = document.createElement('label');
   label.className = 'yt-chat-overlay-settings-enabled';
   const text = document.createElement('span');
-  text.textContent = 'Overlay Enabled';
+  text.textContent = t('Overlay Enabled');
   const input = domInput({ type: 'checkbox', name: 'enabled' });
   label.append(text, input);
   return label;
@@ -148,8 +149,8 @@ function createEnabledField(): HTMLLabelElement {
 
 function createCheckboxField(labelText: string, name: string, title?: string): HTMLLabelElement {
   const input = domInput({ type: 'checkbox', name });
-  if (title) input.title = title;
-  return domField(labelText, input);
+  if (title) input.title = t(title);
+  return domField(t(labelText), input);
 }
 
 // ── UI value formatting ──────────────────────────────────────────────────────
@@ -284,7 +285,7 @@ export class SettingsUiForm {
       if (section.fields.length === 0) continue;
 
       if (section.title) {
-        const secEl = domSection(section.title);
+        const secEl = domSection(t(section.title));
         for (const field of section.fields) {
           secEl.appendChild(this.buildField(field));
         }
@@ -312,26 +313,26 @@ export class SettingsUiForm {
           input,
           def.key as RootScalarSettingKey | Exclude<OutlineSettingKey, 'enabled'>
         );
-        if (def.title) input.title = def.title;
-        return domField(def.label, input);
+        if (def.title) input.title = t(def.title);
+        return domField(t(def.label), input);
       }
       case 'select': {
         const select = document.createElement('select');
         select.name = this.resolveKey(def);
-        if (def.title) select.title = def.title;
+        if (def.title) select.title = t(def.title);
         for (const [value, label] of def.options) {
           const opt = document.createElement('option');
           opt.value = value;
-          opt.textContent = label;
+          opt.textContent = t(label);
           select.appendChild(opt);
         }
-        return domField(def.label, select);
+        return domField(t(def.label), select);
       }
       case 'text': {
         const input = domInput({ type: 'text', name: this.resolveKey(def) });
-        if (def.title) input.title = def.title;
-        if (def.placeholder) input.placeholder = def.placeholder;
-        return domField(def.label, input);
+        if (def.title) input.title = t(def.title);
+        if (def.placeholder) input.placeholder = t(def.placeholder);
+        return domField(t(def.label), input);
       }
       default:
         throw new Error('Unhandled field type');
@@ -343,13 +344,17 @@ export class SettingsUiForm {
   }
 
   private buildAuthorGrid(): HTMLDivElement {
-    const section = domSection('Author Colors & Visibility');
+    const section = domSection(t('Author Colors & Visibility'));
     const grid = domDiv('yt-chat-overlay-author-grid');
-    grid.append(document.createElement('span'), domGridHeader('Color'), domGridHeader('Show'));
+    grid.append(
+      document.createElement('span'),
+      domGridHeader(t('Color')),
+      domGridHeader(t('Show'))
+    );
 
     for (const key of AUTHOR_COLOR_KEYS) {
       grid.append(
-        domGridLabel(key.charAt(0).toUpperCase() + key.slice(1)),
+        domGridLabel(t(key.charAt(0).toUpperCase() + key.slice(1))),
         domInput({
           type: 'color',
           name: `color-${key}`,
@@ -360,7 +365,7 @@ export class SettingsUiForm {
     }
 
     grid.append(
-      domGridLabel('SuperChat'),
+      domGridLabel(t('SuperChat')),
       document.createElement('span'),
       domGridCheckbox('showAuthor-superChat')
     );
