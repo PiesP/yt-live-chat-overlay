@@ -31,28 +31,37 @@ interface LaneAllocatorOptions {
 }
 
 /**
- * Top-first lane scheduler with speed-isolated lane allocation.
+ * Speed tier constants for lane allocation.
+ *  0 = Far depth, 1 = Mid (default real-time), 2 = Near depth, 3 = Backlog
+ */
+export const SPEED_TIER = {
+  FAR: 0,
+  MID: 1,
+  NEAR: 2,
+  BACKLOG: 3,
+} as const;
+
+/**
+ * Top-first lane scheduler with tiered-speed lane allocation.
  *
  * Fills lanes from the top of the screen down using a three-phase strategy
  * that naturally groups messages with similar speeds together:
  *
  *   1. Phase 1 (zero-wait, speed-filtered): return the first lane with
- *      waitMs === 0 that also passes the speed compatibility check.
- *      Real-time messages skip lanes with active backlog content;
- *      backlog messages skip lanes with active real-time content.
+ *      waitMs === 0 that also passes the speed-tier compatibility check.
+ *      Messages skip lanes with incompatible speed-tier content.
  *      During a burst this distributes across all lanes: msg1 → lane 0,
  *      msg2 → lane 1, ..., msgN → lane N-1.
  *
  *   2. Phase 2 (speed-matched): when all lanes are busy, prefer lanes
- *      that already have same-speed content. Real-time messages cluster
- *      with real-time, backlog with backlog. This produces natural
- *      visual zones without hard-coded partitions.
+ *      that already have same-tier content. Messages cluster with their
+ *      own tier. This produces natural visual zones without hard-coded
+ *      partitions.
  *
  *   3. Phase 3 (fastest-free): when no speed-matched lane is available,
  *      return the topmost busy lane (shortest wait) for all message types.
  *      Speed-isolated headway scaling in checkPlacement() prevents visual
- *      overtaking when a fast backlog message shares a lane with a slower
- *      real-time message.
+ *      overtaking when a fast message shares a lane with a slower one.
  *
  * Supports:
  *   - Precision exit-time occupancy for multi-message lane sharing
@@ -79,20 +88,13 @@ export class LaneAllocator {
   private collidedLanes: Set<number> = new Set();
 
   /**
-   * Tracks until when each lane has active real-time content (non-backlog).
-   * Map laneIndex → timestamp (performance.now()) until which the lane is
-   * considered to have real-time occupancy. Backlog messages skip these
-   * lanes when zero-wait lanes exist without recent real-time traffic.
-   * Stale entries (timestamp < now) are cleared on each resetBatch().
+   * Per-lane active speed tier tracking: laneIndex → { tier, until }.
+   * Replaces the old realTimeLanesUntil / backlogLanesUntil dual-map.
+   * Two tiers are speed-compatible when within 1 tier of each other
+   * (e.g. Mid and Near can share, but Far and Backlog cannot).
+   * Stale entries (until < now) are cleared on each resetBatch().
    */
-  private realTimeLanesUntil: Map<number, number> = new Map();
-
-  /**
-   * Tracks until when each lane has active backlog content.
-   * Real-time messages skip these lanes in Phase 1 so they naturally
-   * cluster together, forming visually distinct speed zones.
-   */
-  private backlogLanesUntil: Map<number, number> = new Map();
+  private speedTierLanes: Map<number, { tier: number; until: number }> = new Map();
 
   /**
    * Minimum cooldown between consecutive uses of the same lane (ms).
@@ -112,7 +114,7 @@ export class LaneAllocator {
   static readonly HEADWAY_GAP_MAX_PX = 60;
 
   /**
-   * Epsilon-greedy selection probability (0–1).
+   * Epsilon-greedy selection probability (0-1).
    * 5% chance to skip the strict topmost zero-wait lane and pick the
    * next one below. Prevents all traffic from consolidating on lane 0
    * when the incoming message rate is low.
@@ -131,8 +133,7 @@ export class LaneAllocator {
     this.heap = [];
     this.laneIndexToHeapIndex = new Map();
     this.collidedLanes.clear();
-    this.realTimeLanesUntil.clear();
-    this.backlogLanesUntil.clear();
+    this.speedTierLanes.clear();
     this.cachedUtilization = 0;
     if (!dimensions) {
       this.laneHeight = 0;
@@ -141,10 +142,6 @@ export class LaneAllocator {
     }
 
     // Formula: laneHeight = textHeight + paddingV*2 + laneSpacing
-    // The author section is NOT included because most messages have
-    // showAuthor=false by default. Messages WITH author (moderator,
-    // owner, superChat) report a taller msgHeight from estimateDimensions,
-    // so slotCount = ceil(msgHeight / laneHeight) auto-assigns 2+ slots.
     const totalPaddingV = rendererLayout.paddingV * 2;
     const font = getFontString(
       this.options.fontSize,
@@ -194,21 +191,27 @@ export class LaneAllocator {
     return viewportHeight * this.options.safeTop + laneIndex * this.laneHeight;
   }
 
+  /**
+   * Two speed tiers are compatible when within 1 tier of each other.
+   * This allows e.g. Mid (1) and Near (2) to share lanes, but prevents
+   * Far (0) and Backlog (3 → 2x speed) from mixing.
+   */
+  private static areSpeedTiersCompatible(a: number, b: number): boolean {
+    return Math.abs(a - b) <= 1;
+  }
+
   findPlacement(
     messageHeight: number,
     dimensions: OverlayDimensions,
-    isBacklog = false
+    speedTier: number = SPEED_TIER.MID
   ): LanePlacement | null {
     const now = performance.now();
     const totalLanes = this.laneCount;
     if (totalLanes <= 0) return null;
 
-    // Calculate how many lane slots this message needs.
-    // A superchat card may be 3-5x taller than a regular message.
     const slotCount = Math.max(1, Math.ceil(messageHeight / this.laneHeight));
 
-    // Scan from the top for the first free lane/block.
-    const result = this.allocateMultiSlot(now, 0, totalLanes, slotCount, isBacklog);
+    const result = this.allocateMultiSlot(now, 0, totalLanes, slotCount, speedTier);
     if (!result) return null;
 
     return {
@@ -226,19 +229,9 @@ export class LaneAllocator {
    *
    * For scrolling mode, uses precision exit-time:
    *   occupancyMs = rightEdgePassMs
-   * where rightEdgePassMs is when the comment's right edge exits the
-   * screen plus a small headway gap. This replaces the old duration +
-   * cooldown model and dramatically reduces dead space between consecutive
-   * comments on the same lane.
    *
    * For top/bottom mode, msgWidth/screenWidth are omitted and the old
-   * duration + cooldown model applies (message stays visible for full duration).
-   *
-   * @param placement   - The lane placement returned by findPlacement()
-   * @param startTime   - The timestamp (performance.now()) when the message starts
-   * @param durationMs  - The actual animation duration in milliseconds
-   * @param msgWidth    - Message pixel width (scrolling mode only)
-   * @param screenWidth - Viewport width (scrolling mode only)
+   * duration + cooldown model applies.
    */
   commitPlacement(
     placement: LanePlacement,
@@ -246,35 +239,21 @@ export class LaneAllocator {
     durationMs: number,
     msgWidth?: number,
     screenWidth?: number,
-    isBacklog = false
+    speedTier: number = SPEED_TIER.MID
   ): void {
     const occupancyMs = this.computeOccupancyMs(durationMs, msgWidth, screenWidth);
     const nextAvailable = startTime + occupancyMs;
     const startIdx = placement.laneIndex;
 
-    // Store speed-profile visibility end-time per lane so that
-    // subsequent allocations can group messages by speed profile.
-    // Uses durationMs (full on-screen time) rather than occupancyMs
-    // (right-edge-pass time) to prevent cross-speed overtaking.
-    // A faster backlog message must never enter a lane where a slower
-    // real-time message is still visible, even if its right edge has
-    // already passed the screen edge.
-    // Real-time → realTimeLanesUntil, backlog → backlogLanesUntil.
+    // Track speed-tier visibility per lane so subsequent allocations
+    // can group messages by speed tier. Uses durationMs (full on-screen
+    // time) rather than occupancyMs to prevent cross-tier overtaking.
     const until = startTime + durationMs;
-    if (isBacklog) {
-      forEachSlot(startIdx, placement.slotCount, (slotIdx) => {
-        this.backlogLanesUntil.set(slotIdx, until);
-      });
-    } else {
-      forEachSlot(startIdx, placement.slotCount, (slotIdx) => {
-        this.realTimeLanesUntil.set(slotIdx, until);
-      });
-    }
+    forEachSlot(startIdx, placement.slotCount, (slotIdx) => {
+      this.speedTierLanes.set(slotIdx, { tier: speedTier, until });
+    });
 
     // Update all slots occupied by this message with the SAME available time.
-    // This prevents partial-slot availability where a new message could enter
-    // a "released" top slot while the bottom slot is still occupied, causing
-    // visual overlap with the multi-slot message (e.g. SuperChat cards).
     forEachSlot(startIdx, placement.slotCount, (slotIdx) => {
       this.updateLane(slotIdx, nextAvailable);
     });
@@ -288,13 +267,10 @@ export class LaneAllocator {
    */
   resetBatch(): void {
     this.collidedLanes.clear();
-    // Prune expired speed-profile lane entries.
+    // Prune expired speed-tier lane entries.
     const now = performance.now();
-    for (const [laneIdx, until] of this.realTimeLanesUntil) {
-      if (until <= now) this.realTimeLanesUntil.delete(laneIdx);
-    }
-    for (const [laneIdx, until] of this.backlogLanesUntil) {
-      if (until <= now) this.backlogLanesUntil.delete(laneIdx);
+    for (const [laneIdx, entry] of this.speedTierLanes) {
+      if (entry.until <= now) this.speedTierLanes.delete(laneIdx);
     }
     // Recompute cached utilization for O(1) getUtilization().
     let occupied = 0;
@@ -318,13 +294,8 @@ export class LaneAllocator {
   /**
    * Compute the effective time this message occupies its lane.
    *
-   * For scrolling mode: the comment exits the frame when its right edge
-   * passes the left edge. This happens before `duration` ends because
-   * duration includes the exitPadding. We compute the exact exit time
-   * and add only a small headway gap.
-   *
-   * For top/bottom mode: the message stays visible for the full duration,
-   * so the old cooldown model applies.
+   * For scrolling mode: precision exit-time with adaptive headway gap.
+   * For top/bottom mode: full duration + safety cooldown.
    */
   private computeOccupancyMs(
     durationMs: number,
@@ -338,12 +309,7 @@ export class LaneAllocator {
     }
 
     // Scrolling mode: precision exit-time
-    // exitPadding must match renderFrame's travel distance computation.
     const totalDistance = screenWidth + msgWidthPx + rendererLayout.exitPaddingMin;
-    // Adaptive headway gap: proportional to message width so short messages
-    // get tighter spacing (higher lane density) while long messages maintain
-    // readable separation. At font-size 32, a 3-char message (~80px) gets
-    // 16px gap, a long message (~500px) gets 40px gap.
     const headwayPx = Math.max(
       LaneAllocator.HEADWAY_GAP_MIN_PX,
       Math.min(
@@ -351,35 +317,16 @@ export class LaneAllocator {
         Math.round(msgWidthPx * rendererLayout.headwayGapRatio)
       )
     );
-    // Multi-message lane sharing: the lane is freed when the message has
-    // scrolled just beyond its own width + headway gap. This allows a new
-    // message to enter from the right while the previous message is still
-    // visible on screen — they simply share the same lane without overlap.
-    // Previously the lane was held until the message fully exited the left
-    // edge (visualExitMs), which blocked the lane for ~95% of its duration.
     const rightEdgePassFraction = (msgWidthPx + headwayPx) / totalDistance;
-    const rightEdgePassMs = Math.round(rightEdgePassFraction * durationMs);
-    // The headway gap in time is already accounted for in rightEdgePassMs
-    // (via headwayPx). No separate headwayMs needed.
-    return rightEdgePassMs;
+    return Math.round(rightEdgePassFraction * durationMs);
   }
 
   /**
-   * Allocate a single lane with three-phase speed-isolated scanning.
+   * Allocate a single lane with three-phase speed-tier scanning.
    *
-   * Phase 1 — zero-wait with speed filter: return the first completely
-   * free lane (waitMs === 0) that is compatible with this message's speed
-   * profile. Real-time skips backlog-occupied lanes; backlog skips
-   * real-time-occupied lanes. Epsilon-greedy (5%) skips the first match
-   * for visual variety.
-   *
-   * Phase 2 — speed-matched busy lane: if no zero-wait lane is compatible,
-   * prefer lanes that already have same-speed content (shortest wait first).
-   * Both real-time and backlog benefit from clustering with their own kind.
-   *
-   * Phase 3 — fastest-free lane (real-time only): fall back to the topmost
-   * busy lane regardless of speed profile. Backlog messages stop here and
-   * return null — they don't compete with real-time on busy lanes.
+   * Phase 1 — zero-wait with tier compatibility filter.
+   * Phase 2 — same-tier busy lane (shortest wait first).
+   * Phase 3 — fastest-free lane (all message types).
    *
    * Collided lanes (from markCollision feedback) are excluded from all phases.
    */
@@ -387,7 +334,7 @@ export class LaneAllocator {
     now: number,
     laneStart: number,
     laneEnd: number,
-    isBacklog = false
+    speedTier: number
   ): { laneIndex: number; waitMs: number } | null {
     if (this.heap.length === 0) return null;
 
@@ -395,17 +342,14 @@ export class LaneAllocator {
     let firstBusy: { laneIndex: number; waitMs: number } | null = null;
     let speedMatched: { laneIndex: number; waitMs: number } | null = null;
 
-    // ── Phase 1: zero-wait lane with speed compatibility filter ──
+    // ── Phase 1: zero-wait lane with tier compatibility filter ──
     for (let i = laneStart; i < laneEnd; i++) {
       if (this.collidedLanes.has(i)) continue;
 
-      // Speed compatibility check
-      if (isBacklog) {
-        // Backlog: skip lanes with active real-time content
-        if ((this.realTimeLanesUntil.get(i) ?? 0) > now) continue;
-      } else {
-        // Real-time: skip lanes with active backlog content
-        if ((this.backlogLanesUntil.get(i) ?? 0) > now) continue;
+      // Speed-tier compatibility check
+      const active = this.speedTierLanes.get(i);
+      if (active && active.until > now) {
+        if (!LaneAllocator.areSpeedTiersCompatible(speedTier, active.tier)) continue;
       }
 
       const avail = this.getSlotAvailableAt(i);
@@ -414,12 +358,11 @@ export class LaneAllocator {
       if (wait > 0) {
         // Track for phases 2-3
         if (!firstBusy) firstBusy = { laneIndex: i, waitMs: wait };
-        // Track speed-matched candidate for phase 2
+        // Track same-tier candidate for phase 2
         if (!speedMatched || wait < speedMatched.waitMs) {
-          const hasSameSpeed = isBacklog
-            ? (this.backlogLanesUntil.get(i) ?? 0) > now
-            : (this.realTimeLanesUntil.get(i) ?? 0) > now;
-          if (hasSameSpeed) speedMatched = { laneIndex: i, waitMs: wait };
+          const hasSameTier =
+            active !== undefined && active.until > now && active.tier === speedTier;
+          if (hasSameTier) speedMatched = { laneIndex: i, waitMs: wait };
         }
         continue;
       }
@@ -429,16 +372,10 @@ export class LaneAllocator {
       return { laneIndex: i, waitMs: 0 };
     }
 
-    // ── Phase 2: speed-matched busy lane ──
-    // Prefer lanes already running at the same speed profile.
+    // ── Phase 2: same-tier busy lane ──
     if (speedMatched && speedMatched.waitMs <= maxWaitMs) return speedMatched;
 
     // ── Phase 3: fastest-free lane (all message types) ──
-    // Real-time and backlog both fall back to the soonest-available lane.
-    // Backlog previously returned null here (hard drop), but with drainQueue
-    // now retrying 'no_lane' via retryQueue, backlog messages can wait for
-    // a lane to free up naturally. Speed-isolated headway scaling in
-    // checkPlacement() prevents visual overtaking on cross-speed lanes.
     if (firstBusy && firstBusy.waitMs <= maxWaitMs) return firstBusy;
     return null;
   }
@@ -447,17 +384,9 @@ export class LaneAllocator {
    * Allocate a contiguous block of `slotCount` lanes for tall messages
    * (superchat, membership). Uses a 3-phase strategy:
    *
-   * Phase 1 — zero-wait block: scan for a block where ALL slots are free
-   * and speed-compatible. First match wins (epsilon-greedy not needed here
-   * since multi-slot messages are rare).
-   *
-   * Phase 2 — busy block within maxWaitMs: scan for a contiguous block
-   * where ALL slots pass speed-compatibility AND have waitMs <= maxWaitMs.
-   * Among valid blocks, pick the one with the shortest max wait.
-   *
-   * Phase 3 — fallback: backlog messages return null (don't compete with
-   * real-time on busy lanes). Real-time messages fall back to the
-   * single-lane allocator as a last resort.
+   * Phase 1 — zero-wait block: all slots free and tier-compatible.
+   * Phase 2 — busy block within maxWaitMs: all slots tier-compatible.
+   * Phase 3 — fallback to single-lane allocator.
    *
    * Single-slot messages are forwarded to allocateSingleLane.
    */
@@ -466,19 +395,26 @@ export class LaneAllocator {
     laneStart: number,
     laneEnd: number,
     slotCount: number,
-    isBacklog = false
+    speedTier: number
   ): { laneIndex: number; waitMs: number } | null {
     if (this.heap.length === 0) return null;
     if (slotCount <= 1) {
-      return this.allocateSingleLane(now, laneStart, laneEnd, isBacklog);
+      return this.allocateSingleLane(now, laneStart, laneEnd, speedTier);
     }
 
     const maxWaitMs = rendererLayout.durationMax;
     const maxStartLane = laneEnd - slotCount;
     if (maxStartLane < laneStart) return null;
 
+    // Helper: check tier compatibility for a single slot
+    const isTierCompatible = (slotIdx: number): boolean => {
+      const active = this.speedTierLanes.get(slotIdx);
+      if (!active || active.until <= now) return true;
+      return LaneAllocator.areSpeedTiersCompatible(speedTier, active.tier);
+    };
+
     // Phase 1: scan for a block where ALL slots have waitMs === 0 and
-    // are compatible with this message's speed profile.
+    // are tier-compatible.
     for (let startIdx = laneStart; startIdx <= maxStartLane; startIdx++) {
       let allZeroWait = true;
       let blockMaxWait = 0;
@@ -488,17 +424,9 @@ export class LaneAllocator {
           allZeroWait = false;
           break;
         }
-        // Speed compatibility check for the block
-        if (isBacklog) {
-          if ((this.realTimeLanesUntil.get(slotIdx) ?? 0) > now) {
-            allZeroWait = false;
-            break;
-          }
-        } else {
-          if ((this.backlogLanesUntil.get(slotIdx) ?? 0) > now) {
-            allZeroWait = false;
-            break;
-          }
+        if (!isTierCompatible(slotIdx)) {
+          allZeroWait = false;
+          break;
         }
         const slotAvail = this.getSlotAvailableAt(slotIdx);
         if (slotAvail === undefined) {
@@ -517,8 +445,8 @@ export class LaneAllocator {
     }
 
     // Phase 2: scan for a contiguous block where ALL slots are busy but
-    // within maxWaitMs and pass speed-compatibility. Pick the block with
-    // the shortest maximum wait (same strategy as allocateSingleLane Phase 2).
+    // within maxWaitMs and pass tier-compatibility. Pick the block with
+    // the shortest maximum wait.
     let bestBlock: { laneIndex: number; waitMs: number } | null = null;
     for (let startIdx = laneStart; startIdx <= maxStartLane; startIdx++) {
       let allCompatible = true;
@@ -529,17 +457,9 @@ export class LaneAllocator {
           allCompatible = false;
           break;
         }
-        // Speed compatibility check (same as Phase 1)
-        if (isBacklog) {
-          if ((this.realTimeLanesUntil.get(slotIdx) ?? 0) > now) {
-            allCompatible = false;
-            break;
-          }
-        } else {
-          if ((this.backlogLanesUntil.get(slotIdx) ?? 0) > now) {
-            allCompatible = false;
-            break;
-          }
+        if (!isTierCompatible(slotIdx)) {
+          allCompatible = false;
+          break;
         }
         const slotAvail = this.getSlotAvailableAt(slotIdx);
         if (slotAvail === undefined) {
@@ -561,9 +481,8 @@ export class LaneAllocator {
     }
     if (bestBlock) return bestBlock;
 
-    // Phase 3: no multi-slot block found.
-    // Both real-time and backlog fall back to the single-lane allocator.
-    return this.allocateSingleLane(now, laneStart, laneEnd, isBacklog);
+    // Phase 3: fall back to single-lane allocator.
+    return this.allocateSingleLane(now, laneStart, laneEnd, speedTier);
   }
 
   /** Get the available-at time for a lane by its index. */
@@ -588,7 +507,7 @@ export class LaneAllocator {
     }
   }
 
-  /** Shift all lane timers and speed-isolation tracking by a fixed offset. */
+  /** Shift all lane timers and speed-tier tracking by a fixed offset. */
   shiftAll(offsetMs: number): void {
     const capped = Math.min(offsetMs, rendererLayout.maxMessageAgeMs);
     if (capped <= 0) return;
@@ -607,21 +526,13 @@ export class LaneAllocator {
       }
     }
 
-    // Shift speed-isolation tracking so real-time/backlog lane profiles
-    // survive pause/resume. Without this, resetBatch() prunes all speed
-    // entries as expired, allowing cross-speed overtaking after resume.
-    for (const [idx, until] of this.realTimeLanesUntil) {
-      this.realTimeLanesUntil.set(idx, until + capped);
-    }
-    for (const [idx, until] of this.backlogLanesUntil) {
-      this.backlogLanesUntil.set(idx, until + capped);
+    // Shift speed-tier tracking so lane profiles survive pause/resume.
+    for (const [idx, entry] of this.speedTierLanes) {
+      this.speedTierLanes.set(idx, { tier: entry.tier, until: entry.until + capped });
     }
   }
 
   // ── 4-ary min-heap operations ──────────────────────────────────────
-  // 4-ary heap: children of node i are at 4i+1..4i+4, parent at (i-1)/4.
-  // Sift-down does up to 4 comparisons per level but traverses ~half the
-  // levels of a binary heap. Net win for cache locality and total comparisons.
 
   private siftDown(startIdx: number): void {
     const size = this.heap.length;
@@ -630,7 +541,6 @@ export class LaneAllocator {
       let smallest = idx;
       const firstChild = 4 * idx + 1;
 
-      // Check up to 4 children
       for (let c = 0; c < 4; c++) {
         const childIdx = firstChild + c;
         if (childIdx >= size) break;

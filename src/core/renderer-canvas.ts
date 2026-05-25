@@ -30,7 +30,7 @@ import { drawRoundRect, renderRegularMessage } from '@core/canvas-text-renderer'
 import { computeScrollDuration, rendererLayout, standbyMessageLayout } from '@core/design-tokens';
 import { clearSafeAnimationFrame, clearSafeInterval, forEachSlot } from '@core/dom';
 import type { LanePlacement } from '@core/lane-allocator';
-import { LaneAllocator } from '@core/lane-allocator';
+import { LaneAllocator, SPEED_TIER } from '@core/lane-allocator';
 import { createLogger } from '@core/logging';
 import type { Overlay } from '@core/overlay';
 import { RendererBase } from '@core/renderer-base';
@@ -52,6 +52,8 @@ interface CanvasMessage {
   laneIndex: number;
   /** Time stagger delay (ms) applied to this message's start. */
   staggerDelay: number;
+  /** Speed tier for lane allocation (0=Far, 1=Mid, 2=Near, 3=Backlog). */
+  speedTier: number;
 }
 
 interface CreateCanvasMessageParams {
@@ -64,6 +66,7 @@ interface CreateCanvasMessageParams {
   startX?: number | undefined;
   laneIndex?: number | undefined;
   staggerDelay?: number | undefined;
+  speedTier?: number | undefined;
 }
 
 function createCanvasMessage(params: CreateCanvasMessageParams): CanvasMessage {
@@ -82,6 +85,7 @@ function createCanvasMessage(params: CreateCanvasMessageParams): CanvasMessage {
     pausedDuration: 0,
     laneIndex: params.laneIndex ?? 0,
     staggerDelay,
+    speedTier: params.speedTier ?? SPEED_TIER.MID,
   };
 }
 
@@ -665,7 +669,8 @@ export class CanvasRenderer extends RendererBase {
     const { height: msgHeight } = this.estimateDimensions(message);
 
     // Find the target lane Y position via the allocator (without committing).
-    const placement = this.laneAllocator.findPlacement(msgHeight, dims, message.isBacklog ?? false);
+    const speedTier = this.getSpeedTier(message);
+    const placement = this.laneAllocator.findPlacement(msgHeight, dims, speedTier);
     if (!placement) return { ok: false, reason: 'no_lane' as const };
 
     const newLaneY = placement.laneY + placement.verticalOffset;
@@ -694,11 +699,7 @@ export class CanvasRenderer extends RendererBase {
         // (backlog entering real-time lane), headway scales up by the
         // speed multiplier so the slower message has more lead time,
         // preventing the faster chaser from visually crossing through.
-        const headwayPx = this.computeHeadwayPx(
-          active.width,
-          active.message.isBacklog ?? false,
-          message.isBacklog ?? false
-        );
+        const headwayPx = this.computeHeadwayPx(active.width, active.speedTier, speedTier);
         const travelDistance = active.startX + active.width + rendererLayout.exitPaddingMin;
         const activeProgress = Math.min(1, activeElapsed / active.duration);
         const activeRightEdge = active.startX - activeProgress * travelDistance + active.width;
@@ -761,6 +762,7 @@ export class CanvasRenderer extends RendererBase {
     const { width: msgWidth, height: msgHeight } = this.estimateDimensions(message);
 
     const isScrolling = mode === 'scroll' || mode === 'reverse';
+    const speedTier = this.getSpeedTier(message);
 
     // Horizontal stagger: progressively offset batch messages from the
     // entry edge so they don't all enter in a vertical column. Each
@@ -787,9 +789,7 @@ export class CanvasRenderer extends RendererBase {
 
     let effectiveDuration: number;
     if (isScrolling) {
-      const speed = message.isBacklog
-        ? this.getEffectiveBacklogSpeed()
-        : this.getEffectiveSpeedPxPerSec();
+      const speed = this.getSpeedForTier(speedTier);
       // Total travel distance must account for horizontal stagger to maintain
       // constant velocity — a message starting further from the entry edge
       // travels farther at the same speed, so duration adjusts proportionally.
@@ -831,7 +831,7 @@ export class CanvasRenderer extends RendererBase {
       effectiveDuration,
       isScrolling ? msgWidth : undefined,
       isScrolling ? dims.width : undefined,
-      message.isBacklog
+      speedTier
     );
 
     this.activateMessage(
@@ -843,7 +843,8 @@ export class CanvasRenderer extends RendererBase {
       effectiveDuration,
       startX,
       placement.laneIndex,
-      staggerDelay
+      staggerDelay,
+      speedTier
     );
   }
 
@@ -857,7 +858,8 @@ export class CanvasRenderer extends RendererBase {
     duration?: number,
     startX?: number,
     laneIndex?: number,
-    staggerDelay = 0
+    staggerDelay = 0,
+    speedTier?: number
   ): void {
     const cm = createCanvasMessage({
       message,
@@ -869,6 +871,7 @@ export class CanvasRenderer extends RendererBase {
       startX,
       laneIndex,
       staggerDelay,
+      speedTier,
     });
 
     this.activeMessages.push(cm);
@@ -906,18 +909,18 @@ export class CanvasRenderer extends RendererBase {
    * Compute the headway gap (px) between a new message and an active one
    * on the same lane, accounting for speed differences.
    *
-   * When the new message is faster than the active one (backlog entering
-   * real-time lane), the headway is scaled up by the speed multiplier so
-   * the active message has more lead time — preventing the faster chaser
-   * from catching up and visually crossing through.
+   * When the new message is faster than the active one (higher speedTier),
+   * the headway is scaled up by the backlog speed multiplier so the active
+   * message has more lead time — preventing the faster chaser from catching
+   * up and visually crossing through.
    *
-   * Same-speed messages use the standard adaptive formula:
+   * Same-tier messages use the standard adaptive formula:
    *   headwayPx = clamp(msgWidth × 0.08, 16, 60)
    */
   private computeHeadwayPx(
     activeWidth: number,
-    activeIsBacklog: boolean,
-    newIsBacklog: boolean
+    activeSpeedTier: number,
+    newSpeedTier: number
   ): number {
     const base = Math.max(
       LaneAllocator.HEADWAY_GAP_MIN_PX,
@@ -926,8 +929,8 @@ export class CanvasRenderer extends RendererBase {
         Math.round(activeWidth * rendererLayout.headwayGapRatio)
       )
     );
-    // Only adjust when speeds differ and the new message is faster.
-    if (!activeIsBacklog && newIsBacklog) {
+    // Only adjust when the new message is faster (higher tier).
+    if (newSpeedTier > activeSpeedTier) {
       return Math.round(base * this.settings.backlogSpeedMultiplier);
     }
     return base;
@@ -938,6 +941,46 @@ export class CanvasRenderer extends RendererBase {
   private getEffectiveBacklogSpeed(): number {
     const speed = this.settings.speedPxPerSec * Math.max(1, this.settings.backlogSpeedMultiplier);
     return Math.max(1, speed);
+  }
+
+  /** Compute scroll speed for a given speed tier. */
+  private getSpeedForTier(tier: number): number {
+    const base = this.getEffectiveSpeedPxPerSec();
+    switch (tier) {
+      case SPEED_TIER.FAR:
+        return Math.max(30, base * this.settings.depthFarSpeedMul);
+      case SPEED_TIER.NEAR:
+        return base * this.settings.depthNearSpeedMul;
+      case SPEED_TIER.BACKLOG:
+        return this.getEffectiveBacklogSpeed();
+      default:
+        return base;
+    }
+  }
+
+  /**
+   * Compute the speed tier for a message based on settings and message properties.
+   * Speed tiers: 0=Far, 1=Mid, 2=Near, 3=Backlog.
+   */
+  private getSpeedTier(message: ChatMessage): number {
+    if (message.isBacklog) return SPEED_TIER.BACKLOG;
+    if (!this.settings.depthLayersEnabled) return SPEED_TIER.MID;
+    const mode = this.settings.danmakuMode;
+    if (mode !== 'scroll' && mode !== 'reverse') return SPEED_TIER.MID;
+    // SuperChat/Membership → Near tier
+    if (message.kind === 'superchat' || message.kind === 'membership') return SPEED_TIER.NEAR;
+    // Regular messages: deterministic assignment via message id hash
+    const hash = this.hashStringForTier(message.id ?? String(message.timestamp));
+    return hash < 0.3 ? SPEED_TIER.NEAR : SPEED_TIER.FAR;
+  }
+
+  /** Simple djb2-like hash of a string to a 0-1 float for tier assignment. */
+  private hashStringForTier(str: string): number {
+    let hash = 5381;
+    for (let i = 0; i < str.length; i++) {
+      hash = ((hash << 5) + hash + str.charCodeAt(i)) | 0;
+    }
+    return (hash >>> 0) / 4294967296;
   }
 
   // ── Opacity ──────────────────────────────────────────────────────────
