@@ -36,6 +36,7 @@ const overlayLog = {
   },
 };
 
+/** Set the global log level threshold for all overlay loggers. */
 export const setOverlayLogLevel = (level: LogLevel): void => {
   currentLogLevel = level;
 };
