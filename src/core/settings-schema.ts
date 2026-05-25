@@ -258,14 +258,18 @@ export const cloneSettings = (settings: Readonly<OverlaySettings>): OverlaySetti
   outline: { ...settings.outline },
 });
 
-export const resolveLimits = (
-  key: string
-): Readonly<{ min: number; max: number; step: number }> => {
+/** Maps outline sub-keys to their SETTINGS_LIMITS entries. */
+const OUTLINE_LIMIT_KEYS: Record<string, keyof typeof SETTINGS_LIMITS> = {
+  widthPx: 'outlineWidthPx',
+  opacity: 'outlineOpacity',
+} as const;
+
+export const resolveLimits = (key: string): NumericSettingLimit => {
   const direct = SETTINGS_LIMITS[key as keyof typeof SETTINGS_LIMITS];
   if (direct) return direct;
   // Outline keys use separate limit entries to avoid clashing with root keys
-  if (key === 'widthPx') return SETTINGS_LIMITS.outlineWidthPx;
-  if (key === 'opacity') return SETTINGS_LIMITS.outlineOpacity;
+  const outlineKey = OUTLINE_LIMIT_KEYS[key];
+  if (outlineKey) return SETTINGS_LIMITS[outlineKey];
   throw new Error(`Unknown setting key: ${key}`);
 };
 
