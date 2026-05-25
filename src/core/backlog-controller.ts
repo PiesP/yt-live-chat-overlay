@@ -131,10 +131,9 @@ export class BacklogInjectionController implements Pauseable {
     // Apply sampling based on backlog size
     const sampled = this.sampleMessages(filtered);
 
-    // Priority messages (SuperChat, Membership) bypass the throttled queue
-    // and are emitted immediately for minimum display latency.
+    // Separate priority messages (SuperChat, Membership) from normal ones.
     const priorityMessages: ChatMessage[] = [];
-    const normalMessages: ChatMessage[] = [];
+    let normalMessages: ChatMessage[] = [];
     for (const m of sampled) {
       if (m.kind === 'superchat' || m.kind === 'membership') {
         priorityMessages.push(m);
@@ -143,13 +142,23 @@ export class BacklogInjectionController implements Pauseable {
       }
     }
 
-    // Emit priority messages immediately through the renderer callback
-    if (priorityMessages.length > 0 && !this.paused) {
-      for (const msg of priorityMessages) {
-        msg.isBacklog = true;
-        this.onBacklogMessage?.(msg);
+    // Priority messages bypass the throttled queue and are emitted
+    // immediately for minimum display latency. When the injector is
+    // paused (lane utilization > 80%), prepend them to the normal queue
+    // instead — they surface first when injection resumes.
+    if (priorityMessages.length > 0) {
+      if (this.paused) {
+        // Injector paused: prepend priority messages so they're injected
+        // first when the queue drain resumes. Without this, priority
+        // messages would be silently lost while the injector is paused.
+        normalMessages = [...priorityMessages, ...normalMessages];
+      } else {
+        for (const msg of priorityMessages) {
+          msg.isBacklog = true;
+          this.onBacklogMessage?.(msg);
+        }
+        log.debug(`Backlog: emitted ${priorityMessages.length} priority messages immediately`);
       }
-      log.debug(`Backlog: emitted ${priorityMessages.length} priority messages immediately`);
     }
 
     this.backlogQueue = normalMessages;
