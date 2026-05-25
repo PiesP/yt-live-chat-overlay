@@ -162,6 +162,15 @@ const scaleUiValue = (value: number, scale: number): number =>
 
 const getRootScale = (key: RootScalarSettingKey): number => getRootDisplayMeta(key).scale;
 
+/**
+ * Normalize a numeric input value to its internal representation.
+ *
+ * Rounding is applied at the display-value level **before** scaling down to the
+ * internal range.  This is critical for settings with `displayScale` (e.g.
+ * `superChatOpacity` where the UI works in 0–100 but the internal value is
+ * 0.35–1.0).  Without pre-scale rounding a user entering "85" would produce
+ * `Math.round(0.85) = 1` and silently revert to 100 %.
+ */
 const normalizeNumericValue = (
   value: unknown,
   fallback: number,
@@ -169,10 +178,13 @@ const normalizeNumericValue = (
   rounded: boolean,
   scale = 1
 ): number => {
-  const scaledValue = typeof value === 'number' ? value / scale : Number(value) / scale;
+  const rawValue = typeof value === 'number' ? value : Number(value);
+  // Round the display value while it is still in the display range, *then*
+  // scale down to the internal range so fractional precision is preserved.
+  const displayValue = rounded ? Math.round(rawValue) : rawValue;
+  const scaledValue = displayValue / scale;
   const numericValue = Number.isFinite(scaledValue) ? scaledValue : fallback;
-  const clamped = Math.min(limits.max, Math.max(limits.min, numericValue));
-  return rounded ? Math.round(clamped) : clamped;
+  return Math.min(limits.max, Math.max(limits.min, numericValue));
 };
 
 const formatRootNumericSettingForInput = (
