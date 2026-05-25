@@ -165,6 +165,7 @@ export abstract class RendererBase {
       fontSize: this.settings.fontSize,
       fontWeight: this.settings.fontWeight,
       fontFamily: this.settings.fontFamily,
+      laneSpacing: this.settings.laneSpacing,
     };
 
     this.settings = settings;
@@ -176,11 +177,22 @@ export abstract class RendererBase {
     // Font change invalidates cached text measurements (LRU width cache).
     // Must clear before lane allocator reset to ensure laneHeight recalculation
     // uses fresh font metrics.
-    if (
+    const fontChanged =
       settings.fontSize !== prev.fontSize ||
       settings.fontWeight !== prev.fontWeight ||
-      settings.fontFamily !== prev.fontFamily
-    ) {
+      settings.fontFamily !== prev.fontFamily;
+    const laneSpacingChanged = settings.laneSpacing !== prev.laneSpacing;
+
+    if (fontChanged || laneSpacingChanged) {
+      this.laneAllocator.updateFontMetrics(
+        settings.fontSize,
+        settings.fontWeight,
+        settings.fontFamily,
+        settings.laneSpacing
+      );
+    }
+
+    if (fontChanged) {
       clearTextMeasurementCaches();
     }
 
