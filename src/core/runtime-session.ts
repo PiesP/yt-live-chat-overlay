@@ -466,12 +466,12 @@ export class RuntimeSession {
       // Clear idle markers so the health snapshot reflects current state.
       this.clearHidden();
 
-      // When video is paused, keep chat paused too — the renderer won't
-      // display comments (resume() early-returns on isVideoPaused), so
-      // polling would just waste API calls and YouTube quota.
+      // When video is actually playing (not paused, not in premiere countdown),
+      // resume chat polling and the renderer. During countdown the video exists
+      // but paused=true; resumeForVideo() will kick in when broadcast starts.
       const video = this.getVideoElement();
-      const isVideoPaused = video?.paused ?? true;
-      if (!isVideoPaused) {
+      const isVideoPlaying = video ? !video.paused : false;
+      if (isVideoPlaying) {
         // Trim stale queue entries BEFORE unpausing chat — otherwise
         // freshly arrived messages in the window between setPaused(false)
         // and resume() would be dropped by the trim.
@@ -479,17 +479,13 @@ export class RuntimeSession {
         this.chatSource?.setPaused(false);
       }
 
-      if (!isVideoPaused && this.getRuntimeHealthSnapshot().shouldRestart) {
-        this.requestManagedRestart('foreground-return');
-        return;
+      if (isVideoPlaying) {
+        this.renderer?.resume();
       }
 
-      // When video is paused, keep renderer paused too. Calling resume()
-      // while video is paused clears isPaused prematurely — when the user
-      // later presses play, resumeForVideo() -> resume() would early-return
-      // because isPaused is already false, leaving the render loop stopped.
-      if (!isVideoPaused) {
-        this.renderer?.resume();
+      if (isVideoPlaying && this.getRuntimeHealthSnapshot().shouldRestart) {
+        this.requestManagedRestart('foreground-return');
+        return;
       }
     };
 

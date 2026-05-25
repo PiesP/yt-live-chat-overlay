@@ -267,6 +267,9 @@ export abstract class ChatSource implements Pauseable {
 
   setPaused(paused: boolean): void {
     this.chatPaused = paused;
+    if (!paused) {
+      this.markActivity();
+    }
   }
 
   protected async waitWhilePaused(signal?: AbortSignal): Promise<void> {

@@ -87,6 +87,16 @@ export abstract class RendererBase {
     return this.burstDetector.getEmaRate();
   }
 
+  /**
+   * Whether the renderer is currently paused because the user explicitly
+   * paused the video (via pause event). This is distinct from the DOM
+   * `video.paused` which is also true during premiere countdowns where
+   * the video hasn't started yet but the user didn't press pause.
+   */
+  isPausedByVideo(): boolean {
+    return this.isVideoPaused;
+  }
+
   // ── Shared state machine ──────────────────────────────────────────────
 
   pause(): void {
