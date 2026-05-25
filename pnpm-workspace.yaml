@@ -10,7 +10,4 @@ preferFrozenLockfile: true
 autoInstallPeers: true
 strictPeerDependencies: false
 preferOffline: true
-minimumReleaseAgeExclude:
-  - vite
-  - vite-plugin-monkey
-  - yaml
+

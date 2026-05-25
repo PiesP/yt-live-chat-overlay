@@ -15,7 +15,7 @@
     "lint:fix": "biome lint --write .",
     "fmt": "biome check --linter-enabled=false .",
     "fmt:fix": "biome check --write --linter-enabled=false .",
-    "circular": "pnpm dlx madge --ts-config tsconfig.json --circular src/core/*.ts",
+    "circular": "pnpm dlx madge --ts-config tsconfig.json --circular src/**/*.ts",
     "quality": "pnpm -s fmt && pnpm -s lint && pnpm -s check && pnpm -s circular && pnpm -s knip",
     "quality:fix": "pnpm -s fmt:fix && pnpm -s lint:fix && pnpm -s check && pnpm -s circular && pnpm -s knip",
     "clean": "rm -rf dist",
@@ -30,6 +30,12 @@
   ],
   "author": "PiesP",
   "license": "MIT",
+  "homepage": "https://github.com/PiesP/yt-live-chat-overlay",
+  "bugs": "https://github.com/PiesP/yt-live-chat-overlay/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PiesP/yt-live-chat-overlay.git"
+  },
   "engines": {
     "node": ">=24.0.0",
     "pnpm": ">=11.2.2"
