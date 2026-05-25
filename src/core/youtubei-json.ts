@@ -40,11 +40,11 @@ const MAX_PROCESSED = 500;
  * is acceptable and what to return. If extract returns null/undefined
  * the search continues.
  */
-function findFirstNestedByKey<T>(
+const findFirstNestedByKey = <T>(
   root: unknown,
   key: string,
   extract: (value: unknown) => T | null
-): T | null {
+): T | null => {
   const stack: unknown[] = [root];
   let processed = 0;
 
@@ -77,7 +77,7 @@ function findFirstNestedByKey<T>(
   }
 
   return null;
-}
+};
 
 /**
  * DFS search for the first record containing the given key whose value passes the optional predicate.
