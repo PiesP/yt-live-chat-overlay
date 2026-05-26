@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 PiesP
+
 /**
  * CanvasTextRenderer — extracted text-rendering utilities from CanvasRenderer.
  *

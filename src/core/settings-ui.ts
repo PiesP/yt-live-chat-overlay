@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 PiesP
+
 import type { OverlaySettings } from '@app-types';
 import {
   clearSafeTimeout,

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 PiesP
+
 import { DEFAULT_FONT_FAMILY } from '@core/design-tokens';
 
 // ── UI color palette (settings UI only, not renderer) ──

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 PiesP
+
 /**
  * DomChatWatcher — watches YouTube's chat DOM for newly rendered messages
  * and forwards them to the overlay's ChatSource as a fallback delivery path.

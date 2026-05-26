@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 PiesP
+
 /**
  * FetchInterceptor — intercepts YouTube's own get_live_chat requests
  * and forwards parsed chat events to the overlay's ChatSource.

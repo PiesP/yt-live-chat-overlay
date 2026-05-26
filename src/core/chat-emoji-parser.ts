@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 PiesP
+
 /**
  * ChatEmojiParser — emoji and image asset parsing from YouTube chat data.
  *

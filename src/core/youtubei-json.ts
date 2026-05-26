@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 PiesP
+
 export type JsonObject = Record<string, unknown>;
 
 /** Type guard that checks if a value is a non-null object record. */

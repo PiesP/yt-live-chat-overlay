@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 PiesP
+
 import { getNumber, getString, isRecord } from '@core/youtubei-json';
 
 export interface InnertubeContinuationData {

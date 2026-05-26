@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 PiesP
+
 /**
  * A Map-based FIFO eviction registry for tracking message IDs.
  * Preserves insertion order and evicts the oldest entry when the

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 PiesP
+
 import type { ChatMessage, OverlaySettings, Pauseable } from '@app-types';
 import { BacklogInjectionController } from '@core/backlog-controller';
 import type { ChatHealthSnapshot, ChatSource, ChatSourceStartStatus } from '@core/chat-source-base';

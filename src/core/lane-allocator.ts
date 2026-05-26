@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 PiesP
+
 import type { OverlayDimensions } from '@app-types';
 import { rendererLayout } from '@core/design-tokens';
 import { forEachSlot } from '@core/dom';

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 PiesP
+
 /**
  * LiveChatSource — live polling loop with adaptive delay and density-aware seeding.
  *

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 PiesP
+
 import type { LogLevel } from '@app-types';
 
 type ConsoleLogArgs = Parameters<Console['log']>;

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 PiesP
+
 import type { AuthorType, LogLevel, OutlineSettings, OverlaySettings } from '@app-types';
 import { DEFAULT_FONT_FAMILY, colors as designColors } from '@core/design-tokens';
 
