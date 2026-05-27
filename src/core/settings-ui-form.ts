@@ -18,6 +18,7 @@ import {
 } from '@core/settings-schema';
 import type { FieldDef, PaneDef } from '@core/settings-ui-panes';
 import { PANES } from '@core/settings-ui-panes';
+import { TranslationService } from '@core/translation-service';
 
 const log = createLogger('SettingsUiForm');
 
@@ -291,6 +292,16 @@ export class SettingsUiForm {
     pane.dataset.pane = def.id;
     pane.setAttribute('role', 'tabpanel');
     if (def.id !== 'comments') pane.hidden = true;
+
+    // Translation tab: show unsupported message when browser lacks Translator API.
+    if (def.id === 'translation' && !TranslationService.isSupported()) {
+      const msg = domDiv('yt-chat-overlay-settings-unsupported');
+      msg.textContent = t(
+        'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.'
+      );
+      pane.appendChild(msg);
+      return pane;
+    }
 
     for (const section of def.sections) {
       if (section.title === 'Author Colors & Visibility') {

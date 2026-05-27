@@ -375,4 +375,12 @@ export const SETTINGS_UI_STYLES = `
         pointer-events: none;
         animation: yt-overlay-fade-in 0.15s ease-out;
       }
+      .yt-chat-overlay-settings-unsupported {
+        padding: ${spacing.lg}px;
+        margin: ${spacing.md}px 0;
+        color: ${uiColors.textMuted};
+        font-size: ${typography.fontSize.sm};
+        text-align: center;
+        line-height: 1.5;
+      }
 `;

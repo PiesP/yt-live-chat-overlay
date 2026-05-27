@@ -160,6 +160,8 @@ const KO: TranslationMap = {
     '관리자와 소유자의 메시지가 일반 메시지보다 얼마나 오래 표시될지 설정합니다 (1.0 = 동일, 2.0 = 2배)',
   'Translate chat messages in real-time (requires Chrome 138+ for built-in translation)':
     '실시간으로 채팅 메시지를 번역합니다 (Chrome 138+ 내장 번역 필요)',
+  'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.':
+    '번역 기능은 내장 AI가 있는 브라우저가 필요합니다. Chrome 138+ 또는 Edge 143+ Canary를 사용하세요.',
 
   // ── Modal chrome ──
   'Chat Overlay': '채팅 오버레이',
@@ -276,6 +278,8 @@ const JA: TranslationMap = {
     'モデレーターと所有者のメッセージを通常より長く表示する倍率 (1.0 = 同じ, 2.0 = 2倍)',
   'Translate chat messages in real-time (requires Chrome 138+ for built-in translation)':
     'チャットメッセージをリアルタイムで翻訳します (Chrome 138+の内蔵翻訳が必要)',
+  'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.':
+    '翻訳機能にはAI内蔵ブラウザが必要です。Chrome 138+またはEdge 143+ Canaryをお使いください。',
 
   // ── Modal chrome ──
   'Chat Overlay': 'チャットオーバーレイ',
@@ -392,6 +396,8 @@ const ES: TranslationMap = {
     'Cuánto más tiempo permanecen visibles los mensajes de moderador y propietario (1.0 = igual, 2.0 = el doble)',
   'Translate chat messages in real-time (requires Chrome 138+ for built-in translation)':
     'Traduce mensajes de chat en tiempo real (requiere Chrome 138+ con traducción integrada)',
+  'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.':
+    'La traducción requiere un navegador con IA integrada. Use Chrome 138+ o Edge 143+ Canary.',
 
   // ── Modal chrome ──
   'Chat Overlay': 'Superposición de Chat',
@@ -506,6 +512,8 @@ const ZH: TranslationMap = {
     '版主和频道主的消息比普通消息多显示多长时间 (1.0 = 相同, 2.0 = 两倍)',
   'Translate chat messages in real-time (requires Chrome 138+ for built-in translation)':
     '实时翻译聊天消息 (需要 Chrome 138+ 内置翻译)',
+  'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.':
+    '翻译功能需要内置AI的浏览器。请使用 Chrome 138+ 或 Edge 143+ Canary。',
 
   // ── Modal chrome ──
   'Chat Overlay': '弹幕显示',
