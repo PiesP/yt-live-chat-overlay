@@ -30,6 +30,7 @@
 import type { ChatMessage, OverlayDimensions, OverlaySettings } from '@app-types';
 import { renderMembershipCard, renderSuperChatCard } from '@core/canvas-card-renderers';
 import { drawRoundRect, renderRegularMessage, strokeTextOutline } from '@core/canvas-text-renderer';
+import { getTranslatableText } from '@core/chat-message-helpers';
 import { computeScrollDuration, rendererLayout, standbyMessageLayout } from '@core/design-tokens';
 import { clearSafeAnimationFrame, clearSafeInterval, forEachSlot } from '@core/dom';
 import type { LanePlacement } from '@core/lane-allocator';
@@ -953,10 +954,15 @@ export class CanvasRenderer extends RendererBase {
     // Trigger async translation for enabled messages.
     // Fire-and-forget: message renders with original text, then
     // translation appears on next frame when the Promise resolves.
-    if (this.translationService.isActive && message.kind === 'text' && message.text) {
+    // Use getTranslatableText() to exclude emoji fallback text
+    // (e.g. :smile:, :웃는 얼굴:) from the translation input — those
+    // YouTube-supplied descriptions would appear as literal text in
+    // the translated output instead of being rendered as emoji images.
+    const translatableText = message.kind === 'text' ? getTranslatableText(message) : '';
+    if (this.translationService.isActive && translatableText) {
       const cmRef = cm;
       this.translationService
-        .translate(message.text)
+        .translate(translatableText)
         .then((translated) => {
           cmRef.translatedText = translated;
         })

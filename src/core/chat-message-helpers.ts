@@ -85,6 +85,23 @@ export function hasEmojiContent(segments: readonly ContentSegment[]): boolean {
 }
 
 /**
+ * Extract translatable plain text from a message by joining only the text
+ * content segments. Emoji segments are excluded because they carry
+ * YouTube-supplied fallback text (e.g. :smile:, :웃는 얼굴:) that should
+ * not be sent to the translation API — those descriptions would appear
+ * as literal text in the translated output.
+ */
+export function getTranslatableText(message: ChatMessage): string {
+  const parts: string[] = [];
+  for (const seg of message.content) {
+    if (seg.type === 'text' && seg.content.length > 0) {
+      parts.push(seg.content);
+    }
+  }
+  return parts.join('').trim();
+}
+
+/**
  * Convert a YouTube ARGB 32-bit integer color to a CSS color string.
  */
 export function colorIntToCss(value: unknown): string | undefined {
