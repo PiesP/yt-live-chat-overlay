@@ -88,6 +88,12 @@ const ROOT_SETTING_META = {
   minPollIntervalMs: { type: 'number', visual: false },
   maxPollIntervalMs: { type: 'number', visual: false },
   language: { type: 'string', visual: false },
+  modOwnerDurationMultiplier: {
+    type: 'number',
+    visual: false,
+    displayScale: 1,
+    displayPrecision: 1,
+  },
 } as const satisfies Record<RootScalarSettingKey, SettingMeta>;
 
 /**
@@ -135,7 +141,8 @@ type SettingsLimitKey =
   | 'membershipMaxBodyLines'
   | 'fadeDurationMs'
   | 'minPollIntervalMs'
-  | 'maxPollIntervalMs';
+  | 'maxPollIntervalMs'
+  | 'modOwnerDurationMultiplier';
 
 const SETTINGS_LIMITS = {
   speedPxPerSec: { min: 50, max: 500, step: 10 },
@@ -161,6 +168,7 @@ const SETTINGS_LIMITS = {
   fadeDurationMs: { min: 0, max: 1000, step: 50 }, // 0 = no fade, up to 1s
   minPollIntervalMs: { min: 50, max: 5000, step: 50 }, // 50ms minimum polling
   maxPollIntervalMs: { min: 1000, max: 30000, step: 1000 }, // 1s to 30s maximum
+  modOwnerDurationMultiplier: { min: 1, max: 3, step: 0.1 },
 } as const satisfies Record<SettingsLimitKey, NumericSettingLimit>;
 
 export const STORAGE_KEY = 'yt-live-chat-overlay-settings';
@@ -225,6 +233,7 @@ export const DEFAULT_SETTINGS = {
   depthNearSpeedMul: 1.4,
   depthFarSpeedMul: 0.8,
   depthFarOpacityMul: 0.75,
+  modOwnerDurationMultiplier: 1.5,
   fontWeight: 'bold',
   fontFamily: DEFAULT_FONT_FAMILY,
   preserveUserColor: true,

@@ -192,6 +192,9 @@ export interface OverlaySettings {
   depthFarSpeedMul: number;
   /** Opacity multiplier for Far layer messages (0.4-1.0, default 0.65) */
   depthFarOpacityMul: number;
+  /** Duration multiplier for moderator and owner messages (1.0-3.0, default 1.5).
+   *  1.0 = same duration as regular messages, 2.0 = twice as long. */
+  modOwnerDurationMultiplier: number;
   /** Preserve author's chosen text color from YouTube chat */
   preserveUserColor: boolean;
   /** Maximum body text lines for SuperChat cards (2-10, default 5) */

@@ -127,6 +127,16 @@ export const PANES: PaneDef[] = [
         ],
       },
       {
+        title: 'Moderator & Owner',
+        fields: [
+          num(
+            'Duration Multiplier (×)',
+            'modOwnerDurationMultiplier',
+            'How much longer moderator and owner messages stay visible (1.0 = same as regular, 2.0 = twice as long)'
+          ),
+        ],
+      },
+      {
         title: 'Text Outline',
         fields: [
           chk('Enabled', 'enabled', undefined, 'outline'),

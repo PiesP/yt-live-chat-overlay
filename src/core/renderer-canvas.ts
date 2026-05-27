@@ -823,6 +823,11 @@ export class CanvasRenderer extends RendererBase {
       effectiveDuration = rendererLayout.topBottomDurationMs;
     }
 
+    // Moderator and owner messages stay on screen longer.
+    if (message.authorType === 'moderator' || message.authorType === 'owner') {
+      effectiveDuration *= this.settings.modOwnerDurationMultiplier;
+    }
+
     const laneY = placement.laneY + placement.verticalOffset;
 
     // Stagger delay: spread batch entries across time to prevent vertical
