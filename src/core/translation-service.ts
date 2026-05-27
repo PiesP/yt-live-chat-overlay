@@ -16,7 +16,7 @@
  *   For chat (short messages), this is acceptable.
  */
 
-import type { LanguageSetting, TranslationMode } from '@app-types';
+import type { TranslationMode } from '@app-types';
 import { createLogger } from '@core/logging';
 
 const log = createLogger('TranslationService');
@@ -61,18 +61,21 @@ export interface TranslationResult {
 export class TranslationService {
   private translator: TranslatorInstance | null = null;
   private currentTarget: string | null = null;
+  private currentSource: string | null = null;
   private enabled = false;
 
   /** Call this when settings change to reconfigure the translator. */
   async configure(settings: {
     enabled: boolean;
     service: string;
-    target: LanguageSetting;
+    source: string;
+    target: string;
   }): Promise<void> {
     this.enabled = settings.enabled && settings.service === 'auto';
     if (!this.enabled) {
       this.translator = null;
       this.currentTarget = null;
+      this.currentSource = null;
       return;
     }
 
@@ -82,10 +85,10 @@ export class TranslationService {
       return;
     }
 
-    if (settings.target === this.currentTarget) return;
+    if (settings.target === this.currentTarget && settings.source === this.currentSource) return;
 
     try {
-      const sourceLanguage = ''; // auto-detect
+      const sourceLanguage = settings.source;
       const targetLanguage = settings.target;
 
       const availability = await Translator.availability({
@@ -105,7 +108,8 @@ export class TranslationService {
         targetLanguage,
       });
       this.currentTarget = targetLanguage;
-      log.info(`Translator ready: auto → ${targetLanguage}`);
+      this.currentSource = sourceLanguage;
+      log.info(`Translator ready: ${sourceLanguage} → ${targetLanguage}`);
     } catch (err) {
       log.error('Failed to create translator:', err);
       this.enabled = false;

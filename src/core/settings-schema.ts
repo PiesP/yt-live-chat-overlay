@@ -96,6 +96,7 @@ const ROOT_SETTING_META = {
   },
   translationEnabled: { type: 'boolean', visual: false },
   translationService: { type: 'string', visual: false },
+  translationSource: { type: 'string', visual: true },
   translationTarget: { type: 'string', visual: true },
   translationMode: { type: 'string', visual: true },
 } as const satisfies Record<RootScalarSettingKey, SettingMeta>;
@@ -249,6 +250,7 @@ export const DEFAULT_SETTINGS = {
   language: 'auto',
   translationEnabled: false,
   translationService: 'auto',
+  translationSource: 'en',
   translationTarget: 'ko',
   translationMode: 'dual',
 } as const satisfies Readonly<OverlaySettings>;
@@ -321,6 +323,7 @@ const STRING_VALIDATORS: Partial<Record<RootScalarSettingKey, (v: string) => boo
   translationService: (v) => v === 'auto' || v === 'off',
   translationTarget: (v) => v === 'en' || v === 'ko' || v === 'ja' || v === 'es' || v === 'zh',
   translationMode: (v) => v === 'dual' || v === 'replace',
+  translationSource: (v) => v === 'en' || v === 'ko' || v === 'ja' || v === 'es' || v === 'zh',
 };
 
 const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings => {

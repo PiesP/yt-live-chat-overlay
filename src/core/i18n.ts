@@ -117,6 +117,7 @@ const KO: TranslationMap = {
   'Duration Multiplier (×)': '표시 시간 배율 (×)',
   'Enable Translation': '번역 활성화',
   Service: '서비스',
+  'Source Language': '소스 언어',
   'Target Language': '대상 언어',
   'Display Mode': '표시 방식',
 
@@ -233,6 +234,7 @@ const JA: TranslationMap = {
   'Duration Multiplier (×)': '表示時間倍率 (×)',
   'Enable Translation': '翻訳を有効にする',
   Service: 'サービス',
+  'Source Language': 'ソース言語',
   'Target Language': '対象言語',
   'Display Mode': '表示モード',
 
@@ -351,6 +353,7 @@ const ES: TranslationMap = {
   'Duration Multiplier (×)': 'Multiplicador de duración (×)',
   'Enable Translation': 'Activar traducción',
   Service: 'Servicio',
+  'Source Language': 'Idioma de origen',
   'Target Language': 'Idioma de destino',
   'Display Mode': 'Modo de visualización',
 
@@ -470,6 +473,7 @@ const ZH: TranslationMap = {
   'Duration Multiplier (×)': '显示时长倍率 (×)',
   'Enable Translation': '启用翻译',
   Service: '服务',
+  'Source Language': '源语言',
   'Target Language': '目标语言',
   'Display Mode': '显示模式',
 

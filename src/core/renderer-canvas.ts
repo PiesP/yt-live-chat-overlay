@@ -1108,6 +1108,7 @@ export class CanvasRenderer extends RendererBase {
     this.translationService.configure({
       enabled: settings.translationEnabled,
       service: settings.translationService,
+      source: settings.translationSource,
       target: settings.translationTarget,
     });
   }

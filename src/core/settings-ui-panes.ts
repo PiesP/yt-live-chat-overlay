@@ -257,6 +257,13 @@ export const PANES: PaneDef[] = [
             ['auto', 'Auto (Chrome built-in)'],
             ['off', 'Off'],
           ]),
+          sel('Source Language', 'translationSource', [
+            ['en', 'English'],
+            ['ko', '한국어'],
+            ['ja', '日本語'],
+            ['es', 'Español'],
+            ['zh', '中文'],
+          ]),
           sel('Target Language', 'translationTarget', [
             ['ko', '한국어'],
             ['en', 'English'],

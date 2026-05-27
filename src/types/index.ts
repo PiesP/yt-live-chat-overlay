@@ -27,6 +27,8 @@ export type LanguageSetting = 'auto' | 'en' | 'ko' | 'ja' | 'es' | 'zh';
 export type TranslationService = 'auto' | 'off';
 /** Translation display mode */
 export type TranslationMode = 'dual' | 'replace';
+/** Valid source/target languages for translation (excludes 'auto') */
+export type TranslationLanguage = 'en' | 'ko' | 'ja' | 'es' | 'zh';
 
 /**
  * Author display settings (per author type)
@@ -220,8 +222,10 @@ export interface OverlaySettings {
   translationEnabled: boolean;
   /** Translation service provider */
   translationService: TranslationService;
-  /** Target language for translation (e.g. 'ko', 'en') */
-  translationTarget: LanguageSetting;
+  /** Source language for translation (language messages are written in) */
+  translationSource: TranslationLanguage;
+  /** Target language for translation (language to translate into) */
+  translationTarget: TranslationLanguage;
   /** Display mode: dual (original + translation) or replace (translation only) */
   translationMode: TranslationMode;
 }
