@@ -10,17 +10,21 @@
  * Design notes:
  * - One translator instance per language pair (cached after creation).
  * - `Translator.create()` requires user activation (click/keypress within
- *   5 seconds). Call `onUserActivation()` from settings dialog save/close
- *   events to trigger model downloads.
+ *   5 seconds). The first successful create typically happens when the
+ *   user clicks Save in the settings dialog.
  * - Sequential translations only — a large text blocks subsequent calls.
  *   For chat (short messages), this is acceptable.
  */
-
 import { createLogger } from '@core/logging';
 
 const log = createLogger('TranslationService');
 
 // ── Type declarations for Chrome Translator API ───────────────────────────
+
+interface TranslatorDownloadEvent extends Event {
+  loaded: number;
+  total: number;
+}
 
 interface TranslatorInstance {
   translate(text: string): Promise<string>;
@@ -43,7 +47,8 @@ interface TranslatorStatic {
 }
 
 declare global {
-  const Translator: TranslatorStatic | undefined;
+  // eslint-disable-next-line no-var
+  var Translator: TranslatorStatic | undefined;
 }
 
 // ── Public API ────────────────────────────────────────────────────────────
@@ -59,6 +64,9 @@ export class TranslationService {
   private enabled = false;
   /** Serializes configure() calls to prevent overlapping translator creation. */
   private configurePromise: Promise<void> | null = null;
+  /** Pending source/target from the most recent configure() for retry. */
+  private pendingSource: string | null = null;
+  private pendingTarget: string | null = null;
 
   /** Call this when settings change to reconfigure the translator. */
   async configure(settings: {
@@ -72,6 +80,8 @@ export class TranslationService {
       this.translator = null;
       this.currentTarget = null;
       this.currentSource = null;
+      this.pendingSource = null;
+      this.pendingTarget = null;
       return;
     }
 
@@ -98,32 +108,85 @@ export class TranslationService {
     }
   }
 
+  /**
+   * Re-attempt translator creation with the last configured language pair.
+   * Call this from a user-activation context (e.g. click handler) when
+   * the previous configure() failed because the model was still downloading
+   * or user activation was missing.
+   */
+  async onUserActivation(): Promise<void> {
+    if (!this.enabled) return;
+    if (!this.pendingSource || !this.pendingTarget) return;
+    if (typeof Translator === 'undefined') return;
+
+    // Don't stack retries — if a configure is already in-flight, let it finish.
+    if (this.configurePromise) return;
+
+    log.info('Retrying translator creation via user activation…');
+    this.configurePromise = this.doConfigure(this.pendingSource, this.pendingTarget);
+    try {
+      await this.configurePromise;
+    } finally {
+      this.configurePromise = null;
+    }
+  }
+
   private async doConfigure(sourceLanguage: string, targetLanguage: string): Promise<void> {
     if (typeof Translator === 'undefined') return;
+    this.pendingSource = sourceLanguage;
+    this.pendingTarget = targetLanguage;
+
     try {
       const availability = await Translator.availability({
         sourceLanguage,
         targetLanguage,
       });
 
-      if (availability !== 'available') {
-        log.info(`Translator model for →${targetLanguage}: ${availability}. Waiting for download.`);
+      // 'unavailable' means the language pair is not supported at all.
+      // Don't attempt to create — it would fail immediately.
+      if (availability === 'unavailable') {
+        log.warn(
+          `Translator not available for ${sourceLanguage}→${targetLanguage} (unsupported language pair).`
+        );
         this.translator = null;
         this.currentTarget = null;
+        this.currentSource = null;
         return;
       }
 
+      // For both 'available' and 'downloadable', attempt to create the translator.
+      // When 'downloadable', Translator.create() triggers the model download
+      // (requires user activation within 5 seconds). The Promise resolves once
+      // the download completes and the translator is ready.
       this.translator = await Translator.create({
         sourceLanguage,
         targetLanguage,
+        monitor: (monitor: EventTarget) => {
+          monitor.addEventListener('downloadprogress', (e: Event) => {
+            const evt = e as TranslatorDownloadEvent;
+            if (evt.total > 0) {
+              log.debug(
+                `Translator model download: ${Math.round((evt.loaded / evt.total) * 100)}%`
+              );
+            }
+          });
+        },
       });
       this.currentTarget = targetLanguage;
       this.currentSource = sourceLanguage;
+      this.pendingSource = null;
+      this.pendingTarget = null;
       log.info(`Translator ready: ${sourceLanguage} → ${targetLanguage}`);
     } catch (err) {
-      log.error('Failed to create translator:', err);
-      this.enabled = false;
+      // create() may fail if user activation was missing (NotAllowedError)
+      // or if the download failed. The translator stays null and isActive
+      // returns false. It will be retried on the next configure() or
+      // onUserActivation() call.
+      log.warn('Failed to create translator (may need user activation):', err);
       this.translator = null;
+      // Don't clear currentTarget/currentSource — they hold the last
+      // successfully configured pair. pendingSource/pendingTarget stay
+      // set so onUserActivation() can retry.
     }
   }
 
@@ -157,6 +220,9 @@ export class TranslationService {
   destroy(): void {
     this.translator = null;
     this.currentTarget = null;
+    this.currentSource = null;
+    this.pendingSource = null;
+    this.pendingTarget = null;
     this.enabled = false;
   }
 }

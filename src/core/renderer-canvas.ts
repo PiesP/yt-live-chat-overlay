@@ -29,7 +29,7 @@
 
 import type { ChatMessage, OverlayDimensions, OverlaySettings } from '@app-types';
 import { renderMembershipCard, renderSuperChatCard } from '@core/canvas-card-renderers';
-import { drawRoundRect, renderRegularMessage } from '@core/canvas-text-renderer';
+import { drawRoundRect, renderRegularMessage, strokeTextOutline } from '@core/canvas-text-renderer';
 import { computeScrollDuration, rendererLayout, standbyMessageLayout } from '@core/design-tokens';
 import { clearSafeAnimationFrame, clearSafeInterval, forEachSlot } from '@core/dom';
 import type { LanePlacement } from '@core/lane-allocator';
@@ -38,7 +38,7 @@ import { createLogger } from '@core/logging';
 import type { Overlay } from '@core/overlay';
 import { RendererBase } from '@core/renderer-base';
 import { estimateMessageDimensions as sharedEstimateDimensions } from '@core/renderer-shared';
-import { clearTextMeasurementCaches, getFontString } from '@core/text-measure';
+import { clearTextMeasurementCaches, getFontString, measureTextHeight } from '@core/text-measure';
 import { TranslationService } from '@core/translation-service';
 
 // ── CanvasMessage lifecycle (inlined from canvas-message-lifecycle.ts) ─────
@@ -58,7 +58,7 @@ interface CanvasMessage {
   staggerDelay: number;
   /** Speed tier for lane allocation (0=Far, 1=Mid, 2=Near, 3=Backlog). */
   speedTier: number;
-  /** Translated text (async result). undefined = not requested, null = translating, string = done. */
+  /** Translated text (async result). undefined = not requested, null = cleared/unavailable, string = done. */
   translatedText?: string | null;
 }
 
@@ -559,68 +559,77 @@ export class CanvasRenderer extends RendererBase {
             }
           : msg.message;
 
-      // When in replace mode and translation is available, skip original text rendering.
-      const renderOriginal = this.settings.translationMode !== 'replace' || !msg.translatedText;
-
-      if (renderOriginal) {
-        if (msg.message.kind === 'superchat') {
-          renderSuperChatCard(
-            ctx,
-            renderMessage,
-            msg.width,
-            msg.height,
-            snappedX,
-            snappedY,
-            opacity,
-            this.settings,
-            this.textBitmapCache,
-            this.authorPhotoCache,
-            this.stickerCache,
-            (fs) => this.getFont(fs)
-          );
-        } else if (msg.message.kind === 'membership') {
-          renderMembershipCard(
-            ctx,
-            renderMessage,
-            msg.width,
-            msg.height,
-            snappedX,
-            snappedY,
-            opacity,
-            elapsed,
-            this.settings,
-            this.textBitmapCache,
-            this.authorPhotoCache,
-            (fs) => this.getFont(fs)
-          );
-        } else {
-          renderRegularMessage(
-            ctx,
-            renderMessage,
-            snappedX,
-            snappedY,
-            opacity,
-            this.settings,
-            this.textBitmapCache,
-            this.emojiCache,
-            this.authorPhotoCache,
-            (fs) => this.getFont(fs)
-          );
+      // When in replace mode and translation is available, skip original text rendering
+      // for rich card types (SuperChat/Membership), which are never translated.
+      // For regular text messages, always render — replace mode passes the translated
+      // text as an override so the author section (photo, name, badges) is preserved.
+      if (msg.message.kind === 'text') {
+        const isReplace = this.settings.translationMode === 'replace';
+        renderRegularMessage(
+          ctx,
+          renderMessage,
+          snappedX,
+          snappedY,
+          opacity,
+          this.settings,
+          this.textBitmapCache,
+          this.emojiCache,
+          this.authorPhotoCache,
+          (fs) => this.getFont(fs),
+          isReplace ? msg.translatedText : undefined
+        );
+      } else {
+        const renderOriginal = this.settings.translationMode !== 'replace' || !msg.translatedText;
+        if (renderOriginal) {
+          if (msg.message.kind === 'superchat') {
+            renderSuperChatCard(
+              ctx,
+              renderMessage,
+              msg.width,
+              msg.height,
+              snappedX,
+              snappedY,
+              opacity,
+              this.settings,
+              this.textBitmapCache,
+              this.authorPhotoCache,
+              this.stickerCache,
+              (fs) => this.getFont(fs)
+            );
+          } else if (msg.message.kind === 'membership') {
+            renderMembershipCard(
+              ctx,
+              renderMessage,
+              msg.width,
+              msg.height,
+              snappedX,
+              snappedY,
+              opacity,
+              elapsed,
+              this.settings,
+              this.textBitmapCache,
+              this.authorPhotoCache,
+              (fs) => this.getFont(fs)
+            );
+          }
         }
       }
 
-      // Render translation below original text (in dual mode, or as replacement in replace mode).
-      if (msg.translatedText) {
+      // Render translation below original text (dual mode only).
+      // Replace mode renders translation inside renderRegularMessage as override text.
+      if (msg.translatedText && this.settings.translationMode !== 'replace') {
         const fontSize = Math.max(
           1,
           Math.round(this.settings.fontSize * CanvasRenderer.TRANSLATION_FONT_SCALE)
         );
         const font = getFontString(fontSize, this.settings.fontWeight, this.settings.fontFamily);
         const transY = snappedY + msg.height + CanvasRenderer.TRANSLATION_GAP_PX;
+        const transColor = this.settings.colors[msg.message.authorType];
         ctx.save();
         ctx.globalAlpha = opacity * CanvasRenderer.TRANSLATION_OPACITY_SCALE;
         ctx.font = font;
-        ctx.fillStyle = this.settings.colors[msg.message.authorType];
+        ctx.fillStyle = transColor;
+        strokeTextOutline(ctx, msg.translatedText, snappedX, transY, transColor, this.settings);
         ctx.fillText(msg.translatedText, snappedX, transY);
         ctx.restore();
       }
@@ -968,7 +977,7 @@ export class CanvasRenderer extends RendererBase {
       message.kind === 'superchat'
         ? this.settings.showAuthor.superChat
         : this.settings.showAuthor[message.authorType];
-    return sharedEstimateDimensions(
+    const dims = sharedEstimateDimensions(
       message,
       this.settings.fontSize,
       showAuthor,
@@ -979,6 +988,33 @@ export class CanvasRenderer extends RendererBase {
         membership: this.settings.membershipMaxBodyLines,
       }
     );
+
+    // In dual translation mode, add extra height for the translation line
+    // that will be rendered below the original text.
+    // Only add height when the translation service is actually active
+    // (translator created and ready). If the model is still downloading
+    // or unavailable, reserving space would create a blank gap.
+    if (
+      this.settings.translationEnabled &&
+      this.translationService.isActive &&
+      this.settings.translationMode === 'dual' &&
+      message.kind === 'text'
+    ) {
+      const transFontSize = Math.max(
+        1,
+        Math.round(this.settings.fontSize * CanvasRenderer.TRANSLATION_FONT_SCALE)
+      );
+      const transFont = getFontString(
+        transFontSize,
+        this.settings.fontWeight,
+        this.settings.fontFamily
+      );
+      const transHeight =
+        measureTextHeight(transFont, transFontSize) + CanvasRenderer.TRANSLATION_GAP_PX;
+      return { width: dims.width, height: dims.height + transHeight };
+    }
+
+    return dims;
   }
 
   private getFont(fontSize: number): string {
@@ -1131,7 +1167,17 @@ export class CanvasRenderer extends RendererBase {
   // ── Abstract hook implementations ────────────────────────────────────
 
   updateSettings(settings: OverlaySettings, options?: { resetState?: boolean }): void {
+    const wasTranslationEnabled = this.settings.translationEnabled;
     super.updateSettings(settings, options);
+
+    // When translation is disabled, clear translated text from all active
+    // messages so they revert to showing only the original text on the next frame.
+    if (wasTranslationEnabled && !settings.translationEnabled) {
+      for (const msg of this.activeMessages) {
+        msg.translatedText = null;
+      }
+    }
+
     this.translationService.configure({
       enabled: settings.translationEnabled,
       service: settings.translationService,

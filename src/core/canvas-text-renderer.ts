@@ -366,7 +366,10 @@ export function drawRoundRect(
 
 // ── Message card rendering ───────────────────────────────────────────────
 
-/** Render a regular text message at (x, y) with alpha blending. */
+/** Render a regular text message at (x, y) with alpha blending.
+ *
+ * @param overrideText — when provided (replace translation mode), renders this
+ *   text instead of the message's content/text. Author section is still rendered. */
 export function renderRegularMessage(
   ctx: CanvasRenderingContext2D,
   message: ChatMessage,
@@ -377,7 +380,8 @@ export function renderRegularMessage(
   textBitmapCache: Map<string, HTMLCanvasElement>,
   emojiCache: Map<string, HTMLImageElement>,
   authorPhotoCache: Map<string, HTMLImageElement>,
-  getFontFn: (fontSize: number) => string
+  getFontFn: (fontSize: number) => string,
+  overrideText?: string | null
 ): void {
   const fontSize = settings.fontSize;
   const color =
@@ -404,7 +408,20 @@ export function renderRegularMessage(
     );
   }
 
-  if (message.content.length > 0) {
+  // In replace translation mode, render the translated text instead of the original.
+  if (overrideText) {
+    renderSegment(
+      ctx,
+      overrideText,
+      textX,
+      textY,
+      color,
+      fontSize,
+      settings,
+      textBitmapCache,
+      getFontFn
+    );
+  } else if (message.content.length > 0) {
     renderContentSegments(
       ctx,
       message.content,
