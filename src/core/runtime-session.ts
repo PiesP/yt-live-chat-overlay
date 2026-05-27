@@ -8,6 +8,7 @@ import { LiveChatSource } from '@core/chat-source-live';
 import { ReplayChatSource } from '@core/chat-source-replay';
 import {
   clearSafeInterval,
+  clearSafeTimeout,
   findElementMatch,
   isAbortError,
   throwIfAborted,
@@ -30,7 +31,8 @@ const log = createLogger('RuntimeSession');
 
 const RECENT_MESSAGE_REPLAY_LIMIT = 20;
 const CHAT_WATCHDOG_INTERVAL_MS = 15_000;
-const STANDBY_RECHECK_INTERVAL_MS = 15_000;
+const STANDBY_RECHECK_INTERVAL_MS = 5_000;
+const STANDBY_RETRY_DELAY_MS = 3_000;
 
 async function createChatSource(
   getSettings: () => Readonly<OverlaySettings>,
@@ -102,6 +104,8 @@ export class RuntimeSession {
   private domWatcherUnsubscribe: DomWatcherUnsubscribe | null = null;
   /** Timer for standby periodic recheck (pre-live waiting mode). */
   private standbyPollTimer: ReturnType<typeof setInterval> | null = null;
+  /** Timer for faster retry after a transient standby poll failure. */
+  private standbyRetryTimer: ReturnType<typeof setTimeout> | null = null;
   /** Whether this session is in standby mode (pre-live, waiting for stream). */
   private standbyMode = false;
 
@@ -141,6 +145,12 @@ export class RuntimeSession {
       throwIfAborted(signal);
 
       if (chatStarted === 'waiting') {
+        // Start foreground listeners so the render loop pauses when the
+        // tab is hidden — avoids wasted GPU/CPU during long standby waits.
+        if (document.hidden) {
+          this.noteHidden();
+        }
+        this.startForegroundListeners();
         this.enterStandbyMode();
         log.info('Entered standby mode — waiting for stream to start');
         return 'started';
@@ -266,6 +276,14 @@ export class RuntimeSession {
 
     // Seed bootstrap data from factory call to avoid duplicate watch page fetch
     seedBootstrapIfReady(chatSource, bootstrapResult);
+
+    // Short-circuit when the stream hasn't started yet (LIVE_STREAM_OFFLINE).
+    // The chat source's internal resolver would waste time retrying — return
+    // 'waiting' immediately and let the standby poll timer detect stream start.
+    if (bootstrapResult.status === 'waiting') {
+      log.info('Stream not yet started — entering standby without starting chat source');
+      return 'waiting';
+    }
 
     // Install fetch interceptor to eavesdrop on YouTube's own chat requests.
     // This delivers messages ~1 poll interval earlier than our own polling.
@@ -423,6 +441,11 @@ export class RuntimeSession {
     const dimensions = this.overlay?.getDimensions();
     const renderable = !!(container?.isConnected && dimensions);
 
+    // Pre-live standby has no chat source — never restart from health checks.
+    if (this.standbyMode) {
+      return { idleDurationMs: 0, renderable, chat: null, shouldRestart: false };
+    }
+
     // When the video is paused, chat is intentionally idle — don't treat
     // it as stalled. Without this guard the watchdog would trigger a
     // restart every CHAT_STALL_TIMEOUT_MS (30 s) and the new session
@@ -468,6 +491,13 @@ export class RuntimeSession {
 
       // Clear idle markers so the health snapshot reflects current state.
       this.clearHidden();
+
+      // In standby mode (pre-live, waiting for stream), just resume the
+      // render loop — no chat source or video state to manage.
+      if (this.standbyMode) {
+        this.renderer?.resume();
+        return;
+      }
 
       // When video is actually playing (not paused, not in premiere countdown),
       // resume chat polling and the renderer. During countdown the video exists
@@ -588,6 +618,7 @@ export class RuntimeSession {
   private exitStandbyMode(): void {
     this.standbyMode = false;
     this.stopStandbyPolling();
+    this.standbyRetryTimer = clearSafeTimeout(this.standbyRetryTimer);
     this.renderer?.setStandbyStatus(false);
   }
 
@@ -604,12 +635,28 @@ export class RuntimeSession {
         log.info('Stream detected — requesting managed restart from standby');
         this.stopStandbyPolling();
         this.requestManagedRestart('standby-resolved');
+        return;
+      }
+
+      // On transient errors (network glitch, 503), retry faster instead of
+      // waiting for the next full poll interval.
+      if (result.status === 'retryable') {
+        this.scheduleStandbyRetry();
       }
     } catch (error: unknown) {
       if (!isAbortError(error)) {
         log.warn('Standby poll failed:', error);
+        this.scheduleStandbyRetry();
       }
     }
+  }
+
+  private scheduleStandbyRetry(): void {
+    if (this.standbyRetryTimer !== null) return;
+    this.standbyRetryTimer = setTimeout(() => {
+      this.standbyRetryTimer = null;
+      void this.pollStandbyResolution();
+    }, STANDBY_RETRY_DELAY_MS);
   }
 
   private replayLatestMessages(

@@ -1114,6 +1114,7 @@ export class CanvasRenderer extends RendererBase {
     ctx: CanvasRenderingContext2D,
     dims: { width: number; height: number }
   ): void {
+    ctx.save();
     const message = 'Waiting for live stream\u2026';
     const { fontSize, paddingX, paddingY, bottomOffset, pillRadius, fillStyle, textFillStyle } =
       standbyMessageLayout;
@@ -1136,5 +1137,6 @@ export class CanvasRenderer extends RendererBase {
     // Text on top
     ctx.fillStyle = textFillStyle;
     ctx.fillText(message, dims.width / 2, boxY + boxH / 2);
+    ctx.restore();
   }
 }

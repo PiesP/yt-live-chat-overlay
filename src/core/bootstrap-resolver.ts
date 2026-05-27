@@ -42,6 +42,15 @@ export class BootstrapResolver {
         };
       }
 
+      // Do not retry when the stream hasn't started yet (LIVE_STREAM_OFFLINE).
+      // Retrying won't help — the status won't change until the stream begins.
+      if (result.status === 'waiting') {
+        return {
+          status: 'waiting',
+          reason: result.reason,
+        };
+      }
+
       lastResult = result;
       if (attempt < BOOTSTRAP_MAX_ATTEMPTS) {
         log.debug(
