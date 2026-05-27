@@ -249,6 +249,9 @@ const JA: TranslationMap = {
   'Normal (5 msg / 5s)': '標準 (5件 / 5秒)',
   'Strict (2 msg / 5s)': '厳格 (2件 / 5秒)',
   'Auto (Browser)': '自動 (ブラウザ)',
+  'Auto (Chrome built-in)': '自動 (Chrome内蔵)',
+  'Dual (original + translation)': '二重表示 (原文 + 翻訳)',
+  'Replace (translation only)': '翻訳のみ表示',
 
   // ── Tooltips ──
   'Vertical gap between comment rows (negative = overlap)':
@@ -271,6 +274,8 @@ const JA: TranslationMap = {
     'リアルタイムメッセージに対する過去メッセージの不透明度',
   'How much longer moderator and owner messages stay visible (1.0 = same as regular, 2.0 = twice as long)':
     'モデレーターと所有者のメッセージを通常より長く表示する倍率 (1.0 = 同じ, 2.0 = 2倍)',
+  'Translate chat messages in real-time (requires Chrome 138+ for built-in translation)':
+    'チャットメッセージをリアルタイムで翻訳します (Chrome 138+の内蔵翻訳が必要)',
 
   // ── Modal chrome ──
   'Chat Overlay': 'チャットオーバーレイ',
@@ -305,6 +310,7 @@ const ES: TranslationMap = {
   Comments: 'Comentarios',
   Colors: 'Colores',
   Advanced: 'Avanzado',
+  Translation: 'Traducción',
 
   // ── Section titles ──
   'Text Outline': 'Contorno de texto',
@@ -339,6 +345,10 @@ const ES: TranslationMap = {
   'Author Rate Limit': 'Límite por autor',
   Language: 'Idioma',
   'Duration Multiplier (×)': 'Multiplicador de duración (×)',
+  'Enable Translation': 'Activar traducción',
+  Service: 'Servicio',
+  'Target Language': 'Idioma de destino',
+  'Display Mode': 'Modo de visualización',
 
   // ── Select options ──
   'Scroll (RTL)': 'Desplazar (der.→izq.)',
@@ -355,6 +365,9 @@ const ES: TranslationMap = {
   'Normal (5 msg / 5s)': 'Normal (5 msg / 5s)',
   'Strict (2 msg / 5s)': 'Estricto (2 msg / 5s)',
   'Auto (Browser)': 'Automático (Navegador)',
+  'Auto (Chrome built-in)': 'Automático (integrado en Chrome)',
+  'Dual (original + translation)': 'Dual (original + traducción)',
+  'Replace (translation only)': 'Reemplazar (solo traducción)',
 
   // ── Tooltips ──
   'Vertical gap between comment rows (negative = overlap)':
@@ -377,6 +390,8 @@ const ES: TranslationMap = {
     'Opacidad de mensajes pasados respecto a los actuales',
   'How much longer moderator and owner messages stay visible (1.0 = same as regular, 2.0 = twice as long)':
     'Cuánto más tiempo permanecen visibles los mensajes de moderador y propietario (1.0 = igual, 2.0 = el doble)',
+  'Translate chat messages in real-time (requires Chrome 138+ for built-in translation)':
+    'Traduce mensajes de chat en tiempo real (requiere Chrome 138+ con traducción integrada)',
 
   // ── Modal chrome ──
   'Chat Overlay': 'Superposición de Chat',
@@ -412,6 +427,7 @@ const ZH: TranslationMap = {
   Comments: '弹幕',
   Colors: '颜色',
   Advanced: '高级',
+  Translation: '翻译',
 
   // ── Section titles ──
   'Text Outline': '文字描边',
@@ -446,6 +462,10 @@ const ZH: TranslationMap = {
   'Author Rate Limit': '用户频率限制',
   Language: '语言',
   'Duration Multiplier (×)': '显示时长倍率 (×)',
+  'Enable Translation': '启用翻译',
+  Service: '服务',
+  'Target Language': '目标语言',
+  'Display Mode': '显示模式',
 
   // ── Select options ──
   'Scroll (RTL)': '滚动 (右→左)',
@@ -462,6 +482,9 @@ const ZH: TranslationMap = {
   'Normal (5 msg / 5s)': '标准 (5条 / 5秒)',
   'Strict (2 msg / 5s)': '严格 (2条 / 5秒)',
   'Auto (Browser)': '自动 (浏览器)',
+  'Auto (Chrome built-in)': '自动 (Chrome内置)',
+  'Dual (original + translation)': '双语 (原文 + 翻译)',
+  'Replace (translation only)': '仅翻译',
 
   // ── Tooltips ──
   'Vertical gap between comment rows (negative = overlap)': '弹幕行之间的垂直间距 (负值 = 重叠)',
@@ -481,6 +504,8 @@ const ZH: TranslationMap = {
   'Opacity of past messages relative to real-time messages': '历史消息相对于实时消息的不透明度',
   'How much longer moderator and owner messages stay visible (1.0 = same as regular, 2.0 = twice as long)':
     '版主和频道主的消息比普通消息多显示多长时间 (1.0 = 相同, 2.0 = 两倍)',
+  'Translate chat messages in real-time (requires Chrome 138+ for built-in translation)':
+    '实时翻译聊天消息 (需要 Chrome 138+ 内置翻译)',
 
   // ── Modal chrome ──
   'Chat Overlay': '弹幕显示',
