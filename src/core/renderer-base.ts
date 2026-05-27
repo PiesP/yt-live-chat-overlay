@@ -252,7 +252,9 @@ export abstract class RendererBase {
     this.burstDetector.onMessageReceived();
 
     const priority = RendererBase.getMessagePriority(message);
-    if (!this.authorRateLimiter.allow(message.author ?? 'anonymous', priority)) {
+    if (
+      !this.authorRateLimiter.allow(message.author ?? 'anonymous', priority, message.authorType)
+    ) {
       log.debug('Drop [rate_limited]:', message.author, message.kind, message.id);
       this.observability.onMessageDropped('rate_limited');
       return false;

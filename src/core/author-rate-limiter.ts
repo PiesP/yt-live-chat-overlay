@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import type { AuthorRateLimitPreset, BurstLevel } from '@app-types';
+import type { AuthorRateLimitPreset, AuthorType, BurstLevel } from '@app-types';
 import { createLogger } from '@core/logging';
 
 const log = createLogger('AuthorRateLimiter');
@@ -34,8 +34,11 @@ export class PerAuthorRateLimiter {
     this.getBurstLevel = getBurstLevel;
   }
 
-  allow(authorId: string, priority: number): boolean {
+  allow(authorId: string, priority: number, authorType?: AuthorType): boolean {
     if (!this.enabled) return true;
+
+    // Moderators and owners are exempt from rate limiting
+    if (authorType === 'moderator' || authorType === 'owner') return true;
 
     if (priority >= PRIORITY_EXEMPT_THRESHOLD) return true;
 
