@@ -85,6 +85,7 @@ const KO: TranslationMap = {
   'Text Outline': '텍스트 외곽선',
   'Safe Zone': '안전 영역',
   'Message Rate': '메시지 빈도',
+  'Moderator & Owner': '관리자 & 소유자',
   Backlog: '백로그',
   'Rate Limiting': '속도 제한',
   'Author Colors & Visibility': '작성자 색상 및 표시',
@@ -112,6 +113,7 @@ const KO: TranslationMap = {
   'Backlog Opacity (%)': '백로그 불투명도 (%)',
   'Author Rate Limit': '작성자 빈도 제한',
   Language: '언어',
+  'Duration Multiplier (×)': '표시 시간 배율 (×)',
 
   // ── Select options ──
   'Scroll (RTL)': '스크롤 (오른쪽→왼쪽)',
@@ -146,6 +148,8 @@ const KO: TranslationMap = {
   'Minimum character count': '최소 글자 수',
   'Opacity of past messages relative to real-time messages':
     '실시간 메시지 대비 과거 메시지의 불투명도',
+  'How much longer moderator and owner messages stay visible (1.0 = same as regular, 2.0 = twice as long)':
+    '관리자와 소유자의 메시지가 일반 메시지보다 얼마나 오래 표시될지 설정합니다 (1.0 = 동일, 2.0 = 2배)',
 
   // ── Modal chrome ──
   'Chat Overlay': '채팅 오버레이',
@@ -185,6 +189,7 @@ const JA: TranslationMap = {
   'Text Outline': 'テキスト縁取り',
   'Safe Zone': '安全領域',
   'Message Rate': 'メッセージ頻度',
+  'Moderator & Owner': 'モデレーター & 所有者',
   Backlog: 'バックログ',
   'Rate Limiting': 'レート制限',
   'Author Colors & Visibility': '投稿者の色と表示',
@@ -212,6 +217,7 @@ const JA: TranslationMap = {
   'Backlog Opacity (%)': 'バックログ不透明度 (%)',
   'Author Rate Limit': '投稿者レート制限',
   Language: '言語',
+  'Duration Multiplier (×)': '表示時間倍率 (×)',
 
   // ── Select options ──
   'Scroll (RTL)': 'スクロール (右→左)',
@@ -248,6 +254,8 @@ const JA: TranslationMap = {
   'Minimum character count': '最小文字数',
   'Opacity of past messages relative to real-time messages':
     'リアルタイムメッセージに対する過去メッセージの不透明度',
+  'How much longer moderator and owner messages stay visible (1.0 = same as regular, 2.0 = twice as long)':
+    'モデレーターと所有者のメッセージを通常より長く表示する倍率 (1.0 = 同じ, 2.0 = 2倍)',
 
   // ── Modal chrome ──
   'Chat Overlay': 'チャットオーバーレイ',
@@ -287,6 +295,7 @@ const ES: TranslationMap = {
   'Text Outline': 'Contorno de texto',
   'Safe Zone': 'Zona segura',
   'Message Rate': 'Frecuencia de mensajes',
+  'Moderator & Owner': 'Moderador y Propietario',
   Backlog: 'Historial',
   'Rate Limiting': 'Límite de frecuencia',
   'Author Colors & Visibility': 'Colores y visibilidad',
@@ -314,6 +323,7 @@ const ES: TranslationMap = {
   'Backlog Opacity (%)': 'Opacidad historial (%)',
   'Author Rate Limit': 'Límite por autor',
   Language: 'Idioma',
+  'Duration Multiplier (×)': 'Multiplicador de duración (×)',
 
   // ── Select options ──
   'Scroll (RTL)': 'Desplazar (der.→izq.)',
@@ -350,6 +360,8 @@ const ES: TranslationMap = {
   'Minimum character count': 'Cantidad mínima de caracteres',
   'Opacity of past messages relative to real-time messages':
     'Opacidad de mensajes pasados respecto a los actuales',
+  'How much longer moderator and owner messages stay visible (1.0 = same as regular, 2.0 = twice as long)':
+    'Cuánto más tiempo permanecen visibles los mensajes de moderador y propietario (1.0 = igual, 2.0 = el doble)',
 
   // ── Modal chrome ──
   'Chat Overlay': 'Superposición de Chat',
@@ -390,6 +402,7 @@ const ZH: TranslationMap = {
   'Text Outline': '文字描边',
   'Safe Zone': '安全区域',
   'Message Rate': '消息频率',
+  'Moderator & Owner': '版主与频道主',
   Backlog: '回放',
   'Rate Limiting': '频率限制',
   'Author Colors & Visibility': '用户颜色与显示',
@@ -417,6 +430,7 @@ const ZH: TranslationMap = {
   'Backlog Opacity (%)': '回放不透明度 (%)',
   'Author Rate Limit': '用户频率限制',
   Language: '语言',
+  'Duration Multiplier (×)': '显示时长倍率 (×)',
 
   // ── Select options ──
   'Scroll (RTL)': '滚动 (右→左)',
@@ -450,6 +464,8 @@ const ZH: TranslationMap = {
   'Show messages shorter than Min Length': '显示短于最小长度的消息',
   'Minimum character count': '最小字符数',
   'Opacity of past messages relative to real-time messages': '历史消息相对于实时消息的不透明度',
+  'How much longer moderator and owner messages stay visible (1.0 = same as regular, 2.0 = twice as long)':
+    '版主和频道主的消息比普通消息多显示多长时间 (1.0 = 相同, 2.0 = 两倍)',
 
   // ── Modal chrome ──
   'Chat Overlay': '弹幕显示',
