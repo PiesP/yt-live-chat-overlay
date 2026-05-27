@@ -23,6 +23,10 @@ export type AuthorRateLimitPreset = 'off' | 'normal' | 'strict';
 export type BacklogMode = 'playback' | 'recent' | 'full' | 'none';
 /** Language setting: auto-detect or explicit locale */
 export type LanguageSetting = 'auto' | 'en' | 'ko' | 'ja' | 'es' | 'zh';
+/** Translation service provider */
+export type TranslationService = 'auto' | 'off';
+/** Translation display mode */
+export type TranslationMode = 'dual' | 'replace';
 
 /**
  * Author display settings (per author type)
@@ -210,6 +214,16 @@ export interface OverlaySettings {
   maxPollIntervalMs: number;
   /** UI language: auto-detect or explicit locale */
   language: LanguageSetting;
+
+  // ── Translation ──
+  /** Enable real-time chat translation */
+  translationEnabled: boolean;
+  /** Translation service provider */
+  translationService: TranslationService;
+  /** Target language for translation (e.g. 'ko', 'en') */
+  translationTarget: LanguageSetting;
+  /** Display mode: dual (original + translation) or replace (translation only) */
+  translationMode: TranslationMode;
 }
 
 /**

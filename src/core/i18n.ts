@@ -80,6 +80,7 @@ const KO: TranslationMap = {
   Comments: '코멘트',
   Colors: '색상',
   Advanced: '고급',
+  Translation: '번역',
 
   // ── Section titles ──
   'Text Outline': '텍스트 외곽선',
@@ -114,6 +115,10 @@ const KO: TranslationMap = {
   'Author Rate Limit': '작성자 빈도 제한',
   Language: '언어',
   'Duration Multiplier (×)': '표시 시간 배율 (×)',
+  'Enable Translation': '번역 활성화',
+  Service: '서비스',
+  'Target Language': '대상 언어',
+  'Display Mode': '표시 방식',
 
   // ── Select options ──
   'Scroll (RTL)': '스크롤 (오른쪽→왼쪽)',
@@ -130,6 +135,9 @@ const KO: TranslationMap = {
   'Normal (5 msg / 5s)': '보통 (5개 / 5초)',
   'Strict (2 msg / 5s)': '엄격 (2개 / 5초)',
   'Auto (Browser)': '자동 (브라우저)',
+  'Auto (Chrome built-in)': '자동 (Chrome 내장)',
+  'Dual (original + translation)': '이중 표시 (원문 + 번역)',
+  'Replace (translation only)': '번역만 표시',
 
   // ── Tooltips ──
   'Vertical gap between comment rows (negative = overlap)': '댓글 행 사이 간격 (음수 = 겹침)',
@@ -150,6 +158,8 @@ const KO: TranslationMap = {
     '실시간 메시지 대비 과거 메시지의 불투명도',
   'How much longer moderator and owner messages stay visible (1.0 = same as regular, 2.0 = twice as long)':
     '관리자와 소유자의 메시지가 일반 메시지보다 얼마나 오래 표시될지 설정합니다 (1.0 = 동일, 2.0 = 2배)',
+  'Translate chat messages in real-time (requires Chrome 138+ for built-in translation)':
+    '실시간으로 채팅 메시지를 번역합니다 (Chrome 138+ 내장 번역 필요)',
 
   // ── Modal chrome ──
   'Chat Overlay': '채팅 오버레이',
@@ -184,6 +194,7 @@ const JA: TranslationMap = {
   Comments: 'コメント',
   Colors: '色',
   Advanced: '詳細',
+  Translation: '翻訳',
 
   // ── Section titles ──
   'Text Outline': 'テキスト縁取り',
@@ -218,6 +229,10 @@ const JA: TranslationMap = {
   'Author Rate Limit': '投稿者レート制限',
   Language: '言語',
   'Duration Multiplier (×)': '表示時間倍率 (×)',
+  'Enable Translation': '翻訳を有効にする',
+  Service: 'サービス',
+  'Target Language': '対象言語',
+  'Display Mode': '表示モード',
 
   // ── Select options ──
   'Scroll (RTL)': 'スクロール (右→左)',

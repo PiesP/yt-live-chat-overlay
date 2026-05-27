@@ -241,4 +241,35 @@ export const PANES: PaneDef[] = [
       },
     ],
   },
+  {
+    id: 'translation',
+    label: 'Translation',
+    sections: [
+      {
+        title: '',
+        fields: [
+          chk(
+            'Enable Translation',
+            'translationEnabled',
+            'Translate chat messages in real-time (requires Chrome 138+ for built-in translation)'
+          ),
+          sel('Service', 'translationService', [
+            ['auto', 'Auto (Chrome built-in)'],
+            ['off', 'Off'],
+          ]),
+          sel('Target Language', 'translationTarget', [
+            ['ko', '한국어'],
+            ['en', 'English'],
+            ['ja', '日本語'],
+            ['es', 'Español'],
+            ['zh', '中文'],
+          ]),
+          sel('Display Mode', 'translationMode', [
+            ['dual', 'Dual (original + translation)'],
+            ['replace', 'Replace (translation only)'],
+          ]),
+        ],
+      },
+    ],
+  },
 ];

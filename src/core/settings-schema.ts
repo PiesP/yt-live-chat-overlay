@@ -94,6 +94,10 @@ const ROOT_SETTING_META = {
     displayScale: 1,
     displayPrecision: 1,
   },
+  translationEnabled: { type: 'boolean', visual: false },
+  translationService: { type: 'string', visual: false },
+  translationTarget: { type: 'string', visual: true },
+  translationMode: { type: 'string', visual: true },
 } as const satisfies Record<RootScalarSettingKey, SettingMeta>;
 
 /**
@@ -243,6 +247,10 @@ export const DEFAULT_SETTINGS = {
   minPollIntervalMs: 50,
   maxPollIntervalMs: 2000,
   language: 'auto',
+  translationEnabled: false,
+  translationService: 'auto',
+  translationTarget: 'ko',
+  translationMode: 'dual',
 } as const satisfies Readonly<OverlaySettings>;
 
 // ── Color validation ────────────────────────────────────────────────────────────
@@ -310,6 +318,9 @@ const STRING_VALIDATORS: Partial<Record<RootScalarSettingKey, (v: string) => boo
   authorRateLimit: (v) => v === 'off' || v === 'normal' || v === 'strict',
   language: (v) =>
     v === 'auto' || v === 'en' || v === 'ko' || v === 'ja' || v === 'es' || v === 'zh',
+  translationService: (v) => v === 'auto' || v === 'off',
+  translationTarget: (v) => v === 'en' || v === 'ko' || v === 'ja' || v === 'es' || v === 'zh',
+  translationMode: (v) => v === 'dual' || v === 'replace',
 };
 
 const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings => {

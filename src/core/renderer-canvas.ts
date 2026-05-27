@@ -39,6 +39,7 @@ import type { Overlay } from '@core/overlay';
 import { RendererBase } from '@core/renderer-base';
 import { estimateMessageDimensions as sharedEstimateDimensions } from '@core/renderer-shared';
 import { clearTextMeasurementCaches, getFontString } from '@core/text-measure';
+import { TranslationService } from '@core/translation-service';
 
 // ── CanvasMessage lifecycle (inlined from canvas-message-lifecycle.ts) ─────
 
@@ -57,6 +58,8 @@ interface CanvasMessage {
   staggerDelay: number;
   /** Speed tier for lane allocation (0=Far, 1=Mid, 2=Near, 3=Backlog). */
   speedTier: number;
+  /** Translated text (async result). undefined = not requested, null = translating, string = done. */
+  translatedText?: string | null;
 }
 
 interface CreateCanvasMessageParams {
@@ -140,6 +143,7 @@ export class CanvasRenderer extends RendererBase {
   private lastDpr = 0;
   /** Whether the session is in standby mode (pre-live, waiting for stream). */
   private standbyStatus = false;
+  private translationService: TranslationService;
 
   /**
    * Text bitmap cache: pre-rendered text with outline as offscreen canvas.
@@ -190,6 +194,7 @@ export class CanvasRenderer extends RendererBase {
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
     super(overlay, settings);
+    this.translationService = new TranslationService();
 
     const container = overlay.getContainer();
     const canvas = document.createElement('canvas');
@@ -585,6 +590,19 @@ export class CanvasRenderer extends RendererBase {
           (fs) => this.getFont(fs)
         );
       }
+
+      // Render translation below original text (dual mode).
+      if (msg.translatedText) {
+        const fontSize = Math.max(1, Math.round(this.settings.fontSize * 0.75));
+        const font = getFontString(fontSize, this.settings.fontWeight, this.settings.fontFamily);
+        const transY = snappedY + msg.height + 2;
+        ctx.save();
+        ctx.globalAlpha = opacity * 0.8;
+        ctx.font = font;
+        ctx.fillStyle = this.settings.colors[msg.message.authorType];
+        ctx.fillText(msg.translatedText, snappedX, transY);
+        ctx.restore();
+      }
     }
   }
 
@@ -901,6 +919,16 @@ export class CanvasRenderer extends RendererBase {
 
     this.activeMessages.push(cm);
     this.observability.onMessageRendered();
+
+    // Trigger async translation for enabled messages.
+    // Fire-and-forget: message renders with original text, then
+    // translation appears on next frame when the Promise resolves.
+    if (this.translationService.isActive && message.kind === 'text' && message.text) {
+      const cmRef = cm;
+      this.translationService.translate(message.text).then((translated) => {
+        cmRef.translatedText = translated;
+      });
+    }
   }
 
   // ── Dimension estimation (delegates to shared functions) ──────────────
@@ -1074,6 +1102,15 @@ export class CanvasRenderer extends RendererBase {
   }
 
   // ── Abstract hook implementations ────────────────────────────────────
+
+  updateSettings(settings: OverlaySettings, options?: { resetState?: boolean }): void {
+    super.updateSettings(settings, options);
+    this.translationService.configure({
+      enabled: settings.translationEnabled,
+      service: settings.translationService,
+      target: settings.translationTarget,
+    });
+  }
 
   protected onPause(): void {
     this.stopRenderLoop();
