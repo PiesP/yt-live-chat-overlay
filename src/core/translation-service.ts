@@ -16,7 +16,6 @@
  *   For chat (short messages), this is acceptable.
  */
 
-import type { TranslationMode } from '@app-types';
 import { createLogger } from '@core/logging';
 
 const log = createLogger('TranslationService');
@@ -49,11 +48,6 @@ declare global {
 
 // ── Public API ────────────────────────────────────────────────────────────
 
-export interface TranslationResult {
-  text: string;
-  mode: TranslationMode;
-}
-
 /**
  * Translation service state.
  * Created once per renderer lifecycle.
@@ -63,6 +57,8 @@ export class TranslationService {
   private currentTarget: string | null = null;
   private currentSource: string | null = null;
   private enabled = false;
+  /** Serializes configure() calls to prevent overlapping translator creation. */
+  private configurePromise: Promise<void> | null = null;
 
   /** Call this when settings change to reconfigure the translator. */
   async configure(settings: {
@@ -87,10 +83,24 @@ export class TranslationService {
 
     if (settings.target === this.currentTarget && settings.source === this.currentSource) return;
 
-    try {
-      const sourceLanguage = settings.source;
-      const targetLanguage = settings.target;
+    // Serialize: wait for any in-flight configure before starting a new one.
+    if (this.configurePromise) {
+      await this.configurePromise;
+      // Re-check no-op after the previous call completed.
+      if (settings.target === this.currentTarget && settings.source === this.currentSource) return;
+    }
 
+    this.configurePromise = this.doConfigure(settings.source, settings.target);
+    try {
+      await this.configurePromise;
+    } finally {
+      this.configurePromise = null;
+    }
+  }
+
+  private async doConfigure(sourceLanguage: string, targetLanguage: string): Promise<void> {
+    if (typeof Translator === 'undefined') return;
+    try {
       const availability = await Translator.availability({
         sourceLanguage,
         targetLanguage,

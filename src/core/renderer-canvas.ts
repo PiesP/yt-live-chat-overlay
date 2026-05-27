@@ -192,9 +192,22 @@ export class CanvasRenderer extends RendererBase {
   /** Stagger delay when queue is shallow (ms). */
   private static readonly STAGGER_MAX_MS = 200;
 
+  /** Translation font scale relative to main font size. */
+  private static readonly TRANSLATION_FONT_SCALE = 0.75;
+  /** Gap (px) between original text and translation text. */
+  private static readonly TRANSLATION_GAP_PX = 2;
+  /** Translation opacity scale relative to message opacity. */
+  private static readonly TRANSLATION_OPACITY_SCALE = 0.8;
+
   constructor(overlay: Overlay, settings: OverlaySettings) {
     super(overlay, settings);
     this.translationService = new TranslationService();
+    this.translationService.configure({
+      enabled: settings.translationEnabled,
+      service: settings.translationService,
+      source: settings.translationSource,
+      target: settings.translationTarget,
+    });
 
     const container = overlay.getContainer();
     const canvas = document.createElement('canvas');
@@ -546,58 +559,66 @@ export class CanvasRenderer extends RendererBase {
             }
           : msg.message;
 
-      if (msg.message.kind === 'superchat') {
-        renderSuperChatCard(
-          ctx,
-          renderMessage,
-          msg.width,
-          msg.height,
-          snappedX,
-          snappedY,
-          opacity,
-          this.settings,
-          this.textBitmapCache,
-          this.authorPhotoCache,
-          this.stickerCache,
-          (fs) => this.getFont(fs)
-        );
-      } else if (msg.message.kind === 'membership') {
-        renderMembershipCard(
-          ctx,
-          renderMessage,
-          msg.width,
-          msg.height,
-          snappedX,
-          snappedY,
-          opacity,
-          elapsed,
-          this.settings,
-          this.textBitmapCache,
-          this.authorPhotoCache,
-          (fs) => this.getFont(fs)
-        );
-      } else {
-        renderRegularMessage(
-          ctx,
-          renderMessage,
-          snappedX,
-          snappedY,
-          opacity,
-          this.settings,
-          this.textBitmapCache,
-          this.emojiCache,
-          this.authorPhotoCache,
-          (fs) => this.getFont(fs)
-        );
+      // When in replace mode and translation is available, skip original text rendering.
+      const renderOriginal = this.settings.translationMode !== 'replace' || !msg.translatedText;
+
+      if (renderOriginal) {
+        if (msg.message.kind === 'superchat') {
+          renderSuperChatCard(
+            ctx,
+            renderMessage,
+            msg.width,
+            msg.height,
+            snappedX,
+            snappedY,
+            opacity,
+            this.settings,
+            this.textBitmapCache,
+            this.authorPhotoCache,
+            this.stickerCache,
+            (fs) => this.getFont(fs)
+          );
+        } else if (msg.message.kind === 'membership') {
+          renderMembershipCard(
+            ctx,
+            renderMessage,
+            msg.width,
+            msg.height,
+            snappedX,
+            snappedY,
+            opacity,
+            elapsed,
+            this.settings,
+            this.textBitmapCache,
+            this.authorPhotoCache,
+            (fs) => this.getFont(fs)
+          );
+        } else {
+          renderRegularMessage(
+            ctx,
+            renderMessage,
+            snappedX,
+            snappedY,
+            opacity,
+            this.settings,
+            this.textBitmapCache,
+            this.emojiCache,
+            this.authorPhotoCache,
+            (fs) => this.getFont(fs)
+          );
+        }
       }
 
-      // Render translation below original text (dual mode).
+      // Render translation below original text (in dual mode, or as replacement in replace mode).
       if (msg.translatedText) {
-        const fontSize = Math.max(1, Math.round(this.settings.fontSize * 0.75));
+        const fontSize = Math.max(
+          1,
+          Math.round(this.settings.fontSize * CanvasRenderer.TRANSLATION_FONT_SCALE)
+        );
         const font = getFontString(fontSize, this.settings.fontWeight, this.settings.fontFamily);
-        const transY = snappedY + msg.height + 2;
+        const transY = snappedY + msg.height + CanvasRenderer.TRANSLATION_GAP_PX;
         ctx.save();
-        ctx.globalAlpha = opacity * 0.8;
+        ctx.globalAlpha = opacity * CanvasRenderer.TRANSLATION_OPACITY_SCALE;
         ctx.font = font;
         ctx.fillStyle = this.settings.colors[msg.message.authorType];
         ctx.fillText(msg.translatedText, snappedX, transY);
@@ -925,9 +946,15 @@ export class CanvasRenderer extends RendererBase {
     // translation appears on next frame when the Promise resolves.
     if (this.translationService.isActive && message.kind === 'text' && message.text) {
       const cmRef = cm;
-      this.translationService.translate(message.text).then((translated) => {
-        cmRef.translatedText = translated;
-      });
+      this.translationService
+        .translate(message.text)
+        .then((translated) => {
+          cmRef.translatedText = translated;
+        })
+        .catch(() => {
+          // Silently ignore individual translation failures.
+          // translate() already logs at debug level.
+        });
     }
   }
 
@@ -1148,6 +1175,7 @@ export class CanvasRenderer extends RendererBase {
     this.authorPhotoCache.clear();
     this.stickerCache.clear();
     this.textBitmapCache.clear();
+    this.translationService.destroy();
     clearTextMeasurementCaches();
   }
 

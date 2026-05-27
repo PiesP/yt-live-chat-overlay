@@ -96,8 +96,8 @@ const ROOT_SETTING_META = {
   },
   translationEnabled: { type: 'boolean', visual: false },
   translationService: { type: 'string', visual: false },
-  translationSource: { type: 'string', visual: true },
-  translationTarget: { type: 'string', visual: true },
+  translationSource: { type: 'string', visual: false },
+  translationTarget: { type: 'string', visual: false },
   translationMode: { type: 'string', visual: true },
 } as const satisfies Record<RootScalarSettingKey, SettingMeta>;
 
