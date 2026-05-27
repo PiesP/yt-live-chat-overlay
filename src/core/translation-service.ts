@@ -182,11 +182,13 @@ export class TranslationService {
       // or if the download failed. The translator stays null and isActive
       // returns false. It will be retried on the next configure() or
       // onUserActivation() call.
+      // Clear currentTarget/currentSource so the next configure() with
+      // the same language pair does not incorrectly no-op (see line 94).
       log.warn('Failed to create translator (may need user activation):', err);
       this.translator = null;
-      // Don't clear currentTarget/currentSource — they hold the last
-      // successfully configured pair. pendingSource/pendingTarget stay
-      // set so onUserActivation() can retry.
+      this.currentTarget = null;
+      this.currentSource = null;
+      // pendingSource/pendingTarget stay set so onUserActivation() can retry.
     }
   }
 
