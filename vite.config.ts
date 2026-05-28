@@ -23,7 +23,6 @@ import monkeyPlugin from 'vite-plugin-monkey';
 // ─────────────────────────────────────────────────────────────────────────────
 
 const REPO_ROOT = process.cwd();
-const REPOSITORY_URL = 'https://github.com/PiesP/yt-live-chat-overlay';
 const OUTPUT_FILE_NAMES = {
   dev: 'yt-live-chat-overlay.dev.user.js',
   prod: 'yt-live-chat-overlay.user.js',
@@ -41,9 +40,42 @@ function getVersion(): string {
   if (buildVersion) {
     return buildVersion;
   }
+  return getPackageMeta().version;
+}
+
+interface PackageMeta {
+  version: string;
+  author: string;
+  license: string;
+  description: string;
+  homepage: string;
+  repositoryUrl: string;
+}
+
+let _pkgMeta: PackageMeta | null = null;
+function getPackageMeta(): PackageMeta {
+  if (_pkgMeta) return _pkgMeta;
   const packageJsonPath = resolve(REPO_ROOT, 'package.json');
-  const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8')) as { version: string };
-  return packageJson.version;
+  const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf-8')) as {
+    version: string;
+    author: string;
+    license: string;
+    description: string;
+    homepage: string;
+    repository?: { url: string };
+  };
+  _pkgMeta = {
+    version: pkg.version,
+    author: pkg.author,
+    license: pkg.license,
+    description: pkg.description,
+    homepage: pkg.homepage,
+    repositoryUrl:
+      typeof pkg.repository === 'object' && pkg.repository?.url
+        ? pkg.repository.url.replace(/^git\+/, '').replace(/\.git$/, '')
+        : pkg.homepage,
+  };
+  return _pkgMeta;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -55,6 +87,7 @@ export default defineConfig(({ mode }): UserConfig => {
   const baseVersion = getVersion();
   const version = isDev ? `${baseVersion}-dev` : baseVersion;
   const outputFileName = isDev ? OUTPUT_FILE_NAMES.dev : OUTPUT_FILE_NAMES.prod;
+  const pkg = getPackageMeta();
 
   return {
     plugins: [
@@ -63,9 +96,8 @@ export default defineConfig(({ mode }): UserConfig => {
         userscript: {
           name: `YouTube Live Chat Overlay${isDev ? ' (dev)' : ''}`,
           version: baseVersion,
-          description:
-            'Displays YouTube live chat in Nico-nico style flowing overlay (100% local, no data collection)',
-          author: 'PiesP',
+          description: pkg.description,
+          author: pkg.author,
           match: [...USERSCRIPT_MATCH_PATTERNS],
           grant: [
             'GM_addValueChangeListener',
@@ -77,10 +109,10 @@ export default defineConfig(({ mode }): UserConfig => {
           ],
           'run-at': 'document-end',
           icon: 'https://www.youtube.com/favicon.ico',
-          homepage: REPOSITORY_URL,
-          supportURL: `${REPOSITORY_URL}/issues`,
-          license: 'MIT',
-          namespace: 'https://github.com/PiesP',
+          homepage: pkg.homepage,
+          supportURL: `${pkg.homepage}/issues`,
+          license: pkg.license,
+          namespace: pkg.homepage.replace(/\/[^/]+$/, ''),
           downloadURL:
             'https://cdn.jsdelivr.net/gh/PiesP/yt-live-chat-overlay@release/dist/yt-live-chat-overlay.user.js',
           updateURL:

@@ -1,11 +1,22 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import type { AuthorType, LogLevel, OutlineSettings, OverlaySettings } from '@app-types';
+import type {
+  AuthorRateLimitPreset,
+  AuthorType,
+  FontWeight,
+  LanguageSetting,
+  LogLevel,
+  OutlineSettings,
+  OverlaySettings,
+  TranslationLanguage,
+  TranslationMode,
+  TranslationService,
+} from '@app-types';
 import { DEFAULT_FONT_FAMILY, colors as designColors } from '@core/design-tokens';
 
 const isLogLevel = (value: unknown): value is LogLevel =>
-  value === 'warn' || value === 'info' || value === 'debug';
+  LOG_LEVEL_VALUES.includes(value as LogLevel);
 
 type RootScalarSettingKey = Exclude<keyof OverlaySettings, 'showAuthor' | 'colors' | 'outline'>;
 type OutlineSettingKey = keyof OutlineSettings;
@@ -14,6 +25,31 @@ export type { OutlineSettingKey, RootNumericSettingKey, RootScalarSettingKey };
 
 const VALID_BACKLOG_MODES = ['playback', 'recent', 'full', 'none'] as const;
 const VALID_DANMAKU_MODES = ['scroll', 'reverse', 'top', 'bottom'] as const;
+
+const AUTHOR_RATE_LIMIT_VALUES = [
+  'off',
+  'normal',
+  'strict',
+] as const satisfies readonly AuthorRateLimitPreset[];
+const LANGUAGE_VALUES = [
+  'auto',
+  'en',
+  'ko',
+  'ja',
+  'es',
+  'zh',
+] as const satisfies readonly LanguageSetting[];
+const TRANSLATION_SERVICE_VALUES = ['auto', 'off'] as const satisfies readonly TranslationService[];
+const TRANSLATION_LANGUAGE_VALUES = [
+  'en',
+  'ko',
+  'ja',
+  'es',
+  'zh',
+] as const satisfies readonly TranslationLanguage[];
+const TRANSLATION_MODE_VALUES = ['dual', 'replace'] as const satisfies readonly TranslationMode[];
+const FONT_WEIGHT_VALUES = ['normal', 'bold'] as const satisfies readonly FontWeight[];
+const LOG_LEVEL_VALUES = ['warn', 'info', 'debug'] as const satisfies readonly LogLevel[];
 
 export const AUTHOR_COLOR_KEYS = [
   'normal',
@@ -324,15 +360,14 @@ const STRING_VALIDATORS: Partial<Record<RootScalarSettingKey, (v: string) => boo
   backlogMode: (v) => VALID_BACKLOG_MODES.includes(v as (typeof VALID_BACKLOG_MODES)[number]),
   danmakuMode: (v) => VALID_DANMAKU_MODES.includes(v as (typeof VALID_DANMAKU_MODES)[number]),
   logLevel: (v) => isLogLevel(v),
-  fontWeight: (v) => v === 'normal' || v === 'bold',
+  fontWeight: (v) => FONT_WEIGHT_VALUES.includes(v as FontWeight),
   fontFamily: (_v) => true,
-  authorRateLimit: (v) => v === 'off' || v === 'normal' || v === 'strict',
-  language: (v) =>
-    v === 'auto' || v === 'en' || v === 'ko' || v === 'ja' || v === 'es' || v === 'zh',
-  translationService: (v) => v === 'auto' || v === 'off',
-  translationTarget: (v) => v === 'en' || v === 'ko' || v === 'ja' || v === 'es' || v === 'zh',
-  translationMode: (v) => v === 'dual' || v === 'replace',
-  translationSource: (v) => v === 'en' || v === 'ko' || v === 'ja' || v === 'es' || v === 'zh',
+  authorRateLimit: (v) => AUTHOR_RATE_LIMIT_VALUES.includes(v as AuthorRateLimitPreset),
+  language: (v) => LANGUAGE_VALUES.includes(v as LanguageSetting),
+  translationService: (v) => TRANSLATION_SERVICE_VALUES.includes(v as TranslationService),
+  translationTarget: (v) => TRANSLATION_LANGUAGE_VALUES.includes(v as TranslationLanguage),
+  translationMode: (v) => TRANSLATION_MODE_VALUES.includes(v as TranslationMode),
+  translationSource: (v) => TRANSLATION_LANGUAGE_VALUES.includes(v as TranslationLanguage),
 };
 
 const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings => {
