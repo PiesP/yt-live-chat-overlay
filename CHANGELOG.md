@@ -2,6 +2,59 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.35.0] - 2026-05-28
+
+### Fixed
+
+- **Fetch interceptor real-time messages incorrectly routed through backlog controller** — Live messages from fetch interceptor were treated as replay batches (>= 2 messages), causing unwanted Poisson delays, sampling, and 2× scroll speed. Now only batches > 50 messages trigger backlog injection. ([`d1a46e9`](https://github.com/PiesP/yt-live-chat-overlay/commit/d1a46e9))
+- **Resume state machine stuck when tab hidden + video paused simultaneously** — `isPaused` flag was cleared after the `isVideoPaused` guard, leaving the render loop dead on tab return. Fixed by clearing `isPaused` before the guard and handling `resumeForVideo()` path. ([`d1a46e9`](https://github.com/PiesP/yt-live-chat-overlay/commit/d1a46e9))
+- **Dispose ordering could skip listener cleanup** — `abortController.abort()` was called before `stopForegroundListeners()`; if abort handlers threw, cleanup never ran. Reordered to stop listeners first. ([`d1a46e9`](https://github.com/PiesP/yt-live-chat-overlay/commit/d1a46e9))
+- **`resolveLimits('opacity')` collision returned root limits for outline opacity** — Root `opacity` (0.5–1) shadowed outline `opacity` (0–1), clamping outline opacity to 50% minimum. Added `resolveOutlineLimits()` to bypass root key collision. ([`78ab417`](https://github.com/PiesP/yt-live-chat-overlay/commit/78ab417))
+- **Outline range slider not synced in `populateForm`** — Outline branch `continue` skipped the slider sync code that lived in the root scalar handler. Added local slider sync within the outline handler. ([`78ab417`](https://github.com/PiesP/yt-live-chat-overlay/commit/78ab417))
+- **ReplayBuffer did not deduplicate by message ID** — `insert()` only maintained sort order; overlapping continuation chains could emit duplicates. Added `seenIds` Set. ([`8a2c4dd`](https://github.com/PiesP/yt-live-chat-overlay/commit/8a2c4dd))
+- **`trimBackgroundQueue` sort could produce NaN** — `a.timestamp - b.timestamp` on undefined timestamp (replay messages with `videoOffsetMs`). Added `?? 0` null-coalescing guard. ([`8a2c4dd`](https://github.com/PiesP/yt-live-chat-overlay/commit/8a2c4dd))
+- **`getRootDisplayMeta` falsy-check bug** — `if (meta?.displayScale)` treated `displayScale: 0` as undefined. Changed to `!== undefined`. ([`8a2c4dd`](https://github.com/PiesP/yt-live-chat-overlay/commit/8a2c4dd))
+- **Range slider number inputs had no CSS styling** — CSS selector `.yt-chat-overlay-settings-field input[type="number"]` didn't match range companion inputs (sibling, not child). Added proper dark-theme styling to `.yt-chat-overlay-settings-range-number`. ([`62a8b7f`](https://github.com/PiesP/yt-live-chat-overlay/commit/62a8b7f))
+- **Font Family text input had no CSS styling** — No CSS rule existed for `input[type="text"]`. Added matching dark-theme styles. ([`c6b7ecf`](https://github.com/PiesP/yt-live-chat-overlay/commit/c6b7ecf))
+- **Export button had zero CSS rules** — Only base button styles applied. Added dark outlined style with primary blue hover, matching Reset button. ([`62a8b7f`](https://github.com/PiesP/yt-live-chat-overlay/commit/62a8b7f))
+- **Import button left border accent too prominent** — Yellow `border-left` opacity reduced from 0.4 → 0.15 in base state. ([`c6b7ecf`](https://github.com/PiesP/yt-live-chat-overlay/commit/c6b7ecf))
+- **Medium-severity bugs**: rAF restart during pause now guarded; epsilon-greedy lane skip keeps last zero-wait lane; active message array compaction nulls tail references; observability cooldown resets on recovery; `MessageIdRegistry` uses bulk eviction; `failedEmojiFetches` capped at 500; `BacklogController` guards against duplicate injection; lane allocator heap integrity asserts on mismatch. ([`ee755dc`](https://github.com/PiesP/yt-live-chat-overlay/commit/ee755dc), [`dec87bf`](https://github.com/PiesP/yt-live-chat-overlay/commit/dec87bf))
+- **i18n**: Replaced stale `'Outline Opacity (0–1)'` key with `'Outline Opacity (%)'` in all 4 language maps. Removed dead `'Opacity'` key. Added missing translation keys for new tooltips and validation messages. Wrapped hardcoded validation error strings in `t()` calls. ([`78ab417`](https://github.com/PiesP/yt-live-chat-overlay/commit/78ab417))
+
+### Added
+
+- **Schema-Driven Consistency Guard** — 5 new validation tests (`test/consistency/`) that cross-reference the declarative schema (PANES, settings-schema) with runtime systems (CSS, i18n, form rendering). Catches CSS rule gaps, missing translations, unregistered settings limits, and dead translation keys at CI time. ([`7c9a04a`](https://github.com/PiesP/yt-live-chat-overlay/commit/7c9a04a))
+- **Translation tab section grouping** — Split into "Interface" (language selector) and "Chat Translation" (translation settings) sections, matching the grouped layout of other tabs. ([`98163cf`](https://github.com/PiesP/yt-live-chat-overlay/commit/98163cf))
+- **Outline opacity range slider** — Changed from plain number input to slider+number combo, consistent with all other percentage-based settings. Added tooltips to `fontSize`, `outline.widthPx`, and `outline.opacity`. ([`9c35ff9`](https://github.com/PiesP/yt-live-chat-overlay/commit/9c35ff9))
+- **Save generation counter** — `Settings.save()` now uses a `saveGeneration` counter instead of a boolean `isSaving` flag, correctly handling both synchronous (Tampermonkey) and asynchronous (Violentmonkey) GM storage listener timing. ([`dec87bf`](https://github.com/PiesP/yt-live-chat-overlay/commit/dec87bf))
+- **Orphaned canvas guard** — `renderFrame()` now checks `canvas.isConnected` before drawing, preventing wasted CPU on orphaned canvases. ([`261d835`](https://github.com/PiesP/yt-live-chat-overlay/commit/261d835))
+
+### Changed
+
+- **Outline opacity display unit aligned with all other opacity settings** — Display changed from raw 0–1 to percentage (0–100%) with `displayScale: 100`, matching text/superchat/backlog/far-layer opacity. ([`ae32cd1`](https://github.com/PiesP/yt-live-chat-overlay/commit/ae32cd1))
+- **`getRuntimeHealthSnapshot` null-safe check** — Replaced fragile `!!()` pattern with explicit `(container?.isConnected ?? false) && dimensions != null`. ([`261d835`](https://github.com/PiesP/yt-live-chat-overlay/commit/261d835))
+- **`getRootDisplayMeta`**: Changed falsy-check from `if (meta?.displayScale)` to `if (meta?.displayScale !== undefined)`. ([`8a2c4dd`](https://github.com/PiesP/yt-live-chat-overlay/commit/8a2c4dd))
+- **`vite.config.ts` reads metadata from `package.json`** — Author, license, description, homepage, and repository URL are now read from `package.json` via `getPackageMeta()` instead of being hardcoded. ([`61748bb`](https://github.com/PiesP/yt-live-chat-overlay/commit/61748bb))
+
+### Refactored
+
+- **SSOT: `RgbColor` interface deduplicated** — Was defined in both `color-utils.ts` and `design-tokens.ts` with different modifiers. Moved to `types/index.ts` as canonical export. ([`df4bf7b`](https://github.com/PiesP/yt-live-chat-overlay/commit/df4bf7b))
+- **SSOT: `FontWeight` type extracted** — `'normal' | 'bold'` inline union duplicated across 6 locations. Extracted as named type in `types/index.ts`. ([`df4bf7b`](https://github.com/PiesP/yt-live-chat-overlay/commit/df4bf7b))
+- **SSOT: Magic numbers extracted as named constants** — Priority threshold (80), tier split ratio (0.3), desaturation factor (0.3), stagger batch/scale (3, 25), outline stroke scale (0.85). ([`df4bf7b`](https://github.com/PiesP/yt-live-chat-overlay/commit/df4bf7b))
+- **SSOT: `STRING_VALIDATORS` uses const arrays** — 9 inline union literals replaced with `includes()` checks against `satisfies`-typed const arrays derived from canonical types. `isLogLevel()` also uses array-based check. ([`61748bb`](https://github.com/PiesP/yt-live-chat-overlay/commit/61748bb))
+- **Architecture: `design-tokens.ts` split** — Extracted `color-utils.ts` (7 color functions) and `math-utils.ts` (`sampleExponential`) from the 304-line monolithic file. Added `BurstLevelObserver` interface for DI decoupling. ([`da176ab`](https://github.com/PiesP/yt-live-chat-overlay/commit/da176ab))
+- **Headway-gap computation deduplicated** — Extracted `LaneAllocator.computeBaseHeadwayPx()` static method and reused in `CanvasRenderer.computeHeadwayPx()`. ([`8a2c4dd`](https://github.com/PiesP/yt-live-chat-overlay/commit/8a2c4dd))
+- **Outline patching extracted to shared helper** — Duplicate `partial.outline` spread pattern in `settings-ui-form.ts` replaced with single `patchOutline()` function. ([`8a2c4dd`](https://github.com/PiesP/yt-live-chat-overlay/commit/8a2c4dd))
+- **Action button list extracted as shared constant** — `createActions()` now iterates over exported `ACTIONS` const array instead of an inline list. ([`7c9a04a`](https://github.com/PiesP/yt-live-chat-overlay/commit/7c9a04a))
+
+### Performance
+
+- **O(1) queue dequeue** — `pendingQueue.shift()` (O(n) per element) replaced with index-based dequeue using `pendingQueueOffset` counter. Array compacted when offset exceeds 64 entries. ([`810b4c8`](https://github.com/PiesP/yt-live-chat-overlay/commit/810b4c8))
+- **Pre-computed desaturated user color** — `desaturateColor()` call removed from per-frame Far-tier render hot path. Color pre-computed once on message activation. ([`810b4c8`](https://github.com/PiesP/yt-live-chat-overlay/commit/810b4c8))
+- **Text wrapping now uses measurement cache** — `wrapTextLines()` was bypassing the 500-entry LRU cache and calling `ctx.measureText()` directly. Routed through `measureTextWidth()` cache. ([`d7c4775`](https://github.com/PiesP/yt-live-chat-overlay/commit/d7c4775))
+- **Two-level Map text measurement cache** — Changed from `Map<string, number>` (template literal key allocation on every cache hit) to `Map<string, Map<string, number>>` (font → text → width), eliminating string allocation on cache hits. ([`d7c4775`](https://github.com/PiesP/yt-live-chat-overlay/commit/d7c4775))
+- **Deduplicated `estimateDimensions` call** — Both `checkPlacement` and `enqueueMessageWithPlacement` computed dimensions; now computed once and passed through. ([`d7c4775`](https://github.com/PiesP/yt-live-chat-overlay/commit/d7c4775))
+
 ## [0.34.1] - 2026-05-26
 
 ### Fixed
