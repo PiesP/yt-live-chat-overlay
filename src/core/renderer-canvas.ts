@@ -509,6 +509,7 @@ export class CanvasRenderer extends RendererBase {
     const ctx = this.ctx;
     const canvas = this.canvas;
     if (!ctx || !canvas) return;
+    if (!canvas.isConnected) return;
     if (this.isPaused) return;
     if (this.isVideoPaused) return;
 

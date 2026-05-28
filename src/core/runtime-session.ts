@@ -442,7 +442,7 @@ export class RuntimeSession {
     const idleDurationMs = this.getIdleDurationMs(now);
     const container = this.overlay?.getContainer();
     const dimensions = this.overlay?.getDimensions();
-    const renderable = !!(container?.isConnected && dimensions);
+    const renderable = container != null && container.isConnected && dimensions != null;
 
     // Pre-live standby has no chat source — never restart from health checks.
     if (this.standbyMode) {
