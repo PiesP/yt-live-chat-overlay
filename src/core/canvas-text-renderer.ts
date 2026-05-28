@@ -10,12 +10,8 @@
 
 import type { ChatMessage, ContentSegment, OverlaySettings } from '@app-types';
 import { EMOJI_ALIAS_PATTERN } from '@core/chat-message-helpers';
-import {
-  AUTHOR_PHOTO_SHADOW,
-  computeOutlineColor,
-  rendererLayout,
-  spacing,
-} from '@core/design-tokens';
+import { computeOutlineColor } from '@core/color-utils';
+import { AUTHOR_PHOTO_SHADOW, rendererLayout, spacing } from '@core/design-tokens';
 import {
   getFontString,
   measureTextHeight,

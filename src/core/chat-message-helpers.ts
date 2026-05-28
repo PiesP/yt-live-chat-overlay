@@ -10,7 +10,8 @@
  */
 
 import type { AuthorType, ChatMessage, ContentSegment, SuperChatInfo } from '@app-types';
-import { colors, parseAnyColor, SUPERCHAT_TIER_KEYS } from '@core/design-tokens';
+import { parseAnyColor } from '@core/color-utils';
+import { colors, SUPERCHAT_TIER_KEYS } from '@core/design-tokens';
 import type { JsonObject } from '@core/youtubei-json';
 import { asRecord, getString } from '@core/youtubei-json';
 

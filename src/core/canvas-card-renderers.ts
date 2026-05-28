@@ -15,8 +15,8 @@ import {
   renderWrappedText,
   strokeTextOutline,
 } from '@core/canvas-text-renderer';
+import { computeReadableTextColor, toRgba } from '@core/color-utils';
 import {
-  computeReadableTextColor,
   computeSuperChatOpacities,
   colors as designColors,
   rendererLayout,
@@ -24,7 +24,6 @@ import {
   SUPERCHAT_AMOUNT_BADGE_FILL,
   SUPERCHAT_AMOUNT_BADGE_STROKE,
   spacing,
-  toRgba,
 } from '@core/design-tokens';
 import { getFontString } from '@core/text-measure';
 

@@ -23,9 +23,10 @@
  */
 
 import type { BacklogMode, ChatMessage, Pauseable } from '@app-types';
-import { BACKLOG_INDICATOR_BG, sampleExponential } from '@core/design-tokens';
+import { BACKLOG_INDICATOR_BG } from '@core/design-tokens';
 import { clearSafeTimeout } from '@core/dom';
 import { createLogger } from '@core/logging';
+import { sampleExponential } from '@core/math-utils';
 import type { ObservabilityReporter } from '@core/observability';
 
 const log = createLogger('Backlog');

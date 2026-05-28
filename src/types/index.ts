@@ -194,7 +194,7 @@ export interface OverlaySettings {
   depthLayersEnabled: boolean;
   /** Speed multiplier for Near layer messages (1.0-2.0, default 1.4) */
   depthNearSpeedMul: number;
-  /** Speed multiplier for Far layer messages (0.3-1.0, default 0.6) */
+  /** Speed multiplier for Far layer messages (0.3-1.0, default 0.8) */
   depthFarSpeedMul: number;
   /** Opacity multiplier for Far layer messages (0.4-1.0, default 0.65) */
   depthFarOpacityMul: number;

@@ -15,9 +15,19 @@
 import type { BurstLevel } from '@app-types';
 import { clearSafeInterval } from '@core/dom';
 import { createLogger } from '@core/logging';
-import type { ObservabilityReporter } from '@core/observability';
 
 const log = createLogger('BurstDetector');
+
+/**
+ * Minimal observer interface for burst level updates.
+ *
+ * Consumers that only need to react to burst level changes (e.g.,
+ * ObservabilityReporter) can satisfy this interface without depending
+ * on the full ObservabilityReporter type.
+ */
+export interface BurstLevelObserver {
+  updateBurstLevel(level: BurstLevel): void;
+}
 
 /** How many samples to keep for rate calculation */
 const RATE_SAMPLE_WINDOW = 10;
@@ -44,12 +54,12 @@ export class BurstDetector {
   private burstStartTime: number = 0;
   private sampleInterval: ReturnType<typeof setInterval> | null = null;
   private samplesSinceLastCheck = 0;
-  private observability: ObservabilityReporter | undefined;
   private emaRate: number = 0;
   /** Timestamp of the most recently received message (for inter-message-interval EMA). */
   private lastMessageTime: number = 0;
+  private observability: BurstLevelObserver | undefined;
 
-  constructor(observability?: ObservabilityReporter) {
+  constructor(observability?: BurstLevelObserver) {
     this.observability = observability;
   }
 

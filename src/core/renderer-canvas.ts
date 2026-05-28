@@ -767,7 +767,7 @@ export class CanvasRenderer extends RendererBase {
         reason: 'collision' | 'no_lane';
       } {
     const dims = this.overlay.getDimensions();
-    if (!dims) return { ok: false, reason: 'no_lane' as const };
+    if (!dims) return { ok: false, reason: 'no_lane' };
 
     const mode = this.settings.danmakuMode;
     const isScrolling = mode === 'scroll' || mode === 'reverse';
@@ -777,7 +777,7 @@ export class CanvasRenderer extends RendererBase {
     // Find the target lane Y position via the allocator (without committing).
     const speedTier = this.getSpeedTier(message);
     const placement = this.laneAllocator.findPlacement(msgHeight, dims, speedTier);
-    if (!placement) return { ok: false, reason: 'no_lane' as const };
+    if (!placement) return { ok: false, reason: 'no_lane' };
 
     const newLaneY = placement.laneY + placement.verticalOffset;
     const laneHeight = this.laneAllocator.getLaneHeight();
@@ -818,7 +818,7 @@ export class CanvasRenderer extends RendererBase {
             forEachSlot(placement.laneIndex, placement.slotCount, (slotIdx) => {
               this.laneAllocator.markCollision(slotIdx);
             });
-            return { ok: false, reason: 'collision' as const };
+            return { ok: false, reason: 'collision' };
           }
         } else {
           // reverse mode: messages enter from left, travel right.
@@ -831,7 +831,7 @@ export class CanvasRenderer extends RendererBase {
             forEachSlot(placement.laneIndex, placement.slotCount, (slotIdx) => {
               this.laneAllocator.markCollision(slotIdx);
             });
-            return { ok: false, reason: 'collision' as const };
+            return { ok: false, reason: 'collision' };
           }
         }
       } else {
@@ -841,7 +841,7 @@ export class CanvasRenderer extends RendererBase {
           forEachSlot(placement.laneIndex, placement.slotCount, (slotIdx) => {
             this.laneAllocator.markCollision(slotIdx);
           });
-          return { ok: false, reason: 'collision' as const };
+          return { ok: false, reason: 'collision' };
         }
       }
     }
