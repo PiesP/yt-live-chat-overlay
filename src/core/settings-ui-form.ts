@@ -16,7 +16,7 @@ import {
   OUTLINE_NUMERIC_KEYS,
   resolveLimits,
 } from '@core/settings-schema';
-import type { FieldDef, PaneDef } from '@core/settings-ui-panes';
+import type { AuthorGridField, FieldDef, PaneDef } from '@core/settings-ui-panes';
 import { PANES } from '@core/settings-ui-panes';
 import { TranslationService } from '@core/translation-service';
 
@@ -97,7 +97,7 @@ function createHeader(): HTMLDivElement {
   closeButton.className = 'yt-chat-overlay-settings-close';
   closeButton.setAttribute('data-action', 'close');
   closeButton.setAttribute('aria-label', t('Close settings'));
-  closeButton.textContent = 'x';
+  closeButton.textContent = '\u00D7';
   header.append(title, closeButton);
   return header;
 }
@@ -108,13 +108,13 @@ function createTabs(): HTMLElement {
   nav.setAttribute('role', 'tablist');
   nav.setAttribute('aria-label', t('Settings categories'));
 
-  for (const pane of PANES) {
+  for (const [index, pane] of PANES.entries()) {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'yt-chat-overlay-settings-tab';
     button.dataset.tab = pane.id;
     button.setAttribute('role', 'tab');
-    button.setAttribute('aria-selected', String(pane.id === 'comments'));
+    button.setAttribute('aria-selected', String(index === 0));
     button.setAttribute('aria-controls', `pane-${pane.id}`);
     button.textContent = t(pane.label);
     if (pane.id === 'comments') button.classList.add('active');
@@ -304,7 +304,10 @@ export class SettingsUiForm {
     }
 
     for (const section of def.sections) {
-      if (section.title === 'Author Colors & Visibility') {
+      const authorGridField = section.fields.find(
+        (f): f is AuthorGridField => f.type === 'author-grid'
+      );
+      if (authorGridField) {
         pane.appendChild(this.buildAuthorGrid());
         continue;
       }
@@ -341,6 +344,40 @@ export class SettingsUiForm {
         );
         if (def.title) input.title = t(def.title);
         return domField(t(def.label), input);
+      }
+      case 'range': {
+        const container = domDiv('yt-chat-overlay-settings-range');
+        const limits = resolveLimits(def.key);
+        const displayMeta = getRootDisplayMeta(def.key as RootScalarSettingKey);
+        const scale = displayMeta.scale || 1;
+
+        const slider = document.createElement('input');
+        slider.type = 'range';
+        slider.name = `${this.resolveKey(def)}-slider`;
+        slider.min = String(limits.min * scale);
+        slider.max = String(limits.max * scale);
+        slider.step = String(limits.step * scale);
+        slider.classList.add('yt-chat-overlay-settings-range-slider');
+
+        const numberInput = domInput({ type: 'number', name: this.resolveKey(def) });
+        applyNumberInputAttributes(numberInput, def.key as RootScalarSettingKey);
+        numberInput.classList.add('yt-chat-overlay-settings-range-number');
+        if (def.title) {
+          numberInput.title = t(def.title);
+          slider.title = t(def.title);
+        }
+
+        // Sync: slider → number, number → slider
+        slider.addEventListener('input', () => {
+          numberInput.value = slider.value;
+        });
+        numberInput.addEventListener('input', () => {
+          slider.value = numberInput.value;
+        });
+
+        container.appendChild(domField(t(def.label), slider));
+        container.appendChild(numberInput);
+        return container;
       }
       case 'select': {
         const select = document.createElement('select');
@@ -379,22 +416,24 @@ export class SettingsUiForm {
     );
 
     for (const key of AUTHOR_COLOR_KEYS) {
-      grid.append(
-        domGridLabel(t(key.charAt(0).toUpperCase() + key.slice(1))),
-        domInput({
-          type: 'color',
-          name: `color-${key}`,
-          className: 'yt-chat-overlay-author-grid-color',
-        }),
-        domGridCheckbox(`showAuthor-${key}`)
-      );
+      const colorInput = domInput({
+        type: 'color',
+        name: `color-${key}`,
+        className: 'yt-chat-overlay-author-grid-color',
+      });
+      const labelKey = key.charAt(0).toUpperCase() + key.slice(1);
+      colorInput.setAttribute('aria-label', `${t(labelKey)} ${t('Color')}`);
+
+      const checkbox = domGridCheckbox(`showAuthor-${key}`);
+      checkbox.setAttribute('aria-label', `${t('Show')} ${t(labelKey)}`);
+
+      grid.append(domGridLabel(t(labelKey)), colorInput, checkbox);
     }
 
-    grid.append(
-      domGridLabel(t('SuperChat')),
-      document.createElement('span'),
-      domGridCheckbox('showAuthor-superChat')
-    );
+    const superChatCheckbox = domGridCheckbox('showAuthor-superChat');
+    superChatCheckbox.setAttribute('aria-label', `${t('Show')} ${t('SuperChat')}`);
+
+    grid.append(domGridLabel(t('SuperChat')), document.createElement('span'), superChatCheckbox);
 
     section.appendChild(grid);
     return section;
@@ -453,6 +492,12 @@ export class SettingsUiForm {
             ? String(formatRootNumericSettingForInput(scalarKey, value))
             : String(value);
       }
+
+      // Also sync range slider if present
+      const slider = el.parentElement?.querySelector<HTMLInputElement>('input[type="range"]');
+      if (slider && el.name && slider.name === `${el.name}-slider`) {
+        slider.value = el.value;
+      }
     }
 
     this.syncMinTextLengthState();
@@ -466,7 +511,23 @@ export class SettingsUiForm {
     );
     const minText = this.modal.querySelector<HTMLInputElement>('input[name="minTextLength"]');
     if (allowShort && minText) {
-      minText.disabled = allowShort.checked;
+      const isDisabled = allowShort.checked;
+      minText.disabled = isDisabled;
+
+      // Add/remove disabled-field helper text
+      const existingHint = minText.parentElement?.querySelector(
+        '.yt-chat-overlay-settings-field-hint'
+      );
+      if (isDisabled) {
+        if (!existingHint) {
+          const hint = document.createElement('span');
+          hint.className = 'yt-chat-overlay-settings-field-hint';
+          hint.textContent = t('Short messages shown regardless of length');
+          minText.insertAdjacentElement('afterend', hint);
+        }
+      } else {
+        existingHint?.remove();
+      }
     }
   }
 
@@ -522,11 +583,22 @@ export class SettingsUiForm {
         if (el.type === 'checkbox') {
           partial[scalarKey] = el.checked;
         } else if (el.type === 'number') {
-          partial[scalarKey] = normalizeRootNumericInputValue(
+          const clamped = normalizeRootNumericInputValue(
             scalarKey as RootNumericSettingKey,
             el.value,
             this.getSettings()[scalarKey] as number
           );
+          partial[scalarKey] = clamped;
+          // Show validation feedback when value is clamped
+          const rawNum = Number(el.value);
+          if (Number.isFinite(rawNum)) {
+            const { min, max } = getNumericInputAttributes(scalarKey as RootScalarSettingKey);
+            if (rawNum < min) {
+              this.showFieldError(el, `Value adjusted to ${min}`);
+            } else if (rawNum > max) {
+              this.showFieldError(el, `Value adjusted to ${max}`);
+            }
+          }
         } else {
           partial[scalarKey] = el.value;
         }
@@ -536,6 +608,22 @@ export class SettingsUiForm {
     }
 
     return cloneSettings({ ...this.getSettings(), ...partial } as OverlaySettings);
+  }
+
+  // ── Validation error feedback ───────────────────────────────────────────
+
+  private showFieldError(input: HTMLInputElement, message: string): void {
+    // Remove any existing error
+    const existing = input.parentElement?.querySelector('.yt-chat-overlay-settings-field-error');
+    existing?.remove();
+
+    const error = document.createElement('span');
+    error.className = 'yt-chat-overlay-settings-field-error';
+    error.textContent = message;
+    input.insertAdjacentElement('afterend', error);
+
+    // Auto-dismiss after 3s
+    setTimeout(() => error.remove(), 3000);
   }
 
   getFocusableElements(): HTMLElement[] {

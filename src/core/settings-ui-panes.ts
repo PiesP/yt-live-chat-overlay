@@ -27,8 +27,21 @@ interface TextField extends BaseField {
 interface EnabledField {
   type: 'enabled';
 }
+export interface AuthorGridField {
+  type: 'author-grid';
+}
+export interface RangeField extends BaseField {
+  type: 'range';
+}
 
-export type FieldDef = NumberField | CheckboxField | SelectField | TextField | EnabledField;
+export type FieldDef =
+  | NumberField
+  | CheckboxField
+  | SelectField
+  | TextField
+  | EnabledField
+  | AuthorGridField
+  | RangeField;
 
 type SectionDef = {
   title: string;
@@ -76,6 +89,13 @@ const txt = (label: string, key: string, title?: string, placeholder?: string): 
   ...(title !== undefined ? { title } : {}),
   ...(placeholder !== undefined ? { placeholder } : {}),
 });
+const range = (label: string, key: string, title?: string, modifier?: string): RangeField => ({
+  type: 'range' as const,
+  label,
+  key,
+  ...(title !== undefined ? { title } : {}),
+  ...(modifier !== undefined ? { modifier } : {}),
+});
 
 // ── Declarative field schemas ────────────────────────────────────────────────
 
@@ -88,14 +108,6 @@ export const PANES: PaneDef[] = [
       {
         title: '',
         fields: [
-          sel('Language', 'language', [
-            ['auto', 'Auto (Browser)'],
-            ['en', 'English'],
-            ['ko', '한국어'],
-            ['ja', '日本語'],
-            ['es', 'Español'],
-            ['zh', '中文'],
-          ]),
           sel('Danmaku Mode', 'danmakuMode', [
             ['scroll', 'Scroll (RTL)'],
             ['reverse', 'Reverse (LTR)'],
@@ -103,12 +115,10 @@ export const PANES: PaneDef[] = [
             ['bottom', 'Bottom Fixed'],
           ]),
           num('Font Size (px)', 'fontSize'),
-          num('Text Opacity', 'opacity'),
-          num('Scroll Speed (px/s)', 'speedPxPerSec'),
           num(
-            'Lane Gap (px)',
-            'laneSpacing',
-            'Vertical gap between comment rows (negative = overlap)'
+            'Scroll Speed (px/s)',
+            'speedPxPerSec',
+            'How fast comments scroll across the screen in pixels per second'
           ),
           sel(
             'Font Weight',
@@ -124,10 +134,16 @@ export const PANES: PaneDef[] = [
             'fontFamily',
             'CSS font-family value, e.g. "Noto Sans KR", sans-serif. Falls back to system default if not found.'
           ),
+          range('Text Opacity (%)', 'opacity'),
+          num(
+            'Lane Gap (px)',
+            'laneSpacing',
+            'Vertical gap between comment rows (negative = overlap)'
+          ),
         ],
       },
       {
-        title: 'Moderator & Owner',
+        title: 'Moderator and Owner',
         fields: [
           num(
             'Duration Multiplier (×)',
@@ -136,24 +152,16 @@ export const PANES: PaneDef[] = [
           ),
         ],
       },
-      {
-        title: 'Text Outline',
-        fields: [
-          chk('Enabled', 'enabled', undefined, 'outline'),
-          num('Width (px)', 'widthPx', undefined, 'outline'),
-          num('Opacity', 'opacity', undefined, 'outline'),
-        ],
-      },
     ],
   },
   {
     id: 'colors',
-    label: 'Colors',
+    label: 'Cards & Colors',
     sections: [
       {
         title: '',
         fields: [
-          num(
+          range(
             'SuperChat Opacity (%)',
             'superChatOpacity',
             'Background opacity of Super Chat cards'
@@ -175,7 +183,15 @@ export const PANES: PaneDef[] = [
           ),
         ],
       },
-      { title: 'Author Colors & Visibility', fields: [] },
+      {
+        title: 'Text Outline',
+        fields: [
+          chk('Enabled', 'enabled', undefined, 'outline'),
+          num('Outline Width (px)', 'widthPx', undefined, 'outline'),
+          num('Outline Opacity (0–1)', 'opacity', undefined, 'outline'),
+        ],
+      },
+      { title: 'Author Colors & Visibility', fields: [{ type: 'author-grid' as const }] },
     ],
   },
   {
@@ -185,17 +201,17 @@ export const PANES: PaneDef[] = [
       {
         title: 'Safe Zone',
         fields: [
-          num('Top Clear Zone (%)', 'safeTop', 'Keep top N% of video free of comments'),
-          num('Bottom Clear Zone (%)', 'safeBottom', 'Keep bottom N% of video free of comments'),
+          range('Top Clear Zone (%)', 'safeTop', 'Keep top N% of video free of comments'),
+          range('Bottom Clear Zone (%)', 'safeBottom', 'Keep bottom N% of video free of comments'),
         ],
       },
       {
         title: 'Message Rate',
         fields: [
           chk(
-            'Show Short Messages',
+            'Ignore Min Length',
             'allowShortTextMessages',
-            'Show messages shorter than Min Length'
+            'Show all messages regardless of minimum character length'
           ),
           num('Min Length (chars)', 'minTextLength', 'Minimum character count'),
         ],
@@ -209,10 +225,25 @@ export const PANES: PaneDef[] = [
             ['full', 'Full (show all)'],
             ['none', 'None (skip backlog)'],
           ]),
-          num(
+          range(
             'Backlog Opacity (%)',
             'backlogOpacityMultiplier',
             'Opacity of past messages relative to real-time messages'
+          ),
+          num(
+            'Max Rate (msg/s)',
+            'backlogMaxRate',
+            'Maximum backlog message injection rate per second (0-50)'
+          ),
+          num(
+            'Speed Multiplier',
+            'backlogSpeedMultiplier',
+            'Animation speed multiplier for backlog messages (1-5)'
+          ),
+          num(
+            'Window (min)',
+            'backlogRecentMinutes',
+            'Time window in minutes for recent-only backlog mode (1-30)'
           ),
         ],
       },
@@ -224,19 +255,69 @@ export const PANES: PaneDef[] = [
             'depthLayersEnabled',
             'Speed-based depth perception: fast messages appear near, slow messages appear far'
           ),
-          num('Near Speed (%)', 'depthNearSpeedMul', 'Speed boost for near-layer messages'),
-          num('Far Speed (%)', 'depthFarSpeedMul', 'Speed reduction for far-layer messages'),
-          num('Far Opacity (%)', 'depthFarOpacityMul', 'Opacity dimming for far-layer messages'),
+          range('Near Speed (%)', 'depthNearSpeedMul', 'Speed boost for near-layer messages'),
+          range('Far Speed (%)', 'depthFarSpeedMul', 'Speed reduction for far-layer messages'),
+          range('Far Opacity (%)', 'depthFarOpacityMul', 'Opacity dimming for far-layer messages'),
         ],
       },
       {
         title: 'Rate Limiting',
         fields: [
-          sel('Author Rate Limit', 'authorRateLimit', [
-            ['off', 'Off'],
-            ['normal', 'Normal (5 msg / 5s)'],
-            ['strict', 'Strict (2 msg / 5s)'],
-          ]),
+          sel(
+            'Author Rate Limit',
+            'authorRateLimit',
+            [
+              ['off', 'Off'],
+              ['normal', 'Normal (5 msg / 5s)'],
+              ['strict', 'Strict (2 msg / 5s)'],
+            ],
+            'Limits how frequently messages from the same author appear'
+          ),
+        ],
+      },
+      {
+        title: 'Performance',
+        fields: [
+          num(
+            'Max Messages',
+            'maxConcurrentMessages',
+            'Maximum number of messages visible on screen at once (30-300)'
+          ),
+          num(
+            'Fade Duration (ms)',
+            'fadeDurationMs',
+            'How long messages take to fade out (0 = instant, 50-1000)'
+          ),
+          num(
+            'Min Poll Interval (ms)',
+            'minPollIntervalMs',
+            'Minimum chat polling interval in milliseconds (50-5000)'
+          ),
+          num(
+            'Max Poll Interval (ms)',
+            'maxPollIntervalMs',
+            'Maximum chat polling interval in milliseconds (1000-30000)'
+          ),
+        ],
+      },
+      {
+        title: 'Developer',
+        fields: [
+          sel(
+            'Log Level',
+            'logLevel',
+            [
+              ['warn', 'Warnings only'],
+              ['info', 'Info'],
+              ['debug', 'Debug (verbose)'],
+            ],
+            'Console diagnostic output verbosity'
+          ),
+          chk(
+            'Debug Overlay',
+            'showDebugOverlay',
+            'Show performance debug overlay on the video player'
+          ),
         ],
       },
     ],
@@ -248,29 +329,49 @@ export const PANES: PaneDef[] = [
       {
         title: '',
         fields: [
+          sel(
+            'Language',
+            'language',
+            [
+              ['auto', 'Auto (Browser)'],
+              ['en', 'English'],
+              ['ko', '한국어'],
+              ['ja', '日本語'],
+              ['es', 'Español'],
+              ['zh', '中文'],
+            ],
+            'Sets the overlay user interface language (does not filter comments by language)'
+          ),
           chk(
             'Enable Translation',
             'translationEnabled',
             'Translate chat messages in real-time (requires Chrome 138+ for built-in translation)'
           ),
-          sel('Service', 'translationService', [
-            ['auto', 'Auto (Chrome built-in)'],
-            ['off', 'Off'],
-          ]),
-          sel('Source Language', 'translationSource', [
-            ['en', 'English'],
-            ['ko', '한국어'],
-            ['ja', '日本語'],
-            ['es', 'Español'],
-            ['zh', '中文'],
-          ]),
-          sel('Target Language', 'translationTarget', [
-            ['ko', '한국어'],
-            ['en', 'English'],
-            ['ja', '日本語'],
-            ['es', 'Español'],
-            ['zh', '中文'],
-          ]),
+          sel('Service', 'translationService', [['auto', 'Auto (Chrome built-in)']]),
+          sel(
+            'Source Language',
+            'translationSource',
+            [
+              ['en', 'English'],
+              ['ko', '한국어'],
+              ['ja', '日本語'],
+              ['es', 'Español'],
+              ['zh', '中文'],
+            ],
+            'Language of the incoming chat messages'
+          ),
+          sel(
+            'Target Language',
+            'translationTarget',
+            [
+              ['ko', '한국어'],
+              ['en', 'English'],
+              ['ja', '日本語'],
+              ['es', 'Español'],
+              ['zh', '中文'],
+            ],
+            'Language to translate chat messages into'
+          ),
           sel('Display Mode', 'translationMode', [
             ['dual', 'Dual (original + translation)'],
             ['replace', 'Replace (translation only)'],
