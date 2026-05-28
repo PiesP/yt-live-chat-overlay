@@ -243,10 +243,14 @@ export class RuntimeSession {
     this.disposed = true;
     this.sessionReady = false;
     this.restartRequested = true;
-    this.abortController.abort();
+
+    // Stop event listeners BEFORE aborting — abort handlers may throw,
+    // and we want listeners cleaned up regardless.
     this.stopForegroundListeners();
     this.stopVideoPauseListeners();
     this.stopChatWatchdog();
+
+    this.abortController.abort();
 
     this.backlogController?.destroy();
     this.backlogController = null;
@@ -303,7 +307,7 @@ export class RuntimeSession {
       chatSource.burstRateProvider = () => this.renderer?.getBurstEmaRate() ?? 0;
     }
 
-    return chatSource.start((messages, isInitialSeed) => {
+    return chatSource.start((messages, _isInitialSeed) => {
       if (this.disposed) return;
       const renderer = this.renderer;
       if (!renderer) return;
@@ -326,8 +330,7 @@ export class RuntimeSession {
         return;
       }
 
-      const isReplayBatch = isInitialSeed === false && msgs.length >= 2;
-      if (isReplayBatch || msgs.length > 50) {
+      if (msgs.length > 50) {
         this.ensureBacklogController(renderer);
         this.backlogController?.startBacklogInjection(msgs);
         return;

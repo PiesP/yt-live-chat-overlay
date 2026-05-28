@@ -123,7 +123,13 @@ export abstract class RendererBase {
     this.pausedAt = null;
     this.burstDetector.resume();
 
-    // BUG-4 fix: only shift lane timers if the video is actually playing.
+    // Clear paused flag BEFORE isVideoPaused guard so resumeForVideo()
+    // can call onResume() when video later un-pauses. Without this,
+    // resumeForVideo calls resume() which sees isPaused=false and
+    // returns early without starting the render loop.
+    this.isPaused = false;
+
+    // Only shift lane timers if the video is actually playing.
     // When isVideoPaused is true, the tab was hidden while the video was
     // paused — shifting lanes would advance availability past the pause,
     // causing messages to disappear prematurely when the video resumes.
@@ -132,14 +138,12 @@ export abstract class RendererBase {
     }
 
     if (this.isVideoPaused) {
+      // Don't start render loop while video is paused — it would waste
+      // CPU doing nothing (renderFrame checks isVideoPaused and returns early).
+      // resumeForVideo() will call onResume() when the video un-pauses.
       return;
     }
 
-    // Set isPaused=false AFTER the isVideoPaused guard so future
-    // callers of resume() (including resumeForVideo()) cannot
-    // silently corrupt state by clearing isPaused without
-    // restarting the render loop.
-    this.isPaused = false;
     this.onResume();
     log.debug('Resumed');
   }
@@ -156,7 +160,14 @@ export abstract class RendererBase {
     if (!this.isVideoPaused) return;
     this.isVideoPaused = false;
     if (!document.hidden) {
-      this.resume();
+      if (this.isPaused) {
+        this.resume();
+      } else {
+        // isPaused was already cleared by resume() when tab returned
+        // while video was still paused. Render loop needs to start now.
+        this.onResume();
+        log.debug('Resumed');
+      }
     }
   }
 
