@@ -207,6 +207,15 @@ export const SETTINGS_UI_STYLES = `
         color: ${uiColors.text};
         text-align: right;
       }
+      .yt-chat-overlay-settings-field input[type="text"] {
+        flex: 1;
+        padding: ${spacing.xs}px ${spacing.sm}px;
+        border-radius: ${borderRadius.sm};
+        border: 1px solid ${uiColors.border};
+        background: ${uiColors.backgroundLight};
+        color: ${uiColors.text};
+        font-size: ${typography.fontSize.sm};
+      }
       .yt-chat-overlay-settings-field input[type="color"] {
         width: ${S.colorSwatch}px;
         height: 26px;
@@ -320,7 +329,7 @@ export const SETTINGS_UI_STYLES = `
         background: transparent;
         color: ${uiColors.textMuted};
         border: 1px solid ${uiColors.border};
-        border-left: 2px solid rgba(255, 193, 7, 0.4);
+        border-left: 2px solid rgba(255, 193, 7, 0.15);
       }
       .yt-chat-overlay-settings-actions button[data-action="import"]:hover {
         background: rgba(255, 193, 7, 0.15);
