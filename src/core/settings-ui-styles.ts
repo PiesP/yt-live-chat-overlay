@@ -307,13 +307,26 @@ export const SETTINGS_UI_STYLES = `
         color: ${uiColors.danger};
         border-color: ${uiColors.danger};
       }
+      .yt-chat-overlay-settings-actions button[data-action="export"] {
+        background: transparent;
+        color: ${uiColors.textMuted};
+        border: 1px solid ${uiColors.border};
+      }
+      .yt-chat-overlay-settings-actions button[data-action="export"]:hover {
+        color: ${uiColors.text};
+        border-color: ${uiColors.primary};
+      }
       .yt-chat-overlay-settings-actions button[data-action="import"] {
+        background: transparent;
+        color: ${uiColors.textMuted};
+        border: 1px solid ${uiColors.border};
         border-left: 2px solid rgba(255, 193, 7, 0.4);
       }
       .yt-chat-overlay-settings-actions button[data-action="import"]:hover {
         background: rgba(255, 193, 7, 0.15);
         color: #ffc107;
         border-color: rgba(255, 193, 7, 0.3);
+        border-left-color: rgba(255, 193, 7, 0.6);
       }
       .yt-chat-overlay-settings-actions button:focus-visible {
         outline: 2px solid ${uiColors.primary};
@@ -434,6 +447,12 @@ export const SETTINGS_UI_STYLES = `
       .yt-chat-overlay-settings-range-number {
         width: ${S.inputWidth}px;
         text-align: right;
+        padding: ${spacing.xs}px ${spacing.sm}px;
+        border-radius: ${borderRadius.sm};
+        border: 1px solid ${uiColors.border};
+        background: ${uiColors.backgroundLight};
+        color: ${uiColors.text};
+        font-size: ${typography.fontSize.sm};
       }
       /* Inline validation error */
       .yt-chat-overlay-settings-field-error {
