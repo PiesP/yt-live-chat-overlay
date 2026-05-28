@@ -12,6 +12,7 @@ import type {
 import {
   AUTHOR_COLOR_KEYS,
   cloneSettings,
+  getOutlineDisplayScale,
   getRootDisplayMeta,
   OUTLINE_NUMERIC_KEYS,
   resolveLimits,
@@ -219,14 +220,22 @@ const normalizeOutlineNumericInputValue = (
   value: unknown,
   fallback: number
 ): number => {
-  return normalizeNumericValue(value, fallback, resolveLimits(key), false);
+  return normalizeNumericValue(
+    value,
+    fallback,
+    resolveLimits(key),
+    false,
+    getOutlineDisplayScale(key)
+  );
 };
 
 const getNumericInputAttributes = (
   key: RootScalarSettingKey | Exclude<OutlineSettingKey, 'enabled'>
 ): Readonly<{ min: number; max: number; step: number }> => {
   const limits = resolveLimits(key);
-  const scale = getRootScale(key as RootScalarSettingKey);
+  const scale = isOutlineNumericKey(key)
+    ? getOutlineDisplayScale(key)
+    : getRootScale(key as RootScalarSettingKey);
   return {
     min: scaleUiValue(limits.min, scale),
     max: scaleUiValue(limits.max, scale),
@@ -464,7 +473,9 @@ export class SettingsUiForm {
         } else {
           const numericKey = isOutlineNumericKey(rawKey) ? rawKey : null;
           if (numericKey) {
-            el.value = String(value as number);
+            const scale = getOutlineDisplayScale(numericKey);
+            const displayValue = (value as number) * scale;
+            el.value = String(scale > 1 ? Math.round(displayValue) : displayValue);
           }
         }
         continue;

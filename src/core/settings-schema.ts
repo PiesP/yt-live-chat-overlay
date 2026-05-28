@@ -286,6 +286,15 @@ const OUTLINE_LIMIT_KEYS: Record<string, keyof typeof SETTINGS_LIMITS> = {
   opacity: 'outlineOpacity',
 } as const;
 
+/** Display scale for outline numeric keys — consistent with root opacity settings (displayScale: 100).
+ *  widthPx is already in pixels (no scaling), opacity is 0–1 internally, displayed as 0–100%. */
+export const OUTLINE_DISPLAY_SCALE: Record<string, number> = {
+  widthPx: 1,
+  opacity: 100,
+} as const;
+
+export const getOutlineDisplayScale = (key: string): number => OUTLINE_DISPLAY_SCALE[key] ?? 1;
+
 export const resolveLimits = (key: string): NumericSettingLimit => {
   const direct = SETTINGS_LIMITS[key as keyof typeof SETTINGS_LIMITS];
   if (direct) return direct;

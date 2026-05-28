@@ -188,7 +188,7 @@ export const PANES: PaneDef[] = [
         fields: [
           chk('Enabled', 'enabled', undefined, 'outline'),
           num('Outline Width (px)', 'widthPx', undefined, 'outline'),
-          num('Outline Opacity (0–1)', 'opacity', undefined, 'outline'),
+          num('Outline Opacity (%)', 'opacity', undefined, 'outline'),
         ],
       },
       { title: 'Author Colors & Visibility', fields: [{ type: 'author-grid' as const }] },
