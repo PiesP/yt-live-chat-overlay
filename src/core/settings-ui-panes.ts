@@ -114,7 +114,7 @@ export const PANES: PaneDef[] = [
             ['top', 'Top Fixed'],
             ['bottom', 'Bottom Fixed'],
           ]),
-          num('Font Size (px)', 'fontSize'),
+          num('Font Size (px)', 'fontSize', 'Text size in pixels (14-50)'),
           num(
             'Scroll Speed (px/s)',
             'speedPxPerSec',
@@ -187,8 +187,18 @@ export const PANES: PaneDef[] = [
         title: 'Text Outline',
         fields: [
           chk('Enabled', 'enabled', undefined, 'outline'),
-          num('Outline Width (px)', 'widthPx', undefined, 'outline'),
-          num('Outline Opacity (%)', 'opacity', undefined, 'outline'),
+          num(
+            'Outline Width (px)',
+            'widthPx',
+            'Text outline stroke width in pixels (0-8)',
+            'outline'
+          ),
+          range(
+            'Outline Opacity (%)',
+            'opacity',
+            'Text outline stroke opacity (0-100%)',
+            'outline'
+          ),
         ],
       },
       { title: 'Author Colors & Visibility', fields: [{ type: 'author-grid' as const }] },

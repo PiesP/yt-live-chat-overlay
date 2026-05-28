@@ -362,8 +362,9 @@ export class SettingsUiForm {
       case 'range': {
         const container = domDiv('yt-chat-overlay-settings-range');
         const limits = resolveLimits(def.key);
-        const displayMeta = getRootDisplayMeta(def.key as RootScalarSettingKey);
-        const scale = displayMeta.scale || 1;
+        const scale = isOutlineNumericKey(def.key)
+          ? getOutlineDisplayScale(def.key)
+          : getRootDisplayMeta(def.key as RootScalarSettingKey).scale || 1;
 
         const slider = document.createElement('input');
         slider.type = 'range';
