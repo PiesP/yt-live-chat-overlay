@@ -116,6 +116,12 @@ const KO: TranslationMap = {
   'Backlog Opacity (%)': '백로그 불투명도 (%)',
   'Author Rate Limit': '작성자 빈도 제한',
   Language: '언어',
+  // ── Language names ──
+  English: '영어',
+  한국어: '한국어',
+  日本語: '일본어',
+  Español: '스페인어',
+  中文: '중국어',
   'Duration Multiplier (×)': '표시 시간 배율 (×)',
   'Enable Translation': '번역 활성화',
   Service: '서비스',
@@ -299,6 +305,12 @@ const JA: TranslationMap = {
   'Backlog Opacity (%)': 'バックログ不透明度 (%)',
   'Author Rate Limit': '投稿者レート制限',
   Language: '言語',
+  // ── Language names ──
+  English: '英語',
+  한국어: '韓国語',
+  日本語: '日本語',
+  Español: 'スペイン語',
+  中文: '中国語',
   'Duration Multiplier (×)': '表示時間倍率 (×)',
   'Enable Translation': '翻訳を有効にする',
   Service: 'サービス',
@@ -484,6 +496,12 @@ const ES: TranslationMap = {
   'Backlog Opacity (%)': 'Opacidad historial (%)',
   'Author Rate Limit': 'Límite por autor',
   Language: 'Idioma',
+  // ── Language names ──
+  English: 'Inglés',
+  한국어: 'Coreano',
+  日本語: 'Japonés',
+  Español: 'Español',
+  中文: 'Chino',
   'Duration Multiplier (×)': 'Multiplicador de duración (×)',
   'Enable Translation': 'Activar traducción',
   Service: 'Servicio',
@@ -670,6 +688,12 @@ const ZH: TranslationMap = {
   'Backlog Opacity (%)': '回放不透明度 (%)',
   'Author Rate Limit': '用户频率限制',
   Language: '语言',
+  // ── Language names ──
+  English: '英语',
+  한국어: '韩语',
+  日本語: '日语',
+  Español: '西班牙语',
+  中文: '中文',
   'Duration Multiplier (×)': '显示时长倍率 (×)',
   'Enable Translation': '启用翻译',
   Service: '服务',
@@ -806,6 +830,14 @@ const ZH: TranslationMap = {
 
 const TRANSLATIONS: Record<SupportedLanguage, TranslationMap> = {
   en: {}, // English: no translation needed (strings are the keys)
+  ko: KO,
+  ja: JA,
+  es: ES,
+  zh: ZH,
+};
+
+// Export translation maps for consistency validation (test-only, not used at runtime)
+export const TRANSLATION_MAPS: Record<string, TranslationMap> = {
   ko: KO,
   ja: JA,
   es: ES,

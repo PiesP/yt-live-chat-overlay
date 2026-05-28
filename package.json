@@ -21,6 +21,7 @@
     "quality:ci": "pnpm -s quality",
     "quality:fix": "pnpm -s fmt:fix && pnpm -s lint:fix && pnpm -s check && pnpm -s circular && pnpm -s knip",
     "clean": "rimraf dist",
+    "validate:consistency": "cd test && npx vitest run consistency/",
     "prebuild": "pnpm -s quality"
   },
   "keywords": [

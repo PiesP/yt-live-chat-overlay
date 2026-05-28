@@ -126,14 +126,13 @@ function createTabs(): HTMLElement {
   return nav;
 }
 
+export const ACTIONS = ['reset', 'export', 'import', 'close'] as const;
+
 function createActions(): HTMLDivElement {
   const actions = domDiv('yt-chat-overlay-settings-actions');
-  for (const [action, label] of [
-    ['reset', 'Reset'],
-    ['export', 'Export'],
-    ['import', 'Import'],
-    ['close', 'Close'],
-  ] as const) {
+  for (const [action, label] of ACTIONS.map(
+    (a) => [a, a.charAt(0).toUpperCase() + a.slice(1)] as const
+  )) {
     const button = document.createElement('button');
     button.type = 'button';
     button.dataset.action = action;
