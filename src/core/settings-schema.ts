@@ -340,6 +340,14 @@ export const resolveLimits = (key: string): NumericSettingLimit => {
   throw new Error(`Unknown setting key: ${key}`);
 };
 
+/** Resolve limits for an outline sub-key, checking OUTLINE_LIMIT_KEYS first
+ *  to avoid collisions with same-named root keys (e.g. 'opacity'). */
+export const resolveOutlineLimits = (key: string): NumericSettingLimit => {
+  const outlineKey = OUTLINE_LIMIT_KEYS[key];
+  if (outlineKey) return SETTINGS_LIMITS[outlineKey];
+  throw new Error(`Unknown outline setting key: ${key}`);
+};
+
 /** Get display scale/precision from ROOT_SETTING_META for a root numeric key. */
 export const getRootDisplayMeta = (
   key: RootScalarSettingKey

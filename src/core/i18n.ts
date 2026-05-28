@@ -103,8 +103,7 @@ const KO: TranslationMap = {
   Enabled: '활성화',
   // Legacy key 'Width (px)' removed (replaced by 'Outline Width (px)')
   'Outline Width (px)': '외곽선 두께 (px)',
-  'Outline Opacity (0–1)': '외곽선 불투명도 (0–1)',
-  Opacity: '불투명도',
+  'Outline Opacity (%)': '외곽선 불투명도 (%)',
   'SuperChat Opacity (%)': '슈퍼챗 불투명도 (%)',
   'SuperChat Max Lines': '슈퍼챗 최대 줄 수',
   'Membership Max Lines': '멤버십 최대 줄 수',
@@ -225,11 +224,17 @@ const KO: TranslationMap = {
   'Show performance debug overlay on the video player':
     '비디오 플레이어에 성능 디버그 오버레이 표시',
 
+  // ── New tooltips (added 2026-05-28) ──
+  'Text size in pixels (14-50)': '픽셀 단위 텍스트 크기 (14-50)',
+  'Text outline stroke width in pixels (0-8)': '텍스트 외곽선 두께 (픽셀, 0-8)',
+  'Text outline stroke opacity (0-100%)': '텍스트 외곽선 불투명도 (0-100%)',
+
   // ── Modal chrome ──
   'Chat Overlay': '채팅 오버레이',
   'Close settings': '설정 닫기',
   'Settings categories': '설정 카테고리',
   'Overlay Enabled': '오버레이 활성화',
+  'Value adjusted to': '조정된 값: ',
   Reset: '초기화',
   Export: '내보내기',
   Import: '가져오기',
@@ -281,8 +286,7 @@ const JA: TranslationMap = {
   Enabled: '有効',
   // Legacy key 'Width (px)' removed (replaced by 'Outline Width (px)')
   'Outline Width (px)': '縁取りの太さ (px)',
-  'Outline Opacity (0–1)': '縁取り不透明度 (0–1)',
-  Opacity: '不透明度',
+  'Outline Opacity (%)': '縁取り不透明度 (%)',
   'SuperChat Opacity (%)': 'スパーチャット不透明度 (%)',
   'SuperChat Max Lines': 'スパーチャット最大行数',
   'Membership Max Lines': 'メンバーシップ最大行数',
@@ -405,11 +409,17 @@ const JA: TranslationMap = {
   'Show performance debug overlay on the video player':
     'ビデオプレイヤーにパフォーマンスデバッグオーバーレイを表示',
 
+  // ── New tooltips (added 2026-05-28) ──
+  'Text size in pixels (14-50)': 'ピクセル単位のテキストサイズ (14-50)',
+  'Text outline stroke width in pixels (0-8)': 'テキスト縁取りの太さ (ピクセル, 0-8)',
+  'Text outline stroke opacity (0-100%)': 'テキスト縁取りの不透明度 (0-100%)',
+
   // ── Modal chrome ──
   'Chat Overlay': 'チャットオーバーレイ',
   'Close settings': '設定を閉じる',
   'Settings categories': '設定カテゴリ',
   'Overlay Enabled': 'オーバーレイ有効',
+  'Value adjusted to': '調整後の値: ',
   Reset: 'リセット',
   Export: 'エクスポート',
   Import: 'インポート',
@@ -461,8 +471,7 @@ const ES: TranslationMap = {
   Enabled: 'Activado',
   // Legacy key 'Width (px)' removed (replaced by 'Outline Width (px)')
   'Outline Width (px)': 'Ancho del contorno (px)',
-  'Outline Opacity (0–1)': 'Opacidad del contorno (0–1)',
-  Opacity: 'Opacidad',
+  'Outline Opacity (%)': 'Opacidad del contorno (%)',
   'SuperChat Opacity (%)': 'Opacidad SuperChat (%)',
   'SuperChat Max Lines': 'Líneas máx. SuperChat',
   'Membership Max Lines': 'Líneas máx. membresía',
@@ -585,11 +594,17 @@ const ES: TranslationMap = {
   'Show performance debug overlay on the video player':
     'Mostrar superposición de depuración de rendimiento en el reproductor de video',
 
+  // ── New tooltips (added 2026-05-28) ──
+  'Text size in pixels (14-50)': 'Tamaño del texto en píxeles (14-50)',
+  'Text outline stroke width in pixels (0-8)': 'Ancho del contorno de texto en píxeles (0-8)',
+  'Text outline stroke opacity (0-100%)': 'Opacidad del contorno de texto (0-100%)',
+
   // ── Modal chrome ──
   'Chat Overlay': 'Superposición de Chat',
   'Close settings': 'Cerrar configuración',
   'Settings categories': 'Categorías',
   'Overlay Enabled': 'Superposición activada',
+  'Value adjusted to': 'Valor ajustado a ',
   Reset: 'Restablecer',
   Export: 'Exportar',
   Import: 'Importar',
@@ -642,8 +657,7 @@ const ZH: TranslationMap = {
   Enabled: '启用',
   // Legacy key 'Width (px)' removed (replaced by 'Outline Width (px)')
   'Outline Width (px)': '描边宽度 (px)',
-  'Outline Opacity (0–1)': '描边不透明度 (0–1)',
-  Opacity: '不透明度',
+  'Outline Opacity (%)': '描边不透明度 (%)',
   'SuperChat Opacity (%)': '超级留言不透明度 (%)',
   'SuperChat Max Lines': '超级留言最大行数',
   'Membership Max Lines': '会员消息最大行数',
@@ -756,11 +770,17 @@ const ZH: TranslationMap = {
   'Console diagnostic output verbosity': '控制台诊断输出详细程度',
   'Show performance debug overlay on the video player': '在视频播放器上显示性能调试覆盖层',
 
+  // ── New tooltips (added 2026-05-28) ──
+  'Text size in pixels (14-50)': '像素文本大小 (14-50)',
+  'Text outline stroke width in pixels (0-8)': '文本描边宽度（像素，0-8）',
+  'Text outline stroke opacity (0-100%)': '文本描边不透明度 (0-100%)',
+
   // ── Modal chrome ──
   'Chat Overlay': '弹幕显示',
   'Close settings': '关闭设置',
   'Settings categories': '设置分类',
   'Overlay Enabled': '已启用覆盖层',
+  'Value adjusted to': '已调整至 ',
   Reset: '重置',
   Export: '导出',
   Import: '导入',

@@ -16,6 +16,7 @@ import {
   getRootDisplayMeta,
   OUTLINE_NUMERIC_KEYS,
   resolveLimits,
+  resolveOutlineLimits,
 } from '@core/settings-schema';
 import type { AuthorGridField, FieldDef, PaneDef } from '@core/settings-ui-panes';
 import { PANES } from '@core/settings-ui-panes';
@@ -223,7 +224,7 @@ const normalizeOutlineNumericInputValue = (
   return normalizeNumericValue(
     value,
     fallback,
-    resolveLimits(key),
+    resolveOutlineLimits(key),
     false,
     getOutlineDisplayScale(key)
   );
@@ -232,7 +233,7 @@ const normalizeOutlineNumericInputValue = (
 const getNumericInputAttributes = (
   key: RootScalarSettingKey | Exclude<OutlineSettingKey, 'enabled'>
 ): Readonly<{ min: number; max: number; step: number }> => {
-  const limits = resolveLimits(key);
+  const limits = isOutlineNumericKey(key) ? resolveOutlineLimits(key) : resolveLimits(key);
   const scale = isOutlineNumericKey(key)
     ? getOutlineDisplayScale(key)
     : getRootScale(key as RootScalarSettingKey);
@@ -361,7 +362,9 @@ export class SettingsUiForm {
       }
       case 'range': {
         const container = domDiv('yt-chat-overlay-settings-range');
-        const limits = resolveLimits(def.key);
+        const limits = isOutlineNumericKey(def.key)
+          ? resolveOutlineLimits(def.key)
+          : resolveLimits(def.key);
         const scale = isOutlineNumericKey(def.key)
           ? getOutlineDisplayScale(def.key)
           : getRootDisplayMeta(def.key as RootScalarSettingKey).scale || 1;
@@ -477,6 +480,11 @@ export class SettingsUiForm {
             const scale = getOutlineDisplayScale(numericKey);
             const displayValue = (value as number) * scale;
             el.value = String(scale > 1 ? Math.round(displayValue) : displayValue);
+            // Sync the companion range slider for outline fields
+            const slider = el.parentElement?.querySelector<HTMLInputElement>('input[type="range"]');
+            if (slider && slider.name === `${el.name}-slider`) {
+              slider.value = el.value;
+            }
           }
         }
         continue;
@@ -609,9 +617,9 @@ export class SettingsUiForm {
           if (Number.isFinite(rawNum)) {
             const { min, max } = getNumericInputAttributes(scalarKey as RootScalarSettingKey);
             if (rawNum < min) {
-              this.showFieldError(el, `Value adjusted to ${min}`);
+              this.showFieldError(el, `${t('Value adjusted to')} ${min}`);
             } else if (rawNum > max) {
-              this.showFieldError(el, `Value adjusted to ${max}`);
+              this.showFieldError(el, `${t('Value adjusted to')} ${max}`);
             }
           }
         } else {
