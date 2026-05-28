@@ -142,12 +142,13 @@ function createActions(): HTMLDivElement {
   return actions;
 }
 
-function createEnabledField(): HTMLLabelElement {
+function createEnabledField(title?: string): HTMLLabelElement {
   const label = document.createElement('label');
   label.className = 'yt-chat-overlay-settings-enabled';
   const text = document.createElement('span');
   text.textContent = t('Overlay Enabled');
   const input = domInput({ type: 'checkbox', name: 'enabled' });
+  if (title) input.title = t(title);
   label.append(text, input);
   return label;
 }
@@ -347,7 +348,7 @@ export class SettingsUiForm {
   private buildField(def: FieldDef): HTMLElement {
     switch (def.type) {
       case 'enabled':
-        return createEnabledField();
+        return createEnabledField(def.title);
       case 'checkbox':
         return createCheckboxField(def.label, this.resolveKey(def), def.title);
       case 'number': {

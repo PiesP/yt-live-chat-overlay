@@ -26,6 +26,7 @@ interface TextField extends BaseField {
 }
 interface EnabledField {
   type: 'enabled';
+  title?: string;
 }
 export interface AuthorGridField {
   type: 'author-grid';
@@ -104,16 +105,29 @@ export const PANES: PaneDef[] = [
     id: 'comments',
     label: 'Comments',
     sections: [
-      { title: '', fields: [{ type: 'enabled' }] },
       {
         title: '',
         fields: [
-          sel('Danmaku Mode', 'danmakuMode', [
-            ['scroll', 'Scroll (RTL)'],
-            ['reverse', 'Reverse (LTR)'],
-            ['top', 'Top Fixed'],
-            ['bottom', 'Bottom Fixed'],
-          ]),
+          {
+            type: 'enabled',
+            title: 'Globally enable or disable the chat overlay on YouTube live streams',
+          },
+        ],
+      },
+      {
+        title: '',
+        fields: [
+          sel(
+            'Danmaku Mode',
+            'danmakuMode',
+            [
+              ['scroll', 'Scroll (RTL)'],
+              ['reverse', 'Reverse (LTR)'],
+              ['top', 'Top Fixed'],
+              ['bottom', 'Bottom Fixed'],
+            ],
+            'Comment display direction and behavior'
+          ),
           num('Font Size (px)', 'fontSize', 'Text size in pixels (14-50)'),
           num(
             'Scroll Speed (px/s)',
@@ -134,7 +148,7 @@ export const PANES: PaneDef[] = [
             'fontFamily',
             'CSS font-family value, e.g. "Noto Sans KR", sans-serif. Falls back to system default if not found.'
           ),
-          range('Text Opacity (%)', 'opacity'),
+          range('Text Opacity (%)', 'opacity', 'Overall opacity of comment text (50-100%)'),
           num(
             'Lane Gap (px)',
             'laneSpacing',
@@ -186,7 +200,12 @@ export const PANES: PaneDef[] = [
       {
         title: 'Text Outline',
         fields: [
-          chk('Enabled', 'enabled', undefined, 'outline'),
+          chk(
+            'Enabled',
+            'enabled',
+            'Add a dark outline stroke around text for better readability',
+            'outline'
+          ),
           num(
             'Outline Width (px)',
             'widthPx',
@@ -229,12 +248,17 @@ export const PANES: PaneDef[] = [
       {
         title: 'Backlog',
         fields: [
-          sel('Backlog Mode', 'backlogMode', [
-            ['playback', 'Playback-based (recommended)'],
-            ['recent', 'Recent only'],
-            ['full', 'Full (show all)'],
-            ['none', 'None (skip backlog)'],
-          ]),
+          sel(
+            'Backlog Mode',
+            'backlogMode',
+            [
+              ['playback', 'Playback-based (recommended)'],
+              ['recent', 'Recent only'],
+              ['full', 'Full (show all)'],
+              ['none', 'None (skip backlog)'],
+            ],
+            'How past chat messages are displayed relative to live playback'
+          ),
           range(
             'Backlog Opacity (%)',
             'backlogOpacityMultiplier',
@@ -387,10 +411,15 @@ export const PANES: PaneDef[] = [
             ],
             'Language to translate chat messages into'
           ),
-          sel('Display Mode', 'translationMode', [
-            ['dual', 'Dual (original + translation)'],
-            ['replace', 'Replace (translation only)'],
-          ]),
+          sel(
+            'Display Mode',
+            'translationMode',
+            [
+              ['dual', 'Dual (original + translation)'],
+              ['replace', 'Replace (translation only)'],
+            ],
+            'Dual shows original above translation, Replace shows translation only'
+          ),
         ],
       },
     ],

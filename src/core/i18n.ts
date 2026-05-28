@@ -237,6 +237,18 @@ const KO: TranslationMap = {
   'Text outline stroke width in pixels (0-8)': '텍스트 외곽선 두께 (픽셀, 0-8)',
   'Text outline stroke opacity (0-100%)': '텍스트 외곽선 불투명도 (0-100%)',
 
+  // ── New tooltips (added 2026-05-29) ──
+  'Globally enable or disable the chat overlay on YouTube live streams':
+    'YouTube 라이브 스트림에서 채팅 오버레이를 켜거나 끕니다',
+  'Comment display direction and behavior': '댓글 표시 방향과 동작 방식',
+  'Overall opacity of comment text (50-100%)': '댓글 텍스트의 전체 불투명도 (50-100%)',
+  'Add a dark outline stroke around text for better readability':
+    '밝은 배경에서 텍스트 가독성을 높이기 위해 어두운 외곽선을 추가합니다',
+  'How past chat messages are displayed relative to live playback':
+    '과거 채팅 메시지를 라이브 재생 대비 어떻게 표시할지 설정합니다',
+  'Dual shows original above translation, Replace shows translation only':
+    '이중 표시는 원문 위에 번역을, 교체는 번역만 표시합니다',
+
   // ── Modal chrome ──
   'Chat Overlay': '채팅 오버레이',
   'Close settings': '설정 닫기',
@@ -429,6 +441,18 @@ const JA: TranslationMap = {
   'Text size in pixels (14-50)': 'ピクセル単位のテキストサイズ (14-50)',
   'Text outline stroke width in pixels (0-8)': 'テキスト縁取りの太さ (ピクセル, 0-8)',
   'Text outline stroke opacity (0-100%)': 'テキスト縁取りの不透明度 (0-100%)',
+
+  // ── New tooltips (added 2026-05-29) ──
+  'Globally enable or disable the chat overlay on YouTube live streams':
+    'YouTubeライブストリームでチャットオーバーレイをオン/オフします',
+  'Comment display direction and behavior': 'コメントの表示方向と動作',
+  'Overall opacity of comment text (50-100%)': 'コメントテキスト全体の不透明度 (50-100%)',
+  'Add a dark outline stroke around text for better readability':
+    '明るい背景でもテキストを読みやすくするために黒い縁取りを追加します',
+  'How past chat messages are displayed relative to live playback':
+    '過去のチャットメッセージをライブ再生に対してどう表示するか',
+  'Dual shows original above translation, Replace shows translation only':
+    '二重表示は原文の上に翻訳を、置換は翻訳のみ表示します',
 
   // ── Modal chrome ──
   'Chat Overlay': 'チャットオーバーレイ',
@@ -623,6 +647,19 @@ const ES: TranslationMap = {
   'Text outline stroke width in pixels (0-8)': 'Ancho del contorno de texto en píxeles (0-8)',
   'Text outline stroke opacity (0-100%)': 'Opacidad del contorno de texto (0-100%)',
 
+  // ── New tooltips (added 2026-05-29) ──
+  'Globally enable or disable the chat overlay on YouTube live streams':
+    'Activa o desactiva la superposición de chat en las transmisiones en vivo de YouTube',
+  'Comment display direction and behavior': 'Dirección y comportamiento de los comentarios',
+  'Overall opacity of comment text (50-100%)':
+    'Opacidad general del texto de comentarios (50-100%)',
+  'Add a dark outline stroke around text for better readability':
+    'Añade un contorno oscuro alrededor del texto para mejorar la legibilidad',
+  'How past chat messages are displayed relative to live playback':
+    'Cómo se muestran los mensajes antiguos en relación con la reproducción en vivo',
+  'Dual shows original above translation, Replace shows translation only':
+    'Dual muestra el original encima de la traducción, Reemplazar muestra solo la traducción',
+
   // ── Modal chrome ──
   'Chat Overlay': 'Superposición de Chat',
   'Close settings': 'Cerrar configuración',
@@ -806,6 +843,18 @@ const ZH: TranslationMap = {
   'Text size in pixels (14-50)': '像素文本大小 (14-50)',
   'Text outline stroke width in pixels (0-8)': '文本描边宽度（像素，0-8）',
   'Text outline stroke opacity (0-100%)': '文本描边不透明度 (0-100%)',
+
+  // ── New tooltips (added 2026-05-29) ──
+  'Globally enable or disable the chat overlay on YouTube live streams':
+    '在YouTube直播中打开或关闭弹幕显示',
+  'Comment display direction and behavior': '弹幕显示方向和行为',
+  'Overall opacity of comment text (50-100%)': '弹幕文字的整体不透明度 (50-100%)',
+  'Add a dark outline stroke around text for better readability':
+    '在文字周围添加深色描边，提高可读性',
+  'How past chat messages are displayed relative to live playback':
+    '历史聊天消息相对于直播播放的显示方式',
+  'Dual shows original above translation, Replace shows translation only':
+    '双语显示原文在上翻译在下，仅翻译只显示译文',
 
   // ── Modal chrome ──
   'Chat Overlay': '弹幕显示',
