@@ -14,6 +14,7 @@ const uiColors = {
   primaryHover: '#1976d2',
   danger: '#e53935',
   dangerHover: '#c62828',
+  warning: '#ffc107',
 } as const;
 
 export { uiColors };

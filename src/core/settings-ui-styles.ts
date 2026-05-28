@@ -329,13 +329,10 @@ export const SETTINGS_UI_STYLES = `
         background: transparent;
         color: ${uiColors.textMuted};
         border: 1px solid ${uiColors.border};
-        border-left: 2px solid rgba(255, 193, 7, 0.15);
       }
       .yt-chat-overlay-settings-actions button[data-action="import"]:hover {
-        background: rgba(255, 193, 7, 0.15);
-        color: #ffc107;
-        border-color: rgba(255, 193, 7, 0.3);
-        border-left-color: rgba(255, 193, 7, 0.6);
+        color: ${uiColors.warning};
+        border-color: ${uiColors.warning};
       }
       .yt-chat-overlay-settings-actions button:focus-visible {
         outline: 2px solid ${uiColors.primary};

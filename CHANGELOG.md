@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.35.1] - 2026-05-28
+
+### Fixed
+
+- **Import button border asymmetry** — Left-only 2px yellow `border-left` caused visual misalignment with other outline buttons. Removed per-side overrides; import now uses uniform 1px border matching Reset/Export.
+- **Import button hardcoded yellow** — Raw `#ffc107` and `rgba(255, 193, 7, ...)` values in 3 CSS rules extracted to `uiColors.warning` SSOT token in `settings-ui-tokens.ts`.
+- **Import button hover background inconsistency** — Import was the only outline button that changed background on hover. Removed hover background; now uses border+text color change only, consistent with Reset and Export.
+
+### Changed
+
+- **Action button CSS test coverage expanded** — `test/consistency/action-button-css.test.ts` grew from 4 to 13 tests, adding border symmetry guards (no `border-left`/`border-right`/`border-left-color` per-side overrides), token verification (import hover uses `uiColors.warning`, normal state has no yellow tint), and hover consistency checks (no outline button sets background on hover).
+
 ## [0.35.0] - 2026-05-28
 
 ### Fixed
