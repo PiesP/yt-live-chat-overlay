@@ -5,18 +5,23 @@ All processing is local — chat content is never stored or sent anywhere.
 
 ## Features
 
-- Live chat flows over the player (right-to-left scroll, reverse, top, bottom modes)
-- Works on live streams, premieres, and replays with chat
-- Fetches chat via YouTube's InnerTube API — no chat panel dependency
-- Rich content: text, emoji, membership items, Super Chats (with stickers)
-- Dual rendering: Canvas2D (default, rAF-based) or CSS animation
-- Backlog injection, per-author rate limiting, anti-block density control
-- Cross-tab settings sync via `localStorage` / `GM_setValue`
-- Settings panel (⚙ button on the player) — speed, font, opacity, colors, outline, safe zones
+- **Live chat overlay** — comments flow over the video player in real-time
+- **Four display modes** — RTL scroll (classic), LTR reverse, top-fixed, bottom-fixed
+- **Rich content** — text, emoji, Super Chats (with stickers), membership messages
+- **Chat translation** — real-time in-browser translation with dual/subtitle or replace mode (Chrome 138+)
+- **Multi-language UI** — English, 한국어, 日本語, Español, 中文 (auto-detect or manual)
+- **Backlog injection** — past messages fill the screen on entry (4 modes: playback-based, recent, full, none)
+- **Depth layers** — speed-based near/far perception with configurable speed and opacity
+- **Author badges** — owner, moderator, member visibility & colors
+- **Full customization** — speed, font, size, opacity, colors, text outline, safe zones, lane spacing
+- **Settings import/export** — share config across browsers or backup
+- **Cross-tab sync** — settings sync instantly across YouTube tabs
+- **Settings panel** — click the ⚙ button on the player to configure everything
+- **100% local** — no external dependencies, no data collection, no tracking
 
 ## Install
 
-1. Install Tampermonkey or Violentmonkey.
+1. Install [Tampermonkey](https://www.tampermonkey.net/) or [Violentmonkey](https://violentmonkey.github.io/)
 2. Open the latest release in your browser to install:
    - [yt-live-chat-overlay.user.js](https://github.com/PiesP/yt-live-chat-overlay/releases/latest/download/yt-live-chat-overlay.user.js)
 3. The userscript manager will auto-update when new releases are published.
@@ -28,12 +33,12 @@ Click the ⚙ button in the top-right of the player to adjust settings.
 
 ## Privacy
 
-All chat fetching, parsing, and rendering happens locally in your browser.
+All chat fetching, parsing, rendering, and translation happens locally in your browser.
 No data is stored (beyond saved settings) or transmitted to any third party.
 
 ## Development
 
-Requires Node.js `>=24.0.0` and pnpm `>=10.29.2`.
+Requires Node.js `>=24.0.0` and pnpm `>=11.2.2`.
 
 ```bash
 pnpm install
