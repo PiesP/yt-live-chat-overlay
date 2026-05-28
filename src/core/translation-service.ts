@@ -90,9 +90,8 @@ export class TranslationService {
     }
 
     if (typeof Translator === 'undefined') {
-      log.warn(
-        'Chrome Translator API not available (requires Chrome 138+). Translation will not be active, but will retry on next settings change.'
-      );
+      log.warn('Chrome Translator API not available (requires Chrome 138+). Translation disabled.');
+      this.enabled = false;
       return;
     }
 
@@ -322,9 +321,8 @@ export class GoogleTranslationService {
     }
 
     if (typeof GM_xmlhttpRequest === 'undefined') {
-      googleLog.warn(
-        'GM_xmlhttpRequest not available. Google Translate will not be active, but will retry on next settings change.'
-      );
+      googleLog.warn('GM_xmlhttpRequest not available. Google Translate disabled.');
+      this.enabled = false;
       return;
     }
 
@@ -401,8 +399,9 @@ export class GoogleTranslationService {
     this.consecutiveFailures++;
     if (this.consecutiveFailures >= GoogleTranslationService.MAX_CONSECUTIVE_FAILURES) {
       googleLog.warn(
-        `Google Translate failed ${this.consecutiveFailures} consecutive times — resetting failure counter, will retry`
+        `Google Translate failed ${this.consecutiveFailures} consecutive times — disabling`
       );
+      this.enabled = false;
       this.consecutiveFailures = 0;
     }
   }
