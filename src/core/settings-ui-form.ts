@@ -18,7 +18,7 @@ import {
 } from '@core/settings-schema';
 import type { FieldDef, PaneDef } from '@core/settings-ui-panes';
 import { PANES } from '@core/settings-ui-panes';
-import { GoogleTranslationService, TranslationService } from '@core/translation-service';
+import { TranslationService } from '@core/translation-service';
 
 const log = createLogger('SettingsUiForm');
 
@@ -293,21 +293,16 @@ export class SettingsUiForm {
     pane.setAttribute('role', 'tabpanel');
     if (def.id !== 'comments') pane.hidden = true;
 
-    // Translation tab: show unsupported message when no translation provider is available.
-    if (
-      def.id === 'translation' &&
-      !TranslationService.isSupported() &&
-      !GoogleTranslationService.isSupported()
-    ) {
+    // Translation tab: show unsupported message when browser lacks Translator API.
+    if (def.id === 'translation' && !TranslationService.isSupported()) {
       const msg = domDiv('yt-chat-overlay-settings-unsupported');
       msg.textContent = t(
-        'Translation requires a browser with built-in AI (Chrome 138+ / Edge 143+ Canary) or a userscript manager with GM_xmlhttpRequest support for Google Translate.'
+        'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.'
       );
       pane.appendChild(msg);
       return pane;
     }
 
-    // Build pane sections normally (see below).
     for (const section of def.sections) {
       if (section.title === 'Author Colors & Visibility') {
         pane.appendChild(this.buildAuthorGrid());
@@ -329,19 +324,6 @@ export class SettingsUiForm {
         }
       }
     }
-
-    // Append privacy notice for external translation services.
-    if (def.id === 'translation') {
-      const privacy = domDiv('yt-chat-overlay-settings-privacy-notice');
-      privacy.textContent = t(
-        'When using Google Translate, only the plain text of each chat message ' +
-          '(up to 80 characters, no emoji, author name, or metadata) is sent to ' +
-          'Google translation servers. No YouTube account, video, or personal ' +
-          'information is transmitted. See Google Privacy Policy for details.'
-      );
-      pane.appendChild(privacy);
-    }
-
     return pane;
   }
 

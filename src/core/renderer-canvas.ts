@@ -40,7 +40,7 @@ import type { Overlay } from '@core/overlay';
 import { RendererBase } from '@core/renderer-base';
 import { estimateMessageDimensions as sharedEstimateDimensions } from '@core/renderer-shared';
 import { clearTextMeasurementCaches, getFontString, measureTextHeight } from '@core/text-measure';
-import { GoogleTranslationService, TranslationService } from '@core/translation-service';
+import { TranslationService } from '@core/translation-service';
 
 // ── CanvasMessage lifecycle (inlined from canvas-message-lifecycle.ts) ─────
 
@@ -145,7 +145,6 @@ export class CanvasRenderer extends RendererBase {
   /** Whether the session is in standby mode (pre-live, waiting for stream). */
   private standbyStatus = false;
   private translationService: TranslationService;
-  private googleTranslationService: GoogleTranslationService;
 
   /**
    * Text bitmap cache: pre-rendered text with outline as offscreen canvas.
@@ -205,13 +204,6 @@ export class CanvasRenderer extends RendererBase {
     super(overlay, settings);
     this.translationService = new TranslationService();
     this.translationService.configure({
-      enabled: settings.translationEnabled,
-      service: settings.translationService,
-      source: settings.translationSource,
-      target: settings.translationTarget,
-    });
-    this.googleTranslationService = new GoogleTranslationService();
-    this.googleTranslationService.configure({
       enabled: settings.translationEnabled,
       service: settings.translationService,
       source: settings.translationSource,
@@ -967,11 +959,9 @@ export class CanvasRenderer extends RendererBase {
     // YouTube-supplied descriptions would appear as literal text in
     // the translated output instead of being rendered as emoji images.
     const translatableText = message.kind === 'text' ? getTranslatableText(message) : '';
-    // Route to the active translation service (Chrome built-in or Google).
-    const activeService = this.getActiveTranslationService();
-    if (activeService && translatableText) {
+    if (this.translationService.isActive && translatableText) {
       const cmRef = cm;
-      activeService
+      this.translationService
         .translate(translatableText)
         .then((translated) => {
           cmRef.translatedText = translated;
@@ -1204,19 +1194,6 @@ export class CanvasRenderer extends RendererBase {
       source: settings.translationSource,
       target: settings.translationTarget,
     });
-    this.googleTranslationService.configure({
-      enabled: settings.translationEnabled,
-      service: settings.translationService,
-      source: settings.translationSource,
-      target: settings.translationTarget,
-    });
-  }
-
-  /** Return the active translation service (Chrome built-in or Google) based on current settings. */
-  private getActiveTranslationService(): TranslationService | GoogleTranslationService | null {
-    if (this.translationService.isActive) return this.translationService;
-    if (this.googleTranslationService.isActive) return this.googleTranslationService;
-    return null;
   }
 
   protected onPause(): void {
@@ -1255,7 +1232,6 @@ export class CanvasRenderer extends RendererBase {
     this.stickerCache.clear();
     this.textBitmapCache.clear();
     this.translationService.destroy();
-    this.googleTranslationService.destroy();
     clearTextMeasurementCaches();
   }
 

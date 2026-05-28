@@ -1,7 +1,7 @@
 {
   "name": "yt-live-chat-overlay",
   "version": "0.34.1",
-  "description": "Nico-nico style comment overlay for YouTube live chat (100% local processing; translation opt-in may send message text to external providers)",
+  "description": "Nico-nico style comment overlay for YouTube live chat (100% local processing)",
   "type": "module",
   "private": true,
   "scripts": {

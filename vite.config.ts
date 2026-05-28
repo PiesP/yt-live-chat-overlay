@@ -64,7 +64,7 @@ export default defineConfig(({ mode }): UserConfig => {
           name: `YouTube Live Chat Overlay${isDev ? ' (dev)' : ''}`,
           version: baseVersion,
           description:
-            'Displays YouTube live chat in Nico-nico style flowing overlay (100% local processing; when translation is enabled, message text is sent to the selected translation provider)',
+            'Displays YouTube live chat in Nico-nico style flowing overlay (100% local, no data collection)',
           author: 'PiesP',
           match: [...USERSCRIPT_MATCH_PATTERNS],
           grant: [
@@ -74,7 +74,6 @@ export default defineConfig(({ mode }): UserConfig => {
             'GM_registerMenuCommand',
             'GM_removeValueChangeListener',
             'GM_setValue',
-            'GM_xmlhttpRequest',
           ],
           'run-at': 'document-end',
           icon: 'https://www.youtube.com/favicon.ico',

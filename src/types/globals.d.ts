@@ -51,28 +51,4 @@ declare global {
     callback: (key: string, oldValue: unknown, newValue: unknown, remote: boolean) => void
   ): number;
   function GM_removeValueChangeListener(listenerId: number): void;
-
-  /**
-   * GM_xmlhttpRequest — cross-origin HTTP with extended capabilities.
-   * Required for accessing translate.googleapis.com (no CORS headers).
-   */
-  interface GM_XMLHttpRequestDetails {
-    method: 'GET' | 'POST' | 'HEAD';
-    url: string;
-    headers?: Record<string, string>;
-    data?: string;
-    timeout?: number;
-    onload?: (response: GM_XMLHttpResponse) => void;
-    onerror?: (response: GM_XMLHttpResponse) => void;
-    ontimeout?: () => void;
-  }
-  interface GM_XMLHttpResponse {
-    readyState: number;
-    status: number;
-    statusText: string;
-    responseText: string;
-    responseHeaders: string;
-    finalUrl: string;
-  }
-  function GM_xmlhttpRequest(details: GM_XMLHttpRequestDetails): void;
 }
