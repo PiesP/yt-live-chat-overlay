@@ -91,6 +91,8 @@ const KO: TranslationMap = {
   Backlog: '백로그',
   'Rate Limiting': '속도 제한',
   'Author Colors & Visibility': '작성자 색상 및 표시',
+  Interface: '인터페이스',
+  'Chat Translation': '채팅 번역',
 
   // ── Field labels ──
   'Danmaku Mode': '단마쿠 모드',
@@ -280,6 +282,8 @@ const JA: TranslationMap = {
   Backlog: 'バックログ',
   'Rate Limiting': 'レート制限',
   'Author Colors & Visibility': '投稿者の色と表示',
+  Interface: 'インターフェース',
+  'Chat Translation': 'チャット翻訳',
 
   // ── Field labels ──
   'Danmaku Mode': '弾幕モード',
@@ -471,6 +475,8 @@ const ES: TranslationMap = {
   Backlog: 'Historial',
   'Rate Limiting': 'Límite de frecuencia',
   'Author Colors & Visibility': 'Colores y visibilidad',
+  Interface: 'Interfaz',
+  'Chat Translation': 'Traducción de chat',
 
   // ── Field labels ──
   'Danmaku Mode': 'Modo Danmaku',
@@ -663,6 +669,8 @@ const ZH: TranslationMap = {
   Backlog: '回放',
   'Rate Limiting': '频率限制',
   'Author Colors & Visibility': '用户颜色与显示',
+  Interface: '界面',
+  'Chat Translation': '聊天翻译',
 
   // ── Field labels ──
   'Danmaku Mode': '弹幕模式',

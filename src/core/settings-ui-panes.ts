@@ -337,7 +337,7 @@ export const PANES: PaneDef[] = [
     label: 'Translation',
     sections: [
       {
-        title: '',
+        title: 'Interface',
         fields: [
           sel(
             'Language',
@@ -352,6 +352,11 @@ export const PANES: PaneDef[] = [
             ],
             'Sets the overlay user interface language (does not filter comments by language)'
           ),
+        ],
+      },
+      {
+        title: 'Chat Translation',
+        fields: [
           chk(
             'Enable Translation',
             'translationEnabled',
