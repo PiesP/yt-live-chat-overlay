@@ -30,6 +30,16 @@ export type TranslationMode = 'dual' | 'replace';
 /** Valid source/target languages for translation (excludes 'auto') */
 export type TranslationLanguage = 'en' | 'ko' | 'ja' | 'es' | 'zh';
 
+/** RGB color representation (readonly, immutable). */
+export interface RgbColor {
+  readonly r: number;
+  readonly g: number;
+  readonly b: number;
+}
+
+/** Font weight: normal (400) or bold (700). */
+export type FontWeight = 'normal' | 'bold';
+
 /**
  * Author display settings (per author type)
  */
@@ -169,7 +179,7 @@ export interface OverlaySettings {
   /** Vertical spacing between lanes in pixels (negative = overlap, 0 = tight, higher = more gap) */
   laneSpacing: number;
   /** Text font weight: normal (400) or bold (700) */
-  fontWeight: 'normal' | 'bold';
+  fontWeight: FontWeight;
   /** Font family (CSS font-family value, e.g. 'Noto Sans KR, sans-serif') */
   fontFamily: string;
   /** Show debug overlay with real-time metrics */

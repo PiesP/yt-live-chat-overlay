@@ -20,16 +20,10 @@ export {
 
 export { sampleExponential } from './math-utils';
 
-import type { SuperChatInfo } from '@app-types';
+import type { RgbColor, SuperChatInfo } from '@app-types';
 
 /** Default font family stack for overlay text rendering. */
 export const DEFAULT_FONT_FAMILY = 'system-ui, -apple-system, sans-serif';
-
-interface RgbColor {
-  readonly r: number;
-  readonly g: number;
-  readonly b: number;
-}
 
 const superChatColors = {
   blue: { r: 30, g: 136, b: 229 },

@@ -8,7 +8,7 @@
  * duplicate text measurement and dimension estimation logic.
  */
 
-import type { ChatMessage } from '@app-types';
+import type { ChatMessage, FontWeight } from '@app-types';
 import { DEFAULT_FONT_FAMILY, rendererLayout, spacing } from '@core/design-tokens';
 import {
   getFontString,
@@ -51,7 +51,7 @@ export function estimateMessageDimensions(
   message: ChatMessage,
   fontSize: number,
   showAuthor: boolean,
-  fontWeight: 'normal' | 'bold' = 'bold',
+  fontWeight: FontWeight = 'bold',
   fontFamily: string = DEFAULT_FONT_FAMILY,
   maxBodyLines?: { superchat?: number; membership?: number }
 ): MessageDimensions {
@@ -111,7 +111,7 @@ function estimateSuperChatDimensions(
   showAuthor: boolean,
   fontFamily: string,
   maxBodyLines: number,
-  fontWeight: 'normal' | 'bold' = 'bold'
+  fontWeight: FontWeight = 'bold'
 ): MessageDimensions {
   const { paddingH, paddingV } = rendererLayout.superchat;
   const bodyLineHeight = measureTextHeight(font, fontSize);

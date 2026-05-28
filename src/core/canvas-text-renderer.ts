@@ -23,6 +23,13 @@ import {
 
 const TEXT_BITMAP_CACHE_MAX = 200;
 
+/**
+ * Outline stroke scale factor: outline.widthPx is multiplied by this
+ * to produce the actual stroke width (matching the visual rendering
+ * of bold text with an outline).
+ */
+const OUTLINE_STROKE_SCALE = 0.85;
+
 // ── Text bitmap cache ──────────────────────────────────────────────────────
 
 /**
@@ -90,7 +97,7 @@ export function strokeTextOutline(
 ): void {
   const outline = settings.outline;
   if (!outline.enabled || outline.widthPx <= 0 || outline.opacity <= 0) return;
-  const strokeWidth = Math.max(0.5, outline.widthPx * 0.85);
+  const strokeWidth = Math.max(0.5, outline.widthPx * OUTLINE_STROKE_SCALE);
   ctx.save();
   ctx.strokeStyle = computeOutlineColor(textColor, Math.min(1, outline.opacity));
   ctx.lineWidth = strokeWidth;
@@ -115,7 +122,7 @@ function renderSegment(
 ): void {
   const outline = settings.outline;
   const font = getFontFn(fontSize);
-  const strokeWidth = Math.max(0.5, outline.widthPx * 0.85);
+  const strokeWidth = Math.max(0.5, outline.widthPx * OUTLINE_STROKE_SCALE);
   const strokeColor = computeOutlineColor(color, Math.min(1, outline.opacity));
 
   // Try bitmap cache first (includes outline rendering)

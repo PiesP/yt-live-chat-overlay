@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import type { OverlayDimensions } from '@app-types';
+import type { FontWeight, OverlayDimensions } from '@app-types';
 import { rendererLayout } from '@core/design-tokens';
 import { forEachSlot } from '@core/dom';
 import { createLogger } from '@core/logging';
@@ -28,7 +28,7 @@ interface LaneAllocatorOptions {
   safeTop: number;
   safeBottom: number;
   fontSize: number;
-  fontWeight: 'normal' | 'bold';
+  fontWeight: FontWeight;
   fontFamily: string;
   laneSpacing: number;
 }
@@ -145,7 +145,7 @@ export class LaneAllocator {
   /** Update font metrics — caller must call `reset()` afterwards to apply. */
   updateFontMetrics(
     fontSize: number,
-    fontWeight: 'normal' | 'bold',
+    fontWeight: FontWeight,
     fontFamily: string,
     laneSpacing: number
   ): void {

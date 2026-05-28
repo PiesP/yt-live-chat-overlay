@@ -14,6 +14,7 @@
  * the tightest fit around rendered glyphs.
  */
 
+import type { FontWeight } from '@app-types';
 import { DEFAULT_FONT_FAMILY } from '@core/design-tokens';
 
 let measureCtx: CanvasRenderingContext2D | null | false = null;
@@ -148,7 +149,7 @@ export function measureTextHeight(font: string, fontSize: number): number {
  */
 export function getFontString(
   sizePx: number,
-  weight: 'normal' | 'bold' = 'bold',
+  weight: FontWeight = 'bold',
   fontFamily: string = DEFAULT_FONT_FAMILY
 ): string {
   return `${weight === 'bold' ? 'bold' : '400'} ${sizePx}px ${fontFamily}`;

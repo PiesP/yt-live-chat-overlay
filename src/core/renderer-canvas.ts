@@ -207,6 +207,24 @@ export class CanvasRenderer extends RendererBase {
   /** Translation opacity scale relative to message opacity. */
   private static readonly TRANSLATION_OPACITY_SCALE = 0.8;
 
+  /**
+   * Priority threshold for anti-block gate: messages with priority >= this
+   * value bypass the anti-block throttle so high-priority content (SuperChat,
+   * Membership) is never blocked by lane saturation.
+   */
+  private static readonly ANTI_BLOCK_PRIORITY_THRESHOLD = 80;
+
+  /** Tier split threshold: hash < this value → Near tier, else Far tier. */
+  private static readonly TIER_NEAR_THRESHOLD = 0.3;
+
+  /** Desaturation factor for Far-tier depth layer user colors. */
+  private static readonly FAR_LAYER_DESATURATION_FACTOR = 0.3;
+
+  /** Maximum batch index for stagger exponential scale computation. */
+  private static readonly STAGGER_BATCH_MAX = 3;
+  /** Exponential scale factor for stagger delay (negative value = decreasing delay). */
+  private static readonly STAGGER_EXP_SCALE = 25;
+
   constructor(overlay: Overlay, settings: OverlaySettings) {
     super(overlay, settings);
     this.translationService = new TranslationService();
@@ -679,7 +697,11 @@ export class CanvasRenderer extends RendererBase {
     // interactions are never blocked by lane saturation.
     if (this.isAntiBlockActive()) {
       const front = this.pendingQueue[this.pendingQueueOffset];
-      if (!front || CanvasRenderer.getMessagePriority(front) < 80) return;
+      if (
+        !front ||
+        CanvasRenderer.getMessagePriority(front) < CanvasRenderer.ANTI_BLOCK_PRIORITY_THRESHOLD
+      )
+        return;
     }
     let skipped = 0;
     const maxSkip = CanvasRenderer.DRAIN_QUEUE_MAX_SKIP;
@@ -938,7 +960,12 @@ export class CanvasRenderer extends RendererBase {
     const staggerDelay =
       batchIndex > 0 && maxStagger > 0
         ? Math.round(
-            Math.min(maxStagger, Math.min(batchIndex, 3) * -25 * Math.log(1 - Math.random()))
+            Math.min(
+              maxStagger,
+              Math.min(batchIndex, CanvasRenderer.STAGGER_BATCH_MAX) *
+                -CanvasRenderer.STAGGER_EXP_SCALE *
+                Math.log(1 - Math.random())
+            )
           )
         : 0;
 
@@ -993,7 +1020,10 @@ export class CanvasRenderer extends RendererBase {
     });
 
     if (this.settings.depthLayersEnabled && speedTier === SPEED_TIER.FAR && message.userColor) {
-      cm.desaturatedUserColor = CanvasRenderer.desaturateColor(message.userColor, 0.3);
+      cm.desaturatedUserColor = CanvasRenderer.desaturateColor(
+        message.userColor,
+        CanvasRenderer.FAR_LAYER_DESATURATION_FACTOR
+      );
     }
 
     this.activeMessages.push(cm);
@@ -1135,7 +1165,7 @@ export class CanvasRenderer extends RendererBase {
     if (message.kind === 'superchat' || message.kind === 'membership') return SPEED_TIER.NEAR;
     // Regular messages: deterministic assignment via message id hash
     const hash = this.hashStringForTier(message.id ?? String(message.timestamp));
-    return hash < 0.3 ? SPEED_TIER.NEAR : SPEED_TIER.FAR;
+    return hash < CanvasRenderer.TIER_NEAR_THRESHOLD ? SPEED_TIER.NEAR : SPEED_TIER.FAR;
   }
 
   /** Simple djb2-like hash of a string to a 0-1 float for tier assignment. */

@@ -14,7 +14,7 @@
  * 2. Temporal compression — backlog message animation duration is shortened
  *    by the speed multiplier so they scroll past faster.
  * 3. Statistical sampling — when backlog exceeds 200/500 messages, apply
- *    50%/25% sampling. High-priority messages (SuperChat, Membership) are
+ *    60%/35% sampling. High-priority messages (SuperChat, Membership) are
  *    always included.
  * 4. Density ramp — injection rate starts low and linearly ramps up over
  *    the first few seconds to avoid visual flooding on startup.
