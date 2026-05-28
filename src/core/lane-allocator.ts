@@ -292,6 +292,22 @@ export class LaneAllocator {
    * tracking so lanes can be retried on the next frame.
    */
   resetBatch(): void {
+    // Heap integrity guard: heap length must match index map size.
+    // A mismatch indicates a corrupted laneIndexToHeapIndex mapping
+    // (duplicate or missing lane entries).
+    if (this.heap.length !== this.laneIndexToHeapIndex.size) {
+      log.warn(
+        `Heap integrity violation: heap.length=${this.heap.length} != ` +
+          `laneIndexToHeapIndex.size=${this.laneIndexToHeapIndex.size}. Rebuilding index map.`
+      );
+      // Rebuild laneIndexToHeapIndex from scratch to restore consistency
+      this.laneIndexToHeapIndex.clear();
+      for (let i = 0; i < this.heap.length; i++) {
+        const entry = this.heap[i];
+        if (entry) this.laneIndexToHeapIndex.set(entry[0], i);
+      }
+    }
+
     this.collidedLanes.clear();
     // Prune expired speed-tier lane entries.
     const now = performance.now();

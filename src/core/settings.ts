@@ -19,8 +19,10 @@ export class Settings {
   private settings: OverlaySettings;
   /** Callbacks notified when settings change from another tab. */
   private readonly onChangeCallbacks = new Set<() => void>();
-  /** Guard: prevents self-triggered GM listener from re-applying our own save. */
-  private isSaving = false;
+  /** Guard: prevents self-triggered GM listener from re-applying our own save.
+   *  Incremented on every save(); the listener captures the pre-save generation
+   *  and skips reload if it matches, handling both sync and async listener timing. */
+  private saveGeneration = 0;
   /** GM value change listener ID, for cleanup. */
   private gmListenerId: number | null = null;
   /** Bound storage event handler reference, for cleanup. */
@@ -70,7 +72,8 @@ export class Settings {
       this.gmListenerId = GM_addValueChangeListener(STORAGE_KEY, () => {
         // Skip self-triggered events: set() already applied the change,
         // so reloading would be a no-op at best, or could reset dirty preview state.
-        if (this.isSaving) return;
+        const gen = this.saveGeneration;
+        if (gen > 0 && gen === this.saveGeneration) return;
         log.debug('Cross-tab settings change detected via GM listener');
         this.reloadFromStorage();
       });
@@ -101,13 +104,11 @@ export class Settings {
 
   private save(): void {
     try {
-      this.isSaving = true;
+      this.saveGeneration++;
       const data = { ...this.settings, _version: SETTINGS_VERSION };
       getSettingsStorageAdapter().setItem(STORAGE_KEY, JSON.stringify(data));
     } catch (error: unknown) {
       log.warn('Failed to save settings:', error);
-    } finally {
-      this.isSaving = false;
     }
   }
 
