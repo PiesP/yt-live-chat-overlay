@@ -251,10 +251,11 @@ export const PANES: PaneDef[] = [
           chk(
             'Enable Translation',
             'translationEnabled',
-            'Translate chat messages in real-time (requires Chrome 138+ for built-in translation)'
+            'Translate chat messages in real-time. Google Translate sends message text (no author/video data) to an external server.'
           ),
           sel('Service', 'translationService', [
             ['auto', 'Auto (Chrome built-in)'],
+            ['google', 'Google Translate'],
             ['off', 'Off'],
           ]),
           sel('Source Language', 'translationSource', [

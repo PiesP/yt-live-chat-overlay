@@ -24,7 +24,7 @@ export type BacklogMode = 'playback' | 'recent' | 'full' | 'none';
 /** Language setting: auto-detect or explicit locale */
 export type LanguageSetting = 'auto' | 'en' | 'ko' | 'ja' | 'es' | 'zh';
 /** Translation service provider */
-export type TranslationService = 'auto' | 'off';
+export type TranslationService = 'auto' | 'google' | 'off';
 /** Translation display mode */
 export type TranslationMode = 'dual' | 'replace';
 /** Valid source/target languages for translation (excludes 'auto') */

@@ -4,7 +4,8 @@
 /**
  * YouTube Live Chat Overlay - Main Entry Point
  *
- * 100% local processing, no external requests or data storage (except settings).
+ * 100% local processing. When translation is enabled, only message body text
+ * (no author, video, or account data) is sent to the selected translation API.
  * Displays YouTube live chat messages in Nico-nico style flowing overlay.
  */
 

@@ -320,7 +320,7 @@ const STRING_VALIDATORS: Partial<Record<RootScalarSettingKey, (v: string) => boo
   authorRateLimit: (v) => v === 'off' || v === 'normal' || v === 'strict',
   language: (v) =>
     v === 'auto' || v === 'en' || v === 'ko' || v === 'ja' || v === 'es' || v === 'zh',
-  translationService: (v) => v === 'auto' || v === 'off',
+  translationService: (v) => v === 'auto' || v === 'google' || v === 'off',
   translationTarget: (v) => v === 'en' || v === 'ko' || v === 'ja' || v === 'es' || v === 'zh',
   translationMode: (v) => v === 'dual' || v === 'replace',
   translationSource: (v) => v === 'en' || v === 'ko' || v === 'ja' || v === 'es' || v === 'zh',

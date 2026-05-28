@@ -137,6 +137,7 @@ const KO: TranslationMap = {
   'Strict (2 msg / 5s)': '엄격 (2개 / 5초)',
   'Auto (Browser)': '자동 (브라우저)',
   'Auto (Chrome built-in)': '자동 (Chrome 내장)',
+  'Google Translate': 'Google 번역',
   'Dual (original + translation)': '이중 표시 (원문 + 번역)',
   'Replace (translation only)': '번역만 표시',
 
@@ -159,10 +160,12 @@ const KO: TranslationMap = {
     '실시간 메시지 대비 과거 메시지의 불투명도',
   'How much longer moderator and owner messages stay visible (1.0 = same as regular, 2.0 = twice as long)':
     '관리자와 소유자의 메시지가 일반 메시지보다 얼마나 오래 표시될지 설정합니다 (1.0 = 동일, 2.0 = 2배)',
-  'Translate chat messages in real-time (requires Chrome 138+ for built-in translation)':
-    '실시간으로 채팅 메시지를 번역합니다 (Chrome 138+ 내장 번역 필요)',
-  'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.':
-    '번역 기능은 내장 AI가 있는 브라우저가 필요합니다. Chrome 138+ 또는 Edge 143+ Canary를 사용하세요.',
+  'Translate chat messages in real-time. Google Translate sends message text (no author/video data) to an external server.':
+    '실시간으로 채팅 메시지를 번역합니다. Google 번역 사용 시 메시지 텍스트(작성자/영상 정보 제외)가 외부 서버로 전송됩니다.',
+  'Translation requires a browser with built-in AI (Chrome 138+ / Edge 143+ Canary) or a userscript manager with GM_xmlhttpRequest support for Google Translate.':
+    '번역 기능을 사용하려면 내장 AI 브라우저(Chrome 138+ / Edge 143+ Canary) 또는 GM_xmlhttpRequest를 지원하는 사용자 스크립트 매니저가 필요합니다.',
+  'When using Google Translate, only the plain text of each chat message (up to 80 characters, no emoji, author name, or metadata) is sent to Google translation servers. No YouTube account, video, or personal information is transmitted. See Google Privacy Policy for details.':
+    'Google 번역 사용 시 각 채팅 메시지의 순수 텍스트(최대 80자, 이모지/작성자명/메타데이터 제외)만 Google 번역 서버로 전송됩니다. YouTube 계정, 영상, 개인 정보는 전송되지 않습니다. 자세한 내용은 Google 개인정보처리방침을 참조하세요.',
 
   // ── Modal chrome ──
   'Chat Overlay': '채팅 오버레이',
@@ -254,6 +257,7 @@ const JA: TranslationMap = {
   'Strict (2 msg / 5s)': '厳格 (2件 / 5秒)',
   'Auto (Browser)': '自動 (ブラウザ)',
   'Auto (Chrome built-in)': '自動 (Chrome内蔵)',
+  'Google Translate': 'Google 翻訳',
   'Dual (original + translation)': '二重表示 (原文 + 翻訳)',
   'Replace (translation only)': '翻訳のみ表示',
 
@@ -278,10 +282,12 @@ const JA: TranslationMap = {
     'リアルタイムメッセージに対する過去メッセージの不透明度',
   'How much longer moderator and owner messages stay visible (1.0 = same as regular, 2.0 = twice as long)':
     'モデレーターと所有者のメッセージを通常より長く表示する倍率 (1.0 = 同じ, 2.0 = 2倍)',
-  'Translate chat messages in real-time (requires Chrome 138+ for built-in translation)':
-    'チャットメッセージをリアルタイムで翻訳します (Chrome 138+の内蔵翻訳が必要)',
-  'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.':
-    '翻訳機能にはAI内蔵ブラウザが必要です。Chrome 138+またはEdge 143+ Canaryをお使いください。',
+  'Translate chat messages in real-time. Google Translate sends message text (no author/video data) to an external server.':
+    'チャットメッセージをリアルタイムで翻訳します。Google翻訳使用時はメッセージテキスト(投稿者/動画情報を除く)が外部サーバーに送信されます。',
+  'Translation requires a browser with built-in AI (Chrome 138+ / Edge 143+ Canary) or a userscript manager with GM_xmlhttpRequest support for Google Translate.':
+    '翻訳機能には内蔵AIブラウザ(Chrome 138+ / Edge 143+ Canary)またはGM_xmlhttpRequest対応のユーザースクリプトマネージャが必要です。',
+  'When using Google Translate, only the plain text of each chat message (up to 80 characters, no emoji, author name, or metadata) is sent to Google translation servers. No YouTube account, video, or personal information is transmitted. See Google Privacy Policy for details.':
+    'Google翻訳使用時は各チャットメッセージのプレーンテキスト(最大80文字、絵文字/投稿者名/メタデータを除く)のみがGoogle翻訳サーバーに送信されます。YouTubeアカウント、動画、個人情報は一切送信されません。詳細はGoogleプライバシーポリシーをご確認ください。',
 
   // ── Modal chrome ──
   'Chat Overlay': 'チャットオーバーレイ',
@@ -373,6 +379,7 @@ const ES: TranslationMap = {
   'Strict (2 msg / 5s)': 'Estricto (2 msg / 5s)',
   'Auto (Browser)': 'Automático (Navegador)',
   'Auto (Chrome built-in)': 'Automático (integrado en Chrome)',
+  'Google Translate': 'Google Translate',
   'Dual (original + translation)': 'Dual (original + traducción)',
   'Replace (translation only)': 'Reemplazar (solo traducción)',
 
@@ -397,10 +404,12 @@ const ES: TranslationMap = {
     'Opacidad de mensajes pasados respecto a los actuales',
   'How much longer moderator and owner messages stay visible (1.0 = same as regular, 2.0 = twice as long)':
     'Cuánto más tiempo permanecen visibles los mensajes de moderador y propietario (1.0 = igual, 2.0 = el doble)',
-  'Translate chat messages in real-time (requires Chrome 138+ for built-in translation)':
-    'Traduce mensajes de chat en tiempo real (requiere Chrome 138+ con traducción integrada)',
-  'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.':
-    'La traducción requiere un navegador con IA integrada. Use Chrome 138+ o Edge 143+ Canary.',
+  'Translate chat messages in real-time. Google Translate sends message text (no author/video data) to an external server.':
+    'Traduce mensajes de chat en tiempo real. Al usar Google Translate, el texto del mensaje (sin datos del autor/video) se envía a un servidor externo.',
+  'Translation requires a browser with built-in AI (Chrome 138+ / Edge 143+ Canary) or a userscript manager with GM_xmlhttpRequest support for Google Translate.':
+    'La traducción requiere un navegador con IA integrada (Chrome 138+ / Edge 143+ Canary) o un gestor de scripts con soporte GM_xmlhttpRequest para Google Translate.',
+  'When using Google Translate, only the plain text of each chat message (up to 80 characters, no emoji, author name, or metadata) is sent to Google translation servers. No YouTube account, video, or personal information is transmitted. See Google Privacy Policy for details.':
+    'Al usar Google Translate, solo el texto sin formato de cada mensaje (máx. 80 caracteres, sin emojis, nombre del autor ni metadatos) se envía a los servidores de Google. No se transmite información de la cuenta de YouTube, video ni datos personales. Consulte la Política de Privacidad de Google.',
 
   // ── Modal chrome ──
   'Chat Overlay': 'Superposición de Chat',
@@ -493,6 +502,7 @@ const ZH: TranslationMap = {
   'Strict (2 msg / 5s)': '严格 (2条 / 5秒)',
   'Auto (Browser)': '自动 (浏览器)',
   'Auto (Chrome built-in)': '自动 (Chrome内置)',
+  'Google Translate': 'Google 翻译',
   'Dual (original + translation)': '双语 (原文 + 翻译)',
   'Replace (translation only)': '仅翻译',
 
@@ -514,10 +524,12 @@ const ZH: TranslationMap = {
   'Opacity of past messages relative to real-time messages': '历史消息相对于实时消息的不透明度',
   'How much longer moderator and owner messages stay visible (1.0 = same as regular, 2.0 = twice as long)':
     '版主和频道主的消息比普通消息多显示多长时间 (1.0 = 相同, 2.0 = 两倍)',
-  'Translate chat messages in real-time (requires Chrome 138+ for built-in translation)':
-    '实时翻译聊天消息 (需要 Chrome 138+ 内置翻译)',
-  'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.':
-    '翻译功能需要内置AI的浏览器。请使用 Chrome 138+ 或 Edge 143+ Canary。',
+  'Translate chat messages in real-time. Google Translate sends message text (no author/video data) to an external server.':
+    '实时翻译聊天消息。使用Google翻译时，消息文本（不含作者/视频数据）将发送至外部服务器。',
+  'Translation requires a browser with built-in AI (Chrome 138+ / Edge 143+ Canary) or a userscript manager with GM_xmlhttpRequest support for Google Translate.':
+    '翻译功能需要内置AI的浏览器（Chrome 138+ / Edge 143+ Canary）或支持GM_xmlhttpRequest的用户脚本管理器以使用Google翻译。',
+  'When using Google Translate, only the plain text of each chat message (up to 80 characters, no emoji, author name, or metadata) is sent to Google translation servers. No YouTube account, video, or personal information is transmitted. See Google Privacy Policy for details.':
+    '使用Google翻译时，仅每条聊天消息的纯文本（最多80字符，不含表情符号、作者名或元数据）发送至Google翻译服务器。不会传输YouTube账户、视频或个人数据。详情请参阅Google隐私政策。',
 
   // ── Modal chrome ──
   'Chat Overlay': '弹幕显示',

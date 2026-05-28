@@ -383,4 +383,14 @@ export const SETTINGS_UI_STYLES = `
         text-align: center;
         line-height: 1.5;
       }
+      .yt-chat-overlay-settings-privacy-notice {
+        padding: ${spacing.md}px ${spacing.lg}px;
+        margin: ${spacing.md}px 0;
+        color: ${uiColors.textMuted};
+        font-size: ${typography.fontSize.sm};
+        line-height: 1.5;
+        border: 1px solid ${uiColors.border};
+        border-radius: 4px;
+        background: ${uiColors.backgroundLight};
+      }
 `;
