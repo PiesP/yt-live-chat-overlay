@@ -38,7 +38,7 @@ No data is stored (beyond saved settings) or transmitted to any third party.
 
 ## Development
 
-Requires Node.js `>=24.0.0` and pnpm `>=11.2.2`.
+Requires Node.js `>=26.0.0` and pnpm `>=11.2.2`.
 
 ```bash
 pnpm install

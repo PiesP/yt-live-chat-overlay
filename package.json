@@ -40,12 +40,12 @@
     "url": "git+https://github.com/PiesP/yt-live-chat-overlay.git"
   },
   "engines": {
-    "node": ">=24.0.0",
+    "node": ">=26.0.0",
     "pnpm": ">=11.2.2"
   },
   "packageManager": "pnpm@11.2.2",
   "volta": {
-    "node": "24.16.0",
+    "node": "26.2.0",
     "pnpm": "11.2.2"
   },
   "devDependencies": {

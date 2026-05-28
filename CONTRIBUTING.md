@@ -12,7 +12,7 @@ Include: browser + version, OS + userscript manager, stream type (live/premiere/
 
 ### Prerequisites
 
-- Node.js `>=24.0.0`, pnpm `>=11.2.2`
+- Node.js `>=26.0.0`, pnpm `>=11.2.2`
 
 ### Commands
 
