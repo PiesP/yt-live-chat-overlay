@@ -18,8 +18,9 @@ import { DEFAULT_FONT_FAMILY } from '@core/design-tokens';
 
 let measureCtx: CanvasRenderingContext2D | null | false = null;
 
-/** LRU cache for measureTextWidth. Keyed by `${font}|${text}`. */
-const widthCache = new Map<string, number>();
+/** Two-level LRU cache for measureTextWidth. Outer key: font, inner key: text. */
+const widthCache = new Map<string, Map<string, number>>();
+let totalCacheEntries = 0;
 const WIDTH_CACHE_MAX = 500;
 
 /** Character-width estimate multiplier for CSP-restricted environments (no canvas). */
@@ -54,6 +55,7 @@ function getCtx(): CanvasRenderingContext2D | null {
  */
 export function clearTextMeasurementCaches(): void {
   widthCache.clear();
+  totalCacheEntries = 0;
 }
 
 /**
@@ -68,9 +70,12 @@ export function clearTextMeasurementCaches(): void {
  * in hot paths like the Canvas2D render loop.
  */
 export function measureTextWidth(text: string, font: string): number {
-  const key = `${font}|${text}`;
-  const cached = widthCache.get(key);
-  if (cached !== undefined) return cached;
+  // Two-level lookup: outer key = font, inner key = text
+  const fontCache = widthCache.get(font);
+  if (fontCache) {
+    const cached = fontCache.get(text);
+    if (cached !== undefined) return cached;
+  }
 
   const ctx = getCtx();
   if (!ctx) {
@@ -85,11 +90,25 @@ export function measureTextWidth(text: string, font: string): number {
   const bbWidth = Math.abs(m.actualBoundingBoxLeft) + Math.abs(m.actualBoundingBoxRight);
   const width = bbWidth > 0 ? Math.ceil(bbWidth) : Math.ceil(m.width);
 
-  if (widthCache.size >= WIDTH_CACHE_MAX) {
-    const oldestKey = widthCache.keys().next().value;
-    if (oldestKey !== undefined) widthCache.delete(oldestKey);
+  // LRU eviction: when total entries exceeds the limit, drop the oldest
+  // font group (outer-map first insertion remains oldest).
+  if (totalCacheEntries >= WIDTH_CACHE_MAX) {
+    const oldestFont = widthCache.keys().next().value;
+    if (oldestFont !== undefined) {
+      const entries = widthCache.get(oldestFont);
+      totalCacheEntries -= entries?.size ?? 0;
+      widthCache.delete(oldestFont);
+    }
   }
-  widthCache.set(key, width);
+
+  // Insert into two-level cache
+  let innerCache = widthCache.get(font);
+  if (!innerCache) {
+    innerCache = new Map<string, number>();
+    widthCache.set(font, innerCache);
+  }
+  innerCache.set(text, width);
+  totalCacheEntries++;
   return width;
 }
 
@@ -149,32 +168,29 @@ export function getFontString(
  * @param maxWidth - Maximum line width in pixels.
  * @returns Array of line segments (always >= 1 for non-empty input, 0 for empty).
  */
-function wrapLine(line: string, ctx: CanvasRenderingContext2D, maxWidth: number): string[] {
+function wrapLine(line: string, maxWidth: number, font: string): string[] {
   const words = line.split(/\s+/).filter((w) => w.length > 0);
   if (words.length === 0) return [];
 
-  const spaceWidth = ctx.measureText(' ').width;
+  const spaceWidth = measureTextWidth(' ', font);
   const lines: string[] = [];
   let currentLine = words[0] ?? '';
-  let currentWidth = ctx.measureText(currentLine).width;
+  let currentWidth = measureTextWidth(currentLine, font);
 
   // If the first word exceeds maxWidth, wrap it character by character.
-  // Without this check, a spaceless string or a very long first word that
-  // exceeds maxWidth is pushed as a single line without character-level
-  // wrapping, causing text to overflow the container.
   if (currentWidth > maxWidth) {
-    const charWrapped = wrapChars(currentLine, ctx, maxWidth);
+    const charWrapped = wrapChars(currentLine, maxWidth, font);
     for (let j = 0; j < charWrapped.length - 1; j++) {
       lines.push(charWrapped[j] ?? '');
     }
     currentLine = charWrapped[charWrapped.length - 1] ?? '';
-    currentWidth = ctx.measureText(currentLine).width;
+    currentWidth = measureTextWidth(currentLine, font);
   }
 
   for (let i = 1; i < words.length; i++) {
     const word = words[i];
     if (!word) continue;
-    const wordWidth = ctx.measureText(word).width;
+    const wordWidth = measureTextWidth(word, font);
 
     // If a single word exceeds maxWidth, use character-level wrapping
     if (wordWidth > maxWidth) {
@@ -185,14 +201,14 @@ function wrapLine(line: string, ctx: CanvasRenderingContext2D, maxWidth: number)
         currentWidth = 0;
       }
       // Wrap the long word character by character
-      const charWrapped = wrapChars(word, ctx, maxWidth);
+      const charWrapped = wrapChars(word, maxWidth, font);
       // All but the last char segment become their own lines
       for (let j = 0; j < charWrapped.length - 1; j++) {
         lines.push(charWrapped[j] ?? '');
       }
       const lastChar = charWrapped[charWrapped.length - 1] ?? '';
       currentLine = lastChar;
-      currentWidth = ctx.measureText(lastChar).width;
+      currentWidth = measureTextWidth(lastChar, font);
       continue;
     }
 
@@ -217,13 +233,13 @@ function wrapLine(line: string, ctx: CanvasRenderingContext2D, maxWidth: number)
  * Wrap a single word (no spaces) at character boundaries so each segment
  * fits within `maxWidth`.
  */
-function wrapChars(word: string, ctx: CanvasRenderingContext2D, maxWidth: number): string[] {
+function wrapChars(word: string, maxWidth: number, font: string): string[] {
   const segments: string[] = [];
   let current = '';
   let currentWidth = 0;
 
   for (const ch of word) {
-    const chWidth = ctx.measureText(ch).width;
+    const chWidth = measureTextWidth(ch, font);
     if (currentWidth + chWidth > maxWidth && current.length > 0) {
       segments.push(current);
       current = ch;
@@ -263,7 +279,7 @@ export function wrapTextLines(text: string, font: string, maxWidth: number): str
   const result: string[] = [];
 
   for (const paragraph of paragraphs) {
-    const wrapped = wrapLine(paragraph, ctx, maxWidth);
+    const wrapped = wrapLine(paragraph, maxWidth, font);
     for (const line of wrapped) {
       result.push(line);
     }

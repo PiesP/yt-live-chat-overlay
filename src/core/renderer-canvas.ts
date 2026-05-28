@@ -691,7 +691,7 @@ export class CanvasRenderer extends RendererBase {
         continue;
       }
 
-      this.enqueueMessageWithPlacement(msg, now, result.placement, batchIndex);
+      this.enqueueMessageWithPlacement(msg, now, result.placement, batchIndex, result.dimensions);
       skipped = 0; // reset after successful enqueue
       batchIndex++;
     }
@@ -717,8 +717,9 @@ export class CanvasRenderer extends RendererBase {
    * Check whether placing a new message at its target lane would cause
    * visual overlap with any currently active (visible) message.
    *
-   * Unlike the old wouldOverlap, this returns the LanePlacement on success
-   * so the caller can reuse it without calling findPlacement a second time.
+   * Returns pre-computed dimensions so callers can reuse them instead of
+   * calling estimateDimensions again (avoids duplicate wrap calls for
+   * 2-pass-wrapping messages like SuperChat).
    *
    * For scrolling modes, overlap occurs when a new message enters from the
    * right edge while an existing message in the same or adjacent lane has
@@ -733,7 +734,7 @@ export class CanvasRenderer extends RendererBase {
     message: ChatMessage,
     now: number
   ):
-    | { ok: true; placement: LanePlacement }
+    | { ok: true; placement: LanePlacement; dimensions: { width: number; height: number } }
     | {
         ok: false;
         reason: 'collision' | 'no_lane';
@@ -743,7 +744,8 @@ export class CanvasRenderer extends RendererBase {
 
     const mode = this.settings.danmakuMode;
     const isScrolling = mode === 'scroll' || mode === 'reverse';
-    const { height: msgHeight } = this.estimateDimensions(message);
+    const dimensions = this.estimateDimensions(message);
+    const { height: msgHeight } = dimensions;
 
     // Find the target lane Y position via the allocator (without committing).
     const speedTier = this.getSpeedTier(message);
@@ -817,7 +819,7 @@ export class CanvasRenderer extends RendererBase {
       }
     }
 
-    return { ok: true, placement };
+    return { ok: true, placement, dimensions };
   }
 
   // ── Message enqueue ──────────────────────────────────────────────────
@@ -825,18 +827,24 @@ export class CanvasRenderer extends RendererBase {
   /**
    * Enqueue a message using a pre-computed placement (from checkPlacement).
    * This avoids the double findPlacement call that caused BUG-1.
+   *
+   * Accepts optional pre-computed dimensions to avoid duplicate
+   * estimateDimensions calls (e.g. when called from drainQueue after
+   * checkPlacement already computed them).
    */
   private enqueueMessageWithPlacement(
     message: ChatMessage,
     now: number,
     placement: LanePlacement,
-    batchIndex = 0
+    batchIndex = 0,
+    precomputedDimensions?: { width: number; height: number }
   ): void {
     const dims = this.overlay.getDimensions();
     if (!dims) return;
 
     const mode = this.settings.danmakuMode;
-    const { width: msgWidth, height: msgHeight } = this.estimateDimensions(message);
+    const { width: msgWidth, height: msgHeight } =
+      precomputedDimensions ?? this.estimateDimensions(message);
 
     const isScrolling = mode === 'scroll' || mode === 'reverse';
     const speedTier = this.getSpeedTier(message);
