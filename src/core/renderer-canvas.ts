@@ -61,6 +61,8 @@ interface CanvasMessage {
   speedTier: number;
   /** Translated text (async result). undefined = not requested, null = cleared/unavailable, string = done. */
   translatedText?: string | null;
+  /** Pre-computed desaturated color for Far-tier depth layer. */
+  desaturatedUserColor?: string;
 }
 
 interface CreateCanvasMessageParams {
@@ -130,6 +132,7 @@ export class CanvasRenderer extends RendererBase {
 
   private readonly activeMessages: CanvasMessage[] = [];
   private readonly pendingQueue: ChatMessage[] = [];
+  private pendingQueueOffset = 0;
   private readonly retryQueue: ChatMessage[] = [];
 
   /** Image caches (bounded LRU). */
@@ -261,7 +264,7 @@ export class CanvasRenderer extends RendererBase {
   }
 
   protected getQueueLength(): number {
-    return this.pendingQueue.length;
+    return this.pendingQueue.length - this.pendingQueueOffset;
   }
 
   // ── Message ingress ──────────────────────────────────────────────────
@@ -285,13 +288,13 @@ export class CanvasRenderer extends RendererBase {
     const priority = CanvasRenderer.getMessagePriority(message);
     this.prefetchImages(message);
 
-    if (this.pendingQueue.length >= rendererLayout.queueMaxSize) {
+    if (this.pendingQueue.length - this.pendingQueueOffset >= rendererLayout.queueMaxSize) {
       const last = this.pendingQueue[this.pendingQueue.length - 1];
       if (last && priority <= CanvasRenderer.getMessagePriority(last)) {
         if (trackDrops) this.observability.onMessageDropped('queue_priority');
         return;
       }
-      this.pendingQueue.pop();
+      this.pendingQueueOffset++;
       if (trackDrops) this.observability.onMessageDropped('queue_replaced');
     }
 
@@ -315,7 +318,7 @@ export class CanvasRenderer extends RendererBase {
   /** Binary search for insertion point in the priority-sorted pending queue. */
   private findQueueInsertIndex(priority: number): number {
     const queue = this.pendingQueue;
-    let lo = 0;
+    let lo = this.pendingQueueOffset;
     let hi = queue.length;
     while (lo < hi) {
       const mid = (lo + hi) >>> 1;
@@ -329,7 +332,15 @@ export class CanvasRenderer extends RendererBase {
     return lo;
   }
 
+  private compactPendingQueue(): void {
+    if (this.pendingQueueOffset > 0) {
+      this.pendingQueue.splice(0, this.pendingQueueOffset);
+      this.pendingQueueOffset = 0;
+    }
+  }
+
   trimBackgroundQueue(): void {
+    this.compactPendingQueue();
     if (this.pendingQueue.length <= rendererLayout.backgroundQueueMax) return;
     this.pendingQueue.sort((a, b) => {
       const prioA = CanvasRenderer.getMessagePriority(a);
@@ -550,15 +561,9 @@ export class CanvasRenderer extends RendererBase {
       const snappedY = Math.floor(msg.y);
 
       // Apply atmospheric perspective to Far layer: desaturate author colors
-      const renderMessage =
-        this.settings.depthLayersEnabled &&
-        msg.speedTier === SPEED_TIER.FAR &&
-        msg.message.userColor
-          ? {
-              ...msg.message,
-              userColor: CanvasRenderer.desaturateColor(msg.message.userColor, 0.3),
-            }
-          : msg.message;
+      const renderMessage = msg.desaturatedUserColor
+        ? { ...msg.message, userColor: msg.desaturatedUserColor }
+        : msg.message;
 
       // When in replace mode and translation is available, skip original text rendering
       // for rich card types (SuperChat/Membership), which are never translated.
@@ -645,18 +650,18 @@ export class CanvasRenderer extends RendererBase {
     // (SuperChat priority ≥100, Membership ≥80) bypass the gate so paid
     // interactions are never blocked by lane saturation.
     if (this.isAntiBlockActive()) {
-      const front = this.pendingQueue[0];
+      const front = this.pendingQueue[this.pendingQueueOffset];
       if (!front || CanvasRenderer.getMessagePriority(front) < 80) return;
     }
     let skipped = 0;
     const maxSkip = CanvasRenderer.DRAIN_QUEUE_MAX_SKIP;
     let batchIndex = 0; // for stagger delay computation
     while (
-      this.pendingQueue.length > 0 &&
+      this.pendingQueueOffset < this.pendingQueue.length &&
       this.activeMessages.length < this.settings.maxConcurrentMessages &&
       skipped <= maxSkip
     ) {
-      const msg = this.pendingQueue.shift();
+      const msg = this.pendingQueue[this.pendingQueueOffset++];
       if (!msg) continue;
 
       const result = this.checkPlacement(msg, now);
@@ -702,6 +707,9 @@ export class CanvasRenderer extends RendererBase {
         this.pendingQueue.splice(idx, 0, msg);
       }
       this.retryQueue.length = 0;
+    }
+    if (this.pendingQueueOffset > 64) {
+      this.compactPendingQueue();
     }
   }
 
@@ -947,6 +955,10 @@ export class CanvasRenderer extends RendererBase {
       staggerDelay,
       speedTier,
     });
+
+    if (this.settings.depthLayersEnabled && speedTier === SPEED_TIER.FAR && message.userColor) {
+      cm.desaturatedUserColor = CanvasRenderer.desaturateColor(message.userColor, 0.3);
+    }
 
     this.activeMessages.push(cm);
     this.observability.onMessageRendered();
