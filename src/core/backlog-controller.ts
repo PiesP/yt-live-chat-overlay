@@ -43,6 +43,7 @@ interface BacklogControllerConfig {
 
 export class BacklogInjectionController implements Pauseable {
   private backlogQueue: ChatMessage[] = [];
+  private backlogSeenIds = new Set<string>();
   private isActive = false;
   private isInjecting = false;
   private paused = false;
@@ -107,8 +108,18 @@ export class BacklogInjectionController implements Pauseable {
     // If already injecting, ignore duplicate calls — the current injection
     // is still in progress and resetting state would lose queued messages.
     if (this.isInjecting) {
-      this.backlogQueue.push(...messages);
-      log.debug(`Backlog injection in progress, queued ${messages.length} additional`);
+      let added = 0;
+      for (const msg of messages) {
+        if (!msg.id || !this.backlogSeenIds.has(msg.id)) {
+          this.backlogQueue.push(msg);
+          if (msg.id) this.backlogSeenIds.add(msg.id);
+          added++;
+        }
+      }
+      if (added > 0)
+        log.debug(
+          `Backlog injection in progress, queued ${added} additional (${messages.length - added} duplicates skipped)`
+        );
       return;
     }
 
@@ -165,6 +176,11 @@ export class BacklogInjectionController implements Pauseable {
     }
 
     this.backlogQueue = normalMessages;
+    // Track IDs for duplicate injection prevention.
+    this.backlogSeenIds = new Set<string>();
+    for (const msg of normalMessages) {
+      if (msg.id) this.backlogSeenIds.add(msg.id);
+    }
     this.totalBacklog = normalMessages.length;
     this.processedBacklog = 0;
     this.isActive = normalMessages.length > 0;
@@ -399,6 +415,7 @@ export class BacklogInjectionController implements Pauseable {
     this.isActive = false;
     this.isInjecting = false;
     this.backlogQueue = [];
+    this.backlogSeenIds.clear();
     this.observability?.updateBacklogProgress(1);
     this.hideIndicator();
     log.debug('Backlog injection complete');
@@ -466,6 +483,7 @@ export class BacklogInjectionController implements Pauseable {
     this.injectionTimer = clearSafeTimeout(this.injectionTimer);
     this.hideIndicatorTimer = clearSafeTimeout(this.hideIndicatorTimer);
     this.backlogQueue = [];
+    this.backlogSeenIds.clear();
     if (this.indicatorEl) {
       this.indicatorEl.remove();
       this.indicatorEl = null;

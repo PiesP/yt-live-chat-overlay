@@ -111,6 +111,10 @@ function cleanupExpiredMessages(messages: CanvasMessage[], now: number): number 
       writeIdx++;
     }
   }
+  // Null out tail entries to avoid stale references in the active array.
+  for (let i = writeIdx; i < oldLength; i++) {
+    messages[i] = undefined as unknown as CanvasMessage;
+  }
   return writeIdx;
 }
 
@@ -309,7 +313,13 @@ export class CanvasRenderer extends RendererBase {
 
     // Trigger an immediate render frame so the message appears within
     // one frame (~16ms) instead of waiting for the next natural rAF.
-    if (this.pendingQueue.length === 1 && this.animFrameId !== null) {
+    // Skip if paused — the render loop would just return immediately.
+    if (
+      this.pendingQueue.length === 1 &&
+      this.animFrameId !== null &&
+      !this.isPaused &&
+      !this.isVideoPaused
+    ) {
       this.animFrameId = clearSafeAnimationFrame(this.animFrameId);
       this.startRenderLoop();
     }
@@ -367,6 +377,14 @@ export class CanvasRenderer extends RendererBase {
     };
     img.onerror = () => {
       this.failedEmojiFetches.add(url);
+      // Cap the failed fetches set to prevent unbounded memory growth.
+      if (this.failedEmojiFetches.size > 500) {
+        let evicted = 0;
+        for (const key of this.failedEmojiFetches) {
+          this.failedEmojiFetches.delete(key);
+          if (++evicted >= 250) break;
+        }
+      }
       // Silently skip — don't retry broken URLs on every frame.
     };
   }
@@ -399,7 +417,8 @@ export class CanvasRenderer extends RendererBase {
 
         // Trigger an immediate render frame so the emoji appears within
         // ~1 frame instead of waiting for the next natural rAF tick.
-        if (this.animFrameId !== null) {
+        // Skip if paused — the render loop would just return immediately.
+        if (this.animFrameId !== null && !this.isPaused && !this.isVideoPaused) {
           this.animFrameId = clearSafeAnimationFrame(this.animFrameId);
           this.startRenderLoop();
         }
@@ -408,6 +427,14 @@ export class CanvasRenderer extends RendererBase {
         this.emojiFetching.delete(url);
         this.emojiFetchingStarted.delete(url);
         this.failedEmojiFetches.add(url);
+        // Cap the failed fetches set to prevent unbounded memory growth.
+        if (this.failedEmojiFetches.size > 500) {
+          let evicted = 0;
+          for (const key of this.failedEmojiFetches) {
+            this.failedEmojiFetches.delete(key);
+            if (++evicted >= 250) break;
+          }
+        }
       };
     }
 

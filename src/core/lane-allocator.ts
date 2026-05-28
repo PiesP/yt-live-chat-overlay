@@ -388,7 +388,25 @@ export class LaneAllocator {
       }
       // Found a zero-wait compatible lane.
       // Epsilon-greedy: 5% chance to skip for visual variety.
-      if (Math.random() < LaneAllocator.EPSILON) continue;
+      if (Math.random() < LaneAllocator.EPSILON) {
+        // Don't skip if this is the last zero-wait compatible lane ahead.
+        let hasAlternate = false;
+        for (let j = i + 1; j < laneEnd; j++) {
+          if (this.collidedLanes.has(j)) continue;
+          const activeNext = this.speedTierLanes.get(j);
+          if (activeNext && activeNext.until > now) {
+            if (!LaneAllocator.areSpeedTiersCompatible(speedTier, activeNext.tier)) continue;
+          }
+          const availNext = this.getSlotAvailableAt(j);
+          if (availNext === undefined) continue;
+          const waitNext = Math.max(0, Math.ceil(availNext - now));
+          if (waitNext === 0) {
+            hasAlternate = true;
+            break;
+          }
+        }
+        if (hasAlternate) continue;
+      }
       return { laneIndex: i, waitMs: 0 };
     }
 

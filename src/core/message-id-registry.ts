@@ -31,11 +31,12 @@ export class MessageIdRegistry {
       return;
     }
 
-    const excess = this.ids.size - this.maxSize;
-    for (let i = 0; i < excess; i++) {
-      const firstKey = this.ids.keys().next().value;
-      if (firstKey === undefined) break;
-      this.ids.delete(firstKey);
+    // Bulk evict half the entries to avoid O(n) per-insert eviction overhead.
+    const toDelete = Math.ceil(this.ids.size / 2);
+    let deleted = 0;
+    for (const key of this.ids.keys()) {
+      this.ids.delete(key);
+      if (++deleted >= toDelete) break;
     }
   }
 }

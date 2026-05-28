@@ -87,6 +87,9 @@ export class ObservabilityReporter {
             `reason=${reason ?? 'unknown'})`
         );
       }
+    } else {
+      // Reset cooldown on recovery so next spike triggers a fresh warning
+      this.lastWarnTime = 0;
     }
   }
 
