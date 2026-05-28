@@ -283,8 +283,7 @@ export class TranslationService {
 // ── Google Translate Service ────────────────────────────────────────────────
 
 /**
- * Uses Google Translate unofficial endpoints with request batching and
- * automatic fallback between endpoints.
+ * Uses Google's translate.googleapis.com endpoint with request batching.
  *
  * During busy live streams individual requests would flood the endpoint;
  * instead, translate() calls within a short window (150ms) are batched
@@ -295,17 +294,10 @@ export class TranslationService {
  * account data) is sent.  The request is a standard HTTP GET, so
  * Google sees the user's IP address and the text content.
  *
- * Endpoint strategy:
- * 1. Primary: clients5.google.com/translate_a/t?client=dict-chrome-ex
- *    (Chrome Dictionary endpoint, less aggressively rate-limited)
- * 2. Fallback: translate.googleapis.com/translate_a/single?client=gtx
- *    (current endpoint, ~100 req/hour limit)
- * Both require a Chrome User-Agent header for proper behaviour.
- *
  * Design notes:
- * - Batch window: 150ms, max 10 texts per batch.
- * - Exponential backoff on 429 (1s → 2s → … → 16s max).
- * - Fallback chain: primary 429 → fallback (same batch) → backoff on dual failure.
+ * - Batch window: 150ms (short enough for near-real-time display).
+ * - Max 10 texts per batch to keep request size reasonable.
+ * - Consecutive failure tracking with counter reset (never disables).
  * - Failure reason logged with HTTP status for diagnostics.
  */
 
@@ -339,30 +331,6 @@ export class GoogleTranslationService {
   private static readonly BACKOFF_MIN_MS = 1000;
   /** Ceiling to prevent unbounded growth. */
   private static readonly BACKOFF_MAX_MS = 16000;
-
-  // ── Endpoints ────────────────────────────────────────────────────────
-
-  /** Primary: Chrome Dictionary extension endpoint. Less rate-limited. */
-  private static readonly PRIMARY_URL =
-    'https://clients5.google.com/translate_a/t?client=dict-chrome-ex';
-  /** Fallback: Generic Google Translate endpoint. ~100 req/hour. */
-  private static readonly FALLBACK_URL =
-    'https://translate.googleapis.com/translate_a/single?client=gtx&dt=t';
-
-  // ── Headers ──────────────────────────────────────────────────────────
-
-  /**
-   * Chrome User-Agent required by both endpoints.
-   * Without this, clients5 returns garbled output and translate_a/single
-   * may trigger bot-detection rate limiting.
-   */
-  private static readonly CHROME_UA =
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
-
-  private static readonly REQUEST_HEADERS: Record<string, string> = {
-    'User-Agent': GoogleTranslationService.CHROME_UA,
-    Referer: 'https://translate.google.com/',
-  };
 
   /** Call this when settings change. */
   configure(settings: { enabled: boolean; service: string; source: string; target: string }): void {
@@ -432,7 +400,7 @@ export class GoogleTranslationService {
     this.flushBatch();
   }
 
-  /** Send all queued texts via primary endpoint, falling back on 429. */
+  /** Send all queued texts in a single HTTP request. */
   private flushBatch(): void {
     if (this.batchTimer) {
       clearTimeout(this.batchTimer);
@@ -463,67 +431,52 @@ export class GoogleTranslationService {
     const tl = this.currentTarget;
     const joined = batch.map((r) => r.text).join('\n');
     const encoded = encodeURIComponent(joined);
-
-    // Build both endpoint URLs upfront
-    const primaryUrl = `${GoogleTranslationService.PRIMARY_URL}&sl=${sl}&tl=${tl}&q=${encoded}`;
-    const fallbackUrl = `${GoogleTranslationService.FALLBACK_URL}&sl=${sl}&tl=${tl}&q=${encoded}`;
+    const url =
+      'https://translate.googleapis.com/translate_a/single' +
+      `?client=gtx&sl=${sl}&tl=${tl}&dt=t&q=${encoded}`;
 
     googleLog.debug(`Flushing batch of ${batch.length} texts`);
 
     this.lastRequestTime = Date.now();
 
-    // Try primary, fallback on 429
-    this.sendRequest(batch, primaryUrl, this.parsePrimaryResponse, (is429) => {
-      if (is429) {
-        googleLog.warn('Primary endpoint returned 429 — trying fallback');
-        this.sendRequest(batch, fallbackUrl, this.parseFallbackResponse, () => {
-          // Both endpoints failed: apply backoff and fail the batch
-          this.increaseBackoff();
-          googleLog.warn(`Fallback also failed — backing off to ${this.backoffMs}ms delay`);
-          this.handleFailure();
-          this.flushPendingQueue(null);
-        });
-      } else {
-        // Non-429 error on primary (e.g. network error, 5xx) — still try fallback
-        googleLog.warn('Primary endpoint failed - trying fallback');
-        this.sendRequest(batch, fallbackUrl, this.parseFallbackResponse, () => {
-          this.handleFailure();
-          this.flushPendingQueue(null);
-        });
-      }
-    });
-  }
-
-  /**
-   * Send a single batch request and resolve callbacks via the provided parser.
-   * On success (200 + valid response), resolves all callbacks and decreases backoff.
-   * On failure, calls onFailure(is429) so the caller can decide fallback/backoff.
-   */
-  private sendRequest(
-    batch: PendingRequest[],
-    url: string,
-    parseFn: (parsed: unknown, batch: PendingRequest[]) => boolean,
-    onFailure: (is429: boolean) => void
-  ): void {
     GM_xmlhttpRequest({
       method: 'GET',
       url,
-      headers: GoogleTranslationService.REQUEST_HEADERS,
       timeout: GoogleTranslationService.REQUEST_TIMEOUT_MS,
       onload: (response: GM_XMLHttpResponse) => {
         if (response.status !== 200) {
-          onFailure(response.status === 429);
+          if (response.status === 429) {
+            this.increaseBackoff();
+            googleLog.warn(
+              `Google Translate batch failed: HTTP 429 — backing off to ${this.backoffMs}ms delay`
+            );
+          } else {
+            googleLog.warn(
+              `Google Translate batch failed: HTTP ${response.status} — ${response.statusText}`
+            );
+          }
+          this.handleFailure();
+          this.flushPendingQueue(null);
           return;
         }
         try {
           const parsed: unknown = JSON.parse(response.responseText);
-          if (parseFn(parsed, batch)) {
-            this.consecutiveFailures = 0;
-            this.decreaseBackoff();
-          } else {
+          if (!Array.isArray(parsed) || !Array.isArray(parsed[0])) {
             googleLog.warn('Google Translate batch failed: unexpected response format');
             this.handleFailure();
             this.flushPendingQueue(null);
+            return;
+          }
+          const segments = parsed[0] as Array<Array<string | null>>;
+          this.consecutiveFailures = 0;
+          this.decreaseBackoff();
+
+          // Distribute results: segment[i] corresponds to input line i.
+          // If the response has fewer segments, remaining inputs get null.
+          for (let i = 0; i < batch.length; i++) {
+            const seg = segments[i];
+            const req = batch[i];
+            if (req) req.resolve(seg?.[0] ?? null);
           }
         } catch {
           googleLog.warn('Google Translate batch failed: JSON parse error');
@@ -533,46 +486,15 @@ export class GoogleTranslationService {
       },
       onerror: () => {
         googleLog.warn('Google Translate batch failed: network error');
-        onFailure(false);
+        this.handleFailure();
+        this.flushPendingQueue(null);
       },
       ontimeout: () => {
         googleLog.warn('Google Translate batch failed: request timeout');
-        onFailure(false);
+        this.handleFailure();
+        this.flushPendingQueue(null);
       },
     });
-  }
-
-  /**
-   * Parse response from clients5.google.com/translate_a/t (primary).
-   * Format: [[[["trans"],null,"lang"], ...]]
-   *   parsed[0][i][0][0] = translation string for input i
-   */
-  private parsePrimaryResponse(parsed: unknown, batch: PendingRequest[]): boolean {
-    if (!Array.isArray(parsed) || !Array.isArray(parsed[0])) return false;
-    const segments = parsed[0] as Array<unknown>;
-    for (let i = 0; i < batch.length; i++) {
-      const seg = segments[i] as Array<unknown> | undefined;
-      const inner = seg?.[0] as Array<string | null> | undefined;
-      const req = batch[i];
-      if (req) req.resolve(inner?.[0] ?? null);
-    }
-    return true;
-  }
-
-  /**
-   * Parse response from translate.googleapis.com/translate_a/single (fallback).
-   * Format: [["trans","orig", ...], ...]
-   *   parsed[0][i][0] = translation string for input i
-   */
-  private parseFallbackResponse(parsed: unknown, batch: PendingRequest[]): boolean {
-    if (!Array.isArray(parsed) || !Array.isArray(parsed[0])) return false;
-    const segments = parsed[0] as Array<Array<string | null>>;
-    for (let i = 0; i < batch.length; i++) {
-      const seg = segments[i];
-      const req = batch[i];
-      if (req) req.resolve(seg?.[0] ?? null);
-    }
-    return true;
   }
 
   /** Resolve all pending requests with a value (used on failure / disable). */
