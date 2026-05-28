@@ -345,7 +345,7 @@ export class CanvasRenderer extends RendererBase {
     this.pendingQueue.sort((a, b) => {
       const prioA = CanvasRenderer.getMessagePriority(a);
       const prioB = CanvasRenderer.getMessagePriority(b);
-      return prioB - prioA || a.timestamp - b.timestamp;
+      return prioB - prioA || (a.timestamp ?? 0) - (b.timestamp ?? 0);
     });
     this.pendingQueue.length = rendererLayout.backgroundQueueMax;
   }
@@ -1056,13 +1056,7 @@ export class CanvasRenderer extends RendererBase {
     activeSpeedTier: number,
     newSpeedTier: number
   ): number {
-    const base = Math.max(
-      LaneAllocator.HEADWAY_GAP_MIN_PX,
-      Math.min(
-        LaneAllocator.HEADWAY_GAP_MAX_PX,
-        Math.round(activeWidth * rendererLayout.headwayGapRatio)
-      )
-    );
+    const base = LaneAllocator.computeBaseHeadwayPx(activeWidth);
     // Only adjust when the new message is faster (higher tier).
     if (newSpeedTier > activeSpeedTier) {
       return Math.round(base * this.settings.backlogSpeedMultiplier);

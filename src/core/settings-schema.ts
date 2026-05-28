@@ -303,7 +303,7 @@ export const getRootDisplayMeta = (
   precision: number;
 } => {
   const meta: SettingMeta = ROOT_SETTING_META[key];
-  if (meta?.displayScale) {
+  if (meta?.displayScale !== undefined) {
     return { scale: meta.displayScale, precision: meta.displayPrecision ?? 0 };
   }
   return { scale: 1, precision: 0 };

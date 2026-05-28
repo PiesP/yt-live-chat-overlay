@@ -116,6 +116,16 @@ export class LaneAllocator {
   static readonly HEADWAY_GAP_MIN_PX = 16;
   static readonly HEADWAY_GAP_MAX_PX = 60;
 
+  static computeBaseHeadwayPx(msgWidth: number): number {
+    return Math.max(
+      LaneAllocator.HEADWAY_GAP_MIN_PX,
+      Math.min(
+        LaneAllocator.HEADWAY_GAP_MAX_PX,
+        Math.round(msgWidth * rendererLayout.headwayGapRatio)
+      )
+    );
+  }
+
   /**
    * Epsilon-greedy selection probability (0-1).
    * 5% chance to skip the strict topmost zero-wait lane and pick the
@@ -326,13 +336,7 @@ export class LaneAllocator {
 
     // Scrolling mode: precision exit-time
     const totalDistance = screenWidth + msgWidthPx + rendererLayout.exitPaddingMin;
-    const headwayPx = Math.max(
-      LaneAllocator.HEADWAY_GAP_MIN_PX,
-      Math.min(
-        LaneAllocator.HEADWAY_GAP_MAX_PX,
-        Math.round(msgWidthPx * rendererLayout.headwayGapRatio)
-      )
-    );
+    const headwayPx = LaneAllocator.computeBaseHeadwayPx(msgWidthPx);
     const rightEdgePassFraction = (msgWidthPx + headwayPx) / totalDistance;
     return Math.round(rightEdgePassFraction * durationMs);
   }

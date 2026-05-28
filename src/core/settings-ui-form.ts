@@ -244,8 +244,13 @@ const applyNumberInputAttributes = (
   input.step = String(step);
 };
 
-// ── SettingsUiForm class ─────────────────────────────────────────────────────
+// ── Outline patching helper ───────────────────────────────────────────────────
 
+function patchOutline(partial: Record<string, unknown>, patch: Record<string, unknown>): void {
+  partial.outline = { ...((partial.outline as Record<string, unknown>) ?? {}), ...patch };
+}
+
+// ── SettingsUiForm class ─────────────────────────────────────────────────────
 export class SettingsUiForm {
   private modal: HTMLDivElement | null = null;
   private isUpdating = false;
@@ -545,21 +550,19 @@ export class SettingsUiForm {
         const rawKey = el.name.slice('outline-'.length);
         const key = rawKey as OutlineSettingKey;
         if (key === 'enabled') {
-          partial.outline = {
-            ...((partial.outline as Record<string, unknown>) ?? {}),
+          patchOutline(partial as Record<string, unknown>, {
             enabled: (el as HTMLInputElement).checked,
-          };
+          });
         } else {
           const numericKey = isOutlineNumericKey(rawKey) ? rawKey : null;
           if (!numericKey) continue;
-          partial.outline = {
-            ...((partial.outline as Record<string, unknown>) ?? {}),
+          patchOutline(partial as Record<string, unknown>, {
             [key]: normalizeOutlineNumericInputValue(
               numericKey,
               el.value,
               this.getSettings().outline[key]
             ),
-          };
+          });
         }
         continue;
       }

@@ -22,6 +22,7 @@ const REPLAY_EMIT_TOLERANCE_MS = 300;
 
 export class ReplayBuffer {
   private buffer: BufferedReplayMessage[] = [];
+  private seenIds = new Set<string>();
 
   /** True when the buffer has no messages. */
   get isEmpty(): boolean {
@@ -35,6 +36,9 @@ export class ReplayBuffer {
    * message ID so the same message is never buffered twice.
    */
   insert(message: ChatMessage, offsetMs: number): void {
+    // Deduplicate by message ID (same message from overlapping continuation chains)
+    if (message.id && this.seenIds.has(message.id)) return;
+
     let lo = 0;
     let hi = this.buffer.length;
     while (lo < hi) {
@@ -49,6 +53,7 @@ export class ReplayBuffer {
     }
 
     this.buffer.splice(lo, 0, { message, offsetMs });
+    if (message.id) this.seenIds.add(message.id);
     this.trim(MAX_BUFFERED_REPLAY_MESSAGES);
   }
 
@@ -110,6 +115,7 @@ export class ReplayBuffer {
   /** Clear all buffered messages (e.g. on seek). */
   clear(): void {
     this.buffer = [];
+    this.seenIds.clear();
   }
 
   /**
