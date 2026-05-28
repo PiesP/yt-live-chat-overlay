@@ -1184,6 +1184,10 @@ export class CanvasRenderer extends RendererBase {
       }
     }
 
+    // Re-attempt translator creation if it previously failed due to missing
+    // user activation or model download. Fire-and-forget — configure() below
+    // serializes behind configurePromise so they don't race.
+    this.translationService.onUserActivation();
     this.translationService.configure({
       enabled: settings.translationEnabled,
       service: settings.translationService,

@@ -28,6 +28,7 @@ interface TranslatorDownloadEvent extends Event {
 
 interface TranslatorInstance {
   translate(text: string): Promise<string>;
+  destroy(): void;
 }
 
 interface TranslatorCreateOptions {
@@ -67,6 +68,9 @@ export class TranslationService {
   /** Pending source/target from the most recent configure() for retry. */
   private pendingSource: string | null = null;
   private pendingTarget: string | null = null;
+  /** Consecutive translate() failures. On threshold, the translator is invalidated. */
+  private consecutiveFailures = 0;
+  private static readonly MAX_CONSECUTIVE_FAILURES = 3;
 
   /** Call this when settings change to reconfigure the translator. */
   async configure(settings: {
@@ -176,6 +180,7 @@ export class TranslationService {
       this.currentSource = sourceLanguage;
       this.pendingSource = null;
       this.pendingTarget = null;
+      this.consecutiveFailures = 0;
       log.info(`Translator ready: ${sourceLanguage} → ${targetLanguage}`);
     } catch (err) {
       // create() may fail if user activation was missing (NotAllowedError)
@@ -205,6 +210,12 @@ export class TranslationService {
   /**
    * Translate text. Returns the translation or null on failure.
    * Sequential — one call at a time.
+   *
+   * Tracks consecutive failures. After MAX_CONSECUTIVE_FAILURES the
+   * translator instance is invalidated and pending source/target are
+   * preserved so the next configure() or onUserActivation() call
+   * recreates it. This recovers from translator death (model unload,
+   * memory pressure, input quota exhaustion) without user intervention.
    */
   async translate(text: string): Promise<string | null> {
     if (!this.translator) return null;
@@ -212,19 +223,58 @@ export class TranslationService {
 
     try {
       const result = await this.translator.translate(text);
+      this.consecutiveFailures = 0;
       return result;
     } catch (err) {
-      log.debug('Translation failed:', err);
+      this.consecutiveFailures++;
+      if (this.consecutiveFailures >= TranslationService.MAX_CONSECUTIVE_FAILURES) {
+        log.warn(
+          `Translator failed ${this.consecutiveFailures} times consecutively — invalidating instance for recovery`
+        );
+        // Preserve the language pair for retry, then release the dead instance.
+        if (!this.pendingSource && this.currentSource) {
+          this.pendingSource = this.currentSource;
+        }
+        if (!this.pendingTarget && this.currentTarget) {
+          this.pendingTarget = this.currentTarget;
+        }
+        if (this.translator) {
+          try {
+            this.translator.destroy();
+          } catch {
+            /* terminal state */
+          }
+        }
+        this.translator = null;
+        this.currentTarget = null;
+        this.currentSource = null;
+        this.consecutiveFailures = 0;
+      } else {
+        log.debug('Translation failed:', err);
+      }
       return null;
     }
   }
 
   destroy(): void {
+    // Release the underlying Chrome Translator instance to free the per-profile
+    // slot (Chromium enforces a 10-instance limit per browsing context).
+    // Without this call, every RuntimeSession restart leaks one slot, and after
+    // ~10 restarts (watchdog, foreground-return, standby-resolved, settings
+    // changes) Translator.create() fails permanently.
+    if (this.translator) {
+      try {
+        this.translator.destroy();
+      } catch {
+        // Silently ignore — the instance may already be in a terminal state.
+      }
+    }
     this.translator = null;
     this.currentTarget = null;
     this.currentSource = null;
     this.pendingSource = null;
     this.pendingTarget = null;
     this.enabled = false;
+    this.consecutiveFailures = 0;
   }
 }
