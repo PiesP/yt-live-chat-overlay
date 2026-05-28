@@ -318,19 +318,10 @@ export class GoogleTranslationService {
   private pendingQueue: PendingRequest[] = [];
   private batchTimer: ReturnType<typeof setTimeout> | null = null;
 
-  // ── Rate-limit backoff ──
-  /** Adaptive delay between requests (ms). 0 = no delay. Doubled on 429, halved on success. */
-  private backoffMs = 0;
-  private lastRequestTime = 0;
-
   private static readonly BATCH_WINDOW_MS = 150;
   private static readonly MAX_BATCH_SIZE = 10;
   private static readonly MAX_CONSECUTIVE_FAILURES = 8;
   private static readonly REQUEST_TIMEOUT_MS = 5000;
-  /** Floor for backoff after 429. */
-  private static readonly BACKOFF_MIN_MS = 1000;
-  /** Ceiling to prevent unbounded growth. */
-  private static readonly BACKOFF_MAX_MS = 16000;
 
   /** Call this when settings change. */
   configure(settings: { enabled: boolean; service: string; source: string; target: string }): void {
@@ -352,8 +343,6 @@ export class GoogleTranslationService {
     this.currentSource = settings.source;
     this.currentTarget = settings.target;
     this.consecutiveFailures = 0;
-    this.backoffMs = 0;
-    this.lastRequestTime = 0;
   }
 
   /** Check whether Google Translate can be used in this environment. */
@@ -409,17 +398,6 @@ export class GoogleTranslationService {
 
     const batch = this.pendingQueue;
     if (batch.length === 0) return;
-
-    // Apply rate-limit backoff: if we haven't waited long enough since the
-    // last request, defer this batch by the remaining delay.
-    const now = Date.now();
-    const elapsed = now - this.lastRequestTime;
-    if (elapsed < this.backoffMs) {
-      const remaining = this.backoffMs - elapsed;
-      this.batchTimer = setTimeout(() => this.flushBatch(), remaining);
-      return;
-    }
-
     this.pendingQueue = [];
 
     if (!this.currentSource || !this.currentTarget) {
@@ -437,24 +415,15 @@ export class GoogleTranslationService {
 
     googleLog.debug(`Flushing batch of ${batch.length} texts`);
 
-    this.lastRequestTime = Date.now();
-
     GM_xmlhttpRequest({
       method: 'GET',
       url,
       timeout: GoogleTranslationService.REQUEST_TIMEOUT_MS,
       onload: (response: GM_XMLHttpResponse) => {
         if (response.status !== 200) {
-          if (response.status === 429) {
-            this.increaseBackoff();
-            googleLog.warn(
-              `Google Translate batch failed: HTTP 429 — backing off to ${this.backoffMs}ms delay`
-            );
-          } else {
-            googleLog.warn(
-              `Google Translate batch failed: HTTP ${response.status} — ${response.statusText}`
-            );
-          }
+          googleLog.warn(
+            `Google Translate batch failed: HTTP ${response.status} — ${response.statusText}`
+          );
           this.handleFailure();
           this.flushPendingQueue(null);
           return;
@@ -469,7 +438,6 @@ export class GoogleTranslationService {
           }
           const segments = parsed[0] as Array<Array<string | null>>;
           this.consecutiveFailures = 0;
-          this.decreaseBackoff();
 
           // Distribute results: segment[i] corresponds to input line i.
           // If the response has fewer segments, remaining inputs get null.
@@ -503,22 +471,6 @@ export class GoogleTranslationService {
       req.resolve(value);
     }
     this.pendingQueue = [];
-  }
-
-  // ── Backoff ──────────────────────────────────────────────────────────
-
-  /** Double the backoff on 429, clamped to [BACKOFF_MIN_MS, BACKOFF_MAX_MS]. */
-  private increaseBackoff(): void {
-    if (this.backoffMs < GoogleTranslationService.BACKOFF_MIN_MS) {
-      this.backoffMs = GoogleTranslationService.BACKOFF_MIN_MS;
-    } else {
-      this.backoffMs = Math.min(this.backoffMs * 2, GoogleTranslationService.BACKOFF_MAX_MS);
-    }
-  }
-
-  /** Halve the backoff on success, bottoming out at 0 (no delay). */
-  private decreaseBackoff(): void {
-    this.backoffMs = Math.max(0, Math.floor(this.backoffMs * 0.5));
   }
 
   private handleFailure(): void {
