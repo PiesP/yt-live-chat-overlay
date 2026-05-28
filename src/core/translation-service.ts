@@ -283,33 +283,44 @@ export class TranslationService {
 // ── Google Translate Service ────────────────────────────────────────────────
 
 /**
- * Falls back to Google's translate.googleapis.com endpoint.
+ * Uses Google's translate.googleapis.com endpoint with request batching.
  *
- * Uses GM_xmlhttpRequest to bypass CORS (the endpoint does not set
- * CORS headers).  Each translate() call sends a single GET request
- * with the message text URL-encoded in the query string.
+ * During busy live streams individual requests would flood the endpoint;
+ * instead, translate() calls within a short window (150ms) are batched
+ * into a single GM_xmlhttpRequest.  Texts are joined by newlines and
+ * the multi-line response is distributed back to each caller.
  *
  * Privacy: only the plain-text message body (no author, video, or
  * account data) is sent.  The request is a standard HTTP GET, so
  * Google sees the user's IP address and the text content.
  *
  * Design notes:
- * - No API key or authentication required (internal Google endpoint).
- * - Sequential — one request per translate() call (acceptable for chat).
- * - Consecutive failure tracking with auto-disable after threshold.
- * - Supports auto language detection via sl=auto.
+ * - Batch window: 150ms (short enough for near-real-time display).
+ * - Max 10 texts per batch to keep request size reasonable.
+ * - Consecutive failure tracking with counter reset (never disables).
+ * - Failure reason logged with HTTP status for diagnostics.
  */
 
 const googleLog = createLogger('GoogleTranslationService');
+
+type PendingRequest = {
+  text: string;
+  resolve: (value: string | null) => void;
+};
 
 export class GoogleTranslationService {
   private enabled = false;
   private currentSource: string | null = null;
   private currentTarget: string | null = null;
-  /** Consecutive translate() failures. On threshold, the service is disabled. */
   private consecutiveFailures = 0;
+
+  // ── Batch queue ──
+  private pendingQueue: PendingRequest[] = [];
+  private batchTimer: ReturnType<typeof setTimeout> | null = null;
+
+  private static readonly BATCH_WINDOW_MS = 150;
+  private static readonly MAX_BATCH_SIZE = 10;
   private static readonly MAX_CONSECUTIVE_FAILURES = 8;
-  /** Per-request timeout in milliseconds. */
   private static readonly REQUEST_TIMEOUT_MS = 5000;
 
   /** Call this when settings change. */
@@ -318,6 +329,7 @@ export class GoogleTranslationService {
     if (!this.enabled) {
       this.currentSource = null;
       this.currentTarget = null;
+      this.flushPendingQueue(null);
       return;
     }
 
@@ -344,64 +356,128 @@ export class GoogleTranslationService {
   }
 
   /**
-   * Translate text via Google Translate.
+   * Queue a translation request.  If enough requests accumulate within
+   * BATCH_WINDOW_MS they are sent as a single batched HTTP request.
    * Returns the translation string or null on failure.
    */
   async translate(text: string): Promise<string | null> {
     if (!this.enabled || !this.currentSource || !this.currentTarget) return null;
     if (!text.trim()) return text;
 
+    return new Promise<string | null>((resolve) => {
+      this.pendingQueue.push({ text, resolve });
+
+      if (this.pendingQueue.length >= GoogleTranslationService.MAX_BATCH_SIZE) {
+        this.flushBatchNow();
+      } else if (!this.batchTimer) {
+        this.batchTimer = setTimeout(
+          () => this.flushBatch(),
+          GoogleTranslationService.BATCH_WINDOW_MS
+        );
+      }
+    });
+  }
+
+  // ── Batch internals ──────────────────────────────────────────────────
+
+  /** Cancel the pending timer and flush immediately (used on MAX_BATCH_SIZE). */
+  private flushBatchNow(): void {
+    if (this.batchTimer) {
+      clearTimeout(this.batchTimer);
+      this.batchTimer = null;
+    }
+    this.flushBatch();
+  }
+
+  /** Send all queued texts in a single HTTP request. */
+  private flushBatch(): void {
+    if (this.batchTimer) {
+      clearTimeout(this.batchTimer);
+      this.batchTimer = null;
+    }
+
+    const batch = this.pendingQueue;
+    if (batch.length === 0) return;
+    this.pendingQueue = [];
+
+    if (!this.currentSource || !this.currentTarget) {
+      this.flushPendingQueue(null);
+      return;
+    }
+
     const sl = this.currentSource;
     const tl = this.currentTarget;
-    const encoded = encodeURIComponent(text);
+    const joined = batch.map((r) => r.text).join('\n');
+    const encoded = encodeURIComponent(joined);
     const url =
       'https://translate.googleapis.com/translate_a/single' +
       `?client=gtx&sl=${sl}&tl=${tl}&dt=t&q=${encoded}`;
 
-    return new Promise<string | null>((resolve) => {
-      GM_xmlhttpRequest({
-        method: 'GET',
-        url,
-        timeout: GoogleTranslationService.REQUEST_TIMEOUT_MS,
-        onload: (response: GM_XMLHttpResponse) => {
-          if (response.status !== 200) {
+    googleLog.debug(`Flushing batch of ${batch.length} texts`);
+
+    GM_xmlhttpRequest({
+      method: 'GET',
+      url,
+      timeout: GoogleTranslationService.REQUEST_TIMEOUT_MS,
+      onload: (response: GM_XMLHttpResponse) => {
+        if (response.status !== 200) {
+          googleLog.warn(
+            `Google Translate batch failed: HTTP ${response.status} — ${response.statusText}`
+          );
+          this.handleFailure();
+          this.flushPendingQueue(null);
+          return;
+        }
+        try {
+          const parsed: unknown = JSON.parse(response.responseText);
+          if (!Array.isArray(parsed) || !Array.isArray(parsed[0])) {
+            googleLog.warn('Google Translate batch failed: unexpected response format');
             this.handleFailure();
-            resolve(null);
+            this.flushPendingQueue(null);
             return;
           }
-          try {
-            const parsed: unknown = JSON.parse(response.responseText);
-            if (!Array.isArray(parsed) || !Array.isArray(parsed[0])) {
-              this.handleFailure();
-              resolve(null);
-              return;
-            }
-            const segments = parsed[0] as Array<Array<string | null>>;
-            const translated = segments.map((seg: Array<string | null>) => seg[0] ?? '').join('');
-            this.consecutiveFailures = 0;
-            resolve(translated || null);
-          } catch {
-            this.handleFailure();
-            resolve(null);
+          const segments = parsed[0] as Array<Array<string | null>>;
+          this.consecutiveFailures = 0;
+
+          // Distribute results: segment[i] corresponds to input line i.
+          // If the response has fewer segments, remaining inputs get null.
+          for (let i = 0; i < batch.length; i++) {
+            const seg = segments[i];
+            const req = batch[i];
+            if (req) req.resolve(seg?.[0] ?? null);
           }
-        },
-        onerror: () => {
+        } catch {
+          googleLog.warn('Google Translate batch failed: JSON parse error');
           this.handleFailure();
-          resolve(null);
-        },
-        ontimeout: () => {
-          this.handleFailure();
-          resolve(null);
-        },
-      });
+          this.flushPendingQueue(null);
+        }
+      },
+      onerror: () => {
+        googleLog.warn('Google Translate batch failed: network error');
+        this.handleFailure();
+        this.flushPendingQueue(null);
+      },
+      ontimeout: () => {
+        googleLog.warn('Google Translate batch failed: request timeout');
+        this.handleFailure();
+        this.flushPendingQueue(null);
+      },
     });
+  }
+
+  /** Resolve all pending requests with a value (used on failure / disable). */
+  private flushPendingQueue(value: string | null): void {
+    for (const req of this.pendingQueue) {
+      req.resolve(value);
+    }
+    this.pendingQueue = [];
   }
 
   private handleFailure(): void {
     this.consecutiveFailures++;
     if (this.consecutiveFailures >= GoogleTranslationService.MAX_CONSECUTIVE_FAILURES) {
       googleLog.warn(
-        `Google Translate failed ${this.consecutiveFailures} consecutive times — resetting failure counter, will retry`
+        `Google Translate failed ${this.consecutiveFailures} consecutive times — resetting counter, will retry`
       );
       this.consecutiveFailures = 0;
     }
@@ -409,10 +485,15 @@ export class GoogleTranslationService {
 
   /** No-op: Google Translate does not require user activation. */
   onUserActivation(): void {
-    // Nothing to do — Google Translate works without user interaction.
+    // Nothing to do.
   }
 
   destroy(): void {
+    if (this.batchTimer) {
+      clearTimeout(this.batchTimer);
+      this.batchTimer = null;
+    }
+    this.flushPendingQueue(null);
     this.enabled = false;
     this.currentSource = null;
     this.currentTarget = null;
