@@ -390,11 +390,11 @@ function parseMessageContent(
     const emoji = parseEmoji(emojiData);
     if (emoji) {
       segments.push({ type: 'emoji', emoji });
-      plainText += emoji.fallbackText || '[emoji]';
+      plainText += emoji.fallbackText || '\u200B';
       continue;
     }
 
-    const fallbackText = getEmojiVisibleFallbackText(emojiData) || '[emoji]';
+    const fallbackText = getEmojiVisibleFallbackText(emojiData) || '\u200B';
     appendTextSegment(segments, fallbackText);
     plainText += fallbackText;
   }

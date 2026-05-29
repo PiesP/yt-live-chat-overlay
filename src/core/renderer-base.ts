@@ -159,7 +159,7 @@ export abstract class RendererBase {
   resumeForVideo(): void {
     if (!this.isVideoPaused) return;
     this.isVideoPaused = false;
-    if (!document.hidden) {
+    if (document.visibilityState === 'visible') {
       if (this.isPaused) {
         this.resume();
       } else {
