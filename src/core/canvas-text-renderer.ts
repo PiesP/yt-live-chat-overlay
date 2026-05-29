@@ -518,7 +518,8 @@ export function drawAuthorSection(
 ): number {
   if (!message.author) return startY;
 
-  ctx.save();
+  const prevFont = ctx.font;
+  const prevTextBaseline = ctx.textBaseline;
 
   const fontSize = settings.fontSize;
   const authorFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
@@ -549,7 +550,8 @@ export function drawAuthorSection(
       // Guard: if the ellipsis character alone exceeds maxNameWidth
       // (extremely narrow container), skip rendering the name entirely.
       if (ellipsisWidth >= maxNameWidth) {
-        ctx.restore();
+        ctx.font = prevFont;
+        ctx.textBaseline = prevTextBaseline;
         return startY + sectionHeight;
       }
       // Binary search for optimal truncation point (O(log n) instead of O(n))
@@ -578,10 +580,11 @@ export function drawAuthorSection(
     getFontFn
   );
 
-  ctx.restore();
+  ctx.font = prevFont;
+  ctx.textBaseline = prevTextBaseline;
+
   return startY + sectionHeight;
 }
-
 /** Draw a rounded rectangle path (no fill/stroke — path only). */
 export function drawRoundRect(
   ctx: CanvasRenderingContext2D,
