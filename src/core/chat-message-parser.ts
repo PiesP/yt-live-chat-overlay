@@ -177,9 +177,11 @@ function parseRendererMessage(
 
   if (kind === 'superchat') {
     const superChatInfo = parseSuperChatInfo(renderer);
-    if (superChatInfo) {
-      message.superChat = superChatInfo;
+    if (!superChatInfo) {
+      log.warn('Skipping Super Chat message: failed to extract purchase info');
+      return null;
     }
+    message.superChat = superChatInfo;
   }
 
   return message;
@@ -223,7 +225,6 @@ function isSubstantialMessage(
 function parseSuperChatInfo(renderer: JsonObject): SuperChatInfo | null {
   const amount = extractDisplayText(renderer.purchaseAmountText);
   if (!amount) {
-    log.warn('Super Chat renderer did not include purchaseAmountText');
     return null;
   }
 
