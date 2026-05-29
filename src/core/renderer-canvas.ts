@@ -1200,8 +1200,11 @@ export class CanvasRenderer extends RendererBase {
     this.observability.onMessageRendered();
 
     // Trigger async translation for all message kinds (text, superchat, membership).
+    // Use isEnabled (not isActive) so translate() is called even when the
+    // translator is temporarily dead — auto-recovery inside translate()
+    // will recreate it.
     const translatableText = getTranslatableText(message);
-    if (this.translationService.isActive && translatableText) {
+    if (this.translationService.isEnabled && translatableText) {
       const cmRef = cm;
       this.translationService
         .translate(translatableText)

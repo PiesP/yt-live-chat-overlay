@@ -207,9 +207,15 @@ export class TranslationService {
     return typeof Translator !== 'undefined';
   }
 
-  /** Whether translation is currently active. */
+  /** Whether translation is currently active (translator ready). */
   get isActive(): boolean {
     return this.enabled && this.translator !== null;
+  }
+
+  /** Whether translation is enabled in settings. True even when translator is
+   * temporarily dead (awaiting auto-recovery). */
+  get isEnabled(): boolean {
+    return this.enabled;
   }
 
   /**
