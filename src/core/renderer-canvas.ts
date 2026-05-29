@@ -545,7 +545,21 @@ export class CanvasRenderer extends RendererBase {
       canvas.height = dims.height * dpr;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
-    ctx.clearRect(0, 0, dims.width, dims.height);
+    // O(n) single-pass cleanup of expired messages — before clearRect so
+    // we can skip clearRect entirely for empty frames.
+    const newLength = cleanupExpiredMessages(this.activeMessages, now);
+    if (newLength < this.activeMessages.length) {
+      this.activeMessages.length = newLength;
+      this.observability.updateActiveMessages(this.activeMessages.length);
+      this.observability.updateQueueDepth(this.pendingQueue.length);
+    }
+
+    // P2-3: Skip clearRect + render loop when no active messages or standby message.
+    // Empty frames have nothing to draw, so we skip GPU work entirely.
+    const hasContent = this.activeMessages.length > 0 || this.standbyStatus;
+    if (hasContent) {
+      ctx.clearRect(0, 0, dims.width, dims.height);
+    }
 
     // Draw standby status message when in pre-live standby mode
     if (this.standbyStatus) {
@@ -554,14 +568,6 @@ export class CanvasRenderer extends RendererBase {
 
     const mode = this.settings.danmakuMode;
     const isScrolling = mode === 'scroll' || mode === 'reverse';
-
-    // O(n) single-pass cleanup of expired messages
-    const newLength = cleanupExpiredMessages(this.activeMessages, now);
-    if (newLength < this.activeMessages.length) {
-      this.activeMessages.length = newLength;
-      this.observability.updateActiveMessages(this.activeMessages.length);
-      this.observability.updateQueueDepth(this.pendingQueue.length);
-    }
 
     // Recalculate lane utilization BEFORE drainQueue so anti-block sees
     // accurate state. Previously resetBatch() was inside drainQueue() and
@@ -575,6 +581,9 @@ export class CanvasRenderer extends RendererBase {
 
     this.observability.updateLaneUtilization(this.laneAllocator.getUtilization());
     this.observability.tick();
+
+    // Early exit for empty frames — nothing to render.
+    if (!hasContent) return;
 
     for (let i = 0; i < this.activeMessages.length; i++) {
       const msg = this.activeMessages[i];

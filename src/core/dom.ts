@@ -137,7 +137,7 @@ export const findPlayerContainerElement = async (
         }
       });
 
-      observer.observe(document.documentElement, {
+      observer.observe(document.body, {
         childList: true,
         subtree: true,
       });

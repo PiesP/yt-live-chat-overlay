@@ -645,7 +645,7 @@ export function renderRegularMessage(
       ? message.userColor
       : settings.colors[message.authorType];
 
-  ctx.save();
+  const prevAlpha = ctx.globalAlpha;
   ctx.globalAlpha = alpha;
 
   const showAuthor = settings.showAuthor[message.authorType];
@@ -706,5 +706,5 @@ export function renderRegularMessage(
     );
   }
 
-  ctx.restore();
+  ctx.globalAlpha = prevAlpha;
 }
