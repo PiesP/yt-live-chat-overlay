@@ -72,7 +72,7 @@ export class TranslationService {
   private pendingTarget: string | null = null;
   /** Consecutive translate() failures. On threshold, the translator is invalidated. */
   private consecutiveFailures = 0;
-  private static readonly MAX_CONSECUTIVE_FAILURES = 3;
+  private static readonly MAX_CONSECUTIVE_FAILURES = 6;
   /** Translation result cache to avoid re-translating repeated short text (e.g. "LOL", "ㅋㅋㅋ"). */
   private translationCache: Map<string, string> = new Map();
   private static readonly TRANSLATION_CACHE_MAX = 200;
@@ -234,11 +234,23 @@ export class TranslationService {
 
     // ── Auto-recovery: recreate translator if it died ─────────────────
     if (!this.translator && this.enabled && this.pendingSource && this.pendingTarget) {
-      log.info('Translator instance is dead — attempting auto-recovery…');
-      try {
-        await this.doConfigure(this.pendingSource, this.pendingTarget);
-      } catch {
-        // doConfigure already logs; if recovery fails, return null below.
+      // Don't stack recovery attempts — if a configure is already in-flight,
+      // wait for it and re-check. Prevents N concurrent callers from each
+      // spawning their own doConfigure().
+      if (this.configurePromise) {
+        await this.configurePromise;
+      }
+      // Re-check after waiting — the in-flight configure may have succeeded.
+      if (!this.translator) {
+        log.info('Translator instance is dead — attempting auto-recovery…');
+        this.configurePromise = this.doConfigure(this.pendingSource, this.pendingTarget);
+        try {
+          await this.configurePromise;
+        } catch {
+          // doConfigure already logs; if recovery fails, return null below.
+        } finally {
+          this.configurePromise = null;
+        }
       }
     }
 
