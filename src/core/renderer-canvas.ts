@@ -163,6 +163,15 @@ export class CanvasRenderer extends RendererBase {
   private pendingTranslations: Array<{ msg: CanvasMessage; text: string | null }> = [];
 
   /**
+   * OffscreenCanvas Web Worker for off-main-thread rendering.
+   * When active, the worker owns the render loop; the main thread
+   * handles message ingress, translation, and image loading only.
+   * Falls back to main-thread rendering when unavailable.
+   */
+  private renderWorker: Worker | null = null;
+  private useWorkerMode = false;
+
+  /**
    * Text bitmap cache: pre-rendered text with outline as offscreen canvas.
    * Key = `${font}|${text}|${color}|${strokeWidth}|${strokeColor}`.
    * On cache hit, drawImage() replaces fillText()+strokeText() in the hot path.
@@ -257,8 +266,13 @@ export class CanvasRenderer extends RendererBase {
       log.warn('Canvas created but not connected to DOM — renderer will be inactive');
     }
 
+    // Initialize OffscreenCanvas worker for off-main-thread rendering.
+    // Falls back silently to main-thread rendering when unavailable
+    // (e.g. missing APIs, CSP restrictions, build-time exclusion).
+    this.useWorkerMode = CanvasRenderer.tryInitRenderWorker(this, canvas, settings, overlay);
+
     const dims = overlay.getDimensions();
-    this.applyDevicePixelRatio(dims);
+    if (!this.useWorkerMode) this.applyDevicePixelRatio(dims);
 
     this.overlayDimensionsUnsubscribe = overlay.onDimensionsChanged((d) => {
       if (d && this.canvas) {
@@ -302,6 +316,11 @@ export class CanvasRenderer extends RendererBase {
 
   addMessage(message: ChatMessage): void {
     if (!this.isMessageAllowed(message)) return;
+    // Route to worker when off-main-thread rendering is active
+    if (this.useWorkerMode && this.renderWorker) {
+      this.sendToWorker(message);
+      return;
+    }
     this.enqueueMessage(message, true);
   }
 
@@ -1299,6 +1318,9 @@ export class CanvasRenderer extends RendererBase {
     const wasTranslationEnabled = this.settings.translationEnabled;
     super.updateSettings(settings, options);
 
+    // Sync settings to render worker when off-main-thread mode is active
+    this.syncWorkerSettings();
+
     // When translation is disabled, clear translated text from all active
     // messages so they revert to showing only the original text on the next frame.
     if (wasTranslationEnabled && !settings.translationEnabled) {
@@ -1343,6 +1365,7 @@ export class CanvasRenderer extends RendererBase {
 
   protected onDestroy(): void {
     this.stopRenderLoop();
+    this.destroyWorker();
     this.emojiCleanupIntervalId = clearSafeInterval(this.emojiCleanupIntervalId);
     this.overlayDimensionsUnsubscribe?.();
     this.canvas?.remove();
@@ -1388,5 +1411,160 @@ export class CanvasRenderer extends RendererBase {
     ctx.fillStyle = textFillStyle;
     ctx.fillText(message, dims.width / 2, boxY + boxH / 2);
     ctx.restore();
+  }
+
+  // ── Worker integration ────────────────────────────────────────────────
+
+  /** WorkerConfig keys subset of OverlaySettings for cross-thread transfer. */
+  private static readonly WORKER_CONFIG_KEYS: (keyof OverlaySettings)[] = [
+    'speedPxPerSec',
+    'fontSize',
+    'fontWeight',
+    'fontFamily',
+    'opacity',
+    'laneSpacing',
+    'safeTop',
+    'safeBottom',
+    'maxConcurrentMessages',
+    'danmakuMode',
+    'backlogSpeedMultiplier',
+    'depthLayersEnabled',
+    'depthFarSpeedMul',
+    'depthNearSpeedMul',
+    'depthFarOpacityMul',
+    'backlogOpacityMultiplier',
+    'fadeDurationMs',
+  ] as const;
+
+  /**
+   * Build a flat, serializable config object from OverlaySettings.
+   * Only includes keys needed by the render worker.
+   */
+  private static buildWorkerConfig(settings: OverlaySettings): Record<string, unknown> {
+    const config: Record<string, unknown> = {};
+    for (const key of CanvasRenderer.WORKER_CONFIG_KEYS) {
+      config[key] = settings[key];
+    }
+    config.outlineWidthPx = settings.outline.widthPx;
+    config.outlineOpacity = settings.outline.opacity;
+    config.color = settings.colors.normal;
+    return config;
+  }
+
+  /**
+   * Attempt to create and initialize the OffscreenCanvas render worker.
+   * Returns true if the worker was successfully started.
+   */
+  private static tryInitRenderWorker(
+    renderer: CanvasRenderer,
+    canvas: HTMLCanvasElement,
+    settings: OverlaySettings,
+    overlay: Overlay
+  ): boolean {
+    try {
+      if (typeof OffscreenCanvas === 'undefined') {
+        log.debug('OffscreenCanvas not available — using main-thread renderer');
+        return false;
+      }
+
+      const offscreen = canvas.transferControlToOffscreen();
+      const config = CanvasRenderer.buildWorkerConfig(settings);
+      const dims = overlay.getDimensions();
+
+      // Vite bundles this as a separate worker chunk
+      const workerUrl = new URL('./renderer-worker.ts', import.meta.url);
+      const worker = new Worker(workerUrl, { type: 'module' });
+
+      worker.onmessage = (e: MessageEvent) => {
+        const data = e.data as { type: string } & Record<string, unknown>;
+        switch (data.type) {
+          case 'ready':
+            log.info('Render worker started');
+            break;
+          case 'stats':
+            renderer.observability.updateActiveMessages((data.activeMessages as number) ?? 0);
+            break;
+          case 'error':
+            log.warn('Render worker error:', data.error);
+            break;
+        }
+      };
+
+      worker.onerror = (err) => {
+        log.warn('Render worker unhandled error:', err.message);
+      };
+
+      worker.postMessage(
+        {
+          type: 'init',
+          canvas: offscreen,
+          config,
+          width: dims?.width ?? 0,
+          height: dims?.height ?? 0,
+        },
+        [offscreen]
+      );
+
+      overlay.onDimensionsChanged((d) => {
+        if (d) worker.postMessage({ type: 'resize', width: d.width, height: d.height });
+      });
+
+      renderer.renderWorker = worker;
+      renderer.canvas = null; // owned by worker now
+      renderer.ctx = null;
+
+      log.info('Render worker initialized');
+      return true;
+    } catch (error: unknown) {
+      log.debug('Render worker unavailable — using main-thread renderer:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Send a message to the render worker for display.
+   * Serializes ChatMessage into lightweight cross-thread format.
+   */
+  private sendToWorker(message: ChatMessage): void {
+    if (!this.renderWorker) return;
+
+    const dims = this.estimateDimensions(message);
+
+    let text = '';
+    if (message.kind === 'text') {
+      text = message.content.map((s) => (s.type === 'text' ? s.content : s.emoji.alt)).join('');
+    }
+
+    this.renderWorker.postMessage({
+      type: 'addMessages',
+      messages: [
+        {
+          id: message.id ?? `${message.timestamp}-${Math.random()}`,
+          text,
+          width: dims.width,
+          height: dims.height,
+          priority: CanvasRenderer.getMessagePriority(message),
+          isBacklog: message.isBacklog ?? false,
+        },
+      ],
+    });
+  }
+
+  /** Send updated settings to the render worker. */
+  private syncWorkerSettings(): void {
+    if (!this.renderWorker) return;
+    this.renderWorker.postMessage({
+      type: 'updateConfig',
+      config: CanvasRenderer.buildWorkerConfig(this.settings),
+    });
+  }
+
+  /** Destroy the render worker. */
+  private destroyWorker(): void {
+    if (!this.renderWorker) return;
+    this.renderWorker.postMessage({ type: 'destroy' });
+    this.renderWorker.terminate();
+    this.renderWorker = null;
+    this.useWorkerMode = false;
   }
 }
