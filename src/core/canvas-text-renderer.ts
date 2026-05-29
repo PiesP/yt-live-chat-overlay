@@ -284,31 +284,37 @@ export function buildWrappedLines(
     const gap = prevIsText && piece.type === 'text' ? spaceWidth : 0;
     const needed = gap + piece.width;
 
-    if (currentLine.length > 0 && currentWidth + needed > maxWidth) {
-      // Oversize single word — character-level wrap (CJK etc.)
-      if (piece.type === 'text' && piece.width > maxWidth) {
+    // ── Oversize single word — character-level wrap (CJK, URLs, etc.) ──
+    // Must be checked BEFORE the line-overflow guard so that the first
+    // piece on an empty line (currentLine.length === 0) is also handled.
+    if (piece.type === 'text' && piece.width > maxWidth) {
+      // Flush current line if non-empty (same as normal overflow)
+      if (currentLine.length > 0) {
         maxLineWidth = Math.max(maxLineWidth, currentWidth);
         lines.push(currentLine);
-        const charPieces = wrapCharPieces(piece.text, font, maxWidth);
-        if (charPieces.length <= 1) {
-          currentLine = [piece];
-          currentWidth = piece.width;
-          prevIsText = true;
-          continue;
-        }
-        // Push all but the last char piece as their own lines
-        for (let i = 0; i < charPieces.length - 1; i++) {
-          const cp = charPieces[i] as TextRenderPiece;
-          lines.push([cp]);
-          maxLineWidth = Math.max(maxLineWidth, cp.width);
-        }
-        const lastPiece = charPieces[charPieces.length - 1] as TextRenderPiece;
-        currentLine = [lastPiece];
-        currentWidth = lastPiece.width;
+      }
+      const charPieces = wrapCharPieces(piece.text, font, maxWidth);
+      if (charPieces.length <= 1) {
+        currentLine = [piece];
+        currentWidth = piece.width;
         prevIsText = true;
         continue;
       }
+      // Push all but the last char piece as their own lines
+      for (let i = 0; i < charPieces.length - 1; i++) {
+        const cp = charPieces[i] as TextRenderPiece;
+        lines.push([cp]);
+        maxLineWidth = Math.max(maxLineWidth, cp.width);
+      }
+      const lastPiece = charPieces[charPieces.length - 1] as TextRenderPiece;
+      currentLine = [lastPiece];
+      currentWidth = lastPiece.width;
+      prevIsText = true;
+      continue;
+    }
 
+    // ── Normal line overflow (non-oversize piece) ──────────────────────
+    if (currentLine.length > 0 && currentWidth + needed > maxWidth) {
       // Start a new line with this piece
       maxLineWidth = Math.max(maxLineWidth, currentWidth);
       lines.push(currentLine);
