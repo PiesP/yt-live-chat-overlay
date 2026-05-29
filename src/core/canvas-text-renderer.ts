@@ -130,6 +130,8 @@ function renderSegment(
     }
 
     // Cache miss — render to offscreen canvas and cache
+    // LRU touch: delete existing key before re-inserting to move it to Map end
+    if (textBitmapCache.has(key)) textBitmapCache.delete(key);
     cacheTextBitmap(key, text, font, color, strokeWidth, strokeColor, ctx, textBitmapCache);
 
     // Immediately use the freshly cached bitmap to avoid fallthrough overhead

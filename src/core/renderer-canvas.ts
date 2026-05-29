@@ -63,8 +63,8 @@ interface CanvasMessage {
   translatedText?: string | null;
   /** Pre-computed desaturated color for Far-tier depth layer. */
   desaturatedUserColor?: string;
-  /** Pre-computed render message with desaturated user color (avoids per-frame spread). */
-  renderMessage?: ChatMessage;
+  /** Pre-computed render message (always set — either original or desaturated copy). */
+  renderMessage: ChatMessage;
 }
 
 interface CreateCanvasMessageParams {
@@ -97,6 +97,7 @@ function createCanvasMessage(params: CreateCanvasMessageParams): CanvasMessage {
     laneIndex: params.laneIndex ?? 0,
     staggerDelay,
     speedTier: params.speedTier ?? SPEED_TIER.MID,
+    renderMessage: message,
   };
 }
 
@@ -133,8 +134,12 @@ export class CanvasRenderer extends RendererBase {
   private canvas: HTMLCanvasElement | null = null;
   private ctx: CanvasRenderingContext2D | null = null;
   private animFrameId: number | null = null;
+  /** Pre-computed 1/maxMessageAgeMs to avoid per-frame division in opacity calc. */
+  private readonly ageFadeRate = 1 / rendererLayout.maxMessageAgeMs;
   private overlayDimensionsUnsubscribe: (() => void) | null = null;
   private emojiCleanupIntervalId: ReturnType<typeof setInterval> | null = null;
+  /** Debounce flag for emoji-load-triggered rAF restarts. */
+  private needsRerender = false;
 
   private readonly activeMessages: CanvasMessage[] = [];
   private readonly pendingQueue: ChatMessage[] = [];
@@ -175,7 +180,7 @@ export class CanvasRenderer extends RendererBase {
    * Text bitmap cache: pre-rendered text with outline as offscreen canvas.
    * Key = `${font}|${text}|${color}|${strokeWidth}|${strokeColor}`.
    * On cache hit, drawImage() replaces fillText()+strokeText() in the hot path.
-   * Bounded to 200 entries (LRU eviction) to prevent unbounded memory growth
+   * Bounded to 200 entries (FIFO eviction with LRU touch on re-insert) to prevent unbounded memory growth
    * in long-running streams.
    */
   private readonly textBitmapCache = new Map<string, HTMLCanvasElement>();
@@ -463,8 +468,15 @@ export class CanvasRenderer extends RendererBase {
 
         // Trigger an immediate render frame so the emoji appears within
         // ~1 frame instead of waiting for the next natural rAF tick.
-        // Skip if paused — the render loop would just return immediately.
-        if (this.animFrameId !== null && !this.isPaused && !this.isVideoPaused) {
+        // Skip if paused or already pending — multiple concurrent emoji loads
+        // share a single rAF restart via the needsRerender debounce flag.
+        if (
+          this.animFrameId !== null &&
+          !this.isPaused &&
+          !this.isVideoPaused &&
+          !this.needsRerender
+        ) {
+          this.needsRerender = true;
           this.animFrameId = clearSafeAnimationFrame(this.animFrameId);
           this.startRenderLoop();
         }
@@ -558,6 +570,9 @@ export class CanvasRenderer extends RendererBase {
     if (!canvas.isConnected) return;
     if (this.isPaused) return;
     if (this.isVideoPaused) return;
+
+    // Reset emoji-load debounce flag — any pending rAF restart has landed
+    this.needsRerender = false;
 
     const now = performance.now();
     const dims = this.overlay.getDimensions();
@@ -653,8 +668,8 @@ export class CanvasRenderer extends RendererBase {
       const snappedX = Math.floor(msg.x);
       const snappedY = Math.floor(msg.y);
 
-      // Use pre-computed renderMessage (avoids per-frame object spread)
-      const renderMessage = msg.renderMessage ?? msg.message;
+      // renderMessage is always set in activateMessage (avoids per-frame nullish coalescing)
+      const renderMessage = msg.renderMessage;
 
       // When in replace mode and translation is available, skip original text rendering
       // for rich card types (SuperChat/Membership), which are never translated.
@@ -1093,6 +1108,9 @@ export class CanvasRenderer extends RendererBase {
         CanvasRenderer.FAR_LAYER_DESATURATION_FACTOR
       );
       cm.renderMessage = { ...message, userColor: cm.desaturatedUserColor };
+    } else {
+      // Avoid per-frame nullish coalescing in renderFrame — ensure renderMessage is always set
+      cm.renderMessage = message;
     }
 
     this.activeMessages.push(cm);
@@ -1306,7 +1324,8 @@ export class CanvasRenderer extends RendererBase {
     }
 
     // Age fade-out: gradually fade after maxMessageAgeMs (default 60s)
-    const ageRatio = Math.min(1, elapsed / rendererLayout.maxMessageAgeMs);
+    // Pre-computed multiplication avoids per-frame division (~3000x/sec savings)
+    const ageRatio = Math.min(1, elapsed * this.ageFadeRate);
     opacity *= Math.max(0, 1 - ageRatio);
 
     return opacity;
