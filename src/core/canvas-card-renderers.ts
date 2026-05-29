@@ -52,7 +52,7 @@ export function renderSuperChatCard(
   const w = msgWidth;
   const h = msgHeight;
 
-  const prevAlpha = ctx.globalAlpha;
+  ctx.save();
   ctx.globalAlpha = alpha;
 
   const {
@@ -165,7 +165,7 @@ export function renderSuperChatCard(
     }
   }
 
-  ctx.globalAlpha = prevAlpha;
+  ctx.restore();
 }
 
 // ── Membership card ──────────────────────────────────────────────────────────
@@ -191,7 +191,7 @@ export function renderMembershipCard(
   const h = msgHeight;
   const mem = designColors.membership;
 
-  const memPrevAlpha = ctx.globalAlpha;
+  ctx.save();
   ctx.globalAlpha = alpha;
 
   ctx.fillStyle = `rgba(${mem.background.r}, ${mem.background.g}, ${mem.background.b}, ${mem.backgroundAlpha})`;
@@ -243,5 +243,5 @@ export function renderMembershipCard(
     );
   }
 
-  ctx.globalAlpha = memPrevAlpha;
+  ctx.restore();
 }
