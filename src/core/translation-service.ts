@@ -65,6 +65,8 @@ export class TranslationService {
   private enabled = false;
   /** Serializes configure() calls to prevent overlapping translator creation. */
   private configurePromise: Promise<void> | null = null;
+  /** Serializes translate() calls — prevents concurrent failures from cascading. */
+  private translateMutex: Promise<void> | null = null;
   /** Pending source/target from the most recent configure() for retry. */
   private pendingSource: string | null = null;
   private pendingTarget: string | null = null;
@@ -212,21 +214,45 @@ export class TranslationService {
 
   /**
    * Translate text. Returns the translation or null on failure.
-   * Sequential — one call at a time.
    *
-   * Tracks consecutive failures. After MAX_CONSECUTIVE_FAILURES the
-   * translator instance is invalidated and pending source/target are
-   * preserved so the next configure() or onUserActivation() call
-   * recreates it. This recovers from translator death (model unload,
-   * memory pressure, input quota exhaustion) without user intervention.
+   * Serialized via internal mutex — only one translation is in-flight at a
+   * time to prevent concurrent failures from instantly hitting the
+   * MAX_CONSECUTIVE_FAILURES threshold and destroying the translator.
+   *
+   * When the translator instance dies (destroyed after consecutive failures),
+   * the next call automatically attempts recovery by recreating it via
+   * doConfigure() with the preserved language pair. This means translations
+   * resume without requiring user interaction (settings change, click).
    */
   async translate(text: string): Promise<string | null> {
-    if (!this.translator) return null;
+    // ── Serialize: wait for any in-flight translation to complete ─────
+    if (this.translateMutex) {
+      await this.translateMutex;
+    }
+
     if (!text.trim()) return text;
 
-    // Check cache before calling the API
+    // ── Auto-recovery: recreate translator if it died ─────────────────
+    if (!this.translator && this.enabled && this.pendingSource && this.pendingTarget) {
+      log.info('Translator instance is dead — attempting auto-recovery…');
+      try {
+        await this.doConfigure(this.pendingSource, this.pendingTarget);
+      } catch {
+        // doConfigure already logs; if recovery fails, return null below.
+      }
+    }
+
+    if (!this.translator) return null;
+
+    // ── Check cache before calling the API ────────────────────────────
     const cached = this.translationCache.get(text);
     if (cached !== undefined) return cached;
+
+    // ── Execute translation under mutex ───────────────────────────────
+    let resolveMutex: (() => void) | undefined;
+    this.translateMutex = new Promise<void>((resolve) => {
+      resolveMutex = resolve;
+    });
 
     try {
       const result = await this.translator.translate(text);
@@ -270,6 +296,9 @@ export class TranslationService {
         log.debug('Translation failed:', err);
       }
       return null;
+    } finally {
+      resolveMutex?.();
+      this.translateMutex = null;
     }
   }
 
@@ -293,6 +322,7 @@ export class TranslationService {
     this.pendingTarget = null;
     this.enabled = false;
     this.consecutiveFailures = 0;
+    this.translateMutex = null;
     this.translationCache.clear();
   }
 }
