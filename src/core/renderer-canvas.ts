@@ -63,6 +63,8 @@ interface CanvasMessage {
   translatedText?: string | null;
   /** Pre-computed desaturated color for Far-tier depth layer. */
   desaturatedUserColor?: string;
+  /** Pre-computed render message with desaturated user color (avoids per-frame spread). */
+  renderMessage?: ChatMessage;
 }
 
 interface CreateCanvasMessageParams {
@@ -606,10 +608,8 @@ export class CanvasRenderer extends RendererBase {
       const snappedX = Math.floor(msg.x);
       const snappedY = Math.floor(msg.y);
 
-      // Apply atmospheric perspective to Far layer: desaturate author colors
-      const renderMessage = msg.desaturatedUserColor
-        ? { ...msg.message, userColor: msg.desaturatedUserColor }
-        : msg.message;
+      // Use pre-computed renderMessage (avoids per-frame object spread)
+      const renderMessage = msg.renderMessage ?? msg.message;
 
       // When in replace mode and translation is available, skip original text rendering
       // for rich card types (SuperChat/Membership), which are never translated.
@@ -1024,6 +1024,7 @@ export class CanvasRenderer extends RendererBase {
         message.userColor,
         CanvasRenderer.FAR_LAYER_DESATURATION_FACTOR
       );
+      cm.renderMessage = { ...message, userColor: cm.desaturatedUserColor };
     }
 
     this.activeMessages.push(cm);

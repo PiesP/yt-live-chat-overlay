@@ -71,6 +71,9 @@ export class TranslationService {
   /** Consecutive translate() failures. On threshold, the translator is invalidated. */
   private consecutiveFailures = 0;
   private static readonly MAX_CONSECUTIVE_FAILURES = 3;
+  /** Translation result cache to avoid re-translating repeated short text (e.g. "LOL", "ㅋㅋㅋ"). */
+  private translationCache: Map<string, string> = new Map();
+  private static readonly TRANSLATION_CACHE_MAX = 200;
 
   /** Call this when settings change to reconfigure the translator. */
   async configure(settings: {
@@ -221,9 +224,23 @@ export class TranslationService {
     if (!this.translator) return null;
     if (!text.trim()) return text;
 
+    // Check cache before calling the API
+    const cached = this.translationCache.get(text);
+    if (cached !== undefined) return cached;
+
     try {
       const result = await this.translator.translate(text);
       this.consecutiveFailures = 0;
+
+      // Cache the result with LRU eviction
+      this.translationCache.set(text, result);
+      if (this.translationCache.size > TranslationService.TRANSLATION_CACHE_MAX) {
+        const firstKey = this.translationCache.keys().next().value;
+        if (firstKey !== undefined) {
+          this.translationCache.delete(firstKey);
+        }
+      }
+
       return result;
     } catch (err) {
       this.consecutiveFailures++;
@@ -276,5 +293,6 @@ export class TranslationService {
     this.pendingTarget = null;
     this.enabled = false;
     this.consecutiveFailures = 0;
+    this.translationCache.clear();
   }
 }

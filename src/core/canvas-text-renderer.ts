@@ -136,6 +136,13 @@ function renderSegment(
 
     // Cache miss — render to offscreen canvas and cache
     cacheTextBitmap(key, text, font, color, strokeWidth, strokeColor, ctx, textBitmapCache);
+
+    // Immediately use the freshly cached bitmap to avoid fallthrough overhead
+    const freshBitmap = textBitmapCache.get(key);
+    if (freshBitmap) {
+      ctx.drawImage(freshBitmap, x, y);
+      return;
+    }
   }
 
   // Fallback: direct fillText + strokeText
