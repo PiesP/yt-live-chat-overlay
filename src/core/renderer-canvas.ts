@@ -142,6 +142,8 @@ export class CanvasRenderer extends RendererBase {
   private needsRerender = false;
 
   private readonly activeMessages: CanvasMessage[] = [];
+  /** Lane-indexed active messages for O(1) lane-scoped collision checks. */
+  private readonly activeMessagesByLane = new Map<number, CanvasMessage[]>();
   private readonly pendingQueue: ChatMessage[] = [];
   private pendingQueueOffset = 0;
   private readonly retryQueue: ChatMessage[] = [];
@@ -601,6 +603,18 @@ export class CanvasRenderer extends RendererBase {
     const newLength = cleanupExpiredMessages(this.activeMessages, now);
     if (newLength < this.activeMessages.length) {
       this.activeMessages.length = newLength;
+      // Rebuild lane index after compaction — expired messages are removed
+      this.activeMessagesByLane.clear();
+      for (let i = 0; i < newLength; i++) {
+        const msg = this.activeMessages[i];
+        if (!msg) continue;
+        let laneList = this.activeMessagesByLane.get(msg.laneIndex);
+        if (!laneList) {
+          laneList = [];
+          this.activeMessagesByLane.set(msg.laneIndex, laneList);
+        }
+        laneList.push(msg);
+      }
       this.observability.updateActiveMessages(this.activeMessages.length);
       this.observability.updateQueueDepth(this.pendingQueue.length);
     }
@@ -886,15 +900,24 @@ export class CanvasRenderer extends RendererBase {
     const newLaneY = placement.laneY + placement.verticalOffset;
     const laneHeight = this.laneAllocator.getLaneHeight();
 
-    // Check active messages in reverse (newest first) for early exit on collision.
-    for (let i = this.activeMessages.length - 1; i >= 0; i--) {
-      const active = this.activeMessages[i];
+    // Check active messages in the target lane and adjacent lanes (reverse/newest first).
+    // Lane-scoped scan: instead of O(all activeMessages), only check messages within
+    // vertical overlap range (laneIndex ± 1). For n=100 messages, this scans ~10 instead of ~100.
+    const adjacentMessages: CanvasMessage[] = [];
+    for (let li = placement.laneIndex - 1; li <= placement.laneIndex + 1; li++) {
+      const laneMsgs = this.activeMessagesByLane.get(li);
+      if (laneMsgs) {
+        for (const m of laneMsgs) adjacentMessages.push(m);
+      }
+    }
+    // Scan newest-first for early collision exit
+    for (let i = adjacentMessages.length - 1; i >= 0; i--) {
+      const active = adjacentMessages[i];
       if (!active) continue;
       const activeElapsed = now - active.startTime - active.pausedDuration;
       if (activeElapsed < 0) continue; // not yet started
 
       // Vertical overlap: check if the two messages occupy the same vertical space.
-      // Use lane-height granularity to account for padding/spacing.
       const verticalGap = Math.abs(active.y - newLaneY);
       if (verticalGap >= laneHeight) continue; // different lanes, no overlap
 
@@ -1114,6 +1137,13 @@ export class CanvasRenderer extends RendererBase {
     }
 
     this.activeMessages.push(cm);
+    // Maintain lane-index for O(1) collision checks
+    let laneList = this.activeMessagesByLane.get(cm.laneIndex);
+    if (!laneList) {
+      laneList = [];
+      this.activeMessagesByLane.set(cm.laneIndex, laneList);
+    }
+    laneList.push(cm);
     this.observability.onMessageRendered();
 
     // Trigger async translation for enabled messages.
@@ -1376,6 +1406,7 @@ export class CanvasRenderer extends RendererBase {
 
   protected resetState(): void {
     this.activeMessages.length = 0;
+    this.activeMessagesByLane.clear();
     this.pendingQueue.length = 0;
     this.backlogPaused = false;
     clearTextMeasurementCaches();
