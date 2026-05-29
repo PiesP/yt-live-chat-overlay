@@ -48,6 +48,8 @@ interface CanvasMessage {
   message: ChatMessage;
   startTime: number;
   duration: number;
+  /** Pre-computed 1/duration to avoid per-frame division in progress calc. */
+  invDuration: number;
   width: number;
   height: number;
   startX: number;
@@ -88,6 +90,7 @@ function createCanvasMessage(params: CreateCanvasMessageParams): CanvasMessage {
     message,
     startTime: now + staggerDelay,
     duration,
+    invDuration: 1 / Math.max(1, duration),
     width: msgWidth,
     height: msgHeight,
     startX,
@@ -136,6 +139,8 @@ export class CanvasRenderer extends RendererBase {
   private animFrameId: number | null = null;
   /** Pre-computed 1/maxMessageAgeMs to avoid per-frame division in opacity calc. */
   private readonly ageFadeRate = 1 / rendererLayout.maxMessageAgeMs;
+  /** Pre-computed 1/fadeDurationMs, updated on settings change. */
+  private invFadeDuration = 1 / Math.max(1, 200);
   private overlayDimensionsUnsubscribe: (() => void) | null = null;
   private emojiCleanupIntervalId: ReturnType<typeof setInterval> | null = null;
   /** Debounce flag for emoji-load-triggered rAF restarts. */
@@ -661,7 +666,7 @@ export class CanvasRenderer extends RendererBase {
       // Skip messages still in stagger delay period (haven't visually started)
       if (elapsed < 0) continue;
 
-      const progress = Math.min(1, Math.max(0, elapsed / msg.duration));
+      const progress = Math.min(1, Math.max(0, elapsed * msg.invDuration));
 
       if (mode === 'scroll') {
         const travelDistance = msg.startX + msg.width + rendererLayout.exitPaddingMin;
@@ -937,7 +942,7 @@ export class CanvasRenderer extends RendererBase {
         // preventing the faster chaser from visually crossing through.
         const headwayPx = this.computeHeadwayPx(active.width, active.speedTier, speedTier);
         const travelDistance = active.startX + active.width + rendererLayout.exitPaddingMin;
-        const activeProgress = Math.min(1, activeElapsed / active.duration);
+        const activeProgress = Math.min(1, activeElapsed * active.invDuration);
         const activeRightEdge = active.startX - activeProgress * travelDistance + active.width;
 
         // The new message starts at the right edge (or left for reverse).
@@ -1375,10 +1380,10 @@ export class CanvasRenderer extends RendererBase {
     const fadeDuration = this.settings.fadeDurationMs;
     if (fadeDuration > 0) {
       if (elapsed < fadeDuration) {
-        opacity *= elapsed / fadeDuration;
+        opacity *= elapsed * this.invFadeDuration;
       }
       if (!isScrolling && elapsed > duration - fadeDuration) {
-        opacity *= Math.max(0, (duration - elapsed) / fadeDuration);
+        opacity *= Math.max(0, (duration - elapsed) * this.invFadeDuration);
       }
     }
 
@@ -1407,6 +1412,8 @@ export class CanvasRenderer extends RendererBase {
     // When settings change, cached dimensions become stale
     // (font, size, weight, family, maxBodyLines all affect dimension calculation).
     this.dimensionCache.clear();
+    // Pre-compute 1/fadeDurationMs to avoid per-frame divisions in opacity calc
+    this.invFadeDuration = 1 / Math.max(1, settings.fadeDurationMs);
 
     // Sync settings to render worker when off-main-thread mode is active
     this.syncWorkerSettings();
