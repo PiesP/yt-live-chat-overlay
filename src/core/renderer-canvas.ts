@@ -565,6 +565,22 @@ export class CanvasRenderer extends RendererBase {
         return;
       }
       this.renderFrame();
+      // Stop the render loop when there is no work to do — no visible
+      // messages, no queued messages, not in standby. This eliminates
+      // wasted 60fps rAF cycles when the stream has no chat activity.
+      // The loop is restarted by:
+      //   - enqueueMessage (queue 0→1 transition)
+      //   - setStandbyStatus(true)
+      //   - onResume (tab visibility or video unpause)
+      //   - emoji/sticker load callbacks (via needsRerender flag)
+      if (
+        this.activeMessages.length === 0 &&
+        this.pendingQueue.length === 0 &&
+        !this.standbyStatus
+      ) {
+        this.animFrameId = null;
+        return;
+      }
       this.animFrameId = requestAnimationFrame(loop);
     };
     this.animFrameId = requestAnimationFrame(loop);
