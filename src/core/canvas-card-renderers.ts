@@ -29,12 +29,10 @@ import { getFontString } from '@core/text-measure';
 
 // ── SuperChat card ───────────────────────────────────────────────────────────
 
-/** Gradients cached by `${baseColor}|${h}|${topAlpha}|${scAlpha}|${bottomAlpha}` to avoid per-frame allocation. */
-const superChatGradientCache = new Map<string, CanvasGradient>();
-
 /** Get or create a cached SuperChat background gradient (relative to origin). */
 function getSuperChatGradient(
   ctx: CanvasRenderingContext2D,
+  cache: Map<string, CanvasGradient>,
   baseColor: string,
   h: number,
   topAlpha: number,
@@ -42,13 +40,13 @@ function getSuperChatGradient(
   bottomAlpha: number
 ): CanvasGradient {
   const key = `${baseColor}|${h}|${topAlpha}|${scAlpha}|${bottomAlpha}`;
-  const cached = superChatGradientCache.get(key);
+  const cached = cache.get(key);
   if (cached) return cached;
   const grad = ctx.createLinearGradient(0, 0, 0, h);
   grad.addColorStop(0, toRgba(baseColor, topAlpha));
   grad.addColorStop(0.48, toRgba(baseColor, scAlpha));
   grad.addColorStop(1, toRgba(baseColor, bottomAlpha));
-  superChatGradientCache.set(key, grad);
+  cache.set(key, grad);
   return grad;
 }
 
@@ -66,7 +64,8 @@ export function renderSuperChatCard(
   authorPhotoCache: Map<string, HTMLImageElement>,
   stickerCache: Map<string, HTMLImageElement>,
   emojiCache: Map<string, HTMLImageElement>,
-  getFontFn: (fontSize: number) => string
+  getFontFn: (fontSize: number) => string,
+  superChatGradientCache: Map<string, CanvasGradient>
 ): void {
   const superChat = message.superChat;
   if (!superChat) return;
@@ -88,7 +87,15 @@ export function renderSuperChatCard(
   const textColor = computeReadableTextColor(baseColor);
 
   // Background gradient (cached per color/dimension to avoid per-frame allocation)
-  const grad = getSuperChatGradient(ctx, baseColor, h, topAlpha, scAlpha, bottomAlpha);
+  const grad = getSuperChatGradient(
+    ctx,
+    superChatGradientCache,
+    baseColor,
+    h,
+    topAlpha,
+    scAlpha,
+    bottomAlpha
+  );
   ctx.save();
   ctx.translate(x, y);
   ctx.fillStyle = grad;

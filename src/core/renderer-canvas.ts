@@ -191,6 +191,7 @@ export class CanvasRenderer extends RendererBase {
    * in long-running streams.
    */
   private readonly textBitmapCache = new Map<string, HTMLCanvasElement>();
+  private readonly superChatGradientCache = new Map<string, CanvasGradient>();
 
   /** Cached message dimensions by message ID. Cleared on settings change. */
   private readonly dimensionCache = new Map<string, { width: number; height: number }>();
@@ -729,7 +730,8 @@ export class CanvasRenderer extends RendererBase {
               this.authorPhotoCache,
               this.stickerCache,
               this.emojiCache,
-              (fs) => this.getFont(fs)
+              (fs) => this.getFont(fs),
+              this.superChatGradientCache
             );
           } else if (msg.message.kind === 'membership') {
             renderMembershipCard(
@@ -910,9 +912,11 @@ export class CanvasRenderer extends RendererBase {
 
     // Check active messages in the target lane and adjacent lanes (reverse/newest first).
     // Lane-scoped scan: instead of O(all activeMessages), only check messages within
-    // vertical overlap range (laneIndex ± 1). For n=100 messages, this scans ~10 instead of ~100.
+    // vertical overlap range. For single-slot messages: laneIndex ± 1.
+    // For multi-slot messages: laneIndex-1 through laneIndex+slotCount covers all covered lanes.
     const adjacentMessages: CanvasMessage[] = [];
-    for (let li = placement.laneIndex - 1; li <= placement.laneIndex + 1; li++) {
+    const scanEnd = placement.laneIndex + placement.slotCount;
+    for (let li = placement.laneIndex - 1; li <= scanEnd; li++) {
       const laneMsgs = this.activeMessagesByLane.get(li);
       if (laneMsgs) {
         for (const m of laneMsgs) adjacentMessages.push(m);
@@ -1476,6 +1480,9 @@ export class CanvasRenderer extends RendererBase {
     this.authorPhotoCache.clear();
     this.stickerCache.clear();
     this.textBitmapCache.clear();
+    this.superChatGradientCache.clear();
+    this.dimensionCache.clear();
+    this.activeMessagesByLane.clear();
     this.translationService.destroy();
     clearTextMeasurementCaches();
   }
