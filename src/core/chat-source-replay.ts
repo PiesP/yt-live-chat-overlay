@@ -12,15 +12,7 @@
 import { extractChatEvents } from '@core/chat-message-parser';
 import type { PlaybackSnapshot } from '@core/chat-source-base';
 import { ChatSource } from '@core/chat-source-base';
-import {
-  clearSafeAnimationFrame,
-  clearSafeInterval,
-  findElementMatch,
-  isAbortError,
-  sleep,
-  throwIfAborted,
-  VIDEO_SELECTORS,
-} from '@core/dom';
+import { findElementMatch, isAbortError, throwIfAborted, VIDEO_SELECTORS } from '@core/dom';
 import { createLogger } from '@core/logging';
 import { ReplayBuffer } from '@core/replay-buffer';
 import type { LiveChatPayload } from '@core/youtubei-chat';
@@ -39,12 +31,12 @@ const REPLAY_FAILURE_BACKOFF_MS = 5000;
 const REPLAY_PREFETCH_WINDOW_MS = 5000;
 const BACKGROUND_FETCH_INTERVAL_MS = 1000;
 const RAF_FLUSH_BATCH_SIZE = 5;
+const MAX_PREFETCH_PAGES = 200;
 
 type ReplayMode = 'playerSeek' | 'continuation';
 
 export class ReplayChatSource extends ChatSource {
   private static readonly MAX_REPLAY_BATCHES = 12;
-  private static readonly BG_FETCH_MAX_FAILURES = 5;
 
   private replayMode: ReplayMode | null = null;
   private replayPlayerSeekContinuation: InnertubeContinuationData | null = null;
@@ -56,30 +48,27 @@ export class ReplayChatSource extends ChatSource {
   private replayBuffer = new ReplayBuffer();
   private seekListenerCleanup: (() => void) | null = null;
   private seekSignal: AbortSignal | null = null;
-  private rafHandle: ReturnType<typeof requestAnimationFrame> | null = null;
-  private backgroundFetchTimer: ReturnType<typeof setInterval> | null = null;
-  private backgroundFetchFailures = 0;
-  private prefetchAbortController: AbortController | null = null;
+  private cooperativeLoopTimer: ReturnType<typeof setTimeout> | null = null;
+  private cooperativeLoopRunning = false;
+  private prefetchContinuation: InnertubeContinuationData | null = null;
+  private prefetchPagesFetched = 0;
+  private prefetchMode: ReplayMode | null = null;
+  private prefetchBackoffUntil = 0;
 
   protected seedCurrentSession(signal?: AbortSignal): Promise<boolean> {
     return this.initializeReplaySession(signal);
   }
 
   protected launchCurrentPollLoop(signal?: AbortSignal): void {
-    this.startRafFlush(signal);
-    this.startBackgroundFetch(signal);
-    this.startPrefetch(signal);
+    this.startCooperativeLoop(signal);
     this.installSeekListeners(signal);
   }
 
   /**
-   * Override health check to reflect rAF flush loop lifetime.
-   * The rAF flush loop and callback are the primary liveness indicators.
-   * Background fetch and prefetch are secondary data sources — their
-   * absence does not mean the observer is dead (buffer may still drain).
+   * Override health check to reflect cooperative loop lifetime.
    */
   protected isObserverAlive(): boolean {
-    return this.rafHandle !== null && this.callback !== null;
+    return this.cooperativeLoopRunning && this.callback !== null;
   }
 
   /**
@@ -107,162 +96,153 @@ export class ReplayChatSource extends ChatSource {
     this.resetReplayState();
   }
 
-  // ── rAF flush loop ──────────────────────────────────────────────────────
+  // ── Cooperative loop (unified flush + fetch + prefetch) ─────────────────
 
   /**
-   * Start a requestAnimationFrame loop that flushes replay messages
-   * at the exact video playback position every frame (~16ms precision).
+   * Start a single cooperative tick loop that:
+   *   1. Flushes buffered replay messages at playback position
+   *   2. Fetches more replay pages when the buffer needs data
+   *   3. Prefetches continuation pages in the background
+   *
+   * Replaces the previous 3 independent schedulers (rAF flush, background
+   * fetch interval, async prefetch walk) with one setTimeout-driven loop.
    */
-  private startRafFlush(signal?: AbortSignal): void {
-    this.stopRafFlush();
+  private startCooperativeLoop(signal?: AbortSignal): void {
+    this.stopCooperativeLoop();
 
-    const tick = (): void => {
+    // Initialize prefetch state from current shared continuations
+    if (this.replayMode) {
+      this.prefetchContinuation =
+        this.replayMode === 'playerSeek'
+          ? this.replayPlayerSeekContinuation
+          : this.replayContinuation;
+      this.prefetchPagesFetched = 0;
+      this.prefetchMode = this.replayMode;
+      this.prefetchBackoffUntil = 0;
+    }
+
+    this.cooperativeLoopRunning = true;
+
+    const tick = async (): Promise<void> => {
       if (signal?.aborted) {
-        this.rafHandle = null;
+        this.cooperativeLoopRunning = false;
+        this.cooperativeLoopTimer = null;
         return;
       }
 
+      // 1. If paused, reschedule at background rate and skip work
       if (this.chatPaused) {
-        this.rafHandle = requestAnimationFrame(tick);
+        this.cooperativeLoopTimer = setTimeout(tick, BACKGROUND_FETCH_INTERVAL_MS);
         return;
       }
 
       const playback = this.getPlaybackSnapshot();
-      if (playback && !playback.paused) {
+      const isPlaying = playback && !playback.paused;
+
+      // 2. Flush: emit messages whose video time has arrived
+      if (isPlaying) {
         this.markActivity();
         this.flushReplayBuffer(playback.offsetMs);
       }
 
-      this.rafHandle = requestAnimationFrame(tick);
-    };
-
-    this.rafHandle = requestAnimationFrame(tick);
-  }
-
-  private stopRafFlush(): void {
-    this.rafHandle = clearSafeAnimationFrame(this.rafHandle);
-  }
-
-  // ── Background fetch ────────────────────────────────────────────────────
-
-  /**
-   * Periodically fetch new replay pages from YouTube so the buffer
-   * stays ahead of the playback position.
-   *
-   * In a future phase this will be replaced by a full-chat prefetch
-   * that walks the entire continuation chain in advance.
-   */
-  private startBackgroundFetch(signal?: AbortSignal): void {
-    this.stopBackgroundFetch();
-    this.backgroundFetchFailures = 0;
-
-    this.backgroundFetchTimer = setInterval(() => {
-      if (signal?.aborted) {
-        this.stopBackgroundFetch();
-        return;
-      }
-
-      if (this.chatPaused) return;
-
-      const playback = this.getPlaybackSnapshot();
-      if (!playback || playback.paused) return;
-
-      void (async () => {
+      // 3. Fetch: if buffer needs more pages, call the appropriate poll method
+      if (isPlaying) {
         try {
           if (this.replayMode === 'playerSeek') {
             await this.pollPlayerSeekReplay(playback, signal);
           } else if (this.replayMode === 'continuation') {
             await this.pollContinuationReplay(playback.offsetMs, signal);
           }
-          this.backgroundFetchFailures = 0;
         } catch (error: unknown) {
           if (!isAbortError(error)) {
-            this.backgroundFetchFailures += 1;
-            log.warn('Background fetch iteration failed:', error);
-            if (this.backgroundFetchFailures >= ReplayChatSource.BG_FETCH_MAX_FAILURES) {
-              log.error('Background fetch failed repeatedly — stopping');
-              this.stopBackgroundFetch();
-            }
+            log.warn('Fetch iteration failed:', error);
           }
         }
-      })();
-    }, BACKGROUND_FETCH_INTERVAL_MS);
+      }
+
+      // 4. Prefetch: walk the continuation chain, one page per tick
+      if (
+        this.prefetchContinuation &&
+        this.prefetchPagesFetched < MAX_PREFETCH_PAGES &&
+        !signal?.aborted &&
+        Date.now() >= this.prefetchBackoffUntil
+      ) {
+        try {
+          const payload = await this.requestReplayPayload(this.prefetchContinuation, signal);
+          if (payload) {
+            const events = extractChatEvents(payload.actions, this.getSettings);
+            this.replayBuffer.appendEvents(events, -1);
+            this.markActivity();
+            this.prefetchContinuation =
+              this.prefetchMode === 'playerSeek'
+                ? extractPlayerSeekContinuation(payload.continuations)
+                : extractReplayContinuation(payload.continuations);
+            this.prefetchPagesFetched += 1;
+          } else {
+            this.prefetchContinuation = null;
+          }
+        } catch (error: unknown) {
+          if (isAbortError(error)) {
+            this.prefetchContinuation = null;
+          } else {
+            log.warn('Prefetch page failed:', error);
+            this.prefetchBackoffUntil = Date.now() + 5000;
+          }
+        }
+      }
+
+      // 5. Schedule next tick with adaptive delay
+      const hasPendingFlushes = !this.replayBuffer.isEmpty;
+      const adaptiveDelay = hasPendingFlushes ? 16 : BACKGROUND_FETCH_INTERVAL_MS;
+
+      if (!signal?.aborted && this.cooperativeLoopRunning) {
+        this.cooperativeLoopTimer = setTimeout(tick, adaptiveDelay);
+      }
+    };
+
+    // Fire first tick immediately (after next microtask)
+    this.cooperativeLoopTimer = setTimeout(tick, 0);
+  }
+
+  private stopCooperativeLoop(): void {
+    if (this.cooperativeLoopTimer !== null) {
+      clearTimeout(this.cooperativeLoopTimer);
+      this.cooperativeLoopTimer = null;
+    }
+    this.cooperativeLoopRunning = false;
+  }
+
+  private stopRafFlush(): void {
+    this.stopCooperativeLoop();
   }
 
   private stopBackgroundFetch(): void {
-    this.backgroundFetchTimer = clearSafeInterval(this.backgroundFetchTimer);
+    this.stopCooperativeLoop();
   }
 
-  // ── Background prefetch ──────────────────────────────────────────────────
+  /** Reset prefetch state — cooperative loop will skip the prefetch step. */
+  private stopPrefetch(): void {
+    this.prefetchContinuation = null;
+    this.prefetchPagesFetched = 0;
+    this.prefetchMode = null;
+    this.prefetchBackoffUntil = 0;
+  }
 
   /**
-   * Start a full-chat prefetch that walks the entire continuation chain
-   * after session init.  Runs at 1 req/s in the background, buffering all
-   * messages regardless of playback position so seeking is instant.
-   *
-   * The prefetch uses its own continuation tracking — it does not mutate
-   * the shared continuation fields used by the background fetch interval.
+   * Initialize prefetch state from current shared continuations.
+   * The cooperative loop picks this up on its next tick.
    */
-  private startPrefetch(_signal?: AbortSignal): void {
+  private startPrefetch(): void {
     this.stopPrefetch();
+    if (!this.replayMode) return;
 
-    const continuation =
+    this.prefetchContinuation =
       this.replayMode === 'playerSeek'
         ? this.replayPlayerSeekContinuation
         : this.replayContinuation;
-
-    if (!continuation || !this.replayMode) return;
-
-    this.prefetchAbortController = new AbortController();
-    void this.prefetchFullChat(continuation, this.replayMode, this.prefetchAbortController.signal);
-  }
-
-  private stopPrefetch(): void {
-    this.prefetchAbortController?.abort();
-    this.prefetchAbortController = null;
-  }
-
-  private async prefetchFullChat(
-    initialContinuation: InnertubeContinuationData,
-    mode: ReplayMode,
-    signal?: AbortSignal
-  ): Promise<void> {
-    let pages = 0;
-    const MAX_PREFETCH_PAGES = 200;
-    let continuation: InnertubeContinuationData | null = initialContinuation;
-
-    while (continuation && pages < MAX_PREFETCH_PAGES && !signal?.aborted) {
-      if (pages > 0) {
-        await sleep(1000, signal);
-      }
-
-      if (this.chatPaused) {
-        await sleep(250, signal);
-        continue;
-      }
-
-      try {
-        const payload = await this.requestReplayPayload(continuation, signal);
-        if (!payload) break;
-
-        const events = extractChatEvents(payload.actions, this.getSettings);
-        this.replayBuffer.appendEvents(events, -1);
-        this.markActivity();
-
-        continuation =
-          mode === 'playerSeek'
-            ? extractPlayerSeekContinuation(payload.continuations)
-            : extractReplayContinuation(payload.continuations);
-
-        pages += 1;
-      } catch (error: unknown) {
-        if (isAbortError(error)) break;
-        log.warn('Prefetch page failed:', error);
-        await sleep(5000, signal);
-      }
-    }
-
-    log.info(`Prefetch: ${pages} pages (aborted=${signal?.aborted ?? false})`);
+    this.prefetchPagesFetched = 0;
+    this.prefetchMode = this.replayMode;
+    this.prefetchBackoffUntil = 0;
   }
 
   // ── Seek listeners ──────────────────────────────────────────────────────
