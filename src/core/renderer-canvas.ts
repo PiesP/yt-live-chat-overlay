@@ -736,10 +736,10 @@ export class CanvasRenderer extends RendererBase {
       // renderMessage is always set in activateMessage (avoids per-frame nullish coalescing)
       const renderMessage = msg.renderMessage;
 
-      // When in replace mode and translation is available, skip original text rendering
-      // for rich card types (SuperChat/Membership), which are never translated.
-      // For regular text messages, always render — replace mode passes the translated
-      // text as an override so the author section (photo, name, badges) is preserved.
+      // Rich card types (SuperChat/Membership) always render their original
+      // card structure — replace mode is not supported for structured cards.
+      // Translation appears as dual-mode text below the card (lines 800-815).
+      const renderOriginal = true;
       if (msg.message.kind === 'text') {
         const isReplace = this.settings.translationMode === 'replace';
         renderRegularMessage(
@@ -756,7 +756,6 @@ export class CanvasRenderer extends RendererBase {
           isReplace ? msg.translatedText : undefined
         );
       } else {
-        const renderOriginal = this.settings.translationMode !== 'replace' || !msg.translatedText;
         if (renderOriginal) {
           if (msg.message.kind === 'superchat') {
             renderSuperChatCard(
@@ -1200,14 +1199,8 @@ export class CanvasRenderer extends RendererBase {
     laneList.push(cm);
     this.observability.onMessageRendered();
 
-    // Trigger async translation for enabled messages.
-    // Fire-and-forget: message renders with original text, then
-    // translation appears on next frame when the Promise resolves.
-    // Use getTranslatableText() to exclude emoji fallback text
-    // (e.g. :smile:, :웃는 얼굴:) from the translation input — those
-    // YouTube-supplied descriptions would appear as literal text in
-    // the translated output instead of being rendered as emoji images.
-    const translatableText = message.kind === 'text' ? getTranslatableText(message) : '';
+    // Trigger async translation for all message kinds (text, superchat, membership).
+    const translatableText = getTranslatableText(message);
     if (this.translationService.isActive && translatableText) {
       const cmRef = cm;
       this.translationService
@@ -1237,8 +1230,7 @@ export class CanvasRenderer extends RendererBase {
       if (
         this.settings.translationEnabled &&
         this.translationService.isActive &&
-        this.settings.translationMode === 'dual' &&
-        message.kind === 'text'
+        this.settings.translationMode === 'dual'
       ) {
         const transFontSize = Math.max(
           1,
@@ -1280,15 +1272,11 @@ export class CanvasRenderer extends RendererBase {
     }
 
     // In dual translation mode, add extra height for the translation line
-    // that will be rendered below the original text.
-    // Only add height when the translation service is actually active
-    // (translator created and ready). If the model is still downloading
-    // or unavailable, reserving space would create a blank gap.
+    // below the original content (all message kinds).
     if (
       this.settings.translationEnabled &&
       this.translationService.isActive &&
-      this.settings.translationMode === 'dual' &&
-      message.kind === 'text'
+      this.settings.translationMode === 'dual'
     ) {
       const transFontSize = Math.max(
         1,
@@ -1681,10 +1669,7 @@ export class CanvasRenderer extends RendererBase {
 
     const dims = this.estimateDimensions(message);
 
-    let text = '';
-    if (message.kind === 'text') {
-      text = message.content.map((s) => (s.type === 'text' ? s.content : s.emoji.alt)).join('');
-    }
+    const text = message.content.map((s) => (s.type === 'text' ? s.content : s.emoji.alt)).join('');
 
     this.renderWorker.postMessage({
       type: 'addMessages',
