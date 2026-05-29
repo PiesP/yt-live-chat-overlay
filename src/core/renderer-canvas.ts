@@ -646,6 +646,7 @@ export class CanvasRenderer extends RendererBase {
               this.textBitmapCache,
               this.authorPhotoCache,
               this.stickerCache,
+              this.emojiCache,
               (fs) => this.getFont(fs)
             );
           } else if (msg.message.kind === 'membership') {
@@ -661,6 +662,7 @@ export class CanvasRenderer extends RendererBase {
               this.settings,
               this.textBitmapCache,
               this.authorPhotoCache,
+              this.emojiCache,
               (fs) => this.getFont(fs)
             );
           }

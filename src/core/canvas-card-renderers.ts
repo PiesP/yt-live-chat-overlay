@@ -12,7 +12,7 @@ import type { ChatMessage, OverlaySettings } from '@app-types';
 import {
   drawAuthorSection,
   drawRoundRect,
-  renderWrappedText,
+  renderWrappedContentSegments,
   strokeTextOutline,
 } from '@core/canvas-text-renderer';
 import { computeReadableTextColor, toRgba } from '@core/color-utils';
@@ -42,6 +42,7 @@ export function renderSuperChatCard(
   textBitmapCache: Map<string, HTMLCanvasElement>,
   authorPhotoCache: Map<string, HTMLImageElement>,
   stickerCache: Map<string, HTMLImageElement>,
+  emojiCache: Map<string, HTMLImageElement>,
   getFontFn: (fontSize: number) => string
 ): void {
   const superChat = message.superChat;
@@ -127,13 +128,13 @@ export function renderSuperChatCard(
   );
   ctx.textBaseline = 'top';
 
-  // Body text
+  // Body text (content segments with emoji support)
   let textBottomY = badgeY + badgeHeight;
-  if (message.text) {
+  if (message.content.length > 0) {
     const bodyMaxWidth = w - scPad.paddingH * 2;
-    textBottomY = renderWrappedText(
+    textBottomY = renderWrappedContentSegments(
       ctx,
-      message.text,
+      message.content,
       textX,
       textBottomY + spacing.xs,
       bodyMaxWidth,
@@ -142,6 +143,7 @@ export function renderSuperChatCard(
       fontSize,
       settings,
       textBitmapCache,
+      emojiCache,
       getFontFn
     );
   }
@@ -179,6 +181,7 @@ export function renderMembershipCard(
   settings: OverlaySettings,
   textBitmapCache: Map<string, HTMLCanvasElement>,
   authorPhotoCache: Map<string, HTMLImageElement>,
+  emojiCache: Map<string, HTMLImageElement>,
   getFontFn: (fontSize: number) => string
 ): void {
   const fontSize = settings.fontSize;
@@ -217,12 +220,12 @@ export function renderMembershipCard(
     );
   }
 
-  if (message.text) {
+  if (message.content.length > 0) {
     const bodyMaxWidth = w - padH * 2;
     const bodyY = message.author ? textY + spacing.xs : textY;
-    renderWrappedText(
+    renderWrappedContentSegments(
       ctx,
-      message.text,
+      message.content,
       textX,
       bodyY,
       bodyMaxWidth,
@@ -231,6 +234,7 @@ export function renderMembershipCard(
       fontSize,
       settings,
       textBitmapCache,
+      emojiCache,
       getFontFn
     );
   }

@@ -8,7 +8,7 @@
  * cached bitmaps, and outline strokes on a Canvas2D context.
  */
 
-import type { ChatMessage, ContentSegment, OverlaySettings } from '@app-types';
+import type { ChatMessage, ContentSegment, ImageAsset, OverlaySettings } from '@app-types';
 import { EMOJI_ALIAS_PATTERN } from '@core/chat-message-helpers';
 import { computeOutlineColor } from '@core/color-utils';
 import { AUTHOR_PHOTO_SHADOW, rendererLayout, spacing } from '@core/design-tokens';
@@ -155,7 +155,7 @@ function renderSegment(
   ctx.restore();
 }
 
-// ── Content segments (text + emoji) ─────────────────────────────────────────
+// ── Content segments (text + emoji) — single-line ────────────────────────────
 
 function renderContentSegments(
   ctx: CanvasRenderingContext2D,
@@ -221,7 +221,239 @@ function renderContentSegments(
   }
 }
 
-// ── Wrapped text rendering ──────────────────────────────────────────────────
+// ── Wrapped content segments (text + emoji) ────────────────────────────────
+
+/**
+ * Internal piece type for word-wrapping content segments.
+ * Each piece is either a word from a text segment or a single emoji.
+ */
+type WrappedRenderPiece = TextRenderPiece | EmojiRenderPiece;
+
+interface TextRenderPiece {
+  type: 'text';
+  text: string;
+  width: number;
+}
+
+interface EmojiRenderPiece {
+  type: 'emoji';
+  emoji: ImageAsset;
+  width: number;
+}
+
+/**
+ * Render ContentSegment[] with word-wrapping, respecting maxWidth and maxLines.
+ *
+ * Flattens segments into word-level pieces (text words + emoji), then uses a
+ * greedy line-filling algorithm identical to wrapTextLines. Emoji images are
+ * rendered via emojiCache; text is rendered via renderSegment (with outline
+ * and caching).
+ *
+ * @returns The Y position after the last rendered line.
+ */
+export function renderWrappedContentSegments(
+  ctx: CanvasRenderingContext2D,
+  segments: readonly ContentSegment[],
+  x: number,
+  y: number,
+  maxWidth: number,
+  maxLines: number,
+  color: string,
+  fontSize: number,
+  settings: OverlaySettings,
+  textBitmapCache: Map<string, HTMLCanvasElement>,
+  emojiCache: Map<string, HTMLImageElement>,
+  getFontFn: (fontSize: number) => string
+): number {
+  if (segments.length === 0) return y;
+
+  const font = getFontFn(fontSize);
+  const emojiSize = Math.round(fontSize * rendererLayout.emojiSize);
+  const lineHeight = Math.ceil(measureTextHeight(font, fontSize));
+  const spaceWidth = measureTextWidth(' ', font);
+  const ellipsis = '\u2026';
+
+  // ── Step 1: Flatten segments into word/emoji pieces ──────────────────
+  const pieces: WrappedRenderPiece[] = [];
+  for (const seg of segments) {
+    if (seg.type === 'text') {
+      const words = seg.content.split(/\s+/).filter((w) => w.length > 0);
+      for (const word of words) {
+        pieces.push({ type: 'text', text: word, width: measureTextWidth(word, font) });
+      }
+    } else {
+      pieces.push({ type: 'emoji', emoji: seg.emoji, width: emojiSize + spacing.xs });
+    }
+  }
+
+  if (pieces.length === 0) return y;
+
+  // ── Step 2: Greedy line-filling (same algorithm as wrapLine) ─────────
+  const lines: WrappedRenderPiece[][] = [];
+  let currentLine: WrappedRenderPiece[] = [];
+  let currentWidth = 0;
+  let prevIsText = false;
+
+  for (const piece of pieces) {
+    const gap = prevIsText && piece.type === 'text' ? spaceWidth : 0;
+    const needed = gap + piece.width;
+
+    if (currentLine.length > 0 && currentWidth + needed > maxWidth) {
+      // Oversize single word — character-level wrap (CJK etc.)
+      if (piece.type === 'text' && piece.width > maxWidth) {
+        lines.push(currentLine);
+        const charPieces = wrapCharPieces(piece.text, font, maxWidth);
+        if (charPieces.length <= 1) {
+          currentLine = [piece];
+          currentWidth = piece.width;
+          prevIsText = true;
+          continue;
+        }
+        // Push all but the last char piece as their own lines
+        for (let i = 0; i < charPieces.length - 1; i++) {
+          lines.push([charPieces[i] as TextRenderPiece]);
+        }
+        const lastPiece = charPieces[charPieces.length - 1] as TextRenderPiece;
+        currentLine = [lastPiece];
+        currentWidth = lastPiece.width;
+        prevIsText = true;
+        continue;
+      }
+
+      // Start a new line with this piece
+      lines.push(currentLine);
+      currentLine = [piece];
+      currentWidth = piece.width;
+      prevIsText = piece.type === 'text';
+      continue;
+    }
+
+    if (gap > 0) currentWidth += gap;
+    currentLine.push(piece);
+    currentWidth += piece.width;
+    prevIsText = piece.type === 'text';
+  }
+
+  if (currentLine.length > 0) {
+    lines.push(currentLine);
+  }
+
+  // ── Step 3: Render lines (up to maxLines) ────────────────────────────
+  const renderLines = lines.length > maxLines ? lines.slice(0, maxLines) : lines;
+  const isTruncated = lines.length > maxLines;
+  let cursorY = y;
+
+  for (let li = 0; li < renderLines.length; li++) {
+    const line = renderLines[li];
+    if (!line) continue;
+    const isLastLine = li === renderLines.length - 1;
+    const needsEllipsis = isLastLine && isTruncated;
+    let cursorX = x;
+    let prevText = false;
+
+    for (const piece of line) {
+      // Space gap between text words
+      if (prevText && piece.type === 'text') {
+        cursorX += spaceWidth;
+      }
+      prevText = piece.type === 'text';
+
+      if (piece.type === 'text') {
+        renderSegment(
+          ctx,
+          piece.text,
+          cursorX,
+          cursorY,
+          color,
+          fontSize,
+          settings,
+          textBitmapCache,
+          getFontFn
+        );
+        cursorX += piece.width;
+      } else {
+        // Emoji — same rendering logic as renderContentSegments
+        const cached = emojiCache.get(piece.emoji.url);
+        const img = cached?.complete && cached.naturalWidth > 0 ? cached : null;
+        if (img) {
+          ctx.drawImage(img, cursorX, cursorY, emojiSize, emojiSize);
+        } else if (piece.emoji.fallbackText) {
+          renderSegment(
+            ctx,
+            piece.emoji.fallbackText,
+            cursorX,
+            cursorY,
+            color,
+            fontSize,
+            settings,
+            textBitmapCache,
+            getFontFn
+          );
+        } else if (piece.emoji.alt && !EMOJI_ALIAS_PATTERN.test(piece.emoji.alt)) {
+          renderSegment(
+            ctx,
+            piece.emoji.alt,
+            cursorX,
+            cursorY,
+            color,
+            fontSize,
+            settings,
+            textBitmapCache,
+            getFontFn
+          );
+        }
+        cursorX += piece.width;
+      }
+    }
+
+    // Append ellipsis if this line was truncated
+    if (needsEllipsis) {
+      renderSegment(
+        ctx,
+        ellipsis,
+        cursorX,
+        cursorY,
+        color,
+        fontSize,
+        settings,
+        textBitmapCache,
+        getFontFn
+      );
+    }
+
+    cursorY += lineHeight;
+  }
+
+  return cursorY;
+}
+
+/**
+ * Split a single word into character-level pieces that each fit within maxWidth.
+ * Matches the char-wrapping behavior of wrapChars() in text-measure.ts.
+ */
+function wrapCharPieces(word: string, font: string, maxWidth: number): TextRenderPiece[] {
+  const pieces: TextRenderPiece[] = [];
+  let current = '';
+  let currentWidth = 0;
+
+  for (const ch of word) {
+    const chWidth = measureTextWidth(ch, font);
+    if (currentWidth + chWidth > maxWidth && current.length > 0) {
+      pieces.push({ type: 'text', text: current, width: currentWidth });
+      current = ch;
+      currentWidth = chWidth;
+    } else {
+      current += ch;
+      currentWidth += chWidth;
+    }
+  }
+
+  if (current.length > 0) {
+    pieces.push({ type: 'text', text: current, width: currentWidth });
+  }
+
+  return pieces;
+}
 
 /**
  * Render text with word-wrapping, respecting `maxWidth` and `maxLines`.
