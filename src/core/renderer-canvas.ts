@@ -187,6 +187,9 @@ export class CanvasRenderer extends RendererBase {
    */
   private readonly textBitmapCache = new Map<string, HTMLCanvasElement>();
 
+  /** Cached message dimensions by message ID. Cleared on settings change. */
+  private readonly dimensionCache = new Map<string, { width: number; height: number }>();
+
   /**
    * Horizontal stagger per batch index step (px).
    * Each successive message in a drainQueue batch starts this many pixels
@@ -1172,6 +1175,36 @@ export class CanvasRenderer extends RendererBase {
   // ── Dimension estimation (delegates to shared functions) ──────────────
 
   private estimateDimensions(message: ChatMessage): { width: number; height: number } {
+    // Check message-level cache first — same message ID means same content/kind/author.
+    // Invalidated on settings change (updateSettings, resetState).
+    let cached: { width: number; height: number } | undefined;
+    if (message.id) {
+      cached = this.dimensionCache.get(message.id);
+    }
+    if (cached) {
+      // Translation height adjustment must be re-applied (translation state can change)
+      if (
+        this.settings.translationEnabled &&
+        this.translationService.isActive &&
+        this.settings.translationMode === 'dual' &&
+        message.kind === 'text'
+      ) {
+        const transFontSize = Math.max(
+          1,
+          Math.round(this.settings.fontSize * CanvasRenderer.TRANSLATION_FONT_SCALE)
+        );
+        const transFont = getFontString(
+          transFontSize,
+          this.settings.fontWeight,
+          this.settings.fontFamily
+        );
+        const transHeight =
+          measureTextHeight(transFont, transFontSize) + CanvasRenderer.TRANSLATION_GAP_PX;
+        return { width: cached.width, height: cached.height + transHeight };
+      }
+      return cached;
+    }
+
     // SuperChat rendering uses showAuthor.superChat (canvas-card-renderers.ts:82),
     // not showAuthor[authorType]. Match the rendering's key so that estimation
     // and rendering agree on whether the author section is included.
@@ -1190,6 +1223,10 @@ export class CanvasRenderer extends RendererBase {
         membership: this.settings.membershipMaxBodyLines,
       }
     );
+
+    if (message.id) {
+      this.dimensionCache.set(message.id, dims);
+    }
 
     // In dual translation mode, add extra height for the translation line
     // that will be rendered below the original text.
@@ -1367,6 +1404,10 @@ export class CanvasRenderer extends RendererBase {
     const wasTranslationEnabled = this.settings.translationEnabled;
     super.updateSettings(settings, options);
 
+    // When settings change, cached dimensions become stale
+    // (font, size, weight, family, maxBodyLines all affect dimension calculation).
+    this.dimensionCache.clear();
+
     // Sync settings to render worker when off-main-thread mode is active
     this.syncWorkerSettings();
 
@@ -1411,6 +1452,7 @@ export class CanvasRenderer extends RendererBase {
     this.backlogPaused = false;
     clearTextMeasurementCaches();
     this.textBitmapCache.clear();
+    this.dimensionCache.clear();
   }
 
   protected onDestroy(): void {
