@@ -29,6 +29,29 @@ import { getFontString } from '@core/text-measure';
 
 // ── SuperChat card ───────────────────────────────────────────────────────────
 
+/** Gradients cached by `${baseColor}|${h}|${topAlpha}|${scAlpha}|${bottomAlpha}` to avoid per-frame allocation. */
+const superChatGradientCache = new Map<string, CanvasGradient>();
+
+/** Get or create a cached SuperChat background gradient (relative to origin). */
+function getSuperChatGradient(
+  ctx: CanvasRenderingContext2D,
+  baseColor: string,
+  h: number,
+  topAlpha: number,
+  scAlpha: number,
+  bottomAlpha: number
+): CanvasGradient {
+  const key = `${baseColor}|${h}|${topAlpha}|${scAlpha}|${bottomAlpha}`;
+  const cached = superChatGradientCache.get(key);
+  if (cached) return cached;
+  const grad = ctx.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, toRgba(baseColor, topAlpha));
+  grad.addColorStop(0.48, toRgba(baseColor, scAlpha));
+  grad.addColorStop(1, toRgba(baseColor, bottomAlpha));
+  superChatGradientCache.set(key, grad);
+  return grad;
+}
+
 /** Render a SuperChat card at (x, y) with alpha blending. */
 export function renderSuperChatCard(
   ctx: CanvasRenderingContext2D,
@@ -64,18 +87,17 @@ export function renderSuperChatCard(
   const baseColor = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
   const textColor = computeReadableTextColor(baseColor);
 
-  // Background gradient
-  const grad = ctx.createLinearGradient(x, y, x, y + h);
-  grad.addColorStop(0, toRgba(baseColor, topAlpha));
-  grad.addColorStop(0.48, toRgba(baseColor, scAlpha));
-  grad.addColorStop(1, toRgba(baseColor, bottomAlpha));
+  // Background gradient (cached per color/dimension to avoid per-frame allocation)
+  const grad = getSuperChatGradient(ctx, baseColor, h, topAlpha, scAlpha, bottomAlpha);
+  ctx.save();
+  ctx.translate(x, y);
   ctx.fillStyle = grad;
-  drawRoundRect(ctx, x, y, w, h, rendererLayout.superchatCardRadius);
+  drawRoundRect(ctx, 0, 0, w, h, rendererLayout.superchatCardRadius);
   ctx.fill();
-
-  // Left accent bar
+  // Left accent bar (relative to translated origin)
   ctx.fillStyle = baseColor;
-  ctx.fillRect(x, y, rendererLayout.superchatAccentBarWidth, h);
+  ctx.fillRect(0, 0, rendererLayout.superchatAccentBarWidth, h);
+  ctx.restore();
 
   const scPad = rendererLayout.superchat;
   const textX = x + scPad.paddingH;
