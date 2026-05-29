@@ -9,13 +9,9 @@
  */
 
 import type { ChatMessage, FontWeight } from '@app-types';
+import { buildWrappedLines } from '@core/canvas-text-renderer';
 import { DEFAULT_FONT_FAMILY, rendererLayout, spacing } from '@core/design-tokens';
-import {
-  getFontString,
-  measureTextHeight,
-  measureTextWidth,
-  wrapTextLines,
-} from '@core/text-measure';
+import { getFontString, measureTextHeight, measureTextWidth } from '@core/text-measure';
 
 // ── Text measurement ────────────────────────────────────────────────────────
 
@@ -134,14 +130,19 @@ function estimateSuperChatDimensions(
   const badgeWidth = badgeTextWidth + rendererLayout.superchatBadge.paddingH * 2;
   const badgeHeight = badgeFontSize + rendererLayout.superchatBadge.paddingV * 2;
 
-  // Pass 1: measure text at max inner width to get max line width
+  const emojiSize = Math.round(fontSize * rendererLayout.emojiSize);
+
+  // Pass 1: build wrapped lines at max inner width to determine max line width.
+  // Uses buildWrappedLines (SSOT with renderWrappedContentSegments) so that
+  // emoji segments are measured with the same piece widths as rendering.
   const maxInnerWidth = rendererLayout.superchatMaxWidth - paddingH * 2;
-  const pass1Lines = wrapTextLines(message.text, font, Math.max(1, maxInnerWidth));
-  let maxLineWidth = 0;
-  for (const line of pass1Lines.slice(0, maxBodyLines)) {
-    const w = measureTextWidth(line, font);
-    if (w > maxLineWidth) maxLineWidth = w;
-  }
+  const pass1Result = buildWrappedLines(
+    message.content,
+    font,
+    Math.max(1, maxInnerWidth),
+    emojiSize
+  );
+  const maxLineWidth = pass1Result.maxLineWidth;
 
   // Determine card width from the widest element
   const contentWidth = Math.max(authorSectionWidth, badgeWidth, maxLineWidth);
@@ -150,13 +151,11 @@ function estimateSuperChatDimensions(
     Math.min(rendererLayout.superchatMaxWidth, contentWidth + paddingH * 2)
   );
 
-  // Pass 2: re-wrap text at the actual card inner width so line count
-  // matches what renderSuperChat will produce. Without this, a card clamped
-  // to superchatMinWidth (or narrowed by content) would estimate fewer lines
-  // than actually rendered, causing text to overflow the background.
+  // Pass 2: re-build wrapped lines at the actual card inner width so line count
+  // matches what renderSuperChat will produce. Uses the same SSOT algorithm.
   const actualInnerWidth = Math.max(1, width - paddingH * 2);
-  const wrappedLines = wrapTextLines(message.text, font, actualInnerWidth);
-  const lineCount = Math.min(wrappedLines.length, maxBodyLines);
+  const pass2Result = buildWrappedLines(message.content, font, actualInnerWidth, emojiSize);
+  const lineCount = Math.min(pass2Result.lines.length, maxBodyLines);
   // Per-line rounding matches the renderer, which rounds each line's
   // height individually via Math.ceil(measureTextHeight(...)).
   const lineHeight = Math.ceil(bodyLineHeight);
@@ -192,11 +191,13 @@ function estimateMembershipDimensions(
     Math.min(rendererLayout.superchatMaxWidth, textWidth + paddingH * 2)
   );
 
-  // Re-wrap text at the actual card inner width so line count matches
-  // what renderMembership will produce (same 2-pass pattern as superchat).
+  // Re-build wrapped lines at the actual card inner width so line count matches
+  // what renderMembership will produce. Uses buildWrappedLines (SSOT with
+  // renderWrappedContentSegments) for consistent emoji piece widths.
   const actualInnerWidth = Math.max(1, width - paddingH * 2);
-  const wrappedLines = wrapTextLines(message.text, font, actualInnerWidth);
-  const bodyLineCount = Math.min(wrappedLines.length, maxBodyLines);
+  const emojiSize = Math.round(fontSize * rendererLayout.emojiSize);
+  const passResult = buildWrappedLines(message.content, font, actualInnerWidth, emojiSize);
+  const bodyLineCount = Math.min(passResult.lines.length, maxBodyLines);
   // Per-line rounding matches the renderer (rounds each line individually).
   const textHeight = Math.ceil(bodyLineHeight) * bodyLineCount;
 

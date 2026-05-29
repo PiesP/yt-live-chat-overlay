@@ -222,27 +222,131 @@ function renderContentSegments(
  * Internal piece type for word-wrapping content segments.
  * Each piece is either a word from a text segment or a single emoji.
  */
-type WrappedRenderPiece = TextRenderPiece | EmojiRenderPiece;
+export type WrappedRenderPiece = TextRenderPiece | EmojiRenderPiece;
 
-interface TextRenderPiece {
+export interface TextRenderPiece {
   type: 'text';
   text: string;
   width: number;
 }
 
-interface EmojiRenderPiece {
+export interface EmojiRenderPiece {
   type: 'emoji';
   emoji: ImageAsset;
   width: number;
 }
 
 /**
+ * Build wrapped lines from ContentSegment[] using the same greedy line-fill
+ * algorithm as renderWrappedContentSegments, but without any rendering.
+ *
+ * This is the SSOT for line-breaking logic — used by both the renderer
+ * (to produce lines for rendering) and the dimension estimator
+ * (to predict line count and max width without a canvas).
+ *
+ * @returns Built lines and the maximum line width across all lines.
+ */
+export function buildWrappedLines(
+  segments: readonly ContentSegment[],
+  font: string,
+  maxWidth: number,
+  emojiSize: number
+): { lines: WrappedRenderPiece[][]; maxLineWidth: number } {
+  // ── Step 1: Flatten segments into word/emoji pieces ──────────────────
+  const pieces: WrappedRenderPiece[] = [];
+  for (const seg of segments) {
+    if (seg.type === 'text') {
+      const words = seg.content.split(/\s+/).filter((w) => w.length > 0);
+      for (const word of words) {
+        pieces.push({ type: 'text', text: word, width: measureTextWidth(word, font) });
+      }
+    } else {
+      pieces.push({ type: 'emoji', emoji: seg.emoji, width: emojiSize + spacing.xs });
+    }
+  }
+
+  const lines: WrappedRenderPiece[][] = [];
+  if (pieces.length === 0) return { lines, maxLineWidth: 0 };
+
+  // ── Step 2: Greedy line-filling (same algorithm as wrapLine) ─────────
+  let currentLine: WrappedRenderPiece[] = [];
+  let currentWidth = 0;
+  let prevIsText = false;
+  const spaceWidth = measureTextWidth(' ', font);
+  let maxLineWidth = 0;
+
+  for (const piece of pieces) {
+    const gap = prevIsText && piece.type === 'text' ? spaceWidth : 0;
+    const needed = gap + piece.width;
+
+    if (currentLine.length > 0 && currentWidth + needed > maxWidth) {
+      // Oversize single word — character-level wrap (CJK etc.)
+      if (piece.type === 'text' && piece.width > maxWidth) {
+        maxLineWidth = Math.max(maxLineWidth, lineWidthOf(currentLine, spaceWidth));
+        lines.push(currentLine);
+        const charPieces = wrapCharPieces(piece.text, font, maxWidth);
+        if (charPieces.length <= 1) {
+          currentLine = [piece];
+          currentWidth = piece.width;
+          prevIsText = true;
+          continue;
+        }
+        // Push all but the last char piece as their own lines
+        for (let i = 0; i < charPieces.length - 1; i++) {
+          const cp = charPieces[i] as TextRenderPiece;
+          lines.push([cp]);
+          maxLineWidth = Math.max(maxLineWidth, cp.width);
+        }
+        const lastPiece = charPieces[charPieces.length - 1] as TextRenderPiece;
+        currentLine = [lastPiece];
+        currentWidth = lastPiece.width;
+        prevIsText = true;
+        continue;
+      }
+
+      // Start a new line with this piece
+      maxLineWidth = Math.max(maxLineWidth, lineWidthOf(currentLine, spaceWidth));
+      lines.push(currentLine);
+      currentLine = [piece];
+      currentWidth = piece.width;
+      prevIsText = piece.type === 'text';
+      continue;
+    }
+
+    if (gap > 0) currentWidth += gap;
+    currentLine.push(piece);
+    currentWidth += piece.width;
+    prevIsText = piece.type === 'text';
+  }
+
+  if (currentLine.length > 0) {
+    maxLineWidth = Math.max(maxLineWidth, lineWidthOf(currentLine, spaceWidth));
+    lines.push(currentLine);
+  }
+
+  return { lines, maxLineWidth };
+}
+
+/** Compute the rendered width of a line of pieces (excluding trailing space). */
+function lineWidthOf(line: readonly WrappedRenderPiece[], spaceWidth: number): number {
+  let w = 0;
+  let prevText = false;
+  for (const piece of line) {
+    if (prevText && piece.type === 'text') {
+      w += spaceWidth;
+    }
+    w += piece.width;
+    prevText = piece.type === 'text';
+  }
+  return w;
+}
+
+/**
  * Render ContentSegment[] with word-wrapping, respecting maxWidth and maxLines.
  *
- * Flattens segments into word-level pieces (text words + emoji), then uses a
- * greedy line-filling algorithm identical to wrapTextLines. Emoji images are
- * rendered via emojiCache; text is rendered via renderSegment (with outline
- * and caching).
+ * Uses {@link buildWrappedLines} for line-breaking (SSOT shared with the
+ * dimension estimator), then renders each line via renderSegment (text) or
+ * emojiCache (emoji images).
  *
  * @returns The Y position after the last rendered line.
  */
@@ -266,74 +370,11 @@ export function renderWrappedContentSegments(
   const emojiSize = Math.round(fontSize * rendererLayout.emojiSize);
   const lineHeight = Math.ceil(measureTextHeight(font, fontSize));
   const spaceWidth = measureTextWidth(' ', font);
-  const ellipsis = '\u2026';
+  const ellipsis = '\\u2026';
 
-  // ── Step 1: Flatten segments into word/emoji pieces ──────────────────
-  const pieces: WrappedRenderPiece[] = [];
-  for (const seg of segments) {
-    if (seg.type === 'text') {
-      const words = seg.content.split(/\s+/).filter((w) => w.length > 0);
-      for (const word of words) {
-        pieces.push({ type: 'text', text: word, width: measureTextWidth(word, font) });
-      }
-    } else {
-      pieces.push({ type: 'emoji', emoji: seg.emoji, width: emojiSize + spacing.xs });
-    }
-  }
+  const { lines } = buildWrappedLines(segments, font, maxWidth, emojiSize);
 
-  if (pieces.length === 0) return y;
-
-  // ── Step 2: Greedy line-filling (same algorithm as wrapLine) ─────────
-  const lines: WrappedRenderPiece[][] = [];
-  let currentLine: WrappedRenderPiece[] = [];
-  let currentWidth = 0;
-  let prevIsText = false;
-
-  for (const piece of pieces) {
-    const gap = prevIsText && piece.type === 'text' ? spaceWidth : 0;
-    const needed = gap + piece.width;
-
-    if (currentLine.length > 0 && currentWidth + needed > maxWidth) {
-      // Oversize single word — character-level wrap (CJK etc.)
-      if (piece.type === 'text' && piece.width > maxWidth) {
-        lines.push(currentLine);
-        const charPieces = wrapCharPieces(piece.text, font, maxWidth);
-        if (charPieces.length <= 1) {
-          currentLine = [piece];
-          currentWidth = piece.width;
-          prevIsText = true;
-          continue;
-        }
-        // Push all but the last char piece as their own lines
-        for (let i = 0; i < charPieces.length - 1; i++) {
-          lines.push([charPieces[i] as TextRenderPiece]);
-        }
-        const lastPiece = charPieces[charPieces.length - 1] as TextRenderPiece;
-        currentLine = [lastPiece];
-        currentWidth = lastPiece.width;
-        prevIsText = true;
-        continue;
-      }
-
-      // Start a new line with this piece
-      lines.push(currentLine);
-      currentLine = [piece];
-      currentWidth = piece.width;
-      prevIsText = piece.type === 'text';
-      continue;
-    }
-
-    if (gap > 0) currentWidth += gap;
-    currentLine.push(piece);
-    currentWidth += piece.width;
-    prevIsText = piece.type === 'text';
-  }
-
-  if (currentLine.length > 0) {
-    lines.push(currentLine);
-  }
-
-  // ── Step 3: Render lines (up to maxLines) ────────────────────────────
+  // ── Render lines (up to maxLines) ────────────────────────────────────
   const renderLines = lines.length > maxLines ? lines.slice(0, maxLines) : lines;
   const isTruncated = lines.length > maxLines;
   let cursorY = y;
