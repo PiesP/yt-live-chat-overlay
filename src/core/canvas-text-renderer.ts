@@ -532,7 +532,9 @@ export function drawAuthorSection(
   color: string,
   maxNameWidth: number | undefined,
   settings: OverlaySettings,
-  authorPhotoCache: Map<string, HTMLImageElement>
+  authorPhotoCache: Map<string, HTMLImageElement>,
+  textBitmapCache: Map<string, HTMLCanvasElement>,
+  getFontFn: (fontSize: number) => string
 ): number {
   if (!message.author) return startY;
 
@@ -556,7 +558,7 @@ export function drawAuthorSection(
   if (maxNameWidth !== undefined && maxNameWidth > 0) {
     ctx.font = nameFont;
     ctx.textBaseline = 'top';
-    let nameWidth = ctx.measureText(displayName).width;
+    const nameWidth = ctx.measureText(displayName).width;
     if (nameWidth > maxNameWidth) {
       const ellipsis = '\u2026';
       const ellipsisWidth = ctx.measureText(ellipsis).width;
@@ -566,19 +568,31 @@ export function drawAuthorSection(
         ctx.restore();
         return startY + sectionHeight;
       }
-      while (displayName.length > 0 && nameWidth + ellipsisWidth > maxNameWidth) {
-        displayName = displayName.slice(0, -1);
-        nameWidth = ctx.measureText(displayName).width;
+      // Binary search for optimal truncation point (O(log n) instead of O(n))
+      let lo = 0;
+      let hi = displayName.length;
+      while (lo < hi) {
+        const mid = Math.floor((lo + hi) / 2);
+        const testWidth = ctx.measureText(displayName.slice(0, mid) + ellipsis).width;
+        if (testWidth <= maxNameWidth) lo = mid + 1;
+        else hi = mid;
       }
-      displayName += ellipsis;
+      displayName = displayName.slice(0, Math.max(0, lo - 1)) + ellipsis;
     }
   }
 
-  ctx.font = nameFont;
-  ctx.textBaseline = 'top';
-  strokeTextOutline(ctx, displayName, nameX, nameY, color, settings);
-  ctx.fillStyle = color;
-  ctx.fillText(displayName, nameX, nameY);
+  // Use renderSegment with bitmap cache instead of direct fillText+strokeText
+  renderSegment(
+    ctx,
+    displayName,
+    nameX,
+    nameY,
+    color,
+    authorFontSize,
+    settings,
+    textBitmapCache,
+    getFontFn
+  );
 
   ctx.restore();
   return startY + sectionHeight;
@@ -646,7 +660,9 @@ export function renderRegularMessage(
       color,
       undefined,
       settings,
-      authorPhotoCache
+      authorPhotoCache,
+      textBitmapCache,
+      getFontFn
     );
   }
 

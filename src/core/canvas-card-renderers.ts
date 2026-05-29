@@ -92,7 +92,9 @@ export function renderSuperChatCard(
       textColor,
       nameMaxWidth,
       settings,
-      authorPhotoCache
+      authorPhotoCache,
+      textBitmapCache,
+      getFontFn
     );
   }
 
@@ -216,7 +218,9 @@ export function renderMembershipCard(
       designColors.membership.text,
       nameMaxWidth,
       settings,
-      authorPhotoCache
+      authorPhotoCache,
+      textBitmapCache,
+      getFontFn
     );
   }
 

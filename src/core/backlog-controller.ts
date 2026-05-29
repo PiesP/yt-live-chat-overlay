@@ -44,6 +44,7 @@ interface BacklogControllerConfig {
 
 export class BacklogInjectionController implements Pauseable {
   private backlogQueue: ChatMessage[] = [];
+  private backlogQueueOffset = 0;
   private backlogSeenIds = new Set<string>();
   private isActive = false;
   private isInjecting = false;
@@ -91,6 +92,22 @@ export class BacklogInjectionController implements Pauseable {
   private static readonly SAMPLE_RATIO_SMALL = 0.6;
   private static readonly SAMPLE_RATIO_LARGE = 0.35;
   private static readonly INDICATOR_HIDE_DELAY_MS = 300;
+
+  /** Effective length of the backlog queue (excluding consumed offset entries). */
+  private get backlogQueueLength(): number {
+    return this.backlogQueue.length - this.backlogQueueOffset;
+  }
+
+  /**
+   * Compact the backlog queue when the offset pointer grows large,
+   * avoiding unbounded array growth from consumed entries.
+   */
+  private compactBacklogQueue(): void {
+    if (this.backlogQueueOffset > 64) {
+      this.backlogQueue.splice(0, this.backlogQueueOffset);
+      this.backlogQueueOffset = 0;
+    }
+  }
 
   constructor(
     config: BacklogControllerConfig,
@@ -230,8 +247,8 @@ export class BacklogInjectionController implements Pauseable {
 
   /** Start the throttled injection loop */
   private startInjection(): void {
-    if (this.isInjecting || !this.isActive || this.backlogQueue.length === 0) {
-      if (this.backlogQueue.length === 0) this.finishBacklogInjection();
+    if (this.isInjecting || !this.isActive || this.backlogQueueLength === 0) {
+      if (this.backlogQueueLength === 0) this.finishBacklogInjection();
       return;
     }
 
@@ -241,9 +258,9 @@ export class BacklogInjectionController implements Pauseable {
 
   /** Execute one injection tick. Uses setTimeout for throttled scheduling. */
   private processTick(): void {
-    if (!this.isActive || this.backlogQueue.length === 0) {
+    if (!this.isActive || this.backlogQueueLength === 0) {
       this.isInjecting = false;
-      if (this.backlogQueue.length === 0) this.finishBacklogInjection();
+      if (this.backlogQueueLength === 0) this.finishBacklogInjection();
       return;
     }
 
@@ -269,7 +286,8 @@ export class BacklogInjectionController implements Pauseable {
 
     this.realTimeActivityCount = Math.max(0, this.realTimeActivityCount - 1);
 
-    const message = this.backlogQueue.shift();
+    const message = this.backlogQueue[this.backlogQueueOffset++];
+    this.compactBacklogQueue();
     /* v8 ignore next 1 — TypeScript guard: queue non-empty checked above */
     if (!message) return;
     message.isBacklog = true;
@@ -416,6 +434,7 @@ export class BacklogInjectionController implements Pauseable {
     this.isActive = false;
     this.isInjecting = false;
     this.backlogQueue = [];
+    this.backlogQueueOffset = 0;
     this.backlogSeenIds.clear();
     this.observability?.updateBacklogProgress(1);
     this.hideIndicator();
@@ -484,6 +503,7 @@ export class BacklogInjectionController implements Pauseable {
     this.injectionTimer = clearSafeTimeout(this.injectionTimer);
     this.hideIndicatorTimer = clearSafeTimeout(this.hideIndicatorTimer);
     this.backlogQueue = [];
+    this.backlogQueueOffset = 0;
     this.backlogSeenIds.clear();
     if (this.indicatorEl) {
       this.indicatorEl.remove();
@@ -498,7 +518,7 @@ export class BacklogInjectionController implements Pauseable {
     if (paused) {
       this.isInjecting = false;
       this.injectionTimer = clearSafeTimeout(this.injectionTimer);
-    } else if (!this.isInjecting && this.isActive && this.backlogQueue.length > 0) {
+    } else if (!this.isInjecting && this.isActive && this.backlogQueueLength > 0) {
       this.isInjecting = true;
       this.processTick();
     }

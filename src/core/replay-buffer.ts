@@ -22,11 +22,12 @@ const REPLAY_EMIT_TOLERANCE_MS = 300;
 
 export class ReplayBuffer {
   private buffer: BufferedReplayMessage[] = [];
+  private bufferOffset = 0;
   private seenIds = new Set<string>();
 
-  /** True when the buffer has no messages. */
+  /** True when the buffer has no unconsumed messages. */
   get isEmpty(): boolean {
-    return this.buffer.length === 0;
+    return this.buffer.length - this.bufferOffset <= 0;
   }
 
   /**
@@ -39,7 +40,7 @@ export class ReplayBuffer {
     // Deduplicate by message ID (same message from overlapping continuation chains)
     if (message.id && this.seenIds.has(message.id)) return;
 
-    let lo = 0;
+    let lo = this.bufferOffset;
     let hi = this.buffer.length;
     while (lo < hi) {
       const mid = (lo + hi) >>> 1;
@@ -87,19 +88,19 @@ export class ReplayBuffer {
    * Messages still in the future stay in the buffer.
    */
   flushUpTo(currentOffsetMs: number, maxBatch: number): ChatMessage[] {
-    if (this.buffer.length === 0) return [];
+    if (this.buffer.length - this.bufferOffset <= 0) return [];
 
     const batch: ChatMessage[] = [];
 
-    while (this.buffer.length > 0 && batch.length < maxBatch) {
-      const next = this.buffer[0];
+    while (this.buffer.length - this.bufferOffset > 0 && batch.length < maxBatch) {
+      const next = this.buffer[this.bufferOffset];
       if (!next) break;
 
       // Future messages — stop, they're not ready yet
       if (next.offsetMs > currentOffsetMs + REPLAY_EMIT_TOLERANCE_MS) break;
 
-      // Remove from buffer regardless of whether we emit
-      this.buffer.shift();
+      // Advance offset instead of shift()
+      this.bufferOffset++;
 
       // Too far in the past — drop silently
       if (next.offsetMs < currentOffsetMs - REPLAY_EMIT_TOLERANCE_MS) {
@@ -109,12 +110,19 @@ export class ReplayBuffer {
       batch.push(next.message);
     }
 
+    // Compact when offset grows large
+    if (this.bufferOffset > 64) {
+      this.buffer.splice(0, this.bufferOffset);
+      this.bufferOffset = 0;
+    }
+
     return batch;
   }
 
   /** Clear all buffered messages (e.g. on seek). */
   clear(): void {
     this.buffer = [];
+    this.bufferOffset = 0;
     this.seenIds.clear();
   }
 
@@ -123,9 +131,10 @@ export class ReplayBuffer {
    * Oldest messages are from the past — they won't be needed again.
    */
   private trim(maxSize: number): void {
-    if (this.buffer.length <= maxSize) return;
+    const effectiveLength = this.buffer.length - this.bufferOffset;
+    if (effectiveLength <= maxSize) return;
 
-    const overflow = this.buffer.length - maxSize;
-    this.buffer.splice(0, overflow);
+    const overflow = effectiveLength - maxSize;
+    this.bufferOffset += overflow;
   }
 }
