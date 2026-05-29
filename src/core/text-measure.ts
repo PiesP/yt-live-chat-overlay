@@ -22,7 +22,9 @@ let measureCtx: CanvasRenderingContext2D | null | false = null;
 /** Two-level LRU cache for measureTextWidth. Outer key: font, inner key: text. */
 const widthCache = new Map<string, Map<string, number>>();
 let totalCacheEntries = 0;
-const WIDTH_CACHE_MAX = 500;
+const WIDTH_CACHE_MAX = 1000;
+/** How many entries to evict at once from the oldest font group (10% of cap). */
+const WIDTH_CACHE_EVICT_BATCH = Math.floor(WIDTH_CACHE_MAX * 0.1);
 
 /** Character-width estimate multiplier for CSP-restricted environments (no canvas). */
 const CSP_WIDTH_FACTOR = 0.6;
@@ -99,15 +101,27 @@ export function measureTextWidth(text: string, font: string): number {
   const bbWidth = Math.abs(m.actualBoundingBoxLeft) + Math.abs(m.actualBoundingBoxRight);
   const width = bbWidth > 0 ? Math.ceil(bbWidth) : Math.ceil(m.width);
 
-  // LRU eviction: when total entries exceeds the limit, drop the oldest
-  // font group (outer-map first insertion remains oldest).
-  if (totalCacheEntries >= WIDTH_CACHE_MAX) {
+  // LRU eviction: when total entries exceeds the limit, evict the oldest
+  // entries from the oldest font group (partial eviction — 10% at a time
+  // instead of dropping entire font groups, which caused cascade misses).
+  while (totalCacheEntries >= WIDTH_CACHE_MAX) {
     const oldestFont = widthCache.keys().next().value;
-    if (oldestFont !== undefined) {
-      const entries = widthCache.get(oldestFont);
-      totalCacheEntries -= entries?.size ?? 0;
+    if (oldestFont === undefined) break;
+    const entries = widthCache.get(oldestFont);
+    if (!entries || entries.size === 0) {
       widthCache.delete(oldestFont);
+      continue;
     }
+    // Evict up to EVICT_BATCH entries from this font group
+    let evicted = 0;
+    for (const key of entries.keys()) {
+      entries.delete(key);
+      totalCacheEntries--;
+      evicted++;
+      if (evicted >= WIDTH_CACHE_EVICT_BATCH && entries.size > 0) break;
+    }
+    // If the font group is now empty, remove it from the outer map
+    if (entries.size === 0) widthCache.delete(oldestFont);
   }
 
   // Insert into two-level cache

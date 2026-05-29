@@ -377,6 +377,10 @@ export class LaneAllocator {
     const maxWaitMs = rendererLayout.durationMax;
     let firstBusy: { laneIndex: number; waitMs: number } | null = null;
     let speedMatched: { laneIndex: number; waitMs: number } | null = null;
+    // Pre-collect zero-wait compatible lanes for O(n) epsilon-greedy:
+    // instead of nested scanning on epsilon skip, we collect candidates
+    // in a single pass and pick from the set when the random gate fires.
+    let zeroWaitCandidates: number[] | null = null;
 
     // ── Phase 1: zero-wait lane with tier compatibility filter ──
     for (let i = laneStart; i < laneEnd; i++) {
@@ -404,24 +408,27 @@ export class LaneAllocator {
       }
       // Found a zero-wait compatible lane.
       // Epsilon-greedy: 5% chance to skip for visual variety.
+      // Pre-build a set of zero-wait lanes on first epsilon hit so
+      // subsequent "is there an alternate?" checks are O(1) lookups
+      // instead of O(n) nested scans.
       if (Math.random() < LaneAllocator.EPSILON) {
-        // Don't skip if this is the last zero-wait compatible lane ahead.
-        let hasAlternate = false;
-        for (let j = i + 1; j < laneEnd; j++) {
-          if (this.collidedLanes.has(j)) continue;
-          const activeNext = this.speedTierLanes.get(j);
-          if (activeNext && activeNext.until > now) {
-            if (!LaneAllocator.areSpeedTiersCompatible(speedTier, activeNext.tier)) continue;
-          }
-          const availNext = this.getSlotAvailableAt(j);
-          if (availNext === undefined) continue;
-          const waitNext = Math.max(0, Math.ceil(availNext - now));
-          if (waitNext === 0) {
-            hasAlternate = true;
-            break;
+        if (!zeroWaitCandidates) {
+          // Lazy one-time collection of all remaining zero-wait lanes.
+          zeroWaitCandidates = [];
+          for (let j = i + 1; j < laneEnd; j++) {
+            if (this.collidedLanes.has(j)) continue;
+            const activeJ = this.speedTierLanes.get(j);
+            if (activeJ && activeJ.until > now) {
+              if (!LaneAllocator.areSpeedTiersCompatible(speedTier, activeJ.tier)) continue;
+            }
+            const availJ = this.getSlotAvailableAt(j);
+            if (availJ === undefined) continue;
+            const waitJ = Math.max(0, Math.ceil(availJ - now));
+            if (waitJ === 0) zeroWaitCandidates.push(j);
           }
         }
-        if (hasAlternate) continue;
+        // Only skip if there is at least one alternate zero-wait lane ahead.
+        if (zeroWaitCandidates.length > 0) continue;
       }
       return { laneIndex: i, waitMs: 0 };
     }

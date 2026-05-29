@@ -156,6 +156,13 @@ export class CanvasRenderer extends RendererBase {
   private translationService: TranslationService;
 
   /**
+   * Pending translation results collected between frames.
+   * Promise callbacks push here; renderFrame() applies all at once
+   * to avoid mid-frame mutations that cause translation jank.
+   */
+  private pendingTranslations: Array<{ msg: CanvasMessage; text: string | null }> = [];
+
+  /**
    * Text bitmap cache: pre-rendered text with outline as offscreen canvas.
    * Key = `${font}|${text}|${color}|${strokeWidth}|${strokeColor}`.
    * On cache hit, drawImage() replaces fillText()+strokeText() in the hot path.
@@ -536,6 +543,16 @@ export class CanvasRenderer extends RendererBase {
     const now = performance.now();
     const dims = this.overlay.getDimensions();
     if (!dims) return;
+
+    // Apply any translation results that arrived between frames.
+    // Batch-application prevents mid-frame mutations and the 1-3 frame
+    // visual jank that occurs when translation promises resolve outside rAF.
+    if (this.pendingTranslations.length > 0) {
+      for (const { msg, text } of this.pendingTranslations) {
+        msg.translatedText = text;
+      }
+      this.pendingTranslations.length = 0;
+    }
 
     // Reset device pixel ratio (canvas buffer size may need update on DPR change)
     const dpr = window.devicePixelRatio || 1;
@@ -1075,7 +1092,8 @@ export class CanvasRenderer extends RendererBase {
       this.translationService
         .translate(translatableText)
         .then((translated) => {
-          cmRef.translatedText = translated;
+          // Batch: defer mutation to next renderFrame() for jank-free display.
+          this.pendingTranslations.push({ msg: cmRef, text: translated });
         })
         .catch(() => {
           // Silently ignore individual translation failures.
