@@ -147,7 +147,16 @@ export class LiveChatSource extends ChatSource {
 
       const playback = this.getPlaybackSnapshot();
       if (playback?.paused) {
-        await sleep(LIVE_POLL_FALLBACK_DELAY_MS, signal);
+        // Poll more frequently to detect unpause quickly (~250ms max delay).
+        // This replaces the old 1.5s blind sleep that caused a visible freeze
+        // when the user unpaused during the sleep window.
+        const startTime = Date.now();
+        while (Date.now() - startTime < LIVE_POLL_FALLBACK_DELAY_MS) {
+          if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+          await sleep(250, signal);
+          const current = this.getPlaybackSnapshot();
+          if (!current?.paused) break;
+        }
         continue;
       }
 

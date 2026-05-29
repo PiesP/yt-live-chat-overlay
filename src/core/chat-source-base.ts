@@ -107,6 +107,7 @@ export abstract class ChatSource implements Pauseable {
   private pollController: AbortController | null = null;
   private readonly pollLoopManager = new PollLoopManager();
   protected chatPaused = false;
+  private pauseAbortController: AbortController | null = null;
   private lastActivityTime = 0;
   protected bootstrap: ChatBootstrapData | null = null;
   private readonly messageBuffer = new MessageBuffer();
@@ -128,7 +129,6 @@ export abstract class ChatSource implements Pauseable {
   private static readonly SEEN_IDS_MAX = 5000;
 
   private static readonly PAUSE_POLL_INTERVAL_MS = 250;
-  private static readonly PAUSE_POLL_INTERVAL_MAX_MS = 5000;
 
   constructor(getSettings: () => Readonly<OverlaySettings>) {
     this.getSettings = getSettings;
@@ -270,17 +270,26 @@ export abstract class ChatSource implements Pauseable {
 
   setPaused(paused: boolean): void {
     this.chatPaused = paused;
-    if (!paused) {
+    if (paused) {
+      // Create a fresh controller for the upcoming pause period.
+      // The old one is already aborted (or never created).
+      this.pauseAbortController = new AbortController();
+    } else {
+      // Wake any sleeping waitWhilePaused() by aborting the pause signal.
+      this.pauseAbortController?.abort();
+      this.pauseAbortController = null;
       this.markActivity();
     }
   }
 
-  protected async waitWhilePaused(signal?: AbortSignal): Promise<void> {
-    let backoffMs = ChatSource.PAUSE_POLL_INTERVAL_MS;
+  protected async waitWhilePaused(sessionSignal?: AbortSignal): Promise<void> {
     while (this.chatPaused) {
-      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
-      await sleep(backoffMs, signal);
-      backoffMs = Math.min(backoffMs * 2, ChatSource.PAUSE_POLL_INTERVAL_MAX_MS);
+      if (sessionSignal?.aborted) throw new DOMException('Aborted', 'AbortError');
+      if (this.pauseAbortController?.signal.aborted) return;
+      // Sleep briefly; abort of pauseAbortController (via setPaused(false))
+      // will interrupt via the combined abort check above on next iteration.
+      // Use a short sleep so we don't miss the abort by more than 250ms.
+      await sleep(ChatSource.PAUSE_POLL_INTERVAL_MS, sessionSignal);
     }
   }
 

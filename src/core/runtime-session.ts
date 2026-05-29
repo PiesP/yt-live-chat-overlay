@@ -559,16 +559,14 @@ export class RuntimeSession {
           this.renderer?.pauseForVideo();
           this.chatSource?.setPaused(true);
         } else {
-          // Trim stale queue entries before resuming — when the user
-          // returns from hidden+video-paused state, handleVisibility
-          // skipped trim+resume. The pendingQueue may have accumulated
-          // messages during the hidden period. Trimming here prevents
-          // a visual flood when drainQueue fires on resume.
+          // Trim stale queue entries before resuming — messages may have
+          // accumulated during the paused period. Trimming prevents a visual
+          // flood when drainQueue fires on resume. Always unpause the chat
+          // source so the poll loop wakes even when the tab is hidden
+          // (e.g. unpause via media keys on a second screen).
           this.renderer?.trimBackgroundQueue();
           this.renderer?.resumeForVideo();
-          if (document.visibilityState === 'visible') {
-            this.chatSource?.setPaused(false);
-          }
+          this.chatSource?.setPaused(false);
         }
       },
     };
