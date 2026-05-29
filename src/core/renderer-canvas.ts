@@ -240,10 +240,10 @@ export class CanvasRenderer extends RendererBase {
     const container = overlay.getContainer();
     const canvas = document.createElement('canvas');
     canvas.style.cssText =
-      'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none';
+      'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;text-rendering:optimizeSpeed';
     if (container) container.appendChild(canvas);
     this.canvas = canvas;
-    this.ctx = canvas.getContext('2d');
+    this.ctx = canvas.getContext('2d', { alpha: false });
     if (!this.ctx) {
       log.warn('Failed to get CanvasRenderingContext2D — renderer will be inactive');
     } else if (!canvas.isConnected) {
@@ -714,6 +714,11 @@ export class CanvasRenderer extends RendererBase {
       )
         return;
     }
+    // Cache dimensions once for the entire drain cycle — avoids repeated
+    // overlay.getDimensions() calls in checkPlacement/enqueueMessageWithPlacement.
+    const dims = this.overlay.getDimensions();
+    if (!dims) return;
+
     let skipped = 0;
     const maxSkip = CanvasRenderer.DRAIN_QUEUE_MAX_SKIP;
     let batchIndex = 0; // for stagger delay computation
@@ -725,7 +730,7 @@ export class CanvasRenderer extends RendererBase {
       const msg = this.pendingQueue[this.pendingQueueOffset++];
       if (!msg) continue;
 
-      const result = this.checkPlacement(msg, now);
+      const result = this.checkPlacement(msg, now, dims);
       if (!result.ok) {
         if (result.reason === 'no_lane') {
           // No lane available from the allocator — all lanes are occupied.
@@ -752,7 +757,15 @@ export class CanvasRenderer extends RendererBase {
         continue;
       }
 
-      this.enqueueMessageWithPlacement(msg, now, result.placement, batchIndex, result.dimensions);
+      this.enqueueMessageWithPlacement(
+        msg,
+        now,
+        result.placement,
+        batchIndex,
+        result.dimensions,
+        result.speedTier,
+        dims
+      );
       skipped = 0; // reset after successful enqueue
       batchIndex++;
     }
@@ -793,14 +806,20 @@ export class CanvasRenderer extends RendererBase {
    */
   private checkPlacement(
     message: ChatMessage,
-    now: number
+    now: number,
+    precomputedDims?: OverlayDimensions
   ):
-    | { ok: true; placement: LanePlacement; dimensions: { width: number; height: number } }
+    | {
+        ok: true;
+        placement: LanePlacement;
+        dimensions: { width: number; height: number };
+        speedTier: number;
+      }
     | {
         ok: false;
         reason: DropReason;
       } {
-    const dims = this.overlay.getDimensions();
+    const dims = precomputedDims ?? this.overlay.getDimensions();
     if (!dims) return { ok: false, reason: 'no_lane' };
 
     const mode = this.settings.danmakuMode;
@@ -880,7 +899,7 @@ export class CanvasRenderer extends RendererBase {
       }
     }
 
-    return { ok: true, placement, dimensions };
+    return { ok: true, placement, dimensions, speedTier };
   }
 
   // ── Message enqueue ──────────────────────────────────────────────────
@@ -898,9 +917,11 @@ export class CanvasRenderer extends RendererBase {
     now: number,
     placement: LanePlacement,
     batchIndex = 0,
-    precomputedDimensions?: { width: number; height: number }
+    precomputedDimensions?: { width: number; height: number },
+    precomputedSpeedTier?: number,
+    precomputedDims?: OverlayDimensions
   ): void {
-    const dims = this.overlay.getDimensions();
+    const dims = precomputedDims ?? this.overlay.getDimensions();
     if (!dims) return;
 
     const mode = this.settings.danmakuMode;
@@ -908,7 +929,7 @@ export class CanvasRenderer extends RendererBase {
       precomputedDimensions ?? this.estimateDimensions(message);
 
     const isScrolling = mode === 'scroll' || mode === 'reverse';
-    const speedTier = this.getSpeedTier(message);
+    const speedTier = precomputedSpeedTier ?? this.getSpeedTier(message);
 
     // Horizontal stagger: progressively offset batch messages from the
     // entry edge so they don't all enter in a vertical column. Each

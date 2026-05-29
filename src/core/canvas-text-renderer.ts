@@ -122,7 +122,7 @@ function renderSegment(
 
   // Try bitmap cache first (includes outline rendering)
   if (outline.enabled && outline.widthPx > 0 && outline.opacity > 0) {
-    const key = `${font}|${text}|${color}|${strokeWidth.toFixed(1)}|${strokeColor}`;
+    const key = `${font}|${text}|${color}|${Math.round(strokeWidth)}|${strokeColor}`;
     const bitmap = textBitmapCache.get(key);
     if (bitmap) {
       ctx.drawImage(bitmap, x, y);

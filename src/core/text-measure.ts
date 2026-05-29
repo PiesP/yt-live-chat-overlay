@@ -70,7 +70,15 @@ export function clearTextMeasurementCaches(): void {
  * Results are cached in an LRU cache (max 500 entries) for performance
  * in hot paths like the Canvas2D render loop.
  */
+/** Width of the space character ' ' for each font (cached). */
+const spaceWidthCache = new Map<string, number>();
+
 export function measureTextWidth(text: string, font: string): number {
+  // Fast path for space character (called frequently in wrapLine/buildWrappedLines)
+  if (text === ' ') {
+    const cached = spaceWidthCache.get(font);
+    if (cached !== undefined) return cached;
+  }
   // Two-level lookup: outer key = font, inner key = text
   const fontCache = widthCache.get(font);
   if (fontCache) {
@@ -110,6 +118,12 @@ export function measureTextWidth(text: string, font: string): number {
   }
   innerCache.set(text, width);
   totalCacheEntries++;
+
+  // Populate space-width cache for this font (avoids repeated measureText calls)
+  if (text === ' ') {
+    spaceWidthCache.set(font, width);
+  }
+
   return width;
 }
 
