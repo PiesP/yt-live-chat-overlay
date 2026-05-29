@@ -34,6 +34,10 @@ const CHAT_CONTAINER_SELECTORS = [
   'yt-live-chat-item-list-renderer',
 ] as const;
 
+const TEXT_MESSAGE_RENDERER_SELECTOR = 'yt-live-chat-text-message-renderer';
+const AUTHOR_NAME_SELECTOR = '#author-name';
+const MESSAGE_SELECTOR = '#message';
+
 type DomMessageCallback = (messages: ChatMessage[]) => void;
 
 export type DomWatcherUnsubscribe = () => void;
@@ -57,14 +61,14 @@ export function installDomChatWatcher(onMessages: DomMessageCallback): DomWatche
       const el = node as HTMLElement;
 
       // Check if this element itself is a text-message renderer
-      const textRenderer = el.matches?.('yt-live-chat-text-message-renderer')
+      const textRenderer = el.matches?.(TEXT_MESSAGE_RENDERER_SELECTOR)
         ? el
-        : el.querySelector?.('yt-live-chat-text-message-renderer');
+        : el.querySelector?.(TEXT_MESSAGE_RENDERER_SELECTOR);
 
       if (!textRenderer) continue;
 
-      const authorEl = textRenderer.querySelector?.('#author-name');
-      const messageEl = textRenderer.querySelector?.('#message');
+      const authorEl = textRenderer.querySelector?.(AUTHOR_NAME_SELECTOR);
+      const messageEl = textRenderer.querySelector?.(MESSAGE_SELECTOR);
 
       const author = authorEl?.textContent?.trim() ?? '';
       const text = messageEl?.textContent?.trim() ?? '';

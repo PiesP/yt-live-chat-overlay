@@ -4,6 +4,8 @@
 import type {
   AuthorRateLimitPreset,
   AuthorType,
+  BacklogMode,
+  DanmakuMode,
   FontWeight,
   LanguageSetting,
   LogLevel,
@@ -23,8 +25,18 @@ type OutlineSettingKey = keyof OutlineSettings;
 
 export type { OutlineSettingKey, RootNumericSettingKey, RootScalarSettingKey };
 
-const VALID_BACKLOG_MODES = ['playback', 'recent', 'full', 'none'] as const;
-const VALID_DANMAKU_MODES = ['scroll', 'reverse', 'top', 'bottom'] as const;
+const VALID_BACKLOG_MODES = [
+  'playback',
+  'recent',
+  'full',
+  'none',
+] as const satisfies readonly BacklogMode[];
+const VALID_DANMAKU_MODES = [
+  'scroll',
+  'reverse',
+  'top',
+  'bottom',
+] as const satisfies readonly DanmakuMode[];
 
 const AUTHOR_RATE_LIMIT_VALUES = [
   'off',

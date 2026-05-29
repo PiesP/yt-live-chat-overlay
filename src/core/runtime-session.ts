@@ -62,7 +62,7 @@ interface RuntimeSessionOptions {
   requestRestart: (reason: RuntimeSessionRestartReason) => void;
 }
 
-export type RuntimeSessionStartStatus = 'started' | 'retryable' | 'unavailable' | 'waiting';
+export type { ChatSourceStartStatus as RuntimeSessionStartStatus };
 export type RuntimeSessionRestartReason = 'foreground-return' | 'watchdog' | 'standby-resolved';
 
 interface RuntimeHealth {
@@ -124,7 +124,7 @@ export class RuntimeSession {
     return this.disposed;
   }
 
-  async start(): Promise<RuntimeSessionStartStatus> {
+  async start(): Promise<ChatSourceStartStatus> {
     const signal = this.abortController.signal;
 
     try {

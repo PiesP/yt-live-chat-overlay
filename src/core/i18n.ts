@@ -169,7 +169,6 @@ const KO: TranslationMap = {
   // Legacy key removed (replaced by 'Show all messages regardless of minimum character length')
   'Show all messages regardless of minimum character length':
     '최소 글자 수에 관계없이 모든 메시지 표시',
-  'Short messages shown regardless of length': '길이에 관계없이 짧은 메시지 표시',
   'Minimum character count': '최소 글자 수',
   'Opacity of past messages relative to real-time messages':
     '실시간 메시지 대비 과거 메시지의 불투명도',
@@ -177,8 +176,6 @@ const KO: TranslationMap = {
     '관리자와 소유자의 메시지가 일반 메시지보다 얼마나 오래 표시될지 설정합니다 (1.0 = 동일, 2.0 = 2배)',
   'Translate chat messages in real-time (requires Chrome 138+ for built-in translation)':
     '실시간으로 채팅 메시지를 번역합니다 (Chrome 138+ 내장 번역 필요)',
-  'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.':
-    '번역 기능은 내장 AI가 있는 브라우저가 필요합니다. Chrome 138+ 또는 Edge 143+ Canary를 사용하세요.',
   'Speed-based depth perception: fast messages appear near, slow messages appear far':
     '속도 기반 깊이감: 빠른 메시지는 가까이, 느린 메시지는 멀리 표시',
   'Speed boost for near-layer messages': '가까운 레이어 메시지 속도 증가',
@@ -374,7 +371,6 @@ const JA: TranslationMap = {
   // Legacy key removed (replaced by 'Show all messages regardless of minimum character length')
   'Show all messages regardless of minimum character length':
     '最小文字数に関係なくすべてのメッセージを表示',
-  'Short messages shown regardless of length': '長さに関係なく短いメッセージを表示',
   'Minimum character count': '最小文字数',
   'Opacity of past messages relative to real-time messages':
     'リアルタイムメッセージに対する過去メッセージの不透明度',
@@ -382,8 +378,6 @@ const JA: TranslationMap = {
     'モデレーターと所有者のメッセージを通常より長く表示する倍率 (1.0 = 同じ, 2.0 = 2倍)',
   'Translate chat messages in real-time (requires Chrome 138+ for built-in translation)':
     'チャットメッセージをリアルタイムで翻訳します (Chrome 138+の内蔵翻訳が必要)',
-  'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.':
-    '翻訳機能にはAI内蔵ブラウザが必要です。Chrome 138+またはEdge 143+ Canaryをお使いください。',
   'Speed-based depth perception: fast messages appear near, slow messages appear far':
     '速度ベースの遠近感: 速いメッセージは近く、遅いメッセージは遠くに表示',
   'Speed boost for near-layer messages': '近接レイヤーメッセージの速度ブースト',
@@ -579,7 +573,6 @@ const ES: TranslationMap = {
   // Legacy key removed (replaced by 'Show all messages regardless of minimum character length')
   'Show all messages regardless of minimum character length':
     'Mostrar todos los mensajes sin importar la longitud mínima',
-  'Short messages shown regardless of length': 'Mensajes cortos mostrados sin importar la longitud',
   'Minimum character count': 'Cantidad mínima de caracteres',
   'Opacity of past messages relative to real-time messages':
     'Opacidad de mensajes pasados respecto a los actuales',
@@ -587,8 +580,6 @@ const ES: TranslationMap = {
     'Cuánto más tiempo permanecen visibles los mensajes de moderador y propietario (1.0 = igual, 2.0 = el doble)',
   'Translate chat messages in real-time (requires Chrome 138+ for built-in translation)':
     'Traduce mensajes de chat en tiempo real (requiere Chrome 138+ con traducción integrada)',
-  'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.':
-    'La traducción requiere un navegador con IA integrada. Use Chrome 138+ o Edge 143+ Canary.',
   'Speed-based depth perception: fast messages appear near, slow messages appear far':
     'Percepción de profundidad por velocidad: mensajes rápidos cerca, lentos lejos',
   'Speed boost for near-layer messages': 'Aumento de velocidad para mensajes cercanos',
@@ -783,15 +774,12 @@ const ZH: TranslationMap = {
   'Keep bottom N% of video free of comments': '视频底部N%区域不显示弹幕',
   // Legacy key removed (replaced by 'Show all messages regardless of minimum character length')
   'Show all messages regardless of minimum character length': '无论最小字符数如何，显示所有消息',
-  'Short messages shown regardless of length': '无论长度如何都显示短消息',
   'Minimum character count': '最小字符数',
   'Opacity of past messages relative to real-time messages': '历史消息相对于实时消息的不透明度',
   'How much longer moderator and owner messages stay visible (1.0 = same as regular, 2.0 = twice as long)':
     '版主和频道主的消息比普通消息多显示多长时间 (1.0 = 相同, 2.0 = 两倍)',
   'Translate chat messages in real-time (requires Chrome 138+ for built-in translation)':
     '实时翻译聊天消息 (需要 Chrome 138+ 内置翻译)',
-  'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.':
-    '翻译功能需要内置AI的浏览器。请使用 Chrome 138+ 或 Edge 143+ Canary。',
   'Speed-based depth perception: fast messages appear near, slow messages appear far':
     '基于速度的深度感知：快速消息显示在近处，慢速消息显示在远处',
   'Speed boost for near-layer messages': '近处图层消息速度提升',

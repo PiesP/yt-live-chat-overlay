@@ -12,7 +12,7 @@
  * number counters and timestamps.
  */
 
-import type { BurstLevel, SessionMetrics } from '@app-types';
+import type { BurstLevel, DropReason, SessionMetrics } from '@app-types';
 import {
   DEBUG_OVERLAY_BG,
   DEBUG_OVERLAY_RIGHT,
@@ -64,7 +64,7 @@ export class ObservabilityReporter {
   }
 
   // called when a message is dropped, with optional reason for diagnostics
-  onMessageDropped(reason?: string): void {
+  onMessageDropped(reason?: DropReason): void {
     this.metrics.totalDropped++;
     this.totalDroppedInWindow++;
 

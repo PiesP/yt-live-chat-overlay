@@ -35,7 +35,7 @@ const superChatColors = {
   red: { r: 230, g: 33, b: 23 },
 } as const satisfies Readonly<Record<SuperChatInfo['tier'], RgbColor>>;
 
-export const SUPERCHAT_TIER_KEYS = Object.keys(superChatColors) as Array<SuperChatInfo['tier']>;
+export const SUPERCHAT_TIER_KEYS = Object.keys(superChatColors) as (keyof typeof superChatColors)[];
 
 export const colors = {
   authorNormal: '#FFFFFF',

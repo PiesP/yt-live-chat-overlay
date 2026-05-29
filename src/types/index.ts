@@ -19,6 +19,14 @@ export type DanmakuMode = 'scroll' | 'reverse' | 'top' | 'bottom';
 export type SuperChatTier = 'blue' | 'cyan' | 'green' | 'yellow' | 'orange' | 'magenta' | 'red';
 /** Author rate-limiting preset modes */
 export type AuthorRateLimitPreset = 'off' | 'normal' | 'strict';
+/** Drop reason for observability tracking */
+export type DropReason =
+  | 'video_paused'
+  | 'rate_limited'
+  | 'queue_priority'
+  | 'queue_replaced'
+  | 'collision'
+  | 'no_lane';
 /** Backlog injection modes */
 export type BacklogMode = 'playback' | 'recent' | 'full' | 'none';
 /** Language setting: auto-detect or explicit locale */

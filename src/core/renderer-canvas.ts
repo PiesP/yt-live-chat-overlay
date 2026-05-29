@@ -27,7 +27,7 @@
  * - BUG-5/6: image caches only store loaded images, errors don't cache
  */
 
-import type { ChatMessage, OverlayDimensions, OverlaySettings } from '@app-types';
+import type { ChatMessage, DropReason, OverlayDimensions, OverlaySettings } from '@app-types';
 import { renderMembershipCard, renderSuperChatCard } from '@core/canvas-card-renderers';
 import { drawRoundRect, renderRegularMessage, strokeTextOutline } from '@core/canvas-text-renderer';
 import { getTranslatableText } from '@core/chat-message-helpers';
@@ -798,7 +798,7 @@ export class CanvasRenderer extends RendererBase {
     | { ok: true; placement: LanePlacement; dimensions: { width: number; height: number } }
     | {
         ok: false;
-        reason: 'collision' | 'no_lane';
+        reason: DropReason;
       } {
     const dims = this.overlay.getDimensions();
     if (!dims) return { ok: false, reason: 'no_lane' };
