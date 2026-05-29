@@ -54,6 +54,7 @@ function seedBootstrapIfReady(chatSource: ChatSource, result: ChatBootstrapResul
 }
 const CHAT_STALL_TIMEOUT_MS = 30_000;
 const LONG_IDLE_RESTART_MS = 60_000;
+export const ABSOLUTE_MAX_IDLE_RESTART_MS = 30 * 60 * 1000; // 30 minutes
 
 interface RuntimeSessionOptions {
   targetUrl: string;
@@ -147,7 +148,7 @@ export class RuntimeSession {
       if (chatStarted === 'waiting') {
         // Start foreground listeners so the render loop pauses when the
         // tab is hidden — avoids wasted GPU/CPU during long standby waits.
-        if (document.hidden) {
+        if (document.visibilityState !== 'visible') {
           this.noteHidden();
         }
         this.startForegroundListeners();
@@ -163,7 +164,7 @@ export class RuntimeSession {
       this.sessionReady = true;
 
       // Foreground recovery: listen for tab/window visibility changes
-      if (document.hidden) {
+      if (document.visibilityState !== 'visible') {
         this.noteHidden();
       }
 
@@ -456,11 +457,13 @@ export class RuntimeSession {
     const video = this.getVideoElement();
     const isVideoPaused = video?.paused ?? true;
 
+    const isVeryLongIdle = idleDurationMs >= ABSOLUTE_MAX_IDLE_RESTART_MS;
     const shouldRestart =
-      !isVideoPaused &&
-      (!renderable ||
-        idleDurationMs >= LONG_IDLE_RESTART_MS ||
-        (this.sessionReady && chat != null && (!chat.observerAlive || !chat.recentlyActive)));
+      isVeryLongIdle ||
+      (!isVideoPaused &&
+        (!renderable ||
+          idleDurationMs >= LONG_IDLE_RESTART_MS ||
+          (this.sessionReady && chat != null && (!chat.observerAlive || !chat.recentlyActive))));
 
     return { idleDurationMs, renderable, chat, shouldRestart };
   }
@@ -480,7 +483,7 @@ export class RuntimeSession {
     const cleanups: (() => void)[] = [];
 
     const handleVisibility = (): void => {
-      if (document.hidden) {
+      if (document.visibilityState !== 'visible') {
         this.noteHidden();
         this.renderer?.pause();
         this.renderer?.trimBackgroundQueue();
@@ -559,7 +562,7 @@ export class RuntimeSession {
           // a visual flood when drainQueue fires on resume.
           this.renderer?.trimBackgroundQueue();
           this.renderer?.resumeForVideo();
-          if (!document.hidden) {
+          if (document.visibilityState === 'visible') {
             this.chatSource?.setPaused(false);
           }
         }
@@ -584,7 +587,7 @@ export class RuntimeSession {
     this.chatWatchdogTimer = setInterval(() => {
       try {
         // Skip checks while disposed, hidden, or mid-restart
-        if (this.disposed || document.hidden || this.restartRequested) {
+        if (this.disposed || document.visibilityState !== 'visible' || this.restartRequested) {
           return;
         }
 
