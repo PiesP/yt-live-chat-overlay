@@ -8,6 +8,8 @@
  * SuperChat color resolution.
  */
 
+import type { RgbColor, SuperChatTier } from '@app-types';
+
 /** Parse any supported color string (hex or rgb/rgba) to RgbColor. */
 export function parseAnyColor(colorString: string): RgbColor | null {
   if (colorString.startsWith('#')) {
@@ -79,8 +81,6 @@ export function computeReadableTextColor(backgroundColor: string): string {
   if (!rgb) return '#ffffff';
   return relativeLuminance(rgb) > 0.5 ? '#000000' : '#ffffff';
 }
-
-import type { RgbColor, SuperChatTier } from '@app-types';
 
 /** Resolve SuperChat display color: use YouTube's color if available, else tier default. */
 export function resolveSuperChatRgb(
