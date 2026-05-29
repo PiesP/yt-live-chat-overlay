@@ -12,12 +12,7 @@ import type { ChatMessage, ContentSegment, ImageAsset, OverlaySettings } from '@
 import { EMOJI_ALIAS_PATTERN } from '@core/chat-message-helpers';
 import { computeOutlineColor } from '@core/color-utils';
 import { AUTHOR_PHOTO_SHADOW, rendererLayout, spacing } from '@core/design-tokens';
-import {
-  getFontString,
-  measureTextHeight,
-  measureTextWidth,
-  wrapTextLines,
-} from '@core/text-measure';
+import { getFontString, measureTextHeight, measureTextWidth } from '@core/text-measure';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -453,56 +448,6 @@ function wrapCharPieces(word: string, font: string, maxWidth: number): TextRende
   }
 
   return pieces;
-}
-
-/**
- * Render text with word-wrapping, respecting `maxWidth` and `maxLines`.
- *
- * Uses the same `wrapTextLines()` algorithm as the dimension estimator so
- * rendered output always matches the predicted layout.
- *
- * @returns The Y position after the last rendered line.
- */
-export function renderWrappedText(
-  ctx: CanvasRenderingContext2D,
-  text: string,
-  x: number,
-  y: number,
-  maxWidth: number,
-  maxLines: number,
-  color: string,
-  fontSize: number,
-  settings: OverlaySettings,
-  textBitmapCache: Map<string, HTMLCanvasElement>,
-  getFontFn: (fontSize: number) => string
-): number {
-  const font = getFontFn(fontSize);
-  const allLines = wrapTextLines(text, font, maxWidth);
-  const lineHeight = Math.ceil(measureTextHeight(font, fontSize));
-  const lines = allLines.length > maxLines ? allLines.slice(0, maxLines) : allLines;
-
-  let cursorY = y;
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i] ?? '';
-    const isLastLine = i === lines.length - 1;
-    const isTruncated = isLastLine && allLines.length > maxLines;
-
-    const renderText = isTruncated ? `${line}\u2026` : line;
-    renderSegment(
-      ctx,
-      renderText,
-      x,
-      cursorY,
-      color,
-      fontSize,
-      settings,
-      textBitmapCache,
-      getFontFn
-    );
-    cursorY += lineHeight;
-  }
-
-  return cursorY;
 }
 
 // ── Author rendering ────────────────────────────────────────────────────────

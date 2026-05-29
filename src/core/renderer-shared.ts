@@ -157,7 +157,7 @@ function estimateSuperChatDimensions(
   const actualInnerWidth = Math.max(1, width - paddingH * 2);
   const wrappedLines = wrapTextLines(message.text, font, actualInnerWidth);
   const lineCount = Math.min(wrappedLines.length, maxBodyLines);
-  // Per-line rounding matches renderWrappedText(), which rounds each line's
+  // Per-line rounding matches the renderer, which rounds each line's
   // height individually via Math.ceil(measureTextHeight(...)).
   const lineHeight = Math.ceil(bodyLineHeight);
   const textHeight = lineHeight * lineCount;
@@ -197,7 +197,7 @@ function estimateMembershipDimensions(
   const actualInnerWidth = Math.max(1, width - paddingH * 2);
   const wrappedLines = wrapTextLines(message.text, font, actualInnerWidth);
   const bodyLineCount = Math.min(wrappedLines.length, maxBodyLines);
-  // Per-line rounding matches renderWrappedText() (rounds each line individually).
+  // Per-line rounding matches the renderer (rounds each line individually).
   const textHeight = Math.ceil(bodyLineHeight) * bodyLineCount;
 
   // Include author-to-body gap when author section is present (matching renderMembership)
