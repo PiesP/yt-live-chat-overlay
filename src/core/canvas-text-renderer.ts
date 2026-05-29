@@ -282,7 +282,7 @@ export function buildWrappedLines(
     if (currentLine.length > 0 && currentWidth + needed > maxWidth) {
       // Oversize single word — character-level wrap (CJK etc.)
       if (piece.type === 'text' && piece.width > maxWidth) {
-        maxLineWidth = Math.max(maxLineWidth, lineWidthOf(currentLine, spaceWidth));
+        maxLineWidth = Math.max(maxLineWidth, currentWidth);
         lines.push(currentLine);
         const charPieces = wrapCharPieces(piece.text, font, maxWidth);
         if (charPieces.length <= 1) {
@@ -305,7 +305,7 @@ export function buildWrappedLines(
       }
 
       // Start a new line with this piece
-      maxLineWidth = Math.max(maxLineWidth, lineWidthOf(currentLine, spaceWidth));
+      maxLineWidth = Math.max(maxLineWidth, currentWidth);
       lines.push(currentLine);
       currentLine = [piece];
       currentWidth = piece.width;
@@ -320,25 +320,11 @@ export function buildWrappedLines(
   }
 
   if (currentLine.length > 0) {
-    maxLineWidth = Math.max(maxLineWidth, lineWidthOf(currentLine, spaceWidth));
+    maxLineWidth = Math.max(maxLineWidth, currentWidth);
     lines.push(currentLine);
   }
 
   return { lines, maxLineWidth };
-}
-
-/** Compute the rendered width of a line of pieces (excluding trailing space). */
-function lineWidthOf(line: readonly WrappedRenderPiece[], spaceWidth: number): number {
-  let w = 0;
-  let prevText = false;
-  for (const piece of line) {
-    if (prevText && piece.type === 'text') {
-      w += spaceWidth;
-    }
-    w += piece.width;
-    prevText = piece.type === 'text';
-  }
-  return w;
 }
 
 /**

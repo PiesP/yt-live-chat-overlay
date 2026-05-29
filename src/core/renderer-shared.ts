@@ -151,11 +151,19 @@ function estimateSuperChatDimensions(
     Math.min(rendererLayout.superchatMaxWidth, contentWidth + paddingH * 2)
   );
 
-  // Pass 2: re-build wrapped lines at the actual card inner width so line count
-  // matches what renderSuperChat will produce. Uses the same SSOT algorithm.
+  // Pass 2: re-wrap at actual card inner width to get line count.
+  // Skip when Pass 1 already covers the worst case:
+  //  - Card is at maxWidth → same inner width as Pass 1.
+  //  - Content fits in 0-1 lines → line count won't change at narrower width.
+  const pass1LineCount = pass1Result.lines.length;
   const actualInnerWidth = Math.max(1, width - paddingH * 2);
-  const pass2Result = buildWrappedLines(message.content, font, actualInnerWidth, emojiSize);
-  const lineCount = Math.min(pass2Result.lines.length, maxBodyLines);
+  let lineCount: number;
+  if (actualInnerWidth === maxInnerWidth || pass1LineCount <= 1) {
+    lineCount = Math.min(pass1LineCount, maxBodyLines);
+  } else {
+    const pass2Result = buildWrappedLines(message.content, font, actualInnerWidth, emojiSize);
+    lineCount = Math.min(pass2Result.lines.length, maxBodyLines);
+  }
   // Per-line rounding matches the renderer, which rounds each line's
   // height individually via Math.ceil(measureTextHeight(...)).
   const lineHeight = Math.ceil(bodyLineHeight);
