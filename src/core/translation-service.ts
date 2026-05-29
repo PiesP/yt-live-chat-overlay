@@ -73,6 +73,9 @@ export class TranslationService {
   /** Consecutive translate() failures. On threshold, the translator is invalidated. */
   private consecutiveFailures = 0;
   private static readonly MAX_CONSECUTIVE_FAILURES = 6;
+  /** Minimum cooldown between recovery attempts (prevents death-loops). */
+  private static readonly RECOVERY_COOLDOWN_MS = 5000;
+  private lastRecoveryAttempt = 0;
   /** Translation result cache to avoid re-translating repeated short text (e.g. "LOL", "ㅋㅋㅋ"). */
   private translationCache: Map<string, string> = new Map();
   private static readonly TRANSLATION_CACHE_MAX = 200;
@@ -240,6 +243,14 @@ export class TranslationService {
 
     // ── Auto-recovery: recreate translator if it died ─────────────────
     if (!this.translator && this.enabled && this.pendingSource && this.pendingTarget) {
+      // Enforce cooldown between recovery attempts to prevent death-loops
+      // where the translator is recreated and immediately fails again.
+      const elapsed = Date.now() - this.lastRecoveryAttempt;
+      if (elapsed < TranslationService.RECOVERY_COOLDOWN_MS) {
+        const waitMs = TranslationService.RECOVERY_COOLDOWN_MS - elapsed;
+        log.debug(`Recovery cooldown — waiting ${waitMs}ms before next attempt`);
+        await new Promise((r) => setTimeout(r, waitMs));
+      }
       // Don't stack recovery attempts — if a configure is already in-flight,
       // wait for it and re-check. Prevents N concurrent callers from each
       // spawning their own doConfigure().
@@ -249,6 +260,7 @@ export class TranslationService {
       // Re-check after waiting — the in-flight configure may have succeeded.
       if (!this.translator) {
         log.info('Translator instance is dead — attempting auto-recovery…');
+        this.lastRecoveryAttempt = Date.now();
         this.configurePromise = this.doConfigure(this.pendingSource, this.pendingTarget);
         try {
           await this.configurePromise;
@@ -288,9 +300,10 @@ export class TranslationService {
       return result;
     } catch (err) {
       this.consecutiveFailures++;
+      const errName = err instanceof DOMException ? err.name : 'Unknown';
       if (this.consecutiveFailures >= TranslationService.MAX_CONSECUTIVE_FAILURES) {
         log.warn(
-          `Translator failed ${this.consecutiveFailures} times consecutively — invalidating instance for recovery`
+          `Translator failed ${this.consecutiveFailures} times consecutively (last: ${errName}) — invalidating instance for recovery`
         );
         // Preserve the language pair for retry, then release the dead instance.
         if (!this.pendingSource && this.currentSource) {
@@ -311,7 +324,7 @@ export class TranslationService {
         this.currentSource = null;
         this.consecutiveFailures = 0;
       } else {
-        log.debug('Translation failed:', err);
+        log.debug(`Translation failed (${errName}):`, err);
       }
       return null;
     } finally {
@@ -340,6 +353,7 @@ export class TranslationService {
     this.pendingTarget = null;
     this.enabled = false;
     this.consecutiveFailures = 0;
+    this.lastRecoveryAttempt = 0;
     this.translateMutex = null;
     this.translationCache.clear();
   }
