@@ -187,6 +187,9 @@ function renderContentSegments(
       const cached = emojiCache.get(seg.emoji.url);
       const img = cached?.complete && cached.naturalWidth > 0 ? cached : null;
       if (img) {
+        // LRU touch: re-insert to move key to end of Map
+        emojiCache.delete(seg.emoji.url);
+        emojiCache.set(seg.emoji.url, img);
         ctx.drawImage(img, cursorX, y, emojiSize, emojiSize);
       } else if (seg.emoji.fallbackText) {
         renderSegment(
@@ -400,6 +403,9 @@ export function renderWrappedContentSegments(
         const cached = emojiCache.get(piece.emoji.url);
         const img = cached?.complete && cached.naturalWidth > 0 ? cached : null;
         if (img) {
+          // LRU touch: re-insert to move key to end of Map
+          emojiCache.delete(piece.emoji.url);
+          emojiCache.set(piece.emoji.url, img);
           ctx.drawImage(img, cursorX, cursorY, emojiSize, emojiSize);
         } else if (piece.emoji.fallbackText) {
           renderSegment(
@@ -520,8 +526,12 @@ export function drawAuthorSection(
   const nameHeight = measureTextHeight(nameFont, authorFontSize);
   const sectionHeight = Math.max(rendererLayout.authorPhotoSize, nameHeight);
 
-  const photo = message.authorPhotoUrl ? authorPhotoCache.get(message.authorPhotoUrl) : undefined;
-  if (photo?.complete && photo.naturalWidth > 0) {
+  const authorPhotoUrl = message.authorPhotoUrl;
+  const photo = authorPhotoUrl ? authorPhotoCache.get(authorPhotoUrl) : undefined;
+  if (photo?.complete && photo.naturalWidth > 0 && authorPhotoUrl) {
+    // LRU touch: re-insert to move key to end of Map
+    authorPhotoCache.delete(authorPhotoUrl);
+    authorPhotoCache.set(authorPhotoUrl, photo);
     drawAuthorPhoto(ctx, photo, textX, startY);
   }
   const nameX = textX + (photo ? rendererLayout.authorPhotoSize + spacing.xs : 0);

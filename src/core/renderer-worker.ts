@@ -455,7 +455,7 @@ function renderFrame(): void {
   cleanupExpired(now);
 
   // Clear canvas
-  ctx.reset();
+  ctx.clearRect(0, 0, width, height);
 
   if (activeMessages.length === 0) {
     // Stats every ~60 frames
