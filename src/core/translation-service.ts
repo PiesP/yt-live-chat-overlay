@@ -76,6 +76,9 @@ export class TranslationService {
   /** Minimum cooldown between recovery attempts (prevents death-loops). */
   private static readonly RECOVERY_COOLDOWN_MS = 5000;
   private lastRecoveryAttempt = 0;
+  /** Number of death→recovery cycles this session. Capped to prevent noise. */
+  private recoveryCycleCount = 0;
+  private static readonly MAX_RECOVERY_CYCLES = 3;
   /** Translation result cache to avoid re-translating repeated short text (e.g. "LOL", "ㅋㅋㅋ"). */
   private translationCache: Map<string, string> = new Map();
   private static readonly TRANSLATION_CACHE_MAX = 200;
@@ -189,6 +192,7 @@ export class TranslationService {
       this.pendingSource = null;
       this.pendingTarget = null;
       this.consecutiveFailures = 0;
+      this.recoveryCycleCount = 0;
       log.info(`Translator ready: ${sourceLanguage} → ${targetLanguage}`);
     } catch (err) {
       // create() may fail if user activation was missing (NotAllowedError)
@@ -243,6 +247,18 @@ export class TranslationService {
 
     // ── Auto-recovery: recreate translator if it died ─────────────────
     if (!this.translator && this.enabled && this.pendingSource && this.pendingTarget) {
+      // Cap recovery cycles — after MAX_RECOVERY_CYCLES death-recovery
+      // cycles, give up and disable auto-recovery. The Edge Translator API
+      // is inherently unstable; endless cycling generates noise without
+      // improving the user experience.
+      if (this.recoveryCycleCount >= TranslationService.MAX_RECOVERY_CYCLES) {
+        log.warn(
+          `Translator died ${this.recoveryCycleCount} times — disabling auto-recovery for this session. Translation will resume after a settings change or page reload.`
+        );
+        this.pendingSource = null;
+        this.pendingTarget = null;
+        return null;
+      }
       // Enforce cooldown between recovery attempts to prevent death-loops
       // where the translator is recreated and immediately fails again.
       const elapsed = Date.now() - this.lastRecoveryAttempt;
@@ -302,9 +318,18 @@ export class TranslationService {
       this.consecutiveFailures++;
       const errName = err instanceof DOMException ? err.name : 'Unknown';
       if (this.consecutiveFailures >= TranslationService.MAX_CONSECUTIVE_FAILURES) {
-        log.warn(
-          `Translator failed ${this.consecutiveFailures} times consecutively (last: ${errName}) — invalidating instance for recovery`
-        );
+        this.recoveryCycleCount++;
+        // Downgrade repeated threshold warnings to debug — the first cycle
+        // is informative; subsequent cycles are noise from an unstable API.
+        if (this.recoveryCycleCount === 1) {
+          log.warn(
+            `Translator failed ${this.consecutiveFailures} times consecutively (last: ${errName}) — invalidating instance for recovery`
+          );
+        } else {
+          log.debug(
+            `Translator failed again (cycle #${this.recoveryCycleCount}, last: ${errName}) — invalidating instance`
+          );
+        }
         // Preserve the language pair for retry, then release the dead instance.
         if (!this.pendingSource && this.currentSource) {
           this.pendingSource = this.currentSource;
@@ -353,6 +378,7 @@ export class TranslationService {
     this.pendingTarget = null;
     this.enabled = false;
     this.consecutiveFailures = 0;
+    this.recoveryCycleCount = 0;
     this.lastRecoveryAttempt = 0;
     this.translateMutex = null;
     this.translationCache.clear();
