@@ -163,6 +163,11 @@ export class RuntimeSession {
 
       this.sessionReady = true;
 
+      // Show standby status until first chat message arrives.
+      // Provides immediate visual feedback that the overlay is active
+      // even when the chat is empty (pre-live streams).
+      this.renderer?.setStandbyStatus(true);
+
       // Foreground recovery: listen for tab/window visibility changes
       if (document.visibilityState !== 'visible') {
         this.noteHidden();
@@ -337,6 +342,9 @@ export class RuntimeSession {
         return;
       }
 
+      // Clear standby on first message arrival (idempotent).
+      renderer.setStandbyStatus(false);
+
       // Utilization-aware throttle for live bursts: when lanes are >80% full,
       // route through the backlog controller even for small batches so messages
       // get Poisson-spaced injection instead of hitting the pendingQueue all at
@@ -505,24 +513,16 @@ export class RuntimeSession {
         return;
       }
 
-      // When video is actually playing (not paused, not in premiere countdown),
-      // resume chat polling and the renderer. During countdown the video exists
-      // but paused=true; resumeForVideo() will kick in when broadcast starts.
-      const video = this.getVideoElement();
-      const isVideoPlaying = video ? !video.paused : false;
-      if (isVideoPlaying) {
-        // Trim stale queue entries BEFORE unpausing chat — otherwise
-        // freshly arrived messages in the window between setPaused(false)
-        // and resume() would be dropped by the trim.
-        this.renderer?.trimBackgroundQueue();
-        this.chatSource?.setPaused(false);
-      }
+      // Always resume on foreground return — the renderer gate-checks
+      // isVideoPaused internally. On pre-live pages, the DOM video.paused
+      // is true (countdown), but isVideoPaused is false (not user-initiated),
+      // so the render loop correctly restarts. Chat source resume ensures
+      // messages accumulated during the hidden period are processed.
+      this.renderer?.trimBackgroundQueue();
+      this.chatSource?.setPaused(false);
+      this.renderer?.resume();
 
-      if (isVideoPlaying) {
-        this.renderer?.resume();
-      }
-
-      if (isVideoPlaying && this.getRuntimeHealthSnapshot().shouldRestart) {
+      if (this.getRuntimeHealthSnapshot().shouldRestart) {
         this.requestManagedRestart('foreground-return');
         return;
       }
