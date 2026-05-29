@@ -165,6 +165,10 @@ export class ObservabilityReporter {
       `position:fixed;top:${DEBUG_OVERLAY_TOP};right:${DEBUG_OVERLAY_RIGHT};z-index:${DEBUG_OVERLAY_Z_INDEX};` +
       `background:${DEBUG_OVERLAY_BG};color:#0f0;font:12px/1.4 monospace;` +
       'padding:8px 12px;border-radius:4px;min-width:220px;pointer-events:none;user-select:none';
+    // Pre-create 5 child divs once — avoids DOM churn on every frame
+    for (let i = 0; i < 5; i++) {
+      el.appendChild(document.createElement('div'));
+    }
     document.body.appendChild(el);
     this.debugOverlayEl = el;
   }
@@ -179,14 +183,11 @@ export class ObservabilityReporter {
       `Active: ${m.activeMessages} | Lane: ${(m.laneUtilization * 100).toFixed(0)}%`,
       `Backlog: ${(m.backlogProgress * 100).toFixed(0)}%`,
     ];
-    // Use DOM API instead of innerHTML to avoid any XSS surface
-    this.debugOverlayEl.replaceChildren(
-      ...lines.map((line) => {
-        const div = document.createElement('div');
-        div.textContent = line;
-        return div;
-      })
-    );
+    const children = this.debugOverlayEl.children;
+    for (let i = 0; i < lines.length; i++) {
+      const child = children.item(i);
+      if (child) child.textContent = lines[i] as string;
+    }
   }
 
   private destroyDebugOverlay(): void {

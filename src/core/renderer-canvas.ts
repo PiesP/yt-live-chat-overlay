@@ -104,10 +104,24 @@ function createCanvasMessage(params: CreateCanvasMessageParams): CanvasMessage {
   };
 }
 
-/** Remove expired messages in-place. Returns the new logical length. */
-function cleanupExpiredMessages(messages: CanvasMessage[], now: number): number {
+/**
+ * Remove expired messages in-place, simultaneously maintaining the
+ * lane-indexed map incrementally during compaction.
+ * Returns the new logical length and whether any messages were removed.
+ */
+function cleanupExpiredMessages(
+  messages: CanvasMessage[],
+  now: number,
+  activeMessagesByLane: Map<number, CanvasMessage[]>
+): { newLength: number; anyRemoved: boolean } {
   const oldLength = messages.length;
   let writeIdx = 0;
+  let anyRemoved = false;
+
+  // Clear lane map — will be rebuilt during the single compaction pass
+  // so stale lane entries are automatically purged.
+  activeMessagesByLane.clear();
+
   for (let i = 0; i < oldLength; i++) {
     const msg = messages[i];
     if (!msg) continue;
@@ -115,13 +129,22 @@ function cleanupExpiredMessages(messages: CanvasMessage[], now: number): number 
     if (elapsed < msg.duration) {
       messages[writeIdx] = msg;
       writeIdx++;
+      // Maintain lane map incrementally as part of the same pass.
+      let laneList = activeMessagesByLane.get(msg.laneIndex);
+      if (!laneList) {
+        laneList = [];
+        activeMessagesByLane.set(msg.laneIndex, laneList);
+      }
+      laneList.push(msg);
+    } else {
+      anyRemoved = true;
     }
   }
   // Null out tail entries to avoid stale references in the active array.
   for (let i = writeIdx; i < oldLength; i++) {
     messages[i] = undefined as unknown as CanvasMessage;
   }
-  return writeIdx;
+  return { newLength: writeIdx, anyRemoved };
 }
 
 /** Accumulate paused duration across all active messages. */
@@ -623,22 +646,21 @@ export class CanvasRenderer extends RendererBase {
       canvas.height = dims.height * dpr;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
-    // O(n) single-pass cleanup of expired messages — before clearRect so
-    // we can skip clearRect entirely for empty frames.
-    const newLength = cleanupExpiredMessages(this.activeMessages, now);
-    if (newLength < this.activeMessages.length) {
+    // Single-pass cleanup of expired messages + incremental lane map maintenance.
+    // When messages are removed, truncate the active array and prune empty lane entries.
+    const { newLength, anyRemoved } = cleanupExpiredMessages(
+      this.activeMessages,
+      now,
+      this.activeMessagesByLane
+    );
+    if (anyRemoved) {
       this.activeMessages.length = newLength;
-      // Rebuild lane index after compaction — expired messages are removed
-      this.activeMessagesByLane.clear();
-      for (let i = 0; i < newLength; i++) {
-        const msg = this.activeMessages[i];
-        if (!msg) continue;
-        let laneList = this.activeMessagesByLane.get(msg.laneIndex);
-        if (!laneList) {
-          laneList = [];
-          this.activeMessagesByLane.set(msg.laneIndex, laneList);
+      // Remove lanes that now have 0 messages — stale empty entries waste
+      // iteration time in lane-scoped lookups.
+      for (const [lane, msgs] of this.activeMessagesByLane) {
+        if (msgs.length === 0) {
+          this.activeMessagesByLane.delete(lane);
         }
-        laneList.push(msg);
       }
       this.observability.updateActiveMessages(this.activeMessages.length);
       this.observability.updateQueueDepth(this.pendingQueue.length);
@@ -1432,6 +1454,9 @@ export class CanvasRenderer extends RendererBase {
     // When settings change, cached dimensions become stale
     // (font, size, weight, family, maxBodyLines all affect dimension calculation).
     this.dimensionCache.clear();
+    // Text bitmap cache also depends on font/size/color settings — clear to
+    // avoid stale pre-rendered canvases being reused with the wrong style.
+    this.textBitmapCache.clear();
     // Pre-compute 1/fadeDurationMs to avoid per-frame divisions in opacity calc
     this.invFadeDuration = 1 / Math.max(1, settings.fadeDurationMs);
 
