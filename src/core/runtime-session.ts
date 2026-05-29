@@ -318,6 +318,10 @@ export class RuntimeSession {
       const renderer = this.renderer;
       if (!renderer) return;
 
+      // Clear standby on first message arrival — must happen before routing
+      // decisions (backlog, timestamp paths return early and skip it otherwise).
+      renderer.setStandbyStatus(false);
+
       const msgs = Array.isArray(messages) ? messages : [messages];
 
       // Replay messages carry videoOffsetMs from YouTube's API — they have
