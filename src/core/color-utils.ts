@@ -99,7 +99,7 @@ const SUPERCHAT_TOP_OPACITY_BOOST = 0.06;
 const SUPERCHAT_BOTTOM_OPACITY_REDUCTION = 0.08;
 
 /** Minimum opacity for SuperChat card gradient (clamps base and bottom). */
-const SUPERCHAT_MIN_OPACITY = 0.4;
+const SUPERCHAT_MIN_OPACITY = 0.35;
 
 /** Compute top/middle/bottom opacities for SuperChat card gradient. */
 export function computeSuperChatOpacities(superChatOpacity: number): {
