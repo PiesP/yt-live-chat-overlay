@@ -50,6 +50,8 @@ export type DomWatcherUnsubscribe = () => void;
  */
 export function installDomChatWatcher(onMessages: DomMessageCallback): DomWatcherUnsubscribe {
   let observer: MutationObserver | null = null;
+  let mutationBatchPending = false;
+  let pendingMutations: MutationRecord[][] = [];
 
   const extractMessages = (addedNodes: NodeList): ChatMessage[] => {
     const messages: ChatMessage[] = [];
@@ -110,12 +112,31 @@ export function installDomChatWatcher(onMessages: DomMessageCallback): DomWatche
     }
   };
 
+  /**
+   * RAF-batched mutation callback.
+   * Multiple MutationObserver callbacks within the same animation frame
+   * are coalesced into a single handleMutations call, reducing redundant
+   * DOM queries during chat bursts.
+   */
+  const onMutation = (mutations: MutationRecord[]): void => {
+    pendingMutations.push(mutations);
+    if (!mutationBatchPending) {
+      mutationBatchPending = true;
+      requestAnimationFrame(() => {
+        mutationBatchPending = false;
+        const batch = pendingMutations.flat();
+        pendingMutations = [];
+        handleMutations(batch);
+      });
+    }
+  };
+
   // Find the chat container and attach observer.
   for (const selector of CHAT_CONTAINER_SELECTORS) {
     const container = document.querySelector<HTMLElement>(selector);
     if (!container) continue;
 
-    observer = new MutationObserver(handleMutations);
+    observer = new MutationObserver(onMutation);
     observer.observe(container, { childList: true, subtree: true });
     log.info(`DOM chat watcher installed on: ${selector}`);
     return () => {

@@ -190,10 +190,14 @@ export class CanvasRenderer extends RendererBase {
   private standbyStatus = false;
   private translationService: TranslationService;
 
+  /** Max translations to apply per frame to avoid single-frame spikes during chat bursts. */
+  private static readonly MAX_TRANSLATIONS_PER_FRAME = 5;
+
   /**
    * Pending translation results collected between frames.
-   * Promise callbacks push here; renderFrame() applies all at once
-   * to avoid mid-frame mutations that cause translation jank.
+   * Promise callbacks push here; renderFrame() applies up to
+   * MAX_TRANSLATIONS_PER_FRAME per frame, leaving the rest for
+   * subsequent frames to avoid frame spikes during chat bursts.
    */
   private pendingTranslations: Array<{ msg: CanvasMessage; text: string | null }> = [];
 
@@ -628,14 +632,14 @@ export class CanvasRenderer extends RendererBase {
     const dims = this.overlay.getDimensions();
     if (!dims) return;
 
-    // Apply any translation results that arrived between frames.
-    // Batch-application prevents mid-frame mutations and the 1-3 frame
-    // visual jank that occurs when translation promises resolve outside rAF.
+    // Apply up to MAX_TRANSLATIONS_PER_FRAME translation results that arrived
+    // between frames. Incremental drain prevents single-frame spikes during
+    // chat bursts when many translations resolve simultaneously.
     if (this.pendingTranslations.length > 0) {
-      for (const { msg, text } of this.pendingTranslations) {
+      const batch = this.pendingTranslations.splice(0, CanvasRenderer.MAX_TRANSLATIONS_PER_FRAME);
+      for (const { msg, text } of batch) {
         msg.translatedText = text;
       }
-      this.pendingTranslations.length = 0;
     }
 
     // Reset device pixel ratio (canvas buffer size may need update on DPR change)
