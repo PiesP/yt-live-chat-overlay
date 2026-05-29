@@ -361,7 +361,7 @@ export function renderWrappedContentSegments(
   const emojiSize = Math.round(fontSize * rendererLayout.emojiSize);
   const lineHeight = Math.ceil(measureTextHeight(font, fontSize));
   const spaceWidth = measureTextWidth(' ', font);
-  const ellipsis = '\\u2026';
+  const ellipsis = '\u2026';
 
   const { lines } = buildWrappedLines(segments, font, maxWidth, emojiSize);
 

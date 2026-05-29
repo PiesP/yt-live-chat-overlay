@@ -38,9 +38,12 @@ export function stripControlCharacters(text: string): string {
   return text.replace(/[\u0000-\u001F\u007F-\u009F]/g, '');
 }
 
-/** Collapse whitespace and trim after stripping control characters. */
+/** Collapse whitespace, strip trailing YouTube truncation ellipsis, and trim. */
 export function normalizeInlineText(text: string): string {
-  return stripControlCharacters(text).replace(/\s+/g, ' ').trim();
+  return stripControlCharacters(text)
+    .replace(/[\u2026]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 /** Maximum allowed message text length before truncation. */
