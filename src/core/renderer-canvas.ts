@@ -250,7 +250,7 @@ export class CanvasRenderer extends RendererBase {
       'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;text-rendering:optimizeSpeed';
     if (container) container.appendChild(canvas);
     this.canvas = canvas;
-    this.ctx = canvas.getContext('2d', { alpha: false });
+    this.ctx = canvas.getContext('2d');
     if (!this.ctx) {
       log.warn('Failed to get CanvasRenderingContext2D — renderer will be inactive');
     } else if (!canvas.isConnected) {
