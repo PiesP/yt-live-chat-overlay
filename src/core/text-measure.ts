@@ -258,19 +258,28 @@ function wrapLine(line: string, maxWidth: number, font: string): string[] {
   return lines;
 }
 
+/** A char-wrap segment with pre-computed width, avoiding redundant measureTextWidth() at call sites. */
+export interface CharSegment {
+  text: string;
+  width: number;
+}
+
 /**
- * Wrap a single word (no spaces) at character boundaries so each segment
- * fits within `maxWidth`.
+ * Canonical: Split a single word at character boundaries so each segment
+ * fits within `maxWidth`. Returns segments with pre-computed widths.
+ *
+ * The pre-computed width in each segment eliminates the need for callers
+ * to re-measure — they can use `segment.width` directly.
  */
-function wrapChars(word: string, maxWidth: number, font: string): string[] {
-  const segments: string[] = [];
+export function wrapCharSegments(word: string, font: string, maxWidth: number): CharSegment[] {
+  const segments: CharSegment[] = [];
   let current = '';
   let currentWidth = 0;
 
   for (const ch of word) {
     const chWidth = measureTextWidth(ch, font);
     if (currentWidth + chWidth > maxWidth && current.length > 0) {
-      segments.push(current);
+      segments.push({ text: current, width: currentWidth });
       current = ch;
       currentWidth = chWidth;
     } else {
@@ -280,10 +289,18 @@ function wrapChars(word: string, maxWidth: number, font: string): string[] {
   }
 
   if (current.length > 0) {
-    segments.push(current);
+    segments.push({ text: current, width: currentWidth });
   }
 
   return segments;
+}
+
+/**
+ * Wrap a single word (no spaces) at character boundaries so each segment
+ * fits within `maxWidth`.
+ */
+function wrapChars(word: string, maxWidth: number, font: string): string[] {
+  return wrapCharSegments(word, font, maxWidth).map((s) => s.text);
 }
 
 /**

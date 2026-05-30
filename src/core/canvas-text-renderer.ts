@@ -12,7 +12,13 @@ import type { ChatMessage, ContentSegment, ImageAsset, OverlaySettings } from '@
 import { EMOJI_ALIAS_PATTERN } from '@core/chat-message-helpers';
 import { computeOutlineColor } from '@core/color-utils';
 import { AUTHOR_PHOTO_SHADOW, rendererLayout, spacing } from '@core/design-tokens';
-import { getFontString, measureTextHeight, measureTextWidth } from '@core/text-measure';
+import {
+  type CharSegment,
+  getFontString,
+  measureTextHeight,
+  measureTextWidth,
+  wrapCharSegments,
+} from '@core/text-measure';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -293,22 +299,22 @@ export function buildWrappedLines(
         maxLineWidth = Math.max(maxLineWidth, currentWidth);
         lines.push(currentLine);
       }
-      const charPieces = wrapCharPieces(piece.text, font, maxWidth);
-      if (charPieces.length <= 1) {
+      const charSegs = wrapCharSegments(piece.text, font, maxWidth);
+      if (charSegs.length <= 1) {
         currentLine = [piece];
         currentWidth = piece.width;
         prevIsText = true;
         continue;
       }
-      // Push all but the last char piece as their own lines
-      for (let i = 0; i < charPieces.length - 1; i++) {
-        const cp = charPieces[i] as TextRenderPiece;
-        lines.push([cp]);
-        maxLineWidth = Math.max(maxLineWidth, cp.width);
+      // Push all but the last char segment as their own lines
+      for (let i = 0; i < charSegs.length - 1; i++) {
+        const cs = charSegs[i] as CharSegment;
+        lines.push([{ type: 'text', text: cs.text, width: cs.width }]);
+        maxLineWidth = Math.max(maxLineWidth, cs.width);
       }
-      const lastPiece = charPieces[charPieces.length - 1] as TextRenderPiece;
-      currentLine = [lastPiece];
-      currentWidth = lastPiece.width;
+      const lastSeg = charSegs[charSegs.length - 1] as CharSegment;
+      currentLine = [{ type: 'text', text: lastSeg.text, width: lastSeg.width }];
+      currentWidth = lastSeg.width;
       prevIsText = true;
       continue;
     }
@@ -461,34 +467,6 @@ export function renderWrappedContentSegments(
   }
 
   return cursorY;
-}
-
-/**
- * Split a single word into character-level pieces that each fit within maxWidth.
- * Matches the char-wrapping behavior of wrapChars() in text-measure.ts.
- */
-function wrapCharPieces(word: string, font: string, maxWidth: number): TextRenderPiece[] {
-  const pieces: TextRenderPiece[] = [];
-  let current = '';
-  let currentWidth = 0;
-
-  for (const ch of word) {
-    const chWidth = measureTextWidth(ch, font);
-    if (currentWidth + chWidth > maxWidth && current.length > 0) {
-      pieces.push({ type: 'text', text: current, width: currentWidth });
-      current = ch;
-      currentWidth = chWidth;
-    } else {
-      current += ch;
-      currentWidth += chWidth;
-    }
-  }
-
-  if (current.length > 0) {
-    pieces.push({ type: 'text', text: current, width: currentWidth });
-  }
-
-  return pieces;
 }
 
 // ── Author rendering ────────────────────────────────────────────────────────
