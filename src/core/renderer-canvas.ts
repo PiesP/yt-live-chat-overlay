@@ -69,41 +69,6 @@ interface CanvasMessage {
   renderMessage: ChatMessage;
 }
 
-interface CreateCanvasMessageParams {
-  message: ChatMessage;
-  now: number;
-  msgWidth: number;
-  msgHeight: number;
-  laneY: number;
-  duration?: number | undefined;
-  startX?: number | undefined;
-  laneIndex?: number | undefined;
-  staggerDelay?: number | undefined;
-  speedTier?: number | undefined;
-}
-
-function createCanvasMessage(params: CreateCanvasMessageParams): CanvasMessage {
-  const { message, now, msgWidth, msgHeight, laneY, staggerDelay = 0 } = params;
-  const duration = params.duration ?? rendererLayout.topBottomDurationMs;
-  const startX = params.startX ?? 0;
-  return {
-    message,
-    startTime: now + staggerDelay,
-    duration,
-    invDuration: 1 / Math.max(1, duration),
-    width: msgWidth,
-    height: msgHeight,
-    startX,
-    x: startX,
-    y: laneY,
-    pausedDuration: 0,
-    laneIndex: params.laneIndex ?? 0,
-    staggerDelay,
-    speedTier: params.speedTier ?? SPEED_TIER.MID,
-    renderMessage: message,
-  };
-}
-
 /**
  * Remove expired messages in-place, simultaneously maintaining the
  * lane-indexed map incrementally during compaction.
@@ -112,7 +77,8 @@ function createCanvasMessage(params: CreateCanvasMessageParams): CanvasMessage {
 function cleanupExpiredMessages(
   messages: CanvasMessage[],
   now: number,
-  activeMessagesByLane: Map<number, CanvasMessage[]>
+  activeMessagesByLane: Map<number, CanvasMessage[]>,
+  onExpire?: (msg: CanvasMessage) => void
 ): { newLength: number; anyRemoved: boolean } {
   const oldLength = messages.length;
   let writeIdx = 0;
@@ -138,6 +104,7 @@ function cleanupExpiredMessages(
       laneList.push(msg);
     } else {
       anyRemoved = true;
+      onExpire?.(msg);
     }
   }
   // Null out tail entries to avoid stale references in the active array.
@@ -172,6 +139,8 @@ export class CanvasRenderer extends RendererBase {
   private readonly activeMessages: CanvasMessage[] = [];
   /** Lane-indexed active messages for O(1) lane-scoped collision checks. */
   private readonly activeMessagesByLane = new Map<number, CanvasMessage[]>();
+  /** Pool of recycled CanvasMessage objects to reduce GC pressure. */
+  private readonly messagePool: CanvasMessage[] = [];
   private readonly pendingQueue: ChatMessage[] = [];
   private pendingQueueOffset = 0;
   private readonly retryQueue: ChatMessage[] = [];
@@ -656,7 +625,8 @@ export class CanvasRenderer extends RendererBase {
     const { newLength, anyRemoved } = cleanupExpiredMessages(
       this.activeMessages,
       now,
-      this.activeMessagesByLane
+      this.activeMessagesByLane,
+      (msg) => this.releaseMessage(msg)
     );
     if (anyRemoved) {
       this.activeMessages.length = newLength;
@@ -1188,6 +1158,31 @@ export class CanvasRenderer extends RendererBase {
     );
   }
 
+  /**
+   * Acquire a CanvasMessage from the pool, or create a new empty one.
+   * All fields are uninitialized — caller must Object.assign to populate.
+   */
+  private acquireMessage(): CanvasMessage {
+    return this.messagePool.pop() || ({} as CanvasMessage);
+  }
+
+  /**
+   * Release a CanvasMessage back to the pool.
+   * Resets all reference-type fields to prevent stale data leaks.
+   */
+  private releaseMessage(msg: CanvasMessage): void {
+    const m = msg as unknown as Record<string, unknown>;
+    m.id = undefined;
+    m.text = undefined;
+    m.translatedText = undefined;
+    m.overrideText = undefined;
+    m.message = undefined;
+    m.renderMessage = undefined;
+    m.content = undefined;
+    // Keep numeric fields — they'll be overwritten by Object.assign
+    this.messagePool.push(msg);
+  }
+
   /** Finalize and activate a message. */
   private activateMessage(
     message: ChatMessage,
@@ -1201,17 +1196,24 @@ export class CanvasRenderer extends RendererBase {
     staggerDelay = 0,
     speedTier?: number
   ): void {
-    const cm = createCanvasMessage({
+    const effectiveDuration = duration ?? rendererLayout.topBottomDurationMs;
+    const effectiveStartX = startX ?? 0;
+    const cm = this.acquireMessage();
+    Object.assign(cm, {
       message,
-      now,
-      msgWidth,
-      msgHeight,
-      laneY,
-      duration,
-      startX,
-      laneIndex,
+      startTime: now + staggerDelay,
+      duration: effectiveDuration,
+      invDuration: 1 / Math.max(1, effectiveDuration),
+      width: msgWidth,
+      height: msgHeight,
+      startX: effectiveStartX,
+      x: effectiveStartX,
+      y: laneY,
+      pausedDuration: 0,
+      laneIndex: laneIndex ?? 0,
       staggerDelay,
-      speedTier,
+      speedTier: speedTier ?? SPEED_TIER.MID,
+      renderMessage: message,
     });
 
     if (this.settings.depthLayersEnabled && speedTier === SPEED_TIER.FAR && message.userColor) {
