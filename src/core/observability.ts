@@ -12,7 +12,7 @@
  * number counters and timestamps.
  */
 
-import type { BurstLevel, DropReason, SessionMetrics } from '@app-types';
+import type { BurstLevel, DropReason, FrameTimings, SessionMetrics } from '@app-types';
 import {
   DEBUG_OVERLAY_BG,
   DEBUG_OVERLAY_RIGHT,
@@ -34,6 +34,20 @@ export class ObservabilityReporter {
   private static readonly WARN_COOLDOWN_MS = 30_000;
   private static readonly METRIC_WINDOW_MS = 60_000;
 
+  /** Per-frame timing state. */
+  private frameTimings: FrameTimings = {
+    renderFrameMs: 0,
+    drainQueueMs: 0,
+    collisionCheckMs: 0,
+    textMeasureMs: 0,
+    frameCount: 0,
+    lastFrameTimestamp: 0,
+  };
+  /** Per-frame accumulator for collision check timing (reset each tick). */
+  private collisionAccumMs = 0;
+  /** Per-frame accumulator for text measure timing (reset each tick). */
+  private textMeasureAccumMs = 0;
+
   constructor(initialShowDebug: boolean = false) {
     this.metrics = {
       totalReceived: 0,
@@ -45,6 +59,7 @@ export class ObservabilityReporter {
       activeMessages: 0,
       laneUtilization: 0,
       backlogProgress: 1,
+      frameTimings: this.frameTimings,
     };
     this.showDebug = initialShowDebug;
     if (initialShowDebug) {
@@ -118,6 +133,30 @@ export class ObservabilityReporter {
     this.metrics.backlogProgress = Math.max(0, Math.min(1, progress));
   }
 
+  // ── Per-frame timing instrumentation ────────────────────────────────────
+
+  /** Record renderFrame() execution time with exponential moving average. */
+  recordRenderFrame(ms: number): void {
+    this.frameTimings.renderFrameMs = this.frameTimings.renderFrameMs * 0.95 + ms * 0.05;
+    this.frameTimings.frameCount++;
+    this.frameTimings.lastFrameTimestamp = performance.now();
+  }
+
+  /** Record drainQueue() execution time with exponential moving average. */
+  recordDrainQueue(ms: number): void {
+    this.frameTimings.drainQueueMs = this.frameTimings.drainQueueMs * 0.95 + ms * 0.05;
+  }
+
+  /** Accumulate collision check time during this frame (reset on tick). */
+  recordCollisionCheck(ms: number): void {
+    this.collisionAccumMs += ms;
+  }
+
+  /** Accumulate text measure time during this frame (reset on tick). */
+  recordTextMeasure(ms: number): void {
+    this.textMeasureAccumMs += ms;
+  }
+
   // get current metrics snapshot
   getMetrics(): SessionMetrics {
     this.refreshDerivedMetrics();
@@ -151,9 +190,18 @@ export class ObservabilityReporter {
   /**
    * Update the debug HUD — call from the rAF loop (every frame).
    * Avoids a separate setInterval and visibility-change management.
+   *
+   * Resolves per-frame accumulators (collisionCheckMs, textMeasureMs)
+   * into averages before updating the overlay.
    */
   tick(): void {
     if (!this.showDebug || !this.debugOverlayEl) return;
+    // Compute averages for per-frame accumulators
+    const fc = Math.max(1, this.frameTimings.frameCount);
+    this.frameTimings.collisionCheckMs = this.collisionAccumMs / fc;
+    this.frameTimings.textMeasureMs = this.textMeasureAccumMs / fc;
+    this.collisionAccumMs = 0;
+    this.textMeasureAccumMs = 0;
     this.updateDebugOverlay();
   }
 
@@ -165,8 +213,8 @@ export class ObservabilityReporter {
       `position:fixed;top:${DEBUG_OVERLAY_TOP};right:${DEBUG_OVERLAY_RIGHT};z-index:${DEBUG_OVERLAY_Z_INDEX};` +
       `background:${DEBUG_OVERLAY_BG};color:#0f0;font:12px/1.4 monospace;` +
       'padding:8px 12px;border-radius:4px;min-width:220px;pointer-events:none;user-select:none';
-    // Pre-create 5 child divs once — avoids DOM churn on every frame
-    for (let i = 0; i < 5; i++) {
+    // Pre-create 7 child divs once — avoids DOM churn on every frame
+    for (let i = 0; i < 7; i++) {
       el.appendChild(document.createElement('div'));
     }
     document.body.appendChild(el);
@@ -182,6 +230,10 @@ export class ObservabilityReporter {
       `Queue: ${m.queueDepth} | Burst: ${m.burstLevel}`,
       `Active: ${m.activeMessages} | Lane: ${(m.laneUtilization * 100).toFixed(0)}%`,
       `Backlog: ${(m.backlogProgress * 100).toFixed(0)}%`,
+      `Render: ${m.frameTimings.renderFrameMs.toFixed(2)}ms` +
+        ` | Drain: ${m.frameTimings.drainQueueMs.toFixed(2)}ms`,
+      `Coll: ${m.frameTimings.collisionCheckMs.toFixed(2)}ms` +
+        ` | Text: ${m.frameTimings.textMeasureMs.toFixed(2)}ms`,
     ];
     const children = this.debugOverlayEl.children;
     for (let i = 0; i < lines.length; i++) {

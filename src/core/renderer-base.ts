@@ -24,7 +24,7 @@ import { LaneAllocator } from '@core/lane-allocator';
 import { createLogger } from '@core/logging';
 import { ObservabilityReporter } from '@core/observability';
 import type { Overlay } from '@core/overlay';
-import { clearTextMeasurementCaches } from '@core/text-measure';
+import { clearTextMeasurementCaches, setTextMeasureCallback } from '@core/text-measure';
 
 const log = createLogger('RendererBase');
 
@@ -63,6 +63,7 @@ export abstract class RendererBase {
     this.overlay = overlay;
     this.settings = settings;
     this.observability = new ObservabilityReporter(settings.showDebugOverlay);
+    setTextMeasureCallback((ms) => this.observability.recordTextMeasure(ms));
 
     this.laneAllocator = new LaneAllocator({
       safeTop: this.settings.safeTop,

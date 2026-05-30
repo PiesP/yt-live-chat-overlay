@@ -23,6 +23,8 @@ export class Settings {
    *  Incremented on every save(); the listener captures the pre-save generation
    *  and skips reload if it matches, handling both sync and async listener timing. */
   private saveGeneration = 0;
+  /** Debounce flag: true while a save is scheduled via requestIdleCallback. */
+  private savePending = false;
   /** GM value change listener ID, for cleanup. */
   private gmListenerId: number | null = null;
   /** Bound storage event handler reference, for cleanup. */
@@ -59,6 +61,7 @@ export class Settings {
   }
 
   destroy(): void {
+    this.flushSave();
     this.stopCrossTabSync();
     this.onChangeCallbacks.clear();
   }
@@ -113,6 +116,28 @@ export class Settings {
   }
 
   /**
+   * Schedule a debounced save via requestIdleCallback.
+   * Multiple calls within the same frame are coalesced into a single write.
+   */
+  private scheduleSave(): void {
+    if (this.savePending) return;
+    this.savePending = true;
+    if (typeof requestIdleCallback !== 'undefined') {
+      requestIdleCallback(() => this.flushSave());
+    } else {
+      // No requestIdleCallback support — save immediately.
+      this.flushSave();
+    }
+  }
+
+  /** Flush any pending debounced save immediately. */
+  private flushSave(): void {
+    if (!this.savePending) return;
+    this.savePending = false;
+    this.save();
+  }
+
+  /**
    * Returns the current settings object. Do NOT modify the returned object
    * directly — use updateSettings() for mutations.
    */
@@ -123,7 +148,7 @@ export class Settings {
   /** Apply settings and persist to storage. */
   set(partial: Partial<OverlaySettings>): void {
     this.settings = applySettingsPatch(this.settings, partial);
-    this.save();
+    this.scheduleSave();
   }
 
   /** Apply settings to memory only (no storage write). Used for live preview. */
@@ -134,6 +159,6 @@ export class Settings {
   /** Reset settings to factory defaults and persist. */
   reset(): void {
     this.settings = cloneSettings(DEFAULT_SETTINGS);
-    this.save();
+    this.scheduleSave();
   }
 }

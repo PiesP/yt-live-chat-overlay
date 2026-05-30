@@ -624,6 +624,7 @@ export class CanvasRenderer extends RendererBase {
     if (!canvas.isConnected) return;
     if (this.isPaused) return;
     if (this.isVideoPaused) return;
+    const t0 = performance.now();
 
     // Reset emoji-load debounce flag — any pending rAF restart has landed
     this.needsRerender = false;
@@ -813,6 +814,7 @@ export class CanvasRenderer extends RendererBase {
         ctx.restore();
       }
     }
+    this.observability.recordRenderFrame(performance.now() - t0);
   }
 
   // ── Queue drain ──────────────────────────────────────────────────────
@@ -830,6 +832,7 @@ export class CanvasRenderer extends RendererBase {
       )
         return;
     }
+    const t0 = performance.now();
     // Cache dimensions once for the entire drain cycle — avoids repeated
     // overlay.getDimensions() calls in checkPlacement/enqueueMessageWithPlacement.
     const dims = this.overlay.getDimensions();
@@ -906,6 +909,7 @@ export class CanvasRenderer extends RendererBase {
     if (this.pendingQueueOffset > 64) {
       this.compactPendingQueue();
     }
+    this.observability.recordDrainQueue(performance.now() - t0);
   }
 
   /**
@@ -940,8 +944,12 @@ export class CanvasRenderer extends RendererBase {
         ok: false;
         reason: DropReason;
       } {
+    const t0 = performance.now();
     const dims = precomputedDims ?? this.overlay.getDimensions();
-    if (!dims) return { ok: false, reason: 'no_lane' };
+    if (!dims) {
+      this.observability.recordCollisionCheck(performance.now() - t0);
+      return { ok: false, reason: 'no_lane' };
+    }
 
     const mode = this.settings.danmakuMode;
     const isScrolling = mode === 'scroll' || mode === 'reverse';
@@ -951,7 +959,10 @@ export class CanvasRenderer extends RendererBase {
     // Find the target lane Y position via the allocator (without committing).
     const speedTier = this.getSpeedTier(message);
     const placement = this.laneAllocator.findPlacement(msgHeight, dims, speedTier);
-    if (!placement) return { ok: false, reason: 'no_lane' };
+    if (!placement) {
+      this.observability.recordCollisionCheck(performance.now() - t0);
+      return { ok: false, reason: 'no_lane' };
+    }
 
     const newLaneY = placement.laneY + placement.verticalOffset;
     const laneHeight = this.laneAllocator.getLaneHeight();
@@ -1003,6 +1014,7 @@ export class CanvasRenderer extends RendererBase {
             forEachSlot(placement.laneIndex, placement.slotCount, (slotIdx) => {
               this.laneAllocator.markCollision(slotIdx);
             });
+            this.observability.recordCollisionCheck(performance.now() - t0);
             return { ok: false, reason: 'collision' };
           }
         } else {
@@ -1016,6 +1028,7 @@ export class CanvasRenderer extends RendererBase {
             forEachSlot(placement.laneIndex, placement.slotCount, (slotIdx) => {
               this.laneAllocator.markCollision(slotIdx);
             });
+            this.observability.recordCollisionCheck(performance.now() - t0);
             return { ok: false, reason: 'collision' };
           }
         }
@@ -1026,6 +1039,7 @@ export class CanvasRenderer extends RendererBase {
           forEachSlot(placement.laneIndex, placement.slotCount, (slotIdx) => {
             this.laneAllocator.markCollision(slotIdx);
           });
+          this.observability.recordCollisionCheck(performance.now() - t0);
           return { ok: false, reason: 'collision' };
         }
       }

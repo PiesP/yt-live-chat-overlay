@@ -249,6 +249,24 @@ export interface OverlaySettings {
 }
 
 /**
+ * Per-frame timing instrumentation for the render pipeline.
+ */
+export interface FrameTimings {
+  /** Rolling average (EMA) of renderFrame() execution time in ms. */
+  renderFrameMs: number;
+  /** Rolling average (EMA) of drainQueue() execution time in ms. */
+  drainQueueMs: number;
+  /** Average collision check time per frame (reset each tick). */
+  collisionCheckMs: number;
+  /** Average text measure time per frame (reset each tick). */
+  textMeasureMs: number;
+  /** Number of frames recorded since session start. */
+  frameCount: number;
+  /** Timestamp of the last recorded frame (ms). */
+  lastFrameTimestamp: number;
+}
+
+/**
  * Session metrics snapshot for ObservabilityReporter
  */
 export interface SessionMetrics {
@@ -261,6 +279,7 @@ export interface SessionMetrics {
   activeMessages: number;
   laneUtilization: number; // 0-1
   backlogProgress: number; // 0-1 (when in backlog injection phase)
+  frameTimings: FrameTimings;
 }
 
 /**

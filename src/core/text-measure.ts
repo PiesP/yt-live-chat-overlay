@@ -19,6 +19,17 @@ import { DEFAULT_FONT_FAMILY } from '@core/design-tokens';
 
 let measureCtx: CanvasRenderingContext2D | null | false = null;
 
+/** Callback invoked with wall-clock milliseconds each time measureTextWidth() performs a real measurement (not a cache hit). */
+let textMeasureCallback: ((ms: number) => void) | null = null;
+
+/**
+ * Install a callback to receive text-measurement timing data.
+ * Used by the observability layer to track text measurement cost per frame.
+ */
+export function setTextMeasureCallback(cb: ((ms: number) => void) | null): void {
+  textMeasureCallback = cb;
+}
+
 /** Two-level LRU cache for measureTextWidth. Outer key: font, inner key: text. */
 const widthCache = new Map<string, Map<string, number>>();
 let totalCacheEntries = 0;
@@ -97,7 +108,11 @@ export function measureTextWidth(text: string, font: string): number {
     return Math.ceil(text.length * fontSize * CSP_WIDTH_FACTOR);
   }
   ctx.font = font;
+  const t0 = textMeasureCallback ? performance.now() : 0;
   const m = ctx.measureText(text);
+  if (textMeasureCallback) {
+    textMeasureCallback(performance.now() - t0);
+  }
   const bbWidth = Math.abs(m.actualBoundingBoxLeft) + Math.abs(m.actualBoundingBoxRight);
   const width = bbWidth > 0 ? Math.ceil(bbWidth) : Math.ceil(m.width);
 
