@@ -895,6 +895,11 @@ export class CanvasRenderer extends RendererBase {
       for (const msg of this.retryQueue) {
         const idx = this.findQueueInsertIndex(CanvasRenderer.getMessagePriority(msg));
         this.pendingQueue.splice(idx, 0, msg);
+        // Adjust offset when the item was inserted before the current read position.
+        // Without this, pendingQueueOffset becomes stale after the splice shifts indices.
+        if (idx <= this.pendingQueueOffset) {
+          this.pendingQueueOffset++;
+        }
       }
       this.retryQueue.length = 0;
     }
