@@ -79,7 +79,7 @@ function cleanupExpiredMessages(
   now: number,
   activeMessagesByLane: Map<number, CanvasMessage[]>,
   onExpire?: (msg: CanvasMessage) => void
-): { newLength: number; anyRemoved: boolean } {
+): { newLength: number; anyRemoved: boolean; newMessages?: CanvasMessage[] } {
   const oldLength = messages.length;
   let writeIdx = 0;
   let anyRemoved = false;
@@ -107,7 +107,14 @@ function cleanupExpiredMessages(
       onExpire?.(msg);
     }
   }
-  // Null out tail entries to avoid stale references in the active array.
+  // Array compaction threshold: when more than 50% of the array slots are
+  // expired, allocate a fresh array via slice() instead of nulling the tail.
+  // This avoids keeping garbage-filled tail slots in the array, at the cost
+  // of one allocation, which is worthwhile when the majority is garbage.
+  if (writeIdx < oldLength * 0.5) {
+    return { newMessages: messages.slice(0, writeIdx), newLength: writeIdx, anyRemoved };
+  }
+  // Otherwise, null tail entries to avoid stale references (no allocation).
   for (let i = writeIdx; i < oldLength; i++) {
     messages[i] = undefined as unknown as CanvasMessage;
   }
@@ -622,14 +629,20 @@ export class CanvasRenderer extends RendererBase {
     }
     // Single-pass cleanup of expired messages + incremental lane map maintenance.
     // When messages are removed, truncate the active array and prune empty lane entries.
-    const { newLength, anyRemoved } = cleanupExpiredMessages(
+    const { newMessages, newLength, anyRemoved } = cleanupExpiredMessages(
       this.activeMessages,
       now,
       this.activeMessagesByLane,
       (msg) => this.releaseMessage(msg)
     );
     if (anyRemoved) {
-      this.activeMessages.length = newLength;
+      if (newMessages) {
+        // Replace the array reference entirely (avoids keeping garbage-filled tail slots)
+        this.activeMessages.length = 0;
+        this.activeMessages.push(...newMessages);
+      } else {
+        this.activeMessages.length = newLength;
+      }
       // Remove lanes that now have 0 messages — stale empty entries waste
       // iteration time in lane-scoped lookups.
       for (const [lane, msgs] of this.activeMessagesByLane) {
