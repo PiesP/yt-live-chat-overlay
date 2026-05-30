@@ -519,11 +519,10 @@ export class ReplayChatSource extends ChatSource {
       return;
     }
 
-    const bootstrap = await this.bootstrapResolver.refresh(signal);
+    const bootstrap = await this.refreshBootstrap(signal);
     if (!bootstrap?.isReplay) {
       return;
     }
-    this.bootstrap = bootstrap;
     await this.initializeReplaySession(signal);
   }
 

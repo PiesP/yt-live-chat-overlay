@@ -213,6 +213,35 @@ export abstract class ChatSource implements Pauseable {
     this.lastActivityTime = Date.now();
   }
 
+  /**
+   * Poll at short intervals until playback is no longer paused or timeout elapses.
+   * Used by the live poll loop to handle brief pauses without restarting the session.
+   */
+  protected async pollWhilePaused(
+    timeoutMs: number,
+    pollIntervalMs = 250,
+    signal?: AbortSignal
+  ): Promise<void> {
+    const startTime = Date.now();
+    while (Date.now() - startTime < timeoutMs) {
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+      await sleep(pollIntervalMs, signal);
+      const current = this.getPlaybackSnapshot();
+      if (!current?.paused) break;
+    }
+  }
+
+  /**
+   * Re-fetch bootstrap data from the resolver. Updates this.bootstrap on success.
+   * Returns the fresh bootstrap or null on failure.
+   */
+  protected async refreshBootstrap(signal?: AbortSignal): Promise<ChatBootstrapData | null> {
+    const result = await this.bootstrapResolver.refresh(signal);
+    if (!result) return null;
+    this.bootstrap = result;
+    return result;
+  }
+
   protected emitMessage(message: ChatMessage): void {
     if (!this.callback) return;
     const deduped = this.filterNewMessages([message]);
