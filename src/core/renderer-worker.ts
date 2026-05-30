@@ -154,6 +154,73 @@ const speedTierLanes = new Map<number, { tier: number; until: number }>();
 // Cumulative drop counter for stats
 let totalDrops = 0;
 
+// ── Text bitmap cache ──────────────────────────────────────────────────────
+
+const textBitmapCache = new Map<string, OffscreenCanvas>();
+const TEXT_BITMAP_CACHE_MAX = 100;
+
+function getCacheKey(
+  text: string,
+  font: string,
+  color: string,
+  strokeWidth: number,
+  strokeColor: string
+): string {
+  return `${font}|${text}|${color}|${strokeWidth}|${strokeColor}`;
+}
+
+function renderCachedText(
+  ctx: OffscreenCanvasRenderingContext2D,
+  text: string,
+  font: string,
+  color: string,
+  strokeWidth: number,
+  strokeColor: string,
+  x: number,
+  y: number
+): void {
+  const key = getCacheKey(text, font, color, strokeWidth, strokeColor);
+  let bitmap = textBitmapCache.get(key);
+
+  if (!bitmap) {
+    // LRU eviction
+    if (textBitmapCache.size >= TEXT_BITMAP_CACHE_MAX) {
+      const oldestKey = textBitmapCache.keys().next().value;
+      if (oldestKey !== undefined) textBitmapCache.delete(oldestKey);
+    }
+    // Pre-render to offscreen canvas
+    const metrics = ctx.measureText(text);
+    const w =
+      Math.ceil(
+        Math.abs(metrics.actualBoundingBoxLeft) + Math.abs(metrics.actualBoundingBoxRight)
+      ) +
+      strokeWidth * 2 +
+      2;
+    const h =
+      Math.ceil(
+        Math.abs(metrics.actualBoundingBoxAscent) + Math.abs(metrics.actualBoundingBoxDescent)
+      ) +
+      strokeWidth * 2 +
+      2;
+
+    bitmap = new OffscreenCanvas(w, h);
+    const bctx = bitmap.getContext('2d');
+    if (!bctx) return;
+    bctx.font = font;
+    bctx.textBaseline = 'top';
+    bctx.strokeStyle = strokeColor;
+    bctx.lineWidth = strokeWidth;
+    bctx.lineJoin = 'round';
+    bctx.strokeText(text, strokeWidth + 1, strokeWidth + 1);
+    bctx.fillStyle = color;
+    bctx.fillText(text, strokeWidth + 1, strokeWidth + 1);
+
+    textBitmapCache.set(key, bitmap);
+  }
+
+  ctx.drawImage(bitmap, x - 1, y - 1);
+}
+
 // ── Message handler ───────────────────────────────────────────────────────
 
 self.onmessage = (e: MessageEvent) => {
@@ -523,15 +590,11 @@ function renderFrame(): void {
 
     ctx.globalAlpha = opacity;
 
-    // Outline
-    if (config.outlineWidthPx > 0 && config.outlineOpacity > 0) {
-      ctx.strokeStyle = `rgba(0,0,0,${Math.min(1, config.outlineOpacity)})`;
-      ctx.lineWidth = config.outlineWidthPx;
-      ctx.lineJoin = 'round';
-      ctx.strokeText(msg.text, sx, sy);
-    }
-
-    ctx.fillText(msg.text, sx, sy);
+    // Render with text bitmap cache (matches main-thread quality)
+    const strokeWidth =
+      config.outlineWidthPx > 0 && config.outlineOpacity > 0 ? config.outlineWidthPx : 0;
+    const strokeColor = `rgba(0,0,0,${Math.min(1, config.outlineOpacity)})`;
+    renderCachedText(ctx, msg.text, font, config.color, strokeWidth, strokeColor, sx, sy);
     ctx.globalAlpha = 1;
   }
 
