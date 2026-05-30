@@ -109,16 +109,16 @@ interface ActiveMessage {
 }
 
 // ── Speed tier constants ──────────────────────────────────────────────────
-
+// MUST match @core/lane-allocator SPEED_TIER values.
 const SPEED_TIER = { FAR: 0, MID: 1, NEAR: 2, BACKLOG: 3 } as const;
 
 // ── Layout constants ──────────────────────────────────────────────────────
-
+// MUST match @core/design-tokens rendererLayout values where noted.
 const HEADWAY_GAP_RATIO = 0.08;
 const HEADWAY_GAP_MIN = 16;
 const HEADWAY_GAP_MAX = 60;
-const EXIT_PADDING_MIN = 40;
-const SCROLL_DURATION_MAX_MS = 12_000;
+const EXIT_PADDING_MIN = 100; // canonical: rendererLayout.exitPaddingMin
+const SCROLL_DURATION_MAX_MS = 12_000; // worker-specific safety cap (no equivalent in main renderer)
 const TOP_BOTTOM_DURATION_MS = 5_000;
 const LANE_COOLDOWN_MIN_MS = 500;
 const SAFETY_MARGIN_RATIO = 0.15;

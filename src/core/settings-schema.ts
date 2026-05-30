@@ -336,7 +336,7 @@ const OUTLINE_LIMIT_KEYS: Record<string, keyof typeof SETTINGS_LIMITS> = {
 
 /** Display scale for outline numeric keys — consistent with root opacity settings (displayScale: 100).
  *  widthPx is already in pixels (no scaling), opacity is 0–1 internally, displayed as 0–100%. */
-export const OUTLINE_DISPLAY_SCALE: Record<string, number> = {
+const OUTLINE_DISPLAY_SCALE: Record<string, number> = {
   widthPx: 1,
   opacity: 100,
 } as const;

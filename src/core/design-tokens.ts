@@ -10,15 +10,9 @@
  */
 
 export {
-  computeOutlineColor,
-  computeReadableTextColor,
   computeSuperChatOpacities,
-  parseAnyColor,
   resolveSuperChatRgb,
-  toRgba,
 } from './color-utils';
-
-export { sampleExponential } from './math-utils';
 
 import type { RgbColor, SuperChatInfo } from '@app-types';
 

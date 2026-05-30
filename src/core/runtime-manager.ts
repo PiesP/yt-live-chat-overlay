@@ -61,7 +61,6 @@ const CHAT_STALL_TIMEOUT_MS = 30_000;
 const LONG_IDLE_RESTART_MS = 60_000;
 const ABSOLUTE_MAX_IDLE_RESTART_MS = 30 * 60 * 1000; // 30 minutes
 
-export type { ChatSourceStartStatus as RuntimeSessionStartStatus };
 export type RuntimeSessionRestartReason = 'foreground-return' | 'watchdog' | 'standby-resolved';
 
 interface RuntimeHealth {
@@ -201,7 +200,7 @@ export class RuntimeManager {
       try {
         await this.reconcileOnce();
       } catch (err) {
-        log.error('[RuntimeManager] reconcileOnce() threw an error, continuing loop:', err);
+        log.error('reconcileOnce() threw an error, continuing loop:', err);
       }
     }
   }

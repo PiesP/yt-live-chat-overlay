@@ -194,7 +194,7 @@ export class TranslationService {
       this.consecutiveFailures = 0;
       this.recoveryCycleCount = 0;
       log.info(`Translator ready: ${sourceLanguage} → ${targetLanguage}`);
-    } catch (err) {
+    } catch (err: unknown) {
       // create() may fail if user activation was missing (NotAllowedError)
       // or if the download failed. The translator stays null and isActive
       // returns false. It will be retried on the next configure() or
@@ -314,7 +314,7 @@ export class TranslationService {
       }
 
       return result;
-    } catch (err) {
+    } catch (err: unknown) {
       this.consecutiveFailures++;
       const errName = err instanceof DOMException ? err.name : 'Unknown';
       if (this.consecutiveFailures >= TranslationService.MAX_CONSECUTIVE_FAILURES) {
