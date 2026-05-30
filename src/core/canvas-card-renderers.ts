@@ -9,6 +9,7 @@
  */
 
 import type { ChatMessage, OverlaySettings } from '@app-types';
+import type { ByteLimitedCache } from '@core/byte-limited-cache';
 import {
   drawAuthorSection,
   drawRoundRect,
@@ -59,10 +60,10 @@ export function renderSuperChatCard(
   x: number,
   y: number,
   settings: OverlaySettings,
-  textBitmapCache: Map<string, HTMLCanvasElement>,
+  textBitmapCache: ByteLimitedCache<HTMLCanvasElement>,
   authorPhotoCache: Map<string, HTMLImageElement>,
   stickerCache: Map<string, HTMLImageElement>,
-  emojiCache: Map<string, HTMLImageElement>,
+  emojiCache: ByteLimitedCache<HTMLImageElement>,
   getFontFn: (fontSize: number) => string,
   superChatGradientCache: Map<string, CanvasGradient>
 ): void {
@@ -203,9 +204,9 @@ export function renderMembershipCard(
   y: number,
   elapsed: number,
   settings: OverlaySettings,
-  textBitmapCache: Map<string, HTMLCanvasElement>,
+  textBitmapCache: ByteLimitedCache<HTMLCanvasElement>,
   authorPhotoCache: Map<string, HTMLImageElement>,
-  emojiCache: Map<string, HTMLImageElement>,
+  emojiCache: ByteLimitedCache<HTMLImageElement>,
   getFontFn: (fontSize: number) => string
 ): void {
   const fontSize = settings.fontSize;

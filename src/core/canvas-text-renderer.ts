@@ -9,6 +9,7 @@
  */
 
 import type { ChatMessage, ContentSegment, ImageAsset, OverlaySettings } from '@app-types';
+import type { ByteLimitedCache } from '@core/byte-limited-cache';
 import { EMOJI_ALIAS_PATTERN } from '@core/chat-message-helpers';
 import { computeOutlineColor } from '@core/color-utils';
 import { AUTHOR_PHOTO_SHADOW, rendererLayout, spacing } from '@core/design-tokens';
@@ -21,8 +22,6 @@ import {
 } from '@core/text-measure';
 
 // ── Constants ────────────────────────────────────────────────────────────────
-
-const TEXT_BITMAP_CACHE_MAX = 200;
 
 /**
  * Outline stroke scale factor: outline.widthPx is multiplied by this
@@ -44,7 +43,7 @@ function cacheTextBitmap(
   strokeWidth: number,
   strokeColor: string,
   ctx: CanvasRenderingContext2D,
-  textBitmapCache: Map<string, HTMLCanvasElement>
+  textBitmapCache: ByteLimitedCache<HTMLCanvasElement>
 ): void {
   if (!ctx) return;
 
@@ -78,11 +77,6 @@ function cacheTextBitmap(
   offCtx.fillText(text, strokeWidth / 2 + 1, strokeWidth / 2 + 1);
 
   textBitmapCache.set(key, offscreen);
-
-  if (textBitmapCache.size > TEXT_BITMAP_CACHE_MAX) {
-    const oldestKey = textBitmapCache.keys().next().value;
-    if (oldestKey !== undefined) textBitmapCache.delete(oldestKey);
-  }
 }
 
 // ── Outline stroke ──────────────────────────────────────────────────────────
@@ -118,7 +112,7 @@ function renderSegment(
   color: string,
   fontSize: number,
   settings: OverlaySettings,
-  textBitmapCache: Map<string, HTMLCanvasElement>,
+  textBitmapCache: ByteLimitedCache<HTMLCanvasElement>,
   getFontFn: (fontSize: number) => string
 ): void {
   const outline = settings.outline;
@@ -131,13 +125,12 @@ function renderSegment(
     const key = `${font}|${text}|${color}|${Math.round(strokeWidth)}|${strokeColor}`;
     const bitmap = textBitmapCache.get(key);
     if (bitmap) {
+      textBitmapCache.touch(key);
       ctx.drawImage(bitmap, x, y);
       return;
     }
 
     // Cache miss — render to offscreen canvas and cache
-    // LRU touch: delete existing key before re-inserting to move it to Map end
-    if (textBitmapCache.has(key)) textBitmapCache.delete(key);
     cacheTextBitmap(key, text, font, color, strokeWidth, strokeColor, ctx, textBitmapCache);
 
     // Immediately use the freshly cached bitmap to avoid fallthrough overhead
@@ -168,8 +161,8 @@ function renderContentSegments(
   color: string,
   fontSize: number,
   settings: OverlaySettings,
-  textBitmapCache: Map<string, HTMLCanvasElement>,
-  emojiCache: Map<string, HTMLImageElement>,
+  textBitmapCache: ByteLimitedCache<HTMLCanvasElement>,
+  emojiCache: ByteLimitedCache<HTMLImageElement>,
   getFontFn: (fontSize: number) => string
 ): void {
   let cursorX = startX;
@@ -193,9 +186,8 @@ function renderContentSegments(
       const cached = emojiCache.get(seg.emoji.url);
       const img = cached?.complete && cached.naturalWidth > 0 ? cached : null;
       if (img) {
-        // LRU touch: re-insert to move key to end of Map
-        emojiCache.delete(seg.emoji.url);
-        emojiCache.set(seg.emoji.url, img);
+        // LRU touch: move key to end of insertion order
+        emojiCache.touch(seg.emoji.url);
         ctx.drawImage(img, cursorX, y, emojiSize, emojiSize);
       } else if (seg.emoji.fallbackText) {
         renderSegment(
@@ -363,8 +355,8 @@ export function renderWrappedContentSegments(
   color: string,
   fontSize: number,
   settings: OverlaySettings,
-  textBitmapCache: Map<string, HTMLCanvasElement>,
-  emojiCache: Map<string, HTMLImageElement>,
+  textBitmapCache: ByteLimitedCache<HTMLCanvasElement>,
+  emojiCache: ByteLimitedCache<HTMLImageElement>,
   getFontFn: (fontSize: number) => string
 ): number {
   if (segments.length === 0) return y;
@@ -415,9 +407,8 @@ export function renderWrappedContentSegments(
         const cached = emojiCache.get(piece.emoji.url);
         const img = cached?.complete && cached.naturalWidth > 0 ? cached : null;
         if (img) {
-          // LRU touch: re-insert to move key to end of Map
-          emojiCache.delete(piece.emoji.url);
-          emojiCache.set(piece.emoji.url, img);
+          // LRU touch: move key to end of insertion order
+          emojiCache.touch(piece.emoji.url);
           ctx.drawImage(img, cursorX, cursorY, emojiSize, emojiSize);
         } else if (piece.emoji.fallbackText) {
           renderSegment(
@@ -497,7 +488,7 @@ export function drawAuthorSection(
   maxNameWidth: number | undefined,
   settings: OverlaySettings,
   authorPhotoCache: Map<string, HTMLImageElement>,
-  textBitmapCache: Map<string, HTMLCanvasElement>,
+  textBitmapCache: ByteLimitedCache<HTMLCanvasElement>,
   getFontFn: (fontSize: number) => string
 ): number {
   if (!message.author) return startY;
@@ -603,8 +594,8 @@ export function renderRegularMessage(
   x: number,
   y: number,
   settings: OverlaySettings,
-  textBitmapCache: Map<string, HTMLCanvasElement>,
-  emojiCache: Map<string, HTMLImageElement>,
+  textBitmapCache: ByteLimitedCache<HTMLCanvasElement>,
+  emojiCache: ByteLimitedCache<HTMLImageElement>,
   authorPhotoCache: Map<string, HTMLImageElement>,
   getFontFn: (fontSize: number) => string,
   overrideText?: string | null

@@ -28,6 +28,7 @@
  */
 
 import type { ChatMessage, DropReason, OverlayDimensions, OverlaySettings } from '@app-types';
+import { ByteLimitedCache } from '@core/byte-limited-cache';
 import { renderMembershipCard, renderSuperChatCard } from '@core/canvas-card-renderers';
 import { drawRoundRect, renderRegularMessage, strokeTextOutline } from '@core/canvas-text-renderer';
 import { getTranslatableText } from '@core/chat-message-helpers';
@@ -153,7 +154,10 @@ export class CanvasRenderer extends RendererBase {
   private readonly retryQueue: ChatMessage[] = [];
 
   /** Image caches (bounded LRU). */
-  private readonly emojiCache = new Map<string, HTMLImageElement>();
+  private readonly emojiCache = new ByteLimitedCache<HTMLImageElement>(
+    3_000_000, // 3MB
+    (img) => img.naturalWidth * img.naturalHeight * 4 // RGBA bytes
+  );
   private readonly emojiFetching = new Set<string>();
   private readonly emojiFetchingStarted = new Map<string, number>();
   private readonly authorPhotoCache = new Map<string, HTMLImageElement>();
@@ -193,7 +197,10 @@ export class CanvasRenderer extends RendererBase {
    * Bounded to 200 entries (FIFO eviction with LRU touch on re-insert) to prevent unbounded memory growth
    * in long-running streams.
    */
-  private readonly textBitmapCache = new Map<string, HTMLCanvasElement>();
+  private readonly textBitmapCache = new ByteLimitedCache<HTMLCanvasElement>(
+    2_000_000, // 2MB
+    (c) => c.width * c.height * 4 // RGBA bytes
+  );
   private readonly superChatGradientCache = new Map<string, CanvasGradient>();
 
   /** Cached message dimensions by message ID. Cleared on settings change. */
@@ -222,8 +229,7 @@ export class CanvasRenderer extends RendererBase {
 
   /** Max concurrent emoji fetch operations. */
   private static readonly EMOJI_FETCH_MAX_CONCURRENT = 6;
-  /** Max entries in the emoji image cache. */
-  private static readonly EMOJI_CACHE_MAX = 200;
+
   /** Max entries in the author photo cache. */
   private static readonly AUTHOR_PHOTO_CACHE_MAX = 100;
   /** Max entries in the sticker image cache. */
@@ -471,13 +477,6 @@ export class CanvasRenderer extends RendererBase {
       img.onload = () => {
         this.emojiFetching.delete(url);
         this.emojiFetchingStarted.delete(url);
-        // Direct cache write instead of delegating to loadImage() —
-        // the old path created a second Image for the same URL,
-        // doubling the load latency before the emoji appeared.
-        while (this.emojiCache.size >= CanvasRenderer.EMOJI_CACHE_MAX) {
-          const key = this.emojiCache.keys().next().value;
-          if (key !== undefined) this.emojiCache.delete(key);
-        }
         this.emojiCache.set(url, img);
 
         // Trigger an immediate render frame so the emoji appears within
