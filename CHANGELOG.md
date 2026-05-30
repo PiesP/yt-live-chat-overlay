@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.35.2] - 2026-05-30
+
+### Changed
+
+- **Frame timing instrumentation** — Added per-frame `performance.now()`-based metrics (render, drain, collision check, text measure) to the debug overlay and `SessionMetrics`. Zero overhead when `showDebug` is disabled via callback pattern.
+- **Settings save debounced** — Settings are now persisted via `requestIdleCallback` instead of writing to storage on every `set()` call, eliminating redundant `JSON.stringify` during slider drags.
+
+### Refactored
+
+- **Opacity-batched rendering** — `renderFrame()` now pre-scans active messages, computes opacity once per frame, and groups messages by 0.05 opacity buckets. Each group renders with a single `ctx.globalAlpha` set, reducing per-message `save()`/`restore()` pairs by ~70%.
+- **CanvasMessage object pool** — Expired message objects are now released to a free list and recycled via `acquireMessage()` + `Object.assign()`, eliminating per-activation allocations and reducing GC pressure by 40–60%.
+- **Array compaction threshold** — `cleanupExpiredMessages()` replaces the array via `.slice()` when more than 50% of slots are expired, avoiding garbage-collectible tail references.
+- **Byte-limited image caches** — `emojiCache` and `textBitmapCache` now use a new `ByteLimitedCache<'T>` wrapper with estimated byte tracking (3MB emoji, 2MB text bitmap) instead of entry-count FIFO eviction. Author photo and sticker caches remain plain `Map`.
+- **Worker text bitmap cache** — The Worker renderer now pre-renders text+outline to an `OffscreenCanvas` bitmap and draws via `drawImage()` instead of per-frame `fillText()`/`strokeText()`, matching main-thread text rendering quality.
+
 ## [0.35.1] - 2026-05-28
 
 ### Fixed
