@@ -602,7 +602,6 @@ export function renderRegularMessage(
   message: ChatMessage,
   x: number,
   y: number,
-  alpha: number,
   settings: OverlaySettings,
   textBitmapCache: Map<string, HTMLCanvasElement>,
   emojiCache: Map<string, HTMLImageElement>,
@@ -616,9 +615,7 @@ export function renderRegularMessage(
       ? message.userColor
       : settings.colors[message.authorType];
 
-  const prevAlpha = ctx.globalAlpha;
-  ctx.globalAlpha = alpha;
-
+  // globalAlpha is set by the caller (opacity-batched outer loop)
   const showAuthor = settings.showAuthor[message.authorType];
   const textX = x + rendererLayout.paddingH;
   let textY = y + rendererLayout.paddingV;
@@ -676,6 +673,4 @@ export function renderRegularMessage(
       getFontFn
     );
   }
-
-  ctx.globalAlpha = prevAlpha;
 }

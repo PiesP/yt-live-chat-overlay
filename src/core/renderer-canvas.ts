@@ -702,6 +702,9 @@ export class CanvasRenderer extends RendererBase {
     // Early exit for empty frames — nothing to render.
     if (!hasContent) return;
 
+    // ── Pre-scan: group active messages by opacity bucket (0.05 granularity) ──
+    const opacityGroups = new Map<number, Array<{ msg: CanvasMessage; elapsed: number }>>();
+
     for (let i = 0; i < this.activeMessages.length; i++) {
       const msg = this.activeMessages[i];
       if (!msg) continue;
@@ -731,89 +734,103 @@ export class CanvasRenderer extends RendererBase {
         msg.speedTier
       );
 
-      const snappedX = Math.floor(msg.x);
-      const snappedY = Math.floor(msg.y);
+      const bucket = Math.round(opacity * 20) / 20;
+      let group = opacityGroups.get(bucket);
+      if (!group) {
+        group = [];
+        opacityGroups.set(bucket, group);
+      }
+      group.push({ msg, elapsed });
+    }
 
-      // renderMessage is always set in activateMessage (avoids per-frame nullish coalescing)
-      const renderMessage = msg.renderMessage;
+    // ── Render each opacity group with a single ctx.globalAlpha set ──
+    for (const [bucketOpacity, entries] of opacityGroups) {
+      ctx.globalAlpha = bucketOpacity;
 
-      // Rich card types (SuperChat/Membership) always render their original
-      // card structure — replace mode is not supported for structured cards.
-      // Translation appears as dual-mode text below the card (lines 800-815).
-      const renderOriginal = true;
-      if (msg.message.kind === 'text') {
-        const isReplace = this.settings.translationMode === 'replace';
-        renderRegularMessage(
-          ctx,
-          renderMessage,
-          snappedX,
-          snappedY,
-          opacity,
-          this.settings,
-          this.textBitmapCache,
-          this.emojiCache,
-          this.authorPhotoCache,
-          (fs) => this.getFont(fs),
-          isReplace ? msg.translatedText : undefined
-        );
-      } else {
-        if (renderOriginal) {
-          if (msg.message.kind === 'superchat') {
-            renderSuperChatCard(
-              ctx,
-              renderMessage,
-              msg.width,
-              msg.height,
-              snappedX,
-              snappedY,
-              opacity,
-              this.settings,
-              this.textBitmapCache,
-              this.authorPhotoCache,
-              this.stickerCache,
-              this.emojiCache,
-              (fs) => this.getFont(fs),
-              this.superChatGradientCache
-            );
-          } else if (msg.message.kind === 'membership') {
-            renderMembershipCard(
-              ctx,
-              renderMessage,
-              msg.width,
-              msg.height,
-              snappedX,
-              snappedY,
-              opacity,
-              elapsed,
-              this.settings,
-              this.textBitmapCache,
-              this.authorPhotoCache,
-              this.emojiCache,
-              (fs) => this.getFont(fs)
-            );
+      for (const { msg, elapsed } of entries) {
+        const snappedX = Math.floor(msg.x);
+        const snappedY = Math.floor(msg.y);
+
+        // renderMessage is always set in activateMessage (avoids per-frame nullish coalescing)
+        const renderMessage = msg.renderMessage;
+
+        // Rich card types (SuperChat/Membership) always render their original
+        // card structure — replace mode is not supported for structured cards.
+        // Translation appears as dual-mode text below the card.
+        const renderOriginal = true;
+        if (msg.message.kind === 'text') {
+          const isReplace = this.settings.translationMode === 'replace';
+          renderRegularMessage(
+            ctx,
+            renderMessage,
+            snappedX,
+            snappedY,
+            this.settings,
+            this.textBitmapCache,
+            this.emojiCache,
+            this.authorPhotoCache,
+            (fs) => this.getFont(fs),
+            isReplace ? msg.translatedText : undefined
+          );
+        } else {
+          if (renderOriginal) {
+            if (msg.message.kind === 'superchat') {
+              renderSuperChatCard(
+                ctx,
+                renderMessage,
+                msg.width,
+                msg.height,
+                snappedX,
+                snappedY,
+                this.settings,
+                this.textBitmapCache,
+                this.authorPhotoCache,
+                this.stickerCache,
+                this.emojiCache,
+                (fs) => this.getFont(fs),
+                this.superChatGradientCache
+              );
+            } else if (msg.message.kind === 'membership') {
+              renderMembershipCard(
+                ctx,
+                renderMessage,
+                msg.width,
+                msg.height,
+                snappedX,
+                snappedY,
+                elapsed,
+                this.settings,
+                this.textBitmapCache,
+                this.authorPhotoCache,
+                this.emojiCache,
+                (fs) => this.getFont(fs)
+              );
+            }
           }
         }
-      }
 
-      // Render translation below original text (dual mode only).
-      // Replace mode renders translation inside renderRegularMessage as override text.
-      if (msg.translatedText && this.settings.translationMode !== 'replace') {
-        const fontSize = Math.max(
-          1,
-          Math.round(this.settings.fontSize * CanvasRenderer.TRANSLATION_FONT_SCALE)
-        );
-        const font = getFontString(fontSize, this.settings.fontWeight, this.settings.fontFamily);
-        const transY = snappedY + msg.height + CanvasRenderer.TRANSLATION_GAP_PX;
-        const transColor = this.settings.colors[msg.message.authorType];
-        ctx.save();
-        ctx.globalAlpha = opacity * CanvasRenderer.TRANSLATION_OPACITY_SCALE;
-        ctx.font = font;
-        ctx.fillStyle = transColor;
-        strokeTextOutline(ctx, msg.translatedText, snappedX, transY, transColor, this.settings);
-        ctx.fillText(msg.translatedText, snappedX, transY);
-        ctx.restore();
+        // Render translation below original text (dual mode only).
+        // Replace mode renders translation inside renderRegularMessage as override text.
+        if (msg.translatedText && this.settings.translationMode !== 'replace') {
+          const fontSize = Math.max(
+            1,
+            Math.round(this.settings.fontSize * CanvasRenderer.TRANSLATION_FONT_SCALE)
+          );
+          const font = getFontString(fontSize, this.settings.fontWeight, this.settings.fontFamily);
+          const transY = snappedY + msg.height + CanvasRenderer.TRANSLATION_GAP_PX;
+          const transColor = this.settings.colors[msg.message.authorType];
+          ctx.save();
+          ctx.globalAlpha = bucketOpacity * CanvasRenderer.TRANSLATION_OPACITY_SCALE;
+          ctx.font = font;
+          ctx.fillStyle = transColor;
+          strokeTextOutline(ctx, msg.translatedText, snappedX, transY, transColor, this.settings);
+          ctx.fillText(msg.translatedText, snappedX, transY);
+          ctx.restore();
+        }
       }
     }
+
+    ctx.globalAlpha = 1;
     this.observability.recordRenderFrame(performance.now() - t0);
   }
 

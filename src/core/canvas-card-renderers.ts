@@ -58,7 +58,6 @@ export function renderSuperChatCard(
   msgHeight: number,
   x: number,
   y: number,
-  alpha: number,
   settings: OverlaySettings,
   textBitmapCache: Map<string, HTMLCanvasElement>,
   authorPhotoCache: Map<string, HTMLImageElement>,
@@ -74,8 +73,7 @@ export function renderSuperChatCard(
   const w = msgWidth;
   const h = msgHeight;
 
-  const prevAlpha = ctx.globalAlpha;
-  ctx.globalAlpha = alpha;
+  // globalAlpha is set by the caller (opacity-batched outer loop)
 
   const {
     base: scAlpha,
@@ -193,11 +191,7 @@ export function renderSuperChatCard(
       }
     }
   }
-
-  ctx.globalAlpha = prevAlpha;
 }
-
-// ── Membership card ──────────────────────────────────────────────────────────
 
 /** Render a Membership card at (x, y) with alpha blending. */
 export function renderMembershipCard(
@@ -207,7 +201,6 @@ export function renderMembershipCard(
   msgHeight: number,
   x: number,
   y: number,
-  alpha: number,
   elapsed: number,
   settings: OverlaySettings,
   textBitmapCache: Map<string, HTMLCanvasElement>,
@@ -220,8 +213,7 @@ export function renderMembershipCard(
   const h = msgHeight;
   const mem = designColors.membership;
 
-  const prevAlpha = ctx.globalAlpha;
-  ctx.globalAlpha = alpha;
+  // globalAlpha is set by the caller (opacity-batched outer loop)
 
   ctx.fillStyle = `rgba(${mem.background.r}, ${mem.background.g}, ${mem.background.b}, ${mem.backgroundAlpha})`;
   drawRoundRect(ctx, x, y, w, h, rendererLayout.membershipCardRadius);
@@ -271,6 +263,4 @@ export function renderMembershipCard(
       getFontFn
     );
   }
-
-  ctx.globalAlpha = prevAlpha;
 }
