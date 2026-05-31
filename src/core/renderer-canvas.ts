@@ -319,7 +319,8 @@ export class CanvasRenderer extends RendererBase {
   /** Pre-computed 1/maxMessageAgeMs to avoid per-frame division in opacity calc. */
   private readonly ageFadeRate = 1 / rendererLayout.maxMessageAgeMs;
   /** Pre-computed 1/fadeDurationMs, updated on settings change. */
-  private invFadeDuration = 1 / Math.max(1, 200);
+  /** Pre-computed 1/fadeDurationMs to avoid per-frame division in opacity calc. */
+  private invFadeDuration = 1 / Math.max(1, 500);
   private overlayDimensionsUnsubscribe: (() => void) | null = null;
   private emojiCleanupIntervalId: ReturnType<typeof setInterval> | null = null;
   /** Debounce flag for emoji-load-triggered rAF restarts. */
@@ -465,6 +466,7 @@ export class CanvasRenderer extends RendererBase {
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
     super(overlay, settings);
+    this.invFadeDuration = 1 / Math.max(1, settings.fadeDurationMs);
     this.translationService = new TranslationService();
     this.translationService.configure({
       enabled: settings.translationEnabled,
@@ -1830,6 +1832,7 @@ export class CanvasRenderer extends RendererBase {
     config.outlineWidthPx = settings.outline.widthPx;
     config.outlineOpacity = settings.outline.opacity;
     config.color = settings.colors.normal;
+    config.maxMessageAgeMs = rendererLayout.maxMessageAgeMs;
     return config;
   }
 

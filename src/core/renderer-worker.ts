@@ -66,6 +66,8 @@ interface WorkerConfig {
   backlogOpacityMultiplier: number;
   /** Fade-out duration in ms. */
   fadeDurationMs: number;
+  /** Max message age for age-based fade-out (ms). */
+  maxMessageAgeMs: number;
   /** Text color (CSS string) for regular messages. */
   color: string;
   /** Outline width in px. */
@@ -122,7 +124,7 @@ const HEADWAY_GAP_MIN = 16; // canonical: LaneAllocator.HEADWAY_GAP_MIN_PX
 const HEADWAY_GAP_MAX = 60; // canonical: LaneAllocator.HEADWAY_GAP_MAX_PX
 const EXIT_PADDING_MIN = 100; // canonical: rendererLayout.exitPaddingMin
 const SCROLL_DURATION_MAX_MS = 12_000; // worker-specific safety cap (no equivalent in main renderer)
-const TOP_BOTTOM_DURATION_MS = 5_000;
+const TOP_BOTTOM_DURATION_MS = 4_000; // canonical: rendererLayout.topBottomDurationMs
 const LANE_COOLDOWN_MIN_MS = 500; // canonical: LaneAllocator.LANE_COOLDOWN_MIN_MS
 const SAFETY_MARGIN_RATIO = 0.15; // canonical: LaneAllocator.SAFETY_MARGIN_RATIO
 const EPSILON = 0.05;
@@ -137,6 +139,7 @@ let config: WorkerConfig | null = null;
 let animFrameId: number | null = null;
 let isDestroyed = false;
 let isPaused = false;
+let pauseStartTime = 0;
 
 // Active messages (renderable)
 const activeMessages: ActiveMessage[] = [];
@@ -270,9 +273,33 @@ self.onmessage = (e: MessageEvent) => {
         textBitmapCache.clear();
       }
       break;
-    case 'setPaused':
-      isPaused = data.paused as boolean;
+    case 'setPaused': {
+      const shouldPause = data.paused as boolean;
+      if (shouldPause && !isPaused) {
+        // Pause: record the time
+        pauseStartTime = performance.now();
+        isPaused = true;
+      } else if (!shouldPause && isPaused) {
+        // Resume: accumulate paused duration and shift lane timers
+        const now = performance.now();
+        const pausedMs = Math.max(0, now - pauseStartTime);
+        // Accumulate pausedDuration on active messages
+        for (const msg of activeMessages) {
+          msg.pausedDuration += pausedMs;
+        }
+        // Shift lane heap timers by paused duration
+        shiftLaneTimers(pausedMs);
+        isPaused = false;
+        pauseStartTime = 0;
+        // Restart render loop if stopped
+        if (animFrameId === null && !isDestroyed) {
+          startRenderLoop();
+        }
+      } else {
+        isPaused = shouldPause;
+      }
       break;
+    }
     case 'destroy':
       handleDestroy();
       break;
@@ -486,6 +513,20 @@ function updateLane(laneIdx: number, availableAt: number): void {
   siftDown(heapIdx);
 }
 
+/**
+ * Shift all lane timers forward by `ms` to account for pause duration.
+ * Mirrors renderer-canvas.ts LaneAllocator.shiftAll().
+ */
+function shiftLaneTimers(ms: number): void {
+  for (let i = 0; i < laneHeap.length; i++) {
+    const entry = laneHeap[i];
+    if (entry) entry[1] += ms;
+  }
+  for (const [key, entry] of speedTierLanes) {
+    speedTierLanes.set(key, { tier: entry.tier, until: entry.until + ms });
+  }
+}
+
 // ── 4-ary min-heap helpers ───────────────────────────────────────────────
 
 function siftDown(idx: number): void {
@@ -573,6 +614,8 @@ function renderFrame(): void {
   const isScrolling = mode === 'scroll' || mode === 'reverse';
   const font = `${config.fontWeight} ${config.fontSize}px ${config.fontFamily}`;
   const fadeMs = config.fadeDurationMs;
+  const invFadeMs = fadeMs > 0 ? 1 / Math.max(1, fadeMs) : 0;
+  const ageFadeRate = 1 / config.maxMessageAgeMs;
   const strokeWidth =
     config.outlineWidthPx > 0 && config.outlineOpacity > 0 ? config.outlineWidthPx : 0;
   const strokeColor = `rgba(0,0,0,${Math.min(1, config.outlineOpacity)})`;
@@ -600,9 +643,9 @@ function renderFrame(): void {
     // Compute opacity
     let opacity = config.opacity;
     if (msg.speedTier === SPEED_TIER.BACKLOG) {
-      opacity = config.backlogOpacityMultiplier;
+      opacity *= config.backlogOpacityMultiplier;
     } else if (msg.speedTier === SPEED_TIER.FAR) {
-      opacity = config.depthFarOpacityMul;
+      opacity *= config.depthFarOpacityMul;
     }
 
     if (fadeMs > 0) {
@@ -610,19 +653,22 @@ function renderFrame(): void {
         // Scrolling: fade-out only (message exits screen edge naturally)
         const remaining = msg.duration - elapsed;
         if (remaining < fadeMs) {
-          opacity *= Math.max(0, remaining / Math.max(1, fadeMs));
+          opacity *= Math.max(0, remaining * invFadeMs);
         }
       } else {
         // Fixed (top/bottom): fade-in + fade-out
         if (elapsed < fadeMs) {
-          opacity *= elapsed / Math.max(1, fadeMs);
+          opacity *= elapsed * invFadeMs;
         }
-        const remaining = Math.max(0, msg.duration - elapsed);
-        if (remaining < fadeMs) {
-          opacity *= remaining / Math.max(1, fadeMs);
+        if (elapsed > msg.duration - fadeMs) {
+          opacity *= Math.max(0, (msg.duration - elapsed) * invFadeMs);
         }
       }
     }
+
+    // Age-based fade-out: gradually fade after maxMessageAgeMs (matches renderer-canvas.ts)
+    const ageRatio = Math.min(1, elapsed * ageFadeRate);
+    opacity = Math.max(0, opacity * (1 - ageRatio));
 
     if (opacity <= 0) continue;
 
