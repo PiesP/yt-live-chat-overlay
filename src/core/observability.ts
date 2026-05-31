@@ -49,6 +49,9 @@ export class ObservabilityReporter {
   private collisionAccumMs = 0;
   /** Per-frame accumulator for text measure timing (reset each tick). */
   private textMeasureAccumMs = 0;
+  /** Timestamp of last debug overlay DOM update, for throttle control. */
+  private lastDebugUpdate = 0;
+  private static readonly DEBUG_UPDATE_INTERVAL_MS = 250;
 
   constructor(initialShowDebug: boolean = false) {
     this.metrics = {
@@ -204,7 +207,14 @@ export class ObservabilityReporter {
     this.frameTimings.textMeasureMs = this.textMeasureAccumMs / fc;
     this.collisionAccumMs = 0;
     this.textMeasureAccumMs = 0;
-    this.updateDebugOverlay();
+    // Throttle DOM updates to 250ms intervals.
+    // Debug overlay is human-readable — 4 updates/second is plenty.
+    // Accumulators continue to reset every frame so timing data stays fresh.
+    const now = performance.now();
+    if (now - this.lastDebugUpdate >= ObservabilityReporter.DEBUG_UPDATE_INTERVAL_MS) {
+      this.lastDebugUpdate = now;
+      this.updateDebugOverlay();
+    }
   }
 
   private createDebugOverlay(): void {

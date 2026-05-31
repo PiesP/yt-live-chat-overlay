@@ -15,6 +15,7 @@
  * - Sequential translations only — a large text blocks subsequent calls.
  *   For chat (short messages), this is acceptable.
  */
+import { ByteLimitedCache } from '@core/byte-limited-cache';
 import { createLogger } from '@core/logging';
 
 const log = createLogger('TranslationService');
@@ -79,9 +80,11 @@ export class TranslationService {
   /** Number of death→recovery cycles this session. Capped to prevent noise. */
   private recoveryCycleCount = 0;
   private static readonly MAX_RECOVERY_CYCLES = 3;
-  /** Translation result cache to avoid re-translating repeated short text (e.g. "LOL", "ㅋㅋㅋ"). */
-  private translationCache: Map<string, string> = new Map();
-  private static readonly TRANSLATION_CACHE_MAX = 200;
+  /** Translation result cache with LRU eviction to keep frequently repeated short text (e.g. "LOL", "ㅋㅋㅋ"). */
+  private readonly translationCache = new ByteLimitedCache<string>(
+    50_000, // ~50KB (equivalent to ~2500 average chat messages)
+    (text) => text.length * 2 // UTF-16 byte estimate
+  );
 
   /** Call this when settings change to reconfigure the translator. */
   async configure(settings: {
@@ -292,7 +295,12 @@ export class TranslationService {
 
     // ── Check cache before calling the API ────────────────────────────
     const cached = this.translationCache.get(text);
-    if (cached !== undefined) return cached;
+    if (cached !== undefined) {
+      // LRU touch: move entry to end of eviction order so frequently
+      // repeated short text ("LOL", "草") stays in cache indefinitely.
+      this.translationCache.touch(text);
+      return cached;
+    }
 
     // ── Execute translation under mutex ───────────────────────────────
     let resolveMutex: (() => void) | undefined;
@@ -304,14 +312,8 @@ export class TranslationService {
       const result = await this.translator.translate(text);
       this.consecutiveFailures = 0;
 
-      // Cache the result with LRU eviction
+      // ByteLimitedCache handles eviction automatically based on byte limit
       this.translationCache.set(text, result);
-      if (this.translationCache.size > TranslationService.TRANSLATION_CACHE_MAX) {
-        const firstKey = this.translationCache.keys().next().value;
-        if (firstKey !== undefined) {
-          this.translationCache.delete(firstKey);
-        }
-      }
 
       return result;
     } catch (err: unknown) {

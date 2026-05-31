@@ -61,8 +61,8 @@ export function renderSuperChatCard(
   y: number,
   settings: OverlaySettings,
   textBitmapCache: ByteLimitedCache<HTMLCanvasElement>,
-  authorPhotoCache: Map<string, HTMLImageElement>,
-  stickerCache: Map<string, HTMLImageElement>,
+  authorPhotoCache: ByteLimitedCache<HTMLImageElement>,
+  stickerCache: ByteLimitedCache<HTMLImageElement>,
   emojiCache: ByteLimitedCache<HTMLImageElement>,
   getFontFn: (fontSize: number) => string,
   superChatGradientCache: Map<string, CanvasGradient>
@@ -205,7 +205,7 @@ export function renderMembershipCard(
   elapsed: number,
   settings: OverlaySettings,
   textBitmapCache: ByteLimitedCache<HTMLCanvasElement>,
-  authorPhotoCache: Map<string, HTMLImageElement>,
+  authorPhotoCache: ByteLimitedCache<HTMLImageElement>,
   emojiCache: ByteLimitedCache<HTMLImageElement>,
   getFontFn: (fontSize: number) => string
 ): void {

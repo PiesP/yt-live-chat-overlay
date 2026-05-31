@@ -134,6 +134,175 @@ function applyPausedDurationToMessages(messages: CanvasMessage[], pausedMs: numb
 
 const log = createLogger('RendererCanvas');
 
+/**
+ * Priority-bucketed message queue for O(1) enqueue.
+ *
+ * Priority values are small discrete integers (6 known levels:
+ * 200/150/100/50/0/-50). Messages are stored in priority-level
+ * buckets. Enqueue is O(1) push to bucket. Dequeue scans buckets
+ * from highest to lowest priority (O(k) where k ≤ number of
+ * distinct priority levels, typically 6).
+ *
+ * Replaces the previous binary-search + splice() approach which
+ * was O(n) per insert due to splice's array element shifting.
+ *
+ * Each bucket uses an internal offset for O(1) shift-free dequeue.
+ * Buckets are compacted when the offset exceeds half the array
+ * length, preventing unbounded memory growth.
+ */
+class PriorityBucketQueue {
+  /** Priority → { messages array, read offset } */
+  private readonly buckets = new Map<number, { msgs: ChatMessage[]; offset: number }>();
+  /** Known priority levels sorted descending for efficient dequeue scan. */
+  private priorityLevels: number[] = [];
+  private _size = 0;
+
+  /** Total number of messages across all buckets. */
+  get size(): number {
+    return this._size;
+  }
+
+  /** Whether the queue has any messages. */
+  get isEmpty(): boolean {
+    return this._size === 0;
+  }
+
+  /**
+   * Add a message to its priority bucket. O(1).
+   * Dynamically registers new priority levels on first encounter.
+   */
+  enqueue(message: ChatMessage, priority: number): void {
+    let entry = this.buckets.get(priority);
+    if (!entry) {
+      entry = { msgs: [], offset: 0 };
+      this.buckets.set(priority, entry);
+      // Rebuild sorted priority list (infrequent — only on new levels)
+      this.priorityLevels = Array.from(this.buckets.keys()).sort((a, b) => b - a);
+    }
+    entry.msgs.push(message);
+    this._size++;
+  }
+
+  /**
+   * Remove and return the highest-priority message.
+   * O(k) where k = number of priority levels (~6).
+   * Returns undefined if the queue is empty.
+   */
+  dequeue(): ChatMessage | undefined {
+    for (const prio of this.priorityLevels) {
+      const entry = this.buckets.get(prio);
+      if (!entry) continue;
+      const { msgs } = entry;
+      if (entry.offset < msgs.length) {
+        const msg = msgs[entry.offset];
+        if (!msg) continue;
+        entry.offset++;
+        this._size--;
+        // Compact when more than half the array is consumed
+        if (entry.offset > 0 && entry.offset >= msgs.length / 2) {
+          entry.msgs = msgs.slice(entry.offset);
+          entry.offset = 0;
+        }
+        return msg;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Peek at the highest-priority message without removing it.
+   * Returns undefined if the queue is empty.
+   */
+  peek(): ChatMessage | undefined {
+    for (const prio of this.priorityLevels) {
+      const entry = this.buckets.get(prio);
+      if (!entry) continue;
+      if (entry.offset < entry.msgs.length) return entry.msgs[entry.offset];
+    }
+    return undefined;
+  }
+
+  /**
+   * Peek at the lowest-priority message without removing it.
+   * Used to determine whether an incoming message has higher priority
+   * than anything currently in the queue (for queue-full displacement).
+   * Returns undefined if the queue is empty.
+   */
+  peekLowest(): ChatMessage | undefined {
+    for (let i = this.priorityLevels.length - 1; i >= 0; i--) {
+      const prio = this.priorityLevels[i];
+      if (prio === undefined) continue;
+      const entry = this.buckets.get(prio);
+      if (!entry) continue;
+      if (entry.offset < entry.msgs.length) {
+        return entry.msgs[entry.msgs.length - 1]; // newest at this priority
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Drop the lowest-priority message from the queue.
+   * Used when queue is at capacity and a higher-priority message
+   * needs to displace the least important entry.
+   */
+  dropLowest(): void {
+    for (let i = this.priorityLevels.length - 1; i >= 0; i--) {
+      const prio = this.priorityLevels[i];
+      if (prio === undefined) continue;
+      const entry = this.buckets.get(prio);
+      if (!entry) continue;
+      if (entry.offset < entry.msgs.length) {
+        // Remove the newest message at this priority level (end of array)
+        entry.msgs.pop();
+        this._size--;
+        return;
+      }
+    }
+  }
+
+  /**
+   * Insert a batch of messages that were previously dequeued but
+   * need to be retried (e.g., collision retries). Each message
+   * is re-inserted into its priority bucket.
+   */
+  refill(messages: ChatMessage[], getPriority: (msg: ChatMessage) => number): void {
+    for (const msg of messages) {
+      this.enqueue(msg, getPriority(msg));
+    }
+  }
+
+  /** Clear all buckets and reset state. */
+  clear(): void {
+    this.buckets.clear();
+    this.priorityLevels = [];
+    this._size = 0;
+  }
+
+  /**
+   * Trim the queue to at most `maxSize` messages, keeping the
+   * highest-priority entries. Removes from lowest-priority
+   * buckets first. Used for background queue trimming.
+   */
+  trim(maxSize: number): void {
+    if (this._size <= maxSize) return;
+    let toRemove = this._size - maxSize;
+    for (let i = this.priorityLevels.length - 1; i >= 0 && toRemove > 0; i--) {
+      const prio = this.priorityLevels[i];
+      if (prio === undefined) continue;
+      const entry = this.buckets.get(prio);
+      if (!entry) continue;
+      if (entry.offset < entry.msgs.length) {
+        const activeCount = entry.msgs.length - entry.offset;
+        const removeCount = Math.min(toRemove, activeCount);
+        entry.msgs.length -= removeCount;
+        this._size -= removeCount;
+        toRemove -= removeCount;
+      }
+    }
+  }
+}
+
 /** Shared empty ChatMessage — placeholder for pooled CanvasMessage objects. */
 const EMPTY_CHAT_MESSAGE: ChatMessage = {
   text: '',
@@ -161,8 +330,7 @@ export class CanvasRenderer extends RendererBase {
   private readonly activeMessagesByLane = new Map<number, CanvasMessage[]>();
   /** Pool of recycled CanvasMessage objects to reduce GC pressure. */
   private readonly messagePool: CanvasMessage[] = [];
-  private readonly pendingQueue: ChatMessage[] = [];
-  private pendingQueueOffset = 0;
+  private readonly pendingQueue = new PriorityBucketQueue();
   private readonly retryQueue: ChatMessage[] = [];
 
   /** Image caches (bounded LRU). */
@@ -172,8 +340,16 @@ export class CanvasRenderer extends RendererBase {
   );
   private readonly emojiFetching = new Set<string>();
   private readonly emojiFetchingStarted = new Map<string, number>();
-  private readonly authorPhotoCache = new Map<string, HTMLImageElement>();
-  private readonly stickerCache = new Map<string, HTMLImageElement>();
+  /** Author photo cache — byte-limited instead of count-limited for consistent memory usage. */
+  private readonly authorPhotoCache = new ByteLimitedCache<HTMLImageElement>(
+    2_000_000, // 2MB
+    (img) => img.naturalWidth * img.naturalHeight * 4 // RGBA bytes
+  );
+  /** Sticker image cache — byte-limited instead of count-limited for consistent memory usage. */
+  private readonly stickerCache = new ByteLimitedCache<HTMLImageElement>(
+    1_000_000, // 1MB
+    (img) => img.naturalWidth * img.naturalHeight * 4 // RGBA bytes
+  );
   /** Map of URL → timestamp for failed emoji fetches, with TTL-based eviction. */
   private readonly failedEmojiFetches = new Map<string, number>();
   /** In-flight image load guard to prevent duplicate Image objects. */
@@ -213,7 +389,7 @@ export class CanvasRenderer extends RendererBase {
    * in long-running streams.
    */
   private readonly textBitmapCache = new ByteLimitedCache<HTMLCanvasElement>(
-    2_000_000, // 2MB
+    4_000_000, // 4MB (increased from 2MB for better hit rate with repetitive chat text)
     (c) => c.width * c.height * 4 // RGBA bytes
   );
   private readonly superChatGradientCache = new Map<string, CanvasGradient>();
@@ -253,11 +429,6 @@ export class CanvasRenderer extends RendererBase {
 
   /** Max concurrent emoji fetch operations. */
   private static readonly EMOJI_FETCH_MAX_CONCURRENT = 6;
-
-  /** Max entries in the author photo cache. */
-  private static readonly AUTHOR_PHOTO_CACHE_MAX = 100;
-  /** Max entries in the sticker image cache. */
-  private static readonly STICKER_CACHE_MAX = 50;
 
   /** Stagger queue depth thresholds. */
   private static readonly STAGGER_QUEUE_HIGH = 50;
@@ -358,7 +529,7 @@ export class CanvasRenderer extends RendererBase {
   }
 
   protected getQueueLength(): number {
-    return this.pendingQueue.length - this.pendingQueueOffset;
+    return this.pendingQueue.size;
   }
 
   // ── Message ingress ──────────────────────────────────────────────────
@@ -387,30 +558,30 @@ export class CanvasRenderer extends RendererBase {
     const priority = CanvasRenderer.getMessagePriority(message);
     this.prefetchImages(message);
 
-    if (this.pendingQueue.length - this.pendingQueueOffset >= rendererLayout.queueMaxSize) {
-      const last = this.pendingQueue[this.pendingQueue.length - 1];
-      if (last && priority <= CanvasRenderer.getMessagePriority(last)) {
+    if (this.pendingQueue.size >= rendererLayout.queueMaxSize) {
+      // Queue full — check if the new message has higher priority than
+      // the lowest-priority message currently in the queue.
+      const lowest = this.pendingQueue.peekLowest();
+      // peekLowest returns the lowest-priority entry; but to determine
+      // priority we call getMessagePriority on it (same cost as old code).
+      // If the new message isn't more important, drop it.
+      if (lowest && priority <= CanvasRenderer.getMessagePriority(lowest)) {
         if (trackDrops) this.observability.onMessageDropped('queue_priority');
         return;
       }
-      this.pendingQueueOffset++;
+      // New message is more important — displace the lowest-priority entry.
+      this.pendingQueue.dropLowest();
       if (trackDrops) this.observability.onMessageDropped('queue_replaced');
     }
 
-    const insertIndex = this.findQueueInsertIndex(priority);
-    if (insertIndex === this.pendingQueue.length) {
-      this.pendingQueue.push(message);
-    } else {
-      this.pendingQueue.splice(insertIndex, 0, message);
-    }
-
+    this.pendingQueue.enqueue(message, priority);
     this.updateBacklogPause();
 
     // Trigger an immediate render frame so the message appears within
     // one frame (~16ms) instead of waiting for the next natural rAF.
     // Skip if paused — the render loop would just return immediately.
     if (
-      this.pendingQueue.length === 1 &&
+      this.pendingQueue.size === 1 &&
       this.animFrameId !== null &&
       !this.isPaused &&
       !this.isVideoPaused
@@ -420,45 +591,15 @@ export class CanvasRenderer extends RendererBase {
     }
   }
 
-  /** Binary search for insertion point in the priority-sorted pending queue. */
-  private findQueueInsertIndex(priority: number): number {
-    const queue = this.pendingQueue;
-    let lo = this.pendingQueueOffset;
-    let hi = queue.length;
-    while (lo < hi) {
-      const mid = (lo + hi) >>> 1;
-      const midMsg = queue[mid];
-      if (midMsg && CanvasRenderer.getMessagePriority(midMsg) >= priority) {
-        lo = mid + 1;
-      } else {
-        hi = mid;
-      }
-    }
-    return lo;
-  }
-
-  private compactPendingQueue(): void {
-    if (this.pendingQueueOffset > 0) {
-      this.pendingQueue.splice(0, this.pendingQueueOffset);
-      this.pendingQueueOffset = 0;
-    }
-  }
-
   trimBackgroundQueue(): void {
-    this.compactPendingQueue();
-    if (this.pendingQueue.length <= rendererLayout.backgroundQueueMax) return;
-    this.pendingQueue.sort((a, b) => {
-      const prioA = CanvasRenderer.getMessagePriority(a);
-      const prioB = CanvasRenderer.getMessagePriority(b);
-      return prioB - prioA || (a.timestamp ?? 0) - (b.timestamp ?? 0);
-    });
-    this.pendingQueue.length = rendererLayout.backgroundQueueMax;
+    if (this.pendingQueue.size <= rendererLayout.backgroundQueueMax) return;
+    this.pendingQueue.trim(rendererLayout.backgroundQueueMax);
   }
 
   // ── Image pre-fetching
 
-  /** Load an image and store it in the given cache on success. */
-  private loadImage(url: string, cache: Map<string, HTMLImageElement>, maxEntries: number): void {
+  /** Load an image and store it in the given ByteLimitedCache on success. */
+  private loadImage(url: string, cache: ByteLimitedCache<HTMLImageElement>): void {
     if (cache.has(url)) return;
     if (this.imageLoading.has(url)) return;
     this.imageLoading.add(url);
@@ -467,10 +608,6 @@ export class CanvasRenderer extends RendererBase {
     img.src = url;
     img.onload = () => {
       this.imageLoading.delete(url);
-      while (cache.size >= maxEntries) {
-        const oldestKey = cache.keys().next().value;
-        if (oldestKey !== undefined) cache.delete(oldestKey);
-      }
       cache.set(url, img);
     };
     img.onerror = () => {
@@ -542,16 +679,12 @@ export class CanvasRenderer extends RendererBase {
     }
 
     if (message.authorPhotoUrl) {
-      this.loadImage(
-        message.authorPhotoUrl,
-        this.authorPhotoCache,
-        CanvasRenderer.AUTHOR_PHOTO_CACHE_MAX
-      );
+      this.loadImage(message.authorPhotoUrl, this.authorPhotoCache);
     }
 
     const stickerUrl = message.superChat?.sticker?.url;
     if (stickerUrl) {
-      this.loadImage(stickerUrl, this.stickerCache, CanvasRenderer.STICKER_CACHE_MAX);
+      this.loadImage(stickerUrl, this.stickerCache);
     }
   }
 
@@ -614,11 +747,7 @@ export class CanvasRenderer extends RendererBase {
       //   - setStandbyStatus(true)
       //   - onResume (tab visibility or video unpause)
       //   - emoji/sticker load callbacks (via needsRerender flag)
-      if (
-        this.activeMessages.length === 0 &&
-        this.pendingQueue.length === 0 &&
-        !this.standbyStatus
-      ) {
+      if (this.activeMessages.length === 0 && this.pendingQueue.isEmpty && !this.standbyStatus) {
         this.animFrameId = null;
         return;
       }
@@ -689,7 +818,7 @@ export class CanvasRenderer extends RendererBase {
         }
       }
       this.observability.updateActiveMessages(this.activeMessages.length);
-      this.observability.updateQueueDepth(this.pendingQueue.length);
+      this.observability.updateQueueDepth(this.pendingQueue.size);
     }
 
     // P2-3: Skip clearRect + render loop when no active messages or standby message.
@@ -870,7 +999,7 @@ export class CanvasRenderer extends RendererBase {
     // (SuperChat priority ≥100, Membership ≥80) bypass the gate so paid
     // interactions are never blocked by lane saturation.
     if (this.isAntiBlockActive()) {
-      const front = this.pendingQueue[this.pendingQueueOffset];
+      const front = this.pendingQueue.peek();
       if (
         !front ||
         CanvasRenderer.getMessagePriority(front) < CanvasRenderer.ANTI_BLOCK_PRIORITY_THRESHOLD
@@ -887,11 +1016,11 @@ export class CanvasRenderer extends RendererBase {
     const maxSkip = CanvasRenderer.DRAIN_QUEUE_MAX_SKIP;
     let batchIndex = 0; // for stagger delay computation
     while (
-      this.pendingQueueOffset < this.pendingQueue.length &&
+      !this.pendingQueue.isEmpty &&
       this.activeMessages.length < this.settings.maxConcurrentMessages &&
       skipped <= maxSkip
     ) {
-      const msg = this.pendingQueue[this.pendingQueueOffset++];
+      const msg = this.pendingQueue.dequeue();
       if (!msg) continue;
 
       const result = this.checkPlacement(msg, now, dims);
@@ -935,24 +1064,12 @@ export class CanvasRenderer extends RendererBase {
     }
 
     // Merge retry queue back into pending queue for next frame.
-    // Re-insert via priority-sorted splice instead of blind push to preserve
-    // ordering: a collided superchat retry shouldn't sit behind newly-arrived
-    // text messages. Each insert is O(n) splice, but retryQueue is typically
-    // ≤3 elements (limited by maxSkip).
+    // refill() re-inserts each message into its priority bucket (O(k) per message
+    // where k = number of priority levels, typically 6). Previously this used
+    // O(n) splice per message. retryQueue is typically ≤3 elements (limited by maxSkip).
     if (this.retryQueue.length > 0) {
-      for (const msg of this.retryQueue) {
-        const idx = this.findQueueInsertIndex(CanvasRenderer.getMessagePriority(msg));
-        this.pendingQueue.splice(idx, 0, msg);
-        // Adjust offset when the item was inserted before the current read position.
-        // Without this, pendingQueueOffset becomes stale after the splice shifts indices.
-        if (idx <= this.pendingQueueOffset) {
-          this.pendingQueueOffset++;
-        }
-      }
+      this.pendingQueue.refill(this.retryQueue, (msg) => CanvasRenderer.getMessagePriority(msg));
       this.retryQueue.length = 0;
-    }
-    if (this.pendingQueueOffset > 64) {
-      this.compactPendingQueue();
     }
     this.observability.recordDrainQueue(performance.now() - t0);
   }
@@ -1175,9 +1292,9 @@ export class CanvasRenderer extends RendererBase {
     // When the pending queue backs up, stagger is reduced to avoid
     // compounding the delay — deep queue → zero stagger (backlog mode).
     const maxStagger =
-      this.pendingQueue.length > CanvasRenderer.STAGGER_QUEUE_HIGH
+      this.pendingQueue.size > CanvasRenderer.STAGGER_QUEUE_HIGH
         ? 0
-        : this.pendingQueue.length > CanvasRenderer.STAGGER_QUEUE_MED
+        : this.pendingQueue.size > CanvasRenderer.STAGGER_QUEUE_MED
           ? CanvasRenderer.STAGGER_MED_MS
           : CanvasRenderer.STAGGER_MAX_MS;
     const staggerDelay =
@@ -1608,7 +1725,7 @@ export class CanvasRenderer extends RendererBase {
   protected resetState(): void {
     this.activeMessages.length = 0;
     this.activeMessagesByLane.clear();
-    this.pendingQueue.length = 0;
+    this.pendingQueue.clear();
     this.backlogPaused = false;
     this.onBacklogPauseChange = null;
     clearTextMeasurementCaches();

@@ -497,7 +497,7 @@ export function drawAuthorSection(
   color: string,
   maxNameWidth: number | undefined,
   settings: OverlaySettings,
-  authorPhotoCache: Map<string, HTMLImageElement>,
+  authorPhotoCache: ByteLimitedCache<HTMLImageElement>,
   textBitmapCache: ByteLimitedCache<HTMLCanvasElement>,
   getFontFn: (fontSize: number) => string
 ): number {
@@ -606,7 +606,7 @@ export function renderRegularMessage(
   settings: OverlaySettings,
   textBitmapCache: ByteLimitedCache<HTMLCanvasElement>,
   emojiCache: ByteLimitedCache<HTMLImageElement>,
-  authorPhotoCache: Map<string, HTMLImageElement>,
+  authorPhotoCache: ByteLimitedCache<HTMLImageElement>,
   getFontFn: (fontSize: number) => string,
   overrideText?: string | null
 ): void {

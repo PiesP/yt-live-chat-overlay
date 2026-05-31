@@ -160,7 +160,7 @@ let totalDrops = 0;
 // ── Text bitmap cache ──────────────────────────────────────────────────────
 
 const textBitmapCache = new Map<string, OffscreenCanvas>();
-const TEXT_BITMAP_CACHE_MAX = 100;
+const TEXT_BITMAP_CACHE_MAX = 200;
 
 /**
  * Pre-allocated opacity buckets for per-frame reuse.

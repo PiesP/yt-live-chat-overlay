@@ -50,6 +50,9 @@ export class Overlay {
   private fullscreenHandler: (() => void) | null = null;
   private fullscreenUpdateTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly dimensionChangeCallbacks = new Set<OverlayDimensionsChangeCallback>();
+  /** rAF-based resize coalescing to avoid cascading updates during drag-resize. */
+  private resizePending = false;
+  private resizeRafId: number | null = null;
 
   /**
    * Find player container
@@ -104,7 +107,23 @@ export class Overlay {
     }
 
     this.resizeObserver = new ResizeObserver(() => {
-      this.updateDimensions();
+      // Coalesce multiple synchronised ResizeObserver callbacks into a single
+      // rAF frame. During window drag-resize, the observer fires for every
+      // intermediate size change. Without coalescing, each event triggers
+      // updateDimensions() → notifyDimensionChangeCallbacks() →
+      // canvas.applyDevicePixelRatio() + laneAllocator.reset(), which is
+      // expensive when called dozens of times per second.
+      if (this.resizePending) return;
+      this.resizePending = true;
+      // Cancel any previously scheduled rAF — only the latest resize matters.
+      if (this.resizeRafId !== null) {
+        cancelAnimationFrame(this.resizeRafId);
+      }
+      this.resizeRafId = requestAnimationFrame(() => {
+        this.resizeRafId = null;
+        this.resizePending = false;
+        this.updateDimensions();
+      });
     });
     this.resizeObserver.observe(this.playerElement);
   }
@@ -128,6 +147,14 @@ export class Overlay {
 
     this.resizeObserver.disconnect();
     this.resizeObserver = null;
+    // Cancel any pending rAF-scheduled resize update — without the observer
+    // there is no source for future resize events, and the stale callback
+    // would operate on a disconnected state.
+    if (this.resizeRafId !== null) {
+      cancelAnimationFrame(this.resizeRafId);
+      this.resizeRafId = null;
+    }
+    this.resizePending = false;
   }
 
   private detachFullscreenHandler(): void {
