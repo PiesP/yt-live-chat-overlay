@@ -11,6 +11,7 @@
 import type { ChatMessage, FontWeight } from '@app-types';
 import { buildWrappedLines } from '@core/canvas-text-renderer';
 import { DEFAULT_FONT_FAMILY, rendererLayout, spacing } from '@core/design-tokens';
+import { DEFAULT_SETTINGS } from '@core/settings-schema';
 import { getFontString, measureTextHeight, measureTextWidth } from '@core/text-measure';
 
 // ── Text measurement ────────────────────────────────────────────────────────
@@ -61,13 +62,18 @@ export function estimateMessageDimensions(
       fontSize,
       showAuthor,
       fontFamily,
-      maxBodyLines?.superchat ?? 5,
+      maxBodyLines?.superchat ?? DEFAULT_SETTINGS.superChatMaxBodyLines,
       fontWeight,
       showSuperChatAmount
     );
   }
   if (message.kind === 'membership') {
-    return estimateMembershipDimensions(message, font, fontSize, maxBodyLines?.membership ?? 3);
+    return estimateMembershipDimensions(
+      message,
+      font,
+      fontSize,
+      maxBodyLines?.membership ?? DEFAULT_SETTINGS.membershipMaxBodyLines
+    );
   }
   return estimateRegularMessageDimensions(message, font, fontSize, showAuthor, fontFamily);
 }
