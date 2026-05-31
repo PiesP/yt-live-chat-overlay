@@ -29,6 +29,25 @@
 
 /// <reference lib="webworker" />
 
+import type { FontWeight } from '@app-types';
+import { EMOJI_ALIAS_PATTERN } from './chat-message-helpers';
+import {
+  computeOutlineColor,
+  computeReadableTextColor,
+  computeSuperChatOpacities,
+  toRgba,
+} from './color-utils';
+import {
+  AUTHOR_PHOTO_SHADOW,
+  colors as designColors,
+  rendererLayout,
+  SUPERCHAT_AMOUNT_BADGE_FILL,
+  SUPERCHAT_AMOUNT_BADGE_STROKE,
+  spacing,
+} from './design-tokens';
+import { getFontString } from './text-measure';
+import { WorkerImageCache } from './worker-image-cache';
+
 // ── Types ─────────────────────────────────────────────────────────────────
 
 interface WorkerConfig {
@@ -78,6 +97,30 @@ interface WorkerConfig {
   outlineWidthPx: number;
   /** Outline opacity. */
   outlineOpacity: number;
+  /** SuperChat color opacity (0.35–1.0). */
+  superChatOpacity: number;
+  /** Maximum body text lines for SuperChat cards. */
+  superChatMaxBodyLines: number;
+  /** Maximum body text lines for Membership messages. */
+  membershipMaxBodyLines: number;
+  /** Author display settings (per-authorType visibility). */
+  showAuthor: Record<string, boolean>;
+  /** Preserve author's custom text color. */
+  preserveUserColor: boolean;
+  /** Translation enabled flag. */
+  translationEnabled: boolean;
+  /** Translation display mode: 'dual' or 'replace'. */
+  translationMode: 'dual' | 'replace';
+}
+
+interface WorkerContentSegment {
+  type: 'text' | 'emoji';
+  /** Text content, OR emoji character. */
+  content: string;
+  /** Emoji image URL (only for type='emoji'). */
+  emojiUrl?: string;
+  /** Emoji alt text fallback (only for type='emoji'). */
+  emojiAlt?: string;
 }
 
 interface WorkerMessage {
@@ -100,6 +143,27 @@ interface WorkerMessage {
   kind?: string;
   /** Burst speed multiplier computed by main thread (>= 1.0). */
   burstSpeedMultiplier?: number;
+  /** Content segments: text + emoji with URLs. */
+  content?: WorkerContentSegment[];
+  /** Author display name. */
+  author?: string;
+  /** Author photo URL. */
+  authorPhotoUrl?: string;
+  /** User's custom text color (for preserveUserColor mode). */
+  userColor?: string;
+  // ── SuperChat card data ──
+  /** Formatted amount string (e.g. "$5.00"). */
+  superChatAmount?: string;
+  /** SuperChat tier (0-4, used for gradient selection). */
+  superChatTier?: number;
+  /** Background color as ARGB int. */
+  superChatBgColor?: number;
+  /** Header background color as ARGB int. */
+  superChatHdrColor?: number;
+  /** Sticker image URL. */
+  superChatStickerUrl?: string;
+  /** Sticker alt text. */
+  superChatStickerAlt?: string;
 }
 
 interface ActiveMessage {
@@ -129,6 +193,26 @@ interface ActiveMessage {
   translatedText?: string;
   /** Desaturated color for far-depth layer. */
   colorOverride?: string;
+  /** Content segments for emoji/text rendering. */
+  content?: WorkerContentSegment[];
+  /** Author display name. */
+  author?: string;
+  /** Author photo URL. */
+  authorPhotoUrl?: string;
+  /** User's custom text color (for preserveUserColor mode). */
+  userColor?: string;
+  /** Formatted SuperChat amount (e.g. "$5.00"). */
+  superChatAmount?: string;
+  /** SuperChat tier (0-4). */
+  superChatTier?: number;
+  /** SuperChat background color as ARGB int. */
+  superChatBgColor?: number;
+  /** SuperChat header color as ARGB int. */
+  superChatHdrColor?: number;
+  /** SuperChat sticker image URL. */
+  superChatStickerUrl?: string;
+  /** SuperChat sticker alt text. */
+  superChatStickerAlt?: string;
 }
 
 // ── Speed tier constants ──────────────────────────────────────────────────
@@ -232,7 +316,11 @@ let totalDrops = 0;
 // ── Text bitmap cache ──────────────────────────────────────────────────────
 
 const textBitmapCache = new Map<string, OffscreenCanvas>();
-const TEXT_BITMAP_CACHE_MAX = 200;
+
+const emojiCache = new WorkerImageCache();
+const authorPhotoCache = new WorkerImageCache();
+const stickerCache = new WorkerImageCache();
+const superChatGradientCache = new Map<string, CanvasGradient>();
 
 /**
  * Pre-allocated opacity buckets for per-frame reuse.
@@ -246,66 +334,974 @@ const opacityBuckets: Array<Array<{ msg: ActiveMessage; elapsed: number }>> = Ar
   () => []
 );
 
-function getCacheKey(
-  text: string,
-  font: string,
-  color: string,
-  strokeWidth: number,
-  strokeColor: string
-): string {
-  return `${font}|${text}|${color}|${strokeWidth}|${strokeColor}`;
+// ── Ported rendering functions from canvas-text-renderer / canvas-card-renderers ──
+
+/** Outline stroke scale factor. */
+const OUTLINE_STROKE_SCALE = 0.85;
+
+/**
+ * Inline helper: parse ARGB int (YouTube SuperChat format) to {r, g, b}.
+ * Falls back to tier-based default colors when argb is falsy/zero.
+ */
+function resolveSuperChatRgbFromArgb(
+  argb: number | undefined,
+  tier: number
+): { r: number; g: number; b: number } {
+  const tierColors: Record<number, { r: number; g: number; b: number }> = {
+    0: { r: 253, g: 216, b: 53 },
+    1: { r: 251, g: 190, b: 15 },
+    2: { r: 240, g: 131, b: 36 },
+    3: { r: 219, g: 68, b: 55 },
+    4: { r: 155, g: 93, b: 229 },
+  };
+  if (!argb || argb === 0) return (tierColors[tier] ?? tierColors[0])!;
+  return {
+    r: (argb >> 16) & 0xff,
+    g: (argb >> 8) & 0xff,
+    b: argb & 0xff,
+  };
 }
 
-function renderCachedText(
-  ctx: OffscreenCanvasRenderingContext2D,
+/**
+ * Render text with outline to an offscreen canvas and store in bitmap cache.
+ */
+function cacheTextBitmap(
+  key: string,
   text: string,
   font: string,
-  color: string,
+  fontSize: number,
+  fillColor: string,
   strokeWidth: number,
   strokeColor: string,
+  ctx: OffscreenCanvasRenderingContext2D,
+  textBitmapCache: Map<string, OffscreenCanvas>
+): void {
+  if (!ctx) return;
+
+  ctx.save();
+  ctx.font = font;
+  const metrics = ctx.measureText(text);
+  const bbWidth =
+    Math.abs(metrics.actualBoundingBoxLeft) + Math.abs(metrics.actualBoundingBoxRight);
+  const textWidth = bbWidth > 0 ? Math.ceil(bbWidth) : Math.ceil(metrics.width);
+  const width = textWidth + Math.ceil(strokeWidth) + 2;
+  const ascent = Math.abs(metrics.actualBoundingBoxAscent) || Math.ceil(fontSize * 0.8);
+  const descent = Math.abs(metrics.actualBoundingBoxDescent) || Math.ceil(fontSize * 0.2);
+  const height = ascent + descent + Math.ceil(strokeWidth) + 2;
+  ctx.restore();
+
+  const offscreen = new OffscreenCanvas(width, height);
+  const offCtx = offscreen.getContext('2d');
+  if (!offCtx) return;
+
+  offCtx.font = font;
+  offCtx.textBaseline = 'top';
+  offCtx.strokeStyle = strokeColor;
+  offCtx.lineWidth = strokeWidth;
+  offCtx.lineJoin = 'round';
+  offCtx.lineCap = 'round';
+  offCtx.strokeText(text, strokeWidth / 2 + 1, strokeWidth / 2 + 1);
+  offCtx.fillStyle = fillColor;
+  offCtx.fillText(text, strokeWidth / 2 + 1, strokeWidth / 2 + 1);
+
+  textBitmapCache.set(key, offscreen);
+}
+
+/** Draw crisp auto-contrast outline on text using current font and textBaseline. */
+function strokeTextOutline(
+  ctx: OffscreenCanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  textColor: string,
+  outlineWidthPx: number,
+  outlineOpacity: number
+): void {
+  if (outlineWidthPx <= 0 || outlineOpacity <= 0) return;
+  const strokeWidth = Math.max(0.5, outlineWidthPx * OUTLINE_STROKE_SCALE);
+  ctx.save();
+  ctx.strokeStyle = computeOutlineColor(textColor, Math.min(1, outlineOpacity));
+  ctx.lineWidth = strokeWidth;
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.strokeText(text, x, y);
+  ctx.restore();
+}
+
+function renderSegment(
+  ctx: OffscreenCanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  color: string,
+  fontSize: number,
+  outlineWidthPx: number,
+  outlineOpacity: number,
+  textBitmapCache: Map<string, OffscreenCanvas>,
+  getFontFn: (fontSize: number) => string
+): void {
+  const font = getFontFn(fontSize);
+  const strokeWidth = Math.max(0.5, outlineWidthPx * OUTLINE_STROKE_SCALE);
+  const strokeColor = computeOutlineColor(color, Math.min(1, outlineOpacity));
+
+  // Try bitmap cache first (includes outline rendering)
+  if (outlineWidthPx > 0 && outlineOpacity > 0) {
+    const key = `${font}|${text}|${color}|${Math.round(strokeWidth)}|${strokeColor}`;
+    const bitmap = textBitmapCache.get(key);
+    if (bitmap) {
+      ctx.drawImage(bitmap, x, y);
+      return;
+    }
+
+    // Cache miss — render to offscreen canvas and cache
+    cacheTextBitmap(
+      key,
+      text,
+      font,
+      fontSize,
+      color,
+      strokeWidth,
+      strokeColor,
+      ctx,
+      textBitmapCache
+    );
+
+    // Immediately use the freshly cached bitmap to avoid fallthrough overhead
+    const freshBitmap = textBitmapCache.get(key);
+    if (freshBitmap) {
+      ctx.drawImage(freshBitmap, x, y);
+      return;
+    }
+  }
+
+  // Fallback: direct fillText + strokeText
+  ctx.save();
+  ctx.font = font;
+  ctx.textBaseline = 'top';
+  strokeTextOutline(ctx, text, x, y, color, outlineWidthPx, outlineOpacity);
+  ctx.fillStyle = color;
+  ctx.fillText(text, x, y);
+  ctx.restore();
+}
+
+function renderContentSegments(
+  ctx: OffscreenCanvasRenderingContext2D,
+  segments: readonly WorkerContentSegment[],
+  startX: number,
+  y: number,
+  color: string,
+  fontSize: number,
+  outlineWidthPx: number,
+  outlineOpacity: number,
+  textBitmapCache: Map<string, OffscreenCanvas>,
+  emojiCache: WorkerImageCache,
+  getFontFn: (fontSize: number) => string
+): void {
+  let cursorX = startX;
+  const emojiSize = Math.round(fontSize * rendererLayout.emojiSize);
+
+  for (const seg of segments) {
+    if (seg.type === 'text') {
+      renderSegment(
+        ctx,
+        seg.content,
+        cursorX,
+        y,
+        color,
+        fontSize,
+        outlineWidthPx,
+        outlineOpacity,
+        textBitmapCache,
+        getFontFn
+      );
+      cursorX += ctx.measureText(seg.content as string).width;
+    } else {
+      const img = seg.emojiUrl ? emojiCache.get(seg.emojiUrl) : null;
+      if (img) {
+        ctx.drawImage(img, cursorX, y, emojiSize, emojiSize);
+      } else if (seg.emojiAlt && !EMOJI_ALIAS_PATTERN.test(seg.emojiAlt)) {
+        renderSegment(
+          ctx,
+          seg.emojiAlt,
+          cursorX,
+          y,
+          color,
+          fontSize,
+          outlineWidthPx,
+          outlineOpacity,
+          textBitmapCache,
+          getFontFn
+        );
+      }
+      cursorX += emojiSize + spacing.xs;
+    }
+  }
+}
+
+// ── Wrapped content segments (text + emoji) ────────────────────────────────
+
+/**
+ * Internal piece type for word-wrapping content segments.
+ * Each piece is either a word from a text segment or a single emoji.
+ */
+type WrappedRenderPiece = TextRenderPiece | EmojiRenderPiece;
+
+interface TextRenderPiece {
+  type: 'text';
+  text: string;
+  width: number;
+}
+
+interface EmojiRenderPiece {
+  type: 'emoji';
+  emojiUrl: string;
+  emojiAlt?: string;
+  width: number;
+}
+
+interface CharSegment {
+  text: string;
+  width: number;
+}
+
+/**
+ * Character-level wrapping for oversize words (CJK, URLs, etc.).
+ * Inline version for the worker, using ctx.measureText via the supplied function.
+ */
+function wrapCharSegmentsWorker(
+  word: string,
+  maxWidth: number,
+  measureTextFn: (text: string) => number
+): CharSegment[] {
+  const segments: CharSegment[] = [];
+  let current = '';
+  let currentWidth = 0;
+
+  for (const ch of word) {
+    const chWidth = measureTextFn(ch);
+    if (currentWidth + chWidth > maxWidth && current.length > 0) {
+      segments.push({ text: current, width: currentWidth });
+      current = ch;
+      currentWidth = chWidth;
+    } else {
+      current += ch;
+      currentWidth += chWidth;
+    }
+  }
+
+  if (current.length > 0) {
+    segments.push({ text: current, width: currentWidth });
+  }
+
+  return segments;
+}
+
+/**
+ * Build wrapped lines from WorkerContentSegment[] using the same greedy line-fill
+ * algorithm as renderWrappedContentSegments, but without any rendering.
+ *
+ * This is the SSOT for line-breaking logic — used by both the renderer
+ * (to produce lines for rendering) and the dimension estimator
+ * (to predict line count and max width without a canvas).
+ *
+ * @returns Built lines and the maximum line width across all lines.
+ */
+function buildWrappedLines(
+  segments: readonly WorkerContentSegment[],
+  maxWidth: number,
+  emojiSize: number,
+  measureTextFn: (text: string) => number
+): { lines: WrappedRenderPiece[][]; maxLineWidth: number } {
+  // ── Step 1: Flatten segments into word/emoji pieces ──────────────────
+  const pieces: WrappedRenderPiece[] = [];
+  for (const seg of segments) {
+    if (seg.type === 'text') {
+      const words = (seg.content as string).split(/\s+/).filter((w) => w.length > 0);
+      for (const word of words) {
+        pieces.push({ type: 'text', text: word, width: measureTextFn(word) });
+      }
+    } else if (seg.emojiUrl) {
+      const emojiPiece: WrappedRenderPiece = seg.emojiAlt
+        ? {
+            type: 'emoji',
+            emojiUrl: seg.emojiUrl,
+            emojiAlt: seg.emojiAlt,
+            width: emojiSize + spacing.xs,
+          }
+        : { type: 'emoji', emojiUrl: seg.emojiUrl, width: emojiSize + spacing.xs };
+      pieces.push(emojiPiece);
+    }
+  }
+
+  const lines: WrappedRenderPiece[][] = [];
+  if (pieces.length === 0) return { lines, maxLineWidth: 0 };
+
+  // ── Step 2: Greedy line-filling (same algorithm as wrapLine) ─────────
+  let currentLine: WrappedRenderPiece[] = [];
+  let currentWidth = 0;
+  let prevIsText = false;
+  const spaceWidth = measureTextFn(' ');
+  let maxLineWidth = 0;
+
+  for (const piece of pieces) {
+    const gap = prevIsText && piece.type === 'text' ? spaceWidth : 0;
+    const needed = gap + piece.width;
+
+    // ── Oversize single word — character-level wrap (CJK, URLs, etc.) ──
+    if (piece.type === 'text' && piece.width > maxWidth) {
+      // Flush current line if non-empty (same as normal overflow)
+      if (currentLine.length > 0) {
+        maxLineWidth = Math.max(maxLineWidth, currentWidth);
+        lines.push(currentLine);
+      }
+      const charSegs = wrapCharSegmentsWorker(piece.text, maxWidth, measureTextFn);
+      if (charSegs.length <= 1) {
+        currentLine = [piece];
+        currentWidth = piece.width;
+        prevIsText = true;
+        continue;
+      }
+      // Push all but the last char segment as their own lines
+      for (let i = 0; i < charSegs.length - 1; i++) {
+        const cs = charSegs[i] as CharSegment;
+        lines.push([{ type: 'text', text: cs.text, width: cs.width }]);
+        maxLineWidth = Math.max(maxLineWidth, cs.width);
+      }
+      const lastSeg = charSegs[charSegs.length - 1] as CharSegment;
+      currentLine = [{ type: 'text', text: lastSeg.text, width: lastSeg.width }];
+      currentWidth = lastSeg.width;
+      prevIsText = true;
+      continue;
+    }
+
+    // ── Normal line overflow (non-oversize piece) ──────────────────────
+    if (currentLine.length > 0 && currentWidth + needed > maxWidth) {
+      // Start a new line with this piece
+      maxLineWidth = Math.max(maxLineWidth, currentWidth);
+      lines.push(currentLine);
+      currentLine = [piece];
+      currentWidth = piece.width;
+      prevIsText = piece.type === 'text';
+      continue;
+    }
+
+    if (gap > 0) currentWidth += gap;
+    currentLine.push(piece);
+    currentWidth += piece.width;
+    prevIsText = piece.type === 'text';
+  }
+
+  if (currentLine.length > 0) {
+    maxLineWidth = Math.max(maxLineWidth, currentWidth);
+    lines.push(currentLine);
+  }
+
+  return { lines, maxLineWidth };
+}
+
+/**
+ * Render WorkerContentSegment[] with word-wrapping, respecting maxWidth and maxLines.
+ *
+ * Uses buildWrappedLines for line-breaking (SSOT shared with the
+ * dimension estimator), then renders each line via renderSegment (text) or
+ * emojiCache (emoji images).
+ *
+ * @returns The Y position after the last rendered line.
+ */
+function renderWrappedContentSegments(
+  ctx: OffscreenCanvasRenderingContext2D,
+  segments: readonly WorkerContentSegment[],
+  x: number,
+  y: number,
+  maxWidth: number,
+  maxLines: number,
+  color: string,
+  fontSize: number,
+  outlineWidthPx: number,
+  outlineOpacity: number,
+  textBitmapCache: Map<string, OffscreenCanvas>,
+  emojiCache: WorkerImageCache,
+  getFontFn: (fontSize: number) => string
+): number {
+  if (segments.length === 0) return y;
+
+  const font = getFontFn(fontSize);
+  const emojiSize = Math.round(fontSize * rendererLayout.emojiSize);
+  const lineHeight = Math.ceil(fontSize * 1.1); // measureTextHeight fallback
+  const ellipsis = '\u2026';
+
+  const { lines } = buildWrappedLines(segments, maxWidth, emojiSize, (text: string) => {
+    ctx.font = font;
+    return ctx.measureText(text).width;
+  });
+
+  // ── Render lines (up to maxLines) ────────────────────────────────────
+  const renderLines = lines.length > maxLines ? lines.slice(0, maxLines) : lines;
+  const isTruncated = lines.length > maxLines;
+  let cursorY = y;
+
+  for (let li = 0; li < renderLines.length; li++) {
+    const line = renderLines[li];
+    if (!line) continue;
+    const isLastLine = li === renderLines.length - 1;
+    const needsEllipsis = isLastLine && isTruncated;
+    let cursorX = x;
+    let prevText = false;
+
+    for (const piece of line) {
+      // Space gap between text words
+      if (prevText && piece.type === 'text') {
+        cursorX += ctx.measureText(' ').width;
+      }
+      prevText = piece.type === 'text';
+
+      if (piece.type === 'text') {
+        renderSegment(
+          ctx,
+          piece.text,
+          cursorX,
+          cursorY,
+          color,
+          fontSize,
+          outlineWidthPx,
+          outlineOpacity,
+          textBitmapCache,
+          getFontFn
+        );
+        cursorX += piece.width;
+      } else {
+        // Emoji
+        const img = piece.emojiUrl ? emojiCache.get(piece.emojiUrl) : null;
+        if (img) {
+          ctx.drawImage(img, cursorX, cursorY, emojiSize, emojiSize);
+        } else if (piece.emojiAlt && !EMOJI_ALIAS_PATTERN.test(piece.emojiAlt)) {
+          renderSegment(
+            ctx,
+            piece.emojiAlt,
+            cursorX,
+            cursorY,
+            color,
+            fontSize,
+            outlineWidthPx,
+            outlineOpacity,
+            textBitmapCache,
+            getFontFn
+          );
+        }
+        cursorX += piece.width;
+      }
+    }
+
+    // Append ellipsis if this line was truncated
+    if (needsEllipsis) {
+      renderSegment(
+        ctx,
+        ellipsis,
+        cursorX,
+        cursorY,
+        color,
+        fontSize,
+        outlineWidthPx,
+        outlineOpacity,
+        textBitmapCache,
+        getFontFn
+      );
+    }
+
+    cursorY += lineHeight;
+  }
+
+  return cursorY;
+}
+
+// ── Author rendering ────────────────────────────────────────────────────────
+
+/** Draw an author photo with shadow effects. */
+function drawAuthorPhoto(
+  ctx: OffscreenCanvasRenderingContext2D,
+  photo: ImageBitmap,
   x: number,
   y: number
 ): void {
-  const key = getCacheKey(text, font, color, strokeWidth, strokeColor);
-  let bitmap = textBitmapCache.get(key);
+  ctx.save();
+  ctx.shadowColor = AUTHOR_PHOTO_SHADOW;
+  ctx.shadowBlur = 4;
+  ctx.shadowOffsetX = 1;
+  ctx.shadowOffsetY = 1;
+  ctx.drawImage(photo, x, y, rendererLayout.authorPhotoSize, rendererLayout.authorPhotoSize);
+  ctx.restore();
+}
 
-  if (!bitmap) {
-    // LRU eviction
-    if (textBitmapCache.size >= TEXT_BITMAP_CACHE_MAX) {
-      const oldestKey = textBitmapCache.keys().next().value;
-      if (oldestKey !== undefined) textBitmapCache.delete(oldestKey);
+/** Draw author photo + name section. Returns the Y offset after the section. */
+function drawAuthorSection(
+  ctx: OffscreenCanvasRenderingContext2D,
+  message: { author?: string; authorPhotoUrl?: string },
+  textX: number,
+  startY: number,
+  color: string,
+  maxNameWidth: number | undefined,
+  authorFontSize: number,
+  fontWeight: string,
+  fontFamily: string,
+  outlineWidthPx: number,
+  outlineOpacity: number,
+  authorPhotoCache: WorkerImageCache,
+  textBitmapCache: Map<string, OffscreenCanvas>,
+  getFontFn: (fontSize: number) => string
+): number {
+  if (!message.author) return startY;
+
+  const prevFont = ctx.font;
+  const prevTextBaseline = ctx.textBaseline;
+
+  const nameFont = getFontString(authorFontSize, fontWeight as FontWeight, fontFamily);
+  const ctx2 = ctx; // alias for closure
+  ctx2.font = nameFont;
+  const nameMetrics = ctx2.measureText('Mg');
+  const nameHeight = Math.ceil(
+    (nameMetrics.actualBoundingBoxAscent || authorFontSize * 0.8) +
+      (nameMetrics.actualBoundingBoxDescent || authorFontSize * 0.2)
+  );
+  const sectionHeight = Math.max(rendererLayout.authorPhotoSize, nameHeight);
+
+  const authorPhotoUrl = message.authorPhotoUrl;
+  const photo = authorPhotoUrl ? authorPhotoCache.get(authorPhotoUrl) : null;
+  if (photo && authorPhotoUrl) {
+    drawAuthorPhoto(ctx, photo, textX, startY);
+  }
+  const nameX = textX + (photo ? rendererLayout.authorPhotoSize + spacing.xs : 0);
+  const nameY = startY + Math.max(0, Math.floor((sectionHeight - nameHeight) / 2));
+
+  // Truncate author name with ellipsis if it exceeds the allowed width
+  let displayName = message.author;
+  if (maxNameWidth !== undefined && maxNameWidth > 0) {
+    ctx.font = nameFont;
+    ctx.textBaseline = 'top';
+    const nameWidth = ctx.measureText(displayName).width;
+    if (nameWidth > maxNameWidth) {
+      const ellipsis = '\u2026';
+      const ellipsisWidth = ctx.measureText(ellipsis).width;
+      // Guard: if the ellipsis character alone exceeds maxNameWidth
+      if (ellipsisWidth >= maxNameWidth) {
+        ctx.font = prevFont;
+        ctx.textBaseline = prevTextBaseline;
+        return startY + sectionHeight;
+      }
+      // Binary search for optimal truncation point
+      let lo = 0;
+      let hi = displayName.length;
+      while (lo < hi) {
+        const mid = Math.floor((lo + hi) / 2);
+        const testWidth = ctx.measureText(displayName.slice(0, mid) + ellipsis).width;
+        if (testWidth <= maxNameWidth) lo = mid + 1;
+        else hi = mid;
+      }
+      displayName = displayName.slice(0, Math.max(0, lo - 1)) + ellipsis;
     }
-    // Pre-render to offscreen canvas
-    const metrics = ctx.measureText(text);
-    const w =
-      Math.ceil(
-        Math.abs(metrics.actualBoundingBoxLeft) + Math.abs(metrics.actualBoundingBoxRight)
-      ) +
-      strokeWidth * 2 +
-      2;
-    const h =
-      Math.ceil(
-        Math.abs(metrics.actualBoundingBoxAscent) + Math.abs(metrics.actualBoundingBoxDescent)
-      ) +
-      strokeWidth * 2 +
-      2;
-
-    bitmap = new OffscreenCanvas(w, h);
-    const bctx = bitmap.getContext('2d');
-    if (!bctx) return;
-    bctx.font = font;
-    bctx.textBaseline = 'top';
-    bctx.strokeStyle = strokeColor;
-    bctx.lineWidth = strokeWidth;
-    bctx.lineJoin = 'round';
-    bctx.strokeText(text, strokeWidth + 1, strokeWidth + 1);
-    bctx.fillStyle = color;
-    bctx.fillText(text, strokeWidth + 1, strokeWidth + 1);
-
-    textBitmapCache.set(key, bitmap);
   }
 
-  ctx.drawImage(bitmap, x - 1, y - 1);
+  // Use renderSegment with bitmap cache instead of direct fillText+strokeText
+  renderSegment(
+    ctx,
+    displayName,
+    nameX,
+    nameY,
+    color,
+    authorFontSize,
+    outlineWidthPx,
+    outlineOpacity,
+    textBitmapCache,
+    getFontFn
+  );
+
+  ctx.font = prevFont;
+  ctx.textBaseline = prevTextBaseline;
+
+  return startY + sectionHeight;
+}
+
+/** Draw a rounded rectangle path (no fill/stroke — path only). */
+function drawRoundRect(
+  ctx: OffscreenCanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number
+): void {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.arcTo(x + w, y, x + w, y + r, r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+  ctx.lineTo(x + r, y + h);
+  ctx.arcTo(x, y + h, x, y + h - r, r);
+  ctx.lineTo(x, y + r);
+  ctx.arcTo(x, y, x + r, y, r);
+  ctx.closePath();
+}
+
+// ── Message card rendering ───────────────────────────────────────────────
+
+/** Render a regular text message at (x, y) with alpha blending.
+ *
+ * @param overrideText — when provided (replace translation mode), renders this
+ *   text instead of the message's content/text. Author section is still rendered. */
+function renderRegularMessage(
+  ctx: OffscreenCanvasRenderingContext2D,
+  message: {
+    author?: string;
+    authorPhotoUrl?: string;
+    authorType?: string;
+    userColor?: string;
+    content: readonly WorkerContentSegment[];
+    text: string;
+  },
+  x: number,
+  y: number,
+  fontSize: number,
+  fontWeight: string,
+  fontFamily: string,
+  color: string,
+  outlineWidthPx: number,
+  outlineOpacity: number,
+  textBitmapCache: Map<string, OffscreenCanvas>,
+  emojiCache: WorkerImageCache,
+  authorPhotoCache: WorkerImageCache,
+  getFontFn: (fontSize: number) => string,
+  overrideText?: string | null
+): void {
+  // globalAlpha is set by the caller (opacity-batched outer loop)
+  const textX = x + rendererLayout.paddingH;
+  let textY = y + rendererLayout.paddingV;
+  if (message.author) {
+    textY = drawAuthorSection(
+      ctx,
+      message,
+      textX,
+      textY,
+      color,
+      undefined,
+      Math.round(fontSize * rendererLayout.authorFontScale),
+      fontWeight,
+      fontFamily,
+      outlineWidthPx,
+      outlineOpacity,
+      authorPhotoCache,
+      textBitmapCache,
+      getFontFn
+    );
+  }
+
+  // In replace translation mode, render the translated text instead of the original.
+  if (overrideText) {
+    renderSegment(
+      ctx,
+      overrideText,
+      textX,
+      textY,
+      color,
+      fontSize,
+      outlineWidthPx,
+      outlineOpacity,
+      textBitmapCache,
+      getFontFn
+    );
+  } else if (message.content.length > 0) {
+    renderContentSegments(
+      ctx,
+      message.content,
+      textX,
+      textY,
+      color,
+      fontSize,
+      outlineWidthPx,
+      outlineOpacity,
+      textBitmapCache,
+      emojiCache,
+      getFontFn
+    );
+  } else if (message.text.length > 0) {
+    renderSegment(
+      ctx,
+      message.text,
+      textX,
+      textY,
+      color,
+      fontSize,
+      outlineWidthPx,
+      outlineOpacity,
+      textBitmapCache,
+      getFontFn
+    );
+  }
+}
+
+// ── SuperChat card ───────────────────────────────────────────────────────────
+
+/** Get or create a cached SuperChat background gradient (relative to origin). */
+function getSuperChatGradient(
+  ctx: OffscreenCanvasRenderingContext2D,
+  cache: Map<string, CanvasGradient>,
+  baseColor: string,
+  h: number,
+  topAlpha: number,
+  scAlpha: number,
+  bottomAlpha: number
+): CanvasGradient {
+  const key = `${baseColor}|${h}|${topAlpha}|${scAlpha}|${bottomAlpha}`;
+  const cached = cache.get(key);
+  if (cached) return cached;
+  const grad = ctx.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, toRgba(baseColor, topAlpha));
+  grad.addColorStop(0.48, toRgba(baseColor, scAlpha));
+  grad.addColorStop(1, toRgba(baseColor, bottomAlpha));
+  cache.set(key, grad);
+  return grad;
+}
+
+/** Render a SuperChat card at (x, y) with alpha blending. */
+function renderSuperChatCard(
+  ctx: OffscreenCanvasRenderingContext2D,
+  message: {
+    author?: string;
+    authorPhotoUrl?: string;
+    content: readonly WorkerContentSegment[];
+    superChatAmount?: string;
+    superChatTier?: number;
+    superChatBgColor?: number;
+    superChatStickerUrl?: string;
+    superChatStickerAlt?: string;
+  },
+  msgWidth: number,
+  msgHeight: number,
+  x: number,
+  y: number,
+  fontSize: number,
+  fontWeight: string,
+  fontFamily: string,
+  outlineWidthPx: number,
+  outlineOpacity: number,
+  superChatMaxBodyLines: number,
+  showAuthorSection: boolean,
+  textBitmapCache: Map<string, OffscreenCanvas>,
+  authorPhotoCache: WorkerImageCache,
+  stickerCache: WorkerImageCache,
+  emojiCache: WorkerImageCache,
+  getFontFn: (fontSize: number) => string,
+  superChatGradientCache: Map<string, CanvasGradient>
+): void {
+  const superChatAmount = message.superChatAmount;
+  if (!superChatAmount) return;
+
+  const w = msgWidth;
+  const h = msgHeight;
+
+  // globalAlpha is set by the caller (opacity-batched outer loop)
+
+  const { base: scAlpha, top: topAlpha, bottom: bottomAlpha } = computeSuperChatOpacities(0.85); // default superChatOpacity
+  const rgb = resolveSuperChatRgbFromArgb(message.superChatBgColor, message.superChatTier ?? 0);
+  const baseColor = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
+  const textColor = computeReadableTextColor(baseColor);
+
+  // Background gradient (cached per color/dimension to avoid per-frame allocation)
+  const grad = getSuperChatGradient(
+    ctx,
+    superChatGradientCache,
+    baseColor,
+    h,
+    topAlpha,
+    scAlpha,
+    bottomAlpha
+  );
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.fillStyle = grad;
+  drawRoundRect(ctx, 0, 0, w, h, rendererLayout.superchatCardRadius);
+  ctx.fill();
+  // Left accent bar (relative to translated origin)
+  ctx.fillStyle = baseColor;
+  ctx.fillRect(0, 0, rendererLayout.superchatAccentBarWidth, h);
+  ctx.restore();
+
+  const scPad = rendererLayout.superchat;
+  const textX = x + scPad.paddingH;
+  let contentY = y + scPad.paddingV;
+
+  // Author section
+  if (showAuthorSection && message.author) {
+    const nameMaxWidth = w - scPad.paddingH * 2;
+    contentY = drawAuthorSection(
+      ctx,
+      message,
+      textX,
+      contentY,
+      textColor,
+      nameMaxWidth,
+      Math.round(fontSize * rendererLayout.authorFontScale),
+      fontWeight,
+      fontFamily,
+      outlineWidthPx,
+      outlineOpacity,
+      authorPhotoCache,
+      textBitmapCache,
+      getFontFn
+    );
+  }
+
+  // Amount badge pill
+  const badgeY = contentY + spacing.xs;
+  const badgeFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
+  const badgeHeight = badgeFontSize + rendererLayout.superchatBadge.paddingV * 2;
+  ctx.font = getFontString(badgeFontSize, 'bold' as FontWeight, fontFamily);
+  const badgeTextWidth = Math.ceil(ctx.measureText(superChatAmount).width);
+  const badgeWidth = badgeTextWidth + rendererLayout.superchatBadge.paddingH * 2;
+
+  drawRoundRect(ctx, textX, badgeY, badgeWidth, badgeHeight, rendererLayout.superchatBadge.radius);
+  ctx.fillStyle = SUPERCHAT_AMOUNT_BADGE_FILL;
+  ctx.fill();
+  ctx.strokeStyle = SUPERCHAT_AMOUNT_BADGE_STROKE;
+  ctx.lineWidth = rendererLayout.superchatBadgeStrokeWidth;
+  ctx.stroke();
+
+  ctx.textBaseline = 'middle';
+  strokeTextOutline(
+    ctx,
+    superChatAmount,
+    textX + rendererLayout.superchatBadge.paddingH,
+    badgeY + badgeHeight / 2,
+    textColor,
+    outlineWidthPx,
+    outlineOpacity
+  );
+  ctx.fillStyle = textColor;
+  ctx.fillText(
+    superChatAmount,
+    textX + rendererLayout.superchatBadge.paddingH,
+    badgeY + badgeHeight / 2
+  );
+  ctx.textBaseline = 'top';
+
+  // Body text (content segments with emoji support)
+  let textBottomY = badgeY + badgeHeight;
+  if (message.content.length > 0) {
+    const bodyMaxWidth = w - scPad.paddingH * 2;
+    textBottomY = renderWrappedContentSegments(
+      ctx,
+      message.content,
+      textX,
+      textBottomY + spacing.xs,
+      bodyMaxWidth,
+      superChatMaxBodyLines,
+      textColor,
+      fontSize,
+      outlineWidthPx,
+      outlineOpacity,
+      textBitmapCache,
+      emojiCache,
+      getFontFn
+    );
+  }
+
+  // Sticker
+  if (message.superChatStickerUrl) {
+    const stickerImg = stickerCache.get(message.superChatStickerUrl);
+    if (stickerImg) {
+      const maxStickerSize = Math.round(fontSize * rendererLayout.superchatStickerSize);
+      const stickerY = textBottomY + spacing.xs;
+      const availableHeight = y + h - scPad.paddingV - stickerY;
+      const stickerSize = Math.max(0, Math.min(maxStickerSize, availableHeight));
+      if (stickerSize > 0) {
+        ctx.drawImage(stickerImg, textX, stickerY, stickerSize, stickerSize);
+      }
+    }
+  }
+}
+
+/** Render a Membership card at (x, y) with alpha blending. */
+function renderMembershipCard(
+  ctx: OffscreenCanvasRenderingContext2D,
+  message: {
+    author?: string;
+    authorPhotoUrl?: string;
+    content: readonly WorkerContentSegment[];
+  },
+  msgWidth: number,
+  msgHeight: number,
+  x: number,
+  y: number,
+  elapsed: number,
+  fontSize: number,
+  fontWeight: string,
+  fontFamily: string,
+  outlineWidthPx: number,
+  outlineOpacity: number,
+  membershipMaxBodyLines: number,
+  textBitmapCache: Map<string, OffscreenCanvas>,
+  authorPhotoCache: WorkerImageCache,
+  emojiCache: WorkerImageCache,
+  getFontFn: (fontSize: number) => string
+): void {
+  const w = msgWidth;
+  const h = msgHeight;
+  const mem = designColors.membership;
+
+  // globalAlpha is set by the caller (opacity-batched outer loop)
+
+  ctx.fillStyle = `rgba(${mem.background.r}, ${mem.background.g}, ${mem.background.b}, ${mem.backgroundAlpha})`;
+  drawRoundRect(ctx, x, y, w, h, rendererLayout.membershipCardRadius);
+  ctx.fill();
+
+  const pulse = Math.sin((elapsed / 1000) * Math.PI) * mem.borderAlphaAmplitude + mem.borderAlpha;
+  ctx.strokeStyle = `rgba(${mem.background.r}, ${mem.background.g}, ${mem.background.b}, ${pulse})`;
+  ctx.lineWidth = rendererLayout.membershipBorderWidth;
+  ctx.stroke();
+
+  const padH = rendererLayout.membership.paddingH;
+  const padV = rendererLayout.membership.paddingV;
+  const textX = x + padH;
+  let textY = y + padV;
+
+  if (message.author) {
+    const nameMaxWidth = w - padH * 2;
+    textY = drawAuthorSection(
+      ctx,
+      message,
+      textX,
+      textY,
+      designColors.membership.text,
+      nameMaxWidth,
+      Math.round(fontSize * rendererLayout.authorFontScale),
+      fontWeight,
+      fontFamily,
+      outlineWidthPx,
+      outlineOpacity,
+      authorPhotoCache,
+      textBitmapCache,
+      getFontFn
+    );
+  }
+
+  if (message.content.length > 0) {
+    const bodyMaxWidth = w - padH * 2;
+    const bodyY = message.author ? textY + spacing.xs : textY;
+    renderWrappedContentSegments(
+      ctx,
+      message.content,
+      textX,
+      bodyY,
+      bodyMaxWidth,
+      membershipMaxBodyLines,
+      designColors.membership.text,
+      fontSize,
+      outlineWidthPx,
+      outlineOpacity,
+      textBitmapCache,
+      emojiCache,
+      getFontFn
+    );
+  }
 }
 
 // ── Message handler ───────────────────────────────────────────────────────
@@ -340,6 +1336,10 @@ self.onmessage = (e: MessageEvent) => {
       if (config) {
         Object.assign(config, data.config as Partial<WorkerConfig>);
         textBitmapCache.clear();
+        emojiCache.clear();
+        authorPhotoCache.clear();
+        stickerCache.clear();
+        superChatGradientCache.clear();
       }
       break;
     case 'setPaused': {
@@ -692,7 +1692,6 @@ function renderFrame(): void {
   const ageFadeRate = 1 / config.maxMessageAgeMs;
   const strokeWidth =
     config.outlineWidthPx > 0 && config.outlineOpacity > 0 ? config.outlineWidthPx : 0;
-  const strokeColor = `rgba(0,0,0,${Math.min(1, config.outlineOpacity)})`;
 
   // Reset pre-allocated buckets for this frame
   for (const bucket of opacityBuckets) bucket.length = 0;
@@ -752,18 +1751,17 @@ function renderFrame(): void {
 
   // ── Render pass: one ctx.globalAlpha per opacity bucket ──
   // Iterate ascending (0→20) — low opacity behind, high opacity on top.
-  const baseFont = `${config.fontWeight} ${config.fontSize}px ${config.fontFamily}`;
-  const translationFontSize = Math.round(config.fontSize * TRANSLATION_FONT_SCALE);
-  const translationFont = `${config.fontWeight} ${translationFontSize}px ${config.fontFamily}`;
-  ctx.font = baseFont;
   ctx.textBaseline = 'top';
+  const getFont = (fontSize: number): string =>
+    `${config!.fontWeight} ${fontSize}px ${config!.fontFamily}`;
+
   for (let bucketIndex = 0; bucketIndex < OPACITY_BUCKETS; bucketIndex++) {
     const entries = opacityBuckets[bucketIndex];
     if (!entries || entries.length === 0) continue;
 
     ctx.globalAlpha = bucketIndex / 20;
 
-    for (const { msg } of entries) {
+    for (const { msg, elapsed } of entries) {
       // Per-message color with optional FAR desaturation
       let renderColor = msg.colorOverride || msg.color;
       if (msg.speedTier === SPEED_TIER.FAR && !msg.colorOverride) {
@@ -774,27 +1772,108 @@ function renderFrame(): void {
       const sx = Math.floor(msg.x);
       const sy = Math.floor(msg.y);
 
-      // Render main text
-      renderCachedText(ctx, msg.text, baseFont, renderColor, strokeWidth, strokeColor, sx, sy);
+      // Determine if author section should be shown
+      const showAuthorSection = msg.author
+        ? (config!.showAuthor[msg.authorType || 'normal'] ?? true)
+        : false;
 
-      // Render translated text below (dual mode)
-      if (msg.translatedText && msg.translatedText !== msg.text) {
+      // Dispatch to the appropriate render function based on message kind
+      if (msg.kind === 'superchat' && msg.superChatAmount) {
+        renderSuperChatCard(
+          ctx,
+          msg as Parameters<typeof renderSuperChatCard>[1],
+          msg.width,
+          msg.height,
+          sx,
+          sy,
+          config!.fontSize,
+          config!.fontWeight,
+          config!.fontFamily,
+          strokeWidth,
+          config!.outlineOpacity,
+          config!.superChatMaxBodyLines,
+          showAuthorSection,
+          textBitmapCache,
+          authorPhotoCache,
+          stickerCache,
+          emojiCache,
+          getFont,
+          superChatGradientCache
+        );
+      } else if (msg.kind === 'membership') {
+        renderMembershipCard(
+          ctx,
+          msg as Parameters<typeof renderMembershipCard>[1],
+          msg.width,
+          msg.height,
+          sx,
+          sy,
+          elapsed,
+          config!.fontSize,
+          config!.fontWeight,
+          config!.fontFamily,
+          strokeWidth,
+          config!.outlineOpacity,
+          config!.membershipMaxBodyLines,
+          textBitmapCache,
+          authorPhotoCache,
+          emojiCache,
+          getFont
+        );
+      } else {
+        // Regular message — handle translation
+        const overrideText =
+          config!.translationEnabled && config!.translationMode === 'replace' && msg.translatedText
+            ? msg.translatedText
+            : null;
+
+        renderRegularMessage(
+          ctx,
+          msg as Parameters<typeof renderRegularMessage>[1],
+          sx,
+          sy,
+          config!.fontSize,
+          config!.fontWeight,
+          config!.fontFamily,
+          renderColor,
+          strokeWidth,
+          config!.outlineOpacity,
+          textBitmapCache,
+          emojiCache,
+          authorPhotoCache,
+          getFont,
+          overrideText
+        );
+      }
+
+      // Dual-mode translation: render translated text below for regular messages
+      if (
+        config!.translationEnabled &&
+        config!.translationMode === 'dual' &&
+        msg.translatedText &&
+        msg.translatedText !== msg.text &&
+        (!msg.kind || msg.kind === 'chat' || msg.kind === 'text' || msg.kind === undefined)
+      ) {
+        const translationFontSize = Math.round(config!.fontSize * TRANSLATION_FONT_SCALE);
         const translationColor = msg.authorType
-          ? config.authorColors[msg.authorType] || renderColor
+          ? config!.authorColors[msg.authorType] || renderColor
           : renderColor;
         const translationY = sy + msg.height * TRANSLATION_FONT_SCALE + TRANSLATION_GAP_PX;
+        ctx.save();
         ctx.globalAlpha = (bucketIndex / 20) * TRANSLATION_OPACITY_SCALE;
-        renderCachedText(
+        renderSegment(
           ctx,
           msg.translatedText,
-          translationFont,
-          translationColor,
-          strokeWidth,
-          strokeColor,
           sx,
-          Math.floor(translationY)
+          Math.floor(translationY),
+          translationColor,
+          translationFontSize,
+          strokeWidth,
+          config!.outlineOpacity,
+          textBitmapCache,
+          getFont
         );
-        ctx.globalAlpha = bucketIndex / 20; // restore full bucket alpha
+        ctx.restore();
       }
     }
   }
@@ -975,6 +2054,21 @@ function activateMessage(
     ...(msg.authorType !== undefined ? { authorType: msg.authorType } : {}),
     ...(msg.kind !== undefined ? { kind: msg.kind } : {}),
     ...(msg.translatedText !== undefined ? { translatedText: msg.translatedText } : {}),
+    // Rich rendering fields
+    ...(msg.content !== undefined ? { content: msg.content } : {}),
+    ...(msg.author !== undefined ? { author: msg.author } : {}),
+    ...(msg.authorPhotoUrl !== undefined ? { authorPhotoUrl: msg.authorPhotoUrl } : {}),
+    ...(msg.userColor !== undefined ? { userColor: msg.userColor } : {}),
+    ...(msg.superChatAmount !== undefined ? { superChatAmount: msg.superChatAmount } : {}),
+    ...(msg.superChatTier !== undefined ? { superChatTier: msg.superChatTier } : {}),
+    ...(msg.superChatBgColor !== undefined ? { superChatBgColor: msg.superChatBgColor } : {}),
+    ...(msg.superChatHdrColor !== undefined ? { superChatHdrColor: msg.superChatHdrColor } : {}),
+    ...(msg.superChatStickerUrl !== undefined
+      ? { superChatStickerUrl: msg.superChatStickerUrl }
+      : {}),
+    ...(msg.superChatStickerAlt !== undefined
+      ? { superChatStickerAlt: msg.superChatStickerAlt }
+      : {}),
   };
 
   commitPlacement(
@@ -986,6 +2080,19 @@ function activateMessage(
     msg.width
   );
   activeMessages.push(am);
+
+  // Prefetch images for this message
+  const imageUrls: string[] = [];
+  if (msg.content) {
+    for (const seg of msg.content) {
+      if (seg.type === 'emoji' && seg.emojiUrl) imageUrls.push(seg.emojiUrl);
+    }
+  }
+  if (msg.authorPhotoUrl) imageUrls.push(msg.authorPhotoUrl);
+  if (msg.superChatStickerUrl) imageUrls.push(msg.superChatStickerUrl);
+  if (imageUrls.length > 0) {
+    void emojiCache.prefetchAll(imageUrls);
+  }
 }
 
 // ── Cleanup ───────────────────────────────────────────────────────────────
@@ -1011,6 +2118,11 @@ function handleDestroy(): void {
   canvas = null;
   activeMessages.length = 0;
   pendingQueue.length = 0;
+  textBitmapCache.clear();
+  emojiCache.clear();
+  authorPhotoCache.clear();
+  stickerCache.clear();
+  superChatGradientCache.clear();
 }
 
 // Signal ready

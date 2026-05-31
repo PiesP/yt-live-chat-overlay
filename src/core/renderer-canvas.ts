@@ -1819,6 +1819,11 @@ export class CanvasRenderer extends RendererBase {
     'backlogOpacityMultiplier',
     'fadeDurationMs',
     'modOwnerDurationMultiplier',
+    'superChatOpacity',
+    'superChatMaxBodyLines',
+    'membershipMaxBodyLines',
+    'showAuthor',
+    'preserveUserColor',
   ] as const;
 
   /**
@@ -1835,6 +1840,11 @@ export class CanvasRenderer extends RendererBase {
     config.authorColors = { ...settings.colors };
     config.modOwnerDurationMultiplier = settings.modOwnerDurationMultiplier;
     config.maxMessageAgeMs = rendererLayout.maxMessageAgeMs;
+    config.superChatOpacity = settings.superChatOpacity;
+    config.superChatMaxBodyLines = settings.superChatMaxBodyLines;
+    config.membershipMaxBodyLines = settings.membershipMaxBodyLines;
+    config.showAuthor = { ...settings.showAuthor };
+    config.preserveUserColor = settings.preserveUserColor;
     return config;
   }
 
@@ -1927,6 +1937,18 @@ export class CanvasRenderer extends RendererBase {
 
     const text = message.content.map((s) => (s.type === 'text' ? s.content : s.emoji.alt)).join('');
 
+    const content = message.content.map((s) => {
+      if (s.type === 'text') {
+        return { type: 'text', content: s.content };
+      }
+      return {
+        type: 'emoji',
+        content: s.emoji.alt,
+        emojiUrl: s.emoji.url,
+        emojiAlt: s.emoji.alt,
+      };
+    });
+
     this.renderWorker.postMessage({
       type: 'addMessages',
       messages: [
@@ -1941,6 +1963,22 @@ export class CanvasRenderer extends RendererBase {
           kind: message.kind,
           burstSpeedMultiplier: this.computeBurstSpeedMultiplier(),
           translatedText: (message as { translatedText?: string }).translatedText || undefined,
+          // NEW:
+          content,
+          author: message.author,
+          authorPhotoUrl: message.authorPhotoUrl,
+          userColor: message.userColor,
+          // SuperChat (if applicable)
+          ...(message.kind === 'superchat' && message.superChat
+            ? {
+                superChatAmount: message.superChat.amount,
+                superChatTier: message.superChat.tier,
+                superChatBgColor: message.superChat.backgroundColor,
+                superChatHdrColor: message.superChat.headerBackgroundColor,
+                superChatStickerUrl: message.superChat.sticker?.url,
+                superChatStickerAlt: message.superChat.sticker?.alt,
+              }
+            : {}),
         },
       ],
     });
