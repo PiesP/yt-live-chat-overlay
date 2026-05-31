@@ -97,7 +97,10 @@ interface ActiveMessage {
   startX: number;
   width: number;
   height: number;
+  /** Position/animation start time (includes stagger delay). */
   startTime: number;
+  /** Opacity/fade start time (drain time, before stagger offset). */
+  activationTime: number;
   duration: number;
   pausedDuration: number;
   laneIndex: number;
@@ -158,6 +161,18 @@ let totalDrops = 0;
 
 const textBitmapCache = new Map<string, OffscreenCanvas>();
 const TEXT_BITMAP_CACHE_MAX = 100;
+
+/**
+ * Pre-allocated opacity buckets for per-frame reuse.
+ * Bucket index = Math.round(opacity * 20), yielding 21 buckets (0.00–1.00 in 0.05 steps).
+ * Each frame resets bucket lengths instead of allocating new arrays, eliminating
+ * per-frame GC pressure and reducing ctx.globalAlpha set/reset pairs.
+ */
+const OPACITY_BUCKETS = 21;
+const opacityBuckets: Array<Array<{ msg: ActiveMessage; elapsed: number }>> = Array.from(
+  { length: OPACITY_BUCKETS },
+  () => []
+);
 
 function getCacheKey(
   text: string,
@@ -534,14 +549,17 @@ function renderFrame(): void {
     return;
   }
 
-  // Render pass
+  // ── Pre-scan: compute positions, opacity, and group into opacity buckets ──
   const mode = config.danmakuMode;
   const isScrolling = mode === 'scroll' || mode === 'reverse';
   const font = `${config.fontWeight} ${config.fontSize}px ${config.fontFamily}`;
+  const fadeMs = config.fadeDurationMs;
+  const strokeWidth =
+    config.outlineWidthPx > 0 && config.outlineOpacity > 0 ? config.outlineWidthPx : 0;
+  const strokeColor = `rgba(0,0,0,${Math.min(1, config.outlineOpacity)})`;
 
-  ctx.font = font;
-  ctx.textBaseline = 'top';
-  ctx.fillStyle = config.color;
+  // Reset pre-allocated buckets for this frame
+  for (const bucket of opacityBuckets) bucket.length = 0;
 
   for (let i = 0; i < activeMessages.length; i++) {
     const msg = activeMessages[i];
@@ -560,7 +578,7 @@ function renderFrame(): void {
       msg.x = msg.startX + progress * dist;
     }
 
-    // Opacity
+    // Compute opacity
     let opacity = config.opacity;
     if (msg.speedTier === SPEED_TIER.BACKLOG) {
       opacity = config.backlogOpacityMultiplier;
@@ -568,7 +586,6 @@ function renderFrame(): void {
       opacity = config.depthFarOpacityMul;
     }
 
-    const fadeMs = config.fadeDurationMs;
     if (fadeMs > 0) {
       if (isScrolling) {
         const remaining = msg.duration - elapsed;
@@ -585,18 +602,29 @@ function renderFrame(): void {
 
     if (opacity <= 0) continue;
 
-    const sx = Math.floor(msg.x);
-    const sy = Math.floor(msg.y);
-
-    ctx.globalAlpha = opacity;
-
-    // Render with text bitmap cache (matches main-thread quality)
-    const strokeWidth =
-      config.outlineWidthPx > 0 && config.outlineOpacity > 0 ? config.outlineWidthPx : 0;
-    const strokeColor = `rgba(0,0,0,${Math.min(1, config.outlineOpacity)})`;
-    renderCachedText(ctx, msg.text, font, config.color, strokeWidth, strokeColor, sx, sy);
-    ctx.globalAlpha = 1;
+    const bucketIndex = Math.round(opacity * 20);
+    opacityBuckets[bucketIndex]?.push({ msg, elapsed });
   }
+
+  // ── Render pass: one ctx.globalAlpha per opacity bucket ──
+  // Iterate ascending (0→20) — low opacity behind, high opacity on top.
+  ctx.font = font;
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = config.color;
+  for (let bucketIndex = 0; bucketIndex < OPACITY_BUCKETS; bucketIndex++) {
+    const entries = opacityBuckets[bucketIndex];
+    if (!entries || entries.length === 0) continue;
+
+    ctx.globalAlpha = bucketIndex / 20;
+
+    for (const { msg } of entries) {
+      const sx = Math.floor(msg.x);
+      const sy = Math.floor(msg.y);
+      renderCachedText(ctx, msg.text, font, config.color, strokeWidth, strokeColor, sx, sy);
+    }
+  }
+
+  ctx.globalAlpha = 1;
 
   // Stats
   statsFrameCounter++;
@@ -702,6 +730,7 @@ function activateMessage(
     startX,
     width: msg.width,
     height: msg.height,
+    activationTime: now,
     startTime: now,
     duration,
     pausedDuration: 0,

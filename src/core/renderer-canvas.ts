@@ -47,7 +47,10 @@ import { TranslationService } from '@core/translation-service';
 
 interface CanvasMessage {
   message: ChatMessage;
+  /** Position/animation start time (includes stagger delay). */
   startTime: number;
+  /** Opacity/fade start time (drain time, before stagger offset). */
+  activationTime: number;
   duration: number;
   /** Pre-computed 1/duration to avoid per-frame division in progress calc. */
   invDuration: number;
@@ -205,6 +208,15 @@ export class CanvasRenderer extends RendererBase {
 
   /** Cached message dimensions by message ID. Cleared on settings change. */
   private readonly dimensionCache = new Map<string, { width: number; height: number }>();
+
+  /**
+   * Pre-allocated opacity buckets for per-frame reuse.
+   * Bucket index = Math.round(opacity * 20), yielding 21 buckets (0.00–1.00 in 0.05 steps).
+   * Each frame resets bucket lengths instead of allocating new arrays/Map, eliminating
+   * the per-frame GC pressure from Map + {msg,elapsed} object creation.
+   */
+  private readonly _opacityBuckets: Array<Array<{ msg: CanvasMessage; elapsed: number }>> =
+    Array.from({ length: 21 }, () => []);
 
   /**
    * Horizontal stagger per batch index step (px).
@@ -461,12 +473,16 @@ export class CanvasRenderer extends RendererBase {
   }
 
   private prefetchImages(message: ChatMessage): void {
+    // Clean up stale emoji fetches once per message, before the per-emoji loop.
+    // The 5-second setInterval handles periodic cleanup; this provides an
+    // immediate sweep before new fetches start without redundant per-emoji calls.
+    this.cleanupStaleEmojiFetching();
+
     for (const seg of message.content) {
       if (seg.type !== 'emoji') continue;
       if (this.emojiFetching.has(seg.emoji.url)) continue;
       if (this.emojiCache.has(seg.emoji.url)) continue;
       if (this.failedEmojiFetches.has(seg.emoji.url)) continue;
-      this.cleanupStaleEmojiFetching();
       if (this.emojiFetching.size >= CanvasRenderer.EMOJI_FETCH_MAX_CONCURRENT) continue;
       this.emojiFetching.add(seg.emoji.url);
       this.emojiFetchingStarted.set(seg.emoji.url, performance.now());
@@ -685,17 +701,19 @@ export class CanvasRenderer extends RendererBase {
     if (!hasContent) return;
 
     // ── Pre-scan: group active messages by opacity bucket (0.05 granularity) ──
-    const opacityGroups = new Map<number, Array<{ msg: CanvasMessage; elapsed: number }>>();
+    // Reuse pre-allocated buckets to avoid per-frame Map + object allocations.
+    const buckets = this._opacityBuckets;
+    for (const bucket of buckets) bucket.length = 0;
 
     for (let i = 0; i < this.activeMessages.length; i++) {
       const msg = this.activeMessages[i];
       if (!msg) continue;
-      const elapsed = now - msg.startTime - msg.pausedDuration;
+      const positionElapsed = now - msg.startTime - msg.pausedDuration;
 
       // Skip messages still in stagger delay period (haven't visually started)
-      if (elapsed < 0) continue;
+      if (positionElapsed < 0) continue;
 
-      const progress = Math.min(1, Math.max(0, elapsed * msg.invDuration));
+      const progress = Math.min(1, Math.max(0, positionElapsed * msg.invDuration));
 
       if (mode === 'scroll') {
         const travelDistance = msg.startX + msg.width + rendererLayout.exitPaddingMin;
@@ -708,25 +726,30 @@ export class CanvasRenderer extends RendererBase {
         msg.x = msg.startX + progress * travelDistance;
       }
 
+      // Fade-in uses activationTime (drain time) so fade progresses during stagger.
+      // This ensures the message is already visibly fading in when stagger ends,
+      // eliminating the "disappear then reappear" flicker at entry.
+      const fadeElapsed = now - msg.activationTime - msg.pausedDuration;
       const opacity = this.computeMessageOpacity(
         msg.message,
-        elapsed,
+        fadeElapsed,
         msg.duration,
         isScrolling,
         msg.speedTier
       );
 
-      const bucket = Math.round(opacity * 20) / 20;
-      let group = opacityGroups.get(bucket);
-      if (!group) {
-        group = [];
-        opacityGroups.set(bucket, group);
-      }
-      group.push({ msg, elapsed });
+      const bucketIndex = Math.round(opacity * 20);
+      // Store positionElapsed for membership card border pulse animation
+      buckets[bucketIndex]?.push({ msg, elapsed: positionElapsed });
     }
 
     // ── Render each opacity group with a single ctx.globalAlpha set ──
-    for (const [bucketOpacity, entries] of opacityGroups) {
+    // Iterate ascending (0→20) so low-opacity messages render behind,
+    // high-opacity on top — consistent with pre-pooling Map insertion order.
+    for (let bucketIndex = 0; bucketIndex <= 20; bucketIndex++) {
+      const entries = buckets[bucketIndex];
+      if (!entries || entries.length === 0) continue;
+      const bucketOpacity = bucketIndex / 20;
       ctx.globalAlpha = bucketOpacity;
 
       for (const { msg, elapsed } of entries) {
@@ -1213,6 +1236,7 @@ export class CanvasRenderer extends RendererBase {
     const cm = this.acquireMessage();
     Object.assign(cm, {
       message,
+      activationTime: now,
       startTime: now + staggerDelay,
       duration: effectiveDuration,
       invDuration: 1 / Math.max(1, effectiveDuration),
