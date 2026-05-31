@@ -26,6 +26,10 @@ const log = createLogger('LiveChatSource');
 
 const LIVE_POLL_FALLBACK_DELAY_MS = 1500;
 const LIVE_SEED_CUTOFF_MS = 60_000;
+/** Max consecutive poll failures before the circuit breaker trips and stops the loop. */
+const LIVE_CONSECUTIVE_FAILURE_LIMIT = 10;
+/** How often (in failures) to refresh the bootstrap during sustained errors. */
+const LIVE_BOOTSTRAP_REFRESH_INTERVAL = 5;
 
 export class LiveChatSource extends ChatSource {
   private liveContinuation: InnertubeContinuationData | null = null;
@@ -185,16 +189,58 @@ export class LiveChatSource extends ChatSource {
 
         this.consecutiveErrors += 1;
 
+        // ── Circuit breaker: stop the poll loop after consecutive failures ──
+        // The watchdog (RuntimeManager) will detect the stopped loop via
+        // observerAlive/recentlyActive and trigger a managed restart.
+        if (this.consecutiveErrors >= LIVE_CONSECUTIVE_FAILURE_LIMIT) {
+          log.error(
+            `Live poll failed ${this.consecutiveErrors} times consecutively; ` +
+              'circuit breaker tripped — stopping poll loop for watchdog restart'
+          );
+          throw new Error(
+            `Live poll consecutive failure limit (${LIVE_CONSECUTIVE_FAILURE_LIMIT}) reached`
+          );
+        }
+
+        // ── Error type discrimination with structured diagnostics ──
         if (error instanceof YoutubeInnertubeRequestError) {
           log.warn('Live poll request failed:', {
             status: error.status,
             message: error.message,
           });
+        } else if (error instanceof TypeError) {
+          // Network-level failure (fetch() throws TypeError in browsers)
+          log.warn('Live poll network error:', {
+            name: error.name,
+            message: error.message,
+          });
+        } else if (error instanceof SyntaxError) {
+          // JSON parse failure — API response format may have changed
+          log.warn('Live poll JSON parse error (possible API change):', {
+            name: error.name,
+            message: error.message,
+          });
         } else {
-          log.warn('Live poll request failed:', error);
+          // Catch-all for unexpected error types
+          const errName = error instanceof Error ? error.name : typeof error;
+          const errMsg = error instanceof Error ? error.message : String(error);
+          log.warn('Live poll request failed:', {
+            name: errName,
+            message: errMsg,
+          });
         }
 
-        await this.refreshLiveContinuation(signal);
+        // ── Conditional bootstrap refresh ──
+        // Only refresh bootstrap on parse errors (API format changed)
+        // or periodically (every Nth failure) during sustained outages.
+        const isParseError = error instanceof SyntaxError;
+        const needsPeriodicRefresh =
+          this.consecutiveErrors > 0 &&
+          this.consecutiveErrors % LIVE_BOOTSTRAP_REFRESH_INTERVAL === 0;
+
+        if (isParseError || needsPeriodicRefresh) {
+          await this.refreshLiveContinuation(signal);
+        }
       }
     }
   }
