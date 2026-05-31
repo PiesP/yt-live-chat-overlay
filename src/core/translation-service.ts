@@ -281,7 +281,7 @@ export class TranslationService {
         try {
           await this.configurePromise;
         } catch {
-          // doConfigure already logs; if recovery fails, return null below.
+          log.debug('Translator recovery failed, retrying later');
         } finally {
           this.configurePromise = null;
         }
@@ -341,7 +341,7 @@ export class TranslationService {
           try {
             this.translator.destroy();
           } catch {
-            /* terminal state */
+            log.debug('Translator destroy during recovery failed');
           }
         }
         this.translator = null;
@@ -368,7 +368,7 @@ export class TranslationService {
       try {
         this.translator.destroy();
       } catch {
-        // Silently ignore — the instance may already be in a terminal state.
+        log.debug('Translator destroy during shutdown failed');
       }
     }
     this.translator = null;

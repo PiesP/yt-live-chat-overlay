@@ -260,6 +260,7 @@ export class BacklogInjectionController implements Pauseable {
   private processTick(): void {
     if (!this.isActive || this.backlogQueueLength === 0) {
       this.isInjecting = false;
+      this.injectionTimer = clearSafeTimeout(this.injectionTimer);
       if (this.backlogQueueLength === 0) this.finishBacklogInjection();
       return;
     }

@@ -172,7 +172,10 @@ export class CanvasRenderer extends RendererBase {
   private readonly emojiFetchingStarted = new Map<string, number>();
   private readonly authorPhotoCache = new Map<string, HTMLImageElement>();
   private readonly stickerCache = new Map<string, HTMLImageElement>();
-  private readonly failedEmojiFetches = new Set<string>();
+  /** Map of URL → timestamp for failed emoji fetches, with TTL-based eviction. */
+  private readonly failedEmojiFetches = new Map<string, number>();
+  /** In-flight image load guard to prevent duplicate Image objects. */
+  private readonly imageLoading = new Set<string>();
 
   /** Last devicePixelRatio seen — used to detect DPR changes. */
   private lastDpr = 0;
@@ -455,10 +458,13 @@ export class CanvasRenderer extends RendererBase {
   /** Load an image and store it in the given cache on success. */
   private loadImage(url: string, cache: Map<string, HTMLImageElement>, maxEntries: number): void {
     if (cache.has(url)) return;
+    if (this.imageLoading.has(url)) return;
+    this.imageLoading.add(url);
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.src = url;
     img.onload = () => {
+      this.imageLoading.delete(url);
       while (cache.size >= maxEntries) {
         const oldestKey = cache.keys().next().value;
         if (oldestKey !== undefined) cache.delete(oldestKey);
@@ -466,11 +472,12 @@ export class CanvasRenderer extends RendererBase {
       cache.set(url, img);
     };
     img.onerror = () => {
-      this.failedEmojiFetches.add(url);
-      // Cap the failed fetches set to prevent unbounded memory growth.
+      this.imageLoading.delete(url);
+      this.failedEmojiFetches.set(url, Date.now());
+      // Cap the failed fetches map to prevent unbounded memory growth.
       if (this.failedEmojiFetches.size > 500) {
         let evicted = 0;
-        for (const key of this.failedEmojiFetches) {
+        for (const key of this.failedEmojiFetches.keys()) {
           this.failedEmojiFetches.delete(key);
           if (++evicted >= 250) break;
         }
@@ -520,11 +527,11 @@ export class CanvasRenderer extends RendererBase {
       img.onerror = () => {
         this.emojiFetching.delete(url);
         this.emojiFetchingStarted.delete(url);
-        this.failedEmojiFetches.add(url);
-        // Cap the failed fetches set to prevent unbounded memory growth.
+        this.failedEmojiFetches.set(url, Date.now());
+        // Cap the failed fetches map to prevent unbounded memory growth.
         if (this.failedEmojiFetches.size > 500) {
           let evicted = 0;
-          for (const key of this.failedEmojiFetches) {
+          for (const key of this.failedEmojiFetches.keys()) {
             this.failedEmojiFetches.delete(key);
             if (++evicted >= 250) break;
           }
@@ -554,6 +561,8 @@ export class CanvasRenderer extends RendererBase {
    */
   private static readonly EMOJI_FETCH_TIMEOUT_MS = 30_000;
 
+  private static readonly FAILED_EMOJI_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
   private cleanupStaleEmojiFetching(): void {
     const now = performance.now();
     for (const [url, startedAt] of this.emojiFetchingStarted) {
@@ -563,9 +572,14 @@ export class CanvasRenderer extends RendererBase {
       }
     }
 
-    // Clear stale failure entries periodically to allow retry after transient errors
+    // Evict failed entries older than TTL so permanently broken URLs are not retried forever.
     if (this.failedEmojiFetches.size > 0) {
-      this.failedEmojiFetches.clear();
+      const cutoff = Date.now() - CanvasRenderer.FAILED_EMOJI_TTL_MS;
+      for (const [url, failedAt] of this.failedEmojiFetches) {
+        if (failedAt < cutoff) {
+          this.failedEmojiFetches.delete(url);
+        }
+      }
     }
   }
 
@@ -1594,6 +1608,7 @@ export class CanvasRenderer extends RendererBase {
     this.activeMessagesByLane.clear();
     this.pendingQueue.length = 0;
     this.backlogPaused = false;
+    this.onBacklogPauseChange = null;
     clearTextMeasurementCaches();
     this.textBitmapCache.clear();
     this.dimensionCache.clear();

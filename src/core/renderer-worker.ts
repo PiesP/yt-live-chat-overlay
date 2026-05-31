@@ -284,6 +284,10 @@ self.onmessage = (e: MessageEvent) => {
 function enqueueMessage(msg: WorkerMessage): void {
   const idx = findInsertIndex(msg.priority);
   pendingQueue.splice(idx, 0, msg);
+  // Restart the render loop if it was idled.
+  if (animFrameId === null && !isDestroyed) {
+    startRenderLoop();
+  }
 }
 
 function findInsertIndex(priority: number): number {
@@ -524,6 +528,11 @@ function startRenderLoop(): void {
   function frame(_t: number): void {
     if (isDestroyed) return;
     renderFrame();
+    // Self-idle: stop the rAF loop when there's nothing to do.
+    if (activeMessages.length === 0 && pendingQueue.length === 0 && retryQueue.length === 0) {
+      animFrameId = null;
+      return;
+    }
     animFrameId = requestAnimationFrame(frame);
   }
 
