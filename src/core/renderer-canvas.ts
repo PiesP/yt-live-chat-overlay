@@ -118,10 +118,8 @@ function cleanupExpiredMessages(
   if (writeIdx < oldLength * 0.5) {
     return { newMessages: messages.slice(0, writeIdx), newLength: writeIdx, anyRemoved };
   }
-  // Otherwise, null tail entries to avoid stale references (no allocation).
-  for (let i = writeIdx; i < oldLength; i++) {
-    messages[i] = undefined as unknown as CanvasMessage;
-  }
+  // Otherwise, truncate the array to remove stale references (no allocation of a new array).
+  messages.length = writeIdx;
   return { newLength: writeIdx, anyRemoved };
 }
 
@@ -133,6 +131,15 @@ function applyPausedDurationToMessages(messages: CanvasMessage[], pausedMs: numb
 }
 
 const log = createLogger('RendererCanvas');
+
+/** Shared empty ChatMessage — placeholder for pooled CanvasMessage objects. */
+const EMPTY_CHAT_MESSAGE: ChatMessage = {
+  text: '',
+  content: [],
+  kind: 'text',
+  timestamp: 0,
+  authorType: 'normal',
+};
 
 export class CanvasRenderer extends RendererBase {
   private canvas: HTMLCanvasElement | null = null;
@@ -1198,7 +1205,25 @@ export class CanvasRenderer extends RendererBase {
    * All fields are uninitialized — caller must Object.assign to populate.
    */
   private acquireMessage(): CanvasMessage {
-    return this.messagePool.pop() || ({} as CanvasMessage);
+    return (
+      this.messagePool.pop() ?? {
+        message: EMPTY_CHAT_MESSAGE,
+        startTime: 0,
+        activationTime: 0,
+        duration: 0,
+        invDuration: 0,
+        width: 0,
+        height: 0,
+        startX: 0,
+        x: 0,
+        y: 0,
+        pausedDuration: 0,
+        laneIndex: 0,
+        staggerDelay: 0,
+        speedTier: 0,
+        renderMessage: EMPTY_CHAT_MESSAGE,
+      }
+    );
   }
 
   /**
@@ -1206,14 +1231,12 @@ export class CanvasRenderer extends RendererBase {
    * Resets all reference-type fields to prevent stale data leaks.
    */
   private releaseMessage(msg: CanvasMessage): void {
-    const m = msg as unknown as Record<string, unknown>;
-    m.id = undefined;
-    m.text = undefined;
-    m.translatedText = undefined;
-    m.overrideText = undefined;
-    m.message = undefined;
-    m.renderMessage = undefined;
-    m.content = undefined;
+    // Clear reference-type fields to prevent stale data leaks.
+    // These are overwritten by Object.assign on next acquire.
+    msg.message = EMPTY_CHAT_MESSAGE;
+    msg.renderMessage = EMPTY_CHAT_MESSAGE;
+    msg.translatedText = null;
+    delete msg.desaturatedUserColor;
     // Keep numeric fields — they'll be overwritten by Object.assign
     this.messagePool.push(msg);
   }
