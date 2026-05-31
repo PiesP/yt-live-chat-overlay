@@ -1823,7 +1823,8 @@ export class CanvasRenderer extends RendererBase {
     'superChatMaxBodyLines',
     'membershipMaxBodyLines',
     'showAuthor',
-    'preserveUserColor',
+    'translationEnabled',
+    'translationMode',
   ] as const;
 
   /**
@@ -1838,13 +1839,7 @@ export class CanvasRenderer extends RendererBase {
     config.outlineWidthPx = settings.outline.widthPx;
     config.outlineOpacity = settings.outline.opacity;
     config.authorColors = { ...settings.colors };
-    config.modOwnerDurationMultiplier = settings.modOwnerDurationMultiplier;
     config.maxMessageAgeMs = rendererLayout.maxMessageAgeMs;
-    config.superChatOpacity = settings.superChatOpacity;
-    config.superChatMaxBodyLines = settings.superChatMaxBodyLines;
-    config.membershipMaxBodyLines = settings.membershipMaxBodyLines;
-    config.showAuthor = { ...settings.showAuthor };
-    config.preserveUserColor = settings.preserveUserColor;
     return config;
   }
 
@@ -1967,16 +1962,13 @@ export class CanvasRenderer extends RendererBase {
           content,
           author: message.author,
           authorPhotoUrl: message.authorPhotoUrl,
-          userColor: message.userColor,
           // SuperChat (if applicable)
           ...(message.kind === 'superchat' && message.superChat
             ? {
                 superChatAmount: message.superChat.amount,
                 superChatTier: message.superChat.tier,
                 superChatBgColor: message.superChat.backgroundColor,
-                superChatHdrColor: message.superChat.headerBackgroundColor,
                 superChatStickerUrl: message.superChat.sticker?.url,
-                superChatStickerAlt: message.superChat.sticker?.alt,
               }
             : {}),
         },

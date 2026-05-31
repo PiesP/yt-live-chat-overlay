@@ -105,8 +105,6 @@ interface WorkerConfig {
   membershipMaxBodyLines: number;
   /** Author display settings (per-authorType visibility). */
   showAuthor: Record<string, boolean>;
-  /** Preserve author's custom text color. */
-  preserveUserColor: boolean;
   /** Translation enabled flag. */
   translationEnabled: boolean;
   /** Translation display mode: 'dual' or 'replace'. */
@@ -149,8 +147,6 @@ interface WorkerMessage {
   author?: string;
   /** Author photo URL. */
   authorPhotoUrl?: string;
-  /** User's custom text color (for preserveUserColor mode). */
-  userColor?: string;
   // ── SuperChat card data ──
   /** Formatted amount string (e.g. "$5.00"). */
   superChatAmount?: string;
@@ -163,7 +159,6 @@ interface WorkerMessage {
   /** Sticker image URL. */
   superChatStickerUrl?: string;
   /** Sticker alt text. */
-  superChatStickerAlt?: string;
 }
 
 interface ActiveMessage {
@@ -199,20 +194,14 @@ interface ActiveMessage {
   author?: string;
   /** Author photo URL. */
   authorPhotoUrl?: string;
-  /** User's custom text color (for preserveUserColor mode). */
-  userColor?: string;
   /** Formatted SuperChat amount (e.g. "$5.00"). */
   superChatAmount?: string;
   /** SuperChat tier (0-4). */
   superChatTier?: number;
   /** SuperChat background color as ARGB int. */
   superChatBgColor?: number;
-  /** SuperChat header color as ARGB int. */
-  superChatHdrColor?: number;
   /** SuperChat sticker image URL. */
   superChatStickerUrl?: string;
-  /** SuperChat sticker alt text. */
-  superChatStickerAlt?: string;
 }
 
 // ── Speed tier constants ──────────────────────────────────────────────────
@@ -315,6 +304,8 @@ let totalDrops = 0;
 
 // ── Text bitmap cache ──────────────────────────────────────────────────────
 
+const TEXT_BITMAP_CACHE_MAX = 200;
+
 const textBitmapCache = new Map<string, OffscreenCanvas>();
 
 const emojiCache = new WorkerImageCache();
@@ -404,6 +395,14 @@ function cacheTextBitmap(
   offCtx.strokeText(text, strokeWidth / 2 + 1, strokeWidth / 2 + 1);
   offCtx.fillStyle = fillColor;
   offCtx.fillText(text, strokeWidth / 2 + 1, strokeWidth / 2 + 1);
+
+  // LRU eviction — prevent unbounded OffscreenCanvas growth
+  if (textBitmapCache.size >= TEXT_BITMAP_CACHE_MAX) {
+    const oldestKey = textBitmapCache.keys().next().value;
+    if (oldestKey !== undefined) {
+      textBitmapCache.delete(oldestKey);
+    }
+  }
 
   textBitmapCache.set(key, offscreen);
 }
@@ -1073,7 +1072,6 @@ function renderSuperChatCard(
     superChatTier?: number;
     superChatBgColor?: number;
     superChatStickerUrl?: string;
-    superChatStickerAlt?: string;
   },
   msgWidth: number,
   msgHeight: number,
@@ -1085,6 +1083,7 @@ function renderSuperChatCard(
   outlineWidthPx: number,
   outlineOpacity: number,
   superChatMaxBodyLines: number,
+  superChatOpacity: number,
   showAuthorSection: boolean,
   textBitmapCache: Map<string, OffscreenCanvas>,
   authorPhotoCache: WorkerImageCache,
@@ -1101,7 +1100,11 @@ function renderSuperChatCard(
 
   // globalAlpha is set by the caller (opacity-batched outer loop)
 
-  const { base: scAlpha, top: topAlpha, bottom: bottomAlpha } = computeSuperChatOpacities(0.85); // default superChatOpacity
+  const {
+    base: scAlpha,
+    top: topAlpha,
+    bottom: bottomAlpha,
+  } = computeSuperChatOpacities(superChatOpacity);
   const rgb = resolveSuperChatRgbFromArgb(message.superChatBgColor, message.superChatTier ?? 0);
   const baseColor = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
   const textColor = computeReadableTextColor(baseColor);
@@ -1793,6 +1796,7 @@ function renderFrame(): void {
           strokeWidth,
           cfg.outlineOpacity,
           cfg.superChatMaxBodyLines,
+          cfg.superChatOpacity,
           showAuthorSection,
           textBitmapCache,
           authorPhotoCache,
@@ -2059,16 +2063,11 @@ function activateMessage(
     ...(msg.content !== undefined ? { content: msg.content } : {}),
     ...(msg.author !== undefined ? { author: msg.author } : {}),
     ...(msg.authorPhotoUrl !== undefined ? { authorPhotoUrl: msg.authorPhotoUrl } : {}),
-    ...(msg.userColor !== undefined ? { userColor: msg.userColor } : {}),
     ...(msg.superChatAmount !== undefined ? { superChatAmount: msg.superChatAmount } : {}),
     ...(msg.superChatTier !== undefined ? { superChatTier: msg.superChatTier } : {}),
     ...(msg.superChatBgColor !== undefined ? { superChatBgColor: msg.superChatBgColor } : {}),
-    ...(msg.superChatHdrColor !== undefined ? { superChatHdrColor: msg.superChatHdrColor } : {}),
     ...(msg.superChatStickerUrl !== undefined
       ? { superChatStickerUrl: msg.superChatStickerUrl }
-      : {}),
-    ...(msg.superChatStickerAlt !== undefined
-      ? { superChatStickerAlt: msg.superChatStickerAlt }
       : {}),
   };
 
