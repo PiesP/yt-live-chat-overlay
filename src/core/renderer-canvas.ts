@@ -1629,8 +1629,8 @@ export class CanvasRenderer extends RendererBase {
    *
    * Order of application:
    *   1. settings.opacity (base, default 0.85)
-   *   2. Fade-in: linear ramp over fadeDurationMs at start of life
-   *   3. Fade-out: linear ramp over fadeDurationMs at end (top/bottom only)
+   *   2. Fade-in: linear ramp over fadeDurationMs at start (top/bottom only)
+   *   3. Fade-out: linear ramp over fadeDurationMs at end (all modes)
    *   4. Backlog dimming: backlogOpacityMultiplier if isBacklog
    *   5. Far depth dimming: depthFarOpacityMul for Far tier messages
    *   6. Age fade-out: linear ramp to 0 over maxMessageAgeMs (60s)
@@ -1646,11 +1646,20 @@ export class CanvasRenderer extends RendererBase {
 
     const fadeDuration = this.settings.fadeDurationMs;
     if (fadeDuration > 0) {
-      if (elapsed < fadeDuration) {
-        opacity *= elapsed * this.invFadeDuration;
-      }
-      if (!isScrolling && elapsed > duration - fadeDuration) {
-        opacity *= Math.max(0, (duration - elapsed) * this.invFadeDuration);
+      if (isScrolling) {
+        // Scrolling: fade-out only (message exits screen edge naturally)
+        const remaining = duration - elapsed;
+        if (remaining < fadeDuration) {
+          opacity *= Math.max(0, remaining * this.invFadeDuration);
+        }
+      } else {
+        // Fixed (top/bottom): fade-in + fade-out
+        if (elapsed < fadeDuration) {
+          opacity *= elapsed * this.invFadeDuration;
+        }
+        if (elapsed > duration - fadeDuration) {
+          opacity *= Math.max(0, (duration - elapsed) * this.invFadeDuration);
+        }
       }
     }
 

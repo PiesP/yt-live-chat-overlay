@@ -607,11 +607,16 @@ function renderFrame(): void {
 
     if (fadeMs > 0) {
       if (isScrolling) {
+        // Scrolling: fade-out only (message exits screen edge naturally)
         const remaining = msg.duration - elapsed;
         if (remaining < fadeMs) {
-          opacity *= Math.max(0, remaining / fadeMs);
+          opacity *= Math.max(0, remaining / Math.max(1, fadeMs));
         }
       } else {
+        // Fixed (top/bottom): fade-in + fade-out
+        if (elapsed < fadeMs) {
+          opacity *= elapsed / Math.max(1, fadeMs);
+        }
         const remaining = Math.max(0, msg.duration - elapsed);
         if (remaining < fadeMs) {
           opacity *= remaining / Math.max(1, fadeMs);
