@@ -581,14 +581,12 @@ export class CanvasRenderer extends RendererBase {
 
     // Trigger an immediate render frame so the message appears within
     // one frame (~16ms) instead of waiting for the next natural rAF.
+    // When the loop self-idled (animFrameId === null), restart it.
     // Skip if paused — the render loop would just return immediately.
-    if (
-      this.pendingQueue.size === 1 &&
-      this.animFrameId !== null &&
-      !this.isPaused &&
-      !this.isVideoPaused
-    ) {
-      this.animFrameId = clearSafeAnimationFrame(this.animFrameId);
+    if (this.pendingQueue.size === 1 && !this.isPaused && !this.isVideoPaused) {
+      if (this.animFrameId !== null) {
+        this.animFrameId = clearSafeAnimationFrame(this.animFrameId);
+      }
       this.startRenderLoop();
     }
   }
@@ -652,16 +650,14 @@ export class CanvasRenderer extends RendererBase {
 
         // Trigger an immediate render frame so the emoji appears within
         // ~1 frame instead of waiting for the next natural rAF tick.
+        // When the loop self-idled (animFrameId === null), restart it.
         // Skip if paused or already pending — multiple concurrent emoji loads
         // share a single rAF restart via the needsRerender debounce flag.
-        if (
-          this.animFrameId !== null &&
-          !this.isPaused &&
-          !this.isVideoPaused &&
-          !this.needsRerender
-        ) {
+        if (!this.isPaused && !this.isVideoPaused && !this.needsRerender) {
+          if (this.animFrameId !== null) {
+            this.animFrameId = clearSafeAnimationFrame(this.animFrameId);
+          }
           this.needsRerender = true;
-          this.animFrameId = clearSafeAnimationFrame(this.animFrameId);
           this.startRenderLoop();
         }
       };
@@ -745,7 +741,7 @@ export class CanvasRenderer extends RendererBase {
       // messages, no queued messages, not in standby. This eliminates
       // wasted 60fps rAF cycles when the stream has no chat activity.
       // The loop is restarted by:
-      //   - enqueueMessage (queue 0→1 transition)
+      //   - enqueueMessage (queue 0→1 transition, running or self-idled)
       //   - setStandbyStatus(true)
       //   - onResume (tab visibility or video unpause)
       //   - emoji/sticker load callbacks (via needsRerender flag)
