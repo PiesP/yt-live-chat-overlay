@@ -212,14 +212,6 @@ export class ReplayChatSource extends ChatSource {
     this.cooperativeLoopRunning = false;
   }
 
-  private stopRafFlush(): void {
-    this.stopCooperativeLoop();
-  }
-
-  private stopBackgroundFetch(): void {
-    this.stopCooperativeLoop();
-  }
-
   /** Reset prefetch state — cooperative loop will skip the prefetch step. */
   private stopPrefetch(): void {
     this.prefetchContinuation = null;
@@ -318,8 +310,8 @@ export class ReplayChatSource extends ChatSource {
     this.replayBuffer.clear();
     this.seekListenerCleanup?.();
     this.seekListenerCleanup = null;
-    this.stopRafFlush();
-    this.stopBackgroundFetch();
+    this.stopCooperativeLoop();
+    this.stopCooperativeLoop();
     this.stopPrefetch();
   }
 

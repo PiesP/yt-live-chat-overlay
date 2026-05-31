@@ -61,7 +61,7 @@ const CHAT_STALL_TIMEOUT_MS = 30_000;
 const LONG_IDLE_RESTART_MS = 60_000;
 const ABSOLUTE_MAX_IDLE_RESTART_MS = 30 * 60 * 1000; // 30 minutes
 
-export type RuntimeSessionRestartReason = 'foreground-return' | 'watchdog' | 'standby-resolved';
+type RuntimeSessionRestartReason = 'foreground-return' | 'watchdog' | 'standby-resolved';
 
 interface RuntimeHealth {
   idleDurationMs: number;

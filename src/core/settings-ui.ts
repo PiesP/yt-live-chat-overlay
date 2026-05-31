@@ -127,6 +127,11 @@ export class SettingsUi {
     persist(this.form.collectSettings());
     this.setDialogOpen(false);
 
+    // Remove keydown listener to prevent accumulation across SPA navigations.
+    // ensureModal() registers this listener and close() is called on modal
+    // hide; destroy() also removes it as a safety net.
+    document.removeEventListener('keydown', this.handleKeydown);
+
     if (this.previousFocus?.isConnected) {
       this.previousFocus.focus();
     }

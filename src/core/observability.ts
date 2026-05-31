@@ -33,6 +33,8 @@ export class ObservabilityReporter {
   private showDebug = false;
   private static readonly WARN_COOLDOWN_MS = 30_000;
   private static readonly METRIC_WINDOW_MS = 60_000;
+  /** Number of lines in the debug overlay. */
+  private static readonly DEBUG_OVERLAY_LINE_COUNT = 7;
 
   /** Per-frame timing state. */
   private frameTimings: FrameTimings = {
@@ -213,8 +215,8 @@ export class ObservabilityReporter {
       `position:fixed;top:${DEBUG_OVERLAY_TOP};right:${DEBUG_OVERLAY_RIGHT};z-index:${DEBUG_OVERLAY_Z_INDEX};` +
       `background:${DEBUG_OVERLAY_BG};color:#0f0;font:12px/1.4 monospace;` +
       'padding:8px 12px;border-radius:4px;min-width:220px;pointer-events:none;user-select:none';
-    // Pre-create 7 child divs once — avoids DOM churn on every frame
-    for (let i = 0; i < 7; i++) {
+    // Pre-create child divs matching the number of debug lines
+    for (let i = 0; i < ObservabilityReporter.DEBUG_OVERLAY_LINE_COUNT; i++) {
       el.appendChild(document.createElement('div'));
     }
     document.body.appendChild(el);

@@ -26,10 +26,17 @@ import type { BacklogMode, ChatMessage, Pauseable } from '@app-types';
 import { BACKLOG_INDICATOR_BG } from '@core/design-tokens';
 import { clearSafeTimeout } from '@core/dom';
 import { createLogger } from '@core/logging';
-import { sampleExponential } from '@core/math-utils';
 import type { ObservabilityReporter } from '@core/observability';
 
 const log = createLogger('Backlog');
+
+/**
+ * Sample from an exponential distribution with the given mean.
+ * Uses the inverse-CDF method: -mean * ln(1 - U) where U ~ Uniform(0, 1).
+ */
+function sampleExponential(mean: number): number {
+  return -mean * Math.log(1 - Math.random());
+}
 
 interface BacklogControllerConfig {
   /** How to handle past chat messages */
