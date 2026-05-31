@@ -747,10 +747,11 @@ export class CanvasRenderer extends RendererBase {
         msg.x = msg.startX + progress * travelDistance;
       }
 
-      // Fade-in uses activationTime (drain time) so fade progresses during stagger.
-      // This ensures the message is already visibly fading in when stagger ends,
-      // eliminating the "disappear then reappear" flicker at entry.
-      const fadeElapsed = now - msg.activationTime - msg.pausedDuration;
+      // Fade-in starts from visual startTime so opacity builds naturally
+      // from the moment the message appears on screen, synchronized with
+      // stagger delay. Previously used activationTime (drain time) which
+      // caused fade-in to complete before the message was even visible.
+      const fadeElapsed = now - msg.startTime - msg.pausedDuration;
       const opacity = this.computeMessageOpacity(
         msg.message,
         fadeElapsed,
