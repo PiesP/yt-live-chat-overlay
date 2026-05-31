@@ -117,17 +117,17 @@ const SPEED_TIER = { FAR: 0, MID: 1, NEAR: 2, BACKLOG: 3 } as const;
 
 // ── Layout constants ──────────────────────────────────────────────────────
 // MUST match @core/design-tokens rendererLayout values where noted.
-const HEADWAY_GAP_RATIO = 0.08;
-const HEADWAY_GAP_MIN = 16;
-const HEADWAY_GAP_MAX = 60;
+const HEADWAY_GAP_RATIO = 0.08; // canonical: rendererLayout.headwayGapRatio
+const HEADWAY_GAP_MIN = 16; // canonical: LaneAllocator.HEADWAY_GAP_MIN_PX
+const HEADWAY_GAP_MAX = 60; // canonical: LaneAllocator.HEADWAY_GAP_MAX_PX
 const EXIT_PADDING_MIN = 100; // canonical: rendererLayout.exitPaddingMin
 const SCROLL_DURATION_MAX_MS = 12_000; // worker-specific safety cap (no equivalent in main renderer)
 const TOP_BOTTOM_DURATION_MS = 5_000;
-const LANE_COOLDOWN_MIN_MS = 500;
-const SAFETY_MARGIN_RATIO = 0.15;
+const LANE_COOLDOWN_MIN_MS = 500; // canonical: LaneAllocator.LANE_COOLDOWN_MIN_MS
+const SAFETY_MARGIN_RATIO = 0.15; // canonical: LaneAllocator.SAFETY_MARGIN_RATIO
 const EPSILON = 0.05;
-const DRAIN_MAX_SKIP = 3;
-const PADDING_V = 4;
+const DRAIN_MAX_SKIP = 3; // canonical: CanvasRenderer.DRAIN_QUEUE_MAX_SKIP
+const PADDING_V = 8; // canonical: rendererLayout.paddingV
 
 // ── Globals (worker scope) ───────────────────────────────────────────────
 
@@ -265,7 +265,10 @@ self.onmessage = (e: MessageEvent) => {
       break;
     }
     case 'updateConfig':
-      if (config) Object.assign(config, data.config as Partial<WorkerConfig>);
+      if (config) {
+        Object.assign(config, data.config as Partial<WorkerConfig>);
+        textBitmapCache.clear();
+      }
       break;
     case 'setPaused':
       isPaused = data.paused as boolean;
@@ -298,10 +301,17 @@ function findInsertIndex(priority: number): number {
 // ── Lane allocator (simplified 3-phase, adapted from LaneAllocator) ───────
 
 function initLanes(_width: number, height: number): void {
-  if (!config) return;
+  if (!config || !ctx) return;
   const totalPaddingV = PADDING_V * 2;
-  // Height estimation: fontSize * 1.4 for line-height, plus padding
-  const textHeight = Math.ceil(config.fontSize * 1.4);
+  // Height estimation from actual font metrics (or fallback)
+  const font = `${config.fontWeight} ${config.fontSize}px ${config.fontFamily}`;
+  ctx.font = font;
+  const textMetrics = ctx.measureText('M');
+  const textHeight = Math.ceil(
+    textMetrics.fontBoundingBoxAscent != null
+      ? textMetrics.fontBoundingBoxAscent + textMetrics.fontBoundingBoxDescent
+      : config.fontSize * 1.1
+  );
   laneHeight = Math.max(1, textHeight + totalPaddingV + config.laneSpacing);
 
   const usableHeight = height * (1 - config.safeTop - config.safeBottom);
