@@ -382,6 +382,41 @@ export const PANES: PaneDef[] = [
             'headwayGapRatio',
             'Gap between consecutive messages as percentage of message width (2-30%, default 8)'
           ),
+          num(
+            'Emoji Cache (MB)',
+            'emojiCacheMb',
+            'Max memory for emoji image cache (1-20 MB, default 3)'
+          ),
+          num(
+            'Photo Cache (MB)',
+            'photoCacheMb',
+            'Max memory for author photo cache (1-20 MB, default 2)'
+          ),
+          num(
+            'Sticker Cache (MB)',
+            'stickerCacheMb',
+            'Max memory for sticker image cache (1-20 MB, default 1)'
+          ),
+          num(
+            'Text Cache (MB)',
+            'textCacheMb',
+            'Max memory for text bitmap cache (1-20 MB, default 4)'
+          ),
+          num(
+            'Translation Batch Size',
+            'translationBatchSize',
+            'Max translations applied per frame to avoid spikes (1-20, default 5)'
+          ),
+          num(
+            'Emoji Fetch Limit',
+            'emojiFetchLimit',
+            'Max concurrent emoji fetch operations (1-20, default 6)'
+          ),
+          num(
+            'Failed Emoji Retry (min)',
+            'failedEmojiRetryMins',
+            'How long to wait before retrying failed emoji fetches (1-60 min, default 5)'
+          ),
         ],
       },
       {

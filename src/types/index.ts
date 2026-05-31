@@ -270,6 +270,22 @@ export interface OverlaySettings {
   // ── Lane Spacing ──
   /** Headway gap ratio: fraction of message width used as gap between consecutive messages (0.02-0.30, default 0.08 = 8%) */
   headwayGapRatio: number;
+
+  // ── Performance ──
+  /** Emoji cache size in MB (1-20, default 3) */
+  emojiCacheMb: number;
+  /** Photo cache size in MB (1-20, default 2) */
+  photoCacheMb: number;
+  /** Sticker cache size in MB (1-20, default 1) */
+  stickerCacheMb: number;
+  /** Text bitmap cache size in MB (1-20, default 4) */
+  textCacheMb: number;
+  /** Max translation results to apply per frame (1-20, default 5) */
+  translationBatchSize: number;
+  /** Max concurrent emoji fetch operations (1-20, default 6) */
+  emojiFetchLimit: number;
+  /** Failed emoji retry TTL in minutes (1-60, default 5) */
+  failedEmojiRetryMins: number;
 }
 
 /**

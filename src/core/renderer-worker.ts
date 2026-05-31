@@ -145,6 +145,20 @@ interface WorkerConfig {
   queueMaxSize: number;
   /** Background queue trim target. */
   backgroundQueueMax: number;
+  /** Emoji image cache budget in MB. */
+  emojiCacheMb: number;
+  /** Author photo cache budget in MB. */
+  photoCacheMb: number;
+  /** Sticker image cache budget in MB. */
+  stickerCacheMb: number;
+  /** Text bitmap cache budget in MB. */
+  textCacheMb: number;
+  /** Max translations to apply per frame. */
+  translationBatchSize: number;
+  /** Max concurrent emoji fetch operations. */
+  emojiFetchLimit: number;
+  /** Minutes before retrying failed emoji fetches. */
+  failedEmojiRetryMins: number;
 }
 
 interface WorkerContentSegment {

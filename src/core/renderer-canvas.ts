@@ -350,19 +350,19 @@ export class CanvasRenderer extends RendererBase {
 
   /** Image caches (bounded LRU). */
   private readonly emojiCache = new ByteLimitedCache<HTMLImageElement>(
-    3_000_000, // 3MB
+    this.settings.emojiCacheMb * 1_000_000, // configurable MB
     (img) => img.naturalWidth * img.naturalHeight * 4 // RGBA bytes
   );
   private readonly emojiFetching = new Set<string>();
   private readonly emojiFetchingStarted = new Map<string, number>();
   /** Author photo cache — byte-limited instead of count-limited for consistent memory usage. */
   private readonly authorPhotoCache = new ByteLimitedCache<HTMLImageElement>(
-    2_000_000, // 2MB
+    this.settings.photoCacheMb * 1_000_000, // configurable MB
     (img) => img.naturalWidth * img.naturalHeight * 4 // RGBA bytes
   );
   /** Sticker image cache — byte-limited instead of count-limited for consistent memory usage. */
   private readonly stickerCache = new ByteLimitedCache<HTMLImageElement>(
-    1_000_000, // 1MB
+    this.settings.stickerCacheMb * 1_000_000, // configurable MB
     (img) => img.naturalWidth * img.naturalHeight * 4 // RGBA bytes
   );
   /** Map of URL → timestamp for failed emoji fetches, with TTL-based eviction. */
@@ -377,12 +377,12 @@ export class CanvasRenderer extends RendererBase {
   private translationService: TranslationService;
 
   /** Max translations to apply per frame to avoid single-frame spikes during chat bursts. */
-  private static readonly MAX_TRANSLATIONS_PER_FRAME = 5;
+  private readonly translationBatchSize: number;
 
   /**
    * Pending translation results collected between frames.
    * Promise callbacks push here; renderFrame() applies up to
-   * MAX_TRANSLATIONS_PER_FRAME per frame, leaving the rest for
+   * translationBatchSize per frame, leaving the rest for
    * subsequent frames to avoid frame spikes during chat bursts.
    */
   private pendingTranslations: Array<{ msg: CanvasMessage; text: string | null }> = [];
@@ -404,7 +404,7 @@ export class CanvasRenderer extends RendererBase {
    * in long-running streams.
    */
   private readonly textBitmapCache = new ByteLimitedCache<HTMLCanvasElement>(
-    4_000_000, // 4MB (increased from 2MB for better hit rate with repetitive chat text)
+    this.settings.textCacheMb * 1_000_000, // configurable MB
     (c) => c.width * c.height * 4 // RGBA bytes
   );
   private readonly superChatGradientCache = new Map<string, CanvasGradient>();
@@ -443,7 +443,7 @@ export class CanvasRenderer extends RendererBase {
   private static readonly DRAIN_QUEUE_MAX_SKIP = _DRAIN_QUEUE_MAX_SKIP;
 
   /** Max concurrent emoji fetch operations. */
-  private static readonly EMOJI_FETCH_MAX_CONCURRENT = 6;
+  private readonly emojiFetchLimit: number;
 
   /** Stagger queue depth thresholds. */
   private static readonly STAGGER_QUEUE_HIGH = 50;
@@ -481,6 +481,9 @@ export class CanvasRenderer extends RendererBase {
   constructor(overlay: Overlay, settings: OverlaySettings) {
     super(overlay, settings);
     this.invFadeDuration = 1 / Math.max(1, settings.fadeDurationMs);
+    this.translationBatchSize = settings.translationBatchSize;
+    this.emojiFetchLimit = settings.emojiFetchLimit;
+    this.failedEmojiRetryMins = settings.failedEmojiRetryMins;
     this.translationService = new TranslationService();
     this.translationService.configure({
       enabled: settings.translationEnabled,
@@ -650,7 +653,7 @@ export class CanvasRenderer extends RendererBase {
       if (this.emojiFetching.has(seg.emoji.url)) continue;
       if (this.emojiCache.has(seg.emoji.url)) continue;
       if (this.failedEmojiFetches.has(seg.emoji.url)) continue;
-      if (this.emojiFetching.size >= CanvasRenderer.EMOJI_FETCH_MAX_CONCURRENT) continue;
+      if (this.emojiFetching.size >= this.emojiFetchLimit) continue;
       this.emojiFetching.add(seg.emoji.url);
       this.emojiFetchingStarted.set(seg.emoji.url, performance.now());
       const url = seg.emoji.url;
@@ -708,7 +711,7 @@ export class CanvasRenderer extends RendererBase {
    */
   private static readonly EMOJI_FETCH_TIMEOUT_MS = 30_000;
 
-  private static readonly FAILED_EMOJI_TTL_MS = 5 * 60 * 1000; // 5 minutes
+  private readonly failedEmojiRetryMins: number;
 
   private cleanupStaleEmojiFetching(): void {
     const now = performance.now();
@@ -721,7 +724,7 @@ export class CanvasRenderer extends RendererBase {
 
     // Evict failed entries older than TTL so permanently broken URLs are not retried forever.
     if (this.failedEmojiFetches.size > 0) {
-      const cutoff = Date.now() - CanvasRenderer.FAILED_EMOJI_TTL_MS;
+      const cutoff = Date.now() - this.failedEmojiRetryMins * 60_000;
       for (const [url, failedAt] of this.failedEmojiFetches) {
         if (failedAt < cutoff) {
           this.failedEmojiFetches.delete(url);
@@ -792,7 +795,7 @@ export class CanvasRenderer extends RendererBase {
     // between frames. Incremental drain prevents single-frame spikes during
     // chat bursts when many translations resolve simultaneously.
     if (this.pendingTranslations.length > 0) {
-      const batch = this.pendingTranslations.splice(0, CanvasRenderer.MAX_TRANSLATIONS_PER_FRAME);
+      const batch = this.pendingTranslations.splice(0, this.translationBatchSize);
       for (const { msg, text } of batch) {
         msg.translatedText = text;
       }
@@ -1832,6 +1835,13 @@ export class CanvasRenderer extends RendererBase {
     'backgroundQueueMax',
     'maxMessageAgeMs',
     'headwayGapRatio',
+    'emojiCacheMb',
+    'photoCacheMb',
+    'stickerCacheMb',
+    'textCacheMb',
+    'translationBatchSize',
+    'emojiFetchLimit',
+    'failedEmojiRetryMins',
   ] as const;
 
   /**

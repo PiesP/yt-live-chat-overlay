@@ -274,6 +274,29 @@ const KO: TranslationMap = {
   'Dual shows original above translation, Replace shows translation only':
     '이중 표시는 원문 위에 번역을, 교체는 번역만 표시합니다',
 
+  // ── New cache/performance field labels (added 2026-06-01) ──
+  'Emoji Cache (MB)': '이모지 캐시 (MB)',
+  'Photo Cache (MB)': '사진 캐시 (MB)',
+  'Sticker Cache (MB)': '스티커 캐시 (MB)',
+  'Text Cache (MB)': '텍스트 캐시 (MB)',
+  'Translation Batch Size': '번역 배치 크기',
+  'Emoji Fetch Limit': '이모지 가져오기 제한',
+  'Failed Emoji Retry (min)': '실패한 이모지 재시도 (분)',
+  'Max memory for emoji image cache (1-20 MB, default 3)':
+    '이모지 이미지 캐시 최대 메모리 (1-20 MB, 기본 3)',
+  'Max memory for author photo cache (1-20 MB, default 2)':
+    '작성자 사진 캐시 최대 메모리 (1-20 MB, 기본 2)',
+  'Max memory for sticker image cache (1-20 MB, default 1)':
+    '스티커 이미지 캐시 최대 메모리 (1-20 MB, 기본 1)',
+  'Max memory for text bitmap cache (1-20 MB, default 4)':
+    '텍스트 비트맵 캐시 최대 메모리 (1-20 MB, 기본 4)',
+  'Max translations applied per frame to avoid spikes (1-20, default 5)':
+    '프레임당 최대 번역 적용 수 (1-20, 기본 5)',
+  'Max concurrent emoji fetch operations (1-20, default 6)':
+    '최대 동시 이모지 가져오기 (1-20, 기본 6)',
+  'How long to wait before retrying failed emoji fetches (1-60 min, default 5)':
+    '실패한 이모지 재시도 대기 시간 (1-60분, 기본 5)',
+
   // ── Modal chrome ──
   'Chat Overlay': '채팅 오버레이',
   'Close settings': '설정 닫기',
@@ -503,6 +526,29 @@ const JA: TranslationMap = {
     '過去のチャットメッセージをライブ再生に対してどう表示するか',
   'Dual shows original above translation, Replace shows translation only':
     '二重表示は原文の上に翻訳を、置換は翻訳のみ表示します',
+
+  // ── New cache/performance field labels (added 2026-06-01) ──
+  'Emoji Cache (MB)': '絵文字キャッシュ (MB)',
+  'Photo Cache (MB)': '写真キャッシュ (MB)',
+  'Sticker Cache (MB)': 'ステッカーキャッシュ (MB)',
+  'Text Cache (MB)': 'テキストキャッシュ (MB)',
+  'Translation Batch Size': '翻訳バッチサイズ',
+  'Emoji Fetch Limit': '絵文字取得制限',
+  'Failed Emoji Retry (min)': '失敗した絵文字の再試行 (分)',
+  'Max memory for emoji image cache (1-20 MB, default 3)':
+    '絵文字画像キャッシュの最大メモリ (1-20 MB, デフォルト 3)',
+  'Max memory for author photo cache (1-20 MB, default 2)':
+    '投稿者写真キャッシュの最大メモリ (1-20 MB, デフォルト 2)',
+  'Max memory for sticker image cache (1-20 MB, default 1)':
+    'ステッカー画像キャッシュの最大メモリ (1-20 MB, デフォルト 1)',
+  'Max memory for text bitmap cache (1-20 MB, default 4)':
+    'テキストビットマップキャッシュの最大メモリ (1-20 MB, デフォルト 4)',
+  'Max translations applied per frame to avoid spikes (1-20, default 5)':
+    'フレームごとの最大翻訳適用数 (1-20, デフォルト 5)',
+  'Max concurrent emoji fetch operations (1-20, default 6)':
+    '最大同時絵文字取得数 (1-20, デフォルト 6)',
+  'How long to wait before retrying failed emoji fetches (1-60 min, default 5)':
+    '失敗した絵文字の再試行までの待機時間 (1-60分, デフォルト 5)',
 
   // ── Modal chrome ──
   'Chat Overlay': 'チャットオーバーレイ',
@@ -735,6 +781,29 @@ const ES: TranslationMap = {
   'Dual shows original above translation, Replace shows translation only':
     'Dual muestra el original encima de la traducción, Reemplazar muestra solo la traducción',
 
+  // ── New cache/performance field labels (added 2026-06-01) ──
+  'Emoji Cache (MB)': 'Caché de emojis (MB)',
+  'Photo Cache (MB)': 'Caché de fotos (MB)',
+  'Sticker Cache (MB)': 'Caché de stickers (MB)',
+  'Text Cache (MB)': 'Caché de texto (MB)',
+  'Translation Batch Size': 'Tamaño de lote de traducción',
+  'Emoji Fetch Limit': 'Límite de obtención de emojis',
+  'Failed Emoji Retry (min)': 'Reintento de emoji fallido (min)',
+  'Max memory for emoji image cache (1-20 MB, default 3)':
+    'Memoria máxima para caché de emojis (1-20 MB, predet. 3)',
+  'Max memory for author photo cache (1-20 MB, default 2)':
+    'Memoria máxima para caché de fotos (1-20 MB, predet. 2)',
+  'Max memory for sticker image cache (1-20 MB, default 1)':
+    'Memoria máxima para caché de stickers (1-20 MB, predet. 1)',
+  'Max memory for text bitmap cache (1-20 MB, default 4)':
+    'Memoria máxima para caché de texto (1-20 MB, predet. 4)',
+  'Max translations applied per frame to avoid spikes (1-20, default 5)':
+    'Traducciones máximas por fotograma (1-20, predet. 5)',
+  'Max concurrent emoji fetch operations (1-20, default 6)':
+    'Operaciones simultáneas máximas de emojis (1-20, predet. 6)',
+  'How long to wait before retrying failed emoji fetches (1-60 min, default 5)':
+    'Tiempo de espera antes de reintentar emojis fallidos (1-60 min, predet. 5)',
+
   // ── Modal chrome ──
   'Chat Overlay': 'Superposición de Chat',
   'Close settings': 'Cerrar configuración',
@@ -954,6 +1023,26 @@ const ZH: TranslationMap = {
     '历史聊天消息相对于直播播放的显示方式',
   'Dual shows original above translation, Replace shows translation only':
     '双语显示原文在上翻译在下，仅翻译只显示译文',
+
+  // ── New cache/performance field labels (added 2026-06-01) ──
+  'Emoji Cache (MB)': '表情缓存 (MB)',
+  'Photo Cache (MB)': '头像缓存 (MB)',
+  'Sticker Cache (MB)': '贴纸缓存 (MB)',
+  'Text Cache (MB)': '文本缓存 (MB)',
+  'Translation Batch Size': '翻译批处理大小',
+  'Emoji Fetch Limit': '表情获取限制',
+  'Failed Emoji Retry (min)': '失败表情重试 (分钟)',
+  'Max memory for emoji image cache (1-20 MB, default 3)': '表情图片缓存最大内存 (1-20 MB, 默认 3)',
+  'Max memory for author photo cache (1-20 MB, default 2)':
+    '作者头像缓存最大内存 (1-20 MB, 默认 2)',
+  'Max memory for sticker image cache (1-20 MB, default 1)':
+    '贴纸图片缓存最大内存 (1-20 MB, 默认 1)',
+  'Max memory for text bitmap cache (1-20 MB, default 4)': '文本位图缓存最大内存 (1-20 MB, 默认 4)',
+  'Max translations applied per frame to avoid spikes (1-20, default 5)':
+    '每帧最大翻译数量 (1-20, 默认 5)',
+  'Max concurrent emoji fetch operations (1-20, default 6)': '最大并发表情获取数 (1-20, 默认 6)',
+  'How long to wait before retrying failed emoji fetches (1-60 min, default 5)':
+    '失败表情重试前等待时间 (1-60分钟, 默认 5)',
 
   // ── Modal chrome ──
   'Chat Overlay': '弹幕显示',

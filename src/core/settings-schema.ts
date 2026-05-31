@@ -156,6 +156,13 @@ const ROOT_SETTING_META = {
   backgroundQueueMax: { type: 'number', visual: false },
   maxMessageAgeMs: { type: 'number', visual: true },
   headwayGapRatio: { type: 'number', visual: true, displayScale: 100, displayPrecision: 1 },
+  emojiCacheMb: { type: 'number', visual: false },
+  photoCacheMb: { type: 'number', visual: false },
+  stickerCacheMb: { type: 'number', visual: false },
+  textCacheMb: { type: 'number', visual: false },
+  translationBatchSize: { type: 'number', visual: false },
+  emojiFetchLimit: { type: 'number', visual: false },
+  failedEmojiRetryMins: { type: 'number', visual: false },
 } as const satisfies Record<RootScalarSettingKey, SettingMeta>;
 
 /**
@@ -212,7 +219,14 @@ type SettingsLimitKey =
   | 'queueMaxSize'
   | 'backgroundQueueMax'
   | 'maxMessageAgeMs'
-  | 'headwayGapRatio';
+  | 'headwayGapRatio'
+  | 'emojiCacheMb'
+  | 'photoCacheMb'
+  | 'stickerCacheMb'
+  | 'textCacheMb'
+  | 'translationBatchSize'
+  | 'emojiFetchLimit'
+  | 'failedEmojiRetryMins';
 
 const SETTINGS_LIMITS = {
   speedPxPerSec: { min: 50, max: 500, step: 10 },
@@ -247,6 +261,13 @@ const SETTINGS_LIMITS = {
   backgroundQueueMax: { min: 10, max: 500, step: 10 },
   maxMessageAgeMs: { min: 10000, max: 300000, step: 10000 },
   headwayGapRatio: { min: 0.02, max: 0.3, step: 0.01 },
+  emojiCacheMb: { min: 1, max: 20, step: 1 },
+  photoCacheMb: { min: 1, max: 20, step: 1 },
+  stickerCacheMb: { min: 1, max: 20, step: 1 },
+  textCacheMb: { min: 1, max: 20, step: 1 },
+  translationBatchSize: { min: 1, max: 20, step: 1 },
+  emojiFetchLimit: { min: 1, max: 20, step: 1 },
+  failedEmojiRetryMins: { min: 1, max: 60, step: 1 },
 } as const satisfies Record<SettingsLimitKey, NumericSettingLimit>;
 
 export const STORAGE_KEY = 'yt-live-chat-overlay-settings';
@@ -335,6 +356,13 @@ export const DEFAULT_SETTINGS = {
   backgroundQueueMax: 50,
   maxMessageAgeMs: 60000,
   headwayGapRatio: 0.08,
+  emojiCacheMb: 3,
+  photoCacheMb: 2,
+  stickerCacheMb: 1,
+  textCacheMb: 4,
+  translationBatchSize: 5,
+  emojiFetchLimit: 6,
+  failedEmojiRetryMins: 5,
 } as const satisfies Readonly<OverlaySettings>;
 
 // ── Color validation ────────────────────────────────────────────────────────────
