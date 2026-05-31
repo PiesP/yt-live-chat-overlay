@@ -39,12 +39,32 @@ import {
 } from './color-utils';
 import {
   AUTHOR_PHOTO_SHADOW,
+  computeScrollDuration,
   colors as designColors,
   rendererLayout,
   SUPERCHAT_AMOUNT_BADGE_FILL,
   SUPERCHAT_AMOUNT_BADGE_STROKE,
   spacing,
 } from './design-tokens';
+import { LaneAllocator } from './lane-allocator';
+import {
+  DRAIN_QUEUE_MAX_SKIP as DRAIN_MAX_SKIP,
+  desaturateColor,
+  EPSILON,
+  FAR_LAYER_DESATURATION_FACTOR,
+  HORIZONTAL_STAGGER_MAX,
+  HORIZONTAL_STAGGER_PER_STEP,
+  hashStringForTier as hashForTier,
+  LANE_COOLDOWN_MIN_MS,
+  OUTLINE_STROKE_SCALE,
+  SAFETY_MARGIN_RATIO,
+  STAGGER_BATCH_MAX,
+  STAGGER_EXP_SCALE,
+  TIER_NEAR_THRESHOLD,
+  TRANSLATION_FONT_SCALE,
+  TRANSLATION_GAP_PX,
+  TRANSLATION_OPACITY_SCALE,
+} from './renderer-constants';
 import { getFontString } from './text-measure';
 import { WorkerImageCache } from './worker-image-cache';
 
@@ -210,67 +230,10 @@ interface ActiveMessage {
 // MUST match @core/lane-allocator SPEED_TIER values.
 const SPEED_TIER = { FAR: 0, MID: 1, NEAR: 2, BACKLOG: 3 } as const;
 
-/** Tier split threshold: hash < this value → Near tier, else Far tier. */
-const TIER_NEAR_THRESHOLD = 0.3;
-
-/** Simple djb2-like hash of a string to a 0-1 float for tier assignment. */
-function hashForTier(str: string): number {
-  let hash = 5381;
-  for (let i = 0; i < str.length; i++) {
-    hash = ((hash << 5) + hash + str.charCodeAt(i)) | 0;
-  }
-  return (hash >>> 0) / 4294967296;
-}
-
-/** Desaturation factor for Far-tier depth layer user colors. */
-const FAR_LAYER_DESATURATION_FACTOR = 0.3;
-
-/**
- * Desaturate a hex color toward gray by a given factor.
- * factor 0 = original, 1 = full grayscale.
- * Uses luminance-preserving weights (ITU-R BT.601).
- */
-function desaturateColor(hex: string, factor: number): string {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  const gray = 0.299 * r + 0.587 * g + 0.114 * b;
-  return `rgb(${Math.round(r + (gray - r) * factor)},${Math.round(g + (gray - g) * factor)},${Math.round(b + (gray - b) * factor)})`;
-}
-
-// ── Layout constants ──────────────────────────────────────────────────────
-// MUST match @core/design-tokens rendererLayout values where noted.
-const HEADWAY_GAP_RATIO = 0.08; // canonical: rendererLayout.headwayGapRatio
-const HEADWAY_GAP_MIN = 16; // canonical: LaneAllocator.HEADWAY_GAP_MIN_PX
-const HEADWAY_GAP_MAX = 60; // canonical: LaneAllocator.HEADWAY_GAP_MAX_PX
-const EXIT_PADDING_MIN = 100; // canonical: rendererLayout.exitPaddingMin
-const SCROLL_DURATION_MAX_MS = 12_000; // worker-specific safety cap (no equivalent in main renderer)
-const TOP_BOTTOM_DURATION_MS = 4_000; // canonical: rendererLayout.topBottomDurationMs
-const LANE_COOLDOWN_MIN_MS = 500; // canonical: LaneAllocator.LANE_COOLDOWN_MIN_MS
-const SAFETY_MARGIN_RATIO = 0.15; // canonical: LaneAllocator.SAFETY_MARGIN_RATIO
-const EPSILON = 0.05;
-const DRAIN_MAX_SKIP = 3; // canonical: CanvasRenderer.DRAIN_QUEUE_MAX_SKIP
-const PADDING_V = 8; // canonical: rendererLayout.paddingV
-
-// ── Stagger constants (must match CanvasRenderer) ─────────────────────────
-const HORIZONTAL_STAGGER_PER_STEP = 40;
-const HORIZONTAL_STAGGER_MAX = 200;
-const STAGGER_BATCH_MAX = 3;
-const STAGGER_EXP_SCALE = 25;
-
-// ── Translation constants (must match CanvasRenderer) ─────────────────────
-const TRANSLATION_FONT_SCALE = 0.75;
-const TRANSLATION_GAP_PX = 2;
-const TRANSLATION_OPACITY_SCALE = 0.8;
-
-/** Inline computeScrollDuration matching @core/design-tokens. */
-function computeScrollDuration(totalDistance: number, velocity: number): number {
-  const velocityFloor = Math.max(
-    5000, // canonical: rendererLayout.durationMin
-    (100 / velocity) * 1000 // exitPaddingMin / velocity
-  );
-  return Math.max(velocityFloor, Math.min(30000, (totalDistance / velocity) * 1000));
-}
+// ── Worker-specific constants ──────────────────────────────────────────────
+/** Worker-specific safety cap for scroll duration (ms).
+ *  No equivalent in main renderer. */
+const SCROLL_DURATION_MAX_MS = 12_000;
 
 // ── Globals (worker scope) ───────────────────────────────────────────────
 
@@ -330,7 +293,7 @@ const opacityBuckets: Array<Array<{ msg: ActiveMessage; elapsed: number }>> = Ar
 // ── Ported rendering functions from canvas-text-renderer / canvas-card-renderers ──
 
 /** Outline stroke scale factor. */
-const OUTLINE_STROKE_SCALE = 0.85;
+// OUTLINE_STROKE_SCALE imported from @core/renderer-constants
 
 /**
  * Inline helper: parse ARGB int (YouTube SuperChat format) to {r, g, b}.
@@ -1421,7 +1384,7 @@ function findInsertIndex(priority: number): number {
 
 function initLanes(_width: number, height: number): void {
   if (!config || !ctx) return;
-  const totalPaddingV = PADDING_V * 2;
+  const totalPaddingV = rendererLayout.paddingV * 2;
   // Height estimation from actual font metrics (or fallback)
   const font = `${config.fontWeight} ${config.fontSize}px ${config.fontFamily}`;
   ctx.font = font;
@@ -1589,10 +1552,13 @@ function computeOccupancyMs(durationMs: number, msgWidthPx?: number): number {
   }
   const screenWidth = canvas?.width ?? 1920;
   const headwayPx = Math.max(
-    HEADWAY_GAP_MIN,
-    Math.min(HEADWAY_GAP_MAX, Math.round(msgWidthPx * HEADWAY_GAP_RATIO))
+    LaneAllocator.HEADWAY_GAP_MIN_PX,
+    Math.min(
+      LaneAllocator.HEADWAY_GAP_MAX_PX,
+      Math.round(msgWidthPx * rendererLayout.headwayGapRatio)
+    )
   );
-  const totalDistance = screenWidth + msgWidthPx + EXIT_PADDING_MIN;
+  const totalDistance = screenWidth + msgWidthPx + rendererLayout.exitPaddingMin;
   const fraction = (msgWidthPx + headwayPx) / totalDistance;
   return Math.round(fraction * durationMs);
 }
@@ -1726,10 +1692,10 @@ function renderFrame(): void {
 
     // Update position
     if (mode === 'scroll') {
-      const dist = msg.startX + msg.width + EXIT_PADDING_MIN;
+      const dist = msg.startX + msg.width + rendererLayout.exitPaddingMin;
       msg.x = msg.startX - progress * dist;
     } else if (mode === 'reverse') {
-      const dist = width - msg.startX + EXIT_PADDING_MIN;
+      const dist = width - msg.startX + rendererLayout.exitPaddingMin;
       msg.x = msg.startX + progress * dist;
     }
 
@@ -2038,11 +2004,11 @@ function activateMessage(
   if (isScrolling) {
     const totalDistance =
       mode === 'scroll'
-        ? startX + msg.width + EXIT_PADDING_MIN
-        : screenWidth - startX + EXIT_PADDING_MIN;
+        ? startX + msg.width + rendererLayout.exitPaddingMin
+        : screenWidth - startX + rendererLayout.exitPaddingMin;
     duration = speed > 0 ? computeScrollDuration(totalDistance, speed) : 5000;
   } else {
-    duration = TOP_BOTTOM_DURATION_MS;
+    duration = rendererLayout.topBottomDurationMs;
   }
 
   // Moderator and owner messages stay on screen longer.
