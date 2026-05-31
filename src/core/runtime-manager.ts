@@ -532,10 +532,9 @@ export class RuntimeManager {
    * get_live_chat requests and forwards parsed messages to the ChatSource.
    */
   private installFetchInterceptor(chatSource: ChatSource): void {
-    const settings = this.settings as OverlaySettings;
     try {
       this.fetchInterceptorUnsubscribe = installFetchInterceptor(
-        () => settings,
+        () => this.settings as OverlaySettings,
         (messages) => {
           if (this.disposed) return;
           chatSource.injectExternalMessages(messages);
