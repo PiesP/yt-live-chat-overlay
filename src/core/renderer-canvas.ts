@@ -49,8 +49,10 @@ interface CanvasMessage {
   message: ChatMessage;
   /** Position/animation start time (includes stagger delay). */
   startTime: number;
-  /** Opacity/fade start time (drain time, before stagger offset). */
-  activationTime: number;
+  /** Opacity/fade start time — independent of position timeline.
+   *  When equal to startTime, fade-in begins when the message appears.
+   *  Can be offset for independent fade/position timing control. */
+  fadeStartTime: number;
   duration: number;
   /** Pre-computed 1/duration to avoid per-frame division in progress calc. */
   invDuration: number;
@@ -747,11 +749,10 @@ export class CanvasRenderer extends RendererBase {
         msg.x = msg.startX + progress * travelDistance;
       }
 
-      // Fade-in starts from visual startTime so opacity builds naturally
-      // from the moment the message appears on screen, synchronized with
-      // stagger delay. Previously used activationTime (drain time) which
-      // caused fade-in to complete before the message was even visible.
-      const fadeElapsed = now - msg.startTime - msg.pausedDuration;
+      // Fade-in starts from fadeStartTime, independent of position timeline.
+      // Currently set equal to startTime (visual appearance), but the separate
+      // field allows future independent fade/position timing control.
+      const fadeElapsed = now - msg.fadeStartTime - msg.pausedDuration;
       const opacity = this.computeMessageOpacity(
         msg.message,
         fadeElapsed,
@@ -1224,7 +1225,7 @@ export class CanvasRenderer extends RendererBase {
       this.messagePool.pop() ?? {
         message: EMPTY_CHAT_MESSAGE,
         startTime: 0,
-        activationTime: 0,
+        fadeStartTime: 0,
         duration: 0,
         invDuration: 0,
         width: 0,
@@ -1274,7 +1275,7 @@ export class CanvasRenderer extends RendererBase {
     const cm = this.acquireMessage();
     Object.assign(cm, {
       message,
-      activationTime: now,
+      fadeStartTime: now + staggerDelay,
       startTime: now + staggerDelay,
       duration: effectiveDuration,
       invDuration: 1 / Math.max(1, effectiveDuration),
