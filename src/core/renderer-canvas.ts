@@ -1818,6 +1818,7 @@ export class CanvasRenderer extends RendererBase {
     'depthFarOpacityMul',
     'backlogOpacityMultiplier',
     'fadeDurationMs',
+    'modOwnerDurationMultiplier',
   ] as const;
 
   /**
@@ -1831,7 +1832,8 @@ export class CanvasRenderer extends RendererBase {
     }
     config.outlineWidthPx = settings.outline.widthPx;
     config.outlineOpacity = settings.outline.opacity;
-    config.color = settings.colors.normal;
+    config.authorColors = { ...settings.colors };
+    config.modOwnerDurationMultiplier = settings.modOwnerDurationMultiplier;
     config.maxMessageAgeMs = rendererLayout.maxMessageAgeMs;
     return config;
   }
@@ -1907,6 +1909,14 @@ export class CanvasRenderer extends RendererBase {
   }
 
   /**
+   * Compute the burst speed multiplier: ratio of effective (burst-adjusted)
+   * speed to base speed. Always ≥ 1.0.
+   */
+  private computeBurstSpeedMultiplier(): number {
+    return Math.max(1.0, this.getEffectiveSpeedPxPerSec() / this.settings.speedPxPerSec);
+  }
+
+  /**
    * Send a message to the render worker for display.
    * Serializes ChatMessage into lightweight cross-thread format.
    */
@@ -1927,6 +1937,10 @@ export class CanvasRenderer extends RendererBase {
           height: dims.height,
           priority: CanvasRenderer.getMessagePriority(message),
           isBacklog: message.isBacklog ?? false,
+          authorType: message.authorType,
+          kind: message.kind,
+          burstSpeedMultiplier: this.computeBurstSpeedMultiplier(),
+          translatedText: (message as { translatedText?: string }).translatedText || undefined,
         },
       ],
     });

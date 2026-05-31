@@ -70,6 +70,10 @@ interface WorkerConfig {
   maxMessageAgeMs: number;
   /** Text color (CSS string) for regular messages. */
   color: string;
+  /** Per-author-type color map (CSS strings). */
+  authorColors: Record<string, string>;
+  /** Duration multiplier for moderator/owner messages. */
+  modOwnerDurationMultiplier: number;
   /** Outline width in px. */
   outlineWidthPx: number;
   /** Outline opacity. */
@@ -90,6 +94,12 @@ interface WorkerMessage {
   isBacklog: boolean;
   /** Translated text (if available). */
   translatedText?: string;
+  /** Author type for color selection: normal, moderator, owner, member, etc. */
+  authorType?: string;
+  /** Message kind: 'chat', 'superchat', 'membership', etc. */
+  kind?: string;
+  /** Burst speed multiplier computed by main thread (>= 1.0). */
+  burstSpeedMultiplier?: number;
 }
 
 interface ActiveMessage {
@@ -109,6 +119,14 @@ interface ActiveMessage {
   laneSlotCount: number;
   speedTier: number;
   text: string;
+  /** Per-author color CSS string. */
+  color: string;
+  /** Author type for stats/desaturation. */
+  authorType?: string;
+  /** Message kind for speed tiering. */
+  kind?: string;
+  /** Translated text for dual/replace display. */
+  translatedText?: string;
   /** Desaturated color for far-depth layer. */
   colorOverride?: string;
 }
@@ -116,6 +134,34 @@ interface ActiveMessage {
 // ── Speed tier constants ──────────────────────────────────────────────────
 // MUST match @core/lane-allocator SPEED_TIER values.
 const SPEED_TIER = { FAR: 0, MID: 1, NEAR: 2, BACKLOG: 3 } as const;
+
+/** Tier split threshold: hash < this value → Near tier, else Far tier. */
+const TIER_NEAR_THRESHOLD = 0.3;
+
+/** Simple djb2-like hash of a string to a 0-1 float for tier assignment. */
+function hashForTier(str: string): number {
+  let hash = 5381;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) + hash + str.charCodeAt(i)) | 0;
+  }
+  return (hash >>> 0) / 4294967296;
+}
+
+/** Desaturation factor for Far-tier depth layer user colors. */
+const FAR_LAYER_DESATURATION_FACTOR = 0.3;
+
+/**
+ * Desaturate a hex color toward gray by a given factor.
+ * factor 0 = original, 1 = full grayscale.
+ * Uses luminance-preserving weights (ITU-R BT.601).
+ */
+function desaturateColor(hex: string, factor: number): string {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+  return `rgb(${Math.round(r + (gray - r) * factor)},${Math.round(g + (gray - g) * factor)},${Math.round(b + (gray - b) * factor)})`;
+}
 
 // ── Layout constants ──────────────────────────────────────────────────────
 // MUST match @core/design-tokens rendererLayout values where noted.
@@ -130,6 +176,26 @@ const SAFETY_MARGIN_RATIO = 0.15; // canonical: LaneAllocator.SAFETY_MARGIN_RATI
 const EPSILON = 0.05;
 const DRAIN_MAX_SKIP = 3; // canonical: CanvasRenderer.DRAIN_QUEUE_MAX_SKIP
 const PADDING_V = 8; // canonical: rendererLayout.paddingV
+
+// ── Stagger constants (must match CanvasRenderer) ─────────────────────────
+const HORIZONTAL_STAGGER_PER_STEP = 40;
+const HORIZONTAL_STAGGER_MAX = 200;
+const STAGGER_BATCH_MAX = 3;
+const STAGGER_EXP_SCALE = 25;
+
+// ── Translation constants (must match CanvasRenderer) ─────────────────────
+const TRANSLATION_FONT_SCALE = 0.75;
+const TRANSLATION_GAP_PX = 2;
+const TRANSLATION_OPACITY_SCALE = 0.8;
+
+/** Inline computeScrollDuration matching @core/design-tokens. */
+function computeScrollDuration(totalDistance: number, velocity: number): number {
+  const velocityFloor = Math.max(
+    5000, // canonical: rendererLayout.durationMin
+    (100 / velocity) * 1000 // exitPaddingMin / velocity
+  );
+  return Math.max(velocityFloor, Math.min(30000, (totalDistance / velocity) * 1000));
+}
 
 // ── Globals (worker scope) ───────────────────────────────────────────────
 
@@ -156,6 +222,9 @@ let laneHeight = 0;
 let numLanes = 0;
 // Track speed-tier occupancy per lane
 const speedTierLanes = new Map<number, { tier: number; until: number }>();
+
+// Collision feedback: lanes already used in this batch
+const collidedLanes = new Set<number>();
 
 // Cumulative drop counter for stats
 let totalDrops = 0;
@@ -381,6 +450,7 @@ function findPlacement(
 } | null {
   if (laneHeap.length === 0) return null;
 
+  collidedLanes.clear();
   const now = performance.now();
   const slotCount = Math.max(1, Math.ceil(msgHeight / laneHeight));
   const result = allocateSingleLane(now, speedTier, slotCount);
@@ -414,6 +484,9 @@ function allocateSingleLane(
       }
     }
     if (!tierOk) continue;
+
+    // Skip lanes already used for another message in this batch (collision feedback)
+    if (collidedLanes.has(i)) continue;
 
     const avail = getSlotAvailableAt(i);
     if (avail === undefined) continue;
@@ -484,6 +557,8 @@ function commitPlacement(
   for (let s = 0; s < slotCount; s++) {
     speedTierLanes.set(laneIndex + s, { tier: speedTier, until });
     updateLane(laneIndex + s, nextAvailable);
+    // Mark lanes as occupied for this batch to prevent double-allocation
+    collidedLanes.add(laneIndex + s);
   }
 }
 
@@ -612,7 +687,6 @@ function renderFrame(): void {
   // ── Pre-scan: compute positions, opacity, and group into opacity buckets ──
   const mode = config.danmakuMode;
   const isScrolling = mode === 'scroll' || mode === 'reverse';
-  const font = `${config.fontWeight} ${config.fontSize}px ${config.fontFamily}`;
   const fadeMs = config.fadeDurationMs;
   const invFadeMs = fadeMs > 0 ? 1 / Math.max(1, fadeMs) : 0;
   const ageFadeRate = 1 / config.maxMessageAgeMs;
@@ -678,9 +752,11 @@ function renderFrame(): void {
 
   // ── Render pass: one ctx.globalAlpha per opacity bucket ──
   // Iterate ascending (0→20) — low opacity behind, high opacity on top.
-  ctx.font = font;
+  const baseFont = `${config.fontWeight} ${config.fontSize}px ${config.fontFamily}`;
+  const translationFontSize = Math.round(config.fontSize * TRANSLATION_FONT_SCALE);
+  const translationFont = `${config.fontWeight} ${translationFontSize}px ${config.fontFamily}`;
+  ctx.font = baseFont;
   ctx.textBaseline = 'top';
-  ctx.fillStyle = config.color;
   for (let bucketIndex = 0; bucketIndex < OPACITY_BUCKETS; bucketIndex++) {
     const entries = opacityBuckets[bucketIndex];
     if (!entries || entries.length === 0) continue;
@@ -688,9 +764,38 @@ function renderFrame(): void {
     ctx.globalAlpha = bucketIndex / 20;
 
     for (const { msg } of entries) {
+      // Per-message color with optional FAR desaturation
+      let renderColor = msg.colorOverride || msg.color;
+      if (msg.speedTier === SPEED_TIER.FAR && !msg.colorOverride) {
+        renderColor = desaturateColor(renderColor, FAR_LAYER_DESATURATION_FACTOR);
+        msg.colorOverride = renderColor; // cache for future frames
+      }
+
       const sx = Math.floor(msg.x);
       const sy = Math.floor(msg.y);
-      renderCachedText(ctx, msg.text, font, config.color, strokeWidth, strokeColor, sx, sy);
+
+      // Render main text
+      renderCachedText(ctx, msg.text, baseFont, renderColor, strokeWidth, strokeColor, sx, sy);
+
+      // Render translated text below (dual mode)
+      if (msg.translatedText && msg.translatedText !== msg.text) {
+        const translationColor = msg.authorType
+          ? config.authorColors[msg.authorType] || renderColor
+          : renderColor;
+        const translationY = sy + msg.height * TRANSLATION_FONT_SCALE + TRANSLATION_GAP_PX;
+        ctx.globalAlpha = (bucketIndex / 20) * TRANSLATION_OPACITY_SCALE;
+        renderCachedText(
+          ctx,
+          msg.translatedText,
+          translationFont,
+          translationColor,
+          strokeWidth,
+          strokeColor,
+          sx,
+          Math.floor(translationY)
+        );
+        ctx.globalAlpha = bucketIndex / 20; // restore full bucket alpha
+      }
     }
   }
 
@@ -720,7 +825,21 @@ function drainQueue(now: number, width: number, height: number): void {
     const entry = pendingQueue[pendingQueueOffset++];
     if (!entry) continue;
 
-    const speedTier = entry.isBacklog ? SPEED_TIER.BACKLOG : SPEED_TIER.MID;
+    // Compute speed tier matching activateMessage for correct lane allocation
+    let speedTier: number;
+    if (entry.isBacklog) {
+      speedTier = SPEED_TIER.BACKLOG;
+    } else if (!config.depthLayersEnabled) {
+      speedTier = SPEED_TIER.MID;
+    } else if (config.danmakuMode !== 'scroll' && config.danmakuMode !== 'reverse') {
+      speedTier = SPEED_TIER.MID;
+    } else if (entry.kind === 'superchat' || entry.kind === 'membership') {
+      speedTier = SPEED_TIER.NEAR;
+    } else {
+      const hash = hashForTier(entry.id);
+      speedTier = hash < TIER_NEAR_THRESHOLD ? SPEED_TIER.NEAR : SPEED_TIER.FAR;
+    }
+
     const placement = findPlacement(entry.height, speedTier);
 
     if (!placement) {
@@ -758,40 +877,84 @@ function activateMessage(
   const mode = config.danmakuMode;
   const isScrolling = mode === 'scroll' || mode === 'reverse';
 
-  // Horizontal stagger
-  const stagger = isScrolling && batchIndex > 0 ? Math.min(200, batchIndex * 40) : 0;
-
-  let startX: number;
-  if (mode === 'scroll') startX = screenWidth + stagger;
-  else if (mode === 'reverse') startX = -(msg.width + stagger);
-  else startX = (screenWidth - msg.width) / 2;
-
-  // Speed
-  let speed = config.speedPxPerSec;
+  // ── Speed tier (hash-based FAR/MID/NEAR/BACKLOG, matching main thread) ──
+  let speedTier: number;
   if (msg.isBacklog) {
-    speed *= config.backlogSpeedMultiplier;
-  } else if (config.depthLayersEnabled) {
-    // Hash-based tier assignment (simplified: use priority as proxy)
-    if (msg.priority >= 80) {
-      speed *= config.depthNearSpeedMul;
-    }
+    speedTier = SPEED_TIER.BACKLOG;
+  } else if (!config.depthLayersEnabled) {
+    speedTier = SPEED_TIER.MID;
+  } else if (!isScrolling) {
+    speedTier = SPEED_TIER.MID;
+  } else if (msg.kind === 'superchat' || msg.kind === 'membership') {
+    speedTier = SPEED_TIER.NEAR;
+  } else {
+    const hash = hashForTier(msg.id);
+    speedTier = hash < TIER_NEAR_THRESHOLD ? SPEED_TIER.NEAR : SPEED_TIER.FAR;
   }
 
-  // Duration
+  // ── Speed calculation (per-tier + burst boost) ──
+  let speed = config.speedPxPerSec;
+  if (msg.burstSpeedMultiplier && msg.burstSpeedMultiplier > 1) {
+    speed *= msg.burstSpeedMultiplier;
+  }
+  switch (speedTier) {
+    case SPEED_TIER.FAR:
+      speed = Math.max(30, speed * config.depthFarSpeedMul);
+      break;
+    case SPEED_TIER.NEAR:
+      speed *= config.depthNearSpeedMul;
+      break;
+    case SPEED_TIER.BACKLOG:
+      speed *= config.backlogSpeedMultiplier;
+      break;
+    // MID: no multiplier
+  }
+
+  // ── Exponential stagger delay (matching main thread) ──
+  let staggerDelay = 0;
+  if (batchIndex > 0 && isScrolling) {
+    const staggeredIdx = Math.min(batchIndex, STAGGER_BATCH_MAX);
+    staggerDelay = Math.round(
+      Math.min(
+        HORIZONTAL_STAGGER_MAX,
+        staggeredIdx * -STAGGER_EXP_SCALE * Math.log(1 - Math.random())
+      )
+    );
+  }
+
+  // ── Horizontal stagger ──
+  const horizontalStagger =
+    isScrolling && batchIndex > 0
+      ? Math.min(HORIZONTAL_STAGGER_MAX, batchIndex * HORIZONTAL_STAGGER_PER_STEP)
+      : 0;
+
+  let startX: number;
+  if (mode === 'scroll') startX = screenWidth + horizontalStagger;
+  else if (mode === 'reverse') startX = -(msg.width + horizontalStagger);
+  else startX = (screenWidth - msg.width) / 2;
+
+  // ── Duration (with computeScrollDuration matching design-tokens) ──
   let duration: number;
   if (isScrolling) {
-    const dist =
+    const totalDistance =
       mode === 'scroll'
         ? startX + msg.width + EXIT_PADDING_MIN
         : screenWidth - startX + EXIT_PADDING_MIN;
-    duration = Math.min(SCROLL_DURATION_MAX_MS, Math.round((dist / speed) * 1_000));
+    duration = speed > 0 ? computeScrollDuration(totalDistance, speed) : 5000;
   } else {
     duration = TOP_BOTTOM_DURATION_MS;
   }
 
-  const speedTier = msg.isBacklog ? SPEED_TIER.BACKLOG : SPEED_TIER.MID;
+  // Moderator and owner messages stay on screen longer.
+  if (msg.authorType === 'moderator' || msg.authorType === 'owner') {
+    duration *= config.modOwnerDurationMultiplier;
+  }
+
   const slotCount = Math.max(1, Math.ceil(msg.height / laneHeight));
   const laneY = placement.laneY;
+
+  // ── Per-author color ──
+  const authorColor = (msg.authorType && config.authorColors[msg.authorType]) || config.color;
 
   const am: ActiveMessage = {
     id: msg.id,
@@ -801,16 +964,27 @@ function activateMessage(
     width: msg.width,
     height: msg.height,
     activationTime: now,
-    startTime: now,
+    startTime: now + staggerDelay,
     duration,
     pausedDuration: 0,
     laneIndex: placement.laneIndex,
     laneSlotCount: slotCount,
     speedTier,
-    text: msg.translatedText ?? msg.text,
+    text: msg.text,
+    color: authorColor,
+    ...(msg.authorType !== undefined ? { authorType: msg.authorType } : {}),
+    ...(msg.kind !== undefined ? { kind: msg.kind } : {}),
+    ...(msg.translatedText !== undefined ? { translatedText: msg.translatedText } : {}),
   };
 
-  commitPlacement(placement.laneIndex, slotCount, now, duration, speedTier, msg.width);
+  commitPlacement(
+    placement.laneIndex,
+    slotCount,
+    now + staggerDelay,
+    duration,
+    speedTier,
+    msg.width
+  );
   activeMessages.push(am);
 }
 
