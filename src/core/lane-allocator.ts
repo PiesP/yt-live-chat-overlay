@@ -5,6 +5,11 @@ import type { FontWeight, OverlayDimensions } from '@app-types';
 import { rendererLayout } from '@core/design-tokens';
 import { forEachSlot } from '@core/dom';
 import { createLogger } from '@core/logging';
+import {
+  EPSILON as _EPSILON,
+  LANE_COOLDOWN_MIN_MS as _LANE_COOLDOWN_MIN_MS,
+  SAFETY_MARGIN_RATIO as _SAFETY_MARGIN_RATIO,
+} from '@core/renderer-constants';
 import { getFontString, measureTextHeight } from '@core/text-measure';
 
 const log = createLogger('LaneAllocator');
@@ -105,13 +110,13 @@ export class LaneAllocator {
    * stays visible for the full duration. For scrolling mode, precision
    * exit-time is used instead.
    */
-  private static readonly LANE_COOLDOWN_MIN_MS = 500;
+  private static readonly LANE_COOLDOWN_MIN_MS = _LANE_COOLDOWN_MIN_MS;
 
   /**
    * Safety margin ratio applied to message duration.
    * Used only for top/bottom (non-scrolling) modes.
    */
-  private static readonly SAFETY_MARGIN_RATIO = 0.15;
+  private static readonly SAFETY_MARGIN_RATIO = _SAFETY_MARGIN_RATIO;
 
   static readonly HEADWAY_GAP_MIN_PX = 16;
   static readonly HEADWAY_GAP_MAX_PX = 60;
@@ -132,7 +137,7 @@ export class LaneAllocator {
    * next one below. Prevents all traffic from consolidating on lane 0
    * when the incoming message rate is low.
    */
-  private static readonly EPSILON = 0.05;
+  private static readonly EPSILON = _EPSILON;
 
   constructor(private readonly options: LaneAllocatorOptions) {}
 

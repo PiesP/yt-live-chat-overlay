@@ -42,6 +42,20 @@ import { RendererBase } from '@core/renderer-base';
 import { estimateMessageDimensions as sharedEstimateDimensions } from '@core/renderer-shared';
 import { clearTextMeasurementCaches, getFontString, measureTextHeight } from '@core/text-measure';
 import { TranslationService } from '@core/translation-service';
+import {
+  DRAIN_QUEUE_MAX_SKIP as _DRAIN_QUEUE_MAX_SKIP,
+  FAR_LAYER_DESATURATION_FACTOR as _FAR_LAYER_DESATURATION_FACTOR,
+  HORIZONTAL_STAGGER_MAX as _HORIZONTAL_STAGGER_MAX,
+  HORIZONTAL_STAGGER_PER_STEP as _HORIZONTAL_STAGGER_PER_STEP,
+  STAGGER_BATCH_MAX as _STAGGER_BATCH_MAX,
+  STAGGER_EXP_SCALE as _STAGGER_EXP_SCALE,
+  TIER_NEAR_THRESHOLD as _TIER_NEAR_THRESHOLD,
+  TRANSLATION_FONT_SCALE as _TRANSLATION_FONT_SCALE,
+  TRANSLATION_GAP_PX as _TRANSLATION_GAP_PX,
+  TRANSLATION_OPACITY_SCALE as _TRANSLATION_OPACITY_SCALE,
+  desaturateColor,
+  hashStringForTier,
+} from './renderer-constants';
 
 // ── CanvasMessage lifecycle (inlined from canvas-message-lifecycle.ts) ─────
 
@@ -413,20 +427,20 @@ export class CanvasRenderer extends RendererBase {
    * further to the right, spreading them horizontally so they don't all
    * enter from the same right-edge position.
    */
-  private static readonly HORIZONTAL_STAGGER_PER_STEP = 40;
+  private static readonly HORIZONTAL_STAGGER_PER_STEP = _HORIZONTAL_STAGGER_PER_STEP;
 
   /**
    * Maximum horizontal stagger offset (px).
    * Prevents messages from starting too far off-screen, which would
    * increase scroll duration unnecessarily.
    */
-  private static readonly HORIZONTAL_STAGGER_MAX = 200;
+  private static readonly HORIZONTAL_STAGGER_MAX = _HORIZONTAL_STAGGER_MAX;
 
   /**
    * Max number of consecutive collision skips in the drain queue.
    * Prevents scanning the entire pending queue when all entries collide.
    */
-  private static readonly DRAIN_QUEUE_MAX_SKIP = 3;
+  private static readonly DRAIN_QUEUE_MAX_SKIP = _DRAIN_QUEUE_MAX_SKIP;
 
   /** Max concurrent emoji fetch operations. */
   private static readonly EMOJI_FETCH_MAX_CONCURRENT = 6;
@@ -440,11 +454,11 @@ export class CanvasRenderer extends RendererBase {
   private static readonly STAGGER_MAX_MS = 200;
 
   /** Translation font scale relative to main font size. */
-  private static readonly TRANSLATION_FONT_SCALE = 0.75;
+  private static readonly TRANSLATION_FONT_SCALE = _TRANSLATION_FONT_SCALE;
   /** Gap (px) between original text and translation text. */
-  private static readonly TRANSLATION_GAP_PX = 2;
+  private static readonly TRANSLATION_GAP_PX = _TRANSLATION_GAP_PX;
   /** Translation opacity scale relative to message opacity. */
-  private static readonly TRANSLATION_OPACITY_SCALE = 0.8;
+  private static readonly TRANSLATION_OPACITY_SCALE = _TRANSLATION_OPACITY_SCALE;
 
   /**
    * Priority threshold for anti-block gate: messages with priority >= this
@@ -454,15 +468,15 @@ export class CanvasRenderer extends RendererBase {
   private static readonly ANTI_BLOCK_PRIORITY_THRESHOLD = 80;
 
   /** Tier split threshold: hash < this value → Near tier, else Far tier. */
-  private static readonly TIER_NEAR_THRESHOLD = 0.3;
+  private static readonly TIER_NEAR_THRESHOLD = _TIER_NEAR_THRESHOLD;
 
   /** Desaturation factor for Far-tier depth layer user colors. */
-  private static readonly FAR_LAYER_DESATURATION_FACTOR = 0.3;
+  private static readonly FAR_LAYER_DESATURATION_FACTOR = _FAR_LAYER_DESATURATION_FACTOR;
 
   /** Maximum batch index for stagger exponential scale computation. */
-  private static readonly STAGGER_BATCH_MAX = 3;
+  private static readonly STAGGER_BATCH_MAX = _STAGGER_BATCH_MAX;
   /** Exponential scale factor for stagger delay (negative value = decreasing delay). */
-  private static readonly STAGGER_EXP_SCALE = 25;
+  private static readonly STAGGER_EXP_SCALE = _STAGGER_EXP_SCALE;
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
     super(overlay, settings);
@@ -1407,7 +1421,7 @@ export class CanvasRenderer extends RendererBase {
     });
 
     if (this.settings.depthLayersEnabled && speedTier === SPEED_TIER.FAR && message.userColor) {
-      cm.desaturatedUserColor = CanvasRenderer.desaturateColor(
+      cm.desaturatedUserColor = desaturateColor(
         message.userColor,
         CanvasRenderer.FAR_LAYER_DESATURATION_FACTOR
       );
@@ -1590,34 +1604,13 @@ export class CanvasRenderer extends RendererBase {
     // SuperChat/Membership → Near tier
     if (message.kind === 'superchat' || message.kind === 'membership') return SPEED_TIER.NEAR;
     // Regular messages: deterministic assignment via message id hash
-    const hash = this.hashStringForTier(message.id ?? String(message.timestamp));
+    const hash = hashStringForTier(message.id ?? String(message.timestamp));
     return hash < CanvasRenderer.TIER_NEAR_THRESHOLD ? SPEED_TIER.NEAR : SPEED_TIER.FAR;
   }
 
-  /** Simple djb2-like hash of a string to a 0-1 float for tier assignment. */
-  private hashStringForTier(str: string): number {
-    let hash = 5381;
-    for (let i = 0; i < str.length; i++) {
-      hash = ((hash << 5) + hash + str.charCodeAt(i)) | 0;
-    }
-    return (hash >>> 0) / 4294967296;
-  }
+  // hashStringForTier imported from @core/renderer-constants
 
-  /**
-   * Desaturate a hex color toward gray by a given factor.
-   * factor 0 = original, 1 = full grayscale.
-   * Uses luminance-preserving weights (ITU-R BT.601).
-   */
-  private static desaturateColor(hex: string, factor: number): string {
-    const r = parseInt(hex.slice(1, 3), 16);
-    const g = parseInt(hex.slice(3, 5), 16);
-    const b = parseInt(hex.slice(5, 7), 16);
-    const gray = 0.299 * r + 0.587 * g + 0.114 * b;
-    const nr = Math.round(r + (gray - r) * factor);
-    const ng = Math.round(g + (gray - g) * factor);
-    const nb = Math.round(b + (gray - b) * factor);
-    return `rgb(${nr},${ng},${nb})`;
-  }
+  // desaturateColor imported from @core/renderer-constants
 
   // ── Opacity ──────────────────────────────────────────────────────────
 

@@ -13,6 +13,7 @@ import type { ByteLimitedCache } from '@core/byte-limited-cache';
 import { EMOJI_ALIAS_PATTERN } from '@core/chat-message-helpers';
 import { computeOutlineColor } from '@core/color-utils';
 import { AUTHOR_PHOTO_SHADOW, rendererLayout, spacing } from '@core/design-tokens';
+import { OUTLINE_STROKE_SCALE as _OUTLINE_STROKE_SCALE } from '@core/renderer-constants';
 import {
   type CharSegment,
   getFontMetrics,
@@ -29,7 +30,7 @@ import {
  * to produce the actual stroke width (matching the visual rendering
  * of bold text with an outline).
  */
-const OUTLINE_STROKE_SCALE = 0.85;
+const OUTLINE_STROKE_SCALE = _OUTLINE_STROKE_SCALE;
 
 // ── Text bitmap cache ──────────────────────────────────────────────────────
 
