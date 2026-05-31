@@ -148,6 +148,14 @@ const ROOT_SETTING_META = {
   translationSource: { type: 'string', visual: false },
   translationTarget: { type: 'string', visual: false },
   translationMode: { type: 'string', visual: true },
+  exitPaddingPx: { type: 'number', visual: true },
+  scrollDurationMinMs: { type: 'number', visual: false },
+  scrollDurationMaxMs: { type: 'number', visual: false },
+  topBottomDurationMs: { type: 'number', visual: true },
+  queueMaxSize: { type: 'number', visual: false },
+  backgroundQueueMax: { type: 'number', visual: false },
+  maxMessageAgeMs: { type: 'number', visual: true },
+  headwayGapRatio: { type: 'number', visual: true, displayScale: 100, displayPrecision: 1 },
 } as const satisfies Record<RootScalarSettingKey, SettingMeta>;
 
 /**
@@ -196,7 +204,15 @@ type SettingsLimitKey =
   | 'fadeDurationMs'
   | 'minPollIntervalMs'
   | 'maxPollIntervalMs'
-  | 'modOwnerDurationMultiplier';
+  | 'modOwnerDurationMultiplier'
+  | 'exitPaddingPx'
+  | 'scrollDurationMinMs'
+  | 'scrollDurationMaxMs'
+  | 'topBottomDurationMs'
+  | 'queueMaxSize'
+  | 'backgroundQueueMax'
+  | 'maxMessageAgeMs'
+  | 'headwayGapRatio';
 
 const SETTINGS_LIMITS = {
   speedPxPerSec: { min: 50, max: 500, step: 10 },
@@ -223,6 +239,14 @@ const SETTINGS_LIMITS = {
   minPollIntervalMs: { min: 50, max: 5000, step: 50 }, // 50ms minimum polling
   maxPollIntervalMs: { min: 1000, max: 30000, step: 1000 }, // 1s to 30s maximum
   modOwnerDurationMultiplier: { min: 1, max: 3, step: 0.1 },
+  exitPaddingPx: { min: 20, max: 400, step: 10 },
+  scrollDurationMinMs: { min: 1000, max: 15000, step: 500 },
+  scrollDurationMaxMs: { min: 5000, max: 120000, step: 5000 },
+  topBottomDurationMs: { min: 1000, max: 30000, step: 500 },
+  queueMaxSize: { min: 50, max: 1000, step: 10 },
+  backgroundQueueMax: { min: 10, max: 500, step: 10 },
+  maxMessageAgeMs: { min: 10000, max: 300000, step: 10000 },
+  headwayGapRatio: { min: 0.02, max: 0.3, step: 0.01 },
 } as const satisfies Record<SettingsLimitKey, NumericSettingLimit>;
 
 export const STORAGE_KEY = 'yt-live-chat-overlay-settings';
@@ -303,6 +327,14 @@ export const DEFAULT_SETTINGS = {
   translationSource: 'en',
   translationTarget: 'ko',
   translationMode: 'dual',
+  exitPaddingPx: 100,
+  scrollDurationMinMs: 5000,
+  scrollDurationMaxMs: 30000,
+  topBottomDurationMs: 4000,
+  queueMaxSize: 200,
+  backgroundQueueMax: 50,
+  maxMessageAgeMs: 60000,
+  headwayGapRatio: 0.08,
 } as const satisfies Readonly<OverlaySettings>;
 
 // ── Color validation ────────────────────────────────────────────────────────────

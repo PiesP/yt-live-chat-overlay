@@ -154,6 +154,11 @@ export const PANES: PaneDef[] = [
             'laneSpacing',
             'Vertical gap between comment rows (negative = overlap)'
           ),
+          num(
+            'Exit Padding (px)',
+            'exitPaddingPx',
+            'Extra pixels a message scrolls past the screen edge before being removed (20-400, default 100)'
+          ),
         ],
       },
       {
@@ -163,6 +168,26 @@ export const PANES: PaneDef[] = [
             'Duration Multiplier (×)',
             'modOwnerDurationMultiplier',
             'How much longer moderator and owner messages stay visible (1.0 = same as regular, 2.0 = twice as long)'
+          ),
+        ],
+      },
+      {
+        title: 'Timing',
+        fields: [
+          num(
+            'Min Scroll Duration (ms)',
+            'scrollDurationMinMs',
+            'Minimum scroll animation duration — prevents very short messages from zipping across (1000-15000ms, default 5000)'
+          ),
+          num(
+            'Max Scroll Duration (ms)',
+            'scrollDurationMaxMs',
+            'Maximum scroll animation duration — prevents very long messages from crawling (5-120s, default 30000ms)'
+          ),
+          num(
+            'Top/Bottom Duration (ms)',
+            'topBottomDurationMs',
+            'Fixed display duration for top/bottom mode messages (1000-30000ms, default 4000)'
           ),
         ],
       },
@@ -336,6 +361,26 @@ export const PANES: PaneDef[] = [
             'Max Poll Interval (ms)',
             'maxPollIntervalMs',
             'Maximum chat polling interval in milliseconds (1000-30000)'
+          ),
+          num(
+            'Queue Max Size',
+            'queueMaxSize',
+            'Maximum pending queue depth before messages are dropped (50-1000, default 200)'
+          ),
+          num(
+            'Background Queue Max',
+            'backgroundQueueMax',
+            'Target active message count when trimming background tab (10-500, default 50)'
+          ),
+          num(
+            'Max Message Age (ms)',
+            'maxMessageAgeMs',
+            'Maximum message age before fade-out removal (10-300s, default 60000ms)'
+          ),
+          range(
+            'Headway Gap (%)',
+            'headwayGapRatio',
+            'Gap between consecutive messages as percentage of message width (2-30%, default 8)'
           ),
         ],
       },

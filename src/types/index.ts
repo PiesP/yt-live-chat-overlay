@@ -248,6 +248,28 @@ export interface OverlaySettings {
   translationTarget: TranslationLanguage;
   /** Display mode: dual (original + translation) or replace (translation only) */
   translationMode: TranslationMode;
+
+  // ── Layout / Timing ──
+  /** Extra pixels a message scrolls past the screen edge before being removed (20-400, default 100) */
+  exitPaddingPx: number;
+  /** Minimum scroll animation duration in ms — prevents very short messages from zipping across (1000-15000, default 5000) */
+  scrollDurationMinMs: number;
+  /** Maximum scroll animation duration in ms — prevents very long messages from crawling (5000-120000, default 30000) */
+  scrollDurationMaxMs: number;
+  /** Fixed display duration for top/bottom mode messages in ms (1000-30000, default 4000) */
+  topBottomDurationMs: number;
+
+  // ── Queue / Lifetime ──
+  /** Maximum pending queue depth before messages are dropped (50-1000, default 200) */
+  queueMaxSize: number;
+  /** Target active message count when trimming background tab (10-500, default 50) */
+  backgroundQueueMax: number;
+  /** Maximum message age in ms before fade-out removal (10000-300000, default 60000) */
+  maxMessageAgeMs: number;
+
+  // ── Lane Spacing ──
+  /** Headway gap ratio: fraction of message width used as gap between consecutive messages (0.02-0.30, default 0.08 = 8%) */
+  headwayGapRatio: number;
 }
 
 /**

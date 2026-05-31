@@ -90,6 +90,7 @@ const KO: TranslationMap = {
   'Depth Layers': '깊이 레이어',
   Backlog: '백로그',
   'Rate Limiting': '속도 제한',
+  Timing: '타이밍',
   'Author Colors & Visibility': '작성자 색상 및 표시',
   Interface: '인터페이스',
   'Chat Translation': '채팅 번역',
@@ -126,6 +127,14 @@ const KO: TranslationMap = {
   Español: '스페인어',
   中文: '중국어',
   'Duration Multiplier (×)': '표시 시간 배율 (×)',
+  'Exit Padding (px)': '종료 여백 (px)',
+  'Min Scroll Duration (ms)': '최소 스크롤 시간 (ms)',
+  'Max Scroll Duration (ms)': '최대 스크롤 시간 (ms)',
+  'Top/Bottom Duration (ms)': '상단/하단 표시 시간 (ms)',
+  'Queue Max Size': '큐 최대 크기',
+  'Background Queue Max': '백그라운드 큐 최대',
+  'Max Message Age (ms)': '최대 메시지 수명 (ms)',
+  'Headway Gap (%)': '메시지 간격 (%)',
   'Enable Translation': '번역 활성화',
   Service: '서비스',
   'Source Language': '소스 언어',
@@ -186,6 +195,22 @@ const KO: TranslationMap = {
   'Opacity dimming for far-layer messages': '먼 레이어 메시지 불투명도 감소',
   'How fast comments scroll across the screen in pixels per second':
     '댓글이 화면을 가로지르는 속도(초당 픽셀)',
+  'Extra pixels a message scrolls past the screen edge before being removed (20-400, default 100)':
+    '메시지가 화면 가장자리를 지나 제거되기까지 추가로 이동하는 픽셀 (20-400, 기본 100)',
+  'Minimum scroll animation duration — prevents very short messages from zipping across (1000-15000ms, default 5000)':
+    '최소 스크롤 애니메이션 시간 — 짧은 메시지가 너무 빠르게 지나가는 것을 방지 (1000-15000ms, 기본 5000)',
+  'Maximum scroll animation duration — prevents very long messages from crawling (5-120s, default 30000ms)':
+    '최대 스크롤 애니메이션 시간 — 긴 메시지가 너무 느리게 이동하는 것을 방지 (5-120초, 기본 30000ms)',
+  'Fixed display duration for top/bottom mode messages (1000-30000ms, default 4000)':
+    '상단/하단 모드 메시지의 고정 표시 시간 (1000-30000ms, 기본 4000)',
+  'Maximum pending queue depth before messages are dropped (50-1000, default 200)':
+    '메시지가 드롭되기 전 최대 대기 큐 깊이 (50-1000, 기본 200)',
+  'Target active message count when trimming background tab (10-500, default 50)':
+    '백그라운드 탭 정리 시 목표 활성 메시지 수 (10-500, 기본 50)',
+  'Maximum message age before fade-out removal (10-300s, default 60000ms)':
+    '페이드아웃 제거 전 최대 메시지 수명 (10-300초, 기본 60000ms)',
+  'Gap between consecutive messages as percentage of message width (2-30%, default 8)':
+    '연속 메시지 사이의 간격을 메시지 너비의 백분율로 표시 (2-30%, 기본 8)',
   'Language of the incoming chat messages': '수신 채팅 메시지의 언어',
   'Language to translate chat messages into': '채팅 메시지를 번역할 대상 언어',
   'Limits how frequently messages from the same author appear':
@@ -293,6 +318,7 @@ const JA: TranslationMap = {
   'Depth Layers': '深度レイヤー',
   Backlog: 'バックログ',
   'Rate Limiting': 'レート制限',
+  Timing: 'タイミング',
   'Author Colors & Visibility': '投稿者の色と表示',
   Interface: 'インターフェース',
   'Chat Translation': 'チャット翻訳',
@@ -329,6 +355,30 @@ const JA: TranslationMap = {
   Español: 'スペイン語',
   中文: '中国語',
   'Duration Multiplier (×)': '表示時間倍率 (×)',
+  'Exit Padding (px)': '終了余白 (px)',
+  'Min Scroll Duration (ms)': '最小スクロール時間 (ms)',
+  'Max Scroll Duration (ms)': '最大スクロール時間 (ms)',
+  'Top/Bottom Duration (ms)': '上部/下部表示時間 (ms)',
+  'Queue Max Size': 'キュー最大サイズ',
+  'Background Queue Max': 'バックグラウンドキュー最大',
+  'Max Message Age (ms)': '最大メッセージ寿命 (ms)',
+  'Headway Gap (%)': 'メッセージ間隔 (%)',
+  'Extra pixels a message scrolls past the screen edge before being removed (20-400, default 100)':
+    'メッセージが画面端を通過して削除されるまでの追加ピクセル (20-400, デフォルト 100)',
+  'Minimum scroll animation duration — prevents very short messages from zipping across (1000-15000ms, default 5000)':
+    '最小スクロールアニメーション時間 — 短いメッセージが速すぎるのを防ぐ (1000-15000ms, デフォルト 5000)',
+  'Maximum scroll animation duration — prevents very long messages from crawling (5-120s, default 30000ms)':
+    '最大スクロールアニメーション時間 — 長いメッセージが遅すぎるのを防ぐ (5-120秒, デフォルト 30000ms)',
+  'Fixed display duration for top/bottom mode messages (1000-30000ms, default 4000)':
+    '上部/下部モードメッセージの固定表示時間 (1000-30000ms, デフォルト 4000)',
+  'Maximum pending queue depth before messages are dropped (50-1000, default 200)':
+    'メッセージがドロップされる前の最大待機キュー深度 (50-1000, デフォルト 200)',
+  'Target active message count when trimming background tab (10-500, default 50)':
+    'バックグラウンドタブ整理時の目標アクティブメッセージ数 (10-500, デフォルト 50)',
+  'Maximum message age before fade-out removal (10-300s, default 60000ms)':
+    'フェードアウト除去前の最大メッセージ寿命 (10-300秒, デフォルト 60000ms)',
+  'Gap between consecutive messages as percentage of message width (2-30%, default 8)':
+    '連続メッセージ間の間隔（メッセージ幅のパーセント） (2-30%, デフォルト 8)',
   'Enable Translation': '翻訳を有効にする',
   Service: 'サービス',
   'Source Language': 'ソース言語',
@@ -498,6 +548,7 @@ const ES: TranslationMap = {
   'Depth Layers': 'Capas de profundidad',
   Backlog: 'Historial',
   'Rate Limiting': 'Límite de frecuencia',
+  Timing: 'Temporización',
   'Author Colors & Visibility': 'Colores y visibilidad',
   Interface: 'Interfaz',
   'Chat Translation': 'Traducción de chat',
@@ -534,6 +585,30 @@ const ES: TranslationMap = {
   Español: 'Español',
   中文: 'Chino',
   'Duration Multiplier (×)': 'Multiplicador de duración (×)',
+  'Exit Padding (px)': 'Margen de salida (px)',
+  'Min Scroll Duration (ms)': 'Duración mín. desplazamiento (ms)',
+  'Max Scroll Duration (ms)': 'Duración máx. desplazamiento (ms)',
+  'Top/Bottom Duration (ms)': 'Duración superior/inferior (ms)',
+  'Queue Max Size': 'Tamaño máx. de cola',
+  'Background Queue Max': 'Cola en segundo plano máx.',
+  'Max Message Age (ms)': 'Edad máx. de mensaje (ms)',
+  'Headway Gap (%)': 'Espacio entre mensajes (%)',
+  'Extra pixels a message scrolls past the screen edge before being removed (20-400, default 100)':
+    'Píxeles extra que un mensaje se desplaza más allá del borde antes de eliminarse (20-400, predeterminado 100)',
+  'Minimum scroll animation duration — prevents very short messages from zipping across (1000-15000ms, default 5000)':
+    'Duración mínima de animación de desplazamiento — evita que mensajes cortos pasen demasiado rápido (1000-15000ms, predet. 5000)',
+  'Maximum scroll animation duration — prevents very long messages from crawling (5-120s, default 30000ms)':
+    'Duración máxima de animación de desplazamiento — evita que mensajes largos vayan muy lento (5-120s, predet. 30000ms)',
+  'Fixed display duration for top/bottom mode messages (1000-30000ms, default 4000)':
+    'Duración fija de visualización para mensajes en modo superior/inferior (1000-30000ms, predet. 4000)',
+  'Maximum pending queue depth before messages are dropped (50-1000, default 200)':
+    'Profundidad máxima de cola pendiente antes de descartar mensajes (50-1000, predet. 200)',
+  'Target active message count when trimming background tab (10-500, default 50)':
+    'Objetivo de mensajes activos al recortar pestaña en segundo plano (10-500, predet. 50)',
+  'Maximum message age before fade-out removal (10-300s, default 60000ms)':
+    'Edad máxima del mensaje antes de eliminación por desvanecimiento (10-300s, predet. 60000ms)',
+  'Gap between consecutive messages as percentage of message width (2-30%, default 8)':
+    'Espacio entre mensajes consecutivos como porcentaje del ancho (2-30%, predet. 8)',
   'Enable Translation': 'Activar traducción',
   Service: 'Servicio',
   'Source Language': 'Idioma de origen',
@@ -705,6 +780,7 @@ const ZH: TranslationMap = {
   'Depth Layers': '深度图层',
   Backlog: '回放',
   'Rate Limiting': '频率限制',
+  Timing: '时序',
   'Author Colors & Visibility': '用户颜色与显示',
   Interface: '界面',
   'Chat Translation': '聊天翻译',
@@ -741,6 +817,30 @@ const ZH: TranslationMap = {
   Español: '西班牙语',
   中文: '中文',
   'Duration Multiplier (×)': '显示时长倍率 (×)',
+  'Exit Padding (px)': '退出边距 (px)',
+  'Min Scroll Duration (ms)': '最小滚动时间 (ms)',
+  'Max Scroll Duration (ms)': '最大滚动时间 (ms)',
+  'Top/Bottom Duration (ms)': '顶部/底部显示时间 (ms)',
+  'Queue Max Size': '队列最大容量',
+  'Background Queue Max': '后台队列最大容量',
+  'Max Message Age (ms)': '最大消息寿命 (ms)',
+  'Headway Gap (%)': '消息间距 (%)',
+  'Extra pixels a message scrolls past the screen edge before being removed (20-400, default 100)':
+    '消息滚动超过屏幕边缘后被移除的额外像素 (20-400, 默认 100)',
+  'Minimum scroll animation duration — prevents very short messages from zipping across (1000-15000ms, default 5000)':
+    '最小滚动动画时长 — 防止短消息飞过 (1000-15000ms, 默认 5000)',
+  'Maximum scroll animation duration — prevents very long messages from crawling (5-120s, default 30000ms)':
+    '最大滚动动画时长 — 防止长消息爬行 (5-120秒, 默认 30000ms)',
+  'Fixed display duration for top/bottom mode messages (1000-30000ms, default 4000)':
+    '顶部/底部模式消息的固定显示时长 (1000-30000ms, 默认 4000)',
+  'Maximum pending queue depth before messages are dropped (50-1000, default 200)':
+    '消息被丢弃前的最大待处理队列深度 (50-1000, 默认 200)',
+  'Target active message count when trimming background tab (10-500, default 50)':
+    '后台标签页整理时的目标活动消息数 (10-500, 默认 50)',
+  'Maximum message age before fade-out removal (10-300s, default 60000ms)':
+    '淡出移除前的最大消息寿命 (10-300秒, 默认 60000ms)',
+  'Gap between consecutive messages as percentage of message width (2-30%, default 8)':
+    '连续消息之间的间距（消息宽度的百分比） (2-30%, 默认 8)',
   'Enable Translation': '启用翻译',
   Service: '服务',
   'Source Language': '源语言',
