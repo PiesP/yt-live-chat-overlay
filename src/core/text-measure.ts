@@ -37,6 +37,14 @@ const WIDTH_CACHE_MAX = 1000;
 /** How many entries to evict at once from the oldest font group (10% of cap). */
 const WIDTH_CACHE_EVICT_BATCH = Math.floor(WIDTH_CACHE_MAX * 0.1);
 
+/**
+ * Cache for font ascent/descent metrics measured against "Mg".
+ * Keyed by font string — same font always produces identical ascent/descent,
+ * so caching avoids redundant ctx.measureText("Mg") calls in measureTextHeight
+ * and bitmap generation hot paths.
+ */
+const fontMetricsCache = new Map<string, { ascent: number; descent: number }>();
+
 /** Character-width estimate multiplier for CSP-restricted environments (no canvas). */
 const CSP_WIDTH_FACTOR = 0.6;
 /** Line-height fallback factor when font bounding-box metrics are unavailable. */
@@ -70,6 +78,7 @@ function getCtx(): CanvasRenderingContext2D | null {
 export function clearTextMeasurementCaches(): void {
   widthCache.clear();
   totalCacheEntries = 0;
+  fontMetricsCache.clear();
 }
 
 /**
@@ -157,25 +166,52 @@ export function measureTextWidth(text: string, font: string): number {
 }
 
 /**
+ * Retrieve ascent/descent metrics for a font, cached by font string.
+ *
+ * Uses "Mg" as the representative string — capital M gives a reliable ascent
+ * and lowercase g gives a reliable descent. Results are cached because the
+ * same font string always produces identical metrics regardless of fontSize.
+ *
+ * Fallback: fontSize-based estimate when the bounding-box API is unavailable.
+ */
+export function getFontMetrics(
+  font: string,
+  fontSize: number
+): { ascent: number; descent: number } {
+  const cached = fontMetricsCache.get(font);
+  if (cached) return cached;
+
+  const ctx = getCtx();
+  if (!ctx) {
+    const fallback = Math.ceil(fontSize * HEIGHT_FALLBACK_FACTOR) / 2;
+    return { ascent: fallback, descent: fallback };
+  }
+
+  ctx.font = font;
+  const m = ctx.measureText('Mg');
+  const ascent = m.actualBoundingBoxAscent ?? m.fontBoundingBoxAscent ?? 0;
+  const descent = m.actualBoundingBoxDescent ?? m.fontBoundingBoxDescent ?? 0;
+
+  const metrics = {
+    ascent: Math.ceil(ascent),
+    descent: Math.ceil(descent),
+  };
+  fontMetricsCache.set(font, metrics);
+  return metrics;
+}
+
+/**
  * Measure the full bounding-box height of the font's rendered glyphs.
  *
- * Uses `actualBoundingBoxAscent + actualBoundingBoxDescent` measured
- * against a representative string ("Mg") for the tightest vertical fit.
+ * Uses the cached font metrics (ascent + descent) measured against "Mg".
  * Falls back to a fontSize-based estimate when the bounding-box API is
  * unavailable (very old browsers).
  */
 export function measureTextHeight(font: string, fontSize: number): number {
-  const ctx = getCtx();
-  if (!ctx) return Math.ceil(fontSize * HEIGHT_FALLBACK_FACTOR);
-  ctx.font = font;
-  const m = ctx.measureText('Mg');
-
-  const actualAscent = m.actualBoundingBoxAscent;
-  const actualDescent = m.actualBoundingBoxDescent;
-  if (actualAscent > 0 && actualDescent > 0) {
-    return Math.ceil(actualAscent + actualDescent);
+  const metrics = getFontMetrics(font, fontSize);
+  if (metrics.ascent > 0 && metrics.descent > 0) {
+    return metrics.ascent + metrics.descent;
   }
-
   return Math.ceil(fontSize * HEIGHT_FALLBACK_FACTOR);
 }
 

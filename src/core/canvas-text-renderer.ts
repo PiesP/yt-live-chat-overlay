@@ -15,6 +15,7 @@ import { computeOutlineColor } from '@core/color-utils';
 import { AUTHOR_PHOTO_SHADOW, rendererLayout, spacing } from '@core/design-tokens';
 import {
   type CharSegment,
+  getFontMetrics,
   getFontString,
   measureTextHeight,
   measureTextWidth,
@@ -39,6 +40,7 @@ function cacheTextBitmap(
   key: string,
   text: string,
   font: string,
+  fontSize: number,
   fillColor: string,
   strokeWidth: number,
   strokeColor: string,
@@ -54,10 +56,8 @@ function cacheTextBitmap(
     Math.abs(metrics.actualBoundingBoxLeft) + Math.abs(metrics.actualBoundingBoxRight);
   const textWidth = bbWidth > 0 ? Math.ceil(bbWidth) : Math.ceil(metrics.width);
   const width = textWidth + Math.ceil(strokeWidth) + 2;
-  const mgMetrics = ctx.measureText('Mg');
-  const ascent = mgMetrics.actualBoundingBoxAscent ?? mgMetrics.fontBoundingBoxAscent ?? 0;
-  const descent = mgMetrics.actualBoundingBoxDescent ?? mgMetrics.fontBoundingBoxDescent ?? 0;
-  const height = Math.ceil(ascent) + Math.ceil(descent) + Math.ceil(strokeWidth) + 2;
+  const { ascent, descent } = getFontMetrics(font, fontSize);
+  const height = ascent + descent + Math.ceil(strokeWidth) + 2;
   ctx.restore();
 
   const offscreen = document.createElement('canvas');
@@ -131,7 +131,17 @@ function renderSegment(
     }
 
     // Cache miss — render to offscreen canvas and cache
-    cacheTextBitmap(key, text, font, color, strokeWidth, strokeColor, ctx, textBitmapCache);
+    cacheTextBitmap(
+      key,
+      text,
+      font,
+      fontSize,
+      color,
+      strokeWidth,
+      strokeColor,
+      ctx,
+      textBitmapCache
+    );
 
     // Immediately use the freshly cached bitmap to avoid fallthrough overhead
     const freshBitmap = textBitmapCache.get(key);
