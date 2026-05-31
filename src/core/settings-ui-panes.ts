@@ -191,6 +191,11 @@ export const PANES: PaneDef[] = [
             'Max body text lines for membership messages (1-5)'
           ),
           chk(
+            'Show SuperChat Amount',
+            'showSuperChatAmount',
+            'Display the purchase amount badge on Super Chat cards'
+          ),
+          chk(
             'Preserve User Colors',
             'preserveUserColor',
             "Use author's chosen text color from YouTube chat instead of overlay defaults"

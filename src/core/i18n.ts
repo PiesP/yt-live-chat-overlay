@@ -110,6 +110,7 @@ const KO: TranslationMap = {
   'SuperChat Max Lines': '슈퍼챗 최대 줄 수',
   'Membership Max Lines': '멤버십 최대 줄 수',
   'Preserve User Colors': '사용자 색상 유지',
+  'Show SuperChat Amount': '슈퍼챗 금액 표시',
   'Top Clear Zone (%)': '상단 여백 (%)',
   'Bottom Clear Zone (%)': '하단 여백 (%)',
   'Ignore Min Length': '최소 길이 무시',
@@ -162,6 +163,8 @@ const KO: TranslationMap = {
   'Background opacity of Super Chat cards': '슈퍼챗 카드의 배경 불투명도',
   'Max body text lines before truncation (2-10)': '본문 텍스트 최대 줄 수, 초과 시 잘림 (2-10)',
   'Max body text lines for membership messages (1-5)': '멤버십 메시지 본문 최대 줄 수 (1-5)',
+  'Display the purchase amount badge on Super Chat cards':
+    '슈퍼챗 카드에 구매 금액 배지를 표시합니다',
   "Use author's chosen text color from YouTube chat instead of overlay defaults":
     'YouTube 채팅 작성자의 텍스트 색상을 오버레이 기본값 대신 사용',
   'Keep top N% of video free of comments': '영상 상단 N%를 댓글 없이 유지',
@@ -265,8 +268,8 @@ const KO: TranslationMap = {
   'Reset overlay settings': '오버레이 설정 초기화',
 
   // ── Author grid ──
-  Color: '색상',
-  Show: '표시',
+  'Name Color': '이름 색상',
+  'Show Name': '이름 표시',
   Normal: '일반',
   Member: '멤버',
   Moderator: '관리자',
@@ -310,6 +313,7 @@ const JA: TranslationMap = {
   'SuperChat Max Lines': 'スパーチャット最大行数',
   'Membership Max Lines': 'メンバーシップ最大行数',
   'Preserve User Colors': 'ユーザー色を保持',
+  'Show SuperChat Amount': 'スパーチャット金額表示',
   'Top Clear Zone (%)': '上部余白 (%)',
   'Bottom Clear Zone (%)': '下部余白 (%)',
   'Ignore Min Length': '最小文字数を無視',
@@ -364,6 +368,8 @@ const JA: TranslationMap = {
   'Max body text lines before truncation (2-10)': '本文の最大行数、超過分は省略 (2-10)',
   'Max body text lines for membership messages (1-5)':
     'メンバーシップメッセージの本文最大行数 (1-5)',
+  'Display the purchase amount badge on Super Chat cards':
+    'スパーチャットカードに購入金額バッジを表示します',
   "Use author's chosen text color from YouTube chat instead of overlay defaults":
     'オーバーレイ既定色の代わりにYouTubeチャットの投稿者テキスト色を使用',
   'Keep top N% of video free of comments': '動画上部N%にコメントを表示しない',
@@ -467,8 +473,8 @@ const JA: TranslationMap = {
   'Reset overlay settings': 'オーバーレイ設定をリセット',
 
   // ── Author grid ──
-  Color: '色',
-  Show: '表示',
+  'Name Color': '名前の色',
+  'Show Name': '名前を表示',
   Normal: '一般',
   Member: 'メンバー',
   Moderator: 'モデレーター',
@@ -512,6 +518,7 @@ const ES: TranslationMap = {
   'SuperChat Max Lines': 'Líneas máx. SuperChat',
   'Membership Max Lines': 'Líneas máx. membresía',
   'Preserve User Colors': 'Conservar colores de usuario',
+  'Show SuperChat Amount': 'Mostrar monto SuperChat',
   'Top Clear Zone (%)': 'Margen superior (%)',
   'Bottom Clear Zone (%)': 'Margen inferior (%)',
   'Ignore Min Length': 'Ignorar long. mínima',
@@ -566,6 +573,8 @@ const ES: TranslationMap = {
   'Max body text lines before truncation (2-10)': 'Máximo de líneas antes de truncar (2-10)',
   'Max body text lines for membership messages (1-5)':
     'Máximo de líneas para mensajes de membresía (1-5)',
+  'Display the purchase amount badge on Super Chat cards':
+    'Mostrar la insignia de monto de compra en tarjetas Super Chat',
   "Use author's chosen text color from YouTube chat instead of overlay defaults":
     'Usar el color de texto del autor en lugar del predeterminado',
   'Keep top N% of video free of comments': 'Mantener el N% superior del video sin comentarios',
@@ -671,8 +680,8 @@ const ES: TranslationMap = {
   'Reset overlay settings': 'Restablecer superposición',
 
   // ── Author grid ──
-  Color: 'Color',
-  Show: 'Mostrar',
+  'Name Color': 'Color del nombre',
+  'Show Name': 'Mostrar nombre',
   Normal: 'Normal',
   Member: 'Miembro',
   Moderator: 'Moderador',
@@ -716,6 +725,7 @@ const ZH: TranslationMap = {
   'SuperChat Max Lines': '超级留言最大行数',
   'Membership Max Lines': '会员消息最大行数',
   'Preserve User Colors': '保留用户颜色',
+  'Show SuperChat Amount': '显示超级留言金额',
   'Top Clear Zone (%)': '顶部留白 (%)',
   'Bottom Clear Zone (%)': '底部留白 (%)',
   'Ignore Min Length': '忽略最小长度',
@@ -770,6 +780,7 @@ const ZH: TranslationMap = {
   'Max body text lines for membership messages (1-5)': '会员消息正文最大行数 (1-5)',
   "Use author's chosen text color from YouTube chat instead of overlay defaults":
     '使用YouTube聊天中用户自选文字颜色，而非覆盖层默认颜色',
+  'Display the purchase amount badge on Super Chat cards': '在超级留言卡片上显示购买金额徽章',
   'Keep top N% of video free of comments': '视频顶部N%区域不显示弹幕',
   'Keep bottom N% of video free of comments': '视频底部N%区域不显示弹幕',
   // Legacy key removed (replaced by 'Show all messages regardless of minimum character length')
@@ -863,8 +874,8 @@ const ZH: TranslationMap = {
   'Reset overlay settings': '重置覆盖层设置',
 
   // ── Author grid ──
-  Color: '颜色',
-  Show: '显示',
+  'Name Color': '名称颜色',
+  'Show Name': '显示名称',
   Normal: '普通',
   Member: '会员',
   Moderator: '版主',

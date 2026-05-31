@@ -429,8 +429,8 @@ export class SettingsUiForm {
     const grid = domDiv('yt-chat-overlay-author-grid');
     grid.append(
       document.createElement('span'),
-      domGridHeader(t('Color')),
-      domGridHeader(t('Show'))
+      domGridHeader(t('Name Color')),
+      domGridHeader(t('Show Name'))
     );
 
     for (const key of AUTHOR_COLOR_KEYS) {

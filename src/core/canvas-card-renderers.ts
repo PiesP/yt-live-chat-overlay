@@ -126,40 +126,52 @@ export function renderSuperChatCard(
     );
   }
 
-  // Amount badge pill
-  const badgeY = contentY + spacing.xs;
-  const badgeFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
-  const badgeHeight = badgeFontSize + rendererLayout.superchatBadge.paddingV * 2;
-  ctx.font = getFontString(badgeFontSize, 'bold', settings.fontFamily);
-  const badgeTextWidth = Math.ceil(ctx.measureText(superChat.amount).width);
-  const badgeWidth = badgeTextWidth + rendererLayout.superchatBadge.paddingH * 2;
+  // Amount badge pill (conditionally rendered)
+  let bodyStartY = contentY;
+  if (settings.showSuperChatAmount) {
+    const badgeY = contentY + spacing.xs;
+    const badgeFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
+    const badgeHeight = badgeFontSize + rendererLayout.superchatBadge.paddingV * 2;
+    ctx.font = getFontString(badgeFontSize, 'bold', settings.fontFamily);
+    const badgeTextWidth = Math.ceil(ctx.measureText(superChat.amount).width);
+    const badgeWidth = badgeTextWidth + rendererLayout.superchatBadge.paddingH * 2;
 
-  drawRoundRect(ctx, textX, badgeY, badgeWidth, badgeHeight, rendererLayout.superchatBadge.radius);
-  ctx.fillStyle = SUPERCHAT_AMOUNT_BADGE_FILL;
-  ctx.fill();
-  ctx.strokeStyle = SUPERCHAT_AMOUNT_BADGE_STROKE;
-  ctx.lineWidth = rendererLayout.superchatBadgeStrokeWidth;
-  ctx.stroke();
+    drawRoundRect(
+      ctx,
+      textX,
+      badgeY,
+      badgeWidth,
+      badgeHeight,
+      rendererLayout.superchatBadge.radius
+    );
+    ctx.fillStyle = SUPERCHAT_AMOUNT_BADGE_FILL;
+    ctx.fill();
+    ctx.strokeStyle = SUPERCHAT_AMOUNT_BADGE_STROKE;
+    ctx.lineWidth = rendererLayout.superchatBadgeStrokeWidth;
+    ctx.stroke();
 
-  ctx.textBaseline = 'middle';
-  strokeTextOutline(
-    ctx,
-    superChat.amount,
-    textX + rendererLayout.superchatBadge.paddingH,
-    badgeY + badgeHeight / 2,
-    textColor,
-    settings
-  );
-  ctx.fillStyle = textColor;
-  ctx.fillText(
-    superChat.amount,
-    textX + rendererLayout.superchatBadge.paddingH,
-    badgeY + badgeHeight / 2
-  );
-  ctx.textBaseline = 'top';
+    ctx.textBaseline = 'middle';
+    strokeTextOutline(
+      ctx,
+      superChat.amount,
+      textX + rendererLayout.superchatBadge.paddingH,
+      badgeY + badgeHeight / 2,
+      textColor,
+      settings
+    );
+    ctx.fillStyle = textColor;
+    ctx.fillText(
+      superChat.amount,
+      textX + rendererLayout.superchatBadge.paddingH,
+      badgeY + badgeHeight / 2
+    );
+    ctx.textBaseline = 'top';
+
+    bodyStartY = badgeY + badgeHeight;
+  }
 
   // Body text (content segments with emoji support)
-  let textBottomY = badgeY + badgeHeight;
+  let textBottomY = bodyStartY;
   if (message.content.length > 0) {
     const bodyMaxWidth = w - scPad.paddingH * 2;
     textBottomY = renderWrappedContentSegments(

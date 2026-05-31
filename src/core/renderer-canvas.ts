@@ -1499,7 +1499,8 @@ export class CanvasRenderer extends RendererBase {
       {
         superchat: this.settings.superChatMaxBodyLines,
         membership: this.settings.membershipMaxBodyLines,
-      }
+      },
+      this.settings.showSuperChatAmount
     );
 
     if (message.id) {
@@ -1823,6 +1824,7 @@ export class CanvasRenderer extends RendererBase {
     'superChatMaxBodyLines',
     'membershipMaxBodyLines',
     'showAuthor',
+    'showSuperChatAmount',
     'translationEnabled',
     'translationMode',
   ] as const;
