@@ -354,7 +354,8 @@ function resolveSuperChatRgbFromArgb(
     3: { r: 219, g: 68, b: 55 },
     4: { r: 155, g: 93, b: 229 },
   };
-  if (!argb || argb === 0) return (tierColors[tier] ?? tierColors[0])!;
+  if (!argb || argb === 0)
+    return (tierColors[tier] ?? tierColors[0]) as { r: number; g: number; b: number };
   return {
     r: (argb >> 16) & 0xff,
     g: (argb >> 8) & 0xff,
@@ -1657,6 +1658,7 @@ function startRenderLoop(): void {
 
 function renderFrame(): void {
   if (!ctx || !canvas || !config || isPaused) return;
+  const cfg = config;
 
   const now = performance.now();
   const width = canvas.width;
@@ -1752,8 +1754,7 @@ function renderFrame(): void {
   // ── Render pass: one ctx.globalAlpha per opacity bucket ──
   // Iterate ascending (0→20) — low opacity behind, high opacity on top.
   ctx.textBaseline = 'top';
-  const getFont = (fontSize: number): string =>
-    `${config!.fontWeight} ${fontSize}px ${config!.fontFamily}`;
+  const getFont = (fontSize: number): string => `${cfg.fontWeight} ${fontSize}px ${cfg.fontFamily}`;
 
   for (let bucketIndex = 0; bucketIndex < OPACITY_BUCKETS; bucketIndex++) {
     const entries = opacityBuckets[bucketIndex];
@@ -1774,7 +1775,7 @@ function renderFrame(): void {
 
       // Determine if author section should be shown
       const showAuthorSection = msg.author
-        ? (config!.showAuthor[msg.authorType || 'normal'] ?? true)
+        ? (cfg.showAuthor[msg.authorType || 'normal'] ?? true)
         : false;
 
       // Dispatch to the appropriate render function based on message kind
@@ -1786,12 +1787,12 @@ function renderFrame(): void {
           msg.height,
           sx,
           sy,
-          config!.fontSize,
-          config!.fontWeight,
-          config!.fontFamily,
+          cfg.fontSize,
+          cfg.fontWeight,
+          cfg.fontFamily,
           strokeWidth,
-          config!.outlineOpacity,
-          config!.superChatMaxBodyLines,
+          cfg.outlineOpacity,
+          cfg.superChatMaxBodyLines,
           showAuthorSection,
           textBitmapCache,
           authorPhotoCache,
@@ -1809,12 +1810,12 @@ function renderFrame(): void {
           sx,
           sy,
           elapsed,
-          config!.fontSize,
-          config!.fontWeight,
-          config!.fontFamily,
+          cfg.fontSize,
+          cfg.fontWeight,
+          cfg.fontFamily,
           strokeWidth,
-          config!.outlineOpacity,
-          config!.membershipMaxBodyLines,
+          cfg.outlineOpacity,
+          cfg.membershipMaxBodyLines,
           textBitmapCache,
           authorPhotoCache,
           emojiCache,
@@ -1823,7 +1824,7 @@ function renderFrame(): void {
       } else {
         // Regular message — handle translation
         const overrideText =
-          config!.translationEnabled && config!.translationMode === 'replace' && msg.translatedText
+          cfg.translationEnabled && cfg.translationMode === 'replace' && msg.translatedText
             ? msg.translatedText
             : null;
 
@@ -1832,12 +1833,12 @@ function renderFrame(): void {
           msg as Parameters<typeof renderRegularMessage>[1],
           sx,
           sy,
-          config!.fontSize,
-          config!.fontWeight,
-          config!.fontFamily,
+          cfg.fontSize,
+          cfg.fontWeight,
+          cfg.fontFamily,
           renderColor,
           strokeWidth,
-          config!.outlineOpacity,
+          cfg.outlineOpacity,
           textBitmapCache,
           emojiCache,
           authorPhotoCache,
@@ -1848,15 +1849,15 @@ function renderFrame(): void {
 
       // Dual-mode translation: render translated text below for regular messages
       if (
-        config!.translationEnabled &&
-        config!.translationMode === 'dual' &&
+        cfg.translationEnabled &&
+        cfg.translationMode === 'dual' &&
         msg.translatedText &&
         msg.translatedText !== msg.text &&
         (!msg.kind || msg.kind === 'chat' || msg.kind === 'text' || msg.kind === undefined)
       ) {
-        const translationFontSize = Math.round(config!.fontSize * TRANSLATION_FONT_SCALE);
+        const translationFontSize = Math.round(cfg.fontSize * TRANSLATION_FONT_SCALE);
         const translationColor = msg.authorType
-          ? config!.authorColors[msg.authorType] || renderColor
+          ? cfg.authorColors[msg.authorType] || renderColor
           : renderColor;
         const translationY = sy + msg.height * TRANSLATION_FONT_SCALE + TRANSLATION_GAP_PX;
         ctx.save();
@@ -1869,7 +1870,7 @@ function renderFrame(): void {
           translationColor,
           translationFontSize,
           strokeWidth,
-          config!.outlineOpacity,
+          cfg.outlineOpacity,
           textBitmapCache,
           getFont
         );
