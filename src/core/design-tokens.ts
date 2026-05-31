@@ -184,15 +184,15 @@ export const standbyMessageLayout = {
  * @param velocity       — constant scroll velocity in px/sec
  * @returns Animation duration in milliseconds
  */
-export function computeScrollDuration(totalDistance: number, velocity: number): number {
+export function computeScrollDuration(
+  totalDistance: number,
+  velocity: number,
+  durationMin: number,
+  durationMax: number,
+  exitPaddingPx: number
+): number {
   // Velocity-based floor: at minimum, allow the message to travel
-  // exitPadding pixels at the configured velocity, but no less than 3s.
-  const velocityFloor = Math.max(
-    rendererLayout.durationMin,
-    (rendererLayout.exitPaddingMin / velocity) * 1000
-  );
-  return Math.max(
-    velocityFloor,
-    Math.min(rendererLayout.durationMax, (totalDistance / velocity) * 1000)
-  );
+  // exitPadding pixels at the configured velocity, but no less than the minimum duration.
+  const velocityFloor = Math.max(durationMin, (exitPaddingPx / velocity) * 1000);
+  return Math.max(velocityFloor, Math.min(durationMax, (totalDistance / velocity) * 1000));
 }

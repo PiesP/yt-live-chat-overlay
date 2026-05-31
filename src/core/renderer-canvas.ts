@@ -32,7 +32,7 @@ import { ByteLimitedCache } from '@core/byte-limited-cache';
 import { renderMembershipCard, renderSuperChatCard } from '@core/canvas-card-renderers';
 import { drawRoundRect, renderRegularMessage, strokeTextOutline } from '@core/canvas-text-renderer';
 import { getTranslatableText } from '@core/chat-message-helpers';
-import { computeScrollDuration, rendererLayout, standbyMessageLayout } from '@core/design-tokens';
+import { computeScrollDuration, standbyMessageLayout } from '@core/design-tokens';
 import { clearSafeAnimationFrame, clearSafeInterval, forEachSlot } from '@core/dom';
 import type { LanePlacement } from '@core/lane-allocator';
 import { LaneAllocator, SPEED_TIER } from '@core/lane-allocator';
@@ -331,7 +331,7 @@ export class CanvasRenderer extends RendererBase {
   private ctx: CanvasRenderingContext2D | null = null;
   private animFrameId: number | null = null;
   /** Pre-computed 1/maxMessageAgeMs to avoid per-frame division in opacity calc. */
-  private readonly ageFadeRate = 1 / rendererLayout.maxMessageAgeMs;
+  private readonly ageFadeRate = 1 / this.settings.maxMessageAgeMs;
   /** Pre-computed 1/fadeDurationMs, updated on settings change. */
   /** Pre-computed 1/fadeDurationMs to avoid per-frame division in opacity calc. */
   private invFadeDuration = 1 / Math.max(1, 500);
@@ -574,7 +574,7 @@ export class CanvasRenderer extends RendererBase {
     const priority = CanvasRenderer.getMessagePriority(message);
     this.prefetchImages(message);
 
-    if (this.pendingQueue.size >= rendererLayout.queueMaxSize) {
+    if (this.pendingQueue.size >= this.settings.queueMaxSize) {
       // Queue full — check if the new message has higher priority than
       // the lowest-priority message currently in the queue.
       const lowest = this.pendingQueue.peekLowest();
@@ -606,8 +606,8 @@ export class CanvasRenderer extends RendererBase {
   }
 
   trimBackgroundQueue(): void {
-    if (this.pendingQueue.size <= rendererLayout.backgroundQueueMax) return;
-    this.pendingQueue.trim(rendererLayout.backgroundQueueMax);
+    if (this.pendingQueue.size <= this.settings.backgroundQueueMax) return;
+    this.pendingQueue.trim(this.settings.backgroundQueueMax);
   }
 
   // ── Image pre-fetching
@@ -880,13 +880,13 @@ export class CanvasRenderer extends RendererBase {
       const progress = Math.min(1, Math.max(0, positionElapsed * msg.invDuration));
 
       if (mode === 'scroll') {
-        const travelDistance = msg.startX + msg.width + rendererLayout.exitPaddingMin;
+        const travelDistance = msg.startX + msg.width + this.settings.exitPaddingPx;
         msg.x = msg.startX - progress * travelDistance;
       } else if (mode === 'reverse') {
         // Reverse: message enters from left and scrolls right.
         // Compute travel from startX (left edge) to off-screen right edge,
         // accounting for horizontal stagger in the start position.
-        const travelDistance = dims.width - msg.startX + rendererLayout.exitPaddingMin;
+        const travelDistance = dims.width - msg.startX + this.settings.exitPaddingPx;
         msg.x = msg.startX + progress * travelDistance;
       }
 
@@ -1176,7 +1176,7 @@ export class CanvasRenderer extends RendererBase {
         // speed multiplier so the slower message has more lead time,
         // preventing the faster chaser from visually crossing through.
         const headwayPx = this.computeHeadwayPx(active.width, active.speedTier, speedTier);
-        const travelDistance = active.startX + active.width + rendererLayout.exitPaddingMin;
+        const travelDistance = active.startX + active.width + this.settings.exitPaddingPx;
         const activeProgress = Math.min(1, activeElapsed * active.invDuration);
         const activeRightEdge = active.startX - activeProgress * travelDistance + active.width;
 
@@ -1196,7 +1196,7 @@ export class CanvasRenderer extends RendererBase {
           // Speed-aware headway: when a fast backlog message enters a lane
           // with a slow reverse message, headway scales up to prevent the
           // faster chaser from catching up and visually crossing through.
-          const reverseTravel = dims.width - active.startX + rendererLayout.exitPaddingMin;
+          const reverseTravel = dims.width - active.startX + this.settings.exitPaddingPx;
           const activeX = active.startX + activeProgress * reverseTravel;
           if (activeX + active.width > -headwayPx) {
             forEachSlot(placement.laneIndex, placement.slotCount, (slotIdx) => {
@@ -1282,12 +1282,20 @@ export class CanvasRenderer extends RendererBase {
       // travels farther at the same speed, so duration adjusts proportionally.
       const totalDistance =
         mode === 'scroll'
-          ? startX + msgWidth + rendererLayout.exitPaddingMin
-          : dims.width + msgWidth + rendererLayout.exitPaddingMin + horizontalStagger;
+          ? startX + msgWidth + this.settings.exitPaddingPx
+          : dims.width + msgWidth + this.settings.exitPaddingPx + horizontalStagger;
       effectiveDuration =
-        speed > 0 ? computeScrollDuration(totalDistance, speed) : rendererLayout.durationMin;
+        speed > 0
+          ? computeScrollDuration(
+              totalDistance,
+              speed,
+              this.settings.scrollDurationMinMs,
+              this.settings.scrollDurationMaxMs,
+              this.settings.exitPaddingPx
+            )
+          : this.settings.scrollDurationMinMs;
     } else {
-      effectiveDuration = rendererLayout.topBottomDurationMs;
+      effectiveDuration = this.settings.topBottomDurationMs;
     }
 
     // Moderator and owner messages stay on screen longer.
@@ -1399,7 +1407,7 @@ export class CanvasRenderer extends RendererBase {
     staggerDelay = 0,
     speedTier?: number
   ): void {
-    const effectiveDuration = duration ?? rendererLayout.topBottomDurationMs;
+    const effectiveDuration = duration ?? this.settings.topBottomDurationMs;
     const effectiveStartX = startX ?? 0;
     const cm = this.acquireMessage();
     Object.assign(cm, {
@@ -1562,7 +1570,7 @@ export class CanvasRenderer extends RendererBase {
     activeSpeedTier: number,
     newSpeedTier: number
   ): number {
-    const base = LaneAllocator.computeBaseHeadwayPx(activeWidth);
+    const base = LaneAllocator.computeBaseHeadwayPx(activeWidth, this.settings.headwayGapRatio);
     // Only adjust when the new message is faster (higher tier).
     if (newSpeedTier > activeSpeedTier) {
       return Math.round(base * this.settings.backlogSpeedMultiplier);
@@ -1816,6 +1824,14 @@ export class CanvasRenderer extends RendererBase {
     'showSuperChatAmount',
     'translationEnabled',
     'translationMode',
+    'exitPaddingPx',
+    'scrollDurationMinMs',
+    'scrollDurationMaxMs',
+    'topBottomDurationMs',
+    'queueMaxSize',
+    'backgroundQueueMax',
+    'maxMessageAgeMs',
+    'headwayGapRatio',
   ] as const;
 
   /**
@@ -1830,7 +1846,6 @@ export class CanvasRenderer extends RendererBase {
     config.outlineWidthPx = settings.outline.widthPx;
     config.outlineOpacity = settings.outline.opacity;
     config.authorColors = { ...settings.colors };
-    config.maxMessageAgeMs = rendererLayout.maxMessageAgeMs;
     return config;
   }
 

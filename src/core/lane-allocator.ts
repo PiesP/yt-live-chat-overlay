@@ -36,6 +36,10 @@ interface LaneAllocatorOptions {
   fontWeight: FontWeight;
   fontFamily: string;
   laneSpacing: number;
+  headwayGapRatio: number;
+  exitPaddingPx: number;
+  scrollDurationMaxMs: number;
+  maxMessageAgeMs: number;
 }
 
 /**
@@ -121,13 +125,10 @@ export class LaneAllocator {
   static readonly HEADWAY_GAP_MIN_PX = 16;
   static readonly HEADWAY_GAP_MAX_PX = 60;
 
-  static computeBaseHeadwayPx(msgWidth: number): number {
+  static computeBaseHeadwayPx(msgWidth: number, headwayGapRatio: number): number {
     return Math.max(
       LaneAllocator.HEADWAY_GAP_MIN_PX,
-      Math.min(
-        LaneAllocator.HEADWAY_GAP_MAX_PX,
-        Math.round(msgWidth * rendererLayout.headwayGapRatio)
-      )
+      Math.min(LaneAllocator.HEADWAY_GAP_MAX_PX, Math.round(msgWidth * headwayGapRatio))
     );
   }
 
@@ -356,8 +357,8 @@ export class LaneAllocator {
     }
 
     // Scrolling mode: precision exit-time
-    const totalDistance = screenWidth + msgWidthPx + rendererLayout.exitPaddingMin;
-    const headwayPx = LaneAllocator.computeBaseHeadwayPx(msgWidthPx);
+    const totalDistance = screenWidth + msgWidthPx + this.options.exitPaddingPx;
+    const headwayPx = LaneAllocator.computeBaseHeadwayPx(msgWidthPx, this.options.headwayGapRatio);
     const rightEdgePassFraction = (msgWidthPx + headwayPx) / totalDistance;
     return Math.round(rightEdgePassFraction * durationMs);
   }
@@ -379,7 +380,7 @@ export class LaneAllocator {
   ): { laneIndex: number; waitMs: number } | null {
     if (this.heap.length === 0) return null;
 
-    const maxWaitMs = rendererLayout.durationMax;
+    const maxWaitMs = this.options.scrollDurationMaxMs;
     let firstBusy: { laneIndex: number; waitMs: number } | null = null;
     let speedMatched: { laneIndex: number; waitMs: number } | null = null;
     // Pre-collect zero-wait compatible lanes for O(n) epsilon-greedy:
@@ -468,7 +469,7 @@ export class LaneAllocator {
       return this.allocateSingleLane(now, laneStart, laneEnd, speedTier);
     }
 
-    const maxWaitMs = rendererLayout.durationMax;
+    const maxWaitMs = this.options.scrollDurationMaxMs;
     const maxStartLane = laneEnd - slotCount;
     if (maxStartLane < laneStart) return null;
 
@@ -575,7 +576,7 @@ export class LaneAllocator {
 
   /** Shift all lane timers and speed-tier tracking by a fixed offset. */
   shiftAll(offsetMs: number): void {
-    const capped = Math.min(offsetMs, rendererLayout.maxMessageAgeMs);
+    const capped = Math.min(offsetMs, this.options.maxMessageAgeMs);
     if (capped <= 0) return;
 
     // Shift lane occupancy timers (4-ary min-heap)

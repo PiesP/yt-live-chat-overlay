@@ -131,6 +131,20 @@ interface WorkerConfig {
   translationMode: 'dual' | 'replace';
   /** Toggle Super Chat purchase amount badge display. */
   showSuperChatAmount: boolean;
+  /** Extra pixels past screen edge before exit (px). */
+  exitPaddingPx: number;
+  /** Minimum scroll animation duration (ms). */
+  scrollDurationMinMs: number;
+  /** Maximum scroll animation duration (ms). */
+  scrollDurationMaxMs: number;
+  /** Display duration for top/bottom mode (ms). */
+  topBottomDurationMs: number;
+  /** Headway gap as fraction of message width (0-1). */
+  headwayGapRatio: number;
+  /** Max pending queue depth. */
+  queueMaxSize: number;
+  /** Background queue trim target. */
+  backgroundQueueMax: number;
 }
 
 interface WorkerContentSegment {
@@ -1550,15 +1564,13 @@ function computeOccupancyMs(durationMs: number, msgWidthPx?: number): number {
       durationMs + Math.max(LANE_COOLDOWN_MIN_MS, Math.round(durationMs * SAFETY_MARGIN_RATIO))
     );
   }
+  if (!config) return durationMs;
   const screenWidth = canvas?.width ?? 1920;
   const headwayPx = Math.max(
     LaneAllocator.HEADWAY_GAP_MIN_PX,
-    Math.min(
-      LaneAllocator.HEADWAY_GAP_MAX_PX,
-      Math.round(msgWidthPx * rendererLayout.headwayGapRatio)
-    )
+    Math.min(LaneAllocator.HEADWAY_GAP_MAX_PX, Math.round(msgWidthPx * config.headwayGapRatio))
   );
-  const totalDistance = screenWidth + msgWidthPx + rendererLayout.exitPaddingMin;
+  const totalDistance = screenWidth + msgWidthPx + config.exitPaddingPx;
   const fraction = (msgWidthPx + headwayPx) / totalDistance;
   return Math.round(fraction * durationMs);
 }
@@ -1692,10 +1704,10 @@ function renderFrame(): void {
 
     // Update position
     if (mode === 'scroll') {
-      const dist = msg.startX + msg.width + rendererLayout.exitPaddingMin;
+      const dist = msg.startX + msg.width + config.exitPaddingPx;
       msg.x = msg.startX - progress * dist;
     } else if (mode === 'reverse') {
-      const dist = width - msg.startX + rendererLayout.exitPaddingMin;
+      const dist = width - msg.startX + config.exitPaddingPx;
       msg.x = msg.startX + progress * dist;
     }
 
@@ -2004,11 +2016,20 @@ function activateMessage(
   if (isScrolling) {
     const totalDistance =
       mode === 'scroll'
-        ? startX + msg.width + rendererLayout.exitPaddingMin
-        : screenWidth - startX + rendererLayout.exitPaddingMin;
-    duration = speed > 0 ? computeScrollDuration(totalDistance, speed) : 5000;
+        ? startX + msg.width + config.exitPaddingPx
+        : screenWidth - startX + config.exitPaddingPx;
+    duration =
+      speed > 0
+        ? computeScrollDuration(
+            totalDistance,
+            speed,
+            config.scrollDurationMinMs,
+            config.scrollDurationMaxMs,
+            config.exitPaddingPx
+          )
+        : config.scrollDurationMinMs;
   } else {
-    duration = rendererLayout.topBottomDurationMs;
+    duration = config.topBottomDurationMs;
   }
 
   // Moderator and owner messages stay on screen longer.

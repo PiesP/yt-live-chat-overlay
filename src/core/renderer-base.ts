@@ -72,6 +72,10 @@ export abstract class RendererBase {
       fontWeight: this.settings.fontWeight,
       fontFamily: this.settings.fontFamily,
       laneSpacing: this.settings.laneSpacing,
+      headwayGapRatio: this.settings.headwayGapRatio,
+      exitPaddingPx: this.settings.exitPaddingPx,
+      scrollDurationMaxMs: this.settings.scrollDurationMaxMs,
+      maxMessageAgeMs: this.settings.maxMessageAgeMs,
     });
     this.laneAllocator.reset(this.overlay.getDimensions());
 
@@ -118,7 +122,7 @@ export abstract class RendererBase {
     const now = performance.now();
     let pausedDuration = 0;
     if (this.pausedAt !== null) {
-      pausedDuration = Math.min(Math.max(0, now - this.pausedAt), rendererLayout.maxMessageAgeMs);
+      pausedDuration = Math.min(Math.max(0, now - this.pausedAt), this.settings.maxMessageAgeMs);
       this.applyPausedDuration(pausedDuration);
     }
     this.pausedAt = null;
@@ -326,7 +330,7 @@ export abstract class RendererBase {
     const now = Date.now();
     if (now - this.lastBacklogToggleTime < RendererBase.BACKLOG_TOGGLE_COOLDOWN_MS) return;
 
-    const queueRatio = this.getQueueLength() / rendererLayout.queueMaxSize;
+    const queueRatio = this.getQueueLength() / this.settings.queueMaxSize;
     if (queueRatio > RendererBase.BACKLOG_PAUSE_THRESHOLD && !this.backlogPaused) {
       this.backlogPaused = true;
       this.lastBacklogToggleTime = now;
