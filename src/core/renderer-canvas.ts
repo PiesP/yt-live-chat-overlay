@@ -30,7 +30,7 @@
 import type { ChatMessage, DropReason, OverlayDimensions, OverlaySettings } from '@app-types';
 import { ByteLimitedCache } from '@core/byte-limited-cache';
 import { renderPaidCard } from '@core/canvas-card-renderers';
-import { drawRoundRect, renderRegularMessage, strokeTextOutline } from '@core/canvas-text-renderer';
+import { drawRoundRect, renderRegularMessage } from '@core/canvas-text-renderer';
 import { createMembershipCardConfig, createSuperChatCardConfig } from '@core/card-config';
 import { getTranslatableText } from '@core/chat-message-helpers';
 import { computeScrollDuration, standbyMessageLayout } from '@core/design-tokens';
@@ -65,6 +65,7 @@ import {
 import { RenderWorkerManager } from '@core/renderer-worker-manager';
 import { clearTextMeasurementCaches, getFontString, measureTextHeight } from '@core/text-measure';
 import { TranslationService } from '@core/translation-service';
+import { renderSegment } from '@shared/canvas-rendering-shared';
 
 /**
  * Remove expired messages in-place, simultaneously maintaining the
@@ -518,7 +519,9 @@ export class CanvasRenderer extends RendererBase {
     // Reset emoji-load debounce flag — any pending rAF restart has landed
     this.needsRerender = false;
 
-    const now = performance.now();
+    // Reuse t0 for position/opacity — the sub-microsecond difference between
+    // two performance.now() calls is invisible to any rendering calculation.
+    const now = t0;
     const dims = this.overlay.getDimensions();
     if (!dims) return;
 
@@ -708,27 +711,23 @@ export class CanvasRenderer extends RendererBase {
               1,
               Math.round(this.settings.fontSize * CanvasRenderer.TRANSLATION_FONT_SCALE)
             );
-            const font = getFontString(
-              fontSize,
-              this.settings.fontWeight,
-              this.settings.fontFamily
-            );
             const transY = snappedY + msg.height + CanvasRenderer.TRANSLATION_GAP_PX;
             const transColor = this.settings.colors[msg.message.authorType];
             ctx.save();
             ctx.globalAlpha = bucketOpacity * CanvasRenderer.TRANSLATION_OPACITY_SCALE;
-            ctx.font = font;
-            ctx.fillStyle = transColor;
-            strokeTextOutline(
+            // Bitmap-cached via renderSegment — same text across frames only rasterizes once.
+            renderSegment(
               ctx,
               msg.translatedText,
               snappedX,
               transY,
               transColor,
+              fontSize,
               this.settings.outline.widthPx,
-              this.settings.outline.opacity
+              this.settings.outline.opacity,
+              this.textBitmapCache,
+              this._boundGetFont
             );
-            ctx.fillText(msg.translatedText, snappedX, transY);
             ctx.restore();
           }
         }
