@@ -9,7 +9,7 @@
  * re-exported here for backward compatibility.
  */
 
-export { resolveSuperChatRgb } from './color-utils';
+export { computeSuperChatOpacities, resolveSuperChatRgb } from './color-utils';
 
 import type { RgbColor, SuperChatInfo } from '@app-types';
 
