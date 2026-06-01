@@ -3,7 +3,6 @@
 
 import type { FontWeight, OverlayDimensions } from '@app-types';
 import { rendererLayout } from '@core/design-tokens';
-import { forEachSlot } from '@core/dom';
 import { createLogger } from '@core/logging';
 import {
   EPSILON as _EPSILON,
@@ -271,14 +270,16 @@ export class LaneAllocator {
     // can group messages by speed tier. Uses durationMs (full on-screen
     // time) rather than occupancyMs to prevent cross-tier overtaking.
     const until = startTime + durationMs;
-    forEachSlot(startIdx, placement.slotCount, (slotIdx) => {
+    for (let offset = 0; offset < placement.slotCount; offset++) {
+      const slotIdx = startIdx + offset;
       this.speedTierLanes.set(slotIdx, { tier: speedTier, until });
-    });
+    }
 
     // Update all slots occupied by this message with the SAME available time.
-    forEachSlot(startIdx, placement.slotCount, (slotIdx) => {
+    for (let offset = 0; offset < placement.slotCount; offset++) {
+      const slotIdx = startIdx + offset;
       this.updateLane(slotIdx, nextAvailable);
-    });
+    }
   }
 
   // ── Batch control ─────────────────────────────────────────────────────
