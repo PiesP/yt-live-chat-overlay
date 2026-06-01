@@ -33,7 +33,8 @@ import { renderMembershipCard, renderSuperChatCard } from '@core/canvas-card-ren
 import { drawRoundRect, renderRegularMessage, strokeTextOutline } from '@core/canvas-text-renderer';
 import { getTranslatableText } from '@core/chat-message-helpers';
 import { computeScrollDuration, standbyMessageLayout } from '@core/design-tokens';
-import { clearSafeAnimationFrame, clearSafeInterval, forEachSlot } from '@core/dom';
+import { clearSafeAnimationFrame, forEachSlot } from '@core/dom';
+import { ImageFetchManager } from '@core/image-fetch-manager';
 import type { LanePlacement } from '@core/lane-allocator';
 import { LaneAllocator } from '@core/lane-allocator';
 import { createLogger } from '@core/logging';
@@ -338,9 +339,10 @@ export class CanvasRenderer extends RendererBase {
   /** Pre-computed 1/fadeDurationMs to avoid per-frame division in opacity calc. */
   private invFadeDuration = 1 / Math.max(1, 500);
   private overlayDimensionsUnsubscribe: (() => void) | null = null;
-  private emojiCleanupIntervalId: ReturnType<typeof setInterval> | null = null;
   /** Debounce flag for emoji-load-triggered rAF restarts. */
   private needsRerender = false;
+  /** Image fetch manager for loading and caching emoji, author photos, and stickers. */
+  private imageFetchManager!: ImageFetchManager;
 
   private readonly activeMessages: CanvasMessage[] = [];
   /** Lane-indexed active messages for O(1) lane-scoped collision checks. */
@@ -349,36 +351,6 @@ export class CanvasRenderer extends RendererBase {
   private readonly messagePool: CanvasMessage[] = [];
   private readonly pendingQueue = new PriorityBucketQueue();
   private readonly retryQueue: ChatMessage[] = [];
-
-  /** Image caches (bounded LRU). */
-  private readonly emojiCache = new ByteLimitedCache<HTMLImageElement>(
-    this.settings.emojiCacheMb * 1_000_000, // configurable MB
-    (img) => img.naturalWidth * img.naturalHeight * 4 // RGBA bytes
-  );
-  private readonly emojiFetching = new Set<string>();
-  private readonly emojiFetchingStarted = new Map<string, number>();
-  /** Author photo cache — byte-limited instead of count-limited for consistent memory usage. */
-  private readonly authorPhotoCache = new ByteLimitedCache<HTMLImageElement>(
-    this.settings.photoCacheMb * 1_000_000, // configurable MB
-    (img) => img.naturalWidth * img.naturalHeight * 4 // RGBA bytes
-  );
-  /** Sticker image cache — byte-limited instead of count-limited for consistent memory usage. */
-  private readonly stickerCache = new ByteLimitedCache<HTMLImageElement>(
-    this.settings.stickerCacheMb * 1_000_000, // configurable MB
-    (img) => img.naturalWidth * img.naturalHeight * 4 // RGBA bytes
-  );
-  /** Map of URL → timestamp for failed emoji fetches, with TTL-based eviction. */
-  private readonly failedEmojiFetches = new Map<string, number>();
-  /** In-flight image load guard to prevent duplicate Image objects. */
-  private readonly imageLoading = new Set<string>();
-
-  /**
-   * Pre-converted ImageBitmaps for transfer to the render worker.
-   * Created asynchronously when HTMLImageElements finish loading.
-   * Transferred via postMessage transfer list to avoid duplicate fetch+decode
-   * in the worker. Entries are removed on transfer (bitmap is detached).
-   */
-  private readonly workerBitmapCache = new Map<string, ImageBitmap>();
 
   /** Last devicePixelRatio seen — used to detect DPR changes. */
   private lastDpr = 0;
@@ -456,11 +428,6 @@ export class CanvasRenderer extends RendererBase {
    */
   private static readonly DRAIN_QUEUE_MAX_SKIP = _DRAIN_QUEUE_MAX_SKIP;
 
-  /** Max concurrent emoji fetch operations. */
-  private readonly emojiFetchLimit: number;
-  /** Retry window in minutes for failed emoji fetches. */
-  private readonly failedEmojiRetryMins: number;
-
   /** Stagger queue depth thresholds. */
   private static readonly STAGGER_QUEUE_HIGH = 50;
   private static readonly STAGGER_QUEUE_MED = 30;
@@ -494,8 +461,6 @@ export class CanvasRenderer extends RendererBase {
     super(overlay, settings);
     this.invFadeDuration = 1 / Math.max(1, settings.fadeDurationMs);
     this.translationBatchSize = settings.translationBatchSize;
-    this.emojiFetchLimit = settings.emojiFetchLimit;
-    this.failedEmojiRetryMins = settings.failedEmojiRetryMins;
     this.translationService = new TranslationService();
     this.translationService.configure({
       enabled: settings.translationEnabled,
@@ -533,9 +498,17 @@ export class CanvasRenderer extends RendererBase {
     });
 
     this.startRenderLoop();
-    this.emojiCleanupIntervalId = setInterval(() => {
-      this.cleanupStaleEmojiFetching();
-    }, 5_000);
+    this.imageFetchManager = new ImageFetchManager();
+    this.imageFetchManager.updateConfig(settings, this.renderWorker);
+    this.imageFetchManager.setOnImageReady(() => {
+      if (!this.isPaused && !this.isVideoPaused && !this.needsRerender) {
+        if (this.animFrameId !== null) {
+          this.animFrameId = clearSafeAnimationFrame(this.animFrameId);
+        }
+        this.needsRerender = true;
+        this.startRenderLoop();
+      }
+    });
     log.info('RendererCanvas created');
   }
 
@@ -604,7 +577,7 @@ export class CanvasRenderer extends RendererBase {
 
   private enqueueMessage(message: ChatMessage, trackDrops: boolean): void {
     const priority = CanvasRenderer.getMessagePriority(message);
-    this.prefetchImages(message);
+    this.imageFetchManager.prefetchImages(message);
 
     if (this.pendingQueue.size >= this.settings.queueMaxSize) {
       // Queue full — check if the new message has higher priority than
@@ -640,140 +613,6 @@ export class CanvasRenderer extends RendererBase {
   trimBackgroundQueue(): void {
     if (this.pendingQueue.size <= this.settings.backgroundQueueMax) return;
     this.pendingQueue.trim(this.settings.backgroundQueueMax);
-  }
-
-  // ── Image pre-fetching
-
-  /** Load an image and store it in the given ByteLimitedCache on success. */
-  private loadImage(url: string, cache: ByteLimitedCache<HTMLImageElement>): void {
-    if (cache.has(url)) return;
-    if (this.imageLoading.has(url)) return;
-    this.imageLoading.add(url);
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.src = url;
-    img.onload = () => {
-      this.imageLoading.delete(url);
-      cache.set(url, img);
-      this.preConvertForWorker(url, img);
-    };
-    img.onerror = () => {
-      this.imageLoading.delete(url);
-      this.failedEmojiFetches.set(url, Date.now());
-      // Cap the failed fetches map to prevent unbounded memory growth.
-      if (this.failedEmojiFetches.size > 500) {
-        let evicted = 0;
-        for (const key of this.failedEmojiFetches.keys()) {
-          this.failedEmojiFetches.delete(key);
-          if (++evicted >= 250) break;
-        }
-      }
-      // Silently skip — don't retry broken URLs on every frame.
-    };
-  }
-
-  /**
-   * Pre-convert a loaded HTMLImageElement to ImageBitmap for worker transfer.
-   * On success, stores in workerBitmapCache. On failure, silently skips —
-   * worker will fetch and decode independently.
-   */
-  private preConvertForWorker(url: string, img: HTMLImageElement): void {
-    if (!this.useWorkerMode || !this.renderWorker) return;
-    if (!img.complete || img.naturalWidth === 0) return;
-    createImageBitmap(img)
-      .then((bitmap) => {
-        this.workerBitmapCache.set(url, bitmap);
-      })
-      .catch(() => {});
-  }
-
-  private prefetchImages(message: ChatMessage): void {
-    // Clean up stale emoji fetches once per message, before the per-emoji loop.
-    // The 5-second setInterval handles periodic cleanup; this provides an
-    // immediate sweep before new fetches start without redundant per-emoji calls.
-    this.cleanupStaleEmojiFetching();
-
-    for (const seg of message.content) {
-      if (seg.type !== 'emoji') continue;
-      if (this.emojiFetching.has(seg.emoji.url)) continue;
-      if (this.emojiCache.has(seg.emoji.url)) continue;
-      if (this.failedEmojiFetches.has(seg.emoji.url)) continue;
-      if (this.emojiFetching.size >= this.emojiFetchLimit) continue;
-      this.emojiFetching.add(seg.emoji.url);
-      this.emojiFetchingStarted.set(seg.emoji.url, performance.now());
-      const url = seg.emoji.url;
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.src = url;
-      img.onload = () => {
-        this.emojiFetching.delete(url);
-        this.emojiFetchingStarted.delete(url);
-        this.emojiCache.set(url, img);
-        this.preConvertForWorker(url, img);
-
-        // Trigger an immediate render frame so the emoji appears within
-        // ~1 frame instead of waiting for the next natural rAF tick.
-        // When the loop self-idled (animFrameId === null), restart it.
-        // Skip if paused or already pending — multiple concurrent emoji loads
-        // share a single rAF restart via the needsRerender debounce flag.
-        if (!this.isPaused && !this.isVideoPaused && !this.needsRerender) {
-          if (this.animFrameId !== null) {
-            this.animFrameId = clearSafeAnimationFrame(this.animFrameId);
-          }
-          this.needsRerender = true;
-          this.startRenderLoop();
-        }
-      };
-      img.onerror = () => {
-        this.emojiFetching.delete(url);
-        this.emojiFetchingStarted.delete(url);
-        this.failedEmojiFetches.set(url, Date.now());
-        // Cap the failed fetches map to prevent unbounded memory growth.
-        if (this.failedEmojiFetches.size > 500) {
-          let evicted = 0;
-          for (const key of this.failedEmojiFetches.keys()) {
-            this.failedEmojiFetches.delete(key);
-            if (++evicted >= 250) break;
-          }
-        }
-      };
-    }
-
-    if (message.authorPhotoUrl) {
-      this.loadImage(message.authorPhotoUrl, this.authorPhotoCache);
-    }
-
-    const stickerUrl = message.superChat?.sticker?.url;
-    if (stickerUrl) {
-      this.loadImage(stickerUrl, this.stickerCache);
-    }
-  }
-
-  /**
-   * Remove stale entries from emojiFetching that never resolved.
-   * If an image fetch hasn't completed within the configured timeout, the fetch
-   * likely failed silently (e.g. CORS block), so evict it to unblock
-   * future retries.
-   */
-
-  private cleanupStaleEmojiFetching(): void {
-    const now = performance.now();
-    for (const [url, startedAt] of this.emojiFetchingStarted) {
-      if (now - startedAt > this.settings.emojiFetchTimeoutMs) {
-        this.emojiFetching.delete(url);
-        this.emojiFetchingStarted.delete(url);
-      }
-    }
-
-    // Evict failed entries older than TTL so permanently broken URLs are not retried forever.
-    if (this.failedEmojiFetches.size > 0) {
-      const cutoff = Date.now() - this.failedEmojiRetryMins * 60_000;
-      for (const [url, failedAt] of this.failedEmojiFetches) {
-        if (failedAt < cutoff) {
-          this.failedEmojiFetches.delete(url);
-        }
-      }
-    }
   }
 
   // ── Render loop ──────────────────────────────────────────────────────
@@ -982,8 +821,8 @@ export class CanvasRenderer extends RendererBase {
             snappedY,
             this.settings,
             this.textBitmapCache,
-            this.emojiCache,
-            this.authorPhotoCache,
+            this.imageFetchManager.emojiCache,
+            this.imageFetchManager.authorPhotoCache,
             (fs) => this.getFont(fs),
             isReplace ? msg.translatedText : undefined
           );
@@ -999,9 +838,9 @@ export class CanvasRenderer extends RendererBase {
                 snappedY,
                 this.settings,
                 this.textBitmapCache,
-                this.authorPhotoCache,
-                this.stickerCache,
-                this.emojiCache,
+                this.imageFetchManager.authorPhotoCache,
+                this.imageFetchManager.stickerCache,
+                this.imageFetchManager.emojiCache,
                 (fs) => this.getFont(fs),
                 this.superChatGradientCache
               );
@@ -1016,8 +855,8 @@ export class CanvasRenderer extends RendererBase {
                 elapsed,
                 this.settings,
                 this.textBitmapCache,
-                this.authorPhotoCache,
-                this.emojiCache,
+                this.imageFetchManager.authorPhotoCache,
+                this.imageFetchManager.emojiCache,
                 (fs) => this.getFont(fs)
               );
             }
@@ -1804,16 +1643,16 @@ export class CanvasRenderer extends RendererBase {
   protected onDestroy(): void {
     this.stopRenderLoop();
     this.destroyWorker();
-    this.emojiCleanupIntervalId = clearSafeInterval(this.emojiCleanupIntervalId);
+    this.imageFetchManager.destroy();
     this.overlayDimensionsUnsubscribe?.();
     this.canvas?.remove();
     this.canvas = null;
     this.ctx = null;
-    this.emojiCache.clear();
-    this.emojiFetching.clear();
-    this.emojiFetchingStarted.clear();
-    this.authorPhotoCache.clear();
-    this.stickerCache.clear();
+    this.imageFetchManager.emojiCache.clear();
+    this.imageFetchManager.emojiFetching.clear();
+    this.imageFetchManager.emojiFetchingStarted.clear();
+    this.imageFetchManager.authorPhotoCache.clear();
+    this.imageFetchManager.stickerCache.clear();
     this.textBitmapCache.clear();
     this.superChatGradientCache.clear();
     this.dimensionCache.clear();
@@ -2064,11 +1903,11 @@ export class CanvasRenderer extends RendererBase {
       target: 'emoji' | 'author' | 'sticker'
     ): void => {
       if (!url) return;
-      const bitmap = this.workerBitmapCache.get(url);
+      const bitmap = this.imageFetchManager.workerBitmapCache.get(url);
       if (!bitmap) return;
       transferList.push(bitmap);
       transferredImages.push({ url, bitmap, target });
-      this.workerBitmapCache.delete(url); // bitmap is detached on transfer
+      this.imageFetchManager.workerBitmapCache.delete(url); // bitmap is detached on transfer
     };
 
     for (const seg of content) {
@@ -2134,9 +1973,9 @@ export class CanvasRenderer extends RendererBase {
     this.renderWorker = null;
     this.useWorkerMode = false;
     // Close any remaining pre-converted bitmaps (not yet transferred)
-    for (const bitmap of this.workerBitmapCache.values()) {
+    for (const bitmap of this.imageFetchManager.workerBitmapCache.values()) {
       bitmap.close();
     }
-    this.workerBitmapCache.clear();
+    this.imageFetchManager.workerBitmapCache.clear();
   }
 }
