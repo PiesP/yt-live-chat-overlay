@@ -12,7 +12,13 @@
 import { extractChatEvents } from '@core/chat-message-parser';
 import type { PlaybackSnapshot } from '@core/chat-source-base';
 import { ChatSource } from '@core/chat-source-base';
-import { findElementMatch, isAbortError, throwIfAborted, VIDEO_SELECTORS } from '@core/dom';
+import {
+  clearSafeTimeout,
+  findElementMatch,
+  isAbortError,
+  throwIfAborted,
+  VIDEO_SELECTORS,
+} from '@core/dom';
 import { createLogger } from '@core/logging';
 import { ReplayBuffer } from '@core/replay-buffer';
 import type { LiveChatPayload } from '@core/youtubei-chat';
@@ -205,10 +211,7 @@ export class ReplayChatSource extends ChatSource {
   }
 
   private stopCooperativeLoop(): void {
-    if (this.cooperativeLoopTimer !== null) {
-      clearTimeout(this.cooperativeLoopTimer);
-      this.cooperativeLoopTimer = null;
-    }
+    this.cooperativeLoopTimer = clearSafeTimeout(this.cooperativeLoopTimer);
     this.cooperativeLoopRunning = false;
   }
 

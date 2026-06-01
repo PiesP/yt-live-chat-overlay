@@ -3,6 +3,7 @@
 
 import type { ChatMessage, OverlaySettings } from '@app-types';
 import { ByteLimitedCache } from '@core/byte-limited-cache';
+import { clearSafeInterval } from '@core/dom';
 
 /**
  * ImageFetchManager — handles all image/emoji/sticker loading and caching.
@@ -133,16 +134,6 @@ export class ImageFetchManager {
     };
     img.onerror = () => {
       this.imageLoading.delete(url);
-      this.failedEmojiFetches.set(url, Date.now());
-      // Cap the failed fetches map to prevent unbounded memory growth.
-      if (this.failedEmojiFetches.size > 500) {
-        let evicted = 0;
-        for (const key of this.failedEmojiFetches.keys()) {
-          this.failedEmojiFetches.delete(key);
-          if (++evicted >= 250) break;
-        }
-      }
-      // Silently skip — don't retry broken URLs on every frame.
     };
   }
 
@@ -246,10 +237,7 @@ export class ImageFetchManager {
 
   /** Clean up interval and worker bitmaps. Caches are cleared by the caller. */
   destroy(): void {
-    if (this.emojiCleanupIntervalId !== null) {
-      clearInterval(this.emojiCleanupIntervalId);
-      this.emojiCleanupIntervalId = null;
-    }
+    this.emojiCleanupIntervalId = clearSafeInterval(this.emojiCleanupIntervalId);
     for (const bitmap of this.workerBitmapCache.values()) {
       bitmap.close();
     }

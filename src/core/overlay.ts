@@ -34,6 +34,16 @@ const calculateOverlayDimensions = (playerElement: HTMLElement): OverlayDimensio
   return { width, height };
 };
 
+const calculateOverlayDimensionsFromRect = (
+  width: number,
+  height: number
+): OverlayDimensions | null => {
+  if (width === 0 || height === 0) {
+    return null;
+  }
+  return { width: Math.round(width), height: Math.round(height) };
+};
+
 type OverlayDimensionsChangeCallback = (dimensions: OverlayDimensions | null) => void;
 
 const areOverlayDimensionsEqual = (
@@ -106,7 +116,12 @@ export class Overlay {
       return;
     }
 
-    this.resizeObserver = new ResizeObserver(() => {
+    this.resizeObserver = new ResizeObserver((entries) => {
+      // Use contentRect from the ResizeObserverEntry to avoid forced
+      // synchronous layout that element.offsetWidth/offsetHeight triggers.
+      const entry = entries[0];
+      if (!entry) return;
+
       // Coalesce multiple synchronised ResizeObserver callbacks into a single
       // rAF frame. During window drag-resize, the observer fires for every
       // intermediate size change. Without coalescing, each event triggers
@@ -122,10 +137,23 @@ export class Overlay {
       this.resizeRafId = requestAnimationFrame(() => {
         this.resizeRafId = null;
         this.resizePending = false;
-        this.updateDimensions();
+        const { width, height } = entry.contentRect;
+        this.updateDimensionsFromRect(width, height);
       });
     });
     this.resizeObserver.observe(this.playerElement);
+  }
+
+  private updateDimensionsFromRect(width: number, height: number): void {
+    const nextDimensions =
+      !this.container || !this.settings ? null : calculateOverlayDimensionsFromRect(width, height);
+
+    if (areOverlayDimensionsEqual(this.dimensions, nextDimensions)) {
+      return;
+    }
+
+    this.dimensions = nextDimensions;
+    this.notifyDimensionChangeCallbacks();
   }
 
   private observeFullscreen(): void {

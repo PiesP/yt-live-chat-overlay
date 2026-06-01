@@ -37,6 +37,8 @@ const RECENT_MESSAGE_REPLAY_LIMIT = 20;
 const CHAT_WATCHDOG_INTERVAL_MS = 15_000;
 const STANDBY_RECHECK_INTERVAL_MS = 5_000;
 const STANDBY_RETRY_DELAY_MS = 3_000;
+const STANDBY_RECHECK_MAX_MS = 60_000;
+const STANDBY_RECHECK_FACTOR = 2;
 
 async function createChatSource(
   getSettings: () => Readonly<OverlaySettings>,
@@ -133,7 +135,9 @@ export class RuntimeManager {
   /** Unsubscribe handle for the DOM chat watcher (fallback). */
   private domWatcherUnsubscribe: DomWatcherUnsubscribe | null = null;
   /** Timer for standby periodic recheck (pre-live waiting mode). */
-  private standbyPollTimer: ReturnType<typeof setInterval> | null = null;
+  private standbyPollTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Current delay for standby poll (exponential backoff, 5s→60s). */
+  private standbyPollDelay = STANDBY_RECHECK_INTERVAL_MS;
   /** Timer for faster retry after a transient standby poll failure. */
   private standbyRetryTimer: ReturnType<typeof setTimeout> | null = null;
   /** Whether this session is in standby mode (pre-live, waiting for stream). */
@@ -782,9 +786,9 @@ export class RuntimeManager {
     this.standbyMode = true;
     this.renderer?.setStandbyStatus(true);
 
-    this.standbyPollTimer = setInterval(() => {
-      void this.pollStandbyResolution();
-    }, STANDBY_RECHECK_INTERVAL_MS);
+    // Reset backoff to minimum and start exponential-backoff polling.
+    this.standbyPollDelay = STANDBY_RECHECK_INTERVAL_MS;
+    this.scheduleStandbyPoll();
   }
 
   private exitStandbyMode(): void {
@@ -795,7 +799,15 @@ export class RuntimeManager {
   }
 
   private stopStandbyPolling(): void {
-    this.standbyPollTimer = clearSafeInterval(this.standbyPollTimer);
+    this.standbyPollTimer = clearSafeTimeout(this.standbyPollTimer);
+  }
+
+  /** Schedule the next standby poll with exponential backoff. */
+  private scheduleStandbyPoll(): void {
+    this.standbyPollTimer = setTimeout(() => {
+      this.standbyPollTimer = null;
+      void this.pollStandbyResolution();
+    }, this.standbyPollDelay);
   }
 
   private async pollStandbyResolution(): Promise<void> {
@@ -810,11 +822,20 @@ export class RuntimeManager {
         return;
       }
 
+      // Stream not yet live — increase backoff for next poll.
+      this.standbyPollDelay = Math.min(
+        this.standbyPollDelay * STANDBY_RECHECK_FACTOR,
+        STANDBY_RECHECK_MAX_MS
+      );
+
       // On transient errors (network glitch, 503), retry faster instead of
       // waiting for the next full poll interval.
       if (result.status === 'retryable') {
         this.scheduleStandbyRetry();
+        return;
       }
+
+      this.scheduleStandbyPoll();
     } catch (error: unknown) {
       if (!isAbortError(error)) {
         log.warn('Standby poll failed:', error);
