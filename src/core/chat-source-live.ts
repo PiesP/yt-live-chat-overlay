@@ -85,56 +85,61 @@ export class LiveChatSource extends ChatSource {
     }
   }
 
-  private calculateAdaptiveDelay(timeoutMs: number): number {
+  /**
+   * Exponential backoff when consecutive errors have occurred.
+   * Returns `null` if no errors are active.
+   */
+  private computeErrorBackoffMs(fallbackMs: number): number | null {
+    if (this.consecutiveErrors === 0) return null;
+
+    const settings = this.getSettings();
+    const delayed = fallbackMs * 2 ** this.consecutiveErrors;
+    return Math.min(settings.maxPollIntervalMs, Math.max(settings.minPollIntervalMs, delayed));
+  }
+
+  /**
+   * Sub-poll-interval burst reactivity via EMA rate.
+   * Returns `null` if the EMA provider is not wired or the rate is below any threshold.
+   */
+  private computeBurstAdjustedMs(fallbackMs: number): number | null {
+    const emaRate = this.burstRateProvider?.();
+    if (emaRate === undefined) return null;
+
+    const settings = this.getSettings();
+    if (emaRate >= LiveChatSource.EXTREME_DENSITY_THRESHOLD) return 0;
+    if (emaRate >= LiveChatSource.DENSITY_HIGH_THRESHOLD) {
+      return Math.max(
+        settings.minPollIntervalMs,
+        Math.round(Math.min(settings.maxPollIntervalMs, fallbackMs) * 0.3)
+      );
+    }
+    return null;
+  }
+
+  /**
+   * Moving-window density adaptation using recentMessageCounts.
+   * Uses a single reduce pass — no duplicate computation.
+   */
+  private computeDensityAdjustedMs(fallbackMs: number): number {
     const settings = this.getSettings();
 
-    if (this.consecutiveErrors > 0) {
-      const delayed =
-        (timeoutMs > 0 ? timeoutMs : this.getSettings().livePollFallbackMs) *
-        2 ** this.consecutiveErrors;
-      return Math.min(settings.maxPollIntervalMs, Math.max(settings.minPollIntervalMs, delayed));
+    if (this.recentMessageCounts.length < 2) {
+      // Not enough data points — return clamped fallback as-is.
+      return Math.max(settings.minPollIntervalMs, Math.min(settings.maxPollIntervalMs, fallbackMs));
     }
 
-    // ── Instant burst detection via EMA rate (sub-poll-interval reactivity) ──
-    // Falls back to the 5-sample rolling window if provider is not wired.
-    const emaRate = this.burstRateProvider?.();
-    if (emaRate !== undefined && emaRate >= LiveChatSource.EXTREME_DENSITY_THRESHOLD) {
-      return 0; // chain polling — next request fires immediately
-    }
-    if (emaRate !== undefined && emaRate >= LiveChatSource.DENSITY_HIGH_THRESHOLD) {
-      const base = Math.max(
-        settings.minPollIntervalMs,
-        Math.min(
-          settings.maxPollIntervalMs,
-          timeoutMs > 0 ? timeoutMs : this.getSettings().livePollFallbackMs
-        )
-      );
-      return Math.max(settings.minPollIntervalMs, Math.round(base * 0.3));
-    }
+    // Single reduce — eliminates the duplicate calculation that existed before.
+    const avgCount =
+      this.recentMessageCounts.reduce((a, b) => a + b, 0) / this.recentMessageCounts.length;
 
     // Extreme density: skip sleep entirely (chained polling).
-    // The next request fires immediately after the previous one completes.
-    if (this.recentMessageCounts.length >= 2) {
-      const avgCount =
-        this.recentMessageCounts.reduce((a, b) => a + b, 0) / this.recentMessageCounts.length;
-      if (avgCount >= LiveChatSource.EXTREME_DENSITY_THRESHOLD) {
-        return 0;
-      }
-    }
+    if (avgCount >= LiveChatSource.EXTREME_DENSITY_THRESHOLD) return 0;
 
     // Base adaptive delay within bounds
     let base = Math.max(
       settings.minPollIntervalMs,
-      Math.min(
-        settings.maxPollIntervalMs,
-        timeoutMs > 0 ? timeoutMs : this.getSettings().livePollFallbackMs
-      )
+      Math.min(settings.maxPollIntervalMs, fallbackMs)
     );
-
-    if (this.recentMessageCounts.length < 2) return base;
-
-    const avgCount =
-      this.recentMessageCounts.reduce((a, b) => a + b, 0) / this.recentMessageCounts.length;
 
     if (avgCount >= LiveChatSource.DENSITY_HIGH_THRESHOLD) {
       base = Math.max(settings.minPollIntervalMs, Math.round(base * 0.3));
@@ -144,6 +149,22 @@ export class LiveChatSource extends ChatSource {
     }
 
     return Math.max(settings.minPollIntervalMs, Math.min(settings.maxPollIntervalMs, base));
+  }
+
+  private calculateAdaptiveDelay(timeoutMs: number): number {
+    const settings = this.getSettings();
+    const fallback = timeoutMs > 0 ? timeoutMs : settings.livePollFallbackMs;
+
+    // 1. Error exponential backoff — takes priority when recovering
+    const errorBackoff = this.computeErrorBackoffMs(fallback);
+    if (errorBackoff !== null) return errorBackoff;
+
+    // 2. Burst detection via EMA rate — sub-poll-interval reactivity
+    const burstAdjusted = this.computeBurstAdjustedMs(fallback);
+    if (burstAdjusted !== null) return burstAdjusted;
+
+    // 3. Moving-window density adaptation — full history consideration
+    return this.computeDensityAdjustedMs(fallback);
   }
 
   private async runLiveLoop(signal?: AbortSignal): Promise<void> {

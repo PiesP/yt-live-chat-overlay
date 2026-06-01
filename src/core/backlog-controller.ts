@@ -114,6 +114,42 @@ export class BacklogInjectionController implements Pauseable {
     }
   }
 
+  /**
+   * Filter messages based on the configured backlog mode.
+   * - 'none': returns empty array (no backlog at all).
+   * - 'recent': returns only messages within the configured time window.
+   * - otherwise: returns all messages unfiltered.
+   */
+  private filterByMode(allMessages: ChatMessage[], now: number): ChatMessage[] {
+    if (this.config.backlogMode === 'none') return [];
+    if (this.config.backlogMode === 'recent') {
+      const cutoffMs = this.config.backlogRecentMinutes * 60 * 1000;
+      return allMessages.filter((m) => now - m.timestamp < cutoffMs);
+    }
+    return allMessages;
+  }
+
+  /**
+   * Split messages into priority (SuperChat/Membership) and regular groups.
+   * Priority messages are emitted immediately during backlog injection;
+   * regular messages go through the throttled queue.
+   */
+  private extractPriorityMessages(messages: ChatMessage[]): {
+    priority: ChatMessage[];
+    regular: ChatMessage[];
+  } {
+    const priority: ChatMessage[] = [];
+    const regular: ChatMessage[] = [];
+    for (const msg of messages) {
+      if (msg.kind === 'superchat' || msg.kind === 'membership') {
+        priority.push(msg);
+      } else {
+        regular.push(msg);
+      }
+    }
+    return { priority, regular };
+  }
+
   constructor(
     config: BacklogControllerConfig,
     lanes: number,
@@ -129,8 +165,8 @@ export class BacklogInjectionController implements Pauseable {
   startBacklogInjection(messages: ChatMessage[]): void {
     if (messages.length === 0) return;
 
-    // If already injecting, ignore duplicate calls — the current injection
-    // is still in progress and resetting state would lose queued messages.
+    // If already injecting, queue additional messages into the existing
+    // injection rather than resetting state and losing progress.
     if (this.isInjecting) {
       let added = 0;
       for (const msg of messages) {
@@ -147,6 +183,10 @@ export class BacklogInjectionController implements Pauseable {
       return;
     }
 
+    // Mode-based filtering
+    const now = Date.now();
+    const filtered = this.filterByMode(messages, now);
+
     // 'none' mode: skip backlog entirely
     if (this.config.backlogMode === 'none') {
       log.debug('Backlog mode is "none", skipping injection');
@@ -154,42 +194,27 @@ export class BacklogInjectionController implements Pauseable {
       return;
     }
 
-    // 'recent' mode: filter messages by time window
-    let filtered = messages;
+    // Log recent mode filtering summary
     if (this.config.backlogMode === 'recent') {
-      const cutoffMs = this.config.backlogRecentMinutes * 60 * 1000;
-      const now = Date.now();
-      filtered = messages.filter((m) => now - m.timestamp < cutoffMs);
       log.debug(
         `Backlog recent mode: ${messages.length} → ${filtered.length} ` +
           `(last ${this.config.backlogRecentMinutes} min)`
       );
     }
 
-    // Apply sampling based on backlog size
+    // Statistical sampling + priority extraction
     const sampled = this.sampleMessages(filtered);
-
-    // Separate priority messages (SuperChat, Membership) from normal ones.
-    const priorityMessages: ChatMessage[] = [];
-    let normalMessages: ChatMessage[] = [];
-    for (const m of sampled) {
-      if (m.kind === 'superchat' || m.kind === 'membership') {
-        priorityMessages.push(m);
-      } else {
-        normalMessages.push(m);
-      }
-    }
+    const { priority: priorityMessages, regular: normalMessages } =
+      this.extractPriorityMessages(sampled);
 
     // Priority messages bypass the throttled queue and are emitted
     // immediately for minimum display latency. When the injector is
     // paused (lane utilization > 80%), prepend them to the normal queue
     // instead — they surface first when injection resumes.
+    let queueMessages: ChatMessage[] = normalMessages;
     if (priorityMessages.length > 0) {
       if (this.paused) {
-        // Injector paused: prepend priority messages so they're injected
-        // first when the queue drain resumes. Without this, priority
-        // messages would be silently lost while the injector is paused.
-        normalMessages = [...priorityMessages, ...normalMessages];
+        queueMessages = [...priorityMessages, ...normalMessages];
       } else {
         for (const msg of priorityMessages) {
           msg.isBacklog = true;
@@ -199,16 +224,16 @@ export class BacklogInjectionController implements Pauseable {
       }
     }
 
-    this.backlogQueue = normalMessages;
-    // Track IDs for duplicate injection prevention.
+    // Setup backlog queue state and dedup tracking
+    this.backlogQueue = queueMessages;
     this.backlogSeenIds = new Set<string>();
-    for (const msg of normalMessages) {
+    for (const msg of queueMessages) {
       if (msg.id) this.backlogSeenIds.add(msg.id);
     }
-    this.totalBacklog = normalMessages.length;
+    this.totalBacklog = queueMessages.length;
     this.processedBacklog = 0;
-    this.isActive = normalMessages.length > 0;
-    this.injectionStartTime = Date.now();
+    this.isActive = queueMessages.length > 0;
+    this.injectionStartTime = now;
 
     // Adapt density ramp duration to backlog size.
     // Small backlogs (<200) use the base ramp; large backlogs (>=500)
@@ -230,14 +255,8 @@ export class BacklogInjectionController implements Pauseable {
     }
 
     log.debug(`Backlog injection: ${messages.length} messages, sampled to ${sampled.length}`);
-
-    // Show indicator
     this.showIndicator();
-
-    // Report to observability
     this.observability?.updateBacklogProgress(0);
-
-    // Start throttled injection
     this.startInjection();
   }
 
