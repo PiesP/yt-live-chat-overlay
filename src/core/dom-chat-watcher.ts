@@ -124,9 +124,12 @@ export function installDomChatWatcher(onMessages: DomMessageCallback): DomWatche
       mutationBatchPending = true;
       requestAnimationFrame(() => {
         mutationBatchPending = false;
-        const batch = pendingMutations.flat();
+        // Iterate pendingMutations directly instead of flat() — avoids
+        // allocating a new array each frame during chat bursts.
+        for (const batch of pendingMutations) {
+          handleMutations(batch);
+        }
         pendingMutations = [];
-        handleMutations(batch);
       });
     }
   };
