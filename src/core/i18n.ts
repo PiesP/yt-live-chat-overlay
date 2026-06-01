@@ -82,16 +82,18 @@ const KO: TranslationMap = {
   Advanced: '고급',
   Translation: '번역',
 
+  // ── Aria labels / misc ──
+  Color: '색상',
+  Show: '표시',
+  'Short messages shown regardless of length': '길이에 관계없이 짧은 메시지 표시',
+
   // ── Section titles ──
   'Text Outline': '텍스트 외곽선',
   'Safe Zone': '안전 영역',
   'Message Rate': '메시지 빈도',
-  'Moderator and Owner': '관리자와 소유자',
   'Depth Layers': '깊이 레이어',
   Backlog: '백로그',
-  'Rate Limiting': '속도 제한',
   Timing: '타이밍',
-  Thresholds: '임계값',
   Tuning: '튜닝',
   'Burst Detection': '버스트 감지',
   Cache: '캐시',
@@ -393,16 +395,18 @@ const JA: TranslationMap = {
   Advanced: '詳細',
   Translation: '翻訳',
 
+  // ── Aria labels / misc ──
+  Color: '色',
+  Show: '表示',
+  'Short messages shown regardless of length': '長さに関係なく短いメッセージを表示',
+
   // ── Section titles ──
   'Text Outline': 'テキスト縁取り',
   'Safe Zone': '安全領域',
   'Message Rate': 'メッセージ頻度',
-  'Moderator and Owner': 'モデレーターと所有者',
   'Depth Layers': '深度レイヤー',
   Backlog: 'バックログ',
-  'Rate Limiting': 'レート制限',
   Timing: 'タイミング',
-  Thresholds: 'しきい値',
   Cache: 'キャッシュ',
   'Burst Detection': 'バースト検出',
   Tuning: 'チューニング',
@@ -707,16 +711,19 @@ const ES: TranslationMap = {
   Advanced: 'Avanzado',
   Translation: 'Traducción',
 
+  // ── Aria labels / misc ──
+  Color: 'Color',
+  Show: 'Mostrar',
+  'Short messages shown regardless of length':
+    'Mostrar mensajes cortos independientemente de la longitud',
+
   // ── Section titles ──
   'Text Outline': 'Contorno de texto',
   'Safe Zone': 'Zona segura',
   'Message Rate': 'Frecuencia de mensajes',
-  'Moderator and Owner': 'Moderador y Propietario',
   'Depth Layers': 'Capas de profundidad',
   Backlog: 'Historial',
-  'Rate Limiting': 'Límite de frecuencia',
   Timing: 'Temporización',
-  Thresholds: 'Umbrales',
   Tuning: 'Ajustes',
   'Burst Detection': 'Detección de ráfagas',
   Cache: 'Caché',
@@ -1033,16 +1040,18 @@ const ZH: TranslationMap = {
   Advanced: '高级',
   Translation: '翻译',
 
+  // ── Aria labels / misc ──
+  Color: '颜色',
+  Show: '显示',
+  'Short messages shown regardless of length': '无论长度如何，显示短消息',
+
   // ── Section titles ──
   'Text Outline': '文字描边',
   'Safe Zone': '安全区域',
   'Message Rate': '消息频率',
-  'Moderator and Owner': '版主与频道主',
   'Depth Layers': '深度图层',
   Backlog: '回放',
-  'Rate Limiting': '频率限制',
   Timing: '时序',
-  Thresholds: '阈值',
   Tuning: '调优',
   'Burst Detection': '突发检测',
   Cache: '缓存',

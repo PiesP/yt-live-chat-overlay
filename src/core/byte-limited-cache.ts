@@ -20,7 +20,13 @@ export class ByteLimitedCache<V> {
   ) {}
 
   get(key: string): V | undefined {
-    return this.map.get(key);
+    const val = this.map.get(key);
+    if (val !== undefined) {
+      // LRU touch: move key to end of insertion order (Map is ordered)
+      this.map.delete(key);
+      this.map.set(key, val);
+    }
+    return val;
   }
 
   set(key: string, value: V): void {

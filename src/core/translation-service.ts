@@ -296,9 +296,6 @@ export class TranslationService {
     // ── Check cache before calling the API ────────────────────────────
     const cached = this.translationCache.get(text);
     if (cached !== undefined) {
-      // LRU touch: move entry to end of eviction order so frequently
-      // repeated short text ("LOL", "草") stays in cache indefinitely.
-      this.translationCache.touch(text);
       return cached;
     }
 

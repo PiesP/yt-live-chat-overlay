@@ -126,7 +126,6 @@ function renderSegment(
     const key = `${font}|${text}|${color}|${Math.round(strokeWidth)}|${strokeColor}`;
     const bitmap = textBitmapCache.get(key);
     if (bitmap) {
-      textBitmapCache.touch(key);
       ctx.drawImage(bitmap, x, y);
       return;
     }
@@ -197,8 +196,6 @@ function renderContentSegments(
       const cached = emojiCache.get(seg.emoji.url);
       const img = cached?.complete && cached.naturalWidth > 0 ? cached : null;
       if (img) {
-        // LRU touch: move key to end of insertion order
-        emojiCache.touch(seg.emoji.url);
         ctx.drawImage(img, cursorX, y, emojiSize, emojiSize);
       } else if (seg.emoji.fallbackText) {
         renderSegment(
@@ -418,8 +415,6 @@ export function renderWrappedContentSegments(
         const cached = emojiCache.get(piece.emoji.url);
         const img = cached?.complete && cached.naturalWidth > 0 ? cached : null;
         if (img) {
-          // LRU touch: move key to end of insertion order
-          emojiCache.touch(piece.emoji.url);
           ctx.drawImage(img, cursorX, cursorY, emojiSize, emojiSize);
         } else if (piece.emoji.fallbackText) {
           renderSegment(
