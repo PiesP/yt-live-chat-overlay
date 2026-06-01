@@ -33,6 +33,7 @@ export const typography = {
   },
   lineHeight: {
     normal: 1.5,
+    tight: 1,
   },
 } as const;
 
@@ -61,6 +62,36 @@ export const borderRadius = {
 
 export const zIndex = {
   modal: 10003,
+  settingsButton: 120,
+} as const;
+
+// ── UI sizing tokens (settings panel layout) ──
+export const uiSizing = {
+  buttonSize: 36,
+  buttonFontSize: 18,
+  inputWidth: 86,
+  colorSwatch: 44,
+  modalWidth: 400,
+  modalMaxVW: 92,
+  modalMaxWidth: 420,
+  modalMaxVH: 82,
+  confirmMinWidth: 240,
+  checkboxSize: 18,
+  borderAlpha: 0.25,
+  scrimAlpha: 0.55,
+  hoverScrimAlpha: 0.75,
+} as const;
+
+// ── Animation durations (settings panel) ──
+export const animDuration = {
+  fast: '0.1s',
+  normal: '0.15s',
+  slow: '0.18s',
+  transitions: {
+    button: 'opacity 0.15s, background 0.15s, transform 0.1s',
+    action: 'background 0.15s, color 0.15s, border-color 0.15s',
+    tab: 'color 0.1s',
+  },
 } as const;
 
 // ── UI confirm backdrop alpha ──
