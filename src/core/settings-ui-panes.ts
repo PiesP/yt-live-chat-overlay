@@ -459,12 +459,12 @@ export const PANES: PaneDef[] = [
             'speedBoostThreshold',
             'Pending messages to trigger speed boost'
           ),
-          num(
+          range(
             'Backlog Pause (%)',
             'backlogPauseThreshold',
             'Lane utilization ratio to pause backlog injection'
           ),
-          num(
+          range(
             'Backlog Resume (%)',
             'backlogResumeThreshold',
             'Lane utilization ratio to resume backlog injection'
@@ -495,7 +495,7 @@ export const PANES: PaneDef[] = [
             'Max density ramp duration for backlog injection'
           ),
           num(
-            'Backlog Injection Rate Min',
+            'Backlog Injection Rate Min (msg/s)',
             'backlogInjectionRateMin',
             'Minimum backlog injection rate (msg/s)'
           ),
@@ -574,7 +574,12 @@ export const PANES: PaneDef[] = [
             'translationEnabled',
             'Translate chat messages in real-time (requires Chrome 138+ for built-in translation)'
           ),
-          sel('Service', 'translationService', [['auto', 'Auto (Chrome built-in)']]),
+          sel(
+            'Service',
+            'translationService',
+            [['auto', 'Auto (Chrome built-in)']],
+            'Translation backend service for processing messages'
+          ),
           sel(
             'Source Language',
             'translationSource',

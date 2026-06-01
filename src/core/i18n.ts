@@ -100,6 +100,7 @@ const KO: TranslationMap = {
   'Author Colors & Visibility': '작성자 색상 및 표시',
   Interface: '인터페이스',
   'Chat Translation': '채팅 번역',
+  'Translation backend service for processing messages': '메시지 처리를 위한 번역 백엔드 서비스',
 
   // ── Field labels ──
   'Danmaku Mode': '단마쿠 모드',
@@ -340,7 +341,7 @@ const KO: TranslationMap = {
   'Stagger Medium Delay (ms)': '중간 스태거 지연 (ms)',
   'Emoji Fetch Timeout (ms)': '이모지 가져오기 시간 초과 (ms)',
   'Backlog Density Ramp Max (ms)': '백로그 밀도 램프 최대 (ms)',
-  'Backlog Injection Rate Min': '최소 백로그 주입 속도',
+  'Backlog Injection Rate Min (msg/s)': '최소 백로그 주입 속도',
   'Speed Boost Max': '최대 속도 부스트',
   'Speed Boost Denominator': '속도 부스트 분모',
   'Backlog Toggle Cooldown (ms)': '백로그 전환 쿨다운 (ms)',
@@ -413,6 +414,8 @@ const JA: TranslationMap = {
   'Author Colors & Visibility': '投稿者の色と表示',
   Interface: 'インターフェース',
   'Chat Translation': 'チャット翻訳',
+  'Translation backend service for processing messages':
+    'メッセージ処理用の翻訳バックエンドサービス',
 
   // ── Field labels ──
   'Danmaku Mode': '弾幕モード',
@@ -656,7 +659,7 @@ const JA: TranslationMap = {
   'Stagger Medium Delay (ms)': '中スタッガー遅延 (ms)',
   'Emoji Fetch Timeout (ms)': '絵文字取得タイムアウト (ms)',
   'Backlog Density Ramp Max (ms)': 'バックログ密度ランプ最大 (ms)',
-  'Backlog Injection Rate Min': '最小バックログ注入レート',
+  'Backlog Injection Rate Min (msg/s)': '最小バックログ注入レート',
   'Speed Boost Max': '最大スピードブースト',
   'Speed Boost Denominator': 'スピードブースト分母',
   'Backlog Toggle Cooldown (ms)': 'バックログ切替クールダウン (ms)',
@@ -730,6 +733,8 @@ const ES: TranslationMap = {
   'Author Colors & Visibility': 'Colores y visibilidad',
   Interface: 'Interfaz',
   'Chat Translation': 'Traducción de chat',
+  'Translation backend service for processing messages':
+    'Servicio de traducción para procesar mensajes',
 
   // ── Field labels ──
   'Danmaku Mode': 'Modo Danmaku',
@@ -978,7 +983,7 @@ const ES: TranslationMap = {
   'Stagger Medium Delay (ms)': 'Retardo escalonado medio (ms)',
   'Emoji Fetch Timeout (ms)': 'Tiempo de espera de emoji (ms)',
   'Backlog Density Ramp Max (ms)': 'Rampa densidad historial máx. (ms)',
-  'Backlog Injection Rate Min': 'Inyección historial mín.',
+  'Backlog Injection Rate Min (msg/s)': 'Inyección historial mín.',
   'Speed Boost Max': 'Aumento velocidad máx.',
   'Speed Boost Denominator': 'Denom. aumento velocidad',
   'Backlog Toggle Cooldown (ms)': 'Enfriamiento alternar historial (ms)',
@@ -1058,6 +1063,7 @@ const ZH: TranslationMap = {
   'Author Colors & Visibility': '用户颜色与显示',
   Interface: '界面',
   'Chat Translation': '聊天翻译',
+  'Translation backend service for processing messages': '用于处理消息的翻译后端服务',
 
   // ── Field labels ──
   'Danmaku Mode': '弹幕模式',
@@ -1283,7 +1289,7 @@ const ZH: TranslationMap = {
   'Stagger Medium Delay (ms)': '中等交错延迟 (ms)',
   'Emoji Fetch Timeout (ms)': '表情获取超时 (ms)',
   'Backlog Density Ramp Max (ms)': '回放密度斜坡最大 (ms)',
-  'Backlog Injection Rate Min': '最小回放注入速率',
+  'Backlog Injection Rate Min (msg/s)': '最小回放注入速率',
   'Speed Boost Max': '最大速度提升',
   'Speed Boost Denominator': '速度提升分母',
   'Backlog Toggle Cooldown (ms)': '回放切换冷却 (ms)',
