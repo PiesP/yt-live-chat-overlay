@@ -27,6 +27,16 @@ import { VideoPauseController } from '@core/video-pause-controller';
 import type { ChatBootstrapResult } from '@core/youtubei-chat';
 import { bootstrapChatSession } from '@core/youtubei-chat';
 
+/** Runtime lifecycle state machine — replaces ad-hoc boolean flags. */
+enum RuntimeState {
+  INIT = 'init',
+  STARTING = 'starting',
+  ACTIVE = 'active',
+  RESTARTING = 'restarting',
+  DISPOSED = 'disposed',
+  DESTROYED = 'destroyed',
+}
+
 const log = createLogger('RuntimeManager');
 
 const NAVIGATION_SETTLE_DELAY_MS = 2000;
@@ -106,7 +116,6 @@ export class RuntimeManager {
   private reconcileRequested = false;
   private reconcilePromise: Promise<void> | null = null;
   private scheduledReconcileTimer: ReturnType<typeof setTimeout> | null = null;
-  private destroyed = false;
   private lastPageChangeAt = 0;
   private startFailureState: StartFailureState = {
     url: null,
@@ -124,9 +133,7 @@ export class RuntimeManager {
   private videoPauseController = new VideoPauseController();
   private backlogController: BacklogInjectionController | null = null;
   private chatWatchdogTimer: ReturnType<typeof setInterval> | null = null;
-  private disposed = false;
-  private sessionReady = false;
-  private restartRequested = false;
+  private state: RuntimeState = RuntimeState.INIT;
   private hiddenSince: number | null = null;
   /** Session-scoped registry of message IDs already rendered once. Persists across renderer resets. */
   private readonly sessionDedup = new MessageIdRegistry(5000);
@@ -140,8 +147,20 @@ export class RuntimeManager {
   private standbyPollDelay = STANDBY_RECHECK_INTERVAL_MS;
   /** Timer for faster retry after a transient standby poll failure. */
   private standbyRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  private get isDisposedState(): boolean {
+    return (
+      this.state === RuntimeState.DISPOSED ||
+      this.state === RuntimeState.RESTARTING ||
+      this.state === RuntimeState.DESTROYED
+    );
+  }
+
   /** Whether this session is in standby mode (pre-live, waiting for stream). */
   private standbyMode = false;
+
+  private get isActiveState(): boolean {
+    return this.state === RuntimeState.STARTING || this.state === RuntimeState.ACTIVE;
+  }
 
   constructor(options: RuntimeManagerOptions) {
     this.getCurrentUrl = options.getCurrentUrl;
@@ -154,7 +173,7 @@ export class RuntimeManager {
   }
 
   requestReconcile(reason: ReconcileReason): void {
-    if (this.destroyed) {
+    if (this.state === RuntimeState.DESTROYED) {
       return;
     }
 
@@ -177,11 +196,11 @@ export class RuntimeManager {
   }
 
   destroy(): void {
-    if (this.destroyed) {
+    if (this.state === RuntimeState.DESTROYED) {
       return;
     }
 
-    this.destroyed = true;
+    this.state = RuntimeState.DESTROYED;
     this.clearScheduledReconcile();
     this.disposeActiveSession();
   }
@@ -199,7 +218,7 @@ export class RuntimeManager {
   }
 
   private async runReconcileLoop(): Promise<void> {
-    while (this.reconcileRequested && !this.destroyed) {
+    while (this.reconcileRequested && this.state !== RuntimeState.DESTROYED) {
       this.reconcileRequested = false;
       try {
         await this.reconcileOnce();
@@ -211,7 +230,7 @@ export class RuntimeManager {
 
   private async reconcileOnce(): Promise<void> {
     const desired = this.getDesiredState();
-    const hasActiveSession = this.targetUrl !== null && !this.disposed;
+    const hasActiveSession = this.targetUrl !== null && !this.isDisposedState;
 
     if (hasActiveSession && (!desired.shouldRun || !this.matchesSessionUrl(desired.url))) {
       this.disposeActiveSession();
@@ -228,7 +247,7 @@ export class RuntimeManager {
       return;
     }
 
-    if (this.targetUrl !== null && !this.disposed) {
+    if (this.targetUrl !== null && !this.isDisposedState) {
       this.updateSessionSettings(desired.settings);
       return;
     }
@@ -239,13 +258,11 @@ export class RuntimeManager {
 
     // Reset session lifecycle flags for new start
     this.abortController = new AbortController();
-    this.disposed = false;
-    this.sessionReady = false;
-    this.restartRequested = false;
+    this.state = RuntimeState.STARTING;
 
     const startStatus = await this.startSession();
 
-    if (this.disposed) {
+    if (this.isDisposedState) {
       return;
     }
 
@@ -268,7 +285,7 @@ export class RuntimeManager {
   }
 
   private handleSessionRestart(reason: RuntimeSessionRestartReason): void {
-    if (this.destroyed || this.restartRequested) {
+    if (this.state === RuntimeState.DESTROYED || this.state === RuntimeState.RESTARTING) {
       return;
     }
 
@@ -320,7 +337,7 @@ export class RuntimeManager {
         return chatStarted;
       }
 
-      this.sessionReady = true;
+      this.state = RuntimeState.ACTIVE;
 
       // Show standby status until first chat message arrives.
       // Provides immediate visual feedback that the overlay is active
@@ -362,7 +379,7 @@ export class RuntimeManager {
    * is no stale-copy risk within a single updateSettings() call.
    */
   private updateSessionSettings(settings: OverlaySettings): void {
-    if (this.disposed || !this.settings) {
+    if (!this.isActiveState || !this.settings) {
       return;
     }
 
@@ -402,15 +419,13 @@ export class RuntimeManager {
   }
 
   private disposeSession(): void {
-    if (this.disposed) {
+    if (this.isDisposedState) {
       return;
     }
 
     this.exitStandbyMode();
 
-    this.disposed = true;
-    this.sessionReady = false;
-    this.restartRequested = true;
+    this.state = RuntimeState.RESTARTING;
 
     // Stop event listeners BEFORE aborting — abort handlers may throw,
     // and we want listeners cleaned up regardless.
@@ -477,7 +492,7 @@ export class RuntimeManager {
     }
 
     return chatSource.start((messages, _isInitialSeed) => {
-      if (this.disposed) return;
+      if (this.isDisposedState) return;
       const renderer = this.renderer;
       if (!renderer) return;
 
@@ -544,7 +559,7 @@ export class RuntimeManager {
       this.fetchInterceptorUnsubscribe = installFetchInterceptor(
         () => this.settings as OverlaySettings,
         (messages) => {
-          if (this.disposed) return;
+          if (this.isDisposedState) return;
           chatSource.injectExternalMessages(messages);
         }
       );
@@ -557,7 +572,7 @@ export class RuntimeManager {
     // interceptor misses a response (URL pattern change, etc.).
     try {
       this.domWatcherUnsubscribe = installDomChatWatcher((messages) => {
-        if (this.disposed) return;
+        if (this.isDisposedState) return;
         chatSource.injectExternalMessages(messages);
       });
     } catch (error: unknown) {
@@ -643,17 +658,19 @@ export class RuntimeManager {
       (!isVideoPaused &&
         (!renderable ||
           idleDurationMs >= LONG_IDLE_RESTART_MS ||
-          (this.sessionReady && chat != null && (!chat.observerAlive || !chat.recentlyActive))));
+          (this.state === RuntimeState.ACTIVE &&
+            chat != null &&
+            (!chat.observerAlive || !chat.recentlyActive))));
 
     return { idleDurationMs, renderable, chat, shouldRestart };
   }
 
   private requestManagedRestart(reason: RuntimeSessionRestartReason): void {
-    if (this.disposed || this.restartRequested) {
+    if (this.isDisposedState) {
       return;
     }
 
-    this.restartRequested = true;
+    this.state = RuntimeState.RESTARTING;
     const health = this.getRuntimeHealthSnapshot();
     log.warn('Requesting managed runtime restart', { reason, health });
     this.handleSessionRestart(reason);
@@ -671,7 +688,7 @@ export class RuntimeManager {
         return;
       }
 
-      if (this.disposed) {
+      if (this.isDisposedState) {
         return;
       }
 
@@ -740,7 +757,7 @@ export class RuntimeManager {
     };
     this.videoPauseController.start({
       pauseable: videoPauseable,
-      isDisposed: () => this.disposed,
+      isDisposed: () => this.isDisposedState,
     });
   }
 
@@ -757,7 +774,7 @@ export class RuntimeManager {
     this.chatWatchdogTimer = setInterval(() => {
       try {
         // Skip checks while disposed, hidden, or mid-restart
-        if (this.disposed || document.visibilityState !== 'visible' || this.restartRequested) {
+        if (this.isDisposedState || document.visibilityState !== 'visible') {
           return;
         }
 
@@ -811,7 +828,7 @@ export class RuntimeManager {
   }
 
   private async pollStandbyResolution(): Promise<void> {
-    if (this.disposed || !this.standbyMode) return;
+    if (this.isDisposedState || !this.standbyMode) return;
 
     try {
       const result = await bootstrapChatSession(this.abortController.signal);
@@ -901,7 +918,7 @@ export class RuntimeManager {
   }
 
   private scheduleReconcile(delayMs: number): void {
-    if (this.destroyed) {
+    if (this.state === RuntimeState.DESTROYED) {
       return;
     }
 

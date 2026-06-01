@@ -48,6 +48,7 @@ const EMA_ALPHA = 0.3;
 
 export class BurstDetector {
   private samples: number[] = [];
+  private runningSum = 0;
   private currentLevel: BurstLevel = 'normal';
   private lastBurstTime: number = 0;
   private burstStartTime: number = 0;
@@ -99,9 +100,12 @@ export class BurstDetector {
   start(): void {
     if (this.sampleInterval) return;
     this.sampleInterval = setInterval(() => {
-      this.samples.push(this.samplesSinceLastCheck);
+      const count = this.samplesSinceLastCheck;
+      this.samples.push(count);
+      this.runningSum += count;
       if (this.samples.length > this.rateSampleWindow) {
-        this.samples.shift();
+        const removed = this.samples.shift() ?? 0;
+        this.runningSum -= removed;
       }
       this.samplesSinceLastCheck = 0;
       this.evaluate();
@@ -131,6 +135,7 @@ export class BurstDetector {
     this.stop();
     this.lastMessageTime = 0;
     this.samples = [];
+    this.runningSum = 0;
     this.currentLevel = 'normal';
     this.lastBurstTime = 0;
     this.burstStartTime = 0;
@@ -142,6 +147,7 @@ export class BurstDetector {
    */
   resume(): void {
     this.samples = [];
+    this.runningSum = 0;
     this.lastBurstTime = 0;
     this.burstStartTime = 0;
     this.start();
@@ -156,7 +162,7 @@ export class BurstDetector {
   private evaluate(): void {
     if (this.samples.length === 0) return;
 
-    const avgRate = this.samples.reduce((a, b) => a + b, 0) / this.samples.length;
+    const avgRate = this.samples.length > 0 ? this.runningSum / this.samples.length : 0;
 
     const newLevel: BurstLevel =
       avgRate > this.extremeThreshold

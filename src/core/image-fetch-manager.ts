@@ -30,6 +30,8 @@ export class ImageFetchManager {
   readonly failedEmojiFetches = new Map<string, number>();
   /** In-flight image load guard to prevent duplicate Image objects. */
   readonly imageLoading = new Set<string>();
+  /** In-flight Image objects for teardown neutering. */
+  private readonly inFlightImages = new Set<HTMLImageElement>();
 
   /**
    * Pre-converted ImageBitmaps for transfer to the render worker.
@@ -125,14 +127,17 @@ export class ImageFetchManager {
     if (this.imageLoading.has(url)) return;
     this.imageLoading.add(url);
     const img = new Image();
+    this.inFlightImages.add(img);
     img.crossOrigin = 'anonymous';
     img.src = url;
     img.onload = () => {
+      this.inFlightImages.delete(img);
       this.imageLoading.delete(url);
       cache.set(url, img);
       this.preConvertForWorker(url, img);
     };
     img.onerror = () => {
+      this.inFlightImages.delete(img);
       this.imageLoading.delete(url);
     };
   }
@@ -147,6 +152,8 @@ export class ImageFetchManager {
     if (!img.complete || img.naturalWidth === 0) return;
     createImageBitmap(img)
       .then((bitmap) => {
+        const old = this.workerBitmapCache.get(url);
+        if (old) old.close();
         this.workerBitmapCache.set(url, bitmap);
       })
       .catch(() => {});
@@ -235,9 +242,18 @@ export class ImageFetchManager {
     }
   }
 
-  /** Clean up interval and worker bitmaps. Caches are cleared by the caller. */
+  /** Clean up interval, in-flight images, and worker bitmaps. Caches are cleared by the caller. */
   destroy(): void {
     this.emojiCleanupIntervalId = clearSafeInterval(this.emojiCleanupIntervalId);
+
+    // Neuter in-flight Image objects so callbacks don't fire after teardown.
+    for (const img of this.inFlightImages) {
+      img.onload = null;
+      img.onerror = null;
+      img.src = '';
+    }
+    this.inFlightImages.clear();
+
     for (const bitmap of this.workerBitmapCache.values()) {
       bitmap.close();
     }

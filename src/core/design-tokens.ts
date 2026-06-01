@@ -19,6 +19,14 @@ import type { RgbColor, SuperChatInfo } from '@app-types';
 /** Default font family stack for overlay text rendering. */
 export const DEFAULT_FONT_FAMILY = 'system-ui, -apple-system, sans-serif';
 
+// ── Time unit constants ─────────────────────────────────────────────────
+/** One second in milliseconds. */
+export const SECOND = 1000;
+/** One minute in milliseconds. */
+export const MINUTE = 60 * SECOND;
+/** One hour in milliseconds. */
+export const HOUR = 60 * MINUTE;
+
 const superChatColors = {
   blue: { r: 30, g: 136, b: 229 },
   cyan: { r: 0, g: 191, b: 255 },
