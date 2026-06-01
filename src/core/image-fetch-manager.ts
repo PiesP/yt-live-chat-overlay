@@ -33,6 +33,10 @@ export class ImageFetchManager {
   /** In-flight Image objects for teardown neutering. */
   private readonly inFlightImages = new Set<HTMLImageElement>();
 
+  /** Generation counter per URL — prevents stale createImageBitmap results
+   * from overwriting newer bitmaps when the same URL is loaded concurrently. */
+  private readonly bitmapGeneration = new Map<string, number>();
+
   /**
    * Pre-converted ImageBitmaps for transfer to the render worker.
    * Created asynchronously when HTMLImageElements finish loading.
@@ -76,35 +80,10 @@ export class ImageFetchManager {
     this.renderWorker = worker;
     this.useWorkerMode = worker !== null;
 
-    // Resize caches by replacing them with new limits
-    const emojiSize = (img: HTMLImageElement) => img.naturalWidth * img.naturalHeight * 4;
-    const oldEmoji = this.emojiCache;
-    this.emojiCache = new ByteLimitedCache<HTMLImageElement>(
-      settings.emojiCacheMb * 1_000_000,
-      emojiSize
-    );
-    // Copy existing entries from old cache to preserve cached images
-    for (const [key, val] of oldEmoji.map) {
-      this.emojiCache.set(key, val);
-    }
-
-    const oldPhoto = this.authorPhotoCache;
-    this.authorPhotoCache = new ByteLimitedCache<HTMLImageElement>(
-      settings.photoCacheMb * 1_000_000,
-      emojiSize
-    );
-    for (const [key, val] of oldPhoto.map) {
-      this.authorPhotoCache.set(key, val);
-    }
-
-    const oldSticker = this.stickerCache;
-    this.stickerCache = new ByteLimitedCache<HTMLImageElement>(
-      settings.stickerCacheMb * 1_000_000,
-      emojiSize
-    );
-    for (const [key, val] of oldSticker.map) {
-      this.stickerCache.set(key, val);
-    }
+    // Resize caches in-place instead of recreating + copying all entries.
+    this.emojiCache.resize(settings.emojiCacheMb * 1_000_000);
+    this.authorPhotoCache.resize(settings.photoCacheMb * 1_000_000);
+    this.stickerCache.resize(settings.stickerCacheMb * 1_000_000);
 
     // Start cleanup interval if not already running
     if (this.emojiCleanupIntervalId === null) {
@@ -150,13 +129,25 @@ export class ImageFetchManager {
   private preConvertForWorker(url: string, img: HTMLImageElement): void {
     if (!this.useWorkerMode || !this.renderWorker) return;
     if (!img.complete || img.naturalWidth === 0) return;
+    const generation = (this.bitmapGeneration.get(url) ?? 0) + 1;
+    this.bitmapGeneration.set(url, generation);
     createImageBitmap(img)
       .then((bitmap) => {
+        // Discard if a newer createImageBitmap for the same URL has been issued.
+        if (generation !== this.bitmapGeneration.get(url)) {
+          bitmap.close();
+          return;
+        }
         const old = this.workerBitmapCache.get(url);
         if (old) old.close();
         this.workerBitmapCache.set(url, bitmap);
       })
-      .catch(() => {});
+      .catch(() => {
+        // On failure, clear the generation so a retry doesn't appear stale.
+        if (generation === this.bitmapGeneration.get(url)) {
+          this.bitmapGeneration.delete(url);
+        }
+      });
   }
 
   /**
@@ -258,5 +249,6 @@ export class ImageFetchManager {
       bitmap.close();
     }
     this.workerBitmapCache.clear();
+    this.bitmapGeneration.clear();
   }
 }
