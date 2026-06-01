@@ -27,6 +27,8 @@ interface ChatHealthSnapshotOptions {
 export interface ChatHealthSnapshot {
   observerAlive: boolean;
   recentlyActive: boolean;
+  /** True when the chat source is intentionally backing off from fetches (not a crash). */
+  isInBackoff: boolean;
 }
 
 export interface PlaybackSnapshot {
@@ -182,6 +184,7 @@ export abstract class ChatSource implements Pauseable {
     return {
       observerAlive: this.isObserverAlive(),
       recentlyActive: this.isActive(activeTimeoutMs),
+      isInBackoff: false,
     };
   }
 
@@ -272,6 +275,11 @@ export abstract class ChatSource implements Pauseable {
   ): Promise<LiveChatPayload | null> {
     if (!this.bootstrap) return null;
 
+    // Mark activity BEFORE the fetch so the health watchdog doesn't
+    // penalize transient network failures — the source IS actively
+    // trying, even if the current request failed.
+    this.markActivity();
+
     const response = await fetchFn(this.bootstrap, continuation, ...fetchArgs);
     const payload = getLiveChatPayload(response);
     if (!payload) {
@@ -279,7 +287,6 @@ export abstract class ChatSource implements Pauseable {
       return null;
     }
 
-    this.markActivity();
     return payload;
   }
 

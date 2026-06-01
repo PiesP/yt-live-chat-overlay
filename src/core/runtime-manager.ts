@@ -292,9 +292,42 @@ export class RuntimeManager {
     }
 
     log.warn('Runtime session requested managed restart', { reason });
-    this.disposeActiveSession();
+
+    // Soft restart: keep Overlay + Canvas + BacklogController alive,
+    // restart only the chat source chain. This avoids visible UI flicker
+    // and duplicates the lightweight retry that replay sources already use.
+    this.restartChatSourceSoft();
     this.resetStartFailures();
     this.requestReconcile('session-restart');
+  }
+
+  /**
+   * Restart only the chat source while preserving Overlay, CanvasRenderer,
+   * and BacklogController. A full disposeActiveSession is reserved for
+   * page changes or explicit shutdown.
+   */
+  private restartChatSourceSoft(): void {
+    this.stopForegroundListeners();
+    this.stopVideoPauseListeners();
+    this.stopChatWatchdog();
+
+    this.fetchInterceptorUnsubscribe?.();
+    this.fetchInterceptorUnsubscribe = null;
+
+    this.domWatcherUnsubscribe?.();
+    this.domWatcherUnsubscribe = null;
+
+    this.chatSource?.stop();
+    this.chatSource = null;
+
+    // Reset session dedup in case restarting on the same page.
+    this.sessionDedup.clear();
+
+    // Clear targetUrl so reconcileOnce knows to call startSession()
+    // to rebuild the chat source chain. Keep overlay/renderer/backlogController.
+    this.targetUrl = null;
+
+    // Don't null overlay/renderer/backlogController — they survive.
   }
 
   private matchesSessionUrl(url: string): boolean {
@@ -659,10 +692,16 @@ export class RuntimeManager {
     const video = this.getVideoElement();
     const isVideoPaused = video?.paused ?? true;
 
+    // When the chat source is in intentional fetch backoff (e.g. replay
+    // source after consecutive failures), the silence is expected — don't
+    // override its own recovery with a full runtime restart.
+    const isChatInBackoff = chat?.isInBackoff ?? false;
+
     const isVeryLongIdle = idleDurationMs >= ABSOLUTE_MAX_IDLE_RESTART_MS;
     const shouldRestart =
       isVeryLongIdle ||
       (!isVideoPaused &&
+        !isChatInBackoff &&
         (!renderable ||
           idleDurationMs >= LONG_IDLE_RESTART_MS ||
           (this.state === RuntimeState.ACTIVE &&

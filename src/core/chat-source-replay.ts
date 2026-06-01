@@ -10,7 +10,7 @@
  */
 
 import { extractChatEvents } from '@core/chat-message-parser';
-import type { PlaybackSnapshot } from '@core/chat-source-base';
+import type { ChatHealthSnapshot, PlaybackSnapshot } from '@core/chat-source-base';
 import { ChatSource } from '@core/chat-source-base';
 import {
   clearSafeTimeout,
@@ -34,6 +34,7 @@ const log = createLogger('ReplayChatSource');
 const REPLAY_FETCH_MIN_DELTA_MS = 1000;
 const REPLAY_CONSECUTIVE_FAILURE_LIMIT = 5;
 const REPLAY_FAILURE_BACKOFF_MS = 5000;
+const REPLAY_TOTAL_FAILURE_LIMIT = 15; // 3 backoff cycles before re-initialization
 const REPLAY_PREFETCH_WINDOW_MS = 5000;
 const BACKGROUND_FETCH_INTERVAL_MS = 1000;
 const RAF_FLUSH_BATCH_SIZE = 5;
@@ -50,6 +51,7 @@ export class ReplayChatSource extends ChatSource {
   private replayFallbackLastOffsetMs = -1;
   private lastReplayRequestedOffsetMs = -REPLAY_FETCH_MIN_DELTA_MS;
   private replayConsecutiveFailures = 0;
+  private replayTotalFailuresSinceSuccess = 0;
   private replayNextAllowedFetchAt = 0;
   private replayBuffer = new ReplayBuffer();
   private seekListenerCleanup: (() => void) | null = null;
@@ -75,6 +77,14 @@ export class ReplayChatSource extends ChatSource {
    */
   protected isObserverAlive(): boolean {
     return this.cooperativeLoopRunning && this.callback !== null;
+  }
+
+  getHealthSnapshot(options: { activeTimeoutMs?: number } = {}): ChatHealthSnapshot {
+    const base = super.getHealthSnapshot(options);
+    return {
+      ...base,
+      isInBackoff: Date.now() < this.replayNextAllowedFetchAt,
+    };
   }
 
   /**
@@ -268,6 +278,7 @@ export class ReplayChatSource extends ChatSource {
     this.replayBuffer.clear();
     this.lastReplayRequestedOffsetMs = offsetMs;
     this.replayConsecutiveFailures = 0;
+    this.replayTotalFailuresSinceSuccess = 0;
 
     // Cancel in-flight prefetch — new one starts from seek position below.
     this.stopPrefetch();
@@ -309,6 +320,7 @@ export class ReplayChatSource extends ChatSource {
     this.replayFallbackLastOffsetMs = -1;
     this.lastReplayRequestedOffsetMs = -REPLAY_FETCH_MIN_DELTA_MS;
     this.replayConsecutiveFailures = 0;
+    this.replayTotalFailuresSinceSuccess = 0;
     this.replayNextAllowedFetchAt = 0;
     this.replayBuffer.clear();
     this.seekListenerCleanup?.();
@@ -435,6 +447,7 @@ export class ReplayChatSource extends ChatSource {
       this.lastReplayRequestedOffsetMs = offsetMs;
 
       this.replayConsecutiveFailures = 0;
+      this.replayTotalFailuresSinceSuccess = 0;
       this.replayNextAllowedFetchAt = 0;
 
       return nextPlayerSeekContinuation !== null || payload.actions.length > 0;
@@ -469,6 +482,7 @@ export class ReplayChatSource extends ChatSource {
       this.replayContinuation = extractReplayContinuation(payload.continuations);
 
       this.replayConsecutiveFailures = 0;
+      this.replayTotalFailuresSinceSuccess = 0;
       this.replayNextAllowedFetchAt = 0;
 
       return this.replayContinuation !== null || events.length > 0;
@@ -485,6 +499,7 @@ export class ReplayChatSource extends ChatSource {
 
   private recordReplayFailure(): void {
     this.replayConsecutiveFailures += 1;
+    this.replayTotalFailuresSinceSuccess += 1;
     if (this.replayConsecutiveFailures >= REPLAY_CONSECUTIVE_FAILURE_LIMIT) {
       const backoffUntil = Date.now() + REPLAY_FAILURE_BACKOFF_MS;
       this.replayNextAllowedFetchAt = backoffUntil;
@@ -494,6 +509,10 @@ export class ReplayChatSource extends ChatSource {
           `backing off for ${REPLAY_FAILURE_BACKOFF_MS}ms`
       );
     }
+  }
+
+  private needsReplaySessionRecovery(): boolean {
+    return this.replayTotalFailuresSinceSuccess >= REPLAY_TOTAL_FAILURE_LIMIT;
   }
 
   // ── Poll methods (fetch + backoff only — flush is handled by rAF) ───────
@@ -512,6 +531,18 @@ export class ReplayChatSource extends ChatSource {
     if (fetched) {
       return;
     }
+
+    // Re-initialize only after persistent failures across multiple
+    // backoff cycles (REPLAY_TOTAL_FAILURE_LIMIT). Transient errors
+    // are handled by recordReplayFailure's consecutive-failure backoff.
+    if (!this.needsReplaySessionRecovery()) {
+      return;
+    }
+
+    log.warn(
+      `Replay fetch failed ${REPLAY_TOTAL_FAILURE_LIMIT} total times; ` +
+        're-initializing replay session'
+    );
 
     const bootstrap = await this.refreshBootstrap(signal);
     if (!bootstrap?.isReplay) {

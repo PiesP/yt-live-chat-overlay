@@ -39,4 +39,9 @@ export class MessageIdRegistry {
       if (++deleted >= toDelete) break;
     }
   }
+
+  /** Clear all registered message IDs. */
+  clear(): void {
+    this.ids.clear();
+  }
 }

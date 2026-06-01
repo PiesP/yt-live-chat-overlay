@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { isAbortError } from '@core/dom';
+import { isAbortError, sleep } from '@core/dom';
 import { createLogger } from '@core/logging';
 import {
   extractInitialChatContinuation,
@@ -54,6 +54,21 @@ export class YoutubeInnertubeRequestError extends Error {
     this.name = 'YoutubeInnertubeRequestError';
   }
 }
+
+// ── Retry configuration for transient network errors ─────────────────
+
+const ENDPOINT_RETRY_MAX_ATTEMPTS = 4; // 1 initial + 3 retries
+const ENDPOINT_RETRY_BASE_DELAY_MS = 1000; // 1s → 2s → 4s
+
+/** Retryable: TypeError (network down), 503-504 (server), 429 (rate limit) */
+const isRetryableError = (error: unknown): boolean => {
+  if (error instanceof DOMException && error.name === 'AbortError') return false;
+  if (error instanceof YoutubeInnertubeRequestError) {
+    const s = error.status;
+    return s === 429 || s === 503 || s === 504;
+  }
+  return error instanceof TypeError;
+};
 
 const getVideoIdFromUrl = (href = location.href): string | null => {
   try {
@@ -471,31 +486,68 @@ const fetchChatEndpoint = async (
   signal?: AbortSignal,
   playerOffsetMs?: number
 ): Promise<unknown> => {
-  const response = await fetch(buildEndpointUrl(endpoint, data.apiKey), {
-    method: 'POST',
-    credentials: 'include',
-    cache: 'no-store',
-    mode: 'same-origin',
-    referrerPolicy: 'origin-when-cross-origin',
-    headers: createInnertubeHeaders(data),
-    body: JSON.stringify(
-      buildInnertubeBody(
-        data,
-        continuation,
-        playerOffsetMs === undefined ? undefined : { playerOffsetMs: String(playerOffsetMs) }
-      )
-    ),
-    signal: signal ?? null,
-  });
+  let lastError: unknown;
 
-  if (!response.ok) {
-    throw new YoutubeInnertubeRequestError(
-      `Innertube ${endpoint} request failed (${response.status} ${response.statusText})`,
-      response.status
-    );
+  for (let attempt = 0; attempt < ENDPOINT_RETRY_MAX_ATTEMPTS; attempt++) {
+    // Check abort signal before each attempt
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+
+    try {
+      const response = await fetch(buildEndpointUrl(endpoint, data.apiKey), {
+        method: 'POST',
+        credentials: 'include',
+        cache: 'no-store',
+        mode: 'same-origin',
+        referrerPolicy: 'origin-when-cross-origin',
+        headers: createInnertubeHeaders(data),
+        body: JSON.stringify(
+          buildInnertubeBody(
+            data,
+            continuation,
+            playerOffsetMs === undefined ? undefined : { playerOffsetMs: String(playerOffsetMs) }
+          )
+        ),
+        signal: signal ?? null,
+      });
+
+      if (!response.ok) {
+        throw new YoutubeInnertubeRequestError(
+          `Innertube ${endpoint} request failed (${response.status} ${response.statusText})`,
+          response.status
+        );
+      }
+
+      return response.json();
+    } catch (error: unknown) {
+      // Don't retry abort errors — propagate immediately
+      if (isAbortError(error)) throw error;
+
+      lastError = error;
+
+      const isLastAttempt = attempt === ENDPOINT_RETRY_MAX_ATTEMPTS - 1;
+      if (isLastAttempt || !isRetryableError(error)) {
+        throw error;
+      }
+
+      // Exponential backoff: 1s → 2s → 4s
+      const delayMs = ENDPOINT_RETRY_BASE_DELAY_MS * 2 ** attempt;
+      log.warn(
+        `Innertube ${endpoint} request failed (attempt ${attempt + 1}/${ENDPOINT_RETRY_MAX_ATTEMPTS}), ` +
+          `retrying in ${delayMs}ms:`,
+        lastError
+      );
+
+      try {
+        await sleep(delayMs, signal);
+      } catch {
+        // sleep threw (AbortError during wait) — propagate
+        throw new DOMException('Aborted', 'AbortError');
+      }
+    }
   }
 
-  return response.json();
+  // Should be unreachable, but satisfy TypeScript's return type
+  throw lastError;
 };
 
 export const fetchLiveChat = async (
