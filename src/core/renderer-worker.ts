@@ -290,6 +290,29 @@ let isDestroyed = false;
 let isPaused = false;
 let pauseStartTime = 0;
 
+// Pre-computed invariants (updated on config change to avoid per-frame division)
+let invFadeMs = 0;
+let ageFadeRate = 0;
+
+/** Recompute cached values derived from config (called on init + updateConfig). */
+function recomputeConfigDerived(): void {
+  if (!config) return;
+  invFadeMs = config.fadeDurationMs > 0 ? 1 / Math.max(1, config.fadeDurationMs) : 0;
+  ageFadeRate = 1 / config.maxMessageAgeMs;
+}
+
+// Text measurement cache (cleared on font config change)
+const textMeasureCache = new Map<string, number>();
+function measureTextCached(text: string): number {
+  if (!ctx) return 0;
+  let w = textMeasureCache.get(text);
+  if (w === undefined) {
+    w = ctx.measureText(text).width;
+    textMeasureCache.set(text, w);
+  }
+  return w;
+}
+
 // Active messages (renderable)
 const activeMessages: ActiveMessage[] = [];
 
@@ -523,7 +546,7 @@ function renderContentSegments(
         textBitmapCache,
         getFontFn
       );
-      cursorX += ctx.measureText(seg.content as string).width;
+      cursorX += measureTextCached(seg.content as string);
     } else {
       const img = seg.emojiUrl ? emojiCache.get(seg.emojiUrl) : null;
       if (img) {
@@ -1345,6 +1368,7 @@ self.onmessage = (e: MessageEvent) => {
         self.postMessage({ type: 'error', error: 'Failed to get 2D context' });
         return;
       }
+      recomputeConfigDerived();
       initLanes(data.width as number, data.height as number);
       startRenderLoop();
       self.postMessage({ type: 'ready' });
@@ -1361,6 +1385,8 @@ self.onmessage = (e: MessageEvent) => {
     case 'updateConfig':
       if (config) {
         Object.assign(config, data.config as Partial<WorkerConfig>);
+        recomputeConfigDerived();
+        textMeasureCache.clear();
         textBitmapCache.clear();
         emojiCache.clear();
         authorPhotoCache.clear();
@@ -1715,9 +1741,6 @@ function renderFrame(): void {
   // ── Pre-scan: compute positions, opacity, and group into opacity buckets ──
   const mode = config.danmakuMode;
   const isScrolling = mode === 'scroll' || mode === 'reverse';
-  const fadeMs = config.fadeDurationMs;
-  const invFadeMs = fadeMs > 0 ? 1 / Math.max(1, fadeMs) : 0;
-  const ageFadeRate = 1 / config.maxMessageAgeMs;
   const strokeWidth =
     config.outlineWidthPx > 0 && config.outlineOpacity > 0 ? config.outlineWidthPx : 0;
 
@@ -1749,19 +1772,19 @@ function renderFrame(): void {
       opacity *= config.depthFarOpacityMul;
     }
 
-    if (fadeMs > 0) {
+    if (config!.fadeDurationMs > 0) {
       if (isScrolling) {
         // Scrolling: fade-out only (message exits screen edge naturally)
         const remaining = msg.duration - elapsed;
-        if (remaining < fadeMs) {
+        if (remaining < config!.fadeDurationMs) {
           opacity *= Math.max(0, remaining * invFadeMs);
         }
       } else {
         // Fixed (top/bottom): fade-in + fade-out
-        if (elapsed < fadeMs) {
+        if (elapsed < config!.fadeDurationMs) {
           opacity *= elapsed * invFadeMs;
         }
-        if (elapsed > msg.duration - fadeMs) {
+        if (elapsed > msg.duration - config!.fadeDurationMs) {
           opacity *= Math.max(0, (msg.duration - elapsed) * invFadeMs);
         }
       }
