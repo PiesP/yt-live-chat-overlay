@@ -104,12 +104,16 @@ export class PerAuthorRateLimiter {
 
     // Hard cap: prevent unbounded growth under extreme chat density
     // (e.g. 500+ active authors). Evict oldest entries first.
+    // Use headroom-based pruning to avoid O(n log n) sort on every message:
+    // only evict when size exceeds MAX_ENTRIES * 1.25, prune down to MAX_ENTRIES * 0.75.
     const maxEntries = 500;
-    if (this.authorTimestamps.size > maxEntries) {
+    if (this.authorTimestamps.size > maxEntries * 1.25) {
+      const target = Math.floor(maxEntries * 0.75);
       const sorted = [...this.authorTimestamps.entries()].sort(
         (a, b) => (a[1][0] ?? 0) - (b[1][0] ?? 0)
       );
-      const toRemove = sorted.slice(0, this.authorTimestamps.size - maxEntries);
+      const keepFrom = Math.max(0, sorted.length - target);
+      const toRemove = sorted.slice(0, keepFrom);
       for (const [authorId] of toRemove) {
         this.authorTimestamps.delete(authorId);
       }
@@ -119,6 +123,7 @@ export class PerAuthorRateLimiter {
   updateConfig(config: { preset: AuthorRateLimitPreset }): void {
     if (config.preset === 'off') {
       this.enabled = false;
+      this.authorTimestamps.clear();
     } else if (config.preset === 'normal') {
       this.enabled = true;
       this.windowMs = 5000;
