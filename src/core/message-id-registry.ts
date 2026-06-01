@@ -25,18 +25,18 @@ export class MessageIdRegistry {
 
   /** Register a message ID, evicting oldest if at capacity. */
   mark(id: string): void {
+    // Re-insert to move to end of insertion order (LRU touch) so that
+    // duplicate marks don't create stale "oldest" entries.
+    this.ids.delete(id);
     this.ids.set(id, true);
 
-    if (this.ids.size <= this.maxSize) {
-      return;
-    }
-
-    // Bulk evict half the entries to avoid O(n) per-insert eviction overhead.
-    const toDelete = Math.ceil(this.ids.size / 2);
-    let deleted = 0;
-    for (const key of this.ids.keys()) {
-      this.ids.delete(key);
-      if (++deleted >= toDelete) break;
+    // FIFO evict the single oldest entry when over capacity.
+    // Amortized O(1) per mark() — no bulk deletion spikes.
+    while (this.ids.size > this.maxSize) {
+      const oldest = this.ids.keys().next().value;
+      if (oldest !== undefined) {
+        this.ids.delete(oldest);
+      }
     }
   }
 
