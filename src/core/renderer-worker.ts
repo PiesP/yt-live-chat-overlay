@@ -1273,6 +1273,23 @@ self.onmessage = (e: MessageEvent) => {
       break;
     case 'addMessages': {
       const msgs = data.messages as WorkerMessage[];
+      // Handle transferred ImageBitmaps from main thread
+      const imageData = data.imageData as
+        | Array<{ url: string; bitmap: ImageBitmap; target: string }>
+        | undefined;
+      if (imageData) {
+        for (const item of imageData) {
+          const { url, bitmap, target } = item;
+          if (!url || !bitmap) continue;
+          const cache =
+            target === 'author'
+              ? authorPhotoCache
+              : target === 'sticker'
+                ? stickerCache
+                : emojiCache; // 'emoji' or unknown → emojiCache
+          cache.set(url, bitmap);
+        }
+      }
       for (const m of msgs) enqueueMessage(m);
       break;
     }

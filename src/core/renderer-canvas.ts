@@ -372,6 +372,14 @@ export class CanvasRenderer extends RendererBase {
   /** In-flight image load guard to prevent duplicate Image objects. */
   private readonly imageLoading = new Set<string>();
 
+  /**
+   * Pre-converted ImageBitmaps for transfer to the render worker.
+   * Created asynchronously when HTMLImageElements finish loading.
+   * Transferred via postMessage transfer list to avoid duplicate fetch+decode
+   * in the worker. Entries are removed on transfer (bitmap is detached).
+   */
+  private readonly workerBitmapCache = new Map<string, ImageBitmap>();
+
   /** Last devicePixelRatio seen — used to detect DPR changes. */
   private lastDpr = 0;
   /** Whether the session is in standby mode (pre-live, waiting for stream). */
@@ -642,6 +650,7 @@ export class CanvasRenderer extends RendererBase {
     img.onload = () => {
       this.imageLoading.delete(url);
       cache.set(url, img);
+      this.preConvertForWorker(url, img);
     };
     img.onerror = () => {
       this.imageLoading.delete(url);
@@ -656,6 +665,21 @@ export class CanvasRenderer extends RendererBase {
       }
       // Silently skip — don't retry broken URLs on every frame.
     };
+  }
+
+  /**
+   * Pre-convert a loaded HTMLImageElement to ImageBitmap for worker transfer.
+   * On success, stores in workerBitmapCache. On failure, silently skips —
+   * worker will fetch and decode independently.
+   */
+  private preConvertForWorker(url: string, img: HTMLImageElement): void {
+    if (!this.useWorkerMode || !this.renderWorker) return;
+    if (!img.complete || img.naturalWidth === 0) return;
+    createImageBitmap(img)
+      .then((bitmap) => {
+        this.workerBitmapCache.set(url, bitmap);
+      })
+      .catch(() => {});
   }
 
   private prefetchImages(message: ChatMessage): void {
@@ -680,6 +704,7 @@ export class CanvasRenderer extends RendererBase {
         this.emojiFetching.delete(url);
         this.emojiFetchingStarted.delete(url);
         this.emojiCache.set(url, img);
+        this.preConvertForWorker(url, img);
 
         // Trigger an immediate render frame so the emoji appears within
         // ~1 frame instead of waiting for the next natural rAF tick.
@@ -2016,7 +2041,37 @@ export class CanvasRenderer extends RendererBase {
       };
     });
 
-    this.renderWorker.postMessage({
+    // ── Collect ImageBitmap transfers ──────────────────────────────────
+    // Pre-converted bitmaps are transferred via postMessage transfer list,
+    // eliminating duplicate fetch+decode in the worker (zero-copy transfer).
+    const transferList: ImageBitmap[] = [];
+    const transferredImages: Array<{
+      url: string;
+      bitmap: ImageBitmap;
+      target: 'emoji' | 'author' | 'sticker';
+    }> = [];
+
+    const collectBitmap = (
+      url: string | undefined,
+      target: 'emoji' | 'author' | 'sticker'
+    ): void => {
+      if (!url) return;
+      const bitmap = this.workerBitmapCache.get(url);
+      if (!bitmap) return;
+      transferList.push(bitmap);
+      transferredImages.push({ url, bitmap, target });
+      this.workerBitmapCache.delete(url); // bitmap is detached on transfer
+    };
+
+    for (const seg of content) {
+      if (seg.type === 'emoji') collectBitmap(seg.emojiUrl, 'emoji');
+    }
+    collectBitmap(message.authorPhotoUrl, 'author');
+    if (message.kind === 'superchat' && message.superChat?.sticker?.url) {
+      collectBitmap(message.superChat.sticker.url, 'sticker');
+    }
+
+    const workerMessage: Record<string, unknown> = {
       type: 'addMessages',
       messages: [
         {
@@ -2045,7 +2100,14 @@ export class CanvasRenderer extends RendererBase {
             : {}),
         },
       ],
-    });
+    };
+
+    if (transferredImages.length > 0) {
+      workerMessage.imageData = transferredImages;
+      this.renderWorker.postMessage(workerMessage, transferList);
+    } else {
+      this.renderWorker.postMessage(workerMessage);
+    }
   }
 
   /** Send updated settings to the render worker. */
@@ -2063,5 +2125,10 @@ export class CanvasRenderer extends RendererBase {
     this.renderWorker.terminate();
     this.renderWorker = null;
     this.useWorkerMode = false;
+    // Close any remaining pre-converted bitmaps (not yet transferred)
+    for (const bitmap of this.workerBitmapCache.values()) {
+      bitmap.close();
+    }
+    this.workerBitmapCache.clear();
   }
 }
