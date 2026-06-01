@@ -1066,10 +1066,17 @@ function renderPaidCardWorker(
     const headerMaxWidth = w - padH * 2;
     let displayText = message.headerTagText;
     if (ctx.measureText(displayText).width > headerMaxWidth) {
-      while (displayText.length > 0 && ctx.measureText(`${displayText}…`).width > headerMaxWidth) {
-        displayText = displayText.slice(0, -1);
+      let lo = 0,
+        hi = displayText.length;
+      while (lo < hi) {
+        const mid = Math.floor((lo + hi) / 2);
+        if (ctx.measureText(displayText.slice(0, mid) + '…').width > headerMaxWidth) {
+          hi = mid;
+        } else {
+          lo = mid + 1;
+        }
       }
-      displayText += '…';
+      displayText = lo > 0 ? displayText.slice(0, lo - 1) + '…' : '…';
     }
     strokeTextOutline(
       ctx,

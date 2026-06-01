@@ -94,12 +94,19 @@ export class PerAuthorRateLimiter {
 
     const cutoff = now - this.windowMs;
     for (const [authorId, timestamps] of this.authorTimestamps) {
-      const valid = timestamps.filter((t) => t > cutoff);
-      if (valid.length === 0) {
-        this.authorTimestamps.delete(authorId);
-      } else {
-        this.authorTimestamps.set(authorId, valid);
+      // Binary search for first timestamp > cutoff (timestamps are sorted ascending)
+      let lo = 0,
+        hi = timestamps.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >>> 1;
+        if ((timestamps[mid] ?? 0) <= cutoff) lo = mid + 1;
+        else hi = mid;
       }
+      if (lo > 0) timestamps.splice(0, lo);
+      if (timestamps.length === 0) {
+        this.authorTimestamps.delete(authorId);
+      }
+      // else: timestamps already updated in-place, no need to set() again
     }
 
     // Hard cap: prevent unbounded growth under extreme chat density

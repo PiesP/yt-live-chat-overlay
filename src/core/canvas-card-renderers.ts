@@ -160,10 +160,17 @@ function renderCardHeaderTag(
 
   let displayText = text;
   if (ctx.measureText(displayText).width > maxWidth) {
-    while (displayText.length > 0 && ctx.measureText(`${displayText}…`).width > maxWidth) {
-      displayText = displayText.slice(0, -1);
+    let lo = 0,
+      hi = displayText.length;
+    while (lo < hi) {
+      const mid = Math.floor((lo + hi) / 2);
+      if (ctx.measureText(displayText.slice(0, mid) + '…').width > maxWidth) {
+        hi = mid;
+      } else {
+        lo = mid + 1;
+      }
     }
-    displayText += '…';
+    displayText = lo > 0 ? displayText.slice(0, lo - 1) + '…' : '…';
   }
 
   const tagY = y + (config.headerTag.marginTop ?? 0);
@@ -208,9 +215,7 @@ function renderCardBadge(
   const badgeHeight = badgeFontSize + badge.paddingV * 2;
 
   drawRoundRect(ctx, x, y, badgeWidth, badgeHeight, badge.radius);
-  const prevFillStyle = ctx.fillStyle;
-  const prevStrokeStyle = ctx.strokeStyle;
-  const prevLineWidth = ctx.lineWidth;
+  ctx.save();
   ctx.fillStyle = badge.fillColor;
   ctx.fill();
   ctx.strokeStyle = badge.strokeColor;
@@ -230,11 +235,7 @@ function renderCardBadge(
   ctx.fillStyle = '#ffffff';
   ctx.fillText(text, x + badge.paddingH, y + badgeHeight / 2);
   ctx.textBaseline = 'top';
-
-  // Restore canvas state to prevent bleed to caller
-  ctx.fillStyle = prevFillStyle;
-  ctx.strokeStyle = prevStrokeStyle;
-  ctx.lineWidth = prevLineWidth;
+  ctx.restore();
 
   return y + badgeHeight;
 }

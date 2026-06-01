@@ -773,26 +773,8 @@ export class CanvasRenderer extends RendererBase {
 
       const result = this.checkPlacement(msg, now, dims);
       if (!result.ok) {
-        if (result.reason === 'no_lane') {
-          // No lane available from the allocator — all lanes are occupied.
-          // Push back to retry queue so the message gets retried next frame
-          // when existing messages may have expired. Previously this was a
-          // hard drop, which meant the highest-priority message (front of
-          // priority-sorted queue) was discarded first during bursts.
-          // The skip counter limits deferrals per frame to prevent infinite
-          // retry loops when lanes are truly saturated for extended periods.
-          skipped++;
-          this.retryQueue.push(msg);
-          continue;
-        }
-        // Collision: the allocator found a lane but the bounding-box check
-        // against active (visible) messages detected overlap near the entry
-        // edge. Keep the message in a separate retry queue and retry next
-        // frame — the collision window is often <100ms as the existing
-        // message scrolls left. Previously this was a hard drop, causing
-        // 80%+ loss during high-density bursts despite available lanes
-        // (queue=0, lanes=75%). Pushing to a separate queue avoids O(n²)
-        // push-back into the main pending queue.
+        // no_lane: all lanes occupied. collision: bounding-box overlap at entry edge.
+        // Both cases: retry next frame via retry queue — lanes typically free within <100ms.
         skipped++;
         this.retryQueue.push(msg);
         continue;
