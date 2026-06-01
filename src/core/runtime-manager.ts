@@ -111,6 +111,13 @@ export class RuntimeManager {
   private readonly getSettings: RuntimeManagerOptions['getSettings'];
   private readonly isValidPage: RuntimeManagerOptions['isValidPage'];
   private reconcileRequested = false;
+
+  /** Message count threshold for routing batches through backlog injection. */
+  private static readonly BACKLOG_BATCH_THRESHOLD = 50;
+  /** Lane utilization threshold (0–1) triggering backlog routing for small batches. */
+  private static readonly BACKLOG_UTILIZATION_THRESHOLD = 0.8;
+  /** Minimum message count for utilization-aware small-batch routing. */
+  private static readonly SMALL_BATCH_THRESHOLD = 5;
   private reconcilePromise: Promise<void> | null = null;
   private scheduledReconcileTimer: ReturnType<typeof setTimeout> | null = null;
   private lastPageChangeAt = 0;
@@ -515,7 +522,7 @@ export class RuntimeManager {
         return;
       }
 
-      if (msgs.length > 50) {
+      if (msgs.length > RuntimeManager.BACKLOG_BATCH_THRESHOLD) {
         this.ensureBacklogController(renderer);
         this.backlogController?.startBacklogInjection(msgs);
         return;
@@ -530,7 +537,10 @@ export class RuntimeManager {
       // once. Without this, live poll responses (20-50 msgs) bypass the backlog
       // controller entirely, flooding the queue during bursts.
       const utilization = renderer.getLaneUtilization();
-      if (utilization >= 0.8 && msgs.length >= 5) {
+      if (
+        utilization >= RuntimeManager.BACKLOG_UTILIZATION_THRESHOLD &&
+        msgs.length >= RuntimeManager.SMALL_BATCH_THRESHOLD
+      ) {
         this.ensureBacklogController(renderer);
         this.backlogController?.startBacklogInjection(msgs);
         return;

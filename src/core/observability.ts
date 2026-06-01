@@ -35,6 +35,8 @@ export class ObservabilityReporter {
   private static readonly METRIC_WINDOW_MS = 60_000;
   /** Number of lines in the debug overlay. */
   private static readonly DEBUG_OVERLAY_LINE_COUNT = 7;
+  /** Drop rate threshold (0–1) that triggers high-drop-rate warnings. */
+  private static readonly DROP_RATE_WARN_THRESHOLD = 0.2;
 
   /** Per-frame timing state. */
   private frameTimings: FrameTimings = {
@@ -96,7 +98,7 @@ export class ObservabilityReporter {
     if (reason === 'video_paused') return;
 
     // Warn if drop rate exceeds 20%
-    if (this.metrics.dropRate > 0.2) {
+    if (this.metrics.dropRate > ObservabilityReporter.DROP_RATE_WARN_THRESHOLD) {
       const now = Date.now();
       if (now - this.lastWarnTime > ObservabilityReporter.WARN_COOLDOWN_MS) {
         this.lastWarnTime = now;

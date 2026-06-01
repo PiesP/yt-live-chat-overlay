@@ -280,6 +280,17 @@ interface ActiveMessage {
 
 // ── Worker-specific constants ──────────────────────────────────────────────
 
+/** Fallback ratio for font ascent when actualBoundingBoxAscent is unavailable. */
+const ASCENT_FALLBACK_RATIO = 0.8;
+/** Fallback ratio for font descent when actualBoundingBoxDescent is unavailable. */
+const DESCENT_FALLBACK_RATIO = 0.2;
+/** Fallback line-height multiplier when font metrics are unavailable. */
+const LINE_HEIGHT_FALLBACK_RATIO = 1.1;
+/** Angular frequency for pulsing-border animation (half-cycle per second). */
+const PULSE_ANGULAR_FREQ = Math.PI;
+/** Milliseconds per second, for time-unit conversions in animation math. */
+const MS_PER_SEC = 1000;
+
 // ── Globals (worker scope) ───────────────────────────────────────────────
 
 let ctx: OffscreenCanvasRenderingContext2D | null = null;
@@ -620,7 +631,7 @@ function renderWrappedContentSegments(
 
   const font = getFontFn(fontSize);
   const emojiSize = Math.round(fontSize * rendererLayout.emojiSize);
-  const lineHeight = Math.ceil(fontSize * 1.1); // measureTextHeight fallback
+  const lineHeight = Math.ceil(fontSize * LINE_HEIGHT_FALLBACK_RATIO); // measureTextHeight fallback
   const ellipsis = '\u2026';
 
   // Set font once for all measureText calls inside buildWrappedLines
@@ -743,8 +754,8 @@ function drawAuthorSection(
   ctx2.font = nameFont;
   const nameMetrics = ctx2.measureText('Mg');
   const nameHeight = Math.ceil(
-    (nameMetrics.actualBoundingBoxAscent || authorFontSize * 0.8) +
-      (nameMetrics.actualBoundingBoxDescent || authorFontSize * 0.2)
+    (nameMetrics.actualBoundingBoxAscent || authorFontSize * ASCENT_FALLBACK_RATIO) +
+      (nameMetrics.actualBoundingBoxDescent || authorFontSize * DESCENT_FALLBACK_RATIO)
   );
   const sectionHeight = Math.max(rendererLayout.authorPhotoSize, nameHeight);
 
@@ -1029,7 +1040,8 @@ function renderPaidCardWorker(
     ctx.restore();
   } else if (card.decoration === 'pulsingBorder' && card.pulsingBorder) {
     const pb = card.pulsingBorder;
-    const pulse = Math.sin((elapsed / 1000) * Math.PI) * pb.amplitude + pb.baseAlpha;
+    const pulse =
+      Math.sin((elapsed / MS_PER_SEC) * PULSE_ANGULAR_FREQ) * pb.amplitude + pb.baseAlpha;
     ctx.save();
     drawRoundRect(ctx, x, y, w, h, card.cardRadius);
     ctx.strokeStyle = `rgba(${pb.borderRgb.r}, ${pb.borderRgb.g}, ${pb.borderRgb.b}, ${pulse})`;
@@ -1337,7 +1349,7 @@ function initLanes(_width: number, height: number): void {
   const textHeight = Math.ceil(
     textMetrics.fontBoundingBoxAscent != null
       ? textMetrics.fontBoundingBoxAscent + textMetrics.fontBoundingBoxDescent
-      : config.fontSize * 1.1
+      : config.fontSize * LINE_HEIGHT_FALLBACK_RATIO
   );
   laneHeight = Math.max(1, textHeight + totalPaddingV + config.laneSpacing);
 
