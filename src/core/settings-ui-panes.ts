@@ -202,7 +202,7 @@ export const PANES: PaneDef[] = [
   },
   {
     id: 'colors',
-    label: 'Cards & Colors',
+    label: 'Appearance',
     sections: [
       {
         title: '',
@@ -383,6 +383,16 @@ export const PANES: PaneDef[] = [
             'Gap between consecutive messages as percentage of message width (2-30%, default 8)'
           ),
           num(
+            'Translation Batch Size',
+            'translationBatchSize',
+            'Max translations applied per frame to avoid spikes (1-20, default 5)'
+          ),
+        ],
+      },
+      {
+        title: 'Cache',
+        fields: [
+          num(
             'Emoji Cache (MB)',
             'emojiCacheMb',
             'Max memory for emoji image cache (1-20 MB, default 3)'
@@ -403,11 +413,6 @@ export const PANES: PaneDef[] = [
             'Max memory for text bitmap cache (1-20 MB, default 4)'
           ),
           num(
-            'Translation Batch Size',
-            'translationBatchSize',
-            'Max translations applied per frame to avoid spikes (1-20, default 5)'
-          ),
-          num(
             'Emoji Fetch Limit',
             'emojiFetchLimit',
             'Max concurrent emoji fetch operations (1-20, default 6)'
@@ -420,7 +425,7 @@ export const PANES: PaneDef[] = [
         ],
       },
       {
-        title: 'Thresholds',
+        title: 'Burst Detection',
         fields: [
           num('Burst Sample Window', 'burstSampleWindow', 'Burst rate sample window size'),
           num(
@@ -438,6 +443,11 @@ export const PANES: PaneDef[] = [
             'burstExtremeThreshold',
             'Messages per second threshold for extreme burst level'
           ),
+        ],
+      },
+      {
+        title: 'Tuning',
+        fields: [
           num('Backlog Injection Max', 'backlogInjectionMax', 'Maximum backlog injection rate cap'),
           num(
             'Backlog Density Ramp (ms)',

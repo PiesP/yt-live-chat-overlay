@@ -78,7 +78,7 @@ type TranslationMap = Record<string, string>;
 const KO: TranslationMap = {
   // ── Pane tabs ──
   Comments: '코멘트',
-  'Cards & Colors': '카드 및 색상',
+  Appearance: '카드 및 색상',
   Advanced: '고급',
   Translation: '번역',
 
@@ -92,6 +92,9 @@ const KO: TranslationMap = {
   'Rate Limiting': '속도 제한',
   Timing: '타이밍',
   Thresholds: '임계값',
+  Tuning: '튜닝',
+  'Burst Detection': '버스트 감지',
+  Cache: '캐시',
   'Author Colors & Visibility': '작성자 색상 및 표시',
   Interface: '인터페이스',
   'Chat Translation': '채팅 번역',
@@ -386,7 +389,7 @@ const KO: TranslationMap = {
 const JA: TranslationMap = {
   // ── Pane tabs ──
   Comments: 'コメント',
-  'Cards & Colors': 'カードと色',
+  Appearance: 'カードと色',
   Advanced: '詳細',
   Translation: '翻訳',
 
@@ -400,6 +403,9 @@ const JA: TranslationMap = {
   'Rate Limiting': 'レート制限',
   Timing: 'タイミング',
   Thresholds: 'しきい値',
+  Cache: 'キャッシュ',
+  'Burst Detection': 'バースト検出',
+  Tuning: 'チューニング',
   'Author Colors & Visibility': '投稿者の色と表示',
   Interface: 'インターフェース',
   'Chat Translation': 'チャット翻訳',
@@ -697,7 +703,7 @@ const JA: TranslationMap = {
 const ES: TranslationMap = {
   // ── Pane tabs ──
   Comments: 'Comentarios',
-  'Cards & Colors': 'Tarjetas y Colores',
+  Appearance: 'Tarjetas y Colores',
   Advanced: 'Avanzado',
   Translation: 'Traducción',
 
@@ -711,6 +717,9 @@ const ES: TranslationMap = {
   'Rate Limiting': 'Límite de frecuencia',
   Timing: 'Temporización',
   Thresholds: 'Umbrales',
+  Tuning: 'Ajustes',
+  'Burst Detection': 'Detección de ráfagas',
+  Cache: 'Caché',
   'Author Colors & Visibility': 'Colores y visibilidad',
   Interface: 'Interfaz',
   'Chat Translation': 'Traducción de chat',
@@ -1020,7 +1029,7 @@ const ES: TranslationMap = {
 const ZH: TranslationMap = {
   // ── Pane tabs ──
   Comments: '弹幕',
-  'Cards & Colors': '卡片与颜色',
+  Appearance: '卡片与颜色',
   Advanced: '高级',
   Translation: '翻译',
 
@@ -1034,6 +1043,9 @@ const ZH: TranslationMap = {
   'Rate Limiting': '频率限制',
   Timing: '时序',
   Thresholds: '阈值',
+  Tuning: '调优',
+  'Burst Detection': '突发检测',
+  Cache: '缓存',
   'Author Colors & Visibility': '用户颜色与显示',
   Interface: '界面',
   'Chat Translation': '聊天翻译',
