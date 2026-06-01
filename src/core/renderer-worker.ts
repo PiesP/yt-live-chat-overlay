@@ -30,27 +30,11 @@
 /// <reference lib="webworker" />
 
 import type { FontWeight } from '@app-types';
-import {
-  drawAuthorPhoto,
-  drawRoundRect,
-  renderContentSegments,
-  renderSegment,
-  strokeTextOutline,
-  type TextBitmapCache,
-} from '@shared/canvas-rendering-shared';
-import {
-  areSpeedTiersCompatible,
-  computeLaneY,
-  computeOccupancyMs as computeOccupancyMsShared,
-  heapGetSlotAvailableAt,
-  heapSiftDown,
-  heapUpdateLane,
-} from '@shared/lane-allocation-shared';
-import { ByteLimitedCache } from './byte-limited-cache';
-import type { CardConfigWorker } from './card-config';
-import { EMOJI_ALIAS_PATTERN } from './chat-message-helpers';
-import { toRgba } from './color-utils';
-import { computeScrollDuration, rendererLayout, spacing } from './design-tokens';
+import { ByteLimitedCache } from '@core/byte-limited-cache';
+import type { CardConfigWorker } from '@core/card-config';
+import { EMOJI_ALIAS_PATTERN } from '@core/chat-message-helpers';
+import { toRgba } from '@core/color-utils';
+import { computeScrollDuration, rendererLayout, spacing } from '@core/design-tokens';
 import {
   ANTI_BLOCK_FREE_RATIO,
   DRAIN_QUEUE_MAX_SKIP as DRAIN_MAX_SKIP,
@@ -68,8 +52,24 @@ import {
   TRANSLATION_FONT_SCALE,
   TRANSLATION_GAP_PX,
   TRANSLATION_OPACITY_SCALE,
-} from './renderer-constants';
-import { getFontString, measureTextHeight } from './text-measure';
+} from '@core/renderer-constants';
+import { getFontString, measureTextHeight } from '@core/text-measure';
+import {
+  drawAuthorPhoto,
+  drawRoundRect,
+  renderContentSegments,
+  renderSegment,
+  strokeTextOutline,
+  type TextBitmapCache,
+} from '@shared/canvas-rendering-shared';
+import {
+  areSpeedTiersCompatible,
+  computeLaneY,
+  computeOccupancyMs as computeOccupancyMsShared,
+  heapGetSlotAvailableAt,
+  heapSiftDown,
+  heapUpdateLane,
+} from '@shared/lane-allocation-shared';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -78,8 +78,8 @@ interface WorkerConfig {
   speedPxPerSec: number;
   /** Font size in logical pixels. */
   fontSize: number;
-  /** Font weight string: 'normal' | 'bold'. */
-  fontWeight: string;
+  /** Font weight: 'normal' | 'bold'. */
+  fontWeight: FontWeight;
   /** CSS font-family value. */
   fontFamily: string;
   /** Base opacity (0–1). */

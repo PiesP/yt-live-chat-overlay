@@ -43,14 +43,6 @@ import { MessageActivator } from '@core/message-activator';
 import type { Overlay } from '@core/overlay';
 import { PriorityBucketQueue } from '@core/priority-bucket-queue';
 import { RendererBase } from '@core/renderer-base';
-import { SPEED_TIER } from '@core/renderer-constants';
-import {
-  computeMessageOpacity,
-  estimateMessageDimensions as sharedEstimateDimensions,
-} from '@core/renderer-shared';
-import { RenderWorkerManager } from '@core/renderer-worker-manager';
-import { clearTextMeasurementCaches, getFontString, measureTextHeight } from '@core/text-measure';
-import { TranslationService } from '@core/translation-service';
 import {
   DRAIN_QUEUE_MAX_SKIP as _DRAIN_QUEUE_MAX_SKIP,
   HORIZONTAL_STAGGER_MAX as _HORIZONTAL_STAGGER_MAX,
@@ -64,7 +56,15 @@ import {
   TRANSLATION_OPACITY_SCALE as _TRANSLATION_OPACITY_SCALE,
   type CanvasMessage,
   hashStringForTier,
-} from './renderer-constants';
+  SPEED_TIER,
+} from '@core/renderer-constants';
+import {
+  computeMessageOpacity,
+  estimateMessageDimensions as sharedEstimateDimensions,
+} from '@core/renderer-shared';
+import { RenderWorkerManager } from '@core/renderer-worker-manager';
+import { clearTextMeasurementCaches, getFontString, measureTextHeight } from '@core/text-measure';
+import { TranslationService } from '@core/translation-service';
 
 /**
  * Remove expired messages in-place, simultaneously maintaining the
@@ -131,7 +131,6 @@ export class CanvasRenderer extends RendererBase {
   private animFrameId: number | null = null;
   /** Pre-computed 1/maxMessageAgeMs to avoid per-frame division in opacity calc. */
   private readonly ageFadeRate = 1 / this.settings.maxMessageAgeMs;
-  /** Pre-computed 1/fadeDurationMs, updated on settings change. */
   /** Pre-computed 1/fadeDurationMs to avoid per-frame division in opacity calc. */
   private invFadeDuration = 1 / Math.max(1, 500);
   private overlayDimensionsUnsubscribe: (() => void) | null = null;
