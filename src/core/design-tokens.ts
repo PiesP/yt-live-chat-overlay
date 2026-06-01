@@ -65,8 +65,8 @@ export const spacing = {
 } as const;
 
 // ── SuperChat amount badge ──
-export const SUPERCHAT_AMOUNT_BADGE_FILL = 'rgba(255, 255, 255, 0.16)';
-export const SUPERCHAT_AMOUNT_BADGE_STROKE = 'rgba(255, 255, 255, 0.22)';
+export const SUPERCHAT_AMOUNT_BADGE_FILL = 'rgba(255, 255, 255, 0.24)';
+export const SUPERCHAT_AMOUNT_BADGE_STROKE = 'rgba(255, 255, 255, 0.35)';
 
 // ── Author photo shadow ──
 export const AUTHOR_PHOTO_SHADOW = 'rgba(0, 0, 0, 0.6)';

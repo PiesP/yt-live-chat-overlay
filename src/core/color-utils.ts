@@ -93,10 +93,10 @@ export function resolveSuperChatRgb(
 }
 
 /** Opacity boost applied to the top of a SuperChat card gradient. */
-const SUPERCHAT_TOP_OPACITY_BOOST = 0.06;
+const SUPERCHAT_TOP_OPACITY_BOOST = 0.12;
 
 /** Opacity reduction applied to the bottom of a SuperChat card gradient. */
-const SUPERCHAT_BOTTOM_OPACITY_REDUCTION = 0.08;
+const SUPERCHAT_BOTTOM_OPACITY_REDUCTION = 0.15;
 
 /** Minimum opacity for SuperChat card gradient (clamps base and bottom). */
 const SUPERCHAT_MIN_OPACITY = 0.35;

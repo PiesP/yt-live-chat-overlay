@@ -140,7 +140,7 @@ export function renderSuperChatCard(
     const badgeY = contentY + spacing.xs;
     const badgeFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
     const badgeHeight = badgeFontSize + rendererLayout.superchatBadge.paddingV * 2;
-    ctx.font = getFontString(badgeFontSize, 'bold', settings.fontFamily);
+    ctx.font = getFontString(badgeFontSize, settings.fontWeight, settings.fontFamily);
     const badgeTextWidth = Math.ceil(ctx.measureText(superChat.amount).width);
     const badgeWidth = badgeTextWidth + rendererLayout.superchatBadge.paddingH * 2;
 
