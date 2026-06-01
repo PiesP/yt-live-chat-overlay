@@ -423,6 +423,9 @@ export class CanvasRenderer extends RendererBase {
   /** Cached message dimensions by message ID. Cleared on settings change. */
   private readonly dimensionCache = new Map<string, { width: number; height: number }>();
 
+  /** Max cached dimension entries before LRU eviction. */
+  private static readonly DIMENSION_CACHE_MAX = 1000;
+
   /**
    * Pre-allocated opacity buckets for per-frame reuse.
    * Bucket index = Math.round(opacity * 20), yielding 21 buckets (0.00–1.00 in 0.05 steps).
@@ -1573,6 +1576,11 @@ export class CanvasRenderer extends RendererBase {
     );
 
     if (message.id) {
+      // LRU eviction on overflow
+      if (this.dimensionCache.size >= CanvasRenderer.DIMENSION_CACHE_MAX) {
+        const oldestKey = this.dimensionCache.keys().next().value;
+        if (oldestKey !== undefined) this.dimensionCache.delete(oldestKey);
+      }
       this.dimensionCache.set(message.id, dims);
     }
 

@@ -30,6 +30,9 @@ import { getFontString } from '@core/text-measure';
 
 // ── SuperChat card ───────────────────────────────────────────────────────────
 
+/** Max cached SuperChat gradients before LRU eviction. */
+const SUPERCHAT_GRADIENT_CACHE_MAX = 100;
+
 /** Get or create a cached SuperChat background gradient (relative to origin). */
 function getSuperChatGradient(
   ctx: CanvasRenderingContext2D,
@@ -43,6 +46,11 @@ function getSuperChatGradient(
   const key = `${baseColor}|${h}|${topAlpha}|${scAlpha}|${bottomAlpha}`;
   const cached = cache.get(key);
   if (cached) return cached;
+  // LRU eviction on overflow
+  if (cache.size >= SUPERCHAT_GRADIENT_CACHE_MAX) {
+    const oldestKey = cache.keys().next().value;
+    if (oldestKey !== undefined) cache.delete(oldestKey);
+  }
   const grad = ctx.createLinearGradient(0, 0, 0, h);
   grad.addColorStop(0, toRgba(baseColor, topAlpha));
   grad.addColorStop(0.48, toRgba(baseColor, scAlpha));

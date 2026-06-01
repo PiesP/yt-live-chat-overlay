@@ -353,12 +353,7 @@ let totalDrops = 0;
 
 // ── Text bitmap cache ──────────────────────────────────────────────────────
 
-const textBitmapCache = new Map<string, OffscreenCanvas>();
-
-const textBitmapCacheAdapter: TextBitmapCache = {
-  get: (key) => textBitmapCache.get(key),
-  set: (key, value) => textBitmapCache.set(key, value as OffscreenCanvas),
-};
+let textBitmapCache: ByteLimitedCache<OffscreenCanvas>;
 
 let emojiCache: ByteLimitedCache<ImageBitmap>;
 let authorPhotoCache: ByteLimitedCache<ImageBitmap>;
@@ -1262,6 +1257,10 @@ self.onmessage = (e: MessageEvent) => {
         estimateBitmapBytes,
         (b) => b.close()
       );
+      textBitmapCache = new ByteLimitedCache<OffscreenCanvas>(
+        (config.textCacheMb ?? 4) * 1_000_000,
+        (canvas) => canvas.width * canvas.height * 4
+      );
       recomputeConfigDerived();
       initLanes(data.width as number, data.height as number);
       startRenderLoop();
@@ -1729,7 +1728,7 @@ function renderFrame(): void {
           cfg.superChatOpacity,
           showAuthorSection,
           cfg.showSuperChatAmount,
-          textBitmapCacheAdapter,
+          textBitmapCache,
           authorPhotoCache,
           stickerCache,
           emojiCache,
@@ -1751,7 +1750,7 @@ function renderFrame(): void {
           strokeWidth,
           cfg.outlineOpacity,
           cfg.membershipMaxBodyLines,
-          textBitmapCacheAdapter,
+          textBitmapCache,
           authorPhotoCache,
           emojiCache,
           getFont
@@ -1774,7 +1773,7 @@ function renderFrame(): void {
           renderColor,
           strokeWidth,
           cfg.outlineOpacity,
-          textBitmapCacheAdapter,
+          textBitmapCache,
           emojiCache,
           authorPhotoCache,
           getFont,
@@ -1806,7 +1805,7 @@ function renderFrame(): void {
           translationFontSize,
           strokeWidth,
           cfg.outlineOpacity,
-          textBitmapCacheAdapter,
+          textBitmapCache,
           getFont
         );
         ctx.restore();
@@ -2003,7 +2002,8 @@ function activateMessage(
   const laneY = placement.laneY;
 
   // ── Per-author color ──
-  const authorColor = (msg.authorType && config.authorColors[msg.authorType]) || config.color;
+  const authorColor =
+    (msg.authorType && config.authorColors[msg.authorType]) || config.color || '#ffffff';
 
   const am: ActiveMessage = {
     id: msg.id,
