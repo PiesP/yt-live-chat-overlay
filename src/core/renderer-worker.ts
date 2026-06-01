@@ -1026,14 +1026,29 @@ function renderSuperChatCard(
     scAlpha,
     bottomAlpha
   );
+  // Background card with rounded corners
   ctx.save();
   ctx.translate(x, y);
   ctx.fillStyle = grad;
   drawRoundRect(ctx, 0, 0, w, h, rendererLayout.superchatCardRadius);
   ctx.fill();
-  // Left accent bar (relative to translated origin)
+  ctx.restore();
+
+  // Left accent bar with rounded left edge to match card border radius
+  ctx.save();
+  const barWidth = rendererLayout.superchatAccentBarWidth;
+  const radius = rendererLayout.superchatCardRadius;
+  ctx.beginPath();
+  ctx.moveTo(x + barWidth, y + radius);
+  ctx.lineTo(x + barWidth, y);
+  ctx.lineTo(x + radius, y);
+  ctx.arcTo(x, y, x, y + radius, radius);
+  ctx.lineTo(x, y + h - radius);
+  ctx.arcTo(x, y + h, x + barWidth, y + h, radius);
+  ctx.lineTo(x + barWidth, y + h);
+  ctx.closePath();
   ctx.fillStyle = baseColor;
-  ctx.fillRect(0, 0, rendererLayout.superchatAccentBarWidth, h);
+  ctx.fill();
   ctx.restore();
 
   const scPad = rendererLayout.superchat;
