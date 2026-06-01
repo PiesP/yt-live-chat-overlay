@@ -1107,7 +1107,8 @@ function renderPaidCardWorker(
 
   // ── 7. Badge (amount pill) ────────────────────────────────────────────
   if (card.badgeEnabled && message.badgeText) {
-    const badgeFontSize = Math.round(fontSize * 0.7);
+    cursorY += spacing.xs;
+    const badgeFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
     const badgeFont = getFontString(badgeFontSize, 'bold' as FontWeight, fontFamily);
     ctx.font = badgeFont;
     const badgeTextWidth = Math.ceil(ctx.measureText(message.badgeText).width);

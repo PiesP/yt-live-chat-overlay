@@ -17,6 +17,7 @@ import {
 } from '@core/canvas-text-renderer';
 import type { CardConfig } from '@core/card-config';
 import { computeReadableTextColor, toRgba } from '@core/color-utils';
+import { rendererLayout, spacing } from '@core/design-tokens';
 import { measureTextHeight } from '@core/text-measure';
 
 // ── SuperChat card ───────────────────────────────────────────────────────────
@@ -200,7 +201,7 @@ function renderCardBadge(
 ): number {
   if (!config.badge) return y;
   const badge = config.badge;
-  const badgeFontSize = Math.round(fontSize * 0.7);
+  const badgeFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
   ctx.font = getFontFn(badgeFontSize);
   const badgeTextWidth = Math.ceil(ctx.measureText(text).width);
   const badgeWidth = badgeTextWidth + badge.paddingH * 2;
@@ -348,7 +349,7 @@ export function renderPaidCard(
       cursorY = renderCardBadge(
         ctx,
         textX,
-        cursorY,
+        cursorY + spacing.xs,
         badgeText,
         fontSize,
         config,
