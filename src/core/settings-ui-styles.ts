@@ -6,6 +6,7 @@ import {
   animDuration,
   borderRadius,
   CONFIRM_BACKDROP_ALPHA,
+  scrollbar,
   shadows,
   TOAST_BG,
   TOAST_FONT,
@@ -157,6 +158,21 @@ export const SETTINGS_UI_STYLES = `
         flex: 1;
         min-height: 0;
         padding-right: 2px;
+        scrollbar-width: thin;
+        scrollbar-color: ${scrollbar.thumb} ${scrollbar.track};
+      }
+      .yt-chat-overlay-settings-pane::-webkit-scrollbar {
+        width: ${scrollbar.width};
+      }
+      .yt-chat-overlay-settings-pane::-webkit-scrollbar-track {
+        background: ${scrollbar.track};
+      }
+      .yt-chat-overlay-settings-pane::-webkit-scrollbar-thumb {
+        background: ${scrollbar.thumb};
+        border-radius: ${scrollbar.width};
+      }
+      .yt-chat-overlay-settings-pane::-webkit-scrollbar-thumb:hover {
+        background: ${scrollbar.thumbHover};
       }
       .yt-chat-overlay-settings-pane[hidden] {
         display: none;

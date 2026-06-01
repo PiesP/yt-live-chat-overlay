@@ -97,6 +97,14 @@ export const animDuration = {
 // ── UI confirm backdrop alpha ──
 export const CONFIRM_BACKDROP_ALPHA = 0.5;
 
+// ── Scrollbar (pane overflow) ──
+export const scrollbar = {
+  width: '6px',
+  track: 'transparent',
+  thumb: 'rgba(255, 255, 255, 0.12)',
+  thumbHover: 'rgba(255, 255, 255, 0.28)',
+} as const;
+
 // ── Toast notification ──
 export const TOAST_BG = 'rgba(0, 0, 0, 0.85)';
 export const TOAST_FONT = `12px/1.4 ${DEFAULT_FONT_FAMILY}`;
