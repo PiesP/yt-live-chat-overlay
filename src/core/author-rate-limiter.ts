@@ -50,7 +50,17 @@ export class PerAuthorRateLimiter {
     let timestamps = this.authorTimestamps.get(authorId);
 
     if (timestamps) {
-      timestamps = timestamps.filter((t) => t > cutoff);
+      // Binary search for first timestamp > cutoff (timestamps are sorted ascending)
+      let lo = 0,
+        hi = timestamps.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >>> 1;
+        if ((timestamps[mid] ?? 0) <= cutoff) lo = mid + 1;
+        else hi = mid;
+      }
+      if (lo > 0) {
+        timestamps.splice(0, lo);
+      }
       if (timestamps.length >= limit) {
         this.authorTimestamps.set(authorId, timestamps);
         log.debug(

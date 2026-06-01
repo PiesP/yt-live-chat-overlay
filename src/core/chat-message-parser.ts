@@ -421,6 +421,12 @@ function appendTextSegment(segments: ContentSegment[], content: string): void {
   segments.push({ type: 'text', content });
 }
 
+function countGraphemes(s: string): number {
+  let count = 0;
+  for (const _ of s) count++;
+  return count;
+}
+
 function getVisibleContentLength(segments: readonly ContentSegment[]): number {
   let visibleLength = 0;
 
@@ -430,7 +436,8 @@ function getVisibleContentLength(segments: readonly ContentSegment[]): number {
       continue;
     }
 
-    visibleLength += [...stripControlCharacters(segment.content).replace(/\s+/g, '')].length;
+    const cleaned = stripControlCharacters(segment.content).replace(/\s+/g, '');
+    visibleLength += countGraphemes(cleaned);
   }
 
   return visibleLength;
