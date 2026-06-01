@@ -234,10 +234,42 @@ function estimateMembershipDimensions(
   const hasAuthor = message.author !== undefined;
   const authorBodyGap = hasAuthor ? spacing.xs : 0;
 
-  return {
-    width,
-    height: headerHeight + infoHeight + authorBodyGap + textHeight + paddingV * 2,
-  };
+  return { width, height: headerHeight + infoHeight + authorBodyGap + textHeight + paddingV * 2 };
+}
+
+/**
+ * Estimate dimensions for a paid (SuperChat/Membership) card.
+ * Dispatches to the existing type-specific estimate functions based on message.kind.
+ */
+export function estimatePaidCardDimensions(
+  message: ChatMessage,
+  fontSize: number,
+  fontWeight: FontWeight = 'bold',
+  fontFamily: string = DEFAULT_FONT_FAMILY,
+  maxBodyLines?: { superchat?: number; membership?: number },
+  showSuperChatAmount?: boolean
+): MessageDimensions {
+  const font = getFontString(fontSize, fontWeight, fontFamily);
+
+  if (message.kind === 'superchat') {
+    return estimateSuperChatDimensions(
+      message,
+      font,
+      fontSize,
+      true, // showAuthor — caller should override via estimateMessageDimensions for full control
+      fontFamily,
+      maxBodyLines?.superchat ?? DEFAULT_SETTINGS.superChatMaxBodyLines,
+      fontWeight,
+      showSuperChatAmount
+    );
+  }
+
+  return estimateMembershipDimensions(
+    message,
+    font,
+    fontSize,
+    maxBodyLines?.membership ?? DEFAULT_SETTINGS.membershipMaxBodyLines
+  );
 }
 
 // ── Opacity computation (shared between main-thread and worker renderers) ──

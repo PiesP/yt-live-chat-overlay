@@ -29,8 +29,9 @@
 
 import type { ChatMessage, DropReason, OverlayDimensions, OverlaySettings } from '@app-types';
 import { ByteLimitedCache } from '@core/byte-limited-cache';
-import { renderMembershipCard, renderSuperChatCard } from '@core/canvas-card-renderers';
+import { renderPaidCard } from '@core/canvas-card-renderers';
 import { drawRoundRect, renderRegularMessage, strokeTextOutline } from '@core/canvas-text-renderer';
+import { createMembershipCardConfig, createSuperChatCardConfig } from '@core/card-config';
 import { getTranslatableText } from '@core/chat-message-helpers';
 import { computeScrollDuration, standbyMessageLayout } from '@core/design-tokens';
 import { clearSafeAnimationFrame, forEachSlot } from '@core/dom';
@@ -634,38 +635,27 @@ export class CanvasRenderer extends RendererBase {
           );
         } else {
           if (renderOriginal) {
-            if (msg.message.kind === 'superchat') {
-              renderSuperChatCard(
-                ctx,
-                renderMessage,
-                msg.width,
-                msg.height,
-                snappedX,
-                snappedY,
-                this.settings,
-                this.textBitmapCache,
-                this.imageFetchManager.authorPhotoCache,
-                this.imageFetchManager.stickerCache,
-                this.imageFetchManager.emojiCache,
-                (fs) => this.getFont(fs),
-                this.superChatGradientCache
-              );
-            } else if (msg.message.kind === 'membership') {
-              renderMembershipCard(
-                ctx,
-                renderMessage,
-                msg.width,
-                msg.height,
-                snappedX,
-                snappedY,
-                elapsed,
-                this.settings,
-                this.textBitmapCache,
-                this.imageFetchManager.authorPhotoCache,
-                this.imageFetchManager.emojiCache,
-                (fs) => this.getFont(fs)
-              );
-            }
+            const cardConfig =
+              msg.message.kind === 'superchat'
+                ? createSuperChatCardConfig()
+                : createMembershipCardConfig();
+            renderPaidCard(
+              ctx,
+              renderMessage,
+              msg.width,
+              msg.height,
+              snappedX,
+              snappedY,
+              elapsed,
+              cardConfig,
+              this.settings,
+              this.textBitmapCache,
+              this.imageFetchManager.authorPhotoCache,
+              this.imageFetchManager.stickerCache,
+              this.imageFetchManager.emojiCache,
+              (fs: number) => this.getFont(fs),
+              this.superChatGradientCache
+            );
           }
         }
 

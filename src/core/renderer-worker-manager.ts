@@ -13,6 +13,11 @@
  */
 
 import type { ChatMessage, OverlaySettings } from '@app-types';
+import {
+  createMembershipCardConfig,
+  createSuperChatCardConfig,
+  toWorkerConfig,
+} from '@core/card-config';
 import type { ImageFetchManager } from '@core/image-fetch-manager';
 import { createLogger } from '@core/logging';
 import type { ObservabilityReporter } from '@core/observability';
@@ -276,6 +281,16 @@ export class RenderWorkerManager {
           isBacklog: message.isBacklog ?? false,
           authorType: message.authorType,
           kind: message.kind,
+          cardConfigWorker:
+            message.kind === 'superchat' || message.kind === 'membership'
+              ? toWorkerConfig(
+                  message.kind === 'superchat'
+                    ? createSuperChatCardConfig()
+                    : createMembershipCardConfig(),
+                  message,
+                  this.deps.settings
+                )
+              : undefined,
           burstSpeedMultiplier: this.computeBurstSpeedMultiplier(),
           translatedText: (message as { translatedText?: string }).translatedText || undefined,
           // NEW:
@@ -291,6 +306,8 @@ export class RenderWorkerManager {
                 superChatStickerUrl: message.superChat.sticker?.url,
               }
             : {}),
+          // Membership header (if applicable)
+          ...(message.kind === 'membership' ? { membershipHeader: message.membershipHeader } : {}),
         },
       ],
     };
