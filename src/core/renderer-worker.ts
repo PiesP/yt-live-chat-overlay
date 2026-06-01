@@ -48,6 +48,7 @@ import {
 } from './design-tokens';
 import { LaneAllocator } from './lane-allocator';
 import {
+  ANTI_BLOCK_FREE_RATIO,
   DRAIN_QUEUE_MAX_SKIP as DRAIN_MAX_SKIP,
   desaturateColor,
   EPSILON,
@@ -1944,6 +1945,12 @@ function drainQueue(now: number, width: number, height: number): void {
   let skipped = 0;
   let batchIndex = 0;
 
+  // Anti-block gate: when lane utilization is critically high (≥95%),
+  // probabilistically pause new placements. High-priority messages (≥80)
+  // bypass the gate so paid interactions are never blocked.
+  const laneUtilization = laneHeap.length / Math.max(1, numLanes);
+  const isAntiBlock = laneUtilization >= 1 - ANTI_BLOCK_FREE_RATIO;
+
   while (
     pendingQueueOffset < pendingQueue.length &&
     activeMessages.length < config.maxConcurrentMessages &&
@@ -1951,6 +1958,15 @@ function drainQueue(now: number, width: number, height: number): void {
   ) {
     const entry = pendingQueue[pendingQueueOffset++];
     if (!entry) continue;
+
+    // Anti-block: probabilistically skip low-priority messages when lanes are saturated
+    if (isAntiBlock && entry.priority < 80) {
+      const acceptProb = (1 - laneUtilization) / ANTI_BLOCK_FREE_RATIO;
+      if (Math.random() >= acceptProb) {
+        skipped++;
+        continue;
+      }
+    }
 
     // Compute speed tier matching activateMessage for correct lane allocation
     let speedTier: number;
