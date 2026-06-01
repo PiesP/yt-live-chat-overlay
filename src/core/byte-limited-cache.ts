@@ -16,7 +16,8 @@ export class ByteLimitedCache<V> {
 
   constructor(
     readonly maxBytes: number,
-    private estimateSize: (value: V) => number
+    private estimateSize: (value: V) => number,
+    private onEvict?: (value: V) => void
   ) {}
 
   get(key: string): V | undefined {
@@ -34,7 +35,11 @@ export class ByteLimitedCache<V> {
     const bytes = this.estimateSize(value);
     while (this.totalBytes + bytes > this.maxBytes && this.map.size > 0) {
       const oldestKey = this.map.keys().next().value;
-      if (oldestKey !== undefined) this.delete(oldestKey);
+      if (oldestKey !== undefined) {
+        const oldestVal = this.map.get(oldestKey);
+        if (oldestVal !== undefined) this.onEvict?.(oldestVal);
+        this.delete(oldestKey);
+      }
     }
     // Re-check after eviction — if value itself exceeds maxBytes, don't cache
     if (this.totalBytes + bytes > this.maxBytes && this.map.size === 0) {
@@ -48,6 +53,7 @@ export class ByteLimitedCache<V> {
     const val = this.map.get(key);
     if (val === undefined) return false;
     this.totalBytes -= this.estimateSize(val);
+    this.onEvict?.(val);
     return this.map.delete(key);
   }
 
@@ -56,6 +62,9 @@ export class ByteLimitedCache<V> {
   }
 
   clear(): void {
+    if (this.onEvict) {
+      for (const val of this.map.values()) this.onEvict(val);
+    }
     this.map.clear();
     this.totalBytes = 0;
   }

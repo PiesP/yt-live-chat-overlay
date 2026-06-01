@@ -38,6 +38,7 @@ import {
   heapSiftDown,
   heapUpdateLane,
 } from '@shared/lane-allocation-shared';
+import { ByteLimitedCache } from './byte-limited-cache';
 import { EMOJI_ALIAS_PATTERN } from './chat-message-helpers';
 import {
   computeOutlineColor,
@@ -74,7 +75,6 @@ import {
   TRANSLATION_OPACITY_SCALE,
 } from './renderer-constants';
 import { getFontString } from './text-measure';
-import { WorkerImageCache } from './worker-image-cache';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -354,10 +354,65 @@ const TEXT_BITMAP_CACHE_MAX = 200;
 
 const textBitmapCache = new Map<string, OffscreenCanvas>();
 
-const emojiCache = new WorkerImageCache();
-const authorPhotoCache = new WorkerImageCache();
-const stickerCache = new WorkerImageCache();
+let emojiCache: ByteLimitedCache<ImageBitmap>;
+let authorPhotoCache: ByteLimitedCache<ImageBitmap>;
+let stickerCache: ByteLimitedCache<ImageBitmap>;
 const superChatGradientCache = new Map<string, CanvasGradient>();
+
+// ── Image prefetch utility (semaphore-based concurrency) ──────────────────
+
+/** Estimate byte size of an ImageBitmap (RGBA). */
+function estimateBitmapBytes(bitmap: ImageBitmap): number {
+  return bitmap.width * bitmap.height * 4;
+}
+
+/** Max concurrent image fetches. */
+const MAX_CONCURRENT_FETCHES = 6;
+
+/** Fetch timeout in ms. */
+const FETCH_TIMEOUT_MS = 30_000;
+
+/** In-flight URLs to avoid duplicate prefetches. */
+const fetching = new Set<string>();
+
+/**
+ * Semaphore-based concurrent image prefetch.
+ * Fetches images and inserts them into the given ByteLimitedCache.
+ */
+async function prefetchImages(urls: string[], cache: ByteLimitedCache<ImageBitmap>): Promise<void> {
+  const toFetch = urls.filter((u) => !cache.has(u) && !fetching.has(u));
+  if (toFetch.length === 0) return;
+
+  // Semaphore pattern: process all URLs with concurrency limit
+  let idx = 0;
+  const workers: Promise<void>[] = [];
+  for (let i = 0; i < Math.min(MAX_CONCURRENT_FETCHES, toFetch.length); i++) {
+    workers.push(
+      (async () => {
+        while (idx < toFetch.length) {
+          const url = toFetch[idx++];
+          if (url === undefined) break;
+          fetching.add(url);
+          try {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+            const response = await fetch(url, { signal: controller.signal });
+            clearTimeout(timer);
+            if (!response.ok) continue;
+            const blob = await response.blob();
+            const bitmap = await createImageBitmap(blob);
+            cache.set(url, bitmap);
+          } catch {
+            // Network errors, aborts, decode failures — silently skip
+          } finally {
+            fetching.delete(url);
+          }
+        }
+      })()
+    );
+  }
+  await Promise.all(workers);
+}
 
 /**
  * Pre-allocated opacity buckets for per-frame reuse.
@@ -539,7 +594,7 @@ function renderContentSegments(
   outlineWidthPx: number,
   outlineOpacity: number,
   textBitmapCache: Map<string, OffscreenCanvas>,
-  emojiCache: WorkerImageCache,
+  emojiCache: ByteLimitedCache<ImageBitmap>,
   getFontFn: (fontSize: number) => string
 ): void {
   let cursorX = startX;
@@ -765,7 +820,7 @@ function renderWrappedContentSegments(
   outlineWidthPx: number,
   outlineOpacity: number,
   textBitmapCache: Map<string, OffscreenCanvas>,
-  emojiCache: WorkerImageCache,
+  emojiCache: ByteLimitedCache<ImageBitmap>,
   getFontFn: (fontSize: number) => string
 ): number {
   if (segments.length === 0) return y;
@@ -894,7 +949,7 @@ function drawAuthorSection(
   fontFamily: string,
   outlineWidthPx: number,
   outlineOpacity: number,
-  authorPhotoCache: WorkerImageCache,
+  authorPhotoCache: ByteLimitedCache<ImageBitmap>,
   textBitmapCache: Map<string, OffscreenCanvas>,
   getFontFn: (fontSize: number) => string
 ): number {
@@ -1016,8 +1071,8 @@ function renderRegularMessage(
   outlineWidthPx: number,
   outlineOpacity: number,
   textBitmapCache: Map<string, OffscreenCanvas>,
-  emojiCache: WorkerImageCache,
-  authorPhotoCache: WorkerImageCache,
+  emojiCache: ByteLimitedCache<ImageBitmap>,
+  authorPhotoCache: ByteLimitedCache<ImageBitmap>,
   getFontFn: (fontSize: number) => string,
   overrideText?: string | null
 ): void {
@@ -1144,9 +1199,9 @@ function renderSuperChatCard(
   showAuthorSection: boolean,
   showSuperChatAmount: boolean,
   textBitmapCache: Map<string, OffscreenCanvas>,
-  authorPhotoCache: WorkerImageCache,
-  stickerCache: WorkerImageCache,
-  emojiCache: WorkerImageCache,
+  authorPhotoCache: ByteLimitedCache<ImageBitmap>,
+  stickerCache: ByteLimitedCache<ImageBitmap>,
+  emojiCache: ByteLimitedCache<ImageBitmap>,
   getFontFn: (fontSize: number) => string,
   superChatGradientCache: Map<string, CanvasGradient>
 ): void {
@@ -1313,8 +1368,8 @@ function renderMembershipCard(
   outlineOpacity: number,
   membershipMaxBodyLines: number,
   textBitmapCache: Map<string, OffscreenCanvas>,
-  authorPhotoCache: WorkerImageCache,
-  emojiCache: WorkerImageCache,
+  authorPhotoCache: ByteLimitedCache<ImageBitmap>,
+  emojiCache: ByteLimitedCache<ImageBitmap>,
   getFontFn: (fontSize: number) => string
 ): void {
   const w = msgWidth;
@@ -1393,6 +1448,21 @@ self.onmessage = (e: MessageEvent) => {
         self.postMessage({ type: 'error', error: 'Failed to get 2D context' });
         return;
       }
+      emojiCache = new ByteLimitedCache<ImageBitmap>(
+        (config.emojiCacheMb ?? 4) * 1_000_000,
+        estimateBitmapBytes,
+        (b) => b.close()
+      );
+      authorPhotoCache = new ByteLimitedCache<ImageBitmap>(
+        (config.photoCacheMb ?? 4) * 1_000_000,
+        estimateBitmapBytes,
+        (b) => b.close()
+      );
+      stickerCache = new ByteLimitedCache<ImageBitmap>(
+        (config.stickerCacheMb ?? 4) * 1_000_000,
+        estimateBitmapBytes,
+        (b) => b.close()
+      );
       recomputeConfigDerived();
       initLanes(data.width as number, data.height as number);
       startRenderLoop();
@@ -2160,18 +2230,16 @@ function activateMessage(
   );
   activeMessages.push(am);
 
-  // Prefetch images for this message
-  const imageUrls: string[] = [];
+  // Prefetch images for this message — route to appropriate byte-limited cache
   if (msg.content) {
+    const emojiUrls: string[] = [];
     for (const seg of msg.content) {
-      if (seg.type === 'emoji' && seg.emojiUrl) imageUrls.push(seg.emojiUrl);
+      if (seg.type === 'emoji' && seg.emojiUrl) emojiUrls.push(seg.emojiUrl);
     }
+    if (emojiUrls.length > 0) void prefetchImages(emojiUrls, emojiCache);
   }
-  if (msg.authorPhotoUrl) imageUrls.push(msg.authorPhotoUrl);
-  if (msg.superChatStickerUrl) imageUrls.push(msg.superChatStickerUrl);
-  if (imageUrls.length > 0) {
-    void emojiCache.prefetchAll(imageUrls);
-  }
+  if (msg.authorPhotoUrl) void prefetchImages([msg.authorPhotoUrl], authorPhotoCache);
+  if (msg.superChatStickerUrl) void prefetchImages([msg.superChatStickerUrl], stickerCache);
 }
 
 // ── Cleanup ───────────────────────────────────────────────────────────────
