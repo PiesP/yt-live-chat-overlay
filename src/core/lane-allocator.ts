@@ -9,6 +9,7 @@ import {
   EPSILON as _EPSILON,
   LANE_COOLDOWN_MIN_MS as _LANE_COOLDOWN_MIN_MS,
   SAFETY_MARGIN_RATIO as _SAFETY_MARGIN_RATIO,
+  SPEED_TIER,
 } from '@core/renderer-constants';
 import { getFontString, measureTextHeight } from '@core/text-measure';
 
@@ -41,17 +42,6 @@ interface LaneAllocatorOptions {
   scrollDurationMaxMs: number;
   maxMessageAgeMs: number;
 }
-
-/**
- * Speed tier constants for lane allocation.
- *  0 = Far depth, 1 = Mid (default real-time), 2 = Near depth, 3 = Backlog
- */
-export const SPEED_TIER = {
-  FAR: 0,
-  MID: 1,
-  NEAR: 2,
-  BACKLOG: 3,
-} as const;
 
 /**
  * Top-first lane scheduler with tiered-speed lane allocation.

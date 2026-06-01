@@ -15,6 +15,11 @@
 
 // ── Lane allocation (lane-allocator.ts) ─────────────────────────────────────
 
+/** Speed tier constants for depth-layered rendering.
+ *  FAR=background, MID=middle, NEAR=foreground, BACKLOG=backlog messages.
+ *  Used by both main-thread lane allocator and worker. */
+export const SPEED_TIER = { FAR: 0, MID: 1, NEAR: 2, BACKLOG: 3 } as const;
+
 /** Minimum cooldown between consecutive uses of the same lane (ms).
  *  Used only for top/bottom (non-scrolling) modes. */
 export const LANE_COOLDOWN_MIN_MS = 500;

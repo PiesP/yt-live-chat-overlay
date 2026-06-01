@@ -58,6 +58,7 @@ import {
   LANE_COOLDOWN_MIN_MS,
   OUTLINE_STROKE_SCALE,
   SAFETY_MARGIN_RATIO,
+  SPEED_TIER,
   STAGGER_BATCH_MAX,
   STAGGER_EXP_SCALE,
   TIER_NEAR_THRESHOLD,
@@ -275,10 +276,6 @@ interface ActiveMessage {
   /** SuperChat sticker image URL. */
   superChatStickerUrl?: string;
 }
-
-// ── Speed tier constants ──────────────────────────────────────────────────
-// MUST match @core/lane-allocator SPEED_TIER values.
-const SPEED_TIER = { FAR: 0, MID: 1, NEAR: 2, BACKLOG: 3 } as const;
 
 // ── Worker-specific constants ──────────────────────────────────────────────
 
@@ -1496,7 +1493,7 @@ function allocateSingleLane(
 ): { laneIndex: number; waitMs: number } | null {
   if (laneHeap.length === 0) return null;
 
-  const maxWaitMs = config!.scrollDurationMaxMs;
+  const maxWaitMs = (config as WorkerConfig).scrollDurationMaxMs;
   let firstBusy: { laneIndex: number; waitMs: number } | null = null;
   let speedMatched: { laneIndex: number; waitMs: number } | null = null;
   let zeroWaitCandidates: number[] | null = null;
@@ -1967,10 +1964,9 @@ function drainQueue(now: number, width: number, height: number): void {
 
   // Merge retries
   if (retryQueue.length > 0) {
-    for (const e of retryQueue) {
-      const idx = findInsertIndex(e.priority);
-      pendingQueue.splice(idx, 0, e);
-    }
+    // Bulk push + single sort (O(n log n)) instead of per-message splice insert (O(n²))
+    pendingQueue.push(...retryQueue);
+    pendingQueue.sort((a, b) => b.priority - a.priority);
     retryQueue.length = 0;
   }
 }
