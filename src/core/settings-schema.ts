@@ -163,6 +163,18 @@ const ROOT_SETTING_META = {
   translationBatchSize: { type: 'number', visual: false },
   emojiFetchLimit: { type: 'number', visual: false },
   failedEmojiRetryMins: { type: 'number', visual: false },
+  burstSampleWindow: { type: 'number', visual: false },
+  burstElevatedThreshold: { type: 'number', visual: false },
+  burstHighThreshold: { type: 'number', visual: false },
+  burstExtremeThreshold: { type: 'number', visual: false },
+  backlogInjectionMax: { type: 'number', visual: false },
+  backlogDensityRampMs: { type: 'number', visual: false },
+  livePollFallbackMs: { type: 'number', visual: false },
+  livePollFailureLimit: { type: 'number', visual: false },
+  speedBoostThreshold: { type: 'number', visual: false },
+  backlogPauseThreshold: { type: 'number', visual: false, displayScale: 100, displayPrecision: 0 },
+  backlogResumeThreshold: { type: 'number', visual: false, displayScale: 100, displayPrecision: 0 },
+  activityTimeoutMs: { type: 'number', visual: false },
 } as const satisfies Record<RootScalarSettingKey, SettingMeta>;
 
 /**
@@ -226,7 +238,19 @@ type SettingsLimitKey =
   | 'textCacheMb'
   | 'translationBatchSize'
   | 'emojiFetchLimit'
-  | 'failedEmojiRetryMins';
+  | 'failedEmojiRetryMins'
+  | 'burstSampleWindow'
+  | 'burstElevatedThreshold'
+  | 'burstHighThreshold'
+  | 'burstExtremeThreshold'
+  | 'backlogInjectionMax'
+  | 'backlogDensityRampMs'
+  | 'livePollFallbackMs'
+  | 'livePollFailureLimit'
+  | 'speedBoostThreshold'
+  | 'backlogPauseThreshold'
+  | 'backlogResumeThreshold'
+  | 'activityTimeoutMs';
 
 const SETTINGS_LIMITS = {
   speedPxPerSec: { min: 50, max: 500, step: 10 },
@@ -268,6 +292,18 @@ const SETTINGS_LIMITS = {
   translationBatchSize: { min: 1, max: 20, step: 1 },
   emojiFetchLimit: { min: 1, max: 20, step: 1 },
   failedEmojiRetryMins: { min: 1, max: 60, step: 1 },
+  burstSampleWindow: { min: 3, max: 60, step: 1 },
+  burstElevatedThreshold: { min: 2, max: 50, step: 1 },
+  burstHighThreshold: { min: 5, max: 100, step: 5 },
+  burstExtremeThreshold: { min: 10, max: 200, step: 5 },
+  backlogInjectionMax: { min: 5, max: 100, step: 5 },
+  backlogDensityRampMs: { min: 500, max: 10000, step: 500 },
+  livePollFallbackMs: { min: 500, max: 30000, step: 500 },
+  livePollFailureLimit: { min: 3, max: 50, step: 1 },
+  speedBoostThreshold: { min: 2, max: 50, step: 1 },
+  backlogPauseThreshold: { min: 0.3, max: 1, step: 0.05 },
+  backlogResumeThreshold: { min: 0.1, max: 1, step: 0.05 },
+  activityTimeoutMs: { min: 5000, max: 120000, step: 5000 },
 } as const satisfies Record<SettingsLimitKey, NumericSettingLimit>;
 
 export const STORAGE_KEY = 'yt-live-chat-overlay-settings';
@@ -363,6 +399,18 @@ export const DEFAULT_SETTINGS = {
   translationBatchSize: 5,
   emojiFetchLimit: 6,
   failedEmojiRetryMins: 5,
+  burstSampleWindow: 10,
+  burstElevatedThreshold: 5,
+  burstHighThreshold: 15,
+  burstExtremeThreshold: 30,
+  backlogInjectionMax: 20,
+  backlogDensityRampMs: 2500,
+  livePollFallbackMs: 1500,
+  livePollFailureLimit: 10,
+  speedBoostThreshold: 5,
+  backlogPauseThreshold: 0.8,
+  backlogResumeThreshold: 0.4,
+  activityTimeoutMs: 30000,
 } as const satisfies Readonly<OverlaySettings>;
 
 // ── Color validation ────────────────────────────────────────────────────────────

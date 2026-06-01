@@ -1842,6 +1842,18 @@ export class CanvasRenderer extends RendererBase {
     'translationBatchSize',
     'emojiFetchLimit',
     'failedEmojiRetryMins',
+    'burstSampleWindow',
+    'burstElevatedThreshold',
+    'burstHighThreshold',
+    'burstExtremeThreshold',
+    'backlogInjectionMax',
+    'backlogDensityRampMs',
+    'livePollFallbackMs',
+    'livePollFailureLimit',
+    'speedBoostThreshold',
+    'backlogPauseThreshold',
+    'backlogResumeThreshold',
+    'activityTimeoutMs',
   ] as const;
 
   /**

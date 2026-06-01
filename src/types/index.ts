@@ -286,6 +286,32 @@ export interface OverlaySettings {
   emojiFetchLimit: number;
   /** Failed emoji retry TTL in minutes (1-60, default 5) */
   failedEmojiRetryMins: number;
+
+  // ── Advanced / Thresholds ──
+  /** Burst rate sample window size (3-60, default 10) */
+  burstSampleWindow: number;
+  /** Elevated burst msg/s threshold (>5 msg/s) */
+  burstElevatedThreshold: number;
+  /** High burst msg/s threshold (>15 msg/s) */
+  burstHighThreshold: number;
+  /** Extreme burst msg/s threshold (>30 msg/s) */
+  burstExtremeThreshold: number;
+  /** Max backlog injection rate cap (5-100, default 20) */
+  backlogInjectionMax: number;
+  /** Density ramp duration in ms (500-10000, default 2500) */
+  backlogDensityRampMs: number;
+  /** Live poll fallback delay in ms (500-30000, default 1500) */
+  livePollFallbackMs: number;
+  /** Consecutive poll failures before backoff (3-50, default 10) */
+  livePollFailureLimit: number;
+  /** Pending messages threshold to trigger speed boost (2-50, default 5) */
+  speedBoostThreshold: number;
+  /** Lane utilization ratio to pause backlog injection (0.3-1.0, default 0.8) */
+  backlogPauseThreshold: number;
+  /** Lane utilization ratio to resume backlog injection (0.1-1.0, default 0.4) */
+  backlogResumeThreshold: number;
+  /** Chat activity timeout in ms (5000-120000, default 30000) */
+  activityTimeoutMs: number;
 }
 
 /**

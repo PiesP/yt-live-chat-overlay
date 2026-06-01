@@ -420,6 +420,63 @@ export const PANES: PaneDef[] = [
         ],
       },
       {
+        title: 'Thresholds',
+        fields: [
+          num('Burst Sample Window', 'burstSampleWindow', 'Burst rate sample window size'),
+          num(
+            'Elevated Burst (msg/s)',
+            'burstElevatedThreshold',
+            'Messages per second threshold for elevated burst level'
+          ),
+          num(
+            'High Burst (msg/s)',
+            'burstHighThreshold',
+            'Messages per second threshold for high burst level'
+          ),
+          num(
+            'Extreme Burst (msg/s)',
+            'burstExtremeThreshold',
+            'Messages per second threshold for extreme burst level'
+          ),
+          num('Backlog Injection Max', 'backlogInjectionMax', 'Maximum backlog injection rate cap'),
+          num(
+            'Backlog Density Ramp (ms)',
+            'backlogDensityRampMs',
+            'Density ramp duration for backlog injection in milliseconds'
+          ),
+          num(
+            'Live Poll Fallback (ms)',
+            'livePollFallbackMs',
+            'Live poll fallback delay in milliseconds'
+          ),
+          num(
+            'Poll Failure Limit',
+            'livePollFailureLimit',
+            'Consecutive poll failures before circuit breaker trips'
+          ),
+          num(
+            'Speed Boost Threshold',
+            'speedBoostThreshold',
+            'Pending messages to trigger speed boost'
+          ),
+          num(
+            'Backlog Pause (%)',
+            'backlogPauseThreshold',
+            'Lane utilization ratio to pause backlog injection'
+          ),
+          num(
+            'Backlog Resume (%)',
+            'backlogResumeThreshold',
+            'Lane utilization ratio to resume backlog injection'
+          ),
+          num(
+            'Activity Timeout (ms)',
+            'activityTimeoutMs',
+            'Chat activity timeout in milliseconds'
+          ),
+        ],
+      },
+      {
         title: 'Developer',
         fields: [
           sel(

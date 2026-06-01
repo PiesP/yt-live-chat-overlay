@@ -24,10 +24,9 @@ import {
 
 const log = createLogger('LiveChatSource');
 
-const LIVE_POLL_FALLBACK_DELAY_MS = 1500;
+// livePollFallbackMs — read from this.getSettings()
 const LIVE_SEED_CUTOFF_MS = 60_000;
-/** Max consecutive poll failures before the circuit breaker trips and stops the loop. */
-const LIVE_CONSECUTIVE_FAILURE_LIMIT = 10;
+// livePollFailureLimit — read from this.getSettings()
 /** How often (in failures) to refresh the bootstrap during sustained errors. */
 const LIVE_BOOTSTRAP_REFRESH_INTERVAL = 5;
 
@@ -91,7 +90,8 @@ export class LiveChatSource extends ChatSource {
 
     if (this.consecutiveErrors > 0) {
       const delayed =
-        (timeoutMs > 0 ? timeoutMs : LIVE_POLL_FALLBACK_DELAY_MS) * 2 ** this.consecutiveErrors;
+        (timeoutMs > 0 ? timeoutMs : this.getSettings().livePollFallbackMs) *
+        2 ** this.consecutiveErrors;
       return Math.min(settings.maxPollIntervalMs, Math.max(settings.minPollIntervalMs, delayed));
     }
 
@@ -106,7 +106,7 @@ export class LiveChatSource extends ChatSource {
         settings.minPollIntervalMs,
         Math.min(
           settings.maxPollIntervalMs,
-          timeoutMs > 0 ? timeoutMs : LIVE_POLL_FALLBACK_DELAY_MS
+          timeoutMs > 0 ? timeoutMs : this.getSettings().livePollFallbackMs
         )
       );
       return Math.max(settings.minPollIntervalMs, Math.round(base * 0.3));
@@ -125,7 +125,10 @@ export class LiveChatSource extends ChatSource {
     // Base adaptive delay within bounds
     let base = Math.max(
       settings.minPollIntervalMs,
-      Math.min(settings.maxPollIntervalMs, timeoutMs > 0 ? timeoutMs : LIVE_POLL_FALLBACK_DELAY_MS)
+      Math.min(
+        settings.maxPollIntervalMs,
+        timeoutMs > 0 ? timeoutMs : this.getSettings().livePollFallbackMs
+      )
     );
 
     if (this.recentMessageCounts.length < 2) return base;
@@ -151,11 +154,11 @@ export class LiveChatSource extends ChatSource {
 
       const playback = this.getPlaybackSnapshot();
       if (playback?.paused) {
-        await this.pollWhilePaused(LIVE_POLL_FALLBACK_DELAY_MS, 250, signal);
+        await this.pollWhilePaused(this.getSettings().livePollFallbackMs, 250, signal);
         continue;
       }
 
-      const timeoutMs = this.liveContinuation?.timeoutMs ?? LIVE_POLL_FALLBACK_DELAY_MS;
+      const timeoutMs = this.liveContinuation?.timeoutMs ?? this.getSettings().livePollFallbackMs;
       const delayMs = this.calculateAdaptiveDelay(timeoutMs);
 
       // Extreme density: skip sleep entirely (chained polling).
@@ -192,13 +195,13 @@ export class LiveChatSource extends ChatSource {
         // ── Circuit breaker: stop the poll loop after consecutive failures ──
         // The watchdog (RuntimeManager) will detect the stopped loop via
         // observerAlive/recentlyActive and trigger a managed restart.
-        if (this.consecutiveErrors >= LIVE_CONSECUTIVE_FAILURE_LIMIT) {
+        if (this.consecutiveErrors >= this.getSettings().livePollFailureLimit) {
           log.error(
             `Live poll failed ${this.consecutiveErrors} times consecutively; ` +
               'circuit breaker tripped — stopping poll loop for watchdog restart'
           );
           throw new Error(
-            `Live poll consecutive failure limit (${LIVE_CONSECUTIVE_FAILURE_LIMIT}) reached`
+            `Live poll consecutive failure limit (${this.getSettings().livePollFailureLimit}) reached`
           );
         }
 

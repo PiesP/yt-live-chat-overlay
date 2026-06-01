@@ -29,8 +29,7 @@ export interface BurstLevelObserver {
   updateBurstLevel(level: BurstLevel): void;
 }
 
-/** How many samples to keep for rate calculation */
-const RATE_SAMPLE_WINDOW = 10;
+// rateSampleWindow set via updateThresholds() from settings
 /** Sample interval in ms */
 const SAMPLE_INTERVAL_MS = 1_000;
 /** How long after burst ends to return to normal (ms) — base value,
@@ -43,9 +42,9 @@ const BURST_COOLDOWN_RATIO = 0.3;
 const EMA_ALPHA = 0.3;
 
 /** Messages per second thresholds */
-const ELEVATED_THRESHOLD = 5; // >5 msg/s
-const HIGH_THRESHOLD = 15; // >15 msg/s
-const EXTREME_THRESHOLD = 30; // >30 msg/s
+// elevatedThreshold set via updateThresholds() from settings
+// highThreshold set via updateThresholds() from settings
+// extremeThreshold set via updateThresholds() from settings
 
 export class BurstDetector {
   private samples: number[] = [];
@@ -58,9 +57,26 @@ export class BurstDetector {
   /** Timestamp of the most recently received message (for inter-message-interval EMA). */
   private lastMessageTime: number = 0;
   private observability: BurstLevelObserver | undefined;
+  private rateSampleWindow = 10;
+  private elevatedThreshold = 5;
+  private highThreshold = 15;
+  private extremeThreshold = 30;
 
   constructor(observability?: BurstLevelObserver) {
     this.observability = observability;
+  }
+
+  /** Update burst detection thresholds from user settings. */
+  updateThresholds(settings: {
+    burstSampleWindow: number;
+    burstElevatedThreshold: number;
+    burstHighThreshold: number;
+    burstExtremeThreshold: number;
+  }): void {
+    this.rateSampleWindow = settings.burstSampleWindow;
+    this.elevatedThreshold = settings.burstElevatedThreshold;
+    this.highThreshold = settings.burstHighThreshold;
+    this.extremeThreshold = settings.burstExtremeThreshold;
   }
 
   /** Called whenever a message is received */
@@ -84,7 +100,7 @@ export class BurstDetector {
     if (this.sampleInterval) return;
     this.sampleInterval = setInterval(() => {
       this.samples.push(this.samplesSinceLastCheck);
-      if (this.samples.length > RATE_SAMPLE_WINDOW) {
+      if (this.samples.length > this.rateSampleWindow) {
         this.samples.shift();
       }
       this.samplesSinceLastCheck = 0;
@@ -143,11 +159,11 @@ export class BurstDetector {
     const avgRate = this.samples.reduce((a, b) => a + b, 0) / this.samples.length;
 
     const newLevel: BurstLevel =
-      avgRate > EXTREME_THRESHOLD
+      avgRate > this.extremeThreshold
         ? 'extreme'
-        : avgRate > HIGH_THRESHOLD
+        : avgRate > this.highThreshold
           ? 'high'
-          : avgRate > ELEVATED_THRESHOLD
+          : avgRate > this.elevatedThreshold
             ? 'elevated'
             : 'normal';
 

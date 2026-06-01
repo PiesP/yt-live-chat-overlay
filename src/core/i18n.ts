@@ -91,6 +91,7 @@ const KO: TranslationMap = {
   Backlog: '백로그',
   'Rate Limiting': '속도 제한',
   Timing: '타이밍',
+  Thresholds: '임계값',
   'Author Colors & Visibility': '작성자 색상 및 표시',
   Interface: '인터페이스',
   'Chat Translation': '채팅 번역',
@@ -297,6 +298,38 @@ const KO: TranslationMap = {
   'How long to wait before retrying failed emoji fetches (1-60 min, default 5)':
     '실패한 이모지 재시도 대기 시간 (1-60분, 기본 5)',
 
+  // ── New threshold field labels (added 2026-06-01) ──
+  'Burst Sample Window': '버스트 샘플 창',
+  'Elevated Burst (msg/s)': '상승 버스트 (msg/s)',
+  'High Burst (msg/s)': '높은 버스트 (msg/s)',
+  'Extreme Burst (msg/s)': '극심한 버스트 (msg/s)',
+  'Backlog Injection Max': '백로그 주입 최대',
+  'Backlog Density Ramp (ms)': '백로그 밀도 램프 (ms)',
+  'Live Poll Fallback (ms)': '라이브 폴링 폴백 (ms)',
+  'Poll Failure Limit': '폴링 실패 제한',
+  'Speed Boost Threshold': '속도 부스트 임계값',
+  'Backlog Pause (%)': '백로그 일시 중지 (%)',
+  'Backlog Resume (%)': '백로그 재개 (%)',
+  'Activity Timeout (ms)': '활동 시간 초과 (ms)',
+
+  // ── New threshold tooltips (added 2026-06-01) ──
+  'Burst rate sample window size': '버스트 속도 샘플 창 크기',
+  'Messages per second threshold for elevated burst level': '상승 버스트 수준의 초당 메시지 임계값',
+  'Messages per second threshold for high burst level': '높은 버스트 수준의 초당 메시지 임계값',
+  'Messages per second threshold for extreme burst level':
+    '극심한 버스트 수준의 초당 메시지 임계값',
+  'Maximum backlog injection rate cap': '최대 백로그 주입 속도 상한',
+  'Density ramp duration for backlog injection in milliseconds':
+    '백로그 주입의 밀도 램프 지속 시간 (밀리초)',
+  'Live poll fallback delay in milliseconds': '라이브 폴링 폴백 지연 시간 (밀리초)',
+  'Consecutive poll failures before circuit breaker trips':
+    '차단기가 작동하기 전 연속 폴링 실패 횟수',
+  'Pending messages to trigger speed boost': '속도 부스트를 트리거하는 대기 메시지 수',
+  'Lane utilization ratio to pause backlog injection':
+    '백로그 주입을 일시 중지하는 레인 사용률 비율',
+  'Lane utilization ratio to resume backlog injection': '백로그 주입을 재개하는 레인 사용률 비율',
+  'Chat activity timeout in milliseconds': '채팅 활동 시간 초과 (밀리초)',
+
   // ── Modal chrome ──
   'Chat Overlay': '채팅 오버레이',
   'Close settings': '설정 닫기',
@@ -342,6 +375,7 @@ const JA: TranslationMap = {
   Backlog: 'バックログ',
   'Rate Limiting': 'レート制限',
   Timing: 'タイミング',
+  Thresholds: 'しきい値',
   'Author Colors & Visibility': '投稿者の色と表示',
   Interface: 'インターフェース',
   'Chat Translation': 'チャット翻訳',
@@ -550,6 +584,39 @@ const JA: TranslationMap = {
   'How long to wait before retrying failed emoji fetches (1-60 min, default 5)':
     '失敗した絵文字の再試行までの待機時間 (1-60分, デフォルト 5)',
 
+  // ── New threshold field labels (added 2026-06-01) ──
+  'Burst Sample Window': 'バーストサンプルウィンドウ',
+  'Elevated Burst (msg/s)': '上昇バースト (msg/s)',
+  'High Burst (msg/s)': '高バースト (msg/s)',
+  'Extreme Burst (msg/s)': '極端なバースト (msg/s)',
+  'Backlog Injection Max': 'バックログ注入最大',
+  'Backlog Density Ramp (ms)': 'バックログ密度ランプ (ms)',
+  'Live Poll Fallback (ms)': 'ライブポーリングフォールバック (ms)',
+  'Poll Failure Limit': 'ポーリング失敗制限',
+  'Speed Boost Threshold': 'スピードブーストしきい値',
+  'Backlog Pause (%)': 'バックログ一時停止 (%)',
+  'Backlog Resume (%)': 'バックログ再開 (%)',
+  'Activity Timeout (ms)': 'アクティビティタイムアウト (ms)',
+
+  // ── New threshold tooltips (added 2026-06-01) ──
+  'Burst rate sample window size': 'バーストレートのサンプルウィンドウサイズ',
+  'Messages per second threshold for elevated burst level':
+    '上昇バーストレベルの1秒あたりのメッセージしきい値',
+  'Messages per second threshold for high burst level':
+    '高バーストレベルの1秒あたりのメッセージしきい値',
+  'Messages per second threshold for extreme burst level':
+    '極端なバーストレベルの1秒あたりのメッセージしきい値',
+  'Maximum backlog injection rate cap': 'バックログ注入レートの最大上限',
+  'Density ramp duration for backlog injection in milliseconds':
+    'バックログ注入の密度ランプ時間（ミリ秒）',
+  'Live poll fallback delay in milliseconds': 'ライブポールフォールバック遅延（ミリ秒）',
+  'Consecutive poll failures before circuit breaker trips':
+    'サーキットブレーカー作動前の連続ポーリング失敗数',
+  'Pending messages to trigger speed boost': 'スピードブーストをトリガーする保留メッセージ数',
+  'Lane utilization ratio to pause backlog injection': 'バックログ注入を一時停止するレーン使用率',
+  'Lane utilization ratio to resume backlog injection': 'バックログ注入を再開するレーン使用率',
+  'Chat activity timeout in milliseconds': 'チャットアクティビティタイムアウト（ミリ秒）',
+
   // ── Modal chrome ──
   'Chat Overlay': 'チャットオーバーレイ',
   'Close settings': '設定を閉じる',
@@ -595,6 +662,7 @@ const ES: TranslationMap = {
   Backlog: 'Historial',
   'Rate Limiting': 'Límite de frecuencia',
   Timing: 'Temporización',
+  Thresholds: 'Umbrales',
   'Author Colors & Visibility': 'Colores y visibilidad',
   Interface: 'Interfaz',
   'Chat Translation': 'Traducción de chat',
@@ -804,6 +872,43 @@ const ES: TranslationMap = {
   'How long to wait before retrying failed emoji fetches (1-60 min, default 5)':
     'Tiempo de espera antes de reintentar emojis fallidos (1-60 min, predet. 5)',
 
+  // ── New threshold field labels (added 2026-06-01) ──
+  'Burst Sample Window': 'Ventana de muestra de ráfaga',
+  'Elevated Burst (msg/s)': 'Ráfaga elevada (msg/s)',
+  'High Burst (msg/s)': 'Ráfaga alta (msg/s)',
+  'Extreme Burst (msg/s)': 'Ráfaga extrema (msg/s)',
+  'Backlog Injection Max': 'Inyección máx. historial',
+  'Backlog Density Ramp (ms)': 'Rampa de densidad historial (ms)',
+  'Live Poll Fallback (ms)': 'Sondeo alternativo (ms)',
+  'Poll Failure Limit': 'Límite fallos sondeo',
+  'Speed Boost Threshold': 'Umbral aumento velocidad',
+  'Backlog Pause (%)': 'Pausar historial (%)',
+  'Backlog Resume (%)': 'Reanudar historial (%)',
+  'Activity Timeout (ms)': 'Tiempo de espera (ms)',
+
+  // ── New threshold tooltips (added 2026-06-01) ──
+  'Burst rate sample window size': 'Tamaño de la ventana de muestreo de la tasa de ráfaga',
+  'Messages per second threshold for elevated burst level':
+    'Umbral de mensajes por segundo para el nivel de ráfaga elevado',
+  'Messages per second threshold for high burst level':
+    'Umbral de mensajes por segundo para el nivel de ráfaga alto',
+  'Messages per second threshold for extreme burst level':
+    'Umbral de mensajes por segundo para el nivel de ráfaga extremo',
+  'Maximum backlog injection rate cap': 'Límite máximo de velocidad de inyección del historial',
+  'Density ramp duration for backlog injection in milliseconds':
+    'Duración de la rampa de densidad para la inyección del historial en milisegundos',
+  'Live poll fallback delay in milliseconds':
+    'Retraso alternativo del sondeo en vivo en milisegundos',
+  'Consecutive poll failures before circuit breaker trips':
+    'Fallos consecutivos de sondeo antes de que se active el interruptor',
+  'Pending messages to trigger speed boost':
+    'Mensajes pendientes para activar el aumento de velocidad',
+  'Lane utilization ratio to pause backlog injection':
+    'Relación de uso de carril para pausar la inyección del historial',
+  'Lane utilization ratio to resume backlog injection':
+    'Relación de uso de carril para reanudar la inyección del historial',
+  'Chat activity timeout in milliseconds': 'Tiempo de espera de actividad del chat en milisegundos',
+
   // ── Modal chrome ──
   'Chat Overlay': 'Superposición de Chat',
   'Close settings': 'Cerrar configuración',
@@ -850,6 +955,7 @@ const ZH: TranslationMap = {
   Backlog: '回放',
   'Rate Limiting': '频率限制',
   Timing: '时序',
+  Thresholds: '阈值',
   'Author Colors & Visibility': '用户颜色与显示',
   Interface: '界面',
   'Chat Translation': '聊天翻译',
@@ -1043,6 +1149,35 @@ const ZH: TranslationMap = {
   'Max concurrent emoji fetch operations (1-20, default 6)': '最大并发表情获取数 (1-20, 默认 6)',
   'How long to wait before retrying failed emoji fetches (1-60 min, default 5)':
     '失败表情重试前等待时间 (1-60分钟, 默认 5)',
+
+  // ── New threshold field labels (added 2026-06-01) ──
+  'Burst Sample Window': '突发采样窗口',
+  'Elevated Burst (msg/s)': '上升突发 (msg/s)',
+  'High Burst (msg/s)': '高突发 (msg/s)',
+  'Extreme Burst (msg/s)': '极端突发 (msg/s)',
+  'Backlog Injection Max': '回放注入上限',
+  'Backlog Density Ramp (ms)': '回放密度斜坡 (ms)',
+  'Live Poll Fallback (ms)': '实时轮询回退 (ms)',
+  'Poll Failure Limit': '轮询失败限制',
+  'Speed Boost Threshold': '速度提升阈值',
+  'Backlog Pause (%)': '回放暂停 (%)',
+  'Backlog Resume (%)': '回放恢复 (%)',
+  'Activity Timeout (ms)': '活动超时 (ms)',
+
+  // ── New threshold tooltips (added 2026-06-01) ──
+  'Burst rate sample window size': '突发速率采样窗口大小',
+  'Messages per second threshold for elevated burst level': '上升突发级别的每秒消息数阈值',
+  'Messages per second threshold for high burst level': '高突发级别的每秒消息数阈值',
+  'Messages per second threshold for extreme burst level': '极端突发级别的每秒消息数阈值',
+  'Maximum backlog injection rate cap': '回放注入速率上限',
+  'Density ramp duration for backlog injection in milliseconds':
+    '回放注入的密度斜坡持续时间（毫秒）',
+  'Live poll fallback delay in milliseconds': '实时轮询回退延迟（毫秒）',
+  'Consecutive poll failures before circuit breaker trips': '断路器跳闸前的连续轮询失败次数',
+  'Pending messages to trigger speed boost': '触发速度提升的待处理消息数',
+  'Lane utilization ratio to pause backlog injection': '暂停回放注入的通道利用率',
+  'Lane utilization ratio to resume backlog injection': '恢复回放注入的通道利用率',
+  'Chat activity timeout in milliseconds': '聊天活动超时时间（毫秒）',
 
   // ── Modal chrome ──
   'Chat Overlay': '弹幕显示',

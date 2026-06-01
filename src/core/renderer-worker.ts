@@ -159,6 +159,18 @@ interface WorkerConfig {
   emojiFetchLimit: number;
   /** Minutes before retrying failed emoji fetches. */
   failedEmojiRetryMins: number;
+  burstSampleWindow: number;
+  burstElevatedThreshold: number;
+  burstHighThreshold: number;
+  burstExtremeThreshold: number;
+  backlogInjectionMax: number;
+  backlogDensityRampMs: number;
+  livePollFallbackMs: number;
+  livePollFailureLimit: number;
+  speedBoostThreshold: number;
+  backlogPauseThreshold: number;
+  backlogResumeThreshold: number;
+  activityTimeoutMs: number;
 }
 
 interface WorkerContentSegment {

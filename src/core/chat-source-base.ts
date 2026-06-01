@@ -18,7 +18,7 @@ import type { InnertubeContinuationData } from '@core/youtubei-continuation';
 
 const log = createLogger('ChatSource');
 
-const DEFAULT_ACTIVITY_TIMEOUT_MS = 30_000;
+// activityTimeoutMs — read from this.getSettings()
 
 interface ChatHealthSnapshotOptions {
   activeTimeoutMs?: number;
@@ -172,12 +172,12 @@ export abstract class ChatSource implements Pauseable {
     log.debug('Chat monitoring stopped');
   }
 
-  isActive(timeoutMs = DEFAULT_ACTIVITY_TIMEOUT_MS): boolean {
+  isActive(timeoutMs = this.getSettings().activityTimeoutMs): boolean {
     return Date.now() - this.lastActivityTime < Math.max(0, timeoutMs);
   }
 
   getHealthSnapshot(options: ChatHealthSnapshotOptions = {}): ChatHealthSnapshot {
-    const activeTimeoutMs = options.activeTimeoutMs ?? DEFAULT_ACTIVITY_TIMEOUT_MS;
+    const activeTimeoutMs = options.activeTimeoutMs ?? this.getSettings().activityTimeoutMs;
 
     return {
       observerAlive: this.isObserverAlive(),

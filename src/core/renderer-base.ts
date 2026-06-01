@@ -47,12 +47,9 @@ export abstract class RendererBase {
   protected pausedAt: number | null = null;
   protected backlogPaused = false;
 
-  private static readonly SPEED_BOOST_THRESHOLD = 5;
   private static readonly SPEED_BOOST_DENOMINATOR = 15;
   private static readonly SPEED_BOOST_MAX = 0.35;
   private static readonly BACKLOG_PRIORITY_OFFSET = 50;
-  private static readonly BACKLOG_PAUSE_THRESHOLD = 0.8;
-  private static readonly BACKLOG_RESUME_THRESHOLD = 0.4;
   // Minimum interval between backlog pause toggles to prevent oscillation
   // when the queue ratio hovers near the hysteresis thresholds.
   private static readonly BACKLOG_TOGGLE_COOLDOWN_MS = 2_000;
@@ -80,6 +77,12 @@ export abstract class RendererBase {
     this.laneAllocator.reset(this.overlay.getDimensions());
 
     this.burstDetector = new BurstDetector(this.observability);
+    this.burstDetector.updateThresholds({
+      burstSampleWindow: this.settings.burstSampleWindow,
+      burstElevatedThreshold: this.settings.burstElevatedThreshold,
+      burstHighThreshold: this.settings.burstHighThreshold,
+      burstExtremeThreshold: this.settings.burstExtremeThreshold,
+    });
     this.burstDetector.start();
 
     this.authorRateLimiter = new PerAuthorRateLimiter(() => this.burstDetector.getLevel());
@@ -239,11 +242,11 @@ export abstract class RendererBase {
     let speed = this.settings.speedPxPerSec;
 
     const emaRate = this.burstDetector.getEmaRate();
-    if (emaRate > RendererBase.SPEED_BOOST_THRESHOLD) {
+    if (emaRate > this.settings.speedBoostThreshold) {
       const emaMultiplier =
         1 +
         Math.min(
-          (emaRate - RendererBase.SPEED_BOOST_THRESHOLD) / RendererBase.SPEED_BOOST_DENOMINATOR,
+          (emaRate - this.settings.speedBoostThreshold) / RendererBase.SPEED_BOOST_DENOMINATOR,
           RendererBase.SPEED_BOOST_MAX
         );
       speed *= emaMultiplier;
@@ -331,11 +334,11 @@ export abstract class RendererBase {
     if (now - this.lastBacklogToggleTime < RendererBase.BACKLOG_TOGGLE_COOLDOWN_MS) return;
 
     const queueRatio = this.getQueueLength() / this.settings.queueMaxSize;
-    if (queueRatio > RendererBase.BACKLOG_PAUSE_THRESHOLD && !this.backlogPaused) {
+    if (queueRatio > this.settings.backlogPauseThreshold && !this.backlogPaused) {
       this.backlogPaused = true;
       this.lastBacklogToggleTime = now;
       this.onBacklogPauseChange?.(true);
-    } else if (queueRatio < RendererBase.BACKLOG_RESUME_THRESHOLD && this.backlogPaused) {
+    } else if (queueRatio < this.settings.backlogResumeThreshold && this.backlogPaused) {
       this.backlogPaused = false;
       this.lastBacklogToggleTime = now;
       this.onBacklogPauseChange?.(false);

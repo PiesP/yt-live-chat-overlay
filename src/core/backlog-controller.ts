@@ -47,6 +47,10 @@ interface BacklogControllerConfig {
   backlogSpeedMultiplier: number;
   /** For 'recent' mode: how many minutes of past chat to show */
   backlogRecentMinutes: number;
+  /** Max injection rate (msg/s) for backlog controller */
+  backlogInjectionMax: number;
+  /** Density ramp duration in ms */
+  backlogDensityRampMs: number;
 }
 
 export class BacklogInjectionController implements Pauseable {
@@ -74,21 +78,13 @@ export class BacklogInjectionController implements Pauseable {
    */
   public onUtilizationQuery: (() => number) | null = null;
 
-  /**
-   * Base density ramp duration (ms).
-   * During this window the injection rate linearly ramps from 25% to 100%
-   * of the computed adaptive rate, avoiding visual flooding on startup.
-   *
-   * Scales with backlog size: small backlogs (<200) use the base value,
-   * large backlogs (>=500) extend to 4000ms to prevent visual flooding.
-   */
-  private static readonly DENSITY_RAMP_BASE_MS = 2500;
+  // backlogDensityRampMs — read from this.config
   private static readonly DENSITY_RAMP_MAX_MS = 4000;
-  private densityRampMs = BacklogInjectionController.DENSITY_RAMP_BASE_MS;
+  private densityRampMs: number;
 
   // ── Injection rate constants ────────────────────────────────────
   private static readonly INJECTION_RATE_MIN = 4;
-  private static readonly INJECTION_RATE_MAX = 20;
+  // backlogInjectionMax — read from this.config
   private static readonly REAL_TIME_ACTIVITY_CAP = 5;
   private static readonly REAL_TIME_FACTOR_MIN = 0.25;
   private static readonly REAL_TIME_FACTOR_STEP = 0.2;
@@ -124,6 +120,7 @@ export class BacklogInjectionController implements Pauseable {
     this.config = config;
     this.lanes = lanes;
     this.observability = observability;
+    this.densityRampMs = config.backlogDensityRampMs;
   }
 
   /** Called when initial seed messages arrive */
@@ -223,13 +220,11 @@ export class BacklogInjectionController implements Pauseable {
         (BacklogInjectionController.DENSITY_LARGE_THRESHOLD -
           BacklogInjectionController.DENSITY_SMALL_THRESHOLD); // 0 at 200, 1 at 500
       this.densityRampMs = Math.round(
-        BacklogInjectionController.DENSITY_RAMP_BASE_MS +
-          t *
-            (BacklogInjectionController.DENSITY_RAMP_MAX_MS -
-              BacklogInjectionController.DENSITY_RAMP_BASE_MS)
+        this.config.backlogDensityRampMs +
+          t * (BacklogInjectionController.DENSITY_RAMP_MAX_MS - this.config.backlogDensityRampMs)
       );
     } else {
-      this.densityRampMs = BacklogInjectionController.DENSITY_RAMP_BASE_MS;
+      this.densityRampMs = this.config.backlogDensityRampMs;
     }
 
     log.debug(`Backlog injection: ${messages.length} messages, sampled to ${sampled.length}`);
@@ -274,11 +269,7 @@ export class BacklogInjectionController implements Pauseable {
 
     const maxRate = Math.max(
       BacklogInjectionController.INJECTION_RATE_MIN,
-      Math.min(
-        BacklogInjectionController.INJECTION_RATE_MAX,
-        this.config.backlogMaxRate,
-        this.lanes * 2
-      )
+      Math.min(this.config.backlogInjectionMax, this.config.backlogMaxRate, this.lanes * 2)
     );
     const realTimeFactor = Math.max(
       BacklogInjectionController.REAL_TIME_FACTOR_MIN,
