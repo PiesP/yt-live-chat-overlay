@@ -191,11 +191,7 @@ function estimateSuperChatDimensions(
   const badgeSectionHeight = showSuperChatAmount ? spacing.xs + badgeHeight + spacing.xs : 0;
   const contentHeight = authorSectionHeight + badgeSectionHeight + textHeight + stickerHeight;
 
-  // Safety margin: one line-height of extra space compensates for runtime
-  // font metric differences between estimate and actual Canvas2D rendering.
-  const safetyMargin = lineHeight;
-
-  return { width, height: contentHeight + paddingV * 2 + safetyMargin };
+  return { width, height: contentHeight + paddingV * 2 };
 }
 
 function estimateMembershipDimensions(
