@@ -81,6 +81,8 @@ export class BacklogInjectionController implements Pauseable {
    * the screen is — high utilization → slower injection.
    */
   public onUtilizationQuery: (() => number) | null = null;
+  /** Callback to be set by RuntimeSession */
+  public onBacklogMessage: ((message: ChatMessage) => void) | null = null;
 
   // backlogDensityRampMs — read from this.config
   private densityRampMs: number;
@@ -369,9 +371,6 @@ export class BacklogInjectionController implements Pauseable {
     if (elapsed >= this.densityRampMs) return 1;
     return 0.25 + 0.75 * (elapsed / this.densityRampMs);
   }
-
-  /** Callback to be set by RuntimeSession */
-  public onBacklogMessage: ((message: ChatMessage) => void) | null = null;
 
   /** Apply smart sampling based on message importance and time distribution. */
   private sampleMessages(messages: ChatMessage[]): ChatMessage[] {

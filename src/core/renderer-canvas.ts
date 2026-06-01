@@ -458,6 +458,8 @@ export class CanvasRenderer extends RendererBase {
 
   /** Max concurrent emoji fetch operations. */
   private readonly emojiFetchLimit: number;
+  /** Retry window in minutes for failed emoji fetches. */
+  private readonly failedEmojiRetryMins: number;
 
   /** Stagger queue depth thresholds. */
   private static readonly STAGGER_QUEUE_HIGH = 50;
@@ -753,8 +755,6 @@ export class CanvasRenderer extends RendererBase {
    * likely failed silently (e.g. CORS block), so evict it to unblock
    * future retries.
    */
-
-  private readonly failedEmojiRetryMins: number;
 
   private cleanupStaleEmojiFetching(): void {
     const now = performance.now();
