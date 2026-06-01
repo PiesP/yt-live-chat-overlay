@@ -47,6 +47,7 @@ import {
   computeMessageOpacity,
   estimateMessageDimensions as sharedEstimateDimensions,
 } from '@core/renderer-shared';
+import { RenderWorkerManager } from '@core/renderer-worker-manager';
 import { clearTextMeasurementCaches, getFontString, measureTextHeight } from '@core/text-measure';
 import { TranslationService } from '@core/translation-service';
 import {
@@ -168,9 +169,7 @@ export class CanvasRenderer extends RendererBase {
    * handles message ingress, translation, and image loading only.
    * Falls back to main-thread rendering when unavailable.
    */
-  private renderWorker: Worker | null = null;
-  private useWorkerMode = false;
-  private workerQueueDepth = 0;
+  private workerManager!: RenderWorkerManager;
 
   /**
    * Text bitmap cache: pre-rendered text with outline as offscreen canvas.
@@ -279,10 +278,18 @@ export class CanvasRenderer extends RendererBase {
     // Initialize OffscreenCanvas worker for off-main-thread rendering.
     // Falls back silently to main-thread rendering when unavailable
     // (e.g. missing APIs, CSP restrictions, build-time exclusion).
-    this.useWorkerMode = CanvasRenderer.tryInitRenderWorker(this, canvas, settings, overlay);
+    this.workerManager = new RenderWorkerManager({
+      settings: this.settings,
+      observability: this.observability,
+      imageFetchManager: this.imageFetchManager,
+      estimateDimensions: (msg) => this.estimateDimensions(msg),
+      getMessagePriority: CanvasRenderer.getMessagePriority,
+      getEffectiveSpeedPxPerSec: () => this.getEffectiveSpeedPxPerSec(),
+    });
+    const useWorker = this.workerManager.init(canvas, settings, overlay);
 
     const dims = overlay.getDimensions();
-    if (!this.useWorkerMode) this.applyDevicePixelRatio(dims);
+    if (!useWorker) this.applyDevicePixelRatio(dims);
 
     this.overlayDimensionsUnsubscribe = overlay.onDimensionsChanged((d) => {
       if (d && this.canvas) {
@@ -293,7 +300,7 @@ export class CanvasRenderer extends RendererBase {
 
     this.startRenderLoop();
     this.imageFetchManager = new ImageFetchManager();
-    this.imageFetchManager.updateConfig(settings, this.renderWorker);
+    this.imageFetchManager.updateConfig(settings, this.workerManager.workerRef);
     this.imageFetchManager.setOnImageReady(() => {
       if (!this.isPaused && !this.isVideoPaused && !this.needsRerender) {
         if (this.animFrameId !== null) {
@@ -335,8 +342,8 @@ export class CanvasRenderer extends RendererBase {
   addMessage(message: ChatMessage): void {
     if (!this.isMessageAllowed(message)) return;
     // Route to worker when off-main-thread rendering is active
-    if (this.useWorkerMode && this.renderWorker) {
-      this.sendToWorker(message);
+    if (this.workerManager.isActive) {
+      this.workerManager.sendToWorker(message);
       // Also trigger translation asynchronously and send result to worker
       const translatableText = getTranslatableText(message);
       if (this.translationService.isEnabled && translatableText) {
@@ -344,11 +351,7 @@ export class CanvasRenderer extends RendererBase {
         this.translationService
           .translate(translatableText)
           .then((translated) => {
-            this.renderWorker?.postMessage({
-              type: 'updateTranslation',
-              id: msgId,
-              translatedText: translated,
-            });
+            this.workerManager.sendTranslation(msgId, translated);
           })
           .catch(() => {
             // Silently ignore individual translation failures
@@ -1252,7 +1255,7 @@ export class CanvasRenderer extends RendererBase {
     this.invFadeDuration = 1 / Math.max(1, settings.fadeDurationMs);
 
     // Sync settings to render worker when off-main-thread mode is active
-    this.syncWorkerSettings();
+    this.workerManager.syncSettings(settings);
 
     // When translation is disabled, clear translated text from all active
     // messages so they revert to showing only the original text on the next frame.
@@ -1306,7 +1309,7 @@ export class CanvasRenderer extends RendererBase {
 
   protected onDestroy(): void {
     this.stopRenderLoop();
-    this.destroyWorker();
+    this.workerManager.destroy();
     this.imageFetchManager.destroy();
     this.overlayDimensionsUnsubscribe?.();
     this.canvas?.remove();
@@ -1355,291 +1358,5 @@ export class CanvasRenderer extends RendererBase {
     ctx.fillStyle = textFillStyle;
     ctx.fillText(message, dims.width / 2, boxY + boxH / 2);
     ctx.restore();
-  }
-
-  // ── Worker integration ────────────────────────────────────────────────
-
-  /** WorkerConfig keys subset of OverlaySettings for cross-thread transfer. */
-  private static readonly WORKER_CONFIG_KEYS: (keyof OverlaySettings)[] = [
-    'speedPxPerSec',
-    'fontSize',
-    'fontWeight',
-    'fontFamily',
-    'opacity',
-    'laneSpacing',
-    'safeTop',
-    'safeBottom',
-    'maxConcurrentMessages',
-    'danmakuMode',
-    'backlogSpeedMultiplier',
-    'depthLayersEnabled',
-    'depthFarSpeedMul',
-    'depthNearSpeedMul',
-    'depthFarOpacityMul',
-    'backlogOpacityMultiplier',
-    'fadeDurationMs',
-    'modOwnerDurationMultiplier',
-    'superChatOpacity',
-    'superChatMaxBodyLines',
-    'membershipMaxBodyLines',
-    'showAuthor',
-    'showSuperChatAmount',
-    'translationEnabled',
-    'translationMode',
-    'exitPaddingPx',
-    'scrollDurationMinMs',
-    'scrollDurationMaxMs',
-    'topBottomDurationMs',
-    'queueMaxSize',
-    'backgroundQueueMax',
-    'maxMessageAgeMs',
-    'headwayGapRatio',
-    'emojiCacheMb',
-    'photoCacheMb',
-    'stickerCacheMb',
-    'textCacheMb',
-    'translationBatchSize',
-    'emojiFetchLimit',
-    'failedEmojiRetryMins',
-    'burstSampleWindow',
-    'burstElevatedThreshold',
-    'burstHighThreshold',
-    'burstExtremeThreshold',
-    'backlogInjectionMax',
-    'backlogDensityRampMs',
-    'livePollFallbackMs',
-    'livePollFailureLimit',
-    'speedBoostThreshold',
-    'backlogPauseThreshold',
-    'backlogResumeThreshold',
-    'activityTimeoutMs',
-    'staggerMaxDelayMs',
-    'staggerMediumDelayMs',
-    'emojiFetchTimeoutMs',
-    'backlogDensityRampMaxMs',
-    'backlogInjectionRateMin',
-    'speedBoostMax',
-    'speedBoostDenom',
-    'backlogToggleCooldownMs',
-    'replayPrefetchPages',
-    'replayBatchLimit',
-  ] as const;
-
-  /**
-   * Build a flat, serializable config object from OverlaySettings.
-   * Only includes keys needed by the render worker.
-   */
-  private static buildWorkerConfig(settings: OverlaySettings): Record<string, unknown> {
-    const config: Record<string, unknown> = {};
-    for (const key of CanvasRenderer.WORKER_CONFIG_KEYS) {
-      config[key] = settings[key];
-    }
-    config.outlineWidthPx = settings.outline.widthPx;
-    config.outlineOpacity = settings.outline.opacity;
-    config.authorColors = { ...settings.colors };
-    return config;
-  }
-
-  /**
-   * Attempt to create and initialize the OffscreenCanvas render worker.
-   * Returns true if the worker was successfully started.
-   */
-  private static tryInitRenderWorker(
-    renderer: CanvasRenderer,
-    canvas: HTMLCanvasElement,
-    settings: OverlaySettings,
-    overlay: Overlay
-  ): boolean {
-    try {
-      if (typeof OffscreenCanvas === 'undefined') {
-        log.debug('OffscreenCanvas not available — using main-thread renderer');
-        return false;
-      }
-
-      const offscreen = canvas.transferControlToOffscreen();
-      const config = CanvasRenderer.buildWorkerConfig(settings);
-      const dims = overlay.getDimensions();
-
-      // Vite bundles this as a separate worker chunk
-      const workerUrl = new URL('./renderer-worker.ts', import.meta.url);
-      const worker = new Worker(workerUrl, { type: 'module' });
-
-      worker.onmessage = (e: MessageEvent) => {
-        const data = e.data as { type: string } & Record<string, unknown>;
-        switch (data.type) {
-          case 'ready':
-            log.info('Render worker started');
-            break;
-          case 'stats':
-            renderer.observability.updateActiveMessages((data.activeMessages as number) ?? 0);
-            renderer.workerQueueDepth = (data.pendingQueueDepth as number) ?? 0;
-            break;
-          case 'error':
-            log.warn('Render worker error:', data.error);
-            break;
-        }
-      };
-
-      worker.onerror = (err) => {
-        log.warn('Render worker unhandled error:', err.message);
-      };
-
-      worker.postMessage(
-        {
-          type: 'init',
-          canvas: offscreen,
-          config,
-          width: dims?.width ?? 0,
-          height: dims?.height ?? 0,
-        },
-        [offscreen]
-      );
-
-      overlay.onDimensionsChanged((d) => {
-        if (d) worker.postMessage({ type: 'resize', width: d.width, height: d.height });
-      });
-
-      renderer.renderWorker = worker;
-      renderer.canvas = null; // owned by worker now
-      renderer.ctx = null;
-
-      log.info('Render worker initialized');
-      return true;
-    } catch (error: unknown) {
-      log.debug('Render worker unavailable — using main-thread renderer:', error);
-      return false;
-    }
-  }
-
-  /**
-   * Compute the burst speed multiplier: ratio of effective (burst-adjusted)
-   * speed to base speed. Always ≥ 1.0.
-   */
-  private computeBurstSpeedMultiplier(): number {
-    return Math.max(1.0, this.getEffectiveSpeedPxPerSec() / this.settings.speedPxPerSec);
-  }
-
-  /**
-   * Send a message to the render worker for display.
-   * Serializes ChatMessage into lightweight cross-thread format.
-   */
-  private sendToWorker(message: ChatMessage): void {
-    if (!this.renderWorker) return;
-
-    // Backpressure: drop low-priority messages when worker queue is backed up
-    const maxWorkerQueue = this.settings.queueMaxSize * 2;
-    if (this.workerQueueDepth > maxWorkerQueue) {
-      const priority = CanvasRenderer.getMessagePriority(message);
-      if (priority < 40) {
-        this.observability.onMessageDropped('worker_backpressure');
-        return;
-      }
-    }
-
-    const dims = this.estimateDimensions(message);
-
-    const text = message.content.map((s) => (s.type === 'text' ? s.content : s.emoji.alt)).join('');
-
-    const content = message.content.map((s) => {
-      if (s.type === 'text') {
-        return { type: 'text', content: s.content };
-      }
-      return {
-        type: 'emoji',
-        content: s.emoji.alt,
-        emojiUrl: s.emoji.url,
-        emojiAlt: s.emoji.alt,
-      };
-    });
-
-    // ── Collect ImageBitmap transfers ──────────────────────────────────
-    // Pre-converted bitmaps are transferred via postMessage transfer list,
-    // eliminating duplicate fetch+decode in the worker (zero-copy transfer).
-    const transferList: ImageBitmap[] = [];
-    const transferredImages: Array<{
-      url: string;
-      bitmap: ImageBitmap;
-      target: 'emoji' | 'author' | 'sticker';
-    }> = [];
-
-    const collectBitmap = (
-      url: string | undefined,
-      target: 'emoji' | 'author' | 'sticker'
-    ): void => {
-      if (!url) return;
-      const bitmap = this.imageFetchManager.workerBitmapCache.get(url);
-      if (!bitmap) return;
-      transferList.push(bitmap);
-      transferredImages.push({ url, bitmap, target });
-      this.imageFetchManager.workerBitmapCache.delete(url); // bitmap is detached on transfer
-    };
-
-    for (const seg of content) {
-      if (seg.type === 'emoji') collectBitmap(seg.emojiUrl, 'emoji');
-    }
-    collectBitmap(message.authorPhotoUrl, 'author');
-    if (message.kind === 'superchat' && message.superChat?.sticker?.url) {
-      collectBitmap(message.superChat.sticker.url, 'sticker');
-    }
-
-    const workerMessage: Record<string, unknown> = {
-      type: 'addMessages',
-      messages: [
-        {
-          id: message.id ?? `${message.timestamp}-${Math.random()}`,
-          text,
-          width: dims.width,
-          height: dims.height,
-          priority: CanvasRenderer.getMessagePriority(message),
-          isBacklog: message.isBacklog ?? false,
-          authorType: message.authorType,
-          kind: message.kind,
-          burstSpeedMultiplier: this.computeBurstSpeedMultiplier(),
-          translatedText: (message as { translatedText?: string }).translatedText || undefined,
-          // NEW:
-          content,
-          author: message.author,
-          authorPhotoUrl: message.authorPhotoUrl,
-          // SuperChat (if applicable)
-          ...(message.kind === 'superchat' && message.superChat
-            ? {
-                superChatAmount: message.superChat.amount,
-                superChatTier: message.superChat.tier,
-                superChatBgColor: message.superChat.backgroundColor,
-                superChatStickerUrl: message.superChat.sticker?.url,
-              }
-            : {}),
-        },
-      ],
-    };
-
-    if (transferredImages.length > 0) {
-      workerMessage.imageData = transferredImages;
-      this.renderWorker.postMessage(workerMessage, transferList);
-    } else {
-      this.renderWorker.postMessage(workerMessage);
-    }
-  }
-
-  /** Send updated settings to the render worker. */
-  private syncWorkerSettings(): void {
-    if (!this.renderWorker) return;
-    this.renderWorker.postMessage({
-      type: 'updateConfig',
-      config: CanvasRenderer.buildWorkerConfig(this.settings),
-    });
-  }
-
-  /** Destroy the render worker. */
-  private destroyWorker(): void {
-    if (!this.renderWorker) return;
-    this.renderWorker.terminate();
-    this.renderWorker = null;
-    this.useWorkerMode = false;
-    // Close any remaining pre-converted bitmaps (not yet transferred)
-    for (const bitmap of this.imageFetchManager.workerBitmapCache.values()) {
-      bitmap.close();
-    }
-    this.imageFetchManager.workerBitmapCache.clear();
   }
 }
