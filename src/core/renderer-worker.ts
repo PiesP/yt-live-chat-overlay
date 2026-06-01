@@ -34,6 +34,9 @@ import {
   areSpeedTiersCompatible,
   computeLaneY,
   computeOccupancyMs as computeOccupancyMsShared,
+  heapGetSlotAvailableAt,
+  heapSiftDown,
+  heapUpdateLane,
 } from '@shared/lane-allocation-shared';
 import { EMOJI_ALIAS_PATTERN } from './chat-message-helpers';
 import {
@@ -1584,10 +1587,7 @@ function allocateSingleLane(
 const areTiersCompatible = areSpeedTiersCompatible;
 
 function getSlotAvailableAt(laneIndex: number): number | undefined {
-  if (laneIndex < 0 || laneIndex >= numLanes) return undefined;
-  const heapIdx = laneIndexToHeapIndex.get(laneIndex);
-  if (heapIdx === undefined || heapIdx >= laneHeap.length) return undefined;
-  return laneHeap[heapIdx]?.[1];
+  return heapGetSlotAvailableAt(laneHeap, laneIndexToHeapIndex, laneIndex, numLanes);
 }
 
 function commitPlacement(
@@ -1623,13 +1623,7 @@ function computeOccupancyMs(durationMs: number, msgWidthPx?: number): number {
 }
 
 function updateLane(laneIdx: number, availableAt: number): void {
-  const heapIdx = laneIndexToHeapIndex.get(laneIdx);
-  if (heapIdx === undefined) return;
-  const entry = laneHeap[heapIdx];
-  if (!entry) return;
-  entry[1] = availableAt;
-  // Sift-down after increasing the value
-  siftDown(heapIdx);
+  heapUpdateLane(laneHeap, laneIndexToHeapIndex, laneIdx, availableAt);
 }
 
 /**
@@ -1648,35 +1642,7 @@ function shiftLaneTimers(ms: number): void {
 
 // ── 4-ary min-heap helpers ───────────────────────────────────────────────
 
-function siftDown(idx: number): void {
-  const heap = laneHeap;
-  const n = heap.length;
-  const base = idx * 4; // 4-ary: children at 4*i+1, 4*i+2, 4*i+3, 4*i+4
-
-  while (true) {
-    let smallest = idx;
-    let smallestVal = heap[idx]?.[1] ?? Infinity;
-
-    for (let child = base + 1; child <= base + 4 && child < n; child++) {
-      const childVal = heap[child]?.[1] ?? Infinity;
-      if (childVal < smallestVal) {
-        smallest = child;
-        smallestVal = childVal;
-      }
-    }
-
-    if (smallest === idx) break;
-
-    // Swap
-    const tmp = heap[idx];
-    const smallestEntry = heap[smallest];
-    if (!tmp || !smallestEntry) break;
-    heap[idx] = smallestEntry;
-    heap[smallest] = tmp;
-    laneIndexToHeapIndex.set(smallestEntry[0], idx);
-    laneIndexToHeapIndex.set(tmp[0], smallest);
-  }
-}
+const siftDown = (idx: number): void => heapSiftDown(laneHeap, laneIndexToHeapIndex, idx);
 
 // ── Render loop ───────────────────────────────────────────────────────────
 

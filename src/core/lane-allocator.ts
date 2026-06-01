@@ -13,6 +13,9 @@ import {
   computeOccupancyMs,
   HEADWAY_GAP_MAX_PX,
   HEADWAY_GAP_MIN_PX,
+  heapGetSlotAvailableAt,
+  heapSiftDown,
+  heapUpdateLane,
 } from '@shared/lane-allocation-shared';
 
 const log = createLogger('LaneAllocator');
@@ -527,24 +530,12 @@ export class LaneAllocator {
 
   /** Get the available-at time for a lane by its index. */
   private getSlotAvailableAt(laneIndex: number): number | undefined {
-    const heapIdx = this.laneIndexToHeapIndex.get(laneIndex);
-    if (heapIdx === undefined) return undefined;
-    return this.heap[heapIdx]?.[1];
+    return heapGetSlotAvailableAt(this.heap, this.laneIndexToHeapIndex, laneIndex);
   }
 
   /** Update a lane's available time in the heap. */
   private updateLane(laneIndex: number, newAvailableAt: number): void {
-    const idx = this.laneIndexToHeapIndex.get(laneIndex);
-    if (idx === undefined) return;
-    const entry = this.heap[idx];
-    if (!entry) return;
-    const old = entry[1];
-    this.heap[idx] = [laneIndex, newAvailableAt];
-    if (newAvailableAt > old) {
-      this.siftDown(idx);
-    } else if (newAvailableAt < old) {
-      this.siftUp(idx);
-    }
+    heapUpdateLane(this.heap, this.laneIndexToHeapIndex, laneIndex, newAvailableAt);
   }
 
   /** Shift all lane timers and speed-tier tracking by a fixed offset. */
@@ -575,47 +566,6 @@ export class LaneAllocator {
   // ── 4-ary min-heap operations ──────────────────────────────────────
 
   private siftDown(startIdx: number): void {
-    const size = this.heap.length;
-    let idx = startIdx;
-    while (true) {
-      let smallest = idx;
-      const firstChild = 4 * idx + 1;
-
-      for (let c = 0; c < 4; c++) {
-        const childIdx = firstChild + c;
-        if (childIdx >= size) break;
-        const childEntry = this.heap[childIdx];
-        const smallestEntry = this.heap[smallest];
-        if (childEntry && smallestEntry && childEntry[1] < smallestEntry[1]) {
-          smallest = childIdx;
-        }
-      }
-
-      if (smallest === idx) break;
-      const current = this.heap[idx];
-      const smallestEntrySwap = this.heap[smallest];
-      if (!current || !smallestEntrySwap) break;
-      this.heap[idx] = smallestEntrySwap;
-      this.heap[smallest] = current;
-      this.laneIndexToHeapIndex.set(current[0], smallest);
-      this.laneIndexToHeapIndex.set(smallestEntrySwap[0], idx);
-      idx = smallest;
-    }
-  }
-
-  private siftUp(startIdx: number): void {
-    let idx = startIdx;
-    while (idx > 0) {
-      const parent = Math.floor((idx - 1) / 4);
-      const parentEntry = this.heap[parent];
-      const currentEntry = this.heap[idx];
-      if (!parentEntry || !currentEntry) break;
-      if (parentEntry[1] <= currentEntry[1]) break;
-      this.heap[parent] = currentEntry;
-      this.heap[idx] = parentEntry;
-      this.laneIndexToHeapIndex.set(parentEntry[0], idx);
-      this.laneIndexToHeapIndex.set(currentEntry[0], parent);
-      idx = parent;
-    }
+    heapSiftDown(this.heap, this.laneIndexToHeapIndex, startIdx);
   }
 }
