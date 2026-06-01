@@ -157,7 +157,8 @@ export function renderSuperChatCard(
       textX + rendererLayout.superchatBadge.paddingH,
       badgeY + badgeHeight / 2,
       textColor,
-      settings
+      settings.outline.widthPx,
+      settings.outline.opacity
     );
     ctx.fillStyle = textColor;
     ctx.fillText(

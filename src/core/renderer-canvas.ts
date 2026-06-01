@@ -1010,7 +1010,15 @@ export class CanvasRenderer extends RendererBase {
           ctx.globalAlpha = bucketOpacity * CanvasRenderer.TRANSLATION_OPACITY_SCALE;
           ctx.font = font;
           ctx.fillStyle = transColor;
-          strokeTextOutline(ctx, msg.translatedText, snappedX, transY, transColor, this.settings);
+          strokeTextOutline(
+            ctx,
+            msg.translatedText,
+            snappedX,
+            transY,
+            transColor,
+            this.settings.outline.widthPx,
+            this.settings.outline.opacity
+          );
           ctx.fillText(msg.translatedText, snappedX, transY);
           ctx.restore();
         }

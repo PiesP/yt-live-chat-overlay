@@ -11,221 +11,24 @@
 import type { ChatMessage, ContentSegment, ImageAsset, OverlaySettings } from '@app-types';
 import type { ByteLimitedCache } from '@core/byte-limited-cache';
 import { EMOJI_ALIAS_PATTERN } from '@core/chat-message-helpers';
-import { computeOutlineColor } from '@core/color-utils';
-import { AUTHOR_PHOTO_SHADOW, rendererLayout, spacing } from '@core/design-tokens';
-import { OUTLINE_STROKE_SCALE as _OUTLINE_STROKE_SCALE } from '@core/renderer-constants';
+import { rendererLayout, spacing } from '@core/design-tokens';
 import {
   type CharSegment,
-  getFontMetrics,
   getFontString,
   measureTextHeight,
   measureTextWidth,
   wrapCharSegments,
 } from '@core/text-measure';
+import {
+  drawAuthorPhoto,
+  renderContentSegments,
+  renderSegment,
+} from '@shared/canvas-rendering-shared';
 
-// ── Constants ────────────────────────────────────────────────────────────────
-
-/**
- * Outline stroke scale factor: outline.widthPx is multiplied by this
- * to produce the actual stroke width (matching the visual rendering
- * of bold text with an outline).
- */
-const OUTLINE_STROKE_SCALE = _OUTLINE_STROKE_SCALE;
-
-// ── Text bitmap cache ──────────────────────────────────────────────────────
-
-/**
- * Render text with outline to an offscreen canvas and store in bitmap cache.
- */
-function cacheTextBitmap(
-  key: string,
-  text: string,
-  font: string,
-  fontSize: number,
-  fillColor: string,
-  strokeWidth: number,
-  strokeColor: string,
-  ctx: CanvasRenderingContext2D,
-  textBitmapCache: ByteLimitedCache<HTMLCanvasElement>
-): void {
-  if (!ctx) return;
-
-  ctx.save();
-  ctx.font = font;
-  const metrics = ctx.measureText(text);
-  const bbWidth =
-    Math.abs(metrics.actualBoundingBoxLeft) + Math.abs(metrics.actualBoundingBoxRight);
-  const textWidth = bbWidth > 0 ? Math.ceil(bbWidth) : Math.ceil(metrics.width);
-  const width = textWidth + Math.ceil(strokeWidth) + 2;
-  const { ascent, descent } = getFontMetrics(font, fontSize);
-  const height = ascent + descent + Math.ceil(strokeWidth) + 2;
-  ctx.restore();
-
-  const offscreen = document.createElement('canvas');
-  offscreen.width = width;
-  offscreen.height = height;
-  const offCtx = offscreen.getContext('2d');
-  if (!offCtx) return;
-
-  offCtx.font = font;
-  offCtx.textBaseline = 'top';
-  offCtx.strokeStyle = strokeColor;
-  offCtx.lineWidth = strokeWidth;
-  offCtx.lineJoin = 'round';
-  offCtx.lineCap = 'round';
-  offCtx.strokeText(text, strokeWidth / 2 + 1, strokeWidth / 2 + 1);
-  offCtx.fillStyle = fillColor;
-  offCtx.fillText(text, strokeWidth / 2 + 1, strokeWidth / 2 + 1);
-
-  textBitmapCache.set(key, offscreen);
-}
-
-// ── Outline stroke ──────────────────────────────────────────────────────────
-
-/** Draw crisp auto-contrast outline on text using current font and textBaseline. */
-export function strokeTextOutline(
-  ctx: CanvasRenderingContext2D,
-  text: string,
-  x: number,
-  y: number,
-  textColor: string,
-  settings: OverlaySettings
-): void {
-  const outline = settings.outline;
-  if (!outline.enabled || outline.widthPx <= 0 || outline.opacity <= 0) return;
-  const strokeWidth = Math.max(0.5, outline.widthPx * OUTLINE_STROKE_SCALE);
-  ctx.save();
-  ctx.strokeStyle = computeOutlineColor(textColor, Math.min(1, outline.opacity));
-  ctx.lineWidth = strokeWidth;
-  ctx.lineJoin = 'round';
-  ctx.lineCap = 'round';
-  ctx.strokeText(text, x, y);
-  ctx.restore();
-}
-
-// ── Segment rendering ───────────────────────────────────────────────────────
-
-function renderSegment(
-  ctx: CanvasRenderingContext2D,
-  text: string,
-  x: number,
-  y: number,
-  color: string,
-  fontSize: number,
-  settings: OverlaySettings,
-  textBitmapCache: ByteLimitedCache<HTMLCanvasElement>,
-  getFontFn: (fontSize: number) => string
-): void {
-  const outline = settings.outline;
-  const font = getFontFn(fontSize);
-  const strokeWidth = Math.max(0.5, outline.widthPx * OUTLINE_STROKE_SCALE);
-  const strokeColor = computeOutlineColor(color, Math.min(1, outline.opacity));
-
-  // Try bitmap cache first (includes outline rendering)
-  if (outline.enabled && outline.widthPx > 0 && outline.opacity > 0) {
-    const key = `${font}|${text}|${color}|${Math.round(strokeWidth)}|${strokeColor}`;
-    const bitmap = textBitmapCache.get(key);
-    if (bitmap) {
-      ctx.drawImage(bitmap, x, y);
-      return;
-    }
-
-    // Cache miss — render to offscreen canvas and cache
-    cacheTextBitmap(
-      key,
-      text,
-      font,
-      fontSize,
-      color,
-      strokeWidth,
-      strokeColor,
-      ctx,
-      textBitmapCache
-    );
-
-    // Immediately use the freshly cached bitmap to avoid fallthrough overhead
-    const freshBitmap = textBitmapCache.get(key);
-    if (freshBitmap) {
-      ctx.drawImage(freshBitmap, x, y);
-      return;
-    }
-  }
-
-  // Fallback: direct fillText + strokeText
-  ctx.save();
-  ctx.font = font;
-  ctx.textBaseline = 'top';
-  strokeTextOutline(ctx, text, x, y, color, settings);
-  ctx.fillStyle = color;
-  ctx.fillText(text, x, y);
-  ctx.restore();
-}
-
-// ── Content segments (text + emoji) — single-line ────────────────────────────
-
-function renderContentSegments(
-  ctx: CanvasRenderingContext2D,
-  segments: readonly ContentSegment[],
-  startX: number,
-  y: number,
-  color: string,
-  fontSize: number,
-  settings: OverlaySettings,
-  textBitmapCache: ByteLimitedCache<HTMLCanvasElement>,
-  emojiCache: ByteLimitedCache<HTMLImageElement>,
-  getFontFn: (fontSize: number) => string
-): void {
-  let cursorX = startX;
-  const emojiSize = Math.round(fontSize * rendererLayout.emojiSize);
-
-  for (const seg of segments) {
-    if (seg.type === 'text') {
-      renderSegment(
-        ctx,
-        seg.content,
-        cursorX,
-        y,
-        color,
-        fontSize,
-        settings,
-        textBitmapCache,
-        getFontFn
-      );
-      cursorX += measureTextWidth(seg.content, getFontFn(fontSize));
-    } else {
-      const cached = emojiCache.get(seg.emoji.url);
-      const img = cached?.complete && cached.naturalWidth > 0 ? cached : null;
-      if (img) {
-        ctx.drawImage(img, cursorX, y, emojiSize, emojiSize);
-      } else if (seg.emoji.fallbackText) {
-        renderSegment(
-          ctx,
-          seg.emoji.fallbackText,
-          cursorX,
-          y,
-          color,
-          fontSize,
-          settings,
-          textBitmapCache,
-          getFontFn
-        );
-      } else if (seg.emoji.alt && !EMOJI_ALIAS_PATTERN.test(seg.emoji.alt)) {
-        renderSegment(
-          ctx,
-          seg.emoji.alt,
-          cursorX,
-          y,
-          color,
-          fontSize,
-          settings,
-          textBitmapCache,
-          getFontFn
-        );
-      }
-      cursorX += emojiSize + spacing.xs;
-    }
-  }
-}
+// ── Re-export shared rendering functions so external consumers
+//    (canvas-card-renderers.ts, renderer-canvas.ts) can still
+//    import them from '@core/canvas-text-renderer'.
+export { drawRoundRect, strokeTextOutline } from '@shared/canvas-rendering-shared';
 
 // ── Wrapped content segments (text + emoji) ────────────────────────────────
 
@@ -405,7 +208,8 @@ export function renderWrappedContentSegments(
           cursorY,
           color,
           fontSize,
-          settings,
+          settings.outline.widthPx,
+          settings.outline.opacity,
           textBitmapCache,
           getFontFn
         );
@@ -424,7 +228,8 @@ export function renderWrappedContentSegments(
             cursorY,
             color,
             fontSize,
-            settings,
+            settings.outline.widthPx,
+            settings.outline.opacity,
             textBitmapCache,
             getFontFn
           );
@@ -436,7 +241,8 @@ export function renderWrappedContentSegments(
             cursorY,
             color,
             fontSize,
-            settings,
+            settings.outline.widthPx,
+            settings.outline.opacity,
             textBitmapCache,
             getFontFn
           );
@@ -454,7 +260,8 @@ export function renderWrappedContentSegments(
         cursorY,
         color,
         fontSize,
-        settings,
+        settings.outline.widthPx,
+        settings.outline.opacity,
         textBitmapCache,
         getFontFn
       );
@@ -467,22 +274,6 @@ export function renderWrappedContentSegments(
 }
 
 // ── Author rendering ────────────────────────────────────────────────────────
-
-/** Draw an author photo with shadow effects. */
-function drawAuthorPhoto(
-  ctx: CanvasRenderingContext2D,
-  photo: HTMLImageElement,
-  x: number,
-  y: number
-): void {
-  ctx.save();
-  ctx.shadowColor = AUTHOR_PHOTO_SHADOW;
-  ctx.shadowBlur = 4;
-  ctx.shadowOffsetX = 1;
-  ctx.shadowOffsetY = 1;
-  ctx.drawImage(photo, x, y, rendererLayout.authorPhotoSize, rendererLayout.authorPhotoSize);
-  ctx.restore();
-}
 
 /** Draw author photo + name section. Returns the Y offset after the section. */
 export function drawAuthorSection(
@@ -556,7 +347,8 @@ export function drawAuthorSection(
     nameY,
     color,
     authorFontSize,
-    settings,
+    settings.outline.widthPx,
+    settings.outline.opacity,
     textBitmapCache,
     getFontFn
   );
@@ -565,27 +357,6 @@ export function drawAuthorSection(
   ctx.textBaseline = prevTextBaseline;
 
   return startY + sectionHeight;
-}
-/** Draw a rounded rectangle path (no fill/stroke — path only). */
-export function drawRoundRect(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  r: number
-): void {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.lineTo(x + w - r, y);
-  ctx.arcTo(x + w, y, x + w, y + r, r);
-  ctx.lineTo(x + w, y + h - r);
-  ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
-  ctx.lineTo(x + r, y + h);
-  ctx.arcTo(x, y + h, x, y + h - r, r);
-  ctx.lineTo(x, y + r);
-  ctx.arcTo(x, y, x + r, y, r);
-  ctx.closePath();
 }
 
 // ── Message card rendering ───────────────────────────────────────────────
@@ -640,11 +411,13 @@ export function renderRegularMessage(
       textY,
       color,
       fontSize,
-      settings,
+      settings.outline.widthPx,
+      settings.outline.opacity,
       textBitmapCache,
       getFontFn
     );
   } else if (message.content.length > 0) {
+    const font = getFontFn(fontSize);
     renderContentSegments(
       ctx,
       message.content,
@@ -652,10 +425,15 @@ export function renderRegularMessage(
       textY,
       color,
       fontSize,
-      settings,
+      settings.outline.widthPx,
+      settings.outline.opacity,
       textBitmapCache,
-      emojiCache,
-      getFontFn
+      getFontFn,
+      (text: string) => measureTextWidth(text, font),
+      (url: string) => {
+        const cached = emojiCache.get(url);
+        return cached?.complete && cached.naturalWidth > 0 ? cached : null;
+      }
     );
   } else if (message.text.length > 0) {
     renderSegment(
@@ -665,7 +443,8 @@ export function renderRegularMessage(
       textY,
       color,
       fontSize,
-      settings,
+      settings.outline.widthPx,
+      settings.outline.opacity,
       textBitmapCache,
       getFontFn
     );
