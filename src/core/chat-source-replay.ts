@@ -311,7 +311,6 @@ export class ReplayChatSource extends ChatSource {
     this.seekListenerCleanup?.();
     this.seekListenerCleanup = null;
     this.stopCooperativeLoop();
-    this.stopCooperativeLoop();
     this.stopPrefetch();
   }
 

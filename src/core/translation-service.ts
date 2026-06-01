@@ -66,8 +66,8 @@ export class TranslationService {
   private enabled = false;
   /** Serializes configure() calls to prevent overlapping translator creation. */
   private configurePromise: Promise<void> | null = null;
-  /** Serializes translate() calls — prevents concurrent failures from cascading. */
-  private translateMutex: Promise<void> | null = null;
+  /** Serializes translate() calls — queued lock prevents race window between check and acquire. */
+  private translateLock: Promise<void> = Promise.resolve();
   /** Pending source/target from the most recent configure() for retry. */
   private pendingSource: string | null = null;
   private pendingTarget: string | null = null;
@@ -241,10 +241,13 @@ export class TranslationService {
    * resume without requiring user interaction (settings change, click).
    */
   async translate(text: string): Promise<string | null> {
-    // ── Serialize: wait for any in-flight translation to complete ─────
-    if (this.translateMutex) {
-      await this.translateMutex;
-    }
+    // ── Serialize: queued lock — each caller atomically acquires a slot ─
+    let releaseLock!: () => void;
+    const currentLock = this.translateLock;
+    this.translateLock = new Promise<void>((resolve) => {
+      releaseLock = resolve;
+    });
+    await currentLock;
 
     if (!text.trim()) return text;
 
@@ -299,11 +302,7 @@ export class TranslationService {
       return cached;
     }
 
-    // ── Execute translation under mutex ───────────────────────────────
-    let resolveMutex: (() => void) | undefined;
-    this.translateMutex = new Promise<void>((resolve) => {
-      resolveMutex = resolve;
-    });
+    // ── Execute translation ───────────────────────────────────────────
 
     try {
       const result = await this.translator.translate(text);
@@ -352,8 +351,7 @@ export class TranslationService {
       }
       return null;
     } finally {
-      resolveMutex?.();
-      this.translateMutex = null;
+      releaseLock();
     }
   }
 
@@ -379,7 +377,7 @@ export class TranslationService {
     this.consecutiveFailures = 0;
     this.recoveryCycleCount = 0;
     this.lastRecoveryAttempt = 0;
-    this.translateMutex = null;
+    this.translateLock = Promise.resolve();
     this.translationCache.clear();
   }
 }
