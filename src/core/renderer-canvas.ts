@@ -147,6 +147,10 @@ export class CanvasRenderer extends RendererBase {
 
   /** Last devicePixelRatio seen — used to detect DPR changes. */
   private lastDpr = 0;
+  /** When the idle condition is first met, record the timestamp so the loop
+   * continues for a grace period before stopping. Prevents start/stop
+   * thrashing during sparse chat intervals. */
+  private idleSince: number | null = null;
   /** Whether the session is in standby mode (pre-live, waiting for stream). */
   private standbyStatus = false;
   private translationService: TranslationService;
@@ -245,6 +249,10 @@ export class CanvasRenderer extends RendererBase {
   private static readonly STAGGER_BATCH_MAX = _STAGGER_BATCH_MAX;
   /** Exponential scale factor for stagger delay (negative value = decreasing delay). */
   private static readonly STAGGER_EXP_SCALE = _STAGGER_EXP_SCALE;
+
+  /** Grace period (ms) that the render loop continues after the idle condition
+   * is met. Prevents start/stop thrashing during sparse chat intervals. */
+  private static readonly IDLE_GRACE_PERIOD_MS = 500;
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
     super(overlay, settings);
@@ -427,6 +435,8 @@ export class CanvasRenderer extends RendererBase {
 
   private startRenderLoop(): void {
     if (this.animFrameId !== null) return;
+    // Reset grace period on restart — fresh cycle, no prior idle state.
+    this.idleSince = null;
     const loop = (): void => {
       if (!this.canvas?.isConnected) {
         this.animFrameId = null;
@@ -441,9 +451,23 @@ export class CanvasRenderer extends RendererBase {
       //   - setStandbyStatus(true)
       //   - onResume (tab visibility or video unpause)
       //   - emoji/sticker load callbacks (via needsRerender flag)
+      //
+      // A 500ms idle grace period prevents start/stop thrashing during
+      // sparse chat intervals — the loop continues briefly after the
+      // idle condition is first met, so a message arriving within 500ms
+      // reuses the same rAF cycle without restart overhead.
       if (this.activeMessages.length === 0 && this.pendingQueue.isEmpty && !this.standbyStatus) {
-        this.animFrameId = null;
-        return;
+        const now = performance.now();
+        if (this.idleSince === null) {
+          this.idleSince = now;
+        } else if (now - this.idleSince >= CanvasRenderer.IDLE_GRACE_PERIOD_MS) {
+          this.animFrameId = null;
+          this.idleSince = null;
+          return;
+        }
+        // Continue the loop during the grace period.
+      } else {
+        this.idleSince = null; // reset — not idle anymore
       }
       this.animFrameId = requestAnimationFrame(loop);
     };
