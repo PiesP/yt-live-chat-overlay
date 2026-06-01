@@ -1729,19 +1729,19 @@ function renderFrame(): void {
       opacity *= config.depthFarOpacityMul;
     }
 
-    if (config!.fadeDurationMs > 0) {
+    if (cfg.fadeDurationMs > 0) {
       if (isScrolling) {
         // Scrolling: fade-out only (message exits screen edge naturally)
         const remaining = msg.duration - elapsed;
-        if (remaining < config!.fadeDurationMs) {
+        if (remaining < cfg.fadeDurationMs) {
           opacity *= Math.max(0, remaining * invFadeMs);
         }
       } else {
         // Fixed (top/bottom): fade-in + fade-out
-        if (elapsed < config!.fadeDurationMs) {
+        if (elapsed < cfg.fadeDurationMs) {
           opacity *= elapsed * invFadeMs;
         }
-        if (elapsed > msg.duration - config!.fadeDurationMs) {
+        if (elapsed > msg.duration - cfg.fadeDurationMs) {
           opacity *= Math.max(0, (msg.duration - elapsed) * invFadeMs);
         }
       }
