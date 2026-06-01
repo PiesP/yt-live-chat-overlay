@@ -1009,9 +1009,11 @@ function renderPaidCardWorker(
     ctx.restore();
   } else if (card.backgroundColor) {
     const bg = card.backgroundColor;
+    ctx.save();
     ctx.fillStyle = `rgba(${bg.r}, ${bg.g}, ${bg.b}, ${card.backgroundAlpha ?? 1})`;
     drawRoundRect(ctx, x, y, w, h, card.cardRadius);
     ctx.fill();
+    ctx.restore();
   }
 
   // ── 3. Decoration ─────────────────────────────────────────────────────
@@ -1107,6 +1109,9 @@ function renderPaidCardWorker(
     const badgeHeight = badgeFontSize + card.badgePaddingV * 2;
 
     drawRoundRect(ctx, textX, cursorY, badgeWidth, badgeHeight, card.badgeRadius);
+    const prevFillStyle = ctx.fillStyle;
+    const prevStrokeStyle = ctx.strokeStyle;
+    const prevLineWidth = ctx.lineWidth;
     ctx.fillStyle = card.badgeFillColor;
     ctx.fill();
     ctx.strokeStyle = card.badgeStrokeColor;
@@ -1126,6 +1131,9 @@ function renderPaidCardWorker(
     ctx.fillStyle = '#ffffff';
     ctx.fillText(message.badgeText, textX + card.badgePaddingH, cursorY + badgeHeight / 2);
     ctx.textBaseline = 'top';
+    ctx.fillStyle = prevFillStyle;
+    ctx.strokeStyle = prevStrokeStyle;
+    ctx.lineWidth = prevLineWidth;
 
     cursorY += badgeHeight;
   }
@@ -1635,108 +1643,109 @@ function renderFrame(): void {
 
     ctx.globalAlpha = bucketIndex / (OPACITY_BUCKETS - 1);
 
-    for (const { msg, elapsed } of entries) {
-      // Per-message color with optional FAR desaturation
-      let renderColor = msg.colorOverride || msg.color;
-      if (msg.speedTier === SPEED_TIER.FAR && !msg.colorOverride) {
-        renderColor = desaturateColor(renderColor, FAR_LAYER_DESATURATION_FACTOR);
-        msg.colorOverride = renderColor; // cache for future frames
+    try {
+      for (const { msg, elapsed } of entries) {
+        // Per-message color with optional FAR desaturation
+        let renderColor = msg.colorOverride || msg.color;
+        if (msg.speedTier === SPEED_TIER.FAR && !msg.colorOverride) {
+          renderColor = desaturateColor(renderColor, FAR_LAYER_DESATURATION_FACTOR);
+          msg.colorOverride = renderColor; // cache for future frames
+        }
+
+        const sx = Math.floor(msg.x);
+        const sy = Math.floor(msg.y);
+
+        // Dispatch to the appropriate render function based on message kind
+        // Config-driven dispatch (worker variant) — takes priority when CardConfigWorker is available
+        if (msg.cardConfigWorker) {
+          renderPaidCardWorker(
+            ctx,
+            {
+              author: msg.author,
+              authorPhotoUrl: msg.authorPhotoUrl,
+              content: msg.content ?? [],
+              badgeText: msg.superChatAmount,
+              headerTagText: msg.membershipHeader,
+              stickerUrl: msg.superChatStickerUrl,
+            },
+            msg.width,
+            msg.height,
+            sx,
+            sy,
+            elapsed,
+            msg.cardConfigWorker,
+            cfg.fontSize,
+            cfg.fontWeight,
+            cfg.fontFamily,
+            strokeWidth,
+            cfg.outlineOpacity,
+            textBitmapCache,
+            authorPhotoCache,
+            emojiCache,
+            getFont,
+            superChatGradientCache
+          );
+        } else {
+          // Regular message — handle translation
+          const overrideText =
+            cfg.translationEnabled && cfg.translationMode === 'replace' && msg.translatedText
+              ? msg.translatedText
+              : null;
+
+          renderRegularMessage(
+            ctx,
+            msg as Parameters<typeof renderRegularMessage>[1],
+            sx,
+            sy,
+            cfg.fontSize,
+            cfg.fontWeight,
+            cfg.fontFamily,
+            renderColor,
+            strokeWidth,
+            cfg.outlineOpacity,
+            textBitmapCache,
+            emojiCache,
+            authorPhotoCache,
+            getFont,
+            overrideText
+          );
+        }
+
+        // Dual-mode translation: render translated text below for regular messages
+        if (
+          cfg.translationEnabled &&
+          cfg.translationMode === 'dual' &&
+          msg.translatedText &&
+          msg.translatedText !== msg.text &&
+          (!msg.kind || msg.kind === 'chat' || msg.kind === 'text' || msg.kind === undefined)
+        ) {
+          const translationFontSize = Math.round(cfg.fontSize * TRANSLATION_FONT_SCALE);
+          const translationColor = msg.authorType
+            ? cfg.authorColors[msg.authorType] || renderColor
+            : renderColor;
+          const translationY = sy + msg.height * TRANSLATION_FONT_SCALE + TRANSLATION_GAP_PX;
+          ctx.save();
+          ctx.globalAlpha = (bucketIndex / (OPACITY_BUCKETS - 1)) * TRANSLATION_OPACITY_SCALE;
+          renderSegment(
+            ctx,
+            msg.translatedText,
+            sx,
+            Math.floor(translationY),
+            translationColor,
+            translationFontSize,
+            strokeWidth,
+            cfg.outlineOpacity,
+            textBitmapCache,
+            getFont
+          );
+          ctx.restore();
+        }
       }
-
-      const sx = Math.floor(msg.x);
-      const sy = Math.floor(msg.y);
-
-      // Dispatch to the appropriate render function based on message kind
-      // Config-driven dispatch (worker variant) — takes priority when CardConfigWorker is available
-      if (msg.cardConfigWorker) {
-        renderPaidCardWorker(
-          ctx,
-          {
-            author: msg.author,
-            authorPhotoUrl: msg.authorPhotoUrl,
-            content: msg.content ?? [],
-            badgeText: msg.superChatAmount,
-            headerTagText: msg.membershipHeader,
-            stickerUrl: msg.superChatStickerUrl,
-          },
-          msg.width,
-          msg.height,
-          sx,
-          sy,
-          elapsed,
-          msg.cardConfigWorker,
-          cfg.fontSize,
-          cfg.fontWeight,
-          cfg.fontFamily,
-          strokeWidth,
-          cfg.outlineOpacity,
-          textBitmapCache,
-          authorPhotoCache,
-          emojiCache,
-          getFont,
-          superChatGradientCache
-        );
-      } else {
-        // Regular message — handle translation
-        const overrideText =
-          cfg.translationEnabled && cfg.translationMode === 'replace' && msg.translatedText
-            ? msg.translatedText
-            : null;
-
-        renderRegularMessage(
-          ctx,
-          msg as Parameters<typeof renderRegularMessage>[1],
-          sx,
-          sy,
-          cfg.fontSize,
-          cfg.fontWeight,
-          cfg.fontFamily,
-          renderColor,
-          strokeWidth,
-          cfg.outlineOpacity,
-          textBitmapCache,
-          emojiCache,
-          authorPhotoCache,
-          getFont,
-          overrideText
-        );
-      }
-
-      // Dual-mode translation: render translated text below for regular messages
-      if (
-        cfg.translationEnabled &&
-        cfg.translationMode === 'dual' &&
-        msg.translatedText &&
-        msg.translatedText !== msg.text &&
-        (!msg.kind || msg.kind === 'chat' || msg.kind === 'text' || msg.kind === undefined)
-      ) {
-        const translationFontSize = Math.round(cfg.fontSize * TRANSLATION_FONT_SCALE);
-        const translationColor = msg.authorType
-          ? cfg.authorColors[msg.authorType] || renderColor
-          : renderColor;
-        const translationY = sy + msg.height * TRANSLATION_FONT_SCALE + TRANSLATION_GAP_PX;
-        ctx.save();
-        ctx.globalAlpha = (bucketIndex / (OPACITY_BUCKETS - 1)) * TRANSLATION_OPACITY_SCALE;
-        renderSegment(
-          ctx,
-          msg.translatedText,
-          sx,
-          Math.floor(translationY),
-          translationColor,
-          translationFontSize,
-          strokeWidth,
-          cfg.outlineOpacity,
-          textBitmapCache,
-          getFont
-        );
-        ctx.restore();
-      }
+    } finally {
+      ctx.globalAlpha = 1;
     }
   }
 
-  ctx.globalAlpha = 1;
-
-  // Stats
   statsFrameCounter++;
   if (statsFrameCounter >= 60) {
     statsFrameCounter = 0;

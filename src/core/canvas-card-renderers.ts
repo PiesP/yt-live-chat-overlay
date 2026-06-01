@@ -208,6 +208,9 @@ function renderCardBadge(
   const badgeHeight = badgeFontSize + badge.paddingV * 2;
 
   drawRoundRect(ctx, x, y, badgeWidth, badgeHeight, badge.radius);
+  const prevFillStyle = ctx.fillStyle;
+  const prevStrokeStyle = ctx.strokeStyle;
+  const prevLineWidth = ctx.lineWidth;
   ctx.fillStyle = badge.fillColor;
   ctx.fill();
   ctx.strokeStyle = badge.strokeColor;
@@ -227,6 +230,11 @@ function renderCardBadge(
   ctx.fillStyle = '#ffffff';
   ctx.fillText(text, x + badge.paddingH, y + badgeHeight / 2);
   ctx.textBaseline = 'top';
+
+  // Restore canvas state to prevent bleed to caller
+  ctx.fillStyle = prevFillStyle;
+  ctx.strokeStyle = prevStrokeStyle;
+  ctx.lineWidth = prevLineWidth;
 
   return y + badgeHeight;
 }
