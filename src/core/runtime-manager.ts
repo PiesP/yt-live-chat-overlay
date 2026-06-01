@@ -23,6 +23,7 @@ import { MessageIdRegistry } from '@core/message-id-registry';
 import { OVERLAY_SELECTOR, Overlay } from '@core/overlay';
 import { CanvasRenderer } from '@core/renderer-canvas';
 import { shouldResetRendererForSettingsChange } from '@core/settings-schema';
+import { StandbyController } from '@core/standby-controller';
 import { VideoPauseController } from '@core/video-pause-controller';
 import type { ChatBootstrapResult } from '@core/youtubei-chat';
 import { bootstrapChatSession } from '@core/youtubei-chat';
@@ -45,10 +46,6 @@ const MAX_START_ATTEMPTS = 3;
 
 const RECENT_MESSAGE_REPLAY_LIMIT = 20;
 const CHAT_WATCHDOG_INTERVAL_MS = 15_000;
-const STANDBY_RECHECK_INTERVAL_MS = 5_000;
-const STANDBY_RETRY_DELAY_MS = 3_000;
-const STANDBY_RECHECK_MAX_MS = 60_000;
-const STANDBY_RECHECK_FACTOR = 2;
 
 async function createChatSource(
   getSettings: () => Readonly<OverlaySettings>,
@@ -73,7 +70,7 @@ const CHAT_STALL_TIMEOUT_MS = 30_000;
 const LONG_IDLE_RESTART_MS = 60_000;
 const ABSOLUTE_MAX_IDLE_RESTART_MS = 30 * 60 * 1000; // 30 minutes
 
-type RuntimeSessionRestartReason = 'foreground-return' | 'watchdog' | 'standby-resolved';
+export type RuntimeSessionRestartReason = 'foreground-return' | 'watchdog' | 'standby-resolved';
 
 interface RuntimeHealth {
   idleDurationMs: number;
@@ -131,6 +128,7 @@ export class RuntimeManager {
   private chatSource: ChatSource | null = null;
   private foregroundCleanup: (() => void) | null = null;
   private videoPauseController = new VideoPauseController();
+  private readonly standbyController: StandbyController;
   private backlogController: BacklogInjectionController | null = null;
   private chatWatchdogTimer: ReturnType<typeof setInterval> | null = null;
   private state: RuntimeState = RuntimeState.INIT;
@@ -141,12 +139,7 @@ export class RuntimeManager {
   private fetchInterceptorUnsubscribe: InterceptorUnsubscribe | null = null;
   /** Unsubscribe handle for the DOM chat watcher (fallback). */
   private domWatcherUnsubscribe: DomWatcherUnsubscribe | null = null;
-  /** Timer for standby periodic recheck (pre-live waiting mode). */
-  private standbyPollTimer: ReturnType<typeof setTimeout> | null = null;
-  /** Current delay for standby poll (exponential backoff, 5s→60s). */
-  private standbyPollDelay = STANDBY_RECHECK_INTERVAL_MS;
-  /** Timer for faster retry after a transient standby poll failure. */
-  private standbyRetryTimer: ReturnType<typeof setTimeout> | null = null;
+
   private get isDisposedState(): boolean {
     return (
       this.state === RuntimeState.DISPOSED ||
@@ -154,9 +147,6 @@ export class RuntimeManager {
       this.state === RuntimeState.DESTROYED
     );
   }
-
-  /** Whether this session is in standby mode (pre-live, waiting for stream). */
-  private standbyMode = false;
 
   private get isActiveState(): boolean {
     return this.state === RuntimeState.STARTING || this.state === RuntimeState.ACTIVE;
@@ -166,6 +156,11 @@ export class RuntimeManager {
     this.getCurrentUrl = options.getCurrentUrl;
     this.getSettings = options.getSettings;
     this.isValidPage = options.isValidPage;
+    this.standbyController = new StandbyController(
+      () => this.abortController.signal,
+      () => this.isDisposedState,
+      (reason) => this.requestManagedRestart(reason)
+    );
   }
 
   async start(): Promise<void> {
@@ -317,6 +312,7 @@ export class RuntimeManager {
 
       this.overlay = overlay;
       this.renderer = new CanvasRenderer(overlay, settings);
+      this.standbyController.setRenderer(this.renderer);
 
       const chatStarted = await this.startChatSource(signal);
       throwIfAborted(signal);
@@ -328,7 +324,7 @@ export class RuntimeManager {
           this.noteHidden();
         }
         this.startForegroundListeners();
-        this.enterStandbyMode();
+        this.standbyController.enter();
         log.info('Entered standby mode — waiting for stream to start');
         return 'started';
       }
@@ -423,7 +419,7 @@ export class RuntimeManager {
       return;
     }
 
-    this.exitStandbyMode();
+    this.standbyController.exit();
 
     this.state = RuntimeState.RESTARTING;
 
@@ -449,6 +445,7 @@ export class RuntimeManager {
 
     this.renderer?.destroy();
     this.renderer = null;
+    this.standbyController.setRenderer(null);
 
     this.overlay?.destroy();
     this.overlay = null;
@@ -641,7 +638,7 @@ export class RuntimeManager {
     const renderable = (container?.isConnected ?? false) && dimensions != null;
 
     // Pre-live standby has no chat source — never restart from health checks.
-    if (this.standbyMode) {
+    if (this.standbyController.isStandby()) {
       return { idleDurationMs: 0, renderable, chat: null, shouldRestart: false };
     }
 
@@ -697,7 +694,7 @@ export class RuntimeManager {
 
       // In standby mode (pre-live, waiting for stream), just resume the
       // render loop — no chat source or video state to manage.
-      if (this.standbyMode) {
+      if (this.standbyController.isStandby()) {
         this.renderer?.resume();
         return;
       }
@@ -795,78 +792,6 @@ export class RuntimeManager {
 
   private stopChatWatchdog(): void {
     this.chatWatchdogTimer = clearSafeInterval(this.chatWatchdogTimer);
-  }
-
-  // ── Standby mode (pre-live waiting) ─────────────────────────────────────
-
-  private enterStandbyMode(): void {
-    this.standbyMode = true;
-    this.renderer?.setStandbyStatus(true);
-
-    // Reset backoff to minimum and start exponential-backoff polling.
-    this.standbyPollDelay = STANDBY_RECHECK_INTERVAL_MS;
-    this.scheduleStandbyPoll();
-  }
-
-  private exitStandbyMode(): void {
-    this.standbyMode = false;
-    this.stopStandbyPolling();
-    this.standbyRetryTimer = clearSafeTimeout(this.standbyRetryTimer);
-    this.renderer?.setStandbyStatus(false);
-  }
-
-  private stopStandbyPolling(): void {
-    this.standbyPollTimer = clearSafeTimeout(this.standbyPollTimer);
-  }
-
-  /** Schedule the next standby poll with exponential backoff. */
-  private scheduleStandbyPoll(): void {
-    this.standbyPollTimer = setTimeout(() => {
-      this.standbyPollTimer = null;
-      void this.pollStandbyResolution();
-    }, this.standbyPollDelay);
-  }
-
-  private async pollStandbyResolution(): Promise<void> {
-    if (this.isDisposedState || !this.standbyMode) return;
-
-    try {
-      const result = await bootstrapChatSession(this.abortController.signal);
-      if (result.status === 'ready') {
-        log.info('Stream detected — requesting managed restart from standby');
-        this.stopStandbyPolling();
-        this.requestManagedRestart('standby-resolved');
-        return;
-      }
-
-      // Stream not yet live — increase backoff for next poll.
-      this.standbyPollDelay = Math.min(
-        this.standbyPollDelay * STANDBY_RECHECK_FACTOR,
-        STANDBY_RECHECK_MAX_MS
-      );
-
-      // On transient errors (network glitch, 503), retry faster instead of
-      // waiting for the next full poll interval.
-      if (result.status === 'retryable') {
-        this.scheduleStandbyRetry();
-        return;
-      }
-
-      this.scheduleStandbyPoll();
-    } catch (error: unknown) {
-      if (!isAbortError(error)) {
-        log.warn('Standby poll failed:', error);
-        this.scheduleStandbyRetry();
-      }
-    }
-  }
-
-  private scheduleStandbyRetry(): void {
-    if (this.standbyRetryTimer !== null) return;
-    this.standbyRetryTimer = setTimeout(() => {
-      this.standbyRetryTimer = null;
-      void this.pollStandbyResolution();
-    }, STANDBY_RETRY_DELAY_MS);
   }
 
   private replayLatestMessages(
