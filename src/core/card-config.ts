@@ -9,6 +9,7 @@
  */
 
 import type { ChatMessage, OverlaySettings, RgbColor } from '@app-types';
+import { computeReadableTextColor } from '@core/color-utils';
 import {
   colors as designColors,
   rendererLayout,
@@ -20,6 +21,141 @@ import {
 
 export type BackgroundMode = 'gradient' | 'solid';
 export type DecorationMode = 'accentBar' | 'pulsingBorder' | 'none';
+
+/**
+ * Worker-safe CardConfig — no callbacks, all pre-computed values for structured clone.
+ */
+export interface CardConfigWorker {
+  background: BackgroundMode;
+  backgroundGradient?: {
+    topBoost: number;
+    bottomReduction: number;
+    minOpacity: number;
+  };
+  backgroundColor?: RgbColor;
+  backgroundAlpha?: number;
+  decoration: DecorationMode;
+  accentBar?: {
+    width: number;
+    color: RgbColor; // pre-resolved, no callback
+  };
+  pulsingBorder?: {
+    borderRgb: RgbColor;
+    borderWidth: number;
+    baseAlpha: number;
+    amplitude: number;
+  };
+  badgeEnabled: boolean;
+  badgeFillColor: string;
+  badgeStrokeColor: string;
+  badgeRadius: number;
+  badgePaddingH: number;
+  badgePaddingV: number;
+  badgeStrokeWidth: number;
+  headerTagEnabled: boolean;
+  headerTagFontSizeScale: number;
+  headerTagColor: string;
+  headerTagMarginTop: number;
+  headerTagMarginBottom: number;
+  authorShow: boolean; // pre-resolved: does settings.showAuthor.superChat (or equivalent) allow it?
+  authorNameMaxWidth: number;
+  bodyMaxLines: number; // pre-resolved from settings
+  bodyMarginTop: number;
+  stickerEnabled: boolean;
+  stickerSizeScale: number;
+  stickerMarginTop: number;
+  padding: { horizontal: number; vertical: number };
+  cardRadius: number;
+  textColor: string; // pre-resolved: either 'auto' result or explicit color
+  accentBarColorRgb: RgbColor; // pre-resolved accent bar color
+  resolveColorRgb: RgbColor; // pre-resolved resolveColor(message) result
+  needsGradientCache: boolean;
+  needsElapsed: boolean;
+}
+
+/**
+ * Convert main-thread CardConfig to worker-safe CardConfigWorker by pre-resolving callbacks.
+ * @param config The main-thread CardConfig with callbacks.
+ * @param message The specific chat message to resolve per-message callbacks against.
+ * @param settings The current overlay settings.
+ */
+export function toWorkerConfig(
+  config: CardConfig,
+  message: ChatMessage,
+  settings: OverlaySettings
+): CardConfigWorker {
+  // Pre-resolve base colour
+  const resolveColorRgb = config.resolveColor(message);
+  const baseColor = `rgb(${resolveColorRgb.r}, ${resolveColorRgb.g}, ${resolveColorRgb.b})`;
+  const textColor =
+    config.textColor === 'auto' ? computeReadableTextColor(baseColor) : config.textColor;
+
+  // Pre-resolve accent bar colour (function → RgbColor)
+  let accentBarColorRgb: RgbColor = { r: 0, g: 0, b: 0 };
+  if (config.accentBar) {
+    const raw = config.accentBar.color;
+    accentBarColorRgb = typeof raw === 'function' ? raw(message) : raw;
+  }
+
+  // Pre-resolve author visibility
+  const authorShow =
+    typeof config.authorSection.show === 'function'
+      ? config.authorSection.show(message, settings)
+      : config.authorSection.show;
+
+  // Pre-resolve body max lines
+  const bodyMaxLines =
+    config.body.maxLines === 'fromSettings'
+      ? message.kind === 'superchat'
+        ? settings.superChatMaxBodyLines
+        : settings.membershipMaxBodyLines
+      : config.body.maxLines;
+
+  return {
+    background: config.background,
+    backgroundGradient: config.backgroundGradient ?? undefined,
+    backgroundColor: config.backgroundColor ? { ...config.backgroundColor } : undefined,
+    backgroundAlpha: config.backgroundAlpha,
+    decoration: config.decoration,
+    accentBar: config.accentBar
+      ? { width: config.accentBar.width, color: accentBarColorRgb }
+      : undefined,
+    pulsingBorder: config.pulsingBorder
+      ? {
+          borderRgb: config.pulsingBorder.borderRgb,
+          borderWidth: config.pulsingBorder.borderWidth,
+          baseAlpha: config.pulsingBorder.baseAlpha,
+          amplitude: config.pulsingBorder.amplitude,
+        }
+      : undefined,
+    badgeEnabled: config.badge?.enabled ?? false,
+    badgeFillColor: config.badge?.fillColor ?? '',
+    badgeStrokeColor: config.badge?.strokeColor ?? '',
+    badgeRadius: config.badge?.radius ?? 0,
+    badgePaddingH: config.badge?.paddingH ?? 0,
+    badgePaddingV: config.badge?.paddingV ?? 0,
+    badgeStrokeWidth: config.badge?.strokeWidth ?? 0,
+    headerTagEnabled: config.headerTag?.enabled ?? false,
+    headerTagFontSizeScale: config.headerTag?.fontSizeScale ?? 0.8,
+    headerTagColor: config.headerTag?.color ?? '#ffffff',
+    headerTagMarginTop: config.headerTag?.marginTop ?? 0,
+    headerTagMarginBottom: config.headerTag?.marginBottom ?? 0,
+    authorShow,
+    authorNameMaxWidth: config.authorSection.nameMaxWidth,
+    bodyMaxLines,
+    bodyMarginTop: config.body.marginTop,
+    stickerEnabled: config.sticker?.enabled ?? false,
+    stickerSizeScale: config.sticker?.sizeScale ?? 0,
+    stickerMarginTop: config.sticker?.marginTop ?? 0,
+    padding: { ...config.padding },
+    cardRadius: config.cardRadius,
+    textColor,
+    accentBarColorRgb,
+    resolveColorRgb,
+    needsGradientCache: config.needsGradientCache,
+    needsElapsed: config.needsElapsed,
+  } as CardConfigWorker;
+}
 
 export interface CardConfig {
   background: BackgroundMode;

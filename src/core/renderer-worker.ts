@@ -47,6 +47,7 @@ import {
   heapUpdateLane,
 } from '@shared/lane-allocation-shared';
 import { ByteLimitedCache } from './byte-limited-cache';
+import type { CardConfigWorker } from './card-config';
 import { EMOJI_ALIAS_PATTERN } from './chat-message-helpers';
 import { computeReadableTextColor, computeSuperChatOpacities, toRgba } from './color-utils';
 import {
@@ -239,7 +240,8 @@ interface WorkerMessage {
   superChatHdrColor?: number;
   /** Sticker image URL. */
   superChatStickerUrl?: string;
-  /** Sticker alt text. */
+  /** Membership header text (e.g. member tier/duration). */
+  membershipHeader?: string;
 }
 
 interface ActiveMessage {
@@ -285,6 +287,10 @@ interface ActiveMessage {
   superChatBgColor?: number;
   /** SuperChat sticker image URL. */
   superChatStickerUrl?: string;
+  /** Membership header text. */
+  membershipHeader?: string;
+  /** Optional CardConfigWorker for config-driven renderPaidCardWorker(). */
+  cardConfigWorker?: CardConfigWorker;
 }
 
 // ── Worker-specific constants ──────────────────────────────────────────────
@@ -1156,6 +1162,7 @@ function renderMembershipCard(
     author?: string;
     authorPhotoUrl?: string;
     content: readonly WorkerContentSegment[];
+    membershipHeader?: string;
   },
   msgWidth: number,
   msgHeight: number,
@@ -1192,6 +1199,39 @@ function renderMembershipCard(
   const padV = rendererLayout.membership.paddingV;
   const textX = x + padH;
   let textY = y + padV;
+
+  // Membership header tag (tier/duration)
+  if (message.membershipHeader) {
+    const headerFontSize = Math.round(fontSize * 0.8);
+    const headerFont = getFontString(headerFontSize, fontWeight as FontWeight, fontFamily);
+    ctx.font = headerFont;
+    ctx.textBaseline = 'top';
+    const headerMaxWidth = w - padH * 2;
+    let displayText = message.membershipHeader;
+    if (ctx.measureText(displayText).width > headerMaxWidth) {
+      while (displayText.length > 0 && ctx.measureText(`${displayText}…`).width > headerMaxWidth) {
+        displayText = displayText.slice(0, -1);
+      }
+      displayText += '…';
+    }
+    strokeTextOutline(
+      ctx,
+      displayText,
+      textX,
+      textY,
+      designColors.membership.headerText,
+      outlineWidthPx,
+      outlineOpacity
+    );
+    ctx.fillStyle = designColors.membership.headerText;
+    ctx.fillText(displayText, textX, textY);
+    const headerHeight = Math.ceil(
+      ctx.measureText('Mg').actualBoundingBoxAscent ||
+        ctx.measureText('Mg').fontBoundingBoxAscent ||
+        headerFontSize * 0.8
+    );
+    textY += headerHeight + spacing.xs;
+  }
 
   if (message.author) {
     const nameMaxWidth = w - padH * 2;
@@ -1231,6 +1271,269 @@ function renderMembershipCard(
       emojiCache,
       getFontFn
     );
+  }
+}
+
+// ── Config-driven paid card renderer (worker variant) ────────────────────────
+
+/** Max cached gradients for renderPaidCardWorker LRU eviction. */
+const PAID_CARD_GRADIENT_CACHE_MAX = 100;
+
+/** Get or create a cached linear gradient (top-to-bottom) within the worker. */
+function getPaidCardGradient(
+  ctx: OffscreenCanvasRenderingContext2D,
+  cache: Map<string, CanvasGradient>,
+  baseColor: string,
+  h: number,
+  topAlpha: number,
+  scAlpha: number,
+  bottomAlpha: number
+): CanvasGradient {
+  const key = `${baseColor}|${h}|${topAlpha}|${scAlpha}|${bottomAlpha}`;
+  const cached = cache.get(key);
+  if (cached) return cached;
+  if (cache.size >= PAID_CARD_GRADIENT_CACHE_MAX) {
+    const oldestKey = cache.keys().next().value;
+    if (oldestKey !== undefined) cache.delete(oldestKey);
+  }
+  const grad = ctx.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, toRgba(baseColor, topAlpha));
+  grad.addColorStop(0.48, toRgba(baseColor, scAlpha));
+  grad.addColorStop(1, toRgba(baseColor, bottomAlpha));
+  cache.set(key, grad);
+  return grad;
+}
+
+/**
+ * Render a paid card (SuperChat or Membership) driven entirely by a
+ * CardConfigWorker. Mirrors the main-thread renderPaidCard but uses worker-safe
+ * types (OffscreenCanvasRenderingContext2D, ByteLimitedCache<ImageBitmap>).
+ *
+ * All colours, dimensions, and flags are pre-resolved in the CardConfigWorker
+ * — no callbacks or settings lookups needed.
+ */
+function renderPaidCardWorker(
+  ctx: OffscreenCanvasRenderingContext2D,
+  message: {
+    author: string | undefined;
+    authorPhotoUrl: string | undefined;
+    content: readonly WorkerContentSegment[];
+    /** Amount text for badge (e.g. "$5.00"). */
+    badgeText: string | undefined;
+    /** Header tag text (e.g. membership tier). */
+    headerTagText: string | undefined;
+    /** Sticker image URL. */
+    stickerUrl: string | undefined;
+  },
+  msgWidth: number,
+  msgHeight: number,
+  x: number,
+  y: number,
+  elapsed: number,
+  card: CardConfigWorker,
+  fontSize: number,
+  fontWeight: string,
+  fontFamily: string,
+  outlineWidthPx: number,
+  outlineOpacity: number,
+  textBitmapCache: TextBitmapCache,
+  authorPhotoCache: ByteLimitedCache<ImageBitmap>,
+  emojiCache: ByteLimitedCache<ImageBitmap>,
+  getFontFn: (fontSize: number) => string,
+  gradientCache: Map<string, CanvasGradient>
+): void {
+  const w = msgWidth;
+  const h = msgHeight;
+
+  // ── 1. Resolve base colour ────────────────────────────────────────────
+  const rgb = card.resolveColorRgb;
+  const baseColor = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
+  const textColor = card.textColor;
+
+  // Compute gradient opacities if background is gradient
+  let topAlpha = 1;
+  let scAlpha = 1;
+  let bottomAlpha = 1;
+  if (card.background === 'gradient' && card.backgroundGradient) {
+    const bg = card.backgroundGradient;
+    scAlpha = Math.min(1, Math.max(bg.minOpacity, 0.7)); // use configurable superChatOpacity from settings
+    topAlpha = Math.min(1, scAlpha + bg.topBoost);
+    bottomAlpha = Math.max(bg.minOpacity, scAlpha - bg.bottomReduction);
+  }
+
+  // ── 2. Background ─────────────────────────────────────────────────────
+  if (card.background === 'gradient' && card.backgroundGradient) {
+    const grad = getPaidCardGradient(
+      ctx,
+      gradientCache,
+      baseColor,
+      h,
+      topAlpha,
+      scAlpha,
+      bottomAlpha
+    );
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.fillStyle = grad;
+    drawRoundRect(ctx, 0, 0, w, h, card.cardRadius);
+    ctx.fill();
+    ctx.restore();
+  } else if (card.backgroundColor) {
+    const bg = card.backgroundColor;
+    ctx.fillStyle = `rgba(${bg.r}, ${bg.g}, ${bg.b}, ${card.backgroundAlpha ?? 1})`;
+    drawRoundRect(ctx, x, y, w, h, card.cardRadius);
+    ctx.fill();
+  }
+
+  // ── 3. Decoration ─────────────────────────────────────────────────────
+  if (card.decoration === 'accentBar' && card.accentBar) {
+    const barRgb = card.accentBar.color;
+    ctx.save();
+    ctx.translate(x, y);
+    drawRoundRect(ctx, 0, 0, w, h, card.cardRadius);
+    ctx.clip();
+    ctx.fillStyle = `rgb(${barRgb.r}, ${barRgb.g}, ${barRgb.b})`;
+    ctx.fillRect(0, 0, card.accentBar.width, h);
+    ctx.restore();
+  } else if (card.decoration === 'pulsingBorder' && card.pulsingBorder) {
+    const pb = card.pulsingBorder;
+    const pulse = Math.sin((elapsed / 1000) * Math.PI) * pb.amplitude + pb.baseAlpha;
+    ctx.save();
+    drawRoundRect(ctx, x, y, w, h, card.cardRadius);
+    ctx.strokeStyle = `rgba(${pb.borderRgb.r}, ${pb.borderRgb.g}, ${pb.borderRgb.b}, ${pulse})`;
+    ctx.lineWidth = pb.borderWidth;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // ── 4. Content layout ─────────────────────────────────────────────────
+  const padH = card.padding.horizontal;
+  const padV = card.padding.vertical;
+  const textX = x + padH;
+  let cursorY = y + padV;
+
+  // ── 5. Header tag ─────────────────────────────────────────────────────
+  if (card.headerTagEnabled && message.headerTagText) {
+    const headerFontSize = Math.round(fontSize * card.headerTagFontSizeScale);
+    const headerFont = getFontString(headerFontSize, fontWeight as FontWeight, fontFamily);
+    ctx.save();
+    ctx.font = headerFont;
+    ctx.textBaseline = 'top';
+    const headerMaxWidth = w - padH * 2;
+    let displayText = message.headerTagText;
+    if (ctx.measureText(displayText).width > headerMaxWidth) {
+      while (displayText.length > 0 && ctx.measureText(`${displayText}…`).width > headerMaxWidth) {
+        displayText = displayText.slice(0, -1);
+      }
+      displayText += '…';
+    }
+    strokeTextOutline(
+      ctx,
+      displayText,
+      textX,
+      cursorY + card.headerTagMarginTop,
+      card.headerTagColor,
+      outlineWidthPx,
+      outlineOpacity
+    );
+    ctx.fillStyle = card.headerTagColor;
+    ctx.fillText(displayText, textX, cursorY + card.headerTagMarginTop);
+    ctx.restore();
+    cursorY += headerFontSize + card.headerTagMarginTop + card.headerTagMarginBottom;
+  }
+
+  // ── 6. Author section ─────────────────────────────────────────────────
+  if (card.authorShow && message.author) {
+    cursorY = drawAuthorSection(
+      ctx,
+      // Safe cast: guarded by message.author check above, exactOptionalPropertyTypes compat
+      { author: message.author, authorPhotoUrl: message.authorPhotoUrl } as {
+        author?: string;
+        authorPhotoUrl?: string;
+      },
+      textX,
+      cursorY,
+      textColor,
+      card.authorNameMaxWidth,
+      Math.round(fontSize * 0.7),
+      fontWeight,
+      fontFamily,
+      outlineWidthPx,
+      outlineOpacity,
+      authorPhotoCache,
+      textBitmapCache,
+      getFontFn
+    );
+  }
+
+  // ── 7. Badge (amount pill) ────────────────────────────────────────────
+  if (card.badgeEnabled && message.badgeText) {
+    const badgeFontSize = Math.round(fontSize * 0.7);
+    const badgeFont = getFontString(badgeFontSize, 'bold' as FontWeight, fontFamily);
+    ctx.font = badgeFont;
+    const badgeTextWidth = Math.ceil(ctx.measureText(message.badgeText).width);
+    const badgeWidth = badgeTextWidth + card.badgePaddingH * 2;
+    const badgeHeight = badgeFontSize + card.badgePaddingV * 2;
+
+    drawRoundRect(ctx, textX, cursorY, badgeWidth, badgeHeight, card.badgeRadius);
+    ctx.fillStyle = card.badgeFillColor;
+    ctx.fill();
+    ctx.strokeStyle = card.badgeStrokeColor;
+    ctx.lineWidth = card.badgeStrokeWidth;
+    ctx.stroke();
+
+    ctx.textBaseline = 'middle';
+    strokeTextOutline(
+      ctx,
+      message.badgeText,
+      textX + card.badgePaddingH,
+      cursorY + badgeHeight / 2,
+      '#ffffff',
+      outlineWidthPx,
+      outlineOpacity
+    );
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(message.badgeText, textX + card.badgePaddingH, cursorY + badgeHeight / 2);
+    ctx.textBaseline = 'top';
+
+    cursorY += badgeHeight;
+  }
+
+  // ── 8. Body text ──────────────────────────────────────────────────────
+  let textBottomY = cursorY;
+  if (message.content.length > 0) {
+    const bodyMaxWidth = w - padH * 2;
+    textBottomY = renderWrappedContentSegments(
+      ctx,
+      message.content,
+      textX,
+      cursorY + card.bodyMarginTop,
+      bodyMaxWidth,
+      card.bodyMaxLines,
+      textColor,
+      fontSize,
+      outlineWidthPx,
+      outlineOpacity,
+      textBitmapCache,
+      emojiCache,
+      getFontFn
+    );
+  }
+
+  // ── 9. Sticker (skip if no URL — worker doesn't have sticker cache) ────
+  if (card.stickerEnabled && message.stickerUrl) {
+    // Sticker images are handled via the main thread's imageData transfer.
+    // Render if available in stickerCache.
+    const stickerImg = stickerCache.get(message.stickerUrl);
+    if (stickerImg) {
+      const maxStickerSize = Math.round(fontSize * card.stickerSizeScale);
+      const stickerY = textBottomY + (card.stickerMarginTop ?? 0);
+      const availableHeight = y + h - padV - stickerY;
+      const stickerSize = Math.max(0, Math.min(maxStickerSize, availableHeight));
+      if (stickerSize > 0) {
+        ctx.drawImage(stickerImg, textX, stickerY, stickerSize, stickerSize);
+      }
+    }
   }
 }
 
@@ -1718,7 +2021,36 @@ function renderFrame(): void {
         : false;
 
       // Dispatch to the appropriate render function based on message kind
-      if (msg.kind === 'superchat' && msg.superChatAmount) {
+      // Config-driven dispatch (worker variant) — takes priority when CardConfigWorker is available
+      if (msg.cardConfigWorker) {
+        renderPaidCardWorker(
+          ctx,
+          {
+            author: msg.author,
+            authorPhotoUrl: msg.authorPhotoUrl,
+            content: msg.content ?? [],
+            badgeText: msg.superChatAmount,
+            headerTagText: msg.membershipHeader,
+            stickerUrl: msg.superChatStickerUrl,
+          },
+          msg.width,
+          msg.height,
+          sx,
+          sy,
+          elapsed,
+          msg.cardConfigWorker,
+          cfg.fontSize,
+          cfg.fontWeight,
+          cfg.fontFamily,
+          strokeWidth,
+          cfg.outlineOpacity,
+          textBitmapCache,
+          authorPhotoCache,
+          emojiCache,
+          getFont,
+          superChatGradientCache
+        );
+      } else if (msg.kind === 'superchat' && msg.superChatAmount) {
         renderSuperChatCard(
           ctx,
           msg as Parameters<typeof renderSuperChatCard>[1],
