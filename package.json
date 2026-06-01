@@ -45,7 +45,7 @@
   },
   "packageManager": "pnpm@11.2.2",
   "volta": {
-    "node": "26.2.0",
+    "node": "26.3.0",
     "pnpm": "11.2.2"
   },
   "devDependencies": {
