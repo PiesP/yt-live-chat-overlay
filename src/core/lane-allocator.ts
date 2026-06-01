@@ -4,13 +4,16 @@
 import type { FontWeight, OverlayDimensions } from '@app-types';
 import { rendererLayout } from '@core/design-tokens';
 import { createLogger } from '@core/logging';
-import {
-  EPSILON as _EPSILON,
-  LANE_COOLDOWN_MIN_MS as _LANE_COOLDOWN_MIN_MS,
-  SAFETY_MARGIN_RATIO as _SAFETY_MARGIN_RATIO,
-  SPEED_TIER,
-} from '@core/renderer-constants';
+import { EPSILON as _EPSILON, SPEED_TIER } from '@core/renderer-constants';
 import { getFontString, measureTextHeight } from '@core/text-measure';
+import {
+  areSpeedTiersCompatible,
+  computeBaseHeadwayPx,
+  computeLaneY,
+  computeOccupancyMs,
+  HEADWAY_GAP_MAX_PX,
+  HEADWAY_GAP_MIN_PX,
+} from '@shared/lane-allocation-shared';
 
 const log = createLogger('LaneAllocator');
 
@@ -97,28 +100,11 @@ export class LaneAllocator {
    */
   private speedTierLanes: Map<number, { tier: number; until: number }> = new Map();
 
-  /**
-   * Minimum cooldown between consecutive uses of the same lane (ms).
-   * Used only for top/bottom (non-scrolling) modes where the message
-   * stays visible for the full duration. For scrolling mode, precision
-   * exit-time is used instead.
-   */
-  private static readonly LANE_COOLDOWN_MIN_MS = _LANE_COOLDOWN_MIN_MS;
-
-  /**
-   * Safety margin ratio applied to message duration.
-   * Used only for top/bottom (non-scrolling) modes.
-   */
-  private static readonly SAFETY_MARGIN_RATIO = _SAFETY_MARGIN_RATIO;
-
-  static readonly HEADWAY_GAP_MIN_PX = 16;
-  static readonly HEADWAY_GAP_MAX_PX = 60;
+  static readonly HEADWAY_GAP_MIN_PX = HEADWAY_GAP_MIN_PX;
+  static readonly HEADWAY_GAP_MAX_PX = HEADWAY_GAP_MAX_PX;
 
   static computeBaseHeadwayPx(msgWidth: number, headwayGapRatio: number): number {
-    return Math.max(
-      LaneAllocator.HEADWAY_GAP_MIN_PX,
-      Math.min(LaneAllocator.HEADWAY_GAP_MAX_PX, Math.round(msgWidth * headwayGapRatio))
-    );
+    return computeBaseHeadwayPx(msgWidth, headwayGapRatio);
   }
 
   /**
@@ -209,7 +195,7 @@ export class LaneAllocator {
   }
 
   getLaneY(laneIndex: number, viewportHeight: number): number {
-    return viewportHeight * this.options.safeTop + laneIndex * this.laneHeight;
+    return computeLaneY(laneIndex, viewportHeight, this.options.safeTop, this.laneHeight);
   }
 
   /**
@@ -218,7 +204,7 @@ export class LaneAllocator {
    * Far (0) and Backlog (3 → 2x speed) from mixing.
    */
   private static areSpeedTiersCompatible(a: number, b: number): boolean {
-    return Math.abs(a - b) <= 1;
+    return areSpeedTiersCompatible(a, b);
   }
 
   findPlacement(
@@ -341,17 +327,13 @@ export class LaneAllocator {
     msgWidthPx?: number,
     screenWidth?: number
   ): number {
-    // Top/bottom mode: full duration + safety cooldown
-    if (msgWidthPx === undefined || screenWidth === undefined) {
-      const safetyMargin = Math.round(durationMs * LaneAllocator.SAFETY_MARGIN_RATIO);
-      return durationMs + Math.max(LaneAllocator.LANE_COOLDOWN_MIN_MS, safetyMargin);
-    }
-
-    // Scrolling mode: precision exit-time
-    const totalDistance = screenWidth + msgWidthPx + this.options.exitPaddingPx;
-    const headwayPx = LaneAllocator.computeBaseHeadwayPx(msgWidthPx, this.options.headwayGapRatio);
-    const rightEdgePassFraction = (msgWidthPx + headwayPx) / totalDistance;
-    return Math.round(rightEdgePassFraction * durationMs);
+    return computeOccupancyMs(
+      durationMs,
+      this.options.exitPaddingPx,
+      this.options.headwayGapRatio,
+      msgWidthPx,
+      screenWidth
+    );
   }
 
   /**

@@ -32,6 +32,9 @@
       "@core/*": [
         "./src/core/*"
       ],
+      "@shared/*": [
+        "./src/shared/*"
+      ],
       "@app-types": [
         "./src/types/index"
       ]

@@ -30,6 +30,11 @@
 /// <reference lib="webworker" />
 
 import type { FontWeight } from '@app-types';
+import {
+  areSpeedTiersCompatible,
+  computeLaneY,
+  computeOccupancyMs as computeOccupancyMsShared,
+} from '@shared/lane-allocation-shared';
 import { EMOJI_ALIAS_PATTERN } from './chat-message-helpers';
 import {
   computeOutlineColor,
@@ -46,7 +51,6 @@ import {
   SUPERCHAT_AMOUNT_BADGE_STROKE,
   spacing,
 } from './design-tokens';
-import { LaneAllocator } from './lane-allocator';
 import {
   ANTI_BLOCK_FREE_RATIO,
   DRAIN_QUEUE_MAX_SKIP as DRAIN_MAX_SKIP,
@@ -56,10 +60,8 @@ import {
   HORIZONTAL_STAGGER_MAX,
   HORIZONTAL_STAGGER_PER_STEP,
   hashStringForTier as hashForTier,
-  LANE_COOLDOWN_MIN_MS,
   OPACITY_BUCKET_COUNT as OPACITY_BUCKETS,
   OUTLINE_STROKE_SCALE,
-  SAFETY_MARGIN_RATIO,
   SPEED_TIER,
   STAGGER_BATCH_MAX,
   STAGGER_EXP_SCALE,
@@ -1499,7 +1501,12 @@ function findPlacement(
   const result = allocateSingleLane(now, speedTier, slotCount);
   if (!result) return null;
 
-  const laneY = (config?.safeTop ?? 0) * (canvas?.height ?? 0) + result.laneIndex * laneHeight;
+  const laneY = computeLaneY(
+    result.laneIndex,
+    canvas?.height ?? 0,
+    config?.safeTop ?? 0,
+    laneHeight
+  );
   return { ...result, laneY };
 }
 
@@ -1574,9 +1581,7 @@ function allocateSingleLane(
   return null;
 }
 
-function areTiersCompatible(a: number, b: number): boolean {
-  return Math.abs(a - b) <= 1;
-}
+const areTiersCompatible = areSpeedTiersCompatible;
 
 function getSlotAvailableAt(laneIndex: number): number | undefined {
   if (laneIndex < 0 || laneIndex >= numLanes) return undefined;
@@ -1606,20 +1611,15 @@ function commitPlacement(
 }
 
 function computeOccupancyMs(durationMs: number, msgWidthPx?: number): number {
-  if (msgWidthPx === undefined) {
-    return (
-      durationMs + Math.max(LANE_COOLDOWN_MIN_MS, Math.round(durationMs * SAFETY_MARGIN_RATIO))
-    );
-  }
   if (!config) return durationMs;
   const screenWidth = canvas?.width ?? 1920;
-  const headwayPx = Math.max(
-    LaneAllocator.HEADWAY_GAP_MIN_PX,
-    Math.min(LaneAllocator.HEADWAY_GAP_MAX_PX, Math.round(msgWidthPx * config.headwayGapRatio))
+  return computeOccupancyMsShared(
+    durationMs,
+    config.exitPaddingPx,
+    config.headwayGapRatio,
+    msgWidthPx,
+    screenWidth
   );
-  const totalDistance = screenWidth + msgWidthPx + config.exitPaddingPx;
-  const fraction = (msgWidthPx + headwayPx) / totalDistance;
-  return Math.round(fraction * durationMs);
 }
 
 function updateLane(laneIdx: number, availableAt: number): void {
