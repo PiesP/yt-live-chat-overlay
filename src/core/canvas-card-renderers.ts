@@ -111,21 +111,13 @@ export function renderSuperChatCard(
   ctx.fill();
   ctx.restore();
 
-  // Left accent bar with rounded left edge to match card border radius
+  // Left accent bar — clipped to card's rounded corners
   ctx.save();
-  const barWidth = rendererLayout.superchatAccentBarWidth;
-  const radius = rendererLayout.superchatCardRadius;
-  ctx.beginPath();
-  ctx.moveTo(x + barWidth, y + radius);
-  ctx.lineTo(x + barWidth, y);
-  ctx.lineTo(x + radius, y);
-  ctx.arcTo(x, y, x, y + radius, radius);
-  ctx.lineTo(x, y + h - radius);
-  ctx.arcTo(x, y + h, x + barWidth, y + h, radius);
-  ctx.lineTo(x + barWidth, y + h);
-  ctx.closePath();
+  ctx.translate(x, y);
+  drawRoundRect(ctx, 0, 0, w, h, rendererLayout.superchatCardRadius);
+  ctx.clip();
   ctx.fillStyle = baseColor;
-  ctx.fill();
+  ctx.fillRect(0, 0, rendererLayout.superchatAccentBarWidth, h);
   ctx.restore();
 
   const scPad = rendererLayout.superchat;
