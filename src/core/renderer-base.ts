@@ -47,13 +47,10 @@ export abstract class RendererBase {
   protected pausedAt: number | null = null;
   protected backlogPaused = false;
 
-  private static readonly SPEED_BOOST_DENOMINATOR = 15;
-  private static readonly SPEED_BOOST_MAX = 0.35;
+  // speedBoostMax — read from this.settings
   private static readonly BACKLOG_PRIORITY_OFFSET = 50;
   // Minimum interval between backlog pause toggles to prevent oscillation
   // when the queue ratio hovers near the hysteresis thresholds.
-  private static readonly BACKLOG_TOGGLE_COOLDOWN_MS = 2_000;
-
   private lastBacklogToggleTime = 0;
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
@@ -246,8 +243,8 @@ export abstract class RendererBase {
       const emaMultiplier =
         1 +
         Math.min(
-          (emaRate - this.settings.speedBoostThreshold) / RendererBase.SPEED_BOOST_DENOMINATOR,
-          RendererBase.SPEED_BOOST_MAX
+          (emaRate - this.settings.speedBoostThreshold) / this.settings.speedBoostDenom,
+          this.settings.speedBoostMax
         );
       speed *= emaMultiplier;
     }
@@ -331,7 +328,7 @@ export abstract class RendererBase {
 
   protected updateBacklogPause(): void {
     const now = Date.now();
-    if (now - this.lastBacklogToggleTime < RendererBase.BACKLOG_TOGGLE_COOLDOWN_MS) return;
+    if (now - this.lastBacklogToggleTime < this.settings.backlogToggleCooldownMs) return;
 
     const queueRatio = this.getQueueLength() / this.settings.queueMaxSize;
     if (queueRatio > this.settings.backlogPauseThreshold && !this.backlogPaused) {

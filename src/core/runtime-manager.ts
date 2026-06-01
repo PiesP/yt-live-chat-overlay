@@ -385,6 +385,8 @@ export class RuntimeManager {
         backlogRecentMinutes: settings.backlogRecentMinutes,
         backlogInjectionMax: settings.backlogInjectionMax,
         backlogDensityRampMs: settings.backlogDensityRampMs,
+        backlogDensityRampMaxMs: settings.backlogDensityRampMaxMs,
+        backlogInjectionRateMin: settings.backlogInjectionRateMin,
       });
     }
 
@@ -571,6 +573,8 @@ export class RuntimeManager {
         backlogRecentMinutes: settings.backlogRecentMinutes,
         backlogInjectionMax: settings.backlogInjectionMax,
         backlogDensityRampMs: settings.backlogDensityRampMs,
+        backlogDensityRampMaxMs: settings.backlogDensityRampMaxMs,
+        backlogInjectionRateMin: settings.backlogInjectionRateMin,
       },
       renderer.laneCount,
       renderer.observability

@@ -474,6 +474,52 @@ export const PANES: PaneDef[] = [
             'activityTimeoutMs',
             'Chat activity timeout in milliseconds'
           ),
+          num(
+            'Stagger Max Delay (ms)',
+            'staggerMaxDelayMs',
+            'Max stagger delay for messages in same batch'
+          ),
+          num(
+            'Stagger Medium Delay (ms)',
+            'staggerMediumDelayMs',
+            'Medium stagger delay when queue depth is medium'
+          ),
+          num(
+            'Emoji Fetch Timeout (ms)',
+            'emojiFetchTimeoutMs',
+            'Timeout for emoji fetch operations'
+          ),
+          num(
+            'Backlog Density Ramp Max (ms)',
+            'backlogDensityRampMaxMs',
+            'Max density ramp duration for backlog injection'
+          ),
+          num(
+            'Backlog Injection Rate Min',
+            'backlogInjectionRateMin',
+            'Minimum backlog injection rate (msg/s)'
+          ),
+          num('Speed Boost Max', 'speedBoostMax', 'Max speed boost factor for burst compensation'),
+          num(
+            'Speed Boost Denom',
+            'speedBoostDenom',
+            'Speed boost denominator for EMA rate scaling'
+          ),
+          num(
+            'Backlog Toggle Cooldown (ms)',
+            'backlogToggleCooldownMs',
+            'Cooldown between backlog pause toggles'
+          ),
+          num(
+            'Replay Prefetch Pages',
+            'replayPrefetchPages',
+            'Max pages to prefetch in replay mode'
+          ),
+          num(
+            'Replay Batch Limit',
+            'replayBatchLimit',
+            'Max batches to fetch in replay initialization'
+          ),
         ],
       },
       {

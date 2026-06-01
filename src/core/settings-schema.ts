@@ -175,6 +175,16 @@ const ROOT_SETTING_META = {
   backlogPauseThreshold: { type: 'number', visual: false, displayScale: 100, displayPrecision: 0 },
   backlogResumeThreshold: { type: 'number', visual: false, displayScale: 100, displayPrecision: 0 },
   activityTimeoutMs: { type: 'number', visual: false },
+  staggerMaxDelayMs: { type: 'number', visual: false },
+  staggerMediumDelayMs: { type: 'number', visual: false },
+  emojiFetchTimeoutMs: { type: 'number', visual: false },
+  backlogDensityRampMaxMs: { type: 'number', visual: false },
+  backlogInjectionRateMin: { type: 'number', visual: false },
+  speedBoostMax: { type: 'number', visual: false },
+  speedBoostDenom: { type: 'number', visual: false },
+  backlogToggleCooldownMs: { type: 'number', visual: false },
+  replayPrefetchPages: { type: 'number', visual: false },
+  replayBatchLimit: { type: 'number', visual: false },
 } as const satisfies Record<RootScalarSettingKey, SettingMeta>;
 
 /**
@@ -250,7 +260,17 @@ type SettingsLimitKey =
   | 'speedBoostThreshold'
   | 'backlogPauseThreshold'
   | 'backlogResumeThreshold'
-  | 'activityTimeoutMs';
+  | 'activityTimeoutMs'
+  | 'staggerMaxDelayMs'
+  | 'staggerMediumDelayMs'
+  | 'emojiFetchTimeoutMs'
+  | 'backlogDensityRampMaxMs'
+  | 'backlogInjectionRateMin'
+  | 'speedBoostMax'
+  | 'speedBoostDenom'
+  | 'backlogToggleCooldownMs'
+  | 'replayPrefetchPages'
+  | 'replayBatchLimit';
 
 const SETTINGS_LIMITS = {
   speedPxPerSec: { min: 50, max: 500, step: 10 },
@@ -304,6 +324,16 @@ const SETTINGS_LIMITS = {
   backlogPauseThreshold: { min: 0.3, max: 1, step: 0.05 },
   backlogResumeThreshold: { min: 0.1, max: 1, step: 0.05 },
   activityTimeoutMs: { min: 5000, max: 120000, step: 5000 },
+  staggerMaxDelayMs: { min: 20, max: 1000, step: 20 },
+  staggerMediumDelayMs: { min: 10, max: 500, step: 10 },
+  emojiFetchTimeoutMs: { min: 5000, max: 120000, step: 5000 },
+  backlogDensityRampMaxMs: { min: 500, max: 15000, step: 500 },
+  backlogInjectionRateMin: { min: 1, max: 50, step: 1 },
+  speedBoostMax: { min: 0.05, max: 1, step: 0.05 },
+  speedBoostDenom: { min: 2, max: 100, step: 1 },
+  backlogToggleCooldownMs: { min: 500, max: 30000, step: 500 },
+  replayPrefetchPages: { min: 50, max: 1000, step: 50 },
+  replayBatchLimit: { min: 3, max: 100, step: 1 },
 } as const satisfies Record<SettingsLimitKey, NumericSettingLimit>;
 
 export const STORAGE_KEY = 'yt-live-chat-overlay-settings';
@@ -411,6 +441,18 @@ export const DEFAULT_SETTINGS = {
   backlogPauseThreshold: 0.8,
   backlogResumeThreshold: 0.4,
   activityTimeoutMs: 30000,
+
+  // ── Stagger / Tuning ──
+  staggerMaxDelayMs: 200,
+  staggerMediumDelayMs: 80,
+  emojiFetchTimeoutMs: 30000,
+  backlogDensityRampMaxMs: 4000,
+  backlogInjectionRateMin: 4,
+  speedBoostMax: 0.35,
+  speedBoostDenom: 15,
+  backlogToggleCooldownMs: 2000,
+  replayPrefetchPages: 200,
+  replayBatchLimit: 12,
 } as const satisfies Readonly<OverlaySettings>;
 
 // ── Color validation ────────────────────────────────────────────────────────────

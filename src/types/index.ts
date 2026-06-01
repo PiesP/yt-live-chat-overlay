@@ -312,6 +312,28 @@ export interface OverlaySettings {
   backlogResumeThreshold: number;
   /** Chat activity timeout in ms (5000-120000, default 30000) */
   activityTimeoutMs: number;
+
+  // ── Stagger / Tuning ──
+  /** Max stagger delay for messages in same batch (ms) */
+  staggerMaxDelayMs: number;
+  /** Medium stagger delay when queue is medium depth (ms) */
+  staggerMediumDelayMs: number;
+  /** Timeout for emoji fetch operations (ms) */
+  emojiFetchTimeoutMs: number;
+  /** Max density ramp duration for backlog injection (ms) */
+  backlogDensityRampMaxMs: number;
+  /** Minimum backlog injection rate (msg/s) */
+  backlogInjectionRateMin: number;
+  /** Max speed boost factor for burst compensation */
+  speedBoostMax: number;
+  /** Speed boost denominator for EMA rate scaling */
+  speedBoostDenom: number;
+  /** Cooldown between backlog pause toggles (ms) */
+  backlogToggleCooldownMs: number;
+  /** Max pages to prefetch in replay mode */
+  replayPrefetchPages: number;
+  /** Max batches to fetch in replay initialization */
+  replayBatchLimit: number;
 }
 
 /**

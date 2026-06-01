@@ -31,12 +31,12 @@ const REPLAY_FAILURE_BACKOFF_MS = 5000;
 const REPLAY_PREFETCH_WINDOW_MS = 5000;
 const BACKGROUND_FETCH_INTERVAL_MS = 1000;
 const RAF_FLUSH_BATCH_SIZE = 5;
-const MAX_PREFETCH_PAGES = 200;
+// replayPrefetchPages — read from this.getSettings()
 
 type ReplayMode = 'playerSeek' | 'continuation';
 
 export class ReplayChatSource extends ChatSource {
-  private static readonly MAX_REPLAY_BATCHES = 12;
+  // replayBatchLimit — read from this.getSettings()
 
   private replayMode: ReplayMode | null = null;
   private replayPlayerSeekContinuation: InnertubeContinuationData | null = null;
@@ -163,7 +163,7 @@ export class ReplayChatSource extends ChatSource {
       // 4. Prefetch: walk the continuation chain, one page per tick
       if (
         this.prefetchContinuation &&
-        this.prefetchPagesFetched < MAX_PREFETCH_PAGES &&
+        this.prefetchPagesFetched < this.getSettings().replayPrefetchPages &&
         !signal?.aborted &&
         Date.now() >= this.prefetchBackoffUntil
       ) {
@@ -361,7 +361,7 @@ export class ReplayChatSource extends ChatSource {
       while (
         this.replayContinuation &&
         this.replayFallbackLastOffsetMs < minimumOffsetMs &&
-        batchesFetched < ReplayChatSource.MAX_REPLAY_BATCHES
+        batchesFetched < this.getSettings().replayBatchLimit
       ) {
         throwIfAborted(signal);
         const fetched = await this.fetchNextReplayFallbackBatch(minimumOffsetMs, signal);
@@ -544,7 +544,7 @@ export class ReplayChatSource extends ChatSource {
     while (
       this.replayContinuation &&
       this.replayFallbackLastOffsetMs < minimumOffsetMs &&
-      batches < ReplayChatSource.MAX_REPLAY_BATCHES
+      batches < this.getSettings().replayBatchLimit
     ) {
       throwIfAborted(signal);
 

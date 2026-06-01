@@ -330,6 +330,30 @@ const KO: TranslationMap = {
   'Lane utilization ratio to resume backlog injection': '백로그 주입을 재개하는 레인 사용률 비율',
   'Chat activity timeout in milliseconds': '채팅 활동 시간 초과 (밀리초)',
 
+  // ── New stagger/tuning field labels (added 2026-06-01) ──
+  'Stagger Max Delay (ms)': '최대 스태거 지연 (ms)',
+  'Stagger Medium Delay (ms)': '중간 스태거 지연 (ms)',
+  'Emoji Fetch Timeout (ms)': '이모지 가져오기 시간 초과 (ms)',
+  'Backlog Density Ramp Max (ms)': '백로그 밀도 램프 최대 (ms)',
+  'Backlog Injection Rate Min': '최소 백로그 주입 속도',
+  'Speed Boost Max': '최대 속도 부스트',
+  'Speed Boost Denom': '속도 부스트 분모',
+  'Backlog Toggle Cooldown (ms)': '백로그 전환 쿨다운 (ms)',
+  'Replay Prefetch Pages': '리플리 프리페치 페이지',
+  'Replay Batch Limit': '리플리 배치 제한',
+
+  // ── New stagger/tuning tooltips (added 2026-06-01) ──
+  'Max stagger delay for messages in same batch': '동일 배치 메시지의 최대 스태거 지연 시간',
+  'Medium stagger delay when queue depth is medium': '큐 깊이가 중간일 때 중간 스태거 지연 시간',
+  'Timeout for emoji fetch operations': '이모지 가져오기 작업 시간 초과',
+  'Max density ramp duration for backlog injection': '백로그 주입의 최대 밀도 램프 지속 시간',
+  'Minimum backlog injection rate (msg/s)': '최소 백로그 주입 속도 (msg/s)',
+  'Max speed boost factor for burst compensation': '버스트 보상을 위한 최대 속도 부스트 계수',
+  'Speed boost denominator for EMA rate scaling': 'EMA 속도 스케일링을 위한 속도 부스트 분모',
+  'Cooldown between backlog pause toggles': '백로그 일시 중지 전환 간 쿨다운',
+  'Max pages to prefetch in replay mode': '리플리 모드에서 프리페치할 최대 페이지 수',
+  'Max batches to fetch in replay initialization': '리플리 초기화에서 가져올 최대 배치 수',
+
   // ── Modal chrome ──
   'Chat Overlay': '채팅 오버레이',
   'Close settings': '설정 닫기',
@@ -616,6 +640,30 @@ const JA: TranslationMap = {
   'Lane utilization ratio to pause backlog injection': 'バックログ注入を一時停止するレーン使用率',
   'Lane utilization ratio to resume backlog injection': 'バックログ注入を再開するレーン使用率',
   'Chat activity timeout in milliseconds': 'チャットアクティビティタイムアウト（ミリ秒）',
+
+  // ── New stagger/tuning field labels (added 2026-06-01) ──
+  'Stagger Max Delay (ms)': '最大スタッガー遅延 (ms)',
+  'Stagger Medium Delay (ms)': '中スタッガー遅延 (ms)',
+  'Emoji Fetch Timeout (ms)': '絵文字取得タイムアウト (ms)',
+  'Backlog Density Ramp Max (ms)': 'バックログ密度ランプ最大 (ms)',
+  'Backlog Injection Rate Min': '最小バックログ注入レート',
+  'Speed Boost Max': '最大スピードブースト',
+  'Speed Boost Denom': 'スピードブースト分母',
+  'Backlog Toggle Cooldown (ms)': 'バックログ切替クールダウン (ms)',
+  'Replay Prefetch Pages': 'リプレイプリフェッチページ',
+  'Replay Batch Limit': 'リプレイバッチ制限',
+
+  // ── New stagger/tuning tooltips (added 2026-06-01) ──
+  'Max stagger delay for messages in same batch': '同一バッチ内のメッセージの最大スタッガー遅延',
+  'Medium stagger delay when queue depth is medium': 'キューの深さが中程度のときのスタッガー遅延',
+  'Timeout for emoji fetch operations': '絵文字取得操作のタイムアウト',
+  'Max density ramp duration for backlog injection': 'バックログ注入の最大密度ランプ時間',
+  'Minimum backlog injection rate (msg/s)': '最小バックログ注入レート (msg/s)',
+  'Max speed boost factor for burst compensation': 'バースト補償の最大スピードブースト係数',
+  'Speed boost denominator for EMA rate scaling': 'EMAレートスケーリングのスピードブースト分母',
+  'Cooldown between backlog pause toggles': 'バックログ一時停止切替間のクールダウン',
+  'Max pages to prefetch in replay mode': 'リプレイモードでプリフェッチする最大ページ数',
+  'Max batches to fetch in replay initialization': 'リプレイ初期化で取得する最大バッチ数',
 
   // ── Modal chrome ──
   'Chat Overlay': 'チャットオーバーレイ',
@@ -909,6 +957,36 @@ const ES: TranslationMap = {
     'Relación de uso de carril para reanudar la inyección del historial',
   'Chat activity timeout in milliseconds': 'Tiempo de espera de actividad del chat en milisegundos',
 
+  // ── New stagger/tuning field labels (added 2026-06-01) ──
+  'Stagger Max Delay (ms)': 'Retardo máx. escalonado (ms)',
+  'Stagger Medium Delay (ms)': 'Retardo escalonado medio (ms)',
+  'Emoji Fetch Timeout (ms)': 'Tiempo de espera de emoji (ms)',
+  'Backlog Density Ramp Max (ms)': 'Rampa densidad historial máx. (ms)',
+  'Backlog Injection Rate Min': 'Inyección historial mín.',
+  'Speed Boost Max': 'Aumento velocidad máx.',
+  'Speed Boost Denom': 'Denom. aumento velocidad',
+  'Backlog Toggle Cooldown (ms)': 'Enfriamiento alternar historial (ms)',
+  'Replay Prefetch Pages': 'Páginas precarga repetición',
+  'Replay Batch Limit': 'Límite lotes repetición',
+
+  // ── New stagger/tuning tooltips (added 2026-06-01) ──
+  'Max stagger delay for messages in same batch':
+    'Retardo máximo escalonado para mensajes en el mismo lote',
+  'Medium stagger delay when queue depth is medium':
+    'Retardo escalonado medio cuando la cola está a media capacidad',
+  'Timeout for emoji fetch operations': 'Tiempo de espera para operaciones de obtención de emojis',
+  'Max density ramp duration for backlog injection':
+    'Duración máxima de la rampa de densidad para la inyección del historial',
+  'Minimum backlog injection rate (msg/s)': 'Tasa mínima de inyección del historial (msg/s)',
+  'Max speed boost factor for burst compensation':
+    'Factor máximo de aumento de velocidad para compensación de ráfagas',
+  'Speed boost denominator for EMA rate scaling':
+    'Denominador de aumento de velocidad para escalado de tasa EMA',
+  'Cooldown between backlog pause toggles': 'Enfriamiento entre cambios de pausa del historial',
+  'Max pages to prefetch in replay mode': 'Máximo de páginas a precargar en modo repetición',
+  'Max batches to fetch in replay initialization':
+    'Máximo de lotes a obtener en la inicialización de repetición',
+
   // ── Modal chrome ──
   'Chat Overlay': 'Superposición de Chat',
   'Close settings': 'Cerrar configuración',
@@ -1178,6 +1256,30 @@ const ZH: TranslationMap = {
   'Lane utilization ratio to pause backlog injection': '暂停回放注入的通道利用率',
   'Lane utilization ratio to resume backlog injection': '恢复回放注入的通道利用率',
   'Chat activity timeout in milliseconds': '聊天活动超时时间（毫秒）',
+
+  // ── New stagger/tuning field labels (added 2026-06-01) ──
+  'Stagger Max Delay (ms)': '最大交错延迟 (ms)',
+  'Stagger Medium Delay (ms)': '中等交错延迟 (ms)',
+  'Emoji Fetch Timeout (ms)': '表情获取超时 (ms)',
+  'Backlog Density Ramp Max (ms)': '回放密度斜坡最大 (ms)',
+  'Backlog Injection Rate Min': '最小回放注入速率',
+  'Speed Boost Max': '最大速度提升',
+  'Speed Boost Denom': '速度提升分母',
+  'Backlog Toggle Cooldown (ms)': '回放切换冷却 (ms)',
+  'Replay Prefetch Pages': '回放预取页数',
+  'Replay Batch Limit': '回放批量限制',
+
+  // ── New stagger/tuning tooltips (added 2026-06-01) ──
+  'Max stagger delay for messages in same batch': '同一批次消息的最大交错延迟',
+  'Medium stagger delay when queue depth is medium': '队列深度中等时的交错延迟',
+  'Timeout for emoji fetch operations': '表情获取操作的超时时间',
+  'Max density ramp duration for backlog injection': '回放注入的最大密度斜坡持续时间',
+  'Minimum backlog injection rate (msg/s)': '最小回放注入速率 (msg/s)',
+  'Max speed boost factor for burst compensation': '突发补偿的最大速度提升系数',
+  'Speed boost denominator for EMA rate scaling': 'EMA速率缩放的速度提升分母',
+  'Cooldown between backlog pause toggles': '回放暂停切换之间的冷却时间',
+  'Max pages to prefetch in replay mode': '回放模式下预取的最大页数',
+  'Max batches to fetch in replay initialization': '回放初始化时获取的最大批次数',
 
   // ── Modal chrome ──
   'Chat Overlay': '弹幕显示',

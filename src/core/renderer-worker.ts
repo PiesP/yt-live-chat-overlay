@@ -171,6 +171,16 @@ interface WorkerConfig {
   backlogPauseThreshold: number;
   backlogResumeThreshold: number;
   activityTimeoutMs: number;
+  staggerMaxDelayMs: number;
+  staggerMediumDelayMs: number;
+  emojiFetchTimeoutMs: number;
+  backlogDensityRampMaxMs: number;
+  backlogInjectionRateMin: number;
+  speedBoostMax: number;
+  speedBoostDenom: number;
+  backlogToggleCooldownMs: number;
+  replayPrefetchPages: number;
+  replayBatchLimit: number;
 }
 
 interface WorkerContentSegment {

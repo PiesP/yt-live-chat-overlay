@@ -448,10 +448,6 @@ export class CanvasRenderer extends RendererBase {
   /** Stagger queue depth thresholds. */
   private static readonly STAGGER_QUEUE_HIGH = 50;
   private static readonly STAGGER_QUEUE_MED = 30;
-  /** Stagger delay when queue is medium depth (ms). */
-  private static readonly STAGGER_MED_MS = 80;
-  /** Stagger delay when queue is shallow (ms). */
-  private static readonly STAGGER_MAX_MS = 200;
 
   /** Translation font scale relative to main font size. */
   private static readonly TRANSLATION_FONT_SCALE = _TRANSLATION_FONT_SCALE;
@@ -705,18 +701,17 @@ export class CanvasRenderer extends RendererBase {
 
   /**
    * Remove stale entries from emojiFetching that never resolved.
-   * If an image fetch hasn't completed within 30 seconds, the fetch
+   * If an image fetch hasn't completed within the configured timeout, the fetch
    * likely failed silently (e.g. CORS block), so evict it to unblock
    * future retries.
    */
-  private static readonly EMOJI_FETCH_TIMEOUT_MS = 30_000;
 
   private readonly failedEmojiRetryMins: number;
 
   private cleanupStaleEmojiFetching(): void {
     const now = performance.now();
     for (const [url, startedAt] of this.emojiFetchingStarted) {
-      if (now - startedAt > CanvasRenderer.EMOJI_FETCH_TIMEOUT_MS) {
+      if (now - startedAt > this.settings.emojiFetchTimeoutMs) {
         this.emojiFetching.delete(url);
         this.emojiFetchingStarted.delete(url);
       }
@@ -1318,8 +1313,8 @@ export class CanvasRenderer extends RendererBase {
       this.pendingQueue.size > CanvasRenderer.STAGGER_QUEUE_HIGH
         ? 0
         : this.pendingQueue.size > CanvasRenderer.STAGGER_QUEUE_MED
-          ? CanvasRenderer.STAGGER_MED_MS
-          : CanvasRenderer.STAGGER_MAX_MS;
+          ? this.settings.staggerMediumDelayMs
+          : this.settings.staggerMaxDelayMs;
     const staggerDelay =
       batchIndex > 0 && maxStagger > 0
         ? Math.round(
@@ -1854,6 +1849,16 @@ export class CanvasRenderer extends RendererBase {
     'backlogPauseThreshold',
     'backlogResumeThreshold',
     'activityTimeoutMs',
+    'staggerMaxDelayMs',
+    'staggerMediumDelayMs',
+    'emojiFetchTimeoutMs',
+    'backlogDensityRampMaxMs',
+    'backlogInjectionRateMin',
+    'speedBoostMax',
+    'speedBoostDenom',
+    'backlogToggleCooldownMs',
+    'replayPrefetchPages',
+    'replayBatchLimit',
   ] as const;
 
   /**
