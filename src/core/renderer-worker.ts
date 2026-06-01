@@ -254,6 +254,8 @@ interface ActiveMessage {
   /** Opacity/fade start time (drain time, before stagger offset). */
   activationTime: number;
   duration: number;
+  /** Pre-computed 1/duration for per-frame multiplication (avoids division). */
+  invDuration: number;
   pausedDuration: number;
   laneIndex: number;
   laneSlotCount: number;
@@ -1618,7 +1620,7 @@ function renderFrame(): void {
     const elapsed = now - msg.startTime - msg.pausedDuration;
     if (elapsed < 0) continue;
 
-    const progress = Math.min(1, Math.max(0, elapsed / msg.duration));
+    const progress = Math.min(1, Math.max(0, elapsed * msg.invDuration));
 
     // Update position
     if (mode === 'scroll') {
@@ -1996,6 +1998,7 @@ function activateMessage(
     activationTime: now,
     startTime: now + staggerDelay,
     duration,
+    invDuration: duration > 0 ? 1 / duration : 0,
     pausedDuration: 0,
     laneIndex: placement.laneIndex,
     laneSlotCount: slotCount,
