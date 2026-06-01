@@ -385,11 +385,11 @@ async function prefetchImages(urls: string[], cache: ByteLimitedCache<ImageBitma
           const url = toFetch[idx++];
           if (url === undefined) break;
           fetching.add(url);
+          let timer: ReturnType<typeof setTimeout> | undefined;
           try {
             const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+            timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
             const response = await fetch(url, { signal: controller.signal });
-            clearTimeout(timer);
             if (!response.ok) continue;
             const blob = await response.blob();
             const bitmap = await createImageBitmap(blob);
@@ -397,6 +397,7 @@ async function prefetchImages(urls: string[], cache: ByteLimitedCache<ImageBitma
           } catch {
             // Network errors, aborts, decode failures — silently skip
           } finally {
+            clearTimeout(timer);
             fetching.delete(url);
           }
         }
@@ -1179,128 +1180,136 @@ function renderPaidCardWorker(
 // ── Message handler ───────────────────────────────────────────────────────
 
 self.onmessage = (e: MessageEvent) => {
-  const data = e.data as Record<string, unknown>;
-  const type = data.type as string;
+  try {
+    try {
+      const data = e.data as Record<string, unknown>;
+      const type = data.type as string;
 
-  switch (type) {
-    case 'init': {
-      config = data.config as WorkerConfig;
-      canvas = data.canvas as OffscreenCanvas;
-      ctx = canvas.getContext('2d', { alpha: false });
-      if (!ctx) {
-        self.postMessage({ type: 'error', error: 'Failed to get 2D context' });
-        return;
-      }
-      emojiCache = new ByteLimitedCache<ImageBitmap>(
-        (config.emojiCacheMb ?? 4) * 1_000_000,
-        estimateBitmapBytes,
-        (b) => b.close()
-      );
-      authorPhotoCache = new ByteLimitedCache<ImageBitmap>(
-        (config.photoCacheMb ?? 4) * 1_000_000,
-        estimateBitmapBytes,
-        (b) => b.close()
-      );
-      stickerCache = new ByteLimitedCache<ImageBitmap>(
-        (config.stickerCacheMb ?? 4) * 1_000_000,
-        estimateBitmapBytes,
-        (b) => b.close()
-      );
-      textBitmapCache = new ByteLimitedCache<OffscreenCanvas>(
-        (config.textCacheMb ?? 4) * 1_000_000,
-        (canvas) => canvas.width * canvas.height * 4
-      );
-      recomputeConfigDerived();
-      initLanes(data.width as number, data.height as number);
-      startRenderLoop();
-      self.postMessage({ type: 'ready' });
-      break;
-    }
-    case 'resize':
-      initLanes(data.width as number, data.height as number);
-      break;
-    case 'addMessages': {
-      const msgs = data.messages as WorkerMessage[];
-      // Handle transferred ImageBitmaps from main thread
-      const imageData = data.imageData as
-        | Array<{ url: string; bitmap: ImageBitmap; target: string }>
-        | undefined;
-      if (imageData) {
-        for (const item of imageData) {
-          const { url, bitmap, target } = item;
-          if (!url || !bitmap) continue;
-          const cache =
-            target === 'author'
-              ? authorPhotoCache
-              : target === 'sticker'
-                ? stickerCache
-                : emojiCache; // 'emoji' or unknown → emojiCache
-          cache.set(url, bitmap);
-        }
-      }
-      for (const m of msgs) enqueueMessage(m);
-      break;
-    }
-    case 'updateConfig':
-      if (config) {
-        Object.assign(config, data.config as Partial<WorkerConfig>);
-        recomputeConfigDerived();
-        textMeasureCache.clear();
-        textBitmapCache.clear();
-        emojiCache.clear();
-        authorPhotoCache.clear();
-        stickerCache.clear();
-        superChatGradientCache.clear();
-      }
-      break;
-    case 'setPaused': {
-      const shouldPause = data.paused as boolean;
-      if (shouldPause && !isPaused) {
-        // Pause: record the time
-        pauseStartTime = performance.now();
-        isPaused = true;
-      } else if (!shouldPause && isPaused) {
-        // Resume: accumulate paused duration and shift lane timers
-        const now = performance.now();
-        const pausedMs = Math.max(0, now - pauseStartTime);
-        // Accumulate pausedDuration on active messages
-        for (const msg of activeMessages) {
-          msg.pausedDuration += pausedMs;
-        }
-        // Shift lane heap timers by paused duration
-        shiftLaneTimers(pausedMs);
-        isPaused = false;
-        pauseStartTime = 0;
-        // Restart render loop if stopped
-        if (animFrameId === null && !isDestroyed) {
+      switch (type) {
+        case 'init': {
+          config = data.config as WorkerConfig;
+          canvas = data.canvas as OffscreenCanvas;
+          ctx = canvas.getContext('2d', { alpha: false });
+          if (!ctx) {
+            self.postMessage({ type: 'error', error: 'Failed to get 2D context' });
+            return;
+          }
+          emojiCache = new ByteLimitedCache<ImageBitmap>(
+            (config.emojiCacheMb ?? 4) * 1_000_000,
+            estimateBitmapBytes,
+            (b) => b.close()
+          );
+          authorPhotoCache = new ByteLimitedCache<ImageBitmap>(
+            (config.photoCacheMb ?? 4) * 1_000_000,
+            estimateBitmapBytes,
+            (b) => b.close()
+          );
+          stickerCache = new ByteLimitedCache<ImageBitmap>(
+            (config.stickerCacheMb ?? 4) * 1_000_000,
+            estimateBitmapBytes,
+            (b) => b.close()
+          );
+          textBitmapCache = new ByteLimitedCache<OffscreenCanvas>(
+            (config.textCacheMb ?? 4) * 1_000_000,
+            (canvas) => canvas.width * canvas.height * 4
+          );
+          recomputeConfigDerived();
+          initLanes(data.width as number, data.height as number);
           startRenderLoop();
-        }
-      } else {
-        isPaused = shouldPause;
-      }
-      break;
-    }
-    case 'updateTranslation': {
-      const msgId = data.id as string;
-      const translatedText = data.translatedText as string;
-      for (const msg of activeMessages) {
-        if (msg.id === msgId) {
-          msg.translatedText = translatedText;
+          self.postMessage({ type: 'ready' });
           break;
         }
-      }
-      // Also check pendingQueue in case message hasn't been activated yet
-      for (const msg of pendingQueue) {
-        if (msg.id === msgId) {
-          msg.translatedText = translatedText;
+        case 'resize':
+          initLanes(data.width as number, data.height as number);
+          break;
+        case 'addMessages': {
+          const msgs = data.messages as WorkerMessage[];
+          // Handle transferred ImageBitmaps from main thread
+          const imageData = data.imageData as
+            | Array<{ url: string; bitmap: ImageBitmap; target: string }>
+            | undefined;
+          if (imageData) {
+            for (const item of imageData) {
+              const { url, bitmap, target } = item;
+              if (!url || !bitmap) continue;
+              const cache =
+                target === 'author'
+                  ? authorPhotoCache
+                  : target === 'sticker'
+                    ? stickerCache
+                    : emojiCache; // 'emoji' or unknown → emojiCache
+              cache.set(url, bitmap);
+            }
+          }
+          for (const m of msgs) enqueueMessage(m);
           break;
         }
+        case 'updateConfig':
+          if (config) {
+            Object.assign(config, data.config as Partial<WorkerConfig>);
+            recomputeConfigDerived();
+            textMeasureCache.clear();
+            textBitmapCache.clear();
+            emojiCache.clear();
+            authorPhotoCache.clear();
+            stickerCache.clear();
+            superChatGradientCache.clear();
+          }
+          break;
+        case 'setPaused': {
+          const shouldPause = data.paused as boolean;
+          if (shouldPause && !isPaused) {
+            // Pause: record the time
+            pauseStartTime = performance.now();
+            isPaused = true;
+          } else if (!shouldPause && isPaused) {
+            // Resume: accumulate paused duration and shift lane timers
+            const now = performance.now();
+            const pausedMs = Math.max(0, now - pauseStartTime);
+            // Accumulate pausedDuration on active messages
+            for (const msg of activeMessages) {
+              msg.pausedDuration += pausedMs;
+            }
+            // Shift lane heap timers by paused duration
+            shiftLaneTimers(pausedMs);
+            isPaused = false;
+            pauseStartTime = 0;
+            // Restart render loop if stopped
+            if (animFrameId === null && !isDestroyed) {
+              startRenderLoop();
+            }
+          } else {
+            isPaused = shouldPause;
+          }
+          break;
+        }
+        case 'updateTranslation': {
+          const msgId = data.id as string;
+          const translatedText = data.translatedText as string;
+          for (const msg of activeMessages) {
+            if (msg.id === msgId) {
+              msg.translatedText = translatedText;
+              break;
+            }
+          }
+          // Also check pendingQueue in case message hasn't been activated yet
+          for (const msg of pendingQueue) {
+            if (msg.id === msgId) {
+              msg.translatedText = translatedText;
+              break;
+            }
+          }
+          break;
+        }
+        case 'destroy':
+          handleDestroy();
+          break;
       }
-      break;
+    } catch (err) {
+      self.postMessage({ type: 'error', error: err instanceof Error ? err.message : String(err) });
     }
-    case 'destroy':
-      handleDestroy();
-      break;
+  } catch (err) {
+    self.postMessage({ type: 'error', error: err instanceof Error ? err.message : String(err) });
   }
 };
 
