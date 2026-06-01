@@ -272,7 +272,50 @@ export class SettingsUiForm {
 
   setModal(modal: HTMLDivElement | null): void {
     this.modal = modal;
+    if (modal) {
+      this.bindNumberInputKeys(modal);
+    }
     log.debug('Modal set', { attached: modal !== null });
+  }
+
+  /**
+   * Keyboard shortcuts for number inputs:
+   *   Shift+↑/↓       → ±10 × step
+   *   Ctrl+Shift+↑/↓  → ±100 × step
+   *
+   * Without modifiers, ↑/↓ uses the browser's native ±1 step behavior.
+   * YouTube shortcuts are naturally suppressed because the focused input
+   * receives the event first — no conflict.
+   */
+  private bindNumberInputKeys(modal: HTMLDivElement): void {
+    modal.addEventListener('keydown', (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement) || target.type !== 'number') return;
+
+      const step = parseFloat(target.step || '1');
+      if (!step || !Number.isFinite(step)) return;
+
+      let direction = 0;
+      if (event.key === 'ArrowUp') direction = 1;
+      else if (event.key === 'ArrowDown') direction = -1;
+      else return;
+
+      // Without modifiers, let the browser handle native ↑/↓ (±1 step)
+      if (!event.shiftKey && !event.ctrlKey && !event.metaKey) return;
+
+      const scale = event.ctrlKey || event.metaKey ? 100 : 10;
+      const delta = direction * step * scale;
+
+      event.preventDefault();
+      const min = target.min ? parseFloat(target.min) : -Infinity;
+      const max = target.max ? parseFloat(target.max) : Infinity;
+      const current = parseFloat(target.value);
+      const base = Number.isFinite(current) ? current : min;
+      const newValue = Math.min(max, Math.max(min, base + delta));
+      // Snap to the nearest step to avoid floating-point drift
+      target.value = String(Math.round(newValue / step) * step);
+      target.dispatchEvent(new Event('input', { bubbles: true }));
+    });
   }
 
   private attachLivePreview(element: HTMLElement): void {

@@ -191,6 +191,12 @@ export const SETTINGS_UI_STYLES = `
         background: ${uiColors.backgroundLight};
         color: ${uiColors.text};
         text-align: right;
+        -moz-appearance: textfield;
+      }
+      .yt-chat-overlay-settings-field input[type="number"]::-webkit-inner-spin-button,
+      .yt-chat-overlay-settings-field input[type="number"]::-webkit-outer-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
       }
       .yt-chat-overlay-settings-field input[type="text"] {
         flex: 1;
@@ -444,6 +450,12 @@ export const SETTINGS_UI_STYLES = `
         background: ${uiColors.backgroundLight};
         color: ${uiColors.text};
         font-size: ${typography.fontSize.sm};
+        -moz-appearance: textfield;
+      }
+      .yt-chat-overlay-settings-range-number::-webkit-inner-spin-button,
+      .yt-chat-overlay-settings-range-number::-webkit-outer-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
       }
       /* Inline validation error */
       .yt-chat-overlay-settings-field-error {
