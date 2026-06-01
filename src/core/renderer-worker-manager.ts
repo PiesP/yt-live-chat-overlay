@@ -301,8 +301,6 @@ export class RenderWorkerManager {
           ...(message.kind === 'superchat' && message.superChat
             ? {
                 superChatAmount: message.superChat.amount,
-                superChatTier: message.superChat.tier,
-                superChatBgColor: message.superChat.backgroundColor,
                 superChatStickerUrl: message.superChat.sticker?.url,
               }
             : {}),

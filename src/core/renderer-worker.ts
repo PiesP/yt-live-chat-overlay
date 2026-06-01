@@ -69,7 +69,7 @@ import {
   TRANSLATION_GAP_PX,
   TRANSLATION_OPACITY_SCALE,
 } from './renderer-constants';
-import { getFontString } from './text-measure';
+import { getFontString, measureTextHeight } from './text-measure';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -225,12 +225,6 @@ interface WorkerMessage {
   // ── SuperChat card data ──
   /** Formatted amount string (e.g. "$5.00"). */
   superChatAmount?: string;
-  /** SuperChat tier (0-4, used for gradient selection). */
-  superChatTier?: number;
-  /** Background color as ARGB int. */
-  superChatBgColor?: number;
-  /** Header background color as ARGB int. */
-  superChatHdrColor?: number;
   /** Sticker image URL. */
   superChatStickerUrl?: string;
   /** Membership header text (e.g. member tier/duration). */
@@ -276,10 +270,6 @@ interface ActiveMessage {
   authorPhotoUrl?: string;
   /** Formatted SuperChat amount (e.g. "$5.00"). */
   superChatAmount?: string;
-  /** SuperChat tier (0-4). */
-  superChatTier?: number;
-  /** SuperChat background color as ARGB int. */
-  superChatBgColor?: number;
   /** SuperChat sticker image URL. */
   superChatStickerUrl?: string;
   /** Membership header text. */
@@ -1078,7 +1068,8 @@ function renderPaidCardWorker(
     ctx.fillStyle = card.headerTagColor;
     ctx.fillText(displayText, textX, cursorY + card.headerTagMarginTop);
     ctx.restore();
-    cursorY += headerFontSize + card.headerTagMarginTop + card.headerTagMarginBottom;
+    const headerHeight = measureTextHeight(headerFont, headerFontSize);
+    cursorY += headerHeight + card.headerTagMarginTop + card.headerTagMarginBottom;
   }
 
   // ── 6. Author section ─────────────────────────────────────────────────
@@ -1094,7 +1085,7 @@ function renderPaidCardWorker(
       cursorY,
       textColor,
       card.authorNameMaxWidth,
-      Math.round(fontSize * 0.7),
+      Math.round(fontSize * rendererLayout.authorFontScale),
       fontWeight,
       fontFamily,
       outlineWidthPx,
@@ -1960,8 +1951,6 @@ function activateMessage(
     ...(msg.author !== undefined ? { author: msg.author } : {}),
     ...(msg.authorPhotoUrl !== undefined ? { authorPhotoUrl: msg.authorPhotoUrl } : {}),
     ...(msg.superChatAmount !== undefined ? { superChatAmount: msg.superChatAmount } : {}),
-    ...(msg.superChatTier !== undefined ? { superChatTier: msg.superChatTier } : {}),
-    ...(msg.superChatBgColor !== undefined ? { superChatBgColor: msg.superChatBgColor } : {}),
     ...(msg.superChatStickerUrl !== undefined
       ? { superChatStickerUrl: msg.superChatStickerUrl }
       : {}),
