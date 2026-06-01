@@ -159,11 +159,6 @@ export const PANES: PaneDef[] = [
             'exitPaddingPx',
             'Extra pixels a message scrolls past the screen edge before being removed (20-400, default 100)'
           ),
-        ],
-      },
-      {
-        title: 'Moderator and Owner',
-        fields: [
           num(
             'Duration Multiplier (×)',
             'modOwnerDurationMultiplier',
@@ -273,6 +268,16 @@ export const PANES: PaneDef[] = [
             'Show all messages regardless of minimum character length'
           ),
           num('Min Length (chars)', 'minTextLength', 'Minimum character count'),
+          sel(
+            'Author Rate Limit',
+            'authorRateLimit',
+            [
+              ['off', 'Off'],
+              ['normal', 'Normal (5 msg / 5s)'],
+              ['strict', 'Strict (2 msg / 5s)'],
+            ],
+            'Limits how frequently messages from the same author appear'
+          ),
         ],
       },
       {
@@ -322,21 +327,6 @@ export const PANES: PaneDef[] = [
           range('Near Speed (%)', 'depthNearSpeedMul', 'Speed boost for near-layer messages'),
           range('Far Speed (%)', 'depthFarSpeedMul', 'Speed reduction for far-layer messages'),
           range('Far Opacity (%)', 'depthFarOpacityMul', 'Opacity dimming for far-layer messages'),
-        ],
-      },
-      {
-        title: 'Rate Limiting',
-        fields: [
-          sel(
-            'Author Rate Limit',
-            'authorRateLimit',
-            [
-              ['off', 'Off'],
-              ['normal', 'Normal (5 msg / 5s)'],
-              ['strict', 'Strict (2 msg / 5s)'],
-            ],
-            'Limits how frequently messages from the same author appear'
-          ),
         ],
       },
       {
