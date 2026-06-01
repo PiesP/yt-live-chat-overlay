@@ -191,6 +191,13 @@ export const PANES: PaneDef[] = [
           ),
         ],
       },
+      {
+        title: 'Safe Zone',
+        fields: [
+          range('Top Clear Zone (%)', 'safeTop', 'Keep top N% of video free of comments'),
+          range('Bottom Clear Zone (%)', 'safeBottom', 'Keep bottom N% of video free of comments'),
+        ],
+      },
     ],
   },
   {
@@ -258,13 +265,6 @@ export const PANES: PaneDef[] = [
     label: 'Advanced',
     sections: [
       {
-        title: 'Safe Zone',
-        fields: [
-          range('Top Clear Zone (%)', 'safeTop', 'Keep top N% of video free of comments'),
-          range('Bottom Clear Zone (%)', 'safeBottom', 'Keep bottom N% of video free of comments'),
-        ],
-      },
-      {
         title: 'Message Rate',
         fields: [
           chk(
@@ -295,17 +295,17 @@ export const PANES: PaneDef[] = [
             'Opacity of past messages relative to real-time messages'
           ),
           num(
-            'Max Rate (msg/s)',
+            'Max Injection Rate (msg/s)',
             'backlogMaxRate',
             'Maximum backlog message injection rate per second (0-50)'
           ),
           num(
-            'Speed Multiplier',
+            'Backlog Speed (×)',
             'backlogSpeedMultiplier',
             'Animation speed multiplier for backlog messages (1-5)'
           ),
           num(
-            'Window (min)',
+            'Recent Window (min)',
             'backlogRecentMinutes',
             'Time window in minutes for recent-only backlog mode (1-30)'
           ),
@@ -343,7 +343,7 @@ export const PANES: PaneDef[] = [
         title: 'Performance',
         fields: [
           num(
-            'Max Messages',
+            'Max Concurrent Messages',
             'maxConcurrentMessages',
             'Maximum number of messages visible on screen at once (30-300)'
           ),
@@ -363,12 +363,12 @@ export const PANES: PaneDef[] = [
             'Maximum chat polling interval in milliseconds (1000-30000)'
           ),
           num(
-            'Queue Max Size',
+            'Max Queue Depth',
             'queueMaxSize',
             'Maximum pending queue depth before messages are dropped (50-1000, default 200)'
           ),
           num(
-            'Background Queue Max',
+            'Tab Trim Target',
             'backgroundQueueMax',
             'Target active message count when trimming background tab (10-500, default 50)'
           ),
@@ -378,7 +378,7 @@ export const PANES: PaneDef[] = [
             'Maximum message age before fade-out removal (10-300s, default 60000ms)'
           ),
           range(
-            'Headway Gap (%)',
+            'Message Spacing (%)',
             'headwayGapRatio',
             'Gap between consecutive messages as percentage of message width (2-30%, default 8)'
           ),
@@ -501,7 +501,7 @@ export const PANES: PaneDef[] = [
           ),
           num('Speed Boost Max', 'speedBoostMax', 'Max speed boost factor for burst compensation'),
           num(
-            'Speed Boost Denom',
+            'Speed Boost Denominator',
             'speedBoostDenom',
             'Speed boost denominator for EMA rate scaling'
           ),
