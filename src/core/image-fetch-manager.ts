@@ -244,7 +244,7 @@ export class ImageFetchManager {
     }
   }
 
-  /** Clean up all resources: interval, worker bitmaps. */
+  /** Clean up interval and worker bitmaps. Caches are cleared by the caller. */
   destroy(): void {
     if (this.emojiCleanupIntervalId !== null) {
       clearInterval(this.emojiCleanupIntervalId);

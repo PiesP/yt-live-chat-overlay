@@ -43,7 +43,10 @@ import type { Overlay } from '@core/overlay';
 import { PriorityBucketQueue } from '@core/priority-bucket-queue';
 import { RendererBase } from '@core/renderer-base';
 import { SPEED_TIER } from '@core/renderer-constants';
-import { estimateMessageDimensions as sharedEstimateDimensions } from '@core/renderer-shared';
+import {
+  computeMessageOpacity,
+  estimateMessageDimensions as sharedEstimateDimensions,
+} from '@core/renderer-shared';
 import { clearTextMeasurementCaches, getFontString, measureTextHeight } from '@core/text-measure';
 import { TranslationService } from '@core/translation-service';
 import {
@@ -570,12 +573,21 @@ export class CanvasRenderer extends RendererBase {
       // Currently set equal to startTime (visual appearance), but the separate
       // field allows future independent fade/position timing control.
       const fadeElapsed = now - msg.fadeStartTime - msg.pausedDuration;
-      const opacity = this.computeMessageOpacity(
+      const opacity = computeMessageOpacity(
         msg.message,
         fadeElapsed,
         msg.duration,
         isScrolling,
-        msg.speedTier
+        msg.speedTier,
+        {
+          baseOpacity: this.settings.opacity,
+          fadeDurationMs: this.settings.fadeDurationMs,
+          invFadeDuration: this.invFadeDuration,
+          backlogOpacityMultiplier: this.settings.backlogOpacityMultiplier,
+          depthLayersEnabled: this.settings.depthLayersEnabled,
+          depthFarOpacityMul: this.settings.depthFarOpacityMul,
+          ageFadeRate: this.ageFadeRate,
+        }
       );
 
       const bucketIndex = Math.round(opacity * (_OPACITY_BUCKET_COUNT - 1));
@@ -1223,49 +1235,6 @@ export class CanvasRenderer extends RendererBase {
    *   5. Far depth dimming: depthFarOpacityMul for Far tier messages
    *   6. Age fade-out: linear ramp to 0 over maxMessageAgeMs (60s)
    */
-  private computeMessageOpacity(
-    message: ChatMessage,
-    elapsed: number,
-    duration: number,
-    isScrolling: boolean,
-    speedTier: number
-  ): number {
-    let opacity = this.settings.opacity;
-
-    const fadeDuration = this.settings.fadeDurationMs;
-    if (fadeDuration > 0) {
-      if (isScrolling) {
-        // Scrolling: fade-out only (message exits screen edge naturally)
-        const remaining = duration - elapsed;
-        if (remaining < fadeDuration) {
-          opacity *= Math.max(0, remaining * this.invFadeDuration);
-        }
-      } else {
-        // Fixed (top/bottom): fade-in + fade-out
-        if (elapsed < fadeDuration) {
-          opacity *= elapsed * this.invFadeDuration;
-        }
-        if (elapsed > duration - fadeDuration) {
-          opacity *= Math.max(0, (duration - elapsed) * this.invFadeDuration);
-        }
-      }
-    }
-
-    // Backlog dimming
-    if (message.isBacklog) opacity *= this.settings.backlogOpacityMultiplier;
-
-    // Far depth layer dimming
-    if (this.settings.depthLayersEnabled && speedTier === SPEED_TIER.FAR) {
-      opacity *= this.settings.depthFarOpacityMul;
-    }
-
-    // Age fade-out: gradually fade after maxMessageAgeMs (default 60s)
-    // Pre-computed multiplication avoids per-frame division (~3000x/sec savings)
-    const ageRatio = Math.min(1, elapsed * this.ageFadeRate);
-    opacity *= Math.max(0, 1 - ageRatio);
-
-    return opacity;
-  }
 
   // ── Abstract hook implementations ────────────────────────────────────
 

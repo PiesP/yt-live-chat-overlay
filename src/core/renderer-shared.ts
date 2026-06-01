@@ -11,6 +11,7 @@
 import type { ChatMessage, FontWeight } from '@app-types';
 import { buildWrappedLines } from '@core/canvas-text-renderer';
 import { DEFAULT_FONT_FAMILY, rendererLayout, spacing } from '@core/design-tokens';
+import { SPEED_TIER } from '@core/renderer-constants';
 import { DEFAULT_SETTINGS } from '@core/settings-schema';
 import { getFontString, measureTextHeight, measureTextWidth } from '@core/text-measure';
 
@@ -230,4 +231,63 @@ function estimateMembershipDimensions(
     width,
     height: infoHeight + authorBodyGap + textHeight + paddingV * 2,
   };
+}
+
+// ── Opacity computation (shared between main-thread and worker renderers) ──
+
+export interface OpacityConfig {
+  baseOpacity: number;
+  fadeDurationMs: number;
+  invFadeDuration: number;
+  backlogOpacityMultiplier: number;
+  depthLayersEnabled: boolean;
+  depthFarOpacityMul: number;
+  ageFadeRate: number;
+}
+
+/**
+ * Compute per-frame message opacity using a 6-stage composition:
+ *  1. Base opacity from settings
+ *  2. Fade-in (first N ms, fixed modes only)
+ *  3. Fade-out (last N ms, all modes; scrolling: fade-out only)
+ *  4. Backlog dimming
+ *  5. Far depth layer dimming
+ *  6. Age fade-out (gradual fade toward maxMessageAgeMs)
+ */
+export function computeMessageOpacity(
+  message: ChatMessage,
+  elapsed: number,
+  duration: number,
+  isScrolling: boolean,
+  speedTier: number,
+  config: OpacityConfig
+): number {
+  let opacity = config.baseOpacity;
+
+  if (config.fadeDurationMs > 0) {
+    if (isScrolling) {
+      const remaining = duration - elapsed;
+      if (remaining < config.fadeDurationMs) {
+        opacity *= Math.max(0, remaining * config.invFadeDuration);
+      }
+    } else {
+      if (elapsed < config.fadeDurationMs) {
+        opacity *= elapsed * config.invFadeDuration;
+      }
+      if (elapsed > duration - config.fadeDurationMs) {
+        opacity *= Math.max(0, (duration - elapsed) * config.invFadeDuration);
+      }
+    }
+  }
+
+  if (message.isBacklog) opacity *= config.backlogOpacityMultiplier;
+
+  if (config.depthLayersEnabled && speedTier === SPEED_TIER.FAR) {
+    opacity *= config.depthFarOpacityMul;
+  }
+
+  const ageRatio = Math.min(1, elapsed * config.ageFadeRate);
+  opacity *= Math.max(0, 1 - ageRatio);
+
+  return opacity;
 }
