@@ -1070,13 +1070,13 @@ function renderPaidCardWorker(
         hi = displayText.length;
       while (lo < hi) {
         const mid = Math.floor((lo + hi) / 2);
-        if (ctx.measureText(displayText.slice(0, mid) + '…').width > headerMaxWidth) {
+        if (ctx.measureText(`${displayText.slice(0, mid)}…`).width > headerMaxWidth) {
           hi = mid;
         } else {
           lo = mid + 1;
         }
       }
-      displayText = lo > 0 ? displayText.slice(0, lo - 1) + '…' : '…';
+      displayText = lo > 0 ? `${displayText.slice(0, lo - 1)}…` : '…';
     }
     strokeTextOutline(
       ctx,
