@@ -2021,7 +2021,6 @@ export class CanvasRenderer extends RendererBase {
   /** Destroy the render worker. */
   private destroyWorker(): void {
     if (!this.renderWorker) return;
-    this.renderWorker.postMessage({ type: 'destroy' });
     this.renderWorker.terminate();
     this.renderWorker = null;
     this.useWorkerMode = false;

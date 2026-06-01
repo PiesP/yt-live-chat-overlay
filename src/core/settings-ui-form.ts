@@ -405,10 +405,9 @@ export class SettingsUiForm {
       }
       case 'range': {
         const container = domDiv('yt-chat-overlay-settings-range');
-        const limits = isOutlineNumericKey(def.key)
-          ? resolveOutlineLimits(def.key)
-          : resolveLimits(def.key);
-        const scale = isOutlineNumericKey(def.key)
+        const isOutline = def.modifier === 'outline' && isOutlineNumericKey(def.key);
+        const limits = isOutline ? resolveOutlineLimits(def.key) : resolveLimits(def.key);
+        const scale = isOutline
           ? getOutlineDisplayScale(def.key)
           : getRootDisplayMeta(def.key as RootScalarSettingKey).scale || 1;
 

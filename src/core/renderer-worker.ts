@@ -281,9 +281,6 @@ interface ActiveMessage {
 const SPEED_TIER = { FAR: 0, MID: 1, NEAR: 2, BACKLOG: 3 } as const;
 
 // ── Worker-specific constants ──────────────────────────────────────────────
-/** Worker-specific safety cap for scroll duration (ms).
- *  No equivalent in main renderer. */
-const SCROLL_DURATION_MAX_MS = 12_000;
 
 // ── Globals (worker scope) ───────────────────────────────────────────────
 
@@ -1499,7 +1496,7 @@ function allocateSingleLane(
 ): { laneIndex: number; waitMs: number } | null {
   if (laneHeap.length === 0) return null;
 
-  const maxWaitMs = SCROLL_DURATION_MAX_MS;
+  const maxWaitMs = config!.scrollDurationMaxMs;
   let firstBusy: { laneIndex: number; waitMs: number } | null = null;
   let speedMatched: { laneIndex: number; waitMs: number } | null = null;
   let zeroWaitCandidates: number[] | null = null;
