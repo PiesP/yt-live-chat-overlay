@@ -29,6 +29,8 @@ export class SettingsUi {
   private playerElement: HTMLElement | null = null;
   private button: HTMLButtonElement | null = null;
   private reloadButton: HTMLButtonElement | null = null;
+  /** Timer for reload-complete checkmark → icon restoration. */
+  private reloadFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
   private backdrop: HTMLDivElement | null = null;
   private modal: HTMLDivElement | null = null;
   private previousFocus: HTMLElement | null = null;
@@ -172,6 +174,7 @@ export class SettingsUi {
       this.button.className = 'yt-chat-overlay-settings-button';
       this.button.textContent = '\u2699';
       this.button.setAttribute('aria-label', t('Chat overlay settings'));
+      this.button.title = t('Chat overlay settings');
       this.button.addEventListener('click', () => this.open());
     } else if (this.button.parentElement) {
       this.button.remove();
@@ -186,8 +189,9 @@ export class SettingsUi {
       this.reloadButton.className = 'yt-chat-overlay-reload-button';
       this.reloadButton.textContent = '\u21BB';
       this.reloadButton.setAttribute('aria-label', t('Reload overlay'));
+      this.reloadButton.title = t('Reload overlay');
       this.reloadButton.addEventListener('click', () => {
-        void this.onReload?.();
+        this.handleReloadClick();
       });
     } else if (this.reloadButton?.parentElement) {
       this.reloadButton.remove();
@@ -199,6 +203,32 @@ export class SettingsUi {
     if (this.reloadButton) {
       player.appendChild(this.reloadButton);
     }
+  }
+
+  private clearReloadFeedbackTimer(): void {
+    this.reloadFeedbackTimer = clearSafeTimeout(this.reloadFeedbackTimer);
+  }
+
+  private handleReloadClick(): void {
+    if (!this.reloadButton) return;
+
+    // Show immediate feedback — briefly switch to a checkmark so the user
+    // knows the reload was triggered.  The runtime restart is async and
+    // happens in the background; the checkmark confirms the action started.
+    const icon = this.reloadButton.textContent;
+    this.reloadButton.textContent = '\u2713';
+    this.reloadButton.classList.add('yt-chat-overlay-reload-button--done');
+
+    this.clearReloadFeedbackTimer();
+    this.reloadFeedbackTimer = setTimeout(() => {
+      this.reloadFeedbackTimer = null;
+      if (this.reloadButton) {
+        this.reloadButton.textContent = icon;
+        this.reloadButton.classList.remove('yt-chat-overlay-reload-button--done');
+      }
+    }, 1500);
+
+    void this.onReload?.();
   }
 
   private ensureStyles(): void {
@@ -586,6 +616,7 @@ export class SettingsUi {
     }
     this.button?.remove();
     this.reloadButton?.remove();
+    this.clearReloadFeedbackTimer();
     this.backdrop?.remove();
     document.removeEventListener('keydown', this.handleKeydown);
 

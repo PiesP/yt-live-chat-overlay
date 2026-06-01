@@ -84,6 +84,10 @@ export const SETTINGS_UI_STYLES = `
         opacity: 1;
         pointer-events: auto;
       }
+      .yt-chat-overlay-reload-button--done {
+        color: #4ade80;
+        border-color: rgba(74, 222, 128, 0.5);
+      }
       .yt-chat-overlay-settings-backdrop {
         position: fixed;
         inset: 0;
