@@ -81,10 +81,7 @@ function cleanupExpiredMessages(
   let writeIdx = 0;
   let anyRemoved = false;
 
-  // Clear lane map — will be rebuilt during the single compaction pass
-  // so stale lane entries are automatically purged.
-  activeMessagesByLane.clear();
-
+  // Single pass: compact messages + detect expirations.
   for (let i = 0; i < oldLength; i++) {
     const msg = messages[i];
     if (!msg) continue;
@@ -92,16 +89,25 @@ function cleanupExpiredMessages(
     if (elapsed < msg.duration) {
       messages[writeIdx] = msg;
       writeIdx++;
-      // Maintain lane map incrementally as part of the same pass.
+    } else {
+      anyRemoved = true;
+      onExpire?.(msg);
+    }
+  }
+
+  // Only rebuild lane map when messages actually expired — avoids
+  // unnecessary O(N) Map operations on every frame (7200 ops/sec at 120 msg × 60fps).
+  if (anyRemoved) {
+    activeMessagesByLane.clear();
+    for (let i = 0; i < writeIdx; i++) {
+      const msg = messages[i];
+      if (!msg) continue;
       let laneList = activeMessagesByLane.get(msg.laneIndex);
       if (!laneList) {
         laneList = [];
         activeMessagesByLane.set(msg.laneIndex, laneList);
       }
       laneList.push(msg);
-    } else {
-      anyRemoved = true;
-      onExpire?.(msg);
     }
   }
   // Array compaction threshold: when more than 50% of the array slots are
@@ -124,6 +130,10 @@ function applyPausedDurationToMessages(messages: CanvasMessage[], pausedMs: numb
 }
 
 const log = createLogger('RendererCanvas');
+
+/** Pre-built card configs — module-level singletons since they only depend on design-token constants. */
+const SUPERCHAT_CARD_CONFIG = createSuperChatCardConfig();
+const MEMBERSHIP_CARD_CONFIG = createMembershipCardConfig();
 
 export class CanvasRenderer extends RendererBase {
   private canvas: HTMLCanvasElement | null = null;
@@ -202,6 +212,20 @@ export class CanvasRenderer extends RendererBase {
    */
   private readonly _opacityBuckets: Array<Array<{ msg: CanvasMessage; elapsed: number }>> =
     Array.from({ length: _OPACITY_BUCKET_COUNT }, () => []);
+
+  /** Cached opacity config object — rebuilt on settings changes to avoid per-frame allocation. */
+  private _cachedOpacityConfig!: {
+    baseOpacity: number;
+    fadeDurationMs: number;
+    invFadeDuration: number;
+    backlogOpacityMultiplier: number;
+    depthLayersEnabled: boolean;
+    depthFarOpacityMul: number;
+    ageFadeRate: number;
+  };
+
+  /** Pre-bound getFont to avoid per-call arrow function allocation. */
+  private readonly _boundGetFont = (fs: number): string => this.getFont(fs);
 
   /**
    * Horizontal stagger per batch index step (px).
@@ -283,6 +307,10 @@ export class CanvasRenderer extends RendererBase {
       log.warn('Canvas created but not connected to DOM — renderer will be inactive');
     }
 
+    // Initialize ImageFetchManager BEFORE RenderWorkerManager so the worker
+    // receives a valid reference instead of undefined.
+    this.imageFetchManager = new ImageFetchManager();
+
     // Initialize OffscreenCanvas worker for off-main-thread rendering.
     // Falls back silently to main-thread rendering when unavailable
     // (e.g. missing APIs, CSP restrictions, build-time exclusion).
@@ -307,7 +335,6 @@ export class CanvasRenderer extends RendererBase {
     });
 
     this.startRenderLoop();
-    this.imageFetchManager = new ImageFetchManager();
     this.imageFetchManager.updateConfig(settings, this.workerManager.workerRef);
     this.imageFetchManager.setOnImageReady(() => {
       if (!this.isPaused && !this.isVideoPaused && !this.needsRerender) {
@@ -318,6 +345,7 @@ export class CanvasRenderer extends RendererBase {
         this.startRenderLoop();
       }
     });
+    this._buildOpacityConfig();
     log.info('RendererCanvas created');
   }
 
@@ -606,15 +634,7 @@ export class CanvasRenderer extends RendererBase {
         msg.duration,
         isScrolling,
         msg.speedTier,
-        {
-          baseOpacity: this.settings.opacity,
-          fadeDurationMs: this.settings.fadeDurationMs,
-          invFadeDuration: this.invFadeDuration,
-          backlogOpacityMultiplier: this.settings.backlogOpacityMultiplier,
-          depthLayersEnabled: this.settings.depthLayersEnabled,
-          depthFarOpacityMul: this.settings.depthFarOpacityMul,
-          ageFadeRate: this.ageFadeRate,
-        }
+        this._cachedOpacityConfig
       );
 
       const bucketIndex = Math.round(opacity * (_OPACITY_BUCKET_COUNT - 1));
@@ -654,15 +674,13 @@ export class CanvasRenderer extends RendererBase {
               this.textBitmapCache,
               this.imageFetchManager.emojiCache,
               this.imageFetchManager.authorPhotoCache,
-              (fs) => this.getFont(fs),
+              this._boundGetFont,
               isReplace ? msg.translatedText : undefined
             );
           } else {
             if (renderOriginal) {
               const cardConfig =
-                msg.message.kind === 'superchat'
-                  ? createSuperChatCardConfig()
-                  : createMembershipCardConfig();
+                msg.message.kind === 'superchat' ? SUPERCHAT_CARD_CONFIG : MEMBERSHIP_CARD_CONFIG;
               renderPaidCard(
                 ctx,
                 renderMessage,
@@ -677,7 +695,7 @@ export class CanvasRenderer extends RendererBase {
                 this.imageFetchManager.authorPhotoCache,
                 this.imageFetchManager.stickerCache,
                 this.imageFetchManager.emojiCache,
-                (fs: number) => this.getFont(fs),
+                this._boundGetFont,
                 this.superChatGradientCache
               );
             }
@@ -1175,6 +1193,19 @@ export class CanvasRenderer extends RendererBase {
     return getFontString(fontSize, this.settings.fontWeight, this.settings.fontFamily);
   }
 
+  /** Rebuild cached opacity config from current settings. Called on constructor and updateSettings. */
+  private _buildOpacityConfig(): void {
+    this._cachedOpacityConfig = {
+      baseOpacity: this.settings.opacity,
+      fadeDurationMs: this.settings.fadeDurationMs,
+      invFadeDuration: this.invFadeDuration,
+      backlogOpacityMultiplier: this.settings.backlogOpacityMultiplier,
+      depthLayersEnabled: this.settings.depthLayersEnabled,
+      depthFarOpacityMul: this.settings.depthFarOpacityMul,
+      ageFadeRate: this.ageFadeRate,
+    };
+  }
+
   /**
    * Compute the headway gap (px) between a new message and an active one
    * on the same lane, accounting for speed differences.
@@ -1299,6 +1330,7 @@ export class CanvasRenderer extends RendererBase {
       topBottomDurationMs: settings.topBottomDurationMs,
       depthLayersEnabled: settings.depthLayersEnabled,
     });
+    this._buildOpacityConfig();
   }
 
   protected onPause(): void {
