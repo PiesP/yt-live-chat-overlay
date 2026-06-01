@@ -308,12 +308,18 @@ function recomputeConfigDerived(): void {
 }
 
 // Text measurement cache (cleared on font config change)
+const TEXT_MEASURE_CACHE_MAX = 500;
 const textMeasureCache = new Map<string, number>();
 function measureTextCached(text: string): number {
   if (!ctx) return 0;
   let w = textMeasureCache.get(text);
   if (w === undefined) {
     w = ctx.measureText(text).width;
+    // LRU eviction: delete oldest entry when at capacity, then re-insert
+    if (textMeasureCache.size >= TEXT_MEASURE_CACHE_MAX) {
+      const oldestKey = textMeasureCache.keys().next().value;
+      if (oldestKey !== undefined) textMeasureCache.delete(oldestKey);
+    }
     textMeasureCache.set(text, w);
   }
   return w;
@@ -1428,6 +1434,24 @@ self.onmessage = (e: MessageEvent) => {
       }
       break;
     }
+    case 'updateTranslation': {
+      const msgId = data.id as string;
+      const translatedText = data.translatedText as string;
+      for (const msg of activeMessages) {
+        if (msg.id === msgId) {
+          msg.translatedText = translatedText;
+          break;
+        }
+      }
+      // Also check pendingQueue in case message hasn't been activated yet
+      for (const msg of pendingQueue) {
+        if (msg.id === msgId) {
+          msg.translatedText = translatedText;
+          break;
+        }
+      }
+      break;
+    }
     case 'destroy':
       handleDestroy();
       break;
@@ -1690,7 +1714,12 @@ function renderFrame(): void {
     statsFrameCounter++;
     if (statsFrameCounter >= 60) {
       statsFrameCounter = 0;
-      self.postMessage({ type: 'stats', activeMessages: 0, drops: totalDrops });
+      self.postMessage({
+        type: 'stats',
+        activeMessages: 0,
+        drops: totalDrops,
+        pendingQueueDepth: pendingQueue.length,
+      });
     }
     return;
   }
@@ -1893,7 +1922,12 @@ function renderFrame(): void {
   statsFrameCounter++;
   if (statsFrameCounter >= 60) {
     statsFrameCounter = 0;
-    self.postMessage({ type: 'stats', activeMessages: activeMessages.length, drops: totalDrops });
+    self.postMessage({
+      type: 'stats',
+      activeMessages: activeMessages.length,
+      drops: totalDrops,
+      pendingQueueDepth: pendingQueue.length,
+    });
   }
 }
 

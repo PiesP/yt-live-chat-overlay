@@ -397,6 +397,7 @@ export class CanvasRenderer extends RendererBase {
    */
   private renderWorker: Worker | null = null;
   private useWorkerMode = false;
+  private workerQueueDepth = 0;
 
   /**
    * Text bitmap cache: pre-rendered text with outline as offscreen canvas.
@@ -556,6 +557,23 @@ export class CanvasRenderer extends RendererBase {
     // Route to worker when off-main-thread rendering is active
     if (this.useWorkerMode && this.renderWorker) {
       this.sendToWorker(message);
+      // Also trigger translation asynchronously and send result to worker
+      const translatableText = getTranslatableText(message);
+      if (this.translationService.isEnabled && translatableText) {
+        const msgId = message.id ?? `${message.timestamp}-${Math.random()}`;
+        this.translationService
+          .translate(translatableText)
+          .then((translated) => {
+            this.renderWorker?.postMessage({
+              type: 'updateTranslation',
+              id: msgId,
+              translatedText: translated,
+            });
+          })
+          .catch(() => {
+            // Silently ignore individual translation failures
+          });
+      }
       return;
     }
     this.enqueueMessage(message, true);
@@ -1910,6 +1928,7 @@ export class CanvasRenderer extends RendererBase {
             break;
           case 'stats':
             renderer.observability.updateActiveMessages((data.activeMessages as number) ?? 0);
+            renderer.workerQueueDepth = (data.pendingQueueDepth as number) ?? 0;
             break;
           case 'error':
             log.warn('Render worker error:', data.error);
@@ -1962,6 +1981,16 @@ export class CanvasRenderer extends RendererBase {
    */
   private sendToWorker(message: ChatMessage): void {
     if (!this.renderWorker) return;
+
+    // Backpressure: drop low-priority messages when worker queue is backed up
+    const maxWorkerQueue = this.settings.queueMaxSize * 2;
+    if (this.workerQueueDepth > maxWorkerQueue) {
+      const priority = CanvasRenderer.getMessagePriority(message);
+      if (priority < 40) {
+        this.observability.onMessageDropped('worker_backpressure');
+        return;
+      }
+    }
 
     const dims = this.estimateDimensions(message);
 

@@ -26,7 +26,8 @@ export type DropReason =
   | 'queue_priority'
   | 'queue_replaced'
   | 'collision'
-  | 'no_lane';
+  | 'no_lane'
+  | 'worker_backpressure';
 /** Backlog injection modes */
 export type BacklogMode = 'playback' | 'recent' | 'full' | 'none';
 /** Language setting: auto-detect or explicit locale */
