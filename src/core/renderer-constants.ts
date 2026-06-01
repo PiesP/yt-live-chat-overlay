@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
+import type { ChatMessage } from '@app-types';
+
 /**
  * Shared renderer constants — single source of truth for values used by both
  * the main-thread CanvasRenderer and the OffscreenCanvas Web Worker.
@@ -127,4 +129,44 @@ export function desaturateColor(color: string, factor: number): string {
 
   const gray = 0.299 * r + 0.587 * g + 0.114 * b;
   return `rgb(${Math.round(r + (gray - r) * factor)},${Math.round(g + (gray - g) * factor)},${Math.round(b + (gray - b) * factor)})`;
+}
+
+/** Reusable empty ChatMessage for pool initialization. */
+export const EMPTY_CHAT_MESSAGE: ChatMessage = {
+  text: '',
+  content: [],
+  kind: 'text',
+  timestamp: 0,
+  authorType: 'normal',
+};
+
+/** Canvas-side message state used by the render loop. */
+export interface CanvasMessage {
+  message: ChatMessage;
+  /** Position/animation start time (includes stagger delay). */
+  startTime: number;
+  /** Opacity/fade start time — independent of position timeline.
+   *  When equal to startTime, fade-in begins when the message appears.
+   *  Can be offset for independent fade/position timing control. */
+  fadeStartTime: number;
+  duration: number;
+  /** Pre-computed 1/duration to avoid per-frame division in progress calc. */
+  invDuration: number;
+  width: number;
+  height: number;
+  startX: number;
+  x: number;
+  y: number;
+  pausedDuration: number;
+  laneIndex: number;
+  /** Time stagger delay (ms) applied to this message's start. */
+  staggerDelay: number;
+  /** Speed tier for lane allocation (0=Far, 1=Mid, 2=Near, 3=Backlog). */
+  speedTier: number;
+  /** Translated text (async result). undefined = not requested, null = cleared/unavailable, string = done. */
+  translatedText?: string | null;
+  /** Pre-computed desaturated color for Far-tier depth layer. */
+  desaturatedUserColor?: string;
+  /** Pre-computed render message (always set — either original or desaturated copy). */
+  renderMessage: ChatMessage;
 }

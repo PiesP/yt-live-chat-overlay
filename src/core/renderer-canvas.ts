@@ -38,6 +38,7 @@ import { ImageFetchManager } from '@core/image-fetch-manager';
 import type { LanePlacement } from '@core/lane-allocator';
 import { LaneAllocator } from '@core/lane-allocator';
 import { createLogger } from '@core/logging';
+import { MessageActivator } from '@core/message-activator';
 import type { Overlay } from '@core/overlay';
 import { PriorityBucketQueue } from '@core/priority-bucket-queue';
 import { RendererBase } from '@core/renderer-base';
@@ -47,7 +48,6 @@ import { clearTextMeasurementCaches, getFontString, measureTextHeight } from '@c
 import { TranslationService } from '@core/translation-service';
 import {
   DRAIN_QUEUE_MAX_SKIP as _DRAIN_QUEUE_MAX_SKIP,
-  FAR_LAYER_DESATURATION_FACTOR as _FAR_LAYER_DESATURATION_FACTOR,
   HORIZONTAL_STAGGER_MAX as _HORIZONTAL_STAGGER_MAX,
   HORIZONTAL_STAGGER_PER_STEP as _HORIZONTAL_STAGGER_PER_STEP,
   OPACITY_BUCKET_COUNT as _OPACITY_BUCKET_COUNT,
@@ -57,41 +57,9 @@ import {
   TRANSLATION_FONT_SCALE as _TRANSLATION_FONT_SCALE,
   TRANSLATION_GAP_PX as _TRANSLATION_GAP_PX,
   TRANSLATION_OPACITY_SCALE as _TRANSLATION_OPACITY_SCALE,
-  desaturateColor,
+  type CanvasMessage,
   hashStringForTier,
 } from './renderer-constants';
-
-// ── CanvasMessage lifecycle (inlined from canvas-message-lifecycle.ts) ─────
-
-interface CanvasMessage {
-  message: ChatMessage;
-  /** Position/animation start time (includes stagger delay). */
-  startTime: number;
-  /** Opacity/fade start time — independent of position timeline.
-   *  When equal to startTime, fade-in begins when the message appears.
-   *  Can be offset for independent fade/position timing control. */
-  fadeStartTime: number;
-  duration: number;
-  /** Pre-computed 1/duration to avoid per-frame division in progress calc. */
-  invDuration: number;
-  width: number;
-  height: number;
-  startX: number;
-  x: number;
-  y: number;
-  pausedDuration: number;
-  laneIndex: number;
-  /** Time stagger delay (ms) applied to this message's start. */
-  staggerDelay: number;
-  /** Speed tier for lane allocation (0=Far, 1=Mid, 2=Near, 3=Backlog). */
-  speedTier: number;
-  /** Translated text (async result). undefined = not requested, null = cleared/unavailable, string = done. */
-  translatedText?: string | null;
-  /** Pre-computed desaturated color for Far-tier depth layer. */
-  desaturatedUserColor?: string;
-  /** Pre-computed render message (always set — either original or desaturated copy). */
-  renderMessage: ChatMessage;
-}
 
 /**
  * Remove expired messages in-place, simultaneously maintaining the
@@ -152,15 +120,6 @@ function applyPausedDurationToMessages(messages: CanvasMessage[], pausedMs: numb
 
 const log = createLogger('RendererCanvas');
 
-/** Shared empty ChatMessage — placeholder for pooled CanvasMessage objects. */
-const EMPTY_CHAT_MESSAGE: ChatMessage = {
-  text: '',
-  content: [],
-  kind: 'text',
-  timestamp: 0,
-  authorType: 'normal',
-};
-
 export class CanvasRenderer extends RendererBase {
   private canvas: HTMLCanvasElement | null = null;
   private ctx: CanvasRenderingContext2D | null = null;
@@ -179,8 +138,6 @@ export class CanvasRenderer extends RendererBase {
   private readonly activeMessages: CanvasMessage[] = [];
   /** Lane-indexed active messages for O(1) lane-scoped collision checks. */
   private readonly activeMessagesByLane = new Map<number, CanvasMessage[]>();
-  /** Pool of recycled CanvasMessage objects to reduce GC pressure. */
-  private readonly messagePool: CanvasMessage[] = [];
   private readonly pendingQueue = new PriorityBucketQueue();
   private readonly retryQueue: ChatMessage[] = [];
 
@@ -189,6 +146,7 @@ export class CanvasRenderer extends RendererBase {
   /** Whether the session is in standby mode (pre-live, waiting for stream). */
   private standbyStatus = false;
   private translationService: TranslationService;
+  private messageActivator: MessageActivator;
 
   /** Max translations to apply per frame to avoid single-frame spikes during chat bursts. */
   private readonly translationBatchSize: number;
@@ -281,9 +239,6 @@ export class CanvasRenderer extends RendererBase {
   /** Tier split threshold: hash < this value → Near tier, else Far tier. */
   private static readonly TIER_NEAR_THRESHOLD = _TIER_NEAR_THRESHOLD;
 
-  /** Desaturation factor for Far-tier depth layer user colors. */
-  private static readonly FAR_LAYER_DESATURATION_FACTOR = _FAR_LAYER_DESATURATION_FACTOR;
-
   /** Maximum batch index for stagger exponential scale computation. */
   private static readonly STAGGER_BATCH_MAX = _STAGGER_BATCH_MAX;
   /** Exponential scale factor for stagger delay (negative value = decreasing delay). */
@@ -299,6 +254,10 @@ export class CanvasRenderer extends RendererBase {
       service: settings.translationService,
       source: settings.translationSource,
       target: settings.translationTarget,
+    });
+    this.messageActivator = new MessageActivator(this.translationService, {
+      topBottomDurationMs: settings.topBottomDurationMs,
+      depthLayersEnabled: settings.depthLayersEnabled,
     });
 
     const container = overlay.getContainer();
@@ -529,7 +488,7 @@ export class CanvasRenderer extends RendererBase {
       this.activeMessages,
       now,
       this.activeMessagesByLane,
-      (msg) => this.releaseMessage(msg)
+      (msg) => this.messageActivator.releaseMessage(msg)
     );
     if (anyRemoved) {
       if (newMessages) {
@@ -1064,134 +1023,33 @@ export class CanvasRenderer extends RendererBase {
       speedTier
     );
 
-    this.activateMessage(
+    this.messageActivator.activate(
       message,
       now,
       msgWidth,
       msgHeight,
       laneY,
+      {
+        onActivated: (cm) => {
+          this.activeMessages.push(cm);
+          let laneList = this.activeMessagesByLane.get(cm.laneIndex);
+          if (!laneList) {
+            laneList = [];
+            this.activeMessagesByLane.set(cm.laneIndex, laneList);
+          }
+          laneList.push(cm);
+        },
+        onMessageRendered: () => this.observability.onMessageRendered(),
+        onTranslationResult: (cm, text) => {
+          this.pendingTranslations.push({ msg: cm, text });
+        },
+      },
       effectiveDuration,
       startX,
       placement.laneIndex,
       staggerDelay,
       speedTier
     );
-  }
-
-  /**
-   * Acquire a CanvasMessage from the pool, or create a new empty one.
-   * All fields are uninitialized — caller must Object.assign to populate.
-   */
-  private acquireMessage(): CanvasMessage {
-    return (
-      this.messagePool.pop() ?? {
-        message: EMPTY_CHAT_MESSAGE,
-        startTime: 0,
-        fadeStartTime: 0,
-        duration: 0,
-        invDuration: 0,
-        width: 0,
-        height: 0,
-        startX: 0,
-        x: 0,
-        y: 0,
-        pausedDuration: 0,
-        laneIndex: 0,
-        staggerDelay: 0,
-        speedTier: 0,
-        renderMessage: EMPTY_CHAT_MESSAGE,
-      }
-    );
-  }
-
-  /**
-   * Release a CanvasMessage back to the pool.
-   * Resets all reference-type fields to prevent stale data leaks.
-   */
-  private releaseMessage(msg: CanvasMessage): void {
-    // Clear reference-type fields to prevent stale data leaks.
-    // These are overwritten by Object.assign on next acquire.
-    msg.message = EMPTY_CHAT_MESSAGE;
-    msg.renderMessage = EMPTY_CHAT_MESSAGE;
-    msg.translatedText = null;
-    delete msg.desaturatedUserColor;
-    // Keep numeric fields — they'll be overwritten by Object.assign
-    this.messagePool.push(msg);
-  }
-
-  /** Finalize and activate a message. */
-  private activateMessage(
-    message: ChatMessage,
-    now: number,
-    msgWidth: number,
-    msgHeight: number,
-    laneY: number,
-    duration?: number,
-    startX?: number,
-    laneIndex?: number,
-    staggerDelay = 0,
-    speedTier?: number
-  ): void {
-    const effectiveDuration = duration ?? this.settings.topBottomDurationMs;
-    const effectiveStartX = startX ?? 0;
-    const cm = this.acquireMessage();
-    Object.assign(cm, {
-      message,
-      fadeStartTime: now + staggerDelay,
-      startTime: now + staggerDelay,
-      duration: effectiveDuration,
-      invDuration: 1 / Math.max(1, effectiveDuration),
-      width: msgWidth,
-      height: msgHeight,
-      startX: effectiveStartX,
-      x: effectiveStartX,
-      y: laneY,
-      pausedDuration: 0,
-      laneIndex: laneIndex ?? 0,
-      staggerDelay,
-      speedTier: speedTier ?? SPEED_TIER.MID,
-      renderMessage: message,
-    });
-
-    if (this.settings.depthLayersEnabled && speedTier === SPEED_TIER.FAR && message.userColor) {
-      cm.desaturatedUserColor = desaturateColor(
-        message.userColor,
-        CanvasRenderer.FAR_LAYER_DESATURATION_FACTOR
-      );
-      cm.renderMessage = { ...message, userColor: cm.desaturatedUserColor };
-    } else {
-      // Avoid per-frame nullish coalescing in renderFrame — ensure renderMessage is always set
-      cm.renderMessage = message;
-    }
-
-    this.activeMessages.push(cm);
-    // Maintain lane-index for O(1) collision checks
-    let laneList = this.activeMessagesByLane.get(cm.laneIndex);
-    if (!laneList) {
-      laneList = [];
-      this.activeMessagesByLane.set(cm.laneIndex, laneList);
-    }
-    laneList.push(cm);
-    this.observability.onMessageRendered();
-
-    // Trigger async translation for all message kinds (text, superchat, membership).
-    // Use isEnabled (not isActive) so translate() is called even when the
-    // translator is temporarily dead — auto-recovery inside translate()
-    // will recreate it.
-    const translatableText = getTranslatableText(message);
-    if (this.translationService.isEnabled && translatableText) {
-      const cmRef = cm;
-      this.translationService
-        .translate(translatableText)
-        .then((translated) => {
-          // Batch: defer mutation to next renderFrame() for jank-free display.
-          this.pendingTranslations.push({ msg: cmRef, text: translated });
-        })
-        .catch(() => {
-          // Silently ignore individual translation failures.
-          // translate() already logs at debug level.
-        });
-    }
   }
 
   // ── Dimension estimation (delegates to shared functions) ──────────────
@@ -1444,6 +1302,11 @@ export class CanvasRenderer extends RendererBase {
       service: settings.translationService,
       source: settings.translationSource,
       target: settings.translationTarget,
+    });
+
+    this.messageActivator = new MessageActivator(this.translationService, {
+      topBottomDurationMs: settings.topBottomDurationMs,
+      depthLayersEnabled: settings.depthLayersEnabled,
     });
   }
 
