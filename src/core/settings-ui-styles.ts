@@ -58,6 +58,7 @@ export const SETTINGS_UI_STYLES = `
         justify-content: center;
         background: rgba(0, 0, 0, ${uiSizing.scrimAlpha});
         z-index: ${zIndex.modal};
+        overscroll-behavior: contain;
         animation: yt-overlay-fade-in ${animDuration.normal} ease-out;
       }
       @keyframes yt-overlay-fade-in {

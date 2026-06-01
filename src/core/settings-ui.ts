@@ -28,6 +28,10 @@ export class SettingsUi {
   private activeTab: string;
   /** Language code that was active when the modal content was last built. */
   private modalLanguage: string | null = null;
+  /** Saved body overflow before scroll lock. Restored on close/destroy. */
+  private savedBodyOverflow: string | null = null;
+  /** Saved body padding-right before scrollbar compensation. */
+  private savedBodyPaddingRight: string | null = null;
 
   private get defaultTabId(): string {
     const first = PANES[0];
@@ -127,6 +131,8 @@ export class SettingsUi {
     persist(this.form.collectSettings());
     this.setDialogOpen(false);
 
+    this.unlockBodyScroll();
+
     // Remove keydown listener to prevent accumulation across SPA navigations.
     // ensureModal() registers this listener and close() is called on modal
     // hide; destroy() also removes it as a safety net.
@@ -180,6 +186,30 @@ export class SettingsUi {
 
     this.backdrop.style.display = isOpen ? 'flex' : 'none';
     this.backdrop.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+  }
+
+  /** Lock body scroll to prevent page scrolling behind the open modal.
+   *  Compensates for scrollbar width to avoid layout shift. */
+  private lockBodyScroll(): void {
+    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
+    this.savedBodyOverflow = document.body.style.overflow;
+    this.savedBodyPaddingRight = document.body.style.paddingRight;
+    document.body.style.overflow = 'hidden';
+    if (scrollbarWidth > 0) {
+      document.body.style.paddingRight = `${scrollbarWidth}px`;
+    }
+  }
+
+  /** Restore body scroll state saved by lockBodyScroll(). Idempotent. */
+  private unlockBodyScroll(): void {
+    if (this.savedBodyOverflow !== null) {
+      document.body.style.overflow = this.savedBodyOverflow;
+      this.savedBodyOverflow = null;
+    }
+    if (this.savedBodyPaddingRight !== null) {
+      document.body.style.paddingRight = this.savedBodyPaddingRight;
+      this.savedBodyPaddingRight = null;
+    }
   }
 
   private bindTabEvents(): void {
@@ -254,6 +284,7 @@ export class SettingsUi {
     this.backdrop.id = BACKDROP_ID;
     this.backdrop.className = 'yt-chat-overlay-settings-backdrop';
     this.backdrop.addEventListener('click', (event) => {
+      if (event.button !== 0) return;
       if (event.target === this.backdrop) {
         this.close();
       }
@@ -293,6 +324,7 @@ export class SettingsUi {
 
     this.form.populateForm(this.getSettings());
     this.switchTab(this.activeTab);
+    this.lockBodyScroll();
     this.setDialogOpen(true);
     this.focusInitialElement();
   }
