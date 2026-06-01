@@ -31,6 +31,14 @@
 
 import type { FontWeight } from '@app-types';
 import {
+  drawAuthorPhoto,
+  drawRoundRect,
+  renderContentSegments,
+  renderSegment,
+  strokeTextOutline,
+  type TextBitmapCache,
+} from '@shared/canvas-rendering-shared';
+import {
   areSpeedTiersCompatible,
   computeLaneY,
   computeOccupancyMs as computeOccupancyMsShared,
@@ -40,14 +48,8 @@ import {
 } from '@shared/lane-allocation-shared';
 import { ByteLimitedCache } from './byte-limited-cache';
 import { EMOJI_ALIAS_PATTERN } from './chat-message-helpers';
+import { computeReadableTextColor, computeSuperChatOpacities, toRgba } from './color-utils';
 import {
-  computeOutlineColor,
-  computeReadableTextColor,
-  computeSuperChatOpacities,
-  toRgba,
-} from './color-utils';
-import {
-  AUTHOR_PHOTO_SHADOW,
   computeScrollDuration,
   colors as designColors,
   rendererLayout,
@@ -65,7 +67,6 @@ import {
   HORIZONTAL_STAGGER_PER_STEP,
   hashStringForTier as hashForTier,
   OPACITY_BUCKET_COUNT as OPACITY_BUCKETS,
-  OUTLINE_STROKE_SCALE,
   SPEED_TIER,
   STAGGER_BATCH_MAX,
   STAGGER_EXP_SCALE,
@@ -350,9 +351,12 @@ let totalDrops = 0;
 
 // ── Text bitmap cache ──────────────────────────────────────────────────────
 
-const TEXT_BITMAP_CACHE_MAX = 200;
-
 const textBitmapCache = new Map<string, OffscreenCanvas>();
+
+const textBitmapCacheAdapter: TextBitmapCache = {
+  get: (key) => textBitmapCache.get(key),
+  set: (key, value) => textBitmapCache.set(key, value as OffscreenCanvas),
+};
 
 let emojiCache: ByteLimitedCache<ImageBitmap>;
 let authorPhotoCache: ByteLimitedCache<ImageBitmap>;
@@ -454,189 +458,13 @@ function resolveSuperChatRgbFromArgb(
   };
 }
 
-/**
- * Render text with outline to an offscreen canvas and store in bitmap cache.
- */
-function cacheTextBitmap(
-  key: string,
-  text: string,
-  font: string,
-  fontSize: number,
-  fillColor: string,
-  strokeWidth: number,
-  strokeColor: string,
-  ctx: OffscreenCanvasRenderingContext2D,
-  textBitmapCache: Map<string, OffscreenCanvas>
-): void {
-  if (!ctx) return;
+// cacheTextBitmap imported from @shared/canvas-rendering-shared
 
-  ctx.save();
-  ctx.font = font;
-  const metrics = ctx.measureText(text);
-  const bbWidth =
-    Math.abs(metrics.actualBoundingBoxLeft) + Math.abs(metrics.actualBoundingBoxRight);
-  const textWidth = bbWidth > 0 ? Math.ceil(bbWidth) : Math.ceil(metrics.width);
-  const width = textWidth + Math.ceil(strokeWidth) + 2;
-  const ascent = Math.abs(metrics.actualBoundingBoxAscent) || Math.ceil(fontSize * 0.8);
-  const descent = Math.abs(metrics.actualBoundingBoxDescent) || Math.ceil(fontSize * 0.2);
-  const height = ascent + descent + Math.ceil(strokeWidth) + 2;
-  ctx.restore();
+// strokeTextOutline imported from @shared/canvas-rendering-shared
 
-  const offscreen = new OffscreenCanvas(width, height);
-  const offCtx = offscreen.getContext('2d');
-  if (!offCtx) return;
+// renderSegment imported from @shared/canvas-rendering-shared
 
-  offCtx.font = font;
-  offCtx.textBaseline = 'top';
-  offCtx.strokeStyle = strokeColor;
-  offCtx.lineWidth = strokeWidth;
-  offCtx.lineJoin = 'round';
-  offCtx.lineCap = 'round';
-  offCtx.strokeText(text, strokeWidth / 2 + 1, strokeWidth / 2 + 1);
-  offCtx.fillStyle = fillColor;
-  offCtx.fillText(text, strokeWidth / 2 + 1, strokeWidth / 2 + 1);
-
-  // LRU eviction — prevent unbounded OffscreenCanvas growth
-  if (textBitmapCache.size >= TEXT_BITMAP_CACHE_MAX) {
-    const oldestKey = textBitmapCache.keys().next().value;
-    if (oldestKey !== undefined) {
-      textBitmapCache.delete(oldestKey);
-    }
-  }
-
-  textBitmapCache.set(key, offscreen);
-}
-
-/** Draw crisp auto-contrast outline on text using current font and textBaseline. */
-function strokeTextOutline(
-  ctx: OffscreenCanvasRenderingContext2D,
-  text: string,
-  x: number,
-  y: number,
-  textColor: string,
-  outlineWidthPx: number,
-  outlineOpacity: number
-): void {
-  if (outlineWidthPx <= 0 || outlineOpacity <= 0) return;
-  const strokeWidth = Math.max(0.5, outlineWidthPx * OUTLINE_STROKE_SCALE);
-  ctx.save();
-  ctx.strokeStyle = computeOutlineColor(textColor, Math.min(1, outlineOpacity));
-  ctx.lineWidth = strokeWidth;
-  ctx.lineJoin = 'round';
-  ctx.lineCap = 'round';
-  ctx.strokeText(text, x, y);
-  ctx.restore();
-}
-
-function renderSegment(
-  ctx: OffscreenCanvasRenderingContext2D,
-  text: string,
-  x: number,
-  y: number,
-  color: string,
-  fontSize: number,
-  outlineWidthPx: number,
-  outlineOpacity: number,
-  textBitmapCache: Map<string, OffscreenCanvas>,
-  getFontFn: (fontSize: number) => string
-): void {
-  const font = getFontFn(fontSize);
-  const strokeWidth = Math.max(0.5, outlineWidthPx * OUTLINE_STROKE_SCALE);
-  const strokeColor = computeOutlineColor(color, Math.min(1, outlineOpacity));
-
-  // Try bitmap cache first (includes outline rendering)
-  if (outlineWidthPx > 0 && outlineOpacity > 0) {
-    const key = `${font}|${text}|${color}|${Math.round(strokeWidth)}|${strokeColor}`;
-    const bitmap = textBitmapCache.get(key);
-    if (bitmap) {
-      ctx.drawImage(bitmap, x, y);
-      return;
-    }
-
-    // Cache miss — render to offscreen canvas and cache
-    cacheTextBitmap(
-      key,
-      text,
-      font,
-      fontSize,
-      color,
-      strokeWidth,
-      strokeColor,
-      ctx,
-      textBitmapCache
-    );
-
-    // Immediately use the freshly cached bitmap to avoid fallthrough overhead
-    const freshBitmap = textBitmapCache.get(key);
-    if (freshBitmap) {
-      ctx.drawImage(freshBitmap, x, y);
-      return;
-    }
-  }
-
-  // Fallback: direct fillText + strokeText
-  ctx.save();
-  ctx.font = font;
-  ctx.textBaseline = 'top';
-  strokeTextOutline(ctx, text, x, y, color, outlineWidthPx, outlineOpacity);
-  ctx.fillStyle = color;
-  ctx.fillText(text, x, y);
-  ctx.restore();
-}
-
-function renderContentSegments(
-  ctx: OffscreenCanvasRenderingContext2D,
-  segments: readonly WorkerContentSegment[],
-  startX: number,
-  y: number,
-  color: string,
-  fontSize: number,
-  outlineWidthPx: number,
-  outlineOpacity: number,
-  textBitmapCache: Map<string, OffscreenCanvas>,
-  emojiCache: ByteLimitedCache<ImageBitmap>,
-  getFontFn: (fontSize: number) => string
-): void {
-  let cursorX = startX;
-  const emojiSize = Math.round(fontSize * rendererLayout.emojiSize);
-
-  for (const seg of segments) {
-    if (seg.type === 'text') {
-      renderSegment(
-        ctx,
-        seg.content,
-        cursorX,
-        y,
-        color,
-        fontSize,
-        outlineWidthPx,
-        outlineOpacity,
-        textBitmapCache,
-        getFontFn
-      );
-      cursorX += measureTextCached(seg.content as string);
-    } else {
-      const img = seg.emojiUrl ? emojiCache.get(seg.emojiUrl) : null;
-      if (img) {
-        ctx.drawImage(img, cursorX, y, emojiSize, emojiSize);
-      } else if (seg.emojiAlt && !EMOJI_ALIAS_PATTERN.test(seg.emojiAlt)) {
-        renderSegment(
-          ctx,
-          seg.emojiAlt,
-          cursorX,
-          y,
-          color,
-          fontSize,
-          outlineWidthPx,
-          outlineOpacity,
-          textBitmapCache,
-          getFontFn
-        );
-      }
-      cursorX += emojiSize + spacing.xs;
-    }
-  }
-}
+// renderContentSegments imported from @shared/canvas-rendering-shared
 
 // ── Wrapped content segments (text + emoji) ────────────────────────────────
 
@@ -819,7 +647,7 @@ function renderWrappedContentSegments(
   fontSize: number,
   outlineWidthPx: number,
   outlineOpacity: number,
-  textBitmapCache: Map<string, OffscreenCanvas>,
+  textBitmapCache: TextBitmapCache,
   emojiCache: ByteLimitedCache<ImageBitmap>,
   getFontFn: (fontSize: number) => string
 ): number {
@@ -921,20 +749,7 @@ function renderWrappedContentSegments(
 // ── Author rendering ────────────────────────────────────────────────────────
 
 /** Draw an author photo with shadow effects. */
-function drawAuthorPhoto(
-  ctx: OffscreenCanvasRenderingContext2D,
-  photo: ImageBitmap,
-  x: number,
-  y: number
-): void {
-  ctx.save();
-  ctx.shadowColor = AUTHOR_PHOTO_SHADOW;
-  ctx.shadowBlur = 4;
-  ctx.shadowOffsetX = 1;
-  ctx.shadowOffsetY = 1;
-  ctx.drawImage(photo, x, y, rendererLayout.authorPhotoSize, rendererLayout.authorPhotoSize);
-  ctx.restore();
-}
+// drawAuthorPhoto imported from @shared/canvas-rendering-shared
 
 /** Draw author photo + name section. Returns the Y offset after the section. */
 function drawAuthorSection(
@@ -950,7 +765,7 @@ function drawAuthorSection(
   outlineWidthPx: number,
   outlineOpacity: number,
   authorPhotoCache: ByteLimitedCache<ImageBitmap>,
-  textBitmapCache: Map<string, OffscreenCanvas>,
+  textBitmapCache: TextBitmapCache,
   getFontFn: (fontSize: number) => string
 ): number {
   if (!message.author) return startY;
@@ -1025,26 +840,7 @@ function drawAuthorSection(
 }
 
 /** Draw a rounded rectangle path (no fill/stroke — path only). */
-function drawRoundRect(
-  ctx: OffscreenCanvasRenderingContext2D,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  r: number
-): void {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.lineTo(x + w - r, y);
-  ctx.arcTo(x + w, y, x + w, y + r, r);
-  ctx.lineTo(x + w, y + h - r);
-  ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
-  ctx.lineTo(x + r, y + h);
-  ctx.arcTo(x, y + h, x, y + h - r, r);
-  ctx.lineTo(x, y + r);
-  ctx.arcTo(x, y, x + r, y, r);
-  ctx.closePath();
-}
+// drawRoundRect imported from @shared/canvas-rendering-shared
 
 // ── Message card rendering ───────────────────────────────────────────────
 
@@ -1070,7 +866,7 @@ function renderRegularMessage(
   color: string,
   outlineWidthPx: number,
   outlineOpacity: number,
-  textBitmapCache: Map<string, OffscreenCanvas>,
+  textBitmapCache: TextBitmapCache,
   emojiCache: ByteLimitedCache<ImageBitmap>,
   authorPhotoCache: ByteLimitedCache<ImageBitmap>,
   getFontFn: (fontSize: number) => string,
@@ -1123,8 +919,9 @@ function renderRegularMessage(
       outlineWidthPx,
       outlineOpacity,
       textBitmapCache,
-      emojiCache,
-      getFontFn
+      getFontFn,
+      measureTextCached,
+      (url: string) => emojiCache.get(url) ?? null
     );
   } else if (message.text.length > 0) {
     renderSegment(
@@ -1198,7 +995,7 @@ function renderSuperChatCard(
   superChatOpacity: number,
   showAuthorSection: boolean,
   showSuperChatAmount: boolean,
-  textBitmapCache: Map<string, OffscreenCanvas>,
+  textBitmapCache: TextBitmapCache,
   authorPhotoCache: ByteLimitedCache<ImageBitmap>,
   stickerCache: ByteLimitedCache<ImageBitmap>,
   emojiCache: ByteLimitedCache<ImageBitmap>,
@@ -1367,7 +1164,7 @@ function renderMembershipCard(
   outlineWidthPx: number,
   outlineOpacity: number,
   membershipMaxBodyLines: number,
-  textBitmapCache: Map<string, OffscreenCanvas>,
+  textBitmapCache: TextBitmapCache,
   authorPhotoCache: ByteLimitedCache<ImageBitmap>,
   emojiCache: ByteLimitedCache<ImageBitmap>,
   getFontFn: (fontSize: number) => string
@@ -1913,7 +1710,7 @@ function renderFrame(): void {
           cfg.superChatOpacity,
           showAuthorSection,
           cfg.showSuperChatAmount,
-          textBitmapCache,
+          textBitmapCacheAdapter,
           authorPhotoCache,
           stickerCache,
           emojiCache,
@@ -1935,7 +1732,7 @@ function renderFrame(): void {
           strokeWidth,
           cfg.outlineOpacity,
           cfg.membershipMaxBodyLines,
-          textBitmapCache,
+          textBitmapCacheAdapter,
           authorPhotoCache,
           emojiCache,
           getFont
@@ -1958,7 +1755,7 @@ function renderFrame(): void {
           renderColor,
           strokeWidth,
           cfg.outlineOpacity,
-          textBitmapCache,
+          textBitmapCacheAdapter,
           emojiCache,
           authorPhotoCache,
           getFont,
@@ -1990,7 +1787,7 @@ function renderFrame(): void {
           translationFontSize,
           strokeWidth,
           cfg.outlineOpacity,
-          textBitmapCache,
+          textBitmapCacheAdapter,
           getFont
         );
         ctx.restore();
