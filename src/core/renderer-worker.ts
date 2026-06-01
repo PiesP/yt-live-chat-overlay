@@ -318,6 +318,7 @@ const activeMessages: ActiveMessage[] = [];
 
 // Pending queue (waiting for lane allocation)
 const pendingQueue: WorkerMessage[] = [];
+let pendingQueueSortNeeded = false;
 let pendingQueueOffset = 0;
 const retryQueue: WorkerMessage[] = [];
 
@@ -1430,24 +1431,13 @@ self.onmessage = (e: MessageEvent) => {
 // ── Queue ─────────────────────────────────────────────────────────────────
 
 function enqueueMessage(msg: WorkerMessage): void {
-  const idx = findInsertIndex(msg.priority);
-  pendingQueue.splice(idx, 0, msg);
+  // O(1) push — sort deferred to drainQueue batch start
+  pendingQueue.push(msg);
+  pendingQueueSortNeeded = true;
   // Restart the render loop if it was idled.
   if (animFrameId === null && !isDestroyed) {
     startRenderLoop();
   }
-}
-
-function findInsertIndex(priority: number): number {
-  let lo = pendingQueueOffset;
-  let hi = pendingQueue.length;
-  while (lo < hi) {
-    const mid = (lo + hi) >>> 1;
-    const p = pendingQueue[mid]?.priority ?? 0;
-    if (p >= priority) lo = mid + 1;
-    else hi = mid;
-  }
-  return lo;
 }
 
 // ── Lane allocator (simplified 3-phase, adapted from LaneAllocator) ───────
@@ -1944,6 +1934,12 @@ function renderFrame(): void {
 
 function drainQueue(now: number, width: number, height: number): void {
   if (!config) return;
+
+  // Lazy sort: O(n log n) once per batch instead of O(n) per enqueue
+  if (pendingQueueSortNeeded && pendingQueue.length > 0) {
+    pendingQueue.sort((a, b) => b.priority - a.priority);
+    pendingQueueSortNeeded = false;
+  }
 
   let skipped = 0;
   let batchIndex = 0;
