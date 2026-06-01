@@ -342,8 +342,8 @@ export function renderPaidCard(
     );
   }
 
-  // 6. Badge (amount pill)
-  if (config.badge?.enabled && config.badge.getText) {
+  // 6. Badge (amount pill) — respects showSuperChatAmount setting
+  if (config.badge?.enabled && config.badge.getText && settings.showSuperChatAmount) {
     const badgeText = config.badge.getText(message);
     if (badgeText) {
       cursorY = renderCardBadge(

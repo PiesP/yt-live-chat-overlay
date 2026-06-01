@@ -1105,8 +1105,8 @@ function renderPaidCardWorker(
     );
   }
 
-  // ── 7. Badge (amount pill) ────────────────────────────────────────────
-  if (card.badgeEnabled && message.badgeText) {
+  // ── 7. Badge (amount pill) — respects showSuperChatAmount setting
+  if (card.badgeEnabled && card.showBadgeAmount && message.badgeText) {
     cursorY += spacing.xs;
     const badgeFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
     const badgeFont = getFontString(badgeFontSize, 'bold' as FontWeight, fontFamily);

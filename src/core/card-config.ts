@@ -64,6 +64,8 @@ export interface CardConfigWorker {
   stickerEnabled: boolean;
   stickerSizeScale: number;
   stickerMarginTop: number;
+  /** Whether to show the SuperChat amount badge (from settings.showSuperChatAmount). */
+  showBadgeAmount: boolean;
   padding: { horizontal: number; vertical: number };
   cardRadius: number;
   textColor: string; // pre-resolved: either 'auto' result or explicit color
@@ -147,6 +149,7 @@ export function toWorkerConfig(
     stickerEnabled: config.sticker?.enabled ?? false,
     stickerSizeScale: config.sticker?.sizeScale ?? 0,
     stickerMarginTop: config.sticker?.marginTop ?? 0,
+    showBadgeAmount: settings.showSuperChatAmount,
     padding: { ...config.padding },
     cardRadius: config.cardRadius,
     textColor,
