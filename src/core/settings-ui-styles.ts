@@ -51,6 +51,39 @@ export const SETTINGS_UI_STYLES = `
         opacity: 1;
         pointer-events: auto;
       }
+      .yt-chat-overlay-reload-button {
+        position: absolute;
+        top: ${spacing.sm}px;
+        left: ${spacing.sm + uiSizing.buttonSize + spacing.xs}px;
+        width: ${uiSizing.buttonSize}px;
+        height: ${uiSizing.buttonSize}px;
+        border-radius: ${borderRadius.full};
+        border: 1px solid rgba(255, 255, 255, ${uiSizing.borderAlpha});
+        background: rgba(0, 0, 0, ${uiSizing.scrimAlpha});
+        backdrop-filter: blur(4px);
+        color: ${uiColors.text};
+        font-size: ${uiSizing.buttonFontSize}px;
+        line-height: 1;
+        cursor: pointer;
+        z-index: ${zIndex.settingsButton};
+        opacity: 0;
+        pointer-events: none;
+        transition: ${animDuration.transitions.button};
+      }
+      .yt-chat-overlay-reload-button:hover,
+      .yt-chat-overlay-reload-button:focus-visible {
+        background: rgba(0, 0, 0, ${uiSizing.hoverScrimAlpha});
+        transform: scale(1.1);
+      }
+      .yt-chat-overlay-reload-button:focus-visible {
+        outline: 2px solid ${uiColors.primary};
+        outline-offset: 2px;
+      }
+      #movie_player:hover .yt-chat-overlay-reload-button,
+      .html5-video-player:hover .yt-chat-overlay-reload-button {
+        opacity: 1;
+        pointer-events: auto;
+      }
       .yt-chat-overlay-settings-backdrop {
         position: fixed;
         inset: 0;

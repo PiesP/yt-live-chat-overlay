@@ -197,6 +197,16 @@ export class RuntimeManager {
     await this.ensureReconcileLoop();
   }
 
+  /**
+   * Dispose the current runtime session and immediately start a fresh one.
+   * Called by App.restartRuntime() for manual recovery from degraded states.
+   */
+  async restartSession(): Promise<void> {
+    if (this.state === RuntimeState.DESTROYED) return;
+    this.disposeActiveSession();
+    await this.reconcileNow('session-restart');
+  }
+
   destroy(): void {
     if (this.state === RuntimeState.DESTROYED) {
       return;

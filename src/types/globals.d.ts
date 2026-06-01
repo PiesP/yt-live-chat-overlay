@@ -11,6 +11,7 @@ import type { OverlaySettings } from '@app-types';
 interface YtChatOverlayDebugHandle {
   start(): Promise<void>;
   stop(): void;
+  restartRuntime(): Promise<void>;
   getSettings(): Readonly<OverlaySettings>;
   applySettings(partial: Partial<OverlaySettings>): void;
   resetSettings(): void;

@@ -249,7 +249,10 @@ export class TranslationService {
     });
     await currentLock;
 
-    if (!text.trim()) return text;
+    if (!text.trim()) {
+      releaseLock();
+      return text;
+    }
 
     // ── Auto-recovery: recreate translator if it died ─────────────────
     if (!this.translator && this.enabled && this.pendingSource && this.pendingTarget) {
@@ -263,6 +266,7 @@ export class TranslationService {
         );
         this.pendingSource = null;
         this.pendingTarget = null;
+        releaseLock();
         return null;
       }
       // Enforce cooldown between recovery attempts to prevent death-loops

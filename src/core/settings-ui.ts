@@ -11,7 +11,13 @@ import {
 import { getActiveLanguage, t } from '@core/i18n';
 import { createLogger } from '@core/logging';
 import { normalizeStoredSettings, SETTINGS_VERSION } from '@core/settings-schema';
-import { BACKDROP_ID, BUTTON_ID, SettingsUiForm, STYLE_ID } from '@core/settings-ui-form';
+import {
+  BACKDROP_ID,
+  BUTTON_ID,
+  RELOAD_BUTTON_ID,
+  SettingsUiForm,
+  STYLE_ID,
+} from '@core/settings-ui-form';
 import { PANES } from '@core/settings-ui-panes';
 import { SETTINGS_UI_STYLES } from '@core/settings-ui-styles';
 
@@ -22,6 +28,7 @@ const TOAST_DURATION_MS = 2500;
 export class SettingsUi {
   private playerElement: HTMLElement | null = null;
   private button: HTMLButtonElement | null = null;
+  private reloadButton: HTMLButtonElement | null = null;
   private backdrop: HTMLDivElement | null = null;
   private modal: HTMLDivElement | null = null;
   private previousFocus: HTMLElement | null = null;
@@ -73,7 +80,9 @@ export class SettingsUi {
     private readonly onChange: (partial: Partial<OverlaySettings>) => void,
     private readonly resetSettings: () => void,
     /** Called when settings should be persisted (modal close). Falls back to onChange. */
-    private readonly onPersist?: (partial: Partial<OverlaySettings>) => void
+    private readonly onPersist?: (partial: Partial<OverlaySettings>) => void,
+    /** Called when the reload button is clicked. */
+    private readonly onReload?: () => Promise<void>
   ) {
     this.activeTab = this.defaultTabId;
     this.form = new SettingsUiForm(getSettings, (preview) => {
@@ -99,7 +108,12 @@ export class SettingsUi {
     const player = await this.findPlayerContainer();
     if (!player) return;
 
-    if (this.playerElement === player && this.button?.isConnected && this.backdrop?.isConnected) {
+    if (
+      this.playerElement === player &&
+      this.button?.isConnected &&
+      this.backdrop?.isConnected &&
+      (this.reloadButton ? this.reloadButton.isConnected : true)
+    ) {
       return;
     }
 
@@ -156,16 +170,35 @@ export class SettingsUi {
       this.button.id = BUTTON_ID;
       this.button.type = 'button';
       this.button.className = 'yt-chat-overlay-settings-button';
-      this.button.textContent = '⚙';
+      this.button.textContent = '\u2699';
       this.button.setAttribute('aria-label', t('Chat overlay settings'));
       this.button.addEventListener('click', () => this.open());
     } else if (this.button.parentElement) {
       this.button.remove();
     }
 
+    // Reload button — placed to the right of the settings gear button.
+    // Allows users to restart the overlay runtime without a full page reload.
+    if (!this.reloadButton && this.onReload) {
+      this.reloadButton = document.createElement('button');
+      this.reloadButton.id = RELOAD_BUTTON_ID;
+      this.reloadButton.type = 'button';
+      this.reloadButton.className = 'yt-chat-overlay-reload-button';
+      this.reloadButton.textContent = '\u21BB';
+      this.reloadButton.setAttribute('aria-label', t('Reload overlay'));
+      this.reloadButton.addEventListener('click', () => {
+        void this.onReload?.();
+      });
+    } else if (this.reloadButton?.parentElement) {
+      this.reloadButton.remove();
+    }
+
     ensurePlayerPositioning(player);
 
     player.appendChild(this.button);
+    if (this.reloadButton) {
+      player.appendChild(this.reloadButton);
+    }
   }
 
   private ensureStyles(): void {
@@ -552,6 +585,7 @@ export class SettingsUi {
       this.previewTimer = clearSafeTimeout(this.previewTimer);
     }
     this.button?.remove();
+    this.reloadButton?.remove();
     this.backdrop?.remove();
     document.removeEventListener('keydown', this.handleKeydown);
 
@@ -559,6 +593,7 @@ export class SettingsUi {
     styleElement?.remove();
 
     this.button = null;
+    this.reloadButton = null;
     this.backdrop = null;
     this.modal = null;
     this.playerElement = null;

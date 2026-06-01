@@ -303,6 +303,7 @@ export const KO: Record<string, string> = {
   'Import failed: invalid JSON': '가져오기 실패: 잘못된 JSON 형식',
   'Chat overlay settings': '채팅 오버레이 설정',
   'Reset overlay settings': '오버레이 설정 초기화',
+  'Reload overlay': '오버레이 다시 불러오기',
 
   // ── Author grid ──
   'Name Color': '이름 색상',

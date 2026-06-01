@@ -307,6 +307,7 @@ export const JA: Record<string, string> = {
   'Import failed: invalid JSON': 'インポート失敗: 無効なJSON形式です',
   'Chat overlay settings': 'チャットオーバーレイ設定',
   'Reset overlay settings': 'オーバーレイ設定をリセット',
+  'Reload overlay': 'オーバーレイを再読み込み',
 
   // ── Author grid ──
   'Name Color': '名前の色',

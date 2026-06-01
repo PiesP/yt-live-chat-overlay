@@ -320,6 +320,7 @@ export const ES: Record<string, string> = {
   'Import failed: invalid JSON': 'Error de importación: JSON no válido',
   'Chat overlay settings': 'Configuración de superposición de chat',
   'Reset overlay settings': 'Restablecer superposición',
+  'Reload overlay': 'Recargar superposición',
 
   // ── Author grid ──
   'Name Color': 'Color del nombre',

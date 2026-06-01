@@ -26,6 +26,7 @@ const log = createLogger('SettingsUiForm');
 
 export const STYLE_ID = 'yt-chat-overlay-settings-style';
 export const BUTTON_ID = 'yt-chat-overlay-settings-button';
+export const RELOAD_BUTTON_ID = 'yt-chat-overlay-reload-button';
 export const BACKDROP_ID = 'yt-chat-overlay-settings-backdrop';
 
 const OUTLINE_NUMERIC_KEY_SET = new Set<string>(OUTLINE_NUMERIC_KEYS);

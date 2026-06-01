@@ -38,7 +38,8 @@ class App {
     () => this.settings.get(),
     (partial) => this.previewSettings(partial),
     () => this.resetSettings(),
-    (partial) => this.applySettings(partial)
+    (partial) => this.applySettings(partial),
+    () => this.restartRuntime()
   );
   /** Unsubscribe from cross-tab settings sync. */
   private unsubscribeCrossTab: (() => void) | null = null;
@@ -146,6 +147,19 @@ class App {
     this.applySettingsSideEffects({});
   }
 
+  /**
+   * Dispose the current runtime session and start a fresh one.
+   *
+   * Handy for recovering from degraded states (e.g. Translator API
+   * death-loop, render stall) without a full page reload.  YouTube
+   * playback and user scroll position are preserved.
+   */
+  async restartRuntime(): Promise<void> {
+    log.info('Manual restart — disposing current runtime');
+    await this.runtimeManager.restartSession();
+    log.info('Manual restart completed');
+  }
+
   private async ensureSettingsUi(): Promise<void> {
     try {
       await this.settingsUi.attach();
@@ -212,6 +226,12 @@ function registerMenuCommands(): void {
     const app = window.__ytChatOverlay;
     if (app) {
       app.resetSettings();
+    }
+  });
+  GM_registerMenuCommand(t('Reload overlay'), () => {
+    const app = window.__ytChatOverlay;
+    if (app?.restartRuntime) {
+      void app.restartRuntime();
     }
   });
 }
