@@ -48,6 +48,7 @@ import {
   FAR_LAYER_DESATURATION_FACTOR as _FAR_LAYER_DESATURATION_FACTOR,
   HORIZONTAL_STAGGER_MAX as _HORIZONTAL_STAGGER_MAX,
   HORIZONTAL_STAGGER_PER_STEP as _HORIZONTAL_STAGGER_PER_STEP,
+  OPACITY_BUCKET_COUNT as _OPACITY_BUCKET_COUNT,
   STAGGER_BATCH_MAX as _STAGGER_BATCH_MAX,
   STAGGER_EXP_SCALE as _STAGGER_EXP_SCALE,
   TIER_NEAR_THRESHOLD as _TIER_NEAR_THRESHOLD,
@@ -420,7 +421,7 @@ export class CanvasRenderer extends RendererBase {
    * the per-frame GC pressure from Map + {msg,elapsed} object creation.
    */
   private readonly _opacityBuckets: Array<Array<{ msg: CanvasMessage; elapsed: number }>> =
-    Array.from({ length: 21 }, () => []);
+    Array.from({ length: _OPACITY_BUCKET_COUNT }, () => []);
 
   /**
    * Horizontal stagger per batch index step (px).
@@ -901,18 +902,18 @@ export class CanvasRenderer extends RendererBase {
         msg.speedTier
       );
 
-      const bucketIndex = Math.round(opacity * 20);
+      const bucketIndex = Math.round(opacity * (_OPACITY_BUCKET_COUNT - 1));
       // Store positionElapsed for membership card border pulse animation
       buckets[bucketIndex]?.push({ msg, elapsed: positionElapsed });
     }
 
     // ── Render each opacity group with a single ctx.globalAlpha set ──
-    // Iterate ascending (0→20) so low-opacity messages render behind,
+    // Iterate ascending (0→N-1) so low-opacity messages render behind,
     // high-opacity on top — consistent with pre-pooling Map insertion order.
-    for (let bucketIndex = 0; bucketIndex <= 20; bucketIndex++) {
+    for (let bucketIndex = 0; bucketIndex < _OPACITY_BUCKET_COUNT; bucketIndex++) {
       const entries = buckets[bucketIndex];
       if (!entries || entries.length === 0) continue;
-      const bucketOpacity = bucketIndex / 20;
+      const bucketOpacity = bucketIndex / (_OPACITY_BUCKET_COUNT - 1);
       ctx.globalAlpha = bucketOpacity;
 
       for (const { msg, elapsed } of entries) {

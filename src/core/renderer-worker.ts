@@ -56,6 +56,7 @@ import {
   HORIZONTAL_STAGGER_PER_STEP,
   hashStringForTier as hashForTier,
   LANE_COOLDOWN_MIN_MS,
+  OPACITY_BUCKET_COUNT as OPACITY_BUCKETS,
   OUTLINE_STROKE_SCALE,
   SAFETY_MARGIN_RATIO,
   SPEED_TIER,
@@ -324,11 +325,10 @@ const superChatGradientCache = new Map<string, CanvasGradient>();
 
 /**
  * Pre-allocated opacity buckets for per-frame reuse.
- * Bucket index = Math.round(opacity * 20), yielding 21 buckets (0.00–1.00 in 0.05 steps).
+ * Bucket index = Math.round(opacity * (OPACITY_BUCKETS - 1)), yielding 21 buckets.
  * Each frame resets bucket lengths instead of allocating new arrays, eliminating
  * per-frame GC pressure and reducing ctx.globalAlpha set/reset pairs.
  */
-const OPACITY_BUCKETS = 21;
 const opacityBuckets: Array<Array<{ msg: ActiveMessage; elapsed: number }>> = Array.from(
   { length: OPACITY_BUCKETS },
   () => []
@@ -1773,7 +1773,7 @@ function renderFrame(): void {
 
     if (opacity <= 0) continue;
 
-    const bucketIndex = Math.round(opacity * 20);
+    const bucketIndex = Math.round(opacity * (OPACITY_BUCKETS - 1));
     opacityBuckets[bucketIndex]?.push({ msg, elapsed });
   }
 
@@ -1786,7 +1786,7 @@ function renderFrame(): void {
     const entries = opacityBuckets[bucketIndex];
     if (!entries || entries.length === 0) continue;
 
-    ctx.globalAlpha = bucketIndex / 20;
+    ctx.globalAlpha = bucketIndex / (OPACITY_BUCKETS - 1);
 
     for (const { msg, elapsed } of entries) {
       // Per-message color with optional FAR desaturation
@@ -1889,7 +1889,7 @@ function renderFrame(): void {
           : renderColor;
         const translationY = sy + msg.height * TRANSLATION_FONT_SCALE + TRANSLATION_GAP_PX;
         ctx.save();
-        ctx.globalAlpha = (bucketIndex / 20) * TRANSLATION_OPACITY_SCALE;
+        ctx.globalAlpha = (bucketIndex / (OPACITY_BUCKETS - 1)) * TRANSLATION_OPACITY_SCALE;
         renderSegment(
           ctx,
           msg.translatedText,

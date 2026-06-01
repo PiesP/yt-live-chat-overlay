@@ -24,6 +24,7 @@ import { LaneAllocator } from '@core/lane-allocator';
 import { createLogger } from '@core/logging';
 import { ObservabilityReporter } from '@core/observability';
 import type { Overlay } from '@core/overlay';
+import { ANTI_BLOCK_FREE_RATIO } from '@core/renderer-constants';
 import { clearTextMeasurementCaches, setTextMeasureCallback } from '@core/text-measure';
 
 const log = createLogger('RendererBase');
@@ -287,10 +288,9 @@ export abstract class RendererBase {
    * pattern that a binary threshold causes when utilization hovers near 95%.
    */
   protected isAntiBlockActive(): boolean {
-    const FREE_RATIO = 0.05;
     const utilization = this.laneAllocator.getUtilization();
-    if (utilization < 1 - FREE_RATIO) return false;
-    const acceptProb = (1 - utilization) / FREE_RATIO;
+    if (utilization < 1 - ANTI_BLOCK_FREE_RATIO) return false;
+    const acceptProb = (1 - utilization) / ANTI_BLOCK_FREE_RATIO;
     return Math.random() >= acceptProb;
   }
 

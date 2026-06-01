@@ -32,6 +32,15 @@ export const SAFETY_MARGIN_RATIO = 0.15;
  *  5% chance to skip the strict topmost zero-wait lane. */
 export const EPSILON = 0.05;
 
+/** Free ratio for anti-block gate: utilization above (1 - this) triggers
+ *  probabilistic blocking of new message placements. */
+export const ANTI_BLOCK_FREE_RATIO = 0.05;
+
+/** Number of opacity buckets for render-phase opacity grouping.
+ *  Messages with opacity 0.0–1.0 are distributed across 21 buckets
+ *  (Math.round(opacity * 20)) for grouped draw-order submission. */
+export const OPACITY_BUCKET_COUNT = 21;
+
 // ── Queue / drain (renderer-canvas.ts) ──────────────────────────────────────
 
 /** Max number of consecutive collision skips in the drain queue. */
