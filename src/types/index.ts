@@ -128,6 +128,8 @@ export interface ChatMessage {
   userColor?: string;
   /** Super Chat information (only for kind='superchat') */
   superChat?: SuperChatInfo;
+  /** Membership tier/duration header text (e.g., "New Member", "Member for 12 months") */
+  membershipHeader?: string;
   /** True when the message is part of a backlog injection (initial seed) */
   isBacklog?: boolean;
   /** YouTube video offset in milliseconds (from videoOffsetTimeMsec, replay only) */

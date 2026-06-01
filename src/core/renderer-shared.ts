@@ -213,6 +213,13 @@ function estimateMembershipDimensions(
     Math.min(rendererLayout.superchatMaxWidth, textWidth + paddingH * 2)
   );
 
+  // Membership header height (if present)
+  let headerHeight = 0;
+  if (message.membershipHeader) {
+    const headerFontSize = Math.round(fontSize * 0.8);
+    headerHeight = measureTextHeight(font, headerFontSize) + spacing.xs;
+  }
+
   // Re-build wrapped lines at the actual card inner width so line count matches
   // what renderMembership will produce. Uses buildWrappedLines (SSOT with
   // renderWrappedContentSegments) for consistent emoji piece widths.
@@ -229,7 +236,7 @@ function estimateMembershipDimensions(
 
   return {
     width,
-    height: infoHeight + authorBodyGap + textHeight + paddingV * 2,
+    height: headerHeight + infoHeight + authorBodyGap + textHeight + paddingV * 2,
   };
 }
 

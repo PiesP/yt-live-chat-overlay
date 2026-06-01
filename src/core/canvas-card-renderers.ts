@@ -26,7 +26,7 @@ import {
   SUPERCHAT_AMOUNT_BADGE_STROKE,
   spacing,
 } from '@core/design-tokens';
-import { getFontString } from '@core/text-measure';
+import { getFontString, measureTextHeight } from '@core/text-measure';
 
 // ── SuperChat card ───────────────────────────────────────────────────────────
 
@@ -242,7 +242,7 @@ export function renderMembershipCard(
   ctx.fill();
 
   const pulse = Math.sin((elapsed / 1000) * Math.PI) * mem.borderAlphaAmplitude + mem.borderAlpha;
-  ctx.strokeStyle = `rgba(${mem.background.r}, ${mem.background.g}, ${mem.background.b}, ${pulse})`;
+  ctx.strokeStyle = `rgba(${mem.borderRgb.r}, ${mem.borderRgb.g}, ${mem.borderRgb.b}, ${pulse})`;
   ctx.lineWidth = rendererLayout.membershipBorderWidth;
   ctx.stroke();
 
@@ -250,6 +250,36 @@ export function renderMembershipCard(
   const padV = rendererLayout.membership.paddingV;
   const textX = x + padH;
   let textY = y + padV;
+
+  // Membership tier/duration header tag
+  if (message.membershipHeader) {
+    const headerFontSize = Math.round(fontSize * 0.8);
+    const headerFont = getFontFn(headerFontSize);
+    ctx.font = headerFont;
+    ctx.textBaseline = 'top';
+    const headerMaxWidth = w - padH * 2;
+    let displayText = message.membershipHeader;
+    if (ctx.measureText(displayText).width > headerMaxWidth) {
+      // Manual ellipsis truncation
+      while (displayText.length > 0 && ctx.measureText(`${displayText}…`).width > headerMaxWidth) {
+        displayText = displayText.slice(0, -1);
+      }
+      displayText += '…';
+    }
+    strokeTextOutline(
+      ctx,
+      displayText,
+      textX,
+      textY,
+      designColors.membership.headerText,
+      settings.outline.widthPx,
+      settings.outline.opacity
+    );
+    ctx.fillStyle = designColors.membership.headerText;
+    ctx.fillText(displayText, textX, textY);
+    const headerHeight = measureTextHeight(headerFont, headerFontSize);
+    textY += headerHeight + spacing.xs;
+  }
 
   if (message.author) {
     const nameMaxWidth = w - padH * 2;

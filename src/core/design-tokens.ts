@@ -30,7 +30,7 @@ export const HOUR = 60 * MINUTE;
 const superChatColors = {
   blue: { r: 30, g: 136, b: 229 },
   cyan: { r: 0, g: 191, b: 255 },
-  green: { r: 29, g: 233, b: 182 },
+  green: { r: 15, g: 157, b: 88 },
   yellow: { r: 255, g: 202, b: 40 },
   orange: { r: 245, g: 124, b: 0 },
   magenta: { r: 233, g: 30, b: 99 },
@@ -48,10 +48,12 @@ export const colors = {
   superChat: superChatColors,
   membership: {
     background: { r: 15, g: 157, b: 88 },
+    borderRgb: { r: 45, g: 220, b: 120 },
     backgroundAlpha: 0.28,
     borderAlpha: 0.75,
     borderAlphaAmplitude: 0.15,
     text: '#ffffff',
+    headerText: '#ffffff',
   },
 } as const;
 

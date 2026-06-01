@@ -184,6 +184,13 @@ function parseRendererMessage(
     message.superChat = superChatInfo;
   }
 
+  if (kind === 'membership') {
+    const headerText = parseMembershipHeaderText(renderer);
+    if (headerText) {
+      message.membershipHeader = headerText;
+    }
+  }
+
   return message;
 }
 
@@ -313,6 +320,15 @@ function parseMembershipBody(renderer: JsonObject): ParsedMessageBody {
   return messageBody.visibleLength > 0 || messageBody.text.length > 0
     ? messageBody
     : parseMessageContent(renderer.headerSubtext);
+}
+
+/**
+ * Extract the membership tier/duration header text from
+ * headerPrimaryText (e.g., "New Member", "Member for 12 months").
+ * Returns undefined if no header text is available.
+ */
+function parseMembershipHeaderText(renderer: JsonObject): string | undefined {
+  return extractDisplayText(renderer.headerPrimaryText);
 }
 
 function extractDisplayText(value: unknown): string | undefined {
