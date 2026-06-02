@@ -11,7 +11,7 @@
  */
 
 export class ByteLimitedCache<V> {
-  readonly map = new Map<string, V>();
+  private readonly map = new Map<string, V>();
   private totalBytes = 0;
   private _maxBytes: number;
 

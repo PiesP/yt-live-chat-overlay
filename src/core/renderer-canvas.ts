@@ -98,12 +98,16 @@ function cleanupExpiredMessages(
     for (let i = 0; i < writeIdx; i++) {
       const msg = messages[i];
       if (!msg) continue;
-      let laneList = activeMessagesByLane.get(msg.laneIndex);
-      if (!laneList) {
-        laneList = [];
-        activeMessagesByLane.set(msg.laneIndex, laneList);
+      const slotCount = msg.slotCount ?? 1;
+      for (let slot = 0; slot < slotCount; slot++) {
+        const occupiedLane = msg.laneIndex + slot;
+        let laneList = activeMessagesByLane.get(occupiedLane);
+        if (!laneList) {
+          laneList = [];
+          activeMessagesByLane.set(occupiedLane, laneList);
+        }
+        laneList.push(msg);
       }
-      laneList.push(msg);
     }
   }
   // Array compaction threshold: when more than 50% of the array slots are
@@ -1060,12 +1064,17 @@ export class CanvasRenderer extends RendererBase {
       {
         onActivated: (cm) => {
           this.activeMessages.push(cm);
-          let laneList = this.activeMessagesByLane.get(cm.laneIndex);
-          if (!laneList) {
-            laneList = [];
-            this.activeMessagesByLane.set(cm.laneIndex, laneList);
+          const slotCount = placement.slotCount;
+          cm.slotCount = slotCount;
+          for (let slot = 0; slot < slotCount; slot++) {
+            const occupiedLane = cm.laneIndex + slot;
+            let laneList = this.activeMessagesByLane.get(occupiedLane);
+            if (!laneList) {
+              laneList = [];
+              this.activeMessagesByLane.set(occupiedLane, laneList);
+            }
+            laneList.push(cm);
           }
-          laneList.push(cm);
         },
         onMessageRendered: () => this.observability.onMessageRendered(),
         onTranslationResult: (cm, text) => {

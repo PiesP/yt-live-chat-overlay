@@ -167,6 +167,8 @@ export interface CanvasMessage {
   translatedText?: string | null;
   /** Pre-computed desaturated color for Far-tier depth layer. */
   desaturatedUserColor?: string;
+  /** Number of vertical lanes this message occupies (1 for single-slot, 2+ for multi-slot). */
+  slotCount?: number;
   /** Pre-computed render message (always set — either original or desaturated copy). */
   renderMessage: ChatMessage;
 }

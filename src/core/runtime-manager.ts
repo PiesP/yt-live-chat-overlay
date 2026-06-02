@@ -269,6 +269,7 @@ export class RuntimeManager {
     this.settings = desired.settings;
 
     // Reset session lifecycle flags for new start
+    this.abortController.abort(); // abort stale signal before replacing
     this.abortController = new AbortController();
     this.state = RuntimeState.STARTING;
 
