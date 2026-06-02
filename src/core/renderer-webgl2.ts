@@ -154,6 +154,41 @@ export class RendererWebGL2 extends RendererBase {
     };
   }
 
+  updateSettings(settings: OverlaySettings, options?: { resetState?: boolean }): void {
+    const fontChanged =
+      settings.fontFamily !== this.settings.fontFamily ||
+      settings.fontWeight !== this.settings.fontWeight ||
+      settings.fontSize !== this.settings.fontSize;
+
+    const opacityChanged =
+      settings.opacity !== this.settings.opacity ||
+      settings.fadeDurationMs !== this.settings.fadeDurationMs ||
+      settings.maxMessageAgeMs !== this.settings.maxMessageAgeMs ||
+      settings.backlogOpacityMultiplier !== this.settings.backlogOpacityMultiplier ||
+      settings.depthLayersEnabled !== this.settings.depthLayersEnabled ||
+      settings.depthFarOpacityMul !== this.settings.depthFarOpacityMul;
+
+    super.updateSettings(settings, options);
+
+    if (opacityChanged) {
+      this._ageFadeRate = 1 / Math.max(1, settings.maxMessageAgeMs);
+      this._invFadeDuration = 1 / Math.max(1, settings.fadeDurationMs);
+      this.rebuildOpacityConfig();
+    }
+
+    if (fontChanged && this.atlasReady) {
+      this.atlasReady = false;
+      if (this.atlasTexture) {
+        this.gl.deleteTexture(this.atlasTexture);
+        this.atlasTexture = null;
+      }
+      this.atlas = null;
+      this.initAtlas().catch((e: unknown) => {
+        log.error('Atlas regeneration failed after font change:', e);
+      });
+    }
+  }
+
   private createProgram(vsSrc: string, fsSrc: string): WebGLProgram {
     const gl = this.gl;
     const vs = gl.createShader(gl.VERTEX_SHADER);
@@ -222,7 +257,7 @@ export class RendererWebGL2 extends RendererBase {
   }
 
   private uploadAtlas(): void {
-    const data = (this.atlas as SDFAtlas & { data?: Uint8Array })?.data;
+    const data = this.atlas?.data;
     if (!data) return;
     const gl = this.gl;
     const tex = gl.createTexture();
@@ -354,9 +389,10 @@ export class RendererWebGL2 extends RendererBase {
     const fs = this.settings.fontSize;
     for (const msg of this.messages) {
       if (this.instanceCount >= MAX_INSTANCES) break;
+      const elapsed = msg.startTime > 0 ? Math.max(0, now - msg.startTime) : 0;
       const op = computeMessageOpacity(
         msg.message,
-        now - msg.startTime,
+        elapsed,
         msg.duration,
         msg.laneIndex >= 0,
         msg.speedTier,
@@ -418,7 +454,7 @@ export class RendererWebGL2 extends RendererBase {
 
   protected onDestroy(): void {
     if (this.animFrameId !== null) cancelAnimationFrame(this.animFrameId);
-    this.gl.deleteTexture(this.atlasTexture);
+    if (this.atlasTexture) this.gl.deleteTexture(this.atlasTexture);
     this.gl.deleteBuffer(this.instanceBuffer);
     this.gl.deleteVertexArray(this.vao);
     this.gl.deleteProgram(this.program);

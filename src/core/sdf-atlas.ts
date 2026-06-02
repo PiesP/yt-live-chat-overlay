@@ -80,6 +80,8 @@ export interface SDFAtlas {
   glyphs: Map<number, GlyphInfo>;
   /** Whether atlas has been uploaded to GPU */
   uploaded: boolean;
+  /** Raw RGBA8 pixel data for GPU upload */
+  data?: Uint8Array;
 }
 
 // ── Code Point Ranges ────────────────────────────────────────────────────────
@@ -291,7 +293,7 @@ export class SDFAtlasGenerator {
     onProgress?.(total, total);
 
     // Store raw data for upload
-    (atlas as SDFAtlas & { data: Uint8Array }).data = atlasData;
+    atlas.data = atlasData;
 
     return atlas;
   }
