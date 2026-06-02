@@ -183,7 +183,7 @@ export function renderSegment(
   const strokeColor = computeOutlineColor(color, Math.min(1, outlineOpacity));
 
   // Try bitmap cache first (includes outline rendering)
-  if (outlineWidthPx > 0 && outlineOpacity > 0) {
+  if (outlineWidthPx > 0 && outlineOpacity > 0 && text.length >= 3) {
     const key = `${font}|${text}|${color}|${Math.round(strokeWidth)}|${strokeColor}`;
     const bitmap = textBitmapCache.get(key);
     if (bitmap) {
