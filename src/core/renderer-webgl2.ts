@@ -8,7 +8,9 @@
  */
 
 import type { ChatMessage, OverlaySettings } from '@app-types';
+import { drawRoundRect } from '@core/canvas-text-renderer';
 import { computeOutlineColor } from '@core/color-utils';
+import { rendererLayout } from '@core/design-tokens';
 import type { LanePlacement } from '@core/lane-allocator';
 import { createLogger } from '@core/logging';
 import type { Overlay } from '@core/overlay';
@@ -28,6 +30,7 @@ import {
 import { SDF_FRAGMENT_SHADER, SDF_VERTEX_SHADER } from '@core/sdf-shaders';
 import { getFontString, measureTextWidth } from '@core/text-measure';
 import { TEXTURE_FRAGMENT_SHADER, TEXTURE_VERTEX_SHADER } from '@core/webgl2-texture-shaders';
+import { drawAuthorPhoto } from '@shared/canvas-rendering-shared';
 
 const log = createLogger('RendererWebGL2');
 
@@ -73,6 +76,11 @@ export class RendererWebGL2 extends RendererBase {
   private _ageFadeRate = 0;
   private _invFadeDuration = 0;
 
+  // Canvas2D overlay for card decorations (round rects, author photos)
+  private overlay2d: HTMLCanvasElement;
+  private ctx2d: CanvasRenderingContext2D;
+  private authorPhotoCache = new Map<string, HTMLImageElement>();
+
   // Uniform locations
   private u_viewport!: WebGLUniformLocation | null;
   private u_atlasSize!: WebGLUniformLocation | null;
@@ -99,6 +107,16 @@ export class RendererWebGL2 extends RendererBase {
     canvas.style.cssText =
       'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none';
     if (container) container.appendChild(canvas);
+
+    // Canvas2D overlay for card decorations (round rects, author photos)
+    const overlay2d = document.createElement('canvas');
+    overlay2d.style.cssText =
+      'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:1';
+    if (container) container.appendChild(overlay2d);
+    const ctx2d = overlay2d.getContext('2d');
+    if (!ctx2d) throw new Error('Failed to create 2D overlay context');
+    this.overlay2d = overlay2d;
+    this.ctx2d = ctx2d;
 
     const gl = canvas.getContext('webgl2', {
       alpha: true,
@@ -321,6 +339,16 @@ export class RendererWebGL2 extends RendererBase {
     return tex;
   }
 
+  private loadAuthorPhoto(url: string): HTMLImageElement | undefined {
+    const cached = this.authorPhotoCache.get(url);
+    if (cached) return cached;
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.src = url;
+    this.authorPhotoCache.set(url, img);
+    return undefined; // not loaded yet
+  }
+
   private async initAtlas(): Promise<void> {
     if (this.atlasGenerating) return;
     this.atlasGenerating = true;
@@ -507,6 +535,11 @@ export class RendererWebGL2 extends RendererBase {
       this.cssWidth = dims.width;
       this.cssHeight = dims.height;
       this.laneAllocator.reset(dims);
+      // Also resize the overlay canvas
+      if (this.overlay2d) {
+        this.overlay2d.width = Math.ceil(this.cssWidth * this.dpr);
+        this.overlay2d.height = Math.ceil(this.cssHeight * this.dpr);
+      }
     }
     gl.viewport(0, 0, Math.ceil(this.cssWidth * this.dpr), Math.ceil(this.cssHeight * this.dpr));
     gl.clearColor(0, 0, 0, 0);
@@ -553,6 +586,65 @@ export class RendererWebGL2 extends RendererBase {
       );
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.texQuadCount);
       gl.bindVertexArray(null);
+    }
+
+    // Canvas2D overlay: card round-rects + author photos
+    if (this.ctx2d) {
+      const dpr = this.dpr;
+      this.overlay2d.width = Math.ceil(this.cssWidth * dpr);
+      this.overlay2d.height = Math.ceil(this.cssHeight * dpr);
+      this.ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
+      this.ctx2d.clearRect(0, 0, this.cssWidth, this.cssHeight);
+
+      for (const msg of this.messages) {
+        const elapsed = msg.startTime > 0 ? Math.max(0, now - msg.startTime) : 0;
+        const op = computeMessageOpacity(
+          msg.message,
+          elapsed,
+          msg.duration,
+          msg.laneIndex >= 0,
+          msg.speedTier,
+          this._opacityConfig
+        );
+        if (op <= 0) continue;
+
+        if (msg.message.kind === 'superchat' || msg.message.kind === 'membership') {
+          // Round-rect card background (replaces the flat WebGL2 quad)
+          const pad = 4;
+          const bgColor =
+            msg.message.kind === 'superchat'
+              ? (msg.message.superChat?.backgroundColor ?? '#ff0000')
+              : '#0f0';
+          this.ctx2d.globalAlpha = op * 0.85;
+          this.ctx2d.fillStyle = bgColor;
+          drawRoundRect(
+            this.ctx2d,
+            msg.x - pad,
+            msg.y - pad,
+            msg.width + pad * 2,
+            msg.height + pad * 2,
+            6 // corner radius
+          );
+          this.ctx2d.fill();
+          this.ctx2d.globalAlpha = 1;
+
+          // Author photo
+          const photoUrl = msg.message.authorPhotoUrl;
+          if (photoUrl) {
+            const photo = this.loadAuthorPhoto(photoUrl);
+            if (photo?.complete && photo.naturalWidth > 0) {
+              const photoX = msg.x + rendererLayout.paddingH;
+              const photoY = msg.y + rendererLayout.paddingV;
+              drawAuthorPhoto(this.ctx2d, photo, photoX, photoY);
+            } else if (photo && !photo.complete) {
+              // trigger load
+              photo.onload = () => {
+                /* photo will appear next frame */
+              };
+            }
+          }
+        }
+      }
     }
   }
 
@@ -727,6 +819,7 @@ export class RendererWebGL2 extends RendererBase {
     this.messages.length = 0;
     for (const tex of this.emojiTextures.values()) this.gl.deleteTexture(tex);
     this.emojiTextures.clear();
+    this.authorPhotoCache.clear();
   }
 
   protected onDestroy(): void {
@@ -739,5 +832,8 @@ export class RendererWebGL2 extends RendererBase {
     if (this.solidWhiteTex) this.gl.deleteTexture(this.solidWhiteTex);
     for (const tex of this.emojiTextures.values()) this.gl.deleteTexture(tex);
     this.emojiTextures.clear();
+    // Remove the overlay canvas from DOM
+    if (this.overlay2d.parentNode) this.overlay2d.parentNode.removeChild(this.overlay2d);
+    this.authorPhotoCache.clear();
   }
 }
