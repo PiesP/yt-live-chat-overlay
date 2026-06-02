@@ -302,9 +302,6 @@ export function drawAuthorSection(
   const authorPhotoUrl = message.authorPhotoUrl;
   const photo = authorPhotoUrl ? authorPhotoCache.get(authorPhotoUrl) : undefined;
   if (photo?.complete && photo.naturalWidth > 0 && authorPhotoUrl) {
-    // LRU touch: re-insert to move key to end of Map
-    authorPhotoCache.delete(authorPhotoUrl);
-    authorPhotoCache.set(authorPhotoUrl, photo);
     drawAuthorPhoto(ctx, photo, textX, startY);
   }
   const nameX = textX + (photo ? rendererLayout.authorPhotoSize + spacing.xs : 0);
