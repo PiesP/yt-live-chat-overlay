@@ -14,7 +14,7 @@
 // ── Constants ────────────────────────────────────────────────────────────────
 
 /** Glyph raster size in pixels (before SDF padding) */
-const GLYPH_RASTER_SIZE = 32;
+export const GLYPH_RASTER_SIZE = 32;
 
 /** SDF padding per side — determines the distance field spread */
 const SDF_PADDING = 4;

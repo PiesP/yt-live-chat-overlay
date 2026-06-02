@@ -20,11 +20,13 @@ import { computeMessageOpacity, type OpacityConfig } from '@core/renderer-shared
 import {
   ATLAS_CELL_SIZE,
   ATLAS_SIZE,
+  GLYPH_RASTER_SIZE,
   SDF_DISTANCE_RANGE,
   type SDFAtlas,
   SDFAtlasGenerator,
 } from '@core/sdf-atlas';
 import { SDF_FRAGMENT_SHADER, SDF_VERTEX_SHADER } from '@core/sdf-shaders';
+import { getFontString, measureTextWidth } from '@core/text-measure';
 
 const log = createLogger('RendererWebGL2');
 
@@ -311,10 +313,9 @@ export class RendererWebGL2 extends RendererBase {
   private createCanvasMessage(msg: ChatMessage): CanvasMessage {
     const fontSize = this.settings.fontSize;
     const lh = Math.ceil(fontSize * 1.4);
-    let w = 0;
-    for (const seg of msg.content) {
-      if (seg.type === 'text') w += seg.content.length * fontSize * 0.7;
-    }
+    const font = getFontString(fontSize, this.settings.fontWeight, this.settings.fontFamily);
+    const text = msg.content.map((s) => (s.type === 'text' ? s.content : '')).join('');
+    const w = text ? measureTextWidth(text, font) : 0;
     return {
       message: msg,
       x: 0,
@@ -361,8 +362,8 @@ export class RendererWebGL2 extends RendererBase {
     const dims = this.overlay.getDimensions();
     if (!dims) return;
 
-    const isScrolling =
-      this.settings.danmakuMode === 'scroll' || this.settings.danmakuMode === 'reverse';
+    const mode = this.settings.danmakuMode;
+    const cssW = dims.width;
 
     while (!this.pendingQueue.isEmpty && skipped < MAX_SKIP) {
       if (this.isAntiBlockActive()) break;
@@ -381,11 +382,13 @@ export class RendererWebGL2 extends RendererBase {
         continue;
       }
       const now2 = performance.now();
-      canvasMsg.startX = isScrolling
-        ? this.settings.danmakuMode === 'scroll'
-          ? dims.width
-          : -canvasMsg.width
-        : Math.max(0, Math.floor((dims.width - canvasMsg.width) / 2));
+      if (mode === 'reverse') {
+        canvasMsg.startX = -canvasMsg.width;
+      } else if (mode === 'scroll') {
+        canvasMsg.startX = cssW;
+      } else {
+        canvasMsg.startX = (cssW - canvasMsg.width) / 2;
+      }
       canvasMsg.x = canvasMsg.startX;
       canvasMsg.y = placement.laneY;
       canvasMsg.laneIndex = placement.laneIndex;
@@ -396,8 +399,8 @@ export class RendererWebGL2 extends RendererBase {
         placement,
         now2,
         canvasMsg.duration,
-        isScrolling ? canvasMsg.width : undefined,
-        isScrolling ? dims.width : undefined,
+        mode === 'scroll' || mode === 'reverse' ? canvasMsg.width : undefined,
+        mode === 'scroll' || mode === 'reverse' ? dims.width : undefined,
         speedTier
       );
       this.messages.push(canvasMsg);
@@ -452,12 +455,25 @@ export class RendererWebGL2 extends RendererBase {
 
   private updateMessages(now: number): void {
     let wi = 0;
+    const mode = this.settings.danmakuMode;
+    const cssW = this.cssWidth;
     for (let i = 0; i < this.messages.length; i++) {
       const m = this.messages[i] as CanvasMessage;
       if (m.laneIndex >= 0) {
-        const p = (now - m.startTime) / m.duration;
-        if (p >= 1) continue;
-        m.x = m.startX - p * (this.cssWidth + m.width);
+        const progress = (now - m.startTime) / m.duration;
+        if (progress >= 1) continue;
+        switch (mode) {
+          case 'scroll':
+            m.x = m.startX - progress * (cssW + m.width);
+            break;
+          case 'reverse':
+            m.x = m.startX + progress * (cssW + m.width) - m.width;
+            break;
+          case 'top':
+          case 'bottom':
+            m.x = m.startX;
+            break;
+        }
       }
       if (wi !== i) this.messages[wi] = m;
       wi++;
@@ -468,6 +484,7 @@ export class RendererWebGL2 extends RendererBase {
   private buildInstances(now: number): void {
     this.instanceCount = 0;
     const fs = this.settings.fontSize;
+    const scale = this.settings.fontSize / GLYPH_RASTER_SIZE;
     for (const msg of this.messages) {
       if (this.instanceCount >= MAX_INSTANCES) break;
       const elapsed = msg.startTime > 0 ? Math.max(0, now - msg.startTime) : 0;
@@ -498,7 +515,7 @@ export class RendererWebGL2 extends RendererBase {
         this.instanceData[off + 7] = c[2];
         this.instanceData[off + 8] = op;
         this.instanceCount++;
-        cx += gi?.advanceWidth ?? fs * 0.7;
+        cx += (gi?.advanceWidth ?? this.settings.fontSize * 0.7) * scale;
       }
     }
   }
