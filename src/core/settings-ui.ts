@@ -215,7 +215,8 @@ export class SettingsUi {
     // Show immediate feedback — briefly switch to a checkmark so the user
     // knows the reload was triggered.  The runtime restart is async and
     // happens in the background; the checkmark confirms the action started.
-    const icon = this.reloadButton.textContent;
+    // Capture the original icon as a constant so rapid double-clicks don't
+    // capture the checkmark itself and get stuck on ✓ permanently.
     this.reloadButton.textContent = '\u2713';
     this.reloadButton.classList.add('yt-chat-overlay-reload-button--done');
 
@@ -223,7 +224,7 @@ export class SettingsUi {
     this.reloadFeedbackTimer = setTimeout(() => {
       this.reloadFeedbackTimer = null;
       if (this.reloadButton) {
-        this.reloadButton.textContent = icon;
+        this.reloadButton.textContent = '\u21BB';
         this.reloadButton.classList.remove('yt-chat-overlay-reload-button--done');
       }
     }, 1500);

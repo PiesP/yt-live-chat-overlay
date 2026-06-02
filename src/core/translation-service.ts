@@ -298,11 +298,15 @@ export class TranslationService {
       }
     }
 
-    if (!this.translator) return null;
+    if (!this.translator) {
+      releaseLock();
+      return null;
+    }
 
     // ── Check cache before calling the API ────────────────────────────
     const cached = this.translationCache.get(text);
     if (cached !== undefined) {
+      releaseLock();
       return cached;
     }
 
