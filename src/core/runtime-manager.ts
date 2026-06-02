@@ -21,7 +21,9 @@ import { installFetchInterceptor } from '@core/fetch-interceptor';
 import { createLogger } from '@core/logging';
 import { MessageIdRegistry } from '@core/message-id-registry';
 import { OVERLAY_SELECTOR, Overlay } from '@core/overlay';
+import type { RendererBase } from '@core/renderer-base';
 import { CanvasRenderer } from '@core/renderer-canvas';
+import { RendererWebGL2 } from '@core/renderer-webgl2';
 import { shouldResetRendererForSettingsChange } from '@core/settings-schema';
 import { StandbyController } from '@core/standby-controller';
 import { VideoPauseController } from '@core/video-pause-controller';
@@ -131,7 +133,7 @@ export class RuntimeManager {
   private targetUrl: string | null = null;
   private abortController = new AbortController();
   private overlay: Overlay | null = null;
-  private renderer: CanvasRenderer | null = null;
+  private renderer: RendererBase | null = null;
   private chatSource: ChatSource | null = null;
   private foregroundCleanup: (() => void) | null = null;
   private videoPauseController = new VideoPauseController();
@@ -362,7 +364,7 @@ export class RuntimeManager {
       }
 
       this.overlay = overlay;
-      this.renderer = new CanvasRenderer(overlay, settings);
+      this.renderer = this.createRenderer(overlay, settings);
       this.standbyController.setRenderer(this.renderer);
 
       const chatStarted = await this.startChatSource(signal);
@@ -631,7 +633,7 @@ export class RuntimeManager {
     }
   }
 
-  private ensureBacklogController(renderer: CanvasRenderer): void {
+  private ensureBacklogController(renderer: RendererBase): void {
     if (this.backlogController) return;
 
     const settings = this.settings as OverlaySettings;
@@ -854,10 +856,7 @@ export class RuntimeManager {
     this.chatWatchdogTimer = clearSafeInterval(this.chatWatchdogTimer);
   }
 
-  private replayLatestMessages(
-    renderer: CanvasRenderer,
-    limit = RECENT_MESSAGE_REPLAY_LIMIT
-  ): void {
+  private replayLatestMessages(renderer: RendererBase, limit = RECENT_MESSAGE_REPLAY_LIMIT): void {
     const latestMessages = this.chatSource?.getLatestMessages(limit) ?? [];
     for (const message of latestMessages) {
       // sessionDedup check prevents re-rendering messages already shown
@@ -945,5 +944,23 @@ export class RuntimeManager {
       url: null,
       attempts: 0,
     };
+  }
+
+  /**
+   * Create the appropriate renderer based on settings.
+   * Attempts WebGL2 SDF renderer when enabled, falls back to Canvas2D.
+   */
+  private createRenderer(overlay: Overlay, settings: OverlaySettings): RendererBase {
+    if (settings.enableWebGL2) {
+      try {
+        const renderer = new RendererWebGL2(overlay, settings);
+        log.info('Using WebGL2 SDF renderer');
+        return renderer;
+      } catch (err: unknown) {
+        log.warn('WebGL2 SDF renderer unavailable, falling back to Canvas2D:', err);
+      }
+    }
+    log.info('Using Canvas2D renderer');
+    return new CanvasRenderer(overlay, settings);
   }
 }

@@ -94,6 +94,7 @@ type SettingMeta = {
 };
 const ROOT_SETTING_META = {
   enabled: { type: 'boolean', visual: false },
+  enableWebGL2: { type: 'boolean', visual: true },
   danmakuMode: { type: 'string', visual: false },
   speedPxPerSec: { type: 'number', visual: true },
   fontSize: { type: 'number', visual: true },
@@ -372,6 +373,7 @@ const DEFAULT_OUTLINE = {
 
 export const DEFAULT_SETTINGS = {
   enabled: true,
+  enableWebGL2: false,
   danmakuMode: 'scroll',
   speedPxPerSec: 250,
   fontSize: 32,

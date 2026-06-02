@@ -317,6 +317,22 @@ export abstract class RendererBase {
   abstract get laneCount(): number;
   protected abstract getQueueLength(): number;
 
+  /** Number of lanes currently available (delegates to laneAllocator). */
+  getLaneCount(): number {
+    return this.laneAllocator.getLaneCount();
+  }
+
+  /** Current lane utilization ratio (0-1). */
+  getLaneUtilization(): number {
+    return this.laneAllocator.getUtilization();
+  }
+
+  /** Trim expired messages from the background queue. Override in subclasses. */
+  trimBackgroundQueue(): void {}
+
+  /** Replay a previously received message. Override in subclasses. */
+  replayMessage(_message: ChatMessage): void {}
+
   protected abstract onPause(): void;
   protected abstract onResume(): void;
   protected abstract applyPausedDuration(pausedMs: number): void;

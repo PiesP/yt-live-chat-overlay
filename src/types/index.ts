@@ -159,6 +159,8 @@ export interface OutlineSettings {
 export interface OverlaySettings {
   /** Enable/disable overlay */
   enabled: boolean;
+  /** Enable WebGL2 SDF text renderer (falls back to Canvas2D if unavailable) */
+  enableWebGL2: boolean;
   /** Danmaku comment display mode */
   danmakuMode: DanmakuMode;
   /** Speed in pixels per second (100-400) */

@@ -13,7 +13,7 @@
 
 import { clearSafeTimeout, isAbortError } from '@core/dom';
 import { createLogger } from '@core/logging';
-import type { CanvasRenderer } from '@core/renderer-canvas';
+import type { RendererBase } from '@core/renderer-base';
 import { bootstrapChatSession } from '@core/youtubei-chat';
 
 type RestartReason = 'foreground-return' | 'watchdog' | 'standby-resolved';
@@ -30,7 +30,7 @@ export class StandbyController {
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
   private pollDelay = RECHECK_INTERVAL_MS;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
-  private renderer: CanvasRenderer | null = null;
+  private renderer: RendererBase | null = null;
 
   constructor(
     private readonly getAbortSignal: () => AbortSignal,
@@ -39,7 +39,7 @@ export class StandbyController {
   ) {}
 
   /** Attach the renderer for standby status UI feedback. */
-  setRenderer(renderer: CanvasRenderer | null): void {
+  setRenderer(renderer: RendererBase | null): void {
     this.renderer = renderer;
   }
 
