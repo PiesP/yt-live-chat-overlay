@@ -172,3 +172,8 @@ export interface CanvasMessage {
   /** Pre-computed render message (always set — either original or desaturated copy). */
   renderMessage: ChatMessage;
 }
+
+// ── Re-exports ──────────────────────────────────────────────────────────────
+
+/** @deprecated Import directly from @core/design-tokens */
+export { DEFAULT_TEXT_COLOR } from '@core/design-tokens';

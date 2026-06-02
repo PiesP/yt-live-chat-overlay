@@ -54,6 +54,11 @@ export const spacing = {
   lg: 16,
 } as const;
 
+// ── Fallback colors ─────────────────────────────────────────────────────────
+
+/** Default text color used when no author-specific color is configured. */
+export const DEFAULT_TEXT_COLOR = '#ffffff';
+
 // ── SuperChat amount badge ──
 export const SUPERCHAT_AMOUNT_BADGE_FILL = 'rgba(255, 255, 255, 0.24)';
 export const SUPERCHAT_AMOUNT_BADGE_STROKE = 'rgba(255, 255, 255, 0.35)';

@@ -37,6 +37,7 @@ import { toRgba } from '@core/color-utils';
 import { computeScrollDuration, rendererLayout, spacing } from '@core/design-tokens';
 import {
   ANTI_BLOCK_FREE_RATIO,
+  DEFAULT_TEXT_COLOR,
   DRAIN_QUEUE_MAX_SKIP as DRAIN_MAX_SKIP,
   desaturateColor,
   EPSILON,
@@ -1132,11 +1133,11 @@ function renderPaidCardWorker(
       message.badgeText,
       textX + card.badgePaddingH,
       cursorY + badgeHeight / 2,
-      '#ffffff',
+      DEFAULT_TEXT_COLOR,
       outlineWidthPx,
       outlineOpacity
     );
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = DEFAULT_TEXT_COLOR;
     ctx.fillText(message.badgeText, textX + card.badgePaddingH, cursorY + badgeHeight / 2);
     ctx.textBaseline = 'top';
     ctx.fillStyle = prevFillStyle;
@@ -1958,7 +1959,7 @@ function activateMessage(
 
   // ── Per-author color ──
   const authorColor =
-    (msg.authorType && config.authorColors[msg.authorType]) || config.color || '#ffffff';
+    (msg.authorType && config.authorColors[msg.authorType]) || config.color || DEFAULT_TEXT_COLOR;
 
   const am: ActiveMessage = {
     id: msg.id,

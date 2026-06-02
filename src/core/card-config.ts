@@ -11,6 +11,7 @@
 import type { ChatMessage, OverlaySettings, RgbColor } from '@app-types';
 import { computeReadableTextColor } from '@core/color-utils';
 import {
+  DEFAULT_TEXT_COLOR,
   colors as designColors,
   rendererLayout,
   resolveSuperChatRgb,
@@ -139,7 +140,7 @@ export function toWorkerConfig(
     badgeStrokeWidth: config.badge?.strokeWidth ?? 0,
     headerTagEnabled: config.headerTag?.enabled ?? false,
     headerTagFontSizeScale: config.headerTag?.fontSizeScale ?? 0.8,
-    headerTagColor: config.headerTag?.color ?? '#ffffff',
+    headerTagColor: config.headerTag?.color ?? DEFAULT_TEXT_COLOR,
     headerTagMarginTop: config.headerTag?.marginTop ?? 0,
     headerTagMarginBottom: config.headerTag?.marginBottom ?? 0,
     authorShow,
@@ -250,7 +251,7 @@ export function createSuperChatCardConfig(): CardConfig {
       enabled: false,
       getText: () => undefined,
       fontSizeScale: 0.8,
-      color: '#ffffff',
+      color: DEFAULT_TEXT_COLOR,
       marginTop: 0,
       marginBottom: 0,
     },
@@ -334,7 +335,7 @@ export function createMembershipCardConfig(): CardConfig {
       vertical: rendererLayout.membership.paddingV,
     },
     cardRadius: rendererLayout.membershipCardRadius,
-    textColor: '#ffffff',
+    textColor: DEFAULT_TEXT_COLOR,
     resolveColor: () => mem.background,
     needsGradientCache: false,
     needsElapsed: true,

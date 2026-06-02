@@ -1205,6 +1205,11 @@ export class CanvasRenderer extends RendererBase {
    *
    * Same-tier messages use the standard adaptive formula:
    *   headwayPx = clamp(msgWidth × 0.08, 16, 60)
+   *
+   * @param activeWidth    Width of the active message on the lane (px)
+   * @param activeSpeedTier Speed tier of the active message
+   * @param newSpeedTier   Speed tier of the incoming message
+   * @returns Headway gap in px (always ≥ 16)
    */
   private computeHeadwayPx(
     activeWidth: number,

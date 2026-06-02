@@ -17,7 +17,7 @@ import {
 } from '@core/canvas-text-renderer';
 import type { CardConfig } from '@core/card-config';
 import { computeReadableTextColor, toRgba } from '@core/color-utils';
-import { rendererLayout, spacing } from '@core/design-tokens';
+import { DEFAULT_TEXT_COLOR, rendererLayout, spacing } from '@core/design-tokens';
 import { measureTextHeight } from '@core/text-measure';
 
 // ── SuperChat card ───────────────────────────────────────────────────────────
@@ -228,11 +228,11 @@ function renderCardBadge(
     text,
     x + badge.paddingH,
     y + badgeHeight / 2,
-    '#ffffff',
+    DEFAULT_TEXT_COLOR,
     settings.outline.widthPx,
     settings.outline.opacity
   );
-  ctx.fillStyle = '#ffffff';
+  ctx.fillStyle = DEFAULT_TEXT_COLOR;
   ctx.fillText(text, x + badge.paddingH, y + badgeHeight / 2);
   ctx.textBaseline = 'top';
   ctx.restore();
