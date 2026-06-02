@@ -132,7 +132,15 @@ export function cacheTextBitmap(
   const height = ascent + descent + Math.ceil(strokeWidth) + 2;
   ctx.restore();
 
-  const offscreen = new OffscreenCanvas(width, height);
+  const offscreen: HTMLCanvasElement | OffscreenCanvas =
+    typeof OffscreenCanvas !== 'undefined'
+      ? new OffscreenCanvas(width, height)
+      : (() => {
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          return canvas;
+        })();
   const offCtx = offscreen.getContext('2d');
   if (!offCtx) return;
 

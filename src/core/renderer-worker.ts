@@ -636,12 +636,7 @@ function renderWrappedContentSegments(
 
   // Set font once for all measureText calls inside buildWrappedLines
   ctx.font = font;
-  const { lines } = buildWrappedLines(
-    segments,
-    maxWidth,
-    emojiSize,
-    (text: string) => ctx.measureText(text).width
-  );
+  const { lines } = buildWrappedLines(segments, maxWidth, emojiSize, measureTextCached);
 
   // ── Render lines (up to maxLines) ────────────────────────────────────
   const renderLines = lines.length > maxLines ? lines.slice(0, maxLines) : lines;
