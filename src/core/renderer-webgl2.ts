@@ -310,6 +310,16 @@ export class RendererWebGL2 extends RendererBase {
     }
   }
 
+  /** Set translated text for an active message. Searches only placed messages (not the pending queue). */
+  setTranslatedText(messageId: string, translatedText: string): void {
+    for (const msg of this.messages) {
+      if (msg.message.id === messageId) {
+        msg.translatedText = translatedText;
+        return;
+      }
+    }
+  }
+
   private createCanvasMessage(msg: ChatMessage): CanvasMessage {
     const fontSize = this.settings.fontSize;
     const lh = Math.ceil(fontSize * 1.4);
@@ -517,11 +527,41 @@ export class RendererWebGL2 extends RendererBase {
         this.instanceCount++;
         cx += (gi?.advanceWidth ?? this.settings.fontSize * 0.7) * scale;
       }
+
+      // Dual translation mode: render translated text above original
+      if (this.settings.translationMode === 'dual' && msg.translatedText) {
+        let tx = msg.x;
+        const ty = msg.y - fs * 1.2; // above original
+        const tOpacity = op * 0.7; // slightly dimmer
+        for (let ci = 0; ci < msg.translatedText.length; ci++) {
+          if (this.instanceCount >= MAX_INSTANCES) break;
+          const cp = msg.translatedText.codePointAt(ci) ?? 0x20;
+          const gi = this.atlas?.glyphs.get(cp);
+          const off = this.instanceCount * FLOATS_PER_INSTANCE;
+          const c = this.getMessageColor(msg);
+          this.instanceData[off + 0] = tx;
+          this.instanceData[off + 1] = ty;
+          this.instanceData[off + 2] = fs * 0.7;
+          this.instanceData[off + 3] = fs * 1.2;
+          this.instanceData[off + 4] = gi?.index ?? this.atlas?.glyphs.get(0xfffd)?.index ?? 0;
+          this.instanceData[off + 5] = c[0];
+          this.instanceData[off + 6] = c[1];
+          this.instanceData[off + 7] = c[2];
+          this.instanceData[off + 8] = tOpacity;
+          this.instanceCount++;
+          tx += (gi?.advanceWidth ?? this.settings.fontSize * 0.7) * scale;
+        }
+      }
     }
   }
 
   private getRenderText(msg: CanvasMessage): string {
-    return msg.translatedText && this.settings.translationMode === 'dual'
+    // In dual mode, render the original text in the main loop — translated text is rendered above separately.
+    if (msg.translatedText && this.settings.translationMode === 'dual') {
+      return msg.message.content.map((s) => (s.type === 'text' ? s.content : ' ')).join('');
+    }
+    // In replace mode, use translated text; otherwise use original.
+    return msg.translatedText && this.settings.translationMode === 'replace'
       ? msg.translatedText
       : msg.message.content.map((s) => (s.type === 'text' ? s.content : ' ')).join('');
   }
