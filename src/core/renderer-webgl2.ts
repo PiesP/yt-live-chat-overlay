@@ -27,6 +27,7 @@ import {
 } from '@core/sdf-atlas';
 import { SDF_FRAGMENT_SHADER, SDF_VERTEX_SHADER } from '@core/sdf-shaders';
 import { getFontString, measureTextWidth } from '@core/text-measure';
+import { TEXTURE_FRAGMENT_SHADER, TEXTURE_VERTEX_SHADER } from '@core/webgl2-texture-shaders';
 
 const log = createLogger('RendererWebGL2');
 
@@ -48,6 +49,15 @@ export class RendererWebGL2 extends RendererBase {
   private atlas: SDFAtlas | null = null;
   private atlasReady = false;
   private atlasGenerating = false;
+
+  // Texture program for emoji + card background rendering
+  private textureProgram: WebGLProgram;
+  private u_texViewport: WebGLUniformLocation | null = null;
+  private u_texSampler: WebGLUniformLocation | null = null;
+  private emojiTextures = new Map<string, WebGLTexture>();
+  private solidWhiteTex: WebGLTexture | null = null; // 1x1 white pixel for card backgrounds
+  private texQuadCount = 0;
+  private texQuadData = new Float32Array(MAX_INSTANCES * FLOATS_PER_INSTANCE);
 
   private dpr = 1;
   private cssWidth = 0;
@@ -100,6 +110,38 @@ export class RendererWebGL2 extends RendererBase {
     this.gl = gl;
 
     this.program = this.createProgram(SDF_VERTEX_SHADER, SDF_FRAGMENT_SHADER);
+
+    // Create texture program for emoji + card backgrounds
+    this.textureProgram = this.createProgram(TEXTURE_VERTEX_SHADER, TEXTURE_FRAGMENT_SHADER);
+
+    // Cache texture program uniforms
+    gl.useProgram(this.textureProgram);
+    this.u_texViewport = gl.getUniformLocation(this.textureProgram, 'u_viewport');
+    this.u_texSampler = gl.getUniformLocation(this.textureProgram, 'u_texture');
+    gl.uniform1i(this.u_texSampler, 0);
+
+    // Create 1x1 white texture for solid-color card backgrounds
+    const whiteTex = gl.createTexture();
+    if (whiteTex) {
+      gl.bindTexture(gl.TEXTURE_2D, whiteTex);
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.RGBA,
+        1,
+        1,
+        0,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        new Uint8Array([255, 255, 255, 255])
+      );
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      this.solidWhiteTex = whiteTex;
+    }
+
+    // Restore SDF program
+    gl.useProgram(this.program);
 
     const vao = gl.createVertexArray();
     if (!vao) throw new Error('Failed to create VAO');
@@ -243,6 +285,40 @@ export class RendererWebGL2 extends RendererBase {
     this.u_outlineColor = gl.getUniformLocation(this.program, 'u_outlineColor');
     this.u_outlineOpacity = gl.getUniformLocation(this.program, 'u_outlineOpacity');
     this.u_atlas = gl.getUniformLocation(this.program, 'u_atlas');
+  }
+
+  private getEmojiTexture(url: string): WebGLTexture | null {
+    const cached = this.emojiTextures.get(url);
+    if (cached) return cached;
+    // Create placeholder + load async
+    const gl = this.gl;
+    const tex = gl.createTexture();
+    if (!tex) return null;
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(
+      gl.TEXTURE_2D,
+      0,
+      gl.RGBA,
+      1,
+      1,
+      0,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      new Uint8Array([200, 200, 200, 255])
+    );
+    this.emojiTextures.set(url, tex);
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    };
+    img.src = url;
+    return tex;
   }
 
   private async initAtlas(): Promise<void> {
@@ -461,6 +537,23 @@ export class RendererWebGL2 extends RendererBase {
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.instanceCount);
       gl.bindVertexArray(null);
     }
+
+    // Second pass: texture-based emoji + card backgrounds
+    if (this.texQuadCount > 0 && this.solidWhiteTex) {
+      gl.useProgram(this.textureProgram);
+      gl.bindVertexArray(this.vao);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, this.solidWhiteTex);
+      gl.uniform2f(this.u_texViewport, this.cssWidth, this.cssHeight);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.instanceBuffer);
+      gl.bufferSubData(
+        gl.ARRAY_BUFFER,
+        0,
+        this.texQuadData.subarray(0, this.texQuadCount * FLOATS_PER_INSTANCE)
+      );
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.texQuadCount);
+      gl.bindVertexArray(null);
+    }
   }
 
   private updateMessages(now: number): void {
@@ -493,6 +586,7 @@ export class RendererWebGL2 extends RendererBase {
 
   private buildInstances(now: number): void {
     this.instanceCount = 0;
+    this.texQuadCount = 0;
     const fs = this.settings.fontSize;
     const scale = this.settings.fontSize / GLYPH_RASTER_SIZE;
     for (const msg of this.messages) {
@@ -552,6 +646,49 @@ export class RendererWebGL2 extends RendererBase {
           tx += (gi?.advanceWidth ?? this.settings.fontSize * 0.7) * scale;
         }
       }
+
+      // Card background for paid messages
+      if (msg.message.kind === 'superchat' || msg.message.kind === 'membership') {
+        const bgColor = this.parseColor(
+          msg.message.kind === 'superchat'
+            ? (msg.message.superChat?.backgroundColor ?? '#ff0000')
+            : '#0f0'
+        );
+        const pad = 4;
+        const bgOff = this.texQuadCount * FLOATS_PER_INSTANCE;
+        this.texQuadData[bgOff + 0] = msg.x - pad;
+        this.texQuadData[bgOff + 1] = msg.y - pad;
+        this.texQuadData[bgOff + 2] = msg.width + pad * 2;
+        this.texQuadData[bgOff + 3] = msg.height + pad * 2;
+        this.texQuadData[bgOff + 4] = 0;
+        this.texQuadData[bgOff + 5] = bgColor[0];
+        this.texQuadData[bgOff + 6] = bgColor[1];
+        this.texQuadData[bgOff + 7] = bgColor[2];
+        this.texQuadData[bgOff + 8] = op * 0.85;
+        this.texQuadCount++;
+      }
+
+      // Emoji rendering via texture pass
+      for (const seg of msg.message.content) {
+        if (seg.type !== 'emoji') continue;
+        const emojiUrl = seg.emoji?.url;
+        if (!emojiUrl) continue;
+        const tex = this.getEmojiTexture(emojiUrl);
+        if (!tex) continue;
+        const eOff = this.texQuadCount * FLOATS_PER_INSTANCE;
+        const eSize = fs * 1.2;
+        this.texQuadData[eOff + 0] = cx;
+        this.texQuadData[eOff + 1] = msg.y + (msg.height - eSize) / 2;
+        this.texQuadData[eOff + 2] = eSize;
+        this.texQuadData[eOff + 3] = eSize;
+        this.texQuadData[eOff + 4] = 0;
+        this.texQuadData[eOff + 5] = 1;
+        this.texQuadData[eOff + 6] = 1;
+        this.texQuadData[eOff + 7] = 1;
+        this.texQuadData[eOff + 8] = op;
+        this.texQuadCount++;
+        cx += eSize;
+      }
     }
   }
 
@@ -588,6 +725,8 @@ export class RendererWebGL2 extends RendererBase {
   }
   protected resetState(): void {
     this.messages.length = 0;
+    for (const tex of this.emojiTextures.values()) this.gl.deleteTexture(tex);
+    this.emojiTextures.clear();
   }
 
   protected onDestroy(): void {
@@ -596,5 +735,9 @@ export class RendererWebGL2 extends RendererBase {
     this.gl.deleteBuffer(this.instanceBuffer);
     this.gl.deleteVertexArray(this.vao);
     this.gl.deleteProgram(this.program);
+    if (this.textureProgram) this.gl.deleteProgram(this.textureProgram);
+    if (this.solidWhiteTex) this.gl.deleteTexture(this.solidWhiteTex);
+    for (const tex of this.emojiTextures.values()) this.gl.deleteTexture(tex);
+    this.emojiTextures.clear();
   }
 }
