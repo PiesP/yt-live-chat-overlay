@@ -20,11 +20,6 @@
  * sits at the start position (right edge) but is not rendered. The lane
  * allocator reservation is unaffected — the lane is locked from the
  * actual commit time, not the visual start time.
- *
- * Fixes from audit:
- * - BUG-1: updateSettings now propagates _options to super
- * - BUG-4: reverse travel distance uses consistent exitPadding
- * - BUG-5/6: image caches only store loaded images, errors don't cache
  */
 
 import type { ChatMessage, DropReason, OverlayDimensions, OverlaySettings } from '@app-types';
@@ -525,7 +520,7 @@ export class CanvasRenderer extends RendererBase {
     const dims = this.overlay.getDimensions();
     if (!dims) return;
 
-    // Apply up to MAX_TRANSLATIONS_PER_FRAME translation results that arrived
+    // Apply up to translationBatchSize translation results that arrived
     // between frames. Incremental drain prevents single-frame spikes during
     // chat bursts when many translations resolve simultaneously.
     if (this.pendingTranslations.length > 0) {
