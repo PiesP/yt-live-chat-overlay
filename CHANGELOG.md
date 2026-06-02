@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.35.3] - 2026-06-02
+
+### Fixed
+
+- **OffscreenCanvas fallback** — `cacheTextBitmap()` now guards `new OffscreenCanvas()` with a `typeof` check and falls back to `document.createElement('canvas')` for environments without `OffscreenCanvas` support (e.g. Firefox ESR, old Chromium).
+
+### Changed
+
+- **Worker text measurement cache** — The Worker renderer's `buildWrappedLines()` now uses the existing `measureTextCached()` LRU cache (500 entries) instead of raw `ctx.measureText()`, matching the main thread's cached `measureTextWidth()` behavior. Reduces redundant measurements for repeated words in SuperChat messages.
+- **Bitmap cache threshold** — `renderSegment()` now skips the text bitmap cache for strings shorter than 3 characters. Tiny strings ("ㅋ", "w", "草") render directly via `fillText()`/`strokeText()`, avoiding `OffscreenCanvas` creation overhead where raw rendering cost is lower. Reduces cache thrashing in emoji-heavy channels.
+
 ## [0.35.2] - 2026-05-30
 
 ### Changed
