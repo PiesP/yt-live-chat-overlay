@@ -9,10 +9,13 @@
 
 import type { ChatMessage, OverlaySettings } from '@app-types';
 import { computeOutlineColor } from '@core/color-utils';
+import type { LanePlacement } from '@core/lane-allocator';
 import { createLogger } from '@core/logging';
 import type { Overlay } from '@core/overlay';
+import { PriorityBucketQueue } from '@core/priority-bucket-queue';
 import { RendererBase } from '@core/renderer-base';
 import type { CanvasMessage } from '@core/renderer-constants';
+import { SPEED_TIER } from '@core/renderer-constants';
 import { computeMessageOpacity, type OpacityConfig } from '@core/renderer-shared';
 import {
   ATLAS_CELL_SIZE,
@@ -50,6 +53,9 @@ export class RendererWebGL2 extends RendererBase {
 
   private messages: CanvasMessage[] = [];
   private animFrameId: number | null = null;
+
+  private readonly pendingQueue = new PriorityBucketQueue();
+  private readonly retryQueue: ChatMessage[] = [];
 
   private _opacityConfig!: OpacityConfig;
   private _ageFadeRate = 0;
@@ -285,7 +291,21 @@ export class RendererWebGL2 extends RendererBase {
   }
 
   addMessage(message: ChatMessage): void {
-    this.messages.push(this.createCanvasMessage(message));
+    if (!this.isMessageAllowed(message)) return;
+    const priority = RendererBase.getMessagePriority(message);
+    if (this.pendingQueue.size >= this.settings.queueMaxSize) {
+      const lowest = this.pendingQueue.peekLowest();
+      if (lowest && priority <= RendererBase.getMessagePriority(lowest)) {
+        this.observability.onMessageDropped('queue_priority');
+        return;
+      }
+      this.pendingQueue.dropLowest();
+      this.observability.onMessageDropped('queue_replaced');
+    }
+    this.pendingQueue.enqueue(message, priority);
+    if (this.pendingQueue.size === 1 && !this.isPaused && !this.isVideoPaused) {
+      this.startRenderLoop();
+    }
   }
 
   private createCanvasMessage(msg: ChatMessage): CanvasMessage {
@@ -317,7 +337,12 @@ export class RendererWebGL2 extends RendererBase {
   }
 
   protected getQueueLength(): number {
-    return this.messages.length;
+    return this.pendingQueue.size;
+  }
+
+  trimBackgroundQueue(): void {
+    if (this.pendingQueue.size <= this.settings.backgroundQueueMax) return;
+    this.pendingQueue.trim(this.settings.backgroundQueueMax);
   }
 
   startRenderLoop(): void {
@@ -328,6 +353,61 @@ export class RendererWebGL2 extends RendererBase {
       this.renderFrame(t);
     };
     this.animFrameId = requestAnimationFrame(loop);
+  }
+
+  private drainQueue(_now: number): void {
+    const MAX_SKIP = 3;
+    let skipped = 0;
+    const dims = this.overlay.getDimensions();
+    if (!dims) return;
+
+    const isScrolling =
+      this.settings.danmakuMode === 'scroll' || this.settings.danmakuMode === 'reverse';
+
+    while (!this.pendingQueue.isEmpty && skipped < MAX_SKIP) {
+      if (this.isAntiBlockActive()) break;
+      const msg = this.pendingQueue.dequeue();
+      if (!msg) break;
+      const canvasMsg = this.createCanvasMessage(msg);
+      const speedTier = msg.isBacklog ? SPEED_TIER.BACKLOG : SPEED_TIER.MID;
+      const placement: LanePlacement | null = this.laneAllocator.findPlacement(
+        canvasMsg.height,
+        dims,
+        speedTier
+      );
+      if (!placement) {
+        this.retryQueue.push(msg);
+        skipped++;
+        continue;
+      }
+      const now2 = performance.now();
+      canvasMsg.startX = isScrolling
+        ? this.settings.danmakuMode === 'scroll'
+          ? dims.width
+          : -canvasMsg.width
+        : Math.max(0, Math.floor((dims.width - canvasMsg.width) / 2));
+      canvasMsg.x = canvasMsg.startX;
+      canvasMsg.y = placement.laneY;
+      canvasMsg.laneIndex = placement.laneIndex;
+      canvasMsg.startTime = now2;
+      canvasMsg.fadeStartTime = now2;
+      canvasMsg.staggerDelay = 0;
+      this.laneAllocator.commitPlacement(
+        placement,
+        now2,
+        canvasMsg.duration,
+        isScrolling ? canvasMsg.width : undefined,
+        isScrolling ? dims.width : undefined,
+        speedTier
+      );
+      this.messages.push(canvasMsg);
+      skipped = 0;
+    }
+
+    // Refill from retry queue
+    if (this.pendingQueue.isEmpty && this.retryQueue.length > 0) {
+      this.pendingQueue.refill(this.retryQueue, (m) => RendererBase.getMessagePriority(m));
+    }
   }
 
   private renderFrame(now: number): void {
@@ -342,6 +422,7 @@ export class RendererWebGL2 extends RendererBase {
     gl.viewport(0, 0, Math.ceil(this.cssWidth * this.dpr), Math.ceil(this.cssHeight * this.dpr));
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
+    this.drainQueue(now);
     this.updateMessages(now);
     this.buildInstances(now);
     if (this.instanceCount > 0 && this.atlasTexture) {
