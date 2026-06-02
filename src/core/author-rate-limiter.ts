@@ -112,10 +112,12 @@ export class PerAuthorRateLimiter {
     // Hard cap: prevent unbounded growth under extreme chat density
     // (e.g. 500+ active authors). Evict oldest entries first.
     // Use headroom-based pruning to avoid O(n log n) sort on every message:
-    // only evict when size exceeds MAX_ENTRIES * 1.25, prune down to MAX_ENTRIES * 0.75.
+    // only evict when size exceeds MAX_ENTRIES * PRUNE_TRIGGER_RATIO, prune down to MAX_ENTRIES * PRUNE_TARGET_RATIO.
     const maxEntries = 500;
-    if (this.authorTimestamps.size > maxEntries * 1.25) {
-      const target = Math.floor(maxEntries * 0.75);
+    const PRUNE_TRIGGER_RATIO = 1.25;
+    const PRUNE_TARGET_RATIO = 0.75;
+    if (this.authorTimestamps.size > maxEntries * PRUNE_TRIGGER_RATIO) {
+      const target = Math.floor(maxEntries * PRUNE_TARGET_RATIO);
       const sorted = [...this.authorTimestamps.entries()].sort(
         (a, b) => (a[1][0] ?? 0) - (b[1][0] ?? 0)
       );

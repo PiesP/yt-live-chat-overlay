@@ -15,7 +15,7 @@ import type {
   TranslationMode,
   TranslationService,
 } from '@app-types';
-import { DEFAULT_FONT_FAMILY, colors as designColors } from '@core/design-tokens';
+import { DEFAULT_FONT_FAMILY, colors as designColors, rendererLayout } from '@core/design-tokens';
 
 const isLogLevel = (value: unknown): value is LogLevel =>
   LOG_LEVEL_VALUES.includes(value as LogLevel);
@@ -421,7 +421,7 @@ export const DEFAULT_SETTINGS = {
   queueMaxSize: 200,
   backgroundQueueMax: 50,
   maxMessageAgeMs: 60000,
-  headwayGapRatio: 0.08,
+  headwayGapRatio: rendererLayout.headwayGapRatio,
   emojiCacheMb: 3,
   photoCacheMb: 2,
   stickerCacheMb: 1,
