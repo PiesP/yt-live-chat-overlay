@@ -107,7 +107,7 @@ export function drawRoundRect(
  * actualBoundingBox metrics for accurate sizing. Does NOT handle LRU eviction
  * — the caller's cache implementation is responsible for that.
  */
-export function cacheTextBitmap(
+function cacheTextBitmap(
   key: string,
   text: string,
   font: string,

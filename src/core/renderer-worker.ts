@@ -434,8 +434,6 @@ const opacityBuckets: Array<Array<{ msg: ActiveMessage; elapsed: number }>> = Ar
 /** Outline stroke scale factor. */
 // OUTLINE_STROKE_SCALE imported from @core/renderer-constants
 
-// cacheTextBitmap imported from @shared/canvas-rendering-shared
-
 // strokeTextOutline imported from @shared/canvas-rendering-shared
 
 // renderSegment imported from @shared/canvas-rendering-shared

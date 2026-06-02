@@ -174,10 +174,7 @@ export function measureTextWidth(text: string, font: string): number {
  *
  * Fallback: fontSize-based estimate when the bounding-box API is unavailable.
  */
-export function getFontMetrics(
-  font: string,
-  fontSize: number
-): { ascent: number; descent: number } {
+function getFontMetrics(font: string, fontSize: number): { ascent: number; descent: number } {
   const cached = fontMetricsCache.get(font);
   if (cached) return cached;
 
