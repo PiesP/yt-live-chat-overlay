@@ -36,15 +36,15 @@ export { drawRoundRect, strokeTextOutline } from '@shared/canvas-rendering-share
  * Internal piece type for word-wrapping content segments.
  * Each piece is either a word from a text segment or a single emoji.
  */
-export type WrappedRenderPiece = TextRenderPiece | EmojiRenderPiece;
+type WrappedRenderPiece = TextRenderPiece | EmojiRenderPiece;
 
-export interface TextRenderPiece {
+interface TextRenderPiece {
   type: 'text';
   text: string;
   width: number;
 }
 
-export interface EmojiRenderPiece {
+interface EmojiRenderPiece {
   type: 'emoji';
   emoji: ImageAsset;
   width: number;

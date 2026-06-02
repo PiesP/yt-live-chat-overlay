@@ -210,7 +210,7 @@ export class RenderWorkerManager {
    * Send a message to the render worker for display.
    * Serializes ChatMessage into lightweight cross-thread format.
    */
-  sendToWorker(message: ChatMessage): void {
+  sendToWorker(message: ChatMessage, msgId?: string): void {
     if (!this.worker) return;
 
     // Backpressure: drop low-priority messages when worker queue is backed up
@@ -273,7 +273,7 @@ export class RenderWorkerManager {
       type: 'addMessages',
       messages: [
         {
-          id: message.id ?? `${message.timestamp}-${Math.random()}`,
+          id: msgId ?? message.id ?? `${message.timestamp}-${Math.random()}`,
           text,
           width: dims.width,
           height: dims.height,
@@ -356,6 +356,8 @@ export class RenderWorkerManager {
    * speed to base speed. Always ≥ 1.0.
    */
   private computeBurstSpeedMultiplier(): number {
-    return Math.max(1.0, this.deps.getEffectiveSpeedPxPerSec() / this.deps.settings.speedPxPerSec);
+    const baseSpeed = this.deps.settings.speedPxPerSec;
+    const safeSpeed = Math.max(1, baseSpeed);
+    return Math.max(1.0, this.deps.getEffectiveSpeedPxPerSec() / safeSpeed);
   }
 }

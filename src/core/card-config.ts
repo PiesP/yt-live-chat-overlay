@@ -19,8 +19,8 @@ import {
   spacing,
 } from '@core/design-tokens';
 
-export type BackgroundMode = 'gradient' | 'solid';
-export type DecorationMode = 'accentBar' | 'pulsingBorder' | 'none';
+type BackgroundMode = 'gradient' | 'solid';
+type DecorationMode = 'accentBar' | 'pulsingBorder' | 'none';
 
 /**
  * Worker-safe CardConfig — no callbacks, all pre-computed values for structured clone.

@@ -53,7 +53,7 @@ import {
   TRANSLATION_GAP_PX,
   TRANSLATION_OPACITY_SCALE,
 } from '@core/renderer-constants';
-import { getFontString, measureTextHeight } from '@core/text-measure';
+import { type CharSegment, getFontString, measureTextHeight } from '@core/text-measure';
 import {
   drawAuthorPhoto,
   drawRoundRect,
@@ -458,11 +458,6 @@ interface EmojiRenderPiece {
   type: 'emoji';
   emojiUrl: string;
   emojiAlt?: string;
-  width: number;
-}
-
-interface CharSegment {
-  text: string;
   width: number;
 }
 
@@ -1746,20 +1741,23 @@ function renderFrame(): void {
             : renderColor;
           const translationY = sy + msg.height * TRANSLATION_FONT_SCALE + TRANSLATION_GAP_PX;
           ctx.save();
-          ctx.globalAlpha = (bucketIndex / (OPACITY_BUCKETS - 1)) * TRANSLATION_OPACITY_SCALE;
-          renderSegment(
-            ctx,
-            msg.translatedText,
-            sx,
-            Math.floor(translationY),
-            translationColor,
-            translationFontSize,
-            strokeWidth,
-            cfg.outlineOpacity,
-            textBitmapCache,
-            getFont
-          );
-          ctx.restore();
+          try {
+            ctx.globalAlpha = (bucketIndex / (OPACITY_BUCKETS - 1)) * TRANSLATION_OPACITY_SCALE;
+            renderSegment(
+              ctx,
+              msg.translatedText,
+              sx,
+              Math.floor(translationY),
+              translationColor,
+              translationFontSize,
+              strokeWidth,
+              cfg.outlineOpacity,
+              textBitmapCache,
+              getFont
+            );
+          } finally {
+            ctx.restore();
+          }
         }
       }
     } finally {
@@ -1843,6 +1841,12 @@ function drainQueue(now: number, width: number, height: number): void {
     activateMessage(entry, now, placement, batchIndex, width, height);
     skipped = 0;
     batchIndex++;
+  }
+
+  // Compact consumed entries to prevent unbounded memory growth
+  if (pendingQueueOffset > 64) {
+    pendingQueue.splice(0, pendingQueueOffset);
+    pendingQueueOffset = 0;
   }
 
   // Merge retries
@@ -2033,6 +2037,7 @@ function handleDestroy(): void {
   canvas = null;
   activeMessages.length = 0;
   pendingQueue.length = 0;
+  pendingQueueOffset = 0;
   textBitmapCache.clear();
   emojiCache.clear();
   authorPhotoCache.clear();

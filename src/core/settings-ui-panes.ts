@@ -31,7 +31,7 @@ interface EnabledField {
 export interface AuthorGridField {
   type: 'author-grid';
 }
-export interface RangeField extends BaseField {
+interface RangeField extends BaseField {
   type: 'range';
 }
 

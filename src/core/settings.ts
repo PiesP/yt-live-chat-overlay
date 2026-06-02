@@ -23,6 +23,9 @@ export class Settings {
    *  Incremented on every save(); the listener captures the pre-save generation
    *  and skips reload if it matches, handling both sync and async listener timing. */
   private saveGeneration = 0;
+  /** Tracks the saveGeneration value at the last self-initiated save.
+   *  GM listener skips reload when current saveGeneration matches this. */
+  private lastSelfSaveGeneration = 0;
   /** Debounce flag: true while a save is scheduled via requestIdleCallback. */
   private savePending = false;
   /** GM value change listener ID, for cleanup. */
@@ -73,10 +76,9 @@ export class Settings {
     // GM storage path: fires in all tabs (including the caller)
     if (typeof GM_addValueChangeListener !== 'undefined') {
       this.gmListenerId = GM_addValueChangeListener(STORAGE_KEY, () => {
-        // Skip self-triggered events: set() already applied the change,
-        // so reloading would be a no-op at best, or could reset dirty preview state.
-        const gen = this.saveGeneration;
-        if (gen > 0 && gen === this.saveGeneration) return;
+        // Skip self-triggered events: if our last save matches current generation,
+        // this event was triggered by our own save and we should not reload.
+        if (this.saveGeneration === this.lastSelfSaveGeneration) return;
         log.debug('Cross-tab settings change detected via GM listener');
         this.reloadFromStorage();
       });
@@ -108,6 +110,7 @@ export class Settings {
   private save(): void {
     try {
       this.saveGeneration++;
+      this.lastSelfSaveGeneration = this.saveGeneration;
       const data = { ...this.settings, _version: SETTINGS_VERSION };
       getSettingsStorageAdapter().setItem(STORAGE_KEY, JSON.stringify(data));
     } catch (error: unknown) {

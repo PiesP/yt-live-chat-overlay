@@ -379,11 +379,11 @@ export class CanvasRenderer extends RendererBase {
     if (!this.isMessageAllowed(message)) return;
     // Route to worker when off-main-thread rendering is active
     if (this.workerManager.isActive) {
-      this.workerManager.sendToWorker(message);
+      const msgId = message.id ?? `${message.timestamp}-${Math.random()}`;
+      this.workerManager.sendToWorker(message, msgId);
       // Also trigger translation asynchronously and send result to worker
       const translatableText = getTranslatableText(message);
       if (this.translationService.isEnabled && translatableText) {
-        const msgId = message.id ?? `${message.timestamp}-${Math.random()}`;
         this.translationService
           .translate(translatableText)
           .then((translated) => {
@@ -713,21 +713,24 @@ export class CanvasRenderer extends RendererBase {
             const transY = snappedY + msg.height + CanvasRenderer.TRANSLATION_GAP_PX;
             const transColor = this.settings.colors[msg.message.authorType];
             ctx.save();
-            ctx.globalAlpha = bucketOpacity * CanvasRenderer.TRANSLATION_OPACITY_SCALE;
-            // Bitmap-cached via renderSegment — same text across frames only rasterizes once.
-            renderSegment(
-              ctx,
-              msg.translatedText,
-              snappedX,
-              transY,
-              transColor,
-              fontSize,
-              this.settings.outline.widthPx,
-              this.settings.outline.opacity,
-              this.textBitmapCache,
-              this._boundGetFont
-            );
-            ctx.restore();
+            try {
+              ctx.globalAlpha = bucketOpacity * CanvasRenderer.TRANSLATION_OPACITY_SCALE;
+              // Bitmap-cached via renderSegment — same text across frames only rasterizes once.
+              renderSegment(
+                ctx,
+                msg.translatedText,
+                snappedX,
+                transY,
+                transColor,
+                fontSize,
+                this.settings.outline.widthPx,
+                this.settings.outline.opacity,
+                this.textBitmapCache,
+                this._boundGetFont
+              );
+            } finally {
+              ctx.restore();
+            }
           }
         }
       } finally {
