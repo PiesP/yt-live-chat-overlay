@@ -11,8 +11,6 @@ import {
   computeBaseHeadwayPx,
   computeLaneY,
   computeOccupancyMs,
-  HEADWAY_GAP_MAX_PX,
-  HEADWAY_GAP_MIN_PX,
   heapGetSlotAvailableAt,
   heapSiftDown,
   heapUpdateLane,
@@ -102,9 +100,6 @@ export class LaneAllocator {
    * Stale entries (until < now) are cleared on each resetBatch().
    */
   private speedTierLanes: Map<number, { tier: number; until: number }> = new Map();
-
-  static readonly HEADWAY_GAP_MIN_PX = HEADWAY_GAP_MIN_PX;
-  static readonly HEADWAY_GAP_MAX_PX = HEADWAY_GAP_MAX_PX;
 
   static computeBaseHeadwayPx(msgWidth: number, headwayGapRatio: number): number {
     return computeBaseHeadwayPx(msgWidth, headwayGapRatio);
