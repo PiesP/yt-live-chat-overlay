@@ -20,8 +20,17 @@ export const HEADWAY_GAP_MAX_PX = 60;
 
 // ── Pure computation functions ─────────────────────────────────────────────
 
-/** Compute minimum headway gap (px) between consecutive messages. */
+/**
+ * Compute minimum headway gap (px) between consecutive messages.
+ *
+ * @param msgWidth        Message width in px (from text measurement)
+ * @param headwayGapRatio Gap as fraction of message width (e.g. 0.08 = 8%)
+ * @returns Clamped headway gap in px, always in [16, 60]
+ */
 export function computeBaseHeadwayPx(msgWidth: number, headwayGapRatio: number): number {
+  if (!Number.isFinite(msgWidth) || !Number.isFinite(headwayGapRatio)) {
+    return HEADWAY_GAP_MIN_PX;
+  }
   return Math.max(
     HEADWAY_GAP_MIN_PX,
     Math.min(HEADWAY_GAP_MAX_PX, Math.round(msgWidth * headwayGapRatio))
@@ -77,6 +86,7 @@ export function computeOccupancyMs(
 
   // Scrolling mode: precision exit-time
   const totalDistance = screenWidth + msgWidthPx + exitPaddingPx;
+  if (totalDistance <= 0) return durationMs;
   const headwayPx = computeBaseHeadwayPx(msgWidthPx, headwayGapRatio);
   const rightEdgePassFraction = (msgWidthPx + headwayPx) / totalDistance;
   return Math.round(rightEdgePassFraction * durationMs);
