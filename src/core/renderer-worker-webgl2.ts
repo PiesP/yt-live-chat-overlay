@@ -150,6 +150,8 @@ let u_atlas: WebGLUniformLocation | null = null;
 let opacityConfig: OpacityConfig | null = null;
 const pendingQueue = new PriorityBucketQueue();
 const retryQueue: WorkerMessage[] = [];
+const emojiTextures = new Map<string, WebGLTexture>();
+const authorPhotoTextures = new Map<string, WebGLTexture>();
 
 // CSS pixel dimensions (logical)
 let cssWidth = 0;
@@ -718,18 +720,38 @@ function handleSetPaused(payload: { paused: boolean; videoPaused?: boolean }): v
   if (payload.videoPaused !== undefined) isVideoPaused = payload.videoPaused;
 }
 
-function handleEmojiImages(_payload: {
-  images: Array<{ url: string; bitmap: ImageBitmap }>;
-}): void {
-  void _payload;
-  // Phase 3: upload ImageBitmaps to WebGL textures
+function handleEmojiImages(payload: { images: Array<{ url: string; bitmap: ImageBitmap }> }): void {
+  if (!gl) return;
+  for (const { url, bitmap } of payload.images) {
+    const tex = gl.createTexture();
+    if (!tex) continue;
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, bitmap);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    emojiTextures.set(url, tex);
+    bitmap.close();
+  }
 }
 
-function handleAuthorPhotos(_payload: {
+function handleAuthorPhotos(payload: {
   photos: Array<{ url: string; bitmap: ImageBitmap }>;
 }): void {
-  void _payload;
-  // Phase 3: upload ImageBitmaps to WebGL textures
+  if (!gl) return;
+  for (const { url, bitmap } of payload.photos) {
+    const tex = gl.createTexture();
+    if (!tex) continue;
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, bitmap);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    authorPhotoTextures.set(url, tex);
+    bitmap.close();
+  }
 }
 
 function handleTranslation(payload: { messageId: string; text: string }): void {
@@ -752,6 +774,15 @@ function handleDestroy(): void {
 
   if (gl) {
     if (atlasTexture) gl.deleteTexture(atlasTexture);
+    const g = gl;
+    emojiTextures.forEach((t) => {
+      g.deleteTexture(t);
+    });
+    emojiTextures.clear();
+    authorPhotoTextures.forEach((t) => {
+      g.deleteTexture(t);
+    });
+    authorPhotoTextures.clear();
     if (instanceBuffer) gl.deleteBuffer(instanceBuffer);
     if (vao) gl.deleteVertexArray(vao);
     if (program) gl.deleteProgram(program);
