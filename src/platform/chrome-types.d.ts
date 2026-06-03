@@ -13,8 +13,14 @@ interface ChromeStorageArea {
   set(items: Record<string, unknown>): Promise<void>;
 }
 
+interface ChromeStorageChangedEvent {
+  addListener(callback: (changes: Record<string, unknown>, areaName: string) => void): void;
+  removeListener(callback: (changes: Record<string, unknown>, areaName: string) => void): void;
+}
+
 interface ChromeStorageNamespace {
   local: ChromeStorageArea;
+  onChanged: ChromeStorageChangedEvent;
 }
 
 interface ChromeRuntimeNamespace {

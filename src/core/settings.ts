@@ -30,6 +30,10 @@ export class Settings {
   private savePending = false;
   /** GM value change listener ID, for cleanup. */
   private gmListenerId: number | null = null;
+  /** chrome.storage.onChanged listener reference, for cleanup. */
+  private chromeStorageListener:
+    | ((changes: Record<string, unknown>, areaName: string) => void)
+    | null = null;
   /** Bound storage event handler reference, for cleanup. */
   private readonly handleStorageEvent = (event: StorageEvent): void => {
     if (event.key !== STORAGE_KEY || event.newValue === null) return;
@@ -83,6 +87,18 @@ export class Settings {
         void this.reloadFromStorage();
       });
     }
+
+    // Chrome extension storage path: fires when chrome.storage.local changes
+    if (typeof chrome !== 'undefined' && chrome.storage?.onChanged) {
+      this.chromeStorageListener = (changes: Record<string, unknown>, areaName: string) => {
+        if (areaName !== 'local') return;
+        const change = changes[STORAGE_KEY] as { newValue?: unknown } | undefined;
+        if (!change) return;
+        log.debug('Cross-tab settings change detected via chrome.storage.onChanged');
+        void this.reloadFromStorage();
+      };
+      chrome.storage.onChanged.addListener(this.chromeStorageListener);
+    }
   }
 
   private stopCrossTabSync(): void {
@@ -90,6 +106,14 @@ export class Settings {
     if (this.gmListenerId !== null && typeof GM_removeValueChangeListener !== 'undefined') {
       GM_removeValueChangeListener(this.gmListenerId);
       this.gmListenerId = null;
+    }
+    if (
+      this.chromeStorageListener !== null &&
+      typeof chrome !== 'undefined' &&
+      chrome.storage?.onChanged
+    ) {
+      chrome.storage.onChanged.removeListener(this.chromeStorageListener);
+      this.chromeStorageListener = null;
     }
   }
 
