@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { spacing } from '@core/design-tokens';
+import { DEFAULT_FONT_FAMILY, spacing } from '@core/design-tokens';
 import {
   animDuration,
   borderRadius,
@@ -119,7 +119,7 @@ export const SETTINGS_UI_STYLES = `
         display: flex;
         flex-direction: column;
         gap: ${spacing.md}px;
-        font-family: system-ui, -apple-system, sans-serif;
+        font-family: ${DEFAULT_FONT_FAMILY};
         box-shadow: ${shadows.box.lg};
         animation: yt-overlay-modal-scale-in ${animDuration.slow} ease-out;
       }

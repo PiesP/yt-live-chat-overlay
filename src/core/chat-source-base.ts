@@ -12,6 +12,7 @@ import type { ChatMessage, OverlaySettings, Pauseable } from '@app-types';
 import { BootstrapResolver } from '@core/bootstrap-resolver';
 import { findElementMatch, isAbortError, sleep, VIDEO_SELECTORS } from '@core/dom';
 import { createLogger } from '@core/logging';
+import { MessageIdRegistry } from '@core/message-id-registry';
 import type { ChatBootstrapData, LiveChatPayload } from '@core/youtubei-chat';
 import { getLiveChatPayload } from '@core/youtubei-chat';
 import type { InnertubeContinuationData } from '@core/youtubei-continuation';
@@ -122,13 +123,14 @@ export abstract class ChatSource implements Pauseable {
    */
   burstRateProvider?: () => number;
 
+  private static readonly SEEN_IDS_MAX = 5000;
+
   /**
    * Message IDs already delivered this session (deduplicates fetch-interceptor
    * and poll-loop messages — both capture the same YouTube API responses).
    * Capped at SEEN_IDS_MAX to prevent unbounded growth during long sessions.
    */
-  private readonly seenMessageIds = new Set<string>();
-  private static readonly SEEN_IDS_MAX = 5000;
+  private readonly seenMessageIds = new MessageIdRegistry(ChatSource.SEEN_IDS_MAX);
 
   private static readonly PAUSE_POLL_INTERVAL_MS = 250;
 
@@ -351,16 +353,7 @@ export abstract class ChatSource implements Pauseable {
     for (const msg of messages) {
       if (msg.id !== undefined && this.seenMessageIds.has(msg.id)) continue;
       if (msg.id !== undefined) {
-        if (this.seenMessageIds.size >= ChatSource.SEEN_IDS_MAX) {
-          // Evict oldest half to prevent unbounded memory growth
-          const toDelete = Math.floor(this.seenMessageIds.size / 2);
-          let deleted = 0;
-          for (const id of this.seenMessageIds) {
-            this.seenMessageIds.delete(id);
-            if (++deleted >= toDelete) break;
-          }
-        }
-        this.seenMessageIds.add(msg.id);
+        this.seenMessageIds.mark(msg.id);
       }
       result.push(msg);
     }
@@ -375,13 +368,13 @@ export abstract class ChatSource implements Pauseable {
     if (!this.bootstrap) {
       const bootstrapResolution = await this.bootstrapResolver.resolve(signal);
 
-      if (bootstrapResolution.status !== 'ready' || !bootstrapResolution.bootstrap) {
+      if (bootstrapResolution.status !== 'ready') {
         this.bootstrapResolver.logFailure(bootstrapResolution);
         if (bootstrapResolution.status === 'waiting') return 'waiting';
         return bootstrapResolution.status === 'unavailable' ? 'unavailable' : 'retryable';
       }
 
-      this.bootstrap = bootstrapResolution.bootstrap;
+      this.bootstrap = bootstrapResolution.data;
     }
 
     const seeded = await this.seedCurrentSession(signal);

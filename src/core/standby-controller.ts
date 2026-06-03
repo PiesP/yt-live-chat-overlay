@@ -16,9 +16,9 @@ import { createLogger } from '@core/logging';
 import type { RendererBase } from '@core/renderer-base';
 import { bootstrapChatSession } from '@core/youtubei-chat';
 
-type RestartReason = 'foreground-return' | 'watchdog' | 'standby-resolved';
-
 const log = createLogger('Standby');
+
+type RestartReason = 'foreground-return' | 'watchdog' | 'standby-resolved';
 
 const RECHECK_INTERVAL_MS = 5_000;
 const RETRY_DELAY_MS = 3_000;

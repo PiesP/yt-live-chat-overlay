@@ -863,7 +863,7 @@ export class RuntimeManager {
     const latestMessages = this.chatSource?.getLatestMessages(limit) ?? [];
     for (const message of latestMessages) {
       // sessionDedup check prevents re-rendering messages already shown
-      // before the renderer was reset — their ids survive seenMessageIds.clear().
+      // before the renderer was reset — their ids survive renderer-level clear operations.
       if (!this.acceptForRenderer(message)) continue;
       renderer.replayMessage(message);
     }

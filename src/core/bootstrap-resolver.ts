@@ -11,12 +11,6 @@ const log = createLogger('BootstrapResolver');
 const BOOTSTRAP_MAX_ATTEMPTS = 5;
 const BOOTSTRAP_RETRY_DELAY_MS = 1000;
 
-interface ChatBootstrapResolution {
-  status: 'ready' | 'retryable' | 'unavailable' | 'waiting';
-  bootstrap?: ChatBootstrapData;
-  reason: string;
-}
-
 /**
  * Resolves YouTube chat bootstrap configuration from the page's embedded data.
  * Retries up to BOOTSTRAP_MAX_ATTEMPTS times if the initial attempt fails.
@@ -27,7 +21,7 @@ export class BootstrapResolver {
    * @param signal - Optional AbortSignal to cancel resolution.
    * @returns A resolution object with status, bootstrap data (if ready), and reason.
    */
-  async resolve(signal?: AbortSignal): Promise<ChatBootstrapResolution> {
+  async resolve(signal?: AbortSignal): Promise<ChatBootstrapResult> {
     let lastResult: ChatBootstrapResult | null = null;
 
     for (let attempt = 1; attempt <= BOOTSTRAP_MAX_ATTEMPTS; attempt++) {
@@ -37,8 +31,7 @@ export class BootstrapResolver {
       if (result.status === 'ready') {
         return {
           status: 'ready',
-          bootstrap: result.data,
-          reason: 'Chat bootstrap resolved successfully',
+          data: result.data,
         };
       }
 
@@ -74,19 +67,19 @@ export class BootstrapResolver {
   async refresh(signal?: AbortSignal): Promise<ChatBootstrapData | null> {
     const resolution = await this.resolve(signal);
 
-    if (resolution.status !== 'ready' || !resolution.bootstrap) {
+    if (resolution.status !== 'ready') {
       log.warn('Failed to refresh chat bootstrap:', resolution.reason);
       return null;
     }
 
-    return resolution.bootstrap;
+    return resolution.data;
   }
 
   /**
    * Logs a bootstrap resolution failure reason.
    * @param resolution - The resolution object containing status and reason.
    */
-  logFailure(resolution: ChatBootstrapResolution): void {
+  logFailure(resolution: ChatBootstrapResult): void {
     if (resolution.status === 'waiting') {
       log.info(`Chat bootstrap waiting — stream not yet started (${resolution.reason})`);
       return;
@@ -98,6 +91,9 @@ export class BootstrapResolver {
       return;
     }
 
-    log.warn('Chat source is unavailable:', resolution.reason);
+    log.warn(
+      'Chat source is unavailable:',
+      (resolution as { status: 'unavailable'; reason: string }).reason
+    );
   }
 }
