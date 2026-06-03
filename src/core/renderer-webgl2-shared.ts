@@ -10,6 +10,11 @@
  * near-identical code between the two renderer implementations.
  */
 
+import {
+  TRANSLATION_FONT_SCALE,
+  TRANSLATION_GAP_PX,
+  TRANSLATION_OPACITY_SCALE,
+} from '@core/renderer-constants';
 import { computeMessageOpacity, type OpacityConfig } from '@core/renderer-shared';
 import type { SDFAtlas } from '@core/sdf-atlas';
 
@@ -256,11 +261,12 @@ export function buildSDFInstances(
       cx += (gi?.advanceWidth ?? fontSize * 0.7) * glyphScale;
     }
 
-    // Dual translation mode: render translated text above original
+    // Dual translation mode: render translated text below original
     if (translationMode === 'dual' && msg.translatedText) {
       let tx = msg.x;
-      const ty = msg.y - fontSize * 1.2;
-      const tOpacity = op * 0.7;
+      const transFontSize = fontSize * TRANSLATION_FONT_SCALE;
+      const ty = msg.y + msg.height + TRANSLATION_GAP_PX;
+      const tOpacity = op * TRANSLATION_OPACITY_SCALE;
       for (let ci = 0; ci < msg.translatedText.length; ci++) {
         if (instanceCount >= maxInstances) break;
         const cp = msg.translatedText.codePointAt(ci) ?? 0x20;
@@ -269,15 +275,15 @@ export function buildSDFInstances(
         const cDual = getMessageColor(msg, authorColors);
         instanceData[offDual + 0] = tx;
         instanceData[offDual + 1] = ty;
-        instanceData[offDual + 2] = fontSize * 0.7;
-        instanceData[offDual + 3] = fontSize * 1.2;
+        instanceData[offDual + 2] = transFontSize;
+        instanceData[offDual + 3] = transFontSize;
         instanceData[offDual + 4] = giDual?.index ?? atlas?.glyphs.get(0xfffd)?.index ?? 0;
         instanceData[offDual + 5] = cDual[0];
         instanceData[offDual + 6] = cDual[1];
         instanceData[offDual + 7] = cDual[2];
         instanceData[offDual + 8] = tOpacity;
         instanceCount++;
-        tx += (giDual?.advanceWidth ?? fontSize * 0.7) * glyphScale;
+        tx += (giDual?.advanceWidth ?? transFontSize * 0.7) * glyphScale;
       }
     }
 

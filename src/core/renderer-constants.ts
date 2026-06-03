@@ -65,19 +65,13 @@ export const STAGGER_EXP_SCALE = 25;
 // ── Translation (renderer-canvas.ts) ────────────────────────────────────────
 
 /** Translation font scale relative to main font size. */
-export const TRANSLATION_FONT_SCALE = 0.75;
+export const TRANSLATION_FONT_SCALE = 0.85;
 
 /** Gap (px) between original text and translation text. */
 export const TRANSLATION_GAP_PX = 2;
 
 /** Translation opacity scale relative to message opacity. */
-export const TRANSLATION_OPACITY_SCALE = 0.65;
-
-/** Separator line between original and translation text in dual mode. */
-export const TRANSLATION_SEPARATOR_COLOR = 'rgba(255,255,255,0.2)';
-export const TRANSLATION_SEPARATOR_WIDTH_PX = 1;
-export const TRANSLATION_SEPARATOR_GAP_ABOVE = 2;
-export const TRANSLATION_SEPARATOR_GAP_BELOW = 2;
+export const TRANSLATION_OPACITY_SCALE = 0.8;
 
 // ── Depth layers (renderer-canvas.ts) ───────────────────────────────────────
 

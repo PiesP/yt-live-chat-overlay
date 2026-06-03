@@ -36,6 +36,7 @@ const WORKER_CONFIG_KEYS: (keyof OverlaySettings)[] = [
   'backlogOpacityMultiplier',
   'queueMaxSize',
   'translationMode',
+  'translationEnabled',
 ];
 
 interface WorkerStatsWebGL2 {

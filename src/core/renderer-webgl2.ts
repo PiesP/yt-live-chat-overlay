@@ -17,7 +17,7 @@ import type { Overlay } from '@core/overlay';
 import { PriorityBucketQueue } from '@core/priority-bucket-queue';
 import { RendererBase } from '@core/renderer-base';
 import type { CanvasMessage } from '@core/renderer-constants';
-import { SPEED_TIER } from '@core/renderer-constants';
+import { SPEED_TIER, TRANSLATION_FONT_SCALE, TRANSLATION_GAP_PX } from '@core/renderer-constants';
 import { computeMessageOpacity, type OpacityConfig } from '@core/renderer-shared';
 import {
   buildSDFInstances,
@@ -340,7 +340,12 @@ export class RendererWebGL2 extends RendererBase {
 
   private createCanvasMessage(msg: ChatMessage): CanvasMessage {
     const fontSize = this.settings.fontSize;
-    const lh = Math.ceil(fontSize * 1.4);
+    let lh = Math.ceil(fontSize * 1.4);
+    // Add translation height when dual mode is enabled (translation renders below the message)
+    if (this.settings.translationEnabled && this.settings.translationMode === 'dual') {
+      const transFontSize = Math.round(fontSize * TRANSLATION_FONT_SCALE);
+      lh += Math.ceil(transFontSize * 1.2) + TRANSLATION_GAP_PX;
+    }
     const font = getFontString(fontSize, this.settings.fontWeight, this.settings.fontFamily);
     const text = msg.content.map((s) => (s.type === 'text' ? s.content : '')).join('');
     const w = text ? measureTextWidth(text, font) : 0;

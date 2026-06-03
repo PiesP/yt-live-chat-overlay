@@ -51,11 +51,8 @@ import {
   STAGGER_EXP_SCALE,
   TIER_NEAR_THRESHOLD,
   TRANSLATION_FONT_SCALE,
+  TRANSLATION_GAP_PX,
   TRANSLATION_OPACITY_SCALE,
-  TRANSLATION_SEPARATOR_COLOR,
-  TRANSLATION_SEPARATOR_GAP_ABOVE,
-  TRANSLATION_SEPARATOR_GAP_BELOW,
-  TRANSLATION_SEPARATOR_WIDTH_PX,
 } from '@core/renderer-constants';
 import { computeMessageOpacity, type OpacityConfig } from '@core/renderer-shared';
 import { getFontString } from '@core/text-measure';
@@ -1416,9 +1413,8 @@ function renderFrame(): void {
           );
         }
 
-        // Dual-mode translation: render inside the card with a separator line.
-        // Translation sits near the bottom of the card so it reads as part of
-        // the same message unit, not a separate label.
+        // Dual-mode translation: render inside the card with a small gap
+        // to visually group the original and translation as one unit.
         if (
           cfg.translationEnabled &&
           cfg.translationMode === 'dual' &&
@@ -1429,27 +1425,13 @@ function renderFrame(): void {
           const translationColor = msg.authorType
             ? cfg.authorColors[msg.authorType] || renderColor
             : renderColor;
-          // Compute vertical positions: separator + translation near card bottom
-          const separatorY =
-            sy +
-            msg.height -
-            translationFontSize -
-            TRANSLATION_SEPARATOR_GAP_BELOW -
-            TRANSLATION_SEPARATOR_WIDTH_PX -
-            TRANSLATION_SEPARATOR_GAP_ABOVE;
-          const translationY =
-            separatorY + TRANSLATION_SEPARATOR_WIDTH_PX + TRANSLATION_SEPARATOR_GAP_BELOW;
+          // Compute vertical positions: translation text near card bottom with small gap
+          const translationY = sy + msg.height - translationFontSize - TRANSLATION_GAP_PX;
           ctx.save();
           try {
             ctx.globalAlpha = (bucketIndex / (OPACITY_BUCKETS - 1)) * TRANSLATION_OPACITY_SCALE;
-            // Separator line
-            ctx.strokeStyle = TRANSLATION_SEPARATOR_COLOR;
-            ctx.lineWidth = TRANSLATION_SEPARATOR_WIDTH_PX;
-            ctx.beginPath();
-            ctx.moveTo(sx, separatorY);
-            ctx.lineTo(sx + msg.width, separatorY);
-            ctx.stroke();
-            // Translation text
+            // Translation text (normal weight for subtle distinction)
+            const translationFont = `${translationFontSize}px ${cfg.fontFamily}`;
             renderSegment(
               ctx,
               msg.translatedText,
@@ -1460,7 +1442,7 @@ function renderFrame(): void {
               strokeWidth,
               cfg.outlineOpacity,
               textBitmapCache,
-              getFont
+              (_fs: number) => translationFont
             );
           } finally {
             ctx.restore();
