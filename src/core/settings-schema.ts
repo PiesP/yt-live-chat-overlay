@@ -367,8 +367,8 @@ const DEFAULT_COLORS = {
 
 const DEFAULT_OUTLINE = {
   enabled: true,
-  widthPx: 1.5,
-  opacity: 0.8,
+  widthPx: 2,
+  opacity: 0.7,
 } as const satisfies OutlineSettings;
 
 export const DEFAULT_SETTINGS = {
@@ -381,10 +381,10 @@ export const DEFAULT_SETTINGS = {
   superChatOpacity: 0.75,
   safeTop: 0,
   safeBottom: 0.12,
-  maxConcurrentMessages: 120,
+  maxConcurrentMessages: 300,
   allowShortTextMessages: false,
   minTextLength: 3,
-  logLevel: 'warn',
+  logLevel: 'debug',
   showAuthor: DEFAULT_SHOW_AUTHOR,
   colors: DEFAULT_COLORS,
   outline: DEFAULT_OUTLINE,
@@ -394,7 +394,7 @@ export const DEFAULT_SETTINGS = {
   backlogMaxRate: 20,
   backlogSpeedMultiplier: 2,
   backlogMode: 'playback',
-  backlogRecentMinutes: 5,
+  backlogRecentMinutes: 1,
   backlogOpacityMultiplier: 0.75,
   depthLayersEnabled: true,
   depthNearSpeedMul: 1.4,
@@ -413,7 +413,7 @@ export const DEFAULT_SETTINGS = {
   language: 'auto',
   translationEnabled: false,
   translationService: 'auto',
-  translationSource: 'en',
+  translationSource: 'ja',
   translationTarget: 'ko',
   translationMode: 'dual',
   exitPaddingPx: 100,
@@ -450,7 +450,7 @@ export const DEFAULT_SETTINGS = {
   emojiFetchTimeoutMs: 30000,
   backlogDensityRampMaxMs: 4000,
   backlogInjectionRateMin: 4,
-  speedBoostMax: 0.35,
+  speedBoostMax: 0.05,
   speedBoostDenom: 15,
   backlogToggleCooldownMs: 2000,
   replayPrefetchPages: 200,
