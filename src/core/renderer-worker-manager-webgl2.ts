@@ -40,6 +40,7 @@ const WORKER_CONFIG_KEYS: (keyof OverlaySettings)[] = [
   'backgroundQueueMax',
   'showAuthor',
   'superChatOpacity',
+  'translationMode',
 ];
 
 export interface WorkerStatsWebGL2 {

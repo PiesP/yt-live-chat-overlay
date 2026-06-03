@@ -538,6 +538,11 @@ function startRenderLoop(): void {
 // ── Message Handlers ──
 
 function handleInit(payload: { canvas: OffscreenCanvas; config: WorkerConfig }): void {
+  if (canvas !== null) {
+    self.postMessage({ type: 'error', message: 'Already initialized' });
+    return;
+  }
+
   canvas = payload.canvas;
   config = payload.config;
 

@@ -799,7 +799,15 @@ export class RendererWebGL2 extends RendererBase {
     return this.parseColor(this.settings.colors[msg.message.authorType] || '#ffffff');
   }
   private getOutlineColor(): [number, number, number] {
-    return this.parseColor(computeOutlineColor(this.settings.colors.normal || '#ffffff', 1));
+    const rgba = computeOutlineColor(this.settings.colors.normal || '#ffffff', 1);
+    const m = rgba.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+    if (m)
+      return [
+        parseInt(m[1] ?? '0', 10) / 255,
+        parseInt(m[2] ?? '0', 10) / 255,
+        parseInt(m[3] ?? '0', 10) / 255,
+      ];
+    return [1, 1, 1];
   }
 
   private parseColor(hex: string): [number, number, number] {
