@@ -9,9 +9,6 @@ export const ZH: Record<string, string> = {
   Translation: '翻译',
 
   // ── Aria labels / misc ──
-  Color: '颜色',
-  Show: '显示',
-  'Short messages shown regardless of length': '无论长度如何，显示短消息',
 
   // ── Section titles ──
   'Text Outline': '文字描边',
@@ -288,7 +285,6 @@ export const ZH: Record<string, string> = {
   'Import failed: invalid JSON': '导入失败：JSON格式无效',
   'Chat overlay settings': '弹幕显示设置',
   'Reset overlay settings': '重置覆盖层设置',
-  'Reload overlay': '重新加载覆盖层',
 
   // ── Author grid ──
   'Name Color': '名称颜色',

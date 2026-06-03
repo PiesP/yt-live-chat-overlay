@@ -9,10 +9,6 @@ export const ES: Record<string, string> = {
   Translation: 'Traducción',
 
   // ── Aria labels / misc ──
-  Color: 'Color',
-  Show: 'Mostrar',
-  'Short messages shown regardless of length':
-    'Mostrar mensajes cortos independientemente de la longitud',
 
   // ── Section titles ──
   'Text Outline': 'Contorno de texto',
@@ -320,7 +316,6 @@ export const ES: Record<string, string> = {
   'Import failed: invalid JSON': 'Error de importación: JSON no válido',
   'Chat overlay settings': 'Configuración de superposición de chat',
   'Reset overlay settings': 'Restablecer superposición',
-  'Reload overlay': 'Recargar superposición',
 
   // ── Author grid ──
   'Name Color': 'Color del nombre',

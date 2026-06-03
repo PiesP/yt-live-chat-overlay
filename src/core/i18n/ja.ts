@@ -9,9 +9,6 @@ export const JA: Record<string, string> = {
   Translation: '翻訳',
 
   // ── Aria labels / misc ──
-  Color: '色',
-  Show: '表示',
-  'Short messages shown regardless of length': '長さに関係なく短いメッセージを表示',
 
   // ── Section titles ──
   'Text Outline': 'テキスト縁取り',
@@ -307,7 +304,6 @@ export const JA: Record<string, string> = {
   'Import failed: invalid JSON': 'インポート失敗: 無効なJSON形式です',
   'Chat overlay settings': 'チャットオーバーレイ設定',
   'Reset overlay settings': 'オーバーレイ設定をリセット',
-  'Reload overlay': 'オーバーレイを再読み込み',
 
   // ── Author grid ──
   'Name Color': '名前の色',
