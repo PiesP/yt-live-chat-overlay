@@ -1644,14 +1644,17 @@ function renderFrame(): void {
     }
 
     // Compute opacity via shared SSOT (matches renderer-canvas.ts)
-    const opacity = computeMessageOpacity(
-      { isBacklog: msg.speedTier === SPEED_TIER.BACKLOG } as ChatMessage,
-      elapsed,
-      msg.duration,
-      isScrolling,
-      msg.speedTier,
-      opacityConfig!
-    );
+    const oc = opacityConfig;
+    const opacity = oc
+      ? computeMessageOpacity(
+          { isBacklog: msg.speedTier === SPEED_TIER.BACKLOG } as ChatMessage,
+          elapsed,
+          msg.duration,
+          isScrolling,
+          msg.speedTier,
+          oc
+        )
+      : 0;
 
     if (opacity <= 0) continue;
 
