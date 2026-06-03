@@ -1728,13 +1728,12 @@ function renderFrame(): void {
           );
         }
 
-        // Dual-mode translation: render translated text below for regular messages
+        // Dual-mode translation: render translated text below for all message kinds
         if (
           cfg.translationEnabled &&
           cfg.translationMode === 'dual' &&
           msg.translatedText &&
-          msg.translatedText !== msg.text &&
-          (!msg.kind || msg.kind === 'chat' || msg.kind === 'text' || msg.kind === undefined)
+          msg.translatedText !== msg.text
         ) {
           const translationFontSize = Math.round(cfg.fontSize * TRANSLATION_FONT_SCALE);
           const translationColor = msg.authorType
