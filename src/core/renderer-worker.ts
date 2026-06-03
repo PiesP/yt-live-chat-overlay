@@ -54,7 +54,7 @@ import {
   TRANSLATION_GAP_PX,
   TRANSLATION_OPACITY_SCALE,
 } from '@core/renderer-constants';
-import { type CharSegment, getFontString, measureTextHeight } from '@core/text-measure';
+import { type CharSegment, getFontString } from '@core/text-measure';
 import {
   drawAuthorPhoto,
   drawRoundRect,
@@ -281,12 +281,6 @@ interface ActiveMessage {
 
 // ── Worker-specific constants ──────────────────────────────────────────────
 
-/** Fallback ratio for font ascent when actualBoundingBoxAscent is unavailable. */
-const ASCENT_FALLBACK_RATIO = 0.8;
-/** Fallback ratio for font descent when actualBoundingBoxDescent is unavailable. */
-const DESCENT_FALLBACK_RATIO = 0.2;
-/** Fallback line-height multiplier when font metrics are unavailable. */
-const LINE_HEIGHT_FALLBACK_RATIO = 1.1;
 /** Angular frequency for pulsing-border animation (half-cycle per second). */
 const PULSE_ANGULAR_FREQ = Math.PI;
 /** Milliseconds per second, for time-unit conversions in animation math. */
@@ -320,7 +314,9 @@ function measureTextCached(text: string): number {
   if (!ctx) return 0;
   let w = textMeasureCache.get(text);
   if (w === undefined) {
-    w = ctx.measureText(text).width;
+    const m = ctx.measureText(text);
+    const bbWidth = Math.abs(m.actualBoundingBoxLeft) + Math.abs(m.actualBoundingBoxRight);
+    w = bbWidth > 0 ? Math.ceil(bbWidth) : Math.ceil(m.width);
     // LRU eviction: delete oldest entry when at capacity, then re-insert
     if (textMeasureCache.size >= TEXT_MEASURE_CACHE_MAX) {
       const oldestKey = textMeasureCache.keys().next().value;
@@ -329,6 +325,41 @@ function measureTextCached(text: string): number {
     textMeasureCache.set(text, w);
   }
   return w;
+}
+
+// Font metrics cache — keyed by font string
+const fontMetricsCache = new Map<string, { height: number; ascent: number }>();
+
+/** Build a CSS font string from the current worker config. */
+function getFontFromConfig(fontSize: number): string {
+  if (!config) return `${fontSize}px sans-serif`;
+  return `${config.fontWeight} ${fontSize}px ${config.fontFamily}`;
+}
+
+/**
+ * Measure the full bounding-box height of the font's rendered glyphs.
+ *
+ * Uses the OffscreenCanvas context to measure "Mg" — capital M gives a reliable
+ * ascent and lowercase g gives a reliable descent. Results are cached because
+ * the same font string always produces identical metrics regardless of fontSize.
+ * Falls back to a fontSize-based estimate when ctx is unavailable.
+ */
+function measureTextHeight(fontSize: number): number {
+  if (!ctx) return Math.ceil(fontSize * 1.1); // fallback
+  const font = getFontFromConfig(fontSize);
+  let metrics = fontMetricsCache.get(font);
+  if (!metrics) {
+    ctx.font = font;
+    const m = ctx.measureText('Mg');
+    const ascent = Math.max(0, m.actualBoundingBoxAscent);
+    const descent = Math.max(0, m.actualBoundingBoxDescent);
+    metrics = {
+      height: Math.ceil(ascent + descent),
+      ascent: Math.ceil(ascent),
+    };
+    fontMetricsCache.set(font, metrics);
+  }
+  return metrics.height;
 }
 
 // Active messages (renderable)
@@ -625,7 +656,7 @@ function renderWrappedContentSegments(
 
   const font = getFontFn(fontSize);
   const emojiSize = Math.round(fontSize * rendererLayout.emojiSize);
-  const lineHeight = Math.ceil(fontSize * LINE_HEIGHT_FALLBACK_RATIO); // measureTextHeight fallback
+  const lineHeight = measureTextHeight(fontSize);
   const ellipsis = '\u2026';
 
   // Set font once for all measureText calls inside buildWrappedLines
@@ -739,13 +770,8 @@ function drawAuthorSection(
   const prevTextBaseline = ctx.textBaseline;
 
   const nameFont = getFontString(authorFontSize, fontWeight as FontWeight, fontFamily);
-  const ctx2 = ctx; // alias for closure
-  ctx2.font = nameFont;
-  const nameMetrics = ctx2.measureText('Mg');
-  const nameHeight = Math.ceil(
-    (nameMetrics.actualBoundingBoxAscent || authorFontSize * ASCENT_FALLBACK_RATIO) +
-      (nameMetrics.actualBoundingBoxDescent || authorFontSize * DESCENT_FALLBACK_RATIO)
-  );
+  ctx.font = nameFont;
+  const nameHeight = measureTextHeight(authorFontSize);
   const sectionHeight = Math.max(rendererLayout.authorPhotoSize, nameHeight);
 
   const authorPhotoUrl = message.authorPhotoUrl;
@@ -1079,7 +1105,7 @@ function renderPaidCardWorker(
     ctx.fillStyle = card.headerTagColor;
     ctx.fillText(displayText, textX, cursorY + card.headerTagMarginTop);
     ctx.restore();
-    const headerHeight = measureTextHeight(headerFont, headerFontSize);
+    const headerHeight = measureTextHeight(headerFontSize);
     cursorY += headerHeight + card.headerTagMarginTop + card.headerTagMarginBottom;
   }
 
@@ -1338,15 +1364,8 @@ function enqueueMessage(msg: WorkerMessage): void {
 function initLanes(_width: number, height: number): void {
   if (!config || !ctx) return;
   const totalPaddingV = rendererLayout.paddingV * 2;
-  // Height estimation from actual font metrics (or fallback)
-  const font = `${config.fontWeight} ${config.fontSize}px ${config.fontFamily}`;
-  ctx.font = font;
-  const textMetrics = ctx.measureText('M');
-  const textHeight = Math.ceil(
-    textMetrics.fontBoundingBoxAscent != null
-      ? textMetrics.fontBoundingBoxAscent + textMetrics.fontBoundingBoxDescent
-      : config.fontSize * LINE_HEIGHT_FALLBACK_RATIO
-  );
+  // Height estimation from actual font metrics via bounding-box measurement
+  const textHeight = measureTextHeight(config.fontSize);
   laneHeight = Math.max(1, textHeight + totalPaddingV + config.laneSpacing);
 
   const usableHeight = height * (1 - config.safeTop - config.safeBottom);
