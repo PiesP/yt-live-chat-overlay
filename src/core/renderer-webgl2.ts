@@ -20,6 +20,16 @@ import type { CanvasMessage } from '@core/renderer-constants';
 import { SPEED_TIER } from '@core/renderer-constants';
 import { computeMessageOpacity, type OpacityConfig } from '@core/renderer-shared';
 import {
+  buildSDFInstances,
+  createProgram,
+  FLOATS_PER_INSTANCE,
+  getRenderText,
+  MAX_INSTANCES,
+  setupWebGL2Buffers,
+  updateMessagePositions,
+  uploadSDFAtlas,
+} from '@core/renderer-webgl2-shared';
+import {
   ATLAS_CELL_SIZE,
   ATLAS_SIZE,
   GLYPH_RASTER_SIZE,
@@ -33,11 +43,6 @@ import { TEXTURE_FRAGMENT_SHADER, TEXTURE_VERTEX_SHADER } from '@core/webgl2-tex
 import { drawAuthorPhoto } from '@shared/canvas-rendering-shared';
 
 const log = createLogger('RendererWebGL2');
-
-const FLOATS_PER_INSTANCE = 9;
-const MAX_INSTANCES = 60_000;
-const QUAD_POS = new Float32Array([0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1]);
-const QUAD_UV = new Float32Array([0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1]);
 
 export class RendererWebGL2 extends RendererBase {
   private gl: WebGL2RenderingContext;
@@ -127,10 +132,10 @@ export class RendererWebGL2 extends RendererBase {
     if (!gl) throw new Error('WebGL2 not supported');
     this.gl = gl;
 
-    this.program = this.createProgram(SDF_VERTEX_SHADER, SDF_FRAGMENT_SHADER);
+    this.program = createProgram(gl, SDF_VERTEX_SHADER, SDF_FRAGMENT_SHADER);
 
     // Create texture program for emoji + card backgrounds
-    this.textureProgram = this.createProgram(TEXTURE_VERTEX_SHADER, TEXTURE_FRAGMENT_SHADER);
+    this.textureProgram = createProgram(gl, TEXTURE_VERTEX_SHADER, TEXTURE_FRAGMENT_SHADER);
 
     // Cache texture program uniforms
     gl.useProgram(this.textureProgram);
@@ -161,49 +166,9 @@ export class RendererWebGL2 extends RendererBase {
     // Restore SDF program
     gl.useProgram(this.program);
 
-    const vao = gl.createVertexArray();
-    if (!vao) throw new Error('Failed to create VAO');
-    this.vao = vao;
-    gl.bindVertexArray(vao);
-
-    const posBuf = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, QUAD_POS, gl.STATIC_DRAW);
-    gl.enableVertexAttribArray(0);
-    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-
-    const uvBuf = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, uvBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, QUAD_UV, gl.STATIC_DRAW);
-    gl.enableVertexAttribArray(1);
-    gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
-
-    const instBuf = gl.createBuffer();
-    if (!instBuf) throw new Error('Failed to create instance buffer');
-    this.instanceBuffer = instBuf;
-    gl.bindBuffer(gl.ARRAY_BUFFER, instBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, this.instanceData.byteLength, gl.DYNAMIC_DRAW);
-
-    const stride = FLOATS_PER_INSTANCE * 4;
-    gl.enableVertexAttribArray(2);
-    gl.vertexAttribPointer(2, 2, gl.FLOAT, false, stride, 0);
-    gl.vertexAttribDivisor(2, 1);
-    gl.enableVertexAttribArray(3);
-    gl.vertexAttribPointer(3, 2, gl.FLOAT, false, stride, 8);
-    gl.vertexAttribDivisor(3, 1);
-    gl.enableVertexAttribArray(4);
-    gl.vertexAttribPointer(4, 1, gl.FLOAT, false, stride, 16);
-    gl.vertexAttribDivisor(4, 1);
-    gl.enableVertexAttribArray(5);
-    gl.vertexAttribPointer(5, 3, gl.FLOAT, false, stride, 20);
-    gl.vertexAttribDivisor(5, 1);
-    gl.enableVertexAttribArray(6);
-    gl.vertexAttribPointer(6, 1, gl.FLOAT, false, stride, 32);
-    gl.vertexAttribDivisor(6, 1);
-
-    gl.bindVertexArray(null);
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    const buffers = setupWebGL2Buffers(gl, this.instanceData.byteLength);
+    this.vao = buffers.vao;
+    this.instanceBuffer = buffers.instanceBuffer;
 
     this.cacheUniforms();
     this.initAtlas();
@@ -255,41 +220,6 @@ export class RendererWebGL2 extends RendererBase {
         log.error('Atlas regeneration failed after font change:', e);
       });
     }
-  }
-
-  private createProgram(vsSrc: string, fsSrc: string): WebGLProgram {
-    const gl = this.gl;
-    const vs = gl.createShader(gl.VERTEX_SHADER);
-    if (!vs) throw new Error('Failed to create vertex shader');
-    gl.shaderSource(vs, vsSrc);
-    gl.compileShader(vs);
-    if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS)) {
-      const i = gl.getShaderInfoLog(vs);
-      gl.deleteShader(vs);
-      throw new Error(`VS: ${i}`);
-    }
-    const fs = gl.createShader(gl.FRAGMENT_SHADER);
-    if (!fs) throw new Error('Failed to create fragment shader');
-    gl.shaderSource(fs, fsSrc);
-    gl.compileShader(fs);
-    if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) {
-      const i = gl.getShaderInfoLog(fs);
-      gl.deleteShader(fs);
-      throw new Error(`FS: ${i}`);
-    }
-    const p = gl.createProgram();
-    if (!p) throw new Error('Failed to create program');
-    gl.attachShader(p, vs);
-    gl.attachShader(p, fs);
-    gl.linkProgram(p);
-    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
-      const i = gl.getProgramInfoLog(p);
-      gl.deleteProgram(p);
-      throw new Error(`Link: ${i}`);
-    }
-    gl.deleteShader(vs);
-    gl.deleteShader(fs);
-    return p;
   }
 
   private cacheUniforms(): void {
@@ -372,24 +302,8 @@ export class RendererWebGL2 extends RendererBase {
     const data = this.atlas?.data;
     if (!data) return;
     const gl = this.gl;
-    const tex = gl.createTexture();
+    const tex = uploadSDFAtlas(gl, data, ATLAS_SIZE);
     if (!tex) throw new Error('Failed to create texture');
-    gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texImage2D(
-      gl.TEXTURE_2D,
-      0,
-      gl.RGBA,
-      ATLAS_SIZE,
-      ATLAS_SIZE,
-      0,
-      gl.RGBA,
-      gl.UNSIGNED_BYTE,
-      data
-    );
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     if (!this.atlas) return;
     this.atlas.texture = tex;
     this.atlasTexture = tex;
@@ -649,40 +563,38 @@ export class RendererWebGL2 extends RendererBase {
   }
 
   private updateMessages(now: number): void {
-    let wi = 0;
-    const mode = this.settings.danmakuMode;
-    const cssW = this.cssWidth;
-    for (let i = 0; i < this.messages.length; i++) {
-      const m = this.messages[i] as CanvasMessage;
-      if (m.laneIndex >= 0) {
-        const progress = (now - m.startTime) / m.duration;
-        if (progress >= 1) continue;
-        switch (mode) {
-          case 'scroll':
-            m.x = m.startX - progress * (cssW + m.width);
-            break;
-          case 'reverse':
-            m.x = m.startX + progress * (cssW + m.width) - m.width;
-            break;
-          case 'top':
-          case 'bottom':
-            m.x = m.startX;
-            break;
-        }
-      }
-      if (wi !== i) this.messages[wi] = m;
-      wi++;
-    }
-    if (wi < this.messages.length) this.messages.length = wi;
+    updateMessagePositions(
+      this.messages as unknown as Parameters<typeof updateMessagePositions>[0],
+      this.settings.danmakuMode,
+      this.cssWidth,
+      now
+    );
   }
 
   private buildInstances(now: number): void {
-    this.instanceCount = 0;
-    this.texQuadCount = 0;
     const fs = this.settings.fontSize;
-    const scale = this.settings.fontSize / GLYPH_RASTER_SIZE;
+    const scale = fs / GLYPH_RASTER_SIZE;
+
+    const result = buildSDFInstances(
+      this.messages,
+      this.atlas,
+      this.instanceData,
+      MAX_INSTANCES,
+      fs,
+      scale,
+      this.settings.colors,
+      this._opacityConfig,
+      now,
+      this.settings.translationMode,
+      this.texQuadData
+    );
+    this.instanceCount = result.instanceCount;
+    this.texQuadCount = result.texQuadCount;
+
+    // Emoji rendering via texture pass (main-thread specific — uses getEmojiTexture)
     for (const msg of this.messages) {
-      if (this.instanceCount >= MAX_INSTANCES) break;
+      if (this.texQuadCount >= MAX_INSTANCES) break;
+
       const elapsed = msg.startTime > 0 ? Math.max(0, now - msg.startTime) : 0;
       const op = computeMessageOpacity(
         msg.message,
@@ -693,74 +605,14 @@ export class RendererWebGL2 extends RendererBase {
         this._opacityConfig
       );
       if (op <= 0) continue;
-      const text = this.getRenderText(msg);
-      if (!text) continue;
-      let cx = msg.x;
+
+      const text = getRenderText(msg, this.settings.translationMode);
+      let endCx = msg.x;
       for (let ci = 0; ci < text.length; ci++) {
-        if (this.instanceCount >= MAX_INSTANCES) break;
         const gi = this.atlas?.glyphs.get(text.codePointAt(ci) ?? 0x20);
-        const off = this.instanceCount * FLOATS_PER_INSTANCE;
-        const c = this.getMessageColor(msg);
-        this.instanceData[off + 0] = cx;
-        this.instanceData[off + 1] = msg.y;
-        this.instanceData[off + 2] = fs * 0.7;
-        this.instanceData[off + 3] = fs * 1.4;
-        this.instanceData[off + 4] = gi?.index ?? this.atlas?.glyphs.get(0xfffd)?.index ?? 0;
-        this.instanceData[off + 5] = c[0];
-        this.instanceData[off + 6] = c[1];
-        this.instanceData[off + 7] = c[2];
-        this.instanceData[off + 8] = op;
-        this.instanceCount++;
-        cx += (gi?.advanceWidth ?? this.settings.fontSize * 0.7) * scale;
+        endCx += (gi?.advanceWidth ?? fs * 0.7) * scale;
       }
 
-      // Dual translation mode: render translated text above original
-      if (this.settings.translationMode === 'dual' && msg.translatedText) {
-        let tx = msg.x;
-        const ty = msg.y - fs * 1.2; // above original
-        const tOpacity = op * 0.7; // slightly dimmer
-        for (let ci = 0; ci < msg.translatedText.length; ci++) {
-          if (this.instanceCount >= MAX_INSTANCES) break;
-          const cp = msg.translatedText.codePointAt(ci) ?? 0x20;
-          const gi = this.atlas?.glyphs.get(cp);
-          const off = this.instanceCount * FLOATS_PER_INSTANCE;
-          const c = this.getMessageColor(msg);
-          this.instanceData[off + 0] = tx;
-          this.instanceData[off + 1] = ty;
-          this.instanceData[off + 2] = fs * 0.7;
-          this.instanceData[off + 3] = fs * 1.2;
-          this.instanceData[off + 4] = gi?.index ?? this.atlas?.glyphs.get(0xfffd)?.index ?? 0;
-          this.instanceData[off + 5] = c[0];
-          this.instanceData[off + 6] = c[1];
-          this.instanceData[off + 7] = c[2];
-          this.instanceData[off + 8] = tOpacity;
-          this.instanceCount++;
-          tx += (gi?.advanceWidth ?? this.settings.fontSize * 0.7) * scale;
-        }
-      }
-
-      // Card background for paid messages
-      if (msg.message.kind === 'superchat' || msg.message.kind === 'membership') {
-        const bgColor = this.parseColor(
-          msg.message.kind === 'superchat'
-            ? (msg.message.superChat?.backgroundColor ?? '#ff0000')
-            : '#0f0'
-        );
-        const pad = 4;
-        const bgOff = this.texQuadCount * FLOATS_PER_INSTANCE;
-        this.texQuadData[bgOff + 0] = msg.x - pad;
-        this.texQuadData[bgOff + 1] = msg.y - pad;
-        this.texQuadData[bgOff + 2] = msg.width + pad * 2;
-        this.texQuadData[bgOff + 3] = msg.height + pad * 2;
-        this.texQuadData[bgOff + 4] = 0;
-        this.texQuadData[bgOff + 5] = bgColor[0];
-        this.texQuadData[bgOff + 6] = bgColor[1];
-        this.texQuadData[bgOff + 7] = bgColor[2];
-        this.texQuadData[bgOff + 8] = op * 0.85;
-        this.texQuadCount++;
-      }
-
-      // Emoji rendering via texture pass
       for (const seg of msg.message.content) {
         if (seg.type !== 'emoji') continue;
         const emojiUrl = seg.emoji?.url;
@@ -769,7 +621,7 @@ export class RendererWebGL2 extends RendererBase {
         if (!tex) continue;
         const eOff = this.texQuadCount * FLOATS_PER_INSTANCE;
         const eSize = fs * 1.2;
-        this.texQuadData[eOff + 0] = cx;
+        this.texQuadData[eOff + 0] = endCx;
         this.texQuadData[eOff + 1] = msg.y + (msg.height - eSize) / 2;
         this.texQuadData[eOff + 2] = eSize;
         this.texQuadData[eOff + 3] = eSize;
@@ -779,25 +631,11 @@ export class RendererWebGL2 extends RendererBase {
         this.texQuadData[eOff + 7] = 1;
         this.texQuadData[eOff + 8] = op;
         this.texQuadCount++;
-        cx += eSize;
+        endCx += eSize;
       }
     }
   }
 
-  private getRenderText(msg: CanvasMessage): string {
-    // In dual mode, render the original text in the main loop — translated text is rendered above separately.
-    if (msg.translatedText && this.settings.translationMode === 'dual') {
-      return msg.message.content.map((s) => (s.type === 'text' ? s.content : ' ')).join('');
-    }
-    // In replace mode, use translated text; otherwise use original.
-    return msg.translatedText && this.settings.translationMode === 'replace'
-      ? msg.translatedText
-      : msg.message.content.map((s) => (s.type === 'text' ? s.content : ' ')).join('');
-  }
-
-  private getMessageColor(msg: CanvasMessage): [number, number, number] {
-    return this.parseColor(this.settings.colors[msg.message.authorType] || '#ffffff');
-  }
   private getOutlineColor(): [number, number, number] {
     const rgba = computeOutlineColor(this.settings.colors.normal || '#ffffff', 1);
     const m = rgba.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
@@ -808,14 +646,6 @@ export class RendererWebGL2 extends RendererBase {
         parseInt(m[3] ?? '0', 10) / 255,
       ];
     return [1, 1, 1];
-  }
-
-  private parseColor(hex: string): [number, number, number] {
-    return [
-      parseInt(hex.slice(1, 3), 16) / 255 || 1,
-      parseInt(hex.slice(3, 5), 16) / 255 || 1,
-      parseInt(hex.slice(5, 7), 16) / 255 || 1,
-    ];
   }
 
   protected onPause(): void {}
