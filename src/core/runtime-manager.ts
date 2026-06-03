@@ -505,6 +505,8 @@ export class RuntimeManager {
     this.overlay = null;
     this.hiddenSince = null;
 
+    this.sessionDedup.clear();
+
     log.info('Disposed');
   }
 

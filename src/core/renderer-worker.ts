@@ -1740,7 +1740,7 @@ function renderFrame(): void {
           const translationColor = msg.authorType
             ? cfg.authorColors[msg.authorType] || renderColor
             : renderColor;
-          const translationY = sy + msg.height * TRANSLATION_FONT_SCALE + TRANSLATION_GAP_PX;
+          const translationY = sy + msg.height + TRANSLATION_GAP_PX;
           ctx.save();
           try {
             ctx.globalAlpha = (bucketIndex / (OPACITY_BUCKETS - 1)) * TRANSLATION_OPACITY_SCALE;
