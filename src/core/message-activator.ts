@@ -115,14 +115,22 @@ export class MessageActivator {
     callbacks.onMessageRendered();
 
     // Trigger async translation for all message kinds (text, superchat, membership).
+    // SuperChat and Membership messages get higher priority so their translations
+    // are processed before normal text messages during chat bursts.
     // Use isEnabled (not isActive) so translate() is called even when the
     // translator is temporarily dead — auto-recovery inside translate()
     // will recreate it.
     const translatableText = getTranslatableText(message);
     if (this.translationService.isEnabled && translatableText) {
       const cmRef = cm;
+      let priority = 0;
+      if (message.superChat) {
+        priority = 200;
+      } else if (message.kind === 'membership') {
+        priority = 100;
+      }
       this.translationService
-        .translate(translatableText)
+        .translate(translatableText, priority)
         .then((translated) => {
           callbacks.onTranslationResult(cmRef, translated);
         })

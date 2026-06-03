@@ -66,8 +66,14 @@ export class TranslationService {
   private enabled = false;
   /** Serializes configure() calls to prevent overlapping translator creation. */
   private configurePromise: Promise<void> | null = null;
-  /** Serializes translate() calls — queued lock prevents race window between check and acquire. */
-  private translateLock: Promise<void> = Promise.resolve();
+  /** Priority-sorted translation queue (highest priority first, stable for equal priority). */
+  private translateQueue: Array<{
+    text: string;
+    priority: number;
+    resolve: (result: string | null) => void;
+  }> = [];
+  /** Whether the drain loop is currently running. */
+  private drainActive = false;
   /** Pending source/target from the most recent configure() for retry. */
   private pendingSource: string | null = null;
   private pendingTarget: string | null = null;
@@ -231,16 +237,23 @@ export class TranslationService {
   /**
    * Translate text. Returns the translation or null on failure.
    *
-   * Serialized via internal mutex — only one translation is in-flight at a
-   * time to prevent concurrent failures from instantly hitting the
-   * MAX_CONSECUTIVE_FAILURES threshold and destroying the translator.
+   * Translations are processed via a priority queue — higher-priority
+   * messages (SuperChat, Membership) are translated before lower-priority
+   * normal text messages during chat bursts. Only one translation is
+   * in-flight at a time to prevent concurrent failures from instantly
+   * hitting the MAX_CONSECUTIVE_FAILURES threshold and destroying the
+   * translator.
    *
    * When the translator instance dies (destroyed after consecutive failures),
    * the next call automatically attempts recovery by recreating it via
    * doConfigure() with the preserved language pair. This means translations
    * resume without requiring user interaction (settings change, click).
+   *
+   * @param text The text to translate.
+   * @param priority Priority for queue ordering (higher = processed sooner).
+   *                 Default 0. SuperChat=200, Membership=100, text=0.
    */
-  async translate(text: string): Promise<string | null> {
+  async translate(text: string, priority = 0): Promise<string | null> {
     // ── Lock-free fast path: empty text and cache hits ─────────────────
     if (!text.trim()) {
       return text;
@@ -251,122 +264,123 @@ export class TranslationService {
       return cached;
     }
 
-    // ── Serialize: queued lock — only for cache-miss API access ───────
-    let releaseLock!: () => void;
-    const currentLock = this.translateLock;
-    this.translateLock = new Promise<void>((resolve) => {
-      releaseLock = resolve;
+    // ── Enqueue with priority ─────────────────────────────────────────
+    return new Promise<string | null>((resolve) => {
+      const entry = { text, priority, resolve };
+      // Insert sorted by priority DESC (highest first), stable for equal priority
+      const insertIdx = this.translateQueue.findIndex((q) => q.priority < priority);
+      if (insertIdx === -1) {
+        this.translateQueue.push(entry);
+      } else {
+        this.translateQueue.splice(insertIdx, 0, entry);
+      }
+      if (!this.drainActive) {
+        this.drainActive = true;
+        this.drainQueue();
+      }
     });
-    await currentLock;
+  }
 
-    // Re-check cache after acquiring lock — another caller may have
-    // translated this text while we waited for the mutex.
-    const reCached = this.translationCache.get(text);
-    if (reCached !== undefined) {
-      releaseLock();
-      return reCached;
-    }
+  /**
+   * Drain the priority queue one item at a time.
+   * Only one drain loop runs at a time (guarded by drainActive).
+   */
+  private async drainQueue(): Promise<void> {
+    while (this.translateQueue.length > 0) {
+      const entry = this.translateQueue.shift();
+      if (!entry) break;
 
-    // ── Auto-recovery: recreate translator if it died ─────────────────
-    if (!this.translator && this.enabled && this.pendingSource && this.pendingTarget) {
-      // Cap recovery cycles — after MAX_RECOVERY_CYCLES death-recovery
-      // cycles, give up and disable auto-recovery. The Edge Translator API
-      // is inherently unstable; endless cycling generates noise without
-      // improving the user experience.
-      if (this.recoveryCycleCount >= TranslationService.MAX_RECOVERY_CYCLES) {
-        log.warn(
-          `Translator died ${this.recoveryCycleCount} times — disabling auto-recovery for this session. Translation will resume after a settings change or page reload.`
-        );
-        this.pendingSource = null;
-        this.pendingTarget = null;
-        releaseLock();
-        return null;
+      // Re-check cache after dequeue — another caller may have translated this text
+      const reCached = this.translationCache.get(entry.text);
+      if (reCached !== undefined) {
+        entry.resolve(reCached);
+        continue;
       }
-      // Enforce cooldown between recovery attempts to prevent death-loops
-      // where the translator is recreated and immediately fails again.
-      const elapsed = Date.now() - this.lastRecoveryAttempt;
-      if (elapsed < TranslationService.RECOVERY_COOLDOWN_MS) {
-        const waitMs = TranslationService.RECOVERY_COOLDOWN_MS - elapsed;
-        log.debug(`Recovery cooldown — waiting ${waitMs}ms before next attempt`);
-        await new Promise((r) => setTimeout(r, waitMs));
-      }
-      // Don't stack recovery attempts — if a configure is already in-flight,
-      // wait for it and re-check. Prevents N concurrent callers from each
-      // spawning their own doConfigure().
-      if (this.configurePromise) {
-        await this.configurePromise;
-      }
-      // Re-check after waiting — the in-flight configure may have succeeded.
-      if (!this.translator) {
-        log.info('Translator instance is dead — attempting auto-recovery…');
-        this.lastRecoveryAttempt = Date.now();
-        this.configurePromise = this.doConfigure(this.pendingSource, this.pendingTarget);
-        try {
-          await this.configurePromise;
-        } catch {
-          log.debug('Translator recovery failed, retrying later');
-        } finally {
-          this.configurePromise = null;
-        }
-      }
-    }
 
-    if (!this.translator) {
-      releaseLock();
-      return null;
-    }
-
-    // ── Execute translation ───────────────────────────────────────────
-
-    try {
-      const result = await this.translator.translate(text);
-      this.consecutiveFailures = 0;
-
-      // ByteLimitedCache handles eviction automatically based on byte limit
-      this.translationCache.set(text, result);
-
-      return result;
-    } catch (err: unknown) {
-      this.consecutiveFailures++;
-      const errName = err instanceof DOMException ? err.name : 'Unknown';
-      if (this.consecutiveFailures >= TranslationService.MAX_CONSECUTIVE_FAILURES) {
-        this.recoveryCycleCount++;
-        // Downgrade repeated threshold warnings to debug — the first cycle
-        // is informative; subsequent cycles are noise from an unstable API.
-        if (this.recoveryCycleCount === 1) {
+      // ── Auto-recovery: recreate translator if it died ─────────────────
+      if (!this.translator && this.enabled && this.pendingSource && this.pendingTarget) {
+        if (this.recoveryCycleCount >= TranslationService.MAX_RECOVERY_CYCLES) {
           log.warn(
-            `Translator failed ${this.consecutiveFailures} times consecutively (last: ${errName}) — invalidating instance for recovery`
+            `Translator died ${this.recoveryCycleCount} times — disabling auto-recovery for this session.`
           );
-        } else {
-          log.debug(
-            `Translator failed again (cycle #${this.recoveryCycleCount}, last: ${errName}) — invalidating instance`
-          );
+          this.pendingSource = null;
+          this.pendingTarget = null;
+          entry.resolve(null);
+          continue;
         }
-        // Preserve the language pair for retry, then release the dead instance.
-        if (!this.pendingSource && this.currentSource) {
-          this.pendingSource = this.currentSource;
+        const elapsed = Date.now() - this.lastRecoveryAttempt;
+        if (elapsed < TranslationService.RECOVERY_COOLDOWN_MS) {
+          const waitMs = TranslationService.RECOVERY_COOLDOWN_MS - elapsed;
+          log.debug(`Recovery cooldown — waiting ${waitMs}ms before next attempt`);
+          await new Promise((r) => setTimeout(r, waitMs));
         }
-        if (!this.pendingTarget && this.currentTarget) {
-          this.pendingTarget = this.currentTarget;
+        if (this.configurePromise) {
+          await this.configurePromise;
         }
-        if (this.translator) {
+        if (!this.translator) {
+          log.info('Translator instance is dead — attempting auto-recovery…');
+          this.lastRecoveryAttempt = Date.now();
+          this.configurePromise = this.doConfigure(this.pendingSource, this.pendingTarget);
           try {
-            this.translator.destroy();
+            await this.configurePromise;
           } catch {
-            log.debug('Translator destroy during recovery failed');
+            log.debug('Translator recovery failed, retrying later');
+          } finally {
+            this.configurePromise = null;
           }
         }
-        this.translator = null;
-        this.currentTarget = null;
-        this.currentSource = null;
-        this.consecutiveFailures = 0;
-      } else {
-        log.debug(`Translation failed (${errName}):`, err);
       }
-      return null;
-    } finally {
-      releaseLock();
+
+      if (!this.translator) {
+        entry.resolve(null);
+        continue;
+      }
+
+      // ── Execute translation ───────────────────────────────────────────
+
+      try {
+        const result = await this.translator.translate(entry.text);
+        this.consecutiveFailures = 0;
+        this.translationCache.set(entry.text, result);
+        entry.resolve(result);
+      } catch (err: unknown) {
+        this.consecutiveFailures++;
+        const errName = err instanceof DOMException ? err.name : 'Unknown';
+        if (this.consecutiveFailures >= TranslationService.MAX_CONSECUTIVE_FAILURES) {
+          this.recoveryCycleCount++;
+          if (this.recoveryCycleCount === 1) {
+            log.warn(
+              `Translator failed ${this.consecutiveFailures} times consecutively (last: ${errName}) — invalidating instance for recovery`
+            );
+          } else {
+            log.debug(
+              `Translator failed again (cycle #${this.recoveryCycleCount}, last: ${errName}) — invalidating instance`
+            );
+          }
+          if (!this.pendingSource && this.currentSource) {
+            this.pendingSource = this.currentSource;
+          }
+          if (!this.pendingTarget && this.currentTarget) {
+            this.pendingTarget = this.currentTarget;
+          }
+          if (this.translator) {
+            try {
+              this.translator.destroy();
+            } catch {
+              log.debug('Translator destroy during recovery failed');
+            }
+          }
+          this.translator = null;
+          this.currentTarget = null;
+          this.currentSource = null;
+          this.consecutiveFailures = 0;
+        } else {
+          log.debug(`Translation failed (${errName}):`, err);
+        }
+        entry.resolve(null);
+      }
     }
+    this.drainActive = false;
   }
 
   destroy(): void {
@@ -391,7 +405,8 @@ export class TranslationService {
     this.consecutiveFailures = 0;
     this.recoveryCycleCount = 0;
     this.lastRecoveryAttempt = 0;
-    this.translateLock = Promise.resolve();
+    this.translateQueue = [];
+    this.drainActive = false;
     this.translationCache.clear();
   }
 }
