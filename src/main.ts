@@ -15,6 +15,7 @@ import { PageWatcher } from '@core/page-watcher';
 import { RuntimeManager } from '@core/runtime-manager';
 import { Settings } from '@core/settings';
 import { SettingsUi } from '@core/settings-ui';
+import { getMenuAdapter } from '@platform/menu-adapters';
 
 const log = createLogger('App');
 
@@ -221,17 +222,27 @@ registerMenuCommands();
 main();
 
 function registerMenuCommands(): void {
-  if (typeof GM_registerMenuCommand === 'undefined') return;
-  GM_registerMenuCommand(t('Reset overlay settings'), () => {
-    const app = window.__ytChatOverlay;
-    if (app) {
-      app.resetSettings();
-    }
-  });
-  GM_registerMenuCommand(t('Reload overlay'), () => {
-    const app = window.__ytChatOverlay;
-    if (app?.restartRuntime) {
-      void app.restartRuntime();
-    }
-  });
+  const adapter = getMenuAdapter();
+  if (!adapter.isSupported()) return;
+
+  adapter.register([
+    {
+      name: t('Reset overlay settings'),
+      action: () => {
+        const app = window.__ytChatOverlay;
+        if (app) {
+          app.resetSettings();
+        }
+      },
+    },
+    {
+      name: t('Reload overlay'),
+      action: () => {
+        const app = window.__ytChatOverlay;
+        if (app?.restartRuntime) {
+          void app.restartRuntime();
+        }
+      },
+    },
+  ]);
 }
