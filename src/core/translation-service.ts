@@ -80,9 +80,6 @@ export class TranslationService {
   /** Consecutive translate() failures. On threshold, the translator is invalidated. */
   private consecutiveFailures = 0;
   private static readonly MAX_CONSECUTIVE_FAILURES = 6;
-  /** Minimum cooldown between recovery attempts (prevents death-loops). */
-  private static readonly RECOVERY_COOLDOWN_MS = 5000;
-  private lastRecoveryAttempt = 0;
   /** Number of death→recovery cycles this session. Capped to prevent noise. */
   private recoveryCycleCount = 0;
   private static readonly MAX_RECOVERY_CYCLES = 3;
@@ -297,38 +294,31 @@ export class TranslationService {
         continue;
       }
 
-      // ── Auto-recovery: recreate translator if it died ─────────────────
+      // ── Auto-recovery: translator died, but Translator.create() requires
+      // user activation (click/keypress within 5s).  We cannot recover here —
+      // drainQueue() runs in the background without user interaction.
+      // Instead, resolve all pending translations immediately with null and
+      // preserve pendingSource/pendingTarget so onUserActivation() (called
+      // from click handlers) can recover when the user next interacts.
       if (!this.translator && this.enabled && this.pendingSource && this.pendingTarget) {
         if (this.recoveryCycleCount >= TranslationService.MAX_RECOVERY_CYCLES) {
           log.warn(
-            `Translator died ${this.recoveryCycleCount} times — disabling auto-recovery for this session.`
+            `Translator died ${this.recoveryCycleCount} times — disabling auto-recovery for this session. Open settings and click Save to retry.`
           );
           this.pendingSource = null;
           this.pendingTarget = null;
-          entry.resolve(null);
-          continue;
         }
-        const elapsed = Date.now() - this.lastRecoveryAttempt;
-        if (elapsed < TranslationService.RECOVERY_COOLDOWN_MS) {
-          const waitMs = TranslationService.RECOVERY_COOLDOWN_MS - elapsed;
-          log.debug(`Recovery cooldown — waiting ${waitMs}ms before next attempt`);
-          await new Promise((r) => setTimeout(r, waitMs));
+        // Resolve all remaining queue entries — translator is dead and can't be
+        // recreated without user activation.  The queue drain loop will exit
+        // naturally after resolving these.
+        entry.resolve(null);
+        // Fast-drain remaining queue items (they'll all resolve null)
+        while (this.translateQueue.length > 0) {
+          const next = this.translateQueue.shift();
+          if (next) next.resolve(null);
         }
-        if (this.configurePromise) {
-          await this.configurePromise;
-        }
-        if (!this.translator) {
-          log.info('Translator instance is dead — attempting auto-recovery…');
-          this.lastRecoveryAttempt = Date.now();
-          this.configurePromise = this.doConfigure(this.pendingSource, this.pendingTarget);
-          try {
-            await this.configurePromise;
-          } catch {
-            log.debug('Translator recovery failed, retrying later');
-          } finally {
-            this.configurePromise = null;
-          }
-        }
+        this.drainActive = false;
+        return;
       }
 
       if (!this.translator) {
@@ -404,7 +394,6 @@ export class TranslationService {
     this.enabled = false;
     this.consecutiveFailures = 0;
     this.recoveryCycleCount = 0;
-    this.lastRecoveryAttempt = 0;
     this.translateQueue = [];
     this.drainActive = false;
     this.translationCache.clear();
