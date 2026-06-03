@@ -2,63 +2,22 @@
 // Copyright (c) 2026 PiesP
 
 /**
- * Storage adapter for settings persistence.
+ * Legacy re-export of storage adapter.
  *
- * Uses Tampermonkey GM_setValue/GM_getValue when available,
- * otherwise falls back to localStorage.
+ * The actual adapter implementations now live in @platform/storage-adapters.
+ * This module is kept for backward compatibility — existing code that imports
+ * `getSettingsStorageAdapter` from here continues to work.
  */
 
-interface SettingsStorageAdapter {
-  getItem(key: string): string | null;
-  setItem(key: string, value: string): void;
-}
+import { getStorageAdapter as getPlatformStorageAdapter } from '@platform/storage-adapters';
+import type { StorageAdapter } from '@platform/types';
 
-class LocalStorageAdapter implements SettingsStorageAdapter {
-  getItem(key: string): string | null {
-    try {
-      return localStorage.getItem(key);
-    } catch {
-      return null;
-    }
-  }
+export type SettingsStorageAdapter = StorageAdapter;
 
-  setItem(key: string, value: string): void {
-    try {
-      localStorage.setItem(key, value);
-    } catch {
-      // quota exceeded or private browsing — silently ignore
-    }
-  }
-}
-
-const createGmAdapter = (): SettingsStorageAdapter | null => {
-  if (typeof GM_setValue === 'undefined' || typeof GM_getValue === 'undefined') {
-    return null;
-  }
-
-  return {
-    getItem(key: string): string | null {
-      const value = GM_getValue(key);
-      if (value === undefined || value === null) return null;
-      // Some userscript managers (Violentmonkey, Greasemonkey 4+) auto-parse
-      // JSON on GM_getValue, returning an object instead of the raw string.
-      // Re-serialize to string so JSON.parse in the caller works correctly.
-      if (typeof value === 'object') {
-        return JSON.stringify(value);
-      }
-      return String(value);
-    },
-    setItem(key: string, value: string): void {
-      GM_setValue(key, value);
-    },
-  };
-};
-
-let cachedAdapter: SettingsStorageAdapter | null = null;
-
-/** Returns the singleton settings storage adapter (GM API primary, localStorage fallback). */
+/**
+ * Returns the singleton settings storage adapter.
+ * Priority: chrome.storage > GM_* > localStorage.
+ */
 export function getSettingsStorageAdapter(): SettingsStorageAdapter {
-  if (cachedAdapter) return cachedAdapter;
-  cachedAdapter = createGmAdapter() ?? new LocalStorageAdapter();
-  return cachedAdapter;
+  return getPlatformStorageAdapter();
 }

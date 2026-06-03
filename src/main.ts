@@ -60,7 +60,7 @@ class App {
   }
 
   async start(): Promise<void> {
-    this.settings.initialize();
+    await this.settings.initialize();
     resolveActiveLanguage(this.settings.get().language);
     setOverlayLogLevel(this.settings.get().logLevel);
 

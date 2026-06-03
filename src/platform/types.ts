@@ -11,10 +11,10 @@
 
 // ── Storage ───────────────────────────────────────────────────────────────
 
-/** Key-value persistence adapter. */
+/** Key-value persistence adapter. All methods are async to support chrome.storage.local. */
 export interface StorageAdapter {
-  getItem(key: string): string | null;
-  setItem(key: string, value: string): void;
+  getItem(key: string): Promise<string | null>;
+  setItem(key: string, value: string): Promise<void>;
 }
 
 // ── Cross-Tab Sync ────────────────────────────────────────────────────────

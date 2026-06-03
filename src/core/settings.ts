@@ -34,17 +34,17 @@ export class Settings {
   private readonly handleStorageEvent = (event: StorageEvent): void => {
     if (event.key !== STORAGE_KEY || event.newValue === null) return;
     log.debug('Cross-tab settings change detected via storage event');
-    this.reloadFromStorage();
+    void this.reloadFromStorage();
   };
 
   constructor() {
     this.settings = cloneSettings(DEFAULT_SETTINGS);
   }
 
-  initialize(): void {
+  async initialize(): Promise<void> {
     try {
       const adapter = getSettingsStorageAdapter();
-      const raw = adapter.getItem(STORAGE_KEY);
+      const raw = await adapter.getItem(STORAGE_KEY);
       if (raw) {
         this.settings = normalizeStoredSettings(JSON.parse(raw) as Record<string, unknown>);
       }
@@ -80,7 +80,7 @@ export class Settings {
         // this event was triggered by our own save and we should not reload.
         if (this.saveGeneration === this.lastSelfSaveGeneration) return;
         log.debug('Cross-tab settings change detected via GM listener');
-        this.reloadFromStorage();
+        void this.reloadFromStorage();
       });
     }
   }
@@ -94,10 +94,10 @@ export class Settings {
   }
 
   /** Reload settings from storage and notify subscribers. */
-  private reloadFromStorage(): void {
+  private async reloadFromStorage(): Promise<void> {
     try {
       const adapter = getSettingsStorageAdapter();
-      const raw = adapter.getItem(STORAGE_KEY);
+      const raw = await adapter.getItem(STORAGE_KEY);
       if (!raw) return;
       const loaded = normalizeStoredSettings(JSON.parse(raw) as Record<string, unknown>);
       this.settings = loaded;
@@ -107,12 +107,12 @@ export class Settings {
     }
   }
 
-  private save(): void {
+  private async save(): Promise<void> {
     try {
       this.saveGeneration++;
       this.lastSelfSaveGeneration = this.saveGeneration;
       const data = { ...this.settings, _version: SETTINGS_VERSION };
-      getSettingsStorageAdapter().setItem(STORAGE_KEY, JSON.stringify(data));
+      await getSettingsStorageAdapter().setItem(STORAGE_KEY, JSON.stringify(data));
     } catch (error: unknown) {
       log.warn('Failed to save settings:', error);
     }
@@ -126,18 +126,18 @@ export class Settings {
     if (this.savePending) return;
     this.savePending = true;
     if (typeof requestIdleCallback !== 'undefined') {
-      requestIdleCallback(() => this.flushSave(), { timeout: 2000 });
+      requestIdleCallback(() => void this.flushSave(), { timeout: 2000 });
     } else {
       // No requestIdleCallback support — save immediately.
-      this.flushSave();
+      void this.flushSave();
     }
   }
 
   /** Flush any pending debounced save immediately. */
-  private flushSave(): void {
+  private async flushSave(): Promise<void> {
     if (!this.savePending) return;
     this.savePending = false;
-    this.save();
+    await this.save();
   }
 
   /**
