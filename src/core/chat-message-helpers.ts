@@ -96,13 +96,13 @@ export function hasEmojiContent(segments: readonly ContentSegment[]): boolean {
  * as literal text in the translated output.
  */
 export function getTranslatableText(message: ChatMessage): string {
-  const parts: string[] = [];
+  let result = '';
   for (const seg of message.content) {
     if (seg.type === 'text' && seg.content.length > 0) {
-      parts.push(seg.content);
+      result += seg.content;
     }
   }
-  return parts.join('').trim();
+  return result.trim();
 }
 
 /**

@@ -76,6 +76,7 @@ function cleanupExpiredMessages(
   const oldLength = messages.length;
   let writeIdx = 0;
   let anyRemoved = false;
+  const expiredMessages: CanvasMessage[] = [];
 
   // Single pass: compact messages + detect expirations.
   for (let i = 0; i < oldLength; i++) {
@@ -87,26 +88,25 @@ function cleanupExpiredMessages(
       writeIdx++;
     } else {
       anyRemoved = true;
+      expiredMessages.push(msg);
       onExpire?.(msg);
     }
   }
 
-  // Only rebuild lane map when messages actually expired — avoids
-  // unnecessary O(N) Map operations on every frame (7200 ops/sec at 120 msg × 60fps).
+  // Remove only expired messages from the lane map — incremental instead of
+  // full clear+rebuild. For screen with 100 active messages where 1 expires,
+  // this is O(1) lane operations instead of O(100) rebuild.
   if (anyRemoved) {
-    activeMessagesByLane.clear();
-    for (let i = 0; i < writeIdx; i++) {
-      const msg = messages[i];
-      if (!msg) continue;
+    for (const msg of expiredMessages) {
       const slotCount = msg.slotCount ?? 1;
       for (let slot = 0; slot < slotCount; slot++) {
-        const occupiedLane = msg.laneIndex + slot;
-        let laneList = activeMessagesByLane.get(occupiedLane);
-        if (!laneList) {
-          laneList = [];
-          activeMessagesByLane.set(occupiedLane, laneList);
+        const lane = msg.laneIndex + slot;
+        const list = activeMessagesByLane.get(lane);
+        if (list) {
+          const idx = list.indexOf(msg);
+          if (idx !== -1) list.splice(idx, 1);
+          if (list.length === 0) activeMessagesByLane.delete(lane);
         }
-        laneList.push(msg);
       }
     }
   }

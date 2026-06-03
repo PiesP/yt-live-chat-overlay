@@ -142,10 +142,14 @@ export class ObservabilityReporter {
 
   // ── Per-frame timing instrumentation ────────────────────────────────────
 
+  /** Frames elapsed since the last tick() — ensures per-tick averages are computed correctly. */
+  private framesSinceLastTick = 0;
+
   /** Record renderFrame() execution time with exponential moving average. */
   recordRenderFrame(ms: number): void {
     this.frameTimings.renderFrameMs = this.frameTimings.renderFrameMs * 0.95 + ms * 0.05;
     this.frameTimings.frameCount++;
+    this.framesSinceLastTick++;
     this.frameTimings.lastFrameTimestamp = performance.now();
   }
 
@@ -203,12 +207,13 @@ export class ObservabilityReporter {
    */
   tick(): void {
     if (!this.showDebug || !this.debugOverlayEl) return;
-    // Compute averages for per-frame accumulators
-    const fc = Math.max(1, this.frameTimings.frameCount);
+    // Compute averages for per-frame accumulators using per-interval frame count
+    const fc = Math.max(1, this.framesSinceLastTick);
     this.frameTimings.collisionCheckMs = this.collisionAccumMs / fc;
     this.frameTimings.textMeasureMs = this.textMeasureAccumMs / fc;
     this.collisionAccumMs = 0;
     this.textMeasureAccumMs = 0;
+    this.framesSinceLastTick = 0;
     // Throttle DOM updates to 250ms intervals.
     // Debug overlay is human-readable — 4 updates/second is plenty.
     // Accumulators continue to reset every frame so timing data stays fresh.

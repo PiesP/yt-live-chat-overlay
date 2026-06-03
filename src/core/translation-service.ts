@@ -241,7 +241,17 @@ export class TranslationService {
    * resume without requiring user interaction (settings change, click).
    */
   async translate(text: string): Promise<string | null> {
-    // ── Serialize: queued lock — each caller atomically acquires a slot ─
+    // ── Lock-free fast path: empty text and cache hits ─────────────────
+    if (!text.trim()) {
+      return text;
+    }
+
+    const cached = this.translationCache.get(text);
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    // ── Serialize: queued lock — only for cache-miss API access ───────
     let releaseLock!: () => void;
     const currentLock = this.translateLock;
     this.translateLock = new Promise<void>((resolve) => {
@@ -249,9 +259,12 @@ export class TranslationService {
     });
     await currentLock;
 
-    if (!text.trim()) {
+    // Re-check cache after acquiring lock — another caller may have
+    // translated this text while we waited for the mutex.
+    const reCached = this.translationCache.get(text);
+    if (reCached !== undefined) {
       releaseLock();
-      return text;
+      return reCached;
     }
 
     // ── Auto-recovery: recreate translator if it died ─────────────────
@@ -301,13 +314,6 @@ export class TranslationService {
     if (!this.translator) {
       releaseLock();
       return null;
-    }
-
-    // ── Check cache before calling the API ────────────────────────────
-    const cached = this.translationCache.get(text);
-    if (cached !== undefined) {
-      releaseLock();
-      return cached;
     }
 
     // ── Execute translation ───────────────────────────────────────────

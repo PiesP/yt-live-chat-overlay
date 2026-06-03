@@ -162,6 +162,7 @@ export class BurstDetector {
   private evaluate(): void {
     if (this.samples.length === 0) return;
 
+    const now = performance.now();
     const avgRate = this.samples.length > 0 ? this.runningSum / this.samples.length : 0;
 
     const newLevel: BurstLevel =
@@ -175,8 +176,8 @@ export class BurstDetector {
 
     if (newLevel === this.currentLevel) {
       if (newLevel !== 'normal') {
-        this.lastBurstTime = performance.now();
-        if (this.burstStartTime === 0) this.burstStartTime = performance.now();
+        this.lastBurstTime = now;
+        if (this.burstStartTime === 0) this.burstStartTime = now;
       }
       return;
     }
@@ -186,19 +187,19 @@ export class BurstDetector {
     // in ~5s (capped at 8s). Prevents over-strict rate limiting after
     // short surges while maintaining protection after sustained spikes.
     if (newLevel === 'normal' && this.currentLevel !== 'normal') {
-      const burstDuration = performance.now() - this.burstStartTime;
+      const burstDuration = now - this.burstStartTime;
       const cooldown = Math.min(
         BURST_COOLDOWN_MAX_MS,
         BURST_COOLDOWN_BASE_MS + burstDuration * BURST_COOLDOWN_RATIO
       );
-      if (performance.now() - this.lastBurstTime < cooldown) {
+      if (now - this.lastBurstTime < cooldown) {
         return;
       }
     }
 
     if (newLevel !== 'normal') {
-      this.lastBurstTime = performance.now();
-      if (this.burstStartTime === 0) this.burstStartTime = performance.now();
+      this.lastBurstTime = now;
+      if (this.burstStartTime === 0) this.burstStartTime = now;
     } else {
       this.burstStartTime = 0;
     }

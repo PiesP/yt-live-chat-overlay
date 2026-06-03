@@ -35,7 +35,7 @@ const log = createLogger('Backlog');
  * Uses the inverse-CDF method: -mean * ln(1 - U) where U ~ Uniform(0, 1).
  */
 function sampleExponential(mean: number): number {
-  return -mean * Math.log(1 - Math.random());
+  return -mean * Math.log(Math.max(Number.EPSILON, 1 - Math.random()));
 }
 
 interface BacklogControllerConfig {
@@ -55,6 +55,22 @@ interface BacklogControllerConfig {
   backlogDensityRampMaxMs: number;
   /** Minimum backlog injection rate (msg/s) */
   backlogInjectionRateMin: number;
+}
+
+/**
+ * Priority-check helper shared by sampling, partitioning, and sorting.
+ * Returns true for messages that should always be shown (SuperChat, Membership).
+ */
+function isPriorityMessage(m: ChatMessage): boolean {
+  return m.kind === 'superchat' || m.kind === 'membership';
+}
+
+/**
+ * Get the priority sort order for message kinds.
+ * Lower number = higher priority (SuperChat → Membership → regular).
+ */
+function prioritySortOrder(kind: ChatMessage['kind']): number {
+  return kind === 'superchat' ? 0 : kind === 'membership' ? 1 : 2;
 }
 
 export class BacklogInjectionController implements Pauseable {
@@ -143,7 +159,7 @@ export class BacklogInjectionController implements Pauseable {
     const priority: ChatMessage[] = [];
     const regular: ChatMessage[] = [];
     for (const msg of messages) {
-      if (msg.kind === 'superchat' || msg.kind === 'membership') {
+      if (isPriorityMessage(msg)) {
         priority.push(msg);
       } else {
         regular.push(msg);
@@ -185,16 +201,15 @@ export class BacklogInjectionController implements Pauseable {
       return;
     }
 
-    // Mode-based filtering
-    const now = Date.now();
-    const filtered = this.filterByMode(messages, now);
-
-    // 'none' mode: skip backlog entirely
+    // Mode-based filtering (handles 'none' by returning early before
+    // starting any observability or UI state changes).
     if (this.config.backlogMode === 'none') {
       log.debug('Backlog mode is "none", skipping injection');
-      this.finishBacklogInjection();
       return;
     }
+
+    const now = Date.now();
+    const filtered = this.filterByMode(messages, now);
 
     // Log recent mode filtering summary
     if (this.config.backlogMode === 'recent') {
@@ -377,11 +392,8 @@ export class BacklogInjectionController implements Pauseable {
     const count = messages.length;
     if (count < 200) return messages;
 
-    const isPriority = (m: ChatMessage): boolean =>
-      m.kind === 'superchat' || m.kind === 'membership';
-
     const isSubstantialText = (m: ChatMessage): boolean => {
-      if (isPriority(m)) return false;
+      if (isPriorityMessage(m)) return false;
       const text = m.text.trim();
       return text.length >= 3 && !/^[\sㅋㅎㅇㄱ]+$/.test(text);
     };
@@ -391,7 +403,7 @@ export class BacklogInjectionController implements Pauseable {
     const tier2: ChatMessage[] = [];
     const tier3: ChatMessage[] = [];
     for (const m of messages) {
-      if (isPriority(m)) {
+      if (isPriorityMessage(m)) {
         tier1.push(m);
       } else if (isSubstantialText(m)) {
         tier2.push(m);
@@ -420,8 +432,8 @@ export class BacklogInjectionController implements Pauseable {
     }
 
     return selected.sort((a, b) => {
-      const priorityA = a.kind === 'superchat' ? 0 : a.kind === 'membership' ? 1 : 2;
-      const priorityB = b.kind === 'superchat' ? 0 : b.kind === 'membership' ? 1 : 2;
+      const priorityA = prioritySortOrder(a.kind);
+      const priorityB = prioritySortOrder(b.kind);
       if (priorityA !== priorityB) return priorityA - priorityB;
       return a.timestamp - b.timestamp;
     });

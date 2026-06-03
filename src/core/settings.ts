@@ -126,7 +126,7 @@ export class Settings {
     if (this.savePending) return;
     this.savePending = true;
     if (typeof requestIdleCallback !== 'undefined') {
-      requestIdleCallback(() => this.flushSave());
+      requestIdleCallback(() => this.flushSave(), { timeout: 2000 });
     } else {
       // No requestIdleCallback support — save immediately.
       this.flushSave();

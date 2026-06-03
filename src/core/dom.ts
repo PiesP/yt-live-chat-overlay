@@ -122,43 +122,45 @@ export const findPlayerContainerElement = async (
   // appears in the DOM (SPA navigation, slow rendering). Falls back to
   // polling if MutationObserver is not available or times out.
   if (typeof MutationObserver !== 'undefined') {
-    return new Promise<HTMLElement | null>((resolve: (value: HTMLElement | null) => void) => {
-      let fallbackTimer: ReturnType<typeof setTimeout>;
+    return new Promise<HTMLElement | null>(
+      (resolve: (value: HTMLElement | null) => void, reject: (reason: DOMException) => void) => {
+        let fallbackTimer: ReturnType<typeof setTimeout>;
 
-      const observer = new MutationObserver(() => {
-        const element = findElementMatch<HTMLElement>(PLAYER_CONTAINER_SELECTORS, {
-          predicate: isVisibleElement,
+        const observer = new MutationObserver(() => {
+          const element = findElementMatch<HTMLElement>(PLAYER_CONTAINER_SELECTORS, {
+            predicate: isVisibleElement,
+          });
+          if (element) {
+            observer.disconnect();
+            clearTimeout(fallbackTimer);
+            log.debug('Player found via MutationObserver with selector:', element.selector);
+            resolve(element.element);
+          }
         });
-        if (element) {
+
+        observer.observe(document.body, {
+          childList: true,
+          subtree: true,
+        });
+
+        // Fallback polling timer: if the observer doesn't find the element
+        // within the polling window, clean up and switch to polling.
+        fallbackTimer = setTimeout(() => {
           observer.disconnect();
-          clearTimeout(fallbackTimer);
-          log.debug('Player found via MutationObserver with selector:', element.selector);
-          resolve(element.element);
-        }
-      });
+          resolve(null); // will trigger polling fallback below
+        }, intervalMs * attempts);
 
-      observer.observe(document.body, {
-        childList: true,
-        subtree: true,
-      });
-
-      // Fallback polling timer: if the observer doesn't find the element
-      // within the polling window, clean up and switch to polling.
-      fallbackTimer = setTimeout(() => {
-        observer.disconnect();
-        resolve(null); // will trigger polling fallback below
-      }, intervalMs * attempts);
-
-      signal?.addEventListener(
-        'abort',
-        () => {
-          observer.disconnect();
-          clearTimeout(fallbackTimer);
-          resolve(null);
-        },
-        { once: true }
-      );
-    }).then((found) => {
+        signal?.addEventListener(
+          'abort',
+          () => {
+            observer.disconnect();
+            clearTimeout(fallbackTimer);
+            reject(new DOMException('Aborted', 'AbortError'));
+          },
+          { once: true }
+        );
+      }
+    ).then((found) => {
       if (found) return found;
       // Fall back to polling if observer didn't find anything.
       return pollForPlayerContainer(attempts, intervalMs, signal);
