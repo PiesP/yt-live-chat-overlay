@@ -9,7 +9,7 @@
  * re-exported here for backward compatibility.
  */
 
-export { computeSuperChatOpacities, resolveSuperChatRgb } from './color-utils';
+export { resolveSuperChatRgb } from './color-utils';
 
 import type { RgbColor, SuperChatInfo } from '@app-types';
 
@@ -86,10 +86,6 @@ export const rendererLayout = {
   authorFontScale: 0.85,
   emojiSize: 1.2,
   superchatStickerSize: 2,
-  exitPaddingMin: 100,
-  durationMin: 5000,
-  durationMax: 30000,
-  topBottomDurationMs: 4000,
   kindPriority: {
     superchat: 200,
     membership: 100,
@@ -182,7 +178,7 @@ export const standbyMessageLayout = {
  * The minimum duration is velocity-aware so that short messages at high
  * scroll speeds are not artificially slowed down by a static floor.
  * Without this, at speedPxPerSec=500 a 3-char message's computed duration
- * (~3070ms) was clamped to rendererLayout.durationMin (5000ms), capping
+ * (~3070ms) was clamped to the settings scrollDurationMinMs (5000ms), capping
  * the effective speed at 307px/s instead of the user-configured 500px/s.
  *
  * @param totalDistance  — screenWidth + textWidth + exitPadding
