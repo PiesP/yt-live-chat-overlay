@@ -37,6 +37,9 @@
       ],
       "@app-types": [
         "./src/types/index"
+      ],
+      "@platform/*": [
+        "./src/platform/*"
       ]
     },
     // Build Performance

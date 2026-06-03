@@ -137,6 +137,7 @@ export default defineConfig(({ mode }): UserConfig => {
         '@core': resolve(REPO_ROOT, 'src/core'),
         '@shared': resolve(REPO_ROOT, 'src/shared'),
         '@app-types': resolve(REPO_ROOT, 'src/types/index.ts'),
+        '@platform': resolve(REPO_ROOT, 'src/platform'),
       },
     },
 
