@@ -9,11 +9,11 @@
  */
 
 import type { ChatMessage, FontWeight } from '@app-types';
-import { buildWrappedLines } from '@core/canvas-text-renderer';
 import { DEFAULT_FONT_FAMILY, rendererLayout, spacing } from '@core/design-tokens';
 import { SPEED_TIER } from '@core/renderer-constants';
 import { DEFAULT_SETTINGS } from '@core/settings-schema';
 import { getFontString, measureTextHeight, measureTextWidth } from '@core/text-measure';
+import { buildWrappedLines, type SharedContentSegment } from '@shared/canvas-rendering-shared';
 
 // ── Text measurement ────────────────────────────────────────────────────────
 
@@ -151,10 +151,10 @@ function estimateSuperChatDimensions(
   // emoji segments are measured with the same piece widths as rendering.
   const maxInnerWidth = rendererLayout.superchatMaxWidth - paddingH * 2;
   const pass1Result = buildWrappedLines(
-    message.content,
-    font,
+    message.content as unknown as SharedContentSegment[],
     Math.max(1, maxInnerWidth),
-    emojiSize
+    emojiSize,
+    (t: string) => measureTextWidth(t, font)
   );
   const maxLineWidth = pass1Result.maxLineWidth;
 
@@ -175,7 +175,12 @@ function estimateSuperChatDimensions(
   if (actualInnerWidth === maxInnerWidth || pass1LineCount <= 1) {
     lineCount = Math.min(pass1LineCount, maxBodyLines);
   } else {
-    const pass2Result = buildWrappedLines(message.content, font, actualInnerWidth, emojiSize);
+    const pass2Result = buildWrappedLines(
+      message.content as unknown as SharedContentSegment[],
+      actualInnerWidth,
+      emojiSize,
+      (t: string) => measureTextWidth(t, font)
+    );
     lineCount = Math.min(pass2Result.lines.length, maxBodyLines);
   }
   // Per-line rounding matches the renderer, which rounds each line's
@@ -225,7 +230,12 @@ function estimateMembershipDimensions(
   // renderWrappedContentSegments) for consistent emoji piece widths.
   const actualInnerWidth = Math.max(1, width - paddingH * 2);
   const emojiSize = Math.round(fontSize * rendererLayout.emojiSize);
-  const passResult = buildWrappedLines(message.content, font, actualInnerWidth, emojiSize);
+  const passResult = buildWrappedLines(
+    message.content as unknown as SharedContentSegment[],
+    actualInnerWidth,
+    emojiSize,
+    (t: string) => measureTextWidth(t, font)
+  );
   const bodyLineCount = Math.min(passResult.lines.length, maxBodyLines);
   // Per-line rounding matches the renderer (rounds each line individually).
   const textHeight = Math.ceil(bodyLineHeight) * bodyLineCount;

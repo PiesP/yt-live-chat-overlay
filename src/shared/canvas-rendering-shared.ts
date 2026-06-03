@@ -13,6 +13,7 @@ import { EMOJI_ALIAS_PATTERN } from '@core/chat-message-helpers';
 import { computeOutlineColor } from '@core/color-utils';
 import { AUTHOR_PHOTO_SHADOW, rendererLayout, spacing } from '@core/design-tokens';
 import { OUTLINE_STROKE_SCALE } from '@core/renderer-constants';
+import type { CharSegment } from '@core/text-measure';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -45,6 +46,162 @@ export interface SharedContentSegment {
     fallbackText?: string;
     alt?: string;
   };
+}
+
+// ── Shared text wrapping types ─────────────────────────────────────────────
+
+/** Piece in a wrapped line — either a text word or an emoji image. */
+export interface SharedTextPiece {
+  type: 'text';
+  text: string;
+  width: number;
+}
+
+export interface SharedEmojiPiece {
+  type: 'emoji';
+  emojiUrl: string;
+  emojiAlt?: string;
+  width: number;
+}
+
+export type SharedRenderPiece = SharedTextPiece | SharedEmojiPiece;
+
+// ── Character-level wrapping for oversize words (CJK, URLs, etc.) ──────────
+
+/**
+ * Split a word that exceeds maxWidth into character-level segments.
+ * Used as a fallback when a single word is wider than the available width.
+ */
+export function wrapCharSegments(
+  word: string,
+  maxWidth: number,
+  measureTextFn: (text: string) => number
+): CharSegment[] {
+  const segments: CharSegment[] = [];
+  let current = '';
+  let currentWidth = 0;
+
+  for (const ch of word) {
+    const chWidth = measureTextFn(ch);
+    if (currentWidth + chWidth > maxWidth && current.length > 0) {
+      segments.push({ text: current, width: currentWidth });
+      current = ch;
+      currentWidth = chWidth;
+    } else {
+      current += ch;
+      currentWidth += chWidth;
+    }
+  }
+
+  if (current.length > 0) {
+    segments.push({ text: current, width: currentWidth });
+  }
+
+  return segments;
+}
+
+/**
+ * Build wrapped lines from content segments using greedy line-fill.
+ *
+ * This is the SSOT for line-breaking logic — used by both the renderer
+ * (to produce lines for rendering) and the dimension estimator
+ * (to predict line count and max width without a canvas).
+ *
+ * @param segments  Content segments (text + emoji) to wrap.
+ * @param maxWidth  Maximum width per line in pixels.
+ * @param emojiSize Emoji rendering size in pixels.
+ * @param measureTextFn Width measurement function (font-aware).
+ * @returns Built lines and the maximum line width across all lines.
+ */
+export function buildWrappedLines(
+  segments: readonly SharedContentSegment[],
+  maxWidth: number,
+  emojiSize: number,
+  measureTextFn: (text: string) => number
+): { lines: SharedRenderPiece[][]; maxLineWidth: number } {
+  // ── Step 1: Flatten segments into word/emoji pieces
+  const pieces: SharedRenderPiece[] = [];
+  for (const seg of segments) {
+    if (seg.type === 'text') {
+      const words = (seg.content ?? '').split(/\s+/).filter((w) => w.length > 0);
+      for (const word of words) {
+        pieces.push({ type: 'text', text: word, width: measureTextFn(word) });
+      }
+    } else {
+      const url = seg.emojiUrl ?? seg.emoji?.url ?? '';
+      const alt = seg.emojiAlt ?? seg.emoji?.alt;
+      if (url) {
+        pieces.push({
+          type: 'emoji',
+          emojiUrl: url,
+          ...(alt ? { emojiAlt: alt } : {}),
+          width: emojiSize + spacing.xs,
+        });
+      }
+    }
+  }
+
+  const lines: SharedRenderPiece[][] = [];
+  if (pieces.length === 0) return { lines, maxLineWidth: 0 };
+
+  // ── Step 2: Greedy line-filling
+  let currentLine: SharedRenderPiece[] = [];
+  let currentWidth = 0;
+  let prevIsText = false;
+  const spaceWidth = measureTextFn(' ');
+  let maxLineWidth = 0;
+
+  for (const piece of pieces) {
+    const gap = prevIsText && piece.type === 'text' ? spaceWidth : 0;
+    const needed = gap + piece.width;
+
+    // ── Oversize single word — character-level wrap (CJK, URLs, etc.)
+    if (piece.type === 'text' && piece.width > maxWidth) {
+      if (currentLine.length > 0) {
+        maxLineWidth = Math.max(maxLineWidth, currentWidth);
+        lines.push(currentLine);
+      }
+      const charSegs = wrapCharSegments(piece.text, maxWidth, measureTextFn);
+      if (charSegs.length <= 1) {
+        currentLine = [piece];
+        currentWidth = piece.width;
+        prevIsText = true;
+        continue;
+      }
+      for (let i = 0; i < charSegs.length - 1; i++) {
+        const cs = charSegs[i] as CharSegment;
+        lines.push([{ type: 'text', text: cs.text, width: cs.width }]);
+        maxLineWidth = Math.max(maxLineWidth, cs.width);
+      }
+      const lastSeg = charSegs[charSegs.length - 1] as CharSegment;
+      currentLine = [{ type: 'text', text: lastSeg.text, width: lastSeg.width }];
+      currentWidth = lastSeg.width;
+      prevIsText = true;
+      continue;
+    }
+
+    // ── Normal line overflow
+    if (currentLine.length > 0 && currentWidth + needed > maxWidth) {
+      maxLineWidth = Math.max(maxLineWidth, currentWidth);
+      lines.push(currentLine);
+      currentLine = [piece];
+      currentWidth = piece.width;
+      prevIsText = piece.type === 'text';
+      continue;
+    }
+
+    if (gap > 0) currentWidth += gap;
+    currentLine.push(piece);
+    currentWidth += piece.width;
+    prevIsText = piece.type === 'text';
+  }
+
+  if (currentLine.length > 0) {
+    maxLineWidth = Math.max(maxLineWidth, currentWidth);
+    lines.push(currentLine);
+  }
+
+  return { lines, maxLineWidth };
 }
 
 // ── Outline stroke ──────────────────────────────────────────────────────────
