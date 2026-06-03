@@ -128,6 +128,7 @@ let animFrameId: number | null = null;
 let atlasReady = false;
 let isPaused = false;
 let isVideoPaused = false;
+let pausedAt = 0;
 
 // WebGL state
 let gl: WebGL2RenderingContext | null = null;
@@ -721,8 +722,22 @@ function handleUpdateConfig(payload: { config: Partial<WorkerConfig> }): void {
 }
 
 function handleSetPaused(payload: { paused: boolean; videoPaused?: boolean }): void {
+  const wasPaused = isPaused;
   isPaused = payload.paused;
   if (payload.videoPaused !== undefined) isVideoPaused = payload.videoPaused;
+
+  if (isPaused && !wasPaused) {
+    pausedAt = performance.now();
+  }
+  if (!isPaused && wasPaused) {
+    const pauseDuration = performance.now() - pausedAt;
+    if (pauseDuration > 0 && config) {
+      const clamped = Math.min(pauseDuration, config.maxMessageAgeMs);
+      for (const m of activeMessages) {
+        m.startTime += clamped;
+      }
+    }
+  }
 }
 
 function handleEmojiImages(payload: { images: Array<{ url: string; bitmap: ImageBitmap }> }): void {
@@ -776,6 +791,7 @@ function handleDestroy(): void {
   activeMessages.length = 0;
   pendingQueue.clear();
   retryQueue.length = 0;
+  pausedAt = 0;
 
   if (gl) {
     if (atlasTexture) gl.deleteTexture(atlasTexture);
