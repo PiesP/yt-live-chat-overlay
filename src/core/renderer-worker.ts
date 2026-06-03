@@ -29,7 +29,7 @@
 
 /// <reference lib="webworker" />
 
-import type { FontWeight } from '@app-types';
+import type { ChatMessage, FontWeight } from '@app-types';
 import { ByteLimitedCache } from '@core/byte-limited-cache';
 import type { CardConfigWorker } from '@core/card-config';
 import { EMOJI_ALIAS_PATTERN } from '@core/chat-message-helpers';
@@ -54,6 +54,7 @@ import {
   TRANSLATION_GAP_PX,
   TRANSLATION_OPACITY_SCALE,
 } from '@core/renderer-constants';
+import { computeMessageOpacity, type OpacityConfig } from '@core/renderer-shared';
 import { type CharSegment, getFontString } from '@core/text-measure';
 import {
   drawAuthorPhoto,
@@ -299,12 +300,22 @@ let pauseStartTime = 0;
 // Pre-computed invariants (updated on config change to avoid per-frame division)
 let invFadeMs = 0;
 let ageFadeRate = 0;
+let opacityConfig: OpacityConfig | null = null;
 
 /** Recompute cached values derived from config (called on init + updateConfig). */
 function recomputeConfigDerived(): void {
   if (!config) return;
   invFadeMs = config.fadeDurationMs > 0 ? 1 / Math.max(1, config.fadeDurationMs) : 0;
   ageFadeRate = 1 / config.maxMessageAgeMs;
+  opacityConfig = {
+    baseOpacity: config.opacity,
+    fadeDurationMs: config.fadeDurationMs,
+    invFadeDuration: invFadeMs,
+    backlogOpacityMultiplier: config.backlogOpacityMultiplier,
+    depthLayersEnabled: config.depthLayersEnabled,
+    depthFarOpacityMul: config.depthFarOpacityMul,
+    ageFadeRate,
+  };
 }
 
 // Text measurement cache (cleared on font config change)
@@ -1632,35 +1643,15 @@ function renderFrame(): void {
       msg.x = msg.startX + progress * dist;
     }
 
-    // Compute opacity
-    let opacity = config.opacity;
-    if (msg.speedTier === SPEED_TIER.BACKLOG) {
-      opacity *= config.backlogOpacityMultiplier;
-    } else if (msg.speedTier === SPEED_TIER.FAR) {
-      opacity *= config.depthFarOpacityMul;
-    }
-
-    if (cfg.fadeDurationMs > 0) {
-      if (isScrolling) {
-        // Scrolling: fade-out only (message exits screen edge naturally)
-        const remaining = msg.duration - elapsed;
-        if (remaining < cfg.fadeDurationMs) {
-          opacity *= Math.max(0, remaining * invFadeMs);
-        }
-      } else {
-        // Fixed (top/bottom): fade-in + fade-out
-        if (elapsed < cfg.fadeDurationMs) {
-          opacity *= elapsed * invFadeMs;
-        }
-        if (elapsed > msg.duration - cfg.fadeDurationMs) {
-          opacity *= Math.max(0, (msg.duration - elapsed) * invFadeMs);
-        }
-      }
-    }
-
-    // Age-based fade-out: gradually fade after maxMessageAgeMs (matches renderer-canvas.ts)
-    const ageRatio = Math.min(1, elapsed * ageFadeRate);
-    opacity = Math.max(0, opacity * (1 - ageRatio));
+    // Compute opacity via shared SSOT (matches renderer-canvas.ts)
+    const opacity = computeMessageOpacity(
+      { isBacklog: msg.speedTier === SPEED_TIER.BACKLOG } as ChatMessage,
+      elapsed,
+      msg.duration,
+      isScrolling,
+      msg.speedTier,
+      opacityConfig!
+    );
 
     if (opacity <= 0) continue;
 
@@ -1923,15 +1914,21 @@ function activateMessage(
     // MID: no multiplier
   }
 
+  // ── Adaptive stagger: reduce delay when pending queue is deep (matches renderer-canvas.ts) ──
+  const pendingCount = pendingQueue.length;
+  let effectiveMaxStagger = config.staggerMaxDelayMs;
+  if (pendingCount > 30) {
+    effectiveMaxStagger = 0;
+  } else if (pendingCount > 10) {
+    effectiveMaxStagger = Math.floor(config.staggerMaxDelayMs / 2);
+  }
+
   // ── Exponential stagger delay (matching main thread) ──
   let staggerDelay = 0;
   if (batchIndex > 0 && isScrolling) {
     const staggeredIdx = Math.min(batchIndex, STAGGER_BATCH_MAX);
     staggerDelay = Math.round(
-      Math.min(
-        HORIZONTAL_STAGGER_MAX,
-        staggeredIdx * -STAGGER_EXP_SCALE * Math.log(1 - Math.random())
-      )
+      Math.min(effectiveMaxStagger, staggeredIdx * -STAGGER_EXP_SCALE * Math.log(1 - Math.random()))
     );
   }
 
