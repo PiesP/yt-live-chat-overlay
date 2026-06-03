@@ -2,11 +2,15 @@
 // Copyright (c) 2026 PiesP
 
 /**
- * Minimal type declarations for Chrome extension APIs used by platform adapters.
+ * Minimal type declarations for Chrome extension APIs used by platform adapters
+ * and extension background/service worker scripts.
  *
- * Purpose: Allow `chrome.storage` usage without pulling in @types/chrome.
- * Runtime availability is guarded by `typeof chrome !== 'undefined'` checks.
+ * Purpose: Allow extension code to reference chrome.* APIs without pulling in
+ * the full @types/chrome dependency. Runtime availability is guarded by
+ * `typeof chrome !== 'undefined'` checks.
  */
+
+// ── Storage ────────────────────────────────────────────────────────────────
 
 interface ChromeStorageArea {
   get(keys: string | string[] | null): Promise<Record<string, unknown>>;
@@ -23,14 +27,68 @@ interface ChromeStorageNamespace {
   onChanged: ChromeStorageChangedEvent;
 }
 
+// ── Runtime ────────────────────────────────────────────────────────────────
+
+interface ChromeRuntimeOnInstalledEvent {
+  addListener(callback: (details: { reason: string }) => void): void;
+}
+
+interface ChromeRuntimeOnMessageEvent {
+  addListener(
+    callback: (
+      message: unknown,
+      sender: unknown,
+      sendResponse: (response: unknown) => void
+    ) => void | boolean
+  ): void;
+}
+
 interface ChromeRuntimeNamespace {
   id?: string;
   getURL(path: string): string;
+  onInstalled: ChromeRuntimeOnInstalledEvent;
+  onMessage?: ChromeRuntimeOnMessageEvent;
 }
+
+// ── Context Menus ──────────────────────────────────────────────────────────
+
+interface ChromeContextMenuCreateProperties {
+  id: string;
+  title: string;
+  contexts: string[];
+}
+
+interface ChromeContextMenuInfo {
+  menuItemId: string | number;
+}
+
+interface ChromeContextMenusClickedEvent {
+  addListener(callback: (info: ChromeContextMenuInfo, tab?: ChromeTab) => void): void;
+}
+
+interface ChromeContextMenusNamespace {
+  create(properties: ChromeContextMenuCreateProperties): void;
+  removeAll(callback?: () => void): void;
+  onClicked: ChromeContextMenusClickedEvent;
+}
+
+// ── Tabs ───────────────────────────────────────────────────────────────────
+
+interface ChromeTab {
+  id?: number;
+}
+
+interface ChromeTabsNamespace {
+  sendMessage(tabId: number, message: unknown): Promise<unknown>;
+}
+
+// ── Top-level namespace ────────────────────────────────────────────────────
 
 interface ChromeNamespace {
   storage?: ChromeStorageNamespace;
   runtime?: ChromeRuntimeNamespace;
+  contextMenus?: ChromeContextMenusNamespace;
+  tabs?: ChromeTabsNamespace;
 }
 
 declare const chrome: ChromeNamespace | undefined;

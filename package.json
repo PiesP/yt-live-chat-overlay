@@ -22,7 +22,9 @@
     "quality:fix": "pnpm -s fmt:fix && pnpm -s lint:fix && pnpm -s check && pnpm -s circular && pnpm -s knip",
     "clean": "rimraf dist",
     "validate:consistency": "cd test && npx vitest run consistency/",
-    "prebuild": "pnpm -s quality"
+    "prebuild": "pnpm -s quality",
+    "build:extension": "vite build --config vite.config.extension.ts && cp extension/manifest.json dist-extension/manifest.json && cp -r extension/icons dist-extension/",
+    "build:extension:dev": "vite build --config vite.config.extension.ts --mode development && cp extension/manifest.json dist-extension/manifest.json && cp -r extension/icons dist-extension/"
   },
   "keywords": [
     "userscript",
