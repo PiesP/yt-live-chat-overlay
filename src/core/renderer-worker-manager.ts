@@ -22,6 +22,8 @@ import type { ImageFetchManager } from '@core/image-fetch-manager';
 import { createLogger } from '@core/logging';
 import type { ObservabilityReporter } from '@core/observability';
 import type { Overlay } from '@core/overlay';
+import type { WorkerFactory } from '@platform/types';
+import { getWorkerFactory } from '@platform/worker-factory';
 
 type DimensionResult = { width: number; height: number };
 
@@ -145,7 +147,12 @@ export class RenderWorkerManager {
    * Attempt to create and initialize the OffscreenCanvas render worker.
    * Returns true if the worker was successfully started.
    */
-  init(canvas: HTMLCanvasElement, settings: OverlaySettings, overlay: Overlay): boolean {
+  init(
+    canvas: HTMLCanvasElement,
+    settings: OverlaySettings,
+    overlay: Overlay,
+    workerFactory?: WorkerFactory
+  ): boolean {
     try {
       if (typeof OffscreenCanvas === 'undefined') {
         log.debug('OffscreenCanvas not available — using main-thread renderer');
@@ -156,8 +163,9 @@ export class RenderWorkerManager {
       const config = RenderWorkerManager.buildWorkerConfig(settings);
       const dims = overlay.getDimensions();
 
-      // Vite bundles this as a separate worker chunk
-      const workerUrl = new URL('./renderer-worker.ts', import.meta.url);
+      // Resolve worker URL via platform-specific factory
+      const factory = workerFactory ?? getWorkerFactory();
+      const workerUrl = factory.createWorkerUrl('./renderer-worker.ts');
       const worker = new Worker(workerUrl, { type: 'module' });
 
       worker.onmessage = (e: MessageEvent) => {

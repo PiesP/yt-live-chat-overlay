@@ -13,6 +13,8 @@
 
 import type { ChatMessage, OverlaySettings } from '@app-types';
 import { createLogger } from '@core/logging';
+import type { WorkerFactory } from '@platform/types';
+import { getWorkerFactory } from '@platform/worker-factory';
 
 const log = createLogger('[RenderWorkerManagerWebGL2]');
 
@@ -85,7 +87,11 @@ export class RenderWorkerManagerWebGL2 {
    * Initialize the worker with an OffscreenCanvas.
    * Transfers canvas control to the worker.
    */
-  async init(canvas: HTMLCanvasElement, config: WorkerConfigWebGL2): Promise<void> {
+  async init(
+    canvas: HTMLCanvasElement,
+    config: WorkerConfigWebGL2,
+    workerFactory?: WorkerFactory
+  ): Promise<void> {
     // Guard: terminate any existing worker to prevent double-init
     if (this.worker) {
       this.worker.terminate();
@@ -97,10 +103,9 @@ export class RenderWorkerManagerWebGL2 {
     this.config = config;
 
     const offscreen = canvas.transferControlToOffscreen();
-    // Create worker from the bundled worker file
-    // Note: The build system produces the worker bundle; path resolution depends on bundler config.
-    // For development, we use a blob URL or the vite-bundled path.
-    const workerUrl = new URL('./renderer-worker-webgl2.ts', import.meta.url);
+    // Resolve worker URL via platform-specific factory
+    const factory = workerFactory ?? getWorkerFactory();
+    const workerUrl = factory.createWorkerUrl('./renderer-worker-webgl2.ts');
     this.worker = new Worker(workerUrl, { type: 'module' });
 
     this.worker.onmessage = (e: MessageEvent) => {

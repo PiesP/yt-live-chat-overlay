@@ -29,8 +29,8 @@ interface ChromeRuntimeNamespace {
 }
 
 interface ChromeNamespace {
-  storage: ChromeStorageNamespace;
-  runtime: ChromeRuntimeNamespace;
+  storage?: ChromeStorageNamespace;
+  runtime?: ChromeRuntimeNamespace;
 }
 
 declare const chrome: ChromeNamespace | undefined;
