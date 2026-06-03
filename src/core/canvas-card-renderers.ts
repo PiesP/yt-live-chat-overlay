@@ -344,8 +344,15 @@ export function renderPaidCard(
       cursorY,
       textColor,
       config.authorSection.nameMaxWidth,
-      settings,
-      authorPhotoCache,
+      Math.round(settings.fontSize * rendererLayout.authorFontScale),
+      settings.fontWeight,
+      settings.fontFamily,
+      settings.outline.widthPx,
+      settings.outline.opacity,
+      (url: string) => authorPhotoCache.get(url),
+      (photo: unknown) =>
+        (photo as HTMLImageElement)?.complete === true &&
+        (photo as HTMLImageElement).naturalWidth > 0,
       textBitmapCache,
       getFontFn
     );

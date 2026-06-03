@@ -58,7 +58,7 @@ import { computeMessageOpacity, type OpacityConfig } from '@core/renderer-shared
 import { getFontString } from '@core/text-measure';
 import {
   buildWrappedLines,
-  drawAuthorPhoto,
+  drawAuthorSection,
   drawRoundRect,
   renderContentSegments,
   renderSegment,
@@ -600,97 +600,6 @@ function renderWrappedContentSegments(
   return cursorY;
 }
 
-// ── Author rendering ────────────────────────────────────────────────────────
-
-/** Draw an author photo with shadow effects. */
-// drawAuthorPhoto imported from @shared/canvas-rendering-shared
-
-/** Draw author photo + name section. Returns the Y offset after the section. */
-function drawAuthorSection(
-  ctx: OffscreenCanvasRenderingContext2D,
-  message: { author?: string; authorPhotoUrl?: string },
-  textX: number,
-  startY: number,
-  color: string,
-  maxNameWidth: number | undefined,
-  authorFontSize: number,
-  fontWeight: string,
-  fontFamily: string,
-  outlineWidthPx: number,
-  outlineOpacity: number,
-  authorPhotoCache: ByteLimitedCache<ImageBitmap>,
-  textBitmapCache: TextBitmapCache,
-  getFontFn: (fontSize: number) => string
-): number {
-  if (!message.author) return startY;
-
-  const prevFont = ctx.font;
-  const prevTextBaseline = ctx.textBaseline;
-
-  const nameFont = getFontString(authorFontSize, fontWeight as FontWeight, fontFamily);
-  ctx.font = nameFont;
-  const nameHeight = measureTextHeight(authorFontSize);
-  const sectionHeight = Math.max(rendererLayout.authorPhotoSize, nameHeight);
-
-  const authorPhotoUrl = message.authorPhotoUrl;
-  const photo = authorPhotoUrl ? authorPhotoCache.get(authorPhotoUrl) : null;
-  if (photo && authorPhotoUrl) {
-    drawAuthorPhoto(ctx, photo, textX, startY);
-  }
-  const nameX = textX + (photo ? rendererLayout.authorPhotoSize + spacing.xs : 0);
-  const nameY = startY + Math.max(0, Math.floor((sectionHeight - nameHeight) / 2));
-
-  // Truncate author name with ellipsis if it exceeds the allowed width
-  let displayName = message.author;
-  if (maxNameWidth !== undefined && maxNameWidth > 0) {
-    ctx.font = nameFont;
-    ctx.textBaseline = 'top';
-    const nameWidth = ctx.measureText(displayName).width;
-    if (nameWidth > maxNameWidth) {
-      const ellipsis = '\u2026';
-      const ellipsisWidth = ctx.measureText(ellipsis).width;
-      // Guard: if the ellipsis character alone exceeds maxNameWidth
-      if (ellipsisWidth >= maxNameWidth) {
-        ctx.font = prevFont;
-        ctx.textBaseline = prevTextBaseline;
-        return startY + sectionHeight;
-      }
-      // Binary search for optimal truncation point
-      let lo = 0;
-      let hi = displayName.length;
-      while (lo < hi) {
-        const mid = Math.floor((lo + hi) / 2);
-        const testWidth = ctx.measureText(displayName.slice(0, mid) + ellipsis).width;
-        if (testWidth <= maxNameWidth) lo = mid + 1;
-        else hi = mid;
-      }
-      displayName = displayName.slice(0, Math.max(0, lo - 1)) + ellipsis;
-    }
-  }
-
-  // Use renderSegment with bitmap cache instead of direct fillText+strokeText
-  renderSegment(
-    ctx,
-    displayName,
-    nameX,
-    nameY,
-    color,
-    authorFontSize,
-    outlineWidthPx,
-    outlineOpacity,
-    textBitmapCache,
-    getFontFn
-  );
-
-  ctx.font = prevFont;
-  ctx.textBaseline = prevTextBaseline;
-
-  return startY + sectionHeight;
-}
-
-/** Draw a rounded rectangle path (no fill/stroke — path only). */
-// drawRoundRect imported from @shared/canvas-rendering-shared
-
 // ── Message card rendering ───────────────────────────────────────────────
 
 /** Render a regular text message at (x, y) with alpha blending.
@@ -737,7 +646,8 @@ function renderRegularMessage(
       fontFamily,
       outlineWidthPx,
       outlineOpacity,
-      authorPhotoCache,
+      (url: string) => authorPhotoCache.get(url),
+      () => true,
       textBitmapCache,
       getFontFn
     );
@@ -985,7 +895,8 @@ function renderPaidCardWorker(
       fontFamily,
       outlineWidthPx,
       outlineOpacity,
-      authorPhotoCache,
+      (url: string) => authorPhotoCache.get(url),
+      () => true,
       textBitmapCache,
       getFontFn
     );

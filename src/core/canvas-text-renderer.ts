@@ -11,11 +11,11 @@
 import type { ChatMessage, ContentSegment, OverlaySettings } from '@app-types';
 import type { ByteLimitedCache } from '@core/byte-limited-cache';
 import { EMOJI_ALIAS_PATTERN } from '@core/chat-message-helpers';
-import { rendererLayout, spacing } from '@core/design-tokens';
-import { getFontString, measureTextHeight, measureTextWidth } from '@core/text-measure';
+import { rendererLayout } from '@core/design-tokens';
+import { measureTextHeight, measureTextWidth } from '@core/text-measure';
 import {
   buildWrappedLines,
-  drawAuthorPhoto,
+  drawAuthorSection,
   renderContentSegments,
   renderSegment,
   type SharedContentSegment,
@@ -24,7 +24,11 @@ import {
 // ── Re-export shared rendering functions so external consumers
 //    (canvas-card-renderers.ts, renderer-canvas.ts) can still
 //    import them from '@core/canvas-text-renderer'.
-export { drawRoundRect, strokeTextOutline } from '@shared/canvas-rendering-shared';
+export {
+  drawAuthorSection,
+  drawRoundRect,
+  strokeTextOutline,
+} from '@shared/canvas-rendering-shared';
 
 // ── Wrapped content segments (text + emoji) ────────────────────────────────
 
@@ -146,89 +150,6 @@ export function renderWrappedContentSegments(
   return cursorY;
 }
 
-// ── Author rendering ────────────────────────────────────────────────────────
-
-/** Draw author photo + name section. Returns the Y offset after the section. */
-export function drawAuthorSection(
-  ctx: CanvasRenderingContext2D,
-  message: ChatMessage,
-  textX: number,
-  startY: number,
-  color: string,
-  maxNameWidth: number | undefined,
-  settings: OverlaySettings,
-  authorPhotoCache: ByteLimitedCache<HTMLImageElement>,
-  textBitmapCache: ByteLimitedCache<HTMLCanvasElement>,
-  getFontFn: (fontSize: number) => string
-): number {
-  if (!message.author) return startY;
-
-  const prevFont = ctx.font;
-  const prevTextBaseline = ctx.textBaseline;
-
-  const fontSize = settings.fontSize;
-  const authorFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
-  const nameFont = getFontString(authorFontSize, settings.fontWeight, settings.fontFamily);
-  const nameHeight = measureTextHeight(nameFont, authorFontSize);
-  const sectionHeight = Math.max(rendererLayout.authorPhotoSize, nameHeight);
-
-  const authorPhotoUrl = message.authorPhotoUrl;
-  const photo = authorPhotoUrl ? authorPhotoCache.get(authorPhotoUrl) : undefined;
-  if (photo?.complete && photo.naturalWidth > 0 && authorPhotoUrl) {
-    drawAuthorPhoto(ctx, photo, textX, startY);
-  }
-  const nameX = textX + (photo ? rendererLayout.authorPhotoSize + spacing.xs : 0);
-  const nameY = startY + Math.max(0, Math.floor((sectionHeight - nameHeight) / 2));
-
-  // Truncate author name with ellipsis if it exceeds the allowed width
-  let displayName = message.author;
-  if (maxNameWidth !== undefined && maxNameWidth > 0) {
-    ctx.font = nameFont;
-    ctx.textBaseline = 'top';
-    const nameWidth = ctx.measureText(displayName).width;
-    if (nameWidth > maxNameWidth) {
-      const ellipsis = '\u2026';
-      const ellipsisWidth = ctx.measureText(ellipsis).width;
-      // Guard: if the ellipsis character alone exceeds maxNameWidth
-      // (extremely narrow container), skip rendering the name entirely.
-      if (ellipsisWidth >= maxNameWidth) {
-        ctx.font = prevFont;
-        ctx.textBaseline = prevTextBaseline;
-        return startY + sectionHeight;
-      }
-      // Binary search for optimal truncation point (O(log n) instead of O(n))
-      let lo = 0;
-      let hi = displayName.length;
-      while (lo < hi) {
-        const mid = Math.floor((lo + hi) / 2);
-        const testWidth = ctx.measureText(displayName.slice(0, mid) + ellipsis).width;
-        if (testWidth <= maxNameWidth) lo = mid + 1;
-        else hi = mid;
-      }
-      displayName = displayName.slice(0, Math.max(0, lo - 1)) + ellipsis;
-    }
-  }
-
-  // Use renderSegment with bitmap cache instead of direct fillText+strokeText
-  renderSegment(
-    ctx,
-    displayName,
-    nameX,
-    nameY,
-    color,
-    authorFontSize,
-    settings.outline.widthPx,
-    settings.outline.opacity,
-    textBitmapCache,
-    getFontFn
-  );
-
-  ctx.font = prevFont;
-  ctx.textBaseline = prevTextBaseline;
-
-  return startY + sectionHeight;
-}
-
 // ── Message card rendering ───────────────────────────────────────────────
 
 /** Render a regular text message at (x, y) with alpha blending.
@@ -258,6 +179,7 @@ export function renderRegularMessage(
   const textX = x + rendererLayout.paddingH;
   let textY = y + rendererLayout.paddingV;
   if (showAuthor && message.author) {
+    const authorFontSize = Math.round(settings.fontSize * rendererLayout.authorFontScale);
     textY = drawAuthorSection(
       ctx,
       message,
@@ -265,8 +187,15 @@ export function renderRegularMessage(
       textY,
       color,
       undefined,
-      settings,
-      authorPhotoCache,
+      authorFontSize,
+      settings.fontWeight,
+      settings.fontFamily,
+      settings.outline.widthPx,
+      settings.outline.opacity,
+      (url: string) => authorPhotoCache.get(url),
+      (photo: unknown) =>
+        (photo as HTMLImageElement)?.complete === true &&
+        (photo as HTMLImageElement).naturalWidth > 0,
       textBitmapCache,
       getFontFn
     );

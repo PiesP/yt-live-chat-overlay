@@ -9,11 +9,12 @@
  * and renderer-worker.ts.
  */
 
+import type { FontWeight } from '@app-types';
 import { EMOJI_ALIAS_PATTERN } from '@core/chat-message-helpers';
 import { computeOutlineColor } from '@core/color-utils';
 import { AUTHOR_PHOTO_SHADOW, rendererLayout, spacing } from '@core/design-tokens';
 import { OUTLINE_STROKE_SCALE } from '@core/renderer-constants';
-import type { CharSegment } from '@core/text-measure';
+import { type CharSegment, getFontString } from '@core/text-measure';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -497,4 +498,121 @@ export function drawAuthorPhoto(
   ctx.shadowOffsetY = 1;
   ctx.drawImage(photo, x, y, rendererLayout.authorPhotoSize, rendererLayout.authorPhotoSize);
   ctx.restore();
+}
+
+/**
+ * Draw author photo + name section. Returns the Y offset after the section.
+ *
+ * This is the SSOT for author rendering — used by both main-thread renderers
+ * (canvas-text-renderer.ts, canvas-card-renderers.ts) and the Web Worker
+ * (renderer-worker.ts).
+ *
+ * @param ctx          Any canvas context (CanvasRenderingContext2D or OffscreenCanvasRenderingContext2D)
+ * @param message      Minimal message with optional author name and photo URL
+ * @param textX        X position for the section
+ * @param startY       Starting Y position
+ * @param color        Text color for the author name
+ * @param maxNameWidth Max allowed width for the author name (undefined = no truncation)
+ * @param authorFontSize Font size for the author name in px
+ * @param fontWeight   Font weight ('normal' | 'bold')
+ * @param fontFamily   CSS font-family stack
+ * @param outlineWidthPx Outline width in pixels (0 = no outline)
+ * @param outlineOpacity Outline opacity (0-1)
+ * @param getPhoto     Callback to retrieve a cached photo by URL (returns T or undefined/null)
+ * @param isValidPhoto Callback to check if a cached photo is valid and ready to draw
+ * @param textBitmapCache Text bitmap cache for outline rendering
+ * @param getFontFn    Function to resolve a CSS font string from fontSize
+ * @returns The Y position after the section (for chaining)
+ */
+export function drawAuthorSection<T>(
+  ctx: AnyCanvasContext,
+  message: { author?: string; authorPhotoUrl?: string },
+  textX: number,
+  startY: number,
+  color: string,
+  maxNameWidth: number | undefined,
+  authorFontSize: number,
+  fontWeight: string,
+  fontFamily: string,
+  outlineWidthPx: number,
+  outlineOpacity: number,
+  getPhoto: (url: string) => T | undefined | null,
+  isValidPhoto: (photo: T) => boolean,
+  textBitmapCache: TextBitmapCache,
+  getFontFn: (fontSize: number) => string
+): number {
+  if (!message.author) return startY;
+
+  const prevFont = ctx.font;
+  const prevTextBaseline = ctx.textBaseline;
+
+  const nameFont = getFontString(authorFontSize, fontWeight as FontWeight, fontFamily);
+  ctx.font = nameFont;
+  // Measure text height directly from the context (compatible with both
+  // CanvasRenderingContext2D and OffscreenCanvasRenderingContext2D).
+  const nameMetrics = ctx.measureText('Mg');
+  const ascent = Math.max(0, nameMetrics.actualBoundingBoxAscent);
+  const descent = Math.max(0, nameMetrics.actualBoundingBoxDescent);
+  const nameHeight = Math.ceil(ascent + descent);
+  const sectionHeight = Math.max(rendererLayout.authorPhotoSize, nameHeight);
+
+  // Author photo (if available and valid)
+  const authorPhotoUrl = message.authorPhotoUrl;
+  let hasPhoto = false;
+  if (authorPhotoUrl) {
+    const photo = getPhoto(authorPhotoUrl);
+    if (photo != null && isValidPhoto(photo)) {
+      drawAuthorPhoto(ctx, photo as unknown as CanvasImageSource, textX, startY);
+      hasPhoto = true;
+    }
+  }
+  const nameX = textX + (hasPhoto ? rendererLayout.authorPhotoSize + spacing.xs : 0);
+  const nameY = startY + Math.max(0, Math.floor((sectionHeight - nameHeight) / 2));
+
+  // Truncate author name with ellipsis if it exceeds the allowed width
+  let displayName = message.author;
+  if (maxNameWidth !== undefined && maxNameWidth > 0) {
+    ctx.font = nameFont;
+    ctx.textBaseline = 'top';
+    const nameWidth = ctx.measureText(displayName).width;
+    if (nameWidth > maxNameWidth) {
+      const ellipsis = '\u2026';
+      const ellipsisWidth = ctx.measureText(ellipsis).width;
+      // Guard: if the ellipsis character alone exceeds maxNameWidth
+      // (extremely narrow container), skip rendering the name entirely.
+      if (ellipsisWidth >= maxNameWidth) {
+        ctx.font = prevFont;
+        ctx.textBaseline = prevTextBaseline;
+        return startY + sectionHeight;
+      }
+      // Binary search for optimal truncation point (O(log n) instead of O(n))
+      let lo = 0;
+      let hi = displayName.length;
+      while (lo < hi) {
+        const mid = Math.floor((lo + hi) / 2);
+        const testWidth = ctx.measureText(displayName.slice(0, mid) + ellipsis).width;
+        if (testWidth <= maxNameWidth) lo = mid + 1;
+        else hi = mid;
+      }
+      displayName = displayName.slice(0, Math.max(0, lo - 1)) + ellipsis;
+    }
+  }
+
+  renderSegment(
+    ctx,
+    displayName,
+    nameX,
+    nameY,
+    color,
+    authorFontSize,
+    outlineWidthPx,
+    outlineOpacity,
+    textBitmapCache,
+    getFontFn
+  );
+
+  ctx.font = prevFont;
+  ctx.textBaseline = prevTextBaseline;
+
+  return startY + sectionHeight;
 }
