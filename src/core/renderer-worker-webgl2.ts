@@ -41,7 +41,16 @@
 import { computeOutlineColor } from '@core/color-utils';
 import { PriorityBucketQueue } from '@core/priority-bucket-queue';
 import { SPEED_TIER } from '@core/renderer-constants';
-import { computeMessageOpacity, type OpacityConfig } from '@core/renderer-shared';
+import type { OpacityConfig } from '@core/renderer-shared';
+import {
+  buildSDFInstances,
+  createProgram,
+  FLOATS_PER_INSTANCE,
+  MAX_INSTANCES,
+  setupWebGL2Buffers,
+  updateMessagePositions,
+  uploadSDFAtlas,
+} from '@core/renderer-webgl2-shared';
 import {
   ATLAS_CELL_SIZE,
   ATLAS_SIZE,
@@ -51,12 +60,6 @@ import {
   SDFAtlasGenerator,
 } from '@core/sdf-atlas';
 import { SDF_FRAGMENT_SHADER, SDF_VERTEX_SHADER } from '@core/sdf-shaders';
-
-// ── Constants ──
-const FLOATS_PER_INSTANCE = 9;
-const MAX_INSTANCES = 60_000;
-const QUAD_POS = new Float32Array([0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1]);
-const QUAD_UV = new Float32Array([0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1]);
 
 // ── Types ──
 
@@ -135,6 +138,8 @@ let gl: WebGL2RenderingContext | null = null;
 let program: WebGLProgram | null = null;
 let vao: WebGLVertexArrayObject | null = null;
 let instanceBuffer: WebGLBuffer | null = null;
+let posBuf: WebGLBuffer | null = null;
+let uvBuf: WebGLBuffer | null = null;
 let atlasTexture: WebGLTexture | null = null;
 const instanceData = new Float32Array(MAX_INSTANCES * FLOATS_PER_INSTANCE);
 let instanceCount = 0;
@@ -163,23 +168,6 @@ let dpr = 1;
 
 // ── Helpers ──
 
-function getRenderText(msg: ActiveMessage): string {
-  const cfg = config;
-  if (msg.translatedText && cfg?.translationMode === 'dual') {
-    return msg.message.content.map((s) => (s.type === 'text' ? s.content : ' ')).join('');
-  }
-  if (msg.translatedText && cfg?.translationMode === 'replace') {
-    return msg.translatedText;
-  }
-  return msg.message.content.map((s) => (s.type === 'text' ? s.content : ' ')).join('');
-}
-
-function getMessageColor(msg: ActiveMessage): [number, number, number] {
-  const cfg = config;
-  const color = cfg?.authorColors[msg.message.authorType] ?? '#ffffff';
-  return parseColor(color);
-}
-
 function getOutlineColor(): [number, number, number] {
   const cfg = config;
   const outColor = computeOutlineColor(
@@ -193,15 +181,6 @@ function getOutlineColor(): [number, number, number] {
     return [parseInt(r, 10) / 255, parseInt(g, 10) / 255, parseInt(b, 10) / 255];
   }
   return [0, 0, 0];
-}
-
-function parseColor(hex: string): [number, number, number] {
-  const h = hex.startsWith('#') ? hex : `#${hex}`;
-  return [
-    parseInt(h.slice(1, 3), 16) / 255 || 1,
-    parseInt(h.slice(3, 5), 16) / 255 || 1,
-    parseInt(h.slice(5, 7), 16) / 255 || 1,
-  ];
 }
 
 /** Estimate text width without DOM access (OffscreenCanvas not always needed). */
@@ -224,69 +203,17 @@ function getWorkerMessagePriority(msg: WorkerMessage): number {
 
 // ── WebGL Setup ──
 
-function createProgram(vsSrc: string, fsSrc: string): WebGLProgram {
-  const glCtx = gl;
-  if (!glCtx) throw new Error('WebGL context not initialized');
-  const vs = glCtx.createShader(glCtx.VERTEX_SHADER);
-  if (!vs) throw new Error('Failed to create vertex shader');
-  glCtx.shaderSource(vs, vsSrc);
-  glCtx.compileShader(vs);
-  if (!glCtx.getShaderParameter(vs, glCtx.COMPILE_STATUS)) {
-    const log = glCtx.getShaderInfoLog(vs);
-    glCtx.deleteShader(vs);
-    throw new Error(`VS: ${log}`);
-  }
-  const fs = glCtx.createShader(glCtx.FRAGMENT_SHADER);
-  if (!fs) throw new Error('Failed to create fragment shader');
-  glCtx.shaderSource(fs, fsSrc);
-  glCtx.compileShader(fs);
-  if (!glCtx.getShaderParameter(fs, glCtx.COMPILE_STATUS)) {
-    const log = glCtx.getShaderInfoLog(fs);
-    glCtx.deleteShader(fs);
-    throw new Error(`FS: ${log}`);
-  }
-  const p = glCtx.createProgram();
-  if (!p) throw new Error('Failed to create program');
-  glCtx.attachShader(p, vs);
-  glCtx.attachShader(p, fs);
-  glCtx.linkProgram(p);
-  if (!glCtx.getProgramParameter(p, glCtx.LINK_STATUS)) {
-    const log = glCtx.getProgramInfoLog(p);
-    glCtx.deleteProgram(p);
-    throw new Error(`Link: ${log}`);
-  }
-  glCtx.deleteShader(vs);
-  glCtx.deleteShader(fs);
-  return p;
-}
-
 function uploadAtlas(): void {
   const glCtx = gl;
   const atlasData = atlas;
   const data = atlasData?.data;
   if (!glCtx || !data) return;
   if (atlasTexture && glCtx) glCtx.deleteTexture(atlasTexture);
-  const tex = glCtx.createTexture();
+  const tex = uploadSDFAtlas(glCtx, data, ATLAS_SIZE);
   if (!tex) {
     self.postMessage({ type: 'error', message: 'Failed to create atlas texture' });
     return;
   }
-  glCtx.bindTexture(glCtx.TEXTURE_2D, tex);
-  glCtx.texImage2D(
-    glCtx.TEXTURE_2D,
-    0,
-    glCtx.RGBA,
-    ATLAS_SIZE,
-    ATLAS_SIZE,
-    0,
-    glCtx.RGBA,
-    glCtx.UNSIGNED_BYTE,
-    data
-  );
-  glCtx.texParameteri(glCtx.TEXTURE_2D, glCtx.TEXTURE_MIN_FILTER, glCtx.LINEAR);
-  glCtx.texParameteri(glCtx.TEXTURE_2D, glCtx.TEXTURE_MAG_FILTER, glCtx.LINEAR);
-  glCtx.texParameteri(glCtx.TEXTURE_2D, glCtx.TEXTURE_WRAP_S, glCtx.CLAMP_TO_EDGE);
-  glCtx.texParameteri(glCtx.TEXTURE_2D, glCtx.TEXTURE_WRAP_T, glCtx.CLAMP_TO_EDGE);
   atlasTexture = tex;
   if (atlasData) {
     atlasData.texture = tex;
@@ -373,116 +300,6 @@ function drainQueue(_now: number): void {
   }
 }
 
-function updateMessages(now: number): void {
-  const cfg = config;
-  if (!cfg) return;
-
-  const mode = cfg.danmakuMode;
-  let wi = 0;
-  for (let i = 0; i < activeMessages.length; i++) {
-    const m = activeMessages[i];
-    if (!m) continue;
-    if (m.laneIndex >= 0) {
-      const elapsed = now - m.startTime;
-      const progress = elapsed / m.duration;
-      if (progress >= 1) continue;
-      switch (mode) {
-        case 'scroll':
-          m.x = m.startX - progress * (cssWidth + m.width);
-          break;
-        case 'reverse':
-          m.x = m.startX + progress * (cssWidth + m.width);
-          break;
-        case 'top':
-        case 'bottom':
-          m.x = m.startX;
-          break;
-      }
-    }
-    if (wi !== i) activeMessages[wi] = m;
-    wi++;
-  }
-  if (wi < activeMessages.length) activeMessages.length = wi;
-}
-
-function buildInstances(now: number): void {
-  instanceCount = 0;
-  const cfg = config;
-  if (!cfg || !atlas) return;
-
-  const fs = cfg.fontSize;
-  const scale = fs / GLYPH_RASTER_SIZE;
-  const opCfg = opacityConfig;
-  if (!opCfg) return;
-
-  for (let mi = 0; mi < activeMessages.length; mi++) {
-    if (instanceCount >= MAX_INSTANCES) break;
-
-    const msg = activeMessages[mi];
-    if (!msg) continue;
-
-    const elapsed = msg.startTime > 0 ? Math.max(0, now - msg.startTime) : 0;
-    // computeMessageOpacity expects ChatMessage; cast via unknown
-    const op = computeMessageOpacity(
-      msg.message as unknown as Parameters<typeof computeMessageOpacity>[0],
-      elapsed,
-      msg.duration,
-      msg.laneIndex >= 0,
-      msg.speedTier,
-      opCfg
-    );
-    if (op <= 0) continue;
-
-    const text = getRenderText(msg);
-    if (!text) continue;
-
-    let cx = msg.x;
-    for (let ci = 0; ci < text.length; ci++) {
-      if (instanceCount >= MAX_INSTANCES) break;
-      const cp = text.codePointAt(ci) ?? 0x20;
-      const gi = atlas.glyphs.get(cp);
-      const off = instanceCount * FLOATS_PER_INSTANCE;
-      const c = getMessageColor(msg);
-      instanceData[off + 0] = cx;
-      instanceData[off + 1] = msg.y;
-      instanceData[off + 2] = fs * 0.7;
-      instanceData[off + 3] = fs * 1.4;
-      instanceData[off + 4] = gi?.index ?? atlas.glyphs.get(0xfffd)?.index ?? 0;
-      instanceData[off + 5] = c[0];
-      instanceData[off + 6] = c[1];
-      instanceData[off + 7] = c[2];
-      instanceData[off + 8] = op;
-      instanceCount++;
-      cx += (gi?.advanceWidth ?? fs * 0.7) * scale;
-    }
-
-    // Dual translation mode: render translated text above original
-    if (cfg.translationMode === 'dual' && msg.translatedText) {
-      let tx = msg.x;
-      const ty = msg.y - fs * 1.2;
-      const tOpacity = op * 0.7;
-      for (let ci = 0; ci < msg.translatedText.length; ci++) {
-        if (instanceCount >= MAX_INSTANCES) break;
-        const cp = msg.translatedText.codePointAt(ci) ?? 0x20;
-        const giDual = atlas.glyphs.get(cp);
-        const offDual = instanceCount * FLOATS_PER_INSTANCE;
-        const cDual = getMessageColor(msg);
-        instanceData[offDual + 0] = tx;
-        instanceData[offDual + 1] = ty;
-        instanceData[offDual + 2] = fs * 0.7;
-        instanceData[offDual + 3] = fs * 1.2;
-        instanceData[offDual + 4] = giDual?.index ?? atlas.glyphs.get(0xfffd)?.index ?? 0;
-        instanceData[offDual + 5] = cDual[0];
-        instanceData[offDual + 6] = cDual[1];
-        instanceData[offDual + 7] = cDual[2];
-        instanceData[offDual + 8] = tOpacity;
-        instanceCount++;
-        tx += (giDual?.advanceWidth ?? fs * 0.7) * scale;
-      }
-    }
-  }
-}
-
 function renderFrame(now: number): void {
   const glCtx = gl;
   if (!glCtx || !canvas) return;
@@ -492,8 +309,21 @@ function renderFrame(now: number): void {
   glCtx.clear(glCtx.COLOR_BUFFER_BIT);
 
   drainQueue(now);
-  updateMessages(now);
-  buildInstances(now);
+  updateMessagePositions(activeMessages, config?.danmakuMode ?? 'scroll', cssWidth, now);
+  const result = buildSDFInstances(
+    activeMessages,
+    atlas,
+    instanceData,
+    MAX_INSTANCES,
+    config?.fontSize ?? 16,
+    (config?.fontSize ?? 16) / GLYPH_RASTER_SIZE,
+    config?.authorColors ?? {},
+    opacityConfig,
+    now,
+    config?.translationMode,
+    undefined
+  );
+  instanceCount = result.instanceCount;
 
   if (instanceCount > 0 && atlasTexture && program && vao) {
     const cfg = config;
@@ -565,61 +395,19 @@ function handleInit(payload: { canvas: OffscreenCanvas; config: WorkerConfig }):
   gl = ctx;
 
   // Compile shaders
-  program = createProgram(SDF_VERTEX_SHADER, SDF_FRAGMENT_SHADER);
+  program = createProgram(ctx, SDF_VERTEX_SHADER, SDF_FRAGMENT_SHADER);
 
-  // VAO + buffers
-  const v = ctx.createVertexArray();
-  if (!v) {
-    self.postMessage({ type: 'error', message: 'Failed to create VAO' });
+  // VAO + buffers (shared setup)
+  try {
+    const buffers = setupWebGL2Buffers(ctx, instanceData.byteLength);
+    vao = buffers.vao;
+    instanceBuffer = buffers.instanceBuffer;
+    posBuf = buffers.posBuf;
+    uvBuf = buffers.uvBuf;
+  } catch (e: unknown) {
+    self.postMessage({ type: 'error', message: `WebGL setup failed: ${String(e)}` });
     return;
   }
-  vao = v;
-  ctx.bindVertexArray(v);
-
-  // Position buffer
-  const posBuf = ctx.createBuffer();
-  ctx.bindBuffer(ctx.ARRAY_BUFFER, posBuf);
-  ctx.bufferData(ctx.ARRAY_BUFFER, QUAD_POS, ctx.STATIC_DRAW);
-  ctx.enableVertexAttribArray(0);
-  ctx.vertexAttribPointer(0, 2, ctx.FLOAT, false, 0, 0);
-
-  // UV buffer
-  const uvBuf = ctx.createBuffer();
-  ctx.bindBuffer(ctx.ARRAY_BUFFER, uvBuf);
-  ctx.bufferData(ctx.ARRAY_BUFFER, QUAD_UV, ctx.STATIC_DRAW);
-  ctx.enableVertexAttribArray(1);
-  ctx.vertexAttribPointer(1, 2, ctx.FLOAT, false, 0, 0);
-
-  // Instance buffer
-  const instBuf = ctx.createBuffer();
-  if (!instBuf) {
-    self.postMessage({ type: 'error', message: 'Failed to create instance buffer' });
-    return;
-  }
-  instanceBuffer = instBuf;
-  ctx.bindBuffer(ctx.ARRAY_BUFFER, instBuf);
-  ctx.bufferData(ctx.ARRAY_BUFFER, instanceData.byteLength, ctx.DYNAMIC_DRAW);
-
-  const stride = FLOATS_PER_INSTANCE * 4;
-  ctx.enableVertexAttribArray(2);
-  ctx.vertexAttribPointer(2, 2, ctx.FLOAT, false, stride, 0);
-  ctx.vertexAttribDivisor(2, 1);
-  ctx.enableVertexAttribArray(3);
-  ctx.vertexAttribPointer(3, 2, ctx.FLOAT, false, stride, 8);
-  ctx.vertexAttribDivisor(3, 1);
-  ctx.enableVertexAttribArray(4);
-  ctx.vertexAttribPointer(4, 1, ctx.FLOAT, false, stride, 16);
-  ctx.vertexAttribDivisor(4, 1);
-  ctx.enableVertexAttribArray(5);
-  ctx.vertexAttribPointer(5, 3, ctx.FLOAT, false, stride, 20);
-  ctx.vertexAttribDivisor(5, 1);
-  ctx.enableVertexAttribArray(6);
-  ctx.vertexAttribPointer(6, 1, ctx.FLOAT, false, stride, 32);
-  ctx.vertexAttribDivisor(6, 1);
-
-  ctx.bindVertexArray(null);
-  ctx.enable(ctx.BLEND);
-  ctx.blendFunc(ctx.ONE, ctx.ONE_MINUS_SRC_ALPHA);
 
   // Cache uniforms
   ctx.useProgram(program);
@@ -807,12 +595,16 @@ function handleDestroy(): void {
     });
     authorPhotoTextures.clear();
     if (instanceBuffer) gl.deleteBuffer(instanceBuffer);
+    if (posBuf) gl.deleteBuffer(posBuf);
+    if (uvBuf) gl.deleteBuffer(uvBuf);
     if (vao) gl.deleteVertexArray(vao);
     if (program) gl.deleteProgram(program);
   }
 
   atlasTexture = null;
   instanceBuffer = null;
+  posBuf = null;
+  uvBuf = null;
   vao = null;
   program = null;
   gl = null;
