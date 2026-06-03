@@ -2,6 +2,35 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.37.0] - 2026-06-03
+
+### Added
+
+- **Browser extension distribution** — The overlay is now available as a Chrome MV3 and Firefox MV3 browser extension, in addition to the existing userscript.
+- **Platform abstraction layer** (`src/platform/`) — Adapter interfaces for storage, cross-tab sync, menu commands, and worker URL resolution isolate all platform-specific code behind clean interfaces. Core modules remain unchanged.
+  - `StorageAdapter` — chrome.storage.local, GM_setValue/GM_getValue, or localStorage fallback
+  - `WorkerFactory` — `chrome.runtime.getURL()` for extensions, `import.meta.url` for userscripts
+  - `MenuAdapter` — `chrome.contextMenus` for extensions, `GM_registerMenuCommand` for userscripts
+  - `CrossTabSyncAdapter` — `chrome.storage.onChanged`, `GM_addValueChangeListener`, or `window 'storage'` event
+- **Extension background service worker** — Registers context menu commands and forwards clicks to the content script.
+- **Content script in MAIN world** — Extension content script runs in the page's JavaScript context, enabling `window.fetch` interception identical to the userscript.
+- **IIFE-bundled content script** — Content script is built as a self-executing function (IIFE) to avoid ES module syntax in classic `<script>` injection.
+- **Firefox extension support** — Separate manifest with `browser_specific_settings`, `menus` permission, and Firefox-specific build config.
+- **CI/CD for extensions** — `ci.yaml` builds and uploads all three targets (userscript + Chrome + Firefox). `release.yaml` creates signed extension ZIPs and attaches them to GitHub Releases.
+- **Platform detection** — `detectPlatform()` identifies the runtime environment (userscript, chrome-extension, firefox-extension, or plain browser) and selects appropriate adapters.
+
+### Changed
+
+- **`Settings.initialize()` is now async** — Storage adapter reads are async to support `chrome.storage.local`. All callers already use `await`.
+- **Updated default settings** — `maxConcurrentMessages` (120→300), `logLevel` (warn→debug), `backlogRecentMinutes` (5→1), `translationSource` (en→ja), `speedBoostMax` (0.35→0.05), `outline.widthPx` (1.5→2), `outline.opacity` (0.8→0.7) to match user-preferred configuration.
+- **Refactored `settings-storage.ts`** — Now delegates to platform adapter factory. GM adapter, LocalStorage adapter, and Chrome adapter live in `src/platform/storage-adapters.ts`.
+
+### Developer
+
+- Build commands: `pnpm build:extension` (Chrome), `pnpm build:extension:firefox` (Firefox)
+- Output directories: `dist-extension/`, `dist-extension-firefox/`
+- Documentation: `extension/README.md`, updated `AGENTS.md` and `README.md`
+
 ## [0.36.0] - 2026-06-03
 
 ### Added

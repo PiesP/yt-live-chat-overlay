@@ -1,6 +1,6 @@
 # YouTube Live Chat Overlay
 
-A userscript that shows YouTube live chat as Nico-nico style flowing comments over the video.
+A userscript and browser extension that shows YouTube live chat as Nico-nico style flowing comments over the video.
 All processing is local — chat content is never stored or sent anywhere.
 
 ## Features
@@ -21,10 +21,29 @@ All processing is local — chat content is never stored or sent anywhere.
 
 ## Install
 
+### Userscript
+
 1. Install [Tampermonkey](https://www.tampermonkey.net/) or [Violentmonkey](https://violentmonkey.github.io/)
 2. Open the latest release in your browser to install:
    - [yt-live-chat-overlay.user.js](https://github.com/PiesP/yt-live-chat-overlay/releases/latest/download/yt-live-chat-overlay.user.js)
 3. The userscript manager will auto-update when new releases are published.
+
+### Browser Extension
+
+#### Chrome / Edge / Brave
+
+1. Download `yt-live-chat-overlay-chrome.zip` from the [latest release](https://github.com/PiesP/yt-live-chat-overlay/releases/latest)
+2. Navigate to `chrome://extensions`
+3. Enable **Developer mode** (toggle in top-right)
+4. Drag and drop the ZIP file onto the page
+
+#### Firefox
+
+1. Download `yt-live-chat-overlay-firefox.zip` from the [latest release](https://github.com/PiesP/yt-live-chat-overlay/releases/latest)
+2. Navigate to `about:debugging#/runtime/this-firefox`
+3. Click **Load Temporary Add-on** → select the ZIP file
+
+> **Note:** Firefox does not support the built-in translation API (Chrome 138+). Translation is automatically disabled on Firefox.
 
 ## Usage
 
@@ -42,9 +61,24 @@ Requires Node.js `>=26.0.0` and pnpm `>=11.2.2`.
 
 ```bash
 pnpm install
-pnpm build:dev       # dev bundle with source maps
-pnpm build           # prod bundle (runs quality gate via prebuild)
-pnpm quality         # fmt + lint + check + circular + knip
+pnpm build:dev            # dev userscript bundle with source maps
+pnpm build                # prod userscript bundle (runs quality gate via prebuild)
+pnpm build:extension      # Chrome extension build (output: dist-extension/)
+pnpm build:extension:firefox  # Firefox extension build (output: dist-extension-firefox/)
+pnpm quality              # fmt + lint + check + circular + knip
+```
+
+### Project Structure
+
+```
+src/
+  core/          Shared business logic (renderers, lane allocator, chat parser)
+  platform/      Platform abstraction layer (storage, worker URLs, menus)
+extension/
+  background.ts  Service worker — context menu registration
+  content-script.ts  MAIN world entry point for extension
+  manifest.json  Chrome MV3 manifest
+  manifest.firefox.json  Firefox MV3 manifest
 ```
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full contributor workflow.
