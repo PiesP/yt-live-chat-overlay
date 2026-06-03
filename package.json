@@ -23,9 +23,9 @@
     "clean": "rimraf dist",
     "validate:consistency": "cd test && npx vitest run consistency/",
     "prebuild": "pnpm -s quality",
-    "build:extension": "vite build --config vite.config.extension.ts && cp extension/manifest.json dist-extension/manifest.json && cp -r extension/icons dist-extension/",
-    "build:extension:dev": "vite build --config vite.config.extension.ts --mode development && cp extension/manifest.json dist-extension/manifest.json && cp -r extension/icons dist-extension/",
-    "build:extension:firefox": "vite build --config vite.config.extension.firefox.ts && cp extension/manifest.firefox.json dist-extension-firefox/manifest.json && cp -r extension/icons dist-extension-firefox/"
+    "build:extension": "vite build --config vite.config.extension.ts && vite build --config vite.config.extension.cs.ts && cp extension/manifest.json dist-extension/manifest.json && cp -r extension/icons dist-extension/",
+    "build:extension:dev": "vite build --config vite.config.extension.ts --mode development && vite build --config vite.config.extension.cs.ts --mode development && cp extension/manifest.json dist-extension/manifest.json && cp -r extension/icons dist-extension/",
+    "build:extension:firefox": "vite build --config vite.config.extension.firefox.ts && vite build --config vite.config.extension.cs.firefox.ts && cp extension/manifest.firefox.json dist-extension-firefox/manifest.json && cp -r extension/icons dist-extension-firefox/"
   },
   "keywords": [
     "userscript",

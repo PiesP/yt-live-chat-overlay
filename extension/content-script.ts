@@ -8,14 +8,17 @@
  * It loads the same core application logic as the userscript, but with
  * Chrome extension platform adapters for storage, worker URLs, and menu commands.
  *
- * Layout: This thin entry point re-exports the application bootstrap.
- * All core logic lives in src/ — this file only wires the extension-specific
- * parts (menu command listener from background script).
+ * The side-effect import of ../src/main triggers the application bootstrap
+ * (main() + registerMenuCommands() at the bottom of main.ts). No ES module
+ * export syntax is used, so the bundled output works as a classic script.
+ *
+ * Chrome MV3 content scripts with "world": "MAIN" cannot use module type,
+ * so we avoid import/export in the bundled output.
  */
 
-// Re-export the userscript application bootstrap (shared code path).
-// In the extension build, Vite resolves platform adapters to Chrome implementations.
-export { } from '../src/main';
+// Side-effect import: triggers application bootstrap in main.ts.
+// Vite bundles this as a single self-executing script with no module syntax.
+import '../src/main';
 
 // ── Background script message listener ─────────────────────────────────────
 

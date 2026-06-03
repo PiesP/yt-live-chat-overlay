@@ -1,10 +1,14 @@
 /**
- * Vite Configuration for Firefox MV3 Extension Build.
+ * Vite Configuration for Firefox MV3 Extension — Background + Workers (ES modules).
  *
- * Same multi-entry build as Chrome, but uses Firefox-specific manifest
- * with browser_specific_settings and the `menus` permission.
+ * Produces:
+ * - background.js      (Background script — ES module)
+ * - workers/*.js       (OffscreenCanvas render workers — ES module)
  *
- * Usage: pnpm build:extension:firefox
+ * Content script is built separately via vite.config.extension.cs.ts
+ * as IIFE format (classic <script> injection in MAIN world cannot use ES modules).
+ *
+ * Usage: pnpm build:extension:firefox:sw
  */
 
 import { resolve } from 'node:path';
@@ -32,11 +36,11 @@ export default defineConfig((): UserConfig => {
       sourcemap: false,
       outDir: OUT_DIR,
       emptyOutDir: true,
+      copyPublicDir: false,
 
       rollupOptions: {
         input: {
           'background': resolve(REPO_ROOT, 'extension/background.ts'),
-          'content-script': resolve(REPO_ROOT, 'extension/content-script.ts'),
           'workers/renderer-worker': resolve(REPO_ROOT, 'src/core/renderer-worker.ts'),
           'workers/renderer-worker-webgl2': resolve(REPO_ROOT, 'src/core/renderer-worker-webgl2.ts'),
         },

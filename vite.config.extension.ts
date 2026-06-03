@@ -1,12 +1,14 @@
 /**
- * Vite Configuration for Chrome MV3 Extension Build.
+ * Vite Configuration for Chrome MV3 Extension — Background + Workers (ES modules).
  *
- * Produces a multi-file extension output:
- * - content-script.js  (MAIN world, YouTube pages)
- * - background.js      (Service Worker)
- * - workers/*.js       (OffscreenCanvas render workers)
+ * Produces:
+ * - background.js      (Service Worker — ES module, manifest "type": "module")
+ * - workers/*.js       (OffscreenCanvas render workers — ES module)
  *
- * Usage: pnpm build:extension
+ * Content script is built separately via vite.config.extension.cs.ts
+ * as IIFE format (classic <script> injection in MAIN world cannot use ES modules).
+ *
+ * Usage: pnpm build:extension:sw
  */
 
 import { resolve } from 'node:path';
@@ -30,27 +32,25 @@ export default defineConfig((): UserConfig => {
 
     build: {
       target: 'esnext',
-      minify: false, // Greasy Fork rules — keep readable
+      minify: false,
       sourcemap: false,
       outDir: OUT_DIR,
-      emptyOutDir: true,
+      emptyOutDir: true, // Clear dist-extension on first build
+      copyPublicDir: false,
 
       rollupOptions: {
         input: {
           'background': resolve(REPO_ROOT, 'extension/background.ts'),
-          'content-script': resolve(REPO_ROOT, 'extension/content-script.ts'),
           'workers/renderer-worker': resolve(REPO_ROOT, 'src/core/renderer-worker.ts'),
           'workers/renderer-worker-webgl2': resolve(REPO_ROOT, 'src/core/renderer-worker-webgl2.ts'),
         },
         output: {
-          // Preserve the directory structure: workers/ files go into workers/ subdirectory
           entryFileNames: (chunkInfo) => {
             if (chunkInfo.name.startsWith('workers/')) {
               return '[name].js';
             }
             return '[name].js';
           },
-          // Shared chunks go to chunks/ subdirectory (not exposed via web_accessible_resources)
           chunkFileNames: 'chunks/[name]-[hash].js',
         },
       },
