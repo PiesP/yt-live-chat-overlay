@@ -742,7 +742,32 @@ function renderPaidCardWorker(
   const textX = x + padH;
   let cursorY = y + padV;
 
-  // ── 5. Header tag ─────────────────────────────────────────────────────
+  // ── 5. Author section (name + photo) — rendered first so name appears above amount/duration
+  if (card.authorShow && message.author) {
+    cursorY = drawAuthorSection(
+      ctx,
+      // Safe cast: guarded by message.author check above, exactOptionalPropertyTypes compat
+      { author: message.author, authorPhotoUrl: message.authorPhotoUrl } as {
+        author?: string;
+        authorPhotoUrl?: string;
+      },
+      textX,
+      cursorY,
+      textColor,
+      card.authorNameMaxWidth,
+      Math.round(fontSize * rendererLayout.authorFontScale),
+      fontWeight,
+      fontFamily,
+      outlineWidthPx,
+      outlineOpacity,
+      (url: string) => authorPhotoCache.get(url),
+      () => true,
+      textBitmapCache,
+      getFontFn
+    );
+  }
+
+  // ── 6. Header tag (tier name / membership duration)
   if (card.headerTagEnabled && message.headerTagText) {
     const headerFontSize = Math.round(fontSize * card.headerTagFontSizeScale);
     const headerFont = getFontString(headerFontSize, fontWeight as FontWeight, fontFamily);
@@ -778,31 +803,6 @@ function renderPaidCardWorker(
     ctx.restore();
     const headerHeight = measureTextHeight(headerFontSize);
     cursorY += headerHeight + card.headerTagMarginTop + card.headerTagMarginBottom;
-  }
-
-  // ── 6. Author section ─────────────────────────────────────────────────
-  if (card.authorShow && message.author) {
-    cursorY = drawAuthorSection(
-      ctx,
-      // Safe cast: guarded by message.author check above, exactOptionalPropertyTypes compat
-      { author: message.author, authorPhotoUrl: message.authorPhotoUrl } as {
-        author?: string;
-        authorPhotoUrl?: string;
-      },
-      textX,
-      cursorY,
-      textColor,
-      card.authorNameMaxWidth,
-      Math.round(fontSize * rendererLayout.authorFontScale),
-      fontWeight,
-      fontFamily,
-      outlineWidthPx,
-      outlineOpacity,
-      (url: string) => authorPhotoCache.get(url),
-      () => true,
-      textBitmapCache,
-      getFontFn
-    );
   }
 
   // ── 7. Badge (amount pill) — respects showSuperChatAmount setting

@@ -312,26 +312,7 @@ export function renderPaidCard(
   const textX = x + padH;
   let cursorY = y + padV;
 
-  // 4. Header tag
-  if (config.headerTag?.enabled && config.headerTag.getText) {
-    const headerText = config.headerTag.getText(message);
-    if (headerText) {
-      const headerMaxWidth = w - padH * 2;
-      cursorY = renderCardHeaderTag(
-        ctx,
-        textX,
-        cursorY,
-        headerText,
-        headerMaxWidth,
-        config,
-        settings,
-        textBitmapCache,
-        getFontFn
-      );
-    }
-  }
-
-  // 5. Author section
+  // 4. Author section (name + photo) — rendered first so name appears above amount/duration
   const showAuthor =
     typeof config.authorSection.show === 'function'
       ? config.authorSection.show(message, settings)
@@ -356,6 +337,25 @@ export function renderPaidCard(
       textBitmapCache,
       getFontFn
     );
+  }
+
+  // 5. Header tag (tier name / membership duration)
+  if (config.headerTag?.enabled && config.headerTag.getText) {
+    const headerText = config.headerTag.getText(message);
+    if (headerText) {
+      const headerMaxWidth = w - padH * 2;
+      cursorY = renderCardHeaderTag(
+        ctx,
+        textX,
+        cursorY,
+        headerText,
+        headerMaxWidth,
+        config,
+        settings,
+        textBitmapCache,
+        getFontFn
+      );
+    }
   }
 
   // 6. Badge (amount pill) — respects showSuperChatAmount setting
