@@ -29,28 +29,21 @@ const WORKER_CONFIG_KEYS: (keyof OverlaySettings)[] = [
   'laneSpacing',
   'safeTop',
   'safeBottom',
-  'headwayGapRatio',
-  'exitPaddingPx',
-  'speedPxPerSec',
-  'backlogSpeedMultiplier',
   'depthLayersEnabled',
   'depthFarOpacityMul',
   'backlogOpacityMultiplier',
   'queueMaxSize',
-  'backgroundQueueMax',
-  'showAuthor',
-  'superChatOpacity',
   'translationMode',
 ];
 
-export interface WorkerStatsWebGL2 {
+interface WorkerStatsWebGL2 {
   activeMessages: number;
   fps: number;
   drops: number;
   queueDepth: number;
 }
 
-export type WorkerConfigWebGL2 = Pick<OverlaySettings, (typeof WORKER_CONFIG_KEYS)[number]> & {
+type WorkerConfigWebGL2 = Pick<OverlaySettings, (typeof WORKER_CONFIG_KEYS)[number]> & {
   outlineWidthPx: number;
   outlineOpacity: number;
   authorColors: Record<string, string>;
@@ -196,6 +189,10 @@ export class RenderWorkerManagerWebGL2 {
   updateConfig(settings: OverlaySettings): void {
     const config = RenderWorkerManagerWebGL2.buildWorkerConfig(settings);
     this.worker?.postMessage({ type: 'updateConfig', config });
+  }
+
+  resize(width: number, height: number): void {
+    this.worker?.postMessage({ type: 'resize', width, height });
   }
 
   setPaused(paused: boolean, videoPaused?: boolean): void {

@@ -662,6 +662,9 @@ export class RendererWebGL2 extends RendererBase {
 
   protected onDestroy(): void {
     if (this.animFrameId !== null) cancelAnimationFrame(this.animFrameId);
+    this.messages.length = 0;
+    this.pendingQueue.clear();
+    this.retryQueue.length = 0;
     if (this.atlasTexture) this.gl.deleteTexture(this.atlasTexture);
     this.gl.deleteBuffer(this.instanceBuffer);
     this.gl.deleteVertexArray(this.vao);

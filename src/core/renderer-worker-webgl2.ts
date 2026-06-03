@@ -265,6 +265,7 @@ function uploadAtlas(): void {
   const atlasData = atlas;
   const data = atlasData?.data;
   if (!glCtx || !data) return;
+  if (atlasTexture && glCtx) glCtx.deleteTexture(atlasTexture);
   const tex = glCtx.createTexture();
   if (!tex) {
     self.postMessage({ type: 'error', message: 'Failed to create atlas texture' });
@@ -658,6 +659,7 @@ function handleResize(payload: { width: number; height: number }): void {
     canvas.height = payload.height;
     cssWidth = payload.width / dpr;
     cssHeight = payload.height / dpr;
+    gl?.viewport(0, 0, payload.width, payload.height);
   }
 }
 
@@ -850,6 +852,9 @@ self.onmessage = (e: MessageEvent) => {
       break;
     case 'destroy':
       handleDestroy();
+      break;
+    default:
+      console.debug('[WebGL2 Worker] Unknown message type:', type);
       break;
   }
 };

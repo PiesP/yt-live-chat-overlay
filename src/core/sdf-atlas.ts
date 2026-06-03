@@ -32,17 +32,17 @@ export const SDF_DISTANCE_RANGE = SDF_PADDING + GLYPH_RASTER_SIZE * 0.15;
 export const ATLAS_SIZE = 2048;
 
 /** Grid dimension (ATLAS_SIZE / ATLAS_CELL_SIZE = 46 cells per row at 2048/44) */
-export const ATLAS_GRID_SIZE = Math.floor(ATLAS_SIZE / ATLAS_CELL_SIZE);
+const ATLAS_GRID_SIZE = Math.floor(ATLAS_SIZE / ATLAS_CELL_SIZE);
 
 /** Max glyphs that fit in the atlas */
-export const ATLAS_MAX_GLYPHS = ATLAS_GRID_SIZE * ATLAS_GRID_SIZE;
+const ATLAS_MAX_GLYPHS = ATLAS_GRID_SIZE * ATLAS_GRID_SIZE;
 
 /** Number of glyphs to rasterize per event-loop yield */
 const CHUNK_SIZE = 50;
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-export interface GlyphInfo {
+interface GlyphInfo {
   /** Unicode code point */
   codepoint: number;
   /** Linear index in the atlas grid */
