@@ -616,3 +616,122 @@ export function drawAuthorSection<T>(
 
   return startY + sectionHeight;
 }
+
+// ── Regular message rendering (shared between main-thread and worker) ────────
+
+/** Minimal message shape consumed by renderRegularMessage. */
+export interface RegularMessageLike {
+  author?: string;
+  authorPhotoUrl?: string;
+  content: readonly unknown[];
+  text: string;
+}
+
+/** Font, outline, and display config derived from settings. */
+export interface RegularMessageRenderConfig {
+  showAuthor: boolean;
+  fontSize: number;
+  fontWeight: string;
+  fontFamily: string;
+  color: string;
+  outlineWidthPx: number;
+  outlineOpacity: number;
+}
+
+/**
+ * Render a regular text message at (x, y) with author section and content.
+ *
+ * Per-frame globalAlpha is set by the caller (opacity-batched outer loop).
+ *
+ * @param message      Message with author, content, text fields.
+ * @param config       Font/outline/display settings derived from user config.
+ * @param overrideText When provided (replace translation mode), renders this
+ *                     text instead of the message content.
+ */
+export function renderRegularMessage(
+  ctx: AnyCanvasContext,
+  message: RegularMessageLike,
+  x: number,
+  y: number,
+  config: RegularMessageRenderConfig,
+  textBitmapCache: TextBitmapCache,
+  getEmojiImage: (url: string) => unknown,
+  isValidEmoji: (img: unknown) => boolean,
+  authorPhotoCache: { get(url: string): unknown },
+  isValidAuthorPhoto: (photo: unknown) => boolean,
+  getFontFn: (fontSize: number) => string,
+  measureTextFn: (text: string) => number,
+  overrideText?: string | null
+): void {
+  const { showAuthor, fontSize, fontWeight, fontFamily, color, outlineWidthPx, outlineOpacity } =
+    config;
+  const textX = x + rendererLayout.paddingH;
+  let textY = y + rendererLayout.paddingV;
+
+  if (showAuthor && message.author) {
+    const authorFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
+    textY = drawAuthorSection(
+      ctx,
+      message,
+      textX,
+      textY,
+      color,
+      undefined,
+      authorFontSize,
+      fontWeight,
+      fontFamily,
+      outlineWidthPx,
+      outlineOpacity,
+      (url: string) => authorPhotoCache.get(url),
+      isValidAuthorPhoto,
+      textBitmapCache,
+      getFontFn
+    );
+  }
+
+  if (overrideText) {
+    renderSegment(
+      ctx,
+      overrideText,
+      textX,
+      textY,
+      color,
+      fontSize,
+      outlineWidthPx,
+      outlineOpacity,
+      textBitmapCache,
+      getFontFn
+    );
+  } else if (message.content.length > 0) {
+    renderContentSegments(
+      ctx,
+      message.content as unknown as SharedContentSegment[],
+      textX,
+      textY,
+      color,
+      fontSize,
+      outlineWidthPx,
+      outlineOpacity,
+      textBitmapCache,
+      getFontFn,
+      measureTextFn,
+      (url: string) => {
+        const img = getEmojiImage(url);
+        return img != null && isValidEmoji(img) ? (img as CanvasImageSource) : null;
+      }
+    );
+  } else if (message.text.length > 0) {
+    renderSegment(
+      ctx,
+      message.text,
+      textX,
+      textY,
+      color,
+      fontSize,
+      outlineWidthPx,
+      outlineOpacity,
+      textBitmapCache,
+      getFontFn
+    );
+  }
+}

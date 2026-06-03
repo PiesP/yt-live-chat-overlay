@@ -60,7 +60,8 @@ import {
   buildWrappedLines,
   drawAuthorSection,
   drawRoundRect,
-  renderContentSegments,
+  type RegularMessageLike,
+  renderRegularMessage,
   renderSegment,
   strokeTextOutline,
   type TextBitmapCache,
@@ -598,104 +599,6 @@ function renderWrappedContentSegments(
   }
 
   return cursorY;
-}
-
-// ── Message card rendering ───────────────────────────────────────────────
-
-/** Render a regular text message at (x, y) with alpha blending.
- *
- * @param overrideText — when provided (replace translation mode), renders this
- *   text instead of the message's content/text. Author section is still rendered. */
-function renderRegularMessage(
-  ctx: OffscreenCanvasRenderingContext2D,
-  message: {
-    author?: string;
-    authorPhotoUrl?: string;
-    authorType?: string;
-    userColor?: string;
-    content: readonly WorkerContentSegment[];
-    text: string;
-  },
-  x: number,
-  y: number,
-  fontSize: number,
-  fontWeight: string,
-  fontFamily: string,
-  color: string,
-  outlineWidthPx: number,
-  outlineOpacity: number,
-  textBitmapCache: TextBitmapCache,
-  emojiCache: ByteLimitedCache<ImageBitmap>,
-  authorPhotoCache: ByteLimitedCache<ImageBitmap>,
-  getFontFn: (fontSize: number) => string,
-  overrideText?: string | null
-): void {
-  // globalAlpha is set by the caller (opacity-batched outer loop)
-  const textX = x + rendererLayout.paddingH;
-  let textY = y + rendererLayout.paddingV;
-  if (message.author) {
-    textY = drawAuthorSection(
-      ctx,
-      message,
-      textX,
-      textY,
-      color,
-      undefined,
-      Math.round(fontSize * rendererLayout.authorFontScale),
-      fontWeight,
-      fontFamily,
-      outlineWidthPx,
-      outlineOpacity,
-      (url: string) => authorPhotoCache.get(url),
-      () => true,
-      textBitmapCache,
-      getFontFn
-    );
-  }
-
-  // In replace translation mode, render the translated text instead of the original.
-  if (overrideText) {
-    renderSegment(
-      ctx,
-      overrideText,
-      textX,
-      textY,
-      color,
-      fontSize,
-      outlineWidthPx,
-      outlineOpacity,
-      textBitmapCache,
-      getFontFn
-    );
-  } else if (message.content.length > 0) {
-    renderContentSegments(
-      ctx,
-      message.content,
-      textX,
-      textY,
-      color,
-      fontSize,
-      outlineWidthPx,
-      outlineOpacity,
-      textBitmapCache,
-      getFontFn,
-      measureTextCached,
-      (url: string) => emojiCache.get(url) ?? null
-    );
-  } else if (message.text.length > 0) {
-    renderSegment(
-      ctx,
-      message.text,
-      textX,
-      textY,
-      color,
-      fontSize,
-      outlineWidthPx,
-      outlineOpacity,
-      textBitmapCache,
-      getFontFn
-    );
-  }
 }
 
 // ── Config-driven paid card renderer (worker variant) ────────────────────────
@@ -1482,19 +1385,30 @@ function renderFrame(): void {
 
           renderRegularMessage(
             ctx,
-            msg as Parameters<typeof renderRegularMessage>[1],
+            {
+              author: msg.author ?? undefined,
+              authorPhotoUrl: msg.authorPhotoUrl ?? undefined,
+              content: msg.content ?? [],
+              text: msg.text,
+            } as unknown as RegularMessageLike,
             sx,
             sy,
-            cfg.fontSize,
-            cfg.fontWeight,
-            cfg.fontFamily,
-            renderColor,
-            strokeWidth,
-            cfg.outlineOpacity,
+            {
+              showAuthor: true,
+              fontSize: cfg.fontSize,
+              fontWeight: cfg.fontWeight,
+              fontFamily: cfg.fontFamily,
+              color: renderColor,
+              outlineWidthPx: strokeWidth,
+              outlineOpacity: cfg.outlineOpacity,
+            },
             textBitmapCache,
-            emojiCache,
-            authorPhotoCache,
+            (url: string) => emojiCache.get(url),
+            () => true,
+            { get: (url: string) => authorPhotoCache.get(url) },
+            () => true,
             getFont,
+            measureTextCached,
             overrideText
           );
         }

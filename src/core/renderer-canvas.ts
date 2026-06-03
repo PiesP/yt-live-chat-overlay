@@ -58,7 +58,12 @@ import {
   estimateMessageDimensions as sharedEstimateDimensions,
 } from '@core/renderer-shared';
 import { RenderWorkerManager } from '@core/renderer-worker-manager';
-import { clearTextMeasurementCaches, getFontString, measureTextHeight } from '@core/text-measure';
+import {
+  clearTextMeasurementCaches,
+  getFontString,
+  measureTextHeight,
+  measureTextWidth,
+} from '@core/text-measure';
 import { TranslationService } from '@core/translation-service';
 import { renderSegment } from '@shared/canvas-rendering-shared';
 
@@ -672,11 +677,31 @@ export class CanvasRenderer extends RendererBase {
               renderMessage,
               snappedX,
               snappedY,
-              this.settings,
+              {
+                showAuthor: this.settings.showAuthor[renderMessage.authorType],
+                fontSize: this.settings.fontSize,
+                fontWeight: this.settings.fontWeight,
+                fontFamily: this.settings.fontFamily,
+                color:
+                  this.settings.preserveUserColor && renderMessage.userColor
+                    ? renderMessage.userColor
+                    : this.settings.colors[renderMessage.authorType],
+                outlineWidthPx: this.settings.outline.widthPx,
+                outlineOpacity: this.settings.outline.opacity,
+              },
               this.textBitmapCache,
-              this.imageFetchManager.emojiCache,
+              (url: string) => this.imageFetchManager.emojiCache.get(url),
+              (img: unknown) =>
+                (img as HTMLImageElement)?.complete === true &&
+                (img as HTMLImageElement).naturalWidth > 0,
               this.imageFetchManager.authorPhotoCache,
+              (photo: unknown) =>
+                (photo as HTMLImageElement)?.complete === true &&
+                (photo as HTMLImageElement).naturalWidth > 0,
               this._boundGetFont,
+              (text: string) => {
+                return measureTextWidth(text, this._boundGetFont(this.settings.fontSize));
+              },
               isReplace ? msg.translatedText : undefined
             );
           } else {

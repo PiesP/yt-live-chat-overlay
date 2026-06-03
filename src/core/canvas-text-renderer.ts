@@ -8,15 +8,13 @@
  * cached bitmaps, and outline strokes on a Canvas2D context.
  */
 
-import type { ChatMessage, ContentSegment, OverlaySettings } from '@app-types';
+import type { ContentSegment, OverlaySettings } from '@app-types';
 import type { ByteLimitedCache } from '@core/byte-limited-cache';
 import { EMOJI_ALIAS_PATTERN } from '@core/chat-message-helpers';
 import { rendererLayout } from '@core/design-tokens';
 import { measureTextHeight, measureTextWidth } from '@core/text-measure';
 import {
   buildWrappedLines,
-  drawAuthorSection,
-  renderContentSegments,
   renderSegment,
   type SharedContentSegment,
 } from '@shared/canvas-rendering-shared';
@@ -27,6 +25,9 @@ import {
 export {
   drawAuthorSection,
   drawRoundRect,
+  type RegularMessageLike,
+  type RegularMessageRenderConfig,
+  renderRegularMessage,
   strokeTextOutline,
 } from '@shared/canvas-rendering-shared';
 
@@ -148,104 +149,4 @@ export function renderWrappedContentSegments(
   }
 
   return cursorY;
-}
-
-// ── Message card rendering ───────────────────────────────────────────────
-
-/** Render a regular text message at (x, y) with alpha blending.
- *
- * @param overrideText — when provided (replace translation mode), renders this
- *   text instead of the message's content/text. Author section is still rendered. */
-export function renderRegularMessage(
-  ctx: CanvasRenderingContext2D,
-  message: ChatMessage,
-  x: number,
-  y: number,
-  settings: OverlaySettings,
-  textBitmapCache: ByteLimitedCache<HTMLCanvasElement>,
-  emojiCache: ByteLimitedCache<HTMLImageElement>,
-  authorPhotoCache: ByteLimitedCache<HTMLImageElement>,
-  getFontFn: (fontSize: number) => string,
-  overrideText?: string | null
-): void {
-  const fontSize = settings.fontSize;
-  const color =
-    settings.preserveUserColor && message.userColor
-      ? message.userColor
-      : settings.colors[message.authorType];
-
-  // globalAlpha is set by the caller (opacity-batched outer loop)
-  const showAuthor = settings.showAuthor[message.authorType];
-  const textX = x + rendererLayout.paddingH;
-  let textY = y + rendererLayout.paddingV;
-  if (showAuthor && message.author) {
-    const authorFontSize = Math.round(settings.fontSize * rendererLayout.authorFontScale);
-    textY = drawAuthorSection(
-      ctx,
-      message,
-      textX,
-      textY,
-      color,
-      undefined,
-      authorFontSize,
-      settings.fontWeight,
-      settings.fontFamily,
-      settings.outline.widthPx,
-      settings.outline.opacity,
-      (url: string) => authorPhotoCache.get(url),
-      (photo: unknown) =>
-        (photo as HTMLImageElement)?.complete === true &&
-        (photo as HTMLImageElement).naturalWidth > 0,
-      textBitmapCache,
-      getFontFn
-    );
-  }
-
-  // In replace translation mode, render the translated text instead of the original.
-  if (overrideText) {
-    renderSegment(
-      ctx,
-      overrideText,
-      textX,
-      textY,
-      color,
-      fontSize,
-      settings.outline.widthPx,
-      settings.outline.opacity,
-      textBitmapCache,
-      getFontFn
-    );
-  } else if (message.content.length > 0) {
-    const font = getFontFn(fontSize);
-    renderContentSegments(
-      ctx,
-      message.content,
-      textX,
-      textY,
-      color,
-      fontSize,
-      settings.outline.widthPx,
-      settings.outline.opacity,
-      textBitmapCache,
-      getFontFn,
-      (text: string) => measureTextWidth(text, font),
-      (url: string) => {
-        const cached = emojiCache.get(url);
-        return cached?.complete && cached.naturalWidth > 0 ? cached : null;
-      }
-    );
-  } else if (message.text.length > 0) {
-    renderSegment(
-      ctx,
-      message.text,
-      textX,
-      textY,
-      color,
-      fontSize,
-      settings.outline.widthPx,
-      settings.outline.opacity,
-      textBitmapCache,
-      getFontFn
-    );
-  }
 }
