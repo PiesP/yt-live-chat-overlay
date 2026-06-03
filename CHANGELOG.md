@@ -2,7 +2,40 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.35.3] - 2026-06-02
+## [0.36.0] - 2026-06-03
+
+### Added
+
+- **WebGL2 SDF rendering pipeline** — New `RendererWebGL2` + `RendererWebGL2Worker` with GPU-accelerated signed-distance-field text rendering, instanced quad batching, opacity-bucketed draw calls, and texture-based emoji/author photo support. Worker-first strategy with automatic fallback to Canvas2D.
+- **Translation priority queue** — SuperChat (priority 200) and Membership (priority 100) messages are now translated before normal text messages (priority 0) during chat bursts, preventing paid message translation delays.
+- **Adaptive stagger in worker** — Worker renderer now reduces stagger delay when the pending queue exceeds 10/30 messages, matching main-thread queue-depth adaptation.
+
+### Fixed
+
+- **Worker translation Y position** — Translation text was rendered inside the message card (at `msg.height * 0.75`) instead of below it (`msg.height`). Now matches main-thread layout.
+- **`disposeSession()` memory leak** — `sessionDedup` was not cleared on session dispose, causing stale message IDs to survive into new sessions and silently drop legitimate messages.
+- **Worker text measurement divergence** — Worker used `ctx.measureText().width` (advance width) instead of `actualBoundingBoxLeft + actualBoundingBoxRight` (bounding-box), and hardcoded `fontSize * 1.1` line-height instead of measured font metrics. Now aligned with main thread.
+- **Worker translation kind filter** — Worker skipped translation rendering for SuperChat/Membership messages in dual mode. Now renders for all message kinds, matching main-thread behavior.
+- **Opacity config non-null assertion** — Replaced `opacityConfig!` with null guard for lint compliance.
+
+### Changed
+
+- **Opacity pipeline SSOT** — Worker renderer now imports and uses `computeMessageOpacity()` from `renderer-shared.ts`, eliminating 29 inline opacity lines with a different operation ordering.
+- **Font token consolidation** — Settings UI CSS and backlog indicator now reference `DEFAULT_FONT_FAMILY` design token instead of hardcoded font stacks.
+
+### Refactored
+
+- **`buildWrappedLines` SSOT** — Extracted shared line-breaking function into `canvas-rendering-shared.ts` with parameterized measurement callback, removing 178 lines of duplication between main-thread and worker.
+- **`drawAuthorSection` SSOT** — Extracted shared author section renderer with generic photo validation callbacks, removing 165 lines of duplication.
+- **`renderRegularMessage` SSOT** — Extracted shared regular message renderer with config object pattern, removing 175 lines of duplication.
+- **Dedup layer unification** — `ChatSource.seenMessageIds` now uses `MessageIdRegistry` (FIFO O(1) eviction) instead of raw `Set` with O(n) bulk-delete overflow handling.
+- **Type deduplication** — Consolidated `ChatBootstrapResolution` into `ChatBootstrapResult` from youtubei-chat module.
+- **WebGL2 worker shared module** — Worker WebGL2 renderer now imports from `renderer-webgl2-shared.ts`, eliminating ~300 lines of duplicated shaders, context setup, and rendering utilities.
+
+### Removed
+
+- **Dead `rendererLayout` fields** — Removed `exitPaddingMin`, `durationMin`, `durationMax`, `topBottomDurationMs` (superseded by settings system).
+- **`computeSuperChatOpacities`** — Dead export with zero consumers, removed from `color-utils.ts` and `design-tokens.ts`.
 
 ### Fixed
 
