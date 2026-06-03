@@ -59,6 +59,10 @@ export type WorkerConfigWebGL2 = Pick<OverlaySettings, (typeof WORKER_CONFIG_KEY
 export class RenderWorkerManagerWebGL2 {
   private worker: Worker | null = null;
   private _ready = false;
+  private config: WorkerConfigWebGL2 | null = null;
+  private canvas: HTMLCanvasElement | null = null;
+  private restartAttempts = 0;
+  private static readonly MAX_RESTART_ATTEMPTS = 3;
 
   onStats?: (stats: WorkerStatsWebGL2) => void;
   onAtlasReady?: () => void;
@@ -89,6 +93,16 @@ export class RenderWorkerManagerWebGL2 {
    * Transfers canvas control to the worker.
    */
   async init(canvas: HTMLCanvasElement, config: WorkerConfigWebGL2): Promise<void> {
+    // Guard: terminate any existing worker to prevent double-init
+    if (this.worker) {
+      this.worker.terminate();
+      this.worker = null;
+    }
+
+    // Store references for potential restart
+    this.canvas = canvas;
+    this.config = config;
+
     const offscreen = canvas.transferControlToOffscreen();
     // Create worker from the bundled worker file
     // Note: The build system produces the worker bundle; path resolution depends on bundler config.
@@ -125,9 +139,54 @@ export class RenderWorkerManagerWebGL2 {
     this.worker.onerror = (ev: ErrorEvent) => {
       log.error('Worker error:', ev.message);
       this.onError?.(ev.message);
+
+      // Attempt automatic restart with exponential backoff
+      if (this.restartAttempts < RenderWorkerManagerWebGL2.MAX_RESTART_ATTEMPTS) {
+        this.restartAttempts++;
+        const delayMs = 1000 * 2 ** (this.restartAttempts - 1); // 1s, 2s, 4s
+        log.info(
+          `Worker restart attempt ${this.restartAttempts}/${RenderWorkerManagerWebGL2.MAX_RESTART_ATTEMPTS} in ${delayMs}ms`
+        );
+        setTimeout(() => {
+          this.restart();
+        }, delayMs);
+      } else {
+        log.error(
+          `Worker failed after ${RenderWorkerManagerWebGL2.MAX_RESTART_ATTEMPTS} restart attempts. Giving up.`
+        );
+      }
     };
 
     this.worker.postMessage({ type: 'init', canvas: offscreen, config }, [offscreen]);
+  }
+
+  /**
+   * Restart the worker after a crash. Creates a new canvas element
+   * (the old one had its control transferred), replaces it in the DOM,
+   * terminates the old worker, and re-initializes.
+   * Returns false if no saved config/canvas reference exists.
+   */
+  restart(): boolean {
+    if (!this.canvas || !this.config) return false;
+
+    // Create a new canvas element since control of old one was transferred
+    const newCanvas = document.createElement('canvas');
+    newCanvas.style.cssText = this.canvas.style.cssText;
+    if (this.canvas.parentNode) {
+      this.canvas.parentNode.replaceChild(newCanvas, this.canvas);
+    }
+    this.canvas = newCanvas;
+
+    // Terminate old worker
+    if (this.worker) {
+      this.worker.terminate();
+      this.worker = null;
+    }
+    this._ready = false;
+
+    // Re-init
+    this.init(newCanvas, this.config);
+    return true;
   }
 
   addMessages(messages: ChatMessage[]): void {
