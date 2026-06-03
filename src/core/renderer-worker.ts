@@ -51,8 +51,11 @@ import {
   STAGGER_EXP_SCALE,
   TIER_NEAR_THRESHOLD,
   TRANSLATION_FONT_SCALE,
-  TRANSLATION_GAP_PX,
   TRANSLATION_OPACITY_SCALE,
+  TRANSLATION_SEPARATOR_COLOR,
+  TRANSLATION_SEPARATOR_GAP_ABOVE,
+  TRANSLATION_SEPARATOR_GAP_BELOW,
+  TRANSLATION_SEPARATOR_WIDTH_PX,
 } from '@core/renderer-constants';
 import { computeMessageOpacity, type OpacityConfig } from '@core/renderer-shared';
 import { getFontString } from '@core/text-measure';
@@ -1413,7 +1416,9 @@ function renderFrame(): void {
           );
         }
 
-        // Dual-mode translation: render translated text below for all message kinds
+        // Dual-mode translation: render inside the card with a separator line.
+        // Translation sits near the bottom of the card so it reads as part of
+        // the same message unit, not a separate label.
         if (
           cfg.translationEnabled &&
           cfg.translationMode === 'dual' &&
@@ -1424,10 +1429,27 @@ function renderFrame(): void {
           const translationColor = msg.authorType
             ? cfg.authorColors[msg.authorType] || renderColor
             : renderColor;
-          const translationY = sy + msg.height + TRANSLATION_GAP_PX;
+          // Compute vertical positions: separator + translation near card bottom
+          const separatorY =
+            sy +
+            msg.height -
+            translationFontSize -
+            TRANSLATION_SEPARATOR_GAP_BELOW -
+            TRANSLATION_SEPARATOR_WIDTH_PX -
+            TRANSLATION_SEPARATOR_GAP_ABOVE;
+          const translationY =
+            separatorY + TRANSLATION_SEPARATOR_WIDTH_PX + TRANSLATION_SEPARATOR_GAP_BELOW;
           ctx.save();
           try {
             ctx.globalAlpha = (bucketIndex / (OPACITY_BUCKETS - 1)) * TRANSLATION_OPACITY_SCALE;
+            // Separator line
+            ctx.strokeStyle = TRANSLATION_SEPARATOR_COLOR;
+            ctx.lineWidth = TRANSLATION_SEPARATOR_WIDTH_PX;
+            ctx.beginPath();
+            ctx.moveTo(sx, separatorY);
+            ctx.lineTo(sx + msg.width, separatorY);
+            ctx.stroke();
+            // Translation text
             renderSegment(
               ctx,
               msg.translatedText,

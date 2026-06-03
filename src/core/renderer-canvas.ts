@@ -47,11 +47,14 @@ import {
   STAGGER_EXP_SCALE as _STAGGER_EXP_SCALE,
   TIER_NEAR_THRESHOLD as _TIER_NEAR_THRESHOLD,
   TRANSLATION_FONT_SCALE as _TRANSLATION_FONT_SCALE,
-  TRANSLATION_GAP_PX as _TRANSLATION_GAP_PX,
   TRANSLATION_OPACITY_SCALE as _TRANSLATION_OPACITY_SCALE,
   type CanvasMessage,
   hashStringForTier,
   SPEED_TIER,
+  TRANSLATION_SEPARATOR_COLOR,
+  TRANSLATION_SEPARATOR_GAP_ABOVE,
+  TRANSLATION_SEPARATOR_GAP_BELOW,
+  TRANSLATION_SEPARATOR_WIDTH_PX,
 } from '@core/renderer-constants';
 import {
   computeMessageOpacity,
@@ -259,8 +262,6 @@ export class CanvasRenderer extends RendererBase {
 
   /** Translation font scale relative to main font size. */
   private static readonly TRANSLATION_FONT_SCALE = _TRANSLATION_FONT_SCALE;
-  /** Gap (px) between original text and translation text. */
-  private static readonly TRANSLATION_GAP_PX = _TRANSLATION_GAP_PX;
   /** Translation opacity scale relative to message opacity. */
   private static readonly TRANSLATION_OPACITY_SCALE = _TRANSLATION_OPACITY_SCALE;
 
@@ -728,19 +729,37 @@ export class CanvasRenderer extends RendererBase {
             }
           }
 
-          // Render translation below original text (dual mode only).
+          // Render translation inside the card in dual mode — integrated with a
+          // thin separator line so the original and translation read as one unit.
           // Replace mode renders translation inside renderRegularMessage as override text.
           if (msg.translatedText && this.settings.translationMode !== 'replace') {
             const fontSize = Math.max(
               1,
               Math.round(this.settings.fontSize * CanvasRenderer.TRANSLATION_FONT_SCALE)
             );
-            const transY = snappedY + msg.height + CanvasRenderer.TRANSLATION_GAP_PX;
+            // Compute vertical positions: translation sits near the bottom of the card,
+            // with a thin separator above it to visually group it with the original text.
+            const separatorY =
+              snappedY +
+              msg.height -
+              fontSize -
+              TRANSLATION_SEPARATOR_GAP_BELOW -
+              TRANSLATION_SEPARATOR_WIDTH_PX -
+              TRANSLATION_SEPARATOR_GAP_ABOVE;
+            const transY =
+              separatorY + TRANSLATION_SEPARATOR_WIDTH_PX + TRANSLATION_SEPARATOR_GAP_BELOW;
             const transColor = this.settings.colors[msg.message.authorType];
             ctx.save();
             try {
               ctx.globalAlpha = bucketOpacity * CanvasRenderer.TRANSLATION_OPACITY_SCALE;
-              // Bitmap-cached via renderSegment — same text across frames only rasterizes once.
+              // Separator line
+              ctx.strokeStyle = TRANSLATION_SEPARATOR_COLOR;
+              ctx.lineWidth = TRANSLATION_SEPARATOR_WIDTH_PX;
+              ctx.beginPath();
+              ctx.moveTo(snappedX, separatorY);
+              ctx.lineTo(snappedX + msg.width, separatorY);
+              ctx.stroke();
+              // Translation text
               renderSegment(
                 ctx,
                 msg.translatedText,
@@ -1142,8 +1161,11 @@ export class CanvasRenderer extends RendererBase {
           this.settings.fontWeight,
           this.settings.fontFamily
         );
-        const transHeight =
-          measureTextHeight(transFont, transFontSize) + CanvasRenderer.TRANSLATION_GAP_PX;
+        const separatorHeight =
+          TRANSLATION_SEPARATOR_GAP_ABOVE +
+          TRANSLATION_SEPARATOR_WIDTH_PX +
+          TRANSLATION_SEPARATOR_GAP_BELOW;
+        const transHeight = measureTextHeight(transFont, transFontSize) + separatorHeight;
         return { width: cached.width, height: cached.height + transHeight };
       }
       return cached;
@@ -1178,8 +1200,8 @@ export class CanvasRenderer extends RendererBase {
       this.dimensionCache.set(message.id, dims);
     }
 
-    // In dual translation mode, add extra height for the translation line
-    // below the original content (all message kinds).
+    // In dual translation mode, add extra height for the separator line
+    // and translation text below the original content (all message kinds).
     if (
       this.settings.translationEnabled &&
       this.translationService.isActive &&
@@ -1194,8 +1216,11 @@ export class CanvasRenderer extends RendererBase {
         this.settings.fontWeight,
         this.settings.fontFamily
       );
-      const transHeight =
-        measureTextHeight(transFont, transFontSize) + CanvasRenderer.TRANSLATION_GAP_PX;
+      const separatorHeight =
+        TRANSLATION_SEPARATOR_GAP_ABOVE +
+        TRANSLATION_SEPARATOR_WIDTH_PX +
+        TRANSLATION_SEPARATOR_GAP_BELOW;
+      const transHeight = measureTextHeight(transFont, transFontSize) + separatorHeight;
       return { width: dims.width, height: dims.height + transHeight };
     }
 
