@@ -1,9 +1,10 @@
 name: 🚀 Release
 
-# Responsibility: Publish tagged userscript releases
-# - Build release assets from the tagged commit
+# Responsibility: Publish tagged releases for userscript and browser extensions
+# - Build release assets from the tagged commit (userscript + Chrome + Firefox)
 # - Generate checksums and metadata
-# - Deploy to release branch and GitHub Releases
+# - Deploy userscript to release branch and GitHub Releases
+# - Attach extension ZIPs to GitHub Releases
 #
 # Trigger: Tag push (v*)
 
@@ -55,28 +56,53 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "📦 Release version: $VERSION"
 
-      - name: 🏗️ Build userscript
+      - name: 🏗️ Build all targets
         run: |
           set -euo pipefail
           BUILD_VERSION=${{ steps.version.outputs.version }} pnpm build
-          # Backup dist for later steps (survives git checkout)
-          mkdir -p /tmp/dist-backup
-          cp -r dist/* /tmp/dist-backup/
+          BUILD_VERSION=${{ steps.version.outputs.version }} pnpm build:extension
+          BUILD_VERSION=${{ steps.version.outputs.version }} pnpm build:extension:firefox
+
+          # Backup all dists for later steps (survives git checkout)
+          mkdir -p /tmp/dist-backup/userscript
+          mkdir -p /tmp/dist-backup/extension-chrome
+          mkdir -p /tmp/dist-backup/extension-firefox
+          cp -r dist/* /tmp/dist-backup/userscript/
+          cp -r dist-extension/* /tmp/dist-backup/extension-chrome/
+          cp -r dist-extension-firefox/* /tmp/dist-backup/extension-firefox/
+
           # Generate meta.js from userscript header
-          awk 'BEGIN{p=0} /^\/\/ ==UserScript==/{p=1} {if(p) print} /^\/\/ ==\/UserScript==/{exit}' /tmp/dist-backup/yt-live-chat-overlay.user.js > /tmp/dist-backup/yt-live-chat-overlay.meta.js
+          awk 'BEGIN{p=0} /^\/\/ ==UserScript==/{p=1} {if(p) print} /^\/\/ ==\/UserScript==/{exit}' \
+            /tmp/dist-backup/userscript/yt-live-chat-overlay.user.js \
+            > /tmp/dist-backup/userscript/yt-live-chat-overlay.meta.js
+
+          # Create extension ZIPs
+          cd /tmp/dist-backup/extension-chrome && zip -r /tmp/dist-backup/extension-chrome.zip . && cd -
+          cd /tmp/dist-backup/extension-firefox && zip -r /tmp/dist-backup/extension-firefox.zip . && cd -
+
           # List backed up files for verification
           echo "📦 Built files:"
-          ls -la /tmp/dist-backup/
+          ls -la /tmp/dist-backup/userscript/
+          echo ""
+          echo "📦 Extension ZIPs:"
+          ls -la /tmp/dist-backup/extension-chrome.zip /tmp/dist-backup/extension-firefox.zip
 
       - name: 📦 Prepare release package
         run: |
           set -euo pipefail
           mkdir -p release
-          cp /tmp/dist-backup/yt-live-chat-overlay.user.js release/
-          cp /tmp/dist-backup/yt-live-chat-overlay.meta.js release/
+          cp /tmp/dist-backup/userscript/yt-live-chat-overlay.user.js release/
+          cp /tmp/dist-backup/userscript/yt-live-chat-overlay.meta.js release/
+          cp /tmp/dist-backup/extension-chrome.zip release/yt-live-chat-overlay-chrome.zip
+          cp /tmp/dist-backup/extension-firefox.zip release/yt-live-chat-overlay-firefox.zip
 
-          # Generate checksums
-          cd release && sha256sum yt-live-chat-overlay.user.js yt-live-chat-overlay.meta.js > checksums.txt && cd ..
+          # Generate checksums for all release assets
+          cd release && sha256sum \
+            yt-live-chat-overlay.user.js \
+            yt-live-chat-overlay.meta.js \
+            yt-live-chat-overlay-chrome.zip \
+            yt-live-chat-overlay-firefox.zip \
+            > checksums.txt && cd ..
 
           # Create metadata
           cat > release/metadata.json << EOF
@@ -94,7 +120,7 @@ jobs:
             CHANGELOG_CONTENT=$(awk -v ver="${{ steps.version.outputs.version }}" '
               /^## \[/ {
                 if (found) exit;
-                if ($0 ~ "\[" ver "\]") {
+                if ($0 ~ "\\[" ver "\\]") {
                   found=1;
                   next;
                 }
@@ -103,7 +129,7 @@ jobs:
             ' CHANGELOG.md)
           fi
 
-          # Create release notes with changelog content
+          # Compute previous version for compare URL
           PREV_VERSION=$(
             {
               printf '%s\n' "${{ steps.version.outputs.version }}"
@@ -126,7 +152,24 @@ jobs:
 
           ## 📥 Installation
 
+          ### Userscript
+
           **[📥 Click here to install](https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.version }}/yt-live-chat-overlay.user.js)**
+
+          Requires [Tampermonkey](https://www.tampermonkey.net/) or [Violentmonkey](https://violentmonkey.github.io/).
+
+          ### Chrome / Edge / Brave Extension
+
+          1. Download \`yt-live-chat-overlay-chrome.zip\` from the assets below
+          2. Navigate to \`chrome://extensions\`
+          3. Enable "Developer mode"
+          4. Drag and drop the ZIP file onto the page
+
+          ### Firefox Extension
+
+          1. Download \`yt-live-chat-overlay-firefox.zip\` from the assets below
+          2. Navigate to \`about:debugging#/runtime/this-firefox\`
+          3. Click "Load Temporary Add-on" → select the ZIP file
 
           ---
 
@@ -172,10 +215,10 @@ jobs:
             git commit -m "chore: initialize release branch"
           fi
 
-          # Copy built files from backup (user.js + meta.js for jsDelivr CDN)
+          # Copy built userscript files from backup (user.js + meta.js for jsDelivr CDN)
           mkdir -p dist
-          cp /tmp/dist-backup/yt-live-chat-overlay.user.js dist/
-          cp /tmp/dist-backup/yt-live-chat-overlay.meta.js dist/
+          cp /tmp/dist-backup/userscript/yt-live-chat-overlay.user.js dist/
+          cp /tmp/dist-backup/userscript/yt-live-chat-overlay.meta.js dist/
 
           # Add and commit
           git add dist/yt-live-chat-overlay.user.js dist/yt-live-chat-overlay.meta.js
@@ -213,6 +256,8 @@ jobs:
           files: |
             release/yt-live-chat-overlay.user.js
             release/yt-live-chat-overlay.meta.js
+            release/yt-live-chat-overlay-chrome.zip
+            release/yt-live-chat-overlay-firefox.zip
             release/checksums.txt
             release/metadata.json
           draft: false
