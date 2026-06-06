@@ -47,8 +47,6 @@ const MAX_PROCESSED = 3000;
 
 /**
  * Generic DFS search through a nested object tree for a specific key.
- * Prioritizes the 'contents' key branch first — YouTube's page structure
- * nests chat renderers under contents/objects that contain the live chat panel.
  * When the key is found, the extract callback decides whether the value
  * is acceptable and what to return. If extract returns null/undefined
  * the search continues.
@@ -77,27 +75,15 @@ const findFirstNestedByKey = <T>(
       return result;
     }
 
-    // Push children onto stack. YouTube page structure nests chat-related
-    // objects inside 'contents' arrays — prioritize those by pushing them
-    // LAST (LIFO: last-pushed = explored first), then the 'contents' key.
-    const entries = Object.entries(current);
-
-    // First pass: push non-'contents' values
-    for (const [k, value] of entries) {
-      if (k === 'contents') continue;
+    for (const value of Object.values(current)) {
       if (Array.isArray(value)) {
-        for (const item of value) stack.push(item);
+        for (const item of value) {
+          stack.push(item);
+        }
         continue;
       }
-      stack.push(value);
-    }
 
-    // Second pass: push 'contents' values LAST so they're explored FIRST
-    const contentsValue = current.contents;
-    if (Array.isArray(contentsValue)) {
-      for (const item of contentsValue) stack.push(item);
-    } else if (contentsValue !== undefined) {
-      stack.push(contentsValue);
+      stack.push(value);
     }
   }
 
