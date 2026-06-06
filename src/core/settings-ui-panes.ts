@@ -149,7 +149,7 @@ export const PANES: PaneDef[] = [
             'CSS font-family value, e.g. "Noto Sans KR", sans-serif. Falls back to system default if not found.'
           ),
           range('Text Opacity (%)', 'opacity', 'Overall opacity of comment text (50-100%)'),
-          num(
+          range(
             'Lane Gap (px)',
             'laneSpacing',
             'Vertical gap between comment rows (negative = overlap)'

@@ -133,12 +133,7 @@ export default defineConfig(({ mode }): UserConfig => {
     root: REPO_ROOT,
 
     resolve: {
-      alias: {
-        '@core': resolve(REPO_ROOT, 'src/core'),
-        '@shared': resolve(REPO_ROOT, 'src/shared'),
-        '@app-types': resolve(REPO_ROOT, 'src/types/index.ts'),
-        '@platform': resolve(REPO_ROOT, 'src/platform'),
-      },
+      tsconfigPaths: true,
     },
 
     build: {
