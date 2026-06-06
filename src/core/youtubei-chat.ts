@@ -341,11 +341,15 @@ export const bootstrapChatSession = async (signal?: AbortSignal): Promise<ChatBo
     }
 
     let initialData = tryGetInitialDataFromWindow();
-    // SPA navigation guard: window.ytInitialData may contain homepage/feed
-    // data that has no currentVideoEndpoint. When the returned data does not
-    // belong to a watch page, discard it and fall through to fetchWatchHtml().
-    if (initialData && !extractVideoIdFromInitialData(initialData)) {
-      initialData = null;
+    // SPA navigation guard: window.ytInitialData may contain stale data
+    // from a previous page (homepage, feed, or wrong video).  Discard it
+    // when the embedded videoId is missing or doesn't match the current
+    // URL — fall through to HTML extraction for the correct data.
+    if (initialData) {
+      const windowVideoId = extractVideoIdFromInitialData(initialData);
+      if (!windowVideoId || windowVideoId !== videoId) {
+        initialData = null;
+      }
     }
     if (!initialData) {
       initialData = extractInitialDataFromHtml(await getHtml());
@@ -357,8 +361,7 @@ export const bootstrapChatSession = async (signal?: AbortSignal): Promise<ChatBo
       };
     }
 
-    // Verify videoId in initialData matches the current URL videoId.
-    // After SPA navigation, window.ytInitialData may still hold the previous video's data.
+    // Belt-and-suspenders: verify HTML-extracted data matches the URL.
     const dataVideoId = extractVideoIdFromInitialData(initialData);
     if (dataVideoId && dataVideoId !== videoId) {
       return {
