@@ -52,6 +52,19 @@ const MAX_START_ATTEMPTS = 3;
 const RECENT_MESSAGE_REPLAY_LIMIT = 20;
 const CHAT_WATCHDOG_INTERVAL_MS = 15_000;
 
+/**
+ * YouTube chat panel root element selector.
+ *
+ * On pages with live chat or chat replay, YouTube renders a
+ * `<ytd-live-chat-frame id="chat">` custom element inside
+ * `#chat-container`.  On VOD pages the element is absent.
+ *
+ * Used as a pre-filter before the expensive `fetchWatchHtml() +
+ * ytInitialData deep-parse` pipeline — skip the network round-trip
+ * when the DOM clearly tells us there is no chat.
+ */
+const CHAT_PANEL_SELECTOR = '#chat';
+
 async function createChatSource(
   getSettings: () => Readonly<OverlaySettings>,
   signal?: AbortSignal
@@ -126,6 +139,15 @@ export class RuntimeManager {
   private reconcilePromise: Promise<void> | null = null;
   private scheduledReconcileTimer: ReturnType<typeof setTimeout> | null = null;
   private lastPageChangeAt = 0;
+  /**
+   * Set when the current reconcile was triggered by a SPA page change.
+   * Consumed once by reconcileOnce() to gate the DOM pre-filter — only
+   * SPA navigations skip the expensive bootstrap when #chat is absent.
+   * Startup, settings-change, and session-restart always go through the
+   * full pipeline to avoid false negatives on scheduled streams
+   * (LIVE_STREAM_OFFLINE whose chat panel may not be in the DOM yet).
+   */
+  private isPageChangeReconcile = false;
   private startFailureState: StartFailureState = {
     url: null,
     attempts: 0,
@@ -182,6 +204,7 @@ export class RuntimeManager {
 
     if (reason === 'page-change') {
       this.lastPageChangeAt = Date.now();
+      this.isPageChangeReconcile = true;
       this.resetStartFailures();
       if (this.targetUrl !== null && !this.matchesSessionUrl(this.getCurrentUrl())) {
         this.disposeActiveSession();
@@ -262,6 +285,30 @@ export class RuntimeManager {
 
     if (this.targetUrl !== null && !this.isDisposedState) {
       this.updateSessionSettings(desired.settings);
+      return;
+    }
+
+    // ── DOM-based chat panel pre-filter (SPA page changes only) ──────
+    //
+    // When the user navigates via SPA to a /watch page that has no #chat
+    // (YTD-LIVE-CHAT-FRAME) element in the DOM, the page is almost
+    // certainly a VOD.  Skip the expensive `fetchWatchHtml() +
+    // ytInitialData deep-parse` pipeline and return `unavailable`
+    // immediately.
+    //
+    // Applied ONLY for page-change reconciles — startup, settings-change,
+    // and session-restart always go through the full bootstrap to avoid
+    // false negatives on scheduled streams (LIVE_STREAM_OFFLINE) whose
+    // chat panel is not yet rendered.
+    const isPageChange = this.isPageChangeReconcile;
+    this.isPageChangeReconcile = false;
+    if (
+      isPageChange &&
+      location.pathname === '/watch' &&
+      !document.querySelector(CHAT_PANEL_SELECTOR)
+    ) {
+      log.info('No #chat element in DOM — skipping bootstrap (likely VOD)');
+      this.handleStartFailure(desired.url, 'unavailable');
       return;
     }
 
