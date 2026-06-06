@@ -4,8 +4,8 @@
 /**
  * CardConfig — unified card configuration for SuperChat and Membership messages.
  *
- * Defines card appearance, behavior, and rendering hints. Factory functions
- * create complete configs using design-tokens and color-utils constants.
+ * Defines card appearance, behavior, and rendering hints. Pre-built config
+ * constants use design-tokens and color-utils constants.
  */
 
 import type { ChatMessage, OverlaySettings, RgbColor } from '@app-types';

@@ -34,10 +34,14 @@ import { ByteLimitedCache } from '@core/byte-limited-cache';
 import type { CardConfigWorker } from '@core/card-config';
 import { EMOJI_ALIAS_PATTERN } from '@core/chat-message-helpers';
 import { toRgba } from '@core/color-utils';
-import { computeScrollDuration, rendererLayout, spacing } from '@core/design-tokens';
+import {
+  computeScrollDuration,
+  DEFAULT_TEXT_COLOR,
+  rendererLayout,
+  spacing,
+} from '@core/design-tokens';
 import {
   ANTI_BLOCK_FREE_RATIO,
-  DEFAULT_TEXT_COLOR,
   DRAIN_QUEUE_MAX_SKIP as DRAIN_MAX_SKIP,
   desaturateColor,
   EPSILON,

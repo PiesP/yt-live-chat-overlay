@@ -58,7 +58,7 @@ const LANGUAGE_PATTERNS: ReadonlyArray<[SupportedLanguage, RegExp]> = [
   ['zh', /^zh\b/i],
 ];
 
-function detectBrowserLanguage(): SupportedLanguage {
+export function detectBrowserLanguage(): SupportedLanguage {
   try {
     const nav = navigator.language;
     if (!nav) return 'en';

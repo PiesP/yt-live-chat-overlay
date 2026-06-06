@@ -84,9 +84,7 @@ export class ChromeStorageAdapter implements StorageAdapter {
 
   async setItem(key: string, value: string): Promise<void> {
     try {
-      const storage = chrome?.storage?.local;
-      if (!storage) return;
-      await storage.set({ [key]: value });
+      await chrome?.storage?.local.set({ [key]: value });
     } catch {
       // quota exceeded or extension context invalidated — silently ignore
     }

@@ -175,7 +175,6 @@ export class TranslationService {
     if (!this.enabled) return;
     if (!this.currentTarget) return;
     if (source === this.currentSource) return;
-    if (typeof Translator === 'undefined') return;
 
     // Serialize with configure() to avoid overlapping translator creation.
     if (this.configurePromise) {
@@ -192,12 +191,11 @@ export class TranslationService {
   }
 
   private async doConfigure(sourceLanguage: string, targetLanguage: string): Promise<void> {
-    if (typeof Translator === 'undefined') return;
     this.pendingSource = sourceLanguage;
     this.pendingTarget = targetLanguage;
 
     try {
-      const availability = await Translator.availability({
+      const availability = await Translator?.availability({
         sourceLanguage,
         targetLanguage,
       });
@@ -218,20 +216,21 @@ export class TranslationService {
       // When 'downloadable', Translator.create() triggers the model download
       // (requires user activation within 5 seconds). The Promise resolves once
       // the download completes and the translator is ready.
-      this.translator = await Translator.create({
-        sourceLanguage,
-        targetLanguage,
-        monitor: (monitor: EventTarget) => {
-          monitor.addEventListener('downloadprogress', (e: Event) => {
-            const evt = e as TranslatorDownloadEvent;
-            if (evt.total > 0) {
-              log.debug(
-                `Translator model download: ${Math.round((evt.loaded / evt.total) * 100)}%`
-              );
-            }
-          });
-        },
-      });
+      this.translator =
+        (await Translator?.create({
+          sourceLanguage,
+          targetLanguage,
+          monitor: (monitor: EventTarget) => {
+            monitor.addEventListener('downloadprogress', (e: Event) => {
+              const evt = e as TranslatorDownloadEvent;
+              if (evt.total > 0) {
+                log.debug(
+                  `Translator model download: ${Math.round((evt.loaded / evt.total) * 100)}%`
+                );
+              }
+            });
+          },
+        })) ?? null;
       this.currentTarget = targetLanguage;
       this.currentSource = sourceLanguage;
       this.pendingSource = null;

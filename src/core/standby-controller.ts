@@ -14,10 +14,11 @@
 import { clearSafeTimeout, isAbortError } from '@core/dom';
 import { createLogger } from '@core/logging';
 import type { RendererBase } from '@core/renderer-base';
-import type { RuntimeSessionRestartReason } from '@core/runtime-manager';
 import { bootstrapChatSession } from '@core/youtubei-chat';
 
 const log = createLogger('Standby');
+
+type RestartReason = 'foreground-return' | 'watchdog' | 'standby-resolved';
 
 const RECHECK_INTERVAL_MS = 5_000;
 const RETRY_DELAY_MS = 3_000;
@@ -34,7 +35,7 @@ export class StandbyController {
   constructor(
     private readonly getAbortSignal: () => AbortSignal,
     private readonly isDisposed: () => boolean,
-    private readonly onStreamDetected: (reason: RuntimeSessionRestartReason) => void
+    private readonly onStreamDetected: (reason: RestartReason) => void
   ) {}
 
   /** Attach the renderer for standby status UI feedback. */
