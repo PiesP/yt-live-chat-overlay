@@ -16,7 +16,12 @@ import type { Overlay } from '@core/overlay';
 import { PriorityBucketQueue } from '@core/priority-bucket-queue';
 import { ConnectionStatus, RendererBase } from '@core/renderer-base';
 import type { CanvasMessage } from '@core/renderer-constants';
-import { SPEED_TIER, TRANSLATION_FONT_SCALE, TRANSLATION_GAP_PX } from '@core/renderer-constants';
+import {
+  CARD_BG_OPACITY_FACTOR,
+  SPEED_TIER,
+  TRANSLATION_FONT_SCALE,
+  TRANSLATION_GAP_PX,
+} from '@core/renderer-constants';
 import { computeMessageOpacity, type OpacityConfig } from '@core/renderer-shared';
 import {
   buildSDFInstances,
@@ -539,7 +544,7 @@ export class RendererWebGL2 extends RendererBase {
             msg.message.kind === 'superchat'
               ? (msg.message.superChat?.backgroundColor ?? '#ff0000')
               : '#0f0';
-          this.ctx2d.globalAlpha = op * 0.85;
+          this.ctx2d.globalAlpha = op * CARD_BG_OPACITY_FACTOR;
           this.ctx2d.fillStyle = bgColor;
           drawRoundRect(
             this.ctx2d,

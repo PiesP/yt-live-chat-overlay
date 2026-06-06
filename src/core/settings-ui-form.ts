@@ -689,7 +689,8 @@ export class SettingsUiForm {
     input.insertAdjacentElement('afterend', error);
 
     // Auto-dismiss after 3s
-    setTimeout(() => error.remove(), 3000);
+    const ERROR_DISMISS_MS = 3000;
+    setTimeout(() => error.remove(), ERROR_DISMISS_MS);
   }
 
   getFocusableElements(): HTMLElement[] {

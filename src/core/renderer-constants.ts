@@ -15,6 +15,11 @@ import type { ChatMessage } from '@app-types';
  * statics) are NOT duplicated here — import them from their canonical modules.
  */
 
+// ── Card rendering ──────────────────────────────────────────────────────
+
+/** Factor applied to card background opacity for visual blending. */
+export const CARD_BG_OPACITY_FACTOR = 0.85;
+
 // ── Lane allocation (lane-allocator.ts) ─────────────────────────────────────
 
 /** Speed tier constants for depth-layered rendering.

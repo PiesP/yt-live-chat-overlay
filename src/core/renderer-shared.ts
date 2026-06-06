@@ -260,6 +260,31 @@ export interface OpacityConfig {
 }
 
 /**
+ * Create an OpacityConfig from raw settings fields.
+ * Centralizes the derived-value computation (invFadeDuration, ageFadeRate)
+ * so the 3 render paths (Canvas2D main, Canvas2D worker, WebGL2 worker)
+ * use the same calculation.
+ */
+export function createOpacityConfig(opts: {
+  opacity: number;
+  fadeDurationMs: number;
+  maxMessageAgeMs: number;
+  backlogOpacityMultiplier: number;
+  depthLayersEnabled: boolean;
+  depthFarOpacityMul: number;
+}): OpacityConfig {
+  return {
+    baseOpacity: opts.opacity,
+    fadeDurationMs: opts.fadeDurationMs,
+    invFadeDuration: 1 / Math.max(1, opts.fadeDurationMs),
+    backlogOpacityMultiplier: opts.backlogOpacityMultiplier,
+    depthLayersEnabled: opts.depthLayersEnabled,
+    depthFarOpacityMul: opts.depthFarOpacityMul,
+    ageFadeRate: 1 / Math.max(1, opts.maxMessageAgeMs),
+  };
+}
+
+/**
  * Compute per-frame message opacity using a 6-stage composition:
  *  1. Base opacity from settings
  *  2. Fade-in (first N ms, fixed modes only)

@@ -155,7 +155,6 @@ interface WorkerConfig {
   /** Max pending queue depth. */
   queueMaxSize: number;
   /** Background queue trim target. */
-  backgroundQueueMax: number;
   /** Emoji image cache budget in MB. */
   emojiCacheMb: number;
   /** Author photo cache budget in MB. */
@@ -165,33 +164,12 @@ interface WorkerConfig {
   /** Text bitmap cache budget in MB. */
   textCacheMb: number;
   /** Max translations to apply per frame. */
-  translationBatchSize: number;
   /** Max concurrent emoji fetch operations. */
   emojiFetchLimit: number;
   /** Minutes before retrying failed emoji fetches. */
   failedEmojiRetryMins: number;
-  burstSampleWindow: number;
-  burstElevatedThreshold: number;
-  burstHighThreshold: number;
-  burstExtremeThreshold: number;
-  backlogInjectionMax: number;
-  backlogDensityRampMs: number;
-  livePollFallbackMs: number;
-  livePollFailureLimit: number;
-  speedBoostThreshold: number;
-  backlogPauseThreshold: number;
-  backlogResumeThreshold: number;
-  activityTimeoutMs: number;
   staggerMaxDelayMs: number;
-  staggerMediumDelayMs: number;
   emojiFetchTimeoutMs: number;
-  backlogDensityRampMaxMs: number;
-  backlogInjectionRateMin: number;
-  speedBoostMax: number;
-  speedBoostDenom: number;
-  backlogToggleCooldownMs: number;
-  replayPrefetchPages: number;
-  replayBatchLimit: number;
 }
 
 interface WorkerContentSegment {
@@ -418,12 +396,6 @@ function estimateBitmapBytes(bitmap: ImageBitmap): number {
   return bitmap.width * bitmap.height * 4;
 }
 
-/** Max concurrent image fetches. */
-const MAX_CONCURRENT_FETCHES = 6;
-
-/** Fetch timeout in ms. */
-const FETCH_TIMEOUT_MS = 30_000;
-
 /** In-flight URLs to avoid duplicate prefetches. */
 const fetching = new Set<string>();
 
@@ -438,7 +410,7 @@ async function prefetchImages(urls: string[], cache: ByteLimitedCache<ImageBitma
   // Semaphore pattern: process all URLs with concurrency limit
   let idx = 0;
   const workers: Promise<void>[] = [];
-  for (let i = 0; i < Math.min(MAX_CONCURRENT_FETCHES, toFetch.length); i++) {
+  for (let i = 0; i < Math.min(config?.emojiFetchLimit ?? 8, toFetch.length); i++) {
     workers.push(
       (async () => {
         while (idx < toFetch.length) {
@@ -448,7 +420,7 @@ async function prefetchImages(urls: string[], cache: ByteLimitedCache<ImageBitma
           let timer: ReturnType<typeof setTimeout> | undefined;
           try {
             const controller = new AbortController();
-            timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+            timer = setTimeout(() => controller.abort(), config?.emojiFetchTimeoutMs ?? 30_000);
             const response = await fetch(url, { signal: controller.signal });
             if (!response.ok) continue;
             const blob = await response.blob();
@@ -1745,4 +1717,3 @@ function handleDestroy(): void {
 }
 
 // Signal ready
-self.postMessage({ type: 'ready' });

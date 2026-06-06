@@ -11,6 +11,7 @@
  */
 
 import {
+  CARD_BG_OPACITY_FACTOR,
   TRANSLATION_FONT_SCALE,
   TRANSLATION_GAP_PX,
   TRANSLATION_OPACITY_SCALE,
@@ -307,7 +308,7 @@ export function buildSDFInstances(
         texQuadData[bgOff + 5] = bgColor[0];
         texQuadData[bgOff + 6] = bgColor[1];
         texQuadData[bgOff + 7] = bgColor[2];
-        texQuadData[bgOff + 8] = op * 0.85;
+        texQuadData[bgOff + 8] = op * CARD_BG_OPACITY_FACTOR;
         texQuadCount++;
       }
     }
