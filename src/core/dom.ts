@@ -57,7 +57,7 @@ export const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
     signal?.addEventListener('abort', handleAbort, { once: true });
   });
 
-const isVisibleElement = (element: HTMLElement): boolean =>
+export const isVisibleElement = (element: HTMLElement): boolean =>
   element.offsetWidth > 0 && element.offsetHeight > 0;
 
 export const findElementMatch = <T extends Element>(
