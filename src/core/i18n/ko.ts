@@ -142,7 +142,8 @@ export const KO: Record<string, string> = {
   'Gap between consecutive messages as percentage of message width (2-30%, default 8)':
     '연속 메시지 사이의 간격을 메시지 너비의 백분율로 표시 (2-30%, 기본 8)',
   'Language of the incoming chat messages': '수신 채팅 메시지의 언어',
-  'Language to translate chat messages into': '채팅 메시지를 번역할 대상 언어',
+  'Language to translate chat messages into. Auto detects from browser settings.':
+    '채팅 메시지를 번역할 대상 언어. 자동은 브라우저 설정에서 감지합니다.',
   'Limits how frequently messages from the same author appear':
     '동일 작성자의 메시지 표시 빈도를 제한',
   'Sets the overlay user interface language (does not filter comments by language)':

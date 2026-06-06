@@ -145,7 +145,8 @@ export const JA: Record<string, string> = {
   'How fast comments scroll across the screen in pixels per second':
     'コメントが画面を横切る速度(ピクセル/秒)',
   'Language of the incoming chat messages': '受信チャットメッセージの言語',
-  'Language to translate chat messages into': 'チャットメッセージの翻訳先言語',
+  'Language to translate chat messages into. Auto detects from browser settings.':
+    'チャットメッセージの翻訳先言語。自動はブラウザ設定から検出します。',
   'Limits how frequently messages from the same author appear':
     '同じ投稿者のメッセージ表示頻度を制限',
   'Sets the overlay user interface language (does not filter comments by language)':

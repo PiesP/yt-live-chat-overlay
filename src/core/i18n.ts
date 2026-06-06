@@ -16,7 +16,7 @@
  *   element.textContent = t('Chat Overlay'); // in DOM construction
  */
 
-import type { LanguageSetting } from '@app-types';
+import type { LanguageSetting, TranslationTarget } from '@app-types';
 
 /** Language codes with actual translations (excluding 'auto'). Derived from LanguageSetting. */
 type SupportedLanguage = Exclude<LanguageSetting, 'auto'>;
@@ -58,7 +58,7 @@ const LANGUAGE_PATTERNS: ReadonlyArray<[SupportedLanguage, RegExp]> = [
   ['zh', /^zh\b/i],
 ];
 
-function detectBrowserLanguage(): SupportedLanguage {
+export function detectBrowserLanguage(): SupportedLanguage {
   try {
     const nav = navigator.language;
     if (!nav) return 'en';
@@ -69,6 +69,16 @@ function detectBrowserLanguage(): SupportedLanguage {
   } catch {
     return 'en';
   }
+}
+
+/**
+ * Resolve the translation target language.
+ * When 'auto', detects the browser language via navigator.language.
+ * Returns the concrete TranslationLanguage code for Chrome Translator API.
+ */
+export function resolveTranslationTarget(target: TranslationTarget): SupportedLanguage {
+  if (target !== 'auto') return target;
+  return detectBrowserLanguage();
 }
 
 // ── Translations ─────────────────────────────────────────────────────────

@@ -16,6 +16,7 @@
  *   For chat (short messages), this is acceptable.
  */
 import { ByteLimitedCache } from '@core/byte-limited-cache';
+import { resolveTranslationTarget } from '@core/i18n';
 import { createLogger } from '@core/logging';
 
 const log = createLogger('TranslationService');
@@ -96,6 +97,11 @@ export class TranslationService {
     source: string;
     target: string;
   }): Promise<void> {
+    // Resolve 'auto' target to concrete browser language for Chrome Translator API.
+    // Chrome Translator requires a BCP 47 language code — it does not accept 'auto'.
+    const resolvedTarget =
+      settings.target === 'auto' ? resolveTranslationTarget('auto') : settings.target;
+
     this.enabled = settings.enabled && settings.service === 'auto';
     if (!this.enabled) {
       this.translator = null;
@@ -112,16 +118,16 @@ export class TranslationService {
       return;
     }
 
-    if (settings.target === this.currentTarget && settings.source === this.currentSource) return;
+    if (resolvedTarget === this.currentTarget && settings.source === this.currentSource) return;
 
     // Serialize: wait for any in-flight configure before starting a new one.
     if (this.configurePromise) {
       await this.configurePromise;
       // Re-check no-op after the previous call completed.
-      if (settings.target === this.currentTarget && settings.source === this.currentSource) return;
+      if (resolvedTarget === this.currentTarget && settings.source === this.currentSource) return;
     }
 
-    this.configurePromise = this.doConfigure(settings.source, settings.target);
+    this.configurePromise = this.doConfigure(settings.source, resolvedTarget);
     try {
       await this.configurePromise;
     } finally {

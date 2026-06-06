@@ -596,13 +596,14 @@ export const PANES: PaneDef[] = [
             'Target Language',
             'translationTarget',
             [
+              ['auto', 'Auto (Browser)'],
               ['ko', '한국어'],
               ['en', 'English'],
               ['ja', '日本語'],
               ['es', 'Español'],
               ['zh', '中文'],
             ],
-            'Language to translate chat messages into'
+            'Language to translate chat messages into. Auto detects from browser settings.'
           ),
           sel(
             'Display Mode',

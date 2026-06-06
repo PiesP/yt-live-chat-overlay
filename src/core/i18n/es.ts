@@ -145,7 +145,8 @@ export const ES: Record<string, string> = {
   'How fast comments scroll across the screen in pixels per second':
     'Velocidad a la que los comentarios cruzan la pantalla (píxeles/segundo)',
   'Language of the incoming chat messages': 'Idioma de los mensajes de chat entrantes',
-  'Language to translate chat messages into': 'Idioma al que traducir los mensajes',
+  'Language to translate chat messages into. Auto detects from browser settings.':
+    'Idioma al que traducir los mensajes. Auto detecta desde la configuración del navegador.',
   'Limits how frequently messages from the same author appear':
     'Limita la frecuencia con la que aparecen mensajes del mismo autor',
   'Sets the overlay user interface language (does not filter comments by language)':

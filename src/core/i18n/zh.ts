@@ -138,7 +138,8 @@ export const ZH: Record<string, string> = {
   'Opacity dimming for far-layer messages': '远处图层消息不透明度降低',
   'How fast comments scroll across the screen in pixels per second': '弹幕滚过屏幕的速度(像素/秒)',
   'Language of the incoming chat messages': '传入聊天消息的语言',
-  'Language to translate chat messages into': '将聊天消息翻译成的目标语言',
+  'Language to translate chat messages into. Auto detects from browser settings.':
+    '将聊天消息翻译成的目标语言。自动从浏览器设置检测。',
   'Limits how frequently messages from the same author appear': '限制同一用户消息的显示频率',
   'Sets the overlay user interface language (does not filter comments by language)':
     '设置覆盖层界面语言（不按语言过滤弹幕）',

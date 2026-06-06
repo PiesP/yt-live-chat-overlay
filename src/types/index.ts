@@ -38,6 +38,8 @@ export type TranslationService = 'auto' | 'off';
 export type TranslationMode = 'dual' | 'replace';
 /** Valid source/target languages for translation (excludes 'auto') */
 export type TranslationLanguage = 'en' | 'ko' | 'ja' | 'es' | 'zh';
+/** Target language for translation — 'auto' resolves to browser language via navigator.language */
+export type TranslationTarget = TranslationLanguage | 'auto';
 
 /** RGB color representation (readonly, immutable). */
 export interface RgbColor {
@@ -249,8 +251,8 @@ export interface OverlaySettings {
   translationService: TranslationService;
   /** Source language for translation (language messages are written in) */
   translationSource: TranslationLanguage;
-  /** Target language for translation (language to translate into) */
-  translationTarget: TranslationLanguage;
+  /** Target language for translation (language to translate into). 'auto' resolves via browser language. */
+  translationTarget: TranslationTarget;
   /** Display mode: dual (original + translation) or replace (translation only) */
   translationMode: TranslationMode;
 

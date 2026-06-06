@@ -14,6 +14,7 @@ import type {
   TranslationLanguage,
   TranslationMode,
   TranslationService,
+  TranslationTarget,
 } from '@app-types';
 import { DEFAULT_FONT_FAMILY, colors as designColors, rendererLayout } from '@core/design-tokens';
 
@@ -59,6 +60,14 @@ const TRANSLATION_LANGUAGE_VALUES = [
   'es',
   'zh',
 ] as const satisfies readonly TranslationLanguage[];
+const TRANSLATION_TARGET_VALUES = [
+  'auto',
+  'en',
+  'ko',
+  'ja',
+  'es',
+  'zh',
+] as const satisfies readonly TranslationTarget[];
 const TRANSLATION_MODE_VALUES = ['dual', 'replace'] as const satisfies readonly TranslationMode[];
 const FONT_WEIGHT_VALUES = ['normal', 'bold'] as const satisfies readonly FontWeight[];
 const LOG_LEVEL_VALUES = ['warn', 'info', 'debug'] as const satisfies readonly LogLevel[];
@@ -414,7 +423,7 @@ export const DEFAULT_SETTINGS = {
   translationEnabled: false,
   translationService: 'auto',
   translationSource: 'ja',
-  translationTarget: 'ko',
+  translationTarget: 'auto',
   translationMode: 'dual',
   exitPaddingPx: 100,
   scrollDurationMinMs: 5000,
@@ -539,7 +548,7 @@ const STRING_VALIDATORS: Partial<Record<RootScalarSettingKey, (v: string) => boo
   authorRateLimit: (v) => AUTHOR_RATE_LIMIT_VALUES.includes(v as AuthorRateLimitPreset),
   language: (v) => LANGUAGE_VALUES.includes(v as LanguageSetting),
   translationService: (v) => TRANSLATION_SERVICE_VALUES.includes(v as TranslationService),
-  translationTarget: (v) => TRANSLATION_LANGUAGE_VALUES.includes(v as TranslationLanguage),
+  translationTarget: (v) => TRANSLATION_TARGET_VALUES.includes(v as TranslationTarget),
   translationMode: (v) => TRANSLATION_MODE_VALUES.includes(v as TranslationMode),
   translationSource: (v) => TRANSLATION_LANGUAGE_VALUES.includes(v as TranslationLanguage),
 };
