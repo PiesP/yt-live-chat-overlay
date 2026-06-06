@@ -15,7 +15,7 @@ import type { LanePlacement } from '@core/lane-allocator';
 import { createLogger } from '@core/logging';
 import type { Overlay } from '@core/overlay';
 import { PriorityBucketQueue } from '@core/priority-bucket-queue';
-import { RendererBase } from '@core/renderer-base';
+import { ConnectionStatus, RendererBase } from '@core/renderer-base';
 import type { CanvasMessage } from '@core/renderer-constants';
 import { SPEED_TIER, TRANSLATION_FONT_SCALE, TRANSLATION_GAP_PX } from '@core/renderer-constants';
 import { computeMessageOpacity, type OpacityConfig } from '@core/renderer-shared';
@@ -95,6 +95,8 @@ export class RendererWebGL2 extends RendererBase {
   private u_outlineColor!: WebGLUniformLocation | null;
   private u_outlineOpacity!: WebGLUniformLocation | null;
   private u_atlas!: WebGLUniformLocation | null;
+
+  private connectionStatus: ConnectionStatus = ConnectionStatus.CONNECTED;
 
   get laneCount(): number {
     return this.laneAllocator.getLaneCount();
@@ -651,6 +653,17 @@ export class RendererWebGL2 extends RendererBase {
         parseInt(m[3] ?? '0', 10) / 255,
       ];
     return [1, 1, 1];
+  }
+
+  setStandbyStatus(standby: boolean): void {
+    this.setConnectionStatus(standby ? ConnectionStatus.STANDBY : ConnectionStatus.CONNECTED);
+  }
+
+  setConnectionStatus(status: ConnectionStatus): void {
+    this.connectionStatus = status;
+    // WebGL2 renderer: status bar not yet implemented on this path.
+    // This satisfies the interface contract for dual-path consistency.
+    void this.connectionStatus; // consumed once status bar rendering is implemented
   }
 
   protected onPause(): void {}

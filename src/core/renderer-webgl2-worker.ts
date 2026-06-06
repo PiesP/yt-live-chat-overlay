@@ -14,7 +14,7 @@
 import type { ChatMessage, OverlaySettings } from '@app-types';
 import { createLogger } from '@core/logging';
 import type { Overlay } from '@core/overlay';
-import { RendererBase } from '@core/renderer-base';
+import { type ConnectionStatus, RendererBase } from '@core/renderer-base';
 import { RenderWorkerManagerWebGL2 } from '@core/renderer-worker-manager-webgl2';
 
 const log = createLogger('RendererWebGL2Worker');
@@ -66,6 +66,11 @@ export class RendererWebGL2Worker extends RendererBase {
   /** Worker manages its own requestAnimationFrame loop. */
   startRenderLoop(): void {
     // No-op: worker runs its own rAF loop after init.
+  }
+
+  setConnectionStatus(_status: ConnectionStatus): void {
+    // Worker renderer: status feedback is delegated to main thread.
+    // This satisfies the interface contract for dual-path consistency.
   }
 
   // ── Lifecycle hooks ──────────────────────────────────────────────────
