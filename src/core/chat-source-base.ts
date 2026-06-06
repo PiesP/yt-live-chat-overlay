@@ -9,7 +9,7 @@
  */
 
 import type { ChatMessage, OverlaySettings, Pauseable } from '@app-types';
-import { BootstrapResolver } from '@core/bootstrap-resolver';
+import { logBootstrapFailure, refreshBootstrap, resolveBootstrap } from '@core/bootstrap-resolver';
 import { findElementMatch, isAbortError, sleep, VIDEO_SELECTORS } from '@core/dom';
 import { createLogger } from '@core/logging';
 import { MessageIdRegistry } from '@core/message-id-registry';
@@ -116,7 +116,6 @@ export abstract class ChatSource implements Pauseable {
   private lastActivityTime = 0;
   protected bootstrap: ChatBootstrapData | null = null;
   private readonly messageBuffer = new MessageBuffer();
-  protected readonly bootstrapResolver = new BootstrapResolver();
 
   /**
    * Optional provider for the current burst EMA rate (msg/s).
@@ -244,7 +243,7 @@ export abstract class ChatSource implements Pauseable {
    * Returns the fresh bootstrap or null on failure.
    */
   protected async refreshBootstrap(signal?: AbortSignal): Promise<ChatBootstrapData | null> {
-    const result = await this.bootstrapResolver.refresh(signal);
+    const result = await refreshBootstrap(signal);
     if (!result) return null;
     this.bootstrap = result;
     return result;
@@ -369,10 +368,10 @@ export abstract class ChatSource implements Pauseable {
   private async bootstrapAndLaunchPolling(signal?: AbortSignal): Promise<ChatSourceStartStatus> {
     // Skip resolver when bootstrap was pre-seeded by factory call
     if (!this.bootstrap) {
-      const bootstrapResolution = await this.bootstrapResolver.resolve(signal);
+      const bootstrapResolution = await resolveBootstrap(signal);
 
       if (bootstrapResolution.status !== 'ready') {
-        this.bootstrapResolver.logFailure(bootstrapResolution);
+        logBootstrapFailure(bootstrapResolution);
         if (bootstrapResolution.status === 'waiting') return 'waiting';
         return bootstrapResolution.status === 'unavailable' ? 'unavailable' : 'retryable';
       }

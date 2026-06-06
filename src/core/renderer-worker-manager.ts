@@ -14,8 +14,8 @@
 
 import type { ChatMessage, OverlaySettings } from '@app-types';
 import {
-  createMembershipCardConfig,
-  createSuperChatCardConfig,
+  MEMBERSHIP_CARD_CONFIG,
+  SUPERCHAT_CARD_CONFIG,
   toWorkerConfig,
 } from '@core/card-config';
 import type { ImageFetchManager } from '@core/image-fetch-manager';
@@ -293,8 +293,8 @@ export class RenderWorkerManager {
             message.kind === 'superchat' || message.kind === 'membership'
               ? toWorkerConfig(
                   message.kind === 'superchat'
-                    ? createSuperChatCardConfig()
-                    : createMembershipCardConfig(),
+                    ? SUPERCHAT_CARD_CONFIG
+                    : MEMBERSHIP_CARD_CONFIG,
                   message,
                   this.deps.settings
                 )

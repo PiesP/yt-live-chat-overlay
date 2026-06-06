@@ -16,10 +16,10 @@
  *   element.textContent = t('Chat Overlay'); // in DOM construction
  */
 
-import type { LanguageSetting, TranslationTarget } from '@app-types';
+import type { LanguageSetting, TranslationLanguage, TranslationTarget } from '@app-types';
 
-/** Language codes with actual translations (excluding 'auto'). Derived from LanguageSetting. */
-type SupportedLanguage = Exclude<LanguageSetting, 'auto'>;
+/** Language codes with actual translations (excluding 'auto'). Reuses TranslationLanguage from app-types. */
+type SupportedLanguage = TranslationLanguage;
 
 // ── Module-level active language ─────────────────────────────────────────
 
@@ -58,7 +58,7 @@ const LANGUAGE_PATTERNS: ReadonlyArray<[SupportedLanguage, RegExp]> = [
   ['zh', /^zh\b/i],
 ];
 
-export function detectBrowserLanguage(): SupportedLanguage {
+function detectBrowserLanguage(): SupportedLanguage {
   try {
     const nav = navigator.language;
     if (!nav) return 'en';

@@ -11,7 +11,7 @@ import {
   SETTINGS_VERSION,
   STORAGE_KEY,
 } from '@core/settings-schema';
-import { getSettingsStorageAdapter } from '@core/settings-storage';
+import { getStorageAdapter } from '@platform/storage-adapters';
 
 const log = createLogger('Settings');
 
@@ -47,7 +47,7 @@ export class Settings {
 
   async initialize(): Promise<void> {
     try {
-      const adapter = getSettingsStorageAdapter();
+      const adapter = getStorageAdapter();
       const raw = await adapter.getItem(STORAGE_KEY);
       if (raw) {
         this.settings = normalizeStoredSettings(JSON.parse(raw) as Record<string, unknown>);
@@ -120,7 +120,7 @@ export class Settings {
   /** Reload settings from storage and notify subscribers. */
   private async reloadFromStorage(): Promise<void> {
     try {
-      const adapter = getSettingsStorageAdapter();
+      const adapter = getStorageAdapter();
       const raw = await adapter.getItem(STORAGE_KEY);
       if (!raw) return;
       const loaded = normalizeStoredSettings(JSON.parse(raw) as Record<string, unknown>);
@@ -136,7 +136,7 @@ export class Settings {
       this.saveGeneration++;
       this.lastSelfSaveGeneration = this.saveGeneration;
       const data = { ...this.settings, _version: SETTINGS_VERSION };
-      await getSettingsStorageAdapter().setItem(STORAGE_KEY, JSON.stringify(data));
+      await getStorageAdapter().setItem(STORAGE_KEY, JSON.stringify(data));
     } catch (error: unknown) {
       log.warn('Failed to save settings:', error);
     }

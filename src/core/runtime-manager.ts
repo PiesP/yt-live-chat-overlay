@@ -1014,27 +1014,23 @@ export class RuntimeManager {
    */
   private createRenderer(overlay: Overlay, settings: OverlaySettings): RendererBase {
     if (settings.enableWebGL2) {
-      try {
-        // Try OffscreenCanvas worker first (best for CPU-heavy atlas gen)
-        if (typeof OffscreenCanvas !== 'undefined') {
-          try {
-            const renderer = new RendererWebGL2Worker(overlay, settings);
-            log.info('Using WebGL2 SDF worker renderer');
-            return renderer;
-          } catch (err: unknown) {
-            log.warn('WebGL2 worker unavailable, trying main-thread WebGL2:', err);
-          }
-        }
-        // Fall back to main-thread WebGL2
+      // Try OffscreenCanvas worker first (best for CPU-heavy atlas gen)
+      if (typeof OffscreenCanvas !== 'undefined') {
         try {
-          const renderer = new RendererWebGL2(overlay, settings);
-          log.info('Using WebGL2 SDF renderer (main thread)');
+          const renderer = new RendererWebGL2Worker(overlay, settings);
+          log.info('Using WebGL2 SDF worker renderer');
           return renderer;
         } catch (err: unknown) {
-          log.warn('WebGL2 SDF renderer unavailable, falling back to Canvas2D:', err);
+          log.warn('WebGL2 worker unavailable, trying main-thread WebGL2:', err);
         }
-      } catch {
-        // TypeScript: catch clause variable type annotation
+      }
+      // Fall back to main-thread WebGL2
+      try {
+        const renderer = new RendererWebGL2(overlay, settings);
+        log.info('Using WebGL2 SDF renderer (main thread)');
+        return renderer;
+      } catch (err: unknown) {
+        log.warn('WebGL2 SDF renderer unavailable, falling back to Canvas2D:', err);
       }
     }
     log.info('Using Canvas2D renderer');

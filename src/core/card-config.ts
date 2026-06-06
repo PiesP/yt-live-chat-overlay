@@ -221,71 +221,69 @@ export interface CardConfig {
   needsElapsed: boolean;
 }
 
-export function createSuperChatCardConfig(): CardConfig {
-  return {
-    background: 'gradient',
-    backgroundGradient: {
-      topBoost: 0.12,
-      bottomReduction: 0.15,
-      minOpacity: 0.35,
-    },
-    decoration: 'accentBar',
-    accentBar: {
-      width: rendererLayout.superchatAccentBarWidth,
-      color: (message: ChatMessage) => {
-        const superChat = message.superChat;
-        return resolveSuperChatRgb(superChat ?? { tier: 'blue' as const }, designColors.superChat);
-      },
-    },
-    badge: {
-      enabled: true,
-      getText: (message: ChatMessage) => message.superChat?.amount,
-      fillColor: SUPERCHAT_AMOUNT_BADGE_FILL,
-      strokeColor: SUPERCHAT_AMOUNT_BADGE_STROKE,
-      radius: rendererLayout.superchatBadge.radius,
-      paddingH: rendererLayout.superchatBadge.paddingH,
-      paddingV: rendererLayout.superchatBadge.paddingV,
-      strokeWidth: rendererLayout.superchatBadgeStrokeWidth,
-    },
-    headerTag: {
-      enabled: false,
-      getText: () => undefined,
-      fontSizeScale: 0.8,
-      color: DEFAULT_TEXT_COLOR,
-      marginTop: 0,
-      marginBottom: 0,
-    },
-    authorSection: {
-      show: (message: ChatMessage, settings: OverlaySettings) =>
-        settings.showAuthor.superChat && !!message.author,
-      nameMaxWidth: rendererLayout.authorNameMaxWidth,
-    },
-    body: {
-      maxLines: 'fromSettings',
-      marginTop: spacing.xs,
-    },
-    sticker: {
-      enabled: true,
-      getUrl: (message: ChatMessage) => message.superChat?.sticker?.url,
-      sizeScale: rendererLayout.superchatStickerSize,
-      marginTop: spacing.xs,
-    },
-    padding: {
-      horizontal: rendererLayout.superchat.paddingH,
-      vertical: rendererLayout.superchat.paddingV,
-    },
-    cardRadius: rendererLayout.superchatCardRadius,
-    textColor: 'auto',
-    resolveColor: (message: ChatMessage) => {
+export const SUPERCHAT_CARD_CONFIG: CardConfig = {
+  background: 'gradient',
+  backgroundGradient: {
+    topBoost: 0.12,
+    bottomReduction: 0.15,
+    minOpacity: 0.35,
+  },
+  decoration: 'accentBar',
+  accentBar: {
+    width: rendererLayout.superchatAccentBarWidth,
+    color: (message: ChatMessage) => {
       const superChat = message.superChat;
       return resolveSuperChatRgb(superChat ?? { tier: 'blue' as const }, designColors.superChat);
     },
-    needsGradientCache: true,
-    needsElapsed: false,
-  };
-}
+  },
+  badge: {
+    enabled: true,
+    getText: (message: ChatMessage) => message.superChat?.amount,
+    fillColor: SUPERCHAT_AMOUNT_BADGE_FILL,
+    strokeColor: SUPERCHAT_AMOUNT_BADGE_STROKE,
+    radius: rendererLayout.superchatBadge.radius,
+    paddingH: rendererLayout.superchatBadge.paddingH,
+    paddingV: rendererLayout.superchatBadge.paddingV,
+    strokeWidth: rendererLayout.superchatBadgeStrokeWidth,
+  },
+  headerTag: {
+    enabled: false,
+    getText: () => undefined,
+    fontSizeScale: 0.8,
+    color: DEFAULT_TEXT_COLOR,
+    marginTop: 0,
+    marginBottom: 0,
+  },
+  authorSection: {
+    show: (message: ChatMessage, settings: OverlaySettings) =>
+      settings.showAuthor.superChat && !!message.author,
+    nameMaxWidth: rendererLayout.authorNameMaxWidth,
+  },
+  body: {
+    maxLines: 'fromSettings',
+    marginTop: spacing.xs,
+  },
+  sticker: {
+    enabled: true,
+    getUrl: (message: ChatMessage) => message.superChat?.sticker?.url,
+    sizeScale: rendererLayout.superchatStickerSize,
+    marginTop: spacing.xs,
+  },
+  padding: {
+    horizontal: rendererLayout.superchat.paddingH,
+    vertical: rendererLayout.superchat.paddingV,
+  },
+  cardRadius: rendererLayout.superchatCardRadius,
+  textColor: 'auto',
+  resolveColor: (message: ChatMessage) => {
+    const superChat = message.superChat;
+    return resolveSuperChatRgb(superChat ?? { tier: 'blue' as const }, designColors.superChat);
+  },
+  needsGradientCache: true,
+  needsElapsed: false,
+};
 
-export function createMembershipCardConfig(): CardConfig {
+export const MEMBERSHIP_CARD_CONFIG: CardConfig = (() => {
   const mem = designColors.membership;
   return {
     background: 'solid',
@@ -340,4 +338,4 @@ export function createMembershipCardConfig(): CardConfig {
     needsGradientCache: false,
     needsElapsed: true,
   };
-}
+})();

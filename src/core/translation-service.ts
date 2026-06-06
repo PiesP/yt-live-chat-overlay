@@ -149,7 +149,6 @@ export class TranslationService {
   async onUserActivation(): Promise<void> {
     if (!this.enabled) return;
     if (!this.pendingSource || !this.pendingTarget) return;
-    if (typeof Translator === 'undefined') return;
 
     // Don't stack retries — if a configure is already in-flight, let it finish.
     if (this.configurePromise) return;

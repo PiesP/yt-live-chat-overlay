@@ -26,7 +26,7 @@ import type { ChatMessage, DropReason, OverlayDimensions, OverlaySettings } from
 import { ByteLimitedCache } from '@core/byte-limited-cache';
 import { renderPaidCard } from '@core/canvas-card-renderers';
 import { drawRoundRect, renderRegularMessage } from '@core/canvas-text-renderer';
-import { createMembershipCardConfig, createSuperChatCardConfig } from '@core/card-config';
+import { MEMBERSHIP_CARD_CONFIG, SUPERCHAT_CARD_CONFIG } from '@core/card-config';
 import { ChannelLanguageMemory } from '@core/channel-language-memory';
 import { getTranslatableText } from '@core/chat-message-helpers';
 import { computeScrollDuration, statusBarLayout } from '@core/design-tokens';
@@ -142,10 +142,6 @@ function applyPausedDurationToMessages(messages: CanvasMessage[], pausedMs: numb
 }
 
 const log = createLogger('RendererCanvas');
-
-/** Pre-built card configs — module-level singletons since they only depend on design-token constants. */
-const SUPERCHAT_CARD_CONFIG = createSuperChatCardConfig();
-const MEMBERSHIP_CARD_CONFIG = createMembershipCardConfig();
 
 export class CanvasRenderer extends RendererBase {
   private canvas: HTMLCanvasElement | null = null;
