@@ -734,7 +734,7 @@ export class CanvasRenderer extends RendererBase {
                 outlineOpacity: this.settings.outline.opacity,
               },
               this.textBitmapCache,
-              this.imageFetchManager.emojiCache.get,
+              (url: string) => this.imageFetchManager.emojiCache.get(url),
               isImageReady,
               this.imageFetchManager.authorPhotoCache,
               isImageReady,
