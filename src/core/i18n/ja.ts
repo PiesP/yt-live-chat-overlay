@@ -307,9 +307,12 @@ export const JA: Record<string, string> = {
   'Import failed: invalid JSON': 'インポート失敗: 無効なJSON形式です',
   'Chat overlay settings': 'チャットオーバーレイ設定',
   'Reset overlay settings': 'オーバーレイ設定をリセット',
+  'Reload overlay': 'オーバレイを再読み込み',
 
   // ── Author grid ──
+  Color: '色',
   'Name Color': '名前の色',
+  Show: '表示',
   'Show Name': '名前を表示',
   Normal: '一般',
   Member: 'メンバー',
@@ -317,4 +320,5 @@ export const JA: Record<string, string> = {
   Owner: '所有者',
   Verified: '認証済み',
   SuperChat: 'スパーチャット',
+  'Short messages shown regardless of length': '長さに関係なく短いメッセージを表示',
 };

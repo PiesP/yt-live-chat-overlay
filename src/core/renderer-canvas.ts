@@ -69,6 +69,11 @@ import {
 import { TranslationService } from '@core/translation-service';
 import { renderSegment } from '@shared/canvas-rendering-shared';
 
+/** Check if an image element is fully loaded and has valid dimensions. */
+function isImageReady(img: unknown): boolean {
+  return (img as HTMLImageElement)?.complete === true && (img as HTMLImageElement).naturalWidth > 0;
+}
+
 /**
  * Remove expired messages in-place, simultaneously maintaining the
  * lane-indexed map incrementally during compaction.
@@ -704,14 +709,10 @@ export class CanvasRenderer extends RendererBase {
                 outlineOpacity: this.settings.outline.opacity,
               },
               this.textBitmapCache,
-              (url: string) => this.imageFetchManager.emojiCache.get(url),
-              (img: unknown) =>
-                (img as HTMLImageElement)?.complete === true &&
-                (img as HTMLImageElement).naturalWidth > 0,
+              this.imageFetchManager.emojiCache.get,
+              isImageReady,
               this.imageFetchManager.authorPhotoCache,
-              (photo: unknown) =>
-                (photo as HTMLImageElement)?.complete === true &&
-                (photo as HTMLImageElement).naturalWidth > 0,
+              isImageReady,
               this._boundGetFont,
               (text: string) => {
                 return measureTextWidth(text, this._boundGetFont(this.settings.fontSize));
