@@ -226,6 +226,9 @@ export function buildSDFInstances(
   for (const msg of messages) {
     if (instanceCount >= maxInstances) break;
 
+    // Defensive: skip messages with missing message payload (structured clone fault)
+    if (!msg.message) continue;
+
     const elapsed = msg.startTime > 0 ? Math.max(0, now - msg.startTime) : 0;
     const op = computeMessageOpacity(
       // computeMessageOpacity expects a minimal shape; SharedMessage.message satisfies it
@@ -329,13 +332,21 @@ export function getRenderText(
   },
   translationMode: string | undefined
 ): string {
+  // Defensive: content may be undefined when messages are transferred
+  // via structured clone (postMessage) in WebGL2 Worker renderer path,
+  // or when a malformed message reaches the render pipeline.
+  const content = msg.message?.content;
+  if (!Array.isArray(content)) {
+    return msg.translatedText ?? '';
+  }
+
   if (msg.translatedText && translationMode === 'dual') {
-    return msg.message.content.map((s) => (s.type === 'text' ? (s.content ?? '') : ' ')).join('');
+    return content.map((s) => (s.type === 'text' ? (s.content ?? '') : ' ')).join('');
   }
   if (msg.translatedText && translationMode === 'replace') {
     return msg.translatedText;
   }
-  return msg.message.content.map((s) => (s.type === 'text' ? (s.content ?? '') : ' ')).join('');
+  return content.map((s) => (s.type === 'text' ? (s.content ?? '') : ' ')).join('');
 }
 
 /**

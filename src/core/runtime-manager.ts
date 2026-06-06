@@ -45,7 +45,8 @@ enum RuntimeState {
 const log = createLogger('RuntimeManager');
 
 const NAVIGATION_SETTLE_DELAY_MS = 2000;
-const START_RETRY_DELAY_MS = 2000;
+/** Retry delays with exponential backoff: 2 s → 4 s → 8 s. */
+const START_RETRY_DELAYS_MS = [2000, 4000, 8000] as const;
 const MAX_START_ATTEMPTS = 3;
 
 const RECENT_MESSAGE_REPLAY_LIMIT = 20;
@@ -976,14 +977,23 @@ export class RuntimeManager {
   }
 
   private handleStartFailure(url: string, status: Exclude<ChatSourceStartStatus, 'started'>): void {
+    // Structural 'unavailable' means the page has no chat renderer at all.
+    // Retrying won't help — the only recovery path is a page change (SPA navigation).
+    // Bypass retries and wait for a page-change event to reset the failure state.
+    if (status === 'unavailable') {
+      this.startFailureState = { url, attempts: MAX_START_ATTEMPTS };
+      log.warn('Chat unavailable on this page — waiting for page change, not retrying');
+      return;
+    }
+
     const attempts = this.startFailureState.url === url ? this.startFailureState.attempts + 1 : 1;
     this.startFailureState = { url, attempts };
     log.warn(`Failed to start runtime (${attempts}/${MAX_START_ATTEMPTS}) — status: ${status}`);
 
     if (attempts < MAX_START_ATTEMPTS) {
-      // Retry for both 'retryable' and 'unavailable' — SPA navigation may
-      // temporarily leave bootstrap in an unavailable state.
-      this.scheduleReconcile(START_RETRY_DELAY_MS);
+      // Exponential backoff: 2 s → 4 s → 8 s
+      const delay = START_RETRY_DELAYS_MS[attempts - 1] ?? 8000;
+      this.scheduleReconcile(delay);
       return;
     }
 

@@ -245,9 +245,44 @@ const findLiveChatRenderer = (initialData: JsonObject): JsonObject | null => {
     return directRenderer;
   }
 
-  return findFirstNestedRecordByKey(initialData, 'liveChatRenderer', (value) =>
+  // Primary recursive search: look for liveChatRenderer with continuations array.
+  // This matches the legacy YouTube layout (pre-2024) and remains the most reliable path.
+  const primary = findFirstNestedRecordByKey(initialData, 'liveChatRenderer', (value) =>
     Array.isArray(value.continuations)
   );
+  if (primary) return primary;
+
+  // Fallback recursive search: YouTube may change the renderer shape.
+  // Accept liveChatRenderer objects that have an 'actions' array (newer layout)
+  // or appear inside 'engagementPanels' (2024+ layout experiment).
+  const fallback = findFirstNestedRecordByKey(
+    initialData,
+    'liveChatRenderer',
+    (value) =>
+      isRecord(value) && (Array.isArray(value.actions) || Array.isArray(value.continuations))
+  );
+  if (fallback) {
+    log.info('liveChatRenderer found via fallback path (no continuations array in primary search)');
+    return fallback;
+  }
+
+  // Diagnostic: log page structure to help identify YouTube layout changes
+  if (!directRenderer && !primary && !fallback) {
+    const hasTwoColumn = !!getNestedRecord(initialData, ['contents', 'twoColumnWatchNextResults']);
+    const hasConversationBar = !!getNestedRecord(initialData, [
+      'contents',
+      'twoColumnWatchNextResults',
+      'conversationBar',
+    ]);
+    const topKeys = Object.keys(initialData).slice(0, 8);
+    log.warn('Chat renderer not found — page structure:', {
+      hasTwoColumn,
+      hasConversationBar,
+      topLevelKeys: topKeys,
+    });
+  }
+
+  return null;
 };
 
 const resolveApiKey = (ytcfg: JsonObject): string | undefined =>

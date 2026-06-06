@@ -620,7 +620,10 @@ export class RendererWebGL2 extends RendererBase {
         endCx += (gi?.advanceWidth ?? fs * 0.7) * scale;
       }
 
-      for (const seg of msg.message.content) {
+      // Defensive: content may be undefined for malformed messages (same guard as getRenderText)
+      const msgContent = msg.message?.content;
+      if (!Array.isArray(msgContent)) continue;
+      for (const seg of msgContent) {
         if (seg.type !== 'emoji') continue;
         const emojiUrl = seg.emoji?.url;
         if (!emojiUrl) continue;
