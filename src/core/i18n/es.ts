@@ -319,6 +319,7 @@ export const ES: Record<string, string> = {
   'Import failed: invalid JSON': 'Error de importación: JSON no válido',
   'Chat overlay settings': 'Configuración de superposición de chat',
   'Reset overlay settings': 'Restablecer superposición',
+  'WebGL2 Renderer': 'Renderizador WebGL2',
   'Reload overlay': 'Recargar superposición',
 
   // ── Author grid ──
@@ -332,6 +333,7 @@ export const ES: Record<string, string> = {
   Owner: 'Propietario',
   Verified: 'Verificado',
   SuperChat: 'SuperChat',
+  'Loading chat history...': 'Cargando historial de chat...',
   'Short messages shown regardless of length':
     'Mostrar mensajes cortos independientemente de la longitud',
 };

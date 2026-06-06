@@ -303,6 +303,7 @@ export const KO: Record<string, string> = {
   'Import failed: invalid JSON': '가져오기 실패: 잘못된 JSON 형식',
   'Chat overlay settings': '채팅 오버레이 설정',
   'Reset overlay settings': '오버레이 설정 초기화',
+  'WebGL2 Renderer': 'WebGL2 렌더러',
   'Reload overlay': '오버레이 새로고침',
 
   // ── Author grid ──
@@ -316,5 +317,6 @@ export const KO: Record<string, string> = {
   Owner: '소유자',
   Verified: '인증됨',
   SuperChat: '슈퍼챗',
+  'Loading chat history...': '채팅 기록을 불러오는 중...',
   'Short messages shown regardless of length': '길이에 관계없이 짧은 메시지 표시',
 };

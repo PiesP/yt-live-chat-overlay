@@ -29,6 +29,7 @@ import {
   DEFAULT_FONT_FAMILY,
 } from '@core/design-tokens';
 import { clearSafeTimeout } from '@core/dom';
+import { t } from '@core/i18n';
 import { createLogger } from '@core/logging';
 import type { ObservabilityReporter } from '@core/observability';
 
@@ -499,7 +500,7 @@ export class BacklogInjectionController implements Pauseable {
       border-radius: 4px; pointer-events: none; user-select: none;
       opacity: 0; transition: opacity 0.3s ease;
     `;
-    el.textContent = 'Loading chat history...';
+    el.textContent = t('Loading chat history...');
     document.body.appendChild(el);
     this.indicatorEl = el;
     // Fade in
@@ -511,7 +512,7 @@ export class BacklogInjectionController implements Pauseable {
   private updateIndicator(progress: number): void {
     if (!this.indicatorEl) return;
     const pct = Math.round(progress * 100);
-    this.indicatorEl.textContent = `Loading chat history... ${this.processedBacklog}/${this.totalBacklog} (${pct}%)`;
+    this.indicatorEl.textContent = `${t('Loading chat history...')} ${this.processedBacklog}/${this.totalBacklog} (${pct}%)`;
   }
 
   private hideIndicator(): void {

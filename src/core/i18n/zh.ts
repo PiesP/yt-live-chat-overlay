@@ -288,6 +288,7 @@ export const ZH: Record<string, string> = {
   'Import failed: invalid JSON': '导入失败：JSON格式无效',
   'Chat overlay settings': '弹幕显示设置',
   'Reset overlay settings': '重置覆盖层设置',
+  'WebGL2 Renderer': 'WebGL2渲染器',
   'Reload overlay': '重新加载覆盖层',
 
   // ── Author grid ──
@@ -301,5 +302,6 @@ export const ZH: Record<string, string> = {
   Owner: '频道主',
   Verified: '已认证',
   SuperChat: '超级留言',
+  'Loading chat history...': '正在加载聊天记录...',
   'Short messages shown regardless of length': '无论消息长短均显示短消息',
 };

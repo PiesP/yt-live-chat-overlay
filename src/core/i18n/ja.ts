@@ -307,6 +307,7 @@ export const JA: Record<string, string> = {
   'Import failed: invalid JSON': 'インポート失敗: 無効なJSON形式です',
   'Chat overlay settings': 'チャットオーバーレイ設定',
   'Reset overlay settings': 'オーバーレイ設定をリセット',
+  'WebGL2 Renderer': 'WebGL2レンダラー',
   'Reload overlay': 'オーバレイを再読み込み',
 
   // ── Author grid ──
@@ -320,5 +321,6 @@ export const JA: Record<string, string> = {
   Owner: '所有者',
   Verified: '認証済み',
   SuperChat: 'スパーチャット',
+  'Loading chat history...': 'チャット履歴を読み込み中...',
   'Short messages shown regardless of length': '長さに関係なく短いメッセージを表示',
 };
