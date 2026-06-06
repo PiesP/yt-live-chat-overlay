@@ -157,19 +157,58 @@ export const rendererLayout = {
   headwayGapRatio: 0.08,
 } as const;
 
-/** Standby status message constants (pre-live overlay). */
-export const standbyMessageLayout = {
-  fontSize: 16,
-  paddingX: 16,
-  paddingY: 8,
+/** Status bar layout constants (connection state overlay). */
+export const statusBarLayout = {
+  fontSize: 14,
+  paddingX: 14,
+  paddingY: 6,
   /** Vertical distance from bottom edge of viewport. */
   bottomOffset: 24,
   /** Rounded corner radius for the pill background. */
   pillRadius: 6,
-  /** Semi-transparent background color. */
-  fillStyle: 'rgba(0, 0, 0, 0.5)',
-  /** Text color. */
-  textFillStyle: 'rgba(255, 255, 255, 0.7)',
+  /** Dot radius for the status indicator. */
+  dotRadius: 4,
+  /** Gap between dot and text. */
+  dotGap: 8,
+  /** Colors keyed by ConnectionStatus. */
+  colors: {
+    connected: {
+      bg: 'rgba(0,200,100,0.30)',
+      dot: 'rgba(0,255,140,0.80)',
+      text: 'rgba(255,255,255,0.75)',
+    },
+    connecting: {
+      bg: 'rgba(255,200,0,0.30)',
+      dot: 'rgba(255,220,0,0.85)',
+      text: 'rgba(255,255,255,0.75)',
+    },
+    degraded: {
+      bg: 'rgba(255,140,0,0.30)',
+      dot: 'rgba(255,160,0,0.85)',
+      text: 'rgba(255,255,255,0.75)',
+    },
+    disconnected: {
+      bg: 'rgba(220,50,50,0.45)',
+      dot: 'rgba(255,60,60,0.90)',
+      text: 'rgba(255,255,255,0.85)',
+    },
+    standby: {
+      bg: 'rgba(0,0,0,0.50)',
+      dot: 'rgba(255,255,255,0.50)',
+      text: 'rgba(255,255,255,0.70)',
+    },
+  },
+} as const;
+
+/** @deprecated Use statusBarLayout instead. */
+export const standbyMessageLayout = {
+  fontSize: statusBarLayout.fontSize,
+  paddingX: statusBarLayout.paddingX,
+  paddingY: statusBarLayout.paddingY,
+  bottomOffset: statusBarLayout.bottomOffset,
+  pillRadius: statusBarLayout.pillRadius,
+  fillStyle: statusBarLayout.colors.standby.bg,
+  textFillStyle: statusBarLayout.colors.standby.text,
 } as const;
 
 /**

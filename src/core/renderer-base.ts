@@ -27,6 +27,15 @@ import type { Overlay } from '@core/overlay';
 import { ANTI_BLOCK_FREE_RATIO } from '@core/renderer-constants';
 import { clearTextMeasurementCaches, setTextMeasureCallback } from '@core/text-measure';
 
+/** Renderer-level connection health status for overlay feedback. */
+export enum ConnectionStatus {
+  CONNECTED = 'connected',
+  CONNECTING = 'connecting',
+  DEGRADED = 'degraded',
+  DISCONNECTED = 'disconnected',
+  STANDBY = 'standby',
+}
+
 const log = createLogger('RendererBase');
 
 interface RendererUpdateOptions {
@@ -341,6 +350,10 @@ export abstract class RendererBase {
 
   /** Inform the renderer that the session entered or exited standby mode. */
   setStandbyStatus(_standby: boolean): void {}
+
+  /** Inform the renderer of the current connection health status.
+   *  Subclasses override to update visual feedback (status bar, reload prompt). */
+  setConnectionStatus(_status: ConnectionStatus): void {}
 
   protected updateBacklogPause(): void {
     const now = Date.now();
