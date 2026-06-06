@@ -319,7 +319,11 @@ export class RuntimeManager {
         );
       } else {
         log.info('No #chat element in DOM — skipping bootstrap (likely VOD)');
-        this.handleStartFailure(desired.url, 'unavailable');
+        // Set failure state directly (bypass handleStartFailure) — the
+        // Chat unavailable  warning is misleading for what is actually a
+        // successful optimisation: we correctly identified a VOD and
+        // avoided the expensive bootstrap pipeline.
+        this.startFailureState = { url: desired.url, attempts: MAX_START_ATTEMPTS };
         return;
       }
     }
