@@ -262,7 +262,11 @@ function drainQueue(_now: number): void {
       const transFontSize = Math.round(fontSize * TRANSLATION_FONT_SCALE);
       lh += Math.ceil(transFontSize * 1.2) + TRANSLATION_GAP_PX;
     }
-    const text = msg.content.map((s) => (s.type === 'text' ? s.content : '')).join('');
+    // Defensive: content may be undefined if the message was serialized
+    // incompletely via structured clone (postMessage transfer edge case)
+    const msgContent = msg.content;
+    if (!Array.isArray(msgContent)) continue;
+    const text = msgContent.map((s) => (s.type === 'text' ? s.content : '')).join('');
     const w = text ? estimateTextWidth(text, fontSize) : 0;
 
     const startX =

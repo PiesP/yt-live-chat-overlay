@@ -349,7 +349,9 @@ export class RendererWebGL2 extends RendererBase {
       lh += Math.ceil(transFontSize * 1.2) + TRANSLATION_GAP_PX;
     }
     const font = getFontString(fontSize, this.settings.fontWeight, this.settings.fontFamily);
-    const text = msg.content.map((s) => (s.type === 'text' ? s.content : '')).join('');
+    const text = Array.isArray(msg.content)
+      ? msg.content.map((s) => (s.type === 'text' ? s.content : '')).join('')
+      : '';
     const w = text ? measureTextWidth(text, font) : 0;
     return {
       message: msg,
