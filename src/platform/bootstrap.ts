@@ -8,10 +8,6 @@
  * implementations for storage, cross-tab sync, menu commands, and worker URLs.
  */
 
-import { getMenuAdapter } from '@platform/menu-adapters';
-import type { MenuAdapter, WorkerFactory } from '@platform/types';
-import { getWorkerFactory } from '@platform/worker-factory';
-
 // ── Platform type ──────────────────────────────────────────────────────────
 
 export type PlatformType = 'userscript' | 'chrome-extension' | 'firefox-extension' | 'browser';
@@ -42,28 +38,6 @@ export function detectPlatform(): PlatformType {
 
   // Fallback: plain browser (localStorage-based, limited functionality)
   return 'browser';
-}
-
-// ── Bootstrap result ───────────────────────────────────────────────────────
-
-export interface PlatformBootstrap {
-  platform: PlatformType;
-  menu: MenuAdapter;
-  workerFactory: WorkerFactory;
-}
-
-/**
- * Create the platform adapter bundle for the current environment.
- * Called once at application startup.
- */
-export function bootstrapPlatform(): PlatformBootstrap {
-  const platform = detectPlatform();
-
-  return {
-    platform,
-    menu: getMenuAdapter(),
-    workerFactory: getWorkerFactory(),
-  };
 }
 
 // ── Browser global declaration for Firefox ─────────────────────────────────

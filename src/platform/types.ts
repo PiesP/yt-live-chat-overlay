@@ -19,16 +19,9 @@ export interface StorageAdapter {
 
 // ── Cross-Tab Sync ────────────────────────────────────────────────────────
 
-/** Notifies when external changes occur (another tab, another device). */
-export interface CrossTabSyncAdapter {
-  /**
-   * Start listening for external changes to a storage key.
-   * @param key The storage key to monitor.
-   * @param onExternalChange Called when the key is modified externally.
-   * @returns Unsubscribe function.
-   */
-  listen(key: string, onExternalChange: () => void): () => void;
-}
+// Cross-tab sync is implemented inline in Settings.ts via
+// GM_addValueChangeListener / chrome.storage.onChanged listeners.
+// See src/core/settings.ts for the implementation.
 
 // ── Menu ──────────────────────────────────────────────────────────────────
 

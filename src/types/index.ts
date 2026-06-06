@@ -167,7 +167,7 @@ export interface OverlaySettings {
   enableWebGL2: boolean;
   /** Danmaku comment display mode */
   danmakuMode: DanmakuMode;
-  /** Speed in pixels per second (100-400) */
+  /** Speed in pixels per second (50-500) */
   speedPxPerSec: number;
   /** Font size in pixels */
   fontSize: number;

@@ -52,13 +52,13 @@ export interface SharedContentSegment {
 // ── Shared text wrapping types ─────────────────────────────────────────────
 
 /** Piece in a wrapped line — either a text word or an emoji image. */
-export interface SharedTextPiece {
+interface SharedTextPiece {
   type: 'text';
   text: string;
   width: number;
 }
 
-export interface SharedEmojiPiece {
+interface SharedEmojiPiece {
   type: 'emoji';
   emojiUrl: string;
   emojiAlt?: string;
@@ -73,7 +73,7 @@ export type SharedRenderPiece = SharedTextPiece | SharedEmojiPiece;
  * Split a word that exceeds maxWidth into character-level segments.
  * Used as a fallback when a single word is wider than the available width.
  */
-export function wrapCharSegments(
+function wrapCharSegments(
   word: string,
   maxWidth: number,
   measureTextFn: (text: string) => number
@@ -413,7 +413,7 @@ function resolveEmojiFields(seg: SharedContentSegment): {
  * @param measureTextFn   Function to measure single-line text width (cached in worker, measureTextWidth in main)
  * @param getEmojiImg     Function to retrieve a ready emoji image from cache by URL (returns null if not ready)
  */
-export function renderContentSegments(
+function renderContentSegments(
   ctx: AnyCanvasContext,
   segments: readonly SharedContentSegment[],
   startX: number,

@@ -27,10 +27,10 @@ export const FLOATS_PER_INSTANCE = 9;
 export const MAX_INSTANCES = 60_000;
 
 /** Unit quad positions (two triangles, 6 vertices) */
-export const QUAD_POS = new Float32Array([0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1]);
+const QUAD_POS = new Float32Array([0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1]);
 
 /** Unit quad UV coordinates */
-export const QUAD_UV = new Float32Array([0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1]);
+const QUAD_UV = new Float32Array([0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1]);
 
 // ── Shared message interface ─────────────────────────────────────────────────
 
