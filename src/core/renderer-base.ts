@@ -28,13 +28,14 @@ import { ANTI_BLOCK_FREE_RATIO } from '@core/renderer-constants';
 import { clearTextMeasurementCaches, setTextMeasureCallback } from '@core/text-measure';
 
 /** Renderer-level connection health status for overlay feedback. */
-export enum ConnectionStatus {
-  CONNECTED = 'connected',
-  CONNECTING = 'connecting',
-  DEGRADED = 'degraded',
-  DISCONNECTED = 'disconnected',
-  STANDBY = 'standby',
-}
+export const CONNECTION_STATUSES = [
+  'connected',
+  'connecting',
+  'degraded',
+  'disconnected',
+  'standby',
+] as const;
+export type ConnectionStatus = (typeof CONNECTION_STATUSES)[number];
 
 const log = createLogger('RendererBase');
 

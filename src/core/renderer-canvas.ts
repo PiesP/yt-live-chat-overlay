@@ -38,7 +38,8 @@ import { createLogger } from '@core/logging';
 import { MessageActivator } from '@core/message-activator';
 import type { Overlay } from '@core/overlay';
 import { PriorityBucketQueue } from '@core/priority-bucket-queue';
-import { ConnectionStatus, RendererBase } from '@core/renderer-base';
+import type { ConnectionStatus } from '@core/renderer-base';
+import { RendererBase } from '@core/renderer-base';
 import {
   DRAIN_QUEUE_MAX_SKIP as _DRAIN_QUEUE_MAX_SKIP,
   HORIZONTAL_STAGGER_MAX as _HORIZONTAL_STAGGER_MAX,
@@ -173,7 +174,7 @@ export class CanvasRenderer extends RendererBase {
    * thrashing during sparse chat intervals. */
   private idleSince: number | null = null;
   /** Current connection health status for overlay feedback. */
-  private connectionStatus: ConnectionStatus = ConnectionStatus.CONNECTED;
+  private connectionStatus: ConnectionStatus = 'connected';
   /** Bounding box of the last-rendered status bar pill, for click hit testing. */
   private statusBarHitRegion: { x: number; y: number; w: number; h: number } | null = null;
   private translationService: TranslationService;
@@ -334,7 +335,7 @@ export class CanvasRenderer extends RendererBase {
 
     // Click handler for status bar (click-to-reload on DISCONNECTED)
     canvas.addEventListener('click', (e: MouseEvent) => {
-      if (this.connectionStatus !== ConnectionStatus.DISCONNECTED) return;
+      if (this.connectionStatus !== 'disconnected') return;
       if (!this.statusBarHitRegion || !this.onStatusBarClick) return;
       const { x, y, w, h } = this.statusBarHitRegion;
       if (e.offsetX >= x && e.offsetX <= x + w && e.offsetY >= y && e.offsetY <= y + h) {
@@ -396,7 +397,7 @@ export class CanvasRenderer extends RendererBase {
 
   /** Update standby status via ConnectionStatus — backward compat. */
   setStandbyStatus(standby: boolean): void {
-    this.setConnectionStatus(standby ? ConnectionStatus.STANDBY : ConnectionStatus.CONNECTED);
+    this.setConnectionStatus(standby ? 'standby' : 'connected');
   }
 
   /** Inform the renderer of the current connection health status. */
@@ -404,10 +405,10 @@ export class CanvasRenderer extends RendererBase {
     this.connectionStatus = status;
     // Enable pointer events on canvas when disconnected so click-to-reload works
     if (this.canvas) {
-      this.canvas.style.pointerEvents = status === ConnectionStatus.DISCONNECTED ? 'auto' : 'none';
+      this.canvas.style.pointerEvents = status === 'disconnected' ? 'auto' : 'none';
     }
     // Ensure render loop runs when status needs to be displayed (all non-CONNECTED states)
-    if (status !== ConnectionStatus.CONNECTED && this.animFrameId === null) {
+    if (status !== 'connected' && this.animFrameId === null) {
       this.startRenderLoop();
     }
   }
@@ -530,7 +531,7 @@ export class CanvasRenderer extends RendererBase {
       if (
         this.activeMessages.length === 0 &&
         this.pendingQueue.isEmpty &&
-        this.connectionStatus === ConnectionStatus.CONNECTED
+        this.connectionStatus === 'connected'
       ) {
         const now = performance.now();
         if (this.idleSince === null) {
@@ -618,14 +619,13 @@ export class CanvasRenderer extends RendererBase {
 
     // P2-3: Skip clearRect + render loop when no active messages or standby message.
     // Empty frames have nothing to draw, so we skip GPU work entirely.
-    const hasContent =
-      this.activeMessages.length > 0 || this.connectionStatus !== ConnectionStatus.CONNECTED;
+    const hasContent = this.activeMessages.length > 0 || this.connectionStatus !== 'connected';
     if (hasContent) {
       ctx.clearRect(0, 0, dims.width, dims.height);
     }
 
     // Draw connection status bar when not connected
-    if (this.connectionStatus !== ConnectionStatus.CONNECTED) {
+    if (this.connectionStatus !== 'connected') {
       this.renderStatusBar(ctx, dims);
     }
 
@@ -1478,7 +1478,7 @@ export class CanvasRenderer extends RendererBase {
     dims: { width: number; height: number }
   ): void {
     const status = this.connectionStatus;
-    if (status === ConnectionStatus.CONNECTED) {
+    if (status === 'connected') {
       // CONNECTED: only a small dot, subtle
       this.renderStatusDot(ctx, dims);
       return;
@@ -1548,13 +1548,13 @@ export class CanvasRenderer extends RendererBase {
 
   private getStatusMessage(status: ConnectionStatus): string {
     switch (status) {
-      case ConnectionStatus.CONNECTING:
+      case 'connecting':
         return 'Connecting\u2026';
-      case ConnectionStatus.DEGRADED:
+      case 'degraded':
         return 'Connection unstable';
-      case ConnectionStatus.DISCONNECTED:
+      case 'disconnected':
         return 'Disconnected \u2014 Click to reload';
-      case ConnectionStatus.STANDBY:
+      case 'standby':
         return 'Waiting for live stream\u2026';
       default:
         return '';

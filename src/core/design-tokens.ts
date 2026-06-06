@@ -170,7 +170,7 @@ export const statusBarLayout = {
   dotRadius: 4,
   /** Gap between dot and text. */
   dotGap: 8,
-  /** Colors keyed by ConnectionStatus. */
+  /** Colors keyed by ConnectionStatus type. */
   colors: {
     connected: {
       bg: 'rgba(0,200,100,0.30)',

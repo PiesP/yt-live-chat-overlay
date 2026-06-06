@@ -14,7 +14,8 @@ import type { LanePlacement } from '@core/lane-allocator';
 import { createLogger } from '@core/logging';
 import type { Overlay } from '@core/overlay';
 import { PriorityBucketQueue } from '@core/priority-bucket-queue';
-import { ConnectionStatus, RendererBase } from '@core/renderer-base';
+import type { ConnectionStatus } from '@core/renderer-base';
+import { RendererBase } from '@core/renderer-base';
 import type { CanvasMessage } from '@core/renderer-constants';
 import {
   CARD_BG_OPACITY_FACTOR,
@@ -102,7 +103,7 @@ export class RendererWebGL2 extends RendererBase {
   private u_outlineOpacity!: WebGLUniformLocation | null;
   private u_atlas!: WebGLUniformLocation | null;
 
-  private connectionStatus: ConnectionStatus = ConnectionStatus.CONNECTED;
+  private connectionStatus: ConnectionStatus = 'connected';
 
   get laneCount(): number {
     return this.laneAllocator.getLaneCount();
@@ -667,7 +668,7 @@ export class RendererWebGL2 extends RendererBase {
   }
 
   setStandbyStatus(standby: boolean): void {
-    this.setConnectionStatus(standby ? ConnectionStatus.STANDBY : ConnectionStatus.CONNECTED);
+    this.setConnectionStatus(standby ? 'standby' : 'connected');
   }
 
   setConnectionStatus(status: ConnectionStatus): void {

@@ -21,8 +21,7 @@ import { installFetchInterceptor } from '@core/fetch-interceptor';
 import { createLogger } from '@core/logging';
 import { MessageIdRegistry } from '@core/message-id-registry';
 import { OVERLAY_SELECTOR, Overlay } from '@core/overlay';
-import type { RendererBase } from '@core/renderer-base';
-import { ConnectionStatus } from '@core/renderer-base';
+import type { ConnectionStatus, RendererBase } from '@core/renderer-base';
 import { CanvasRenderer } from '@core/renderer-canvas';
 import { RendererWebGL2 } from '@core/renderer-webgl2';
 import { RendererWebGL2Worker } from '@core/renderer-webgl2-worker';
@@ -33,14 +32,15 @@ import type { ChatBootstrapResult } from '@core/youtubei-chat';
 import { bootstrapChatSession } from '@core/youtubei-chat';
 
 /** Runtime lifecycle state machine — replaces ad-hoc boolean flags. */
-enum RuntimeState {
-  INIT = 'init',
-  STARTING = 'starting',
-  ACTIVE = 'active',
-  RESTARTING = 'restarting',
-  DISPOSED = 'disposed',
-  DESTROYED = 'destroyed',
-}
+const RUNTIME_STATES = [
+  'init',
+  'starting',
+  'active',
+  'restarting',
+  'disposed',
+  'destroyed',
+] as const;
+type RuntimeState = (typeof RUNTIME_STATES)[number];
 
 const log = createLogger('RuntimeManager');
 
@@ -143,7 +143,7 @@ export class RuntimeManager {
   private readonly standbyController: StandbyController;
   private backlogController: BacklogInjectionController | null = null;
   private chatWatchdogTimer: ReturnType<typeof setInterval> | null = null;
-  private state: RuntimeState = RuntimeState.INIT;
+  private state: RuntimeState = 'init';
   private hiddenSince: number | null = null;
   /** Session-scoped registry of message IDs already rendered once. Persists across renderer resets. */
   private readonly sessionDedup = new MessageIdRegistry(5000);
@@ -153,15 +153,11 @@ export class RuntimeManager {
   private domWatcherUnsubscribe: DomWatcherUnsubscribe | null = null;
 
   private get isDisposedState(): boolean {
-    return (
-      this.state === RuntimeState.DISPOSED ||
-      this.state === RuntimeState.RESTARTING ||
-      this.state === RuntimeState.DESTROYED
-    );
+    return this.state === 'disposed' || this.state === 'restarting' || this.state === 'destroyed';
   }
 
   private get isActiveState(): boolean {
-    return this.state === RuntimeState.STARTING || this.state === RuntimeState.ACTIVE;
+    return this.state === 'starting' || this.state === 'active';
   }
 
   constructor(options: RuntimeManagerOptions) {
@@ -180,7 +176,7 @@ export class RuntimeManager {
   }
 
   requestReconcile(reason: ReconcileReason): void {
-    if (this.state === RuntimeState.DESTROYED) {
+    if (this.state === 'destroyed') {
       return;
     }
 
@@ -207,17 +203,17 @@ export class RuntimeManager {
    * Called by App.restartRuntime() for manual recovery from degraded states.
    */
   async restartSession(): Promise<void> {
-    if (this.state === RuntimeState.DESTROYED) return;
+    if (this.state === 'destroyed') return;
     this.disposeActiveSession();
     await this.reconcileNow('session-restart');
   }
 
   destroy(): void {
-    if (this.state === RuntimeState.DESTROYED) {
+    if (this.state === 'destroyed') {
       return;
     }
 
-    this.state = RuntimeState.DESTROYED;
+    this.state = 'destroyed';
     this.clearScheduledReconcile();
     this.disposeActiveSession();
   }
@@ -235,7 +231,7 @@ export class RuntimeManager {
   }
 
   private async runReconcileLoop(): Promise<void> {
-    while (this.reconcileRequested && this.state !== RuntimeState.DESTROYED) {
+    while (this.reconcileRequested && this.state !== 'destroyed') {
       this.reconcileRequested = false;
       try {
         await this.reconcileOnce();
@@ -276,7 +272,7 @@ export class RuntimeManager {
     // Reset session lifecycle flags for new start
     this.abortController.abort(); // abort stale signal before replacing
     this.abortController = new AbortController();
-    this.state = RuntimeState.STARTING;
+    this.state = 'starting';
 
     const startStatus = await this.startSession();
 
@@ -303,7 +299,7 @@ export class RuntimeManager {
   }
 
   private handleSessionRestart(reason: RuntimeSessionRestartReason): void {
-    if (this.state === RuntimeState.DESTROYED || this.state === RuntimeState.RESTARTING) {
+    if (this.state === 'destroyed' || this.state === 'restarting') {
       return;
     }
 
@@ -320,38 +316,38 @@ export class RuntimeManager {
   private computeConnectionStatus(): ConnectionStatus {
     // Standby mode takes priority
     if (this.standbyController.isStandby()) {
-      return ConnectionStatus.STANDBY;
+      return 'standby';
     }
 
     // No active session → connecting
     if (!this.chatSource || this.isDisposedState) {
-      return ConnectionStatus.CONNECTING;
+      return 'connecting';
     }
 
     const health = this.chatSource.getHealthSnapshot();
 
     // Circuit breaker tripped (consecutiveErrors >= failureLimit) → disconnected
     if (health.consecutiveErrors >= this.getSettings().livePollFailureLimit) {
-      return ConnectionStatus.DISCONNECTED;
+      return 'disconnected';
     }
 
     // Errors occurring but still retrying → degraded
     if (health.consecutiveErrors > 0) {
-      return ConnectionStatus.DEGRADED;
+      return 'degraded';
     }
 
     // Normal operation
     if (health.observerAlive && health.recentlyActive) {
-      return ConnectionStatus.CONNECTED;
+      return 'connected';
     }
 
     // Observer alive but not recently active → connecting
     if (health.observerAlive) {
-      return ConnectionStatus.CONNECTING;
+      return 'connecting';
     }
 
     // Observer not alive → disconnected
-    return ConnectionStatus.DISCONNECTED;
+    return 'disconnected';
   }
 
   /**
@@ -405,7 +401,7 @@ export class RuntimeManager {
 
       this.overlay = overlay;
       this.renderer = this.createRenderer(overlay, settings);
-      this.renderer.setConnectionStatus(ConnectionStatus.CONNECTING);
+      this.renderer.setConnectionStatus('connecting');
       this.renderer.onStatusBarClick = () => {
         log.info('Status bar click — restarting session');
         void this.restartSession();
@@ -431,7 +427,7 @@ export class RuntimeManager {
         return chatStarted;
       }
 
-      this.state = RuntimeState.ACTIVE;
+      this.state = 'active';
 
       // Show standby status until first chat message arrives.
       // Provides immediate visual feedback that the overlay is active
@@ -519,7 +515,7 @@ export class RuntimeManager {
 
     this.standbyController.exit();
 
-    this.state = RuntimeState.RESTARTING;
+    this.state = 'restarting';
 
     // Stop event listeners BEFORE aborting — abort handlers may throw,
     // and we want listeners cleaned up regardless.
@@ -764,7 +760,7 @@ export class RuntimeManager {
         !isChatInBackoff &&
         (!renderable ||
           idleDurationMs >= LONG_IDLE_RESTART_MS ||
-          (this.state === RuntimeState.ACTIVE &&
+          (this.state === 'active' &&
             chat != null &&
             (!chat.observerAlive || !chat.recentlyActive))));
 
@@ -776,7 +772,7 @@ export class RuntimeManager {
       return;
     }
 
-    this.state = RuntimeState.RESTARTING;
+    this.state = 'restarting';
     const health = this.getRuntimeHealthSnapshot();
     log.warn('Requesting managed runtime restart', { reason, health });
     this.handleSessionRestart(reason);
@@ -954,7 +950,7 @@ export class RuntimeManager {
   }
 
   private scheduleReconcile(delayMs: number): void {
-    if (this.state === RuntimeState.DESTROYED) {
+    if (this.state === 'destroyed') {
       return;
     }
 
