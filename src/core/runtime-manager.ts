@@ -259,7 +259,7 @@ export class RuntimeManager {
       try {
         await this.reconcileOnce();
       } catch (err) {
-        log.error('reconcileOnce() threw an error, continuing loop:', err);
+        log.warn('reconcileOnce() threw an error, continuing loop:', err);
       }
     }
   }
@@ -366,7 +366,7 @@ export class RuntimeManager {
       return;
     }
 
-    log.warn('Runtime session requested managed restart', { reason });
+    log.info('Runtime session requested managed restart', { reason });
 
     // Soft restart: keep Overlay + Canvas + BacklogController alive,
     // restart only the chat source chain. This avoids visible UI flicker
@@ -513,7 +513,7 @@ export class RuntimeManager {
         return 'retryable';
       }
 
-      log.warn('Failed to start:', error);
+      log.info('Failed to start:', error);
       return 'retryable';
     }
   }
@@ -723,7 +723,7 @@ export class RuntimeManager {
         }
       );
     } catch (error: unknown) {
-      log.warn('Failed to install fetch interceptor:', error);
+      log.info('Failed to install fetch interceptor:', error);
     }
 
     // Install DOM watcher as a fallback. It captures messages from
@@ -735,7 +735,7 @@ export class RuntimeManager {
         chatSource.injectExternalMessages(messages);
       });
     } catch (error: unknown) {
-      log.warn('Failed to install DOM chat watcher:', error);
+      log.info('Failed to install DOM chat watcher:', error);
     }
   }
 
@@ -837,7 +837,7 @@ export class RuntimeManager {
 
     this.state = 'restarting';
     const health = this.getRuntimeHealthSnapshot();
-    log.warn('Requesting managed runtime restart', { reason, health });
+    log.info('Requesting managed runtime restart', { reason, health });
     this.handleSessionRestart(reason);
   }
 
@@ -949,7 +949,7 @@ export class RuntimeManager {
         if (video?.paused) return;
 
         if (this.getRuntimeHealthSnapshot().shouldRestart) {
-          log.warn('Chat health check failed, triggering recovery');
+          log.info('Chat health check failed, triggering recovery');
           this.requestManagedRestart('watchdog');
           return;
         }
@@ -958,7 +958,7 @@ export class RuntimeManager {
         const connStatus = this.computeConnectionStatus();
         this.renderer?.setConnectionStatus(connStatus);
       } catch (error: unknown) {
-        log.error('Chat watchdog check error:', error);
+        log.warn('Chat watchdog check error:', error);
       }
     }, CHAT_WATCHDOG_INTERVAL_MS);
   }
@@ -1080,7 +1080,7 @@ export class RuntimeManager {
           log.info('Using WebGL2 SDF worker renderer');
           return renderer;
         } catch (err: unknown) {
-          log.warn('WebGL2 worker unavailable, trying main-thread WebGL2:', err);
+          log.info('WebGL2 worker unavailable, trying main-thread WebGL2:', err);
         }
       }
       // Fall back to main-thread WebGL2
@@ -1089,7 +1089,7 @@ export class RuntimeManager {
         log.info('Using WebGL2 SDF renderer (main thread)');
         return renderer;
       } catch (err: unknown) {
-        log.warn('WebGL2 SDF renderer unavailable, falling back to Canvas2D:', err);
+        log.info('WebGL2 SDF renderer unavailable, falling back to Canvas2D:', err);
       }
     }
     log.info('Using Canvas2D renderer');

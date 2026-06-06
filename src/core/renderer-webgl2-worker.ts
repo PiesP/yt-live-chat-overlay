@@ -38,7 +38,7 @@ export class RendererWebGL2Worker extends RendererBase {
     };
 
     this.workerManager.onError = (err) => {
-      log.error('Worker error:', err);
+      log.warn('Worker error:', err);
     };
 
     // Initialize worker with OffscreenCanvas and config.

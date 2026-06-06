@@ -136,7 +136,7 @@ export class RenderWorkerManagerWebGL2 {
     };
 
     this.worker.onerror = (ev: ErrorEvent) => {
-      log.error('Worker error:', ev.message);
+      log.warn('Worker error:', ev.message);
       this.onError?.(ev.message);
 
       // Attempt automatic restart with exponential backoff
@@ -150,7 +150,7 @@ export class RenderWorkerManagerWebGL2 {
           this.restart();
         }, delayMs);
       } else {
-        log.error(
+        log.warn(
           `Worker failed after ${RenderWorkerManagerWebGL2.MAX_RESTART_ATTEMPTS} restart attempts. Giving up.`
         );
       }

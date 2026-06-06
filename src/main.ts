@@ -166,7 +166,7 @@ class App {
     try {
       await this.settingsUi.attach();
     } catch (error: unknown) {
-      log.warn('Settings UI error:', error);
+      log.info('Settings UI error:', error);
     }
   }
 }

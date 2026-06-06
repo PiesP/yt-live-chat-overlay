@@ -226,7 +226,7 @@ export class RendererWebGL2 extends RendererBase {
       }
       this.atlas = null;
       this.initAtlas().catch((e: unknown) => {
-        log.error('Atlas regeneration failed after font change:', e);
+        log.warn('Atlas regeneration failed after font change:', e);
       });
     }
   }
@@ -301,7 +301,7 @@ export class RendererWebGL2 extends RendererBase {
       this.atlasGenerating = false;
       log.info(`Atlas ready: ${this.atlas.glyphs.size} glyphs`);
     } catch (e: unknown) {
-      log.error('Atlas failed:', e);
+      log.warn('Atlas failed:', e);
       this.atlasGenerating = false;
       throw e;
     }

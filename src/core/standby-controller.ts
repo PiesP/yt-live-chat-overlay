@@ -106,7 +106,7 @@ export class StandbyController {
       this.schedulePoll();
     } catch (error: unknown) {
       if (!isAbortError(error)) {
-        log.warn('Standby poll failed:', error);
+        log.info('Standby poll failed:', error);
         this.scheduleRetry();
       }
     }
