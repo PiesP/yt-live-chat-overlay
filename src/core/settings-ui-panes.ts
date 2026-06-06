@@ -584,13 +584,14 @@ export const PANES: PaneDef[] = [
             'Source Language',
             'translationSource',
             [
+              ['auto', 'Auto-detect'],
               ['en', 'English'],
               ['ko', '한국어'],
               ['ja', '日本語'],
               ['es', 'Español'],
               ['zh', '中文'],
             ],
-            'Language of the incoming chat messages'
+            "Language of the incoming chat messages. Auto-detect uses Chrome's built-in language detection."
           ),
           sel(
             'Target Language',

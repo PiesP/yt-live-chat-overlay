@@ -15,6 +15,7 @@
  * - Sequential translations only — a large text blocks subsequent calls.
  *   For chat (short messages), this is acceptable.
  */
+import type { TranslationLanguage } from '@app-types';
 import { ByteLimitedCache } from '@core/byte-limited-cache';
 import { resolveTranslationTarget } from '@core/i18n';
 import { createLogger } from '@core/logging';
@@ -102,6 +103,10 @@ export class TranslationService {
     const resolvedTarget =
       settings.target === 'auto' ? resolveTranslationTarget('auto') : settings.target;
 
+    // Resolve 'auto' source — use 'en' as initial fallback until Language Detector
+    // determines the actual language via setDetectedSource().
+    const resolvedSource = settings.source === 'auto' ? 'en' : settings.source;
+
     this.enabled = settings.enabled && settings.service === 'auto';
     if (!this.enabled) {
       this.translator = null;
@@ -118,16 +123,16 @@ export class TranslationService {
       return;
     }
 
-    if (resolvedTarget === this.currentTarget && settings.source === this.currentSource) return;
+    if (resolvedTarget === this.currentTarget && resolvedSource === this.currentSource) return;
 
     // Serialize: wait for any in-flight configure before starting a new one.
     if (this.configurePromise) {
       await this.configurePromise;
       // Re-check no-op after the previous call completed.
-      if (resolvedTarget === this.currentTarget && settings.source === this.currentSource) return;
+      if (resolvedTarget === this.currentTarget && resolvedSource === this.currentSource) return;
     }
 
-    this.configurePromise = this.doConfigure(settings.source, resolvedTarget);
+    this.configurePromise = this.doConfigure(resolvedSource, resolvedTarget);
     try {
       await this.configurePromise;
     } finally {
@@ -155,6 +160,35 @@ export class TranslationService {
       await this.configurePromise;
     } finally {
       this.configurePromise = null;
+    }
+  }
+
+  /** Prevents overlapping translator creation during source detection updates. */
+  private sourceDetectionPromise: Promise<void> | null = null;
+
+  /**
+   * Update the source language post-detection.
+   * Called by the renderer after LanguageDetectorService determines
+   * the actual chat language. Only creates a new translator if the
+   * detected source differs from the current one.
+   */
+  async setDetectedSource(source: TranslationLanguage): Promise<void> {
+    if (!this.enabled) return;
+    if (!this.currentTarget) return;
+    if (source === this.currentSource) return;
+    if (typeof Translator === 'undefined') return;
+
+    // Serialize with configure() to avoid overlapping translator creation.
+    if (this.configurePromise) {
+      await this.configurePromise;
+      if (source === this.currentSource) return;
+    }
+
+    this.sourceDetectionPromise = this.doConfigure(source, this.currentTarget);
+    try {
+      await this.sourceDetectionPromise;
+    } finally {
+      this.sourceDetectionPromise = null;
     }
   }
 

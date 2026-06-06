@@ -11,9 +11,9 @@ import type {
   LogLevel,
   OutlineSettings,
   OverlaySettings,
-  TranslationLanguage,
   TranslationMode,
   TranslationService,
+  TranslationSource,
   TranslationTarget,
 } from '@app-types';
 import { DEFAULT_FONT_FAMILY, colors as designColors, rendererLayout } from '@core/design-tokens';
@@ -53,13 +53,6 @@ const LANGUAGE_VALUES = [
   'zh',
 ] as const satisfies readonly LanguageSetting[];
 const TRANSLATION_SERVICE_VALUES = ['auto', 'off'] as const satisfies readonly TranslationService[];
-const TRANSLATION_LANGUAGE_VALUES = [
-  'en',
-  'ko',
-  'ja',
-  'es',
-  'zh',
-] as const satisfies readonly TranslationLanguage[];
 const TRANSLATION_TARGET_VALUES = [
   'auto',
   'en',
@@ -68,6 +61,14 @@ const TRANSLATION_TARGET_VALUES = [
   'es',
   'zh',
 ] as const satisfies readonly TranslationTarget[];
+const TRANSLATION_SOURCE_VALUES = [
+  'auto',
+  'en',
+  'ko',
+  'ja',
+  'es',
+  'zh',
+] as const satisfies readonly TranslationSource[];
 const TRANSLATION_MODE_VALUES = ['dual', 'replace'] as const satisfies readonly TranslationMode[];
 const FONT_WEIGHT_VALUES = ['normal', 'bold'] as const satisfies readonly FontWeight[];
 const LOG_LEVEL_VALUES = ['warn', 'info', 'debug'] as const satisfies readonly LogLevel[];
@@ -422,7 +423,7 @@ export const DEFAULT_SETTINGS = {
   language: 'auto',
   translationEnabled: false,
   translationService: 'auto',
-  translationSource: 'ja',
+  translationSource: 'auto',
   translationTarget: 'auto',
   translationMode: 'dual',
   exitPaddingPx: 100,
@@ -550,7 +551,7 @@ const STRING_VALIDATORS: Partial<Record<RootScalarSettingKey, (v: string) => boo
   translationService: (v) => TRANSLATION_SERVICE_VALUES.includes(v as TranslationService),
   translationTarget: (v) => TRANSLATION_TARGET_VALUES.includes(v as TranslationTarget),
   translationMode: (v) => TRANSLATION_MODE_VALUES.includes(v as TranslationMode),
-  translationSource: (v) => TRANSLATION_LANGUAGE_VALUES.includes(v as TranslationLanguage),
+  translationSource: (v) => TRANSLATION_SOURCE_VALUES.includes(v as TranslationSource),
 };
 
 const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings => {

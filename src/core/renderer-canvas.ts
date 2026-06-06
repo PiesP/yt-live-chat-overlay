@@ -27,12 +27,14 @@ import { ByteLimitedCache } from '@core/byte-limited-cache';
 import { renderPaidCard } from '@core/canvas-card-renderers';
 import { drawRoundRect, renderRegularMessage } from '@core/canvas-text-renderer';
 import { createMembershipCardConfig, createSuperChatCardConfig } from '@core/card-config';
+import { ChannelLanguageMemory } from '@core/channel-language-memory';
 import { getTranslatableText } from '@core/chat-message-helpers';
 import { computeScrollDuration, standbyMessageLayout } from '@core/design-tokens';
 import { clearSafeAnimationFrame, forEachSlot } from '@core/dom';
 import { ImageFetchManager } from '@core/image-fetch-manager';
 import type { LanePlacement } from '@core/lane-allocator';
 import { LaneAllocator } from '@core/lane-allocator';
+import { LanguageDetectorService } from '@core/language-detector-service';
 import { createLogger } from '@core/logging';
 import { MessageActivator } from '@core/message-activator';
 import type { Overlay } from '@core/overlay';
@@ -170,6 +172,11 @@ export class CanvasRenderer extends RendererBase {
   private standbyStatus = false;
   private translationService: TranslationService;
   private messageActivator: MessageActivator;
+  private languageDetector: LanguageDetectorService | null = null;
+  private channelMemory: ChannelLanguageMemory | null = null;
+  private sourceDetectionDone = false;
+  private sourceSampleBuffer: string[] = [];
+  private static readonly SOURCE_SAMPLE_COUNT = 8;
 
   /** Max translations to apply per frame to avoid single-frame spikes during chat bursts. */
   private readonly translationBatchSize: number;
@@ -286,10 +293,19 @@ export class CanvasRenderer extends RendererBase {
     this.invFadeDuration = 1 / Math.max(1, settings.fadeDurationMs);
     this.translationBatchSize = settings.translationBatchSize;
     this.translationService = new TranslationService();
-    this.translationService.configure({
+    // Initialize language detection pipeline for 'auto' source
+    this.languageDetector = new LanguageDetectorService();
+    this.channelMemory = new ChannelLanguageMemory();
+    void this.languageDetector.initialize();
+
+    // Check channel memory for cached language
+    const channelKey = ChannelLanguageMemory.keyFromUrl(location.href);
+    const cachedSource = channelKey ? this.channelMemory.get(channelKey) : undefined;
+
+    void this.translationService.configure({
       enabled: settings.translationEnabled,
       service: settings.translationService,
-      source: settings.translationSource,
+      source: cachedSource ?? settings.translationSource,
       target: settings.translationTarget,
     });
     this.messageActivator = new MessageActivator(this.translationService, {
@@ -1118,6 +1134,18 @@ export class CanvasRenderer extends RendererBase {
       staggerDelay,
       speedTier
     );
+
+    // Auto-detect source language from message samples
+    if (
+      this.settings.translationSource === 'auto' &&
+      !this.sourceDetectionDone &&
+      message.text.trim()
+    ) {
+      this.sourceSampleBuffer.push(message.text);
+      if (this.sourceSampleBuffer.length >= CanvasRenderer.SOURCE_SAMPLE_COUNT) {
+        void this.performSourceDetection();
+      }
+    }
   }
 
   // ── Dimension estimation (delegates to shared functions) ──────────────
@@ -1332,7 +1360,15 @@ export class CanvasRenderer extends RendererBase {
     // user activation or model download. Fire-and-forget — configure() below
     // serializes behind configurePromise so they don't race.
     this.translationService.onUserActivation();
-    this.translationService.configure({
+
+    // Reset detection state when source changes to 'auto'
+    const sourceChanged = settings.translationSource !== this.settings.translationSource;
+    if (sourceChanged) {
+      this.sourceDetectionDone = false;
+      this.sourceSampleBuffer = [];
+    }
+
+    void this.translationService.configure({
       enabled: settings.translationEnabled,
       service: settings.translationService,
       source: settings.translationSource,
@@ -1371,6 +1407,20 @@ export class CanvasRenderer extends RendererBase {
     this.dimensionCache.clear();
   }
 
+  private async performSourceDetection(): Promise<void> {
+    if (!this.languageDetector) return;
+    const detected = await this.languageDetector.detectFromSamples(this.sourceSampleBuffer);
+    if (detected) {
+      const channelKey = ChannelLanguageMemory.keyFromUrl(location.href);
+      if (channelKey && this.channelMemory) {
+        this.channelMemory.set(channelKey, detected);
+      }
+      await this.translationService.setDetectedSource(detected);
+    }
+    this.sourceDetectionDone = true;
+    this.sourceSampleBuffer = [];
+  }
+
   protected onDestroy(): void {
     this.stopRenderLoop();
     this.workerManager.destroy();
@@ -1389,6 +1439,10 @@ export class CanvasRenderer extends RendererBase {
     this.dimensionCache.clear();
     this.activeMessagesByLane.clear();
     this.translationService.destroy();
+    this.languageDetector?.destroy();
+    this.languageDetector = null;
+    this.channelMemory?.clear();
+    this.channelMemory = null;
     clearTextMeasurementCaches();
   }
 

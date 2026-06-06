@@ -106,6 +106,7 @@ export const ES: Record<string, string> = {
   'Normal (5 msg / 5s)': 'Normal (5 msg / 5s)',
   'Strict (2 msg / 5s)': 'Estricto (2 msg / 5s)',
   'Auto (Browser)': 'Automático (Navegador)',
+  'Auto-detect': 'Detección automática',
   'Auto (Chrome built-in)': 'Automático (integrado en Chrome)',
   'Dual (original + translation)': 'Dual (original + traducción)',
   'Replace (translation only)': 'Reemplazar (solo traducción)',
@@ -144,7 +145,8 @@ export const ES: Record<string, string> = {
   'Opacity dimming for far-layer messages': 'Reducción de opacidad para mensajes lejanos',
   'How fast comments scroll across the screen in pixels per second':
     'Velocidad a la que los comentarios cruzan la pantalla (píxeles/segundo)',
-  'Language of the incoming chat messages': 'Idioma de los mensajes de chat entrantes',
+  "Language of the incoming chat messages. Auto-detect uses Chrome's built-in language detection.":
+    'Idioma de los mensajes de chat entrantes. La detección automática usa la detección de idioma integrada de Chrome.',
   'Language to translate chat messages into. Auto detects from browser settings.':
     'Idioma al que traducir los mensajes. Auto detecta desde la configuración del navegador.',
   'Limits how frequently messages from the same author appear':

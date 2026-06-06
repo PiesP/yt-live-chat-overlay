@@ -89,6 +89,7 @@ export const KO: Record<string, string> = {
   'Normal (5 msg / 5s)': '보통 (5개 / 5초)',
   'Strict (2 msg / 5s)': '엄격 (2개 / 5초)',
   'Auto (Browser)': '자동 (브라우저)',
+  'Auto-detect': '자동 감지',
   'Auto (Chrome built-in)': '자동 (Chrome 내장)',
   'Dual (original + translation)': '이중 표시 (원문 + 번역)',
   'Replace (translation only)': '번역만 표시',
@@ -141,7 +142,8 @@ export const KO: Record<string, string> = {
     '페이드아웃 제거 전 최대 메시지 수명 (10-300초, 기본 60000ms)',
   'Gap between consecutive messages as percentage of message width (2-30%, default 8)':
     '연속 메시지 사이의 간격을 메시지 너비의 백분율로 표시 (2-30%, 기본 8)',
-  'Language of the incoming chat messages': '수신 채팅 메시지의 언어',
+  "Language of the incoming chat messages. Auto-detect uses Chrome's built-in language detection.":
+    '수신 채팅 메시지의 언어입니다. 자동 감지는 Chrome 내장 언어 감지를 사용합니다.',
   'Language to translate chat messages into. Auto detects from browser settings.':
     '채팅 메시지를 번역할 대상 언어. 자동은 브라우저 설정에서 감지합니다.',
   'Limits how frequently messages from the same author appear':

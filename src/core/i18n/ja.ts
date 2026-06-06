@@ -106,6 +106,7 @@ export const JA: Record<string, string> = {
   'Normal (5 msg / 5s)': '標準 (5件 / 5秒)',
   'Strict (2 msg / 5s)': '厳格 (2件 / 5秒)',
   'Auto (Browser)': '自動 (ブラウザ)',
+  'Auto-detect': '自動検出',
   'Auto (Chrome built-in)': '自動 (Chrome内蔵)',
   'Dual (original + translation)': '二重表示 (原文 + 翻訳)',
   'Replace (translation only)': '翻訳のみ表示',
@@ -144,7 +145,8 @@ export const JA: Record<string, string> = {
   'Opacity dimming for far-layer messages': '遠方レイヤーメッセージの不透明度減衰',
   'How fast comments scroll across the screen in pixels per second':
     'コメントが画面を横切る速度(ピクセル/秒)',
-  'Language of the incoming chat messages': '受信チャットメッセージの言語',
+  "Language of the incoming chat messages. Auto-detect uses Chrome's built-in language detection.":
+    '受信チャットメッセージの言語。自動検出はChrome内蔵の言語検出を使用します。',
   'Language to translate chat messages into. Auto detects from browser settings.':
     'チャットメッセージの翻訳先言語。自動はブラウザ設定から検出します。',
   'Limits how frequently messages from the same author appear':

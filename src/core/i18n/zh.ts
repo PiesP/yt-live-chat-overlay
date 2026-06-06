@@ -105,6 +105,7 @@ export const ZH: Record<string, string> = {
   'Normal (5 msg / 5s)': '标准 (5条 / 5秒)',
   'Strict (2 msg / 5s)': '严格 (2条 / 5秒)',
   'Auto (Browser)': '自动 (浏览器)',
+  'Auto-detect': '自动检测',
   'Auto (Chrome built-in)': '自动 (Chrome内置)',
   'Dual (original + translation)': '双语 (原文 + 翻译)',
   'Replace (translation only)': '仅翻译',
@@ -137,7 +138,8 @@ export const ZH: Record<string, string> = {
   'Speed reduction for far-layer messages': '远处图层消息速度降低',
   'Opacity dimming for far-layer messages': '远处图层消息不透明度降低',
   'How fast comments scroll across the screen in pixels per second': '弹幕滚过屏幕的速度(像素/秒)',
-  'Language of the incoming chat messages': '传入聊天消息的语言',
+  "Language of the incoming chat messages. Auto-detect uses Chrome's built-in language detection.":
+    '传入聊天消息的语言。自动检测使用Chrome内置语言检测。',
   'Language to translate chat messages into. Auto detects from browser settings.':
     '将聊天消息翻译成的目标语言。自动从浏览器设置检测。',
   'Limits how frequently messages from the same author appear': '限制同一用户消息的显示频率',

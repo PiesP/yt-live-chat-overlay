@@ -40,6 +40,8 @@ export type TranslationMode = 'dual' | 'replace';
 export type TranslationLanguage = 'en' | 'ko' | 'ja' | 'es' | 'zh';
 /** Target language for translation — 'auto' resolves to browser language via navigator.language */
 export type TranslationTarget = TranslationLanguage | 'auto';
+/** Source language for translation — 'auto' uses Chrome Language Detector API or Unicode heuristics */
+export type TranslationSource = TranslationLanguage | 'auto';
 
 /** RGB color representation (readonly, immutable). */
 export interface RgbColor {
@@ -249,8 +251,8 @@ export interface OverlaySettings {
   translationEnabled: boolean;
   /** Translation service provider */
   translationService: TranslationService;
-  /** Source language for translation (language messages are written in) */
-  translationSource: TranslationLanguage;
+  /** Source language for translation (language messages are written in). 'auto' uses language detection. */
+  translationSource: TranslationSource;
   /** Target language for translation (language to translate into). 'auto' resolves via browser language. */
   translationTarget: TranslationTarget;
   /** Display mode: dual (original + translation) or replace (translation only) */
