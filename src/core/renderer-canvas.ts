@@ -29,7 +29,7 @@ import { drawRoundRect, renderRegularMessage } from '@core/canvas-text-renderer'
 import { createMembershipCardConfig, createSuperChatCardConfig } from '@core/card-config';
 import { ChannelLanguageMemory } from '@core/channel-language-memory';
 import { getTranslatableText } from '@core/chat-message-helpers';
-import { computeScrollDuration, standbyMessageLayout } from '@core/design-tokens';
+import { computeScrollDuration, statusBarLayout } from '@core/design-tokens';
 import { clearSafeAnimationFrame, forEachSlot } from '@core/dom';
 import { ImageFetchManager } from '@core/image-fetch-manager';
 import type { LanePlacement } from '@core/lane-allocator';
@@ -39,7 +39,7 @@ import { createLogger } from '@core/logging';
 import { MessageActivator } from '@core/message-activator';
 import type { Overlay } from '@core/overlay';
 import { PriorityBucketQueue } from '@core/priority-bucket-queue';
-import { RendererBase } from '@core/renderer-base';
+import { ConnectionStatus, RendererBase } from '@core/renderer-base';
 import {
   DRAIN_QUEUE_MAX_SKIP as _DRAIN_QUEUE_MAX_SKIP,
   HORIZONTAL_STAGGER_MAX as _HORIZONTAL_STAGGER_MAX,
@@ -173,8 +173,8 @@ export class CanvasRenderer extends RendererBase {
    * continues for a grace period before stopping. Prevents start/stop
    * thrashing during sparse chat intervals. */
   private idleSince: number | null = null;
-  /** Whether the session is in standby mode (pre-live, waiting for stream). */
-  private standbyStatus = false;
+  /** Current connection health status for overlay feedback. */
+  private connectionStatus: ConnectionStatus = ConnectionStatus.CONNECTED;
   private translationService: TranslationService;
   private messageActivator: MessageActivator;
   private languageDetector: LanguageDetectorService | null = null;
@@ -383,12 +383,16 @@ export class CanvasRenderer extends RendererBase {
     return this.laneAllocator.getUtilization();
   }
 
-  /** Update standby status and ensure render loop is running for message display. */
+  /** Update standby status via ConnectionStatus — backward compat. */
   setStandbyStatus(standby: boolean): void {
-    this.standbyStatus = standby;
-    if (!standby) return;
-    // Ensure render loop is running to draw the standby message.
-    if (this.animFrameId === null) {
+    this.setConnectionStatus(standby ? ConnectionStatus.STANDBY : ConnectionStatus.CONNECTED);
+  }
+
+  /** Inform the renderer of the current connection health status. */
+  setConnectionStatus(status: ConnectionStatus): void {
+    this.connectionStatus = status;
+    // Ensure render loop runs when status needs to be displayed (all non-CONNECTED states)
+    if (status !== ConnectionStatus.CONNECTED && this.animFrameId === null) {
       this.startRenderLoop();
     }
   }
@@ -508,7 +512,11 @@ export class CanvasRenderer extends RendererBase {
       // sparse chat intervals — the loop continues briefly after the
       // idle condition is first met, so a message arriving within 500ms
       // reuses the same rAF cycle without restart overhead.
-      if (this.activeMessages.length === 0 && this.pendingQueue.isEmpty && !this.standbyStatus) {
+      if (
+        this.activeMessages.length === 0 &&
+        this.pendingQueue.isEmpty &&
+        this.connectionStatus === ConnectionStatus.CONNECTED
+      ) {
         const now = performance.now();
         if (this.idleSince === null) {
           this.idleSince = now;
@@ -595,14 +603,15 @@ export class CanvasRenderer extends RendererBase {
 
     // P2-3: Skip clearRect + render loop when no active messages or standby message.
     // Empty frames have nothing to draw, so we skip GPU work entirely.
-    const hasContent = this.activeMessages.length > 0 || this.standbyStatus;
+    const hasContent =
+      this.activeMessages.length > 0 || this.connectionStatus !== ConnectionStatus.CONNECTED;
     if (hasContent) {
       ctx.clearRect(0, 0, dims.width, dims.height);
     }
 
-    // Draw standby status message when in pre-live standby mode
-    if (this.standbyStatus) {
-      this.renderStandbyMessage(ctx, dims);
+    // Draw connection status bar when not connected
+    if (this.connectionStatus !== ConnectionStatus.CONNECTED) {
+      this.renderStatusBar(ctx, dims);
     }
 
     const mode = this.settings.danmakuMode;
@@ -1447,35 +1456,90 @@ export class CanvasRenderer extends RendererBase {
     clearTextMeasurementCaches();
   }
 
-  // ── Standby message rendering ─────────────────────────────────────────
+  // ── Status bar rendering ────────────────────────────────────────────────
 
-  private renderStandbyMessage(
+  private renderStatusBar(
     ctx: CanvasRenderingContext2D,
     dims: { width: number; height: number }
   ): void {
-    ctx.save();
-    const message = 'Waiting for live stream\u2026';
-    const { fontSize, paddingX, paddingY, bottomOffset, pillRadius, fillStyle, textFillStyle } =
-      standbyMessageLayout;
+    const status = this.connectionStatus;
+    if (status === ConnectionStatus.CONNECTED) {
+      // CONNECTED: only a small dot, subtle
+      this.renderStatusDot(ctx, dims);
+      return;
+    }
+
+    // All other states: pill with dot + text
+    const colors = statusBarLayout.colors[status];
+    const message = this.getStatusMessage(status);
+
+    const { fontSize, paddingX, paddingY, bottomOffset, pillRadius, dotRadius, dotGap } =
+      statusBarLayout;
     const font = getFontString(fontSize, 'normal', this.settings.fontFamily);
+    ctx.save();
     ctx.font = font;
     ctx.textBaseline = 'middle';
-    ctx.textAlign = 'center';
+    ctx.textAlign = 'left'; // dot + text layout
 
     const textWidth = ctx.measureText(message).width;
-    const boxW = textWidth + paddingX * 2;
+    const dotTotalWidth = dotRadius * 2 + dotGap;
+    const boxW = dotTotalWidth + textWidth + paddingX * 2;
     const boxH = fontSize * 1.5 + paddingY * 2;
     const boxX = (dims.width - boxW) / 2;
     const boxY = dims.height - boxH - bottomOffset;
 
-    // Semi-transparent background pill
-    ctx.fillStyle = fillStyle;
+    // Pill background
+    ctx.fillStyle = colors.bg;
     drawRoundRect(ctx, boxX, boxY, boxW, boxH, pillRadius);
     ctx.fill();
 
-    // Text on top
-    ctx.fillStyle = textFillStyle;
-    ctx.fillText(message, dims.width / 2, boxY + boxH / 2);
+    // Status dot
+    const dotX = boxX + paddingX + dotRadius;
+    const dotY = boxY + boxH / 2;
+    ctx.fillStyle = colors.dot;
+    ctx.beginPath();
+    ctx.arc(dotX, dotY, dotRadius, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Text
+    ctx.fillStyle = colors.text;
+    ctx.fillText(message, dotX + dotRadius + dotGap, boxY + boxH / 2);
+
     ctx.restore();
+  }
+
+  /** Renders only a small colored dot for CONNECTED state. */
+  private renderStatusDot(
+    ctx: CanvasRenderingContext2D,
+    dims: { width: number; height: number }
+  ): void {
+    const { dotRadius, bottomOffset, fontSize, paddingY } = statusBarLayout;
+    const colors = statusBarLayout.colors.connected;
+    const boxH = fontSize * 1.5 + paddingY * 2;
+    const x = dims.width / 2;
+    const y = dims.height - boxH - bottomOffset + boxH / 2;
+
+    ctx.save();
+    ctx.fillStyle = colors.dot;
+    ctx.globalAlpha = 0.15; // subtle when connected
+    ctx.beginPath();
+    ctx.arc(x, y, dotRadius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  private getStatusMessage(status: ConnectionStatus): string {
+    switch (status) {
+      case ConnectionStatus.CONNECTING:
+        return 'Connecting\u2026';
+      case ConnectionStatus.DEGRADED:
+        return 'Connection unstable';
+      case ConnectionStatus.DISCONNECTED:
+        return 'Disconnected \u2014 Click to reload';
+      case ConnectionStatus.STANDBY:
+        return 'Waiting for live stream\u2026';
+      default:
+        return '';
+    }
   }
 }
