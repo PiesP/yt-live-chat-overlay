@@ -300,6 +300,10 @@ export class RuntimeManager {
     // and session-restart always go through the full bootstrap to avoid
     // false negatives on scheduled streams (LIVE_STREAM_OFFLINE) whose
     // chat panel is not yet rendered.
+    //
+    // Before blocking, check playabilityStatus from window.ytInitialData.
+    // Scheduled streams (LIVE_STREAM_OFFLINE) may lack #chat in the DOM
+    // but will transition later — let the full bootstrap detect standby.
     const isPageChange = this.isPageChangeReconcile;
     this.isPageChangeReconcile = false;
     if (
@@ -307,9 +311,17 @@ export class RuntimeManager {
       location.pathname === '/watch' &&
       !document.querySelector(CHAT_PANEL_SELECTOR)
     ) {
-      log.info('No #chat element in DOM — skipping bootstrap (likely VOD)');
-      this.handleStartFailure(desired.url, 'unavailable');
-      return;
+      const playbackStatus = (window.ytInitialData as Record<string, unknown> | undefined)
+        ?.playabilityStatus as { status?: string } | undefined;
+      if (playbackStatus?.status === 'LIVE_STREAM_OFFLINE') {
+        log.info(
+          '#chat absent but playabilityStatus is LIVE_STREAM_OFFLINE — proceeding to bootstrap'
+        );
+      } else {
+        log.info('No #chat element in DOM — skipping bootstrap (likely VOD)');
+        this.handleStartFailure(desired.url, 'unavailable');
+        return;
+      }
     }
 
     // Initialize session state from desired state
