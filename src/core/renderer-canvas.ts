@@ -25,7 +25,6 @@
 import type { ChatMessage, DropReason, OverlayDimensions, OverlaySettings } from '@app-types';
 import { ByteLimitedCache } from '@core/byte-limited-cache';
 import { renderPaidCard } from '@core/canvas-card-renderers';
-import { drawRoundRect, renderRegularMessage } from '@core/canvas-text-renderer';
 import { MEMBERSHIP_CARD_CONFIG, SUPERCHAT_CARD_CONFIG } from '@core/card-config';
 import { ChannelLanguageMemory } from '@core/channel-language-memory';
 import { getTranslatableText } from '@core/chat-message-helpers';
@@ -67,7 +66,11 @@ import {
   measureTextWidth,
 } from '@core/text-measure';
 import { TranslationService } from '@core/translation-service';
-import { renderSegment } from '@shared/canvas-rendering-shared';
+import {
+  drawRoundRect,
+  renderRegularMessage,
+  renderSegment,
+} from '@shared/canvas-rendering-shared';
 
 /** Check if an image element is fully loaded and has valid dimensions. */
 function isImageReady(img: unknown): boolean {

@@ -8,7 +8,6 @@
  */
 
 import type { ChatMessage, OverlaySettings } from '@app-types';
-import { drawRoundRect } from '@core/canvas-text-renderer';
 import { computeOutlineColor } from '@core/color-utils';
 import { rendererLayout } from '@core/design-tokens';
 import type { LanePlacement } from '@core/lane-allocator';
@@ -25,7 +24,11 @@ import {
   FLOATS_PER_INSTANCE,
   getRenderText,
   MAX_INSTANCES,
+  SDF_FRAGMENT_SHADER,
+  SDF_VERTEX_SHADER,
   setupWebGL2Buffers,
+  TEXTURE_FRAGMENT_SHADER,
+  TEXTURE_VERTEX_SHADER,
   updateMessagePositions,
   uploadSDFAtlas,
 } from '@core/renderer-webgl2-shared';
@@ -37,10 +40,8 @@ import {
   type SDFAtlas,
   SDFAtlasGenerator,
 } from '@core/sdf-atlas';
-import { SDF_FRAGMENT_SHADER, SDF_VERTEX_SHADER } from '@core/sdf-shaders';
 import { getFontString, measureTextWidth } from '@core/text-measure';
-import { TEXTURE_FRAGMENT_SHADER, TEXTURE_VERTEX_SHADER } from '@core/webgl2-texture-shaders';
-import { drawAuthorPhoto } from '@shared/canvas-rendering-shared';
+import { drawAuthorPhoto, drawRoundRect } from '@shared/canvas-rendering-shared';
 
 const log = createLogger('RendererWebGL2');
 

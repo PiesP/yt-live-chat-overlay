@@ -47,6 +47,8 @@ import {
   createProgram,
   FLOATS_PER_INSTANCE,
   MAX_INSTANCES,
+  SDF_FRAGMENT_SHADER,
+  SDF_VERTEX_SHADER,
   setupWebGL2Buffers,
   updateMessagePositions,
   uploadSDFAtlas,
@@ -59,7 +61,6 @@ import {
   type SDFAtlas,
   SDFAtlasGenerator,
 } from '@core/sdf-atlas';
-import { SDF_FRAGMENT_SHADER, SDF_VERTEX_SHADER } from '@core/sdf-shaders';
 
 // ── Types ──
 

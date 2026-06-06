@@ -85,10 +85,10 @@ export function resolveTranslationTarget(target: TranslationTarget): SupportedLa
 
 type TranslationMap = Record<string, string>;
 
-import { ES } from './i18n/es';
-import { JA } from './i18n/ja';
-import { KO } from './i18n/ko';
-import { ZH } from './i18n/zh';
+import { ES } from '@core/i18n/es';
+import { JA } from '@core/i18n/ja';
+import { KO } from '@core/i18n/ko';
+import { ZH } from '@core/i18n/zh';
 
 const TRANSLATIONS: Record<SupportedLanguage, TranslationMap> = {
   en: {}, // English: no translation needed (strings are the keys)
