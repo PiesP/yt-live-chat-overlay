@@ -83,7 +83,9 @@ export class LanguageDetectorService {
 
   /** Check if the browser supports the Language Detector API. */
   static isSupported(): boolean {
-    return typeof LanguageDetector !== 'undefined';
+    return (
+      typeof LanguageDetector !== 'undefined' && typeof LanguageDetector?.create === 'function'
+    );
   }
 
   /** Initialize the detector instance. Safe to call multiple times — no-ops if already ready. */
@@ -107,13 +109,19 @@ export class LanguageDetectorService {
   }
 
   private async doInit(): Promise<void> {
+    if (typeof LanguageDetector?.capabilities !== 'function') {
+      log.info('Language Detector API shape mismatch — using Unicode heuristics');
+      return;
+    }
     try {
-      const caps = await LanguageDetector?.capabilities();
+      const caps = await LanguageDetector.capabilities();
       if (!caps || caps.available === 'no') {
         log.warn('Language Detector not available on this device');
         return;
       }
-      this.detector = (await LanguageDetector?.create()) ?? null;
+      if (typeof LanguageDetector.create === 'function') {
+        this.detector = await LanguageDetector.create();
+      }
       log.info('Language Detector ready');
     } catch (err: unknown) {
       log.warn('Failed to create Language Detector:', err);
