@@ -22,6 +22,7 @@ import { createLogger } from '@core/logging';
 import { MessageIdRegistry } from '@core/message-id-registry';
 import { OVERLAY_SELECTOR, Overlay } from '@core/overlay';
 import type { RendererBase } from '@core/renderer-base';
+import { ConnectionStatus } from '@core/renderer-base';
 import { CanvasRenderer } from '@core/renderer-canvas';
 import { RendererWebGL2 } from '@core/renderer-webgl2';
 import { RendererWebGL2Worker } from '@core/renderer-webgl2-worker';
@@ -315,6 +316,43 @@ export class RuntimeManager {
     this.requestReconcile('session-restart');
   }
 
+  private computeConnectionStatus(): ConnectionStatus {
+    // Standby mode takes priority
+    if (this.standbyController.isStandby()) {
+      return ConnectionStatus.STANDBY;
+    }
+
+    // No active session → connecting
+    if (!this.chatSource || this.isDisposedState) {
+      return ConnectionStatus.CONNECTING;
+    }
+
+    const health = this.chatSource.getHealthSnapshot();
+
+    // Circuit breaker tripped (consecutiveErrors >= failureLimit) → disconnected
+    if (health.consecutiveErrors >= this.getSettings().livePollFailureLimit) {
+      return ConnectionStatus.DISCONNECTED;
+    }
+
+    // Errors occurring but still retrying → degraded
+    if (health.consecutiveErrors > 0) {
+      return ConnectionStatus.DEGRADED;
+    }
+
+    // Normal operation
+    if (health.observerAlive && health.recentlyActive) {
+      return ConnectionStatus.CONNECTED;
+    }
+
+    // Observer alive but not recently active → connecting
+    if (health.observerAlive) {
+      return ConnectionStatus.CONNECTING;
+    }
+
+    // Observer not alive → disconnected
+    return ConnectionStatus.DISCONNECTED;
+  }
+
   /**
    * Restart only the chat source while preserving Overlay, CanvasRenderer,
    * and BacklogController. A full disposeActiveSession is reserved for
@@ -366,6 +404,11 @@ export class RuntimeManager {
 
       this.overlay = overlay;
       this.renderer = this.createRenderer(overlay, settings);
+      this.renderer.setConnectionStatus(ConnectionStatus.CONNECTING);
+      this.renderer.onStatusBarClick = () => {
+        log.info('Status bar click — restarting session');
+        void this.restartSession();
+      };
       this.standbyController.setRenderer(this.renderer);
 
       const chatStarted = await this.startChatSource(signal);
@@ -848,7 +891,12 @@ export class RuntimeManager {
         if (this.getRuntimeHealthSnapshot().shouldRestart) {
           log.warn('Chat health check failed, triggering recovery');
           this.requestManagedRestart('watchdog');
+          return;
         }
+
+        // Propagate connection status to renderer for visual feedback
+        const connStatus = this.computeConnectionStatus();
+        this.renderer?.setConnectionStatus(connStatus);
       } catch (error: unknown) {
         log.error('Chat watchdog check error:', error);
       }

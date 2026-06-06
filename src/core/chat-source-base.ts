@@ -30,6 +30,8 @@ export interface ChatHealthSnapshot {
   recentlyActive: boolean;
   /** True when the chat source is intentionally backing off from fetches (not a crash). */
   isInBackoff: boolean;
+  /** Number of consecutive poll errors (0 = healthy). LiveChatSource tracks this. */
+  consecutiveErrors: number;
 }
 
 export interface PlaybackSnapshot {
@@ -187,6 +189,7 @@ export abstract class ChatSource implements Pauseable {
       observerAlive: this.isObserverAlive(),
       recentlyActive: this.isActive(activeTimeoutMs),
       isInBackoff: false,
+      consecutiveErrors: 0,
     };
   }
 

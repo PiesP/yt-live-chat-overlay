@@ -9,6 +9,7 @@
 
 import type { ChatMessage } from '@app-types';
 import { extractChatEvents } from '@core/chat-message-parser';
+import type { ChatHealthSnapshot } from '@core/chat-source-base';
 import { ChatSource } from '@core/chat-source-base';
 import { isAbortError, sleep, throwIfAborted } from '@core/dom';
 import { createLogger } from '@core/logging';
@@ -32,7 +33,7 @@ const LIVE_BOOTSTRAP_REFRESH_INTERVAL = 5;
 
 export class LiveChatSource extends ChatSource {
   private liveContinuation: InnertubeContinuationData | null = null;
-  private consecutiveErrors = 0;
+  protected consecutiveErrors = 0;
   private readonly recentMessageCounts: number[] = [];
   private static readonly DENSITY_WINDOW_SIZE = 5;
   private static readonly DENSITY_HIGH_THRESHOLD = 10;
@@ -46,6 +47,12 @@ export class LiveChatSource extends ChatSource {
 
   protected launchCurrentPollLoop(signal?: AbortSignal): void {
     this.launchPollLoop(signal, (loopSignal) => this.runLiveLoop(loopSignal));
+  }
+
+  /** Expose consecutive error count via health snapshot for status bar feedback. */
+  getHealthSnapshot(options?: { activeTimeoutMs?: number }): ChatHealthSnapshot {
+    const base = super.getHealthSnapshot(options);
+    return { ...base, consecutiveErrors: this.consecutiveErrors };
   }
 
   protected resetSessionState(): void {

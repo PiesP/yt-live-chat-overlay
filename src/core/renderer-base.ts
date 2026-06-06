@@ -45,6 +45,8 @@ interface RendererUpdateOptions {
 export abstract class RendererBase {
   readonly observability: ObservabilityReporter;
   onBacklogPauseChange: ((paused: boolean) => void) | null = null;
+  /** Callback invoked when the disconnected status bar is clicked. */
+  onStatusBarClick: (() => void) | null = null;
 
   protected overlay: Overlay;
   protected settings: OverlaySettings;

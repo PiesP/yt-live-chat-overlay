@@ -175,6 +175,8 @@ export class CanvasRenderer extends RendererBase {
   private idleSince: number | null = null;
   /** Current connection health status for overlay feedback. */
   private connectionStatus: ConnectionStatus = ConnectionStatus.CONNECTED;
+  /** Bounding box of the last-rendered status bar pill, for click hit testing. */
+  private statusBarHitRegion: { x: number; y: number; w: number; h: number } | null = null;
   private translationService: TranslationService;
   private messageActivator: MessageActivator;
   private languageDetector: LanguageDetectorService | null = null;
@@ -331,6 +333,16 @@ export class CanvasRenderer extends RendererBase {
       log.warn('Canvas created but not connected to DOM — renderer will be inactive');
     }
 
+    // Click handler for status bar (click-to-reload on DISCONNECTED)
+    canvas.addEventListener('click', (e: MouseEvent) => {
+      if (this.connectionStatus !== ConnectionStatus.DISCONNECTED) return;
+      if (!this.statusBarHitRegion || !this.onStatusBarClick) return;
+      const { x, y, w, h } = this.statusBarHitRegion;
+      if (e.offsetX >= x && e.offsetX <= x + w && e.offsetY >= y && e.offsetY <= y + h) {
+        this.onStatusBarClick();
+      }
+    });
+
     // Initialize ImageFetchManager BEFORE RenderWorkerManager so the worker
     // receives a valid reference instead of undefined.
     this.imageFetchManager = new ImageFetchManager();
@@ -391,6 +403,10 @@ export class CanvasRenderer extends RendererBase {
   /** Inform the renderer of the current connection health status. */
   setConnectionStatus(status: ConnectionStatus): void {
     this.connectionStatus = status;
+    // Enable pointer events on canvas when disconnected so click-to-reload works
+    if (this.canvas) {
+      this.canvas.style.pointerEvents = status === ConnectionStatus.DISCONNECTED ? 'auto' : 'none';
+    }
     // Ensure render loop runs when status needs to be displayed (all non-CONNECTED states)
     if (status !== ConnectionStatus.CONNECTED && this.animFrameId === null) {
       this.startRenderLoop();
@@ -1504,6 +1520,9 @@ export class CanvasRenderer extends RendererBase {
     // Text
     ctx.fillStyle = colors.text;
     ctx.fillText(message, dotX + dotRadius + dotGap, boxY + boxH / 2);
+
+    // Store hit region for click-to-reload in DISCONNECTED state
+    this.statusBarHitRegion = { x: boxX, y: boxY, w: boxW, h: boxH };
 
     ctx.restore();
   }
