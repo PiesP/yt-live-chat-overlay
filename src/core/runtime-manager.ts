@@ -492,11 +492,6 @@ export class RuntimeManager {
 
       this.state = 'active';
 
-      // Show standby status until first chat message arrives.
-      // Provides immediate visual feedback that the overlay is active
-      // even when the chat is empty (pre-live streams).
-      this.renderer?.setStandbyStatus(true);
-
       // Foreground recovery: listen for tab/window visibility changes
       if (document.visibilityState !== 'visible') {
         this.noteHidden();
