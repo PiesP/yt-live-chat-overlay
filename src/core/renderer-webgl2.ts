@@ -28,7 +28,6 @@ import {
   buildSDFInstances,
   createProgram,
   FLOATS_PER_INSTANCE,
-  getRenderText,
   MAX_INSTANCES,
   SDF_FRAGMENT_SHADER,
   SDF_VERTEX_SHADER,
@@ -521,8 +520,6 @@ export class RendererWebGL2 extends RendererBase {
     // Canvas2D overlay: card round-rects + author photos
     if (this.ctx2d) {
       const dpr = this.dpr;
-      this.overlay2d.width = Math.ceil(this.cssWidth * dpr);
-      this.overlay2d.height = Math.ceil(this.cssHeight * dpr);
       this.ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
       this.ctx2d.clearRect(0, 0, this.cssWidth, this.cssHeight);
 
@@ -591,6 +588,24 @@ export class RendererWebGL2 extends RendererBase {
     const fs = this.settings.fontSize;
     const scale = fs / GLYPH_RASTER_SIZE;
 
+    // Precompute opacity once per message to avoid duplicate computeMessageOpacity
+    // calls (buildSDFInstances + emoji loop both needed it)
+    const precomputedOpacities = new Map<number, number>();
+    for (let i = 0; i < this.messages.length; i++) {
+      const msg = this.messages[i];
+      if (!msg) continue;
+      const elapsed = msg.startTime > 0 ? Math.max(0, now - msg.startTime) : 0;
+      const op = computeMessageOpacity(
+        msg.message,
+        elapsed,
+        msg.duration,
+        msg.laneIndex >= 0,
+        msg.speedTier,
+        this._opacityConfig
+      );
+      precomputedOpacities.set(i, op);
+    }
+
     const result = buildSDFInstances(
       this.messages,
       this.atlas,
@@ -602,55 +617,56 @@ export class RendererWebGL2 extends RendererBase {
       this._opacityConfig,
       now,
       this.settings.translationMode,
-      this.texQuadData
+      this.texQuadData,
+      precomputedOpacities
     );
     this.instanceCount = result.instanceCount;
     this.texQuadCount = result.texQuadCount;
 
     // Emoji rendering via texture pass (main-thread specific — uses getEmojiTexture)
-    for (const msg of this.messages) {
+    // Emojis are placed at their actual inline position by iterating content
+    // segments in order and tracking a cursor per segment type.
+    for (let i = 0; i < this.messages.length; i++) {
       if (this.texQuadCount >= MAX_INSTANCES) break;
 
-      const elapsed = msg.startTime > 0 ? Math.max(0, now - msg.startTime) : 0;
-      const op = computeMessageOpacity(
-        msg.message,
-        elapsed,
-        msg.duration,
-        msg.laneIndex >= 0,
-        msg.speedTier,
-        this._opacityConfig
-      );
+      const msg = this.messages[i];
+      if (!msg) continue;
+      const op = precomputedOpacities.get(i) ?? 0;
       if (op <= 0) continue;
 
-      const text = getRenderText(msg, this.settings.translationMode);
-      let endCx = msg.x;
-      for (let ci = 0; ci < text.length; ci++) {
-        const gi = this.atlas?.glyphs.get(text.codePointAt(ci) ?? 0x20);
-        endCx += (gi?.advanceWidth ?? fs * 0.7) * scale;
-      }
-
-      // Defensive: content may be undefined for malformed messages (same guard as getRenderText)
+      // Defensive: content may be undefined for malformed messages
       const msgContent = msg.message?.content;
       if (!Array.isArray(msgContent)) continue;
+
+      // Track cursor position per segment to place emojis inline
+      let cursorX = msg.x;
       for (const seg of msgContent) {
-        if (seg.type !== 'emoji') continue;
-        const emojiUrl = seg.emoji?.url;
-        if (!emojiUrl) continue;
-        const tex = this.getEmojiTexture(emojiUrl);
-        if (!tex) continue;
-        const eOff = this.texQuadCount * FLOATS_PER_INSTANCE;
-        const eSize = fs * 1.2;
-        this.texQuadData[eOff + 0] = endCx;
-        this.texQuadData[eOff + 1] = msg.y + (msg.height - eSize) / 2;
-        this.texQuadData[eOff + 2] = eSize;
-        this.texQuadData[eOff + 3] = eSize;
-        this.texQuadData[eOff + 4] = 0;
-        this.texQuadData[eOff + 5] = 1;
-        this.texQuadData[eOff + 6] = 1;
-        this.texQuadData[eOff + 7] = 1;
-        this.texQuadData[eOff + 8] = op;
-        this.texQuadCount++;
-        endCx += eSize;
+        if (seg.type === 'text') {
+          // Advance cursor past each text character using glyph widths
+          const text = seg.content ?? '';
+          for (let ci = 0; ci < text.length; ci++) {
+            const gi = this.atlas?.glyphs.get(text.codePointAt(ci) ?? 0x20);
+            cursorX += (gi?.advanceWidth ?? fs * 0.7) * scale;
+          }
+        } else if (seg.type === 'emoji') {
+          const emojiUrl = seg.emoji?.url;
+          if (!emojiUrl) continue;
+          const tex = this.getEmojiTexture(emojiUrl);
+          if (!tex) continue;
+          const eOff = this.texQuadCount * FLOATS_PER_INSTANCE;
+          const eSize = fs * 1.2;
+          this.texQuadData[eOff + 0] = cursorX;
+          this.texQuadData[eOff + 1] = msg.y + (msg.height - eSize) / 2;
+          this.texQuadData[eOff + 2] = eSize;
+          this.texQuadData[eOff + 3] = eSize;
+          this.texQuadData[eOff + 4] = 0;
+          this.texQuadData[eOff + 5] = 1;
+          this.texQuadData[eOff + 6] = 1;
+          this.texQuadData[eOff + 7] = 1;
+          this.texQuadData[eOff + 8] = op;
+          this.texQuadCount++;
+          cursorX += eSize;
+        }
       }
     }
   }

@@ -217,7 +217,8 @@ export function buildSDFInstances(
   opacityConfig: OpacityConfig | null,
   now: number,
   translationMode: string | undefined,
-  texQuadData?: Float32Array
+  texQuadData?: Float32Array,
+  precomputedOpacities?: Map<number, number>
 ): { instanceCount: number; texQuadCount: number } {
   let instanceCount = 0;
   let texQuadCount = 0;
@@ -230,16 +231,24 @@ export function buildSDFInstances(
     // Defensive: skip messages with missing message payload (structured clone fault)
     if (!msg.message) continue;
 
-    const elapsed = msg.startTime > 0 ? Math.max(0, now - msg.startTime) : 0;
-    const op = computeMessageOpacity(
-      // computeMessageOpacity expects a minimal shape; SharedMessage.message satisfies it
-      msg.message as Parameters<typeof computeMessageOpacity>[0],
-      elapsed,
-      msg.duration,
-      msg.laneIndex >= 0,
-      msg.speedTier,
-      opacityConfig
-    );
+    // Use precomputed opacity if provided (avoids duplicate computation per frame)
+    const msgIndex = messages.indexOf(msg);
+    const precomputedOp = precomputedOpacities?.get(msgIndex);
+    const op =
+      precomputedOp !== undefined
+        ? precomputedOp
+        : (() => {
+            const elapsed = msg.startTime > 0 ? Math.max(0, now - msg.startTime) : 0;
+            return computeMessageOpacity(
+              // computeMessageOpacity expects a minimal shape; SharedMessage.message satisfies it
+              msg.message as Parameters<typeof computeMessageOpacity>[0],
+              elapsed,
+              msg.duration,
+              msg.laneIndex >= 0,
+              msg.speedTier,
+              opacityConfig
+            );
+          })();
     if (op <= 0) continue;
 
     const text = getRenderText(msg, translationMode);
