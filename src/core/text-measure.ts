@@ -148,6 +148,12 @@ export function measureTextWidth(text: string, font: string): number {
     if (entries.size === 0) widthCache.delete(oldestFont);
   }
 
+  // Populate space-width cache for this font (avoids repeated measureText calls)
+  if (text === ' ') {
+    spaceWidthCache.set(font, width);
+    return width;
+  }
+
   // Insert into two-level cache
   let innerCache = widthCache.get(font);
   if (!innerCache) {
@@ -156,11 +162,6 @@ export function measureTextWidth(text: string, font: string): number {
   }
   innerCache.set(text, width);
   totalCacheEntries++;
-
-  // Populate space-width cache for this font (avoids repeated measureText calls)
-  if (text === ' ') {
-    spaceWidthCache.set(font, width);
-  }
 
   return width;
 }
