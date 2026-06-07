@@ -192,7 +192,7 @@ export class RenderWorkerManagerWebGL2 {
     this.worker?.postMessage({ type: 'addMessages', messages });
   }
 
-  updateConfig(settings: OverlaySettings): void {
+  updateSettings(settings: OverlaySettings): void {
     const config = RenderWorkerManagerWebGL2.buildWorkerConfig(settings);
     this.worker?.postMessage({ type: 'updateConfig', config });
   }

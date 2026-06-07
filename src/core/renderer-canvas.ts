@@ -1371,7 +1371,7 @@ export class CanvasRenderer extends RendererBase {
     this.invFadeDuration = 1 / Math.max(1, settings.fadeDurationMs);
 
     // Sync settings to render worker when off-main-thread mode is active
-    this.workerManager.syncSettings(settings);
+    this.workerManager.updateSettings(settings);
 
     // When translation is disabled, clear translated text from all active
     // messages so they revert to showing only the original text on the next frame.

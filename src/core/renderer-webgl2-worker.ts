@@ -86,7 +86,7 @@ export class RendererWebGL2Worker extends RendererBase {
 
   updateSettings(settings: OverlaySettings, options?: { resetState?: boolean }): void {
     super.updateSettings(settings, options);
-    this.workerManager.updateConfig(settings);
+    this.workerManager.updateSettings(settings);
   }
 
   protected onPause(): void {

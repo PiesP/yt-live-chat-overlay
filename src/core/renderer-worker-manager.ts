@@ -307,7 +307,7 @@ export class RenderWorkerManager {
   }
 
   /** Send updated settings to the render worker. */
-  syncSettings(settings: OverlaySettings): void {
+  updateSettings(settings: OverlaySettings): void {
     if (!this.worker) return;
     this.worker.postMessage({
       type: 'updateConfig',
