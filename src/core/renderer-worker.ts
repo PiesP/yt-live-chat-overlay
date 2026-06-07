@@ -1206,16 +1206,30 @@ const siftDown = (idx: number): void => heapSiftDown(laneHeap, laneIndexToHeapIn
 
 let statsFrameCounter = 0;
 
+/** Grace period (ms) before self-idling — matches main thread. */
+const IDLE_GRACE_PERIOD_MS = 500;
+let idleSince: number | null = null;
+
 function startRenderLoop(): void {
   if (animFrameId !== null) return;
 
   function frame(_t: number): void {
     if (isDestroyed) return;
     renderFrame();
-    // Self-idle: stop the rAF loop when there's nothing to do.
+    // Self-idle with grace period to prevent rAF start/stop thrashing
+    // during sparse chat intervals.
     if (activeMessages.length === 0 && pendingQueue.length === 0 && retryQueue.length === 0) {
-      animFrameId = null;
-      return;
+      const now = performance.now();
+      if (idleSince === null) {
+        idleSince = now;
+      } else if (now - idleSince >= IDLE_GRACE_PERIOD_MS) {
+        animFrameId = null;
+        idleSince = null;
+        return;
+      }
+      // Continue the loop during the grace period.
+    } else {
+      idleSince = null; // reset — not idle anymore
     }
     animFrameId = requestAnimationFrame(frame);
   }

@@ -163,7 +163,7 @@ class WebGL2RenderWorker {
   // Collections
   private readonly activeMessages: ActiveMessage[] = [];
   private readonly instanceData = new Float32Array(MAX_INSTANCES * FLOATS_PER_INSTANCE);
-  private readonly pendingQueue = new PriorityBucketQueue();
+  private readonly pendingQueue = new PriorityBucketQueue<WorkerMessage>();
   private readonly retryQueue: WorkerMessage[] = [];
   private readonly emojiTextures = new Map<string, WebGLTexture>();
   private readonly authorPhotoTextures = new Map<string, WebGLTexture>();
@@ -251,11 +251,9 @@ class WebGL2RenderWorker {
     while (!this.pendingQueue.isEmpty) {
       if (this.activeMessages.length >= maxMessages) break;
 
-      // biome-ignore lint/suspicious/noExplicitAny: PriorityBucketQueue typed for ChatMessage; WorkerMessage is serializable subset
-      const raw = this.pendingQueue.dequeue() as any as WorkerMessage | undefined;
-      if (!raw) break;
+      const msg = this.pendingQueue.dequeue();
+      if (!msg) break;
 
-      const msg = raw as WorkerMessage;
       const fontSize = cfg.fontSize;
       let lh = Math.ceil(fontSize * 1.4);
       // Add translation height when dual mode is enabled (translation renders below the message)
@@ -304,8 +302,7 @@ class WebGL2RenderWorker {
     // Refill from retry queue
     if (this.pendingQueue.isEmpty && this.retryQueue.length > 0) {
       for (const m of this.retryQueue) {
-        // biome-ignore lint/suspicious/noExplicitAny: PriorityBucketQueue typed for ChatMessage; WorkerMessage is serializable subset
-        (this.pendingQueue as any).enqueue(m, this.getWorkerMessagePriority(m));
+        this.pendingQueue.enqueue(m, this.getWorkerMessagePriority(m));
       }
       this.retryQueue.length = 0;
     }
@@ -476,15 +473,13 @@ class WebGL2RenderWorker {
       if (this.pendingQueue.size >= cfg.queueMaxSize) {
         const lowest = this.pendingQueue.peekLowest();
         if (lowest) {
-          const lowestMsg = lowest as unknown as WorkerMessage;
-          if (priority <= this.getWorkerMessagePriority(lowestMsg)) {
+          if (priority <= this.getWorkerMessagePriority(lowest)) {
             continue;
           }
         }
         this.pendingQueue.dropLowest();
       }
-      // biome-ignore lint/suspicious/noExplicitAny: PriorityBucketQueue typed for ChatMessage; WorkerMessage is serializable subset
-      (this.pendingQueue as any).enqueue(msg, priority);
+      this.pendingQueue.enqueue(msg, priority);
     }
   }
 

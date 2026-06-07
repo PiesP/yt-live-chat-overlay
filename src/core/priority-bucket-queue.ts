@@ -19,9 +19,9 @@ import type { ChatMessage } from '@app-types';
  * Buckets are compacted when the offset exceeds half the array
  * length, preventing unbounded memory growth.
  */
-export class PriorityBucketQueue {
+export class PriorityBucketQueue<T = ChatMessage> {
   /** Priority → { messages array, read offset } */
-  private readonly buckets = new Map<number, { msgs: ChatMessage[]; offset: number }>();
+  private readonly buckets = new Map<number, { msgs: T[]; offset: number }>();
   /** Known priority levels sorted descending for efficient dequeue scan. */
   private priorityLevels: number[] = [];
   private _size = 0;
@@ -40,7 +40,7 @@ export class PriorityBucketQueue {
    * Add a message to its priority bucket. O(1).
    * Dynamically registers new priority levels on first encounter.
    */
-  enqueue(message: ChatMessage, priority: number): void {
+  enqueue(message: T, priority: number): void {
     let entry = this.buckets.get(priority);
     if (!entry) {
       entry = { msgs: [], offset: 0 };
@@ -57,7 +57,7 @@ export class PriorityBucketQueue {
    * O(k) where k = number of priority levels (~6).
    * Returns undefined if the queue is empty.
    */
-  dequeue(): ChatMessage | undefined {
+  dequeue(): T | undefined {
     for (const prio of this.priorityLevels) {
       const entry = this.buckets.get(prio);
       if (!entry) continue;
@@ -82,7 +82,7 @@ export class PriorityBucketQueue {
    * Peek at the highest-priority message without removing it.
    * Returns undefined if the queue is empty.
    */
-  peek(): ChatMessage | undefined {
+  peek(): T | undefined {
     for (const prio of this.priorityLevels) {
       const entry = this.buckets.get(prio);
       if (!entry) continue;
@@ -97,7 +97,7 @@ export class PriorityBucketQueue {
    * than anything currently in the queue (for queue-full displacement).
    * Returns undefined if the queue is empty.
    */
-  peekLowest(): ChatMessage | undefined {
+  peekLowest(): T | undefined {
     for (let i = this.priorityLevels.length - 1; i >= 0; i--) {
       const prio = this.priorityLevels[i];
       if (prio === undefined) continue;
@@ -135,7 +135,7 @@ export class PriorityBucketQueue {
    * need to be retried (e.g., collision retries). Each message
    * is re-inserted into its priority bucket.
    */
-  refill(messages: ChatMessage[], getPriority: (msg: ChatMessage) => number): void {
+  refill(messages: T[], getPriority: (msg: T) => number): void {
     for (const msg of messages) {
       this.enqueue(msg, getPriority(msg));
     }
