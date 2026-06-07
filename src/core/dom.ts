@@ -174,23 +174,22 @@ export const findPlayerContainerElement = async (
 export const isAbortError = (error: unknown): boolean =>
   error instanceof DOMException && error.name === 'AbortError';
 
-/** Clear a timeout timer and null the reference. Idempotent if already null. */
-export const clearSafeTimeout = (timer: ReturnType<typeof setTimeout> | null): null => {
-  if (timer !== null) clearTimeout(timer);
+const clearSafe = <T>(value: T | null, clearFn: (v: T) => void): null => {
+  if (value !== null) clearFn(value);
   return null;
 };
+
+/** Clear a timeout timer and null the reference. Idempotent if already null. */
+export const clearSafeTimeout = (timer: ReturnType<typeof setTimeout> | null): null =>
+  clearSafe(timer, clearTimeout);
 
 /** Clear an interval timer and null the reference. Idempotent if already null. */
-export const clearSafeInterval = (timer: ReturnType<typeof setInterval> | null): null => {
-  if (timer !== null) clearInterval(timer);
-  return null;
-};
+export const clearSafeInterval = (timer: ReturnType<typeof setInterval> | null): null =>
+  clearSafe(timer, clearInterval);
 
 /** Cancel an animation frame handle and null the reference. */
-export const clearSafeAnimationFrame = (handle: number | null): null => {
-  if (handle !== null) cancelAnimationFrame(handle);
-  return null;
-};
+export const clearSafeAnimationFrame = (handle: number | null): null =>
+  clearSafe(handle, cancelAnimationFrame);
 
 /** Iterate over slot indices for a multi-slot placement. */
 export const forEachSlot = (
