@@ -92,6 +92,9 @@ export const FAR_LAYER_DESATURATION_FACTOR = 0.3;
  *  to produce the actual stroke width. */
 export const OUTLINE_STROKE_SCALE = 0.85;
 
+/** Milliseconds to seconds conversion divisor. */
+export const MS_TO_S = 1000;
+
 // ── Shared utility functions ────────────────────────────────────────────────
 
 /** Simple djb2-like hash of a string to a 0-1 float for tier assignment. */

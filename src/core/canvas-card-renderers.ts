@@ -18,6 +18,7 @@ import {
 import type { CardConfig } from '@core/card-config';
 import { computeReadableTextColor, toRgba } from '@core/color-utils';
 import { DEFAULT_TEXT_COLOR, rendererLayout, spacing } from '@core/design-tokens';
+import { MS_TO_S } from '@core/renderer-constants';
 import { measureTextHeight } from '@core/text-measure';
 
 // ── SuperChat card ───────────────────────────────────────────────────────────
@@ -126,7 +127,7 @@ function renderCardDecoration(
     ctx.restore();
   } else if (config.decoration === 'pulsingBorder' && config.pulsingBorder) {
     const pb = config.pulsingBorder;
-    const pulse = Math.sin((elapsed / 1000) * Math.PI) * pb.amplitude + pb.baseAlpha;
+    const pulse = Math.sin((elapsed / MS_TO_S) * Math.PI) * pb.amplitude + pb.baseAlpha;
     ctx.save();
     drawRoundRect(ctx, x, y, w, h, config.cardRadius);
     ctx.strokeStyle = `rgba(${pb.borderRgb.r}, ${pb.borderRgb.g}, ${pb.borderRgb.b}, ${pulse})`;
