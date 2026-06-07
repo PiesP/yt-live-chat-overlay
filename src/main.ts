@@ -201,8 +201,11 @@ const stopPreviousAppInstance = (): void => {
   }
 
   log.debug('Stopping previous instance before re-init');
-  window.__ytChatOverlay.stop();
-  window.__ytChatOverlay = undefined;
+  try {
+    window.__ytChatOverlay.stop();
+  } finally {
+    window.__ytChatOverlay = undefined;
+  }
 };
 
 async function initApp(): Promise<void> {
@@ -213,6 +216,7 @@ async function initApp(): Promise<void> {
 
     const app = new App();
     await app.start();
+    registerMenuCommands();
 
     window.__ytChatOverlay = app;
     log.info('App instance exposed to window.__ytChatOverlay');
@@ -221,7 +225,6 @@ async function initApp(): Promise<void> {
   }
 }
 
-registerMenuCommands();
 main();
 
 function registerMenuCommands(): void {
