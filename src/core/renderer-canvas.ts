@@ -633,6 +633,17 @@ export class CanvasRenderer extends RendererBase {
     const mode = this.settings.danmakuMode;
     const isScrolling = mode === 'scroll' || mode === 'reverse';
 
+    // Pre-compute frame-level render context to avoid per-message allocation churn.
+    // fontSize, fontWeight, fontFamily, outlineWidthPx, and outlineOpacity are
+    // constant across all messages within a single frame.
+    const frameCtx = {
+      fontSize: this.settings.fontSize,
+      fontWeight: this.settings.fontWeight,
+      fontFamily: this.settings.fontFamily,
+      outlineWidthPx: this.settings.outline.widthPx,
+      outlineOpacity: this.settings.outline.opacity,
+    };
+
     // Recalculate lane utilization BEFORE drainQueue so anti-block sees
     // accurate state. Previously resetBatch() was inside drainQueue() and
     // never called when anti-block was active, causing a deadlock:
@@ -722,16 +733,12 @@ export class CanvasRenderer extends RendererBase {
               snappedX,
               snappedY,
               {
+                ...frameCtx,
                 showAuthor: this.settings.showAuthor[renderMessage.authorType],
-                fontSize: this.settings.fontSize,
-                fontWeight: this.settings.fontWeight,
-                fontFamily: this.settings.fontFamily,
                 color:
                   this.settings.preserveUserColor && renderMessage.userColor
                     ? renderMessage.userColor
                     : this.settings.colors[renderMessage.authorType],
-                outlineWidthPx: this.settings.outline.widthPx,
-                outlineOpacity: this.settings.outline.opacity,
               },
               this.textBitmapCache,
               (url: string) => this.imageFetchManager.emojiCache.get(url),

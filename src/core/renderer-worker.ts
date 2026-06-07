@@ -286,19 +286,22 @@ let pauseStartTime = 0;
 let invFadeMs = 0;
 let ageFadeRate = 0;
 let opacityConfig: OpacityConfig | null = null;
+let boundGetFont: (fontSize: number) => string = (fs: number) => `${fs}px sans-serif`;
 
 /** Recompute cached values derived from config (called on init + updateConfig). */
 function recomputeConfigDerived(): void {
   if (!config) return;
-  invFadeMs = config.fadeDurationMs > 0 ? 1 / Math.max(1, config.fadeDurationMs) : 0;
-  ageFadeRate = 1 / config.maxMessageAgeMs;
+  const c = config; // narrow for closure safety (module-level let config)
+  invFadeMs = c.fadeDurationMs > 0 ? 1 / Math.max(1, c.fadeDurationMs) : 0;
+  ageFadeRate = 1 / c.maxMessageAgeMs;
+  boundGetFont = (fontSize: number): string => `${c.fontWeight} ${fontSize}px ${c.fontFamily}`;
   opacityConfig = {
-    baseOpacity: config.opacity,
-    fadeDurationMs: config.fadeDurationMs,
+    baseOpacity: c.opacity,
+    fadeDurationMs: c.fadeDurationMs,
     invFadeDuration: invFadeMs,
-    backlogOpacityMultiplier: config.backlogOpacityMultiplier,
-    depthLayersEnabled: config.depthLayersEnabled,
-    depthFarOpacityMul: config.depthFarOpacityMul,
+    backlogOpacityMultiplier: c.backlogOpacityMultiplier,
+    depthLayersEnabled: c.depthLayersEnabled,
+    depthFarOpacityMul: c.depthFarOpacityMul,
     ageFadeRate,
   };
 }
@@ -1303,7 +1306,7 @@ function renderFrame(): void {
   // ── Render pass: one ctx.globalAlpha per opacity bucket ──
   // Iterate ascending (0→20) — low opacity behind, high opacity on top.
   ctx.textBaseline = 'top';
-  const getFont = (fontSize: number): string => `${cfg.fontWeight} ${fontSize}px ${cfg.fontFamily}`;
+  const getFont = boundGetFont;
 
   for (let bucketIndex = 0; bucketIndex < OPACITY_BUCKETS; bucketIndex++) {
     const entries = opacityBuckets[bucketIndex];
