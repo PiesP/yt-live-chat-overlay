@@ -79,7 +79,7 @@ function prioritySortOrder(kind: ChatMessage['kind']): number {
 }
 
 export class BacklogInjectionController implements Pauseable {
-  private backlogQueue: ChatMessage[] = [];
+  private backlogQueue: (ChatMessage | undefined)[] = [];
   private backlogQueueOffset = 0;
   private backlogSeenIds = new Set<string>();
   private isActive = false;
@@ -137,8 +137,7 @@ export class BacklogInjectionController implements Pauseable {
       return undefined;
     }
     const msg = this.backlogQueue[this.backlogQueueOffset];
-    // biome-ignore lint/style/noNonNullAssertion: marking consumed slot as undefined
-    this.backlogQueue[this.backlogQueueOffset] = undefined!;
+    this.backlogQueue[this.backlogQueueOffset] = undefined;
     this.backlogQueueOffset++;
 
     if (this.backlogQueueOffset > 64) {
