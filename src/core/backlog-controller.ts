@@ -127,14 +127,25 @@ export class BacklogInjectionController implements Pauseable {
   }
 
   /**
-   * Compact the backlog queue when the offset pointer grows large,
-   * avoiding unbounded array growth from consumed entries.
+   * Dequeue the next backlog message using ring-buffer semantics.
+   * Marks the slot as undefined and advances the offset pointer.
+   * When the offset exceeds 64 entries, compacts via slice() to
+   * reclaim memory without splice() overhead on every tick.
    */
-  private compactBacklogQueue(): void {
+  private dequeueBacklog(): ChatMessage | undefined {
+    if (this.backlogQueueOffset >= this.backlogQueue.length) {
+      return undefined;
+    }
+    const msg = this.backlogQueue[this.backlogQueueOffset];
+    // biome-ignore lint/style/noNonNullAssertion: marking consumed slot as undefined
+    this.backlogQueue[this.backlogQueueOffset] = undefined!;
+    this.backlogQueueOffset++;
+
     if (this.backlogQueueOffset > 64) {
-      this.backlogQueue.splice(0, this.backlogQueueOffset);
+      this.backlogQueue = this.backlogQueue.slice(this.backlogQueueOffset);
       this.backlogQueueOffset = 0;
     }
+    return msg;
   }
 
   /**
@@ -328,8 +339,7 @@ export class BacklogInjectionController implements Pauseable {
 
     this.realTimeActivityCount = Math.max(0, this.realTimeActivityCount - 1);
 
-    const message = this.backlogQueue[this.backlogQueueOffset++];
-    this.compactBacklogQueue();
+    const message = this.dequeueBacklog();
     /* v8 ignore next 1 — TypeScript guard: queue non-empty checked above */
     if (!message) return;
     message.isBacklog = true;
