@@ -128,6 +128,7 @@ function createTabs(): HTMLElement {
 }
 
 export const ACTIONS = ['reset', 'export', 'import', 'close'] as const;
+export type ActionType = (typeof ACTIONS)[number];
 
 function createActions(): HTMLDivElement {
   const actions = domDiv('yt-chat-overlay-settings-actions');

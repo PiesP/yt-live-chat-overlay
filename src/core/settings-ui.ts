@@ -12,6 +12,7 @@ import { getActiveLanguage, t } from '@core/i18n';
 import { createLogger } from '@core/logging';
 import { normalizeStoredSettings, SETTINGS_VERSION } from '@core/settings-schema';
 import {
+  type ActionType,
   BACKDROP_ID,
   BUTTON_ID,
   RELOAD_BUTTON_ID,
@@ -314,11 +315,21 @@ export class SettingsUi {
       const target = event.target as HTMLElement | null;
       const actionBtn = target?.closest<HTMLButtonElement>('button[data-action]');
       if (actionBtn) {
-        const action = actionBtn.dataset.action;
-        if (action === 'close') this.close();
-        else if (action === 'reset') this.handleReset();
-        else if (action === 'export') this.handleExport();
-        else if (action === 'import') this.handleImport();
+        const action = actionBtn.dataset.action as ActionType | undefined;
+        switch (action) {
+          case 'close':
+            this.close();
+            break;
+          case 'reset':
+            this.handleReset();
+            break;
+          case 'export':
+            this.handleExport();
+            break;
+          case 'import':
+            this.handleImport();
+            break;
+        }
         return;
       }
     });
