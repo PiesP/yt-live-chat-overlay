@@ -27,15 +27,7 @@ import type { Overlay } from '@core/overlay';
 import { ANTI_BLOCK_FREE_RATIO } from '@core/renderer-constants';
 import { clearTextMeasurementCaches, setTextMeasureCallback } from '@core/text-measure';
 
-/** Renderer-level connection health status for overlay feedback. */
-export const CONNECTION_STATUSES = [
-  'connected',
-  'connecting',
-  'degraded',
-  'disconnected',
-  'standby',
-] as const;
-export type ConnectionStatus = (typeof CONNECTION_STATUSES)[number];
+export type ConnectionStatus = 'connected' | 'connecting' | 'degraded' | 'disconnected' | 'standby';
 
 const log = createLogger('RendererBase');
 

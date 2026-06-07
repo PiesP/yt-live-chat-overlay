@@ -200,17 +200,6 @@ export const statusBarLayout = {
   },
 } as const;
 
-/** @deprecated Use statusBarLayout instead. */
-export const standbyMessageLayout = {
-  fontSize: statusBarLayout.fontSize,
-  paddingX: statusBarLayout.paddingX,
-  paddingY: statusBarLayout.paddingY,
-  bottomOffset: statusBarLayout.bottomOffset,
-  pillRadius: statusBarLayout.pillRadius,
-  fillStyle: statusBarLayout.colors.standby.bg,
-  textFillStyle: statusBarLayout.colors.standby.text,
-} as const;
-
 /**
  * Compute DLIOS animation duration from total travel distance and velocity.
  *

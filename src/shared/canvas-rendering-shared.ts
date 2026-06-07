@@ -15,12 +15,13 @@ import { EMOJI_ALIAS_PATTERN } from '@core/chat-message-helpers';
 import { computeOutlineColor } from '@core/color-utils';
 import { AUTHOR_PHOTO_SHADOW, rendererLayout, spacing } from '@core/design-tokens';
 import { OUTLINE_STROKE_SCALE } from '@core/renderer-constants';
-import {
-  type CharSegment,
-  getFontString,
-  measureTextHeight,
-  measureTextWidth,
-} from '@core/text-measure';
+import { getFontString, measureTextHeight, measureTextWidth } from '@core/text-measure';
+
+/** A char-wrap segment with pre-computed width. */
+interface CharSegment {
+  text: string;
+  width: number;
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────
 

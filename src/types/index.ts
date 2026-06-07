@@ -14,7 +14,7 @@ export type AuthorType = 'normal' | 'member' | 'moderator' | 'owner' | 'verified
  */
 export type LogLevel = 'warn' | 'info' | 'debug';
 type AuthorDisplayKey = 'normal' | 'member' | 'moderator' | 'owner' | 'verified' | 'superChat';
-export type ChatMessageKind = 'text' | 'superchat' | 'membership';
+type ChatMessageKind = 'text' | 'superchat' | 'membership';
 export type DanmakuMode = 'scroll' | 'reverse' | 'top' | 'bottom';
 export type SuperChatTier = 'blue' | 'cyan' | 'green' | 'yellow' | 'orange' | 'magenta' | 'red';
 /** Author rate-limiting preset modes */
@@ -56,7 +56,7 @@ export type FontWeight = 'normal' | 'bold';
 /**
  * Author display settings (per author type)
  */
-export type AuthorDisplaySettings = Record<AuthorDisplayKey, boolean>;
+type AuthorDisplaySettings = Record<AuthorDisplayKey, boolean>;
 
 /**
  * Shared image asset metadata
@@ -87,7 +87,7 @@ type TextContentSegment = {
   content: string;
 };
 
-export interface EmojiContentSegment {
+interface EmojiContentSegment {
   type: 'emoji';
   emoji: ImageAsset;
 }
@@ -143,7 +143,7 @@ export interface ChatMessage {
 /**
  * Color settings for different author types
  */
-export type ColorSettings = Record<AuthorType, string>;
+type ColorSettings = Record<AuthorType, string>;
 
 /**
  * Outline settings for message text
