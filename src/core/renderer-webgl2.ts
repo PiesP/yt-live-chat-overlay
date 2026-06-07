@@ -8,6 +8,7 @@
  */
 
 import type { ChatMessage, OverlaySettings } from '@app-types';
+import { drawAuthorPhoto, drawRoundRect } from '@core/canvas-rendering-shared';
 import { computeOutlineColor } from '@core/color-utils';
 import { rendererLayout } from '@core/design-tokens';
 import type { LanePlacement } from '@core/lane-allocator';
@@ -46,7 +47,6 @@ import {
   SDFAtlasGenerator,
 } from '@core/sdf-atlas';
 import { getFontString, measureTextWidth } from '@core/text-measure';
-import { drawAuthorPhoto, drawRoundRect } from '@shared/canvas-rendering-shared';
 
 const log = createLogger('RendererWebGL2');
 

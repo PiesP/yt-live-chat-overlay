@@ -3,9 +3,6 @@
 
 import type { FontWeight, OverlayDimensions } from '@app-types';
 import { rendererLayout } from '@core/design-tokens';
-import { createLogger } from '@core/logging';
-import { EPSILON as _EPSILON, SPEED_TIER } from '@core/renderer-constants';
-import { getFontString, measureTextHeight } from '@core/text-measure';
 import {
   areSpeedTiersCompatible,
   computeBaseHeadwayPx,
@@ -14,7 +11,10 @@ import {
   heapGetSlotAvailableAt,
   heapSiftDown,
   heapUpdateLane,
-} from '@shared/lane-allocation-shared';
+} from '@core/lane-allocation-shared';
+import { createLogger } from '@core/logging';
+import { EPSILON as _EPSILON, SPEED_TIER } from '@core/renderer-constants';
+import { getFontString, measureTextHeight } from '@core/text-measure';
 
 const log = createLogger('LaneAllocator');
 

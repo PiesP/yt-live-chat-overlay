@@ -31,6 +31,16 @@
 
 import type { ChatMessage, FontWeight } from '@app-types';
 import { ByteLimitedCache } from '@core/byte-limited-cache';
+import {
+  buildWrappedLines,
+  drawAuthorSection,
+  drawRoundRect,
+  type RegularMessageLike,
+  renderRegularMessage,
+  renderSegment,
+  strokeTextOutline,
+  type TextBitmapCache,
+} from '@core/canvas-rendering-shared';
 import type { CardConfigWorker } from '@core/card-config';
 import { EMOJI_ALIAS_PATTERN } from '@core/chat-message-helpers';
 import { toRgba } from '@core/color-utils';
@@ -40,6 +50,14 @@ import {
   rendererLayout,
   spacing,
 } from '@core/design-tokens';
+import {
+  areSpeedTiersCompatible,
+  computeLaneY,
+  computeOccupancyMs as computeOccupancyMsShared,
+  heapGetSlotAvailableAt,
+  heapSiftDown,
+  heapUpdateLane,
+} from '@core/lane-allocation-shared';
 import { LruMap } from '@core/lru-map';
 import {
   ANTI_BLOCK_FREE_RATIO,
@@ -61,24 +79,6 @@ import {
 } from '@core/renderer-constants';
 import { computeMessageOpacity, type OpacityConfig } from '@core/renderer-shared';
 import { getFontString } from '@core/text-measure';
-import {
-  buildWrappedLines,
-  drawAuthorSection,
-  drawRoundRect,
-  type RegularMessageLike,
-  renderRegularMessage,
-  renderSegment,
-  strokeTextOutline,
-  type TextBitmapCache,
-} from '@shared/canvas-rendering-shared';
-import {
-  areSpeedTiersCompatible,
-  computeLaneY,
-  computeOccupancyMs as computeOccupancyMsShared,
-  heapGetSlotAvailableAt,
-  heapSiftDown,
-  heapUpdateLane,
-} from '@shared/lane-allocation-shared';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -459,11 +459,11 @@ const opacityBuckets: Array<Array<{ msg: ActiveMessage; elapsed: number }>> = Ar
 /** Outline stroke scale factor. */
 // OUTLINE_STROKE_SCALE imported from @core/renderer-constants
 
-// strokeTextOutline imported from @shared/canvas-rendering-shared
+// strokeTextOutline imported from @core/canvas-rendering-shared
 
-// renderSegment imported from @shared/canvas-rendering-shared
+// renderSegment imported from @core/canvas-rendering-shared
 
-// renderContentSegments imported from @shared/canvas-rendering-shared
+// renderContentSegments imported from @core/canvas-rendering-shared
 
 // ── Wrapped content segments (text + emoji) ────────────────────────────────
 

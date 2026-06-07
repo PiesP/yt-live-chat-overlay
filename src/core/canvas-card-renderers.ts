@@ -9,16 +9,16 @@
  */
 import type { ChatMessage, OverlaySettings } from '@app-types';
 import type { ByteLimitedCache } from '@core/byte-limited-cache';
-import type { CardConfig } from '@core/card-config';
-import { computeReadableTextColor, toRgba } from '@core/color-utils';
-import { DEFAULT_TEXT_COLOR, rendererLayout, spacing } from '@core/design-tokens';
-import { measureTextHeight } from '@core/text-measure';
 import {
   drawAuthorSection,
   drawRoundRect,
   renderWrappedContentSegments,
   strokeTextOutline,
-} from '@shared/canvas-rendering-shared';
+} from '@core/canvas-rendering-shared';
+import type { CardConfig } from '@core/card-config';
+import { computeReadableTextColor, toRgba } from '@core/color-utils';
+import { DEFAULT_TEXT_COLOR, rendererLayout, spacing } from '@core/design-tokens';
+import { measureTextHeight } from '@core/text-measure';
 
 // ── SuperChat card ───────────────────────────────────────────────────────────
 
