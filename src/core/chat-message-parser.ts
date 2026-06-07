@@ -37,7 +37,7 @@ const EMPTY_MESSAGE_BODY: ParsedMessageBody = Object.freeze({
   visibleLength: 0,
 });
 
-interface ParsedMessageBody {
+export interface ParsedMessageBody {
   text: string;
   content: ContentSegment[];
   visibleLength: number;
@@ -212,7 +212,7 @@ function extractRendererBody(
   return parsedBody;
 }
 
-function isSubstantialMessage(
+export function isSubstantialMessage(
   body: ParsedMessageBody,
   authorType: AuthorType,
   settings: Readonly<OverlaySettings>
@@ -271,7 +271,9 @@ function parseSuperChatInfo(renderer: JsonObject): SuperChatInfo | null {
 // Pure helper functions (module-level, no settings dependency)
 // ---------------------------------------------------------------------------
 
-function extractActionItem(action: JsonObject): JsonObject | null {
+export function extractActionItem(action: JsonObject): JsonObject | null {
+  if (!isRecord(action)) return null;
+
   const addChatItemAction = asRecord(action.addChatItemAction);
   if (addChatItemAction) {
     const item = asRecord(addChatItemAction.item);
@@ -291,7 +293,7 @@ function extractActionItem(action: JsonObject): JsonObject | null {
   return null;
 }
 
-function extractSupportedRenderer(item: JsonObject): SupportedRenderer | null {
+export function extractSupportedRenderer(item: JsonObject): SupportedRenderer | null {
   const textRenderer = asRecord(item.liveChatTextMessageRenderer);
   if (textRenderer) {
     return { kind: 'text', renderer: textRenderer };
@@ -437,13 +439,13 @@ function appendTextSegment(segments: ContentSegment[], content: string): void {
   segments.push({ type: 'text', content });
 }
 
-function countGraphemes(s: string): number {
+export function countGraphemes(s: string): number {
   let count = 0;
   for (const _ of s) count++;
   return count;
 }
 
-function getVisibleContentLength(segments: readonly ContentSegment[]): number {
+export function getVisibleContentLength(segments: readonly ContentSegment[]): number {
   let visibleLength = 0;
 
   for (const segment of segments) {
@@ -460,7 +462,7 @@ function getVisibleContentLength(segments: readonly ContentSegment[]): number {
 }
 
 // ── Author type extraction ───────────────────────────────────────────────────
-function extractAuthorType(value: unknown): AuthorType {
+export function extractAuthorType(value: unknown): AuthorType {
   let resolvedType: AuthorType = 'normal';
 
   if (!Array.isArray(value)) {
@@ -477,7 +479,7 @@ function extractAuthorType(value: unknown): AuthorType {
   return resolvedType;
 }
 
-function classifyAuthorBadge(value: unknown): AuthorType {
+export function classifyAuthorBadge(value: unknown): AuthorType {
   const badgeEntry = asRecord(value);
   if (!badgeEntry) {
     return 'normal';

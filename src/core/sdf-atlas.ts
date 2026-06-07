@@ -86,7 +86,7 @@ export interface SDFAtlas {
 
 // ── Code Point Ranges ────────────────────────────────────────────────────────
 
-function getCodePointRanges(): Array<{ start: number; end: number }> {
+export function getCodePointRanges(): Array<{ start: number; end: number }> {
   return [
     { start: 0x20, end: 0x7e }, // ASCII printable
     { start: 0x00c0, end: 0x024f }, // Latin Extended
@@ -106,7 +106,7 @@ function getCodePointRanges(): Array<{ start: number; end: number }> {
   ];
 }
 
-function collectCodePoints(): number[] {
+export function collectCodePoints(): number[] {
   const cps: number[] = [];
   for (const range of getCodePointRanges()) {
     for (let cp = range.start; cp <= range.end; cp++) {
@@ -122,7 +122,7 @@ function collectCodePoints(): number[] {
  * Safe Float32Array element access for noUncheckedIndexedAccess mode.
  * Returns 0 for out-of-bounds (acts as infinity for min-comparisons).
  */
-function safeGetF32(arr: Float32Array, i: number, size: number): number {
+export function safeGetF32(arr: Float32Array, i: number, size: number): number {
   return i >= 0 && i < size ? (arr[i] ?? 0) : 1e10;
 }
 
@@ -132,7 +132,7 @@ function safeGetF32(arr: Float32Array, i: number, size: number): number {
  * Input: binary alpha buffer (0 = inside glyph, 255 = outside)
  * Output: SDF buffer (0..1, where 0.5 = glyph edge)
  */
-function compute8SSEDT(binary: Uint8Array, width: number, height: number): Float32Array {
+export function compute8SSEDT(binary: Uint8Array, width: number, height: number): Float32Array {
   const size = width * height;
   const INF = 1e10;
 
