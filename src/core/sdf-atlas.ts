@@ -127,12 +127,13 @@ export function safeGetF32(arr: Float32Array, i: number, size: number): number {
 }
 
 /**
- * Two-pass O(n) Euclidean distance transform (8SSEDT algorithm).
+ * Two-pass O(n) Chamfer distance transform (1,2 weight).
+ * Produces approximate signed distance field sufficient for glyph rendering.
  *
  * Input: binary alpha buffer (0 = inside glyph, 255 = outside)
  * Output: SDF buffer (0..1, where 0.5 = glyph edge)
  */
-export function compute8SSEDT(binary: Uint8Array, width: number, height: number): Float32Array {
+export function computeChamferSDF(binary: Uint8Array, width: number, height: number): Float32Array {
   const size = width * height;
   const INF = 1e10;
 
@@ -340,7 +341,7 @@ export class SDFAtlasGenerator {
       binary[i] = imageData.data[i * 4 + 3] ?? 0;
     }
 
-    const sdf = compute8SSEDT(binary, w, h);
+    const sdf = computeChamferSDF(binary, w, h);
 
     return {
       codepoint,
