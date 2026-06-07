@@ -269,7 +269,7 @@ export class SettingsUiForm {
 
   constructor(
     private readonly getSettings: () => Readonly<OverlaySettings>,
-    private readonly onPreview?: (settings: OverlaySettings) => void
+    private readonly onPreview?: () => void
   ) {}
 
   setModal(modal: HTMLDivElement | null): void {
@@ -324,7 +324,7 @@ export class SettingsUiForm {
     if (!this.onPreview) return;
     const handler = (): void => {
       if (this.isUpdating) return;
-      this.onPreview?.(this.collectSettings());
+      this.onPreview?.();
     };
     const inputs = element.querySelectorAll<HTMLElement>('input, select');
     for (const input of inputs) {

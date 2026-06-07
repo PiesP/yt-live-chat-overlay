@@ -88,8 +88,8 @@ export class SettingsUi {
     private readonly onReload?: () => Promise<void>
   ) {
     this.activeTab = this.defaultTabId;
-    this.form = new SettingsUiForm(getSettings, (preview) => {
-      this.queuePreview(preview);
+    this.form = new SettingsUiForm(getSettings, () => {
+      this.queuePreview();
     });
   }
 
@@ -97,10 +97,11 @@ export class SettingsUi {
   private previewTimer: ReturnType<typeof setTimeout> | null = null;
   private static readonly PREVIEW_DEBOUNCE_MS = 100;
 
-  private queuePreview(preview: OverlaySettings): void {
+  private queuePreview(): void {
     this.previewTimer = clearSafeTimeout(this.previewTimer);
     this.previewTimer = setTimeout(() => {
       this.previewTimer = null;
+      const preview = this.form.collectSettings();
       this.onChange(preview);
       // Sync form with normalized values from the settings system
       this.form.populateForm(this.getSettings());
