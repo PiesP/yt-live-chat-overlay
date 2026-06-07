@@ -12,6 +12,7 @@
 
 import { resolve } from 'node:path';
 import { defineConfig, type UserConfig } from 'vite';
+import pkg from './package.json';
 
 const REPO_ROOT = process.cwd();
 const OUT_DIR = resolve(REPO_ROOT, 'dist-extension');
@@ -47,7 +48,7 @@ export default defineConfig((): UserConfig => {
 
     define: {
       __DEV__: JSON.stringify(false),
-      __VERSION__: JSON.stringify(process.env.BUILD_VERSION || '0.36.0'),
+      __VERSION__: JSON.stringify(process.env.BUILD_VERSION || pkg.version),
       __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
       // Suppress import.meta warning in IIFE build — ChromeExtensionWorkerFactory
       // is selected by getWorkerFactory() in extension context, so ViteWorkerFactory
