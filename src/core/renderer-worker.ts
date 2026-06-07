@@ -40,6 +40,7 @@ import {
   rendererLayout,
   spacing,
 } from '@core/design-tokens';
+import { LruMap } from '@core/lru-map';
 import {
   ANTI_BLOCK_FREE_RATIO,
   DRAIN_QUEUE_MAX_SKIP as DRAIN_MAX_SKIP,
@@ -387,7 +388,7 @@ let textBitmapCache: ByteLimitedCache<OffscreenCanvas>;
 let emojiCache: ByteLimitedCache<ImageBitmap>;
 let authorPhotoCache: ByteLimitedCache<ImageBitmap>;
 let stickerCache: ByteLimitedCache<ImageBitmap>;
-const superChatGradientCache = new Map<string, CanvasGradient>();
+const superChatGradientCache = new LruMap<string, CanvasGradient>(64);
 
 // ── Image prefetch utility (semaphore-based concurrency) ──────────────────
 

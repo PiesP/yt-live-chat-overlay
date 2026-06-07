@@ -170,9 +170,11 @@ export class ImageFetchManager {
       this.emojiFetchingStarted.set(seg.emoji.url, performance.now());
       const url = seg.emoji.url;
       const img = new Image();
+      this.inFlightImages.add(img);
       img.crossOrigin = 'anonymous';
       img.src = url;
       img.onload = () => {
+        this.inFlightImages.delete(img);
         this.emojiFetching.delete(url);
         this.emojiFetchingStarted.delete(url);
         this.emojiCache.set(url, img);
@@ -183,6 +185,7 @@ export class ImageFetchManager {
         this.onImageReadyCallback?.(url, 'emoji');
       };
       img.onerror = () => {
+        this.inFlightImages.delete(img);
         this.emojiFetching.delete(url);
         this.emojiFetchingStarted.delete(url);
         this.failedEmojiFetches.set(url, Date.now());
@@ -250,5 +253,10 @@ export class ImageFetchManager {
     }
     this.workerBitmapCache.clear();
     this.bitmapGeneration.clear();
+
+    // Null references to prevent late callbacks from accessing destroyed subsystems.
+    this.renderWorker = null;
+    this.useWorkerMode = false;
+    delete this.onImageReadyCallback;
   }
 }

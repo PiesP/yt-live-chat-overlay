@@ -35,6 +35,7 @@ import type { LanePlacement } from '@core/lane-allocator';
 import { LaneAllocator } from '@core/lane-allocator';
 import { LanguageDetectorService } from '@core/language-detector-service';
 import { createLogger } from '@core/logging';
+import { LruMap } from '@core/lru-map';
 import { MessageActivator } from '@core/message-activator';
 import type { Overlay } from '@core/overlay';
 import { PriorityBucketQueue } from '@core/priority-bucket-queue';
@@ -215,7 +216,7 @@ export class CanvasRenderer extends RendererBase {
     this.settings.textCacheMb * 1_000_000, // configurable MB
     (c) => c.width * c.height * 4 // RGBA bytes
   );
-  private readonly superChatGradientCache = new Map<string, CanvasGradient>();
+  private readonly superChatGradientCache = new LruMap<string, CanvasGradient>(64);
 
   /** Cached message dimensions by message ID. Cleared on settings change. */
   private readonly dimensionCache = new Map<string, { width: number; height: number }>();
