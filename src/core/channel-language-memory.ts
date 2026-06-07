@@ -55,7 +55,7 @@ export class ChannelLanguageMemory {
   set(key: string, lang: TranslationLanguage): void {
     // LRU: delete and re-insert to move to end (most recently used position)
     this.map.delete(key);
-    while (this.map.size >= MAX_ENTRIES) {
+    if (this.map.size >= MAX_ENTRIES) {
       const first = this.map.keys().next().value;
       if (first) this.map.delete(first);
     }

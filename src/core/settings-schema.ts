@@ -394,7 +394,7 @@ export const DEFAULT_SETTINGS = {
   maxConcurrentMessages: 300,
   allowShortTextMessages: false,
   minTextLength: 3,
-  logLevel: 'debug',
+  logLevel: 'warn',
   showAuthor: DEFAULT_SHOW_AUTHOR,
   colors: DEFAULT_COLORS,
   outline: DEFAULT_OUTLINE,
