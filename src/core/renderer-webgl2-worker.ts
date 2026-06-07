@@ -21,6 +21,7 @@ const log = createLogger('RendererWebGL2Worker');
 
 export class RendererWebGL2Worker extends RendererBase {
   private workerManager: RenderWorkerManagerWebGL2;
+  private dimensionsUnsubscribe: (() => void) | null = null;
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
     super(overlay, settings);
@@ -40,6 +41,14 @@ export class RendererWebGL2Worker extends RendererBase {
     this.workerManager.onError = (err) => {
       log.warn('Worker error:', err);
     };
+
+    // Subscribe to player dimension changes so the worker can resize
+    // its internal viewport / lane allocator (fullscreen, theater mode, etc.)
+    this.dimensionsUnsubscribe = overlay.onDimensionsChanged((dims) => {
+      if (dims) {
+        this.workerManager.resize(dims.width, dims.height);
+      }
+    });
 
     // Initialize worker with OffscreenCanvas and config.
     // init() is async but we intentionally don't await it — the worker sends
@@ -97,6 +106,8 @@ export class RendererWebGL2Worker extends RendererBase {
   }
 
   protected onDestroy(): void {
+    this.dimensionsUnsubscribe?.();
+    this.dimensionsUnsubscribe = null;
     this.workerManager.destroy();
   }
 }
