@@ -41,7 +41,7 @@
     },
     // Build Performance
     "incremental": true,
-    "tsBuildInfoFile": ".tsbuildinfo",
+    "tsBuildInfoFile": ".vscode/.tsbuildinfo",
     // Compatibility
     "useDefineForClassFields": true,
     "forceConsistentCasingInFileNames": true,
@@ -54,6 +54,7 @@
   "exclude": [
     "node_modules",
     "dist",
-    "extension"
+    "extension",
+    ".vscode"
   ]
 }
