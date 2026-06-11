@@ -9,7 +9,7 @@ branches:
         required_approving_review_count: 0
         dismiss_stale_reviews: false
         require_code_owner_reviews: false
-        require_last_push_approval: false
+        require_last_push_approval: true
 
       required_status_checks:
         strict: true
