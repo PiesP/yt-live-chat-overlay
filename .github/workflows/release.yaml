@@ -63,18 +63,18 @@ jobs:
           BUILD_VERSION=${{ steps.version.outputs.version }} pnpm build:extension
           BUILD_VERSION=${{ steps.version.outputs.version }} pnpm build:extension:firefox
 
-          # Backup all dists for later steps (survives git checkout)
-          mkdir -p /tmp/dist-backup/userscript
+          # Backup all dists for later steps
+          mkdir -p /tmp/dist-backup/dist
           mkdir -p /tmp/dist-backup/extension-chrome
           mkdir -p /tmp/dist-backup/extension-firefox
-          cp -r dist/* /tmp/dist-backup/userscript/
+          cp -r dist/* /tmp/dist-backup/dist/
           cp -r dist-extension/* /tmp/dist-backup/extension-chrome/
           cp -r dist-extension-firefox/* /tmp/dist-backup/extension-firefox/
 
           # Generate meta.js from userscript header
-          awk 'BEGIN{p=0} /^\/\/ ==UserScript==/{p=1} {if(p) print} /^\/\/ ==\/UserScript==/{exit}' \
-            /tmp/dist-backup/userscript/yt-live-chat-overlay.user.js \
-            > /tmp/dist-backup/userscript/yt-live-chat-overlay.meta.js
+          awk 'BEGIN{p=0} /^\\/\\/ ==UserScript==/{p=1} {if(p) print} /^\\/\\/ ==\\/UserScript==/{exit}' \
+            /tmp/dist-backup/dist/yt-live-chat-overlay.user.js \
+            > /tmp/dist-backup/dist/yt-live-chat-overlay.meta.js
 
           # Create extension ZIPs
           cd /tmp/dist-backup/extension-chrome && zip -r /tmp/dist-backup/extension-chrome.zip . && cd -
@@ -82,7 +82,7 @@ jobs:
 
           # List backed up files for verification
           echo "📦 Built files:"
-          ls -la /tmp/dist-backup/userscript/
+          ls -la /tmp/dist-backup/dist/
           echo ""
           echo "📦 Extension ZIPs:"
           ls -la /tmp/dist-backup/extension-chrome.zip /tmp/dist-backup/extension-firefox.zip
@@ -91,8 +91,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release
-          cp /tmp/dist-backup/userscript/yt-live-chat-overlay.user.js release/
-          cp /tmp/dist-backup/userscript/yt-live-chat-overlay.meta.js release/
+          cp /tmp/dist-backup/dist/yt-live-chat-overlay.user.js release/
+          cp /tmp/dist-backup/dist/yt-live-chat-overlay.meta.js release/
           cp /tmp/dist-backup/extension-chrome.zip release/yt-live-chat-overlay-chrome.zip
           cp /tmp/dist-backup/extension-firefox.zip release/yt-live-chat-overlay-firefox.zip
 
@@ -193,7 +193,7 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_branch: release
-          publish_dir: /tmp/dist-backup/userscript
+          publish_dir: /tmp/dist-backup
           force_orphan: true
 
       - name: 🔄 Purge jsDelivr CDN cache
