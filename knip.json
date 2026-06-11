@@ -4,8 +4,7 @@
   "project": ["src/**/*.ts", "src/**/*.tsx"],
   "paths": {
     "@core/*": ["src/core/*"],
-    "@shared/*": ["src/shared/*"],
-    "@app-types/*": ["src/types/*"],
+    "@app-types": ["src/types/index"],
     "@platform/*": ["src/platform/*"]
   },
   "ignoreBinaries": ["vitest"],
