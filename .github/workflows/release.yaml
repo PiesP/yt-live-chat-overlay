@@ -189,8 +189,6 @@ jobs:
           EOF
 
       - name: 📤 Deploy dist/ to release branch
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           cd /tmp/dist-backup/dist
@@ -199,7 +197,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A
           git commit -m "Release v${{ steps.version.outputs.version }} — dist snapshot"
-          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}"
+          git remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}"
           git push --force origin release
 
       - name: 🔄 Purge jsDelivr CDN cache
