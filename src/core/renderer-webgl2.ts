@@ -457,121 +457,125 @@ export class RendererWebGL2 extends RendererBase {
   }
 
   private renderFrame(now: number): void {
-    const gl = this.gl;
-    const dims = this.overlay.getDimensions();
-    if (!dims) return;
-    if (dims.width !== this.cssWidth || dims.height !== this.cssHeight) {
-      this.cssWidth = dims.width;
-      this.cssHeight = dims.height;
-      this.laneAllocator.reset(dims);
-      // Also resize the overlay canvas
-      if (this.overlay2d) {
-        this.overlay2d.width = Math.ceil(this.cssWidth * this.dpr);
-        this.overlay2d.height = Math.ceil(this.cssHeight * this.dpr);
+    try {
+      const gl = this.gl;
+      const dims = this.overlay.getDimensions();
+      if (!dims) return;
+      if (dims.width !== this.cssWidth || dims.height !== this.cssHeight) {
+        this.cssWidth = dims.width;
+        this.cssHeight = dims.height;
+        this.laneAllocator.reset(dims);
+        // Also resize the overlay canvas
+        if (this.overlay2d) {
+          this.overlay2d.width = Math.ceil(this.cssWidth * this.dpr);
+          this.overlay2d.height = Math.ceil(this.cssHeight * this.dpr);
+        }
       }
-    }
-    gl.viewport(0, 0, Math.ceil(this.cssWidth * this.dpr), Math.ceil(this.cssHeight * this.dpr));
-    gl.clearColor(0, 0, 0, 0);
-    gl.clear(gl.COLOR_BUFFER_BIT);
-    this.drainQueue(now);
-    this.updateMessages(now);
-    this.buildInstances(now);
-    if (this.instanceCount > 0 && this.atlasTexture) {
-      gl.useProgram(this.program);
-      gl.bindVertexArray(this.vao);
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, this.atlasTexture);
-      gl.uniform2f(this.u_viewport, this.cssWidth, this.cssHeight);
-      gl.uniform1f(this.u_atlasSize, ATLAS_SIZE);
-      gl.uniform1f(this.u_cellSize, ATLAS_CELL_SIZE);
-      gl.uniform1f(this.u_distanceRange, SDF_DISTANCE_RANGE);
-      gl.uniform1f(this.u_outlineWidth, this.settings.outline.widthPx / SDF_DISTANCE_RANGE);
-      const oc = this.getOutlineColor();
-      gl.uniform3f(this.u_outlineColor, oc[0], oc[1], oc[2]);
-      gl.uniform1f(this.u_outlineOpacity, this.settings.outline.opacity);
-      gl.uniform1i(this.u_atlas, 0);
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.instanceBuffer);
-      gl.bufferSubData(
-        gl.ARRAY_BUFFER,
-        0,
-        this.instanceData.subarray(0, this.instanceCount * FLOATS_PER_INSTANCE)
-      );
-      gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.instanceCount);
-      gl.bindVertexArray(null);
-    }
-
-    // Second pass: texture-based emoji + card backgrounds
-    if (this.texQuadCount > 0 && this.solidWhiteTex) {
-      gl.useProgram(this.textureProgram);
-      gl.bindVertexArray(this.vao);
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, this.solidWhiteTex);
-      gl.uniform2f(this.u_texViewport, this.cssWidth, this.cssHeight);
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.instanceBuffer);
-      gl.bufferSubData(
-        gl.ARRAY_BUFFER,
-        0,
-        this.texQuadData.subarray(0, this.texQuadCount * FLOATS_PER_INSTANCE)
-      );
-      gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.texQuadCount);
-      gl.bindVertexArray(null);
-    }
-
-    // Canvas2D overlay: card round-rects + author photos
-    if (this.ctx2d) {
-      const dpr = this.dpr;
-      this.ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
-      this.ctx2d.clearRect(0, 0, this.cssWidth, this.cssHeight);
-
-      for (const msg of this.messages) {
-        const elapsed = msg.startTime > 0 ? Math.max(0, now - msg.startTime) : 0;
-        const op = computeMessageOpacity(
-          msg.message,
-          elapsed,
-          msg.duration,
-          msg.laneIndex >= 0,
-          msg.speedTier,
-          this._opacityConfig
+      gl.viewport(0, 0, Math.ceil(this.cssWidth * this.dpr), Math.ceil(this.cssHeight * this.dpr));
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      this.drainQueue(now);
+      this.updateMessages(now);
+      this.buildInstances(now);
+      if (this.instanceCount > 0 && this.atlasTexture) {
+        gl.useProgram(this.program);
+        gl.bindVertexArray(this.vao);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, this.atlasTexture);
+        gl.uniform2f(this.u_viewport, this.cssWidth, this.cssHeight);
+        gl.uniform1f(this.u_atlasSize, ATLAS_SIZE);
+        gl.uniform1f(this.u_cellSize, ATLAS_CELL_SIZE);
+        gl.uniform1f(this.u_distanceRange, SDF_DISTANCE_RANGE);
+        gl.uniform1f(this.u_outlineWidth, this.settings.outline.widthPx / SDF_DISTANCE_RANGE);
+        const oc = this.getOutlineColor();
+        gl.uniform3f(this.u_outlineColor, oc[0], oc[1], oc[2]);
+        gl.uniform1f(this.u_outlineOpacity, this.settings.outline.opacity);
+        gl.uniform1i(this.u_atlas, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.instanceBuffer);
+        gl.bufferSubData(
+          gl.ARRAY_BUFFER,
+          0,
+          this.instanceData.subarray(0, this.instanceCount * FLOATS_PER_INSTANCE)
         );
-        if (op <= 0) continue;
+        gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.instanceCount);
+        gl.bindVertexArray(null);
+      }
 
-        if (msg.message.kind === 'superchat' || msg.message.kind === 'membership') {
-          // Round-rect card background (replaces the flat WebGL2 quad)
-          const pad = 4;
-          const bgColor =
-            msg.message.kind === 'superchat'
-              ? (msg.message.superChat?.backgroundColor ?? '#ff0000')
-              : '#0f0';
-          this.ctx2d.globalAlpha = op * CARD_BG_OPACITY_FACTOR;
-          this.ctx2d.fillStyle = bgColor;
-          drawRoundRect(
-            this.ctx2d,
-            msg.x - pad,
-            msg.y - pad,
-            msg.width + pad * 2,
-            msg.height + pad * 2,
-            6 // corner radius
+      // Second pass: texture-based emoji + card backgrounds
+      if (this.texQuadCount > 0 && this.solidWhiteTex) {
+        gl.useProgram(this.textureProgram);
+        gl.bindVertexArray(this.vao);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, this.solidWhiteTex);
+        gl.uniform2f(this.u_texViewport, this.cssWidth, this.cssHeight);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.instanceBuffer);
+        gl.bufferSubData(
+          gl.ARRAY_BUFFER,
+          0,
+          this.texQuadData.subarray(0, this.texQuadCount * FLOATS_PER_INSTANCE)
+        );
+        gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.texQuadCount);
+        gl.bindVertexArray(null);
+      }
+
+      // Canvas2D overlay: card round-rects + author photos
+      if (this.ctx2d) {
+        const dpr = this.dpr;
+        this.ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
+        this.ctx2d.clearRect(0, 0, this.cssWidth, this.cssHeight);
+
+        for (const msg of this.messages) {
+          const elapsed = msg.startTime > 0 ? Math.max(0, now - msg.startTime) : 0;
+          const op = computeMessageOpacity(
+            msg.message,
+            elapsed,
+            msg.duration,
+            msg.laneIndex >= 0,
+            msg.speedTier,
+            this._opacityConfig
           );
-          this.ctx2d.fill();
-          this.ctx2d.globalAlpha = 1;
+          if (op <= 0) continue;
 
-          // Author photo
-          const photoUrl = msg.message.authorPhotoUrl;
-          if (photoUrl) {
-            const photo = this.loadAuthorPhoto(photoUrl);
-            if (photo?.complete && photo.naturalWidth > 0) {
-              const photoX = msg.x + rendererLayout.paddingH;
-              const photoY = msg.y + rendererLayout.paddingV;
-              drawAuthorPhoto(this.ctx2d, photo, photoX, photoY);
-            } else if (photo && !photo.complete) {
-              // trigger load
-              photo.onload = () => {
-                /* photo will appear next frame */
-              };
+          if (msg.message.kind === 'superchat' || msg.message.kind === 'membership') {
+            // Round-rect card background (replaces the flat WebGL2 quad)
+            const pad = 4;
+            const bgColor =
+              msg.message.kind === 'superchat'
+                ? (msg.message.superChat?.backgroundColor ?? '#ff0000')
+                : '#0f0';
+            this.ctx2d.globalAlpha = op * CARD_BG_OPACITY_FACTOR;
+            this.ctx2d.fillStyle = bgColor;
+            drawRoundRect(
+              this.ctx2d,
+              msg.x - pad,
+              msg.y - pad,
+              msg.width + pad * 2,
+              msg.height + pad * 2,
+              6 // corner radius
+            );
+            this.ctx2d.fill();
+            this.ctx2d.globalAlpha = 1;
+
+            // Author photo
+            const photoUrl = msg.message.authorPhotoUrl;
+            if (photoUrl) {
+              const photo = this.loadAuthorPhoto(photoUrl);
+              if (photo?.complete && photo.naturalWidth > 0) {
+                const photoX = msg.x + rendererLayout.paddingH;
+                const photoY = msg.y + rendererLayout.paddingV;
+                drawAuthorPhoto(this.ctx2d, photo, photoX, photoY);
+              } else if (photo && !photo.complete) {
+                // trigger load
+                photo.onload = () => {
+                  /* photo will appear next frame */
+                };
+              }
             }
           }
         }
       }
+    } catch (err) {
+      log.error('WebGL2 renderFrame error:', err);
     }
   }
 
@@ -582,6 +586,22 @@ export class RendererWebGL2 extends RendererBase {
       this.cssWidth,
       now
     );
+    // Clean up expired messages to prevent unbounded array growth on long streams
+    this.cleanupExpiredMessages(now);
+  }
+
+  private cleanupExpiredMessages(now: number): void {
+    let writeIdx = 0;
+    for (let i = 0; i < this.messages.length; i++) {
+      const msg = this.messages[i];
+      if (!msg) continue;
+      const elapsed = msg.startTime > 0 ? Math.max(0, now - msg.startTime) : 0;
+      // Keep messages that are still visible (not yet finished scrolling)
+      if (elapsed < msg.duration && msg.startTime > 0) {
+        this.messages[writeIdx++] = msg;
+      }
+    }
+    this.messages.length = writeIdx;
   }
 
   private buildInstances(now: number): void {
