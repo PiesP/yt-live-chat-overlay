@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.38.0] - 2026-06-12
+
+### Added
+
+- **WebGL2 worker lane allocator** — Ported the 3-phase speed-isolated lane allocator to the WebGL2 worker path, enabling proper speed-isolated lane assignment for GPU-rendered messages.
+
+### Fixed
+
+- **`GmStorageAdapter.setItem` missing try/catch** — Added error handling to match `LocalStorageAdapter` and `ChromeStorageAdapter` patterns.
+- **WebGL2 worker `slotCount` hardcoded to 1** — Now computed from message height (`Math.max(1, Math.ceil(msg.height / laneHeight))`), matching Canvas2D worker behavior. Prevents potential overlap for multi-slot cards (SuperChat/Membership).
+- **`RenderWorkerManagerWebGL2.restart` doesn't reset `restartAttempts`** — Manual restart now resets the retry counter, preventing permanent failure after 3 auto-retry attempts.
+- **`PriorityBucketQueue.dropLowest` wrong FIFO semantics** — Changed from `pop()` (removes newest) to `splice(entry.offset, 1)` (removes oldest unconsumed), matching documented intent.
+- **WebGL2 main-thread `renderFrame` missing try/catch** — Added error boundary to prevent single message render failure from breaking the entire frame.
+- **WebGL2 main-thread expired message accumulation** — Added `cleanupExpiredMessages()` to prevent unbounded `this.messages` array growth on long streams.
+- **`countCodePoints` missing export** — Added `export` keyword to `countCodePoints` function (renamed from `countGraphemes` in 0.37.x).
+
+### Changed
+
+- **Extracted magic number constants** — `COMPACTION_THRESHOLD_RATIO` (0.5), `BACKLOG_QUEUE_COMPACT_THRESHOLD` (64), `FAILED_EMOJI_FETCH_CAP` (500), `FAILED_EMOJI_FETCH_EVICT_COUNT` (250), `RELOAD_FEEDBACK_DURATION_MS` (1500).
+- **Replaced raw `console.debug` with `createLogger`** in WebGL2 worker for structured logging consistency.
+- **Fixed relative import** in `design-tokens.ts` to use `@core/` path alias.
+- **Renamed `countGraphemes` to `countCodePoints`** — More accurate name (counts Unicode code points, not grapheme clusters).
+
+### Developer
+
+- **Codebase audit (2026-06-12)** — Comprehensive 4-lens parallel audit (Structural/Bugs/Style/Renderer Parity) found and fixed 75 issues. All quality gates pass (`pnpm quality` + `pnpm test` — 26 files, 631 tests).
+
 ## [0.37.0] - 2026-06-03
 
 ### Added
