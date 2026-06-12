@@ -61,6 +61,7 @@ import {
 import { LruMap } from '@core/lru-map';
 import {
   ANTI_BLOCK_FREE_RATIO,
+  ANTI_BLOCK_PRIORITY_THRESHOLD,
   DRAIN_QUEUE_MAX_SKIP as DRAIN_MAX_SKIP,
   desaturateColor,
   EPSILON,
@@ -1489,7 +1490,7 @@ function drainQueue(now: number, width: number, height: number): void {
     if (!entry) continue;
 
     // Anti-block: probabilistically skip low-priority messages when lanes are saturated
-    if (isAntiBlock && entry.priority < 80) {
+    if (isAntiBlock && entry.priority < ANTI_BLOCK_PRIORITY_THRESHOLD) {
       const acceptProb = (1 - laneUtilization) / ANTI_BLOCK_FREE_RATIO;
       if (Math.random() >= acceptProb) {
         skipped++;
@@ -1590,9 +1591,9 @@ function activateMessage(
   // ── Adaptive stagger: reduce delay when pending queue is deep (matches renderer-canvas.ts) ──
   const pendingCount = pendingQueue.length;
   let effectiveMaxStagger = config.staggerMaxDelayMs;
-  if (pendingCount > 30) {
+  if (pendingCount > 50) {
     effectiveMaxStagger = 0;
-  } else if (pendingCount > 10) {
+  } else if (pendingCount > 30) {
     effectiveMaxStagger = Math.floor(config.staggerMaxDelayMs / 2);
   }
 

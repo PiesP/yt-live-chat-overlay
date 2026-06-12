@@ -413,8 +413,9 @@ export class LaneAllocator {
     // ── Phase 2: same-tier busy lane ──
     if (speedMatched && speedMatched.waitMs <= maxWaitMs) return speedMatched;
 
-    // ── Phase 3: fastest-free lane (all message types) ──
-    if (firstBusy && firstBusy.waitMs <= maxWaitMs) return firstBusy;
+    // ── Phase 3: fastest-free lane (real-time only; backlog returns null) ──
+    if (firstBusy && firstBusy.waitMs <= maxWaitMs && speedTier !== SPEED_TIER.BACKLOG)
+      return firstBusy;
     return null;
   }
 

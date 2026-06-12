@@ -43,6 +43,7 @@ import { PriorityBucketQueue } from '@core/priority-bucket-queue';
 import type { ConnectionStatus } from '@core/renderer-base';
 import { RendererBase } from '@core/renderer-base';
 import {
+  ANTI_BLOCK_PRIORITY_THRESHOLD as _ANTI_BLOCK_PRIORITY_THRESHOLD,
   DRAIN_QUEUE_MAX_SKIP as _DRAIN_QUEUE_MAX_SKIP,
   HORIZONTAL_STAGGER_MAX as _HORIZONTAL_STAGGER_MAX,
   HORIZONTAL_STAGGER_PER_STEP as _HORIZONTAL_STAGGER_PER_STEP,
@@ -273,12 +274,7 @@ export class CanvasRenderer extends RendererBase {
   /** Translation opacity scale relative to message opacity. */
   private static readonly TRANSLATION_OPACITY_SCALE = _TRANSLATION_OPACITY_SCALE;
 
-  /**
-   * Priority threshold for anti-block gate: messages with priority >= this
-   * value bypass the anti-block throttle so high-priority content (SuperChat,
-   * Membership) is never blocked by lane saturation.
-   */
-  private static readonly ANTI_BLOCK_PRIORITY_THRESHOLD = 80;
+  private static readonly ANTI_BLOCK_PRIORITY_THRESHOLD = _ANTI_BLOCK_PRIORITY_THRESHOLD;
 
   /** Tier split threshold: hash < this value → Near tier, else Far tier. */
   private static readonly TIER_NEAR_THRESHOLD = _TIER_NEAR_THRESHOLD;

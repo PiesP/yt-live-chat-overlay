@@ -80,6 +80,11 @@ export const TRANSLATION_OPACITY_SCALE = 0.8;
 
 // ── Depth layers (renderer-canvas.ts) ───────────────────────────────────────
 
+/** Priority threshold for anti-block gate: messages with priority >= this
+ *  value bypass the anti-block throttle so high-priority content (SuperChat,
+ *  Membership) is never blocked by lane saturation. */
+export const ANTI_BLOCK_PRIORITY_THRESHOLD = 80;
+
 /** Tier split threshold: hash < this value → Near tier, else Far tier. */
 export const TIER_NEAR_THRESHOLD = 0.3;
 
