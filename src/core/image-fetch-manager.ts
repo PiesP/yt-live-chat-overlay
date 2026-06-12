@@ -5,6 +5,11 @@ import type { ChatMessage, OverlaySettings } from '@app-types';
 import { ByteLimitedCache } from '@core/byte-limited-cache';
 import { clearSafeInterval } from '@core/dom';
 
+/** Maximum number of failed emoji fetch entries before eviction triggers. */
+const FAILED_EMOJI_FETCH_CAP = 500;
+/** Number of entries to evict when the cap is exceeded. */
+const FAILED_EMOJI_FETCH_EVICT_COUNT = 250;
+
 /**
  * ImageFetchManager — handles all image/emoji/sticker loading and caching.
  *
@@ -190,11 +195,11 @@ export class ImageFetchManager {
         this.emojiFetchingStarted.delete(url);
         this.failedEmojiFetches.set(url, Date.now());
         // Cap the failed fetches map to prevent unbounded memory growth.
-        if (this.failedEmojiFetches.size > 500) {
+        if (this.failedEmojiFetches.size > FAILED_EMOJI_FETCH_CAP) {
           let evicted = 0;
           for (const key of this.failedEmojiFetches.keys()) {
             this.failedEmojiFetches.delete(key);
-            if (++evicted >= 250) break;
+            if (++evicted >= FAILED_EMOJI_FETCH_EVICT_COUNT) break;
           }
         }
       };

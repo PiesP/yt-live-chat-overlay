@@ -25,6 +25,7 @@ import { SETTINGS_UI_STYLES } from '@core/settings-ui-styles';
 const log = createLogger('SettingsUi');
 
 const TOAST_DURATION_MS = 2500;
+const RELOAD_FEEDBACK_DURATION_MS = 1500;
 
 export class SettingsUi {
   private playerElement: HTMLElement | null = null;
@@ -229,7 +230,7 @@ export class SettingsUi {
         this.reloadButton.textContent = '\u21BB';
         this.reloadButton.classList.remove('yt-chat-overlay-reload-button--done');
       }
-    }, 1500);
+    }, RELOAD_FEEDBACK_DURATION_MS);
 
     void this.onReload?.();
   }

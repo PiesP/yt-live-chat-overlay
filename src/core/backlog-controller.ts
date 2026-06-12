@@ -33,6 +33,9 @@ import { t } from '@core/i18n';
 import { createLogger } from '@core/logging';
 import type { ObservabilityReporter } from '@core/observability';
 
+/** Offset threshold at which the backlog queue ring buffer is compacted via slice(). */
+const BACKLOG_QUEUE_COMPACT_THRESHOLD = 64;
+
 const log = createLogger('Backlog');
 
 /**
@@ -140,7 +143,7 @@ export class BacklogInjectionController implements Pauseable {
     this.backlogQueue[this.backlogQueueOffset] = undefined;
     this.backlogQueueOffset++;
 
-    if (this.backlogQueueOffset > 64) {
+    if (this.backlogQueueOffset > BACKLOG_QUEUE_COMPACT_THRESHOLD) {
       this.backlogQueue = this.backlogQueue.slice(this.backlogQueueOffset);
       this.backlogQueueOffset = 0;
     }
