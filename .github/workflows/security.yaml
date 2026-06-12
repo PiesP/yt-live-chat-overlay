@@ -63,7 +63,7 @@ jobs:
     name: 🔍 Static Analysis (Semgrep)
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' }}
     permissions:
       contents: read
       security-events: write
@@ -77,13 +77,25 @@ jobs:
 
       - name: 🔍 Run Semgrep scan
         run: |
-          semgrep scan \
-            --config=p/typescript \
-            --config=p/javascript \
-            --config=p/security-audit \
-            --config=p/secrets \
-            --sarif \
-            --output=semgrep.sarif
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            # PR: diff scan on changed files only
+            semgrep scan \
+              --config=p/typescript \
+              --config=p/javascript \
+              --config=p/security-audit \
+              --config=p/secrets \
+              --sarif \
+              --output=semgrep.sarif
+          else
+            # Scheduled/manual: full repo scan
+            semgrep scan \
+              --config=p/typescript \
+              --config=p/javascript \
+              --config=p/security-audit \
+              --config=p/secrets \
+              --sarif \
+              --output=semgrep.sarif
+          fi
 
       - name: 📊 Upload SARIF to GitHub Security
         uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4

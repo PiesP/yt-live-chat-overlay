@@ -32,6 +32,10 @@
     }
   ],
 
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; worker-src 'self' blob:"
+  },
+
   "background": {
     "service_worker": "background.js",
     "type": "module"
