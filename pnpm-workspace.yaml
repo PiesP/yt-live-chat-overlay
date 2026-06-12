@@ -1,13 +1,37 @@
 overrides:
   minimatch@<3.1.3: '>=3.1.3'
   minimatch@<3.1.4: '>=3.1.4'
+
+# ── Supply-chain security ──────────────────────────────────────────────
+# Require 7-day cooling period for new package versions to mitigate
+# supply-chain attacks (compromised packages are typically detected
+# within days). Security-critical packages are exempted below.
+minimumReleaseAge: 10080
+
+# Security-critical packages that bypass the 7-day cooling period:
+#   - minimatch: known supply-chain attack target (CVE-2022-3517)
+minimumReleaseAgeExclude:
+  - minimatch
+
+# ── Build integrity ────────────────────────────────────────────────────
+# Block installation of packages with exotic subdependencies
+# (git URLs, file paths, registries other than npm).
+blockExoticSubdeps: true
+
+# Fail the build if any dependency's build script fails.
+strictDepBuilds: true
+
+# ── Engine enforcement ─────────────────────────────────────────────────
+# Fail if the current Node.js / pnpm version doesn't match engines field.
 engineStrict: true
-lockfileVersion: 3
+
+# ── Lockfile format ─────────────────────────────────────────────────────
+# pnpm manages the lockfile format version automatically (currently v9).
+
+# ── Dependency resolution ──────────────────────────────────────────────
 publicHoistPattern:
   - '*types*'
-  - '*biome*'
 preferFrozenLockfile: true
 autoInstallPeers: true
 strictPeerDependencies: false
 preferOffline: true
-
