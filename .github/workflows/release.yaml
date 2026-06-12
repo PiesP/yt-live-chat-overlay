@@ -72,7 +72,7 @@ jobs:
           cp -r dist-extension-firefox/* /tmp/dist-backup/extension-firefox/
 
           # Generate meta.js from userscript header
-          awk 'BEGIN{p=0} /^\\/\\/ ==UserScript==/{p=1} {if(p) print} /^\\/\\/ ==\\/UserScript==/{exit}' \
+          awk 'BEGIN{p=0} /^\/\/ ==UserScript==/{p=1} {if(p) print} /^\/\/ ==\/UserScript==/{exit}' \
             /tmp/dist-backup/dist/yt-live-chat-overlay.user.js \
             > /tmp/dist-backup/dist/yt-live-chat-overlay.meta.js
 
