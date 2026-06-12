@@ -48,6 +48,7 @@ import {
   heapSiftDown,
   heapUpdateLane,
 } from '@core/lane-allocation-shared';
+import { createLogger } from '@core/logging';
 import { PriorityBucketQueue } from '@core/priority-bucket-queue';
 import {
   EPSILON,
@@ -75,6 +76,8 @@ import {
   type SDFAtlas,
   SDFAtlasGenerator,
 } from '@core/sdf-atlas';
+
+const log = createLogger('RendererWorkerWebGL2');
 
 // ── Types ──
 
@@ -511,9 +514,10 @@ class WebGL2RenderWorker {
       };
 
       this.activeMessages.push(active);
+      const slotCount = Math.max(1, Math.ceil(lh / this.laneHeight));
       this.commitPlacement(
         placement.laneIndex,
-        1,
+        slotCount,
         now2,
         cfg.scrollDurationMaxMs,
         speedTier,
@@ -924,7 +928,7 @@ self.onmessage = (e: MessageEvent) => {
       worker = null;
       break;
     default:
-      console.debug('[WebGL2 Worker] Unknown message type:', type);
+      log.debug('Unknown message type:', type);
       break;
   }
 };
