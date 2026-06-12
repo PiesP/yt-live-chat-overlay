@@ -39,8 +39,22 @@
 
 // ── Imports ──
 import { computeOutlineColor } from '@core/color-utils';
+import { rendererLayout } from '@core/design-tokens';
+import {
+  areSpeedTiersCompatible,
+  computeLaneY,
+  computeOccupancyMs as computeOccupancyMsShared,
+  heapGetSlotAvailableAt,
+  heapSiftDown,
+  heapUpdateLane,
+} from '@core/lane-allocation-shared';
 import { PriorityBucketQueue } from '@core/priority-bucket-queue';
-import { SPEED_TIER, TRANSLATION_FONT_SCALE, TRANSLATION_GAP_PX } from '@core/renderer-constants';
+import {
+  EPSILON,
+  SPEED_TIER,
+  TRANSLATION_FONT_SCALE,
+  TRANSLATION_GAP_PX,
+} from '@core/renderer-constants';
 import type { OpacityConfig } from '@core/renderer-shared';
 import {
   buildSDFInstances,
@@ -168,6 +182,183 @@ class WebGL2RenderWorker {
   private readonly emojiTextures = new Map<string, WebGLTexture>();
   private readonly authorPhotoTextures = new Map<string, WebGLTexture>();
 
+  // Lane allocator state
+  private laneHeap: [number, number][] = [];
+  private laneIndexToHeapIndex: Map<number, number> = new Map();
+  private laneHeight = 0;
+  private numLanes = 0;
+  private speedTierLanes: Map<number, { tier: number; until: number }> = new Map();
+  private collidedLanes: Set<number> = new Set();
+
+  // ── Lane allocator methods ──
+
+  private initLanes(height: number): void {
+    const cfg = this.config;
+    if (!cfg) return;
+    const totalPaddingV = rendererLayout.paddingV * 2;
+    // Fallback: bounding-box height ≈ fontSize * 1.1 when canvas context is unavailable
+    const textHeight = Math.ceil(cfg.fontSize * 1.1);
+    this.laneHeight = Math.max(1, textHeight + totalPaddingV + cfg.laneSpacing);
+    const usableHeight = height * (1 - cfg.safeTop - cfg.safeBottom);
+    this.numLanes = Math.max(1, Math.floor(usableHeight / this.laneHeight));
+
+    this.laneHeap = [];
+    this.laneIndexToHeapIndex.clear();
+    this.speedTierLanes.clear();
+    const now = performance.now();
+    for (let i = 0; i < this.numLanes; i++) {
+      this.laneHeap.push([i, now]);
+      this.laneIndexToHeapIndex.set(i, i);
+    }
+    // Build 4-ary min-heap
+    for (let i = Math.floor((this.laneHeap.length - 2) / 4); i >= 0; i--) {
+      this.siftDown(i);
+    }
+  }
+
+  private siftDown(idx: number): void {
+    heapSiftDown(this.laneHeap, this.laneIndexToHeapIndex, idx);
+  }
+
+  private getSlotAvailableAt(laneIndex: number): number | undefined {
+    return heapGetSlotAvailableAt(
+      this.laneHeap,
+      this.laneIndexToHeapIndex,
+      laneIndex,
+      this.numLanes
+    );
+  }
+
+  private updateLane(laneIdx: number, availableAt: number): void {
+    heapUpdateLane(this.laneHeap, this.laneIndexToHeapIndex, laneIdx, availableAt);
+  }
+
+  private resetBatch(): void {
+    const now = performance.now();
+    for (const [k, v] of this.speedTierLanes) {
+      if (v.until <= now) this.speedTierLanes.delete(k);
+    }
+    this.collidedLanes.clear();
+  }
+
+  private findPlacement(
+    msgHeight: number,
+    speedTier: number
+  ): { laneIndex: number; waitMs: number; laneY: number } | null {
+    if (this.laneHeap.length === 0) return null;
+    this.collidedLanes.clear();
+    const now = performance.now();
+    const slotCount = Math.max(1, Math.ceil(msgHeight / this.laneHeight));
+    const result = this.allocateSingleLane(now, speedTier, slotCount);
+    if (!result) return null;
+    const laneY = computeLaneY(
+      result.laneIndex,
+      this.cssHeight,
+      this.config?.safeTop ?? 0,
+      this.laneHeight
+    );
+    return { ...result, laneY };
+  }
+
+  private allocateSingleLane(
+    now: number,
+    speedTier: number,
+    slotCount: number
+  ): { laneIndex: number; waitMs: number } | null {
+    if (this.laneHeap.length === 0) return null;
+    const maxWaitMs = this.config?.scrollDurationMaxMs ?? 30000;
+    let firstBusy: { laneIndex: number; waitMs: number } | null = null;
+    let speedMatched: { laneIndex: number; waitMs: number } | null = null;
+    let zeroWaitCandidates: number[] | null = null;
+
+    for (let i = 0; i < this.numLanes - slotCount + 1; i++) {
+      let tierOk = true;
+      for (let s = 0; s < slotCount; s++) {
+        const active = this.speedTierLanes.get(i + s);
+        if (active && active.until > now && !areSpeedTiersCompatible(speedTier, active.tier)) {
+          tierOk = false;
+          break;
+        }
+      }
+      if (!tierOk) continue;
+      if (this.collidedLanes.has(i)) continue;
+
+      const avail = this.getSlotAvailableAt(i);
+      if (avail === undefined) continue;
+      const wait = Math.max(0, Math.ceil(avail - now));
+      if (wait > 0) {
+        if (!firstBusy) firstBusy = { laneIndex: i, waitMs: wait };
+        const active = this.speedTierLanes.get(i);
+        if ((!speedMatched || wait < speedMatched.waitMs) && active && active.tier === speedTier) {
+          speedMatched = { laneIndex: i, waitMs: wait };
+        }
+        continue;
+      }
+
+      if (Math.random() < EPSILON) {
+        if (!zeroWaitCandidates) {
+          zeroWaitCandidates = [];
+          for (let j = i + 1; j < this.numLanes - slotCount + 1; j++) {
+            const availJ = this.getSlotAvailableAt(j);
+            if (availJ !== undefined && Math.max(0, Math.ceil(availJ - now)) === 0) {
+              let jTierOk = true;
+              for (let s = 0; s < slotCount; s++) {
+                const activeJ = this.speedTierLanes.get(j + s);
+                if (
+                  activeJ &&
+                  activeJ.until > now &&
+                  !areSpeedTiersCompatible(speedTier, activeJ.tier)
+                ) {
+                  jTierOk = false;
+                  break;
+                }
+              }
+              if (jTierOk) zeroWaitCandidates.push(j);
+            }
+          }
+        }
+        if (zeroWaitCandidates.length > 0) continue;
+      }
+      return { laneIndex: i, waitMs: 0 };
+    }
+
+    if (speedMatched && speedMatched.waitMs <= maxWaitMs) return speedMatched;
+    // Phase 3: fastest-free (real-time only; backlog returns null)
+    if (firstBusy && firstBusy.waitMs <= maxWaitMs && speedTier !== SPEED_TIER.BACKLOG)
+      return firstBusy;
+    return null;
+  }
+
+  private commitPlacement(
+    laneIndex: number,
+    slotCount: number,
+    startTime: number,
+    durationMs: number,
+    speedTier: number,
+    msgWidth?: number
+  ): void {
+    const cfg = this.config;
+    if (!cfg) return;
+    const screenWidth = this.cssWidth;
+    const exitPaddingPx = (cfg.exitPaddingPx as number | undefined) ?? 0;
+    const headwayGapRatio = (cfg.headwayGapRatio as number | undefined) ?? 0.08;
+    const occupancyMs = computeOccupancyMsShared(
+      durationMs,
+      exitPaddingPx,
+      headwayGapRatio,
+      msgWidth,
+      screenWidth
+    );
+    const nextAvailable = startTime + occupancyMs;
+    const until = startTime + durationMs;
+
+    for (let s = 0; s < slotCount; s++) {
+      this.speedTierLanes.set(laneIndex + s, { tier: speedTier, until });
+      this.updateLane(laneIndex + s, nextAvailable);
+      this.collidedLanes.add(laneIndex + s);
+    }
+  }
+
   // ── Helpers ──
 
   private getOutlineColor(): [number, number, number] {
@@ -246,27 +437,54 @@ class WebGL2RenderWorker {
     if (!cfg) return;
 
     const maxMessages = cfg.queueMaxSize;
-    let yCursor = cfg.safeTop;
+
+    // Initialize lanes on first call or when dimensions change
+    if (this.laneHeap.length === 0) {
+      this.initLanes(this.cssHeight);
+    }
+
+    this.resetBatch();
 
     while (!this.pendingQueue.isEmpty) {
       if (this.activeMessages.length >= maxMessages) break;
 
-      const msg = this.pendingQueue.dequeue();
+      const msg = this.pendingQueue.peek();
       if (!msg) break;
 
       const fontSize = cfg.fontSize;
       let lh = Math.ceil(fontSize * 1.4);
-      // Add translation height when dual mode is enabled (translation renders below the message)
       if (cfg.translationEnabled && cfg.translationMode === 'dual') {
         const transFontSize = Math.round(fontSize * TRANSLATION_FONT_SCALE);
         lh += Math.ceil(transFontSize * 1.2) + TRANSLATION_GAP_PX;
       }
-      // Defensive: content may be undefined if the message was serialized
-      // incompletely via structured clone (postMessage transfer edge case)
       const msgContent = msg.content;
-      if (!Array.isArray(msgContent)) continue;
-      const text = msgContent.map((s) => (s.type === 'text' ? s.content : '')).join('');
+      if (!Array.isArray(msgContent)) {
+        this.pendingQueue.dequeue();
+        continue;
+      }
+      const text = msgContent
+        .filter(
+          (
+            s:
+              | { type: string; content: string }
+              | { type: string; emojiUrl: string; emojiAlt?: string }
+          ): s is { type: 'text'; content: string } => s.type === 'text'
+        )
+        .map((s) => s.content)
+        .join('');
       const w = text ? this.estimateTextWidth(text, fontSize) : 0;
+
+      const speedTier = msg.isBacklog ? SPEED_TIER.BACKLOG : SPEED_TIER.MID;
+      const placement = this.findPlacement(lh, speedTier);
+
+      if (!placement) {
+        // No lane available — push to retry queue and stop draining
+        this.pendingQueue.dequeue();
+        this.retryQueue.push(msg);
+        continue;
+      }
+
+      this.pendingQueue.dequeue();
 
       const startX =
         cfg.danmakuMode === 'reverse'
@@ -274,29 +492,33 @@ class WebGL2RenderWorker {
           : cfg.danmakuMode === 'scroll'
             ? this.cssWidth
             : (this.cssWidth - w) / 2;
-      const speedTier = msg.isBacklog ? SPEED_TIER.BACKLOG : SPEED_TIER.MID;
+
       const now2 = performance.now();
 
       const active: ActiveMessage = {
         message: msg,
         x: startX,
-        y: yCursor,
+        y: placement.laneY,
         width: Math.max(1, Math.ceil(w)),
         height: lh,
         startX,
         startTime: now2,
         duration: cfg.scrollDurationMaxMs,
         fadeStartTime: now2,
-        laneIndex: 0,
+        laneIndex: placement.laneIndex,
         speedTier,
         translatedText: null,
       };
 
       this.activeMessages.push(active);
-
-      // Simple vertical stacking
-      yCursor += lh + cfg.laneSpacing;
-      if (yCursor + lh > this.cssHeight - cfg.safeBottom) break;
+      this.commitPlacement(
+        placement.laneIndex,
+        1,
+        now2,
+        cfg.scrollDurationMaxMs,
+        speedTier,
+        Math.ceil(w)
+      );
     }
 
     // Refill from retry queue
@@ -396,6 +618,9 @@ class WebGL2RenderWorker {
     this.cssWidth = this.canvas.width / this.dpr;
     this.cssHeight = this.canvas.height / this.dpr;
 
+    // Initialize lanes
+    this.initLanes(this.cssHeight);
+
     const ctx = this.canvas.getContext('webgl2', {
       alpha: true,
       antialias: false,
@@ -462,6 +687,12 @@ class WebGL2RenderWorker {
       this.cssWidth = payload.width / this.dpr;
       this.cssHeight = payload.height / this.dpr;
       this.gl?.viewport(0, 0, payload.width, payload.height);
+      // Reinitialize lanes when dimensions change
+      this.laneHeap = [];
+      this.laneIndexToHeapIndex.clear();
+      this.speedTierLanes.clear();
+      this.collidedLanes.clear();
+      this.initLanes(this.cssHeight);
     }
   }
 
@@ -538,6 +769,14 @@ class WebGL2RenderWorker {
         for (const m of this.activeMessages) {
           m.startTime += clamped;
         }
+        // Shift lane timers by pause duration
+        for (let i = 0; i < this.laneHeap.length; i++) {
+          const entry = this.laneHeap[i];
+          if (entry) entry[1] += clamped;
+        }
+        for (const [key, entry] of this.speedTierLanes) {
+          this.speedTierLanes.set(key, { tier: entry.tier, until: entry.until + clamped });
+        }
       }
     }
   }
@@ -606,6 +845,12 @@ class WebGL2RenderWorker {
     this.pendingQueue.clear();
     this.retryQueue.length = 0;
     this.pausedAt = 0;
+
+    // Clear lane allocator state
+    this.laneHeap = [];
+    this.laneIndexToHeapIndex.clear();
+    this.speedTierLanes.clear();
+    this.collidedLanes.clear();
 
     if (this.gl) {
       if (this.atlasTexture) this.gl.deleteTexture(this.atlasTexture);
