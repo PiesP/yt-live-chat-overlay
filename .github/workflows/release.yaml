@@ -59,9 +59,19 @@ jobs:
       - name: 🏗️ Build all targets
         run: |
           set -euo pipefail
-          BUILD_VERSION=${{ steps.version.outputs.version }} pnpm build
-          BUILD_VERSION=${{ steps.version.outputs.version }} pnpm build:extension
-          BUILD_VERSION=${{ steps.version.outputs.version }} pnpm build:extension:firefox
+          VERSION=${{ steps.version.outputs.version }}
+
+          # Sync manifest versions before build
+          for manifest in extension/manifest.json extension/manifest.firefox.json; do
+            if [ -f "$manifest" ]; then
+              jq ".version = \"$VERSION\"" "$manifest" > "$manifest.tmp" && mv "$manifest.tmp" "$manifest"
+              echo "Synced $manifest → $VERSION"
+            fi
+          done
+
+          BUILD_VERSION=$VERSION pnpm build
+          BUILD_VERSION=$VERSION pnpm build:extension
+          BUILD_VERSION=$VERSION pnpm build:extension:firefox
 
           # Backup all dists for later steps
           mkdir -p /tmp/dist-backup/dist
