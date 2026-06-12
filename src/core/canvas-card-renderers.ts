@@ -396,9 +396,10 @@ export function renderPaidCard(
       bodyMaxLines,
       textColor,
       fontSize,
-      settings,
+      settings.outline.widthPx,
+      settings.outline.opacity,
       textBitmapCache,
-      emojiCache,
+      emojiCache as unknown as ByteLimitedCache<CanvasImageSource>,
       getFontFn
     );
   }

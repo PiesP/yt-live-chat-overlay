@@ -32,17 +32,17 @@
 import type { ChatMessage, FontWeight } from '@app-types';
 import { ByteLimitedCache } from '@core/byte-limited-cache';
 import {
-  buildWrappedLines,
   drawAuthorSection,
   drawRoundRect,
   type RegularMessageLike,
   renderRegularMessage,
   renderSegment,
+  renderWrappedContentSegments,
+  type SharedContentSegment,
   strokeTextOutline,
   type TextBitmapCache,
 } from '@core/canvas-rendering-shared';
 import type { CardConfigWorker } from '@core/card-config';
-import { EMOJI_ALIAS_PATTERN } from '@core/chat-message-helpers';
 import { toRgba } from '@core/color-utils';
 import {
   computeScrollDuration,
@@ -468,120 +468,6 @@ const opacityBuckets: Array<Array<{ msg: ActiveMessage; elapsed: number }>> = Ar
 
 // ── Wrapped content segments (text + emoji) ────────────────────────────────
 
-/**
- * Render WorkerContentSegment[] with word-wrapping, respecting maxWidth and maxLines.
- *
- * Uses buildWrappedLines for line-breaking (SSOT shared with the
- * dimension estimator), then renders each line via renderSegment (text) or
- * emojiCache (emoji images).
- *
- * @returns The Y position after the last rendered line.
- */
-function renderWrappedContentSegments(
-  ctx: OffscreenCanvasRenderingContext2D,
-  segments: readonly WorkerContentSegment[],
-  x: number,
-  y: number,
-  maxWidth: number,
-  maxLines: number,
-  color: string,
-  fontSize: number,
-  outlineWidthPx: number,
-  outlineOpacity: number,
-  textBitmapCache: TextBitmapCache,
-  emojiCache: ByteLimitedCache<ImageBitmap>,
-  getFontFn: (fontSize: number) => string
-): number {
-  if (segments.length === 0) return y;
-
-  const font = getFontFn(fontSize);
-  const emojiSize = Math.round(fontSize * rendererLayout.emojiSize);
-  const lineHeight = measureTextHeight(fontSize);
-  const ellipsis = '\u2026';
-
-  // Set font once for all measureText calls inside buildWrappedLines
-  ctx.font = font;
-  const { lines } = buildWrappedLines(segments, maxWidth, emojiSize, measureTextCached);
-
-  // ── Render lines (up to maxLines) ────────────────────────────────────
-  const renderLines = lines.length > maxLines ? lines.slice(0, maxLines) : lines;
-  const isTruncated = lines.length > maxLines;
-  let cursorY = y;
-
-  for (let li = 0; li < renderLines.length; li++) {
-    const line = renderLines[li];
-    if (!line) continue;
-    const isLastLine = li === renderLines.length - 1;
-    const needsEllipsis = isLastLine && isTruncated;
-    let cursorX = x;
-    let prevText = false;
-
-    for (const piece of line) {
-      // Space gap between text words
-      if (prevText && piece.type === 'text') {
-        cursorX += ctx.measureText(' ').width;
-      }
-      prevText = piece.type === 'text';
-
-      if (piece.type === 'text') {
-        renderSegment(
-          ctx,
-          piece.text,
-          cursorX,
-          cursorY,
-          color,
-          fontSize,
-          outlineWidthPx,
-          outlineOpacity,
-          textBitmapCache,
-          getFontFn
-        );
-        cursorX += piece.width;
-      } else {
-        // Emoji
-        const img = piece.emojiUrl ? emojiCache.get(piece.emojiUrl) : null;
-        if (img) {
-          ctx.drawImage(img, cursorX, cursorY, emojiSize, emojiSize);
-        } else if (piece.emojiAlt && !EMOJI_ALIAS_PATTERN.test(piece.emojiAlt)) {
-          renderSegment(
-            ctx,
-            piece.emojiAlt,
-            cursorX,
-            cursorY,
-            color,
-            fontSize,
-            outlineWidthPx,
-            outlineOpacity,
-            textBitmapCache,
-            getFontFn
-          );
-        }
-        cursorX += piece.width;
-      }
-    }
-
-    // Append ellipsis if this line was truncated
-    if (needsEllipsis) {
-      renderSegment(
-        ctx,
-        ellipsis,
-        cursorX,
-        cursorY,
-        color,
-        fontSize,
-        outlineWidthPx,
-        outlineOpacity,
-        textBitmapCache,
-        getFontFn
-      );
-    }
-
-    cursorY += lineHeight;
-  }
-
-  return cursorY;
-}
-
 // ── Config-driven paid card renderer (worker variant) ────────────────────────
 
 /** Max cached gradients for renderPaidCardWorker LRU eviction. */
@@ -832,7 +718,7 @@ function renderPaidCardWorker(
     const bodyMaxWidth = w - padH * 2;
     textBottomY = renderWrappedContentSegments(
       ctx,
-      message.content,
+      message.content as readonly SharedContentSegment[],
       textX,
       cursorY + card.bodyMarginTop,
       bodyMaxWidth,
@@ -842,7 +728,7 @@ function renderPaidCardWorker(
       outlineWidthPx,
       outlineOpacity,
       textBitmapCache,
-      emojiCache,
+      emojiCache as unknown as ByteLimitedCache<CanvasImageSource>,
       getFontFn
     );
   }

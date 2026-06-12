@@ -9,7 +9,7 @@
  * and renderer-worker.ts.
  */
 
-import type { ContentSegment, FontWeight, OverlaySettings } from '@app-types';
+import type { FontWeight } from '@app-types';
 import type { ByteLimitedCache } from '@core/byte-limited-cache';
 import { EMOJI_ALIAS_PATTERN } from '@core/chat-message-helpers';
 import { computeOutlineColor } from '@core/color-utils';
@@ -754,18 +754,22 @@ export function renderRegularMessage(
  *
  * @returns The Y position after the last rendered line.
  */
-export function renderWrappedContentSegments(
-  ctx: CanvasRenderingContext2D,
-  segments: readonly ContentSegment[],
+export function renderWrappedContentSegments<
+  TTextBitmapCache extends TextBitmapCache,
+  TEmojiCache extends ByteLimitedCache<CanvasImageSource>,
+>(
+  ctx: AnyCanvasContext,
+  segments: readonly SharedContentSegment[],
   x: number,
   y: number,
   maxWidth: number,
   maxLines: number,
   color: string,
   fontSize: number,
-  settings: OverlaySettings,
-  textBitmapCache: ByteLimitedCache<HTMLCanvasElement>,
-  emojiCache: ByteLimitedCache<HTMLImageElement>,
+  outlineWidthPx: number,
+  outlineOpacity: number,
+  textBitmapCache: TTextBitmapCache,
+  emojiCache: TEmojiCache,
   getFontFn: (fontSize: number) => string
 ): number {
   if (segments.length === 0) return y;
@@ -776,11 +780,8 @@ export function renderWrappedContentSegments(
   const spaceWidth = measureTextWidth(' ', font);
   const ellipsis = '\u2026';
 
-  const { lines } = buildWrappedLines(
-    segments as readonly SharedContentSegment[],
-    maxWidth,
-    emojiSize,
-    (t: string) => measureTextWidth(t, font)
+  const { lines } = buildWrappedLines(segments, maxWidth, emojiSize, (t: string) =>
+    measureTextWidth(t, font)
   );
 
   // ── Render lines (up to maxLines) ────────────────────────────────────
@@ -811,16 +812,16 @@ export function renderWrappedContentSegments(
           cursorY,
           color,
           fontSize,
-          settings.outline.widthPx,
-          settings.outline.opacity,
+          outlineWidthPx,
+          outlineOpacity,
           textBitmapCache,
           getFontFn
         );
         cursorX += piece.width;
       } else {
         // Emoji — same rendering logic as renderContentSegments
-        const cached = emojiCache.get(piece.emojiUrl);
-        const img = cached?.complete && cached.naturalWidth > 0 ? cached : null;
+        const cached = piece.emojiUrl ? emojiCache.get(piece.emojiUrl) : undefined;
+        const img = cached && 'naturalWidth' in cached && cached.naturalWidth > 0 ? cached : null;
         if (img) {
           ctx.drawImage(img, cursorX, cursorY, emojiSize, emojiSize);
         } else if (piece.emojiAlt && !EMOJI_ALIAS_PATTERN.test(piece.emojiAlt)) {
@@ -831,8 +832,8 @@ export function renderWrappedContentSegments(
             cursorY,
             color,
             fontSize,
-            settings.outline.widthPx,
-            settings.outline.opacity,
+            outlineWidthPx,
+            outlineOpacity,
             textBitmapCache,
             getFontFn
           );
@@ -850,8 +851,8 @@ export function renderWrappedContentSegments(
         cursorY,
         color,
         fontSize,
-        settings.outline.widthPx,
-        settings.outline.opacity,
+        outlineWidthPx,
+        outlineOpacity,
         textBitmapCache,
         getFontFn
       );
