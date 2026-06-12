@@ -52,7 +52,11 @@ export class GmStorageAdapter implements StorageAdapter {
 
   async setItem(key: string, value: string): Promise<void> {
     if (typeof GM_setValue === 'undefined') return;
-    GM_setValue(key, value);
+    try {
+      GM_setValue(key, value);
+    } catch {
+      // silently ignore
+    }
   }
 }
 
