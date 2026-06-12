@@ -439,7 +439,7 @@ function appendTextSegment(segments: ContentSegment[], content: string): void {
   segments.push({ type: 'text', content });
 }
 
-function countCodePoints(s: string): number {
+export function countCodePoints(s: string): number {
   let count = 0;
   for (const _ of s) count++;
   return count;
