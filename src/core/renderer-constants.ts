@@ -145,13 +145,13 @@ export function desaturateColor(color: string, factor: number): string {
 }
 
 /** Reusable empty ChatMessage for pool initialization. */
-export const EMPTY_CHAT_MESSAGE: ChatMessage = {
+export const EMPTY_CHAT_MESSAGE: ChatMessage = Object.freeze({
   text: '',
   content: [],
   kind: 'text',
   timestamp: 0,
   authorType: 'normal',
-};
+});
 
 /** Canvas-side message state used by the render loop. */
 export interface CanvasMessage {

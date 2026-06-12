@@ -34,17 +34,20 @@ export class LocalStorageAdapter implements StorageAdapter {
 
 export class GmStorageAdapter implements StorageAdapter {
   async getItem(key: string): Promise<string | null> {
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- GM_getValue may not exist
-    if (typeof GM_getValue === 'undefined') return null;
-    const value = GM_getValue(key);
-    if (value === undefined || value === null) return null;
-    // Some userscript managers (Violentmonkey, Greasemonkey 4+) auto-parse
-    // JSON on GM_getValue, returning an object instead of the raw string.
-    // Re-serialize to string so JSON.parse in the caller works correctly.
-    if (typeof value === 'object') {
-      return JSON.stringify(value);
+    try {
+      if (typeof GM_getValue === 'undefined') return null;
+      const value = GM_getValue(key);
+      if (value === undefined || value === null) return null;
+      // Some userscript managers (Violentmonkey, Greasemonkey 4+) auto-parse
+      // JSON on GM_getValue, returning an object instead of the raw string.
+      // Re-serialize to string so JSON.parse in the caller works correctly.
+      if (typeof value === 'object') {
+        return JSON.stringify(value);
+      }
+      return String(value);
+    } catch {
+      return null;
     }
-    return String(value);
   }
 
   async setItem(key: string, value: string): Promise<void> {
