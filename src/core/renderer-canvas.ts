@@ -126,11 +126,11 @@ function cleanupExpiredMessages(
       }
     }
   }
-  // Array compaction threshold: when more than 50% of the array slots are
+  // Array compaction threshold: when more than half of the array slots are
   // expired, allocate a fresh array via slice() instead of nulling the tail.
   // This avoids keeping garbage-filled tail slots in the array, at the cost
   // of one allocation, which is worthwhile when the majority is garbage.
-  if (writeIdx < oldLength * 0.5) {
+  if (writeIdx < oldLength * COMPACTION_THRESHOLD_RATIO) {
     return { newMessages: messages.slice(0, writeIdx), newLength: writeIdx, anyRemoved };
   }
   // Otherwise, truncate the array to remove stale references (no allocation of a new array).
@@ -146,6 +146,9 @@ function applyPausedDurationToMessages(messages: CanvasMessage[], pausedMs: numb
 }
 
 const log = createLogger('RendererCanvas');
+
+/** Ratio of expired slots above which compaction allocates a fresh array via slice(). */
+const COMPACTION_THRESHOLD_RATIO = 0.5;
 
 export class CanvasRenderer extends RendererBase {
   private canvas: HTMLCanvasElement | null = null;
