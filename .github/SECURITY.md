@@ -50,8 +50,8 @@ We aim to respond within **7 business days** and coordinate disclosure once a fi
 We use several mechanisms to keep the codebase secure:
 
 - **GitHub Security Suite** (`.github/workflows/security.yaml`)
-  - Dependency scanning with OSV Scanner
-  - Static analysis with Semgrep on scheduled/manual security runs
+  - Dependency scanning with OSV Scanner (PR diff + scheduled full scans)
+  - Static analysis with Semgrep on PR, scheduled, and manual runs
 - **Dependabot** (`.github/dependabot.yaml`)
   - Automated grouped updates for npm packages and GitHub Actions
 - **Quality & Testing**

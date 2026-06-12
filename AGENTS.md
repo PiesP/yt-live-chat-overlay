@@ -94,6 +94,7 @@ pnpm clean           # rm -rf dist
 - Keep the bundle small and efficient.
 - Use `MutationObserver` for DOM change detection where applicable.
 - Use `createLogger('[ModuleName]')` from `@core/logging` for structured runtime logging.
+- **Security**: Avoid `eval()`, `new Function()`, or string-based timers. Use `textContent` instead of `innerHTML`. Do not inject raw HTML. Sanitize any user-controlled data before DOM insertion.
 
 ## Code Architecture
 
