@@ -189,6 +189,8 @@ jobs:
           EOF
 
       - name: 📤 Deploy dist/ to release branch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           cd /tmp/dist-backup/dist
