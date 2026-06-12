@@ -122,8 +122,8 @@ export class PriorityBucketQueue<T = ChatMessage> {
       const entry = this.buckets.get(prio);
       if (!entry) continue;
       if (entry.offset < entry.msgs.length) {
-        // Remove the newest message at this priority level (end of array)
-        entry.msgs.pop();
+        // Remove the oldest unconsumed message at this priority level (FIFO)
+        entry.msgs.splice(entry.offset, 1);
         this._size--;
         return;
       }

@@ -168,6 +168,9 @@ export class RenderWorkerManagerWebGL2 {
   restart(): boolean {
     if (!this.canvas || !this.config) return false;
 
+    // Reset retry counter so manual restart always gets a fresh attempt
+    this.restartAttempts = 0;
+
     // Create a new canvas element since control of old one was transferred
     const newCanvas = document.createElement('canvas');
     newCanvas.style.cssText = this.canvas.style.cssText;
