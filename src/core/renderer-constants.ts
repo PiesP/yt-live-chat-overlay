@@ -67,6 +67,10 @@ export const STAGGER_BATCH_MAX = 3;
 /** Exponential scale factor for stagger delay (negative value = decreasing delay). */
 export const STAGGER_EXP_SCALE = 25;
 
+/** Stagger queue depth thresholds for adaptive stagger. */
+export const STAGGER_QUEUE_HIGH = 50;
+export const STAGGER_QUEUE_MED = 30;
+
 // ── Translation (renderer-canvas.ts) ────────────────────────────────────────
 
 /** Translation font scale relative to main font size. */

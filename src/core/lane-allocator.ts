@@ -13,7 +13,7 @@ import {
   heapUpdateLane,
 } from '@core/lane-allocation-shared';
 import { createLogger } from '@core/logging';
-import { EPSILON as _EPSILON, SPEED_TIER } from '@core/renderer-constants';
+import { EPSILON, SPEED_TIER } from '@core/renderer-constants';
 import { getFontString, measureTextHeight } from '@core/text-measure';
 
 const log = createLogger('LaneAllocator');
@@ -33,7 +33,7 @@ export interface LanePlacement {
   verticalOffset: number;
 }
 
-interface LaneAllocatorOptions {
+export interface LaneAllocatorOptions {
   safeTop: number;
   safeBottom: number;
   fontSize: number;
@@ -111,7 +111,7 @@ export class LaneAllocator {
    * next one below. Prevents all traffic from consolidating on lane 0
    * when the incoming message rate is low.
    */
-  private static readonly EPSILON = _EPSILON;
+  private static readonly EPSILON = EPSILON;
 
   constructor(private readonly options: LaneAllocatorOptions) {}
 
@@ -286,6 +286,11 @@ export class LaneAllocator {
       for (let i = 0; i < this.heap.length; i++) {
         const entry = this.heap[i];
         if (entry) this.laneIndexToHeapIndex.set(entry[0], i);
+      }
+      // Re-heapify to restore min-heap invariant (corrupted heap may remain
+      // after index map rebuild — the heap array itself could be out of order).
+      for (let i = Math.floor((this.heap.length - 2) / 4); i >= 0; i--) {
+        this.siftDown(i);
       }
     }
 

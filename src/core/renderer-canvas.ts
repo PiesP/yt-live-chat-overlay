@@ -50,6 +50,8 @@ import {
   OPACITY_BUCKET_COUNT as _OPACITY_BUCKET_COUNT,
   STAGGER_BATCH_MAX as _STAGGER_BATCH_MAX,
   STAGGER_EXP_SCALE as _STAGGER_EXP_SCALE,
+  STAGGER_QUEUE_HIGH as _STAGGER_QUEUE_HIGH,
+  STAGGER_QUEUE_MED as _STAGGER_QUEUE_MED,
   TIER_NEAR_THRESHOLD as _TIER_NEAR_THRESHOLD,
   TRANSLATION_FONT_SCALE as _TRANSLATION_FONT_SCALE,
   TRANSLATION_GAP_PX as _TRANSLATION_GAP_PX,
@@ -266,8 +268,8 @@ export class CanvasRenderer extends RendererBase {
   private static readonly DRAIN_QUEUE_MAX_SKIP = _DRAIN_QUEUE_MAX_SKIP;
 
   /** Stagger queue depth thresholds. */
-  private static readonly STAGGER_QUEUE_HIGH = 50;
-  private static readonly STAGGER_QUEUE_MED = 30;
+  private static readonly STAGGER_QUEUE_HIGH = _STAGGER_QUEUE_HIGH;
+  private static readonly STAGGER_QUEUE_MED = _STAGGER_QUEUE_MED;
 
   /** Translation font scale relative to main font size. */
   private static readonly TRANSLATION_FONT_SCALE = _TRANSLATION_FONT_SCALE;

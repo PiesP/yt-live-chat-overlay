@@ -73,6 +73,8 @@ import {
   SPEED_TIER,
   STAGGER_BATCH_MAX,
   STAGGER_EXP_SCALE,
+  STAGGER_QUEUE_HIGH,
+  STAGGER_QUEUE_MED,
   TIER_NEAR_THRESHOLD,
   TRANSLATION_FONT_SCALE,
   TRANSLATION_GAP_PX,
@@ -157,6 +159,7 @@ interface WorkerConfig {
   /** Max pending queue depth. */
   queueMaxSize: number;
   /** Background queue trim target. */
+  backgroundQueueMax: number;
   /** Emoji image cache budget in MB. */
   emojiCacheMb: number;
   /** Author photo cache budget in MB. */
@@ -166,6 +169,7 @@ interface WorkerConfig {
   /** Text bitmap cache budget in MB. */
   textCacheMb: number;
   /** Max translations to apply per frame. */
+  translationBatchSize: number;
   /** Max concurrent emoji fetch operations. */
   emojiFetchLimit: number;
   /** Minutes before retrying failed emoji fetches. */
@@ -1477,9 +1481,9 @@ function activateMessage(
   // ── Adaptive stagger: reduce delay when pending queue is deep (matches renderer-canvas.ts) ──
   const pendingCount = pendingQueue.length;
   let effectiveMaxStagger = config.staggerMaxDelayMs;
-  if (pendingCount > 50) {
+  if (pendingCount > STAGGER_QUEUE_HIGH) {
     effectiveMaxStagger = 0;
-  } else if (pendingCount > 30) {
+  } else if (pendingCount > STAGGER_QUEUE_MED) {
     effectiveMaxStagger = Math.floor(config.staggerMaxDelayMs / 2);
   }
 

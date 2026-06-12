@@ -78,18 +78,19 @@ export function computeOccupancyMs(
   msgWidthPx?: number,
   screenWidth?: number
 ): number {
+  const safeDuration = Math.max(0, durationMs);
   // Top/bottom mode: full duration + safety cooldown
   if (msgWidthPx === undefined || screenWidth === undefined) {
-    const safetyMargin = Math.round(durationMs * SAFETY_MARGIN_RATIO);
-    return durationMs + Math.max(LANE_COOLDOWN_MIN_MS, safetyMargin);
+    const safetyMargin = Math.round(safeDuration * SAFETY_MARGIN_RATIO);
+    return safeDuration + Math.max(LANE_COOLDOWN_MIN_MS, safetyMargin);
   }
 
   // Scrolling mode: precision exit-time
   const totalDistance = screenWidth + msgWidthPx + exitPaddingPx;
-  if (totalDistance <= 0) return durationMs;
+  if (totalDistance <= 0) return safeDuration;
   const headwayPx = computeBaseHeadwayPx(msgWidthPx, headwayGapRatio);
   const rightEdgePassFraction = (msgWidthPx + headwayPx) / totalDistance;
-  return Math.round(rightEdgePassFraction * durationMs);
+  return Math.round(rightEdgePassFraction * safeDuration);
 }
 
 // ── 4-ary min-heap operations (parameterized — no `this`) ──────────────────

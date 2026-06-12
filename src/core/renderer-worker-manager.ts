@@ -77,6 +77,8 @@ export class RenderWorkerManager {
     'emojiFetchTimeoutMs',
     'failedEmojiRetryMins',
     'staggerMaxDelayMs',
+    'backgroundQueueMax',
+    'translationBatchSize',
   ];
   /**
    * Build a flat, serializable config object from OverlaySettings.

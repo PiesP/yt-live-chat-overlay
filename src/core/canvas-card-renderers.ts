@@ -92,10 +92,12 @@ function renderCardBackground(
     ctx.fill();
     ctx.restore();
   } else if (config.backgroundColor) {
+    ctx.save();
     const bg = config.backgroundColor;
     ctx.fillStyle = `rgba(${bg.r}, ${bg.g}, ${bg.b}, ${config.backgroundAlpha ?? 1})`;
     drawRoundRect(ctx, x, y, w, h, config.cardRadius);
     ctx.fill();
+    ctx.restore();
   }
 }
 
