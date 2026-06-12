@@ -439,7 +439,7 @@ function appendTextSegment(segments: ContentSegment[], content: string): void {
   segments.push({ type: 'text', content });
 }
 
-export function countGraphemes(s: string): number {
+function countCodePoints(s: string): number {
   let count = 0;
   for (const _ of s) count++;
   return count;
@@ -455,7 +455,7 @@ export function getVisibleContentLength(segments: readonly ContentSegment[]): nu
     }
 
     const cleaned = stripControlCharacters(segment.content).replace(/\s+/g, '');
-    visibleLength += countGraphemes(cleaned);
+    visibleLength += countCodePoints(cleaned);
   }
 
   return visibleLength;
