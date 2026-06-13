@@ -82,6 +82,10 @@ interface ChromeTabsNamespace {
   sendMessage(tabId: number, message: unknown): Promise<unknown>;
 }
 
+interface ChromeI18nNamespace {
+  getUILanguage(): string;
+}
+
 // ── Top-level namespace ────────────────────────────────────────────────────
 
 interface ChromeNamespace {
@@ -89,6 +93,7 @@ interface ChromeNamespace {
   runtime?: ChromeRuntimeNamespace;
   contextMenus?: ChromeContextMenusNamespace;
   tabs?: ChromeTabsNamespace;
+  i18n?: ChromeI18nNamespace;
 }
 
 declare const chrome: ChromeNamespace | undefined;

@@ -52,19 +52,56 @@ export function getActiveLanguage(): SupportedLanguage {
 // ── Browser language detection ────────────────────────────────────────────
 
 const LANGUAGE_PATTERNS: ReadonlyArray<[SupportedLanguage, RegExp]> = [
+  ['en', /^en\b/i],
   ['ko', /^ko\b/i],
   ['ja', /^ja\b/i],
   ['es', /^es\b/i],
   ['zh', /^zh\b/i],
 ];
 
+/**
+ * Iterate over an array of language codes and return the first supported match.
+ */
+function matchLanguages(languages: string[]): SupportedLanguage {
+  for (const lang of languages) {
+    for (const [code, re] of LANGUAGE_PATTERNS) {
+      if (re.test(lang)) return code;
+    }
+  }
+  return 'en';
+}
+
+/**
+ * Detect the best supported language from the browser environment.
+ *
+ * Priority order:
+ * 1. `chrome.i18n.getUILanguage()` — Chrome extension UI language (most
+ *    accurate for extension context; reflects the browser's own locale setting).
+ * 2. `navigator.languages[]` — user's ordered accept-language list (covers
+ *    cases like "pt-BR" → fall through earlier entries → "en").
+ * 3. `navigator.language` — single fallback (legacy / userscript).
+ */
 export function detectBrowserLanguage(): SupportedLanguage {
   try {
-    const nav = navigator.language;
-    if (!nav) return 'en';
-    for (const [lang, re] of LANGUAGE_PATTERNS) {
-      if (re.test(nav)) return lang;
+    // 1. Chrome extension UI language (extension context only)
+    const chromeUiLanguage =
+      typeof chrome !== 'undefined' ? chrome?.i18n?.getUILanguage?.() : undefined;
+    if (chromeUiLanguage) {
+      return matchLanguages([chromeUiLanguage]);
     }
+
+    // 2. Navigator languages array (user preference order)
+    if (typeof navigator !== 'undefined') {
+      const languages = navigator.languages as string[] | undefined;
+      if (languages && languages.length > 0) {
+        return matchLanguages(languages);
+      }
+      // 3. Single-language fallback
+      if (navigator.language) {
+        return matchLanguages([navigator.language]);
+      }
+    }
+
     return 'en';
   } catch {
     return 'en';
@@ -73,7 +110,8 @@ export function detectBrowserLanguage(): SupportedLanguage {
 
 /**
  * Resolve the translation target language.
- * When 'auto', detects the browser language via navigator.language.
+ * When 'auto', delegates to detectBrowserLanguage() which checks
+ * chrome.i18n.getUILanguage() → navigator.languages[] → navigator.language.
  * Returns the concrete TranslationLanguage code for Chrome Translator API.
  */
 export function resolveTranslationTarget(target: TranslationTarget): SupportedLanguage {
