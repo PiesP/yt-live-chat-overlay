@@ -253,7 +253,8 @@ export abstract class ChatSource implements Pauseable {
     if (!this.callback) return;
     const deduped = this.filterNewMessages([message]);
     if (deduped.length === 0) return;
-    const msg = deduped[0] ?? message;
+    const [msg] = deduped;
+    if (!msg) return;
     this.messageBuffer.push(msg);
     this.callback(msg);
   }

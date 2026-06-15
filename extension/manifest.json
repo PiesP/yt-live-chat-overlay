@@ -27,13 +27,13 @@
 
   "web_accessible_resources": [
     {
-      "resources": ["workers/*.js"],
+      "resources": ["workers/*.js", "chunks/*.js"],
       "matches": ["https://www.youtube.com/*"]
     }
   ],
 
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'none'; worker-src 'self' blob:"
+    "extension_pages": "script-src 'self'; object-src 'none'; worker-src 'self'"
   },
 
   "background": {

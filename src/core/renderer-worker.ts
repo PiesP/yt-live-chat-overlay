@@ -52,11 +52,14 @@ import {
 } from '@core/design-tokens';
 import {
   areSpeedTiersCompatible,
+  buildLaneHeap,
+  commitPlacementShared,
   computeLaneY,
   computeOccupancyMs as computeOccupancyMsShared,
   heapGetSlotAvailableAt,
-  heapSiftDown,
-  heapUpdateLane,
+  type LaneAllocationState,
+  resetBatchShared,
+  shiftLaneTimersShared,
 } from '@core/lane-allocation-shared';
 import { LruMap } from '@core/lru-map';
 import {
@@ -459,7 +462,7 @@ const opacityBuckets: Array<Array<{ msg: ActiveMessage; elapsed: number }>> = Ar
   () => []
 );
 
-// ── Ported rendering functions from canvas-text-renderer / canvas-card-renderers ──
+// ── Ported rendering functions from canvas-rendering-shared / canvas-card-renderers ──
 
 /** Outline stroke scale factor. */
 // OUTLINE_STROKE_SCALE imported from @core/renderer-constants
@@ -904,6 +907,15 @@ function enqueueMessage(msg: WorkerMessage): void {
 
 // ── Lane allocator (simplified 3-phase, adapted from LaneAllocator) ───────
 
+// Lane allocator state — bundle into LaneAllocationState for shared ops
+const laneState: LaneAllocationState = {
+  heap: [],
+  indexMap: laneIndexToHeapIndex,
+  numLanes: 0,
+  speedTierLanes,
+  collidedLanes,
+};
+
 function initLanes(_width: number, height: number): void {
   if (!config || !ctx) return;
   const totalPaddingV = rendererLayout.paddingV * 2;
@@ -913,28 +925,16 @@ function initLanes(_width: number, height: number): void {
 
   const usableHeight = height * (1 - config.safeTop - config.safeBottom);
   numLanes = Math.max(1, Math.floor(usableHeight / laneHeight));
-
-  laneHeap = [];
-  laneIndexToHeapIndex.clear();
-  speedTierLanes.clear();
+  laneState.numLanes = numLanes;
 
   const now = performance.now();
-  for (let i = 0; i < numLanes; i++) {
-    laneHeap.push([i, now]);
-    laneIndexToHeapIndex.set(i, i);
-  }
-  // Build 4-ary min-heap
-  for (let i = Math.floor((laneHeap.length - 2) / 4); i >= 0; i--) {
-    siftDown(i);
-  }
+  laneState.heap = buildLaneHeap(numLanes, now, laneIndexToHeapIndex);
+  laneHeap = laneState.heap;
+  speedTierLanes.clear();
 }
 
 function resetBatch(): void {
-  // Prune expired speed-tier entries
-  const now = performance.now();
-  for (const [k, v] of speedTierLanes) {
-    if (v.until <= now) speedTierLanes.delete(k);
-  }
+  resetBatchShared(laneState);
 }
 
 function findPlacement(
@@ -980,7 +980,7 @@ function allocateSingleLane(
     let tierOk = true;
     for (let s = 0; s < slotCount; s++) {
       const active = speedTierLanes.get(i + s);
-      if (active && active.until > now && !areTiersCompatible(speedTier, active.tier)) {
+      if (active && active.until > now && !areSpeedTiersCompatible(speedTier, active.tier)) {
         tierOk = false;
         break;
       }
@@ -1012,7 +1012,11 @@ function allocateSingleLane(
             let jTierOk = true;
             for (let s = 0; s < slotCount; s++) {
               const activeJ = speedTierLanes.get(j + s);
-              if (activeJ && activeJ.until > now && !areTiersCompatible(speedTier, activeJ.tier)) {
+              if (
+                activeJ &&
+                activeJ.until > now &&
+                !areSpeedTiersCompatible(speedTier, activeJ.tier)
+              ) {
                 jTierOk = false;
                 break;
               }
@@ -1033,12 +1037,6 @@ function allocateSingleLane(
   return null;
 }
 
-const areTiersCompatible = areSpeedTiersCompatible;
-
-function getSlotAvailableAt(laneIndex: number): number | undefined {
-  return heapGetSlotAvailableAt(laneHeap, laneIndexToHeapIndex, laneIndex, numLanes);
-}
-
 function commitPlacement(
   laneIndex: number,
   slotCount: number,
@@ -1047,32 +1045,28 @@ function commitPlacement(
   speedTier: number,
   msgWidth?: number
 ): void {
-  const occupancyMs = computeOccupancyMs(durationMs, msgWidth);
-  const nextAvailable = startTime + occupancyMs;
-  const until = startTime + durationMs;
-
-  for (let s = 0; s < slotCount; s++) {
-    speedTierLanes.set(laneIndex + s, { tier: speedTier, until });
-    updateLane(laneIndex + s, nextAvailable);
-    // Mark lanes as occupied for this batch to prevent double-allocation
-    collidedLanes.add(laneIndex + s);
-  }
-}
-
-function computeOccupancyMs(durationMs: number, msgWidthPx?: number): number {
-  if (!config) return durationMs;
+  if (!config) return;
   const screenWidth = canvas?.width ?? 1920;
-  return computeOccupancyMsShared(
+  const occupancyMs = computeOccupancyMsShared(
     durationMs,
     config.exitPaddingPx,
     config.headwayGapRatio,
-    msgWidthPx,
+    msgWidth,
     screenWidth
+  );
+  commitPlacementShared(
+    laneState,
+    laneIndex,
+    slotCount,
+    startTime,
+    occupancyMs,
+    durationMs,
+    speedTier
   );
 }
 
-function updateLane(laneIdx: number, availableAt: number): void {
-  heapUpdateLane(laneHeap, laneIndexToHeapIndex, laneIdx, availableAt);
+function getSlotAvailableAt(laneIndex: number): number | undefined {
+  return heapGetSlotAvailableAt(laneHeap, laneIndexToHeapIndex, laneIndex, numLanes);
 }
 
 /**
@@ -1080,18 +1074,8 @@ function updateLane(laneIdx: number, availableAt: number): void {
  * Mirrors renderer-canvas.ts LaneAllocator.shiftAll().
  */
 function shiftLaneTimers(ms: number): void {
-  for (let i = 0; i < laneHeap.length; i++) {
-    const entry = laneHeap[i];
-    if (entry) entry[1] += ms;
-  }
-  for (const [key, entry] of speedTierLanes) {
-    speedTierLanes.set(key, { tier: entry.tier, until: entry.until + ms });
-  }
+  shiftLaneTimersShared(laneState, ms);
 }
-
-// ── 4-ary min-heap helpers ───────────────────────────────────────────────
-
-const siftDown = (idx: number): void => heapSiftDown(laneHeap, laneIndexToHeapIndex, idx);
 
 // ── Render loop ───────────────────────────────────────────────────────────
 

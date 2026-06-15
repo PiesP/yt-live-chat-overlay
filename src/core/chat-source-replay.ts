@@ -56,8 +56,10 @@ export class ReplayChatSource extends ChatSource {
   private replayBuffer = new ReplayBuffer();
   private seekListenerCleanup: (() => void) | null = null;
   private seekSignal: AbortSignal | null = null;
+  private seekGeneration = 0;
   private cooperativeLoopTimer: ReturnType<typeof setTimeout> | null = null;
   private cooperativeLoopRunning = false;
+  private cooperativeLoopGeneration = 0;
   private prefetchContinuation: InnertubeContinuationData | null = null;
   private prefetchPagesFetched = 0;
   private prefetchMode: ReplayMode | null = null;
@@ -138,9 +140,10 @@ export class ReplayChatSource extends ChatSource {
     }
 
     this.cooperativeLoopRunning = true;
+    const gen = ++this.cooperativeLoopGeneration;
 
     const tick = async (): Promise<void> => {
-      if (signal?.aborted) {
+      if (signal?.aborted || gen !== this.cooperativeLoopGeneration) {
         this.cooperativeLoopRunning = false;
         this.cooperativeLoopTimer = null;
         return;
@@ -148,7 +151,9 @@ export class ReplayChatSource extends ChatSource {
 
       // 1. If paused, reschedule at background rate and skip work
       if (this.chatPaused) {
-        this.cooperativeLoopTimer = setTimeout(tick, BACKGROUND_FETCH_INTERVAL_MS);
+        if (gen === this.cooperativeLoopGeneration) {
+          this.cooperativeLoopTimer = setTimeout(tick, BACKGROUND_FETCH_INTERVAL_MS);
+        }
         return;
       }
 
@@ -211,7 +216,7 @@ export class ReplayChatSource extends ChatSource {
       const hasPendingFlushes = !this.replayBuffer.isEmpty;
       const adaptiveDelay = hasPendingFlushes ? 16 : BACKGROUND_FETCH_INTERVAL_MS;
 
-      if (!signal?.aborted && this.cooperativeLoopRunning) {
+      if (!signal?.aborted && gen === this.cooperativeLoopGeneration) {
         this.cooperativeLoopTimer = setTimeout(tick, adaptiveDelay);
       }
     };
@@ -221,6 +226,7 @@ export class ReplayChatSource extends ChatSource {
   }
 
   private stopCooperativeLoop(): void {
+    this.cooperativeLoopGeneration++;
     this.cooperativeLoopTimer = clearSafeTimeout(this.cooperativeLoopTimer);
     this.cooperativeLoopRunning = false;
   }
@@ -275,6 +281,9 @@ export class ReplayChatSource extends ChatSource {
     // will no-op. Bail out early to avoid unnecessary async work.
     if (!this.callback) return;
 
+    // Increment seek generation — cancels any in-flight seek from a prior seek.
+    const gen = ++this.seekGeneration;
+
     this.replayBuffer.clear();
     this.lastReplayRequestedOffsetMs = offsetMs;
     this.replayConsecutiveFailures = 0;
@@ -287,7 +296,10 @@ export class ReplayChatSource extends ChatSource {
       const signal = this.seekSignal ?? undefined;
       void (async () => {
         try {
+          // Abort guard: if another seek fired since we started, discard result.
+          if (gen !== this.seekGeneration) return;
           await this.fetchReplayPlayerSeek(offsetMs, signal);
+          if (gen !== this.seekGeneration) return;
           this.flushReplayBuffer(offsetMs);
           this.startPrefetch();
         } catch (error: unknown) {
@@ -300,7 +312,10 @@ export class ReplayChatSource extends ChatSource {
       const signal = this.seekSignal ?? undefined;
       void (async () => {
         try {
+          // Abort guard: if another seek fired since we started, discard result.
+          if (gen !== this.seekGeneration) return;
           await this.pollContinuationReplay(offsetMs, signal);
+          if (gen !== this.seekGeneration) return;
           this.startPrefetch();
         } catch (error: unknown) {
           if (!isAbortError(error)) {

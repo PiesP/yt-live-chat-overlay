@@ -70,7 +70,7 @@ export const AUTHOR_PHOTO_SHADOW = 'rgba(0, 0, 0, 0.6)';
 export const DEBUG_OVERLAY_BG = 'rgba(0, 0, 0, 0.8)';
 export const DEBUG_OVERLAY_TOP = '8px';
 export const DEBUG_OVERLAY_RIGHT = '8px';
-export const DEBUG_OVERLAY_Z_INDEX = '99999';
+export const INDICATOR_Z_INDEX = '99999';
 
 // ── Backlog indicator ──
 export const BACKLOG_INDICATOR_BG = 'rgba(0, 0, 0, 0.75)';

@@ -429,6 +429,9 @@ export class RuntimeManager {
     this.domWatcherUnsubscribe?.();
     this.domWatcherUnsubscribe = null;
 
+    // Abort the controller BEFORE stopping the chat source so in-flight
+    // async operations (e.g. seek handlers) get the abort signal.
+    this.abortController?.abort();
     this.chatSource?.stop();
     this.chatSource = null;
 
@@ -438,6 +441,7 @@ export class RuntimeManager {
     // Clear targetUrl so reconcileOnce knows to call startSession()
     // to rebuild the chat source chain. Keep overlay/renderer/backlogController.
     this.targetUrl = null;
+    this.abortController = new AbortController();
 
     // Don't null overlay/renderer/backlogController — they survive.
   }
@@ -830,6 +834,11 @@ export class RuntimeManager {
       return;
     }
 
+    // Clear watchdog synchronously before state transition so the interval
+    // callback cannot fire after we've moved to 'restarting' and trigger
+    // a double restart.
+    this.stopChatWatchdog();
+
     this.state = 'restarting';
     const health = this.getRuntimeHealthSnapshot();
     log.info('Requesting managed runtime restart', { reason, health });
@@ -1024,9 +1033,16 @@ export class RuntimeManager {
   }
 
   private disposeActiveSession(): void {
-    this.disposeSession();
+    // Capture references then null the session identity BEFORE disposal.
+    // This prevents a concurrent reconcile from seeing a half-disposed state
+    // where targetUrl is set but the session is already destroyed.
+    const url = this.targetUrl;
     this.targetUrl = null;
     this.settings = null;
+    // Use url as a sentinel — if disposeSession re-enters disposeActiveSession
+    // via a re-entrant call, url is already consumed and targetUrl is null.
+    void url;
+    this.disposeSession();
     this.abortController = new AbortController();
   }
 

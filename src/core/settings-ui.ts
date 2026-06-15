@@ -506,13 +506,11 @@ export class SettingsUi {
   private handleExport(): void {
     const settings = this.getSettings();
     const json = JSON.stringify({ ...settings, _version: SETTINGS_VERSION }, null, 2);
-    const blob = new Blob([json], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
+    const encoded = encodeURIComponent(json);
     const a = document.createElement('a');
-    a.href = url;
+    a.href = `data:application/json;charset=utf-8,${encoded}`;
     a.download = 'yt-chat-overlay-settings.json';
     a.click();
-    URL.revokeObjectURL(url);
   }
 
   private handleImport(): void {
@@ -609,6 +607,8 @@ export class SettingsUi {
   }
 
   /** Show a transient toast notification in the settings modal. */
+  private toastTimer: ReturnType<typeof setTimeout> | null = null;
+
   private showToast(message: string): void {
     if (!this.modal) return;
     const existing = this.modal.querySelector('.yt-chat-overlay-settings-toast');
@@ -617,7 +617,11 @@ export class SettingsUi {
     toast.className = 'yt-chat-overlay-settings-toast';
     toast.textContent = message;
     this.modal.appendChild(toast);
-    setTimeout(() => toast.remove(), TOAST_DURATION_MS);
+    this.toastTimer = clearSafeTimeout(this.toastTimer);
+    this.toastTimer = setTimeout(() => {
+      toast.remove();
+      this.toastTimer = null;
+    }, TOAST_DURATION_MS);
   }
 
   destroy(): void {
@@ -631,6 +635,7 @@ export class SettingsUi {
     this.button?.remove();
     this.reloadButton?.remove();
     this.clearReloadFeedbackTimer();
+    this.toastTimer = clearSafeTimeout(this.toastTimer);
     this.backdrop?.remove();
     document.removeEventListener('keydown', this.handleKeydown);
 

@@ -17,7 +17,7 @@ import {
   DEBUG_OVERLAY_BG,
   DEBUG_OVERLAY_RIGHT,
   DEBUG_OVERLAY_TOP,
-  DEBUG_OVERLAY_Z_INDEX,
+  INDICATOR_Z_INDEX,
 } from '@core/design-tokens';
 import { createLogger } from '@core/logging';
 
@@ -207,13 +207,17 @@ export class ObservabilityReporter {
    */
   tick(): void {
     if (!this.showDebug || !this.debugOverlayEl) return;
-    // Compute averages for per-frame accumulators using per-interval frame count
-    const fc = Math.max(1, this.framesSinceLastTick);
-    this.frameTimings.collisionCheckMs = this.collisionAccumMs / fc;
-    this.frameTimings.textMeasureMs = this.textMeasureAccumMs / fc;
-    this.collisionAccumMs = 0;
-    this.textMeasureAccumMs = 0;
-    this.framesSinceLastTick = 0;
+    // Compute averages for per-frame accumulators using per-interval frame count.
+    // If no frames occurred since last tick, skip averaging to avoid 0-division
+    // and keep the previous tick's values intact.
+    if (this.framesSinceLastTick > 0) {
+      const fc = this.framesSinceLastTick;
+      this.frameTimings.collisionCheckMs = this.collisionAccumMs / fc;
+      this.frameTimings.textMeasureMs = this.textMeasureAccumMs / fc;
+      this.collisionAccumMs = 0;
+      this.textMeasureAccumMs = 0;
+      this.framesSinceLastTick = 0;
+    }
     // Throttle DOM updates to 250ms intervals.
     // Debug overlay is human-readable — 4 updates/second is plenty.
     // Accumulators continue to reset every frame so timing data stays fresh.
@@ -229,7 +233,7 @@ export class ObservabilityReporter {
     const el = document.createElement('div');
     el.id = 'yt-chat-overlay-debug';
     el.style.cssText =
-      `position:fixed;top:${DEBUG_OVERLAY_TOP};right:${DEBUG_OVERLAY_RIGHT};z-index:${DEBUG_OVERLAY_Z_INDEX};` +
+      `position:fixed;top:${DEBUG_OVERLAY_TOP};right:${DEBUG_OVERLAY_RIGHT};z-index:${INDICATOR_Z_INDEX};` +
       `background:${DEBUG_OVERLAY_BG};color:#0f0;font:12px/1.4 monospace;` +
       'padding:8px 12px;border-radius:4px;min-width:220px;pointer-events:none;user-select:none';
     // Pre-create child divs matching the number of debug lines

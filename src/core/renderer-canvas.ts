@@ -32,8 +32,8 @@ import { getTranslatableText } from '@core/chat-message-helpers';
 import { computeScrollDuration, statusBarLayout } from '@core/design-tokens';
 import { clearSafeAnimationFrame, forEachSlot } from '@core/dom';
 import { ImageFetchManager } from '@core/image-fetch-manager';
+import { computeBaseHeadwayPx } from '@core/lane-allocation-shared';
 import type { LanePlacement } from '@core/lane-allocator';
-import { LaneAllocator } from '@core/lane-allocator';
 import { LanguageDetectorService } from '@core/language-detector-service';
 import { createLogger } from '@core/logging';
 import { LruMap } from '@core/lru-map';
@@ -248,46 +248,6 @@ export class CanvasRenderer extends RendererBase {
 
   /** Pre-bound getFont to avoid per-call arrow function allocation. */
   private readonly _boundGetFont = (fs: number): string => this.getFont(fs);
-
-  /**
-   * Horizontal stagger per batch index step (px).
-   * Each successive message in a drainQueue batch starts this many pixels
-   * further to the right, spreading them horizontally so they don't all
-   * enter from the same right-edge position.
-   */
-  private static readonly HORIZONTAL_STAGGER_PER_STEP = _HORIZONTAL_STAGGER_PER_STEP;
-
-  /**
-   * Maximum horizontal stagger offset (px).
-   * Prevents messages from starting too far off-screen, which would
-   * increase scroll duration unnecessarily.
-   */
-  private static readonly HORIZONTAL_STAGGER_MAX = _HORIZONTAL_STAGGER_MAX;
-
-  /**
-   * Max number of consecutive collision skips in the drain queue.
-   * Prevents scanning the entire pending queue when all entries collide.
-   */
-  private static readonly DRAIN_QUEUE_MAX_SKIP = _DRAIN_QUEUE_MAX_SKIP;
-
-  /** Stagger queue depth thresholds. */
-  private static readonly STAGGER_QUEUE_HIGH = _STAGGER_QUEUE_HIGH;
-  private static readonly STAGGER_QUEUE_MED = _STAGGER_QUEUE_MED;
-
-  /** Translation font scale relative to main font size. */
-  private static readonly TRANSLATION_FONT_SCALE = _TRANSLATION_FONT_SCALE;
-  /** Translation opacity scale relative to message opacity. */
-  private static readonly TRANSLATION_OPACITY_SCALE = _TRANSLATION_OPACITY_SCALE;
-
-  private static readonly ANTI_BLOCK_PRIORITY_THRESHOLD = _ANTI_BLOCK_PRIORITY_THRESHOLD;
-
-  /** Tier split threshold: hash < this value → Near tier, else Far tier. */
-  private static readonly TIER_NEAR_THRESHOLD = _TIER_NEAR_THRESHOLD;
-
-  /** Maximum batch index for stagger exponential scale computation. */
-  private static readonly STAGGER_BATCH_MAX = _STAGGER_BATCH_MAX;
-  /** Exponential scale factor for stagger delay (negative value = decreasing delay). */
-  private static readonly STAGGER_EXP_SCALE = _STAGGER_EXP_SCALE;
 
   /** Grace period (ms) that the render loop continues after the idle condition
    * is met. Prevents start/stop thrashing during sparse chat intervals. */
@@ -718,10 +678,6 @@ export class CanvasRenderer extends RendererBase {
           // renderMessage is always set in activateMessage (avoids per-frame nullish coalescing)
           const renderMessage = msg.renderMessage;
 
-          // Rich card types (SuperChat/Membership) always render their original
-          // card structure — replace mode is not supported for structured cards.
-          // Translation appears as dual-mode text below the card.
-          const renderOriginal = true;
           if (msg.message.kind === 'text') {
             const isReplace = this.settings.translationMode === 'replace';
             renderRegularMessage(
@@ -749,27 +705,25 @@ export class CanvasRenderer extends RendererBase {
               isReplace ? msg.translatedText : undefined
             );
           } else {
-            if (renderOriginal) {
-              const cardConfig =
-                msg.message.kind === 'superchat' ? SUPERCHAT_CARD_CONFIG : MEMBERSHIP_CARD_CONFIG;
-              renderPaidCard(
-                ctx,
-                renderMessage,
-                msg.width,
-                msg.height,
-                snappedX,
-                snappedY,
-                elapsed,
-                cardConfig,
-                this.settings,
-                this.textBitmapCache,
-                this.imageFetchManager.authorPhotoCache,
-                this.imageFetchManager.stickerCache,
-                this.imageFetchManager.emojiCache,
-                this._boundGetFont,
-                this.superChatGradientCache
-              );
-            }
+            const cardConfig =
+              msg.message.kind === 'superchat' ? SUPERCHAT_CARD_CONFIG : MEMBERSHIP_CARD_CONFIG;
+            renderPaidCard(
+              ctx,
+              renderMessage,
+              msg.width,
+              msg.height,
+              snappedX,
+              snappedY,
+              elapsed,
+              cardConfig,
+              this.settings,
+              this.textBitmapCache,
+              this.imageFetchManager.authorPhotoCache,
+              this.imageFetchManager.stickerCache,
+              this.imageFetchManager.emojiCache,
+              this._boundGetFont,
+              this.superChatGradientCache
+            );
           }
 
           // Render translation inside the card in dual mode — with a small gap
@@ -778,7 +732,7 @@ export class CanvasRenderer extends RendererBase {
           if (msg.translatedText && this.settings.translationMode !== 'replace') {
             const fontSize = Math.max(
               1,
-              Math.round(this.settings.fontSize * CanvasRenderer.TRANSLATION_FONT_SCALE)
+              Math.round(this.settings.fontSize * _TRANSLATION_FONT_SCALE)
             );
             // Compute vertical positions: translation sits near the bottom of the card,
             // with a small gap between original content and translation text.
@@ -787,7 +741,7 @@ export class CanvasRenderer extends RendererBase {
             const transColor = this.settings.colors[msg.message.authorType];
             ctx.save();
             try {
-              ctx.globalAlpha = bucketOpacity * CanvasRenderer.TRANSLATION_OPACITY_SCALE;
+              ctx.globalAlpha = bucketOpacity * _TRANSLATION_OPACITY_SCALE;
               // Translation text (normal weight for subtle distinction)
               const transFont = getFontString(fontSize, 'normal', this.settings.fontFamily);
               renderSegment(
@@ -823,10 +777,7 @@ export class CanvasRenderer extends RendererBase {
     // interactions are never blocked by lane saturation.
     if (this.isAntiBlockActive()) {
       const front = this.pendingQueue.peek();
-      if (
-        !front ||
-        CanvasRenderer.getMessagePriority(front) < CanvasRenderer.ANTI_BLOCK_PRIORITY_THRESHOLD
-      )
+      if (!front || CanvasRenderer.getMessagePriority(front) < _ANTI_BLOCK_PRIORITY_THRESHOLD)
         return;
     }
     const t0 = performance.now();
@@ -836,7 +787,7 @@ export class CanvasRenderer extends RendererBase {
     if (!dims) return;
 
     let skipped = 0;
-    const maxSkip = CanvasRenderer.DRAIN_QUEUE_MAX_SKIP;
+    const maxSkip = _DRAIN_QUEUE_MAX_SKIP;
     let batchIndex = 0; // for stagger delay computation
     while (
       !this.pendingQueue.isEmpty &&
@@ -1050,10 +1001,7 @@ export class CanvasRenderer extends RendererBase {
     // spreading them horizontally and breaking the vertical "wall" effect.
     const horizontalStagger =
       isScrolling && batchIndex > 0
-        ? Math.min(
-            CanvasRenderer.HORIZONTAL_STAGGER_MAX,
-            batchIndex * CanvasRenderer.HORIZONTAL_STAGGER_PER_STEP
-          )
+        ? Math.min(_HORIZONTAL_STAGGER_MAX, batchIndex * _HORIZONTAL_STAGGER_PER_STEP)
         : 0;
 
     // startX: off-screen entry position for scrolling modes,
@@ -1105,9 +1053,9 @@ export class CanvasRenderer extends RendererBase {
     // When the pending queue backs up, stagger is reduced to avoid
     // compounding the delay — deep queue → zero stagger (backlog mode).
     const maxStagger =
-      this.pendingQueue.size > CanvasRenderer.STAGGER_QUEUE_HIGH
+      this.pendingQueue.size > _STAGGER_QUEUE_HIGH
         ? 0
-        : this.pendingQueue.size > CanvasRenderer.STAGGER_QUEUE_MED
+        : this.pendingQueue.size > _STAGGER_QUEUE_MED
           ? this.settings.staggerMediumDelayMs
           : this.settings.staggerMaxDelayMs;
     const staggerDelay =
@@ -1115,8 +1063,8 @@ export class CanvasRenderer extends RendererBase {
         ? Math.round(
             Math.min(
               maxStagger,
-              Math.min(batchIndex, CanvasRenderer.STAGGER_BATCH_MAX) *
-                -CanvasRenderer.STAGGER_EXP_SCALE *
+              Math.min(batchIndex, _STAGGER_BATCH_MAX) *
+                -_STAGGER_EXP_SCALE *
                 Math.log(1 - Math.random())
             )
           )
@@ -1196,7 +1144,7 @@ export class CanvasRenderer extends RendererBase {
       ) {
         const transFontSize = Math.max(
           1,
-          Math.round(this.settings.fontSize * CanvasRenderer.TRANSLATION_FONT_SCALE)
+          Math.round(this.settings.fontSize * _TRANSLATION_FONT_SCALE)
         );
         const transFont = getFontString(transFontSize, 'normal', this.settings.fontFamily);
         const gap = _TRANSLATION_GAP_PX;
@@ -1244,7 +1192,7 @@ export class CanvasRenderer extends RendererBase {
     ) {
       const transFontSize = Math.max(
         1,
-        Math.round(this.settings.fontSize * CanvasRenderer.TRANSLATION_FONT_SCALE)
+        Math.round(this.settings.fontSize * _TRANSLATION_FONT_SCALE)
       );
       const transFont = getFontString(transFontSize, 'normal', this.settings.fontFamily);
       const gap = _TRANSLATION_GAP_PX;
@@ -1294,7 +1242,7 @@ export class CanvasRenderer extends RendererBase {
     activeSpeedTier: number,
     newSpeedTier: number
   ): number {
-    const base = LaneAllocator.computeBaseHeadwayPx(activeWidth, this.settings.headwayGapRatio);
+    const base = computeBaseHeadwayPx(activeWidth, this.settings.headwayGapRatio);
     // Only adjust when the new message is faster (higher tier).
     if (newSpeedTier > activeSpeedTier) {
       return Math.round(base * this.settings.backlogSpeedMultiplier);
@@ -1337,12 +1285,10 @@ export class CanvasRenderer extends RendererBase {
     if (message.kind === 'superchat' || message.kind === 'membership') return SPEED_TIER.NEAR;
     // Regular messages: deterministic assignment via message id hash
     const hash = hashStringForTier(message.id ?? String(message.timestamp));
-    return hash < CanvasRenderer.TIER_NEAR_THRESHOLD ? SPEED_TIER.NEAR : SPEED_TIER.FAR;
+    return hash < _TIER_NEAR_THRESHOLD ? SPEED_TIER.NEAR : SPEED_TIER.FAR;
   }
 
   // hashStringForTier imported from @core/renderer-constants
-
-  // desaturateColor imported from @core/renderer-constants
 
   // ── Opacity ──────────────────────────────────────────────────────────
 

@@ -6,7 +6,7 @@
  * LaneAllocator and the Web Worker renderer (renderer-worker.ts).
  *
  * All functions are stateless (no `this`, no DOM, no side effects beyond
- * parameter mutation). This eliminates the 235-line duplication of lane
+ * parameter mutation). This eliminates the ~190-line duplication of lane
  * allocation logic between the two contexts.
  */
 
@@ -97,6 +97,19 @@ export function computeOccupancyMs(
 
 /** Heap entry: [laneIndex, availableAtMs]. */
 export type HeapEntry = [number, number];
+
+/**
+ * Mutable lane-allocation state bundle.
+ * Passed to shared functions so they can operate on both
+ * the main-thread LaneAllocator and the worker's local state.
+ */
+export interface LaneAllocationState {
+  heap: HeapEntry[];
+  indexMap: Map<number, number>;
+  numLanes: number;
+  speedTierLanes: Map<number, { tier: number; until: number }>;
+  collidedLanes: Set<number>;
+}
 
 /**
  * Sift a heap element downward to restore the min-heap invariant (4-ary heap).
@@ -193,5 +206,78 @@ export function heapUpdateLane(
     heapSiftDown(heap, indexMap, idx);
   } else if (newAvailableAt < old) {
     heapSiftUp(heap, indexMap, idx);
+  }
+}
+
+// ── Shared lane lifecycle operations ───────────────────────────────────────
+
+/**
+ * Build a fresh 4-ary min-heap with `numLanes` lanes, all available at `now`.
+ * Returns the heap array and populates the index map.
+ */
+export function buildLaneHeap(
+  numLanes: number,
+  now: number,
+  indexMap: Map<number, number>
+): HeapEntry[] {
+  const heap: HeapEntry[] = [];
+  indexMap.clear();
+  for (let i = 0; i < numLanes; i++) {
+    heap.push([i, now]);
+    indexMap.set(i, i);
+  }
+  // Build 4-ary min-heap: sift down from last non-leaf
+  for (let i = Math.floor((heap.length - 2) / 4); i >= 0; i--) {
+    heapSiftDown(heap, indexMap, i);
+  }
+  return heap;
+}
+
+/**
+ * Prune expired speed-tier entries and clear collision set.
+ * Call at the start of each batch.
+ */
+export function resetBatchShared(state: LaneAllocationState): void {
+  const now = performance.now();
+  for (const [k, v] of state.speedTierLanes) {
+    if (v.until <= now) state.speedTierLanes.delete(k);
+  }
+  state.collidedLanes.clear();
+}
+
+/**
+ * Commit a placement: update speed-tier tracking and heap occupancy.
+ * For multi-slot messages, all occupied lanes are updated.
+ */
+export function commitPlacementShared(
+  state: LaneAllocationState,
+  laneIndex: number,
+  slotCount: number,
+  startTime: number,
+  occupancyMs: number,
+  durationMs: number,
+  speedTier: number
+): void {
+  const nextAvailable = startTime + occupancyMs;
+  const until = startTime + durationMs;
+
+  for (let s = 0; s < slotCount; s++) {
+    const idx = laneIndex + s;
+    state.speedTierLanes.set(idx, { tier: speedTier, until });
+    heapUpdateLane(state.heap, state.indexMap, idx, nextAvailable);
+    state.collidedLanes.add(idx);
+  }
+}
+
+/**
+ * Shift all lane timers and speed-tier tracking by a fixed offset (pause/resume).
+ */
+export function shiftLaneTimersShared(state: LaneAllocationState, ms: number): void {
+  for (let i = 0; i < state.heap.length; i++) {
+    const entry = state.heap[i];
+    if (entry) entry[1] += ms;
+  }
+  for (const [key, entry] of state.speedTierLanes) {
+    state.speedTierLanes.set(key, { tier: entry.tier, until: entry.until + ms });
   }
 }

@@ -25,9 +25,11 @@
     "check-versions": "node --experimental-strip-types scripts/check-versions.ts",
     "sync-versions": "node --experimental-strip-types scripts/sync-versions.ts",
     "prebuild": "pnpm -s check-versions && pnpm -s quality",
-    "build:extension": "vite build --config vite.config.extension.ts && vite build --config vite.config.extension.cs.ts && cp extension/manifest.json dist-extension/manifest.json && cp -r extension/icons dist-extension/",
+    "prebuild:extension": "pnpm -s check",
+    "prebuild:extension:firefox": "pnpm -s check",
+    "build:extension": "pnpm -s prebuild:extension && vite build --config vite.config.extension.ts && vite build --config vite.config.extension.cs.ts && cp extension/manifest.json dist-extension/manifest.json && cp -r extension/icons dist-extension/",
     "build:extension:dev": "vite build --config vite.config.extension.ts --mode development && vite build --config vite.config.extension.cs.ts --mode development && cp extension/manifest.json dist-extension/manifest.json && cp -r extension/icons dist-extension/",
-    "build:extension:firefox": "vite build --config vite.config.extension.firefox.ts && vite build --config vite.config.extension.cs.firefox.ts && cp extension/manifest.firefox.json dist-extension-firefox/manifest.json && cp -r extension/icons dist-extension-firefox/"
+    "build:extension:firefox": "pnpm -s prebuild:extension:firefox && vite build --config vite.config.extension.firefox.ts && vite build --config vite.config.extension.cs.firefox.ts && cp extension/manifest.firefox.json dist-extension-firefox/manifest.json && cp -r extension/icons dist-extension-firefox/"
   },
   "keywords": [
     "userscript",

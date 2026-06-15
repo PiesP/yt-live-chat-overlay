@@ -1,12 +1,11 @@
 {
   "$schema": "./node_modules/knip/schema.json",
   "entry": ["src/main.ts"],
-  "project": ["src/**/*.ts", "src/**/*.tsx"],
+  "project": ["src/**/*.ts"],
   "paths": {
     "@core/*": ["src/core/*"],
     "@app-types": ["src/types/index"],
     "@platform/*": ["src/platform/*"]
   },
-  "ignoreBinaries": ["vitest"],
   "ignore": ["test/**", "extension/**", "dist*/**"]
 }

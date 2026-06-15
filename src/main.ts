@@ -15,7 +15,6 @@ import { PageWatcher } from '@core/page-watcher';
 import { RuntimeManager } from '@core/runtime-manager';
 import { Settings } from '@core/settings';
 import { SettingsUi } from '@core/settings-ui';
-import { detectPlatform } from '@platform/bootstrap';
 import { getMenuAdapter } from '@platform/menu-adapters';
 
 const log = createLogger('App');
@@ -172,9 +171,7 @@ class App {
 }
 
 function main(): void {
-  const platform = detectPlatform();
   log.debug('Script loaded', {
-    platform,
     readyState: document.readyState,
     url: location.href,
   });

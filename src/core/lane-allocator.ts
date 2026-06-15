@@ -5,7 +5,7 @@ import type { FontWeight, OverlayDimensions } from '@app-types';
 import { rendererLayout } from '@core/design-tokens';
 import {
   areSpeedTiersCompatible,
-  computeBaseHeadwayPx,
+  buildLaneHeap,
   computeLaneY,
   computeOccupancyMs,
   heapGetSlotAvailableAt,
@@ -101,10 +101,6 @@ export class LaneAllocator {
    */
   private speedTierLanes: Map<number, { tier: number; until: number }> = new Map();
 
-  static computeBaseHeadwayPx(msgWidth: number, headwayGapRatio: number): number {
-    return computeBaseHeadwayPx(msgWidth, headwayGapRatio);
-  }
-
   /**
    * Epsilon-greedy selection probability (0-1).
    * 5% chance to skip the strict topmost zero-wait lane and pick the
@@ -164,14 +160,7 @@ export class LaneAllocator {
 
     // Uniform initialization: all lanes start at the same available time.
     const now = performance.now();
-    for (let i = 0; i < this.laneCount; i++) {
-      this.heap.push([i, now]);
-      this.laneIndexToHeapIndex.set(i, i);
-    }
-    // Build min-heap (4-ary): start from last non-leaf node
-    for (let i = Math.floor((this.heap.length - 2) / 4); i >= 0; i--) {
-      this.siftDown(i);
-    }
+    this.heap = buildLaneHeap(this.laneCount, now, this.laneIndexToHeapIndex);
   }
 
   isEmpty(): boolean {
@@ -194,15 +183,6 @@ export class LaneAllocator {
 
   getLaneY(laneIndex: number, viewportHeight: number): number {
     return computeLaneY(laneIndex, viewportHeight, this.options.safeTop, this.laneHeight);
-  }
-
-  /**
-   * Two speed tiers are compatible when within 1 tier of each other.
-   * This allows e.g. Mid (1) and Near (2) to share lanes, but prevents
-   * Far (0) and Backlog (3 → 2x speed) from mixing.
-   */
-  private static areSpeedTiersCompatible(a: number, b: number): boolean {
-    return areSpeedTiersCompatible(a, b);
   }
 
   findPlacement(
@@ -294,12 +274,12 @@ export class LaneAllocator {
       }
     }
 
-    this.collidedLanes.clear();
-    // Prune expired speed-tier lane entries.
+    // Prune expired speed-tier entries and clear collision set.
     const now = performance.now();
     for (const [laneIdx, entry] of this.speedTierLanes) {
       if (entry.until <= now) this.speedTierLanes.delete(laneIdx);
     }
+    this.collidedLanes.clear();
     // Recompute cached utilization for O(1) getUtilization().
     let occupied = 0;
     for (const [, availableAt] of this.heap) {
@@ -371,7 +351,7 @@ export class LaneAllocator {
       // Speed-tier compatibility check
       const active = this.speedTierLanes.get(i);
       if (active && active.until > now) {
-        if (!LaneAllocator.areSpeedTiersCompatible(speedTier, active.tier)) continue;
+        if (!areSpeedTiersCompatible(speedTier, active.tier)) continue;
       }
 
       const avail = this.getSlotAvailableAt(i);
@@ -401,7 +381,7 @@ export class LaneAllocator {
             if (this.collidedLanes.has(j)) continue;
             const activeJ = this.speedTierLanes.get(j);
             if (activeJ && activeJ.until > now) {
-              if (!LaneAllocator.areSpeedTiersCompatible(speedTier, activeJ.tier)) continue;
+              if (!areSpeedTiersCompatible(speedTier, activeJ.tier)) continue;
             }
             const availJ = this.getSlotAvailableAt(j);
             if (availJ === undefined) continue;
@@ -454,7 +434,7 @@ export class LaneAllocator {
     const isTierCompatible = (slotIdx: number): boolean => {
       const active = this.speedTierLanes.get(slotIdx);
       if (!active || active.until <= now) return true;
-      return LaneAllocator.areSpeedTiersCompatible(speedTier, active.tier);
+      return areSpeedTiersCompatible(speedTier, active.tier);
     };
 
     // Phase 1: scan for a block where ALL slots have waitMs === 0 and
@@ -544,21 +524,17 @@ export class LaneAllocator {
     const capped = Math.min(offsetMs, this.options.maxMessageAgeMs);
     if (capped <= 0) return;
 
-    // Shift lane occupancy timers (4-ary min-heap)
+    // Shift lane occupancy timers (4-ary min-heap) and speed-tier tracking
     if (this.heap.length > 0) {
       for (let i = 0; i < this.heap.length; i++) {
         const entry = this.heap[i];
-        if (entry) {
-          this.heap[i] = [entry[0], entry[1] + capped];
-        }
+        if (entry) entry[1] += capped;
       }
       // Rebuild heap invariant after bulk update (4-ary)
       for (let i = Math.floor((this.heap.length - 2) / 4); i >= 0; i--) {
         this.siftDown(i);
       }
     }
-
-    // Shift speed-tier tracking so lane profiles survive pause/resume.
     for (const [idx, entry] of this.speedTierLanes) {
       this.speedTierLanes.set(idx, { tier: entry.tier, until: entry.until + capped });
     }

@@ -23,28 +23,17 @@
  */
 
 import type { BacklogMode, ChatMessage, Pauseable } from '@app-types';
-import {
-  BACKLOG_INDICATOR_BG,
-  DEBUG_OVERLAY_Z_INDEX,
-  DEFAULT_FONT_FAMILY,
-} from '@core/design-tokens';
+import { BACKLOG_INDICATOR_BG, DEFAULT_FONT_FAMILY, INDICATOR_Z_INDEX } from '@core/design-tokens';
 import { clearSafeTimeout } from '@core/dom';
 import { t } from '@core/i18n';
 import { createLogger } from '@core/logging';
+import { sampleExponential } from '@core/math-utils';
 import type { ObservabilityReporter } from '@core/observability';
 
 /** Offset threshold at which the backlog queue ring buffer is compacted via slice(). */
 const BACKLOG_QUEUE_COMPACT_THRESHOLD = 64;
 
 const log = createLogger('Backlog');
-
-/**
- * Sample from an exponential distribution with the given mean.
- * Uses the inverse-CDF method: -mean * ln(1 - U) where U ~ Uniform(0, 1).
- */
-function sampleExponential(mean: number): number {
-  return -mean * Math.log(Math.max(Number.EPSILON, 1 - Math.random()));
-}
 
 interface BacklogControllerConfig {
   /** How to handle past chat messages */
@@ -506,7 +495,7 @@ export class BacklogInjectionController implements Pauseable {
     const el = document.createElement('div');
     el.id = 'yt-chat-overlay-backlog-indicator';
     el.style.cssText = `
-      position: fixed; top: 40px; right: 8px; z-index: ${DEBUG_OVERLAY_Z_INDEX};
+      position: fixed; top: 40px; right: 8px; z-index: ${INDICATOR_Z_INDEX};
       background: ${BACKLOG_INDICATOR_BG}; color: #fff;
       font: 12px/1.4 ${DEFAULT_FONT_FAMILY}; padding: 6px 10px;
       border-radius: 4px; pointer-events: none; user-select: none;
@@ -542,6 +531,7 @@ export class BacklogInjectionController implements Pauseable {
   /** Update config at runtime */
   updateConfig(config: Partial<BacklogControllerConfig>): void {
     this.config = { ...this.config, ...config };
+    this.densityRampMs = this.config.backlogDensityRampMs;
   }
 
   /** Clean up */

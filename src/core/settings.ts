@@ -28,6 +28,8 @@ export class Settings {
   private lastSelfSaveGeneration = 0;
   /** Debounce flag: true while a save is scheduled via requestIdleCallback. */
   private savePending = false;
+  /** requestIdleCallback handle — stored so we can cancel on flush/destroy. */
+  private saveIdleHandle = 0;
   /** GM value change listener ID, for cleanup. */
   private gmListenerId: number | null = null;
   /** chrome.storage.onChanged listener reference, for cleanup. */
@@ -43,6 +45,20 @@ export class Settings {
 
   constructor() {
     this.settings = cloneSettings(DEFAULT_SETTINGS);
+  }
+
+  /** Whether chrome.storage.onChanged is available (extension context). */
+  private static get hasChromeStorageEvents(): boolean {
+    return (
+      typeof chrome !== 'undefined' &&
+      chrome.storage !== undefined &&
+      chrome.storage.onChanged !== undefined
+    );
+  }
+
+  /** Whether GM_addValueChangeListener is available (userscript context). */
+  private static get hasGmValueChangeListener(): boolean {
+    return typeof GM_addValueChangeListener !== 'undefined';
   }
 
   async initialize(): Promise<void> {
@@ -69,6 +85,10 @@ export class Settings {
 
   destroy(): void {
     this.flushSave();
+    if (this.saveIdleHandle !== 0) {
+      cancelIdleCallback(this.saveIdleHandle);
+      this.saveIdleHandle = 0;
+    }
     this.stopCrossTabSync();
     this.onChangeCallbacks.clear();
   }
@@ -78,7 +98,7 @@ export class Settings {
     window.addEventListener('storage', this.handleStorageEvent);
 
     // GM storage path: fires in all tabs (including the caller)
-    if (typeof GM_addValueChangeListener !== 'undefined') {
+    if (Settings.hasGmValueChangeListener) {
       this.gmListenerId = GM_addValueChangeListener(STORAGE_KEY, () => {
         // Skip self-triggered events: if our last save matches current generation,
         // this event was triggered by our own save and we should not reload.
@@ -89,7 +109,7 @@ export class Settings {
     }
 
     // Chrome extension storage path: fires when chrome.storage.local changes
-    if (typeof chrome !== 'undefined' && chrome.storage?.onChanged) {
+    if (Settings.hasChromeStorageEvents) {
       this.chromeStorageListener = (changes: Record<string, unknown>, areaName: string) => {
         if (areaName !== 'local') return;
         const change = changes[STORAGE_KEY] as { newValue?: unknown } | undefined;
@@ -97,22 +117,18 @@ export class Settings {
         log.debug('Cross-tab settings change detected via chrome.storage.onChanged');
         void this.reloadFromStorage();
       };
-      chrome.storage.onChanged.addListener(this.chromeStorageListener);
+      chrome?.storage?.onChanged.addListener(this.chromeStorageListener);
     }
   }
 
   private stopCrossTabSync(): void {
     window.removeEventListener('storage', this.handleStorageEvent);
-    if (this.gmListenerId !== null && typeof GM_removeValueChangeListener !== 'undefined') {
+    if (this.gmListenerId !== null && Settings.hasGmValueChangeListener) {
       GM_removeValueChangeListener(this.gmListenerId);
       this.gmListenerId = null;
     }
-    if (
-      this.chromeStorageListener !== null &&
-      typeof chrome !== 'undefined' &&
-      chrome.storage?.onChanged
-    ) {
-      chrome.storage.onChanged.removeListener(this.chromeStorageListener);
+    if (this.chromeStorageListener !== null && Settings.hasChromeStorageEvents) {
+      chrome?.storage?.onChanged.removeListener(this.chromeStorageListener);
       this.chromeStorageListener = null;
     }
   }
@@ -150,7 +166,7 @@ export class Settings {
     if (this.savePending) return;
     this.savePending = true;
     if (typeof requestIdleCallback !== 'undefined') {
-      requestIdleCallback(() => void this.flushSave(), { timeout: 2000 });
+      this.saveIdleHandle = requestIdleCallback(() => void this.flushSave(), { timeout: 2000 });
     } else {
       // No requestIdleCallback support — save immediately.
       void this.flushSave();
@@ -161,6 +177,10 @@ export class Settings {
   private async flushSave(): Promise<void> {
     if (!this.savePending) return;
     this.savePending = false;
+    if (this.saveIdleHandle !== 0) {
+      cancelIdleCallback(this.saveIdleHandle);
+      this.saveIdleHandle = 0;
+    }
     await this.save();
   }
 

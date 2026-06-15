@@ -313,7 +313,7 @@ export class LiveChatSource extends ChatSource {
       }
 
       if (messages.length > 0) {
-        this.emitMessages(messages, isInitialSeed);
+        this.emitBatch(messages, isInitialSeed);
         this.recordMessageCount(messages.length);
       }
     }
@@ -327,12 +327,5 @@ export class LiveChatSource extends ChatSource {
     if (bootstrap) {
       this.liveContinuation = bootstrap.initialContinuation ?? null;
     }
-  }
-
-  /**
-   * Emit messages — all messages go directly to the callback.
-   */
-  private emitMessages(messages: ChatMessage[], isInitialSeed: boolean): void {
-    this.emitBatch(messages, isInitialSeed);
   }
 }

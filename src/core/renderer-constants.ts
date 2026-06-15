@@ -7,7 +7,7 @@ import type { ChatMessage } from '@app-types';
  * Shared renderer constants — single source of truth for values used by both
  * the main-thread CanvasRenderer and the OffscreenCanvas Web Worker.
  *
- * Extracted from renderer-canvas.ts, lane-allocator.ts, canvas-text-renderer.ts
+ * Extracted from renderer-canvas.ts, lane-allocator.ts, canvas-rendering-shared.ts
  * to eliminate the 23+ duplicated constant definitions in renderer-worker.ts
  * that risk maintenance drift.
  *
@@ -95,7 +95,7 @@ export const TIER_NEAR_THRESHOLD = 0.3;
 /** Desaturation factor for Far-tier depth layer user colors. */
 export const FAR_LAYER_DESATURATION_FACTOR = 0.3;
 
-// ── Text rendering (canvas-text-renderer.ts) ────────────────────────────────
+// ── Text rendering (canvas-rendering-shared.ts) ──────────────────────────────
 
 /** Outline stroke scale factor: outline.widthPx is multiplied by this
  *  to produce the actual stroke width. */

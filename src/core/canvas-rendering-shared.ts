@@ -5,7 +5,7 @@
  * Shared Canvas 2D rendering functions usable from both main thread
  * (CanvasRenderingContext2D) and Web Worker (OffscreenCanvasRenderingContext2D).
  *
- * Eliminates ~300+ lines of code duplication between canvas-text-renderer.ts
+ * Eliminates ~300+ lines of code duplication between canvas-rendering-shared.ts
  * and renderer-worker.ts.
  */
 
@@ -511,7 +511,7 @@ export function drawAuthorPhoto(
  * Draw author photo + name section. Returns the Y offset after the section.
  *
  * This is the SSOT for author rendering — used by both main-thread renderers
- * (canvas-text-renderer.ts, canvas-card-renderers.ts) and the Web Worker
+ * (canvas-rendering-shared.ts, canvas-card-renderers.ts) and the Web Worker
  * (renderer-worker.ts).
  *
  * @param ctx          Any canvas context (CanvasRenderingContext2D or OffscreenCanvasRenderingContext2D)

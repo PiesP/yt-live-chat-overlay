@@ -16,40 +16,44 @@ import pkg from './package.json';
 export function createExtensionConfig(outDir: string): UserConfig {
   const repoRoot = process.cwd();
 
-  return defineConfig({
-    root: repoRoot,
+  return defineConfig(({ mode }) => {
+    const isDev = mode === 'development';
 
-    resolve: {
-      tsconfigPaths: true,
-    },
+    return {
+      root: repoRoot,
 
-    build: {
-      target: 'esnext',
-      minify: false,
-      sourcemap: false,
-      outDir,
-      emptyOutDir: true,
-      copyPublicDir: false,
+      resolve: {
+        tsconfigPaths: true,
+      },
 
-      rollupOptions: {
-        input: {
-          'background': resolve(repoRoot, 'extension/background.ts'),
-          'workers/renderer-worker': resolve(repoRoot, 'src/core/renderer-worker.ts'),
-          'workers/renderer-worker-webgl2': resolve(repoRoot, 'src/core/renderer-worker-webgl2.ts'),
-        },
-        output: {
-          entryFileNames: '[name].js',
-          chunkFileNames: 'chunks/[name]-[hash].js',
+      build: {
+        target: 'esnext',
+        minify: !isDev,
+        sourcemap: isDev,
+        outDir,
+        emptyOutDir: true,
+        copyPublicDir: false,
+
+        rollupOptions: {
+          input: {
+            'background': resolve(repoRoot, 'extension/background.ts'),
+            'workers/renderer-worker': resolve(repoRoot, 'src/core/renderer-worker.ts'),
+            'workers/renderer-worker-webgl2': resolve(repoRoot, 'src/core/renderer-worker-webgl2.ts'),
+          },
+          output: {
+            entryFileNames: '[name].js',
+            chunkFileNames: 'chunks/[name]-[hash].js',
+          },
         },
       },
-    },
 
-    define: {
-      __DEV__: JSON.stringify(false),
-      __VERSION__: JSON.stringify(process.env.BUILD_VERSION || pkg.version),
-      __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
-    },
+      define: {
+        __DEV__: JSON.stringify(isDev),
+        __VERSION__: JSON.stringify(process.env.BUILD_VERSION || pkg.version),
+        __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
+      },
 
-    logLevel: 'warn',
+      logLevel: 'warn',
+    };
   });
 }

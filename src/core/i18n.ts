@@ -84,22 +84,21 @@ function matchLanguages(languages: string[]): SupportedLanguage {
 export function detectBrowserLanguage(): SupportedLanguage {
   try {
     // 1. Chrome extension UI language (extension context only)
-    const chromeUiLanguage =
-      typeof chrome !== 'undefined' ? chrome?.i18n?.getUILanguage?.() : undefined;
-    if (chromeUiLanguage) {
-      return matchLanguages([chromeUiLanguage]);
+    if (typeof chrome !== 'undefined' && chrome.i18n?.getUILanguage) {
+      const chromeUiLanguage = chrome.i18n.getUILanguage();
+      if (chromeUiLanguage) {
+        return matchLanguages([chromeUiLanguage]);
+      }
     }
 
     // 2. Navigator languages array (user preference order)
-    if (typeof navigator !== 'undefined') {
-      const languages = navigator.languages as string[] | undefined;
-      if (languages && languages.length > 0) {
-        return matchLanguages(languages);
-      }
-      // 3. Single-language fallback
-      if (navigator.language) {
-        return matchLanguages([navigator.language]);
-      }
+    if (typeof navigator !== 'undefined' && navigator.languages && navigator.languages.length > 0) {
+      return matchLanguages([...navigator.languages]);
+    }
+
+    // 3. Single-language fallback
+    if (typeof navigator !== 'undefined' && navigator.language) {
+      return matchLanguages([navigator.language]);
     }
 
     return 'en';
