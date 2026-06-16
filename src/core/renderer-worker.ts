@@ -1032,8 +1032,9 @@ function allocateSingleLane(
 
   // Phase 2: same-tier busy
   if (speedMatched && speedMatched.waitMs <= maxWaitMs) return speedMatched;
-  // Phase 3: fastest-free
-  if (firstBusy && firstBusy.waitMs <= maxWaitMs) return firstBusy;
+  // Phase 3: fastest-free (real-time only; backlog returns null)
+  if (firstBusy && firstBusy.waitMs <= maxWaitMs && speedTier !== SPEED_TIER.BACKLOG)
+    return firstBusy;
   return null;
 }
 
@@ -1352,7 +1353,12 @@ function drainQueue(now: number, width: number, height: number): void {
   // Anti-block gate: when lane utilization is critically high (≥95%),
   // probabilistically pause new placements. High-priority messages (≥80)
   // bypass the gate so paid interactions are never blocked.
-  const laneUtilization = laneHeap.length / Math.max(1, numLanes);
+  let occupiedCount = 0;
+  for (let h = 0; h < laneHeap.length; h++) {
+    const entry = laneHeap[h];
+    if (entry && entry[1] > now) occupiedCount++;
+  }
+  const laneUtilization = occupiedCount / Math.max(1, numLanes);
   const isAntiBlock = laneUtilization >= 1 - ANTI_BLOCK_FREE_RATIO;
 
   while (

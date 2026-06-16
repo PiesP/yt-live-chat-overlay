@@ -51,6 +51,7 @@ export type DomWatcherUnsubscribe = () => void;
 export function installDomChatWatcher(onMessages: DomMessageCallback): DomWatcherUnsubscribe {
   let observer: MutationObserver | null = null;
   let mutationBatchPending = false;
+  let mutationRafId: number | null = null;
   let pendingMutations: MutationRecord[][] = [];
 
   const extractMessages = (addedNodes: NodeList): ChatMessage[] => {
@@ -122,8 +123,9 @@ export function installDomChatWatcher(onMessages: DomMessageCallback): DomWatche
     pendingMutations.push(mutations);
     if (!mutationBatchPending) {
       mutationBatchPending = true;
-      requestAnimationFrame(() => {
+      mutationRafId = requestAnimationFrame(() => {
         mutationBatchPending = false;
+        mutationRafId = null;
         // Iterate pendingMutations directly instead of flat() — avoids
         // allocating a new array each frame during chat bursts.
         for (const batch of pendingMutations) {
@@ -143,6 +145,10 @@ export function installDomChatWatcher(onMessages: DomMessageCallback): DomWatche
     observer.observe(container, { childList: true, subtree: true });
     log.info(`DOM chat watcher installed on: ${selector}`);
     return () => {
+      if (mutationRafId !== null) {
+        cancelAnimationFrame(mutationRafId);
+        mutationRafId = null;
+      }
       observer?.disconnect();
       observer = null;
       log.info('DOM chat watcher removed');

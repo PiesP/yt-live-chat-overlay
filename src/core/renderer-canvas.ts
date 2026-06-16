@@ -261,18 +261,24 @@ export class CanvasRenderer extends RendererBase {
     // Initialize language detection pipeline for 'auto' source
     this.languageDetector = new LanguageDetectorService();
     this.channelMemory = new ChannelLanguageMemory();
-    void this.languageDetector.initialize();
+    void this.languageDetector.initialize().catch((err: unknown) => {
+      log.debug('LanguageDetector init failed, auto-source unavailable:', err);
+    });
 
     // Check channel memory for cached language
     const channelKey = ChannelLanguageMemory.keyFromUrl(location.href);
     const cachedSource = channelKey ? this.channelMemory.get(channelKey) : undefined;
 
-    void this.translationService.configure({
-      enabled: settings.translationEnabled,
-      service: settings.translationService,
-      source: cachedSource ?? settings.translationSource,
-      target: settings.translationTarget,
-    });
+    void this.translationService
+      .configure({
+        enabled: settings.translationEnabled,
+        service: settings.translationService,
+        source: cachedSource ?? settings.translationSource,
+        target: settings.translationTarget,
+      })
+      .catch((err: unknown) => {
+        log.debug('TranslationService configure failed:', err);
+      });
     this.messageActivator = new MessageActivator(this.translationService, {
       topBottomDurationMs: settings.topBottomDurationMs,
       depthLayersEnabled: settings.depthLayersEnabled,
@@ -1344,12 +1350,16 @@ export class CanvasRenderer extends RendererBase {
       this.sourceSampleBuffer = [];
     }
 
-    void this.translationService.configure({
-      enabled: settings.translationEnabled,
-      service: settings.translationService,
-      source: settings.translationSource,
-      target: settings.translationTarget,
-    });
+    void this.translationService
+      .configure({
+        enabled: settings.translationEnabled,
+        service: settings.translationService,
+        source: settings.translationSource,
+        target: settings.translationTarget,
+      })
+      .catch((err: unknown) => {
+        log.debug('TranslationService reconfigure failed:', err);
+      });
 
     this.messageActivator = new MessageActivator(this.translationService, {
       topBottomDurationMs: settings.topBottomDurationMs,
@@ -1385,13 +1395,17 @@ export class CanvasRenderer extends RendererBase {
 
   private async performSourceDetection(): Promise<void> {
     if (!this.languageDetector) return;
-    const detected = await this.languageDetector.detectFromSamples(this.sourceSampleBuffer);
-    if (detected) {
-      const channelKey = ChannelLanguageMemory.keyFromUrl(location.href);
-      if (channelKey && this.channelMemory) {
-        this.channelMemory.set(channelKey, detected);
+    try {
+      const detected = await this.languageDetector.detectFromSamples(this.sourceSampleBuffer);
+      if (detected) {
+        const channelKey = ChannelLanguageMemory.keyFromUrl(location.href);
+        if (channelKey && this.channelMemory) {
+          this.channelMemory.set(channelKey, detected);
+        }
+        await this.translationService.setDetectedSource(detected);
       }
-      await this.translationService.setDetectedSource(detected);
+    } catch (err: unknown) {
+      log.debug('Source detection failed:', err);
     }
     this.sourceDetectionDone = true;
     this.sourceSampleBuffer = [];
@@ -1414,6 +1428,9 @@ export class CanvasRenderer extends RendererBase {
     this.superChatGradientCache.clear();
     this.dimensionCache.clear();
     this.activeMessagesByLane.clear();
+    this.pendingTranslations.length = 0;
+    this.onBacklogPauseChange = null;
+    this.onStatusBarClick = null;
     this.translationService.destroy();
     this.languageDetector?.destroy();
     this.languageDetector = null;

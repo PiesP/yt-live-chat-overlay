@@ -58,6 +58,7 @@ export class RenderWorkerManagerWebGL2 {
   private config: WorkerConfigWebGL2 | null = null;
   private canvas: HTMLCanvasElement | null = null;
   private restartAttempts = 0;
+  private restartTimerId: ReturnType<typeof setTimeout> | null = null;
   private static readonly MAX_RESTART_ATTEMPTS = 3;
 
   onStats?: (stats: WorkerStatsWebGL2) => void;
@@ -146,7 +147,8 @@ export class RenderWorkerManagerWebGL2 {
         log.info(
           `Worker restart attempt ${this.restartAttempts}/${RenderWorkerManagerWebGL2.MAX_RESTART_ATTEMPTS} in ${delayMs}ms`
         );
-        setTimeout(() => {
+        this.restartTimerId = setTimeout(() => {
+          this.restartTimerId = null;
           this.restart();
         }, delayMs);
       } else {
@@ -223,9 +225,18 @@ export class RenderWorkerManagerWebGL2 {
   }
 
   destroy(): void {
+    if (this.restartTimerId !== null) {
+      clearTimeout(this.restartTimerId);
+      this.restartTimerId = null;
+    }
     this.worker?.postMessage({ type: 'destroy' });
     this.worker?.terminate();
     this.worker = null;
     this._ready = false;
+    delete this.onStats;
+    delete this.onAtlasReady;
+    delete this.onAtlasError;
+    delete this.onError;
+    delete this.onRequestImages;
   }
 }
