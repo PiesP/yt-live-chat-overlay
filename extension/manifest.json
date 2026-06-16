@@ -1,46 +1,48 @@
 {
   "manifest_version": 3,
   "name": "YouTube Live Chat Overlay",
-  "version": "0.38.0",
+  "version": "0.39.0",
   "description": "Nico-nico style comment overlay for YouTube live chat. 100% local processing.",
   "author": "PiesP",
   "homepage_url": "https://github.com/PiesP/yt-live-chat-overlay",
   "minimum_chrome_version": "102",
-
   "permissions": [
     "storage",
     "contextMenus"
   ],
-
   "host_permissions": [
     "https://www.youtube.com/*"
   ],
-
   "content_scripts": [
     {
-      "matches": ["https://www.youtube.com/*"],
-      "js": ["content-script.js"],
+      "matches": [
+        "https://www.youtube.com/*"
+      ],
+      "js": [
+        "content-script.js"
+      ],
       "run_at": "document_end",
       "world": "MAIN"
     }
   ],
-
   "web_accessible_resources": [
     {
-      "resources": ["workers/*.js", "chunks/*.js"],
-      "matches": ["https://www.youtube.com/*"]
+      "resources": [
+        "workers/*.js",
+        "chunks/*.js"
+      ],
+      "matches": [
+        "https://www.youtube.com/*"
+      ]
     }
   ],
-
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'none'; worker-src 'self'"
   },
-
   "background": {
     "service_worker": "background.js",
     "type": "module"
   },
-
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",

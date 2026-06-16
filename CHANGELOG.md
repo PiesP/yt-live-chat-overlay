@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.39.0] - 2026-06-18
+
+### Fixed
+
+- **Worker Phase 3 backlog lane competition** — Added `speedTier !== SPEED_TIER.BACKLOG` guard to worker `allocateSingleLane` Phase 3, matching main thread `laneAllocator` behavior. Prevents backlog messages from competing with real-time messages on busy lanes.
+- **Worker anti-block utilization always reporting 100%** — Changed from `laneHeap.length / numLanes` (always ~1.0) to counting lanes where `availableAt > now`, matching main thread `getUtilization()` semantics. Anti-block gate now activates correctly.
+- **WebGL2 worker restart `setTimeout` not tracked** — Added `restartTimerId` field to track the restart timer handle. `destroy()` now clears the timer to prevent post-destruction restart attempts.
+- **`languageDetector.initialize()` silent failure** — Added `.catch()` error logging to prevent unhandled promise rejection when auto-source detection fails.
+- **`translationService.configure()` silent failure** — Added `.catch()` error logging in constructor and `updateSettings()`. Wrapped `performSourceDetection()` in try/catch.
+- **`onDestroy()` missing cleanup** — Clear `pendingTranslations` array and null out `onBacklogPauseChange`/`onStatusBarClick` callbacks to prevent post-destruction callback invocation.
+- **WebGL2 worker-manager `destroy()` not releasing callbacks** — Delete all callback references in `destroy()` to prevent late worker messages from invoking stale callbacks.
+- **DOM chat watcher rAF not cancelled on unsubscribe** — Track `mutationRafId` and cancel in unsubscribe function to prevent post-unsubscribe callback execution.
+
+### Developer
+
+- **Codebase audit (2026-06-18)** — Bug/stability-focused 3-lens parallel audit (Render Pipeline / Chat Sources & Session / Platform & Infrastructure) found 7 MEDIUM + 12 LOW issues. 8 issues fixed in this release. All quality gates pass (`pnpm quality` + `pnpm test` — 26 files, 640 tests).
+
 ## [0.38.0] - 2026-06-12
 
 ### Added
