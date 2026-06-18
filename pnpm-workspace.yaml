@@ -9,6 +9,7 @@ overrides:
 #   - minimatch: known supply-chain attack target (CVE-2022-3517)
 minimumReleaseAgeExclude:
   - minimatch
+  - undici@7.28.0
 
 # ── Build integrity ────────────────────────────────────────────────────
 # Block installation of packages with exotic subdependencies
