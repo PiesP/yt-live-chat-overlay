@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.39.1] - 2026-07-28
+
+### Fixed
+
+- **MV3 best-practice improvements** — URL whitelist for content script injection, correct build target for extension bundles, and API consistency across platform adapters.
+- **Resource management for long-running sessions** — Fix cleanup of pending callbacks and worker references to prevent memory leaks during extended YouTube live sessions.
+- **Biome config migration** — Migrate biome.json to preset format, remove deprecated `recommended` field.
+
+### Changed
+
+- **Dependency updates** — @types/node 26.0.0, vitest 4.1.9, knip 6.17.1, oxc-parser 0.135.0, oxc-resolver 11.21.3, Node.js 26.3.1.
+
 ## [0.39.0] - 2026-06-18
 
 ### Fixed
