@@ -64,9 +64,13 @@ export class GmStorageAdapter implements StorageAdapter {
 
 export class ChromeStorageAdapter implements StorageAdapter {
   /**
-   * Whether chrome.storage API is available.
-   * Content scripts in MAIN world have access to chrome.runtime but not chrome.storage.
-   * The adapter detects this and falls back gracefully.
+   * Whether chrome.storage.local is available.
+   *
+   * NOTE: In content scripts injected with `"world": "MAIN"`, the
+   * `chrome.storage` API is typically NOT available — only `chrome.runtime`
+   * is exposed. This method will return false in that context, causing
+   * the storage adapter to fall back to LocalStorageAdapter (which uses
+   * window.localStorage + storage events for cross-tab sync).
    */
   static isAvailable(): boolean {
     try {

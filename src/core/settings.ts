@@ -94,10 +94,13 @@ export class Settings {
   }
 
   private startCrossTabSync(): void {
-    // localStorage path: fires in other tabs when setItem() is called
+    // localStorage path: fires in other tabs when setItem() is called.
+    // This is the primary cross-tab sync mechanism for MAIN-world content
+    // scripts where chrome.storage.onChanged is not available.
     window.addEventListener('storage', this.handleStorageEvent);
 
-    // GM storage path: fires in all tabs (including the caller)
+    // GM storage path: fires in all tabs (including the caller).
+    // Only available in userscript contexts (Tampermonkey/Violentmonkey).
     if (Settings.hasGmValueChangeListener) {
       this.gmListenerId = GM_addValueChangeListener(STORAGE_KEY, () => {
         // Skip self-triggered events: if our last save matches current generation,
@@ -108,7 +111,11 @@ export class Settings {
       });
     }
 
-    // Chrome extension storage path: fires when chrome.storage.local changes
+    // Chrome extension storage path: fires when chrome.storage.local changes.
+    // NOTE: This is NOT available in MAIN-world content scripts (world: "MAIN").
+    // In that context, ChromeStorageAdapter.isAvailable() returns false and
+    // the adapter falls back to LocalStorageAdapter, which relies on the
+    // 'storage' event listener registered above.
     if (Settings.hasChromeStorageEvents) {
       this.chromeStorageListener = (changes: Record<string, unknown>, areaName: string) => {
         if (areaName !== 'local') return;

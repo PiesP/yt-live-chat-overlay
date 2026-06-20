@@ -141,7 +141,27 @@ export class RenderWorkerManager {
       // Resolve worker URL via platform-specific factory
       const factory = workerFactory ?? getWorkerFactory();
       const workerUrl = factory.createWorkerUrl('./renderer-worker.ts');
-      const worker = new Worker(workerUrl, { type: 'module' });
+
+      // In MAIN-world content scripts, the page's CSP (not the extension's)
+      // governs Worker creation. If YouTube's CSP blocks the worker URL
+      // (e.g. missing worker-src directive), the constructor throws a
+      // SecurityError. We catch this and fall back to main-thread rendering.
+      let worker: Worker;
+      try {
+        worker = new Worker(workerUrl, { type: 'module' });
+      } catch (workerError: unknown) {
+        const isSecurityError =
+          workerError instanceof DOMException && workerError.name === 'SecurityError';
+        if (isSecurityError) {
+          log.info(
+            'Worker creation blocked by page CSP — falling back to main-thread renderer.' +
+              ' This can happen if the page CSP has a restrictive worker-src directive.'
+          );
+        } else {
+          log.debug('Worker creation failed:', workerError);
+        }
+        return false;
+      }
 
       worker.onmessage = (e: MessageEvent) => {
         const data = e.data as { type: string } & Record<string, unknown>;

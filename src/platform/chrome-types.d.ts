@@ -48,6 +48,7 @@ interface ChromeRuntimeNamespace {
   getURL(path: string): string;
   onInstalled: ChromeRuntimeOnInstalledEvent;
   onMessage?: ChromeRuntimeOnMessageEvent;
+  lastError?: { message?: string };
 }
 
 // ── Context Menus ──────────────────────────────────────────────────────────
@@ -67,9 +68,14 @@ interface ChromeContextMenusClickedEvent {
 }
 
 interface ChromeContextMenusNamespace {
-  create(properties: ChromeContextMenuCreateProperties): void;
+  create(properties: ChromeContextMenuCreateProperties, callback?: () => void): void;
   removeAll(callback?: () => void): void;
+  getAll(callback: (items: ChromeContextMenuItem[]) => void): void;
   onClicked: ChromeContextMenusClickedEvent;
+}
+
+interface ChromeContextMenuItem {
+  id?: string;
 }
 
 // ── Tabs ───────────────────────────────────────────────────────────────────
