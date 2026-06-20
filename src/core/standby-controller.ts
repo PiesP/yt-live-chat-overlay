@@ -52,8 +52,11 @@ export class StandbyController {
     this.schedulePoll();
   }
 
-  /** Exit standby mode — stop polling and clear timers. */
+  /** Exit standby mode — stop polling and clear timers.
+   *  Safe to call multiple times; subsequent calls are no-ops.
+   *  Called by destroy() and by RuntimeManager during session teardown. */
   exit(): void {
+    if (!this.mode) return; // already exited — idempotent
     this.mode = false;
     this.stopPolling();
     this.retryTimer = clearSafeTimeout(this.retryTimer);

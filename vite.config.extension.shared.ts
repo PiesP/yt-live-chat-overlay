@@ -27,7 +27,7 @@ export function createExtensionConfig(outDir: string): UserConfig {
       },
 
       build: {
-        target: 'esnext',
+        target: 'es2023',
         minify: !isDev,
         sourcemap: isDev,
         outDir,

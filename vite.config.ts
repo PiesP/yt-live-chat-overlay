@@ -137,7 +137,7 @@ export default defineConfig(({ mode }): UserConfig => {
     },
 
     build: {
-      target: 'esnext',
+      target: 'es2023',
       // Greasy Fork rule: scripts must not be minified/obfuscated.
       minify: false,
       sourcemap: isDev ? 'inline' : false,

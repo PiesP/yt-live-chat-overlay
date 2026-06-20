@@ -26,7 +26,7 @@ export default defineConfig((): UserConfig => {
     },
 
     build: {
-      target: 'esnext',
+      target: 'es2023',
       minify: false,
       sourcemap: false,
       outDir: OUT_DIR,

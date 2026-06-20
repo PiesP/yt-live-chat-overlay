@@ -4,11 +4,38 @@
 import type { ChatMessage, OverlaySettings } from '@app-types';
 import { ByteLimitedCache } from '@core/byte-limited-cache';
 import { clearSafeInterval } from '@core/dom';
+import { createLogger } from '@core/logging';
 
 /** Maximum number of failed emoji fetch entries before eviction triggers. */
 const FAILED_EMOJI_FETCH_CAP = 500;
 /** Number of entries to evict when the cap is exceeded. */
 const FAILED_EMOJI_FETCH_EVICT_COUNT = 250;
+
+/**
+ * Allowed image host patterns for YouTube CDN resources.
+ * All image URLs (emoji, author photos, stickers) must match one of these
+ * origins to prevent loading arbitrary third-party resources.
+ */
+const ALLOWED_IMAGE_ORIGINS = [
+  'https://yt3.ggpht.com', // YouTube user/content images
+  'https://yt4.ggpht.com', // YouTube CDN alias
+] as const;
+
+/** Validate that an image URL originates from an allowed YouTube CDN domain. */
+function isAllowedImageUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return (
+      parsed.protocol === 'https:' &&
+      ALLOWED_IMAGE_ORIGINS.some(
+        (origin) =>
+          parsed.origin === origin || parsed.origin === origin.replace('https://', 'https://i.')
+      )
+    );
+  } catch {
+    return false;
+  }
+}
 
 /**
  * ImageFetchManager — handles all image/emoji/sticker loading and caching.
@@ -20,6 +47,7 @@ const FAILED_EMOJI_FETCH_EVICT_COUNT = 250;
  * images to ImageBitmaps for off-main-thread worker transfer.
  */
 export class ImageFetchManager {
+  private static readonly log = createLogger('ImageFetchManager');
   /** Emoji image cache (byte-limited LRU). */
   emojiCache: ByteLimitedCache<HTMLImageElement>;
   /** Author photo cache (byte-limited LRU). */
@@ -111,10 +139,15 @@ export class ImageFetchManager {
 
   // ── Image loading ─────────────────────────────────────────────────────
 
-  /** Load an image and store it in the given ByteLimitedCache on success. */
+  /** Load an image and store it in the given ByteLimitedCache on success.
+   *  URLs are validated against the YouTube CDN whitelist. */
   loadImage(url: string, cache: ByteLimitedCache<HTMLImageElement>): void {
     if (cache.has(url)) return;
     if (this.imageLoading.has(url)) return;
+    if (!isAllowedImageUrl(url)) {
+      ImageFetchManager.log.debug('Blocked image URL (not in CDN whitelist):', url);
+      return;
+    }
     this.imageLoading.add(url);
     const img = new Image();
     this.inFlightImages.add(img);
@@ -171,13 +204,18 @@ export class ImageFetchManager {
 
     for (const seg of message.content) {
       if (seg.type !== 'emoji') continue;
-      if (this.emojiFetching.has(seg.emoji.url)) continue;
-      if (this.emojiCache.has(seg.emoji.url)) continue;
-      if (this.failedEmojiFetches.has(seg.emoji.url)) continue;
+      const emojiUrl = seg.emoji.url;
+      if (!isAllowedImageUrl(emojiUrl)) {
+        ImageFetchManager.log.debug('Blocked emoji URL (not in CDN whitelist):', emojiUrl);
+        continue;
+      }
+      if (this.emojiFetching.has(emojiUrl)) continue;
+      if (this.emojiCache.has(emojiUrl)) continue;
+      if (this.failedEmojiFetches.has(emojiUrl)) continue;
       if (this.emojiFetching.size >= this.emojiFetchLimit) continue;
-      this.emojiFetching.add(seg.emoji.url);
-      this.emojiFetchingStarted.set(seg.emoji.url, performance.now());
-      const url = seg.emoji.url;
+      this.emojiFetching.add(emojiUrl);
+      this.emojiFetchingStarted.set(emojiUrl, performance.now());
+      const url = emojiUrl;
       const img = new Image();
       this.inFlightImages.add(img);
       img.crossOrigin = 'anonymous';
