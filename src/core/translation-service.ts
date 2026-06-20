@@ -90,6 +90,10 @@ export class TranslationService {
     50_000, // ~50KB (equivalent to ~2500 average chat messages)
     (text) => text.length * 2 // UTF-16 byte estimate
   );
+  /** Maximum number of entries allowed in the translate queue.
+   * When exceeded, oldest low-priority entries are dropped to prevent
+   * unbounded growth during sustained chat bursts. */
+  private static readonly MAX_TRANSLATE_QUEUE_SIZE = 1000;
 
   /** Call this when settings change to reconfigure the translator. */
   async configure(settings: {
@@ -301,6 +305,26 @@ export class TranslationService {
 
     // ── Enqueue with priority ─────────────────────────────────────────
     return new Promise<string | null>((resolve) => {
+      // Drop oldest low-priority entries if the queue is at capacity.
+      // This prevents unbounded growth when the translator is slow or
+      // dead and messages keep arriving faster than they drain.
+      if (this.translateQueue.length >= TranslationService.MAX_TRANSLATE_QUEUE_SIZE) {
+        // Find the oldest entry with the lowest priority (end of queue).
+        let dropIdx = this.translateQueue.length - 1;
+        let minPriority = this.translateQueue[dropIdx]?.priority ?? 0;
+        for (let i = this.translateQueue.length - 2; i >= 0; i--) {
+          const p = this.translateQueue[i]?.priority ?? 0;
+          if (p < minPriority) {
+            minPriority = p;
+            dropIdx = i;
+          }
+        }
+        const dropped = this.translateQueue.splice(dropIdx, 1)[0];
+        if (dropped) dropped.resolve(null);
+        log.debug(
+          `Translate queue at capacity (${TranslationService.MAX_TRANSLATE_QUEUE_SIZE}) — dropped oldest low-priority entry (priority=${minPriority})`
+        );
+      }
       const entry = { text, priority, resolve };
       // Insert sorted by priority DESC (highest first), stable for equal priority
       const insertIdx = this.translateQueue.findIndex((q) => q.priority < priority);

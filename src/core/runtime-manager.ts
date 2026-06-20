@@ -880,6 +880,23 @@ export class RuntimeManager {
       this.chatSource?.setPaused(false);
       this.renderer?.resume();
 
+      // After a hidden period, verify the chat source is still alive.
+      // During hidden time the poll loop was paused, so observerAlive may
+      // have flipped without the watchdog catching it (watchdog skips
+      // hidden tabs). If the chat source died while we were away, trigger
+      // a managed restart immediately rather than waiting for the next
+      // watchdog tick.
+      if (this.state === 'active' && this.chatSource) {
+        const chatHealth = this.chatSource.getHealthSnapshot({
+          activeTimeoutMs: CHAT_STALL_TIMEOUT_MS,
+        });
+        if (!chatHealth.observerAlive && !this.standbyController.isStandby()) {
+          log.info('Chat source observer died during hidden period — triggering recovery');
+          this.requestManagedRestart('foreground-return');
+          return;
+        }
+      }
+
       if (this.getRuntimeHealthSnapshot().shouldRestart) {
         this.requestManagedRestart('foreground-return');
         return;
@@ -891,6 +908,19 @@ export class RuntimeManager {
 
     window.addEventListener('pageshow', handleVisibility);
     cleanups.push(() => window.removeEventListener('pageshow', handleVisibility));
+
+    // bfcache restore: when the page is restored from the browser cache
+    // (event.persisted === true), the previous JS state may be stale —
+    // the chat source poll loop could be dead, the renderer paused, etc.
+    // Force a full reconcile to re-validate the session.
+    const handlePageShow = (e: PageTransitionEvent): void => {
+      if (e.persisted) {
+        log.info('Page restored from bfcache — forcing session reconcile');
+        this.requestReconcile('page-change');
+      }
+    };
+    window.addEventListener('pageshow', handlePageShow);
+    cleanups.push(() => window.removeEventListener('pageshow', handlePageShow));
 
     this.foregroundCleanup = () => {
       for (const fn of cleanups) {

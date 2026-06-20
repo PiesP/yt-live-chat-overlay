@@ -53,6 +53,7 @@ export function installDomChatWatcher(onMessages: DomMessageCallback): DomWatche
   let mutationBatchPending = false;
   let mutationRafId: number | null = null;
   let pendingMutations: MutationRecord[][] = [];
+  let isPaused = false;
 
   const extractMessages = (addedNodes: NodeList): ChatMessage[] => {
     const messages: ChatMessage[] = [];
@@ -118,8 +119,13 @@ export function installDomChatWatcher(onMessages: DomMessageCallback): DomWatche
    * Multiple MutationObserver callbacks within the same animation frame
    * are coalesced into a single handleMutations call, reducing redundant
    * DOM queries during chat bursts.
+   *
+   * When the tab is hidden, mutations are dropped entirely to avoid
+   * unbounded pendingMutations growth — the observer is paused and
+   * re-attached on visibility return.
    */
   const onMutation = (mutations: MutationRecord[]): void => {
+    if (isPaused) return;
     pendingMutations.push(mutations);
     if (!mutationBatchPending) {
       mutationBatchPending = true;
@@ -143,8 +149,32 @@ export function installDomChatWatcher(onMessages: DomMessageCallback): DomWatche
 
     observer = new MutationObserver(onMutation);
     observer.observe(container, { childList: true, subtree: true });
+
+    // Pause the observer when the tab is hidden to prevent unbounded
+    // pendingMutations growth. rAF callbacks are throttled in hidden
+    // tabs, so mutations would accumulate without being flushed.
+    const handleVisibility = (): void => {
+      if (document.visibilityState !== 'visible') {
+        isPaused = true;
+        observer?.disconnect();
+        // Cancel any pending rAF flush — the mutations are stale and
+        // will be re-fetched by the fetch interceptor on resume.
+        if (mutationRafId !== null) {
+          cancelAnimationFrame(mutationRafId);
+          mutationRafId = null;
+        }
+        mutationBatchPending = false;
+        pendingMutations = [];
+      } else {
+        isPaused = false;
+        observer?.observe(container, { childList: true, subtree: true });
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
     log.info(`DOM chat watcher installed on: ${selector}`);
     return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
       if (mutationRafId !== null) {
         cancelAnimationFrame(mutationRafId);
         mutationRafId = null;

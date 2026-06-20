@@ -47,8 +47,14 @@ export class ImageFetchManager {
    * Created asynchronously when HTMLImageElements finish loading.
    * Transferred via postMessage transfer list to avoid duplicate fetch+decode
    * in the worker. Entries are removed on transfer (bitmap is detached).
+   * Byte-limited to prevent unbounded growth during long sessions with many
+   * unique emoji/sticker URLs.
    */
-  readonly workerBitmapCache = new Map<string, ImageBitmap>();
+  readonly workerBitmapCache = new ByteLimitedCache<ImageBitmap>(
+    10_000_000, // 10 MB — enough for ~500 emoji at 200×200 RGBA
+    (bitmap) => bitmap.width * bitmap.height * 4,
+    (bitmap) => bitmap.close()
+  );
 
   private emojiCleanupIntervalId: ReturnType<typeof setInterval> | null = null;
   private emojiFetchLimit = 10;
@@ -143,8 +149,6 @@ export class ImageFetchManager {
           bitmap.close();
           return;
         }
-        const old = this.workerBitmapCache.get(url);
-        if (old) old.close();
         this.workerBitmapCache.set(url, bitmap);
       })
       .catch(() => {
@@ -253,9 +257,7 @@ export class ImageFetchManager {
     }
     this.inFlightImages.clear();
 
-    for (const bitmap of this.workerBitmapCache.values()) {
-      bitmap.close();
-    }
+    // ByteLimitedCache.clear() calls onEvict (bitmap.close()) for each entry.
     this.workerBitmapCache.clear();
     this.bitmapGeneration.clear();
 

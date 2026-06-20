@@ -325,10 +325,8 @@ export class RenderWorkerManager {
     this.worker.terminate();
     this.worker = null;
     this.active = false;
-    // Close any remaining pre-converted bitmaps (not yet transferred)
-    for (const bitmap of this.deps.imageFetchManager.workerBitmapCache.values()) {
-      bitmap.close();
-    }
+    // Close any remaining pre-converted bitmaps (not yet transferred).
+    // ByteLimitedCache.clear() calls onEvict (bitmap.close()) for each entry.
     this.deps.imageFetchManager.workerBitmapCache.clear();
   }
 
