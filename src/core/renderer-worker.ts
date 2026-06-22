@@ -1547,20 +1547,18 @@ function activateMessage(
     speedTier,
     text: msg.text,
     color: authorColor,
-    ...(msg.authorType !== undefined ? { authorType: msg.authorType } : {}),
-    ...(msg.kind !== undefined ? { kind: msg.kind } : {}),
-    ...(msg.translatedText !== undefined ? { translatedText: msg.translatedText } : {}),
-    // Rich rendering fields
-    ...(msg.content !== undefined ? { content: msg.content } : {}),
-    ...(msg.author !== undefined ? { author: msg.author } : {}),
-    ...(msg.authorPhotoUrl !== undefined ? { authorPhotoUrl: msg.authorPhotoUrl } : {}),
-    ...(msg.superChatAmount !== undefined ? { superChatAmount: msg.superChatAmount } : {}),
-    ...(msg.superChatStickerUrl !== undefined
-      ? { superChatStickerUrl: msg.superChatStickerUrl }
-      : {}),
-    ...(msg.membershipHeader !== undefined ? { membershipHeader: msg.membershipHeader } : {}),
-    ...(msg.cardConfigWorker !== undefined ? { cardConfigWorker: msg.cardConfigWorker } : {}),
   };
+  if (msg.authorType !== undefined) am.authorType = msg.authorType;
+  if (msg.kind !== undefined) am.kind = msg.kind;
+  if (msg.translatedText !== undefined) am.translatedText = msg.translatedText;
+  // Rich rendering fields
+  if (msg.content !== undefined) am.content = msg.content;
+  if (msg.author !== undefined) am.author = msg.author;
+  if (msg.authorPhotoUrl !== undefined) am.authorPhotoUrl = msg.authorPhotoUrl;
+  if (msg.superChatAmount !== undefined) am.superChatAmount = msg.superChatAmount;
+  if (msg.superChatStickerUrl !== undefined) am.superChatStickerUrl = msg.superChatStickerUrl;
+  if (msg.membershipHeader !== undefined) am.membershipHeader = msg.membershipHeader;
+  if (msg.cardConfigWorker !== undefined) am.cardConfigWorker = msg.cardConfigWorker;
 
   commitPlacement(
     placement.laneIndex,

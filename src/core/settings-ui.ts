@@ -43,6 +43,7 @@ export class SettingsUi {
   private savedBodyOverflow: string | null = null;
   /** Saved body padding-right before scrollbar compensation. */
   private savedBodyPaddingRight: string | null = null;
+  private _backdropClickHandler: ((event: MouseEvent) => void) | null = null;
 
   private get defaultTabId(): string {
     const first = PANES[0];
@@ -360,12 +361,13 @@ export class SettingsUi {
     this.backdrop = document.createElement('div');
     this.backdrop.id = BACKDROP_ID;
     this.backdrop.className = 'yt-chat-overlay-settings-backdrop';
-    this.backdrop.addEventListener('click', (event) => {
+    this._backdropClickHandler = (event: MouseEvent) => {
       if (event.button !== 0) return;
       if (event.target === this.backdrop) {
         this.close();
       }
-    });
+    };
+    this.backdrop.addEventListener('click', this._backdropClickHandler);
 
     this.modal = document.createElement('div');
     this.modal.className = 'yt-chat-overlay-settings-modal';
@@ -636,6 +638,10 @@ export class SettingsUi {
     this.reloadButton?.remove();
     this.clearReloadFeedbackTimer();
     this.toastTimer = clearSafeTimeout(this.toastTimer);
+    if (this.backdrop && this._backdropClickHandler) {
+      this.backdrop.removeEventListener('click', this._backdropClickHandler);
+      this._backdropClickHandler = null;
+    }
     this.backdrop?.remove();
     document.removeEventListener('keydown', this.handleKeydown);
 

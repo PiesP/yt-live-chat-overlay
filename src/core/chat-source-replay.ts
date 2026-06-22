@@ -229,6 +229,7 @@ export class ReplayChatSource extends ChatSource {
     this.cooperativeLoopGeneration++;
     this.cooperativeLoopTimer = clearSafeTimeout(this.cooperativeLoopTimer);
     this.cooperativeLoopRunning = false;
+    this.seekListenerCleanup?.();
   }
 
   /** Reset prefetch state — cooperative loop will skip the prefetch step. */

@@ -87,12 +87,13 @@ function cleanupExpiredMessages(
   messages: CanvasMessage[],
   now: number,
   activeMessagesByLane: Map<number, CanvasMessage[]>,
+  expiredScratch: CanvasMessage[],
   onExpire?: (msg: CanvasMessage) => void
 ): { newLength: number; anyRemoved: boolean; newMessages?: CanvasMessage[] } {
   const oldLength = messages.length;
   let writeIdx = 0;
   let anyRemoved = false;
-  const expiredMessages: CanvasMessage[] = [];
+  expiredScratch.length = 0;
 
   // Single pass: compact messages + detect expirations.
   for (let i = 0; i < oldLength; i++) {
@@ -104,7 +105,7 @@ function cleanupExpiredMessages(
       writeIdx++;
     } else {
       anyRemoved = true;
-      expiredMessages.push(msg);
+      expiredScratch.push(msg);
       onExpire?.(msg);
     }
   }
@@ -113,7 +114,7 @@ function cleanupExpiredMessages(
   // full clear+rebuild. For screen with 100 active messages where 1 expires,
   // this is O(1) lane operations instead of O(100) rebuild.
   if (anyRemoved) {
-    for (const msg of expiredMessages) {
+    for (const msg of expiredScratch) {
       const slotCount = msg.slotCount ?? 1;
       for (let slot = 0; slot < slotCount; slot++) {
         const lane = msg.laneIndex + slot;
@@ -152,6 +153,7 @@ const COMPACTION_THRESHOLD_RATIO = 0.5;
 
 export class CanvasRenderer extends RendererBase {
   private canvas: HTMLCanvasElement | null = null;
+  private canvasClickHandler: ((e: MouseEvent) => void) | null = null;
   private ctx: CanvasRenderingContext2D | null = null;
   private animFrameId: number | null = null;
   /** Pre-computed 1/maxMessageAgeMs to avoid per-frame division in opacity calc. */
@@ -198,6 +200,14 @@ export class CanvasRenderer extends RendererBase {
    * subsequent frames to avoid frame spikes during chat bursts.
    */
   private pendingTranslations: Array<{ msg: CanvasMessage; text: string | null }> = [];
+  /** Read index for incremental pendingTranslations drain (avoids splice allocation). */
+  private _pendingTranslationReadIdx = 0;
+
+  /**
+   * Scratch array for cleanupExpiredMessages — hoisted to avoid per-frame allocation.
+   * Reset via .length = 0 at the start of each call.
+   */
+  private _expiredMessagesScratch: CanvasMessage[] = [];
 
   /**
    * OffscreenCanvas Web Worker for off-main-thread rendering.
@@ -249,8 +259,6 @@ export class CanvasRenderer extends RendererBase {
   /** Pre-bound getFont to avoid per-call arrow function allocation. */
   private readonly _boundGetFont = (fs: number): string => this.getFont(fs);
 
-  /** Grace period (ms) that the render loop continues after the idle condition
-   * is met. Prevents start/stop thrashing during sparse chat intervals. */
   private static readonly IDLE_GRACE_PERIOD_MS = 500;
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
@@ -263,6 +271,8 @@ export class CanvasRenderer extends RendererBase {
     this.channelMemory = new ChannelLanguageMemory();
     void this.languageDetector.initialize().catch((err: unknown) => {
       log.debug('LanguageDetector init failed, auto-source unavailable:', err);
+      // Set to null so performSourceDetection() can retry later
+      this.languageDetector = null;
     });
 
     // Check channel memory for cached language
@@ -298,14 +308,15 @@ export class CanvasRenderer extends RendererBase {
     }
 
     // Click handler for status bar (click-to-reload on DISCONNECTED)
-    canvas.addEventListener('click', (e: MouseEvent) => {
+    this.canvasClickHandler = (e: MouseEvent) => {
       if (this.connectionStatus !== 'disconnected') return;
       if (!this.statusBarHitRegion || !this.onStatusBarClick) return;
       const { x, y, w, h } = this.statusBarHitRegion;
       if (e.offsetX >= x && e.offsetX <= x + w && e.offsetY >= y && e.offsetY <= y + h) {
         this.onStatusBarClick();
       }
-    });
+    };
+    canvas.addEventListener('click', this.canvasClickHandler);
 
     // Initialize ImageFetchManager BEFORE RenderWorkerManager so the worker
     // receives a valid reference instead of undefined.
@@ -540,9 +551,18 @@ export class CanvasRenderer extends RendererBase {
     // between frames. Incremental drain prevents single-frame spikes during
     // chat bursts when many translations resolve simultaneously.
     if (this.pendingTranslations.length > 0) {
-      const batch = this.pendingTranslations.splice(0, this.translationBatchSize);
+      const end = Math.min(
+        this._pendingTranslationReadIdx + this.translationBatchSize,
+        this.pendingTranslations.length
+      );
+      const batch = this.pendingTranslations.slice(this._pendingTranslationReadIdx, end);
+      this._pendingTranslationReadIdx = end;
       for (const { msg, text } of batch) {
         msg.translatedText = text;
+      }
+      if (this._pendingTranslationReadIdx >= this.pendingTranslations.length) {
+        this.pendingTranslations.length = 0;
+        this._pendingTranslationReadIdx = 0;
       }
     }
 
@@ -560,6 +580,7 @@ export class CanvasRenderer extends RendererBase {
       this.activeMessages,
       now,
       this.activeMessagesByLane,
+      this._expiredMessagesScratch,
       (msg) => this.messageActivator.releaseMessage(msg)
     );
     if (anyRemoved) {
@@ -599,14 +620,6 @@ export class CanvasRenderer extends RendererBase {
     // Pre-compute frame-level render context to avoid per-message allocation churn.
     // fontSize, fontWeight, fontFamily, outlineWidthPx, and outlineOpacity are
     // constant across all messages within a single frame.
-    const frameCtx = {
-      fontSize: this.settings.fontSize,
-      fontWeight: this.settings.fontWeight,
-      fontFamily: this.settings.fontFamily,
-      outlineWidthPx: this.settings.outline.widthPx,
-      outlineOpacity: this.settings.outline.opacity,
-    };
-
     // Recalculate lane utilization BEFORE drainQueue so anti-block sees
     // accurate state. Previously resetBatch() was inside drainQueue() and
     // never called when anti-block was active, causing a deadlock:
@@ -692,7 +705,11 @@ export class CanvasRenderer extends RendererBase {
               snappedX,
               snappedY,
               {
-                ...frameCtx,
+                fontSize: this.settings.fontSize,
+                fontWeight: this.settings.fontWeight,
+                fontFamily: this.settings.fontFamily,
+                outlineWidthPx: this.settings.outline.widthPx,
+                outlineOpacity: this.settings.outline.opacity,
                 showAuthor: this.settings.showAuthor[renderMessage.authorType],
                 color:
                   this.settings.preserveUserColor && renderMessage.userColor
@@ -1416,6 +1433,10 @@ export class CanvasRenderer extends RendererBase {
     this.workerManager.destroy();
     this.imageFetchManager.destroy();
     this.overlayDimensionsUnsubscribe?.();
+    if (this.canvas && this.canvasClickHandler) {
+      this.canvas.removeEventListener('click', this.canvasClickHandler);
+    }
+    this.canvasClickHandler = null;
     this.canvas?.remove();
     this.canvas = null;
     this.ctx = null;

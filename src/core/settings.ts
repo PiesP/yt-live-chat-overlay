@@ -23,9 +23,13 @@ export class Settings {
    *  Incremented on every save(); the listener captures the pre-save generation
    *  and skips reload if it matches, handling both sync and async listener timing. */
   private saveGeneration = 0;
-  /** Tracks the saveGeneration value at the last self-initiated save.
-   *  GM listener skips reload when current saveGeneration matches this. */
-  private lastSelfSaveGeneration = 0;
+  /** Generation counter captured at GM listener registration time.
+   *  Any GM event that fires with a generation <= this value is considered
+   *  self-triggered and is skipped. This prevents redundant reloads when
+   *  save() is called rapidly — the listener sees the captured generation
+   *  from registration, not the latest saveGeneration which may have been
+   *  incremented by a concurrent save(). */
+  private gmListenerGeneration = 0;
   /** Debounce flag: true while a save is scheduled via requestIdleCallback. */
   private savePending = false;
   /** requestIdleCallback handle — stored so we can cancel on flush/destroy. */
@@ -102,10 +106,15 @@ export class Settings {
     // GM storage path: fires in all tabs (including the caller).
     // Only available in userscript contexts (Tampermonkey/Violentmonkey).
     if (Settings.hasGmValueChangeListener) {
+      // Capture the current generation at registration time. Any GM event that
+      // fires with a generation <= this value was triggered by a save that
+      // occurred before or during listener registration, so we skip it.
+      this.gmListenerGeneration = this.saveGeneration;
       this.gmListenerId = GM_addValueChangeListener(STORAGE_KEY, () => {
-        // Skip self-triggered events: if our last save matches current generation,
-        // this event was triggered by our own save and we should not reload.
-        if (this.saveGeneration === this.lastSelfSaveGeneration) return;
+        // Skip self-triggered events: if the current generation was already
+        // committed at the time the listener was registered, this event was
+        // triggered by our own save and we should not reload.
+        if (this.saveGeneration <= this.gmListenerGeneration) return;
         log.debug('Cross-tab settings change detected via GM listener');
         void this.reloadFromStorage();
       });
@@ -157,7 +166,9 @@ export class Settings {
   private async save(): Promise<void> {
     try {
       this.saveGeneration++;
-      this.lastSelfSaveGeneration = this.saveGeneration;
+      // Update the GM listener baseline so that the self-triggered GM event
+      // from this save is correctly identified and skipped.
+      this.gmListenerGeneration = this.saveGeneration;
       const data = { ...this.settings, _version: SETTINGS_VERSION };
       await getStorageAdapter().setItem(STORAGE_KEY, JSON.stringify(data));
     } catch (error: unknown) {

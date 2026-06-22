@@ -266,6 +266,7 @@ function patchOutline(partial: Record<string, unknown>, patch: Record<string, un
 export class SettingsUiForm {
   private modal: HTMLDivElement | null = null;
   private isUpdating = false;
+  private errorDismissTimeouts: ReturnType<typeof setTimeout>[] = [];
 
   constructor(
     private readonly getSettings: () => Readonly<OverlaySettings>,
@@ -276,8 +277,20 @@ export class SettingsUiForm {
     this.modal = modal;
     if (modal) {
       this.bindNumberInputKeys(modal);
+    } else {
+      this.clearErrorDismissTimeouts();
     }
     log.debug('Modal set', { attached: modal !== null });
+  }
+
+  destroy(): void {
+    this.clearErrorDismissTimeouts();
+    this.modal = null;
+  }
+
+  private clearErrorDismissTimeouts(): void {
+    for (const t of this.errorDismissTimeouts) clearTimeout(t);
+    this.errorDismissTimeouts = [];
   }
 
   /**
@@ -691,7 +704,11 @@ export class SettingsUiForm {
 
     // Auto-dismiss after 3s
     const ERROR_DISMISS_MS = 3000;
-    setTimeout(() => error.remove(), ERROR_DISMISS_MS);
+    const timer = setTimeout(() => {
+      error.remove();
+      this.errorDismissTimeouts = this.errorDismissTimeouts.filter((t) => t !== timer);
+    }, ERROR_DISMISS_MS);
+    this.errorDismissTimeouts.push(timer);
   }
 
   getFocusableElements(): HTMLElement[] {

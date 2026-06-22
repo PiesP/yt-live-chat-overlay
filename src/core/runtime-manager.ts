@@ -332,7 +332,11 @@ export class RuntimeManager {
     this.targetUrl = desired.url;
     this.settings = desired.settings;
 
-    // Reset session lifecycle flags for new start
+    // Set restarting state BEFORE aborting so that async operations
+    // checking isDisposedState (e.g., visibility handler) see the
+    // correct state during the transition window.
+    this.state = 'restarting';
+
     this.abortController.abort(); // abort stale signal before replacing
     this.abortController = new AbortController();
     this.state = 'starting';
@@ -508,6 +512,8 @@ export class RuntimeManager {
       log.info('Started successfully');
       return 'started';
     } catch (error: unknown) {
+      // Ensure watchdog is stopped if startup failed after startChatWatchdog()
+      this.stopChatWatchdog();
       if (isAbortError(error)) {
         return 'retryable';
       }
@@ -846,6 +852,11 @@ export class RuntimeManager {
   }
 
   private startForegroundListeners(): void {
+    // Clean up any previously registered listeners from a prior startSession() call.
+    // Without this, a managed restart would leak the old visibilitychange/pageshow
+    // listeners, causing double-execution of resume logic.
+    this.stopForegroundListeners();
+
     const cleanups: (() => void)[] = [];
 
     const handleVisibility = (): void => {
@@ -903,11 +914,10 @@ export class RuntimeManager {
       }
     };
 
+    // Single handler for both visibilitychange and pageshow — handles
+    // tab visibility changes and bfcache restores uniformly.
     document.addEventListener('visibilitychange', handleVisibility);
     cleanups.push(() => document.removeEventListener('visibilitychange', handleVisibility));
-
-    window.addEventListener('pageshow', handleVisibility);
-    cleanups.push(() => window.removeEventListener('pageshow', handleVisibility));
 
     // bfcache restore: when the page is restored from the browser cache
     // (event.persisted === true), the previous JS state may be stale —
@@ -917,6 +927,9 @@ export class RuntimeManager {
       if (e.persisted) {
         log.info('Page restored from bfcache — forcing session reconcile');
         this.requestReconcile('page-change');
+      } else {
+        // Non-bfcache pageshow: treat same as visibility change
+        handleVisibility();
       }
     };
     window.addEventListener('pageshow', handlePageShow);

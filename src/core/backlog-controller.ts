@@ -27,7 +27,6 @@ import { BACKLOG_INDICATOR_BG, DEFAULT_FONT_FAMILY, INDICATOR_Z_INDEX } from '@c
 import { clearSafeTimeout } from '@core/dom';
 import { t } from '@core/i18n';
 import { createLogger } from '@core/logging';
-import { sampleExponential } from '@core/math-utils';
 import type { ObservabilityReporter } from '@core/observability';
 
 /** Offset threshold at which the backlog queue ring buffer is compacted via slice(). */
@@ -82,6 +81,7 @@ export class BacklogInjectionController implements Pauseable {
   private processedBacklog = 0;
   private indicatorEl: HTMLElement | null = null;
   private hideIndicatorTimer: ReturnType<typeof setTimeout> | null = null;
+  private _indicatorFadeRaf: number | null = null;
   private config: BacklogControllerConfig;
   private lanes: number;
   private observability: ObservabilityReporter | undefined;
@@ -112,6 +112,14 @@ export class BacklogInjectionController implements Pauseable {
   private static readonly SAMPLE_RATIO_SMALL = 0.6;
   private static readonly SAMPLE_RATIO_LARGE = 0.35;
   private static readonly INDICATOR_HIDE_DELAY_MS = 300;
+
+  /**
+   * Sample from an exponential distribution with the given mean.
+   * Uses the inverse-CDF method: -mean * ln(1 - U) where U ~ Uniform(0, 1).
+   */
+  private static sampleExponential(mean: number): number {
+    return -mean * Math.log(Math.max(Number.EPSILON, 1 - Math.random()));
+  }
 
   /** Effective length of the backlog queue (excluding consumed offset entries). */
   private get backlogQueueLength(): number {
@@ -377,7 +385,7 @@ export class BacklogInjectionController implements Pauseable {
     const floorMs = Math.max(32, Math.round(meanInterval * 0.6));
     const poissonDelay = Math.max(
       floorMs,
-      Math.min(meanInterval * 2, sampleExponential(meanInterval))
+      Math.min(meanInterval * 2, BacklogInjectionController.sampleExponential(meanInterval))
     );
     this.injectionTimer = setTimeout(() => this.processTick(), poissonDelay);
   }
@@ -505,8 +513,9 @@ export class BacklogInjectionController implements Pauseable {
     document.body.appendChild(el);
     this.indicatorEl = el;
     // Fade in
-    requestAnimationFrame(() => {
+    this._indicatorFadeRaf = requestAnimationFrame(() => {
       el.style.opacity = '1';
+      this._indicatorFadeRaf = null;
     });
   }
 
@@ -540,6 +549,10 @@ export class BacklogInjectionController implements Pauseable {
     this.isInjecting = false;
     this.injectionTimer = clearSafeTimeout(this.injectionTimer);
     this.hideIndicatorTimer = clearSafeTimeout(this.hideIndicatorTimer);
+    if (this._indicatorFadeRaf !== null) {
+      cancelAnimationFrame(this._indicatorFadeRaf);
+      this._indicatorFadeRaf = null;
+    }
     this.backlogQueue = [];
     this.backlogQueueOffset = 0;
     this.backlogSeenIds.clear();
