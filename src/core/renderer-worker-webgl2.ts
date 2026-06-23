@@ -42,11 +42,13 @@ import { computeOutlineColor } from '@core/color-utils';
 import { rendererLayout } from '@core/design-tokens';
 import {
   areSpeedTiersCompatible,
+  buildLaneHeap,
+  commitPlacementShared,
   computeLaneY,
   computeOccupancyMs as computeOccupancyMsShared,
-  heapGetSlotAvailableAt,
-  heapSiftDown,
-  heapUpdateLane,
+  type LaneAllocationState,
+  resetBatchShared,
+  shiftLaneTimersShared,
 } from '@core/lane-allocation-shared';
 import { createLogger } from '@core/logging';
 import { PriorityBucketQueue } from '@core/priority-bucket-queue';
@@ -185,13 +187,19 @@ class WebGL2RenderWorker {
   private readonly emojiTextures = new Map<string, WebGLTexture>();
   private readonly authorPhotoTextures = new Map<string, WebGLTexture>();
 
-  // Lane allocator state
-  private laneHeap: [number, number][] = [];
-  private laneIndexToHeapIndex: Map<number, number> = new Map();
+  // Lane allocator state (shared via LaneAllocationState)
+  private readonly laneIndexToHeapIndex = new Map<number, number>();
+  private readonly speedTierLanesMap = new Map<number, { tier: number; until: number }>();
+  private readonly collidedLanesSet = new Set<number>();
+  private laneState: LaneAllocationState = {
+    heap: [],
+    indexMap: this.laneIndexToHeapIndex,
+    numLanes: 0,
+    speedTierLanes: this.speedTierLanesMap,
+    collidedLanes: this.collidedLanesSet,
+  };
   private laneHeight = 0;
   private numLanes = 0;
-  private speedTierLanes: Map<number, { tier: number; until: number }> = new Map();
-  private collidedLanes: Set<number> = new Set();
 
   // ── Lane allocator methods ──
 
@@ -204,52 +212,28 @@ class WebGL2RenderWorker {
     this.laneHeight = Math.max(1, textHeight + totalPaddingV + cfg.laneSpacing);
     const usableHeight = height * (1 - cfg.safeTop - cfg.safeBottom);
     this.numLanes = Math.max(1, Math.floor(usableHeight / this.laneHeight));
+    this.laneState.numLanes = this.numLanes;
 
-    this.laneHeap = [];
-    this.laneIndexToHeapIndex.clear();
-    this.speedTierLanes.clear();
+    this.speedTierLanesMap.clear();
     const now = performance.now();
-    for (let i = 0; i < this.numLanes; i++) {
-      this.laneHeap.push([i, now]);
-      this.laneIndexToHeapIndex.set(i, i);
-    }
-    // Build 4-ary min-heap
-    for (let i = Math.floor((this.laneHeap.length - 2) / 4); i >= 0; i--) {
-      this.siftDown(i);
-    }
-  }
-
-  private siftDown(idx: number): void {
-    heapSiftDown(this.laneHeap, this.laneIndexToHeapIndex, idx);
+    this.laneState.heap = buildLaneHeap(this.numLanes, now, this.laneIndexToHeapIndex);
   }
 
   private getSlotAvailableAt(laneIndex: number): number | undefined {
-    return heapGetSlotAvailableAt(
-      this.laneHeap,
-      this.laneIndexToHeapIndex,
-      laneIndex,
-      this.numLanes
-    );
-  }
-
-  private updateLane(laneIdx: number, availableAt: number): void {
-    heapUpdateLane(this.laneHeap, this.laneIndexToHeapIndex, laneIdx, availableAt);
+    const heapIdx = this.laneIndexToHeapIndex.get(laneIndex);
+    if (heapIdx === undefined || heapIdx >= this.laneState.heap.length) return undefined;
+    return this.laneState.heap[heapIdx]?.[1];
   }
 
   private resetBatch(): void {
-    const now = performance.now();
-    for (const [k, v] of this.speedTierLanes) {
-      if (v.until <= now) this.speedTierLanes.delete(k);
-    }
-    this.collidedLanes.clear();
+    resetBatchShared(this.laneState);
   }
 
   private findPlacement(
     msgHeight: number,
     speedTier: number
   ): { laneIndex: number; waitMs: number; laneY: number } | null {
-    if (this.laneHeap.length === 0) return null;
-    this.collidedLanes.clear();
+    if (this.laneState.heap.length === 0) return null;
     const now = performance.now();
     const slotCount = Math.max(1, Math.ceil(msgHeight / this.laneHeight));
     const result = this.allocateSingleLane(now, speedTier, slotCount);
@@ -268,7 +252,7 @@ class WebGL2RenderWorker {
     speedTier: number,
     slotCount: number
   ): { laneIndex: number; waitMs: number } | null {
-    if (this.laneHeap.length === 0) return null;
+    if (this.laneState.heap.length === 0) return null;
     const maxWaitMs = this.config?.scrollDurationMaxMs ?? 30000;
     let firstBusy: { laneIndex: number; waitMs: number } | null = null;
     let speedMatched: { laneIndex: number; waitMs: number } | null = null;
@@ -277,21 +261,21 @@ class WebGL2RenderWorker {
     for (let i = 0; i < this.numLanes - slotCount + 1; i++) {
       let tierOk = true;
       for (let s = 0; s < slotCount; s++) {
-        const active = this.speedTierLanes.get(i + s);
+        const active = this.speedTierLanesMap.get(i + s);
         if (active && active.until > now && !areSpeedTiersCompatible(speedTier, active.tier)) {
           tierOk = false;
           break;
         }
       }
       if (!tierOk) continue;
-      if (this.collidedLanes.has(i)) continue;
+      if (this.collidedLanesSet.has(i)) continue;
 
       const avail = this.getSlotAvailableAt(i);
       if (avail === undefined) continue;
       const wait = Math.max(0, Math.ceil(avail - now));
       if (wait > 0) {
         if (!firstBusy) firstBusy = { laneIndex: i, waitMs: wait };
-        const active = this.speedTierLanes.get(i);
+        const active = this.speedTierLanesMap.get(i);
         if ((!speedMatched || wait < speedMatched.waitMs) && active && active.tier === speedTier) {
           speedMatched = { laneIndex: i, waitMs: wait };
         }
@@ -306,7 +290,7 @@ class WebGL2RenderWorker {
             if (availJ !== undefined && Math.max(0, Math.ceil(availJ - now)) === 0) {
               let jTierOk = true;
               for (let s = 0; s < slotCount; s++) {
-                const activeJ = this.speedTierLanes.get(j + s);
+                const activeJ = this.speedTierLanesMap.get(j + s);
                 if (
                   activeJ &&
                   activeJ.until > now &&
@@ -343,23 +327,22 @@ class WebGL2RenderWorker {
     const cfg = this.config;
     if (!cfg) return;
     const screenWidth = this.cssWidth;
-    const exitPaddingPx = (cfg.exitPaddingPx as number | undefined) ?? 0;
-    const headwayGapRatio = (cfg.headwayGapRatio as number | undefined) ?? 0.08;
     const occupancyMs = computeOccupancyMsShared(
       durationMs,
-      exitPaddingPx,
-      headwayGapRatio,
+      (cfg.exitPaddingPx as number | undefined) ?? 0,
+      (cfg.headwayGapRatio as number | undefined) ?? 0.08,
       msgWidth,
       screenWidth
     );
-    const nextAvailable = startTime + occupancyMs;
-    const until = startTime + durationMs;
-
-    for (let s = 0; s < slotCount; s++) {
-      this.speedTierLanes.set(laneIndex + s, { tier: speedTier, until });
-      this.updateLane(laneIndex + s, nextAvailable);
-      this.collidedLanes.add(laneIndex + s);
-    }
+    commitPlacementShared(
+      this.laneState,
+      laneIndex,
+      slotCount,
+      startTime,
+      occupancyMs,
+      durationMs,
+      speedTier
+    );
   }
 
   // ── Helpers ──
@@ -442,7 +425,7 @@ class WebGL2RenderWorker {
     const maxMessages = cfg.queueMaxSize;
 
     // Initialize lanes on first call or when dimensions change
-    if (this.laneHeap.length === 0) {
+    if (this.laneState.heap.length === 0) {
       this.initLanes(this.cssHeight);
     }
 
@@ -692,10 +675,10 @@ class WebGL2RenderWorker {
       this.cssHeight = payload.height / this.dpr;
       this.gl?.viewport(0, 0, payload.width, payload.height);
       // Reinitialize lanes when dimensions change
-      this.laneHeap = [];
+      this.laneState.heap = [];
       this.laneIndexToHeapIndex.clear();
-      this.speedTierLanes.clear();
-      this.collidedLanes.clear();
+      this.speedTierLanesMap.clear();
+      this.collidedLanesSet.clear();
       this.initLanes(this.cssHeight);
     }
   }
@@ -773,14 +756,8 @@ class WebGL2RenderWorker {
         for (const m of this.activeMessages) {
           m.startTime += clamped;
         }
-        // Shift lane timers by pause duration
-        for (let i = 0; i < this.laneHeap.length; i++) {
-          const entry = this.laneHeap[i];
-          if (entry) entry[1] += clamped;
-        }
-        for (const [key, entry] of this.speedTierLanes) {
-          this.speedTierLanes.set(key, { tier: entry.tier, until: entry.until + clamped });
-        }
+        // Shift lane timers by pause duration using shared helper
+        shiftLaneTimersShared(this.laneState, clamped);
       }
     }
   }
@@ -851,10 +828,10 @@ class WebGL2RenderWorker {
     this.pausedAt = 0;
 
     // Clear lane allocator state
-    this.laneHeap = [];
+    this.laneState.heap = [];
     this.laneIndexToHeapIndex.clear();
-    this.speedTierLanes.clear();
-    this.collidedLanes.clear();
+    this.speedTierLanesMap.clear();
+    this.collidedLanesSet.clear();
 
     if (this.gl) {
       if (this.atlasTexture) this.gl.deleteTexture(this.atlasTexture);

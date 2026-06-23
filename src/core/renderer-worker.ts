@@ -302,7 +302,7 @@ function recomputeConfigDerived(): void {
   const c = config; // narrow for closure safety (module-level let config)
   invFadeMs = c.fadeDurationMs > 0 ? 1 / Math.max(1, c.fadeDurationMs) : 0;
   ageFadeRate = 1 / c.maxMessageAgeMs;
-  boundGetFont = (fontSize: number): string => `${c.fontWeight} ${fontSize}px ${c.fontFamily}`;
+  boundGetFont = (fontSize: number): string => getFontString(fontSize, c.fontWeight, c.fontFamily);
   opacityConfig = {
     baseOpacity: c.opacity,
     fadeDurationMs: c.fadeDurationMs,
@@ -340,7 +340,7 @@ const fontMetricsCache = new Map<string, { height: number; ascent: number }>();
 /** Build a CSS font string from the current worker config. */
 function getFontFromConfig(fontSize: number): string {
   if (!config) return `${fontSize}px sans-serif`;
-  return `${config.fontWeight} ${fontSize}px ${config.fontFamily}`;
+  return getFontString(fontSize, config.fontWeight, config.fontFamily);
 }
 
 /**
