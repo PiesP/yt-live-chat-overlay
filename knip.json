@@ -7,5 +7,6 @@
     "@app-types": ["src/types/index"],
     "@platform/*": ["src/platform/*"]
   },
-  "ignore": ["test/**", "extension/**", "dist*/**"]
+  "ignore": ["test/**", "extension/**", "dist*/**"],
+  "ignoreBinaries": ["stryker"]
 }

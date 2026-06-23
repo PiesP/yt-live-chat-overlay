@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { KO } from './ko';
 import { ES } from './es';
 import { JA } from './ja';
+import { KO } from './ko';
 import { ZH } from './zh';
 
-export { KO, ES, JA, ZH };
+export { ES, JA, KO, ZH };
 
 export const TRANSLATION_MAPS: Record<string, Record<string, string>> = {
   ko: KO,
