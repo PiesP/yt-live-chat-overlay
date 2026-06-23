@@ -17,9 +17,9 @@ const uiColors = {
   warning: '#ffc107',
 } as const;
 
-export { uiColors };
+// export { uiColors }; // removed — was only used internally
 
-export const typography = {
+const typography = {
   fontSize: {
     xs: '12px',
     sm: '14px',
@@ -37,7 +37,7 @@ export const typography = {
   },
 } as const;
 
-export const shadows = {
+const shadows = {
   text: {
     sm: '1px 1px 2px rgba(0, 0, 0, 0.8)',
     md: '2px 2px 4px rgba(0, 0, 0, 0.8)',
@@ -53,20 +53,20 @@ export const shadows = {
   },
 } as const;
 
-export const borderRadius = {
+const borderRadius = {
   sm: '6px',
   md: '8px',
   lg: '12px',
   full: '50%',
 } as const;
 
-export const zIndex = {
+const zIndex = {
   modal: 10003,
   settingsButton: 120,
 } as const;
 
 // ── UI sizing tokens (settings panel layout) ──
-export const uiSizing = {
+const uiSizing = {
   buttonSize: 36,
   buttonFontSize: 18,
   inputWidth: 86,
@@ -83,7 +83,7 @@ export const uiSizing = {
 } as const;
 
 // ── Animation durations (settings panel) ──
-export const animDuration = {
+const animDuration = {
   fast: '0.1s',
   normal: '0.15s',
   slow: '0.18s',
@@ -95,10 +95,10 @@ export const animDuration = {
 } as const;
 
 // ── UI confirm backdrop alpha ──
-export const CONFIRM_BACKDROP_ALPHA = 0.5;
+const CONFIRM_BACKDROP_ALPHA = 0.5;
 
 // ── Scrollbar (pane overflow) ──
-export const scrollbar = {
+const scrollbar = {
   width: '6px',
   track: 'transparent',
   thumb: 'rgba(255, 255, 255, 0.12)',
@@ -106,9 +106,9 @@ export const scrollbar = {
 } as const;
 
 // ── Toast notification ──
-export const TOAST_BG = 'rgba(0, 0, 0, 0.85)';
-export const TOAST_FONT = `12px/1.4 ${DEFAULT_FONT_FAMILY}`;
-export const TOAST_PADDING = '6px 14px';
+const TOAST_BG = 'rgba(0, 0, 0, 0.85)';
+const TOAST_FONT = `12px/1.4 ${DEFAULT_FONT_FAMILY}`;
+const TOAST_PADDING = '6px 14px';
 
 export const SETTINGS_UI_STYLES = `
       .yt-chat-overlay-settings-button {

@@ -134,11 +134,3 @@ const TRANSLATIONS: Record<SupportedLanguage, TranslationMap> = {
   es: ES,
   zh: ZH,
 };
-
-// Export translation maps for consistency validation (test-only, not used at runtime)
-export const TRANSLATION_MAPS: Record<string, TranslationMap> = {
-  ko: KO,
-  ja: JA,
-  es: ES,
-  zh: ZH,
-};
