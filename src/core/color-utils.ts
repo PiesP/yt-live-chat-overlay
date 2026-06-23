@@ -82,6 +82,39 @@ export function computeReadableTextColor(backgroundColor: string): string {
   return relativeLuminance(rgb) > 0.5 ? '#000000' : '#ffffff';
 }
 
+/**
+ * Desaturate a CSS color toward gray by a given factor.
+ * Accepts #RRGGBB hex, #RGB short hex, or rgb(r,g,b) / rgba(r,g,b,a) formats.
+ * factor 0 = original, 1 = full grayscale.
+ * Uses luminance-preserving weights (ITU-R BT.601).
+ */
+export function desaturateColor(color: string, factor: number): string {
+  let r: number, g: number, b: number;
+
+  if (color.startsWith('#')) {
+    const hex = color.slice(1);
+    if (hex.length === 3) {
+      r = parseInt(hex.charAt(0) + hex.charAt(0), 16);
+      g = parseInt(hex.charAt(1) + hex.charAt(1), 16);
+      b = parseInt(hex.charAt(2) + hex.charAt(2), 16);
+    } else {
+      r = parseInt(hex.slice(0, 2), 16);
+      g = parseInt(hex.slice(2, 4), 16);
+      b = parseInt(hex.slice(4, 6), 16);
+    }
+  } else {
+    const match = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+    if (!match) return color;
+    const [, rStr = '0', gStr = '0', bStr = '0'] = match;
+    r = parseInt(rStr, 10);
+    g = parseInt(gStr, 10);
+    b = parseInt(bStr, 10);
+  }
+
+  const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+  return `rgb(${Math.round(r + (gray - r) * factor)},${Math.round(g + (gray - g) * factor)},${Math.round(b + (gray - b) * factor)})`;
+}
+
 /** Resolve SuperChat display color: use YouTube's color if available, else tier default. */
 export function resolveSuperChatRgb(
   superChat: { headerBackgroundColor?: string; backgroundColor?: string; tier: SuperChatTier },

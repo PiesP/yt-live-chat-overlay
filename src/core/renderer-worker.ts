@@ -43,7 +43,7 @@ import {
   type TextBitmapCache,
 } from '@core/canvas-rendering-shared';
 import type { CardConfigWorker } from '@core/card-config';
-import { toRgba } from '@core/color-utils';
+import { desaturateColor, toRgba } from '@core/color-utils';
 import {
   computeScrollDuration,
   DEFAULT_TEXT_COLOR,
@@ -66,7 +66,6 @@ import {
   ANTI_BLOCK_FREE_RATIO,
   ANTI_BLOCK_PRIORITY_THRESHOLD,
   DRAIN_QUEUE_MAX_SKIP as DRAIN_MAX_SKIP,
-  desaturateColor,
   EPSILON,
   FAR_LAYER_DESATURATION_FACTOR,
   HORIZONTAL_STAGGER_MAX,

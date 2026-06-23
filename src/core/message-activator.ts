@@ -3,9 +3,9 @@
 
 import type { ChatMessage } from '@app-types';
 import { getTranslatableText } from '@core/chat-message-helpers';
+import { desaturateColor } from '@core/color-utils';
 import {
   type CanvasMessage,
-  desaturateColor,
   EMPTY_CHAT_MESSAGE,
   FAR_LAYER_DESATURATION_FACTOR,
   SPEED_TIER,

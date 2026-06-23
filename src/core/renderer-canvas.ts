@@ -43,22 +43,22 @@ import { PriorityBucketQueue } from '@core/priority-bucket-queue';
 import type { ConnectionStatus } from '@core/renderer-base';
 import { RendererBase } from '@core/renderer-base';
 import {
-  ANTI_BLOCK_PRIORITY_THRESHOLD as _ANTI_BLOCK_PRIORITY_THRESHOLD,
-  DRAIN_QUEUE_MAX_SKIP as _DRAIN_QUEUE_MAX_SKIP,
-  HORIZONTAL_STAGGER_MAX as _HORIZONTAL_STAGGER_MAX,
-  HORIZONTAL_STAGGER_PER_STEP as _HORIZONTAL_STAGGER_PER_STEP,
-  OPACITY_BUCKET_COUNT as _OPACITY_BUCKET_COUNT,
-  STAGGER_BATCH_MAX as _STAGGER_BATCH_MAX,
-  STAGGER_EXP_SCALE as _STAGGER_EXP_SCALE,
-  STAGGER_QUEUE_HIGH as _STAGGER_QUEUE_HIGH,
-  STAGGER_QUEUE_MED as _STAGGER_QUEUE_MED,
-  TIER_NEAR_THRESHOLD as _TIER_NEAR_THRESHOLD,
-  TRANSLATION_FONT_SCALE as _TRANSLATION_FONT_SCALE,
-  TRANSLATION_GAP_PX as _TRANSLATION_GAP_PX,
-  TRANSLATION_OPACITY_SCALE as _TRANSLATION_OPACITY_SCALE,
+  ANTI_BLOCK_PRIORITY_THRESHOLD,
   type CanvasMessage,
+  DRAIN_QUEUE_MAX_SKIP,
+  HORIZONTAL_STAGGER_MAX,
+  HORIZONTAL_STAGGER_PER_STEP,
   hashStringForTier,
+  OPACITY_BUCKET_COUNT,
   SPEED_TIER,
+  STAGGER_BATCH_MAX,
+  STAGGER_EXP_SCALE,
+  STAGGER_QUEUE_HIGH,
+  STAGGER_QUEUE_MED,
+  TIER_NEAR_THRESHOLD,
+  TRANSLATION_FONT_SCALE,
+  TRANSLATION_GAP_PX,
+  TRANSLATION_OPACITY_SCALE,
 } from '@core/renderer-constants';
 import {
   computeMessageOpacity,
@@ -243,7 +243,7 @@ export class CanvasRenderer extends RendererBase {
    * the per-frame GC pressure from Map + {msg,elapsed} object creation.
    */
   private readonly _opacityBuckets: Array<Array<{ msg: CanvasMessage; elapsed: number }>> =
-    Array.from({ length: _OPACITY_BUCKET_COUNT }, () => []);
+    Array.from({ length: OPACITY_BUCKET_COUNT }, () => []);
 
   /** Cached opacity config object — rebuilt on settings changes to avoid per-frame allocation. */
   private _cachedOpacityConfig!: {
@@ -675,7 +675,7 @@ export class CanvasRenderer extends RendererBase {
         this._cachedOpacityConfig
       );
 
-      const bucketIndex = Math.round(opacity * (_OPACITY_BUCKET_COUNT - 1));
+      const bucketIndex = Math.round(opacity * (OPACITY_BUCKET_COUNT - 1));
       // Store positionElapsed for membership card border pulse animation
       buckets[bucketIndex]?.push({ msg, elapsed: positionElapsed });
     }
@@ -683,10 +683,10 @@ export class CanvasRenderer extends RendererBase {
     // ── Render each opacity group with a single ctx.globalAlpha set ──
     // Iterate ascending (0→N-1) so low-opacity messages render behind,
     // high-opacity on top — consistent with pre-pooling Map insertion order.
-    for (let bucketIndex = 0; bucketIndex < _OPACITY_BUCKET_COUNT; bucketIndex++) {
+    for (let bucketIndex = 0; bucketIndex < OPACITY_BUCKET_COUNT; bucketIndex++) {
       const entries = buckets[bucketIndex];
       if (!entries || entries.length === 0) continue;
-      const bucketOpacity = bucketIndex / (_OPACITY_BUCKET_COUNT - 1);
+      const bucketOpacity = bucketIndex / (OPACITY_BUCKET_COUNT - 1);
       ctx.globalAlpha = bucketOpacity;
 
       try {
@@ -755,16 +755,16 @@ export class CanvasRenderer extends RendererBase {
           if (msg.translatedText && this.settings.translationMode !== 'replace') {
             const fontSize = Math.max(
               1,
-              Math.round(this.settings.fontSize * _TRANSLATION_FONT_SCALE)
+              Math.round(this.settings.fontSize * TRANSLATION_FONT_SCALE)
             );
             // Compute vertical positions: translation sits near the bottom of the card,
             // with a small gap between original content and translation text.
-            const gap = _TRANSLATION_GAP_PX;
+            const gap = TRANSLATION_GAP_PX;
             const transY = snappedY + msg.height - fontSize - gap;
             const transColor = this.settings.colors[msg.message.authorType];
             ctx.save();
             try {
-              ctx.globalAlpha = bucketOpacity * _TRANSLATION_OPACITY_SCALE;
+              ctx.globalAlpha = bucketOpacity * TRANSLATION_OPACITY_SCALE;
               // Translation text (normal weight for subtle distinction)
               const transFont = getFontString(fontSize, 'normal', this.settings.fontFamily);
               renderSegment(
@@ -800,7 +800,7 @@ export class CanvasRenderer extends RendererBase {
     // interactions are never blocked by lane saturation.
     if (this.isAntiBlockActive()) {
       const front = this.pendingQueue.peek();
-      if (!front || CanvasRenderer.getMessagePriority(front) < _ANTI_BLOCK_PRIORITY_THRESHOLD)
+      if (!front || CanvasRenderer.getMessagePriority(front) < ANTI_BLOCK_PRIORITY_THRESHOLD)
         return;
     }
     const t0 = performance.now();
@@ -810,7 +810,7 @@ export class CanvasRenderer extends RendererBase {
     if (!dims) return;
 
     let skipped = 0;
-    const maxSkip = _DRAIN_QUEUE_MAX_SKIP;
+    const maxSkip = DRAIN_QUEUE_MAX_SKIP;
     let batchIndex = 0; // for stagger delay computation
     while (
       !this.pendingQueue.isEmpty &&
@@ -1024,7 +1024,7 @@ export class CanvasRenderer extends RendererBase {
     // spreading them horizontally and breaking the vertical "wall" effect.
     const horizontalStagger =
       isScrolling && batchIndex > 0
-        ? Math.min(_HORIZONTAL_STAGGER_MAX, batchIndex * _HORIZONTAL_STAGGER_PER_STEP)
+        ? Math.min(HORIZONTAL_STAGGER_MAX, batchIndex * HORIZONTAL_STAGGER_PER_STEP)
         : 0;
 
     // startX: off-screen entry position for scrolling modes,
@@ -1076,9 +1076,9 @@ export class CanvasRenderer extends RendererBase {
     // When the pending queue backs up, stagger is reduced to avoid
     // compounding the delay — deep queue → zero stagger (backlog mode).
     const maxStagger =
-      this.pendingQueue.size > _STAGGER_QUEUE_HIGH
+      this.pendingQueue.size > STAGGER_QUEUE_HIGH
         ? 0
-        : this.pendingQueue.size > _STAGGER_QUEUE_MED
+        : this.pendingQueue.size > STAGGER_QUEUE_MED
           ? this.settings.staggerMediumDelayMs
           : this.settings.staggerMaxDelayMs;
     const staggerDelay =
@@ -1086,8 +1086,8 @@ export class CanvasRenderer extends RendererBase {
         ? Math.round(
             Math.min(
               maxStagger,
-              Math.min(batchIndex, _STAGGER_BATCH_MAX) *
-                -_STAGGER_EXP_SCALE *
+              Math.min(batchIndex, STAGGER_BATCH_MAX) *
+                -STAGGER_EXP_SCALE *
                 Math.log(1 - Math.random())
             )
           )
@@ -1167,10 +1167,10 @@ export class CanvasRenderer extends RendererBase {
       ) {
         const transFontSize = Math.max(
           1,
-          Math.round(this.settings.fontSize * _TRANSLATION_FONT_SCALE)
+          Math.round(this.settings.fontSize * TRANSLATION_FONT_SCALE)
         );
         const transFont = getFontString(transFontSize, 'normal', this.settings.fontFamily);
-        const gap = _TRANSLATION_GAP_PX;
+        const gap = TRANSLATION_GAP_PX;
         const transHeight = measureTextHeight(transFont, transFontSize) + gap;
         return { width: cached.width, height: cached.height + transHeight };
       }
@@ -1215,10 +1215,10 @@ export class CanvasRenderer extends RendererBase {
     ) {
       const transFontSize = Math.max(
         1,
-        Math.round(this.settings.fontSize * _TRANSLATION_FONT_SCALE)
+        Math.round(this.settings.fontSize * TRANSLATION_FONT_SCALE)
       );
       const transFont = getFontString(transFontSize, 'normal', this.settings.fontFamily);
-      const gap = _TRANSLATION_GAP_PX;
+      const gap = TRANSLATION_GAP_PX;
       const transHeight = measureTextHeight(transFont, transFontSize) + gap;
       return { width: dims.width, height: dims.height + transHeight };
     }
@@ -1308,7 +1308,7 @@ export class CanvasRenderer extends RendererBase {
     if (message.kind === 'superchat' || message.kind === 'membership') return SPEED_TIER.NEAR;
     // Regular messages: deterministic assignment via message id hash
     const hash = hashStringForTier(message.id ?? String(message.timestamp));
-    return hash < _TIER_NEAR_THRESHOLD ? SPEED_TIER.NEAR : SPEED_TIER.FAR;
+    return hash < TIER_NEAR_THRESHOLD ? SPEED_TIER.NEAR : SPEED_TIER.FAR;
   }
 
   // hashStringForTier imported from @core/renderer-constants

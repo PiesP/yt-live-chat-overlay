@@ -152,7 +152,11 @@ export function heapSiftDown(
  * Sift a heap element upward to restore the min-heap invariant (4-ary heap).
  * Mutates `heap` and `indexMap` in place.
  */
-function heapSiftUp(heap: HeapEntry[], indexMap: Map<number, number>, startIdx: number): void {
+export function heapSiftUp(
+  heap: HeapEntry[],
+  indexMap: Map<number, number>,
+  startIdx: number
+): void {
   let idx = startIdx;
   while (idx > 0) {
     const parent = Math.floor((idx - 1) / 4);
