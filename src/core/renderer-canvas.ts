@@ -1333,6 +1333,7 @@ export class CanvasRenderer extends RendererBase {
 
   updateSettings(settings: OverlaySettings, options?: { resetState?: boolean }): void {
     const wasTranslationEnabled = this.settings.translationEnabled;
+    const prevSource = this.settings.translationSource;
     super.updateSettings(settings, options);
 
     // When settings change, cached dimensions become stale
@@ -1361,7 +1362,7 @@ export class CanvasRenderer extends RendererBase {
     this.translationService.onUserActivation();
 
     // Reset detection state when source changes to 'auto'
-    const sourceChanged = settings.translationSource !== this.settings.translationSource;
+    const sourceChanged = settings.translationSource !== prevSource;
     if (sourceChanged) {
       this.sourceDetectionDone = false;
       this.sourceSampleBuffer = [];
