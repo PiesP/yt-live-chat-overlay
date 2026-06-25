@@ -11,7 +11,7 @@ export type JsonObject = Record<string, unknown>;
  * @returns `true` if the value is a plain object record
  */
 export const isRecord = (value: unknown): value is JsonObject =>
-  typeof value === 'object' && value !== null;
+  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /**
  * Safely casts a value to a {@link JsonObject} if it is a record, otherwise
