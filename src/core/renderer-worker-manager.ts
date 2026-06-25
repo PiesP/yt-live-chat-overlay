@@ -20,6 +20,10 @@ import type { ObservabilityReporter } from '@core/observability';
 import type { Overlay } from '@core/overlay';
 import type { WorkerFactory } from '@platform/types';
 import { getWorkerFactory } from '@platform/worker-factory';
+import {
+  buildPartialWorkerConfig,
+  sendUpdateConfigToWorker,
+} from './renderer-worker-manager-common';
 
 type DimensionResult = { width: number; height: number };
 
@@ -330,11 +334,14 @@ export class RenderWorkerManager {
 
   /** Send updated settings to the render worker. */
   updateSettings(settings: OverlaySettings): void {
-    if (!this.worker) return;
-    this.worker.postMessage({
-      type: 'updateConfig',
-      config: RenderWorkerManager.buildWorkerConfig(settings),
-    });
+    const config = buildPartialWorkerConfig(
+      settings,
+      RenderWorkerManager.WORKER_CONFIG_KEYS
+    ) as Record<string, unknown>;
+    config.outlineWidthPx = settings.outline.widthPx;
+    config.outlineOpacity = settings.outline.opacity;
+    config.authorColors = { ...settings.colors };
+    sendUpdateConfigToWorker({ worker: this.worker }, config);
   }
 
   /** Destroy the render worker. */

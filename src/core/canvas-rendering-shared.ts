@@ -56,7 +56,43 @@ export interface SharedContentSegment {
   };
 }
 
-// ── Shared text wrapping types ─────────────────────────────────────────────
+/**
+ * Convert a ContentSegment (from @app-types) to a SharedContentSegment.
+ * This is a structural transformation — the nested `emoji` object is flattened
+ * into top-level `emojiUrl`/`emojiAlt` fields for cross-thread compatibility.
+ */
+export function toSharedContentSegment(seg: {
+  type: string;
+  content?: string;
+  emoji?: { url: string; alt: string; fallbackText?: string };
+}): SharedContentSegment {
+  if (seg.type === 'emoji') {
+    const { url, alt, fallbackText } = seg.emoji ?? {};
+    const result: SharedContentSegment = { type: 'emoji' };
+    if (url !== undefined) result.emojiUrl = url;
+    if (alt !== undefined) result.emojiAlt = alt;
+    if (fallbackText !== undefined) result.emojiFallbackText = fallbackText;
+    return result;
+  }
+  const result: SharedContentSegment = { type: 'text' };
+  if (seg.content !== undefined) result.content = seg.content;
+  return result;
+}
+
+/**
+ * Convert an array of ContentSegments to SharedContentSegments.
+ */
+export function toSharedContentSegments(segments: readonly unknown[]): SharedContentSegment[] {
+  return segments.map((seg) =>
+    toSharedContentSegment(
+      seg as {
+        type: string;
+        content?: string;
+        emoji?: { url: string; alt: string; fallbackText?: string };
+      }
+    )
+  );
+}
 
 /** Piece in a wrapped line — either a text word or an emoji image. */
 interface SharedTextPiece {
@@ -508,6 +544,20 @@ export function drawAuthorPhoto(
 }
 
 /**
+ * Runtime type guard for CanvasImageSource.
+ * Checks the properties that all CanvasImageSource implementations have
+ * (HTMLImageElement, HTMLCanvasElement, ImageBitmap, etc).
+ */
+function isCanvasImageSource(value: unknown): value is CanvasImageSource {
+  if (typeof value !== 'object' || value === null) return false;
+  const obj = value as Record<string, unknown>;
+  return (
+    (typeof obj.width === 'number' || typeof obj.naturalWidth === 'number') &&
+    (typeof obj.height === 'number' || typeof obj.naturalHeight === 'number')
+  );
+}
+
+/**
  * Draw author photo + name section. Returns the Y offset after the section.
  *
  * This is the SSOT for author rendering — used by both main-thread renderers
@@ -568,8 +618,8 @@ export function drawAuthorSection<T>(
   let hasPhoto = false;
   if (authorPhotoUrl) {
     const photo = getPhoto(authorPhotoUrl);
-    if (photo != null && isValidPhoto(photo)) {
-      drawAuthorPhoto(ctx, photo as unknown as CanvasImageSource, textX, startY);
+    if (photo != null && isValidPhoto(photo) && isCanvasImageSource(photo)) {
+      drawAuthorPhoto(ctx, photo as CanvasImageSource, textX, startY);
       hasPhoto = true;
     }
   }
@@ -712,7 +762,7 @@ export function renderRegularMessage(
   } else if (message.content.length > 0) {
     renderContentSegments(
       ctx,
-      message.content as unknown as SharedContentSegment[],
+      toSharedContentSegments(message.content),
       textX,
       textY,
       color,

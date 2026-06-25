@@ -401,7 +401,7 @@ export function renderPaidCard(
       settings.outline.widthPx,
       settings.outline.opacity,
       textBitmapCache,
-      emojiCache as unknown as ByteLimitedCache<CanvasImageSource>,
+      emojiCache as ByteLimitedCache<CanvasImageSource>,
       getFontFn
     );
   }

@@ -9,7 +9,7 @@
  */
 
 import type { ChatMessage, FontWeight } from '@app-types';
-import { buildWrappedLines, type SharedContentSegment } from '@core/canvas-rendering-shared';
+import { buildWrappedLines, toSharedContentSegments } from '@core/canvas-rendering-shared';
 import { DEFAULT_FONT_FAMILY, rendererLayout, spacing } from '@core/design-tokens';
 import { SPEED_TIER } from '@core/renderer-constants';
 import { DEFAULT_SETTINGS } from '@core/settings-schema';
@@ -151,7 +151,7 @@ function estimateSuperChatDimensions(
   // emoji segments are measured with the same piece widths as rendering.
   const maxInnerWidth = rendererLayout.superchatMaxWidth - paddingH * 2;
   const pass1Result = buildWrappedLines(
-    message.content as unknown as SharedContentSegment[],
+    toSharedContentSegments(message.content),
     Math.max(1, maxInnerWidth),
     emojiSize,
     (t: string) => measureTextWidth(t, font)
@@ -176,7 +176,7 @@ function estimateSuperChatDimensions(
     lineCount = Math.min(pass1LineCount, maxBodyLines);
   } else {
     const pass2Result = buildWrappedLines(
-      message.content as unknown as SharedContentSegment[],
+      toSharedContentSegments(message.content),
       actualInnerWidth,
       emojiSize,
       (t: string) => measureTextWidth(t, font)
@@ -231,7 +231,7 @@ function estimateMembershipDimensions(
   const actualInnerWidth = Math.max(1, width - paddingH * 2);
   const emojiSize = Math.round(fontSize * rendererLayout.emojiSize);
   const passResult = buildWrappedLines(
-    message.content as unknown as SharedContentSegment[],
+    toSharedContentSegments(message.content),
     actualInnerWidth,
     emojiSize,
     (t: string) => measureTextWidth(t, font)

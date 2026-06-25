@@ -15,6 +15,16 @@ import type { ChatMessage, OverlaySettings } from '@app-types';
 import { createLogger } from '@core/logging';
 import type { WorkerFactory } from '@platform/types';
 import { getWorkerFactory } from '@platform/worker-factory';
+import {
+  buildPartialWorkerConfig,
+  sendAuthorPhotosToWorker,
+  sendEmojiImagesToWorker,
+  sendMessagesToWorker,
+  sendResizeToWorker,
+  sendSetPausedToWorker,
+  sendTranslationToWorker,
+  sendUpdateConfigToWorker,
+} from './renderer-worker-manager-common';
 
 const log = createLogger('[RenderWorkerManagerWebGL2]');
 
@@ -73,16 +83,14 @@ export class RenderWorkerManagerWebGL2 {
 
   /** Build flat config from OverlaySettings. */
   static buildWorkerConfig(settings: OverlaySettings): WorkerConfigWebGL2 {
-    const config = {} as Record<string, unknown>;
-    for (const key of WORKER_CONFIG_KEYS) {
-      config[key] = settings[key];
-    }
-    return {
-      ...config,
-      outlineWidthPx: settings.outline.widthPx,
-      outlineOpacity: settings.outline.opacity,
-      authorColors: { ...settings.colors },
-    } as unknown as WorkerConfigWebGL2;
+    const config = buildPartialWorkerConfig(settings, WORKER_CONFIG_KEYS) as Record<
+      string,
+      unknown
+    >;
+    config.outlineWidthPx = settings.outline.widthPx;
+    config.outlineOpacity = settings.outline.opacity;
+    config.authorColors = { ...settings.colors };
+    return config as WorkerConfigWebGL2;
   }
 
   /**
@@ -194,34 +202,35 @@ export class RenderWorkerManagerWebGL2 {
   }
 
   addMessages(messages: ChatMessage[]): void {
-    this.worker?.postMessage({ type: 'addMessages', messages });
+    sendMessagesToWorker({ worker: this.worker }, messages);
   }
 
   updateSettings(settings: OverlaySettings): void {
-    const config = RenderWorkerManagerWebGL2.buildWorkerConfig(settings);
-    this.worker?.postMessage({ type: 'updateConfig', config });
+    const config = buildPartialWorkerConfig(settings, WORKER_CONFIG_KEYS);
+    config.outlineWidthPx = settings.outline.widthPx;
+    config.outlineOpacity = settings.outline.opacity;
+    config.authorColors = { ...settings.colors };
+    sendUpdateConfigToWorker({ worker: this.worker }, config);
   }
 
   resize(width: number, height: number): void {
-    this.worker?.postMessage({ type: 'resize', width, height });
+    sendResizeToWorker({ worker: this.worker }, width, height);
   }
 
   setPaused(paused: boolean, videoPaused?: boolean): void {
-    this.worker?.postMessage({ type: 'setPaused', paused, videoPaused });
+    sendSetPausedToWorker({ worker: this.worker }, paused, videoPaused);
   }
 
   addEmojiImages(images: Array<{ url: string; bitmap: ImageBitmap }>): void {
-    const bitmaps = images.map((i) => i.bitmap);
-    this.worker?.postMessage({ type: 'addEmojiImages', images }, bitmaps);
+    sendEmojiImagesToWorker({ worker: this.worker }, images);
   }
 
   addAuthorPhotos(photos: Array<{ url: string; bitmap: ImageBitmap }>): void {
-    const bitmaps = photos.map((p) => p.bitmap);
-    this.worker?.postMessage({ type: 'addAuthorPhotos', photos }, bitmaps);
+    sendAuthorPhotosToWorker({ worker: this.worker }, photos);
   }
 
   setTranslation(messageId: string, text: string): void {
-    this.worker?.postMessage({ type: 'setTranslation', messageId, text });
+    sendTranslationToWorker({ worker: this.worker }, messageId, text);
   }
 
   destroy(): void {

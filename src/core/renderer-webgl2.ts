@@ -590,12 +590,7 @@ export class RendererWebGL2 extends RendererBase {
   }
 
   private updateMessages(now: number): void {
-    updateMessagePositions(
-      this.messages as unknown as Parameters<typeof updateMessagePositions>[0],
-      this.settings.danmakuMode,
-      this.cssWidth,
-      now
-    );
+    updateMessagePositions(this.messages, this.settings.danmakuMode, this.cssWidth, now);
     // Clean up expired messages to prevent unbounded array growth on long streams
     this.cleanupExpiredMessages(now);
   }

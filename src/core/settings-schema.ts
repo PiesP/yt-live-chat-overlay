@@ -554,6 +554,40 @@ const STRING_VALIDATORS: Partial<Record<RootScalarSettingKey, (v: string) => boo
   translationSource: (v) => TRANSLATION_SOURCE_VALUES.includes(v as TranslationSource),
 };
 
+/**
+ * Apply validated scalar settings from `settings` onto `out` (mutating in place).
+ * Each key is type-routed via ROOT_SETTING_META, so the assignment is guaranteed
+ * to match the target field's declared type. This avoids `as unknown as` while
+ * still working around OverlaySettings lacking an index signature.
+ */
+function mutateScalarSettings(
+  out: OverlaySettings,
+  settings: Readonly<OverlaySettings>,
+  defaults: OverlaySettings
+): void {
+  const mutableOut = out as unknown as Record<string, unknown>;
+  const mutableDefaults = defaults as unknown as Record<string, unknown>;
+  for (const key of Object.keys(ROOT_SETTING_META) as RootScalarSettingKey[]) {
+    const meta = ROOT_SETTING_META[key];
+    const raw = settings[key];
+    if (meta.type === 'boolean') {
+      if (typeof raw === 'boolean') {
+        mutableOut[key] = raw;
+      }
+    } else if (meta.type === 'number') {
+      const defaultVal = mutableDefaults[key];
+      if (typeof defaultVal === 'number') {
+        mutableOut[key] = clampNumber(raw, defaultVal, resolveLimits(key));
+      }
+    } else {
+      const validator = STRING_VALIDATORS[key];
+      if (typeof raw === 'string' && validator?.(raw)) {
+        mutableOut[key] = raw;
+      }
+    }
+  }
+}
+
 const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings => {
   const d = DEFAULT_SETTINGS;
   // Start from defaults, then overlay valid values from the input
@@ -564,20 +598,8 @@ const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings
 
   // Root scalar settings: type-routed via ROOT_SETTING_META.
   // Write into a mutable copy since OverlaySettings has no index signature.
-  const cast = out as unknown as Record<string, unknown>;
-  const defaults = d as unknown as Record<string, unknown>;
-  for (const key of Object.keys(ROOT_SETTING_META) as RootScalarSettingKey[]) {
-    const meta = ROOT_SETTING_META[key];
-    const raw = settings[key];
-    if (meta.type === 'boolean') {
-      cast[key] = typeof raw === 'boolean' ? raw : defaults[key];
-    } else if (meta.type === 'number') {
-      cast[key] = clampNumber(raw, defaults[key] as number, resolveLimits(key));
-    } else {
-      const validator = STRING_VALIDATORS[key];
-      cast[key] = typeof raw === 'string' && validator?.(raw) ? raw : defaults[key];
-    }
-  }
+  // Each write is guarded by the type-checking if/else branches inside the helper.
+  mutateScalarSettings(out, settings, d);
 
   for (const key of SHOW_AUTHOR_KEYS) {
     out.showAuthor[key] = pickBool(settings.showAuthor[key], d.showAuthor[key]);

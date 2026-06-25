@@ -397,8 +397,26 @@ export function parseColor(hex: string): [number, number, number] {
  * - 'reverse': left-to-right (x = startX + progress × travel)
  * - 'top' / 'bottom': fixed  (x = startX)
  */
+export interface PositionableMessage {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  startX: number;
+  startTime: number;
+  duration: number;
+  laneIndex: number;
+  speedTier: number;
+  translatedText?: string | null;
+}
+
+/**
+ * Update message positions based on elapsed time in the render frame.
+ * Only mutates position/timing fields — message content is untouched.
+ * Returns the new logical length after compaction.
+ */
 export function updateMessagePositions(
-  messages: SharedMessage[],
+  messages: PositionableMessage[],
   mode: string,
   cssWidth: number,
   now: number

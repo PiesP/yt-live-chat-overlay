@@ -60,7 +60,8 @@ export class PageWatcher {
     const original = history[methodName];
     // Guard: if this method was already patched by us (marker present),
     // skip re-patching to avoid double-wrapping.
-    if ((original as unknown as Record<string, boolean>)[PageWatcher.PATCH_MARKER]) {
+    const originalWithMarker = original as unknown as { [key: string]: unknown };
+    if (originalWithMarker[PageWatcher.PATCH_MARKER] === true) {
       return () => {
         /* no-op: already patched */
       };
@@ -72,7 +73,8 @@ export class PageWatcher {
       this.handlePotentialUrlChange(methodName);
     };
     // Stamp marker so future patches can detect this is our wrapper.
-    (patched as unknown as Record<string, boolean>)[PageWatcher.PATCH_MARKER] = true;
+    const patchedWithMarker = patched as unknown as { [key: string]: unknown };
+    patchedWithMarker[PageWatcher.PATCH_MARKER] = true;
     history[methodName] = patched;
     return () => {
       // Only restore if no newer patch has been applied since us.

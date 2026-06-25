@@ -456,6 +456,12 @@ export class TranslationService {
     this.enabled = false;
     this.consecutiveFailures = 0;
     this.recoveryCycleCount = 0;
+    // Resolve all pending translate() callers with null before clearing the queue.
+    // Without this, any caller awaiting translate() has a Promise that never settles,
+    // causing a Promise leak that retains closures and their entire scope chain.
+    for (const entry of this.translateQueue) {
+      entry.resolve(null);
+    }
     this.translateQueue = [];
     this.drainActive = false;
     this.translationCache.clear();

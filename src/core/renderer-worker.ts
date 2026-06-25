@@ -34,13 +34,12 @@ import { ByteLimitedCache } from '@core/byte-limited-cache';
 import {
   drawAuthorSection,
   drawRoundRect,
-  type RegularMessageLike,
   renderRegularMessage,
   renderSegment,
   renderWrappedContentSegments,
-  type SharedContentSegment,
   strokeTextOutline,
   type TextBitmapCache,
+  toSharedContentSegments,
 } from '@core/canvas-rendering-shared';
 import type { CardConfigWorker } from '@core/card-config';
 import { desaturateColor, toRgba } from '@core/color-utils';
@@ -724,7 +723,7 @@ function renderPaidCardWorker(
     const bodyMaxWidth = w - padH * 2;
     textBottomY = renderWrappedContentSegments(
       ctx,
-      message.content as readonly SharedContentSegment[],
+      toSharedContentSegments(message.content),
       textX,
       cursorY + card.bodyMarginTop,
       bodyMaxWidth,
@@ -734,7 +733,7 @@ function renderPaidCardWorker(
       outlineWidthPx,
       outlineOpacity,
       textBitmapCache,
-      emojiCache as unknown as ByteLimitedCache<CanvasImageSource>,
+      emojiCache as ByteLimitedCache<CanvasImageSource>,
       getFontFn
     );
   }
@@ -1255,11 +1254,11 @@ function renderFrame(): void {
           renderRegularMessage(
             ctx,
             {
-              author: msg.author ?? undefined,
-              authorPhotoUrl: msg.authorPhotoUrl ?? undefined,
+              ...(msg.author !== undefined ? { author: msg.author } : {}),
+              ...(msg.authorPhotoUrl !== undefined ? { authorPhotoUrl: msg.authorPhotoUrl } : {}),
               content: msg.content ?? [],
               text: msg.text,
-            } as unknown as RegularMessageLike,
+            },
             sx,
             sy,
             {
