@@ -300,6 +300,11 @@ export class ImageFetchManager {
     this.workerBitmapCache.clear();
     this.bitmapGeneration.clear();
 
+    // Clear image caches to release cached ImageBitmap/HTMLImageElement references.
+    this.emojiCache.clear();
+    this.authorPhotoCache.clear();
+    this.stickerCache.clear();
+
     // Null references to prevent late callbacks from accessing destroyed subsystems.
     this.renderWorker = null;
     this.useWorkerMode = false;

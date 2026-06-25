@@ -267,7 +267,9 @@ export class Overlay {
    */
   updateLanguage(): void {
     if (this.container) {
-      this.container.lang = getActiveLanguage();
+      const lang = getActiveLanguage();
+      this.container.lang = lang;
+      this.container.setAttribute('aria-label', `Live chat overlay — ${lang}`);
     }
   }
 

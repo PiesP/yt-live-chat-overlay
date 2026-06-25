@@ -119,26 +119,63 @@ export class RenderWorkerManagerWebGL2 {
     this.worker = new Worker(workerUrl, { type: 'module' });
 
     this.worker.onmessage = (e: MessageEvent) => {
+      // Runtime validation: ensure incoming data is an object with a string `type` field.
+      if (!e.data || typeof e.data !== 'object' || typeof e.data.type !== 'string') {
+        log.warn('Invalid worker message received — missing or invalid type field:', e.data);
+        return;
+      }
       const { type, ...payload } = e.data;
       switch (type) {
         case 'ready':
           this._ready = true;
           break;
-        case 'stats':
-          this.onStats?.(payload as WorkerStatsWebGL2);
+        case 'stats': {
+          const stats = payload as WorkerStatsWebGL2;
+          if (
+            typeof stats.activeMessages !== 'number' ||
+            typeof stats.fps !== 'number' ||
+            typeof stats.drops !== 'number' ||
+            typeof stats.queueDepth !== 'number'
+          ) {
+            log.warn('Invalid stats payload from worker:', stats);
+            break;
+          }
+          this.onStats?.(stats);
           break;
+        }
         case 'atlasReady':
           this.onAtlasReady?.();
           break;
-        case 'atlasError':
-          this.onAtlasError?.((payload as { error: string }).error);
+        case 'atlasError': {
+          const errorPayload = payload as { error: string };
+          if (typeof errorPayload.error !== 'string') {
+            log.warn('Invalid atlasError payload from worker:', errorPayload);
+            break;
+          }
+          this.onAtlasError?.(errorPayload.error);
           break;
-        case 'requestImages':
-          this.onRequestImages?.((payload as { urls: string[] }).urls);
+        }
+        case 'requestImages': {
+          const imagesPayload = payload as { urls: string[] };
+          if (
+            !Array.isArray(imagesPayload.urls) ||
+            !imagesPayload.urls.every((u) => typeof u === 'string')
+          ) {
+            log.warn('Invalid requestImages payload from worker:', imagesPayload);
+            break;
+          }
+          this.onRequestImages?.(imagesPayload.urls);
           break;
-        case 'error':
-          this.onError?.((payload as { message: string }).message);
+        }
+        case 'error': {
+          const msgPayload = payload as { message: string };
+          if (typeof msgPayload.message !== 'string') {
+            log.warn('Invalid error payload from worker:', msgPayload);
+            break;
+          }
+          this.onError?.(msgPayload.message);
           break;
+        }
         default:
           log.debug('Unknown worker message:', type);
       }

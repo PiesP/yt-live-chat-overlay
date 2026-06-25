@@ -22,13 +22,6 @@ import { getLiveChatPayload } from '@core/youtubei-chat';
 const log = createLogger('FetchInterceptor');
 
 /**
- * Captured once at module load time — the true browser fetch.
- * Storing this at scope level ensures we always wrap the real fetch,
- * not a patch applied by another extension before this module loads.
- */
-const ORIGINAL_FETCH = window.fetch;
-
-/**
  * Matches YouTube Innertube live-chat fetch URLs.
  * Covers both live and replay endpoints.
  */
@@ -61,6 +54,9 @@ export function installFetchInterceptor(
     activeInterceptor = null;
   }
 
+  // Capture the current fetch at install time so we chain properly with other patches.
+  const originalFetch = window.fetch;
+
   function interceptedFetch(
     this: typeof window,
     input: RequestInfo | URL,
@@ -78,11 +74,11 @@ export function installFetchInterceptor(
     const isChatRequest = CHAT_ENDPOINT_RE.test(url);
 
     if (!isChatRequest) {
-      return ORIGINAL_FETCH.call(this, input, init);
+      return originalFetch.call(this, input, init);
     }
 
     // Let the original request proceed normally — we only eavesdrop.
-    const response = ORIGINAL_FETCH.call(this, input, init);
+    const response = originalFetch.call(this, input, init);
 
     // Clone the response so the original consumer (YouTube's UI) is unaffected.
     // Read the clone asynchronously; errors here must not propagate.
@@ -113,7 +109,7 @@ export function installFetchInterceptor(
 
   const restore = (): void => {
     if (window.fetch === interceptedFetch) {
-      window.fetch = ORIGINAL_FETCH;
+      window.fetch = originalFetch;
     }
     if (activeInterceptor?.restore === restore) {
       activeInterceptor = null;

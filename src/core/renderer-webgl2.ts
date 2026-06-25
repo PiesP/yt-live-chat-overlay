@@ -51,10 +51,10 @@ import { getFontString, measureTextWidth } from '@core/text-measure';
 const log = createLogger('RendererWebGL2');
 
 export class RendererWebGL2 extends RendererBase {
-  private gl: WebGL2RenderingContext;
-  private program: WebGLProgram;
-  private vao: WebGLVertexArrayObject;
-  private instanceBuffer: WebGLBuffer;
+  private gl!: WebGL2RenderingContext;
+  private program!: WebGLProgram;
+  private vao!: WebGLVertexArrayObject;
+  private instanceBuffer!: WebGLBuffer;
   private atlasTexture: WebGLTexture | null = null;
 
   private instanceData = new Float32Array(MAX_INSTANCES * FLOATS_PER_INSTANCE);
@@ -65,7 +65,7 @@ export class RendererWebGL2 extends RendererBase {
   private atlasGenerating = false;
 
   // Texture program for emoji + card background rendering
-  private textureProgram: WebGLProgram;
+  private textureProgram!: WebGLProgram;
   private u_texViewport: WebGLUniformLocation | null = null;
   private u_texSampler: WebGLUniformLocation | null = null;
   private emojiTextures = new Map<string, WebGLTexture>();
@@ -88,8 +88,8 @@ export class RendererWebGL2 extends RendererBase {
   private _invFadeDuration = 0;
 
   // Canvas2D overlay for card decorations (round rects, author photos)
-  private overlay2d: HTMLCanvasElement;
-  private ctx2d: CanvasRenderingContext2D;
+  private overlay2d!: HTMLCanvasElement;
+  private ctx2d!: CanvasRenderingContext2D;
   private authorPhotoCache = new Map<string, HTMLImageElement>();
 
   // Uniform locations
@@ -120,18 +120,12 @@ export class RendererWebGL2 extends RendererBase {
     canvas.style.cssText =
       'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none';
     canvas.setAttribute('aria-hidden', 'true');
-    if (container) container.appendChild(canvas);
 
     // Canvas2D overlay for card decorations (round rects, author photos)
     const overlay2d = document.createElement('canvas');
     overlay2d.style.cssText =
       'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:1';
     overlay2d.setAttribute('aria-hidden', 'true');
-    if (container) container.appendChild(overlay2d);
-    const ctx2d = overlay2d.getContext('2d');
-    if (!ctx2d) throw new Error('Failed to create 2D overlay context');
-    this.overlay2d = overlay2d;
-    this.ctx2d = ctx2d;
 
     // Visually-hidden live region for connection status announcements
     const statusRegion = document.createElement('div');
@@ -139,7 +133,38 @@ export class RendererWebGL2 extends RendererBase {
     statusRegion.setAttribute('role', 'status');
     statusRegion.style.cssText =
       'position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0';
-    if (container) container.appendChild(statusRegion);
+
+    // Append DOM elements early so cleanup can remove them on failure.
+    if (container) {
+      container.appendChild(canvas);
+      container.appendChild(overlay2d);
+      container.appendChild(statusRegion);
+    }
+
+    try {
+      this.initWebGL2(canvas, overlay2d, statusRegion);
+    } catch (error) {
+      // Clean up all DOM elements to avoid leaving a broken overlay in the DOM.
+      canvas.remove();
+      overlay2d.remove();
+      statusRegion.remove();
+      throw error;
+    }
+  }
+
+  /**
+   * Initialize WebGL2 context, programs, buffers, and atlas.
+   * Extracted from constructor so that failures can be caught and cleaned up.
+   */
+  private initWebGL2(
+    canvas: HTMLCanvasElement,
+    overlay2d: HTMLCanvasElement,
+    _statusRegion: HTMLDivElement
+  ): void {
+    const ctx2d = overlay2d.getContext('2d');
+    if (!ctx2d) throw new Error('Failed to create 2D overlay context');
+    this.overlay2d = overlay2d;
+    this.ctx2d = ctx2d;
 
     const gl = canvas.getContext('webgl2', {
       alpha: true,
