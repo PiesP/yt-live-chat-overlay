@@ -327,6 +327,13 @@ export class CanvasRenderer extends RendererBase {
     };
     canvas.addEventListener('click', this.canvasClickHandler);
 
+    // Destroy previous ImageFetchManager (if any) to clean up its interval
+    // timer before creating a new one. Without this, recreating the renderer
+    // (e.g. on settings change) leaks the old setInterval forever.
+    if (this.imageFetchManager) {
+      this.imageFetchManager.destroy();
+    }
+
     // Initialize ImageFetchManager BEFORE RenderWorkerManager so the worker
     // receives a valid reference instead of undefined.
     this.imageFetchManager = new ImageFetchManager();
