@@ -134,3 +134,6 @@ const TRANSLATIONS: Record<SupportedLanguage, TranslationMap> = {
   es: ES,
   zh: ZH,
 };
+
+/** Exported translation map for testing and introspection. */
+export const TRANSLATION_MAPS: Record<SupportedLanguage, TranslationMap> = TRANSLATIONS;
