@@ -24,9 +24,27 @@ export class LocalStorageAdapter implements StorageAdapter {
   async setItem(key: string, value: string): Promise<void> {
     try {
       localStorage.setItem(key, value);
-    } catch {
-      // quota exceeded or private browsing — silently ignore
+    } catch (error: unknown) {
+      // quota exceeded or private browsing — log and surface feedback
+      if (this.isQuotaExceededError(error)) {
+        console.warn(
+          `[yt-chat-overlay] Storage quota exceeded for key "${key}". ` +
+            'Consider reducing settings data or clearing unused entries.'
+        );
+      }
     }
+  }
+
+  private isQuotaExceededError(error: unknown): boolean {
+    if (error instanceof DOMException) {
+      return (
+        error.name === 'QuotaExceededError' ||
+        error.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
+        error.code === 22 ||
+        error.code === 1014
+      );
+    }
+    return false;
   }
 }
 
@@ -96,9 +114,25 @@ export class ChromeStorageAdapter implements StorageAdapter {
   async setItem(key: string, value: string): Promise<void> {
     try {
       await chrome?.storage?.local.set({ [key]: value });
-    } catch {
-      // quota exceeded or extension context invalidated — silently ignore
+    } catch (error: unknown) {
+      // quota exceeded or extension context invalidated — log and surface feedback
+      if (this.isQuotaExceededError(error)) {
+        console.warn(
+          `[yt-chat-overlay] Chrome storage quota exceeded for key "${key}". ` +
+            'Consider reducing settings data or clearing unused entries.'
+        );
+      }
     }
+  }
+
+  private isQuotaExceededError(error: unknown): boolean {
+    if (error instanceof Error) {
+      return (
+        error.message.toLowerCase().includes('quota') ||
+        error.message.toLowerCase().includes('exceeded')
+      );
+    }
+    return false;
   }
 }
 

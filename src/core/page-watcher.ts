@@ -23,6 +23,22 @@ export class PageWatcher {
   private callbacks: Set<PageChangeCallback> = new Set();
   private restorePushState?: () => void;
   private restoreReplaceState?: () => void;
+  /**
+   * Generation counter for history-patching guard.
+   *
+   * Each call to `patchHistoryMethod()` bumps this counter so we can detect
+   * when a previous patch was already applied (e.g. if PageWatcher is
+   * constructed multiple times during a SPA session). The restore function
+   * checks the generation it was created at and refuses to roll back a
+   * newer patch.
+   */
+  private patchGeneration = 0;
+  /**
+   * Unique marker stamped onto the patched history methods so we can tell
+   * our patches apart from other code (e.g. YouTube's own wrappers) that
+   * may also monkey-patch pushState/replaceState.
+   */
+  private static readonly PATCH_MARKER = '__yt_chat_overlay_patched__';
 
   private readonly handleUrlMutation = (): void => {
     this.handlePotentialUrlChange('popstate');
@@ -42,12 +58,27 @@ export class PageWatcher {
 
   private patchHistoryMethod(methodName: 'pushState' | 'replaceState'): () => void {
     const original = history[methodName];
-    history[methodName] = (...args: Parameters<typeof history.pushState>) => {
+    // Guard: if this method was already patched by us (marker present),
+    // skip re-patching to avoid double-wrapping.
+    if ((original as unknown as Record<string, boolean>)[PageWatcher.PATCH_MARKER]) {
+      return () => {
+        /* no-op: already patched */
+      };
+    }
+    this.patchGeneration++;
+    const myGeneration = this.patchGeneration;
+    const patched = (...args: Parameters<typeof history.pushState>) => {
       original.apply(history, args);
       this.handlePotentialUrlChange(methodName);
     };
+    // Stamp marker so future patches can detect this is our wrapper.
+    (patched as unknown as Record<string, boolean>)[PageWatcher.PATCH_MARKER] = true;
+    history[methodName] = patched;
     return () => {
-      history[methodName] = original;
+      // Only restore if no newer patch has been applied since us.
+      if (this.patchGeneration === myGeneration) {
+        history[methodName] = original;
+      }
     };
   }
 

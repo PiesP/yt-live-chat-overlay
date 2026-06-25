@@ -16,6 +16,7 @@ import {
   findPlayerContainerElement,
   PLAYER_LOOKUP_INTERVAL_MS,
 } from '@core/dom';
+import { getActiveLanguage, t } from '@core/i18n';
 import { createLogger } from '@core/logging';
 
 const log = createLogger('Overlay');
@@ -63,6 +64,8 @@ export class Overlay {
   /** rAF-based resize coalescing to avoid cascading updates during drag-resize. */
   private resizePending = false;
   private resizeRafId: number | null = null;
+  /** Aria-live region for announcing new chat messages to screen readers. */
+  private liveRegion: HTMLDivElement | null = null;
 
   /**
    * Find player container
@@ -90,6 +93,10 @@ export class Overlay {
     container.style.overflow = 'hidden';
     container.style.zIndex = rendererLayout.overlayZIndex;
     container.style.contain = 'layout style paint';
+    container.setAttribute('role', 'region');
+    container.setAttribute('aria-label', t('Chat overlay'));
+    // Set lang attribute to match active language for screen readers
+    container.lang = getActiveLanguage();
     return container;
   }
 
@@ -237,6 +244,14 @@ export class Overlay {
 
     this.updateDimensions();
 
+    // Create aria-live region for screen reader announcements of new messages
+    this.liveRegion = document.createElement('div');
+    this.liveRegion.setAttribute('role', 'log');
+    this.liveRegion.setAttribute('aria-live', 'polite');
+    this.liveRegion.setAttribute('aria-label', t('Chat messages'));
+    this.liveRegion.className = 'yt-live-chat-overlay-live-region';
+    this.container.appendChild(this.liveRegion);
+
     log.info('Overlay created');
     return true;
   }
@@ -244,6 +259,16 @@ export class Overlay {
   updateSettings(settings: OverlaySettings): void {
     this.settings = settings;
     this.updateDimensions();
+  }
+
+  /**
+   * Update the lang attribute on the overlay container to match the active language.
+   * Call this when the language setting changes.
+   */
+  updateLanguage(): void {
+    if (this.container) {
+      this.container.lang = getActiveLanguage();
+    }
   }
 
   /**
@@ -298,6 +323,7 @@ export class Overlay {
     this.dimensions = null;
     this.settings = null;
     this.dimensionChangeCallbacks.clear();
+    this.liveRegion = null;
 
     log.debug('Destroyed');
   }

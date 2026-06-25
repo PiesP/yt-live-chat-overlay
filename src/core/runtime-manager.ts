@@ -542,8 +542,14 @@ export class RuntimeManager {
     }
 
     const shouldResetRenderer = shouldResetRendererForSettingsChange(this.settings, settings);
+    const prevLanguage = this.settings?.language;
     this.settings = settings;
     this.overlay?.updateSettings(settings);
+
+    // Update overlay lang attribute when language changes
+    if (settings.language !== undefined && settings.language !== prevLanguage) {
+      this.overlay?.updateLanguage();
+    }
 
     const renderer = this.renderer;
     if (!renderer) {

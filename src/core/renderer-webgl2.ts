@@ -119,17 +119,27 @@ export class RendererWebGL2 extends RendererBase {
     const canvas = document.createElement('canvas');
     canvas.style.cssText =
       'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none';
+    canvas.setAttribute('aria-hidden', 'true');
     if (container) container.appendChild(canvas);
 
     // Canvas2D overlay for card decorations (round rects, author photos)
     const overlay2d = document.createElement('canvas');
     overlay2d.style.cssText =
       'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:1';
+    overlay2d.setAttribute('aria-hidden', 'true');
     if (container) container.appendChild(overlay2d);
     const ctx2d = overlay2d.getContext('2d');
     if (!ctx2d) throw new Error('Failed to create 2D overlay context');
     this.overlay2d = overlay2d;
     this.ctx2d = ctx2d;
+
+    // Visually-hidden live region for connection status announcements
+    const statusRegion = document.createElement('div');
+    statusRegion.setAttribute('aria-live', 'polite');
+    statusRegion.setAttribute('role', 'status');
+    statusRegion.style.cssText =
+      'position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0';
+    if (container) container.appendChild(statusRegion);
 
     const gl = canvas.getContext('webgl2', {
       alpha: true,

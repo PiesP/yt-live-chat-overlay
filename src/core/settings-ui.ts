@@ -34,7 +34,7 @@ export class SettingsUi {
   /** Timer for reload-complete checkmark → icon restoration. */
   private reloadFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
   private backdrop: HTMLDivElement | null = null;
-  private modal: HTMLDivElement | null = null;
+  private modal: HTMLDialogElement | null = null;
   private previousFocus: HTMLElement | null = null;
   private activeTab: string;
   /** Language code that was active when the modal content was last built. */
@@ -52,14 +52,9 @@ export class SettingsUi {
 
   private readonly form: SettingsUiForm;
 
-  private readonly handleKeydown = (event: KeyboardEvent) => {
+  private handleKeydown = (event: KeyboardEvent) => {
     if (event.key === 'Escape') {
       this.close();
-      return;
-    }
-
-    if (event.key === 'Tab' && this.backdrop && this.backdrop.style.display !== 'none') {
-      this.trapFocus(event);
     }
   };
 
@@ -67,7 +62,7 @@ export class SettingsUi {
    * Check whether the settings dialog is currently visible to the user.
    */
   private isDialogOpen(): boolean {
-    return this.backdrop !== null && this.backdrop.style.display !== 'none';
+    return this.modal?.open ?? false;
   }
 
   /**
@@ -78,6 +73,23 @@ export class SettingsUi {
   syncForm(): void {
     if (!this.isDialogOpen()) return;
     this.form.populateForm(this.getSettings());
+    this.announceSync();
+  }
+
+  /** Announce settings sync to screen readers via live region. */
+  private announceSync(): void {
+    if (!this.modal) return;
+    let liveRegion = this.modal.querySelector<HTMLDivElement>(
+      '.yt-chat-overlay-settings-sync-live-region'
+    );
+    if (!liveRegion) {
+      liveRegion = document.createElement('div');
+      liveRegion.className = 'yt-chat-overlay-settings-sync-live-region';
+      liveRegion.setAttribute('aria-live', 'polite');
+      liveRegion.setAttribute('aria-atomic', 'true');
+      this.modal.appendChild(liveRegion);
+    }
+    liveRegion.textContent = t('Settings updated from another tab');
   }
 
   constructor(
@@ -152,6 +164,9 @@ export class SettingsUi {
     this.setDialogOpen(false);
 
     this.unlockBodyScroll();
+
+    // Remove inert from main content
+    document.body.inert = false;
 
     // Remove keydown listener to prevent accumulation across SPA navigations.
     // ensureModal() registers this listener and close() is called on modal
@@ -299,14 +314,24 @@ export class SettingsUi {
     for (const btn of this.modal.querySelectorAll<HTMLButtonElement>(
       '.yt-chat-overlay-settings-tab'
     )) {
-      btn.classList.toggle('active', btn.dataset.tab === tabId);
-      btn.setAttribute('aria-selected', `${btn.dataset.tab === tabId}`);
+      const isActive = btn.dataset.tab === tabId;
+      btn.classList.toggle('active', isActive);
+      btn.setAttribute('aria-selected', `${isActive}`);
+      btn.setAttribute('tabindex', isActive ? '0' : '-1');
     }
 
     for (const pane of this.modal.querySelectorAll<HTMLDivElement>(
       '.yt-chat-overlay-settings-pane'
     )) {
       pane.toggleAttribute('hidden', pane.dataset.pane !== tabId);
+    }
+
+    // Move focus to the newly activated tab panel
+    const activePane = this.modal.querySelector<HTMLDivElement>(
+      `.yt-chat-overlay-settings-pane[data-pane="${tabId}"]`
+    );
+    if (activePane) {
+      activePane.focus();
     }
   }
 
@@ -362,6 +387,8 @@ export class SettingsUi {
     this.backdrop.id = BACKDROP_ID;
     this.backdrop.className = 'yt-chat-overlay-settings-backdrop';
     this._backdropClickHandler = (event: MouseEvent) => {
+      // Only handle left-click (button === 0); ignore middle/right-click
+      // to avoid conflicting with browser context menu or middle-click paste.
       if (event.button !== 0) return;
       if (event.target === this.backdrop) {
         this.close();
@@ -369,10 +396,8 @@ export class SettingsUi {
     };
     this.backdrop.addEventListener('click', this._backdropClickHandler);
 
-    this.modal = document.createElement('div');
+    this.modal = document.createElement('dialog');
     this.modal.className = 'yt-chat-overlay-settings-modal';
-    this.modal.tabIndex = -1;
-    this.modal.setAttribute('role', 'dialog');
     this.modal.setAttribute('aria-modal', 'true');
     this.modal.setAttribute('aria-labelledby', 'yt-chat-overlay-settings-title');
     this.modal.append(...this.form.createModalContent());
@@ -384,9 +409,6 @@ export class SettingsUi {
     this.backdrop.appendChild(this.modal);
     document.body.appendChild(this.backdrop);
     this.setDialogOpen(false);
-
-    // Activate keydown listener now that modal DOM exists
-    document.addEventListener('keydown', this.handleKeydown);
   }
 
   private open(): void {
@@ -405,6 +427,11 @@ export class SettingsUi {
     this.switchTab(this.activeTab);
     this.lockBodyScroll();
     this.setDialogOpen(true);
+    this.modal.showModal();
+
+    // Set inert on main content to prevent screen reader from reading behind modal
+    document.body.inert = true;
+
     this.focusInitialElement();
   }
 
@@ -477,11 +504,31 @@ export class SettingsUi {
     confirmDialog.append(message, buttons);
     dialog.append(backdrop, confirmDialog);
 
-    cancelBtn.addEventListener('click', () => dialog.remove());
+    const triggerElement = this.button;
+
+    const handleConfirmKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        dialog.remove();
+        triggerElement?.focus();
+        return;
+      }
+      if (event.key === 'Tab') {
+        this.trapFocusConfirm(event, confirmDialog);
+      }
+    };
+
+    cancelBtn.addEventListener('click', () => {
+      dialog.remove();
+      triggerElement?.focus();
+    });
     okBtn.addEventListener('click', () => {
       dialog.remove();
       options.onConfirm();
+      triggerElement?.focus();
     });
+    confirmDialog.addEventListener('keydown', handleConfirmKeyDown);
 
     cancelBtn.focus();
     return dialog;
@@ -529,7 +576,7 @@ export class SettingsUi {
           if (typeof text !== 'string') return;
           const parsed = JSON.parse(text) as Record<string, unknown>;
           if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-            this.showToast(t('Import failed: invalid settings format'));
+            this.showToast(t('Import failed: invalid settings format'), true);
             log.warn('Import failed: expected a settings object');
             return;
           }
@@ -548,7 +595,7 @@ export class SettingsUi {
           persist(settings);
           this.showToast(t('Settings imported successfully'));
         } catch (error: unknown) {
-          this.showToast(t('Import failed: invalid JSON'));
+          this.showToast(t('Import failed: invalid JSON'), true);
           log.warn('Import failed: invalid JSON file', error);
         }
       });
@@ -577,31 +624,26 @@ export class SettingsUi {
     this.modal.focus();
   }
 
-  private trapFocus(event: KeyboardEvent): void {
-    if (!this.backdrop || this.backdrop.style.display === 'none') {
-      return;
-    }
-
-    const focusableElements = this.form.getFocusableElements();
+  private trapFocusConfirm(event: KeyboardEvent, container: HTMLElement): void {
+    const focusableElements = Array.from(
+      container.querySelectorAll<HTMLElement>(
+        'input:not([disabled]), select:not([disabled]), button, [tabindex]:not([tabindex="-1"])'
+      )
+    );
     if (focusableElements.length === 0) {
       event.preventDefault();
-      this.modal?.focus();
       return;
     }
-
     const first = focusableElements[0];
     const last = focusableElements[focusableElements.length - 1];
     if (!first || !last) return;
-
     const activeElement = document.activeElement;
     const isShiftTab = event.shiftKey;
-
     if (isShiftTab && activeElement === first) {
       event.preventDefault();
       last.focus();
       return;
     }
-
     if (!isShiftTab && activeElement === last) {
       event.preventDefault();
       first.focus();
@@ -611,12 +653,14 @@ export class SettingsUi {
   /** Show a transient toast notification in the settings modal. */
   private toastTimer: ReturnType<typeof setTimeout> | null = null;
 
-  private showToast(message: string): void {
+  private showToast(message: string, isError = false): void {
     if (!this.modal) return;
     const existing = this.modal.querySelector('.yt-chat-overlay-settings-toast');
     if (existing) existing.remove();
     const toast = document.createElement('div');
     toast.className = 'yt-chat-overlay-settings-toast';
+    toast.setAttribute('role', 'status');
+    toast.setAttribute('aria-live', isError ? 'assertive' : 'polite');
     toast.textContent = message;
     this.modal.appendChild(toast);
     this.toastTimer = clearSafeTimeout(this.toastTimer);
@@ -643,7 +687,6 @@ export class SettingsUi {
       this._backdropClickHandler = null;
     }
     this.backdrop?.remove();
-    document.removeEventListener('keydown', this.handleKeydown);
 
     const styleElement = document.getElementById(STYLE_ID);
     styleElement?.remove();

@@ -8,6 +8,7 @@ interface BaseField {
   key: string;
   title?: string;
   modifier?: string;
+  hint?: string;
 }
 
 interface NumberField extends BaseField {
@@ -19,10 +20,12 @@ interface CheckboxField extends BaseField {
 interface SelectField extends BaseField {
   type: 'select';
   options: ReadonlyArray<[string, string]>;
+  hint?: string;
 }
 interface TextField extends BaseField {
   type: 'text';
   placeholder?: string;
+  hint?: string;
 }
 interface EnabledField {
   type: 'enabled';

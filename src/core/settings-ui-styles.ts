@@ -10,8 +10,8 @@ const uiColors = {
   border: '#444444',
   text: '#ffffff',
   textMuted: '#cccccc',
-  primary: '#1e88e5',
-  primaryHover: '#1976d2',
+  primary: '#64b5f6',
+  primaryHover: '#42a5f5',
   danger: '#e53935',
   dangerHover: '#c62828',
   warning: '#ffc107',
@@ -21,10 +21,10 @@ const uiColors = {
 
 const typography = {
   fontSize: {
-    xs: '12px',
-    sm: '14px',
-    base: '16px',
-    lg: '18px',
+    xs: '0.75rem',
+    sm: '0.875rem',
+    base: '1rem',
+    lg: '1.125rem',
   },
   fontWeight: {
     normal: 400,
@@ -67,7 +67,7 @@ const zIndex = {
 
 // ── UI sizing tokens (settings panel layout) ──
 const uiSizing = {
-  buttonSize: 36,
+  buttonSize: 44,
   buttonFontSize: 18,
   inputWidth: 86,
   colorSwatch: 44,
@@ -76,7 +76,7 @@ const uiSizing = {
   modalMaxWidth: 420,
   modalMaxVH: 82,
   confirmMinWidth: 240,
-  checkboxSize: 18,
+  checkboxSize: 44,
   borderAlpha: 0.25,
   scrimAlpha: 0.55,
   hoverScrimAlpha: 0.75,
@@ -101,20 +101,20 @@ const CONFIRM_BACKDROP_ALPHA = 0.5;
 const scrollbar = {
   width: '6px',
   track: 'transparent',
-  thumb: 'rgba(255, 255, 255, 0.12)',
-  thumbHover: 'rgba(255, 255, 255, 0.28)',
+  thumb: 'rgba(255, 255, 255, 0.28)',
+  thumbHover: 'rgba(255, 255, 255, 0.45)',
 } as const;
 
 // ── Toast notification ──
 const TOAST_BG = 'rgba(0, 0, 0, 0.85)';
-const TOAST_FONT = `12px/1.4 ${DEFAULT_FONT_FAMILY}`;
+const TOAST_FONT = `0.75rem/1.4 ${DEFAULT_FONT_FAMILY}`;
 const TOAST_PADDING = '6px 14px';
 
 export const SETTINGS_UI_STYLES = `
       .yt-chat-overlay-settings-button {
         position: absolute;
         top: ${spacing.sm}px;
-        left: ${spacing.sm}px;
+        inset-inline-start: ${spacing.sm}px;
         width: ${uiSizing.buttonSize}px;
         height: ${uiSizing.buttonSize}px;
         border-radius: ${borderRadius.full};
@@ -129,15 +129,22 @@ export const SETTINGS_UI_STYLES = `
         opacity: 0;
         pointer-events: none;
         transition: ${animDuration.transitions.button};
-      }
-      .yt-chat-overlay-settings-button:hover,
-      .yt-chat-overlay-settings-button:focus-visible {
-        background: rgba(0, 0, 0, ${uiSizing.hoverScrimAlpha});
-        transform: scale(1.1);
-      }
-      .yt-chat-overlay-settings-button:focus-visible {
-        outline: 2px solid ${uiColors.primary};
-        outline-offset: 2px;
+        &:hover,
+        &:focus-visible {
+          background: rgba(0, 0, 0, ${uiSizing.hoverScrimAlpha});
+          transform: scale(1.1);
+        }
+        &:focus-visible {
+          outline: 2px solid ${uiColors.primary};
+          outline-offset: 2px;
+        }
+        /* Always visible focus indicator for settings button */
+        &:focus {
+          outline: 2px solid ${uiColors.primary};
+          outline-offset: 2px;
+          opacity: 1;
+          pointer-events: auto;
+        }
       }
       #movie_player:hover .yt-chat-overlay-settings-button,
       .html5-video-player:hover .yt-chat-overlay-settings-button {
@@ -147,7 +154,7 @@ export const SETTINGS_UI_STYLES = `
       .yt-chat-overlay-reload-button {
         position: absolute;
         top: ${spacing.sm}px;
-        left: ${spacing.sm + uiSizing.buttonSize + spacing.xs}px;
+        inset-inline-start: ${spacing.sm + uiSizing.buttonSize + spacing.xs}px;
         width: ${uiSizing.buttonSize}px;
         height: ${uiSizing.buttonSize}px;
         border-radius: ${borderRadius.full};
@@ -162,15 +169,15 @@ export const SETTINGS_UI_STYLES = `
         opacity: 0;
         pointer-events: none;
         transition: ${animDuration.transitions.button};
-      }
-      .yt-chat-overlay-reload-button:hover,
-      .yt-chat-overlay-reload-button:focus-visible {
-        background: rgba(0, 0, 0, ${uiSizing.hoverScrimAlpha});
-        transform: scale(1.1);
-      }
-      .yt-chat-overlay-reload-button:focus-visible {
-        outline: 2px solid ${uiColors.primary};
-        outline-offset: 2px;
+        &:hover,
+        &:focus-visible {
+          background: rgba(0, 0, 0, ${uiSizing.hoverScrimAlpha});
+          transform: scale(1.1);
+        }
+        &:focus-visible {
+          outline: 2px solid ${uiColors.primary};
+          outline-offset: 2px;
+        }
       }
       #movie_player:hover .yt-chat-overlay-reload-button,
       .html5-video-player:hover .yt-chat-overlay-reload-button {
@@ -187,10 +194,12 @@ export const SETTINGS_UI_STYLES = `
         display: none;
         align-items: center;
         justify-content: center;
-        background: rgba(0, 0, 0, ${uiSizing.scrimAlpha});
         z-index: ${zIndex.modal};
         overscroll-behavior: contain;
         animation: yt-overlay-fade-in ${animDuration.normal} ease-out;
+      }
+      .yt-chat-overlay-settings-backdrop:has(dialog[open]) {
+        background: rgba(0, 0, 0, ${uiSizing.scrimAlpha});
       }
       @keyframes yt-overlay-fade-in {
         from { opacity: 0; }
@@ -208,6 +217,7 @@ export const SETTINGS_UI_STYLES = `
         background: ${uiColors.background};
         color: ${uiColors.text};
         border-radius: ${borderRadius.md};
+        border: none;
         padding: ${spacing.lg}px;
         display: flex;
         flex-direction: column;
@@ -215,6 +225,21 @@ export const SETTINGS_UI_STYLES = `
         font-family: ${DEFAULT_FONT_FAMILY};
         box-shadow: ${shadows.box.lg};
         animation: yt-overlay-modal-scale-in ${animDuration.slow} ease-out;
+        container-type: inline-size;
+      }
+      .yt-chat-overlay-settings-modal::backdrop {
+        background: rgba(0, 0, 0, ${uiSizing.scrimAlpha});
+      }
+      /* Container query: narrow modal reduces padding and hides tab labels */
+      @container (max-width: 320px) {
+        .yt-chat-overlay-settings-modal {
+          padding: ${spacing.md}px;
+          gap: ${spacing.sm}px;
+        }
+        .yt-chat-overlay-settings-tab {
+          font-size: 0.65rem;
+          letter-spacing: 0.02em;
+        }
       }
       /* Header */
       .yt-chat-overlay-settings-header {
@@ -224,6 +249,12 @@ export const SETTINGS_UI_STYLES = `
         font-weight: ${typography.fontWeight.bold};
         font-size: ${typography.fontSize.base};
         flex-shrink: 0;
+      }
+      .yt-chat-overlay-settings-title {
+        font-size: ${typography.fontSize.base};
+        font-weight: ${typography.fontWeight.bold};
+        margin: 0;
+        color: ${uiColors.text};
       }
       .yt-chat-overlay-settings-close {
         border: none;
@@ -239,13 +270,13 @@ export const SETTINGS_UI_STYLES = `
         align-items: center;
         justify-content: center;
         border-radius: ${borderRadius.sm};
-      }
-      .yt-chat-overlay-settings-close:hover {
-        color: ${uiColors.text};
-      }
-      .yt-chat-overlay-settings-close:focus-visible {
-        outline: 2px solid ${uiColors.primary};
-        outline-offset: 2px;
+        &:hover {
+          color: ${uiColors.text};
+        }
+        &:focus-visible {
+          outline: 2px solid ${uiColors.primary};
+          outline-offset: 2px;
+        }
       }
       /* Tab bar */
       .yt-chat-overlay-settings-tabs {
@@ -265,19 +296,19 @@ export const SETTINGS_UI_STYLES = `
         text-transform: uppercase;
         letter-spacing: 0.05em;
         cursor: pointer;
-        margin-bottom: -1px;
+        margin-block-end: -1px;
         transition: ${animDuration.transitions.tab};
-      }
-      .yt-chat-overlay-settings-tab:hover {
-        color: ${uiColors.text};
-      }
-      .yt-chat-overlay-settings-tab:focus-visible {
-        outline: 2px solid ${uiColors.primary};
-        outline-offset: -1px;
-      }
-      .yt-chat-overlay-settings-tab.active {
-        color: ${uiColors.primary};
-        border-bottom-color: ${uiColors.primary};
+        &:hover {
+          color: ${uiColors.text};
+        }
+        &:focus-visible {
+          outline: 2px solid ${uiColors.primary};
+          outline-offset: -1px;
+        }
+        &.active {
+          color: ${uiColors.primary};
+          border-bottom-color: ${uiColors.primary};
+        }
       }
       /* Tab panes */
       .yt-chat-overlay-settings-pane {
@@ -287,7 +318,7 @@ export const SETTINGS_UI_STYLES = `
         overflow-y: auto;
         flex: 1;
         min-height: 0;
-        padding-right: 2px;
+        padding-inline-end: 2px;
         scrollbar-width: thin;
         scrollbar-color: ${scrollbar.thumb} ${scrollbar.track};
       }
@@ -318,8 +349,9 @@ export const SETTINGS_UI_STYLES = `
         color: ${uiColors.textMuted};
         text-transform: uppercase;
         letter-spacing: 0.04em;
-        padding-bottom: ${spacing.xs}px;
+        padding-block-end: ${spacing.xs}px;
         border-bottom: 1px solid ${uiColors.border};
+        margin: 0;
       }
       /* Row fields */
       .yt-chat-overlay-settings-field {
@@ -355,7 +387,7 @@ export const SETTINGS_UI_STYLES = `
       }
       .yt-chat-overlay-settings-field input[type="color"] {
         width: ${uiSizing.colorSwatch}px;
-        height: 26px;
+        min-height: 44px;
         border: none;
         background: transparent;
         padding: 0;
@@ -545,7 +577,7 @@ export const SETTINGS_UI_STYLES = `
       .yt-chat-overlay-settings-toast {
         position: absolute;
         bottom: 60px;
-        left: 50%;
+        inset-inline-start: 50%;
         transform: translateX(-50%);
         background: ${TOAST_BG};
         color: ${uiColors.text};
@@ -555,6 +587,9 @@ export const SETTINGS_UI_STYLES = `
         z-index: 2;
         pointer-events: none;
         animation: yt-overlay-fade-in ${animDuration.normal} ease-out;
+      }
+      .yt-chat-overlay-settings-toast:hover {
+        animation-play-state: paused;
       }
       .yt-chat-overlay-settings-unsupported {
         padding: ${spacing.lg}px;
@@ -609,11 +644,6 @@ export const SETTINGS_UI_STYLES = `
         font-size: ${typography.fontSize.xs};
         color: ${uiColors.danger};
         margin-top: 2px;
-        animation: yt-overlay-error-fade 3s ease-out forwards;
-      }
-      @keyframes yt-overlay-error-fade {
-        0%, 70% { opacity: 1; }
-        100% { opacity: 0; }
       }
       /* Disabled-field helper hint */
       .yt-chat-overlay-settings-field-hint {
@@ -621,5 +651,247 @@ export const SETTINGS_UI_STYLES = `
         font-size: ${typography.fontSize.xs};
         color: ${uiColors.textMuted};
         margin-top: 2px;
+      }
+
+      /* Live region (visually hidden) */
+      .yt-live-chat-overlay-live-region {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+
+      /* Sync live region (visually hidden) */
+      .yt-chat-overlay-settings-sync-live-region {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+
+      /* Author grid fieldset */
+      .yt-chat-overlay-author-grid-fieldset {
+        border: none;
+        padding: 0;
+        margin: 0;
+      }
+      .yt-chat-overlay-author-grid-legend {
+        font-size: ${typography.fontSize.xs};
+        color: ${uiColors.textMuted};
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        padding-bottom: ${spacing.xs}px;
+        border-bottom: 1px solid ${uiColors.border};
+        margin-block-end: ${spacing.sm}px;
+        width: 100%;
+      }
+      .yt-chat-overlay-author-grid-color-cell,
+      .yt-chat-overlay-author-grid-checkbox-cell {
+        justify-self: center;
+      }
+
+      /* ── prefers-reduced-motion ── */
+      @media (prefers-reduced-motion: reduce) {
+        .yt-chat-overlay-settings-backdrop,
+        .yt-chat-overlay-settings-modal,
+        .yt-chat-overlay-settings-toast,
+        .yt-chat-overlay-settings-field-error {
+          animation-duration: 0.01ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.01ms !important;
+        }
+        @keyframes yt-overlay-fade-in {
+          from { opacity: 1; }
+          to { opacity: 1; }
+        }
+        @keyframes yt-overlay-modal-scale-in {
+          from { transform: scale(1); opacity: 1; }
+          to { transform: scale(1); opacity: 1; }
+        }
+      }
+
+      /* ── prefers-color-scheme: light ── */
+      @media (prefers-color-scheme: light) {
+        .yt-chat-overlay-settings-backdrop:has(dialog[open]) {
+          background: rgba(0, 0, 0, 0.4);
+        }
+        .yt-chat-overlay-settings-modal {
+          background: #ffffff;
+          color: #1a1a1a;
+        }
+        .yt-chat-overlay-settings-section-title {
+          color: #555555;
+          border-bottom-color: #d0d0d0;
+        }
+        .yt-chat-overlay-settings-field input[type="number"],
+        .yt-chat-overlay-settings-field input[type="text"],
+        .yt-chat-overlay-settings-range-number {
+          background: #f5f5f5;
+          border-color: #d0d0d0;
+          color: #1a1a1a;
+        }
+        .yt-chat-overlay-settings-field select {
+          background: #f5f5f5;
+          border-color: #d0d0d0;
+          color: #1a1a1a;
+        }
+        .yt-chat-overlay-settings-field input[type="checkbox"] {
+          accent-color: #1565c0;
+        }
+        .yt-chat-overlay-settings-enabled {
+          background: #f5f5f5;
+          color: #1a1a1a;
+        }
+        .yt-chat-overlay-settings-actions button[data-action="reset"],
+        .yt-chat-overlay-settings-actions button[data-action="export"],
+        .yt-chat-overlay-settings-actions button[data-action="import"] {
+          color: #555555;
+          border-color: #d0d0d0;
+        }
+        .yt-chat-overlay-settings-actions button[data-action="close"] {
+          background: #1565c0;
+          color: #ffffff;
+        }
+        .yt-chat-overlay-settings-confirm-dialog {
+          background: #ffffff;
+          border-color: #d0d0d0;
+        }
+        .yt-chat-overlay-settings-confirm-message {
+          color: #1a1a1a;
+        }
+        .yt-chat-overlay-settings-confirm-cancel {
+          color: #555555;
+          border-color: #d0d0d0;
+        }
+        .yt-chat-overlay-settings-confirm-ok {
+          background: #c62828;
+          color: #ffffff;
+        }
+        .yt-chat-overlay-settings-toast {
+          background: rgba(0, 0, 0, 0.8);
+          color: #ffffff;
+        }
+        .yt-chat-overlay-settings-field-hint {
+          color: #555555;
+        }
+        .yt-chat-overlay-settings-field-error {
+          color: #c62828;
+        }
+      }
+
+      /* ── prefers-contrast: more ── */
+      @media (prefers-contrast: more) {
+        .yt-chat-overlay-settings-modal {
+          border-width: 2px;
+        }
+        .yt-chat-overlay-settings-tabs {
+          border-bottom-width: 2px;
+        }
+        .yt-chat-overlay-settings-tab {
+          border-bottom-width: 3px;
+        }
+        .yt-chat-overlay-settings-tab:focus-visible {
+          outline-width: 3px;
+          outline-offset: 2px;
+        }
+        .yt-chat-overlay-settings-close:focus-visible {
+          outline-width: 3px;
+          outline-offset: 3px;
+        }
+        .yt-chat-overlay-settings-field input[type="number"],
+        .yt-chat-overlay-settings-field input[type="text"],
+        .yt-chat-overlay-settings-field select,
+        .yt-chat-overlay-settings-range-number {
+          border-width: 2px;
+        }
+        .yt-chat-overlay-settings-field input:focus-visible,
+        .yt-chat-overlay-settings-field select:focus-visible {
+          outline-width: 3px;
+          outline-offset: 2px;
+        }
+        .yt-chat-overlay-settings-actions button {
+          border-width: 2px;
+        }
+        .yt-chat-overlay-settings-actions button:focus-visible {
+          outline-width: 3px;
+          outline-offset: 2px;
+        }
+        .yt-chat-overlay-settings-section-title {
+          border-bottom-width: 2px;
+        }
+        .yt-chat-overlay-settings-button,
+        .yt-chat-overlay-reload-button {
+          border-width: 2px;
+        }
+        .yt-chat-overlay-settings-button:focus-visible,
+        .yt-chat-overlay-reload-button:focus-visible {
+          outline-width: 3px;
+          outline-offset: 3px;
+        }
+      }
+
+      /* ── forced-colors (High Contrast Mode) ── */
+      @media (forced-colors: active) {
+        .yt-chat-overlay-settings-backdrop:has(dialog[open]) {
+          background: Canvas;
+        }
+        .yt-chat-overlay-settings-modal {
+          border: 2px solid CanvasText;
+          forced-color-adjust: none;
+        }
+        .yt-chat-overlay-settings-button,
+        .yt-chat-overlay-reload-button {
+          background: Canvas;
+          color: CanvasText;
+          border: 2px solid CanvasText;
+          forced-color-adjust: none;
+        }
+        .yt-chat-overlay-settings-button:focus-visible,
+        .yt-chat-overlay-reload-button:focus-visible {
+          outline: 3px solid Highlight;
+        }
+        .yt-chat-overlay-settings-tab {
+          color: CanvasText;
+          border-bottom: 2px solid transparent;
+        }
+        .yt-chat-overlay-settings-tab.active {
+          color: Highlight;
+          border-bottom-color: Highlight;
+        }
+        .yt-chat-overlay-settings-tab:focus-visible {
+          outline: 3px solid Highlight;
+        }
+        .yt-chat-overlay-settings-close:focus-visible {
+          outline: 3px solid Highlight;
+        }
+        .yt-chat-overlay-settings-actions button:focus-visible {
+          outline: 3px solid Highlight;
+        }
+        .yt-chat-overlay-settings-actions button[data-action="close"] {
+          background: Highlight;
+          color: HighlightText;
+        }
+        .yt-chat-overlay-settings-confirm-dialog {
+          border: 2px solid CanvasText;
+          forced-color-adjust: none;
+        }
+        .yt-chat-overlay-settings-confirm-ok {
+          background: Highlight;
+          color: HighlightText;
+        }
+        .yt-chat-overlay-settings-toast {
+          border: 1px solid CanvasText;
+          forced-color-adjust: none;
+        }
       }
 `;

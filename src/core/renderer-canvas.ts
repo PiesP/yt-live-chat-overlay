@@ -298,6 +298,7 @@ export class CanvasRenderer extends RendererBase {
     const canvas = document.createElement('canvas');
     canvas.style.cssText =
       'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;text-rendering:optimizeSpeed';
+    canvas.setAttribute('aria-hidden', 'true');
     if (container) container.appendChild(canvas);
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
@@ -306,6 +307,14 @@ export class CanvasRenderer extends RendererBase {
     } else if (!canvas.isConnected) {
       log.warn('Canvas created but not connected to DOM — renderer will be inactive');
     }
+
+    // Visually-hidden live region for connection status announcements
+    const statusRegion = document.createElement('div');
+    statusRegion.setAttribute('aria-live', 'polite');
+    statusRegion.setAttribute('role', 'status');
+    statusRegion.style.cssText =
+      'position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0';
+    if (container) container.appendChild(statusRegion);
 
     // Click handler for status bar (click-to-reload on DISCONNECTED)
     this.canvasClickHandler = (e: MouseEvent) => {
