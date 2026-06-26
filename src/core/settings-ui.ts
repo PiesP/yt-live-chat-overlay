@@ -165,8 +165,8 @@ export class SettingsUi {
 
     this.unlockBodyScroll();
 
-    // Remove inert from main content
-    document.body.inert = false;
+    // NOTE: document.body.inert is not used — see open() for rationale.
+    // <dialog>.showModal() / close() natively manages top-layer inertness.
 
     // Remove keydown listener to prevent accumulation across SPA navigations.
     // ensureModal() registers this listener and close() is called on modal
@@ -429,15 +429,12 @@ export class SettingsUi {
     this.setDialogOpen(true);
     this.modal.showModal();
 
-    // Set inert on main content to prevent screen reader from reading behind modal
-    document.body.inert = true;
-    try {
-      this.focusInitialElement();
-    } finally {
-      // Ensure inert is restored even if focusInitialElement throws,
-      // preventing the page from becoming permanently inaccessible.
-      document.body.inert = false;
-    }
+    // NOTE: document.body.inert is intentionally NOT used here.
+    // <dialog>.showModal() natively provides top-layer inertness — it makes
+    // all other document content inert to accessibility tree and focus.
+    // Setting body.inert would also make the dialog and its backdrop inert
+    // (since they are body descendants), breaking modal interactivity.
+    this.focusInitialElement();
   }
 
   /** Rebuild modal DOM content from scratch (called on language change). */
