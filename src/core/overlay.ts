@@ -24,6 +24,20 @@ const log = createLogger('Overlay');
 const OVERLAY_ID = 'yt-live-chat-overlay';
 export const OVERLAY_SELECTOR = `#${OVERLAY_ID}`;
 
+/** Return the native/endonym name for a supported language code. */
+const getLocalizedName = (lang: string): string =>
+  lang === 'ar'
+    ? 'العربية'
+    : lang === 'zh-CN'
+      ? '中文'
+      : lang === 'ko'
+        ? '한국어'
+        : lang === 'ja'
+          ? '日本語'
+          : lang === 'es'
+            ? 'Español'
+            : 'English';
+
 const calculateOverlayDimensions = (playerElement: HTMLElement): OverlayDimensions | null => {
   const width = playerElement.offsetWidth;
   const height = playerElement.offsetHeight;
@@ -273,7 +287,7 @@ export class Overlay {
       const lang = getActiveLanguage();
       this.container.lang = lang;
       this.container.dir = lang === 'ar' ? 'rtl' : 'ltr';
-      this.container.setAttribute('aria-label', `Live chat overlay — ${lang}`);
+      this.container.setAttribute('aria-label', `${t('Live chat overlay')} — ${getLocalizedName(lang)}`);
       this.announceLanguageChange(lang);
     }
   }
@@ -283,18 +297,7 @@ export class Overlay {
    */
   private announceLanguageChange(lang: string): void {
     if (!this.liveRegion) return;
-    const langName =
-      lang === 'ar'
-        ? 'العربية'
-        : lang === 'zh-CN'
-          ? '中文'
-          : lang === 'ko'
-            ? '한국어'
-            : lang === 'ja'
-              ? '日本語'
-              : lang === 'es'
-                ? 'Español'
-                : 'English';
+    const langName = getLocalizedName(lang);
     this.liveRegion.textContent = `Interface language changed to ${langName}`;
   }
 
