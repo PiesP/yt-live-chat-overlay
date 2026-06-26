@@ -85,6 +85,7 @@ export class ImageFetchManager {
   );
 
   private emojiCleanupIntervalId: ReturnType<typeof setInterval> | null = null;
+  private isDestroyed = false;
   private emojiFetchLimit = 10;
   private failedEmojiRetryMins = 5;
   private emojiFetchTimeoutMs = 10_000;
@@ -129,6 +130,7 @@ export class ImageFetchManager {
     // timer churn — the 5s tick only reads current instance properties.
     if (this.emojiCleanupIntervalId === null) {
       this.emojiCleanupIntervalId = setInterval(() => {
+        if (this.isDestroyed) return;
         this.cleanupStaleEmojiFetching();
       }, 5_000);
     }
@@ -282,6 +284,7 @@ export class ImageFetchManager {
 
   /** Clean up interval, in-flight images, and worker bitmaps. Caches are cleared by the caller. */
   destroy(): void {
+    this.isDestroyed = true;
     this.emojiCleanupIntervalId = clearSafeInterval(this.emojiCleanupIntervalId);
 
     // Neuter in-flight Image objects so callbacks don't fire after teardown.
