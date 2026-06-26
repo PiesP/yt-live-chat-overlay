@@ -199,11 +199,6 @@ export class ImageFetchManager {
    * emoji, author photo, and sticker (SuperChat).
    */
   prefetchImages(message: ChatMessage): void {
-    // Clean up stale emoji fetches once per message, before the per-emoji loop.
-    // The 5-second setInterval handles periodic cleanup; this provides an
-    // immediate sweep before new fetches start without redundant per-emoji calls.
-    this.cleanupStaleEmojiFetching();
-
     for (const seg of message.content) {
       if (seg.type !== 'emoji') continue;
       const emojiUrl = seg.emoji.url;
