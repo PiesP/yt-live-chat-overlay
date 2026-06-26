@@ -221,7 +221,8 @@ export class ReplayChatSource extends ChatSource {
       }
     };
 
-    // Fire first tick immediately (after next microtask)
+    // Fire first tick immediately (after next microtask).
+    // Note: scheduler.yield() could replace setTimeout(tick, 0) here if this were an async function.
     this.cooperativeLoopTimer = setTimeout(tick, 0);
   }
 

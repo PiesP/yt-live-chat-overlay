@@ -287,7 +287,13 @@ export class SDFAtlasGenerator {
 
       if (i % CHUNK_SIZE === 0) {
         onProgress?.(i, total);
-        await new Promise((r) => setTimeout(r, 0));
+        // Yield to the scheduler to keep the UI responsive.
+        // scheduler.yield() is the modern API; fall back to setTimeout for older engines.
+        if ('scheduler' in globalThis) {
+          await (globalThis as { scheduler: { yield: () => Promise<void> } }).scheduler.yield();
+        } else {
+          await new Promise((r) => setTimeout(r, 0));
+        }
       }
     }
 
