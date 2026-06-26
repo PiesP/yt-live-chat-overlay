@@ -2,6 +2,40 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.40.0] - 2026-06-26
+
+### Added
+
+- **Accessibility & web standards overhaul** — Comprehensive WCAG 2.1/2.2 AA compliance: native `<dialog>`, form labels, ARIA attributes, toast `aria-live`, canvas `aria-hidden`, tab arrow keys, `prefers-reduced-motion`, 44px touch targets, semantic headings, fieldset/legend for grids, inert modal overlay.
+- **Stryker mutation testing infrastructure** — Mutation testing with `@stryker-mutator/vitest-runner` for `test/` workspace.
+- **i18n barrel export** — `TRANSLATION_MAPS` exported for test and introspection.
+
+### Fixed
+
+- **DOM watcher duplicate observe on visibilitychange re-entry** — Added `observer.disconnect()` before re-observe to prevent MutationRecord duplication.
+- **Settings UI `inert` not restored on error** — Changed `catch` to `finally` to guarantee `document.body.inert = false` even if `focusInitialElement()` throws.
+- **BacklogController indicator fade rAF glitch** — Cancel pending fade-in rAF in `hideIndicator()` to prevent opacity override.
+- **Per-frame measureTextWidth callback allocation** — Replaced per-frame arrow function with pre-bound `_boundMeasureTextWidth` method.
+- **pendingTranslations slice allocation per drain** — Replaced `slice()` + `for...of` with index-based `for` loop.
+- **cleanupExpiredMessages spread overhead** — Replaced `push(...newMessages)` with `Array.prototype.push.apply()`.
+- **Settings async save not awaited in destroy()** — Made `destroy()` async, `await flushSave()` before teardown.
+- **ImageFetchManager interval recreation on config update** — Only create cleanup interval if one doesn't exist.
+- **fetchInterceptor unnecessary clone for non-chat URLs** — Added fast-path URL guard before regex test.
+- **Overlay updateDimensionsFromRect unnecessary guard** — Removed redundant null check.
+- **estimateDimensions getFontString duplication** — Compute once at function start, reuse.
+- **Hostname guards** — Added hostname checks to prevent execution on non-YouTube pages.
+- **ImageFetchManager interval timer leak on renderer reset** — Track and clear interval on reset.
+- **youtubei-json Array.isArray check** — Added `Array.isArray` check to `isRecord` guard.
+- **updateSettings source-change detection** — Fixed always-false condition.
+- **Promise leak / code duplication / type safety** — Resolved 3 high-severity issues from audit.
+- **Dependency updates** — nanoid 3.3.15, smol-toml 1.7.0, oxc-parser, knip.
+
+### Refactored
+
+- **Code structure** — Deduplicated `desaturateColor`/`siftDown`, cleaned unused imports, unified WebGL2 worker lane allocation, removed text measurement duplication.
+- **Dead code removal** — Removed unused `bootstrap.ts`, cleaned unused exports.
+- **Firefox manifest** — Cleaned and synchronized with Chrome manifest.
+
 ## [0.39.1] - 2026-07-28
 
 ### Fixed
