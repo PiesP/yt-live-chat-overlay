@@ -171,6 +171,10 @@ class App {
 }
 
 function main(): void {
+  if (!location.hostname.endsWith('youtube.com')) {
+    return;
+  }
+
   log.debug('Script loaded', {
     readyState: document.readyState,
     url: location.href,

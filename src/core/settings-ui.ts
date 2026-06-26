@@ -431,8 +431,12 @@ export class SettingsUi {
 
     // Set inert on main content to prevent screen reader from reading behind modal
     document.body.inert = true;
-
-    this.focusInitialElement();
+    try {
+      this.focusInitialElement();
+    } catch {
+      // If focus fails, ensure inert is not left permanently set
+      document.body.inert = false;
+    }
   }
 
   /** Rebuild modal DOM content from scratch (called on language change). */

@@ -1082,15 +1082,13 @@ export class RuntimeManager {
   }
 
   private disposeActiveSession(): void {
-    // Capture references then null the session identity BEFORE disposal.
-    // This prevents a concurrent reconcile from seeing a half-disposed state
-    // where targetUrl is set but the session is already destroyed.
-    const url = this.targetUrl;
+    // Capture targetUrl before nulling — the act of reading + nulling is the
+    // re-entrant guard. If disposeSession re-enters disposeActiveSession,
+    // targetUrl is already null and the second call becomes a no-op.
+    const _url = this.targetUrl;
     this.targetUrl = null;
     this.settings = null;
-    // Use url as a sentinel — if disposeSession re-enters disposeActiveSession
-    // via a re-entrant call, url is already consumed and targetUrl is null.
-    void url;
+    void _url;
     this.disposeSession();
     this.abortController = new AbortController();
   }

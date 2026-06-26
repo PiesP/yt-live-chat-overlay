@@ -125,6 +125,7 @@ export class PageWatcher {
    * Check if current page is a valid target (live/watch page)
    */
   isValidPage(): boolean {
+    if (!location.hostname.endsWith('youtube.com')) return false;
     return location.pathname === '/watch' || location.pathname.startsWith('/live/');
   }
 
