@@ -24,7 +24,11 @@ import {
   TRANSLATION_FONT_SCALE,
   TRANSLATION_GAP_PX,
 } from '@core/renderer-constants';
-import { computeMessageOpacity, type OpacityConfig } from '@core/renderer-shared';
+import {
+  computeMessageOpacity,
+  enqueueWithOverflow,
+  type OpacityConfig,
+} from '@core/renderer-shared';
 import {
   buildSDFInstances,
   createProgram,
@@ -356,16 +360,14 @@ export class RendererWebGL2 extends RendererBase {
   addMessage(message: ChatMessage): void {
     if (!this.isMessageAllowed(message)) return;
     const priority = RendererBase.getMessagePriority(message);
-    if (this.pendingQueue.size >= this.settings.queueMaxSize) {
-      const lowest = this.pendingQueue.peekLowest();
-      if (lowest && priority <= RendererBase.getMessagePriority(lowest)) {
-        this.observability.onMessageDropped('queue_priority');
-        return;
-      }
-      this.pendingQueue.dropLowest();
-      this.observability.onMessageDropped('queue_replaced');
-    }
-    this.pendingQueue.enqueue(message, priority);
+    const result = enqueueWithOverflow(
+      this.pendingQueue,
+      message,
+      priority,
+      (reason) => this.observability.onMessageDropped(reason),
+      this.settings.queueMaxSize
+    );
+    if (result === 'dropped') return;
     if (this.pendingQueue.size === 1 && !this.isPaused && !this.isVideoPaused) {
       this.startRenderLoop();
     }

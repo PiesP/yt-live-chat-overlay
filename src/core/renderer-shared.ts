@@ -11,6 +11,8 @@
 import type { ChatMessage, FontWeight } from '@app-types';
 import { buildWrappedLines, toSharedContentSegments } from '@core/canvas-rendering-shared';
 import { DEFAULT_FONT_FAMILY, rendererLayout, spacing } from '@core/design-tokens';
+import type { PriorityBucketQueue } from '@core/priority-bucket-queue';
+import { RendererBase } from '@core/renderer-base';
 import { SPEED_TIER } from '@core/renderer-constants';
 import { DEFAULT_SETTINGS } from '@core/settings-schema';
 import { getFontString, measureTextHeight, measureTextWidth } from '@core/text-measure';
@@ -304,4 +306,35 @@ export function computeMessageOpacity(
   opacity *= Math.max(0, 1 - ageRatio);
 
   return opacity;
+}
+
+/**
+ * Enqueue a message into a priority-bucket queue with overflow displacement.
+ *
+ * When the queue is at capacity, the new message displaces the lowest-priority
+ * entry if it has higher priority. Otherwise the new message is dropped.
+ *
+ * Returns 'enqueued' on success, 'dropped' if the message was rejected,
+ * or 'replaced' if the new message displaced a lower-priority entry.
+ */
+export function enqueueWithOverflow(
+  queue: PriorityBucketQueue<ChatMessage>,
+  message: ChatMessage,
+  priority: number,
+  onDrop: (reason: 'queue_priority' | 'queue_replaced') => void,
+  maxSize: number
+): 'enqueue' | 'dropped' | 'replaced' {
+  if (queue.size >= maxSize) {
+    const lowest = queue.peekLowest();
+    if (lowest && priority <= RendererBase.getMessagePriority(lowest)) {
+      onDrop('queue_priority');
+      return 'dropped';
+    }
+    queue.dropLowest();
+    onDrop('queue_replaced');
+    queue.enqueue(message, priority);
+    return 'replaced';
+  }
+  queue.enqueue(message, priority);
+  return 'enqueue';
 }

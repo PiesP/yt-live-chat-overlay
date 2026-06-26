@@ -62,6 +62,7 @@ import {
 } from '@core/renderer-constants';
 import {
   computeMessageOpacity,
+  enqueueWithOverflow,
   estimateMessageDimensions as sharedEstimateDimensions,
 } from '@core/renderer-shared';
 import { RenderWorkerManager } from '@core/renderer-worker-manager';
@@ -450,23 +451,17 @@ export class CanvasRenderer extends RendererBase {
     const priority = CanvasRenderer.getMessagePriority(message);
     this.imageFetchManager.prefetchImages(message);
 
-    if (this.pendingQueue.size >= this.settings.queueMaxSize) {
-      // Queue full — check if the new message has higher priority than
-      // the lowest-priority message currently in the queue.
-      const lowest = this.pendingQueue.peekLowest();
-      // peekLowest returns the lowest-priority entry; but to determine
-      // priority we call getMessagePriority on it (same cost as old code).
-      // If the new message isn't more important, drop it.
-      if (lowest && priority <= CanvasRenderer.getMessagePriority(lowest)) {
-        if (trackDrops) this.observability.onMessageDropped('queue_priority');
-        return;
-      }
-      // New message is more important — displace the lowest-priority entry.
-      this.pendingQueue.dropLowest();
-      if (trackDrops) this.observability.onMessageDropped('queue_replaced');
-    }
+    const result = enqueueWithOverflow(
+      this.pendingQueue,
+      message,
+      priority,
+      (reason) => {
+        if (trackDrops) this.observability.onMessageDropped(reason);
+      },
+      this.settings.queueMaxSize
+    );
+    if (result === 'dropped') return;
 
-    this.pendingQueue.enqueue(message, priority);
     this.updateBacklogPause();
 
     // Trigger an immediate render frame so the message appears within
