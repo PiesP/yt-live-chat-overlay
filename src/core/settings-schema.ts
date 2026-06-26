@@ -50,7 +50,8 @@ const LANGUAGE_VALUES = [
   'ko',
   'ja',
   'es',
-  'zh',
+  'zh-CN',
+  'ar',
 ] as const satisfies readonly LanguageSetting[];
 const TRANSLATION_SERVICE_VALUES = ['auto', 'off'] as const satisfies readonly TranslationService[];
 const TRANSLATION_TARGET_VALUES = [
@@ -59,7 +60,8 @@ const TRANSLATION_TARGET_VALUES = [
   'ko',
   'ja',
   'es',
-  'zh',
+  'zh-CN',
+  'ar',
 ] as const satisfies readonly TranslationTarget[];
 const TRANSLATION_SOURCE_VALUES = [
   'auto',
@@ -67,7 +69,8 @@ const TRANSLATION_SOURCE_VALUES = [
   'ko',
   'ja',
   'es',
-  'zh',
+  'zh-CN',
+  'ar',
 ] as const satisfies readonly TranslationSource[];
 const TRANSLATION_MODE_VALUES = ['dual', 'replace'] as const satisfies readonly TranslationMode[];
 const FONT_WEIGHT_VALUES = ['normal', 'bold'] as const satisfies readonly FontWeight[];

@@ -31,13 +31,13 @@ export type DropReason =
 /** Backlog injection modes */
 export type BacklogMode = 'playback' | 'recent' | 'full' | 'none';
 /** Language setting: auto-detect or explicit locale */
-export type LanguageSetting = 'auto' | 'en' | 'ko' | 'ja' | 'es' | 'zh';
+export type LanguageSetting = 'auto' | 'en' | 'ko' | 'ja' | 'es' | 'zh-CN' | 'ar';
 /** Translation service provider */
 export type TranslationService = 'auto' | 'off';
 /** Translation display mode */
 export type TranslationMode = 'dual' | 'replace';
 /** Valid source/target languages for translation (excludes 'auto') */
-export type TranslationLanguage = 'en' | 'ko' | 'ja' | 'es' | 'zh';
+export type TranslationLanguage = 'en' | 'ko' | 'ja' | 'es' | 'zh-CN' | 'ar';
 /** Target language for translation — 'auto' resolves to browser language via navigator.language */
 export type TranslationTarget = TranslationLanguage | 'auto';
 /** Source language for translation — 'auto' uses Chrome Language Detector API or Unicode heuristics */

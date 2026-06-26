@@ -55,7 +55,7 @@ const UNICODE_HINTS: ReadonlyArray<[TranslationLanguage, [number, number]]> = [
   ['ja', [0x3040, 0x309f]], // Hiragana
   ['ja', [0x30a0, 0x30ff]], // Katakana
   ['ko', [0xac00, 0xd7af]], // Hangul Syllables
-  ['zh', [0x4e00, 0x9fff]], // CJK Unified Ideographs
+  ['zh-CN', [0x4e00, 0x9fff]], // CJK Unified Ideographs
   ['es', [0x00c0, 0x00ff]], // Latin-1 Supplement (ñ, á, é, í, ó, ú, ü, ¿, ¡)
 ];
 
@@ -176,8 +176,8 @@ export class LanguageDetectorService {
         return 'ja';
       case 'es':
         return 'es';
-      case 'zh':
-        return 'zh';
+      case 'zh-CN':
+        return 'zh-CN';
       default:
         return null;
     }

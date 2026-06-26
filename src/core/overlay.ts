@@ -96,7 +96,9 @@ export class Overlay {
     container.setAttribute('role', 'region');
     container.setAttribute('aria-label', t('Chat overlay'));
     // Set lang attribute to match active language for screen readers
-    container.lang = getActiveLanguage();
+    const initialLang = getActiveLanguage();
+    container.lang = initialLang;
+    container.dir = initialLang === 'ar' ? 'rtl' : 'ltr';
     return container;
   }
 
@@ -263,13 +265,37 @@ export class Overlay {
   /**
    * Update the lang attribute on the overlay container to match the active language.
    * Call this when the language setting changes.
+   * Sets dir="rtl" for Arabic, "ltr" otherwise, and announces the change
+   * to screen readers via the live region.
    */
   updateLanguage(): void {
     if (this.container) {
       const lang = getActiveLanguage();
       this.container.lang = lang;
+      this.container.dir = lang === 'ar' ? 'rtl' : 'ltr';
       this.container.setAttribute('aria-label', `Live chat overlay — ${lang}`);
+      this.announceLanguageChange(lang);
     }
+  }
+
+  /**
+   * Announce a language change to screen readers via the aria-live region.
+   */
+  private announceLanguageChange(lang: string): void {
+    if (!this.liveRegion) return;
+    const langName =
+      lang === 'ar'
+        ? 'العربية'
+        : lang === 'zh-CN'
+          ? '中文'
+          : lang === 'ko'
+            ? '한국어'
+            : lang === 'ja'
+              ? '日本語'
+              : lang === 'es'
+                ? 'Español'
+                : 'English';
+    this.liveRegion.textContent = `Interface language changed to ${langName}`;
   }
 
   /**

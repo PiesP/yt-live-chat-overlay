@@ -56,7 +56,8 @@ const LANGUAGE_PATTERNS: ReadonlyArray<[SupportedLanguage, RegExp]> = [
   ['ko', /^ko\b/i],
   ['ja', /^ja\b/i],
   ['es', /^es\b/i],
-  ['zh', /^zh\b/i],
+  ['zh-CN', /^zh\b/i],
+  ['ar', /^ar\b/i],
 ];
 
 /**
@@ -122,17 +123,19 @@ export function resolveTranslationTarget(target: TranslationTarget): SupportedLa
 
 type TranslationMap = Record<string, string>;
 
+import { AR } from '@core/i18n/ar';
 import { ES } from '@core/i18n/es';
 import { JA } from '@core/i18n/ja';
 import { KO } from '@core/i18n/ko';
-import { ZH } from '@core/i18n/zh';
+import { ZH_CN } from '@core/i18n/zh-CN';
 
 const TRANSLATIONS: Record<SupportedLanguage, TranslationMap> = {
   en: {}, // English: no translation needed (strings are the keys)
   ko: KO,
   ja: JA,
   es: ES,
-  zh: ZH,
+  'zh-CN': ZH_CN,
+  ar: AR,
 };
 
 /** Exported translation map for testing and introspection. */
