@@ -167,6 +167,9 @@ export function installDomChatWatcher(onMessages: DomMessageCallback): DomWatche
         pendingMutations = [];
       } else {
         isPaused = false;
+        // Always disconnect before observe to prevent duplicate observers
+        // if this handler re-fires while already observing.
+        observer?.disconnect();
         observer?.observe(container, { childList: true, subtree: true });
       }
     };
