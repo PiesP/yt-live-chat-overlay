@@ -326,12 +326,15 @@ export class TranslationService {
         );
       }
       const entry = { text, priority, resolve };
-      // Append and re-sort to maintain priority order (highest first).
-      // The queue is bounded by MAX_TRANSLATE_QUEUE_SIZE (1000), so the
-      // O(n log n) sort cost is acceptable and avoids O(n²) shift overhead
-      // from repeated splice-insert on large arrays during chat bursts.
-      this.translateQueue.push(entry);
-      this.translateQueue.sort((a, b) => b.priority - a.priority);
+      // Binary insertion to maintain priority order (highest first).
+      // O(log n) search + O(n) shift is better than O(n log n) sort on
+      // every enqueue during high-frequency chat bursts.
+      const insertIdx = this.translateQueue.findIndex((q) => q.priority < priority);
+      if (insertIdx === -1) {
+        this.translateQueue.push(entry);
+      } else {
+        this.translateQueue.splice(insertIdx, 0, entry);
+      }
       if (!this.drainActive) {
         this.drainActive = true;
         this.drainQueue();

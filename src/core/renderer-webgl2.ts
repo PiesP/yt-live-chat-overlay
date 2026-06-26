@@ -314,7 +314,7 @@ export class RendererWebGL2 extends RendererBase {
 
   private loadAuthorPhoto(url: string): HTMLImageElement | undefined {
     const cached = this.authorPhotoCache.get(url);
-    if (cached) return cached;
+    if (cached?.complete && cached.naturalWidth > 0) return cached;
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.src = url;
