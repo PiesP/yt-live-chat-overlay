@@ -258,6 +258,9 @@ export class CanvasRenderer extends RendererBase {
 
   /** Pre-bound getFont to avoid per-call arrow function allocation. */
   private readonly _boundGetFont = (fs: number): string => this.getFont(fs);
+  /** Pre-bound measureTextWidth to avoid per-call arrow function allocation. */
+  private readonly _boundMeasureTextWidth = (text: string): number =>
+    measureTextWidth(text, this._boundGetFont(this.settings.fontSize));
 
   private static readonly IDLE_GRACE_PERIOD_MS = 500;
 
@@ -738,9 +741,7 @@ export class CanvasRenderer extends RendererBase {
               this.imageFetchManager.authorPhotoCache,
               isImageReady,
               this._boundGetFont,
-              (text: string) => {
-                return measureTextWidth(text, this._boundGetFont(this.settings.fontSize));
-              },
+              this._boundMeasureTextWidth,
               isReplace ? msg.translatedText : undefined
             );
           } else {
