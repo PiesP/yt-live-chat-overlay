@@ -38,6 +38,13 @@ const getLocalizedName = (lang: string): string =>
             ? 'Español'
             : 'English';
 
+/**
+ * Calculate overlay dimensions from an HTMLElement's offsetWidth/offsetHeight.
+ *
+ * @deprecated Forces synchronous layout reflow. Use
+ *   {@link calculateOverlayDimensionsFromRect} with a ResizeObserver's
+ *   contentRect instead to avoid layout thrashing.
+ */
 const calculateOverlayDimensions = (playerElement: HTMLElement): OverlayDimensions | null => {
   const width = playerElement.offsetWidth;
   const height = playerElement.offsetHeight;
@@ -287,7 +294,10 @@ export class Overlay {
       const lang = getActiveLanguage();
       this.container.lang = lang;
       this.container.dir = lang === 'ar' ? 'rtl' : 'ltr';
-      this.container.setAttribute('aria-label', `${t('Live chat overlay')} — ${getLocalizedName(lang)}`);
+      this.container.setAttribute(
+        'aria-label',
+        `${t('Live chat overlay')} — ${getLocalizedName(lang)}`
+      );
       this.announceLanguageChange(lang);
     }
   }
