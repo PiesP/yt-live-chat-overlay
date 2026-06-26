@@ -527,6 +527,12 @@ export class BacklogInjectionController implements Pauseable {
 
   private hideIndicator(): void {
     if (!this.indicatorEl) return;
+    // Cancel any pending fade-in rAF to prevent opacity glitch
+    // (rAF setting opacity=1 would override our opacity=0).
+    if (this._indicatorFadeRaf !== null) {
+      cancelAnimationFrame(this._indicatorFadeRaf);
+      this._indicatorFadeRaf = null;
+    }
     this.indicatorEl.style.opacity = '0';
     this.hideIndicatorTimer = setTimeout(() => {
       this.hideIndicatorTimer = null;
