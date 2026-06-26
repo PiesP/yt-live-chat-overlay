@@ -176,6 +176,8 @@ export class LanguageDetectorService {
         return 'ja';
       case 'es':
         return 'es';
+      case 'zh':
+        return 'zh-CN';
       case 'zh-CN':
         return 'zh-CN';
       default:
