@@ -433,8 +433,9 @@ export class SettingsUi {
     document.body.inert = true;
     try {
       this.focusInitialElement();
-    } catch {
-      // If focus fails, ensure inert is not left permanently set
+    } finally {
+      // Ensure inert is restored even if focusInitialElement throws,
+      // preventing the page from becoming permanently inaccessible.
       document.body.inert = false;
     }
   }
