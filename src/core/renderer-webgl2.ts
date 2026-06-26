@@ -125,11 +125,25 @@ export class RendererWebGL2 extends RendererBase {
       'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none';
     canvas.setAttribute('aria-hidden', 'true');
 
+    // Probe WebGL2 availability BEFORE inserting DOM elements.
+    // If WebGL2 is unavailable, throw before any DOM manipulation so
+    // the factory (createRenderer) can cleanly fall back to Canvas2D.
+    const probeCtx = canvas.getContext('webgl2', {
+      alpha: true,
+      antialias: false,
+      premultipliedAlpha: true,
+      preserveDrawingBuffer: false,
+    });
+    if (!probeCtx) throw new Error('WebGL2 not supported');
+
     // Canvas2D overlay for card decorations (round rects, author photos)
     const overlay2d = document.createElement('canvas');
     overlay2d.style.cssText =
       'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:1';
     overlay2d.setAttribute('aria-hidden', 'true');
+
+    const ctx2d = overlay2d.getContext('2d');
+    if (!ctx2d) throw new Error('Failed to create 2D overlay context');
 
     // Visually-hidden live region for connection status announcements
     const statusRegion = document.createElement('div');
@@ -138,22 +152,14 @@ export class RendererWebGL2 extends RendererBase {
     statusRegion.style.cssText =
       'position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0';
 
-    // Append DOM elements early so cleanup can remove them on failure.
+    // Append DOM elements — only reached after WebGL2 is confirmed.
     if (container) {
       container.appendChild(canvas);
       container.appendChild(overlay2d);
       container.appendChild(statusRegion);
     }
 
-    try {
-      this.initWebGL2(canvas, overlay2d, statusRegion);
-    } catch (error) {
-      // Clean up all DOM elements to avoid leaving a broken overlay in the DOM.
-      canvas.remove();
-      overlay2d.remove();
-      statusRegion.remove();
-      throw error;
-    }
+    this.initWebGL2(canvas, overlay2d, ctx2d, statusRegion);
   }
 
   /**
@@ -163,10 +169,9 @@ export class RendererWebGL2 extends RendererBase {
   private initWebGL2(
     canvas: HTMLCanvasElement,
     overlay2d: HTMLCanvasElement,
+    ctx2d: CanvasRenderingContext2D,
     _statusRegion: HTMLDivElement
   ): void {
-    const ctx2d = overlay2d.getContext('2d');
-    if (!ctx2d) throw new Error('Failed to create 2D overlay context');
     this.overlay2d = overlay2d;
     this.ctx2d = ctx2d;
 
