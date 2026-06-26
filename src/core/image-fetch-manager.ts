@@ -124,13 +124,14 @@ export class ImageFetchManager {
     this.authorPhotoCache.resize(settings.photoCacheMb * 1_000_000);
     this.stickerCache.resize(settings.stickerCacheMb * 1_000_000);
 
-    // Start cleanup interval if not already running
-    if (this.emojiCleanupIntervalId !== null) {
-      clearInterval(this.emojiCleanupIntervalId);
+    // Start cleanup interval only if not already running.
+    // Re-creating the interval on every updateConfig() causes unnecessary
+    // timer churn — the 5s tick only reads current instance properties.
+    if (this.emojiCleanupIntervalId === null) {
+      this.emojiCleanupIntervalId = setInterval(() => {
+        this.cleanupStaleEmojiFetching();
+      }, 5_000);
     }
-    this.emojiCleanupIntervalId = setInterval(() => {
-      this.cleanupStaleEmojiFetching();
-    }, 5_000);
   }
 
   /** Register a callback for when an image finishes loading (triggers rAF restart). */

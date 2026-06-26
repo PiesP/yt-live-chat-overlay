@@ -152,8 +152,7 @@ export class Overlay {
   }
 
   private updateDimensionsFromRect(width: number, height: number): void {
-    const nextDimensions =
-      !this.container || !this.settings ? null : calculateOverlayDimensionsFromRect(width, height);
+    const nextDimensions = calculateOverlayDimensionsFromRect(width, height);
 
     if (areOverlayDimensionsEqual(this.dimensions, nextDimensions)) {
       return;

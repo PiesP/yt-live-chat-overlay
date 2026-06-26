@@ -87,12 +87,14 @@ export class Settings {
     };
   }
 
-  destroy(): void {
-    this.flushSave();
+  async destroy(): Promise<void> {
+    // Cancel any idle callback to avoid a race where flushSave() fires after destroy().
     if (this.saveIdleHandle !== 0) {
       cancelIdleCallback(this.saveIdleHandle);
       this.saveIdleHandle = 0;
     }
+    // Await the flush to ensure the async save completes before tearing down.
+    await this.flushSave();
     this.stopCrossTabSync();
     this.onChangeCallbacks.clear();
   }

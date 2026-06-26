@@ -71,9 +71,9 @@ export function installFetchInterceptor(
             ? input.url
             : '';
 
-    const isChatRequest = CHAT_ENDPOINT_RE.test(url);
-
-    if (!isChatRequest) {
+    // Fast-path URL check: skip regex for non-string/URL/Request inputs.
+    // Only chat-related URLs need cloning; all others pass through untouched.
+    if (!url || !CHAT_ENDPOINT_RE.test(url)) {
       return originalFetch.call(this, input, init);
     }
 

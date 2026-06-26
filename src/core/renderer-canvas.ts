@@ -574,11 +574,12 @@ export class CanvasRenderer extends RendererBase {
         this._pendingTranslationReadIdx + this.translationBatchSize,
         this.pendingTranslations.length
       );
-      const batch = this.pendingTranslations.slice(this._pendingTranslationReadIdx, end);
-      this._pendingTranslationReadIdx = end;
-      for (const { msg, text } of batch) {
-        msg.translatedText = text;
+      for (let i = this._pendingTranslationReadIdx; i < end; i++) {
+        const entry = this.pendingTranslations[i];
+        if (!entry) continue;
+        entry.msg.translatedText = entry.text;
       }
+      this._pendingTranslationReadIdx = end;
       if (this._pendingTranslationReadIdx >= this.pendingTranslations.length) {
         this.pendingTranslations.length = 0;
         this._pendingTranslationReadIdx = 0;
@@ -604,9 +605,10 @@ export class CanvasRenderer extends RendererBase {
     );
     if (anyRemoved) {
       if (newMessages) {
-        // Replace the array reference entirely (avoids keeping garbage-filled tail slots)
+        // Replace the array reference entirely (avoids keeping garbage-filled tail slots).
+        // Use Array.prototype.push.apply to avoid spread-induced temporary array.
         this.activeMessages.length = 0;
-        this.activeMessages.push(...newMessages);
+        Array.prototype.push.apply(this.activeMessages, newMessages);
       } else {
         this.activeMessages.length = newLength;
       }
@@ -1175,20 +1177,28 @@ export class CanvasRenderer extends RendererBase {
     if (message.id) {
       cached = this.dimensionCache.get(message.id);
     }
+
+    // Pre-compute translation font metrics — used in both cache-hit and fresh paths
+    // when dual translation mode is active. Translation state can change between calls,
+    // so this is evaluated each time but only once per invocation.
+    let transHeight = 0;
+    if (
+      this.settings.translationEnabled &&
+      this.translationService.isActive &&
+      this.settings.translationMode === 'dual'
+    ) {
+      const transFontSize = Math.max(
+        1,
+        Math.round(this.settings.fontSize * TRANSLATION_FONT_SCALE)
+      );
+      const transFont = getFontString(transFontSize, 'normal', this.settings.fontFamily);
+      const gap = TRANSLATION_GAP_PX;
+      transHeight = measureTextHeight(transFont, transFontSize) + gap;
+    }
+
     if (cached) {
       // Translation height adjustment must be re-applied (translation state can change)
-      if (
-        this.settings.translationEnabled &&
-        this.translationService.isActive &&
-        this.settings.translationMode === 'dual'
-      ) {
-        const transFontSize = Math.max(
-          1,
-          Math.round(this.settings.fontSize * TRANSLATION_FONT_SCALE)
-        );
-        const transFont = getFontString(transFontSize, 'normal', this.settings.fontFamily);
-        const gap = TRANSLATION_GAP_PX;
-        const transHeight = measureTextHeight(transFont, transFontSize) + gap;
+      if (transHeight > 0) {
         return { width: cached.width, height: cached.height + transHeight };
       }
       return cached;
@@ -1225,18 +1235,7 @@ export class CanvasRenderer extends RendererBase {
 
     // In dual translation mode, add extra height for the translation text
     // below the original content (all message kinds).
-    if (
-      this.settings.translationEnabled &&
-      this.translationService.isActive &&
-      this.settings.translationMode === 'dual'
-    ) {
-      const transFontSize = Math.max(
-        1,
-        Math.round(this.settings.fontSize * TRANSLATION_FONT_SCALE)
-      );
-      const transFont = getFontString(transFontSize, 'normal', this.settings.fontFamily);
-      const gap = TRANSLATION_GAP_PX;
-      const transHeight = measureTextHeight(transFont, transFontSize) + gap;
+    if (transHeight > 0) {
       return { width: dims.width, height: dims.height + transHeight };
     }
 
