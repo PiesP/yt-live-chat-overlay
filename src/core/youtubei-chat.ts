@@ -75,12 +75,12 @@ export const getVideoIdFromUrl = (href = location.href): string | null => {
   try {
     const url = new URL(href, location.origin);
 
-    if (isYouTubeWatch(href)) {
+    if (isYouTubeWatch(url.href)) {
       const videoId = url.searchParams.get('v');
       return videoId && videoId.trim().length > 0 ? videoId : null;
     }
 
-    if (isYouTubeLive(href)) {
+    if (isYouTubeLive(url.href)) {
       const [, videoId] = url.pathname.split('/').filter((s): s is string => s !== '');
       return videoId && videoId.trim().length > 0 ? videoId : null;
     }
