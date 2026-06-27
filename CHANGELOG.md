@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.41.0] - 2026-06-28
+
+### Added
+
+- **URLPattern for YouTube URL matching** — Introduced `URLPattern` with fallback regex for robust YouTube URL detection; supports `youtube.com` without `www` subdomain.
+- **scheduler.yield() in SDF atlas generation** — Replaced `setTimeout(fn, 0)` with `scheduler.yield()` for cooperative scheduling during atlas build.
+- **Arabic translation and BCP-47 normalization** — Added Arabic (`ar`) locale, normalized Chinese to `zh-CN`.
+- **Translation completeness verification script** — Automated i18n key parity validation across all locales.
+- **WCAG 2.2 AA accessibility improvements** — Comprehensive settings UI audit (3 phases): native `<dialog>`, form labels, ARIA, `prefers-reduced-motion`, 44px touch targets, semantic headings, fieldset/legend, focus management.
+- **Comment overlap fix on tab return** — Replay buffer accumulated during hidden tab period is now drained through the backlog controller for gradual Poisson-distributed emission instead of bursting.
+
+### Fixed
+
+- **Regex escaping bugs** — Fixed `EMOJI_ALIAS_PATTERN` double-backslash and URLPattern `*.example.com` not matching bare domain.
+- **body.inert removed from settings dialog** — Use native `<dialog>` inertness to avoid freezing rAF and IntersectionObserver.
+- **ImageFetchManager interval leak** — Added `isDestroyed` guard to prevent interval recreation on config update.
+- **RendererWebGL2 constructor throw after DOM insertion** — Guard against post-insertion race conditions.
+- **BacklogController author grid CSS override** — Use inline styles/`!important` to prevent page CSS from breaking grid layout.
+- **i18n edge cases** — `mapBcp47` `zh` → `zh-CN`, binary insertion in translate queue, `t()` for localized `aria-label`.
+- **Settings UI layout** — Increased modal width, restored horizontal range layout, fixed checkbox sizing.
+
+### Refactored
+
+- **Replay buffer drain API** — Consolidated `getPendingDrainCount`/`drainPendingMessages`/`resetPendingDrainCount` into a single `drainPendingMessages()` method.
+- **Priority queue overflow logic** — Extracted to shared `enqueueWithOverflow` utility.
+
 ## [0.40.0] - 2026-06-26
 
 ### Added
