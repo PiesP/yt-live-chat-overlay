@@ -281,7 +281,7 @@ export const SETTINGS_UI_STYLES = `
       }
       .yt-chat-overlay-settings-tab {
         flex: 1;
-        padding: ${spacing.sm}px ${spacing.xs}px;
+        padding: 10px 6px;
         border: none;
         border-bottom: 2px solid transparent;
         background: transparent;
@@ -382,7 +382,7 @@ export const SETTINGS_UI_STYLES = `
         margin: 0;
       }
       .yt-chat-overlay-settings-field input[type="text"] {
-        flex: 1;
+        width: ${uiSizing.inputWidth}px;
         padding: ${spacing.xs}px ${spacing.sm}px;
         border-radius: ${borderRadius.sm};
         border: 1px solid ${uiColors.border};
@@ -399,8 +399,8 @@ export const SETTINGS_UI_STYLES = `
         cursor: pointer;
       }
       .yt-chat-overlay-settings-field input[type="checkbox"] {
-        width: ${uiSizing.checkboxSize}px;
-        height: ${uiSizing.checkboxSize}px;
+        width: 20px;
+        height: 20px;
         cursor: pointer;
         accent-color: ${uiColors.primary};
       }
@@ -466,6 +466,7 @@ export const SETTINGS_UI_STYLES = `
       /* Actions bar */
       .yt-chat-overlay-settings-actions {
         display: flex;
+        flex-wrap: wrap;
         justify-content: flex-end;
         gap: ${spacing.sm}px;
         flex-shrink: 0;
@@ -618,19 +619,18 @@ export const SETTINGS_UI_STYLES = `
       /* Range slider (dual: slider + number) */
       .yt-chat-overlay-settings-range {
         display: flex;
-        align-items: center;
-        gap: ${spacing.sm}px;
+        flex-direction: column;
+        gap: var(--spacing-xs);
         padding: 6px 0;
-        justify-content: space-between;
       }
       .yt-chat-overlay-settings-range label {
-        flex: 1;
-        font-size: ${typography.fontSize.sm};
-        color: ${uiColors.text};
+        flex: none;
+        font-size: var(--font-sm);
+        color: var(--ui-text);
       }
       .yt-chat-overlay-settings-range-slider {
-        flex: 2;
-        height: ${spacing.xs}px;
+        width: 100%;
+        height: 4px;
         accent-color: ${uiColors.primary};
         margin: 0;
       }
@@ -648,6 +648,7 @@ export const SETTINGS_UI_STYLES = `
         color: ${uiColors.text};
         font-size: ${typography.fontSize.sm};
         -moz-appearance: textfield;
+        align-self: flex-end;
       }
       .yt-chat-overlay-settings-range-number::-webkit-inner-spin-button,
       .yt-chat-overlay-settings-range-number::-webkit-outer-spin-button {

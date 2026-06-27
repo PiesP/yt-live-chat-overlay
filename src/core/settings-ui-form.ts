@@ -76,14 +76,13 @@ function domField(labelText: string, control: HTMLElement): HTMLLabelElement {
   return label;
 }
 
-function domSection(titleText: string): HTMLDivElement {
+function domSection(titleText: string): HTMLDivElement | null {
+  if (!titleText) return null;
   const sec = domDiv('yt-chat-overlay-settings-section');
-  if (titleText) {
-    const title = document.createElement('h3');
-    title.className = 'yt-chat-overlay-settings-section-title';
-    title.textContent = titleText;
-    sec.appendChild(title);
-  }
+  const title = document.createElement('h3');
+  title.className = 'yt-chat-overlay-settings-section-title';
+  title.textContent = titleText;
+  sec.appendChild(title);
   return sec;
 }
 
@@ -469,10 +468,12 @@ export class SettingsUiForm {
 
       if (section.title) {
         const secEl = domSection(t(section.title));
-        for (const field of section.fields) {
-          secEl.appendChild(this.buildField(field));
+        if (secEl) {
+          for (const field of section.fields) {
+            secEl.appendChild(this.buildField(field));
+          }
+          pane.appendChild(secEl);
         }
-        pane.appendChild(secEl);
       } else {
         for (const field of section.fields) {
           const el = this.buildField(field);
@@ -615,7 +616,11 @@ export class SettingsUiForm {
   }
 
   private buildAuthorGrid(): HTMLDivElement {
-    const section = domSection(t('Author Colors & Visibility'));
+    const section = domDiv('yt-chat-overlay-settings-section');
+    const gridTitle = document.createElement('h3');
+    gridTitle.className = 'yt-chat-overlay-settings-section-title';
+    gridTitle.textContent = t('Author Colors & Visibility');
+    section.appendChild(gridTitle);
     const fieldset = document.createElement('fieldset');
     fieldset.className = 'yt-chat-overlay-author-grid-fieldset';
     const legend = document.createElement('legend');
