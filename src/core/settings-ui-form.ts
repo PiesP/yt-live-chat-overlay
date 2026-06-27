@@ -135,14 +135,18 @@ function createTabs(): HTMLElement {
   return nav;
 }
 
-export const ACTIONS = ['reset', 'export', 'import', 'close'] as const;
-export type ActionType = (typeof ACTIONS)[number];
+export type ActionType = 'reset' | 'export' | 'import' | 'close';
+
+export const ACTION_LABELS: Record<ActionType, string> = {
+  reset: 'Reset',
+  export: 'Export',
+  import: 'Import',
+  close: 'Close',
+};
 
 function createActions(): HTMLDivElement {
   const actions = domDiv('yt-chat-overlay-settings-actions');
-  for (const [action, label] of ACTIONS.map(
-    (a) => [a, a.charAt(0).toUpperCase() + a.slice(1)] as const
-  )) {
+  for (const [action, label] of Object.entries(ACTION_LABELS)) {
     const button = document.createElement('button');
     button.type = 'button';
     button.dataset.action = action;
@@ -394,6 +398,11 @@ export class SettingsUiForm {
                 )) {
                   pane.toggleAttribute('hidden', pane.dataset.pane !== tabId);
                 }
+                // Move focus to the newly activated tab panel
+                const activePane = this.modal.querySelector<HTMLDivElement>(
+                  `.yt-chat-overlay-settings-pane[data-pane="${tabId}"]`
+                );
+                activePane?.focus();
               }
             }
           }

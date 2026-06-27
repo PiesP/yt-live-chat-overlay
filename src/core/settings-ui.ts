@@ -387,6 +387,12 @@ export class SettingsUi {
     this.backdrop = document.createElement('div');
     this.backdrop.id = BACKDROP_ID;
     this.backdrop.className = 'yt-chat-overlay-settings-backdrop';
+
+    // RTL support: set dir attribute for Arabic
+    if (getActiveLanguage() === 'ar') {
+      this.backdrop.setAttribute('dir', 'rtl');
+    }
+
     this._backdropClickHandler = (event: MouseEvent) => {
       // Only handle left-click (button === 0); ignore middle/right-click
       // to avoid conflicting with browser context menu or middle-click paste.
@@ -474,8 +480,10 @@ export class SettingsUi {
     confirmLabel: string;
     onConfirm: () => void;
   }): HTMLDivElement {
+    const dialogId = `yt-chat-overlay-settings-confirm-${Date.now()}`;
     const dialog = document.createElement('div');
     dialog.className = 'yt-chat-overlay-settings-confirm';
+    dialog.id = dialogId;
     dialog.setAttribute('role', 'alertdialog');
     dialog.setAttribute('aria-modal', 'true');
     dialog.setAttribute('aria-label', t(options.message));
@@ -483,12 +491,11 @@ export class SettingsUi {
     const backdrop = document.createElement('div');
     backdrop.className = 'yt-chat-overlay-settings-confirm-backdrop';
 
-    const confirmDialog = document.createElement('div');
-    confirmDialog.className = 'yt-chat-overlay-settings-confirm-dialog';
-
     const message = document.createElement('p');
     message.className = 'yt-chat-overlay-settings-confirm-message';
+    message.id = `yt-chat-overlay-confirm-msg-${Date.now()}`;
     message.textContent = t(options.message);
+    dialog.setAttribute('aria-describedby', message.id);
 
     const buttons = document.createElement('div');
     buttons.className = 'yt-chat-overlay-settings-confirm-buttons';
@@ -504,8 +511,7 @@ export class SettingsUi {
     okBtn.textContent = t(options.confirmLabel);
 
     buttons.append(cancelBtn, okBtn);
-    confirmDialog.append(message, buttons);
-    dialog.append(backdrop, confirmDialog);
+    dialog.append(backdrop, message, buttons);
 
     const triggerElement = this.button;
 
@@ -518,7 +524,7 @@ export class SettingsUi {
         return;
       }
       if (event.key === 'Tab') {
-        this.trapFocusConfirm(event, confirmDialog);
+        this.trapFocusConfirm(event, dialog);
       }
     };
 
@@ -531,7 +537,7 @@ export class SettingsUi {
       options.onConfirm();
       triggerElement?.focus();
     });
-    confirmDialog.addEventListener('keydown', handleConfirmKeyDown);
+    dialog.addEventListener('keydown', handleConfirmKeyDown);
 
     cancelBtn.focus();
     return dialog;
@@ -563,6 +569,7 @@ export class SettingsUi {
     a.href = `data:application/json;charset=utf-8,${encoded}`;
     a.download = 'yt-chat-overlay-settings.json';
     a.click();
+    this.showToast(t('Settings exported successfully'));
   }
 
   private handleImport(): void {

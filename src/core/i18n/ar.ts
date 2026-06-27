@@ -21,6 +21,7 @@ export const AR: Record<string, string> = {
   'Burst Detection': 'كشف الانفجار',
   Cache: 'الذاكرة المؤقتة',
   'Author Colors & Visibility': 'ألوان المؤلفين والرؤية',
+  'Author colors and visibility': 'ألوان المؤلفين والرؤية',
   Interface: 'الواجهة',
   'Chat Translation': 'ترجمة الدردشة',
   'Translation backend service for processing messages': 'خدمة الترجمة الخلفية لمعالجة الرسائل',
@@ -164,7 +165,8 @@ export const AR: Record<string, string> = {
   'Backlog Speed (×)': 'مضاعف سرعة السجل',
   'Recent Window (min)': 'النافذة الزمنية (دقائق)',
   'Log Level': 'مستوى السجل',
-  'Debug Overlay': 'تراكب التصحيح',
+  'Debug Overlay': 'طبقة تصحيح',
+  'Enable WebGL2': 'تفعيل WebGL2',
 
   // ── New select options ──
   'Warnings only': 'التحذيرات فقط',
@@ -319,5 +321,12 @@ export const AR: Record<string, string> = {
   Verified: 'موثّق',
   SuperChat: 'رسالة مميزة',
   'Loading chat history...': 'جارٍ تحميل سجل الدردشة...',
-  'Short messages shown regardless of length': 'الرسائل القصيرة تُعرض بغض النظر عن الطول',
+  'Short messages shown regardless of length': 'عرض الرسائل القصيرة بغض النظر عن الطول',
+
+  // ── Toast / sync messages ──
+  'Settings updated from another tab': 'تم تحديث الإعدادات من تبويب آخر',
+  'Settings exported successfully': 'تم تصدير الإعدادات بنجاح',
+
+  // ── Translation unsupported ──
+  'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.': 'يتطلب الترجمة متصفحًا مزودًا بذكاء اصطناعي مدمج. استخدم Chrome 138+ أو Edge 143+ Canary.',
 };

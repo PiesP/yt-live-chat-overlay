@@ -21,6 +21,7 @@ export const JA: Record<string, string> = {
   'Burst Detection': 'バースト検出',
   Tuning: 'チューニング',
   'Author Colors & Visibility': '投稿者の色と表示',
+  'Author colors and visibility': '投稿者の色と表示',
   Interface: 'インターフェース',
   'Chat Translation': 'チャット翻訳',
   'Translation backend service for processing messages':
@@ -168,6 +169,7 @@ export const JA: Record<string, string> = {
   'Recent Window (min)': '時間枠 (分)',
   'Log Level': 'ログレベル',
   'Debug Overlay': 'デバッグオーバーレイ',
+  'Enable WebGL2': 'WebGL2を有効化',
 
   // ── New select options ──
   'Warnings only': '警告のみ',
@@ -323,4 +325,11 @@ export const JA: Record<string, string> = {
   SuperChat: 'スパーチャット',
   'Loading chat history...': 'チャット履歴を読み込み中...',
   'Short messages shown regardless of length': '長さに関係なく短いメッセージを表示',
+
+  // ── Toast / sync messages ──
+  'Settings updated from another tab': '他のタブから設定が更新されました',
+  'Settings exported successfully': '設定がエクスポートされました',
+
+  // ── Translation unsupported ──
+  'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.': '翻訳機能には内蔵AIが必要です。Chrome 138+またはEdge 143+ Canaryをご利用ください。',
 };

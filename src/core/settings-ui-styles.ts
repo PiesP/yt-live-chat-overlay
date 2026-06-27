@@ -535,21 +535,13 @@ export const SETTINGS_UI_STYLES = `
         align-items: center;
         justify-content: center;
         z-index: 1;
+        padding: ${spacing.lg}px;
       }
       .yt-chat-overlay-settings-confirm-backdrop {
         position: absolute;
         inset: 0;
         background: rgba(0, 0, 0, ${CONFIRM_BACKDROP_ALPHA});
         border-radius: ${borderRadius.md};
-      }
-      .yt-chat-overlay-settings-confirm-dialog {
-        position: relative;
-        background: ${uiColors.backgroundLight};
-        border: 1px solid ${uiColors.border};
-        border-radius: ${borderRadius.md};
-        padding: ${spacing.lg}px;
-        min-width: ${uiSizing.confirmMinWidth}px;
-        box-shadow: ${shadows.box.lg};
       }
       .yt-chat-overlay-settings-confirm-message {
         margin: 0 0 ${spacing.md}px;

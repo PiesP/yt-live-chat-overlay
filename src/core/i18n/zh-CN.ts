@@ -21,6 +21,7 @@ export const ZH_CN: Record<string, string> = {
   'Burst Detection': '突发检测',
   Cache: '缓存',
   'Author Colors & Visibility': '用户颜色与显示',
+  'Author colors and visibility': '用户颜色与显示',
   Interface: '界面',
   'Chat Translation': '聊天翻译',
   'Translation backend service for processing messages': '用于处理消息的翻译后端服务',
@@ -160,7 +161,8 @@ export const ZH_CN: Record<string, string> = {
   'Backlog Speed (×)': '速度倍率',
   'Recent Window (min)': '时间窗口 (分)',
   'Log Level': '日志级别',
-  'Debug Overlay': '调试覆盖层',
+  'Debug Overlay': '调试叠加层',
+  'Enable WebGL2': '启用 WebGL2',
 
   // ── New select options ──
   'Warnings only': '仅警告',
@@ -304,5 +306,12 @@ export const ZH_CN: Record<string, string> = {
   Verified: '已认证',
   SuperChat: '超级留言',
   'Loading chat history...': '正在加载聊天记录...',
-  'Short messages shown regardless of length': '无论消息长短均显示短消息',
+  'Short messages shown regardless of length': '显示短消息，无论长度如何',
+
+  // ── Toast / sync messages ──
+  'Settings updated from another tab': '已从其他标签页更新设置',
+  'Settings exported successfully': '设置已导出成功',
+
+  // ── Translation unsupported ──
+  'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.': '翻译功能需要内置 AI 的浏览器。请使用 Chrome 138+ 或 Edge 143+ Canary。',
 };

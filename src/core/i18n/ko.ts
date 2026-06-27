@@ -21,6 +21,7 @@ export const KO: Record<string, string> = {
   'Burst Detection': '버스트 감지',
   Cache: '캐시',
   'Author Colors & Visibility': '작성자 색상 및 표시',
+  'Author colors and visibility': '작성자 색상 및 표시',
   Interface: '인터페이스',
   'Chat Translation': '채팅 번역',
   'Translation backend service for processing messages': '메시지 처리를 위한 번역 백엔드 서비스',
@@ -165,6 +166,7 @@ export const KO: Record<string, string> = {
   'Recent Window (min)': '시간 창 (분)',
   'Log Level': '로그 레벨',
   'Debug Overlay': '디버그 오버레이',
+  'Enable WebGL2': 'WebGL2 활성화',
 
   // ── New select options ──
   'Warnings only': '경고만',
@@ -319,4 +321,11 @@ export const KO: Record<string, string> = {
   SuperChat: '슈퍼챗',
   'Loading chat history...': '채팅 기록을 불러오는 중...',
   'Short messages shown regardless of length': '길이에 관계없이 짧은 메시지 표시',
+
+  // ── Toast / sync messages ──
+  'Settings updated from another tab': '다른 탭에서 설정이 업데이트되었습니다',
+  'Settings exported successfully': '설정이 내보내기되었습니다',
+
+  // ── Translation unsupported ──
+  'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.': '번역 기능을 사용하려면 내장 AI가 있는 브라우저가 필요합니다. Chrome 138+ 또는 Edge 143+ Canary를 사용하세요.',
 };

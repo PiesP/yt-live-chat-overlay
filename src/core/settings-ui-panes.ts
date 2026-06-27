@@ -543,6 +543,11 @@ export const PANES: PaneDef[] = [
             'showDebugOverlay',
             'Show performance debug overlay on the video player'
           ),
+          chk(
+            'Enable WebGL2',
+            'enableWebGL2',
+            'Use WebGL2 GPU-accelerated rendering for higher performance (requires page reload)'
+          ),
         ],
       },
     ],
@@ -603,8 +608,8 @@ export const PANES: PaneDef[] = [
             'translationTarget',
             [
               ['auto', 'Auto (Browser)'],
-              ['ko', '한국어'],
               ['en', 'English'],
+              ['ko', '한국어'],
               ['ja', '日本語'],
               ['es', 'Español'],
               ['zh-CN', '中文'],

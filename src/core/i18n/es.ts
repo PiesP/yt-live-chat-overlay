@@ -21,6 +21,7 @@ export const ES: Record<string, string> = {
   'Burst Detection': 'Detección de ráfagas',
   Cache: 'Caché',
   'Author Colors & Visibility': 'Colores y visibilidad',
+  'Author colors and visibility': 'Colores y visibilidad',
   Interface: 'Interfaz',
   'Chat Translation': 'Traducción de chat',
   'Translation backend service for processing messages':
@@ -168,6 +169,7 @@ export const ES: Record<string, string> = {
   'Recent Window (min)': 'Ventana (min)',
   'Log Level': 'Nivel de registro',
   'Debug Overlay': 'Superposición depuración',
+  'Enable WebGL2': 'Habilitar WebGL2',
 
   // ── New select options ──
   'Warnings only': 'Solo avisos',
@@ -334,6 +336,12 @@ export const ES: Record<string, string> = {
   Verified: 'Verificado',
   SuperChat: 'SuperChat',
   'Loading chat history...': 'Cargando historial de chat...',
-  'Short messages shown regardless of length':
-    'Mostrar mensajes cortos independientemente de la longitud',
-};
+  'Short messages shown regardless of length': 'Mostrar mensajes cortos sin importar la longitud',
+
+    // ── Toast / sync messages ──
+    'Settings updated from another tab': 'Configuración actualizada desde otra pestaña',
+  'Settings exported successfully': 'Configuración exportada correctamente',
+
+    // ── Translation unsupported ──
+    'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.': 'La traducción requiere un navegador con IA integrada. Usa Chrome 138+ o Edge 143+ Canary.',
+    };
