@@ -399,8 +399,8 @@ export const SETTINGS_UI_STYLES = `
         cursor: pointer;
       }
       .yt-chat-overlay-settings-field input[type="checkbox"] {
-        width: 20px;
-        height: 20px;
+        width: 24px;
+        height: 24px;
         cursor: pointer;
         accent-color: ${uiColors.primary};
       }
