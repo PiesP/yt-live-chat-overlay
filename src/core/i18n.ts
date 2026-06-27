@@ -39,7 +39,7 @@ export function resolveActiveLanguage(setting: LanguageSetting): void {
  * The English source strings serve as both fallback and lookup key.
  */
 export function t(text: string): string {
-  const map = TRANSLATIONS[activeLanguage];
+  const map = TRANSLATION_MAPS[activeLanguage];
   if (!map) return text;
   return map[text] ?? text;
 }
@@ -129,7 +129,7 @@ import { JA } from '@core/i18n/ja';
 import { KO } from '@core/i18n/ko';
 import { ZH_CN } from '@core/i18n/zh-CN';
 
-const TRANSLATIONS: Record<SupportedLanguage, TranslationMap> = {
+export const TRANSLATION_MAPS: Record<SupportedLanguage, TranslationMap> = {
   en: {}, // English: no translation needed (strings are the keys)
   ko: KO,
   ja: JA,

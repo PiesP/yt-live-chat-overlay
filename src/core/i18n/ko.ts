@@ -306,6 +306,8 @@ export const KO: Record<string, string> = {
   'Chat overlay settings': '채팅 오버레이 설정',
   'Reset overlay settings': '오버레이 설정 초기화',
   'WebGL2 Renderer': 'WebGL2 렌더러',
+  'Use WebGL2 GPU-accelerated rendering for higher performance (requires page reload)':
+    '더 높은 성능을 위해 WebGL2 GPU 가속 렌더링 사용 (페이지 새로고침 필요)',
   'Reload overlay': '오버레이 새로고침',
 
   // ── Author grid ──

@@ -322,6 +322,8 @@ export const ES: Record<string, string> = {
   'Chat overlay settings': 'Configuración de superposición de chat',
   'Reset overlay settings': 'Restablecer superposición',
   'WebGL2 Renderer': 'Renderizador WebGL2',
+  'Use WebGL2 GPU-accelerated rendering for higher performance (requires page reload)':
+    'Usar renderizado WebGL2 acelerado por GPU para mayor rendimiento (requiere recargar la página)',
   'Reload overlay': 'Recargar superposición',
 
   // ── Author grid ──

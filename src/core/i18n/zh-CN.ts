@@ -292,6 +292,8 @@ export const ZH_CN: Record<string, string> = {
   'Chat overlay settings': '弹幕显示设置',
   'Reset overlay settings': '重置覆盖层设置',
   'WebGL2 Renderer': 'WebGL2渲染器',
+  'Use WebGL2 GPU-accelerated rendering for higher performance (requires page reload)':
+    '使用WebGL2 GPU加速渲染以获得更高性能（需要重新加载页面）',
   'Reload overlay': '重新加载覆盖层',
 
   // ── Author grid ──

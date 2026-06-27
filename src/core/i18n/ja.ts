@@ -310,6 +310,8 @@ export const JA: Record<string, string> = {
   'Chat overlay settings': 'チャットオーバーレイ設定',
   'Reset overlay settings': 'オーバーレイ設定をリセット',
   'WebGL2 Renderer': 'WebGL2レンダラー',
+  'Use WebGL2 GPU-accelerated rendering for higher performance (requires page reload)':
+    '高性能なWebGL2 GPUアクセラレーションレンダリングを使用（ページの再読み込みが必要）',
   'Reload overlay': 'オーバレイを再読み込み',
 
   // ── Author grid ──

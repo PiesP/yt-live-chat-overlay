@@ -307,6 +307,8 @@ export const AR: Record<string, string> = {
   'Chat overlay settings': 'إعدادات تراكب الدردشة',
   'Reset overlay settings': 'إعادة تعيين إعدادات التراكب',
   'WebGL2 Renderer': 'عارض WebGL2',
+  'Use WebGL2 GPU-accelerated rendering for higher performance (requires page reload)':
+    'استخدام عرض WebGL2 المسرّع بواسطة GPU لأداء أعلى (يتطلب إعادة تحميل الصفحة)',
   'Reload overlay': 'إعادة تحميل التراكب',
 
   // ── Author grid ──
