@@ -896,6 +896,23 @@ export class RuntimeManager {
       // messages accumulated during the hidden period are processed.
       this.renderer?.trimBackgroundQueue();
       this.chatSource?.setPaused(false);
+
+      // If the chat source accumulated messages during the hidden period
+      // (ReplayChatSource buffers them), drain through the backlog controller
+      // for gradual emission instead of letting them burst out directly.
+      if (
+        this.renderer &&
+        this.chatSource instanceof ReplayChatSource &&
+        this.chatSource.getPendingDrainCount() > 0
+      ) {
+        const messages = this.chatSource.drainPendingMessages();
+        if (messages.length > 0) {
+          this.ensureBacklogController(this.renderer);
+          this.backlogController?.startBacklogInjection(messages);
+        }
+        this.chatSource.resetPendingDrainCount();
+      }
+
       this.renderer?.resume();
 
       // After a hidden period, verify the chat source is still alive.

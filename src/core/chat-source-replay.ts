@@ -9,6 +9,7 @@
  * API fetching runs in a decoupled background interval.
  */
 
+import type { ChatMessage } from '@app-types';
 import { extractChatEvents } from '@core/chat-message-parser';
 import type { ChatHealthSnapshot, PlaybackSnapshot } from '@core/chat-source-base';
 import { ChatSource } from '@core/chat-source-base';
@@ -64,6 +65,15 @@ export class ReplayChatSource extends ChatSource {
   private prefetchPagesFetched = 0;
   private prefetchMode: ReplayMode | null = null;
   private prefetchBackoffUntil = 0;
+  getPendingDrainCount(): number {
+    return this.replayBuffer.pendingCount;
+  }
+  drainPendingMessages(): ChatMessage[] {
+    return this.replayBuffer.drainAll();
+  }
+  resetPendingDrainCount(): void {
+    /* no-op */
+  }
 
   protected seedCurrentSession(signal?: AbortSignal): Promise<boolean> {
     return this.initializeReplaySession(signal);
@@ -90,23 +100,19 @@ export class ReplayChatSource extends ChatSource {
   }
 
   /**
-   * Override setPaused to reset fetch throttles on unpause.
+   * Override setPaused to flag backlog drain on unpause.
    *
-   * When the tab is hidden for more than a few seconds, the background
-   * fetch interval skips every tick (`chatPaused` check). If the video
-   * kept playing during hidden, the buffer will be empty at the new
-   * playback position on return. Resetting the throttles here causes
-   * the very next background fetch tick to fire without delay — the
-   * first tick after unpause is at most BACKGROUND_FETCH_INTERVAL_MS
-   * (1s) away, vs waiting for the normal min-delta throttle (1s) to
-   * elapse from the last (stale) fetch offset.
+   * When the tab is hidden, the cooperative loop skips flush work but
+   * continues fetching into the ReplayBuffer. On unpause, accumulated
+   * messages must be drained through the backlog controller for gradual
+   * emission — see the cooperative loop's backlog drain logic.
+   *
+   * Note: we intentionally do NOT reset fetch throttles here. The last
+   * fetch offset is preserved so the cooperative loop continues from
+   * where it left off without re-fetching already-fetched data ranges.
    */
   setPaused(paused: boolean): void {
     super.setPaused(paused);
-    if (!paused) {
-      this.lastReplayRequestedOffsetMs = -REPLAY_FETCH_MIN_DELTA_MS;
-      this.replayNextAllowedFetchAt = 0;
-    }
   }
 
   protected resetSessionState(): void {

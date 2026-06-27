@@ -30,6 +30,11 @@ export class ReplayBuffer {
     return this.buffer.length - this.bufferOffset <= 0;
   }
 
+  /** Number of unconsumed messages currently held in the buffer. */
+  get pendingCount(): number {
+    return this.buffer.length - this.bufferOffset;
+  }
+
   /**
    * Insert a message in sorted order by offsetMs.
    *
@@ -124,6 +129,28 @@ export class ReplayBuffer {
     this.buffer = [];
     this.bufferOffset = 0;
     this.seenIds.clear();
+  }
+
+  /**
+   * Drain all buffered messages regardless of their offsetMs.
+   *
+   * Returns every unconsumed message currently in the buffer (sorted by
+   * offsetMs) and clears the buffer. Used when returning from a hidden
+   * tab state — accumulated replay messages need to be routed through
+   * the backlog controller for gradual emission instead of bursting.
+   */
+  drainAll(): ChatMessage[] {
+    const messages: ChatMessage[] = [];
+    for (let i = this.bufferOffset; i < this.buffer.length; i++) {
+      const item = this.buffer[i];
+      if (item) {
+        messages.push(item.message);
+      }
+    }
+    this.buffer = [];
+    this.bufferOffset = 0;
+    this.seenIds.clear();
+    return messages;
   }
 
   /**
