@@ -2,6 +2,7 @@
 // Copyright (c) 2026 PiesP
 
 import { createLogger } from '@core/logging';
+import { isYouTubeLive, isYouTubeWatch } from '@core/youtube-url-pattern';
 
 const log = createLogger('PageWatcher');
 
@@ -125,8 +126,7 @@ export class PageWatcher {
    * Check if current page is a valid target (live/watch page)
    */
   isValidPage(): boolean {
-    if (!location.hostname.endsWith('youtube.com')) return false;
-    return location.pathname === '/watch' || location.pathname.startsWith('/live/');
+    return isYouTubeWatch(location.href) || isYouTubeLive(location.href);
   }
 
   /**

@@ -10,6 +10,7 @@
  */
 
 import type { TranslationLanguage } from '@app-types';
+import { isYouTubeWatch } from '@core/youtube-url-pattern';
 
 const MAX_ENTRIES = 20;
 
@@ -30,7 +31,7 @@ export class ChannelLanguageMemory {
         return null;
       }
       // Live stream or regular video: /watch?v=VIDEO_ID
-      if (u.pathname === '/watch') {
+      if (isYouTubeWatch(url)) {
         return u.searchParams.get('v');
       }
       // Channel page: /@handle or /channel/UC...

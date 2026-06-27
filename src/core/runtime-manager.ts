@@ -28,6 +28,7 @@ import { RendererWebGL2Worker } from '@core/renderer-webgl2-worker';
 import { shouldResetRendererForSettingsChange } from '@core/settings-schema';
 import { StandbyController } from '@core/standby-controller';
 import { VideoPauseController } from '@core/video-pause-controller';
+import { isYouTubeWatch } from '@core/youtube-url-pattern';
 import type { ChatBootstrapResult } from '@core/youtubei-chat';
 import { bootstrapChatSession } from '@core/youtubei-chat';
 
@@ -308,7 +309,7 @@ export class RuntimeManager {
     this.isPageChangeReconcile = false;
     if (
       isPageChange &&
-      location.pathname === '/watch' &&
+      isYouTubeWatch(location.href) &&
       !document.querySelector(CHAT_PANEL_SELECTOR)
     ) {
       const playbackStatus = (window.ytInitialData as Record<string, unknown> | undefined)

@@ -3,6 +3,7 @@
 
 import { isAbortError, sleep } from '@core/dom';
 import { createLogger } from '@core/logging';
+import { isYouTubeLive, isYouTubeWatch } from '@core/youtube-url-pattern';
 import {
   extractInitialChatContinuation,
   type InnertubeContinuationData,
@@ -74,12 +75,12 @@ export const getVideoIdFromUrl = (href = location.href): string | null => {
   try {
     const url = new URL(href, location.origin);
 
-    if (url.pathname === '/watch') {
+    if (isYouTubeWatch(href)) {
       const videoId = url.searchParams.get('v');
       return videoId && videoId.trim().length > 0 ? videoId : null;
     }
 
-    if (url.pathname.startsWith('/live/')) {
+    if (isYouTubeLive(href)) {
       const [, videoId] = url.pathname.split('/').filter((s): s is string => s !== '');
       return videoId && videoId.trim().length > 0 ? videoId : null;
     }
