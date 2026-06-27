@@ -390,13 +390,26 @@ export const SETTINGS_UI_STYLES = `
         color: ${uiColors.text};
         font-size: ${typography.fontSize.sm};
       }
-      .yt-chat-overlay-settings-field input[type="color"] {
-        width: ${uiSizing.colorSwatch}px;
-        min-height: 44px;
+      .yt-chat-overlay-author-grid-color {
+        width: 32px;
+        height: 28px;
+        min-width: 32px;
+        min-height: 28px;
+        max-width: 32px;
+        max-height: 28px;
         border: none;
         background: transparent;
         padding: 0;
         cursor: pointer;
+        appearance: none;
+        -webkit-appearance: none;
+      }
+      .yt-chat-overlay-author-grid-color::-webkit-color-swatch-wrapper {
+        padding: 0;
+      }
+      .yt-chat-overlay-author-grid-color::-webkit-color-swatch {
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        border-radius: 4px;
       }
       .yt-chat-overlay-settings-field input[type="checkbox"] {
         width: 24px;
@@ -442,11 +455,11 @@ export const SETTINGS_UI_STYLES = `
         cursor: pointer;
         accent-color: ${uiColors.primary};
       }
-      /* Authors grid */
+      /* Author grid */
       .yt-chat-overlay-author-grid {
         display: grid;
-        grid-template-columns: 1fr auto auto;
-        gap: ${spacing.sm}px ${spacing.md}px;
+        grid-template-columns: 1fr 36px 28px;
+        gap: 8px 12px;
         align-items: center;
       }
       .yt-chat-overlay-author-grid-header {
@@ -460,8 +473,11 @@ export const SETTINGS_UI_STYLES = `
       .yt-chat-overlay-author-grid-color {
         justify-self: center;
       }
-      .yt-chat-overlay-author-grid-checkbox {
-        justify-self: center;
+      .yt-chat-overlay-author-grid-checkbox-cell > input[type="checkbox"] {
+        width: 20px;
+        height: 20px;
+        cursor: pointer;
+        accent-color: ${uiColors.primary};
       }
       /* Actions bar */
       .yt-chat-overlay-settings-actions {
@@ -709,9 +725,20 @@ export const SETTINGS_UI_STYLES = `
         margin-block-end: ${spacing.sm}px;
         width: 100%;
       }
-      .yt-chat-overlay-author-grid-color-cell,
+      .yt-chat-overlay-author-grid-color-cell {
+        justify-self: center;
+        width: 32px;
+        height: 28px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
       .yt-chat-overlay-author-grid-checkbox-cell {
         justify-self: center;
+        width: 28px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
       }
 
       /* ── prefers-reduced-motion ── */
