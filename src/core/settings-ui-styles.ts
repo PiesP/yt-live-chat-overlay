@@ -267,8 +267,8 @@ export const SETTINGS_UI_STYLES = `
       }
       .yt-chat-overlay-settings-close {
         border: none;
-        background: transparent;
-        color: var(--yt-overlay-text-muted);
+        background: var(--yt-overlay-danger);
+        color: #ffffff;
         font-size: ${typography.fontSize.lg};
         cursor: pointer;
         padding: ${spacing.sm}px;
@@ -280,7 +280,8 @@ export const SETTINGS_UI_STYLES = `
         justify-content: center;
         border-radius: ${borderRadius.sm};
         &:hover {
-          color: var(--yt-overlay-text);
+          background: var(--yt-overlay-dangerHover);
+          color: #ffffff;
         }
         &:focus-visible {
           outline: 2px solid var(--yt-overlay-primary);
@@ -295,12 +296,13 @@ export const SETTINGS_UI_STYLES = `
       }
       .yt-chat-overlay-settings-tab {
         flex: 1;
-        padding: 10px 6px;
+        padding: 12px 8px;
         border: none;
         border-bottom: 2px solid transparent;
         background: transparent;
         color: var(--yt-overlay-textMuted);
-        font-size: ${typography.fontSize.xs};
+        font-size: ${typography.fontSize.sm};
+        line-height: normal;
         font-weight: ${typography.fontWeight.semibold};
         text-transform: uppercase;
         letter-spacing: 0.05em;
@@ -330,7 +332,7 @@ export const SETTINGS_UI_STYLES = `
         overflow-y: auto;
         flex: 1;
         min-height: 0;
-        padding-inline-end: 2px;
+        padding-inline-end: 8px;
         scrollbar-width: thin;
         scrollbar-color: ${scrollbar.thumb} ${scrollbar.track};
       }
@@ -364,8 +366,13 @@ export const SETTINGS_UI_STYLES = `
         padding-block-end: ${spacing.xs}px;
         border-bottom: 1px solid var(--yt-overlay-border);
         margin: 0;
+        font-weight: ${typography.fontWeight.semibold};
       }
-      /* Row fields */
+      .yt-chat-overlay-settings-field > span[title] {
+        cursor: help;
+        border-bottom: 1px dotted var(--yt-overlay-border);
+      }
+      /* Checkbox & radio: ensure 44px minimum touch target (WCAG 2.5.8) */
       .yt-chat-overlay-settings-field {
         display: flex;
         align-items: center;
@@ -373,6 +380,8 @@ export const SETTINGS_UI_STYLES = `
         gap: ${spacing.md}px;
         font-size: ${typography.fontSize.sm};
         min-width: 0;
+        min-height: 44px;
+        padding: 4px 0;
       }
       .yt-chat-overlay-settings-field > span {
         overflow: hidden;
@@ -381,7 +390,10 @@ export const SETTINGS_UI_STYLES = `
         min-width: 0;
       }
       .yt-chat-overlay-settings-field input[type="number"] {
-        width: ${uiSizing.inputWidth}px;
+        width: auto;
+        min-width: 60px;
+        max-width: 90px;
+        flex: 0 1 70px;
         padding: ${spacing.xs}px ${spacing.sm}px;
         border-radius: ${borderRadius.sm};
         border: 1px solid var(--yt-overlay-border);
@@ -405,12 +417,12 @@ export const SETTINGS_UI_STYLES = `
         font-size: ${typography.fontSize.sm};
       }
       .yt-chat-overlay-author-grid-color {
-        width: 32px;
-        height: 28px;
-        min-width: 32px;
-        min-height: 28px;
-        max-width: 32px;
-        max-height: 28px;
+        width: 36px;
+        height: 36px;
+        min-width: 36px;
+        min-height: 36px;
+        max-width: 36px;
+        max-height: 36px;
         border: none;
         background: transparent;
         padding: 0;
@@ -423,7 +435,7 @@ export const SETTINGS_UI_STYLES = `
       }
       .yt-chat-overlay-author-grid-color::-webkit-color-swatch {
         border: 1px solid rgba(255, 255, 255, 0.3);
-        border-radius: 4px;
+        border-radius: 6px;
       }
       .yt-chat-overlay-settings-field input[type="checkbox"] {
         width: 24px;
@@ -472,7 +484,7 @@ export const SETTINGS_UI_STYLES = `
       /* Author grid */
       .yt-chat-overlay-author-grid {
         display: grid;
-        grid-template-columns: 1fr 36px 28px;
+        grid-template-columns: 1fr 40px 36px;
         gap: 8px 12px;
         align-items: center;
       }
@@ -486,15 +498,16 @@ export const SETTINGS_UI_STYLES = `
       }
       .yt-chat-overlay-author-grid-color-cell {
         justify-self: center !important;
-        width: 32px !important;
-        height: 28px !important;
+        width: 40px !important;
+        height: 36px !important;
         display: flex !important;
         align-items: center !important;
         justify-content: center !important;
       }
       .yt-chat-overlay-author-grid-checkbox-cell {
         justify-self: center !important;
-        width: 28px !important;
+        width: 36px !important;
+        height: 36px !important;
         display: flex !important;
         align-items: center !important;
         justify-content: center !important;
@@ -526,13 +539,13 @@ export const SETTINGS_UI_STYLES = `
         transition: ${animDuration.transitions.action};
       }
       .yt-chat-overlay-settings-actions button[data-action="reset"] {
-        background: transparent;
-        color: var(--yt-overlay-text-muted);
-        border: 1px solid var(--yt-overlay-border);
+        background: var(--yt-overlay-danger);
+        color: #fff;
+        border: 1px solid var(--yt-overlay-danger);
       }
       .yt-chat-overlay-settings-actions button[data-action="reset"]:hover {
-        color: var(--yt-overlay-danger);
-        border-color: var(--yt-overlay-danger);
+        background: var(--yt-overlay-danger-hover);
+        border-color: var(--yt-overlay-danger-hover);
       }
       .yt-chat-overlay-settings-actions button[data-action="export"] {
         background: transparent;
@@ -655,7 +668,7 @@ export const SETTINGS_UI_STYLES = `
       .yt-chat-overlay-settings-range {
         display: flex;
         align-items: center;
-        gap: ${spacing.sm}px;
+        gap: 12px;
         padding: 6px 0;
       }
       .yt-chat-overlay-settings-range label {
@@ -670,6 +683,7 @@ export const SETTINGS_UI_STYLES = `
       .yt-chat-overlay-settings-range-slider {
         flex: 1;
         min-width: 80px;
+        max-width: 280px;
         height: 4px;
         accent-color: var(--yt-overlay-primary);
         margin: 0;
@@ -679,7 +693,7 @@ export const SETTINGS_UI_STYLES = `
         outline-offset: 2px;
       }
       .yt-chat-overlay-settings-range-number {
-        width: ${uiSizing.inputWidth}px;
+        width: 72px;
         flex-shrink: 0;
         text-align: right;
         padding: ${spacing.xs}px ${spacing.sm}px;
@@ -961,6 +975,48 @@ export const SETTINGS_UI_STYLES = `
         .yt-chat-overlay-settings-toast {
           border: 1px solid CanvasText;
           forced-color-adjust: none;
+        }
+      }
+
+      /* ── Mobile responsive (max-width: 480px) ── */
+      @media (max-width: 480px) {
+        .yt-chat-overlay-settings-modal {
+          width: 100vw;
+          max-width: 100vw;
+          max-height: 100vh;
+          min-height: auto;
+          border-radius: 0;
+          padding: 12px;
+          margin: auto 0 0;
+        }
+        .yt-chat-overlay-settings-tabs {
+          flex-wrap: wrap;
+        }
+        .yt-chat-overlay-settings-tab {
+          flex: 1 1 50%;
+          padding: 8px 4px;
+          font-size: 0.6rem;
+        }
+        .yt-chat-overlay-settings-range {
+          flex-direction: column;
+          align-items: stretch;
+          gap: 4px;
+        }
+        .yt-chat-overlay-settings-range-slider {
+          max-width: 100%;
+        }
+        .yt-chat-overlay-settings-range-number {
+          width: 100%;
+          text-align: center;
+        }
+        .yt-chat-overlay-author-grid {
+          grid-template-columns: 1fr 36px 32px;
+          gap: 8px 10px;
+        }
+        .yt-chat-overlay-settings-field input[type="number"],
+        .yt-chat-overlay-settings-field input[type="text"] {
+          width: 60px;
+          min-width: 50px;
         }
       }
 `;

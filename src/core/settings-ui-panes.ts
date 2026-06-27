@@ -203,7 +203,7 @@ export const PANES: PaneDef[] = [
     label: 'Appearance',
     sections: [
       {
-        title: '',
+        title: 'Cards',
         fields: [
           range(
             'SuperChat Opacity (%)',

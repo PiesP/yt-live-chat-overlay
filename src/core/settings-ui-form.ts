@@ -426,7 +426,14 @@ export class SettingsUiForm {
     const inputs = element.querySelectorAll<HTMLElement>('input, select');
     for (const input of inputs) {
       if (input instanceof HTMLInputElement && input.type === 'number') {
-        input.addEventListener('input', handler);
+        if (input.classList.contains('yt-chat-overlay-settings-range-slider')) {
+          // Range sliders only fire 'change' (on release) to avoid render-loop jank
+          // during drag. The number input companion updates the slider visually
+          // via the existing bidirectional sync listeners.
+          input.addEventListener('change', handler);
+        } else {
+          input.addEventListener('input', handler);
+        }
       } else {
         input.addEventListener('change', handler);
       }
@@ -494,6 +501,26 @@ export class SettingsUiForm {
           def.key as RootScalarSettingKey | Exclude<OutlineSettingKey, 'enabled'>
         );
         if (def.title) input.title = t(def.title);
+
+        // Real-time validation feedback on input
+        input.addEventListener('input', () => {
+          if (this.isUpdating) return;
+          const rawNum = Number(input.value);
+          if (Number.isFinite(rawNum)) {
+            const { min, max } = getNumericInputAttributes(def.key as RootScalarSettingKey);
+            if (rawNum < min) {
+              input.setAttribute('aria-invalid', 'true');
+              this.showFieldError(input, `${t('Minimum')} ${min}`);
+            } else if (rawNum > max) {
+              input.setAttribute('aria-invalid', 'true');
+              this.showFieldError(input, `${t('Maximum')} ${max}`);
+            } else {
+              input.removeAttribute('aria-invalid');
+              this.clearFieldError(input);
+            }
+          }
+        });
+
         return domField(t(def.label), input);
       }
       case 'range': {
@@ -701,13 +728,23 @@ export class SettingsUiForm {
     superChatLabelCell.setAttribute('role', 'gridcell');
     superChatLabelCell.className = 'yt-chat-overlay-author-grid-label';
     superChatLabelCell.textContent = t('SuperChat');
-    const emptyCell = document.createElement('span');
-    emptyCell.setAttribute('role', 'gridcell');
+    const superChatColorCell = document.createElement('span');
+    superChatColorCell.setAttribute('role', 'gridcell');
+    superChatColorCell.className = 'yt-chat-overlay-author-grid-color-cell';
+    // Placeholder swatch (disabled) — keeps column alignment consistent with other rows
+    const superChatPlaceholder = domInput({
+      type: 'color',
+      name: 'color-superChat',
+      className: 'yt-chat-overlay-author-grid-color',
+    });
+    superChatPlaceholder.disabled = true;
+    superChatPlaceholder.style.visibility = 'hidden';
+    superChatColorCell.appendChild(superChatPlaceholder);
     const superChatCheckboxCell = document.createElement('span');
     superChatCheckboxCell.setAttribute('role', 'gridcell');
     superChatCheckboxCell.className = 'yt-chat-overlay-author-grid-checkbox-cell';
     superChatCheckboxCell.appendChild(superChatCheckbox);
-    superChatRow.append(superChatLabelCell, emptyCell, superChatCheckboxCell);
+    superChatRow.append(superChatLabelCell, superChatColorCell, superChatCheckboxCell);
     grid.appendChild(superChatRow);
 
     fieldset.appendChild(grid);

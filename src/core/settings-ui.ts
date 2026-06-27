@@ -360,6 +360,7 @@ export class SettingsUi {
       `.yt-chat-overlay-settings-pane[data-pane="${tabId}"]`
     );
     if (activePane) {
+      activePane.scrollTop = 0;
       activePane.focus();
     }
   }
