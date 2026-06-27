@@ -285,3 +285,176 @@ export function shiftLaneTimersShared(state: LaneAllocationState, ms: number): v
     state.speedTierLanes.set(key, { tier: entry.tier, until: entry.until + ms });
   }
 }
+
+/**
+ * Find a lane placement for a message using the three-phase speed-tier strategy.
+ * Shared between main-thread LaneAllocator and Web Worker renderer.
+ *
+ * @param state     Mutable lane allocation state
+ * @param now       Current time (performance.now())
+ * @param msgHeight Message height in px
+ * @param laneHeight Height of a single lane in px
+ * @param maxWaitMs Maximum acceptable wait time (ms)
+ * @param speedTier Speed tier of the incoming message
+ * @returns lane index and waitMs, or null if no placement found
+ */
+export function findPlacementShared(
+  state: LaneAllocationState,
+  now: number,
+  msgHeight: number,
+  laneHeight: number,
+  maxWaitMs: number,
+  speedTier: number
+): { laneIndex: number; waitMs: number } | null {
+  if (state.heap.length === 0) return null;
+  const slotCount = Math.max(1, Math.ceil(msgHeight / laneHeight));
+  const numLanes = state.numLanes;
+  if (numLanes <= 0) return null;
+
+  if (slotCount <= 1) {
+    return allocateSingleLaneShared(state, now, 0, numLanes, maxWaitMs, speedTier);
+  }
+
+  // Multi-slot: scan for contiguous block
+  const maxStartLane = numLanes - slotCount;
+  if (maxStartLane < 0) return null;
+
+  const isTierCompatible = (slotIdx: number): boolean => {
+    const active = state.speedTierLanes.get(slotIdx);
+    if (!active || active.until <= now) return true;
+    return areSpeedTiersCompatible(speedTier, active.tier);
+  };
+
+  // Phase 1: zero-wait block
+  for (let startIdx = 0; startIdx <= maxStartLane; startIdx++) {
+    let allZeroWait = true;
+    for (let s = 0; s < slotCount; s++) {
+      const slotIdx = startIdx + s;
+      if (state.collidedLanes.has(slotIdx)) {
+        allZeroWait = false;
+        break;
+      }
+      if (!isTierCompatible(slotIdx)) {
+        allZeroWait = false;
+        break;
+      }
+      const avail = heapGetSlotAvailableAt(state.heap, state.indexMap, slotIdx, numLanes);
+      if (avail === undefined) {
+        allZeroWait = false;
+        break;
+      }
+      const wait = Math.max(0, Math.ceil(avail - now));
+      if (wait > 0) allZeroWait = false;
+      if (wait > maxWaitMs) {
+        allZeroWait = false;
+        break;
+      }
+    }
+    if (allZeroWait) return { laneIndex: startIdx, waitMs: 0 };
+  }
+
+  // Phase 2: busy block within maxWaitMs
+  let bestBlock: { laneIndex: number; waitMs: number } | null = null;
+  for (let startIdx = 0; startIdx <= maxStartLane; startIdx++) {
+    let allCompatible = true;
+    let blockMaxWait = 0;
+    for (let s = 0; s < slotCount; s++) {
+      const slotIdx = startIdx + s;
+      if (state.collidedLanes.has(slotIdx)) {
+        allCompatible = false;
+        break;
+      }
+      if (!isTierCompatible(slotIdx)) {
+        allCompatible = false;
+        break;
+      }
+      const avail = heapGetSlotAvailableAt(state.heap, state.indexMap, slotIdx, numLanes);
+      if (avail === undefined) {
+        allCompatible = false;
+        break;
+      }
+      const wait = Math.max(0, Math.ceil(avail - now));
+      if (wait > maxWaitMs) {
+        allCompatible = false;
+        break;
+      }
+      blockMaxWait = Math.max(blockMaxWait, wait);
+    }
+    if (allCompatible && blockMaxWait <= maxWaitMs) {
+      if (!bestBlock || blockMaxWait < bestBlock.waitMs) {
+        bestBlock = { laneIndex: startIdx, waitMs: blockMaxWait };
+      }
+    }
+  }
+  if (bestBlock) return bestBlock;
+
+  // Phase 3: fallback to single-lane allocator
+  return allocateSingleLaneShared(state, now, 0, numLanes, maxWaitMs, speedTier);
+}
+
+/**
+ * Allocate a single lane with three-phase speed-tier scanning.
+ * Pure function operating on LaneAllocationState — no `this`.
+ */
+function allocateSingleLaneShared(
+  state: LaneAllocationState,
+  now: number,
+  laneStart: number,
+  laneEnd: number,
+  maxWaitMs: number,
+  speedTier: number
+): { laneIndex: number; waitMs: number } | null {
+  if (state.heap.length === 0) return null;
+
+  let firstBusy: { laneIndex: number; waitMs: number } | null = null;
+  let speedMatched: { laneIndex: number; waitMs: number } | null = null;
+  let zeroWaitCandidates: number[] | null = null;
+
+  for (let i = laneStart; i < laneEnd; i++) {
+    if (state.collidedLanes.has(i)) continue;
+
+    const active = state.speedTierLanes.get(i);
+    if (active && active.until > now) {
+      if (!areSpeedTiersCompatible(speedTier, active.tier)) continue;
+    }
+
+    const avail = heapGetSlotAvailableAt(state.heap, state.indexMap, i, state.numLanes);
+    if (avail === undefined) continue;
+    const wait = Math.max(0, Math.ceil(avail - now));
+    if (wait > 0) {
+      if (!firstBusy) firstBusy = { laneIndex: i, waitMs: wait };
+      if (!speedMatched || wait < speedMatched.waitMs) {
+        const hasSameTier = active !== undefined && active.until > now && active.tier === speedTier;
+        if (hasSameTier) speedMatched = { laneIndex: i, waitMs: wait };
+      }
+      continue;
+    }
+
+    if (Math.random() < EPSILON_GREEDY) {
+      if (!zeroWaitCandidates) {
+        zeroWaitCandidates = [];
+        for (let j = i + 1; j < laneEnd; j++) {
+          if (state.collidedLanes.has(j)) continue;
+          const activeJ = state.speedTierLanes.get(j);
+          if (activeJ && activeJ.until > now) {
+            if (!areSpeedTiersCompatible(speedTier, activeJ.tier)) continue;
+          }
+          const availJ = heapGetSlotAvailableAt(state.heap, state.indexMap, j, state.numLanes);
+          if (availJ === undefined) continue;
+          const waitJ = Math.max(0, Math.ceil(availJ - now));
+          if (waitJ === 0) zeroWaitCandidates.push(j);
+        }
+      }
+      if (zeroWaitCandidates.length > 0) continue;
+    }
+    return { laneIndex: i, waitMs: 0 };
+  }
+
+  if (speedMatched && speedMatched.waitMs <= maxWaitMs) return speedMatched;
+  if (firstBusy && firstBusy.waitMs <= maxWaitMs && speedTier !== SPEED_TIER_BACKLOG)
+    return firstBusy;
+  return null;
+}
+
+const EPSILON_GREEDY = 0.05;
+const SPEED_TIER_BACKLOG = 3;

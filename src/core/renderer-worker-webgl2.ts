@@ -41,23 +41,18 @@
 import { computeOutlineColor } from '@core/color-utils';
 import { rendererLayout } from '@core/design-tokens';
 import {
-  areSpeedTiersCompatible,
   buildLaneHeap,
   commitPlacementShared,
   computeLaneY,
   computeOccupancyMs as computeOccupancyMsShared,
+  findPlacementShared,
   type LaneAllocationState,
   resetBatchShared,
   shiftLaneTimersShared,
 } from '@core/lane-allocation-shared';
 import { createLogger } from '@core/logging';
 import { PriorityBucketQueue } from '@core/priority-bucket-queue';
-import {
-  EPSILON,
-  SPEED_TIER,
-  TRANSLATION_FONT_SCALE,
-  TRANSLATION_GAP_PX,
-} from '@core/renderer-constants';
+import { SPEED_TIER, TRANSLATION_FONT_SCALE, TRANSLATION_GAP_PX } from '@core/renderer-constants';
 import type { OpacityConfig } from '@core/renderer-shared';
 import {
   buildSDFInstances,
@@ -67,7 +62,6 @@ import {
   SDF_FRAGMENT_SHADER,
   SDF_VERTEX_SHADER,
   setupWebGL2Buffers,
-  updateMessagePositions,
   uploadSDFAtlas,
 } from '@core/renderer-webgl2-shared';
 import {
@@ -132,6 +126,7 @@ interface ActiveMessage {
   height: number;
   startX: number;
   startTime: number;
+  pausedDuration: number;
   duration: number;
   fadeStartTime: number;
   laneIndex: number;
@@ -219,12 +214,6 @@ class WebGL2RenderWorker {
     this.laneState.heap = buildLaneHeap(this.numLanes, now, this.laneIndexToHeapIndex);
   }
 
-  private getSlotAvailableAt(laneIndex: number): number | undefined {
-    const heapIdx = this.laneIndexToHeapIndex.get(laneIndex);
-    if (heapIdx === undefined || heapIdx >= this.laneState.heap.length) return undefined;
-    return this.laneState.heap[heapIdx]?.[1];
-  }
-
   private resetBatch(): void {
     resetBatchShared(this.laneState);
   }
@@ -235,8 +224,15 @@ class WebGL2RenderWorker {
   ): { laneIndex: number; waitMs: number; laneY: number } | null {
     if (this.laneState.heap.length === 0) return null;
     const now = performance.now();
-    const slotCount = Math.max(1, Math.ceil(msgHeight / this.laneHeight));
-    const result = this.allocateSingleLane(now, speedTier, slotCount);
+    const maxWaitMs = this.config?.scrollDurationMaxMs ?? 30000;
+    const result = findPlacementShared(
+      this.laneState,
+      now,
+      msgHeight,
+      this.laneHeight,
+      maxWaitMs,
+      speedTier
+    );
     if (!result) return null;
     const laneY = computeLaneY(
       result.laneIndex,
@@ -245,75 +241,6 @@ class WebGL2RenderWorker {
       this.laneHeight
     );
     return { ...result, laneY };
-  }
-
-  private allocateSingleLane(
-    now: number,
-    speedTier: number,
-    slotCount: number
-  ): { laneIndex: number; waitMs: number } | null {
-    if (this.laneState.heap.length === 0) return null;
-    const maxWaitMs = this.config?.scrollDurationMaxMs ?? 30000;
-    let firstBusy: { laneIndex: number; waitMs: number } | null = null;
-    let speedMatched: { laneIndex: number; waitMs: number } | null = null;
-    let zeroWaitCandidates: number[] | null = null;
-
-    for (let i = 0; i < this.numLanes - slotCount + 1; i++) {
-      let tierOk = true;
-      for (let s = 0; s < slotCount; s++) {
-        const active = this.speedTierLanesMap.get(i + s);
-        if (active && active.until > now && !areSpeedTiersCompatible(speedTier, active.tier)) {
-          tierOk = false;
-          break;
-        }
-      }
-      if (!tierOk) continue;
-      if (this.collidedLanesSet.has(i)) continue;
-
-      const avail = this.getSlotAvailableAt(i);
-      if (avail === undefined) continue;
-      const wait = Math.max(0, Math.ceil(avail - now));
-      if (wait > 0) {
-        if (!firstBusy) firstBusy = { laneIndex: i, waitMs: wait };
-        const active = this.speedTierLanesMap.get(i);
-        if ((!speedMatched || wait < speedMatched.waitMs) && active && active.tier === speedTier) {
-          speedMatched = { laneIndex: i, waitMs: wait };
-        }
-        continue;
-      }
-
-      if (Math.random() < EPSILON) {
-        if (!zeroWaitCandidates) {
-          zeroWaitCandidates = [];
-          for (let j = i + 1; j < this.numLanes - slotCount + 1; j++) {
-            const availJ = this.getSlotAvailableAt(j);
-            if (availJ !== undefined && Math.max(0, Math.ceil(availJ - now)) === 0) {
-              let jTierOk = true;
-              for (let s = 0; s < slotCount; s++) {
-                const activeJ = this.speedTierLanesMap.get(j + s);
-                if (
-                  activeJ &&
-                  activeJ.until > now &&
-                  !areSpeedTiersCompatible(speedTier, activeJ.tier)
-                ) {
-                  jTierOk = false;
-                  break;
-                }
-              }
-              if (jTierOk) zeroWaitCandidates.push(j);
-            }
-          }
-        }
-        if (zeroWaitCandidates.length > 0) continue;
-      }
-      return { laneIndex: i, waitMs: 0 };
-    }
-
-    if (speedMatched && speedMatched.waitMs <= maxWaitMs) return speedMatched;
-    // Phase 3: fastest-free (real-time only; backlog returns null)
-    if (firstBusy && firstBusy.waitMs <= maxWaitMs && speedTier !== SPEED_TIER.BACKLOG)
-      return firstBusy;
-    return null;
   }
 
   private commitPlacement(
@@ -362,11 +289,17 @@ class WebGL2RenderWorker {
     return [0, 0, 0];
   }
 
-  /** Estimate text width without DOM access (OffscreenCanvas not always needed). */
+  /** Estimate text width using SDF glyph advance widths from the atlas. */
   private estimateTextWidth(text: string, fontSize: number): number {
     if (!text) return 0;
-    // Fallback: average character width ≈ fontSize * 0.6
-    return Math.ceil(text.length * fontSize * 0.6);
+    const glyphScale = fontSize / GLYPH_RASTER_SIZE;
+    let totalWidth = 0;
+    for (let i = 0; i < text.length; i++) {
+      const cp = text.codePointAt(i) ?? 0x20;
+      const gi = this.atlas?.glyphs.get(cp);
+      totalWidth += (gi?.advanceWidth ?? fontSize * 0.7) * glyphScale;
+    }
+    return Math.ceil(totalWidth);
   }
 
   private getWorkerMessagePriority(msg: WorkerMessage): number {
@@ -489,6 +422,7 @@ class WebGL2RenderWorker {
         height: lh,
         startX,
         startTime: now2,
+        pausedDuration: 0,
         duration: cfg.scrollDurationMaxMs,
         fadeStartTime: now2,
         laneIndex: placement.laneIndex,
@@ -526,7 +460,7 @@ class WebGL2RenderWorker {
     glCtx.clear(glCtx.COLOR_BUFFER_BIT);
 
     this.drainQueue(now);
-    updateMessagePositions(
+    updateMessagePositionsWithPaused(
       this.activeMessages,
       this.config?.danmakuMode ?? 'scroll',
       this.cssWidth,
@@ -754,7 +688,7 @@ class WebGL2RenderWorker {
       if (pauseDuration > 0 && this.config) {
         const clamped = Math.min(pauseDuration, this.config.maxMessageAgeMs);
         for (const m of this.activeMessages) {
-          m.startTime += clamped;
+          m.pausedDuration += clamped;
         }
         // Shift lane timers by pause duration using shared helper
         shiftLaneTimersShared(this.laneState, clamped);
@@ -863,6 +797,51 @@ class WebGL2RenderWorker {
     this.config = null;
     this.opacityConfig = null;
   }
+}
+
+// ── Position update with pausedDuration support ──────────────────────────────
+
+/**
+ * Update message positions accounting for accumulated pausedDuration.
+ * Same logic as updateMessagePositions but subtracts pausedDuration from
+ * the effective elapsed time so messages resume from where they paused.
+ */
+function updateMessagePositionsWithPaused(
+  messages: ActiveMessage[],
+  mode: string,
+  cssWidth: number,
+  now: number
+): number {
+  let wi = 0;
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    if (!m) continue;
+    if (m.laneIndex >= 0) {
+      const effectiveNow = now - m.pausedDuration;
+      const progress = (effectiveNow - m.startTime) / m.duration;
+      if (progress >= 1) continue;
+      switch (mode) {
+        case 'scroll':
+          m.x = m.startX - progress * (cssWidth + m.width);
+          break;
+        case 'reverse':
+          m.x = m.startX + progress * (cssWidth + m.width);
+          break;
+        case 'top':
+        case 'bottom':
+          m.x = m.startX;
+          break;
+      }
+    }
+    if (wi !== i) {
+      messages[wi] = m;
+    }
+    wi++;
+  }
+  if (wi < messages.length) {
+    messages.length = wi;
+  }
+  return messages.length;
 }
 
 // ── Main ──

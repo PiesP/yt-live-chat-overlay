@@ -225,15 +225,16 @@ export function buildSDFInstances(
 
   if (!opacityConfig) return { instanceCount, texQuadCount };
 
-  for (const msg of messages) {
+  for (let msgIdx = 0; msgIdx < messages.length; msgIdx++) {
+    const msg = messages[msgIdx];
+    if (!msg) continue;
     if (instanceCount >= maxInstances) break;
 
     // Defensive: skip messages with missing message payload (structured clone fault)
     if (!msg.message) continue;
 
     // Use precomputed opacity if provided (avoids duplicate computation per frame)
-    const msgIndex = messages.indexOf(msg);
-    const precomputedOp = precomputedOpacities?.get(msgIndex);
+    const precomputedOp = precomputedOpacities?.get(msgIdx);
     const op =
       precomputedOp !== undefined
         ? precomputedOp

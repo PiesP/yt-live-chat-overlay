@@ -572,11 +572,13 @@ export class SettingsUi {
   private handleExport(): void {
     const settings = this.getSettings();
     const json = JSON.stringify({ ...settings, _version: SETTINGS_VERSION }, null, 2);
-    const encoded = encodeURIComponent(json);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = `data:application/json;charset=utf-8,${encoded}`;
+    a.href = url;
     a.download = 'yt-chat-overlay-settings.json';
     a.click();
+    URL.revokeObjectURL(url);
   }
 
   private handleImport(): void {

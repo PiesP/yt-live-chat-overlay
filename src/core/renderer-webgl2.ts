@@ -107,6 +107,7 @@ export class RendererWebGL2 extends RendererBase {
   private u_atlas!: WebGLUniformLocation | null;
 
   private connectionStatus: ConnectionStatus = 'connected';
+  private isContextLost = false;
 
   get laneCount(): number {
     return this.laneAllocator.getLaneCount();
@@ -183,6 +184,17 @@ export class RendererWebGL2 extends RendererBase {
     });
     if (!gl) throw new Error('WebGL2 not supported');
     this.gl = gl;
+
+    // Context loss handling — prevent default so the browser allows restoration,
+    // then reinitialize all GL resources when the context is restored.
+    canvas.addEventListener('webglcontextlost', (e: Event) => {
+      e.preventDefault();
+      this.isContextLost = true;
+    });
+    canvas.addEventListener('webglcontextrestored', () => {
+      this.isContextLost = false;
+      this.reinitializeGLResources();
+    });
 
     this.program = createProgram(gl, SDF_VERTEX_SHADER, SDF_FRAGMENT_SHADER);
 
@@ -335,10 +347,12 @@ export class RendererWebGL2 extends RendererBase {
     if (this.atlasGenerating) return;
     this.atlasGenerating = true;
     try {
-      this.atlas = await new SDFAtlasGenerator().generate(
+      const newAtlas = await new SDFAtlasGenerator().generate(
         this.settings.fontFamily,
         this.settings.fontWeight
       );
+      // Only assign after successful generation — keeps old atlas intact on failure
+      this.atlas = newAtlas;
       this.uploadAtlas();
       this.atlasReady = true;
       this.atlasGenerating = false;
@@ -346,6 +360,7 @@ export class RendererWebGL2 extends RendererBase {
     } catch (e: unknown) {
       log.warn('Atlas failed:', e);
       this.atlasGenerating = false;
+      // Keep old atlas instead of nullifying — prevents permanent context loss
       throw e;
     }
   }
@@ -360,6 +375,55 @@ export class RendererWebGL2 extends RendererBase {
     this.atlas.texture = tex;
     this.atlasTexture = tex;
     this.atlas.uploaded = true;
+  }
+
+  /**
+   * Reinitialize all GPU resources after a WebGL2 context restore.
+   * Recreates program, buffers, VAO, and re-generates the SDF atlas.
+   */
+  private reinitializeGLResources(): void {
+    const gl = this.gl;
+    this.program = createProgram(gl, SDF_VERTEX_SHADER, SDF_FRAGMENT_SHADER);
+    this.textureProgram = createProgram(gl, TEXTURE_VERTEX_SHADER, TEXTURE_FRAGMENT_SHADER);
+
+    gl.useProgram(this.textureProgram);
+    this.u_texViewport = gl.getUniformLocation(this.textureProgram, 'u_viewport');
+    this.u_texSampler = gl.getUniformLocation(this.textureProgram, 'u_texture');
+    gl.uniform1i(this.u_texSampler, 0);
+
+    // Recreate 1x1 white texture
+    if (this.solidWhiteTex) gl.deleteTexture(this.solidWhiteTex);
+    const whiteTex = gl.createTexture();
+    if (whiteTex) {
+      gl.bindTexture(gl.TEXTURE_2D, whiteTex);
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.RGBA,
+        1,
+        1,
+        0,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        new Uint8Array([255, 255, 255, 255])
+      );
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      this.solidWhiteTex = whiteTex;
+    }
+
+    gl.useProgram(this.program);
+    const buffers = setupWebGL2Buffers(gl, this.instanceData.byteLength);
+    this.vao = buffers.vao;
+    this.instanceBuffer = buffers.instanceBuffer;
+    this.cacheUniforms();
+
+    // Re-generate atlas (async — sets atlasReady when done)
+    this.atlasReady = false;
+    this.atlasTexture = null;
+    this.initAtlas().catch((e: unknown) => {
+      log.warn('Atlas regeneration failed after context restore:', e);
+    });
   }
 
   addMessage(message: ChatMessage): void {
@@ -499,6 +563,7 @@ export class RendererWebGL2 extends RendererBase {
   }
 
   private renderFrame(now: number): void {
+    if (this.isContextLost) return;
     try {
       const gl = this.gl;
       const dims = this.overlay.getDimensions();
@@ -751,8 +816,17 @@ export class RendererWebGL2 extends RendererBase {
     void this.connectionStatus; // consumed once status bar rendering is implemented
   }
 
-  protected onPause(): void {}
-  protected onResume(): void {}
+  protected onPause(): void {
+    if (this.animFrameId !== null) {
+      cancelAnimationFrame(this.animFrameId);
+      this.animFrameId = null;
+    }
+  }
+  protected onResume(): void {
+    if (this.atlasReady && !this.isPaused && !this.isVideoPaused) {
+      this.startRenderLoop();
+    }
+  }
   protected applyPausedDuration(ms: number): void {
     for (const m of this.messages) m.startTime += ms;
   }
@@ -779,5 +853,8 @@ export class RendererWebGL2 extends RendererBase {
     // Remove the overlay canvas from DOM
     if (this.overlay2d.parentNode) this.overlay2d.parentNode.removeChild(this.overlay2d);
     this.authorPhotoCache.clear();
+    // Remove the WebGL2 canvas from DOM
+    const glCanvas = this.gl.canvas as HTMLCanvasElement | undefined;
+    if (glCanvas?.parentNode) glCanvas.parentNode.removeChild(glCanvas);
   }
 }
