@@ -200,7 +200,7 @@ export const PANES: PaneDef[] = [
     label: 'Appearance',
     sections: [
       {
-        title: '',
+        title: 'Cards',
         fields: [
           range(
             'SuperChat Opacity (%)',
@@ -560,7 +560,8 @@ export const PANES: PaneDef[] = [
               ['ko', '한국어'],
               ['ja', '日本語'],
               ['es', 'Español'],
-              ['zh', '中文'],
+              ['zh-CN', '中文'],
+              ['ar', 'العربية'],
             ],
             'Sets the overlay user interface language (does not filter comments by language)'
           ),
@@ -589,7 +590,8 @@ export const PANES: PaneDef[] = [
               ['ko', '한국어'],
               ['ja', '日本語'],
               ['es', 'Español'],
-              ['zh', '中文'],
+              ['zh-CN', '中文'],
+              ['ar', 'العربية'],
             ],
             "Language of the incoming chat messages. Auto-detect uses Chrome's built-in language detection."
           ),
@@ -602,7 +604,8 @@ export const PANES: PaneDef[] = [
               ['en', 'English'],
               ['ja', '日本語'],
               ['es', 'Español'],
-              ['zh', '中文'],
+              ['zh-CN', '中文'],
+              ['ar', 'العربية'],
             ],
             'Language to translate chat messages into. Auto detects from browser settings.'
           ),
