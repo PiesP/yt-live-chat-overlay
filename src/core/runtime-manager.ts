@@ -434,6 +434,14 @@ export class RuntimeManager {
     this.domWatcherUnsubscribe?.();
     this.domWatcherUnsubscribe = null;
 
+    // Destroy the backlog controller — it references the current renderer
+    // and chat source. A new one will be created in startSession() with
+    // the new renderer. Keeping it alive across the soft restart would
+    // cause onBacklogMessage to reference the stale (about-to-be-replaced)
+    // renderer, leading to messages being added to a destroyed session.
+    this.backlogController?.destroy();
+    this.backlogController = null;
+
     // Abort the controller BEFORE stopping the chat source so in-flight
     // async operations (e.g. seek handlers) get the abort signal.
     this.abortController?.abort();
@@ -444,11 +452,9 @@ export class RuntimeManager {
     this.sessionDedup.clear();
 
     // Clear targetUrl so reconcileOnce knows to call startSession()
-    // to rebuild the chat source chain. Keep overlay/renderer/backlogController.
+    // to rebuild the chat source chain. Keep overlay/renderer alive.
     this.targetUrl = null;
     this.abortController = new AbortController();
-
-    // Don't null overlay/renderer/backlogController — they survive.
   }
 
   private matchesSessionUrl(url: string): boolean {

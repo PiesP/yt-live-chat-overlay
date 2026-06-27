@@ -9,9 +9,11 @@
 
 import type { ChatMessage, OverlaySettings } from '@app-types';
 import { drawAuthorPhoto, drawRoundRect } from '@core/canvas-rendering-shared';
+import { ChannelLanguageMemory } from '@core/channel-language-memory';
 import { computeOutlineColor } from '@core/color-utils';
 import { rendererLayout, statusBarLayout } from '@core/design-tokens';
 import type { LanePlacement } from '@core/lane-allocator';
+import { LanguageDetectorService } from '@core/language-detector-service';
 import { createLogger } from '@core/logging';
 import type { Overlay } from '@core/overlay';
 import { PriorityBucketQueue } from '@core/priority-bucket-queue';
@@ -109,6 +111,13 @@ export class RendererWebGL2 extends RendererBase {
   private connectionStatus: ConnectionStatus = 'connected';
   private isContextLost = false;
 
+  // ── Language source detection (shared parity with CanvasRenderer) ──
+  private languageDetector: LanguageDetectorService | null = null;
+  private channelMemory: ChannelLanguageMemory | null = null;
+  private sourceDetectionDone = false;
+  private sourceSampleBuffer: string[] = [];
+  private static readonly SOURCE_SAMPLE_COUNT = 8;
+
   get laneCount(): number {
     return this.laneAllocator.getLaneCount();
   }
@@ -119,6 +128,16 @@ export class RendererWebGL2 extends RendererBase {
     this._ageFadeRate = 1 / Math.max(1, settings.maxMessageAgeMs);
     this._invFadeDuration = 1 / Math.max(1, settings.fadeDurationMs);
     this.rebuildOpacityConfig();
+
+    // Initialize language detection pipeline for 'auto' source
+    if (settings.translationSource === 'auto') {
+      this.languageDetector = new LanguageDetectorService();
+      this.channelMemory = new ChannelLanguageMemory();
+      void this.languageDetector.initialize().catch((err: unknown) => {
+        log.debug('LanguageDetector init failed, auto-source unavailable:', err);
+        this.languageDetector = null;
+      });
+    }
 
     const container = overlay.getContainer();
     const canvas = document.createElement('canvas');
@@ -194,6 +213,18 @@ export class RendererWebGL2 extends RendererBase {
     canvas.addEventListener('webglcontextrestored', () => {
       this.isContextLost = false;
       this.reinitializeGLResources();
+      // Restart the render loop if it was stopped during context loss.
+      // Without this, if onPause() cancelled the rAF while the context
+      // was lost, the loop never restarts after restore — messages
+      // accumulate in the pendingQueue but never get rendered.
+      if (
+        this.animFrameId === null &&
+        !this.isPaused &&
+        !this.isVideoPaused &&
+        (!this.pendingQueue.isEmpty || this.messages.length > 0 || this.retryQueue.length > 0)
+      ) {
+        this.startRenderLoop();
+      }
     });
 
     this.program = createProgram(gl, SDF_VERTEX_SHADER, SDF_FRAGMENT_SHADER);
@@ -428,6 +459,20 @@ export class RendererWebGL2 extends RendererBase {
 
   addMessage(message: ChatMessage): void {
     if (!this.isMessageAllowed(message)) return;
+
+    // Auto-detect source language from message samples
+    if (
+      this.settings.translationSource === 'auto' &&
+      this.languageDetector &&
+      !this.sourceDetectionDone &&
+      message.text?.trim()
+    ) {
+      this.sourceSampleBuffer.push(message.text);
+      if (this.sourceSampleBuffer.length >= RendererWebGL2.SOURCE_SAMPLE_COUNT) {
+        void this.performSourceDetection();
+      }
+    }
+
     const priority = RendererBase.getMessagePriority(message);
     const result = enqueueWithOverflow(
       this.pendingQueue,
@@ -871,14 +916,17 @@ export class RendererWebGL2 extends RendererBase {
       this.animFrameId = null;
     }
   }
+
   protected onResume(): void {
     if (this.atlasReady && !this.isPaused && !this.isVideoPaused) {
       this.startRenderLoop();
     }
   }
+
   protected applyPausedDuration(ms: number): void {
     for (const m of this.messages) m.startTime += ms;
   }
+
   protected resetState(): void {
     this.messages.length = 0;
     for (const tex of this.emojiTextures.values()) this.gl.deleteTexture(tex);
@@ -886,18 +934,45 @@ export class RendererWebGL2 extends RendererBase {
     this.authorPhotoCache.clear();
   }
 
+  private async performSourceDetection(): Promise<void> {
+    if (!this.languageDetector) return;
+    try {
+      const detected = await this.languageDetector.detectFromSamples(this.sourceSampleBuffer);
+      if (detected) {
+        const channelKey = ChannelLanguageMemory.keyFromUrl(location.href);
+        if (channelKey && this.channelMemory) {
+          this.channelMemory.set(channelKey, detected);
+        }
+        // Note: WebGL2 renderer does not own a TranslationService —
+        // the translation is handled externally. We only detect and
+        // cache the source language for downstream consumers.
+      }
+    } catch (err: unknown) {
+      log.debug('Source detection failed:', err);
+    }
+    this.sourceDetectionDone = true;
+    this.sourceSampleBuffer = [];
+  }
+
   protected onDestroy(): void {
     if (this.animFrameId !== null) cancelAnimationFrame(this.animFrameId);
     this.messages.length = 0;
     this.pendingQueue.clear();
     this.retryQueue.length = 0;
-    if (this.atlasTexture) this.gl.deleteTexture(this.atlasTexture);
-    this.gl.deleteBuffer(this.instanceBuffer);
-    this.gl.deleteVertexArray(this.vao);
-    this.gl.deleteProgram(this.program);
-    if (this.textureProgram) this.gl.deleteProgram(this.textureProgram);
-    if (this.solidWhiteTex) this.gl.deleteTexture(this.solidWhiteTex);
-    for (const tex of this.emojiTextures.values()) this.gl.deleteTexture(tex);
+    this.languageDetector?.destroy();
+    this.languageDetector = null;
+    // Guard against context loss — calling GL delete methods on a lost
+    // context throws INVALID_OPERATION. Skip GPU cleanup; the context
+    // will be garbage-collected with its resources.
+    if (!this.isContextLost) {
+      if (this.atlasTexture) this.gl.deleteTexture(this.atlasTexture);
+      this.gl.deleteBuffer(this.instanceBuffer);
+      this.gl.deleteVertexArray(this.vao);
+      this.gl.deleteProgram(this.program);
+      if (this.textureProgram) this.gl.deleteProgram(this.textureProgram);
+      if (this.solidWhiteTex) this.gl.deleteTexture(this.solidWhiteTex);
+      for (const tex of this.emojiTextures.values()) this.gl.deleteTexture(tex);
+    }
     this.emojiTextures.clear();
     // Remove the overlay canvas from DOM
     if (this.overlay2d.parentNode) this.overlay2d.parentNode.removeChild(this.overlay2d);

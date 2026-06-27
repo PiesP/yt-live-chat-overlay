@@ -158,12 +158,14 @@ export class ImageFetchManager {
     img.crossOrigin = 'anonymous';
     img.src = url;
     img.onload = () => {
+      if (this.isDestroyed) return;
       this.inFlightImages.delete(img);
       this.imageLoading.delete(url);
       cache.set(url, img);
       this.preConvertForWorker(url, img);
     };
     img.onerror = () => {
+      if (this.isDestroyed) return;
       this.inFlightImages.delete(img);
       this.imageLoading.delete(url);
     };
@@ -220,6 +222,7 @@ export class ImageFetchManager {
       img.crossOrigin = 'anonymous';
       img.src = url;
       img.onload = () => {
+        if (this.isDestroyed) return;
         this.inFlightImages.delete(img);
         this.emojiFetching.delete(url);
         this.emojiFetchingStarted.delete(url);
@@ -231,6 +234,7 @@ export class ImageFetchManager {
         this.onImageReadyCallback?.(url, 'emoji');
       };
       img.onerror = () => {
+        if (this.isDestroyed) return;
         this.inFlightImages.delete(img);
         this.emojiFetching.delete(url);
         this.emojiFetchingStarted.delete(url);
