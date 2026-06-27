@@ -313,5 +313,6 @@ export const ZH_CN: Record<string, string> = {
   'Settings exported successfully': '设置已导出成功',
 
   // ── Translation unsupported ──
-  'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.': '翻译功能需要内置 AI 的浏览器。请使用 Chrome 138+ 或 Edge 143+ Canary。',
+  'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.':
+    '翻译功能需要内置 AI 的浏览器。请使用 Chrome 138+ 或 Edge 143+ Canary。',
 };

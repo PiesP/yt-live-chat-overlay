@@ -338,10 +338,11 @@ export const ES: Record<string, string> = {
   'Loading chat history...': 'Cargando historial de chat...',
   'Short messages shown regardless of length': 'Mostrar mensajes cortos sin importar la longitud',
 
-    // ── Toast / sync messages ──
-    'Settings updated from another tab': 'Configuración actualizada desde otra pestaña',
+  // ── Toast / sync messages ──
+  'Settings updated from another tab': 'Configuración actualizada desde otra pestaña',
   'Settings exported successfully': 'Configuración exportada correctamente',
 
-    // ── Translation unsupported ──
-    'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.': 'La traducción requiere un navegador con IA integrada. Usa Chrome 138+ o Edge 143+ Canary.',
-    };
+  // ── Translation unsupported ──
+  'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.':
+    'La traducción requiere un navegador con IA integrada. Usa Chrome 138+ o Edge 143+ Canary.',
+};

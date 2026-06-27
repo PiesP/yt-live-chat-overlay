@@ -331,5 +331,6 @@ export const JA: Record<string, string> = {
   'Settings exported successfully': '設定がエクスポートされました',
 
   // ── Translation unsupported ──
-  'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.': '翻訳機能には内蔵AIが必要です。Chrome 138+またはEdge 143+ Canaryをご利用ください。',
+  'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.':
+    '翻訳機能には内蔵AIが必要です。Chrome 138+またはEdge 143+ Canaryをご利用ください。',
 };

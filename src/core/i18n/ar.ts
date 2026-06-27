@@ -328,5 +328,6 @@ export const AR: Record<string, string> = {
   'Settings exported successfully': 'تم تصدير الإعدادات بنجاح',
 
   // ── Translation unsupported ──
-  'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.': 'يتطلب الترجمة متصفحًا مزودًا بذكاء اصطناعي مدمج. استخدم Chrome 138+ أو Edge 143+ Canary.',
+  'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.':
+    'يتطلب الترجمة متصفحًا مزودًا بذكاء اصطناعي مدمج. استخدم Chrome 138+ أو Edge 143+ Canary.',
 };
