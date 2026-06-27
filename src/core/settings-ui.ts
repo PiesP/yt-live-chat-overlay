@@ -24,19 +24,8 @@ import { SETTINGS_UI_STYLES } from '@core/settings-ui-styles';
 
 const log = createLogger('SettingsUi');
 
+const TOAST_DURATION_MS = 2500;
 const RELOAD_FEEDBACK_DURATION_MS = 1500;
-const TOAST_DURATION_BASE_MS = 2500;
-const TOAST_DURATION_PER_CHAR_MS = 50;
-const TOAST_DURATION_MAX_MS = 8000;
-const TOAST_DURATION_THRESHOLD_CHARS = 40;
-
-function getToastDuration(message: string): number {
-  return Math.min(
-    TOAST_DURATION_MAX_MS,
-    TOAST_DURATION_BASE_MS +
-      Math.max(0, message.length - TOAST_DURATION_THRESHOLD_CHARS) * TOAST_DURATION_PER_CHAR_MS
-  );
-}
 
 export class SettingsUi {
   private playerElement: HTMLElement | null = null;
@@ -45,7 +34,7 @@ export class SettingsUi {
   /** Timer for reload-complete checkmark → icon restoration. */
   private reloadFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
   private backdrop: HTMLDivElement | null = null;
-  private modal: HTMLDialogElement | null = null;
+  private modal: HTMLDivElement | null = null;
   private previousFocus: HTMLElement | null = null;
   private activeTab: string;
   /** Language code that was active when the modal content was last built. */
@@ -55,8 +44,6 @@ export class SettingsUi {
   /** Saved body padding-right before scrollbar compensation. */
   private savedBodyPaddingRight: string | null = null;
   private _backdropClickHandler: ((event: MouseEvent) => void) | null = null;
-  /** All active timers — cleared in destroy() for robust cleanup. */
-  private timers: ReturnType<typeof setTimeout>[] = [];
 
   private get defaultTabId(): string {
     const first = PANES[0];
@@ -65,14 +52,14 @@ export class SettingsUi {
 
   private readonly form: SettingsUiForm;
 
-  private handleKeydown = (event: KeyboardEvent) => {
-    if (event.shiftKey && event.altKey && event.key === 's') {
-      event.preventDefault();
-      this.open();
-      return;
-    }
+  private readonly handleKeydown = (event: KeyboardEvent) => {
     if (event.key === 'Escape') {
       this.close();
+      return;
+    }
+
+    if (event.key === 'Tab' && this.backdrop && this.backdrop.style.display !== 'none') {
+      this.trapFocus(event);
     }
   };
 
@@ -80,7 +67,7 @@ export class SettingsUi {
    * Check whether the settings dialog is currently visible to the user.
    */
   private isDialogOpen(): boolean {
-    return this.modal?.open ?? false;
+    return this.backdrop !== null && this.backdrop.style.display !== 'none';
   }
 
   /**
@@ -91,23 +78,6 @@ export class SettingsUi {
   syncForm(): void {
     if (!this.isDialogOpen()) return;
     this.form.populateForm(this.getSettings());
-    this.announceSync();
-  }
-
-  /** Announce settings sync to screen readers via live region. */
-  private announceSync(): void {
-    if (!this.modal) return;
-    let liveRegion = this.modal.querySelector<HTMLDivElement>(
-      '.yt-chat-overlay-settings-sync-live-region'
-    );
-    if (!liveRegion) {
-      liveRegion = document.createElement('div');
-      liveRegion.className = 'yt-chat-overlay-settings-sync-live-region';
-      liveRegion.setAttribute('aria-live', 'polite');
-      liveRegion.setAttribute('aria-atomic', 'true');
-      this.modal.appendChild(liveRegion);
-    }
-    liveRegion.textContent = t('Settings updated from another tab');
   }
 
   constructor(
@@ -125,19 +95,19 @@ export class SettingsUi {
     });
   }
 
-  /** Coalesced live preview via requestAnimationFrame. */
-  private previewPending = false;
+  /** Debounced live preview — applies settings immediately (memory only, no storage write). */
+  private previewTimer: ReturnType<typeof setTimeout> | null = null;
+  private static readonly PREVIEW_DEBOUNCE_MS = 100;
 
   private queuePreview(): void {
-    if (this.previewPending) return;
-    this.previewPending = true;
-    requestAnimationFrame(() => {
-      this.previewPending = false;
+    this.previewTimer = clearSafeTimeout(this.previewTimer);
+    this.previewTimer = setTimeout(() => {
+      this.previewTimer = null;
       const preview = this.form.collectSettings();
       this.onChange(preview);
       // Sync form with normalized values from the settings system
       this.form.populateForm(this.getSettings());
-    });
+    }, SettingsUi.PREVIEW_DEBOUNCE_MS);
   }
 
   async attach(): Promise<void> {
@@ -157,7 +127,6 @@ export class SettingsUi {
     this.ensureButton(player);
     this.ensureModal();
     this.close();
-    document.addEventListener('keydown', this.handleKeydown);
   }
 
   close(): void {
@@ -175,15 +144,14 @@ export class SettingsUi {
     // writes settings to storage — preview (memory only) never writes.
     // Covers: X button, Close button, Escape, backdrop click, and
     // SPA navigation (destroy() calls close()).
+    if (this.previewTimer !== null) {
+      this.previewTimer = clearSafeTimeout(this.previewTimer);
+    }
     const persist = this.onPersist ?? this.onChange;
     persist(this.form.collectSettings());
     this.setDialogOpen(false);
-    this.modal?.close();
 
     this.unlockBodyScroll();
-
-    // NOTE: document.body.inert is not used — see open() for rationale.
-    // <dialog>.showModal() / close() natively manages top-layer inertness.
 
     // Remove keydown listener to prevent accumulation across SPA navigations.
     // ensureModal() registers this listener and close() is called on modal
@@ -210,7 +178,7 @@ export class SettingsUi {
       this.button.className = 'yt-chat-overlay-settings-button';
       this.button.textContent = '\u2699';
       this.button.setAttribute('aria-label', t('Chat overlay settings'));
-      this.button.title = `${t('Chat overlay settings')} (Shift+Alt+S)`;
+      this.button.title = t('Chat overlay settings');
       this.button.addEventListener('click', () => this.open());
     } else if (this.button.parentElement) {
       this.button.remove();
@@ -245,17 +213,6 @@ export class SettingsUi {
     this.reloadFeedbackTimer = clearSafeTimeout(this.reloadFeedbackTimer);
   }
 
-  private registerTimer(timer: ReturnType<typeof setTimeout>): void {
-    this.timers.push(timer);
-  }
-
-  private clearAllTimers(): void {
-    for (const timer of this.timers) {
-      clearTimeout(timer);
-    }
-    this.timers = [];
-  }
-
   private handleReloadClick(): void {
     if (!this.reloadButton) return;
 
@@ -275,7 +232,6 @@ export class SettingsUi {
         this.reloadButton.classList.remove('yt-chat-overlay-reload-button--done');
       }
     }, RELOAD_FEEDBACK_DURATION_MS);
-    this.registerTimer(this.reloadFeedbackTimer);
 
     void this.onReload?.();
   }
@@ -298,7 +254,6 @@ export class SettingsUi {
 
     this.backdrop.style.display = isOpen ? 'flex' : 'none';
     this.backdrop.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
-    this.backdrop.setAttribute('data-open', isOpen ? 'true' : 'false');
   }
 
   /** Lock body scroll to prevent page scrolling behind the open modal.
@@ -344,25 +299,14 @@ export class SettingsUi {
     for (const btn of this.modal.querySelectorAll<HTMLButtonElement>(
       '.yt-chat-overlay-settings-tab'
     )) {
-      const isActive = btn.dataset.tab === tabId;
-      btn.classList.toggle('active', isActive);
-      btn.setAttribute('aria-selected', `${isActive}`);
-      btn.setAttribute('tabindex', isActive ? '0' : '-1');
+      btn.classList.toggle('active', btn.dataset.tab === tabId);
+      btn.setAttribute('aria-selected', `${btn.dataset.tab === tabId}`);
     }
 
     for (const pane of this.modal.querySelectorAll<HTMLDivElement>(
       '.yt-chat-overlay-settings-pane'
     )) {
       pane.toggleAttribute('hidden', pane.dataset.pane !== tabId);
-    }
-
-    // Move focus to the newly activated tab panel
-    const activePane = this.modal.querySelector<HTMLDivElement>(
-      `.yt-chat-overlay-settings-pane[data-pane="${tabId}"]`
-    );
-    if (activePane) {
-      activePane.scrollTop = 0;
-      activePane.focus();
     }
   }
 
@@ -417,16 +361,7 @@ export class SettingsUi {
     this.backdrop = document.createElement('div');
     this.backdrop.id = BACKDROP_ID;
     this.backdrop.className = 'yt-chat-overlay-settings-backdrop';
-    this.backdrop.setAttribute('data-open', 'false');
-
-    // RTL support: set dir attribute for Arabic
-    if (getActiveLanguage() === 'ar') {
-      this.backdrop.setAttribute('dir', 'rtl');
-    }
-
     this._backdropClickHandler = (event: MouseEvent) => {
-      // Only handle left-click (button === 0); ignore middle/right-click
-      // to avoid conflicting with browser context menu or middle-click paste.
       if (event.button !== 0) return;
       if (event.target === this.backdrop) {
         this.close();
@@ -434,8 +369,10 @@ export class SettingsUi {
     };
     this.backdrop.addEventListener('click', this._backdropClickHandler);
 
-    this.modal = document.createElement('dialog');
+    this.modal = document.createElement('div');
     this.modal.className = 'yt-chat-overlay-settings-modal';
+    this.modal.tabIndex = -1;
+    this.modal.setAttribute('role', 'dialog');
     this.modal.setAttribute('aria-modal', 'true');
     this.modal.setAttribute('aria-labelledby', 'yt-chat-overlay-settings-title');
     this.modal.append(...this.form.createModalContent());
@@ -447,6 +384,9 @@ export class SettingsUi {
     this.backdrop.appendChild(this.modal);
     document.body.appendChild(this.backdrop);
     this.setDialogOpen(false);
+
+    // Activate keydown listener now that modal DOM exists
+    document.addEventListener('keydown', this.handleKeydown);
   }
 
   private open(): void {
@@ -465,13 +405,6 @@ export class SettingsUi {
     this.switchTab(this.activeTab);
     this.lockBodyScroll();
     this.setDialogOpen(true);
-    this.modal.showModal();
-
-    // NOTE: document.body.inert is intentionally NOT used here.
-    // <dialog>.showModal() natively provides top-layer inertness — it makes
-    // all other document content inert to accessibility tree and focus.
-    // Setting body.inert would also make the dialog and its backdrop inert
-    // (since they are body descendants), breaking modal interactivity.
     this.focusInitialElement();
   }
 
@@ -505,25 +438,25 @@ export class SettingsUi {
     this.switchTab(savedTab);
   }
 
-  /** Create a reusable confirmation dialog using native <dialog> element. */
+  /** Create a reusable confirmation dialog overlay for destructive actions. */
   private createConfirmDialog(options: {
     message: string;
     confirmLabel: string;
     onConfirm: () => void;
-  }): HTMLDialogElement {
-    const dialog = document.createElement('dialog');
+  }): HTMLDivElement {
+    const dialog = document.createElement('div');
     dialog.className = 'yt-chat-overlay-settings-confirm';
+    dialog.setAttribute('role', 'alertdialog');
     dialog.setAttribute('aria-modal', 'true');
-    dialog.setAttribute('aria-labelledby', 'yt-chat-overlay-confirm-title');
-    dialog.setAttribute('aria-describedby', 'yt-chat-overlay-confirm-msg');
+    dialog.setAttribute('aria-label', t(options.message));
 
-    const title = document.createElement('h2');
-    title.id = 'yt-chat-overlay-confirm-title';
-    title.className = 'yt-chat-overlay-settings-confirm-title';
-    title.textContent = t('Confirm');
+    const backdrop = document.createElement('div');
+    backdrop.className = 'yt-chat-overlay-settings-confirm-backdrop';
+
+    const confirmDialog = document.createElement('div');
+    confirmDialog.className = 'yt-chat-overlay-settings-confirm-dialog';
 
     const message = document.createElement('p');
-    message.id = 'yt-chat-overlay-confirm-msg';
     message.className = 'yt-chat-overlay-settings-confirm-message';
     message.textContent = t(options.message);
 
@@ -541,30 +474,24 @@ export class SettingsUi {
     okBtn.textContent = t(options.confirmLabel);
 
     buttons.append(cancelBtn, okBtn);
-    dialog.append(title, message, buttons);
+    confirmDialog.append(message, buttons);
+    dialog.append(backdrop, confirmDialog);
 
-    const triggerElement = this.button;
-
-    dialog.addEventListener('cancel', (event) => {
-      event.preventDefault();
-      triggerElement?.focus();
-    });
-
-    cancelBtn.addEventListener('click', () => {
-      dialog.close();
-      triggerElement?.focus();
-    });
+    cancelBtn.addEventListener('click', () => dialog.remove());
     okBtn.addEventListener('click', () => {
-      dialog.close();
+      dialog.remove();
       options.onConfirm();
-      triggerElement?.focus();
     });
 
+    cancelBtn.focus();
     return dialog;
   }
 
   private handleReset(): void {
     if (!this.modal) return;
+
+    const existing = this.modal.querySelector('.yt-chat-overlay-settings-confirm');
+    if (existing) existing.remove();
 
     const dialog = this.createConfirmDialog({
       message: 'Reset all settings to defaults?',
@@ -576,7 +503,6 @@ export class SettingsUi {
     });
 
     this.modal.appendChild(dialog);
-    dialog.showModal();
   }
 
   private handleExport(): void {
@@ -586,14 +512,7 @@ export class SettingsUi {
     const a = document.createElement('a');
     a.href = `data:application/json;charset=utf-8,${encoded}`;
     a.download = 'yt-chat-overlay-settings.json';
-    try {
-      a.click();
-    } catch (error: unknown) {
-      log.warn('Export failed: download blocked', error);
-      this.showToast(t('Export failed: download blocked'), true);
-      return;
-    }
-    this.showToast(t('Settings exported successfully'));
+    a.click();
   }
 
   private handleImport(): void {
@@ -607,27 +526,11 @@ export class SettingsUi {
       reader.addEventListener('load', () => {
         try {
           const text = reader.result;
-          if (typeof text !== 'string') {
-            this.showToast(t('Import failed: unreadable file'), true);
-            log.warn('Import failed: reader result was not a string');
-            return;
-          }
+          if (typeof text !== 'string') return;
           const parsed = JSON.parse(text) as Record<string, unknown>;
           if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-            this.showToast(t('Import failed: invalid settings format'), true);
+            this.showToast(t('Import failed: invalid settings format'));
             log.warn('Import failed: expected a settings object');
-            return;
-          }
-
-          // Validate that the file looks like a settings export
-          if (
-            typeof parsed._version !== 'number' &&
-            typeof parsed.comments !== 'object' &&
-            typeof parsed.superChats !== 'object' &&
-            typeof parsed.memberships !== 'object'
-          ) {
-            this.showToast(t('Import failed: not a settings file'), true);
-            log.warn('Import failed: file does not contain recognized settings keys');
             return;
           }
 
@@ -645,13 +548,9 @@ export class SettingsUi {
           persist(settings);
           this.showToast(t('Settings imported successfully'));
         } catch (error: unknown) {
-          this.showToast(t('Import failed: invalid JSON'), true);
+          this.showToast(t('Import failed: invalid JSON'));
           log.warn('Import failed: invalid JSON file', error);
         }
-      });
-      reader.addEventListener('error', () => {
-        log.warn('Import failed: file read error', reader.error);
-        this.showToast(t('Import failed: could not read file'), true);
       });
       reader.readAsText(file);
     });
@@ -661,14 +560,6 @@ export class SettingsUi {
   private focusInitialElement(): void {
     if (!this.modal) return;
 
-    // Focus the first focusable form element (input/select) per WCAG guidance.
-    const [firstFormEl] = this.form.getFocusableElements();
-    if (firstFormEl) {
-      firstFormEl.focus();
-      return;
-    }
-
-    // Fallback: close button if no form elements exist.
     const closeButton = this.modal.querySelector<HTMLButtonElement>(
       '.yt-chat-overlay-settings-close'
     );
@@ -677,28 +568,62 @@ export class SettingsUi {
       return;
     }
 
+    const [first] = this.form.getFocusableElements();
+    if (first) {
+      first.focus();
+      return;
+    }
+
     this.modal.focus();
+  }
+
+  private trapFocus(event: KeyboardEvent): void {
+    if (!this.backdrop || this.backdrop.style.display === 'none') {
+      return;
+    }
+
+    const focusableElements = this.form.getFocusableElements();
+    if (focusableElements.length === 0) {
+      event.preventDefault();
+      this.modal?.focus();
+      return;
+    }
+
+    const first = focusableElements[0];
+    const last = focusableElements[focusableElements.length - 1];
+    if (!first || !last) return;
+
+    const activeElement = document.activeElement;
+    const isShiftTab = event.shiftKey;
+
+    if (isShiftTab && activeElement === first) {
+      event.preventDefault();
+      last.focus();
+      return;
+    }
+
+    if (!isShiftTab && activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
   }
 
   /** Show a transient toast notification in the settings modal. */
   private toastTimer: ReturnType<typeof setTimeout> | null = null;
 
-  private showToast(message: string, isError = false): void {
+  private showToast(message: string): void {
     if (!this.modal) return;
     const existing = this.modal.querySelector('.yt-chat-overlay-settings-toast');
     if (existing) existing.remove();
     const toast = document.createElement('div');
     toast.className = 'yt-chat-overlay-settings-toast';
-    toast.setAttribute('role', 'status');
-    toast.setAttribute('aria-live', isError ? 'assertive' : 'polite');
     toast.textContent = message;
     this.modal.appendChild(toast);
     this.toastTimer = clearSafeTimeout(this.toastTimer);
     this.toastTimer = setTimeout(() => {
       toast.remove();
       this.toastTimer = null;
-    }, getToastDuration(message));
-    this.registerTimer(this.toastTimer);
+    }, TOAST_DURATION_MS);
   }
 
   destroy(): void {
@@ -706,15 +631,19 @@ export class SettingsUi {
     // saved only when the user explicitly closes the dialog (Close button,
     // Escape, backdrop click). Implicit teardown from SPA navigation, page
     // refresh, or App.stop() must NOT write to storage.
-    document.removeEventListener('keydown', this.handleKeydown);
+    if (this.previewTimer !== null) {
+      this.previewTimer = clearSafeTimeout(this.previewTimer);
+    }
     this.button?.remove();
     this.reloadButton?.remove();
-    this.clearAllTimers();
+    this.clearReloadFeedbackTimer();
+    this.toastTimer = clearSafeTimeout(this.toastTimer);
     if (this.backdrop && this._backdropClickHandler) {
       this.backdrop.removeEventListener('click', this._backdropClickHandler);
       this._backdropClickHandler = null;
     }
     this.backdrop?.remove();
+    document.removeEventListener('keydown', this.handleKeydown);
 
     const styleElement = document.getElementById(STYLE_ID);
     styleElement?.remove();

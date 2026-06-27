@@ -20,6 +20,7 @@ import {
 } from '@core/settings-schema';
 import type { AuthorGridField, FieldDef, PaneDef } from '@core/settings-ui-panes';
 import { PANES } from '@core/settings-ui-panes';
+import { TranslationService } from '@core/translation-service';
 
 const log = createLogger('SettingsUiForm');
 
@@ -33,12 +34,6 @@ const isOutlineNumericKey = (key: string): key is Exclude<OutlineSettingKey, 'en
   OUTLINE_NUMERIC_KEY_SET.has(key);
 
 // ── DOM helper functions ─────────────────────────────────────────────────────
-
-let _idCounter = 0;
-
-function nextFieldId(prefix: string): string {
-  return `yt-field-${prefix}-${_idCounter++}`;
-}
 
 function domDiv(className: string): HTMLDivElement {
   const el = document.createElement('div');
@@ -54,26 +49,41 @@ function domInput(props: { type: string; name: string; className?: string }): HT
   return el;
 }
 
-function domField(labelText: string, control: HTMLElement, controlId?: string): HTMLLabelElement {
+function domField(labelText: string, control: HTMLElement): HTMLLabelElement {
   const label = document.createElement('label');
   label.className = 'yt-chat-overlay-settings-field';
   const text = document.createElement('span');
   text.textContent = labelText;
-  if (controlId) {
-    label.htmlFor = controlId;
-  }
   label.append(text, control);
   return label;
 }
 
-function domSection(titleText: string): HTMLDivElement | null {
-  if (!titleText) return null;
+function domSection(titleText: string): HTMLDivElement {
   const sec = domDiv('yt-chat-overlay-settings-section');
-  const title = document.createElement('h3');
-  title.className = 'yt-chat-overlay-settings-section-title';
+  const title = domDiv('yt-chat-overlay-settings-section-title');
   title.textContent = titleText;
   sec.appendChild(title);
   return sec;
+}
+
+function domGridCheckbox(name: string): HTMLInputElement {
+  const el = domInput({ type: 'checkbox', name });
+  el.className = 'yt-chat-overlay-author-grid-checkbox';
+  return el;
+}
+
+function domGridHeader(text: string): HTMLSpanElement {
+  const el = document.createElement('span');
+  el.className = 'yt-chat-overlay-author-grid-header';
+  el.textContent = text;
+  return el;
+}
+
+function domGridLabel(text: string): HTMLSpanElement {
+  const el = document.createElement('span');
+  el.className = 'yt-chat-overlay-author-grid-label';
+  el.textContent = text;
+  return el;
 }
 
 // ── Modal sub-structure factories ────────────────────────────────────────────
@@ -82,9 +92,8 @@ const TITLE_ID = 'yt-chat-overlay-settings-title';
 
 function createHeader(): HTMLDivElement {
   const header = domDiv('yt-chat-overlay-settings-header');
-  const title = document.createElement('h2');
+  const title = document.createElement('div');
   title.id = TITLE_ID;
-  title.className = 'yt-chat-overlay-settings-title';
   title.textContent = t('Chat Overlay');
   const closeButton = document.createElement('button');
   closeButton.type = 'button';
@@ -100,7 +109,6 @@ function createTabs(): HTMLElement {
   const nav = document.createElement('nav');
   nav.className = 'yt-chat-overlay-settings-tabs';
   nav.setAttribute('role', 'tablist');
-  nav.setAttribute('aria-orientation', 'horizontal');
   nav.setAttribute('aria-label', t('Settings categories'));
 
   for (const [index, pane] of PANES.entries()) {
@@ -119,18 +127,14 @@ function createTabs(): HTMLElement {
   return nav;
 }
 
-export type ActionType = 'reset' | 'export' | 'import' | 'close';
-
-export const ACTION_LABELS: Record<ActionType, string> = {
-  reset: 'Reset',
-  export: 'Export',
-  import: 'Import',
-  close: 'Close',
-};
+export const ACTIONS = ['reset', 'export', 'import', 'close'] as const;
+export type ActionType = (typeof ACTIONS)[number];
 
 function createActions(): HTMLDivElement {
   const actions = domDiv('yt-chat-overlay-settings-actions');
-  for (const [action, label] of Object.entries(ACTION_LABELS)) {
+  for (const [action, label] of ACTIONS.map(
+    (a) => [a, a.charAt(0).toUpperCase() + a.slice(1)] as const
+  )) {
     const button = document.createElement('button');
     button.type = 'button';
     button.dataset.action = action;
@@ -146,19 +150,15 @@ function createEnabledField(title?: string): HTMLLabelElement {
   const text = document.createElement('span');
   text.textContent = t('Overlay Enabled');
   const input = domInput({ type: 'checkbox', name: 'enabled' });
-  input.id = nextFieldId('enabled');
   if (title) input.title = t(title);
   label.append(text, input);
-  label.htmlFor = input.id;
   return label;
 }
 
 function createCheckboxField(labelText: string, name: string, title?: string): HTMLLabelElement {
   const input = domInput({ type: 'checkbox', name });
-  input.id = nextFieldId(name);
   if (title) input.title = t(title);
-  const label = domField(t(labelText), input, input.id);
-  return label;
+  return domField(t(labelText), input);
 }
 
 // ── UI value formatting ──────────────────────────────────────────────────────
@@ -264,7 +264,7 @@ function patchOutline(partial: Record<string, unknown>, patch: Record<string, un
 
 // ── SettingsUiForm class ─────────────────────────────────────────────────────
 export class SettingsUiForm {
-  private modal: HTMLElement | null = null;
+  private modal: HTMLDivElement | null = null;
   private isUpdating = false;
   private errorDismissTimeouts: ReturnType<typeof setTimeout>[] = [];
 
@@ -273,11 +273,10 @@ export class SettingsUiForm {
     private readonly onPreview?: () => void
   ) {}
 
-  setModal(modal: HTMLElement | null): void {
+  setModal(modal: HTMLDivElement | null): void {
     this.modal = modal;
     if (modal) {
       this.bindNumberInputKeys(modal);
-      this.bindTabKeydown(modal);
     } else {
       this.clearErrorDismissTimeouts();
     }
@@ -296,13 +295,14 @@ export class SettingsUiForm {
 
   /**
    * Keyboard shortcuts for number inputs:
-   *   Shift+↑/↓  → ±10 × step
+   *   Shift+↑/↓       → ±10 × step
+   *   Ctrl+Shift+↑/↓  → ±100 × step
    *
    * Without modifiers, ↑/↓ uses the browser's native ±1 step behavior.
    * YouTube shortcuts are naturally suppressed because the focused input
    * receives the event first — no conflict.
    */
-  private bindNumberInputKeys(modal: HTMLElement): void {
+  private bindNumberInputKeys(modal: HTMLDivElement): void {
     modal.addEventListener('keydown', (event) => {
       const target = event.target;
       if (!(target instanceof HTMLInputElement) || target.type !== 'number') return;
@@ -315,10 +315,11 @@ export class SettingsUiForm {
       else if (event.key === 'ArrowDown') direction = -1;
       else return;
 
-      // Only Shift modifier: ±10 step. Ctrl/Cmd without Shift is ignored.
-      if (!event.shiftKey || event.ctrlKey || event.metaKey) return;
+      // Without modifiers, let the browser handle native ↑/↓ (±1 step)
+      if (!event.shiftKey && !event.ctrlKey && !event.metaKey) return;
 
-      const delta = direction * step * 10;
+      const scale = event.ctrlKey || event.metaKey ? 100 : 10;
+      const delta = direction * step * scale;
 
       event.preventDefault();
       const min = target.min ? parseFloat(target.min) : -Infinity;
@@ -332,75 +333,6 @@ export class SettingsUiForm {
     });
   }
 
-  private bindTabKeydown(modal: HTMLElement): void {
-    const tablist = modal.querySelector<HTMLElement>('[role="tablist"]');
-    if (!tablist) return;
-    tablist.addEventListener('keydown', (event) => {
-      const tabs = Array.from(tablist.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
-      if (tabs.length === 0) return;
-      const currentIndex = tabs.indexOf(document.activeElement as HTMLButtonElement);
-      const activeIndex = currentIndex >= 0 ? currentIndex : -1;
-      let newIndex = activeIndex;
-      switch (event.key) {
-        case 'ArrowLeft':
-          event.preventDefault();
-          newIndex = activeIndex <= 0 ? tabs.length - 1 : activeIndex - 1;
-          break;
-        case 'ArrowRight':
-          event.preventDefault();
-          newIndex = activeIndex >= tabs.length - 1 ? 0 : activeIndex + 1;
-          break;
-        case 'Home':
-          event.preventDefault();
-          newIndex = 0;
-          break;
-        case 'End':
-          event.preventDefault();
-          newIndex = tabs.length - 1;
-          break;
-        case 'Enter':
-        case ' ':
-          event.preventDefault();
-          if (activeIndex >= 0) {
-            const activeTab = tabs[activeIndex];
-            if (activeTab) {
-              const tabId = activeTab.dataset.tab;
-              if (tabId && this.modal) {
-                for (const btn of this.modal.querySelectorAll<HTMLButtonElement>(
-                  '.yt-chat-overlay-settings-tab'
-                )) {
-                  const isActive = btn.dataset.tab === tabId;
-                  btn.classList.toggle('active', isActive);
-                  btn.setAttribute('aria-selected', String(isActive));
-                  btn.setAttribute('tabindex', isActive ? '0' : '-1');
-                }
-                for (const pane of this.modal.querySelectorAll<HTMLDivElement>(
-                  '.yt-chat-overlay-settings-pane'
-                )) {
-                  pane.toggleAttribute('hidden', pane.dataset.pane !== tabId);
-                }
-                // Move focus to the newly activated tab panel
-                const activePane = this.modal.querySelector<HTMLDivElement>(
-                  `.yt-chat-overlay-settings-pane[data-pane="${tabId}"]`
-                );
-                activePane?.focus();
-              }
-            }
-          }
-          return;
-        default:
-          return;
-      }
-      if (newIndex >= 0 && newIndex < tabs.length) {
-        const newTab = tabs[newIndex];
-        if (newTab) {
-          newTab.setAttribute('tabindex', '0');
-          newTab.focus();
-        }
-      }
-    });
-  }
-
   private attachLivePreview(element: HTMLElement): void {
     if (!this.onPreview) return;
     const handler = (): void => {
@@ -410,14 +342,7 @@ export class SettingsUiForm {
     const inputs = element.querySelectorAll<HTMLElement>('input, select');
     for (const input of inputs) {
       if (input instanceof HTMLInputElement && input.type === 'number') {
-        if (input.classList.contains('yt-chat-overlay-settings-range-slider')) {
-          // Range sliders only fire 'change' (on release) to avoid render-loop jank
-          // during drag. The number input companion updates the slider visually
-          // via the existing bidirectional sync listeners.
-          input.addEventListener('change', handler);
-        } else {
-          input.addEventListener('input', handler);
-        }
+        input.addEventListener('input', handler);
       } else {
         input.addEventListener('change', handler);
       }
@@ -439,8 +364,17 @@ export class SettingsUiForm {
     pane.id = `pane-${def.id}`;
     pane.dataset.pane = def.id;
     pane.setAttribute('role', 'tabpanel');
-    pane.tabIndex = -1;
     if (def.id !== 'comments') pane.hidden = true;
+
+    // Translation tab: show unsupported message when browser lacks Translator API.
+    if (def.id === 'translation' && !TranslationService.isSupported()) {
+      const msg = domDiv('yt-chat-overlay-settings-unsupported');
+      msg.textContent = t(
+        'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.'
+      );
+      pane.appendChild(msg);
+      return pane;
+    }
 
     for (const section of def.sections) {
       const authorGridField = section.fields.find(
@@ -454,12 +388,10 @@ export class SettingsUiForm {
 
       if (section.title) {
         const secEl = domSection(t(section.title));
-        if (secEl) {
-          for (const field of section.fields) {
-            secEl.appendChild(this.buildField(field));
-          }
-          pane.appendChild(secEl);
+        for (const field of section.fields) {
+          secEl.appendChild(this.buildField(field));
         }
+        pane.appendChild(secEl);
       } else {
         for (const field of section.fields) {
           const el = this.buildField(field);
@@ -479,33 +411,12 @@ export class SettingsUiForm {
         return createCheckboxField(def.label, this.resolveKey(def), def.title);
       case 'number': {
         const input = domInput({ type: 'number', name: this.resolveKey(def) });
-        input.id = nextFieldId(this.resolveKey(def));
         applyNumberInputAttributes(
           input,
           def.key as RootScalarSettingKey | Exclude<OutlineSettingKey, 'enabled'>
         );
         if (def.title) input.title = t(def.title);
-
-        // Real-time validation feedback on input
-        input.addEventListener('input', () => {
-          if (this.isUpdating) return;
-          const rawNum = Number(input.value);
-          if (Number.isFinite(rawNum)) {
-            const { min, max } = getNumericInputAttributes(def.key as RootScalarSettingKey);
-            if (rawNum < min) {
-              input.setAttribute('aria-invalid', 'true');
-              this.showFieldError(input, `${t('Minimum')} ${min}`);
-            } else if (rawNum > max) {
-              input.setAttribute('aria-invalid', 'true');
-              this.showFieldError(input, `${t('Maximum')} ${max}`);
-            } else {
-              input.removeAttribute('aria-invalid');
-              this.clearFieldError(input);
-            }
-          }
-        });
-
-        return domField(t(def.label), input, input.id);
+        return domField(t(def.label), input);
       }
       case 'range': {
         const container = domDiv('yt-chat-overlay-settings-range');
@@ -515,8 +426,6 @@ export class SettingsUiForm {
           ? getOutlineDisplayScale(def.key)
           : getRootDisplayMeta(def.key as RootScalarSettingKey).scale || 1;
 
-        const valueDisplayId = `range-value-${this.resolveKey(def)}`;
-
         const slider = document.createElement('input');
         slider.type = 'range';
         slider.name = `${this.resolveKey(def)}-slider`;
@@ -524,15 +433,8 @@ export class SettingsUiForm {
         slider.max = String(limits.max * scale);
         slider.step = String(limits.step * scale);
         slider.classList.add('yt-chat-overlay-settings-range-slider');
-        slider.id = nextFieldId(`${this.resolveKey(def)}-slider`);
-
-        // ARIA value attributes for screen readers
-        slider.setAttribute('aria-valuemin', String(limits.min * scale));
-        slider.setAttribute('aria-valuemax', String(limits.max * scale));
-        slider.setAttribute('aria-describedby', valueDisplayId);
 
         const numberInput = domInput({ type: 'number', name: this.resolveKey(def) });
-        numberInput.id = valueDisplayId;
         applyNumberInputAttributes(numberInput, def.key as RootScalarSettingKey);
         numberInput.classList.add('yt-chat-overlay-settings-range-number');
         if (def.title) {
@@ -540,79 +442,35 @@ export class SettingsUiForm {
           slider.title = t(def.title);
         }
 
-        // Helper to update aria-valuenow/valuetext on the slider
-        const updateSliderAria = (): void => {
-          const val = parseFloat(slider.value);
-          slider.setAttribute('aria-valuenow', String(val));
-          const displayVal = val / scale;
-          const unitLabel = slider.title || '';
-          const formatted = unitLabel
-            ? `${displayVal} ${unitLabel}`
-            : Number.isInteger(displayVal)
-              ? `${displayVal}`
-              : `${displayVal.toFixed(2)}`;
-          slider.setAttribute('aria-valuetext', formatted);
-        };
-
         // Sync: slider → number, number → slider
         slider.addEventListener('input', () => {
           numberInput.value = slider.value;
-          updateSliderAria();
         });
         numberInput.addEventListener('input', () => {
           slider.value = numberInput.value;
-          updateSliderAria();
         });
 
-        // Initialize ARIA values
-        updateSliderAria();
-
-        // Label wraps slider for association; number input is sibling
-        const label = domField(t(def.label), slider, slider.id);
-        container.append(label, numberInput);
+        container.appendChild(domField(t(def.label), slider));
+        container.appendChild(numberInput);
         return container;
       }
       case 'select': {
         const select = document.createElement('select');
         select.name = this.resolveKey(def);
-        select.id = nextFieldId(this.resolveKey(def));
         if (def.title) select.title = t(def.title);
-        if (def.hint) {
-          select.setAttribute('aria-describedby', `hint-${this.resolveKey(def)}`);
-        }
         for (const [value, label] of def.options) {
           const opt = document.createElement('option');
           opt.value = value;
           opt.textContent = t(label);
           select.appendChild(opt);
         }
-        const field = domField(t(def.label), select, select.id);
-        if (def.hint) {
-          const hint = document.createElement('span');
-          hint.className = 'yt-chat-overlay-settings-field-hint';
-          hint.id = `hint-${this.resolveKey(def)}`;
-          hint.textContent = t(def.hint);
-          field.appendChild(hint);
-        }
-        return field;
+        return domField(t(def.label), select);
       }
       case 'text': {
         const input = domInput({ type: 'text', name: this.resolveKey(def) });
-        input.id = nextFieldId(this.resolveKey(def));
         if (def.title) input.title = t(def.title);
         if (def.placeholder) input.placeholder = t(def.placeholder);
-        if (def.hint) {
-          input.setAttribute('aria-describedby', `hint-${this.resolveKey(def)}`);
-        }
-        const field = domField(t(def.label), input, input.id);
-        if (def.hint) {
-          const hint = document.createElement('span');
-          hint.className = 'yt-chat-overlay-settings-field-hint';
-          hint.id = `hint-${this.resolveKey(def)}`;
-          hint.textContent = t(def.hint);
-          field.appendChild(hint);
-        }
-        return field;
+        return domField(t(def.label), input);
       }
       default:
         throw new Error('Unhandled field type');
@@ -624,95 +482,35 @@ export class SettingsUiForm {
   }
 
   private buildAuthorGrid(): HTMLDivElement {
-    const section = domDiv('yt-chat-overlay-settings-section');
-    const gridTitle = document.createElement('h3');
-    gridTitle.className = 'yt-chat-overlay-settings-section-title';
-    gridTitle.textContent = t('Author Colors & Visibility');
-    section.appendChild(gridTitle);
-
-    const table = document.createElement('table');
-    table.className = 'yt-chat-overlay-author-grid';
-
-    // Header row
-    const thead = document.createElement('thead');
-    const headerRow = document.createElement('tr');
-    const emptyTh = document.createElement('th');
-    emptyTh.setAttribute('scope', 'col');
-    const nameColorTh = document.createElement('th');
-    nameColorTh.setAttribute('scope', 'col');
-    nameColorTh.textContent = t('Name Color');
-    const showNameTh = document.createElement('th');
-    showNameTh.setAttribute('scope', 'col');
-    showNameTh.textContent = t('Show Name');
-    headerRow.append(emptyTh, nameColorTh, showNameTh);
-    thead.appendChild(headerRow);
-    table.appendChild(thead);
-
-    // Body rows
-    const tbody = document.createElement('tbody');
+    const section = domSection(t('Author Colors & Visibility'));
+    const grid = domDiv('yt-chat-overlay-author-grid');
+    grid.append(
+      document.createElement('span'),
+      domGridHeader(t('Name Color')),
+      domGridHeader(t('Show Name'))
+    );
 
     for (const key of AUTHOR_COLOR_KEYS) {
-      const labelKey = key.charAt(0).toUpperCase() + key.slice(1);
-
       const colorInput = domInput({
         type: 'color',
         name: `color-${key}`,
         className: 'yt-chat-overlay-author-grid-color',
       });
+      const labelKey = key.charAt(0).toUpperCase() + key.slice(1);
       colorInput.setAttribute('aria-label', `${t(labelKey)} ${t('Color')}`);
 
-      const checkbox = domInput({ type: 'checkbox', name: `showAuthor-${key}` });
-      checkbox.className = 'yt-chat-overlay-author-grid-checkbox';
+      const checkbox = domGridCheckbox(`showAuthor-${key}`);
       checkbox.setAttribute('aria-label', `${t('Show')} ${t(labelKey)}`);
 
-      const row = document.createElement('tr');
-
-      const labelCell = document.createElement('th');
-      labelCell.setAttribute('scope', 'row');
-      labelCell.textContent = t(labelKey);
-
-      const colorCell = document.createElement('td');
-      colorCell.className = 'yt-chat-overlay-author-grid-color-cell';
-      colorCell.appendChild(colorInput);
-
-      const checkboxCell = document.createElement('td');
-      checkboxCell.className = 'yt-chat-overlay-author-grid-checkbox-cell';
-      checkboxCell.appendChild(checkbox);
-
-      row.append(labelCell, colorCell, checkboxCell);
-      tbody.appendChild(row);
+      grid.append(domGridLabel(t(labelKey)), colorInput, checkbox);
     }
 
-    // SuperChat row
-    const superChatRow = document.createElement('tr');
-    const superChatLabelCell = document.createElement('th');
-    superChatLabelCell.setAttribute('scope', 'row');
-    superChatLabelCell.textContent = t('SuperChat');
-
-    const superChatColorCell = document.createElement('td');
-    superChatColorCell.className = 'yt-chat-overlay-author-grid-color-cell';
-    const superChatPlaceholder = domInput({
-      type: 'color',
-      name: 'color-superChat',
-      className: 'yt-chat-overlay-author-grid-color',
-    });
-    superChatPlaceholder.disabled = true;
-    superChatPlaceholder.setAttribute('aria-hidden', 'true');
-    superChatColorCell.appendChild(superChatPlaceholder);
-
-    const superChatCheckbox = domInput({ type: 'checkbox', name: 'showAuthor-superChat' });
-    superChatCheckbox.className = 'yt-chat-overlay-author-grid-checkbox';
+    const superChatCheckbox = domGridCheckbox('showAuthor-superChat');
     superChatCheckbox.setAttribute('aria-label', `${t('Show')} ${t('SuperChat')}`);
 
-    const superChatCheckboxCell = document.createElement('td');
-    superChatCheckboxCell.className = 'yt-chat-overlay-author-grid-checkbox-cell';
-    superChatCheckboxCell.appendChild(superChatCheckbox);
+    grid.append(domGridLabel(t('SuperChat')), document.createElement('span'), superChatCheckbox);
 
-    superChatRow.append(superChatLabelCell, superChatColorCell, superChatCheckboxCell);
-    tbody.appendChild(superChatRow);
-
-    table.appendChild(tbody);
-    section.appendChild(table);
+    section.appendChild(grid);
     return section;
   }
 
@@ -879,8 +677,6 @@ export class SettingsUiForm {
               this.showFieldError(el, `${t('Value adjusted to')} ${min}`);
             } else if (rawNum > max) {
               this.showFieldError(el, `${t('Value adjusted to')} ${max}`);
-            } else {
-              this.clearFieldError(el);
             }
           }
         } else {
@@ -903,20 +699,16 @@ export class SettingsUiForm {
 
     const error = document.createElement('span');
     error.className = 'yt-chat-overlay-settings-field-error';
-    error.setAttribute('role', 'alert');
-    error.id = `error-${input.name}-${Date.now()}`;
     error.textContent = message;
     input.insertAdjacentElement('afterend', error);
 
-    input.setAttribute('aria-invalid', 'true');
-    input.setAttribute('aria-describedby', error.id);
-  }
-
-  private clearFieldError(input: HTMLInputElement): void {
-    input.removeAttribute('aria-invalid');
-    input.removeAttribute('aria-describedby');
-    const error = input.parentElement?.querySelector('.yt-chat-overlay-settings-field-error');
-    error?.remove();
+    // Auto-dismiss after 3s
+    const ERROR_DISMISS_MS = 3000;
+    const timer = setTimeout(() => {
+      error.remove();
+      this.errorDismissTimeouts = this.errorDismissTimeouts.filter((t) => t !== timer);
+    }, ERROR_DISMISS_MS);
+    this.errorDismissTimeouts.push(timer);
   }
 
   getFocusableElements(): HTMLElement[] {

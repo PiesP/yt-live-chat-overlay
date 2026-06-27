@@ -8,7 +8,6 @@ interface BaseField {
   key: string;
   title?: string;
   modifier?: string;
-  hint?: string;
 }
 
 interface NumberField extends BaseField {
@@ -20,12 +19,10 @@ interface CheckboxField extends BaseField {
 interface SelectField extends BaseField {
   type: 'select';
   options: ReadonlyArray<[string, string]>;
-  hint?: string;
 }
 interface TextField extends BaseField {
   type: 'text';
   placeholder?: string;
-  hint?: string;
 }
 interface EnabledField {
   type: 'enabled';
@@ -203,7 +200,7 @@ export const PANES: PaneDef[] = [
     label: 'Appearance',
     sections: [
       {
-        title: 'Cards',
+        title: '',
         fields: [
           range(
             'SuperChat Opacity (%)',
@@ -543,11 +540,6 @@ export const PANES: PaneDef[] = [
             'showDebugOverlay',
             'Show performance debug overlay on the video player'
           ),
-          chk(
-            'Enable WebGL2',
-            'enableWebGL2',
-            'Use WebGL2 GPU-accelerated rendering for higher performance (requires page reload)'
-          ),
         ],
       },
     ],
@@ -568,8 +560,7 @@ export const PANES: PaneDef[] = [
               ['ko', '한국어'],
               ['ja', '日本語'],
               ['es', 'Español'],
-              ['zh-CN', '中文'],
-              ['ar', 'العربية'],
+              ['zh', '中文'],
             ],
             'Sets the overlay user interface language (does not filter comments by language)'
           ),
@@ -598,8 +589,7 @@ export const PANES: PaneDef[] = [
               ['ko', '한국어'],
               ['ja', '日本語'],
               ['es', 'Español'],
-              ['zh-CN', '中文'],
-              ['ar', 'العربية'],
+              ['zh', '中文'],
             ],
             "Language of the incoming chat messages. Auto-detect uses Chrome's built-in language detection."
           ),
@@ -608,12 +598,11 @@ export const PANES: PaneDef[] = [
             'translationTarget',
             [
               ['auto', 'Auto (Browser)'],
-              ['en', 'English'],
               ['ko', '한국어'],
+              ['en', 'English'],
               ['ja', '日本語'],
               ['es', 'Español'],
-              ['zh-CN', '中文'],
-              ['ar', 'العربية'],
+              ['zh', '中文'],
             ],
             'Language to translate chat messages into. Auto detects from browser settings.'
           ),
