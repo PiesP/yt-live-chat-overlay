@@ -68,10 +68,9 @@ export class TranslationService {
   private enabled = false;
   /** Serializes configure() calls to prevent overlapping translator creation. */
   private configurePromise: Promise<void> | null = null;
-  /** Priority-sorted translation queue (highest priority first, stable for equal priority). */
+  /** FIFO translation queue. */
   private translateQueue: Array<{
     text: string;
-    priority: number;
     resolve: (result: string | null) => void;
   }> = [];
   /** Whether the drain loop is currently running. */
@@ -91,7 +90,7 @@ export class TranslationService {
     (text) => text.length * 2 // UTF-16 byte estimate
   );
   /** Maximum number of entries allowed in the translate queue.
-   * When exceeded, oldest low-priority entries are dropped to prevent
+   * When exceeded, oldest entries are dropped to prevent
    * unbounded growth during sustained chat bursts. */
   private static readonly MAX_TRANSLATE_QUEUE_SIZE = 1000;
 
@@ -276,10 +275,8 @@ export class TranslationService {
   /**
    * Translate text. Returns the translation or null on failure.
    *
-   * Translations are processed via a priority queue — higher-priority
-   * messages (SuperChat, Membership) are translated before lower-priority
-   * normal text messages during chat bursts. Only one translation is
-   * in-flight at a time to prevent concurrent failures from instantly
+   * Translations are processed via a FIFO queue. Only one translation
+   * is in-flight at a time to prevent concurrent failures from instantly
    * hitting the MAX_CONSECUTIVE_FAILURES threshold and destroying the
    * translator.
    *
@@ -289,10 +286,8 @@ export class TranslationService {
    * resume without requiring user interaction (settings change, click).
    *
    * @param text The text to translate.
-   * @param priority Priority for queue ordering (higher = processed sooner).
-   *                 Default 0. SuperChat=200, Membership=100, text=0.
    */
-  async translate(text: string, priority = 0): Promise<string | null> {
+  async translate(text: string): Promise<string | null> {
     // ── Lock-free fast path: empty text and cache hits ─────────────────
     if (!text.trim()) {
       return text;
@@ -303,38 +298,17 @@ export class TranslationService {
       return cached;
     }
 
-    // ── Enqueue with priority ─────────────────────────────────────────
+    // ── Enqueue (FIFO) ────────────────────────────────────────────────
     return new Promise<string | null>((resolve) => {
-      // Drop oldest low-priority entries if the queue is at capacity.
-      // This prevents unbounded growth when the translator is slow or
-      // dead and messages keep arriving faster than they drain.
+      // Drop oldest entry if the queue is at capacity.
       if (this.translateQueue.length >= TranslationService.MAX_TRANSLATE_QUEUE_SIZE) {
-        // Find the oldest entry with the lowest priority (end of queue).
-        let dropIdx = this.translateQueue.length - 1;
-        let minPriority = this.translateQueue[dropIdx]?.priority ?? 0;
-        for (let i = this.translateQueue.length - 2; i >= 0; i--) {
-          const p = this.translateQueue[i]?.priority ?? 0;
-          if (p < minPriority) {
-            minPriority = p;
-            dropIdx = i;
-          }
-        }
-        const dropped = this.translateQueue.splice(dropIdx, 1)[0];
+        const dropped = this.translateQueue.shift();
         if (dropped) dropped.resolve(null);
         log.debug(
-          `Translate queue at capacity (${TranslationService.MAX_TRANSLATE_QUEUE_SIZE}) — dropped oldest low-priority entry (priority=${minPriority})`
+          `Translate queue at capacity (${TranslationService.MAX_TRANSLATE_QUEUE_SIZE}) — dropped oldest entry`
         );
       }
-      const entry = { text, priority, resolve };
-      // Binary insertion to maintain priority order (highest first).
-      // O(log n) search + O(n) shift is better than O(n log n) sort on
-      // every enqueue during high-frequency chat bursts.
-      const insertIdx = this.translateQueue.findIndex((q) => q.priority < priority);
-      if (insertIdx === -1) {
-        this.translateQueue.push(entry);
-      } else {
-        this.translateQueue.splice(insertIdx, 0, entry);
-      }
+      this.translateQueue.push({ text, resolve });
       if (!this.drainActive) {
         this.drainActive = true;
         this.drainQueue();
@@ -343,7 +317,7 @@ export class TranslationService {
   }
 
   /**
-   * Drain the priority queue one item at a time.
+   * Drain the queue one item at a time.
    * Only one drain loop runs at a time (guarded by drainActive).
    */
   private async drainQueue(): Promise<void> {

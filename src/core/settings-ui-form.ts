@@ -20,7 +20,6 @@ import {
 } from '@core/settings-schema';
 import type { AuthorGridField, FieldDef, PaneDef } from '@core/settings-ui-panes';
 import { PANES } from '@core/settings-ui-panes';
-import { TranslationService } from '@core/translation-service';
 
 const log = createLogger('SettingsUiForm');
 
@@ -454,17 +453,6 @@ export class SettingsUiForm {
     pane.tabIndex = -1;
     if (def.id !== 'comments') pane.hidden = true;
 
-    // Translation tab: show unsupported message when browser lacks Translator API.
-    if (def.id === 'translation' && !TranslationService.isSupported()) {
-      const msg = domDiv('yt-chat-overlay-settings-unsupported');
-      msg.setAttribute('role', 'note');
-      msg.textContent = t(
-        'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.'
-      );
-      pane.appendChild(msg);
-      return pane;
-    }
-
     for (const section of def.sections) {
       const authorGridField = section.fields.find(
         (f): f is AuthorGridField => f.type === 'author-grid'
@@ -640,11 +628,7 @@ export class SettingsUiForm {
     const grid = domDiv('yt-chat-overlay-author-grid');
     grid.setAttribute('role', 'grid');
     grid.setAttribute('aria-label', t('Author colors and visibility'));
-    // Inline styles prevent page CSS from overriding grid layout
-    grid.style.display = 'grid';
-    grid.style.gridTemplateColumns = '1fr 36px 28px';
-    grid.style.gap = '8px 12px';
-    grid.style.alignItems = 'center';
+    // Grid layout defined in CSS (no !important needed since page CSS doesn't override)
 
     // Header row
     const headerRow = document.createElement('div');

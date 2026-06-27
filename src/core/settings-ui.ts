@@ -53,6 +53,11 @@ export class SettingsUi {
   private readonly form: SettingsUiForm;
 
   private handleKeydown = (event: KeyboardEvent) => {
+    if (event.shiftKey && event.altKey && event.key === 's') {
+      event.preventDefault();
+      this.open();
+      return;
+    }
     if (event.key === 'Escape') {
       this.close();
     }
@@ -107,19 +112,19 @@ export class SettingsUi {
     });
   }
 
-  /** Debounced live preview — applies settings immediately (memory only, no storage write). */
-  private previewTimer: ReturnType<typeof setTimeout> | null = null;
-  private static readonly PREVIEW_DEBOUNCE_MS = 100;
+  /** Coalesced live preview via requestAnimationFrame. */
+  private previewPending = false;
 
   private queuePreview(): void {
-    this.previewTimer = clearSafeTimeout(this.previewTimer);
-    this.previewTimer = setTimeout(() => {
-      this.previewTimer = null;
+    if (this.previewPending) return;
+    this.previewPending = true;
+    requestAnimationFrame(() => {
+      this.previewPending = false;
       const preview = this.form.collectSettings();
       this.onChange(preview);
       // Sync form with normalized values from the settings system
       this.form.populateForm(this.getSettings());
-    }, SettingsUi.PREVIEW_DEBOUNCE_MS);
+    });
   }
 
   async attach(): Promise<void> {
@@ -139,6 +144,7 @@ export class SettingsUi {
     this.ensureButton(player);
     this.ensureModal();
     this.close();
+    document.addEventListener('keydown', this.handleKeydown);
   }
 
   close(): void {
@@ -156,9 +162,6 @@ export class SettingsUi {
     // writes settings to storage — preview (memory only) never writes.
     // Covers: X button, Close button, Escape, backdrop click, and
     // SPA navigation (destroy() calls close()).
-    if (this.previewTimer !== null) {
-      this.previewTimer = clearSafeTimeout(this.previewTimer);
-    }
     const persist = this.onPersist ?? this.onChange;
     persist(this.form.collectSettings());
     this.setDialogOpen(false);
@@ -474,28 +477,27 @@ export class SettingsUi {
     this.switchTab(savedTab);
   }
 
-  /** Create a reusable confirmation dialog overlay for destructive actions. */
+  /** Create a reusable confirmation dialog using native <dialog> element. */
   private createConfirmDialog(options: {
     message: string;
     confirmLabel: string;
     onConfirm: () => void;
-  }): HTMLDivElement {
-    const dialogId = `yt-chat-overlay-settings-confirm-${Date.now()}`;
-    const dialog = document.createElement('div');
+  }): HTMLDialogElement {
+    const dialog = document.createElement('dialog');
     dialog.className = 'yt-chat-overlay-settings-confirm';
-    dialog.id = dialogId;
-    dialog.setAttribute('role', 'alertdialog');
     dialog.setAttribute('aria-modal', 'true');
-    dialog.setAttribute('aria-label', t(options.message));
+    dialog.setAttribute('aria-labelledby', 'yt-chat-overlay-confirm-title');
+    dialog.setAttribute('aria-describedby', 'yt-chat-overlay-confirm-msg');
 
-    const backdrop = document.createElement('div');
-    backdrop.className = 'yt-chat-overlay-settings-confirm-backdrop';
+    const title = document.createElement('h2');
+    title.id = 'yt-chat-overlay-confirm-title';
+    title.className = 'yt-chat-overlay-settings-confirm-title';
+    title.textContent = t('Confirm');
 
     const message = document.createElement('p');
+    message.id = 'yt-chat-overlay-confirm-msg';
     message.className = 'yt-chat-overlay-settings-confirm-message';
-    message.id = `yt-chat-overlay-confirm-msg-${Date.now()}`;
     message.textContent = t(options.message);
-    dialog.setAttribute('aria-describedby', message.id);
 
     const buttons = document.createElement('div');
     buttons.className = 'yt-chat-overlay-settings-confirm-buttons';
@@ -511,43 +513,30 @@ export class SettingsUi {
     okBtn.textContent = t(options.confirmLabel);
 
     buttons.append(cancelBtn, okBtn);
-    dialog.append(backdrop, message, buttons);
+    dialog.append(title, message, buttons);
 
     const triggerElement = this.button;
 
-    const handleConfirmKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        event.stopPropagation();
-        dialog.remove();
-        triggerElement?.focus();
-        return;
-      }
-      if (event.key === 'Tab') {
-        this.trapFocusConfirm(event, dialog);
-      }
-    };
+    dialog.addEventListener('cancel', (event) => {
+      event.preventDefault();
+      triggerElement?.focus();
+    });
 
     cancelBtn.addEventListener('click', () => {
-      dialog.remove();
+      dialog.close();
       triggerElement?.focus();
     });
     okBtn.addEventListener('click', () => {
-      dialog.remove();
+      dialog.close();
       options.onConfirm();
       triggerElement?.focus();
     });
-    dialog.addEventListener('keydown', handleConfirmKeyDown);
 
-    cancelBtn.focus();
     return dialog;
   }
 
   private handleReset(): void {
     if (!this.modal) return;
-
-    const existing = this.modal.querySelector('.yt-chat-overlay-settings-confirm');
-    if (existing) existing.remove();
 
     const dialog = this.createConfirmDialog({
       message: 'Reset all settings to defaults?',
@@ -559,6 +548,7 @@ export class SettingsUi {
     });
 
     this.modal.appendChild(dialog);
+    dialog.showModal();
   }
 
   private handleExport(): void {
@@ -634,32 +624,6 @@ export class SettingsUi {
     this.modal.focus();
   }
 
-  private trapFocusConfirm(event: KeyboardEvent, container: HTMLElement): void {
-    const focusableElements = Array.from(
-      container.querySelectorAll<HTMLElement>(
-        'input:not([disabled]), select:not([disabled]), button, [tabindex]:not([tabindex="-1"])'
-      )
-    );
-    if (focusableElements.length === 0) {
-      event.preventDefault();
-      return;
-    }
-    const first = focusableElements[0];
-    const last = focusableElements[focusableElements.length - 1];
-    if (!first || !last) return;
-    const activeElement = document.activeElement;
-    const isShiftTab = event.shiftKey;
-    if (isShiftTab && activeElement === first) {
-      event.preventDefault();
-      last.focus();
-      return;
-    }
-    if (!isShiftTab && activeElement === last) {
-      event.preventDefault();
-      first.focus();
-    }
-  }
-
   /** Show a transient toast notification in the settings modal. */
   private toastTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -685,9 +649,7 @@ export class SettingsUi {
     // saved only when the user explicitly closes the dialog (Close button,
     // Escape, backdrop click). Implicit teardown from SPA navigation, page
     // refresh, or App.stop() must NOT write to storage.
-    if (this.previewTimer !== null) {
-      this.previewTimer = clearSafeTimeout(this.previewTimer);
-    }
+    document.removeEventListener('keydown', this.handleKeydown);
     this.button?.remove();
     this.reloadButton?.remove();
     this.clearReloadFeedbackTimer();

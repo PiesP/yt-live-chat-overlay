@@ -455,12 +455,12 @@ export const SETTINGS_UI_STYLES = `
         cursor: pointer;
         accent-color: ${uiColors.primary};
       }
-      /* Author grid — !important prevents page CSS from overriding */
+      /* Author grid */
       .yt-chat-overlay-author-grid {
-        display: grid !important;
-        grid-template-columns: 1fr 36px 28px !important;
-        gap: 8px 12px !important;
-        align-items: center !important;
+        display: grid;
+        grid-template-columns: 1fr 36px 28px;
+        gap: 8px 12px;
+        align-items: center;
       }
       .yt-chat-overlay-author-grid-header {
         font-size: ${typography.fontSize.xs};
