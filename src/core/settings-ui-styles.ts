@@ -455,12 +455,12 @@ export const SETTINGS_UI_STYLES = `
         cursor: pointer;
         accent-color: ${uiColors.primary};
       }
-      /* Author grid */
+      /* Author grid — !important prevents page CSS from overriding */
       .yt-chat-overlay-author-grid {
-        display: grid;
-        grid-template-columns: 1fr 36px 28px;
-        gap: 8px 12px;
-        align-items: center;
+        display: grid !important;
+        grid-template-columns: 1fr 36px 28px !important;
+        gap: 8px 12px !important;
+        align-items: center !important;
       }
       .yt-chat-overlay-author-grid-header {
         font-size: ${typography.fontSize.xs};
@@ -470,12 +470,25 @@ export const SETTINGS_UI_STYLES = `
       .yt-chat-overlay-author-grid-label {
         font-size: ${typography.fontSize.sm};
       }
-      .yt-chat-overlay-author-grid-color {
-        justify-self: center;
+      .yt-chat-overlay-author-grid-color-cell {
+        justify-self: center !important;
+        width: 32px !important;
+        height: 28px !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+      }
+      .yt-chat-overlay-author-grid-checkbox-cell {
+        justify-self: center !important;
+        width: 28px !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
       }
       .yt-chat-overlay-author-grid-checkbox-cell > input[type="checkbox"] {
-        width: 20px;
-        height: 20px;
+        width: 20px !important;
+        height: 20px !important;
+        min-width: 20px !important;
         cursor: pointer;
         accent-color: ${uiColors.primary};
       }
