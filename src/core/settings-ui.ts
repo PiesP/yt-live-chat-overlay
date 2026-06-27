@@ -162,6 +162,7 @@ export class SettingsUi {
     const persist = this.onPersist ?? this.onChange;
     persist(this.form.collectSettings());
     this.setDialogOpen(false);
+    this.modal?.close();
 
     this.unlockBodyScroll();
 
