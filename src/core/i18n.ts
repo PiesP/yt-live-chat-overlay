@@ -56,7 +56,7 @@ const LANGUAGE_PATTERNS: ReadonlyArray<[SupportedLanguage, RegExp]> = [
   ['ko', /^ko\b/i],
   ['ja', /^ja\b/i],
   ['es', /^es\b/i],
-  ['zh-CN', /^zh\b/i],
+  ['zh-CN', /^(?:zh-TW|zh-HK|zh)\b/i],
   ['ar', /^ar\b/i],
 ];
 

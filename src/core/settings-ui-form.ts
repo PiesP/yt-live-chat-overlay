@@ -312,8 +312,7 @@ export class SettingsUiForm {
 
   /**
    * Keyboard shortcuts for number inputs:
-   *   Shift+↑/↓       → ±10 × step
-   *   Ctrl+Shift+↑/↓  → ±100 × step
+   *   Shift+↑/↓  → ±10 × step
    *
    * Without modifiers, ↑/↓ uses the browser's native ±1 step behavior.
    * YouTube shortcuts are naturally suppressed because the focused input
@@ -332,11 +331,10 @@ export class SettingsUiForm {
       else if (event.key === 'ArrowDown') direction = -1;
       else return;
 
-      // Without modifiers, let the browser handle native ↑/↓ (±1 step)
-      if (!event.shiftKey && !event.ctrlKey && !event.metaKey) return;
+      // Only Shift modifier: ±10 step. Ctrl/Cmd without Shift is ignored.
+      if (!event.shiftKey || event.ctrlKey || event.metaKey) return;
 
-      const scale = event.ctrlKey || event.metaKey ? 100 : 10;
-      const delta = direction * step * scale;
+      const delta = direction * step * 10;
 
       event.preventDefault();
       const min = target.min ? parseFloat(target.min) : -Infinity;

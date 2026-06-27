@@ -24,8 +24,19 @@ import { SETTINGS_UI_STYLES } from '@core/settings-ui-styles';
 
 const log = createLogger('SettingsUi');
 
-const TOAST_DURATION_MS = 2500;
 const RELOAD_FEEDBACK_DURATION_MS = 1500;
+const TOAST_DURATION_BASE_MS = 2500;
+const TOAST_DURATION_PER_CHAR_MS = 50;
+const TOAST_DURATION_MAX_MS = 8000;
+const TOAST_DURATION_THRESHOLD_CHARS = 40;
+
+function getToastDuration(message: string): number {
+  return Math.min(
+    TOAST_DURATION_MAX_MS,
+    TOAST_DURATION_BASE_MS +
+      Math.max(0, message.length - TOAST_DURATION_THRESHOLD_CHARS) * TOAST_DURATION_PER_CHAR_MS
+  );
+}
 
 export class SettingsUi {
   private playerElement: HTMLElement | null = null;
@@ -558,7 +569,13 @@ export class SettingsUi {
     const a = document.createElement('a');
     a.href = `data:application/json;charset=utf-8,${encoded}`;
     a.download = 'yt-chat-overlay-settings.json';
-    a.click();
+    try {
+      a.click();
+    } catch (error: unknown) {
+      log.warn('Export failed: download blocked', error);
+      this.showToast(t('Export failed: download blocked'), true);
+      return;
+    }
     this.showToast(t('Settings exported successfully'));
   }
 
@@ -573,11 +590,27 @@ export class SettingsUi {
       reader.addEventListener('load', () => {
         try {
           const text = reader.result;
-          if (typeof text !== 'string') return;
+          if (typeof text !== 'string') {
+            this.showToast(t('Import failed: unreadable file'), true);
+            log.warn('Import failed: reader result was not a string');
+            return;
+          }
           const parsed = JSON.parse(text) as Record<string, unknown>;
           if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
             this.showToast(t('Import failed: invalid settings format'), true);
             log.warn('Import failed: expected a settings object');
+            return;
+          }
+
+          // Validate that the file looks like a settings export
+          if (
+            typeof parsed._version !== 'number' &&
+            typeof parsed.comments !== 'object' &&
+            typeof parsed.superChats !== 'object' &&
+            typeof parsed.memberships !== 'object'
+          ) {
+            this.showToast(t('Import failed: not a settings file'), true);
+            log.warn('Import failed: file does not contain recognized settings keys');
             return;
           }
 
@@ -598,6 +631,10 @@ export class SettingsUi {
           this.showToast(t('Import failed: invalid JSON'), true);
           log.warn('Import failed: invalid JSON file', error);
         }
+      });
+      reader.addEventListener('error', () => {
+        log.warn('Import failed: file read error', reader.error);
+        this.showToast(t('Import failed: could not read file'), true);
       });
       reader.readAsText(file);
     });
@@ -641,7 +678,7 @@ export class SettingsUi {
     this.toastTimer = setTimeout(() => {
       toast.remove();
       this.toastTimer = null;
-    }, TOAST_DURATION_MS);
+    }, getToastDuration(message));
   }
 
   destroy(): void {

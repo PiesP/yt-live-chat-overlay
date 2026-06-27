@@ -84,6 +84,10 @@ export class TranslationService {
   /** Number of death→recovery cycles this session. Capped to prevent noise. */
   private recoveryCycleCount = 0;
   private static readonly MAX_RECOVERY_CYCLES = 3;
+  /** Timestamp of the last successful translation. Used to time-base-reset recovery cycles. */
+  private lastSuccessTimestamp = 0;
+  /** If more than this many ms have passed since last success, reset recoveryCycleCount. */
+  private static readonly RECOVERY_RESET_MS = 300_000; // 5 minutes
   /** Translation result cache with LRU eviction to keep frequently repeated short text (e.g. "LOL", "ㅋㅋㅋ"). */
   private readonly translationCache = new ByteLimitedCache<string>(
     50_000, // ~50KB (equivalent to ~2500 average chat messages)
@@ -240,6 +244,7 @@ export class TranslationService {
       this.pendingTarget = null;
       this.consecutiveFailures = 0;
       this.recoveryCycleCount = 0;
+      this.lastSuccessTimestamp = 0;
       log.info(`Translator ready: ${sourceLanguage} → ${targetLanguage}`);
     } catch (err: unknown) {
       // create() may fail if user activation was missing (NotAllowedError)
@@ -339,6 +344,14 @@ export class TranslationService {
       // preserve pendingSource/pendingTarget so onUserActivation() (called
       // from click handlers) can recover when the user next interacts.
       if (!this.translator && this.enabled && this.pendingSource && this.pendingTarget) {
+        // Time-based reset: if translations were working recently, allow fresh recovery attempts.
+        if (
+          this.lastSuccessTimestamp > 0 &&
+          Date.now() - this.lastSuccessTimestamp > TranslationService.RECOVERY_RESET_MS
+        ) {
+          log.debug('Recovery cycle count reset — last success was over 5 minutes ago');
+          this.recoveryCycleCount = 0;
+        }
         if (this.recoveryCycleCount >= TranslationService.MAX_RECOVERY_CYCLES) {
           log.warn(
             `Translator died ${this.recoveryCycleCount} times — disabling auto-recovery for this session. Open settings and click Save to retry.`
@@ -369,6 +382,7 @@ export class TranslationService {
       try {
         const result = await this.translator.translate(entry.text);
         this.consecutiveFailures = 0;
+        this.lastSuccessTimestamp = Date.now();
         this.translationCache.set(entry.text, result);
         entry.resolve(result);
       } catch (err: unknown) {
@@ -432,6 +446,7 @@ export class TranslationService {
     this.enabled = false;
     this.consecutiveFailures = 0;
     this.recoveryCycleCount = 0;
+    this.lastSuccessTimestamp = 0;
     // Resolve all pending translate() callers with null before clearing the queue.
     // Without this, any caller awaiting translate() has a Promise that never settles,
     // causing a Promise leak that retains closures and their entire scope chain.
