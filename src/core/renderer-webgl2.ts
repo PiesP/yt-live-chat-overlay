@@ -388,6 +388,19 @@ export class RendererWebGL2 extends RendererBase {
       this.atlasReady = true;
       this.atlasGenerating = false;
       log.info(`Atlas ready: ${this.atlas.glyphs.size} glyphs`);
+      // Restart the render loop if there is pending work and we are not paused.
+      // This covers the edge case where onResume() was called while the atlas
+      // was still regenerating (e.g., context loss during pause + restore
+      // before tab resume). Without this, queued messages would sit unrendered
+      // until the next addMessage() triggers a 0→1 queue transition.
+      if (
+        this.animFrameId === null &&
+        !this.isPaused &&
+        !this.isVideoPaused &&
+        (!this.pendingQueue.isEmpty || this.messages.length > 0 || this.retryQueue.length > 0)
+      ) {
+        this.startRenderLoop();
+      }
     } catch (e: unknown) {
       log.warn('Atlas failed:', e);
       this.atlasGenerating = false;
@@ -544,7 +557,11 @@ export class RendererWebGL2 extends RendererBase {
     if (this.animFrameId !== null) return;
     const loop = (t: number) => {
       this.animFrameId = requestAnimationFrame(loop);
-      if (!this.atlasReady || this.isPaused || this.isVideoPaused) return;
+      // atlasReady is the only guard needed here: isPaused/isVideoPaused
+      // are enforced externally by onPause() cancelling the rAF, so the
+      // loop is never Running while paused. atlasReady can flip asynchronously
+      // when the atlas finishes generating after context restore.
+      if (!this.atlasReady) return;
       this.renderFrame(t);
     };
     this.animFrameId = requestAnimationFrame(loop);
