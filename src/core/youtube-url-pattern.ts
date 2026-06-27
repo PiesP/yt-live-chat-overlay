@@ -16,11 +16,11 @@ declare const URLPattern: {
 const hasURLPattern = typeof URLPattern !== 'undefined';
 
 const watchPattern = hasURLPattern
-  ? new URLPattern({ hostname: '*.youtube.com', pathname: '/watch' })
+  ? new URLPattern({ hostname: '(www.)?youtube.com', pathname: '/watch' })
   : null;
 
 const livePattern = hasURLPattern
-  ? new URLPattern({ hostname: '*.youtube.com', pathname: '/live/*' })
+  ? new URLPattern({ hostname: '(www.)?youtube.com', pathname: '/live/*' })
   : null;
 
 export function isYouTubeWatch(url: string): boolean {
