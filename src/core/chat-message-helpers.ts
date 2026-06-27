@@ -31,7 +31,7 @@ export const AUTHOR_TYPE_PRIORITY: Record<AuthorType, number> = {
  * are also detected.
  */
 export const EMOJI_TEXT_PATTERN = /\p{Emoji}/u;
-export const EMOJI_ALIAS_PATTERN = /^:[^:\\s][^:]*:$/u;
+export const EMOJI_ALIAS_PATTERN = /^:[^:\s][^:]*:$/u;
 
 /** Strip ASCII control characters (U+0000–U+001F, U+007F–U+009F) from text. */
 export function stripControlCharacters(text: string): string {
