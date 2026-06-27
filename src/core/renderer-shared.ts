@@ -302,7 +302,7 @@ export function computeMessageOpacity(
     opacity *= config.depthFarOpacityMul;
   }
 
-  const ageRatio = Math.min(1, elapsed * config.ageFadeRate);
+  const ageRatio = isScrolling ? Math.min(1, elapsed * config.ageFadeRate) : 0;
   opacity *= Math.max(0, 1 - ageRatio);
 
   return opacity;

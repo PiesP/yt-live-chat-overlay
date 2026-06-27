@@ -39,7 +39,7 @@
 
 // ── Imports ──
 import { computeOutlineColor } from '@core/color-utils';
-import { rendererLayout } from '@core/design-tokens';
+import { computeScrollDuration, rendererLayout } from '@core/design-tokens';
 import {
   buildLaneHeap,
   commitPlacementShared,
@@ -100,6 +100,9 @@ interface WorkerConfig {
   maxMessageAgeMs: number;
   danmakuMode: string;
   scrollDurationMaxMs: number;
+  scrollDurationMinMs: number;
+  exitPaddingPx: number;
+  speedPxPerSec: number;
   queueMaxSize: number;
   outlineWidthPx: number;
   outlineOpacity: number;
@@ -109,6 +112,8 @@ interface WorkerConfig {
   safeBottom: number;
   backlogSpeedMultiplier: number;
   depthLayersEnabled: boolean;
+  depthFarSpeedMul: number;
+  depthNearSpeedMul: number;
   depthFarOpacityMul: number;
   backlogOpacityMultiplier: number;
   showAuthor: boolean;
@@ -303,14 +308,8 @@ class WebGL2RenderWorker {
   }
 
   private getWorkerMessagePriority(msg: WorkerMessage): number {
-    switch (msg.kind) {
-      case 'superchat':
-        return 200;
-      case 'membership':
-        return 100;
-      default:
-        return msg.isBacklog ? -50 : 0;
-    }
+    const kindBase = rendererLayout.kindPriority[msg.kind] ?? 0;
+    return kindBase + (msg.isBacklog ? -50 : 0);
   }
 
   // ── WebGL Setup ──
@@ -405,6 +404,8 @@ class WebGL2RenderWorker {
 
       this.pendingQueue.dequeue();
 
+      const isScrolling = cfg.danmakuMode === 'scroll' || cfg.danmakuMode === 'reverse';
+
       const startX =
         cfg.danmakuMode === 'reverse'
           ? -w
@@ -413,6 +414,37 @@ class WebGL2RenderWorker {
             : (this.cssWidth - w) / 2;
 
       const now2 = performance.now();
+
+      // Compute speed-aware scroll duration matching CanvasRenderer
+      let msgDuration: number;
+      if (isScrolling) {
+        let speed = cfg.speedPxPerSec;
+        const effectiveTier = speedTier as number;
+        if (effectiveTier === SPEED_TIER.FAR) {
+          speed = Math.max(30, speed * (cfg.depthFarSpeedMul ?? 1));
+        } else if (effectiveTier === SPEED_TIER.NEAR) {
+          speed *= cfg.depthNearSpeedMul ?? 1;
+        } else if (effectiveTier === SPEED_TIER.BACKLOG) {
+          speed *= cfg.backlogSpeedMultiplier;
+        }
+        // MID: no multiplier
+        const totalDistance =
+          cfg.danmakuMode === 'scroll'
+            ? startX + w + (cfg.exitPaddingPx ?? 0)
+            : this.cssWidth - startX + (cfg.exitPaddingPx ?? 0);
+        msgDuration =
+          speed > 0
+            ? computeScrollDuration(
+                totalDistance,
+                speed,
+                cfg.scrollDurationMinMs,
+                cfg.scrollDurationMaxMs,
+                cfg.exitPaddingPx ?? 0
+              )
+            : cfg.scrollDurationMinMs;
+      } else {
+        msgDuration = this.cssWidth > 0 ? cfg.scrollDurationMaxMs : cfg.scrollDurationMinMs;
+      }
 
       const active: ActiveMessage = {
         message: msg,
@@ -423,7 +455,7 @@ class WebGL2RenderWorker {
         startX,
         startTime: now2,
         pausedDuration: 0,
-        duration: cfg.scrollDurationMaxMs,
+        duration: msgDuration,
         fadeStartTime: now2,
         laneIndex: placement.laneIndex,
         speedTier,
@@ -436,7 +468,7 @@ class WebGL2RenderWorker {
         placement.laneIndex,
         slotCount,
         now2,
-        cfg.scrollDurationMaxMs,
+        msgDuration,
         speedTier,
         Math.ceil(w)
       );

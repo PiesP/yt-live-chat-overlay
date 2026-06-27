@@ -38,24 +38,6 @@ const getLocalizedName = (lang: string): string =>
             ? 'Español'
             : 'English';
 
-/**
- * Calculate overlay dimensions from an HTMLElement's offsetWidth/offsetHeight.
- *
- * @deprecated Forces synchronous layout reflow. Use
- *   {@link calculateOverlayDimensionsFromRect} with a ResizeObserver's
- *   contentRect instead to avoid layout thrashing.
- */
-const calculateOverlayDimensions = (playerElement: HTMLElement): OverlayDimensions | null => {
-  const width = playerElement.offsetWidth;
-  const height = playerElement.offsetHeight;
-
-  if (width === 0 || height === 0) {
-    return null;
-  }
-
-  return { width, height };
-};
-
 const calculateOverlayDimensionsFromRect = (
   width: number,
   height: number
@@ -124,10 +106,15 @@ export class Overlay {
   }
 
   private updateDimensions(): void {
-    const nextDimensions =
-      !this.playerElement || !this.container || !this.settings
-        ? null
-        : calculateOverlayDimensions(this.playerElement);
+    if (!this.playerElement || !this.container || !this.settings) {
+      if (this.dimensions !== null) {
+        this.dimensions = null;
+        this.notifyDimensionChangeCallbacks();
+      }
+      return;
+    }
+    const rect = this.container.getBoundingClientRect();
+    const nextDimensions = calculateOverlayDimensionsFromRect(rect.width, rect.height);
 
     if (areOverlayDimensionsEqual(this.dimensions, nextDimensions)) {
       return;

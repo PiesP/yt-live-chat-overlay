@@ -10,7 +10,7 @@
 import type { ChatMessage, OverlaySettings } from '@app-types';
 import { drawAuthorPhoto, drawRoundRect } from '@core/canvas-rendering-shared';
 import { computeOutlineColor } from '@core/color-utils';
-import { rendererLayout } from '@core/design-tokens';
+import { rendererLayout, statusBarLayout } from '@core/design-tokens';
 import type { LanePlacement } from '@core/lane-allocator';
 import { createLogger } from '@core/logging';
 import type { Overlay } from '@core/overlay';
@@ -680,6 +680,11 @@ export class RendererWebGL2 extends RendererBase {
             }
           }
         }
+
+        // Connection status indicator (non-connected states)
+        if (this.connectionStatus !== 'connected') {
+          this.drawStatusBar();
+        }
       }
     } catch (err) {
       log.error('WebGL2 renderFrame error:', err);
@@ -811,9 +816,53 @@ export class RendererWebGL2 extends RendererBase {
 
   setConnectionStatus(status: ConnectionStatus): void {
     this.connectionStatus = status;
-    // WebGL2 renderer: status bar not yet implemented on this path.
-    // This satisfies the interface contract for dual-path consistency.
-    void this.connectionStatus; // consumed once status bar rendering is implemented
+    // Trigger a render frame so the status indicator appears immediately
+    // even if the render loop is idle (no active messages).
+    if (status !== 'connected' && this.animFrameId === null) {
+      this.startRenderLoop();
+    }
+  }
+
+  /**
+   * Draw a minimal connection status indicator on the Canvas2D overlay.
+   * Renders a small pill at the bottom-center of the viewport.
+   */
+  private drawStatusBar(): void {
+    if (!this.ctx2d) return;
+    const ctx = this.ctx2d;
+    const cfg = statusBarLayout;
+    const text = this.connectionStatus.toUpperCase();
+    ctx.font = `${cfg.fontSize}px system-ui, sans-serif`;
+    const textW = ctx.measureText(text).width;
+    const dotR = cfg.dotRadius;
+    const dotGap = cfg.dotGap;
+    const padX = cfg.paddingX;
+    const padY = cfg.paddingY;
+    const pillW = padX * 2 + dotR * 2 + dotGap + textW;
+    const pillH = cfg.fontSize + padY * 2;
+    const x = (this.cssWidth - pillW) / 2;
+    const y = this.cssHeight - pillH - cfg.bottomOffset;
+
+    const colors = cfg.colors[this.connectionStatus] ?? cfg.colors.disconnected;
+
+    // Pill background
+    ctx.globalAlpha = 0.9;
+    ctx.fillStyle = colors.bg;
+    drawRoundRect(ctx, x, y, pillW, pillH, cfg.pillRadius);
+    ctx.fill();
+
+    // Status dot
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = colors.dot;
+    ctx.beginPath();
+    ctx.arc(x + padX + dotR, y + pillH / 2, dotR, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Status text
+    ctx.fillStyle = colors.text;
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, x + padX + dotR * 2 + dotGap, y + pillH / 2);
+    ctx.globalAlpha = 1;
   }
 
   protected onPause(): void {
