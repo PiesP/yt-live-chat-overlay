@@ -71,9 +71,9 @@ const uiSizing = {
   buttonFontSize: 18,
   inputWidth: 86,
   colorSwatch: 44,
-  modalWidth: 400,
+  modalWidth: 340,
   modalMaxVW: 92,
-  modalMaxWidth: 420,
+  modalMaxWidth: 460,
   modalMaxVH: 82,
   confirmMinWidth: 240,
   checkboxSize: 44,
@@ -89,8 +89,8 @@ const animDuration = {
   slow: '0.18s',
   transitions: {
     button: 'opacity 0.15s, background 0.15s, transform 0.1s',
-    action: 'background 0.15s, color 0.15s, border-color 0.15s',
-    tab: 'color 0.1s',
+    action: 'background 0.15s, color 0.15s, border-color 0.15s, transform 0.1s',
+    tab: 'color 0.1s, transform 0.1s',
   },
 } as const;
 
@@ -135,11 +135,6 @@ export const SETTINGS_UI_STYLES = `
           transform: scale(1.1);
         }
         &:focus-visible {
-          outline: 2px solid ${uiColors.primary};
-          outline-offset: 2px;
-        }
-        /* Always visible focus indicator for settings button */
-        &:focus {
           outline: 2px solid ${uiColors.primary};
           outline-offset: 2px;
           opacity: 1;
@@ -210,7 +205,7 @@ export const SETTINGS_UI_STYLES = `
         to { transform: scale(1); opacity: 1; }
       }
       .yt-chat-overlay-settings-modal {
-        width: ${uiSizing.modalWidth}px;
+        width: clamp(${uiSizing.modalWidth}px, ${uiSizing.modalMaxVW}vw, ${uiSizing.modalMaxWidth}px);
         max-width: min(${uiSizing.modalMaxVW}vw, ${uiSizing.modalMaxWidth}px);
         max-height: ${uiSizing.modalMaxVH}vh;
         overflow: hidden;
@@ -231,7 +226,7 @@ export const SETTINGS_UI_STYLES = `
         background: rgba(0, 0, 0, ${uiSizing.scrimAlpha});
       }
       /* Container query: narrow modal reduces padding and hides tab labels */
-      @container (max-width: 320px) {
+      @container (max-width: 440px) {
         .yt-chat-overlay-settings-modal {
           padding: ${spacing.md}px;
           gap: ${spacing.sm}px;
@@ -309,6 +304,9 @@ export const SETTINGS_UI_STYLES = `
           color: ${uiColors.primary};
           border-bottom-color: ${uiColors.primary};
         }
+        &:active {
+          transform: scale(0.97);
+        }
       }
       /* Tab panes */
       .yt-chat-overlay-settings-pane {
@@ -360,6 +358,13 @@ export const SETTINGS_UI_STYLES = `
         justify-content: space-between;
         gap: ${spacing.md}px;
         font-size: ${typography.fontSize.sm};
+        min-width: 0;
+      }
+      .yt-chat-overlay-settings-field > span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        min-width: 0;
       }
       .yt-chat-overlay-settings-field input[type="number"] {
         width: ${uiSizing.inputWidth}px;
@@ -507,12 +512,18 @@ export const SETTINGS_UI_STYLES = `
         outline: 2px solid ${uiColors.primary};
         outline-offset: 1px;
       }
+      .yt-chat-overlay-settings-actions button:active {
+        transform: scale(0.97);
+      }
       .yt-chat-overlay-settings-actions button[data-action="close"] {
         background: ${uiColors.primary};
         color: ${uiColors.text};
       }
       .yt-chat-overlay-settings-actions button[data-action="close"]:hover {
         background: ${uiColors.primaryHover};
+      }
+      .yt-chat-overlay-settings-actions button[data-action="close"]:active {
+        transform: scale(0.97);
       }
 
       /* Reset confirmation dialog */
@@ -566,12 +577,20 @@ export const SETTINGS_UI_STYLES = `
       .yt-chat-overlay-settings-confirm-cancel:hover {
         color: ${uiColors.text};
       }
+      .yt-chat-overlay-settings-confirm-cancel:focus-visible {
+        outline: 2px solid ${uiColors.primary};
+        outline-offset: 1px;
+      }
       .yt-chat-overlay-settings-confirm-ok {
         background: ${uiColors.danger};
         color: ${uiColors.text};
       }
       .yt-chat-overlay-settings-confirm-ok:hover {
         background: ${uiColors.dangerHover};
+      }
+      .yt-chat-overlay-settings-confirm-ok:focus-visible {
+        outline: 2px solid ${uiColors.primary};
+        outline-offset: 1px;
       }
       /* Toast notification */
       .yt-chat-overlay-settings-toast {
@@ -587,9 +606,6 @@ export const SETTINGS_UI_STYLES = `
         z-index: 2;
         pointer-events: none;
         animation: yt-overlay-fade-in ${animDuration.normal} ease-out;
-      }
-      .yt-chat-overlay-settings-toast:hover {
-        animation-play-state: paused;
       }
       .yt-chat-overlay-settings-unsupported {
         padding: ${spacing.lg}px;
@@ -778,8 +794,9 @@ export const SETTINGS_UI_STYLES = `
           color: #ffffff;
         }
         .yt-chat-overlay-settings-toast {
-          background: rgba(0, 0, 0, 0.8);
-          color: #ffffff;
+          background: rgba(255, 255, 255, 0.95);
+          color: #1a1a1a;
+          border: 1px solid #d0d0d0;
         }
         .yt-chat-overlay-settings-field-hint {
           color: #555555;

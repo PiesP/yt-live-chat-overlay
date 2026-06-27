@@ -78,10 +78,12 @@ function domField(labelText: string, control: HTMLElement): HTMLLabelElement {
 
 function domSection(titleText: string): HTMLDivElement {
   const sec = domDiv('yt-chat-overlay-settings-section');
-  const title = document.createElement('h3');
-  title.className = 'yt-chat-overlay-settings-section-title';
-  title.textContent = titleText;
-  sec.appendChild(title);
+  if (titleText) {
+    const title = document.createElement('h3');
+    title.className = 'yt-chat-overlay-settings-section-title';
+    title.textContent = titleText;
+    sec.appendChild(title);
+  }
   return sec;
 }
 
@@ -535,9 +537,12 @@ export class SettingsUiForm {
           const val = parseFloat(slider.value);
           slider.setAttribute('aria-valuenow', String(val));
           const displayVal = val / scale;
-          const formatted = Number.isInteger(displayVal)
-            ? `${displayVal} units`
-            : `${displayVal.toFixed(2)} units`;
+          const unitLabel = slider.title || '';
+          const formatted = unitLabel
+            ? `${displayVal} ${unitLabel}`
+            : Number.isInteger(displayVal)
+              ? `${displayVal}`
+              : `${displayVal.toFixed(2)}`;
           slider.setAttribute('aria-valuetext', formatted);
         };
 
