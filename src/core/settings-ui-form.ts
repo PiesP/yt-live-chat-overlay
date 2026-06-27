@@ -640,6 +640,11 @@ export class SettingsUiForm {
     const grid = domDiv('yt-chat-overlay-author-grid');
     grid.setAttribute('role', 'grid');
     grid.setAttribute('aria-label', t('Author colors and visibility'));
+    // Inline styles prevent page CSS from overriding grid layout
+    grid.style.display = 'grid';
+    grid.style.gridTemplateColumns = '1fr 36px 28px';
+    grid.style.gap = '8px 12px';
+    grid.style.alignItems = 'center';
 
     // Header row
     const headerRow = document.createElement('div');
@@ -668,9 +673,21 @@ export class SettingsUiForm {
       });
       const labelKey = key.charAt(0).toUpperCase() + key.slice(1);
       colorInput.setAttribute('aria-label', `${t(labelKey)} ${t('Color')}`);
+      // Fixed size prevents page CSS from expanding the element
+      colorInput.style.width = '32px';
+      colorInput.style.height = '28px';
+      colorInput.style.minWidth = '32px';
+      colorInput.style.minHeight = '28px';
+      colorInput.style.maxWidth = '32px';
+      colorInput.style.maxHeight = '28px';
+      colorInput.style.appearance = 'none';
+      colorInput.style.webkitAppearance = 'none';
 
       const checkbox = domGridCheckbox(`showAuthor-${key}`);
       checkbox.setAttribute('aria-label', `${t('Show')} ${t(labelKey)}`);
+      checkbox.style.width = '20px';
+      checkbox.style.height = '20px';
+      checkbox.style.minWidth = '20px';
 
       const row = document.createElement('div');
       row.setAttribute('role', 'row');
@@ -692,6 +709,9 @@ export class SettingsUiForm {
 
     const superChatCheckbox = domGridCheckbox('showAuthor-superChat');
     superChatCheckbox.setAttribute('aria-label', `${t('Show')} ${t('SuperChat')}`);
+    superChatCheckbox.style.width = '20px';
+    superChatCheckbox.style.height = '20px';
+    superChatCheckbox.style.minWidth = '20px';
 
     const superChatRow = document.createElement('div');
     superChatRow.setAttribute('role', 'row');
