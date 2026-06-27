@@ -9,6 +9,8 @@ export const ZH_CN: Record<string, string> = {
   Translation: '翻译',
 
   // ── Aria labels / misc ──
+  'Live chat overlay': 'Live chat overlay',
+  'Interface language changed to': '界面语言已更改为：',
 
   // ── Section titles ──
   'Text Outline': '文字描边',

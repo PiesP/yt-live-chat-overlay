@@ -9,6 +9,8 @@ export const JA: Record<string, string> = {
   Translation: '翻訳',
 
   // ── Aria labels / misc ──
+  'Live chat overlay': 'Live chat overlay',
+  'Interface language changed to': 'インターフェース言語が変更されました: ',
 
   // ── Section titles ──
   'Text Outline': 'テキスト縁取り',

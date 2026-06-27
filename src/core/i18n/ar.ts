@@ -9,6 +9,8 @@ export const AR: Record<string, string> = {
   Translation: 'الترجمة',
 
   // ── Aria labels / misc ──
+  'Live chat overlay': 'Live chat overlay',
+  'Interface language changed to': 'تم تغيير لغة الواجهة إلى: ',
 
   // ── Section titles ──
   'Text Outline': 'حدود النص',

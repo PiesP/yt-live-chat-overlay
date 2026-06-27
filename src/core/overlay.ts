@@ -308,7 +308,7 @@ export class Overlay {
   private announceLanguageChange(lang: string): void {
     if (!this.liveRegion) return;
     const langName = getLocalizedName(lang);
-    this.liveRegion.textContent = `Interface language changed to ${langName}`;
+    this.liveRegion.textContent = `${t('Interface language changed to')}${langName}`;
   }
 
   /**

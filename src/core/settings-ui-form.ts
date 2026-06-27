@@ -24,6 +24,63 @@ import { TranslationService } from '@core/translation-service';
 
 const log = createLogger('SettingsUiForm');
 
+// ── Unique ID generator ──────────────────────────────────────────────────────
+
+let _fieldIdCounter = 0;
+function nextFieldId(prefix: string): string {
+  return `yt-field-${prefix}-${_fieldIdCounter++}`;
+}
+
+// ── Tab keyboard navigation helper ────────────────────────────────────────────
+
+function setupTabKeyNavigation(tablist: HTMLElement): void {
+  const tabs = Array.from(tablist.querySelectorAll<HTMLElement>('[role="tab"]'));
+  if (tabs.length === 0) return;
+
+  const handleKeyDown = (event: KeyboardEvent): void => {
+    const currentTab = event.target as HTMLElement;
+    if (currentTab?.getAttribute('role') !== 'tab') return;
+
+    const currentIndex = tabs.indexOf(currentTab);
+    if (currentIndex === -1) return;
+
+    let newIndex = -1;
+
+    switch (event.key) {
+      case 'ArrowLeft':
+        newIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+        event.preventDefault();
+        break;
+      case 'ArrowRight':
+        newIndex = (currentIndex + 1) % tabs.length;
+        event.preventDefault();
+        break;
+      case 'Home':
+        newIndex = 0;
+        event.preventDefault();
+        break;
+      case 'End':
+        newIndex = tabs.length - 1;
+        event.preventDefault();
+        break;
+      default:
+        return;
+    }
+
+    if (newIndex >= 0 && newIndex !== currentIndex) {
+      // Update roving tabindex
+      currentTab.setAttribute('tabindex', '-1');
+      const newTab = tabs[newIndex];
+      if (newTab) {
+        newTab.setAttribute('tabindex', '0');
+        newTab.focus();
+      }
+    }
+  };
+
+  tablist.addEventListener('keydown', handleKeyDown);
+}
+
 export const STYLE_ID = 'yt-chat-overlay-settings-style';
 export const BUTTON_ID = 'yt-chat-overlay-settings-button';
 export const RELOAD_BUTTON_ID = 'yt-chat-overlay-reload-button';
@@ -49,9 +106,12 @@ function domInput(props: { type: string; name: string; className?: string }): HT
   return el;
 }
 
-function domField(labelText: string, control: HTMLElement): HTMLLabelElement {
+function domField(labelText: string, control: HTMLElement, id?: string): HTMLLabelElement {
   const label = document.createElement('label');
   label.className = 'yt-chat-overlay-settings-field';
+  if (id) {
+    label.htmlFor = id;
+  }
   const text = document.createElement('span');
   text.textContent = labelText;
   label.append(text, control);
@@ -60,28 +120,23 @@ function domField(labelText: string, control: HTMLElement): HTMLLabelElement {
 
 function domSection(titleText: string): HTMLDivElement {
   const sec = domDiv('yt-chat-overlay-settings-section');
-  const title = domDiv('yt-chat-overlay-settings-section-title');
+  const title = document.createElement('h3');
+  title.className = 'yt-chat-overlay-settings-section-title';
   title.textContent = titleText;
   sec.appendChild(title);
   return sec;
 }
 
-function domGridCheckbox(name: string): HTMLInputElement {
+function domGridCheckbox(name: string, id?: string): HTMLInputElement {
   const el = domInput({ type: 'checkbox', name });
   el.className = 'yt-chat-overlay-author-grid-checkbox';
+  if (id) el.id = id;
   return el;
 }
 
 function domGridHeader(text: string): HTMLSpanElement {
   const el = document.createElement('span');
   el.className = 'yt-chat-overlay-author-grid-header';
-  el.textContent = text;
-  return el;
-}
-
-function domGridLabel(text: string): HTMLSpanElement {
-  const el = document.createElement('span');
-  el.className = 'yt-chat-overlay-author-grid-label';
   el.textContent = text;
   return el;
 }
@@ -112,17 +167,24 @@ function createTabs(): HTMLElement {
   nav.setAttribute('aria-label', t('Settings categories'));
 
   for (const [index, pane] of PANES.entries()) {
+    const tabId = `tab-${pane.id}`;
     const button = document.createElement('button');
     button.type = 'button';
+    button.id = tabId;
     button.className = 'yt-chat-overlay-settings-tab';
     button.dataset.tab = pane.id;
     button.setAttribute('role', 'tab');
     button.setAttribute('aria-selected', String(index === 0));
     button.setAttribute('aria-controls', `pane-${pane.id}`);
+    // Roving tabindex: first tab focusable, rest not
+    button.setAttribute('tabindex', String(index === 0 ? 0 : -1));
     button.textContent = t(pane.label);
     if (pane.id === 'comments') button.classList.add('active');
     nav.appendChild(button);
   }
+
+  // Set up arrow key navigation
+  setupTabKeyNavigation(nav);
 
   return nav;
 }
@@ -145,20 +207,25 @@ function createActions(): HTMLDivElement {
 }
 
 function createEnabledField(title?: string): HTMLLabelElement {
+  const id = nextFieldId('enabled');
   const label = document.createElement('label');
   label.className = 'yt-chat-overlay-settings-enabled';
+  label.htmlFor = id;
   const text = document.createElement('span');
   text.textContent = t('Overlay Enabled');
   const input = domInput({ type: 'checkbox', name: 'enabled' });
+  input.id = id;
   if (title) input.title = t(title);
   label.append(text, input);
   return label;
 }
 
 function createCheckboxField(labelText: string, name: string, title?: string): HTMLLabelElement {
+  const id = nextFieldId(name);
   const input = domInput({ type: 'checkbox', name });
+  input.id = id;
   if (title) input.title = t(title);
-  return domField(t(labelText), input);
+  return domField(t(labelText), input, id);
 }
 
 // ── UI value formatting ──────────────────────────────────────────────────────
@@ -364,6 +431,7 @@ export class SettingsUiForm {
     pane.id = `pane-${def.id}`;
     pane.dataset.pane = def.id;
     pane.setAttribute('role', 'tabpanel');
+    pane.setAttribute('aria-labelledby', `tab-${def.id}`);
     if (def.id !== 'comments') pane.hidden = true;
 
     // Translation tab: show unsupported message when browser lacks Translator API.
@@ -410,13 +478,15 @@ export class SettingsUiForm {
       case 'checkbox':
         return createCheckboxField(def.label, this.resolveKey(def), def.title);
       case 'number': {
+        const inputId = nextFieldId(`number-${this.resolveKey(def)}`);
         const input = domInput({ type: 'number', name: this.resolveKey(def) });
+        input.id = inputId;
         applyNumberInputAttributes(
           input,
           def.key as RootScalarSettingKey | Exclude<OutlineSettingKey, 'enabled'>
         );
         if (def.title) input.title = t(def.title);
-        return domField(t(def.label), input);
+        return domField(t(def.label), input, inputId);
       }
       case 'range': {
         const container = domDiv('yt-chat-overlay-settings-range');
@@ -426,15 +496,23 @@ export class SettingsUiForm {
           ? getOutlineDisplayScale(def.key)
           : getRootDisplayMeta(def.key as RootScalarSettingKey).scale || 1;
 
+        const sliderId = nextFieldId(`range-${this.resolveKey(def)}`);
         const slider = document.createElement('input');
         slider.type = 'range';
+        slider.id = sliderId;
         slider.name = `${this.resolveKey(def)}-slider`;
         slider.min = String(limits.min * scale);
         slider.max = String(limits.max * scale);
         slider.step = String(limits.step * scale);
         slider.classList.add('yt-chat-overlay-settings-range-slider');
+        // ARIA attributes for accessibility
+        slider.setAttribute('aria-valuemin', String(limits.min * scale));
+        slider.setAttribute('aria-valuemax', String(limits.max * scale));
+        slider.setAttribute('aria-valuenow', String(limits.min * scale));
+        slider.setAttribute('aria-valuetext', String(limits.min * scale));
 
         const numberInput = domInput({ type: 'number', name: this.resolveKey(def) });
+        numberInput.id = nextFieldId(`number-${this.resolveKey(def)}`);
         applyNumberInputAttributes(numberInput, def.key as RootScalarSettingKey);
         numberInput.classList.add('yt-chat-overlay-settings-range-number');
         if (def.title) {
@@ -442,21 +520,27 @@ export class SettingsUiForm {
           slider.title = t(def.title);
         }
 
-        // Sync: slider → number, number → slider
+        // Update aria-valuenow and aria-valuetext when slider changes
         slider.addEventListener('input', () => {
+          slider.setAttribute('aria-valuenow', slider.value);
+          slider.setAttribute('aria-valuetext', slider.value);
           numberInput.value = slider.value;
         });
         numberInput.addEventListener('input', () => {
           slider.value = numberInput.value;
+          slider.setAttribute('aria-valuenow', numberInput.value);
+          slider.setAttribute('aria-valuetext', numberInput.value);
         });
 
-        container.appendChild(domField(t(def.label), slider));
+        container.appendChild(domField(t(def.label), slider, sliderId));
         container.appendChild(numberInput);
         return container;
       }
       case 'select': {
+        const selectId = nextFieldId(`select-${this.resolveKey(def)}`);
         const select = document.createElement('select');
         select.name = this.resolveKey(def);
+        select.id = selectId;
         if (def.title) select.title = t(def.title);
         for (const [value, label] of def.options) {
           const opt = document.createElement('option');
@@ -464,13 +548,15 @@ export class SettingsUiForm {
           opt.textContent = t(label);
           select.appendChild(opt);
         }
-        return domField(t(def.label), select);
+        return domField(t(def.label), select, selectId);
       }
       case 'text': {
+        const inputId = nextFieldId(`text-${this.resolveKey(def)}`);
         const input = domInput({ type: 'text', name: this.resolveKey(def) });
+        input.id = inputId;
         if (def.title) input.title = t(def.title);
         if (def.placeholder) input.placeholder = t(def.placeholder);
-        return domField(t(def.label), input);
+        return domField(t(def.label), input, inputId);
       }
       default:
         throw new Error('Unhandled field type');
@@ -491,24 +577,42 @@ export class SettingsUiForm {
     );
 
     for (const key of AUTHOR_COLOR_KEYS) {
+      const labelId = nextFieldId(`label-${key}`);
+      const colorId = nextFieldId(`color-${key}`);
       const colorInput = domInput({
         type: 'color',
         name: `color-${key}`,
         className: 'yt-chat-overlay-author-grid-color',
       });
+      colorInput.id = colorId;
       const labelKey = key.charAt(0).toUpperCase() + key.slice(1);
       colorInput.setAttribute('aria-label', `${t(labelKey)} ${t('Color')}`);
 
-      const checkbox = domGridCheckbox(`showAuthor-${key}`);
+      const checkboxId = nextFieldId(`showAuthor-${key}`);
+      const checkbox = domGridCheckbox(`showAuthor-${key}`, checkboxId);
       checkbox.setAttribute('aria-label', `${t('Show')} ${t(labelKey)}`);
 
-      grid.append(domGridLabel(t(labelKey)), colorInput, checkbox);
+      const label = document.createElement('label');
+      label.className = 'yt-chat-overlay-author-grid-label';
+      label.id = labelId;
+      label.htmlFor = `${colorId} ${checkboxId}`;
+      label.textContent = t(labelKey);
+
+      grid.append(label, colorInput, checkbox);
     }
 
-    const superChatCheckbox = domGridCheckbox('showAuthor-superChat');
+    const superChatLabelId = nextFieldId('label-superChat');
+    const superChatCheckboxId = nextFieldId('showAuthor-superChat');
+    const superChatCheckbox = domGridCheckbox('showAuthor-superChat', superChatCheckboxId);
     superChatCheckbox.setAttribute('aria-label', `${t('Show')} ${t('SuperChat')}`);
 
-    grid.append(domGridLabel(t('SuperChat')), document.createElement('span'), superChatCheckbox);
+    const superChatLabel = document.createElement('label');
+    superChatLabel.className = 'yt-chat-overlay-author-grid-label';
+    superChatLabel.id = superChatLabelId;
+    superChatLabel.htmlFor = superChatCheckboxId;
+    superChatLabel.textContent = t('SuperChat');
+
+    grid.append(superChatLabel, document.createElement('span'), superChatCheckbox);
 
     section.appendChild(grid);
     return section;
@@ -595,6 +699,11 @@ export class SettingsUiForm {
     if (allowShort && minText) {
       const isDisabled = allowShort.checked;
       minText.disabled = isDisabled;
+      if (isDisabled) {
+        minText.setAttribute('aria-disabled', 'true');
+      } else {
+        minText.removeAttribute('aria-disabled');
+      }
 
       // Add/remove disabled-field helper text
       const existingHint = minText.parentElement?.querySelector(

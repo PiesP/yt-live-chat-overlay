@@ -7,9 +7,9 @@ import { DEFAULT_FONT_FAMILY, spacing } from '@core/design-tokens';
 const uiColors = {
   background: '#1a1a1a',
   backgroundLight: '#222222',
-  border: '#444444',
+  border: '#5a5a5a',
   text: '#ffffff',
-  textMuted: '#cccccc',
+  textMuted: '#b0b0b0',
   primary: '#1e88e5',
   primaryHover: '#1976d2',
   danger: '#e53935',
@@ -67,7 +67,7 @@ const zIndex = {
 
 // ── UI sizing tokens (settings panel layout) ──
 const uiSizing = {
-  buttonSize: 36,
+  buttonSize: 44,
   buttonFontSize: 18,
   inputWidth: 86,
   colorSwatch: 44,
@@ -114,7 +114,7 @@ export const SETTINGS_UI_STYLES = `
       .yt-chat-overlay-settings-button {
         position: absolute;
         top: ${spacing.sm}px;
-        left: ${spacing.sm}px;
+        inset-inline-start: ${spacing.sm}px;
         width: ${uiSizing.buttonSize}px;
         height: ${uiSizing.buttonSize}px;
         border-radius: ${borderRadius.full};
@@ -147,7 +147,7 @@ export const SETTINGS_UI_STYLES = `
       .yt-chat-overlay-reload-button {
         position: absolute;
         top: ${spacing.sm}px;
-        left: ${spacing.sm + uiSizing.buttonSize + spacing.xs}px;
+        inset-inline-start: ${spacing.sm + uiSizing.buttonSize + spacing.xs}px;
         width: ${uiSizing.buttonSize}px;
         height: ${uiSizing.buttonSize}px;
         border-radius: ${borderRadius.full};
@@ -201,7 +201,7 @@ export const SETTINGS_UI_STYLES = `
         to { transform: scale(1); opacity: 1; }
       }
       .yt-chat-overlay-settings-modal {
-        width: ${uiSizing.modalWidth}px;
+        width: min(${uiSizing.modalWidth}px, ${uiSizing.modalMaxVW}vw);
         max-width: min(${uiSizing.modalMaxVW}vw, ${uiSizing.modalMaxWidth}px);
         max-height: ${uiSizing.modalMaxVH}vh;
         overflow: hidden;
@@ -287,7 +287,7 @@ export const SETTINGS_UI_STYLES = `
         overflow-y: auto;
         flex: 1;
         min-height: 0;
-        padding-right: 2px;
+        padding-inline-end: 2px;
         scrollbar-width: thin;
         scrollbar-color: ${scrollbar.thumb} ${scrollbar.track};
       }
@@ -336,7 +336,7 @@ export const SETTINGS_UI_STYLES = `
         border: 1px solid ${uiColors.border};
         background: ${uiColors.backgroundLight};
         color: ${uiColors.text};
-        text-align: right;
+        text-align: end;
         -moz-appearance: textfield;
       }
       .yt-chat-overlay-settings-field input[type="number"]::-webkit-inner-spin-button,
@@ -419,6 +419,7 @@ export const SETTINGS_UI_STYLES = `
       }
       .yt-chat-overlay-author-grid-label {
         font-size: ${typography.fontSize.sm};
+        unicode-bidi: isolate;
       }
       .yt-chat-overlay-author-grid-color {
         justify-self: center;
@@ -589,7 +590,7 @@ export const SETTINGS_UI_STYLES = `
       }
       .yt-chat-overlay-settings-range-number {
         width: ${uiSizing.inputWidth}px;
-        text-align: right;
+        text-align: end;
         padding: ${spacing.xs}px ${spacing.sm}px;
         border-radius: ${borderRadius.sm};
         border: 1px solid ${uiColors.border};
@@ -621,5 +622,61 @@ export const SETTINGS_UI_STYLES = `
         font-size: ${typography.fontSize.xs};
         color: ${uiColors.textMuted};
         margin-top: 2px;
+      }
+
+      /* ── Accessibility: reduced motion ── */
+      @media (prefers-reduced-motion: reduce) {
+        .yt-chat-overlay-settings-backdrop,
+        .yt-chat-overlay-settings-modal,
+        .yt-chat-overlay-settings-toast,
+        .yt-chat-overlay-settings-field-error,
+        .yt-chat-overlay-settings-button,
+        .yt-chat-overlay-reload-button,
+        .yt-chat-overlay-settings-close,
+        .yt-chat-overlay-settings-actions button,
+        .yt-chat-overlay-settings-tab {
+          animation: none !important;
+          transition: none !important;
+        }
+      }
+
+      /* ── Accessibility: forced colors (Windows High Contrast) ── */
+      @media (forced-colors: active) {
+        .yt-chat-overlay-settings-tabs,
+        .yt-chat-overlay-settings-section-title,
+        .yt-chat-overlay-settings-actions button[data-action="reset"],
+        .yt-chat-overlay-settings-actions button[data-action="export"],
+        .yt-chat-overlay-settings-actions button[data-action="import"],
+        .yt-chat-overlay-settings-confirm-dialog,
+        .yt-chat-overlay-settings-confirm-cancel {
+          border-color: CanvasText;
+        }
+        .yt-chat-overlay-settings-button,
+        .yt-chat-overlay-reload-button,
+        .yt-chat-overlay-settings-close,
+        .yt-chat-overlay-settings-actions button,
+        .yt-chat-overlay-settings-tab,
+        .yt-chat-overlay-settings-field input,
+        .yt-chat-overlay-settings-field select,
+        .yt-chat-overlay-settings-range-number,
+        .yt-chat-overlay-settings-confirm-cancel,
+        .yt-chat-overlay-settings-confirm-ok {
+          forced-color-adjust: none;
+        }
+        .yt-chat-overlay-settings-button:focus-visible,
+        .yt-chat-overlay-reload-button:focus-visible,
+        .yt-chat-overlay-settings-close:focus-visible,
+        .yt-chat-overlay-settings-actions button:focus-visible,
+        .yt-chat-overlay-settings-tab:focus-visible {
+          outline-color: Highlight;
+        }
+        .yt-chat-overlay-settings-tab.active {
+          border-bottom-color: Highlight;
+          color: Highlight;
+        }
+        .yt-chat-overlay-settings-actions button[data-action="close"] {
+          background: Highlight;
+          color: HighlightText;
+        }
       }
 `;

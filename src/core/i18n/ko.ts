@@ -9,6 +9,8 @@ export const KO: Record<string, string> = {
   Translation: '번역',
 
   // ── Aria labels / misc ──
+  'Live chat overlay': 'Live chat overlay',
+  'Interface language changed to': '인터페이스 언어가 변경되었습니다: ',
 
   // ── Section titles ──
   'Text Outline': '텍스트 외곽선',

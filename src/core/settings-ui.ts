@@ -44,6 +44,10 @@ export class SettingsUi {
   /** Saved body padding-right before scrollbar compensation. */
   private savedBodyPaddingRight: string | null = null;
   private _backdropClickHandler: ((event: MouseEvent) => void) | null = null;
+  /** Element focused before confirm dialog opened; restored on close. */
+  private confirmPreviousFocus: HTMLElement | null = null;
+  /** Keydown handler bound to confirm dialog for focus trap + ESC. */
+  private confirmKeydownHandler: ((event: KeyboardEvent) => void) | null = null;
 
   private get defaultTabId(): string {
     const first = PANES[0];
@@ -406,6 +410,7 @@ export class SettingsUi {
     this.lockBodyScroll();
     this.setDialogOpen(true);
     this.focusInitialElement();
+    this.updateDocumentLangDir();
   }
 
   /** Rebuild modal DOM content from scratch (called on language change). */
@@ -436,6 +441,15 @@ export class SettingsUi {
     this.rebuildModalContent();
     this.form.populateForm(this.getSettings());
     this.switchTab(savedTab);
+    this.updateDocumentLangDir();
+  }
+
+  /** Update document.documentElement.lang and dir to match the active language.
+   *  Arabic ('ar') is RTL; all other supported languages are LTR. */
+  private updateDocumentLangDir(): void {
+    const lang = getActiveLanguage();
+    document.documentElement.lang = lang;
+    document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
   }
 
   /** Create a reusable confirmation dialog overlay for destructive actions. */
@@ -457,8 +471,11 @@ export class SettingsUi {
     confirmDialog.className = 'yt-chat-overlay-settings-confirm-dialog';
 
     const message = document.createElement('p');
+    const messageId = 'yt-chat-overlay-confirm-msg';
     message.className = 'yt-chat-overlay-settings-confirm-message';
     message.textContent = t(options.message);
+    message.id = messageId;
+    dialog.setAttribute('aria-describedby', messageId);
 
     const buttons = document.createElement('div');
     buttons.className = 'yt-chat-overlay-settings-confirm-buttons';
@@ -477,9 +494,59 @@ export class SettingsUi {
     confirmDialog.append(message, buttons);
     dialog.append(backdrop, confirmDialog);
 
-    cancelBtn.addEventListener('click', () => dialog.remove());
-    okBtn.addEventListener('click', () => {
+    // Save focus before opening confirm dialog; restore on close
+    const previouslyFocused =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    this.confirmPreviousFocus = previouslyFocused;
+
+    const closeDialog = () => {
+      // Remove ESC / Tab handler
+      if (this.confirmKeydownHandler) {
+        document.removeEventListener('keydown', this.confirmKeydownHandler, true);
+        this.confirmKeydownHandler = null;
+      }
       dialog.remove();
+      // Restore focus to element that was active before confirm opened
+      if (this.confirmPreviousFocus?.isConnected) {
+        this.confirmPreviousFocus.focus();
+      }
+      this.confirmPreviousFocus = null;
+    };
+
+    // Focus trap + ESC handler (capture phase so it fires before the
+    // parent modal's keydown listener and prevents Escape from closing
+    // the parent modal while the confirm dialog is open).
+    this.confirmKeydownHandler = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        closeDialog();
+        return;
+      }
+      if (event.key === 'Tab') {
+        // Trap focus within confirm dialog buttons
+        const focusableInDialog = [cancelBtn, okBtn];
+        const first = focusableInDialog[0];
+        const last = focusableInDialog[focusableInDialog.length - 1];
+        if (!first || !last) {
+          event.preventDefault();
+          return;
+        }
+        const active = document.activeElement;
+        if (event.shiftKey && active === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && active === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+    };
+    document.addEventListener('keydown', this.confirmKeydownHandler, true);
+
+    cancelBtn.addEventListener('click', () => closeDialog());
+    okBtn.addEventListener('click', () => {
+      closeDialog();
       options.onConfirm();
     });
 
@@ -489,9 +556,6 @@ export class SettingsUi {
 
   private handleReset(): void {
     if (!this.modal) return;
-
-    const existing = this.modal.querySelector('.yt-chat-overlay-settings-confirm');
-    if (existing) existing.remove();
 
     const dialog = this.createConfirmDialog({
       message: 'Reset all settings to defaults?',
@@ -560,6 +624,17 @@ export class SettingsUi {
   private focusInitialElement(): void {
     if (!this.modal) return;
 
+    // Focus the active tab button first — this gives screen reader users
+    // context about which tab panel they're in. Fall back to close button,
+    // then first focusable element, then the modal itself.
+    const activeTabBtn = this.modal.querySelector<HTMLButtonElement>(
+      '.yt-chat-overlay-settings-tab.active'
+    );
+    if (activeTabBtn) {
+      activeTabBtn.focus();
+      return;
+    }
+
     const closeButton = this.modal.querySelector<HTMLButtonElement>(
       '.yt-chat-overlay-settings-close'
     );
@@ -611,12 +686,14 @@ export class SettingsUi {
   /** Show a transient toast notification in the settings modal. */
   private toastTimer: ReturnType<typeof setTimeout> | null = null;
 
-  private showToast(message: string): void {
+  private showToast(message: string, isError = false): void {
     if (!this.modal) return;
     const existing = this.modal.querySelector('.yt-chat-overlay-settings-toast');
     if (existing) existing.remove();
     const toast = document.createElement('div');
     toast.className = 'yt-chat-overlay-settings-toast';
+    toast.setAttribute('role', 'status');
+    toast.setAttribute('aria-live', isError ? 'assertive' : 'polite');
     toast.textContent = message;
     this.modal.appendChild(toast);
     this.toastTimer = clearSafeTimeout(this.toastTimer);
