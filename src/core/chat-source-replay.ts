@@ -65,14 +65,18 @@ export class ReplayChatSource extends ChatSource {
   private prefetchPagesFetched = 0;
   private prefetchMode: ReplayMode | null = null;
   private prefetchBackoffUntil = 0;
-  getPendingDrainCount(): number {
-    return this.replayBuffer.pendingCount;
-  }
+  /**
+   * Drain all buffered replay messages regardless of their offset.
+   *
+   * Returns every unconsumed message currently in the buffer (sorted by
+   * offsetMs) and clears the buffer. Used by RuntimeManager when returning
+   * from a hidden tab — accumulated messages are routed through the
+   * backlog controller for gradual emission instead of bursting.
+   *
+   * Returns an empty array when the buffer has no pending messages.
+   */
   drainPendingMessages(): ChatMessage[] {
     return this.replayBuffer.drainAll();
-  }
-  resetPendingDrainCount(): void {
-    /* no-op */
   }
 
   protected seedCurrentSession(signal?: AbortSignal): Promise<boolean> {

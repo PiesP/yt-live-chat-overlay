@@ -30,11 +30,6 @@ export class ReplayBuffer {
     return this.buffer.length - this.bufferOffset <= 0;
   }
 
-  /** Number of unconsumed messages currently held in the buffer. */
-  get pendingCount(): number {
-    return this.buffer.length - this.bufferOffset;
-  }
-
   /**
    * Insert a message in sorted order by offsetMs.
    *
