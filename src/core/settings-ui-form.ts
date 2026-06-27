@@ -54,22 +54,13 @@ function domInput(props: { type: string; name: string; className?: string }): HT
   return el;
 }
 
-function domField(labelText: string, control: HTMLElement): HTMLLabelElement {
+function domField(labelText: string, control: HTMLElement, controlId?: string): HTMLLabelElement {
   const label = document.createElement('label');
   label.className = 'yt-chat-overlay-settings-field';
   const text = document.createElement('span');
   text.textContent = labelText;
-  if (control instanceof HTMLInputElement || control instanceof HTMLSelectElement) {
-    if (!control.id) {
-      control.id = nextFieldId(control.name || 'input');
-    }
-    label.htmlFor = control.id;
-  } else if (control.querySelector('input, select')) {
-    const inner = control.querySelector('input, select') as HTMLInputElement | HTMLSelectElement;
-    if (!inner.id) {
-      inner.id = nextFieldId(inner.name || 'input');
-    }
-    label.htmlFor = inner.id;
+  if (controlId) {
+    label.htmlFor = controlId;
   }
   label.append(text, control);
   return label;
@@ -83,12 +74,6 @@ function domSection(titleText: string): HTMLDivElement | null {
   title.textContent = titleText;
   sec.appendChild(title);
   return sec;
-}
-
-function domGridCheckbox(name: string): HTMLInputElement {
-  const el = domInput({ type: 'checkbox', name });
-  el.className = 'yt-chat-overlay-author-grid-checkbox';
-  return el;
 }
 
 // ── Modal sub-structure factories ────────────────────────────────────────────
@@ -172,8 +157,7 @@ function createCheckboxField(labelText: string, name: string, title?: string): H
   const input = domInput({ type: 'checkbox', name });
   input.id = nextFieldId(name);
   if (title) input.title = t(title);
-  const label = domField(t(labelText), input);
-  label.htmlFor = input.id;
+  const label = domField(t(labelText), input, input.id);
   return label;
 }
 
@@ -521,7 +505,7 @@ export class SettingsUiForm {
           }
         });
 
-        return domField(t(def.label), input);
+        return domField(t(def.label), input, input.id);
       }
       case 'range': {
         const container = domDiv('yt-chat-overlay-settings-range');
@@ -540,6 +524,7 @@ export class SettingsUiForm {
         slider.max = String(limits.max * scale);
         slider.step = String(limits.step * scale);
         slider.classList.add('yt-chat-overlay-settings-range-slider');
+        slider.id = nextFieldId(`${this.resolveKey(def)}-slider`);
 
         // ARIA value attributes for screen readers
         slider.setAttribute('aria-valuemin', String(limits.min * scale));
@@ -582,8 +567,9 @@ export class SettingsUiForm {
         // Initialize ARIA values
         updateSliderAria();
 
-        container.appendChild(domField(t(def.label), slider));
-        container.appendChild(numberInput);
+        // Label wraps slider for association; number input is sibling
+        const label = domField(t(def.label), slider, slider.id);
+        container.append(label, numberInput);
         return container;
       }
       case 'select': {
@@ -600,7 +586,7 @@ export class SettingsUiForm {
           opt.textContent = t(label);
           select.appendChild(opt);
         }
-        const field = domField(t(def.label), select);
+        const field = domField(t(def.label), select, select.id);
         if (def.hint) {
           const hint = document.createElement('span');
           hint.className = 'yt-chat-overlay-settings-field-hint';
@@ -618,7 +604,7 @@ export class SettingsUiForm {
         if (def.hint) {
           input.setAttribute('aria-describedby', `hint-${this.resolveKey(def)}`);
         }
-        const field = domField(t(def.label), input);
+        const field = domField(t(def.label), input, input.id);
         if (def.hint) {
           const hint = document.createElement('span');
           hint.className = 'yt-chat-overlay-settings-field-hint';
@@ -643,112 +629,90 @@ export class SettingsUiForm {
     gridTitle.className = 'yt-chat-overlay-settings-section-title';
     gridTitle.textContent = t('Author Colors & Visibility');
     section.appendChild(gridTitle);
-    const fieldset = document.createElement('fieldset');
-    fieldset.className = 'yt-chat-overlay-author-grid-fieldset';
-    const legend = document.createElement('legend');
-    legend.className = 'yt-chat-overlay-author-grid-legend';
-    legend.textContent = t('Author Colors & Visibility');
-    fieldset.appendChild(legend);
 
-    const grid = domDiv('yt-chat-overlay-author-grid');
-    grid.setAttribute('role', 'grid');
-    grid.setAttribute('aria-label', t('Author colors and visibility'));
-    // Grid layout defined in CSS (no !important needed since page CSS doesn't override)
+    const table = document.createElement('table');
+    table.className = 'yt-chat-overlay-author-grid';
 
     // Header row
-    const headerRow = document.createElement('div');
-    headerRow.setAttribute('role', 'row');
-    const emptyTh = document.createElement('span');
-    emptyTh.setAttribute('role', 'columnheader');
+    const thead = document.createElement('thead');
+    const headerRow = document.createElement('tr');
+    const emptyTh = document.createElement('th');
     emptyTh.setAttribute('scope', 'col');
-    const nameColorTh = document.createElement('span');
-    nameColorTh.setAttribute('role', 'columnheader');
+    const nameColorTh = document.createElement('th');
     nameColorTh.setAttribute('scope', 'col');
-    nameColorTh.className = 'yt-chat-overlay-author-grid-header';
     nameColorTh.textContent = t('Name Color');
-    const showNameTh = document.createElement('span');
-    showNameTh.setAttribute('role', 'columnheader');
+    const showNameTh = document.createElement('th');
     showNameTh.setAttribute('scope', 'col');
-    showNameTh.className = 'yt-chat-overlay-author-grid-header';
     showNameTh.textContent = t('Show Name');
     headerRow.append(emptyTh, nameColorTh, showNameTh);
-    grid.appendChild(headerRow);
+    thead.appendChild(headerRow);
+    table.appendChild(thead);
+
+    // Body rows
+    const tbody = document.createElement('tbody');
 
     for (const key of AUTHOR_COLOR_KEYS) {
+      const labelKey = key.charAt(0).toUpperCase() + key.slice(1);
+
       const colorInput = domInput({
         type: 'color',
         name: `color-${key}`,
         className: 'yt-chat-overlay-author-grid-color',
       });
-      const labelKey = key.charAt(0).toUpperCase() + key.slice(1);
       colorInput.setAttribute('aria-label', `${t(labelKey)} ${t('Color')}`);
-      // Fixed size prevents page CSS from expanding the element
-      colorInput.style.width = '32px';
-      colorInput.style.height = '28px';
-      colorInput.style.minWidth = '32px';
-      colorInput.style.minHeight = '28px';
-      colorInput.style.maxWidth = '32px';
-      colorInput.style.maxHeight = '28px';
-      colorInput.style.appearance = 'none';
-      colorInput.style.webkitAppearance = 'none';
 
-      const checkbox = domGridCheckbox(`showAuthor-${key}`);
+      const checkbox = domInput({ type: 'checkbox', name: `showAuthor-${key}` });
+      checkbox.className = 'yt-chat-overlay-author-grid-checkbox';
       checkbox.setAttribute('aria-label', `${t('Show')} ${t(labelKey)}`);
-      checkbox.style.width = '20px';
-      checkbox.style.height = '20px';
-      checkbox.style.minWidth = '20px';
 
-      const row = document.createElement('div');
-      row.setAttribute('role', 'row');
-      const labelCell = document.createElement('span');
-      labelCell.setAttribute('role', 'gridcell');
-      labelCell.className = 'yt-chat-overlay-author-grid-label';
+      const row = document.createElement('tr');
+
+      const labelCell = document.createElement('th');
+      labelCell.setAttribute('scope', 'row');
       labelCell.textContent = t(labelKey);
-      const colorCell = document.createElement('span');
-      colorCell.setAttribute('role', 'gridcell');
+
+      const colorCell = document.createElement('td');
       colorCell.className = 'yt-chat-overlay-author-grid-color-cell';
       colorCell.appendChild(colorInput);
-      const checkboxCell = document.createElement('span');
-      checkboxCell.setAttribute('role', 'gridcell');
+
+      const checkboxCell = document.createElement('td');
       checkboxCell.className = 'yt-chat-overlay-author-grid-checkbox-cell';
       checkboxCell.appendChild(checkbox);
+
       row.append(labelCell, colorCell, checkboxCell);
-      grid.appendChild(row);
+      tbody.appendChild(row);
     }
 
-    const superChatCheckbox = domGridCheckbox('showAuthor-superChat');
-    superChatCheckbox.setAttribute('aria-label', `${t('Show')} ${t('SuperChat')}`);
-    superChatCheckbox.style.width = '20px';
-    superChatCheckbox.style.height = '20px';
-    superChatCheckbox.style.minWidth = '20px';
-
-    const superChatRow = document.createElement('div');
-    superChatRow.setAttribute('role', 'row');
-    const superChatLabelCell = document.createElement('span');
-    superChatLabelCell.setAttribute('role', 'gridcell');
-    superChatLabelCell.className = 'yt-chat-overlay-author-grid-label';
+    // SuperChat row
+    const superChatRow = document.createElement('tr');
+    const superChatLabelCell = document.createElement('th');
+    superChatLabelCell.setAttribute('scope', 'row');
     superChatLabelCell.textContent = t('SuperChat');
-    const superChatColorCell = document.createElement('span');
-    superChatColorCell.setAttribute('role', 'gridcell');
+
+    const superChatColorCell = document.createElement('td');
     superChatColorCell.className = 'yt-chat-overlay-author-grid-color-cell';
-    // Placeholder swatch (disabled) — keeps column alignment consistent with other rows
     const superChatPlaceholder = domInput({
       type: 'color',
       name: 'color-superChat',
       className: 'yt-chat-overlay-author-grid-color',
     });
     superChatPlaceholder.disabled = true;
-    superChatPlaceholder.style.visibility = 'hidden';
+    superChatPlaceholder.setAttribute('aria-hidden', 'true');
     superChatColorCell.appendChild(superChatPlaceholder);
-    const superChatCheckboxCell = document.createElement('span');
-    superChatCheckboxCell.setAttribute('role', 'gridcell');
+
+    const superChatCheckbox = domInput({ type: 'checkbox', name: 'showAuthor-superChat' });
+    superChatCheckbox.className = 'yt-chat-overlay-author-grid-checkbox';
+    superChatCheckbox.setAttribute('aria-label', `${t('Show')} ${t('SuperChat')}`);
+
+    const superChatCheckboxCell = document.createElement('td');
     superChatCheckboxCell.className = 'yt-chat-overlay-author-grid-checkbox-cell';
     superChatCheckboxCell.appendChild(superChatCheckbox);
-    superChatRow.append(superChatLabelCell, superChatColorCell, superChatCheckboxCell);
-    grid.appendChild(superChatRow);
 
-    fieldset.appendChild(grid);
-    section.appendChild(fieldset);
+    superChatRow.append(superChatLabelCell, superChatColorCell, superChatCheckboxCell);
+    tbody.appendChild(superChatRow);
+
+    table.appendChild(tbody);
+    section.appendChild(table);
     return section;
   }
 

@@ -298,6 +298,7 @@ export class SettingsUi {
 
     this.backdrop.style.display = isOpen ? 'flex' : 'none';
     this.backdrop.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+    this.backdrop.setAttribute('data-open', isOpen ? 'true' : 'false');
   }
 
   /** Lock body scroll to prevent page scrolling behind the open modal.
@@ -416,6 +417,7 @@ export class SettingsUi {
     this.backdrop = document.createElement('div');
     this.backdrop.id = BACKDROP_ID;
     this.backdrop.className = 'yt-chat-overlay-settings-backdrop';
+    this.backdrop.setAttribute('data-open', 'false');
 
     // RTL support: set dir attribute for Arabic
     if (getActiveLanguage() === 'ar') {
