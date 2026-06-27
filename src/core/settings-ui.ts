@@ -55,6 +55,8 @@ export class SettingsUi {
   /** Saved body padding-right before scrollbar compensation. */
   private savedBodyPaddingRight: string | null = null;
   private _backdropClickHandler: ((event: MouseEvent) => void) | null = null;
+  /** All active timers — cleared in destroy() for robust cleanup. */
+  private timers: ReturnType<typeof setTimeout>[] = [];
 
   private get defaultTabId(): string {
     const first = PANES[0];
@@ -208,7 +210,7 @@ export class SettingsUi {
       this.button.className = 'yt-chat-overlay-settings-button';
       this.button.textContent = '\u2699';
       this.button.setAttribute('aria-label', t('Chat overlay settings'));
-      this.button.title = t('Chat overlay settings');
+      this.button.title = `${t('Chat overlay settings')} (Shift+Alt+S)`;
       this.button.addEventListener('click', () => this.open());
     } else if (this.button.parentElement) {
       this.button.remove();
@@ -243,6 +245,17 @@ export class SettingsUi {
     this.reloadFeedbackTimer = clearSafeTimeout(this.reloadFeedbackTimer);
   }
 
+  private registerTimer(timer: ReturnType<typeof setTimeout>): void {
+    this.timers.push(timer);
+  }
+
+  private clearAllTimers(): void {
+    for (const timer of this.timers) {
+      clearTimeout(timer);
+    }
+    this.timers = [];
+  }
+
   private handleReloadClick(): void {
     if (!this.reloadButton) return;
 
@@ -262,6 +275,7 @@ export class SettingsUi {
         this.reloadButton.classList.remove('yt-chat-overlay-reload-button--done');
       }
     }, RELOAD_FEEDBACK_DURATION_MS);
+    this.registerTimer(this.reloadFeedbackTimer);
 
     void this.onReload?.();
   }
@@ -644,17 +658,19 @@ export class SettingsUi {
   private focusInitialElement(): void {
     if (!this.modal) return;
 
+    // Focus the first focusable form element (input/select) per WCAG guidance.
+    const [firstFormEl] = this.form.getFocusableElements();
+    if (firstFormEl) {
+      firstFormEl.focus();
+      return;
+    }
+
+    // Fallback: close button if no form elements exist.
     const closeButton = this.modal.querySelector<HTMLButtonElement>(
       '.yt-chat-overlay-settings-close'
     );
     if (closeButton) {
       closeButton.focus();
-      return;
-    }
-
-    const [first] = this.form.getFocusableElements();
-    if (first) {
-      first.focus();
       return;
     }
 
@@ -679,6 +695,7 @@ export class SettingsUi {
       toast.remove();
       this.toastTimer = null;
     }, getToastDuration(message));
+    this.registerTimer(this.toastTimer);
   }
 
   destroy(): void {
@@ -689,8 +706,7 @@ export class SettingsUi {
     document.removeEventListener('keydown', this.handleKeydown);
     this.button?.remove();
     this.reloadButton?.remove();
-    this.clearReloadFeedbackTimer();
-    this.toastTimer = clearSafeTimeout(this.toastTimer);
+    this.clearAllTimers();
     if (this.backdrop && this._backdropClickHandler) {
       this.backdrop.removeEventListener('click', this._backdropClickHandler);
       this._backdropClickHandler = null;
