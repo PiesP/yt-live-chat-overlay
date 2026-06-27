@@ -70,10 +70,10 @@ const uiSizing = {
   buttonSize: 44,
   buttonFontSize: 18,
   inputWidth: 86,
-  colorSwatch: 44,
-  modalWidth: 340,
+  colorSwatch: 36,
+  modalWidth: 380,
   modalMaxVW: 92,
-  modalMaxWidth: 460,
+  modalMaxWidth: 480,
   modalMaxVH: 82,
   confirmMinWidth: 240,
   checkboxSize: 44,
@@ -619,17 +619,22 @@ export const SETTINGS_UI_STYLES = `
       /* Range slider (dual: slider + number) */
       .yt-chat-overlay-settings-range {
         display: flex;
-        flex-direction: column;
-        gap: var(--spacing-xs);
+        align-items: center;
+        gap: ${spacing.sm}px;
         padding: 6px 0;
       }
       .yt-chat-overlay-settings-range label {
-        flex: none;
-        font-size: var(--font-sm);
-        color: var(--ui-text);
+        flex: 0 1 auto;
+        font-size: ${typography.fontSize.sm};
+        color: ${uiColors.text};
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
       .yt-chat-overlay-settings-range-slider {
-        width: 100%;
+        flex: 1;
+        min-width: 80px;
         height: 4px;
         accent-color: ${uiColors.primary};
         margin: 0;
@@ -640,6 +645,7 @@ export const SETTINGS_UI_STYLES = `
       }
       .yt-chat-overlay-settings-range-number {
         width: ${uiSizing.inputWidth}px;
+        flex-shrink: 0;
         text-align: right;
         padding: ${spacing.xs}px ${spacing.sm}px;
         border-radius: ${borderRadius.sm};
@@ -648,7 +654,6 @@ export const SETTINGS_UI_STYLES = `
         color: ${uiColors.text};
         font-size: ${typography.fontSize.sm};
         -moz-appearance: textfield;
-        align-self: flex-end;
       }
       .yt-chat-overlay-settings-range-number::-webkit-inner-spin-button,
       .yt-chat-overlay-settings-range-number::-webkit-outer-spin-button {
