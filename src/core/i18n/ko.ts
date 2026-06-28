@@ -13,6 +13,7 @@ export const KO: Record<string, string> = {
   'Interface language changed to': '인터페이스 언어가 변경되었습니다: ',
 
   // ── Section titles ──
+  Cards: '카드',
   'Text Outline': '텍스트 외곽선',
   'Safe Zone': '안전 영역',
   'Message Rate': '메시지 빈도',

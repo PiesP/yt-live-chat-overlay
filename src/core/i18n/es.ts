@@ -13,6 +13,7 @@ export const ES: Record<string, string> = {
   'Interface language changed to': 'Idioma de interfaz cambiado a: ',
 
   // ── Section titles ──
+  Cards: 'Tarjetas',
   'Text Outline': 'Contorno de texto',
   'Safe Zone': 'Zona segura',
   'Message Rate': 'Frecuencia de mensajes',

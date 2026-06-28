@@ -13,6 +13,7 @@ export const AR: Record<string, string> = {
   'Interface language changed to': 'تم تغيير لغة الواجهة إلى: ',
 
   // ── Section titles ──
+  Cards: 'البطاقات',
   'Text Outline': 'حدود النص',
   'Safe Zone': 'المنطقة الآمنة',
   'Message Rate': 'معدل الرسائل',

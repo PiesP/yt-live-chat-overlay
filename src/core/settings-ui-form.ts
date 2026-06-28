@@ -38,7 +38,7 @@ function setupTabKeyNavigation(tablist: HTMLElement): void {
   if (tabs.length === 0) return;
 
   const handleKeyDown = (event: KeyboardEvent): void => {
-    const currentTab = event.target as HTMLElement;
+    const currentTab = document.activeElement as HTMLElement | null;
     if (currentTab?.getAttribute('role') !== 'tab') return;
 
     const currentIndex = tabs.indexOf(currentTab);
@@ -147,8 +147,9 @@ const TITLE_ID = 'yt-chat-overlay-settings-title';
 
 function createHeader(): HTMLDivElement {
   const header = domDiv('yt-chat-overlay-settings-header');
-  const title = document.createElement('div');
+  const title = document.createElement('h2');
   title.id = TITLE_ID;
+  title.className = 'yt-chat-overlay-settings-title';
   title.textContent = t('Chat Overlay');
   const closeButton = document.createElement('button');
   closeButton.type = 'button';
@@ -164,6 +165,7 @@ function createTabs(): HTMLElement {
   const nav = document.createElement('nav');
   nav.className = 'yt-chat-overlay-settings-tabs';
   nav.setAttribute('role', 'tablist');
+  nav.setAttribute('aria-orientation', 'horizontal');
   nav.setAttribute('aria-label', t('Settings categories'));
 
   for (const [index, pane] of PANES.entries()) {
@@ -229,6 +231,28 @@ function createCheckboxField(labelText: string, name: string, title?: string): H
 }
 
 // ── UI value formatting ──────────────────────────────────────────────────────
+
+/**
+ * Map setting keys to human-readable unit labels for aria-valuetext.
+ * Returns empty string if the key has no common unit.
+ */
+function getRangeUnit(key: string): string {
+  switch (key) {
+    case 'opacity':
+    case 'safeTop':
+    case 'safeBottom':
+    case 'depthNearSpeedMul':
+    case 'depthFarSpeedMul':
+    case 'depthFarOpacityMul':
+      return '%';
+    case 'fontSize':
+      return 'px';
+    case 'speedPxPerSec':
+      return 'px/s';
+    default:
+      return '';
+  }
+}
 
 const ROUNDING_PRECISION = 1e4;
 
@@ -509,12 +533,17 @@ export class SettingsUiForm {
         slider.setAttribute('aria-valuemin', String(limits.min * scale));
         slider.setAttribute('aria-valuemax', String(limits.max * scale));
         slider.setAttribute('aria-valuenow', String(limits.min * scale));
-        slider.setAttribute('aria-valuetext', String(limits.min * scale));
+        const displayUnit = getRangeUnit(def.key);
+        const formatValue = (v: number): string =>
+          displayUnit ? `${v} ${displayUnit}` : `${v} `;
+        slider.setAttribute('aria-valuetext', formatValue(limits.min * scale));
 
+        const rangeValueId = `range-value-${this.resolveKey(def)}`;
         const numberInput = domInput({ type: 'number', name: this.resolveKey(def) });
-        numberInput.id = nextFieldId(`number-${this.resolveKey(def)}`);
+        numberInput.id = rangeValueId;
         applyNumberInputAttributes(numberInput, def.key as RootScalarSettingKey);
         numberInput.classList.add('yt-chat-overlay-settings-range-number');
+        slider.setAttribute('aria-describedby', rangeValueId);
         if (def.title) {
           numberInput.title = t(def.title);
           slider.title = t(def.title);
@@ -522,14 +551,16 @@ export class SettingsUiForm {
 
         // Update aria-valuenow and aria-valuetext when slider changes
         slider.addEventListener('input', () => {
+          const val = parseFloat(slider.value);
           slider.setAttribute('aria-valuenow', slider.value);
-          slider.setAttribute('aria-valuetext', slider.value);
+          slider.setAttribute('aria-valuetext', formatValue(val));
           numberInput.value = slider.value;
         });
         numberInput.addEventListener('input', () => {
           slider.value = numberInput.value;
+          const val = parseFloat(numberInput.value);
           slider.setAttribute('aria-valuenow', numberInput.value);
-          slider.setAttribute('aria-valuetext', numberInput.value);
+          slider.setAttribute('aria-valuetext', Number.isFinite(val) ? formatValue(val) : numberInput.value);
         });
 
         container.appendChild(domField(t(def.label), slider, sliderId));
@@ -569,15 +600,38 @@ export class SettingsUiForm {
 
   private buildAuthorGrid(): HTMLDivElement {
     const section = domSection(t('Author Colors & Visibility'));
+    const fieldset = document.createElement('fieldset');
+    fieldset.className = 'yt-chat-overlay-author-grid-fieldset';
+    const legend = document.createElement('legend');
+    legend.className = 'yt-chat-overlay-author-grid-legend';
+    legend.textContent = t('Author Colors & Visibility');
+    fieldset.appendChild(legend);
+
     const grid = domDiv('yt-chat-overlay-author-grid');
-    grid.append(
-      document.createElement('span'),
-      domGridHeader(t('Name Color')),
-      domGridHeader(t('Show Name'))
-    );
+    grid.setAttribute('role', 'grid');
+    grid.setAttribute('aria-label', t('Author Colors & Visibility'));
+
+    // Header row
+    const headerRow = document.createElement('div');
+    headerRow.setAttribute('role', 'row');
+    const emptyHeader = document.createElement('span');
+    emptyHeader.setAttribute('role', 'gridcell');
+    headerRow.appendChild(emptyHeader);
+    const nameColorHeader = document.createElement('span');
+    nameColorHeader.setAttribute('role', 'gridcell');
+    nameColorHeader.setAttribute('scope', 'col');
+    nameColorHeader.className = 'yt-chat-overlay-author-grid-header';
+    nameColorHeader.textContent = t('Name Color');
+    headerRow.appendChild(nameColorHeader);
+    const showNameHeader = document.createElement('span');
+    showNameHeader.setAttribute('role', 'gridcell');
+    showNameHeader.setAttribute('scope', 'col');
+    showNameHeader.className = 'yt-chat-overlay-author-grid-header';
+    showNameHeader.textContent = t('Show Name');
+    headerRow.appendChild(showNameHeader);
+    grid.appendChild(headerRow);
 
     for (const key of AUTHOR_COLOR_KEYS) {
-      const labelId = nextFieldId(`label-${key}`);
       const colorId = nextFieldId(`color-${key}`);
       const colorInput = domInput({
         type: 'color',
@@ -594,27 +648,50 @@ export class SettingsUiForm {
 
       const label = document.createElement('label');
       label.className = 'yt-chat-overlay-author-grid-label';
-      label.id = labelId;
       label.htmlFor = `${colorId} ${checkboxId}`;
       label.textContent = t(labelKey);
 
-      grid.append(label, colorInput, checkbox);
+      const row = document.createElement('div');
+      row.setAttribute('role', 'row');
+      const labelCell = document.createElement('span');
+      labelCell.setAttribute('role', 'gridcell');
+      labelCell.appendChild(label);
+      const colorCell = document.createElement('span');
+      colorCell.setAttribute('role', 'gridcell');
+      colorCell.appendChild(colorInput);
+      const checkboxCell = document.createElement('span');
+      checkboxCell.setAttribute('role', 'gridcell');
+      checkboxCell.appendChild(checkbox);
+      row.append(labelCell, colorCell, checkboxCell);
+      grid.appendChild(row);
     }
 
-    const superChatLabelId = nextFieldId('label-superChat');
+    // SuperChat row
     const superChatCheckboxId = nextFieldId('showAuthor-superChat');
     const superChatCheckbox = domGridCheckbox('showAuthor-superChat', superChatCheckboxId);
     superChatCheckbox.setAttribute('aria-label', `${t('Show')} ${t('SuperChat')}`);
 
     const superChatLabel = document.createElement('label');
     superChatLabel.className = 'yt-chat-overlay-author-grid-label';
-    superChatLabel.id = superChatLabelId;
     superChatLabel.htmlFor = superChatCheckboxId;
     superChatLabel.textContent = t('SuperChat');
 
-    grid.append(superChatLabel, document.createElement('span'), superChatCheckbox);
+    const superChatRow = document.createElement('div');
+    superChatRow.setAttribute('role', 'row');
+    const superChatLabelCell = document.createElement('span');
+    superChatLabelCell.setAttribute('role', 'gridcell');
+    superChatLabelCell.appendChild(superChatLabel);
+    const emptyCell = document.createElement('span');
+    emptyCell.setAttribute('role', 'gridcell');
+    superChatRow.appendChild(emptyCell);
+    const superChatCheckboxCell = document.createElement('span');
+    superChatCheckboxCell.setAttribute('role', 'gridcell');
+    superChatCheckboxCell.appendChild(superChatCheckbox);
+    superChatRow.append(superChatLabelCell, emptyCell, superChatCheckboxCell);
+    grid.appendChild(superChatRow);
 
-    section.appendChild(grid);
+    fieldset.appendChild(grid);
+    section.appendChild(fieldset);
     return section;
   }
 

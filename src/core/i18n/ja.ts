@@ -13,6 +13,7 @@ export const JA: Record<string, string> = {
   'Interface language changed to': 'インターフェース言語が変更されました: ',
 
   // ── Section titles ──
+  Cards: 'カード',
   'Text Outline': 'テキスト縁取り',
   'Safe Zone': '安全領域',
   'Message Rate': 'メッセージ頻度',

@@ -13,6 +13,7 @@ export const ZH_CN: Record<string, string> = {
   'Interface language changed to': '界面语言已更改为：',
 
   // ── Section titles ──
+  Cards: '卡片',
   'Text Outline': '文字描边',
   'Safe Zone': '安全区域',
   'Message Rate': '消息频率',
