@@ -120,11 +120,6 @@ export function collectCodePoints(): number[] {
   return _cachedCodePoints;
 }
 
-/** Pre-warm the code point cache (optional, for startup optimization). */
-export function preWarmCodePoints(): void {
-  collectCodePoints();
-}
-
 // ── 8SSEDT Distance Transform ────────────────────────────────────────────────
 
 /**

@@ -184,7 +184,7 @@ function createTabs(): HTMLElement {
   return nav;
 }
 
-export const ACTIONS = ['reset', 'export', 'import', 'close'] as const;
+const ACTIONS = ['reset', 'export', 'import', 'close'] as const;
 export type ActionType = (typeof ACTIONS)[number];
 
 function createActions(): HTMLDivElement {

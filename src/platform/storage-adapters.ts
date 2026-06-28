@@ -160,8 +160,3 @@ export function getStorageAdapter(): StorageAdapter {
   cachedAdapter = new LocalStorageAdapter();
   return cachedAdapter;
 }
-
-/** Reset cached adapter (for testing). */
-export function resetStorageAdapterCache(): void {
-  cachedAdapter = null;
-}

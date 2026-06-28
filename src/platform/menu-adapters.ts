@@ -61,8 +61,3 @@ export function getMenuAdapter(): MenuAdapter {
   cachedAdapter = new NoopMenuAdapter();
   return cachedAdapter;
 }
-
-/** Reset cached adapter (for testing). */
-export function resetMenuAdapterCache(): void {
-  cachedAdapter = null;
-}

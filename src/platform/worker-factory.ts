@@ -65,8 +65,3 @@ export function getWorkerFactory(): WorkerFactory {
   cachedFactory = new ViteWorkerFactory();
   return cachedFactory;
 }
-
-/** Reset cached factory (for testing). */
-export function resetWorkerFactoryCache(): void {
-  cachedFactory = null;
-}
