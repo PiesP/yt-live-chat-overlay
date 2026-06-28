@@ -164,7 +164,8 @@ export class SettingsUi {
     // Remove keydown listener to prevent accumulation across SPA navigations.
     // ensureModal() registers this listener and close() is called on modal
     // hide; destroy() also removes it as a safety net.
-    document.removeEventListener('keydown', this.handleKeydown);
+    // Must use capture=true to match the addEventListener call in ensureModal().
+    document.removeEventListener('keydown', this.handleKeydown, true);
 
     if (this.previousFocus?.isConnected) {
       this.previousFocus.focus();
@@ -370,7 +371,12 @@ export class SettingsUi {
     this.backdrop.id = BACKDROP_ID;
     this.backdrop.className = 'yt-chat-overlay-settings-backdrop';
     this._backdropClickHandler = (event: MouseEvent) => {
+      // Only respond to genuine left-button mouse clicks. Touch events
+      // generate synthetic MouseEvent with button === 0 but detail === 0;
+      // filtering detail === 0 prevents accidental modal dismissal from
+      // touch scrolls/taps that trigger synthetic click events.
       if (event.button !== 0) return;
+      if (event.detail === 0) return;
       if (event.target === this.backdrop) {
         this.close();
       }
@@ -393,8 +399,10 @@ export class SettingsUi {
     document.body.appendChild(this.backdrop);
     this.setDialogOpen(false);
 
-    // Activate keydown listener now that modal DOM exists
-    document.addEventListener('keydown', this.handleKeydown);
+    // Activate keydown listener now that modal DOM exists.
+    // Use capture phase so ESC fires before any page-level handlers and
+    // the focus trap's Tab handler intercepts keys before YouTube's own listeners.
+    document.addEventListener('keydown', this.handleKeydown, true);
   }
 
   private open(): void {
@@ -741,7 +749,7 @@ export class SettingsUi {
       this._backdropClickHandler = null;
     }
     this.backdrop?.remove();
-    document.removeEventListener('keydown', this.handleKeydown);
+    document.removeEventListener('keydown', this.handleKeydown, true);
     this.restoreDocumentLangDir();
 
     const styleElement = document.getElementById(STYLE_ID);
