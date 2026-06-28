@@ -185,6 +185,8 @@ export class CanvasRenderer extends RendererBase {
   private connectionStatus: ConnectionStatus = 'connected';
   /** Bounding box of the last-rendered status bar pill, for click hit testing. */
   private statusBarHitRegion: { x: number; y: number; w: number; h: number } | null = null;
+  /** Visually-hidden live region for connection status announcements. */
+  private statusRegion: HTMLDivElement | null = null;
   private translationService: TranslationService;
   private messageActivator: MessageActivator;
   private languageDetector: LanguageDetectorService | null = null;
@@ -321,6 +323,7 @@ export class CanvasRenderer extends RendererBase {
     statusRegion.style.cssText =
       'position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0';
     if (container) container.appendChild(statusRegion);
+    this.statusRegion = statusRegion;
 
     // Click handler for status bar (click-to-reload on DISCONNECTED)
     this.canvasClickHandler = (e: MouseEvent) => {
@@ -400,6 +403,11 @@ export class CanvasRenderer extends RendererBase {
   /** Inform the renderer of the current connection health status. */
   setConnectionStatus(status: ConnectionStatus): void {
     this.connectionStatus = status;
+    // Update the screen-reader live region so status changes are announced
+    // even when the canvas-rendered pill is clipped or offscreen.
+    if (this.statusRegion) {
+      this.statusRegion.textContent = this.getStatusMessage(status);
+    }
     // Enable pointer events on canvas when disconnected so click-to-reload works
     if (this.canvas) {
       this.canvas.style.pointerEvents = status === 'disconnected' ? 'auto' : 'none';
