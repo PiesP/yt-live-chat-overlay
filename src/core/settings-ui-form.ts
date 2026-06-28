@@ -134,13 +134,6 @@ function domGridCheckbox(name: string, id?: string): HTMLInputElement {
   return el;
 }
 
-function domGridHeader(text: string): HTMLSpanElement {
-  const el = document.createElement('span');
-  el.className = 'yt-chat-overlay-author-grid-header';
-  el.textContent = text;
-  return el;
-}
-
 // ── Modal sub-structure factories ────────────────────────────────────────────
 
 const TITLE_ID = 'yt-chat-overlay-settings-title';
@@ -534,8 +527,7 @@ export class SettingsUiForm {
         slider.setAttribute('aria-valuemax', String(limits.max * scale));
         slider.setAttribute('aria-valuenow', String(limits.min * scale));
         const displayUnit = getRangeUnit(def.key);
-        const formatValue = (v: number): string =>
-          displayUnit ? `${v} ${displayUnit}` : `${v} `;
+        const formatValue = (v: number): string => (displayUnit ? `${v} ${displayUnit}` : `${v} `);
         slider.setAttribute('aria-valuetext', formatValue(limits.min * scale));
 
         const rangeValueId = `range-value-${this.resolveKey(def)}`;
@@ -560,7 +552,10 @@ export class SettingsUiForm {
           slider.value = numberInput.value;
           const val = parseFloat(numberInput.value);
           slider.setAttribute('aria-valuenow', numberInput.value);
-          slider.setAttribute('aria-valuetext', Number.isFinite(val) ? formatValue(val) : numberInput.value);
+          slider.setAttribute(
+            'aria-valuetext',
+            Number.isFinite(val) ? formatValue(val) : numberInput.value
+          );
         });
 
         container.appendChild(domField(t(def.label), slider, sliderId));
