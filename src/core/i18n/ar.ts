@@ -24,7 +24,6 @@ export const AR: Record<string, string> = {
   'Burst Detection': 'كشف الانفجار',
   Cache: 'الذاكرة المؤقتة',
   'Author Colors & Visibility': 'ألوان المؤلفين والرؤية',
-  'Author colors and visibility': 'ألوان المؤلفين والرؤية',
   Interface: 'الواجهة',
   'Chat Translation': 'ترجمة الدردشة',
   'Translation backend service for processing messages': 'خدمة الترجمة الخلفية لمعالجة الرسائل',
@@ -169,7 +168,6 @@ export const AR: Record<string, string> = {
   'Recent Window (min)': 'النافذة الزمنية (دقائق)',
   'Log Level': 'مستوى السجل',
   'Debug Overlay': 'طبقة تصحيح',
-  'Enable WebGL2': 'تفعيل WebGL2',
 
   // ── New select options ──
   'Warnings only': 'التحذيرات فقط',
@@ -309,9 +307,6 @@ export const AR: Record<string, string> = {
   'Import failed: invalid JSON': 'فشل الاستيراد: JSON غير صالح',
   'Chat overlay settings': 'إعدادات تراكب الدردشة',
   'Reset overlay settings': 'إعادة تعيين إعدادات التراكب',
-  'WebGL2 Renderer': 'عارض WebGL2',
-  'Use WebGL2 GPU-accelerated rendering for higher performance (requires page reload)':
-    'استخدام عرض WebGL2 المسرّع بواسطة GPU لأداء أعلى (يتطلب إعادة تحميل الصفحة)',
   'Reload overlay': 'إعادة تحميل التراكب',
 
   // ── Author grid ──
@@ -329,8 +324,6 @@ export const AR: Record<string, string> = {
   'Short messages shown regardless of length': 'عرض الرسائل القصيرة بغض النظر عن الطول',
 
   // ── Toast / sync messages ──
-  'Settings updated from another tab': 'تم تحديث الإعدادات من تبويب آخر',
-  'Settings exported successfully': 'تم تصدير الإعدادات بنجاح',
 
   // ── Translation unsupported ──
   'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.':

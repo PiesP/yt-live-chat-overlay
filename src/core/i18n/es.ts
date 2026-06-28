@@ -24,7 +24,6 @@ export const ES: Record<string, string> = {
   'Burst Detection': 'Detección de ráfagas',
   Cache: 'Caché',
   'Author Colors & Visibility': 'Colores y visibilidad',
-  'Author colors and visibility': 'Colores y visibilidad',
   Interface: 'Interfaz',
   'Chat Translation': 'Traducción de chat',
   'Translation backend service for processing messages':
@@ -172,7 +171,6 @@ export const ES: Record<string, string> = {
   'Recent Window (min)': 'Ventana (min)',
   'Log Level': 'Nivel de registro',
   'Debug Overlay': 'Superposición depuración',
-  'Enable WebGL2': 'Habilitar WebGL2',
 
   // ── New select options ──
   'Warnings only': 'Solo avisos',
@@ -324,9 +322,6 @@ export const ES: Record<string, string> = {
   'Import failed: invalid JSON': 'Error de importación: JSON no válido',
   'Chat overlay settings': 'Configuración de superposición de chat',
   'Reset overlay settings': 'Restablecer superposición',
-  'WebGL2 Renderer': 'Renderizador WebGL2',
-  'Use WebGL2 GPU-accelerated rendering for higher performance (requires page reload)':
-    'Usar renderizado WebGL2 acelerado por GPU para mayor rendimiento (requiere recargar la página)',
   'Reload overlay': 'Recargar superposición',
 
   // ── Author grid ──
@@ -344,8 +339,6 @@ export const ES: Record<string, string> = {
   'Short messages shown regardless of length': 'Mostrar mensajes cortos sin importar la longitud',
 
   // ── Toast / sync messages ──
-  'Settings updated from another tab': 'Configuración actualizada desde otra pestaña',
-  'Settings exported successfully': 'Configuración exportada correctamente',
 
   // ── Translation unsupported ──
   'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.':

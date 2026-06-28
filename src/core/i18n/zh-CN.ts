@@ -24,7 +24,6 @@ export const ZH_CN: Record<string, string> = {
   'Burst Detection': '突发检测',
   Cache: '缓存',
   'Author Colors & Visibility': '用户颜色与显示',
-  'Author colors and visibility': '用户颜色与显示',
   Interface: '界面',
   'Chat Translation': '聊天翻译',
   'Translation backend service for processing messages': '用于处理消息的翻译后端服务',
@@ -165,7 +164,6 @@ export const ZH_CN: Record<string, string> = {
   'Recent Window (min)': '时间窗口 (分)',
   'Log Level': '日志级别',
   'Debug Overlay': '调试叠加层',
-  'Enable WebGL2': '启用 WebGL2',
 
   // ── New select options ──
   'Warnings only': '仅警告',
@@ -294,9 +292,6 @@ export const ZH_CN: Record<string, string> = {
   'Import failed: invalid JSON': '导入失败：JSON格式无效',
   'Chat overlay settings': '弹幕显示设置',
   'Reset overlay settings': '重置覆盖层设置',
-  'WebGL2 Renderer': 'WebGL2渲染器',
-  'Use WebGL2 GPU-accelerated rendering for higher performance (requires page reload)':
-    '使用WebGL2 GPU加速渲染以获得更高性能（需要重新加载页面）',
   'Reload overlay': '重新加载覆盖层',
 
   // ── Author grid ──
@@ -314,8 +309,6 @@ export const ZH_CN: Record<string, string> = {
   'Short messages shown regardless of length': '显示短消息，无论长度如何',
 
   // ── Toast / sync messages ──
-  'Settings updated from another tab': '已从其他标签页更新设置',
-  'Settings exported successfully': '设置已导出成功',
 
   // ── Translation unsupported ──
   'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.':

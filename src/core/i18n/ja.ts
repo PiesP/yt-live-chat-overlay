@@ -24,7 +24,6 @@ export const JA: Record<string, string> = {
   'Burst Detection': 'バースト検出',
   Tuning: 'チューニング',
   'Author Colors & Visibility': '投稿者の色と表示',
-  'Author colors and visibility': '投稿者の色と表示',
   Interface: 'インターフェース',
   'Chat Translation': 'チャット翻訳',
   'Translation backend service for processing messages':
@@ -172,7 +171,6 @@ export const JA: Record<string, string> = {
   'Recent Window (min)': '時間枠 (分)',
   'Log Level': 'ログレベル',
   'Debug Overlay': 'デバッグオーバーレイ',
-  'Enable WebGL2': 'WebGL2を有効化',
 
   // ── New select options ──
   'Warnings only': '警告のみ',
@@ -312,9 +310,6 @@ export const JA: Record<string, string> = {
   'Import failed: invalid JSON': 'インポート失敗: 無効なJSON形式です',
   'Chat overlay settings': 'チャットオーバーレイ設定',
   'Reset overlay settings': 'オーバーレイ設定をリセット',
-  'WebGL2 Renderer': 'WebGL2レンダラー',
-  'Use WebGL2 GPU-accelerated rendering for higher performance (requires page reload)':
-    '高性能なWebGL2 GPUアクセラレーションレンダリングを使用（ページの再読み込みが必要）',
   'Reload overlay': 'オーバレイを再読み込み',
 
   // ── Author grid ──
@@ -332,8 +327,6 @@ export const JA: Record<string, string> = {
   'Short messages shown regardless of length': '長さに関係なく短いメッセージを表示',
 
   // ── Toast / sync messages ──
-  'Settings updated from another tab': '他のタブから設定が更新されました',
-  'Settings exported successfully': '設定がエクスポートされました',
 
   // ── Translation unsupported ──
   'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.':

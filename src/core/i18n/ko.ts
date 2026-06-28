@@ -24,7 +24,6 @@ export const KO: Record<string, string> = {
   'Burst Detection': '버스트 감지',
   Cache: '캐시',
   'Author Colors & Visibility': '작성자 색상 및 표시',
-  'Author colors and visibility': '작성자 색상 및 표시',
   Interface: '인터페이스',
   'Chat Translation': '채팅 번역',
   'Translation backend service for processing messages': '메시지 처리를 위한 번역 백엔드 서비스',
@@ -169,7 +168,6 @@ export const KO: Record<string, string> = {
   'Recent Window (min)': '시간 창 (분)',
   'Log Level': '로그 레벨',
   'Debug Overlay': '디버그 오버레이',
-  'Enable WebGL2': 'WebGL2 활성화',
 
   // ── New select options ──
   'Warnings only': '경고만',
@@ -308,9 +306,6 @@ export const KO: Record<string, string> = {
   'Import failed: invalid JSON': '가져오기 실패: 잘못된 JSON 형식',
   'Chat overlay settings': '채팅 오버레이 설정',
   'Reset overlay settings': '오버레이 설정 초기화',
-  'WebGL2 Renderer': 'WebGL2 렌더러',
-  'Use WebGL2 GPU-accelerated rendering for higher performance (requires page reload)':
-    '더 높은 성능을 위해 WebGL2 GPU 가속 렌더링 사용 (페이지 새로고침 필요)',
   'Reload overlay': '오버레이 새로고침',
 
   // ── Author grid ──
@@ -328,8 +323,6 @@ export const KO: Record<string, string> = {
   'Short messages shown regardless of length': '길이에 관계없이 짧은 메시지 표시',
 
   // ── Toast / sync messages ──
-  'Settings updated from another tab': '다른 탭에서 설정이 업데이트되었습니다',
-  'Settings exported successfully': '설정이 내보내기되었습니다',
 
   // ── Translation unsupported ──
   'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.':
