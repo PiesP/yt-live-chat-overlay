@@ -5,39 +5,13 @@ import type { ChatMessage, OverlaySettings } from '@app-types';
 import { ByteLimitedCache } from '@core/byte-limited-cache';
 import { clearSafeInterval } from '@core/dom';
 import { createLogger } from '@core/logging';
+import { isAllowedImageUrl } from '@core/image-url-validation';
 
 /** Maximum number of failed emoji fetch entries before eviction triggers. */
 const FAILED_EMOJI_FETCH_CAP = 500;
 /** Number of entries to evict when the cap is exceeded. */
 const FAILED_EMOJI_FETCH_EVICT_COUNT = 250;
 
-/**
- * Allowed image host patterns for YouTube CDN resources.
- * All image URLs (emoji, author photos, stickers) must match one of these
- * origins to prevent loading arbitrary third-party resources.
- */
-const ALLOWED_IMAGE_ORIGINS = [
-  'https://yt3.ggpht.com', // YouTube user/content images
-  'https://yt4.ggpht.com', // YouTube CDN alias
-] as const;
-
-/** Validate that an image URL originates from an allowed YouTube CDN domain. */
-function isAllowedImageUrl(url: string): boolean {
-  try {
-    const parsed = new URL(url);
-    return (
-      parsed.protocol === 'https:' &&
-      ALLOWED_IMAGE_ORIGINS.some(
-        (origin) =>
-          parsed.origin === origin || parsed.origin === origin.replace('https://', 'https://i.')
-      )
-    );
-  } catch {
-    return false;
-  }
-}
-
-/**
  * ImageFetchManager — handles all image/emoji/sticker loading and caching.
  *
  * Extracted from CanvasRenderer to separate the image loading concern from
