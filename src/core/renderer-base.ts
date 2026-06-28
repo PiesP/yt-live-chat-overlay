@@ -354,7 +354,8 @@ export abstract class RendererBase {
     const now = Date.now();
     if (now - this.lastBacklogToggleTime < this.settings.backlogToggleCooldownMs) return;
 
-    const queueRatio = this.getQueueLength() / this.settings.queueMaxSize;
+    const queueRatio =
+      this.settings.queueMaxSize > 0 ? this.getQueueLength() / this.settings.queueMaxSize : 0;
     if (queueRatio > this.settings.backlogPauseThreshold && !this.backlogPaused) {
       this.backlogPaused = true;
       this.lastBacklogToggleTime = now;

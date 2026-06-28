@@ -70,8 +70,9 @@ export class PageWatcher {
     this.patchGeneration++;
     const myGeneration = this.patchGeneration;
     const patched = (...args: Parameters<typeof history.pushState>) => {
-      original.apply(history, args);
+      const result = original.apply(history, args);
       this.handlePotentialUrlChange(methodName);
+      return result;
     };
     // Stamp marker so future patches can detect this is our wrapper.
     const patchedWithMarker = patched as unknown as { [key: string]: unknown };

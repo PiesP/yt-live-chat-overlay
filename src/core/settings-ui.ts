@@ -39,6 +39,9 @@ export class SettingsUi {
   private activeTab: string;
   /** Language code that was active when the modal content was last built. */
   private modalLanguage: string | null = null;
+  /** Saved document lang/dir before modal opened; restored on close. */
+  private savedDocumentLang: string | null = null;
+  private savedDocumentDir: string | null = null;
   /** Saved body overflow before scroll lock. Restored on close/destroy. */
   private savedBodyOverflow: string | null = null;
   /** Saved body padding-right before scrollbar compensation. */
@@ -156,6 +159,7 @@ export class SettingsUi {
     this.setDialogOpen(false);
 
     this.unlockBodyScroll();
+    this.restoreDocumentLangDir();
 
     // Remove keydown listener to prevent accumulation across SPA navigations.
     // ensureModal() registers this listener and close() is called on modal
@@ -447,9 +451,24 @@ export class SettingsUi {
   /** Update document.documentElement.lang and dir to match the active language.
    *  Arabic ('ar') is RTL; all other supported languages are LTR. */
   private updateDocumentLangDir(): void {
+    // Save original values before first modification so we can restore on close.
+    if (this.savedDocumentLang === null) {
+      this.savedDocumentLang = document.documentElement.lang || '';
+      this.savedDocumentDir = document.documentElement.dir || '';
+    }
     const lang = getActiveLanguage();
     document.documentElement.lang = lang;
     document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
+  }
+
+  /** Restore document.documentElement.lang and dir to pre-modal values. */
+  private restoreDocumentLangDir(): void {
+    if (this.savedDocumentLang !== null) {
+      document.documentElement.lang = this.savedDocumentLang;
+      document.documentElement.dir = this.savedDocumentDir ?? '';
+      this.savedDocumentLang = null;
+      this.savedDocumentDir = null;
+    }
   }
 
   /** Create a reusable confirmation dialog overlay for destructive actions. */
@@ -723,6 +742,7 @@ export class SettingsUi {
     }
     this.backdrop?.remove();
     document.removeEventListener('keydown', this.handleKeydown);
+    this.restoreDocumentLangDir();
 
     const styleElement = document.getElementById(STYLE_ID);
     styleElement?.remove();
