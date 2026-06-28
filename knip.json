@@ -8,5 +8,5 @@
     "@platform/*": ["src/platform/*"]
   },
   "ignore": ["test/**", "extension/**", "dist*/**"],
-  "ignoreBinaries": ["stryker"]
+  "ignoreBinaries": ["stryker", "e2e"]
 }
