@@ -31,7 +31,14 @@
     "build:extension:dev": "vite build --mode development && vite build --config vite.config.extension.cs.ts --mode development && cp extension/manifest.json dist-extension/manifest.json && cp -r extension/icons dist-extension/",
     "mut": "cd test && npx stryker run ../stryker.conf.json --reporters=progress",
     "mut:fast": "cd test && npx stryker run ../stryker.conf.json --reporters=progress --mutators=boolean,arithmetic,conditional-boundary,equality-operator,negate-conditional,string",
-    "build:extension:firefox": "pnpm -s prebuild:extension:firefox && vite build --config vite.config.extension.firefox.ts && vite build --config vite.config.extension.cs.firefox.ts && cp extension/manifest.firefox.json dist-extension-firefox/manifest.json && cp -r extension/icons dist-extension-firefox/"
+    "build:extension:firefox": "pnpm -s prebuild:extension:firefox && vite build --config vite.config.extension.firefox.ts && vite build --config vite.config.extension.cs.firefox.ts && cp extension/manifest.firefox.json dist-extension-firefox/manifest.json && cp -r extension/icons dist-extension-firefox/",
+    "test": "cd test && pnpm test",
+    "test:watch": "cd test && pnpm test:watch",
+    "test:cov": "cd test && pnpm test:cov",
+    "test:e2e": "cd test && pnpm e2e",
+    "test:e2e:headed": "cd test && pnpm e2e:headed",
+    "test:setup": "cd test && pnpm install",
+    "clean:all": "rimraf dist dist-extension dist-extension-firefox"
   },
   "keywords": [
     "userscript",
