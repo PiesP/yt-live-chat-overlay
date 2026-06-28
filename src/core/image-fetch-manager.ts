@@ -187,7 +187,7 @@ export class ImageFetchManager {
       }
       if (this.emojiFetching.has(emojiUrl)) continue;
       if (this.emojiCache.has(emojiUrl)) continue;
-      if (this.failedEmojiFetches.has(emojiUrl)) continue;
+      if (this.isEmojiFetchFailed(emojiUrl)) continue;
       if (this.emojiFetching.size >= this.emojiFetchLimit) continue;
       this.emojiFetching.add(emojiUrl);
       this.emojiFetchingStarted.set(emojiUrl, performance.now());
@@ -233,6 +233,21 @@ export class ImageFetchManager {
     if (stickerUrl) {
       this.loadImage(stickerUrl, this.stickerCache);
     }
+  }
+
+  /**
+   * Check whether a URL is in the failed-fetch cache, refreshing its
+   * position on access so eviction targets the least-recently-seen entries
+   * (true LRU) rather than the oldest-inserted ones (FIFO).
+   */
+  private isEmojiFetchFailed(url: string): boolean {
+    const ts = this.failedEmojiFetches.get(url);
+    if (ts === undefined) return false;
+    // Re-insert to move this entry to the end of the Map's insertion order,
+    // marking it as most-recently-seen for LRU eviction.
+    this.failedEmojiFetches.delete(url);
+    this.failedEmojiFetches.set(url, ts);
+    return true;
   }
 
   /**

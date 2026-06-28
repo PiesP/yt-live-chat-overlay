@@ -513,6 +513,27 @@ export class RendererWebGL2 extends RendererBase {
     }
   }
 
+  /**
+   * Replay a previously received message without observability tracking.
+   * Used by replayLatestMessages so replayed messages don't inflate
+   * drop-rate denominators or trigger burst detection / rate limiting.
+   */
+  replayMessage(message: ChatMessage): void {
+    if (this.isVideoPaused) return;
+    const priority = RendererBase.getMessagePriority(message);
+    const result = enqueueWithOverflow(
+      this.pendingQueue,
+      message,
+      priority,
+      (reason) => this.observability.onMessageDropped(reason),
+      this.settings.queueMaxSize
+    );
+    if (result === 'dropped') return;
+    if (this.pendingQueue.size === 1 && !this.isPaused && !this.isVideoPaused) {
+      this.startRenderLoop();
+    }
+  }
+
   /** Set translated text for an active message. Searches only placed messages (not the pending queue). */
   setTranslatedText(messageId: string, translatedText: string): void {
     for (const msg of this.messages) {

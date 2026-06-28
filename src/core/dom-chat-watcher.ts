@@ -65,14 +65,14 @@ export function installDomChatWatcher(onMessages: DomMessageCallback): DomWatche
       const el = node as HTMLElement;
 
       // Check if this element itself is a text-message renderer
-      const textRenderer = el.matches?.(TEXT_MESSAGE_RENDERER_SELECTOR)
+      const textRenderer = el.matches(TEXT_MESSAGE_RENDERER_SELECTOR)
         ? el
-        : el.querySelector?.(TEXT_MESSAGE_RENDERER_SELECTOR);
+        : el.querySelector(TEXT_MESSAGE_RENDERER_SELECTOR);
 
       if (!textRenderer) continue;
 
-      const authorEl = textRenderer.querySelector?.(AUTHOR_NAME_SELECTOR);
-      const messageEl = textRenderer.querySelector?.(MESSAGE_SELECTOR);
+      const authorEl = textRenderer.querySelector(AUTHOR_NAME_SELECTOR);
+      const messageEl = textRenderer.querySelector(MESSAGE_SELECTOR);
 
       const author = authorEl?.textContent?.trim() ?? '';
       const text = messageEl?.textContent?.trim() ?? '';
