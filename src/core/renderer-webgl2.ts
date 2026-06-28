@@ -15,6 +15,7 @@ import { rendererLayout, statusBarLayout } from '@core/design-tokens';
 import type { LanePlacement } from '@core/lane-allocator';
 import { LanguageDetectorService } from '@core/language-detector-service';
 import { createLogger } from '@core/logging';
+import { LruMap } from '@core/lru-map';
 import type { Overlay } from '@core/overlay';
 import { PriorityBucketQueue } from '@core/priority-bucket-queue';
 import type { ConnectionStatus } from '@core/renderer-base';
@@ -74,7 +75,7 @@ export class RendererWebGL2 extends RendererBase {
   private textureProgram!: WebGLProgram;
   private u_texViewport: WebGLUniformLocation | null = null;
   private u_texSampler: WebGLUniformLocation | null = null;
-  private emojiTextures = new Map<string, WebGLTexture>();
+  private emojiTextures = new LruMap<string, WebGLTexture>(256);
   private solidWhiteTex: WebGLTexture | null = null; // 1x1 white pixel for card backgrounds
   private texQuadCount = 0;
   private texQuadData = new Float32Array(MAX_INSTANCES * FLOATS_PER_INSTANCE);
@@ -96,7 +97,7 @@ export class RendererWebGL2 extends RendererBase {
   // Canvas2D overlay for card decorations (round rects, author photos)
   private overlay2d!: HTMLCanvasElement;
   private ctx2d!: CanvasRenderingContext2D;
-  private authorPhotoCache = new Map<string, HTMLImageElement>();
+  private authorPhotoCache = new LruMap<string, HTMLImageElement>(128);
 
   // Uniform locations
   private u_viewport!: WebGLUniformLocation | null;
@@ -349,7 +350,7 @@ export class RendererWebGL2 extends RendererBase {
       gl.UNSIGNED_BYTE,
       new Uint8Array([200, 200, 200, 255])
     );
-    this.emojiTextures.set(url, tex);
+    this.setEmojiTexture(url, tex);
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
@@ -958,6 +959,23 @@ export class RendererWebGL2 extends RendererBase {
     this.authorPhotoCache.clear();
   }
 
+  /** Add an emoji texture to the bounded cache. Evicts the oldest texture
+   *  (and deletes its GL resource) when at capacity. */
+  private setEmojiTexture(url: string, tex: WebGLTexture): void {
+    if (this.emojiTextures.has(url)) return;
+    // If at capacity, evict the oldest entry and free its GL texture.
+    // LruMap evicts on .set(), so we manually evict to get the handle.
+    const maxSize = 256; // must match LruMap capacity
+    while (this.emojiTextures.size >= maxSize) {
+      const oldestKey = this.emojiTextures.keys().next().value;
+      if (oldestKey === undefined) break;
+      const evictedTex = this.emojiTextures.get(oldestKey);
+      if (evictedTex !== undefined) this.gl.deleteTexture(evictedTex);
+      this.emojiTextures.delete(oldestKey);
+    }
+    this.emojiTextures.set(url, tex);
+  }
+
   private async performSourceDetection(): Promise<void> {
     if (!this.languageDetector) return;
     try {
@@ -996,8 +1014,8 @@ export class RendererWebGL2 extends RendererBase {
       if (this.textureProgram) this.gl.deleteProgram(this.textureProgram);
       if (this.solidWhiteTex) this.gl.deleteTexture(this.solidWhiteTex);
       for (const tex of this.emojiTextures.values()) this.gl.deleteTexture(tex);
+      this.emojiTextures.clear();
     }
-    this.emojiTextures.clear();
     // Remove the overlay canvas from DOM
     if (this.overlay2d.parentNode) this.overlay2d.parentNode.removeChild(this.overlay2d);
     this.authorPhotoCache.clear();
