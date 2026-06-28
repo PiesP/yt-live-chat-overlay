@@ -353,6 +353,13 @@ export class RendererWebGL2 extends RendererBase {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
+      // Guard against context loss: img.onload fires asynchronously after
+      // the image is decoded. If the WebGL2 context was lost between
+      // getEmojiTexture() and now, gl.texImage2D silently fails and the
+      // 1x1 gray placeholder becomes permanent. Skip the upload — the
+      // texture is re-fetched after context restoration via
+      // reinitializeGLResources() + the normal emoji request path.
+      if (this.isContextLost) return;
       gl.bindTexture(gl.TEXTURE_2D, tex);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
