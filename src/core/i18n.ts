@@ -17,6 +17,8 @@
  */
 
 import type { LanguageSetting, TranslationLanguage, TranslationTarget } from '@app-types';
+import { getLanguageAdapter } from '@platform/language-adapter';
+import type { LanguageAdapter } from '@platform/types';
 
 /** Language codes with actual translations (excluding 'auto'). Reuses TranslationLanguage from app-types. */
 type SupportedLanguage = TranslationLanguage;
@@ -76,20 +78,22 @@ function matchLanguages(languages: string[]): SupportedLanguage {
  * Detect the best supported language from the browser environment.
  *
  * Priority order:
- * 1. `chrome.i18n.getUILanguage()` — Chrome extension UI language (most
- *    accurate for extension context; reflects the browser's own locale setting).
+ * 1. Platform-provided UI language hint (chrome.i18n.getUILanguage() in extension
+ *    context, undefined otherwise) — most accurate for extension context.
  * 2. `navigator.languages[]` — user's ordered accept-language list (covers
  *    cases like "pt-BR" → fall through earlier entries → "en").
  * 3. `navigator.language` — single fallback (legacy / userscript).
+ *
+ * @param adapter Optional LanguageAdapter override (for testing). Uses the
+ *                platform default when not provided.
  */
-export function detectBrowserLanguage(): SupportedLanguage {
+export function detectBrowserLanguage(adapter?: LanguageAdapter): SupportedLanguage {
   try {
-    // 1. Chrome extension UI language (extension context only)
-    if (typeof chrome !== 'undefined' && chrome.i18n?.getUILanguage) {
-      const chromeUiLanguage = chrome.i18n.getUILanguage();
-      if (chromeUiLanguage) {
-        return matchLanguages([chromeUiLanguage]);
-      }
+    // 1. Platform-provided UI language (extension context only)
+    const langAdapter = adapter ?? getLanguageAdapter();
+    const uiLanguage = langAdapter.getUILanguage();
+    if (uiLanguage) {
+      return matchLanguages([uiLanguage]);
     }
 
     // 2. Navigator languages array (user preference order)
@@ -111,7 +115,7 @@ export function detectBrowserLanguage(): SupportedLanguage {
 /**
  * Resolve the translation target language.
  * When 'auto', delegates to detectBrowserLanguage() which checks
- * chrome.i18n.getUILanguage() → navigator.languages[] → navigator.language.
+ * platform UI language → navigator.languages[] → navigator.language.
  * Returns the concrete TranslationLanguage code for Chrome Translator API.
  */
 export function resolveTranslationTarget(target: TranslationTarget): SupportedLanguage {

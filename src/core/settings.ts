@@ -11,6 +11,7 @@ import {
   SETTINGS_VERSION,
   STORAGE_KEY,
 } from '@core/settings-schema';
+import { getCrossTabSyncAdapter } from '@platform/cross-tab-sync-adapters';
 import { getStorageAdapter } from '@platform/storage-adapters';
 
 const log = createLogger('Settings');
@@ -19,41 +20,23 @@ export class Settings {
   private settings: OverlaySettings;
   /** Callbacks notified when settings change from another tab. */
   private readonly onChangeCallbacks = new Set<() => void>();
-  /** Guard: true during a save() call so the GM listener can skip self-triggered events. */
+  /** Guard: true during a save() call so cross-tab listeners can skip self-triggered events. */
   private saving = false;
   /** Debounce flag: true while a save is scheduled via requestIdleCallback. */
   private savePending = false;
   /** requestIdleCallback handle — stored so we can cancel on flush/destroy. */
   private saveIdleHandle = 0;
-  /** GM value change listener ID, for cleanup. */
-  private gmListenerId: number | null = null;
-  /** chrome.storage.onChanged listener reference, for cleanup. */
-  private chromeStorageListener:
-    | ((changes: Record<string, unknown>, areaName: string) => void)
-    | null = null;
-  /** Bound storage event handler reference, for cleanup. */
-  private readonly handleStorageEvent = (event: StorageEvent): void => {
-    if (event.key !== STORAGE_KEY || event.newValue === null) return;
-    log.debug('Cross-tab settings change detected via storage event');
+  /** Cross-tab sync adapter for the current environment. */
+  private crossTabSyncAdapter = getCrossTabSyncAdapter(STORAGE_KEY);
+  /** Bound callback reference for cross-tab sync adapter removeListener. */
+  private readonly onCrossTabChange = (_key: string): void => {
+    if (this.saving) return;
+    log.debug('Cross-tab settings change detected via platform adapter');
     void this.reloadFromStorage();
   };
 
   constructor() {
     this.settings = cloneSettings(DEFAULT_SETTINGS);
-  }
-
-  /** Whether chrome.storage.onChanged is available (extension context). */
-  private static get hasChromeStorageEvents(): boolean {
-    return (
-      typeof chrome !== 'undefined' &&
-      chrome.storage !== undefined &&
-      chrome.storage.onChanged !== undefined
-    );
-  }
-
-  /** Whether GM_addValueChangeListener is available (userscript context). */
-  private static get hasGmValueChangeListener(): boolean {
-    return typeof GM_addValueChangeListener !== 'undefined';
   }
 
   async initialize(): Promise<void> {
@@ -91,48 +74,11 @@ export class Settings {
   }
 
   private startCrossTabSync(): void {
-    // localStorage path: fires in other tabs when setItem() is called.
-    // This is the primary cross-tab sync mechanism for MAIN-world content
-    // scripts where chrome.storage.onChanged is not available.
-    window.addEventListener('storage', this.handleStorageEvent);
-
-    // GM storage path: fires in all tabs (including the caller).
-    // Only available in userscript contexts (Tampermonkey/Violentmonkey).
-    if (Settings.hasGmValueChangeListener) {
-      this.gmListenerId = GM_addValueChangeListener(STORAGE_KEY, () => {
-        if (this.saving) return;
-        log.debug('Cross-tab settings change detected via GM listener');
-        void this.reloadFromStorage();
-      });
-    }
-
-    // Chrome extension storage path: fires when chrome.storage.local changes.
-    // NOTE: This is NOT available in MAIN-world content scripts (world: "MAIN").
-    // In that context, ChromeStorageAdapter.isAvailable() returns false and
-    // the adapter falls back to LocalStorageAdapter, which relies on the
-    // 'storage' event listener registered above.
-    if (Settings.hasChromeStorageEvents) {
-      this.chromeStorageListener = (changes: Record<string, unknown>, areaName: string) => {
-        if (areaName !== 'local') return;
-        const change = changes[STORAGE_KEY] as { newValue?: unknown } | undefined;
-        if (!change) return;
-        log.debug('Cross-tab settings change detected via chrome.storage.onChanged');
-        void this.reloadFromStorage();
-      };
-      chrome?.storage?.onChanged.addListener(this.chromeStorageListener);
-    }
+    this.crossTabSyncAdapter.addListener(this.onCrossTabChange);
   }
 
   private stopCrossTabSync(): void {
-    window.removeEventListener('storage', this.handleStorageEvent);
-    if (this.gmListenerId !== null && Settings.hasGmValueChangeListener) {
-      GM_removeValueChangeListener(this.gmListenerId);
-      this.gmListenerId = null;
-    }
-    if (this.chromeStorageListener !== null && Settings.hasChromeStorageEvents) {
-      chrome?.storage?.onChanged.removeListener(this.chromeStorageListener);
-      this.chromeStorageListener = null;
-    }
+    this.crossTabSyncAdapter.removeListener();
   }
 
   /** Reload settings from storage and notify subscribers. */

@@ -19,9 +19,20 @@ export interface StorageAdapter {
 
 // ── Cross-Tab Sync ────────────────────────────────────────────────────────
 
-// Cross-tab sync is implemented inline in Settings.ts via
-// GM_addValueChangeListener / chrome.storage.onChanged listeners.
-// See src/core/settings.ts for the implementation.
+/**
+ * Listens for settings changes made in other tabs and notifies the caller.
+ *
+ * Implementations wrap platform-specific cross-tab sync mechanisms:
+ * - GM_addValueChangeListener (userscript)
+ * - chrome.storage.onChanged (extension)
+ * - window 'storage' event (fallback)
+ */
+export interface CrossTabSyncAdapter {
+  /** Start listening for cross-tab changes. The callback fires with the changed key. */
+  addListener(callback: (key: string, newValue: unknown) => void): void;
+  /** Remove the listener registered via addListener(). */
+  removeListener(): void;
+}
 
 // ── Menu ──────────────────────────────────────────────────────────────────
 
@@ -51,4 +62,20 @@ export interface WorkerFactory {
    * @returns URL that can be passed to `new Worker(url, { type: 'module' })`.
    */
   createWorkerUrl(relativePath: string): string | URL;
+}
+
+// ── Language ───────────────────────────────────────────────────────────────
+
+/**
+ * Provides the browser's UI language hint.
+ *
+ * Core modules never call chrome.* directly. The platform bootstrap wires
+ * the appropriate implementation (Chrome extension vs. userscript vs. fallback).
+ */
+export interface LanguageAdapter {
+  /**
+   * Return the browser's UI language code (e.g. "en", "ko", "ja"),
+   * or undefined if the platform cannot determine it.
+   */
+  getUILanguage(): string | undefined;
 }

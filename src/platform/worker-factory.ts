@@ -36,13 +36,12 @@ export class ChromeExtensionWorkerFactory implements WorkerFactory {
     // './renderer-worker.ts' → 'workers/renderer-worker.js'
     const basename = relativePath.replace(/^\.\//, '').replace(/\.ts$/, '.js');
     // chrome is declared as possibly undefined; guard access
-    if (typeof chrome === 'undefined') {
+    const chromeApi =
+      (typeof chrome !== 'undefined' && chrome) || (typeof browser !== 'undefined' && browser);
+    if (!chromeApi || !chromeApi.runtime) {
       throw new Error('chrome.runtime.getURL not available');
     }
-    if (!chrome.runtime) {
-      throw new Error('chrome.runtime not available');
-    }
-    return chrome.runtime.getURL(`workers/${basename}`);
+    return chromeApi.runtime.getURL(`workers/${basename}`);
   }
 }
 
@@ -57,7 +56,10 @@ let cachedFactory: WorkerFactory | null = null;
 export function getWorkerFactory(): WorkerFactory {
   if (cachedFactory) return cachedFactory;
 
-  if (typeof chrome !== 'undefined' && chrome.runtime) {
+  if (
+    (typeof chrome !== 'undefined' && chrome.runtime) ||
+    (typeof browser !== 'undefined' && browser.runtime)
+  ) {
     cachedFactory = new ChromeExtensionWorkerFactory();
     return cachedFactory;
   }

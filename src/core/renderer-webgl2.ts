@@ -113,6 +113,8 @@ export class RendererWebGL2 extends RendererBase {
 
   private connectionStatus: ConnectionStatus = 'connected';
   private isContextLost = false;
+  private contextLostHandler: ((e: Event) => void) | null = null;
+  private contextRestoredHandler: (() => void) | null = null;
 
   // ── Language source detection (shared parity with CanvasRenderer) ──
   private languageDetector: LanguageDetectorService | null = null;
@@ -209,11 +211,11 @@ export class RendererWebGL2 extends RendererBase {
 
     // Context loss handling — prevent default so the browser allows restoration,
     // then reinitialize all GL resources when the context is restored.
-    canvas.addEventListener('webglcontextlost', (e: Event) => {
+    this.contextLostHandler = (e: Event) => {
       e.preventDefault();
       this.isContextLost = true;
-    });
-    canvas.addEventListener('webglcontextrestored', () => {
+    };
+    this.contextRestoredHandler = () => {
       this.isContextLost = false;
       this.reinitializeGLResources();
       // Restart the render loop if it was stopped during context loss.
@@ -228,7 +230,9 @@ export class RendererWebGL2 extends RendererBase {
       ) {
         this.startRenderLoop();
       }
-    });
+    };
+    canvas.addEventListener('webglcontextlost', this.contextLostHandler);
+    canvas.addEventListener('webglcontextrestored', this.contextRestoredHandler);
 
     this.program = createProgram(gl, SDF_VERTEX_SHADER, SDF_FRAGMENT_SHADER);
 
@@ -440,6 +444,11 @@ export class RendererWebGL2 extends RendererBase {
    */
   private reinitializeGLResources(): void {
     const gl = this.gl;
+
+    // Clear emoji texture cache — stale WebGLTexture handles are invalid after context restore
+    for (const tex of this.emojiTextures.values()) this.gl.deleteTexture(tex);
+    this.emojiTextures.clear();
+
     this.program = createProgram(gl, SDF_VERTEX_SHADER, SDF_FRAGMENT_SHADER);
     this.textureProgram = createProgram(gl, TEXTURE_VERTEX_SHADER, TEXTURE_FRAGMENT_SHADER);
 
@@ -1042,11 +1051,20 @@ export class RendererWebGL2 extends RendererBase {
       for (const tex of this.emojiTextures.values()) this.gl.deleteTexture(tex);
       this.emojiTextures.clear();
     }
+    // Remove context event listeners from the WebGL2 canvas
+    const glCanvas = this.gl.canvas as HTMLCanvasElement | undefined;
+    if (glCanvas) {
+      if (this.contextLostHandler)
+        glCanvas.removeEventListener('webglcontextlost', this.contextLostHandler);
+      if (this.contextRestoredHandler)
+        glCanvas.removeEventListener('webglcontextrestored', this.contextRestoredHandler);
+    }
+    this.contextLostHandler = null;
+    this.contextRestoredHandler = null;
     // Remove the overlay canvas from DOM
     if (this.overlay2d.parentNode) this.overlay2d.parentNode.removeChild(this.overlay2d);
     this.authorPhotoCache.clear();
     // Remove the WebGL2 canvas from DOM
-    const glCanvas = this.gl.canvas as HTMLCanvasElement | undefined;
     if (glCanvas?.parentNode) glCanvas.parentNode.removeChild(glCanvas);
   }
 }

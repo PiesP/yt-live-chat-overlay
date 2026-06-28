@@ -27,9 +27,15 @@ import '../src/main';
  * Equivalent to GM_registerMenuCommand in the userscript.
  */
 chrome.runtime?.onMessage?.addListener?.(
-  (message: unknown) => {
+  (message: unknown, sender) => {
+    // Defense-in-depth: reject messages not from this extension.
+    if (sender.id !== chrome.runtime.id) return;
+
     const msg = message as { type?: string; command?: string };
     if (msg.type !== 'menu-command') return;
+
+    // Runtime type guard: only accept known command values.
+    if (msg.command !== 'reset-settings' && msg.command !== 'reload-overlay') return;
 
     const app = (window as { __ytChatOverlay?: { resetSettings: () => void; restartRuntime: () => Promise<void> } }).__ytChatOverlay;
     if (!app) return;

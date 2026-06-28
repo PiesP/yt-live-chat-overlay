@@ -33,11 +33,17 @@ interface ChromeRuntimeOnInstalledEvent {
   addListener(callback: (details: { reason: string }) => void): void;
 }
 
+interface ChromeMessageSender {
+  id?: string;
+  tab?: ChromeTab;
+  url?: string;
+}
+
 interface ChromeRuntimeOnMessageEvent {
   addListener(
     callback: (
       message: unknown,
-      sender: unknown,
+      sender: ChromeMessageSender,
       sendResponse: (response: unknown) => void
     ) => void | boolean
   ): void;
@@ -103,3 +109,10 @@ interface ChromeNamespace {
 }
 
 declare const chrome: ChromeNamespace | undefined;
+
+/**
+ * Firefox MV3 exposes browser.* as the canonical API namespace.
+ * It mirrors chrome.* closely; we declare it with the same type so the
+ * factory can fall back to it when chrome is absent.
+ */
+declare const browser: ChromeNamespace | undefined;
