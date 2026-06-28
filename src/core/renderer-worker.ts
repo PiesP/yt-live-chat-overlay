@@ -81,7 +81,12 @@ import {
   TRANSLATION_GAP_PX,
   TRANSLATION_OPACITY_SCALE,
 } from '@core/renderer-constants';
-import { computeMessageOpacity, type OpacityConfig } from '@core/renderer-shared';
+import {
+  computeAgeFadeRate,
+  computeInvFadeDuration,
+  computeMessageOpacity,
+  type OpacityConfig,
+} from '@core/renderer-shared';
 import { getFontString } from '@core/text-measure';
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -298,8 +303,8 @@ let boundGetFont: (fontSize: number) => string = (fs: number) => `${fs}px sans-s
 function recomputeConfigDerived(): void {
   if (!config) return;
   const c = config; // narrow for closure safety (module-level let config)
-  invFadeMs = c.fadeDurationMs > 0 ? 1 / Math.max(1, c.fadeDurationMs) : 0;
-  ageFadeRate = 1 / c.maxMessageAgeMs;
+  invFadeMs = computeInvFadeDuration(c.fadeDurationMs);
+  ageFadeRate = computeAgeFadeRate(c.maxMessageAgeMs);
   boundGetFont = (fontSize: number): string => getFontString(fontSize, c.fontWeight, c.fontFamily);
   opacityConfig = {
     baseOpacity: c.opacity,

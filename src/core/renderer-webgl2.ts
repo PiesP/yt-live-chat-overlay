@@ -28,6 +28,8 @@ import {
   TRANSLATION_GAP_PX,
 } from '@core/renderer-constants';
 import {
+  computeAgeFadeRate,
+  computeInvFadeDuration,
   computeMessageOpacity,
   enqueueWithOverflow,
   type OpacityConfig,
@@ -126,8 +128,8 @@ export class RendererWebGL2 extends RendererBase {
   constructor(overlay: Overlay, settings: OverlaySettings) {
     super(overlay, settings);
     this.dpr = window.devicePixelRatio || 1;
-    this._ageFadeRate = 1 / Math.max(1, settings.maxMessageAgeMs);
-    this._invFadeDuration = 1 / Math.max(1, settings.fadeDurationMs);
+    this._ageFadeRate = computeAgeFadeRate(settings.maxMessageAgeMs);
+    this._invFadeDuration = computeInvFadeDuration(settings.fadeDurationMs);
     this.rebuildOpacityConfig();
 
     // Initialize language detection pipeline for 'auto' source

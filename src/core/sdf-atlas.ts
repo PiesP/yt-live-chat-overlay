@@ -106,14 +106,23 @@ export function getCodePointRanges(): Array<{ start: number; end: number }> {
   ];
 }
 
+let _cachedCodePoints: number[] | null = null;
+
 export function collectCodePoints(): number[] {
+  if (_cachedCodePoints) return _cachedCodePoints;
   const cps: number[] = [];
   for (const range of getCodePointRanges()) {
     for (let cp = range.start; cp <= range.end; cp++) {
       cps.push(cp);
     }
   }
-  return [...new Set(cps)].sort((a, b) => a - b);
+  _cachedCodePoints = [...new Set(cps)].sort((a, b) => a - b);
+  return _cachedCodePoints;
+}
+
+/** Pre-warm the code point cache (optional, for startup optimization). */
+export function preWarmCodePoints(): void {
+  collectCodePoints();
 }
 
 // ── 8SSEDT Distance Transform ────────────────────────────────────────────────

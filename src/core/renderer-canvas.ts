@@ -61,12 +61,14 @@ import {
   TRANSLATION_OPACITY_SCALE,
 } from '@core/renderer-constants';
 import {
+  computeAgeFadeRate,
+  computeInvFadeDuration,
   computeMessageOpacity,
   enqueueWithOverflow,
   estimateMessageDimensions as sharedEstimateDimensions,
+  type OpacityConfig,
 } from '@core/renderer-shared';
 import { RenderWorkerManager } from '@core/renderer-worker-manager';
-import {
   clearTextMeasurementCaches,
   getFontString,
   measureTextHeight,
@@ -158,9 +160,9 @@ export class CanvasRenderer extends RendererBase {
   private ctx: CanvasRenderingContext2D | null = null;
   private animFrameId: number | null = null;
   /** Pre-computed 1/maxMessageAgeMs to avoid per-frame division in opacity calc. */
-  private readonly ageFadeRate = 1 / this.settings.maxMessageAgeMs;
+  private readonly ageFadeRate = computeAgeFadeRate(this.settings.maxMessageAgeMs);
   /** Pre-computed 1/fadeDurationMs to avoid per-frame division in opacity calc. */
-  private invFadeDuration = 1 / Math.max(1, 500);
+  private invFadeDuration = computeInvFadeDuration(500);
   private overlayDimensionsUnsubscribe: (() => void) | null = null;
   /** Debounce flag for emoji-load-triggered rAF restarts. */
   private needsRerender = false;
@@ -267,7 +269,7 @@ export class CanvasRenderer extends RendererBase {
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
     super(overlay, settings);
-    this.invFadeDuration = 1 / Math.max(1, settings.fadeDurationMs);
+    this.invFadeDuration = computeInvFadeDuration(settings.fadeDurationMs);
     this.translationBatchSize = settings.translationBatchSize;
     this.translationService = new TranslationService();
     // Initialize language detection pipeline for 'auto' source
@@ -1354,7 +1356,7 @@ export class CanvasRenderer extends RendererBase {
     // avoid stale pre-rendered canvases being reused with the wrong style.
     this.textBitmapCache.clear();
     // Pre-compute 1/fadeDurationMs to avoid per-frame divisions in opacity calc
-    this.invFadeDuration = 1 / Math.max(1, settings.fadeDurationMs);
+    this.invFadeDuration = computeInvFadeDuration(settings.fadeDurationMs);
 
     // Sync settings to render worker when off-main-thread mode is active
     this.workerManager.updateSettings(settings);

@@ -251,6 +251,22 @@ function estimateMembershipDimensions(
 
 // ── Opacity computation (shared between main-thread and worker renderers) ──
 
+/**
+ * Compute the age fade rate multiplier (1 / maxMessageAgeMs).
+ * Clamped to a minimum denominator of 1 to prevent division by zero.
+ */
+export function computeAgeFadeRate(maxMessageAgeMs: number): number {
+  return 1 / Math.max(1, maxMessageAgeMs);
+}
+
+/**
+ * Compute the inverse fade duration (1 / fadeDurationMs).
+ * Returns 0 if fadeDurationMs is 0 (fade disabled).
+ */
+export function computeInvFadeDuration(fadeDurationMs: number): number {
+  return fadeDurationMs > 0 ? 1 / Math.max(1, fadeDurationMs) : 0;
+}
+
 export interface OpacityConfig {
   baseOpacity: number;
   fadeDurationMs: number;
