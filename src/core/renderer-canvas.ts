@@ -66,9 +66,9 @@ import {
   computeMessageOpacity,
   enqueueWithOverflow,
   estimateMessageDimensions as sharedEstimateDimensions,
-  type OpacityConfig,
 } from '@core/renderer-shared';
 import { RenderWorkerManager } from '@core/renderer-worker-manager';
+import {
   clearTextMeasurementCaches,
   getFontString,
   measureTextHeight,

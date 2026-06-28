@@ -303,8 +303,7 @@ export class LaneAllocator {
       }
       this.occupiedCount = occupied;
     }
-    this.cachedUtilization =
-      this.heap.length > 0 ? this.occupiedCount / this.heap.length : 0;
+    this.cachedUtilization = this.heap.length > 0 ? this.occupiedCount / this.heap.length : 0;
   }
 
   /**

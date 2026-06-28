@@ -14,9 +14,9 @@ import {
   extractAccessibilityLabel,
   normalizeInlineText,
 } from '@core/chat-message-helpers';
+import { normalizeYouTubeImageUrl } from '@core/image-url-validation';
 import type { JsonObject } from '@core/youtubei-json';
 import { getNumber, getString, isRecord } from '@core/youtubei-json';
-import { normalizeYouTubeImageUrl } from '@core/image-url-validation';
 
 // ── Image URL validation ─────────────────────────────────────────────────────
 
