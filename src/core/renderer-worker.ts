@@ -338,7 +338,7 @@ function measureTextCached(text: string): number {
 }
 
 // Font metrics cache — keyed by font string
-const fontMetricsCache = new Map<string, { height: number; ascent: number }>();
+const fontMetricsCache = new Map<string, { height: number }>();
 
 /** Build a CSS font string from the current worker config. */
 function getFontFromConfig(fontSize: number): string {
@@ -365,7 +365,6 @@ function measureTextHeight(fontSize: number): number {
     const descent = Math.max(0, m.actualBoundingBoxDescent);
     metrics = {
       height: Math.ceil(ascent + descent),
-      ascent: Math.ceil(ascent),
     };
     fontMetricsCache.set(font, metrics);
   }
