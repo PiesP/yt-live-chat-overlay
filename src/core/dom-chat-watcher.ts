@@ -137,7 +137,8 @@ export function installDomChatWatcher(onMessages: DomMessageCallback): DomWatche
         for (const batch of pendingMutations) {
           handleMutations(batch);
         }
-        pendingMutations = [];
+        // Reset length instead of reassigning to avoid per-frame allocation.
+        pendingMutations.length = 0;
       });
     }
   };

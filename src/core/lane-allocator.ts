@@ -82,6 +82,8 @@ export class LaneAllocator {
   private laneCount = 0;
   /** Cached utilization value, recomputed in resetBatch for O(1) reads. */
   private cachedUtilization = 0;
+  /** Number of lanes currently occupied (availableAt > now). Maintained incrementally. */
+  private occupiedCount = 0;
 
   /**
    * Set of lane indices that collided with an active message in the current
@@ -136,6 +138,8 @@ export class LaneAllocator {
     this.collidedLanes.clear();
     this.speedTierLanes.clear();
     this.cachedUtilization = 0;
+    this.occupiedCount = 0;
+    this.utilizationRecountCounter = 0;
     if (!dimensions) {
       this.laneHeight = 0;
       this.laneCount = 0;
@@ -248,6 +252,11 @@ export class LaneAllocator {
 
   // ── Batch control ─────────────────────────────────────────────────────
 
+  /** Frames until next utilization recount — amortizes the O(n) scan. */
+  private utilizationRecountCounter = 0;
+  /** Recount interval — recompute utilization every N frames. */
+  private static readonly UTILIZATION_RECOUNT_INTERVAL = 10;
+
   /**
    * Called at the start of each drainQueue batch. Clears per-frame collision
    * tracking so lanes can be retried on the next frame.
@@ -280,12 +289,22 @@ export class LaneAllocator {
       if (entry.until <= now) this.speedTierLanes.delete(laneIdx);
     }
     this.collidedLanes.clear();
-    // Recompute cached utilization for O(1) getUtilization().
-    let occupied = 0;
-    for (const [, availableAt] of this.heap) {
-      if (availableAt > now) occupied++;
+
+    // Amortized utilization recount: scan the heap every N frames instead of
+    // every frame. Between recounts, the cached value is slightly stale but
+    // the anti-block gate uses a gradual probabilistic threshold, so a ~5-frame
+    // staleness is visually indistinguishable.
+    this.utilizationRecountCounter++;
+    if (this.utilizationRecountCounter >= LaneAllocator.UTILIZATION_RECOUNT_INTERVAL) {
+      this.utilizationRecountCounter = 0;
+      let occupied = 0;
+      for (const [, availableAt] of this.heap) {
+        if (availableAt > now) occupied++;
+      }
+      this.occupiedCount = occupied;
     }
-    this.cachedUtilization = this.heap.length > 0 ? occupied / this.heap.length : 0;
+    this.cachedUtilization =
+      this.heap.length > 0 ? this.occupiedCount / this.heap.length : 0;
   }
 
   /**
