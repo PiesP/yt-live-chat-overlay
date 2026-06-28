@@ -77,14 +77,14 @@ export class RendererWebGL2Worker extends RendererBase {
     // No-op: worker runs its own rAF loop after init.
   }
 
-  setConnectionStatus(_status: ConnectionStatus): void {
+  override setConnectionStatus(_status: ConnectionStatus): void {
     // Worker renderer: status feedback is delegated to main thread.
     // This satisfies the interface contract for dual-path consistency.
   }
 
   // ── Lifecycle hooks ──────────────────────────────────────────────────
 
-  updateSettings(settings: OverlaySettings, options?: { resetState?: boolean }): void {
+  override updateSettings(settings: OverlaySettings, options?: { resetState?: boolean }): void {
     super.updateSettings(settings, options);
     this.workerManager.updateSettings(settings);
   }

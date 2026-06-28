@@ -285,7 +285,7 @@ export class RendererWebGL2 extends RendererBase {
     };
   }
 
-  updateSettings(settings: OverlaySettings, options?: { resetState?: boolean }): void {
+  override updateSettings(settings: OverlaySettings, options?: { resetState?: boolean }): void {
     const fontChanged =
       settings.fontFamily !== this.settings.fontFamily ||
       settings.fontWeight !== this.settings.fontWeight ||

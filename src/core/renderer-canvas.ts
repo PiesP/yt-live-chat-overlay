@@ -391,17 +391,17 @@ export class CanvasRenderer extends RendererBase {
   }
 
   /** Get current lane utilization ratio (0–1): occupied lanes / total lanes. */
-  getLaneUtilization(): number {
+  override getLaneUtilization(): number {
     return this.laneAllocator.getUtilization();
   }
 
   /** Update standby status via ConnectionStatus — backward compat. */
-  setStandbyStatus(standby: boolean): void {
+  override setStandbyStatus(standby: boolean): void {
     this.setConnectionStatus(standby ? 'standby' : 'connected');
   }
 
   /** Inform the renderer of the current connection health status. */
-  setConnectionStatus(status: ConnectionStatus): void {
+  override setConnectionStatus(status: ConnectionStatus): void {
     this.connectionStatus = status;
     // Update the screen-reader live region so status changes are announced
     // even when the canvas-rendered pill is clipped or offscreen.
@@ -452,7 +452,7 @@ export class CanvasRenderer extends RendererBase {
    * Used by replayLatestMessages so replayed messages don't inflate
    * drop-rate denominators or trigger burst detection / rate limiting.
    */
-  replayMessage(message: ChatMessage): void {
+  override replayMessage(message: ChatMessage): void {
     if (this.isVideoPaused) return;
     this.enqueueMessage(message, false);
   }
@@ -486,7 +486,7 @@ export class CanvasRenderer extends RendererBase {
     }
   }
 
-  trimBackgroundQueue(): void {
+  override trimBackgroundQueue(): void {
     if (this.pendingQueue.size <= this.settings.backgroundQueueMax) return;
     this.pendingQueue.trim(this.settings.backgroundQueueMax);
   }
@@ -1352,7 +1352,7 @@ export class CanvasRenderer extends RendererBase {
 
   // ── Abstract hook implementations ────────────────────────────────────
 
-  updateSettings(settings: OverlaySettings, options?: { resetState?: boolean }): void {
+  override updateSettings(settings: OverlaySettings, options?: { resetState?: boolean }): void {
     const wasTranslationEnabled = this.settings.translationEnabled;
     const prevSource = this.settings.translationSource;
     super.updateSettings(settings, options);

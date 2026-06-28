@@ -50,12 +50,12 @@ export class LiveChatSource extends ChatSource {
   }
 
   /** Expose consecutive error count via health snapshot for status bar feedback. */
-  getHealthSnapshot(options?: { activeTimeoutMs?: number }): ChatHealthSnapshot {
+  override getHealthSnapshot(options?: { activeTimeoutMs?: number }): ChatHealthSnapshot {
     const base = super.getHealthSnapshot(options);
     return { ...base, consecutiveErrors: this.consecutiveErrors };
   }
 
-  protected resetSessionState(): void {
+  protected override resetSessionState(): void {
     super.resetSessionState();
     this.liveContinuation = null;
     this.consecutiveErrors = 0;

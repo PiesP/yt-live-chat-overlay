@@ -91,11 +91,11 @@ export class ReplayChatSource extends ChatSource {
   /**
    * Override health check to reflect cooperative loop lifetime.
    */
-  protected isObserverAlive(): boolean {
+  protected override isObserverAlive(): boolean {
     return this.cooperativeLoopRunning && this.callback !== null;
   }
 
-  getHealthSnapshot(options: { activeTimeoutMs?: number } = {}): ChatHealthSnapshot {
+  override getHealthSnapshot(options: { activeTimeoutMs?: number } = {}): ChatHealthSnapshot {
     const base = super.getHealthSnapshot(options);
     return {
       ...base,
@@ -115,11 +115,11 @@ export class ReplayChatSource extends ChatSource {
    * fetch offset is preserved so the cooperative loop continues from
    * where it left off without re-fetching already-fetched data ranges.
    */
-  setPaused(paused: boolean): void {
+  override setPaused(paused: boolean): void {
     super.setPaused(paused);
   }
 
-  protected resetSessionState(): void {
+  protected override resetSessionState(): void {
     super.resetSessionState();
     this.resetReplayState();
   }
