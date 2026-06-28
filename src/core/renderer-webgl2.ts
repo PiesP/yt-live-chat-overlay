@@ -518,7 +518,7 @@ export class RendererWebGL2 extends RendererBase {
    * Used by replayLatestMessages so replayed messages don't inflate
    * drop-rate denominators or trigger burst detection / rate limiting.
    */
-  replayMessage(message: ChatMessage): void {
+  override replayMessage(message: ChatMessage): void {
     if (this.isVideoPaused) return;
     const priority = RendererBase.getMessagePriority(message);
     const result = enqueueWithOverflow(
@@ -582,7 +582,7 @@ export class RendererWebGL2 extends RendererBase {
     return this.pendingQueue.size;
   }
 
-  trimBackgroundQueue(): void {
+  override trimBackgroundQueue(): void {
     if (this.pendingQueue.size <= this.settings.backgroundQueueMax) return;
     this.pendingQueue.trim(this.settings.backgroundQueueMax);
   }
@@ -906,11 +906,11 @@ export class RendererWebGL2 extends RendererBase {
     return [1, 1, 1];
   }
 
-  setStandbyStatus(standby: boolean): void {
+  override setStandbyStatus(standby: boolean): void {
     this.setConnectionStatus(standby ? 'standby' : 'connected');
   }
 
-  setConnectionStatus(status: ConnectionStatus): void {
+  override setConnectionStatus(status: ConnectionStatus): void {
     this.connectionStatus = status;
     // Trigger a render frame so the status indicator appears immediately
     // even if the render loop is idle (no active messages).

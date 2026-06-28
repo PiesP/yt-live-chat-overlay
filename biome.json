@@ -29,9 +29,13 @@
       "preset": "recommended",
       "correctness": {
         "noUnusedImports": "error",
-        "noUnusedVariables": "warn"
+        "noUnusedVariables": "warn",
+        "useExhaustiveDependencies": "warn",
+        "noUnknownMediaFeatureName": "off",
+        "noUnknownPseudoElement": "off"
       },
       "style": {
+        "noNonNullAssertion": "off",
         "useConst": "error",
         "noParameterAssign": "warn",
         "noUnusedTemplateLiteral": "error",
@@ -40,9 +44,11 @@
       "suspicious": {
         "noExplicitAny": "error",
         "noConfusingVoidType": "off",
-        "noDocumentCookie": "off",
         "noControlCharactersInRegex": "off",
-        "noImplicitAnyLet": "error"
+        "noAssignInExpressions": "off",
+        "noDocumentCookie": "off",
+        "noImplicitAnyLet": "error",
+        "useIterableCallbackReturn": "error"
       },
       "complexity": {
         "noForEach": "off",
@@ -54,6 +60,14 @@
       },
       "performance": {
         "noAccumulatingSpread": "error"
+      },
+      "a11y": {
+        "noStaticElementInteractions": "off",
+        "useKeyWithClickEvents": "off",
+        "useMediaCaption": "off",
+        "noSvgWithoutTitle": "off",
+        "useAriaPropsSupportedByRole": "off",
+        "useSemanticElements": "off"
       }
     }
   },
