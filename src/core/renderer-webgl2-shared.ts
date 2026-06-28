@@ -379,9 +379,9 @@ export function getMessageColor(
 export function parseColor(hex: string): [number, number, number] {
   const h = hex.startsWith('#') ? hex : `#${hex}`;
   return [
-    parseInt(h.slice(1, 3), 16) / 255 || 1,
-    parseInt(h.slice(3, 5), 16) / 255 || 1,
-    parseInt(h.slice(5, 7), 16) / 255 || 1,
+    (parseInt(h.slice(1, 3), 16) || 0) / 255,
+    (parseInt(h.slice(3, 5), 16) || 0) / 255,
+    (parseInt(h.slice(5, 7), 16) || 0) / 255,
   ];
 }
 
