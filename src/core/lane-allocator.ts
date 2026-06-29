@@ -361,10 +361,10 @@ export class LaneAllocator {
     const maxWaitMs = this.options.scrollDurationMaxMs;
     let firstBusy: { laneIndex: number; waitMs: number } | null = null;
     let speedMatched: { laneIndex: number; waitMs: number } | null = null;
-    // Pre-collect zero-wait compatible lanes for O(n) epsilon-greedy:
-    // instead of nested scanning on epsilon skip, we collect candidates
-    // in a single pass and pick from the set when the random gate fires.
-    let zeroWaitCandidates: number[] | null = null;
+    // Collect zero-wait compatible lanes during the first scan so that
+    // epsilon-greedy skipping is O(1) lookup instead of O(n) re-scan.
+    // On epsilon skip, we pick the next candidate from this array.
+    const zeroWaitCandidates: number[] = [];
 
     // ── Phase 1: zero-wait lane with tier compatibility filter ──
     for (let i = laneStart; i < laneEnd; i++) {
@@ -392,29 +392,21 @@ export class LaneAllocator {
       }
       // Found a zero-wait compatible lane.
       // Epsilon-greedy: 5% chance to skip for visual variety.
-      // Pre-build a set of zero-wait lanes on first epsilon hit so
-      // subsequent "is there an alternate?" checks are O(1) lookups
-      // instead of O(n) nested scans.
+      // Candidates are collected during the scan — on epsilon fire,
+      // pick the next unvisited zero-wait lane from the array (O(1)).
       if (Math.random() < LaneAllocator.EPSILON) {
-        if (!zeroWaitCandidates) {
-          // Lazy one-time collection of all remaining zero-wait lanes.
-          zeroWaitCandidates = [];
-          for (let j = i + 1; j < laneEnd; j++) {
-            if (this.collidedLanes.has(j)) continue;
-            const activeJ = this.speedTierLanes.get(j);
-            if (activeJ && activeJ.until > now) {
-              if (!areSpeedTiersCompatible(speedTier, activeJ.tier)) continue;
-            }
-            const availJ = this.getSlotAvailableAt(j);
-            if (availJ === undefined) continue;
-            const waitJ = Math.max(0, Math.ceil(availJ - now));
-            if (waitJ === 0) zeroWaitCandidates.push(j);
-          }
-        }
-        // Only skip if there is at least one alternate zero-wait lane ahead.
-        if (zeroWaitCandidates.length > 0) continue;
+        // Record this lane as a future candidate and skip it for now.
+        zeroWaitCandidates.push(i);
+        continue;
       }
       return { laneIndex: i, waitMs: 0 };
+    }
+
+    // Epsilon path: if we skipped some zero-wait lanes during the scan,
+    // return the first skipped one (O(1) — no re-scan needed).
+    const firstSkipped = zeroWaitCandidates[0];
+    if (firstSkipped !== undefined) {
+      return { laneIndex: firstSkipped, waitMs: 0 };
     }
 
     // ── Phase 2: same-tier busy lane ──

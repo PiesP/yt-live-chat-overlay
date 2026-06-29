@@ -329,6 +329,10 @@ class WebGL2RenderWorker {
     if (atlasData) {
       atlasData.texture = tex;
       atlasData.uploaded = true;
+      // Free the 16MB CPU-side pixel buffer now that the data is on the GPU.
+      // Use delete since the property is optional and exactOptionalPropertyTypes
+      // prevents assigning undefined to it.
+      delete atlasData.data;
     }
   }
 

@@ -30,8 +30,6 @@ export interface BurstLevelObserver {
 }
 
 // rateSampleWindow set via updateThresholds() from settings
-/** Sample interval in ms */
-const SAMPLE_INTERVAL_MS = 1_000;
 /** How long after burst ends to return to normal (ms) — base value,
  * scaled proportionally to burst duration. Short bursts cool down faster. */
 const BURST_COOLDOWN_BASE_MS = 2_000;
@@ -47,6 +45,8 @@ const EMA_ALPHA = 0.3;
 // extremeThreshold set via updateThresholds() from settings
 
 export class BurstDetector {
+  /** Sample interval in ms — 500ms for faster burst response (was 1000ms). */
+  private static readonly SAMPLE_INTERVAL_MS = 500;
   private samples: number[] = [];
   private runningSum = 0;
   private currentLevel: BurstLevel = 'normal';
@@ -120,7 +120,7 @@ export class BurstDetector {
       }
       this.samplesSinceLastCheck = 0;
       this.evaluate();
-    }, SAMPLE_INTERVAL_MS);
+    }, BurstDetector.SAMPLE_INTERVAL_MS);
   }
 
   /** Get current EMA-smoothed message rate for speed adaptation */
