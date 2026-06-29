@@ -150,6 +150,16 @@ export class ImageFetchManager {
    * Pre-convert a loaded HTMLImageElement to ImageBitmap for worker transfer.
    * On success, stores in workerBitmapCache. On failure, silently skips —
    * worker will fetch and decode independently.
+   *
+   * NOTE: createImageBitmap is used instead of WebCodecs ImageDecoder API.
+   * WebCodecs would offer more control (e.g. decode-only-without-render,
+   * color space handling) but is not used here because:
+   *   - createImageBitmap is universally supported (including Firefox 121+)
+   *     while WebCodecs ImageDecoder has spotty support in workers.
+   *   - The current pipeline fetches PNG/JPG blobs from YouTube CDN;
+   *     createImageBitmap handles these formats efficiently.
+   *   - Future consideration: if we need AVIF/WebP-sequential-decode or
+   *     frame-by-frame control, ImageDecoder would be the upgrade path.
    */
   private preConvertForWorker(url: string, img: HTMLImageElement): void {
     if (!this.useWorkerMode || !this.renderWorker) return;

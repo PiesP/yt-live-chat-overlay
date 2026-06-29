@@ -3,6 +3,34 @@
 
 import { DEFAULT_FONT_FAMILY, spacing } from '@core/design-tokens';
 
+/**
+ * Settings UI styles — plain CSS string injected into the page.
+ *
+ * STATE MANAGEMENT: This project uses CSS classes for state toggling
+ * (e.g. `.active`, `.yt-chat-overlay-reload-button--done`) instead of the
+ * CSS `:has()` pseudo-class. Rationale:
+ *
+ *   1. MV3 content scripts run in the MAIN world where they share the CSS
+ *      scope with the host page. `:has()` selectors are broad and can
+ *      accidentally match page elements if not carefully scoped — class-based
+ *      state is explicit and isolated by our `.yt-chat-overlay-*` prefix.
+ *
+ *   2. While `:has()` is now widely supported (Chrome 105+, Firefox 121+),
+ *      using it for state-driven styling would require the browser to recompute
+ *      the selector tree on every DOM mutation. Class toggling via
+ *      classList.toggle() is O(1) and only triggers style recalculation on
+ *      the affected element.
+ *
+ *   3. Class-based state is programmatically accessible — other components
+ *      can check `element.classList.contains('active')` without querying the
+ *      stylesheet. This matters for the focus trap, tab switching, and
+ *      confirm dialog logic in settings-ui.ts.
+ *
+ * Future consideration: `:has()` could simplify some sibling-descendant
+ * selectors but the performance and compatibility tradeoffs currently favor
+ * explicit class management.
+ */
+
 // ── UI color palette (settings UI only, not renderer) ──
 const uiColors = {
   background: '#1a1a1a',
