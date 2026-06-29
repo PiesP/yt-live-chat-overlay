@@ -45,6 +45,22 @@ const WIDTH_CACHE_EVICT_BATCH = Math.floor(WIDTH_CACHE_MAX * 0.1);
  */
 const fontMetricsCache = new Map<string, { ascent: number; descent: number }>();
 
+/**
+ * Compute the bounding-box width from a TextMetrics object.
+ *
+ * Uses `actualBoundingBoxLeft + actualBoundingBoxRight` so that glyph
+ * overshoot (common with italic fonts and some CJK glyphs) is included.
+ * Falls back to `TextMetrics.width` when the bounding-box API returns
+ * zeros (empty or whitespace-only strings).
+ *
+ * Shared between main-thread (text-measure.ts) and worker (renderer-worker.ts)
+ * to ensure consistent measurement across both contexts.
+ */
+export function measureBoundingBoxWidth(m: TextMetrics): number {
+  const bbWidth = Math.abs(m.actualBoundingBoxLeft) + Math.abs(m.actualBoundingBoxRight);
+  return bbWidth > 0 ? Math.ceil(bbWidth) : Math.ceil(m.width);
+}
+
 /** Character-width estimate multiplier for CSP-restricted environments (no canvas). */
 const CSP_WIDTH_FACTOR = 0.6;
 /** Line-height fallback factor when font bounding-box metrics are unavailable. */
@@ -122,8 +138,7 @@ export function measureTextWidth(text: string, font: string): number {
   if (textMeasureCallback) {
     textMeasureCallback(performance.now() - t0);
   }
-  const bbWidth = Math.abs(m.actualBoundingBoxLeft) + Math.abs(m.actualBoundingBoxRight);
-  const width = bbWidth > 0 ? Math.ceil(bbWidth) : Math.ceil(m.width);
+  const width = measureBoundingBoxWidth(m);
 
   // LRU eviction: when total entries exceeds the limit, evict the oldest
   // entries from the oldest font group (partial eviction — 10% at a time

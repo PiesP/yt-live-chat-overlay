@@ -87,7 +87,7 @@ import {
   computeMessageOpacity,
   type OpacityConfig,
 } from '@core/renderer-shared';
-import { getFontString } from '@core/text-measure';
+import { getFontString, measureBoundingBoxWidth } from '@core/text-measure';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -325,8 +325,7 @@ function measureTextCached(text: string): number {
   let w = textMeasureCache.get(text);
   if (w === undefined) {
     const m = ctx.measureText(text);
-    const bbWidth = Math.abs(m.actualBoundingBoxLeft) + Math.abs(m.actualBoundingBoxRight);
-    w = bbWidth > 0 ? Math.ceil(bbWidth) : Math.ceil(m.width);
+    w = measureBoundingBoxWidth(m);
     // LRU eviction: delete oldest entry when at capacity, then re-insert
     if (textMeasureCache.size >= TEXT_MEASURE_CACHE_MAX) {
       const oldestKey = textMeasureCache.keys().next().value;
