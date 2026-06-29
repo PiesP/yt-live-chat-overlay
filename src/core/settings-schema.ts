@@ -93,8 +93,26 @@ type RootNumericSettingKey = Exclude<
   'enabled' | 'allowShortTextMessages' | 'logLevel' | 'showDebugOverlay' | 'authorRateLimit'
 >;
 
-/** Root setting metadata: defines type, category, and visual-change flag.
- *  Drives the normalizeSettings() loop — single source of truth for type routing. */
+/**
+ * Root setting metadata: defines type, category, and visual-change flag.
+ * Drives the normalizeSettings() loop — single source of truth for type routing.
+ *
+ * INTENTIONAL DUPLICATION: This map enumerates every root OverlaySettings key
+ * with UI metadata (type, visual flag, displayScale, displayPrecision). While
+ * the field *names* overlap with OverlaySettings, this object is the SSOT for
+ * the rendering/UI layer — it controls:
+ *   - Which settings trigger a full renderer reset (visual: true)
+ *   - How numeric values map between internal range and user-facing display
+ *     (e.g. opacity 0.5-1.0 internally → 50-100% in the UI)
+ *   - Whether integer rounding is applied before or after display scaling
+ *
+ * Deriving this from OverlaySettings alone is not feasible because TypeScript
+ * types carry no runtime metadata about display semantics. A Proxy or decorator
+ * approach would add runtime complexity for negligible ergonomic gain. The
+ * `satisfies Record<RootScalarSettingKey, SettingMeta>` constraint at the bottom
+ * guarantees exhaustiveness at compile time — adding a new setting without an
+ * entry here is a type error.
+ */
 type SettingMeta = {
   type: 'boolean' | 'number' | 'string';
   visual: boolean;
