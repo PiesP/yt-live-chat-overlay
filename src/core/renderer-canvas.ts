@@ -154,6 +154,23 @@ const log = createLogger('RendererCanvas');
 /** Ratio of expired slots above which compaction allocates a fresh array via slice(). */
 const COMPACTION_THRESHOLD_RATIO = 0.5;
 
+/**
+ * Deterministic PRNG (LCG) for stagger delay computation.
+ * Replaces Math.random() to avoid per-frame Math.random() calls in burst
+ * scenarios where dozens of messages are enqueued simultaneously.
+ * Seed is derived from wall-clock time at module load, so each page
+ * gets a different sequence without calling Math.random() in the hot path.
+ *
+ *Period: 2^32 ≈ 4.3 billion (full 32-bit LCG).
+ * Distribution: uniform [0, 1).
+ */
+let prngSeed = (Date.now() ^ (Math.random() * 0xffffffff)) >>> 0;
+function fastRandom(): number {
+  // LCG parameters from Numerical Recipes (a=1664525, c=1013904223)
+  prngSeed = (Math.imul(1664525, prngSeed) + 1013904223) >>> 0;
+  return prngSeed / 0xffffffff;
+}
+
 export class CanvasRenderer extends RendererBase {
   private canvas: HTMLCanvasElement | null = null;
   private canvasClickHandler: ((e: MouseEvent) => void) | null = null;
@@ -1141,7 +1158,7 @@ export class CanvasRenderer extends RendererBase {
               maxStagger,
               Math.min(batchIndex, STAGGER_BATCH_MAX) *
                 -STAGGER_EXP_SCALE *
-                Math.log(1 - Math.random())
+                Math.log(1 - fastRandom())
             )
           )
         : 0;
