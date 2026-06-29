@@ -168,17 +168,33 @@ export class RenderWorkerManager {
       }
 
       worker.onmessage = (e: MessageEvent) => {
-        const data = e.data as { type: string } & Record<string, unknown>;
-        switch (data.type) {
+        // Type guard: validate message shape before dispatch.
+        // Malformed or foreign messages (e.g. from a stale worker after
+        // recreation, or injected by a page-level listener) must not
+        // cause undefined property access.
+        const data = e.data;
+        if (
+          data === null ||
+          typeof data !== 'object' ||
+          !('type' in data) ||
+          typeof (data as { type: unknown }).type !== 'string'
+        ) {
+          log.debug('Ignoring malformed worker message:', data);
+          return;
+        }
+        const { type } = data as { type: string };
+        switch (type) {
           case 'ready':
             log.info('Render worker started');
             break;
           case 'stats':
-            this.deps.observability.updateActiveMessages((data.activeMessages as number) ?? 0);
-            this._queueDepth = (data.pendingQueueDepth as number) ?? 0;
+            this.deps.observability.updateActiveMessages(
+              ((data as Record<string, unknown>).activeMessages as number) ?? 0
+            );
+            this._queueDepth = ((data as Record<string, unknown>).pendingQueueDepth as number) ?? 0;
             break;
           case 'error':
-            log.warn('Render worker error:', data.error);
+            log.warn('Render worker error:', (data as Record<string, unknown>).error);
             break;
         }
       };
