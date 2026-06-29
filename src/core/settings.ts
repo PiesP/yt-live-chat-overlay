@@ -156,5 +156,9 @@ export class Settings {
   reset(): void {
     this.settings = cloneSettings(DEFAULT_SETTINGS);
     this.scheduleSave();
+    // Notify local subscribers (e.g., live UI) of the reset.
+    // Without this, local listeners won't update until the next storage
+    // write propagates through the cross-tab sync adapter.
+    for (const cb of this.onChangeCallbacks) cb();
   }
 }
