@@ -219,7 +219,17 @@ async function initApp(): Promise<void> {
     await app.start();
     registerMenuCommands();
 
-    window.__ytChatOverlay = app;
+    // Expose a frozen debug handle — limits the surface to YtChatOverlayDebugHandle
+    // and prevents malicious MAIN-world scripts from reassigning or extending it.
+    window.__ytChatOverlay = Object.freeze({
+      start: () => app.start(),
+      stop: () => app.stop(),
+      restartRuntime: () => app.restartRuntime(),
+      getSettings: () => app.getSettings(),
+      applySettings: (partial: Parameters<typeof app.applySettings>[0]) =>
+        app.applySettings(partial),
+      resetSettings: () => app.resetSettings(),
+    });
     log.info('App instance exposed to window.__ytChatOverlay');
   } catch (error: unknown) {
     log.error('Fatal error:', error);

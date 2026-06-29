@@ -23,11 +23,20 @@ import '../src/main';
 // ── Background script message listener ─────────────────────────────────────
 
 /**
+ * Local type for the frozen debug handle exposed on window.__ytChatOverlay.
+ * Only these methods are accessible — the full App instance is not.
+ */
+interface ContentScriptYtChatOverlayHandle {
+  resetSettings(): void;
+  restartRuntime(): Promise<void>;
+}
+
+/**
  * Listen for menu commands forwarded from the background service worker.
  * Equivalent to GM_registerMenuCommand in the userscript.
  */
-chrome.runtime?.onMessage?.addListener?.(
-  (message: unknown, sender) => {
+chrome?.runtime?.onMessage?.addListener?.(
+  (message: unknown, sender: { id: string }) => {
     // Defense-in-depth: reject messages not from this extension.
     if (sender.id !== chrome.runtime.id) return;
 
@@ -37,7 +46,7 @@ chrome.runtime?.onMessage?.addListener?.(
     // Runtime type guard: only accept known command values.
     if (msg.command !== 'reset-settings' && msg.command !== 'reload-overlay') return;
 
-    const app = (window as { __ytChatOverlay?: { resetSettings: () => void; restartRuntime: () => Promise<void> } }).__ytChatOverlay;
+    const app = (window as { __ytChatOverlay?: ContentScriptYtChatOverlayHandle }).__ytChatOverlay;
     if (!app) return;
 
     switch (msg.command) {
