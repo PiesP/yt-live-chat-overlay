@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Author Grid Preview - yt-live-chat-overlay</title>
+<style>
+  :root {
+    --bg: #1a1a1a;
+    --bg-light: #222222;
+    --border: #5a5a5a;
+    --text: #ffffff;
+    --text-muted: #b0b0b0;
+    --primary: #1e88e5;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #000;
+    color: var(--text);
+    padding: 40px;
+    min-height: 100vh;
+  }
+  .container { max-width: 500px; margin: 0 auto; }
+  h1 {
+    font-size: 14px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 20px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .modal {
+    width: 400px;
+    background: var(--bg);
+    border-radius: 8px;
+    padding: 20px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.9);
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .section { display: flex; flex-direction: column; gap: 16px; }
+  .section-title {
+    font-size: 12px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--border);
+  }
+  .author-grid {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: 12px 16px;
+    align-items: center;
+  }
+  .author-grid-header {
+    font-size: 12px;
+    color: var(--text-muted);
+    text-align: center;
+  }
+  .author-grid-label { font-size: 14px; unicode-bidi: isolate; }
+  .author-grid-color { justify-self: center; }
+  .author-grid-color input[type="color"] {
+    width: 44px; height: 26px; border: none;
+    background: transparent; padding: 0; cursor: pointer;
+  }
+  .author-grid-checkbox { justify-self: center; }
+  .author-grid-checkbox input[type="checkbox"] {
+    width: 18px; height: 18px; cursor: pointer; accent-color: var(--primary);
+  }
+  fieldset { border: none; padding: 0; }
+  legend {
+    font-size: 12px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 16px;
+    width: 100%;
+  }
+  .controls {
+    margin-top: 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .controls label { font-size: 12px; color: var(--text-muted); }
+  .controls input[type="range"] { flex: 1; accent-color: var(--primary); }
+  .width-value {
+    font-size: 12px; color: var(--text);
+    font-family: monospace; min-width: 50px; text-align: right;
+  }
+  .issues {
+    margin-top: 24px;
+    padding: 16px;
+    background: rgba(229, 53, 0.08);
+    border: 1px solid rgba(229, 57, 53, 0.3);
+    border-radius: 6px;
+  }
+  .issues h3 { font-size: 13px; color: #e53935; margin-bottom: 12px; }
+  .issues ul { list-style: none; padding: 0; }
+  .issues li {
+    font-size: 12px; line-height: 1.7;
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+  }
+  .issues li:last-child { border-bottom: none; }
+  .issues code {
+    background: rgba(30, 136, 229, 0.15);
+    color: #5e84f1;
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 11px;
+  }
+  .sev {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 700;
+    margin-right: 6px;
+    text-transform: uppercase;
+  }
+  .sev.critical { background: #e53935; color: #fff; }
+  .sev.high { background: #ff9800; color: #000; }
+  .sev.medium { background: #ffc107; color: #000; }
+  .sev.low { background: #4caf50; color: #fff; }
+  .debug-info {
+    margin-top: 16px;
+    padding: 12px;
+    background: var(--bg-light);
+    border-radius: 6px;
+    font-size: 11px;
+    line-height: 1.6;
+    color: var(--text-muted);
+    font-family: monospace;
+  }
+  .toggle-area {
+    margin-top: 12px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .toggle-area label { font-size: 12px; color: var(--text-muted); }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Design Audit: Author Colors &amp; Visibility</h1>
+
+  <div class="modal" id="modal">
+    <div class="section" id="section">
+      <div class="section-title" id="sectionTitle">작성자 색상 및 �시</div>
+      <fieldset>
+        <legend>작성자 색상 및 �시</legend>
+        <div class="author-grid" id="authorGrid">
+          <span></span>
+          <span class="author-grid-header">이름 색상</span>
+          <span class="author-grid-header">이름 표시</span>
+
+          <span><label class="author-grid-label">일반</label></span>
+          <span class="author-grid-color"><input type="color" value="#ffffff"></span>
+          <span class="author-grid-checkbox"><input type="checkbox" checked></span>
+
+          <span><label class="author-grid-label">멤버</label></span>
+          <span class="author-grid-color"><input type="color" value="#1bb940"></span>
+          <span class="author-grid-checkbox"><input type="checkbox" checked></span>
+
+          <span><label class="author-grid-label">관리자</label></span>
+          <span class="author-grid-color"><input type="color" value="#5e84f1"></span>
+          <span class="author-grid-checkbox"><input type="checkbox" checked></span>
+
+          <span><label class="author-grid-label">소유자</label></span>
+          <span class="author-grid-color"><input type="color" value="#ffd600"></span>
+          <span class="author-grid-checkbox"><input type="checkbox" checked></span>
+
+          <span><label class="author-grid-label">인증�</label></span>
+          <span class="author-grid-color"><input type="color" value="#cccccc"></span>
+          <span class="author-grid-checkbox"><input type="checkbox" checked></span>
+
+          <span><label class="author-grid-label">�퍼�</label></span>
+          <span></span>
+          <span class="author-grid-checkbox"><input type="checkbox" checked></span>
+        </div>
+      </fieldset>
+    </div>
+  </div>
+
+  <div class="controls">
+    <label>Width:</label>
+    <input type="range" id="widthSlider" min="280" max="500" value="400">
+    <span class="width-value" id="widthValue">400px</span>
+  </div>
+  <div class="toggle-area">
+    <input type="checkbox" id="toggleDuplicate" checked>
+    <label for="toggleDuplicate">Show duplicate title (h3.section-title + legend overlap)</label>
+  </div>
+
+  <div class="debug-info" id="layoutDebug">
+    Grid: <code>1fr auto auto</code> | Gap: <code>12px 16px</code> | Swatch: <code>44x26px</code> | Checkbox: <code>18x18px</code>
+  </div>
+
+  <div class="issues">
+    <h3>Design Audit: 5 Issues Found</h3>
+    <ul>
+      <li>
+        <span class="sev critical">Critical</span>
+        <strong>label.htmlFor syntax error</strong> &mdash; <code>settings-ui-form.ts:646</code><br>
+        Code: <code>label.htmlFor = `${colorId} ${checkboxId}`</code><br>
+        HTML <code>htmlFor</code> accepts a single ID. Two space-separated IDs are silently ignored &rarr; clicking label does nothing.<br>
+        <strong>Fix:</strong> <code>label.htmlFor = colorId</code> (or <code>checkboxId</code>)
+      </li>
+      <li>
+        <span class="sev high">High</span>
+        <strong>Section title rendered twice</strong> &mdash; <code>settings-ui-form.ts:597-603</code><br>
+        <code>domSection()</code> creates a h3 title, then <code>buildAuthorGrid()</code> adds a <code>&lt;legend&gt;</code> with same text inside a <code>&lt;fieldset&gt;</code>.<br>
+        Result: "작성자 색상 � 표시" appears twice consecutively.<br>
+        <strong>Fix:</strong> Remove either <code>domSection()</code> call or <code>&lt;legend&gt;</code>
+      </li>
+      <li>
+        <span class="sev high">High</span>
+        <strong>Empty first header cell wastes space</strong><br>
+        First header <code>&lt;span&gt;</code> occupies 1fr column. In narrow modals (320px), this squeezes label column and may clip text.<br>
+        <strong>Fix:</strong> Use only 2 grid columns (remove empty header cell column), or set first column to <code>0px</code> when empty.
+      </li>
+      <li>
+        <span class="sev medium">Medium</span>
+        <strong>SuperChat row alignment offset</strong><br>
+        Other rows: [Label 1fr] [Color 44px] [Checkbox 18px]<br>
+        SuperChat: [Label 1fr] [Empty 0px] [Checkbox 18px]<br>
+        Checkbox is left-shifted compared to other rows.<br>
+        <strong>Fix:</strong> Add a placeholder color swatch for SuperChat (add to color settings) or insert empty styled span at same width.
+      </li>
+      <li>
+        <span class="sev low">Low</span>
+        <strong>Color input size is browser-dependent</strong><br>
+        <code>width: 44px; height: 26px</code> on <code>input[type="color"]</code> may be overridden by UA styles in Firefox.<br>
+        <strong>Fix:</strong> Add <code>appearance: none; border-radius: 4px;</code> for cross-browser consistency.
+      </li>
+    </ul>
+  </div>
+
+  <div class="debug-info">
+    <strong>Source locations:</strong><br>
+    Rendering: <code>src/core/settings-ui-form.ts:596-691</code> (buildAuthorGrid)<br>
+    Styles: <code>src/core/settings-ui-styles.ts:437-457</code> (.yt-chat-overlay-author-grid)<br>
+    Schema: <code>src/core/settings-schema.ts:79-85</code> (AUTHOR_COLOR_KEYS)<br>
+    i18n: <code>src/core/i18n/ko.ts:313-321</code>
+  </div>
+</div>
+
+<script>
+  const slider = document.getElementById('widthSlider');
+  const modal = document.getElementById('modal');
+  const widthValue = document.getElementById('widthValue');
+  const toggle = document.getElementById('toggleDuplicate');
+  const sectionTitle = document.getElementById('sectionTitle');
+
+  slider.addEventListener('input', () => {
+    modal.style.width = slider.value + 'px';
+    widthValue.textContent = slider.value + 'px';
+  });
+
+  toggle.addEventListener('change', () => {
+    sectionTitle.style.display = toggle.checked ? 'block' : 'none';
+  });
+</script>
+</body>
+</html>

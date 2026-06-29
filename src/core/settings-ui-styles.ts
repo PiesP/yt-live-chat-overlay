@@ -455,6 +455,10 @@ export const SETTINGS_UI_STYLES = `
       .yt-chat-overlay-author-grid-checkbox {
         justify-self: center;
       }
+      .yt-chat-overlay-author-grid-color-superchat {
+        width: 44px;
+        height: 26px;
+      }
       /* Actions bar */
       .yt-chat-overlay-settings-actions {
         display: flex;

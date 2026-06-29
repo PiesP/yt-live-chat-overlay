@@ -594,13 +594,14 @@ export class SettingsUiForm {
   }
 
   private buildAuthorGrid(): HTMLDivElement {
-    const section = domSection(t('Author Colors & Visibility'));
+    const section = domDiv('yt-chat-overlay-settings-section');
+    const heading = document.createElement('h3');
+    heading.className = 'yt-chat-overlay-settings-section-title';
+    heading.textContent = t('Author Colors & Visibility');
+    section.appendChild(heading);
+
     const fieldset = document.createElement('fieldset');
     fieldset.className = 'yt-chat-overlay-author-grid-fieldset';
-    const legend = document.createElement('legend');
-    legend.className = 'yt-chat-overlay-author-grid-legend';
-    legend.textContent = t('Author Colors & Visibility');
-    fieldset.appendChild(legend);
 
     const grid = domDiv('yt-chat-overlay-author-grid');
     grid.setAttribute('role', 'grid');
@@ -643,7 +644,7 @@ export class SettingsUiForm {
 
       const label = document.createElement('label');
       label.className = 'yt-chat-overlay-author-grid-label';
-      label.htmlFor = `${colorId} ${checkboxId}`;
+      label.htmlFor = colorId;
       label.textContent = t(labelKey);
 
       const row = document.createElement('div');
@@ -676,13 +677,15 @@ export class SettingsUiForm {
     const superChatLabelCell = document.createElement('span');
     superChatLabelCell.setAttribute('role', 'gridcell');
     superChatLabelCell.appendChild(superChatLabel);
-    const emptyCell = document.createElement('span');
-    emptyCell.setAttribute('role', 'gridcell');
-    superChatRow.appendChild(emptyCell);
+    const superChatPlaceholder = document.createElement('span');
+    superChatPlaceholder.setAttribute('role', 'gridcell');
+    superChatPlaceholder.className = 'yt-chat-overlay-author-grid-color-superchat';
+    superChatRow.appendChild(superChatLabelCell);
+    superChatRow.appendChild(superChatPlaceholder);
     const superChatCheckboxCell = document.createElement('span');
     superChatCheckboxCell.setAttribute('role', 'gridcell');
     superChatCheckboxCell.appendChild(superChatCheckbox);
-    superChatRow.append(superChatLabelCell, emptyCell, superChatCheckboxCell);
+    superChatRow.appendChild(superChatCheckboxCell);
     grid.appendChild(superChatRow);
 
     fieldset.appendChild(grid);
