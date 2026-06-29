@@ -658,6 +658,11 @@ export class RendererWebGL2 extends RendererBase {
   }
 
   private drainQueue(_now: number): void {
+    // Clear per-frame collision tracking so lanes can be retried this frame.
+    // Without this, collidedLanes from prior frames persist, permanently
+    // blocking messages in those lanes (same bug class as CanvasRenderer).
+    this.laneAllocator.resetBatch();
+
     const MAX_SKIP = 3;
     let skipped = 0;
     const dims = this.overlay.getDimensions();
