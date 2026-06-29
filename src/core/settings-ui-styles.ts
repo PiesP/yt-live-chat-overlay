@@ -433,12 +433,17 @@ export const SETTINGS_UI_STYLES = `
         cursor: pointer;
         accent-color: ${uiColors.primary};
       }
-      /* Authors grid */
+      /* Authors grid — role="row" wrappers use subgrid to share parent columns */
       .yt-chat-overlay-author-grid {
         display: grid;
         grid-template-columns: 1fr auto auto;
         gap: ${spacing.sm}px ${spacing.md}px;
         align-items: center;
+      }
+      .yt-chat-overlay-author-grid > [role="row"] {
+        display: grid;
+        grid-template-columns: subgrid;
+        grid-column: 1 / -1;
       }
       .yt-chat-overlay-author-grid-header {
         font-size: ${typography.fontSize.xs};
