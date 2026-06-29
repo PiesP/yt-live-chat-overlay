@@ -1041,8 +1041,15 @@ export class RendererWebGL2 extends RendererBase {
 
   protected resetState(): void {
     this.messages.length = 0;
-    for (const tex of this.emojiTextures.values()) this.gl.deleteTexture(tex);
-    this.emojiTextures.clear();
+    // Delete-and-remove one entry at a time to avoid double-delete if
+    // setEmojiTexture() (from async image.onload) evicts an entry mid-iteration.
+    for (const key of Array.from(this.emojiTextures.keys())) {
+      const tex = this.emojiTextures.get(key);
+      if (tex !== undefined) {
+        this.gl.deleteTexture(tex);
+        this.emojiTextures.delete(key);
+      }
+    }
     this.authorPhotoCache.clear();
   }
 
@@ -1100,8 +1107,14 @@ export class RendererWebGL2 extends RendererBase {
       this.gl.deleteProgram(this.program);
       if (this.textureProgram) this.gl.deleteProgram(this.textureProgram);
       if (this.solidWhiteTex) this.gl.deleteTexture(this.solidWhiteTex);
-      for (const tex of this.emojiTextures.values()) this.gl.deleteTexture(tex);
-      this.emojiTextures.clear();
+      // Delete-and-remove one at a time to handle concurrent eviction safely
+      for (const key of Array.from(this.emojiTextures.keys())) {
+        const tex = this.emojiTextures.get(key);
+        if (tex !== undefined) {
+          this.gl.deleteTexture(tex);
+          this.emojiTextures.delete(key);
+        }
+      }
     }
     // Remove context event listeners from the WebGL2 canvas
     const glCanvas = this.gl.canvas as HTMLCanvasElement | undefined;
