@@ -365,12 +365,22 @@ export class RenderWorkerManager {
     this.dimensionsUnsubscribe?.();
     this.dimensionsUnsubscribe = null;
     if (!this.worker) return;
-    this.worker.terminate();
-    this.worker = null;
+    // Send a destroy message so the worker can flush in-flight work
+    // (pending ImageBitmap transfers) before terminate() severs the connection.
+    // Without this, bitmaps mid-transfer may not be closed properly.
+    this.worker.postMessage({ type: 'destroy' });
+    // Give the worker one microtask tick to acknowledge the destroy message,
+    // then terminate. This prevents orphaned in-flight bitmap transfers.
+    queueMicrotask(() => {
+      if (this.worker) {
+        this.worker.terminate();
+        this.worker = null;
+      }
+      // Close any remaining pre-converted bitmaps (not yet transferred).
+      // ByteLimitedCache.clear() calls onEvict (bitmap.close()) for each entry.
+      this.deps.imageFetchManager.workerBitmapCache.clear();
+    });
     this.active = false;
-    // Close any remaining pre-converted bitmaps (not yet transferred).
-    // ByteLimitedCache.clear() calls onEvict (bitmap.close()) for each entry.
-    this.deps.imageFetchManager.workerBitmapCache.clear();
   }
 
   /**
