@@ -9,6 +9,31 @@
  * draining, and GPU rendering entirely off the main thread. This wrapper
  * translates RendererBase lifecycle events (pause, resume, destroy) into
  * worker messages and forwards incoming chat messages to the worker.
+ *
+ * ## Why some overrides are no-ops
+ *
+ * This class is a thin proxy — it satisfies the RendererBase interface
+ * contract without duplicating render logic.
+ *
+ * - `startRenderLoop()`: No-op because the worker runs its own rAF loop
+ *   internally after `init()`. The main thread has no render loop when
+ *   the worker is active (no canvas, no GL context, no atlas cached here).
+ *
+ * - `setConnectionStatus()`: No-op because the worker handles connection
+ *   status pill rendering internally. The main thread only needs to know
+ *   about the status for externally-observable state (e.g. to decide
+ *   whether to render the overlay).
+ *
+ * - `applyPausedDuration()`: No-op because the worker manages its own
+ *   `performance.now()` clock and timestamps are self-consistent within
+ *   the worker's event loop.
+ *
+ * - `resetState()`: No-op because the worker handles state reset via
+ *   destroy + recreate (swapping the OffscreenCanvas) internally.
+ *
+ * - `getQueueLength()` / `laneCount()`: Return 0 because the worker
+ *   manages its own state; these values are only meaningful for the
+ *   main-three rendering path.
  */
 
 import type { ChatMessage, OverlaySettings } from '@app-types';
