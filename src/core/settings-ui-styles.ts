@@ -433,7 +433,8 @@ export const SETTINGS_UI_STYLES = `
         cursor: pointer;
         accent-color: ${uiColors.primary};
       }
-      /* Authors grid — role="row" wrappers use subgrid to share parent columns */
+      /* Authors grid — role="row" wrappers use display:contents so children
+         become direct grid items (immune to wrapper insertion/removal) */
       .yt-chat-overlay-author-grid {
         display: grid;
         grid-template-columns: 1fr auto auto;
@@ -441,9 +442,7 @@ export const SETTINGS_UI_STYLES = `
         align-items: center;
       }
       .yt-chat-overlay-author-grid > [role="row"] {
-        display: grid;
-        grid-template-columns: subgrid;
-        grid-column: 1 / -1;
+        display: contents;
       }
       .yt-chat-overlay-author-grid-header {
         font-size: ${typography.fontSize.xs};
@@ -454,10 +453,10 @@ export const SETTINGS_UI_STYLES = `
         font-size: ${typography.fontSize.sm};
         unicode-bidi: isolate;
       }
-      .yt-chat-overlay-author-grid-color {
+      .yt-chat-overlay-author-grid [role="gridcell"]:has(> .yt-chat-overlay-author-grid-color) {
         justify-self: center;
       }
-      .yt-chat-overlay-author-grid-checkbox {
+      .yt-chat-overlay-author-grid [role="gridcell"]:has(> .yt-chat-overlay-author-grid-checkbox) {
         justify-self: center;
       }
       .yt-chat-overlay-author-grid-color-superchat {
