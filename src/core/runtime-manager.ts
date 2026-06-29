@@ -563,6 +563,14 @@ export class RuntimeManager {
       return;
     }
 
+    // C2: When the renderer is reset (visual settings change), clear session dedup
+    // so that replayLatestMessages() can re-inject the recent messages. Without this,
+    // messages visible before the reset are blocked by their own IDs surviving in the
+    // session-scoped dedup registry.
+    if (shouldResetRenderer) {
+      this.sessionDedup.clear();
+    }
+
     renderer.updateSettings(settings, { resetState: shouldResetRenderer });
 
     // Update backlog controller config if it exists, then sync the

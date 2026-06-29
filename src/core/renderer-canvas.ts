@@ -316,6 +316,22 @@ export class CanvasRenderer extends RendererBase {
       log.warn('Canvas created but not connected to DOM — renderer will be inactive');
     }
 
+    // C1: Listen for context restoration to recover from GPU crashes / driver resets.
+    // Without this, a context loss permanently disables the renderer until page reload.
+    canvas.addEventListener('webglcontextlost', (e: Event) => {
+      e.preventDefault();
+      this.ctx = null;
+      log.warn('Canvas context lost — renderer paused until restoration');
+    });
+    canvas.addEventListener('webglcontextrestored', () => this.handleContextRestored());
+    // Canvas 2D context loss is rare but possible under memory pressure.
+    canvas.addEventListener('contextlost', (e: Event) => {
+      e.preventDefault();
+      this.ctx = null;
+      log.warn('Canvas 2D context lost — renderer paused until restoration');
+    });
+    canvas.addEventListener('contextrestored', () => this.handleContextRestored());
+
     // Visually-hidden live region for connection status announcements
     const statusRegion = document.createElement('div');
     statusRegion.setAttribute('aria-live', 'polite');
@@ -1480,6 +1496,37 @@ export class CanvasRenderer extends RendererBase {
     this.channelMemory?.clear();
     this.channelMemory = null;
     clearTextMeasurementCaches();
+  }
+
+  // ── Canvas context loss / restoration ───────────────────────────────────
+
+  /**
+   * C1: Handle canvas context restoration after GPU crash / driver reset.
+   * Re-acquires the 2D context and resumes rendering. Without this listener,
+   * context loss permanently disables the renderer until page reload.
+   */
+  private handleContextRestored(): void {
+    if (!this.canvas) return;
+    const ctx = this.canvas.getContext('2d');
+    if (!ctx) {
+      log.warn('Context restored but getContext failed — renderer remains inactive');
+      return;
+    }
+    this.ctx = ctx;
+    // Restore DPR transform that was lost with the context
+    const dpr = window.devicePixelRatio || 1;
+    const dims = this.overlay?.getDimensions();
+    if (dims) {
+      this.lastDpr = dpr;
+      this.canvas.width = dims.width * dpr;
+      this.canvas.height = dims.height * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    log.info('Canvas context restored — renderer resuming');
+    // Restart the render loop if it was stopped
+    if (!this.isPaused && !this.isVideoPaused) {
+      this.startRenderLoop();
+    }
   }
 
   // ── Status bar rendering ────────────────────────────────────────────────

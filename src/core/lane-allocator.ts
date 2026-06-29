@@ -255,7 +255,11 @@ export class LaneAllocator {
   /** Frames until next utilization recount — amortizes the O(n) scan. */
   private utilizationRecountCounter = 0;
   /** Recount interval — recompute utilization every N frames. */
-  private static readonly UTILIZATION_RECOUNT_INTERVAL = 10;
+  // C3: Reduced from 10 to 3 frames. A stale 100% utilization for 10 frames
+  // (167ms) could keep anti-block active after lanes free up, causing backlog
+  // messages to be permanently stuck (they skip Phase 3). 3 frames (~50ms)
+  // is enough amortization without risking backlog deadlock.
+  private static readonly UTILIZATION_RECOUNT_INTERVAL = 3;
 
   /**
    * Called at the start of each drainQueue batch. Clears per-frame collision
