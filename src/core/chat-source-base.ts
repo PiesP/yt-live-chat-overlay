@@ -354,13 +354,26 @@ export abstract class ChatSource implements Pauseable {
   private filterNewMessages(messages: ChatMessage[]): ChatMessage[] {
     const result: ChatMessage[] = [];
     for (const msg of messages) {
-      if (msg.id !== undefined && this.seenMessageIds.has(msg.id)) continue;
-      if (msg.id !== undefined) {
-        this.seenMessageIds.mark(msg.id);
-      }
+      // H4: For messages without an id, use a content-based hash as fallback key.
+      // This prevents duplicate display when the fetch interceptor and poll loop
+      // both process the same API response for id-less messages.
+      const dedupKey = msg.id ?? this.computeContentHash(msg);
+      if (this.seenMessageIds.has(dedupKey)) continue;
+      this.seenMessageIds.mark(dedupKey);
       result.push(msg);
     }
     return result;
+  }
+
+  /**
+   * H4: Compute a deduplication hash for messages without an id.
+   * Combines author, text, and timestamp to create a unique-enough key.
+   */
+  private computeContentHash(msg: ChatMessage): string {
+    const text = msg.text ?? '';
+    const author = msg.author ?? '';
+    const ts = msg.videoOffsetMs ?? msg.timestamp ?? 0;
+    return `hash:${author}:${ts}:${text.slice(0, 80)}`;
   }
 
   protected abstract seedCurrentSession(signal?: AbortSignal): Promise<boolean>;

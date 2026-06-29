@@ -473,6 +473,19 @@ export class CanvasRenderer extends RendererBase {
     this.enqueueMessage(message, false);
   }
 
+  /**
+   * H1: Replay messages that arrived during video pause.
+   * Called from resumeForVideo() via the base class after the pause flag clears.
+   * Enqueues buffered messages into the pending queue for rendering.
+   */
+  protected override onResumeFromVideoPause(messages: ChatMessage[]): void {
+    for (const message of messages) {
+      // Don't use burst detector (these messages are from the past)
+      // and don't track drops (they were already counted as 'video_paused')
+      this.enqueueMessage(message, false);
+    }
+  }
+
   private enqueueMessage(message: ChatMessage, trackDrops: boolean): void {
     const priority = CanvasRenderer.getMessagePriority(message);
     this.imageFetchManager.prefetchImages(message);

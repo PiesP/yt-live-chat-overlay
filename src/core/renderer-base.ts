@@ -52,6 +52,13 @@ export abstract class RendererBase {
   protected pausedAt: number | null = null;
   protected backlogPaused = false;
 
+  // H1: Buffer messages during video pause instead of dropping them.
+  // Messages received while the video is paused are stored here and
+  // replayed to subclasses on resume, preventing permanent loss during
+  // user pauses, seeking, or buffering events.
+  private pauseBuffer: ChatMessage[] = [];
+  private static readonly PAUSE_BUFFER_MAX = 200;
+
   // speedBoostMax — read from this.settings
   private static readonly BACKLOG_PRIORITY_OFFSET = 50;
   // Minimum interval between backlog pause toggles to prevent oscillation
@@ -179,6 +186,30 @@ export abstract class RendererBase {
         log.debug('Resumed');
       }
     }
+    // H1: Replay buffered messages from the pause period.
+    // Subclasses override onResumeFromVideoPause() to receive them.
+    this.flushPauseBuffer();
+  }
+
+  /**
+   * H1: Flush the pause buffer by replaying buffered messages.
+   * Called from resumeForVideo() after the video pause flag is cleared.
+   * Subclasses can override onResumeFromVideoPause() to receive messages.
+   */
+  private flushPauseBuffer(): void {
+    if (this.pauseBuffer.length === 0) return;
+    const buffered = this.pauseBuffer;
+    this.pauseBuffer = [];
+    this.onResumeFromVideoPause(buffered);
+  }
+
+  /**
+   * H1: Called when the video resumes with messages that arrived during pause.
+   * Subclasses override to replay buffered messages into their queue.
+   * Default implementation discards the buffer (safe fallback).
+   */
+  protected onResumeFromVideoPause(_messages: ChatMessage[]): void {
+    // Default: discard. Subclasses override to replay.
   }
 
   updateSettings(settings: OverlaySettings, options: RendererUpdateOptions = {}): void {
@@ -266,8 +297,13 @@ export abstract class RendererBase {
     // onMessageReceived(), freezing the denominator and inflating the ratio.
     this.observability.onMessageReceived();
 
+    // H1: Buffer messages during video pause instead of dropping them.
+    // They will be replayed to subclasses when the video resumes.
     if (this.isVideoPaused) {
       this.observability.onMessageDropped('video_paused');
+      if (this.pauseBuffer.length < RendererBase.PAUSE_BUFFER_MAX) {
+        this.pauseBuffer.push(message);
+      }
       return false;
     }
     this.burstDetector.onMessageReceived();
@@ -308,6 +344,7 @@ export abstract class RendererBase {
   destroy(): void {
     this.isPaused = false;
     this.isVideoPaused = false;
+    this.pauseBuffer.length = 0;
     this.burstDetector.destroy();
     this.authorRateLimiter.destroy();
     this.observability.destroy();

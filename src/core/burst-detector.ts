@@ -57,6 +57,11 @@ export class BurstDetector {
   private emaRate: number = 0;
   /** Timestamp of the most recently received message (for inter-message-interval EMA). */
   private lastMessageTime: number = 0;
+  // H5: Count messages since resume to skip EMA computation for the first
+  // few messages. After a pause, the first inter-message interval may be
+  // artificially small (burst of queued messages), producing an EMA spike.
+  private postResumeSkipCount = 0;
+  private static readonly POST_RESUME_EMA_SKIP = 3;
   private observability: BurstLevelObserver | undefined;
   private rateSampleWindow = 10;
   private elevatedThreshold = 5;
@@ -89,9 +94,15 @@ export class BurstDetector {
     // sampling interval used by burst level evaluation.
     const now = performance.now();
     if (this.lastMessageTime > 0) {
-      const intervalMs = now - this.lastMessageTime;
-      const instantRate = 1000 / Math.max(1, intervalMs); // msg/s, avoid div-by-zero
-      this.emaRate = EMA_ALPHA * instantRate + (1 - EMA_ALPHA) * this.emaRate;
+      // H5: Skip EMA for the first few messages after resume to avoid
+      // an artificial rate spike from queued messages arriving in a burst.
+      if (this.postResumeSkipCount < BurstDetector.POST_RESUME_EMA_SKIP) {
+        this.postResumeSkipCount++;
+      } else {
+        const intervalMs = now - this.lastMessageTime;
+        const instantRate = 1000 / Math.max(1, intervalMs); // msg/s, avoid div-by-zero
+        this.emaRate = EMA_ALPHA * instantRate + (1 - EMA_ALPHA) * this.emaRate;
+      }
     }
     this.lastMessageTime = now;
   }
@@ -134,6 +145,7 @@ export class BurstDetector {
   pause(): void {
     this.stop();
     this.lastMessageTime = 0;
+    this.postResumeSkipCount = 0;
     this.samples = [];
     this.runningSum = 0;
     this.currentLevel = 'normal';
@@ -148,6 +160,7 @@ export class BurstDetector {
   resume(): void {
     this.samples = [];
     this.runningSum = 0;
+    this.postResumeSkipCount = 0;
     this.lastBurstTime = 0;
     this.burstStartTime = 0;
     this.start();

@@ -18,7 +18,11 @@ interface BufferedReplayMessage {
 }
 
 const MAX_BUFFERED_REPLAY_MESSAGES = 3000;
-const REPLAY_EMIT_TOLERANCE_MS = 300;
+// H2: Widened from 300ms to 2000ms. The original 300ms tolerance dropped
+// messages after any frame hitch during replay playback, causing visible
+// chat gaps. At 2s, messages slightly behind position are still forwarded
+// to the renderer (which clips them to the current position anyway).
+const REPLAY_EMIT_TOLERANCE_MS = 2000;
 
 export class ReplayBuffer {
   private buffer: BufferedReplayMessage[] = [];
