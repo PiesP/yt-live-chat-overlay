@@ -110,6 +110,24 @@ export interface SuperChatInfo {
 
 /**
  * Chat message structure (normalized)
+ *
+ * This is the ONLY type shared across the entire pipeline boundary (parser →
+ * renderer → worker). All other message-like types (CanvasMessage,
+ * WorkerMessage, ActiveMessage, SharedMessage) are renderer-internal and
+ * intentionally NOT unified into a single type because:
+ *
+ *   1. Each renderer layer adds its own lifecycle state (timing, position,
+ *      opacity buckets) that would pollute the ingress type with 20+ optional
+ *      fields — defeating type safety.
+ *   2. WorkerMessage must be serializable (postMessage), so it can't carry
+ *      the same fields as CanvasMessage which holds live references (the
+ *      original ChatMessage object, mutable render state).
+ *   3. A union/sum type would force every consumer to narrow, adding runtime
+ *      overhead to a hot path (60fps render loop).
+ *
+ * ChatMessage represents the "parsed and normalized" contract. Downstream
+ * renderers project it into their own optimized shapes. This is a deliberate
+ * projection-over-unification tradeoff.
  */
 export interface ChatMessage {
   /** Stable YouTube message id for deduplication (from renderer DOM id). */

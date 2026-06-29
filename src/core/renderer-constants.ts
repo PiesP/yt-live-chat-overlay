@@ -124,6 +124,42 @@ export const EMPTY_CHAT_MESSAGE: ChatMessage = {
   authorType: 'normal',
 };
 
+/**
+ * RenderableMessage — common subset shared by CanvasMessage (main thread),
+ * WorkerMessage (Canvas2D worker), and ActiveMessage (both workers).
+ *
+ * This interface documents the structural overlap without forcing a single
+ * unified type. Full unification is intentionally NOT pursued because:
+ *   - CanvasMessage carries render-loop state (fadeStartTime, slotCount,
+ *     desaturatedUserColor) that worker messages don't need.
+ *   - WorkerMessage carries serializable cross-thread payload fields
+ *     (priority, burstSpeedMultiplier, cardConfigWorker) that are pre-resolved
+ *     before the worker receives it.
+ *   - ActiveMessage is a render-phase accumulator with per-frame mutable state
+ *     (x, y, pausedDuration) that would bloat the ingress types.
+ *
+ * The shared subset (id, text, content, author, authorType, kind, dimensions,
+ * isBacklog, translatedText) is what both renderers consume after activation.
+ * Keeping them as separate types preserves zero-cost abstraction: no runtime
+ * casting, no optional-everywhere interfaces, and clear ownership boundaries.
+ */
+export interface RenderableMessage {
+  id: string;
+  text: string;
+  content: Array<{ type: string; content?: string; emoji?: { url?: string; alt?: string } }>;
+  author?: string;
+  authorType?: string;
+  kind?: string;
+  width: number;
+  height: number;
+  isBacklog: boolean;
+  translatedText?: string;
+  authorPhotoUrl?: string;
+  superChatAmount?: string;
+  superChatStickerUrl?: string;
+  membershipHeader?: string;
+}
+
 /** Canvas-side message state used by the render loop. */
 export interface CanvasMessage {
   message: ChatMessage;
