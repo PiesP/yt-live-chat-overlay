@@ -717,9 +717,11 @@ export class SettingsUiForm {
             const displayValue = (value as number) * scale;
             el.value = String(scale > 1 ? Math.round(displayValue) : displayValue);
             // Sync the companion range slider for outline fields
-            const slider = el.parentElement?.querySelector<HTMLInputElement>('input[type="range"]');
-            if (slider && slider.name === `${el.name}-slider`) {
-              slider.value = el.value;
+            if (el.name) {
+              const slider = this.modal.querySelector<HTMLInputElement>(
+                `input[type="range"][name="${el.name}-slider"]`
+              );
+              if (slider) slider.value = el.value;
             }
           }
         }
@@ -755,9 +757,11 @@ export class SettingsUiForm {
       }
 
       // Also sync range slider if present
-      const slider = el.parentElement?.querySelector<HTMLInputElement>('input[type="range"]');
-      if (slider && el.name && slider.name === `${el.name}-slider`) {
-        slider.value = el.value;
+      if (el.name) {
+        const slider = this.modal.querySelector<HTMLInputElement>(
+          `input[type="range"][name="${el.name}-slider"]`
+        );
+        if (slider) slider.value = el.value;
       }
     }
 
@@ -780,14 +784,17 @@ export class SettingsUiForm {
         minText.removeAttribute('aria-disabled');
       }
 
-      // Add/remove disabled-field helper text
-      const existingHint = minText.parentElement?.querySelector(
-        '.yt-chat-overlay-settings-field-hint'
-      );
+      // Add/remove disabled-field helper text (search by input name, not parentElement)
+      const existingHint = minText.name
+        ? this.modal.querySelector<HTMLElement>(
+            `.yt-chat-overlay-settings-field-hint[data-for="${minText.name}"]`
+          )
+        : null;
       if (isDisabled) {
         if (!existingHint) {
           const hint = document.createElement('span');
           hint.className = 'yt-chat-overlay-settings-field-hint';
+          if (minText.name) hint.dataset.for = minText.name;
           hint.textContent = t('Short messages shown regardless of length');
           minText.insertAdjacentElement('afterend', hint);
         }
@@ -877,12 +884,19 @@ export class SettingsUiForm {
   // ── Validation error feedback ───────────────────────────────────────────
 
   private showFieldError(input: HTMLInputElement, message: string): void {
-    // Remove any existing error
-    const existing = input.parentElement?.querySelector('.yt-chat-overlay-settings-field-error');
-    existing?.remove();
+    if (!this.modal) return;
+    // Remove any existing error (search by input name, not parentElement)
+    if (input.name) {
+      this.modal
+        .querySelectorAll(`.yt-chat-overlay-settings-field-error[data-for="${input.name}"]`)
+        .forEach((el) => {
+          el.remove();
+        });
+    }
 
     const error = document.createElement('span');
     error.className = 'yt-chat-overlay-settings-field-error';
+    if (input.name) error.dataset.for = input.name;
     error.textContent = message;
     input.insertAdjacentElement('afterend', error);
 

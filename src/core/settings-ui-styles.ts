@@ -229,6 +229,7 @@ export const SETTINGS_UI_STYLES = `
         to { transform: scale(1); opacity: 1; }
       }
       .yt-chat-overlay-settings-modal {
+        position: relative;
         width: min(${uiSizing.modalWidth}px, ${uiSizing.modalMaxVW}vw);
         max-width: min(${uiSizing.modalMaxVW}vw, ${uiSizing.modalMaxWidth}px);
         max-height: ${uiSizing.modalMaxVH}vh;
