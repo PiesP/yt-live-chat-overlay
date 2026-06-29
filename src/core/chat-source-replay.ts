@@ -601,8 +601,14 @@ export class ReplayChatSource extends ChatSource {
     const minimumOffsetMs = Math.max(0, currentOffsetMs - REPLAY_PREFETCH_WINDOW_MS);
     let batches = 0;
 
+    // M4: Track last offset to detect stalled progress. If the offset doesn't
+    // advance after a fetch, the remaining pages have no messages — stop early
+    // instead of wastefully fetching up to replayBatchLimit empty pages.
+    let lastOffsetBeforeLoop = this.replayFallbackLastOffsetMs;
+
     while (
       this.replayContinuation &&
+      this.replayFallbackLastOffsetMs >= 0 &&
       this.replayFallbackLastOffsetMs < minimumOffsetMs &&
       batches < this.getSettings().replayBatchLimit
     ) {
@@ -612,6 +618,12 @@ export class ReplayChatSource extends ChatSource {
       if (!fetched) {
         break;
       }
+
+      // M4: If the offset didn't advance, no more messages are available ahead.
+      if (this.replayFallbackLastOffsetMs <= lastOffsetBeforeLoop) {
+        break;
+      }
+      lastOffsetBeforeLoop = this.replayFallbackLastOffsetMs;
 
       batches += 1;
     }
