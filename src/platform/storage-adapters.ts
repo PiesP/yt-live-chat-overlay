@@ -152,7 +152,11 @@ export function getStorageAdapter(): StorageAdapter {
     return cachedAdapter;
   }
 
-  if (typeof GM_getValue !== 'undefined' && typeof GM_setValue !== 'undefined') {
+  if (
+    typeof GM_getValue !== 'undefined' &&
+    typeof GM_setValue !== 'undefined' &&
+    typeof GM_addValueChangeListener !== 'undefined'
+  ) {
     cachedAdapter = new GmStorageAdapter();
     return cachedAdapter;
   }
