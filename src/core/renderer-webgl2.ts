@@ -439,16 +439,64 @@ export class RendererWebGL2 extends RendererBase {
   }
 
   /**
+   * Free all GPU resources associated with the current (possibly lost) context.
+   * Safe to call even when the context is already lost — GL delete methods
+   * on a lost context are no-ops (they silently fail without throwing).
+   */
+  private freeAllGLResources(): void {
+    const gl = this.gl;
+    // Delete atlas texture
+    if (this.atlasTexture) gl.deleteTexture(this.atlasTexture);
+    this.atlasTexture = null;
+    // Delete all emoji textures — remove from map immediately after each
+    // delete to prevent double-delete if resetState() or onDestroy()
+    // runs concurrently with this method.
+    for (const key of Array.from(this.emojiTextures.keys())) {
+      const tex = this.emojiTextures.get(key);
+      if (tex !== undefined) {
+        gl.deleteTexture(tex);
+        this.emojiTextures.delete(key);
+      }
+    }
+    // Delete programs
+    if (this.program) gl.deleteProgram(this.program);
+    if (this.textureProgram) gl.deleteProgram(this.textureProgram);
+    // Delete buffers and VAO
+    if (this.instanceBuffer) gl.deleteBuffer(this.instanceBuffer);
+    if (this.vao) gl.deleteVertexArray(this.vao);
+    // Delete solid white texture
+    if (this.solidWhiteTex) gl.deleteTexture(this.solidWhiteTex);
+    this.solidWhiteTex = null;
+  }
+
+  /**
    * Reinitialize all GPU resources after a WebGL2 context restore.
    * Recreates program, buffers, VAO, and re-generates the SDF atlas.
    */
   private reinitializeGLResources(): void {
-    const gl = this.gl;
+    // Step 1: Free all GPU resources from the old (lost) context BEFORE
+    // acquiring the new one. If we called getContext() first, the stale
+    // GL handles in our member fields would remain — the new context
+    // would have its own namespace and our old handles would leak.
+    this.freeAllGLResources();
 
-    // Clear emoji texture cache — stale WebGLTexture handles are invalid after context restore
-    for (const tex of this.emojiTextures.values()) this.gl.deleteTexture(tex);
-    this.emojiTextures.clear();
+    // Step 2: Re-acquire the WebGL2 context from the canvas. After a
+    // webglcontextrestored event, the canvas provides a NEW context
+    // instance. The old this.gl reference is stale and must be replaced.
+    const canvas = this.gl.canvas as HTMLCanvasElement;
+    const gl = canvas.getContext('webgl2', {
+      alpha: true,
+      antialias: false,
+      premultipliedAlpha: true,
+      preserveDrawingBuffer: false,
+    });
+    if (!gl) {
+      log.error('Failed to reacquire WebGL2 context after restore');
+      return;
+    }
+    this.gl = gl;
 
+    // Step 3: Recreate all GPU resources with the new context
     this.program = createProgram(gl, SDF_VERTEX_SHADER, SDF_FRAGMENT_SHADER);
     this.textureProgram = createProgram(gl, TEXTURE_VERTEX_SHADER, TEXTURE_FRAGMENT_SHADER);
 
@@ -457,8 +505,7 @@ export class RendererWebGL2 extends RendererBase {
     this.u_texSampler = gl.getUniformLocation(this.textureProgram, 'u_texture');
     gl.uniform1i(this.u_texSampler, 0);
 
-    // Recreate 1x1 white texture
-    if (this.solidWhiteTex) gl.deleteTexture(this.solidWhiteTex);
+    // Recreate 1x1 white texture (freeAllGLResources already deleted the old one)
     const whiteTex = gl.createTexture();
     if (whiteTex) {
       gl.bindTexture(gl.TEXTURE_2D, whiteTex);
