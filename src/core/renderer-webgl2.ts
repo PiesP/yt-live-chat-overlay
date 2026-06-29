@@ -21,12 +21,7 @@ import { PriorityBucketQueue } from '@core/priority-bucket-queue';
 import type { ConnectionStatus } from '@core/renderer-base';
 import { RendererBase } from '@core/renderer-base';
 import type { CanvasMessage } from '@core/renderer-constants';
-import {
-  CARD_BG_OPACITY_FACTOR,
-  SPEED_TIER,
-  TRANSLATION_FONT_SCALE,
-  TRANSLATION_GAP_PX,
-} from '@core/renderer-constants';
+import { SPEED_TIER, TRANSLATION_FONT_SCALE, TRANSLATION_GAP_PX } from '@core/renderer-constants';
 import {
   computeAgeFadeRate,
   computeInvFadeDuration,
@@ -78,6 +73,8 @@ export class RendererWebGL2 extends RendererBase {
   private u_texViewport: WebGLUniformLocation | null = null;
   private u_texSampler: WebGLUniformLocation | null = null;
   private emojiTextures = new LruMap<string, WebGLTexture>(256);
+  /** Set of emoji URLs currently being loaded — skip eviction to prevent races. */
+  private emojiLoading = new Set<string>();
   private solidWhiteTex: WebGLTexture | null = null; // 1x1 white pixel for card backgrounds
   private texQuadCount = 0;
   private texQuadData = new Float32Array(MAX_INSTANCES * FLOATS_PER_INSTANCE);
@@ -340,10 +337,18 @@ export class RendererWebGL2 extends RendererBase {
   private getEmojiTexture(url: string): WebGLTexture | null {
     const cached = this.emojiTextures.get(url);
     if (cached) return cached;
+    // Prevent eviction while loading — without this, the eviction loop
+    // in setEmojiTexture() could remove a URL that has an async img.onload
+    // pending, causing a permanent "missing" texture on next request.
+    if (this.emojiLoading.has(url)) return null;
+    this.emojiLoading.add(url);
     // Create placeholder + load async
     const gl = this.gl;
     const tex = gl.createTexture();
-    if (!tex) return null;
+    if (!tex) {
+      this.emojiLoading.delete(url);
+      return null;
+    }
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.texImage2D(
       gl.TEXTURE_2D,
@@ -376,6 +381,7 @@ export class RendererWebGL2 extends RendererBase {
       if (this.isContextLost) return;
       gl.bindTexture(gl.TEXTURE_2D, tex);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+      this.emojiLoading.delete(url);
     };
     img.src = url;
     return tex;
@@ -669,6 +675,7 @@ export class RendererWebGL2 extends RendererBase {
     if (!dims) return;
 
     const mode = this.settings.danmakuMode;
+    const isScrolling = mode === 'scroll' || mode === 'reverse';
     const cssW = dims.width;
 
     while (!this.pendingQueue.isEmpty && skipped < MAX_SKIP) {
@@ -687,6 +694,18 @@ export class RendererWebGL2 extends RendererBase {
         skipped++;
         continue;
       }
+
+      // Simplified collision check: after findPlacement (timing-based),
+      // verify no active message in the same or adjacent lanes would
+      // visually overlap at the entry edge. This catches the pause/resume
+      // edge case where the allocator's timing is stale but messages
+      // are still visible on screen.
+      if (isScrolling && this.hasCollisionAtEntry(canvasMsg, placement, dims, mode)) {
+        this.retryQueue.push(msg);
+        skipped++;
+        continue;
+      }
+
       const now2 = performance.now();
       if (mode === 'reverse') {
         canvasMsg.startX = -canvasMsg.width;
@@ -717,6 +736,65 @@ export class RendererWebGL2 extends RendererBase {
     if (this.pendingQueue.isEmpty && this.retryQueue.length > 0) {
       this.pendingQueue.refill(this.retryQueue, (m) => RendererBase.getMessagePriority(m));
     }
+  }
+
+  /**
+   * Simplified collision detection for WebGL2 drainQueue.
+   *
+   * The lane allocator's findPlacement() uses timing-based availability
+   * (commitPlacement reserves a lane for N ms). After pause/resume,
+   * timestamps shift but the allocator's heap may still consider a lane
+   * "free" while the previous message in that lane is still visible
+   * on screen (its right edge hasn't exited the viewport yet).
+   *
+   * This method performs a bounding-box overlap check against active
+   * messages in the target lane, similar to CanvasRenderer.checkPlacement()
+   * but simplified: we only check the headway gap at the entry edge
+   * (right side for scroll, left side for reverse), not full overlap.
+   */
+  private hasCollisionAtEntry(
+    canvasMsg: CanvasMessage,
+    placement: LanePlacement,
+    dims: { width: number; height: number },
+    mode: string
+  ): boolean {
+    const newLaneY = placement.laneY;
+    // Scan active messages in the target lane and adjacent lanes.
+    // Vertical overlap check: skip messages in different lanes entirely.
+    for (let li = placement.laneIndex - 1; li <= placement.laneIndex + placement.slotCount; li++) {
+      for (const active of this.messages) {
+        if (active.laneIndex !== li) continue;
+        // Vertical overlap: different lane (shouldn't happen with laneIndex filter, but safety check).
+        if (active.y + active.height <= newLaneY || active.y >= newLaneY + canvasMsg.height) {
+          continue;
+        }
+        // Only check messages that have actually started scrolling.
+        const activeElapsed =
+          canvasMsg.startTime > 0 ? Math.max(0, canvasMsg.startTime - active.startTime) : 0;
+        if (activeElapsed < 0) continue;
+
+        if (mode === 'scroll') {
+          // New message enters from right. Collision if active message's
+          // right edge is still past the right edge minus a small gap.
+          const travelDistance = active.startX + active.width;
+          const activeProgress = Math.min(1, activeElapsed * active.invDuration);
+          const activeRightEdge = active.startX - activeProgress * travelDistance + active.width;
+          if (activeRightEdge > dims.width - 10) {
+            return true;
+          }
+        } else {
+          // reverse mode: messages enter from left, travel right.
+          // Collision if active message's left edge hasn't cleared the left side.
+          const reverseTravel = dims.width - active.startX;
+          const activeProgress = Math.min(1, activeElapsed * active.invDuration);
+          const activeX = active.startX + activeProgress * reverseTravel;
+          if (activeX + active.width > 10) {
+            return true;
+          }
+        }
+      }
+    }
+    return false;
   }
 
   private renderFrame(now: number): void {
@@ -782,13 +860,16 @@ export class RendererWebGL2 extends RendererBase {
         gl.bindVertexArray(null);
       }
 
-      // Canvas2D overlay: card round-rects + author photos
+      // Canvas2D overlay: author photos (WebGL2 cannot draw images directly)
+      // and connection status indicator. Only these elements remain on the
+      // overlay — card backgrounds and emojis now render in the WebGL2 pass.
       if (this.ctx2d) {
         const dpr = this.dpr;
         this.ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
         this.ctx2d.clearRect(0, 0, this.cssWidth, this.cssHeight);
 
         for (const msg of this.messages) {
+          if (msg.message.kind !== 'superchat' && msg.message.kind !== 'membership') continue;
           const elapsed = msg.startTime > 0 ? Math.max(0, now - msg.startTime) : 0;
           const op = computeMessageOpacity(
             msg.message,
@@ -800,40 +881,19 @@ export class RendererWebGL2 extends RendererBase {
           );
           if (op <= 0) continue;
 
-          if (msg.message.kind === 'superchat' || msg.message.kind === 'membership') {
-            // Round-rect card background (replaces the flat WebGL2 quad)
-            const pad = 4;
-            const bgColor =
-              msg.message.kind === 'superchat'
-                ? (msg.message.superChat?.backgroundColor ?? '#ff0000')
-                : '#0f0';
-            this.ctx2d.globalAlpha = op * CARD_BG_OPACITY_FACTOR;
-            this.ctx2d.fillStyle = bgColor;
-            drawRoundRect(
-              this.ctx2d,
-              msg.x - pad,
-              msg.y - pad,
-              msg.width + pad * 2,
-              msg.height + pad * 2,
-              6 // corner radius
-            );
-            this.ctx2d.fill();
-            this.ctx2d.globalAlpha = 1;
-
-            // Author photo
-            const photoUrl = msg.message.authorPhotoUrl;
-            if (photoUrl) {
-              const photo = this.loadAuthorPhoto(photoUrl);
-              if (photo?.complete && photo.naturalWidth > 0) {
-                const photoX = msg.x + rendererLayout.paddingH;
-                const photoY = msg.y + rendererLayout.paddingV;
-                drawAuthorPhoto(this.ctx2d, photo, photoX, photoY);
-              } else if (photo && !photo.complete) {
-                // trigger load
-                photo.onload = () => {
-                  /* photo will appear next frame */
-                };
-              }
+          // Author photo (WebGL2 lacks drawImage for photos — keep on overlay)
+          const photoUrl = msg.message.authorPhotoUrl;
+          if (photoUrl) {
+            const photo = this.loadAuthorPhoto(photoUrl);
+            if (photo?.complete && photo.naturalWidth > 0) {
+              const photoX = msg.x + rendererLayout.paddingH;
+              const photoY = msg.y + rendererLayout.paddingV;
+              drawAuthorPhoto(this.ctx2d, photo, photoX, photoY);
+            } else if (photo && !photo.complete) {
+              // trigger load
+              photo.onload = () => {
+                /* photo will appear next frame */
+              };
             }
           }
         }
@@ -926,11 +986,14 @@ export class RendererWebGL2 extends RendererBase {
       let cursorX = msg.x;
       for (const seg of msgContent) {
         if (seg.type === 'text') {
-          // Advance cursor past each text character using glyph widths
+          // Advance cursor past text using pre-computed text width.
+          // Previously this iterated every character doing atlas.glyphs.get(),
+          // which was O(chars) per message per frame. Now it's O(segments)
+          // regardless of text length.
           const text = seg.content ?? '';
-          for (let ci = 0; ci < text.length; ci++) {
-            const gi = this.atlas?.glyphs.get(text.codePointAt(ci) ?? 0x20);
-            cursorX += (gi?.advanceWidth ?? fs * 0.7) * scale;
+          if (text) {
+            const font = getFontString(fs, this.settings.fontWeight, this.settings.fontFamily);
+            cursorX += measureTextWidth(text, font) * scale;
           }
         } else if (seg.type === 'emoji') {
           const emojiUrl = seg.emoji?.url;
