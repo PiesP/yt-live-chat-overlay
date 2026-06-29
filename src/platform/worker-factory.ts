@@ -38,10 +38,10 @@ export class ChromeExtensionWorkerFactory implements WorkerFactory {
     // chrome is declared as possibly undefined; guard access
     const chromeApi =
       (typeof chrome !== 'undefined' && chrome) || (typeof browser !== 'undefined' && browser);
-    if (!chromeApi || !chromeApi.runtime) {
+    if (!chromeApi) {
       throw new Error('chrome.runtime.getURL not available');
     }
-    return chromeApi.runtime.getURL(`workers/${basename}`);
+    return chromeApi.runtime!.getURL(`workers/${basename}`);
   }
 }
 
