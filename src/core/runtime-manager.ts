@@ -289,42 +289,52 @@ export class RuntimeManager {
       return;
     }
 
-    // ── DOM-based chat panel pre-filter (SPA page changes only) ──────
+    // ── DOM-based chat panel pre-filter ─────────────────────────────────
     //
-    // When the user navigates via SPA to a /watch page that has no #chat
-    // (YTD-LIVE-CHAT-FRAME) element in the DOM, the page is almost
-    // certainly a VOD.  Skip the expensive `fetchWatchHtml() +
+    // When the page has no #chat (YTD-LIVE-CHAT-FRAME) element in the DOM,
+    // it is almost certainly a VOD.  Skip the expensive `fetchWatchHtml() +
     // ytInitialData deep-parse` pipeline and return `unavailable`
     // immediately.
     //
-    // Applied ONLY for page-change reconciles — startup, settings-change,
-    // and session-restart always go through the full bootstrap to avoid
-    // false negatives on scheduled streams (LIVE_STREAM_OFFLINE) whose
-    // chat panel is not yet rendered.
+    // For SPA page-change reconciles: the DOM is already settled (2s delay
+    // applied above), so we can safely skip bootstrap.
+    //
+    // For startup reconciles: the DOM may not be settled yet — YouTube may
+    // still be rendering the chat frame.  Defer the check with a settle
+    // delay to avoid false negatives on live streams whose chat panel
+    // hasn't rendered at document-end time.
     //
     // Before blocking, check playabilityStatus from window.ytInitialData.
     // Scheduled streams (LIVE_STREAM_OFFLINE) may lack #chat in the DOM
     // but will transition later — let the full bootstrap detect standby.
     const isPageChange = this.isPageChangeReconcile;
     this.isPageChangeReconcile = false;
-    if (
-      isPageChange &&
-      isYouTubeWatch(location.href) &&
-      !document.querySelector(CHAT_PANEL_SELECTOR)
-    ) {
+    if (isYouTubeWatch(location.href) && !document.querySelector(CHAT_PANEL_SELECTOR)) {
       const playbackStatus = (window.ytInitialData as Record<string, unknown> | undefined)
         ?.playabilityStatus as { status?: string } | undefined;
       if (playbackStatus?.status === 'LIVE_STREAM_OFFLINE') {
         log.info(
           '#chat absent but playabilityStatus is LIVE_STREAM_OFFLINE — proceeding to bootstrap'
         );
-      } else {
+      } else if (isPageChange) {
         log.info('No #chat element in DOM — skipping bootstrap (likely VOD)');
         // Set failure state directly (bypass handleStartFailure) — the
-        // Chat unavailable  warning is misleading for what is actually a
+        // Chat unavailable warning is misleading for what is actually a
         // successful optimisation: we correctly identified a VOD and
         // avoided the expensive bootstrap pipeline.
         this.startFailureState = { url: desired.url, attempts: MAX_START_ATTEMPTS };
+        return;
+      } else {
+        // Startup: DOM may not be settled yet.  Arm the settle delay and
+        // schedule a retry — if #chat is still absent after the delay,
+        // the next reconcile will skip bootstrap via the isPageChange=false
+        // path above (but lastPageChangeAt will be set, so getRemainingSettleDelay
+        // won't re-trigger).  We use scheduleReconcile which calls
+        // requestReconcile('retry') — isPageChangeReconcile stays false,
+        // but lastPageChangeAt is set so no further settle delay occurs.
+        log.info('#chat not found at startup — deferring to settle delay for DOM render');
+        this.lastPageChangeAt = Date.now();
+        this.scheduleReconcile(NAVIGATION_SETTLE_DELAY_MS);
         return;
       }
     }
