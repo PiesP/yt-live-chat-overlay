@@ -199,6 +199,17 @@ export class CanvasRenderer extends RendererBase {
   private readonly boundMeasureTextWidth = (text: string): number =>
     measureTextWidth(text, this.boundGetFont(this.settings.fontSize));
 
+  /** Pre-computed exponential distribution table for stagger delay (256 entries).
+   *  Each entry = -ln(1 - (i+0.5)/256), yielding a positive exponential sample.
+   *  Indexed by floor(fastRandom() * 256) — avoids per-message Math.log calls. */
+  private static readonly STAGGER_EXP_TABLE: Float64Array = (() => {
+    const t = new Float64Array(256);
+    for (let i = 0; i < 256; i++) {
+      t[i] = -Math.log(1 - (i + 0.5) / 256);
+    }
+    return t;
+  })();
+
   private static readonly IDLE_GRACE_PERIOD_MS = 500;
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
@@ -1090,8 +1101,8 @@ export class CanvasRenderer extends RendererBase {
             Math.min(
               maxStagger,
               Math.min(batchIndex, STAGGER_BATCH_MAX) *
-                -STAGGER_EXP_SCALE *
-                Math.log(1 - fastRandom())
+                STAGGER_EXP_SCALE *
+                CanvasRenderer.STAGGER_EXP_TABLE[(fastRandom() * 256) >>> 0]!
             )
           )
         : 0;
