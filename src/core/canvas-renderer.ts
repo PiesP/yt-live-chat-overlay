@@ -27,7 +27,7 @@ import { ByteLimitedCache } from '@core/byte-limited-cache';
 import { renderPaidCard } from '@core/canvas-card-renderers';
 import {
   applyPausedDurationToMessages,
-  cleanupExpiredMessages,
+  COMPACTION_THRESHOLD_RATIO,
   fastRandom,
 } from '@core/canvas-pipeline';
 import { drawRoundRect, renderRegularMessage, renderSegment } from '@core/canvas-rendering-shared';
@@ -558,37 +558,8 @@ export class CanvasRenderer extends RendererBase {
       canvas.height = dims.height * dpr;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
-    // Single-pass cleanup of expired messages + incremental lane map maintenance.
-    // When messages are removed, truncate the active array and prune empty lane entries.
-    const { newMessages, newLength, anyRemoved } = cleanupExpiredMessages(
-      this.activeMessages,
-      now,
-      this.activeMessagesByLane,
-      this.expiredMessagesScratch,
-      (msg) => this.messageActivator.releaseMessage(msg)
-    );
-    if (anyRemoved) {
-      if (newMessages) {
-        // Replace the array reference entirely (avoids keeping garbage-filled tail slots).
-        // Use Array.prototype.push.apply to avoid spread-induced temporary array.
-        this.activeMessages.length = 0;
-        Array.prototype.push.apply(this.activeMessages, newMessages);
-      } else {
-        this.activeMessages.length = newLength;
-      }
-      // Remove lanes that now have 0 messages — stale empty entries waste
-      // iteration time in lane-scoped lookups.
-      for (const [lane, msgs] of this.activeMessagesByLane) {
-        if (msgs.length === 0) {
-          this.activeMessagesByLane.delete(lane);
-        }
-      }
-      this.observability.updateActiveMessages(this.activeMessages.length);
-      this.observability.updateQueueDepth(this.pendingQueue.size);
-    }
-
-    // P2-3: Skip clearRect + render loop when no active messages or standby message.
-    // Empty frames have nothing to draw, so we skip GPU work entirely.
+    // P2-3: Skip clearRect + render loop when no active messages.
+    // Note: checked before merged cleanup+pre-scan; the loop handles expiry.
     const hasContent = this.activeMessages.length > 0 || this.connectionStatus !== 'connected';
     if (hasContent) {
       ctx.clearRect(0, 0, dims.width, dims.height);
@@ -602,15 +573,8 @@ export class CanvasRenderer extends RendererBase {
     const mode = this.settings.danmakuMode;
     const isScrolling = mode === 'scroll' || mode === 'reverse';
 
-    // Pre-compute frame-level render context to avoid per-message allocation churn.
-    // fontSize, fontWeight, fontFamily, outlineWidthPx, and outlineOpacity are
-    // constant across all messages within a single frame.
     // Recalculate lane utilization BEFORE drainQueue so anti-block sees
-    // accurate state. Previously resetBatch() was inside drainQueue() and
-    // never called when anti-block was active, causing a deadlock:
-    // activeMessages emptied → cachedUtilization stuck at 100% →
-    // anti-block always true → drainQueue never runs → resetBatch never
-    // called → cachedUtilization never updated → permanent stall.
+    // accurate state.
     this.laneAllocator.resetBatch();
 
     this.drainQueue(now);
@@ -621,20 +585,39 @@ export class CanvasRenderer extends RendererBase {
     // Early exit for empty frames — nothing to render.
     if (!hasContent) return;
 
-    // ── Pre-scan: group active messages by opacity bucket (0.05 granularity) ──
-    // Reuse pre-allocated buckets to avoid per-frame Map + object allocations.
+    // ── Merged cleanup + pre-scan: single pass over activeMessages ──
+    // Formerly two separate passes (cleanupExpiredMessages + opacity bucket
+    // pre-scan). Now merged into one loop to halve iteration overhead.
     const buckets = this.opacityBuckets;
     for (const bucket of buckets) bucket.length = 0;
+    this.expiredMessagesScratch.length = 0;
 
-    for (let i = 0; i < this.activeMessages.length; i++) {
+    const oldLength = this.activeMessages.length;
+    let writeIdx = 0;
+    let anyRemoved = false;
+
+    for (let i = 0; i < oldLength; i++) {
       const msg = this.activeMessages[i];
       if (!msg) continue;
-      const positionElapsed = now - msg.startTime - msg.pausedDuration;
+      const elapsed = now - msg.startTime - msg.pausedDuration;
 
-      // Skip messages still in stagger delay period (haven't visually started)
-      if (positionElapsed < 0) continue;
+      // Expired: message has exceeded its display duration
+      if (elapsed >= msg.duration) {
+        this.expiredMessagesScratch.push(msg);
+        this.messageActivator.releaseMessage(msg);
+        anyRemoved = true;
+        continue;
+      }
 
-      const progress = Math.min(1, Math.max(0, positionElapsed * msg.invDuration));
+      // Keep message in active array (in-place compaction)
+      this.activeMessages[writeIdx] = msg;
+      writeIdx++;
+
+      // Still in stagger delay — keep in array but skip rendering
+      if (elapsed < 0) continue;
+
+      // ── Render pre-compute ──
+      const progress = Math.min(1, Math.max(0, elapsed * msg.invDuration));
 
       if (mode === 'scroll') {
         const travelDistance = msg.startX + msg.width + this.settings.exitPaddingPx;
@@ -648,8 +631,6 @@ export class CanvasRenderer extends RendererBase {
       }
 
       // Fade-in starts from fadeStartTime, independent of position timeline.
-      // Currently set equal to startTime (visual appearance), but the separate
-      // field allows future independent fade/position timing control.
       const fadeElapsed = now - msg.fadeStartTime - msg.pausedDuration;
       const opacity = computeMessageOpacity(
         msg.message,
@@ -661,8 +642,44 @@ export class CanvasRenderer extends RendererBase {
       );
 
       const bucketIndex = Math.round(opacity * (OPACITY_BUCKET_COUNT - 1));
-      // Store positionElapsed for membership card border pulse animation
-      buckets[bucketIndex]?.push({ msg, elapsed: positionElapsed });
+      // Store elapsed for membership card border pulse animation
+      buckets[bucketIndex]?.push({ msg, elapsed });
+    }
+
+    // Post-loop: compact array + clean lane map for expired messages
+    if (anyRemoved) {
+      // Remove only expired messages from the lane map — incremental instead of
+      // full clear+rebuild.
+      for (const msg of this.expiredMessagesScratch) {
+        const slotCount = msg.slotCount ?? 1;
+        for (let slot = 0; slot < slotCount; slot++) {
+          const lane = msg.laneIndex + slot;
+          const list = this.activeMessagesByLane.get(lane);
+          if (list) {
+            const idx = list.indexOf(msg);
+            if (idx !== -1) list.splice(idx, 1);
+            if (list.length === 0) this.activeMessagesByLane.delete(lane);
+          }
+        }
+      }
+
+      // Array compaction threshold: when >50% slots expired, allocate fresh array
+      if (writeIdx < oldLength * COMPACTION_THRESHOLD_RATIO) {
+        const newMessages = this.activeMessages.slice(0, writeIdx);
+        this.activeMessages.length = 0;
+        Array.prototype.push.apply(this.activeMessages, newMessages);
+      } else {
+        this.activeMessages.length = writeIdx;
+      }
+
+      // Remove lanes that now have 0 messages
+      for (const [lane, msgs] of this.activeMessagesByLane) {
+        if (msgs.length === 0) {
+          this.activeMessagesByLane.delete(lane);
+        }
+      }
+      this.observability.updateActiveMessages(this.activeMessages.length);
+      this.observability.updateQueueDepth(this.pendingQueue.size);
     }
 
     // ── Render each opacity group with a single ctx.globalAlpha set ──
