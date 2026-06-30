@@ -2,7 +2,7 @@
 // Copyright (c) 2026 PiesP
 
 /**
- * RendererCanvas — Canvas 2D-based renderer.
+ * CanvasRenderer — Canvas 2D-based renderer.
  *
  * Uses requestAnimationFrame instead of CSS @keyframes animations.
  * Each frame computes positions with Math.floor() to snap to integer pixel
@@ -25,7 +25,13 @@
 import type { ChatMessage, DropReason, OverlayDimensions, OverlaySettings } from '@app-types';
 import { ByteLimitedCache } from '@core/byte-limited-cache';
 import { renderPaidCard } from '@core/canvas-card-renderers';
+import {
+  applyPausedDurationToMessages,
+  cleanupExpiredMessages,
+  fastRandom,
+} from '@core/canvas-pipeline';
 import { drawRoundRect, renderRegularMessage, renderSegment } from '@core/canvas-rendering-shared';
+import { isImageReady } from '@core/canvas-worker-bridge';
 import { MEMBERSHIP_CARD_CONFIG, SUPERCHAT_CARD_CONFIG } from '@core/card-config';
 import { ChannelLanguageMemory } from '@core/channel-language-memory';
 import { getTranslatableText } from '@core/chat-message-helpers';
@@ -76,100 +82,7 @@ import {
 } from '@core/text-measure';
 import { TranslationService } from '@core/translation-service';
 
-/** Check if an image element is fully loaded and has valid dimensions. */
-function isImageReady(img: unknown): boolean {
-  return (img as HTMLImageElement)?.complete === true && (img as HTMLImageElement).naturalWidth > 0;
-}
-
-/**
- * Remove expired messages in-place, simultaneously maintaining the
- * lane-indexed map incrementally during compaction.
- * Returns the new logical length and whether any messages were removed.
- */
-function cleanupExpiredMessages(
-  messages: CanvasMessage[],
-  now: number,
-  activeMessagesByLane: Map<number, CanvasMessage[]>,
-  expiredScratch: CanvasMessage[],
-  onExpire?: (msg: CanvasMessage) => void
-): { newLength: number; anyRemoved: boolean; newMessages?: CanvasMessage[] } {
-  const oldLength = messages.length;
-  let writeIdx = 0;
-  let anyRemoved = false;
-  expiredScratch.length = 0;
-
-  // Single pass: compact messages + detect expirations.
-  for (let i = 0; i < oldLength; i++) {
-    const msg = messages[i];
-    if (!msg) continue;
-    const elapsed = now - msg.startTime - msg.pausedDuration;
-    if (elapsed < msg.duration) {
-      messages[writeIdx] = msg;
-      writeIdx++;
-    } else {
-      anyRemoved = true;
-      expiredScratch.push(msg);
-      onExpire?.(msg);
-    }
-  }
-
-  // Remove only expired messages from the lane map — incremental instead of
-  // full clear+rebuild. For screen with 100 active messages where 1 expires,
-  // this is O(1) lane operations instead of O(100) rebuild.
-  if (anyRemoved) {
-    for (const msg of expiredScratch) {
-      const slotCount = msg.slotCount ?? 1;
-      for (let slot = 0; slot < slotCount; slot++) {
-        const lane = msg.laneIndex + slot;
-        const list = activeMessagesByLane.get(lane);
-        if (list) {
-          const idx = list.indexOf(msg);
-          if (idx !== -1) list.splice(idx, 1);
-          if (list.length === 0) activeMessagesByLane.delete(lane);
-        }
-      }
-    }
-  }
-  // Array compaction threshold: when more than half of the array slots are
-  // expired, allocate a fresh array via slice() instead of nulling the tail.
-  // This avoids keeping garbage-filled tail slots in the array, at the cost
-  // of one allocation, which is worthwhile when the majority is garbage.
-  if (writeIdx < oldLength * COMPACTION_THRESHOLD_RATIO) {
-    return { newMessages: messages.slice(0, writeIdx), newLength: writeIdx, anyRemoved };
-  }
-  // Otherwise, truncate the array to remove stale references (no allocation of a new array).
-  messages.length = writeIdx;
-  return { newLength: writeIdx, anyRemoved };
-}
-
-/** Accumulate paused duration across all active messages. */
-function applyPausedDurationToMessages(messages: CanvasMessage[], pausedMs: number): void {
-  for (const msg of messages) {
-    msg.pausedDuration += pausedMs;
-  }
-}
-
 const log = createLogger('RendererCanvas');
-
-/** Ratio of expired slots above which compaction allocates a fresh array via slice(). */
-const COMPACTION_THRESHOLD_RATIO = 0.5;
-
-/**
- * Deterministic PRNG (LCG) for stagger delay computation.
- * Replaces Math.random() to avoid per-frame Math.random() calls in burst
- * scenarios where dozens of messages are enqueued simultaneously.
- * Seed is derived from wall-clock time at module load, so each page
- * gets a different sequence without calling Math.random() in the hot path.
- *
- *Period: 2^32 ≈ 4.3 billion (full 32-bit LCG).
- * Distribution: uniform [0, 1).
- */
-let prngSeed = (Date.now() ^ (Math.random() * 0xffffffff)) >>> 0;
-function fastRandom(): number {
-  // LCG parameters from Numerical Recipes (a=1664525, c=1013904223)
-  prngSeed = (Math.imul(1664525, prngSeed) + 1013904223) >>> 0;
-  return prngSeed / 0xffffffff;
-}
 
 export class CanvasRenderer extends RendererBase {
   private canvas: HTMLCanvasElement | null = null;
@@ -223,13 +136,13 @@ export class CanvasRenderer extends RendererBase {
    */
   private pendingTranslations: Array<{ msg: CanvasMessage; text: string | null }> = [];
   /** Read index for incremental pendingTranslations drain (avoids splice allocation). */
-  private _pendingTranslationReadIdx = 0;
+  private pendingTranslationReadIdx = 0;
 
   /**
    * Scratch array for cleanupExpiredMessages — hoisted to avoid per-frame allocation.
    * Reset via .length = 0 at the start of each call.
    */
-  private _expiredMessagesScratch: CanvasMessage[] = [];
+  private expiredMessagesScratch: CanvasMessage[] = [];
 
   /**
    * OffscreenCanvas Web Worker for off-main-thread rendering.
@@ -264,11 +177,11 @@ export class CanvasRenderer extends RendererBase {
    * Each frame resets bucket lengths instead of allocating new arrays/Map, eliminating
    * the per-frame GC pressure from Map + {msg,elapsed} object creation.
    */
-  private readonly _opacityBuckets: Array<Array<{ msg: CanvasMessage; elapsed: number }>> =
+  private readonly opacityBuckets: Array<Array<{ msg: CanvasMessage; elapsed: number }>> =
     Array.from({ length: OPACITY_BUCKET_COUNT }, () => []);
 
   /** Cached opacity config object — rebuilt on settings changes to avoid per-frame allocation. */
-  private _cachedOpacityConfig!: {
+  private cachedOpacityConfig!: {
     baseOpacity: number;
     fadeDurationMs: number;
     invFadeDuration: number;
@@ -279,10 +192,10 @@ export class CanvasRenderer extends RendererBase {
   };
 
   /** Pre-bound getFont to avoid per-call arrow function allocation. */
-  private readonly _boundGetFont = (fs: number): string => this.getFont(fs);
+  private readonly boundGetFont = (fs: number): string => this.getFont(fs);
   /** Pre-bound measureTextWidth to avoid per-call arrow function allocation. */
-  private readonly _boundMeasureTextWidth = (text: string): number =>
-    measureTextWidth(text, this._boundGetFont(this.settings.fontSize));
+  private readonly boundMeasureTextWidth = (text: string): number =>
+    measureTextWidth(text, this.boundGetFont(this.settings.fontSize));
 
   private static readonly IDLE_GRACE_PERIOD_MS = 500;
 
@@ -414,7 +327,7 @@ export class CanvasRenderer extends RendererBase {
         this.startRenderLoop();
       }
     });
-    this._buildOpacityConfig();
+    this.buildOpacityConfig();
     log.info('RendererCanvas created');
   }
 
@@ -622,18 +535,18 @@ export class CanvasRenderer extends RendererBase {
     // chat bursts when many translations resolve simultaneously.
     if (this.pendingTranslations.length > 0) {
       const end = Math.min(
-        this._pendingTranslationReadIdx + this.translationBatchSize,
+        this.pendingTranslationReadIdx + this.translationBatchSize,
         this.pendingTranslations.length
       );
-      for (let i = this._pendingTranslationReadIdx; i < end; i++) {
+      for (let i = this.pendingTranslationReadIdx; i < end; i++) {
         const entry = this.pendingTranslations[i];
         if (!entry) continue;
         entry.msg.translatedText = entry.text;
       }
-      this._pendingTranslationReadIdx = end;
-      if (this._pendingTranslationReadIdx >= this.pendingTranslations.length) {
+      this.pendingTranslationReadIdx = end;
+      if (this.pendingTranslationReadIdx >= this.pendingTranslations.length) {
         this.pendingTranslations.length = 0;
-        this._pendingTranslationReadIdx = 0;
+        this.pendingTranslationReadIdx = 0;
       }
     }
 
@@ -651,7 +564,7 @@ export class CanvasRenderer extends RendererBase {
       this.activeMessages,
       now,
       this.activeMessagesByLane,
-      this._expiredMessagesScratch,
+      this.expiredMessagesScratch,
       (msg) => this.messageActivator.releaseMessage(msg)
     );
     if (anyRemoved) {
@@ -710,7 +623,7 @@ export class CanvasRenderer extends RendererBase {
 
     // ── Pre-scan: group active messages by opacity bucket (0.05 granularity) ──
     // Reuse pre-allocated buckets to avoid per-frame Map + object allocations.
-    const buckets = this._opacityBuckets;
+    const buckets = this.opacityBuckets;
     for (const bucket of buckets) bucket.length = 0;
 
     for (let i = 0; i < this.activeMessages.length; i++) {
@@ -744,7 +657,7 @@ export class CanvasRenderer extends RendererBase {
         msg.duration,
         isScrolling,
         msg.speedTier,
-        this._cachedOpacityConfig
+        this.cachedOpacityConfig
       );
 
       const bucketIndex = Math.round(opacity * (OPACITY_BUCKET_COUNT - 1));
@@ -793,8 +706,8 @@ export class CanvasRenderer extends RendererBase {
               isImageReady,
               this.imageFetchManager.authorPhotoCache,
               isImageReady,
-              this._boundGetFont,
-              this._boundMeasureTextWidth,
+              this.boundGetFont,
+              this.boundMeasureTextWidth,
               isReplace ? msg.translatedText : undefined
             );
           } else {
@@ -814,7 +727,7 @@ export class CanvasRenderer extends RendererBase {
               this.imageFetchManager.authorPhotoCache,
               this.imageFetchManager.stickerCache,
               this.imageFetchManager.emojiCache,
-              this._boundGetFont,
+              this.boundGetFont,
               this.superChatGradientCache
             );
           }
@@ -997,7 +910,6 @@ export class CanvasRenderer extends RendererBase {
       const activeElapsed = now - active.startTime - active.pausedDuration;
       if (activeElapsed < 0) continue; // not yet started
 
-      // Vertical overlap: check if the two messages occupy the same vertical space.
       const verticalGap = Math.abs(active.y - newLaneY);
       if (verticalGap >= laneHeight) continue; // different lanes, no overlap
 
@@ -1298,8 +1210,8 @@ export class CanvasRenderer extends RendererBase {
   }
 
   /** Rebuild cached opacity config from current settings. Called on constructor and updateSettings. */
-  private _buildOpacityConfig(): void {
-    this._cachedOpacityConfig = {
+  private buildOpacityConfig(): void {
+    this.cachedOpacityConfig = {
       baseOpacity: this.settings.opacity,
       fadeDurationMs: this.settings.fadeDurationMs,
       invFadeDuration: this.invFadeDuration,
@@ -1450,7 +1362,7 @@ export class CanvasRenderer extends RendererBase {
       topBottomDurationMs: settings.topBottomDurationMs,
       depthLayersEnabled: settings.depthLayersEnabled,
     });
-    this._buildOpacityConfig();
+    this.buildOpacityConfig();
   }
 
   protected onPause(): void {
