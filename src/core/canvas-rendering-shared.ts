@@ -347,6 +347,7 @@ function cacheTextBitmap(
 
   offCtx.font = font;
   offCtx.textBaseline = 'top';
+  offCtx.textRendering = 'optimizeSpeed';
   offCtx.strokeStyle = strokeColor;
   offCtx.lineWidth = strokeWidth;
   offCtx.lineJoin = 'round';
@@ -417,6 +418,7 @@ export function renderSegment(
   ctx.save();
   ctx.font = font;
   ctx.textBaseline = 'top';
+  ctx.textRendering = 'optimizeSpeed';
   strokeTextOutline(ctx, text, x, y, color, outlineWidthPx, outlineOpacity);
   ctx.fillStyle = color;
   ctx.fillText(text, x, y);

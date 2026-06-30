@@ -38,7 +38,6 @@ export function createExtensionConfig(outDir: string): UserConfig {
           input: {
             'background': resolve(repoRoot, 'extension/background.ts'),
             'workers/renderer-worker': resolve(repoRoot, 'src/core/renderer-worker.ts'),
-            'workers/renderer-worker-webgl2': resolve(repoRoot, 'src/core/renderer-worker-webgl2.ts'),
           },
           output: {
             entryFileNames: '[name].js',

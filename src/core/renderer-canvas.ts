@@ -326,7 +326,7 @@ export class CanvasRenderer extends RendererBase {
     canvas.setAttribute('aria-hidden', 'true');
     if (container) container.appendChild(canvas);
     this.canvas = canvas;
-    this.ctx = canvas.getContext('2d');
+    this.ctx = canvas.getContext('2d', { desynchronized: true });
     if (!this.ctx) {
       log.warn('Failed to get CanvasRenderingContext2D — renderer will be inactive');
     } else if (!canvas.isConnected) {

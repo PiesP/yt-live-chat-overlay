@@ -23,8 +23,6 @@ import { MessageIdRegistry } from '@core/message-id-registry';
 import { OVERLAY_SELECTOR, Overlay } from '@core/overlay';
 import type { ConnectionStatus, RendererBase } from '@core/renderer-base';
 import { CanvasRenderer } from '@core/renderer-canvas';
-import { RendererWebGL2 } from '@core/renderer-webgl2';
-import { RendererWebGL2Worker } from '@core/renderer-webgl2-worker';
 import { shouldResetRendererForSettingsChange } from '@core/settings-schema';
 import { StandbyController } from '@core/standby-controller';
 import { VideoPauseController } from '@core/video-pause-controller';
@@ -1162,31 +1160,9 @@ export class RuntimeManager {
   }
 
   /**
-   * Create the appropriate renderer based on settings.
-   * Tries WebGL2 SDF worker first (best for CPU-heavy atlas generation),
-   * falls back to main-thread WebGL2, then Canvas2D.
+   * Create the Canvas2D renderer.
    */
   private createRenderer(overlay: Overlay, settings: OverlaySettings): RendererBase {
-    if (settings.enableWebGL2) {
-      // Try OffscreenCanvas worker first (best for CPU-heavy atlas gen)
-      if (typeof OffscreenCanvas !== 'undefined') {
-        try {
-          const renderer = new RendererWebGL2Worker(overlay, settings);
-          log.info('Using WebGL2 SDF worker renderer');
-          return renderer;
-        } catch (err: unknown) {
-          log.info('WebGL2 worker unavailable, trying main-thread WebGL2:', err);
-        }
-      }
-      // Fall back to main-thread WebGL2
-      try {
-        const renderer = new RendererWebGL2(overlay, settings);
-        log.info('Using WebGL2 SDF renderer (main thread)');
-        return renderer;
-      } catch (err: unknown) {
-        log.info('WebGL2 SDF renderer unavailable, falling back to Canvas2D:', err);
-      }
-    }
     log.info('Using Canvas2D renderer');
     return new CanvasRenderer(overlay, settings);
   }
