@@ -23,6 +23,7 @@
  */
 
 import type { BacklogMode, ChatMessage, Pauseable } from '@app-types';
+import { isPriorityMessage, prioritySortOrder, sampleExponential } from '@core/backlog-helpers';
 import { BACKLOG_INDICATOR_BG, DEFAULT_FONT_FAMILY, INDICATOR_Z_INDEX } from '@core/design-tokens';
 import { clearSafeTimeout } from '@core/dom';
 import { t } from '@core/i18n';
@@ -51,22 +52,6 @@ interface BacklogControllerConfig {
   backlogDensityRampMaxMs: number;
   /** Minimum backlog injection rate (msg/s) */
   backlogInjectionRateMin: number;
-}
-
-/**
- * Priority-check helper shared by sampling, partitioning, and sorting.
- * Returns true for messages that should always be shown (SuperChat, Membership).
- */
-function isPriorityMessage(m: ChatMessage): boolean {
-  return m.kind === 'superchat' || m.kind === 'membership';
-}
-
-/**
- * Get the priority sort order for message kinds.
- * Lower number = higher priority (SuperChat → Membership → regular).
- */
-function prioritySortOrder(kind: ChatMessage['kind']): number {
-  return kind === 'superchat' ? 0 : kind === 'membership' ? 1 : 2;
 }
 
 export class BacklogInjectionController implements Pauseable {
@@ -113,13 +98,7 @@ export class BacklogInjectionController implements Pauseable {
   private static readonly SAMPLE_RATIO_LARGE = 0.35;
   private static readonly INDICATOR_HIDE_DELAY_MS = 300;
 
-  /**
-   * Sample from an exponential distribution with the given mean.
-   * Uses the inverse-CDF method: -mean * ln(1 - U) where U ~ Uniform(0, 1).
-   */
-  private static sampleExponential(mean: number): number {
-    return -mean * Math.log(Math.max(Number.EPSILON, 1 - Math.random()));
-  }
+  private static sampleExponential = sampleExponential;
 
   /** Effective length of the backlog queue (excluding consumed offset entries). */
   private get backlogQueueLength(): number {
