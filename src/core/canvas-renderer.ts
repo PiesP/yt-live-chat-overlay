@@ -177,8 +177,10 @@ export class CanvasRenderer extends RendererBase {
    * Each frame resets bucket lengths instead of allocating new arrays/Map, eliminating
    * the per-frame GC pressure from Map + {msg,elapsed} object creation.
    */
-  private readonly opacityBuckets: Array<Array<{ msg: CanvasMessage; elapsed: number }>> =
-    Array.from({ length: OPACITY_BUCKET_COUNT }, () => []);
+  private readonly opacityBuckets: CanvasMessage[][] = Array.from(
+    { length: OPACITY_BUCKET_COUNT },
+    () => []
+  );
 
   /** Cached opacity config object — rebuilt on settings changes to avoid per-frame allocation. */
   private cachedOpacityConfig!: {
@@ -643,7 +645,8 @@ export class CanvasRenderer extends RendererBase {
 
       const bucketIndex = Math.round(opacity * (OPACITY_BUCKET_COUNT - 1));
       // Store elapsed for membership card border pulse animation
-      buckets[bucketIndex]?.push({ msg, elapsed });
+      msg._frameElapsed = elapsed;
+      buckets[bucketIndex]!.push(msg);
     }
 
     // Post-loop: compact array + clean lane map for expired messages
@@ -692,7 +695,8 @@ export class CanvasRenderer extends RendererBase {
       ctx.globalAlpha = bucketOpacity;
 
       try {
-        for (const { msg, elapsed } of entries) {
+        for (const msg of entries) {
+          const elapsed = msg._frameElapsed!;
           const snappedX = Math.floor(msg.x);
           const snappedY = Math.floor(msg.y);
 

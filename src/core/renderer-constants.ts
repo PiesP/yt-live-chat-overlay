@@ -191,4 +191,7 @@ export interface CanvasMessage {
   slotCount?: number;
   /** Pre-computed render message (always set — either original or desaturated copy). */
   renderMessage: ChatMessage;
+  /** Transient frame-local elapsed (ms). Set by renderFrame pre-scan, read by
+   *  rendering. Not serialized — re-set each frame. */
+  _frameElapsed?: number;
 }
