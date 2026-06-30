@@ -22,7 +22,13 @@
  * actual commit time, not the visual start time.
  */
 
-import type { ChatMessage, DropReason, OverlayDimensions, OverlaySettings } from '@app-types';
+import type {
+  ChatMessage,
+  DropReason,
+  OverlayDimensions,
+  OverlaySettings,
+  TranslationLanguage,
+} from '@app-types';
 import { ByteLimitedCache } from '@core/byte-limited-cache';
 import { renderPaidCard } from '@core/canvas-card-renderers';
 import { drawRoundRect, renderRegularMessage, renderSegment } from '@core/canvas-rendering-shared';
@@ -61,10 +67,14 @@ import {
   TRANSLATION_OPACITY_SCALE,
 } from '@core/renderer-constants';
 import {
+  collectSourceSample,
   computeAgeFadeRate,
   computeInvFadeDuration,
   computeMessageOpacity,
+  createSourceDetectionState,
   enqueueWithOverflow,
+  performSourceDetection,
+  type SourceDetectionState,
   estimateMessageDimensions as sharedEstimateDimensions,
 } from '@core/renderer-shared';
 import { RenderWorkerManager } from '@core/renderer-worker-manager';
@@ -208,9 +218,7 @@ export class CanvasRenderer extends RendererBase {
   private messageActivator: MessageActivator;
   private languageDetector: LanguageDetectorService | null = null;
   private channelMemory: ChannelLanguageMemory | null = null;
-  private sourceDetectionDone = false;
-  private sourceSampleBuffer: string[] = [];
-  private static readonly SOURCE_SAMPLE_COUNT = 8;
+  private sourceDetectionState: SourceDetectionState;
 
   /** Max translations to apply per frame to avoid single-frame spikes during chat bursts. */
   private readonly translationBatchSize: number;
@@ -294,6 +302,11 @@ export class CanvasRenderer extends RendererBase {
     // Initialize language detection pipeline for 'auto' source
     this.languageDetector = new LanguageDetectorService();
     this.channelMemory = new ChannelLanguageMemory();
+    this.sourceDetectionState = createSourceDetectionState();
+    if (settings.translationSource === 'auto') {
+      this.sourceDetectionState.languageDetector = this.languageDetector;
+      this.sourceDetectionState.channelMemory = this.channelMemory;
+    }
     void this.languageDetector.initialize().catch((err: unknown) => {
       log.debug('LanguageDetector init failed, auto-source unavailable:', err);
       // Set to null so performSourceDetection() can retry later
@@ -332,22 +345,6 @@ export class CanvasRenderer extends RendererBase {
     } else if (!canvas.isConnected) {
       log.warn('Canvas created but not connected to DOM — renderer will be inactive');
     }
-
-    // C1: Listen for context restoration to recover from GPU crashes / driver resets.
-    // Without this, a context loss permanently disables the renderer until page reload.
-    canvas.addEventListener('webglcontextlost', (e: Event) => {
-      e.preventDefault();
-      this.ctx = null;
-      log.warn('Canvas context lost — renderer paused until restoration');
-    });
-    canvas.addEventListener('webglcontextrestored', () => this.handleContextRestored());
-    // Canvas 2D context loss is rare but possible under memory pressure.
-    canvas.addEventListener('contextlost', (e: Event) => {
-      e.preventDefault();
-      this.ctx = null;
-      log.warn('Canvas 2D context lost — renderer paused until restoration');
-    });
-    canvas.addEventListener('contextrestored', () => this.handleContextRestored());
 
     // Visually-hidden live region for connection status announcements
     const statusRegion = document.createElement('div');
@@ -687,7 +684,7 @@ export class CanvasRenderer extends RendererBase {
     }
 
     const mode = this.settings.danmakuMode;
-    const isScrolling = mode === 'scroll' || mode === 'reverse';
+    const isScrolling = (mode === 'scroll' || mode === 'reverse') && !this.reducedMotion;
 
     // Pre-compute frame-level render context to avoid per-message allocation churn.
     // fontSize, fontWeight, fontFamily, outlineWidthPx, and outlineOpacity are
@@ -963,7 +960,7 @@ export class CanvasRenderer extends RendererBase {
     }
 
     const mode = this.settings.danmakuMode;
-    const isScrolling = mode === 'scroll' || mode === 'reverse';
+    const isScrolling = (mode === 'scroll' || mode === 'reverse') && !this.reducedMotion;
     const dimensions = this.estimateDimensions(message);
     const { height: msgHeight } = dimensions;
 
@@ -1085,7 +1082,7 @@ export class CanvasRenderer extends RendererBase {
     const { width: msgWidth, height: msgHeight } =
       precomputedDimensions ?? this.estimateDimensions(message);
 
-    const isScrolling = mode === 'scroll' || mode === 'reverse';
+    const isScrolling = (mode === 'scroll' || mode === 'reverse') && !this.reducedMotion;
     const speedTier = precomputedSpeedTier ?? this.getSpeedTier(message);
 
     // Horizontal stagger: progressively offset batch messages from the
@@ -1207,13 +1204,8 @@ export class CanvasRenderer extends RendererBase {
     );
 
     // Auto-detect source language from message samples
-    if (
-      this.settings.translationSource === 'auto' &&
-      !this.sourceDetectionDone &&
-      message.text.trim()
-    ) {
-      this.sourceSampleBuffer.push(message.text);
-      if (this.sourceSampleBuffer.length >= CanvasRenderer.SOURCE_SAMPLE_COUNT) {
+    if (this.settings.translationSource === 'auto') {
+      if (collectSourceSample(this.sourceDetectionState, message.text)) {
         void this.performSourceDetection();
       }
     }
@@ -1431,8 +1423,7 @@ export class CanvasRenderer extends RendererBase {
     // Reset detection state when source changes to 'auto'
     const sourceChanged = settings.translationSource !== prevSource;
     if (sourceChanged) {
-      this.sourceDetectionDone = false;
-      this.sourceSampleBuffer = [];
+      this.sourceDetectionState = createSourceDetectionState();
     }
 
     void this.translationService
@@ -1480,20 +1471,14 @@ export class CanvasRenderer extends RendererBase {
 
   private async performSourceDetection(): Promise<void> {
     if (!this.languageDetector) return;
-    try {
-      const detected = await this.languageDetector.detectFromSamples(this.sourceSampleBuffer);
-      if (detected) {
-        const channelKey = ChannelLanguageMemory.keyFromUrl(location.href);
-        if (channelKey && this.channelMemory) {
-          this.channelMemory.set(channelKey, detected);
-        }
-        await this.translationService.setDetectedSource(detected);
-      }
-    } catch (err: unknown) {
-      log.debug('Source detection failed:', err);
+    const detected = await performSourceDetection(this.sourceDetectionState);
+    if (detected) {
+      await this.translationService
+        .setDetectedSource(detected as TranslationLanguage)
+        .catch((err: unknown) => {
+          log.debug('Failed to set detected source on translation service:', err);
+        });
     }
-    this.sourceDetectionDone = true;
-    this.sourceSampleBuffer = [];
   }
 
   protected onDestroy(): void {
@@ -1526,37 +1511,6 @@ export class CanvasRenderer extends RendererBase {
     this.channelMemory?.clear();
     this.channelMemory = null;
     clearTextMeasurementCaches();
-  }
-
-  // ── Canvas context loss / restoration ───────────────────────────────────
-
-  /**
-   * C1: Handle canvas context restoration after GPU crash / driver reset.
-   * Re-acquires the 2D context and resumes rendering. Without this listener,
-   * context loss permanently disables the renderer until page reload.
-   */
-  private handleContextRestored(): void {
-    if (!this.canvas) return;
-    const ctx = this.canvas.getContext('2d');
-    if (!ctx) {
-      log.warn('Context restored but getContext failed — renderer remains inactive');
-      return;
-    }
-    this.ctx = ctx;
-    // Restore DPR transform that was lost with the context
-    const dpr = window.devicePixelRatio || 1;
-    const dims = this.overlay?.getDimensions();
-    if (dims) {
-      this.lastDpr = dpr;
-      this.canvas.width = dims.width * dpr;
-      this.canvas.height = dims.height * dpr;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    }
-    log.info('Canvas context restored — renderer resuming');
-    // Restart the render loop if it was stopped
-    if (!this.isPaused && !this.isVideoPaused) {
-      this.startRenderLoop();
-    }
   }
 
   // ── Status bar rendering ────────────────────────────────────────────────

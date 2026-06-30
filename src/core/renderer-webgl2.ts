@@ -23,11 +23,15 @@ import { RendererBase } from '@core/renderer-base';
 import type { CanvasMessage } from '@core/renderer-constants';
 import { SPEED_TIER, TRANSLATION_FONT_SCALE, TRANSLATION_GAP_PX } from '@core/renderer-constants';
 import {
+  collectSourceSample,
   computeAgeFadeRate,
   computeInvFadeDuration,
   computeMessageOpacity,
+  createSourceDetectionState,
   enqueueWithOverflow,
   type OpacityConfig,
+  performSourceDetection,
+  type SourceDetectionState,
 } from '@core/renderer-shared';
 import {
   buildSDFInstances,
@@ -113,12 +117,13 @@ export class RendererWebGL2 extends RendererBase {
   private contextLostHandler: ((e: Event) => void) | null = null;
   private contextRestoredHandler: (() => void) | null = null;
 
-  // ── Language source detection (shared parity with CanvasRenderer) ──
+  // ── Language source detection (shared via renderer-shared) ──
   private languageDetector: LanguageDetectorService | null = null;
   private channelMemory: ChannelLanguageMemory | null = null;
-  private sourceDetectionDone = false;
-  private sourceSampleBuffer: string[] = [];
-  private static readonly SOURCE_SAMPLE_COUNT = 8;
+  private sourceDetectionState: SourceDetectionState = createSourceDetectionState();
+
+  private static readonly IDLE_GRACE_PERIOD_MS = 500;
+  private _idleSince: number | null = null;
 
   get laneCount(): number {
     return this.laneAllocator.getLaneCount();
@@ -135,6 +140,9 @@ export class RendererWebGL2 extends RendererBase {
     if (settings.translationSource === 'auto') {
       this.languageDetector = new LanguageDetectorService();
       this.channelMemory = new ChannelLanguageMemory();
+      this.sourceDetectionState = createSourceDetectionState();
+      this.sourceDetectionState.languageDetector = this.languageDetector;
+      this.sourceDetectionState.channelMemory = this.channelMemory;
       void this.languageDetector.initialize().catch((err: unknown) => {
         log.debug('LanguageDetector init failed, auto-source unavailable:', err);
         this.languageDetector = null;
@@ -214,6 +222,11 @@ export class RendererWebGL2 extends RendererBase {
     };
     this.contextRestoredHandler = () => {
       this.isContextLost = false;
+      // Clear in-flight emoji load tracking — callbacks referencing the old
+      // (lost) context's WebGL handles will never fire meaningfully. Without
+      // this, getEmojiTexture() would skip re-fetching URLs stuck in
+      // emojiLoading, leaving gray placeholders until the next cache miss.
+      this.emojiLoading.clear();
       this.reinitializeGLResources();
       // Restart the render loop if it was stopped during context loss.
       // Without this, if onPause() cancelled the rAF while the context
@@ -549,14 +562,8 @@ export class RendererWebGL2 extends RendererBase {
     if (!this.isMessageAllowed(message)) return;
 
     // Auto-detect source language from message samples
-    if (
-      this.settings.translationSource === 'auto' &&
-      this.languageDetector &&
-      !this.sourceDetectionDone &&
-      message.text?.trim()
-    ) {
-      this.sourceSampleBuffer.push(message.text);
-      if (this.sourceSampleBuffer.length >= RendererWebGL2.SOURCE_SAMPLE_COUNT) {
+    if (this.settings.translationSource === 'auto') {
+      if (collectSourceSample(this.sourceDetectionState, message.text)) {
         void this.performSourceDetection();
       }
     }
@@ -651,6 +658,8 @@ export class RendererWebGL2 extends RendererBase {
 
   startRenderLoop(): void {
     if (this.animFrameId !== null) return;
+    // Reset idle grace period on restart — fresh cycle, no prior idle state.
+    this._idleSince = null;
     const loop = (t: number) => {
       this.animFrameId = requestAnimationFrame(loop);
       // atlasReady is the only guard needed here: isPaused/isVideoPaused
@@ -659,6 +668,24 @@ export class RendererWebGL2 extends RendererBase {
       // when the atlas finishes generating after context restore.
       if (!this.atlasReady) return;
       this.renderFrame(t);
+
+      // Self-stop the render loop when there is no work to do — no visible
+      // messages, no queued messages, not in standby. This eliminates
+      // wasted 60fps GPU cycles when the stream has no chat activity.
+      // Matching CanvasRenderer behavior with a grace period to prevent
+      // start/stop thrashing during sparse chat intervals.
+      if (this.messages.length === 0 && this.pendingQueue.isEmpty && this.retryQueue.length === 0) {
+        const now = performance.now();
+        if (this._idleSince === null) {
+          this._idleSince = now;
+        } else if (now - this._idleSince >= RendererWebGL2.IDLE_GRACE_PERIOD_MS) {
+          this.animFrameId = null;
+          this._idleSince = null;
+          return;
+        }
+      } else {
+        this._idleSince = null; // not idle anymore
+      }
     };
     this.animFrameId = requestAnimationFrame(loop);
   }
@@ -675,7 +702,7 @@ export class RendererWebGL2 extends RendererBase {
     if (!dims) return;
 
     const mode = this.settings.danmakuMode;
-    const isScrolling = mode === 'scroll' || mode === 'reverse';
+    const isScrolling = (mode === 'scroll' || mode === 'reverse') && !this.reducedMotion;
     const cssW = dims.width;
 
     while (!this.pendingQueue.isEmpty && skipped < MAX_SKIP) {
@@ -700,13 +727,18 @@ export class RendererWebGL2 extends RendererBase {
       // visually overlap at the entry edge. This catches the pause/resume
       // edge case where the allocator's timing is stale but messages
       // are still visible on screen.
+      const now2 = performance.now();
+      // Set startTime BEFORE hasCollisionAtEntry so the collision check
+      // uses the actual message startTime instead of the literal 0 from
+      // createCanvasMessage(). Without this, activeElapsed is computed
+      // from startTime=0, producing a huge elapsed value that incorrectly
+      // treats all active messages as fully scrolled past.
+      canvasMsg.startTime = now2;
       if (isScrolling && this.hasCollisionAtEntry(canvasMsg, placement, dims, mode)) {
         this.retryQueue.push(msg);
         skipped++;
         continue;
       }
-
-      const now2 = performance.now();
       if (mode === 'reverse') {
         canvasMsg.startX = -canvasMsg.width;
       } else if (mode === 'scroll') {
@@ -1134,23 +1166,7 @@ export class RendererWebGL2 extends RendererBase {
   }
 
   private async performSourceDetection(): Promise<void> {
-    if (!this.languageDetector) return;
-    try {
-      const detected = await this.languageDetector.detectFromSamples(this.sourceSampleBuffer);
-      if (detected) {
-        const channelKey = ChannelLanguageMemory.keyFromUrl(location.href);
-        if (channelKey && this.channelMemory) {
-          this.channelMemory.set(channelKey, detected);
-        }
-        // Note: WebGL2 renderer does not own a TranslationService —
-        // the translation is handled externally. We only detect and
-        // cache the source language for downstream consumers.
-      }
-    } catch (err: unknown) {
-      log.debug('Source detection failed:', err);
-    }
-    this.sourceDetectionDone = true;
-    this.sourceSampleBuffer = [];
+    await performSourceDetection(this.sourceDetectionState);
   }
 
   protected onDestroy(): void {

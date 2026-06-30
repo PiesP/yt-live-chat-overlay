@@ -761,6 +761,14 @@ function renderPaidCardWorker(
 // ── Message handler ───────────────────────────────────────────────────────
 
 self.onmessage = (e: MessageEvent) => {
+  // Defense-in-depth: verify the message origin matches the worker's own origin.
+  // Workers are same-origin by construction (loaded via Worker constructor with
+  // a same-origin URL), but checking self.origin protects against potential
+  // cross-origin injection if a page script can postMessage to this worker.
+  if (e.origin !== self.origin) {
+    console.warn('Ignoring cross-origin message to renderer worker');
+    return;
+  }
   try {
     try {
       const data = e.data as Record<string, unknown>;

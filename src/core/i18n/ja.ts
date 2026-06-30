@@ -60,6 +60,7 @@ export const JA: Record<string, string> = {
   日本語: '日本語',
   Español: 'スペイン語',
   中文: '中国語',
+  العربية: 'アラビア語',
   'Duration Multiplier (×)': '表示時間倍率 (×)',
   'Exit Padding (px)': '終了余白 (px)',
   'Min Scroll Duration (ms)': '最小スクロール時間 (ms)',
