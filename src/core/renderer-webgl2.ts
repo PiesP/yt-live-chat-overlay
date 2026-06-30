@@ -12,6 +12,7 @@ import { drawAuthorPhoto, drawRoundRect } from '@core/canvas-rendering-shared';
 import { ChannelLanguageMemory } from '@core/channel-language-memory';
 import { computeOutlineColor } from '@core/color-utils';
 import { rendererLayout, statusBarLayout } from '@core/design-tokens';
+import { computeBaseHeadwayPx } from '@core/lane-allocation-shared';
 import type { LanePlacement } from '@core/lane-allocator';
 import { LanguageDetectorService } from '@core/language-detector-service';
 import { createLogger } from '@core/logging';
@@ -809,20 +810,22 @@ export class RendererWebGL2 extends RendererBase {
 
         if (mode === 'scroll') {
           // New message enters from right. Collision if active message's
-          // right edge is still past the right edge minus a small gap.
+          // right edge is still past the right edge minus the headway gap.
+          const headwayPx = computeBaseHeadwayPx(active.width, this.settings.headwayGapRatio);
           const travelDistance = active.startX + active.width;
           const activeProgress = Math.min(1, activeElapsed * active.invDuration);
           const activeRightEdge = active.startX - activeProgress * travelDistance + active.width;
-          if (activeRightEdge > dims.width - 10) {
+          if (activeRightEdge > dims.width - headwayPx) {
             return true;
           }
         } else {
           // reverse mode: messages enter from left, travel right.
           // Collision if active message's left edge hasn't cleared the left side.
+          const headwayPx = computeBaseHeadwayPx(active.width, this.settings.headwayGapRatio);
           const reverseTravel = dims.width - active.startX;
           const activeProgress = Math.min(1, activeElapsed * active.invDuration);
           const activeX = active.startX + activeProgress * reverseTravel;
-          if (activeX + active.width > 10) {
+          if (activeX + active.width > headwayPx) {
             return true;
           }
         }
