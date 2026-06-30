@@ -10,6 +10,10 @@
  *
  * Zero runtime dependencies — all processing uses plain counters and
  * standard browser timers.
+ *
+ * Idle auto-stop: if no messages arrive for IDLE_STOP_THRESHOLD_MS,
+ * the periodic sampling interval is stopped to conserve resources.
+ * It automatically restarts on the next onMessageReceived() call.
  */
 
 import type { BurstLevel } from '@app-types';
@@ -47,6 +51,8 @@ const EMA_ALPHA = 0.3;
 export class BurstDetector {
   /** Sample interval in ms — 500ms for faster burst response (was 1000ms). */
   private static readonly SAMPLE_INTERVAL_MS = 500;
+  /** If no messages arrive for this long, the sampling interval stops. */
+  private static readonly IDLE_STOP_THRESHOLD_MS = 15_000;
   private samples: number[] = [];
   private runningSum = 0;
   private currentLevel: BurstLevel = 'normal';
@@ -67,6 +73,8 @@ export class BurstDetector {
   private elevatedThreshold = 5;
   private highThreshold = 15;
   private extremeThreshold = 30;
+  /** Timestamp of the last onMessageReceived() call for idle detection. */
+  private lastMessageTimestamp = 0;
 
   constructor(observability?: BurstLevelObserver) {
     this.observability = observability;
@@ -87,6 +95,13 @@ export class BurstDetector {
 
   /** Called whenever a message is received */
   onMessageReceived(): void {
+    this.lastMessageTimestamp = performance.now();
+
+    // Restart sampling if it was stopped due to idle timeout.
+    if (!this.sampleInterval) {
+      this.start();
+    }
+
     this.samplesSinceLastCheck++;
 
     // Update EMA on every message using the inter-message interval for
@@ -110,7 +125,14 @@ export class BurstDetector {
   /** Start periodic sampling */
   start(): void {
     if (this.sampleInterval) return;
+    this.lastMessageTimestamp = performance.now();
     this.sampleInterval = setInterval(() => {
+      // Check for idle timeout — stop sampling if no messages for a while.
+      if (performance.now() - this.lastMessageTimestamp > BurstDetector.IDLE_STOP_THRESHOLD_MS) {
+        this.stop();
+        return;
+      }
+
       const count = this.samplesSinceLastCheck;
       this.samples.push(count);
       this.runningSum += count;
@@ -132,6 +154,7 @@ export class BurstDetector {
   stop(): void {
     this.sampleInterval = clearSafeInterval(this.sampleInterval);
     this.samplesSinceLastCheck = 0;
+    // Don't reset lastMessageTimestamp — keep it for idle detection on restart.
   }
 
   /**
@@ -225,6 +248,7 @@ export class BurstDetector {
   /** Clean up */
   destroy(): void {
     this.stop();
+    this.lastMessageTimestamp = 0;
     this.samples = [];
     this.emaRate = 0;
     this.lastMessageTime = 0;

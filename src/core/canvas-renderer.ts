@@ -681,7 +681,10 @@ export class CanvasRenderer extends RendererBase {
           const list = this.activeMessagesByLane.get(lane);
           if (list) {
             const idx = list.indexOf(msg);
-            if (idx !== -1) list.splice(idx, 1);
+            if (idx !== -1) {
+              list[idx] = list[list.length - 1]!;
+              list.pop();
+            }
             if (list.length === 0) this.activeMessagesByLane.delete(lane);
           }
         }
