@@ -329,6 +329,12 @@ export const JA: Record<string, string> = {
 
   // ── Toast / sync messages ──
 
+  // ── Status bar messages ──
+  'Connecting\u2026': '接続中\u2026',
+  'Connection unstable': '接続が不安定です',
+  'Disconnected \u2014 Click to reload': '切断されました \u2014 クリックして再読み込み',
+  'Waiting for live stream\u2026': 'ライブ配信を待機中\u2026',
+
   // ── Translation unsupported ──
   'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.':
     '翻訳機能には内蔵AIが必要です。Chrome 138+またはEdge 143+ Canaryをご利用ください。',

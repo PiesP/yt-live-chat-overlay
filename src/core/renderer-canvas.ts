@@ -37,6 +37,7 @@ import { ChannelLanguageMemory } from '@core/channel-language-memory';
 import { getTranslatableText } from '@core/chat-message-helpers';
 import { computeScrollDuration, statusBarLayout } from '@core/design-tokens';
 import { clearSafeAnimationFrame, forEachSlot } from '@core/dom';
+import { t } from '@core/i18n';
 import { ImageFetchManager } from '@core/image-fetch-manager';
 import { computeBaseHeadwayPx } from '@core/lane-allocation-shared';
 import type { LanePlacement } from '@core/lane-allocator';
@@ -1591,13 +1592,13 @@ export class CanvasRenderer extends RendererBase {
   private getStatusMessage(status: ConnectionStatus): string {
     switch (status) {
       case 'connecting':
-        return 'Connecting\u2026';
+        return t('Connecting\u2026');
       case 'degraded':
-        return 'Connection unstable';
+        return t('Connection unstable');
       case 'disconnected':
-        return 'Disconnected \u2014 Click to reload';
+        return t('Disconnected \u2014 Click to reload');
       case 'standby':
-        return 'Waiting for live stream\u2026';
+        return t('Waiting for live stream\u2026');
       default:
         return '';
     }

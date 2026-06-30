@@ -341,6 +341,12 @@ export const ES: Record<string, string> = {
 
   // ── Toast / sync messages ──
 
+  // ── Status bar messages ──
+  'Connecting\u2026': 'Conectando\u2026',
+  'Connection unstable': 'Conexión inestable',
+  'Disconnected \u2014 Click to reload': 'Desconectado \u2014 Haz clic para recargar',
+  'Waiting for live stream\u2026': 'Esperando transmisión en vivo\u2026',
+
   // ── Translation unsupported ──
   'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.':
     'La traducción requiere un navegador con IA integrada. Usa Chrome 138+ o Edge 143+ Canary.',

@@ -18,7 +18,7 @@ import type {
 } from '@app-types';
 import { DEFAULT_FONT_FAMILY, colors as designColors, rendererLayout } from '@core/design-tokens';
 
-export const isLogLevel = (value: unknown): value is LogLevel =>
+const isLogLevel = (value: unknown): value is LogLevel =>
   LOG_LEVEL_VALUES.includes(value as LogLevel);
 
 type RootScalarSettingKey = Exclude<keyof OverlaySettings, 'showAuthor' | 'colors' | 'outline'>;
@@ -372,7 +372,7 @@ export const STORAGE_KEY = 'yt-live-chat-overlay-settings';
 export const SETTINGS_VERSION = 1;
 
 /** Version-aware migration. Stamps version if absent; preserves existing version for chained migration support. */
-export const migrateSettings = (raw: Record<string, unknown>): Record<string, unknown> => {
+const migrateSettings = (raw: Record<string, unknown>): Record<string, unknown> => {
   const version = (raw._version as number) ?? 0;
   return { ...raw, _version: Math.max(version, 1) };
 };

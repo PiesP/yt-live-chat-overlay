@@ -325,6 +325,12 @@ export const KO: Record<string, string> = {
 
   // ── Toast / sync messages ──
 
+  // ── Status bar messages ──
+  'Connecting\u2026': '연결 중\u2026',
+  'Connection unstable': '연결 불안정',
+  'Disconnected \u2014 Click to reload': '연결 끊김 \u2014 클릭하여 새로고침',
+  'Waiting for live stream\u2026': '라이브 스트림 대기 중\u2026',
+
   // ── Translation unsupported ──
   'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.':
     '번역 기능을 사용하려면 내장 AI가 있는 브라우저가 필요합니다. Chrome 138+ 또는 Edge 143+ Canary를 사용하세요.',
