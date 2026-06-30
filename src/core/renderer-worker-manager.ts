@@ -37,7 +37,7 @@ interface WorkerManagerDeps {
   getEffectiveSpeedPxPerSec: () => number;
 }
 
-const log = createLogger('[RenderWorkerManager]');
+const log = createLogger('RenderWorkerManager');
 
 export class RenderWorkerManager {
   /** WorkerConfig keys subset of OverlaySettings for cross-thread transfer. */
