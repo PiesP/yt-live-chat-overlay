@@ -1455,12 +1455,14 @@ export class CanvasRenderer extends RendererBase {
 
   protected onPause(): void {
     this.stopRenderLoop();
+    this.workerManager.setPaused(true);
   }
 
   protected onResume(): void {
     this.startRenderLoop();
     this.laneAllocator.resetBatch();
     this.drainQueue(performance.now());
+    this.workerManager.setPaused(false);
   }
 
   protected applyPausedDuration(pausedMs: number): void {

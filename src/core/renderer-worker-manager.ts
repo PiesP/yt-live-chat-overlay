@@ -22,6 +22,7 @@ import type { WorkerFactory } from '@platform/types';
 import { getWorkerFactory } from '@platform/worker-factory';
 import {
   buildPartialWorkerConfig,
+  sendSetPausedToWorker,
   sendUpdateConfigToWorker,
 } from './renderer-worker-manager-common';
 
@@ -358,6 +359,12 @@ export class RenderWorkerManager {
     config.outlineOpacity = settings.outline.opacity;
     config.authorColors = { ...settings.colors };
     sendUpdateConfigToWorker({ worker: this.worker }, config);
+  }
+
+  /** Inform the render worker of a pause/resume state change (tab visibility or video). */
+  setPaused(paused: boolean): void {
+    if (!this.worker) return;
+    sendSetPausedToWorker({ worker: this.worker }, paused);
   }
 
   /** Destroy the render worker. */
