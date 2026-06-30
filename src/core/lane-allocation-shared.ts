@@ -74,7 +74,6 @@ export function computeLaneY(
 export function computeOccupancyMs(
   durationMs: number,
   exitPaddingPx: number,
-  headwayGapRatio: number,
   msgWidthPx?: number,
   screenWidth?: number
 ): number {
@@ -85,11 +84,14 @@ export function computeOccupancyMs(
     return safeDuration + Math.max(LANE_COOLDOWN_MIN_MS, safetyMargin);
   }
 
-  // Scrolling mode: precision exit-time
+  // Scrolling mode: precision exit-time — lane becomes available when the
+  // message's right edge clears the right screen edge. Headway is handled by
+  // the collision-check layer (checkPlacement/hasCollisionAtEntry), so occupancy
+  // only needs to track the geometric clear time. This allows faster lane reuse
+  // for short messages (msgWidth-based) while the collision check prevents overlap.
   const totalDistance = screenWidth + msgWidthPx + exitPaddingPx;
   if (totalDistance <= 0) return safeDuration;
-  const headwayPx = computeBaseHeadwayPx(msgWidthPx, headwayGapRatio);
-  const rightEdgePassFraction = (msgWidthPx + headwayPx) / totalDistance;
+  const rightEdgePassFraction = msgWidthPx / totalDistance;
   return Math.round(rightEdgePassFraction * safeDuration);
 }
 

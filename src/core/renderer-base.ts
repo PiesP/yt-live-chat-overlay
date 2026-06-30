@@ -80,7 +80,6 @@ export abstract class RendererBase {
       fontWeight: this.settings.fontWeight,
       fontFamily: this.settings.fontFamily,
       laneSpacing: this.settings.laneSpacing,
-      headwayGapRatio: this.settings.headwayGapRatio,
       exitPaddingPx: this.settings.exitPaddingPx,
       scrollDurationMaxMs: this.settings.scrollDurationMaxMs,
       maxMessageAgeMs: this.settings.maxMessageAgeMs,

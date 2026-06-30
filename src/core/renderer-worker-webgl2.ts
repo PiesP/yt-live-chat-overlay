@@ -262,7 +262,6 @@ class WebGL2RenderWorker {
     const occupancyMs = computeOccupancyMsShared(
       durationMs,
       (cfg.exitPaddingPx as number | undefined) ?? 0,
-      (cfg.headwayGapRatio as number | undefined) ?? 0.08,
       msgWidth,
       screenWidth
     );

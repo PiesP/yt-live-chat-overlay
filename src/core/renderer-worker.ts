@@ -1060,7 +1060,6 @@ function commitPlacement(
   const occupancyMs = computeOccupancyMsShared(
     durationMs,
     config.exitPaddingPx,
-    config.headwayGapRatio,
     msgWidth,
     screenWidth
   );
