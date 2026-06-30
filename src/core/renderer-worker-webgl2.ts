@@ -262,6 +262,7 @@ class WebGL2RenderWorker {
     const occupancyMs = computeOccupancyMsShared(
       durationMs,
       (cfg.exitPaddingPx as number | undefined) ?? 0,
+      (cfg.headwayGapRatio as number | undefined) ?? 0.08,
       msgWidth,
       screenWidth
     );
@@ -883,13 +884,6 @@ function updateMessagePositionsWithPaused(
 let worker: WebGL2RenderWorker | null = null;
 
 self.onmessage = (e: MessageEvent) => {
-  // Defense-in-depth: verify the message origin matches the worker's own origin.
-  // Workers are same-origin by construction, but checking self.origin protects
-  // against potential cross-origin injection scenarios.
-  if (e.origin !== self.origin) {
-    log.warn('Ignoring cross-origin message to WebGL2 renderer worker');
-    return;
-  }
   const { type, ...payload } = e.data as { type: string; [key: string]: unknown };
   switch (type) {
     case 'init': {

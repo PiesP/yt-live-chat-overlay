@@ -325,12 +325,6 @@ export const AR: Record<string, string> = {
 
   // ── Toast / sync messages ──
 
-  // ── Status bar messages ──
-  'Connecting\u2026': 'جارٍ الاتصال\u2026',
-  'Connection unstable': 'الاتصال غير مستقر',
-  'Disconnected \u2014 Click to reload': 'تم قطع الاتصال \u2014 انقر لإعادة التحميل',
-  'Waiting for live stream\u2026': 'بانتظار البث المباشر\u2026',
-
   // ── Translation unsupported ──
   'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.':
     'يتطلب الترجمة متصفحًا مزودًا بذكاء اصطناعي مدمج. استخدم Chrome 138+ أو Edge 143+ Canary.',

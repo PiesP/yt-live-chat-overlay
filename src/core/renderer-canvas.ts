@@ -22,13 +22,7 @@
  * actual commit time, not the visual start time.
  */
 
-import type {
-  ChatMessage,
-  DropReason,
-  OverlayDimensions,
-  OverlaySettings,
-  TranslationLanguage,
-} from '@app-types';
+import type { ChatMessage, DropReason, OverlayDimensions, OverlaySettings } from '@app-types';
 import { ByteLimitedCache } from '@core/byte-limited-cache';
 import { renderPaidCard } from '@core/canvas-card-renderers';
 import { drawRoundRect, renderRegularMessage, renderSegment } from '@core/canvas-rendering-shared';
@@ -37,7 +31,6 @@ import { ChannelLanguageMemory } from '@core/channel-language-memory';
 import { getTranslatableText } from '@core/chat-message-helpers';
 import { computeScrollDuration, statusBarLayout } from '@core/design-tokens';
 import { clearSafeAnimationFrame, forEachSlot } from '@core/dom';
-import { t } from '@core/i18n';
 import { ImageFetchManager } from '@core/image-fetch-manager';
 import { computeBaseHeadwayPx } from '@core/lane-allocation-shared';
 import type { LanePlacement } from '@core/lane-allocator';
@@ -68,16 +61,10 @@ import {
   TRANSLATION_OPACITY_SCALE,
 } from '@core/renderer-constants';
 import {
-  buildOpacityConfig,
-  collectSourceSample,
   computeAgeFadeRate,
   computeInvFadeDuration,
   computeMessageOpacity,
-  createSourceDetectionState,
   enqueueWithOverflow,
-  type OpacityConfig,
-  performSourceDetection,
-  type SourceDetectionState,
   estimateMessageDimensions as sharedEstimateDimensions,
 } from '@core/renderer-shared';
 import { RenderWorkerManager } from '@core/renderer-worker-manager';
@@ -102,7 +89,7 @@ function isImageReady(img: unknown): boolean {
 function cleanupExpiredMessages(
   messages: CanvasMessage[],
   now: number,
-  activeMessagesByLane: Map<number, Set<CanvasMessage>>,
+  activeMessagesByLane: Map<number, CanvasMessage[]>,
   expiredScratch: CanvasMessage[],
   onExpire?: (msg: CanvasMessage) => void
 ): { newLength: number; anyRemoved: boolean; newMessages?: CanvasMessage[] } {
@@ -128,16 +115,17 @@ function cleanupExpiredMessages(
 
   // Remove only expired messages from the lane map — incremental instead of
   // full clear+rebuild. For screen with 100 active messages where 1 expires,
-  // this is O(1) lane operations via Set.delete instead of O(n) indexOf+splice.
+  // this is O(1) lane operations instead of O(100) rebuild.
   if (anyRemoved) {
     for (const msg of expiredScratch) {
       const slotCount = msg.slotCount ?? 1;
       for (let slot = 0; slot < slotCount; slot++) {
         const lane = msg.laneIndex + slot;
-        const set = activeMessagesByLane.get(lane);
-        if (set) {
-          set.delete(msg);
-          if (set.size === 0) activeMessagesByLane.delete(lane);
+        const list = activeMessagesByLane.get(lane);
+        if (list) {
+          const idx = list.indexOf(msg);
+          if (idx !== -1) list.splice(idx, 1);
+          if (list.length === 0) activeMessagesByLane.delete(lane);
         }
       }
     }
@@ -166,18 +154,28 @@ const log = createLogger('RendererCanvas');
 /** Ratio of expired slots above which compaction allocates a fresh array via slice(). */
 const COMPACTION_THRESHOLD_RATIO = 0.5;
 
+/**
+ * Deterministic PRNG (LCG) for stagger delay computation.
+ * Replaces Math.random() to avoid per-frame Math.random() calls in burst
+ * scenarios where dozens of messages are enqueued simultaneously.
+ * Seed is derived from wall-clock time at module load, so each page
+ * gets a different sequence without calling Math.random() in the hot path.
+ *
+ *Period: 2^32 ≈ 4.3 billion (full 32-bit LCG).
+ * Distribution: uniform [0, 1).
+ */
+let prngSeed = (Date.now() ^ (Math.random() * 0xffffffff)) >>> 0;
+function fastRandom(): number {
+  // LCG parameters from Numerical Recipes (a=1664525, c=1013904223)
+  prngSeed = (Math.imul(1664525, prngSeed) + 1013904223) >>> 0;
+  return prngSeed / 0xffffffff;
+}
+
 export class CanvasRenderer extends RendererBase {
   private canvas: HTMLCanvasElement | null = null;
   private canvasClickHandler: ((e: MouseEvent) => void) | null = null;
   private ctx: CanvasRenderingContext2D | null = null;
   private animFrameId: number | null = null;
-  /**
-   * Deterministic PRNG (LCG) seed for stagger delay computation.
-   * Instance-level to prevent seed sharing if multiple renderers coexist
-   * (e.g. during seamless renderer switching). Each instance gets a unique
-   * seed from wall-clock time at construction.
-   */
-  private _prngSeed = (Date.now() ^ (Math.random() * 0xffffffff)) >>> 0;
   /** Pre-computed 1/maxMessageAgeMs to avoid per-frame division in opacity calc. */
   private readonly ageFadeRate = computeAgeFadeRate(this.settings.maxMessageAgeMs);
   /** Pre-computed 1/fadeDurationMs to avoid per-frame division in opacity calc. */
@@ -190,7 +188,7 @@ export class CanvasRenderer extends RendererBase {
 
   private readonly activeMessages: CanvasMessage[] = [];
   /** Lane-indexed active messages for O(1) lane-scoped collision checks. */
-  private readonly activeMessagesByLane = new Map<number, Set<CanvasMessage>>();
+  private readonly activeMessagesByLane = new Map<number, CanvasMessage[]>();
   private readonly pendingQueue = new PriorityBucketQueue();
   private readonly retryQueue: ChatMessage[] = [];
 
@@ -210,7 +208,9 @@ export class CanvasRenderer extends RendererBase {
   private messageActivator: MessageActivator;
   private languageDetector: LanguageDetectorService | null = null;
   private channelMemory: ChannelLanguageMemory | null = null;
-  private sourceDetectionState: SourceDetectionState;
+  private sourceDetectionDone = false;
+  private sourceSampleBuffer: string[] = [];
+  private static readonly SOURCE_SAMPLE_COUNT = 8;
 
   /** Max translations to apply per frame to avoid single-frame spikes during chat bursts. */
   private readonly translationBatchSize: number;
@@ -268,7 +268,15 @@ export class CanvasRenderer extends RendererBase {
     Array.from({ length: OPACITY_BUCKET_COUNT }, () => []);
 
   /** Cached opacity config object — rebuilt on settings changes to avoid per-frame allocation. */
-  private _cachedOpacityConfig!: OpacityConfig;
+  private _cachedOpacityConfig!: {
+    baseOpacity: number;
+    fadeDurationMs: number;
+    invFadeDuration: number;
+    backlogOpacityMultiplier: number;
+    depthLayersEnabled: boolean;
+    depthFarOpacityMul: number;
+    ageFadeRate: number;
+  };
 
   /** Pre-bound getFont to avoid per-call arrow function allocation. */
   private readonly _boundGetFont = (fs: number): string => this.getFont(fs);
@@ -286,11 +294,6 @@ export class CanvasRenderer extends RendererBase {
     // Initialize language detection pipeline for 'auto' source
     this.languageDetector = new LanguageDetectorService();
     this.channelMemory = new ChannelLanguageMemory();
-    this.sourceDetectionState = createSourceDetectionState();
-    if (settings.translationSource === 'auto') {
-      this.sourceDetectionState.languageDetector = this.languageDetector;
-      this.sourceDetectionState.channelMemory = this.channelMemory;
-    }
     void this.languageDetector.initialize().catch((err: unknown) => {
       log.debug('LanguageDetector init failed, auto-source unavailable:', err);
       // Set to null so performSourceDetection() can retry later
@@ -329,6 +332,22 @@ export class CanvasRenderer extends RendererBase {
     } else if (!canvas.isConnected) {
       log.warn('Canvas created but not connected to DOM — renderer will be inactive');
     }
+
+    // C1: Listen for context restoration to recover from GPU crashes / driver resets.
+    // Without this, a context loss permanently disables the renderer until page reload.
+    canvas.addEventListener('webglcontextlost', (e: Event) => {
+      e.preventDefault();
+      this.ctx = null;
+      log.warn('Canvas context lost — renderer paused until restoration');
+    });
+    canvas.addEventListener('webglcontextrestored', () => this.handleContextRestored());
+    // Canvas 2D context loss is rare but possible under memory pressure.
+    canvas.addEventListener('contextlost', (e: Event) => {
+      e.preventDefault();
+      this.ctx = null;
+      log.warn('Canvas 2D context lost — renderer paused until restoration');
+    });
+    canvas.addEventListener('contextrestored', () => this.handleContextRestored());
 
     // Visually-hidden live region for connection status announcements
     const statusRegion = document.createElement('div');
@@ -397,20 +416,6 @@ export class CanvasRenderer extends RendererBase {
     });
     this._buildOpacityConfig();
     log.info('RendererCanvas created');
-  }
-
-  /**
-   * Deterministic PRNG (LCG) returning uniform [0, 1).
-   * Used for stagger delay computation. Replaces Math.random() in the hot
-   * path during burst enqueue scenarios. Instance-level seed prevents
-   * correlated sequences if multiple renderers coexist.
-   *
-   * LCG parameters from Numerical Recipes (a=1664525, c=1013904223).
-   * Period: 2^32 ≈ 4.3 billion.
-   */
-  private fastRandom(): number {
-    this._prngSeed = (Math.imul(1664525, this._prngSeed) + 1013904223) >>> 0;
-    return this._prngSeed / 0xffffffff;
   }
 
   /** Total number of lanes in the allocator. */
@@ -661,7 +666,7 @@ export class CanvasRenderer extends RendererBase {
       // Remove lanes that now have 0 messages — stale empty entries waste
       // iteration time in lane-scoped lookups.
       for (const [lane, msgs] of this.activeMessagesByLane) {
-        if (msgs.size === 0) {
+        if (msgs.length === 0) {
           this.activeMessagesByLane.delete(lane);
         }
       }
@@ -682,7 +687,7 @@ export class CanvasRenderer extends RendererBase {
     }
 
     const mode = this.settings.danmakuMode;
-    const isScrolling = (mode === 'scroll' || mode === 'reverse') && !this.reducedMotion;
+    const isScrolling = mode === 'scroll' || mode === 'reverse';
 
     // Pre-compute frame-level render context to avoid per-message allocation churn.
     // fontSize, fontWeight, fontFamily, outlineWidthPx, and outlineOpacity are
@@ -958,7 +963,7 @@ export class CanvasRenderer extends RendererBase {
     }
 
     const mode = this.settings.danmakuMode;
-    const isScrolling = (mode === 'scroll' || mode === 'reverse') && !this.reducedMotion;
+    const isScrolling = mode === 'scroll' || mode === 'reverse';
     const dimensions = this.estimateDimensions(message);
     const { height: msgHeight } = dimensions;
 
@@ -1080,19 +1085,13 @@ export class CanvasRenderer extends RendererBase {
     const { width: msgWidth, height: msgHeight } =
       precomputedDimensions ?? this.estimateDimensions(message);
 
-    const isScrolling = (mode === 'scroll' || mode === 'reverse') && !this.reducedMotion;
-    // isScrollingMode determines entry-edge position regardless of
-    // reduced-motion preference. When reducedMotion is active, messages
-    // enter from the correct edge but remain static (no animation).
-    const isScrollingMode = mode === 'scroll' || mode === 'reverse';
+    const isScrolling = mode === 'scroll' || mode === 'reverse';
     const speedTier = precomputedSpeedTier ?? this.getSpeedTier(message);
 
     // Horizontal stagger: progressively offset batch messages from the
     // entry edge so they don't all enter in a vertical column. Each
     // successive batch message starts further from the entry edge,
     // spreading them horizontally and breaking the vertical "wall" effect.
-    // Stagger is skipped when reducedMotion is active — static messages
-    // don't benefit from entry-spread staggering.
     const horizontalStagger =
       isScrolling && batchIndex > 0
         ? Math.min(HORIZONTAL_STAGGER_MAX, batchIndex * HORIZONTAL_STAGGER_PER_STEP)
@@ -1103,7 +1102,7 @@ export class CanvasRenderer extends RendererBase {
     //   scroll  → dims.width + horizontalStagger  (right edge + stagger)
     //   reverse → -(msgWidth + horizontalStagger)    (left edge − stagger)
     //   top/bottom → center of viewport
-    const startX = isScrollingMode
+    const startX = isScrolling
       ? mode === 'scroll'
         ? dims.width + horizontalStagger
         : -(msgWidth + horizontalStagger)
@@ -1159,7 +1158,7 @@ export class CanvasRenderer extends RendererBase {
               maxStagger,
               Math.min(batchIndex, STAGGER_BATCH_MAX) *
                 -STAGGER_EXP_SCALE *
-                Math.log(1 - this.fastRandom())
+                Math.log(1 - fastRandom())
             )
           )
         : 0;
@@ -1187,12 +1186,12 @@ export class CanvasRenderer extends RendererBase {
           cm.slotCount = slotCount;
           for (let slot = 0; slot < slotCount; slot++) {
             const occupiedLane = cm.laneIndex + slot;
-            let laneSet = this.activeMessagesByLane.get(occupiedLane);
-            if (!laneSet) {
-              laneSet = new Set();
-              this.activeMessagesByLane.set(occupiedLane, laneSet);
+            let laneList = this.activeMessagesByLane.get(occupiedLane);
+            if (!laneList) {
+              laneList = [];
+              this.activeMessagesByLane.set(occupiedLane, laneList);
             }
-            laneSet.add(cm);
+            laneList.push(cm);
           }
         },
         onMessageRendered: () => this.observability.onMessageRendered(),
@@ -1208,8 +1207,13 @@ export class CanvasRenderer extends RendererBase {
     );
 
     // Auto-detect source language from message samples
-    if (this.settings.translationSource === 'auto') {
-      if (collectSourceSample(this.sourceDetectionState, message.text)) {
+    if (
+      this.settings.translationSource === 'auto' &&
+      !this.sourceDetectionDone &&
+      message.text.trim()
+    ) {
+      this.sourceSampleBuffer.push(message.text);
+      if (this.sourceSampleBuffer.length >= CanvasRenderer.SOURCE_SAMPLE_COUNT) {
         void this.performSourceDetection();
       }
     }
@@ -1295,15 +1299,15 @@ export class CanvasRenderer extends RendererBase {
 
   /** Rebuild cached opacity config from current settings. Called on constructor and updateSettings. */
   private _buildOpacityConfig(): void {
-    this._cachedOpacityConfig = buildOpacityConfig(
-      this.settings.opacity,
-      this.settings.fadeDurationMs,
-      this.invFadeDuration,
-      this.settings.backlogOpacityMultiplier,
-      this.settings.depthLayersEnabled,
-      this.settings.depthFarOpacityMul,
-      this.ageFadeRate
-    );
+    this._cachedOpacityConfig = {
+      baseOpacity: this.settings.opacity,
+      fadeDurationMs: this.settings.fadeDurationMs,
+      invFadeDuration: this.invFadeDuration,
+      backlogOpacityMultiplier: this.settings.backlogOpacityMultiplier,
+      depthLayersEnabled: this.settings.depthLayersEnabled,
+      depthFarOpacityMul: this.settings.depthFarOpacityMul,
+      ageFadeRate: this.ageFadeRate,
+    };
   }
 
   /**
@@ -1427,7 +1431,8 @@ export class CanvasRenderer extends RendererBase {
     // Reset detection state when source changes to 'auto'
     const sourceChanged = settings.translationSource !== prevSource;
     if (sourceChanged) {
-      this.sourceDetectionState = createSourceDetectionState();
+      this.sourceDetectionDone = false;
+      this.sourceSampleBuffer = [];
     }
 
     void this.translationService
@@ -1475,14 +1480,20 @@ export class CanvasRenderer extends RendererBase {
 
   private async performSourceDetection(): Promise<void> {
     if (!this.languageDetector) return;
-    const detected = await performSourceDetection(this.sourceDetectionState);
-    if (detected) {
-      await this.translationService
-        .setDetectedSource(detected as TranslationLanguage)
-        .catch((err: unknown) => {
-          log.debug('Failed to set detected source on translation service:', err);
-        });
+    try {
+      const detected = await this.languageDetector.detectFromSamples(this.sourceSampleBuffer);
+      if (detected) {
+        const channelKey = ChannelLanguageMemory.keyFromUrl(location.href);
+        if (channelKey && this.channelMemory) {
+          this.channelMemory.set(channelKey, detected);
+        }
+        await this.translationService.setDetectedSource(detected);
+      }
+    } catch (err: unknown) {
+      log.debug('Source detection failed:', err);
     }
+    this.sourceDetectionDone = true;
+    this.sourceSampleBuffer = [];
   }
 
   protected onDestroy(): void {
@@ -1490,11 +1501,8 @@ export class CanvasRenderer extends RendererBase {
     this.workerManager.destroy();
     this.imageFetchManager.destroy();
     this.overlayDimensionsUnsubscribe?.();
-    if (this.canvasClickHandler) {
-      // Always clean up the listener even if canvas reference is stale.
-      // A detached element still holds the listener reference via the event
-      // system, preventing GC unless removeEventListener is called.
-      this.canvas?.removeEventListener('click', this.canvasClickHandler);
+    if (this.canvas && this.canvasClickHandler) {
+      this.canvas.removeEventListener('click', this.canvasClickHandler);
     }
     this.canvasClickHandler = null;
     this.canvas?.remove();
@@ -1518,6 +1526,37 @@ export class CanvasRenderer extends RendererBase {
     this.channelMemory?.clear();
     this.channelMemory = null;
     clearTextMeasurementCaches();
+  }
+
+  // ── Canvas context loss / restoration ───────────────────────────────────
+
+  /**
+   * C1: Handle canvas context restoration after GPU crash / driver reset.
+   * Re-acquires the 2D context and resumes rendering. Without this listener,
+   * context loss permanently disables the renderer until page reload.
+   */
+  private handleContextRestored(): void {
+    if (!this.canvas) return;
+    const ctx = this.canvas.getContext('2d');
+    if (!ctx) {
+      log.warn('Context restored but getContext failed — renderer remains inactive');
+      return;
+    }
+    this.ctx = ctx;
+    // Restore DPR transform that was lost with the context
+    const dpr = window.devicePixelRatio || 1;
+    const dims = this.overlay?.getDimensions();
+    if (dims) {
+      this.lastDpr = dpr;
+      this.canvas.width = dims.width * dpr;
+      this.canvas.height = dims.height * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    log.info('Canvas context restored — renderer resuming');
+    // Restart the render loop if it was stopped
+    if (!this.isPaused && !this.isVideoPaused) {
+      this.startRenderLoop();
+    }
   }
 
   // ── Status bar rendering ────────────────────────────────────────────────
@@ -1598,13 +1637,13 @@ export class CanvasRenderer extends RendererBase {
   private getStatusMessage(status: ConnectionStatus): string {
     switch (status) {
       case 'connecting':
-        return t('Connecting\u2026');
+        return 'Connecting\u2026';
       case 'degraded':
-        return t('Connection unstable');
+        return 'Connection unstable';
       case 'disconnected':
-        return t('Disconnected \u2014 Click to reload');
+        return 'Disconnected \u2014 Click to reload';
       case 'standby':
-        return t('Waiting for live stream\u2026');
+        return 'Waiting for live stream\u2026';
       default:
         return '';
     }

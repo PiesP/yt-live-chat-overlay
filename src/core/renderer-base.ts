@@ -51,8 +51,6 @@ export abstract class RendererBase {
   protected isVideoPaused = false;
   protected pausedAt: number | null = null;
   protected backlogPaused = false;
-  /** Whether the user prefers reduced motion via OS/browser setting. */
-  protected reducedMotion = false;
 
   // H1: Buffer messages during video pause instead of dropping them.
   // Messages received while the video is paused are stored here and
@@ -80,26 +78,12 @@ export abstract class RendererBase {
       fontWeight: this.settings.fontWeight,
       fontFamily: this.settings.fontFamily,
       laneSpacing: this.settings.laneSpacing,
+      headwayGapRatio: this.settings.headwayGapRatio,
       exitPaddingPx: this.settings.exitPaddingPx,
       scrollDurationMaxMs: this.settings.scrollDurationMaxMs,
       maxMessageAgeMs: this.settings.maxMessageAgeMs,
     });
     this.laneAllocator.reset(this.overlay.getDimensions());
-
-    // Respect user's reduced-motion preference (a11y). When enabled,
-    // scrolling animations are disabled — messages appear statically.
-    // The media query is checked at construction and whenever the
-    // preference changes (e.g. user toggles OS accessibility setting).
-    try {
-      const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
-      this.reducedMotion = mq.matches;
-      mq.addEventListener('change', (ev: MediaQueryListEvent) => {
-        this.reducedMotion = ev.matches;
-      });
-    } catch {
-      // matchMedia may not be available in all environments (e.g. workers)
-      this.reducedMotion = false;
-    }
 
     this.burstDetector = new BurstDetector(this.observability);
     this.burstDetector.updateThresholds({

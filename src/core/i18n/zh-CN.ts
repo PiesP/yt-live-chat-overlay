@@ -310,12 +310,6 @@ export const ZH_CN: Record<string, string> = {
 
   // ── Toast / sync messages ──
 
-  // ── Status bar messages ──
-  'Connecting\u2026': '连接中\u2026',
-  'Connection unstable': '连接不稳定',
-  'Disconnected \u2014 Click to reload': '已断开 \u2014 点击重新加载',
-  'Waiting for live stream\u2026': '等待直播\u2026',
-
   // ── Translation unsupported ──
   'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.':
     '翻译功能需要内置 AI 的浏览器。请使用 Chrome 138+ 或 Edge 143+ Canary。',

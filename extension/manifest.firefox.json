@@ -48,7 +48,7 @@
     "type": "module"
   },
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'none'; worker-src 'self'; connect-src 'self' https://www.youtube.com"
+    "extension_pages": "script-src 'self'; object-src 'none'; worker-src 'self'"
   },
   "icons": {
     "16": "icons/icon16.png",

@@ -60,7 +60,6 @@ export const ES: Record<string, string> = {
   日本語: 'Japonés',
   Español: 'Español',
   中文: 'Chino',
-  العربية: 'Árabe',
   'Duration Multiplier (×)': 'Multiplicador de duración (×)',
   'Exit Padding (px)': 'Margen de salida (px)',
   'Min Scroll Duration (ms)': 'Duración mín. desplazamiento (ms)',
@@ -340,12 +339,6 @@ export const ES: Record<string, string> = {
   'Short messages shown regardless of length': 'Mostrar mensajes cortos sin importar la longitud',
 
   // ── Toast / sync messages ──
-
-  // ── Status bar messages ──
-  'Connecting\u2026': 'Conectando\u2026',
-  'Connection unstable': 'Conexión inestable',
-  'Disconnected \u2014 Click to reload': 'Desconectado \u2014 Haz clic para recargar',
-  'Waiting for live stream\u2026': 'Esperando transmisión en vivo\u2026',
 
   // ── Translation unsupported ──
   'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.':

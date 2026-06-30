@@ -59,7 +59,6 @@ export const KO: Record<string, string> = {
   日本語: '일본어',
   Español: '스페인어',
   中文: '중국어',
-  العربية: '아랍어',
   'Duration Multiplier (×)': '표시 시간 배율 (×)',
   'Exit Padding (px)': '종료 여백 (px)',
   'Min Scroll Duration (ms)': '최소 스크롤 시간 (ms)',
@@ -324,12 +323,6 @@ export const KO: Record<string, string> = {
   'Short messages shown regardless of length': '길이에 관계없이 짧은 메시지 표시',
 
   // ── Toast / sync messages ──
-
-  // ── Status bar messages ──
-  'Connecting\u2026': '연결 중\u2026',
-  'Connection unstable': '연결 불안정',
-  'Disconnected \u2014 Click to reload': '연결 끊김 \u2014 클릭하여 새로고침',
-  'Waiting for live stream\u2026': '라이브 스트림 대기 중\u2026',
 
   // ── Translation unsupported ──
   'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.':

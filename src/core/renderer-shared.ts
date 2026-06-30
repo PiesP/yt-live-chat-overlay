@@ -10,17 +10,12 @@
 
 import type { ChatMessage, FontWeight } from '@app-types';
 import { buildWrappedLines, toSharedContentSegments } from '@core/canvas-rendering-shared';
-import { ChannelLanguageMemory } from '@core/channel-language-memory';
 import { DEFAULT_FONT_FAMILY, rendererLayout, spacing } from '@core/design-tokens';
-import type { LanguageDetectorService } from '@core/language-detector-service';
-import { createLogger } from '@core/logging';
 import type { PriorityBucketQueue } from '@core/priority-bucket-queue';
 import { RendererBase } from '@core/renderer-base';
 import { SPEED_TIER } from '@core/renderer-constants';
 import { DEFAULT_SETTINGS } from '@core/settings-schema';
 import { getFontString, measureTextHeight, measureTextWidth } from '@core/text-measure';
-
-const log = createLogger('RendererShared');
 
 // ── Text measurement ────────────────────────────────────────────────────────
 
@@ -358,98 +353,4 @@ export function enqueueWithOverflow(
   }
   queue.enqueue(message, priority);
   return 'enqueue';
-}
-
-// ── Shared source language detection ────────────────────────────────────────
-
-/** Shared source-detection sample buffer capacity used by both renderers. */
-export const SOURCE_SAMPLE_COUNT = 8;
-
-/**
- * Shared types for source language detection state.
- * Used by both CanvasRenderer and RendererWebGL2 to avoid
- * duplicating the field declarations and performSourceDetection logic.
- */
-export interface SourceDetectionState {
-  languageDetector: LanguageDetectorService | null;
-  channelMemory: ChannelLanguageMemory | null;
-  sourceDetectionDone: boolean;
-  sourceSampleBuffer: string[];
-}
-
-/**
- * Initialize source detection state with shared defaults.
- */
-export function createSourceDetectionState(): SourceDetectionState {
-  return {
-    languageDetector: null,
-    channelMemory: null,
-    sourceDetectionDone: false,
-    sourceSampleBuffer: [],
-  };
-}
-
-/**
- * Collect a sample message text for auto-detection.
- * Returns true if the sample buffer is full and detection should be triggered.
- */
-export function collectSourceSample(
-  state: SourceDetectionState,
-  text: string | undefined
-): boolean {
-  if (state.languageDetector && !state.sourceDetectionDone && text?.trim()) {
-    state.sourceSampleBuffer.push(text);
-    return state.sourceSampleBuffer.length >= SOURCE_SAMPLE_COUNT;
-  }
-  return false;
-}
-
-/**
- * Run source language detection on collected samples.
- * Detects the language from buffered samples, caches it in ChannelLanguageMemory,
- * and returns the detected language code (or null on failure).
- * The caller is responsible for integrating the result (e.g. setting it on a TranslationService).
- */
-export async function performSourceDetection(state: SourceDetectionState): Promise<string | null> {
-  if (!state.languageDetector) return null;
-  try {
-    const detected = await state.languageDetector.detectFromSamples(state.sourceSampleBuffer);
-    if (detected) {
-      const channelKey = ChannelLanguageMemory.keyFromUrl(location.href);
-      if (channelKey && state.channelMemory) {
-        state.channelMemory.set(channelKey, detected);
-      }
-    }
-    return detected;
-  } catch (err: unknown) {
-    log.debug('Source detection failed:', err);
-    return null;
-  } finally {
-    state.sourceDetectionDone = true;
-    state.sourceSampleBuffer = [];
-  }
-}
-
-/**
- * Build a shared OpacityConfig from settings.
- * Shared between CanvasRenderer and RendererWebGL2 to eliminate duplicate construction.
- */
-export function buildOpacityConfig(
-  baseOpacity: number,
-  fadeDurationMs: number,
-  invFadeDuration: number,
-  backlogOpacityMultiplier: number,
-  depthLayersEnabled: boolean,
-  depthFarOpacityMul: number,
-  ageFadeRate: number
-): OpacityConfig {
-  return {
-    baseOpacity,
-    fadeDurationMs,
-    invFadeDuration,
-    backlogOpacityMultiplier,
-    depthLayersEnabled,
-    depthFarOpacityMul,
-    ageFadeRate,
-  };
 }

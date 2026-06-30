@@ -16,7 +16,7 @@ import { LANE_COOLDOWN_MIN_MS, SAFETY_MARGIN_RATIO } from '@core/renderer-consta
 
 const HEADWAY_GAP_MIN_PX = 16;
 
-const HEADWAY_GAP_MAX_PX = 60;
+export const HEADWAY_GAP_MAX_PX = 60;
 
 // ── Pure computation functions ─────────────────────────────────────────────
 
@@ -74,6 +74,7 @@ export function computeLaneY(
 export function computeOccupancyMs(
   durationMs: number,
   exitPaddingPx: number,
+  headwayGapRatio: number,
   msgWidthPx?: number,
   screenWidth?: number
 ): number {
@@ -84,14 +85,11 @@ export function computeOccupancyMs(
     return safeDuration + Math.max(LANE_COOLDOWN_MIN_MS, safetyMargin);
   }
 
-  // Scrolling mode: precision exit-time — lane becomes available when the
-  // message's right edge clears the right screen edge. Headway is handled by
-  // the collision-check layer (checkPlacement/hasCollisionAtEntry), so occupancy
-  // only needs to track the geometric clear time. This allows faster lane reuse
-  // for short messages (msgWidth-based) while the collision check prevents overlap.
+  // Scrolling mode: precision exit-time
   const totalDistance = screenWidth + msgWidthPx + exitPaddingPx;
   if (totalDistance <= 0) return safeDuration;
-  const rightEdgePassFraction = msgWidthPx / totalDistance;
+  const headwayPx = computeBaseHeadwayPx(msgWidthPx, headwayGapRatio);
+  const rightEdgePassFraction = (msgWidthPx + headwayPx) / totalDistance;
   return Math.round(rightEdgePassFraction * safeDuration);
 }
 
@@ -154,7 +152,11 @@ export function heapSiftDown(
  * Sift a heap element upward to restore the min-heap invariant (4-ary heap).
  * Mutates `heap` and `indexMap` in place.
  */
-function heapSiftUp(heap: HeapEntry[], indexMap: Map<number, number>, startIdx: number): void {
+export function heapSiftUp(
+  heap: HeapEntry[],
+  indexMap: Map<number, number>,
+  startIdx: number
+): void {
   let idx = startIdx;
   while (idx > 0) {
     const parent = Math.floor((idx - 1) / 4);
@@ -238,7 +240,6 @@ export function buildLaneHeap(
 /**
  * Prune expired speed-tier entries and clear collision set.
  * Call at the start of each batch.
- * @knip — exported for use by dead-code worker entry points
  */
 export function resetBatchShared(state: LaneAllocationState): void {
   const now = performance.now();
@@ -251,7 +252,6 @@ export function resetBatchShared(state: LaneAllocationState): void {
 /**
  * Commit a placement: update speed-tier tracking and heap occupancy.
  * For multi-slot messages, all occupied lanes are updated.
- * @knip — exported for use by dead-code worker entry points
  */
 export function commitPlacementShared(
   state: LaneAllocationState,
@@ -275,7 +275,6 @@ export function commitPlacementShared(
 
 /**
  * Shift all lane timers and speed-tier tracking by a fixed offset (pause/resume).
- * @knip — exported for use by dead-code worker entry points
  */
 export function shiftLaneTimersShared(state: LaneAllocationState, ms: number): void {
   for (let i = 0; i < state.heap.length; i++) {
@@ -298,7 +297,6 @@ export function shiftLaneTimersShared(state: LaneAllocationState, ms: number): v
  * @param maxWaitMs Maximum acceptable wait time (ms)
  * @param speedTier Speed tier of the incoming message
  * @returns lane index and waitMs, or null if no placement found
- * @knip — exported for use by dead-code worker entry points
  */
 export function findPlacementShared(
   state: LaneAllocationState,
@@ -458,5 +456,5 @@ function allocateSingleLaneShared(
   return null;
 }
 
-const EPSILON_GREEDY = 0.15;
+const EPSILON_GREEDY = 0.05;
 const SPEED_TIER_BACKLOG = 3;

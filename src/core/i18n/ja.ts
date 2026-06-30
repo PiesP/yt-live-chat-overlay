@@ -60,7 +60,6 @@ export const JA: Record<string, string> = {
   日本語: '日本語',
   Español: 'スペイン語',
   中文: '中国語',
-  العربية: 'アラビア語',
   'Duration Multiplier (×)': '表示時間倍率 (×)',
   'Exit Padding (px)': '終了余白 (px)',
   'Min Scroll Duration (ms)': '最小スクロール時間 (ms)',
@@ -328,12 +327,6 @@ export const JA: Record<string, string> = {
   'Short messages shown regardless of length': '長さに関係なく短いメッセージを表示',
 
   // ── Toast / sync messages ──
-
-  // ── Status bar messages ──
-  'Connecting\u2026': '接続中\u2026',
-  'Connection unstable': '接続が不安定です',
-  'Disconnected \u2014 Click to reload': '切断されました \u2014 クリックして再読み込み',
-  'Waiting for live stream\u2026': 'ライブ配信を待機中\u2026',
 
   // ── Translation unsupported ──
   'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.':

@@ -36,8 +36,8 @@ export const LANE_COOLDOWN_MIN_MS = 500;
 export const SAFETY_MARGIN_RATIO = 0.15;
 
 /** Epsilon-greedy selection probability (0-1).
- *  15% chance to skip the strict topmost zero-wait lane. */
-export const EPSILON = 0.15;
+ *  5% chance to skip the strict topmost zero-wait lane. */
+export const EPSILON = 0.05;
 
 /** Free ratio for anti-block gate: utilization above (1 - this) triggers
  *  probabilistic blocking of new message placements. */

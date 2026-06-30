@@ -13,7 +13,7 @@ import {
   heapUpdateLane,
 } from '@core/lane-allocation-shared';
 import { createLogger } from '@core/logging';
-import { SPEED_TIER } from '@core/renderer-constants';
+import { EPSILON, SPEED_TIER } from '@core/renderer-constants';
 import { getFontString, measureTextHeight } from '@core/text-measure';
 
 const log = createLogger('LaneAllocator');
@@ -40,6 +40,7 @@ export interface LaneAllocatorOptions {
   fontWeight: FontWeight;
   fontFamily: string;
   laneSpacing: number;
+  headwayGapRatio: number;
   exitPaddingPx: number;
   scrollDurationMaxMs: number;
   maxMessageAgeMs: number;
@@ -101,6 +102,14 @@ export class LaneAllocator {
    * Stale entries (until < now) are cleared on each resetBatch().
    */
   private speedTierLanes: Map<number, { tier: number; until: number }> = new Map();
+
+  /**
+   * Epsilon-greedy selection probability (0-1).
+   * 5% chance to skip the strict topmost zero-wait lane and pick the
+   * next one below. Prevents all traffic from consolidating on lane 0
+   * when the incoming message rate is low.
+   */
+  private static readonly EPSILON = EPSILON;
 
   constructor(private readonly options: LaneAllocatorOptions) {}
 
@@ -323,7 +332,13 @@ export class LaneAllocator {
     msgWidthPx?: number,
     screenWidth?: number
   ): number {
-    return computeOccupancyMs(durationMs, this.options.exitPaddingPx, msgWidthPx, screenWidth);
+    return computeOccupancyMs(
+      durationMs,
+      this.options.exitPaddingPx,
+      this.options.headwayGapRatio,
+      msgWidthPx,
+      screenWidth
+    );
   }
 
   /**
@@ -346,17 +361,13 @@ export class LaneAllocator {
     const maxWaitMs = this.options.scrollDurationMaxMs;
     let firstBusy: { laneIndex: number; waitMs: number } | null = null;
     let speedMatched: { laneIndex: number; waitMs: number } | null = null;
-    // Random start lane distributes messages uniformly across all lanes
-    // without the sequential bias that produces diagonal patterns. Each
-    // message has equal probability of landing on any free lane.
-    // Phase 2 (speedMatched) and Phase 3 (firstBusy) are unaffected —
-    // they still pick the best candidate based on wait time.
-    const numLanes = laneEnd - laneStart;
-    const randOffset = numLanes > 1 ? Math.floor(Math.random() * numLanes) : 0;
+    // Collect zero-wait compatible lanes during the first scan so that
+    // epsilon-greedy skipping is O(1) lookup instead of O(n) re-scan.
+    // On epsilon skip, we pick the next candidate from this array.
+    const zeroWaitCandidates: number[] = [];
 
     // ── Phase 1: zero-wait lane with tier compatibility filter ──
-    for (let idx = 0; idx < numLanes; idx++) {
-      const i = laneStart + ((randOffset + idx) % numLanes);
+    for (let i = laneStart; i < laneEnd; i++) {
       if (this.collidedLanes.has(i)) continue;
 
       // Speed-tier compatibility check
@@ -379,9 +390,23 @@ export class LaneAllocator {
         }
         continue;
       }
-      // Found a zero-wait compatible lane — return immediately.
-      // Random start ensures uniform distribution without ε-greedy.
+      // Found a zero-wait compatible lane.
+      // Epsilon-greedy: 5% chance to skip for visual variety.
+      // Candidates are collected during the scan — on epsilon fire,
+      // pick the next unvisited zero-wait lane from the array (O(1)).
+      if (Math.random() < LaneAllocator.EPSILON) {
+        // Record this lane as a future candidate and skip it for now.
+        zeroWaitCandidates.push(i);
+        continue;
+      }
       return { laneIndex: i, waitMs: 0 };
+    }
+
+    // Epsilon path: if we skipped some zero-wait lanes during the scan,
+    // return the first skipped one (O(1) — no re-scan needed).
+    const firstSkipped = zeroWaitCandidates[0];
+    if (firstSkipped !== undefined) {
+      return { laneIndex: firstSkipped, waitMs: 0 };
     }
 
     // ── Phase 2: same-tier busy lane ──
