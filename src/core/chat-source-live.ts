@@ -34,9 +34,7 @@ const LIVE_BOOTSTRAP_REFRESH_INTERVAL = 5;
 export class LiveChatSource extends ChatSource {
   private liveContinuation: InnertubeContinuationData | null = null;
   protected consecutiveErrors = 0;
-  private readonly densityRing = new Uint16Array(LiveChatSource.DENSITY_WINDOW_SIZE);
-  private densityRingWrite = 0;
-  private densityRingFilled = 0;
+  private readonly recentMessageCounts: number[] = [];
   private static readonly DENSITY_WINDOW_SIZE = 5;
   private static readonly DENSITY_HIGH_THRESHOLD = 10;
   private static readonly DENSITY_LOW_THRESHOLD = 1;
@@ -61,9 +59,7 @@ export class LiveChatSource extends ChatSource {
     super.resetSessionState();
     this.liveContinuation = null;
     this.consecutiveErrors = 0;
-    this.densityRing.fill(0);
-    this.densityRingWrite = 0;
-    this.densityRingFilled = 0;
+    this.recentMessageCounts.length = 0;
   }
 
   private async initializeLiveSession(signal?: AbortSignal): Promise<boolean> {
@@ -90,10 +86,9 @@ export class LiveChatSource extends ChatSource {
   }
 
   private recordMessageCount(count: number): void {
-    this.densityRing[this.densityRingWrite] = count;
-    this.densityRingWrite = (this.densityRingWrite + 1) % LiveChatSource.DENSITY_WINDOW_SIZE;
-    if (this.densityRingFilled < LiveChatSource.DENSITY_WINDOW_SIZE) {
-      this.densityRingFilled++;
+    this.recentMessageCounts.push(count);
+    if (this.recentMessageCounts.length > LiveChatSource.DENSITY_WINDOW_SIZE) {
+      this.recentMessageCounts.shift();
     }
   }
 
@@ -129,23 +124,20 @@ export class LiveChatSource extends ChatSource {
   }
 
   /**
-   * Moving-window density adaptation using the circular buffer.
-   * Iterates the filled portion of the ring buffer — no array allocation.
+   * Moving-window density adaptation using recentMessageCounts.
+   * Uses a single reduce pass — no duplicate computation.
    */
   private computeDensityAdjustedMs(fallbackMs: number): number {
     const settings = this.getSettings();
 
-    if (this.densityRingFilled < 2) {
+    if (this.recentMessageCounts.length < 2) {
       // Not enough data points — return clamped fallback as-is.
       return Math.max(settings.minPollIntervalMs, Math.min(settings.maxPollIntervalMs, fallbackMs));
     }
 
-    // Sum over the filled portion of the ring buffer — no reduce overhead.
-    let sum = 0;
-    for (let i = 0; i < this.densityRingFilled; i++) {
-      sum += this.densityRing[i];
-    }
-    const avgCount = sum / this.densityRingFilled;
+    // Single reduce — eliminates the duplicate calculation that existed before.
+    const avgCount =
+      this.recentMessageCounts.reduce((a, b) => a + b, 0) / this.recentMessageCounts.length;
 
     // Extreme density: skip sleep entirely (chained polling).
     if (avgCount >= LiveChatSource.EXTREME_DENSITY_THRESHOLD) return 0;
