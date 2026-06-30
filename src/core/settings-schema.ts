@@ -240,69 +240,6 @@ export const OUTLINE_NUMERIC_KEYS = ['widthPx', 'opacity'] as const satisfies Re
 
 type NumericSettingLimit = Readonly<{ min: number; max: number; step: number }>;
 
-type SettingsLimitKey =
-  | 'speedPxPerSec'
-  | 'fontSize'
-  | 'opacity'
-  | 'superChatOpacity'
-  | 'safeTop'
-  | 'safeBottom'
-  | 'maxConcurrentMessages'
-  | 'minTextLength'
-  | 'outlineWidthPx'
-  | 'outlineOpacity'
-  | 'laneSpacing'
-  | 'backlogMaxRate'
-  | 'backlogSpeedMultiplier'
-  | 'backlogRecentMinutes'
-  | 'backlogOpacityMultiplier'
-  | 'depthNearSpeedMul'
-  | 'depthFarSpeedMul'
-  | 'depthFarOpacityMul'
-  | 'superChatMaxBodyLines'
-  | 'membershipMaxBodyLines'
-  | 'fadeDurationMs'
-  | 'minPollIntervalMs'
-  | 'maxPollIntervalMs'
-  | 'modOwnerDurationMultiplier'
-  | 'exitPaddingPx'
-  | 'scrollDurationMinMs'
-  | 'scrollDurationMaxMs'
-  | 'topBottomDurationMs'
-  | 'queueMaxSize'
-  | 'backgroundQueueMax'
-  | 'maxMessageAgeMs'
-  | 'headwayGapRatio'
-  | 'emojiCacheMb'
-  | 'photoCacheMb'
-  | 'stickerCacheMb'
-  | 'textCacheMb'
-  | 'translationBatchSize'
-  | 'emojiFetchLimit'
-  | 'failedEmojiRetryMins'
-  | 'burstSampleWindow'
-  | 'burstElevatedThreshold'
-  | 'burstHighThreshold'
-  | 'burstExtremeThreshold'
-  | 'backlogInjectionMax'
-  | 'backlogDensityRampMs'
-  | 'livePollFallbackMs'
-  | 'livePollFailureLimit'
-  | 'speedBoostThreshold'
-  | 'backlogPauseThreshold'
-  | 'backlogResumeThreshold'
-  | 'activityTimeoutMs'
-  | 'staggerMaxDelayMs'
-  | 'staggerMediumDelayMs'
-  | 'emojiFetchTimeoutMs'
-  | 'backlogDensityRampMaxMs'
-  | 'backlogInjectionRateMin'
-  | 'speedBoostMax'
-  | 'speedBoostDenom'
-  | 'backlogToggleCooldownMs'
-  | 'replayPrefetchPages'
-  | 'replayBatchLimit';
-
 const SETTINGS_LIMITS = {
   speedPxPerSec: { min: 50, max: 500, step: 10 },
   fontSize: { min: 14, max: 50, step: 2 },
@@ -365,7 +302,10 @@ const SETTINGS_LIMITS = {
   backlogToggleCooldownMs: { min: 500, max: 30000, step: 500 },
   replayPrefetchPages: { min: 50, max: 1000, step: 50 },
   replayBatchLimit: { min: 3, max: 100, step: 1 },
-} as const satisfies Record<SettingsLimitKey, NumericSettingLimit>;
+} as const;
+
+/** Derived automatically from SETTINGS_LIMITS — single source of truth for limit keys. */
+export type SettingsLimitKey = keyof typeof SETTINGS_LIMITS;
 
 export const STORAGE_KEY = 'yt-live-chat-overlay-settings';
 export const SETTINGS_VERSION = 1;
