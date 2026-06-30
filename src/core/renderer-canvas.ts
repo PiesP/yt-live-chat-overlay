@@ -1081,12 +1081,18 @@ export class CanvasRenderer extends RendererBase {
       precomputedDimensions ?? this.estimateDimensions(message);
 
     const isScrolling = (mode === 'scroll' || mode === 'reverse') && !this.reducedMotion;
+    // isScrollingMode determines entry-edge position regardless of
+    // reduced-motion preference. When reducedMotion is active, messages
+    // enter from the correct edge but remain static (no animation).
+    const isScrollingMode = mode === 'scroll' || mode === 'reverse';
     const speedTier = precomputedSpeedTier ?? this.getSpeedTier(message);
 
     // Horizontal stagger: progressively offset batch messages from the
     // entry edge so they don't all enter in a vertical column. Each
     // successive batch message starts further from the entry edge,
     // spreading them horizontally and breaking the vertical "wall" effect.
+    // Stagger is skipped when reducedMotion is active — static messages
+    // don't benefit from entry-spread staggering.
     const horizontalStagger =
       isScrolling && batchIndex > 0
         ? Math.min(HORIZONTAL_STAGGER_MAX, batchIndex * HORIZONTAL_STAGGER_PER_STEP)
@@ -1097,7 +1103,7 @@ export class CanvasRenderer extends RendererBase {
     //   scroll  → dims.width + horizontalStagger  (right edge + stagger)
     //   reverse → -(msgWidth + horizontalStagger)    (left edge − stagger)
     //   top/bottom → center of viewport
-    const startX = isScrolling
+    const startX = isScrollingMode
       ? mode === 'scroll'
         ? dims.width + horizontalStagger
         : -(msgWidth + horizontalStagger)
