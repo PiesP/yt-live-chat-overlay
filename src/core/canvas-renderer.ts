@@ -586,11 +586,21 @@ export class CanvasRenderer extends RendererBase {
     const mode = this.settings.danmakuMode;
     const isScrolling = mode === 'scroll' || mode === 'reverse';
 
-    // Recalculate lane utilization BEFORE drainQueue so anti-block sees
-    // accurate state.
-    this.laneAllocator.resetBatch();
-
-    this.drainQueue(now);
+    // Anti-block throttle: when lane utilization is critically high, pause
+    // new placements to prevent visual chaos. Checked BEFORE resetBatch so we
+    // can skip both resetBatch and drainQueue when drainQueue would be a no-op.
+    // High-priority messages (SuperChat ≥100, Membership ≥80) bypass the gate.
+    if (this.isAntiBlockActive()) {
+      const front = this.pendingQueue.peek();
+      if (front && CanvasRenderer.getMessagePriority(front) >= ANTI_BLOCK_PRIORITY_THRESHOLD) {
+        this.laneAllocator.resetBatch();
+        this.drainQueue(now);
+      }
+      // else: skip both resetBatch and drainQueue — drainQueue would return immediately
+    } else {
+      this.laneAllocator.resetBatch();
+      this.drainQueue(now);
+    }
 
     this.observability.updateLaneUtilization(this.laneAllocator.getUtilization());
     this.observability.tick();
@@ -809,15 +819,6 @@ export class CanvasRenderer extends RendererBase {
   // ── Queue drain ──────────────────────────────────────────────────────
 
   private drainQueue(now: number): void {
-    // Anti-block throttle: when lane utilization is critically high, pause
-    // new placements to prevent visual chaos. High-priority messages
-    // (SuperChat priority ≥100, Membership ≥80) bypass the gate so paid
-    // interactions are never blocked by lane saturation.
-    if (this.isAntiBlockActive()) {
-      const front = this.pendingQueue.peek();
-      if (!front || CanvasRenderer.getMessagePriority(front) < ANTI_BLOCK_PRIORITY_THRESHOLD)
-        return;
-    }
     const t0 = performance.now();
     // Cache dimensions once for the entire drain cycle — avoids repeated
     // overlay.getDimensions() calls in checkPlacement/enqueueMessageWithPlacement.
