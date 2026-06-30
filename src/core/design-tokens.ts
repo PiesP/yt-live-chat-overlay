@@ -155,7 +155,7 @@ export const rendererLayout = {
    *  = 640 - 48 - 24 - 8 = 560. Prevents long names from overflowing the card. */
   authorNameMaxWidth: 560,
   /** Headway gap ratio: fraction of message width used as gap between consecutive messages on the same lane. */
-  headwayGapRatio: 0.06,
+  headwayGapRatio: 0.08,
 } as const;
 
 /** Status bar layout constants (connection state overlay). */

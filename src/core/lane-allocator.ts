@@ -13,7 +13,7 @@ import {
   heapUpdateLane,
 } from '@core/lane-allocation-shared';
 import { createLogger } from '@core/logging';
-import { SPEED_TIER } from '@core/renderer-constants';
+import { EPSILON, SPEED_TIER } from '@core/renderer-constants';
 import { getFontString, measureTextHeight } from '@core/text-measure';
 
 const log = createLogger('LaneAllocator');
@@ -102,6 +102,9 @@ export class LaneAllocator {
    * Stale entries (until < now) are cleared on each resetBatch().
    */
   private speedTierLanes: Map<number, { tier: number; until: number }> = new Map();
+
+  /** Epsilon-greedy selection probability (0-1). 15% chance to skip. */
+  private static readonly EPSILON = EPSILON;
 
   constructor(private readonly options: LaneAllocatorOptions) {}
 
@@ -353,10 +356,11 @@ export class LaneAllocator {
     const maxWaitMs = this.options.scrollDurationMaxMs;
     let firstBusy: { laneIndex: number; waitMs: number } | null = null;
     let speedMatched: { laneIndex: number; waitMs: number } | null = null;
-    // Collect zero-wait compatible lanes during the scan. At the end of the scan,
-    // one is randomly picked to break the deterministic sequential bias that
-    // produces visible diagonal patterns across lanes.
-    const zeroWaitLanes: number[] = [];
+    // Collect zero-wait lanes skipped by ε-greedy. When ε fires, the current
+    // lane is deferred and the next compatible zero-wait lane is picked instead.
+    // This retains the top-down lane-filling flow (85% of messages go to the
+    // highest available lane) while the 15% skip rate breaks diagonal patterns.
+    const deferredLanes: number[] = [];
 
     // ── Phase 1: zero-wait lane with tier compatibility filter ──
     for (let i = laneStart; i < laneEnd; i++) {
@@ -382,17 +386,20 @@ export class LaneAllocator {
         }
         continue;
       }
-      // Found a zero-wait compatible lane — collect all candidates.
-      // Random pick at end of scan breaks the deterministic lane-index
-      // ordering that produces diagonal patterns.
-      zeroWaitLanes.push(i);
+      // Found a zero-wait compatible lane.
+      // ε-greedy: 15% chance to skip for visual variety — breaks diagonal
+      // patterns without destroying the top-down lane-filling structure.
+      if (Math.random() < LaneAllocator.EPSILON) {
+        deferredLanes.push(i);
+        continue;
+      }
+      return { laneIndex: i, waitMs: 0 };
     }
 
-    // Randomly pick from collected zero-wait lanes to distribute messages
-    // across the full vertical space rather than stacking sequentially.
-    if (zeroWaitLanes.length > 0) {
-      const pick = zeroWaitLanes[Math.floor(Math.random() * zeroWaitLanes.length)]!;
-      return { laneIndex: pick, waitMs: 0 };
+    // ε path: if any zero-wait lanes were skipped, return the first one.
+    if (deferredLanes.length > 0) {
+      const firstDeferred = deferredLanes[0]!;
+      return { laneIndex: firstDeferred, waitMs: 0 };
     }
 
     // ── Phase 2: same-tier busy lane ──

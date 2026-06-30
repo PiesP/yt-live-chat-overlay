@@ -1329,12 +1329,9 @@ export class CanvasRenderer extends RendererBase {
     newSpeedTier: number
   ): number {
     const base = computeBaseHeadwayPx(activeWidth, this.settings.headwayGapRatio);
-    // When a faster message (backlog) enters a lane occupied by a slower
-    // message, increase headway to prevent the chaser from visually
-    // catching up. Capped at 1.5× to avoid excessive lane under-utilization.
+    // Only adjust when the new message is faster (higher tier).
     if (newSpeedTier > activeSpeedTier) {
-      const cappedMultiplier = Math.min(1.5, this.settings.backlogSpeedMultiplier);
-      return Math.round(base * cappedMultiplier);
+      return Math.round(base * this.settings.backlogSpeedMultiplier);
     }
     return base;
   }

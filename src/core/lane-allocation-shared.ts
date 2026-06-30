@@ -14,7 +14,7 @@ import { LANE_COOLDOWN_MIN_MS, SAFETY_MARGIN_RATIO } from '@core/renderer-consta
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
-const HEADWAY_GAP_MIN_PX = 10;
+const HEADWAY_GAP_MIN_PX = 16;
 
 const HEADWAY_GAP_MAX_PX = 60;
 
@@ -456,5 +456,5 @@ function allocateSingleLaneShared(
   return null;
 }
 
-const EPSILON_GREEDY = 0.05;
+const EPSILON_GREEDY = 0.15;
 const SPEED_TIER_BACKLOG = 3;
