@@ -13,7 +13,7 @@ import {
   heapUpdateLane,
 } from '@core/lane-allocation-shared';
 import { createLogger } from '@core/logging';
-import { EPSILON, SPEED_TIER } from '@core/renderer-constants';
+import { SPEED_TIER } from '@core/renderer-constants';
 import { getFontString, measureTextHeight } from '@core/text-measure';
 
 const log = createLogger('LaneAllocator');
@@ -102,14 +102,6 @@ export class LaneAllocator {
    * Stale entries (until < now) are cleared on each resetBatch().
    */
   private speedTierLanes: Map<number, { tier: number; until: number }> = new Map();
-
-  /**
-   * Epsilon-greedy selection probability (0-1).
-   * 5% chance to skip the strict topmost zero-wait lane and pick the
-   * next one below. Prevents all traffic from consolidating on lane 0
-   * when the incoming message rate is low.
-   */
-  private static readonly EPSILON = EPSILON;
 
   constructor(private readonly options: LaneAllocatorOptions) {}
 
@@ -361,10 +353,10 @@ export class LaneAllocator {
     const maxWaitMs = this.options.scrollDurationMaxMs;
     let firstBusy: { laneIndex: number; waitMs: number } | null = null;
     let speedMatched: { laneIndex: number; waitMs: number } | null = null;
-    // Collect zero-wait compatible lanes during the first scan so that
-    // epsilon-greedy skipping is O(1) lookup instead of O(n) re-scan.
-    // On epsilon skip, we pick the next candidate from this array.
-    const zeroWaitCandidates: number[] = [];
+    // Collect zero-wait compatible lanes during the scan. At the end of the scan,
+    // one is randomly picked to break the deterministic sequential bias that
+    // produces visible diagonal patterns across lanes.
+    const zeroWaitLanes: number[] = [];
 
     // ── Phase 1: zero-wait lane with tier compatibility filter ──
     for (let i = laneStart; i < laneEnd; i++) {
@@ -390,23 +382,17 @@ export class LaneAllocator {
         }
         continue;
       }
-      // Found a zero-wait compatible lane.
-      // Epsilon-greedy: 5% chance to skip for visual variety.
-      // Candidates are collected during the scan — on epsilon fire,
-      // pick the next unvisited zero-wait lane from the array (O(1)).
-      if (Math.random() < LaneAllocator.EPSILON) {
-        // Record this lane as a future candidate and skip it for now.
-        zeroWaitCandidates.push(i);
-        continue;
-      }
-      return { laneIndex: i, waitMs: 0 };
+      // Found a zero-wait compatible lane — collect all candidates.
+      // Random pick at end of scan breaks the deterministic lane-index
+      // ordering that produces diagonal patterns.
+      zeroWaitLanes.push(i);
     }
 
-    // Epsilon path: if we skipped some zero-wait lanes during the scan,
-    // return the first skipped one (O(1) — no re-scan needed).
-    const firstSkipped = zeroWaitCandidates[0];
-    if (firstSkipped !== undefined) {
-      return { laneIndex: firstSkipped, waitMs: 0 };
+    // Randomly pick from collected zero-wait lanes to distribute messages
+    // across the full vertical space rather than stacking sequentially.
+    if (zeroWaitLanes.length > 0) {
+      const pick = zeroWaitLanes[Math.floor(Math.random() * zeroWaitLanes.length)]!;
+      return { laneIndex: pick, waitMs: 0 };
     }
 
     // ── Phase 2: same-tier busy lane ──
