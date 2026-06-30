@@ -16,7 +16,7 @@ import { LANE_COOLDOWN_MIN_MS, SAFETY_MARGIN_RATIO } from '@core/renderer-consta
 
 const HEADWAY_GAP_MIN_PX = 16;
 
-export const HEADWAY_GAP_MAX_PX = 60;
+const HEADWAY_GAP_MAX_PX = 60;
 
 // ── Pure computation functions ─────────────────────────────────────────────
 
@@ -152,11 +152,7 @@ export function heapSiftDown(
  * Sift a heap element upward to restore the min-heap invariant (4-ary heap).
  * Mutates `heap` and `indexMap` in place.
  */
-export function heapSiftUp(
-  heap: HeapEntry[],
-  indexMap: Map<number, number>,
-  startIdx: number
-): void {
+function heapSiftUp(heap: HeapEntry[], indexMap: Map<number, number>, startIdx: number): void {
   let idx = startIdx;
   while (idx > 0) {
     const parent = Math.floor((idx - 1) / 4);
@@ -240,6 +236,7 @@ export function buildLaneHeap(
 /**
  * Prune expired speed-tier entries and clear collision set.
  * Call at the start of each batch.
+ * @knip — exported for use by dead-code worker entry points
  */
 export function resetBatchShared(state: LaneAllocationState): void {
   const now = performance.now();
@@ -252,6 +249,7 @@ export function resetBatchShared(state: LaneAllocationState): void {
 /**
  * Commit a placement: update speed-tier tracking and heap occupancy.
  * For multi-slot messages, all occupied lanes are updated.
+ * @knip — exported for use by dead-code worker entry points
  */
 export function commitPlacementShared(
   state: LaneAllocationState,
@@ -275,6 +273,7 @@ export function commitPlacementShared(
 
 /**
  * Shift all lane timers and speed-tier tracking by a fixed offset (pause/resume).
+ * @knip — exported for use by dead-code worker entry points
  */
 export function shiftLaneTimersShared(state: LaneAllocationState, ms: number): void {
   for (let i = 0; i < state.heap.length; i++) {
@@ -297,6 +296,7 @@ export function shiftLaneTimersShared(state: LaneAllocationState, ms: number): v
  * @param maxWaitMs Maximum acceptable wait time (ms)
  * @param speedTier Speed tier of the incoming message
  * @returns lane index and waitMs, or null if no placement found
+ * @knip — exported for use by dead-code worker entry points
  */
 export function findPlacementShared(
   state: LaneAllocationState,

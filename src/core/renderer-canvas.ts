@@ -67,12 +67,14 @@ import {
   TRANSLATION_OPACITY_SCALE,
 } from '@core/renderer-constants';
 import {
+  buildOpacityConfig,
   collectSourceSample,
   computeAgeFadeRate,
   computeInvFadeDuration,
   computeMessageOpacity,
   createSourceDetectionState,
   enqueueWithOverflow,
+  type OpacityConfig,
   performSourceDetection,
   type SourceDetectionState,
   estimateMessageDimensions as sharedEstimateDimensions,
@@ -99,7 +101,7 @@ function isImageReady(img: unknown): boolean {
 function cleanupExpiredMessages(
   messages: CanvasMessage[],
   now: number,
-  activeMessagesByLane: Map<number, CanvasMessage[]>,
+  activeMessagesByLane: Map<number, Set<CanvasMessage>>,
   expiredScratch: CanvasMessage[],
   onExpire?: (msg: CanvasMessage) => void
 ): { newLength: number; anyRemoved: boolean; newMessages?: CanvasMessage[] } {
@@ -125,17 +127,16 @@ function cleanupExpiredMessages(
 
   // Remove only expired messages from the lane map — incremental instead of
   // full clear+rebuild. For screen with 100 active messages where 1 expires,
-  // this is O(1) lane operations instead of O(100) rebuild.
+  // this is O(1) lane operations via Set.delete instead of O(n) indexOf+splice.
   if (anyRemoved) {
     for (const msg of expiredScratch) {
       const slotCount = msg.slotCount ?? 1;
       for (let slot = 0; slot < slotCount; slot++) {
         const lane = msg.laneIndex + slot;
-        const list = activeMessagesByLane.get(lane);
-        if (list) {
-          const idx = list.indexOf(msg);
-          if (idx !== -1) list.splice(idx, 1);
-          if (list.length === 0) activeMessagesByLane.delete(lane);
+        const set = activeMessagesByLane.get(lane);
+        if (set) {
+          set.delete(msg);
+          if (set.size === 0) activeMessagesByLane.delete(lane);
         }
       }
     }
@@ -164,28 +165,18 @@ const log = createLogger('RendererCanvas');
 /** Ratio of expired slots above which compaction allocates a fresh array via slice(). */
 const COMPACTION_THRESHOLD_RATIO = 0.5;
 
-/**
- * Deterministic PRNG (LCG) for stagger delay computation.
- * Replaces Math.random() to avoid per-frame Math.random() calls in burst
- * scenarios where dozens of messages are enqueued simultaneously.
- * Seed is derived from wall-clock time at module load, so each page
- * gets a different sequence without calling Math.random() in the hot path.
- *
- *Period: 2^32 ≈ 4.3 billion (full 32-bit LCG).
- * Distribution: uniform [0, 1).
- */
-let prngSeed = (Date.now() ^ (Math.random() * 0xffffffff)) >>> 0;
-function fastRandom(): number {
-  // LCG parameters from Numerical Recipes (a=1664525, c=1013904223)
-  prngSeed = (Math.imul(1664525, prngSeed) + 1013904223) >>> 0;
-  return prngSeed / 0xffffffff;
-}
-
 export class CanvasRenderer extends RendererBase {
   private canvas: HTMLCanvasElement | null = null;
   private canvasClickHandler: ((e: MouseEvent) => void) | null = null;
   private ctx: CanvasRenderingContext2D | null = null;
   private animFrameId: number | null = null;
+  /**
+   * Deterministic PRNG (LCG) seed for stagger delay computation.
+   * Instance-level to prevent seed sharing if multiple renderers coexist
+   * (e.g. during seamless renderer switching). Each instance gets a unique
+   * seed from wall-clock time at construction.
+   */
+  private _prngSeed = (Date.now() ^ (Math.random() * 0xffffffff)) >>> 0;
   /** Pre-computed 1/maxMessageAgeMs to avoid per-frame division in opacity calc. */
   private readonly ageFadeRate = computeAgeFadeRate(this.settings.maxMessageAgeMs);
   /** Pre-computed 1/fadeDurationMs to avoid per-frame division in opacity calc. */
@@ -198,7 +189,7 @@ export class CanvasRenderer extends RendererBase {
 
   private readonly activeMessages: CanvasMessage[] = [];
   /** Lane-indexed active messages for O(1) lane-scoped collision checks. */
-  private readonly activeMessagesByLane = new Map<number, CanvasMessage[]>();
+  private readonly activeMessagesByLane = new Map<number, Set<CanvasMessage>>();
   private readonly pendingQueue = new PriorityBucketQueue();
   private readonly retryQueue: ChatMessage[] = [];
 
@@ -276,15 +267,7 @@ export class CanvasRenderer extends RendererBase {
     Array.from({ length: OPACITY_BUCKET_COUNT }, () => []);
 
   /** Cached opacity config object — rebuilt on settings changes to avoid per-frame allocation. */
-  private _cachedOpacityConfig!: {
-    baseOpacity: number;
-    fadeDurationMs: number;
-    invFadeDuration: number;
-    backlogOpacityMultiplier: number;
-    depthLayersEnabled: boolean;
-    depthFarOpacityMul: number;
-    ageFadeRate: number;
-  };
+  private _cachedOpacityConfig!: OpacityConfig;
 
   /** Pre-bound getFont to avoid per-call arrow function allocation. */
   private readonly _boundGetFont = (fs: number): string => this.getFont(fs);
@@ -413,6 +396,20 @@ export class CanvasRenderer extends RendererBase {
     });
     this._buildOpacityConfig();
     log.info('RendererCanvas created');
+  }
+
+  /**
+   * Deterministic PRNG (LCG) returning uniform [0, 1).
+   * Used for stagger delay computation. Replaces Math.random() in the hot
+   * path during burst enqueue scenarios. Instance-level seed prevents
+   * correlated sequences if multiple renderers coexist.
+   *
+   * LCG parameters from Numerical Recipes (a=1664525, c=1013904223).
+   * Period: 2^32 ≈ 4.3 billion.
+   */
+  private fastRandom(): number {
+    this._prngSeed = (Math.imul(1664525, this._prngSeed) + 1013904223) >>> 0;
+    return this._prngSeed / 0xffffffff;
   }
 
   /** Total number of lanes in the allocator. */
@@ -663,7 +660,7 @@ export class CanvasRenderer extends RendererBase {
       // Remove lanes that now have 0 messages — stale empty entries waste
       // iteration time in lane-scoped lookups.
       for (const [lane, msgs] of this.activeMessagesByLane) {
-        if (msgs.length === 0) {
+        if (msgs.size === 0) {
           this.activeMessagesByLane.delete(lane);
         }
       }
@@ -1155,7 +1152,7 @@ export class CanvasRenderer extends RendererBase {
               maxStagger,
               Math.min(batchIndex, STAGGER_BATCH_MAX) *
                 -STAGGER_EXP_SCALE *
-                Math.log(1 - fastRandom())
+                Math.log(1 - this.fastRandom())
             )
           )
         : 0;
@@ -1183,12 +1180,12 @@ export class CanvasRenderer extends RendererBase {
           cm.slotCount = slotCount;
           for (let slot = 0; slot < slotCount; slot++) {
             const occupiedLane = cm.laneIndex + slot;
-            let laneList = this.activeMessagesByLane.get(occupiedLane);
-            if (!laneList) {
-              laneList = [];
-              this.activeMessagesByLane.set(occupiedLane, laneList);
+            let laneSet = this.activeMessagesByLane.get(occupiedLane);
+            if (!laneSet) {
+              laneSet = new Set();
+              this.activeMessagesByLane.set(occupiedLane, laneSet);
             }
-            laneList.push(cm);
+            laneSet.add(cm);
           }
         },
         onMessageRendered: () => this.observability.onMessageRendered(),
@@ -1291,15 +1288,15 @@ export class CanvasRenderer extends RendererBase {
 
   /** Rebuild cached opacity config from current settings. Called on constructor and updateSettings. */
   private _buildOpacityConfig(): void {
-    this._cachedOpacityConfig = {
-      baseOpacity: this.settings.opacity,
-      fadeDurationMs: this.settings.fadeDurationMs,
-      invFadeDuration: this.invFadeDuration,
-      backlogOpacityMultiplier: this.settings.backlogOpacityMultiplier,
-      depthLayersEnabled: this.settings.depthLayersEnabled,
-      depthFarOpacityMul: this.settings.depthFarOpacityMul,
-      ageFadeRate: this.ageFadeRate,
-    };
+    this._cachedOpacityConfig = buildOpacityConfig(
+      this.settings.opacity,
+      this.settings.fadeDurationMs,
+      this.invFadeDuration,
+      this.settings.backlogOpacityMultiplier,
+      this.settings.depthLayersEnabled,
+      this.settings.depthFarOpacityMul,
+      this.ageFadeRate
+    );
   }
 
   /**
@@ -1486,8 +1483,11 @@ export class CanvasRenderer extends RendererBase {
     this.workerManager.destroy();
     this.imageFetchManager.destroy();
     this.overlayDimensionsUnsubscribe?.();
-    if (this.canvas && this.canvasClickHandler) {
-      this.canvas.removeEventListener('click', this.canvasClickHandler);
+    if (this.canvasClickHandler) {
+      // Always clean up the listener even if canvas reference is stale.
+      // A detached element still holds the listener reference via the event
+      // system, preventing GC unless removeEventListener is called.
+      this.canvas?.removeEventListener('click', this.canvasClickHandler);
     }
     this.canvasClickHandler = null;
     this.canvas?.remove();

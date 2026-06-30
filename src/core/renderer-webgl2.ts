@@ -23,6 +23,7 @@ import { RendererBase } from '@core/renderer-base';
 import type { CanvasMessage } from '@core/renderer-constants';
 import { SPEED_TIER, TRANSLATION_FONT_SCALE, TRANSLATION_GAP_PX } from '@core/renderer-constants';
 import {
+  buildOpacityConfig,
   collectSourceSample,
   computeAgeFadeRate,
   computeInvFadeDuration,
@@ -288,15 +289,15 @@ export class RendererWebGL2 extends RendererBase {
 
   private rebuildOpacityConfig(): void {
     const s = this.settings;
-    this._opacityConfig = {
-      baseOpacity: s.opacity,
-      fadeDurationMs: s.fadeDurationMs,
-      invFadeDuration: this._invFadeDuration,
-      backlogOpacityMultiplier: s.backlogOpacityMultiplier,
-      depthLayersEnabled: s.depthLayersEnabled,
-      depthFarOpacityMul: s.depthFarOpacityMul,
-      ageFadeRate: this._ageFadeRate,
-    };
+    this._opacityConfig = buildOpacityConfig(
+      s.opacity,
+      s.fadeDurationMs,
+      this._invFadeDuration,
+      s.backlogOpacityMultiplier,
+      s.depthLayersEnabled,
+      s.depthFarOpacityMul,
+      this._ageFadeRate
+    );
   }
 
   override updateSettings(settings: OverlaySettings, options?: { resetState?: boolean }): void {
@@ -568,6 +569,16 @@ export class RendererWebGL2 extends RendererBase {
       }
     }
 
+    this._enqueue(message);
+  }
+
+  /**
+   * Shared enqueue logic used by both addMessage and replayMessage.
+   * Extracted to eliminate duplicate enqueueWithOverflow + render-loop
+   * start pattern. Skips isMessageAllowed / source detection so replay
+   * callers can bypass those without duplicating the core enqueue path.
+   */
+  private _enqueue(message: ChatMessage): void {
     const priority = RendererBase.getMessagePriority(message);
     const result = enqueueWithOverflow(
       this.pendingQueue,
@@ -589,18 +600,7 @@ export class RendererWebGL2 extends RendererBase {
    */
   override replayMessage(message: ChatMessage): void {
     if (this.isVideoPaused) return;
-    const priority = RendererBase.getMessagePriority(message);
-    const result = enqueueWithOverflow(
-      this.pendingQueue,
-      message,
-      priority,
-      (reason) => this.observability.onMessageDropped(reason),
-      this.settings.queueMaxSize
-    );
-    if (result === 'dropped') return;
-    if (this.pendingQueue.size === 1 && !this.isPaused && !this.isVideoPaused) {
-      this.startRenderLoop();
-    }
+    this._enqueue(message);
   }
 
   /** Set translated text for an active message. Searches only placed messages (not the pending queue). */
@@ -727,7 +727,9 @@ export class RendererWebGL2 extends RendererBase {
       // visually overlap at the entry edge. This catches the pause/resume
       // edge case where the allocator's timing is stale but messages
       // are still visible on screen.
-      const now2 = performance.now();
+      // Use _now (from the render frame entry's t0) instead of calling
+      // performance.now() per message in the hot drain loop.
+      const now2 = _now;
       // Set startTime BEFORE hasCollisionAtEntry so the collision check
       // uses the actual message startTime instead of the literal 0 from
       // createCanvasMessage(). Without this, activeElapsed is computed
