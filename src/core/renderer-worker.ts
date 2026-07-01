@@ -53,6 +53,7 @@ import {
   areSpeedTiersCompatible,
   buildLaneHeap,
   commitPlacementShared,
+  computeBaseHeadwayPx,
   computeLaneY,
   computeOccupancyMs as computeOccupancyMsShared,
   heapGetSlotAvailableAt,
@@ -1339,6 +1340,82 @@ function renderFrame(): void {
 
 // ── Queue drain ───────────────────────────────────────────────────────────
 
+/**
+ * Pixel-level collision check for worker renderer.
+ * Mirrors canvas-renderer.ts checkPlacement() — prevents visual overlap by
+ * checking actual bounding boxes of active messages, not just the lane
+ * allocator's theoretical occupancy model.
+ *
+ * Returns true if no collision (message can be placed), false if collision
+ * detected (message should be retried next frame).
+ */
+function checkCollision(
+  placement: { laneIndex: number; waitMs: number; laneY: number },
+  newMsgHeight: number,
+  newSpeedTier: number,
+  now: number,
+  screenWidth: number
+): boolean {
+  if (!config) return true;
+
+  const mode = config.danmakuMode;
+  const isScrolling = mode === 'scroll' || mode === 'reverse';
+
+  // New message vertical extent
+  const newTop = placement.laneY;
+  const newBottom = placement.laneY + newMsgHeight;
+
+  // Scan active messages for those that vertically overlap the new placement
+  for (let i = 0; i < activeMessages.length; i++) {
+    const active = activeMessages[i];
+    if (!active) continue;
+
+    const activeElapsed = now - active.startTime - active.pausedDuration;
+    if (activeElapsed < 0) continue; // still in stagger delay
+
+    // Extent-based vertical overlap check:
+    // active occupies [active.y, active.y + active.height]
+    // new message would occupy [newTop, newBottom]
+    if (active.y + active.height <= newTop || active.y >= newBottom) continue;
+
+    if (isScrolling) {
+      // Speed-aware headway: scale up when new message is faster than active
+      let headwayPx = computeBaseHeadwayPx(active.width, config.headwayGapRatio);
+      if (newSpeedTier > active.speedTier) {
+        headwayPx = Math.round(headwayPx * config.backlogSpeedMultiplier);
+      }
+
+      const activeProgress = Math.min(1, Math.max(0, activeElapsed * active.invDuration));
+
+      if (mode === 'scroll') {
+        const travelDistance = active.startX + active.width + config.exitPaddingPx;
+        const activeRightEdge = active.startX - activeProgress * travelDistance + active.width;
+        // Collision if active message's right edge hasn't cleared the entry zone
+        if (activeRightEdge > screenWidth - headwayPx) {
+          collidedLanes.add(placement.laneIndex);
+          return false;
+        }
+      } else {
+        // reverse: messages enter from left
+        const reverseTravel = screenWidth - active.startX + config.exitPaddingPx;
+        const activeX = active.startX + activeProgress * reverseTravel;
+        if (activeX + active.width > -headwayPx) {
+          collidedLanes.add(placement.laneIndex);
+          return false;
+        }
+      }
+    } else {
+      // Top/bottom modes: collision if active message hasn't expired yet
+      if (activeElapsed < active.duration) {
+        collidedLanes.add(placement.laneIndex);
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
 function drainQueue(now: number, width: number, height: number): void {
   if (!config) return;
 
@@ -1399,6 +1476,15 @@ function drainQueue(now: number, width: number, height: number): void {
     if (!placement) {
       skipped++;
       totalDrops++;
+      retryQueue.push(entry);
+      continue;
+    }
+
+    // Pixel-level collision check — prevents overlap when the lane allocator's
+    // occupancy model diverges from actual message positions (e.g. after
+    // pause/resume, horizontal stagger, or burst speed changes).
+    if (!checkCollision(placement, entry.height, speedTier, now, width)) {
+      skipped++;
       retryQueue.push(entry);
       continue;
     }
