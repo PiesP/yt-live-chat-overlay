@@ -21,6 +21,9 @@ import { getLiveChatPayload } from '@core/youtubei-chat';
 
 const log = createLogger('FetchInterceptor');
 
+/** Maximum time to wait for JSON parsing in the fetch interceptor. */
+const INTERCEPTOR_PARSE_TIMEOUT_MS = 5000;
+
 /**
  * Matches YouTube Innertube live-chat fetch URLs.
  * Covers both live and replay endpoints.
@@ -86,7 +89,20 @@ export function installFetchInterceptor(
       try {
         const res = await response;
         const cloned = res.clone();
-        const data: unknown = await cloned.json();
+
+        // C-3: Timeout the JSON parse to prevent indefinite hang on slow networks.
+        // If the parse takes >5s, the interceptor silently aborts — the poll loop
+        // will catch these messages on its next cycle.
+        let timeoutId: ReturnType<typeof setTimeout> | undefined;
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(() => {
+            reject(new Error('Fetch interceptor JSON parse timed out'));
+          }, INTERCEPTOR_PARSE_TIMEOUT_MS);
+        });
+
+        const data: unknown = await Promise.race([cloned.json(), timeoutPromise]);
+        clearTimeout(timeoutId);
+
         const payload = getLiveChatPayload(data);
         if (payload && payload.actions.length > 0) {
           const events = extractChatEvents(payload.actions, getSettings);

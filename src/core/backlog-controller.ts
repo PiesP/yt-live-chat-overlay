@@ -548,6 +548,22 @@ export class BacklogInjectionController implements Pauseable {
     this.onBacklogMessage = null;
   }
 
+  /**
+   * Drain undelivered backlog messages for preservation across restarts.
+   * Returns all unconsumed messages from the current offset to the end
+   * of the queue, without modifying the controller's internal state
+   * (caller should destroy() afterward).
+   */
+  drainPending(): ChatMessage[] {
+    if (!this.isActive && this.backlogQueueLength === 0) return [];
+    const messages: ChatMessage[] = [];
+    for (let i = this.backlogQueueOffset; i < this.backlogQueue.length; i++) {
+      const msg = this.backlogQueue[i];
+      if (msg !== undefined) messages.push(msg);
+    }
+    return messages;
+  }
+
   /** Pause/resume injection when the render queue is overloaded */
   setPaused(paused: boolean): void {
     this.paused = paused;

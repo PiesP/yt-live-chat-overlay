@@ -50,6 +50,8 @@ const MAX_START_ATTEMPTS = 3;
 
 const RECENT_MESSAGE_REPLAY_LIMIT = 20;
 const CHAT_WATCHDOG_INTERVAL_MS = 15_000;
+/** Hidden duration threshold for switching from time-jump to overlay refresh. */
+const OVERLAY_REFRESH_THRESHOLD_MS = 30_000; // 30 seconds
 
 /**
  * YouTube chat panel root element selector.
@@ -172,6 +174,8 @@ export class RuntimeManager {
   private fetchInterceptorUnsubscribe: InterceptorUnsubscribe | null = null;
   /** Unsubscribe handle for the DOM chat watcher (fallback). */
   private domWatcherUnsubscribe: DomWatcherUnsubscribe | null = null;
+  /** Backlog messages preserved across soft restarts for re-injection. */
+  private _pendingBacklogMessages: ChatMessage[] = [];
 
   private get isDisposedState(): boolean {
     return this.state === 'disposed' || this.state === 'restarting' || this.state === 'destroyed';
@@ -389,6 +393,51 @@ export class RuntimeManager {
     this.requestReconcile('session-restart');
   }
 
+  /**
+   * Clear all active messages and restart from recent history.
+   * Used when returning from a long-hidden tab to prevent visual
+   * glitches caused by the paused-duration time jump on expired messages.
+   */
+  private performOverlayRefresh(reason: string): void {
+    if (this.isDisposedState) return;
+
+    const renderer = this.renderer;
+    if (!renderer) return;
+
+    log.info(`Overlay refresh triggered: ${reason}`);
+
+    // 1. Clear renderer state
+    renderer.prepareForRefresh();
+
+    // 2. Reset lane allocator completely (not shift — fresh start)
+    const dims = this.overlay?.getDimensions();
+    if (dims) {
+      renderer.resetAllocator(dims);
+    }
+
+    // 3. Reset burst detector
+    renderer.resetBurstDetector();
+
+    // 4. Unpause chat source — poll loop resumes from saved token
+    this.chatSource?.setPaused(false);
+
+    // 5. Re-inject recent messages through backlog controller for smooth restart
+    const recentMessages = this.chatSource?.getLatestMessages(20) ?? [];
+    if (recentMessages.length > 0) {
+      this.ensureBacklogController(renderer);
+      this.backlogController?.startBacklogInjection(recentMessages);
+    }
+
+    // 6. Restart render loop
+    renderer.resumeRenderLoop();
+
+    // 7. Restart foreground listeners (may have been stopped)
+    this.startForegroundListeners();
+
+    // 8. Re-arm chat watchdog
+    this.startChatWatchdog();
+  }
+
   private computeConnectionStatus(): ConnectionStatus {
     // Standby mode takes priority
     if (this.standbyController.isStandby()) {
@@ -442,11 +491,9 @@ export class RuntimeManager {
     this.domWatcherUnsubscribe?.();
     this.domWatcherUnsubscribe = null;
 
-    // Destroy the backlog controller — it references the current renderer
-    // and chat source. A new one will be created in startSession() with
-    // the new renderer. Keeping it alive across the soft restart would
-    // cause onBacklogMessage to reference the stale (about-to-be-replaced)
-    // renderer, leading to messages being added to a destroyed session.
+    // C-4: Drain undelivered backlog messages before destroying the controller.
+    // Store them for re-injection after the new renderer is created.
+    const pendingBacklog = this.backlogController?.drainPending() ?? [];
     this.backlogController?.destroy();
     this.backlogController = null;
 
@@ -463,6 +510,9 @@ export class RuntimeManager {
     // to rebuild the chat source chain. Keep overlay/renderer alive.
     this.targetUrl = null;
     this.abortController = new AbortController();
+
+    // Store for re-injection in startSession
+    this._pendingBacklogMessages = pendingBacklog;
   }
 
   private matchesSessionUrl(url: string): boolean {
@@ -493,6 +543,13 @@ export class RuntimeManager {
         void this.restartSession();
       };
       this.standbyController.setRenderer(this.renderer);
+
+      // Re-inject any backlog messages preserved across a soft restart.
+      if (this._pendingBacklogMessages.length > 0) {
+        this.ensureBacklogController(this.renderer);
+        this.backlogController?.startBacklogInjection(this._pendingBacklogMessages);
+        this._pendingBacklogMessages = [];
+      }
 
       const chatStarted = await this.startChatSource(signal);
       throwIfAborted(signal);
@@ -911,12 +968,27 @@ export class RuntimeManager {
         return;
       }
 
-      // Always resume on foreground return — the renderer gate-checks
-      // isVideoPaused internally. On pre-live pages, the DOM video.paused
-      // is true (countdown), but isVideoPaused is false (not user-initiated),
-      // so the render loop correctly restarts. Chat source resume ensures
-      // messages accumulated during the hidden period are processed.
-      this.renderer?.trimBackgroundQueue();
+      // F-1: Long-hidden tab → full overlay refresh (clear + restart from history)
+      // rather than time-jumping expired messages via paused-duration shift.
+      const hiddenDuration = this.getIdleDurationMs(Date.now());
+      if (hiddenDuration >= OVERLAY_REFRESH_THRESHOLD_MS) {
+        this.performOverlayRefresh(`hidden-${Math.round(hiddenDuration / 1000)}s`);
+        return;
+      }
+
+      // Short hidden: existing time-jump logic using paused-duration shift.
+
+      // P-1: Drain pending queue through backlog controller instead of trimming.
+      // This preserves messages accumulated during the hidden period for gradual
+      // emission rather than silently dropping them.
+      const pendingMessages = this.renderer?.drainPendingQueue();
+      if (pendingMessages && pendingMessages.length > 0 && this.renderer) {
+        this.ensureBacklogController(this.renderer);
+        this.backlogController?.startBacklogInjection(pendingMessages);
+      } else {
+        this.renderer?.trimBackgroundQueue();
+      }
+
       this.chatSource?.setPaused(false);
 
       // If the chat source accumulated messages during the hidden period

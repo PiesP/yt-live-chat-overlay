@@ -28,8 +28,10 @@ const log = createLogger('LiveChatSource');
 // livePollFallbackMs — read from this.getSettings()
 const LIVE_SEED_CUTOFF_MS = 60_000;
 // livePollFailureLimit — read from this.getSettings()
-/** How often (in failures) to refresh the bootstrap during sustained errors. */
-const LIVE_BOOTSTRAP_REFRESH_INTERVAL = 5;
+/** Base interval for periodic bootstrap refresh during sustained errors. */
+const LIVE_BOOTSTRAP_REFRESH_BASE = 5;
+/** Maximum multiplier for bootstrap refresh interval. */
+const LIVE_BOOTSTRAP_REFRESH_MAX = 50;
 
 export class LiveChatSource extends ChatSource {
   private liveContinuation: InnertubeContinuationData | null = null;
@@ -78,7 +80,7 @@ export class LiveChatSource extends ChatSource {
         return false;
       }
 
-      this.handleLivePayload(payload, true); // isInitialSeed: apply time-based filtering
+      await this.handleLivePayload(payload, true); // isInitialSeed: apply time-based filtering
       return true;
     } catch (error: unknown) {
       if (isAbortError(error)) {
@@ -220,7 +222,7 @@ export class LiveChatSource extends ChatSource {
           continue;
         }
 
-        this.handleLivePayload(payload);
+        await this.handleLivePayload(payload);
       } catch (error: unknown) {
         if (isAbortError(error)) {
           throw error;
@@ -271,13 +273,20 @@ export class LiveChatSource extends ChatSource {
 
         // ── Conditional bootstrap refresh ──
         // Only refresh bootstrap on parse errors (API format changed)
-        // or periodically (every Nth failure) during sustained outages.
+        // or periodically with exponential backoff during sustained outages.
+        // Network errors (TypeError) should NOT trigger bootstrap refresh —
+        // just wait and retry; the network may recover on its own.
         const isParseError = error instanceof SyntaxError;
+        const refreshInterval = Math.min(
+          LIVE_BOOTSTRAP_REFRESH_MAX,
+          LIVE_BOOTSTRAP_REFRESH_BASE *
+            2 ** Math.floor((this.consecutiveErrors - 1) / LIVE_BOOTSTRAP_REFRESH_BASE)
+        );
         const needsPeriodicRefresh =
-          this.consecutiveErrors > 0 &&
-          this.consecutiveErrors % LIVE_BOOTSTRAP_REFRESH_INTERVAL === 0;
+          this.consecutiveErrors > 0 && this.consecutiveErrors % refreshInterval === 0;
 
-        if (isParseError || needsPeriodicRefresh) {
+        const isNetworkError = error instanceof TypeError;
+        if (isParseError || (needsPeriodicRefresh && !isNetworkError)) {
           await this.refreshLiveContinuation(signal);
         }
       }
@@ -291,7 +300,10 @@ export class LiveChatSource extends ChatSource {
     return this.requestPayload(fetchLiveChat, continuation, signal);
   }
 
-  private handleLivePayload(payload: LiveChatPayload, isInitialSeed: boolean = false): void {
+  private async handleLivePayload(
+    payload: LiveChatPayload,
+    isInitialSeed: boolean = false
+  ): Promise<void> {
     const events = extractChatEvents(payload.actions, this.getSettings);
 
     if (events.length > 0) {
@@ -327,7 +339,16 @@ export class LiveChatSource extends ChatSource {
     }
 
     this.consecutiveErrors = 0;
-    this.liveContinuation = extractNextLiveContinuation(payload.continuations);
+    const nextContinuation = extractNextLiveContinuation(payload.continuations);
+    if (!nextContinuation) {
+      // Continuation token missing — API format may have changed.
+      // Refresh bootstrap immediately instead of waiting for the next poll to fail.
+      log.warn('Live continuation token missing from payload — refreshing bootstrap');
+      await this.refreshLiveContinuation();
+      // refreshLiveContinuation updates this.liveContinuation internally
+    } else {
+      this.liveContinuation = nextContinuation;
+    }
   }
 
   private async refreshLiveContinuation(signal?: AbortSignal): Promise<void> {

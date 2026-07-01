@@ -25,11 +25,7 @@
 import type { ChatMessage, DropReason, OverlayDimensions, OverlaySettings } from '@app-types';
 import { ByteLimitedCache } from '@core/byte-limited-cache';
 import { renderPaidCard } from '@core/canvas-card-renderers';
-import {
-  applyPausedDurationToMessages,
-  COMPACTION_THRESHOLD_RATIO,
-  fastRandom,
-} from '@core/canvas-pipeline';
+import { COMPACTION_THRESHOLD_RATIO, fastRandom } from '@core/canvas-pipeline';
 import { drawRoundRect, renderRegularMessage, renderSegment } from '@core/canvas-rendering-shared';
 import { isImageReady } from '@core/canvas-worker-bridge';
 import { MEMBERSHIP_CARD_CONFIG, SUPERCHAT_CARD_CONFIG } from '@core/card-config';
@@ -212,6 +208,14 @@ export class CanvasRenderer extends RendererBase {
 
   private static readonly IDLE_GRACE_PERIOD_MS = 500;
 
+  /**
+   * H2: Tracks whether the status bar has been rendered at least once
+   * since the last status change. When transitioning from idle with a
+   * non-connected status, one extra frame is allowed to render the
+   * status bar before stopping the render loop.
+   */
+  private _hasRenderedStatusBar = false;
+
   constructor(overlay: Overlay, settings: OverlaySettings) {
     super(overlay, settings);
     this.invFadeDuration = computeInvFadeDuration(settings.fadeDurationMs);
@@ -361,6 +365,12 @@ export class CanvasRenderer extends RendererBase {
 
   /** Inform the renderer of the current connection health status. */
   override setConnectionStatus(status: ConnectionStatus): void {
+    if (status !== this.connectionStatus) {
+      // H2: Reset status bar render flag so the idle-detection logic
+      // allows one extra frame to render the new status bar before
+      // potentially stopping the render loop.
+      this._hasRenderedStatusBar = false;
+    }
     this.connectionStatus = status;
     // Update the screen-reader live region so status changes are announced
     // even when the canvas-rendered pill is clipped or offscreen.
@@ -463,6 +473,49 @@ export class CanvasRenderer extends RendererBase {
     this.pendingQueue.trim(this.settings.backgroundQueueMax);
   }
 
+  /** Drain all pending queue messages for re-injection (used by overlay refresh). */
+  override drainPendingQueue(): ChatMessage[] {
+    const messages: ChatMessage[] = [];
+    while (!this.pendingQueue.isEmpty) {
+      const msg = this.pendingQueue.dequeue();
+      if (msg) messages.push(msg);
+    }
+    // Also drain retry queue
+    messages.push(...this.retryQueue);
+    this.retryQueue.length = 0;
+    return messages;
+  }
+
+  /** Clear all active messages (used by overlay refresh). */
+  override clearActiveMessages(): void {
+    this.activeMessages.length = 0;
+    this.activeMessagesByLane.clear();
+  }
+
+  /** Clear pending/retry queues (used by overlay refresh). */
+  override clearPendingQueue(): void {
+    this.pendingQueue.clear();
+    this.retryQueue.length = 0;
+  }
+
+  /** Explicitly restart the render loop (used by overlay refresh). */
+  override resumeRenderLoop(): void {
+    this.idleSince = null;
+    this._hasRenderedStatusBar = false;
+    this.startRenderLoop();
+  }
+
+  /** Prepare renderer for a clean restart (overlay refresh). Preserves caches but clears all display state. */
+  override prepareForRefresh(): void {
+    this.clearActiveMessages();
+    this.clearPendingQueue();
+    this.backlogPaused = false;
+    this.dimensionCache.clear();
+    for (const bucket of this.opacityBuckets) bucket.length = 0;
+    this.idleSince = null;
+    this._hasRenderedStatusBar = false;
+  }
+
   // ── Render loop ──────────────────────────────────────────────────────
 
   private applyDevicePixelRatio(dims?: OverlayDimensions | null): void {
@@ -487,11 +540,12 @@ export class CanvasRenderer extends RendererBase {
       }
       this.renderFrame();
       // Stop the render loop when there is no work to do — no visible
-      // messages, no queued messages, not in standby. This eliminates
-      // wasted 60fps rAF cycles when the stream has no chat activity.
+      // messages, no queued messages. This eliminates wasted 60fps rAF
+      // cycles when the stream has no chat activity.
       // The loop is restarted by:
       //   - enqueueMessage (queue 0→1 transition, running or self-idled)
       //   - setStandbyStatus(true)
+      //   - setConnectionStatus (non-connected status change)
       //   - onResume (tab visibility or video unpause)
       //   - emoji/sticker load callbacks (via needsRerender flag)
       //
@@ -499,18 +553,25 @@ export class CanvasRenderer extends RendererBase {
       // sparse chat intervals — the loop continues briefly after the
       // idle condition is first met, so a message arriving within 500ms
       // reuses the same rAF cycle without restart overhead.
-      if (
-        this.activeMessages.length === 0 &&
-        this.pendingQueue.isEmpty &&
-        this.connectionStatus === 'connected'
-      ) {
-        const now = performance.now();
-        if (this.idleSince === null) {
-          this.idleSince = now;
-        } else if (now - this.idleSince >= CanvasRenderer.IDLE_GRACE_PERIOD_MS) {
-          this.animFrameId = null;
-          this.idleSince = null;
-          return;
+      //
+      // H2: Idle detection covers ALL connection states. When idle with
+      // a non-connected status, one extra frame renders the status bar
+      // before stopping the loop. When the status changes, the loop is
+      // restarted via setConnectionStatus.
+      if (this.activeMessages.length === 0 && this.pendingQueue.isEmpty) {
+        // H2: Allow one extra frame for status bar rendering when idle
+        // with a non-connected status.
+        if (!this._hasRenderedStatusBar && this.connectionStatus !== 'connected') {
+          this._hasRenderedStatusBar = true;
+        } else {
+          const now = performance.now();
+          if (this.idleSince === null) {
+            this.idleSince = now;
+          } else if (now - this.idleSince >= CanvasRenderer.IDLE_GRACE_PERIOD_MS) {
+            this.animFrameId = null;
+            this.idleSince = null;
+            return;
+          }
         }
         // Continue the loop during the grace period.
       } else {
@@ -1413,8 +1474,26 @@ export class CanvasRenderer extends RendererBase {
     this.workerManager.setPaused(false);
   }
 
-  protected applyPausedDuration(pausedMs: number): void {
-    applyPausedDurationToMessages(this.activeMessages, pausedMs);
+  /**
+   * B-1: Per-message paused duration clamping.
+   *
+   * Instead of blindly adding the full paused duration (which can push
+   * already-expired messages beyond their display window), each message
+   * gets at most its remaining display time + 1s grace window. Messages
+   * that would already be expired by now are left to expire naturally on
+   * the next render frame via the merged cleanup pass.
+   */
+  protected override applyPausedDuration(pausedMs: number): void {
+    const now = performance.now();
+    for (const msg of this.activeMessages) {
+      const elapsedBeforePause = now - pausedMs - msg.startTime;
+      const remainingDisplay = msg.duration - elapsedBeforePause;
+      // Clamp per-message: never push pausedDuration beyond what the
+      // message could have possibly displayed. 1s grace prevents
+      // messages from expiring mid-flight on the first post-resume frame.
+      const capped = Math.max(0, Math.min(pausedMs, Math.max(0, remainingDisplay) + 1000));
+      msg.pausedDuration += capped;
+    }
   }
 
   protected resetState(): void {

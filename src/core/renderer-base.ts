@@ -16,7 +16,7 @@
  *   and message ingress check this flag.
  */
 
-import type { ChatMessage, OverlaySettings } from '@app-types';
+import type { ChatMessage, OverlayDimensions, OverlaySettings } from '@app-types';
 import { PerAuthorRateLimiter } from '@core/author-rate-limiter';
 import { BurstDetector } from '@core/burst-detector';
 import { rendererLayout } from '@core/design-tokens';
@@ -134,7 +134,11 @@ export abstract class RendererBase {
     const now = performance.now();
     let pausedDuration = 0;
     if (this.pausedAt !== null) {
-      pausedDuration = Math.min(Math.max(0, now - this.pausedAt), this.settings.maxMessageAgeMs);
+      // B-1: Use a higher clamp (2× maxMessageAgeMs) to avoid the per-message
+      // clamp from discarding real elapsed time. The per-message clamp in
+      // CanvasRenderer.applyPausedDuration handles individual message expiry.
+      const raw = Math.max(0, now - this.pausedAt);
+      pausedDuration = Math.min(raw, this.settings.maxMessageAgeMs * 2);
       this.applyPausedDuration(pausedDuration);
     }
     this.pausedAt = null;
@@ -386,6 +390,42 @@ export abstract class RendererBase {
   /** Inform the renderer of the current connection health status.
    *  Subclasses override to update visual feedback (status bar, reload prompt). */
   setConnectionStatus(_status: ConnectionStatus): void {}
+
+  // ── Overlay refresh helpers (used by RuntimeManager.performOverlayRefresh) ──
+
+  /** Reset lane allocator with new dimensions. */
+  resetAllocator(dims: OverlayDimensions | null): void {
+    this.laneAllocator.reset(dims);
+  }
+
+  /** Reset burst detector state. */
+  resetBurstDetector(): void {
+    this.burstDetector.resume();
+  }
+
+  /** Explicitly restart the render loop. Subclasses override. */
+  resumeRenderLoop(): void {
+    // Subclasses override to call startRenderLoop()
+  }
+
+  /** Drain pending queue messages. Subclasses override. */
+  drainPendingQueue(): ChatMessage[] {
+    return [];
+  }
+
+  /** Clear all active messages. Subclasses override (used by overlay refresh). */
+  clearActiveMessages(): void {}
+
+  /** Clear pending/retry queues. Subclasses override (used by overlay refresh). */
+  clearPendingQueue(): void {}
+
+  /** Combo clear for overlay refresh. Subclasses override to call
+   *  clearActiveMessages() + clearPendingQueue() together, plus
+   *  any subclass-specific state. */
+  prepareForRefresh(): void {
+    this.clearActiveMessages();
+    this.clearPendingQueue();
+  }
 
   protected updateBacklogPause(): void {
     const now = Date.now();
