@@ -72,6 +72,16 @@ export class BacklogInjectionController implements Pauseable {
   private observability: ObservabilityReporter | undefined;
   private realTimeActivityCount = 0;
   private injectionStartTime = 0;
+  /**
+   * Timestamp of the most recent real-time activity notification.
+   * Used for time-based decay instead of per-tick decrement — the
+   * per-tick approach tied the decay rate to the injection rate,
+   * creating a vicious cycle where slow injection → slow decay → keeps
+   * injection slow.
+   */
+  private lastRealTimeActivityAt = 0;
+  /** Time after which real-time activity counter fully resets (ms). */
+  private static readonly REAL_TIME_DECAY_MS = 2000;
 
   /**
    * Callback to query current lane utilization (0–1).
@@ -249,6 +259,9 @@ export class BacklogInjectionController implements Pauseable {
     this.processedBacklog = 0;
     this.isActive = queueMessages.length > 0;
     this.injectionStartTime = now;
+    // Reset real-time activity state for the new injection cycle
+    this.realTimeActivityCount = 0;
+    this.lastRealTimeActivityAt = 0;
 
     // Adapt density ramp duration to backlog size.
     // Small backlogs (<200) use the base ramp; large backlogs (>=500)
@@ -281,6 +294,7 @@ export class BacklogInjectionController implements Pauseable {
       this.realTimeActivityCount + 1,
       BacklogInjectionController.REAL_TIME_ACTIVITY_CAP
     );
+    this.lastRealTimeActivityAt = Date.now();
   }
 
   /** Start the throttled injection loop */
@@ -307,19 +321,49 @@ export class BacklogInjectionController implements Pauseable {
       this.config.backlogInjectionRateMin,
       Math.min(this.config.backlogInjectionMax, this.config.backlogMaxRate, this.lanes * 2)
     );
+
+    // ── Congestion throttle: take the MIN of real-time and utilization ──
+    // Real-time activity and lane utilization both measure screen
+    // congestion. Using min() prevents multiplicative compounding where
+    // 0.25 × 0.28 = 0.07 instead of the intended ~0.25 worst case.
+    //
+    // realTimeFactor: 0.25(when activity reaches cap) → 1.0(when idle)
+    // utilizationFactor: 0.1(when lanes 100% full) → 1.0(when lanes empty)
     const realTimeFactor = Math.max(
       BacklogInjectionController.REAL_TIME_FACTOR_MIN,
       1 - this.realTimeActivityCount * BacklogInjectionController.REAL_TIME_FACTOR_STEP
     );
-    const rampFactor = this.getDensityRampFactor();
     const utilizationFactor = this.getUtilizationFactor();
-    const adaptiveRate = Math.max(
-      1,
-      Math.round(maxRate * realTimeFactor * rampFactor * utilizationFactor)
-    );
+    const congestionFactor = Math.min(realTimeFactor, utilizationFactor);
+
+    // Ramp factor is multiplicative — it serves a different purpose
+    // (startup smoothing) and should not be merged with congestion.
+    const rampFactor = this.getDensityRampFactor();
+
+    // Minimum rate floor: at least lanes+1 msg/s so every lane can
+    // receive a new message within ~1 second even under worst conditions.
+    const minRate = Math.max(this.lanes + 1, 2);
+
+    const adaptiveRate = Math.max(minRate, Math.round(maxRate * congestionFactor * rampFactor));
     const meanInterval = Math.round(1000 / adaptiveRate);
 
-    this.realTimeActivityCount = Math.max(0, this.realTimeActivityCount - 1);
+    // ── Time-based real-time activity decay ──
+    // Previously: `realTimeActivityCount = Math.max(0, count - 1)` per tick.
+    // This tied the decay rate to the injection rate: when injection was
+    // slow, the activity counter decayed just as slowly, creating a lock-up.
+    // Now: fully reset after REAL_TIME_DECAY_MS of inactivity, resolving
+    // in O(2s) regardless of injection rate.
+    const msSinceLastRealTime = Date.now() - this.lastRealTimeActivityAt;
+    if (msSinceLastRealTime > BacklogInjectionController.REAL_TIME_DECAY_MS) {
+      this.realTimeActivityCount = 0;
+    } else if (this.realTimeActivityCount > 0) {
+      // Gentle decay during the decay window: linear drop from current
+      // count to 0 over the decay period. This provides continuous
+      // acceleration instead of a sudden jump when the timer expires.
+      const decayProgress = msSinceLastRealTime / BacklogInjectionController.REAL_TIME_DECAY_MS;
+      const target = Math.ceil(this.realTimeActivityCount * (1 - decayProgress));
+      this.realTimeActivityCount = Math.max(target, 0);
+    }
 
     const message = this.dequeueBacklog();
     /* v8 ignore next 1 — TypeScript guard: queue non-empty checked above */
