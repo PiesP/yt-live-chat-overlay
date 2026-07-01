@@ -760,7 +760,12 @@ export class CanvasRenderer extends RendererBase {
         this.cachedOpacityConfig
       );
 
-      const bucketIndex = Math.round(opacity * (OPACITY_BUCKET_COUNT - 1));
+      // Clamp to valid bucket range — floating-point imprecision or corrupted
+      // settings (baseOpacity > 1) could push the index out of bounds.
+      const bucketIndex = Math.min(
+        OPACITY_BUCKET_COUNT - 1,
+        Math.round(opacity * (OPACITY_BUCKET_COUNT - 1))
+      );
       // Store elapsed for membership card border pulse animation
       msg._frameElapsed = elapsed;
       buckets[bucketIndex]!.push(msg);

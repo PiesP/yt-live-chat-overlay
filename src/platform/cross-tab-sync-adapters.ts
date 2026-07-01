@@ -134,6 +134,14 @@ let cachedKey: string | null = null;
 export function getCrossTabSyncAdapter(storageKey: string): CrossTabSyncAdapter {
   if (cachedAdapter && cachedKey === storageKey) return cachedAdapter;
 
+  // Clean up the previous adapter's listener before replacing it.
+  // Without this, a stale listener (e.g., chrome.storage.onChanged) remains
+  // registered when the storage key changes, causing cross-tab sync to fire
+  // for the wrong key.
+  if (cachedAdapter) {
+    cachedAdapter.removeListener();
+  }
+
   if (ChromeCrossTabSyncAdapter.isAvailable()) {
     cachedAdapter = new ChromeCrossTabSyncAdapter(storageKey);
   } else if (GmCrossTabSyncAdapter.isAvailable()) {

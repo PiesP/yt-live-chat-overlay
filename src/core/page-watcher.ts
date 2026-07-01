@@ -47,7 +47,13 @@ export class PageWatcher {
 
   private readonly handleYouTubeNavigateFinish = (): void => {
     log.debug('YouTube navigation finished');
-    this.handlePotentialUrlChange('yt-navigate-finish');
+    // Always notify — yt-navigate-finish signals data-ready even when URL is unchanged
+    // (e.g., VOD→live transitions where pushState already updated the URL).
+    const newUrl = location.href;
+    if (newUrl !== this.currentUrl) {
+      this.currentUrl = newUrl;
+    }
+    this.notifyCallbacks();
   };
 
   constructor() {

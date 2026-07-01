@@ -117,8 +117,9 @@ export class Settings {
     if (typeof requestIdleCallback !== 'undefined') {
       this.saveIdleHandle = requestIdleCallback(() => void this.flushSave(), { timeout: 2000 });
     } else {
-      // No requestIdleCallback support — save immediately.
-      void this.flushSave();
+      // No requestIdleCallback support — defer save to next task to avoid
+      // racing with subsequent set() calls that update in-memory state first.
+      setTimeout(() => void this.flushSave(), 0);
     }
   }
 

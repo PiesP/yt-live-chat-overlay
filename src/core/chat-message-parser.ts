@@ -140,10 +140,9 @@ function parseRendererMessage(
   kind: ChatMessage['kind'],
   settings: Readonly<OverlaySettings>
 ): ChatMessage | null {
-  const author = extractDisplayText(renderer.authorName);
-  if (!author) {
-    return null;
-  }
+  // Allow messages without an author name (e.g., system messages, some YouTube API edge cases).
+  // Fall back to empty string so the message body is still rendered.
+  const author = extractDisplayText(renderer.authorName) ?? '';
 
   const authorType = extractAuthorType(renderer.authorBadges);
   const userColor = extractUserColor(renderer);

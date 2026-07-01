@@ -219,6 +219,11 @@ export class RuntimeManager {
       if (this.targetUrl !== null && !this.matchesSessionUrl(this.getCurrentUrl())) {
         this.disposeActiveSession();
       }
+    } else if (reason === 'startup') {
+      // Startup always starts fresh — clear any stale page-change flag
+      // that may have been left by a requestReconcile('page-change') call
+      // before start() was invoked.
+      this.isPageChangeReconcile = false;
     }
 
     this.reconcileRequested = true;
@@ -275,6 +280,12 @@ export class RuntimeManager {
   }
 
   private async reconcileOnce(): Promise<void> {
+    // Save and reset isPageChangeReconcile at the very start, before any
+    // early return paths, so the flag is always consumed exactly once and
+    // never bleeds across reconcile iterations.
+    const isPageChange = this.isPageChangeReconcile;
+    this.isPageChangeReconcile = false;
+
     const desired = this.getDesiredState();
     const hasActiveSession = this.targetUrl !== null && !this.isDisposedState;
 
@@ -316,8 +327,6 @@ export class RuntimeManager {
     // Before blocking, check playabilityStatus from window.ytInitialData.
     // Scheduled streams (LIVE_STREAM_OFFLINE) may lack #chat in the DOM
     // but will transition later — let the full bootstrap detect standby.
-    const isPageChange = this.isPageChangeReconcile;
-    this.isPageChangeReconcile = false;
     if (isYouTubeWatch(location.href) && !document.querySelector(CHAT_PANEL_SELECTOR)) {
       const playbackStatus = (window.ytInitialData as Record<string, unknown> | undefined)
         ?.playabilityStatus as { status?: string } | undefined;

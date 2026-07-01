@@ -604,8 +604,11 @@ export class SettingsUi {
     const a = document.createElement('a');
     a.href = url;
     a.download = 'yt-chat-overlay-settings.json';
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+    // Delay revoke to avoid race with async download start in some browsers.
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
   }
 
   private handleImport(): void {
@@ -733,10 +736,11 @@ export class SettingsUi {
   }
 
   destroy(): void {
-    // Explicit cleanup — does NOT persist settings. Policy: settings are
-    // saved only when the user explicitly closes the dialog (Close button,
-    // Escape, backdrop click). Implicit teardown from SPA navigation, page
-    // refresh, or App.stop() must NOT write to storage.
+    // Close dialog first to persist settings and restore scroll lock
+    // if it was open (e.g., SPA navigation while dialog is visible).
+    if (this.isDialogOpen()) {
+      this.close();
+    }
     if (this.previewTimer !== null) {
       this.previewTimer = clearSafeTimeout(this.previewTimer);
     }
