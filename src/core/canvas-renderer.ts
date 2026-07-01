@@ -1021,7 +1021,6 @@ export class CanvasRenderer extends RendererBase {
     }
 
     const newLaneY = placement.laneY + placement.verticalOffset;
-    const laneHeight = this.laneAllocator.getLaneHeight();
 
     // Check active messages in the target lane and adjacent lanes (reverse/newest first).
     // Lane-scoped scan: instead of O(all activeMessages), only check messages within
@@ -1042,8 +1041,11 @@ export class CanvasRenderer extends RendererBase {
       const activeElapsed = now - active.startTime - active.pausedDuration;
       if (activeElapsed < 0) continue; // not yet started
 
-      const verticalGap = Math.abs(active.y - newLaneY);
-      if (verticalGap >= laneHeight) continue; // different lanes, no overlap
+      // Extent-based overlap check: active occupies [active.y, active.y + active.height],
+      // new message would occupy [newLaneY, newLaneY + dimensions.height].
+      // Skip if no vertical overlap between the extents.
+      if (active.y + active.height <= newLaneY || active.y >= newLaneY + dimensions.height)
+        continue;
 
       if (isScrolling) {
         // Horizontal overlap: the active message's right edge must have
