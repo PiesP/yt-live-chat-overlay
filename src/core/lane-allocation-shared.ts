@@ -430,24 +430,19 @@ function allocateSingleLaneShared(
       continue;
     }
 
-    if (Math.random() < EPSILON_GREEDY) {
-      if (!zeroWaitCandidates) {
-        zeroWaitCandidates = [];
-        for (let j = i + 1; j < laneEnd; j++) {
-          if (state.collidedLanes.has(j)) continue;
-          const activeJ = state.speedTierLanes.get(j);
-          if (activeJ && activeJ.until > now) {
-            if (!areSpeedTiersCompatible(speedTier, activeJ.tier)) continue;
-          }
-          const availJ = heapGetSlotAvailableAt(state.heap, state.indexMap, j, state.numLanes);
-          if (availJ === undefined) continue;
-          const waitJ = Math.max(0, Math.ceil(availJ - now));
-          if (waitJ === 0) zeroWaitCandidates.push(j);
-        }
-      }
-      if (zeroWaitCandidates.length > 0) continue;
-    }
+    // Zero-wait lane found: pre-collect candidate for epsilon skip
+    if (!zeroWaitCandidates) zeroWaitCandidates = [];
+    zeroWaitCandidates.push(i);
+
+    // Epsilon-greedy: 5% chance to skip this lane for variety
+    if (Math.random() < EPSILON_GREEDY) continue;
+
     return { laneIndex: i, waitMs: 0 };
+  }
+
+  // After loop: if epsilon skipped all candidates, return first skipped
+  if (zeroWaitCandidates && zeroWaitCandidates.length > 0) {
+    return { laneIndex: zeroWaitCandidates[0]!, waitMs: 0 };
   }
 
   if (speedMatched && speedMatched.waitMs <= maxWaitMs) return speedMatched;
