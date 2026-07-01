@@ -341,7 +341,27 @@ export abstract class ChatSource implements Pauseable {
    * so they flow through dedup, spread emission, and the renderer.
    */
   injectExternalMessages(messages: ChatMessage[]): void {
-    if (this.chatPaused || !this.callback || messages.length === 0) return;
+    if (!this.callback || messages.length === 0) return;
+
+    // ── Defensive recovery from stuck chatPaused ──
+    // If chatPaused is true but the tab is visible and the video is playing,
+    // the pause state has likely drifted due to interleaved visibility and
+    // video-pause event ordering. Force-unpause to recover message delivery.
+    // Without this, the fetch interceptor and DOM watcher would silently
+    // drop all messages while YouTube's own chat panel continues to update.
+    if (this.chatPaused && document.visibilityState === 'visible') {
+      const playback = this.getPlaybackSnapshot();
+      if (playback && !playback.paused) {
+        log.warn(
+          'chatPaused state drift detected — tab visible + video playing but chatPaused=true. ' +
+            'Force-unpausing to recover message delivery.'
+        );
+        // Bypass setPaused() to avoid creating an abort controller we don't need
+        this.chatPaused = false;
+      }
+    }
+
+    if (this.chatPaused) return;
     const deduped = this.filterNewMessages(messages);
     if (deduped.length === 0) return;
     for (const message of deduped) {

@@ -107,6 +107,15 @@ export class CanvasRenderer extends RendererBase {
    * continues for a grace period before stopping. Prevents start/stop
    * thrashing during sparse chat intervals. */
   private idleSince: number | null = null;
+  /**
+   * Timestamp (performance.now) when anti-block was first activated in the
+   * current consecutive block sequence. Used to force-drainQueue after
+   * a maximum duration, preventing indefinite message suppression during
+   * sustained lane saturation.
+   */
+  private antiBlockSince: number | null = null;
+  /** Maximum consecutive duration (ms) that anti-block can suppress drainQueue. */
+  private static readonly ANTI_BLOCK_MAX_DURATION_MS = 2000;
   /** Current connection health status for overlay feedback. */
   private connectionStatus: ConnectionStatus = 'connected';
   /** Bounding box of the last-rendered status bar pill, for click hit testing. */
@@ -648,18 +657,44 @@ export class CanvasRenderer extends RendererBase {
     const isScrolling = mode === 'scroll' || mode === 'reverse';
 
     // Anti-block throttle: when lane utilization is critically high, pause
-    // new placements to prevent visual chaos. Checked BEFORE resetBatch so we
-    // can skip both resetBatch and drainQueue when drainQueue would be a no-op.
-    // High-priority messages (SuperChat ≥100, Membership ≥80) bypass the gate.
+    // new placements to prevent visual chaos. High-priority messages
+    // (SuperChat ≥100, Membership ≥80) always bypass the gate.
+    //
+    // resetBatch() is called unconditionally every frame to keep the lane
+    // allocator's collision set and speed-tier entries current. Without this,
+    // stale collision data from a previous frame can cause findPlacement()
+    // to skip lanes that have since freed up.
+    //
+    // When anti-block persists beyond ANTI_BLOCK_MAX_DURATION_MS, drainQueue
+    // is force-called to prevent indefinite message suppression. During
+    // sustained high traffic this acts as a pressure-release valve, allowing
+    // messages through even if they cause some visual overlap — better than
+    // showing nothing at all.
+    this.laneAllocator.resetBatch();
+
     if (this.isAntiBlockActive()) {
+      const now = performance.now();
+      if (this.antiBlockSince === null) {
+        this.antiBlockSince = now;
+      }
+
       const front = this.pendingQueue.peek();
-      if (front && CanvasRenderer.getMessagePriority(front) >= ANTI_BLOCK_PRIORITY_THRESHOLD) {
-        this.laneAllocator.resetBatch();
+      const forceDrain =
+        front !== undefined &&
+        now - this.antiBlockSince >= CanvasRenderer.ANTI_BLOCK_MAX_DURATION_MS;
+      const highPriorityFront =
+        front && CanvasRenderer.getMessagePriority(front) >= ANTI_BLOCK_PRIORITY_THRESHOLD;
+
+      if (highPriorityFront || forceDrain) {
+        if (forceDrain) {
+          // Reset the timer so the next force-drain is a full interval away
+          this.antiBlockSince = now;
+        }
         this.drainQueue(now);
       }
-      // else: skip both resetBatch and drainQueue — drainQueue would return immediately
+      // else: drainQueue skipped for this frame
     } else {
-      this.laneAllocator.resetBatch();
+      this.antiBlockSince = null; // anti-block no longer active — reset timer
       this.drainQueue(now);
     }
 
