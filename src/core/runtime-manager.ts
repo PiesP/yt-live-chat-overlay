@@ -177,6 +177,13 @@ export class RuntimeManager {
   /** Backlog messages preserved across soft restarts for re-injection. */
   private _pendingBacklogMessages: ChatMessage[] = [];
 
+  /**
+   * Set when the chat source was in error on the last watchdog check.
+   * The next successful message batch routes through the backlog controller
+   * regardless of size to prevent post-recovery queue flooding.
+   */
+  private _recoveringFromError = false;
+
   private get isDisposedState(): boolean {
     return this.state === 'disposed' || this.state === 'restarting' || this.state === 'destroyed';
   }
@@ -700,6 +707,7 @@ export class RuntimeManager {
     this.hiddenSince = null;
 
     this.sessionDedup.clear();
+    this._recoveringFromError = false;
 
     log.info('Disposed');
   }
@@ -766,6 +774,18 @@ export class RuntimeManager {
       }
 
       if (msgs.length > RuntimeManager.BACKLOG_BATCH_THRESHOLD) {
+        this.ensureBacklogController(renderer);
+        this.backlogController?.startBacklogInjection(msgs);
+        return;
+      }
+
+      // ── Error recovery guard ──
+      // When the chat source experienced errors (detected by watchdog),
+      // route ANY non-trivial batch through the backlog controller to
+      // prevent queue flooding. After recovery, the poll loop may receive
+      // accumulated messages that overwhelm the renderer's pending queue.
+      if (this._recoveringFromError && msgs.length >= 2) {
+        this._recoveringFromError = false;
         this.ensureBacklogController(renderer);
         this.backlogController?.startBacklogInjection(msgs);
         return;
@@ -1117,6 +1137,18 @@ export class RuntimeManager {
         // Propagate connection status to renderer for visual feedback
         const connStatus = this.computeConnectionStatus();
         this.renderer?.setConnectionStatus(connStatus);
+
+        // Track error recovery: when the chat source has errors, flag
+        // that the next successful message batch should route through
+        // the backlog controller to prevent post-recovery queue flooding.
+        const health = this.chatSource?.getHealthSnapshot();
+        if (health && health.consecutiveErrors > 0) {
+          this._recoveringFromError = true;
+        } else if (health && health.consecutiveErrors === 0 && this._recoveringFromError) {
+          // Errors cleared without a message batch to trigger the guard.
+          // Reset here so the flag doesn't persist across multiple healings.
+          this._recoveringFromError = false;
+        }
       } catch (error: unknown) {
         log.warn('Chat watchdog check error:', error);
       }
