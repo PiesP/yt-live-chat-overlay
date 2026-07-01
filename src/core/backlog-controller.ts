@@ -188,10 +188,14 @@ export class BacklogInjectionController implements Pauseable {
           added++;
         }
       }
-      if (added > 0)
+      if (added > 0) {
+        // Update totalBacklog so the progress indicator (processedBacklog / totalBacklog)
+        // reflects the true total and doesn't exceed 100%.
+        this.totalBacklog += added;
         log.debug(
-          `Backlog injection in progress, queued ${added} additional (${messages.length - added} duplicates skipped)`
+          `Backlog injection in progress, queued ${added} additional (${messages.length - added} duplicates skipped, total now ${this.totalBacklog})`
         );
+      }
       return;
     }
 
