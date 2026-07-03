@@ -884,6 +884,9 @@ self.onmessage = (e: MessageEvent) => {
         case 'destroy':
           handleDestroy();
           break;
+        case 'ping':
+          self.postMessage({ type: 'pong' });
+          break;
       }
     } catch (err) {
       self.postMessage({ type: 'error', error: err instanceof Error ? err.message : String(err) });

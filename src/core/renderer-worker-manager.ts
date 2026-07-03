@@ -107,6 +107,12 @@ export class RenderWorkerManager {
   /** Unsubscribe function for overlay dimension changes, stored for cleanup. */
   private dimensionsUnsubscribe: (() => void) | null = null;
 
+  /** Ping/pong health check for detecting crashed or unresponsive workers. */
+  private pingTimer: ReturnType<typeof setInterval> | null = null;
+  private lastPongTime = 0;
+  private static readonly PING_INTERVAL_MS = 1000;
+  private static readonly PONG_TIMEOUT_MS = 5000;
+
   constructor(deps: WorkerManagerDeps) {
     this.deps = deps;
   }
@@ -121,6 +127,37 @@ export class RenderWorkerManager {
 
   get queueDepth(): number {
     return this._queueDepth;
+  }
+
+  /**
+   * Whether the worker is responding to ping messages.
+   * Returns false when the worker has not responded within PONG_TIMEOUT_MS
+   * of the last ping, indicating a crashed or frozen worker thread.
+   */
+  isAlive(): boolean {
+    if (!this.active || !this.worker) return true; // no worker → not applicable
+    if (this.lastPongTime === 0) return true; // haven't received first pong yet
+    return performance.now() - this.lastPongTime < RenderWorkerManager.PONG_TIMEOUT_MS;
+  }
+
+  /** Start periodic ping/pong health checks with the worker. */
+  private startPingPong(): void {
+    this.stopPingPong();
+    this.lastPongTime = 0;
+    this.pingTimer = setInterval(() => {
+      if (this.worker) {
+        this.worker.postMessage({ type: 'ping' });
+      }
+    }, RenderWorkerManager.PING_INTERVAL_MS);
+  }
+
+  /** Stop periodic ping/pong health checks. */
+  private stopPingPong(): void {
+    if (this.pingTimer !== null) {
+      clearInterval(this.pingTimer);
+      this.pingTimer = null;
+    }
+    this.lastPongTime = 0;
   }
 
   /**
@@ -197,6 +234,9 @@ export class RenderWorkerManager {
           case 'error':
             log.warn('Render worker error:', (data as Record<string, unknown>).error);
             break;
+          case 'pong':
+            this.lastPongTime = performance.now();
+            break;
         }
       };
 
@@ -221,6 +261,7 @@ export class RenderWorkerManager {
 
       this.worker = worker;
       this.active = true;
+      this.startPingPong();
 
       log.info('Render worker initialized');
       return true;
@@ -371,6 +412,7 @@ export class RenderWorkerManager {
   destroy(): void {
     this.dimensionsUnsubscribe?.();
     this.dimensionsUnsubscribe = null;
+    this.stopPingPong();
     if (!this.worker) return;
     // Send a destroy message so the worker can flush in-flight work
     // (pending ImageBitmap transfers) before terminate() severs the connection.

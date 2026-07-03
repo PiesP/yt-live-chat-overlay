@@ -983,12 +983,19 @@ export class RuntimeManager {
     // Detects the case where the chat source is healthy (messages arriving)
     // but the renderer has silently stopped rendering them (queue growing,
     // zero active messages, no render activity for RENDERER_STUCK_THRESHOLD_MS).
+    //
+    // Also detects a crashed/unresponsive Worker: when the Worker is active
+    // but hasn't responded to pings within PONG_TIMEOUT_MS, treat the renderer
+    // as stuck so the recovery path can restart the Worker or fall back to
+    // main-thread rendering.
     const r = this.renderer;
+    const isWorkerDead = r != null && !r.isWorkerAlive();
     const isRendererStuck =
       r != null &&
-      r.getQueueLength() > 0 &&
-      r.getActiveMessageCount() === 0 &&
-      r.getMsSinceLastRenderActivity() >= RENDERER_STUCK_THRESHOLD_MS;
+      (isWorkerDead ||
+        (r.getQueueLength() > 0 &&
+          r.getActiveMessageCount() === 0 &&
+          r.getMsSinceLastRenderActivity() >= RENDERER_STUCK_THRESHOLD_MS));
 
     // Pre-live standby has no chat source — never restart from health checks.
     if (this.standbyController.isStandby()) {

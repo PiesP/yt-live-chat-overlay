@@ -432,6 +432,15 @@ export abstract class RendererBase {
   /** Number of currently active (visible) messages. */
   abstract getActiveMessageCount(): number;
 
+  /**
+   * Whether the off-main-thread worker (if any) is responding to pings.
+   * Returns true when no worker is active (main-thread only) or when the
+   * worker has responded within the timeout window.
+   */
+  isWorkerAlive(): boolean {
+    return true; // default: no worker → always alive
+  }
+
   /** Reset lane allocator with new dimensions. */
   resetAllocator(dims: OverlayDimensions | null): void {
     this.laneAllocator.reset(dims);

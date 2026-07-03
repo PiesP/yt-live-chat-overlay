@@ -402,6 +402,10 @@ export class CanvasRenderer extends RendererBase {
     return this.activeMessages.length;
   }
 
+  override isWorkerAlive(): boolean {
+    return this.workerManager.isActive ? this.workerManager.isAlive() : true;
+  }
+
   // ── Message ingress ──────────────────────────────────────────────────
 
   addMessage(message: ChatMessage): void {
