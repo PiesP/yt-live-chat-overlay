@@ -396,7 +396,7 @@ export function findPlacementShared(
  * Allocate a single lane with three-phase speed-tier scanning.
  * Pure function operating on LaneAllocationState — no `this`.
  */
-function allocateSingleLaneShared(
+export function allocateSingleLaneShared(
   state: LaneAllocationState,
   now: number,
   laneStart: number,

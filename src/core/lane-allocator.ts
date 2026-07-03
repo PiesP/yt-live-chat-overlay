@@ -4,16 +4,15 @@
 import type { FontWeight, OverlayDimensions } from '@app-types';
 import { rendererLayout } from '@core/design-tokens';
 import {
-  areSpeedTiersCompatible,
   buildLaneHeap,
   computeLaneY,
   computeOccupancyMs,
-  heapGetSlotAvailableAt,
+  findPlacementShared,
   heapSiftDown,
   heapUpdateLane,
 } from '@core/lane-allocation-shared';
 import { createLogger } from '@core/logging';
-import { EPSILON, SPEED_TIER } from '@core/renderer-constants';
+import { SPEED_TIER } from '@core/renderer-constants';
 import { getFontString, measureTextHeight } from '@core/text-measure';
 
 const log = createLogger('LaneAllocator');
@@ -92,9 +91,9 @@ export class LaneAllocator {
   /** 4-ary min-heap of [laneIndex, availableAtMs] pairs, sorted by availableAtMs */
   private heap: [number, number][] = [];
   /** Reverse map: laneIndex → heap index for O(1) lookup and update */
-  private laneIndexToHeapIndex: Map<number, number> = new Map();
+  private indexMap: Map<number, number> = new Map();
   private laneHeight = 0;
-  private laneCount = 0;
+  private numLanes = 0;
   /** Cached utilization value, recomputed in resetBatch for O(1) reads. */
   private cachedUtilization = 0;
   /** Number of lanes currently occupied (availableAt > now). Maintained incrementally. */
@@ -117,14 +116,6 @@ export class LaneAllocator {
    * Stale entries (until < now) are cleared on each resetBatch().
    */
   private speedTierLanes: Map<number, { tier: number; until: number }> = new Map();
-
-  /**
-   * Epsilon-greedy selection probability (0-1).
-   * 5% chance to skip the strict topmost zero-wait lane and pick the
-   * next one below. Prevents all traffic from consolidating on lane 0
-   * when the incoming message rate is low.
-   */
-  private static readonly EPSILON = EPSILON;
 
   constructor(private readonly options: LaneAllocatorOptions) {}
 
@@ -149,7 +140,7 @@ export class LaneAllocator {
 
   reset(dimensions: OverlayDimensions | null): void {
     this.heap = [];
-    this.laneIndexToHeapIndex = new Map();
+    this.indexMap = new Map();
     this.collidedLanes.clear();
     this.speedTierLanes.clear();
     this.cachedUtilization = 0;
@@ -157,7 +148,7 @@ export class LaneAllocator {
     this.utilizationRecountCounter = 0;
     if (!dimensions) {
       this.laneHeight = 0;
-      this.laneCount = 0;
+      this.numLanes = 0;
       return;
     }
 
@@ -173,13 +164,13 @@ export class LaneAllocator {
     this.laneHeight = Math.max(1, textHeight + totalPaddingV + this.options.laneSpacing);
 
     const usableHeight = dimensions.height * (1 - this.options.safeTop - this.options.safeBottom);
-    this.laneCount = Math.max(1, Math.floor(usableHeight / this.laneHeight));
+    this.numLanes = Math.max(1, Math.floor(usableHeight / this.laneHeight));
 
-    log.debug('Reset', { lanes: this.laneCount, height: Math.round(this.laneHeight) });
+    log.debug('Reset', { lanes: this.numLanes, height: Math.round(this.laneHeight) });
 
     // Uniform initialization: all lanes start at the same available time.
     const now = performance.now();
-    this.heap = buildLaneHeap(this.laneCount, now, this.laneIndexToHeapIndex);
+    this.heap = buildLaneHeap(this.numLanes, now, this.indexMap);
   }
 
   isEmpty(): boolean {
@@ -193,7 +184,7 @@ export class LaneAllocator {
    */
   snapshot(): LaneAllocatorSnapshot {
     const indexMap: Record<number, number> = {};
-    this.laneIndexToHeapIndex.forEach((v, k) => {
+    this.indexMap.forEach((v, k) => {
       indexMap[k] = v;
     });
     const speedTierMap: Record<number, { tier: number; until: number }> = {};
@@ -204,7 +195,7 @@ export class LaneAllocator {
       heap: structuredClone(this.heap),
       indexMap,
       laneHeight: this.laneHeight,
-      laneCount: this.laneCount,
+      laneCount: this.numLanes,
       speedTierLanes: speedTierMap,
     };
   }
@@ -215,11 +206,9 @@ export class LaneAllocator {
    */
   restore(snapshot: LaneAllocatorSnapshot): void {
     this.heap = structuredClone(snapshot.heap);
-    this.laneIndexToHeapIndex = new Map(
-      Object.entries(snapshot.indexMap).map(([k, v]) => [Number(k), v])
-    );
+    this.indexMap = new Map(Object.entries(snapshot.indexMap).map(([k, v]) => [Number(k), v]));
     this.laneHeight = snapshot.laneHeight;
-    this.laneCount = snapshot.laneCount;
+    this.numLanes = snapshot.laneCount;
     this.speedTierLanes = new Map(
       Object.entries(snapshot.speedTierLanes).map(([k, v]) => [
         Number(k),
@@ -233,7 +222,7 @@ export class LaneAllocator {
   }
 
   getLaneCount(): number {
-    return this.laneCount;
+    return this.numLanes;
   }
 
   /** Get current lane utilization ratio (0-1): occupied lanes / total lanes. O(1) cached value. */
@@ -256,12 +245,21 @@ export class LaneAllocator {
     speedTier: number = SPEED_TIER.MID
   ): LanePlacement | null {
     const now = performance.now();
-    const totalLanes = this.laneCount;
+    const totalLanes = this.numLanes;
     if (totalLanes <= 0) return null;
 
     const slotCount = Math.max(1, Math.ceil(messageHeight / this.laneHeight));
 
-    const result = this.allocateMultiSlot(now, 0, totalLanes, slotCount, speedTier);
+    // Delegate to shared pure function via LaneAllocationState cast.
+    const state = this as unknown as import('@core/lane-allocation-shared').LaneAllocationState;
+    const result = findPlacementShared(
+      state,
+      now,
+      messageHeight,
+      this.laneHeight,
+      this.options.scrollDurationMaxMs,
+      speedTier
+    );
     if (!result) return null;
 
     return {
@@ -330,16 +328,16 @@ export class LaneAllocator {
     // Heap integrity guard: heap length must match index map size.
     // A mismatch indicates a corrupted laneIndexToHeapIndex mapping
     // (duplicate or missing lane entries).
-    if (this.heap.length !== this.laneIndexToHeapIndex.size) {
+    if (this.heap.length !== this.indexMap.size) {
       log.warn(
         `Heap integrity violation: heap.length=${this.heap.length} != ` +
-          `laneIndexToHeapIndex.size=${this.laneIndexToHeapIndex.size}. Rebuilding index map.`
+          `laneIndexToHeapIndex.size=${this.indexMap.size}. Rebuilding index map.`
       );
       // Rebuild laneIndexToHeapIndex from scratch to restore consistency
-      this.laneIndexToHeapIndex.clear();
+      this.indexMap.clear();
       for (let i = 0; i < this.heap.length; i++) {
         const entry = this.heap[i];
-        if (entry) this.laneIndexToHeapIndex.set(entry[0], i);
+        if (entry) this.indexMap.set(entry[0], i);
       }
       // Re-heapify to restore min-heap invariant (corrupted heap may remain
       // after index map rebuild — the heap array itself could be out of order).
@@ -403,195 +401,15 @@ export class LaneAllocator {
   }
 
   /**
-   * Allocate a single lane with three-phase speed-tier scanning.
-   *
-   * Phase 1 — zero-wait with tier compatibility filter.
-   * Phase 2 — same-tier busy lane (shortest wait first).
-   * Phase 3 — fastest-free lane (all message types).
-   *
-   * Collided lanes (from markCollision feedback) are excluded from all phases.
-   */
-  private allocateSingleLane(
-    now: number,
-    laneStart: number,
-    laneEnd: number,
-    speedTier: number
-  ): { laneIndex: number; waitMs: number } | null {
-    if (this.heap.length === 0) return null;
-
-    const maxWaitMs = this.options.scrollDurationMaxMs;
-    let firstBusy: { laneIndex: number; waitMs: number } | null = null;
-    let speedMatched: { laneIndex: number; waitMs: number } | null = null;
-    // Collect zero-wait compatible lanes during the first scan so that
-    // epsilon-greedy skipping is O(1) lookup instead of O(n) re-scan.
-    // On epsilon skip, we pick the next candidate from this array.
-    const zeroWaitCandidates: number[] = [];
-
-    // ── Phase 1: zero-wait lane with tier compatibility filter ──
-    for (let i = laneStart; i < laneEnd; i++) {
-      if (this.collidedLanes.has(i)) continue;
-
-      // Speed-tier compatibility check
-      const active = this.speedTierLanes.get(i);
-      if (active && active.until > now) {
-        if (!areSpeedTiersCompatible(speedTier, active.tier)) continue;
-      }
-
-      const avail = this.getSlotAvailableAt(i);
-      if (avail === undefined) continue;
-      const wait = Math.max(0, Math.ceil(avail - now));
-      if (wait > 0) {
-        // Track for phases 2-3
-        if (!firstBusy) firstBusy = { laneIndex: i, waitMs: wait };
-        // Track same-tier candidate for phase 2
-        if (!speedMatched || wait < speedMatched.waitMs) {
-          const hasSameTier =
-            active !== undefined && active.until > now && active.tier === speedTier;
-          if (hasSameTier) speedMatched = { laneIndex: i, waitMs: wait };
-        }
-        continue;
-      }
-      // Found a zero-wait compatible lane.
-      // Epsilon-greedy: 5% chance to skip for visual variety.
-      // Candidates are collected during the scan — on epsilon fire,
-      // pick the next unvisited zero-wait lane from the array (O(1)).
-      if (Math.random() < LaneAllocator.EPSILON) {
-        // Record this lane as a future candidate and skip it for now.
-        zeroWaitCandidates.push(i);
-        continue;
-      }
-      return { laneIndex: i, waitMs: 0 };
-    }
-
-    // Epsilon path: if we skipped some zero-wait lanes during the scan,
-    // return the first skipped one (O(1) — no re-scan needed).
-    const firstSkipped = zeroWaitCandidates[0];
-    if (firstSkipped !== undefined) {
-      return { laneIndex: firstSkipped, waitMs: 0 };
-    }
-
-    // ── Phase 2: same-tier busy lane ──
-    if (speedMatched && speedMatched.waitMs <= maxWaitMs) return speedMatched;
-
-    // ── Phase 3: fastest-free lane (real-time only; backlog returns null) ──
-    if (firstBusy && firstBusy.waitMs <= maxWaitMs && speedTier !== SPEED_TIER.BACKLOG)
-      return firstBusy;
-    return null;
-  }
-
-  /**
    * Allocate a contiguous block of `slotCount` lanes for tall messages
    * (superchat, membership). Uses a 3-phase strategy:
    *
-   * Phase 1 — zero-wait block: all slots free and tier-compatible.
-   * Phase 2 — busy block within maxWaitMs: all slots tier-compatible.
-   * Phase 3 — fallback to single-lane allocator.
-   *
-   * Single-slot messages are forwarded to allocateSingleLane.
-   */
-  private allocateMultiSlot(
-    now: number,
-    laneStart: number,
-    laneEnd: number,
-    slotCount: number,
-    speedTier: number
-  ): { laneIndex: number; waitMs: number } | null {
-    if (this.heap.length === 0) return null;
-    if (slotCount <= 1) {
-      return this.allocateSingleLane(now, laneStart, laneEnd, speedTier);
-    }
-
-    const maxWaitMs = this.options.scrollDurationMaxMs;
-    const maxStartLane = laneEnd - slotCount;
-    if (maxStartLane < laneStart) return null;
-
-    // Helper: check tier compatibility for a single slot
-    const isTierCompatible = (slotIdx: number): boolean => {
-      const active = this.speedTierLanes.get(slotIdx);
-      if (!active || active.until <= now) return true;
-      return areSpeedTiersCompatible(speedTier, active.tier);
-    };
-
-    // Phase 1: scan for a block where ALL slots have waitMs === 0 and
-    // are tier-compatible.
-    for (let startIdx = laneStart; startIdx <= maxStartLane; startIdx++) {
-      let allZeroWait = true;
-      let blockMaxWait = 0;
-      for (let s = 0; s < slotCount; s++) {
-        const slotIdx = startIdx + s;
-        if (this.collidedLanes.has(slotIdx)) {
-          allZeroWait = false;
-          break;
-        }
-        if (!isTierCompatible(slotIdx)) {
-          allZeroWait = false;
-          break;
-        }
-        const slotAvail = this.getSlotAvailableAt(slotIdx);
-        if (slotAvail === undefined) {
-          allZeroWait = false;
-          break;
-        }
-        const slotWait = Math.max(0, Math.ceil(slotAvail - now));
-        if (slotWait > 0) allZeroWait = false;
-        if (slotWait > maxWaitMs) {
-          allZeroWait = false;
-          break;
-        }
-        blockMaxWait = Math.max(blockMaxWait, slotWait);
-      }
-      if (allZeroWait) return { laneIndex: startIdx, waitMs: blockMaxWait };
-    }
-
-    // Phase 2: scan for a contiguous block where ALL slots are busy but
-    // within maxWaitMs and pass tier-compatibility. Pick the block with
-    // the shortest maximum wait.
-    let bestBlock: { laneIndex: number; waitMs: number } | null = null;
-    for (let startIdx = laneStart; startIdx <= maxStartLane; startIdx++) {
-      let allCompatible = true;
-      let blockMaxWait = 0;
-      for (let s = 0; s < slotCount; s++) {
-        const slotIdx = startIdx + s;
-        if (this.collidedLanes.has(slotIdx)) {
-          allCompatible = false;
-          break;
-        }
-        if (!isTierCompatible(slotIdx)) {
-          allCompatible = false;
-          break;
-        }
-        const slotAvail = this.getSlotAvailableAt(slotIdx);
-        if (slotAvail === undefined) {
-          allCompatible = false;
-          break;
-        }
-        const slotWait = Math.max(0, Math.ceil(slotAvail - now));
-        if (slotWait > maxWaitMs) {
-          allCompatible = false;
-          break;
-        }
-        blockMaxWait = Math.max(blockMaxWait, slotWait);
-      }
-      if (allCompatible && blockMaxWait <= maxWaitMs) {
-        if (!bestBlock || blockMaxWait < bestBlock.waitMs) {
-          bestBlock = { laneIndex: startIdx, waitMs: blockMaxWait };
-        }
-      }
-    }
-    if (bestBlock) return bestBlock;
-
-    // Phase 3: fall back to single-lane allocator.
-    return this.allocateSingleLane(now, laneStart, laneEnd, speedTier);
-  }
 
   /** Get the available-at time for a lane by its index. */
-  private getSlotAvailableAt(laneIndex: number): number | undefined {
-    return heapGetSlotAvailableAt(this.heap, this.laneIndexToHeapIndex, laneIndex);
-  }
 
   /** Update a lane's available time in the heap. */
   private updateLane(laneIndex: number, newAvailableAt: number): void {
-    heapUpdateLane(this.heap, this.laneIndexToHeapIndex, laneIndex, newAvailableAt);
+    heapUpdateLane(this.heap, this.indexMap, laneIndex, newAvailableAt);
   }
 
   /** Shift all lane timers and speed-tier tracking by a fixed offset. */
@@ -618,6 +436,6 @@ export class LaneAllocator {
   // ── 4-ary min-heap operations ──────────────────────────────────────
 
   private siftDown(startIdx: number): void {
-    heapSiftDown(this.heap, this.laneIndexToHeapIndex, startIdx);
+    heapSiftDown(this.heap, this.indexMap, startIdx);
   }
 }
