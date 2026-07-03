@@ -388,7 +388,45 @@ export function findPlacementShared(
   }
   if (bestBlock) return bestBlock;
 
-  // Phase 3: fallback to single-lane allocator
+  // Phase 3: fallback — any contiguous block within maxWaitMs (speed-tier agnostic)
+  // For multi-slot messages, scan for consecutive compatible lanes instead of
+  // falling through to allocateSingleLaneShared which returns only 1 lane.
+  // Without this, SuperChat/Membership messages needing 2-3 lanes get placed
+  // on a single lane, causing visual overlap.
+  if (slotCount > 1) {
+    let bestBlock: { laneIndex: number; waitMs: number } | null = null;
+    for (let startIdx = 0; startIdx <= maxStartLane; startIdx++) {
+      let blockMaxWait = 0;
+      let allAvailable = true;
+      for (let s = 0; s < slotCount; s++) {
+        const slotIdx = startIdx + s;
+        if (state.collidedLanes.has(slotIdx)) {
+          allAvailable = false;
+          break;
+        }
+        const avail = heapGetSlotAvailableAt(state.heap, state.indexMap, slotIdx, numLanes);
+        if (avail === undefined) {
+          allAvailable = false;
+          break;
+        }
+        const wait = Math.max(0, Math.ceil(avail - now));
+        if (wait > maxWaitMs) {
+          allAvailable = false;
+          break;
+        }
+        blockMaxWait = Math.max(blockMaxWait, wait);
+      }
+      if (allAvailable) {
+        if (!bestBlock || blockMaxWait < bestBlock.waitMs) {
+          bestBlock = { laneIndex: startIdx, waitMs: blockMaxWait };
+        }
+      }
+    }
+    if (bestBlock) return bestBlock;
+    return null;
+  }
+
+  // Single-slot fallback
   return allocateSingleLaneShared(state, now, 0, numLanes, maxWaitMs, speedTier);
 }
 
