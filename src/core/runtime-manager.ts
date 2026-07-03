@@ -21,6 +21,7 @@ import { installDomChatWatcher } from '@core/dom-chat-watcher';
 import type { InterceptorUnsubscribe } from '@core/fetch-interceptor';
 import { installFetchInterceptor } from '@core/fetch-interceptor';
 import { createLogger } from '@core/logging';
+import { MessageBus } from '@core/message-bus';
 import { MessageIdRegistry } from '@core/message-id-registry';
 import { OVERLAY_SELECTOR, Overlay } from '@core/overlay';
 import type { ConnectionStatus, RendererBase } from '@core/renderer-base';
@@ -178,6 +179,8 @@ export class RuntimeManager {
   private videoPauseController = new VideoPauseController();
   private readonly standbyController: StandbyController;
   private backlogController: BacklogInjectionController | null = null;
+  /** Pub/sub bus decoupling ChatSource message production from Renderer consumption. */
+  private messageBus: MessageBus<ChatMessage> | null = null;
   private chatWatchdogTimer: ReturnType<typeof setInterval> | null = null;
   private state: RuntimeState = 'init';
   private hiddenSince: number | null = null;
@@ -722,6 +725,9 @@ export class RuntimeManager {
     this.chatSource?.stop();
     this.chatSource = null;
 
+    this.messageBus?.destroy();
+    this.messageBus = null;
+
     this.fetchInterceptorUnsubscribe?.();
     this.fetchInterceptorUnsubscribe = null;
 
@@ -778,78 +784,82 @@ export class RuntimeManager {
       chatSource.burstRateProvider = () => this.renderer?.getBurstEmaRate() ?? 0;
     }
 
+    // ── Message bus: decouples ChatSource (producer) from Renderer (consumer) ──
+    this.messageBus?.destroy();
+    this.messageBus = new MessageBus<ChatMessage>();
+    this.messageBus.subscribe((msgs) => this.routeMessages(msgs));
+
     return chatSource.start((messages, _isInitialSeed) => {
-      if (this.isDisposedState) return;
-      const renderer = this.renderer;
-      if (!renderer) return;
-
-      // Clear standby on first message arrival — must happen before routing
-      // decisions (backlog, timestamp paths return early and skip it otherwise).
-      renderer.setStandbyStatus(false);
-
       const msgs = Array.isArray(messages) ? messages : [messages];
+      if (this.messageBus) this.messageBus.publish(msgs);
+    });
+  }
 
-      // Replay messages carry videoOffsetMs from YouTube's API — they have
-      // exact timing and should bypass the backlog controller entirely.
-      // The rAF flush loop in ReplayChatSource already handles frame-accurate
-      // emission; Poisson spacing would distort the timing.
-      //
-      // Live chat initial seed batches (> 50 messages) still go through the
-      // backlog controller for burst protection.
-      const hasVideoTimestamps = msgs.some((m) => m.videoOffsetMs !== undefined);
-      if (hasVideoTimestamps) {
-        for (const msg of msgs) {
-          if (!this.acceptForRenderer(msg)) continue;
-          renderer.addMessage(msg);
-        }
-        return;
-      }
+  /**
+   * Route a batch of chat messages through dedup, backlog controller,
+   * and renderer.  Subscribed to the MessageBus in startSession().
+   */
+  private routeMessages(msgs: ChatMessage[]): void {
+    if (this.isDisposedState) return;
+    const renderer = this.renderer;
+    if (!renderer) return;
 
-      if (msgs.length > RuntimeManager.BACKLOG_BATCH_THRESHOLD) {
-        this.ensureBacklogController(renderer);
-        this.backlogController?.startBacklogInjection(msgs);
-        return;
-      }
+    // Clear standby on first message arrival — must happen before routing
+    // decisions (backlog, timestamp paths return early and skip it otherwise).
+    renderer.setStandbyStatus(false);
 
-      // ── Error recovery guard ──
-      // When the chat source experienced errors (detected by watchdog),
-      // route ANY non-trivial batch through the backlog controller to
-      // prevent queue flooding. After recovery, the poll loop may receive
-      // accumulated messages that overwhelm the renderer's pending queue.
-      if (this._recoveringFromError && msgs.length >= 2) {
-        this._recoveringFromError = false;
-        this.ensureBacklogController(renderer);
-        this.backlogController?.startBacklogInjection(msgs);
-        return;
-      }
-
-      // Clear standby on first message arrival (idempotent).
-      renderer.setStandbyStatus(false);
-
-      // Utilization-aware throttle for live bursts: when lanes are >80% full,
-      // route through the backlog controller even for small batches so messages
-      // get Poisson-spaced injection instead of hitting the pendingQueue all at
-      // once. Without this, live poll responses (20-50 msgs) bypass the backlog
-      // controller entirely, flooding the queue during bursts.
-      const utilization = renderer.getLaneUtilization();
-      if (
-        utilization >= RuntimeManager.BACKLOG_UTILIZATION_THRESHOLD &&
-        msgs.length >= RuntimeManager.SMALL_BATCH_THRESHOLD
-      ) {
-        this.ensureBacklogController(renderer);
-        this.backlogController?.startBacklogInjection(msgs);
-        return;
-      }
-
+    // Replay messages carry videoOffsetMs from YouTube's API — they have
+    // exact timing and should bypass the backlog controller entirely.
+    // The rAF flush loop in ReplayChatSource already handles frame-accurate
+    // emission; Poisson spacing would distort the timing.
+    //
+    // Live chat initial seed batches (> 50 messages) still go through the
+    // backlog controller for burst protection.
+    const hasVideoTimestamps = msgs.some((m) => m.videoOffsetMs !== undefined);
+    if (hasVideoTimestamps) {
       for (const msg of msgs) {
         if (!this.acceptForRenderer(msg)) continue;
         renderer.addMessage(msg);
       }
+      return;
+    }
 
-      if (this.backlogController?.isBacklogActive) {
-        this.backlogController.notifyRealTimeActivity();
-      }
-    }, signal);
+    if (msgs.length > RuntimeManager.BACKLOG_BATCH_THRESHOLD) {
+      this.ensureBacklogController(renderer);
+      this.backlogController?.startBacklogInjection(msgs);
+      return;
+    }
+
+    // ── Error recovery guard ──
+    if (this._recoveringFromError && msgs.length >= 2) {
+      this._recoveringFromError = false;
+      this.ensureBacklogController(renderer);
+      this.backlogController?.startBacklogInjection(msgs);
+      return;
+    }
+
+    // Clear standby on first message arrival (idempotent).
+    renderer.setStandbyStatus(false);
+
+    // Utilization-aware throttle for live bursts
+    const utilization = renderer.getLaneUtilization();
+    if (
+      utilization >= RuntimeManager.BACKLOG_UTILIZATION_THRESHOLD &&
+      msgs.length >= RuntimeManager.SMALL_BATCH_THRESHOLD
+    ) {
+      this.ensureBacklogController(renderer);
+      this.backlogController?.startBacklogInjection(msgs);
+      return;
+    }
+
+    for (const msg of msgs) {
+      if (!this.acceptForRenderer(msg)) continue;
+      renderer.addMessage(msg);
+    }
+
+    if (this.backlogController?.isBacklogActive) {
+      this.backlogController.notifyRealTimeActivity();
+    }
   }
 
   /**
