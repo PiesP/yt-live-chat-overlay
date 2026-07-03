@@ -131,7 +131,9 @@ export class ImageFetchManager {
     const img = new Image();
     this.inFlightImages.add(img);
     img.crossOrigin = 'anonymous';
-    img.src = url;
+    // Assign onload/onerror BEFORE setting src to avoid a race where
+    // a cached image fires the load event synchronously before the
+    // handler is attached.
     img.onload = () => {
       if (this.isDestroyed) return;
       this.inFlightImages.delete(img);
@@ -144,6 +146,7 @@ export class ImageFetchManager {
       this.inFlightImages.delete(img);
       this.imageLoading.delete(url);
     };
+    img.src = url;
   }
 
   /**
