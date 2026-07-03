@@ -86,8 +86,8 @@ export class CanvasRenderer extends RendererBase {
   private animFrameId: number | null = null;
   /** Pre-computed 1/maxMessageAgeMs to avoid per-frame division in opacity calc. */
   private readonly ageFadeRate = computeAgeFadeRate(this.settings.maxMessageAgeMs);
-  /** Pre-computed 1/fadeDurationMs to avoid per-frame division in opacity calc. */
-  private invFadeDuration = computeInvFadeDuration(500);
+  /** Pre-computed 1/fadeDurationMs — corrected in constructor from settings. */
+  private invFadeDuration = 0;
   private overlayDimensionsUnsubscribe: (() => void) | null = null;
   /** Debounce flag for emoji-load-triggered rAF restarts. */
   private needsRerender = false;
@@ -299,12 +299,10 @@ export class CanvasRenderer extends RendererBase {
     };
     canvas.addEventListener('click', this.canvasClickHandler);
 
-    // Destroy previous ImageFetchManager (if any) to clean up its interval
-    // timer before creating a new one. Without this, recreating the renderer
-    // (e.g. on settings change) leaks the old setInterval forever.
-    if (this.imageFetchManager) {
-      this.imageFetchManager.destroy();
-    }
+    // Note: ImageFetchManager cleanup is handled by onDestroy(), which is
+    // called by RuntimeManager.disposeSession() before a new renderer is
+    // created.  The old guard here never fired because the field is only
+    // assigned later in this constructor (line 311).
 
     // Initialize ImageFetchManager BEFORE RenderWorkerManager so the worker
     // receives a valid reference instead of undefined.

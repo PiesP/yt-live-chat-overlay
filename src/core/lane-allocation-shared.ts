@@ -10,7 +10,7 @@
  * allocation logic between the two contexts.
  */
 
-import { LANE_COOLDOWN_MIN_MS, SAFETY_MARGIN_RATIO } from '@core/renderer-constants';
+import { EPSILON, LANE_COOLDOWN_MIN_MS, SAFETY_MARGIN_RATIO } from '@core/renderer-constants';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -435,7 +435,7 @@ function allocateSingleLaneShared(
     zeroWaitCandidates.push(i);
 
     // Epsilon-greedy: 5% chance to skip this lane for variety
-    if (Math.random() < EPSILON_GREEDY) continue;
+    if (Math.random() < EPSILON) continue;
 
     return { laneIndex: i, waitMs: 0 };
   }
@@ -450,6 +450,4 @@ function allocateSingleLaneShared(
     return firstBusy;
   return null;
 }
-
-const EPSILON_GREEDY = 0.05;
 const SPEED_TIER_BACKLOG = 3;

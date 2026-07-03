@@ -70,6 +70,7 @@ import {
   HORIZONTAL_STAGGER_MAX,
   HORIZONTAL_STAGGER_PER_STEP,
   hashStringForTier as hashForTier,
+  MS_TO_S,
   OPACITY_BUCKET_COUNT as OPACITY_BUCKETS,
   SPEED_TIER,
   STAGGER_BATCH_MAX,
@@ -281,7 +282,7 @@ interface ActiveMessage {
 /** Angular frequency for pulsing-border animation (half-cycle per second). */
 const PULSE_ANGULAR_FREQ = Math.PI;
 /** Milliseconds per second, for time-unit conversions in animation math. */
-const MS_PER_SEC = 1000;
+const MS_PER_SEC = MS_TO_S;
 
 // ── Globals (worker scope) ───────────────────────────────────────────────
 
@@ -899,6 +900,25 @@ self.onmessage = (e: MessageEvent) => {
 // ── Queue ─────────────────────────────────────────────────────────────────
 
 function enqueueMessage(msg: WorkerMessage): void {
+  // Enforce max queue size matching main-thread behavior.  Without this
+  // cap, sustained 100% lane utilization causes unbounded pendingQueue
+  // growth leading to tab crash under extreme chat density.
+  const maxSize = config?.queueMaxSize ?? 200;
+  if (pendingQueue.length >= maxSize) {
+    // Drop the lowest-priority message to make room.
+    let minIdx = pendingQueueOffset;
+    for (let i = pendingQueueOffset + 1; i < pendingQueue.length; i++) {
+      if ((pendingQueue[i]?.priority ?? 0) < (pendingQueue[minIdx]?.priority ?? 0)) {
+        minIdx = i;
+      }
+    }
+    if (msg.priority > (pendingQueue[minIdx]?.priority ?? 0)) {
+      // Replace: swap new message into the lowest-priority slot
+      pendingQueue[minIdx] = msg;
+    }
+    // else: drop (new message has lower priority than everything in queue)
+    return;
+  }
   // O(1) push — sort deferred to drainQueue batch start
   pendingQueue.push(msg);
   pendingQueueSortNeeded = true;

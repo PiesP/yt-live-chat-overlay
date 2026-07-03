@@ -156,8 +156,12 @@ export function installDomChatWatcher(onMessages: DomMessageCallback): DomWatche
     // tabs, so mutations would accumulate without being flushed.
     const handleVisibility = (): void => {
       if (document.visibilityState !== 'visible') {
-        isPaused = true;
+        // Disconnect observer BEFORE setting isPaused to prevent a race:
+        // if a mutation fires between isPaused=true and disconnect(),
+        // onMutation drops it silently (isPaused guard).  Disconnecting
+        // first ensures no callbacks fire during the gap.
         observer?.disconnect();
+        isPaused = true;
         // Cancel any pending rAF flush — the mutations are stale and
         // will be re-fetched by the fetch interceptor on resume.
         if (mutationRafId !== null) {
