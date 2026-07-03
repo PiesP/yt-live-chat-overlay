@@ -23,6 +23,8 @@ interface SelectField extends BaseField {
 interface TextField extends BaseField {
   type: 'text';
   placeholder?: string;
+  /** Datalist suggestions for autocomplete (e.g., font family names). */
+  suggestions?: string[];
 }
 interface EnabledField {
   type: 'enabled';
@@ -83,12 +85,19 @@ const sel = (
   options,
   ...(title !== undefined ? { title } : {}),
 });
-const txt = (label: string, key: string, title?: string, placeholder?: string): TextField => ({
+const txt = (
+  label: string,
+  key: string,
+  title?: string,
+  placeholder?: string,
+  suggestions?: string[]
+): TextField => ({
   type: 'text' as const,
   label,
   key,
   ...(title !== undefined ? { title } : {}),
   ...(placeholder !== undefined ? { placeholder } : {}),
+  ...(suggestions !== undefined ? { suggestions } : {}),
 });
 const range = (label: string, key: string, title?: string, modifier?: string): RangeField => ({
   type: 'range' as const,
@@ -99,6 +108,45 @@ const range = (label: string, key: string, title?: string, modifier?: string): R
 });
 
 // ── Declarative field schemas ────────────────────────────────────────────────
+
+/** Common font families suggested in the font picker autocomplete list. */
+const FONT_SUGGESTIONS: string[] = [
+  // System defaults
+  'system-ui, -apple-system, sans-serif',
+  // Windows
+  '"Segoe UI", system-ui, sans-serif',
+  // macOS / iOS
+  '"-apple-system", "Helvetica Neue", sans-serif',
+  // Android / ChromeOS
+  '"Roboto", system-ui, sans-serif',
+  // CJK fonts
+  '"Noto Sans KR", sans-serif',
+  '"Noto Sans JP", sans-serif',
+  '"Noto Sans SC", sans-serif',
+  '"Noto Sans TC", sans-serif',
+  '"Malgun Gothic", sans-serif',
+  '"Microsoft YaHei", sans-serif',
+  '"Meiryo", sans-serif',
+  // Monospace
+  '"Cascadia Code", "Fira Code", monospace',
+  '"JetBrains Mono", monospace',
+  '"Source Code Pro", monospace',
+  'monospace',
+  // Sans-serif
+  'Arial, sans-serif',
+  '"Helvetica Neue", Arial, sans-serif',
+  'Verdana, sans-serif',
+  '"Trebuchet MS", sans-serif',
+  'sans-serif',
+  // Serif
+  'Georgia, serif',
+  '"Times New Roman", serif',
+  'serif',
+  // Cursive / decorative
+  '"Comic Sans MS", cursive',
+  'Impact, sans-serif',
+  '"Arial Black", sans-serif',
+];
 
 export const PANES: PaneDef[] = [
   {
@@ -146,7 +194,9 @@ export const PANES: PaneDef[] = [
           txt(
             'Font Family',
             'fontFamily',
-            'CSS font-family value, e.g. "Noto Sans KR", sans-serif. Falls back to system default if not found.'
+            'CSS font-family value. Type to filter suggestions, or enter a custom font stack.',
+            undefined,
+            FONT_SUGGESTIONS
           ),
           range('Text Opacity (%)', 'opacity', 'Overall opacity of comment text (50-100%)'),
           range(

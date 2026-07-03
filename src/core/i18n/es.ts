@@ -119,7 +119,7 @@ export const ES: Record<string, string> = {
     'Espacio vertical entre filas (negativo = superposición)',
   'Text weight: Bold is more readable, Normal uses less GPU memory':
     'Negrita es más legible, Normal usa menos memoria de GPU',
-  'CSS font-family value, e.g. "Noto Sans KR", sans-serif. Falls back to system default if not found.':
+  'CSS font-family value. Type to filter suggestions, or enter a custom font stack.':
     'Valor CSS font-family, ej. "Noto Sans KR", sans-serif. Si no se encuentra, usa la fuente del sistema.',
   'Background opacity of Super Chat cards': 'Opacidad del fondo de tarjetas Super Chat',
   'Max body text lines before truncation (2-10)': 'Máximo de líneas antes de truncar (2-10)',

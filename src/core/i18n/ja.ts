@@ -119,7 +119,7 @@ export const JA: Record<string, string> = {
     'コメント行の間隔 (マイナス値 = 重なり)',
   'Text weight: Bold is more readable, Normal uses less GPU memory':
     '太字は読みやすく、標準はGPUメモリ消費が少なくなります',
-  'CSS font-family value, e.g. "Noto Sans KR", sans-serif. Falls back to system default if not found.':
+  'CSS font-family value. Type to filter suggestions, or enter a custom font stack.':
     'CSS font-family 値。例: "Noto Sans KR", sans-serif。フォントがなければシステム既定値。',
   'Background opacity of Super Chat cards': 'スパーチャットカードの背景不透明度',
   'Max body text lines before truncation (2-10)': '本文の最大行数、超過分は省略 (2-10)',

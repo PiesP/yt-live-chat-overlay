@@ -118,7 +118,7 @@ export const AR: Record<string, string> = {
     'الفجوة الرأسية بين صفوف التعليقات (سالب = تداخل)',
   'Text weight: Bold is more readable, Normal uses less GPU memory':
     'وزن النص: العريض أكثر قابلية للقراءة، العادي يستخدم ذاكرة GPU أقل',
-  'CSS font-family value, e.g. "Noto Sans KR", sans-serif. Falls back to system default if not found.':
+  'CSS font-family value. Type to filter suggestions, or enter a custom font stack.':
     'قيمة CSS font-family، مثل "Noto Sans KR"، sans-serif. يعود إلى النظام الافتراضي إذا لم يُعثر عليه.',
   'Background opacity of Super Chat cards': 'شفافية خلفية بطاقات الرسائل المميزة',
   'Max body text lines before truncation (2-10)': 'الحد الأقصى لأسطر النص قبل الاقتطاع (2-10)',

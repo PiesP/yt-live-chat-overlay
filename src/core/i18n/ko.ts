@@ -101,7 +101,7 @@ export const KO: Record<string, string> = {
   'Vertical gap between comment rows (negative = overlap)': '댓글 행 사이 간격 (음수 = 겹침)',
   'Text weight: Bold is more readable, Normal uses less GPU memory':
     '글자 두께: 볼드는 더 읽기 쉽고, 보통은 GPU 메모리를 적게 사용합니다',
-  'CSS font-family value, e.g. "Noto Sans KR", sans-serif. Falls back to system default if not found.':
+  'CSS font-family value. Type to filter suggestions, or enter a custom font stack.':
     'CSS font-family 값. 예: "Noto Sans KR", sans-serif. 글꼴이 없으면 시스템 기본값을 사용합니다.',
   'Background opacity of Super Chat cards': '슈퍼챗 카드의 배경 불투명도',
   'Max body text lines before truncation (2-10)': '본문 텍스트 최대 줄 수, 초과 시 잘림 (2-10)',

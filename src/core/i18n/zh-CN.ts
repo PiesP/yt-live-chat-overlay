@@ -118,7 +118,7 @@ export const ZH_CN: Record<string, string> = {
   'Vertical gap between comment rows (negative = overlap)': '弹幕行之间的垂直间距 (负值 = 重叠)',
   'Text weight: Bold is more readable, Normal uses less GPU memory':
     '粗体更易阅读，常规字体占用更少GPU内存',
-  'CSS font-family value, e.g. "Noto Sans KR", sans-serif. Falls back to system default if not found.':
+  'CSS font-family value. Type to filter suggestions, or enter a custom font stack.':
     'CSS font-family 值，例如 "Noto Sans KR", sans-serif。字体不存在时使用系统默认。',
   'Background opacity of Super Chat cards': '超级留言卡片的背景不透明度',
   'Max body text lines before truncation (2-10)': '正文最大行数，超出部分截断 (2-10)',

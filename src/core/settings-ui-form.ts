@@ -582,7 +582,24 @@ export class SettingsUiForm {
         input.id = inputId;
         if (def.title) input.title = t(def.title);
         if (def.placeholder) input.placeholder = t(def.placeholder);
-        return domField(t(def.label), input, inputId);
+
+        const field = domField(t(def.label), input, inputId);
+
+        // Append <datalist> for autocomplete suggestions when provided
+        if (def.suggestions && def.suggestions.length > 0) {
+          const datalistId = `${inputId}-list`;
+          input.setAttribute('list', datalistId);
+          const datalist = document.createElement('datalist');
+          datalist.id = datalistId;
+          for (const suggestion of def.suggestions) {
+            const opt = document.createElement('option');
+            opt.value = suggestion;
+            datalist.appendChild(opt);
+          }
+          field.appendChild(datalist);
+        }
+
+        return field;
       }
       default:
         throw new Error('Unhandled field type');
