@@ -285,6 +285,21 @@ const PULSE_ANGULAR_FREQ = Math.PI;
 const MS_PER_SEC = MS_TO_S;
 
 // ── Globals (worker scope) ───────────────────────────────────────────────
+//
+// NOTE: These 15+ module-level let/const variables are shared across all
+// incoming messages (addMessages, updateConfig, setPaused, destroy). Two
+// consecutive addMessages calls between rAF frames could observe stale
+// state if the worker's event loop processes both messages before the
+// render loop ticks. This is safe in practice because:
+//   1. addMessages only pushes into the pendingMessages array, which is
+//      drained atomically in the render loop.
+//   2. updateConfig and destroy are serialised by the manager's
+//      postMessage ordering — the worker processes them FIFO.
+//   3. The render loop runs on a single rAF schedule; there is no
+//      concurrent read/write of the same variable from different paths.
+// If a future change adds async/await between message handling and
+// rendering, this assumption breaks and must be re-examined.
+//
 
 let ctx: OffscreenCanvasRenderingContext2D | null = null;
 let canvas: OffscreenCanvas | null = null;

@@ -106,12 +106,11 @@ function domInput(props: { type: string; name: string; className?: string }): HT
   return el;
 }
 
-function domField(labelText: string, control: HTMLElement, id?: string): HTMLLabelElement {
+function domField(labelText: string, control: HTMLElement, _id?: string): HTMLLabelElement {
   const label = document.createElement('label');
   label.className = 'yt-chat-overlay-settings-field';
-  if (id) {
-    label.htmlFor = id;
-  }
+  // No htmlFor needed — the label wraps the control, so implicit
+  // label–input association works natively without an explicit for/id.
   const text = document.createElement('span');
   text.textContent = labelText;
   label.append(text, control);
@@ -205,7 +204,7 @@ function createEnabledField(title?: string): HTMLLabelElement {
   const id = nextFieldId('enabled');
   const label = document.createElement('label');
   label.className = 'yt-chat-overlay-settings-enabled';
-  label.htmlFor = id;
+  // Label wraps the input below — implicit association, no htmlFor needed.
   const text = document.createElement('span');
   text.textContent = t('Overlay Enabled');
   const input = domInput({ type: 'checkbox', name: 'enabled' });

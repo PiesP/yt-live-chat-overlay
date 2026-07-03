@@ -108,8 +108,6 @@ export class BacklogInjectionController implements Pauseable {
   private static readonly SAMPLE_RATIO_LARGE = 0.35;
   private static readonly INDICATOR_HIDE_DELAY_MS = 300;
 
-  private static sampleExponential = sampleExponential;
-
   /** Effective length of the backlog queue (excluding consumed offset entries). */
   private get backlogQueueLength(): number {
     return this.backlogQueue.length - this.backlogQueueOffset;
@@ -412,7 +410,7 @@ export class BacklogInjectionController implements Pauseable {
     const floorMs = Math.max(32, Math.round(meanInterval * 0.6));
     const poissonDelay = Math.max(
       floorMs,
-      Math.min(meanInterval * 2, BacklogInjectionController.sampleExponential(meanInterval))
+      Math.min(meanInterval * 2, sampleExponential(meanInterval))
     );
     this.injectionTimer = setTimeout(() => this.processTick(), poissonDelay);
   }

@@ -144,6 +144,11 @@ export function installDomChatWatcher(onMessages: DomMessageCallback): DomWatche
   };
 
   // Find the chat container and attach observer.
+  // NOTE: YouTube may embed chat in a cross-origin iframe (e.g. #chatframe),
+  // which is inaccessible to MutationObserver from the host page. When that
+  // happens, no selector below matches and the DOM watcher silently falls
+  // back to the fetch-interceptor primary path — that is the expected
+  // degraded mode, not a bug.
   for (const selector of CHAT_CONTAINER_SELECTORS) {
     const container = document.querySelector<HTMLElement>(selector);
     if (!container) continue;
@@ -195,6 +200,10 @@ export function installDomChatWatcher(onMessages: DomMessageCallback): DomWatche
 
   // No container found — return a no-op unsubscribe.
   // The caller can retry later if needed.
-  log.debug('No chat container found — DOM watcher not installed');
+  log.warn(
+    'No chat container found — DOM watcher not installed. ' +
+      'YouTube chat may be in a cross-origin iframe (#chatframe) ' +
+      'inaccessible from the content script. Falling back to fetch interceptor.'
+  );
   return () => {};
 }

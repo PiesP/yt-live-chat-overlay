@@ -110,6 +110,8 @@ export class VideoPauseController {
       return;
     }
 
+    // Declare currentVideo BEFORE closures that reference it (handleLeavePiP
+    // at line ~71, rebindVideo at line ~117) to avoid TDZ fragility.
     let currentVideo: HTMLVideoElement | undefined = initial;
     attachListeners(currentVideo);
 

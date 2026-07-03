@@ -6,6 +6,14 @@ import { DEFAULT_FONT_FAMILY, spacing } from '@core/design-tokens';
 /**
  * Settings UI styles — plain CSS string injected into the page.
  *
+ * CSP NOTE: The CSS is injected via `style.textContent` (see
+ * `settings-ui.ts`). This works in userscript contexts (GM adds the
+ * `style-src: 'unsafe-inline'` for content scripts) but may fail under
+ * strict CSP in MV3 extension content scripts that don't allow inline
+ * styles. A future improvement could use the CSSOM
+ * (CSSStyleSheet.insertRule) or a background-script messaging bridge
+ * to inject styles without violating CSP.
+ *
  * STATE MANAGEMENT: This project uses CSS classes for state toggling
  * (e.g. `.active`, `.yt-chat-overlay-reload-button--done`) instead of the
  * CSS `:has()` pseudo-class. Rationale:

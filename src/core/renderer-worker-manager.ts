@@ -418,17 +418,36 @@ export class RenderWorkerManager {
     // (pending ImageBitmap transfers) before terminate() severs the connection.
     // Without this, bitmaps mid-transfer may not be closed properly.
     this.worker.postMessage({ type: 'destroy' });
-    // Give the worker one microtask tick to acknowledge the destroy message,
-    // then terminate. This prevents orphaned in-flight bitmap transfers.
-    queueMicrotask(() => {
+
+    // Listen for the worker's 'ack' before terminating, so in-flight
+    // ImageBitmap transfers have time to complete.  A 500 ms safety
+    // timeout prevents indefinite hangs if the ack never arrives.
+    let terminated = false;
+    const messageHandler = (event: MessageEvent): void => {
+      if (event.data?.type === 'ack' && !terminated) {
+        terminated = true;
+        this.worker?.removeEventListener('message', messageHandler);
+        this.worker?.terminate();
+        this.worker = null;
+        // Close any remaining pre-converted bitmaps (not yet transferred).
+        // ByteLimitedCache.clear() calls onEvict (bitmap.close()) for each entry.
+        this.deps.imageFetchManager.workerBitmapCache.clear();
+      }
+    };
+    this.worker.addEventListener('message', messageHandler);
+
+    // Safety timeout: if the ack never arrives, force-terminate after 500ms.
+    setTimeout(() => {
+      if (terminated) return;
+      terminated = true;
+      this.worker?.removeEventListener('message', messageHandler);
       if (this.worker) {
         this.worker.terminate();
         this.worker = null;
       }
-      // Close any remaining pre-converted bitmaps (not yet transferred).
-      // ByteLimitedCache.clear() calls onEvict (bitmap.close()) for each entry.
       this.deps.imageFetchManager.workerBitmapCache.clear();
-    });
+    }, 500);
+
     this.active = false;
   }
 

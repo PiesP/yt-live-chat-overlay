@@ -39,9 +39,6 @@ export class SettingsUi {
   private activeTab: string;
   /** Language code that was active when the modal content was last built. */
   private modalLanguage: string | null = null;
-  /** Saved document lang/dir before modal opened; restored on close. */
-  private savedDocumentLang: string | null = null;
-  private savedDocumentDir: string | null = null;
   /** Saved body overflow before scroll lock. Restored on close/destroy. */
   private savedBodyOverflow: string | null = null;
   /** Saved body padding-right before scrollbar compensation. */
@@ -456,27 +453,23 @@ export class SettingsUi {
     this.updateDocumentLangDir();
   }
 
-  /** Update document.documentElement.lang and dir to match the active language.
-   *  Arabic ('ar') is RTL; all other supported languages are LTR. */
+  /** Update the settings modal's lang and dir to match the active language.
+   *  Arabic ('ar') is RTL; all other supported languages are LTR.
+   *  Scoped to .yt-chat-overlay-settings-modal rather than
+   *  document.documentElement so the direction change does not affect the
+   *  entire YouTube page layout. */
   private updateDocumentLangDir(): void {
-    // Save original values before first modification so we can restore on close.
-    if (this.savedDocumentLang === null) {
-      this.savedDocumentLang = document.documentElement.lang || '';
-      this.savedDocumentDir = document.documentElement.dir || '';
-    }
+    if (!this.modal) return;
     const lang = getActiveLanguage();
-    document.documentElement.lang = lang;
-    document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
+    this.modal.lang = lang;
+    this.modal.dir = lang === 'ar' ? 'rtl' : 'ltr';
   }
 
-  /** Restore document.documentElement.lang and dir to pre-modal values. */
+  /** Restore modal lang/dir to default. No-op since we never touched the document root. */
   private restoreDocumentLangDir(): void {
-    if (this.savedDocumentLang !== null) {
-      document.documentElement.lang = this.savedDocumentLang;
-      document.documentElement.dir = this.savedDocumentDir ?? '';
-      this.savedDocumentLang = null;
-      this.savedDocumentDir = null;
-    }
+    if (!this.modal) return;
+    this.modal.lang = '';
+    this.modal.dir = '';
   }
 
   /** Create a reusable confirmation dialog overlay for destructive actions. */
