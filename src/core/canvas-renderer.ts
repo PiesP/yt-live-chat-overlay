@@ -527,6 +527,11 @@ export class CanvasRenderer extends RendererBase {
     for (const bucket of this.opacityBuckets) bucket.length = 0;
     this.idleSince = null;
     this._hasRenderedStatusBar = false;
+    // Reset the render activity heartbeat so the watchdog does not
+    // immediately re-detect the pre-refresh stuck state.  The backlog
+    // injection that follows will update this timestamp when the first
+    // message is successfully placed.
+    this.lastRenderActivity = performance.now();
   }
 
   // ── Render loop ──────────────────────────────────────────────────────
