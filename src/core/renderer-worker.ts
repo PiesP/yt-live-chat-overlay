@@ -1353,7 +1353,7 @@ function renderFrame(): void {
           try {
             ctx.globalAlpha = (bucketIndex / (OPACITY_BUCKETS - 1)) * TRANSLATION_OPACITY_SCALE;
             // Translation text (normal weight for subtle distinction)
-            const translationFont = `${translationFontSize}px ${cfg.fontFamily}`;
+            const translationFont = getFontString(translationFontSize, 'normal', cfg.fontFamily);
             renderSegment(
               ctx,
               msg.translatedText,

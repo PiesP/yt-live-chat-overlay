@@ -49,7 +49,8 @@ export function normalizeInlineText(text: string): string {
 /** Maximum allowed message text length before truncation. */
 const MAX_MESSAGE_TEXT_LENGTH = 80;
 
-const TRUNCATION_ELLIPSIS_LENGTH = 3;
+/** Length of the truncation ellipsis placeholder (U+2026 = 1 code unit). */
+const TRUNCATION_ELLIPSIS_LENGTH = 1;
 
 /** Fully opaque alpha threshold for CSS color conversion. */
 const FULLY_OPAQUE_THRESHOLD = 0.999;
@@ -63,7 +64,7 @@ const NEAR_BLACK_THRESHOLD = 15;
 function truncateText(text: string): string {
   const normalized = normalizeInlineText(text);
   if (normalized.length > MAX_MESSAGE_TEXT_LENGTH) {
-    return `${normalized.slice(0, MAX_MESSAGE_TEXT_LENGTH - TRUNCATION_ELLIPSIS_LENGTH)}...`;
+    return `${normalized.slice(0, MAX_MESSAGE_TEXT_LENGTH - TRUNCATION_ELLIPSIS_LENGTH)}\u2026`;
   }
   return normalized;
 }
