@@ -112,8 +112,73 @@ export type SharedRenderPiece = SharedTextPiece | SharedEmojiPiece;
 
 // ── Character-level wrapping for oversize words (CJK, URLs, etc.) ──────────
 
+/** Lazy-initialized Intl.Segmenter for grapheme-cluster splitting. */
+let _graphemeSegmenter: Intl.Segmenter | undefined;
+
+function getGraphemeSegmenter(): Intl.Segmenter | undefined {
+  if (_graphemeSegmenter === undefined) {
+    try {
+      _graphemeSegmenter = new Intl.Segmenter('en', { granularity: 'grapheme' });
+    } catch {
+      _graphemeSegmenter = undefined; // runtime without Intl.Segmenter
+    }
+  }
+  return _graphemeSegmenter;
+}
+
 /**
- * Split a word that exceeds maxWidth into character-level segments.
+ * Split a string into grapheme clusters for safe per-character processing.
+ *
+ * Uses Intl.Segmenter when available so that ZWJ sequences, flag emoji,
+ * and skin-tone modifiers stay intact.  Falls back to Array.from (code-point
+ * iteration) on runtimes without Intl.Segmenter support.
+ */
+function splitGraphemeClusters(text: string): string[] {
+  const seg = getGraphemeSegmenter();
+  if (seg) {
+    return Array.from(seg.segment(text), (s) => s.segment);
+  }
+  return Array.from(text); // code-point fallback
+}
+
+/**
+ * Reverse the visual order of RTL text (Arabic, Hebrew, etc.) so that
+ * Canvas2D fillText() — which always renders left-to-right — produces
+ * the correct visual reading order.
+ *
+ * Canvas2D does not support bidirectional text: Arabic rendered via
+ * fillText() appears LTR with isolated glyph forms.  By reversing the
+ * character sequence we at least restore correct reading order.
+ * Contextual Arabic shaping (cursive connections) still requires a
+ * dedicated shaping engine and is not addressed here.
+ */
+function reverseRtlText(text: string): string {
+  // Quick scan: is the first strong character RTL?
+  let hasRtl = false;
+  for (const ch of text) {
+    const cp = ch.codePointAt(0);
+    if (cp === undefined) continue;
+    // Hebrew block + Arabic blocks + Syriac + Thaana + NKo
+    if ((cp >= 0x0590 && cp <= 0x08ff) || (cp >= 0xfb1d && cp <= 0xfefc)) {
+      hasRtl = true;
+      break;
+    }
+    // Skip neutrals (spaces, punctuation, marks) — keep scanning
+    // for the first character with strong direction.
+    if (/\S/u.test(ch)) break; // first non-space is LTR → bail
+  }
+  if (!hasRtl) return text;
+
+  // Reverse grapheme clusters so the rightmost glyph appears first on screen.
+  return splitGraphemeClusters(text).reverse().join('');
+}
+
+/**
+ * Split a word that exceeds maxWidth into grapheme-cluster segments.
+ *
+ * Uses Intl.Segmenter (grapheme granularity) when available so that
+ * multi-code-point sequences (ZWJ emoji, flags, skin tones) stay
+ * together.  Falls back to code-point iteration on older runtimes.
  * Used as a fallback when a single word is wider than the available width.
  */
 function wrapCharSegments(
@@ -125,7 +190,9 @@ function wrapCharSegments(
   let current = '';
   let currentWidth = 0;
 
-  for (const ch of word) {
+  const chars: string[] = splitGraphemeClusters(word);
+  for (let i = 0; i < chars.length; i++) {
+    const ch = chars[i]!;
     const chWidth = measureTextFn(ch);
     if (currentWidth + chWidth > maxWidth && current.length > 0) {
       segments.push({ text: current, width: currentWidth });
@@ -420,13 +487,17 @@ export function renderSegment(
   textBitmapCache: TextBitmapCache,
   getFontFn: (fontSize: number) => string
 ): void {
+  // Reverse RTL text so Canvas2D fillText (always LTR) produces correct
+  // visual reading order for Arabic, Hebrew, etc.
+  const displayText = reverseRtlText(text);
+
   const font = getFontFn(fontSize);
   const strokeWidth = Math.max(0.5, outlineWidthPx * OUTLINE_STROKE_SCALE);
   const strokeColor = computeOutlineColor(color, Math.min(1, outlineOpacity));
 
   // Try bitmap cache first (includes outline rendering)
-  if (outlineWidthPx > 0 && outlineOpacity > 0 && text.length >= 3) {
-    const key = `${font}|${text}|${color}|${Math.round(strokeWidth)}|${strokeColor}`;
+  if (outlineWidthPx > 0 && outlineOpacity > 0 && displayText.length >= 3) {
+    const key = `${font}|${displayText}|${color}|${Math.round(strokeWidth)}|${strokeColor}`;
     const bitmap = textBitmapCache.get(key);
     if (bitmap) {
       drawBitmapAtCssSize(ctx, bitmap, x, y);
@@ -436,7 +507,7 @@ export function renderSegment(
     // Cache miss — render to offscreen canvas and cache
     cacheTextBitmap(
       key,
-      text,
+      displayText,
       font,
       fontSize,
       color,
@@ -459,9 +530,9 @@ export function renderSegment(
   ctx.font = font;
   ctx.textBaseline = 'top';
   ctx.textRendering = 'optimizeSpeed';
-  strokeTextOutline(ctx, text, x, y, color, outlineWidthPx, outlineOpacity);
+  strokeTextOutline(ctx, displayText, x, y, color, outlineWidthPx, outlineOpacity);
   ctx.fillStyle = color;
-  ctx.fillText(text, x, y);
+  ctx.fillText(displayText, x, y);
   ctx.restore();
 }
 
