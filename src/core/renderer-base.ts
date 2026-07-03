@@ -41,6 +41,11 @@ export abstract class RendererBase {
   /** Callback invoked when the disconnected status bar is clicked. */
   onStatusBarClick: (() => void) | null = null;
 
+  /** Called when YouTube's chat panel opens or closes. Subclasses can override. */
+  setChatPanelOpen(_open: boolean): void {
+    // Default no-op. Subclasses override to react to panel state changes.
+  }
+
   protected overlay: Overlay;
   protected settings: OverlaySettings;
   protected laneAllocator: LaneAllocator;

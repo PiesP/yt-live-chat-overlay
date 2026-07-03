@@ -4,6 +4,7 @@
 import type { ChatMessage, OverlaySettings, Pauseable } from '@app-types';
 import { BacklogInjectionController } from '@core/backlog-controller';
 import { CanvasRenderer } from '@core/canvas-renderer';
+import { ChatPanelObserver, type ChatPanelState } from '@core/chat-panel-observer';
 import type { ChatHealthSnapshot, ChatSource, ChatSourceStartStatus } from '@core/chat-source-base';
 import { LiveChatSource } from '@core/chat-source-live';
 import { ReplayChatSource } from '@core/chat-source-replay';
@@ -186,6 +187,8 @@ export class RuntimeManager {
   private fetchInterceptorUnsubscribe: InterceptorUnsubscribe | null = null;
   /** Unsubscribe handle for the DOM chat watcher (fallback). */
   private domWatcherUnsubscribe: DomWatcherUnsubscribe | null = null;
+  /** Observer that tracks when YouTube's chat panel opens or closes. */
+  private chatPanelObserver: ChatPanelObserver = new ChatPanelObserver();
   /** Backlog messages preserved across soft restarts for re-injection. */
   private _pendingBacklogMessages: ChatMessage[] = [];
 
@@ -593,6 +596,7 @@ export class RuntimeManager {
           this.noteHidden();
         }
         this.startForegroundListeners();
+        this.startChatPanelMonitor(this.chatSource!);
         this.standbyController.enter();
         log.info('Entered standby mode — waiting for stream to start');
         return 'started';
@@ -612,6 +616,7 @@ export class RuntimeManager {
       this.startForegroundListeners();
       this.startVideoPauseListeners();
       this.startChatWatchdog();
+      this.startChatPanelMonitor(this.chatSource!);
 
       log.info('Started successfully');
       return 'started';
@@ -722,6 +727,8 @@ export class RuntimeManager {
 
     this.domWatcherUnsubscribe?.();
     this.domWatcherUnsubscribe = null;
+
+    this.chatPanelObserver.stop();
 
     this.renderer?.destroy();
     this.renderer = null;
@@ -849,6 +856,43 @@ export class RuntimeManager {
    * Install a fetch interceptor that eavesdrops on YouTube's own
    * get_live_chat requests and forwards parsed messages to the ChatSource.
    */
+
+  // ── Chat panel monitoring ────────────────────────────────────────────────
+
+  /**
+   * Monitor YouTube chat panel open/closed state.
+   *
+   * When the panel opens or closes:
+   * - Renderer is notified (for future behavioral adjustments)
+   * - DOM chat watcher is installed/uninstalled: watching the native chat
+   *   DOM is wasted when the panel is closed since the target elements
+   *   don't exist
+   */
+  private startChatPanelMonitor(chatSource: ChatSource): void {
+    this.chatPanelObserver.start((state: ChatPanelState) => {
+      this.renderer?.setChatPanelOpen(state.isOpen);
+
+      if (state.isOpen) {
+        // Panel opened — try to install DOM watcher if not already active
+        if (!this.domWatcherUnsubscribe) {
+          try {
+            this.domWatcherUnsubscribe = installDomChatWatcher((messages) => {
+              if (this.isDisposedState) return;
+              chatSource.injectExternalMessages(messages);
+            });
+            log.info('DOM chat watcher installed (panel opened)');
+          } catch (error: unknown) {
+            log.info('Failed to install DOM chat watcher after panel open:', error);
+          }
+        }
+      } else {
+        // Panel closed — uninstall DOM watcher (target DOM is gone)
+        this.domWatcherUnsubscribe?.();
+        this.domWatcherUnsubscribe = null;
+      }
+    });
+  }
+
   private installFetchInterceptor(chatSource: ChatSource): void {
     try {
       this.fetchInterceptorUnsubscribe = installFetchInterceptor(

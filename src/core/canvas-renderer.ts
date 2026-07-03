@@ -1526,6 +1526,10 @@ export class CanvasRenderer extends RendererBase {
     this.buildOpacityConfig();
   }
 
+  override setChatPanelOpen(open: boolean): void {
+    log.debug(`Chat panel ${open ? 'opened' : 'closed'}`);
+  }
+
   protected onPause(): void {
     this.stopRenderLoop();
     this.workerManager.setPaused(true);
