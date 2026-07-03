@@ -406,13 +406,20 @@ export class CanvasRenderer extends RendererBase {
 
   addMessage(message: ChatMessage): void {
     if (!this.isMessageAllowed(message)) return;
-    // Route to worker when off-main-thread rendering is active
+
+    // Always enqueue through main-thread pendingQueue so lane allocation
+    // and collision detection run in one place.  When the Worker is active
+    // the placed message is forwarded to it for rendering after drainQueue
+    // succeeds — the Worker no longer maintains its own lane allocator.
+    this.enqueueMessage(message, true);
+
+    // Pre-emptively trigger translation and forward to worker when active.
+    // The worker needs translated text for rendering; we send it asynchronously
+    // so it arrives before or shortly after the placed-message batch.
     if (this.workerManager.isActive) {
-      const msgId = message.id ?? `${message.timestamp}-${Math.random()}`;
-      this.workerManager.sendToWorker(message, msgId);
-      // Also trigger translation asynchronously and send result to worker
       const translatableText = getTranslatableText(message);
       if (this.translationService.isEnabled && translatableText) {
+        const msgId = message.id ?? `${message.timestamp}-${Math.random()}`;
         this.translationService
           .translate(translatableText)
           .then((translated) => {
@@ -422,9 +429,7 @@ export class CanvasRenderer extends RendererBase {
             // Silently ignore individual translation failures
           });
       }
-      return;
     }
-    this.enqueueMessage(message, true);
   }
 
   /**
@@ -1285,6 +1290,16 @@ export class CanvasRenderer extends RendererBase {
     // Update render activity heartbeat — signals to the watchdog that
     // the renderer is healthy (successfully enqueuing messages).
     this.lastRenderActivity = performance.now();
+
+    // Forward the placed message to the Worker if off-main-thread rendering
+    // is active.  The message still goes through the Worker's internal
+    // pipeline for now, but since the main-thread pipeline has already
+    // validated the placement (lane allocation + collision check), the
+    // Worker can skip its own drainQueue/checkCollision in a future phase.
+    if (this.workerManager.isActive) {
+      const msgId = message.id ?? `${message.timestamp}-${Math.random()}`;
+      this.workerManager.sendToWorker(message, msgId);
+    }
   }
 
   // ── Dimension estimation (delegates to shared functions) ──────────────
