@@ -272,6 +272,13 @@ export class CanvasRenderer extends RendererBase {
 
     // C1: Listen for Canvas 2D context restoration to recover from GPU crashes / driver resets.
     // Without this, a context loss permanently disables the renderer until page reload.
+    //
+    // Note: This codebase uses Canvas2D + OffscreenCanvas Worker only — there is no WebGL2
+    // renderer implementation (the RenderWorkerManagerWebGL2 references in CHANGELOG.md
+    // describe a prior experimental path that has been removed/restructured). Therefore no
+    // webglcontextlost/webglcontextrestored listeners are needed. If a WebGL2 renderer is
+    // added in the future, it must also listen for webglcontextlost and webglcontextrestored
+    // with resource re-initialization (shader recompilation, buffer re-upload, texture restore).
     canvas.addEventListener('contextlost', (e: Event) => {
       e.preventDefault();
       this.ctx = null;
@@ -811,20 +818,33 @@ export class CanvasRenderer extends RendererBase {
 
   /** Compact the activeMessages array and clean the per-lane map after expired message removal. */
   private compactRemovedMessages(writeIdx: number, oldLength: number): void {
-    // Remove only expired messages from the lane map
+    // Remove only expired messages from the lane map using O(1) swap-pop
     for (const msg of this.expiredMessagesScratch) {
       const slotCount = msg.slotCount ?? 1;
+      const indices = msg.laneArrayIndices;
       for (let slot = 0; slot < slotCount; slot++) {
         const lane = msg.laneIndex + slot;
         const list = this.activeMessagesByLane.get(lane);
-        if (list) {
-          const idx = list.indexOf(msg);
-          if (idx !== -1) {
-            list[idx] = list[list.length - 1]!;
-            list.pop();
+        if (!list || list.length === 0) continue;
+
+        const idx = indices?.[slot] ?? list.indexOf(msg);
+        if (idx < 0 || idx >= list.length) continue;
+
+        const lastMsg = list[list.length - 1]!;
+        if (lastMsg !== msg) {
+          list[idx] = lastMsg;
+          // Update the swapped message's laneArrayIndices entry for this lane
+          if (lastMsg.laneArrayIndices) {
+            for (let ss = 0; ss < (lastMsg.slotCount ?? 1); ss++) {
+              if (lastMsg.laneIndex + ss === lane) {
+                lastMsg.laneArrayIndices[ss] = idx;
+                break;
+              }
+            }
           }
-          if (list.length === 0) this.activeMessagesByLane.delete(lane);
         }
+        list.pop();
+        if (list.length === 0) this.activeMessagesByLane.delete(lane);
       }
     }
 
@@ -1269,6 +1289,7 @@ export class CanvasRenderer extends RendererBase {
           this.activeMessages.push(cm);
           const slotCount = placement.slotCount;
           cm.slotCount = slotCount;
+          cm.laneArrayIndices = new Array(slotCount);
           for (let slot = 0; slot < slotCount; slot++) {
             const occupiedLane = cm.laneIndex + slot;
             let laneList = this.activeMessagesByLane.get(occupiedLane);
@@ -1276,6 +1297,7 @@ export class CanvasRenderer extends RendererBase {
               laneList = [];
               this.activeMessagesByLane.set(occupiedLane, laneList);
             }
+            cm.laneArrayIndices[slot] = laneList.length;
             laneList.push(cm);
           }
         },

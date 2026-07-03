@@ -51,6 +51,7 @@ export class MessageActivator {
         staggerDelay: 0,
         speedTier: 0,
         renderMessage: EMPTY_CHAT_MESSAGE,
+        laneArrayIndices: [],
       }
     );
   }

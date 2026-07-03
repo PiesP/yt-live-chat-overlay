@@ -189,4 +189,12 @@ export interface CanvasMessage {
   /** Transient frame-local elapsed (ms). Set by renderFrame pre-scan, read by
    *  rendering. Not serialized — re-set each frame. */
   _frameElapsed?: number;
+  /**
+   * Per-slot index in each per-lane array (activeMessagesByLane).
+   * laneArrayIndices[s] = position of this message in the per-lane array
+   * for lane laneIndex + s. Used by compactRemovedMessages for O(1)
+   * swap-pop removal instead of O(n) indexOf. Updated when swap-pop
+   * displaces another message in the same per-lane array.
+   */
+  laneArrayIndices: number[];
 }
