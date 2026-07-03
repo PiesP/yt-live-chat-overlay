@@ -396,8 +396,12 @@ export class CanvasRenderer extends RendererBase {
     }
   }
 
-  protected getQueueLength(): number {
+  getQueueLength(): number {
     return this.pendingQueue.size;
+  }
+
+  override getActiveMessageCount(): number {
+    return this.activeMessages.length;
   }
 
   // ── Message ingress ──────────────────────────────────────────────────
@@ -1268,6 +1272,10 @@ export class CanvasRenderer extends RendererBase {
         void this.performSourceDetection();
       }
     }
+
+    // Update render activity heartbeat — signals to the watchdog that
+    // the renderer is healthy (successfully enqueuing messages).
+    this.lastRenderActivity = performance.now();
   }
 
   // ── Dimension estimation (delegates to shared functions) ──────────────

@@ -88,6 +88,16 @@ function seedBootstrapIfReady(chatSource: ChatSource, result: ChatBootstrapResul
 const CHAT_STALL_TIMEOUT_MS = 30_000;
 const LONG_IDLE_RESTART_MS = 60_000;
 const ABSOLUTE_MAX_IDLE_RESTART_MS = 30 * 60 * 1000; // 30 minutes
+/**
+ * Maximum time (ms) the renderer can have a non-empty pending queue
+ * with zero active messages before the watchdog triggers a recovery.
+ * Set at 10 seconds — long enough to avoid false positives from
+ * transient drain-queue back-pressure, short enough that the user
+ * doesn't see an extended blank overlay.
+ */
+const RENDERER_STUCK_THRESHOLD_MS = 10_000;
+/** Maximum consecutive overlay refreshes before escalating to a full session restart. */
+const MAX_CONSECUTIVE_REFRESHES = 2;
 
 export type RuntimeSessionRestartReason = 'foreground-return' | 'watchdog' | 'standby-resolved';
 
@@ -96,6 +106,8 @@ interface RuntimeHealth {
   renderable: boolean;
   chat: ChatHealthSnapshot | null;
   shouldRestart: boolean;
+  /** True when the renderer has queued messages but hasn't placed any for RENDERER_STUCK_THRESHOLD_MS. */
+  isRendererStuck: boolean;
 }
 
 type ReconcileReason = 'startup' | 'page-change' | 'settings-change' | 'retry' | 'session-restart';
@@ -183,6 +195,10 @@ export class RuntimeManager {
    * regardless of size to prevent post-recovery queue flooding.
    */
   private _recoveringFromError = false;
+
+  /** Number of consecutive overlay refreshes that did not restore rendering.
+   *  After MAX_CONSECUTIVE_REFRESHES, escalate to a full session restart. */
+  private consecutiveRefreshFailures = 0;
 
   private get isDisposedState(): boolean {
     return this.state === 'disposed' || this.state === 'restarting' || this.state === 'destroyed';
@@ -919,9 +935,20 @@ export class RuntimeManager {
     const dimensions = this.overlay?.getDimensions();
     const renderable = (container?.isConnected ?? false) && dimensions != null;
 
+    // ── Renderer stuck detection ──
+    // Detects the case where the chat source is healthy (messages arriving)
+    // but the renderer has silently stopped rendering them (queue growing,
+    // zero active messages, no render activity for RENDERER_STUCK_THRESHOLD_MS).
+    const r = this.renderer;
+    const isRendererStuck =
+      r != null &&
+      r.getQueueLength() > 0 &&
+      r.getActiveMessageCount() === 0 &&
+      r.getMsSinceLastRenderActivity() >= RENDERER_STUCK_THRESHOLD_MS;
+
     // Pre-live standby has no chat source — never restart from health checks.
     if (this.standbyController.isStandby()) {
-      return { idleDurationMs: 0, renderable, chat: null, shouldRestart: false };
+      return { idleDurationMs: 0, renderable, chat: null, shouldRestart: false, isRendererStuck };
     }
 
     // When the video is paused, chat is intentionally idle — don't treat
@@ -947,7 +974,7 @@ export class RuntimeManager {
             chat != null &&
             (!chat.observerAlive || !chat.recentlyActive))));
 
-    return { idleDurationMs, renderable, chat, shouldRestart };
+    return { idleDurationMs, renderable, chat, shouldRestart, isRendererStuck };
   }
 
   private requestManagedRestart(reason: RuntimeSessionRestartReason): void {
@@ -1125,6 +1152,10 @@ export class RuntimeManager {
   }
 
   private startChatWatchdog(): void {
+    // Clear any existing timer before creating a new one — prevents
+    // duplicate intervals when called from performOverlayRefresh or
+    // during session recovery.
+    this.chatWatchdogTimer = clearSafeInterval(this.chatWatchdogTimer);
     this.chatWatchdogTimer = setInterval(() => {
       try {
         // Skip checks while disposed, hidden, or mid-restart
@@ -1137,7 +1168,35 @@ export class RuntimeManager {
         const video = this.getVideoElement();
         if (video?.paused) return;
 
-        if (this.getRuntimeHealthSnapshot().shouldRestart) {
+        const health = this.getRuntimeHealthSnapshot();
+
+        // ── Renderer stuck recovery ──
+        // When the chat source is healthy but the renderer hasn't placed
+        // any messages for RENDERER_STUCK_THRESHOLD_MS despite a non-empty
+        // queue, the renderer is stuck.  Attempt an overlay refresh first
+        // (lightweight — preserves the chat source).  If it keeps failing,
+        // escalate to a full session restart.
+        if (health.isRendererStuck) {
+          this.consecutiveRefreshFailures++;
+          if (this.consecutiveRefreshFailures > MAX_CONSECUTIVE_REFRESHES) {
+            log.warn(
+              `Renderer stuck after ${this.consecutiveRefreshFailures - 1} refresh attempts — escalating to full restart`
+            );
+            this.consecutiveRefreshFailures = 0;
+            this.requestManagedRestart('watchdog');
+          } else {
+            log.info(
+              `Renderer stuck detected (attempt ${this.consecutiveRefreshFailures}/${MAX_CONSECUTIVE_REFRESHES}) — performing overlay refresh`
+            );
+            this.performOverlayRefresh('renderer-stuck');
+          }
+          return;
+        }
+
+        // Renderer is healthy — reset the escalation counter.
+        this.consecutiveRefreshFailures = 0;
+
+        if (health.shouldRestart) {
           log.info('Chat health check failed, triggering recovery');
           this.requestManagedRestart('watchdog');
           return;
@@ -1150,10 +1209,10 @@ export class RuntimeManager {
         // Track error recovery: when the chat source has errors, flag
         // that the next successful message batch should route through
         // the backlog controller to prevent post-recovery queue flooding.
-        const health = this.chatSource?.getHealthSnapshot();
-        if (health && health.consecutiveErrors > 0) {
+        const chatHealth = this.chatSource?.getHealthSnapshot();
+        if (chatHealth && chatHealth.consecutiveErrors > 0) {
           this._recoveringFromError = true;
-        } else if (health && health.consecutiveErrors === 0 && this._recoveringFromError) {
+        } else if (chatHealth && chatHealth.consecutiveErrors === 0 && this._recoveringFromError) {
           // Errors cleared without a message batch to trigger the guard.
           // Reset here so the flag doesn't persist across multiple healings.
           this._recoveringFromError = false;

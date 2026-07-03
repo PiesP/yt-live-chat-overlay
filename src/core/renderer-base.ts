@@ -52,6 +52,14 @@ export abstract class RendererBase {
   protected pausedAt: number | null = null;
   protected backlogPaused = false;
 
+  /**
+   * Timestamp (performance.now) of the last successful message enqueue.
+   * Updated by subclasses in enqueueMessageWithPlacement after
+   * commitPlacement. Used by RuntimeManager's watchdog to detect
+   * renderer stuck states (queue growing but nothing rendering).
+   */
+  protected lastRenderActivity = performance.now();
+
   // H1: Buffer messages during video pause instead of dropping them.
   // Messages received while the video is paused are stored here and
   // replayed to subclasses on resume, preventing permanent loss during
@@ -360,7 +368,7 @@ export abstract class RendererBase {
 
   abstract addMessage(message: ChatMessage): void;
   abstract get laneCount(): number;
-  protected abstract getQueueLength(): number;
+  abstract getQueueLength(): number;
 
   /** Number of lanes currently available (delegates to laneAllocator). */
   getLaneCount(): number {
@@ -392,6 +400,19 @@ export abstract class RendererBase {
   setConnectionStatus(_status: ConnectionStatus): void {}
 
   // ── Overlay refresh helpers (used by RuntimeManager.performOverlayRefresh) ──
+
+  /**
+   * Milliseconds since the last successful render activity.
+   * Returns 0 if no render activity has ever been recorded (unlikely,
+   * but defensive for early-init edge cases where constructor runs
+   * before the first renderFrame).
+   */
+  getMsSinceLastRenderActivity(now = performance.now()): number {
+    return Math.max(0, now - this.lastRenderActivity);
+  }
+
+  /** Number of currently active (visible) messages. */
+  abstract getActiveMessageCount(): number;
 
   /** Reset lane allocator with new dimensions. */
   resetAllocator(dims: OverlayDimensions | null): void {
