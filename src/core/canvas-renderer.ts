@@ -511,6 +511,15 @@ export class CanvasRenderer extends RendererBase {
     this.retryQueue.length = 0;
   }
 
+  /**
+   * Return a snapshot of the pending queue for burst EMA pre-warming.
+   * Called by RendererBase.resume() to seed the BurstDetector EMA with
+   * inter-message intervals from messages queued during the pause.
+   */
+  override getPendingQueueMessages(): ChatMessage[] {
+    return this.pendingQueue.toArray();
+  }
+
   /** Explicitly restart the render loop (used by overlay refresh). */
   override resumeRenderLoop(): void {
     this.idleSince = null;

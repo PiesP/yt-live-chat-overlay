@@ -149,6 +149,23 @@ export class PriorityBucketQueue<T = ChatMessage> {
   }
 
   /**
+   * Return all queued items as an array, ordered from highest to lowest
+   * priority.  Items at the same priority level are FIFO-ordered.
+   * Does NOT modify the queue (no side effects).
+   */
+  toArray(): T[] {
+    const result: T[] = [];
+    for (const prio of this.priorityLevels) {
+      const entry = this.buckets.get(prio);
+      if (!entry) continue;
+      for (let i = entry.offset; i < entry.msgs.length; i++) {
+        result.push(entry.msgs[i] as T);
+      }
+    }
+    return result;
+  }
+
+  /**
    * Trim the queue to at most `maxSize` messages, keeping the
    * highest-priority entries. Removes from lowest-priority
    * buckets first. Used for background queue trimming.

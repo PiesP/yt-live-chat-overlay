@@ -189,6 +189,44 @@ export class BurstDetector {
     this.start();
   }
 
+  /**
+   * Resume with pre-loaded inter-message intervals to avoid a cold-start
+   * EMA period.  When returning from a short tab switch (<30 s), the
+   * pending queue holds recent messages whose inter-arrival intervals can
+   * seed the EMA.  This prevents messages from rendering at base speed for
+   * the first 30+ messages while the EMA warms up.
+   *
+   * @param sampleIntervalsMs — consecutive inter-message deltas in ms.
+   */
+  resumeWithSamples(sampleIntervalsMs: number[]): void {
+    this.start();
+
+    for (const intervalMs of sampleIntervalsMs) {
+      if (intervalMs <= 0) continue;
+      const instantRate = 1000 / Math.max(1, intervalMs);
+      if (this.emaRate === 0) {
+        this.emaRate = instantRate;
+      } else {
+        this.emaRate = EMA_ALPHA * instantRate + (1 - EMA_ALPHA) * this.emaRate;
+      }
+    }
+
+    // Seed the next sampling tick with an estimated message count so the
+    // burst level evaluation has data to work with immediately.
+    if (sampleIntervalsMs.length > 0) {
+      const medianInterval = sampleIntervalsMs.slice().sort((a, b) => a - b)[
+        (sampleIntervalsMs.length / 2) | 0
+      ]!;
+      const avgMsgPerTick =
+        medianInterval > 0 ? BurstDetector.SAMPLE_INTERVAL_MS / medianInterval : 0;
+      this.samplesSinceLastCheck = Math.max(this.samplesSinceLastCheck, Math.ceil(avgMsgPerTick));
+    }
+
+    // We've already seeded the EMA; skip the post-resume skip period
+    // so real messages don't lose their EMA contribution.
+    this.postResumeSkipCount = BurstDetector.POST_RESUME_EMA_SKIP;
+  }
+
   /** Get current burst level */
   getLevel(): BurstLevel {
     return this.currentLevel;
