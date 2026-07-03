@@ -131,14 +131,39 @@ export class PriorityBucketQueue<T = ChatMessage> {
   }
 
   /**
-   * Insert a batch of messages that were previously dequeued but
-   * need to be retried (e.g., collision retries). Each message
-   * is re-inserted into its priority bucket.
+   * Remove specific messages from the queue.
+   * O(n) where n = total unconsumed messages across all buckets.
+   * Returns the number of messages actually removed.
+   *
+   * Used by drainQueue to atomically remove successfully placed messages
+   * after a peek-based drain pass, eliminating the dequeue→retry→refill
+   * cycle that could lose messages when the skip limit was exceeded.
    */
-  refill(messages: T[], getPriority: (msg: T) => number): void {
-    for (const msg of messages) {
-      this.enqueue(msg, getPriority(msg));
+  removeAll(messages: T[]): number {
+    if (messages.length === 0) return 0;
+    const toRemove = new Set(messages);
+    let removed = 0;
+
+    for (const prio of this.priorityLevels) {
+      const entry = this.buckets.get(prio);
+      if (!entry) continue;
+      const { msgs } = entry;
+      if (entry.offset >= msgs.length) continue;
+
+      let writeIdx = entry.offset;
+      for (let i = entry.offset; i < msgs.length; i++) {
+        const msg = msgs[i];
+        if (msg !== undefined && !toRemove.has(msg)) {
+          msgs[writeIdx++] = msg;
+        } else {
+          removed++;
+        }
+      }
+      msgs.length = writeIdx;
     }
+
+    this._size -= removed;
+    return removed;
   }
 
   /** Clear all buckets and reset state. */

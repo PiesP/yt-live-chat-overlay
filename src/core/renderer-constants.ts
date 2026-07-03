@@ -48,11 +48,6 @@ export const ANTI_BLOCK_FREE_RATIO = 0.05;
  *  (Math.round(opacity * 20)) for grouped draw-order submission. */
 export const OPACITY_BUCKET_COUNT = 21;
 
-// ── Queue / drain (renderer-canvas.ts) ──────────────────────────────────────
-
-/** Max number of consecutive collision skips in the drain queue. */
-export const DRAIN_QUEUE_MAX_SKIP = 3;
-
 // ── Stagger (renderer-canvas.ts) ────────────────────────────────────────────
 
 /** Horizontal stagger per batch index step (px). */

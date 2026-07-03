@@ -47,7 +47,6 @@ import { RendererBase } from '@core/renderer-base';
 import {
   ANTI_BLOCK_PRIORITY_THRESHOLD,
   type CanvasMessage,
-  DRAIN_QUEUE_MAX_SKIP,
   HORIZONTAL_STAGGER_MAX,
   HORIZONTAL_STAGGER_PER_STEP,
   hashStringForTier,
@@ -99,7 +98,6 @@ export class CanvasRenderer extends RendererBase {
   /** Lane-indexed active messages for O(1) lane-scoped collision checks. */
   private readonly activeMessagesByLane = new Map<number, CanvasMessage[]>();
   private readonly pendingQueue = new PriorityBucketQueue();
-  private readonly retryQueue: ChatMessage[] = [];
 
   /** Last devicePixelRatio seen — used to detect DPR changes. */
   private lastDpr = 0;
@@ -493,9 +491,6 @@ export class CanvasRenderer extends RendererBase {
       const msg = this.pendingQueue.dequeue();
       if (msg) messages.push(msg);
     }
-    // Also drain retry queue
-    messages.push(...this.retryQueue);
-    this.retryQueue.length = 0;
     return messages;
   }
 
@@ -505,10 +500,9 @@ export class CanvasRenderer extends RendererBase {
     this.activeMessagesByLane.clear();
   }
 
-  /** Clear pending/retry queues (used by overlay refresh). */
+  /** Clear pending queue (used by overlay refresh). */
   override clearPendingQueue(): void {
     this.pendingQueue.clear();
-    this.retryQueue.length = 0;
   }
 
   /**
@@ -947,23 +941,27 @@ export class CanvasRenderer extends RendererBase {
     const dims = this.overlay.getDimensions();
     if (!dims) return;
 
-    let skipped = 0;
-    const maxSkip = DRAIN_QUEUE_MAX_SKIP;
-    let batchIndex = 0; // for stagger delay computation
-    while (
-      !this.pendingQueue.isEmpty &&
-      this.activeMessages.length < this.settings.maxConcurrentMessages &&
-      skipped <= maxSkip
-    ) {
-      const msg = this.pendingQueue.dequeue();
-      if (!msg) continue;
+    // ── Peek-based drain: messages stay in queue until placement succeeds ──
+    // Previously, drainQueue used a dequeue→retry→refill cycle with a skip
+    // limit.  When the limit was exceeded (4+ consecutive collisions in a
+    // single frame), dequeued messages beyond the limit were permanently lost
+    // — removed from the queue but never added to retryQueue.
+    //
+    // Now, we snapshot the queue via toArray(), try to place every message,
+    // and only remove (removeAll) those that were successfully placed.
+    // Messages that fail placement stay in the queue for the next frame.
+    // This guarantees zero message loss from internal queue management.
+    const candidates = this.pendingQueue.toArray();
+    let batchIndex = 0;
+    const committed: ChatMessage[] = [];
+
+    for (const msg of candidates) {
+      if (this.activeMessages.length >= this.settings.maxConcurrentMessages) break;
 
       const result = this.checkPlacement(msg, now, dims);
       if (!result.ok) {
-        // no_lane: all lanes occupied. collision: bounding-box overlap at entry edge.
-        // Both cases: retry next frame via retry queue — lanes typically free within <100ms.
-        skipped++;
-        this.retryQueue.push(msg);
+        // Message stays in queue for retry next frame.
+        // checkPlacement() already called markCollision() for feedback.
         continue;
       }
 
@@ -976,18 +974,15 @@ export class CanvasRenderer extends RendererBase {
         result.speedTier,
         dims
       );
-      skipped = 0; // reset after successful enqueue
       batchIndex++;
+      committed.push(msg);
     }
 
-    // Merge retry queue back into pending queue for next frame.
-    // refill() re-inserts each message into its priority bucket (O(k) per message
-    // where k = number of priority levels, typically 6). Previously this used
-    // O(n) splice per message. retryQueue is typically ≤3 elements (limited by maxSkip).
-    if (this.retryQueue.length > 0) {
-      this.pendingQueue.refill(this.retryQueue, (msg) => CanvasRenderer.getMessagePriority(msg));
-      this.retryQueue.length = 0;
+    // Atomically remove successfully placed messages from the queue.
+    if (committed.length > 0) {
+      this.pendingQueue.removeAll(committed);
     }
+
     this.observability.recordDrainQueue(performance.now() - t0);
   }
 

@@ -65,7 +65,6 @@ import { LruMap } from '@core/lru-map';
 import {
   ANTI_BLOCK_FREE_RATIO,
   ANTI_BLOCK_PRIORITY_THRESHOLD,
-  DRAIN_QUEUE_MAX_SKIP as DRAIN_MAX_SKIP,
   EPSILON,
   FAR_LAYER_DESATURATION_FACTOR,
   HORIZONTAL_STAGGER_MAX,
@@ -378,7 +377,6 @@ const activeMessages: ActiveMessage[] = [];
 const pendingQueue: WorkerMessage[] = [];
 let pendingQueueSortNeeded = false;
 let pendingQueueOffset = 0;
-const retryQueue: WorkerMessage[] = [];
 
 // Lane allocator state — heap of [laneIndex, availableAtMs]
 let laneHeap: [number, number][] = [];
@@ -1096,7 +1094,7 @@ function startRenderLoop(): void {
     renderFrame();
     // Self-idle with grace period to prevent rAF start/stop thrashing
     // during sparse chat intervals.
-    if (activeMessages.length === 0 && pendingQueue.length === 0 && retryQueue.length === 0) {
+    if (activeMessages.length === 0 && pendingQueue.length === 0) {
       const now = performance.now();
       if (idleSince === null) {
         idleSince = now;
@@ -1425,7 +1423,12 @@ function drainQueue(now: number, width: number, height: number): void {
     pendingQueueSortNeeded = false;
   }
 
-  let skipped = 0;
+  // Compact consumed entries to prevent unbounded memory growth
+  if (pendingQueueOffset > 64) {
+    pendingQueue.splice(0, pendingQueueOffset);
+    pendingQueueOffset = 0;
+  }
+
   let batchIndex = 0;
 
   // Anti-block gate: when lane utilization is critically high (≥95%),
@@ -1439,21 +1442,25 @@ function drainQueue(now: number, width: number, height: number): void {
   const laneUtilization = occupiedCount / Math.max(1, numLanes);
   const isAntiBlock = laneUtilization >= 1 - ANTI_BLOCK_FREE_RATIO;
 
-  while (
-    pendingQueueOffset < pendingQueue.length &&
-    activeMessages.length < config.maxConcurrentMessages &&
-    skipped <= DRAIN_MAX_SKIP
-  ) {
-    const entry = pendingQueue[pendingQueueOffset++];
+  // ── Peek-based drain ──
+  // Process all messages without removing them from the queue.
+  // Messages that fail placement stay in the queue for the next frame.
+  // Successfully placed messages are tracked and filtered out afterward.
+  // This eliminates the dequeue→retry→sort cycle and guarantees zero
+  // message loss from internal queue management (previously, messages
+  // beyond DRAIN_MAX_SKIP were dequeued but never added to retryQueue).
+  const committed = new Set<WorkerMessage>();
+
+  for (let i = pendingQueueOffset; i < pendingQueue.length; i++) {
+    const entry = pendingQueue[i];
     if (!entry) continue;
+
+    if (activeMessages.length >= config.maxConcurrentMessages) break;
 
     // Anti-block: probabilistically skip low-priority messages when lanes are saturated
     if (isAntiBlock && entry.priority < ANTI_BLOCK_PRIORITY_THRESHOLD) {
       const acceptProb = (1 - laneUtilization) / ANTI_BLOCK_FREE_RATIO;
-      if (Math.random() >= acceptProb) {
-        skipped++;
-        continue;
-      }
+      if (Math.random() >= acceptProb) continue; // stays in queue for retry
     }
 
     // Compute speed tier matching activateMessage for correct lane allocation
@@ -1474,38 +1481,32 @@ function drainQueue(now: number, width: number, height: number): void {
     const placement = findPlacement(entry.height, speedTier);
 
     if (!placement) {
-      skipped++;
       totalDrops++;
-      retryQueue.push(entry);
-      continue;
+      continue; // stays in queue for retry
     }
 
     // Pixel-level collision check — prevents overlap when the lane allocator's
     // occupancy model diverges from actual message positions (e.g. after
     // pause/resume, horizontal stagger, or burst speed changes).
     if (!checkCollision(placement, entry.height, speedTier, now, width)) {
-      skipped++;
-      retryQueue.push(entry);
-      continue;
+      continue; // stays in queue for retry
     }
 
     activateMessage(entry, now, placement, batchIndex, width, height);
-    skipped = 0;
     batchIndex++;
+    committed.add(entry);
   }
 
-  // Compact consumed entries to prevent unbounded memory growth
-  if (pendingQueueOffset > 64) {
-    pendingQueue.splice(0, pendingQueueOffset);
-    pendingQueueOffset = 0;
-  }
-
-  // Merge retries
-  if (retryQueue.length > 0) {
-    // Bulk push + single sort (O(n log n)) instead of per-message splice insert (O(n²))
-    pendingQueue.push(...retryQueue);
-    pendingQueue.sort((a, b) => b.priority - a.priority);
-    retryQueue.length = 0;
+  // Remove committed messages from the queue.
+  if (committed.size > 0) {
+    let writeIdx = pendingQueueOffset;
+    for (let i = pendingQueueOffset; i < pendingQueue.length; i++) {
+      const entry = pendingQueue[i];
+      if (entry !== undefined && !committed.has(entry)) {
+        pendingQueue[writeIdx++] = entry;
+      }
+    }
+    pendingQueue.length = writeIdx;
   }
 }
 
