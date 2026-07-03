@@ -57,6 +57,7 @@ export class ReplayChatSource extends ChatSource {
   private replayBuffer = new ReplayBuffer();
   private seekListenerCleanup: (() => void) | null = null;
   private seekSignal: AbortSignal | null = null;
+  private seekAbortController: AbortController | null = null;
   private seekGeneration = 0;
   private cooperativeLoopTimer: ReturnType<typeof setTimeout> | null = null;
   private cooperativeLoopRunning = false;
@@ -296,6 +297,15 @@ export class ReplayChatSource extends ChatSource {
     // Increment seek generation — cancels any in-flight seek from a prior seek.
     const gen = ++this.seekGeneration;
 
+    // Abort the previous seek's in-flight fetch (if any), then create a fresh
+    // AbortController for this seek.  Compose with the session-level signal
+    // so the fetch is also cancelled on session stop.
+    this.seekAbortController?.abort();
+    this.seekAbortController = new AbortController();
+    const seekSignal = this.seekSignal
+      ? AbortSignal.any([this.seekAbortController.signal, this.seekSignal])
+      : this.seekAbortController.signal;
+
     this.replayBuffer.clear();
     this.lastReplayRequestedOffsetMs = offsetMs;
     this.replayConsecutiveFailures = 0;
@@ -305,12 +315,10 @@ export class ReplayChatSource extends ChatSource {
     this.stopPrefetch();
 
     if (this.replayMode === 'playerSeek' && this.replayPlayerSeekContinuation) {
-      const signal = this.seekSignal ?? undefined;
       void (async () => {
         try {
-          // Abort guard: if another seek fired since we started, discard result.
           if (gen !== this.seekGeneration) return;
-          await this.fetchReplayPlayerSeek(offsetMs, signal);
+          await this.fetchReplayPlayerSeek(offsetMs, seekSignal);
           if (gen !== this.seekGeneration) return;
           this.flushReplayBuffer(offsetMs);
           this.startPrefetch();
@@ -321,12 +329,10 @@ export class ReplayChatSource extends ChatSource {
         }
       })();
     } else if (this.replayMode === 'continuation') {
-      const signal = this.seekSignal ?? undefined;
       void (async () => {
         try {
-          // Abort guard: if another seek fired since we started, discard result.
           if (gen !== this.seekGeneration) return;
-          await this.pollContinuationReplay(offsetMs, signal);
+          await this.pollContinuationReplay(offsetMs, seekSignal);
           if (gen !== this.seekGeneration) return;
           this.startPrefetch();
         } catch (error: unknown) {
@@ -352,6 +358,8 @@ export class ReplayChatSource extends ChatSource {
     this.replayBuffer.clear();
     this.seekListenerCleanup?.();
     this.seekListenerCleanup = null;
+    this.seekAbortController?.abort();
+    this.seekAbortController = null;
     this.stopCooperativeLoop();
     this.stopPrefetch();
   }

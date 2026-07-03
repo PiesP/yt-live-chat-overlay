@@ -607,8 +607,7 @@ export class SettingsUi {
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    // Delay revoke to avoid race with async download start in some browsers.
-    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    URL.revokeObjectURL(url);
   }
 
   private handleImport(): void {

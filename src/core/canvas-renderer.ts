@@ -270,15 +270,8 @@ export class CanvasRenderer extends RendererBase {
       log.warn('Canvas created but not connected to DOM — renderer will be inactive');
     }
 
-    // C1: Listen for context restoration to recover from GPU crashes / driver resets.
+    // C1: Listen for Canvas 2D context restoration to recover from GPU crashes / driver resets.
     // Without this, a context loss permanently disables the renderer until page reload.
-    canvas.addEventListener('webglcontextlost', (e: Event) => {
-      e.preventDefault();
-      this.ctx = null;
-      log.warn('Canvas context lost — renderer paused until restoration');
-    });
-    canvas.addEventListener('webglcontextrestored', () => this.handleContextRestored());
-    // Canvas 2D context loss is rare but possible under memory pressure.
     canvas.addEventListener('contextlost', (e: Event) => {
       e.preventDefault();
       this.ctx = null;

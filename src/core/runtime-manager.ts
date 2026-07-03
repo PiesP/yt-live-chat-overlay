@@ -469,10 +469,12 @@ export class RuntimeManager {
     // 6. Restart render loop
     renderer.resumeRenderLoop();
 
-    // 7. Restart foreground listeners (may have been stopped)
+    // 7. Restart foreground listeners (explicit stop before start for safety)
+    this.stopForegroundListeners();
     this.startForegroundListeners();
 
     // 8. Re-arm chat watchdog
+    this.stopChatWatchdog();
     this.startChatWatchdog();
   }
 
