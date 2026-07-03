@@ -47,6 +47,21 @@ export interface LaneAllocatorOptions {
 }
 
 /**
+ * Serializable snapshot of LaneAllocator's internal state.
+ * Enables cross-thread transfer (e.g. main → Worker) and
+ * deterministic unit testing of allocation logic.
+ */
+export interface LaneAllocatorSnapshot {
+  heap: [number, number][];
+  /** laneIndex → heapIndex, serialized as a plain object for JSON transfer. */
+  indexMap: Record<number, number>;
+  laneHeight: number;
+  laneCount: number;
+  /** laneIndex → { tier, until }, serialized as a plain object. */
+  speedTierLanes: Record<number, { tier: number; until: number }>;
+}
+
+/**
  * Top-first lane scheduler with tiered-speed lane allocation.
  *
  * Fills lanes from the top of the screen down using a three-phase strategy
@@ -169,6 +184,52 @@ export class LaneAllocator {
 
   isEmpty(): boolean {
     return this.heap.length === 0;
+  }
+
+  /**
+   * Export current allocator state as a serializable snapshot.
+   * Transient/derived state (collidedLanes, utilization counters) is
+   * excluded — they are reset on the next frame via resetBatch().
+   */
+  snapshot(): LaneAllocatorSnapshot {
+    const indexMap: Record<number, number> = {};
+    this.laneIndexToHeapIndex.forEach((v, k) => {
+      indexMap[k] = v;
+    });
+    const speedTierMap: Record<number, { tier: number; until: number }> = {};
+    this.speedTierLanes.forEach((v, k) => {
+      speedTierMap[k] = { tier: v.tier, until: v.until };
+    });
+    return {
+      heap: structuredClone(this.heap),
+      indexMap,
+      laneHeight: this.laneHeight,
+      laneCount: this.laneCount,
+      speedTierLanes: speedTierMap,
+    };
+  }
+
+  /**
+   * Restore allocator state from a previously captured snapshot.
+   * Resets all transient state — call before the next frame's drainQueue.
+   */
+  restore(snapshot: LaneAllocatorSnapshot): void {
+    this.heap = structuredClone(snapshot.heap);
+    this.laneIndexToHeapIndex = new Map(
+      Object.entries(snapshot.indexMap).map(([k, v]) => [Number(k), v])
+    );
+    this.laneHeight = snapshot.laneHeight;
+    this.laneCount = snapshot.laneCount;
+    this.speedTierLanes = new Map(
+      Object.entries(snapshot.speedTierLanes).map(([k, v]) => [
+        Number(k),
+        { tier: v.tier, until: v.until },
+      ])
+    );
+    this.collidedLanes.clear();
+    this.cachedUtilization = 0;
+    this.occupiedCount = 0;
+    this.utilizationRecountCounter = 0;
   }
 
   getLaneCount(): number {
