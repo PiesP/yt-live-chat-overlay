@@ -634,90 +634,25 @@ export class CanvasRenderer extends RendererBase {
     const dims = this.overlay.getDimensions();
     if (!dims) return;
 
-    // Apply up to translationBatchSize translation results that arrived
-    // between frames. Incremental drain prevents single-frame spikes during
-    // chat bursts when many translations resolve simultaneously.
-    if (this.pendingTranslations.length > 0) {
-      const end = Math.min(
-        this.pendingTranslationReadIdx + this.translationBatchSize,
-        this.pendingTranslations.length
-      );
-      for (let i = this.pendingTranslationReadIdx; i < end; i++) {
-        const entry = this.pendingTranslations[i];
-        if (!entry) continue;
-        entry.msg.translatedText = entry.text;
-      }
-      this.pendingTranslationReadIdx = end;
-      if (this.pendingTranslationReadIdx >= this.pendingTranslations.length) {
-        this.pendingTranslations.length = 0;
-        this.pendingTranslationReadIdx = 0;
-      }
-    }
+    // ── Translation drain ──
+    this.applyPendingTranslations();
 
-    // Reset device pixel ratio (canvas buffer size may need update on DPR change)
-    const dpr = window.devicePixelRatio || 1;
-    if (dpr !== this.lastDpr) {
-      this.lastDpr = dpr;
-      canvas.width = dims.width * dpr;
-      canvas.height = dims.height * dpr;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    }
-    // P2-3: Skip clearRect + render loop when no active messages.
-    // Note: checked before merged cleanup+pre-scan; the loop handles expiry.
+    // ── DPR update ──
+    this.updateCanvasDpr(canvas, ctx, dims);
+
+    // ── Clear + status bar ──
     const hasContent = this.activeMessages.length > 0 || this.connectionStatus !== 'connected';
     if (hasContent) {
       ctx.clearRect(0, 0, dims.width, dims.height);
     }
-
-    // Draw connection status bar when not connected
     if (this.connectionStatus !== 'connected') {
       this.renderStatusBar(ctx, dims);
     }
 
     const mode = this.settings.danmakuMode;
-    const isScrolling = mode === 'scroll' || mode === 'reverse';
 
-    // Anti-block throttle: when lane utilization is critically high, pause
-    // new placements to prevent visual chaos. High-priority messages
-    // (SuperChat ≥100, Membership ≥80) always bypass the gate.
-    //
-    // resetBatch() is called unconditionally every frame to keep the lane
-    // allocator's collision set and speed-tier entries current. Without this,
-    // stale collision data from a previous frame can cause findPlacement()
-    // to skip lanes that have since freed up.
-    //
-    // When anti-block persists beyond ANTI_BLOCK_MAX_DURATION_MS, drainQueue
-    // is force-called to prevent indefinite message suppression. During
-    // sustained high traffic this acts as a pressure-release valve, allowing
-    // messages through even if they cause some visual overlap — better than
-    // showing nothing at all.
-    this.laneAllocator.resetBatch();
-
-    if (this.isAntiBlockActive()) {
-      const now = performance.now();
-      if (this.antiBlockSince === null) {
-        this.antiBlockSince = now;
-      }
-
-      const front = this.pendingQueue.peek();
-      const forceDrain =
-        front !== undefined &&
-        now - this.antiBlockSince >= CanvasRenderer.ANTI_BLOCK_MAX_DURATION_MS;
-      const highPriorityFront =
-        front && CanvasRenderer.getMessagePriority(front) >= ANTI_BLOCK_PRIORITY_THRESHOLD;
-
-      if (highPriorityFront || forceDrain) {
-        if (forceDrain) {
-          // Reset the timer so the next force-drain is a full interval away
-          this.antiBlockSince = now;
-        }
-        this.drainQueue(now);
-      }
-      // else: drainQueue skipped for this frame
-    } else {
-      this.antiBlockSince = null; // anti-block no longer active — reset timer
-      this.drainQueue(now);
-    }
+    // ── Drain stage: anti-block gate + lane allocation ──
+    this.drainStage(now, dims);
 
     this.observability.updateLaneUtilization(this.laneAllocator.getUtilization());
     this.observability.tick();
@@ -725,9 +660,103 @@ export class CanvasRenderer extends RendererBase {
     // Early exit for empty frames — nothing to render.
     if (!hasContent) return;
 
-    // ── Merged cleanup + pre-scan: single pass over activeMessages ──
-    // Formerly two separate passes (cleanupExpiredMessages + opacity bucket
-    // pre-scan). Now merged into one loop to halve iteration overhead.
+    // ── Cleanup + opacity buckets (merged single pass) ──
+    const cleanupResult = this.cleanupAndBucketStage(now, dims, mode);
+
+    // Post-cleanup: compact array + clean lane map for expired messages
+    if (cleanupResult.anyRemoved) {
+      this.compactRemovedMessages(cleanupResult.writeIdx, cleanupResult.oldLength);
+    }
+
+    // ── Draw stage: opacity-bucketed rendering ──
+    this.drawStage(ctx, cleanupResult.buckets);
+
+    this.observability.recordRenderFrame(performance.now() - t0);
+  }
+
+  // ── renderFrame stages ─────────────────────────────────────────────────
+
+  /** Apply batched translation results to active messages. */
+  private applyPendingTranslations(): void {
+    if (this.pendingTranslations.length === 0) return;
+    const end = Math.min(
+      this.pendingTranslationReadIdx + this.translationBatchSize,
+      this.pendingTranslations.length
+    );
+    for (let i = this.pendingTranslationReadIdx; i < end; i++) {
+      const entry = this.pendingTranslations[i];
+      if (!entry) continue;
+      entry.msg.translatedText = entry.text;
+    }
+    this.pendingTranslationReadIdx = end;
+    if (this.pendingTranslationReadIdx >= this.pendingTranslations.length) {
+      this.pendingTranslations.length = 0;
+      this.pendingTranslationReadIdx = 0;
+    }
+  }
+
+  /** Update canvas dimensions when device pixel ratio changes. */
+  private updateCanvasDpr(
+    canvas: HTMLCanvasElement,
+    ctx: CanvasRenderingContext2D,
+    dims: OverlayDimensions
+  ): void {
+    const dpr = window.devicePixelRatio || 1;
+    if (dpr === this.lastDpr) return;
+    this.lastDpr = dpr;
+    canvas.width = dims.width * dpr;
+    canvas.height = dims.height * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  /**
+   * Anti-block gate + drainQueue.
+   * When lane utilization is critically high, new placements are paused.
+   * If anti-block persists beyond ANTI_BLOCK_MAX_DURATION_MS, drainQueue
+   * is force-called to prevent indefinite message suppression.
+   */
+  private drainStage(now: number, _dims: OverlayDimensions): void {
+    // Anti-block throttle
+    // resetBatch() is called unconditionally every frame to keep the lane
+    // allocator's collision set and speed-tier entries current.
+    this.laneAllocator.resetBatch();
+
+    if (this.isAntiBlockActive()) {
+      const currentNow = performance.now();
+      if (this.antiBlockSince === null) {
+        this.antiBlockSince = currentNow;
+      }
+
+      const front = this.pendingQueue.peek();
+      const forceDrain =
+        front !== undefined &&
+        currentNow - this.antiBlockSince >= CanvasRenderer.ANTI_BLOCK_MAX_DURATION_MS;
+      const highPriorityFront =
+        front && CanvasRenderer.getMessagePriority(front) >= ANTI_BLOCK_PRIORITY_THRESHOLD;
+
+      if (highPriorityFront || forceDrain) {
+        if (forceDrain) {
+          this.antiBlockSince = currentNow;
+        }
+        this.drainQueue(now);
+      }
+    } else {
+      this.antiBlockSince = null;
+      this.drainQueue(now);
+    }
+  }
+
+  /**
+   * Single-pass cleanup + opacity bucket pre-scan.
+   * Removes expired messages and computes per-message opacity bucket
+   * assignment. Returns buckets for the draw stage and compaction metadata.
+   */
+  private cleanupAndBucketStage(
+    now: number,
+    dims: OverlayDimensions,
+    mode: string
+  ): { buckets: CanvasMessage[][]; anyRemoved: boolean; writeIdx: number; oldLength: number } {
+    const isScrolling = mode === 'scroll' || mode === 'reverse';
     const buckets = this.opacityBuckets;
     for (const bucket of buckets) bucket.length = 0;
     this.expiredMessagesScratch.length = 0;
@@ -763,9 +792,6 @@ export class CanvasRenderer extends RendererBase {
         const travelDistance = msg.startX + msg.width + this.settings.exitPaddingPx;
         msg.x = msg.startX - progress * travelDistance;
       } else if (mode === 'reverse') {
-        // Reverse: message enters from left and scrolls right.
-        // Compute travel from startX (left edge) to off-screen right edge,
-        // accounting for horizontal stagger in the start position.
         const travelDistance = dims.width - msg.startX + this.settings.exitPaddingPx;
         msg.x = msg.startX + progress * travelDistance;
       }
@@ -781,59 +807,61 @@ export class CanvasRenderer extends RendererBase {
         this.cachedOpacityConfig
       );
 
-      // Clamp to valid bucket range — floating-point imprecision or corrupted
-      // settings (baseOpacity > 1) could push the index out of bounds.
       const bucketIndex = Math.min(
         OPACITY_BUCKET_COUNT - 1,
         Math.round(opacity * (OPACITY_BUCKET_COUNT - 1))
       );
-      // Store elapsed for membership card border pulse animation
       msg._frameElapsed = elapsed;
       buckets[bucketIndex]!.push(msg);
     }
 
-    // Post-loop: compact array + clean lane map for expired messages
-    if (anyRemoved) {
-      // Remove only expired messages from the lane map — incremental instead of
-      // full clear+rebuild.
-      for (const msg of this.expiredMessagesScratch) {
-        const slotCount = msg.slotCount ?? 1;
-        for (let slot = 0; slot < slotCount; slot++) {
-          const lane = msg.laneIndex + slot;
-          const list = this.activeMessagesByLane.get(lane);
-          if (list) {
-            const idx = list.indexOf(msg);
-            if (idx !== -1) {
-              list[idx] = list[list.length - 1]!;
-              list.pop();
-            }
-            if (list.length === 0) this.activeMessagesByLane.delete(lane);
+    return { buckets, anyRemoved, writeIdx, oldLength };
+  }
+
+  /** Compact the activeMessages array and clean the per-lane map after expired message removal. */
+  private compactRemovedMessages(writeIdx: number, oldLength: number): void {
+    // Remove only expired messages from the lane map
+    for (const msg of this.expiredMessagesScratch) {
+      const slotCount = msg.slotCount ?? 1;
+      for (let slot = 0; slot < slotCount; slot++) {
+        const lane = msg.laneIndex + slot;
+        const list = this.activeMessagesByLane.get(lane);
+        if (list) {
+          const idx = list.indexOf(msg);
+          if (idx !== -1) {
+            list[idx] = list[list.length - 1]!;
+            list.pop();
           }
+          if (list.length === 0) this.activeMessagesByLane.delete(lane);
         }
       }
-
-      // Array compaction threshold: when >50% slots expired, allocate fresh array
-      if (writeIdx < oldLength * COMPACTION_THRESHOLD_RATIO) {
-        const newMessages = this.activeMessages.slice(0, writeIdx);
-        this.activeMessages.length = 0;
-        Array.prototype.push.apply(this.activeMessages, newMessages);
-      } else {
-        this.activeMessages.length = writeIdx;
-      }
-
-      // Remove lanes that now have 0 messages
-      for (const [lane, msgs] of this.activeMessagesByLane) {
-        if (msgs.length === 0) {
-          this.activeMessagesByLane.delete(lane);
-        }
-      }
-      this.observability.updateActiveMessages(this.activeMessages.length);
-      this.observability.updateQueueDepth(this.pendingQueue.size);
     }
 
-    // ── Render each opacity group with a single ctx.globalAlpha set ──
-    // Iterate ascending (0→N-1) so low-opacity messages render behind,
-    // high-opacity on top — consistent with pre-pooling Map insertion order.
+    // Array compaction: when >50% slots expired, allocate fresh array
+    if (writeIdx < oldLength * COMPACTION_THRESHOLD_RATIO) {
+      const newMessages = this.activeMessages.slice(0, writeIdx);
+      this.activeMessages.length = 0;
+      Array.prototype.push.apply(this.activeMessages, newMessages);
+    } else {
+      this.activeMessages.length = writeIdx;
+    }
+
+    // Remove lanes that now have 0 messages
+    for (const [lane, msgs] of this.activeMessagesByLane) {
+      if (msgs.length === 0) {
+        this.activeMessagesByLane.delete(lane);
+      }
+    }
+    this.observability.updateActiveMessages(this.activeMessages.length);
+    this.observability.updateQueueDepth(this.pendingQueue.size);
+  }
+
+  /**
+   * Render active messages grouped by opacity bucket.
+   * Each bucket is rendered with a single ctx.globalAlpha set,
+   * reducing GPU state changes by ~21× vs per-message alpha.
+   */
+  private drawStage(ctx: CanvasRenderingContext2D, buckets: CanvasMessage[][]): void {
     for (let bucketIndex = 0; bucketIndex < OPACITY_BUCKET_COUNT; bucketIndex++) {
       const entries = buckets[bucketIndex];
       if (!entries || entries.length === 0) continue;
@@ -846,7 +874,6 @@ export class CanvasRenderer extends RendererBase {
           const snappedX = Math.floor(msg.x);
           const snappedY = Math.floor(msg.y);
 
-          // renderMessage is always set in activateMessage (avoids per-frame nullish coalescing)
           const renderMessage = msg.renderMessage;
 
           if (msg.message.kind === 'text') {
@@ -899,23 +926,18 @@ export class CanvasRenderer extends RendererBase {
             );
           }
 
-          // Render translation inside the card in dual mode — with a small gap
-          // to visually group the original and translation as one unit.
-          // Replace mode renders translation inside renderRegularMessage as override text.
+          // Render translation in dual mode
           if (msg.translatedText && this.settings.translationMode !== 'replace') {
             const fontSize = Math.max(
               1,
               Math.round(this.settings.fontSize * TRANSLATION_FONT_SCALE)
             );
-            // Compute vertical positions: translation sits near the bottom of the card,
-            // with a small gap between original content and translation text.
             const gap = TRANSLATION_GAP_PX;
             const transY = snappedY + msg.height - fontSize - gap;
             const transColor = this.settings.colors[msg.message.authorType];
             ctx.save();
             try {
               ctx.globalAlpha = bucketOpacity * TRANSLATION_OPACITY_SCALE;
-              // Translation text (normal weight for subtle distinction)
               const transFont = getFontString(fontSize, 'normal', this.settings.fontFamily);
               renderSegment(
                 ctx,
@@ -938,7 +960,6 @@ export class CanvasRenderer extends RendererBase {
         ctx.globalAlpha = 1;
       }
     }
-    this.observability.recordRenderFrame(performance.now() - t0);
   }
 
   // ── Queue drain ──────────────────────────────────────────────────────
