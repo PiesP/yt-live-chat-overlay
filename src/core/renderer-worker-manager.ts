@@ -176,9 +176,17 @@ export class RenderWorkerManager {
         return false;
       }
 
+      const dims = overlay.getDimensions();
+      const dpr = window.devicePixelRatio || 1;
+      // Apply DPR to canvas backing store BEFORE transferring to offscreen,
+      // so the worker's OffscreenCanvas renders at native device resolution
+      // instead of being browser-upscaled from CSS-pixel resolution.
+      if (dims) {
+        canvas.width = dims.width * dpr;
+        canvas.height = dims.height * dpr;
+      }
       const offscreen = canvas.transferControlToOffscreen();
       const config = RenderWorkerManager.buildWorkerConfig(settings);
-      const dims = overlay.getDimensions();
 
       // Resolve worker URL via platform-specific factory
       const factory = workerFactory ?? getWorkerFactory();
@@ -251,12 +259,21 @@ export class RenderWorkerManager {
           config,
           width: dims?.width ?? 0,
           height: dims?.height ?? 0,
+          dpr,
         },
         [offscreen]
       );
 
       this.dimensionsUnsubscribe = overlay.onDimensionsChanged((d) => {
-        if (d) worker.postMessage({ type: 'resize', width: d.width, height: d.height });
+        if (d) {
+          const currentDpr = window.devicePixelRatio || 1;
+          worker.postMessage({
+            type: 'resize',
+            width: d.width,
+            height: d.height,
+            dpr: currentDpr,
+          });
+        }
       });
 
       this.worker = worker;

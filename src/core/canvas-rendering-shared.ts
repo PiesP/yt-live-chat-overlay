@@ -271,6 +271,7 @@ export function strokeTextOutline(
   ctx.lineWidth = strokeWidth;
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
+  ctx.miterLimit = 2;
   ctx.strokeText(text, x, y);
   ctx.restore();
 }
@@ -333,18 +334,25 @@ function cacheTextBitmap(
   const height = ascent + descent + Math.ceil(strokeWidth) + 2;
   ctx.restore();
 
+  // Detect DPR from context transform so bitmap resolution matches the
+  // canvas backing store. Without this, a 1x bitmap drawn on a 2x canvas
+  // via drawImage() gets browser-upscaled → blurry cached text.
+  const dpr = ctx.getTransform().a || 1;
+
   const offscreen: HTMLCanvasElement | OffscreenCanvas =
     typeof OffscreenCanvas !== 'undefined'
-      ? new OffscreenCanvas(width, height)
+      ? new OffscreenCanvas(Math.ceil(width * dpr), Math.ceil(height * dpr))
       : (() => {
           const canvas = document.createElement('canvas');
-          canvas.width = width;
-          canvas.height = height;
+          canvas.width = Math.ceil(width * dpr);
+          canvas.height = Math.ceil(height * dpr);
           return canvas;
         })();
   const offCtx = offscreen.getContext('2d');
   if (!offCtx) return;
 
+  // Scale so CSS-coordinate drawing commands map to the full DPR buffer
+  offCtx.scale(dpr, dpr);
   offCtx.font = font;
   offCtx.textBaseline = 'top';
   offCtx.textRendering = 'optimizeSpeed';
@@ -352,6 +360,7 @@ function cacheTextBitmap(
   offCtx.lineWidth = strokeWidth;
   offCtx.lineJoin = 'round';
   offCtx.lineCap = 'round';
+  offCtx.miterLimit = 2;
   offCtx.strokeText(text, strokeWidth / 2 + 1, strokeWidth / 2 + 1);
   offCtx.fillStyle = fillColor;
   offCtx.fillText(text, strokeWidth / 2 + 1, strokeWidth / 2 + 1);

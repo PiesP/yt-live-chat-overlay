@@ -785,11 +785,16 @@ self.onmessage = (e: MessageEvent) => {
         case 'init': {
           config = data.config as WorkerConfig;
           canvas = data.canvas as OffscreenCanvas;
-          ctx = canvas.getContext('2d', { alpha: false });
+          ctx = canvas.getContext('2d', { alpha: true });
           if (!ctx) {
             self.postMessage({ type: 'error', error: 'Failed to get 2D context' });
             return;
           }
+          // Apply DPR transform so all drawing at CSS coordinates maps to
+          // the device-resolution canvas backing store (set by main thread
+          // before transferControlToOffscreen).
+          const dpr = (data.dpr as number) || 1;
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
           emojiCache = new ByteLimitedCache<ImageBitmap>(
             (config.emojiCacheMb ?? 4) * 1_000_000,
             estimateBitmapBytes,
@@ -815,9 +820,18 @@ self.onmessage = (e: MessageEvent) => {
           self.postMessage({ type: 'ready' });
           break;
         }
-        case 'resize':
-          initLanes(data.width as number, data.height as number);
+        case 'resize': {
+          if (!canvas || !ctx) break;
+          const newDpr = (data.dpr as number) || 1;
+          const cssW = data.width as number;
+          const cssH = data.height as number;
+          // Resize canvas backing store to match new DPR-scaled dimensions
+          canvas.width = cssW * newDpr;
+          canvas.height = cssH * newDpr;
+          ctx.setTransform(newDpr, 0, 0, newDpr, 0, 0);
+          initLanes(cssW, cssH);
           break;
+        }
         case 'addMessages': {
           const msgs = data.messages as WorkerMessage[];
           // Handle transferred ImageBitmaps from main thread
