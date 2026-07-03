@@ -1024,6 +1024,24 @@ export class RuntimeManager {
         return;
       }
 
+      // When tab returns while video is paused, the renderer won't start its
+      // render loop (resume() exits early when isVideoPaused=true). Drain any
+      // pending messages to the backlog controller so they are gradually emitted
+      // when the video eventually resumes.
+      if (this.renderer?.isVideoPaused) {
+        const pendingMessages = this.renderer.drainPendingQueue();
+        if (pendingMessages && pendingMessages.length > 0 && this.renderer) {
+          log.info(
+            `Tab returned while video paused — routing ${pendingMessages.length} messages to backlog`
+          );
+          this.ensureBacklogController(this.renderer);
+          this.backlogController?.startBacklogInjection(pendingMessages);
+        }
+        // Don't return — still need to set chat source unpaused for poll loop wake.
+        this.chatSource?.setPaused(false);
+        return;
+      }
+
       // F-1: Long-hidden tab → full overlay refresh (clear + restart from history)
       // rather than time-jumping expired messages via paused-duration shift.
       const hiddenDuration = this.getIdleDurationMs(Date.now());
@@ -1125,12 +1143,14 @@ export class RuntimeManager {
           this.renderer?.pauseForVideo();
           this.chatSource?.setPaused(true);
         } else {
-          // Trim stale queue entries before resuming — messages may have
-          // accumulated during the paused period. Trimming prevents a visual
-          // flood when drainQueue fires on resume. Always unpause the chat
-          // source so the poll loop wakes even when the tab is hidden
-          // (e.g. unpause via media keys on a second screen).
-          this.renderer?.trimBackgroundQueue();
+          // Drain pending queue through backlog controller instead of trimming.
+          const pendingMessages = this.renderer?.drainPendingQueue();
+          if (pendingMessages && pendingMessages.length > 0 && this.renderer) {
+            this.ensureBacklogController(this.renderer);
+            this.backlogController?.startBacklogInjection(pendingMessages);
+          } else {
+            this.renderer?.trimBackgroundQueue();
+          }
           this.renderer?.resumeForVideo();
           this.chatSource?.setPaused(false);
         }

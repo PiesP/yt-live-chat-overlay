@@ -48,7 +48,7 @@ export abstract class RendererBase {
   protected authorRateLimiter: PerAuthorRateLimiter;
 
   protected isPaused = false;
-  protected isVideoPaused = false;
+  protected _isVideoPaused = false;
   protected pausedAt: number | null = null;
   protected backlogPaused = false;
 
@@ -121,8 +121,12 @@ export abstract class RendererBase {
    * `video.paused` which is also true during premiere countdowns where
    * the video hasn't started yet but the user didn't press pause.
    */
+  get isVideoPaused(): boolean {
+    return this._isVideoPaused;
+  }
+
   isPausedByVideo(): boolean {
-    return this.isVideoPaused;
+    return this._isVideoPaused;
   }
 
   // ── Shared state machine ──────────────────────────────────────────────
@@ -150,7 +154,16 @@ export abstract class RendererBase {
       this.applyPausedDuration(pausedDuration);
     }
     this.pausedAt = null;
-    this.burstDetector.resume();
+
+    // Pre-warm BurstDetector EMA from pending queue density.
+    // Without this, the EMA starts at 0 and takes 30+ messages to
+    // reflect actual chat activity after a short tab switch.
+    const intervals = this.computePendingQueueIntervals();
+    if (intervals.length > 0) {
+      this.burstDetector.resumeWithSamples(intervals);
+    } else {
+      this.burstDetector.resume();
+    }
 
     // Clear paused flag BEFORE isVideoPaused guard so resumeForVideo()
     // can call onResume() when video later un-pauses. Without this,
@@ -179,15 +192,15 @@ export abstract class RendererBase {
 
   pauseForVideo(): void {
     if (this.isVideoPaused) return;
-    this.isVideoPaused = true;
+    this._isVideoPaused = true;
     if (!this.isPaused) {
       this.pause();
     }
   }
 
   resumeForVideo(): void {
-    if (!this.isVideoPaused) return;
-    this.isVideoPaused = false;
+    if (!this._isVideoPaused) return;
+    this._isVideoPaused = false;
     if (document.visibilityState === 'visible') {
       if (this.isPaused) {
         this.resume();
@@ -355,7 +368,7 @@ export abstract class RendererBase {
 
   destroy(): void {
     this.isPaused = false;
-    this.isVideoPaused = false;
+    this._isVideoPaused = false;
     this.pauseBuffer.length = 0;
     this.burstDetector.destroy();
     this.authorRateLimiter.destroy();
@@ -446,6 +459,32 @@ export abstract class RendererBase {
   prepareForRefresh(): void {
     this.clearActiveMessages();
     this.clearPendingQueue();
+  }
+
+  /**
+   * Return messages currently in the pending queue for burst EMA seeding.
+   * Base class returns empty (no pending queue). Subclasses with a pending
+   * queue override to provide queued messages.
+   */
+  protected getPendingQueueMessages(): ChatMessage[] {
+    return [];
+  }
+
+  /**
+   * Extract inter-message intervals from the pending queue for burst EMA
+   * seeding.  Returns timestamp deltas between consecutive queued messages
+   * in milliseconds.  Used on resume to pre-warm the BurstDetector EMA so
+   * speed adaptation doesn't start from zero after a short tab switch.
+   */
+  private computePendingQueueIntervals(): number[] {
+    const msgs = this.getPendingQueueMessages();
+    if (msgs.length < 2) return [];
+    const intervals: number[] = [];
+    for (let i = 1; i < msgs.length; i++) {
+      const delta = msgs[i]!.timestamp - msgs[i - 1]!.timestamp;
+      if (delta >= 0) intervals.push(delta);
+    }
+    return intervals;
   }
 
   protected updateBacklogPause(): void {
