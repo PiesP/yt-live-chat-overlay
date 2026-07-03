@@ -60,6 +60,7 @@ export class ImageFetchManager {
   );
 
   private emojiCleanupIntervalId: ReturnType<typeof setInterval> | null = null;
+  private isEmojiCleanupPaused = false;
   private isDestroyed = false;
   private emojiFetchLimit = 10;
   private failedEmojiRetryMins = 5;
@@ -286,6 +287,32 @@ export class ImageFetchManager {
           this.failedEmojiFetches.delete(url);
         }
       }
+    }
+  }
+
+  /**
+   * Pause the emoji cleanup interval when the tab becomes hidden.
+   * Prevents unnecessary setInterval execution during background idle.
+   */
+  pause(): void {
+    if (this.isEmojiCleanupPaused) return;
+    this.isEmojiCleanupPaused = true;
+    this.emojiCleanupIntervalId = clearSafeInterval(this.emojiCleanupIntervalId);
+  }
+
+  /**
+   * Resume the emoji cleanup interval when the tab becomes visible.
+   * Only restarts if it was running before pause() was called.
+   */
+  resume(): void {
+    if (!this.isEmojiCleanupPaused) return;
+    this.isEmojiCleanupPaused = false;
+    if (this.isDestroyed) return;
+    if (this.emojiCleanupIntervalId === null) {
+      this.emojiCleanupIntervalId = setInterval(() => {
+        if (this.isDestroyed || this.isEmojiCleanupPaused) return;
+        this.cleanupStaleEmojiFetching();
+      }, 5_000);
     }
   }
 

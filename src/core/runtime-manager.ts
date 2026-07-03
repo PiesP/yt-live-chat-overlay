@@ -1070,6 +1070,7 @@ export class RuntimeManager {
         this.renderer?.pause();
         this.renderer?.trimBackgroundQueue();
         this.chatSource?.setPaused(true);
+        this.chatPanelObserver.pause();
         return;
       }
 
@@ -1079,6 +1080,9 @@ export class RuntimeManager {
 
       // Clear idle markers so the health snapshot reflects current state.
       this.clearHidden();
+
+      // Resume chat panel observer — it was paused when the tab was hidden.
+      this.chatPanelObserver.resume();
 
       // In standby mode (pre-live, waiting for stream), just resume the
       // render loop — no chat source or video state to manage.

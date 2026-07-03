@@ -1581,6 +1581,7 @@ export class CanvasRenderer extends RendererBase {
   protected onPause(): void {
     this.stopRenderLoop();
     this.workerManager.setPaused(true);
+    this.imageFetchManager.pause();
   }
 
   protected onResume(): void {
@@ -1588,6 +1589,7 @@ export class CanvasRenderer extends RendererBase {
     this.laneAllocator.resetBatch();
     this.drainQueue(performance.now());
     this.workerManager.setPaused(false);
+    this.imageFetchManager.resume();
   }
 
   /**

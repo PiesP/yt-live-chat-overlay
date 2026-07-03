@@ -42,6 +42,7 @@ export class ChatPanelObserver {
   private callback: ChatPanelChangeCallback | null = null;
   private lastState: ChatPanelState | null = null;
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private isPaused = false;
 
   /** Start observing for chat panel open/close state changes. */
   start(callback: ChatPanelChangeCallback): void {
@@ -78,6 +79,45 @@ export class ChatPanelObserver {
     }
     this.callback = null;
     this.lastState = null;
+  }
+
+  /**
+   * Pause periodic polling and DOM observation while the tab is hidden.
+   * Preserves callback and lastState for seamless resumption.
+   */
+  pause(): void {
+    if (this.isPaused) return;
+    this.isPaused = true;
+    this.observer?.disconnect();
+    this.observer = null;
+    if (this.pollTimer !== null) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
+    }
+    if (this.debounceTimer !== null) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
+    }
+  }
+
+  /**
+   * Resume periodic polling and DOM observation when the tab becomes visible.
+   * Only restarts if a callback is registered (start() was called previously).
+   */
+  resume(): void {
+    if (!this.isPaused) return;
+    this.isPaused = false;
+    if (!this.callback) return;
+
+    // Reconnect MutationObserver
+    this.observer = new MutationObserver(() => this.scheduleCheck());
+    this.observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+    });
+
+    // Restart poll timer
+    this.pollTimer = setInterval(() => this.scheduleCheck(), MUTATION_CHECK_INTERVAL_MS);
   }
 
   /** Return the last known panel state, or null if never checked. */

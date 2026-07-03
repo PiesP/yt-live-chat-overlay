@@ -869,7 +869,14 @@ self.onmessage = (e: MessageEvent) => {
         case 'setPaused': {
           const shouldPause = data.paused as boolean;
           if (shouldPause && !isPaused) {
-            // Pause: record the time
+            // Pause: stop the render loop and record the time.
+            // rAF in a hidden tab is auto-throttled by the browser, but
+            // when paused while visible (e.g. video paused), the rAF loop
+            // would keep running wastefully — stop it explicitly.
+            if (animFrameId !== null) {
+              cancelAnimationFrame(animFrameId);
+              animFrameId = null;
+            }
             pauseStartTime = performance.now();
             isPaused = true;
           } else if (!shouldPause && isPaused) {
