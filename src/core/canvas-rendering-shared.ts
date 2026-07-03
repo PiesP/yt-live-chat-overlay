@@ -371,6 +371,37 @@ function cacheTextBitmap(
 // ── Segment rendering ───────────────────────────────────────────────────────
 
 /**
+ * Draw a DPR-scaled bitmap at CSS-pixel coordinates.
+ *
+ * Bitmaps created by cacheTextBitmap are rendered at device resolution
+ * (natural pixels = CSS size × DPR).  When drawn via drawImage(img, x, y)
+ * without explicit dimensions, the image's natural pixel count is interpreted
+ * as coordinate-system units — which causes a 2× oversize on DPR-scaled
+ * canvases.  This helper divides the bitmap dimensions by the context's DPR
+ * so the bitmap occupies the correct CSS-pixel area regardless of pixel
+ * density.
+ */
+function drawBitmapAtCssSize(
+  ctx: AnyCanvasContext,
+  bitmap: CanvasImageSource,
+  x: number,
+  y: number
+): void {
+  let bw = 0;
+  let bh = 0;
+  if (bitmap instanceof HTMLCanvasElement || bitmap instanceof OffscreenCanvas) {
+    bw = bitmap.width;
+    bh = bitmap.height;
+  }
+  if (bw <= 0 || bh <= 0) {
+    ctx.drawImage(bitmap, x, y); // fallback for non-canvas sources
+    return;
+  }
+  const dpr = ctx.getTransform().a || 1;
+  ctx.drawImage(bitmap, x, y, bw / dpr, bh / dpr);
+}
+
+/**
  * Render a single text segment with outline bitmap caching.
  *
  * @param outlineWidthPx  Outline width in pixels (0 = no outline)
@@ -398,7 +429,7 @@ export function renderSegment(
     const key = `${font}|${text}|${color}|${Math.round(strokeWidth)}|${strokeColor}`;
     const bitmap = textBitmapCache.get(key);
     if (bitmap) {
-      ctx.drawImage(bitmap, x, y);
+      drawBitmapAtCssSize(ctx, bitmap, x, y);
       return;
     }
 
@@ -418,7 +449,7 @@ export function renderSegment(
     // Immediately use the freshly cached bitmap to avoid fallthrough overhead
     const freshBitmap = textBitmapCache.get(key);
     if (freshBitmap) {
-      ctx.drawImage(freshBitmap, x, y);
+      drawBitmapAtCssSize(ctx, freshBitmap, x, y);
       return;
     }
   }
