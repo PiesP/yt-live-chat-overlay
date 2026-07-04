@@ -26,6 +26,18 @@ interface TextField extends BaseField {
   /** Datalist suggestions for autocomplete (e.g., font family names). */
   suggestions?: string[];
 }
+export interface FontPreviewField {
+  type: 'font-preview';
+}
+export interface WeightToggleField extends BaseField {
+  type: 'weight-toggle';
+  options: ReadonlyArray<[string, string]>;
+}
+export interface FontChipsField extends BaseField {
+  type: 'font-chips';
+  /** Font family suggestions as clickable chips. */
+  suggestions: string[];
+}
 interface EnabledField {
   type: 'enabled';
   title?: string;
@@ -42,6 +54,9 @@ export type FieldDef =
   | CheckboxField
   | SelectField
   | TextField
+  | FontPreviewField
+  | WeightToggleField
+  | FontChipsField
   | EnabledField
   | AuthorGridField
   | RangeField;
@@ -85,26 +100,41 @@ const sel = (
   options,
   ...(title !== undefined ? { title } : {}),
 });
-const txt = (
-  label: string,
-  key: string,
-  title?: string,
-  placeholder?: string,
-  suggestions?: string[]
-): TextField => ({
-  type: 'text' as const,
-  label,
-  key,
-  ...(title !== undefined ? { title } : {}),
-  ...(placeholder !== undefined ? { placeholder } : {}),
-  ...(suggestions !== undefined ? { suggestions } : {}),
-});
 const range = (label: string, key: string, title?: string, modifier?: string): RangeField => ({
   type: 'range' as const,
   label,
   key,
   ...(title !== undefined ? { title } : {}),
   ...(modifier !== undefined ? { modifier } : {}),
+});
+const fontPreview = (): FontPreviewField => ({
+  type: 'font-preview' as const,
+});
+
+const weightToggle = (
+  label: string,
+  key: string,
+  options: ReadonlyArray<[string, string]>,
+  title?: string
+): WeightToggleField => ({
+  type: 'weight-toggle' as const,
+  label,
+  key,
+  options,
+  ...(title !== undefined ? { title } : {}),
+});
+
+const fontChips = (
+  label: string,
+  key: string,
+  suggestions: string[],
+  title?: string
+): FontChipsField => ({
+  type: 'font-chips' as const,
+  label,
+  key,
+  suggestions,
+  ...(title !== undefined ? { title } : {}),
 });
 
 // ── Declarative field schemas ────────────────────────────────────────────────
@@ -176,27 +206,10 @@ export const PANES: PaneDef[] = [
             ],
             'Comment display direction and behavior'
           ),
-          num('Font Size (px)', 'fontSize', 'Text size in pixels (14-50)'),
           num(
             'Scroll Speed (px/s)',
             'speedPxPerSec',
             'How fast comments scroll across the screen in pixels per second'
-          ),
-          sel(
-            'Font Weight',
-            'fontWeight',
-            [
-              ['bold', 'Bold (700)'],
-              ['normal', 'Normal (400)'],
-            ],
-            'Text weight: Bold is more readable, Normal uses less GPU memory'
-          ),
-          txt(
-            'Font Family',
-            'fontFamily',
-            'CSS font-family value. Type to filter suggestions, or enter a custom font stack.',
-            undefined,
-            FONT_SUGGESTIONS
           ),
           range('Text Opacity (%)', 'opacity', 'Overall opacity of comment text (50-100%)'),
           range(
@@ -241,6 +254,23 @@ export const PANES: PaneDef[] = [
         fields: [
           range('Top Clear Zone (%)', 'safeTop', 'Keep top N% of video free of comments'),
           range('Bottom Clear Zone (%)', 'safeBottom', 'Keep bottom N% of video free of comments'),
+        ],
+      },
+      {
+        title: 'Font',
+        fields: [
+          fontPreview(),
+          num('Size (px)', 'fontSize', 'Text size in pixels (14-50)'),
+          weightToggle(
+            'Weight',
+            'fontWeight',
+            [
+              ['bold', 'Bold'],
+              ['normal', 'Regular'],
+            ],
+            'Bold is more readable, Regular uses less GPU memory'
+          ),
+          fontChips('Family', 'fontFamily', FONT_SUGGESTIONS, 'Font family for comment text'),
         ],
       },
     ],

@@ -669,6 +669,124 @@ export const SETTINGS_UI_STYLES = `
         margin-top: 2px;
       }
 
+      /* ── Font preview ── */
+      .yt-chat-overlay-settings-font-preview {
+        background: #111;
+        border: 1px solid ${uiColors.border};
+        border-radius: ${borderRadius.sm};
+        padding: ${spacing.lg}px;
+        margin-bottom: ${spacing.md}px;
+        text-align: center;
+        min-height: 60px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .yt-chat-overlay-settings-font-preview-text {
+        color: ${uiColors.text};
+        transition: font-size 0.1s, font-weight 0.1s;
+        line-height: 1.3;
+      }
+
+      /* ── Weight toggle pills ── */
+      .yt-chat-overlay-settings-weight-toggle {
+        display: flex;
+        gap: 0;
+        border-radius: ${borderRadius.sm};
+        overflow: hidden;
+        border: 1px solid ${uiColors.border};
+      }
+      .yt-chat-overlay-settings-weight-toggle-btn {
+        flex: 1;
+        padding: ${spacing.xs}px ${spacing.md}px;
+        border: none;
+        background: ${uiColors.backgroundLight};
+        color: ${uiColors.textMuted};
+        font-size: ${typography.fontSize.sm};
+        cursor: pointer;
+        transition: background 0.15s, color 0.15s;
+        border-right: 1px solid ${uiColors.border};
+        min-height: 30px;
+      }
+      .yt-chat-overlay-settings-weight-toggle-btn:last-child {
+        border-right: none;
+      }
+      .yt-chat-overlay-settings-weight-toggle-btn.active {
+        background: rgba(30, 136, 229, 0.25);
+        color: ${uiColors.text};
+        font-weight: ${typography.fontWeight.semibold};
+      }
+      .yt-chat-overlay-settings-weight-toggle-btn:hover:not(.active) {
+        color: ${uiColors.text};
+      }
+      .yt-chat-overlay-settings-weight-toggle-btn:focus-visible {
+        outline: 2px solid ${uiColors.primary};
+        outline-offset: -2px;
+      }
+
+      /* ── Font family chips ── */
+      .yt-chat-overlay-settings-font-chips-wrapper {
+        width: 100%;
+      }
+      .yt-chat-overlay-settings-font-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-bottom: ${spacing.sm}px;
+      }
+      .yt-chat-overlay-settings-font-chip {
+        padding: 3px 10px;
+        border-radius: 14px;
+        border: 1px solid ${uiColors.border};
+        background: ${uiColors.backgroundLight};
+        color: ${uiColors.textMuted};
+        font-size: 12px;
+        cursor: pointer;
+        transition: all 0.15s;
+        white-space: nowrap;
+        user-select: none;
+      }
+      .yt-chat-overlay-settings-font-chip:hover {
+        border-color: ${uiColors.primary};
+        color: ${uiColors.text};
+      }
+      .yt-chat-overlay-settings-font-chip.active {
+        background: rgba(30, 136, 229, 0.2);
+        border-color: ${uiColors.primary};
+        color: ${uiColors.text};
+        font-weight: ${typography.fontWeight.semibold};
+      }
+      .yt-chat-overlay-settings-font-chip:focus-visible {
+        outline: 2px solid ${uiColors.primary};
+        outline-offset: 1px;
+      }
+
+      /* ── Custom font input row ── */
+      .yt-chat-overlay-settings-font-custom-row {
+        display: flex;
+        align-items: center;
+        gap: ${spacing.sm}px;
+      }
+      .yt-chat-overlay-settings-font-custom-input {
+        flex: 1;
+        padding: ${spacing.xs}px ${spacing.sm}px;
+        border-radius: ${borderRadius.sm};
+        border: 1px solid ${uiColors.border};
+        background: ${uiColors.backgroundLight};
+        color: ${uiColors.text};
+        font-size: 12px;
+      }
+      .yt-chat-overlay-settings-font-custom-input:focus-visible {
+        outline: 2px solid ${uiColors.primary};
+        outline-offset: 1px;
+      }
+
+      /* Font panel label override — vertical alignment for chip/weight containers */
+      .yt-chat-overlay-settings-field:has(.yt-chat-overlay-settings-font-chips-wrapper),
+      .yt-chat-overlay-settings-field:has(.yt-chat-overlay-settings-weight-toggle) {
+        align-items: flex-start;
+      }
+
       /* ── Accessibility: reduced motion ── */
       @media (prefers-reduced-motion: reduce) {
         .yt-chat-overlay-settings-backdrop,
@@ -679,7 +797,10 @@ export const SETTINGS_UI_STYLES = `
         .yt-chat-overlay-reload-button,
         .yt-chat-overlay-settings-close,
         .yt-chat-overlay-settings-actions button,
-        .yt-chat-overlay-settings-tab {
+        .yt-chat-overlay-settings-tab,
+        .yt-chat-overlay-settings-font-preview-text,
+        .yt-chat-overlay-settings-weight-toggle-btn,
+        .yt-chat-overlay-settings-font-chip {
           animation: none !important;
           transition: none !important;
         }

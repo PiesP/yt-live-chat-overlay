@@ -18,7 +18,14 @@ import {
   resolveLimits,
   resolveOutlineLimits,
 } from '@core/settings-schema';
-import type { AuthorGridField, FieldDef, PaneDef } from '@core/settings-ui-panes';
+import type {
+  AuthorGridField,
+  FieldDef,
+  FontChipsField,
+  FontPreviewField,
+  PaneDef,
+  WeightToggleField,
+} from '@core/settings-ui-panes';
 import { PANES } from '@core/settings-ui-panes';
 import { TranslationService } from '@core/translation-service';
 
@@ -430,6 +437,50 @@ export class SettingsUiForm {
         input.addEventListener('change', handler);
       }
     }
+
+    // Font-specific handlers: update font preview box on font-related changes
+    const fontPreviewEl = element.querySelector<HTMLElement>(
+      '.yt-chat-overlay-settings-font-preview-text'
+    );
+    if (fontPreviewEl) {
+      // Listen for fontSize number input changes
+      const fontSizeInput = element.querySelector<HTMLInputElement>('input[name="fontSize"]');
+      if (fontSizeInput) {
+        fontSizeInput.addEventListener('input', () => {
+          fontPreviewEl.style.fontSize = `${fontSizeInput.value}px`;
+        });
+      }
+
+      // Listen for weight toggle changes
+      const weightToggle = element.querySelector<HTMLElement>(
+        '.yt-chat-overlay-settings-weight-toggle'
+      );
+      if (weightToggle) {
+        weightToggle.addEventListener('change', () => {
+          const activeBtn = weightToggle.querySelector<HTMLButtonElement>(
+            '.yt-chat-overlay-settings-weight-toggle-btn.active'
+          );
+          if (activeBtn?.dataset.value) {
+            fontPreviewEl.style.fontWeight = activeBtn.dataset.value === 'bold' ? '700' : '400';
+          }
+        });
+      }
+
+      // Listen for font chips changes
+      const chipsWrapper = element.querySelector<HTMLElement>(
+        '.yt-chat-overlay-settings-font-chips-wrapper'
+      );
+      if (chipsWrapper) {
+        chipsWrapper.addEventListener('change', () => {
+          const hiddenInput = chipsWrapper.querySelector<HTMLInputElement>(
+            '.yt-chat-overlay-settings-font-value'
+          );
+          if (hiddenInput?.value) {
+            fontPreviewEl.style.fontFamily = hiddenInput.value;
+          }
+        });
+      }
+    }
   }
 
   // ── Modal content factory ──────────────────────────────────────────────
@@ -600,6 +651,12 @@ export class SettingsUiForm {
 
         return field;
       }
+      case 'font-preview':
+        return this.buildFontPreview(def);
+      case 'weight-toggle':
+        return this.buildWeightToggle(def);
+      case 'font-chips':
+        return this.buildFontChips(def);
       default:
         throw new Error('Unhandled field type');
     }
@@ -607,6 +664,145 @@ export class SettingsUiForm {
 
   private resolveKey(def: { key: string; modifier?: string }): string {
     return def.modifier ? `${def.modifier}-${def.key}` : def.key;
+  }
+
+  // ── Font preview builder ─────────────────────────────────────────────────
+
+  private buildFontPreview(_def: FontPreviewField): HTMLDivElement {
+    const container = domDiv('yt-chat-overlay-settings-font-preview');
+    const previewText = document.createElement('span');
+    previewText.className = 'yt-chat-overlay-settings-font-preview-text';
+    previewText.textContent = 'The quick brown fox jumped over the lazy dog. 안녕하세요 こんにちは';
+    container.appendChild(previewText);
+    return container;
+  }
+
+  // ── Weight toggle builder ────────────────────────────────────────────────
+
+  private buildWeightToggle(def: WeightToggleField): HTMLElement {
+    const resolvedKey = this.resolveKey(def);
+    const container = domDiv('yt-chat-overlay-settings-weight-toggle');
+    container.dataset.key = resolvedKey;
+
+    for (const [value, label] of def.options) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'yt-chat-overlay-settings-weight-toggle-btn';
+      btn.dataset.value = value;
+      btn.textContent = t(label);
+      btn.addEventListener('click', () => {
+        container.querySelectorAll('.yt-chat-overlay-settings-weight-toggle-btn').forEach((b) => {
+          b.classList.remove('active');
+        });
+        btn.classList.add('active');
+        // Fire change event for live preview
+        container.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+      container.appendChild(btn);
+    }
+
+    return domField(t(def.label), container);
+  }
+
+  // ── Font chips builder ───────────────────────────────────────────────────
+
+  private buildFontChips(def: FontChipsField): HTMLElement {
+    const resolvedKey = this.resolveKey(def);
+    const container = domDiv('yt-chat-overlay-settings-font-chips-wrapper');
+
+    // Chips
+    const chipsContainer = domDiv('yt-chat-overlay-settings-font-chips');
+    for (const suggestion of def.suggestions) {
+      const chip = document.createElement('span');
+      chip.className = 'yt-chat-overlay-settings-font-chip';
+      chip.dataset.value = suggestion;
+      chip.textContent = this.fontChipLabel(suggestion);
+      chip.addEventListener('click', () => {
+        chipsContainer.querySelectorAll('.yt-chat-overlay-settings-font-chip').forEach((c) => {
+          c.classList.remove('active');
+        });
+        chip.classList.add('active');
+        // Clear custom input
+        const customInput = container.querySelector<HTMLInputElement>(
+          '.yt-chat-overlay-settings-font-custom-input'
+        );
+        if (customInput) customInput.value = '';
+        // Sync hidden input value for form collection
+        const hiddenInput = container.querySelector<HTMLInputElement>(
+          '.yt-chat-overlay-settings-font-value'
+        );
+        if (hiddenInput) hiddenInput.value = suggestion;
+        container.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+      chipsContainer.appendChild(chip);
+    }
+    container.appendChild(chipsContainer);
+
+    // Custom font input
+    const customRow = domDiv('yt-chat-overlay-settings-font-custom-row');
+    const customInputId = nextFieldId(`font-custom-${this.resolveKey(def)}`);
+    const customInput = document.createElement('input');
+    customInput.type = 'text';
+    customInput.id = customInputId;
+    customInput.className = 'yt-chat-overlay-settings-font-custom-input';
+    customInput.placeholder = t('Custom font stack…');
+    customInput.addEventListener('input', () => {
+      // Deactivate all chips when custom input is used
+      chipsContainer.querySelectorAll('.yt-chat-overlay-settings-font-chip').forEach((c) => {
+        c.classList.remove('active');
+      });
+      const hiddenInput = container.querySelector<HTMLInputElement>(
+        '.yt-chat-overlay-settings-font-value'
+      );
+      if (hiddenInput) hiddenInput.value = customInput.value;
+      container.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    customRow.appendChild(customInput);
+
+    // Hidden input for form collection
+    const hiddenInput = document.createElement('input');
+    hiddenInput.type = 'hidden';
+    hiddenInput.name = resolvedKey;
+    hiddenInput.className = 'yt-chat-overlay-settings-font-value';
+    customRow.appendChild(hiddenInput);
+
+    container.appendChild(customRow);
+
+    return domField(t(def.label), container);
+  }
+
+  /** Derive a short display label from a CSS font-family value. */
+  private fontChipLabel(cssFamily: string): string {
+    // Common presets → human-friendly names
+    const PRESET_LABELS: Record<string, string> = {
+      'system-ui, -apple-system, sans-serif': 'System Default',
+      '"Segoe UI", system-ui, sans-serif': 'Segoe UI',
+      '"-apple-system", "Helvetica Neue", sans-serif': 'SF / Helvetica',
+      '"Roboto", system-ui, sans-serif': 'Roboto',
+      '"Noto Sans KR", sans-serif': 'Noto Sans KR',
+      '"Noto Sans JP", sans-serif': 'Noto Sans JP',
+      '"Noto Sans SC", sans-serif': 'Noto Sans SC',
+      '"Noto Sans TC", sans-serif': 'Noto Sans TC',
+      '"Malgun Gothic", sans-serif': 'Malgun Gothic',
+      '"Microsoft YaHei", sans-serif': 'Microsoft YaHei',
+      '"Meiryo", sans-serif': 'Meiryo',
+      '"Cascadia Code", "Fira Code", monospace': 'Cascadia Code',
+      '"JetBrains Mono", monospace': 'JetBrains Mono',
+      '"Source Code Pro", monospace': 'Source Code Pro',
+      monospace: 'Monospace',
+      'Arial, sans-serif': 'Arial',
+      '"Helvetica Neue", Arial, sans-serif': 'Helvetica Neue',
+      'Verdana, sans-serif': 'Verdana',
+      '"Trebuchet MS", sans-serif': 'Trebuchet MS',
+      'sans-serif': 'Sans-serif',
+      'Georgia, serif': 'Georgia',
+      '"Times New Roman", serif': 'Times New Roman',
+      serif: 'Serif',
+      '"Comic Sans MS", cursive': 'Comic Sans MS',
+      'Impact, sans-serif': 'Impact',
+      '"Arial Black", sans-serif': 'Arial Black',
+    };
+    return PRESET_LABELS[cssFamily] ?? cssFamily;
   }
 
   private buildAuthorGrid(): HTMLDivElement {
@@ -782,7 +978,78 @@ export class SettingsUiForm {
     }
 
     this.syncMinTextLengthState();
+    this.populateFontPreview(settings);
+    this.populateWeightToggle(settings);
+    this.populateFontChips(settings);
     this.isUpdating = false;
+  }
+
+  private populateFontPreview(settings: Readonly<OverlaySettings>): void {
+    if (!this.modal) return;
+    const previewEl = this.modal.querySelector<HTMLElement>(
+      '.yt-chat-overlay-settings-font-preview-text'
+    );
+    if (!previewEl) return;
+    previewEl.style.fontSize = `${settings.fontSize}px`;
+    previewEl.style.fontWeight = settings.fontWeight === 'bold' ? '700' : '400';
+    previewEl.style.fontFamily = settings.fontFamily;
+  }
+
+  private populateWeightToggle(settings: Readonly<OverlaySettings>): void {
+    if (!this.modal) return;
+    const container = this.modal.querySelector<HTMLElement>(
+      '.yt-chat-overlay-settings-weight-toggle'
+    );
+    if (!container) return;
+    const buttons = container.querySelectorAll<HTMLButtonElement>(
+      '.yt-chat-overlay-settings-weight-toggle-btn'
+    );
+    for (const btn of buttons) {
+      if (btn.dataset.value === settings.fontWeight) {
+        btn.classList.add('active');
+      } else {
+        btn.classList.remove('active');
+      }
+    }
+  }
+
+  private populateFontChips(settings: Readonly<OverlaySettings>): void {
+    if (!this.modal) return;
+    const chipsContainer = this.modal.querySelector<HTMLElement>(
+      '.yt-chat-overlay-settings-font-chips'
+    );
+    const customInput = this.modal.querySelector<HTMLInputElement>(
+      '.yt-chat-overlay-settings-font-custom-input'
+    );
+    const hiddenInput = this.modal.querySelector<HTMLInputElement>(
+      '.yt-chat-overlay-settings-font-value'
+    );
+
+    const family = settings.fontFamily;
+
+    // Try matching a chip
+    let matched = false;
+    if (chipsContainer) {
+      const chips = chipsContainer.querySelectorAll<HTMLElement>(
+        '.yt-chat-overlay-settings-font-chip'
+      );
+      for (const chip of chips) {
+        if (chip.dataset.value === family) {
+          chip.classList.add('active');
+          matched = true;
+        } else {
+          chip.classList.remove('active');
+        }
+      }
+    }
+
+    // If no chip matched, use custom input
+    if (customInput && !matched) {
+      customInput.value = family;
+    }
+    if (hiddenInput) {
+      hiddenInput.value = family;
+    }
   }
 
   syncMinTextLengthState(): void {
@@ -891,6 +1158,19 @@ export class SettingsUiForm {
         }
       } else if (el instanceof HTMLSelectElement) {
         partial[scalarKey] = el.value;
+      }
+    }
+
+    // Collect weight toggle value (buttons, not form elements)
+    const weightToggleEl = this.modal.querySelector<HTMLElement>(
+      '.yt-chat-overlay-settings-weight-toggle'
+    );
+    if (weightToggleEl) {
+      const activeBtn = weightToggleEl.querySelector<HTMLButtonElement>(
+        '.yt-chat-overlay-settings-weight-toggle-btn.active'
+      );
+      if (activeBtn?.dataset.value) {
+        partial.fontWeight = activeBtn.dataset.value;
       }
     }
 
