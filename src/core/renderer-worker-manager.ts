@@ -125,6 +125,11 @@ export class RenderWorkerManager {
     return this.active;
   }
 
+  /** Force-set the active state (used by fallback paths after Worker destruction). */
+  setActive(active: boolean): void {
+    this.active = active;
+  }
+
   get workerRef(): Worker | null {
     return this.worker;
   }

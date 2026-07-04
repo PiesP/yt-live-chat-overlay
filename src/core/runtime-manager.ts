@@ -1271,6 +1271,17 @@ export class RuntimeManager {
         // (lightweight — preserves the chat source).  If it keeps failing,
         // escalate to a full session restart.
         if (health.isRendererStuck) {
+          // When the Worker has died (ping/pong timeout), the canvas is
+          // already transferred to a dead OffscreenCanvas.  An overlay
+          // refresh clears state but can't help — the canvas is
+          // unrecoverable.  Trigger a fallback to main-thread rendering.
+          if (this.renderer != null && !this.renderer.isWorkerAlive()) {
+            log.warn('Worker detected as dead — falling back to main-thread renderer');
+            this.renderer.fallbackToMainThread('worker-dead');
+            this.consecutiveRefreshFailures = 0;
+            return;
+          }
+
           this.consecutiveRefreshFailures++;
           if (this.consecutiveRefreshFailures > MAX_CONSECUTIVE_REFRESHES) {
             log.warn(

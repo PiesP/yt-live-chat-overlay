@@ -462,6 +462,14 @@ export abstract class RendererBase {
     return true; // default: no worker → always alive
   }
 
+  /**
+   * Gracefully degrade from Worker-mode to main-thread rendering.
+   * Default no-op — CanvasRenderer overrides with actual fallback logic.
+   */
+  fallbackToMainThread(_reason: string): void {
+    // no-op: main-thread-only renderers have nothing to fall back from
+  }
+
   /** Reset lane allocator with new dimensions. */
   resetAllocator(dims: OverlayDimensions | null): void {
     this.laneAllocator.reset(dims);

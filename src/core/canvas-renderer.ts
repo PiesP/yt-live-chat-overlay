@@ -1789,6 +1789,91 @@ export class CanvasRenderer extends RendererBase {
     clearTextMeasurementCaches();
   }
 
+  // ── Worker recovery / fallback ──────────────────────────────────────────
+
+  /**
+   * Replace the current canvas with a new one and acquire a fresh 2D context.
+   * Used when the original canvas is unrecoverable (transferred to a dead
+   * OffscreenCanvas after GPU reset or Worker crash).
+   *
+   * The new canvas is inserted at the same DOM position and inherits the
+   * CSS size of the original. Returns true if successful.
+   */
+  private replaceCanvas(): boolean {
+    const container = this.overlay.getContainer();
+    if (!container || !this.canvas) return false;
+
+    this.canvas.remove();
+
+    const newCanvas = document.createElement('canvas');
+    const dims = this.overlay.getDimensions();
+    if (dims) {
+      newCanvas.style.width = `${dims.width}px`;
+      newCanvas.style.height = `${dims.height}px`;
+      const dpr = window.devicePixelRatio || 1;
+      newCanvas.width = dims.width * dpr;
+      newCanvas.height = dims.height * dpr;
+    }
+    newCanvas.style.cssText =
+      'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;text-rendering:optimizeSpeed';
+    newCanvas.setAttribute('aria-hidden', 'true');
+    container.appendChild(newCanvas);
+
+    const ctx = newCanvas.getContext('2d', { desynchronized: true });
+    if (!ctx) return false;
+
+    newCanvas.addEventListener('contextlost', (e: Event) => {
+      e.preventDefault();
+      this.ctx = null;
+      log.warn('Canvas 2D context lost — renderer paused until restoration');
+    });
+    newCanvas.addEventListener('contextrestored', () => this.handleContextRestored());
+
+    this.canvas = newCanvas;
+    this.ctx = ctx;
+    const dpr = window.devicePixelRatio || 1;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    log.info('Canvas replaced — fallback to main-thread rendering');
+    return true;
+  }
+
+  /**
+   * Gracefully degrade from Worker-mode to main-thread rendering.
+   * Called when the Worker is unrecoverable (dead or canvas context lost).
+   */
+  override fallbackToMainThread(reason: string): void {
+    log.warn(`Falling back to main-thread renderer: ${reason}`);
+
+    this.workerManager.destroy();
+    this.workerManager.setActive(false);
+
+    if (!this.replaceCanvas()) {
+      log.error('Fallback failed: could not replace canvas');
+      return;
+    }
+
+    this.activeMessages.length = 0;
+    this.activeMessagesByLane.clear();
+    this.pendingQueue.clear();
+    this.backlogPaused = false;
+    clearTextMeasurementCaches();
+    this.textBitmapCache.clear();
+    this.dimensionCache.clear();
+    for (const bucket of this.opacityBuckets) bucket.length = 0;
+
+    const dims = this.overlay.getDimensions();
+    if (dims) {
+      this.laneAllocator.reset(dims);
+    }
+    this.laneAllocator.resetBatch();
+
+    this.idleSince = null;
+    this.startRenderLoop();
+
+    log.info('Fallback to main-thread renderer complete');
+  }
+
   // ── Canvas context loss / restoration ───────────────────────────────────
 
   /**
@@ -1798,6 +1883,16 @@ export class CanvasRenderer extends RendererBase {
    */
   private handleContextRestored(): void {
     if (!this.canvas) return;
+
+    // When the canvas was transferred to OffscreenCanvas (Worker mode),
+    // getContext('2d') will always return null — control was permanently
+    // transferred. Fall back to main-thread rendering with a fresh canvas.
+    if (this.workerManager.isActive) {
+      log.warn('Context restored while in Worker mode — falling back to main-thread renderer');
+      this.fallbackToMainThread('gpu-reset-worker');
+      return;
+    }
+
     const ctx = this.canvas.getContext('2d');
     if (!ctx) {
       log.warn('Context restored but getContext failed — renderer remains inactive');
