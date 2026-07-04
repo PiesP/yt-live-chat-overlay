@@ -848,16 +848,21 @@ export function drawAuthorSection<T>(
         ctx.textBaseline = prevTextBaseline;
         return startY + sectionHeight;
       }
-      // Binary search for optimal truncation point (O(log n) instead of O(n))
+      // Binary search for optimal grapheme-cluster-safe truncation point.
+      // Uses grapheme clusters (via existing splitGraphemeClusters) so that
+      // surrogate pairs and ZWJ sequences in emoji author names are never
+      // split mid-glyph by a raw String.slice().
+      const graphemes = splitGraphemeClusters(displayName);
       let lo = 0;
-      let hi = displayName.length;
+      let hi = graphemes.length;
       while (lo < hi) {
         const mid = Math.floor((lo + hi) / 2);
-        const testWidth = ctx.measureText(displayName.slice(0, mid) + ellipsis).width;
+        const testText = graphemes.slice(0, mid).join('') + ellipsis;
+        const testWidth = ctx.measureText(testText).width;
         if (testWidth <= maxNameWidth) lo = mid + 1;
         else hi = mid;
       }
-      displayName = displayName.slice(0, Math.max(0, lo - 1)) + ellipsis;
+      displayName = graphemes.slice(0, Math.max(0, lo - 1)).join('') + ellipsis;
     }
   }
 
