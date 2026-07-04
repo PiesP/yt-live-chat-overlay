@@ -70,7 +70,6 @@ export interface CardConfigWorker {
   padding: { horizontal: number; vertical: number };
   cardRadius: number;
   textColor: string; // pre-resolved: either 'auto' result or explicit color
-  accentBarColorRgb: RgbColor; // pre-resolved accent bar color
   resolveColorRgb: RgbColor; // pre-resolved resolveColor(message) result
   needsGradientCache: boolean;
   needsElapsed: boolean;
@@ -93,11 +92,15 @@ export function toWorkerConfig(
   const textColor =
     config.textColor === 'auto' ? computeReadableTextColor(baseColor) : config.textColor;
 
-  // Pre-resolve accent bar colour (function → RgbColor)
-  let accentBarColorRgb: RgbColor = { r: 0, g: 0, b: 0 };
-  if (config.accentBar) {
-    const raw = config.accentBar.color;
-    accentBarColorRgb = typeof raw === 'function' ? raw(message) : raw;
+  // Pre-resolve accent bar — the worker accesses it through card.accentBar.color
+  // (structurally nested), not a top-level field.  The raw value is inlined
+  // into the accentBar sub-object below.
+  const accentBar = config.accentBar;
+  let accentBarWorker: CardConfigWorker['accentBar'];
+  if (accentBar) {
+    const rawColor = accentBar.color;
+    const resolvedColor: RgbColor = typeof rawColor === 'function' ? rawColor(message) : rawColor;
+    accentBarWorker = { width: accentBar.width, color: resolvedColor };
   }
 
   // Pre-resolve author visibility
@@ -120,9 +123,7 @@ export function toWorkerConfig(
     backgroundColor: config.backgroundColor ? { ...config.backgroundColor } : undefined,
     backgroundAlpha: config.backgroundAlpha,
     decoration: config.decoration,
-    accentBar: config.accentBar
-      ? { width: config.accentBar.width, color: accentBarColorRgb }
-      : undefined,
+    accentBar: accentBarWorker,
     pulsingBorder: config.pulsingBorder
       ? {
           borderRgb: config.pulsingBorder.borderRgb,
@@ -154,7 +155,6 @@ export function toWorkerConfig(
     padding: { ...config.padding },
     cardRadius: config.cardRadius,
     textColor,
-    accentBarColorRgb,
     resolveColorRgb,
     needsGradientCache: config.needsGradientCache,
     needsElapsed: config.needsElapsed,
