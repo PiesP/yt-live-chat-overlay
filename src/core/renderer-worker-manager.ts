@@ -82,6 +82,8 @@ export class RenderWorkerManager {
     'emojiFetchTimeoutMs',
     'failedEmojiRetryMins',
     'staggerMaxDelayMs',
+    'staggerMediumDelayMs',
+    'ignoreReducedMotion',
     'backgroundQueueMax',
     'translationBatchSize',
   ];
@@ -97,6 +99,8 @@ export class RenderWorkerManager {
     config.outlineWidthPx = settings.outline.widthPx;
     config.outlineOpacity = settings.outline.opacity;
     config.authorColors = { ...settings.colors };
+    // Workers cannot access matchMedia — main thread relays the OS preference.
+    config.reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     return config;
   }
 

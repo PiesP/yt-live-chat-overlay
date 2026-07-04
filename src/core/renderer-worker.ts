@@ -183,7 +183,13 @@ interface WorkerConfig {
   /** Minutes before retrying failed emoji fetches. */
   failedEmojiRetryMins: number;
   staggerMaxDelayMs: number;
+  /** Medium stagger delay for moderate queue depth (ms). Mirrors OverlaySettings.staggerMediumDelayMs. */
+  staggerMediumDelayMs: number;
   emojiFetchTimeoutMs: number;
+  /** Ignore OS reduced-motion preference (user override). Mirrors OverlaySettings.ignoreReducedMotion. */
+  ignoreReducedMotion: boolean;
+  /** OS prefers-reduced-motion media query result (relayed from main thread; Workers lack matchMedia). */
+  reducedMotion: boolean;
 }
 
 interface WorkerContentSegment {
@@ -242,8 +248,8 @@ interface ActiveMessage {
   height: number;
   /** Position/animation start time (includes stagger delay). */
   startTime: number;
-  /** Opacity/fade start time (drain time, before stagger offset). */
-  activationTime: number;
+  /** Opacity/fade start time (matches main thread fadeStartTime = now + staggerDelay). */
+  fadeStartTime: number;
   duration: number;
   /** Pre-computed 1/duration for per-frame multiplication (avoids division). */
   invDuration: number;
@@ -309,6 +315,9 @@ let animFrameId: number | null = null;
 let isDestroyed = false;
 let isPaused = false;
 let pauseStartTime = 0;
+/** Anti-block force drain timeout (ms). Mirrors renderer-base.ts:ANTI_BLOCK_MAX_DURATION_MS. */
+const ANTI_BLOCK_MAX_DURATION_MS = 2000;
+let antiBlockStartTime = 0;
 
 // Pre-computed invariants (updated on config change to avoid per-frame division)
 let invFadeMs = 0;
@@ -1233,21 +1242,33 @@ function renderFrame(): void {
 
     const progress = Math.min(1, Math.max(0, elapsed * msg.invDuration));
 
-    // Update position
+    // Update position — mirrors canvas-renderer.ts cleanupAndBucketStage:820-834
+    const isReducedMotionActive = config.reducedMotion && !config.ignoreReducedMotion;
     if (mode === 'scroll') {
-      const dist = msg.startX + msg.width + config.exitPaddingPx;
-      msg.x = msg.startX - progress * dist;
+      if (!isReducedMotionActive) {
+        const dist = msg.startX + msg.width + config.exitPaddingPx;
+        msg.x = msg.startX - progress * dist;
+      } else {
+        msg.x = Math.max(0, (width - msg.width) / 2);
+      }
     } else if (mode === 'reverse') {
-      const dist = width - msg.startX + config.exitPaddingPx;
-      msg.x = msg.startX + progress * dist;
+      if (!isReducedMotionActive) {
+        const dist = width - msg.startX + config.exitPaddingPx;
+        msg.x = msg.startX + progress * dist;
+      } else {
+        msg.x = Math.max(0, (width - msg.width) / 2);
+      }
     }
 
-    // Compute opacity via shared SSOT (matches renderer-canvas.ts)
+    // Compute opacity via shared SSOT (matches renderer-canvas.ts).
+    // Uses fadeElapsed (based on fadeStartTime) mirroring main thread's
+    // cleanupAndBucketStage at canvas-renderer.ts:838-846.
     const oc = opacityConfig;
+    const fadeElapsed = now - msg.fadeStartTime - msg.pausedDuration;
     const opacity = oc
       ? computeMessageOpacity(
           { isBacklog: msg.speedTier === SPEED_TIER.BACKLOG } as ChatMessage,
-          elapsed,
+          fadeElapsed,
           msg.duration,
           isScrolling,
           msg.speedTier,
@@ -1257,7 +1278,7 @@ function renderFrame(): void {
 
     if (opacity <= 0) continue;
 
-    const bucketIndex = Math.round(opacity * (OPACITY_BUCKETS - 1));
+    const bucketIndex = Math.min(OPACITY_BUCKETS - 1, Math.round(opacity * (OPACITY_BUCKETS - 1)));
     opacityBuckets[bucketIndex]?.push({ msg, elapsed });
   }
 
@@ -1502,13 +1523,28 @@ function drainQueue(now: number, width: number, height: number): void {
   // Anti-block gate: when lane utilization is critically high (≥95%),
   // probabilistically pause new placements. High-priority messages (≥80)
   // bypass the gate so paid interactions are never blocked.
+  // Mirrors renderer-base.ts:381-386 drainStage anti-block logic.
   let occupiedCount = 0;
   for (let h = 0; h < laneHeap.length; h++) {
     const entry = laneHeap[h];
     if (entry && entry[1] > now) occupiedCount++;
   }
   const laneUtilization = occupiedCount / Math.max(1, numLanes);
-  const isAntiBlock = laneUtilization >= 1 - ANTI_BLOCK_FREE_RATIO;
+  let isAntiBlock = laneUtilization >= 1 - ANTI_BLOCK_FREE_RATIO;
+
+  // Force drain timeout: after 2s at ≥95% utilization, drain all messages
+  // regardless of lane availability. Prevents permanent message stall under
+  // sustained saturation. Mirrors renderer-base.ts:759-761.
+  // Module-level: antiBlockStartTime
+  if (isAntiBlock) {
+    if (antiBlockStartTime === 0) {
+      antiBlockStartTime = now;
+    } else if (now - antiBlockStartTime >= ANTI_BLOCK_MAX_DURATION_MS) {
+      isAntiBlock = false;
+    }
+  } else {
+    antiBlockStartTime = 0;
+  }
 
   // ── Peek-based drain ──
   // Process all messages without removing them from the queue.
@@ -1630,7 +1666,7 @@ function activateMessage(
   if (pendingCount > STAGGER_QUEUE_HIGH) {
     effectiveMaxStagger = 0;
   } else if (pendingCount > STAGGER_QUEUE_MED) {
-    effectiveMaxStagger = Math.floor(config.staggerMaxDelayMs / 2);
+    effectiveMaxStagger = config.staggerMediumDelayMs;
   }
 
   // ── Exponential stagger delay (matching main thread) ──
@@ -1693,7 +1729,7 @@ function activateMessage(
     startX,
     width: msg.width,
     height: msg.height,
-    activationTime: now,
+    fadeStartTime: now + staggerDelay,
     startTime: now + staggerDelay,
     duration,
     invDuration: 1 / Math.max(1, duration),
@@ -1722,7 +1758,7 @@ function activateMessage(
     now + staggerDelay,
     duration,
     speedTier,
-    msg.width
+    isScrolling ? msg.width : undefined
   );
   activeMessages.push(am);
 
