@@ -238,11 +238,11 @@ export const SETTINGS_UI_STYLES = `
         to { opacity: 1; }
       }
       /* Native <dialog> backdrop — replaces custom .yt-chat-overlay-settings-backdrop */
-      dialog.yt-chat-overlay-settings-modal::backdrop {
+      dialog.yt-chat-overlay-settings-modal[open]::backdrop {
         background: rgba(0, 0, 0, ${uiSizing.scrimAlpha});
         animation: yt-overlay-fade-in ${animDuration.normal} ease-out;
       }
-      dialog.yt-chat-overlay-settings-modal {
+      dialog.yt-chat-overlay-settings-modal[open] {
         border: none;
         padding: ${spacing.lg}px;
         margin: auto;
@@ -261,7 +261,7 @@ export const SETTINGS_UI_STYLES = `
         animation: yt-overlay-modal-scale-in ${animDuration.slow} ease-out;
       }
       @starting-style {
-        dialog.yt-chat-overlay-settings-modal {
+        dialog.yt-chat-overlay-settings-modal[open] {
           transform: scale(0.92);
           opacity: 0;
         }
@@ -562,7 +562,7 @@ export const SETTINGS_UI_STYLES = `
       }
 
       /* Reset confirmation dialog — native <dialog> */
-      dialog.yt-chat-overlay-settings-confirm {
+      dialog.yt-chat-overlay-settings-confirm[open] {
         border: none;
         padding: ${spacing.lg}px;
         margin: auto;
@@ -573,7 +573,7 @@ export const SETTINGS_UI_STYLES = `
         box-shadow: ${shadows.box.lg};
         animation: yt-overlay-confirm-fade-in ${animDuration.normal} ease-out;
       }
-      dialog.yt-chat-overlay-settings-confirm::backdrop {
+      dialog.yt-chat-overlay-settings-confirm[open]::backdrop {
         background: rgba(0, 0, 0, ${CONFIRM_BACKDROP_ALPHA});
         animation: yt-overlay-confirm-fade-in ${animDuration.normal} ease-out;
       }
@@ -817,8 +817,6 @@ export const SETTINGS_UI_STYLES = `
 
       /* ── Accessibility: reduced motion ── */
       @media (prefers-reduced-motion: reduce) {
-        .yt-chat-overlay-settings-backdrop,
-        .yt-chat-overlay-settings-modal,
         .yt-chat-overlay-settings-toast,
         .yt-chat-overlay-settings-field-error,
         .yt-chat-overlay-settings-button,
@@ -829,10 +827,10 @@ export const SETTINGS_UI_STYLES = `
         .yt-chat-overlay-settings-font-preview-text,
         .yt-chat-overlay-settings-weight-toggle-btn,
         .yt-chat-overlay-settings-font-chip,
-        dialog.yt-chat-overlay-settings-modal::backdrop,
-        dialog.yt-chat-overlay-settings-modal,
-        dialog.yt-chat-overlay-settings-confirm::backdrop,
-        dialog.yt-chat-overlay-settings-confirm {
+        dialog.yt-chat-overlay-settings-modal[open]::backdrop,
+        dialog.yt-chat-overlay-settings-modal[open],
+        dialog.yt-chat-overlay-settings-confirm[open]::backdrop,
+        dialog.yt-chat-overlay-settings-confirm[open] {
           animation: none !important;
           transition: none !important;
         }
@@ -845,7 +843,7 @@ export const SETTINGS_UI_STYLES = `
         .yt-chat-overlay-settings-actions button[data-action="reset"],
         .yt-chat-overlay-settings-actions button[data-action="export"],
         .yt-chat-overlay-settings-actions button[data-action="import"],
-        dialog.yt-chat-overlay-settings-confirm,
+        dialog.yt-chat-overlay-settings-confirm[open],
         .yt-chat-overlay-settings-confirm-cancel {
           border-color: CanvasText;
         }
