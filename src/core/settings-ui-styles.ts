@@ -57,6 +57,7 @@ const uiColors = {
   danger: '#e53935',
   dangerHover: '#c62828',
   warning: '#ffc107',
+  success: '#4ade80',
 } as const;
 
 // export { uiColors }; // removed — was only used internally
@@ -112,6 +113,7 @@ const uiSizing = {
   buttonFontSize: 18,
   inputWidth: 86,
   colorSwatch: 44,
+  colorSwatchHeight: 26,
   modalWidth: 400,
   modalMaxVW: 92,
   modalMaxWidth: 420,
@@ -222,8 +224,8 @@ export const SETTINGS_UI_STYLES = `
         pointer-events: auto;
       }
       .yt-chat-overlay-reload-button--done {
-        color: #4ade80;
-        border-color: rgba(74, 222, 128, 0.5);
+        color: ${uiColors.success};
+        border-color: ${uiColors.success}80;
       }
       @keyframes yt-overlay-fade-in {
         from { opacity: 0; }
@@ -372,7 +374,7 @@ export const SETTINGS_UI_STYLES = `
         font-size: ${typography.fontSize.xs};
         color: ${uiColors.textMuted};
         text-transform: uppercase;
-        letter-spacing: 0.04em;
+        letter-spacing: 0.05em;
         padding-bottom: ${spacing.xs}px;
         border-bottom: 1px solid ${uiColors.border};
       }
@@ -410,7 +412,7 @@ export const SETTINGS_UI_STYLES = `
       }
       .yt-chat-overlay-settings-field input[type="color"] {
         width: ${uiSizing.colorSwatch}px;
-        height: 26px;
+        height: ${uiSizing.colorSwatchHeight}px;
         border: none;
         background: transparent;
         padding: 0;
@@ -653,7 +655,7 @@ export const SETTINGS_UI_STYLES = `
       }
       .yt-chat-overlay-settings-range-slider {
         flex: 2;
-        height: ${spacing.xs}px;
+        height: 8px;
         accent-color: ${uiColors.primary};
         margin: 0;
       }
@@ -699,7 +701,7 @@ export const SETTINGS_UI_STYLES = `
 
       /* ── Font preview ── */
       .yt-chat-overlay-settings-font-preview {
-        background: #111;
+        background: ${uiColors.background};
         border: 1px solid ${uiColors.border};
         border-radius: ${borderRadius.sm};
         padding: ${spacing.lg}px;
@@ -759,7 +761,7 @@ export const SETTINGS_UI_STYLES = `
       .yt-chat-overlay-settings-font-chips {
         display: flex;
         flex-wrap: wrap;
-        gap: 6px;
+        gap: ${spacing.xs}px;
         margin-bottom: ${spacing.sm}px;
       }
       .yt-chat-overlay-settings-font-chip {
@@ -768,7 +770,7 @@ export const SETTINGS_UI_STYLES = `
         border: 1px solid ${uiColors.border};
         background: ${uiColors.backgroundLight};
         color: ${uiColors.textMuted};
-        font-size: 12px;
+        font-size: ${typography.fontSize.xs};
         cursor: pointer;
         transition: all 0.15s;
         white-space: nowrap;
@@ -803,7 +805,7 @@ export const SETTINGS_UI_STYLES = `
         border: 1px solid ${uiColors.border};
         background: ${uiColors.backgroundLight};
         color: ${uiColors.text};
-        font-size: 12px;
+        font-size: ${typography.fontSize.xs};
       }
       .yt-chat-overlay-settings-font-custom-input:focus-visible {
         outline: 2px solid ${uiColors.primary};
@@ -811,8 +813,7 @@ export const SETTINGS_UI_STYLES = `
       }
 
       /* Font panel label override — vertical alignment for chip/weight containers */
-      .yt-chat-overlay-settings-field:has(.yt-chat-overlay-settings-font-chips-wrapper),
-      .yt-chat-overlay-settings-field:has(.yt-chat-overlay-settings-weight-toggle) {
+      .yt-chat-overlay-settings-field--top-align {
         align-items: flex-start;
       }
 
@@ -879,10 +880,10 @@ export const SETTINGS_UI_STYLES = `
       /* Native Popover API tooltips */
       .yt-chat-overlay-tooltip {
         font-family: ${DEFAULT_FONT_FAMILY};
-        font-size: 12px;
+        font-size: ${typography.fontSize.xs};
         line-height: 1.4;
-        padding: 4px 10px;
-        border-radius: 4px;
+        padding: ${spacing.xs}px ${spacing.sm}px;
+        border-radius: ${borderRadius.sm};
         background: rgba(0, 0, 0, 0.9);
         color: #fff;
         border: 1px solid rgba(255, 255, 255, 0.15);
