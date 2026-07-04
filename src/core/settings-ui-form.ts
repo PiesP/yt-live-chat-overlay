@@ -629,6 +629,7 @@ export class SettingsUiForm {
         numberInput.id = rangeValueId;
         applyNumberInputAttributes(numberInput, def.key as RootScalarSettingKey);
         numberInput.classList.add('yt-chat-overlay-settings-range-number');
+        numberInput.setAttribute('aria-label', t(def.label));
         slider.setAttribute('aria-describedby', rangeValueId);
         if (def.title) {
           numberInput.title = t(def.title);
@@ -699,10 +700,16 @@ export class SettingsUiForm {
       }
       case 'font-preview':
         return this.buildFontPreview(def);
-      case 'weight-toggle':
-        return this.buildWeightToggle(def);
-      case 'font-chips':
-        return this.buildFontChips(def);
+      case 'weight-toggle': {
+        const field = this.buildWeightToggle(def);
+        field.classList.add('yt-chat-overlay-settings-field--top-align');
+        return field;
+      }
+      case 'font-chips': {
+        const field = this.buildFontChips(def);
+        field.classList.add('yt-chat-overlay-settings-field--top-align');
+        return field;
+      }
       default:
         throw new Error('Unhandled field type');
     }
@@ -761,6 +768,8 @@ export class SettingsUiForm {
     for (const suggestion of def.suggestions) {
       const chip = document.createElement('span');
       chip.className = 'yt-chat-overlay-settings-font-chip';
+      chip.setAttribute('role', 'button');
+      chip.setAttribute('tabindex', '0');
       chip.dataset.value = suggestion;
       chip.textContent = this.fontChipLabel(suggestion);
       chip.addEventListener('click', () => {
