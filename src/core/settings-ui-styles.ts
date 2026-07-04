@@ -888,12 +888,23 @@ export const SETTINGS_UI_STYLES = `
         border: 1px solid rgba(255, 255, 255, 0.15);
         max-width: 240px;
         pointer-events: none;
-        /* CSS Anchor Positioning for edge-aware placement */
-        position-try-fallbacks: flip-block, flip-inline, flip-block flip-inline;
+        white-space: nowrap;
+        opacity: 0;
+        transition: opacity 0.15s ease-out;
+      }
+      @starting-style {
+        .yt-chat-overlay-tooltip:popover-open {
+          opacity: 0;
+        }
       }
       .yt-chat-overlay-tooltip:popover-open {
         inset: unset;
         margin: 0;
+        opacity: 1;
+        /* Default placement: below the anchor element, center-aligned */
+        position-area: block-end;
+        /* Edge-aware fallbacks: flip above if no room below, then flip horizontally */
+        position-try-fallbacks: flip-block, flip-inline, flip-block flip-inline;
       }
       /* CSS Anchor Positioning — anchor-name targets use fixed ID strings */
       #yt-chat-overlay-settings-button {
