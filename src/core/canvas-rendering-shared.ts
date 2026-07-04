@@ -527,10 +527,15 @@ export function renderSegment(
   const font = getFontFn(fontSize);
   const strokeWidth = Math.max(0.5, outlineWidthPx * OUTLINE_STROKE_SCALE);
   const strokeColor = computeOutlineColor(color, Math.min(1, outlineOpacity));
+  // Normalize to 'dark'/'light' — computeOutlineColor only returns black or
+  // white variations.  Using the class instead of the full rgba string prevents
+  // cache fragmentation from opacity-only differences (e.g. rgba(0,0,0,0.8)
+  // vs rgba(0,0,0,0.6) are the same visual outline class).
+  const outlineClass = strokeColor.startsWith('rgba(0, 0, 0') ? 'dark' : 'light';
 
   // Try bitmap cache first (includes outline rendering)
   if (outlineWidthPx > 0 && outlineOpacity > 0 && displayText.length >= 3) {
-    const key = `${font}|${displayText}|${color}|${Math.round(strokeWidth)}|${strokeColor}`;
+    const key = `${font}|${displayText}|${color}|${Math.round(strokeWidth)}|${outlineClass}`;
     const bitmap = textBitmapCache.get(key);
     if (bitmap) {
       drawBitmapAtCssSize(ctx, bitmap, x, y);
