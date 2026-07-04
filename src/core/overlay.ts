@@ -100,7 +100,7 @@ export class Overlay {
     container.style.zIndex = rendererLayout.overlayZIndex;
     container.style.contain = 'layout style paint';
     container.setAttribute('role', 'region');
-    container.setAttribute('aria-label', t('Chat overlay'));
+    container.setAttribute('aria-label', t('Chat Overlay'));
     // Set lang attribute to match active language for screen readers
     const initialLang = getActiveLanguage();
     container.lang = initialLang;

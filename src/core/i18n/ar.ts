@@ -329,4 +329,12 @@ export const AR: Record<string, string> = {
   // ── Translation unsupported ──
   'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.':
     'يتطلب الترجمة متصفحًا مزودًا بذكاء اصطناعي مدمج. استخدم Chrome 138+ أو Edge 143+ Canary.',
+
+  // ── Added 2026-07-04 ──
+  'Chat messages': 'رسائل الدردشة',
+  'Ignore Reduced Motion': 'تجاهل تقليل الحركة',
+  'Force scroll animations even when OS reduced-motion is enabled (requires page refresh)':
+    'فرض رسوم التمرير المتحركة حتى عند تمكين تقليل الحركة في النظام (يتطلب تحديث الصفحة)',
+  'CSS font-family value. Type to filter suggestions, or enter a custom font stack.':
+    'قيمة CSS font-family. اكتب لتصفية الاقتراحات، أو أدخل مجموعة خطوط مخصصة.',
 };

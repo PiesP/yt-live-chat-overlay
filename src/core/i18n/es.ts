@@ -344,4 +344,10 @@ export const ES: Record<string, string> = {
   // ── Translation unsupported ──
   'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.':
     'La traducción requiere un navegador con IA integrada. Usa Chrome 138+ o Edge 143+ Canary.',
+
+  // ── Added 2026-07-04 ──
+  'Chat messages': 'Mensajes del chat',
+  'Ignore Reduced Motion': 'Ignorar movimiento reducido',
+  'Force scroll animations even when OS reduced-motion is enabled (requires page refresh)':
+    'Forzar animaciones de desplazamiento incluso con movimiento reducido del SO activado (requiere recargar)',
 };

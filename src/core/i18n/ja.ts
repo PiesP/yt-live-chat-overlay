@@ -333,4 +333,10 @@ export const JA: Record<string, string> = {
   // ── Translation unsupported ──
   'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.':
     '翻訳機能には内蔵AIが必要です。Chrome 138+またはEdge 143+ Canaryをご利用ください。',
+
+  // ── Added 2026-07-04 ──
+  'Chat messages': 'チャットメッセージ',
+  'Ignore Reduced Motion': 'モーション低減を無視',
+  'Force scroll animations even when OS reduced-motion is enabled (requires page refresh)':
+    'OSのモーション低減設定が有効でもスクロールアニメーションを強制します（ページ再読み込みが必要）',
 };

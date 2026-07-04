@@ -329,4 +329,10 @@ export const KO: Record<string, string> = {
   // ── Translation unsupported ──
   'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.':
     '번역 기능을 사용하려면 내장 AI가 있는 브라우저가 필요합니다. Chrome 138+ 또는 Edge 143+ Canary를 사용하세요.',
+
+  // ── Added 2026-07-04 ──
+  'Chat messages': '채팅 메시지',
+  'Ignore Reduced Motion': '접근성 모션 무시',
+  'Force scroll animations even when OS reduced-motion is enabled (requires page refresh)':
+    'OS 모션 감소 설정이 켜져 있어도 스크롤 애니메이션을 강제로 사용합니다 (페이지 새로고침 필요)',
 };

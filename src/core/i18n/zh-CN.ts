@@ -314,4 +314,10 @@ export const ZH_CN: Record<string, string> = {
   // ── Translation unsupported ──
   'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.':
     '翻译功能需要内置 AI 的浏览器。请使用 Chrome 138+ 或 Edge 143+ Canary。',
+
+  // ── Added 2026-07-04 ──
+  'Chat messages': '聊天消息',
+  'Ignore Reduced Motion': '忽略减少动态效果',
+  'Force scroll animations even when OS reduced-motion is enabled (requires page refresh)':
+    '即使操作系统开启了减少动态效果，也强制使用滚动动画（需要刷新页面）',
 };
