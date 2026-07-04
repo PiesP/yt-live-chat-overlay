@@ -41,6 +41,13 @@ function relativeLuminance(rgb: RgbColor): number {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 
+/** Max cached outline color entries before LRU eviction. */
+const OUTLINE_COLOR_CACHE_MAX = 64;
+
+/** Cache for computeOutlineColor results — avoids repeated regex + WCAG luminance
+ *  calculations for the same text-color/opacity pair across multiple render calls. */
+const outlineColorCache = new Map<string, string>();
+
 /**
  * Compute an outline color that contrasts with the given text color.
  *
@@ -48,18 +55,34 @@ function relativeLuminance(rgb: RgbColor): number {
  * outline, dark text gets a light outline. This ensures the outline is
  * always visible regardless of the text color or background.
  *
+ * Results are cached by (textColor, opacity) key to avoid redundant
+ * regex parsing and luminance computation in the hot rendering path.
+ *
  * @param textColor - CSS color string (hex or rgb/rgba)
  * @param opacity   - Outline opacity (0-1)
  * @returns CSS rgba string for the outline stroke
  */
 export function computeOutlineColor(textColor: string, opacity: number): string {
+  const cacheKey = `${textColor}|${Math.round(opacity * 100) / 100}`;
+  const cached = outlineColorCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
   const rgb = parseAnyColor(textColor);
-  if (!rgb) return `rgba(0, 0, 0, ${opacity})`;
-  const lum = relativeLuminance(rgb);
-  if (lum > 0.5) {
-    return `rgba(0, 0, 0, ${opacity})`;
+  let result: string;
+  if (!rgb) {
+    result = `rgba(0, 0, 0, ${opacity})`;
+  } else {
+    const lum = relativeLuminance(rgb);
+    result = lum > 0.5 ? `rgba(0, 0, 0, ${opacity})` : `rgba(255, 255, 255, ${opacity})`;
   }
-  return `rgba(255, 255, 255, ${opacity})`;
+
+  // LRU eviction: delete oldest entry when at capacity
+  if (outlineColorCache.size >= OUTLINE_COLOR_CACHE_MAX) {
+    const oldestKey = outlineColorCache.keys().next().value;
+    if (oldestKey !== undefined) outlineColorCache.delete(oldestKey);
+  }
+  outlineColorCache.set(cacheKey, result);
+  return result;
 }
 
 /**
