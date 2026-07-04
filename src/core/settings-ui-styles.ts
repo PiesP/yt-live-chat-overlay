@@ -906,4 +906,17 @@ export const SETTINGS_UI_STYLES = `
         inset: unset;
         margin: 0;
       }
+      /* CSS Anchor Positioning — anchor-name targets use fixed ID strings */
+      #yt-chat-overlay-settings-button {
+        anchor-name: --yt-overlay-settings-btn;
+      }
+      #yt-chat-overlay-reload-button {
+        anchor-name: --yt-overlay-reload-btn;
+      }
+      #yt-chat-overlay-settings-tooltip {
+        position-anchor: --yt-overlay-settings-btn;
+      }
+      #yt-chat-overlay-reload-tooltip {
+        position-anchor: --yt-overlay-reload-btn;
+      }
 `;

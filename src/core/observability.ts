@@ -72,6 +72,8 @@ export class ObservabilityReporter {
     if (initialShowDebug) {
       this.createDebugOverlay();
     }
+    // Initialize INP monitoring (Event Timing API)
+    this.initInpMonitoring();
   }
 
   // called when a message is received (before any processing)
@@ -269,6 +271,36 @@ export class ObservabilityReporter {
     if (this.debugOverlayEl) {
       this.debugOverlayEl.remove();
       this.debugOverlayEl = null;
+    }
+  }
+
+  /** Curated INP (Interaction to Next Paint) timing, updated via Event Timing API. */
+  private inpMs = 0;
+
+  /**
+   * Initialize INP monitoring via the Event Timing API (PerformanceObserver).
+   * Records the `first-input` and `event` entry types to track Interaction to
+   * Next Paint — a Core Web Vital that measures responsiveness.
+   * Falls back silently when the API is unavailable.
+   */
+  private initInpMonitoring(): void {
+    try {
+      if (typeof PerformanceObserver === 'undefined') return;
+      const observer = new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) {
+          const eventEntry = entry as PerformanceEventTiming;
+          if (eventEntry.duration > this.inpMs) {
+            this.inpMs = eventEntry.duration;
+            if (this.showDebug) {
+              log.debug(`INP: ${this.inpMs.toFixed(1)}ms (${eventEntry.name})`);
+            }
+          }
+        }
+      });
+      observer.observe({ type: 'first-input', buffered: true });
+      observer.observe({ type: 'event', buffered: true });
+    } catch {
+      // Event Timing API unavailable — skip INP monitoring
     }
   }
 

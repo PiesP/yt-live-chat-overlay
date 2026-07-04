@@ -99,6 +99,8 @@ export class Overlay {
     container.style.overflow = 'hidden';
     container.style.zIndex = rendererLayout.overlayZIndex;
     container.style.contain = 'layout style paint';
+    container.style.contentVisibility = 'auto';
+    container.style.containIntrinsicSize = '1px 100px';
     container.setAttribute('role', 'region');
     container.setAttribute('aria-label', t('Chat overlay'));
     // Set lang attribute to match active language for screen readers
