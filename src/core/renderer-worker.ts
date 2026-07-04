@@ -67,6 +67,7 @@ import {
   ANTI_BLOCK_PRIORITY_THRESHOLD,
   EPSILON,
   FAR_LAYER_DESATURATION_FACTOR,
+  GRADIENT_CACHE_MAX,
   HORIZONTAL_STAGGER_MAX,
   HORIZONTAL_STAGGER_PER_STEP,
   hashStringForTier as hashForTier,
@@ -415,7 +416,7 @@ let textBitmapCache: ByteLimitedCache<OffscreenCanvas>;
 let emojiCache: ByteLimitedCache<ImageBitmap>;
 let authorPhotoCache: ByteLimitedCache<ImageBitmap>;
 let stickerCache: ByteLimitedCache<ImageBitmap>;
-const superChatGradientCache = new LruMap<string, CanvasGradient>(64);
+const superChatGradientCache = new LruMap<string, CanvasGradient>(GRADIENT_CACHE_MAX);
 
 // ── Image prefetch utility (semaphore-based concurrency) ──────────────────
 
@@ -493,9 +494,6 @@ const opacityBuckets: Array<Array<{ msg: ActiveMessage; elapsed: number }>> = Ar
 
 // ── Config-driven paid card renderer (worker variant) ────────────────────────
 
-/** Max cached gradients for renderPaidCardWorker LRU eviction. */
-const PAID_CARD_GRADIENT_CACHE_MAX = 100;
-
 /** Get or create a cached linear gradient (top-to-bottom) within the worker. */
 function getPaidCardGradient(
   ctx: OffscreenCanvasRenderingContext2D,
@@ -509,7 +507,7 @@ function getPaidCardGradient(
   const key = `${baseColor}|${h}|${topAlpha}|${scAlpha}|${bottomAlpha}`;
   const cached = cache.get(key);
   if (cached) return cached;
-  if (cache.size >= PAID_CARD_GRADIENT_CACHE_MAX) {
+  if (cache.size >= GRADIENT_CACHE_MAX) {
     const oldestKey = cache.keys().next().value;
     if (oldestKey !== undefined) cache.delete(oldestKey);
   }

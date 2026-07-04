@@ -47,6 +47,7 @@ import { RendererBase } from '@core/renderer-base';
 import {
   ANTI_BLOCK_PRIORITY_THRESHOLD,
   type CanvasMessage,
+  GRADIENT_CACHE_MAX,
   HORIZONTAL_STAGGER_MAX,
   HORIZONTAL_STAGGER_PER_STEP,
   hashStringForTier,
@@ -166,7 +167,7 @@ export class CanvasRenderer extends RendererBase {
     this.settings.textCacheMb * 1_000_000, // configurable MB
     (c) => c.width * c.height * 4 // RGBA bytes
   );
-  private readonly superChatGradientCache = new LruMap<string, CanvasGradient>(64);
+  private readonly superChatGradientCache = new LruMap<string, CanvasGradient>(GRADIENT_CACHE_MAX);
 
   /** Cached message dimensions by message ID. Cleared on settings change. */
   private readonly dimensionCache = new Map<string, { width: number; height: number }>();

@@ -18,13 +18,10 @@ import {
 import type { CardConfig } from '@core/card-config';
 import { computeReadableTextColor, toRgba } from '@core/color-utils';
 import { DEFAULT_TEXT_COLOR, rendererLayout, spacing } from '@core/design-tokens';
-import { MS_TO_S } from '@core/renderer-constants';
+import { GRADIENT_CACHE_MAX, MS_TO_S } from '@core/renderer-constants';
 import { measureTextHeight } from '@core/text-measure';
 
 // ── SuperChat card ───────────────────────────────────────────────────────────
-
-/** Max cached gradients before LRU eviction. */
-const GRADIENT_CACHE_MAX = 100;
 
 /**
  * Get or create a cached linear gradient (top-to-bottom) with alpha stops.

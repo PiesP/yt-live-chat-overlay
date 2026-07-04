@@ -20,6 +20,11 @@ import type { ChatMessage } from '@app-types';
 /** Factor applied to card background opacity for visual blending. */
 export const CARD_BG_OPACITY_FACTOR = 0.85;
 
+/** Max cached linear-gradient entries (SuperChat/Membership card backgrounds).
+ *  Used by both main thread (LruMap) and worker (Map with manual eviction)
+ *  to keep gradient memory bounded during long streams. */
+export const GRADIENT_CACHE_MAX = 64;
+
 // ── Lane allocation (lane-allocator.ts) ─────────────────────────────────────
 
 /** Speed tier constants for depth-layered rendering.
