@@ -70,6 +70,7 @@ import {
   estimateMessageDimensions as sharedEstimateDimensions,
 } from '@core/renderer-shared';
 import { RenderWorkerManager } from '@core/renderer-worker-manager';
+import { schedulerPostTask, yieldIfOverBudget } from '@core/scheduler-utils';
 import {
   clearTextMeasurementCaches,
   getFontString,
@@ -489,7 +490,14 @@ export class CanvasRenderer extends RendererBase {
 
   override trimBackgroundQueue(): void {
     if (this.pendingQueue.size <= this.settings.backgroundQueueMax) return;
-    this.pendingQueue.trim(this.settings.backgroundQueueMax);
+    // Defer trimming to a background task so it doesn't compete with
+    // frame-critical rendering or message processing.
+    schedulerPostTask(
+      () => {
+        this.pendingQueue.trim(this.settings.backgroundQueueMax);
+      },
+      { priority: 'background' }
+    );
   }
 
   /** Drain all pending queue messages for re-injection (used by overlay refresh). */
@@ -1029,6 +1037,52 @@ export class CanvasRenderer extends RendererBase {
     }
 
     this.observability.recordDrainQueue(performance.now() - t0);
+  }
+
+  /**
+   * Async drain for burst processing outside the rAF render loop.
+   *
+   * Processes queued messages in chunks with scheduler.yield() between
+   * chunks to avoid blocking the main thread during heavy backlog drains.
+   * Uses 'user-visible' priority so it doesn't starve frame-critical work.
+   *
+   * Falls back to synchronous drain when called from the rAF path
+   * (via drainQueue).
+   */
+  private async drainQueueAsync(now: number): Promise<void> {
+    const dims = this.overlay.getDimensions();
+    if (!dims) return;
+
+    const candidates = this.pendingQueue.toArray();
+    let batchIndex = 0;
+    const committed: ChatMessage[] = [];
+    let deadline = performance.now() + 50; // 50ms budget
+
+    for (const msg of candidates) {
+      if (this.activeMessages.length >= this.settings.maxConcurrentMessages) break;
+
+      const result = this.checkPlacement(msg, now, dims);
+      if (!result.ok) continue;
+
+      this.enqueueMessageWithPlacement(
+        msg,
+        now,
+        result.placement,
+        batchIndex,
+        result.dimensions,
+        result.speedTier,
+        dims
+      );
+      batchIndex++;
+      committed.push(msg);
+
+      // Yield every 50ms to keep the main thread responsive during bursts.
+      deadline = await yieldIfOverBudget(deadline);
+    }
+
+    if (committed.length > 0) {
+      this.pendingQueue.removeAll(committed);
+    }
   }
 
   /**
@@ -1591,7 +1645,9 @@ export class CanvasRenderer extends RendererBase {
   protected onResume(): void {
     this.startRenderLoop();
     this.laneAllocator.resetBatch();
-    this.drainQueue(performance.now());
+    // Use async drain for non-rAF context — allows yielding during
+    // backlog processing to keep the main thread responsive.
+    void this.drainQueueAsync(performance.now());
     this.workerManager.setPaused(false);
     this.imageFetchManager.resume();
   }
