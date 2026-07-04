@@ -110,6 +110,10 @@ function domInput(props: { type: string; name: string; className?: string }): HT
   el.type = props.type;
   el.name = props.name;
   if (props.className) el.className = props.className;
+  // Prevent password managers from treating settings inputs as credential fields.
+  // The dialog-level autocomplete="off" covers most cases; this provides defense-in-depth
+  // for password managers that scan individual inputs instead of the dialog attribute.
+  el.autocomplete = 'off';
   return el;
 }
 

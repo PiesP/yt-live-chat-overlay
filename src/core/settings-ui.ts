@@ -379,6 +379,9 @@ export class SettingsUi {
     this.modal = document.createElement('dialog');
     this.modal.id = BACKDROP_ID;
     this.modal.className = 'yt-chat-overlay-settings-modal';
+    // autocomplete="off" prevents password managers (Bitwarden, 1Password, etc.)
+    // from scanning the settings form inputs as credential fields.
+    this.modal.setAttribute('autocomplete', 'off');
     // closedby="any" enables light dismiss via backdrop click (Chrome 133+)
     // and ESC, both handled natively by the dialog element.
     this.modal.setAttribute('closedby', 'any');
