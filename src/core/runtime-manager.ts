@@ -757,6 +757,13 @@ export class RuntimeManager {
     const { chatSource, bootstrapResult } = await createChatSource(() => settings, signal);
     this.chatSource = chatSource;
 
+    // Notify renderer of replay mode so it disables burst-driven speed
+    // adaptation, author rate limiting, and anti-block throttling —
+    // all of which distort exact videoOffsetMs-based replay timing.
+    if (chatSource instanceof ReplayChatSource && this.renderer) {
+      this.renderer.setReplayMode(true);
+    }
+
     // Seed bootstrap data from factory call to avoid duplicate watch page fetch
     seedBootstrapIfReady(chatSource, bootstrapResult);
 

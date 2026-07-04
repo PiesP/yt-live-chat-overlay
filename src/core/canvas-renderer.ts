@@ -719,7 +719,10 @@ export class CanvasRenderer extends RendererBase {
     // allocator's collision set and speed-tier entries current.
     this.laneAllocator.resetBatch();
 
-    if (this.isAntiBlockActive()) {
+    // Replay (VOD): always drain — anti-block's probabilistic drops would
+    // create gaps in the historical chat timeline where messages have exact
+    // videoOffsetMs timing.
+    if (!this.isReplayMode && this.isAntiBlockActive()) {
       const currentNow = performance.now();
       if (this.antiBlockSince === null) {
         this.antiBlockSince = currentNow;

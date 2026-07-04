@@ -54,6 +54,8 @@ export abstract class RendererBase {
 
   protected isPaused = false;
   protected _isVideoPaused = false;
+  /** Set by RuntimeManager when the session uses ReplayChatSource. */
+  protected _isReplayMode = false;
   protected pausedAt: number | null = null;
   protected backlogPaused = false;
 
@@ -132,6 +134,16 @@ export abstract class RendererBase {
 
   isPausedByVideo(): boolean {
     return this._isVideoPaused;
+  }
+
+  /** Whether the renderer is in replay (VOD) mode. */
+  get isReplayMode(): boolean {
+    return this._isReplayMode;
+  }
+
+  /** Set by RuntimeManager when the session uses ReplayChatSource. */
+  setReplayMode(enabled: boolean): void {
+    this._isReplayMode = enabled;
   }
 
   // ── Shared state machine ──────────────────────────────────────────────
@@ -302,7 +314,13 @@ export abstract class RendererBase {
   // ── Shared helpers ────────────────────────────────────────────────────
 
   protected getEffectiveSpeedPxPerSec(): number {
-    let speed = this.settings.speedPxPerSec;
+    const baseSpeed = this.settings.speedPxPerSec;
+
+    // Replay (VOD): use base speed only — burst adaptation would distort
+    // exact videoOffsetMs-based timing from ReplayChatSource.
+    if (this._isReplayMode) return Math.max(1, baseSpeed);
+
+    let speed = baseSpeed;
 
     const emaRate = this.burstDetector.getEmaRate();
     if (emaRate > this.settings.speedBoostThreshold) {
@@ -316,9 +334,7 @@ export abstract class RendererBase {
     }
 
     const burstLevel = this.burstDetector.getLevel();
-    speed *= rendererLayout.burstSpeedMultiplier[burstLevel];
-
-    return Math.max(1, speed);
+    return Math.max(1, speed * rendererLayout.burstSpeedMultiplier[burstLevel]);
   }
 
   protected isMessageAllowed(message: ChatMessage): boolean {
@@ -336,15 +352,20 @@ export abstract class RendererBase {
       }
       return false;
     }
-    this.burstDetector.onMessageReceived();
 
-    const priority = RendererBase.getMessagePriority(message);
-    if (
-      !this.authorRateLimiter.allow(message.author ?? 'anonymous', priority, message.authorType)
-    ) {
-      log.debug('Drop [rate_limited]:', message.author, message.kind, message.id);
-      this.observability.onMessageDropped('rate_limited');
-      return false;
+    // Replay (VOD): messages carry exact videoOffsetMs timing — burst
+    // detection and rate limiting are meaningless for historical data.
+    if (!this._isReplayMode) {
+      this.burstDetector.onMessageReceived();
+
+      const priority = RendererBase.getMessagePriority(message);
+      if (
+        !this.authorRateLimiter.allow(message.author ?? 'anonymous', priority, message.authorType)
+      ) {
+        log.debug('Drop [rate_limited]:', message.author, message.kind, message.id);
+        this.observability.onMessageDropped('rate_limited');
+        return false;
+      }
     }
     return true;
   }
