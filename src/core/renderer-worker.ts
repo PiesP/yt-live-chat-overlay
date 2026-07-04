@@ -1303,6 +1303,12 @@ function renderFrame(): void {
         }
 
         const sx = Math.floor(msg.x);
+
+        // Skip messages that have fully exited the screen — avoids GPU waste
+        // rendering invisible content at negative coordinates.
+        // cleanupExpired() will remove them next frame when elapsed >= duration.
+        if (sx + msg.width <= 0) continue;
+
         const sy = Math.floor(msg.y);
 
         // Dispatch to the appropriate render function based on message kind

@@ -663,10 +663,12 @@ export class CanvasRenderer extends RendererBase {
     this.updateCanvasDpr(canvas, ctx, dims);
 
     // ── Clear + status bar ──
+    // Always clear canvas first — prevents stale status bar from persisting
+    // when connection transitions to 'connected' with no active messages.
+    // Mirrors renderer-worker.ts renderFrame unconditional clearRect.
+    ctx.clearRect(0, 0, dims.width, dims.height);
+
     const hasContent = this.activeMessages.length > 0 || this.connectionStatus !== 'connected';
-    if (hasContent) {
-      ctx.clearRect(0, 0, dims.width, dims.height);
-    }
     if (this.connectionStatus !== 'connected') {
       this.renderStatusBar(ctx, dims);
     }
