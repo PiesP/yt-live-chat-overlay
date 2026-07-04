@@ -101,6 +101,10 @@ export class CanvasRenderer extends RendererBase {
   private readonly activeMessagesByLane = new Map<number, CanvasMessage[]>();
   private readonly pendingQueue = new PriorityBucketQueue();
 
+  /** Cached prefers-reduced-motion media query result. */
+  private reducedMotionQuery: MediaQueryList | null = null;
+  private reducedMotion = false;
+
   /** Last devicePixelRatio seen — used to detect DPR changes. */
   private lastDpr = 0;
   /** When the idle condition is first met, record the timestamp so the loop
@@ -352,6 +356,12 @@ export class CanvasRenderer extends RendererBase {
       }
     });
     this.buildOpacityConfig();
+    // Initialize prefers-reduced-motion query
+    this.reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    this.reducedMotion = this.reducedMotionQuery.matches;
+    this.reducedMotionQuery.addEventListener('change', (e: MediaQueryListEvent) => {
+      this.reducedMotion = e.matches;
+    });
     log.info('RendererCanvas created');
   }
 
@@ -678,6 +688,9 @@ export class CanvasRenderer extends RendererBase {
     // ── Draw stage: opacity-bucketed rendering ──
     this.drawStage(ctx, cleanupResult.buckets);
 
+    // ── Live region mirroring: expose last 10 visible messages to AT ──
+    this.mirrorVisibleMessages();
+
     this.observability.recordRenderFrame(performance.now() - t0);
   }
 
@@ -798,10 +811,10 @@ export class CanvasRenderer extends RendererBase {
       // ── Render pre-compute ──
       const progress = Math.min(1, Math.max(0, elapsed * msg.invDuration));
 
-      if (mode === 'scroll') {
+      if (mode === 'scroll' && !this.reducedMotion) {
         const travelDistance = msg.startX + msg.width + this.settings.exitPaddingPx;
         msg.x = msg.startX - progress * travelDistance;
-      } else if (mode === 'reverse') {
+      } else if (mode === 'reverse' && !this.reducedMotion) {
         const travelDistance = dims.width - msg.startX + this.settings.exitPaddingPx;
         msg.x = msg.startX + progress * travelDistance;
       }
@@ -982,6 +995,30 @@ export class CanvasRenderer extends RendererBase {
       } finally {
         ctx.globalAlpha = 1;
       }
+    }
+  }
+
+  /** Maximum number of snippets to mirror to the aria-live region. */
+  private static readonly LIVE_REGION_MAX_MESSAGES = 10;
+
+  /**
+   * Mirror snippets from visible canvas messages to an offscreen aria-live
+   * region so screen readers, find-in-page, and translation tools can
+   * discover canvas-rendered text content.
+   */
+  private mirrorVisibleMessages(): void {
+    const count = Math.min(this.activeMessages.length, CanvasRenderer.LIVE_REGION_MAX_MESSAGES);
+    if (count === 0) return;
+    const snippets: string[] = [];
+    const start = this.activeMessages.length - count;
+    for (let i = start; i < this.activeMessages.length; i++) {
+      const msg = this.activeMessages[i];
+      if (!msg) continue;
+      const text = msg.message.text;
+      if (text) snippets.push(text.slice(0, 80));
+    }
+    if (snippets.length > 0) {
+      this.overlay.updateLiveRegion(snippets);
     }
   }
 

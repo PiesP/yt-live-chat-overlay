@@ -296,6 +296,11 @@ export class SettingsUi {
 
     const style = document.createElement('style');
     style.id = STYLE_ID;
+    // CSP NOTE: style.textContent may violate strict style-src in MV3
+    // extension context. A future improvement should use
+    // CSSStyleSheet.insertRule() or Constructable Stylesheets
+    // (new CSSStyleSheet()) to inject styles without inline content,
+    // bypassing style-src restrictions entirely.
     style.textContent = SETTINGS_UI_STYLES;
     document.head.appendChild(style);
   }
@@ -310,12 +315,14 @@ export class SettingsUi {
   }
 
   /** Lock body scroll to prevent page scrolling behind the open modal.
-   *  Compensates for scrollbar width to avoid layout shift. */
+   *  Compensates for scrollbar width to avoid layout shift.
+   *  Also marks body as inert to improve focus isolation for AT. */
   private lockBodyScroll(): void {
     const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
     this.savedBodyOverflow = document.body.style.overflow;
     this.savedBodyPaddingRight = document.body.style.paddingRight;
     document.body.style.overflow = 'hidden';
+    document.body.inert = true;
     if (scrollbarWidth > 0) {
       document.body.style.paddingRight = `${scrollbarWidth}px`;
     }
@@ -323,6 +330,7 @@ export class SettingsUi {
 
   /** Restore body scroll state saved by lockBodyScroll(). Idempotent. */
   private unlockBodyScroll(): void {
+    document.body.inert = false;
     if (this.savedBodyOverflow !== null) {
       document.body.style.overflow = this.savedBodyOverflow;
       this.savedBodyOverflow = null;

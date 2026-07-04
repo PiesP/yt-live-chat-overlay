@@ -367,6 +367,7 @@ export class SettingsUiForm {
     this.modal = modal;
     if (modal) {
       this.bindNumberInputKeys(modal);
+      this.bindAriaInvalidSync(modal);
     } else {
       this.clearErrorDismissTimeouts();
     }
@@ -420,6 +421,40 @@ export class SettingsUiForm {
       // Snap to the nearest step to avoid floating-point drift
       target.value = String(Math.round(newValue / step) * step);
       target.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  }
+
+  /**
+   * Sync aria-invalid attribute on form inputs using native :user-invalid
+   * pseudo-class checking. Updates on blur and input events so screen
+   * readers are notified of validation state changes.
+   */
+  private bindAriaInvalidSync(modal: HTMLDivElement): void {
+    const sync = (input: HTMLInputElement | HTMLSelectElement): void => {
+      if (input.willValidate) {
+        // Use :user-invalid check: after user interaction,
+        // the pseudo-class reflects validation state.
+        // Cast to any because CSS :user-invalid may not be in
+        // older TS lib types for matches().
+        const isInvalid = (input as HTMLElement).matches(':user-invalid') || !input.checkValidity();
+        input.setAttribute('aria-invalid', String(isInvalid));
+      }
+    };
+    modal.addEventListener(
+      'blur',
+      (event) => {
+        const target = event.target;
+        if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement) {
+          if (target.name) sync(target);
+        }
+      },
+      true
+    );
+    modal.addEventListener('input', (event) => {
+      const target = event.target;
+      if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement) {
+        if (target.name) sync(target);
+      }
     });
   }
 
@@ -548,6 +583,8 @@ export class SettingsUiForm {
         const inputId = nextFieldId(`number-${this.resolveKey(def)}`);
         const input = domInput({ type: 'number', name: this.resolveKey(def) });
         input.id = inputId;
+        input.required = true;
+        input.setAttribute('aria-required', 'true');
         applyNumberInputAttributes(
           input,
           def.key as RootScalarSettingKey | Exclude<OutlineSettingKey, 'enabled'>
@@ -630,6 +667,8 @@ export class SettingsUiForm {
         const inputId = nextFieldId(`text-${this.resolveKey(def)}`);
         const input = domInput({ type: 'text', name: this.resolveKey(def) });
         input.id = inputId;
+        input.required = true;
+        input.setAttribute('aria-required', 'true');
         if (def.title) input.title = t(def.title);
         if (def.placeholder) input.placeholder = t(def.placeholder);
 
@@ -1190,16 +1229,28 @@ export class SettingsUiForm {
         });
     }
 
+    const errorId = nextFieldId(`error-${input.name}`);
     const error = document.createElement('span');
     error.className = 'yt-chat-overlay-settings-field-error';
+    error.id = errorId;
+    error.setAttribute('role', 'alert');
+    error.setAttribute('aria-live', 'polite');
     if (input.name) error.dataset.for = input.name;
     error.textContent = message;
     input.insertAdjacentElement('afterend', error);
+    // Link error to input for screen readers
+    input.setAttribute('aria-errormessage', errorId);
+    input.setAttribute('aria-invalid', 'true');
 
     // Auto-dismiss after 3s
     const ERROR_DISMISS_MS = 3000;
     const timer = setTimeout(() => {
       error.remove();
+      // Clear aria-errormessage when error is dismissed
+      if (input.getAttribute('aria-errormessage') === errorId) {
+        input.removeAttribute('aria-errormessage');
+        input.setAttribute('aria-invalid', 'false');
+      }
       this.errorDismissTimeouts = this.errorDismissTimeouts.filter((t) => t !== timer);
     }, ERROR_DISMISS_MS);
     this.errorDismissTimeouts.push(timer);

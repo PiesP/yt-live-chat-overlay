@@ -69,6 +69,9 @@ export class Overlay {
   private resizeRafId: number | null = null;
   /** Aria-live region for announcing new chat messages to screen readers. */
   private liveRegion: HTMLDivElement | null = null;
+  /** Debounce timer for live region updates. */
+  private liveRegionTimer: ReturnType<typeof setTimeout> | null = null;
+  private static readonly LIVE_REGION_DEBOUNCE_MS = 500;
 
   /**
    * Find player container
@@ -296,6 +299,25 @@ export class Overlay {
     if (!this.liveRegion) return;
     const langName = getLocalizedName(lang);
     this.liveRegion.textContent = `${t('Interface language changed to')}${langName}`;
+  }
+
+  /**
+   * Update the aria-live region with snippets from visible canvas messages.
+   * Called by the renderer so screen readers, find-in-page, and translation
+   * tools can discover canvas-rendered text content. Debounced to avoid
+   * flooding the accessibility tree during rapid chat.
+   * Mirrors the last N visible messages as a simple text list.
+   */
+  updateLiveRegion(snippets: string[]): void {
+    if (!this.liveRegion) return;
+    if (this.liveRegionTimer !== null) {
+      clearTimeout(this.liveRegionTimer);
+    }
+    this.liveRegionTimer = setTimeout(() => {
+      this.liveRegionTimer = null;
+      // Update text content with pipe-separated snippets
+      this.liveRegion!.textContent = snippets.join(' | ');
+    }, Overlay.LIVE_REGION_DEBOUNCE_MS);
   }
 
   /**
