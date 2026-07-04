@@ -65,6 +65,7 @@ const ROOT_SETTING_META = {
   logLevel: { type: 'string', visual: false },
   laneSpacing: { type: 'number', visual: true },
   showDebugOverlay: { type: 'boolean', visual: false },
+  ignoreReducedMotion: { type: 'boolean', visual: false },
   authorRateLimit: { type: 'string', visual: false },
   backlogMaxRate: { type: 'number', visual: false },
   backlogSpeedMultiplier: { type: 'number', visual: false, displayScale: 1, displayPrecision: 1 },

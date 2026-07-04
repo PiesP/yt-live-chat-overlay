@@ -365,6 +365,11 @@ export class CanvasRenderer extends RendererBase {
     log.info('RendererCanvas created');
   }
 
+  /** Effective reduced-motion: OS preference AND-ed with user override. */
+  private get isReducedMotionActive(): boolean {
+    return this.reducedMotion && !this.settings.ignoreReducedMotion;
+  }
+
   /** Total number of lanes in the allocator. */
   get laneCount(): number {
     return this.laneAllocator.getLaneCount();
@@ -812,7 +817,7 @@ export class CanvasRenderer extends RendererBase {
       const progress = Math.min(1, Math.max(0, elapsed * msg.invDuration));
 
       if (mode === 'scroll') {
-        if (!this.reducedMotion) {
+        if (!this.isReducedMotionActive) {
           const travelDistance = msg.startX + msg.width + this.settings.exitPaddingPx;
           msg.x = msg.startX - progress * travelDistance;
         } else {
@@ -820,7 +825,7 @@ export class CanvasRenderer extends RendererBase {
           msg.x = Math.max(0, (dims.width - msg.width) / 2);
         }
       } else if (mode === 'reverse') {
-        if (!this.reducedMotion) {
+        if (!this.isReducedMotionActive) {
           const travelDistance = dims.width - msg.startX + this.settings.exitPaddingPx;
           msg.x = msg.startX + progress * travelDistance;
         } else {

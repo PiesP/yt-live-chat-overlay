@@ -217,6 +217,8 @@ export interface OverlaySettings {
   fontFamily: string;
   /** Show debug overlay with real-time metrics */
   showDebugOverlay: boolean;
+  /** Ignore OS-level reduced-motion preference and always use scroll animations */
+  ignoreReducedMotion: boolean;
 
   // ── Author Rate Limiting ──
   /** Per-author rate limiting preset */

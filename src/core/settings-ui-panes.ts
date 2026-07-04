@@ -620,6 +620,11 @@ export const PANES: PaneDef[] = [
             'showDebugOverlay',
             'Show performance debug overlay on the video player'
           ),
+          chk(
+            'Ignore Reduced Motion',
+            'ignoreReducedMotion',
+            'Force scroll animations even when OS reduced-motion is enabled (requires page refresh)'
+          ),
         ],
       },
     ],

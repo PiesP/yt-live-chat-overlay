@@ -45,6 +45,7 @@ export const DEFAULT_SETTINGS = {
   outline: DEFAULT_OUTLINE,
   laneSpacing: 0,
   showDebugOverlay: false,
+  ignoreReducedMotion: false,
   authorRateLimit: 'normal',
   backlogMaxRate: 20,
   backlogSpeedMultiplier: 2,
