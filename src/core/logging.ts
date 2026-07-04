@@ -40,9 +40,9 @@ const overlayLog = {
 };
 
 /** Set the global log level threshold for all overlay loggers. */
-export const setOverlayLogLevel = (level: LogLevel): void => {
+export function setOverlayLogLevel(level: LogLevel): void {
   currentLogLevel = level;
-};
+}
 
 interface ModuleLogger {
   debug: (...args: ConsoleLogArgs) => void;
@@ -56,7 +56,7 @@ interface ModuleLogger {
  * Returns an object with debug/info/warn/error methods.
  * @param moduleName - The module name to prefix log messages with.
  */
-export const createLogger = (moduleName: string): ModuleLogger => {
+export function createLogger(moduleName: string): ModuleLogger {
   const prefix = `[${moduleName}]`;
   return {
     debug: (...args) => overlayLog.debug(prefix, ...args),
@@ -64,4 +64,4 @@ export const createLogger = (moduleName: string): ModuleLogger => {
     warn: (...args) => overlayLog.warn(prefix, ...args),
     error: (...args) => overlayLog.error(prefix, ...args),
   };
-};
+}

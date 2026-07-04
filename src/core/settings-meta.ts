@@ -157,15 +157,13 @@ const VISUAL_ROOT_KEYS = Object.entries(ROOT_SETTING_META)
 export { ROOT_SETTING_META, SHOW_AUTHOR_KEYS, VISUAL_ROOT_KEYS };
 
 /** Get display scale/precision from ROOT_SETTING_META for a root numeric key. */
-export const getRootDisplayMeta = (
-  key: RootScalarSettingKey
-): {
+export function getRootDisplayMeta(key: RootScalarSettingKey): {
   scale: number;
   precision: number;
-} => {
+} {
   const meta: SettingMeta = ROOT_SETTING_META[key];
   if (meta?.displayScale !== undefined) {
     return { scale: meta.displayScale, precision: meta.displayPrecision ?? 0 };
   }
   return { scale: 1, precision: 0 };
-};
+}

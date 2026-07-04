@@ -71,7 +71,7 @@ const isRetryableError = (error: unknown): boolean => {
   return error instanceof TypeError;
 };
 
-export const getVideoIdFromUrl = (href = location.href): string | null => {
+export function getVideoIdFromUrl(href = location.href): string | null {
   try {
     const url = new URL(href, location.origin);
 
@@ -89,7 +89,7 @@ export const getVideoIdFromUrl = (href = location.href): string | null => {
   }
 
   return null;
-};
+}
 
 export const buildWatchUrl = (videoId: string): string =>
   `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
@@ -234,7 +234,7 @@ const extractVideoIdFromInitialData = (initialData: JsonObject): string | null |
   return getString(watchEndpoint.videoId);
 };
 
-export const findLiveChatRenderer = (initialData: JsonObject): JsonObject | null => {
+export function findLiveChatRenderer(initialData: JsonObject): JsonObject | null {
   const directRenderer = getNestedRecord(initialData, [
     'contents',
     'twoColumnWatchNextResults',
@@ -269,7 +269,7 @@ export const findLiveChatRenderer = (initialData: JsonObject): JsonObject | null
   });
 
   return null;
-};
+}
 
 const resolveApiKey = (ytcfg: JsonObject): string | undefined =>
   getString(ytcfg.INNERTUBE_API_KEY) ?? findFirstNestedStringByKey(ytcfg, 'innertubeApiKey');
@@ -310,7 +310,7 @@ const resolveClientContext = (ytcfg: JsonObject): JsonObject | null => {
  * @param signal - Optional AbortSignal to cancel the bootstrap process.
  * @returns A promise resolving to the bootstrap result (ready, retryable, or unavailable).
  */
-export const bootstrapChatSession = async (signal?: AbortSignal): Promise<ChatBootstrapResult> => {
+export async function bootstrapChatSession(signal?: AbortSignal): Promise<ChatBootstrapResult> {
   const videoId = getVideoIdFromUrl();
   if (!videoId) {
     return {
@@ -437,7 +437,7 @@ export const bootstrapChatSession = async (signal?: AbortSignal): Promise<ChatBo
       reason: error instanceof Error ? error.message : 'Failed to bootstrap chat session',
     };
   }
-};
+}
 
 const createInnertubeHeaders = (data: ChatBootstrapData): Record<string, string> => {
   const headers: Record<string, string> = {
@@ -588,7 +588,7 @@ export const fetchReplayChat = async (
 ): Promise<unknown> =>
   fetchChatEndpoint('get_live_chat_replay', data, continuation, signal, playerOffsetMs);
 
-export const getLiveChatPayload = (response: unknown): LiveChatPayload | null => {
+export function getLiveChatPayload(response: unknown): LiveChatPayload | null {
   const liveChatContinuation = getNestedRecord(response, [
     'continuationContents',
     'liveChatContinuation',
@@ -604,4 +604,4 @@ export const getLiveChatPayload = (response: unknown): LiveChatPayload | null =>
       ? liveChatContinuation.continuations
       : [],
   };
-};
+}

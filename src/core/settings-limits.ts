@@ -111,19 +111,19 @@ const OUTLINE_DISPLAY_SCALE: Record<string, number> = {
 
 export const getOutlineDisplayScale = (key: string): number => OUTLINE_DISPLAY_SCALE[key] ?? 1;
 
-export const resolveLimits = (key: string): NumericSettingLimit => {
+export function resolveLimits(key: string): NumericSettingLimit {
   const direct = SETTINGS_LIMITS[key as keyof typeof SETTINGS_LIMITS];
   if (direct) return direct;
   // Outline keys use separate limit entries to avoid clashing with root keys
   const outlineKey = OUTLINE_LIMIT_KEYS[key];
   if (outlineKey) return SETTINGS_LIMITS[outlineKey];
   throw new Error(`Unknown setting key: ${key}`);
-};
+}
 
 /** Resolve limits for an outline sub-key, checking OUTLINE_LIMIT_KEYS first
  *  to avoid collisions with same-named root keys (e.g. 'opacity'). */
-export const resolveOutlineLimits = (key: string): NumericSettingLimit => {
+export function resolveOutlineLimits(key: string): NumericSettingLimit {
   const outlineKey = OUTLINE_LIMIT_KEYS[key];
   if (outlineKey) return SETTINGS_LIMITS[outlineKey];
   throw new Error(`Unknown outline setting key: ${key}`);
-};
+}

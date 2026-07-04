@@ -31,11 +31,11 @@ const createAbortError = (reason?: unknown): DOMException => {
   return new DOMException(message, 'AbortError');
 };
 
-export const throwIfAborted = (signal?: AbortSignal): void => {
+export function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) {
     throw createAbortError(signal.reason);
   }
-};
+}
 
 export const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
   new Promise((resolve, reject) => {
@@ -60,10 +60,10 @@ export const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
 export const isVisibleElement = (element: HTMLElement): boolean =>
   element.offsetWidth > 0 && element.offsetHeight > 0;
 
-export const findElementMatch = <T extends Element>(
+export function findElementMatch<T extends Element>(
   selectors: readonly string[],
   options: ElementMatchOptions<T> = {}
-): SelectorMatch<T> | null => {
+): SelectorMatch<T> | null {
   const { root = document, predicate } = options;
 
   for (const selector of selectors) {
@@ -74,7 +74,7 @@ export const findElementMatch = <T extends Element>(
   }
 
   return null;
-};
+}
 
 async function pollForPlayerContainer(
   attempts: number,
@@ -102,9 +102,9 @@ async function pollForPlayerContainer(
   return null;
 }
 
-export const findPlayerContainerElement = async (
+export async function findPlayerContainerElement(
   options: { attempts?: number; intervalMs?: number; signal?: AbortSignal | undefined } = {}
-): Promise<HTMLElement | null> => {
+): Promise<HTMLElement | null> {
   const attempts = Math.max(1, Math.trunc(options.attempts ?? DEFAULT_WAIT_ATTEMPTS));
   const intervalMs = Math.max(0, options.intervalMs ?? DEFAULT_WAIT_INTERVAL_MS);
   const { signal } = options;
@@ -168,7 +168,7 @@ export const findPlayerContainerElement = async (
   }
 
   return pollForPlayerContainer(attempts, intervalMs, signal);
-};
+}
 
 /** Check whether an error is an AbortError (used to ignore abort-related rejections). */
 export const isAbortError = (error: unknown): boolean =>
@@ -192,22 +192,22 @@ export const clearSafeAnimationFrame = (handle: number | null): null =>
   clearSafe(handle, cancelAnimationFrame);
 
 /** Iterate over slot indices for a multi-slot placement. */
-export const forEachSlot = (
+export function forEachSlot(
   laneIndex: number,
   slotCount: number,
   fn: (slotIndex: number, slotOffset: number) => void
-): void => {
+): void {
   for (let offset = 0; offset < slotCount; offset++) {
     fn(laneIndex + offset, offset);
   }
-};
+}
 
 /**
  * Ensure a player element has CSS positioning so absolutely-positioned
  * children (overlay, settings button) are placed relative to it.
  */
-export const ensurePlayerPositioning = (element: HTMLElement): void => {
+export function ensurePlayerPositioning(element: HTMLElement): void {
   if (window.getComputedStyle(element).position === 'static') {
     element.style.position = 'relative';
   }
-};
+}

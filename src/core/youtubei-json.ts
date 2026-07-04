@@ -39,10 +39,10 @@ export const getString = (value: unknown): string | undefined =>
  * @param value - The value to coerce to a number
  * @returns A finite number, or `undefined` if the value is not numeric
  */
-export const getNumber = (value: unknown): number | undefined => {
+export function getNumber(value: unknown): number | undefined {
   const n = typeof value === 'string' ? Number(value) : value;
   return typeof n === 'number' && Number.isFinite(n) ? n : undefined;
-};
+}
 
 /**
  * Traverses a nested object along the given key path and returns the final
@@ -53,7 +53,7 @@ export const getNumber = (value: unknown): number | undefined => {
  * @param path - Ordered array of keys forming the traversal path
  * @returns The nested record at the end of the path, or `null`
  */
-export const getNestedRecord = (root: unknown, path: readonly string[]): JsonObject | null => {
+export function getNestedRecord(root: unknown, path: readonly string[]): JsonObject | null {
   let current: unknown = root;
 
   for (const key of path) {
@@ -65,7 +65,7 @@ export const getNestedRecord = (root: unknown, path: readonly string[]): JsonObj
   }
 
   return isRecord(current) ? current : null;
-};
+}
 
 /**
  * YouTube ytInitialData is ~2000+ DFS nodes for a watch page (secondaryResults
@@ -134,17 +134,17 @@ const findFirstNestedByKey = <T>(
  *   records for which the predicate returns `true` are returned
  * @returns The first matching record, or `null` if none found
  */
-export const findFirstNestedRecordByKey = (
+export function findFirstNestedRecordByKey(
   root: unknown,
   key: string,
   predicate?: (value: JsonObject) => boolean
-): JsonObject | null => {
+): JsonObject | null {
   return findFirstNestedByKey(root, key, (v) => {
     if (!isRecord(v)) return null;
     if (predicate && !predicate(v)) return null;
     return v;
   });
-};
+}
 
 /**
  * Depth-first search for the first non-empty string value associated with

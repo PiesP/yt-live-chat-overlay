@@ -10,7 +10,12 @@
  * allocation logic between the two contexts.
  */
 
-import { EPSILON, LANE_COOLDOWN_MIN_MS, SAFETY_MARGIN_RATIO, SPEED_TIER } from '@core/renderer-constants';
+import {
+  EPSILON,
+  LANE_COOLDOWN_MIN_MS,
+  SAFETY_MARGIN_RATIO,
+  SPEED_TIER,
+} from '@core/renderer-constants';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 

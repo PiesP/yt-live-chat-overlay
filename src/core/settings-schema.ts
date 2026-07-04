@@ -106,15 +106,15 @@ const LOG_LEVEL_VALUES = ['warn', 'info', 'debug'] as const satisfies readonly L
 export const isColorValue = (value: unknown): value is string =>
   typeof value === 'string' && /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6,8})$/i.test(value);
 
-export const clampNumber = (
+export function clampNumber(
   value: unknown,
   fallback: number,
   limits: Readonly<{ min: number; max: number }>
-): number => {
+): number {
   const numericValue = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(numericValue)) return fallback;
   return Math.min(limits.max, Math.max(limits.min, numericValue));
-};
+}
 
 export const cloneSettings = (settings: Readonly<OverlaySettings>): OverlaySettings => ({
   ...settings,
@@ -206,10 +206,10 @@ const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings
   return out;
 };
 
-export const applySettingsPatch = (
+export function applySettingsPatch(
   base: Readonly<OverlaySettings>,
   partial: Partial<OverlaySettings>
-): OverlaySettings => {
+): OverlaySettings {
   const merged: OverlaySettings = {
     ...base,
     ...partial,
@@ -218,20 +218,20 @@ export const applySettingsPatch = (
     outline: { ...base.outline, ...partial.outline },
   };
   return normalizeSettings(merged);
-};
+}
 
-export const normalizeStoredSettings = (
+export function normalizeStoredSettings(
   stored: Record<string, unknown> | null | undefined
-): OverlaySettings => {
+): OverlaySettings {
   if (!stored) return cloneSettings(DEFAULT_SETTINGS);
   const migrated = migrateSettings(stored);
   return applySettingsPatch(cloneSettings(DEFAULT_SETTINGS), migrated as Partial<OverlaySettings>);
-};
+}
 
-export const shouldResetRendererForSettingsChange = (
+export function shouldResetRendererForSettingsChange(
   previous: Readonly<OverlaySettings>,
   next: Readonly<OverlaySettings>
-): boolean => {
+): boolean {
   if (VISUAL_ROOT_KEYS.some((key) => previous[key] !== next[key])) return true;
   if (SHOW_AUTHOR_KEYS.some((key) => previous.showAuthor[key] !== next.showAuthor[key]))
     return true;
@@ -239,4 +239,4 @@ export const shouldResetRendererForSettingsChange = (
   return (['enabled', 'widthPx', 'opacity'] as const).some(
     (key) => previous.outline[key] !== next.outline[key]
   );
-};
+}
