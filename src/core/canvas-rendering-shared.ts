@@ -673,20 +673,75 @@ function renderContentSegments(
 
 // ── Author rendering ────────────────────────────────────────────────────────
 
-/** Draw an author photo with shadow effects. */
+/** Cache author photos pre-composited with drop shadows so that per-frame
+ *  `ctx.shadowBlur` (expensive GPU blur pass, may fall back to software
+ *  rasterization) is only paid once per unique photo.  Keyed by the photo
+ *  object itself so cleanup is automatic when the image is evicted from
+ *  the caller's ByteLimitedCache. */
+const _photoShadowCache = new WeakMap<object, OffscreenCanvas>();
+
+/** Pad around the photo for shadow overflow (blur=4 + offset=1 ≈ 5px). */
+const AUTHOR_PHOTO_SHADOW_PAD = 5;
+
+/** Total canvas size for the shadow-precomposed photo. */
+const AUTHOR_PHOTO_CANVAS_SIZE = rendererLayout.authorPhotoSize + AUTHOR_PHOTO_SHADOW_PAD * 2;
+
+/** Draw an author photo with drop-shadow — first frame renders to offscreen
+ *  canvas and caches; subsequent frames draw from cache (no shadowBlur). */
 export function drawAuthorPhoto(
   ctx: AnyCanvasContext,
   photo: CanvasImageSource,
   x: number,
   y: number
 ): void {
-  ctx.save();
-  ctx.shadowColor = AUTHOR_PHOTO_SHADOW;
-  ctx.shadowBlur = 4;
-  ctx.shadowOffsetX = 1;
-  ctx.shadowOffsetY = 1;
-  ctx.drawImage(photo, x, y, rendererLayout.authorPhotoSize, rendererLayout.authorPhotoSize);
-  ctx.restore();
+  const dpr = ctx.getTransform().a || 1;
+  const photoSize = rendererLayout.authorPhotoSize;
+  const totalSize = AUTHOR_PHOTO_CANVAS_SIZE;
+
+  // Try the pre-composited cache first — avoids per-frame shadowBlur
+  const cached = _photoShadowCache.get(photo);
+  if (cached) {
+    ctx.drawImage(
+      cached,
+      x - AUTHOR_PHOTO_SHADOW_PAD,
+      y - AUTHOR_PHOTO_SHADOW_PAD,
+      totalSize,
+      totalSize
+    );
+    return;
+  }
+
+  // First encounter — render to offscreen with shadow, cache, then draw
+  const offscreen = new OffscreenCanvas(Math.ceil(totalSize * dpr), Math.ceil(totalSize * dpr));
+  const octx = offscreen.getContext('2d');
+  if (!octx) {
+    // Fallback: direct shadowBlur on main context (should never happen)
+    ctx.save();
+    ctx.shadowColor = AUTHOR_PHOTO_SHADOW;
+    ctx.shadowBlur = 4;
+    ctx.shadowOffsetX = 1;
+    ctx.shadowOffsetY = 1;
+    ctx.drawImage(photo, x, y, photoSize, photoSize);
+    ctx.restore();
+    return;
+  }
+  octx.scale(dpr, dpr);
+  octx.shadowColor = AUTHOR_PHOTO_SHADOW;
+  octx.shadowBlur = 4;
+  octx.shadowOffsetX = 1;
+  octx.shadowOffsetY = 1;
+  octx.drawImage(photo, AUTHOR_PHOTO_SHADOW_PAD, AUTHOR_PHOTO_SHADOW_PAD, photoSize, photoSize);
+
+  _photoShadowCache.set(photo, offscreen);
+
+  // Draw the freshly created cached version
+  ctx.drawImage(
+    offscreen,
+    x - AUTHOR_PHOTO_SHADOW_PAD,
+    y - AUTHOR_PHOTO_SHADOW_PAD,
+    totalSize,
+    totalSize
+  );
 }
 
 /**
