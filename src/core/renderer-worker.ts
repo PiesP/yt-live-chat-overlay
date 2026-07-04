@@ -785,7 +785,7 @@ self.onmessage = (e: MessageEvent) => {
         case 'init': {
           config = data.config as WorkerConfig;
           canvas = data.canvas as OffscreenCanvas;
-          ctx = canvas.getContext('2d', { alpha: true });
+          ctx = canvas.getContext('2d', { alpha: true, desynchronized: true });
           if (!ctx) {
             self.postMessage({ type: 'error', error: 'Failed to get 2D context' });
             return;
