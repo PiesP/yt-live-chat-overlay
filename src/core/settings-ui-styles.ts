@@ -103,7 +103,6 @@ const borderRadius = {
 } as const;
 
 const zIndex = {
-  modal: 10003,
   settingsButton: 120,
 } as const;
 
@@ -226,23 +225,6 @@ export const SETTINGS_UI_STYLES = `
         color: #4ade80;
         border-color: rgba(74, 222, 128, 0.5);
       }
-      .yt-chat-overlay-settings-backdrop {
-        position: fixed;
-        inset: 0;
-        display: none;
-        align-items: center;
-        justify-content: center;
-        background: rgba(0, 0, 0, ${uiSizing.scrimAlpha});
-        z-index: ${zIndex.modal};
-        overscroll-behavior: contain;
-        animation: yt-overlay-fade-in ${animDuration.normal} ease-out;
-        transition: opacity ${animDuration.normal} ease-out;
-      }
-      @starting-style {
-        .yt-chat-overlay-settings-backdrop {
-          opacity: 0;
-        }
-      }
       @keyframes yt-overlay-fade-in {
         from { opacity: 0; }
         to { opacity: 1; }
@@ -251,8 +233,19 @@ export const SETTINGS_UI_STYLES = `
         from { transform: scale(0.92); opacity: 0; }
         to { transform: scale(1); opacity: 1; }
       }
-      .yt-chat-overlay-settings-modal {
-        position: relative;
+      @keyframes yt-overlay-confirm-fade-in {
+        from { opacity: 0; }
+        to { opacity: 1; }
+      }
+      /* Native <dialog> backdrop — replaces custom .yt-chat-overlay-settings-backdrop */
+      dialog.yt-chat-overlay-settings-modal::backdrop {
+        background: rgba(0, 0, 0, ${uiSizing.scrimAlpha});
+        animation: yt-overlay-fade-in ${animDuration.normal} ease-out;
+      }
+      dialog.yt-chat-overlay-settings-modal {
+        border: none;
+        padding: ${spacing.lg}px;
+        margin: auto;
         width: min(${uiSizing.modalWidth}px, ${uiSizing.modalMaxVW}vw);
         max-width: min(${uiSizing.modalMaxVW}vw, ${uiSizing.modalMaxWidth}px);
         max-height: ${uiSizing.modalMaxVH}vh;
@@ -260,17 +253,15 @@ export const SETTINGS_UI_STYLES = `
         background: ${uiColors.background};
         color: ${uiColors.text};
         border-radius: ${borderRadius.md};
-        padding: ${spacing.lg}px;
         display: flex;
         flex-direction: column;
         gap: ${spacing.md}px;
         font-family: ${DEFAULT_FONT_FAMILY};
         box-shadow: ${shadows.box.lg};
         animation: yt-overlay-modal-scale-in ${animDuration.slow} ease-out;
-        transition: opacity ${animDuration.slow} ease-out, transform ${animDuration.slow} ease-out;
       }
       @starting-style {
-        .yt-chat-overlay-settings-modal {
+        dialog.yt-chat-overlay-settings-modal {
           transform: scale(0.92);
           opacity: 0;
         }
@@ -570,39 +561,33 @@ export const SETTINGS_UI_STYLES = `
         background: ${uiColors.primaryHover};
       }
 
-      /* Reset confirmation dialog */
-      .yt-chat-overlay-settings-confirm {
-        position: absolute;
-        inset: 0;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 1;
-      }
-      .yt-chat-overlay-settings-confirm-backdrop {
-        position: absolute;
-        inset: 0;
-        background: rgba(0, 0, 0, ${CONFIRM_BACKDROP_ALPHA});
-        border-radius: ${borderRadius.md};
-      }
-      .yt-chat-overlay-settings-confirm-dialog {
-        position: relative;
+      /* Reset confirmation dialog — native <dialog> */
+      dialog.yt-chat-overlay-settings-confirm {
+        border: none;
+        padding: ${spacing.lg}px;
+        margin: auto;
         background: ${uiColors.backgroundLight};
         border: 1px solid ${uiColors.border};
         border-radius: ${borderRadius.md};
-        padding: ${spacing.lg}px;
         min-width: ${uiSizing.confirmMinWidth}px;
         box-shadow: ${shadows.box.lg};
+        animation: yt-overlay-confirm-fade-in ${animDuration.normal} ease-out;
+      }
+      dialog.yt-chat-overlay-settings-confirm::backdrop {
+        background: rgba(0, 0, 0, ${CONFIRM_BACKDROP_ALPHA});
+        animation: yt-overlay-confirm-fade-in ${animDuration.normal} ease-out;
       }
       .yt-chat-overlay-settings-confirm-message {
         margin: 0 0 ${spacing.md}px;
         font-size: ${typography.fontSize.sm};
         color: ${uiColors.text};
+        font-family: ${DEFAULT_FONT_FAMILY};
       }
       .yt-chat-overlay-settings-confirm-buttons {
         display: flex;
         justify-content: flex-end;
         gap: ${spacing.sm}px;
+        font-family: ${DEFAULT_FONT_FAMILY};
       }
       .yt-chat-overlay-settings-confirm-cancel,
       .yt-chat-overlay-settings-confirm-ok {
@@ -612,6 +597,7 @@ export const SETTINGS_UI_STYLES = `
         cursor: pointer;
         font-weight: ${typography.fontWeight.semibold};
         font-size: ${typography.fontSize.sm};
+        font-family: inherit;
       }
       .yt-chat-overlay-settings-confirm-cancel {
         background: transparent;
@@ -842,7 +828,11 @@ export const SETTINGS_UI_STYLES = `
         .yt-chat-overlay-settings-tab,
         .yt-chat-overlay-settings-font-preview-text,
         .yt-chat-overlay-settings-weight-toggle-btn,
-        .yt-chat-overlay-settings-font-chip {
+        .yt-chat-overlay-settings-font-chip,
+        dialog.yt-chat-overlay-settings-modal::backdrop,
+        dialog.yt-chat-overlay-settings-modal,
+        dialog.yt-chat-overlay-settings-confirm::backdrop,
+        dialog.yt-chat-overlay-settings-confirm {
           animation: none !important;
           transition: none !important;
         }
@@ -855,7 +845,7 @@ export const SETTINGS_UI_STYLES = `
         .yt-chat-overlay-settings-actions button[data-action="reset"],
         .yt-chat-overlay-settings-actions button[data-action="export"],
         .yt-chat-overlay-settings-actions button[data-action="import"],
-        .yt-chat-overlay-settings-confirm-dialog,
+        dialog.yt-chat-overlay-settings-confirm,
         .yt-chat-overlay-settings-confirm-cancel {
           border-color: CanvasText;
         }

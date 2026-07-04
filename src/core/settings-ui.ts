@@ -40,21 +40,15 @@ export class SettingsUi {
   private reloadButton: HTMLButtonElement | null = null;
   /** Timer for reload-complete checkmark → icon restoration. */
   private reloadFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
-  private backdrop: HTMLDivElement | null = null;
-  private modal: HTMLDivElement | null = null;
+  private modal: HTMLDialogElement | null = null;
   private previousFocus: HTMLElement | null = null;
   private activeTab: string;
   /** Language code that was active when the modal content was last built. */
   private modalLanguage: string | null = null;
-  /** Saved body overflow before scroll lock. Restored on close/destroy. */
-  private savedBodyOverflow: string | null = null;
-  /** Saved body padding-right before scrollbar compensation. */
-  private savedBodyPaddingRight: string | null = null;
-  private _backdropClickHandler: ((event: MouseEvent) => void) | null = null;
   /** Element focused before confirm dialog opened; restored on close. */
   private confirmPreviousFocus: HTMLElement | null = null;
-  /** Keydown handler bound to confirm dialog for focus trap + ESC. */
-  private confirmKeydownHandler: ((event: KeyboardEvent) => void) | null = null;
+  /** Guard against re-entrant close() calls from the native dialog 'close' event. */
+  private closing = false;
 
   private get defaultTabId(): string {
     const first = PANES[0];
@@ -63,22 +57,12 @@ export class SettingsUi {
 
   private readonly form: SettingsUiForm;
 
-  private readonly handleKeydown = (event: KeyboardEvent) => {
-    if (event.key === 'Escape') {
-      this.close();
-      return;
-    }
-
-    if (event.key === 'Tab' && this.backdrop && this.backdrop.style.display !== 'none') {
-      this.trapFocus(event);
-    }
-  };
-
   /**
    * Check whether the settings dialog is currently visible to the user.
+   * Uses the native dialog `open` property for accurate state.
    */
   private isDialogOpen(): boolean {
-    return this.backdrop !== null && this.backdrop.style.display !== 'none';
+    return this.modal?.open === true;
   }
 
   /**
@@ -128,7 +112,7 @@ export class SettingsUi {
     if (
       this.playerElement === player &&
       this.button?.isConnected &&
-      this.backdrop?.isConnected &&
+      this.modal?.isConnected &&
       (this.reloadButton ? this.reloadButton.isConnected : true)
     ) {
       return;
@@ -141,40 +125,43 @@ export class SettingsUi {
   }
 
   close(): void {
-    if (!this.backdrop) return;
+    if (!this.modal) return;
+
+    // Guard against re-entry from the native dialog's 'close' event
+    // (fires synchronously inside this.modal.close()).
+    if (this.closing) return;
+    this.closing = true;
+
     // Only persist form state when the dialog is actually visible.
     // attach() and destroy() call close() even when the dialog has never
     // been opened — in that case the form inputs are unpopulated and
     // collectSettings() would return minimum values (Number('') → 0),
     // corrupting saved settings on every page load / SPA navigation.
-    if (!this.isDialogOpen()) {
-      this.setDialogOpen(false);
+    if (!this.modal.open) {
+      this.closing = false;
       return;
     }
     // Persist current form state on close. This is the only path that
     // writes settings to storage — preview (memory only) never writes.
-    // Covers: X button, Close button, Escape, backdrop click, and
+    // Covers: X button, Close button, Escape (cancel event), and
     // SPA navigation (destroy() calls close()).
     if (this.previewTimer !== null) {
       this.previewTimer = clearSafeTimeout(this.previewTimer);
     }
     const persist = this.onPersist ?? this.onChange;
     persist(this.form.collectSettings());
-    this.setDialogOpen(false);
 
-    this.unlockBodyScroll();
+    // Close the native dialog (fires 'close' event synchronously, but
+    // the closing guard prevents re-entry).
+    this.modal.close();
+
     this.restoreDocumentLangDir();
-
-    // Remove keydown listener to prevent accumulation across SPA navigations.
-    // ensureModal() registers this listener and close() is called on modal
-    // hide; destroy() also removes it as a safety net.
-    // Must use capture=true to match the addEventListener call in ensureModal().
-    document.removeEventListener('keydown', this.handleKeydown, true);
 
     if (this.previousFocus?.isConnected) {
       this.previousFocus.focus();
     }
     this.previousFocus = null;
+    this.closing = false;
   }
 
   private findPlayerContainer(): Promise<HTMLElement | null> {
@@ -199,6 +186,13 @@ export class SettingsUi {
         this.button.title = t('Chat overlay settings');
       }
       this.button.addEventListener('click', () => this.open());
+      // commandfor Invoker Commands (Chrome 134+) as progressive enhancement.
+      // When supported, lets the settings button open the native dialog declaratively
+      // without JavaScript. Falls back to the click handler above.
+      if ('commandFor' in HTMLElement.prototype) {
+        this.button.setAttribute('commandfor', BACKDROP_ID);
+        this.button.setAttribute('command', 'show-modal');
+      }
     } else if (this.button.parentElement) {
       this.button.remove();
     }
@@ -305,42 +299,6 @@ export class SettingsUi {
     document.head.appendChild(style);
   }
 
-  private setDialogOpen(isOpen: boolean): void {
-    if (!this.backdrop) {
-      return;
-    }
-
-    this.backdrop.style.display = isOpen ? 'flex' : 'none';
-    this.backdrop.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
-  }
-
-  /** Lock body scroll to prevent page scrolling behind the open modal.
-   *  Compensates for scrollbar width to avoid layout shift.
-   *  Also marks body as inert to improve focus isolation for AT. */
-  private lockBodyScroll(): void {
-    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
-    this.savedBodyOverflow = document.body.style.overflow;
-    this.savedBodyPaddingRight = document.body.style.paddingRight;
-    document.body.style.overflow = 'hidden';
-    document.body.inert = true;
-    if (scrollbarWidth > 0) {
-      document.body.style.paddingRight = `${scrollbarWidth}px`;
-    }
-  }
-
-  /** Restore body scroll state saved by lockBodyScroll(). Idempotent. */
-  private unlockBodyScroll(): void {
-    document.body.inert = false;
-    if (this.savedBodyOverflow !== null) {
-      document.body.style.overflow = this.savedBodyOverflow;
-      this.savedBodyOverflow = null;
-    }
-    if (this.savedBodyPaddingRight !== null) {
-      document.body.style.paddingRight = this.savedBodyPaddingRight;
-      this.savedBodyPaddingRight = null;
-    }
-  }
-
   private bindTabEvents(): void {
     if (!this.modal) return;
     this.modal.addEventListener('click', (event) => {
@@ -412,53 +370,39 @@ export class SettingsUi {
   private ensureModal(): void {
     this.ensureStyles();
 
-    if (this.backdrop?.isConnected) return;
+    if (this.modal?.isConnected) return;
 
     // Clean up previously detached DOM elements so they can be garbage-collected
-    this.backdrop?.remove();
-    this.backdrop = null;
+    this.modal?.remove();
     this.modal = null;
 
-    this.backdrop = document.createElement('div');
-    this.backdrop.id = BACKDROP_ID;
-    this.backdrop.className = 'yt-chat-overlay-settings-backdrop';
-    this._backdropClickHandler = (event: MouseEvent) => {
-      // Only respond to genuine left-button mouse clicks. Touch events
-      // generate synthetic MouseEvent with button === 0 but detail === 0;
-      // filtering detail === 0 prevents accidental modal dismissal from
-      // touch scrolls/taps that trigger synthetic click events.
-      if (event.button !== 0) return;
-      if (event.detail === 0) return;
-      if (event.target === this.backdrop) {
-        this.close();
-      }
-    };
-    this.backdrop.addEventListener('click', this._backdropClickHandler);
-
-    this.modal = document.createElement('div');
+    this.modal = document.createElement('dialog');
+    this.modal.id = BACKDROP_ID;
     this.modal.className = 'yt-chat-overlay-settings-modal';
-    this.modal.tabIndex = -1;
-    this.modal.setAttribute('role', 'dialog');
-    this.modal.setAttribute('aria-modal', 'true');
+    // closedby="any" enables light dismiss via backdrop click (Chrome 133+)
+    // and ESC, both handled natively by the dialog element.
+    this.modal.setAttribute('closedby', 'any');
     this.modal.setAttribute('aria-labelledby', 'yt-chat-overlay-settings-title');
+    this.modal.setAttribute('aria-modal', 'true');
     this.modal.append(...this.form.createModalContent());
 
     this.form.setModal(this.modal);
     this.bindModalEvents();
     this.modalLanguage = getActiveLanguage();
 
-    this.backdrop.appendChild(this.modal);
-    document.body.appendChild(this.backdrop);
-    this.setDialogOpen(false);
+    // When the user presses Escape, the native dialog fires a 'cancel'
+    // event. We intercept it, prevent the default UA close, and call
+    // our custom close() which persists settings first.
+    this.modal.addEventListener('cancel', (event: Event) => {
+      event.preventDefault();
+      this.close();
+    });
 
-    // Activate keydown listener now that modal DOM exists.
-    // Use capture phase so ESC fires before any page-level handlers and
-    // the focus trap's Tab handler intercepts keys before YouTube's own listeners.
-    document.addEventListener('keydown', this.handleKeydown, true);
+    document.body.appendChild(this.modal);
   }
 
   private open(): void {
-    if (!this.backdrop || !this.modal) return;
+    if (!this.modal) return;
 
     // Rebuild modal content when language changed — DOM strings are
     // baked at construction time so a full rebuild is required.
@@ -471,8 +415,9 @@ export class SettingsUi {
 
     this.form.populateForm(this.getSettings());
     this.switchTab(this.activeTab);
-    this.lockBodyScroll();
-    this.setDialogOpen(true);
+    // showModal() opens the dialog in the top layer with native backdrop,
+    // automatic focus trap, scroll lock, and inert handling.
+    this.modal.showModal();
     this.focusInitialElement();
     this.updateDocumentLangDir();
   }
@@ -527,23 +472,15 @@ export class SettingsUi {
     this.modal.dir = '';
   }
 
-  /** Create a reusable confirmation dialog overlay for destructive actions. */
+  /** Create a reusable confirmation dialog for destructive actions using native <dialog>. */
   private createConfirmDialog(options: {
     message: string;
     confirmLabel: string;
     onConfirm: () => void;
-  }): HTMLDivElement {
-    const dialog = document.createElement('div');
+  }): HTMLDialogElement {
+    const dialog = document.createElement('dialog');
     dialog.className = 'yt-chat-overlay-settings-confirm';
-    dialog.setAttribute('role', 'alertdialog');
-    dialog.setAttribute('aria-modal', 'true');
     dialog.setAttribute('aria-label', t(options.message));
-
-    const backdrop = document.createElement('div');
-    backdrop.className = 'yt-chat-overlay-settings-confirm-backdrop';
-
-    const confirmDialog = document.createElement('div');
-    confirmDialog.className = 'yt-chat-overlay-settings-confirm-dialog';
 
     const message = document.createElement('p');
     const messageId = 'yt-chat-overlay-confirm-msg';
@@ -566,8 +503,7 @@ export class SettingsUi {
     okBtn.textContent = t(options.confirmLabel);
 
     buttons.append(cancelBtn, okBtn);
-    confirmDialog.append(message, buttons);
-    dialog.append(backdrop, confirmDialog);
+    dialog.append(message, buttons);
 
     // Save focus before opening confirm dialog; restore on close
     const previouslyFocused =
@@ -575,11 +511,7 @@ export class SettingsUi {
     this.confirmPreviousFocus = previouslyFocused;
 
     const closeDialog = () => {
-      // Remove ESC / Tab handler
-      if (this.confirmKeydownHandler) {
-        document.removeEventListener('keydown', this.confirmKeydownHandler, true);
-        this.confirmKeydownHandler = null;
-      }
+      dialog.close();
       dialog.remove();
       // Restore focus to element that was active before confirm opened
       if (this.confirmPreviousFocus?.isConnected) {
@@ -588,36 +520,11 @@ export class SettingsUi {
       this.confirmPreviousFocus = null;
     };
 
-    // Focus trap + ESC handler (capture phase so it fires before the
-    // parent modal's keydown listener and prevents Escape from closing
-    // the parent modal while the confirm dialog is open).
-    this.confirmKeydownHandler = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        event.stopPropagation();
-        closeDialog();
-        return;
-      }
-      if (event.key === 'Tab') {
-        // Trap focus within confirm dialog buttons
-        const focusableInDialog = [cancelBtn, okBtn];
-        const first = focusableInDialog[0];
-        const last = focusableInDialog[focusableInDialog.length - 1];
-        if (!first || !last) {
-          event.preventDefault();
-          return;
-        }
-        const active = document.activeElement;
-        if (event.shiftKey && active === first) {
-          event.preventDefault();
-          last.focus();
-        } else if (!event.shiftKey && active === last) {
-          event.preventDefault();
-          first.focus();
-        }
-      }
-    };
-    document.addEventListener('keydown', this.confirmKeydownHandler, true);
+    // Native dialog handles ESC and focus trap automatically.
+    // Clean up on close (covers ESC, backdrop click, and manual close).
+    dialog.addEventListener('close', () => {
+      closeDialog();
+    });
 
     cancelBtn.addEventListener('click', () => closeDialog());
     okBtn.addEventListener('click', () => {
@@ -641,7 +548,10 @@ export class SettingsUi {
       },
     });
 
-    this.modal.appendChild(dialog);
+    // Append to body and use showModal() so it stacks on top of the
+    // settings dialog in the top layer.
+    document.body.appendChild(dialog);
+    dialog.showModal();
   }
 
   private handleExport(): void {
@@ -731,37 +641,6 @@ export class SettingsUi {
     this.modal.focus();
   }
 
-  private trapFocus(event: KeyboardEvent): void {
-    if (!this.backdrop || this.backdrop.style.display === 'none') {
-      return;
-    }
-
-    const focusableElements = this.form.getFocusableElements();
-    if (focusableElements.length === 0) {
-      event.preventDefault();
-      this.modal?.focus();
-      return;
-    }
-
-    const first = focusableElements[0];
-    const last = focusableElements[focusableElements.length - 1];
-    if (!first || !last) return;
-
-    const activeElement = document.activeElement;
-    const isShiftTab = event.shiftKey;
-
-    if (isShiftTab && activeElement === first) {
-      event.preventDefault();
-      last.focus();
-      return;
-    }
-
-    if (!isShiftTab && activeElement === last) {
-      event.preventDefault();
-      first.focus();
-    }
-  }
-
   /** Show a transient toast notification in the settings modal. */
   private toastTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -795,12 +674,8 @@ export class SettingsUi {
     this.reloadButton?.remove();
     this.clearReloadFeedbackTimer();
     this.toastTimer = clearSafeTimeout(this.toastTimer);
-    if (this.backdrop && this._backdropClickHandler) {
-      this.backdrop.removeEventListener('click', this._backdropClickHandler);
-      this._backdropClickHandler = null;
-    }
-    this.backdrop?.remove();
-    document.removeEventListener('keydown', this.handleKeydown, true);
+    this.modal?.close();
+    this.modal?.remove();
     this.restoreDocumentLangDir();
 
     const styleElement = document.getElementById(STYLE_ID);
@@ -808,7 +683,6 @@ export class SettingsUi {
 
     this.button = null;
     this.reloadButton = null;
-    this.backdrop = null;
     this.modal = null;
     this.playerElement = null;
 

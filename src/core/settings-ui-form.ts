@@ -155,6 +155,9 @@ function createHeader(): HTMLDivElement {
   closeButton.className = 'yt-chat-overlay-settings-close';
   closeButton.setAttribute('data-action', 'close');
   closeButton.setAttribute('aria-label', t('Close settings'));
+  // command Invoker Commands (Chrome 134+) as progressive enhancement.
+  // Declaratively closes the native dialog without JavaScript.
+  closeButton.setAttribute('command', 'close');
   closeButton.textContent = '\u00D7';
   header.append(title, closeButton);
   return header;
@@ -354,7 +357,7 @@ function patchOutline(partial: Record<string, unknown>, patch: Record<string, un
 
 // ── SettingsUiForm class ─────────────────────────────────────────────────────
 export class SettingsUiForm {
-  private modal: HTMLDivElement | null = null;
+  private modal: HTMLDialogElement | null = null;
   private isUpdating = false;
   private errorDismissTimeouts: ReturnType<typeof setTimeout>[] = [];
 
@@ -363,7 +366,7 @@ export class SettingsUiForm {
     private readonly onPreview?: () => void
   ) {}
 
-  setModal(modal: HTMLDivElement | null): void {
+  setModal(modal: HTMLDialogElement | null): void {
     this.modal = modal;
     if (modal) {
       this.bindNumberInputKeys(modal);
@@ -393,7 +396,7 @@ export class SettingsUiForm {
    * YouTube shortcuts are naturally suppressed because the focused input
    * receives the event first — no conflict.
    */
-  private bindNumberInputKeys(modal: HTMLDivElement): void {
+  private bindNumberInputKeys(modal: HTMLElement): void {
     modal.addEventListener('keydown', (event) => {
       const target = event.target;
       if (!(target instanceof HTMLInputElement) || target.type !== 'number') return;
@@ -429,7 +432,7 @@ export class SettingsUiForm {
    * pseudo-class checking. Updates on blur and input events so screen
    * readers are notified of validation state changes.
    */
-  private bindAriaInvalidSync(modal: HTMLDivElement): void {
+  private bindAriaInvalidSync(modal: HTMLElement): void {
     const sync = (input: HTMLInputElement | HTMLSelectElement): void => {
       if (input.willValidate) {
         // Use :user-invalid check: after user interaction,
