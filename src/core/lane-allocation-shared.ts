@@ -10,7 +10,7 @@
  * allocation logic between the two contexts.
  */
 
-import { EPSILON, LANE_COOLDOWN_MIN_MS, SAFETY_MARGIN_RATIO } from '@core/renderer-constants';
+import { EPSILON, LANE_COOLDOWN_MIN_MS, SAFETY_MARGIN_RATIO, SPEED_TIER } from '@core/renderer-constants';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -484,8 +484,7 @@ export function allocateSingleLaneShared(
   }
 
   if (speedMatched && speedMatched.waitMs <= maxWaitMs) return speedMatched;
-  if (firstBusy && firstBusy.waitMs <= maxWaitMs && speedTier !== SPEED_TIER_BACKLOG)
+  if (firstBusy && firstBusy.waitMs <= maxWaitMs && speedTier !== SPEED_TIER.BACKLOG)
     return firstBusy;
   return null;
 }
-const SPEED_TIER_BACKLOG = 3;
