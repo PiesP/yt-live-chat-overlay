@@ -87,8 +87,7 @@ export function logBootstrapFailure(resolution: ChatBootstrapResult): void {
     return;
   }
 
-  log.warn(
-    'Chat source is unavailable:',
-    (resolution as { status: 'unavailable'; reason: string }).reason
-  );
+  if (resolution.status === 'unavailable') {
+    log.warn('Chat source is unavailable:', resolution.reason);
+  }
 }
