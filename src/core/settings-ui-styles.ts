@@ -845,4 +845,21 @@ export const SETTINGS_UI_STYLES = `
           color: HighlightText;
         }
       }
+      /* Native Popover API tooltips */
+      .yt-chat-overlay-tooltip {
+        font-family: ${DEFAULT_FONT_FAMILY};
+        font-size: 12px;
+        line-height: 1.4;
+        padding: 4px 10px;
+        border-radius: 4px;
+        background: rgba(0, 0, 0, 0.9);
+        color: #fff;
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        max-width: 240px;
+        pointer-events: none;
+      }
+      .yt-chat-overlay-tooltip:popover-open {
+        inset: unset;
+        margin: 0;
+      }
 `;

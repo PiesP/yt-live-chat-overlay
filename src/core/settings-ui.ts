@@ -28,6 +28,13 @@ const TOAST_DURATION_MS = 2500;
 const RELOAD_FEEDBACK_DURATION_MS = 1500;
 
 export class SettingsUi {
+  /** Popover API feature detection — checked once at construction. */
+  private static readonly supportsHints: boolean =
+    typeof HTMLElement !== 'undefined' && 'popover' in HTMLElement.prototype;
+
+  private static readonly SETTINGS_TOOLTIP_ID = 'yt-chat-overlay-settings-tooltip';
+  private static readonly RELOAD_TOOLTIP_ID = 'yt-chat-overlay-reload-tooltip';
+
   private playerElement: HTMLElement | null = null;
   private button: HTMLButtonElement | null = null;
   private reloadButton: HTMLButtonElement | null = null;
@@ -184,7 +191,13 @@ export class SettingsUi {
       this.button.className = 'yt-chat-overlay-settings-button';
       this.button.textContent = '\u2699';
       this.button.setAttribute('aria-label', t('Chat overlay settings'));
-      this.button.title = t('Chat overlay settings');
+      // Native Popover API tooltip with interestfor (Chrome 133+).
+      // Falls back to traditional title attribute on unsupported browsers.
+      if (SettingsUi.supportsHints) {
+        this.button.setAttribute('interestfor', SettingsUi.SETTINGS_TOOLTIP_ID);
+      } else {
+        this.button.title = t('Chat overlay settings');
+      }
       this.button.addEventListener('click', () => this.open());
     } else if (this.button.parentElement) {
       this.button.remove();
@@ -199,7 +212,13 @@ export class SettingsUi {
       this.reloadButton.className = 'yt-chat-overlay-reload-button';
       this.reloadButton.textContent = '\u21BB';
       this.reloadButton.setAttribute('aria-label', t('Reload overlay'));
-      this.reloadButton.title = t('Reload overlay');
+      // Native Popover API tooltip with interestfor (Chrome 133+).
+      // Falls back to traditional title attribute on unsupported browsers.
+      if (SettingsUi.supportsHints) {
+        this.reloadButton.setAttribute('interestfor', SettingsUi.RELOAD_TOOLTIP_ID);
+      } else {
+        this.reloadButton.title = t('Reload overlay');
+      }
       this.reloadButton.addEventListener('click', () => {
         this.handleReloadClick();
       });
@@ -209,9 +228,37 @@ export class SettingsUi {
 
     ensurePlayerPositioning(player);
 
+    // Append popover tooltip elements when supported
+    if (SettingsUi.supportsHints) {
+      this.ensureTooltips(player);
+    }
+
     player.appendChild(this.button);
     if (this.reloadButton) {
       player.appendChild(this.reloadButton);
+    }
+  }
+
+  /** Create popover tooltip elements for settings and reload buttons. */
+  private ensureTooltips(container: HTMLElement): void {
+    const existingSettingsTip = document.getElementById(SettingsUi.SETTINGS_TOOLTIP_ID);
+    if (!existingSettingsTip) {
+      const settingsTip = document.createElement('div');
+      settingsTip.id = SettingsUi.SETTINGS_TOOLTIP_ID;
+      settingsTip.className = 'yt-chat-overlay-tooltip';
+      settingsTip.setAttribute('popover', 'hint');
+      settingsTip.textContent = t('Chat overlay settings');
+      container.appendChild(settingsTip);
+    }
+
+    const existingReloadTip = document.getElementById(SettingsUi.RELOAD_TOOLTIP_ID);
+    if (!existingReloadTip) {
+      const reloadTip = document.createElement('div');
+      reloadTip.id = SettingsUi.RELOAD_TOOLTIP_ID;
+      reloadTip.className = 'yt-chat-overlay-tooltip';
+      reloadTip.setAttribute('popover', 'hint');
+      reloadTip.textContent = t('Reload overlay');
+      container.appendChild(reloadTip);
     }
   }
 
