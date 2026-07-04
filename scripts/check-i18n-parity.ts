@@ -16,7 +16,7 @@ const BASELINE = 'ko.ts';
  * Parses `export const NAME: Record<string, string> = { ... }` and
  * returns the list of literal keys inside the object.
  */
-function extractKeys(source) {
+function extractKeys(source: string): string[] {
   // Find the opening brace of the object literal
   const match = source.match(/export\s+const\s+\w+\s*:\s*Record\s*<[^>]*>\s*=\s*\{/);
   if (!match) {
@@ -24,7 +24,7 @@ function extractKeys(source) {
     return [];
   }
 
-  const start = match.index + match[0].length - 1; // position of '{'
+  const start = match.index! + match[0].length - 1; // position of '{'
   let depth = 0;
   let end = start;
   for (let i = start; i < source.length; i++) {
@@ -37,11 +37,11 @@ function extractKeys(source) {
   }
 
   const body = source.slice(start + 1, end);
-  const keys = [];
+  const keys: string[] = [];
 
   // Match lines like:  KeyName: '...'  or  'Key With Spaces': '...'
   const keyRe = /^\s*(?:(\w+)|'([^']+)'|"([^"]+)")\s*:/gm;
-  let m;
+  let m: RegExpExecArray | null;
   while ((m = keyRe.exec(body)) !== null) {
     const key = m[1] ?? m[2] ?? m[3];
     if (key && !key.startsWith('//')) {
