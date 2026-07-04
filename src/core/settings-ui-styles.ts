@@ -14,29 +14,35 @@ import { DEFAULT_FONT_FAMILY, spacing } from '@core/design-tokens';
  * (CSSStyleSheet.insertRule) or a background-script messaging bridge
  * to inject styles without violating CSP.
  *
- * STATE MANAGEMENT: This project uses CSS classes for state toggling
- * (e.g. `.active`, `.yt-chat-overlay-reload-button--done`) instead of the
- * CSS `:has()` pseudo-class. Rationale:
+ * STATE MANAGEMENT — CSS `:has()` policy (2026 update):
  *
- *   1. MV3 content scripts run in the MAIN world where they share the CSS
- *      scope with the host page. `:has()` selectors are broad and can
- *      accidentally match page elements if not carefully scoped — class-based
- *      state is explicit and isolated by our `.yt-chat-overlay-*` prefix.
+ *   `:has()` is Baseline 2023, fully supported in all modern browsers
+ *   (Chrome 105+, Firefox 121+, Safari 15.4+). The project uses it in
+ *   4 places for contextual layout selectors (see lines 465, 468, 785, 786).
  *
- *   2. While `:has()` is now widely supported (Chrome 105+, Firefox 121+),
- *      using it for state-driven styling would require the browser to recompute
- *      the selector tree on every DOM mutation. Class toggling via
- *      classList.toggle() is O(1) and only triggers style recalculation on
- *      the affected element.
+ *   Guidelines for choosing between class-based state and `:has()`:
  *
- *   3. Class-based state is programmatically accessible — other components
- *      can check `element.classList.contains('active')` without querying the
- *      stylesheet. This matters for the focus trap, tab switching, and
- *      confirm dialog logic in settings-ui.ts.
+ *   1. Prefer class-based toggle (`classList.toggle('active')`) for
+ *      critical UI state (active, focused, open). Classes are O(1) to
+ *      toggle, don't require sibling/ancestor traversal on every mutation,
+ *      and are programmatically accessible (other components can do
+ *      `element.classList.contains('active')` without querying stylesheets).
+ *      This matters for the focus trap, tab switching, and confirm dialog
+ *      logic in settings-ui.ts.
  *
- * Future consideration: `:has()` could simplify some sibling-descendant
- * selectors but the performance and compatibility tradeoffs currently favor
- * explicit class management.
+ *   2. Use `:has()` for layout relationships (e.g. gridcell styling based
+ *      on child element presence), hover effects, and contextual styling
+ *      where a class-based approach would require extra JS coordination.
+ *
+ *   3. Always scope `:has()` selectors with the `.yt-chat-overlay-*`
+ *      namespace prefix to avoid accidentally matching host page elements —
+ *      content scripts run in the MAIN world and share CSS scope with the page.
+ *
+ *   CONTAINER QUERY NOTE: container queries (`@container`) remain risky in
+ *   injected YouTube modals because YouTube's DOM can interfere with
+ *   containment contexts. Prefer `@media` queries for responsive breakpoints
+ *   in the settings UI unless the container query targets an element wholly
+ *   under our control (i.e. not injected into YouTube's modal DOM).
  */
 
 // ── UI color palette (settings UI only, not renderer) ──
