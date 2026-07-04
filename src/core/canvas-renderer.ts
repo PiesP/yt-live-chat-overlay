@@ -811,12 +811,22 @@ export class CanvasRenderer extends RendererBase {
       // ── Render pre-compute ──
       const progress = Math.min(1, Math.max(0, elapsed * msg.invDuration));
 
-      if (mode === 'scroll' && !this.reducedMotion) {
-        const travelDistance = msg.startX + msg.width + this.settings.exitPaddingPx;
-        msg.x = msg.startX - progress * travelDistance;
-      } else if (mode === 'reverse' && !this.reducedMotion) {
-        const travelDistance = dims.width - msg.startX + this.settings.exitPaddingPx;
-        msg.x = msg.startX + progress * travelDistance;
+      if (mode === 'scroll') {
+        if (!this.reducedMotion) {
+          const travelDistance = msg.startX + msg.width + this.settings.exitPaddingPx;
+          msg.x = msg.startX - progress * travelDistance;
+        } else {
+          // Reduced motion: place message at a fixed visible position (no scrolling)
+          msg.x = Math.max(0, (dims.width - msg.width) / 2);
+        }
+      } else if (mode === 'reverse') {
+        if (!this.reducedMotion) {
+          const travelDistance = dims.width - msg.startX + this.settings.exitPaddingPx;
+          msg.x = msg.startX + progress * travelDistance;
+        } else {
+          // Reduced motion: place message at a fixed visible position (no scrolling)
+          msg.x = Math.max(0, (dims.width - msg.width) / 2);
+        }
       }
 
       // Fade-in starts from fadeStartTime, independent of position timeline.
