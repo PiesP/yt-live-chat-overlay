@@ -881,9 +881,20 @@ self.onmessage = (e: MessageEvent) => {
             // Resume: accumulate paused duration and shift lane timers
             const now = performance.now();
             const pausedMs = Math.max(0, now - pauseStartTime);
-            // Accumulate pausedDuration on active messages
+            // Accumulate pausedDuration on active messages.
+            // Mirror CanvasRenderer.applyPausedDuration() per-message capping:
+            // each message gets at most its remaining display time + 1s grace.
+            // Without this cap, a long pause (tab hidden for minutes) causes
+            // elapsed to go deeply negative, making messages invisible while
+            // keeping them in activeMessages indefinitely.
             for (const msg of activeMessages) {
-              msg.pausedDuration += pausedMs;
+              const elapsedBeforePause = now - pausedMs - msg.startTime;
+              const remainingDisplay = msg.duration - elapsedBeforePause;
+              // Cap: never push pausedDuration beyond what the message could
+              // have possibly displayed. 1s grace prevents messages from
+              // expiring mid-flight on the first post-resume frame.
+              const capped = Math.max(0, Math.min(pausedMs, Math.max(0, remainingDisplay) + 1000));
+              msg.pausedDuration += capped;
             }
             // Shift lane heap timers by paused duration
             shiftLaneTimers(pausedMs);
@@ -1685,7 +1696,7 @@ function activateMessage(
     activationTime: now,
     startTime: now + staggerDelay,
     duration,
-    invDuration: duration > 0 ? 1 / duration : 0,
+    invDuration: 1 / Math.max(1, duration),
     pausedDuration: 0,
     laneIndex: placement.laneIndex,
     laneSlotCount: slotCount,

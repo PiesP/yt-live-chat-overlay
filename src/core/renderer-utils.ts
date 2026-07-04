@@ -32,6 +32,12 @@ export function computeScrollDuration(
   durationMax: number,
   exitPaddingPx: number
 ): number {
+  // Defensive: return minimum duration when any input is NaN or velocity ≤ 0.
+  // NaN can propagate from text measurement failures or invalid canvas
+  // dimensions, leading to stuck messages (invDuration=NaN → position=NaN).
+  if (Number.isNaN(totalDistance) || Number.isNaN(velocity) || velocity <= 0) {
+    return durationMin;
+  }
   // Velocity-based floor: at minimum, allow the message to travel
   // exitPadding pixels at the configured velocity, but no less than the minimum duration.
   const velocityFloor = Math.max(durationMin, (exitPaddingPx / velocity) * 1000);
