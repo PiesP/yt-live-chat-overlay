@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.42.0] - 2026-07-04
+
+### Added
+
+- **Native `<dialog>` for settings modal** — Replaced custom backdrop div, focus trap, ESC handler, scroll lock, and `body.inert` with browser-native `showModal()`. Added `commandfor` progressive enhancement for declarative dialog control (Chrome 134+).
+- **Ignore Reduced Motion setting** — Advanced → Developer checkbox that overrides OS-level `prefers-reduced-motion: reduce`, forcing scroll animations regardless of system accessibility settings.
+- **Native Popover API for tooltips** — Replaced `title` attribute tooltips with `popover=hint` elements for better positioning and accessibility.
+- **Modern CSS features** — `field-sizing: content` for auto-sizing inputs, `@starting-style` for dialog entry animations, anchor positioning helpers, `mask-image` scroll fade indicators.
+- **Canvas live region mirroring** — Offscreen `aria-live` region updated with visible message snippets so screen readers, find-in-page, and translation tools can discover canvas-rendered text.
+- **Font settings redesign** — Live preview text, font family chips with visual samples, weight toggle pills, datalist autocomplete for font selection.
+- **`scheduler.yield()` + `scheduler.postTask()`** — Cooperative scheduling during heavy drain operations with Safari fallback.
+- **INP monitoring** — `PerformanceObserver` tracking Interaction to Next Paint for settings UI responsiveness.
+- **`aria-invalid` bridge and `aria-required`** — Real-time validation feedback on number inputs, screen-reader error announcements.
+- **i18n parity check in quality gate** — `check-i18n-parity.ts` consolidated from 3 duplicate scripts, wired into `prebuild`.
+
+### Fixed
+
+- **Dialog permanent display bug** — CSS specificity conflict where `dialog { display: flex }` (0,2,1) overrode UA `dialog:not([open]) { display: none }` (0,1,1). Scoped all dialog rules to `[open]` attribute.
+- **Settings pane bottom fade overlap** — `mask-image` gradient shifted from 90% to 94%, added `padding-bottom` so last items clear the fade zone.
+- **Canvas invisible with `content-visibility: auto`** — Overlay container's `content-visibility: auto` caused browser to skip canvas rendering. Removed from permanently-visible overlay.
+- **Reduced-motion messages permanently invisible** — When `prefers-reduced-motion: reduce` was active, scroll/reverse mode messages stayed at off-screen `startX` position. Now placed at fixed center position when reduced motion is active.
+- **i18n completeness** — Added missing `Chat messages`, `Ignore Reduced Motion`, and tooltip keys to all 5 non-English locales. Fixed `Chat overlay` case mismatch (lowercase 'o' → uppercase 'O'). Added Arabic `CSS font-family` tooltip.
+
+### Refactored
+
+- **Script consolidation** — Removed 5 orphan/duplicate scripts across all 3 projects. Converted `check-i18n-parity.mjs` to `.ts`, wired into quality gate.
+
 ## [0.41.0] - 2026-06-28
 
 ### Added
