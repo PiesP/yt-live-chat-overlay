@@ -342,8 +342,9 @@ export const SETTINGS_UI_STYLES = `
         scrollbar-color: ${scrollbar.thumb} ${scrollbar.track};
         content-visibility: auto;
         contain-intrinsic-size: 300px;
-        mask-image: linear-gradient(to bottom, black 90%, transparent 100%);
-        -webkit-mask-image: linear-gradient(to bottom, black 90%, transparent 100%);
+        mask-image: linear-gradient(to bottom, black 94%, transparent 100%);
+        -webkit-mask-image: linear-gradient(to bottom, black 94%, transparent 100%);
+        padding-bottom: calc(${spacing.lg}px * 2);
       }
       .yt-chat-overlay-settings-pane::-webkit-scrollbar {
         width: ${scrollbar.width};
