@@ -42,6 +42,10 @@ const WIDTH_CACHE_EVICT_BATCH = Math.floor(WIDTH_CACHE_MAX * 0.1);
  * Keyed by font string — same font always produces identical ascent/descent,
  * so caching avoids redundant ctx.measureText("Mg") calls in measureTextHeight
  * and bitmap generation hot paths.
+ *
+ * NOTE: Intentionally duplicated in renderer-worker.ts (worker variant).
+ * The worker uses OffscreenCanvasRenderingContext2D and cannot share the
+ * main-thread canvas context.
  */
 const fontMetricsCache = new Map<string, { ascent: number; descent: number }>();
 

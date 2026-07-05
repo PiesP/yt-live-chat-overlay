@@ -109,7 +109,7 @@ const MS_PER_SEC = MS_TO_S;
 
 const ctx: OffscreenCanvasRenderingContext2D | null = null;
 const config: WorkerConfig | null = null;
-const fontMetricsCache = new Map<string, { height: number }>();
+const fontMetricsCache = new Map<string, { height: number }>(); // See also text-measure.ts fontMetricsCache (main thread variant — intentionally duplicated for OffscreenCanvas)
 // biome-ignore lint/style/useConst: reassigned during worker init
 let stickerCache: ByteLimitedCache<ImageBitmap> | null = null;
 
