@@ -110,7 +110,8 @@ const MS_PER_SEC = MS_TO_S;
 const ctx: OffscreenCanvasRenderingContext2D | null = null;
 const config: WorkerConfig | null = null;
 const fontMetricsCache = new Map<string, { height: number }>();
-let stickerCache!: ByteLimitedCache<ImageBitmap>;
+// biome-ignore lint/style/useConst: reassigned during worker init
+let stickerCache: ByteLimitedCache<ImageBitmap> | null = null;
 
 function measureTextHeight(fontSize: number): number {
   if (!ctx) return Math.ceil(fontSize * 1.1);
@@ -371,7 +372,7 @@ function renderPaidCardWorker(
   if (card.stickerEnabled && message.stickerUrl) {
     // Sticker images are handled via the main thread's imageData transfer.
     // Render if available in stickerCache.
-    const stickerImg = stickerCache.get(message.stickerUrl);
+    const stickerImg = stickerCache?.get(message.stickerUrl);
     if (stickerImg) {
       const maxStickerSize = Math.round(fontSize * card.stickerSizeScale);
       const stickerY = textBottomY + (card.stickerMarginTop ?? 0);
