@@ -456,24 +456,37 @@ export class RuntimeManager {
     // 3. Reset burst detector
     renderer.resetBurstDetector();
 
-    // 4. Unpause chat source — poll loop resumes from saved token
+    // 4. Clear pause state so the render loop can run.
+    //    performOverlayRefresh is called from handleVisibility (after
+    //    the renderer was paused during the hidden period) and from the
+    //    watchdog (after detecting a stuck renderer).  In both cases
+    //    isPaused may still be true, which would cause every renderFrame
+    //    to return immediately — including any frames needed to render
+    //    the backlog injection below.  resume() applies paused-duration
+    //    (no-op since state was cleared), resumes burst detector, shifts
+    //    lane timers (harmless after resetAllocator), and unpauses the
+    //    Worker in off-main-thread mode.
+    renderer.resume();
+
+    // 5. Unpause chat source — poll loop resumes from saved token
     this.chatSource?.setPaused(false);
 
-    // 5. Re-inject recent messages through backlog controller for smooth restart
+    // 6. Re-inject recent messages through backlog controller for smooth restart
     const recentMessages = this.chatSource?.getLatestMessages(20) ?? [];
     if (recentMessages.length > 0) {
       this.ensureBacklogController(renderer);
       this.backlogController?.startBacklogInjection(recentMessages);
     }
 
-    // 6. Restart render loop
+    // 7. Ensure render loop is running (resume() above already started it
+    //    via onResume(), but resumeRenderLoop is idempotent as a safety net).
     renderer.resumeRenderLoop();
 
-    // 7. Restart foreground listeners (explicit stop before start for safety)
+    // 8. Restart foreground listeners (explicit stop before start for safety)
     this.stopForegroundListeners();
     this.startForegroundListeners();
 
-    // 8. Re-arm chat watchdog
+    // 9. Re-arm chat watchdog
     this.stopChatWatchdog();
     this.startChatWatchdog();
   }
