@@ -31,6 +31,7 @@
 
 import type { ChatMessage, FontWeight } from '@app-types';
 import { ByteLimitedCache } from '@core/byte-limited-cache';
+import { getCachedGradient } from '@core/canvas-gradient-utils';
 import {
   drawAuthorSection,
   drawRoundRect,
@@ -42,7 +43,7 @@ import {
   toSharedContentSegments,
 } from '@core/canvas-rendering-shared';
 import type { CardConfigWorker } from '@core/card-config';
-import { desaturateColor, toRgba } from '@core/color-utils';
+import { desaturateColor } from '@core/color-utils';
 import {
   computeScrollDuration,
   DEFAULT_TEXT_COLOR,
@@ -131,30 +132,6 @@ function measureTextHeight(fontSize: number): number {
 
 // ── Config-driven paid card renderer (worker variant) ────────────────────────
 
-function getPaidCardGradient(
-  ctx: OffscreenCanvasRenderingContext2D,
-  cache: Map<string, CanvasGradient>,
-  baseColor: string,
-  h: number,
-  topAlpha: number,
-  scAlpha: number,
-  bottomAlpha: number
-): CanvasGradient {
-  const key = `${baseColor}|${h}|${topAlpha}|${scAlpha}|${bottomAlpha}`;
-  const cached = cache.get(key);
-  if (cached) return cached;
-  if (cache.size >= GRADIENT_CACHE_MAX) {
-    const oldestKey = cache.keys().next().value;
-    if (oldestKey !== undefined) cache.delete(oldestKey);
-  }
-  const grad = ctx.createLinearGradient(0, 0, 0, h);
-  grad.addColorStop(0, toRgba(baseColor, topAlpha));
-  grad.addColorStop(0.48, toRgba(baseColor, scAlpha));
-  grad.addColorStop(1, toRgba(baseColor, bottomAlpha));
-  cache.set(key, grad);
-  return grad;
-}
-
 /**
  * Render a paid card (SuperChat or Membership) driven entirely by a
  * CardConfigWorker. Mirrors the main-thread renderPaidCard but uses worker-safe
@@ -214,7 +191,7 @@ function renderPaidCardWorker(
 
   // ── 2. Background ─────────────────────────────────────────────────────
   if (card.background === 'gradient' && card.backgroundGradient) {
-    const grad = getPaidCardGradient(
+    const grad = getCachedGradient(
       ctx,
       gradientCache,
       baseColor,

@@ -9,6 +9,7 @@
  */
 import type { ChatMessage, OverlaySettings } from '@app-types';
 import type { ByteLimitedCache } from '@core/byte-limited-cache';
+import { getCachedGradient } from '@core/canvas-gradient-utils';
 import {
   drawAuthorSection,
   drawRoundRect,
@@ -16,41 +17,12 @@ import {
   strokeTextOutline,
 } from '@core/canvas-rendering-shared';
 import type { CardConfig } from '@core/card-config';
-import { computeReadableTextColor, toRgba } from '@core/color-utils';
+import { computeReadableTextColor } from '@core/color-utils';
 import { DEFAULT_TEXT_COLOR, rendererLayout, spacing } from '@core/design-tokens';
-import { GRADIENT_CACHE_MAX, MS_TO_S } from '@core/renderer-constants';
+import { MS_TO_S } from '@core/renderer-constants';
 import { measureTextHeight } from '@core/text-measure';
 
 // ── SuperChat card ───────────────────────────────────────────────────────────
-
-/**
- * Get or create a cached linear gradient (top-to-bottom) with alpha stops.
- * Used by renderCardBackground for config-driven paid card rendering.
- */
-function getCachedGradient(
-  ctx: CanvasRenderingContext2D,
-  cache: Map<string, CanvasGradient>,
-  baseColor: string,
-  h: number,
-  topAlpha: number,
-  scAlpha: number,
-  bottomAlpha: number
-): CanvasGradient {
-  const key = `${baseColor}|${h}|${topAlpha}|${scAlpha}|${bottomAlpha}`;
-  const cached = cache.get(key);
-  if (cached) return cached;
-  // LRU eviction on overflow
-  if (cache.size >= GRADIENT_CACHE_MAX) {
-    const oldestKey = cache.keys().next().value;
-    if (oldestKey !== undefined) cache.delete(oldestKey);
-  }
-  const grad = ctx.createLinearGradient(0, 0, 0, h);
-  grad.addColorStop(0, toRgba(baseColor, topAlpha));
-  grad.addColorStop(0.48, toRgba(baseColor, scAlpha));
-  grad.addColorStop(1, toRgba(baseColor, bottomAlpha));
-  cache.set(key, grad);
-  return grad;
-}
 
 // ── Config-driven card sub-renderers (Phase 2) ──────────────────────────────
 
