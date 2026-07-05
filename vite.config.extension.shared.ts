@@ -36,7 +36,7 @@ export function createExtensionConfig(outDir: string): UserConfig {
 
         rollupOptions: {
           input: {
-            'background': resolve(repoRoot, 'extension/background.ts'),
+            background: resolve(repoRoot, 'extension/background.ts'),
             'workers/renderer-worker': resolve(repoRoot, 'src/core/renderer-worker.ts'),
           },
           output: {

@@ -1,5 +1,4 @@
 {
-  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
   "vcs": {
     "enabled": true,
     "clientKind": "git",
@@ -9,7 +8,7 @@
   "files": {
     "includes": [
       "src/**",
-      "vite.config.ts",
+      "vite.config*.ts",
       "!!**/extension/",
       "!!**/dist-extension/",
       "!!**/dist-extension-firefox/"
