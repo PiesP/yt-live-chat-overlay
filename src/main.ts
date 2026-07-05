@@ -15,9 +15,20 @@ import { PageWatcher } from '@core/page-watcher';
 import { RuntimeManager } from '@core/runtime-manager';
 import { Settings } from '@core/settings';
 import { SettingsUi } from '@core/settings-ui';
+import { isYouTubeLive, isYouTubeWatch } from '@core/youtube-url-pattern';
 import { getMenuAdapter } from '@platform/menu-adapters';
 
 const log = createLogger('App');
+
+/** YouTube SPA navigation signal event name — matches PageWatcher's internal constant. */
+const YT_NAVIGATE_FINISH_EVENT = 'yt-navigate-finish';
+
+/** Guard against duplicate SPA bootstrap listener installation. */
+let spaBootstrapInstalled = false;
+
+function isVideoPage(): boolean {
+  return isYouTubeWatch(location.href) || isYouTubeLive(location.href);
+}
 
 /**
  * Thin application shell.
@@ -170,6 +181,40 @@ class App {
   }
 }
 
+/**
+ * Install a lightweight SPA navigation listener on non-video pages.
+ *
+ * Avoids creating the full App (Settings, RuntimeManager, SettingsUiForm)
+ * on the YouTube main page whose hero section contains a #movie_player
+ * video element.  That player would satisfy findPlayerContainerElement()
+ * and cause SettingsUi.attach() → ensureModal() → createModalContent()
+ * → buildFontChips() to execute pointlessly, producing a TypeError.
+ *
+ * When the user SPA-navigates to a /watch or /live page this listener
+ * bootstraps the full App, which then manages all subsequent navigation
+ * via its own internal PageWatcher.
+ */
+function setupSpaBootstrap(): void {
+  if (spaBootstrapInstalled) return;
+  spaBootstrapInstalled = true;
+
+  const onNavigate = (): void => {
+    if (!isVideoPage() || window.__ytChatOverlay) return;
+
+    // Tear down the lightweight watcher before handing control to App.
+    window.removeEventListener(YT_NAVIGATE_FINISH_EVENT, onNavigate);
+    window.removeEventListener('popstate', onNavigate);
+    spaBootstrapInstalled = false;
+
+    log.info('SPA navigation reached video page — bootstrapping App');
+    void initApp();
+  };
+
+  window.addEventListener(YT_NAVIGATE_FINISH_EVENT, onNavigate);
+  window.addEventListener('popstate', onNavigate);
+  log.debug('SPA bootstrap watcher installed on non-video page');
+}
+
 function main(): void {
   if (!location.hostname.endsWith('youtube.com')) {
     return;
@@ -179,6 +224,19 @@ function main(): void {
     readyState: document.readyState,
     url: location.href,
   });
+
+  // On non-video pages (YouTube homepage, channel pages, etc.) defer
+  // full App initialization.  The page may still have video elements
+  // (hero section autoplay) that would incorrectly trigger settings
+  // UI / runtime setup via findPlayerContainerElement().
+  //
+  // The lightweight SPA bootstrap listener watches for yt-navigate-finish
+  // and popstate events, and promotes to the full App on the first
+  // navigation to a /watch or /live URL.
+  if (!isVideoPage()) {
+    setupSpaBootstrap();
+    return;
+  }
 
   if (document.readyState === 'loading') {
     log.debug('Waiting for DOMContentLoaded...');
