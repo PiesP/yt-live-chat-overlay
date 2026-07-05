@@ -1672,4 +1672,19 @@ export function resetWorkerForTests(): void {
   for (const bucket of opacityBuckets) bucket.length = 0;
 }
 
+/**
+ * Encapsulated renderer state for the OffscreenCanvas Web Worker.
+ *
+ * Groups all mutable rendering state (canvas context, config, lane heap,
+ * message queues, image caches) into instance fields, replacing the
+ * previous 18+ module-level let/const pattern.
+ *
+ * Public entry point: handleMessage — called from self.onmessage.
+ */
+export class WorkerRenderer {
+  handleMessage(_e: MessageEvent): void {
+    // Will be populated in Phase 4
+  }
+}
+
 // Signal ready
