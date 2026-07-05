@@ -414,6 +414,10 @@ export const SETTINGS_UI_STYLES = `
         color: ${uiColors.text};
         font-size: ${typography.fontSize.sm};
       }
+      .yt-chat-overlay-settings-field input[type="text"]:focus-visible {
+        outline: 2px solid ${uiColors.primary};
+        outline-offset: 1px;
+      }
       .yt-chat-overlay-settings-field input[type="color"] {
         width: ${uiSizing.colorSwatch}px;
         height: ${uiSizing.colorSwatchHeight}px;
@@ -459,6 +463,14 @@ export const SETTINGS_UI_STYLES = `
         min-inline-size: 60px;
         max-inline-size: 200px;
       }
+      .yt-chat-overlay-settings-field input[type="number"]:focus-visible {
+        outline: 2px solid ${uiColors.primary};
+        outline-offset: 1px;
+      }
+      .yt-chat-overlay-settings-field input[type="text"]:focus-visible {
+        outline: 2px solid ${uiColors.primary};
+        outline-offset: 1px;
+      }
       .yt-chat-overlay-settings-field input[type="number"]:disabled {
         opacity: 0.4;
         cursor: not-allowed;
@@ -481,6 +493,10 @@ export const SETTINGS_UI_STYLES = `
         cursor: pointer;
         accent-color: ${uiColors.primary};
       }
+      .yt-chat-overlay-settings-enabled input[type="checkbox"]:focus-visible {
+        outline: 2px solid ${uiColors.primary};
+        outline-offset: 1px;
+      }
       /* Authors grid — role="row" wrappers use display:contents so children
          become direct grid items (immune to wrapper insertion/removal) */
       .yt-chat-overlay-author-grid {
@@ -500,6 +516,15 @@ export const SETTINGS_UI_STYLES = `
       .yt-chat-overlay-author-grid-label {
         font-size: ${typography.fontSize.sm};
         unicode-bidi: isolate;
+      }
+      .yt-chat-overlay-author-grid-color {
+        width: ${uiSizing.colorSwatch}px;
+        height: ${uiSizing.colorSwatchHeight}px;
+        cursor: pointer;
+      }
+      .yt-chat-overlay-author-grid-color:focus-visible {
+        outline: 2px solid ${uiColors.primary};
+        outline-offset: 1px;
       }
       .yt-chat-overlay-author-grid [role="gridcell"]:has(> .yt-chat-overlay-author-grid-color) {
         justify-self: center;
@@ -624,12 +649,20 @@ export const SETTINGS_UI_STYLES = `
       .yt-chat-overlay-settings-confirm-cancel:hover {
         color: ${uiColors.text};
       }
+      .yt-chat-overlay-settings-confirm-cancel:focus-visible {
+        outline: 2px solid ${uiColors.primary};
+        outline-offset: 1px;
+      }
       .yt-chat-overlay-settings-confirm-ok {
         background: ${uiColors.danger};
         color: ${uiColors.text};
       }
       .yt-chat-overlay-settings-confirm-ok:hover {
         background: ${uiColors.dangerHover};
+      }
+      .yt-chat-overlay-settings-confirm-ok:focus-visible {
+        outline: 2px solid ${uiColors.primary};
+        outline-offset: 1px;
       }
       /* Toast notification */
       .yt-chat-overlay-settings-toast {
@@ -671,6 +704,7 @@ export const SETTINGS_UI_STYLES = `
         flex: 2;
         height: ${spacing.sm}px;
         accent-color: ${uiColors.primary};
+        cursor: pointer;
         margin: 0;
       }
       .yt-chat-overlay-settings-range-slider:focus-visible {
@@ -687,6 +721,10 @@ export const SETTINGS_UI_STYLES = `
         color: ${uiColors.text};
         font-size: ${typography.fontSize.sm};
         -moz-appearance: textfield;
+      }
+      .yt-chat-overlay-settings-range-number:focus-visible {
+        outline: 2px solid ${uiColors.primary};
+        outline-offset: 1px;
       }
       .yt-chat-overlay-settings-range-number::-webkit-inner-spin-button,
       .yt-chat-overlay-settings-range-number::-webkit-outer-spin-button {
