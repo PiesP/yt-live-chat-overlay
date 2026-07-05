@@ -22,6 +22,47 @@ import { DEFAULT_TEXT_COLOR, rendererLayout, spacing } from '@core/design-tokens
 import { MS_TO_S } from '@core/renderer-constants';
 import { measureTextHeight } from '@core/text-measure';
 
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Split a string into grapheme clusters using Array.from() as a fallback.
+ * Ensures grapheme-safe truncation (emoji, zalgo, CJK, etc.).
+ */
+function splitGraphemeClusters(text: string): string[] {
+  return Array.from(text);
+}
+
+/**
+ * Draw a path with only the LEFT corners rounded; RIGHT corners are sharp.
+ * Follows the same beginPath/arcTo pattern as drawRoundRect but omits
+ * right-side curves. Useful for accent bars and similar left-edge-only
+ * decorative elements.
+ */
+function drawLeftRoundedRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number
+): void {
+  ctx.beginPath();
+  // Top edge (left to right, sharp top-right corner)
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w, y);
+  // Right edge (straight down, sharp bottom-right corner)
+  ctx.lineTo(x + w, y + h);
+  // Bottom edge (right to left, up to bottom-left curve start)
+  ctx.lineTo(x + r, y + h);
+  // Bottom-left curve
+  ctx.arcTo(x, y + h, x, y + h - r, r);
+  // Left edge (up)
+  ctx.lineTo(x, y + r);
+  // Top-left curve
+  ctx.arcTo(x, y, x + r, y, r);
+  ctx.closePath();
+}
+
 // ── SuperChat card ───────────────────────────────────────────────────────────
 
 // ── Config-driven card sub-renderers (Phase 2) ──────────────────────────────
@@ -89,13 +130,10 @@ function renderCardDecoration(
   if (config.decoration === 'accentBar' && config.accentBar) {
     const barColorRaw = config.accentBar.color;
     const barRgb = typeof barColorRaw === 'function' ? barColorRaw(message) : barColorRaw;
-    ctx.save();
-    ctx.translate(x, y);
-    drawRoundRect(ctx, 0, 0, w, h, config.cardRadius);
-    ctx.clip();
+    const barWidth = config.accentBar.width;
     ctx.fillStyle = `rgb(${barRgb.r}, ${barRgb.g}, ${barRgb.b})`;
-    ctx.fillRect(0, 0, config.accentBar.width, h);
-    ctx.restore();
+    drawLeftRoundedRect(ctx, x, y, barWidth, h, config.cardRadius);
+    ctx.fill();
   } else if (config.decoration === 'pulsingBorder' && config.pulsingBorder) {
     const pb = config.pulsingBorder;
     const pulse = Math.sin((elapsed / MS_TO_S) * Math.PI) * pb.amplitude + pb.baseAlpha;
@@ -132,17 +170,18 @@ function renderCardHeaderTag(
 
   let displayText = text;
   if (ctx.measureText(displayText).width > maxWidth) {
+    const clusters = splitGraphemeClusters(displayText);
     let lo = 0,
-      hi = displayText.length;
+      hi = clusters.length;
     while (lo < hi) {
       const mid = Math.floor((lo + hi) / 2);
-      if (ctx.measureText(`${displayText.slice(0, mid)}…`).width > maxWidth) {
+      if (ctx.measureText(`${clusters.slice(0, mid).join('')}…`).width > maxWidth) {
         hi = mid;
       } else {
         lo = mid + 1;
       }
     }
-    displayText = lo > 0 ? `${displayText.slice(0, lo - 1)}…` : '…';
+    displayText = lo > 0 ? `${clusters.slice(0, lo - 1).join('')}…` : '…';
   }
 
   const tagY = y + (config.headerTag.marginTop ?? 0);
@@ -206,7 +245,6 @@ function renderCardBadge(
   );
   ctx.fillStyle = DEFAULT_TEXT_COLOR;
   ctx.fillText(text, x + badge.paddingH, y + badgeHeight / 2);
-  ctx.textBaseline = 'top';
   ctx.restore();
 
   return y + badgeHeight;
