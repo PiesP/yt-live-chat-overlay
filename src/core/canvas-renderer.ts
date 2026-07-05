@@ -45,6 +45,7 @@ import { PriorityBucketQueue } from '@core/priority-bucket-queue';
 import type { ConnectionStatus } from '@core/renderer-base';
 import { RendererBase } from '@core/renderer-base';
 import {
+  ANTI_BLOCK_MAX_DURATION_MS,
   ANTI_BLOCK_PRIORITY_THRESHOLD,
   type CanvasMessage,
   GRADIENT_CACHE_MAX,
@@ -118,8 +119,6 @@ export class CanvasRenderer extends RendererBase {
    * sustained lane saturation.
    */
   private antiBlockSince: number | null = null;
-  /** Maximum consecutive duration (ms) that anti-block can suppress drainQueue. */
-  private static readonly ANTI_BLOCK_MAX_DURATION_MS = 2000;
   /** Current connection health status for overlay feedback. */
   private connectionStatus: ConnectionStatus = 'connected';
   /** Bounding box of the last-rendered status bar pill, for click hit testing. */
@@ -759,8 +758,7 @@ export class CanvasRenderer extends RendererBase {
 
       const front = this.pendingQueue.peek();
       const forceDrain =
-        front !== undefined &&
-        currentNow - this.antiBlockSince >= CanvasRenderer.ANTI_BLOCK_MAX_DURATION_MS;
+        front !== undefined && currentNow - this.antiBlockSince >= ANTI_BLOCK_MAX_DURATION_MS;
       const highPriorityFront =
         front && CanvasRenderer.getMessagePriority(front) >= ANTI_BLOCK_PRIORITY_THRESHOLD;
 

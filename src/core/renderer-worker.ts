@@ -64,6 +64,7 @@ import {
 import { LruMap } from '@core/lru-map';
 import {
   ANTI_BLOCK_FREE_RATIO,
+  ANTI_BLOCK_MAX_DURATION_MS,
   ANTI_BLOCK_PRIORITY_THRESHOLD,
   EPSILON,
   FAR_LAYER_DESATURATION_FACTOR,
@@ -315,8 +316,6 @@ let animFrameId: number | null = null;
 let isDestroyed = false;
 let isPaused = false;
 let pauseStartTime = 0;
-/** Anti-block force drain timeout (ms). Mirrors renderer-base.ts:ANTI_BLOCK_MAX_DURATION_MS. */
-const ANTI_BLOCK_MAX_DURATION_MS = 2000;
 let antiBlockStartTime = 0;
 
 // Pre-computed invariants (updated on config change to avoid per-frame division)

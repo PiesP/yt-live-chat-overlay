@@ -48,6 +48,11 @@ export const EPSILON = 0.05;
  *  probabilistic blocking of new message placements. */
 export const ANTI_BLOCK_FREE_RATIO = 0.05;
 
+/** Maximum consecutive duration (ms) that anti-block can suppress drainQueue
+ *  before the renderer forces a drain regardless of lane saturation.
+ *  Shared by CanvasRenderer (main thread) and renderer-worker (OffscreenCanvas). */
+export const ANTI_BLOCK_MAX_DURATION_MS = 2000;
+
 /** Number of opacity buckets for render-phase opacity grouping.
  *  Messages with opacity 0.0–1.0 are distributed across 21 buckets
  *  (Math.round(opacity * 20)) for grouped draw-order submission. */
