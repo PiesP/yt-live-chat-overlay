@@ -1814,4 +1814,50 @@ function handleDestroy(): void {
   superChatGradientCache.clear();
 }
 
+/**
+ * Reset all mutable worker state for test isolation.
+ *
+ * Performs a complete teardown + re-initialization, leaving the worker
+ * in a clean state ready for a new init. Call this between test runs
+ * when reusing the same Worker instance to avoid state leakage.
+ *
+ * The 18+ module-level let/const variables in this file are intentional
+ * for the single-worker architecture; this function is the sanctioned
+ * entry point for external state reset. Future refactoring toward a
+ * WorkerRenderer class would move these variables into instance fields.
+ */
+export function resetWorkerForTests(): void {
+  isDestroyed = false;
+  isPaused = false;
+  pauseStartTime = 0;
+  antiBlockStartTime = 0;
+  if (animFrameId !== null) {
+    cancelAnimationFrame(animFrameId);
+    animFrameId = null;
+  }
+  ctx = null;
+  canvas = null;
+  config = null;
+  activeMessages.length = 0;
+  pendingQueue.length = 0;
+  pendingQueueSortNeeded = false;
+  pendingQueueOffset = 0;
+  laneHeap.length = 0;
+  laneIndexToHeapIndex.clear();
+  laneHeight = 0;
+  numLanes = 0;
+  speedTierLanes.clear();
+  collidedLanes.clear();
+  totalDrops = 0;
+  if (textBitmapCache) textBitmapCache.clear();
+  if (emojiCache) emojiCache.clear();
+  if (authorPhotoCache) authorPhotoCache.clear();
+  if (stickerCache) stickerCache.clear();
+  superChatGradientCache.clear();
+  fetching.clear();
+  textMeasureCache.clear();
+  fontMetricsCache.clear();
+  for (const bucket of opacityBuckets) bucket.length = 0;
+}
+
 // Signal ready
