@@ -81,18 +81,10 @@ const typography = {
 } as const;
 
 const shadows = {
-  text: {
-    sm: '1px 1px 2px rgba(0, 0, 0, 0.8)',
-    md: '2px 2px 4px rgba(0, 0, 0, 0.8)',
-    lg: '2px 2px 6px rgba(0, 0, 0, 0.9), -1px -1px 4px rgba(0, 0, 0, 0.7)',
-  },
   box: {
     sm: '0 2px 8px rgba(0, 0, 0, 0.6)',
     md: '0 4px 16px rgba(0, 0, 0, 0.8)',
     lg: '0 8px 24px rgba(0, 0, 0, 0.9)',
-  },
-  filter: {
-    md: 'drop-shadow(2px 2px 4px rgba(0, 0, 0, 0.8))',
   },
 } as const;
 
@@ -100,6 +92,7 @@ const borderRadius = {
   sm: '6px',
   md: '8px',
   lg: '12px',
+  pill: '14px',
   full: '50%',
 } as const;
 
@@ -765,14 +758,14 @@ export const SETTINGS_UI_STYLES = `
         margin-bottom: ${spacing.sm}px;
       }
       .yt-chat-overlay-settings-font-chip {
-        padding: 3px 10px;
-        border-radius: 14px;
+        padding: 3px ${spacing.lg}px;
+        border-radius: ${borderRadius.pill};
         border: 1px solid ${uiColors.border};
         background: ${uiColors.backgroundLight};
         color: ${uiColors.textMuted};
         font-size: ${typography.fontSize.xs};
         cursor: pointer;
-        transition: all 0.15s;
+        transition: all ${animDuration.normal};
         white-space: nowrap;
         text-wrap: nowrap;
         user-select: none;
