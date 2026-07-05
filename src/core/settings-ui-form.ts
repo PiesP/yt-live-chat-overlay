@@ -612,6 +612,7 @@ export class SettingsUiForm {
         slider.type = 'range';
         slider.id = sliderId;
         slider.name = `${this.resolveKey(def)}-slider`;
+        slider.autocomplete = 'off';
         slider.min = String(limits.min * scale);
         slider.max = String(limits.max * scale);
         slider.step = String(limits.step * scale);
@@ -662,6 +663,7 @@ export class SettingsUiForm {
         const select = document.createElement('select');
         select.name = this.resolveKey(def);
         select.id = selectId;
+        select.autocomplete = 'off';
         if (def.title) select.title = t(def.title);
         for (const [value, label] of def.options) {
           const opt = document.createElement('option');
@@ -799,6 +801,7 @@ export class SettingsUiForm {
     const customInput = document.createElement('input');
     customInput.type = 'text';
     customInput.id = customInputId;
+    customInput.autocomplete = 'off';
     customInput.className = 'yt-chat-overlay-settings-font-custom-input';
     customInput.placeholder = t('Custom font stack…');
     customInput.addEventListener('input', () => {
@@ -818,6 +821,7 @@ export class SettingsUiForm {
     const hiddenInput = document.createElement('input');
     hiddenInput.type = 'hidden';
     hiddenInput.name = resolvedKey;
+    hiddenInput.autocomplete = 'off';
     hiddenInput.className = 'yt-chat-overlay-settings-font-value';
     customRow.appendChild(hiddenInput);
 

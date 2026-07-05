@@ -575,6 +575,7 @@ export class SettingsUi {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = '.json';
+    input.autocomplete = 'off';
     input.addEventListener('change', () => {
       const file = input.files?.[0];
       if (!file) return;
