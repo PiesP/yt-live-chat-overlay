@@ -49,14 +49,16 @@ const OUTLINE_COLOR_CACHE_MAX = 64;
 const outlineColorCache = new Map<string, string>();
 
 /**
- * Compute an outline color that contrasts with the given text color.
+ * Compute an outline color derived from text color with opacity.
  *
  * Uses WCAG 2.0 relative luminance: light text (L > 0.5) gets a dark
  * outline, dark text gets a light outline. This ensures the outline is
  * always visible regardless of the text color or background.
  *
- * Results are cached by (textColor, opacity) key to avoid redundant
- * regex parsing and luminance computation in the hot rendering path.
+ * Uses a module-level LRU cache (max {@link OUTLINE_COLOR_CACHE_MAX} entries)
+ * keyed on `textColor|opacity` to avoid redundant color parsing in the hot
+ * render path. This is a transparent performance optimization — the function
+ * is semantically pure for identical inputs.
  *
  * @param textColor - CSS color string (hex or rgb/rgba)
  * @param opacity   - Outline opacity (0-1)

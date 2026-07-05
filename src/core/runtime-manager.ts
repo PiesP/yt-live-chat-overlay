@@ -22,7 +22,7 @@ import type { InterceptorUnsubscribe } from '@core/fetch-interceptor';
 import { installFetchInterceptor } from '@core/fetch-interceptor';
 import { createLogger } from '@core/logging';
 import { MessageBus } from '@core/message-bus';
-import { MessageIdRegistry } from '@core/message-id-registry';
+import { createMessageIdRegistry } from '@core/message-id-registry';
 import { OVERLAY_SELECTOR, Overlay } from '@core/overlay';
 import type { ConnectionStatus, RendererBase } from '@core/renderer-base';
 import { shouldResetRendererForSettingsChange } from '@core/settings-schema';
@@ -185,7 +185,7 @@ export class RuntimeManager {
   private state: RuntimeState = 'init';
   private hiddenSince: number | null = null;
   /** Session-scoped registry of message IDs already rendered once. Persists across renderer resets. */
-  private readonly sessionDedup = new MessageIdRegistry(5000);
+  private readonly sessionDedup = createMessageIdRegistry(5000);
   /** Unsubscribe handle for the fetch interceptor. */
   private fetchInterceptorUnsubscribe: InterceptorUnsubscribe | null = null;
   /** Unsubscribe handle for the DOM chat watcher (fallback). */

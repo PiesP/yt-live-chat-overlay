@@ -53,6 +53,9 @@ export const ANTI_BLOCK_FREE_RATIO = 0.05;
  *  Shared by CanvasRenderer (main thread) and renderer-worker (OffscreenCanvas). */
 export const ANTI_BLOCK_MAX_DURATION_MS = 2000;
 
+/** Default emoji fetch timeout (ms) — fallback used when config is unavailable. */
+export const EMOJI_FETCH_TIMEOUT_DEFAULT_MS = 30_000;
+
 /** Number of opacity buckets for render-phase opacity grouping.
  *  Messages with opacity 0.0–1.0 are distributed across 21 buckets
  *  (Math.round(opacity * 20)) for grouped draw-order submission. */

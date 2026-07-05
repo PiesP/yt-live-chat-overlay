@@ -67,3 +67,8 @@ export function getWorkerFactory(): WorkerFactory {
   cachedFactory = new ViteWorkerFactory();
   return cachedFactory;
 }
+
+/** Reset cached factory singleton for test isolation. */
+export function resetWorkerFactory(): void {
+  cachedFactory = null;
+}

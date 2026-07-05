@@ -135,11 +135,11 @@ export class PerAuthorRateLimiter {
       this.authorTimestamps.clear();
     } else if (config.preset === 'normal') {
       this.enabled = true;
-      this.windowMs = 5000;
-      this.maxPerWindow = 5;
+      this.windowMs = DEFAULT_WINDOW_MS;
+      this.maxPerWindow = DEFAULT_MAX_PER_WINDOW;
     } else if (config.preset === 'strict') {
       this.enabled = true;
-      this.windowMs = 5000;
+      this.windowMs = DEFAULT_WINDOW_MS;
       this.maxPerWindow = 2;
     }
   }

@@ -10,38 +10,42 @@
  * At 5000 entries with string keys (~100 bytes each), memory is ~500KB,
  * well within browser limits for a session-scoped registry.
  */
-export class MessageIdRegistry {
-  private readonly ids = new Map<string, true>();
-  private readonly maxSize: number;
 
-  constructor(maxSize: number) {
-    this.maxSize = maxSize;
-  }
-
+export interface MessageIdRegistry {
   /** Check if a message ID has already been registered. */
-  has(id: string): boolean {
-    return this.ids.has(id);
-  }
-
+  has(id: string): boolean;
   /** Register a message ID, evicting oldest if at capacity. */
-  mark(id: string): void {
-    // Re-insert to move to end of insertion order (LRU touch) so that
-    // duplicate marks don't create stale "oldest" entries.
-    this.ids.delete(id);
-    this.ids.set(id, true);
-
-    // FIFO evict the single oldest entry when over capacity.
-    // Amortized O(1) per mark() — no bulk deletion spikes.
-    while (this.ids.size > this.maxSize) {
-      const oldest = this.ids.keys().next().value;
-      if (oldest !== undefined) {
-        this.ids.delete(oldest);
-      }
-    }
-  }
-
+  mark(id: string): void;
   /** Clear all registered message IDs. */
-  clear(): void {
-    this.ids.clear();
-  }
+  clear(): void;
+}
+
+export function createMessageIdRegistry(maxSize: number): MessageIdRegistry {
+  const ids = new Map<string, true>();
+
+  return {
+    has(id: string): boolean {
+      return ids.has(id);
+    },
+
+    mark(id: string): void {
+      // Re-insert to move to end of insertion order (LRU touch) so that
+      // duplicate marks don't create stale "oldest" entries.
+      ids.delete(id);
+      ids.set(id, true);
+
+      // FIFO evict the single oldest entry when over capacity.
+      // Amortized O(1) per mark() — no bulk deletion spikes.
+      while (ids.size > maxSize) {
+        const oldest = ids.keys().next().value;
+        if (oldest !== undefined) {
+          ids.delete(oldest);
+        }
+      }
+    },
+
+    clear(): void {
+      ids.clear();
+    },
+  };
 }

@@ -66,6 +66,7 @@ import {
   ANTI_BLOCK_FREE_RATIO,
   ANTI_BLOCK_MAX_DURATION_MS,
   ANTI_BLOCK_PRIORITY_THRESHOLD,
+  EMOJI_FETCH_TIMEOUT_DEFAULT_MS,
   EPSILON,
   FAR_LAYER_DESATURATION_FACTOR,
   GRADIENT_CACHE_MAX,
@@ -457,7 +458,10 @@ async function prefetchImages(urls: string[], cache: ByteLimitedCache<ImageBitma
           let timer: ReturnType<typeof setTimeout> | undefined;
           try {
             const controller = new AbortController();
-            timer = setTimeout(() => controller.abort(), config?.emojiFetchTimeoutMs ?? 30_000);
+            timer = setTimeout(
+              () => controller.abort(),
+              config?.emojiFetchTimeoutMs ?? EMOJI_FETCH_TIMEOUT_DEFAULT_MS
+            );
             const response = await fetch(url, { signal: controller.signal });
             if (!response.ok) continue;
             const blob = await response.blob();

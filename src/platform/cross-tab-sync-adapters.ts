@@ -152,3 +152,9 @@ export function getCrossTabSyncAdapter(storageKey: string): CrossTabSyncAdapter 
   cachedKey = storageKey;
   return cachedAdapter;
 }
+
+/** Reset cached adapter singleton and key for test isolation. */
+export function resetCrossTabSyncAdapter(): void {
+  cachedAdapter = null;
+  cachedKey = null;
+}

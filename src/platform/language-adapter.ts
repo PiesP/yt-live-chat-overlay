@@ -60,3 +60,8 @@ export function getLanguageAdapter(): LanguageAdapter {
   cachedAdapter = new DefaultLanguageAdapter();
   return cachedAdapter;
 }
+
+/** Reset cached adapter singleton for test isolation. */
+export function resetLanguageAdapter(): void {
+  cachedAdapter = null;
+}

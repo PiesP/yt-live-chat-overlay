@@ -12,7 +12,7 @@ import type { ChatMessage, OverlaySettings, Pauseable } from '@app-types';
 import { logBootstrapFailure, refreshBootstrap, resolveBootstrap } from '@core/bootstrap-resolver';
 import { findElementMatch, isAbortError, sleep, VIDEO_SELECTORS } from '@core/dom';
 import { createLogger } from '@core/logging';
-import { MessageIdRegistry } from '@core/message-id-registry';
+import { createMessageIdRegistry } from '@core/message-id-registry';
 import type { ChatBootstrapData, LiveChatPayload } from '@core/youtubei-chat';
 import { getLiveChatPayload } from '@core/youtubei-chat';
 import type { InnertubeContinuationData } from '@core/youtubei-continuation';
@@ -131,7 +131,7 @@ export abstract class ChatSource implements Pauseable {
    * and poll-loop messages — both capture the same YouTube API responses).
    * Capped at SEEN_IDS_MAX to prevent unbounded growth during long sessions.
    */
-  private readonly seenMessageIds = new MessageIdRegistry(ChatSource.SEEN_IDS_MAX);
+  private readonly seenMessageIds = createMessageIdRegistry(ChatSource.SEEN_IDS_MAX);
 
   private static readonly PAUSE_POLL_INTERVAL_MS = 250;
 

@@ -164,3 +164,8 @@ export function getStorageAdapter(): StorageAdapter {
   cachedAdapter = new LocalStorageAdapter();
   return cachedAdapter;
 }
+
+/** Reset cached adapter singleton for test isolation. */
+export function resetStorageAdapter(): void {
+  cachedAdapter = null;
+}
