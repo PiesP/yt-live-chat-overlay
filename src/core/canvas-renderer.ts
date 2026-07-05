@@ -126,6 +126,10 @@ export class CanvasRenderer extends RendererBase {
    * sustained lane saturation.
    */
   private antiBlockSince: number | null = null;
+  /** Offscreen recovery poll interval ID. */
+  private offscreenPollInterval: ReturnType<typeof setInterval> | null = null;
+  /** IntersectionObserver for detecting canvas offscreen state. */
+  private offscreenObserver: IntersectionObserver | null = null;
   /** Current connection health status for overlay feedback. */
   private connectionStatus: ConnectionStatus = 'connected';
   /** Bounding box of the last-rendered status bar pill, for click hit testing. */
@@ -296,6 +300,11 @@ export class CanvasRenderer extends RendererBase {
       log.warn('Canvas 2D context lost — renderer paused until restoration');
     });
     canvas.addEventListener('contextrestored', () => this.handleContextRestored());
+
+    // M7: IntersectionObserver for offscreen detection. When the canvas is
+    // hidden behind a modal/backdrop, pause the renderer. A recovery poll
+    // guards against missed intersection entries on modal dismiss.
+    this.setupOffscreenObserver(canvas);
 
     // Visually-hidden live region for connection status announcements
     const statusRegion = document.createElement('div');
@@ -643,6 +652,79 @@ export class CanvasRenderer extends RendererBase {
     this.animFrameId = clearSafeAnimationFrame(this.animFrameId);
   }
 
+  // ── Offscreen recovery (M7) ──────────────────────────────────────────
+
+  /**
+   * Set up an IntersectionObserver on the canvas to detect when it is
+   * hidden (e.g. behind a settings modal/backdrop). On offscreen transition
+   * the renderer is paused; a recovery poll guards against missed
+   * intersection-entries when the modal is dismissed.
+   */
+  private setupOffscreenObserver(canvas: HTMLCanvasElement): void {
+    this.offscreenObserver?.disconnect();
+    this.offscreenObserver = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (!entry) return;
+        if (!entry.isIntersecting) {
+          // Canvas is offscreen — pause and start recovery poll
+          if (!this.isPaused) {
+            this.pause();
+          }
+          this.startOffscreenPoll(canvas);
+        } else {
+          // Canvas is back on screen — stop poll, resume if paused
+          this.stopOffscreenPoll();
+          if (this.isPaused) {
+            this.resume();
+          }
+        }
+      },
+      { threshold: 0 }
+    );
+    this.offscreenObserver.observe(canvas);
+  }
+
+  /**
+   * Periodic poll (~1000ms) that checks whether the canvas has become
+   * visible again. Guards against the IntersectionObserver failing to
+   * fire a re-entry event when a modal/backdrop covering the canvas is
+   * dismissed.
+   */
+  private startOffscreenPoll(canvas: HTMLCanvasElement): void {
+    if (this.offscreenPollInterval !== null) return;
+    this.offscreenPollInterval = setInterval(() => {
+      // Check multiple visibility signals to handle edge cases
+      const rect = canvas.getBoundingClientRect();
+      const viewportW = window.innerWidth;
+      const viewportH = window.innerHeight;
+      const isRectVisible =
+        rect.width > 0 &&
+        rect.height > 0 &&
+        rect.left < viewportW &&
+        rect.top < viewportH &&
+        rect.right > 0 &&
+        rect.bottom > 0;
+      const docVisible = document.visibilityState === 'visible';
+
+      // Canvas is considered visible when the rect intersects the viewport
+      // AND the document is visible (tab not hidden).
+      if (isRectVisible && docVisible) {
+        this.stopOffscreenPoll();
+        if (this.isPaused) {
+          this.resume();
+        }
+      }
+    }, 1000);
+  }
+
+  private stopOffscreenPoll(): void {
+    if (this.offscreenPollInterval !== null) {
+      clearInterval(this.offscreenPollInterval);
+      this.offscreenPollInterval = null;
+    }
+  }
+
   private renderFrame(): void {
     const ctx = this.ctx;
     const canvas = this.canvas;
@@ -748,14 +830,9 @@ export class CanvasRenderer extends RendererBase {
    * is force-called to prevent indefinite message suppression.
    */
   private drainStage(now: number, _dims: OverlayDimensions): void {
-    // Anti-block throttle
-    // resetBatch() is called unconditionally every frame to keep the lane
-    // allocator's collision set and speed-tier entries current.
-    this.laneAllocator.resetBatch();
-
-    // Replay (VOD): always drain — anti-block's probabilistic drops would
-    // create gaps in the historical chat timeline where messages have exact
-    // videoOffsetMs timing.
+    // Anti-block throttle: check BEFORE resetBatch() to avoid paying the
+    // lane-allocator batch-advance cost when anti-block suppresses all
+    // new placements on this frame.
     if (!this.isReplayMode && this.isAntiBlockActive()) {
       const currentNow = performance.now();
       if (this.antiBlockSince === null) {
@@ -772,10 +849,14 @@ export class CanvasRenderer extends RendererBase {
         if (forceDrain) {
           this.antiBlockSince = currentNow;
         }
+        // Only call resetBatch() + drainQueue() when the anti-block gate
+        // actually passes — saves lane-allocator overhead on suppressed frames.
+        this.laneAllocator.resetBatch();
         this.drainQueue(now);
       }
     } else {
       this.antiBlockSince = null;
+      this.laneAllocator.resetBatch();
       this.drainQueue(now);
     }
   }
@@ -1638,6 +1719,7 @@ export class CanvasRenderer extends RendererBase {
   override updateSettings(settings: OverlaySettings, options?: { resetState?: boolean }): void {
     const wasTranslationEnabled = this.settings.translationEnabled;
     const prevSource = this.settings.translationSource;
+    const prevDanmakuMode = this.settings.danmakuMode;
     super.updateSettings(settings, options);
 
     // When settings change, cached dimensions become stale
@@ -1688,6 +1770,67 @@ export class CanvasRenderer extends RendererBase {
       depthLayersEnabled: settings.depthLayersEnabled,
     });
     this.buildOpacityConfig();
+
+    // M6: When danmakuMode changes, active messages retain startX computed
+    // for the old mode — recompute startX, duration, and current x for all
+    // active messages so they render correctly in the new mode.
+    if (prevDanmakuMode !== settings.danmakuMode) {
+      const dims = this.overlay.getDimensions();
+      if (dims && this.activeMessages.length > 0) {
+        const newIsScrolling =
+          settings.danmakuMode === 'scroll' || settings.danmakuMode === 'reverse';
+        const now = performance.now();
+        for (const msg of this.activeMessages) {
+          // Preserve current progress so messages don't jump mid-flight
+          const elapsed = now - msg.startTime - msg.pausedDuration;
+          const oldProgress =
+            msg.duration > 0 ? Math.min(1, Math.max(0, elapsed / msg.duration)) : 0;
+
+          // Recompute startX for the new mode
+          if (newIsScrolling) {
+            msg.startX = settings.danmakuMode === 'scroll' ? dims.width : -(msg.width + 0); // no stagger for in-flight messages
+          } else {
+            msg.startX = Math.max(0, Math.floor((dims.width - msg.width) / 2));
+          }
+
+          // Recompute duration based on new mode
+          if (newIsScrolling) {
+            const totalDistance =
+              settings.danmakuMode === 'scroll'
+                ? msg.startX + msg.width + settings.exitPaddingPx
+                : dims.width + msg.width + settings.exitPaddingPx;
+            const speed = this.getEffectiveSpeedPxPerSec();
+            msg.duration =
+              speed > 0
+                ? computeScrollDuration(
+                    totalDistance,
+                    speed,
+                    settings.scrollDurationMinMs,
+                    settings.scrollDurationMaxMs,
+                    settings.exitPaddingPx
+                  )
+                : settings.scrollDurationMinMs;
+          } else {
+            msg.duration = settings.topBottomDurationMs;
+          }
+          msg.invDuration = msg.duration > 0 ? 1 / msg.duration : 0;
+
+          // Reposition x based on new startX and preserved progress
+          if (newIsScrolling) {
+            if (settings.danmakuMode === 'scroll') {
+              const travelDistance = msg.startX + msg.width + settings.exitPaddingPx;
+              msg.x = msg.startX - oldProgress * travelDistance;
+            } else {
+              const reverseTravel = dims.width - msg.startX + settings.exitPaddingPx;
+              msg.x = msg.startX + oldProgress * reverseTravel;
+            }
+          } else {
+            // top/bottom: static centered
+            msg.x = msg.startX;
+          }
+        }
+      }
+    }
   }
 
   override setChatPanelOpen(open: boolean): void {
@@ -1790,6 +1933,10 @@ export class CanvasRenderer extends RendererBase {
     this.languageDetector = null;
     this.channelMemory?.clear();
     this.channelMemory = null;
+    // M7: Clean up offscreen observer and recovery poll
+    this.stopOffscreenPoll();
+    this.offscreenObserver?.disconnect();
+    this.offscreenObserver = null;
     clearTextMeasurementCaches();
   }
 
