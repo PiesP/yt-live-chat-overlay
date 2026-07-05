@@ -23,6 +23,15 @@ import { createLogger } from '@core/logging';
 
 const log = createLogger('Observability');
 
+/** Debug overlay inline style tokens. */
+const DEBUG_OVERLAY_STYLES = {
+  color: '#0f0',
+  font: '12px/1.4 monospace',
+  padding: '8px 12px',
+  borderRadius: '4px',
+  minWidth: '220px',
+} as const;
+
 export class ObservabilityReporter {
   private metrics: SessionMetrics;
   private totalDroppedInWindow = 0;
@@ -236,8 +245,9 @@ export class ObservabilityReporter {
     el.id = 'yt-chat-overlay-debug';
     el.style.cssText =
       `position:fixed;top:${DEBUG_OVERLAY_TOP};right:${DEBUG_OVERLAY_RIGHT};z-index:${INDICATOR_Z_INDEX};` +
-      `background:${DEBUG_OVERLAY_BG};color:#0f0;font:12px/1.4 monospace;` +
-      'padding:8px 12px;border-radius:4px;min-width:220px;pointer-events:none;user-select:none';
+      `background:${DEBUG_OVERLAY_BG};color:${DEBUG_OVERLAY_STYLES.color};font:${DEBUG_OVERLAY_STYLES.font};` +
+      `padding:${DEBUG_OVERLAY_STYLES.padding};border-radius:${DEBUG_OVERLAY_STYLES.borderRadius};` +
+      `min-width:${DEBUG_OVERLAY_STYLES.minWidth};pointer-events:none;user-select:none`;
     // Pre-create child divs matching the number of debug lines
     for (let i = 0; i < ObservabilityReporter.DEBUG_OVERLAY_LINE_COUNT; i++) {
       el.appendChild(document.createElement('div'));

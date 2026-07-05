@@ -15,6 +15,7 @@ import {
   ensurePlayerPositioning,
   findPlayerContainerElement,
   PLAYER_LOOKUP_INTERVAL_MS,
+  SCREEN_READER_CSS,
 } from '@core/dom';
 import { getActiveLanguage, t } from '@core/i18n';
 import { createLogger } from '@core/logging';
@@ -262,8 +263,7 @@ export class Overlay {
     this.liveRegion.setAttribute('aria-live', 'polite');
     this.liveRegion.setAttribute('aria-label', t('Chat messages'));
     this.liveRegion.className = 'yt-live-chat-overlay-live-region';
-    this.liveRegion.style.cssText =
-      'position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0';
+    this.liveRegion.style.cssText = SCREEN_READER_CSS;
     this.container.appendChild(this.liveRegion);
 
     log.info('Overlay created');

@@ -15,6 +15,10 @@ interface ElementMatchOptions<T extends Element> {
   predicate?: (element: T) => boolean;
 }
 
+/** Visually-hidden but screen-reader accessible — WCAG compliant. */
+export const SCREEN_READER_CSS =
+  'position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0';
+
 const DEFAULT_WAIT_ATTEMPTS = 5;
 const DEFAULT_WAIT_INTERVAL_MS = 500;
 

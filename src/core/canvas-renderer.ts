@@ -32,7 +32,7 @@ import { MEMBERSHIP_CARD_CONFIG, SUPERCHAT_CARD_CONFIG } from '@core/card-config
 import { ChannelLanguageMemory } from '@core/channel-language-memory';
 import { getTranslatableText } from '@core/chat-message-helpers';
 import { computeScrollDuration, statusBarLayout } from '@core/design-tokens';
-import { clearSafeAnimationFrame, forEachSlot } from '@core/dom';
+import { clearSafeAnimationFrame, forEachSlot, SCREEN_READER_CSS } from '@core/dom';
 import { ImageFetchManager } from '@core/image-fetch-manager';
 import { computeBaseHeadwayPx } from '@core/lane-allocation-shared';
 import type { LanePlacement } from '@core/lane-allocator';
@@ -81,6 +81,13 @@ import {
 import { TranslationService } from '@core/translation-service';
 
 const log = createLogger('RendererCanvas');
+
+/** Shared CSS string applied to all canvas elements — ensures consistent sizing and event delegation. */
+const CANVAS_CSS =
+  'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;text-rendering:optimizeSpeed';
+
+/** Alpha for the connected status dot — subtle when connected. */
+const DISCONNECTED_DOT_ALPHA = 0.15;
 
 export class CanvasRenderer extends RendererBase {
   private canvas: HTMLCanvasElement | null = null;
@@ -263,8 +270,7 @@ export class CanvasRenderer extends RendererBase {
 
     const container = overlay.getContainer();
     const canvas = document.createElement('canvas');
-    canvas.style.cssText =
-      'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;text-rendering:optimizeSpeed';
+    canvas.style.cssText = CANVAS_CSS;
     canvas.setAttribute('aria-hidden', 'true');
     if (container) container.appendChild(canvas);
     this.canvas = canvas;
@@ -295,8 +301,7 @@ export class CanvasRenderer extends RendererBase {
     const statusRegion = document.createElement('div');
     statusRegion.setAttribute('aria-live', 'polite');
     statusRegion.setAttribute('role', 'status');
-    statusRegion.style.cssText =
-      'position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0';
+    statusRegion.style.cssText = SCREEN_READER_CSS;
     if (container) container.appendChild(statusRegion);
     this.statusRegion = statusRegion;
 
@@ -1813,8 +1818,7 @@ export class CanvasRenderer extends RendererBase {
       newCanvas.width = dims.width * dpr;
       newCanvas.height = dims.height * dpr;
     }
-    newCanvas.style.cssText =
-      'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;text-rendering:optimizeSpeed';
+    newCanvas.style.cssText = CANVAS_CSS;
     newCanvas.setAttribute('aria-hidden', 'true');
     container.appendChild(newCanvas);
 
@@ -1982,7 +1986,7 @@ export class CanvasRenderer extends RendererBase {
 
     ctx.save();
     ctx.fillStyle = colors.dot;
-    ctx.globalAlpha = 0.15; // subtle when connected
+    ctx.globalAlpha = DISCONNECTED_DOT_ALPHA; // subtle when connected
     ctx.beginPath();
     ctx.arc(x, y, dotRadius, 0, Math.PI * 2);
     ctx.fill();

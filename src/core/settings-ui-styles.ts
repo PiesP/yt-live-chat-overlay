@@ -60,6 +60,11 @@ const uiColors = {
   success: '#4ade80',
 } as const;
 
+const uiColorsAlpha = {
+  primaryBg: 'rgba(30, 136, 229, 0.25)',
+  primaryBgLight: 'rgba(30, 136, 229, 0.20)',
+} as const;
+
 // export { uiColors }; // removed — was only used internally
 
 const typography = {
@@ -116,6 +121,12 @@ const uiSizing = {
   borderAlpha: 0.25,
   scrimAlpha: 0.55,
   hoverScrimAlpha: 0.75,
+} as const;
+
+const tooltip = {
+  bg: 'rgba(0, 0, 0, 0.9)',
+  border: 'rgba(255, 255, 255, 0.15)',
+  text: '#ffffff',
 } as const;
 
 // ── Animation durations (settings panel) ──
@@ -332,7 +343,7 @@ export const SETTINGS_UI_STYLES = `
         overflow-y: auto;
         flex: 1;
         min-height: 0;
-        padding-inline-end: 2px;
+        padding-inline-end: ${spacing.xxs}px;
         scrollbar-width: thin;
         scrollbar-color: ${scrollbar.thumb} ${scrollbar.track};
         content-visibility: auto;
@@ -497,8 +508,8 @@ export const SETTINGS_UI_STYLES = `
         justify-self: center;
       }
       .yt-chat-overlay-author-grid-color-superchat {
-        width: 44px;
-        height: 26px;
+        width: ${uiSizing.colorSwatch}px;
+        height: ${uiSizing.colorSwatchHeight}px;
       }
       /* Actions bar */
       .yt-chat-overlay-settings-actions {
@@ -648,7 +659,7 @@ export const SETTINGS_UI_STYLES = `
       }
       .yt-chat-overlay-settings-range-slider {
         flex: 2;
-        height: 8px;
+        height: ${spacing.sm}px;
         accent-color: ${uiColors.primary};
         margin: 0;
       }
@@ -677,7 +688,7 @@ export const SETTINGS_UI_STYLES = `
         display: block;
         font-size: ${typography.fontSize.xs};
         color: ${uiColors.danger};
-        margin-top: 2px;
+        margin-top: ${spacing.xxs}px;
         animation: yt-overlay-error-fade 3s ease-out forwards;
       }
       @keyframes yt-overlay-error-fade {
@@ -689,7 +700,7 @@ export const SETTINGS_UI_STYLES = `
         display: block;
         font-size: ${typography.fontSize.xs};
         color: ${uiColors.textMuted};
-        margin-top: 2px;
+        margin-top: ${spacing.xxs}px;
       }
 
       /* ── Font preview ── */
@@ -735,7 +746,7 @@ export const SETTINGS_UI_STYLES = `
         border-right: none;
       }
       .yt-chat-overlay-settings-weight-toggle-btn.active {
-        background: rgba(30, 136, 229, 0.25);
+        background: ${uiColorsAlpha.primaryBg};
         color: ${uiColors.text};
         font-weight: ${typography.fontWeight.semibold};
       }
@@ -775,7 +786,7 @@ export const SETTINGS_UI_STYLES = `
         color: ${uiColors.text};
       }
       .yt-chat-overlay-settings-font-chip.active {
-        background: rgba(30, 136, 229, 0.2);
+        background: ${uiColorsAlpha.primaryBgLight};
         border-color: ${uiColors.primary};
         color: ${uiColors.text};
         font-weight: ${typography.fontWeight.semibold};
@@ -870,6 +881,11 @@ export const SETTINGS_UI_STYLES = `
           color: HighlightText;
         }
       }
+      // Black overlay opacity scale — documented rationale:
+      // - 0.90: Tooltip bg (highest contrast, over white/dark content)
+      // - 0.85: Toast bg (floating notification, slightly less opaque)
+      // - 0.80: Debug overlay (dev-only, unobtrusive)
+      // - 0.75: Backlog indicator (small pill, less intrusive)
       /* Native Popover API tooltips */
       .yt-chat-overlay-tooltip {
         font-family: ${DEFAULT_FONT_FAMILY};
@@ -877,9 +893,9 @@ export const SETTINGS_UI_STYLES = `
         line-height: 1.4;
         padding: ${spacing.xs}px ${spacing.sm}px;
         border-radius: ${borderRadius.sm};
-        background: rgba(0, 0, 0, 0.9);
-        color: #fff;
-        border: 1px solid rgba(255, 255, 255, 0.15);
+        background: ${tooltip.bg};
+        color: ${tooltip.text};
+        border: 1px solid ${tooltip.border};
         max-width: 240px;
         pointer-events: none;
         white-space: nowrap;
