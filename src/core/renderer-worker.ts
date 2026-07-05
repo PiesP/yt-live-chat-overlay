@@ -46,18 +46,18 @@ import type { CardConfigWorker } from '@core/card-config';
 import { desaturateColor } from '@core/color-utils';
 import {
   computeScrollDuration,
+  DEFAULT_FONT_FAMILY,
   DEFAULT_TEXT_COLOR,
   rendererLayout,
   spacing,
 } from '@core/design-tokens';
 import {
-  areSpeedTiersCompatible,
   buildLaneHeap,
   commitPlacementShared,
   computeBaseHeadwayPx,
   computeLaneY,
   computeOccupancyMs as computeOccupancyMsShared,
-  heapGetSlotAvailableAt,
+  findPlacementShared,
   type LaneAllocationState,
   resetBatchShared,
   shiftLaneTimersShared,
@@ -68,7 +68,6 @@ import {
   ANTI_BLOCK_MAX_DURATION_MS,
   ANTI_BLOCK_PRIORITY_THRESHOLD,
   EMOJI_FETCH_TIMEOUT_DEFAULT_MS,
-  EPSILON,
   FAR_LAYER_DESATURATION_FACTOR,
   GRADIENT_CACHE_MAX,
   HORIZONTAL_STAGGER_MAX,
@@ -129,6 +128,18 @@ function measureTextHeight(fontSize: number): number {
     fontMetricsCache.set(font, metrics);
   }
   return metrics.height;
+}
+
+/** Split text into grapheme clusters for safe truncation.
+ *  Uses Intl.Segmenter when available, falling back to Array.from
+ *  which handles most multi-byte (but not all combined) characters. */
+function splitGraphemeClusters(text: string): string[] {
+  try {
+    const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+    return [...segmenter.segment(text)].map((s) => s.segment);
+  } catch {
+    return Array.from(text);
+  }
 }
 
 // ── Config-driven paid card renderer (worker variant) ────────────────────────
@@ -279,17 +290,18 @@ function renderPaidCardWorker(
     const headerMaxWidth = w - padH * 2;
     let displayText = message.headerTagText;
     if (ctx.measureText(displayText).width > headerMaxWidth) {
+      const graphemes = splitGraphemeClusters(displayText);
       let lo = 0,
-        hi = displayText.length;
+        hi = graphemes.length;
       while (lo < hi) {
         const mid = Math.floor((lo + hi) / 2);
-        if (ctx.measureText(`${displayText.slice(0, mid)}…`).width > headerMaxWidth) {
+        if (ctx.measureText(`${graphemes.slice(0, mid).join('')}…`).width > headerMaxWidth) {
           hi = mid;
         } else {
           lo = mid + 1;
         }
       }
-      displayText = lo > 0 ? `${displayText.slice(0, lo - 1)}…` : '…';
+      displayText = lo > 0 ? `${graphemes.slice(0, lo - 1).join('')}…` : '…';
     }
     strokeTextOutline(
       ctx,
@@ -397,8 +409,19 @@ export class WorkerRenderer {
   private invFadeMs = 0;
   private ageFadeRate = 0;
   private opacityConfig: OpacityConfig | null = null;
-  private boundGetFont: (fontSize: number) => string = (fs: number) => `${fs}px sans-serif`;
+  private boundGetFont: (fontSize: number) => string = (fs: number) =>
+    getFontString(fs, 'bold' as FontWeight, DEFAULT_FONT_FAMILY);
   private static TEXT_MEASURE_CACHE_MAX = 500;
+  /** Pre-computed exponential distribution table for stagger delay (256 entries).
+   *  Each entry = -ln(1 - (i+0.5)/256), yielding a positive exponential sample.
+   *  Indexed by floor(Math.random() * 256) — avoids per-message Math.log calls. */
+  private static readonly STAGGER_EXP_TABLE: Float64Array = (() => {
+    const t = new Float64Array(256);
+    for (let i = 0; i < 256; i++) {
+      t[i] = -Math.log(1 - (i + 0.5) / 256);
+    }
+    return t;
+  })();
   private textMeasureCache = new Map<string, number>();
   private fontMetricsCache = new Map<string, { height: number }>();
   private activeMessages: ActiveMessage[] = [];
@@ -418,13 +441,13 @@ export class WorkerRenderer {
   private stickerCache!: ByteLimitedCache<ImageBitmap>;
   private superChatGradientCache = new LruMap<string, CanvasGradient>(GRADIENT_CACHE_MAX);
   private fetching = new Set<string>();
-  private opacityBuckets: Array<Array<{ msg: ActiveMessage; elapsed: number }>> = Array.from(
-    { length: OPACITY_BUCKETS },
-    () => []
-  );
+  private opacityBuckets: ActiveMessage[][] = Array.from({ length: OPACITY_BUCKETS }, () => []);
   private statsFrameCounter = 0;
   private idleSince: number | null = null;
   private static readonly IDLE_GRACE_PERIOD_MS = 500;
+  /** CSS-pixel dimensions (not DPR-multiplied). Set by init/resize handlers. */
+  private logicalWidth = 0;
+  private logicalHeight = 0;
 
   handleMessage(e: MessageEvent): void {
     try {
@@ -463,6 +486,8 @@ export class WorkerRenderer {
             );
             this.recomputeConfigDerived();
             this.initLanes(data.width as number, data.height as number);
+            this.logicalWidth = data.width as number;
+            this.logicalHeight = data.height as number;
             this.startRenderLoop();
             self.postMessage({ type: 'ready' });
             break;
@@ -475,6 +500,8 @@ export class WorkerRenderer {
             this.canvas.width = cssW * newDpr;
             this.canvas.height = cssH * newDpr;
             this.ctx.setTransform(newDpr, 0, 0, newDpr, 0, 0);
+            this.logicalWidth = cssW;
+            this.logicalHeight = cssH;
             this.initLanes(cssW, cssH);
             break;
           }
@@ -522,7 +549,7 @@ export class WorkerRenderer {
               this.isPaused = true;
             } else if (!shouldPause && this.isPaused) {
               const now = performance.now();
-              const pausedMs = Math.max(0, now - this.pauseStartTime);
+              let pausedMs = Math.max(0, now - this.pauseStartTime);
               for (const msg of this.activeMessages) {
                 const elapsedBeforePause = now - pausedMs - msg.startTime;
                 const remainingDisplay = msg.duration - elapsedBeforePause;
@@ -532,6 +559,7 @@ export class WorkerRenderer {
                 );
                 msg.pausedDuration += capped;
               }
+              pausedMs = Math.min(pausedMs, (this.config?.maxMessageAgeMs ?? 5000) * 2);
               WorkerRenderer.shiftLaneTimers(this.laneState, pausedMs);
               this.isPaused = false;
               this.pauseStartTime = 0;
@@ -747,10 +775,16 @@ export class WorkerRenderer {
     speedTier: number
   ): { laneIndex: number; waitMs: number; laneY: number } | null {
     if (this.laneHeap.length === 0) return null;
-    this.collidedLanes.clear();
     const now = performance.now();
-    const slotCount = Math.max(1, Math.ceil(msgHeight / this.laneHeight));
-    const result = this.allocateSingleLane(now, speedTier, slotCount);
+    const maxWaitMs = this.config?.scrollDurationMaxMs ?? 5000;
+    const result = findPlacementShared(
+      this.laneState,
+      now,
+      msgHeight,
+      this.laneHeight,
+      maxWaitMs,
+      speedTier
+    );
     if (!result) return null;
     const laneY = computeLaneY(
       result.laneIndex,
@@ -759,70 +793,6 @@ export class WorkerRenderer {
       this.laneHeight
     );
     return { ...result, laneY };
-  }
-
-  private allocateSingleLane(
-    now: number,
-    speedTier: number,
-    slotCount: number
-  ): { laneIndex: number; waitMs: number } | null {
-    if (this.laneHeap.length === 0) return null;
-    const maxWaitMs = (this.config as WorkerConfig).scrollDurationMaxMs;
-    let firstBusy: { laneIndex: number; waitMs: number } | null = null;
-    let speedMatched: { laneIndex: number; waitMs: number } | null = null;
-    let zeroWaitCandidates: number[] | null = null;
-    for (let i = 0; i < this.numLanes - slotCount + 1; i++) {
-      let tierOk = true;
-      for (let s = 0; s < slotCount; s++) {
-        const active = this.speedTierLanes.get(i + s);
-        if (active && active.until > now && !areSpeedTiersCompatible(speedTier, active.tier)) {
-          tierOk = false;
-          break;
-        }
-      }
-      if (!tierOk) continue;
-      if (this.collidedLanes.has(i)) continue;
-      const avail = this.getSlotAvailableAt(i);
-      if (avail === undefined) continue;
-      const wait = Math.max(0, Math.ceil(avail - now));
-      if (wait > 0) {
-        if (!firstBusy) firstBusy = { laneIndex: i, waitMs: wait };
-        const active = this.speedTierLanes.get(i);
-        if ((!speedMatched || wait < speedMatched.waitMs) && active && active.tier === speedTier) {
-          speedMatched = { laneIndex: i, waitMs: wait };
-        }
-        continue;
-      }
-      if (Math.random() < EPSILON) {
-        if (!zeroWaitCandidates) {
-          zeroWaitCandidates = [];
-          for (let j = i + 1; j < this.numLanes - slotCount + 1; j++) {
-            const availJ = this.getSlotAvailableAt(j);
-            if (availJ !== undefined && Math.max(0, Math.ceil(availJ - now)) === 0) {
-              let jTierOk = true;
-              for (let s = 0; s < slotCount; s++) {
-                const activeJ = this.speedTierLanes.get(j + s);
-                if (
-                  activeJ &&
-                  activeJ.until > now &&
-                  !areSpeedTiersCompatible(speedTier, activeJ.tier)
-                ) {
-                  jTierOk = false;
-                  break;
-                }
-              }
-              if (jTierOk) zeroWaitCandidates.push(j);
-            }
-          }
-        }
-        if (zeroWaitCandidates.length > 0) continue;
-      }
-      return { laneIndex: i, waitMs: 0 };
-    }
-    if (speedMatched && speedMatched.waitMs <= maxWaitMs) return speedMatched;
-    if (firstBusy && firstBusy.waitMs <= maxWaitMs && speedTier !== SPEED_TIER.BACKLOG)
-      return firstBusy;
-    return null;
   }
 
   private commitPlacement(
@@ -834,7 +804,7 @@ export class WorkerRenderer {
     msgWidth?: number
   ): void {
     if (!this.config) return;
-    const screenWidth = this.canvas?.width ?? 1920;
+    const screenWidth = this.logicalWidth || 1920;
     const occupancyMs = computeOccupancyMsShared(
       durationMs,
       this.config.exitPaddingPx,
@@ -850,15 +820,6 @@ export class WorkerRenderer {
       occupancyMs,
       durationMs,
       speedTier
-    );
-  }
-
-  private getSlotAvailableAt(laneIndex: number): number | undefined {
-    return heapGetSlotAvailableAt(
-      this.laneHeap,
-      this.laneIndexToHeapIndex,
-      laneIndex,
-      this.numLanes
     );
   }
 
@@ -914,7 +875,9 @@ export class WorkerRenderer {
       staggerDelay = Math.round(
         Math.min(
           effectiveMaxStagger,
-          staggeredIdx * -STAGGER_EXP_SCALE * Math.log(1 - Math.random())
+          staggeredIdx *
+            -STAGGER_EXP_SCALE *
+            WorkerRenderer.STAGGER_EXP_TABLE[(Math.random() * 256) >>> 0]!
         )
       );
     }
@@ -1002,28 +965,98 @@ export class WorkerRenderer {
       void this.prefetchImages([msg.superChatStickerUrl], this.stickerCache);
   }
 
-  private cleanupExpired(now: number): void {
-    let writeIdx = 0;
-    for (let i = 0; i < this.activeMessages.length; i++) {
-      const m = this.activeMessages[i];
-      if (!m) continue;
-      if (now - m.startTime - m.pausedDuration >= m.duration) continue;
-      this.activeMessages[writeIdx++] = m;
-    }
-    this.activeMessages.length = writeIdx;
-  }
-
   private renderFrame(): void {
     if (!this.ctx || !this.canvas || !this.config || this.isPaused) return;
     const cfg = this.config;
     const now = performance.now();
     const width = this.canvas.width;
     const height = this.canvas.height;
-    WorkerRenderer.resetBatch(this.laneState);
-    this.drainQueue(now, width, height);
-    this.cleanupExpired(now);
-    this.ctx.clearRect(0, 0, width, height);
-    if (this.activeMessages.length === 0) {
+    // Anti-block gate: check if drainQueue should run
+    let shouldDrain = true;
+    if (this.pendingQueue.length > 0) {
+      let occupiedCount = 0;
+      for (let h = 0; h < this.laneHeap.length; h++) {
+        const entry = this.laneHeap[h];
+        if (entry && entry[1] > now) occupiedCount++;
+      }
+      const laneUtilization = occupiedCount / Math.max(1, this.numLanes);
+      if (laneUtilization >= 1 - ANTI_BLOCK_FREE_RATIO) {
+        if (this.antiBlockStartTime === 0) {
+          this.antiBlockStartTime = now;
+        }
+        const front = this.pendingQueue[this.pendingQueueOffset];
+        const forceDrain = now - this.antiBlockStartTime >= ANTI_BLOCK_MAX_DURATION_MS;
+        const highPriorityFront = front ? front.priority >= ANTI_BLOCK_PRIORITY_THRESHOLD : false;
+        shouldDrain = forceDrain || highPriorityFront;
+      } else {
+        this.antiBlockStartTime = 0;
+      }
+    }
+    if (shouldDrain) {
+      WorkerRenderer.resetBatch(this.laneState);
+      this.drainQueue(now, width, height);
+    }
+    // ── Merged cleanup + pre-scan (single pass) ──────────────────────
+    for (const bucket of this.opacityBuckets) bucket.length = 0;
+    const mode = this.config.danmakuMode;
+    const isScrolling = mode === 'scroll' || mode === 'reverse';
+    const strokeWidth =
+      this.config.outlineWidthPx > 0 && this.config.outlineOpacity > 0
+        ? this.config.outlineWidthPx
+        : 0;
+    let writeIdx = 0;
+    for (let i = 0; i < this.activeMessages.length; i++) {
+      const msg = this.activeMessages[i];
+      if (!msg) continue;
+      const elapsed = now - msg.startTime - msg.pausedDuration;
+      // Expired: remove via skip (don't write to writeIdx position)
+      if (elapsed >= msg.duration) {
+        continue;
+      }
+      // Keep message (in-place compaction)
+      this.activeMessages[writeIdx++] = msg;
+      // Still in stagger delay — keep but skip rendering
+      if (elapsed < 0) continue;
+      // ── Render pre-compute ──
+      const progress = Math.min(1, Math.max(0, elapsed * msg.invDuration));
+      const isReducedMotionActive = this.config.reducedMotion && !this.config.ignoreReducedMotion;
+      if (mode === 'scroll') {
+        if (!isReducedMotionActive) {
+          msg.x = msg.startX - progress * (msg.startX + msg.width + this.config.exitPaddingPx);
+        } else {
+          msg.x = Math.max(0, (this.logicalWidth - msg.width) / 2);
+        }
+      } else if (mode === 'reverse') {
+        if (!isReducedMotionActive) {
+          msg.x =
+            msg.startX + progress * (this.logicalWidth - msg.startX + this.config.exitPaddingPx);
+        } else {
+          msg.x = Math.max(0, (this.logicalWidth - msg.width) / 2);
+        }
+      }
+      const fadeElapsed = now - msg.fadeStartTime - msg.pausedDuration;
+      const opacity = this.opacityConfig
+        ? computeMessageOpacity(
+            { isBacklog: msg.speedTier === SPEED_TIER.BACKLOG } as ChatMessage,
+            fadeElapsed,
+            msg.duration,
+            isScrolling,
+            msg.speedTier,
+            this.opacityConfig
+          )
+        : 0;
+      if (opacity <= 0) continue;
+      const bucketIndex = Math.min(
+        OPACITY_BUCKETS - 1,
+        Math.round(opacity * (OPACITY_BUCKETS - 1))
+      );
+      msg._frameElapsed = elapsed;
+      this.opacityBuckets[bucketIndex]?.push(msg);
+    }
+    this.activeMessages.length = writeIdx;
+    // ── Clear canvas ────────────────────────────────────────────────
+    this.ctx.clearRect(0, 0, this.logicalWidth, this.logicalHeight);
+    if (writeIdx === 0) {
       this.statsFrameCounter++;
       if (this.statsFrameCounter >= 60) {
         this.statsFrameCounter = 0;
@@ -1036,52 +1069,6 @@ export class WorkerRenderer {
       }
       return;
     }
-    const mode = this.config.danmakuMode;
-    const isScrolling = mode === 'scroll' || mode === 'reverse';
-    const strokeWidth =
-      this.config.outlineWidthPx > 0 && this.config.outlineOpacity > 0
-        ? this.config.outlineWidthPx
-        : 0;
-    for (const bucket of this.opacityBuckets) bucket.length = 0;
-    for (let i = 0; i < this.activeMessages.length; i++) {
-      const msg = this.activeMessages[i];
-      if (!msg) continue;
-      const elapsed = now - msg.startTime - msg.pausedDuration;
-      if (elapsed < 0) continue;
-      const progress = Math.min(1, Math.max(0, elapsed * msg.invDuration));
-      const isReducedMotionActive = this.config.reducedMotion && !this.config.ignoreReducedMotion;
-      if (mode === 'scroll') {
-        if (!isReducedMotionActive) {
-          msg.x = msg.startX - progress * (msg.startX + msg.width + this.config.exitPaddingPx);
-        } else {
-          msg.x = Math.max(0, (width - msg.width) / 2);
-        }
-      } else if (mode === 'reverse') {
-        if (!isReducedMotionActive) {
-          msg.x = msg.startX + progress * (width - msg.startX + this.config.exitPaddingPx);
-        } else {
-          msg.x = Math.max(0, (width - msg.width) / 2);
-        }
-      }
-      const oc = this.opacityConfig;
-      const fadeElapsed = now - msg.fadeStartTime - msg.pausedDuration;
-      const opacity = oc
-        ? computeMessageOpacity(
-            { isBacklog: msg.speedTier === SPEED_TIER.BACKLOG } as ChatMessage,
-            fadeElapsed,
-            msg.duration,
-            isScrolling,
-            msg.speedTier,
-            oc
-          )
-        : 0;
-      if (opacity <= 0) continue;
-      const bucketIndex = Math.min(
-        OPACITY_BUCKETS - 1,
-        Math.round(opacity * (OPACITY_BUCKETS - 1))
-      );
-      this.opacityBuckets[bucketIndex]?.push({ msg, elapsed });
-    }
     this.ctx.textBaseline = 'top';
     const getFont = this.boundGetFont;
     for (let bucketIndex = 0; bucketIndex < OPACITY_BUCKETS; bucketIndex++) {
@@ -1089,7 +1076,7 @@ export class WorkerRenderer {
       if (!entries || entries.length === 0) continue;
       this.ctx.globalAlpha = bucketIndex / (OPACITY_BUCKETS - 1);
       try {
-        for (const { msg, elapsed } of entries) {
+        for (const msg of entries) {
           let renderColor = msg.colorOverride || msg.color;
           if (msg.speedTier === SPEED_TIER.FAR && !msg.colorOverride) {
             renderColor = desaturateColor(renderColor, FAR_LAYER_DESATURATION_FACTOR);
@@ -1113,7 +1100,7 @@ export class WorkerRenderer {
               msg.height,
               sx,
               sy,
-              elapsed,
+              msg._frameElapsed!,
               msg.cardConfigWorker,
               cfg.fontSize,
               cfg.fontWeight,
@@ -1273,30 +1260,11 @@ export class WorkerRenderer {
       this.pendingQueueOffset = 0;
     }
     let batchIndex = 0;
-    let occupiedCount = 0;
-    for (let h = 0; h < this.laneHeap.length; h++) {
-      const entry = this.laneHeap[h];
-      if (entry && entry[1] > now) occupiedCount++;
-    }
-    const laneUtilization = occupiedCount / Math.max(1, this.numLanes);
-    let isAntiBlock = laneUtilization >= 1 - ANTI_BLOCK_FREE_RATIO;
-    if (isAntiBlock) {
-      if (this.antiBlockStartTime === 0) {
-        this.antiBlockStartTime = now;
-      } else if (now - this.antiBlockStartTime >= ANTI_BLOCK_MAX_DURATION_MS) {
-        isAntiBlock = false;
-      }
-    } else {
-      this.antiBlockStartTime = 0;
-    }
     const committed = new Set<WorkerMessage>();
     for (let i = this.pendingQueueOffset; i < this.pendingQueue.length; i++) {
       const entry = this.pendingQueue[i];
       if (!entry) continue;
       if (this.activeMessages.length >= this.config.maxConcurrentMessages) break;
-      if (isAntiBlock && entry.priority < ANTI_BLOCK_PRIORITY_THRESHOLD) {
-        if (Math.random() >= (1 - laneUtilization) / ANTI_BLOCK_FREE_RATIO) continue;
-      }
       let speedTier: number;
       if (entry.isBacklog) {
         speedTier = SPEED_TIER.BACKLOG;

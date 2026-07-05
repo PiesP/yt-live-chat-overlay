@@ -202,4 +202,7 @@ export interface ActiveMessage {
   membershipHeader?: string;
   /** Optional CardConfigWorker for config-driven renderPaidCardWorker(). */
   cardConfigWorker?: CardConfigWorker;
+  /** Transient frame-local elapsed (ms). Set by renderFrame pre-scan, used by
+   *  bucket rendering. Not serialized — re-set each frame. */
+  _frameElapsed?: number;
 }
