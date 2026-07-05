@@ -71,7 +71,7 @@ const isRetryableError = (error: unknown): boolean => {
   return error instanceof TypeError;
 };
 
-export function getVideoIdFromUrl(href = location.href): string | null {
+export function getVideoIdFromUrl(href: string): string | null {
   try {
     const url = new URL(href, location.origin);
 
@@ -311,7 +311,7 @@ const resolveClientContext = (ytcfg: JsonObject): JsonObject | null => {
  * @returns A promise resolving to the bootstrap result (ready, retryable, or unavailable).
  */
 export async function bootstrapChatSession(signal?: AbortSignal): Promise<ChatBootstrapResult> {
-  const videoId = getVideoIdFromUrl();
+  const videoId = getVideoIdFromUrl(location.href);
   if (!videoId) {
     return {
       status: 'unavailable',
