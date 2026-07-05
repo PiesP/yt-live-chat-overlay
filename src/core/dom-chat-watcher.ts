@@ -200,7 +200,7 @@ export function installDomChatWatcher(onMessages: DomMessageCallback): DomWatche
 
   // No container found — return a no-op unsubscribe.
   // The caller can retry later if needed.
-  log.warn(
+  log.info(
     'No chat container found — DOM watcher not installed. ' +
       'YouTube chat may be in a cross-origin iframe (#chatframe) ' +
       'inaccessible from the content script. Falling back to fetch interceptor.'
