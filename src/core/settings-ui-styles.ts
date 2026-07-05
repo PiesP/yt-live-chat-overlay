@@ -504,6 +504,16 @@ export const SETTINGS_UI_STYLES = `
       .yt-chat-overlay-author-grid [role="gridcell"]:has(> .yt-chat-overlay-author-grid-color) {
         justify-self: center;
       }
+      .yt-chat-overlay-author-grid-checkbox {
+        width: ${uiSizing.checkboxSize}px;
+        height: ${uiSizing.checkboxSize}px;
+        cursor: pointer;
+        accent-color: ${uiColors.primary};
+      }
+      .yt-chat-overlay-author-grid-checkbox:focus-visible {
+        outline: 2px solid ${uiColors.primary};
+        outline-offset: 1px;
+      }
       .yt-chat-overlay-author-grid [role="gridcell"]:has(> .yt-chat-overlay-author-grid-checkbox) {
         justify-self: center;
       }
