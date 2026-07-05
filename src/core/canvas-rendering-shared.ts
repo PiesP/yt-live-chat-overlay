@@ -126,6 +126,11 @@ function getGraphemeSegmenter(): Intl.Segmenter | undefined {
   return _graphemeSegmenter;
 }
 
+/** Reset grapheme segmenter for test isolation. */
+export function resetGraphemeSegmenter(): void {
+  _graphemeSegmenter = undefined;
+}
+
 /**
  * Split a string into grapheme clusters for safe per-character processing.
  *

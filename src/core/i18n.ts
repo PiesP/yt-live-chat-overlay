@@ -51,6 +51,11 @@ export function getActiveLanguage(): SupportedLanguage {
   return activeLanguage;
 }
 
+/** Reset active language to default for test isolation. */
+export function resetActiveLanguage(): void {
+  activeLanguage = 'en';
+}
+
 // ── Browser language detection ────────────────────────────────────────────
 
 const LANGUAGE_PATTERNS: ReadonlyArray<[SupportedLanguage, RegExp]> = [
