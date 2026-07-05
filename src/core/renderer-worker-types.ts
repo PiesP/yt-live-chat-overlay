@@ -110,6 +110,10 @@ export interface WorkerConfig {
   ignoreReducedMotion: boolean;
   /** OS prefers-reduced-motion media query result (relayed from main thread; Workers lack matchMedia). */
   reducedMotion: boolean;
+  /** Whether to preserve the author-chosen user color from YouTube chat. */
+  preserveUserColor: boolean;
+  /** Whether the renderer is in replay (VOD) mode. Disables anti-block throttling. */
+  isReplayMode: boolean;
 }
 
 export interface WorkerContentSegment {
@@ -157,6 +161,8 @@ export interface WorkerMessage {
   membershipHeader?: string;
   /** Optional CardConfigWorker for config-driven renderPaidCardWorker(). */
   cardConfigWorker?: CardConfigWorker;
+  /** Author-chosen user color from YouTube chat (used when preserveUserColor is enabled). */
+  userColor?: string;
 }
 
 export interface ActiveMessage {

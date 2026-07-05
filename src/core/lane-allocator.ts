@@ -414,14 +414,13 @@ export class LaneAllocator {
 
   /** Shift all lane timers and speed-tier tracking by a fixed offset. */
   shiftAll(offsetMs: number): void {
-    const capped = Math.min(offsetMs, this.options.maxMessageAgeMs);
-    if (capped <= 0) return;
+    if (offsetMs <= 0) return;
 
     // Shift lane occupancy timers (4-ary min-heap) and speed-tier tracking
     if (this.heap.length > 0) {
       for (let i = 0; i < this.heap.length; i++) {
         const entry = this.heap[i];
-        if (entry) entry[1] += capped;
+        if (entry) entry[1] += offsetMs;
       }
       // Rebuild heap invariant after bulk update (4-ary)
       for (let i = Math.floor((this.heap.length - 2) / 4); i >= 0; i--) {
@@ -429,7 +428,7 @@ export class LaneAllocator {
       }
     }
     for (const [idx, entry] of this.speedTierLanes) {
-      this.speedTierLanes.set(idx, { tier: entry.tier, until: entry.until + capped });
+      this.speedTierLanes.set(idx, { tier: entry.tier, until: entry.until + offsetMs });
     }
   }
 

@@ -85,6 +85,7 @@ export class RenderWorkerManager {
     'staggerMaxDelayMs',
     'staggerMediumDelayMs',
     'ignoreReducedMotion',
+    'preserveUserColor',
     'backgroundQueueMax',
     'translationBatchSize',
   ];
@@ -100,8 +101,10 @@ export class RenderWorkerManager {
     config.outlineWidthPx = settings.outline.widthPx;
     config.outlineOpacity = settings.outline.opacity;
     config.authorColors = { ...settings.colors };
+    config.color = settings.colors.normal;
     // Workers cannot access matchMedia — main thread relays the OS preference.
     config.reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    config.isReplayMode = false;
     return config;
   }
 
@@ -373,6 +376,7 @@ export class RenderWorkerManager {
           isBacklog: message.isBacklog ?? false,
           authorType: message.authorType,
           kind: message.kind,
+          userColor: message.userColor,
           cardConfigWorker:
             message.kind === 'superchat' || message.kind === 'membership'
               ? toWorkerConfig(
@@ -426,6 +430,8 @@ export class RenderWorkerManager {
     config.outlineWidthPx = settings.outline.widthPx;
     config.outlineOpacity = settings.outline.opacity;
     config.authorColors = { ...settings.colors };
+    config.color = settings.colors.normal;
+    config.reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     sendUpdateConfigToWorker({ worker: this.worker }, config);
   }
 
@@ -433,6 +439,12 @@ export class RenderWorkerManager {
   setPaused(paused: boolean): void {
     if (!this.worker) return;
     sendSetPausedToWorker({ worker: this.worker }, paused);
+  }
+
+  /** Send replay mode state to the worker. */
+  sendReplayModeToWorker(isReplayMode: boolean): void {
+    if (!this.worker) return;
+    sendUpdateConfigToWorker({ worker: this.worker }, { isReplayMode } as Record<string, unknown>);
   }
 
   /**

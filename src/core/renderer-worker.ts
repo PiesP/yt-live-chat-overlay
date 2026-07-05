@@ -32,6 +32,7 @@
 import type { ChatMessage, FontWeight } from '@app-types';
 import { ByteLimitedCache } from '@core/byte-limited-cache';
 import { getCachedGradient } from '@core/canvas-gradient-utils';
+import { fastRandom } from '@core/canvas-pipeline';
 import {
   drawAuthorSection,
   drawRoundRect,
@@ -877,7 +878,7 @@ export class WorkerRenderer {
           effectiveMaxStagger,
           staggeredIdx *
             -STAGGER_EXP_SCALE *
-            WorkerRenderer.STAGGER_EXP_TABLE[(Math.random() * 256) >>> 0]!
+            WorkerRenderer.STAGGER_EXP_TABLE[(fastRandom() * 256) >>> 0]!
         )
       );
     }
@@ -913,9 +914,11 @@ export class WorkerRenderer {
     const slotCount = Math.max(1, Math.ceil(msg.height / this.laneHeight));
     const laneY = placement.laneY;
     const authorColor =
-      (msg.authorType && this.config.authorColors[msg.authorType]) ||
-      this.config.color ||
-      DEFAULT_TEXT_COLOR;
+      this.config.preserveUserColor && msg.userColor
+        ? msg.userColor
+        : (msg.authorType && this.config.authorColors[msg.authorType]) ||
+          this.config.color ||
+          DEFAULT_TEXT_COLOR;
     const am: ActiveMessage = {
       id: msg.id,
       x: startX,
@@ -981,13 +984,17 @@ export class WorkerRenderer {
       }
       const laneUtilization = occupiedCount / Math.max(1, this.numLanes);
       if (laneUtilization >= 1 - ANTI_BLOCK_FREE_RATIO) {
-        if (this.antiBlockStartTime === 0) {
-          this.antiBlockStartTime = now;
+        if (!cfg.isReplayMode) {
+          if (this.antiBlockStartTime === 0) {
+            this.antiBlockStartTime = now;
+          }
+          const front = this.pendingQueue[this.pendingQueueOffset];
+          const forceDrain = now - this.antiBlockStartTime >= ANTI_BLOCK_MAX_DURATION_MS;
+          const highPriorityFront = front ? front.priority >= ANTI_BLOCK_PRIORITY_THRESHOLD : false;
+          shouldDrain = forceDrain || highPriorityFront;
+        } else {
+          this.antiBlockStartTime = 0;
         }
-        const front = this.pendingQueue[this.pendingQueueOffset];
-        const forceDrain = now - this.antiBlockStartTime >= ANTI_BLOCK_MAX_DURATION_MS;
-        const highPriorityFront = front ? front.priority >= ANTI_BLOCK_PRIORITY_THRESHOLD : false;
-        shouldDrain = forceDrain || highPriorityFront;
       } else {
         this.antiBlockStartTime = 0;
       }

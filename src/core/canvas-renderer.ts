@@ -422,6 +422,12 @@ export class CanvasRenderer extends RendererBase {
     }
   }
 
+  /** Set replay mode and propagate to the worker. */
+  override setReplayMode(enabled: boolean): void {
+    super.setReplayMode(enabled);
+    this.workerManager.sendReplayModeToWorker(enabled);
+  }
+
   getQueueLength(): number {
     return this.pendingQueue.size;
   }
@@ -1072,7 +1078,11 @@ export class CanvasRenderer extends RendererBase {
             );
             const gap = TRANSLATION_GAP_PX;
             const transY = snappedY + msg.height - fontSize - gap;
-            const transColor = this.settings.colors[msg.message.authorType];
+            const transColor =
+              this.settings.preserveUserColor && renderMessage.userColor
+                ? renderMessage.userColor
+                : (msg.message.authorType && this.settings.colors[msg.message.authorType]) ||
+                  this.settings.colors.normal;
             ctx.save();
             try {
               ctx.globalAlpha = bucketOpacity * TRANSLATION_OPACITY_SCALE;
