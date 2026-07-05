@@ -74,9 +74,22 @@ export function cleanupExpiredMessages(
         const lane = msg.laneIndex + slot;
         const list = activeMessagesByLane.get(lane);
         if (list) {
-          const idx = list.indexOf(msg);
+          const indices = msg.laneArrayIndices;
+          const idx = indices?.[slot] ?? list.indexOf(msg);
           if (idx !== -1) {
-            list[idx] = list[list.length - 1]!;
+            const lastMsg = list[list.length - 1]!;
+            if (lastMsg !== msg) {
+              list[idx] = lastMsg;
+              // Update the swapped-in message's laneArrayIndices entry for this lane
+              if (lastMsg.laneArrayIndices) {
+                for (let ss = 0; ss < (lastMsg.slotCount ?? 1); ss++) {
+                  if (lastMsg.laneIndex + ss === lane) {
+                    lastMsg.laneArrayIndices[ss] = idx;
+                    break;
+                  }
+                }
+              }
+            }
             list.pop();
           }
           if (list.length === 0) activeMessagesByLane.delete(lane);
