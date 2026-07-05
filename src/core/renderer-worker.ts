@@ -585,6 +585,9 @@ export class WorkerRenderer {
           case 'destroy':
             this.handleDestroy();
             break;
+          case 'clearState':
+            this.handleClearState();
+            break;
           case 'ping':
             self.postMessage({ type: 'pong' });
             break;
@@ -716,6 +719,23 @@ export class WorkerRenderer {
     this.authorPhotoCache.clear();
     this.stickerCache.clear();
     this.superChatGradientCache.clear();
+  }
+
+  /**
+   * Clear renderer state for a fresh restart (used by performOverlayRefresh).
+   * Resets active messages, pending queue, and lane allocator while
+   * preserving caches (text bitmaps, emoji, author photos, etc.).
+   */
+  private handleClearState(): void {
+    this.activeMessages.length = 0;
+    this.pendingQueue.length = 0;
+    this.pendingQueueOffset = 0;
+    // Rebuild lane allocator from existing dimensions (numLanes/laneHeight
+    // are preserved from the last initLanes/resize call).
+    const now = performance.now();
+    this.laneHeap = buildLaneHeap(this.numLanes, now, this.laneIndexToHeapIndex);
+    this.speedTierLanes.clear();
+    this.collidedLanes.clear();
   }
 
   private get laneState(): LaneAllocationState {

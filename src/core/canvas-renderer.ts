@@ -555,6 +555,7 @@ export class CanvasRenderer extends RendererBase {
   override prepareForRefresh(): void {
     this.clearActiveMessages();
     this.clearPendingQueue();
+    this.workerManager.clearState();
     this.backlogPaused = false;
     this.dimensionCache.clear();
     for (const bucket of this.opacityBuckets) bucket.length = 0;

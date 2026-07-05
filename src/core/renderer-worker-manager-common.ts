@@ -88,6 +88,18 @@ export function sendAuthorPhotosToWorker(
 /**
  * Send a translation result to the worker.
  */
+/**
+ * Send a clearState command to the worker.
+ * Instructs the Worker to reset its renderer state (active messages,
+ * pending queue, lane allocator) while preserving caches.
+ */
+export function sendClearStateToWorker(manager: WorkerManagerLike): void {
+  manager.worker?.postMessage({ type: 'clearState' });
+}
+
+/**
+ * Send a translation result to the worker.
+ */
 export function sendTranslationToWorker(
   manager: WorkerManagerLike,
   messageId: string,

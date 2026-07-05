@@ -22,6 +22,7 @@ import type { WorkerFactory } from '@platform/types';
 import { getWorkerFactory } from '@platform/worker-factory';
 import {
   buildPartialWorkerConfig,
+  sendClearStateToWorker,
   sendSetPausedToWorker,
   sendUpdateConfigToWorker,
 } from './renderer-worker-manager-common';
@@ -432,6 +433,17 @@ export class RenderWorkerManager {
   setPaused(paused: boolean): void {
     if (!this.worker) return;
     sendSetPausedToWorker({ worker: this.worker }, paused);
+  }
+
+  /**
+   * Clear the worker's renderer state (active messages, pending queue,
+   * lane allocator) while preserving caches (text bitmaps, emoji, etc.).
+   * Used by performOverlayRefresh to reset both main-thread and worker
+   * state consistently.
+   */
+  clearState(): void {
+    if (!this.worker) return;
+    sendClearStateToWorker({ worker: this.worker });
   }
 
   /** Destroy the render worker. */
