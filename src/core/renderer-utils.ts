@@ -9,6 +9,8 @@
  * from configuration and message metrics.
  */
 
+import { MS_TO_S } from '@core/renderer-constants';
+
 /**
  * Compute DLIOS animation duration from total travel distance and velocity.
  *
@@ -40,6 +42,6 @@ export function computeScrollDuration(
   }
   // Velocity-based floor: at minimum, allow the message to travel
   // exitPadding pixels at the configured velocity, but no less than the minimum duration.
-  const velocityFloor = Math.max(durationMin, (exitPaddingPx / velocity) * 1000);
-  return Math.max(velocityFloor, Math.min(durationMax, (totalDistance / velocity) * 1000));
+  const velocityFloor = Math.max(durationMin, (exitPaddingPx / velocity) * MS_TO_S);
+  return Math.max(velocityFloor, Math.min(durationMax, (totalDistance / velocity) * MS_TO_S));
 }
