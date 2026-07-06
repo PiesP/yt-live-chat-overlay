@@ -1,0 +1,6 @@
+{
+  "schema_version": 2,
+  "tool": "nose",
+  "baseline_kind": "accepted-duplication",
+  "families": []
+}
