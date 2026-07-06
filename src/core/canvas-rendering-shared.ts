@@ -434,7 +434,14 @@ function cacheTextBitmap(
   const bbWidth =
     Math.abs(metrics.actualBoundingBoxLeft) + Math.abs(metrics.actualBoundingBoxRight);
   const textWidth = bbWidth > 0 ? Math.ceil(bbWidth) : Math.ceil(metrics.width);
-  const width = textWidth + Math.ceil(strokeWidth) + 2;
+  // Canvas2D measureText() does NOT account for letterSpacing, wordSpacing,
+  // or textRendering — it measures based on font + text content only.
+  // When letterSpacing > 0, the actual rendered text is wider by
+  // (graphemeCount - 1) × letterSpacingPx.  Add this contribution to
+  // prevent the rightmost character from being clipped by the bitmap edge.
+  const lsPx = parseFloat(letterSpacing) || 0;
+  const lsExtraWidth = lsPx > 0 ? Math.ceil(Math.max(0, [...text].length - 1) * lsPx) : 0;
+  const width = textWidth + Math.ceil(strokeWidth) + 2 + lsExtraWidth;
   const ascent = Math.abs(metrics.actualBoundingBoxAscent) || Math.ceil(fontSize * 0.8);
   const descent = Math.abs(metrics.actualBoundingBoxDescent) || Math.ceil(fontSize * 0.2);
   const height = ascent + descent + Math.ceil(strokeWidth) + 2;
