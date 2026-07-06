@@ -92,6 +92,7 @@ import {
   computeMessageOpacity,
   type OpacityConfig,
 } from '@core/renderer-shared';
+import { DEFAULT_SETTINGS } from '@core/settings-defaults';
 import { getFontString, measureBoundingBoxWidth } from '@core/text-measure';
 
 import type {
@@ -540,7 +541,10 @@ export class WorkerRenderer {
                 );
                 msg.pausedDuration += capped;
               }
-              pausedMs = Math.min(pausedMs, (this.config?.maxMessageAgeMs ?? 5000) * 2);
+              pausedMs = Math.min(
+                pausedMs,
+                (this.config?.maxMessageAgeMs ?? DEFAULT_SETTINGS.maxMessageAgeMs) * 2
+              );
               WorkerRenderer.shiftLaneTimers(this.laneState, pausedMs);
               this.isPaused = false;
               this.pauseStartTime = 0;
@@ -757,7 +761,7 @@ export class WorkerRenderer {
   ): { laneIndex: number; waitMs: number; laneY: number } | null {
     if (this.laneHeap.length === 0) return null;
     const now = performance.now();
-    const maxWaitMs = this.config?.scrollDurationMaxMs ?? 5000;
+    const maxWaitMs = this.config?.scrollDurationMaxMs ?? DEFAULT_SETTINGS.scrollDurationMaxMs;
     const result = findPlacementShared(
       this.laneState,
       now,
