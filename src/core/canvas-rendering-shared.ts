@@ -591,6 +591,99 @@ export function renderSegment(
   ctx.restore();
 }
 
+// ── Text bitmap key computation (extracted for reuse) ───────────────────────
+
+/**
+ * Compute the cache key used by renderSegment's text bitmap cache.
+ *
+ * Extracted from renderSegment so warmTextBitmapCache can compute the same
+ * key without duplicating the formula.
+ */
+export function computeTextBitmapKey(
+  text: string,
+  fontSize: number,
+  fontWeight: string,
+  fontFamily: string,
+  color: string,
+  outlineWidthPx: number,
+  outlineOpacity: number,
+  letterSpacing = '0px'
+): string {
+  const displayText = reverseRtlText(text);
+  const font = getFontString(fontSize, fontWeight as FontWeight, fontFamily);
+  const strokeWidth = Math.max(0.5, outlineWidthPx * OUTLINE_STROKE_SCALE);
+  const strokeColor = computeOutlineColor(color, Math.min(1, outlineOpacity));
+  const outlineClass = strokeColor.startsWith('rgba(0, 0, 0') ? 'dark' : 'light';
+  return `${font}|${displayText}|${color}|${Math.round(strokeWidth)}|${outlineClass}|${letterSpacing}`;
+}
+
+// ── Text bitmap pre-warming ─────────────────────────────────────────────────
+
+/**
+ * Pre-render text bitmaps before they enter the render loop.
+ *
+ * When called during drainQueue (outside the draw hot path), this populates
+ * the bitmap cache for all text segments in a message so that renderSegment
+ * always gets a cache hit during the per-frame draw stage.  Eliminates the
+ * synchronous OffscreenCanvas fillText/strokeText cost from the render loop
+ * — especially impactful during chat bursts where dozens of unique texts
+ * arrive simultaneously.
+ *
+ * @param segments        Content segments, or a plain string for override-text modes
+ * @param textBitmapCache The same cache used by renderSegment
+ * @param ctx             A context for measurement and DPR detection
+ */
+export function warmTextBitmapCache(
+  segments: readonly SharedContentSegment[] | string,
+  fontSize: number,
+  fontWeight: string,
+  fontFamily: string,
+  color: string,
+  outlineWidthPx: number,
+  outlineOpacity: number,
+  textBitmapCache: TextBitmapCache,
+  ctx: AnyCanvasContext,
+  letterSpacing?: string
+): void {
+  if (outlineWidthPx <= 0 || outlineOpacity <= 0) return;
+
+  const strokeWidth = Math.max(0.5, outlineWidthPx * OUTLINE_STROKE_SCALE);
+  const strokeColor = computeOutlineColor(color, Math.min(1, outlineOpacity));
+  const keyLetterSpacing = letterSpacing ?? '0px';
+
+  const warmSingle = (text: string, ls: string): void => {
+    const displayText = reverseRtlText(text);
+    if (displayText.length < 3) return; // min length for bitmap caching
+    const font = getFontString(fontSize, fontWeight as FontWeight, fontFamily);
+    const outlineClass = strokeColor.startsWith('rgba(0, 0, 0') ? 'dark' : 'light';
+    const key = `${font}|${displayText}|${color}|${Math.round(strokeWidth)}|${outlineClass}|${ls}`;
+    if (textBitmapCache.get(key)) return; // already cached
+
+    cacheTextBitmap(
+      key,
+      displayText,
+      font,
+      fontSize,
+      color,
+      strokeWidth,
+      strokeColor,
+      ctx,
+      textBitmapCache,
+      ls
+    );
+  };
+
+  if (typeof segments === 'string') {
+    warmSingle(segments, keyLetterSpacing);
+  } else {
+    for (const seg of segments) {
+      if (seg.type === 'text' && seg.content) {
+        warmSingle(seg.content, keyLetterSpacing);
+      }
+    }
+  }
+}
+
 // ── Content segments (text + emoji) — single-line ────────────────────────────
 
 /**

@@ -42,6 +42,7 @@ import {
   strokeTextOutline,
   type TextBitmapCache,
   toSharedContentSegments,
+  warmTextBitmapCache,
 } from '@core/canvas-rendering-shared';
 import type { CardConfigWorker } from '@core/card-config';
 import { desaturateColor } from '@core/color-utils';
@@ -432,7 +433,9 @@ export class WorkerRenderer {
   private stickerCache!: ByteLimitedCache<ImageBitmap>;
   private superChatGradientCache = new LruMap<string, CanvasGradient>(GRADIENT_CACHE_MAX);
   private fetching = new Set<string>();
-  private opacityBuckets: ActiveMessage[][] = Array.from({ length: OPACITY_BUCKETS }, () => []);
+  private farOpacityBuckets: ActiveMessage[][] = Array.from({ length: OPACITY_BUCKETS }, () => []);
+  private midOpacityBuckets: ActiveMessage[][] = Array.from({ length: OPACITY_BUCKETS }, () => []);
+  private nearOpacityBuckets: ActiveMessage[][] = Array.from({ length: OPACITY_BUCKETS }, () => []);
   private statsFrameCounter = 0;
   private idleSince: number | null = null;
   private static readonly IDLE_GRACE_PERIOD_MS = 500;
@@ -1000,7 +1003,9 @@ export class WorkerRenderer {
       this.drainQueue(now, width, height);
     }
     // ── Merged cleanup + pre-scan (single pass) ──────────────────────
-    for (const bucket of this.opacityBuckets) bucket.length = 0;
+    for (const bucket of this.farOpacityBuckets) bucket.length = 0;
+    for (const bucket of this.midOpacityBuckets) bucket.length = 0;
+    for (const bucket of this.nearOpacityBuckets) bucket.length = 0;
     const mode = this.config.danmakuMode;
     const isScrolling = mode === 'scroll' || mode === 'reverse';
     const strokeWidth =
@@ -1059,7 +1064,14 @@ export class WorkerRenderer {
         Math.round(opacity * (OPACITY_BUCKETS - 1))
       );
       msg._frameElapsed = elapsed;
-      this.opacityBuckets[bucketIndex]?.push(msg);
+      // Route to the correct speed-tier bucket for z-order rendering
+      if (msg.speedTier === SPEED_TIER.FAR) {
+        this.farOpacityBuckets[bucketIndex]?.push(msg);
+      } else if (msg.speedTier === SPEED_TIER.NEAR) {
+        this.nearOpacityBuckets[bucketIndex]?.push(msg);
+      } else {
+        this.midOpacityBuckets[bucketIndex]?.push(msg);
+      }
     }
     this.activeMessages.length = writeIdx;
     // ── Clear canvas ────────────────────────────────────────────────
@@ -1079,141 +1091,147 @@ export class WorkerRenderer {
     }
     this.ctx.textBaseline = 'top';
     const getFont = this.boundGetFont;
-    for (let bucketIndex = 0; bucketIndex < OPACITY_BUCKETS; bucketIndex++) {
-      const entries = this.opacityBuckets[bucketIndex];
-      if (!entries || entries.length === 0) continue;
-      this.ctx.globalAlpha = bucketIndex / (OPACITY_BUCKETS - 1);
-      try {
-        for (const msg of entries) {
-          let renderColor = msg.colorOverride || msg.color;
-          if (msg.speedTier === SPEED_TIER.FAR && !msg.colorOverride) {
-            renderColor = desaturateColor(renderColor, FAR_LAYER_DESATURATION_FACTOR);
-            msg.colorOverride = renderColor;
-          }
-          const sx = Math.floor(msg.x);
-          if (sx + msg.width <= 0) continue;
-          const sy = Math.floor(msg.y);
-
-          // Temporal frame blending: render ghost at previous position for FAR-tier
-          if (
-            msg.speedTier === SPEED_TIER.FAR &&
-            !msg.cardConfigWorker &&
-            msg._prevX !== undefined &&
-            msg._prevY !== undefined
-          ) {
-            const ghostAlpha = this.ctx.globalAlpha * TEMPORAL_BLEND_ALPHA;
-            if (ghostAlpha > 0.001) {
-              this.ctx.save();
-              this.ctx.globalAlpha = ghostAlpha;
-              const ghostFont = getFont(this.config.fontSize);
-              this.ctx.font = ghostFont;
-              this.ctx.textRendering = 'optimizeSpeed';
-              this.ctx.fillStyle = renderColor;
-              this.ctx.fillText(
-                msg.text,
-                Math.floor(msg._prevX) + rendererLayout.paddingH,
-                Math.floor(msg._prevY) + rendererLayout.paddingV
-              );
-              this.ctx.restore();
+    // Render FAR → MID → NEAR for correct z-order
+    const tierBuckets = [this.farOpacityBuckets, this.midOpacityBuckets, this.nearOpacityBuckets];
+    for (const tierBucket of tierBuckets) {
+      for (let bucketIndex = 0; bucketIndex < OPACITY_BUCKETS; bucketIndex++) {
+        const entries = tierBucket[bucketIndex];
+        if (!entries || entries.length === 0) continue;
+        this.ctx.globalAlpha = bucketIndex / (OPACITY_BUCKETS - 1);
+        try {
+          for (const msg of entries) {
+            let renderColor = msg.colorOverride || msg.color;
+            if (msg.speedTier === SPEED_TIER.FAR && !msg.colorOverride) {
+              renderColor = desaturateColor(renderColor, FAR_LAYER_DESATURATION_FACTOR);
+              msg.colorOverride = renderColor;
             }
-          }
-          if (msg.cardConfigWorker) {
-            renderPaidCardWorker(
-              this.ctx,
-              {
-                author: msg.author,
-                authorPhotoUrl: msg.authorPhotoUrl,
-                content: msg.content ?? [],
-                badgeText: msg.superChatAmount,
-                headerTagText: msg.membershipHeader,
-                stickerUrl: msg.superChatStickerUrl,
-              },
-              msg.width,
-              msg.height,
-              sx,
-              sy,
-              msg._frameElapsed!,
-              msg.cardConfigWorker,
-              cfg.fontSize,
-              cfg.fontWeight,
-              cfg.fontFamily,
-              strokeWidth,
-              cfg.outlineOpacity,
-              this.textBitmapCache,
-              this.authorPhotoCache,
-              this.emojiCache,
-              getFont,
-              this.superChatGradientCache
-            );
-          } else {
-            const overrideText =
-              cfg.translationEnabled && cfg.translationMode === 'replace' && msg.translatedText
-                ? msg.translatedText
-                : null;
-            renderRegularMessage(
-              this.ctx,
-              {
-                ...(msg.author !== undefined ? { author: msg.author } : {}),
-                ...(msg.authorPhotoUrl !== undefined ? { authorPhotoUrl: msg.authorPhotoUrl } : {}),
-                content: msg.content ?? [],
-                text: msg.text,
-              },
-              sx,
-              sy,
-              {
-                showAuthor: true,
-                fontSize: cfg.fontSize,
-                fontWeight: cfg.fontWeight,
-                fontFamily: cfg.fontFamily,
-                color: renderColor,
-                outlineWidthPx: strokeWidth,
-                outlineOpacity: cfg.outlineOpacity,
-              },
-              this.textBitmapCache,
-              (url: string) => this.emojiCache.get(url),
-              () => true,
-              { get: (url: string) => this.authorPhotoCache.get(url) },
-              () => true,
-              getFont,
-              this.measureTextCached.bind(this),
-              overrideText,
-              msg.speedTier === SPEED_TIER.FAR ? '1px' : undefined
-            );
-          }
-          if (
-            cfg.translationEnabled &&
-            cfg.translationMode === 'dual' &&
-            msg.translatedText &&
-            msg.translatedText !== msg.text
-          ) {
-            const translationFontSize = Math.round(cfg.fontSize * TRANSLATION_FONT_SCALE);
-            const translationColor = msg.authorType
-              ? cfg.authorColors[msg.authorType] || renderColor
-              : renderColor;
-            const translationY = sy + msg.height - translationFontSize - TRANSLATION_GAP_PX;
-            this.ctx.save();
-            try {
-              this.ctx.globalAlpha =
-                (bucketIndex / (OPACITY_BUCKETS - 1)) * TRANSLATION_OPACITY_SCALE;
-              renderSegment(
+            const sx = Math.floor(msg.x);
+            if (sx + msg.width <= 0) continue;
+            const sy = Math.floor(msg.y);
+
+            // Temporal frame blending: render ghost at previous position for FAR-tier
+            if (
+              msg.speedTier === SPEED_TIER.FAR &&
+              !msg.cardConfigWorker &&
+              msg._prevX !== undefined &&
+              msg._prevY !== undefined
+            ) {
+              const ghostAlpha = this.ctx.globalAlpha * TEMPORAL_BLEND_ALPHA;
+              if (ghostAlpha > 0.001) {
+                this.ctx.save();
+                this.ctx.globalAlpha = ghostAlpha;
+                const ghostFont = getFont(this.config.fontSize);
+                this.ctx.font = ghostFont;
+                this.ctx.textRendering = 'optimizeSpeed';
+                this.ctx.fillStyle = renderColor;
+                this.ctx.fillText(
+                  msg.text,
+                  Math.floor(msg._prevX) + rendererLayout.paddingH,
+                  Math.floor(msg._prevY) + rendererLayout.paddingV
+                );
+                this.ctx.restore();
+              }
+            }
+            if (msg.cardConfigWorker) {
+              renderPaidCardWorker(
                 this.ctx,
-                msg.translatedText,
+                {
+                  author: msg.author,
+                  authorPhotoUrl: msg.authorPhotoUrl,
+                  content: msg.content ?? [],
+                  badgeText: msg.superChatAmount,
+                  headerTagText: msg.membershipHeader,
+                  stickerUrl: msg.superChatStickerUrl,
+                },
+                msg.width,
+                msg.height,
                 sx,
-                Math.floor(translationY),
-                translationColor,
-                translationFontSize,
+                sy,
+                msg._frameElapsed!,
+                msg.cardConfigWorker,
+                cfg.fontSize,
+                cfg.fontWeight,
+                cfg.fontFamily,
                 strokeWidth,
                 cfg.outlineOpacity,
                 this.textBitmapCache,
-                (_fs: number) => getFontString(translationFontSize, 'normal', cfg.fontFamily)
+                this.authorPhotoCache,
+                this.emojiCache,
+                getFont,
+                this.superChatGradientCache
               );
-            } finally {
-              this.ctx.restore();
+            } else {
+              const overrideText =
+                cfg.translationEnabled && cfg.translationMode === 'replace' && msg.translatedText
+                  ? msg.translatedText
+                  : null;
+              renderRegularMessage(
+                this.ctx,
+                {
+                  ...(msg.author !== undefined ? { author: msg.author } : {}),
+                  ...(msg.authorPhotoUrl !== undefined
+                    ? { authorPhotoUrl: msg.authorPhotoUrl }
+                    : {}),
+                  content: msg.content ?? [],
+                  text: msg.text,
+                },
+                sx,
+                sy,
+                {
+                  showAuthor: true,
+                  fontSize: cfg.fontSize,
+                  fontWeight: cfg.fontWeight,
+                  fontFamily: cfg.fontFamily,
+                  color: renderColor,
+                  outlineWidthPx: strokeWidth,
+                  outlineOpacity: cfg.outlineOpacity,
+                },
+                this.textBitmapCache,
+                (url: string) => this.emojiCache.get(url),
+                () => true,
+                { get: (url: string) => this.authorPhotoCache.get(url) },
+                () => true,
+                getFont,
+                this.measureTextCached.bind(this),
+                overrideText,
+                msg.speedTier === SPEED_TIER.FAR ? '1px' : undefined
+              );
+            }
+            if (
+              cfg.translationEnabled &&
+              cfg.translationMode === 'dual' &&
+              msg.translatedText &&
+              msg.translatedText !== msg.text
+            ) {
+              const translationFontSize = Math.round(cfg.fontSize * TRANSLATION_FONT_SCALE);
+              const translationColor = msg.authorType
+                ? cfg.authorColors[msg.authorType] || renderColor
+                : renderColor;
+              const translationY = sy + msg.height - translationFontSize - TRANSLATION_GAP_PX;
+              this.ctx.save();
+              try {
+                this.ctx.globalAlpha =
+                  (bucketIndex / (OPACITY_BUCKETS - 1)) * TRANSLATION_OPACITY_SCALE;
+                renderSegment(
+                  this.ctx,
+                  msg.translatedText,
+                  sx,
+                  Math.floor(translationY),
+                  translationColor,
+                  translationFontSize,
+                  strokeWidth,
+                  cfg.outlineOpacity,
+                  this.textBitmapCache,
+                  (_fs: number) => getFontString(translationFontSize, 'normal', cfg.fontFamily)
+                );
+              } finally {
+                this.ctx.restore();
+              }
             }
           }
+        } finally {
+          this.ctx.globalAlpha = 1;
         }
-      } finally {
-        this.ctx.globalAlpha = 1;
       }
     }
     this.statsFrameCounter++;
@@ -1319,6 +1337,29 @@ export class WorkerRenderer {
       this.activateMessage(entry, now, placement, batchIndex, width, height);
       batchIndex++;
       committed.add(entry);
+
+      // Pre-warm text bitmap cache — see canvas-renderer.ts drainQueue for rationale.
+      if (entry.content && this.config.outlineWidthPx > 0 && this.config.outlineOpacity > 0) {
+        const warmColor =
+          this.config.preserveUserColor && entry.userColor
+            ? entry.userColor
+            : (entry.authorType && this.config.authorColors[entry.authorType]) ||
+              this.config.color ||
+              DEFAULT_TEXT_COLOR;
+        const farSpacing = speedTier === SPEED_TIER.FAR ? '1px' : undefined;
+        warmTextBitmapCache(
+          entry.content,
+          this.config.fontSize,
+          this.config.fontWeight,
+          this.config.fontFamily,
+          warmColor,
+          this.config.outlineWidthPx,
+          this.config.outlineOpacity,
+          this.textBitmapCache,
+          this.ctx!,
+          farSpacing
+        );
+      }
     }
     if (committed.size > 0) {
       let writeIdx = this.pendingQueueOffset;

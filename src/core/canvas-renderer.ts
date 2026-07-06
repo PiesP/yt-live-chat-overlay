@@ -26,7 +26,13 @@ import type { ChatMessage, DropReason, OverlayDimensions, OverlaySettings } from
 import { ByteLimitedCache } from '@core/byte-limited-cache';
 import { renderPaidCard } from '@core/canvas-card-renderers';
 import { COMPACTION_THRESHOLD_RATIO, fastRandom } from '@core/canvas-pipeline';
-import { drawRoundRect, renderRegularMessage, renderSegment } from '@core/canvas-rendering-shared';
+import {
+  drawRoundRect,
+  renderRegularMessage,
+  renderSegment,
+  toSharedContentSegments,
+  warmTextBitmapCache,
+} from '@core/canvas-rendering-shared';
 import { isImageReady } from '@core/canvas-worker-bridge';
 import { MEMBERSHIP_CARD_CONFIG, SUPERCHAT_CARD_CONFIG } from '@core/card-config';
 import { ChannelLanguageMemory } from '@core/channel-language-memory';
@@ -192,12 +198,21 @@ export class CanvasRenderer extends RendererBase {
   private static readonly DIMENSION_CACHE_MAX = 1000;
 
   /**
-   * Pre-allocated opacity buckets for per-frame reuse.
-   * Bucket index = Math.round(opacity * 20), yielding 21 buckets (0.00–1.00 in 0.05 steps).
-   * Each frame resets bucket lengths instead of allocating new arrays/Map, eliminating
-   * the per-frame GC pressure from Map + {msg,elapsed} object creation.
+   * Pre-allocated opacity buckets for per-frame reuse, split by speed tier.
+   *
+   * FAR (back) → MID (middle) → NEAR (front) z-order is enforced by
+   * rendering each tier's buckets in sequence. Within each tier, bucket
+   * index = Math.round(opacity × 20) yields 21 steps (0.00–1.00).
    */
-  private readonly opacityBuckets: CanvasMessage[][] = Array.from(
+  private readonly farOpacityBuckets: CanvasMessage[][] = Array.from(
+    { length: OPACITY_BUCKET_COUNT },
+    () => []
+  );
+  private readonly midOpacityBuckets: CanvasMessage[][] = Array.from(
+    { length: OPACITY_BUCKET_COUNT },
+    () => []
+  );
+  private readonly nearOpacityBuckets: CanvasMessage[][] = Array.from(
     { length: OPACITY_BUCKET_COUNT },
     () => []
   );
@@ -579,7 +594,9 @@ export class CanvasRenderer extends RendererBase {
     this.workerManager.clearState();
     this.backlogPaused = false;
     this.dimensionCache.clear();
-    for (const bucket of this.opacityBuckets) bucket.length = 0;
+    for (const bucket of this.farOpacityBuckets) bucket.length = 0;
+    for (const bucket of this.midOpacityBuckets) bucket.length = 0;
+    for (const bucket of this.nearOpacityBuckets) bucket.length = 0;
     this.idleSince = null;
     this._hasRenderedStatusBar = false;
     // Reset the render activity heartbeat so the watchdog does not
@@ -786,8 +803,10 @@ export class CanvasRenderer extends RendererBase {
       this.compactRemovedMessages(cleanupResult.writeIdx, cleanupResult.oldLength);
     }
 
-    // ── Draw stage: opacity-bucketed rendering ──
-    this.drawStage(ctx, cleanupResult.buckets);
+    // ── Draw stage: opacity-bucketed rendering (FAR → MID → NEAR) ──
+    this.drawStage(ctx, cleanupResult.farBuckets);
+    this.drawStage(ctx, cleanupResult.midBuckets);
+    this.drawStage(ctx, cleanupResult.nearBuckets);
 
     // ── Live region mirroring: expose last 10 visible messages to AT ──
     this.mirrorVisibleMessages();
@@ -877,10 +896,21 @@ export class CanvasRenderer extends RendererBase {
     now: number,
     dims: OverlayDimensions,
     mode: string
-  ): { buckets: CanvasMessage[][]; anyRemoved: boolean; writeIdx: number; oldLength: number } {
+  ): {
+    farBuckets: CanvasMessage[][];
+    midBuckets: CanvasMessage[][];
+    nearBuckets: CanvasMessage[][];
+    anyRemoved: boolean;
+    writeIdx: number;
+    oldLength: number;
+  } {
     const isScrolling = mode === 'scroll' || mode === 'reverse';
-    const buckets = this.opacityBuckets;
-    for (const bucket of buckets) bucket.length = 0;
+    const farBuckets = this.farOpacityBuckets;
+    const midBuckets = this.midOpacityBuckets;
+    const nearBuckets = this.nearOpacityBuckets;
+    for (const bucket of farBuckets) bucket.length = 0;
+    for (const bucket of midBuckets) bucket.length = 0;
+    for (const bucket of nearBuckets) bucket.length = 0;
     this.expiredMessagesScratch.length = 0;
 
     const oldLength = this.activeMessages.length;
@@ -949,10 +979,17 @@ export class CanvasRenderer extends RendererBase {
         Math.round(opacity * (OPACITY_BUCKET_COUNT - 1))
       );
       msg._frameElapsed = elapsed;
-      buckets[bucketIndex]!.push(msg);
+      // Route to the correct speed-tier bucket for z-order rendering
+      if (msg.speedTier === SPEED_TIER.FAR) {
+        farBuckets[bucketIndex]!.push(msg);
+      } else if (msg.speedTier === SPEED_TIER.NEAR) {
+        nearBuckets[bucketIndex]!.push(msg);
+      } else {
+        midBuckets[bucketIndex]!.push(msg);
+      }
     }
 
-    return { buckets, anyRemoved, writeIdx, oldLength };
+    return { farBuckets, midBuckets, nearBuckets, anyRemoved, writeIdx, oldLength };
   }
 
   /** Compact the activeMessages array and clean the per-lane map after expired message removal. */
@@ -1219,6 +1256,28 @@ export class CanvasRenderer extends RendererBase {
       );
       batchIndex++;
       committed.push(msg);
+
+      // Pre-warm text bitmap cache so the render loop never pays
+      // the cost of cache-miss bitmap generation during drawStage.
+      if (this.settings.outline.widthPx > 0 && this.settings.outline.opacity > 0) {
+        const warmColor =
+          this.settings.preserveUserColor && msg.userColor
+            ? msg.userColor
+            : this.settings.colors[msg.authorType];
+        const farSpacing = result.speedTier === SPEED_TIER.FAR ? '1px' : undefined;
+        warmTextBitmapCache(
+          toSharedContentSegments(msg.content),
+          this.settings.fontSize,
+          this.settings.fontWeight,
+          this.settings.fontFamily,
+          warmColor,
+          this.settings.outline.widthPx,
+          this.settings.outline.opacity,
+          this.textBitmapCache,
+          this.ctx!,
+          farSpacing
+        );
+      }
     }
 
     // Atomically remove successfully placed messages from the queue.
@@ -2061,7 +2120,9 @@ export class CanvasRenderer extends RendererBase {
     clearTextMeasurementCaches();
     this.textBitmapCache.clear();
     this.dimensionCache.clear();
-    for (const bucket of this.opacityBuckets) bucket.length = 0;
+    for (const bucket of this.farOpacityBuckets) bucket.length = 0;
+    for (const bucket of this.midOpacityBuckets) bucket.length = 0;
+    for (const bucket of this.nearOpacityBuckets) bucket.length = 0;
 
     const dims = this.overlay.getDimensions();
     if (dims) {
