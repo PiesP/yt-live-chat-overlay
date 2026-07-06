@@ -105,30 +105,12 @@ import type {
 const PULSE_ANGULAR_FREQ = Math.PI;
 const MS_PER_SEC = MS_TO_S;
 
-// ── Module-level state for standalone card renderer ──
-
-const ctx: OffscreenCanvasRenderingContext2D | null = null;
-const config: WorkerConfig | null = null;
-const fontMetricsCache = new Map<string, { height: number }>(); // See also text-measure.ts fontMetricsCache (main thread variant — intentionally duplicated for OffscreenCanvas)
 // biome-ignore lint/style/useConst: reassigned during worker init
 let stickerCache: ByteLimitedCache<ImageBitmap> | null = null;
 
 function measureTextHeight(fontSize: number): number {
-  if (!ctx) return Math.ceil(fontSize * 1.1);
-  const font = ((): string => {
-    if (!config) return `${fontSize}px sans-serif`;
-    return getFontString(fontSize, config.fontWeight, config.fontFamily);
-  })();
-  let metrics = fontMetricsCache.get(font);
-  if (!metrics) {
-    ctx.font = font;
-    const m = ctx.measureText('Mg');
-    const ascent = Math.max(0, m.actualBoundingBoxAscent);
-    const descent = Math.max(0, m.actualBoundingBoxDescent);
-    metrics = { height: Math.ceil(ascent + descent) };
-    fontMetricsCache.set(font, metrics);
-  }
-  return metrics.height;
+  // Module-level ctx/config were removed; always return conservative fallback.
+  return Math.ceil(fontSize * 1.1);
 }
 
 /** Split text into grapheme clusters for safe truncation.
