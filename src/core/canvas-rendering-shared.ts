@@ -688,7 +688,13 @@ function renderContentSegments(
  *  rasterization) is only paid once per unique photo.  Keyed by the photo
  *  object itself so cleanup is automatic when the image is evicted from
  *  the caller's ByteLimitedCache. */
-const _photoShadowCache = new WeakMap<object, OffscreenCanvas>();
+let _photoShadowCache = new WeakMap<object, OffscreenCanvas>();
+
+/** Clear the photo shadow cache. Use this to release accumulated
+ *  pre-composited OffscreenCanvas allocations during very long sessions. */
+export function clearPhotoShadowCache(): void {
+  _photoShadowCache = new WeakMap<object, OffscreenCanvas>();
+}
 
 /** Pad around the photo for shadow overflow (blur=4 + offset=1 ≈ 5px). */
 const AUTHOR_PHOTO_SHADOW_PAD = 5;
