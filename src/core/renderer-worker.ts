@@ -214,11 +214,19 @@ function renderPaidCardWorker(
   if (card.decoration === 'accentBar' && card.accentBar) {
     const barRgb = card.accentBar.color;
     ctx.save();
-    ctx.translate(x, y);
-    drawRoundRect(ctx, 0, 0, w, h, card.cardRadius);
-    ctx.clip();
     ctx.fillStyle = `rgb(${barRgb.r}, ${barRgb.g}, ${barRgb.b})`;
-    ctx.fillRect(0, 0, card.accentBar.width, h);
+    // Dedicated left-rounded rect — avoids ctx.clip() which forces save/restore
+    // and recomputes the rasterizer clip mask.
+    ctx.beginPath();
+    ctx.moveTo(x + card.cardRadius, y);
+    ctx.lineTo(x + card.accentBar.width, y);
+    ctx.lineTo(x + card.accentBar.width, y + h);
+    ctx.lineTo(x + card.cardRadius, y + h);
+    ctx.arcTo(x, y + h, x, y + h - card.cardRadius, card.cardRadius);
+    ctx.lineTo(x, y + card.cardRadius);
+    ctx.arcTo(x, y, x + card.cardRadius, y, card.cardRadius);
+    ctx.closePath();
+    ctx.fill();
     ctx.restore();
   } else if (card.decoration === 'pulsingBorder' && card.pulsingBorder) {
     const pb = card.pulsingBorder;
@@ -974,6 +982,9 @@ export class WorkerRenderer {
           }
           const front = this.pendingQueue[this.pendingQueueOffset];
           const forceDrain = now - this.antiBlockStartTime >= ANTI_BLOCK_MAX_DURATION_MS;
+          if (forceDrain) {
+            this.antiBlockStartTime = now;
+          }
           const highPriorityFront = front ? front.priority >= ANTI_BLOCK_PRIORITY_THRESHOLD : false;
           shouldDrain = forceDrain || highPriorityFront;
         } else {
