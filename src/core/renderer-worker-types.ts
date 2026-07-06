@@ -211,4 +211,9 @@ export interface ActiveMessage {
   /** Transient frame-local elapsed (ms). Set by renderFrame pre-scan, used by
    *  bucket rendering. Not serialized — re-set each frame. */
   _frameElapsed?: number;
+  /** Transient previous-frame X position for temporal frame blending.
+   *  Set before position update in pre-scan, read by draw stage. */
+  _prevX?: number;
+  /** Transient previous-frame Y position for temporal frame blending. */
+  _prevY?: number;
 }

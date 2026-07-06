@@ -31,7 +31,7 @@ import { isImageReady } from '@core/canvas-worker-bridge';
 import { MEMBERSHIP_CARD_CONFIG, SUPERCHAT_CARD_CONFIG } from '@core/card-config';
 import { ChannelLanguageMemory } from '@core/channel-language-memory';
 import { getTranslatableText } from '@core/chat-message-helpers';
-import { computeScrollDuration, statusBarLayout } from '@core/design-tokens';
+import { computeScrollDuration, rendererLayout, statusBarLayout } from '@core/design-tokens';
 import { clearSafeAnimationFrame, forEachSlot, SCREEN_READER_CSS } from '@core/dom';
 import { ImageFetchManager } from '@core/image-fetch-manager';
 import { computeBaseHeadwayPx } from '@core/lane-allocation-shared';
@@ -58,6 +58,7 @@ import {
   STAGGER_EXP_SCALE,
   STAGGER_QUEUE_HIGH,
   STAGGER_QUEUE_MED,
+  TEMPORAL_BLEND_ALPHA,
   TIER_NEAR_THRESHOLD,
   TRANSLATION_FONT_SCALE,
   TRANSLATION_GAP_PX,
@@ -907,6 +908,11 @@ export class CanvasRenderer extends RendererBase {
       if (elapsed < 0) continue;
 
       // ── Render pre-compute ──
+      // Save previous position for temporal frame blending (FAR-tier motion blur)
+      if (msg.speedTier === SPEED_TIER.FAR) {
+        msg._prevX = msg.x;
+        msg._prevY = msg.y;
+      }
       const progress = Math.min(1, Math.max(0, elapsed * msg.invDuration));
 
       if (mode === 'scroll') {
@@ -1018,6 +1024,40 @@ export class CanvasRenderer extends RendererBase {
           const snappedX = Math.floor(msg.x);
           const snappedY = Math.floor(msg.y);
 
+          // Temporal frame blending: render ghost at previous position for FAR-tier
+          if (
+            msg.speedTier === SPEED_TIER.FAR &&
+            msg._prevX !== undefined &&
+            msg._prevY !== undefined
+          ) {
+            const ghostAlpha = ctx.globalAlpha * TEMPORAL_BLEND_ALPHA;
+            if (ghostAlpha > 0.001) {
+              ctx.save();
+              ctx.globalAlpha = ghostAlpha;
+              // Re-draw the same message at the previous position
+              // We use a lightweight direct fillText for the ghost (no outline, no cache)
+              if (msg.renderMessage) {
+                const ghostFont = this.boundGetFont(this.settings.fontSize);
+                ctx.font = ghostFont;
+                ctx.textBaseline = 'top';
+                ctx.textRendering = 'optimizeSpeed';
+                const ghostColor =
+                  msg.renderMessage.userColor && this.settings.preserveUserColor
+                    ? msg.renderMessage.userColor
+                    : (msg.renderMessage.authorType &&
+                        this.settings.colors[msg.renderMessage.authorType]) ||
+                      this.settings.colors.normal;
+                ctx.fillStyle = ghostColor;
+                ctx.fillText(
+                  msg.renderMessage.text,
+                  Math.floor(msg._prevX) + rendererLayout.paddingH,
+                  Math.floor(msg._prevY) + rendererLayout.paddingV
+                );
+              }
+              ctx.restore();
+            }
+          }
+
           const renderMessage = msg.renderMessage;
 
           if (msg.message.kind === 'text') {
@@ -1046,7 +1086,8 @@ export class CanvasRenderer extends RendererBase {
               isImageReady,
               this.boundGetFont,
               this.boundMeasureTextWidth,
-              isReplace ? msg.translatedText : undefined
+              isReplace ? msg.translatedText : undefined,
+              msg.speedTier === SPEED_TIER.FAR ? '1px' : undefined
             );
           } else {
             const cardConfig =

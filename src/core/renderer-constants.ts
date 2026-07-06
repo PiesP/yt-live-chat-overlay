@@ -103,6 +103,12 @@ export const TIER_NEAR_THRESHOLD = 0.3;
 /** Desaturation factor for Far-tier depth layer user colors. */
 export const FAR_LAYER_DESATURATION_FACTOR = 0.3;
 
+/** Ghost alpha for temporal frame blending on FAR-tier messages.
+ *  Renders a faint previous-frame copy before the current frame to
+ *  create perceived motion blur, smoothing fast-scrolling text.
+ *  Keep low (0.08–0.15) to avoid visible ghosting artifacts. */
+export const TEMPORAL_BLEND_ALPHA = 0.12;
+
 // ── Text rendering (canvas-rendering-shared.ts) ──────────────────────────────
 
 /** Outline stroke scale factor: outline.widthPx is multiplied by this
@@ -202,6 +208,12 @@ export interface CanvasMessage {
   /** Transient frame-local elapsed (ms). Set by renderFrame pre-scan, read by
    *  rendering. Not serialized — re-set each frame. */
   _frameElapsed?: number;
+  /** Transient previous-frame X position for temporal frame blending (motion blur).
+   *  Set before position update in pre-scan, read by draw stage for ghost rendering.
+   *  Only meaningful for FAR-tier messages. Not serialized. */
+  _prevX?: number;
+  /** Transient previous-frame Y position for temporal frame blending. */
+  _prevY?: number;
   /**
    * Per-slot index in each per-lane array (activeMessagesByLane).
    * laneArrayIndices[s] = position of this message in the per-lane array

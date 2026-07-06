@@ -423,7 +423,8 @@ function cacheTextBitmap(
   strokeWidth: number,
   strokeColor: string,
   ctx: AnyCanvasContext,
-  textBitmapCache: TextBitmapCache
+  textBitmapCache: TextBitmapCache,
+  letterSpacing = '0px'
 ): void {
   if (!ctx) return;
 
@@ -460,7 +461,8 @@ function cacheTextBitmap(
   offCtx.scale(dpr, dpr);
   offCtx.font = font;
   offCtx.textBaseline = 'top';
-  offCtx.textRendering = 'optimizeSpeed';
+  offCtx.letterSpacing = letterSpacing;
+  offCtx.textRendering = 'optimizeLegibility';
   offCtx.strokeStyle = strokeColor;
   offCtx.lineWidth = strokeWidth;
   offCtx.lineJoin = 'round';
@@ -523,7 +525,8 @@ export function renderSegment(
   outlineWidthPx: number,
   outlineOpacity: number,
   textBitmapCache: TextBitmapCache,
-  getFontFn: (fontSize: number) => string
+  getFontFn: (fontSize: number) => string,
+  letterSpacing = '0px'
 ): void {
   // Reverse RTL text so Canvas2D fillText (always LTR) produces correct
   // visual reading order for Arabic, Hebrew, etc.
@@ -540,7 +543,7 @@ export function renderSegment(
 
   // Try bitmap cache first (includes outline rendering)
   if (outlineWidthPx > 0 && outlineOpacity > 0 && displayText.length >= 3) {
-    const key = `${font}|${displayText}|${color}|${Math.round(strokeWidth)}|${outlineClass}`;
+    const key = `${font}|${displayText}|${color}|${Math.round(strokeWidth)}|${outlineClass}|${letterSpacing}`;
     const bitmap = textBitmapCache.get(key);
     if (bitmap) {
       drawBitmapAtCssSize(ctx, bitmap, x, y);
@@ -557,7 +560,8 @@ export function renderSegment(
       strokeWidth,
       strokeColor,
       ctx,
-      textBitmapCache
+      textBitmapCache,
+      letterSpacing
     );
 
     // Immediately use the freshly cached bitmap to avoid fallthrough overhead
@@ -573,6 +577,7 @@ export function renderSegment(
   ctx.font = font;
   ctx.textBaseline = 'top';
   ctx.textRendering = 'optimizeSpeed';
+  ctx.letterSpacing = letterSpacing;
   strokeTextOutline(ctx, displayText, x, y, color, outlineWidthPx, outlineOpacity);
   ctx.fillStyle = color;
   ctx.fillText(displayText, x, y);
@@ -624,7 +629,8 @@ function renderContentSegments(
   textBitmapCache: TextBitmapCache,
   getFontFn: (fontSize: number) => string,
   measureTextFn: (text: string) => number,
-  getEmojiImg: (url: string) => CanvasImageSource | null
+  getEmojiImg: (url: string) => CanvasImageSource | null,
+  letterSpacing = '0px'
 ): void {
   let cursorX = startX;
   const emojiSize = Math.round(fontSize * rendererLayout.emojiSize);
@@ -641,7 +647,8 @@ function renderContentSegments(
         outlineWidthPx,
         outlineOpacity,
         textBitmapCache,
-        getFontFn
+        getFontFn,
+        letterSpacing
       );
       cursorX += measureTextFn(seg.content);
     } else {
@@ -940,7 +947,8 @@ export function renderRegularMessage(
   isValidAuthorPhoto: (photo: unknown) => boolean,
   getFontFn: (fontSize: number) => string,
   measureTextFn: (text: string) => number,
-  overrideText?: string | null
+  overrideText?: string | null,
+  letterSpacing = '0px'
 ): void {
   const { showAuthor, fontSize, fontWeight, fontFamily, color, outlineWidthPx, outlineOpacity } =
     config;
@@ -979,7 +987,8 @@ export function renderRegularMessage(
       outlineWidthPx,
       outlineOpacity,
       textBitmapCache,
-      getFontFn
+      getFontFn,
+      letterSpacing
     );
   } else if (message.content.length > 0) {
     renderContentSegments(
@@ -997,7 +1006,8 @@ export function renderRegularMessage(
       (url: string) => {
         const img = getEmojiImage(url);
         return img != null && isValidEmoji(img) ? (img as CanvasImageSource) : null;
-      }
+      },
+      letterSpacing
     );
   } else if (message.text.length > 0) {
     renderSegment(
@@ -1010,7 +1020,8 @@ export function renderRegularMessage(
       outlineWidthPx,
       outlineOpacity,
       textBitmapCache,
-      getFontFn
+      getFontFn,
+      letterSpacing
     );
   }
 }

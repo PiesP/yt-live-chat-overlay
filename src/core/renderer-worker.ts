@@ -81,6 +81,7 @@ import {
   STAGGER_EXP_SCALE,
   STAGGER_QUEUE_HIGH,
   STAGGER_QUEUE_MED,
+  TEMPORAL_BLEND_ALPHA,
   TIER_NEAR_THRESHOLD,
   TRANSLATION_FONT_SCALE,
   TRANSLATION_GAP_PX,
@@ -1020,6 +1021,11 @@ export class WorkerRenderer {
       // Still in stagger delay — keep but skip rendering
       if (elapsed < 0) continue;
       // ── Render pre-compute ──
+      // Save previous position for temporal frame blending (FAR-tier motion blur)
+      if (msg.speedTier === SPEED_TIER.FAR) {
+        msg._prevX = msg.x;
+        msg._prevY = msg.y;
+      }
       const progress = Math.min(1, Math.max(0, elapsed * msg.invDuration));
       const isReducedMotionActive = this.config.reducedMotion && !this.config.ignoreReducedMotion;
       if (mode === 'scroll') {
@@ -1087,6 +1093,30 @@ export class WorkerRenderer {
           const sx = Math.floor(msg.x);
           if (sx + msg.width <= 0) continue;
           const sy = Math.floor(msg.y);
+
+          // Temporal frame blending: render ghost at previous position for FAR-tier
+          if (
+            msg.speedTier === SPEED_TIER.FAR &&
+            !msg.cardConfigWorker &&
+            msg._prevX !== undefined &&
+            msg._prevY !== undefined
+          ) {
+            const ghostAlpha = this.ctx.globalAlpha * TEMPORAL_BLEND_ALPHA;
+            if (ghostAlpha > 0.001) {
+              this.ctx.save();
+              this.ctx.globalAlpha = ghostAlpha;
+              const ghostFont = getFont(this.config.fontSize);
+              this.ctx.font = ghostFont;
+              this.ctx.textRendering = 'optimizeSpeed';
+              this.ctx.fillStyle = renderColor;
+              this.ctx.fillText(
+                msg.text,
+                Math.floor(msg._prevX) + rendererLayout.paddingH,
+                Math.floor(msg._prevY) + rendererLayout.paddingV
+              );
+              this.ctx.restore();
+            }
+          }
           if (msg.cardConfigWorker) {
             renderPaidCardWorker(
               this.ctx,
@@ -1146,7 +1176,8 @@ export class WorkerRenderer {
               () => true,
               getFont,
               this.measureTextCached.bind(this),
-              overrideText
+              overrideText,
+              msg.speedTier === SPEED_TIER.FAR ? '1px' : undefined
             );
           }
           if (
