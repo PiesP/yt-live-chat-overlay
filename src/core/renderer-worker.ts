@@ -103,7 +103,6 @@ import type {
 
 // ── Worker-specific constants ──────────────────────────────────────────────
 const PULSE_ANGULAR_FREQ = Math.PI;
-const MS_PER_SEC = MS_TO_S;
 
 // biome-ignore lint/style/useConst: reassigned during worker init
 let stickerCache: ByteLimitedCache<ImageBitmap> | null = null;
@@ -222,8 +221,7 @@ function renderPaidCardWorker(
     ctx.restore();
   } else if (card.decoration === 'pulsingBorder' && card.pulsingBorder) {
     const pb = card.pulsingBorder;
-    const pulse =
-      Math.sin((elapsed / MS_PER_SEC) * PULSE_ANGULAR_FREQ) * pb.amplitude + pb.baseAlpha;
+    const pulse = Math.sin((elapsed / MS_TO_S) * PULSE_ANGULAR_FREQ) * pb.amplitude + pb.baseAlpha;
     ctx.save();
     drawRoundRect(ctx, x, y, w, h, card.cardRadius);
     ctx.strokeStyle = `rgba(${pb.borderRgb.r}, ${pb.borderRgb.g}, ${pb.borderRgb.b}, ${pulse})`;
