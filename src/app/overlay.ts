@@ -317,8 +317,12 @@ export class Overlay {
     }
     this.liveRegionTimer = setTimeout(() => {
       this.liveRegionTimer = null;
-      // Update text content with pipe-separated snippets
-      this.liveRegion!.textContent = snippets.join(' | ');
+      // Update text content with pipe-separated snippets.
+      // Defend against TOCTOU: liveRegion may have been set to null by
+      // destroy() between the outer null check and this callback.
+      if (this.liveRegion) {
+        this.liveRegion.textContent = snippets.join(' | ');
+      }
     }, Overlay.LIVE_REGION_DEBOUNCE_MS);
   }
 
@@ -375,6 +379,13 @@ export class Overlay {
     this.settings = null;
     this.dimensionChangeCallbacks.clear();
     this.liveRegion = null;
+
+    // Clear any pending live-region update timer to prevent
+    // a stale setTimeout callback from accessing the null liveRegion.
+    if (this.liveRegionTimer !== null) {
+      clearTimeout(this.liveRegionTimer);
+      this.liveRegionTimer = null;
+    }
 
     log.debug('Destroyed');
   }
