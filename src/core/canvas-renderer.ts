@@ -59,6 +59,8 @@ import {
   HORIZONTAL_STAGGER_PER_STEP,
   hashStringForTier,
   OPACITY_BUCKET_COUNT,
+  SIN_LUT_SCALE,
+  SIN_TABLE,
   SPEED_TIER,
   STAGGER_BATCH_MAX,
   STAGGER_EXP_SCALE,
@@ -86,6 +88,8 @@ import {
   measureTextWidth,
 } from '@core/text-measure';
 import { TranslationService } from '@core/translation-service';
+
+import { WebGL2ImageRenderer } from '@core/webgl2-image-renderer';
 
 const log = createLogger('RendererCanvas');
 
@@ -247,6 +251,9 @@ export class CanvasRenderer extends RendererBase {
 
   private static readonly IDLE_GRACE_PERIOD_MS = 500;
 
+  /** WebGL2-accelerated image rendering overlay (experimental). */
+  private webgl2: WebGL2ImageRenderer | null = null;
+
   /**
    * H2: Tracks whether the status bar has been rendered at least once
    * since the last status change. When transitioning from idle with a
@@ -346,6 +353,12 @@ export class CanvasRenderer extends RendererBase {
     // created.  The old guard here never fired because the field is only
     // assigned later in this constructor (line 311).
 
+    // Initialize WebGL2 overlay for GPU-accelerated image/glow effects.
+    const initDims = overlay.getDimensions();
+    if (container && initDims) {
+      this.webgl2 = new WebGL2ImageRenderer(container, initDims.width, initDims.height);
+    }
+
     // Initialize ImageFetchManager BEFORE RenderWorkerManager so the worker
     // receives a valid reference instead of undefined.
     this.imageFetchManager = new ImageFetchManager();
@@ -370,6 +383,7 @@ export class CanvasRenderer extends RendererBase {
       if (d && this.canvas) {
         this.applyDevicePixelRatio(d);
         this.laneAllocator.reset(d);
+        this.webgl2?.resize(d.width, d.height);
       }
     });
 
@@ -804,9 +818,12 @@ export class CanvasRenderer extends RendererBase {
     }
 
     // ── Draw stage: opacity-bucketed rendering (FAR → MID → NEAR) ──
+    // WebGL2 overlay renders glow/effects beneath Canvas2D text
+    this.webgl2?.beginFrame();
     this.drawStage(ctx, cleanupResult.farBuckets);
     this.drawStage(ctx, cleanupResult.midBuckets);
     this.drawStage(ctx, cleanupResult.nearBuckets);
+    this.webgl2?.flush();
 
     // ── Live region mirroring: expose last 10 visible messages to AT ──
     this.mirrorVisibleMessages();
@@ -1147,6 +1164,25 @@ export class CanvasRenderer extends RendererBase {
               this.boundGetFont,
               this.superChatGradientCache
             );
+
+            // WebGL2 glow for membership pulsing border
+            if (this.webgl2?.isEnabled && cardConfig.decoration === 'pulsingBorder') {
+              const pb = cardConfig.pulsingBorder;
+              if (pb) {
+                const sinIndex = ((elapsed * SIN_LUT_SCALE) | 0) & 255;
+                const pulse = SIN_TABLE[sinIndex]! * pb.amplitude + pb.baseAlpha;
+                if (pulse > 0.01) {
+                  this.webgl2.addGlow(
+                    snappedX,
+                    snappedY,
+                    msg.width,
+                    msg.height,
+                    `rgba(${pb.borderRgb.r},${pb.borderRgb.g},${pb.borderRgb.b},${pulse})`,
+                    pulse * 0.3
+                  );
+                }
+              }
+            }
           }
 
           // Render translation in dual mode
@@ -2019,6 +2055,7 @@ export class CanvasRenderer extends RendererBase {
     this.stopRenderLoop();
     this.workerManager.destroy();
     this.imageFetchManager.destroy();
+    this.webgl2?.destroy();
     this.overlayDimensionsUnsubscribe?.();
     if (this.canvas && this.canvasClickHandler) {
       this.canvas.removeEventListener('click', this.canvasClickHandler);
