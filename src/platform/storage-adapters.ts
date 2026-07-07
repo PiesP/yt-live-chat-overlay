@@ -8,7 +8,10 @@
  * The factory function selects the appropriate adapter based on environment.
  */
 
+import { createLogger } from '@core/logging';
 import type { StorageAdapter } from '@platform/types';
+
+const log = createLogger('StorageAdapter');
 
 // ── LocalStorageAdapter ────────────────────────────────────────────────────
 
@@ -27,8 +30,8 @@ export class LocalStorageAdapter implements StorageAdapter {
     } catch (error: unknown) {
       // quota exceeded or private browsing — log and surface feedback
       if (this.isQuotaExceededError(error)) {
-        console.warn(
-          `[yt-chat-overlay] Storage quota exceeded for key "${key}". ` +
+        log.warn(
+          `Storage quota exceeded for key "${key}". ` +
             'Consider reducing settings data or clearing unused entries.'
         );
       }
@@ -117,8 +120,8 @@ export class ChromeStorageAdapter implements StorageAdapter {
     } catch (error: unknown) {
       // quota exceeded or extension context invalidated — log and surface feedback
       if (this.isQuotaExceededError(error)) {
-        console.warn(
-          `[yt-chat-overlay] Chrome storage quota exceeded for key "${key}". ` +
+        log.warn(
+          `Chrome storage quota exceeded for key "${key}". ` +
             'Consider reducing settings data or clearing unused entries.'
         );
       }
