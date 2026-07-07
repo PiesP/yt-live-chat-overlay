@@ -106,7 +106,12 @@ export const FAR_LAYER_DESATURATION_FACTOR = 0.3;
 /** Ghost alpha for temporal frame blending on FAR-tier messages.
  *  Renders a faint previous-frame copy before the current frame to
  *  create perceived motion blur, smoothing fast-scrolling text.
- *  Keep low (0.08–0.15) to avoid visible ghosting artifacts. */
+ *  Keep low (0.08–0.15) to avoid visible ghosting artifacts.
+ *
+ *  IMPORTANT: Ghost text MUST use text-only content segments, NOT
+ *  message.text.  message.text includes emoji fallbackText (e.g.
+ *  "PiesP Smile") which would render as faint unrelated text
+ *  alongside emoji images.  See ChatMessage.text documentation. */
 export const TEMPORAL_BLEND_ALPHA = 0.12;
 
 // ── Text rendering (canvas-rendering-shared.ts) ──────────────────────────────

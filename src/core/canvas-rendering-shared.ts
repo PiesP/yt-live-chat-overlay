@@ -111,6 +111,29 @@ interface SharedEmojiPiece {
 
 export type SharedRenderPiece = SharedTextPiece | SharedEmojiPiece;
 
+/** Content segment shape accepted by getDisplayText. */
+interface TextSegmentLike {
+  type: string;
+  content?: string;
+}
+
+/**
+ * Extract text-only content from segments, excluding emoji fallbackText.
+ *
+ * Use this when you need a plain-text rendering fallback — e.g. for
+ * lightweight fillText paths (temporal ghost, width estimation) — to
+ * avoid accidentally rendering emoji accessibility labels alongside
+ * emoji images.
+ *
+ * @see ChatMessage.text — includes emoji fallbackText, NOT for canvas rendering.
+ */
+export function getDisplayText(segments: readonly TextSegmentLike[]): string {
+  return segments
+    .filter((s): s is { type: 'text'; content: string } => s.type === 'text' && !!s.content)
+    .map((s) => s.content)
+    .join('');
+}
+
 // ── Character-level wrapping for oversize words (CJK, URLs, etc.) ──────────
 
 /** Lazy-initialized Intl.Segmenter for grapheme-cluster splitting. */

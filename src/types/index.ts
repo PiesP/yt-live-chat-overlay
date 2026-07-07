@@ -132,7 +132,19 @@ export interface SuperChatInfo {
 export interface ChatMessage {
   /** Stable YouTube message id for deduplication (from renderer DOM id). */
   id?: string;
-  /** Derived plain-text fallback from content (sanitized, max 80 chars) */
+  /**
+   * Plain-text representation built from content segments (includes emoji fallbackText).
+   *
+   * Primary consumers:
+   *  - Search / deduplication hashing
+   *  - Accessibility live region mirroring
+   *  - Source language auto-detection
+   *  - Width estimation fallback (when content is empty)
+   *
+   * NOT FOR CANVAS RENDERING — use `content` (ContentSegment[]) for rendering.
+   * `text` includes emoji fallbackText (e.g. "PiesP Smile" for membership emojis)
+   * which would appear as unrelated text alongside emoji images if rendered.
+   */
   text: string;
   /** Canonical visible content segments used for rendering */
   content: ContentSegment[];

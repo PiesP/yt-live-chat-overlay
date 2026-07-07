@@ -36,6 +36,7 @@ import { fastRandom } from '@core/canvas-pipeline';
 import {
   drawAuthorSection,
   drawRoundRect,
+  getDisplayText,
   renderRegularMessage,
   renderSegment,
   renderWrappedContentSegments,
@@ -1127,10 +1128,7 @@ export class WorkerRenderer {
                 this.ctx.fontKerning = 'none';
                 this.ctx.fillStyle = renderColor;
                 // Build ghost text from text segments only — skip emoji fallbackText
-                const ghostText = (msg.content ?? [])
-                  .filter((s): s is { type: 'text'; content: string } => s.type === 'text')
-                  .map((s) => s.content)
-                  .join('');
+                const ghostText = getDisplayText(msg.content ?? []);
                 if (ghostText) {
                   this.ctx.fillText(
                     ghostText,

@@ -28,6 +28,7 @@ import { renderPaidCard } from '@core/canvas-card-renderers';
 import { COMPACTION_THRESHOLD_RATIO, fastRandom } from '@core/canvas-pipeline';
 import {
   drawRoundRect,
+  getDisplayText,
   renderRegularMessage,
   renderSegment,
   toSharedContentSegments,
@@ -1114,10 +1115,7 @@ export class CanvasRenderer extends RendererBase {
                 ctx.fillStyle = ghostColor;
                 // Build ghost text from text segments only — skip emoji fallbackText
                 // which would appear as faint ghost text alongside emoji images.
-                const ghostText = msg.renderMessage.content
-                  .filter((s): s is { type: 'text'; content: string } => s.type === 'text')
-                  .map((s) => s.content)
-                  .join('');
+                const ghostText = getDisplayText(msg.renderMessage.content);
                 if (ghostText) {
                   ctx.fillText(
                     ghostText,
