@@ -114,10 +114,49 @@ export const DEFAULT_SETTINGS = {
 } as const satisfies Readonly<OverlaySettings>;
 
 export const STORAGE_KEY = 'yt-live-chat-overlay-settings';
+
+// ── Settings migration chain ───────────────────────────────────────────────
+
+type MigrationFn = (settings: Record<string, unknown>) => Record<string, unknown>;
+
+/**
+ * Ordered migration map: version N → N+1.
+ * Each function receives a shallow-cloned settings object for the source version
+ * and must return a settings object at version N+1 with `_version` set.
+ *
+ * To add a new migration (e.g. v1 → v2):
+ *   1. Add a new entry: `1: (s) => ({ ...s, newField: defaultValue, _version: 2 })`
+ *   2. Bump SETTINGS_VERSION to match the new target version.
+ */
+const MIGRATIONS: Readonly<Record<number, MigrationFn>> = {
+  // v0 → v1: initial version stamp (no schema changes)
+  0: (s: Record<string, unknown>): Record<string, unknown> => ({ ...s, _version: 1 }),
+};
+
+/** Current settings schema version. Must match the highest key in MIGRATIONS + 1. */
 export const SETTINGS_VERSION = 1;
 
-/** Version-aware migration. Stamps version if absent; preserves existing version for chained migration support. */
+/**
+ * Apply all pending migrations to raw stored settings.
+ * Chains through MIGRATIONS from the stored version up to SETTINGS_VERSION.
+ * Each step receives the output of the previous step.
+ */
 export function migrateSettings(raw: Record<string, unknown>): Record<string, unknown> {
-  const version = (raw._version as number) ?? 0;
-  return { ...raw, _version: Math.max(version, 1) };
+  let version = (raw._version as number) ?? 0;
+
+  // Copy so we don't mutate the argument
+  let migrated: Record<string, unknown> = { ...raw };
+
+  while (version < SETTINGS_VERSION) {
+    const fn = MIGRATIONS[version];
+    if (!fn) {
+      // Gap in migration chain — stamp version and stop
+      migrated = { ...migrated, _version: SETTINGS_VERSION };
+      break;
+    }
+    migrated = fn(migrated);
+    version = migrated._version as number;
+  }
+
+  return migrated;
 }
