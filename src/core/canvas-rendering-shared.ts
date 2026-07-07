@@ -105,6 +105,7 @@ interface SharedEmojiPiece {
   type: 'emoji';
   emojiUrl: string;
   emojiAlt?: string;
+  emojiFallbackText?: string;
   width: number;
 }
 
@@ -246,11 +247,13 @@ export function buildWrappedLines(
     } else {
       const url = seg.emojiUrl ?? seg.emoji?.url ?? '';
       const alt = seg.emojiAlt ?? seg.emoji?.alt;
+      const fallbackText = seg.emojiFallbackText ?? seg.emoji?.fallbackText;
       if (url) {
         pieces.push({
           type: 'emoji',
           emojiUrl: url,
           ...(alt ? { emojiAlt: alt } : {}),
+          ...(fallbackText ? { emojiFallbackText: fallbackText } : {}),
           width: emojiSize + spacing.xs,
         });
       }
@@ -1209,6 +1212,19 @@ export function renderWrappedContentSegments<
         const img = cached && 'naturalWidth' in cached && cached.naturalWidth > 0 ? cached : null;
         if (img) {
           ctx.drawImage(img, cursorX, cursorY, emojiSize, emojiSize);
+        } else if (piece.emojiFallbackText) {
+          renderSegment(
+            ctx,
+            piece.emojiFallbackText,
+            cursorX,
+            cursorY,
+            color,
+            fontSize,
+            outlineWidthPx,
+            outlineOpacity,
+            textBitmapCache,
+            getFontFn
+          );
         } else if (piece.emojiAlt && !EMOJI_ALIAS_PATTERN.test(piece.emojiAlt)) {
           renderSegment(
             ctx,

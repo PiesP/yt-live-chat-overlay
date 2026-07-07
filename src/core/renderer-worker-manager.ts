@@ -331,6 +331,7 @@ export class RenderWorkerManager {
         content: s.emoji.alt,
         emojiUrl: s.emoji.url,
         emojiAlt: s.emoji.alt,
+        emojiFallbackText: s.emoji.fallbackText,
       };
     });
 
