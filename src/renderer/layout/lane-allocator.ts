@@ -43,6 +43,9 @@ export interface LaneAllocatorOptions {
   exitPaddingPx: number;
   scrollDurationMaxMs: number;
   maxMessageAgeMs: number;
+  /** Lane density factor: 1.0 = full-cell, < 1.0 = sub-cell mode.
+   *  effectiveLaneHeight = laneHeight * laneDensityFactor. */
+  laneDensityFactor: number;
 }
 
 /**
@@ -161,12 +164,17 @@ export class LaneAllocator {
     );
     const textHeight = measureTextHeight(font, this.options.fontSize);
 
-    this.laneHeight = Math.max(1, textHeight + totalPaddingV + this.options.laneSpacing);
+    const rawLaneHeight = Math.max(1, textHeight + totalPaddingV + this.options.laneSpacing);
+    this.laneHeight = Math.max(1, Math.round(rawLaneHeight * this.options.laneDensityFactor));
 
     const usableHeight = dimensions.height * (1 - this.options.safeTop - this.options.safeBottom);
     this.numLanes = Math.max(1, Math.floor(usableHeight / this.laneHeight));
 
-    log.debug('Reset', { lanes: this.numLanes, height: Math.round(this.laneHeight) });
+    log.debug('Reset', {
+      lanes: this.numLanes,
+      height: Math.round(this.laneHeight),
+      density: this.options.laneDensityFactor,
+    });
 
     // Uniform initialization: all lanes start at the same available time.
     const now = performance.now();

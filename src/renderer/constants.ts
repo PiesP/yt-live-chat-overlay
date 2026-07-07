@@ -44,6 +44,12 @@ export const SAFETY_MARGIN_RATIO = 0.15;
  *  5% chance to skip the strict topmost zero-wait lane. */
 export const EPSILON = 0.05;
 
+/** Lane density factor for sub-cell placement during bursts.
+ *  1.0 = full-cell (normal), 0.75 = 3/4-cell (high burst), 0.5 = half-cell (extreme burst).
+ *  When < 1.0, effectiveLaneHeight = laneHeight * factor doubles lane resolution
+ *  for finer vertical placement opportunities. */
+export const LANE_DENSITY_NORMAL = 1.0;
+
 /** Free ratio for anti-block gate: utilization above (1 - this) triggers
  *  probabilistic blocking of new message placements. */
 export const ANTI_BLOCK_FREE_RATIO = 0.05;

@@ -97,6 +97,7 @@ export abstract class RendererBase {
       exitPaddingPx: this.settings.exitPaddingPx,
       scrollDurationMaxMs: this.settings.scrollDurationMaxMs,
       maxMessageAgeMs: this.settings.maxMessageAgeMs,
+      laneDensityFactor: 1.0,
     });
     this.laneAllocator.reset(this.overlay.getDimensions());
 
