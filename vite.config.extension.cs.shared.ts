@@ -11,52 +11,32 @@
  */
 
 import { resolve } from 'node:path';
-import { defineConfig, type UserConfigFn } from 'vite';
+import { defineConfig, mergeConfig, type UserConfig } from 'vite';
 import pkg from './package.json';
+import { basePreset } from './tooling/vite/presets/base';
+import { extensionCsPreset } from './tooling/vite/presets/extension-cs';
 
-export function createContentScriptConfig(outDir: string): UserConfigFn {
+export function createContentScriptConfig(outDir: string) {
   const repoRoot = process.cwd();
 
-  return defineConfig(() => {
-    return {
-      root: repoRoot,
+  return defineConfig(
+    () =>
+      mergeConfig(mergeConfig(basePreset, extensionCsPreset), {
+        build: {
+          outDir,
 
-      resolve: {
-        tsconfigPaths: true,
-      },
-
-      build: {
-        target: 'es2023',
-        minify: false,
-        sourcemap: false,
-        outDir,
-        emptyOutDir: false, // Don't clear — background/workers already built
-
-        lib: {
-          entry: resolve(repoRoot, 'extension/content-script.ts'),
-          name: 'YtChatOverlay',
-          formats: ['iife'],
-          fileName: () => 'content-script.js',
-        },
-
-        rollupOptions: {
-          output: {
-            // IIFE format via build.lib — no chunks needed (codeSplitting is false)
+          lib: {
+            entry: resolve(repoRoot, 'extension/content-script.ts'),
+            name: 'YtChatOverlay',
+            formats: ['iife'],
+            fileName: () => 'content-script.js',
           },
         },
-      },
 
-      define: {
-        __DEV__: JSON.stringify(false),
-        __VERSION__: JSON.stringify(process.env.BUILD_VERSION || pkg.version),
-        __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
-        // Suppress import.meta warning in IIFE build — ChromeExtensionWorkerFactory
-        // is selected by getWorkerFactory() in extension context, so ViteWorkerFactory
-        // (which uses import.meta.url) never executes at runtime.
-        'import.meta': JSON.stringify({}),
-      },
-
-      logLevel: 'warn' as const,
-    };
-  });
+        define: {
+          __VERSION__: JSON.stringify(process.env.BUILD_VERSION || pkg.version),
+          __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
+        },
+      }) as UserConfig
+  );
 }

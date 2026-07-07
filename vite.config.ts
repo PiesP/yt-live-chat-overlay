@@ -15,8 +15,10 @@
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { defineConfig, type UserConfig } from 'vite';
+import { defineConfig, mergeConfig, type UserConfig } from 'vite';
 import monkeyPlugin from 'vite-plugin-monkey';
+import { basePreset } from './tooling/vite/presets/base';
+import { userscriptPreset } from './tooling/vite/presets/userscript';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -89,7 +91,7 @@ export default defineConfig(({ mode }): UserConfig => {
   const outputFileName = isDev ? OUTPUT_FILE_NAMES.dev : OUTPUT_FILE_NAMES.prod;
   const pkg = getPackageMeta();
 
-  return {
+  return mergeConfig(mergeConfig(basePreset, userscriptPreset), {
     plugins: [
       monkeyPlugin({
         entry: USERSCRIPT_ENTRY,
@@ -130,20 +132,8 @@ export default defineConfig(({ mode }): UserConfig => {
       }),
     ],
 
-    root: REPO_ROOT,
-
-    resolve: {
-      tsconfigPaths: true,
-    },
-
     build: {
-      target: 'es2023',
-      // Greasy Fork rule: scripts must not be minified/obfuscated.
-      minify: false,
       sourcemap: isDev ? 'inline' : false,
-      outDir: 'dist',
-      emptyOutDir: true,
-      write: true,
     },
 
     define: {
@@ -151,7 +141,5 @@ export default defineConfig(({ mode }): UserConfig => {
       __VERSION__: JSON.stringify(version),
       __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
     },
-
-    logLevel: 'warn',
-  };
+  }) as UserConfig;
 });
