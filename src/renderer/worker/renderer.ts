@@ -30,8 +30,8 @@
 /// <reference lib="webworker" />
 
 import type { ChatMessage, FontWeight } from '@app-types';
-import { getCachedGradient } from '@core/canvas-gradient-utils';
-import { fastRandom } from '@core/canvas-pipeline';
+import { getCachedGradient } from '@renderer/canvas/gradient-utils';
+import { fastRandom } from '@renderer/canvas/pipeline-utils';
 import {
   drawAuthorSection,
   drawRoundRect,
@@ -43,20 +43,9 @@ import {
   type TextBitmapCache,
   toSharedContentSegments,
   warmTextBitmapCache,
-} from '@core/canvas-rendering-shared';
-import type { CardConfigWorker } from '@core/card-config';
-import { desaturateColor } from '@core/color-utils';
-import {
-  buildLaneHeap,
-  commitPlacementShared,
-  computeBaseHeadwayPx,
-  computeLaneY,
-  computeOccupancyMs as computeOccupancyMsShared,
-  findPlacementShared,
-  type LaneAllocationState,
-  resetBatchShared,
-  shiftLaneTimersShared,
-} from '@core/lane-allocation-shared';
+} from '@renderer/canvas/shared';
+import type { CardConfigWorker } from '@renderer/card-config';
+import { desaturateColor } from '@renderer/color-utils';
 import {
   ANTI_BLOCK_FREE_RATIO,
   ANTI_BLOCK_MAX_DURATION_MS,
@@ -80,14 +69,25 @@ import {
   TRANSLATION_FONT_SCALE,
   TRANSLATION_GAP_PX,
   TRANSLATION_OPACITY_SCALE,
-} from '@core/renderer-constants';
+} from '@renderer/constants';
+import {
+  buildLaneHeap,
+  commitPlacementShared,
+  computeBaseHeadwayPx,
+  computeLaneY,
+  computeOccupancyMs as computeOccupancyMsShared,
+  findPlacementShared,
+  type LaneAllocationState,
+  resetBatchShared,
+  shiftLaneTimersShared,
+} from '@renderer/layout/lane-shared';
 import {
   computeAgeFadeRate,
   computeInvFadeDuration,
   computeMessageOpacity,
   type OpacityConfig,
-} from '@core/renderer-shared';
-import { getFontString, measureBoundingBoxWidth } from '@core/text-measure';
+} from '@renderer/shared';
+import { getFontString, measureBoundingBoxWidth } from '@renderer/text-measure';
 import { DEFAULT_SETTINGS } from '@settings/defaults';
 import { ByteLimitedCache } from '@util/byte-limited-cache';
 import {
@@ -99,12 +99,7 @@ import {
 } from '@util/design-tokens';
 import { LruMap } from '@util/lru-map';
 
-import type {
-  ActiveMessage,
-  WorkerConfig,
-  WorkerContentSegment,
-  WorkerMessage,
-} from './renderer-worker-types';
+import type { ActiveMessage, WorkerConfig, WorkerContentSegment, WorkerMessage } from './types';
 
 // ── Worker-specific constants ──────────────────────────────────────────────
 

@@ -48,6 +48,9 @@
       "@settings/*": [
         "./src/settings/*"
       ],
+      "@renderer/*": [
+        "./src/renderer/*"
+      ],
       "@app-types": [
         "./src/types/index"
       ],

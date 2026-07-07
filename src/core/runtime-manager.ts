@@ -13,11 +13,11 @@ import { ReplayChatSource } from '@chat/source-replay';
 import type { ChatBootstrapResult } from '@chat/youtube/api';
 import { bootstrapChatSession } from '@chat/youtube/api';
 import { isYouTubeWatch } from '@chat/youtube/url-pattern';
-import { CanvasRenderer } from '@core/canvas-renderer';
 import { OVERLAY_SELECTOR, Overlay } from '@core/overlay';
-import type { ConnectionStatus, RendererBase } from '@core/renderer-base';
 import { StandbyController } from '@core/standby-controller';
 import { VideoPauseController } from '@core/video-pause-controller';
+import { CanvasRenderer } from '@renderer/canvas-renderer';
+import type { ConnectionStatus, RendererBase } from '@renderer/renderer-base';
 import { shouldResetRendererForSettingsChange } from '@settings/schema';
 import { BacklogInjectionController } from '@util/backlog-controller';
 import {

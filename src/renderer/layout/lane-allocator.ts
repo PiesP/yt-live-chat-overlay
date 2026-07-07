@@ -2,6 +2,7 @@
 // Copyright (c) 2026 PiesP
 
 import type { FontWeight, OverlayDimensions } from '@app-types';
+import { SPEED_TIER } from '@renderer/constants';
 import {
   buildLaneHeap,
   computeLaneY,
@@ -9,9 +10,8 @@ import {
   findPlacementShared,
   heapSiftDown,
   heapUpdateLane,
-} from '@core/lane-allocation-shared';
-import { SPEED_TIER } from '@core/renderer-constants';
-import { getFontString, measureTextHeight } from '@core/text-measure';
+} from '@renderer/layout/lane-shared';
+import { getFontString, measureTextHeight } from '@renderer/text-measure';
 import { rendererLayout } from '@util/design-tokens';
 import { createLogger } from '@util/logging';
 
@@ -251,7 +251,7 @@ export class LaneAllocator {
     const slotCount = Math.max(1, Math.ceil(messageHeight / this.laneHeight));
 
     // Delegate to shared pure function via LaneAllocationState cast.
-    const state = this as unknown as import('@core/lane-allocation-shared').LaneAllocationState;
+    const state = this as unknown as import('@renderer/layout/lane-shared').LaneAllocationState;
     const result = findPlacementShared(
       state,
       now,

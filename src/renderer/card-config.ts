@@ -9,7 +9,7 @@
  */
 
 import type { ChatMessage, OverlaySettings, RgbColor } from '@app-types';
-import { computeReadableTextColor } from '@core/color-utils';
+import { computeReadableTextColor } from '@renderer/color-utils';
 import {
   DEFAULT_TEXT_COLOR,
   colors as designColors,

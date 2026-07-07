@@ -13,11 +13,15 @@
  */
 
 import type { ChatMessage, OverlaySettings } from '@app-types';
-import { MEMBERSHIP_CARD_CONFIG, SUPERCHAT_CARD_CONFIG, toWorkerConfig } from '@core/card-config';
 import type { ImageFetchManager } from '@core/image-fetch-manager';
 import type { Overlay } from '@core/overlay';
 import type { WorkerFactory } from '@platform/types';
 import { getWorkerFactory } from '@platform/worker-factory';
+import {
+  MEMBERSHIP_CARD_CONFIG,
+  SUPERCHAT_CARD_CONFIG,
+  toWorkerConfig,
+} from '@renderer/card-config';
 import { createLogger } from '@util/logging';
 import type { ObservabilityReporter } from '@util/observability';
 import {
@@ -25,7 +29,7 @@ import {
   sendClearStateToWorker,
   sendSetPausedToWorker,
   sendUpdateConfigToWorker,
-} from './renderer-worker-manager-common';
+} from './common';
 
 type DimensionResult = { width: number; height: number };
 

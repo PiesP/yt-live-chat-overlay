@@ -9,7 +9,7 @@
  * from configuration and message metrics.
  */
 
-import { MS_TO_S } from '@core/renderer-constants';
+import { MS_TO_S } from '@renderer/constants';
 
 /**
  * Compute DLIOS animation duration from total travel distance and velocity.

@@ -11,9 +11,9 @@
 
 import type { FontWeight } from '@app-types';
 import { EMOJI_ALIAS_PATTERN } from '@chat/message-helpers';
-import { computeOutlineColor } from '@core/color-utils';
-import { OUTLINE_STROKE_SCALE } from '@core/renderer-constants';
-import { getFontString, measureTextHeight, measureTextWidth } from '@core/text-measure';
+import { computeOutlineColor } from '@renderer/color-utils';
+import { OUTLINE_STROKE_SCALE } from '@renderer/constants';
+import { getFontString, measureTextHeight, measureTextWidth } from '@renderer/text-measure';
 import type { ByteLimitedCache } from '@util/byte-limited-cache';
 import { AUTHOR_PHOTO_SHADOW, rendererLayout, spacing } from '@util/design-tokens';
 

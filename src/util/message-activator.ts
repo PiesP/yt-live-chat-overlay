@@ -3,14 +3,14 @@
 
 import type { ChatMessage } from '@app-types';
 import { getTranslatableText } from '@chat/message-helpers';
-import { desaturateColor } from '@core/color-utils';
+import type { TranslationService } from '@core/translation-service';
+import { desaturateColor } from '@renderer/color-utils';
 import {
   type CanvasMessage,
   EMPTY_CHAT_MESSAGE,
   FAR_LAYER_DESATURATION_FACTOR,
   SPEED_TIER,
-} from '@core/renderer-constants';
-import type { TranslationService } from '@core/translation-service';
+} from '@renderer/constants';
 
 export interface MessageActivatorConfig {
   topBottomDurationMs: number;

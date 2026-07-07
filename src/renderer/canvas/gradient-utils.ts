@@ -9,8 +9,8 @@
  * linear gradients with alpha stops for paid card backgrounds.
  */
 
-import { toRgba } from '@core/color-utils';
-import { GRADIENT_CACHE_MAX } from '@core/renderer-constants';
+import { toRgba } from '@renderer/color-utils';
+import { GRADIENT_CACHE_MAX } from '@renderer/constants';
 
 /** Minimal canvas context subset needed for gradient creation. */
 export interface GradientContext {

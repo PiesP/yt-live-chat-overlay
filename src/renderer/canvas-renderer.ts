@@ -24,8 +24,13 @@
 
 import type { ChatMessage, DropReason, OverlayDimensions, OverlaySettings } from '@app-types';
 import { getTranslatableText } from '@chat/message-helpers';
-import { renderPaidCard } from '@core/canvas-card-renderers';
-import { COMPACTION_THRESHOLD_RATIO, fastRandom } from '@core/canvas-pipeline';
+import { ChannelLanguageMemory } from '@core/channel-language-memory';
+import { ImageFetchManager } from '@core/image-fetch-manager';
+import { LanguageDetectorService } from '@core/language-detector-service';
+import type { Overlay } from '@core/overlay';
+import { TranslationService } from '@core/translation-service';
+import { renderPaidCard } from '@renderer/canvas/card-renderers';
+import { COMPACTION_THRESHOLD_RATIO, fastRandom } from '@renderer/canvas/pipeline-utils';
 import {
   drawRoundRect,
   getDisplayText,
@@ -33,17 +38,8 @@ import {
   renderSegment,
   toSharedContentSegments,
   warmTextBitmapCache,
-} from '@core/canvas-rendering-shared';
-import { isImageReady } from '@core/canvas-worker-bridge';
-import { MEMBERSHIP_CARD_CONFIG, SUPERCHAT_CARD_CONFIG } from '@core/card-config';
-import { ChannelLanguageMemory } from '@core/channel-language-memory';
-import { ImageFetchManager } from '@core/image-fetch-manager';
-import { computeBaseHeadwayPx } from '@core/lane-allocation-shared';
-import type { LanePlacement } from '@core/lane-allocator';
-import { LanguageDetectorService } from '@core/language-detector-service';
-import type { Overlay } from '@core/overlay';
-import type { ConnectionStatus } from '@core/renderer-base';
-import { RendererBase } from '@core/renderer-base';
+} from '@renderer/canvas/shared';
+import { MEMBERSHIP_CARD_CONFIG, SUPERCHAT_CARD_CONFIG } from '@renderer/card-config';
 import {
   ANTI_BLOCK_MAX_DURATION_MS,
   ANTI_BLOCK_PRIORITY_THRESHOLD,
@@ -65,22 +61,26 @@ import {
   TRANSLATION_FONT_SCALE,
   TRANSLATION_GAP_PX,
   TRANSLATION_OPACITY_SCALE,
-} from '@core/renderer-constants';
+} from '@renderer/constants';
+import type { LanePlacement } from '@renderer/layout/lane-allocator';
+import { computeBaseHeadwayPx } from '@renderer/layout/lane-shared';
+import type { ConnectionStatus } from '@renderer/renderer-base';
+import { RendererBase } from '@renderer/renderer-base';
 import {
   computeAgeFadeRate,
   computeInvFadeDuration,
   computeMessageOpacity,
   enqueueWithOverflow,
   estimateMessageDimensions as sharedEstimateDimensions,
-} from '@core/renderer-shared';
-import { RenderWorkerManager } from '@core/renderer-worker-manager';
+} from '@renderer/shared';
 import {
   clearTextMeasurementCaches,
   getFontString,
   measureTextHeight,
   measureTextWidth,
-} from '@core/text-measure';
-import { TranslationService } from '@core/translation-service';
+} from '@renderer/text-measure';
+import { isImageReady } from '@renderer/worker/bridge';
+import { RenderWorkerManager } from '@renderer/worker/manager';
 import { ByteLimitedCache } from '@util/byte-limited-cache';
 import { computeScrollDuration, rendererLayout, statusBarLayout } from '@util/design-tokens';
 import { clearSafeAnimationFrame, forEachSlot, SCREEN_READER_CSS } from '@util/dom';
@@ -1857,7 +1857,7 @@ export class CanvasRenderer extends RendererBase {
     return hash < TIER_NEAR_THRESHOLD ? SPEED_TIER.NEAR : SPEED_TIER.FAR;
   }
 
-  // hashStringForTier imported from @core/renderer-constants
+  // hashStringForTier imported from @renderer/constants
 
   // ── Opacity ──────────────────────────────────────────────────────────
 

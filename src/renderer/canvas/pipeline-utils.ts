@@ -10,7 +10,7 @@
  * threshold constant.
  */
 
-import type { CanvasMessage } from '@core/renderer-constants';
+import type { CanvasMessage } from '@renderer/constants';
 
 /** Ratio of expired slots above which compaction allocates a fresh array via slice(). */
 export const COMPACTION_THRESHOLD_RATIO = 0.5;

@@ -9,7 +9,7 @@
  */
 
 import type { FontWeight } from '@app-types';
-import type { CardConfigWorker } from '@core/card-config';
+import type { CardConfigWorker } from '@renderer/card-config';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 

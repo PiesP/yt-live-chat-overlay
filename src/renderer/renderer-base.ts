@@ -18,11 +18,11 @@
 
 import type { ChatMessage, OverlayDimensions, OverlaySettings } from '@app-types';
 import { PerAuthorRateLimiter } from '@core/author-rate-limiter';
-import { BurstDetector } from '@core/burst-detector';
-import { LaneAllocator } from '@core/lane-allocator';
 import type { Overlay } from '@core/overlay';
-import { ANTI_BLOCK_FREE_RATIO } from '@core/renderer-constants';
-import { clearTextMeasurementCaches, setTextMeasureCallback } from '@core/text-measure';
+import { ANTI_BLOCK_FREE_RATIO } from '@renderer/constants';
+import { BurstDetector } from '@renderer/layout/burst-detector';
+import { LaneAllocator } from '@renderer/layout/lane-allocator';
+import { clearTextMeasurementCaches, setTextMeasureCallback } from '@renderer/text-measure';
 import { rendererLayout } from '@util/design-tokens';
 import { createLogger } from '@util/logging';
 import { ObservabilityReporter } from '@util/observability';

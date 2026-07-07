@@ -12,7 +12,7 @@
  */
 
 import { bootstrapChatSession } from '@chat/youtube/api';
-import type { RendererBase } from '@core/renderer-base';
+import type { RendererBase } from '@renderer/renderer-base';
 import { clearSafeTimeout, isAbortError } from '@util/dom';
 import { createLogger } from '@util/logging';
 

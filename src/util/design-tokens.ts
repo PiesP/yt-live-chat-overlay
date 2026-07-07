@@ -9,8 +9,8 @@
  * re-exported here for backward compatibility.
  */
 
-export { resolveSuperChatRgb } from '@core/color-utils';
-export { computeScrollDuration } from '@core/renderer-utils';
+export { resolveSuperChatRgb } from '@renderer/color-utils';
+export { computeScrollDuration } from '@renderer/utils';
 
 import type { RgbColor, SuperChatInfo } from '@app-types';
 

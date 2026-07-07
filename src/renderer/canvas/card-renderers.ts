@@ -8,17 +8,17 @@
  * rectangle paths on a Canvas2D context.
  */
 import type { ChatMessage, OverlaySettings } from '@app-types';
-import { getCachedGradient } from '@core/canvas-gradient-utils';
+import { getCachedGradient } from '@renderer/canvas/gradient-utils';
 import {
   drawAuthorSection,
   drawRoundRect,
   renderWrappedContentSegments,
   strokeTextOutline,
-} from '@core/canvas-rendering-shared';
-import type { CardConfig } from '@core/card-config';
-import { computeReadableTextColor } from '@core/color-utils';
-import { SIN_LUT_SCALE, SIN_TABLE } from '@core/renderer-constants';
-import { measureTextHeight } from '@core/text-measure';
+} from '@renderer/canvas/shared';
+import type { CardConfig } from '@renderer/card-config';
+import { computeReadableTextColor } from '@renderer/color-utils';
+import { SIN_LUT_SCALE, SIN_TABLE } from '@renderer/constants';
+import { measureTextHeight } from '@renderer/text-measure';
 import type { ByteLimitedCache } from '@util/byte-limited-cache';
 import { DEFAULT_TEXT_COLOR, rendererLayout, spacing } from '@util/design-tokens';
 
