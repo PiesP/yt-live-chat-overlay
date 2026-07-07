@@ -265,6 +265,24 @@ export class RenderWorkerManager {
         log.warn('Render worker unhandled error:', err.message);
       };
 
+      // Structured clone deserialization failures (malformed messages)
+      // indicate a corrupted worker state. After N consecutive failures,
+      // destroy the worker and let the renderer fall back to main thread.
+      let messageErrorCount = 0;
+      const MAX_MESSAGE_ERRORS = 3;
+      worker.onmessageerror = () => {
+        messageErrorCount++;
+        log.warn(
+          `Render worker message deserialization failed (${messageErrorCount}/${MAX_MESSAGE_ERRORS})`
+        );
+        if (messageErrorCount >= MAX_MESSAGE_ERRORS) {
+          log.error(
+            'Render worker exceeded max message errors — destroying worker for main-thread fallback'
+          );
+          this.destroy();
+        }
+      };
+
       worker.postMessage(
         {
           type: 'init',
