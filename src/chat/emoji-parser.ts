@@ -16,11 +16,11 @@ import {
 } from '@chat/message-helpers';
 import type { JsonObject } from '@chat/youtube/request';
 import { getNumber, getString, isRecord } from '@chat/youtube/request';
-import { normalizeYouTubeImageUrl } from '@core/image-url-validation';
+import { normalizeYouTubeImageUrl } from '@media/image-url-validation';
 
 // ── Image URL validation ─────────────────────────────────────────────────────
 
-// normalizeYouTubeImageUrl is imported from @core/image-url-validation
+// normalizeYouTubeImageUrl is imported from @media/image-url-validation
 
 // ── Thumbnail extraction ─────────────────────────────────────────────────────
 

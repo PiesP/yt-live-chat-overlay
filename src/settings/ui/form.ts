@@ -2,7 +2,6 @@
 // Copyright (c) 2026 PiesP
 
 import type { OverlaySettings } from '@app-types';
-import { TranslationService } from '@core/translation-service';
 import { t } from '@i18n/index';
 import type {
   OutlineSettingKey,
@@ -27,6 +26,7 @@ import type {
   WeightToggleField,
 } from '@settings/ui/panes';
 import { PANES } from '@settings/ui/panes';
+import { TranslationService } from '@translation/service';
 import { createLogger } from '@util/logging';
 
 const log = createLogger('SettingsUiForm');

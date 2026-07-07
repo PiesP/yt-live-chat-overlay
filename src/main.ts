@@ -8,10 +8,10 @@
  * Displays YouTube live chat messages in Nico-nico style flowing overlay.
  */
 
+import { PageWatcher } from '@app/page-watcher';
+import { RuntimeManager } from '@app/runtime-manager';
 import type { OverlaySettings } from '@app-types';
 import { isYouTubeLive, isYouTubeWatch } from '@chat/youtube/url-pattern';
-import { PageWatcher } from '@core/page-watcher';
-import { RuntimeManager } from '@core/runtime-manager';
 import { resolveActiveLanguage, t } from '@i18n/index';
 import { getMenuAdapter } from '@platform/menu-adapters';
 import { Settings } from '@settings/store';

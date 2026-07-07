@@ -12,9 +12,9 @@
  * Extracted from CanvasRenderer for single-responsibility separation.
  */
 
+import type { Overlay } from '@app/overlay';
 import type { ChatMessage, OverlaySettings } from '@app-types';
-import type { ImageFetchManager } from '@core/image-fetch-manager';
-import type { Overlay } from '@core/overlay';
+import type { ImageFetchManager } from '@media/image-fetch-manager';
 import type { WorkerFactory } from '@platform/types';
 import { getWorkerFactory } from '@platform/worker-factory';
 import {

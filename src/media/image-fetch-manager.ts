@@ -2,7 +2,7 @@
 // Copyright (c) 2026 PiesP
 
 import type { ChatMessage, OverlaySettings } from '@app-types';
-import { isAllowedImageUrl } from '@core/image-url-validation';
+import { isAllowedImageUrl } from '@media/image-url-validation';
 import { ByteLimitedCache } from '@util/byte-limited-cache';
 import { clearSafeInterval } from '@util/dom';
 import { createLogger } from '@util/logging';

@@ -16,9 +16,9 @@
  *   and message ingress check this flag.
  */
 
+import type { Overlay } from '@app/overlay';
 import type { ChatMessage, OverlayDimensions, OverlaySettings } from '@app-types';
-import { PerAuthorRateLimiter } from '@core/author-rate-limiter';
-import type { Overlay } from '@core/overlay';
+import { PerAuthorRateLimiter } from '@media/author-rate-limiter';
 import { ANTI_BLOCK_FREE_RATIO } from '@renderer/constants';
 import { BurstDetector } from '@renderer/layout/burst-detector';
 import { LaneAllocator } from '@renderer/layout/lane-allocator';

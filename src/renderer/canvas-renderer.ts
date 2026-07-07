@@ -22,13 +22,10 @@
  * actual commit time, not the visual start time.
  */
 
+import type { Overlay } from '@app/overlay';
 import type { ChatMessage, DropReason, OverlayDimensions, OverlaySettings } from '@app-types';
 import { getTranslatableText } from '@chat/message-helpers';
-import { ChannelLanguageMemory } from '@core/channel-language-memory';
-import { ImageFetchManager } from '@core/image-fetch-manager';
-import { LanguageDetectorService } from '@core/language-detector-service';
-import type { Overlay } from '@core/overlay';
-import { TranslationService } from '@core/translation-service';
+import { ImageFetchManager } from '@media/image-fetch-manager';
 import { renderPaidCard } from '@renderer/canvas/card-renderers';
 import { COMPACTION_THRESHOLD_RATIO, fastRandom } from '@renderer/canvas/pipeline-utils';
 import {
@@ -81,6 +78,9 @@ import {
 } from '@renderer/text-measure';
 import { isImageReady } from '@renderer/worker/bridge';
 import { RenderWorkerManager } from '@renderer/worker/manager';
+import { ChannelLanguageMemory } from '@translation/channel-memory';
+import { LanguageDetectorService } from '@translation/language-detector';
+import { TranslationService } from '@translation/service';
 import { ByteLimitedCache } from '@util/byte-limited-cache';
 import { computeScrollDuration, rendererLayout, statusBarLayout } from '@util/design-tokens';
 import { clearSafeAnimationFrame, forEachSlot, SCREEN_READER_CSS } from '@util/dom';

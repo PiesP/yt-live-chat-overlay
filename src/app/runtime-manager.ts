@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
+import { OVERLAY_SELECTOR, Overlay } from '@app/overlay';
+import { StandbyController } from '@app/standby-controller';
+import { VideoPauseController } from '@app/video-pause-controller';
 import type { ChatMessage, OverlaySettings, Pauseable } from '@app-types';
 import type { DomWatcherUnsubscribe } from '@chat/dom-watcher';
 import { installDomChatWatcher } from '@chat/dom-watcher';
@@ -13,9 +16,6 @@ import { ReplayChatSource } from '@chat/source-replay';
 import type { ChatBootstrapResult } from '@chat/youtube/api';
 import { bootstrapChatSession } from '@chat/youtube/api';
 import { isYouTubeWatch } from '@chat/youtube/url-pattern';
-import { OVERLAY_SELECTOR, Overlay } from '@core/overlay';
-import { StandbyController } from '@core/standby-controller';
-import { VideoPauseController } from '@core/video-pause-controller';
 import { CanvasRenderer } from '@renderer/canvas-renderer';
 import type { ConnectionStatus, RendererBase } from '@renderer/renderer-base';
 import { shouldResetRendererForSettingsChange } from '@settings/schema';

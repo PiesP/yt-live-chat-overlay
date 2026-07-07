@@ -51,6 +51,15 @@
       "@renderer/*": [
         "./src/renderer/*"
       ],
+      "@app/*": [
+        "./src/app/*"
+      ],
+      "@translation/*": [
+        "./src/translation/*"
+      ],
+      "@media/*": [
+        "./src/media/*"
+      ],
       "@app-types": [
         "./src/types/index"
       ],
