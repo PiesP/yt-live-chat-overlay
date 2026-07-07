@@ -2,23 +2,19 @@
 // Copyright (c) 2026 PiesP
 
 /**
- * WebGL2ImageRenderer — GPU-accelerated image rendering for Canvas2D overlays.
+ * WebGL2ImageRenderer — GPU-accelerated glow effects via OffscreenCanvas.
  *
- * Renders images (emoji, badges, author photos, stickers) via instanced quads
- * in a single draw call, reducing CPU-side drawImage overhead at scale.
+ * Renders glow effects on a WebGL2-backed OffscreenCanvas, then composites
+ * the result onto the main Canvas2D context via drawImage().  No DOM canvas
+ * element — avoids z-index stacking issues entirely.
  *
  * Architecture:
- *   - Separate WebGL2 canvas layered behind the main Canvas2D text layer
- *   - Texture atlas for images (lazy upload on first use per frame)
- *   - Instanced draw via drawArraysInstanced for all images in one call
- *   - Falls back silently to Canvas2D drawImage when WebGL2 is unavailable
+ *   - OffscreenCanvas with WebGL2 context (GPU-side, no DOM)
+ *   - Instanced quad rendering for glow rects
+ *   - beginFrame → addGlow → flush → getResult() pipeline
+ *   - Result drawn onto Canvas2D via ctx.drawImage(result, 0, 0) BEFORE text
  *
- * Usage:
- *   const renderer = new WebGL2ImageRenderer(overlayContainer, dimensions);
- *   renderer.beginFrame();
- *   renderer.addImage(img, x, y, w, h, alpha);
- *   renderer.addImage(img2, x2, y2, w2, h2, alpha2);
- *   renderer.flush();
+ * Falls back silently when WebGL2 is unavailable (isEnabled = false).
  */
 
 import { createLogger } from '@core/logging';
@@ -27,32 +23,24 @@ const log = createLogger('WebGL2Image');
 
 // ── Shaders ─────────────────────────────────────────────────────────────────
 
-/** Vertex shader: instanced unit quad. Per-instance attributes: position + scale + alpha. */
 const VERTEX_SRC = `#version 300 es
-layout(location = 0) in vec2 a_pos;       // unit quad vertex (6 verts per quad)
-layout(location = 1) in vec4 a_rect;      // per-instance: x, y, w, h in CSS pixels
-layout(location = 2) in float a_alpha;    // per-instance: opacity (0-1)
-layout(location = 3) in vec4 a_uv;        // per-instance: texcoord bounds (u0,v0,u1,v1)
+layout(location = 0) in vec2 a_pos;
+layout(location = 1) in vec4 a_rect;
+layout(location = 2) in float a_alpha;
 
-uniform vec2 u_viewport;                  // canvas width, height in CSS pixels
+uniform vec2 u_viewport;
 
-out vec2 v_uv;
 out float v_alpha;
 
 void main() {
-  // Map unit quad [-1,1] to screen position [x, x+w], [y, y+h]
   vec2 halfSize = a_rect.zw * 0.5;
   vec2 center = a_rect.xy + halfSize;
   vec2 pos = center + a_pos * halfSize;
-
-  // Convert to NDC
   gl_Position = vec4(
     (pos.x / u_viewport.x) * 2.0 - 1.0,
     1.0 - (pos.y / u_viewport.y) * 2.0,
     0.0, 1.0
   );
-
-  v_uv = mix(a_uv.xy, a_uv.zw, a_pos * 0.5 + 0.5);
   v_alpha = a_alpha;
 }
 `;
@@ -60,241 +48,203 @@ void main() {
 const FRAGMENT_SRC = `#version 300 es
 precision mediump float;
 
-in vec2 v_uv;
 in float v_alpha;
-
-uniform sampler2D u_texture;
+uniform vec4 u_color;
 
 out vec4 outColor;
 
 void main() {
-  vec4 texColor = texture(u_texture, v_uv);
-  outColor = vec4(texColor.rgb, texColor.a * v_alpha);
+  outColor = vec4(u_color.rgb, u_color.a * v_alpha);
 }
 `;
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
-/** Max instances per draw call (before flushing). */
-const MAX_INSTANCES = 1024;
+const MAX_INSTANCES = 256;
+const FLOATS_PER_INSTANCE = 5; // x, y, w, h, alpha
 
-/** Instance data floats per image: x, y, w, h, alpha, u0, v0, u1, v1 = 9 */
-const FLOATS_PER_INSTANCE = 9;
-
-/** Unit quad vertices (2 triangles = 6 verts, each 2 floats). */
 const UNIT_QUAD = new Float32Array([-1, -1, 1, -1, 1, 1, -1, -1, 1, 1, -1, 1]);
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
+interface GlowInstance {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** CSS color string, e.g. "rgba(100,150,200,0.5)" */
+  color: string;
+  alpha: number;
+}
+
 // ── Implementation ──────────────────────────────────────────────────────────
 
 export class WebGL2ImageRenderer {
-  private canvas: HTMLCanvasElement | null = null;
+  private offscreen: OffscreenCanvas | null = null;
   private gl: WebGL2RenderingContext | null = null;
   private program: WebGLProgram | null = null;
   private vao: WebGLVertexArrayObject | null = null;
   private uniformViewport: WebGLUniformLocation | null = null;
-  private uniformTexture: WebGLUniformLocation | null = null;
+  private uniformColor: WebGLUniformLocation | null = null;
 
   private readonly instanceData = new Float32Array(MAX_INSTANCES * FLOATS_PER_INSTANCE);
-  private textureMap = new Map<CanvasImageSource, WebGLTexture>();
-  private currentTexture: WebGLTexture | null = null;
-  private instanceCount = 0;
+  private readonly queue: GlowInstance[] = [];
   private enabled = false;
   private width = 0;
   private height = 0;
 
   // ── Lifecycle ──────────────────────────────────────────────────────────
 
-  constructor(container: HTMLElement, width: number, height: number) {
+  constructor(width: number, height: number) {
     this.width = width;
     this.height = height;
 
-    const canvas = document.createElement('canvas');
-    canvas.style.cssText =
-      'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:1;background:transparent';
-    canvas.width = width;
-    canvas.height = height;
-    container.appendChild(canvas);
-    this.canvas = canvas;
-
-    const gl = canvas.getContext('webgl2', {
-      alpha: true,
-      premultipliedAlpha: false,
-      antialias: false,
-      desynchronized: true,
-    });
-
-    if (!gl) {
-      log.warn('WebGL2 unavailable — image rendering falls back to Canvas2D');
-      return;
-    }
-    this.gl = gl;
-
     try {
+      const offscreen = new OffscreenCanvas(width, height);
+      const gl = offscreen.getContext('webgl2', {
+        alpha: true,
+        premultipliedAlpha: false,
+        antialias: false,
+      });
+
+      if (!gl) {
+        log.warn('WebGL2 unavailable for OffscreenCanvas');
+        return;
+      }
+
+      this.offscreen = offscreen;
+      this.gl = gl;
       this.initGL(gl);
       this.enabled = true;
     } catch (err: unknown) {
-      log.warn('WebGL2 init failed:', err);
-      canvas.remove();
-      this.canvas = null;
-      this.gl = null;
+      log.debug('WebGL2 OffscreenCanvas init failed:', err);
     }
   }
 
-  /** Whether WebGL2 image rendering is active. */
   get isEnabled(): boolean {
     return this.enabled;
   }
 
-  /** Resize the WebGL2 backing store. */
   resize(width: number, height: number): void {
+    if (!this.enabled || !this.offscreen) return;
     this.width = width;
     this.height = height;
-    if (this.canvas) {
-      this.canvas.width = width;
-      this.canvas.height = height;
-    }
+    this.offscreen.width = width;
+    this.offscreen.height = height;
   }
 
-  /** Release all GPU resources. */
   destroy(): void {
-    const { gl, canvas } = this;
+    const { gl } = this;
     if (gl) {
-      for (const tex of this.textureMap.values()) {
-        gl.deleteTexture(tex);
-      }
-      this.textureMap.clear();
       if (this.program) gl.deleteProgram(this.program);
       if (this.vao) gl.deleteVertexArray(this.vao);
     }
-    if (canvas) canvas.remove();
     this.gl = null;
-    this.canvas = null;
+    this.offscreen = null;
     this.enabled = false;
   }
 
   // ── Per-Frame API ──────────────────────────────────────────────────────
 
-  /** Begin a new frame — clear the WebGL canvas and instance buffer. */
+  /** Begin a new frame — clear the offscreen canvas. */
   beginFrame(): void {
     if (!this.enabled || !this.gl) return;
     const gl = this.gl;
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.viewport(0, 0, this.canvas?.width ?? this.width, this.canvas?.height ?? this.height);
+    gl.viewport(0, 0, this.width, this.height);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
-
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
     gl.useProgram(this.program);
     gl.bindVertexArray(this.vao!);
-    gl.uniform2f(this.uniformViewport, this.width, this.height);
-    gl.uniform1i(this.uniformTexture, 0);
 
-    this.instanceCount = 0;
+    this.queue.length = 0;
+  }
+
+  /** Queue a glow rectangle. Color is parsed and batched by color key. */
+  addGlow(x: number, y: number, w: number, h: number, color: string, multiplier: number): void {
+    if (!this.enabled || multiplier <= 0 || w <= 0 || h <= 0) return;
+
+    // Parse alpha from color string, apply multiplier
+    const match = color.match(/[\d.]+\)$/);
+    let baseAlpha = 1;
+    if (match) {
+      const parts = color.slice(0, -1).split(',');
+      const last = parseFloat(parts[parts.length - 1]!.trim());
+      if (!Number.isNaN(last)) baseAlpha = last;
+    }
+
+    const alpha = Math.min(1, baseAlpha * multiplier);
+    if (alpha <= 0.001) return;
+
+    this.queue.push({ x, y, w, h, color, alpha });
   }
 
   /**
-   * Queue an image for GPU rendering. Images with the same source are batched
-   * together; a new draw call occurs when the source changes or the buffer fills.
+   * Render all queued glow instances and return the result as an OffscreenCanvas
+   * suitable for ctx.drawImage(). Returns null if no glow content was rendered.
    */
-  addImage(image: CanvasImageSource, x: number, y: number, w: number, h: number, alpha = 1): void {
-    if (!this.enabled || !this.gl) return;
-    if (alpha <= 0 || w <= 0 || h <= 0) return;
+  flush(): OffscreenCanvas | null {
+    if (!this.enabled || !this.gl || this.queue.length === 0) return null;
+    const gl = this.gl;
 
-    // Flush if image source changed (different texture)
-    if (this.currentTexture && this.currentTexture !== this.textureMap.get(image)) {
-      this.flushDraw();
+    // Group by color to batch draw calls
+    const byColor = new Map<string, GlowInstance[]>();
+    for (const g of this.queue) {
+      // Normalize color: strip alpha suffix, use only rgb part for batching
+      const rgbKey = g.color.replace(/,\s*[\d.]+\s*\)$/, ')');
+      let group = byColor.get(rgbKey);
+      if (!group) {
+        group = [];
+        byColor.set(rgbKey, group);
+      }
+      group.push(g);
     }
 
-    // Upload texture on first use this frame
-    if (!this.textureMap.has(image)) {
-      this.uploadTexture(image);
-    }
-    this.currentTexture = this.textureMap.get(image) ?? null;
-
-    // Flush if buffer full
-    if (this.instanceCount >= MAX_INSTANCES) {
-      this.flushDraw();
-    }
-
-    const offset = this.instanceCount * FLOATS_PER_INSTANCE;
-    const d = this.instanceData;
-    // Clip rectangle is in CSS pixels; full-image UVs
-    d[offset + 0] = Math.floor(x);
-    d[offset + 1] = Math.floor(y);
-    d[offset + 2] = Math.floor(w);
-    d[offset + 3] = Math.floor(h);
-    d[offset + 4] = alpha;
-    d[offset + 5] = 0; // u0
-    d[offset + 6] = 0; // v0
-    d[offset + 7] = 1; // u1
-    d[offset + 8] = 1; // v1
-    this.instanceCount++;
-  }
-
-  /** Render all queued images and prepare for the next frame. */
-  flush(): void {
-    if (!this.enabled || !this.gl) return;
-    this.flushDraw();
-  }
-
-  /**
-   * Render a blurred glow rectangle behind an element (e.g., membership card glow).
-   * Renders a solid-color rect with an additional blurred copy for the glow effect.
-   */
-  addGlow(x: number, y: number, w: number, h: number, color: string, alpha: number): void {
-    if (!this.enabled || !this.gl) return;
-
-    // Create a 1×1 pixel texture with the glow color (lazy upload)
-    const colorKey = `glow:${color}`;
-    let tex = this.textureMap.get(colorKey as unknown as CanvasImageSource);
-    if (!tex) {
-      tex = this.gl.createTexture()!;
-      this.gl.bindTexture(this.gl.TEXTURE_2D, tex);
-      // Parse rgba string to pixel data
-      const match = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
-      if (!match) return;
-      const r = parseInt(match[1]!, 10);
-      const g = parseInt(match[2]!, 10);
-      const b = parseInt(match[3]!, 10);
-      const a = match[4] ? parseFloat(match[4]) : 1;
-      const pixel = new Uint8Array([r, g, b, Math.round(a * 255)]);
-      this.gl.texImage2D(
-        this.gl.TEXTURE_2D,
-        0,
-        this.gl.RGBA,
-        1,
-        1,
-        0,
-        this.gl.RGBA,
-        this.gl.UNSIGNED_BYTE,
-        pixel
-      );
-      this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MIN_FILTER, this.gl.LINEAR);
-      this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MAG_FILTER, this.gl.LINEAR);
-      this.textureMap.set(colorKey as unknown as CanvasImageSource, tex);
+    // Render each color group
+    for (const [rgbKey, instances] of byColor) {
+      // Upload instances to buffer
+      let count = 0;
+      for (const g of instances) {
+        if (count >= MAX_INSTANCES) {
+          this.drawInstances(gl, count);
+          count = 0;
+        }
+        const off = count * FLOATS_PER_INSTANCE;
+        const d = this.instanceData;
+        d[off + 0] = g.x;
+        d[off + 1] = g.y;
+        d[off + 2] = g.w;
+        d[off + 3] = g.h;
+        d[off + 4] = g.alpha;
+        count++;
+      }
+      if (count > 0) {
+        // Parse color for the uniform
+        const match = rgbKey.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+        if (match) {
+          gl.uniform4f(
+            this.uniformColor,
+            parseInt(match[1]!, 10) / 255,
+            parseInt(match[2]!, 10) / 255,
+            parseInt(match[3]!, 10) / 255,
+            1.0
+          );
+        }
+        gl.uniform2f(this.uniformViewport, this.width, this.height);
+        this.drawInstances(gl, count);
+      }
     }
 
-    // Expand rect for glow spread
-    const spread = 8;
-    this.addImage(
-      colorKey as unknown as CanvasImageSource,
-      x - spread,
-      y - spread,
-      w + spread * 2,
-      h + spread * 2,
-      alpha
-    );
+    return this.offscreen;
   }
 
   // ── Internal ───────────────────────────────────────────────────────────
 
   private initGL(gl: WebGL2RenderingContext): void {
-    // Compile shaders
     const vs = this.compileShader(gl, gl.VERTEX_SHADER, VERTEX_SRC);
     const fs = this.compileShader(gl, gl.FRAGMENT_SHADER, FRAGMENT_SRC);
     const program = gl.createProgram()!;
@@ -303,14 +253,13 @@ export class WebGL2ImageRenderer {
     gl.linkProgram(program);
 
     if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-      const logMsg = gl.getProgramInfoLog(program);
-      throw new Error(`WebGL program link failed: ${logMsg}`);
+      throw new Error(`WebGL program link failed: ${gl.getProgramInfoLog(program)}`);
     }
     this.program = program;
     this.uniformViewport = gl.getUniformLocation(program, 'u_viewport');
-    this.uniformTexture = gl.getUniformLocation(program, 'u_texture');
+    this.uniformColor = gl.getUniformLocation(program, 'u_color');
 
-    // VAO + vertex buffer (unit quad — static, reused for all instances)
+    // VAO + static vertex buffer (unit quad)
     const vao = gl.createVertexArray()!;
     gl.bindVertexArray(vao);
 
@@ -320,31 +269,24 @@ export class WebGL2ImageRenderer {
     gl.enableVertexAttribArray(0);
     gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
 
-    // Instance buffer (dynamic — updated per frame)
+    // Instance buffer (dynamic)
     const ibo = gl.createBuffer()!;
     gl.bindBuffer(gl.ARRAY_BUFFER, ibo);
     gl.bufferData(gl.ARRAY_BUFFER, this.instanceData.byteLength, gl.DYNAMIC_DRAW);
 
-    // a_rect (vec4): x, y, w, h — 4 floats starting at attribute 1
-    // Uses 4 consecutive attribute locations
-    const rectStride = FLOATS_PER_INSTANCE * 4; // 36 bytes per instance
+    const stride = FLOATS_PER_INSTANCE * 4;
+
+    // a_rect (vec4)
     for (let i = 0; i < 4; i++) {
       gl.enableVertexAttribArray(1 + i);
-      gl.vertexAttribPointer(1 + i, 1, gl.FLOAT, false, rectStride, i * 4);
+      gl.vertexAttribPointer(1 + i, 1, gl.FLOAT, false, stride, i * 4);
       gl.vertexAttribDivisor(1 + i, 1);
     }
 
-    // a_alpha (float): offset = 4 floats = 16 bytes
+    // a_alpha
     gl.enableVertexAttribArray(5);
-    gl.vertexAttribPointer(5, 1, gl.FLOAT, false, rectStride, 16);
+    gl.vertexAttribPointer(5, 1, gl.FLOAT, false, stride, 16);
     gl.vertexAttribDivisor(5, 1);
-
-    // a_uv (vec4): u0, v0, u1, v1 — offset = 5 floats = 20 bytes
-    for (let i = 0; i < 4; i++) {
-      gl.enableVertexAttribArray(6 + i);
-      gl.vertexAttribPointer(6 + i, 1, gl.FLOAT, false, rectStride, 20 + i * 4);
-      gl.vertexAttribDivisor(6 + i, 1);
-    }
 
     this.vao = vao;
   }
@@ -354,46 +296,15 @@ export class WebGL2ImageRenderer {
     gl.shaderSource(shader, source);
     gl.compileShader(shader);
     if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-      const logMsg = gl.getShaderInfoLog(shader);
+      const msg = gl.getShaderInfoLog(shader);
       gl.deleteShader(shader);
-      throw new Error(`Shader compile failed: ${logMsg}`);
+      throw new Error(`Shader compile failed: ${msg}`);
     }
     return shader;
   }
 
-  private uploadTexture(image: CanvasImageSource): void {
-    const gl = this.gl!;
-    const tex = gl.createTexture()!;
-    gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image as HTMLCanvasElement);
-    this.textureMap.set(image, tex);
-  }
-
-  private flushDraw(): void {
-    if (this.instanceCount === 0) return;
-    const gl = this.gl!;
-
-    // Bind the current texture
-    if (this.currentTexture) {
-      gl.bindTexture(gl.TEXTURE_2D, this.currentTexture);
-    }
-
-    // Upload instance data
-    gl.bufferSubData(
-      gl.ARRAY_BUFFER,
-      0,
-      this.instanceData,
-      0,
-      this.instanceCount * FLOATS_PER_INSTANCE
-    );
-
-    // Draw all instances in one call
-    gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.instanceCount);
-
-    this.instanceCount = 0;
+  private drawInstances(gl: WebGL2RenderingContext, count: number): void {
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, this.instanceData, 0, count * FLOATS_PER_INSTANCE);
+    gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, count);
   }
 }

@@ -95,7 +95,7 @@ const log = createLogger('RendererCanvas');
 
 /** Shared CSS string applied to all canvas elements — ensures consistent sizing and event delegation. */
 const CANVAS_CSS =
-  'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;text-rendering:optimizeSpeed;z-index:2';
+  'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;text-rendering:optimizeSpeed';
 
 /** Alpha for the connected status dot — subtle when connected. */
 const DISCONNECTED_DOT_ALPHA = 0.15;
@@ -353,10 +353,12 @@ export class CanvasRenderer extends RendererBase {
     // created.  The old guard here never fired because the field is only
     // assigned later in this constructor (line 311).
 
-    // Initialize WebGL2 overlay for GPU-accelerated image/glow effects.
-    const initDims = overlay.getDimensions();
-    if (container && initDims) {
-      this.webgl2 = new WebGL2ImageRenderer(container, initDims.width, initDims.height);
+    // Initialize WebGL2 overlay for GPU-accelerated glow effects (OffscreenCanvas).
+    {
+      const initDims = overlay.getDimensions();
+      if (initDims) {
+        this.webgl2 = new WebGL2ImageRenderer(initDims.width, initDims.height);
+      }
     }
 
     // Initialize ImageFetchManager BEFORE RenderWorkerManager so the worker
@@ -817,13 +819,19 @@ export class CanvasRenderer extends RendererBase {
       this.compactRemovedMessages(cleanupResult.writeIdx, cleanupResult.oldLength);
     }
 
-    // ── Draw stage: opacity-bucketed rendering (FAR → MID → NEAR) ──
-    // WebGL2 overlay renders glow/effects beneath Canvas2D text
+    // ── Draw stage: WebGL2 glow first (under text), then Canvas2D text on top ──
     this.webgl2?.beginFrame();
+    this.collectGlowInstances(cleanupResult.nearBuckets);
+    const glowCanvas = this.webgl2?.flush();
+
+    ctx.clearRect(0, 0, dims.width, dims.height);
+    if (glowCanvas) {
+      ctx.drawImage(glowCanvas, 0, 0, dims.width, dims.height);
+    }
+
     this.drawStage(ctx, cleanupResult.farBuckets);
     this.drawStage(ctx, cleanupResult.midBuckets);
     this.drawStage(ctx, cleanupResult.nearBuckets);
-    this.webgl2?.flush();
 
     // ── Live region mirroring: expose last 10 visible messages to AT ──
     this.mirrorVisibleMessages();
@@ -1164,25 +1172,6 @@ export class CanvasRenderer extends RendererBase {
               this.boundGetFont,
               this.superChatGradientCache
             );
-
-            // WebGL2 glow for membership pulsing border
-            if (this.webgl2?.isEnabled && cardConfig.decoration === 'pulsingBorder') {
-              const pb = cardConfig.pulsingBorder;
-              if (pb) {
-                const sinIndex = ((elapsed * SIN_LUT_SCALE) | 0) & 255;
-                const pulse = SIN_TABLE[sinIndex]! * pb.amplitude + pb.baseAlpha;
-                if (pulse > 0.01) {
-                  this.webgl2.addGlow(
-                    snappedX,
-                    snappedY,
-                    msg.width,
-                    msg.height,
-                    `rgba(${pb.borderRgb.r},${pb.borderRgb.g},${pb.borderRgb.b},${pulse})`,
-                    pulse * 0.3
-                  );
-                }
-              }
-            }
           }
 
           // Render translation in dual mode
@@ -1221,6 +1210,47 @@ export class CanvasRenderer extends RendererBase {
         }
       } finally {
         ctx.globalAlpha = 1;
+      }
+    }
+  }
+
+  /**
+   * Lightweight pass over NEAR-tier messages to collect WebGL2 glow instances.
+   * Does NOT render Canvas2D — only calls webgl2.addGlow() for membership cards
+   * with pulsing borders.  Called before the main draw stages so glow renders
+   * beneath the text layer.
+   */
+  private collectGlowInstances(buckets: CanvasMessage[][]): void {
+    if (!this.webgl2?.isEnabled) return;
+
+    for (let bucketIndex = 0; bucketIndex < OPACITY_BUCKET_COUNT; bucketIndex++) {
+      const entries = buckets[bucketIndex];
+      if (!entries || entries.length === 0) continue;
+      for (const msg of entries) {
+        if (!msg.message || msg.message.kind === 'text') continue;
+        const renderMessage = msg.renderMessage;
+        if (!renderMessage) continue;
+
+        const cardConfig =
+          renderMessage.kind === 'superchat' ? SUPERCHAT_CARD_CONFIG : MEMBERSHIP_CARD_CONFIG;
+
+        if (cardConfig.decoration !== 'pulsingBorder') continue;
+        const pb = cardConfig.pulsingBorder;
+        if (!pb) continue;
+
+        const elapsed = msg._frameElapsed ?? 0;
+        const sinIndex = ((elapsed * SIN_LUT_SCALE) | 0) & 255;
+        const pulse = SIN_TABLE[sinIndex]! * pb.amplitude + pb.baseAlpha;
+        if (pulse > 0.01) {
+          this.webgl2!.addGlow(
+            Math.floor(msg.x),
+            Math.floor(msg.y),
+            msg.width,
+            msg.height,
+            `rgba(${pb.borderRgb.r},${pb.borderRgb.g},${pb.borderRgb.b},1)`,
+            pulse * 0.3
+          );
+        }
       }
     }
   }
