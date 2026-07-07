@@ -23,7 +23,7 @@ packages?
 
 ## Platform Abstraction
 
-The core application logic (`src/core/`) is platform-agnostic. Platform differences
+The application logic is organized into domain-specific directories under `src/`: `app/`, `chat/`, `renderer/`, `settings/`, `i18n/`, `translation/`, `media/`, `util/`. Platform differences
 are isolated behind adapter interfaces in `src/platform/`:
 
 | Capability | Userscript | Chrome Extension | Firefox Extension |
@@ -68,8 +68,8 @@ pnpm build:extension:firefox
   different API namespaces (`chrome.*` vs `browser.*`), but the core code
   never calls these directly. The platform adapter layer handles the mapping.
 
-- **Worker bundles in web_accessible_resources**: The render workers
-  (`renderer-worker.js`, `renderer-worker-webgl2.js`) must be listed in
+- **Worker bundles in web_accessible_resources**: The render worker
+  (`workers/renderer.js`) must be listed in
   `web_accessible_resources` so the content script can spawn them via
   `chrome.runtime.getURL()`.
 
