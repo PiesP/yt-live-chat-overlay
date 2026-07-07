@@ -9,7 +9,7 @@
  */
 
 import type { OverlayDimensions, OverlaySettings } from '@app-types';
-import { getActiveLanguage, t } from '@core/i18n';
+import { getActiveLanguage, t } from '@i18n/index';
 import { rendererLayout } from '@util/design-tokens';
 import {
   clearSafeTimeout,

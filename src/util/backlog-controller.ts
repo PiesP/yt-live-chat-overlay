@@ -23,7 +23,7 @@
  */
 
 import type { BacklogMode, ChatMessage, Pauseable } from '@app-types';
-import { t } from '@core/i18n';
+import { t } from '@i18n/index';
 import { isPriorityMessage, prioritySortOrder, sampleExponential } from '@util/backlog-helpers';
 import {
   BACKLOG_INDICATOR_BG,

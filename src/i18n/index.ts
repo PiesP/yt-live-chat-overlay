@@ -11,7 +11,7 @@
  * supported set; unknown locales fall back to English.
  *
  * Usage:
- *   import { t, resolveActiveLanguage } from '@core/i18n';
+ *   import { t, resolveActiveLanguage } from '@i18n/index';
  *   resolveActiveLanguage('auto');          // at startup
  *   element.textContent = t('Chat Overlay'); // in DOM construction
  */
@@ -132,11 +132,11 @@ export function resolveTranslationTarget(target: TranslationTarget): SupportedLa
 
 type TranslationMap = Record<string, string>;
 
-import { AR } from '@core/i18n/ar';
-import { ES } from '@core/i18n/es';
-import { JA } from '@core/i18n/ja';
-import { KO } from '@core/i18n/ko';
-import { ZH_CN } from '@core/i18n/zh-CN';
+import { AR } from '@i18n/ar';
+import { ES } from '@i18n/es';
+import { JA } from '@i18n/ja';
+import { KO } from '@i18n/ko';
+import { ZH_CN } from '@i18n/zh-CN';
 
 export const TRANSLATION_MAPS: Record<SupportedLanguage, TranslationMap> = {
   en: {}, // English: no translation needed (strings are the keys)

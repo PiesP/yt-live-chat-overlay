@@ -2,7 +2,6 @@
 // Copyright (c) 2026 PiesP
 
 import type { OverlaySettings } from '@app-types';
-import { getActiveLanguage, t } from '@core/i18n';
 import { normalizeStoredSettings, SETTINGS_VERSION } from '@core/settings-schema';
 import {
   type ActionType,
@@ -14,6 +13,7 @@ import {
 } from '@core/settings-ui-form';
 import { PANES } from '@core/settings-ui-panes';
 import { SETTINGS_UI_STYLES } from '@core/settings-ui-styles';
+import { getActiveLanguage, t } from '@i18n/index';
 import {
   clearSafeTimeout,
   ensurePlayerPositioning,

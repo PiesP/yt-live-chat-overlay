@@ -2,7 +2,6 @@
 // Copyright (c) 2026 PiesP
 
 import type { OverlaySettings } from '@app-types';
-import { t } from '@core/i18n';
 import type {
   OutlineSettingKey,
   RootNumericSettingKey,
@@ -27,6 +26,7 @@ import type {
 } from '@core/settings-ui-panes';
 import { PANES } from '@core/settings-ui-panes';
 import { TranslationService } from '@core/translation-service';
+import { t } from '@i18n/index';
 import { createLogger } from '@util/logging';
 
 const log = createLogger('SettingsUiForm');

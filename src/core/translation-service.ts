@@ -16,7 +16,7 @@
  *   For chat (short messages), this is acceptable.
  */
 import type { TranslationLanguage } from '@app-types';
-import { resolveTranslationTarget } from '@core/i18n';
+import { resolveTranslationTarget } from '@i18n/index';
 import { ByteLimitedCache } from '@util/byte-limited-cache';
 import { createLogger } from '@util/logging';
 

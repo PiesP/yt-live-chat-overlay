@@ -8,7 +8,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, basename } from 'node:path';
 
-const I18N_DIR = new URL('../src/core/i18n/', import.meta.url).pathname;
+const I18N_DIR = new URL('../src/i18n/', import.meta.url).pathname;
 const BASELINE = 'ko.ts';
 
 /**
@@ -54,7 +54,7 @@ function extractKeys(source: string): string[] {
 
 // ── Gather locale files ──
 const files = readdirSync(I18N_DIR)
-  .filter((f) => f.endsWith('.ts') && f !== 'index.ts' && f !== BASELINE)
+  .filter((f) => f.endsWith('.ts') && f !== 'index.ts' && f !== 'en.ts' && f !== BASELINE)
   .sort();
 
 const baselinePath = join(I18N_DIR, BASELINE);

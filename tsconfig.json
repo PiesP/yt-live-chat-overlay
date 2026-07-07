@@ -36,6 +36,9 @@
       "@util/*": [
         "./src/util/*"
       ],
+      "@i18n/*": [
+        "./src/i18n/*"
+      ],
       "@app-types": [
         "./src/types/index"
       ],
