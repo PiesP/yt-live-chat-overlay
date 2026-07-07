@@ -75,8 +75,9 @@ import {
   HORIZONTAL_STAGGER_MAX,
   HORIZONTAL_STAGGER_PER_STEP,
   hashStringForTier as hashForTier,
-  MS_TO_S,
   OPACITY_BUCKET_COUNT as OPACITY_BUCKETS,
+  SIN_LUT_SCALE,
+  SIN_TABLE,
   SPEED_TIER,
   STAGGER_BATCH_MAX,
   STAGGER_EXP_SCALE,
@@ -105,7 +106,6 @@ import type {
 } from './renderer-worker-types';
 
 // ── Worker-specific constants ──────────────────────────────────────────────
-const PULSE_ANGULAR_FREQ = Math.PI;
 
 // biome-ignore lint/style/useConst: reassigned during worker init
 let stickerCache: ByteLimitedCache<ImageBitmap> | null = null;
@@ -232,7 +232,8 @@ function renderPaidCardWorker(
     ctx.restore();
   } else if (card.decoration === 'pulsingBorder' && card.pulsingBorder) {
     const pb = card.pulsingBorder;
-    const pulse = Math.sin((elapsed / MS_TO_S) * PULSE_ANGULAR_FREQ) * pb.amplitude + pb.baseAlpha;
+    const sinIndex = ((elapsed * SIN_LUT_SCALE) | 0) & 255;
+    const pulse = SIN_TABLE[sinIndex]! * pb.amplitude + pb.baseAlpha;
     ctx.save();
     drawRoundRect(ctx, x, y, w, h, card.cardRadius);
     ctx.strokeStyle = `rgba(${pb.borderRgb.r}, ${pb.borderRgb.g}, ${pb.borderRgb.b}, ${pulse})`;
@@ -1123,6 +1124,7 @@ export class WorkerRenderer {
                 const ghostFont = getFont(this.config.fontSize);
                 this.ctx.font = ghostFont;
                 this.ctx.textRendering = 'optimizeSpeed';
+                this.ctx.fontKerning = 'none';
                 this.ctx.fillStyle = renderColor;
                 this.ctx.fillText(
                   msg.text,

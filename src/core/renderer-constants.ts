@@ -118,6 +118,24 @@ export const OUTLINE_STROKE_SCALE = 0.85;
 /** Milliseconds to seconds conversion divisor. */
 export const MS_TO_S = 1000;
 
+// ── Trigonometric LUTs ──────────────────────────────────────────────────────
+
+/** 256-entry pre-computed sine table covering [0, 2π).
+ *  Indexed by floor(elapsed * SIN_LUT_SCALE) & 255 to avoid per-frame Math.sin().
+ *  One sine cycle = 2000ms for membership card pulsing. */
+export const SIN_TABLE: Float64Array = (() => {
+  const t = new Float64Array(256);
+  for (let i = 0; i < 256; i++) {
+    t[i] = Math.sin((i / 256) * 2 * Math.PI);
+  }
+  return t;
+})();
+
+/** Scale factor to map elapsed (ms) to SIN_TABLE index.
+ *  256 entries / 2000ms period = 0.128 index/ms.
+ *  Usage: SIN_TABLE[((elapsed * SIN_LUT_SCALE) | 0) & 255] */
+export const SIN_LUT_SCALE = 256 / 2000; // 0.128
+
 // ── Shared utility functions ────────────────────────────────────────────────
 
 /** Simple djb2-like hash of a string to a 0-1 float for tier assignment. */

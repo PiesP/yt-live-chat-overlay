@@ -1078,6 +1078,7 @@ export class CanvasRenderer extends RendererBase {
                 ctx.font = ghostFont;
                 ctx.textBaseline = 'top';
                 ctx.textRendering = 'optimizeSpeed';
+                ctx.fontKerning = 'none';
                 const ghostColor =
                   msg.renderMessage.userColor && this.settings.preserveUserColor
                     ? msg.renderMessage.userColor

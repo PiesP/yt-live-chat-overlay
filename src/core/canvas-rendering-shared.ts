@@ -470,6 +470,7 @@ function cacheTextBitmap(
   offCtx.textBaseline = 'top';
   offCtx.letterSpacing = letterSpacing;
   offCtx.textRendering = 'optimizeLegibility';
+  offCtx.fontKerning = 'auto'; // enable kerning for cached bitmap quality
   offCtx.strokeStyle = strokeColor;
   offCtx.lineWidth = strokeWidth;
   offCtx.lineJoin = 'round';
@@ -584,6 +585,7 @@ export function renderSegment(
   ctx.font = font;
   ctx.textBaseline = 'top';
   ctx.textRendering = 'optimizeSpeed';
+  ctx.fontKerning = 'none'; // disable kerning for speed
   ctx.letterSpacing = letterSpacing;
   strokeTextOutline(ctx, displayText, x, y, color, outlineWidthPx, outlineOpacity);
   ctx.fillStyle = color;
