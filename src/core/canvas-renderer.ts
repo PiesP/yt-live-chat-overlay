@@ -90,8 +90,6 @@ import {
 } from '@core/text-measure';
 import { TranslationService } from '@core/translation-service';
 
-import { WebGL2ImageRenderer } from '@core/webgl2-image-renderer';
-
 const log = createLogger('RendererCanvas');
 
 /** Shared CSS string applied to all canvas elements — ensures consistent sizing and event delegation. */
@@ -252,9 +250,6 @@ export class CanvasRenderer extends RendererBase {
 
   private static readonly IDLE_GRACE_PERIOD_MS = 500;
 
-  /** WebGL2-accelerated image rendering overlay (experimental). */
-  private webgl2: WebGL2ImageRenderer | null = null;
-
   /**
    * H2: Tracks whether the status bar has been rendered at least once
    * since the last status change. When transitioning from idle with a
@@ -354,14 +349,6 @@ export class CanvasRenderer extends RendererBase {
     // created.  The old guard here never fired because the field is only
     // assigned later in this constructor (line 311).
 
-    // Initialize WebGL2 overlay for GPU-accelerated glow effects (OffscreenCanvas).
-    {
-      const initDims = overlay.getDimensions();
-      if (initDims) {
-        this.webgl2 = new WebGL2ImageRenderer(initDims.width, initDims.height);
-      }
-    }
-
     // Initialize ImageFetchManager BEFORE RenderWorkerManager so the worker
     // receives a valid reference instead of undefined.
     this.imageFetchManager = new ImageFetchManager();
@@ -386,7 +373,6 @@ export class CanvasRenderer extends RendererBase {
       if (d && this.canvas) {
         this.applyDevicePixelRatio(d);
         this.laneAllocator.reset(d);
-        this.webgl2?.resize(d.width, d.height);
       }
     });
 
@@ -820,15 +806,10 @@ export class CanvasRenderer extends RendererBase {
       this.compactRemovedMessages(cleanupResult.writeIdx, cleanupResult.oldLength);
     }
 
-    // ── Draw stage: WebGL2 glow first (under text), then Canvas2D text on top ──
-    this.webgl2?.beginFrame();
-    this.collectGlowInstances(cleanupResult.nearBuckets);
-    const glowCanvas = this.webgl2?.flush();
-
     ctx.clearRect(0, 0, dims.width, dims.height);
-    if (glowCanvas) {
-      ctx.drawImage(glowCanvas, 0, 0, dims.width, dims.height);
-    }
+
+    // ── Glow stage: membership card pulsing borders ──
+    this.drawGlowStage(ctx, cleanupResult.nearBuckets);
 
     this.drawStage(ctx, cleanupResult.farBuckets);
     this.drawStage(ctx, cleanupResult.midBuckets);
@@ -1222,14 +1203,11 @@ export class CanvasRenderer extends RendererBase {
   }
 
   /**
-   * Lightweight pass over NEAR-tier messages to collect WebGL2 glow instances.
-   * Does NOT render Canvas2D — only calls webgl2.addGlow() for membership cards
-   * with pulsing borders.  Called before the main draw stages so glow renders
-   * beneath the text layer.
+   * Render pulsing-border glow effects for membership/superchat cards.
+   * Uses ctx.filter blur for GPU-accelerated Gaussian blur (all browsers).
+   * Drawn BEFORE text passes so glow renders beneath the text layer.
    */
-  private collectGlowInstances(buckets: CanvasMessage[][]): void {
-    if (!this.webgl2?.isEnabled) return;
-
+  private drawGlowStage(ctx: CanvasRenderingContext2D, buckets: CanvasMessage[][]): void {
     for (let bucketIndex = 0; bucketIndex < OPACITY_BUCKET_COUNT; bucketIndex++) {
       const entries = buckets[bucketIndex];
       if (!entries || entries.length === 0) continue;
@@ -1248,16 +1226,15 @@ export class CanvasRenderer extends RendererBase {
         const elapsed = msg._frameElapsed ?? 0;
         const sinIndex = ((elapsed * SIN_LUT_SCALE) | 0) & 255;
         const pulse = SIN_TABLE[sinIndex]! * pb.amplitude + pb.baseAlpha;
-        if (pulse > 0.01) {
-          this.webgl2!.addGlow(
-            Math.floor(msg.x),
-            Math.floor(msg.y),
-            msg.width,
-            msg.height,
-            `rgba(${pb.borderRgb.r},${pb.borderRgb.g},${pb.borderRgb.b},1)`,
-            pulse * 0.3
-          );
-        }
+        if (pulse <= 0.01) continue;
+
+        const alpha = Math.min(1, pulse * 0.3);
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.filter = 'blur(8px)';
+        ctx.fillStyle = `rgb(${pb.borderRgb.r},${pb.borderRgb.g},${pb.borderRgb.b})`;
+        ctx.fillRect(Math.floor(msg.x) - 4, Math.floor(msg.y) - 4, msg.width + 8, msg.height + 8);
+        ctx.restore();
       }
     }
   }
@@ -2092,7 +2069,6 @@ export class CanvasRenderer extends RendererBase {
     this.stopRenderLoop();
     this.workerManager.destroy();
     this.imageFetchManager.destroy();
-    this.webgl2?.destroy();
     this.overlayDimensionsUnsubscribe?.();
     if (this.canvas && this.canvasClickHandler) {
       this.canvas.removeEventListener('click', this.canvasClickHandler);
