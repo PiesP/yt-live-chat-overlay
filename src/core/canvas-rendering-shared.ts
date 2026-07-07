@@ -294,7 +294,7 @@ export function buildWrappedLines(
   let maxLineWidth = 0;
 
   for (const piece of pieces) {
-    const gap = prevIsText && piece.type === 'text' ? spaceWidth : 0;
+    const gap = prevIsText ? spaceWidth : 0;
     const needed = gap + piece.width;
 
     // ── Oversize single word — character-level wrap (CJK, URLs, etc.)
@@ -762,6 +762,9 @@ function renderContentSegments(
 ): void {
   let cursorX = startX;
   const emojiSize = Math.round(fontSize * rendererLayout.emojiSize);
+  const font = getFontFn(fontSize);
+  const textHeight = measureTextHeight(font, fontSize);
+  const emojiY = y + Math.round((textHeight - emojiSize) / 2);
 
   for (const seg of segments) {
     if (seg.type === 'text' && seg.content) {
@@ -783,7 +786,7 @@ function renderContentSegments(
       const { emojiUrl, emojiAlt, emojiFallbackText } = resolveEmojiFields(seg);
       const img = emojiUrl ? getEmojiImg(emojiUrl) : null;
       if (img) {
-        ctx.drawImage(img, cursorX, y, emojiSize, emojiSize);
+        ctx.drawImage(img, cursorX, emojiY, emojiSize, emojiSize);
       } else if (emojiFallbackText) {
         renderSegment(
           ctx,
@@ -1207,10 +1210,10 @@ export function renderWrappedContentSegments<
     const needsEllipsis = isLastLine && isTruncated;
     let cursorX = x;
     let prevText = false;
+    const emojiLineY = cursorY + Math.round((lineHeight - emojiSize) / 2);
 
     for (const piece of line) {
-      // Space gap between text words
-      if (prevText && piece.type === 'text') {
+      if (prevText) {
         cursorX += spaceWidth;
       }
       prevText = piece.type === 'text';
@@ -1240,7 +1243,7 @@ export function renderWrappedContentSegments<
             ? cached
             : null;
         if (img) {
-          ctx.drawImage(img, cursorX, cursorY, emojiSize, emojiSize);
+          ctx.drawImage(img, cursorX, emojiLineY, emojiSize, emojiSize);
         } else if (piece.emojiFallbackText) {
           renderSegment(
             ctx,

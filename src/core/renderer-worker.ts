@@ -111,8 +111,18 @@ import type {
 // biome-ignore lint/style/useConst: reassigned during worker init
 let stickerCache: ByteLimitedCache<ImageBitmap> | null = null;
 
-function measureTextHeight(fontSize: number): number {
-  // Module-level ctx/config were removed; always return conservative fallback.
+function measureTextHeight(
+  fontSize: number,
+  font: string,
+  ctx?: OffscreenCanvasRenderingContext2D
+): number {
+  if (ctx) {
+    ctx.font = font;
+    const m = ctx.measureText('Mg');
+    const ascent = Math.max(0, m.actualBoundingBoxAscent);
+    const descent = Math.max(0, m.actualBoundingBoxDescent);
+    if (ascent > 0 && descent > 0) return Math.ceil(ascent + descent);
+  }
   return Math.ceil(fontSize * 1.1);
 }
 
@@ -309,7 +319,7 @@ function renderPaidCardWorker(
     ctx.fillStyle = card.headerTagColor;
     ctx.fillText(displayText, textX, cursorY + card.headerTagMarginTop);
     ctx.restore();
-    const headerHeight = measureTextHeight(headerFontSize);
+    const headerHeight = measureTextHeight(headerFontSize, headerFont, ctx);
     cursorY += headerHeight + card.headerTagMarginTop + card.headerTagMarginBottom;
   }
 
