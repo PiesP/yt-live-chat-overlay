@@ -30,9 +30,6 @@
     "skipLibCheck": true,
     // Path Aliases
     "paths": {
-      "@core/*": [
-        "./src/core/*"
-      ],
       "@util/*": [
         "./src/util/*"
       ],
