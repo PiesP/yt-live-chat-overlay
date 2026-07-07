@@ -112,7 +112,7 @@ export class WebGL2ImageRenderer {
 
     const canvas = document.createElement('canvas');
     canvas.style.cssText =
-      'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:1';
+      'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:1;background:transparent';
     canvas.width = width;
     canvas.height = height;
     container.appendChild(canvas);
@@ -240,7 +240,6 @@ export class WebGL2ImageRenderer {
   flush(): void {
     if (!this.enabled || !this.gl) return;
     this.flushDraw();
-    this.gl.finish();
   }
 
   /**

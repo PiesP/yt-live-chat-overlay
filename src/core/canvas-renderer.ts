@@ -95,7 +95,7 @@ const log = createLogger('RendererCanvas');
 
 /** Shared CSS string applied to all canvas elements — ensures consistent sizing and event delegation. */
 const CANVAS_CSS =
-  'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;text-rendering:optimizeSpeed';
+  'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;text-rendering:optimizeSpeed;z-index:2';
 
 /** Alpha for the connected status dot — subtle when connected. */
 const DISCONNECTED_DOT_ALPHA = 0.15;
