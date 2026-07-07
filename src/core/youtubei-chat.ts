@@ -550,12 +550,16 @@ const fetchChatEndpoint = async (
 
       const isLastAttempt = attempt === ENDPOINT_RETRY_MAX_ATTEMPTS - 1;
       if (isLastAttempt || !isRetryableError(error)) {
+        log.warn(
+          `Innertube ${endpoint} request failed (attempt ${attempt + 1}/${ENDPOINT_RETRY_MAX_ATTEMPTS}):`,
+          error
+        );
         throw error;
       }
 
       // Exponential backoff: 1s → 2s → 4s
       const delayMs = ENDPOINT_RETRY_BASE_DELAY_MS * 2 ** attempt;
-      log.warn(
+      log.info(
         `Innertube ${endpoint} request failed (attempt ${attempt + 1}/${ENDPOINT_RETRY_MAX_ATTEMPTS}), ` +
           `retrying in ${delayMs}ms:`,
         lastError

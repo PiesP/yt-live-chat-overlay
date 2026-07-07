@@ -187,7 +187,7 @@ export class ReplayChatSource extends ChatSource {
           }
         } catch (error: unknown) {
           if (!isAbortError(error)) {
-            log.warn('Fetch iteration failed:', error);
+            log.info('Fetch iteration failed:', error);
           }
         }
       }
@@ -217,7 +217,7 @@ export class ReplayChatSource extends ChatSource {
           if (isAbortError(error)) {
             this.prefetchContinuation = null;
           } else {
-            log.warn('Prefetch page failed:', error);
+            log.info('Prefetch page failed:', error);
             this.prefetchBackoffUntil = Date.now() + 5000;
           }
         }
@@ -324,7 +324,7 @@ export class ReplayChatSource extends ChatSource {
           this.startPrefetch();
         } catch (error: unknown) {
           if (!isAbortError(error)) {
-            log.warn('Seek replay fetch failed:', error);
+            log.info('Seek replay fetch failed:', error);
           }
         }
       })();
@@ -337,7 +337,7 @@ export class ReplayChatSource extends ChatSource {
           this.startPrefetch();
         } catch (error: unknown) {
           if (!isAbortError(error)) {
-            log.warn('Continuation poll in seek handler failed:', error);
+            log.info('Continuation poll in seek handler failed:', error);
           }
         }
       })();
@@ -424,7 +424,7 @@ export class ReplayChatSource extends ChatSource {
         throw error;
       }
 
-      log.warn('Failed to initialize replay chat session:', error);
+      log.info('Failed to initialize replay chat session:', error);
       return false;
     }
   }
@@ -491,7 +491,7 @@ export class ReplayChatSource extends ChatSource {
         throw error;
       }
 
-      log.warn('Replay playerSeek request failed:', error);
+      log.info('Replay playerSeek request failed:', error);
       this.recordReplayFailure();
       return false;
     }
@@ -526,7 +526,7 @@ export class ReplayChatSource extends ChatSource {
         throw error;
       }
 
-      log.warn('Replay continuation request failed:', error);
+      log.info('Replay continuation request failed:', error);
       this.recordReplayFailure();
       return false;
     }
