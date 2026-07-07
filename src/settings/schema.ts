@@ -14,14 +14,14 @@ import type {
   TranslationSource,
   TranslationTarget,
 } from '@app-types';
-import { DEFAULT_SETTINGS, migrateSettings } from '@core/settings-defaults';
-import { resolveLimits } from '@core/settings-limits';
+import { DEFAULT_SETTINGS, migrateSettings } from '@settings/defaults';
+import { resolveLimits } from '@settings/limits';
 import {
   AUTHOR_COLOR_KEYS,
   ROOT_SETTING_META,
   SHOW_AUTHOR_KEYS,
   VISUAL_ROOT_KEYS,
-} from '@core/settings-meta';
+} from '@settings/meta';
 
 // ── Re-exports for backward compatibility ───────────────────────────────────────
 export {
@@ -29,20 +29,20 @@ export {
   migrateSettings,
   SETTINGS_VERSION,
   STORAGE_KEY,
-} from '@core/settings-defaults';
+} from '@settings/defaults';
 export type {
   OutlineSettingKey,
   RootNumericSettingKey,
   SettingsLimitKey,
-} from '@core/settings-limits';
+} from '@settings/limits';
 export {
   getOutlineDisplayScale,
   OUTLINE_NUMERIC_KEYS,
   resolveLimits,
   resolveOutlineLimits,
-} from '@core/settings-limits';
-export type { RootScalarSettingKey } from '@core/settings-meta';
-export { AUTHOR_COLOR_KEYS, getRootDisplayMeta } from '@core/settings-meta';
+} from '@settings/limits';
+export type { RootScalarSettingKey } from '@settings/meta';
+export { AUTHOR_COLOR_KEYS, getRootDisplayMeta } from '@settings/meta';
 // ── End re-exports ──────────────────────────────────────────────────────────────
 
 export const isLogLevel = (value: unknown): value is LogLevel =>

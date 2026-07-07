@@ -2,11 +2,13 @@
 // Copyright (c) 2026 PiesP
 
 import type { OverlaySettings } from '@app-types';
+import { TranslationService } from '@core/translation-service';
+import { t } from '@i18n/index';
 import type {
   OutlineSettingKey,
   RootNumericSettingKey,
   RootScalarSettingKey,
-} from '@core/settings-schema';
+} from '@settings/schema';
 import {
   AUTHOR_COLOR_KEYS,
   cloneSettings,
@@ -15,7 +17,7 @@ import {
   OUTLINE_NUMERIC_KEYS,
   resolveLimits,
   resolveOutlineLimits,
-} from '@core/settings-schema';
+} from '@settings/schema';
 import type {
   AuthorGridField,
   FieldDef,
@@ -23,10 +25,8 @@ import type {
   FontPreviewField,
   PaneDef,
   WeightToggleField,
-} from '@core/settings-ui-panes';
-import { PANES } from '@core/settings-ui-panes';
-import { TranslationService } from '@core/translation-service';
-import { t } from '@i18n/index';
+} from '@settings/ui/panes';
+import { PANES } from '@settings/ui/panes';
 import { createLogger } from '@util/logging';
 
 const log = createLogger('SettingsUiForm');

@@ -12,8 +12,8 @@ import type { ChatMessage, FontWeight } from '@app-types';
 import { buildWrappedLines, toSharedContentSegments } from '@core/canvas-rendering-shared';
 import { RendererBase } from '@core/renderer-base';
 import { SPEED_TIER } from '@core/renderer-constants';
-import { DEFAULT_SETTINGS } from '@core/settings-schema';
 import { getFontString, measureTextHeight, measureTextWidth } from '@core/text-measure';
+import { DEFAULT_SETTINGS } from '@settings/schema';
 import { DEFAULT_FONT_FAMILY, rendererLayout, spacing } from '@util/design-tokens';
 import type { PriorityBucketQueue } from '@util/priority-bucket-queue';
 

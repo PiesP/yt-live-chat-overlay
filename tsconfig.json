@@ -45,6 +45,9 @@
       "@chat/youtube/*": [
         "./src/chat/youtube/*"
       ],
+      "@settings/*": [
+        "./src/settings/*"
+      ],
       "@app-types": [
         "./src/types/index"
       ],

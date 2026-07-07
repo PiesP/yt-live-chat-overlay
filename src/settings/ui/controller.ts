@@ -2,7 +2,8 @@
 // Copyright (c) 2026 PiesP
 
 import type { OverlaySettings } from '@app-types';
-import { normalizeStoredSettings, SETTINGS_VERSION } from '@core/settings-schema';
+import { getActiveLanguage, t } from '@i18n/index';
+import { normalizeStoredSettings, SETTINGS_VERSION } from '@settings/schema';
 import {
   type ActionType,
   BACKDROP_ID,
@@ -10,10 +11,9 @@ import {
   RELOAD_BUTTON_ID,
   SettingsUiForm,
   STYLE_ID,
-} from '@core/settings-ui-form';
-import { PANES } from '@core/settings-ui-panes';
-import { SETTINGS_UI_STYLES } from '@core/settings-ui-styles';
-import { getActiveLanguage, t } from '@i18n/index';
+} from '@settings/ui/form';
+import { PANES } from '@settings/ui/panes';
+import { SETTINGS_UI_STYLES } from '@settings/ui/styles';
 import {
   clearSafeTimeout,
   ensurePlayerPositioning,

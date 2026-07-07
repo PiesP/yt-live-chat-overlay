@@ -16,9 +16,9 @@ import { isYouTubeWatch } from '@chat/youtube/url-pattern';
 import { CanvasRenderer } from '@core/canvas-renderer';
 import { OVERLAY_SELECTOR, Overlay } from '@core/overlay';
 import type { ConnectionStatus, RendererBase } from '@core/renderer-base';
-import { shouldResetRendererForSettingsChange } from '@core/settings-schema';
 import { StandbyController } from '@core/standby-controller';
 import { VideoPauseController } from '@core/video-pause-controller';
+import { shouldResetRendererForSettingsChange } from '@settings/schema';
 import { BacklogInjectionController } from '@util/backlog-controller';
 import {
   clearSafeInterval,

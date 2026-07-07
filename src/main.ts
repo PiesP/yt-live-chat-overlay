@@ -12,10 +12,10 @@ import type { OverlaySettings } from '@app-types';
 import { isYouTubeLive, isYouTubeWatch } from '@chat/youtube/url-pattern';
 import { PageWatcher } from '@core/page-watcher';
 import { RuntimeManager } from '@core/runtime-manager';
-import { Settings } from '@core/settings';
-import { SettingsUi } from '@core/settings-ui';
 import { resolveActiveLanguage, t } from '@i18n/index';
 import { getMenuAdapter } from '@platform/menu-adapters';
+import { Settings } from '@settings/store';
+import { SettingsUi } from '@settings/ui/controller';
 import { createLogger, setOverlayLogLevel } from '@util/logging';
 
 const log = createLogger('App');

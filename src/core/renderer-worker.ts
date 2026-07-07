@@ -87,8 +87,8 @@ import {
   computeMessageOpacity,
   type OpacityConfig,
 } from '@core/renderer-shared';
-import { DEFAULT_SETTINGS } from '@core/settings-defaults';
 import { getFontString, measureBoundingBoxWidth } from '@core/text-measure';
+import { DEFAULT_SETTINGS } from '@settings/defaults';
 import { ByteLimitedCache } from '@util/byte-limited-cache';
 import {
   computeScrollDuration,
