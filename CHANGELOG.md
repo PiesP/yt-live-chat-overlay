@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **Half-cell lane density during burst traffic** — When comments flood, the lane grid subdivides to finer resolution, doubling placement opportunities.
+  - Normal/elevated burst: `laneDensityFactor = 1.0` (full-cell, no change)
+  - High burst: 0.75 (transitional, 33% more lanes)
+  - Extreme burst: 0.5 (half-cell, 2× lane count)
+  - Effective lane height = `rawLaneHeight × laneDensityFactor`, applied in both main-thread `LaneAllocator` and Worker renderer
+  - Density transitions are burst-driven and automatic; active messages survive unchanged
+  - Worker synced via `laneDensity` protocol message
+
 ## [0.42.0] - 2026-07-04
 
 ### Added
