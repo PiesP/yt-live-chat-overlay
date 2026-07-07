@@ -55,6 +55,9 @@ export abstract class RendererBase {
 
   protected isPaused = false;
   protected _isVideoPaused = false;
+
+  /** Currently active lane density factor — cached to detect burst-driven changes. */
+  protected currentLaneDensityFactor = 1.0;
   /** Set by RuntimeManager when the session uses ReplayChatSource. */
   protected _isReplayMode = false;
   protected pausedAt: number | null = null;
@@ -354,6 +357,21 @@ export abstract class RendererBase {
   getLaneDensityFactor(): number {
     const burstLevel = this.burstDetector.getLevel();
     return RendererBase.LANE_DENSITY_BY_BURST[burstLevel];
+  }
+
+  /** Apply lane density change if burst level shifted since last check.
+   *  Called at the start of each render frame, before drainStage().
+   *  When density changes, resets the lane allocator with the new effective lane height.
+   *  Active messages are unaffected — they retain their original placement positions.
+   *  New placements from this point use the updated grid.
+   *  Returns true if lanes were reset. */
+  protected applyLaneDensityIfChanged(): boolean {
+    const newFactor = this.getLaneDensityFactor();
+    if (newFactor === this.currentLaneDensityFactor) return false;
+    this.currentLaneDensityFactor = newFactor;
+    this.laneAllocator.updateLaneDensityFactor(newFactor);
+    this.laneAllocator.reset(this.overlay.getDimensions());
+    return true;
   }
 
   protected isMessageAllowed(message: ChatMessage): boolean {

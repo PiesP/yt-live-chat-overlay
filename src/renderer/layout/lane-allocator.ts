@@ -141,6 +141,11 @@ export class LaneAllocator {
     this.options.laneSpacing = laneSpacing;
   }
 
+  /** Update lane density factor — caller must call `reset()` afterwards to apply. */
+  updateLaneDensityFactor(factor: number): void {
+    this.options.laneDensityFactor = factor;
+  }
+
   reset(dimensions: OverlayDimensions | null): void {
     this.heap = [];
     this.indexMap = new Map();

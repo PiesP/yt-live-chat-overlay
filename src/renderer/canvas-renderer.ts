@@ -790,6 +790,7 @@ export class CanvasRenderer extends RendererBase {
     const mode = this.settings.danmakuMode;
 
     // ── Drain stage: anti-block gate + lane allocation ──
+    this.applyLaneDensityIfChanged();
     this.drainStage(now, dims);
 
     this.observability.updateLaneUtilization(this.laneAllocator.getUtilization());
