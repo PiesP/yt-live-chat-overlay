@@ -33,7 +33,7 @@ export class ViteWorkerFactory implements WorkerFactory {
  */
 export class ChromeExtensionWorkerFactory implements WorkerFactory {
   createWorkerUrl(relativePath: string): string {
-    // './renderer-worker.ts' → 'workers/renderer-worker.js'
+    // './renderer.ts' → 'workers/renderer.js'
     const basename = relativePath.replace(/^\.\//, '').replace(/\.ts$/, '.js');
     // chrome is declared as possibly undefined; guard access
     const chromeApi =

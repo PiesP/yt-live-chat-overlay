@@ -37,7 +37,7 @@ export function createExtensionConfig(outDir: string): UserConfig {
         rollupOptions: {
           input: {
             background: resolve(repoRoot, 'extension/background.ts'),
-            'workers/renderer-worker': resolve(repoRoot, 'src/renderer/worker/renderer.ts'),
+            'workers/renderer': resolve(repoRoot, 'src/renderer/worker/renderer.ts'),
           },
           output: {
             entryFileNames: '[name].js',

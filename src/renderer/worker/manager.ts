@@ -207,7 +207,7 @@ export class RenderWorkerManager {
 
       // Resolve worker URL via platform-specific factory
       const factory = workerFactory ?? getWorkerFactory();
-      const workerUrl = factory.createWorkerUrl('./renderer-worker.ts');
+      const workerUrl = factory.createWorkerUrl('./renderer.ts');
 
       // In MAIN-world content scripts, the page's CSP (not the extension's)
       // governs Worker creation. If YouTube's CSP blocks the worker URL

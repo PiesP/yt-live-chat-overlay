@@ -51,8 +51,8 @@ pnpm knip:full       # full unused files/exports/deps scan
 
 See [CODE_STANDARDS.md](./CODE_STANDARDS.md) for detailed conventions. Key points:
 
-- Path aliases: `@core/*` → `src/core/*`, `@app-types` → `src/types/index.ts`
-- Use `createLogger('[ModuleName]')` from `@core/logging`
+- Path aliases: `@util/*`, `@app/*`, `@renderer/*`, `@chat/*`, `@settings/*`, `@i18n/*`, `@app-types` (see tsconfig.json)
+- Use `createLogger('[ModuleName]')` from `@util/logging`
 - Non-null assertions (`!`) and `any` are forbidden
 - Prefer Canvas2D renderer for new rendering features
 

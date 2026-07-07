@@ -3,7 +3,14 @@
   "entry": ["src/main.ts"],
   "project": ["src/**/*.ts"],
   "paths": {
-    "@core/*": ["src/core/*"],
+    "@app/*": ["src/app/*"],
+    "@chat/*": ["src/chat/*"],
+    "@i18n/*": ["src/i18n/*"],
+    "@media/*": ["src/media/*"],
+    "@renderer/*": ["src/renderer/*"],
+    "@settings/*": ["src/settings/*"],
+    "@translation/*": ["src/translation/*"],
+    "@util/*": ["src/util/*"],
     "@app-types": ["src/types/index"],
     "@platform/*": ["src/platform/*"]
   },
