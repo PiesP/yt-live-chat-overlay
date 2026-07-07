@@ -1126,11 +1126,18 @@ export class WorkerRenderer {
                 this.ctx.textRendering = 'optimizeSpeed';
                 this.ctx.fontKerning = 'none';
                 this.ctx.fillStyle = renderColor;
-                this.ctx.fillText(
-                  msg.text,
-                  Math.floor(msg._prevX) + rendererLayout.paddingH,
-                  Math.floor(msg._prevY) + rendererLayout.paddingV
-                );
+                // Build ghost text from text segments only — skip emoji fallbackText
+                const ghostText = (msg.content ?? [])
+                  .filter((s): s is { type: 'text'; content: string } => s.type === 'text')
+                  .map((s) => s.content)
+                  .join('');
+                if (ghostText) {
+                  this.ctx.fillText(
+                    ghostText,
+                    Math.floor(msg._prevX) + rendererLayout.paddingH,
+                    Math.floor(msg._prevY) + rendererLayout.paddingV
+                  );
+                }
                 this.ctx.restore();
               }
             }

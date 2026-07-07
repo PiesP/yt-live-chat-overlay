@@ -1096,8 +1096,9 @@ export class CanvasRenderer extends RendererBase {
             if (ghostAlpha > 0.001) {
               ctx.save();
               ctx.globalAlpha = ghostAlpha;
-              // Re-draw the same message at the previous position
-              // We use a lightweight direct fillText for the ghost (no outline, no cache)
+              // Re-draw the same message at the previous position.
+              // Use only text segments (skip emoji fallbackText from message.text)
+              // to avoid ghost rendering of "PiesP Smile" etc. alongside emoji images.
               if (msg.renderMessage) {
                 const ghostFont = this.boundGetFont(this.settings.fontSize);
                 ctx.font = ghostFont;
@@ -1111,11 +1112,19 @@ export class CanvasRenderer extends RendererBase {
                         this.settings.colors[msg.renderMessage.authorType]) ||
                       this.settings.colors.normal;
                 ctx.fillStyle = ghostColor;
-                ctx.fillText(
-                  msg.renderMessage.text,
-                  Math.floor(msg._prevX) + rendererLayout.paddingH,
-                  Math.floor(msg._prevY) + rendererLayout.paddingV
-                );
+                // Build ghost text from text segments only — skip emoji fallbackText
+                // which would appear as faint ghost text alongside emoji images.
+                const ghostText = msg.renderMessage.content
+                  .filter((s): s is { type: 'text'; content: string } => s.type === 'text')
+                  .map((s) => s.content)
+                  .join('');
+                if (ghostText) {
+                  ctx.fillText(
+                    ghostText,
+                    Math.floor(msg._prevX) + rendererLayout.paddingH,
+                    Math.floor(msg._prevY) + rendererLayout.paddingV
+                  );
+                }
               }
               ctx.restore();
             }
