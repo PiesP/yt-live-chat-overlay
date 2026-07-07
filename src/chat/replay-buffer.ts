@@ -10,7 +10,7 @@
  */
 
 import type { ChatMessage } from '@app-types';
-import type { ChatEvent } from '@core/chat-message-parser';
+import type { ChatEvent } from '@chat/message-parser';
 
 interface BufferedReplayMessage {
   message: ChatMessage;

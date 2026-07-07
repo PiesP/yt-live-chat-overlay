@@ -10,7 +10,7 @@
  */
 
 import type { FontWeight } from '@app-types';
-import { EMOJI_ALIAS_PATTERN } from '@core/chat-message-helpers';
+import { EMOJI_ALIAS_PATTERN } from '@chat/message-helpers';
 import { computeOutlineColor } from '@core/color-utils';
 import { OUTLINE_STROKE_SCALE } from '@core/renderer-constants';
 import { getFontString, measureTextHeight, measureTextWidth } from '@core/text-measure';

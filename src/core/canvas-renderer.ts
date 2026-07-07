@@ -23,6 +23,7 @@
  */
 
 import type { ChatMessage, DropReason, OverlayDimensions, OverlaySettings } from '@app-types';
+import { getTranslatableText } from '@chat/message-helpers';
 import { renderPaidCard } from '@core/canvas-card-renderers';
 import { COMPACTION_THRESHOLD_RATIO, fastRandom } from '@core/canvas-pipeline';
 import {
@@ -36,7 +37,6 @@ import {
 import { isImageReady } from '@core/canvas-worker-bridge';
 import { MEMBERSHIP_CARD_CONFIG, SUPERCHAT_CARD_CONFIG } from '@core/card-config';
 import { ChannelLanguageMemory } from '@core/channel-language-memory';
-import { getTranslatableText } from '@core/chat-message-helpers';
 import { ImageFetchManager } from '@core/image-fetch-manager';
 import { computeBaseHeadwayPx } from '@core/lane-allocation-shared';
 import type { LanePlacement } from '@core/lane-allocator';

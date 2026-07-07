@@ -13,10 +13,10 @@ import {
   EMOJI_ALIAS_PATTERN,
   extractAccessibilityLabel,
   normalizeInlineText,
-} from '@core/chat-message-helpers';
+} from '@chat/message-helpers';
+import type { JsonObject } from '@chat/youtube/request';
+import { getNumber, getString, isRecord } from '@chat/youtube/request';
 import { normalizeYouTubeImageUrl } from '@core/image-url-validation';
-import type { JsonObject } from '@core/youtubei-json';
-import { getNumber, getString, isRecord } from '@core/youtubei-json';
 
 // ── Image URL validation ─────────────────────────────────────────────────────
 

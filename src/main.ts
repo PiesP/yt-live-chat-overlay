@@ -9,11 +9,11 @@
  */
 
 import type { OverlaySettings } from '@app-types';
+import { isYouTubeLive, isYouTubeWatch } from '@chat/youtube/url-pattern';
 import { PageWatcher } from '@core/page-watcher';
 import { RuntimeManager } from '@core/runtime-manager';
 import { Settings } from '@core/settings';
 import { SettingsUi } from '@core/settings-ui';
-import { isYouTubeLive, isYouTubeWatch } from '@core/youtube-url-pattern';
 import { resolveActiveLanguage, t } from '@i18n/index';
 import { getMenuAdapter } from '@platform/menu-adapters';
 import { createLogger, setOverlayLogLevel } from '@util/logging';

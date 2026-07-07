@@ -8,18 +8,18 @@
  */
 
 import type { ChatMessage } from '@app-types';
-import { extractChatEvents } from '@core/chat-message-parser';
-import type { ChatHealthSnapshot } from '@core/chat-source-base';
-import { ChatSource } from '@core/chat-source-base';
+import { extractChatEvents } from '@chat/message-parser';
+import type { ChatHealthSnapshot } from '@chat/source-base';
+import { ChatSource } from '@chat/source-base';
 import {
   fetchLiveChat,
   type LiveChatPayload,
   YoutubeInnertubeRequestError,
-} from '@core/youtubei-chat';
+} from '@chat/youtube/api';
 import {
   extractNextLiveContinuation,
   type InnertubeContinuationData,
-} from '@core/youtubei-continuation';
+} from '@chat/youtube/continuation';
 import { isAbortError, sleep, throwIfAborted } from '@util/dom';
 import { createLogger } from '@util/logging';
 

@@ -10,17 +10,17 @@
  */
 
 import type { ChatMessage } from '@app-types';
-import { extractChatEvents } from '@core/chat-message-parser';
-import type { ChatHealthSnapshot, PlaybackSnapshot } from '@core/chat-source-base';
-import { ChatSource } from '@core/chat-source-base';
-import { ReplayBuffer } from '@core/replay-buffer';
-import type { LiveChatPayload } from '@core/youtubei-chat';
-import { fetchReplayChat } from '@core/youtubei-chat';
-import type { InnertubeContinuationData } from '@core/youtubei-continuation';
+import { extractChatEvents } from '@chat/message-parser';
+import { ReplayBuffer } from '@chat/replay-buffer';
+import type { ChatHealthSnapshot, PlaybackSnapshot } from '@chat/source-base';
+import { ChatSource } from '@chat/source-base';
+import type { LiveChatPayload } from '@chat/youtube/api';
+import { fetchReplayChat } from '@chat/youtube/api';
+import type { InnertubeContinuationData } from '@chat/youtube/continuation';
 import {
   extractPlayerSeekContinuation,
   extractReplayContinuation,
-} from '@core/youtubei-continuation';
+} from '@chat/youtube/continuation';
 import {
   clearSafeTimeout,
   findElementMatch,

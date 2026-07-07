@@ -10,7 +10,7 @@
  */
 
 import type { TranslationLanguage } from '@app-types';
-import { isYouTubeWatch } from '@core/youtube-url-pattern';
+import { isYouTubeWatch } from '@chat/youtube/url-pattern';
 
 const MAX_ENTRIES = 20;
 

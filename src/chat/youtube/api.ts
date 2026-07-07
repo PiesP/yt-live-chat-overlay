@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { isYouTubeLive, isYouTubeWatch } from '@core/youtube-url-pattern';
 import {
   extractInitialChatContinuation,
   type InnertubeContinuationData,
-} from '@core/youtubei-continuation';
+} from '@chat/youtube/continuation';
 import {
   findFirstNestedRecordByKey,
   findFirstNestedStringByKey,
@@ -14,7 +13,8 @@ import {
   getString,
   isRecord,
   type JsonObject,
-} from '@core/youtubei-json';
+} from '@chat/youtube/request';
+import { isYouTubeLive, isYouTubeWatch } from '@chat/youtube/url-pattern';
 import { isAbortError, sleep } from '@util/dom';
 import { createLogger } from '@util/logging';
 

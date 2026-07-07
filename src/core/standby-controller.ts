@@ -11,8 +11,8 @@
  * stream is detected.
  */
 
+import { bootstrapChatSession } from '@chat/youtube/api';
 import type { RendererBase } from '@core/renderer-base';
-import { bootstrapChatSession } from '@core/youtubei-chat';
 import { clearSafeTimeout, isAbortError } from '@util/dom';
 import { createLogger } from '@util/logging';
 

@@ -9,10 +9,10 @@
  */
 
 import type { ChatMessage, OverlaySettings, Pauseable } from '@app-types';
+import type { ChatBootstrapData, LiveChatPayload } from '@chat/youtube/api';
+import { getLiveChatPayload } from '@chat/youtube/api';
+import type { InnertubeContinuationData } from '@chat/youtube/continuation';
 import { logBootstrapFailure, refreshBootstrap, resolveBootstrap } from '@core/bootstrap-resolver';
-import type { ChatBootstrapData, LiveChatPayload } from '@core/youtubei-chat';
-import { getLiveChatPayload } from '@core/youtubei-chat';
-import type { InnertubeContinuationData } from '@core/youtubei-continuation';
 import { findElementMatch, isAbortError, sleep, VIDEO_SELECTORS } from '@util/dom';
 import { createLogger } from '@util/logging';
 import { createMessageIdRegistry } from '@util/message-id-registry';

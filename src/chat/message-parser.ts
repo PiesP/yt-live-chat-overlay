@@ -13,7 +13,7 @@ import {
   extractBestThumbnail,
   getEmojiVisibleFallbackText,
   parseEmoji,
-} from '@core/chat-emoji-parser';
+} from '@chat/emoji-parser';
 import {
   AUTHOR_TYPE_PRIORITY,
   colorIntToCss,
@@ -24,9 +24,9 @@ import {
   hasEmojiContent,
   stripControlCharacters,
   truncateForKind,
-} from '@core/chat-message-helpers';
-import type { JsonObject } from '@core/youtubei-json';
-import { asRecord, getNumber, getString, isRecord } from '@core/youtubei-json';
+} from '@chat/message-helpers';
+import type { JsonObject } from '@chat/youtube/request';
+import { asRecord, getNumber, getString, isRecord } from '@chat/youtube/request';
 import { createLogger } from '@util/logging';
 
 const log = createLogger('ChatMessageParser');

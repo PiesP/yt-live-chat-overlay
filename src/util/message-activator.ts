@@ -2,7 +2,7 @@
 // Copyright (c) 2026 PiesP
 
 import type { ChatMessage } from '@app-types';
-import { getTranslatableText } from '@core/chat-message-helpers';
+import { getTranslatableText } from '@chat/message-helpers';
 import { desaturateColor } from '@core/color-utils';
 import {
   type CanvasMessage,

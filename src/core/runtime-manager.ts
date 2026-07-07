@@ -2,23 +2,23 @@
 // Copyright (c) 2026 PiesP
 
 import type { ChatMessage, OverlaySettings, Pauseable } from '@app-types';
+import type { DomWatcherUnsubscribe } from '@chat/dom-watcher';
+import { installDomChatWatcher } from '@chat/dom-watcher';
+import type { InterceptorUnsubscribe } from '@chat/fetch-interceptor';
+import { installFetchInterceptor } from '@chat/fetch-interceptor';
+import { ChatPanelObserver, type ChatPanelState } from '@chat/panel-observer';
+import type { ChatHealthSnapshot, ChatSource, ChatSourceStartStatus } from '@chat/source-base';
+import { LiveChatSource } from '@chat/source-live';
+import { ReplayChatSource } from '@chat/source-replay';
+import type { ChatBootstrapResult } from '@chat/youtube/api';
+import { bootstrapChatSession } from '@chat/youtube/api';
+import { isYouTubeWatch } from '@chat/youtube/url-pattern';
 import { CanvasRenderer } from '@core/canvas-renderer';
-import { ChatPanelObserver, type ChatPanelState } from '@core/chat-panel-observer';
-import type { ChatHealthSnapshot, ChatSource, ChatSourceStartStatus } from '@core/chat-source-base';
-import { LiveChatSource } from '@core/chat-source-live';
-import { ReplayChatSource } from '@core/chat-source-replay';
-import type { DomWatcherUnsubscribe } from '@core/dom-chat-watcher';
-import { installDomChatWatcher } from '@core/dom-chat-watcher';
-import type { InterceptorUnsubscribe } from '@core/fetch-interceptor';
-import { installFetchInterceptor } from '@core/fetch-interceptor';
 import { OVERLAY_SELECTOR, Overlay } from '@core/overlay';
 import type { ConnectionStatus, RendererBase } from '@core/renderer-base';
 import { shouldResetRendererForSettingsChange } from '@core/settings-schema';
 import { StandbyController } from '@core/standby-controller';
 import { VideoPauseController } from '@core/video-pause-controller';
-import { isYouTubeWatch } from '@core/youtube-url-pattern';
-import type { ChatBootstrapResult } from '@core/youtubei-chat';
-import { bootstrapChatSession } from '@core/youtubei-chat';
 import { BacklogInjectionController } from '@util/backlog-controller';
 import {
   clearSafeInterval,
