@@ -16,8 +16,8 @@
 
 import type { ChatMessage, OverlaySettings } from '@app-types';
 import { extractChatEvents } from '@core/chat-message-parser';
-import { createLogger } from '@core/logging';
 import { getLiveChatPayload } from '@core/youtubei-chat';
+import { createLogger } from '@util/logging';
 
 const log = createLogger('FetchInterceptor');
 

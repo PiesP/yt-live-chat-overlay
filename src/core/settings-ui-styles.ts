@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { DEFAULT_FONT_FAMILY, spacing } from '@core/design-tokens';
+import { DEFAULT_FONT_FAMILY, spacing } from '@util/design-tokens';
 
 /**
  * Settings UI styles — plain CSS string injected into the page.

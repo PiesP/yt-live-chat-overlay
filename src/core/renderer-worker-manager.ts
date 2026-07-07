@@ -15,11 +15,11 @@
 import type { ChatMessage, OverlaySettings } from '@app-types';
 import { MEMBERSHIP_CARD_CONFIG, SUPERCHAT_CARD_CONFIG, toWorkerConfig } from '@core/card-config';
 import type { ImageFetchManager } from '@core/image-fetch-manager';
-import { createLogger } from '@core/logging';
-import type { ObservabilityReporter } from '@core/observability';
 import type { Overlay } from '@core/overlay';
 import type { WorkerFactory } from '@platform/types';
 import { getWorkerFactory } from '@platform/worker-factory';
+import { createLogger } from '@util/logging';
+import type { ObservabilityReporter } from '@util/observability';
 import {
   buildPartialWorkerConfig,
   sendClearStateToWorker,

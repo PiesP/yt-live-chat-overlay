@@ -18,8 +18,8 @@ import {
   findElementMatch,
   PLAYER_CONTAINER_SELECTORS,
   VIDEO_SELECTORS,
-} from '@core/dom';
-import { createLogger } from '@core/logging';
+} from '@util/dom';
+import { createLogger } from '@util/logging';
 
 const log = createLogger('VideoPauseController');
 

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { createLogger } from '@core/logging';
 import { isYouTubeLive, isYouTubeWatch } from '@core/youtube-url-pattern';
+import { createLogger } from '@util/logging';
 
 const log = createLogger('PageWatcher');
 

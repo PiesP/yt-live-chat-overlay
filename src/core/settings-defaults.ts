@@ -2,7 +2,7 @@
 // Copyright (c) 2026 PiesP
 
 import type { OutlineSettings, OverlaySettings } from '@app-types';
-import { DEFAULT_FONT_FAMILY, colors as designColors, rendererLayout } from '@core/design-tokens';
+import { DEFAULT_FONT_FAMILY, colors as designColors, rendererLayout } from '@util/design-tokens';
 
 const DEFAULT_SHOW_AUTHOR = {
   normal: false,

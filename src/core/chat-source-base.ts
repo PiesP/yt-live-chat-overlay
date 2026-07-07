@@ -10,12 +10,12 @@
 
 import type { ChatMessage, OverlaySettings, Pauseable } from '@app-types';
 import { logBootstrapFailure, refreshBootstrap, resolveBootstrap } from '@core/bootstrap-resolver';
-import { findElementMatch, isAbortError, sleep, VIDEO_SELECTORS } from '@core/dom';
-import { createLogger } from '@core/logging';
-import { createMessageIdRegistry } from '@core/message-id-registry';
 import type { ChatBootstrapData, LiveChatPayload } from '@core/youtubei-chat';
 import { getLiveChatPayload } from '@core/youtubei-chat';
 import type { InnertubeContinuationData } from '@core/youtubei-continuation';
+import { findElementMatch, isAbortError, sleep, VIDEO_SELECTORS } from '@util/dom';
+import { createLogger } from '@util/logging';
+import { createMessageIdRegistry } from '@util/message-id-registry';
 
 const log = createLogger('ChatSource');
 

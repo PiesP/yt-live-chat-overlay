@@ -9,16 +9,16 @@
  */
 
 import type { OverlayDimensions, OverlaySettings } from '@app-types';
-import { rendererLayout } from '@core/design-tokens';
+import { getActiveLanguage, t } from '@core/i18n';
+import { rendererLayout } from '@util/design-tokens';
 import {
   clearSafeTimeout,
   ensurePlayerPositioning,
   findPlayerContainerElement,
   PLAYER_LOOKUP_INTERVAL_MS,
   SCREEN_READER_CSS,
-} from '@core/dom';
-import { getActiveLanguage, t } from '@core/i18n';
-import { createLogger } from '@core/logging';
+} from '@util/dom';
+import { createLogger } from '@util/logging';
 
 const log = createLogger('Overlay');
 

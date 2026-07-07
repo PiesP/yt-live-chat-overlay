@@ -10,12 +10,12 @@
 
 import type { ChatMessage, FontWeight } from '@app-types';
 import { buildWrappedLines, toSharedContentSegments } from '@core/canvas-rendering-shared';
-import { DEFAULT_FONT_FAMILY, rendererLayout, spacing } from '@core/design-tokens';
-import type { PriorityBucketQueue } from '@core/priority-bucket-queue';
 import { RendererBase } from '@core/renderer-base';
 import { SPEED_TIER } from '@core/renderer-constants';
 import { DEFAULT_SETTINGS } from '@core/settings-schema';
 import { getFontString, measureTextHeight, measureTextWidth } from '@core/text-measure';
+import { DEFAULT_FONT_FAMILY, rendererLayout, spacing } from '@util/design-tokens';
+import type { PriorityBucketQueue } from '@util/priority-bucket-queue';
 
 // ── Text measurement ────────────────────────────────────────────────────────
 

@@ -2,14 +2,7 @@
 // Copyright (c) 2026 PiesP
 
 import type { OverlaySettings } from '@app-types';
-import {
-  clearSafeTimeout,
-  ensurePlayerPositioning,
-  findPlayerContainerElement,
-  PLAYER_LOOKUP_INTERVAL_MS,
-} from '@core/dom';
 import { getActiveLanguage, t } from '@core/i18n';
-import { createLogger } from '@core/logging';
 import { normalizeStoredSettings, SETTINGS_VERSION } from '@core/settings-schema';
 import {
   type ActionType,
@@ -21,6 +14,13 @@ import {
 } from '@core/settings-ui-form';
 import { PANES } from '@core/settings-ui-panes';
 import { SETTINGS_UI_STYLES } from '@core/settings-ui-styles';
+import {
+  clearSafeTimeout,
+  ensurePlayerPositioning,
+  findPlayerContainerElement,
+  PLAYER_LOOKUP_INTERVAL_MS,
+} from '@util/dom';
+import { createLogger } from '@util/logging';
 
 const log = createLogger('SettingsUi');
 

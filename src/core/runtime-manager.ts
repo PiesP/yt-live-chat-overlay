@@ -2,27 +2,15 @@
 // Copyright (c) 2026 PiesP
 
 import type { ChatMessage, OverlaySettings, Pauseable } from '@app-types';
-import { BacklogInjectionController } from '@core/backlog-controller';
 import { CanvasRenderer } from '@core/canvas-renderer';
 import { ChatPanelObserver, type ChatPanelState } from '@core/chat-panel-observer';
 import type { ChatHealthSnapshot, ChatSource, ChatSourceStartStatus } from '@core/chat-source-base';
 import { LiveChatSource } from '@core/chat-source-live';
 import { ReplayChatSource } from '@core/chat-source-replay';
-import {
-  clearSafeInterval,
-  clearSafeTimeout,
-  findElementMatch,
-  isAbortError,
-  throwIfAborted,
-  VIDEO_SELECTORS,
-} from '@core/dom';
 import type { DomWatcherUnsubscribe } from '@core/dom-chat-watcher';
 import { installDomChatWatcher } from '@core/dom-chat-watcher';
 import type { InterceptorUnsubscribe } from '@core/fetch-interceptor';
 import { installFetchInterceptor } from '@core/fetch-interceptor';
-import { createLogger } from '@core/logging';
-import { MessageBus } from '@core/message-bus';
-import { createMessageIdRegistry } from '@core/message-id-registry';
 import { OVERLAY_SELECTOR, Overlay } from '@core/overlay';
 import type { ConnectionStatus, RendererBase } from '@core/renderer-base';
 import { shouldResetRendererForSettingsChange } from '@core/settings-schema';
@@ -31,6 +19,18 @@ import { VideoPauseController } from '@core/video-pause-controller';
 import { isYouTubeWatch } from '@core/youtube-url-pattern';
 import type { ChatBootstrapResult } from '@core/youtubei-chat';
 import { bootstrapChatSession } from '@core/youtubei-chat';
+import { BacklogInjectionController } from '@util/backlog-controller';
+import {
+  clearSafeInterval,
+  clearSafeTimeout,
+  findElementMatch,
+  isAbortError,
+  throwIfAborted,
+  VIDEO_SELECTORS,
+} from '@util/dom';
+import { createLogger } from '@util/logging';
+import { MessageBus } from '@util/message-bus';
+import { createMessageIdRegistry } from '@util/message-id-registry';
 
 /** Runtime lifecycle state machine — replaces ad-hoc boolean flags. */
 const RUNTIME_STATES = [

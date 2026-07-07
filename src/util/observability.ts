@@ -18,8 +18,8 @@ import {
   DEBUG_OVERLAY_RIGHT,
   DEBUG_OVERLAY_TOP,
   INDICATOR_Z_INDEX,
-} from '@core/design-tokens';
-import { createLogger } from '@core/logging';
+} from '@util/design-tokens';
+import { createLogger } from '@util/logging';
 
 const log = createLogger('Observability');
 

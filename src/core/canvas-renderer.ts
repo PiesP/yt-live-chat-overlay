@@ -23,7 +23,6 @@
  */
 
 import type { ChatMessage, DropReason, OverlayDimensions, OverlaySettings } from '@app-types';
-import { ByteLimitedCache } from '@core/byte-limited-cache';
 import { renderPaidCard } from '@core/canvas-card-renderers';
 import { COMPACTION_THRESHOLD_RATIO, fastRandom } from '@core/canvas-pipeline';
 import {
@@ -38,17 +37,11 @@ import { isImageReady } from '@core/canvas-worker-bridge';
 import { MEMBERSHIP_CARD_CONFIG, SUPERCHAT_CARD_CONFIG } from '@core/card-config';
 import { ChannelLanguageMemory } from '@core/channel-language-memory';
 import { getTranslatableText } from '@core/chat-message-helpers';
-import { computeScrollDuration, rendererLayout, statusBarLayout } from '@core/design-tokens';
-import { clearSafeAnimationFrame, forEachSlot, SCREEN_READER_CSS } from '@core/dom';
 import { ImageFetchManager } from '@core/image-fetch-manager';
 import { computeBaseHeadwayPx } from '@core/lane-allocation-shared';
 import type { LanePlacement } from '@core/lane-allocator';
 import { LanguageDetectorService } from '@core/language-detector-service';
-import { createLogger } from '@core/logging';
-import { LruMap } from '@core/lru-map';
-import { MessageActivator } from '@core/message-activator';
 import type { Overlay } from '@core/overlay';
-import { PriorityBucketQueue } from '@core/priority-bucket-queue';
 import type { ConnectionStatus } from '@core/renderer-base';
 import { RendererBase } from '@core/renderer-base';
 import {
@@ -81,7 +74,6 @@ import {
   estimateMessageDimensions as sharedEstimateDimensions,
 } from '@core/renderer-shared';
 import { RenderWorkerManager } from '@core/renderer-worker-manager';
-import { schedulerPostTask, yieldIfOverBudget } from '@core/scheduler-utils';
 import {
   clearTextMeasurementCaches,
   getFontString,
@@ -89,6 +81,14 @@ import {
   measureTextWidth,
 } from '@core/text-measure';
 import { TranslationService } from '@core/translation-service';
+import { ByteLimitedCache } from '@util/byte-limited-cache';
+import { computeScrollDuration, rendererLayout, statusBarLayout } from '@util/design-tokens';
+import { clearSafeAnimationFrame, forEachSlot, SCREEN_READER_CSS } from '@util/dom';
+import { createLogger } from '@util/logging';
+import { LruMap } from '@util/lru-map';
+import { MessageActivator } from '@util/message-activator';
+import { PriorityBucketQueue } from '@util/priority-bucket-queue';
+import { schedulerPostTask, yieldIfOverBudget } from '@util/scheduler-utils';
 
 const log = createLogger('RendererCanvas');
 

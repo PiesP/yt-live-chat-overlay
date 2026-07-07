@@ -11,10 +11,10 @@
  * stream is detected.
  */
 
-import { clearSafeTimeout, isAbortError } from '@core/dom';
-import { createLogger } from '@core/logging';
 import type { RendererBase } from '@core/renderer-base';
 import { bootstrapChatSession } from '@core/youtubei-chat';
+import { clearSafeTimeout, isAbortError } from '@util/dom';
+import { createLogger } from '@util/logging';
 
 const log = createLogger('Standby');
 

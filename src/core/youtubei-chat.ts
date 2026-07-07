@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { isAbortError, sleep } from '@core/dom';
-import { createLogger } from '@core/logging';
 import { isYouTubeLive, isYouTubeWatch } from '@core/youtube-url-pattern';
 import {
   extractInitialChatContinuation,
@@ -17,6 +15,8 @@ import {
   isRecord,
   type JsonObject,
 } from '@core/youtubei-json';
+import { isAbortError, sleep } from '@util/dom';
+import { createLogger } from '@util/logging';
 
 const log = createLogger('Youtubei');
 

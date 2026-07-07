@@ -10,13 +10,13 @@
 
 import type { OverlaySettings } from '@app-types';
 import { resolveActiveLanguage, t } from '@core/i18n';
-import { createLogger, setOverlayLogLevel } from '@core/logging';
 import { PageWatcher } from '@core/page-watcher';
 import { RuntimeManager } from '@core/runtime-manager';
 import { Settings } from '@core/settings';
 import { SettingsUi } from '@core/settings-ui';
 import { isYouTubeLive, isYouTubeWatch } from '@core/youtube-url-pattern';
 import { getMenuAdapter } from '@platform/menu-adapters';
+import { createLogger, setOverlayLogLevel } from '@util/logging';
 
 const log = createLogger('App');
 

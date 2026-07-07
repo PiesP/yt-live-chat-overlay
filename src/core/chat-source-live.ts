@@ -11,8 +11,6 @@ import type { ChatMessage } from '@app-types';
 import { extractChatEvents } from '@core/chat-message-parser';
 import type { ChatHealthSnapshot } from '@core/chat-source-base';
 import { ChatSource } from '@core/chat-source-base';
-import { isAbortError, sleep, throwIfAborted } from '@core/dom';
-import { createLogger } from '@core/logging';
 import {
   fetchLiveChat,
   type LiveChatPayload,
@@ -22,6 +20,8 @@ import {
   extractNextLiveContinuation,
   type InnertubeContinuationData,
 } from '@core/youtubei-continuation';
+import { isAbortError, sleep, throwIfAborted } from '@util/dom';
+import { createLogger } from '@util/logging';
 
 const log = createLogger('LiveChatSource');
 

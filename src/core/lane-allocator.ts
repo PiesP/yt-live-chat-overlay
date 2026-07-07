@@ -2,7 +2,6 @@
 // Copyright (c) 2026 PiesP
 
 import type { FontWeight, OverlayDimensions } from '@app-types';
-import { rendererLayout } from '@core/design-tokens';
 import {
   buildLaneHeap,
   computeLaneY,
@@ -11,9 +10,10 @@ import {
   heapSiftDown,
   heapUpdateLane,
 } from '@core/lane-allocation-shared';
-import { createLogger } from '@core/logging';
 import { SPEED_TIER } from '@core/renderer-constants';
 import { getFontString, measureTextHeight } from '@core/text-measure';
+import { rendererLayout } from '@util/design-tokens';
+import { createLogger } from '@util/logging';
 
 const log = createLogger('LaneAllocator');
 

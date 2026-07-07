@@ -3,7 +3,6 @@
 
 import type { OverlaySettings } from '@app-types';
 import { t } from '@core/i18n';
-import { createLogger } from '@core/logging';
 import type {
   OutlineSettingKey,
   RootNumericSettingKey,
@@ -28,6 +27,7 @@ import type {
 } from '@core/settings-ui-panes';
 import { PANES } from '@core/settings-ui-panes';
 import { TranslationService } from '@core/translation-service';
+import { createLogger } from '@util/logging';
 
 const log = createLogger('SettingsUiForm');
 

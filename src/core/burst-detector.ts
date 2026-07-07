@@ -17,8 +17,8 @@
  */
 
 import type { BurstLevel } from '@app-types';
-import { clearSafeInterval } from '@core/dom';
-import { createLogger } from '@core/logging';
+import { clearSafeInterval } from '@util/dom';
+import { createLogger } from '@util/logging';
 
 const log = createLogger('BurstDetector');
 

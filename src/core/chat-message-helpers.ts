@@ -11,9 +11,9 @@
 
 import type { AuthorType, ChatMessage, ContentSegment, SuperChatInfo } from '@app-types';
 import { parseAnyColor } from '@core/color-utils';
-import { colors, SUPERCHAT_TIER_KEYS } from '@core/design-tokens';
 import type { JsonObject } from '@core/youtubei-json';
 import { asRecord, getString } from '@core/youtubei-json';
+import { colors, SUPERCHAT_TIER_KEYS } from '@util/design-tokens';
 
 export const AUTHOR_TYPE_PRIORITY: Record<AuthorType, number> = {
   normal: 0,

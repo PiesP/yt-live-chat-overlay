@@ -16,7 +16,7 @@
  */
 
 import type { TranslationLanguage } from '@app-types';
-import { createLogger } from '@core/logging';
+import { createLogger } from '@util/logging';
 
 const log = createLogger('LanguageDetector');
 

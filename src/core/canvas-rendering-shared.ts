@@ -10,12 +10,12 @@
  */
 
 import type { FontWeight } from '@app-types';
-import type { ByteLimitedCache } from '@core/byte-limited-cache';
 import { EMOJI_ALIAS_PATTERN } from '@core/chat-message-helpers';
 import { computeOutlineColor } from '@core/color-utils';
-import { AUTHOR_PHOTO_SHADOW, rendererLayout, spacing } from '@core/design-tokens';
 import { OUTLINE_STROKE_SCALE } from '@core/renderer-constants';
 import { getFontString, measureTextHeight, measureTextWidth } from '@core/text-measure';
+import type { ByteLimitedCache } from '@util/byte-limited-cache';
+import { AUTHOR_PHOTO_SHADOW, rendererLayout, spacing } from '@util/design-tokens';
 
 /** A char-wrap segment with pre-computed width. */
 interface CharSegment {

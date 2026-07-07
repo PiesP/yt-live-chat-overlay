@@ -2,7 +2,6 @@
 // Copyright (c) 2026 PiesP
 
 import type { OverlaySettings } from '@app-types';
-import { createLogger } from '@core/logging';
 import {
   applySettingsPatch,
   cloneSettings,
@@ -13,6 +12,7 @@ import {
 } from '@core/settings-schema';
 import { getCrossTabSyncAdapter } from '@platform/cross-tab-sync-adapters';
 import { getStorageAdapter } from '@platform/storage-adapters';
+import { createLogger } from '@util/logging';
 
 const log = createLogger('Settings');
 

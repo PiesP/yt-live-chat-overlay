@@ -19,13 +19,13 @@
 import type { ChatMessage, OverlayDimensions, OverlaySettings } from '@app-types';
 import { PerAuthorRateLimiter } from '@core/author-rate-limiter';
 import { BurstDetector } from '@core/burst-detector';
-import { rendererLayout } from '@core/design-tokens';
 import { LaneAllocator } from '@core/lane-allocator';
-import { createLogger } from '@core/logging';
-import { ObservabilityReporter } from '@core/observability';
 import type { Overlay } from '@core/overlay';
 import { ANTI_BLOCK_FREE_RATIO } from '@core/renderer-constants';
 import { clearTextMeasurementCaches, setTextMeasureCallback } from '@core/text-measure';
+import { rendererLayout } from '@util/design-tokens';
+import { createLogger } from '@util/logging';
+import { ObservabilityReporter } from '@util/observability';
 
 export type ConnectionStatus = 'connected' | 'connecting' | 'degraded' | 'disconnected' | 'standby';
 

@@ -8,7 +8,6 @@
  * rectangle paths on a Canvas2D context.
  */
 import type { ChatMessage, OverlaySettings } from '@app-types';
-import type { ByteLimitedCache } from '@core/byte-limited-cache';
 import { getCachedGradient } from '@core/canvas-gradient-utils';
 import {
   drawAuthorSection,
@@ -18,9 +17,10 @@ import {
 } from '@core/canvas-rendering-shared';
 import type { CardConfig } from '@core/card-config';
 import { computeReadableTextColor } from '@core/color-utils';
-import { DEFAULT_TEXT_COLOR, rendererLayout, spacing } from '@core/design-tokens';
 import { SIN_LUT_SCALE, SIN_TABLE } from '@core/renderer-constants';
 import { measureTextHeight } from '@core/text-measure';
+import type { ByteLimitedCache } from '@util/byte-limited-cache';
+import { DEFAULT_TEXT_COLOR, rendererLayout, spacing } from '@util/design-tokens';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 

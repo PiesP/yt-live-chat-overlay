@@ -30,7 +30,6 @@
 /// <reference lib="webworker" />
 
 import type { ChatMessage, FontWeight } from '@app-types';
-import { ByteLimitedCache } from '@core/byte-limited-cache';
 import { getCachedGradient } from '@core/canvas-gradient-utils';
 import { fastRandom } from '@core/canvas-pipeline';
 import {
@@ -48,13 +47,6 @@ import {
 import type { CardConfigWorker } from '@core/card-config';
 import { desaturateColor } from '@core/color-utils';
 import {
-  computeScrollDuration,
-  DEFAULT_FONT_FAMILY,
-  DEFAULT_TEXT_COLOR,
-  rendererLayout,
-  spacing,
-} from '@core/design-tokens';
-import {
   buildLaneHeap,
   commitPlacementShared,
   computeBaseHeadwayPx,
@@ -65,7 +57,6 @@ import {
   resetBatchShared,
   shiftLaneTimersShared,
 } from '@core/lane-allocation-shared';
-import { LruMap } from '@core/lru-map';
 import {
   ANTI_BLOCK_FREE_RATIO,
   ANTI_BLOCK_MAX_DURATION_MS,
@@ -98,6 +89,15 @@ import {
 } from '@core/renderer-shared';
 import { DEFAULT_SETTINGS } from '@core/settings-defaults';
 import { getFontString, measureBoundingBoxWidth } from '@core/text-measure';
+import { ByteLimitedCache } from '@util/byte-limited-cache';
+import {
+  computeScrollDuration,
+  DEFAULT_FONT_FAMILY,
+  DEFAULT_TEXT_COLOR,
+  rendererLayout,
+  spacing,
+} from '@util/design-tokens';
+import { LruMap } from '@util/lru-map';
 
 import type {
   ActiveMessage,

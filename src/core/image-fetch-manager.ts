@@ -2,10 +2,10 @@
 // Copyright (c) 2026 PiesP
 
 import type { ChatMessage, OverlaySettings } from '@app-types';
-import { ByteLimitedCache } from '@core/byte-limited-cache';
-import { clearSafeInterval } from '@core/dom';
 import { isAllowedImageUrl } from '@core/image-url-validation';
-import { createLogger } from '@core/logging';
+import { ByteLimitedCache } from '@util/byte-limited-cache';
+import { clearSafeInterval } from '@util/dom';
+import { createLogger } from '@util/logging';
 
 /** Maximum number of failed emoji fetch entries before eviction triggers. */
 const FAILED_EMOJI_FETCH_CAP = 500;

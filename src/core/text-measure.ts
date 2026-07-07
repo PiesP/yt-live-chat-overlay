@@ -15,7 +15,7 @@
  */
 
 import type { FontWeight } from '@app-types';
-import { DEFAULT_FONT_FAMILY } from '@core/design-tokens';
+import { DEFAULT_FONT_FAMILY } from '@util/design-tokens';
 
 let measureCtx: CanvasRenderingContext2D | null | false = null;
 

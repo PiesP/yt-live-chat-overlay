@@ -23,18 +23,18 @@
  */
 
 import type { BacklogMode, ChatMessage, Pauseable } from '@app-types';
-import { isPriorityMessage, prioritySortOrder, sampleExponential } from '@core/backlog-helpers';
+import { t } from '@core/i18n';
+import { isPriorityMessage, prioritySortOrder, sampleExponential } from '@util/backlog-helpers';
 import {
   BACKLOG_INDICATOR_BG,
   DEBUG_OVERLAY_RIGHT,
   DEFAULT_FONT_FAMILY,
   DEFAULT_TEXT_COLOR,
   INDICATOR_Z_INDEX,
-} from '@core/design-tokens';
-import { clearSafeTimeout } from '@core/dom';
-import { t } from '@core/i18n';
-import { createLogger } from '@core/logging';
-import type { ObservabilityReporter } from '@core/observability';
+} from '@util/design-tokens';
+import { clearSafeTimeout } from '@util/dom';
+import { createLogger } from '@util/logging';
+import type { ObservabilityReporter } from '@util/observability';
 
 /** Offset threshold at which the backlog queue ring buffer is compacted via slice(). */
 const BACKLOG_QUEUE_COMPACT_THRESHOLD = 64;

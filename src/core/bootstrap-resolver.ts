@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { sleep, throwIfAborted } from '@core/dom';
-import { createLogger } from '@core/logging';
 import type { ChatBootstrapData, ChatBootstrapResult } from '@core/youtubei-chat';
 import { bootstrapChatSession } from '@core/youtubei-chat';
+import { sleep, throwIfAborted } from '@util/dom';
+import { createLogger } from '@util/logging';
 
 const log = createLogger('BootstrapResolver');
 

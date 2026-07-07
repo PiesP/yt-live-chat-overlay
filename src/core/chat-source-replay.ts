@@ -13,14 +13,6 @@ import type { ChatMessage } from '@app-types';
 import { extractChatEvents } from '@core/chat-message-parser';
 import type { ChatHealthSnapshot, PlaybackSnapshot } from '@core/chat-source-base';
 import { ChatSource } from '@core/chat-source-base';
-import {
-  clearSafeTimeout,
-  findElementMatch,
-  isAbortError,
-  throwIfAborted,
-  VIDEO_SELECTORS,
-} from '@core/dom';
-import { createLogger } from '@core/logging';
 import { ReplayBuffer } from '@core/replay-buffer';
 import type { LiveChatPayload } from '@core/youtubei-chat';
 import { fetchReplayChat } from '@core/youtubei-chat';
@@ -29,6 +21,14 @@ import {
   extractPlayerSeekContinuation,
   extractReplayContinuation,
 } from '@core/youtubei-continuation';
+import {
+  clearSafeTimeout,
+  findElementMatch,
+  isAbortError,
+  throwIfAborted,
+  VIDEO_SELECTORS,
+} from '@util/dom';
+import { createLogger } from '@util/logging';
 
 const log = createLogger('ReplayChatSource');
 

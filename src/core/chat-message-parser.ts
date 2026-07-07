@@ -25,9 +25,9 @@ import {
   stripControlCharacters,
   truncateForKind,
 } from '@core/chat-message-helpers';
-import { createLogger } from '@core/logging';
 import type { JsonObject } from '@core/youtubei-json';
 import { asRecord, getNumber, getString, isRecord } from '@core/youtubei-json';
+import { createLogger } from '@util/logging';
 
 const log = createLogger('ChatMessageParser');
 

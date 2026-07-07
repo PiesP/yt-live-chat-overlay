@@ -8,8 +8,8 @@
  * The factory function selects the appropriate adapter based on environment.
  */
 
-import { createLogger } from '@core/logging';
 import type { StorageAdapter } from '@platform/types';
+import { createLogger } from '@util/logging';
 
 const log = createLogger('StorageAdapter');
 

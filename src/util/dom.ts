@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { createLogger } from '@core/logging';
+import { createLogger } from '@util/logging';
 
 const log = createLogger('Dom');
 

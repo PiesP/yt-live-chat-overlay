@@ -18,7 +18,7 @@ import {
   SUPERCHAT_AMOUNT_BADGE_FILL,
   SUPERCHAT_AMOUNT_BADGE_STROKE,
   spacing,
-} from '@core/design-tokens';
+} from '@util/design-tokens';
 
 type BackgroundMode = 'gradient' | 'solid';
 type DecorationMode = 'accentBar' | 'pulsingBorder' | 'none';

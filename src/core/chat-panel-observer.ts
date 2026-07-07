@@ -15,7 +15,7 @@
  * from DOM text content alone.
  */
 
-import { createLogger } from '@core/logging';
+import { createLogger } from '@util/logging';
 
 const log = createLogger('[ChatPanelObserver]');
 

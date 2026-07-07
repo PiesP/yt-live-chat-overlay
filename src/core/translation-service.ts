@@ -16,9 +16,9 @@
  *   For chat (short messages), this is acceptable.
  */
 import type { TranslationLanguage } from '@app-types';
-import { ByteLimitedCache } from '@core/byte-limited-cache';
 import { resolveTranslationTarget } from '@core/i18n';
-import { createLogger } from '@core/logging';
+import { ByteLimitedCache } from '@util/byte-limited-cache';
+import { createLogger } from '@util/logging';
 
 const log = createLogger('TranslationService');
 
