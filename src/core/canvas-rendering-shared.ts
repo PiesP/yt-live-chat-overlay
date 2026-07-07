@@ -1207,9 +1207,15 @@ export function renderWrappedContentSegments<
         );
         cursorX += piece.width;
       } else {
-        // Emoji — same rendering logic as renderContentSegments
+        // Emoji — same rendering logic as renderContentSegments.
+        // Dual type check: HTMLImageElement has naturalWidth, ImageBitmap has width.
         const cached = piece.emojiUrl ? emojiCache.get(piece.emojiUrl) : undefined;
-        const img = cached && 'naturalWidth' in cached && cached.naturalWidth > 0 ? cached : null;
+        const img =
+          cached != null &&
+          (('naturalWidth' in cached && cached.naturalWidth > 0) ||
+            ('width' in cached && (cached as { width: number }).width > 0))
+            ? cached
+            : null;
         if (img) {
           ctx.drawImage(img, cursorX, cursorY, emojiSize, emojiSize);
         } else if (piece.emojiFallbackText) {
