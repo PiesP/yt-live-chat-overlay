@@ -459,6 +459,15 @@ export class CanvasRenderer extends RendererBase {
     return this.workerManager.isActive ? this.workerManager.isAlive() : true;
   }
 
+  /** Override to relay lane density changes to the Worker renderer. */
+  protected override applyLaneDensityIfChanged(): boolean {
+    const changed = super.applyLaneDensityIfChanged();
+    if (changed && this.workerManager.isActive) {
+      this.workerManager.sendLaneDensity(this.currentLaneDensityFactor);
+    }
+    return changed;
+  }
+
   // ── Message ingress ──────────────────────────────────────────────────
 
   addMessage(message: ChatMessage): void {

@@ -17,8 +17,7 @@
  */
 
 import type { Overlay } from '@app/overlay';
-import type { ChatMessage, OverlayDimensions, OverlaySettings } from '@app-types';
-import type { BurstLevel } from '@app-types';
+import type { BurstLevel, ChatMessage, OverlayDimensions, OverlaySettings } from '@app-types';
 import { PerAuthorRateLimiter } from '@media/author-rate-limiter';
 import { ANTI_BLOCK_FREE_RATIO } from '@renderer/constants';
 import { BurstDetector } from '@renderer/layout/burst-detector';

@@ -481,6 +481,11 @@ export class RenderWorkerManager {
     sendClearStateToWorker({ worker: this.worker });
   }
 
+  /** Notify the render worker of a lane density factor change (burst-driven half-cell mode). */
+  sendLaneDensity(factor: number): void {
+    this.worker?.postMessage({ type: 'laneDensity', factor });
+  }
+
   /** Destroy the render worker. */
   destroy(): void {
     this.dimensionsUnsubscribe?.();

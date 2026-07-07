@@ -431,6 +431,8 @@ export class WorkerRenderer {
   private laneIndexToHeapIndex = new Map<number, number>();
   private laneHeight = 0;
   private numLanes = 0;
+  /** Current lane density factor — updated via 'laneDensity' protocol message. */
+  private laneDensityFactor = 1.0;
   private speedTierLanes = new Map<number, { tier: number; until: number }>();
   private collidedLanes = new Set<number>();
   private totalDrops = 0;
@@ -598,6 +600,12 @@ export class WorkerRenderer {
           case 'clearState':
             this.handleClearState();
             break;
+          case 'laneDensity':
+            this.laneDensityFactor = (data as { factor: number }).factor;
+            if (this.canvas && this.config) {
+              this.initLanes(this.canvas.width, this.canvas.height);
+            }
+            break;
           case 'ping':
             self.postMessage({ type: 'pong' });
             break;
@@ -762,7 +770,8 @@ export class WorkerRenderer {
     if (!this.config || !this.ctx) return;
     const totalPaddingV = rendererLayout.paddingV * 2;
     const textHeight = this.measureTextHeight(this.config.fontSize);
-    this.laneHeight = Math.max(1, textHeight + totalPaddingV + this.config.laneSpacing);
+    const rawLaneHeight = Math.max(1, textHeight + totalPaddingV + this.config.laneSpacing);
+    this.laneHeight = Math.max(1, Math.round(rawLaneHeight * this.laneDensityFactor));
     const usableHeight = height * (1 - this.config.safeTop - this.config.safeBottom);
     this.numLanes = Math.max(1, Math.floor(usableHeight / this.laneHeight));
     const now = performance.now();
