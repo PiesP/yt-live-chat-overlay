@@ -18,6 +18,7 @@
 
 import type { Overlay } from '@app/overlay';
 import type { ChatMessage, OverlayDimensions, OverlaySettings } from '@app-types';
+import type { BurstLevel } from '@app-types';
 import { PerAuthorRateLimiter } from '@media/author-rate-limiter';
 import { ANTI_BLOCK_FREE_RATIO } from '@renderer/constants';
 import { BurstDetector } from '@renderer/layout/burst-detector';
@@ -76,6 +77,15 @@ export abstract class RendererBase {
 
   // speedBoostMax — read from this.settings
   private static readonly BACKLOG_PRIORITY_OFFSET = 50;
+
+  /** Lane density factor per burst level.
+   *  1.0 = full-cell (normal/elevated), 0.75 = transitional (high), 0.5 = half-cell (extreme). */
+  private static readonly LANE_DENSITY_BY_BURST: Record<BurstLevel, number> = {
+    normal: 1.0,
+    elevated: 1.0,
+    high: 0.75,
+    extreme: 0.5,
+  };
   // Minimum interval between backlog pause toggles to prevent oscillation
   // when the queue ratio hovers near the hysteresis thresholds.
   private lastBacklogToggleTime = 0;
@@ -336,6 +346,14 @@ export abstract class RendererBase {
 
     const burstLevel = this.burstDetector.getLevel();
     return Math.max(1, speed * rendererLayout.burstSpeedMultiplier[burstLevel]);
+  }
+
+  /** Get the current lane density factor based on burst detection level.
+   *  Returns 1.0 (full-cell) during normal/elevated traffic,
+   *  0.75 during high burst, 0.5 (half-cell) during extreme burst. */
+  getLaneDensityFactor(): number {
+    const burstLevel = this.burstDetector.getLevel();
+    return RendererBase.LANE_DENSITY_BY_BURST[burstLevel];
   }
 
   protected isMessageAllowed(message: ChatMessage): boolean {
