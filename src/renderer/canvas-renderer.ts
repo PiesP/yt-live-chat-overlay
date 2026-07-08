@@ -768,6 +768,10 @@ export class CanvasRenderer extends RendererBase {
     if (!canvas.isConnected) return;
     if (this.isPaused) return;
     if (this.isVideoPaused) return;
+    // When Worker mode is active (OffscreenCanvas transferred to worker),
+    // the main-thread ctx is still a non-null reference but is detached.
+    // Canvas operations on a detached context would throw silently.
+    if (this.workerManager.isActive) return;
     const t0 = performance.now();
 
     // Reset emoji-load debounce flag — any pending rAF restart has landed
@@ -816,7 +820,10 @@ export class CanvasRenderer extends RendererBase {
       this.compactRemovedMessages(cleanupResult.writeIdx, cleanupResult.oldLength);
     }
 
-    ctx.clearRect(0, 0, dims.width, dims.height);
+    // Don't clear when status bar is showing — it was drawn above and would be wiped.
+    if (this.connectionStatus === 'connected') {
+      ctx.clearRect(0, 0, dims.width, dims.height);
+    }
 
     // ── Glow stage: membership card pulsing borders ──
     this.drawGlowStage(ctx, cleanupResult.nearBuckets);

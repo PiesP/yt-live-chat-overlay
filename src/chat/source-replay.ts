@@ -139,16 +139,9 @@ export class ReplayChatSource extends ChatSource {
   private startCooperativeLoop(signal?: AbortSignal): void {
     this.stopCooperativeLoop();
 
-    // Initialize prefetch state from current shared continuations
-    if (this.replayMode) {
-      this.prefetchContinuation =
-        this.replayMode === 'playerSeek'
-          ? this.replayPlayerSeekContinuation
-          : this.replayContinuation;
-      this.prefetchPagesFetched = 0;
-      this.prefetchMode = this.replayMode;
-      this.prefetchBackoffUntil = 0;
-    }
+    // Prefetch not seeded yet — seeded after the first successful main poll
+    // so prefetchContinuation starts from the NEXT page, not the current one.
+    this.stopPrefetch();
 
     this.cooperativeLoopRunning = true;
     const gen = ++this.cooperativeLoopGeneration;
@@ -189,6 +182,13 @@ export class ReplayChatSource extends ChatSource {
           if (!isAbortError(error)) {
             log.info('Fetch iteration failed:', error);
           }
+        }
+
+        // ✅ Seed prefetch after the first main poll — replayContinuation has
+        // now advanced past the page the poll just fetched, so prefetch won't
+        // duplicate it.
+        if (!this.prefetchMode) {
+          this.startPrefetch();
         }
       }
 

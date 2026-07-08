@@ -162,5 +162,14 @@ export class ReplayBuffer {
 
     const overflow = effectiveLength - maxSize;
     this.bufferOffset += overflow;
+
+    // Prune seenIds to match buffer range — IDs no longer in the
+    // active window would otherwise accumulate forever during long replays.
+    const idSet = new Set<string>();
+    for (let i = this.bufferOffset; i < this.buffer.length; i++) {
+      const id = this.buffer[i]?.message.id;
+      if (id) idSet.add(id);
+    }
+    this.seenIds = idSet;
   }
 }
