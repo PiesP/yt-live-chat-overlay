@@ -2,5 +2,32 @@
   "schema_version": 2,
   "tool": "nose",
   "baseline_kind": "accepted-duplication",
-  "families": []
+  "families": [
+    {
+      "id": "ed0b5bae379ec1fa",
+      "note": "local duplication — extract a method from the repeated block",
+      "members": [
+        {
+          "id": "71db5608dcf7bf4a",
+          "source_digest": "fnv1a64:762816cc91cc6ffd",
+          "file": "src/renderer/canvas-renderer.ts",
+          "lang": "typescript",
+          "start_line": 1324,
+          "end_line": 1367,
+          "kind": "Block",
+          "is_fragment": false
+        },
+        {
+          "id": "68941a75da852079",
+          "source_digest": "fnv1a64:c3b8d88318dd4ca1",
+          "file": "src/renderer/canvas-renderer.ts",
+          "lang": "typescript",
+          "start_line": 1396,
+          "end_line": 1438,
+          "kind": "Block",
+          "is_fragment": false
+        }
+      ]
+    }
+  ]
 }
