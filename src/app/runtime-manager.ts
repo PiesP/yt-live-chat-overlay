@@ -483,22 +483,25 @@ export class RuntimeManager {
     // 5. Unpause chat source — poll loop resumes from saved token
     this.chatSource?.setPaused(false);
 
-    // 6. Re-inject recent messages through backlog controller for smooth restart
+    // 6. Clear session dedup so re-injected messages aren't blocked
+    this.sessionDedup.clear();
+
+    // 7. Re-inject recent messages through backlog controller for smooth restart
     const recentMessages = this.chatSource?.getLatestMessages(20) ?? [];
     if (recentMessages.length > 0) {
       this.ensureBacklogController(renderer);
       this.backlogController?.startBacklogInjection(recentMessages);
     }
 
-    // 7. Ensure render loop is running (resume() above already started it
+    // 8. Ensure render loop is running (resume() above already started it
     //    via onResume(), but resumeRenderLoop is idempotent as a safety net).
     renderer.resumeRenderLoop();
 
-    // 8. Restart foreground listeners (explicit stop before start for safety)
+    // 9. Restart foreground listeners (explicit stop before start for safety)
     this.stopForegroundListeners();
     this.startForegroundListeners();
 
-    // 9. Re-arm chat watchdog
+    // 10. Re-arm chat watchdog
     this.stopChatWatchdog();
     this.startChatWatchdog();
   }
@@ -1053,7 +1056,9 @@ export class RuntimeManager {
     // restart every CHAT_STALL_TIMEOUT_MS (30 s) and the new session
     // would immediately hit the same state, causing a restart loop.
     const video = this.getVideoElement();
-    const isVideoPaused = video?.paused ?? true;
+    // When no video element exists, we don't know the pause state — return
+    // false to avoid suppressing watchdog restarts based on an assumption.
+    const isVideoPaused = video?.paused ?? false;
 
     // When the chat source is in intentional fetch backoff (e.g. replay
     // source after consecutive failures), the silence is expected — don't

@@ -17,6 +17,11 @@
  */
 
 import type { LanguageSetting, TranslationLanguage, TranslationTarget } from '@app-types';
+import { AR } from '@i18n/ar';
+import { ES } from '@i18n/es';
+import { JA } from '@i18n/ja';
+import { KO } from '@i18n/ko';
+import { ZH_CN } from '@i18n/zh-CN';
 import { getLanguageAdapter } from '@platform/language-adapter';
 import type { LanguageAdapter } from '@platform/types';
 
@@ -131,12 +136,6 @@ export function resolveTranslationTarget(target: TranslationTarget): SupportedLa
 // ── Translations ─────────────────────────────────────────────────────────
 
 type TranslationMap = Record<string, string>;
-
-import { AR } from '@i18n/ar';
-import { ES } from '@i18n/es';
-import { JA } from '@i18n/ja';
-import { KO } from '@i18n/ko';
-import { ZH_CN } from '@i18n/zh-CN';
 
 export const TRANSLATION_MAPS: Record<SupportedLanguage, TranslationMap> = {
   en: {}, // English: no translation needed (strings are the keys)

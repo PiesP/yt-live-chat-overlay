@@ -15,13 +15,23 @@ export function parseAnyColor(colorString: string): RgbColor | null {
   if (colorString.startsWith('#')) {
     const hex = colorString.slice(1);
     if (hex.length < 3) return null;
-    const expand = hex.length <= 4;
-    const h0 = hex[0] ?? '0';
-    const h1 = hex[1] ?? '0';
-    const h2 = hex[2] ?? '0';
-    const r = parseInt(expand ? h0 + h0 : hex.slice(0, 2), 16);
-    const g = parseInt(expand ? h1 + h1 : hex.slice(2, 4), 16);
-    const b = parseInt(expand ? h2 + h2 : hex.slice(4, 6), 16);
+    if (hex.length === 3) {
+      // #RGB → expand each char to two (#RRGGBB)
+      const r = parseInt(hex[0]! + hex[0], 16);
+      const g = parseInt(hex[1]! + hex[1], 16);
+      const b = parseInt(hex[2]! + hex[2], 16);
+      return Number.isFinite(r) && Number.isFinite(g) && Number.isFinite(b) ? { r, g, b } : null;
+    }
+    if (hex.length === 4) {
+      // #RGBA → expand first 3 chars (#RRGGBB), drop alpha (RgbColor has no alpha field)
+      const r = parseInt(hex[0]! + hex[0], 16);
+      const g = parseInt(hex[1]! + hex[1], 16);
+      const b = parseInt(hex[2]! + hex[2], 16);
+      return Number.isFinite(r) && Number.isFinite(g) && Number.isFinite(b) ? { r, g, b } : null;
+    }
+    const r = parseInt(hex.slice(0, 2), 16);
+    const g = parseInt(hex.slice(2, 4), 16);
+    const b = parseInt(hex.slice(4, 6), 16);
     return Number.isFinite(r) && Number.isFinite(g) && Number.isFinite(b) ? { r, g, b } : null;
   }
   const match = colorString.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);

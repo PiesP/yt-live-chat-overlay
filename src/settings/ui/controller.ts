@@ -578,6 +578,9 @@ export class SettingsUi {
     input.autocomplete = 'off';
     input.addEventListener('change', () => {
       const file = input.files?.[0];
+      // Clean up the transient <input> element now that we have the file handle.
+      // It was never appended to the DOM but keeping it alive in memory leaks.
+      input.remove();
       if (!file) return;
       const reader = new FileReader();
       reader.addEventListener('load', () => {

@@ -1152,7 +1152,10 @@ export class SettingsUiForm {
     const partial: Record<string, unknown> = {};
     if (!this.modal) return cloneSettings(this.getSettings());
 
-    const els = this.modal.querySelectorAll<HTMLInputElement | HTMLSelectElement>('input, select');
+    // Exclude range sliders — they duplicate number inputs and produce spurious keys
+    const els = this.modal.querySelectorAll<HTMLInputElement | HTMLSelectElement>(
+      'input:not([type="range"]), select'
+    );
     for (const el of els) {
       if (!el.name) continue;
 

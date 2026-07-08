@@ -184,6 +184,9 @@ function renderPaidCardWorker(
   const textColor = card.textColor;
 
   // Compute gradient opacities if background is gradient
+  // scAlpha is declared here (with default 1) and reassigned inside the
+  // gradient block below. A separate `if` with the same condition reads it,
+  // so TS needs definite assignment outside the first `if`.
   let topAlpha = 1;
   let scAlpha = 1;
   let bottomAlpha = 1;

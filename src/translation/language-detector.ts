@@ -61,7 +61,9 @@ const UNICODE_HINTS: ReadonlyArray<[TranslationLanguage, [number, number]]> = [
 
 function detectByUnicodeRange(text: string): TranslationLanguage | null {
   const scores = new Map<TranslationLanguage, number>();
-  for (const ch of text) {
+  // Sample first 100 chars — sufficient for language detection by Unicode range
+  const sample = text.slice(0, 100);
+  for (const ch of sample) {
     const cp = ch.codePointAt(0);
     if (cp === undefined) continue;
     for (const [lang, [lo, hi]] of UNICODE_HINTS) {

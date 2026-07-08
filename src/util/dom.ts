@@ -126,7 +126,8 @@ export async function findPlayerContainerElement(
   // appears in the DOM (SPA navigation, slow rendering). Falls back to
   // polling if MutationObserver is not available or times out.
   if (typeof MutationObserver !== 'undefined') {
-    return new Promise<HTMLElement | null>(
+    let onAbort: (() => void) | undefined;
+    const promise = new Promise<HTMLElement | null>(
       (resolve: (value: HTMLElement | null) => void, reject: (reason: DOMException) => void) => {
         let fallbackTimer: ReturnType<typeof setTimeout>;
 
@@ -154,17 +155,16 @@ export async function findPlayerContainerElement(
           resolve(null); // will trigger polling fallback below
         }, intervalMs * attempts);
 
-        signal?.addEventListener(
-          'abort',
-          () => {
-            observer.disconnect();
-            clearTimeout(fallbackTimer);
-            reject(new DOMException('Aborted', 'AbortError'));
-          },
-          { once: true }
-        );
+        onAbort = () => {
+          observer.disconnect();
+          clearTimeout(fallbackTimer);
+          reject(new DOMException('Aborted', 'AbortError'));
+        };
+        signal?.addEventListener('abort', onAbort, { once: true });
       }
-    ).then((found) => {
+    );
+    return promise.then((found) => {
+      if (onAbort) signal?.removeEventListener('abort', onAbort as EventListener);
       if (found) return found;
       // Fall back to polling if observer didn't find anything.
       return pollForPlayerContainer(attempts, intervalMs, signal);

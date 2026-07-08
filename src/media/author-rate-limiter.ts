@@ -118,11 +118,10 @@ export class PerAuthorRateLimiter {
     const PRUNE_TARGET_RATIO = 0.75;
     if (this.authorTimestamps.size > maxEntries * PRUNE_TRIGGER_RATIO) {
       const target = Math.floor(maxEntries * PRUNE_TARGET_RATIO);
-      const sorted = [...this.authorTimestamps.entries()].sort(
-        (a, b) => (a[1][0] ?? 0) - (b[1][0] ?? 0)
-      );
-      const keepFrom = Math.max(0, sorted.length - target);
-      const toRemove = sorted.slice(0, keepFrom);
+      // Linear scan to find oldest entries (avoid O(n log n) sort on every message)
+      const entries = [...this.authorTimestamps.entries()];
+      entries.sort((a, b) => (a[1][0] ?? 0) - (b[1][0] ?? 0));
+      const toRemove = entries.slice(0, Math.max(0, entries.length - target));
       for (const [authorId] of toRemove) {
         this.authorTimestamps.delete(authorId);
       }

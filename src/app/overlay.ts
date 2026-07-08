@@ -137,11 +137,13 @@ export class Overlay {
       return;
     }
 
+    let latestEntry: ResizeObserverEntry | null = null;
     this.resizeObserver = new ResizeObserver((entries) => {
       // Use contentRect from the ResizeObserverEntry to avoid forced
       // synchronous layout that element.offsetWidth/offsetHeight triggers.
       const entry = entries[0];
       if (!entry) return;
+      latestEntry = entry;
 
       // Coalesce multiple synchronised ResizeObserver callbacks into a single
       // rAF frame. During window drag-resize, the observer fires for every
@@ -158,7 +160,8 @@ export class Overlay {
       this.resizeRafId = requestAnimationFrame(() => {
         this.resizeRafId = null;
         this.resizePending = false;
-        const { width, height } = entry.contentRect;
+        if (!latestEntry) return;
+        const { width, height } = latestEntry.contentRect;
         this.updateDimensionsFromRect(width, height);
       });
     });

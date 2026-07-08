@@ -1683,7 +1683,7 @@ export class CanvasRenderer extends RendererBase {
           )
         : 0;
 
-    const effectiveStartTime = now + staggerDelay;
+    const effectiveStartTime = now + staggerDelay + placement.waitMs;
     this.laneAllocator.commitPlacement(
       placement,
       effectiveStartTime,

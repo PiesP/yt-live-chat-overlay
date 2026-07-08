@@ -129,6 +129,11 @@ export class VideoPauseController {
       findElementMatch<HTMLElement>(PLAYER_CONTAINER_SELECTORS)?.element ?? null;
 
     if (playerContainer) {
+      // Guard: disconnect any observer from a prior start() call
+      if (this.videoPauseCleanup) {
+        this.videoPauseCleanup();
+        this.videoPauseCleanup = null;
+      }
       const observer = new MutationObserver(() => scheduleRebind());
       observer.observe(playerContainer, { childList: true, subtree: true });
 

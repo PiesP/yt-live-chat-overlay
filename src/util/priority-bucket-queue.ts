@@ -123,7 +123,7 @@ export class PriorityBucketQueue<T = ChatMessage> {
       if (!entry) continue;
       if (entry.offset < entry.msgs.length) {
         // Remove the oldest unconsumed message at this priority level (FIFO)
-        entry.msgs.splice(entry.offset, 1);
+        entry.msgs.shift();
         this._size--;
         return;
       }

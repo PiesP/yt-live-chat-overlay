@@ -41,7 +41,10 @@ export class ChromeExtensionWorkerFactory implements WorkerFactory {
     if (!chromeApi) {
       throw new Error('chrome.runtime.getURL not available');
     }
-    return chromeApi.runtime!.getURL(`workers/${basename}`);
+    if (!chromeApi.runtime?.getURL) {
+      throw new Error('chrome.runtime.getURL not available');
+    }
+    return chromeApi.runtime.getURL(`workers/${basename}`);
   }
 }
 

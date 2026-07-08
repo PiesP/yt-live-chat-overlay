@@ -339,7 +339,7 @@ export function enqueueWithOverflow(
   priority: number,
   onDrop: (reason: 'queue_priority' | 'queue_replaced') => void,
   maxSize: number
-): 'enqueue' | 'dropped' | 'replaced' {
+): 'enqueued' | 'dropped' | 'replaced' {
   if (queue.size >= maxSize) {
     const lowest = queue.peekLowest();
     if (lowest && priority <= RendererBase.getMessagePriority(lowest)) {
@@ -352,5 +352,5 @@ export function enqueueWithOverflow(
     return 'replaced';
   }
   queue.enqueue(message, priority);
-  return 'enqueue';
+  return 'enqueued';
 }

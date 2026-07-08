@@ -370,7 +370,9 @@ export class BacklogInjectionController implements Pauseable {
     }
 
     const message = this.dequeueBacklog();
-    /* v8 ignore next 1 — TypeScript guard: queue non-empty checked above */
+    // Defensive guard: dequeueBacklog() should always return a message here
+    // since we checked this.backlog.length > 0 above. The v8 ignore note is
+    // a TypeScript safety net — keep it to avoid a crash if invariants change.
     if (!message) return;
     message.isBacklog = true;
     this.processedBacklog++;

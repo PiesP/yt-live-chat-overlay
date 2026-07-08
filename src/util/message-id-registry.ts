@@ -21,7 +21,9 @@ export interface MessageIdRegistry {
 }
 
 export function createMessageIdRegistry(maxSize: number): MessageIdRegistry {
+  // Clamp to at least 1 so a single entry is never immediately evicted
   const ids = new Map<string, true>();
+  const effectiveMax = Math.max(1, maxSize);
 
   return {
     has(id: string): boolean {
@@ -36,7 +38,7 @@ export function createMessageIdRegistry(maxSize: number): MessageIdRegistry {
 
       // FIFO evict the single oldest entry when over capacity.
       // Amortized O(1) per mark() — no bulk deletion spikes.
-      while (ids.size > maxSize) {
+      while (ids.size > effectiveMax) {
         const oldest = ids.keys().next().value;
         if (oldest !== undefined) {
           ids.delete(oldest);

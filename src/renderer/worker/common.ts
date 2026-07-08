@@ -84,10 +84,6 @@ export function sendAuthorPhotosToWorker(
   const bitmaps = photos.map((p) => p.bitmap);
   manager.worker?.postMessage({ type: 'addAuthorPhotos', photos }, bitmaps);
 }
-
-/**
- * Send a translation result to the worker.
- */
 /**
  * Send a clearState command to the worker.
  * Instructs the Worker to reset its renderer state (active messages,
@@ -95,17 +91,6 @@ export function sendAuthorPhotosToWorker(
  */
 export function sendClearStateToWorker(manager: WorkerManagerLike): void {
   manager.worker?.postMessage({ type: 'clearState' });
-}
-
-/**
- * Send a translation result to the worker.
- */
-export function sendTranslationToWorker(
-  manager: WorkerManagerLike,
-  messageId: string,
-  text: string
-): void {
-  manager.worker?.postMessage({ type: 'setTranslation', messageId, text });
 }
 
 /**

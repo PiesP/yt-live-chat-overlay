@@ -26,6 +26,8 @@ export class Settings {
   private savePending = false;
   /** requestIdleCallback handle — stored so we can cancel on flush/destroy. */
   private saveIdleHandle = 0;
+  /** setTimeout handle — used when requestIdleCallback is unavailable. */
+  private saveTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
   /** Cross-tab sync adapter for the current environment. */
   private crossTabSyncAdapter = getCrossTabSyncAdapter(STORAGE_KEY);
   /** Bound callback reference for cross-tab sync adapter removeListener. */
@@ -62,10 +64,14 @@ export class Settings {
   }
 
   async destroy(): Promise<void> {
-    // Cancel any idle callback to avoid a race where flushSave() fires after destroy().
+    // Cancel any idle callback / timeout to avoid a race where flushSave() fires after destroy().
     if (this.saveIdleHandle !== 0) {
       cancelIdleCallback(this.saveIdleHandle);
       this.saveIdleHandle = 0;
+    }
+    if (this.saveTimeoutHandle !== null) {
+      clearTimeout(this.saveTimeoutHandle);
+      this.saveTimeoutHandle = null;
     }
     // Await the flush to ensure the async save completes before tearing down.
     await this.flushSave();
@@ -119,7 +125,7 @@ export class Settings {
     } else {
       // No requestIdleCallback support — defer save to next task to avoid
       // racing with subsequent set() calls that update in-memory state first.
-      setTimeout(() => void this.flushSave(), 0);
+      this.saveTimeoutHandle = setTimeout(() => void this.flushSave(), 0);
     }
   }
 
@@ -130,6 +136,10 @@ export class Settings {
     if (this.saveIdleHandle !== 0) {
       cancelIdleCallback(this.saveIdleHandle);
       this.saveIdleHandle = 0;
+    }
+    if (this.saveTimeoutHandle !== null) {
+      clearTimeout(this.saveTimeoutHandle);
+      this.saveTimeoutHandle = null;
     }
     await this.save();
   }

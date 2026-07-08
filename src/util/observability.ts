@@ -179,10 +179,10 @@ export class ObservabilityReporter {
     this.textMeasureAccumMs += ms;
   }
 
-  // get current metrics snapshot
+  // get current metrics snapshot (deep-cloned to prevent external mutation)
   getMetrics(): SessionMetrics {
     this.refreshDerivedMetrics();
-    return { ...this.metrics };
+    return structuredClone(this.metrics);
   }
 
   private refreshDerivedMetrics(): void {
@@ -307,7 +307,6 @@ export class ObservabilityReporter {
           }
         }
       });
-      observer.observe({ type: 'first-input', buffered: true });
       observer.observe({ type: 'event', buffered: true });
     } catch {
       // Event Timing API unavailable — skip INP monitoring
