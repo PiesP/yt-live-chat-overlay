@@ -136,16 +136,16 @@ export class ImageFetchManager {
     // a cached image fires the load event synchronously before the
     // handler is attached.
     img.onload = () => {
-      if (this.isDestroyed) return;
-      this.inFlightImages.delete(img);
       this.imageLoading.delete(url);
+      this.inFlightImages.delete(img);
+      if (this.isDestroyed) return;
       cache.set(url, img);
       this.preConvertForWorker(url, img);
     };
     img.onerror = () => {
-      if (this.isDestroyed) return;
-      this.inFlightImages.delete(img);
       this.imageLoading.delete(url);
+      this.inFlightImages.delete(img);
+      if (this.isDestroyed) return;
     };
     img.src = url;
   }

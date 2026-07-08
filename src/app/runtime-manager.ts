@@ -372,7 +372,19 @@ export class RuntimeManager {
         // won't re-trigger).  We use scheduleReconcile which calls
         // requestReconcile('retry') — isPageChangeReconcile stays false,
         // but lastPageChangeAt is set so no further settle delay occurs.
+        //
+        // Bound retry count to avoid infinite polling on genuine VOD pages
+        // that never render a #chat element.
         log.info('#chat not found at startup — deferring to settle delay for DOM render');
+        const attempts =
+          this.startFailureState.url === desired.url ? this.startFailureState.attempts + 1 : 1;
+        this.startFailureState = { url: desired.url, attempts };
+        if (attempts >= MAX_START_ATTEMPTS) {
+          log.warn(
+            `No #chat element after ${MAX_START_ATTEMPTS} attempts — giving up (likely VOD)`
+          );
+          return;
+        }
         this.lastPageChangeAt = Date.now();
         this.scheduleReconcile(NAVIGATION_SETTLE_DELAY_MS);
         return;
@@ -581,14 +593,16 @@ export class RuntimeManager {
 
       const overlay = new Overlay();
       const overlayCreated = await overlay.create(settings, signal);
-      throwIfAborted(signal);
 
       if (!overlayCreated) {
         overlay.destroy();
         return 'retryable';
       }
 
+      // Assign overlay BEFORE throwIfAborted so the DOM is cleaned up
+      // by disposeActiveSession() if a subsequent check throws.
       this.overlay = overlay;
+      throwIfAborted(signal);
       this.renderer = this.createRenderer(overlay, settings);
       this.renderer.setConnectionStatus('connecting');
       this.renderer.onStatusBarClick = () => {

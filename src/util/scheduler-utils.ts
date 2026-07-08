@@ -93,12 +93,14 @@ export function schedulerPostTask<T>(
     switch (priority) {
       case 'background':
         // Defer more aggressively so urgent work runs first.
-        setTimeout(() => resolve(fn()), 0);
+        // Using setTimeout(4) adds ~4ms of slack to let higher-priority tasks
+        // scheduled via setTimeout(0) execute first.
+        setTimeout(() => resolve(fn()), 4);
         break;
       case 'user-blocking':
         // Use a microtask-style schedule: requestAnimationFrame would align
         // with the next frame boundary which defeats the purpose of being
-        // "user-blocking".  setTimeout(0) runs after the current macrotask
+        // 'user-blocking'.  setTimeout(0) runs after the current macrotask
         // but before the next rendering frame in most browsers.
         //
         // For truly blocking work, a MessageChannel-based scheduler would be
@@ -107,6 +109,8 @@ export function schedulerPostTask<T>(
         setTimeout(() => resolve(fn()), 0);
         break;
       default:
+        // Default priority; runs promptly but allows user-blocking work to
+        // be queued first when both are pending in the same macrotask.
         setTimeout(() => resolve(fn()), 0);
         break;
     }

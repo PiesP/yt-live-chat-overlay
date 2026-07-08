@@ -25,6 +25,15 @@ const log = createLogger('FetchInterceptor');
 const INTERCEPTOR_PARSE_TIMEOUT_MS = 5000;
 
 /**
+ * Cache of response body texts already parsed by the interceptor.
+ * Prevents duplicate JSON.parse when the same response body is intercepted
+ * multiple times (e.g. when the poll loop and YouTube's own client both
+ * fetch the same continuation).  Cleared when full to bound memory growth.
+ */
+const responseTextCache = new Set<string>();
+const MAX_RESPONSE_CACHE_SIZE = 50;
+
+/**
  * Matches YouTube Innertube live-chat fetch URLs.
  * Covers both live and replay endpoints.
  */
@@ -147,7 +156,24 @@ export function installFetchInterceptor(
           }, INTERCEPTOR_PARSE_TIMEOUT_MS);
         });
 
-        const data: unknown = await Promise.race([cloned.json(), timeoutPromise]);
+        // Read as text so we can cache the raw body and avoid re-parsing
+        // the same response seen by both the interceptor and the poll loop.
+        const text = await cloned.text();
+        if (responseTextCache.has(text)) {
+          clearTimeout(timeoutId);
+          log.debug('Skipping already-parsed response body');
+          return;
+        }
+        // Evict oldest entries when cache is full
+        if (responseTextCache.size >= MAX_RESPONSE_CACHE_SIZE) {
+          responseTextCache.clear();
+        }
+        responseTextCache.add(text);
+
+        const data: unknown = await Promise.race([
+          Promise.resolve(JSON.parse(text)),
+          timeoutPromise,
+        ]);
         clearTimeout(timeoutId);
 
         const payload = getLiveChatPayload(data);

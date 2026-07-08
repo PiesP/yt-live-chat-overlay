@@ -52,8 +52,11 @@ export class ChatPanelObserver {
     this.check();
 
     // MutationObserver for DOM structure changes (iframe insert/remove, display toggles)
+    // Scoped to the YouTube layout container (#columns) instead of document.body
+    // to avoid firing on every page mutation across the entire document.
     this.observer = new MutationObserver(() => this.scheduleCheck());
-    this.observer.observe(document.body, {
+    const target = document.querySelector('#columns') ?? document.body;
+    this.observer.observe(target, {
       childList: true,
       subtree: true,
     });
@@ -109,9 +112,10 @@ export class ChatPanelObserver {
     this.isPaused = false;
     if (!this.callback) return;
 
-    // Reconnect MutationObserver
+    // Reconnect MutationObserver (scoped to #columns, not document.body)
     this.observer = new MutationObserver(() => this.scheduleCheck());
-    this.observer.observe(document.body, {
+    const target = document.querySelector('#columns') ?? document.body;
+    this.observer.observe(target, {
       childList: true,
       subtree: true,
     });

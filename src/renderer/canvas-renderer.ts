@@ -122,6 +122,8 @@ export class CanvasRenderer extends RendererBase {
   /** Cached prefers-reduced-motion media query result. */
   private reducedMotionQuery: MediaQueryList | null = null;
   private reducedMotion = false;
+  /** Bound listener for reduced-motion changes — stored for cleanup in onDestroy. */
+  private reducedMotionListener: ((e: MediaQueryListEvent) => void) | null = null;
 
   /** Last devicePixelRatio seen — used to detect DPR changes. */
   private lastDpr = 0;
@@ -391,9 +393,10 @@ export class CanvasRenderer extends RendererBase {
     // Initialize prefers-reduced-motion query
     this.reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
     this.reducedMotion = this.reducedMotionQuery.matches;
-    this.reducedMotionQuery.addEventListener('change', (e: MediaQueryListEvent) => {
+    this.reducedMotionListener = (e: MediaQueryListEvent) => {
       this.reducedMotion = e.matches;
-    });
+    };
+    this.reducedMotionQuery.addEventListener('change', this.reducedMotionListener);
     log.info('RendererCanvas created');
   }
 
@@ -856,6 +859,11 @@ export class CanvasRenderer extends RendererBase {
     if (this.pendingTranslationReadIdx >= this.pendingTranslations.length) {
       this.pendingTranslations.length = 0;
       this.pendingTranslationReadIdx = 0;
+    } else if (this.pendingTranslationReadIdx > 0) {
+      // Compact: shift consumed entries out so the array doesn't grow unbounded
+      // when translations arrive faster than translationBatchSize per frame.
+      this.pendingTranslations.splice(0, this.pendingTranslationReadIdx);
+      this.pendingTranslationReadIdx = 0;
     }
   }
 
@@ -1258,13 +1266,23 @@ export class CanvasRenderer extends RendererBase {
 
   /** Maximum number of snippets to mirror to the aria-live region. */
   private static readonly LIVE_REGION_MAX_MESSAGES = 10;
+  /** Throttle interval for aria-live mirroring to avoid spamming screen readers at 60fps. */
+  private static readonly LIVE_REGION_THROTTLE_MS = 500;
+  /** Last timestamp when updateLiveRegion was called, for throttling. */
+  private lastLiveRegionUpdate = 0;
 
   /**
    * Mirror snippets from visible canvas messages to an offscreen aria-live
    * region so screen readers, find-in-page, and translation tools can
    * discover canvas-rendered text content.
+   *
+   * Throttled to at most once per 500ms to avoid flooding the live region
+   * with updates at 60fps.
    */
   private mirrorVisibleMessages(): void {
+    const now = performance.now();
+    if (now - this.lastLiveRegionUpdate < CanvasRenderer.LIVE_REGION_THROTTLE_MS) return;
+    this.lastLiveRegionUpdate = now;
     const count = Math.min(this.activeMessages.length, CanvasRenderer.LIVE_REGION_MAX_MESSAGES);
     if (count === 0) return;
     const snippets: string[] = [];
@@ -1392,6 +1410,28 @@ export class CanvasRenderer extends RendererBase {
       );
       batchIndex++;
       committed.push(msg);
+
+      // Pre-warm text bitmap cache so the render loop never pays
+      // the cost of cache-miss bitmap generation during drawStage.
+      if (this.settings.outline.widthPx > 0 && this.settings.outline.opacity > 0) {
+        const warmColor =
+          this.settings.preserveUserColor && msg.userColor
+            ? msg.userColor
+            : this.settings.colors[msg.authorType];
+        const farSpacing = result.speedTier === SPEED_TIER.FAR ? '1px' : undefined;
+        warmTextBitmapCache(
+          toSharedContentSegments(msg.content),
+          this.settings.fontSize,
+          this.settings.fontWeight,
+          this.settings.fontFamily,
+          warmColor,
+          this.settings.outline.widthPx,
+          this.settings.outline.opacity,
+          this.textBitmapCache,
+          this.ctx!,
+          farSpacing
+        );
+      }
 
       // Yield every 50ms to keep the main thread responsive during bursts.
       deadline = await yieldIfOverBudget(deadline);
@@ -1829,8 +1869,11 @@ export class CanvasRenderer extends RendererBase {
     newSpeedTier: number
   ): number {
     const base = computeBaseHeadwayPx(activeWidth, this.settings.headwayGapRatio);
-    // Only adjust when the new message is faster (higher tier).
-    if (newSpeedTier > activeSpeedTier) {
+    // Only apply the backlog multiplier when the active message is in BACKLOG
+    // tier — the multiplier gives backlog messages more lead time so faster
+    // chasers don't visually cross through them.  A plain new-taller-than-active
+    // check would spuriously scale headway for normal tier transitions.
+    if (activeSpeedTier === SPEED_TIER.BACKLOG && newSpeedTier > activeSpeedTier) {
       return Math.round(base * this.settings.backlogSpeedMultiplier);
     }
     return base;
@@ -2087,6 +2130,12 @@ export class CanvasRenderer extends RendererBase {
     this.workerManager.destroy();
     this.imageFetchManager.destroy();
     this.overlayDimensionsUnsubscribe?.();
+    // Clean up prefers-reduced-motion listener
+    if (this.reducedMotionQuery && this.reducedMotionListener) {
+      this.reducedMotionQuery.removeEventListener('change', this.reducedMotionListener);
+    }
+    this.reducedMotionListener = null;
+    this.reducedMotionQuery = null;
     if (this.canvas && this.canvasClickHandler) {
       this.canvas.removeEventListener('click', this.canvasClickHandler);
     }
@@ -2109,7 +2158,6 @@ export class CanvasRenderer extends RendererBase {
     this.translationService.destroy();
     this.languageDetector?.destroy();
     this.languageDetector = null;
-    this.channelMemory?.clear();
     this.channelMemory = null;
     // M7: Clean up offscreen observer and recovery poll
     this.stopOffscreenPoll();
@@ -2161,6 +2209,10 @@ export class CanvasRenderer extends RendererBase {
     this.ctx = ctx;
     const dpr = window.devicePixelRatio || 1;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    // Re-initialize offscreen observer for the new canvas — the old observer
+    // still referenced the removed canvas and would fail to detect offscreen state.
+    this.setupOffscreenObserver(newCanvas);
 
     log.info('Canvas replaced — fallback to main-thread rendering');
     return true;
