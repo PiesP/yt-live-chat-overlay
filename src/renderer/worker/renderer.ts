@@ -483,7 +483,7 @@ export class WorkerRenderer {
               WorkerRenderer.estimateBitmapBytes,
               (b) => b.close()
             );
-            this.stickerCache = new ByteLimitedCache<ImageBitmap>(
+            stickerCache = this.stickerCache = new ByteLimitedCache<ImageBitmap>(
               (this.config.stickerCacheMb ?? 4) * 1_000_000,
               WorkerRenderer.estimateBitmapBytes,
               (b) => b.close()

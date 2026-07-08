@@ -435,6 +435,9 @@ export class RuntimeManager {
 
     log.info('Runtime session requested managed restart', { reason });
 
+    // Exit standby mode if active — prevents standby leak after stream detected.
+    this.standbyController?.exit();
+
     // Soft restart: keep Overlay + Canvas + BacklogController alive,
     // restart only the chat source chain. This avoids visible UI flicker
     // and duplicates the lightweight retry that replay sources already use.
@@ -1150,7 +1153,12 @@ export class RuntimeManager {
 
       // F-1: Long-hidden tab → full overlay refresh (clear + restart from history)
       // rather than time-jumping expired messages via paused-duration shift.
+      // Capture hidden duration BEFORE clearing so F-1 threshold check works.
       const hiddenDuration = this.getIdleDurationMs(Date.now());
+
+      // Clear idle markers so the health snapshot reflects current state.
+      this.clearHidden();
+
       if (hiddenDuration >= OVERLAY_REFRESH_THRESHOLD_MS) {
         this.performOverlayRefresh(`hidden-${Math.round(hiddenDuration / 1000)}s`);
         return;
