@@ -77,3 +77,6 @@ TESTING.md
 
 # Local tests
 test/
+
+# Test config (lives in test/)
+stryker.conf.json
