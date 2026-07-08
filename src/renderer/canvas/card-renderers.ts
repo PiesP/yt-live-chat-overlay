@@ -12,8 +12,9 @@ import { getCachedGradient } from '@renderer/canvas/gradient-utils';
 import {
   drawAuthorSection,
   drawRoundRect,
+  renderSegment,
   renderWrappedContentSegments,
-  strokeTextOutline,
+  splitGraphemeClusters,
 } from '@renderer/canvas/shared';
 import type { CardConfig } from '@renderer/card-config';
 import { computeReadableTextColor } from '@renderer/color-utils';
@@ -23,14 +24,6 @@ import type { ByteLimitedCache } from '@util/byte-limited-cache';
 import { DEFAULT_TEXT_COLOR, rendererLayout, spacing } from '@util/design-tokens';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
-
-/**
- * Split a string into grapheme clusters using Array.from() as a fallback.
- * Ensures grapheme-safe truncation (emoji, zalgo, CJK, etc.).
- */
-function splitGraphemeClusters(text: string): string[] {
-  return Array.from(text);
-}
 
 /**
  * Draw a path with only the LEFT corners rounded; RIGHT corners are sharp.
@@ -186,17 +179,19 @@ function renderCardHeaderTag(
   }
 
   const tagY = y + (config.headerTag.marginTop ?? 0);
-  strokeTextOutline(
+  // Route through renderSegment for bitmap caching (fixes #9)
+  renderSegment(
     ctx,
     displayText,
     x,
     tagY,
     config.headerTag.color,
+    headerFontSize,
     settings.outline.widthPx,
-    settings.outline.opacity
+    settings.outline.opacity,
+    _textBitmapCache,
+    getFontFn
   );
-  ctx.fillStyle = config.headerTag.color;
-  ctx.fillText(displayText, x, tagY);
 
   const headerHeight = measureTextHeight(headerFont, headerFontSize);
   return tagY + headerHeight + (config.headerTag.marginBottom ?? 0);
@@ -235,17 +230,18 @@ function renderCardBadge(
   ctx.stroke();
 
   ctx.textBaseline = 'middle';
-  strokeTextOutline(
+  renderSegment(
     ctx,
     text,
     x + badge.paddingH,
     y + badgeHeight / 2,
     DEFAULT_TEXT_COLOR,
+    badgeFontSize,
     settings.outline.widthPx,
-    settings.outline.opacity
+    settings.outline.opacity,
+    _textBitmapCache2,
+    getFontFn
   );
-  ctx.fillStyle = DEFAULT_TEXT_COLOR;
-  ctx.fillText(text, x + badge.paddingH, y + badgeHeight / 2);
   ctx.restore();
 
   return y + badgeHeight;

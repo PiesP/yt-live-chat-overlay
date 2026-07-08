@@ -162,7 +162,7 @@ export function resetGraphemeSegmenter(): void {
  * and skin-tone modifiers stay intact.  Falls back to Array.from (code-point
  * iteration) on runtimes without Intl.Segmenter support.
  */
-function splitGraphemeClusters(text: string): string[] {
+export function splitGraphemeClusters(text: string): string[] {
   const seg = getGraphemeSegmenter();
   if (seg) {
     return Array.from(seg.segment(text), (s) => s.segment);

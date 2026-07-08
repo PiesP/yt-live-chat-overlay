@@ -1208,7 +1208,7 @@ export class WorkerRenderer {
                 sx,
                 sy,
                 {
-                  showAuthor: true,
+                  showAuthor: cfg.showAuthor[msg.authorType ?? 'normal'] ?? true,
                   fontSize: cfg.fontSize,
                   fontWeight: cfg.fontWeight,
                   fontFamily: cfg.fontFamily,

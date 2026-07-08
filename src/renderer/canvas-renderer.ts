@@ -829,6 +829,10 @@ export class CanvasRenderer extends RendererBase {
     }
 
     // ── Glow stage: membership card pulsing borders ──
+    // Drive glow by cardConfig.decoration over all buckets, not just nearBuckets,
+    // so pulsing-border glow works even when depth layers are disabled.
+    this.drawGlowStage(ctx, cleanupResult.farBuckets);
+    this.drawGlowStage(ctx, cleanupResult.midBuckets);
     this.drawGlowStage(ctx, cleanupResult.nearBuckets);
 
     this.drawStage(ctx, cleanupResult.farBuckets);
