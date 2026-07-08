@@ -171,7 +171,9 @@ function renderPaidCardWorker(
   authorPhotoCache: ByteLimitedCache<ImageBitmap>,
   emojiCache: ByteLimitedCache<ImageBitmap>,
   getFontFn: (fontSize: number) => string,
-  gradientCache: Map<string, CanvasGradient>
+  gradientCache: Map<string, CanvasGradient>,
+  /** Configurable SuperChat opacity from settings, clamped to [0.35, 1]. */
+  superChatOpacity: number
 ): void {
   const w = msgWidth;
   const h = msgHeight;
@@ -187,7 +189,7 @@ function renderPaidCardWorker(
   let bottomAlpha = 1;
   if (card.background === 'gradient' && card.backgroundGradient) {
     const bg = card.backgroundGradient;
-    scAlpha = Math.min(1, Math.max(bg.minOpacity, 0.7)); // use configurable superChatOpacity from settings
+    scAlpha = Math.min(1, Math.max(bg.minOpacity, superChatOpacity));
     topAlpha = Math.min(1, scAlpha + bg.topBoost);
     bottomAlpha = Math.max(bg.minOpacity, scAlpha - bg.bottomReduction);
   }
@@ -523,6 +525,9 @@ export class WorkerRenderer {
                     : target === 'sticker'
                       ? this.stickerCache
                       : this.emojiCache;
+                // Close prior bitmap if one exists for this URL to prevent
+                // GPU-side resource leak from orphaned ImageBitmaps.
+                cache.get(url)?.close();
                 cache.set(url, bitmap);
               }
             }
@@ -1179,7 +1184,8 @@ export class WorkerRenderer {
                 this.authorPhotoCache,
                 this.emojiCache,
                 getFont,
-                this.superChatGradientCache
+                this.superChatGradientCache,
+                cfg.superChatOpacity
               );
             } else {
               const overrideText =
