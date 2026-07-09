@@ -4,34 +4,27 @@
 /**
  * BacklogInjectionController
  *
- * Throttles the injection of initial backlog messages when a video is first
- * opened, preventing the queue from being flooded with hundreds of messages
- * at once.
+ * Lightweight orchestrator that throttles injection of initial backlog
+ * messages when a video is first opened, preventing the queue from being
+ * flooded with hundreds of messages at once.
+ *
+ * Delegates to:
+ * - BacklogScheduler — rate computation, density ramp, Poisson scheduling
+ * - BacklogSampler   — statistical sampling, priority filtering
+ * - BacklogIndicator — DOM-based progress overlay
  *
  * Strategies:
- * 1. Time-based throttling — backlog messages are injected at a controlled
- *    rate (max N per second, based on lane count).
- * 2. Temporal compression — backlog message animation duration is shortened
- *    by the speed multiplier so they scroll past faster.
- * 3. Statistical sampling — when backlog exceeds 200/500 messages, apply
- *    60%/35% sampling. High-priority messages (SuperChat, Membership) are
- *    always included.
- * 4. Density ramp — injection rate starts low and linearly ramps up over
- *    the first few seconds to avoid visual flooding on startup.
- * 5. Progress indicator — shows a "Loading chat history..." overlay indicator
- *    that auto-removes when backlog injection completes.
+ * 1. Time-based throttling — injection rate control per lane count
+ * 2. Temporal compression — animation duration shortening (via getSpeedMultiplier)
+ * 3. Statistical sampling — priority-based sampling at thresholds
+ * 4. Density ramp — linear rate increase over time
+ * 5. Progress indicator — overlay UI with auto-removal
  */
 
 import type { BacklogMode, ChatMessage, Pauseable } from '@app-types';
-import { t } from '@i18n/index';
-import { isPriorityMessage, prioritySortOrder, sampleExponential } from '@util/backlog-helpers';
-import {
-  BACKLOG_INDICATOR_BG,
-  DEBUG_OVERLAY_RIGHT,
-  DEFAULT_FONT_FAMILY,
-  DEFAULT_TEXT_COLOR,
-  INDICATOR_Z_INDEX,
-} from '@util/design-tokens';
+import { BacklogIndicator } from '@util/backlog-indicator';
+import { BacklogSampler } from '@util/backlog-sampler';
+import { BacklogScheduler } from '@util/backlog-scheduler';
 import { clearSafeTimeout } from '@util/dom';
 import { createLogger } from '@util/logging';
 import type { ObservabilityReporter } from '@util/observability';
@@ -41,7 +34,7 @@ const BACKLOG_QUEUE_COMPACT_THRESHOLD = 64;
 
 const log = createLogger('Backlog');
 
-interface BacklogControllerConfig {
+export interface BacklogControllerConfig {
   /** How to handle past chat messages */
   backlogMode: BacklogMode;
   /** Max messages per second during backlog injection */
@@ -70,24 +63,16 @@ export class BacklogInjectionController implements Pauseable {
   private injectionTimer: ReturnType<typeof setTimeout> | null = null;
   private totalBacklog = 0;
   private processedBacklog = 0;
-  private indicatorEl: HTMLElement | null = null;
-  private hideIndicatorTimer: ReturnType<typeof setTimeout> | null = null;
-  private _indicatorFadeRaf: number | null = null;
   private config: BacklogControllerConfig;
-  private lanes: number;
   private observability: ObservabilityReporter | undefined;
   private realTimeActivityCount = 0;
-  private injectionStartTime = 0;
-  /**
-   * Timestamp of the most recent real-time activity notification.
-   * Used for time-based decay instead of per-tick decrement — the
-   * per-tick approach tied the decay rate to the injection rate,
-   * creating a vicious cycle where slow injection → slow decay → keeps
-   * injection slow.
-   */
   private lastRealTimeActivityAt = 0;
-  /** Time after which real-time activity counter fully resets (ms). */
-  private static readonly REAL_TIME_DECAY_MS = 2000;
+  private injectionStartTime = 0;
+
+  /** Delegated modules */
+  private readonly scheduler: BacklogScheduler;
+  private readonly sampler: BacklogSampler;
+  private readonly indicator: BacklogIndicator;
 
   /**
    * Callback to query current lane utilization (0–1).
@@ -98,26 +83,19 @@ export class BacklogInjectionController implements Pauseable {
   /** Callback to be set by RuntimeSession */
   public onBacklogMessage: ((message: ChatMessage) => void) | null = null;
 
-  // backlogDensityRampMs — read from this.config
-  private densityRampMs: number;
-
-  // ── Injection rate constants ────────────────────────────────────
-  // backlogInjectionRateMin — read from this.config
-  private static readonly REAL_TIME_ACTIVITY_CAP = 5;
-  private static readonly REAL_TIME_FACTOR_MIN = 0.25;
-  private static readonly REAL_TIME_FACTOR_STEP = 0.2;
-  private static readonly UTILIZATION_FACTOR_MIN = 0.1;
-  private static readonly UTILIZATION_FACTOR_SLOPE = 0.9;
-  private static readonly DENSITY_SMALL_THRESHOLD = 200;
-  private static readonly DENSITY_LARGE_THRESHOLD = 500;
-  private static readonly SAMPLE_RATIO_SMALL = 0.6;
-  private static readonly SAMPLE_RATIO_LARGE = 0.35;
-  private static readonly INDICATOR_HIDE_DELAY_MS = 300;
-
-  /** Effective length of the backlog queue (excluding consumed offset entries). */
-  private get backlogQueueLength(): number {
-    return this.backlogQueue.length - this.backlogQueueOffset;
+  constructor(
+    config: BacklogControllerConfig,
+    lanes: number,
+    observability?: ObservabilityReporter
+  ) {
+    this.config = config;
+    this.observability = observability;
+    this.scheduler = new BacklogScheduler(config, lanes);
+    this.sampler = new BacklogSampler();
+    this.indicator = new BacklogIndicator();
   }
+
+  // ── Ring buffer ──────────────────────────────────────────
 
   /**
    * Dequeue the next backlog message using ring-buffer semantics.
@@ -140,52 +118,7 @@ export class BacklogInjectionController implements Pauseable {
     return msg;
   }
 
-  /**
-   * Filter messages based on the configured backlog mode.
-   * - 'none': returns empty array (no backlog at all).
-   * - 'recent': returns only messages within the configured time window.
-   * - otherwise: returns all messages unfiltered.
-   */
-  private filterByMode(allMessages: ChatMessage[], now: number): ChatMessage[] {
-    if (this.config.backlogMode === 'none') return [];
-    if (this.config.backlogMode === 'recent') {
-      const cutoffMs = this.config.backlogRecentMinutes * 60 * 1000;
-      return allMessages.filter((m) => now - m.timestamp < cutoffMs);
-    }
-    return allMessages;
-  }
-
-  /**
-   * Split messages into priority (SuperChat/Membership) and regular groups.
-   * Priority messages are emitted immediately during backlog injection;
-   * regular messages go through the throttled queue.
-   */
-  private extractPriorityMessages(messages: ChatMessage[]): {
-    priority: ChatMessage[];
-    regular: ChatMessage[];
-  } {
-    const priority: ChatMessage[] = [];
-    const regular: ChatMessage[] = [];
-    for (const msg of messages) {
-      if (isPriorityMessage(msg)) {
-        priority.push(msg);
-      } else {
-        regular.push(msg);
-      }
-    }
-    return { priority, regular };
-  }
-
-  constructor(
-    config: BacklogControllerConfig,
-    lanes: number,
-    observability?: ObservabilityReporter
-  ) {
-    this.config = config;
-    this.lanes = lanes;
-    this.observability = observability;
-    this.densityRampMs = config.backlogDensityRampMs;
-  }
+  // ── Public API ───────────────────────────────────────────
 
   /** Called when initial seed messages arrive */
   startBacklogInjection(messages: ChatMessage[]): void {
@@ -203,8 +136,6 @@ export class BacklogInjectionController implements Pauseable {
         }
       }
       if (added > 0) {
-        // Update totalBacklog so the progress indicator (processedBacklog / totalBacklog)
-        // reflects the true total and doesn't exceed 100%.
         this.totalBacklog += added;
         log.debug(
           `Backlog injection in progress, queued ${added} additional (${messages.length - added} duplicates skipped, total now ${this.totalBacklog})`
@@ -213,17 +144,15 @@ export class BacklogInjectionController implements Pauseable {
       return;
     }
 
-    // Mode-based filtering (handles 'none' by returning early before
-    // starting any observability or UI state changes).
+    // Mode-based filtering (handles 'none' by returning early)
     if (this.config.backlogMode === 'none') {
       log.debug('Backlog mode is "none", skipping injection');
       return;
     }
 
     const now = Date.now();
-    const filtered = this.filterByMode(messages, now);
+    const filtered = this.sampler.filterByMode(messages, this.config, now);
 
-    // Log recent mode filtering summary
     if (this.config.backlogMode === 'recent') {
       log.debug(
         `Backlog recent mode: ${messages.length} → ${filtered.length} ` +
@@ -232,14 +161,11 @@ export class BacklogInjectionController implements Pauseable {
     }
 
     // Statistical sampling + priority extraction
-    const sampled = this.sampleMessages(filtered);
+    const sampled = this.sampler.sampleMessages(filtered);
     const { priority: priorityMessages, regular: normalMessages } =
-      this.extractPriorityMessages(sampled);
+      this.sampler.extractPriorityMessages(sampled);
 
-    // Priority messages bypass the throttled queue and are emitted
-    // immediately for minimum display latency. When the injector is
-    // paused (lane utilization > 80%), prepend them to the normal queue
-    // instead — they surface first when injection resumes.
+    // Priority messages bypass the throttled queue
     let queueMessages: ChatMessage[] = normalMessages;
     if (priorityMessages.length > 0) {
       if (this.paused) {
@@ -253,7 +179,7 @@ export class BacklogInjectionController implements Pauseable {
       }
     }
 
-    // Setup backlog queue state and dedup tracking
+    // Setup backlog queue state
     this.backlogQueue = queueMessages;
     this.backlogSeenIds = new Set<string>();
     for (const msg of queueMessages) {
@@ -263,31 +189,14 @@ export class BacklogInjectionController implements Pauseable {
     this.processedBacklog = 0;
     this.isActive = queueMessages.length > 0;
     this.injectionStartTime = now;
-    // Reset real-time activity state for the new injection cycle
     this.realTimeActivityCount = 0;
     this.lastRealTimeActivityAt = 0;
 
-    // Adapt density ramp duration to backlog size.
-    // Small backlogs (<200) use the base ramp; large backlogs (>=500)
-    // extend up to DENSITY_RAMP_MAX_MS to prevent visual flooding.
-    const backlogSize = sampled.length;
-    if (backlogSize >= BacklogInjectionController.DENSITY_LARGE_THRESHOLD) {
-      this.densityRampMs = this.config.backlogDensityRampMaxMs;
-    } else if (backlogSize >= BacklogInjectionController.DENSITY_SMALL_THRESHOLD) {
-      const t =
-        (backlogSize - BacklogInjectionController.DENSITY_SMALL_THRESHOLD) /
-        (BacklogInjectionController.DENSITY_LARGE_THRESHOLD -
-          BacklogInjectionController.DENSITY_SMALL_THRESHOLD); // 0 at 200, 1 at 500
-      this.densityRampMs = Math.round(
-        this.config.backlogDensityRampMs +
-          t * (this.config.backlogDensityRampMaxMs - this.config.backlogDensityRampMs)
-      );
-    } else {
-      this.densityRampMs = this.config.backlogDensityRampMs;
-    }
+    // Adapt density ramp duration to backlog size
+    this.scheduler.setDensityRampMs(this.scheduler.computeDensityRampMs(sampled.length));
 
     log.debug(`Backlog injection: ${messages.length} messages, sampled to ${sampled.length}`);
-    this.showIndicator();
+    this.indicator.show();
     this.observability?.updateBacklogProgress(0);
     this.startInjection();
   }
@@ -296,227 +205,9 @@ export class BacklogInjectionController implements Pauseable {
   notifyRealTimeActivity(): void {
     this.realTimeActivityCount = Math.min(
       this.realTimeActivityCount + 1,
-      BacklogInjectionController.REAL_TIME_ACTIVITY_CAP
+      BacklogScheduler.REAL_TIME_ACTIVITY_CAP
     );
     this.lastRealTimeActivityAt = Date.now();
-  }
-
-  /** Start the throttled injection loop */
-  private startInjection(): void {
-    if (this.isInjecting || !this.isActive || this.backlogQueueLength === 0) {
-      if (this.backlogQueueLength === 0) this.finishBacklogInjection();
-      return;
-    }
-
-    this.isInjecting = true;
-    this.processTick();
-  }
-
-  /** Execute one injection tick. Uses setTimeout for throttled scheduling. */
-  private processTick(): void {
-    if (!this.isActive || this.backlogQueueLength === 0) {
-      this.isInjecting = false;
-      this.injectionTimer = clearSafeTimeout(this.injectionTimer);
-      if (this.backlogQueueLength === 0) this.finishBacklogInjection();
-      return;
-    }
-
-    const maxRate = Math.max(
-      this.config.backlogInjectionRateMin,
-      Math.min(this.config.backlogInjectionMax, this.config.backlogMaxRate, this.lanes * 2)
-    );
-
-    // ── Congestion throttle: take the MIN of real-time and utilization ──
-    // Real-time activity and lane utilization both measure screen
-    // congestion. Using min() prevents multiplicative compounding where
-    // 0.25 × 0.28 = 0.07 instead of the intended ~0.25 worst case.
-    //
-    // realTimeFactor: 0.25(when activity reaches cap) → 1.0(when idle)
-    // utilizationFactor: 0.1(when lanes 100% full) → 1.0(when lanes empty)
-    const realTimeFactor = Math.max(
-      BacklogInjectionController.REAL_TIME_FACTOR_MIN,
-      1 - this.realTimeActivityCount * BacklogInjectionController.REAL_TIME_FACTOR_STEP
-    );
-    const utilizationFactor = this.getUtilizationFactor();
-    const congestionFactor = Math.min(realTimeFactor, utilizationFactor);
-
-    // Ramp factor is multiplicative — it serves a different purpose
-    // (startup smoothing) and should not be merged with congestion.
-    const rampFactor = this.getDensityRampFactor();
-
-    // Minimum rate floor: at least lanes+1 msg/s so every lane can
-    // receive a new message within ~1 second even under worst conditions.
-    const minRate = Math.max(this.lanes + 1, 2);
-
-    const adaptiveRate = Math.max(minRate, Math.round(maxRate * congestionFactor * rampFactor));
-    const meanInterval = Math.round(1000 / adaptiveRate);
-
-    // ── Time-based real-time activity decay ──
-    // Previously: `realTimeActivityCount = Math.max(0, count - 1)` per tick.
-    // This tied the decay rate to the injection rate: when injection was
-    // slow, the activity counter decayed just as slowly, creating a lock-up.
-    // Now: fully reset after REAL_TIME_DECAY_MS of inactivity, resolving
-    // in O(2s) regardless of injection rate.
-    const msSinceLastRealTime = Date.now() - this.lastRealTimeActivityAt;
-    if (msSinceLastRealTime > BacklogInjectionController.REAL_TIME_DECAY_MS) {
-      this.realTimeActivityCount = 0;
-    } else if (this.realTimeActivityCount > 0) {
-      // Gentle decay during the decay window: linear drop from current
-      // count to 0 over the decay period. This provides continuous
-      // acceleration instead of a sudden jump when the timer expires.
-      const decayProgress = msSinceLastRealTime / BacklogInjectionController.REAL_TIME_DECAY_MS;
-      const target = Math.ceil(this.realTimeActivityCount * (1 - decayProgress));
-      this.realTimeActivityCount = Math.max(target, 0);
-    }
-
-    const message = this.dequeueBacklog();
-    // Defensive guard: dequeueBacklog() should always return a message here
-    // since we checked this.backlog.length > 0 above. The v8 ignore note is
-    // a TypeScript safety net — keep it to avoid a crash if invariants change.
-    if (!message) return;
-    message.isBacklog = true;
-    this.processedBacklog++;
-
-    const progress = this.totalBacklog > 0 ? this.processedBacklog / this.totalBacklog : 1;
-    this.observability?.updateBacklogProgress(progress);
-
-    this.updateIndicator(progress);
-
-    this.onBacklogMessage?.(message);
-
-    this.scheduleNextTick(meanInterval);
-  }
-
-  /**
-   * Compute a utilization-based throttle factor (0.1–1.0).
-   * When the screen is heavily occupied, injection slows down to prevent
-   * visual crowding. Uses the lane utilization ratio from the allocator.
-   */
-  private getUtilizationFactor(): number {
-    if (!this.onUtilizationQuery) return 1;
-    const utilization = this.onUtilizationQuery();
-    // Linear falloff: 0% utilized → 1.0, 100% utilized → 0.1
-    return Math.max(
-      BacklogInjectionController.UTILIZATION_FACTOR_MIN,
-      1 - utilization * BacklogInjectionController.UTILIZATION_FACTOR_SLOPE
-    );
-  }
-
-  /**
-   * Schedule the next injection tick using Poisson-distributed spacing.
-   *
-   * Instead of a fixed interval, the delay is sampled from an exponential
-   * distribution with the given mean. This produces a Poisson process whose
-   * long-term rate matches the target, but whose individual intervals vary
-   * naturally — eliminating the "train" pattern caused by uniform spacing.
-   *
-   * The result is clamped to [floorMs, 2×mean] to prevent both sub-32ms
-   * clustering (vertical bunching on nearby lanes) and extreme outliers.
-   * floorMs = max(32, meanInterval × 0.6) adapts to the injection rate.
-   */
-  private scheduleNextTick(meanInterval: number): void {
-    const floorMs = Math.max(32, Math.round(meanInterval * 0.6));
-    const poissonDelay = Math.max(
-      floorMs,
-      Math.min(meanInterval * 2, sampleExponential(meanInterval))
-    );
-    this.injectionTimer = setTimeout(() => this.processTick(), poissonDelay);
-  }
-
-  /**
-   * Compute the density ramp factor (0.25-1.0).
-   * Linearly interpolates from 0.25 to 1.0 over the adaptive density ramp window.
-   * After the ramp window, returns 1.0 (full rate).
-   */
-  private getDensityRampFactor(): number {
-    const elapsed = Date.now() - this.injectionStartTime;
-    if (elapsed >= this.densityRampMs) return 1;
-    return 0.25 + 0.75 * (elapsed / this.densityRampMs);
-  }
-
-  /** Apply smart sampling based on message importance and time distribution. */
-  private sampleMessages(messages: ChatMessage[]): ChatMessage[] {
-    const count = messages.length;
-    if (count < 200) return messages;
-
-    const isSubstantialText = (m: ChatMessage): boolean => {
-      if (isPriorityMessage(m)) return false;
-      const text = m.text.trim();
-      return text.length >= 3 && !/^[\sㅋㅎㅇㄱ]+$/.test(text);
-    };
-
-    // Partition into priority / substantial / other tiers in a single pass.
-    const tier1: ChatMessage[] = [];
-    const tier2: ChatMessage[] = [];
-    const tier3: ChatMessage[] = [];
-    for (const m of messages) {
-      if (isPriorityMessage(m)) {
-        tier1.push(m);
-      } else if (isSubstantialText(m)) {
-        tier2.push(m);
-      } else {
-        tier3.push(m);
-      }
-    }
-
-    const normalBudget =
-      count < BacklogInjectionController.DENSITY_LARGE_THRESHOLD
-        ? Math.floor(count * BacklogInjectionController.SAMPLE_RATIO_SMALL)
-        : Math.floor(count * BacklogInjectionController.SAMPLE_RATIO_LARGE);
-
-    const selected: ChatMessage[] = [...tier1];
-    let remaining = normalBudget;
-
-    if (tier2.length > 0 && remaining > 0) {
-      const pick = Math.min(remaining, tier2.length);
-      selected.push(...this.timeDistributedPick(tier2, pick));
-      remaining -= pick;
-    }
-
-    if (tier3.length > 0 && remaining > 0) {
-      const pick = Math.min(remaining, tier3.length);
-      selected.push(...this.timeDistributedPick(tier3, pick));
-    }
-
-    return selected.sort((a, b) => {
-      const priorityA = prioritySortOrder(a.kind);
-      const priorityB = prioritySortOrder(b.kind);
-      if (priorityA !== priorityB) return priorityA - priorityB;
-      return a.timestamp - b.timestamp;
-    });
-  }
-
-  /**
-   * Pick messages with even time distribution to avoid clustering.
-   * Divides the time range into buckets and picks one message per bucket.
-   */
-  private timeDistributedPick(messages: ChatMessage[], count: number): ChatMessage[] {
-    if (count >= messages.length) return [...messages];
-    if (count <= 0) return [];
-
-    const sorted = [...messages].sort((a, b) => a.timestamp - b.timestamp);
-    const step = Math.max(1, Math.floor(sorted.length / count));
-    const picked: ChatMessage[] = [];
-
-    for (let i = 0; i < count; i++) {
-      const idx = Math.min(i * step, sorted.length - 1);
-      const msg = sorted[idx];
-      if (msg) picked.push(msg);
-    }
-
-    return picked;
-  }
-
-  /** Mark backlog injection as complete */
-  private finishBacklogInjection(): void {
-    this.isActive = false;
-    this.isInjecting = false;
-    this.backlogQueue = [];
-    this.backlogQueueOffset = 0;
-    this.backlogSeenIds.clear();
-    this.observability?.updateBacklogProgress(1);
-    this.hideIndicator();
-    log.debug('Backlog injection complete');
   }
 
   /** Returns the speed multiplier for backlog message animations */
@@ -529,77 +220,10 @@ export class BacklogInjectionController implements Pauseable {
     return this.isActive;
   }
 
-  // --- Backlog indicator UI ---
-
-  private showIndicator(): void {
-    if (this.indicatorEl) return;
-    const el = document.createElement('div');
-    el.id = 'yt-chat-overlay-backlog-indicator';
-    el.style.cssText = `
-      position: fixed; top: 40px; right: ${DEBUG_OVERLAY_RIGHT}; z-index: ${INDICATOR_Z_INDEX};
-      background: ${BACKLOG_INDICATOR_BG}; color: ${DEFAULT_TEXT_COLOR};
-      font: 12px/1.4 ${DEFAULT_FONT_FAMILY}; padding: 6px 10px;
-      border-radius: 4px; pointer-events: none; user-select: none;
-      opacity: 0; transition: opacity 0.3s ease;
-    `;
-    el.textContent = t('Loading chat history...');
-    document.body.appendChild(el);
-    this.indicatorEl = el;
-    // Fade in
-    this._indicatorFadeRaf = requestAnimationFrame(() => {
-      el.style.opacity = '1';
-      this._indicatorFadeRaf = null;
-    });
-  }
-
-  private updateIndicator(progress: number): void {
-    if (!this.indicatorEl) return;
-    const pct = Math.round(progress * 100);
-    this.indicatorEl.textContent = `${t('Loading chat history...')} ${this.processedBacklog}/${this.totalBacklog} (${pct}%)`;
-  }
-
-  private hideIndicator(): void {
-    if (!this.indicatorEl) return;
-    // Cancel any pending fade-in rAF to prevent opacity glitch
-    // (rAF setting opacity=1 would override our opacity=0).
-    if (this._indicatorFadeRaf !== null) {
-      cancelAnimationFrame(this._indicatorFadeRaf);
-      this._indicatorFadeRaf = null;
-    }
-    this.indicatorEl.style.opacity = '0';
-    this.hideIndicatorTimer = setTimeout(() => {
-      this.hideIndicatorTimer = null;
-      if (this.indicatorEl) {
-        this.indicatorEl.remove();
-        this.indicatorEl = null;
-      }
-    }, BacklogInjectionController.INDICATOR_HIDE_DELAY_MS);
-  }
-
   /** Update config at runtime */
   updateConfig(config: Partial<BacklogControllerConfig>): void {
     this.config = { ...this.config, ...config };
-    this.densityRampMs = this.config.backlogDensityRampMs;
-  }
-
-  /** Clean up */
-  destroy(): void {
-    this.isActive = false;
-    this.isInjecting = false;
-    this.injectionTimer = clearSafeTimeout(this.injectionTimer);
-    this.hideIndicatorTimer = clearSafeTimeout(this.hideIndicatorTimer);
-    if (this._indicatorFadeRaf !== null) {
-      cancelAnimationFrame(this._indicatorFadeRaf);
-      this._indicatorFadeRaf = null;
-    }
-    this.backlogQueue = [];
-    this.backlogQueueOffset = 0;
-    this.backlogSeenIds.clear();
-    if (this.indicatorEl) {
-      this.indicatorEl.remove();
-      this.indicatorEl = null;
-    }
-    this.onBacklogMessage = null;
+    this.scheduler.updateConfig(config);
   }
 
   /**
@@ -628,5 +252,78 @@ export class BacklogInjectionController implements Pauseable {
       this.isInjecting = true;
       this.processTick();
     }
+  }
+
+  /** Clean up */
+  destroy(): void {
+    this.isActive = false;
+    this.isInjecting = false;
+    this.injectionTimer = clearSafeTimeout(this.injectionTimer);
+    this.indicator.destroy();
+    this.backlogQueue = [];
+    this.backlogQueueOffset = 0;
+    this.backlogSeenIds.clear();
+    this.onBacklogMessage = null;
+  }
+
+  // ── Injection lifecycle ──────────────────────────────────
+
+  /** Start the throttled injection loop */
+  private startInjection(): void {
+    if (this.isInjecting || !this.isActive || this.backlogQueueLength === 0) {
+      if (this.backlogQueueLength === 0) this.finishBacklogInjection();
+      return;
+    }
+
+    this.isInjecting = true;
+    this.processTick();
+  }
+
+  /** Execute one injection tick. Uses setTimeout for throttled scheduling. */
+  private processTick(): void {
+    if (!this.isActive || this.backlogQueueLength === 0) {
+      this.isInjecting = false;
+      this.injectionTimer = clearSafeTimeout(this.injectionTimer);
+      if (this.backlogQueueLength === 0) this.finishBacklogInjection();
+      return;
+    }
+
+    const { meanInterval, updatedActivityCount } =
+      this.scheduler.computeMeanIntervalWithUtilization(
+        this.realTimeActivityCount,
+        this.lastRealTimeActivityAt,
+        this.injectionStartTime,
+        this.onUtilizationQuery
+      );
+    this.realTimeActivityCount = updatedActivityCount;
+
+    const message = this.dequeueBacklog();
+    if (!message) return;
+    message.isBacklog = true;
+    this.processedBacklog++;
+
+    const progress = this.totalBacklog > 0 ? this.processedBacklog / this.totalBacklog : 1;
+    this.observability?.updateBacklogProgress(progress);
+    this.indicator.update(this.processedBacklog, this.totalBacklog);
+    this.onBacklogMessage?.(message);
+
+    this.injectionTimer = this.scheduler.scheduleNextTick(() => this.processTick(), meanInterval);
+  }
+
+  /** Mark backlog injection as complete */
+  private finishBacklogInjection(): void {
+    this.isActive = false;
+    this.isInjecting = false;
+    this.backlogQueue = [];
+    this.backlogQueueOffset = 0;
+    this.backlogSeenIds.clear();
+    this.observability?.updateBacklogProgress(1);
+    this.indicator.hide();
+    log.debug('Backlog injection complete');
+  }
+
+  /** Effective length of the backlog queue (excluding consumed offset entries). */
+  private get backlogQueueLength(): number {
+    return this.backlogQueue.length - this.backlogQueueOffset;
   }
 }
