@@ -9,6 +9,12 @@ type ConsoleErrorArgs = Parameters<Console['error']>;
 
 const DEFAULT_LOG_LEVEL: LogLevel = 'warn';
 
+/**
+ * Module-level mutable state — the global log level threshold that affects
+ * all createLogger() instances. This is an intentional singleton pattern,
+ * analogous to configuring a logging framework at the application level.
+ * Use resetLogLevel() for test isolation.
+ */
 let currentLogLevel: LogLevel = DEFAULT_LOG_LEVEL;
 
 const LOG_LEVEL_RANK = {

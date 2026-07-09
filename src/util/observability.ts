@@ -23,7 +23,12 @@ import { createLogger } from '@util/logging';
 
 const log = createLogger('Observability');
 
-/** Debug overlay inline style tokens. */
+/**
+ * Debug overlay inline style tokens.
+ * Defined as a `const` object for referential transparency — the styles
+ * are immutable tokens referenced by createDebugOverlay(). Changing them
+ * here propagates to all debug overlay instances.
+ */
 const DEBUG_OVERLAY_STYLES = {
   color: '#0f0',
   font: '12px/1.4 monospace',

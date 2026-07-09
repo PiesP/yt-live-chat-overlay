@@ -27,11 +27,14 @@ export class PerAuthorRateLimiter {
   private windowMs: number = DEFAULT_WINDOW_MS;
   private maxPerWindow: number = DEFAULT_MAX_PER_WINDOW;
   private enabled: boolean = true;
-  private lastPruneTime: number = Date.now();
+  private lastPruneTime: number;
   private readonly getBurstLevel: () => BurstLevel;
+  private readonly now: () => number;
 
-  constructor(getBurstLevel: () => BurstLevel) {
+  constructor(getBurstLevel: () => BurstLevel, now?: () => number) {
     this.getBurstLevel = getBurstLevel;
+    this.now = now ?? (() => Date.now());
+    this.lastPruneTime = this.now();
   }
 
   allow(authorId: string, priority: number, authorType?: AuthorType): boolean {
@@ -45,7 +48,7 @@ export class PerAuthorRateLimiter {
     const limit = this.getEffectiveLimit();
     if (limit === null) return true;
 
-    const now = Date.now();
+    const now = this.now();
     const cutoff = now - this.windowMs;
     let timestamps = this.authorTimestamps.get(authorId);
 

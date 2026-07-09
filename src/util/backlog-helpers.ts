@@ -30,7 +30,12 @@ export function prioritySortOrder(kind: ChatMessage['kind']): number {
 /**
  * Sample from an exponential distribution with the given mean.
  * Uses the inverse-CDF method: -mean * ln(1 - U) where U ~ Uniform(0, 1).
+ *
+ * @param mean The mean (rate parameter inverse) of the distribution.
+ * @param random Optional random function returning [0, 1) (default Math.random).
+ *   Accepting this as a parameter makes the function deterministic when a
+ *   seeded PRNG is provided.
  */
-export function sampleExponential(mean: number): number {
-  return -mean * Math.log(Math.max(Number.EPSILON, 1 - Math.random()));
+export function sampleExponential(mean: number, random: () => number = Math.random): number {
+  return -mean * Math.log(Math.max(Number.EPSILON, 1 - random()));
 }

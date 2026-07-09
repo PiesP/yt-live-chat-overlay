@@ -28,6 +28,10 @@ import { getUILanguage as getPlatformUILanguage } from '@platform/language-adapt
 type SupportedLanguage = TranslationLanguage;
 
 // ── Module-level active language ─────────────────────────────────────────
+// Module-level mutable state is intentional here — the active language is
+// a singleton that affects all t() calls. This is not a pure function, but
+// the pattern is appropriate for a global i18n context.
+// Use resetActiveLanguage() for test isolation.
 
 let activeLanguage: SupportedLanguage = 'en';
 
@@ -94,8 +98,13 @@ function matchLanguages(languages: string[]): SupportedLanguage {
  * 3. `navigator.language` — single fallback (legacy / userscript).
  *
  * @param getUILang Optional override for platform UI language detection (for testing).
+ * @param languages Optional override for navigator.languages (for deterministic
+ *   detection — avoids direct global access which breaks referential transparency).
  */
-export function detectBrowserLanguage(getUILang?: () => string | undefined): SupportedLanguage {
+export function detectBrowserLanguage(
+  getUILang?: () => string | undefined,
+  languages?: readonly string[]
+): SupportedLanguage {
   try {
     // 1. Platform-provided UI language (extension context only)
     const uiLanguage = (getUILang ?? getPlatformUILanguage)();
@@ -104,13 +113,20 @@ export function detectBrowserLanguage(getUILang?: () => string | undefined): Sup
     }
 
     // 2. Navigator languages array (user preference order)
-    if (typeof navigator !== 'undefined' && navigator.languages && navigator.languages.length > 0) {
-      return matchLanguages([...navigator.languages]);
+    const navLanguages =
+      languages ??
+      (typeof navigator !== 'undefined'
+        ? (navigator.languages as readonly string[] | undefined)
+        : undefined);
+    if (navLanguages && navLanguages.length > 0) {
+      return matchLanguages([...navLanguages]);
     }
 
     // 3. Single-language fallback
-    if (typeof navigator !== 'undefined' && navigator.language) {
-      return matchLanguages([navigator.language]);
+    const navLanguage =
+      languages?.[0] ?? (typeof navigator !== 'undefined' ? navigator.language : undefined);
+    if (navLanguage) {
+      return matchLanguages([navLanguage]);
     }
 
     return 'en';
