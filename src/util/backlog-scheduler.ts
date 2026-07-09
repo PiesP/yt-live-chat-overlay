@@ -12,6 +12,7 @@
  * Extracted from backlog-controller.ts for single-responsibility separation.
  */
 
+import { DENSITY_LARGE_THRESHOLD, DENSITY_SMALL_THRESHOLD } from '@util/backlog-constants';
 import { sampleExponential } from '@util/backlog-helpers';
 
 export interface SchedulerConfig {
@@ -30,8 +31,6 @@ export class BacklogScheduler {
   static readonly UTILIZATION_FACTOR_MIN = 0.1;
   static readonly UTILIZATION_FACTOR_SLOPE = 0.9;
   static readonly REAL_TIME_DECAY_MS = 2000;
-  static readonly DENSITY_SMALL_THRESHOLD = 200;
-  static readonly DENSITY_LARGE_THRESHOLD = 500;
 
   private config: SchedulerConfig;
   private lanes: number;
@@ -50,13 +49,13 @@ export class BacklogScheduler {
    */
   computeDensityRampMs(backlogSize: number): number {
     const { backlogDensityRampMs, backlogDensityRampMaxMs } = this.config;
-    if (backlogSize >= BacklogScheduler.DENSITY_LARGE_THRESHOLD) {
+    if (backlogSize >= DENSITY_LARGE_THRESHOLD) {
       return backlogDensityRampMaxMs;
     }
-    if (backlogSize >= BacklogScheduler.DENSITY_SMALL_THRESHOLD) {
+    if (backlogSize >= DENSITY_SMALL_THRESHOLD) {
       const t =
-        (backlogSize - BacklogScheduler.DENSITY_SMALL_THRESHOLD) /
-        (BacklogScheduler.DENSITY_LARGE_THRESHOLD - BacklogScheduler.DENSITY_SMALL_THRESHOLD);
+        (backlogSize - DENSITY_SMALL_THRESHOLD) /
+        (DENSITY_LARGE_THRESHOLD - DENSITY_SMALL_THRESHOLD);
       return Math.round(
         backlogDensityRampMs + t * (backlogDensityRampMaxMs - backlogDensityRampMs)
       );

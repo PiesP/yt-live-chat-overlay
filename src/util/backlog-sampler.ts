@@ -15,11 +15,10 @@
  */
 
 import type { BacklogMode, ChatMessage } from '@app-types';
+import { DENSITY_LARGE_THRESHOLD, DENSITY_SMALL_THRESHOLD } from '@util/backlog-constants';
 import { isPriorityMessage, prioritySortOrder } from '@util/backlog-helpers';
 
 export class BacklogSampler {
-  static readonly DENSITY_SMALL_THRESHOLD = 200;
-  static readonly DENSITY_LARGE_THRESHOLD = 500;
   static readonly SAMPLE_RATIO_SMALL = 0.6;
   static readonly SAMPLE_RATIO_LARGE = 0.35;
 
@@ -69,7 +68,7 @@ export class BacklogSampler {
    */
   sampleMessages(messages: ChatMessage[]): ChatMessage[] {
     const count = messages.length;
-    if (count < BacklogSampler.DENSITY_SMALL_THRESHOLD) return messages;
+    if (count < DENSITY_SMALL_THRESHOLD) return messages;
 
     const isSubstantialText = (m: ChatMessage): boolean => {
       if (isPriorityMessage(m)) return false;
@@ -92,7 +91,7 @@ export class BacklogSampler {
     }
 
     const normalBudget =
-      count < BacklogSampler.DENSITY_LARGE_THRESHOLD
+      count < DENSITY_LARGE_THRESHOLD
         ? Math.floor(count * BacklogSampler.SAMPLE_RATIO_SMALL)
         : Math.floor(count * BacklogSampler.SAMPLE_RATIO_LARGE);
 

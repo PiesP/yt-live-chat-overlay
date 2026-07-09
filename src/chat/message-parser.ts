@@ -110,6 +110,15 @@ function parseChatEventFromAction(
     return null;
   }
 
+  // Extract timestamp from YouTube API action if available (timestampUsec = microseconds).
+  // YouTube's InnerTube API provides per-action timestamps as timestampUsec
+  // (microseconds since epoch) at the action level, or inside addChatItemAction
+  // (legacy format for replay).  Using this real timestamp instead of Date.now()
+  // enables deterministic parsing and preserves the server-assigned message ordering.
+  const actionTimestampUsec = getNumber(action.timestampUsec);
+  const timestampOverride =
+    actionTimestampUsec !== undefined ? Math.round(actionTimestampUsec / 1000) : undefined;
+
   const item = extractActionItem(action);
   if (!item) {
     return null;
@@ -123,7 +132,8 @@ function parseChatEventFromAction(
   const message = parseRendererMessage(
     supportedRenderer.renderer,
     supportedRenderer.kind,
-    settings
+    settings,
+    timestampOverride
   );
   if (!message) {
     return null;
@@ -138,7 +148,8 @@ function parseChatEventFromAction(
 function parseRendererMessage(
   renderer: JsonObject,
   kind: ChatMessage['kind'],
-  settings: Readonly<OverlaySettings>
+  settings: Readonly<OverlaySettings>,
+  timestampOverride?: number
 ): ChatMessage | null {
   // Allow messages without an author name (e.g., system messages, some YouTube API edge cases).
   // Fall back to empty string so the message body is still rendered.
@@ -155,7 +166,7 @@ function parseRendererMessage(
     text: parsedBody.text,
     content: parsedBody.content,
     kind,
-    timestamp: Date.now(),
+    timestamp: timestampOverride ?? Date.now(),
     author,
     authorType,
   };

@@ -54,6 +54,7 @@ import {
   HORIZONTAL_STAGGER_MAX,
   HORIZONTAL_STAGGER_PER_STEP,
   hashStringForTier,
+  IDLE_GRACE_PERIOD_MS,
   OPACITY_BUCKET_COUNT,
   SPEED_TIER,
   STAGGER_BATCH_MAX,
@@ -101,6 +102,11 @@ const CANVAS_CSS =
 
 /** Alpha for the connected status dot — subtle when connected. */
 const DISCONNECTED_DOT_ALPHA = 0.15;
+
+/** Shared fallback message ID counter for deterministic message ID generation
+ *  when the YouTube API does not provide an id (avoids Math.random() which
+ *  makes rendering non-deterministic). */
+let fallbackMessageIdCounter = 0;
 
 export class CanvasRenderer extends RendererBase {
   private canvas: HTMLCanvasElement | null = null;
@@ -252,8 +258,6 @@ export class CanvasRenderer extends RendererBase {
     }
     return t;
   })();
-
-  private static readonly IDLE_GRACE_PERIOD_MS = 500;
 
   /**
    * H2: Tracks whether the status bar has been rendered at least once
@@ -494,7 +498,7 @@ export class CanvasRenderer extends RendererBase {
     if (this.workerManager.isActive) {
       const translatableText = getTranslatableText(message);
       if (this.translationService.isEnabled && translatableText) {
-        const msgId = message.id ?? `${message.timestamp}-${Math.random()}`;
+        const msgId = message.id ?? `${message.timestamp}-${++fallbackMessageIdCounter}`;
         this.translationService
           .translate(translatableText)
           .then((translated) => {
@@ -674,7 +678,7 @@ export class CanvasRenderer extends RendererBase {
           const now = performance.now();
           if (this.idleSince === null) {
             this.idleSince = now;
-          } else if (now - this.idleSince >= CanvasRenderer.IDLE_GRACE_PERIOD_MS) {
+          } else if (now - this.idleSince >= IDLE_GRACE_PERIOD_MS) {
             this.animFrameId = null;
             this.idleSince = null;
             return;

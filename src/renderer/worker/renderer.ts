@@ -56,6 +56,7 @@ import {
   HORIZONTAL_STAGGER_MAX,
   HORIZONTAL_STAGGER_PER_STEP,
   hashStringForTier as hashForTier,
+  IDLE_GRACE_PERIOD_MS,
   OPACITY_BUCKET_COUNT as OPACITY_BUCKETS,
   SIN_LUT_SCALE,
   SIN_TABLE,
@@ -452,7 +453,7 @@ export class WorkerRenderer {
   private nearOpacityBuckets: ActiveMessage[][] = Array.from({ length: OPACITY_BUCKETS }, () => []);
   private statsFrameCounter = 0;
   private idleSince: number | null = null;
-  private static readonly IDLE_GRACE_PERIOD_MS = 500;
+
   /** CSS-pixel dimensions (not DPR-multiplied). Set by init/resize handlers. */
   private logicalWidth = 0;
   private logicalHeight = 0;
@@ -716,7 +717,7 @@ export class WorkerRenderer {
         const now = performance.now();
         if (this.idleSince === null) {
           this.idleSince = now;
-        } else if (now - this.idleSince >= WorkerRenderer.IDLE_GRACE_PERIOD_MS) {
+        } else if (now - this.idleSince >= IDLE_GRACE_PERIOD_MS) {
           this.animFrameId = null;
           this.idleSince = null;
           return;
