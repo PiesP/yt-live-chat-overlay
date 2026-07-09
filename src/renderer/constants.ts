@@ -18,7 +18,7 @@ import type { ChatMessage } from '@app-types';
 // ── Card rendering ──────────────────────────────────────────────────────
 
 /** Factor applied to card background opacity for visual blending. */
-export const CARD_BG_OPACITY_FACTOR = 0.85;
+const CARD_BG_OPACITY_FACTOR = 0.85;
 
 /** Max cached linear-gradient entries (SuperChat/Membership card backgrounds).
  *  Used by both main thread (LruMap) and worker (Map with manual eviction)
@@ -48,7 +48,7 @@ export const EPSILON = 0.05;
  *  1.0 = full-cell (normal), 0.75 = 3/4-cell (high burst), 0.5 = half-cell (extreme burst).
  *  When < 1.0, effectiveLaneHeight = laneHeight * factor doubles lane resolution
  *  for finer vertical placement opportunities. */
-export const LANE_DENSITY_NORMAL = 1.0;
+const LANE_DENSITY_NORMAL = 1.0;
 
 /** Free ratio for anti-block gate: utilization above (1 - this) triggers
  *  probabilistic blocking of new message placements. */

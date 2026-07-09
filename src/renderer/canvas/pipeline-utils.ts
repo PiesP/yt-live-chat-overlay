@@ -28,7 +28,7 @@ export const COMPACTION_THRESHOLD_RATIO = 0.5;
 let prngSeed = (Date.now() ^ (Math.random() * 0xffffffff)) >>> 0;
 
 /** Reset PRNG seed for test isolation. */
-export function resetPrngSeed(): void {
+function resetPrngSeed(): void {
   prngSeed = (Date.now() ^ (Math.random() * 0xffffffff)) >>> 0;
 }
 
@@ -44,7 +44,7 @@ export function fastRandom(): number {
  * Returns the new logical length and whether any messages were removed.
  */
 /** Accumulate paused duration across all active messages. */
-export function applyPausedDurationToMessages(messages: CanvasMessage[], pausedMs: number): void {
+function applyPausedDurationToMessages(messages: CanvasMessage[], pausedMs: number): void {
   for (const msg of messages) {
     msg.pausedDuration += pausedMs;
   }

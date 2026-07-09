@@ -21,7 +21,7 @@ import {
 
 const HEADWAY_GAP_MIN_PX = 16;
 
-export const HEADWAY_GAP_MAX_PX = 60;
+const HEADWAY_GAP_MAX_PX = 60;
 
 // ── Pure computation functions ─────────────────────────────────────────────
 
@@ -43,7 +43,7 @@ export function computeBaseHeadwayPx(msgWidth: number, headwayGapRatio: number):
 }
 
 /** Speed tiers within 1 level of each other can share lanes. */
-export function areSpeedTiersCompatible(a: number, b: number): boolean {
+function areSpeedTiersCompatible(a: number, b: number): boolean {
   return Math.abs(a - b) <= 1;
 }
 
@@ -157,7 +157,7 @@ export function heapSiftDown(
  * Sift a heap element upward to restore the min-heap invariant (4-ary heap).
  * Mutates `heap` and `indexMap` in place.
  */
-export function heapSiftUp(
+function heapSiftUp(
   heap: HeapEntry[],
   indexMap: Map<number, number>,
   startIdx: number
@@ -181,7 +181,7 @@ export function heapSiftUp(
  * Get the available-at time for a lane by its index.
  * Returns undefined if the lane is not in the heap.
  */
-export function heapGetSlotAvailableAt(
+function heapGetSlotAvailableAt(
   heap: HeapEntry[],
   indexMap: Map<number, number>,
   laneIndex: number,
@@ -246,7 +246,7 @@ export function buildLaneHeap(
  * Prune expired speed-tier entries and clear collision set.
  * Call at the start of each batch.
  */
-export function resetBatchShared(state: LaneAllocationState): void {
+function resetBatchShared(state: LaneAllocationState): void {
   const now = performance.now();
   for (const [k, v] of state.speedTierLanes) {
     if (v.until <= now) state.speedTierLanes.delete(k);
@@ -258,7 +258,7 @@ export function resetBatchShared(state: LaneAllocationState): void {
  * Commit a placement: update speed-tier tracking and heap occupancy.
  * For multi-slot messages, all occupied lanes are updated.
  */
-export function commitPlacementShared(
+function commitPlacementShared(
   state: LaneAllocationState,
   laneIndex: number,
   slotCount: number,
@@ -281,7 +281,7 @@ export function commitPlacementShared(
 /**
  * Shift all lane timers and speed-tier tracking by a fixed offset (pause/resume).
  */
-export function shiftLaneTimersShared(state: LaneAllocationState, ms: number): void {
+function shiftLaneTimersShared(state: LaneAllocationState, ms: number): void {
   for (let i = 0; i < state.heap.length; i++) {
     const entry = state.heap[i];
     if (entry) entry[1] += ms;
@@ -439,7 +439,7 @@ export function findPlacementShared(
  * Allocate a single lane with three-phase speed-tier scanning.
  * Pure function operating on LaneAllocationState — no `this`.
  */
-export function allocateSingleLaneShared(
+function allocateSingleLaneShared(
   state: LaneAllocationState,
   now: number,
   laneStart: number,

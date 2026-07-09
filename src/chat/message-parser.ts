@@ -211,7 +211,7 @@ function extractRendererBody(
   return parsedBody;
 }
 
-export function isSubstantialMessage(
+function isSubstantialMessage(
   body: ParsedMessageBody,
   authorType: AuthorType,
   settings: Readonly<OverlaySettings>
@@ -270,7 +270,7 @@ function parseSuperChatInfo(renderer: JsonObject): SuperChatInfo | null {
 // Pure helper functions (module-level, no settings dependency)
 // ---------------------------------------------------------------------------
 
-export function extractActionItem(action: JsonObject): JsonObject | null {
+function extractActionItem(action: JsonObject): JsonObject | null {
   if (!isRecord(action)) return null;
 
   const addChatItemAction = asRecord(action.addChatItemAction);
@@ -292,7 +292,7 @@ export function extractActionItem(action: JsonObject): JsonObject | null {
   return null;
 }
 
-export function extractSupportedRenderer(item: JsonObject): SupportedRenderer | null {
+function extractSupportedRenderer(item: JsonObject): SupportedRenderer | null {
   const textRenderer = asRecord(item.liveChatTextMessageRenderer);
   if (textRenderer) {
     return { kind: 'text', renderer: textRenderer };
@@ -438,13 +438,13 @@ function appendTextSegment(segments: ContentSegment[], content: string): void {
   segments.push({ type: 'text', content });
 }
 
-export function countCodePoints(s: string): number {
+function countCodePoints(s: string): number {
   let count = 0;
   for (const _ of s) count++;
   return count;
 }
 
-export function getVisibleContentLength(segments: readonly ContentSegment[]): number {
+function getVisibleContentLength(segments: readonly ContentSegment[]): number {
   let visibleLength = 0;
 
   for (const segment of segments) {
@@ -461,7 +461,7 @@ export function getVisibleContentLength(segments: readonly ContentSegment[]): nu
 }
 
 // ── Author type extraction ───────────────────────────────────────────────────
-export function extractAuthorType(value: unknown): AuthorType {
+function extractAuthorType(value: unknown): AuthorType {
   let resolvedType: AuthorType = 'normal';
 
   if (!Array.isArray(value)) {
@@ -478,7 +478,7 @@ export function extractAuthorType(value: unknown): AuthorType {
   return resolvedType;
 }
 
-export function classifyAuthorBadge(value: unknown): AuthorType {
+function classifyAuthorBadge(value: unknown): AuthorType {
   const badgeEntry = asRecord(value);
   if (!badgeEntry) {
     return 'normal';

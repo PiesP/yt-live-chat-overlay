@@ -26,7 +26,7 @@ export interface WorkerManagerLike {
  * Send an array of messages to the worker as an 'addMessages' command.
  * Shared by both Canvas2D and WebGL2 managers.
  */
-export function sendMessagesToWorker(manager: WorkerManagerLike, messages: ChatMessage[]): void {
+function sendMessagesToWorker(manager: WorkerManagerLike, messages: ChatMessage[]): void {
   manager.worker?.postMessage({ type: 'addMessages', messages });
 }
 
@@ -44,7 +44,7 @@ export function sendUpdateConfigToWorker(
 /**
  * Send a resize command to the worker.
  */
-export function sendResizeToWorker(
+function sendResizeToWorker(
   manager: WorkerManagerLike,
   width: number,
   height: number
@@ -66,7 +66,7 @@ export function sendSetPausedToWorker(
 /**
  * Send emoji images (with ImageBitmap transfer) to the worker.
  */
-export function sendEmojiImagesToWorker(
+function sendEmojiImagesToWorker(
   manager: WorkerManagerLike,
   images: Array<{ url: string; bitmap: ImageBitmap }>
 ): void {
@@ -77,7 +77,7 @@ export function sendEmojiImagesToWorker(
 /**
  * Send author photos (with ImageBitmap transfer) to the worker.
  */
-export function sendAuthorPhotosToWorker(
+function sendAuthorPhotosToWorker(
   manager: WorkerManagerLike,
   photos: Array<{ url: string; bitmap: ImageBitmap }>
 ): void {

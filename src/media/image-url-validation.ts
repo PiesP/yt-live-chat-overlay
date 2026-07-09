@@ -9,7 +9,7 @@
  */
 
 /** Hostname suffixes considered valid YouTube CDN origins. */
-export const ALLOWED_IMAGE_HOST_SUFFIXES = [
+const ALLOWED_IMAGE_HOST_SUFFIXES = [
   'ggpht.com',
   'googleusercontent.com',
   'gstatic.com',
@@ -17,10 +17,10 @@ export const ALLOWED_IMAGE_HOST_SUFFIXES = [
 ] as const;
 
 /** Exact origins allowed for image fetch (more restrictive). */
-export const ALLOWED_IMAGE_ORIGINS = ['https://yt3.ggpht.com', 'https://yt4.ggpht.com'] as const;
+const ALLOWED_IMAGE_ORIGINS = ['https://yt3.ggpht.com', 'https://yt4.ggpht.com'] as const;
 
 /** Check whether a hostname ends with one of the allowed suffixes. */
-export function isAllowedImageHostname(hostname: string): boolean {
+function isAllowedImageHostname(hostname: string): boolean {
   const normalized = hostname.toLowerCase();
   return ALLOWED_IMAGE_HOST_SUFFIXES.some(
     (suffix) => normalized === suffix || normalized.endsWith(`.${suffix}`)

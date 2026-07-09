@@ -45,7 +45,7 @@ export function setOverlayLogLevel(level: LogLevel): void {
 }
 
 /** Reset log level to default for test isolation. */
-export function resetLogLevel(): void {
+function resetLogLevel(): void {
   currentLogLevel = DEFAULT_LOG_LEVEL;
 }
 

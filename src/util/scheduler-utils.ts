@@ -43,7 +43,7 @@ const hasPostTask: boolean =
  * the ~4ms minimum setTimeout delay), otherwise falls back to
  * new Promise(resolve => setTimeout(resolve, 0)).
  */
-export async function schedulerYield(): Promise<void> {
+async function schedulerYield(): Promise<void> {
   if (hasSchedulerYield) {
     await (globalThis.scheduler as unknown as { yield(): Promise<void> }).yield();
   } else {

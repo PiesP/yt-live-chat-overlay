@@ -61,7 +61,7 @@ export interface SharedContentSegment {
  * This is a structural transformation — the nested `emoji` object is flattened
  * into top-level `emojiUrl`/`emojiAlt` fields for cross-thread compatibility.
  */
-export function toSharedContentSegment(seg: {
+function toSharedContentSegment(seg: {
   type: string;
   content?: string;
   emoji?: { url: string; alt: string; fallbackText?: string };
@@ -151,7 +151,7 @@ function getGraphemeSegmenter(): Intl.Segmenter | undefined {
 }
 
 /** Reset grapheme segmenter for test isolation. */
-export function resetGraphemeSegmenter(): void {
+function resetGraphemeSegmenter(): void {
   _graphemeSegmenter = undefined;
 }
 
@@ -353,7 +353,7 @@ export function buildWrappedLines(
  * Uses individual outlineWidthPx and outlineOpacity parameters (not a settings
  * object) so the same function works in both main-thread and worker contexts.
  */
-export function strokeTextOutline(
+function strokeTextOutline(
   ctx: AnyCanvasContext,
   text: string,
   x: number,
@@ -627,7 +627,7 @@ export function renderSegment(
  * Extracted from renderSegment so warmTextBitmapCache can compute the same
  * key without duplicating the formula.
  */
-export function computeTextBitmapKey(
+function computeTextBitmapKey(
   text: string,
   fontSize: number,
   fontWeight: string,
@@ -830,7 +830,7 @@ let _photoShadowCache = new WeakMap<object, OffscreenCanvas>();
 
 /** Clear the photo shadow cache. Use this to release accumulated
  *  pre-composited OffscreenCanvas allocations during very long sessions. */
-export function clearPhotoShadowCache(): void {
+function clearPhotoShadowCache(): void {
   _photoShadowCache = new WeakMap<object, OffscreenCanvas>();
 }
 
@@ -842,7 +842,7 @@ const AUTHOR_PHOTO_CANVAS_SIZE = rendererLayout.authorPhotoSize + AUTHOR_PHOTO_S
 
 /** Draw an author photo with drop-shadow — first frame renders to offscreen
  *  canvas and caches; subsequent frames draw from cache (no shadowBlur). */
-export function drawAuthorPhoto(
+function drawAuthorPhoto(
   ctx: AnyCanvasContext,
   photo: CanvasImageSource,
   x: number,

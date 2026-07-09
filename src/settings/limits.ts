@@ -88,9 +88,9 @@ const SETTINGS_LIMITS = {
 } as const;
 
 /** Derived automatically from SETTINGS_LIMITS — single source of truth for limit keys. */
-export type SettingsLimitKey = keyof typeof SETTINGS_LIMITS;
+type SettingsLimitKey = keyof typeof SETTINGS_LIMITS;
 
-export { SETTINGS_LIMITS };
+export type { OutlineSettingKey, RootNumericSettingKey };
 
 export const OUTLINE_NUMERIC_KEYS = ['widthPx', 'opacity'] as const satisfies ReadonlyArray<
   Exclude<OutlineSettingKey, 'enabled'>
