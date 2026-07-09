@@ -32,6 +32,13 @@ import type { ChatMessage, DropReason, OverlayDimensions, OverlaySettings } from
 import { getTranslatableText } from '@chat/message-helpers';
 import { t } from '@i18n/index';
 import { ImageFetchManager } from '@media/image-fetch-manager';
+import {
+  applyDevicePixelRatio,
+  disconnectObserver,
+  setupOffscreenObserver,
+  startOffscreenPoll,
+  updateCanvasDpr,
+} from '@renderer/canvas/canvas-setup';
 import { renderPaidCard } from '@renderer/canvas/card-renderers';
 import { COMPACTION_THRESHOLD_RATIO, fastRandom } from '@renderer/canvas/pipeline-utils';
 import {
@@ -632,11 +639,7 @@ export class CanvasRenderer extends RendererBase {
     const canvas = this.canvas;
     const ctx = this.ctx;
     if (!canvas || !ctx || !dims) return;
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = dims.width * dpr;
-    canvas.height = dims.height * dpr;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    this.lastDpr = dpr;
+    this.lastDpr = applyDevicePixelRatio(canvas, ctx, dims);
   }
 
   private startRenderLoop(): void {
@@ -706,27 +709,24 @@ export class CanvasRenderer extends RendererBase {
    */
   private setupOffscreenObserver(canvas: HTMLCanvasElement): void {
     this.offscreenObserver?.disconnect();
-    this.offscreenObserver = new IntersectionObserver(
-      (entries) => {
-        const entry = entries[0];
-        if (!entry) return;
-        if (!entry.isIntersecting) {
-          // Canvas is offscreen — pause and start recovery poll
-          if (!this.isPaused) {
-            this.pause();
-          }
-          this.startOffscreenPoll(canvas);
-        } else {
-          // Canvas is back on screen — stop poll, resume if paused
-          this.stopOffscreenPoll();
-          if (this.isPaused) {
-            this.resume();
-          }
+    this.stopOffscreenPoll();
+    this.offscreenObserver = setupOffscreenObserver(
+      canvas,
+      () => {
+        // Canvas is offscreen — pause and start recovery poll
+        if (!this.isPaused) {
+          this.pause();
         }
+        this.startOffscreenPoll(canvas);
       },
-      { threshold: 0 }
+      () => {
+        // Canvas is back on screen — stop poll, resume if paused
+        this.stopOffscreenPoll();
+        if (this.isPaused) {
+          this.resume();
+        }
+      }
     );
-    this.offscreenObserver.observe(canvas);
   }
 
   /**
@@ -737,34 +737,18 @@ export class CanvasRenderer extends RendererBase {
    */
   private startOffscreenPoll(canvas: HTMLCanvasElement): void {
     if (this.offscreenPollInterval !== null) return;
-    this.offscreenPollInterval = setInterval(() => {
-      // Check multiple visibility signals to handle edge cases
-      const rect = canvas.getBoundingClientRect();
-      const viewportW = window.innerWidth;
-      const viewportH = window.innerHeight;
-      const isRectVisible =
-        rect.width > 0 &&
-        rect.height > 0 &&
-        rect.left < viewportW &&
-        rect.top < viewportH &&
-        rect.right > 0 &&
-        rect.bottom > 0;
-      const docVisible = document.visibilityState === 'visible';
-
-      // Canvas is considered visible when the rect intersects the viewport
-      // AND the document is visible (tab not hidden).
-      if (isRectVisible && docVisible) {
-        this.stopOffscreenPoll();
-        if (this.isPaused) {
-          this.resume();
-        }
+    this.offscreenPollInterval = startOffscreenPoll(canvas, () => {
+      if (this.isPaused) {
+        this.resume();
       }
-    }, 1000);
+    }) as unknown as ReturnType<typeof setInterval>;
   }
 
   private stopOffscreenPoll(): void {
     if (this.offscreenPollInterval !== null) {
-      clearInterval(this.offscreenPollInterval);
+      // The poll function returns a cleanup callback — calling it via
+      // the stored interval mechanism. We cast back to invoke cleanup.
+      (this.offscreenPollInterval as unknown as () => void)();
       this.offscreenPollInterval = null;
     }
   }
@@ -882,12 +866,7 @@ export class CanvasRenderer extends RendererBase {
     ctx: CanvasRenderingContext2D,
     dims: OverlayDimensions
   ): void {
-    const dpr = window.devicePixelRatio || 1;
-    if (dpr === this.lastDpr) return;
-    this.lastDpr = dpr;
-    canvas.width = dims.width * dpr;
-    canvas.height = dims.height * dpr;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.lastDpr = updateCanvasDpr(canvas, ctx, dims, this.lastDpr);
   }
 
   /**
@@ -2170,7 +2149,7 @@ export class CanvasRenderer extends RendererBase {
     this.channelMemory = null;
     // M7: Clean up offscreen observer and recovery poll
     this.stopOffscreenPoll();
-    this.offscreenObserver?.disconnect();
+    disconnectObserver(this.offscreenObserver);
     this.offscreenObserver = null;
     clearTextMeasurementCaches();
   }
@@ -2291,13 +2270,9 @@ export class CanvasRenderer extends RendererBase {
     }
     this.ctx = ctx;
     // Restore DPR transform that was lost with the context
-    const dpr = window.devicePixelRatio || 1;
     const dims = this.overlay?.getDimensions();
-    if (dims) {
-      this.lastDpr = dpr;
-      this.canvas.width = dims.width * dpr;
-      this.canvas.height = dims.height * dpr;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (dims && this.canvas) {
+      this.lastDpr = applyDevicePixelRatio(this.canvas, ctx, dims);
     }
     log.info('Canvas context restored — renderer resuming');
     // Restart the render loop if it was stopped
