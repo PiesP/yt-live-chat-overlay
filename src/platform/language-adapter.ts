@@ -16,7 +16,7 @@ import type { LanguageAdapter } from '@platform/types';
  * Uses chrome.i18n.getUILanguage() to determine the browser UI language.
  * Available only in Chrome extension contexts.
  */
-export class ChromeLanguageAdapter implements LanguageAdapter {
+class ChromeLanguageAdapter implements LanguageAdapter {
   getUILanguage(): string | undefined {
     try {
       if (typeof chrome !== 'undefined' && chrome.i18n?.getUILanguage) {
@@ -29,17 +29,8 @@ export class ChromeLanguageAdapter implements LanguageAdapter {
   }
 }
 
-// ── DefaultLanguageAdapter ─────────────────────────────────────────────────
-
-/**
- * Fallback adapter for environments without chrome.i18n.
- * Returns undefined so the caller can fall back to navigator.language.
- */
-export class DefaultLanguageAdapter implements LanguageAdapter {
-  getUILanguage(): string | undefined {
-    return undefined;
-  }
-}
+/** Inline fallback adapter that always returns undefined. */
+const DEFAULT_ADAPTER: LanguageAdapter = { getUILanguage: () => undefined };
 
 // ── Factory ────────────────────────────────────────────────────────────────
 
@@ -57,7 +48,7 @@ export function getLanguageAdapter(): LanguageAdapter {
     return cachedAdapter;
   }
 
-  cachedAdapter = new DefaultLanguageAdapter();
+  cachedAdapter = DEFAULT_ADAPTER;
   return cachedAdapter;
 }
 

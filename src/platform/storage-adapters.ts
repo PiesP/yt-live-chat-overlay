@@ -15,7 +15,7 @@ const log = createLogger('StorageAdapter');
 
 // ── LocalStorageAdapter ────────────────────────────────────────────────────
 
-export class LocalStorageAdapter implements StorageAdapter {
+class LocalStorageAdapter implements StorageAdapter {
   async getItem(key: string): Promise<string | null> {
     try {
       return localStorage.getItem(key);
@@ -53,7 +53,7 @@ export class LocalStorageAdapter implements StorageAdapter {
 
 // ── GmStorageAdapter ──────────────────────────────────────────────────────
 
-export class GmStorageAdapter implements StorageAdapter {
+class GmStorageAdapter implements StorageAdapter {
   async getItem(key: string): Promise<string | null> {
     try {
       if (typeof GM_getValue === 'undefined') return null;
@@ -83,7 +83,7 @@ export class GmStorageAdapter implements StorageAdapter {
 
 // ── ChromeStorageAdapter ───────────────────────────────────────────────────
 
-export class ChromeStorageAdapter implements StorageAdapter {
+class ChromeStorageAdapter implements StorageAdapter {
   /**
    * Whether chrome.storage.local is available.
    *

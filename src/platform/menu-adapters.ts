@@ -15,7 +15,7 @@ import type { MenuAdapter, MenuCommand } from '@platform/types';
 
 // ── GmMenuAdapter ──────────────────────────────────────────────────────────
 
-export class GmMenuAdapter implements MenuAdapter {
+class GmMenuAdapter implements MenuAdapter {
   isSupported(): boolean {
     return typeof GM_registerMenuCommand !== 'undefined';
   }
@@ -31,7 +31,7 @@ export class GmMenuAdapter implements MenuAdapter {
 // ── NoopMenuAdapter ────────────────────────────────────────────────────────
 
 /** No-op adapter for environments without menu support. */
-export class NoopMenuAdapter implements MenuAdapter {
+class NoopMenuAdapter implements MenuAdapter {
   isSupported(): boolean {
     return false;
   }

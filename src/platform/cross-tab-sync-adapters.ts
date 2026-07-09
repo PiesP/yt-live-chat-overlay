@@ -14,7 +14,7 @@ import type { CrossTabSyncAdapter } from '@platform/types';
 
 // ── ChromeCrossTabSyncAdapter ──────────────────────────────────────────────
 
-export class ChromeCrossTabSyncAdapter implements CrossTabSyncAdapter {
+class ChromeCrossTabSyncAdapter implements CrossTabSyncAdapter {
   private readonly storageKey: string;
   private currentCallback: ((key: string, newValue: unknown) => void) | null = null;
   private readonly boundListener: (changes: Record<string, unknown>, areaName: string) => void;
@@ -58,7 +58,7 @@ export class ChromeCrossTabSyncAdapter implements CrossTabSyncAdapter {
 
 // ── GmCrossTabSyncAdapter ──────────────────────────────────────────────────
 
-export class GmCrossTabSyncAdapter implements CrossTabSyncAdapter {
+class GmCrossTabSyncAdapter implements CrossTabSyncAdapter {
   private readonly storageKey: string;
   private listenerId: number | null = null;
   private currentCallback: ((key: string, newValue: unknown) => void) | null = null;
@@ -94,7 +94,7 @@ export class GmCrossTabSyncAdapter implements CrossTabSyncAdapter {
 
 // ── LocalStorageCrossTabSyncAdapter ────────────────────────────────────────
 
-export class LocalStorageCrossTabSyncAdapter implements CrossTabSyncAdapter {
+class LocalStorageCrossTabSyncAdapter implements CrossTabSyncAdapter {
   private readonly storageKey: string;
   private currentCallback: ((key: string, newValue: unknown) => void) | null = null;
   private readonly boundHandler: (event: StorageEvent) => void;
