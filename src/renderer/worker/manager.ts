@@ -15,8 +15,7 @@
 import type { Overlay } from '@app/overlay';
 import type { ChatMessage, OverlaySettings } from '@app-types';
 import type { ImageFetchManager } from '@media/image-fetch-manager';
-import type { WorkerFactory } from '@platform/types';
-import { getWorkerFactory } from '@platform/worker-factory';
+import { createWorkerUrl } from '@platform/worker-factory';
 import {
   MEMBERSHIP_CARD_CONFIG,
   SUPERCHAT_CARD_CONFIG,
@@ -185,7 +184,7 @@ export class RenderWorkerManager {
     canvas: HTMLCanvasElement,
     settings: OverlaySettings,
     overlay: Overlay,
-    workerFactory?: WorkerFactory
+    overrideWorkerUrl?: string | URL
   ): boolean {
     try {
       if (typeof OffscreenCanvas === 'undefined') {
@@ -206,8 +205,7 @@ export class RenderWorkerManager {
       const config = RenderWorkerManager.buildWorkerConfig(settings);
 
       // Resolve worker URL via platform-specific factory
-      const factory = workerFactory ?? getWorkerFactory();
-      const workerUrl = factory.createWorkerUrl('./renderer.ts');
+      const workerUrl = overrideWorkerUrl ?? createWorkerUrl('./renderer.ts');
 
       // In MAIN-world content scripts, the page's CSP (not the extension's)
       // governs Worker creation. If YouTube's CSP blocks the worker URL

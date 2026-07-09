@@ -2,122 +2,101 @@
 // Copyright (c) 2026 PiesP
 
 /**
- * Platform cross-tab sync adapter implementations.
- *
- * Each adapter conforms to the CrossTabSyncAdapter interface from @platform/types.
- * The factory function selects the appropriate adapter based on environment.
+ * Platform cross-tab sync adapters — inline implementations.
  *
  * Priority: chrome.storage.onChanged > GM_addValueChangeListener > window 'storage' event.
  */
 
 import type { CrossTabSyncAdapter } from '@platform/types';
 
-// ── ChromeCrossTabSyncAdapter ──────────────────────────────────────────────
+// ── Chrome storage sync ────────────────────────────────────────────────────
 
-class ChromeCrossTabSyncAdapter implements CrossTabSyncAdapter {
-  private readonly storageKey: string;
-  private currentCallback: ((key: string, newValue: unknown) => void) | null = null;
-  private readonly boundListener: (changes: Record<string, unknown>, areaName: string) => void;
+function createChromeSyncAdapter(storageKey: string): CrossTabSyncAdapter {
+  let currentCallback: ((key: string, newValue: unknown) => void) | null = null;
+  const listener = (changes: Record<string, unknown>, areaName: string) => {
+    if (areaName !== 'local') return;
+    const change = changes[storageKey] as { newValue?: unknown } | undefined;
+    if (!change || !currentCallback) return;
+    currentCallback(storageKey, change.newValue);
+  };
 
-  constructor(storageKey: string) {
-    this.storageKey = storageKey;
-    this.boundListener = (changes, areaName) => {
-      if (areaName !== 'local') return;
-      const change = changes[this.storageKey] as { newValue?: unknown } | undefined;
-      if (!change || !this.currentCallback) return;
-      this.currentCallback(this.storageKey, change.newValue);
-    };
-  }
-
-  static isAvailable(): boolean {
-    try {
-      return (
-        typeof chrome !== 'undefined' &&
-        chrome.storage !== undefined &&
-        chrome.storage.onChanged !== undefined
-      );
-    } catch {
-      return false;
-    }
-  }
-
-  addListener(callback: (key: string, newValue: unknown) => void): void {
-    this.currentCallback = callback;
-    const storage = chrome?.storage;
-    storage?.onChanged?.addListener(this.boundListener);
-  }
-
-  removeListener(): void {
-    this.currentCallback = null;
-    if (ChromeCrossTabSyncAdapter.isAvailable()) {
-      const storage = chrome?.storage;
-      storage?.onChanged?.removeListener(this.boundListener);
-    }
-  }
+  return {
+    addListener(callback: (key: string, newValue: unknown) => void): void {
+      currentCallback = callback;
+      chrome?.storage?.onChanged?.addListener(listener);
+    },
+    removeListener(): void {
+      currentCallback = null;
+      chrome?.storage?.onChanged?.removeListener(listener);
+    },
+  };
 }
 
-// ── GmCrossTabSyncAdapter ──────────────────────────────────────────────────
-
-class GmCrossTabSyncAdapter implements CrossTabSyncAdapter {
-  private readonly storageKey: string;
-  private listenerId: number | null = null;
-  private currentCallback: ((key: string, newValue: unknown) => void) | null = null;
-
-  constructor(storageKey: string) {
-    this.storageKey = storageKey;
-  }
-
-  static isAvailable(): boolean {
-    return typeof GM_addValueChangeListener !== 'undefined';
-  }
-
-  addListener(callback: (key: string, newValue: unknown) => void): void {
-    this.currentCallback = callback;
-    this.listenerId = GM_addValueChangeListener(
-      this.storageKey,
-      (_key: string, _oldValue: unknown, newValue: unknown, _remote: boolean) => {
-        if (this.currentCallback) {
-          this.currentCallback(this.storageKey, newValue);
-        }
-      }
+function isChromeSyncAvailable(): boolean {
+  try {
+    return (
+      typeof chrome !== 'undefined' &&
+      chrome.storage !== undefined &&
+      chrome.storage.onChanged !== undefined
     );
-  }
-
-  removeListener(): void {
-    if (this.listenerId !== null && GmCrossTabSyncAdapter.isAvailable()) {
-      GM_removeValueChangeListener(this.listenerId);
-      this.listenerId = null;
-    }
-    this.currentCallback = null;
+  } catch {
+    return false;
   }
 }
 
-// ── LocalStorageCrossTabSyncAdapter ────────────────────────────────────────
+// ── GM value-change sync ──────────────────────────────────────────────────
 
-class LocalStorageCrossTabSyncAdapter implements CrossTabSyncAdapter {
-  private readonly storageKey: string;
-  private currentCallback: ((key: string, newValue: unknown) => void) | null = null;
-  private readonly boundHandler: (event: StorageEvent) => void;
+function createGmSyncAdapter(storageKey: string): CrossTabSyncAdapter {
+  let listenerId: number | null = null;
+  let currentCallback: ((key: string, newValue: unknown) => void) | null = null;
 
-  constructor(storageKey: string) {
-    this.storageKey = storageKey;
-    this.boundHandler = (event: StorageEvent) => {
-      if (event.key !== this.storageKey || event.newValue === null) return;
-      if (this.currentCallback) {
-        this.currentCallback(this.storageKey, event.newValue);
+  return {
+    addListener(callback: (key: string, newValue: unknown) => void): void {
+      currentCallback = callback;
+      listenerId = GM_addValueChangeListener(
+        storageKey,
+        (_key: string, _oldValue: unknown, newValue: unknown, _remote: boolean) => {
+          if (currentCallback) {
+            currentCallback(storageKey, newValue);
+          }
+        }
+      );
+    },
+    removeListener(): void {
+      if (listenerId !== null && typeof GM_removeValueChangeListener !== 'undefined') {
+        GM_removeValueChangeListener(listenerId);
+        listenerId = null;
       }
-    };
-  }
+      currentCallback = null;
+    },
+  };
+}
 
-  addListener(callback: (key: string, newValue: unknown) => void): void {
-    this.currentCallback = callback;
-    window.addEventListener('storage', this.boundHandler);
-  }
+function isGmSyncAvailable(): boolean {
+  return typeof GM_addValueChangeListener !== 'undefined';
+}
 
-  removeListener(): void {
-    this.currentCallback = null;
-    window.removeEventListener('storage', this.boundHandler);
-  }
+// ── localStorage sync ─────────────────────────────────────────────────────
+
+function createLocalStorageSyncAdapter(storageKey: string): CrossTabSyncAdapter {
+  let currentCallback: ((key: string, newValue: unknown) => void) | null = null;
+  const handler = (event: StorageEvent) => {
+    if (event.key !== storageKey || event.newValue === null) return;
+    if (currentCallback) {
+      currentCallback(storageKey, event.newValue);
+    }
+  };
+
+  return {
+    addListener(callback: (key: string, newValue: unknown) => void): void {
+      currentCallback = callback;
+      window.addEventListener('storage', handler);
+    },
+    removeListener(): void {
+      currentCallback = null;
+      window.removeEventListener('storage', handler);
+    },
+  };
 }
 
 // ── Factory ────────────────────────────────────────────────────────────────
@@ -135,19 +114,16 @@ export function getCrossTabSyncAdapter(storageKey: string): CrossTabSyncAdapter 
   if (cachedAdapter && cachedKey === storageKey) return cachedAdapter;
 
   // Clean up the previous adapter's listener before replacing it.
-  // Without this, a stale listener (e.g., chrome.storage.onChanged) remains
-  // registered when the storage key changes, causing cross-tab sync to fire
-  // for the wrong key.
   if (cachedAdapter) {
     cachedAdapter.removeListener();
   }
 
-  if (ChromeCrossTabSyncAdapter.isAvailable()) {
-    cachedAdapter = new ChromeCrossTabSyncAdapter(storageKey);
-  } else if (GmCrossTabSyncAdapter.isAvailable()) {
-    cachedAdapter = new GmCrossTabSyncAdapter(storageKey);
+  if (isChromeSyncAvailable()) {
+    cachedAdapter = createChromeSyncAdapter(storageKey);
+  } else if (isGmSyncAvailable()) {
+    cachedAdapter = createGmSyncAdapter(storageKey);
   } else {
-    cachedAdapter = new LocalStorageCrossTabSyncAdapter(storageKey);
+    cachedAdapter = createLocalStorageSyncAdapter(storageKey);
   }
   cachedKey = storageKey;
   return cachedAdapter;

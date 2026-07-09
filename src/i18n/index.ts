@@ -22,8 +22,7 @@ import { ES } from '@i18n/es';
 import { JA } from '@i18n/ja';
 import { KO } from '@i18n/ko';
 import { ZH_CN } from '@i18n/zh-CN';
-import { getLanguageAdapter } from '@platform/language-adapter';
-import type { LanguageAdapter } from '@platform/types';
+import { getUILanguage as getPlatformUILanguage } from '@platform/language-adapter';
 
 /** Language codes with actual translations (excluding 'auto'). Reuses TranslationLanguage from app-types. */
 type SupportedLanguage = TranslationLanguage;
@@ -94,14 +93,12 @@ function matchLanguages(languages: string[]): SupportedLanguage {
  *    cases like "pt-BR" → fall through earlier entries → "en").
  * 3. `navigator.language` — single fallback (legacy / userscript).
  *
- * @param adapter Optional LanguageAdapter override (for testing). Uses the
- *                platform default when not provided.
+ * @param getUILang Optional override for platform UI language detection (for testing).
  */
-export function detectBrowserLanguage(adapter?: LanguageAdapter): SupportedLanguage {
+export function detectBrowserLanguage(getUILang?: () => string | undefined): SupportedLanguage {
   try {
     // 1. Platform-provided UI language (extension context only)
-    const langAdapter = adapter ?? getLanguageAdapter();
-    const uiLanguage = langAdapter.getUILanguage();
+    const uiLanguage = (getUILang ?? getPlatformUILanguage)();
     if (uiLanguage) {
       return matchLanguages([uiLanguage]);
     }

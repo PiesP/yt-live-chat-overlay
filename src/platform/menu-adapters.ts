@@ -2,67 +2,21 @@
 // Copyright (c) 2026 PiesP
 
 /**
- * Platform menu command adapter implementations.
+ * Platform menu command registration — single function.
  *
- * Each platform registers menu commands differently:
- * - Userscript: GM_registerMenuCommand
- * - Chrome extension: chrome.contextMenus (requires background script — see Phase 7)
- * - Firefox extension: browser.menus (requires background script — see Phase 8)
- * - No-op: For environments without menu support
+ * Uses GM_registerMenuCommand when available (userscript context).
+ * No-op in environments without Tampermonkey/Violentmonkey API.
  */
 
-import type { MenuAdapter, MenuCommand } from '@platform/types';
-
-// ── GmMenuAdapter ──────────────────────────────────────────────────────────
-
-class GmMenuAdapter implements MenuAdapter {
-  isSupported(): boolean {
-    return typeof GM_registerMenuCommand !== 'undefined';
-  }
-
-  register(commands: MenuCommand[]): void {
-    if (!this.isSupported()) return;
-    for (const cmd of commands) {
-      GM_registerMenuCommand(cmd.name, cmd.action);
-    }
-  }
-}
-
-// ── NoopMenuAdapter ────────────────────────────────────────────────────────
-
-/** No-op adapter for environments without menu support. */
-class NoopMenuAdapter implements MenuAdapter {
-  isSupported(): boolean {
-    return false;
-  }
-
-  register(_commands: MenuCommand[]): void {
-    // No-op
-  }
-}
-
-// ── Factory ────────────────────────────────────────────────────────────────
-
-let cachedAdapter: MenuAdapter | null = null;
+import type { MenuCommand } from '@platform/types';
 
 /**
- * Returns the best available menu adapter for the current environment.
- * Priority: GM_registerMenuCommand > no-op.
- * chrome.contextMenus adapter will be wired when the extension background script exists (Phase 7).
+ * Register menu commands via GM_registerMenuCommand.
+ * Safe to call in any environment — no-op when GM API is unavailable.
  */
-export function getMenuAdapter(): MenuAdapter {
-  if (cachedAdapter) return cachedAdapter;
-
-  if (typeof GM_registerMenuCommand !== 'undefined') {
-    cachedAdapter = new GmMenuAdapter();
-    return cachedAdapter;
+export function registerMenuCommands(commands: MenuCommand[]): void {
+  if (typeof GM_registerMenuCommand === 'undefined') return;
+  for (const cmd of commands) {
+    GM_registerMenuCommand(cmd.name, cmd.action);
   }
-
-  cachedAdapter = new NoopMenuAdapter();
-  return cachedAdapter;
-}
-
-/** Reset cached adapter singleton for test isolation. */
-export function resetMenuAdapter(): void {
-  cachedAdapter = null;
 }

@@ -13,7 +13,7 @@ import { RuntimeManager } from '@app/runtime-manager';
 import type { OverlaySettings } from '@app-types';
 import { isYouTubeLive, isYouTubeWatch } from '@chat/youtube/url-pattern';
 import { resolveActiveLanguage, t } from '@i18n/index';
-import { getMenuAdapter } from '@platform/menu-adapters';
+import { registerMenuCommands } from '@platform/menu-adapters';
 import { Settings } from '@settings/store';
 import { SettingsUi } from '@settings/ui/controller';
 import { createLogger, setOverlayLogLevel } from '@util/logging';
@@ -275,7 +275,7 @@ async function initApp(): Promise<void> {
 
     const app = new App();
     await app.start();
-    registerMenuCommands();
+    setupMenuCommands();
 
     // Expose a debug handle for menu commands.  Object.freeze prevents extending
     // or mutating the value object itself, but window.__ytChatOverlay can still be
@@ -305,11 +305,8 @@ async function initApp(): Promise<void> {
 
 main();
 
-function registerMenuCommands(): void {
-  const adapter = getMenuAdapter();
-  if (!adapter.isSupported()) return;
-
-  adapter.register([
+function setupMenuCommands(): void {
+  registerMenuCommands([
     {
       name: t('Reset overlay settings'),
       action: () => {
