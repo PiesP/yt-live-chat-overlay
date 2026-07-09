@@ -12,6 +12,12 @@ export const ES: Record<string, string> = {
   'Live chat overlay': 'Live chat overlay',
   'Interface language changed to': 'Idioma de interfaz cambiado a: ',
 
+  // ── Canvas connection status ──
+  'Connecting…': 'Conectando…',
+  'Connection unstable': 'Conexión inestable',
+  'Disconnected — Click to reload': 'Desconectado — Haz clic para recargar',
+  'Waiting for live stream…': 'Esperando transmisión en vivo…',
+
   // ── Section titles ──
   Cards: 'Tarjetas',
   'Text Outline': 'Contorno de texto',

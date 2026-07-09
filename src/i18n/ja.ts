@@ -12,6 +12,12 @@ export const JA: Record<string, string> = {
   'Live chat overlay': 'Live chat overlay',
   'Interface language changed to': 'インターフェース言語が変更されました: ',
 
+  // ── Canvas connection status ──
+  'Connecting…': '接続中…',
+  'Connection unstable': '接続が不安定です',
+  'Disconnected — Click to reload': '切断されました — クリックして再読み込み',
+  'Waiting for live stream…': 'ライブストリームを待機中…',
+
   // ── Section titles ──
   Cards: 'カード',
   'Text Outline': 'テキスト縁取り',

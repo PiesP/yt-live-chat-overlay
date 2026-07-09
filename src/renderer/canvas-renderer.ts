@@ -89,6 +89,7 @@ import { LruMap } from '@util/lru-map';
 import { MessageActivator } from '@util/message-activator';
 import { PriorityBucketQueue } from '@util/priority-bucket-queue';
 import { schedulerPostTask, yieldIfOverBudget } from '@util/scheduler-utils';
+import { t } from '@i18n/index';
 
 const log = createLogger('RendererCanvas');
 
@@ -2379,13 +2380,13 @@ export class CanvasRenderer extends RendererBase {
   private getStatusMessage(status: ConnectionStatus): string {
     switch (status) {
       case 'connecting':
-        return 'Connecting\u2026';
+        return t('Connecting\u2026');
       case 'degraded':
-        return 'Connection unstable';
+        return t('Connection unstable');
       case 'disconnected':
-        return 'Disconnected \u2014 Click to reload';
+        return t('Disconnected \u2014 Click to reload');
       case 'standby':
-        return 'Waiting for live stream\u2026';
+        return t('Waiting for live stream\u2026');
       default:
         return '';
     }

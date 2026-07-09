@@ -12,6 +12,12 @@ export const ZH_CN: Record<string, string> = {
   'Live chat overlay': 'Live chat overlay',
   'Interface language changed to': '界面语言已更改为：',
 
+  // ── Canvas connection status ──
+  'Connecting…': '连接中…',
+  'Connection unstable': '连接不稳定',
+  'Disconnected — Click to reload': '已断开 — 点击重新加载',
+  'Waiting for live stream…': '等待直播…',
+
   // ── Section titles ──
   Cards: '卡片',
   'Text Outline': '文字描边',

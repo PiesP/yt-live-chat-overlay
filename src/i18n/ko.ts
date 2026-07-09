@@ -12,6 +12,12 @@ export const KO: Record<string, string> = {
   'Live chat overlay': 'Live chat overlay',
   'Interface language changed to': '인터페이스 언어가 변경되었습니다: ',
 
+  // ── Canvas connection status ──
+  'Connecting…': '연결 중…',
+  'Connection unstable': '연결 불안정',
+  'Disconnected — Click to reload': '연결 끊김 — 클릭하여 새로고침',
+  'Waiting for live stream…': '라이브 스트림 대기 중…',
+
   // ── Section titles ──
   Cards: '카드',
   'Text Outline': '텍스트 외곽선',

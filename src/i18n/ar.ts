@@ -12,6 +12,12 @@ export const AR: Record<string, string> = {
   'Live chat overlay': 'Live chat overlay',
   'Interface language changed to': 'تم تغيير لغة الواجهة إلى: ',
 
+  // ── Canvas connection status ──
+  'Connecting…': 'جارٍ الاتصال…',
+  'Connection unstable': 'الاتصال غير مستقر',
+  'Disconnected — Click to reload': 'تم قطع الاتصال — انقر لإعادة التحميل',
+  'Waiting for live stream…': 'بانتظار البث المباشر…',
+
   // ── Section titles ──
   Cards: 'البطاقات',
   'Text Outline': 'حدود النص',
