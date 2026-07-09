@@ -56,10 +56,6 @@ export function normalizeYouTubeImageUrl(url: string): string | null {
     const parsed = new URL(normalizedUrl);
 
     if (!isAllowedImageHostname(parsed.hostname)) return null;
-    // Re-check against the strict origin allowlist for consistency with
-    // the network fetch guard (isAllowedImageUrl).  A valid host suffix
-    // alone is not sufficient — the full origin must be permitted.
-    if (!isAllowedImageUrl(normalizedUrl)) return null;
 
     if (parsed.protocol === 'http:') {
       parsed.protocol = 'https:';
