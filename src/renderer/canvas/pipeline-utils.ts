@@ -25,6 +25,11 @@ export const COMPACTION_THRESHOLD_RATIO = 0.5;
  */
 let prngSeed = (Date.now() ^ (Math.random() * 0xffffffff)) >>> 0;
 
+/** Reset the PRNG seed for test isolation. */
+export function resetPrngSeed(): void {
+  prngSeed = 0;
+}
+
 export function fastRandom(): number {
   // LCG parameters from Numerical Recipes (a=1664525, c=1013904223)
   prngSeed = (Math.imul(1664525, prngSeed) + 1013904223) >>> 0;

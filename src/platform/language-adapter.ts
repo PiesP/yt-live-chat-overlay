@@ -18,7 +18,7 @@ export function getUILanguage(): string | undefined {
       return chrome.i18n.getUILanguage();
     }
     return undefined;
-  } catch {
+  } catch (error: unknown) {
     return undefined;
   }
 }

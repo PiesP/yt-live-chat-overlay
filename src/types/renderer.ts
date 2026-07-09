@@ -28,6 +28,6 @@ export interface SessionMetrics {
 }
 
 /** Interface for objects that can be paused/resumed. */
-export interface Pauseable {
+export type Pauseable = {
   setPaused(paused: boolean): void;
-}
+};

@@ -263,7 +263,7 @@ export class CanvasRenderer extends RendererBase {
    * non-connected status, one extra frame is allowed to render the
    * status bar before stopping the render loop.
    */
-  private _hasRenderedStatusBar = false;
+  private hasRenderedStatusBar = false;
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
     super(overlay, settings);
@@ -431,7 +431,7 @@ export class CanvasRenderer extends RendererBase {
       // H2: Reset status bar render flag so the idle-detection logic
       // allows one extra frame to render the new status bar before
       // potentially stopping the render loop.
-      this._hasRenderedStatusBar = false;
+      this.hasRenderedStatusBar = false;
     }
     this.connectionStatus = status;
     // Update the screen-reader live region so status changes are announced
@@ -603,7 +603,7 @@ export class CanvasRenderer extends RendererBase {
   /** Explicitly restart the render loop (used by overlay refresh). */
   override resumeRenderLoop(): void {
     this.idleSince = null;
-    this._hasRenderedStatusBar = false;
+    this.hasRenderedStatusBar = false;
     this.startRenderLoop();
   }
 
@@ -618,7 +618,7 @@ export class CanvasRenderer extends RendererBase {
     for (const bucket of this.midOpacityBuckets) bucket.length = 0;
     for (const bucket of this.nearOpacityBuckets) bucket.length = 0;
     this.idleSince = null;
-    this._hasRenderedStatusBar = false;
+    this.hasRenderedStatusBar = false;
     // Reset the render activity heartbeat so the watchdog does not
     // immediately re-detect the pre-refresh stuck state.  The backlog
     // injection that follows will update this timestamp when the first
@@ -671,8 +671,8 @@ export class CanvasRenderer extends RendererBase {
       if (this.activeMessages.length === 0 && this.pendingQueue.isEmpty) {
         // H2: Allow one extra frame for status bar rendering when idle
         // with a non-connected status.
-        if (!this._hasRenderedStatusBar && this.connectionStatus !== 'connected') {
-          this._hasRenderedStatusBar = true;
+        if (!this.hasRenderedStatusBar && this.connectionStatus !== 'connected') {
+          this.hasRenderedStatusBar = true;
         } else {
           const now = performance.now();
           if (this.idleSince === null) {

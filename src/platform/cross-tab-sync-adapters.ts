@@ -39,7 +39,7 @@ function isChromeSyncAvailable(): boolean {
       chrome.storage !== undefined &&
       chrome.storage.onChanged !== undefined
     );
-  } catch {
+  } catch (error: unknown) {
     return false;
   }
 }

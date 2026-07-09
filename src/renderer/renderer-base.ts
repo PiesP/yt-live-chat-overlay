@@ -53,12 +53,12 @@ export abstract class RendererBase {
   protected authorRateLimiter: PerAuthorRateLimiter;
 
   protected isPaused = false;
-  protected _isVideoPaused = false;
+  protected videoPaused = false;
 
   /** Currently active lane density factor — cached to detect burst-driven changes. */
   protected currentLaneDensityFactor = 1.0;
   /** Set by RuntimeManager when the session uses ReplayChatSource. */
-  protected _isReplayMode = false;
+  protected replayMode = false;
   protected pausedAt: number | null = null;
   protected backlogPaused = false;
 
@@ -142,21 +142,17 @@ export abstract class RendererBase {
    * the video hasn't started yet but the user didn't press pause.
    */
   get isVideoPaused(): boolean {
-    return this._isVideoPaused;
-  }
-
-  isPausedByVideo(): boolean {
-    return this._isVideoPaused;
+    return this.videoPaused;
   }
 
   /** Whether the renderer is in replay (VOD) mode. */
   get isReplayMode(): boolean {
-    return this._isReplayMode;
+    return this.replayMode;
   }
 
   /** Set by RuntimeManager when the session uses ReplayChatSource. */
   setReplayMode(enabled: boolean): void {
-    this._isReplayMode = enabled;
+    this.replayMode = enabled;
   }
 
   // ── Shared state machine ──────────────────────────────────────────────
@@ -222,15 +218,15 @@ export abstract class RendererBase {
 
   pauseForVideo(): void {
     if (this.isVideoPaused) return;
-    this._isVideoPaused = true;
+    this.videoPaused = true;
     if (!this.isPaused) {
       this.pause();
     }
   }
 
   resumeForVideo(): void {
-    if (!this._isVideoPaused) return;
-    this._isVideoPaused = false;
+    if (!this.videoPaused) return;
+    this.videoPaused = false;
     if (document.visibilityState === 'visible') {
       if (this.isPaused) {
         this.resume();
@@ -331,7 +327,7 @@ export abstract class RendererBase {
 
     // Replay (VOD): use base speed only — burst adaptation would distort
     // exact videoOffsetMs-based timing from ReplayChatSource.
-    if (this._isReplayMode) return Math.max(1, baseSpeed);
+    if (this.replayMode) return Math.max(1, baseSpeed);
 
     let speed = baseSpeed;
 
@@ -391,7 +387,7 @@ export abstract class RendererBase {
 
     // Replay (VOD): messages carry exact videoOffsetMs timing — burst
     // detection and rate limiting are meaningless for historical data.
-    if (!this._isReplayMode) {
+    if (!this.replayMode) {
       this.burstDetector.onMessageReceived();
 
       const priority = RendererBase.getMessagePriority(message);
@@ -430,7 +426,7 @@ export abstract class RendererBase {
 
   destroy(): void {
     this.isPaused = false;
-    this._isVideoPaused = false;
+    this.videoPaused = false;
     this.pauseBuffer.length = 0;
     this.burstDetector.destroy();
     this.authorRateLimiter.destroy();
