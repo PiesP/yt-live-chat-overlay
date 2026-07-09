@@ -11,7 +11,7 @@
  * delegate to shared logic without inheritance coupling.
  */
 
-import type { ChatMessage, OverlaySettings } from '@app-types';
+import type { OverlaySettings } from '@app-types';
 
 /**
  * Minimal worker manager shape that both RenderWorkerManager and
@@ -20,14 +20,6 @@ import type { ChatMessage, OverlaySettings } from '@app-types';
  */
 export interface WorkerManagerLike {
   worker: Worker | null;
-}
-
-/**
- * Send an array of messages to the worker as an 'addMessages' command.
- * Shared by both Canvas2D and WebGL2 managers.
- */
-function sendMessagesToWorker(manager: WorkerManagerLike, messages: ChatMessage[]): void {
-  manager.worker?.postMessage({ type: 'addMessages', messages });
 }
 
 /**
@@ -42,17 +34,6 @@ export function sendUpdateConfigToWorker(
 }
 
 /**
- * Send a resize command to the worker.
- */
-function sendResizeToWorker(
-  manager: WorkerManagerLike,
-  width: number,
-  height: number
-): void {
-  manager.worker?.postMessage({ type: 'resize', width, height });
-}
-
-/**
  * Send a setPaused command to the worker.
  */
 export function sendSetPausedToWorker(
@@ -63,27 +44,6 @@ export function sendSetPausedToWorker(
   manager.worker?.postMessage({ type: 'setPaused', paused, videoPaused });
 }
 
-/**
- * Send emoji images (with ImageBitmap transfer) to the worker.
- */
-function sendEmojiImagesToWorker(
-  manager: WorkerManagerLike,
-  images: Array<{ url: string; bitmap: ImageBitmap }>
-): void {
-  const bitmaps = images.map((i) => i.bitmap);
-  manager.worker?.postMessage({ type: 'addEmojiImages', images }, bitmaps);
-}
-
-/**
- * Send author photos (with ImageBitmap transfer) to the worker.
- */
-function sendAuthorPhotosToWorker(
-  manager: WorkerManagerLike,
-  photos: Array<{ url: string; bitmap: ImageBitmap }>
-): void {
-  const bitmaps = photos.map((p) => p.bitmap);
-  manager.worker?.postMessage({ type: 'addAuthorPhotos', photos }, bitmaps);
-}
 /**
  * Send a clearState command to the worker.
  * Instructs the Worker to reset its renderer state (active messages,

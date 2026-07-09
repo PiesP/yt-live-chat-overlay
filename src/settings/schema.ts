@@ -26,6 +26,7 @@ import {
 // ── Re-exports for backward compatibility ───────────────────────────────────────
 export {
   DEFAULT_SETTINGS,
+  migrateSettings,
   SETTINGS_VERSION,
   STORAGE_KEY,
 } from '@settings/defaults';
@@ -41,9 +42,10 @@ export {
 } from '@settings/limits';
 export type { RootScalarSettingKey } from '@settings/meta';
 export { AUTHOR_COLOR_KEYS, getRootDisplayMeta } from '@settings/meta';
+
 // ── End re-exports ──────────────────────────────────────────────────────────────
 
-const isLogLevel = (value: unknown): value is LogLevel =>
+export const isLogLevel = (value: unknown): value is LogLevel =>
   LOG_LEVEL_VALUES.includes(value as LogLevel);
 
 const VALID_BACKLOG_MODES = [
@@ -101,10 +103,10 @@ const LOG_LEVEL_VALUES = ['warn', 'info', 'debug'] as const satisfies readonly L
 /**
  * Matches hex color strings: #RGB, #RRGGBB, #RGBA, #RRGGBBAA.
  */
-const isColorValue = (value: unknown): value is string =>
+export const isColorValue = (value: unknown): value is string =>
   typeof value === 'string' && /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6,8})$/i.test(value);
 
-function clampNumber(
+export function clampNumber(
   value: unknown,
   fallback: number,
   limits: Readonly<{ min: number; max: number }>

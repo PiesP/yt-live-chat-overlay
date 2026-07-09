@@ -67,12 +67,12 @@ export interface ImageAsset {
 /** Content segment (text or emoji) */
 export type ContentSegment = TextContentSegment | EmojiContentSegment;
 
-type TextContentSegment = {
+export type TextContentSegment = {
   type: 'text';
   content: string;
 };
 
-interface EmojiContentSegment {
+export interface EmojiContentSegment {
   type: 'emoji';
   emoji: ImageAsset;
 }

@@ -71,7 +71,7 @@ const isRetryableError = (error: unknown): boolean => {
   return error instanceof TypeError;
 };
 
-function getVideoIdFromUrl(href: string): string | null {
+export function getVideoIdFromUrl(href: string): string | null {
   try {
     const url = new URL(href, location.origin);
 
@@ -91,7 +91,7 @@ function getVideoIdFromUrl(href: string): string | null {
   return null;
 }
 
-const buildWatchUrl = (videoId: string): string =>
+export const buildWatchUrl = (videoId: string): string =>
   `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
 
 const readYtcfg = (): JsonObject | null => {
@@ -234,7 +234,7 @@ const extractVideoIdFromInitialData = (initialData: JsonObject): string | null |
   return getString(watchEndpoint.videoId);
 };
 
-function findLiveChatRenderer(initialData: JsonObject): JsonObject | null {
+export function findLiveChatRenderer(initialData: JsonObject): JsonObject | null {
   const directRenderer = getNestedRecord(initialData, [
     'contents',
     'twoColumnWatchNextResults',

@@ -10,8 +10,6 @@
  * threshold constant.
  */
 
-import type { CanvasMessage } from '@renderer/constants';
-
 /** Ratio of expired slots above which compaction allocates a fresh array via slice(). */
 export const COMPACTION_THRESHOLD_RATIO = 0.5;
 
@@ -27,25 +25,8 @@ export const COMPACTION_THRESHOLD_RATIO = 0.5;
  */
 let prngSeed = (Date.now() ^ (Math.random() * 0xffffffff)) >>> 0;
 
-/** Reset PRNG seed for test isolation. */
-function resetPrngSeed(): void {
-  prngSeed = (Date.now() ^ (Math.random() * 0xffffffff)) >>> 0;
-}
-
 export function fastRandom(): number {
   // LCG parameters from Numerical Recipes (a=1664525, c=1013904223)
   prngSeed = (Math.imul(1664525, prngSeed) + 1013904223) >>> 0;
   return prngSeed / 0xffffffff;
-}
-
-/**
- * Remove expired messages in-place, simultaneously maintaining the
- * lane-indexed map incrementally during compaction.
- * Returns the new logical length and whether any messages were removed.
- */
-/** Accumulate paused duration across all active messages. */
-function applyPausedDurationToMessages(messages: CanvasMessage[], pausedMs: number): void {
-  for (const msg of messages) {
-    msg.pausedDuration += pausedMs;
-  }
 }

@@ -103,7 +103,7 @@ import type { ActiveMessage, WorkerConfig, WorkerContentSegment, WorkerMessage }
 
 // ── Worker-specific constants ──────────────────────────────────────────────
 
-// biome-ignore lint/style/useConst: reassigned during worker init
+/** Sticker image cache — lazily initialized during worker init. */
 let stickerCache: ByteLimitedCache<ImageBitmap> | null = null;
 
 function measureTextHeight(

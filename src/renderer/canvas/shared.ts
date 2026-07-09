@@ -150,11 +150,6 @@ function getGraphemeSegmenter(): Intl.Segmenter | undefined {
   return _graphemeSegmenter;
 }
 
-/** Reset grapheme segmenter for test isolation. */
-function resetGraphemeSegmenter(): void {
-  _graphemeSegmenter = undefined;
-}
-
 /**
  * Split a string into grapheme clusters for safe per-character processing.
  *
@@ -353,7 +348,7 @@ export function buildWrappedLines(
  * Uses individual outlineWidthPx and outlineOpacity parameters (not a settings
  * object) so the same function works in both main-thread and worker contexts.
  */
-function strokeTextOutline(
+export function strokeTextOutline(
   ctx: AnyCanvasContext,
   text: string,
   x: number,
@@ -621,30 +616,6 @@ export function renderSegment(
 
 // ── Text bitmap key computation (extracted for reuse) ───────────────────────
 
-/**
- * Compute the cache key used by renderSegment's text bitmap cache.
- *
- * Extracted from renderSegment so warmTextBitmapCache can compute the same
- * key without duplicating the formula.
- */
-function computeTextBitmapKey(
-  text: string,
-  fontSize: number,
-  fontWeight: string,
-  fontFamily: string,
-  color: string,
-  outlineWidthPx: number,
-  outlineOpacity: number,
-  letterSpacing = '0px'
-): string {
-  const displayText = reverseRtlText(text);
-  const font = getFontString(fontSize, fontWeight as FontWeight, fontFamily);
-  const strokeWidth = Math.max(0.5, outlineWidthPx * OUTLINE_STROKE_SCALE);
-  const strokeColor = computeOutlineColor(color, Math.min(1, outlineOpacity));
-  const outlineClass = strokeColor.startsWith('rgba(0, 0, 0') ? 'dark' : 'light';
-  return `${font}|${displayText}|${color}|${Math.round(strokeWidth)}|${outlineClass}|${letterSpacing}`;
-}
-
 // ── Text bitmap pre-warming ─────────────────────────────────────────────────
 
 /**
@@ -826,13 +797,7 @@ function renderContentSegments(
  *  rasterization) is only paid once per unique photo.  Keyed by the photo
  *  object itself so cleanup is automatic when the image is evicted from
  *  the caller's ByteLimitedCache. */
-let _photoShadowCache = new WeakMap<object, OffscreenCanvas>();
-
-/** Clear the photo shadow cache. Use this to release accumulated
- *  pre-composited OffscreenCanvas allocations during very long sessions. */
-function clearPhotoShadowCache(): void {
-  _photoShadowCache = new WeakMap<object, OffscreenCanvas>();
-}
+const _photoShadowCache = new WeakMap<object, OffscreenCanvas>();
 
 /** Pad around the photo for shadow overflow (blur=4 + offset=1 ≈ 5px). */
 const AUTHOR_PHOTO_SHADOW_PAD = 5;

@@ -87,14 +87,13 @@ const SETTINGS_LIMITS = {
   replayBatchLimit: { min: 3, max: 100, step: 1 },
 } as const;
 
-/** Derived automatically from SETTINGS_LIMITS — single source of truth for limit keys. */
-type SettingsLimitKey = keyof typeof SETTINGS_LIMITS;
-
-export type { OutlineSettingKey, RootNumericSettingKey };
-
 export const OUTLINE_NUMERIC_KEYS = ['widthPx', 'opacity'] as const satisfies ReadonlyArray<
   Exclude<OutlineSettingKey, 'enabled'>
 >;
+
+export type SettingsLimitKey = keyof typeof SETTINGS_LIMITS;
+
+export { SETTINGS_LIMITS };
 
 /** Maps outline sub-keys to their SETTINGS_LIMITS entries. */
 const OUTLINE_LIMIT_KEYS: Record<string, keyof typeof SETTINGS_LIMITS> = {

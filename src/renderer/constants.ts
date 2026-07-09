@@ -17,9 +17,6 @@ import type { ChatMessage } from '@app-types';
 
 // ── Card rendering ──────────────────────────────────────────────────────
 
-/** Factor applied to card background opacity for visual blending. */
-const CARD_BG_OPACITY_FACTOR = 0.85;
-
 /** Max cached linear-gradient entries (SuperChat/Membership card backgrounds).
  *  Used by both main thread (LruMap) and worker (Map with manual eviction)
  *  to keep gradient memory bounded during long streams. */
@@ -44,12 +41,6 @@ export const SAFETY_MARGIN_RATIO = 0.15;
  *  5% chance to skip the strict topmost zero-wait lane. */
 export const EPSILON = 0.05;
 
-/** Lane density factor for sub-cell placement during bursts.
- *  1.0 = full-cell (normal), 0.75 = 3/4-cell (high burst), 0.5 = half-cell (extreme burst).
- *  When < 1.0, effectiveLaneHeight = laneHeight * factor doubles lane resolution
- *  for finer vertical placement opportunities. */
-const LANE_DENSITY_NORMAL = 1.0;
-
 /** Free ratio for anti-block gate: utilization above (1 - this) triggers
  *  probabilistic blocking of new message placements. */
 export const ANTI_BLOCK_FREE_RATIO = 0.05;
@@ -61,6 +52,12 @@ export const ANTI_BLOCK_MAX_DURATION_MS = 2000;
 
 /** Default emoji fetch timeout (ms) — fallback used when config is unavailable. */
 export const EMOJI_FETCH_TIMEOUT_DEFAULT_MS = 30_000;
+
+/** Lane density factor for sub-cell placement during bursts.
+ *  1.0 = full-cell (normal), 0.75 = 3/4-cell (high burst), 0.5 = half-cell (extreme burst).
+ *  When < 1.0, effectiveLaneHeight = laneHeight * factor doubles lane resolution
+ *  for finer vertical placement opportunities. */
+export const LANE_DENSITY_NORMAL = 1.0;
 
 /** Number of opacity buckets for render-phase opacity grouping.
  *  Messages with opacity 0.0–1.0 are distributed across 21 buckets
@@ -166,8 +163,6 @@ export const EMPTY_CHAT_MESSAGE: ChatMessage = {
   timestamp: 0,
   authorType: 'normal',
 };
-
-
 
 /** Canvas-side message state used by the render loop. */
 export interface CanvasMessage {
