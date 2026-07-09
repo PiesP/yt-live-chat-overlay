@@ -1,11 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-/** Check if an image element is fully loaded and has valid dimensions. */
-function isImageReady(img: unknown): boolean {
-  return (img as HTMLImageElement)?.complete === true && (img as HTMLImageElement).naturalWidth > 0;
-}
-
 /**
  * CanvasRenderer — Canvas 2D-based renderer.
  *
@@ -39,38 +34,35 @@ import {
   startOffscreenPoll,
   updateCanvasDpr,
 } from '@renderer/canvas/canvas-setup';
-import { renderPaidCard } from '@renderer/canvas/card-renderers';
-import { COMPACTION_THRESHOLD_RATIO, fastRandom } from '@renderer/canvas/pipeline-utils';
+import { fastRandom } from '@renderer/canvas/pipeline-utils';
+import {
+  cleanupAndBucketStage,
+  compactRemovedMessages,
+  drainStage,
+  drawGlowStage,
+  drawStage,
+  mirrorVisibleMessages,
+} from '@renderer/canvas/render-pipeline';
 import {
   drawRoundRect,
-  getDisplayText,
-  renderRegularMessage,
-  renderSegment,
   toSharedContentSegments,
   warmTextBitmapCache,
 } from '@renderer/canvas/shared';
-import { MEMBERSHIP_CARD_CONFIG, SUPERCHAT_CARD_CONFIG } from '@renderer/card-config';
 import {
-  ANTI_BLOCK_MAX_DURATION_MS,
-  ANTI_BLOCK_PRIORITY_THRESHOLD,
   type CanvasMessage,
   GRADIENT_CACHE_MAX,
   HORIZONTAL_STAGGER_MAX,
   HORIZONTAL_STAGGER_PER_STEP,
   hashStringForTier,
   OPACITY_BUCKET_COUNT,
-  SIN_LUT_SCALE,
-  SIN_TABLE,
   SPEED_TIER,
   STAGGER_BATCH_MAX,
   STAGGER_EXP_SCALE,
   STAGGER_QUEUE_HIGH,
   STAGGER_QUEUE_MED,
-  TEMPORAL_BLEND_ALPHA,
   TIER_NEAR_THRESHOLD,
   TRANSLATION_FONT_SCALE,
   TRANSLATION_GAP_PX,
-  TRANSLATION_OPACITY_SCALE,
 } from '@renderer/constants';
 import type { LanePlacement } from '@renderer/layout/lane-allocator';
 import { computeBaseHeadwayPx } from '@renderer/layout/lane-shared';
@@ -79,7 +71,6 @@ import { RendererBase } from '@renderer/renderer-base';
 import {
   computeAgeFadeRate,
   computeInvFadeDuration,
-  computeMessageOpacity,
   enqueueWithOverflow,
   estimateMessageDimensions as sharedEstimateDimensions,
 } from '@renderer/shared';
@@ -94,7 +85,7 @@ import { ChannelLanguageMemory } from '@translation/channel-memory';
 import { LanguageDetectorService } from '@translation/language-detector';
 import { TranslationService } from '@translation/service';
 import { ByteLimitedCache } from '@util/byte-limited-cache';
-import { computeScrollDuration, rendererLayout, statusBarLayout } from '@util/design-tokens';
+import { computeScrollDuration, statusBarLayout } from '@util/design-tokens';
 import { clearSafeAnimationFrame, forEachSlot, SCREEN_READER_CSS } from '@util/dom';
 import { createLogger } from '@util/logging';
 import { LruMap } from '@util/lru-map';
@@ -271,6 +262,9 @@ export class CanvasRenderer extends RendererBase {
    * status bar before stopping the render loop.
    */
   private hasRenderedStatusBar = false;
+
+  /** Last timestamp when updateLiveRegion was called, for throttling. */
+  private lastLiveRegionUpdate = 0;
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
     super(overlay, settings);
@@ -775,6 +769,9 @@ export class CanvasRenderer extends RendererBase {
     const dims = this.overlay.getDimensions();
     if (!dims) return;
 
+    // ── Build render context ──
+    const rctx = this.buildRenderContext();
+
     // ── Translation drain ──
     this.applyPendingTranslations();
 
@@ -796,7 +793,7 @@ export class CanvasRenderer extends RendererBase {
 
     // ── Drain stage: anti-block gate + lane allocation ──
     this.applyLaneDensityIfChanged();
-    this.drainStage(now, dims);
+    drainStage(rctx, now, dims);
 
     this.observability.updateLaneUtilization(this.laneAllocator.getUtilization());
     this.observability.tick();
@@ -805,11 +802,11 @@ export class CanvasRenderer extends RendererBase {
     if (!hasContent) return;
 
     // ── Cleanup + opacity buckets (merged single pass) ──
-    const cleanupResult = this.cleanupAndBucketStage(now, dims, mode);
+    const cleanupResult = cleanupAndBucketStage(rctx, now, dims, mode);
 
     // Post-cleanup: compact array + clean lane map for expired messages
     if (cleanupResult.anyRemoved) {
-      this.compactRemovedMessages(cleanupResult.writeIdx, cleanupResult.oldLength);
+      compactRemovedMessages(rctx, cleanupResult.writeIdx, cleanupResult.oldLength);
     }
 
     // Don't clear when status bar is showing — it was drawn above and would be wiped.
@@ -820,18 +817,53 @@ export class CanvasRenderer extends RendererBase {
     // ── Glow stage: membership card pulsing borders ──
     // Drive glow by cardConfig.decoration over all buckets, not just nearBuckets,
     // so pulsing-border glow works even when depth layers are disabled.
-    this.drawGlowStage(ctx, cleanupResult.farBuckets);
-    this.drawGlowStage(ctx, cleanupResult.midBuckets);
-    this.drawGlowStage(ctx, cleanupResult.nearBuckets);
+    drawGlowStage(rctx, ctx, cleanupResult.farBuckets);
+    drawGlowStage(rctx, ctx, cleanupResult.midBuckets);
+    drawGlowStage(rctx, ctx, cleanupResult.nearBuckets);
 
-    this.drawStage(ctx, cleanupResult.farBuckets);
-    this.drawStage(ctx, cleanupResult.midBuckets);
-    this.drawStage(ctx, cleanupResult.nearBuckets);
+    drawStage(rctx, ctx, cleanupResult.farBuckets);
+    drawStage(rctx, ctx, cleanupResult.midBuckets);
+    drawStage(rctx, ctx, cleanupResult.nearBuckets);
 
     // ── Live region mirroring: expose last 10 visible messages to AT ──
-    this.mirrorVisibleMessages();
+    mirrorVisibleMessages(rctx);
 
     this.observability.recordRenderFrame(performance.now() - t0);
+  }
+
+  /**
+   * Build a CanvasRenderContext from the current instance state.
+   * Called once per frame to share references with pipeline functions.
+   * The context is a lightweight object with references — no allocations
+   * of complex data structures.
+   */
+  private buildRenderContext(): import('@renderer/canvas/render-pipeline').CanvasRenderContext {
+    return {
+      settings: this.settings,
+      textBitmapCache: this.textBitmapCache,
+      superChatGradientCache: this.superChatGradientCache,
+      imageFetchManager: this.imageFetchManager,
+      boundGetFont: this.boundGetFont,
+      boundMeasureTextWidth: this.boundMeasureTextWidth,
+      activeMessages: this.activeMessages,
+      activeMessagesByLane: this.activeMessagesByLane,
+      farOpacityBuckets: this.farOpacityBuckets,
+      midOpacityBuckets: this.midOpacityBuckets,
+      nearOpacityBuckets: this.nearOpacityBuckets,
+      expiredMessagesScratch: this.expiredMessagesScratch,
+      messageActivator: this.messageActivator,
+      cachedOpacityConfig: this.cachedOpacityConfig,
+      antiBlockSince: this.antiBlockSince,
+      pendingQueue: this.pendingQueue,
+      laneAllocator: this.laneAllocator,
+      observability: this.observability,
+      isReplayMode: this.isReplayMode,
+      isReducedMotionActive: this.isReducedMotionActive,
+      isAntiBlockActive: () => this.isAntiBlockActive(),
+      drainQueue: (n: number) => this.drainQueue(n),
+      lastLiveRegionUpdate: this.lastLiveRegionUpdate,
+      updateLiveRegion: (s) => this.overlay.updateLiveRegion(s),
+    };
   }
 
   // ── renderFrame stages ─────────────────────────────────────────────────
@@ -875,418 +907,7 @@ export class CanvasRenderer extends RendererBase {
    * If anti-block persists beyond ANTI_BLOCK_MAX_DURATION_MS, drainQueue
    * is force-called to prevent indefinite message suppression.
    */
-  private drainStage(now: number, _dims: OverlayDimensions): void {
-    // Anti-block throttle: check BEFORE resetBatch() to avoid paying the
-    // lane-allocator batch-advance cost when anti-block suppresses all
-    // new placements on this frame.
-    if (!this.isReplayMode && this.isAntiBlockActive()) {
-      const currentNow = performance.now();
-      if (this.antiBlockSince === null) {
-        this.antiBlockSince = currentNow;
-      }
-
-      const front = this.pendingQueue.peek();
-      const forceDrain =
-        front !== undefined && currentNow - this.antiBlockSince >= ANTI_BLOCK_MAX_DURATION_MS;
-      const highPriorityFront =
-        front && CanvasRenderer.getMessagePriority(front) >= ANTI_BLOCK_PRIORITY_THRESHOLD;
-
-      if (highPriorityFront || forceDrain) {
-        if (forceDrain) {
-          this.antiBlockSince = currentNow;
-        }
-        // Only call resetBatch() + drainQueue() when the anti-block gate
-        // actually passes — saves lane-allocator overhead on suppressed frames.
-        this.laneAllocator.resetBatch();
-        this.drainQueue(now);
-      }
-    } else {
-      this.antiBlockSince = null;
-      this.laneAllocator.resetBatch();
-      this.drainQueue(now);
-    }
-  }
-
-  /**
-   * Single-pass cleanup + opacity bucket pre-scan.
-   * Removes expired messages and computes per-message opacity bucket
-   * assignment. Returns buckets for the draw stage and compaction metadata.
-   */
-  private cleanupAndBucketStage(
-    now: number,
-    dims: OverlayDimensions,
-    mode: string
-  ): {
-    farBuckets: CanvasMessage[][];
-    midBuckets: CanvasMessage[][];
-    nearBuckets: CanvasMessage[][];
-    anyRemoved: boolean;
-    writeIdx: number;
-    oldLength: number;
-  } {
-    const isScrolling = mode === 'scroll' || mode === 'reverse';
-    const farBuckets = this.farOpacityBuckets;
-    const midBuckets = this.midOpacityBuckets;
-    const nearBuckets = this.nearOpacityBuckets;
-    for (const bucket of farBuckets) bucket.length = 0;
-    for (const bucket of midBuckets) bucket.length = 0;
-    for (const bucket of nearBuckets) bucket.length = 0;
-    this.expiredMessagesScratch.length = 0;
-
-    const oldLength = this.activeMessages.length;
-    let writeIdx = 0;
-    let anyRemoved = false;
-
-    for (let i = 0; i < oldLength; i++) {
-      const msg = this.activeMessages[i];
-      if (!msg) continue;
-      const elapsed = now - msg.startTime - msg.pausedDuration;
-
-      // Expired: message has exceeded its display duration
-      if (elapsed >= msg.duration) {
-        this.expiredMessagesScratch.push(msg);
-        this.messageActivator.releaseMessage(msg);
-        anyRemoved = true;
-        continue;
-      }
-
-      // Keep message in active array (in-place compaction)
-      this.activeMessages[writeIdx] = msg;
-      writeIdx++;
-
-      // Still in stagger delay — keep in array but skip rendering
-      if (elapsed < 0) continue;
-
-      // ── Render pre-compute ──
-      // Save previous position for temporal frame blending (FAR-tier motion blur)
-      if (msg.speedTier === SPEED_TIER.FAR) {
-        msg._prevX = msg.x;
-        msg._prevY = msg.y;
-      }
-      const progress = Math.min(1, Math.max(0, elapsed * msg.invDuration));
-
-      if (mode === 'scroll') {
-        if (!this.isReducedMotionActive) {
-          const travelDistance = msg.startX + msg.width + this.settings.exitPaddingPx;
-          msg.x = msg.startX - progress * travelDistance;
-        } else {
-          // Reduced motion: place message at a fixed visible position (no scrolling)
-          msg.x = Math.max(0, (dims.width - msg.width) / 2);
-        }
-      } else if (mode === 'reverse') {
-        if (!this.isReducedMotionActive) {
-          const travelDistance = dims.width - msg.startX + this.settings.exitPaddingPx;
-          msg.x = msg.startX + progress * travelDistance;
-        } else {
-          // Reduced motion: place message at a fixed visible position (no scrolling)
-          msg.x = Math.max(0, (dims.width - msg.width) / 2);
-        }
-      }
-
-      // Fade-in starts from fadeStartTime, independent of position timeline.
-      const fadeElapsed = now - msg.fadeStartTime - msg.pausedDuration;
-      const opacity = computeMessageOpacity(
-        msg.message,
-        fadeElapsed,
-        msg.duration,
-        isScrolling,
-        msg.speedTier,
-        this.cachedOpacityConfig
-      );
-
-      const bucketIndex = Math.min(
-        OPACITY_BUCKET_COUNT - 1,
-        Math.round(opacity * (OPACITY_BUCKET_COUNT - 1))
-      );
-      msg._frameElapsed = elapsed;
-      // Route to the correct speed-tier bucket for z-order rendering
-      if (msg.speedTier === SPEED_TIER.FAR) {
-        farBuckets[bucketIndex]!.push(msg);
-      } else if (msg.speedTier === SPEED_TIER.NEAR) {
-        nearBuckets[bucketIndex]!.push(msg);
-      } else {
-        midBuckets[bucketIndex]!.push(msg);
-      }
-    }
-
-    return { farBuckets, midBuckets, nearBuckets, anyRemoved, writeIdx, oldLength };
-  }
-
-  /** Compact the activeMessages array and clean the per-lane map after expired message removal. */
-  private compactRemovedMessages(writeIdx: number, oldLength: number): void {
-    // Remove only expired messages from the lane map using O(1) swap-pop
-    for (const msg of this.expiredMessagesScratch) {
-      const slotCount = msg.slotCount ?? 1;
-      const indices = msg.laneArrayIndices;
-      for (let slot = 0; slot < slotCount; slot++) {
-        const lane = msg.laneIndex + slot;
-        const list = this.activeMessagesByLane.get(lane);
-        if (!list || list.length === 0) continue;
-
-        const idx = indices?.[slot] ?? list.indexOf(msg);
-        if (idx < 0 || idx >= list.length) continue;
-
-        const lastMsg = list[list.length - 1]!;
-        if (lastMsg !== msg) {
-          list[idx] = lastMsg;
-          // Update the swapped message's laneArrayIndices entry for this lane
-          if (lastMsg.laneArrayIndices) {
-            for (let ss = 0; ss < (lastMsg.slotCount ?? 1); ss++) {
-              if (lastMsg.laneIndex + ss === lane) {
-                lastMsg.laneArrayIndices[ss] = idx;
-                break;
-              }
-            }
-          }
-        }
-        list.pop();
-        if (list.length === 0) this.activeMessagesByLane.delete(lane);
-      }
-    }
-
-    // Array compaction: when >50% slots expired, allocate fresh array
-    if (writeIdx < oldLength * COMPACTION_THRESHOLD_RATIO) {
-      const newMessages = this.activeMessages.slice(0, writeIdx);
-      this.activeMessages.length = 0;
-      Array.prototype.push.apply(this.activeMessages, newMessages);
-    } else {
-      this.activeMessages.length = writeIdx;
-    }
-
-    // Remove lanes that now have 0 messages
-    for (const [lane, msgs] of this.activeMessagesByLane) {
-      if (msgs.length === 0) {
-        this.activeMessagesByLane.delete(lane);
-      }
-    }
-    this.observability.updateActiveMessages(this.activeMessages.length);
-    this.observability.updateQueueDepth(this.pendingQueue.size);
-  }
-
-  /**
-   * Render active messages grouped by opacity bucket.
-   * Each bucket is rendered with a single ctx.globalAlpha set,
-   * reducing GPU state changes by ~21× vs per-message alpha.
-   */
-  private drawStage(ctx: CanvasRenderingContext2D, buckets: CanvasMessage[][]): void {
-    for (let bucketIndex = 0; bucketIndex < OPACITY_BUCKET_COUNT; bucketIndex++) {
-      const entries = buckets[bucketIndex];
-      if (!entries || entries.length === 0) continue;
-      const bucketOpacity = bucketIndex / (OPACITY_BUCKET_COUNT - 1);
-      ctx.globalAlpha = bucketOpacity;
-
-      try {
-        for (const msg of entries) {
-          const elapsed = msg._frameElapsed!;
-          const snappedX = Math.floor(msg.x);
-          const snappedY = Math.floor(msg.y);
-
-          // Temporal frame blending: render ghost at previous position for FAR-tier
-          if (
-            msg.speedTier === SPEED_TIER.FAR &&
-            msg._prevX !== undefined &&
-            msg._prevY !== undefined
-          ) {
-            const ghostAlpha = ctx.globalAlpha * TEMPORAL_BLEND_ALPHA;
-            if (ghostAlpha > 0.001) {
-              ctx.save();
-              ctx.globalAlpha = ghostAlpha;
-              // Re-draw the same message at the previous position.
-              // Use only text segments (skip emoji fallbackText from message.text)
-              // to avoid ghost rendering of "PiesP Smile" etc. alongside emoji images.
-              if (msg.renderMessage) {
-                const ghostFont = this.boundGetFont(this.settings.fontSize);
-                ctx.font = ghostFont;
-                ctx.textBaseline = 'top';
-                ctx.textRendering = 'optimizeSpeed';
-                ctx.fontKerning = 'none';
-                const ghostColor =
-                  msg.renderMessage.userColor && this.settings.preserveUserColor
-                    ? msg.renderMessage.userColor
-                    : (msg.renderMessage.authorType &&
-                        this.settings.colors[msg.renderMessage.authorType]) ||
-                      this.settings.colors.normal;
-                ctx.fillStyle = ghostColor;
-                // Build ghost text from text segments only — skip emoji fallbackText
-                // which would appear as faint ghost text alongside emoji images.
-                const ghostText = getDisplayText(msg.renderMessage.content);
-                if (ghostText) {
-                  ctx.fillText(
-                    ghostText,
-                    Math.floor(msg._prevX) + rendererLayout.paddingH,
-                    Math.floor(msg._prevY) + rendererLayout.paddingV
-                  );
-                }
-              }
-              ctx.restore();
-            }
-          }
-
-          const renderMessage = msg.renderMessage;
-
-          if (msg.message.kind === 'text') {
-            const isReplace = this.settings.translationMode === 'replace';
-            renderRegularMessage(
-              ctx,
-              renderMessage,
-              snappedX,
-              snappedY,
-              {
-                fontSize: this.settings.fontSize,
-                fontWeight: this.settings.fontWeight,
-                fontFamily: this.settings.fontFamily,
-                outlineWidthPx: this.settings.outline.widthPx,
-                outlineOpacity: this.settings.outline.opacity,
-                showAuthor: this.settings.showAuthor[renderMessage.authorType],
-                color:
-                  this.settings.preserveUserColor && renderMessage.userColor
-                    ? renderMessage.userColor
-                    : this.settings.colors[renderMessage.authorType],
-              },
-              this.textBitmapCache,
-              (url: string) => this.imageFetchManager.emojiCache.get(url),
-              isImageReady,
-              this.imageFetchManager.authorPhotoCache,
-              isImageReady,
-              this.boundGetFont,
-              this.boundMeasureTextWidth,
-              isReplace ? msg.translatedText : undefined,
-              msg.speedTier === SPEED_TIER.FAR ? '1px' : undefined
-            );
-          } else {
-            const cardConfig =
-              msg.message.kind === 'superchat' ? SUPERCHAT_CARD_CONFIG : MEMBERSHIP_CARD_CONFIG;
-            renderPaidCard(
-              ctx,
-              renderMessage,
-              msg.width,
-              msg.height,
-              snappedX,
-              snappedY,
-              elapsed,
-              cardConfig,
-              this.settings,
-              this.textBitmapCache,
-              this.imageFetchManager.authorPhotoCache,
-              this.imageFetchManager.stickerCache,
-              this.imageFetchManager.emojiCache,
-              this.boundGetFont,
-              this.superChatGradientCache
-            );
-          }
-
-          // Render translation in dual mode
-          if (msg.translatedText && this.settings.translationMode !== 'replace') {
-            const fontSize = Math.max(
-              1,
-              Math.round(this.settings.fontSize * TRANSLATION_FONT_SCALE)
-            );
-            const gap = TRANSLATION_GAP_PX;
-            const transY = snappedY + msg.height - fontSize - gap;
-            const transColor =
-              this.settings.preserveUserColor && renderMessage.userColor
-                ? renderMessage.userColor
-                : (msg.message.authorType && this.settings.colors[msg.message.authorType]) ||
-                  this.settings.colors.normal;
-            ctx.save();
-            try {
-              ctx.globalAlpha = bucketOpacity * TRANSLATION_OPACITY_SCALE;
-              const transFont = getFontString(fontSize, 'normal', this.settings.fontFamily);
-              renderSegment(
-                ctx,
-                msg.translatedText,
-                snappedX,
-                transY,
-                transColor,
-                fontSize,
-                this.settings.outline.widthPx,
-                this.settings.outline.opacity,
-                this.textBitmapCache,
-                (_fs: number) => transFont
-              );
-            } finally {
-              ctx.restore();
-            }
-          }
-        }
-      } finally {
-        ctx.globalAlpha = 1;
-      }
-    }
-  }
-
-  /**
-   * Render pulsing-border glow effects for membership/superchat cards.
-   * Uses ctx.filter blur for GPU-accelerated Gaussian blur (all browsers).
-   * Drawn BEFORE text passes so glow renders beneath the text layer.
-   */
-  private drawGlowStage(ctx: CanvasRenderingContext2D, buckets: CanvasMessage[][]): void {
-    for (let bucketIndex = 0; bucketIndex < OPACITY_BUCKET_COUNT; bucketIndex++) {
-      const entries = buckets[bucketIndex];
-      if (!entries || entries.length === 0) continue;
-      for (const msg of entries) {
-        if (!msg.message || msg.message.kind === 'text') continue;
-        const renderMessage = msg.renderMessage;
-        if (!renderMessage) continue;
-
-        const cardConfig =
-          renderMessage.kind === 'superchat' ? SUPERCHAT_CARD_CONFIG : MEMBERSHIP_CARD_CONFIG;
-
-        if (cardConfig.decoration !== 'pulsingBorder') continue;
-        const pb = cardConfig.pulsingBorder;
-        if (!pb) continue;
-
-        const elapsed = msg._frameElapsed ?? 0;
-        const sinIndex = ((elapsed * SIN_LUT_SCALE) | 0) & 255;
-        const pulse = SIN_TABLE[sinIndex]! * pb.amplitude + pb.baseAlpha;
-        if (pulse <= 0.01) continue;
-
-        const alpha = Math.min(1, pulse * 0.3);
-        ctx.save();
-        ctx.globalAlpha = alpha;
-        ctx.filter = 'blur(8px)';
-        ctx.fillStyle = `rgb(${pb.borderRgb.r},${pb.borderRgb.g},${pb.borderRgb.b})`;
-        ctx.fillRect(Math.floor(msg.x) - 4, Math.floor(msg.y) - 4, msg.width + 8, msg.height + 8);
-        ctx.restore();
-      }
-    }
-  }
-
-  /** Maximum number of snippets to mirror to the aria-live region. */
-  private static readonly LIVE_REGION_MAX_MESSAGES = 10;
-  /** Throttle interval for aria-live mirroring to avoid spamming screen readers at 60fps. */
-  private static readonly LIVE_REGION_THROTTLE_MS = 500;
-  /** Last timestamp when updateLiveRegion was called, for throttling. */
-  private lastLiveRegionUpdate = 0;
-
-  /**
-   * Mirror snippets from visible canvas messages to an offscreen aria-live
-   * region so screen readers, find-in-page, and translation tools can
-   * discover canvas-rendered text content.
-   *
-   * Throttled to at most once per 500ms to avoid flooding the live region
-   * with updates at 60fps.
-   */
-  private mirrorVisibleMessages(): void {
-    const now = performance.now();
-    if (now - this.lastLiveRegionUpdate < CanvasRenderer.LIVE_REGION_THROTTLE_MS) return;
-    this.lastLiveRegionUpdate = now;
-    const count = Math.min(this.activeMessages.length, CanvasRenderer.LIVE_REGION_MAX_MESSAGES);
-    if (count === 0) return;
-    const snippets: string[] = [];
-    const start = this.activeMessages.length - count;
-    for (let i = start; i < this.activeMessages.length; i++) {
-      const msg = this.activeMessages[i];
-      if (!msg) continue;
-      const text = msg.message.text;
-      if (text) snippets.push(text.slice(0, 80));
-    }
-    if (snippets.length > 0) {
-      this.overlay.updateLiveRegion(snippets);
-    }
-  }
-
-  // ── Queue drain ──────────────────────────────────────────────────────
+  // ── renderFrame stages ─────────────────────────────────────────────────
 
   private drainQueue(now: number): void {
     const t0 = performance.now();
