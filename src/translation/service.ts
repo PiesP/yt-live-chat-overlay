@@ -23,37 +23,11 @@ import { createLogger } from '@util/logging';
 const log = createLogger('TranslationService');
 
 // ── Type declarations for Chrome Translator API ───────────────────────────
+// Types are defined in @platform/translation-adapter and re-exported for
+// use within this module.
 
-interface TranslatorDownloadEvent extends Event {
-  loaded: number;
-  total: number;
-}
-
-interface TranslatorInstance {
-  translate(text: string): Promise<string>;
-  destroy(): void;
-}
-
-interface TranslatorCreateOptions {
-  sourceLanguage: string;
-  targetLanguage: string;
-  monitor?: (monitor: EventTarget) => void;
-}
-
-type TranslatorAvailability = 'available' | 'downloadable' | 'unavailable';
-
-interface TranslatorStatic {
-  create(options: TranslatorCreateOptions): Promise<TranslatorInstance>;
-  availability(options: {
-    sourceLanguage: string;
-    targetLanguage: string;
-  }): Promise<TranslatorAvailability>;
-}
-
-declare global {
-  // eslint-disable-next-line no-var
-  var Translator: TranslatorStatic | undefined;
-}
+import type { TranslatorDownloadEvent, TranslatorInstance } from '@platform/translation-adapter';
+import { getTranslator, isTranslationSupported } from '@platform/translation-adapter';
 
 // ── Public API ────────────────────────────────────────────────────────────
 
@@ -124,7 +98,7 @@ export class TranslationService {
       return;
     }
 
-    if (typeof Translator === 'undefined') {
+    if (!getTranslator()) {
       log.warn('Chrome Translator API not available (requires Chrome 138+). Translation disabled.');
       this.enabled = false;
       return;
@@ -202,7 +176,7 @@ export class TranslationService {
     this.pendingTarget = targetLanguage;
 
     try {
-      const availability = await Translator?.availability({
+      const availability = await getTranslator()?.availability({
         sourceLanguage,
         targetLanguage,
       });
@@ -224,7 +198,7 @@ export class TranslationService {
       // (requires user activation within 5 seconds). The Promise resolves once
       // the download completes and the translator is ready.
       this.translator =
-        (await Translator?.create({
+        (await getTranslator()?.create({
           sourceLanguage,
           targetLanguage,
           monitor: (monitor: EventTarget) => {
@@ -263,7 +237,7 @@ export class TranslationService {
 
   /** Check if the browser supports the Translator API. */
   static isSupported(): boolean {
-    return typeof Translator !== 'undefined';
+    return isTranslationSupported();
   }
 
   /** Whether translation is currently active (translator ready). */
