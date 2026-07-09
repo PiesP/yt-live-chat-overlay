@@ -58,9 +58,9 @@ export interface CardConfigWorker {
   headerTagColor: string;
   headerTagMarginTop: number;
   headerTagMarginBottom: number;
-  authorShow: boolean; // pre-resolved: does settings.showAuthor.superChat (or equivalent) allow it?
+  authorShow: boolean;
   authorNameMaxWidth: number;
-  bodyMaxLines: number; // pre-resolved from settings
+  bodyMaxLines: number;
   bodyMarginTop: number;
   stickerEnabled: boolean;
   stickerSizeScale: number;
@@ -69,32 +69,25 @@ export interface CardConfigWorker {
   showBadgeAmount: boolean;
   padding: { horizontal: number; vertical: number };
   cardRadius: number;
-  textColor: string; // pre-resolved: either 'auto' result or explicit color
-  resolveColorRgb: RgbColor; // pre-resolved resolveColor(message) result
+  textColor: string;
+  resolveColorRgb: RgbColor;
   needsGradientCache: boolean;
   needsElapsed: boolean;
 }
 
 /**
  * Convert main-thread CardConfig to worker-safe CardConfigWorker by pre-resolving callbacks.
- * @param config The main-thread CardConfig with callbacks.
- * @param message The specific chat message to resolve per-message callbacks against.
- * @param settings The current overlay settings.
  */
 export function toWorkerConfig(
   config: CardConfig,
   message: ChatMessage,
   settings: OverlaySettings
 ): CardConfigWorker {
-  // Pre-resolve base colour
   const resolveColorRgb = config.resolveColor(message);
   const baseColor = `rgb(${resolveColorRgb.r}, ${resolveColorRgb.g}, ${resolveColorRgb.b})`;
   const textColor =
     config.textColor === 'auto' ? computeReadableTextColor(baseColor) : config.textColor;
 
-  // Pre-resolve accent bar — the worker accesses it through card.accentBar.color
-  // (structurally nested), not a top-level field.  The raw value is inlined
-  // into the accentBar sub-object below.
   const accentBar = config.accentBar;
   let accentBarWorker: CardConfigWorker['accentBar'];
   if (accentBar) {
@@ -103,13 +96,11 @@ export function toWorkerConfig(
     accentBarWorker = { width: accentBar.width, color: resolvedColor };
   }
 
-  // Pre-resolve author visibility
   const authorShow =
     typeof config.authorSection.show === 'function'
       ? config.authorSection.show(message, settings)
       : config.authorSection.show;
 
-  // Pre-resolve body max lines
   const bodyMaxLines =
     config.body.maxLines === 'fromSettings'
       ? message.kind === 'superchat'
@@ -132,14 +123,14 @@ export function toWorkerConfig(
           amplitude: config.pulsingBorder.amplitude,
         }
       : undefined,
-    badgeEnabled: config.badge?.enabled ?? false,
+    badgeEnabled: config.badge !== undefined,
     badgeFillColor: config.badge?.fillColor ?? '',
     badgeStrokeColor: config.badge?.strokeColor ?? '',
     badgeRadius: config.badge?.radius ?? 0,
     badgePaddingH: config.badge?.paddingH ?? 0,
     badgePaddingV: config.badge?.paddingV ?? 0,
     badgeStrokeWidth: config.badge?.strokeWidth ?? 0,
-    headerTagEnabled: config.headerTag?.enabled ?? false,
+    headerTagEnabled: config.headerTag !== undefined,
     headerTagFontSizeScale: config.headerTag?.fontSizeScale ?? 0.8,
     headerTagColor: config.headerTag?.color ?? DEFAULT_TEXT_COLOR,
     headerTagMarginTop: config.headerTag?.marginTop ?? 0,
@@ -148,7 +139,7 @@ export function toWorkerConfig(
     authorNameMaxWidth: config.authorSection.nameMaxWidth,
     bodyMaxLines,
     bodyMarginTop: config.body.marginTop,
-    stickerEnabled: config.sticker?.enabled ?? false,
+    stickerEnabled: config.sticker !== undefined,
     stickerSizeScale: config.sticker?.sizeScale ?? 0,
     stickerMarginTop: config.sticker?.marginTop ?? 0,
     showBadgeAmount: settings.showSuperChatAmount,
@@ -181,8 +172,8 @@ export interface CardConfig {
     baseAlpha: number;
     amplitude: number;
   };
+  /** Badge sub-object — omit when not needed (enabled: false). */
   badge?: {
-    enabled: boolean;
     getText: (message: ChatMessage) => string | undefined;
     fillColor: string;
     strokeColor: string;
@@ -191,8 +182,8 @@ export interface CardConfig {
     paddingV: number;
     strokeWidth: number;
   };
+  /** Header tag sub-object — omit when not needed (enabled: false). */
   headerTag?: {
-    enabled: boolean;
     getText: (message: ChatMessage) => string | undefined;
     fontSizeScale: number;
     color: string;
@@ -207,8 +198,8 @@ export interface CardConfig {
     maxLines: number | 'fromSettings';
     marginTop: number;
   };
+  /** Sticker sub-object — omit when not needed (enabled: false). */
   sticker?: {
-    enabled: boolean;
     getUrl: (message: ChatMessage) => string | undefined;
     sizeScale: number;
     marginTop: number;
@@ -237,7 +228,6 @@ export const SUPERCHAT_CARD_CONFIG: CardConfig = {
     },
   },
   badge: {
-    enabled: true,
     getText: (message: ChatMessage) => message.superChat?.amount,
     fillColor: SUPERCHAT_AMOUNT_BADGE_FILL,
     strokeColor: SUPERCHAT_AMOUNT_BADGE_STROKE,
@@ -246,14 +236,7 @@ export const SUPERCHAT_CARD_CONFIG: CardConfig = {
     paddingV: rendererLayout.superchatBadge.paddingV,
     strokeWidth: rendererLayout.superchatBadgeStrokeWidth,
   },
-  headerTag: {
-    enabled: false,
-    getText: () => undefined,
-    fontSizeScale: 0.8,
-    color: DEFAULT_TEXT_COLOR,
-    marginTop: 0,
-    marginBottom: 0,
-  },
+  // headerTag: disabled for SuperChat — omitted
   authorSection: {
     show: (message: ChatMessage, settings: OverlaySettings) =>
       settings.showAuthor.superChat && !!message.author,
@@ -264,7 +247,6 @@ export const SUPERCHAT_CARD_CONFIG: CardConfig = {
     marginTop: spacing.xs,
   },
   sticker: {
-    enabled: true,
     getUrl: (message: ChatMessage) => message.superChat?.sticker?.url,
     sizeScale: rendererLayout.superchatStickerSize,
     marginTop: spacing.xs,
@@ -296,18 +278,8 @@ export const MEMBERSHIP_CARD_CONFIG: CardConfig = (() => {
       baseAlpha: mem.borderAlpha,
       amplitude: mem.borderAlphaAmplitude,
     },
-    badge: {
-      enabled: false,
-      getText: () => undefined,
-      fillColor: '',
-      strokeColor: '',
-      radius: 0,
-      paddingH: 0,
-      paddingV: 0,
-      strokeWidth: 0,
-    },
+    // badge: disabled for Membership — omitted
     headerTag: {
-      enabled: true,
       getText: (message: ChatMessage) => message.membershipHeader,
       fontSizeScale: 0.8,
       color: mem.headerText,
@@ -322,12 +294,7 @@ export const MEMBERSHIP_CARD_CONFIG: CardConfig = (() => {
       maxLines: 'fromSettings',
       marginTop: spacing.xs,
     },
-    sticker: {
-      enabled: false,
-      getUrl: () => undefined,
-      sizeScale: 0,
-      marginTop: 0,
-    },
+    // sticker: disabled for Membership — omitted
     padding: {
       horizontal: rendererLayout.membership.paddingH,
       vertical: rendererLayout.membership.paddingV,

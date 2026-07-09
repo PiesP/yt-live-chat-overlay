@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
+/** Check if an image element is fully loaded and has valid dimensions. */
+function isImageReady(img: unknown): boolean {
+  return (img as HTMLImageElement)?.complete === true && (img as HTMLImageElement).naturalWidth > 0;
+}
+
 /**
  * CanvasRenderer — Canvas 2D-based renderer.
  *
@@ -77,7 +82,6 @@ import {
   measureTextHeight,
   measureTextWidth,
 } from '@renderer/text-measure';
-import { isImageReady } from '@renderer/worker/bridge';
 import { RenderWorkerManager } from '@renderer/worker/manager';
 import { ChannelLanguageMemory } from '@translation/channel-memory';
 import { LanguageDetectorService } from '@translation/language-detector';
