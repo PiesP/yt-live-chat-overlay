@@ -23,7 +23,7 @@ import type { AuthorType, OverlaySettings } from '@app-types';
  * guarantees exhaustiveness at compile time — adding a new setting without an
  * entry here is a type error.
  */
-export type SettingMeta = {
+type SettingMeta = {
   type: 'boolean' | 'number' | 'string';
   visual: boolean;
   /** Display scale factor for UI (e.g. 100 for percentages, 1 for raw values). Only meaningful for 'number'. */

@@ -37,7 +37,7 @@ const EMPTY_MESSAGE_BODY: ParsedMessageBody = Object.freeze({
   visibleLength: 0,
 });
 
-export interface ParsedMessageBody {
+interface ParsedMessageBody {
   text: string;
   content: ContentSegment[];
   visibleLength: number;
