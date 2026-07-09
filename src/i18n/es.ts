@@ -69,6 +69,7 @@ export const ES: Record<string, string> = {
   日本語: 'Japonés',
   Español: 'Español',
   中文: 'Chino',
+  العربية: 'Árabe',
   'Duration Multiplier (×)': 'Multiplicador de duración (×)',
   'Exit Padding (px)': 'Margen de salida (px)',
   'Min Scroll Duration (ms)': 'Duración mín. desplazamiento (ms)',

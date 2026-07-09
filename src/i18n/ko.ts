@@ -68,6 +68,7 @@ export const KO: Record<string, string> = {
   日本語: '일본어',
   Español: '스페인어',
   中文: '중국어',
+  العربية: '아랍어',
   'Duration Multiplier (×)': '표시 시간 배율 (×)',
   'Exit Padding (px)': '종료 여백 (px)',
   'Min Scroll Duration (ms)': '최소 스크롤 시간 (ms)',

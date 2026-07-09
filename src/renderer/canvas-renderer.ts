@@ -25,6 +25,7 @@
 import type { Overlay } from '@app/overlay';
 import type { ChatMessage, DropReason, OverlayDimensions, OverlaySettings } from '@app-types';
 import { getTranslatableText } from '@chat/message-helpers';
+import { t } from '@i18n/index';
 import { ImageFetchManager } from '@media/image-fetch-manager';
 import { renderPaidCard } from '@renderer/canvas/card-renderers';
 import { COMPACTION_THRESHOLD_RATIO, fastRandom } from '@renderer/canvas/pipeline-utils';
@@ -89,7 +90,6 @@ import { LruMap } from '@util/lru-map';
 import { MessageActivator } from '@util/message-activator';
 import { PriorityBucketQueue } from '@util/priority-bucket-queue';
 import { schedulerPostTask, yieldIfOverBudget } from '@util/scheduler-utils';
-import { t } from '@i18n/index';
 
 const log = createLogger('RendererCanvas');
 
