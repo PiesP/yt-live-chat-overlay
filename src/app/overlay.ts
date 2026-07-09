@@ -25,19 +25,19 @@ const log = createLogger('Overlay');
 const OVERLAY_ID = 'yt-live-chat-overlay';
 export const OVERLAY_SELECTOR = `#${OVERLAY_ID}`;
 
-/** Return the native/endonym name for a supported language code. */
+/** Return the native/endonym name for a supported language code, translated to the current UI language. */
 const getLocalizedName = (lang: string): string =>
   lang === 'ar'
-    ? 'العربية'
+    ? t('العربية')
     : lang === 'zh-CN'
-      ? '中文'
+      ? t('中文')
       : lang === 'ko'
-        ? '한국어'
+        ? t('한국어')
         : lang === 'ja'
-          ? '日本語'
+          ? t('日本語')
           : lang === 'es'
-            ? 'Español'
-            : 'English';
+            ? t('Español')
+            : t('English');
 
 const calculateOverlayDimensionsFromRect = (
   width: number,
