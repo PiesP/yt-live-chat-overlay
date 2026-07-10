@@ -428,7 +428,10 @@ export class RuntimeManager {
   }
 
   private handleSessionRestart(reason: RuntimeSessionRestartReason): void {
-    if (this.state === 'destroyed' || this.state === 'restarting') {
+    // The 'restarting' state is set by requestManagedRestart() before calling
+    // this method — do NOT guard against it here.  isDisposedState (checked in
+    // requestManagedRestart) prevents double-entry before the state transition.
+    if (this.state === 'destroyed') {
       return;
     }
 
