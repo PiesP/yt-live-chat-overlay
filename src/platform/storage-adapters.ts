@@ -52,7 +52,7 @@ export function getStorageAdapter(): StorageAdapter {
           const value = result[key];
           if (value === undefined || value === null) return null;
           return typeof value === 'string' ? value : JSON.stringify(value);
-        } catch (error: unknown) {
+        } catch (_error: unknown) {
           return null;
         }
       },
@@ -81,7 +81,7 @@ export function getStorageAdapter(): StorageAdapter {
           if (rawValue === undefined || rawValue === null) return null;
           if (typeof rawValue === 'object') return JSON.stringify(rawValue);
           return String(rawValue);
-        } catch (error: unknown) {
+        } catch (_error: unknown) {
           return null;
         }
       },
@@ -102,7 +102,7 @@ export function getStorageAdapter(): StorageAdapter {
     async getItem(key: string): Promise<string | null> {
       try {
         return localStorage.getItem(key);
-      } catch (error: unknown) {
+      } catch (_error: unknown) {
         return null;
       }
     },

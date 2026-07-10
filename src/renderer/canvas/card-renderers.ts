@@ -347,7 +347,7 @@ export function renderPaidCard(
   }
 
   // 5. Header tag (tier name / membership duration)
-  if (config.headerTag && config.headerTag.getText) {
+  if (config.headerTag?.getText) {
     const headerText = config.headerTag.getText(message);
     if (headerText) {
       const headerMaxWidth = w - padH * 2;
@@ -366,7 +366,7 @@ export function renderPaidCard(
   }
 
   // 6. Badge (amount pill) — respects showSuperChatAmount setting
-  if (config.badge && config.badge.getText && settings.showSuperChatAmount) {
+  if (config.badge?.getText && settings.showSuperChatAmount) {
     const badgeText = config.badge.getText(message);
     if (badgeText) {
       cursorY = renderCardBadge(
@@ -411,7 +411,7 @@ export function renderPaidCard(
   }
 
   // 8. Sticker
-  if (config.sticker && config.sticker.getUrl) {
+  if (config.sticker?.getUrl) {
     const stickerUrl = config.sticker.getUrl(message);
     if (stickerUrl) {
       const cached = stickerCache.get(stickerUrl);
