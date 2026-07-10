@@ -58,11 +58,6 @@ const OUTLINE_COLOR_CACHE_MAX = 64;
  *  calculations for the same text-color/opacity pair across multiple render calls. */
 const outlineColorCache = new Map<string, string>();
 
-/** Clear the outline color cache. Used by tests to reset module-level state. */
-export function resetOutlineColorCache(): void {
-  outlineColorCache.clear();
-}
-
 /**
  * Compute an outline color derived from text color with opacity.
  *

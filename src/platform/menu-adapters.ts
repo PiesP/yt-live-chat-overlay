@@ -26,8 +26,3 @@ export function registerMenuCommands(commands: MenuCommand[]): void {
     GM_registerMenuCommand(cmd.name, cmd.action);
   }
 }
-
-/** Reset registered commands set (for test isolation). */
-export function resetRegisteredCommands(): void {
-  registeredCommandNames.clear();
-}

@@ -50,11 +50,6 @@ export function setOverlayLogLevel(level: LogLevel): void {
   currentLogLevel = level;
 }
 
-/** Reset the log level to default for test isolation. */
-export function resetLogLevel(): void {
-  currentLogLevel = DEFAULT_LOG_LEVEL;
-}
-
 interface ModuleLogger {
   debug: (...args: ConsoleLogArgs) => void;
   info: (...args: ConsoleLogArgs) => void;
