@@ -16,6 +16,8 @@ import { COMPACTION_THRESHOLD_RATIO } from '@renderer/canvas/pipeline-utils';
 import { getDisplayText, renderRegularMessage, renderSegment } from '@renderer/canvas/shared';
 import { MEMBERSHIP_CARD_CONFIG, SUPERCHAT_CARD_CONFIG } from '@renderer/card-config';
 import {
+  ANTI_BLOCK_MAX_DURATION_MS,
+  ANTI_BLOCK_PRIORITY_THRESHOLD,
   type CanvasMessage,
   OPACITY_BUCKET_COUNT,
   SIN_LUT_SCALE,
@@ -136,9 +138,7 @@ export function drainStage(ctx: CanvasRenderContext, now: number, _dims: Overlay
     }
 
     const peeked = ctx.pendingQueue.peek();
-    // Use local imports for constants
-    const ANTI_BLOCK_MAX_DURATION_MS = 10_000;
-    const ANTI_BLOCK_PRIORITY_THRESHOLD = 80;
+    // Use shared constants from @renderer/constants
 
     const forceDrain =
       peeked !== undefined && currentNow - ctx.antiBlockSince >= ANTI_BLOCK_MAX_DURATION_MS;
