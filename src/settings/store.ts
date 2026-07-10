@@ -64,6 +64,13 @@ export class Settings {
   }
 
   async destroy(): Promise<void> {
+    // Remove cross-tab sync listener synchronously BEFORE awaiting the async
+    // flushSave.  The adapter is a cached singleton shared by all Settings
+    // instances — if a new instance calls startCrossTabSync() during the
+    // await gap, this stale removeListener() would null out its callback.
+    this.stopCrossTabSync();
+    this.onChangeCallbacks.clear();
+
     // Cancel any idle callback / timeout to avoid a race where flushSave() fires after destroy().
     if (this.saveIdleHandle !== 0) {
       cancelIdleCallback(this.saveIdleHandle);
@@ -73,10 +80,7 @@ export class Settings {
       clearTimeout(this.saveTimeoutHandle);
       this.saveTimeoutHandle = null;
     }
-    // Await the flush to ensure the async save completes before tearing down.
     await this.flushSave();
-    this.stopCrossTabSync();
-    this.onChangeCallbacks.clear();
   }
 
   private startCrossTabSync(): void {
