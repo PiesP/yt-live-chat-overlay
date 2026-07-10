@@ -447,6 +447,7 @@ export class WorkerRenderer {
   private authorPhotoCache!: ByteLimitedCache<ImageBitmap>;
   private stickerCache!: ByteLimitedCache<ImageBitmap>;
   private superChatGradientCache = new LruMap<string, CanvasGradient>(GRADIENT_CACHE_MAX);
+  private readonly messageById = new Map<string, WorkerMessage | ActiveMessage>();
   private fetching = new Set<string>();
   private farOpacityBuckets: ActiveMessage[][] = Array.from({ length: OPACITY_BUCKETS }, () => []);
   private midOpacityBuckets: ActiveMessage[][] = Array.from({ length: OPACITY_BUCKETS }, () => []);
@@ -589,17 +590,9 @@ export class WorkerRenderer {
           case 'updateTranslation': {
             const msgId = data.id as string;
             const translatedText = data.translatedText as string;
-            for (const msg of this.activeMessages) {
-              if (msg.id === msgId) {
-                msg.translatedText = translatedText;
-                break;
-              }
-            }
-            for (const msg of this.pendingQueue) {
-              if (msg.id === msgId) {
-                msg.translatedText = translatedText;
-                break;
-              }
+            const msg = this.messageById.get(msgId);
+            if (msg) {
+              msg.translatedText = translatedText;
             }
             break;
           }
@@ -702,6 +695,7 @@ export class WorkerRenderer {
       return;
     }
     this.pendingQueue.push(msg);
+    this.messageById.set(msg.id, msg);
     this.pendingQueueSortNeeded = true;
     if (this.animFrameId === null && !this.isDestroyed) {
       this.startRenderLoop();
@@ -746,6 +740,7 @@ export class WorkerRenderer {
     this.authorPhotoCache.clear();
     this.stickerCache.clear();
     this.superChatGradientCache.clear();
+    this.messageById.clear();
   }
 
   /**
@@ -757,6 +752,7 @@ export class WorkerRenderer {
     this.activeMessages.length = 0;
     this.pendingQueue.length = 0;
     this.pendingQueueOffset = 0;
+    this.messageById.clear();
     // Rebuild lane allocator from existing dimensions (numLanes/laneHeight
     // are preserved from the last initLanes/resize call).
     const now = performance.now();
@@ -977,6 +973,7 @@ export class WorkerRenderer {
       isScrolling ? msg.width : undefined
     );
     this.activeMessages.push(am);
+    this.messageById.set(msg.id, am);
     if (msg.content) {
       const emojiUrls: string[] = [];
       for (const seg of msg.content) {
@@ -1044,6 +1041,7 @@ export class WorkerRenderer {
       const elapsed = now - msg.startTime - msg.pausedDuration;
       // Expired: remove via skip (don't write to writeIdx position)
       if (elapsed >= msg.duration) {
+        this.messageById.delete(msg.id);
         continue;
       }
       // Keep message (in-place compaction)

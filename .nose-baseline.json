@@ -9,7 +9,7 @@
       "members": [
         {
           "id": "d60c9e6eb1402b0c",
-          "source_digest": "fnv1a64:762816cc91cc6ffd",
+          "source_digest": "fnv1a64:6092c086be0bef5c",
           "file": "src/renderer/canvas-renderer.ts",
           "lang": "typescript",
           "start_line": 937,
@@ -19,7 +19,7 @@
         },
         {
           "id": "ec3e48509eaaccee",
-          "source_digest": "fnv1a64:c3b8d88318dd4ca1",
+          "source_digest": "fnv1a64:6d7c3fbe20c6738c",
           "file": "src/renderer/canvas-renderer.ts",
           "lang": "typescript",
           "start_line": 1009,
