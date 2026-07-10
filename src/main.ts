@@ -300,6 +300,13 @@ async function initApp(): Promise<void> {
     log.info('App instance exposed to window.__ytChatOverlay');
   } catch (error: unknown) {
     log.error('Fatal error:', error);
+
+    // Fallback recovery: if the user navigated away during init, re-install
+    // the SPA bootstrap so the next navigation to a video page triggers a
+    // fresh initApp() attempt.
+    if (!isVideoPage()) {
+      setupSpaBootstrap();
+    }
   }
 }
 
