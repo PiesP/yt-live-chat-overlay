@@ -43,39 +43,3 @@ export type MenuCommand = {
   /** Action to execute when the command is selected. */
   action: () => void;
 };
-
-/** Platform-native menu registration (userscript menu, context menu, etc.). */
-export type MenuAdapter = {
-  /** Register one or more menu commands. Idempotent — safe to call multiple times. */
-  register(commands: MenuCommand[]): void;
-  /** Whether menu registration is supported in this environment. */
-  isSupported(): boolean;
-};
-
-// ── Worker ────────────────────────────────────────────────────────────────
-
-/** Resolves the URL for a render worker bundle. */
-export type WorkerFactory = {
-  /**
-   * Create a worker URL from a relative module path.
-   * @param relativePath Module-relative path, e.g. './renderer-worker.ts'.
-   * @returns URL that can be passed to `new Worker(url, { type: 'module' })`.
-   */
-  createWorkerUrl(relativePath: string): string | URL;
-};
-
-// ── Language ───────────────────────────────────────────────────────────────
-
-/**
- * Provides the browser's UI language hint.
- *
- * Core modules never call chrome.* directly. The platform bootstrap wires
- * the appropriate implementation (Chrome extension vs. userscript vs. fallback).
- */
-export type LanguageAdapter = {
-  /**
-   * Return the browser's UI language code (e.g. "en", "ko", "ja"),
-   * or undefined if the platform cannot determine it.
-   */
-  getUILanguage(): string | undefined;
-};
