@@ -189,7 +189,7 @@ export class RuntimeManager {
   /** Unsubscribe handle for the fetch interceptor. */
   private fetchInterceptorUnsubscribe: InterceptorUnsubscribe | null = null;
   /** Unsubscribe handle for the DOM chat watcher (fallback). */
-  private domWatcherUnsubscribe: DomWatcherUnsubscribe | null = null;
+  private domWatcherUnsubscribe: DomWatcherUnsubscribe = null;
   /** Observer that tracks when YouTube's chat panel opens or closes. */
   private chatPanelObserver: ChatPanelObserver = new ChatPanelObserver();
   /** Backlog messages preserved across soft restarts for re-injection. */
