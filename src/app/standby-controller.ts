@@ -33,8 +33,6 @@ export class StandbyController {
   private renderer: RendererBase | null = null;
   /** Generation counter to guard against stale poll callbacks after exit(). */
   private pollGeneration = 0;
-  /** Generation counter to guard against stale poll callbacks after exit(). */
-  private pollGeneration = 0;
 
   constructor(
     private readonly getAbortSignal: () => AbortSignal,
@@ -60,14 +58,13 @@ export class StandbyController {
    *  Safe to call multiple times; subsequent calls are no-ops.
    *  Called by destroy() and by RuntimeManager during session teardown. */
   exit(): void {
-    exit(): void {
-      if (!this.mode) return; // already exited — idempotent
-      this.mode = false;
-      this.pollGeneration++;
-      this.stopPolling();
-      this.retryTimer = clearSafeTimeout(this.retryTimer);
-      this.renderer?.setStandbyStatus(false);
-    }
+    if (!this.mode) return; // already exited — idempotent
+    this.mode = false;
+    this.pollGeneration++;
+    this.stopPolling();
+    this.retryTimer = clearSafeTimeout(this.retryTimer);
+    this.renderer?.setStandbyStatus(false);
+  }
 
   /** Whether currently in standby mode. */
   isStandby(): boolean {
