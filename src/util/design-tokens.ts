@@ -164,6 +164,8 @@ export const rendererLayout = {
     /** Border radius of the badge pill (px) */
     radius: 12,
   },
+  // SSOT: these 4 values mirror DEFAULT_SETTINGS in src/settings/defaults.ts
+  // Update there first if defaults need changing (circular dep prevents direct import).
   /** Pending queue max size */
   queueMaxSize: 200,
   /** Background queue max */
@@ -188,7 +190,8 @@ export const rendererLayout = {
    *  Derived from: superchatMaxWidth - paddingH*2 - authorPhotoSize - spacing.sm
    *  = 640 - 48 - 24 - 8 = 560. Prevents long names from overflowing the card. */
   authorNameMaxWidth: 560,
-  /** Headway gap ratio: fraction of message width used as gap between consecutive messages on the same lane. */
+  /** Headway gap ratio: fraction of message width used as gap between consecutive messages on the same lane.
+   *  SSOT: mirrors DEFAULT_SETTINGS.headwayGapRatio. */
   headwayGapRatio: 0.08,
 } as const;
 
