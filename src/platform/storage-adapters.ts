@@ -90,7 +90,7 @@ export function getStorageAdapter(): StorageAdapter {
         try {
           GM_setValue(key, value);
         } catch (error: unknown) {
-          // silently ignore
+          log.warn('GM_setValue failed:', error);
         }
       },
     };
