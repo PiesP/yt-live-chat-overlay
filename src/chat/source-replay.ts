@@ -322,6 +322,9 @@ export class ReplayChatSource extends ChatSource {
         try {
           if (gen !== this.seekGeneration) return;
           await this.fetchReplayPlayerSeek(offsetMs, seekSignal);
+          // Guard: if seekGeneration was incremented by a subsequent seek
+          // during the fetch, discard stale data to avoid emitting messages
+          // from an outdated seek position.
           if (gen !== this.seekGeneration) return;
           this.flushReplayBuffer(offsetMs);
           this.startPrefetch();

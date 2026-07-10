@@ -349,14 +349,17 @@ export abstract class ChatSource implements Pauseable {
     // video-pause event ordering. Force-unpause to recover message delivery.
     // Without this, the fetch interceptor and DOM watcher would silently
     // drop all messages while YouTube's own chat panel continues to update.
-    if (this.chatPaused && document.visibilityState === 'visible') {
+    if (this.chatPaused && document.visibilityState !== 'hidden') {
       const playback = this.getPlaybackSnapshot();
       if (playback && !playback.paused) {
         log.warn(
           'chatPaused state drift detected — tab visible + video playing but chatPaused=true. ' +
             'Force-unpausing to recover message delivery.'
         );
-        // Bypass setPaused() to avoid creating an abort controller we don't need
+        // Abort any pending pause listeners before force-unpausing,
+        // otherwise the orphaned pauseAbortController signal lingers.
+        this.pauseAbortController?.abort();
+        // Bypass setPaused() to avoid creating a new abort controller we don't need.
         this.chatPaused = false;
       }
     }

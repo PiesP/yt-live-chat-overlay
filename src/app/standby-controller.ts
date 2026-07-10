@@ -31,6 +31,8 @@ export class StandbyController {
   private pollDelay = RECHECK_INTERVAL_MS;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private renderer: RendererBase | null = null;
+  /** Generation counter to guard against stale poll callbacks after exit(). */
+  private pollGeneration = 0;
 
   constructor(
     private readonly getAbortSignal: () => AbortSignal,
@@ -58,6 +60,7 @@ export class StandbyController {
   exit(): void {
     if (!this.mode) return; // already exited — idempotent
     this.mode = false;
+    this.pollGeneration++;
     this.stopPolling();
     this.retryTimer = clearSafeTimeout(this.retryTimer);
     this.renderer?.setStandbyStatus(false);
@@ -89,8 +92,14 @@ export class StandbyController {
   private async poll(): Promise<void> {
     if (this.isDisposed() || !this.mode) return;
 
+    // Bail early if exit() was called while we were awaiting a previous tick
+    // (e.g., during sleep between scheduled polls).
+    const gen = this.pollGeneration;
+
     try {
       const result = await bootstrapChatSession(this.getAbortSignal());
+      if (gen !== this.pollGeneration) return; // stale — exit() was called during fetch
+
       if (result.status === 'ready') {
         log.info('Stream detected — requesting managed restart from standby');
         this.stopPolling();
