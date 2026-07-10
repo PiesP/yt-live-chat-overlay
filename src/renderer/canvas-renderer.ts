@@ -962,7 +962,7 @@ export class CanvasRenderer extends RendererBase {
         const warmColor =
           this.settings.preserveUserColor && msg.userColor
             ? msg.userColor
-            : this.settings.colors[msg.authorType];
+            : (this.settings.colors[msg.authorType] ?? this.settings.colors.normal);
         const farSpacing = result.speedTier === SPEED_TIER.FAR ? '1px' : undefined;
         warmTextBitmapCache(
           toSharedContentSegments(msg.content),
@@ -1030,7 +1030,7 @@ export class CanvasRenderer extends RendererBase {
         const warmColor =
           this.settings.preserveUserColor && msg.userColor
             ? msg.userColor
-            : this.settings.colors[msg.authorType];
+            : (this.settings.colors[msg.authorType] ?? this.settings.colors.normal);
         const farSpacing = result.speedTier === SPEED_TIER.FAR ? '1px' : undefined;
         warmTextBitmapCache(
           toSharedContentSegments(msg.content),
