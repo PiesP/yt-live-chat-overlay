@@ -91,8 +91,6 @@ export const OUTLINE_NUMERIC_KEYS = ['widthPx', 'opacity'] as const satisfies Re
   Exclude<OutlineSettingKey, 'enabled'>
 >;
 
-export type SettingsLimitKey = keyof typeof SETTINGS_LIMITS;
-
 export { SETTINGS_LIMITS };
 
 /** Maps outline sub-keys to their SETTINGS_LIMITS entries. */
