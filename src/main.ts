@@ -278,11 +278,9 @@ async function initApp(): Promise<void> {
     setupMenuCommands();
 
     // Expose a debug handle for menu commands.  Object.freeze prevents extending
-    // or mutating the value object itself, but window.__ytChatOverlay can still be
-    // reassigned from the console (it's just a data property).  For MAIN-world
-    // script protection, we use Object.defineProperty with writable: false so the
-    // reference itself cannot be overwritten.
-    const debugHandle = Object.freeze({
+    // or mutating the value object itself, while a plain property assignment
+    // allows stopPreviousAppInstance() to clear it for re-injection.
+    window.__ytChatOverlay = Object.freeze({
       start: () => app.start(),
       stop: () => app.stop(),
       restartRuntime: () => app.restartRuntime(),
@@ -290,12 +288,6 @@ async function initApp(): Promise<void> {
       applySettings: (partial: Parameters<typeof app.applySettings>[0]) =>
         app.applySettings(partial),
       resetSettings: () => app.resetSettings(),
-    });
-    Object.defineProperty(window, '__ytChatOverlay', {
-      value: debugHandle,
-      writable: false,
-      configurable: false,
-      enumerable: true,
     });
     log.info('App instance exposed to window.__ytChatOverlay');
   } catch (error: unknown) {
