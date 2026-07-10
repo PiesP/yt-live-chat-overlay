@@ -107,6 +107,10 @@ export function installFetchInterceptor(
   getSettings: () => Readonly<OverlaySettings>,
   onMessages: InterceptorCallback
 ): InterceptorUnsubscribe {
+  // Clear any stale response text cache from a previous session to prevent
+  // the new interceptor from skipping responses that should be processed.
+  responseTextCache.clear();
+
   // Remove any previously installed interceptor first.
   if (activeInterceptor) {
     activeInterceptor.restore();

@@ -400,7 +400,6 @@ export class RuntimeManager {
     // correct state during the transition window.
     this.state = 'restarting';
 
-    this.abortController.abort(); // abort stale signal before replacing
     this.abortController = new AbortController();
     this.state = 'starting';
 
