@@ -48,52 +48,6 @@ let activeInterceptor: {
   interceptedFn: typeof window.fetch;
 } | null = null;
 
-/** How often to verify that window.fetch still points to our interceptor (ms). */
-const VALIDATION_INTERVAL_MS = 5000;
-
-let validationTimerId: ReturnType<typeof setInterval> | null = null;
-
-/**
- * Start a periodic validation that checks whether `window.fetch` has been
- * replaced by a third party (e.g., YouTube's own SPA re-initialization)
- * and re-installs the interceptor if it has been silently removed.
- */
-function startValidation(
-  getSettings: () => Readonly<OverlaySettings>,
-  onMessages: InterceptorCallback
-): void {
-  stopValidation();
-
-  validationTimerId = setInterval(() => {
-    if (!activeInterceptor) {
-      stopValidation();
-      return;
-    }
-
-    // Check if our interceptor is still on the fetch chain.
-    // If window.fetch has been replaced (e.g., YouTube re-patched it after
-    // SPA navigation), our function is gone and the interceptor silently
-    // stops capturing messages. Re-install in-place to restore it.
-    if (window.fetch !== activeInterceptor.interceptedFn) {
-      log.info('Fetch interceptor displaced — re-installing');
-      // Avoid recursion: the restore function guards against
-      // window.fetch !== interceptedFetch, making it a no-op here.
-      // We re-install fresh by calling installFetchInterceptor again.
-      installFetchInterceptor(getSettings, onMessages);
-    }
-  }, VALIDATION_INTERVAL_MS);
-}
-
-/**
- * Stop the periodic fetch chain validation.
- */
-function stopValidation(): void {
-  if (validationTimerId !== null) {
-    clearInterval(validationTimerId);
-    validationTimerId = null;
-  }
-}
-
 /**
  * Install a fetch monkey-patch that intercepts YouTube's own chat requests.
  *
@@ -201,20 +155,16 @@ export function installFetchInterceptor(
   window.fetch = interceptedFetch as typeof window.fetch;
 
   const restore = (): void => {
-    stopValidation();
     if (window.fetch === interceptedFetch) {
       window.fetch = originalFetch;
     }
     if (activeInterceptor?.restore === restore) {
       activeInterceptor = null;
     }
-    stopValidation();
     log.info('Fetch interceptor removed');
   };
 
   activeInterceptor = { restore, interceptedFn: interceptedFetch as typeof window.fetch };
-
-  startValidation(getSettings, onMessages);
 
   log.info('Fetch interceptor installed for YouTube live chat');
   return restore;
