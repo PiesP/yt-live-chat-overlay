@@ -501,10 +501,7 @@ export class RenderWorkerManager {
    */
   sendReducedMotion(reducedMotion: boolean): void {
     if (!this.worker) return;
-    sendUpdateConfigToWorker(
-      { worker: this.worker },
-      { reducedMotion } as Record<string, unknown>
-    );
+    sendUpdateConfigToWorker({ worker: this.worker }, { reducedMotion } as Record<string, unknown>);
   }
 
   /**
