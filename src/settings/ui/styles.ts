@@ -313,7 +313,8 @@ export const SETTINGS_UI_STYLES = `
       }
       .yt-chat-overlay-settings-tab {
         flex: 1;
-        padding: ${spacing.sm}px ${spacing.xs}px;
+        padding: ${spacing.sm + 2}px ${spacing.sm}px;
+        min-height: 40px;
         border: none;
         border-bottom: 2px solid transparent;
         background: transparent;
@@ -391,6 +392,7 @@ export const SETTINGS_UI_STYLES = `
         justify-content: space-between;
         gap: ${spacing.md}px;
         font-size: ${typography.fontSize.sm};
+        min-height: 40px;
       }
       .yt-chat-overlay-settings-field input[type="number"] {
         width: ${uiSizing.inputWidth}px;
@@ -831,7 +833,9 @@ export const SETTINGS_UI_STYLES = `
         appearance: none;
         -webkit-appearance: none;
         font-family: inherit;
-        padding: 3px ${spacing.lg}px;
+        padding: ${spacing.sm - 1}px ${spacing.md}px;
+        min-height: 36px;
+        line-height: 1.3;
         border-radius: ${borderRadius.pill};
         border: 1px solid ${uiColors.border};
         background: ${uiColors.backgroundLight};
