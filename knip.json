@@ -15,5 +15,5 @@
     "@platform/*": ["src/platform/*"]
   },
   "ignore": ["test/**", "extension/**", "dist*/**"],
-  "ignoreBinaries": ["stryker", "e2e"]
+  "ignoreBinaries": ["e2e"]
 }
