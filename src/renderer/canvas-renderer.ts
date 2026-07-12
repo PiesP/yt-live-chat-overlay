@@ -146,7 +146,7 @@ export class CanvasRenderer extends RendererBase {
    * a maximum duration, preventing indefinite message suppression during
    * sustained lane saturation.
    */
-  private antiBlockSince: number | null = null;
+  private antiBlockSinceRef = { value: null as number | null };
   /** Offscreen recovery poll cleanup function. startOffscreenPoll returns a
    *  cleanup callback, not a setInterval handle. */
   private offscreenPollCleanup: (() => void) | null = null;
@@ -269,7 +269,7 @@ export class CanvasRenderer extends RendererBase {
   private hasRenderedStatusBar = false;
 
   /** Last timestamp when updateLiveRegion was called, for throttling. */
-  private lastLiveRegionUpdate = 0;
+  private lastLiveRegionUpdateRef = { value: 0 };
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
     super(overlay, settings);
@@ -310,30 +310,10 @@ export class CanvasRenderer extends RendererBase {
     canvas.setAttribute('aria-hidden', 'true');
     if (container) container.appendChild(canvas);
     this.canvas = canvas;
-    this.ctx = canvas.getContext('2d', { desynchronized: true });
-    if (!this.ctx) {
-      log.warn('Failed to get CanvasRenderingContext2D — renderer will be inactive');
-    } else if (!canvas.isConnected) {
-      log.warn('Canvas created but not connected to DOM — renderer will be inactive');
-    }
 
-    // C1: Listen for Canvas 2D context restoration to recover from GPU crashes / driver resets.
-    // Without this, a context loss permanently disables the renderer until page reload.
+    // ── Phase 1: setup that does NOT depend on canvas context ──────
     //
-    // Note: This codebase uses Canvas2D + OffscreenCanvas Worker only — there is no WebGL2
-    // renderer implementation (the RenderWorkerManagerWebGL2 references in CHANGELOG.md
-    // describe a prior experimental path that has been removed/restructured). Therefore no
-    // webglcontextlost/webglcontextrestored listeners are needed. If a WebGL2 renderer is
-    // added in the future, it must also listen for webglcontextlost and webglcontextrestored
-    // with resource re-initialization (shader recompilation, buffer re-upload, texture restore).
-    canvas.addEventListener('contextlost', (e: Event) => {
-      e.preventDefault();
-      this.ctx = null;
-      log.warn('Canvas 2D context lost — renderer paused until restoration');
-    });
-    canvas.addEventListener('contextrestored', () => this.handleContextRestored());
-
-    // M7: IntersectionObserver for offscreen detection. When the canvas is
+    // IntersectionObserver for offscreen detection. When the canvas is
     // hidden behind a modal/backdrop, pause the renderer. A recovery poll
     // guards against missed intersection entries on modal dismiss.
     this.setupOffscreenObserver(canvas);
@@ -366,9 +346,13 @@ export class CanvasRenderer extends RendererBase {
     // receives a valid reference instead of undefined.
     this.imageFetchManager = new ImageFetchManager();
 
-    // Initialize OffscreenCanvas worker for off-main-thread rendering.
-    // Falls back silently to main-thread rendering when unavailable
-    // (e.g. missing APIs, CSP restrictions, build-time exclusion).
+    // ── Phase 2: attempt OffscreenCanvas worker ────────────────────
+    //
+    // transferControlToOffscreen() requires the canvas to NOT have a
+    // rendering context yet (HTML spec §4.12.5).  We must NOT call
+    // getContext('2d') before this point, otherwise the transfer always
+    // throws InvalidStateError and the renderer silently falls back to
+    // the main thread every time.
     this.workerManager = new RenderWorkerManager({
       settings: this.settings,
       observability: this.observability,
@@ -379,8 +363,35 @@ export class CanvasRenderer extends RendererBase {
     });
     const useWorker = this.workerManager.init(canvas, settings, overlay);
 
+    // ── Phase 3: main-thread fallback setup (only when Worker failed) ──
+
     const dims = overlay.getDimensions();
-    if (!useWorker) this.applyDevicePixelRatio(dims);
+    if (!useWorker) {
+      this.ctx = canvas.getContext('2d', { desynchronized: true });
+      if (!this.ctx) {
+        log.warn('Failed to get CanvasRenderingContext2D — renderer will be inactive');
+      } else if (!canvas.isConnected) {
+        log.warn('Canvas created but not connected to DOM — renderer will be inactive');
+      }
+
+      // C1: Listen for Canvas 2D context restoration to recover from GPU
+      // crashes / driver resets.  Without this, a context loss permanently
+      // disables the renderer until page reload.
+      //
+      // Note: This codebase uses Canvas2D + OffscreenCanvas Worker only —
+      // there is no WebGL2 renderer implementation.  If a WebGL2 renderer
+      // is added in the future, it must also listen for
+      // webglcontextlost/webglcontextrestored with resource re-initialization
+      // (shader recompilation, buffer re-upload, texture restore).
+      canvas.addEventListener('contextlost', (e: Event) => {
+        e.preventDefault();
+        this.ctx = null;
+        log.warn('Canvas 2D context lost — renderer paused until restoration');
+      });
+      canvas.addEventListener('contextrestored', () => this.handleContextRestored());
+
+      this.applyDevicePixelRatio(dims);
+    }
 
     this.overlayDimensionsUnsubscribe = overlay.onDimensionsChanged((d) => {
       if (d && this.canvas) {
@@ -487,19 +498,23 @@ export class CanvasRenderer extends RendererBase {
   addMessage(message: ChatMessage): void {
     if (!this.isMessageAllowed(message)) return;
 
-    // Always enqueue through main-thread pendingQueue so lane allocation
-    // and collision detection run in one place.  When the Worker is active
-    // the placed message is forwarded to it for rendering after drainQueue
-    // succeeds — the Worker no longer maintains its own lane allocator.
-    this.enqueueMessage(message, true);
-
-    // Pre-emptively trigger translation and forward to worker when active.
-    // The worker needs translated text for rendering; we send it asynchronously
-    // so it arrives before or shortly after the placed-message batch.
+    // When the Worker owns the OffscreenCanvas, forward the message
+    // directly and skip main-thread queue/lane management entirely.
+    // The Worker has its own complete render pipeline: pending queue,
+    // lane heap, collision detection, anti-block logic, and draw.
     if (this.workerManager.isActive) {
+      const msgId = message.id ?? `${message.timestamp}-${++fallbackMessageIdCounter}`;
+      this.workerManager.sendToWorker(message, msgId);
+
+      this.imageFetchManager.prefetchImages(message);
+      this.lastRenderActivity = performance.now();
+
+      // Pre-emptively trigger translation and forward to worker.
+      // The worker needs translated text for rendering; we send it
+      // asynchronously so it arrives before or shortly after the
+      // placed-message batch.
       const translatableText = getTranslatableText(message);
       if (this.translationService.isEnabled && translatableText) {
-        const msgId = message.id ?? `${message.timestamp}-${++fallbackMessageIdCounter}`;
         this.translationService
           .translate(translatableText)
           .then((translated) => {
@@ -509,7 +524,15 @@ export class CanvasRenderer extends RendererBase {
             // Silently ignore individual translation failures
           });
       }
+      return;
     }
+
+    // ── Main-thread fallback path ──────────────────────────────────
+    //
+    // Enqueue through main-thread pendingQueue so lane allocation and
+    // collision detection run during renderFrame.  The placed message
+    // is drawn by the main-thread canvas pipeline.
+    this.enqueueMessage(message, true);
   }
 
   /**
@@ -856,7 +879,7 @@ export class CanvasRenderer extends RendererBase {
       expiredMessagesScratch: this.expiredMessagesScratch,
       messageActivator: this.messageActivator,
       cachedOpacityConfig: this.cachedOpacityConfig,
-      antiBlockSince: this.antiBlockSince,
+      antiBlockSince: this.antiBlockSinceRef,
       pendingQueue: this.pendingQueue,
       laneAllocator: this.laneAllocator,
       observability: this.observability,
@@ -864,7 +887,7 @@ export class CanvasRenderer extends RendererBase {
       isReducedMotionActive: this.isReducedMotionActive,
       isAntiBlockActive: () => this.isAntiBlockActive(),
       drainQueue: (n: number) => this.drainQueue(n),
-      lastLiveRegionUpdate: this.lastLiveRegionUpdate,
+      lastLiveRegionUpdate: this.lastLiveRegionUpdateRef,
       updateLiveRegion: (s) => this.overlay.updateLiveRegion(s),
     };
   }
@@ -1393,16 +1416,6 @@ export class CanvasRenderer extends RendererBase {
     // Update render activity heartbeat — signals to the watchdog that
     // the renderer is healthy (successfully enqueuing messages).
     this.lastRenderActivity = performance.now();
-
-    // Forward the placed message to the Worker if off-main-thread rendering
-    // is active.  The message still goes through the Worker's internal
-    // pipeline for now, but since the main-thread pipeline has already
-    // validated the placement (lane allocation + collision check), the
-    // Worker can skip its own drainQueue/checkCollision in a future phase.
-    if (this.workerManager.isActive) {
-      const msgId = message.id ?? `${message.timestamp}-${Math.random()}`;
-      this.workerManager.sendToWorker(message, msgId);
-    }
   }
 
   // ── Dimension estimation (delegates to shared functions) ──────────────

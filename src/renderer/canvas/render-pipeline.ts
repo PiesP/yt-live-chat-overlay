@@ -87,8 +87,8 @@ export interface CanvasRenderContext {
     ageFadeRate: number;
   };
 
-  /** Anti-block state — mutable, null when block is inactive. */
-  antiBlockSince: number | null;
+  /** Anti-block state — mutable reference wrapper so pipeline writes propagate back. */
+  antiBlockSince: { value: number | null };
 
   pendingQueue: PriorityBucketQueue;
   laneAllocator: LaneAllocator;
@@ -107,8 +107,8 @@ export interface CanvasRenderContext {
    */
   drainQueue: (now: number) => void;
 
-  /** Last timestamp (performance.now) when the live region was updated. */
-  lastLiveRegionUpdate: number;
+  /** Last timestamp (performance.now) when the live region was updated. Mutable ref. */
+  lastLiveRegionUpdate: { value: number };
   /** Callback to push snippets to the overlay's aria-live region. */
   updateLiveRegion: (snippets: string[]) => void;
 }
@@ -133,21 +133,21 @@ export function drainStage(ctx: CanvasRenderContext, now: number, _dims: Overlay
   // new placements on this frame.
   if (!ctx.isReplayMode && ctx.isAntiBlockActive()) {
     const currentNow = performance.now();
-    if (ctx.antiBlockSince === null) {
-      ctx.antiBlockSince = currentNow;
+    if (ctx.antiBlockSince.value === null) {
+      ctx.antiBlockSince.value = currentNow;
     }
 
     const peeked = ctx.pendingQueue.peek();
     // Use shared constants from @renderer/constants
 
     const forceDrain =
-      peeked !== undefined && currentNow - ctx.antiBlockSince >= ANTI_BLOCK_MAX_DURATION_MS;
+      peeked !== undefined && currentNow - ctx.antiBlockSince.value >= ANTI_BLOCK_MAX_DURATION_MS;
     const highPriorityFront =
       peeked !== undefined && getMessagePriority(peeked) >= ANTI_BLOCK_PRIORITY_THRESHOLD;
 
     if (highPriorityFront || forceDrain) {
       if (forceDrain) {
-        ctx.antiBlockSince = currentNow;
+        ctx.antiBlockSince.value = currentNow;
       }
       // Only call resetBatch() + drainQueue() when the anti-block gate
       // actually passes — saves lane-allocator overhead on suppressed frames.
@@ -155,7 +155,7 @@ export function drainStage(ctx: CanvasRenderContext, now: number, _dims: Overlay
       ctx.drainQueue(now);
     }
   } else {
-    ctx.antiBlockSince = null;
+    ctx.antiBlockSince.value = null;
     ctx.laneAllocator.resetBatch();
     ctx.drainQueue(now);
   }
@@ -548,8 +548,8 @@ export function drawGlowStage(
  */
 export function mirrorVisibleMessages(ctx: CanvasRenderContext): void {
   const now = performance.now();
-  if (now - ctx.lastLiveRegionUpdate < LIVE_REGION_THROTTLE_MS) return;
-  ctx.lastLiveRegionUpdate = now;
+  if (now - ctx.lastLiveRegionUpdate.value < LIVE_REGION_THROTTLE_MS) return;
+  ctx.lastLiveRegionUpdate.value = now;
   const count = Math.min(ctx.activeMessages.length, LIVE_REGION_MAX_MESSAGES);
   if (count === 0) return;
   const snippets: string[] = [];

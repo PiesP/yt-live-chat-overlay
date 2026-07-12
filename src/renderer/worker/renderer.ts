@@ -605,7 +605,7 @@ export class WorkerRenderer {
           case 'laneDensity':
             this.laneDensityFactor = (data as { factor: number }).factor;
             if (this.canvas && this.config) {
-              this.initLanes(this.canvas.width, this.canvas.height);
+              this.initLanes(this.logicalWidth, this.logicalHeight);
             }
             break;
           case 'ping':
@@ -990,8 +990,8 @@ export class WorkerRenderer {
     if (!this.ctx || !this.canvas || !this.config || this.isPaused) return;
     const cfg = this.config;
     const now = performance.now();
-    const width = this.canvas.width;
-    const height = this.canvas.height;
+    const width = this.logicalWidth;
+    const height = this.logicalHeight;
     // Anti-block gate: check if drainQueue should run
     let shouldDrain = true;
     if (this.pendingQueue.length > 0) {
