@@ -417,6 +417,10 @@ export class CanvasRenderer extends RendererBase {
     this.reducedMotion = this.reducedMotionQuery.matches;
     this.reducedMotionListener = (e: MediaQueryListEvent) => {
       this.reducedMotion = e.matches;
+      // Relay OS preference change to the Worker (workers lack matchMedia).
+      if (this.workerManager.isActive) {
+        this.workerManager.sendReducedMotion(e.matches as boolean);
+      }
     };
     this.reducedMotionQuery.addEventListener('change', this.reducedMotionListener);
     log.info('RendererCanvas created');
@@ -542,6 +546,11 @@ export class CanvasRenderer extends RendererBase {
    */
   override replayMessage(message: ChatMessage): void {
     if (this.isVideoPaused) return;
+    if (this.workerManager.isActive) {
+      const msgId = message.id ?? `${message.timestamp}-${++fallbackMessageIdCounter}`;
+      this.workerManager.sendToWorker(message, msgId);
+      return;
+    }
     this.enqueueMessage(message, false);
   }
 
@@ -552,9 +561,12 @@ export class CanvasRenderer extends RendererBase {
    */
   protected override onResumeFromVideoPause(messages: ChatMessage[]): void {
     for (const message of messages) {
-      // Don't use burst detector (these messages are from the past)
-      // and don't track drops (they were already counted as 'video_paused')
-      this.enqueueMessage(message, false);
+      if (this.workerManager.isActive) {
+        const msgId = message.id ?? `${message.timestamp}-${++fallbackMessageIdCounter}`;
+        this.workerManager.sendToWorker(message, msgId);
+      } else {
+        this.enqueueMessage(message, false);
+      }
     }
   }
 
