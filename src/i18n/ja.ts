@@ -312,6 +312,8 @@ export const JA: Record<string, string> = {
   Export: 'エクスポート',
   Import: 'インポート',
   Close: '閉じる',
+  Done: '完了',
+  'Changes are saved automatically': '変更は自動的に保存されます',
   'Reset all settings to defaults?': 'すべての設定を初期値にリセットしますか？',
   Cancel: 'キャンセル',
   'Import failed: invalid settings format': 'インポート失敗: 設定形式が無効です',

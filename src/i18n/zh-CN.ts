@@ -292,6 +292,8 @@ export const ZH_CN: Record<string, string> = {
   Export: '导出',
   Import: '导入',
   Close: '关闭',
+  Done: '完成',
+  'Changes are saved automatically': '更改会自动保存',
   'Reset all settings to defaults?': '将所有设置重置为默认值？',
   Cancel: '取消',
   'Import failed: invalid settings format': '导入失败：设置格式无效',

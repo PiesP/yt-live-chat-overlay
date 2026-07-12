@@ -158,7 +158,9 @@ const TOAST_FONT = `12px/1.4 ${DEFAULT_FONT_FAMILY}`;
 const TOAST_PADDING = '6px 14px';
 
 export const SETTINGS_UI_STYLES = `
-      :root {
+      .yt-chat-overlay-settings-modal,
+      .yt-chat-overlay-settings-confirm,
+      #yt-chat-overlay-settings-backdrop {
         color-scheme: dark;
       }
       .yt-chat-overlay-settings-button {
@@ -311,7 +313,8 @@ export const SETTINGS_UI_STYLES = `
       }
       .yt-chat-overlay-settings-tab {
         flex: 1;
-        padding: ${spacing.sm}px ${spacing.xs}px;
+        padding: ${spacing.sm + 2}px ${spacing.sm}px;
+        min-height: 40px;
         border: none;
         border-bottom: 2px solid transparent;
         background: transparent;
@@ -389,6 +392,7 @@ export const SETTINGS_UI_STYLES = `
         justify-content: space-between;
         gap: ${spacing.md}px;
         font-size: ${typography.fontSize.sm};
+        min-height: 40px;
       }
       .yt-chat-overlay-settings-field input[type="number"] {
         width: ${uiSizing.inputWidth}px;
@@ -547,13 +551,15 @@ export const SETTINGS_UI_STYLES = `
         height: ${uiSizing.colorSwatchHeight}px;
       }
       /* Actions bar */
+      .yt-chat-overlay-settings-actions-wrapper {
+        flex-shrink: 0;
+        padding-top: ${spacing.sm}px;
+        border-top: 1px solid ${uiColors.border};
+      }
       .yt-chat-overlay-settings-actions {
         display: flex;
         justify-content: flex-end;
         gap: ${spacing.sm}px;
-        flex-shrink: 0;
-        padding-top: ${spacing.sm}px;
-        border-top: 1px solid ${uiColors.border};
       }
       .yt-chat-overlay-settings-actions button {
         border: none;
@@ -601,6 +607,13 @@ export const SETTINGS_UI_STYLES = `
       }
       .yt-chat-overlay-settings-actions button[data-action="close"]:hover {
         background: ${uiColors.primaryHover};
+      }
+      .yt-chat-overlay-settings-autosave-hint {
+        margin: ${spacing.xs}px 0 0;
+        font-size: ${typography.fontSize.xs};
+        color: ${uiColors.textMuted};
+        text-align: end;
+        font-family: ${DEFAULT_FONT_FAMILY};
       }
 
       /* Reset confirmation dialog — native <dialog> */
@@ -817,7 +830,12 @@ export const SETTINGS_UI_STYLES = `
         margin-bottom: ${spacing.sm}px;
       }
       .yt-chat-overlay-settings-font-chip {
-        padding: 3px ${spacing.lg}px;
+        appearance: none;
+        -webkit-appearance: none;
+        font-family: inherit;
+        padding: ${spacing.sm - 1}px ${spacing.md}px;
+        min-height: 36px;
+        line-height: 1.3;
         border-radius: ${borderRadius.pill};
         border: 1px solid ${uiColors.border};
         background: ${uiColors.backgroundLight};

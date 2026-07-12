@@ -307,6 +307,8 @@ export const AR: Record<string, string> = {
   Export: 'تصدير',
   Import: 'استيراد',
   Close: 'إغلاق',
+  Done: 'تم',
+  'Changes are saved automatically': 'يتم حفظ التغييرات تلقائيًا',
   'Reset all settings to defaults?': 'إعادة تعيين جميع الإعدادات إلى الافتراضية؟',
   Cancel: 'إلغاء',
   'Import failed: invalid settings format': 'فشل الاستيراد: تنسيق الإعدادات غير صالح',

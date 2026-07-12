@@ -322,6 +322,8 @@ export const ES: Record<string, string> = {
   Export: 'Exportar',
   Import: 'Importar',
   Close: 'Cerrar',
+  Done: 'Listo',
+  'Changes are saved automatically': 'Los cambios se guardan automáticamente',
   'Reset all settings to defaults?':
     '¿Restablecer todas las opciones a los valores predeterminados?',
   Cancel: 'Cancelar',

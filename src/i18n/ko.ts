@@ -308,6 +308,8 @@ export const KO: Record<string, string> = {
   Export: '내보내기',
   Import: '가져오기',
   Close: '닫기',
+  Done: '완료',
+  'Changes are saved automatically': '모든 변경 사항이 자동으로 저장됩니다',
   'Reset all settings to defaults?': '모든 설정을 기본값으로 초기화할까요?',
   Cancel: '취소',
   'Import failed: invalid settings format': '가져오기 실패: 잘못된 설정 형식',
