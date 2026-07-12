@@ -498,19 +498,23 @@ export class CanvasRenderer extends RendererBase {
   addMessage(message: ChatMessage): void {
     if (!this.isMessageAllowed(message)) return;
 
-    // Always enqueue through main-thread pendingQueue so lane allocation
-    // and collision detection run in one place.  When the Worker is active
-    // the placed message is forwarded to it for rendering after drainQueue
-    // succeeds — the Worker no longer maintains its own lane allocator.
-    this.enqueueMessage(message, true);
-
-    // Pre-emptively trigger translation and forward to worker when active.
-    // The worker needs translated text for rendering; we send it asynchronously
-    // so it arrives before or shortly after the placed-message batch.
+    // When the Worker owns the OffscreenCanvas, forward the message
+    // directly and skip main-thread queue/lane management entirely.
+    // The Worker has its own complete render pipeline: pending queue,
+    // lane heap, collision detection, anti-block logic, and draw.
     if (this.workerManager.isActive) {
+      const msgId = message.id ?? `${message.timestamp}-${++fallbackMessageIdCounter}`;
+      this.workerManager.sendToWorker(message, msgId);
+
+      this.imageFetchManager.prefetchImages(message);
+      this.lastRenderActivity = performance.now();
+
+      // Pre-emptively trigger translation and forward to worker.
+      // The worker needs translated text for rendering; we send it
+      // asynchronously so it arrives before or shortly after the
+      // placed-message batch.
       const translatableText = getTranslatableText(message);
       if (this.translationService.isEnabled && translatableText) {
-        const msgId = message.id ?? `${message.timestamp}-${++fallbackMessageIdCounter}`;
         this.translationService
           .translate(translatableText)
           .then((translated) => {
@@ -520,7 +524,15 @@ export class CanvasRenderer extends RendererBase {
             // Silently ignore individual translation failures
           });
       }
+      return;
     }
+
+    // ── Main-thread fallback path ──────────────────────────────────
+    //
+    // Enqueue through main-thread pendingQueue so lane allocation and
+    // collision detection run during renderFrame.  The placed message
+    // is drawn by the main-thread canvas pipeline.
+    this.enqueueMessage(message, true);
   }
 
   /**
@@ -1404,16 +1416,6 @@ export class CanvasRenderer extends RendererBase {
     // Update render activity heartbeat — signals to the watchdog that
     // the renderer is healthy (successfully enqueuing messages).
     this.lastRenderActivity = performance.now();
-
-    // Forward the placed message to the Worker if off-main-thread rendering
-    // is active.  The message still goes through the Worker's internal
-    // pipeline for now, but since the main-thread pipeline has already
-    // validated the placement (lane allocation + collision check), the
-    // Worker can skip its own drainQueue/checkCollision in a future phase.
-    if (this.workerManager.isActive) {
-      const msgId = message.id ?? `${message.timestamp}-${Math.random()}`;
-      this.workerManager.sendToWorker(message, msgId);
-    }
   }
 
   // ── Dimension estimation (delegates to shared functions) ──────────────
