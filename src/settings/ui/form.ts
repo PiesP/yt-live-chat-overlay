@@ -768,17 +768,19 @@ export class SettingsUiForm {
     // Chips
     const chipsContainer = domDiv('yt-chat-overlay-settings-font-chips');
     for (const suggestion of def.suggestions) {
-      const chip = document.createElement('span');
+      const chip = document.createElement('button');
+      chip.type = 'button';
       chip.className = 'yt-chat-overlay-settings-font-chip';
-      chip.setAttribute('role', 'button');
-      chip.setAttribute('tabindex', '0');
+      chip.setAttribute('aria-pressed', 'false');
       chip.dataset.value = suggestion;
       chip.textContent = this.fontChipLabel(suggestion);
       chip.addEventListener('click', () => {
         chipsContainer.querySelectorAll('.yt-chat-overlay-settings-font-chip').forEach((c) => {
           c.classList.remove('active');
+          c.setAttribute('aria-pressed', 'false');
         });
         chip.classList.add('active');
+        chip.setAttribute('aria-pressed', 'true');
         // Clear custom input
         const customInput = container.querySelector<HTMLInputElement>(
           '.yt-chat-overlay-settings-font-custom-input'
@@ -808,6 +810,7 @@ export class SettingsUiForm {
       // Deactivate all chips when custom input is used
       chipsContainer.querySelectorAll('.yt-chat-overlay-settings-font-chip').forEach((c) => {
         c.classList.remove('active');
+        c.setAttribute('aria-pressed', 'false');
       });
       const hiddenInput = container.querySelector<HTMLInputElement>(
         '.yt-chat-overlay-settings-font-value'
@@ -1095,9 +1098,11 @@ export class SettingsUiForm {
       for (const chip of chips) {
         if (chip.dataset.value === family) {
           chip.classList.add('active');
+          chip.setAttribute('aria-pressed', 'true');
           matched = true;
         } else {
           chip.classList.remove('active');
+          chip.setAttribute('aria-pressed', 'false');
         }
       }
     }

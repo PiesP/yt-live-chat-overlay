@@ -819,6 +819,9 @@ export const SETTINGS_UI_STYLES = `
         margin-bottom: ${spacing.sm}px;
       }
       .yt-chat-overlay-settings-font-chip {
+        appearance: none;
+        -webkit-appearance: none;
+        font-family: inherit;
         padding: 3px ${spacing.lg}px;
         border-radius: ${borderRadius.pill};
         border: 1px solid ${uiColors.border};
