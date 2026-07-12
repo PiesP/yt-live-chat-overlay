@@ -948,108 +948,114 @@ export class CanvasRenderer extends RendererBase {
   // ── renderFrame stages ─────────────────────────────────────────────────
 
   private drainQueue(now: number): void {
-    const t0 = performance.now();
-    // Cache dimensions once for the entire drain cycle — avoids repeated
-    // overlay.getDimensions() calls in checkPlacement/enqueueMessageWithPlacement.
-    const dims = this.overlay.getDimensions();
-    if (!dims) return;
+    if (this.drainLocked) return;
+    this.drainLocked = true;
+    try {
+      const t0 = performance.now();
+      // Cache dimensions once for the entire drain cycle — avoids repeated
+      // overlay.getDimensions() calls in checkPlacement/enqueueMessageWithPlacement.
+      const dims = this.overlay.getDimensions();
+      if (!dims) return;
 
-    // ── Peek-based drain: messages stay in queue until placement succeeds ──
-    // Previously, drainQueue used a dequeue→retry→refill cycle with a skip
-    // limit.  When the limit was exceeded (4+ consecutive collisions in a
-    // single frame), dequeued messages beyond the limit were permanently lost
-    // — removed from the queue but never added to retryQueue.
-    //
-    // Now, we snapshot the queue via toArray(), try to place every message,
-    // and only remove (removeAll) those that were successfully placed.
-    // Messages that fail placement stay in the queue for the next frame.
-    // This guarantees zero message loss from internal queue management.
-    const candidates = this.pendingQueue.toArray();
-    let batchIndex = 0;
-    const committed: ChatMessage[] = [];
-    const unplaceable: ChatMessage[] = []; // Messages that can never be placed (oversized)
+      // ── Peek-based drain: messages stay in queue until placement succeeds ──
+      // Previously, drainQueue used a dequeue→retry→refill cycle with a skip
+      // limit.  When the limit was exceeded (4+ consecutive collisions in a
+      // single frame), dequeued messages beyond the limit were permanently lost
+      // — removed from the queue but never added to retryQueue.
+      //
+      // Now, we snapshot the queue via toArray(), try to place every message,
+      // and only remove (removeAll) those that were successfully placed.
+      // Messages that fail placement stay in the queue for the next frame.
+      // This guarantees zero message loss from internal queue management.
+      const candidates = this.pendingQueue.toArray();
+      let batchIndex = 0;
+      const committed: ChatMessage[] = [];
+      const unplaceable: ChatMessage[] = []; // Messages that can never be placed (oversized)
 
-    for (const msg of candidates) {
-      if (this.activeMessages.length >= this.settings.maxConcurrentMessages) break;
+      for (const msg of candidates) {
+        if (this.activeMessages.length >= this.settings.maxConcurrentMessages) break;
 
-      const result = this.checkPlacement(msg, now, dims);
-      if (!result.ok) {
-        // 'collision' → transient lane conflict; message stays for retry.
-        // 'temporarily_unavailable' → all lanes saturated (burst); retry next frame.
-        // 'oversized'          → requiredSlots > totalLanes; will NEVER fit —
-        //                        drop permanently to prevent watchdog restart loop.
-        if (result.reason === 'oversized') {
-          unplaceable.push(msg);
+        const result = this.checkPlacement(msg, now, dims);
+        if (!result.ok) {
+          // 'collision' → transient lane conflict; message stays for retry.
+          // 'temporarily_unavailable' → all lanes saturated (burst); retry next frame.
+          // 'oversized'          → requiredSlots > totalLanes; will NEVER fit —
+          //                        drop permanently to prevent watchdog restart loop.
+          if (result.reason === 'oversized') {
+            unplaceable.push(msg);
+          }
+          // checkPlacement() already called markCollision() for feedback.
+          continue;
         }
-        // checkPlacement() already called markCollision() for feedback.
-        continue;
-      }
 
-      this.enqueueMessageWithPlacement(
-        msg,
-        now,
-        result.placement,
-        batchIndex,
-        result.dimensions,
-        result.speedTier,
-        dims
-      );
-      batchIndex++;
-      committed.push(msg);
-
-      // Pre-warm text bitmap cache so the render loop never pays
-      // the cost of cache-miss bitmap generation during drawStage.
-      if (this.settings.outline.widthPx > 0 && this.settings.outline.opacity > 0) {
-        const warmColor =
-          this.settings.preserveUserColor && msg.userColor
-            ? msg.userColor
-            : (this.settings.colors[msg.authorType] ?? this.settings.colors.normal);
-        const farSpacing = result.speedTier === SPEED_TIER.FAR ? '1px' : undefined;
-        warmTextBitmapCache(
-          toSharedContentSegments(msg.content),
-          this.settings.fontSize,
-          this.settings.fontWeight,
-          this.settings.fontFamily,
-          warmColor,
-          this.settings.outline.widthPx,
-          this.settings.outline.opacity,
-          this.textBitmapCache,
-          this.ctx!,
-          farSpacing
+        this.enqueueMessageWithPlacement(
+          msg,
+          now,
+          result.placement,
+          batchIndex,
+          result.dimensions,
+          result.speedTier,
+          dims
         );
+        batchIndex++;
+        committed.push(msg);
+
+        // Pre-warm text bitmap cache so the render loop never pays
+        // the cost of cache-miss bitmap generation during drawStage.
+        if (this.settings.outline.widthPx > 0 && this.settings.outline.opacity > 0) {
+          const warmColor =
+            this.settings.preserveUserColor && msg.userColor
+              ? msg.userColor
+              : (this.settings.colors[msg.authorType] ?? this.settings.colors.normal);
+          const farSpacing = result.speedTier === SPEED_TIER.FAR ? '1px' : undefined;
+          warmTextBitmapCache(
+            toSharedContentSegments(msg.content),
+            this.settings.fontSize,
+            this.settings.fontWeight,
+            this.settings.fontFamily,
+            warmColor,
+            this.settings.outline.widthPx,
+            this.settings.outline.opacity,
+            this.textBitmapCache,
+            this.ctx!,
+            farSpacing
+          );
+        }
       }
-    }
 
-    // Atomically remove successfully placed messages from the queue.
-    if (committed.length > 0) {
-      this.pendingQueue.removeAll(committed);
-    }
+      // Atomically remove successfully placed messages from the queue.
+      if (committed.length > 0) {
+        this.pendingQueue.removeAll(committed);
+      }
 
-    // Drop oversized messages to prevent the infinite watchdog restart loop.
-    // These messages have heights exceeding total available lanes — no amount
-    // of waiting or retry will place them.
-    if (unplaceable.length > 0) {
-      this.pendingQueue.removeAll(unplaceable);
-      // Update render activity so the watchdog doesn't flag a stuck renderer
-      // for messages that were intentionally dropped as oversized.
-      this.lastRenderActivity = performance.now();
-      const first = unplaceable[0]!;
-      const firstEstHeight = Math.round(this.estimateDimensions(first).height);
-      const laneCount = this.laneAllocator.getLaneCount();
-      const laneHeight = Math.round(this.laneAllocator.getLaneHeight());
-      const capacityPx = laneCount * laneHeight;
-      const requiredSlots = Math.ceil(firstEstHeight / laneHeight);
-      log.warn(
-        `Dropped ${unplaceable.length} oversized message(s) — ` +
-          `requiredSlots=${requiredSlots} > laneCount=${laneCount} ` +
-          `(capacities: ${capacityPx}px total, laneHeight=${laneHeight}px, ` +
-          `msgHeight=${firstEstHeight}px). ` +
-          `First message: kind=${first.kind}`
-      );
-      this.observability.onMessageDropped('oversized');
-    }
+      // Drop oversized messages to prevent the infinite watchdog restart loop.
+      // These messages have heights exceeding total available lanes — no amount
+      // of waiting or retry will place them.
+      if (unplaceable.length > 0) {
+        this.pendingQueue.removeAll(unplaceable);
+        // Update render activity so the watchdog doesn't flag a stuck renderer
+        // for messages that were intentionally dropped as oversized.
+        this.lastRenderActivity = performance.now();
+        const first = unplaceable[0]!;
+        const firstEstHeight = Math.round(this.estimateDimensions(first).height);
+        const laneCount = this.laneAllocator.getLaneCount();
+        const laneHeight = Math.round(this.laneAllocator.getLaneHeight());
+        const capacityPx = laneCount * laneHeight;
+        const requiredSlots = Math.ceil(firstEstHeight / laneHeight);
+        log.warn(
+          `Dropped ${unplaceable.length} oversized message(s) — ` +
+            `requiredSlots=${requiredSlots} > laneCount=${laneCount} ` +
+            `(capacities: ${capacityPx}px total, laneHeight=${laneHeight}px, ` +
+            `msgHeight=${firstEstHeight}px). ` +
+            `First message: kind=${first.kind}`
+        );
+        this.observability.onMessageDropped('oversized');
+      }
 
-    this.observability.recordDrainQueue(performance.now() - t0);
+      this.observability.recordDrainQueue(performance.now() - t0);
+    } finally {
+      this.drainLocked = false;
+    }
   }
 
   /**
@@ -1063,72 +1069,78 @@ export class CanvasRenderer extends RendererBase {
    * (via drainQueue).
    */
   private async drainQueueAsync(now: number): Promise<void> {
-    const dims = this.overlay.getDimensions();
-    if (!dims) return;
+    if (this.drainLocked) return;
+    this.drainLocked = true;
+    try {
+      const dims = this.overlay.getDimensions();
+      if (!dims) return;
 
-    const candidates = this.pendingQueue.toArray();
-    let batchIndex = 0;
-    const committed: ChatMessage[] = [];
-    const unplaceable: ChatMessage[] = [];
-    let deadline = performance.now() + 50; // 50ms budget
+      const candidates = this.pendingQueue.toArray();
+      let batchIndex = 0;
+      const committed: ChatMessage[] = [];
+      const unplaceable: ChatMessage[] = [];
+      let deadline = performance.now() + 50; // 50ms budget
 
-    for (const msg of candidates) {
-      if (this.activeMessages.length >= this.settings.maxConcurrentMessages) break;
+      for (const msg of candidates) {
+        if (this.activeMessages.length >= this.settings.maxConcurrentMessages) break;
 
-      const result = this.checkPlacement(msg, now, dims);
-      if (!result.ok) {
-        if (result.reason === 'oversized') {
-          unplaceable.push(msg);
+        const result = this.checkPlacement(msg, now, dims);
+        if (!result.ok) {
+          if (result.reason === 'oversized') {
+            unplaceable.push(msg);
+          }
+          continue;
         }
-        continue;
-      }
 
-      this.enqueueMessageWithPlacement(
-        msg,
-        now,
-        result.placement,
-        batchIndex,
-        result.dimensions,
-        result.speedTier,
-        dims
-      );
-      batchIndex++;
-      committed.push(msg);
-
-      // Pre-warm text bitmap cache so the render loop never pays
-      // the cost of cache-miss bitmap generation during drawStage.
-      if (this.settings.outline.widthPx > 0 && this.settings.outline.opacity > 0) {
-        const warmColor =
-          this.settings.preserveUserColor && msg.userColor
-            ? msg.userColor
-            : (this.settings.colors[msg.authorType] ?? this.settings.colors.normal);
-        const farSpacing = result.speedTier === SPEED_TIER.FAR ? '1px' : undefined;
-        warmTextBitmapCache(
-          toSharedContentSegments(msg.content),
-          this.settings.fontSize,
-          this.settings.fontWeight,
-          this.settings.fontFamily,
-          warmColor,
-          this.settings.outline.widthPx,
-          this.settings.outline.opacity,
-          this.textBitmapCache,
-          this.ctx!,
-          farSpacing
+        this.enqueueMessageWithPlacement(
+          msg,
+          now,
+          result.placement,
+          batchIndex,
+          result.dimensions,
+          result.speedTier,
+          dims
         );
+        batchIndex++;
+        committed.push(msg);
+
+        // Pre-warm text bitmap cache so the render loop never pays
+        // the cost of cache-miss bitmap generation during drawStage.
+        if (this.settings.outline.widthPx > 0 && this.settings.outline.opacity > 0) {
+          const warmColor =
+            this.settings.preserveUserColor && msg.userColor
+              ? msg.userColor
+              : (this.settings.colors[msg.authorType] ?? this.settings.colors.normal);
+          const farSpacing = result.speedTier === SPEED_TIER.FAR ? '1px' : undefined;
+          warmTextBitmapCache(
+            toSharedContentSegments(msg.content),
+            this.settings.fontSize,
+            this.settings.fontWeight,
+            this.settings.fontFamily,
+            warmColor,
+            this.settings.outline.widthPx,
+            this.settings.outline.opacity,
+            this.textBitmapCache,
+            this.ctx!,
+            farSpacing
+          );
+        }
+
+        // Yield every 50ms to keep the main thread responsive during bursts.
+        deadline = await yieldIfOverBudget(deadline);
       }
 
-      // Yield every 50ms to keep the main thread responsive during bursts.
-      deadline = await yieldIfOverBudget(deadline);
-    }
+      if (committed.length > 0) {
+        this.pendingQueue.removeAll(committed);
+      }
 
-    if (committed.length > 0) {
-      this.pendingQueue.removeAll(committed);
-    }
-
-    // Drop unplaceable messages — same rationale as drainQueue.
-    if (unplaceable.length > 0) {
-      this.pendingQueue.removeAll(unplaceable);
-      this.lastRenderActivity = performance.now();
+      // Drop unplaceable messages — same rationale as drainQueue.
+      if (unplaceable.length > 0) {
+        this.pendingQueue.removeAll(unplaceable);
+        this.lastRenderActivity = performance.now();
+      }
+    } finally {
+      this.drainLocked = false;
     }
   }
 
@@ -1252,12 +1264,13 @@ export class CanvasRenderer extends RendererBase {
           }
         } else {
           // reverse mode: messages enter from left, travel right.
-          // Speed-aware headway: when a fast backlog message enters a lane
-          // with a slow reverse message, headway scales up to prevent the
-          // faster chaser from catching up and visually crossing through.
+          // Collision: the active message's LEFT edge must have cleared
+          // the left-side entry zone (+ headway gap) before a new message
+          // can enter the same lane. Testing the RIGHT edge (as the old
+          // code did) was always true — blocking lane reuse entirely.
           const reverseTravel = dims.width - active.startX + this.settings.exitPaddingPx;
           const activeX = active.startX + activeProgress * reverseTravel;
-          if (activeX + active.width > -headwayPx) {
+          if (activeX < headwayPx) {
             forEachSlot(placement.laneIndex, placement.slotCount, (slotIdx) => {
               this.laneAllocator.markCollision(slotIdx);
             });
@@ -1426,7 +1439,7 @@ export class CanvasRenderer extends RendererBase {
       effectiveDuration,
       startX,
       placement.laneIndex,
-      staggerDelay,
+      staggerDelay + placement.waitMs,
       speedTier
     );
 
@@ -1792,6 +1805,7 @@ export class CanvasRenderer extends RendererBase {
     this.activeMessages.length = 0;
     this.activeMessagesByLane.clear();
     this.pendingQueue.clear();
+    this.workerManager.clearState();
     this.backlogPaused = false;
     this.onBacklogPauseChange = null;
     clearTextMeasurementCaches();

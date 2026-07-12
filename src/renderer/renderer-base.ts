@@ -63,6 +63,15 @@ export abstract class RendererBase {
   protected backlogPaused = false;
 
   /**
+   * Mutex to prevent concurrent drain operations. Set to true when either
+   * drainQueue() or drainQueueAsync() is actively processing; the other
+   * path skips if already locked. Prevents duplicate activation of the
+   * same pending messages during onResume() where both the async drain
+   * and the rAF render loop's drainQueue() may race on the pending queue.
+   */
+  protected drainLocked = false;
+
+  /**
    * Timestamp (performance.now) of the last successful message enqueue.
    * Updated by subclasses in enqueueMessageWithPlacement after
    * commitPlacement. Used by RuntimeManager's watchdog to detect

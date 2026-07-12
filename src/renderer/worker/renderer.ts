@@ -430,6 +430,7 @@ export class WorkerRenderer {
   private textMeasureCache = new Map<string, number>();
   private fontMetricsCache = new Map<string, { height: number }>();
   private activeMessages: ActiveMessage[] = [];
+  private activeMessagesByLane = new Map<number, ActiveMessage[]>();
   private pendingQueue: WorkerMessage[] = [];
   private pendingQueueSortNeeded = false;
   private pendingQueueOffset = 0;
@@ -541,6 +542,7 @@ export class WorkerRenderer {
           }
           case 'updateConfig':
             if (this.config) {
+              const prevMode = this.config.danmakuMode;
               Object.assign(this.config, data.config as Partial<WorkerConfig>);
               this.recomputeConfigDerived();
               this.textMeasureCache.clear();
@@ -549,6 +551,17 @@ export class WorkerRenderer {
               this.authorPhotoCache.clear();
               this.stickerCache.clear();
               this.superChatGradientCache.clear();
+              // Issue 4: When danmakuMode changes, active messages have positions
+              // computed for the old mode — clear state to avoid rendering artifacts.
+              // The main thread recalculates positions for its own messages; clearing
+              // the worker state ensures consistency on the next message batch.
+              if (
+                data.config &&
+                (data.config as WorkerConfig).danmakuMode !== undefined &&
+                (data.config as WorkerConfig).danmakuMode !== prevMode
+              ) {
+                this.handleClearState();
+              }
             }
             break;
           case 'setPaused': {
@@ -739,6 +752,7 @@ export class WorkerRenderer {
     this.ctx = null;
     this.canvas = null;
     this.activeMessages.length = 0;
+    this.activeMessagesByLane.clear();
     this.pendingQueue.length = 0;
     this.pendingQueueOffset = 0;
     this.textBitmapCache.clear();
@@ -759,6 +773,7 @@ export class WorkerRenderer {
    */
   private handleClearState(): void {
     this.activeMessages.length = 0;
+    this.activeMessagesByLane.clear();
     this.pendingQueue.length = 0;
     this.pendingQueueOffset = 0;
     this.messageById.clear();
@@ -800,7 +815,13 @@ export class WorkerRenderer {
   private findPlacement(
     msgHeight: number,
     speedTier: number
-  ): { laneIndex: number; waitMs: number; laneY: number } | null {
+  ): {
+    laneIndex: number;
+    waitMs: number;
+    laneY: number;
+    slotCount: number;
+    verticalOffset: number;
+  } | null {
     if (this.laneHeap.length === 0) return null;
     const now = performance.now();
     const maxWaitMs = this.config?.scrollDurationMaxMs ?? DEFAULT_SETTINGS.scrollDurationMaxMs;
@@ -813,13 +834,15 @@ export class WorkerRenderer {
       speedTier
     );
     if (!result) return null;
+    const slotCount = Math.max(1, Math.ceil(msgHeight / this.laneHeight));
     const laneY = computeLaneY(
       result.laneIndex,
       this.logicalHeight,
       this.config?.safeTop ?? 0,
       this.laneHeight
     );
-    return { ...result, laneY };
+    const verticalOffset = Math.floor((slotCount * this.laneHeight - msgHeight) / 2);
+    return { ...result, laneY, slotCount, verticalOffset };
   }
 
   private commitPlacement(
@@ -857,7 +880,13 @@ export class WorkerRenderer {
   private activateMessage(
     msg: WorkerMessage,
     now: number,
-    placement: { laneIndex: number; waitMs: number; laneY: number },
+    placement: {
+      laneIndex: number;
+      waitMs: number;
+      laneY: number;
+      slotCount: number;
+      verticalOffset: number;
+    },
     batchIndex: number,
     screenWidth: number,
     _screenHeight: number
@@ -937,8 +966,8 @@ export class WorkerRenderer {
     }
     if (msg.authorType === 'moderator' || msg.authorType === 'owner')
       duration *= this.config.modOwnerDurationMultiplier;
-    const slotCount = Math.max(1, Math.ceil(msg.height / this.laneHeight));
-    const laneY = placement.laneY;
+    const slotCount = placement.slotCount;
+    const laneY = placement.laneY + placement.verticalOffset;
     const authorColor =
       this.config.preserveUserColor && msg.userColor
         ? msg.userColor
@@ -982,6 +1011,16 @@ export class WorkerRenderer {
       isScrolling ? msg.width : undefined
     );
     this.activeMessages.push(am);
+    // Register in per-lane index for O(lanes) collision checks (Issue 7).
+    for (let slot = 0; slot < slotCount; slot++) {
+      const lane = placement.laneIndex + slot;
+      let laneList = this.activeMessagesByLane.get(lane);
+      if (!laneList) {
+        laneList = [];
+        this.activeMessagesByLane.set(lane, laneList);
+      }
+      laneList.push(am);
+    }
     this.messageById.set(msg.id, am);
     if (msg.content) {
       const emojiUrls: string[] = [];
@@ -1106,6 +1145,21 @@ export class WorkerRenderer {
       }
     }
     this.activeMessages.length = writeIdx;
+    // Rebuild per-lane index after compaction removes expired messages.
+    this.activeMessagesByLane.clear();
+    for (let i = 0; i < writeIdx; i++) {
+      const msg = this.activeMessages[i]!;
+      const slotCount = msg.laneSlotCount ?? 1;
+      for (let slot = 0; slot < slotCount; slot++) {
+        const lane = msg.laneIndex + slot;
+        let laneList = this.activeMessagesByLane.get(lane);
+        if (!laneList) {
+          laneList = [];
+          this.activeMessagesByLane.set(lane, laneList);
+        }
+        laneList.push(msg);
+      }
+    }
     // ── Clear canvas ────────────────────────────────────────────────
     this.ctx.clearRect(0, 0, this.logicalWidth, this.logicalHeight);
     if (writeIdx === 0) {
@@ -1285,7 +1339,13 @@ export class WorkerRenderer {
   }
 
   private checkCollision(
-    placement: { laneIndex: number; waitMs: number; laneY: number },
+    placement: {
+      laneIndex: number;
+      waitMs: number;
+      laneY: number;
+      slotCount: number;
+      verticalOffset: number;
+    },
     newMsgHeight: number,
     newSpeedTier: number,
     now: number,
@@ -1294,10 +1354,25 @@ export class WorkerRenderer {
     if (!this.config) return true;
     const mode = this.config.danmakuMode;
     const isScrolling = mode === 'scroll' || mode === 'reverse';
-    const newTop = placement.laneY;
-    const newBottom = placement.laneY + newMsgHeight;
-    for (let i = 0; i < this.activeMessages.length; i++) {
-      const active = this.activeMessages[i];
+    const newTop = placement.laneY + placement.verticalOffset;
+    const newBottom = newTop + newMsgHeight;
+
+    // Issue 7: Lane-scoped collision scan via activeMessagesByLane.
+    // Scan the new message's lanes ± 1 for adjacent overlap, instead of
+    // iterating all active messages (O(n) → O(lanes · avgMsgsPerLane)).
+    const adjacentMessages: ActiveMessage[] = [];
+    const scanStart = placement.laneIndex - 1;
+    const scanEnd = placement.laneIndex + placement.slotCount;
+    for (let li = scanStart; li <= scanEnd; li++) {
+      const laneMsgs = this.activeMessagesByLane.get(li);
+      if (laneMsgs) {
+        for (const m of laneMsgs) adjacentMessages.push(m);
+      }
+    }
+
+    // Scan newest-first for early collision exit
+    for (let i = adjacentMessages.length - 1; i >= 0; i--) {
+      const active = adjacentMessages[i];
       if (!active) continue;
       const activeElapsed = now - active.startTime - active.pausedDuration;
       if (activeElapsed < 0) continue;
@@ -1314,28 +1389,37 @@ export class WorkerRenderer {
               active.width >
             screenWidth - headwayPx
           ) {
-            this.collidedLanes.add(placement.laneIndex);
+            this.markCollidedLanes(placement.laneIndex, placement.slotCount);
             return false;
           }
         } else {
-          if (
+          // reverse mode: messages enter from left, travel right.
+          // Collision: the active message's LEFT edge must have cleared
+          // the left-side entry zone (+ headway gap) before a new message
+          // can enter the same lane.
+          const activeX =
             active.startX +
-              activeProgress * (screenWidth - active.startX + this.config.exitPaddingPx) +
-              active.width >
-            -headwayPx
-          ) {
-            this.collidedLanes.add(placement.laneIndex);
+            activeProgress * (screenWidth - active.startX + this.config.exitPaddingPx);
+          if (activeX < headwayPx) {
+            this.markCollidedLanes(placement.laneIndex, placement.slotCount);
             return false;
           }
         }
       } else {
         if (activeElapsed < active.duration) {
-          this.collidedLanes.add(placement.laneIndex);
+          this.markCollidedLanes(placement.laneIndex, placement.slotCount);
           return false;
         }
       }
     }
     return true;
+  }
+
+  /** Issue 6: Mark all lanes occupied by a multi-slot message, not just the start lane. */
+  private markCollidedLanes(startLane: number, slotCount: number): void {
+    for (let slot = 0; slot < slotCount; slot++) {
+      this.collidedLanes.add(startLane + slot);
+    }
   }
 
   private drainQueue(now: number, width: number, height: number): void {

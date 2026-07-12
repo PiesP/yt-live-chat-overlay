@@ -10,11 +10,7 @@
  * allocation logic between the two contexts.
  */
 
-import {
-  LANE_COOLDOWN_MIN_MS,
-  SAFETY_MARGIN_RATIO,
-  SPEED_TIER,
-} from '@renderer/constants';
+import { LANE_COOLDOWN_MIN_MS, SAFETY_MARGIN_RATIO, SPEED_TIER } from '@renderer/constants';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
