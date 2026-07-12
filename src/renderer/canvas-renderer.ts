@@ -146,7 +146,7 @@ export class CanvasRenderer extends RendererBase {
    * a maximum duration, preventing indefinite message suppression during
    * sustained lane saturation.
    */
-  private antiBlockSince: number | null = null;
+  private antiBlockSinceRef = { value: null as number | null };
   /** Offscreen recovery poll cleanup function. startOffscreenPoll returns a
    *  cleanup callback, not a setInterval handle. */
   private offscreenPollCleanup: (() => void) | null = null;
@@ -269,7 +269,7 @@ export class CanvasRenderer extends RendererBase {
   private hasRenderedStatusBar = false;
 
   /** Last timestamp when updateLiveRegion was called, for throttling. */
-  private lastLiveRegionUpdate = 0;
+  private lastLiveRegionUpdateRef = { value: 0 };
 
   constructor(overlay: Overlay, settings: OverlaySettings) {
     super(overlay, settings);
@@ -867,7 +867,7 @@ export class CanvasRenderer extends RendererBase {
       expiredMessagesScratch: this.expiredMessagesScratch,
       messageActivator: this.messageActivator,
       cachedOpacityConfig: this.cachedOpacityConfig,
-      antiBlockSince: this.antiBlockSince,
+      antiBlockSince: this.antiBlockSinceRef,
       pendingQueue: this.pendingQueue,
       laneAllocator: this.laneAllocator,
       observability: this.observability,
@@ -875,7 +875,7 @@ export class CanvasRenderer extends RendererBase {
       isReducedMotionActive: this.isReducedMotionActive,
       isAntiBlockActive: () => this.isAntiBlockActive(),
       drainQueue: (n: number) => this.drainQueue(n),
-      lastLiveRegionUpdate: this.lastLiveRegionUpdate,
+      lastLiveRegionUpdate: this.lastLiveRegionUpdateRef,
       updateLiveRegion: (s) => this.overlay.updateLiveRegion(s),
     };
   }
