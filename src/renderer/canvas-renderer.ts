@@ -310,30 +310,10 @@ export class CanvasRenderer extends RendererBase {
     canvas.setAttribute('aria-hidden', 'true');
     if (container) container.appendChild(canvas);
     this.canvas = canvas;
-    this.ctx = canvas.getContext('2d', { desynchronized: true });
-    if (!this.ctx) {
-      log.warn('Failed to get CanvasRenderingContext2D — renderer will be inactive');
-    } else if (!canvas.isConnected) {
-      log.warn('Canvas created but not connected to DOM — renderer will be inactive');
-    }
 
-    // C1: Listen for Canvas 2D context restoration to recover from GPU crashes / driver resets.
-    // Without this, a context loss permanently disables the renderer until page reload.
+    // ── Phase 1: setup that does NOT depend on canvas context ──────
     //
-    // Note: This codebase uses Canvas2D + OffscreenCanvas Worker only — there is no WebGL2
-    // renderer implementation (the RenderWorkerManagerWebGL2 references in CHANGELOG.md
-    // describe a prior experimental path that has been removed/restructured). Therefore no
-    // webglcontextlost/webglcontextrestored listeners are needed. If a WebGL2 renderer is
-    // added in the future, it must also listen for webglcontextlost and webglcontextrestored
-    // with resource re-initialization (shader recompilation, buffer re-upload, texture restore).
-    canvas.addEventListener('contextlost', (e: Event) => {
-      e.preventDefault();
-      this.ctx = null;
-      log.warn('Canvas 2D context lost — renderer paused until restoration');
-    });
-    canvas.addEventListener('contextrestored', () => this.handleContextRestored());
-
-    // M7: IntersectionObserver for offscreen detection. When the canvas is
+    // IntersectionObserver for offscreen detection. When the canvas is
     // hidden behind a modal/backdrop, pause the renderer. A recovery poll
     // guards against missed intersection entries on modal dismiss.
     this.setupOffscreenObserver(canvas);
@@ -366,9 +346,13 @@ export class CanvasRenderer extends RendererBase {
     // receives a valid reference instead of undefined.
     this.imageFetchManager = new ImageFetchManager();
 
-    // Initialize OffscreenCanvas worker for off-main-thread rendering.
-    // Falls back silently to main-thread rendering when unavailable
-    // (e.g. missing APIs, CSP restrictions, build-time exclusion).
+    // ── Phase 2: attempt OffscreenCanvas worker ────────────────────
+    //
+    // transferControlToOffscreen() requires the canvas to NOT have a
+    // rendering context yet (HTML spec §4.12.5).  We must NOT call
+    // getContext('2d') before this point, otherwise the transfer always
+    // throws InvalidStateError and the renderer silently falls back to
+    // the main thread every time.
     this.workerManager = new RenderWorkerManager({
       settings: this.settings,
       observability: this.observability,
@@ -379,8 +363,35 @@ export class CanvasRenderer extends RendererBase {
     });
     const useWorker = this.workerManager.init(canvas, settings, overlay);
 
+    // ── Phase 3: main-thread fallback setup (only when Worker failed) ──
+
     const dims = overlay.getDimensions();
-    if (!useWorker) this.applyDevicePixelRatio(dims);
+    if (!useWorker) {
+      this.ctx = canvas.getContext('2d', { desynchronized: true });
+      if (!this.ctx) {
+        log.warn('Failed to get CanvasRenderingContext2D — renderer will be inactive');
+      } else if (!canvas.isConnected) {
+        log.warn('Canvas created but not connected to DOM — renderer will be inactive');
+      }
+
+      // C1: Listen for Canvas 2D context restoration to recover from GPU
+      // crashes / driver resets.  Without this, a context loss permanently
+      // disables the renderer until page reload.
+      //
+      // Note: This codebase uses Canvas2D + OffscreenCanvas Worker only —
+      // there is no WebGL2 renderer implementation.  If a WebGL2 renderer
+      // is added in the future, it must also listen for
+      // webglcontextlost/webglcontextrestored with resource re-initialization
+      // (shader recompilation, buffer re-upload, texture restore).
+      canvas.addEventListener('contextlost', (e: Event) => {
+        e.preventDefault();
+        this.ctx = null;
+        log.warn('Canvas 2D context lost — renderer paused until restoration');
+      });
+      canvas.addEventListener('contextrestored', () => this.handleContextRestored());
+
+      this.applyDevicePixelRatio(dims);
+    }
 
     this.overlayDimensionsUnsubscribe = overlay.onDimensionsChanged((d) => {
       if (d && this.canvas) {
