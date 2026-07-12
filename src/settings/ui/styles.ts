@@ -158,7 +158,9 @@ const TOAST_FONT = `12px/1.4 ${DEFAULT_FONT_FAMILY}`;
 const TOAST_PADDING = '6px 14px';
 
 export const SETTINGS_UI_STYLES = `
-      :root {
+      .yt-chat-overlay-settings-modal,
+      .yt-chat-overlay-settings-confirm,
+      #yt-chat-overlay-settings-backdrop {
         color-scheme: dark;
       }
       .yt-chat-overlay-settings-button {
