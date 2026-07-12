@@ -967,19 +967,18 @@ export class CanvasRenderer extends RendererBase {
     const candidates = this.pendingQueue.toArray();
     let batchIndex = 0;
     const committed: ChatMessage[] = [];
-    const unplaceable: ChatMessage[] = []; // Messages that can never be placed (no_lane)
+    const unplaceable: ChatMessage[] = []; // Messages that can never be placed (oversized)
 
     for (const msg of candidates) {
       if (this.activeMessages.length >= this.settings.maxConcurrentMessages) break;
 
       const result = this.checkPlacement(msg, now, dims);
       if (!result.ok) {
-        // "collision" → transient lane conflict; message stays in queue for retry.
-        // "no_lane"   → fundamental placement impossibility (e.g. message height
-        //               exceeds total available lanes); message will NEVER be
-        //               placed no matter how many frames pass.  Drop it to
-        //               prevent the infinite watchdog restart loop.
-        if (result.reason === 'no_lane') {
+        // 'collision' → transient lane conflict; message stays for retry.
+        // 'temporarily_unavailable' → all lanes saturated (burst); retry next frame.
+        // 'oversized'          → requiredSlots > totalLanes; will NEVER fit —
+        //                        drop permanently to prevent watchdog restart loop.
+        if (result.reason === 'oversized') {
           unplaceable.push(msg);
         }
         // checkPlacement() already called markCollision() for feedback.
@@ -1026,22 +1025,28 @@ export class CanvasRenderer extends RendererBase {
       this.pendingQueue.removeAll(committed);
     }
 
-    // Drop unplaceable messages to prevent the infinite watchdog restart loop.
+    // Drop oversized messages to prevent the infinite watchdog restart loop.
     // These messages have heights exceeding total available lanes — no amount
     // of waiting or retry will place them.
     if (unplaceable.length > 0) {
       this.pendingQueue.removeAll(unplaceable);
       // Update render activity so the watchdog doesn't flag a stuck renderer
-      // for messages that were intentionally dropped as unplaceable.
+      // for messages that were intentionally dropped as oversized.
       this.lastRenderActivity = performance.now();
+      const first = unplaceable[0]!;
+      const firstEstHeight = Math.round(this.estimateDimensions(first).height);
+      const laneCount = this.laneAllocator.getLaneCount();
+      const laneHeight = Math.round(this.laneAllocator.getLaneHeight());
+      const capacityPx = laneCount * laneHeight;
+      const requiredSlots = Math.ceil(firstEstHeight / laneHeight);
       log.warn(
-        `Dropped ${unplaceable.length} unplaceable message(s) — ` +
-          'message height exceeds total lane capacity ' +
-          `(${dims.width}×${dims.height}, ${this.laneAllocator.getLaneCount()} lanes, ` +
-          `laneHeight=${Math.round(this.laneAllocator.getLaneHeight())}px). ` +
-          `First message: kind=${unplaceable[0]!.kind}, estHeight=${Math.round(this.estimateDimensions(unplaceable[0]!).height)}px`
+        `Dropped ${unplaceable.length} oversized message(s) — ` +
+          `requiredSlots=${requiredSlots} > laneCount=${laneCount} ` +
+          `(capacities: ${capacityPx}px total, laneHeight=${laneHeight}px, ` +
+          `msgHeight=${firstEstHeight}px). ` +
+          `First message: kind=${first.kind}`
       );
-      this.observability.onMessageDropped('no_lane');
+      this.observability.onMessageDropped('oversized');
     }
 
     this.observability.recordDrainQueue(performance.now() - t0);
@@ -1072,7 +1077,7 @@ export class CanvasRenderer extends RendererBase {
 
       const result = this.checkPlacement(msg, now, dims);
       if (!result.ok) {
-        if (result.reason === 'no_lane') {
+        if (result.reason === 'oversized') {
           unplaceable.push(msg);
         }
         continue;
@@ -1163,7 +1168,7 @@ export class CanvasRenderer extends RendererBase {
     const dims = precomputedDims ?? this.overlay.getDimensions();
     if (!dims) {
       this.observability.recordCollisionCheck(performance.now() - t0);
-      return { ok: false, reason: 'no_lane' };
+      return { ok: false, reason: 'temporarily_unavailable' };
     }
 
     const mode = this.settings.danmakuMode;
@@ -1171,12 +1176,24 @@ export class CanvasRenderer extends RendererBase {
     const dimensions = this.estimateDimensions(message);
     const { height: msgHeight } = dimensions;
 
+    // Classify unplaceable messages:
+    //   - If requiredSlots > totalLanes → message is genuinely too tall, drop permanently.
+    //   - Otherwise → transient lane saturation (all lanes colliding, speed-tier
+    //     incompatibility, or wait-timeout); keep in queue for retry next frame.
+    const totalLanes = this.laneAllocator.getLaneCount();
+    const laneHeight = this.laneAllocator.getLaneHeight();
+    const requiredSlots = Math.max(1, Math.ceil(msgHeight / laneHeight));
+    if (requiredSlots > totalLanes) {
+      this.observability.recordCollisionCheck(performance.now() - t0);
+      return { ok: false, reason: 'oversized' };
+    }
+
     // Find the target lane Y position via the allocator (without committing).
     const speedTier = this.getSpeedTier(message);
     const placement = this.laneAllocator.findPlacement(msgHeight, dims, speedTier);
     if (!placement) {
       this.observability.recordCollisionCheck(performance.now() - t0);
-      return { ok: false, reason: 'no_lane' };
+      return { ok: false, reason: 'temporarily_unavailable' };
     }
 
     const newLaneY = placement.laneY + placement.verticalOffset;

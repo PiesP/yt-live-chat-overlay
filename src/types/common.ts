@@ -24,7 +24,8 @@ export type DropReason =
   | 'queue_priority'
   | 'queue_replaced'
   | 'collision'
-  | 'no_lane'
+  | 'oversized'
+  | 'temporarily_unavailable'
   | 'worker_backpressure';
 /** Backlog injection modes */
 export type BacklogMode = 'playback' | 'recent' | 'full' | 'none';
