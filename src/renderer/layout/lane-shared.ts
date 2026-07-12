@@ -11,7 +11,6 @@
  */
 
 import {
-  EPSILON,
   LANE_COOLDOWN_MIN_MS,
   SAFETY_MARGIN_RATIO,
   SPEED_TIER,
@@ -473,19 +472,26 @@ export function allocateSingleLaneShared(
       continue;
     }
 
-    // Zero-wait lane found: pre-collect candidate for epsilon skip
+    // Zero-wait lane found: collect candidates for randomized distribution.
+    // Collecting up to 4 candidates instead of returning the first one
+    // prevents diagonal patterns during bursts — where messages would
+    // otherwise always enter lane 0 → lane 1 → lane 2 in strict top-first
+    // order, creating an unnatural visual flow.
     if (!zeroWaitCandidates) zeroWaitCandidates = [];
     zeroWaitCandidates.push(i);
 
-    // Epsilon-greedy: 5% chance to skip this lane for variety
-    if (Math.random() < EPSILON) continue;
-
-    return { laneIndex: i, waitMs: 0 };
+    // Collect a small pool of candidates, then randomly pick one below.
+    // Cap at 4 to bound scan cost in high-density modes.
+    if (zeroWaitCandidates.length < 4) continue;
+    break;
   }
 
-  // After loop: if epsilon skipped all candidates, return first skipped
+  // After loop: randomly pick from collected zero-wait candidates.
+  // Random selection distributes burst messages across lanes instead
+  // of funneling them all through the topmost lane.
   if (zeroWaitCandidates && zeroWaitCandidates.length > 0) {
-    return { laneIndex: zeroWaitCandidates[0]!, waitMs: 0 };
+    const idx = Math.floor(Math.random() * zeroWaitCandidates.length) % zeroWaitCandidates.length;
+    return { laneIndex: zeroWaitCandidates[idx]!, waitMs: 0 };
   }
 
   if (speedMatched && speedMatched.waitMs <= maxWaitMs) return speedMatched;
