@@ -18,12 +18,6 @@ dist-extension-firefox/
 coverage/
 test-results/
 
-# Mutation testing
-.stryker-tmp/
-.stryker-tmp-debug/
-stryker-report/
-stryker.log
-
 # IDE
 .vscode/
 .idea/
@@ -77,6 +71,3 @@ TESTING.md
 
 # Local tests
 test/
-
-# Test config (lives in test/)
-stryker.conf.json
