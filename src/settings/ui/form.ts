@@ -201,6 +201,7 @@ const ACTIONS = ['reset', 'export', 'import', 'close'] as const;
 export type ActionType = (typeof ACTIONS)[number];
 
 function createActions(): HTMLDivElement {
+  const wrapper = domDiv('yt-chat-overlay-settings-actions-wrapper');
   const actions = domDiv('yt-chat-overlay-settings-actions');
   for (const [action, label] of ACTIONS.map(
     (a) => [a, a.charAt(0).toUpperCase() + a.slice(1)] as const
@@ -208,10 +209,19 @@ function createActions(): HTMLDivElement {
     const button = document.createElement('button');
     button.type = 'button';
     button.dataset.action = action;
-    button.textContent = t(label);
+    // Use "Done" for the close action to avoid user confusion
+    button.textContent = action === 'close' ? t('Done') : t(label);
     actions.appendChild(button);
   }
-  return actions;
+  wrapper.appendChild(actions);
+
+  // Subtle auto-save indicator — reassures users their changes are persisted
+  const autoSaveHint = document.createElement('p');
+  autoSaveHint.className = 'yt-chat-overlay-settings-autosave-hint';
+  autoSaveHint.textContent = t('Changes are saved automatically');
+  wrapper.appendChild(autoSaveHint);
+
+  return wrapper;
 }
 
 function createEnabledField(title?: string): HTMLLabelElement {

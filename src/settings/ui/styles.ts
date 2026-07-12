@@ -549,13 +549,15 @@ export const SETTINGS_UI_STYLES = `
         height: ${uiSizing.colorSwatchHeight}px;
       }
       /* Actions bar */
+      .yt-chat-overlay-settings-actions-wrapper {
+        flex-shrink: 0;
+        padding-top: ${spacing.sm}px;
+        border-top: 1px solid ${uiColors.border};
+      }
       .yt-chat-overlay-settings-actions {
         display: flex;
         justify-content: flex-end;
         gap: ${spacing.sm}px;
-        flex-shrink: 0;
-        padding-top: ${spacing.sm}px;
-        border-top: 1px solid ${uiColors.border};
       }
       .yt-chat-overlay-settings-actions button {
         border: none;
@@ -603,6 +605,13 @@ export const SETTINGS_UI_STYLES = `
       }
       .yt-chat-overlay-settings-actions button[data-action="close"]:hover {
         background: ${uiColors.primaryHover};
+      }
+      .yt-chat-overlay-settings-autosave-hint {
+        margin: ${spacing.xs}px 0 0;
+        font-size: ${typography.fontSize.xs};
+        color: ${uiColors.textMuted};
+        text-align: end;
+        font-family: ${DEFAULT_FONT_FAMILY};
       }
 
       /* Reset confirmation dialog — native <dialog> */
