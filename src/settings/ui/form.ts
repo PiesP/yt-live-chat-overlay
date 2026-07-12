@@ -81,6 +81,10 @@ function setupTabKeyNavigation(tablist: HTMLElement): void {
       if (newTab) {
         newTab.setAttribute('tabindex', '0');
         newTab.focus();
+        // Automatic activation: switching focus immediately activates the tab.
+        // Uses click() rather than dispatching a custom event so the existing
+        // click-delegation handler in bindTabEvents() processes it uniformly.
+        newTab.click();
       }
     }
   };
