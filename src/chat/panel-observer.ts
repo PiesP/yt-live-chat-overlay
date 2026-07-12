@@ -46,6 +46,13 @@ export class ChatPanelObserver {
 
   /** Start observing for chat panel open/close state changes. */
   start(callback: ChatPanelChangeCallback): void {
+    // Guard against double-start: if already running, just update the callback.
+    if (this.pollTimer !== null) {
+      log.debug('Already started — updating callback');
+      this.callback = callback;
+      return;
+    }
+
     this.callback = callback;
 
     // Initial check
