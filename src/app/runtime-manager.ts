@@ -273,9 +273,11 @@ export class RuntimeManager {
       return;
     }
 
-    this.state = 'destroyed';
     this.clearScheduledReconcile();
     this.disposeActiveSession();
+    // Set state AFTER cleanup so disposeSession()'s isDisposedState guard
+    // doesn't short-circuit out of renderer / chat source / observer disposal.
+    this.state = 'destroyed';
   }
 
   private ensureReconcileLoop(): Promise<void> {

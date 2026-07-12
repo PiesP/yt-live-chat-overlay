@@ -186,6 +186,7 @@ export class RenderWorkerManager {
     overlay: Overlay,
     overrideWorkerUrl?: string | URL
   ): boolean {
+    let worker: Worker | null = null;
     try {
       if (typeof OffscreenCanvas === 'undefined') {
         log.debug('OffscreenCanvas not available — using main-thread renderer');
@@ -211,7 +212,6 @@ export class RenderWorkerManager {
       // governs Worker creation. If YouTube's CSP blocks the worker URL
       // (e.g. missing worker-src directive), the constructor throws a
       // SecurityError. We catch this and fall back to main-thread rendering.
-      let worker: Worker;
       try {
         worker = new Worker(workerUrl, { type: 'module' });
       } catch (workerError: unknown) {
@@ -228,7 +228,11 @@ export class RenderWorkerManager {
         return false;
       }
 
-      worker.onmessage = (e: MessageEvent) => {
+      // TS can't infer that worker is non-null here despite inner catch always
+      // returning — assert non-null so the rest of the block sees Worker.
+      const w = worker!;
+
+      w.onmessage = (e: MessageEvent) => {
         // Type guard: validate message shape before dispatch.
         // Malformed or foreign messages (e.g. from a stale worker after
         // recreation, or injected by a page-level listener) must not
@@ -263,7 +267,7 @@ export class RenderWorkerManager {
         }
       };
 
-      worker.onerror = (err) => {
+      w.onerror = (err) => {
         log.warn('Render worker unhandled error:', err.message);
       };
 
@@ -272,7 +276,7 @@ export class RenderWorkerManager {
       // destroy the worker and let the renderer fall back to main thread.
       let messageErrorCount = 0;
       const MAX_MESSAGE_ERRORS = 3;
-      worker.onmessageerror = () => {
+      w.onmessageerror = () => {
         messageErrorCount++;
         log.warn(
           `Render worker message deserialization failed (${messageErrorCount}/${MAX_MESSAGE_ERRORS})`
@@ -285,7 +289,7 @@ export class RenderWorkerManager {
         }
       };
 
-      worker.postMessage(
+      w.postMessage(
         {
           type: 'init',
           canvas: offscreen,
@@ -300,7 +304,7 @@ export class RenderWorkerManager {
       this.dimensionsUnsubscribe = overlay.onDimensionsChanged((d) => {
         if (d) {
           const currentDpr = window.devicePixelRatio || 1;
-          worker.postMessage({
+          w.postMessage({
             type: 'resize',
             width: d.width,
             height: d.height,
@@ -309,13 +313,17 @@ export class RenderWorkerManager {
         }
       });
 
-      this.worker = worker;
+      this.worker = w;
       this.active = true;
       this.startPingPong();
 
       log.info('Render worker initialized');
       return true;
     } catch (error: unknown) {
+      // Terminate any worker created before the failure to prevent leaks.
+      // The offscreen canvas was already transferred via postMessage, so the
+      // caller must create a fresh canvas for the main-thread fallback path.
+      (worker as Worker)?.terminate();
       log.debug('Render worker unavailable — using main-thread renderer:', error);
       return false;
     }
