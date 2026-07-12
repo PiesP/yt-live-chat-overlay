@@ -932,11 +932,17 @@ export class RuntimeManager {
         // Panel opened — try to install DOM watcher if not already active
         if (!this.domWatcherUnsubscribe) {
           try {
-            this.domWatcherUnsubscribe = installDomChatWatcher((messages) => {
+            const unsub = installDomChatWatcher((messages) => {
               if (this.isDisposedState) return;
               chatSource.injectExternalMessages(messages);
             });
-            log.info('DOM chat watcher installed (panel opened)');
+            if (unsub) {
+              this.domWatcherUnsubscribe = unsub;
+              log.info('DOM chat watcher installed (panel opened)');
+            }
+            // If unsub is null, the container was not found — this is
+            // expected for cross-origin iframe chat (#chatframe). The
+            // fetch interceptor serves as the primary messaging path.
           } catch (error: unknown) {
             log.info('Failed to install DOM chat watcher after panel open:', error);
           }

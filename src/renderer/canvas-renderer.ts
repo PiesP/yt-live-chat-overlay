@@ -932,13 +932,21 @@ export class CanvasRenderer extends RendererBase {
     const candidates = this.pendingQueue.toArray();
     let batchIndex = 0;
     const committed: ChatMessage[] = [];
+    const unplaceable: ChatMessage[] = []; // Messages that can never be placed (no_lane)
 
     for (const msg of candidates) {
       if (this.activeMessages.length >= this.settings.maxConcurrentMessages) break;
 
       const result = this.checkPlacement(msg, now, dims);
       if (!result.ok) {
-        // Message stays in queue for retry next frame.
+        // "collision" → transient lane conflict; message stays in queue for retry.
+        // "no_lane"   → fundamental placement impossibility (e.g. message height
+        //               exceeds total available lanes); message will NEVER be
+        //               placed no matter how many frames pass.  Drop it to
+        //               prevent the infinite watchdog restart loop.
+        if (result.reason === 'no_lane') {
+          unplaceable.push(msg);
+        }
         // checkPlacement() already called markCollision() for feedback.
         continue;
       }
@@ -983,6 +991,24 @@ export class CanvasRenderer extends RendererBase {
       this.pendingQueue.removeAll(committed);
     }
 
+    // Drop unplaceable messages to prevent the infinite watchdog restart loop.
+    // These messages have heights exceeding total available lanes — no amount
+    // of waiting or retry will place them.
+    if (unplaceable.length > 0) {
+      this.pendingQueue.removeAll(unplaceable);
+      // Update render activity so the watchdog doesn't flag a stuck renderer
+      // for messages that were intentionally dropped as unplaceable.
+      this.lastRenderActivity = performance.now();
+      log.warn(
+        `Dropped ${unplaceable.length} unplaceable message(s) — ` +
+          'message height exceeds total lane capacity ' +
+          `(${dims.width}×${dims.height}, ${this.laneAllocator.getLaneCount()} lanes, ` +
+          `laneHeight=${Math.round(this.laneAllocator.getLaneHeight())}px). ` +
+          `First message: kind=${unplaceable[0]!.kind}, estHeight=${Math.round(this.estimateDimensions(unplaceable[0]!).height)}px`
+      );
+      this.observability.onMessageDropped('no_lane');
+    }
+
     this.observability.recordDrainQueue(performance.now() - t0);
   }
 
@@ -1003,13 +1029,19 @@ export class CanvasRenderer extends RendererBase {
     const candidates = this.pendingQueue.toArray();
     let batchIndex = 0;
     const committed: ChatMessage[] = [];
+    const unplaceable: ChatMessage[] = [];
     let deadline = performance.now() + 50; // 50ms budget
 
     for (const msg of candidates) {
       if (this.activeMessages.length >= this.settings.maxConcurrentMessages) break;
 
       const result = this.checkPlacement(msg, now, dims);
-      if (!result.ok) continue;
+      if (!result.ok) {
+        if (result.reason === 'no_lane') {
+          unplaceable.push(msg);
+        }
+        continue;
+      }
 
       this.enqueueMessageWithPlacement(
         msg,
@@ -1051,6 +1083,12 @@ export class CanvasRenderer extends RendererBase {
 
     if (committed.length > 0) {
       this.pendingQueue.removeAll(committed);
+    }
+
+    // Drop unplaceable messages — same rationale as drainQueue.
+    if (unplaceable.length > 0) {
+      this.pendingQueue.removeAll(unplaceable);
+      this.lastRenderActivity = performance.now();
     }
   }
 
