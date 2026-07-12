@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.42.1] - 2026-07-12
+
+### Fixed
+
+- **Color-scheme leak to YouTube host page** — Settings injected styles used `:root { color-scheme: dark; }`, which affected YouTube's native form controls (scrollbars, selects, inputs). Now scoped to `.yt-chat-overlay-settings-modal`, `.yt-chat-overlay-settings-confirm`, and `#yt-chat-overlay-settings-backdrop`.
+- **Font chip keyboard inaccessibility** — Chips used `<span role="button">` with click-only handler, blocking keyboard users. Now native `<button>` elements with `aria-pressed` for screen reader state communication and automatic Enter/Space activation.
+- **Ambiguous save model** — The main action button read "Close," which users interpreted as cancel/discard. Now reads "Done" with a persistent "Changes are saved automatically" hint below the button bar.
+- **Tab arrow key navigation without activation** — Arrow keys moved focus between tabs but required a separate Enter/Space to switch panels (manual activation). Now arrow keys automatically activate the focused tab (automatic activation), matching WAI-ARIA Tabs Pattern recommendation.
+- **E2E test selectors mismatch** — Visual tests referenced `#yt-chat-overlay-settings-modal` (actual ID: `#yt-chat-overlay-settings-backdrop`) and `[data-testid="tab-*"]` (tabs use `id="tab-{paneId}"`), so they couldn't catch real regressions. Fixed to use actual DOM selectors.
+
+### Changed
+
+- **Improved touch target sizes** — Tab buttons (28px → 40px min-height), font chips (18px → 36px min-height), and field rows (implicit → 40px min-height) for better usability on 400px-wide modal at WCAG 2.2 touch target recommendations.
+
+## [0.42.0] - 2026-07-04
+
 ### Added
 
 - **Half-cell lane density during burst traffic** — When comments flood, the lane grid subdivides to finer resolution, doubling placement opportunities.
@@ -13,10 +29,6 @@ All notable changes to this project will be documented in this file.
   - Effective lane height = `rawLaneHeight × laneDensityFactor`, applied in both main-thread `LaneAllocator` and Worker renderer
   - Density transitions are burst-driven and automatic; active messages survive unchanged
   - Worker synced via `laneDensity` protocol message
-
-## [0.42.0] - 2026-07-04
-
-### Added
 
 - **Native `<dialog>` for settings modal** — Replaced custom backdrop div, focus trap, ESC handler, scroll lock, and `body.inert` with browser-native `showModal()`. Added `commandfor` progressive enhancement for declarative dialog control (Chrome 134+).
 - **Ignore Reduced Motion setting** — Advanced → Developer checkbox that overrides OS-level `prefers-reduced-motion: reduce`, forcing scroll animations regardless of system accessibility settings.
