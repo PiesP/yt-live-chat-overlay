@@ -690,7 +690,13 @@ export class WorkerRenderer {
         }
       }
       if (msg.priority > (this.pendingQueue[minIdx]?.priority ?? 0)) {
+        // Replace the lowest-priority entry.  Clean up the evicted
+        // entry from messageById and register the new one so
+        // translation results can be matched.
+        const evicted = this.pendingQueue[minIdx];
+        if (evicted) this.messageById.delete(evicted.id);
         this.pendingQueue[minIdx] = msg;
+        this.messageById.set(msg.id, msg);
       }
       return;
     }
@@ -741,6 +747,9 @@ export class WorkerRenderer {
     this.stickerCache.clear();
     this.superChatGradientCache.clear();
     this.messageById.clear();
+    // Acknowledge the destroy request so the main thread can terminate
+    // without waiting for the 500ms safety timeout.
+    self.postMessage({ type: 'ack' });
   }
 
   /**
@@ -806,7 +815,7 @@ export class WorkerRenderer {
     if (!result) return null;
     const laneY = computeLaneY(
       result.laneIndex,
-      this.canvas?.height ?? 0,
+      this.logicalHeight,
       this.config?.safeTop ?? 0,
       this.laneHeight
     );

@@ -121,8 +121,12 @@ export class RenderWorkerManager {
   /** Ping/pong health check for detecting crashed or unresponsive workers. */
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private lastPongTime = 0;
+  /** Timestamp when the worker was started (used to detect init-time crashes). */
+  private initTime = 0;
   private static readonly PING_INTERVAL_MS = 1000;
   private static readonly PONG_TIMEOUT_MS = 5000;
+  /** Max time after init before the first pong must arrive. */
+  private static readonly INIT_TIMEOUT_MS = 10000;
 
   constructor(deps: WorkerManagerDeps) {
     this.deps = deps;
@@ -152,7 +156,12 @@ export class RenderWorkerManager {
    */
   isAlive(): boolean {
     if (!this.active || !this.worker) return true; // no worker → not applicable
-    if (this.lastPongTime === 0) return true; // haven't received first pong yet
+    // Grace period after init: allow the Worker time to send its first pong.
+    // If the worker crashes during initialization (before the first pong),
+    // we must eventually detect it — the init timeout covers this case.
+    if (this.lastPongTime === 0) {
+      return performance.now() - this.initTime < RenderWorkerManager.INIT_TIMEOUT_MS;
+    }
     return performance.now() - this.lastPongTime < RenderWorkerManager.PONG_TIMEOUT_MS;
   }
 
@@ -160,6 +169,7 @@ export class RenderWorkerManager {
   private startPingPong(): void {
     this.stopPingPong();
     this.lastPongTime = 0;
+    this.initTime = performance.now();
     this.pingTimer = setInterval(() => {
       if (this.worker) {
         this.worker.postMessage({ type: 'ping' });
@@ -174,6 +184,7 @@ export class RenderWorkerManager {
       this.pingTimer = null;
     }
     this.lastPongTime = 0;
+    this.initTime = 0;
   }
 
   /**
@@ -195,19 +206,16 @@ export class RenderWorkerManager {
 
       const dims = overlay.getDimensions();
       const dpr = window.devicePixelRatio || 1;
-      // Apply DPR to canvas backing store BEFORE transferring to offscreen,
-      // so the worker's OffscreenCanvas renders at native device resolution
-      // instead of being browser-upscaled from CSS-pixel resolution.
-      if (dims) {
-        canvas.width = dims.width * dpr;
-        canvas.height = dims.height * dpr;
-      }
-      const offscreen = canvas.transferControlToOffscreen();
       const config = RenderWorkerManager.buildWorkerConfig(settings);
 
       // Resolve worker URL via platform-specific factory
       const workerUrl = overrideWorkerUrl ?? createWorkerUrl('./renderer.ts');
 
+      // ── Create Worker BEFORE touching the canvas ─────────────────
+      // If Worker creation fails (CSP, network, etc.), the canvas must
+      // stay unmodified so the main-thread fallback can acquire a 2D
+      // context on the original canvas element.
+      //
       // In MAIN-world content scripts, the page's CSP (not the extension's)
       // governs Worker creation. If YouTube's CSP blocks the worker URL
       // (e.g. missing worker-src directive), the constructor throws a
@@ -231,6 +239,16 @@ export class RenderWorkerManager {
       // TS can't infer that worker is non-null here despite inner catch always
       // returning — assert non-null so the rest of the block sees Worker.
       const w = worker!;
+
+      // ── Worker ready — now transfer the canvas ───────────────────
+      // Apply DPR to canvas backing store BEFORE transferring to offscreen,
+      // so the worker's OffscreenCanvas renders at native device resolution
+      // instead of being browser-upscaled from CSS-pixel resolution.
+      if (dims) {
+        canvas.width = dims.width * dpr;
+        canvas.height = dims.height * dpr;
+      }
+      const offscreen = canvas.transferControlToOffscreen();
 
       w.onmessage = (e: MessageEvent) => {
         // Type guard: validate message shape before dispatch.
@@ -321,8 +339,9 @@ export class RenderWorkerManager {
       return true;
     } catch (error: unknown) {
       // Terminate any worker created before the failure to prevent leaks.
-      // The offscreen canvas was already transferred via postMessage, so the
-      // caller must create a fresh canvas for the main-thread fallback path.
+      // The canvas is untouched when Worker creation in the inner try/catch
+      // returns false — the caller can safely use the original canvas for
+      // the main-thread fallback path.
       (worker as Worker)?.terminate();
       log.debug('Render worker unavailable — using main-thread renderer:', error);
       return false;
@@ -474,6 +493,15 @@ export class RenderWorkerManager {
   sendReplayModeToWorker(isReplayMode: boolean): void {
     if (!this.worker) return;
     sendUpdateConfigToWorker({ worker: this.worker }, { isReplayMode } as Record<string, unknown>);
+  }
+
+  /**
+   * Relay OS reduced-motion preference change to the Worker.
+   * Workers cannot access matchMedia — the main thread must push updates.
+   */
+  sendReducedMotion(reducedMotion: boolean): void {
+    if (!this.worker) return;
+    sendUpdateConfigToWorker({ worker: this.worker }, { reducedMotion } as Record<string, unknown>);
   }
 
   /**
