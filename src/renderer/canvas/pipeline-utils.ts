@@ -27,7 +27,7 @@ export const COMPACTION_THRESHOLD_RATIO = 0.5;
  * @param seed Optional explicit seed for deterministic sequences (testing).
  * @returns A function that returns a pseudo-random number in [0, 1).
  */
-export function createFastRandom(seed?: number): () => number {
+function createFastRandom(seed?: number): () => number {
   let s = seed != null ? seed : Date.now() ^ ((Math.random() * 0xffffffff) >>> 0);
   return () => {
     // LCG parameters from Numerical Recipes (a=1664525, c=1013904223)

@@ -58,12 +58,6 @@ export const EMOJI_FETCH_TIMEOUT_DEFAULT_MS = 30_000;
  *  Shared by both main-thread CanvasRenderer and OffscreenCanvas Worker renderer. */
 export const IDLE_GRACE_PERIOD_MS = 500;
 
-/** Lane density factor for sub-cell placement during bursts.
- *  1.0 = full-cell (normal), 0.75 = 3/4-cell (high burst), 0.5 = half-cell (extreme burst).
- *  When < 1.0, effectiveLaneHeight = laneHeight * factor doubles lane resolution
- *  for finer vertical placement opportunities. */
-export const LANE_DENSITY_NORMAL = 1.0;
-
 /** Number of opacity buckets for render-phase opacity grouping.
  *  Messages with opacity 0.0–1.0 are distributed across 21 buckets
  *  (Math.round(opacity * 20)) for grouped draw-order submission. */

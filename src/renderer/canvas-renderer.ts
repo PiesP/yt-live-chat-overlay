@@ -147,8 +147,9 @@ export class CanvasRenderer extends RendererBase {
    * sustained lane saturation.
    */
   private antiBlockSince: number | null = null;
-  /** Offscreen recovery poll interval ID. */
-  private offscreenPollInterval: ReturnType<typeof setInterval> | null = null;
+  /** Offscreen recovery poll cleanup function. startOffscreenPoll returns a
+   *  cleanup callback, not a setInterval handle. */
+  private offscreenPollCleanup: (() => void) | null = null;
   /** IntersectionObserver for detecting canvas offscreen state. */
   private offscreenObserver: IntersectionObserver | null = null;
   /** Current connection health status for overlay feedback. */
@@ -734,20 +735,18 @@ export class CanvasRenderer extends RendererBase {
    * dismissed.
    */
   private startOffscreenPoll(canvas: HTMLCanvasElement): void {
-    if (this.offscreenPollInterval !== null) return;
-    this.offscreenPollInterval = startOffscreenPoll(canvas, () => {
+    if (this.offscreenPollCleanup !== null) return;
+    this.offscreenPollCleanup = startOffscreenPoll(canvas, () => {
       if (this.isPaused) {
         this.resume();
       }
-    }) as unknown as ReturnType<typeof setInterval>;
+    });
   }
 
   private stopOffscreenPoll(): void {
-    if (this.offscreenPollInterval !== null) {
-      // The poll function returns a cleanup callback — calling it via
-      // the stored interval mechanism. We cast back to invoke cleanup.
-      (this.offscreenPollInterval as unknown as () => void)();
-      this.offscreenPollInterval = null;
+    if (this.offscreenPollCleanup !== null) {
+      this.offscreenPollCleanup();
+      this.offscreenPollCleanup = null;
     }
   }
 

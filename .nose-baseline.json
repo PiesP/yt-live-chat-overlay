@@ -5,15 +5,15 @@
   "families": [
     {
       "id": "8da5484c8e755973",
-      "note": "local duplication — extract a method from the repeated block",
+      "note": "local duplication \u2014 extract a method from the repeated block",
       "members": [
         {
           "id": "d60c9e6eb1402b0c",
           "source_digest": "fnv1a64:6092c086be0bef5c",
           "file": "src/renderer/canvas-renderer.ts",
           "lang": "typescript",
-          "start_line": 937,
-          "end_line": 980,
+          "start_line": 936,
+          "end_line": 979,
           "kind": "Block",
           "is_fragment": false
         },
@@ -22,8 +22,8 @@
           "source_digest": "fnv1a64:6d7c3fbe20c6738c",
           "file": "src/renderer/canvas-renderer.ts",
           "lang": "typescript",
-          "start_line": 1009,
-          "end_line": 1051,
+          "start_line": 1008,
+          "end_line": 1050,
           "kind": "Block",
           "is_fragment": false
         }
