@@ -45,6 +45,7 @@ export class TranslationService {
   /** FIFO translation queue. */
   private translateQueue: Array<{
     text: string;
+    cacheKey: string;
     resolve: (result: string | null) => void;
   }> = [];
   /** Whether the drain loop is currently running. */
@@ -90,6 +91,7 @@ export class TranslationService {
 
     this.enabled = settings.enabled && settings.service === 'auto';
     if (!this.enabled) {
+      this.translator?.destroy();
       this.translator = null;
       this.currentTarget = null;
       this.currentSource = null;
@@ -187,6 +189,7 @@ export class TranslationService {
         log.warn(
           `Translator not available for ${sourceLanguage}→${targetLanguage} (unsupported language pair).`
         );
+        this.translator?.destroy();
         this.translator = null;
         this.currentTarget = null;
         this.currentSource = null;
@@ -228,6 +231,7 @@ export class TranslationService {
       // Clear currentTarget/currentSource so the next configure() with
       // the same language pair does not incorrectly no-op (see line 94).
       log.warn('translation.service.create-failed', { error: String(err) });
+      this.translator?.destroy();
       this.translator = null;
       this.currentTarget = null;
       this.currentSource = null;
@@ -272,7 +276,10 @@ export class TranslationService {
       return text;
     }
 
-    const cached = this.translationCache.get(text);
+    // Include language pair in cache key so stale translations from a
+    // previous target language aren't returned after settings change.
+    const cacheKey = `${this.currentSource ?? 'auto'}:${this.currentTarget}:${text}`;
+    const cached = this.translationCache.get(cacheKey);
     if (cached !== undefined) {
       return cached;
     }
@@ -287,7 +294,7 @@ export class TranslationService {
           `Translate queue at capacity (${TranslationService.MAX_TRANSLATE_QUEUE_SIZE}) — dropped oldest entry`
         );
       }
-      this.translateQueue.push({ text, resolve });
+      this.translateQueue.push({ text, cacheKey, resolve });
       if (!this.drainActive) {
         this.drainActive = true;
         this.drainQueue();
@@ -306,7 +313,7 @@ export class TranslationService {
         if (!entry) break;
 
         // Re-check cache after dequeue — another caller may have translated this text
-        const reCached = this.translationCache.get(entry.text);
+        const reCached = this.translationCache.get(entry.cacheKey);
         if (reCached !== undefined) {
           entry.resolve(reCached);
           continue;
@@ -357,7 +364,7 @@ export class TranslationService {
           const result = await this.translator.translate(entry.text);
           this.consecutiveFailures = 0;
           this.lastSuccessTimestamp = Date.now();
-          this.translationCache.set(entry.text, result);
+          this.translationCache.set(entry.cacheKey, result);
           entry.resolve(result);
         } catch (err: unknown) {
           this.consecutiveFailures++;

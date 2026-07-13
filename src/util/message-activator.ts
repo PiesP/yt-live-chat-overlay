@@ -121,11 +121,18 @@ export class MessageActivator {
     // will recreate it.
     const translatableText = getTranslatableText(message);
     if (this.translationService.isEnabled && translatableText) {
-      const cmRef = cm;
+      // Capture immutable message id — not the pooled CanvasMessage reference.
+      // Pooled messages can be recycled before the async translation completes,
+      // which would corrupt the new message's rendered output.
+      const capturedId = message.id;
       this.translationService
         .translate(translatableText)
         .then((translated) => {
-          callbacks.onTranslationResult(cmRef, translated);
+          // Guard: only apply translation if the CanvasMessage hasn't been
+          // recycled and repurposed for a different chat message.
+          if (cm.message.id === capturedId) {
+            callbacks.onTranslationResult(cm, translated);
+          }
         })
         .catch(() => {
           // Silently ignore individual translation failures.
