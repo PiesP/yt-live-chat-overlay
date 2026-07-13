@@ -11,15 +11,15 @@
  * - Forward menu clicks to the active tab's content script
  *
  * `chrome` global is always available in extension service worker context.
- * We cache it as `browserApi` because the type declaration marks it as
- * possibly undefined (for content-script compat) but all APIs are present
- * in SW context.
+ * API references are extracted with `!` assertions because the type
+ * declaration marks them as possibly undefined (for content-script compat)
+ * but all APIs are present in SW context.
  */
 
-// Cache the chrome namespace: in SW context it is always defined,
-// but the type declaration marks it as possibly undefined for compat
-// with content-script contexts where it may not be available.
-const browserApi = chrome!;
+// Extract API references — always defined in SW context.
+const contextMenus = chrome!.contextMenus!;
+const runtime = chrome!.runtime!;
+const tabs = chrome!.tabs!;
 
 // ── Menu commands ──────────────────────────────────────────────────────────
 
@@ -32,18 +32,18 @@ const MENU_COMMANDS = [
 
 /** Idempotent menu registration: creates only missing items. */
 function ensureMenuCommands(): void {
-  browserApi.contextMenus.getAll((existing) => {
+  contextMenus.getAll((existing) => {
     const existingIds = new Set(existing.map((item) => item.id));
     for (const cmd of MENU_COMMANDS) {
       if (existingIds.has(cmd.id)) continue;
-      browserApi.contextMenus.create(
+      contextMenus.create(
         {
           id: cmd.id,
           title: cmd.title,
           contexts: ['action'],
         },
         () => {
-          if (browserApi.runtime.lastError) {
+          if (runtime.lastError) {
             // Menu may have been created by a concurrent call — safe to ignore.
           }
         }
@@ -54,12 +54,12 @@ function ensureMenuCommands(): void {
 
 // ── Installation ───────────────────────────────────────────────────────────
 
-browserApi.runtime.onInstalled.addListener((details) => {
+runtime.onInstalled.addListener((details) => {
   // Always rebuild menus on install/update.
   if (details.reason === 'install' || details.reason === 'update') {
-    browserApi.contextMenus.removeAll(() => {
+    contextMenus.removeAll(() => {
       for (const cmd of MENU_COMMANDS) {
-        browserApi.contextMenus.create({
+        contextMenus.create({
           id: cmd.id,
           title: cmd.title,
           contexts: ['action'],
@@ -71,14 +71,14 @@ browserApi.runtime.onInstalled.addListener((details) => {
 
 // ── Context menu click handler ─────────────────────────────────────────────
 
-browserApi.contextMenus.onClicked.addListener((info, tab) => {
+contextMenus.onClicked.addListener((info, tab) => {
   if (!tab?.id) return;
 
   const command = MENU_COMMANDS.find((c) => c.id === info.menuItemId);
   if (!command) return;
 
   // Forward to content script
-  browserApi.tabs.sendMessage(tab.id, {
+  tabs.sendMessage(tab.id, {
     type: 'menu-command',
     command: command.id,
   }).catch(() => {

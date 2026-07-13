@@ -6,8 +6,30 @@
  *
  * Resolves worker bundle URLs based on the environment:
  * - Extension: chrome.runtime.getURL (workers must be in web_accessible_resources)
- * - Userscript: new URL(..., import.meta.url) (Vite emits worker chunks)
+ * - Userscript: Vite IIFE builds replace import.meta.url with {}.url (empty object),
+ *   making relative URL construction impossible. Use workerSupported() to check
+ *   before attempting Worker creation.
  */
+
+/** Check whether Web Workers can be spawned in this environment. */
+export function workerSupported(): boolean {
+  // Extension context has chrome.runtime.getURL for worker bundles.
+  const chromeApi =
+    (typeof chrome !== 'undefined' ? chrome : undefined) ??
+    (typeof browser !== 'undefined' ? browser : undefined);
+  if (chromeApi?.runtime?.getURL) return true;
+
+  // Userscript IIFE builds: Vite replaces import.meta.url with {}.url,
+  // so new URL(relative, import.meta.url) produces an invalid URL.
+  // Worker bundling is not supported in this context.
+  // Detect by checking whether import.meta.url is a real URL.
+  try {
+    new URL('.', import.meta.url);
+  } catch {
+    return false;
+  }
+  return true;
+}
 
 /**
  * Create a URL for a render worker bundle.
