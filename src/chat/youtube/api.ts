@@ -258,7 +258,7 @@ export function findLiveChatRenderer(initialData: JsonObject): JsonObject | null
   if (recursive) return recursive;
 
   // Diagnostic: log page structure to help identify YouTube layout changes
-  log.warn('Chat renderer not found — page structure:', {
+  log.debug('Chat renderer not found — page structure:', {
     hasTwoColumn: !!getNestedRecord(initialData, ['contents', 'twoColumnWatchNextResults']),
     hasConversationBar: !!getNestedRecord(initialData, [
       'contents',
