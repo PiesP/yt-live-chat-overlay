@@ -2,7 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.42.2] - 2026-07-13
+
+### Fixed
+
+- **Translation lifecycle management** — Abort in-progress translation batches when language is switched mid-request, preventing stale translations from corrupting the display.
+- **Backlog rate cap** — Hidden tab accumulated comments, when replayed on tab return, now emit through the backlog controller for gradual Poisson-distributed emission instead of bursting all at once.
+- **Translation cache overwrite** — Concurrent translations of the same message no longer overwrite each other in the cache.
+- **Settings button accessibility** — Settings toggle buttons were invisible on keyboard navigation and touch devices. Fixed with explicit focus/hover styles and touch-event handling.
+- **Worker renderer parity** — Three gaps between main-thread and Worker renderer fixed: stagger sign miscalculation, queue depth threshold mismatch, and inconsistent drain guard logic.
+- **Hidden duration tracking** — `hiddenDuration` was always reported as 0 due to incorrect timestamp capture. Now accurately tracks tab-hidden time.
+- **PageWatcher SPA re-initialization** — YouTube's SPA client-side navigation no longer leaves the PageWatcher in a stale state.
+- **Worker support detection** — Added runtime `workerSupported()` detection that gracefully handles IIFE builds where `import.meta.url` is unavailable.
+- **Extension TypeScript errors** — 10 type errors in extension-specific code paths resolved.
+- **Restart leak** — Old overlay and renderer instances are now properly destroyed before creating new ones during `startSession`, preventing stale event listeners and memory leaks.
+- **Log level consistency** — Misleveled log calls corrected; all log calls standardized to structured format (`{channel, event, ...}`).
+- **Renderer fixes** — Reverse collision detection corrected, `waitMs` calculation fixed, drain race condition eliminated, and additional worker parity gaps closed.
+- **Lane selection bias** — Zero-wait lane selection now randomized to prevent diagonal burst patterns when many lanes have equal priority.
+- **Drop reason granularity** — `no_lane` drop reason split into `oversized` (comment physically too large) and `temporarily_unavailable` (all lanes occupied).
+- **Panel observer double-start** — Added `isStarted` guard to prevent duplicate IntersectionObserver initialization.
+- **Dependencies** — postcss updated to 8.5.17.
+
+### Refactored
+
+- **Structured logging** — All log calls standardized from ad-hoc format strings to `{channel, event, ...data}` objects for consistent filtering and debugging.
+- **Chat preflight state machine** — Extracted chat connection preflight logic from monolithic `ChatConnection` into a dedicated state machine module.
 
 ## [0.42.1] - 2026-07-12
 
