@@ -102,7 +102,7 @@ async function pollForPlayerContainer(
     await sleep(intervalMs, signal);
   }
 
-  log.warn('dom.player.not-found');
+  log.debug('dom.player.not-found');
   return null;
 }
 

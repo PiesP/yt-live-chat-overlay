@@ -1950,7 +1950,7 @@ export class CanvasRenderer extends RendererBase {
    * Called when the Worker is unrecoverable (dead or canvas context lost).
    */
   override fallbackToMainThread(reason: string): void {
-    log.warn('renderer.fallback.started', { reason });
+    log.info('renderer.fallback.started', { reason });
 
     this.workerManager.destroy();
     this.workerManager.setActive(false);
