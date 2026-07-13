@@ -571,6 +571,16 @@ export class RuntimeManager {
     const settings = this.settings as OverlaySettings;
 
     try {
+      // Dispose previous overlay/renderer before creating new ones.
+      // restartChatSourceSoft preserves old references but startSession
+      // creates fresh instances — the old ones must be cleaned up to
+      // prevent Worker, rAF, ResizeObserver, and fullscreen listener leaks.
+      this.overlay?.destroy();
+      this.overlay = null;
+      this.renderer?.destroy();
+      this.renderer = null;
+      this.standbyController.setRenderer(null);
+
       this.removeLeftoverOverlays();
 
       const overlay = new Overlay();
