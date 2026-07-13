@@ -200,7 +200,9 @@ export class RenderWorkerManager {
     let worker: Worker | null = null;
     try {
       if (typeof OffscreenCanvas === 'undefined') {
-        log.debug('OffscreenCanvas not available — using main-thread renderer');
+        log.debug('renderer.worker.unavailable', {
+          reason: 'no-offscreen-canvas',
+        });
         return false;
       }
 
@@ -231,7 +233,9 @@ export class RenderWorkerManager {
               ' This can happen if the page CSP has a restrictive worker-src directive.'
           );
         } else {
-          log.debug('Worker creation failed:', workerError);
+          log.debug('renderer.worker.creation-failed', {
+            error: String(workerError),
+          });
         }
         return false;
       }
@@ -262,13 +266,15 @@ export class RenderWorkerManager {
           !('type' in data) ||
           typeof (data as { type: unknown }).type !== 'string'
         ) {
-          log.debug('Ignoring malformed worker message:', data);
+          log.debug('renderer.worker.malformed-message', {
+            data: String(data),
+          });
           return;
         }
         const { type } = data as { type: string };
         switch (type) {
           case 'ready':
-            log.info('Render worker started');
+            log.info('renderer.worker.started');
             break;
           case 'stats':
             this.deps.observability.updateActiveMessages(
@@ -277,7 +283,9 @@ export class RenderWorkerManager {
             this._queueDepth = ((data as Record<string, unknown>).pendingQueueDepth as number) ?? 0;
             break;
           case 'error':
-            log.warn('Render worker error:', (data as Record<string, unknown>).error);
+            log.warn('renderer.worker.error', {
+              error: String((data as Record<string, unknown>).error),
+            });
             break;
           case 'pong':
             this.lastPongTime = performance.now();
@@ -286,7 +294,9 @@ export class RenderWorkerManager {
       };
 
       w.onerror = (err) => {
-        log.warn('Render worker unhandled error:', err.message);
+        log.warn('renderer.worker.error', {
+          error: err.message,
+        });
       };
 
       // Structured clone deserialization failures (malformed messages)
@@ -296,13 +306,14 @@ export class RenderWorkerManager {
       const MAX_MESSAGE_ERRORS = 3;
       w.onmessageerror = () => {
         messageErrorCount++;
-        log.warn(
-          `Render worker message deserialization failed (${messageErrorCount}/${MAX_MESSAGE_ERRORS})`
-        );
+        log.warn('renderer.worker.message-deserialization-failed', {
+          attempt: messageErrorCount,
+          max: MAX_MESSAGE_ERRORS,
+        });
         if (messageErrorCount >= MAX_MESSAGE_ERRORS) {
-          log.error(
-            'Render worker exceeded max message errors — destroying worker for main-thread fallback'
-          );
+          log.error('renderer.worker.max-message-errors', {
+            limit: MAX_MESSAGE_ERRORS,
+          });
           this.destroy();
         }
       };
@@ -335,7 +346,7 @@ export class RenderWorkerManager {
       this.active = true;
       this.startPingPong();
 
-      log.info('Render worker initialized');
+      log.info('renderer.worker.initialized');
       return true;
     } catch (error: unknown) {
       // Terminate any worker created before the failure to prevent leaks.
@@ -343,7 +354,9 @@ export class RenderWorkerManager {
       // returns false — the caller can safely use the original canvas for
       // the main-thread fallback path.
       (worker as Worker)?.terminate();
-      log.debug('Render worker unavailable — using main-thread renderer:', error);
+      log.debug('renderer.worker.unavailable', {
+        error: String(error),
+      });
       return false;
     }
   }

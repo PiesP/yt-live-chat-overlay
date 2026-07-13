@@ -174,7 +174,7 @@ export abstract class ChatSource implements Pauseable {
     this.callback = null;
     this.resetSessionState();
 
-    log.debug('Chat monitoring stopped');
+    log.debug('chat.source.monitoring-stopped');
   }
 
   isActive(timeoutMs = this.getSettings().activityTimeoutMs): boolean {
@@ -288,7 +288,7 @@ export abstract class ChatSource implements Pauseable {
     const response = await fetchFn(this.bootstrap, continuation, ...fetchArgs);
     const payload = getLiveChatPayload(response);
     if (!payload) {
-      log.warn('Failed to parse live chat payload from response');
+      log.warn('chat.source.parse-failed');
       return null;
     }
 
@@ -423,9 +423,7 @@ export abstract class ChatSource implements Pauseable {
 
     this.launchCurrentPollLoop(signal);
 
-    log.info(
-      `Chat monitoring started successfully via youtubei (${this.bootstrap.isReplay ? 'replay' : 'live'})`
-    );
+    log.debug('chat.source.replay-poll-started');
 
     return 'started';
   }

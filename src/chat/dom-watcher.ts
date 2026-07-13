@@ -109,7 +109,7 @@ export function installDomChatWatcher(onMessages: DomMessageCallback): DomWatche
     }
 
     if (allMessages.length > 0) {
-      log.debug(`DOM watcher captured ${allMessages.length} chat message(s)`);
+      log.debug('chat.dom-watcher.captured', { count: allMessages.length });
       onMessages(allMessages);
     }
   };
@@ -185,7 +185,7 @@ export function installDomChatWatcher(onMessages: DomMessageCallback): DomWatche
     };
     document.addEventListener('visibilitychange', handleVisibility);
 
-    log.info(`DOM chat watcher installed on: ${selector}`);
+    log.info('chat.dom-watcher.installed', { selector });
     return () => {
       document.removeEventListener('visibilitychange', handleVisibility);
       if (mutationRafId !== null) {
@@ -194,7 +194,7 @@ export function installDomChatWatcher(onMessages: DomMessageCallback): DomWatche
       }
       observer?.disconnect();
       observer = null;
-      log.info('DOM chat watcher removed');
+      log.info('chat.dom-watcher.removed');
     };
   }
 

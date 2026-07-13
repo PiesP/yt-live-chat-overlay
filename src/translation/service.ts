@@ -99,7 +99,7 @@ export class TranslationService {
     }
 
     if (!getTranslator()) {
-      log.warn('Chrome Translator API not available (requires Chrome 138+). Translation disabled.');
+      log.warn('translation.service.api-unavailable');
       this.enabled = false;
       return;
     }
@@ -134,7 +134,7 @@ export class TranslationService {
     // Don't stack retries — if a configure is already in-flight, let it finish.
     if (this.configurePromise) return;
 
-    log.info('Retrying translator creation via user activation…');
+    log.info('translation.service.retry-user-activation');
     this.configurePromise = this.doConfigure(this.pendingSource, this.pendingTarget);
     try {
       await this.configurePromise;
@@ -219,7 +219,7 @@ export class TranslationService {
       this.consecutiveFailures = 0;
       this.recoveryCycleCount = 0;
       this.lastSuccessTimestamp = 0;
-      log.info(`Translator ready: ${sourceLanguage} → ${targetLanguage}`);
+      log.info('translation.service.ready', { source: sourceLanguage, target: targetLanguage });
     } catch (err: unknown) {
       // create() may fail if user activation was missing (NotAllowedError)
       // or if the download failed. The translator stays null and isActive
@@ -227,7 +227,7 @@ export class TranslationService {
       // onUserActivation() call.
       // Clear currentTarget/currentSource so the next configure() with
       // the same language pair does not incorrectly no-op (see line 94).
-      log.warn('Failed to create translator (may need user activation):', err);
+      log.warn('translation.service.create-failed', { error: String(err) });
       this.translator = null;
       this.currentTarget = null;
       this.currentSource = null;
@@ -324,7 +324,7 @@ export class TranslationService {
             this.lastSuccessTimestamp > 0 &&
             Date.now() - this.lastSuccessTimestamp > TranslationService.RECOVERY_RESET_MS
           ) {
-            log.debug('Recovery cycle count reset — last success was over 5 minutes ago');
+            log.debug('translation.service.recovery-reset');
             this.recoveryCycleCount = 0;
           }
           if (this.recoveryCycleCount >= TranslationService.MAX_RECOVERY_CYCLES) {
@@ -383,7 +383,7 @@ export class TranslationService {
               try {
                 this.translator.destroy();
               } catch {
-                log.debug('Translator destroy during recovery failed');
+                log.debug('translation.service.destroy-failed');
               }
             }
             this.translator = null;
@@ -391,7 +391,10 @@ export class TranslationService {
             this.currentSource = null;
             this.consecutiveFailures = 0;
           } else {
-            log.debug(`Translation failed (${errName}):`, err);
+            log.debug('translation.service.translate-failed', {
+              errorName: errName,
+              error: String(err),
+            });
           }
           entry.resolve(null);
         }
@@ -415,7 +418,7 @@ export class TranslationService {
       try {
         this.translator.destroy();
       } catch {
-        log.debug('Translator destroy during shutdown failed');
+        log.debug('translation.service.shutdown-destroy-failed');
       }
     }
     this.translator = null;

@@ -269,7 +269,7 @@ export class Overlay {
     this.liveRegion.style.cssText = SCREEN_READER_CSS;
     this.container.appendChild(this.liveRegion);
 
-    log.info('Overlay created');
+    log.info('app.overlay.created');
     return true;
   }
 
@@ -355,7 +355,7 @@ export class Overlay {
       try {
         callback(this.dimensions);
       } catch (error: unknown) {
-        log.warn('Dimension change callback error:', error);
+        log.warn('app.overlay.callback-error', { error: String(error) });
       }
     }
   }
@@ -390,6 +390,6 @@ export class Overlay {
       this.liveRegionTimer = null;
     }
 
-    log.debug('Destroyed');
+    log.debug('app.overlay.destroyed');
   }
 }

@@ -39,13 +39,13 @@ export class VideoPauseController {
     this.videoPauseCleanup?.();
     const handlePause = (): void => {
       if (callbacks.isDisposed()) return;
-      log.debug('Video paused — pausing comment flow');
+      log.debug('app.video.paused');
       callbacks.pauseable.setPaused(true);
     };
 
     const handlePlay = (): void => {
       if (callbacks.isDisposed()) return;
-      log.debug('Video playing — resuming comment flow');
+      log.debug('app.video.playing');
       callbacks.pauseable.setPaused(false);
     };
 
@@ -54,7 +54,7 @@ export class VideoPauseController {
     // The 'playing' event fires when buffering completes and playback resumes.
     const handleWaiting = (): void => {
       if (callbacks.isDisposed()) return;
-      log.debug('Video buffering — pausing comment flow');
+      log.debug('app.video.buffering');
       callbacks.pauseable.setPaused(true);
     };
 
@@ -62,7 +62,7 @@ export class VideoPauseController {
     // rendering to save CPU/GPU. On exit, resume normally.
     const handleEnterPiP = (): void => {
       if (callbacks.isDisposed()) return;
-      log.debug('Entered PiP — pausing comment flow');
+      log.debug('app.video.pip-enter');
       callbacks.pauseable.setPaused(true);
     };
 
@@ -70,10 +70,10 @@ export class VideoPauseController {
       if (callbacks.isDisposed()) return;
       // Only resume if the video is actually playing (not paused in PiP)
       if (currentVideo && !currentVideo.paused) {
-        log.debug('Left PiP — resuming comment flow');
+        log.debug('app.video.pip-leave');
         callbacks.pauseable.setPaused(false);
       } else {
-        log.debug('Left PiP — video still paused, keeping comment flow paused');
+        log.debug('app.video.pip-leave-still-paused');
       }
     };
 
@@ -106,7 +106,7 @@ export class VideoPauseController {
 
     const initial = findElementMatch<HTMLVideoElement>(VIDEO_SELECTORS)?.element;
     if (!initial) {
-      log.debug('No video element found — video pause handling disabled');
+      log.debug('app.video.no-element');
       return;
     }
 
@@ -121,7 +121,7 @@ export class VideoPauseController {
         detachListeners(currentVideo);
         currentVideo = nextVideo;
         attachListeners(currentVideo);
-        log.debug('Re-bound video pause/play listeners to new <video> element');
+        log.debug('app.video.rebound-listeners');
       }
     };
 

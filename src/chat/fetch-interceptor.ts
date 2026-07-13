@@ -119,7 +119,7 @@ export function installFetchInterceptor(
         const text = await cloned.text();
         if (responseTextCache.has(text)) {
           clearTimeout(timeoutId);
-          log.debug('Skipping already-parsed response body');
+          log.debug('chat.interceptor.skip-duplicate');
           return;
         }
         // Evict oldest entries when cache is full
@@ -139,12 +139,12 @@ export function installFetchInterceptor(
           const events = extractChatEvents(payload.actions, getSettings);
           if (events.length > 0) {
             const messages = events.map((e) => e.message);
-            log.debug(`Intercepted ${messages.length} chat message(s) from YouTube client`);
+            log.debug('chat.interceptor.messages-received', { count: messages.length });
             onMessages(messages);
           }
         }
       } catch (error: unknown) {
-        log.debug('Fetch interceptor parse failed:', error);
+        log.debug('chat.interceptor.parse-failed', { error: String(error) });
         // Silently ignore parse failures — the fallback poll loop handles this.
       }
     })();
@@ -161,11 +161,11 @@ export function installFetchInterceptor(
     if (activeInterceptor?.restore === restore) {
       activeInterceptor = null;
     }
-    log.info('Fetch interceptor removed');
+    log.info('chat.interceptor.removed');
   };
 
   activeInterceptor = { restore, interceptedFn: interceptedFetch as typeof window.fetch };
 
-  log.info('Fetch interceptor installed for YouTube live chat');
+  log.info('chat.interceptor.installed');
   return restore;
 }

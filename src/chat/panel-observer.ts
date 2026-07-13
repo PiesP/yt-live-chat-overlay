@@ -48,7 +48,7 @@ export class ChatPanelObserver {
   start(callback: ChatPanelChangeCallback): void {
     // Guard against double-start: if already running, just update the callback.
     if (this.pollTimer !== null) {
-      log.debug('Already started — updating callback');
+      log.debug('chat.panel-observer.already-started');
       this.callback = callback;
       return;
     }
@@ -72,7 +72,7 @@ export class ChatPanelObserver {
     // and any other changes the MutationObserver misses.
     this.pollTimer = setInterval(() => this.scheduleCheck(), MUTATION_CHECK_INTERVAL_MS);
 
-    log.info('Chat panel observer started');
+    log.info('chat.panel-observer.started');
   }
 
   /** Stop observing and clean up all listeners. */
@@ -160,9 +160,9 @@ export class ChatPanelObserver {
     const state: ChatPanelState = { isOpen, element, timestamp: now };
 
     if (isOpen) {
-      log.info('Chat panel opened');
+      log.info('chat.panel.opened');
     } else {
-      log.info('Chat panel closed');
+      log.info('chat.panel.closed');
     }
 
     this.lastState = state;

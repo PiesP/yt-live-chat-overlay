@@ -183,7 +183,7 @@ export class ReplayChatSource extends ChatSource {
           }
         } catch (error: unknown) {
           if (!isAbortError(error)) {
-            log.info('Fetch iteration failed:', error);
+            log.debug('chat.replay.fetch-failed', { error: String(error) });
           }
         }
 
@@ -220,7 +220,7 @@ export class ReplayChatSource extends ChatSource {
           if (isAbortError(error)) {
             this.prefetchContinuation = null;
           } else {
-            log.info('Prefetch page failed:', error);
+            log.debug('chat.replay.prefetch-failed', { error: String(error) });
             this.prefetchBackoffUntil = Date.now() + 5000;
           }
         }
@@ -330,7 +330,7 @@ export class ReplayChatSource extends ChatSource {
           this.startPrefetch();
         } catch (error: unknown) {
           if (!isAbortError(error)) {
-            log.info('Seek replay fetch failed:', error);
+            log.debug('chat.replay.seek-fetch-failed', { error: String(error) });
           }
         }
       })();
@@ -343,7 +343,7 @@ export class ReplayChatSource extends ChatSource {
           this.startPrefetch();
         } catch (error: unknown) {
           if (!isAbortError(error)) {
-            log.info('Continuation poll in seek handler failed:', error);
+            log.debug('chat.replay.continuation-failed', { error: String(error) });
           }
         }
       })();
@@ -399,7 +399,7 @@ export class ReplayChatSource extends ChatSource {
 
       const replayContinuation = extractReplayContinuation(initialPayload.continuations);
       if (!replayContinuation) {
-        log.warn('Replay session did not expose playerSeek or replay continuation data');
+        log.warn('chat.replay.no-seek-data');
         return false;
       }
 
@@ -430,7 +430,7 @@ export class ReplayChatSource extends ChatSource {
         throw error;
       }
 
-      log.info('Failed to initialize replay chat session:', error);
+      log.info('chat.replay.init-failed', { error: String(error) });
       return false;
     }
   }
@@ -497,7 +497,7 @@ export class ReplayChatSource extends ChatSource {
         throw error;
       }
 
-      log.info('Replay playerSeek request failed:', error);
+      log.debug('chat.replay.player-seek-failed', { error: String(error) });
       this.recordReplayFailure();
       return false;
     }
@@ -532,7 +532,7 @@ export class ReplayChatSource extends ChatSource {
         throw error;
       }
 
-      log.info('Replay continuation request failed:', error);
+      log.debug('chat.replay.continuation-request-failed', { error: String(error) });
       this.recordReplayFailure();
       return false;
     }

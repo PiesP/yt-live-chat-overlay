@@ -4,26 +4,26 @@
   "baseline_kind": "accepted-duplication",
   "families": [
     {
-      "id": "570f375c04777be2",
+      "id": "817919e49c56879a",
       "note": "local duplication — extract a method from the repeated block",
       "members": [
         {
-          "id": "f3ce37388114e1fd",
+          "id": "325e825863417b5b",
           "source_digest": "fnv1a64:73e4d556bf097fac",
           "file": "src/renderer/canvas-renderer.ts",
           "lang": "typescript",
-          "start_line": 975,
-          "end_line": 1024,
+          "start_line": 988,
+          "end_line": 1037,
           "kind": "Block",
           "is_fragment": false
         },
         {
-          "id": "6788543e92886caa",
+          "id": "c1cc82b2eb056cc8",
           "source_digest": "fnv1a64:3c1e55dd1fc937b2",
           "file": "src/renderer/canvas-renderer.ts",
           "lang": "typescript",
-          "start_line": 1084,
-          "end_line": 1131,
+          "start_line": 1097,
+          "end_line": 1144,
           "kind": "Block",
           "is_fragment": false
         }

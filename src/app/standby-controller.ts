@@ -101,7 +101,7 @@ export class StandbyController {
       if (gen !== this.pollGeneration) return; // stale — exit() was called during fetch
 
       if (result.status === 'ready') {
-        log.info('Stream detected — requesting managed restart from standby');
+        log.info('app.standby.stream-detected');
         this.stopPolling();
         this.onStreamDetected('standby-resolved');
         return;
@@ -118,7 +118,7 @@ export class StandbyController {
       this.schedulePoll();
     } catch (error: unknown) {
       if (!isAbortError(error)) {
-        log.info('Standby poll failed:', error);
+        log.warn('app.standby.poll-failed', { error: String(error) });
         this.scheduleRetry();
       }
     }

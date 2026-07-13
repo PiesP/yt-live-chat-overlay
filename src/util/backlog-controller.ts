@@ -137,16 +137,14 @@ export class BacklogInjectionController implements Pauseable {
       }
       if (added > 0) {
         this.totalBacklog += added;
-        log.debug(
-          `Backlog injection in progress, queued ${added} additional (${messages.length - added} duplicates skipped, total now ${this.totalBacklog})`
-        );
+        log.debug('backlog.injection-queued', { added, total: this.totalBacklog });
       }
       return;
     }
 
     // Mode-based filtering (handles 'none' by returning early)
     if (this.config.backlogMode === 'none') {
-      log.debug('Backlog mode is "none", skipping injection');
+      log.debug('backlog.mode-none');
       return;
     }
 
@@ -175,7 +173,7 @@ export class BacklogInjectionController implements Pauseable {
           msg.isBacklog = true;
           this.onBacklogMessage?.(msg);
         }
-        log.debug(`Backlog: emitted ${priorityMessages.length} priority messages immediately`);
+        log.debug('backlog.priority-emitted', { count: priorityMessages.length });
       }
     }
 
@@ -195,7 +193,7 @@ export class BacklogInjectionController implements Pauseable {
     // Adapt density ramp duration to backlog size
     this.scheduler.setDensityRampMs(this.scheduler.computeDensityRampMs(sampled.length));
 
-    log.debug(`Backlog injection: ${messages.length} messages, sampled to ${sampled.length}`);
+    log.debug('backlog.sampled', { total: messages.length, sampled: sampled.length });
     this.indicator.show();
     this.observability?.updateBacklogProgress(0);
     this.startInjection();
@@ -319,7 +317,7 @@ export class BacklogInjectionController implements Pauseable {
     this.backlogSeenIds.clear();
     this.observability?.updateBacklogProgress(1);
     this.indicator.hide();
-    log.debug('Backlog injection complete');
+    log.debug('backlog.injection-complete');
   }
 
   /** Effective length of the backlog queue (excluding consumed offset entries). */

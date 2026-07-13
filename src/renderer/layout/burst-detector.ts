@@ -279,7 +279,10 @@ export class BurstDetector {
     }
 
     this.currentLevel = newLevel;
-    log.debug(`Burst level: ${newLevel} (rate=${avgRate.toFixed(1)} msg/s)`);
+    log.debug('renderer.burst.level-change', {
+      level: newLevel,
+      avgRate: Math.round(avgRate * 10) / 10,
+    });
     this.observability?.updateBurstLevel(newLevel);
   }
 

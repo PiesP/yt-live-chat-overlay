@@ -590,7 +590,7 @@ export class SettingsUi {
           const parsed = JSON.parse(text) as Record<string, unknown>;
           if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
             this.showToast(t('Import failed: invalid settings format'));
-            log.warn('Import failed: expected a settings object');
+            log.warn('settings.import.invalid-format');
             return;
           }
 
@@ -609,7 +609,7 @@ export class SettingsUi {
           this.showToast(t('Settings imported successfully'));
         } catch (error: unknown) {
           this.showToast(t('Import failed: invalid JSON'));
-          log.warn('Import failed: invalid JSON file', error);
+          log.warn('settings.import.invalid-json', { error: String(error) });
         }
       });
       reader.readAsText(file);
@@ -693,6 +693,6 @@ export class SettingsUi {
     this.modal = null;
     this.playerElement = null;
 
-    log.info('Destroyed');
+    log.info('settings.controller.destroyed');
   }
 }

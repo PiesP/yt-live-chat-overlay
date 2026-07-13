@@ -125,7 +125,7 @@ export class ImageFetchManager {
     if (cache.has(url)) return;
     if (this.imageLoading.has(url)) return;
     if (!isAllowedImageUrl(url)) {
-      ImageFetchManager.log.debug('Blocked image URL (not in CDN whitelist):', url);
+      ImageFetchManager.log.debug('media.image.blocked', { reason: 'not-in-cdn-whitelist', url });
       return;
     }
     this.imageLoading.add(url);
@@ -196,7 +196,10 @@ export class ImageFetchManager {
       if (seg.type !== 'emoji') continue;
       const emojiUrl = seg.emoji.url;
       if (!isAllowedImageUrl(emojiUrl)) {
-        ImageFetchManager.log.debug('Blocked emoji URL (not in CDN whitelist):', emojiUrl);
+        ImageFetchManager.log.debug('media.image.emoji-blocked', {
+          reason: 'not-in-cdn-whitelist',
+          url: emojiUrl,
+        });
         continue;
       }
       if (this.emojiFetching.has(emojiUrl)) continue;

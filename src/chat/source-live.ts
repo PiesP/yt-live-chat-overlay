@@ -87,7 +87,7 @@ export class LiveChatSource extends ChatSource {
         throw error;
       }
 
-      log.warn('Failed to initialize live chat session:', error);
+      log.warn('chat.live.init-failed', { error: String(error) });
       return false;
     }
   }
@@ -343,7 +343,7 @@ export class LiveChatSource extends ChatSource {
     if (!nextContinuation) {
       // Continuation token missing — API format may have changed.
       // Refresh bootstrap immediately instead of waiting for the next poll to fail.
-      log.warn('Live continuation token missing from payload — refreshing bootstrap');
+      log.warn('chat.live.missing-continuation');
       await this.refreshLiveContinuation();
       // refreshLiveContinuation updates this.liveContinuation internally
     } else {

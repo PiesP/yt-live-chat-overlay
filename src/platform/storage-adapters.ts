@@ -90,7 +90,7 @@ export function getStorageAdapter(): StorageAdapter {
         try {
           GM_setValue(key, value);
         } catch (error: unknown) {
-          log.warn('GM_setValue failed:', error);
+          log.warn('platform.storage.set-failed', { error: String(error) });
         }
       },
     };

@@ -280,7 +280,10 @@ export class CanvasRenderer extends RendererBase {
     this.languageDetector = new LanguageDetectorService();
     this.channelMemory = new ChannelLanguageMemory();
     void this.languageDetector.initialize().catch((err: unknown) => {
-      log.debug('LanguageDetector init failed, auto-source unavailable:', err);
+      log.debug('renderer.translation.init-failed', {
+        reason: 'language-detector',
+        error: String(err),
+      });
       // Set to null so performSourceDetection() can retry later
       this.languageDetector = null;
     });
@@ -297,7 +300,9 @@ export class CanvasRenderer extends RendererBase {
         target: settings.translationTarget,
       })
       .catch((err: unknown) => {
-        log.debug('TranslationService configure failed:', err);
+        log.debug('renderer.translation.configure-failed', {
+          error: String(err),
+        });
       });
     this.messageActivator = new MessageActivator(this.translationService, {
       topBottomDurationMs: settings.topBottomDurationMs,
@@ -369,9 +374,13 @@ export class CanvasRenderer extends RendererBase {
     if (!useWorker) {
       this.ctx = canvas.getContext('2d', { desynchronized: true });
       if (!this.ctx) {
-        log.warn('Failed to get CanvasRenderingContext2D — renderer will be inactive');
+        log.warn('renderer.canvas.get-context-failed', {
+          reason: 'no-2d-context',
+        });
       } else if (!canvas.isConnected) {
-        log.warn('Canvas created but not connected to DOM — renderer will be inactive');
+        log.warn('renderer.canvas.not-connected', {
+          reason: 'not-in-dom',
+        });
       }
 
       // C1: Listen for Canvas 2D context restoration to recover from GPU
@@ -386,7 +395,9 @@ export class CanvasRenderer extends RendererBase {
       canvas.addEventListener('contextlost', (e: Event) => {
         e.preventDefault();
         this.ctx = null;
-        log.warn('Canvas 2D context lost — renderer paused until restoration');
+        log.warn('renderer.canvas.context-lost', {
+          reason: 'initial-create',
+        });
       });
       canvas.addEventListener('contextrestored', () => this.handleContextRestored());
 
@@ -423,7 +434,9 @@ export class CanvasRenderer extends RendererBase {
       }
     };
     this.reducedMotionQuery.addEventListener('change', this.reducedMotionListener);
-    log.info('RendererCanvas created');
+    log.info('renderer.created', {
+      mode: 'canvas2d',
+    });
   }
 
   /** Effective reduced-motion: OS preference AND-ed with user override. */
@@ -1039,16 +1052,16 @@ export class CanvasRenderer extends RendererBase {
         const first = unplaceable[0]!;
         const firstEstHeight = Math.round(this.estimateDimensions(first).height);
         const laneCount = this.laneAllocator.getLaneCount();
-        const laneHeight = Math.round(this.laneAllocator.getLaneHeight());
-        const capacityPx = laneCount * laneHeight;
-        const requiredSlots = Math.ceil(firstEstHeight / laneHeight);
-        log.warn(
-          `Dropped ${unplaceable.length} oversized message(s) — ` +
-            `requiredSlots=${requiredSlots} > laneCount=${laneCount} ` +
-            `(capacities: ${capacityPx}px total, laneHeight=${laneHeight}px, ` +
-            `msgHeight=${firstEstHeight}px). ` +
-            `First message: kind=${first.kind}`
+        const requiredSlots = Math.ceil(
+          firstEstHeight / Math.round(this.laneAllocator.getLaneHeight())
         );
+        log.warn('renderer.message.drop', {
+          reason: 'oversized',
+          dropped: unplaceable.length,
+          requiredSlots,
+          laneCount,
+          sampleKind: first.kind,
+        });
         this.observability.onMessageDropped('oversized');
       }
 
@@ -1688,7 +1701,9 @@ export class CanvasRenderer extends RendererBase {
         target: settings.translationTarget,
       })
       .catch((err: unknown) => {
-        log.debug('TranslationService reconfigure failed:', err);
+        log.debug('renderer.translation.reconfigure-failed', {
+          error: String(err),
+        });
       });
 
     this.messageActivator = new MessageActivator(this.translationService, {
@@ -1760,7 +1775,7 @@ export class CanvasRenderer extends RendererBase {
   }
 
   override setChatPanelOpen(open: boolean): void {
-    log.debug(`Chat panel ${open ? 'opened' : 'closed'}`);
+    log.debug('renderer.chat-panel.changed', { open });
   }
 
   protected onPause(): void {
@@ -1825,7 +1840,9 @@ export class CanvasRenderer extends RendererBase {
         await this.translationService.setDetectedSource(detected);
       }
     } catch (err: unknown) {
-      log.debug('Source detection failed:', err);
+      log.debug('renderer.translation.source-detection-failed', {
+        error: String(err),
+      });
     }
     this.sourceDetectionDone = true;
     this.sourceSampleBuffer = [];
@@ -1907,7 +1924,9 @@ export class CanvasRenderer extends RendererBase {
     newCanvas.addEventListener('contextlost', (e: Event) => {
       e.preventDefault();
       this.ctx = null;
-      log.warn('Canvas 2D context lost — renderer paused until restoration');
+      log.warn('renderer.canvas.context-lost', {
+        reason: 'runtime',
+      });
     });
     newCanvas.addEventListener('contextrestored', () => this.handleContextRestored());
 
@@ -1920,7 +1939,9 @@ export class CanvasRenderer extends RendererBase {
     // still referenced the removed canvas and would fail to detect offscreen state.
     this.setupOffscreenObserver(newCanvas);
 
-    log.info('Canvas replaced — fallback to main-thread rendering');
+    log.info('renderer.fallback.started', {
+      reason: 'main-thread',
+    });
     return true;
   }
 
@@ -1929,13 +1950,15 @@ export class CanvasRenderer extends RendererBase {
    * Called when the Worker is unrecoverable (dead or canvas context lost).
    */
   override fallbackToMainThread(reason: string): void {
-    log.warn(`Falling back to main-thread renderer: ${reason}`);
+    log.warn('renderer.fallback.started', { reason });
 
     this.workerManager.destroy();
     this.workerManager.setActive(false);
 
     if (!this.replaceCanvas()) {
-      log.error('Fallback failed: could not replace canvas');
+      log.warn('renderer.fallback.failed', {
+        reason: 'could-not-replace-canvas',
+      });
       return;
     }
 
@@ -1959,7 +1982,7 @@ export class CanvasRenderer extends RendererBase {
     this.idleSince = null;
     this.startRenderLoop();
 
-    log.info('Fallback to main-thread renderer complete');
+    log.info('renderer.fallback.complete');
   }
 
   // ── Canvas context loss / restoration ───────────────────────────────────
@@ -1976,14 +1999,18 @@ export class CanvasRenderer extends RendererBase {
     // getContext('2d') will always return null — control was permanently
     // transferred. Fall back to main-thread rendering with a fresh canvas.
     if (this.workerManager.isActive) {
-      log.warn('Context restored while in Worker mode — falling back to main-thread renderer');
+      log.warn('renderer.canvas.context-lost-while-worker', {
+        reason: 'worker-mode',
+      });
       this.fallbackToMainThread('gpu-reset-worker');
       return;
     }
 
     const ctx = this.canvas.getContext('2d');
     if (!ctx) {
-      log.warn('Context restored but getContext failed — renderer remains inactive');
+      log.warn('renderer.canvas.context-restore-failed', {
+        reason: 'get-context-returned-null',
+      });
       return;
     }
     this.ctx = ctx;
@@ -1992,7 +2019,7 @@ export class CanvasRenderer extends RendererBase {
     if (dims && this.canvas) {
       this.lastDpr = applyDevicePixelRatio(this.canvas, ctx, dims);
     }
-    log.info('Canvas context restored — renderer resuming');
+    log.info('renderer.canvas.context-restored');
     // Restart the render loop if it was stopped
     if (!this.isPaused && !this.isVideoPaused) {
       this.startRenderLoop();

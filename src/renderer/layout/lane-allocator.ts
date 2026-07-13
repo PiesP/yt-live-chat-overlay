@@ -342,10 +342,10 @@ export class LaneAllocator {
     // A mismatch indicates a corrupted laneIndexToHeapIndex mapping
     // (duplicate or missing lane entries).
     if (this.heap.length !== this.indexMap.size) {
-      log.warn(
-        `Heap integrity violation: heap.length=${this.heap.length} != ` +
-          `laneIndexToHeapIndex.size=${this.indexMap.size}. Rebuilding index map.`
-      );
+      log.warn('renderer.lane-allocator.heap-integrity', {
+        heapLength: this.heap.length,
+        indexMapSize: this.indexMap.size,
+      });
       // Rebuild laneIndexToHeapIndex from scratch to restore consistency
       this.indexMap.clear();
       for (let i = 0; i < this.heap.length; i++) {

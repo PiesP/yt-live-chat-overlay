@@ -33,7 +33,7 @@ export class Settings {
   /** Bound callback reference for cross-tab sync adapter removeListener. */
   private readonly onCrossTabChange = (_key: string): void => {
     if (this.saving) return;
-    log.debug('Cross-tab settings change detected via platform adapter');
+    log.debug('settings.store.cross-tab-change');
     void this.reloadFromStorage();
   };
 
@@ -49,7 +49,7 @@ export class Settings {
         this.settings = normalizeStoredSettings(JSON.parse(raw) as Record<string, unknown>);
       }
     } catch (error: unknown) {
-      log.warn('Failed to load settings:', error);
+      log.warn('settings.store.load-failed', { error: String(error) });
     }
 
     this.startCrossTabSync();
@@ -101,7 +101,7 @@ export class Settings {
       this.settings = loaded;
       for (const cb of this.onChangeCallbacks) cb();
     } catch (error: unknown) {
-      log.warn('Failed to reload settings from storage:', error);
+      log.warn('settings.store.reload-failed', { error: String(error) });
     }
   }
 
@@ -111,7 +111,7 @@ export class Settings {
       const data = { ...this.settings, _version: SETTINGS_VERSION };
       await getStorageAdapter().setItem(STORAGE_KEY, JSON.stringify(data));
     } catch (error: unknown) {
-      log.warn('Failed to save settings:', error);
+      log.warn('settings.store.save-failed', { error: String(error) });
     } finally {
       this.saving = false;
     }

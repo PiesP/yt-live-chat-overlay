@@ -66,9 +66,7 @@ export class PerAuthorRateLimiter {
       }
       if (timestamps.length >= limit) {
         this.authorTimestamps.set(authorId, timestamps);
-        log.debug(
-          `Rate limited author: ${authorId} (${timestamps.length}/${limit} in ${this.windowMs}ms)`
-        );
+        log.debug('media.rate-limiter.limited', { authorId });
         return false;
       }
     } else {

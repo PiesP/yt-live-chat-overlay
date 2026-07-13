@@ -188,7 +188,7 @@ function parseRendererMessage(
   if (kind === 'superchat') {
     const superChatInfo = parseSuperChatInfo(renderer);
     if (!superChatInfo) {
-      log.warn('Skipping Super Chat message: failed to extract purchase info');
+      log.warn('chat.parser.super-chat-skip', { reason: 'no-purchase-info' });
       return null;
     }
     message.superChat = superChatInfo;

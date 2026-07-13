@@ -46,7 +46,7 @@ export class PageWatcher {
   };
 
   private readonly handleYouTubeNavigateFinish = (): void => {
-    log.debug('YouTube navigation finished');
+    log.debug('app.page-watcher.navigation-finished');
     // Always notify — yt-navigate-finish signals data-ready even when URL is unchanged
     // (e.g., VOD→live transitions where pushState already updated the URL).
     const newUrl = location.href;
@@ -117,7 +117,7 @@ export class PageWatcher {
       try {
         callback();
       } catch (error: unknown) {
-        log.warn('Page change callback error:', error);
+        log.warn('app.page-watcher.callback-error', { error: String(error) });
       }
     }
   }
@@ -146,6 +146,6 @@ export class PageWatcher {
     this.restoreReplaceState?.();
     this.callbacks.clear();
 
-    log.debug('Destroyed');
+    log.debug('app.page-watcher.destroyed');
   }
 }

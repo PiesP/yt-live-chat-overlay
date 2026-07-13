@@ -284,7 +284,7 @@ export class RuntimeManager {
       try {
         await this.reconcileOnce();
       } catch (err) {
-        log.warn('reconcileOnce() threw an error, continuing loop:', err);
+        log.warn('runtime.reconcile.error', { error: String(err) });
       }
     }
   }
@@ -398,7 +398,7 @@ export class RuntimeManager {
     }
 
     this.resetStartFailures();
-    log.info('Runtime session started');
+    log.info('runtime.session.started');
   }
 
   private handleSessionRestart(reason: RuntimeSessionRestartReason): void {
@@ -409,7 +409,7 @@ export class RuntimeManager {
       return;
     }
 
-    log.info('Runtime session requested managed restart', { reason });
+    log.info('runtime.session.restart-requested', { reason });
 
     // Exit standby mode if active — prevents standby leak after stream detected.
     this.standbyController?.exit();
@@ -433,7 +433,7 @@ export class RuntimeManager {
     const renderer = this.renderer;
     if (!renderer) return;
 
-    log.info(`Overlay refresh triggered: ${reason}`);
+    log.info('runtime.overlay.refreshed', { reason });
 
     // 1. Clear renderer state
     renderer.prepareForRefresh();
@@ -588,7 +588,7 @@ export class RuntimeManager {
       this.renderer = this.createRenderer(overlay, settings);
       this.renderer.setConnectionStatus('connecting');
       this.renderer.onStatusBarClick = () => {
-        log.info('Status bar click — restarting session');
+        log.info('runtime.status-bar.clicked');
         void this.restartSession();
       };
       this.standbyController.setRenderer(this.renderer);
@@ -612,7 +612,7 @@ export class RuntimeManager {
         this.startForegroundListeners();
         this.startChatPanelMonitor(this.chatSource!);
         this.standbyController.enter();
-        log.info('Entered standby mode — waiting for stream to start');
+        log.info('runtime.standby.entered');
         return 'started';
       }
 
@@ -632,7 +632,7 @@ export class RuntimeManager {
       this.startChatWatchdog();
       this.startChatPanelMonitor(this.chatSource!);
 
-      log.info('Started successfully');
+      log.info('runtime.session.started');
       return 'started';
     } catch (error: unknown) {
       // Ensure watchdog is stopped if startup failed after startChatWatchdog()
@@ -641,7 +641,7 @@ export class RuntimeManager {
         return 'retryable';
       }
 
-      log.info('Failed to start:', error);
+      log.info('runtime.start-failed', { error: String(error) });
       return 'retryable';
     }
   }
@@ -758,7 +758,7 @@ export class RuntimeManager {
     this.sessionDedup.clear();
     this._recoveringFromError = false;
 
-    log.info('Disposed');
+    log.info('runtime.session.disposed');
   }
 
   private async startChatSource(signal: AbortSignal): Promise<ChatSourceStartStatus> {
@@ -780,7 +780,7 @@ export class RuntimeManager {
     // The chat source's internal resolver would waste time retrying — return
     // 'waiting' immediately and let the standby poll timer detect stream start.
     if (bootstrapResult.status === 'waiting') {
-      log.info('Stream not yet started — entering standby without starting chat source');
+      log.info('runtime.standby.entered');
       return 'waiting';
     }
 
@@ -910,13 +910,13 @@ export class RuntimeManager {
             });
             if (unsub) {
               this.domWatcherUnsubscribe = unsub;
-              log.info('DOM chat watcher installed (panel opened)');
+              log.info('runtime.dom-watcher.installed');
             }
             // If unsub is null, the container was not found — this is
             // expected for cross-origin iframe chat (#chatframe). The
             // fetch interceptor serves as the primary messaging path.
           } catch (error: unknown) {
-            log.info('Failed to install DOM chat watcher after panel open:', error);
+            log.info('runtime.dom-watcher.install-failed', { error: String(error) });
           }
         }
       } else {
@@ -937,7 +937,7 @@ export class RuntimeManager {
         }
       );
     } catch (error: unknown) {
-      log.info('Failed to install fetch interceptor:', error);
+      log.info('runtime.interceptor.install-failed', { error: String(error) });
     }
 
     // Install DOM watcher as a fallback. It captures messages from
@@ -949,7 +949,7 @@ export class RuntimeManager {
         chatSource.injectExternalMessages(messages);
       });
     } catch (error: unknown) {
-      log.info('Failed to install DOM chat watcher:', error);
+      log.info('runtime.dom-watcher.install-failed', { error: String(error) });
     }
   }
 
@@ -1075,8 +1075,7 @@ export class RuntimeManager {
     this.stopChatWatchdog();
 
     this.state = 'restarting';
-    const health = this.getRuntimeHealthSnapshot();
-    log.info('Requesting managed runtime restart', { reason, health });
+    log.info('runtime.restart.requested', { reason });
     this.handleSessionRestart(reason);
   }
 
@@ -1122,9 +1121,7 @@ export class RuntimeManager {
       if (this.renderer?.isVideoPaused) {
         const pendingMessages = this.renderer.drainPendingQueue();
         if (pendingMessages && pendingMessages.length > 0 && this.renderer) {
-          log.info(
-            `Tab returned while video paused — routing ${pendingMessages.length} messages to backlog`
-          );
+          log.info('runtime.foreground.video-paused-backlog', { count: pendingMessages.length });
           this.ensureBacklogController(this.renderer);
           this.backlogController?.startBacklogInjection(pendingMessages);
         }
@@ -1185,7 +1182,7 @@ export class RuntimeManager {
           activeTimeoutMs: CHAT_STALL_TIMEOUT_MS,
         });
         if (!chatHealth.observerAlive && !this.standbyController.isStandby()) {
-          log.info('Chat source observer died during hidden period — triggering recovery');
+          log.info('runtime.foreground.observer-died');
           this.requestManagedRestart('foreground-return');
           return;
         }
@@ -1208,7 +1205,7 @@ export class RuntimeManager {
     // Force a full reconcile to re-validate the session.
     const handlePageShow = (e: PageTransitionEvent): void => {
       if (e.persisted) {
-        log.info('Page restored from bfcache — forcing session reconcile');
+        log.info('runtime.bfcache.restored');
         this.requestReconcile('page-change');
       } else {
         // Non-bfcache pageshow: treat same as visibility change
@@ -1298,7 +1295,7 @@ export class RuntimeManager {
           // refresh clears state but can't help — the canvas is
           // unrecoverable.  Trigger a fallback to main-thread rendering.
           if (this.renderer != null && !this.renderer.isWorkerAlive()) {
-            log.warn('Worker detected as dead — falling back to main-thread renderer');
+            log.warn('runtime.worker.dead');
             this.renderer.fallbackToMainThread('worker-dead');
             this.consecutiveRefreshFailures = 0;
             return;
@@ -1306,15 +1303,16 @@ export class RuntimeManager {
 
           this.consecutiveRefreshFailures++;
           if (this.consecutiveRefreshFailures > MAX_CONSECUTIVE_REFRESHES) {
-            log.warn(
-              `Renderer stuck after ${this.consecutiveRefreshFailures - 1} refresh attempts — escalating to full restart`
-            );
+            log.warn('runtime.renderer.stuck-escalated', {
+              refreshAttempts: this.consecutiveRefreshFailures - 1,
+            });
             this.consecutiveRefreshFailures = 0;
             this.requestManagedRestart('watchdog');
           } else {
-            log.info(
-              `Renderer stuck detected (attempt ${this.consecutiveRefreshFailures}/${MAX_CONSECUTIVE_REFRESHES}) — performing overlay refresh`
-            );
+            log.info('runtime.renderer.stuck-detected', {
+              attempt: this.consecutiveRefreshFailures,
+              max: MAX_CONSECUTIVE_REFRESHES,
+            });
             this.performOverlayRefresh('renderer-stuck');
           }
           return;
@@ -1324,7 +1322,7 @@ export class RuntimeManager {
         this.consecutiveRefreshFailures = 0;
 
         if (health.shouldRestart) {
-          log.info('Chat health check failed, triggering recovery');
+          log.info('runtime.health.failed');
           this.requestManagedRestart('watchdog');
           return;
         }
@@ -1345,7 +1343,7 @@ export class RuntimeManager {
           this._recoveringFromError = false;
         }
       } catch (error: unknown) {
-        log.warn('Chat watchdog check error:', error);
+        log.warn('runtime.watchdog.error', { error: String(error) });
       }
     }, CHAT_WATCHDOG_INTERVAL_MS);
   }
@@ -1474,7 +1472,7 @@ export class RuntimeManager {
    * Create the Canvas2D renderer.
    */
   private createRenderer(overlay: Overlay, settings: OverlaySettings): RendererBase {
-    log.info('Using Canvas2D renderer');
+    log.info('runtime.renderer.selected', { mode: 'canvas2d' });
     return new CanvasRenderer(overlay, settings);
   }
 }

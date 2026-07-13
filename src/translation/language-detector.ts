@@ -93,7 +93,7 @@ export class LanguageDetectorService {
   /** Initialize the detector instance. Safe to call multiple times — no-ops if already ready. */
   async initialize(): Promise<void> {
     if (!LanguageDetectorService.isSupported()) {
-      log.info('Language Detector API not available — using Unicode heuristics');
+      log.info('translation.detector.api-unavailable');
       return;
     }
     if (this.detector) return;
@@ -112,21 +112,21 @@ export class LanguageDetectorService {
 
   private async doInit(): Promise<void> {
     if (typeof LanguageDetector?.capabilities !== 'function') {
-      log.info('Language Detector API shape mismatch — using Unicode heuristics');
+      log.info('translation.detector.api-mismatch');
       return;
     }
     try {
       const caps = await LanguageDetector.capabilities();
       if (!caps || caps.available === 'no') {
-        log.warn('Language Detector not available on this device');
+        log.warn('translation.detector.device-unavailable');
         return;
       }
       if (typeof LanguageDetector.create === 'function') {
         this.detector = await LanguageDetector.create();
       }
-      log.info('Language Detector ready');
+      log.info('translation.detector.ready');
     } catch (err: unknown) {
-      log.warn('Failed to create Language Detector:', err);
+      log.warn('translation.detector.create-failed', { error: String(err) });
     }
   }
 
@@ -146,7 +146,7 @@ export class LanguageDetectorService {
           if (mapped) return mapped;
         }
       } catch (err: unknown) {
-        log.debug('LanguageDetector.detect failed, falling back to Unicode:', err);
+        log.debug('translation.detector.detect-failed', { error: String(err) });
       }
     }
 

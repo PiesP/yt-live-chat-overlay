@@ -51,9 +51,12 @@ export async function resolveBootstrap(signal?: AbortSignal): Promise<ChatBootst
 
     lastResult = result;
     if (attempt < BOOTSTRAP_MAX_ATTEMPTS) {
-      log.debug(
-        `Bootstrap attempt ${attempt}/${BOOTSTRAP_MAX_ATTEMPTS} — ${result.status}: ${result.reason}`
-      );
+      log.debug('chat.bootstrap.retry', {
+        attempt,
+        max: 5,
+        status: result.status,
+        reason: result.reason,
+      });
       await sleep(BOOTSTRAP_RETRY_DELAY_MS, signal);
     }
   }
@@ -73,7 +76,7 @@ export async function refreshBootstrap(signal?: AbortSignal): Promise<ChatBootst
   const resolution = await resolveBootstrap(signal);
 
   if (resolution.status !== 'ready') {
-    log.warn('Failed to refresh chat bootstrap:', resolution.reason);
+    log.warn('chat.bootstrap.refresh-failed', { reason: resolution.reason });
     return null;
   }
 
@@ -86,17 +89,15 @@ export async function refreshBootstrap(signal?: AbortSignal): Promise<ChatBootst
  */
 export function logBootstrapFailure(resolution: ChatBootstrapResult): void {
   if (resolution.status === 'waiting') {
-    log.info(`Chat bootstrap waiting — stream not yet started (${resolution.reason})`);
+    log.info('chat.bootstrap.waiting', { reason: resolution.reason });
     return;
   }
   if (resolution.status === 'retryable') {
-    log.warn(
-      `Chat bootstrap was retryable after ${BOOTSTRAP_MAX_ATTEMPTS} attempts: ${resolution.reason}`
-    );
+    log.warn('chat.bootstrap.retry-exhausted', { reason: resolution.reason, attempts: 5 });
     return;
   }
 
   if (resolution.status === 'unavailable') {
-    log.info('Chat source is unavailable:', resolution.reason);
+    log.info('chat.bootstrap.unavailable', { reason: resolution.reason });
   }
 }

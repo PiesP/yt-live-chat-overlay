@@ -68,7 +68,7 @@ class App {
 
   constructor() {
     this.pageWatcher.onChange(this.handlePageWatcherChange);
-    log.debug('Initialized');
+    log.debug('app.initialized');
   }
 
   async start(): Promise<void> {
@@ -79,7 +79,7 @@ class App {
     // Subscribe to cross-tab settings sync — reconcile runtime when
     // another tab changes settings via localStorage or GM storage.
     this.unsubscribeCrossTab = this.settings.subscribe(() => {
-      log.debug('Cross-tab settings change — reconciling runtime');
+      log.debug('app.cross-tab-change');
       resolveActiveLanguage(this.settings.get().language);
       setOverlayLogLevel(this.settings.get().logLevel);
       // Sync the settings form if it is open, so cross-tab changes are
@@ -102,7 +102,7 @@ class App {
     this.settingsUi.destroy();
     this.unsubscribeCrossTab?.();
     this.settings.destroy();
-    log.debug('Stopped');
+    log.debug('app.stopped');
   }
 
   getSettings(): Readonly<OverlaySettings> {
@@ -167,16 +167,16 @@ class App {
    * playback and user scroll position are preserved.
    */
   async restartRuntime(): Promise<void> {
-    log.info('Manual restart — disposing current runtime');
+    log.info('app.restart.disposing');
     await this.runtimeManager.restartSession();
-    log.info('Manual restart completed');
+    log.info('app.restart.completed');
   }
 
   private async ensureSettingsUi(): Promise<void> {
     try {
       await this.settingsUi.attach();
     } catch (error: unknown) {
-      log.info('Settings UI error:', error);
+      log.info('app.settings-ui.error', { error: String(error) });
     }
   }
 }
@@ -206,13 +206,13 @@ function setupSpaBootstrap(): void {
     window.removeEventListener('popstate', onNavigate);
     spaBootstrapInstalled = false;
 
-    log.info('SPA navigation reached video page — bootstrapping App');
+    log.info('app.spa.video-page-reached');
     void initApp();
   };
 
   window.addEventListener(YT_NAVIGATE_FINISH_EVENT, onNavigate);
   window.addEventListener('popstate', onNavigate);
-  log.debug('SPA bootstrap watcher installed on non-video page');
+  log.debug('app.spa.watcher-installed');
 }
 
 function main(): void {
@@ -239,17 +239,17 @@ function main(): void {
   }
 
   if (document.readyState === 'loading') {
-    log.debug('Waiting for DOMContentLoaded...');
+    log.debug('app.waiting-dom-ready');
     document.addEventListener(
       'DOMContentLoaded',
       () => {
-        log.debug('DOMContentLoaded fired');
+        log.debug('app.dom-ready');
         void initApp();
       },
       { once: true }
     );
   } else {
-    log.debug('Document already ready, initializing...');
+    log.debug('app.already-ready');
     void initApp();
   }
 }
@@ -259,7 +259,7 @@ const stopPreviousAppInstance = (): void => {
     return;
   }
 
-  log.debug('Stopping previous instance before re-init');
+  log.debug('app.reinit-stopping-prev');
   try {
     window.__ytChatOverlay.stop();
   } finally {
@@ -268,7 +268,7 @@ const stopPreviousAppInstance = (): void => {
 };
 
 async function initApp(): Promise<void> {
-  log.debug('Initializing application...');
+  log.debug('app.initializing');
 
   try {
     stopPreviousAppInstance();
@@ -289,9 +289,9 @@ async function initApp(): Promise<void> {
         app.applySettings(partial),
       resetSettings: () => app.resetSettings(),
     });
-    log.info('App instance exposed to window.__ytChatOverlay');
+    log.info('app.exposed');
   } catch (error: unknown) {
-    log.error('Fatal error:', error);
+    log.error('app.fatal-error', { error: String(error) });
 
     // Fallback recovery: if the user navigated away during init, re-install
     // the SPA bootstrap so the next navigation to a video page triggers a

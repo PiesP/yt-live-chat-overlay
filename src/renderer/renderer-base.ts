@@ -172,7 +172,7 @@ export abstract class RendererBase {
     this.pausedAt = performance.now();
     this.burstDetector.pause();
     this.onPause();
-    log.debug('Paused');
+    log.debug('renderer.paused', { reason: 'user' });
   }
 
   resume(): void {
@@ -222,7 +222,7 @@ export abstract class RendererBase {
     }
 
     this.onResume();
-    log.debug('Resumed');
+    log.debug('renderer.resumed');
   }
 
   pauseForVideo(): void {
@@ -243,7 +243,7 @@ export abstract class RendererBase {
         // isPaused was already cleared by resume() when tab returned
         // while video was still paused. Render loop needs to start now.
         this.onResume();
-        log.debug('Resumed');
+        log.debug('renderer.resumed');
       }
     }
     // H1: Replay buffered messages from the pause period.
@@ -403,7 +403,11 @@ export abstract class RendererBase {
       if (
         !this.authorRateLimiter.allow(message.author ?? 'anonymous', priority, message.authorType)
       ) {
-        log.debug('Drop [rate_limited]:', message.author, message.kind, message.id);
+        log.debug('renderer.message.drop', {
+          reason: 'rate_limited',
+          author: message.author,
+          kind: message.kind,
+        });
         this.observability.onMessageDropped('rate_limited');
         return false;
       }
@@ -441,7 +445,7 @@ export abstract class RendererBase {
     this.authorRateLimiter.destroy();
     this.observability.destroy();
     this.onDestroy();
-    log.debug('Destroyed');
+    log.debug('renderer.destroyed');
   }
 
   // ── Abstract hooks for subclasses ─────────────────────────────────────

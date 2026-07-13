@@ -93,7 +93,7 @@ async function pollForPlayerContainer(
     });
 
     if (element) {
-      log.debug('Player found via polling with selector:', element.selector);
+      log.debug('dom.player.found-polling', { selector: element.selector });
       return element.element;
     }
 
@@ -102,7 +102,7 @@ async function pollForPlayerContainer(
     await sleep(intervalMs, signal);
   }
 
-  log.warn('No player container found');
+  log.warn('dom.player.not-found');
   return null;
 }
 
@@ -118,7 +118,7 @@ export async function findPlayerContainerElement(
     predicate: isVisibleElement,
   });
   if (immediate) {
-    log.debug('Player found immediately with selector:', immediate.selector);
+    log.debug('dom.player.found-immediate', { selector: immediate.selector });
     return immediate.element;
   }
 
@@ -138,7 +138,7 @@ export async function findPlayerContainerElement(
           if (element) {
             observer.disconnect();
             clearTimeout(fallbackTimer);
-            log.debug('Player found via MutationObserver with selector:', element.selector);
+            log.debug('dom.player.found-observer', { selector: element.selector });
             resolve(element.element);
           }
         });
