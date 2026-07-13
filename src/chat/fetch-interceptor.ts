@@ -21,9 +21,6 @@ import { createLogger } from '@util/logging';
 
 const log = createLogger('FetchInterceptor');
 
-/** Maximum time to wait for JSON parsing in the fetch interceptor. */
-const INTERCEPTOR_PARSE_TIMEOUT_MS = 5000;
-
 /**
  * Cache of response body texts already parsed by the interceptor.
  * Prevents duplicate JSON.parse when the same response body is intercepted
@@ -31,7 +28,7 @@ const INTERCEPTOR_PARSE_TIMEOUT_MS = 5000;
  * fetch the same continuation).  Cleared when full to bound memory growth.
  */
 const responseTextCache = new Set<string>();
-const MAX_RESPONSE_CACHE_SIZE = 50;
+const MAX_RESPONSE_CACHE_SIZE = 16;
 
 /**
  * Matches YouTube Innertube live-chat fetch URLs.
@@ -104,21 +101,10 @@ export function installFetchInterceptor(
         const res = await response;
         const cloned = res.clone();
 
-        // C-3: Timeout the JSON parse to prevent indefinite hang on slow networks.
-        // If the parse takes >5s, the interceptor silently aborts — the poll loop
-        // will catch these messages on its next cycle.
-        let timeoutId: ReturnType<typeof setTimeout> | undefined;
-        const timeoutPromise = new Promise<never>((_, reject) => {
-          timeoutId = setTimeout(() => {
-            reject(new Error('Fetch interceptor JSON parse timed out'));
-          }, INTERCEPTOR_PARSE_TIMEOUT_MS);
-        });
-
         // Read as text so we can cache the raw body and avoid re-parsing
         // the same response seen by both the interceptor and the poll loop.
         const text = await cloned.text();
         if (responseTextCache.has(text)) {
-          clearTimeout(timeoutId);
           log.debug('chat.interceptor.skip-duplicate');
           return;
         }
@@ -128,11 +114,7 @@ export function installFetchInterceptor(
         }
         responseTextCache.add(text);
 
-        const data: unknown = await Promise.race([
-          Promise.resolve(JSON.parse(text)),
-          timeoutPromise,
-        ]);
-        clearTimeout(timeoutId);
+        const data = JSON.parse(text) as unknown;
 
         const payload = getLiveChatPayload(data);
         if (payload && payload.actions.length > 0) {
