@@ -190,6 +190,8 @@ export const SETTINGS_UI_STYLES = `
       .yt-chat-overlay-settings-button:focus-visible {
         outline: 2px solid ${uiColors.primary};
         outline-offset: 2px;
+        opacity: 1;
+        pointer-events: auto;
       }
       #movie_player:hover .yt-chat-overlay-settings-button,
       .html5-video-player:hover .yt-chat-overlay-settings-button {
@@ -223,11 +225,25 @@ export const SETTINGS_UI_STYLES = `
       .yt-chat-overlay-reload-button:focus-visible {
         outline: 2px solid ${uiColors.primary};
         outline-offset: 2px;
+        opacity: 1;
+        pointer-events: auto;
       }
       #movie_player:hover .yt-chat-overlay-reload-button,
       .html5-video-player:hover .yt-chat-overlay-reload-button {
         opacity: 1;
         pointer-events: auto;
+      }
+      /* Touch devices: no hover capability — show buttons at reduced opacity */
+      @media (hover: none) {
+        .yt-chat-overlay-settings-button,
+        .yt-chat-overlay-reload-button {
+          opacity: 0.7;
+          pointer-events: auto;
+        }
+        .yt-chat-overlay-settings-button:focus-visible,
+        .yt-chat-overlay-reload-button:focus-visible {
+          opacity: 1;
+        }
       }
       .yt-chat-overlay-reload-button--done {
         color: ${uiColors.success};
