@@ -137,7 +137,8 @@ export class BacklogScheduler {
     const rampFactor = this.getDensityRampFactor(injectionStartTime);
 
     const minRate = Math.max(this.lanes + 1, 2);
-    const adaptiveRate = Math.max(minRate, Math.round(maxRate * congestionFactor * rampFactor));
+    const rawRate = Math.round(maxRate * congestionFactor * rampFactor);
+    const adaptiveRate = Math.min(maxRate, Math.max(minRate, rawRate));
 
     return {
       meanInterval: Math.round(1000 / adaptiveRate),

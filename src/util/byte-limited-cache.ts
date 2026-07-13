@@ -54,8 +54,18 @@ export class ByteLimitedCache<V> {
   }
 
   set(key: string, value: V): void {
-    // Evict oldest entries until under maxBytes
     const bytes = this.estimateSize(value);
+
+    // Subtract previous entry's bytes before overwrite to prevent ghost
+    // byte accumulation. Without this, repeated set() on the same key
+    // inflates totalBytes beyond the actual sum, causing premature eviction.
+    const existing = this.map.get(key);
+    if (existing !== undefined) {
+      this.totalBytes -= this.estimateSize(existing);
+      this.map.delete(key); // re-insert below to refresh insertion order
+    }
+
+    // Evict oldest entries until under maxBytes
     while (this.totalBytes + bytes > this._maxBytes && this.map.size > 0) {
       const oldestKey = this.map.keys().next().value;
       if (oldestKey !== undefined) {
