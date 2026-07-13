@@ -34,12 +34,11 @@ export class PageWatcher {
    * newer patch.
    */
   private patchGeneration = 0;
-  /**
-   * Unique marker stamped onto the patched history methods so we can tell
-   * our patches apart from other code (e.g. YouTube's own wrappers) that
-   * may also monkey-patch pushState/replaceState.
-   */
-  private static readonly PATCH_MARKER = '__yt_chat_overlay_patched__';
+
+  /** Per-instance marker for wrapper identity — avoids the static-marker
+   *  problem where a second PageWatcher skips patching because the first
+   *  watcher's marker is still on history.pushState/replaceState. */
+  private static wrapperToOwner = new WeakMap<(...args: unknown[]) => unknown, PageWatcher>();
 
   private readonly handleUrlMutation = (): void => {
     this.handlePotentialUrlChange('popstate');
@@ -65,14 +64,17 @@ export class PageWatcher {
 
   private patchHistoryMethod(methodName: 'pushState' | 'replaceState'): () => void {
     const original = history[methodName];
-    // Guard: if this method was already patched by us (marker present),
-    // skip re-patching to avoid double-wrapping.
-    const originalWithMarker = original as unknown as { [key: string]: unknown };
-    if (originalWithMarker[PageWatcher.PATCH_MARKER] === true) {
+    // Check whether the current history method is a wrapper from THIS instance.
+    // WeakMap lookup is per-instance — a second PageWatcher will NOT see the
+    // first watcher's wrapper as its own and will install a fresh patch.
+    const currentFn = history[methodName] as (...args: unknown[]) => unknown;
+    const currentOwner = PageWatcher.wrapperToOwner.get(currentFn);
+    if (currentOwner === this) {
       return () => {
-        /* no-op: already patched */
+        /* no-op: already patched by this instance */
       };
     }
+
     this.patchGeneration++;
     const myGeneration = this.patchGeneration;
     const patched = (...args: Parameters<typeof history.pushState>) => {
@@ -80,14 +82,14 @@ export class PageWatcher {
       this.handlePotentialUrlChange(methodName);
       return result;
     };
-    // Stamp marker so future patches can detect this is our wrapper.
-    const patchedWithMarker = patched as unknown as { [key: string]: unknown };
-    patchedWithMarker[PageWatcher.PATCH_MARKER] = true;
+    // Register in WeakMap so future PageWatcher instances can check ownership.
+    PageWatcher.wrapperToOwner.set(patched as (...args: unknown[]) => unknown, this);
     history[methodName] = patched;
     return () => {
       // Only restore if no newer patch has been applied since us.
       if (this.patchGeneration === myGeneration) {
         history[methodName] = original;
+        PageWatcher.wrapperToOwner.delete(patched as (...args: unknown[]) => unknown);
       }
     };
   }

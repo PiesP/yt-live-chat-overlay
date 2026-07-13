@@ -1111,9 +1111,6 @@ export class RuntimeManager {
         return;
       }
 
-      // Clear idle markers so the health snapshot reflects current state.
-      this.clearHidden();
-
       // Resume chat panel observer — it was paused when the tab was hidden.
       this.chatPanelObserver.resume();
 
