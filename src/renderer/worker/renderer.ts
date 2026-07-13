@@ -932,7 +932,7 @@ export class WorkerRenderer {
         Math.min(
           effectiveMaxStagger,
           staggeredIdx *
-            -STAGGER_EXP_SCALE *
+            STAGGER_EXP_SCALE *
             WorkerRenderer.STAGGER_EXP_TABLE[(fastRandom() * 256) >>> 0]!
         )
       );
@@ -1434,6 +1434,8 @@ export class WorkerRenderer {
     }
     let batchIndex = 0;
     const committed = new Set<WorkerMessage>();
+    let skipCount = 0;
+    const MAX_CONSECUTIVE_SKIPS = 16;
     for (let i = this.pendingQueueOffset; i < this.pendingQueue.length; i++) {
       const entry = this.pendingQueue[i];
       if (!entry) continue;
@@ -1453,9 +1455,16 @@ export class WorkerRenderer {
       const placement = this.findPlacement(entry.height, speedTier);
       if (!placement) {
         this.totalDrops++;
+        skipCount++;
+        if (skipCount >= MAX_CONSECUTIVE_SKIPS) break;
         continue;
       }
-      if (!this.checkCollision(placement, entry.height, speedTier, now, width)) continue;
+      if (!this.checkCollision(placement, entry.height, speedTier, now, width)) {
+        skipCount++;
+        if (skipCount >= MAX_CONSECUTIVE_SKIPS) break;
+        continue;
+      }
+      skipCount = 0;
       this.activateMessage(entry, now, placement, batchIndex, width, height);
       batchIndex++;
       committed.add(entry);

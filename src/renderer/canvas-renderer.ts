@@ -490,7 +490,7 @@ export class CanvasRenderer extends RendererBase {
   }
 
   getQueueLength(): number {
-    return this.pendingQueue.size;
+    return this.pendingQueue.size + this.workerManager.queueDepth;
   }
 
   override getActiveMessageCount(): number {
