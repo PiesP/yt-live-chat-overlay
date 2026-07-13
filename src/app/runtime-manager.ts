@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
+import {
+  CHAT_PANEL_SELECTOR,
+  type ChatPreflightStateMachine,
+  createChatPreflight,
+} from '@app/chat-availability-preflight';
 import { OVERLAY_SELECTOR, Overlay } from '@app/overlay';
 import { StandbyController } from '@app/standby-controller';
 import { VideoPauseController } from '@app/video-pause-controller';
@@ -54,19 +59,6 @@ const RECENT_MESSAGE_REPLAY_LIMIT = 20;
 const CHAT_WATCHDOG_INTERVAL_MS = 15_000;
 /** Hidden duration threshold for switching from time-jump to overlay refresh. */
 const OVERLAY_REFRESH_THRESHOLD_MS = 30_000; // 30 seconds
-
-/**
- * YouTube chat panel root element selector.
- *
- * On pages with live chat or chat replay, YouTube renders a
- * `<ytd-live-chat-frame id="chat">` custom element inside
- * `#chat-container`.  On VOD pages the element is absent.
- *
- * Used as a pre-filter before the expensive `fetchWatchHtml() +
- * ytInitialData deep-parse` pipeline — skip the network round-trip
- * when the DOM clearly tells us there is no chat.
- */
-const CHAT_PANEL_SELECTOR = '#chat';
 
 async function createChatSource(
   getSettings: () => Readonly<OverlaySettings>,
@@ -155,14 +147,13 @@ export class RuntimeManager {
   private scheduledReconcileTimer: ReturnType<typeof setTimeout> | null = null;
   private lastPageChangeAt = 0;
   /**
-   * Set when the current reconcile was triggered by a SPA page change.
-   * Consumed once by reconcileOnce() to gate the DOM pre-filter — only
-   * SPA navigations skip the expensive bootstrap when #chat is absent.
-   * Startup, settings-change, and session-restart always go through the
-   * full pipeline to avoid false negatives on scheduled streams
-   * (LIVE_STREAM_OFFLINE whose chat panel may not be in the DOM yet).
+   * URL-scoped chat panel DOM preflight.
+   * Tracks whether the DOM settle for the current URL has been performed
+   * and whether the chat panel (#chat) was confirmed absent.
+   * Separated from startFailureState so that DOM check terminal state
+   * doesn't interfere with actual bootstrap retry counting.
    */
-  private isPageChangeReconcile = false;
+  private chatPreflight: ChatPreflightStateMachine = createChatPreflight();
   private startFailureState: StartFailureState = {
     url: null,
     attempts: 0,
@@ -236,16 +227,11 @@ export class RuntimeManager {
 
     if (reason === 'page-change') {
       this.lastPageChangeAt = Date.now();
-      this.isPageChangeReconcile = true;
+      this.chatPreflight.reset();
       this.resetStartFailures();
       if (this.targetUrl !== null && !this.matchesSessionUrl(this.getCurrentUrl())) {
         this.disposeActiveSession();
       }
-    } else if (reason === 'startup') {
-      // Startup always starts fresh — clear any stale page-change flag
-      // that may have been left by a requestReconcile('page-change') call
-      // before start() was invoked.
-      this.isPageChangeReconcile = false;
     }
 
     this.reconcileRequested = true;
@@ -304,12 +290,6 @@ export class RuntimeManager {
   }
 
   private async reconcileOnce(): Promise<void> {
-    // Save and reset isPageChangeReconcile at the very start, before any
-    // early return paths, so the flag is always consumed exactly once and
-    // never bleeds across reconcile iterations.
-    const isPageChange = this.isPageChangeReconcile;
-    this.isPageChangeReconcile = false;
-
     const desired = this.getDesiredState();
     const hasActiveSession = this.targetUrl !== null && !this.isDisposedState;
 
@@ -335,62 +315,51 @@ export class RuntimeManager {
 
     // ── DOM-based chat panel pre-filter ─────────────────────────────────
     //
-    // When the page has no #chat (YTD-LIVE-CHAT-FRAME) element in the DOM,
-    // it is almost certainly a VOD.  Skip the expensive `fetchWatchHtml() +
-    // ytInitialData deep-parse` pipeline and return `unavailable`
-    // immediately.
+    // The chatPreflight state machine handles DOM settle uniformly for both
+    // startup and SPA page changes — no special-casing needed.  A single
+    // 2 s settle delay is applied via getRemainingSettleDelay() above.
     //
-    // For SPA page-change reconciles: the DOM is already settled (2s delay
-    // applied above), so we can safely skip bootstrap.
-    //
-    // For startup reconciles: the DOM may not be settled yet — YouTube may
-    // still be rendering the chat frame.  Defer the check with a settle
-    // delay to avoid false negatives on live streams whose chat panel
-    // hasn't rendered at document-end time.
-    //
-    // Before blocking, check playabilityStatus from window.ytInitialData.
-    // Scheduled streams (LIVE_STREAM_OFFLINE) may lack #chat in the DOM
-    // but will transition later — let the full bootstrap detect standby.
+    // Flow:
+    //   1. #chat absent + terminal (expected-absent, same URL) → silent return
+    //   2. #chat absent + LIVE_STREAM_OFFLINE → reset preflight, proceed to bootstrap
+    //   3. #chat absent + settling (timed out) → markAbsent + log.info + return
+    //   4. #chat absent + idle → startSettle + arm settle delay + return
+    //   5. #chat present → reset preflight, proceed to bootstrap
     if (isYouTubeWatch(location.href) && !document.querySelector(CHAT_PANEL_SELECTOR)) {
+      // Terminal: already confirmed absent at this URL — idempotent, no re-log.
+      if (this.chatPreflight.isTerminalAbsent) {
+        return;
+      }
+
+      // Scheduled streams (LIVE_STREAM_OFFLINE) may lack #chat but will appear
+      // after stream start — let the full bootstrap detect standby.
       const playbackStatus = (window.ytInitialData as Record<string, unknown> | undefined)
         ?.playabilityStatus as { status?: string } | undefined;
       if (playbackStatus?.status === 'LIVE_STREAM_OFFLINE') {
-        log.info(
-          '#chat absent but playabilityStatus is LIVE_STREAM_OFFLINE — proceeding to bootstrap'
-        );
-      } else if (isPageChange) {
-        log.info('No #chat element in DOM — skipping bootstrap (likely VOD)');
-        // Set failure state directly (bypass handleStartFailure) — the
-        // Chat unavailable warning is misleading for what is actually a
-        // successful optimisation: we correctly identified a VOD and
-        // avoided the expensive bootstrap pipeline.
-        this.startFailureState = { url: desired.url, attempts: MAX_START_ATTEMPTS };
+        this.chatPreflight.reset();
+        // Fall through to bootstrap below.
+      } else if (this.chatPreflight.isSettling) {
+        // Settle delay expired, #chat still absent → terminal VOD.
+        this.chatPreflight.markAbsent(desired.url);
+        log.info('runtime.chat.preflight', {
+          outcome: 'expected-absent',
+          reason: 'chat-panel-missing',
+        });
         return;
       } else {
-        // Startup: DOM may not be settled yet.  Arm the settle delay and
-        // schedule a retry — if #chat is still absent after the delay,
-        // the next reconcile will skip bootstrap via the isPageChange=false
-        // path above (but lastPageChangeAt will be set, so getRemainingSettleDelay
-        // won't re-trigger).  We use scheduleReconcile which calls
-        // requestReconcile('retry') — isPageChangeReconcile stays false,
-        // but lastPageChangeAt is set so no further settle delay occurs.
-        //
-        // Bound retry count to avoid infinite polling on genuine VOD pages
-        // that never render a #chat element.
-        log.info('#chat not found at startup — deferring to settle delay for DOM render');
-        const attempts =
-          this.startFailureState.url === desired.url ? this.startFailureState.attempts + 1 : 1;
-        this.startFailureState = { url: desired.url, attempts };
-        if (attempts >= MAX_START_ATTEMPTS) {
-          log.warn(
-            `No #chat element after ${MAX_START_ATTEMPTS} attempts — giving up (likely VOD)`
-          );
-          return;
-        }
+        // First check — start a single settle period.
+        this.chatPreflight.startSettle(desired.url);
         this.lastPageChangeAt = Date.now();
         this.scheduleReconcile(NAVIGATION_SETTLE_DELAY_MS);
+        log.info('runtime.chat.preflight', {
+          outcome: 'settling',
+          reason: 'chat-panel-missing',
+        });
         return;
       }
+    } else {
+      // #chat is present in DOM — reset preflight for the next navigation.
+      this.chatPreflight.reset();
     }
 
     // Initialize session state from desired state
@@ -415,7 +384,10 @@ export class RuntimeManager {
       // Session entered standby mode — keep it alive.
       // The session itself handles periodic recheck and transition.
       this.resetStartFailures();
-      log.info('Runtime session in standby (waiting for stream start)');
+      log.info('runtime.chat.start', {
+        outcome: 'standby',
+        reason: 'stream-not-yet-started',
+      });
       return;
     }
 
@@ -1457,17 +1429,25 @@ export class RuntimeManager {
 
   private handleStartFailure(url: string, status: Exclude<ChatSourceStartStatus, 'started'>): void {
     // Structural 'unavailable' means the page has no chat renderer at all.
-    // Retrying won't help — the only recovery path is a page change (SPA navigation).
-    // Bypass retries and wait for a page-change event to reset the failure state.
+    // This is expected on VOD pages — not a recoverable error.
+    // Log at info level and wait for a page-change event to reset state.
     if (status === 'unavailable') {
       this.startFailureState = { url, attempts: MAX_START_ATTEMPTS };
-      log.warn('Chat unavailable on this page — waiting for page change, not retrying');
+      log.info('runtime.chat.start', {
+        outcome: 'unavailable',
+        reason: 'no-live-chat-renderer',
+      });
       return;
     }
 
     const attempts = this.startFailureState.url === url ? this.startFailureState.attempts + 1 : 1;
     this.startFailureState = { url, attempts };
-    log.warn(`Failed to start runtime (${attempts}/${MAX_START_ATTEMPTS}) — status: ${status}`);
+    log.warn('runtime.chat.start', {
+      outcome: 'retry',
+      reason: `bootstrap-${status}`,
+      attempt: attempts,
+      maxAttempts: MAX_START_ATTEMPTS,
+    });
 
     if (attempts < MAX_START_ATTEMPTS) {
       // Exponential backoff: 2 s → 4 s → 8 s
@@ -1476,7 +1456,11 @@ export class RuntimeManager {
       return;
     }
 
-    log.warn('Giving up on automatic restart until state changes');
+    log.warn('runtime.chat.start', {
+      outcome: 'retry-exhausted',
+      reason: `bootstrap-${status}`,
+      attempts: MAX_START_ATTEMPTS,
+    });
   }
 
   private resetStartFailures(): void {

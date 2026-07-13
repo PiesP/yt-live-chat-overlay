@@ -40,6 +40,15 @@ export async function resolveBootstrap(signal?: AbortSignal): Promise<ChatBootst
       };
     }
 
+    // Do not retry when the page structurally has no chat renderer.
+    // VOD pages, non-watch URLs — retrying won't change the outcome.
+    if (result.status === 'unavailable') {
+      return {
+        status: 'unavailable',
+        reason: result.reason,
+      };
+    }
+
     lastResult = result;
     if (attempt < BOOTSTRAP_MAX_ATTEMPTS) {
       log.debug(
@@ -88,6 +97,6 @@ export function logBootstrapFailure(resolution: ChatBootstrapResult): void {
   }
 
   if (resolution.status === 'unavailable') {
-    log.warn('Chat source is unavailable:', resolution.reason);
+    log.info('Chat source is unavailable:', resolution.reason);
   }
 }
