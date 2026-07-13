@@ -9,6 +9,7 @@
     "build:dev": "vite build --mode development",
     "dev": "vite build --mode development --watch",
     "check": "tsc --noEmit",
+    "check:extension": "tsc -p tsconfig.extension.json --noEmit",
     "typecheck": "pnpm -s check",
     "knip": "knip --dependencies",
     "knip:full": "knip --files --exports --dependencies --reporter compact --max-show-issues 50 --no-exit-code",

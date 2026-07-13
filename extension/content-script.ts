@@ -36,9 +36,9 @@ interface ContentScriptYtChatOverlayHandle {
  * Equivalent to GM_registerMenuCommand in the userscript.
  */
 chrome?.runtime?.onMessage?.addListener?.(
-  (message: unknown, sender: { id: string }) => {
+  (message: unknown, sender: ChromeMessageSender) => {
     // Defense-in-depth: reject messages not from this extension.
-    if (sender.id !== chrome.runtime.id) return;
+    if (sender.id !== chrome?.runtime?.id) return;
 
     const msg = message as { type?: string; command?: string };
     if (msg.type !== 'menu-command') return;

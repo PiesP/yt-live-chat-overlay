@@ -15,7 +15,7 @@
 import type { Overlay } from '@app/overlay';
 import type { ChatMessage, OverlaySettings } from '@app-types';
 import type { ImageFetchManager } from '@media/image-fetch-manager';
-import { createWorkerUrl } from '@platform/worker-factory';
+import { createWorkerUrl, workerSupported } from '@platform/worker-factory';
 import {
   MEMBERSHIP_CARD_CONFIG,
   SUPERCHAT_CARD_CONFIG,
@@ -199,6 +199,17 @@ export class RenderWorkerManager {
   ): boolean {
     let worker: Worker | null = null;
     try {
+      // Check Worker support BEFORE attempting URL construction.
+      // In userscript IIFE builds, import.meta.url is mangled to {}.url
+      // and Worker bundling is impossible. Skip early instead of relying
+      // on the inner try/catch for URL construction failure.
+      if (!workerSupported()) {
+        log.debug('renderer.worker.unavailable', {
+          reason: 'worker-unsupported-platform',
+        });
+        return false;
+      }
+
       if (typeof OffscreenCanvas === 'undefined') {
         log.debug('renderer.worker.unavailable', {
           reason: 'no-offscreen-canvas',

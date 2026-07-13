@@ -1,0 +1,37 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "lib": ["ESNext", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noEmit": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "paths": {
+      "@platform/*": ["./src/platform/*"],
+      "@app/*": ["./src/app/*"],
+      "@app-types": ["./src/types/index"],
+      "@chat/youtube/*": ["./src/chat/youtube/*"],
+      "@i18n/*": ["./src/i18n/*"],
+      "@settings/*": ["./src/settings/*"],
+      "@util/*": ["./src/util/*"]
+    }
+  },
+  "include": [
+    "extension/**/*.ts",
+    "src/platform/chrome-types.d.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "dist-extension",
+    "dist-extension-firefox",
+    ".vscode",
+    "src"
+  ]
+}
