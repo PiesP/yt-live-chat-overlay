@@ -16,7 +16,13 @@ export const ALLOWED_IMAGE_HOST_SUFFIXES = [
   'ytimg.com',
 ] as const;
 
-/** Exact origins allowed for image fetch (more restrictive). */
+/**
+ * Exact origins allowed for image fetch.
+ *
+ * Legacy constant — `isAllowedImageUrl` now delegates to
+ * `isAllowedImageHostname` for consistency with `normalizeYouTubeImageUrl`.
+ * Kept for reference and backward compatibility.
+ */
 export const ALLOWED_IMAGE_ORIGINS = ['https://yt3.ggpht.com', 'https://yt4.ggpht.com'] as const;
 
 /** Check whether a hostname ends with one of the allowed suffixes. */
@@ -27,17 +33,17 @@ export function isAllowedImageHostname(hostname: string): boolean {
   );
 }
 
-/** Validate that a URL string originates from an allowed YouTube CDN origin. */
+/**
+ * Validate that a URL string originates from an allowed YouTube CDN origin.
+ *
+ * Uses the same hostname-suffix allowlist as `isAllowedImageHostname`
+ * and `normalizeYouTubeImageUrl`, ensuring all three functions share
+ * a single source of truth for allowed domains.
+ */
 export function isAllowedImageUrl(url: string): boolean {
   try {
     const parsed = new URL(url);
-    return (
-      parsed.protocol === 'https:' &&
-      ALLOWED_IMAGE_ORIGINS.some(
-        (origin) =>
-          parsed.origin === origin || parsed.origin === origin.replace('https://', 'https://i.')
-      )
-    );
+    return parsed.protocol === 'https:' && isAllowedImageHostname(parsed.hostname);
   } catch {
     return false;
   }
