@@ -229,12 +229,17 @@ function renderCardBadge(
   ctx.lineWidth = badge.strokeWidth;
   ctx.stroke();
 
-  ctx.textBaseline = 'middle';
+  // renderSegment always uses textBaseline='top' (bitmap cache + fallback),
+  // so we must compute the Y coordinate for top-aligned text that is
+  // visually centered within the badge rectangle.
+  const badgeFont = getFontFn(badgeFontSize);
+  const textHeight = measureTextHeight(badgeFont, badgeFontSize);
+  const textY = y + (badgeHeight - textHeight) / 2;
   renderSegment(
     ctx,
     text,
     x + badge.paddingH,
-    y + badgeHeight / 2,
+    textY,
     DEFAULT_TEXT_COLOR,
     badgeFontSize,
     settings.outline.widthPx,
