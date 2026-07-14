@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.42.3] - 2026-07-14
+
+### Fixed
+
+- **SuperChat badge text vertically misaligned** — Badge amount text appeared too low relative to border because `renderSegment()` always uses `textBaseline='top'` while the caller assumed `'middle'`. Fixed by computing actual text height via `measureTextHeight` and adjusting Y to center with top baseline.
+- **SuperChat stickers not loading from non-ggpht CDN domains** — `isAllowedImageUrl()` used a separate origin-based allowlist (only `yt3.ggpht.com` / `yt4.ggpht.com`) while `normalizeYouTubeImageUrl()` and `isAllowedImageHostname()` used hostname-suffix matching. Stickers hosted on `googleusercontent.com` and other YouTube CDN domains were silently blocked during pre-fetch. Refactored `isAllowedImageUrl()` to delegate to `isAllowedImageHostname()`, unifying all three validators on a single allowlist.
+
+### Dependencies
+
+- **postcss** — updated to latest version (carried from 0.42.2 cycle).
+- **nanoid** — updated to latest version (carried from 0.42.2 cycle).
+
 ## [0.42.2] - 2026-07-13
 
 ### Fixed
