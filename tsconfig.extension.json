@@ -13,17 +13,22 @@
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,
     "paths": {
-      "@platform/*": ["./src/platform/*"],
-      "@app/*": ["./src/app/*"],
-      "@app-types": ["./src/types/index"],
-      "@chat/youtube/*": ["./src/chat/youtube/*"],
+      "@util/*": ["./src/util/*"],
       "@i18n/*": ["./src/i18n/*"],
+      "@chat/*": ["./src/chat/*"],
+      "@chat/youtube/*": ["./src/chat/youtube/*"],
       "@settings/*": ["./src/settings/*"],
-      "@util/*": ["./src/util/*"]
+      "@renderer/*": ["./src/renderer/*"],
+      "@app/*": ["./src/app/*"],
+      "@translation/*": ["./src/translation/*"],
+      "@media/*": ["./src/media/*"],
+      "@app-types": ["./src/types/index"],
+      "@platform/*": ["./src/platform/*"]
     }
   },
   "include": [
     "extension/**/*.ts",
+    "src/types/globals.d.ts",
     "src/platform/chrome-types.d.ts"
   ],
   "exclude": [
@@ -31,7 +36,6 @@
     "dist",
     "dist-extension",
     "dist-extension-firefox",
-    ".vscode",
-    "src"
+    ".vscode"
   ]
 }
