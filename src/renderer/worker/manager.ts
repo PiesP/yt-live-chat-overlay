@@ -495,6 +495,11 @@ export class RenderWorkerManager {
 
   /** Send updated settings to the render worker. */
   updateSettings(settings: OverlaySettings): void {
+    // Update the live settings reference so internal methods (backpressure
+    // check in sendToWorker, burst speed in computeBurstSpeedMultiplier)
+    // use current values, not the construction-time snapshot.
+    this.deps.settings = settings;
+
     const config = buildPartialWorkerConfig(
       settings,
       RenderWorkerManager.WORKER_CONFIG_KEYS
