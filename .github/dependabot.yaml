@@ -13,7 +13,7 @@ updates:
       cooldown:
         default: 7
         semver-patch: 3
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 5
     commit-message:
       prefix: "chore(deps)"
       prefix-development: "chore(deps-dev)"
@@ -26,13 +26,21 @@ updates:
     rebase-strategy: "auto"
 
     groups:
-      tooling:
+      build:
         patterns:
-          - "@biomejs/*"
-          - "@types/*"
-          - "knip"
           - "typescript"
           - "vite"
+          - "vite-plugin-monkey"
+          - "@types/*"
+        update-types:
+          - "minor"
+          - "patch"
+
+      quality:
+        patterns:
+          - "@biomejs/*"
+          - "knip"
+          - "rimraf"
         update-types:
           - "minor"
           - "patch"
