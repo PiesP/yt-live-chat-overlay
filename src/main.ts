@@ -96,12 +96,12 @@ class App {
     await this.runtimeManager.start();
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
     this.runtimeManager.destroy();
     this.pageWatcher.destroy();
     this.settingsUi.destroy();
     this.unsubscribeCrossTab?.();
-    this.settings.destroy();
+    await this.settings.destroy();
     log.debug('app.stopped');
   }
 
@@ -216,7 +216,7 @@ function setupSpaBootstrap(): void {
 }
 
 function main(): void {
-  if (!location.hostname.endsWith('youtube.com')) {
+  if (location.hostname !== 'www.youtube.com' && location.hostname !== 'youtube.com') {
     return;
   }
 
@@ -254,14 +254,14 @@ function main(): void {
   }
 }
 
-const stopPreviousAppInstance = (): void => {
+const stopPreviousAppInstance = async (): Promise<void> => {
   if (!window.__ytChatOverlay) {
     return;
   }
 
   log.debug('app.reinit-stopping-prev');
   try {
-    window.__ytChatOverlay.stop();
+    await window.__ytChatOverlay.stop();
   } finally {
     window.__ytChatOverlay = undefined;
   }
@@ -271,7 +271,7 @@ async function initApp(): Promise<void> {
   log.debug('app.initializing');
 
   try {
-    stopPreviousAppInstance();
+    await stopPreviousAppInstance();
 
     const app = new App();
     await app.start();

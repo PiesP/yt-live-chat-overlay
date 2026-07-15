@@ -216,12 +216,12 @@ jobs:
           echo "🔄 Purging jsDelivr CDN cache..."
 
           # Purge main userscript file
-          PURGE_URL_USER="https://purge.jsdelivr.net/gh/${{ github.repository }}@release/dist/yt-live-chat-overlay.user.js"
+          PURGE_URL_USER="https://purge.jsdelivr.net/gh/${{ github.repository }}@release/yt-live-chat-overlay.user.js"
           echo "Purging: $PURGE_URL_USER"
           curl -s "$PURGE_URL_USER" | jq '.' || echo "Purge request sent"
 
           # Purge meta.js file
-          PURGE_URL_META="https://purge.jsdelivr.net/gh/${{ github.repository }}@release/dist/yt-live-chat-overlay.meta.js"
+          PURGE_URL_META="https://purge.jsdelivr.net/gh/${{ github.repository }}@release/yt-live-chat-overlay.meta.js"
           echo "Purging: $PURGE_URL_META"
           curl -s "$PURGE_URL_META" | jq '.' || echo "Purge request sent"
 

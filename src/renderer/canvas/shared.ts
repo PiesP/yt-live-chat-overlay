@@ -525,7 +525,10 @@ function drawBitmapAtCssSize(
 ): void {
   let bw = 0;
   let bh = 0;
-  if (bitmap instanceof HTMLCanvasElement || bitmap instanceof OffscreenCanvas) {
+  if (
+    (typeof HTMLCanvasElement !== 'undefined' && bitmap instanceof HTMLCanvasElement) ||
+    bitmap instanceof OffscreenCanvas
+  ) {
     bw = bitmap.width;
     bh = bitmap.height;
   }

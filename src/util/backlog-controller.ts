@@ -142,6 +142,25 @@ export class BacklogInjectionController implements Pauseable {
       return;
     }
 
+    // When injection is paused (render queue over capacity), merge new
+    // messages into the existing backlog rather than replacing the queue
+    // and silently discarding pending messages.
+    if (this.paused && this.backlogQueue.length > 0) {
+      let added = 0;
+      for (const msg of messages) {
+        if (!msg.id || !this.backlogSeenIds.has(msg.id)) {
+          this.backlogQueue.push(msg);
+          if (msg.id) this.backlogSeenIds.add(msg.id);
+          added++;
+        }
+      }
+      if (added > 0) {
+        this.totalBacklog += added;
+        log.debug('backlog.paused-merge', { added, total: this.totalBacklog });
+      }
+      return;
+    }
+
     // Mode-based filtering (handles 'none' by returning early)
     if (this.config.backlogMode === 'none') {
       log.debug('backlog.mode-none');

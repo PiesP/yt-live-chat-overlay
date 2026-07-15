@@ -121,6 +121,8 @@ export class RenderWorkerManager {
   /** Ping/pong health check for detecting crashed or unresponsive workers. */
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private lastPongTime = 0;
+  /** Whether the worker reported OffscreenCanvas context loss. */
+  private _contextLost = false;
   /** Timestamp when the worker was started (used to detect init-time crashes). */
   private initTime = 0;
   private static readonly PING_INTERVAL_MS = 1000;
@@ -156,6 +158,9 @@ export class RenderWorkerManager {
    */
   isAlive(): boolean {
     if (!this.active || !this.worker) return true; // no worker → not applicable
+    // Canvas context loss means the worker can no longer render, even
+    // if it still responds to pings.
+    if (this._contextLost) return false;
     // Grace period after init: allow the Worker time to send its first pong.
     // If the worker crashes during initialization (before the first pong),
     // we must eventually detect it — the init timeout covers this case.
@@ -300,6 +305,10 @@ export class RenderWorkerManager {
             break;
           case 'pong':
             this.lastPongTime = performance.now();
+            break;
+          case 'contextLost':
+            log.warn('renderer.worker.context-lost');
+            this._contextLost = true;
             break;
         }
       };
@@ -495,6 +504,11 @@ export class RenderWorkerManager {
 
   /** Send updated settings to the render worker. */
   updateSettings(settings: OverlaySettings): void {
+    // Update the live settings reference so internal methods (backpressure
+    // check in sendToWorker, burst speed in computeBurstSpeedMultiplier)
+    // use current values, not the construction-time snapshot.
+    this.deps.settings = settings;
+
     const config = buildPartialWorkerConfig(
       settings,
       RenderWorkerManager.WORKER_CONFIG_KEYS

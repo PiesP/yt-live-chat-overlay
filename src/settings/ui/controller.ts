@@ -401,6 +401,28 @@ export class SettingsUi {
       this.close();
     });
 
+    // Handle native dialog close from backdrop click (closedby="any").
+    // The browser fires 'close' (not 'cancel') for light dismiss.
+    // At this point modal.open is already false, so we bypass the guard
+    // in close() and persist directly.
+    this.modal.addEventListener('close', () => {
+      if (this.closing) return;
+      // Only handle backdrop-initiated closes — our own code sets closing=true
+      // before calling modal.close(), which would re-enter here harmlessly.
+      this.closing = true;
+      if (this.previewTimer !== null) {
+        this.previewTimer = clearSafeTimeout(this.previewTimer);
+      }
+      const persist = this.onPersist ?? this.onChange;
+      persist(this.form.collectSettings());
+      this.restoreDocumentLangDir();
+      if (this.previousFocus?.isConnected) {
+        this.previousFocus.focus();
+      }
+      this.previousFocus = null;
+      this.closing = false;
+    });
+
     document.body.appendChild(this.modal);
   }
 

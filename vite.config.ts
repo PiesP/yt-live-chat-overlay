@@ -116,9 +116,9 @@ export default defineConfig(({ mode }): UserConfig => {
           license: pkg.license,
           namespace: pkg.homepage.replace(/\/[^/]+$/, ''),
           downloadURL:
-            'https://cdn.jsdelivr.net/gh/PiesP/yt-live-chat-overlay@release/dist/yt-live-chat-overlay.user.js',
+            'https://cdn.jsdelivr.net/gh/PiesP/yt-live-chat-overlay@release/yt-live-chat-overlay.user.js',
           updateURL:
-            'https://cdn.jsdelivr.net/gh/PiesP/yt-live-chat-overlay@release/dist/yt-live-chat-overlay.meta.js',
+            'https://cdn.jsdelivr.net/gh/PiesP/yt-live-chat-overlay@release/yt-live-chat-overlay.meta.js',
         },
         build: {
           fileName: outputFileName,

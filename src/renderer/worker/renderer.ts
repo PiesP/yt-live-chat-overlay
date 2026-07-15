@@ -1036,6 +1036,21 @@ export class WorkerRenderer {
 
   private renderFrame(): void {
     if (!this.ctx || !this.canvas || !this.config || this.isPaused) return;
+
+    // Detect OffscreenCanvas context loss (GPU driver reset, etc.).
+    // Signal the main thread so it can fall back to main-thread rendering.
+    // OffscreenCanvasRenderingContext2D.isContextLost() is available in
+    // Chrome 130+ and Firefox 135+.
+    try {
+      if (typeof this.ctx.isContextLost === 'function' && this.ctx.isContextLost()) {
+        self.postMessage({ type: 'contextLost' });
+        return;
+      }
+    } catch {
+      self.postMessage({ type: 'contextLost' });
+      return;
+    }
+
     const cfg = this.config;
     const now = performance.now();
     const width = this.logicalWidth;

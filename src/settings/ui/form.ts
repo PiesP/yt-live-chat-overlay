@@ -379,12 +379,20 @@ export class SettingsUiForm {
   private isUpdating = false;
   private errorDismissTimeouts: ReturnType<typeof setTimeout>[] = [];
 
+  // Track event listeners added to the modal so they can be removed before
+  // re-adding on language change (which calls rebuildModalContent → setModal).
+  private _modalCleanupFns: (() => void)[] = [];
+
   constructor(
     private readonly getSettings: () => Readonly<OverlaySettings>,
     private readonly onPreview?: () => void
   ) {}
 
   setModal(modal: HTMLDialogElement | null): void {
+    // Remove old listeners before re-binding (handles language change re-attach).
+    for (const fn of this._modalCleanupFns) fn();
+    this._modalCleanupFns = [];
+
     this.modal = modal;
     if (modal) {
       this.bindNumberInputKeys(modal);
@@ -415,7 +423,7 @@ export class SettingsUiForm {
    * receives the event first — no conflict.
    */
   private bindNumberInputKeys(modal: HTMLElement): void {
-    modal.addEventListener('keydown', (event) => {
+    const handler = (event: Event): void => {
       const target = event.target;
       if (!(target instanceof HTMLInputElement) || target.type !== 'number') return;
 
@@ -423,14 +431,19 @@ export class SettingsUiForm {
       if (!step || !Number.isFinite(step)) return;
 
       let direction = 0;
-      if (event.key === 'ArrowUp') direction = 1;
-      else if (event.key === 'ArrowDown') direction = -1;
+      if ((event as KeyboardEvent).key === 'ArrowUp') direction = 1;
+      else if ((event as KeyboardEvent).key === 'ArrowDown') direction = -1;
       else return;
 
       // Without modifiers, let the browser handle native ↑/↓ (±1 step)
-      if (!event.shiftKey && !event.ctrlKey && !event.metaKey) return;
+      if (
+        !(event as KeyboardEvent).shiftKey &&
+        !(event as KeyboardEvent).ctrlKey &&
+        !(event as KeyboardEvent).metaKey
+      )
+        return;
 
-      const scale = event.ctrlKey || event.metaKey ? 100 : 10;
+      const scale = (event as KeyboardEvent).ctrlKey || (event as KeyboardEvent).metaKey ? 100 : 10;
       const delta = direction * step * scale;
 
       event.preventDefault();
@@ -442,7 +455,9 @@ export class SettingsUiForm {
       // Snap to the nearest step to avoid floating-point drift
       target.value = String(Math.round(newValue / step) * step);
       target.dispatchEvent(new Event('input', { bubbles: true }));
-    });
+    };
+    modal.addEventListener('keydown', handler);
+    this._modalCleanupFns.push(() => modal.removeEventListener('keydown', handler));
   }
 
   /**
@@ -461,21 +476,23 @@ export class SettingsUiForm {
         input.setAttribute('aria-invalid', String(isInvalid));
       }
     };
-    modal.addEventListener(
-      'blur',
-      (event) => {
-        const target = event.target;
-        if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement) {
-          if (target.name) sync(target);
-        }
-      },
-      true
-    );
-    modal.addEventListener('input', (event) => {
+    const blurHandler = (event: Event): void => {
       const target = event.target;
       if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement) {
         if (target.name) sync(target);
       }
+    };
+    const inputHandler = (event: Event): void => {
+      const target = event.target;
+      if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement) {
+        if (target.name) sync(target);
+      }
+    };
+    modal.addEventListener('blur', blurHandler, true);
+    modal.addEventListener('input', inputHandler);
+    this._modalCleanupFns.push(() => {
+      modal.removeEventListener('blur', blurHandler, true);
+      modal.removeEventListener('input', inputHandler);
     });
   }
 
