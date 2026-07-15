@@ -136,6 +136,10 @@ export class RuntimeManager {
   private readonly getSettings: RuntimeManagerOptions['getSettings'];
   private readonly isValidPage: RuntimeManagerOptions['isValidPage'];
   private reconcileRequested = false;
+  /** When true, the next reconcile will always dispose the active session,
+   *  even if the URL matches. Set by page-watcher on yt-navigate-finish
+   *  to handle VOD→Live transitions where data changes but URL doesn't. */
+  private forceNewSession = false;
 
   /** Message count threshold for routing batches through backlog injection. */
   private static readonly BACKLOG_BATCH_THRESHOLD = 50;
@@ -231,6 +235,10 @@ export class RuntimeManager {
       this.resetStartFailures();
       if (this.targetUrl !== null && !this.matchesSessionUrl(this.getCurrentUrl())) {
         this.disposeActiveSession();
+      } else if (this.targetUrl !== null) {
+        // URL matches but navigation occurred (VOD→Live, etc.).
+        // Force a fresh session in reconcileOnce.
+        this.forceNewSession = true;
       }
     }
 
@@ -293,7 +301,11 @@ export class RuntimeManager {
     const desired = this.getDesiredState();
     const hasActiveSession = this.targetUrl !== null && !this.isDisposedState;
 
-    if (hasActiveSession && (!desired.shouldRun || !this.matchesSessionUrl(desired.url))) {
+    if (
+      hasActiveSession &&
+      (!desired.shouldRun || !this.matchesSessionUrl(desired.url) || this.forceNewSession)
+    ) {
+      this.forceNewSession = false;
       this.disposeActiveSession();
     }
 

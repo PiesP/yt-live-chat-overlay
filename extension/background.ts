@@ -14,6 +14,11 @@
  * API references are extracted with `!` assertions because the type
  * declaration marks them as possibly undefined (for content-script compat)
  * but all APIs are present in SW context.
+ *
+ * Firefox compatibility note: The manifest.firefox.json declares the
+ * `menus` permission (Firefox's equivalent of `contextMenus`). Firefox MV3
+ * provides a `chrome` namespace compatibility layer, so `chrome.contextMenus`
+ * works in both Chrome and Firefox extension service workers.
  */
 
 // Extract API references — always defined in SW context.

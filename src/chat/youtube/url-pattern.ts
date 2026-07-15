@@ -27,7 +27,9 @@ export function isYouTubeWatch(url: string): boolean {
   if (watchPattern) return watchPattern.test(url);
   try {
     const u = new URL(url);
-    return u.hostname.endsWith('youtube.com') && u.pathname === '/watch';
+    return (
+      (u.hostname === 'www.youtube.com' || u.hostname === 'youtube.com') && u.pathname === '/watch'
+    );
   } catch {
     return false;
   }
@@ -37,7 +39,10 @@ export function isYouTubeLive(url: string): boolean {
   if (livePattern) return livePattern.test(url);
   try {
     const u = new URL(url);
-    return u.hostname.endsWith('youtube.com') && u.pathname.startsWith('/live/');
+    return (
+      (u.hostname === 'www.youtube.com' || u.hostname === 'youtube.com') &&
+      u.pathname.startsWith('/live/')
+    );
   } catch {
     return false;
   }
