@@ -3,10 +3,7 @@
   "compilerOptions": {
     // Target & Libraries
     "target": "ESNext",
-    "lib": [
-      "ESNext",
-      "DOM",
-    ],
+    "lib": ["ESNext", "DOM"],
     // Determines ordering for union/intersection types (matches TS 7.0 Go port)
     "stableTypeOrdering": true,
     // Module System (bundler mode for Vite compatibility)
@@ -30,39 +27,17 @@
     "skipLibCheck": true,
     // Path Aliases
     "paths": {
-      "@util/*": [
-        "./src/util/*"
-      ],
-      "@i18n/*": [
-        "./src/i18n/*"
-      ],
-      "@chat/*": [
-        "./src/chat/*"
-      ],
-      "@chat/youtube/*": [
-        "./src/chat/youtube/*"
-      ],
-      "@settings/*": [
-        "./src/settings/*"
-      ],
-      "@renderer/*": [
-        "./src/renderer/*"
-      ],
-      "@app/*": [
-        "./src/app/*"
-      ],
-      "@translation/*": [
-        "./src/translation/*"
-      ],
-      "@media/*": [
-        "./src/media/*"
-      ],
-      "@app-types": [
-        "./src/types/index"
-      ],
-      "@platform/*": [
-        "./src/platform/*"
-      ]
+      "@util/*": ["./src/util/*"],
+      "@i18n/*": ["./src/i18n/*"],
+      "@chat/*": ["./src/chat/*"],
+      "@chat/youtube/*": ["./src/chat/youtube/*"],
+      "@settings/*": ["./src/settings/*"],
+      "@renderer/*": ["./src/renderer/*"],
+      "@app/*": ["./src/app/*"],
+      "@translation/*": ["./src/translation/*"],
+      "@media/*": ["./src/media/*"],
+      "@app-types": ["./src/types/index"],
+      "@platform/*": ["./src/platform/*"]
     },
     // Build Performance
     "incremental": true,
@@ -72,14 +47,6 @@
     "forceConsistentCasingInFileNames": true,
     "allowImportingTsExtensions": true
   },
-  "include": [
-    "src/**/*",
-    "vite.config.ts"
-  ],
-  "exclude": [
-    "node_modules",
-    "dist",
-    "extension",
-    ".vscode"
-  ]
+  "include": ["src/**/*", "vite.config.ts"],
+  "exclude": ["node_modules", "dist", "extension", ".vscode"]
 }

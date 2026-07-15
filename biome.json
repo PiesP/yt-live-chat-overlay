@@ -8,7 +8,13 @@
   "files": {
     "includes": [
       "src/**",
+      "scripts/**",
       "vite.config*.ts",
+      "package.json",
+      "tsconfig.json",
+      "tsconfig.extension.json",
+      "knip.json",
+      "biome.json",
       "!!**/extension/",
       "!!**/dist-extension/",
       "!!**/dist-extension-firefox/"
@@ -46,6 +52,8 @@
         "noControlCharactersInRegex": "off",
         "noAssignInExpressions": "off",
         "noDocumentCookie": "off",
+        "noSelfCompare": "warn",
+        "noArrayIndexKey": "off",
         "noImplicitAnyLet": "error",
         "useIterableCallbackReturn": "error"
       },

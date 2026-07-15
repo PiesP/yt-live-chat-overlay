@@ -15,5 +15,6 @@
     "@platform/*": ["src/platform/*"]
   },
   "ignore": ["test/**", "extension/**", "dist*/**"],
-  "ignoreBinaries": ["e2e"]
+  "ignoreBinaries": ["e2e"],
+  "ignoreExportsUsedInFile": true
 }

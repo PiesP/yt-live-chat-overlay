@@ -48,6 +48,7 @@ temp/
 
 # Documentation (keep essential files tracked)
 docs/
+plans/
 *.md
 !README.md
 !LICENSE
