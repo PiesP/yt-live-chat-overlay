@@ -6,7 +6,7 @@
 // missing / extra keys so drift is caught at build time.
 
 import { readdirSync, readFileSync } from 'node:fs';
-import { join, basename } from 'node:path';
+import { join } from 'node:path';
 
 const I18N_DIR = new URL('../src/i18n/', import.meta.url).pathname;
 const BASELINE = 'ko.ts';
@@ -92,5 +92,5 @@ if (totalErrors > 0) {
   console.log(`\n❌ ${totalErrors} parity issue(s) found.`);
   process.exit(1);
 } else {
-  console.log(`\n✅ All locale files are in parity.\n`);
+  console.log('\n✅ All locale files are in parity.\n');
 }
