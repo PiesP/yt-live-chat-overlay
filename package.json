@@ -78,6 +78,7 @@
     "typescript": "7.0.2",
     "vite": "^8.1.4",
     "vite-plugin-monkey": "^8.0.6",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "@piesp/browser-core": "file:../packages/core"
   }
 }

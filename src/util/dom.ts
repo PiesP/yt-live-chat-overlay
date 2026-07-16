@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
+import { sleep } from '@piesp/browser-core/async';
 import { createLogger } from '@util/logging';
+
+export { sleep } from '@piesp/browser-core/async';
+export { isAbortError } from '@piesp/browser-core/error';
 
 const log = createLogger('Dom');
 
@@ -40,26 +44,6 @@ export function throwIfAborted(signal?: AbortSignal): void {
     throw createAbortError(signal.reason);
   }
 }
-
-export const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
-  new Promise((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(createAbortError(signal.reason));
-      return;
-    }
-
-    const timeoutId: ReturnType<typeof setTimeout> = setTimeout(() => {
-      signal?.removeEventListener('abort', handleAbort);
-      resolve();
-    }, ms);
-
-    const handleAbort = (): void => {
-      clearTimeout(timeoutId);
-      reject(createAbortError(signal?.reason));
-    };
-
-    signal?.addEventListener('abort', handleAbort, { once: true });
-  });
 
 export const isVisibleElement = (element: HTMLElement): boolean =>
   element.offsetWidth > 0 && element.offsetHeight > 0;
@@ -173,10 +157,6 @@ export async function findPlayerContainerElement(
 
   return pollForPlayerContainer(attempts, intervalMs, signal);
 }
-
-/** Check whether an error is an AbortError (used to ignore abort-related rejections). */
-export const isAbortError = (error: unknown): boolean =>
-  error instanceof DOMException && error.name === 'AbortError';
 
 const clearSafe = <T>(value: T | null, clearFn: (v: T) => void): null => {
   if (value !== null) clearFn(value);
