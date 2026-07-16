@@ -5,6 +5,7 @@
   "type": "module",
   "private": true,
   "scripts": {
+    "preinstall": "test -f packages/core/package.json || (echo '⚠️  Submodule not initialized. Run: git submodule update --init' && exit 1)",
     "build": "vite build",
     "build:dev": "vite build --mode development",
     "dev": "vite build --mode development --watch",
@@ -79,6 +80,6 @@
     "vite": "^8.1.4",
     "vite-plugin-monkey": "^8.0.6",
     "vitest": "^4.1.10",
-    "@piesp/browser-core": "file:../packages/core"
+    "@piesp/browser-core": "file:./packages/core"
   }
 }
