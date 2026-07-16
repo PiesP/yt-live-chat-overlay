@@ -471,8 +471,9 @@ export class RuntimeManager {
     //    Worker in off-main-thread mode.
     renderer.resume();
 
-    // 5. Unpause chat source — poll loop resumes from saved token
-    this.chatSource?.setPaused(false);
+    // 5. Unpause chat source — clear all pause reasons for fresh start
+    this.chatSource?.setPauseReason('visibility', false);
+    this.chatSource?.setPauseReason('video', false);
 
     // 6. Clear session dedup so re-injected messages aren't blocked
     this.sessionDedup.clear();
@@ -1114,7 +1115,7 @@ export class RuntimeManager {
         this.noteHidden();
         this.renderer?.pause();
         this.renderer?.trimBackgroundQueue();
-        this.chatSource?.setPaused(true);
+        this.chatSource?.setPauseReason('visibility', true);
         this.chatPanelObserver.pause();
         return;
       }
@@ -1145,7 +1146,7 @@ export class RuntimeManager {
           this.backlogController?.startBacklogInjection(pendingMessages);
         }
         // Don't return — still need to set chat source unpaused for poll loop wake.
-        this.chatSource?.setPaused(false);
+        this.chatSource?.setPauseReason('visibility', false);
         return;
       }
 
@@ -1175,7 +1176,7 @@ export class RuntimeManager {
         this.renderer?.trimBackgroundQueue();
       }
 
-      this.chatSource?.setPaused(false);
+      this.chatSource?.setPauseReason('visibility', false);
 
       // If the chat source accumulated messages during the hidden period
       // (ReplayChatSource buffers them), drain through the backlog controller
@@ -1253,7 +1254,7 @@ export class RuntimeManager {
       setPaused: (paused: boolean) => {
         if (paused) {
           this.renderer?.pauseForVideo();
-          this.chatSource?.setPaused(true);
+          this.chatSource?.setPauseReason('video', true);
         } else {
           // Drain pending queue through backlog controller instead of trimming.
           const pendingMessages = this.renderer?.drainPendingQueue();
@@ -1264,7 +1265,7 @@ export class RuntimeManager {
             this.renderer?.trimBackgroundQueue();
           }
           this.renderer?.resumeForVideo();
-          this.chatSource?.setPaused(false);
+          this.chatSource?.setPauseReason('video', false);
         }
       },
     };

@@ -154,7 +154,7 @@ export class ReplayChatSource extends ChatSource {
       }
 
       // 1. If paused, reschedule at background rate and skip work
-      if (this.chatPaused) {
+      if (this.isPaused) {
         // Mark activity even while paused so the health watchdog doesn't
         // consider this session dead and restart it on unpause.
         this.markActivity();
