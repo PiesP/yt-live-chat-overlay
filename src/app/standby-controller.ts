@@ -126,6 +126,11 @@ export class StandbyController {
 
   private scheduleRetry(): void {
     if (this.retryTimer !== null) return;
+    // Guard: don't schedule a retry if we've already exited standby mode.
+    // exit() clears timers synchronously but a concurrent poll() error handler
+    // may still call scheduleRetry() before the mode check on the next poll
+    // iteration. This idempotent gate prevents stray retry timers after exit.
+    if (!this.mode) return;
     this.retryTimer = setTimeout(() => {
       this.retryTimer = null;
       void this.poll();
