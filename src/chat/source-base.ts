@@ -111,7 +111,18 @@ export abstract class ChatSource implements Pauseable {
   protected callback: MessageCallback | null = null;
   private pollController: AbortController | null = null;
   private readonly pollLoopManager = new PollLoopManager();
-  protected chatPaused = false;
+  /**
+   * Set of active pause reasons. When non-empty, the chat source is paused.
+   * Keys: 'visibility' (tab hidden), 'video' (user pause, buffering, PiP).
+   * Multiple components can independently add/remove reasons without
+   * overwriting each other — the source resumes only when ALL are removed.
+   */
+  private pauseReasons = new Set<string>();
+
+  /** Whether any pause reason is currently active. */
+  protected get isPaused(): boolean {
+    return this.pauseReasons.size > 0;
+  }
   private pauseAbortController: AbortController | null = null;
   private lastActivityTime = 0;
   protected bootstrap: ChatBootstrapData | null = null;
@@ -309,25 +320,46 @@ export abstract class ChatSource implements Pauseable {
     this.seenMessageIds.clear();
   }
 
-  setPaused(paused: boolean): void {
-    this.chatPaused = paused;
+  /**
+   * Set a specific pause reason. When any reason is active, the chat source pauses.
+   * When all reasons are removed, the source resumes.
+   *
+   * Callers should use distinct reason keys:
+   * - 'visibility' — tab hidden (handleVisibility in RuntimeManager)
+   * - 'video' — user pause, buffering, or PiP (VideoPauseController)
+   */
+  setPauseReason(reason: string, paused: boolean): void {
     if (paused) {
-      // Create a fresh controller for the upcoming pause period.
-      // The old one is already aborted (or never created).
-      this.pauseAbortController = new AbortController();
+      const wasEmpty = this.pauseReasons.size === 0;
+      this.pauseReasons.add(reason);
+      if (wasEmpty) {
+        // Transitioning from unpaused → paused: create a fresh wake signal.
+        this.pauseAbortController = new AbortController();
+      }
     } else {
-      // Wake any sleeping waitWhilePaused() by aborting the pause signal.
-      this.pauseAbortController?.abort();
-      this.pauseAbortController = null;
-      this.markActivity();
+      this.pauseReasons.delete(reason);
+      if (this.pauseReasons.size === 0) {
+        // All reasons removed — wake any sleeping waitWhilePaused().
+        this.pauseAbortController?.abort();
+        this.pauseAbortController = null;
+        this.markActivity();
+      }
     }
   }
 
+  /**
+   * @deprecated Use setPauseReason(reason, paused) with a specific reason key.
+   * Kept for backward compatibility with the Pauseable interface.
+   */
+  setPaused(paused: boolean): void {
+    this.setPauseReason('general', paused);
+  }
+
   protected async waitWhilePaused(sessionSignal?: AbortSignal): Promise<void> {
-    while (this.chatPaused) {
+    while (this.pauseReasons.size > 0) {
       if (sessionSignal?.aborted) throw new DOMException('Aborted', 'AbortError');
       if (this.pauseAbortController?.signal.aborted) return;
-      // Sleep briefly; abort of pauseAbortController (via setPaused(false))
+      // Sleep briefly; abort of pauseAbortController (via all reasons removed)
       // will interrupt via the combined abort check above on next iteration.
       // Use a short sleep so we don't miss the abort by more than 250ms.
       await sleep(ChatSource.PAUSE_POLL_INTERVAL_MS, sessionSignal);
@@ -343,28 +375,28 @@ export abstract class ChatSource implements Pauseable {
   injectExternalMessages(messages: ChatMessage[]): void {
     if (!this.callback || messages.length === 0) return;
 
-    // ── Defensive recovery from stuck chatPaused ──
-    // If chatPaused is true but the tab is visible and the video is playing,
+    // ── Defensive recovery from stuck pause reasons ──
+    // If pauseReasons is non-empty but the tab is visible and the video is playing,
     // the pause state has likely drifted due to interleaved visibility and
     // video-pause event ordering. Force-unpause to recover message delivery.
     // Without this, the fetch interceptor and DOM watcher would silently
     // drop all messages while YouTube's own chat panel continues to update.
-    if (this.chatPaused && document.visibilityState !== 'hidden') {
+    if (this.pauseReasons.size > 0 && document.visibilityState !== 'hidden') {
       const playback = this.getPlaybackSnapshot();
       if (playback && !playback.paused) {
         log.warn(
-          'chatPaused state drift detected — tab visible + video playing but chatPaused=true. ' +
-            'Force-unpausing to recover message delivery.'
+          'pauseReasons state drift detected — tab visible + video playing but reasons active. ' +
+            'Force-clearing pause reasons to recover message delivery.'
         );
         // Abort any pending pause listeners before force-unpausing,
         // otherwise the orphaned pauseAbortController signal lingers.
         this.pauseAbortController?.abort();
-        // Bypass setPaused() to avoid creating a new abort controller we don't need.
-        this.chatPaused = false;
+        this.pauseAbortController = null;
+        this.pauseReasons.clear();
       }
     }
 
-    if (this.chatPaused) return;
+    if (this.pauseReasons.size > 0) return;
     const deduped = this.filterNewMessages(messages);
     if (deduped.length === 0) return;
     for (const message of deduped) {

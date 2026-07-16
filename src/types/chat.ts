@@ -60,4 +60,11 @@ export interface ChatMessage {
   membershipHeader?: string;
   isBacklog?: boolean;
   videoOffsetMs?: number;
+  /**
+   * Source action type from YouTube API.
+   * - 'add': standard addChatItemAction (new message)
+   * - 'replace': replaceChatItemAction (edited/deleted message)
+   * - undefined: from sources that don't track this (DOM watcher, etc.)
+   */
+  actionType?: 'add' | 'replace';
 }

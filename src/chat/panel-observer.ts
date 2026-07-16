@@ -89,6 +89,10 @@ export class ChatPanelObserver {
     }
     this.callback = null;
     this.lastState = null;
+    // Reset pause state so the next start() → pause()/resume() pair
+    // works correctly — without this, a paused session that is stopped
+    // then restarted would have isPaused stuck at true.
+    this.isPaused = false;
   }
 
   /**

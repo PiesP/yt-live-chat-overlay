@@ -154,7 +154,7 @@ export class ReplayChatSource extends ChatSource {
       }
 
       // 1. If paused, reschedule at background rate and skip work
-      if (this.chatPaused) {
+      if (this.isPaused) {
         // Mark activity even while paused so the health watchdog doesn't
         // consider this session dead and restart it on unpause.
         this.markActivity();
@@ -228,7 +228,10 @@ export class ReplayChatSource extends ChatSource {
 
       // 5. Schedule next tick with adaptive delay
       const hasPendingFlushes = !this.replayBuffer.isEmpty;
-      const adaptiveDelay = hasPendingFlushes ? 16 : BACKGROUND_FETCH_INTERVAL_MS;
+      // When the video is paused, no new data arrives and flush is skipped —
+      // a fast 16ms loop just wastes CPU. Use the background interval instead.
+      const videoPaused = playback?.paused ?? true;
+      const adaptiveDelay = hasPendingFlushes && !videoPaused ? 16 : BACKGROUND_FETCH_INTERVAL_MS;
 
       if (!signal?.aborted && gen === this.cooperativeLoopGeneration) {
         this.cooperativeLoopTimer = setTimeout(tick, adaptiveDelay);

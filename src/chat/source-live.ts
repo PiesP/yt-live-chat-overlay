@@ -80,7 +80,7 @@ export class LiveChatSource extends ChatSource {
         return false;
       }
 
-      await this.handleLivePayload(payload, true); // isInitialSeed: apply time-based filtering
+      await this.handleLivePayload(payload, true, signal); // isInitialSeed: apply time-based filtering
       return true;
     } catch (error: unknown) {
       if (isAbortError(error)) {
@@ -222,7 +222,7 @@ export class LiveChatSource extends ChatSource {
           continue;
         }
 
-        await this.handleLivePayload(payload);
+        await this.handleLivePayload(payload, false, signal);
       } catch (error: unknown) {
         if (isAbortError(error)) {
           throw error;
@@ -302,7 +302,8 @@ export class LiveChatSource extends ChatSource {
 
   private async handleLivePayload(
     payload: LiveChatPayload,
-    isInitialSeed: boolean = false
+    isInitialSeed: boolean = false,
+    signal?: AbortSignal
   ): Promise<void> {
     const events = extractChatEvents(payload.actions, this.getSettings);
 
@@ -344,7 +345,7 @@ export class LiveChatSource extends ChatSource {
       // Continuation token missing — API format may have changed.
       // Refresh bootstrap immediately instead of waiting for the next poll to fail.
       log.warn('chat.live.missing-continuation');
-      await this.refreshLiveContinuation();
+      await this.refreshLiveContinuation(signal);
       // refreshLiveContinuation updates this.liveContinuation internally
     } else {
       this.liveContinuation = nextContinuation;

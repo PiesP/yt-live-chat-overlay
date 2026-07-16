@@ -111,6 +111,8 @@ let fallbackMessageIdCounter = 0;
 export class CanvasRenderer extends RendererBase {
   private canvas: HTMLCanvasElement | null = null;
   private canvasClickHandler: ((e: MouseEvent) => void) | null = null;
+  /** Set to true during onDestroy() — checked after async awaits in drainQueueAsync. */
+  private _destroyed = false;
   private ctx: CanvasRenderingContext2D | null = null;
   private animFrameId: number | null = null;
   /** Pre-computed 1/maxMessageAgeMs to avoid per-frame division in opacity calc. */
@@ -1141,6 +1143,11 @@ export class CanvasRenderer extends RendererBase {
 
         // Yield every 50ms to keep the main thread responsive during bursts.
         deadline = await yieldIfOverBudget(deadline);
+
+        // Session may have been destroyed during the yield — abort drain
+        // to avoid accessing null canvas/ctx or injecting messages into
+        // a disposed renderer.
+        if (this._destroyed) return;
       }
 
       if (committed.length > 0) {
@@ -1849,6 +1856,7 @@ export class CanvasRenderer extends RendererBase {
   }
 
   protected onDestroy(): void {
+    this._destroyed = true;
     this.stopRenderLoop();
     this.workerManager.destroy();
     this.imageFetchManager.destroy();

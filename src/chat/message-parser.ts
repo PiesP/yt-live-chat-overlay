@@ -119,12 +119,12 @@ function parseChatEventFromAction(
   const timestampOverride =
     actionTimestampUsec !== undefined ? Math.round(actionTimestampUsec / 1000) : undefined;
 
-  const item = extractActionItem(action);
-  if (!item) {
+  const extraction = extractActionItem(action);
+  if (!extraction) {
     return null;
   }
 
-  const supportedRenderer = extractSupportedRenderer(item);
+  const supportedRenderer = extractSupportedRenderer(extraction.item);
   if (!supportedRenderer) {
     return null;
   }
@@ -138,6 +138,10 @@ function parseChatEventFromAction(
   if (!message) {
     return null;
   }
+
+  // Tag with the source action type so downstream renderers can implement
+  // update-in-place logic for edited/deleted messages.
+  message.actionType = extraction.actionType;
 
   if (offsetMs !== undefined) {
     message.videoOffsetMs = offsetMs;
@@ -281,14 +285,19 @@ function parseSuperChatInfo(renderer: JsonObject): SuperChatInfo | null {
 // Pure helper functions (module-level, no settings dependency)
 // ---------------------------------------------------------------------------
 
-export function extractActionItem(action: JsonObject): JsonObject | null {
+export type ActionExtraction = {
+  item: JsonObject;
+  actionType: 'add' | 'replace';
+} | null;
+
+export function extractActionItem(action: JsonObject): ActionExtraction {
   if (!isRecord(action)) return null;
 
   const addChatItemAction = asRecord(action.addChatItemAction);
   if (addChatItemAction) {
     const item = asRecord(addChatItemAction.item);
     if (item) {
-      return item;
+      return { item, actionType: 'add' };
     }
   }
 
@@ -296,7 +305,7 @@ export function extractActionItem(action: JsonObject): JsonObject | null {
   if (replaceChatItemAction) {
     const item = asRecord(replaceChatItemAction.item);
     if (item) {
-      return item;
+      return { item, actionType: 'replace' };
     }
   }
 
