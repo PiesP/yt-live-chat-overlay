@@ -157,7 +157,11 @@ export class RenderWorkerManager {
    * of the last ping, indicating a crashed or frozen worker thread.
    */
   isAlive(): boolean {
-    if (!this.active || !this.worker) return true; // no worker → not applicable
+    // Worker was never initialized — not applicable, renderer uses main thread.
+    if (!this.active) return true;
+    // Worker was initialized but has been destroyed (e.g., after consecutive
+    // message deserialization errors). It is dead and cannot render.
+    if (!this.worker) return false;
     // Canvas context loss means the worker can no longer render, even
     // if it still responds to pings.
     if (this._contextLost) return false;
