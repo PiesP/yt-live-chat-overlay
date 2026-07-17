@@ -93,6 +93,15 @@ const RENDERER_STUCK_THRESHOLD_MS = 10_000;
 /** Maximum consecutive overlay refreshes before escalating to a full session restart. */
 const MAX_CONSECUTIVE_REFRESHES = 2;
 
+/** Backoff delays for consecutive watchdog restarts: 5 s → 15 s → 30 s → 60 s. */
+const RESTART_BACKOFF_DELAYS_MS = [5_000, 15_000, 30_000, 60_000] as const;
+
+/** Maximum consecutive watchdog restarts before auto-restart is disabled. */
+const MAX_WATCHDOG_RESTARTS = 4;
+
+/** Rolling window for recent restart timestamp tracking (ms). */
+const RESTART_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
+
 export type RuntimeSessionRestartReason = 'foreground-return' | 'watchdog' | 'standby-resolved';
 
 /** Root-cause classification for watchdog-triggered health failures. */
@@ -212,6 +221,15 @@ export class RuntimeManager {
    *  After MAX_CONSECUTIVE_REFRESHES, escalate to a full session restart. */
   private consecutiveRefreshFailures = 0;
 
+  /** Timestamps (epoch ms) of recent watchdog-triggered restarts. Rolling window. */
+  private recentRestartTimestamps: number[] = [];
+
+  /** Consecutive watchdog restarts without a stable session. Reset on successful start. */
+  private consecutiveWatchdogRestarts = 0;
+
+  /** Timer handle for deferred (cooldown) restart. null when no deferred restart is pending. */
+  private restartTimer: ReturnType<typeof setTimeout> | null = null;
+
   private get isDisposedState(): boolean {
     return this.state === 'disposed' || this.state === 'restarting' || this.state === 'destroyed';
   }
@@ -276,6 +294,12 @@ export class RuntimeManager {
   destroy(): void {
     if (this.state === 'destroyed') {
       return;
+    }
+
+    // Cancel any deferred restart timer
+    if (this.restartTimer !== null) {
+      clearTimeout(this.restartTimer);
+      this.restartTimer = null;
     }
 
     this.clearScheduledReconcile();
@@ -421,6 +445,9 @@ export class RuntimeManager {
     }
 
     this.resetStartFailures();
+    // Reset watchdog restart counter on successful session start so cooldown
+    // does not ratchet across unrelated page navigations or manual restarts.
+    this.consecutiveWatchdogRestarts = 0;
     log.info('runtime.session.started');
   }
 
@@ -1130,14 +1157,71 @@ export class RuntimeManager {
       return;
     }
 
+    const now = Date.now();
+
+    // Clean stale entries from the rolling window
+    this.recentRestartTimestamps = this.recentRestartTimestamps.filter(
+      (t) => now - t < RESTART_WINDOW_MS
+    );
+
+    const recentCount = this.recentRestartTimestamps.length;
+    this.recentRestartTimestamps.push(now);
+
+    // First restart: immediate
+    if (recentCount === 0) {
+      this.consecutiveWatchdogRestarts = 1;
+    } else {
+      this.consecutiveWatchdogRestarts++;
+    }
+
+    // Hard cap: stop auto-restart, leave session in current state.
+    // The user can manually restart via the status bar click handler.
+    if (this.consecutiveWatchdogRestarts > MAX_WATCHDOG_RESTARTS) {
+      log.warn('runtime.restart.max-reached', {
+        consecutiveRestarts: this.consecutiveWatchdogRestarts - 1,
+      });
+      return;
+    }
+
+    // Compute the cooldown delay for this restart attempt
+    const backoffIndex = Math.min(
+      this.consecutiveWatchdogRestarts - 1,
+      RESTART_BACKOFF_DELAYS_MS.length - 1
+    );
+    // Clamped by Math.min above; safe non-null assertion.
+    const delayMs = RESTART_BACKOFF_DELAYS_MS[backoffIndex]!;
+
+    log.info('runtime.restart.scheduled', {
+      reason,
+      attempt: this.consecutiveWatchdogRestarts,
+      delayMs,
+    });
+
     // Clear watchdog synchronously before state transition so the interval
     // callback cannot fire after we've moved to 'restarting' and trigger
     // a double restart.
     this.stopChatWatchdog();
 
     this.state = 'restarting';
-    log.info('runtime.restart.requested', { reason });
-    this.handleSessionRestart(reason);
+
+    if (delayMs > 0) {
+      // Clear any previously deferred restart timer
+      if (this.restartTimer !== null) {
+        clearTimeout(this.restartTimer);
+      }
+      this.restartTimer = setTimeout(() => {
+        this.restartTimer = null;
+        if (this.isDisposedState) return;
+        log.info('runtime.restart.requested', {
+          reason,
+          attempt: this.consecutiveWatchdogRestarts,
+        });
+        this.handleSessionRestart(reason);
+      }, delayMs);
+    } else {
+      log.info('runtime.restart.requested', { reason });
+      this.handleSessionRestart(reason);
+    }
   }
 
   private startForegroundListeners(): void {
