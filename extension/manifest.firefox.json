@@ -27,13 +27,14 @@
         "content-script.js"
       ],
       "run_at": "document_end",
-      "world": "MAIN"
+      "world": "ISOLATED"
     }
   ],
   "web_accessible_resources": [
     {
       "resources": [
         "workers/*.js",
+        "page-script.js",
         "chunks/*.js"
       ],
       "matches": [

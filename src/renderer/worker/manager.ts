@@ -119,6 +119,7 @@ export class RenderWorkerManager {
   private worker: Worker | null = null;
   private active = false;
   private _queueDepth = 0;
+  private _activeMessageCount = 0;
   private readonly deps: WorkerManagerDeps;
   /** Unsubscribe function for overlay dimension changes, stored for cleanup. */
   private dimensionsUnsubscribe: (() => void) | null = null;
@@ -157,6 +158,10 @@ export class RenderWorkerManager {
 
   get queueDepth(): number {
     return this._queueDepth;
+  }
+
+  get activeMessageCount(): number {
+    return this._activeMessageCount;
   }
 
   /**
@@ -313,9 +318,9 @@ export class RenderWorkerManager {
             log.info('renderer.worker.started');
             break;
           case 'stats':
-            this.deps.observability.updateActiveMessages(
-              ((data as Record<string, unknown>).activeMessages as number) ?? 0
-            );
+            this._activeMessageCount =
+              ((data as Record<string, unknown>).activeMessages as number) ?? 0;
+            this.deps.observability.updateActiveMessages(this._activeMessageCount);
             this._queueDepth = ((data as Record<string, unknown>).pendingQueueDepth as number) ?? 0;
             break;
           case 'error':

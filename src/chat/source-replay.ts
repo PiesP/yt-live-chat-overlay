@@ -160,27 +160,28 @@ export class ReplayChatSource extends ChatSource {
         return;
       }
 
-      // 1. If paused, reschedule at background rate and skip work
+      // 1. Mark activity even while paused so the health watchdog doesn't
+      //    consider this session dead and restart it on unpause.
       if (this.isPaused) {
-        // Mark activity even while paused so the health watchdog doesn't
-        // consider this session dead and restart it on unpause.
         this.markActivity();
-        if (gen === this.cooperativeLoopGeneration) {
-          this.cooperativeLoopTimer = setTimeout(tick, BACKGROUND_FETCH_INTERVAL_MS);
-        }
-        return;
       }
 
       const playback = this.getPlaybackSnapshot();
       const isPlaying = playback && !playback.paused;
 
-      // 2. Flush: emit messages whose video time has arrived
-      if (isPlaying) {
+      // 2. Flush: emit messages whose video time has arrived.
+      //    Skip when visibility-paused (tab hidden) — messages accumulate
+      //    in the replay buffer and will be drained when the tab returns.
+      if (!this.isPaused && isPlaying) {
         this.markActivity();
         this.flushReplayBuffer(playback.offsetMs);
       }
 
-      // 3. Fetch: if buffer needs more pages, call the appropriate poll method
+      // 3. Fetch: continue fetching replay data when the video is playing,
+      //    even if the tab is hidden. This prevents data gaps during long
+      //    hidden intervals. When the video itself is paused, skip fetching
+      //    — there's no point collecting data that won't be consumed until
+      //    the user manually resumes.
       if (isPlaying) {
         try {
           if (this.replayMode === 'playerSeek') {
@@ -194,9 +195,9 @@ export class ReplayChatSource extends ChatSource {
           }
         }
 
-        // ✅ Seed prefetch after the first main poll — replayContinuation has
-        // now advanced past the page the poll just fetched, so prefetch won't
-        // duplicate it.
+        // Seed prefetch after the first successful main poll — replayContinuation
+        // has now advanced past the page the poll just fetched, so prefetch
+        // won't duplicate it.
         if (!this.prefetchMode) {
           this.startPrefetch();
         }
@@ -235,10 +236,11 @@ export class ReplayChatSource extends ChatSource {
 
       // 5. Schedule next tick with adaptive delay
       const hasPendingFlushes = !this.replayBuffer.isEmpty;
-      // When the video is paused, no new data arrives and flush is skipped —
-      // a fast 16ms loop just wastes CPU. Use the background interval instead.
+      // When the video is paused or the tab is hidden, no flush occurs —
+      // a fast 16ms loop just wastes CPU. Use the background interval.
       const videoPaused = playback?.paused ?? true;
-      const adaptiveDelay = hasPendingFlushes && !videoPaused ? 16 : BACKGROUND_FETCH_INTERVAL_MS;
+      const adaptiveDelay =
+        hasPendingFlushes && !this.isPaused && !videoPaused ? 16 : BACKGROUND_FETCH_INTERVAL_MS;
 
       if (!signal?.aborted && gen === this.cooperativeLoopGeneration) {
         this.cooperativeLoopTimer = setTimeout(tick, adaptiveDelay);

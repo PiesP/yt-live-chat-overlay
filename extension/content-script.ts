@@ -2,60 +2,57 @@
 // Copyright (c) 2026 PiesP
 
 /**
- * Extension Content Script entry point.
+ * Extension Content Script — runs in the ISOLATED world.
  *
- * This script runs in the MAIN world (manifest "world": "MAIN") on YouTube pages.
- * It loads the same core application logic as the userscript, but with
- * Chrome extension platform adapters for storage, worker URLs, and menu commands.
+ * Responsibilities:
+ * 1. Inject the MAIN-world page script as a <script> element.
+ * 2. Relay menu commands from the background service worker to the
+ *    page script via window.postMessage (strict origin validation).
  *
- * The side-effect import of ../src/main triggers the application bootstrap
- * (main() + registerMenuCommands() at the bottom of main.ts). No ES module
- * export syntax is used, so the bundled output works as a classic script.
+ * ISOLATED world has full access to chrome.runtime APIs, unlike MAIN world
+ * where chrome.runtime is undefined. The previous MAIN-world content script
+ * used optional chaining (chrome?.runtime?.onMessage?.addListener?.()) which
+ * silently failed — menu commands were never delivered.
  *
- * Chrome MV3 content scripts with "world": "MAIN" cannot use module type,
- * so we avoid import/export in the bundled output.
+ * Non-null assertions (!) on chrome.runtime are safe: in ISOLATED world,
+ * chrome is always defined. If it weren't, the content script would fail
+ * to load entirely.
  */
 
-// Side-effect import: triggers application bootstrap in main.ts.
-// Vite bundles this as a single self-executing script with no module syntax.
-import '../src/main';
+// ── Inject page script ─────────────────────────────────────────────────
 
-// ── Background script message listener ─────────────────────────────────────
+const pageScript = document.createElement('script');
+// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+pageScript.src = chrome!.runtime!.getURL('page-script.js');
+pageScript.type = 'text/javascript';
+(document.head || document.documentElement).appendChild(pageScript);
 
-/**
- * Local type for the frozen debug handle exposed on window.__ytChatOverlay.
- * Only these methods are accessible — the full App instance is not.
- */
-interface ContentScriptYtChatOverlayHandle {
-  resetSettings(): void;
-  restartRuntime(): Promise<void>;
+// ── Background message relay ───────────────────────────────────────────
+
+interface ChromeMessageSender {
+  id?: string;
+  url?: string;
+  tab?: { id?: number };
 }
 
-/**
- * Listen for menu commands forwarded from the background service worker.
- * Equivalent to GM_registerMenuCommand in the userscript.
- */
-chrome?.runtime?.onMessage?.addListener?.(
-  (message: unknown, sender: ChromeMessageSender) => {
-    // Defense-in-depth: reject messages not from this extension.
-    if (sender.id !== chrome?.runtime?.id) return;
+const extRuntime = chrome!.runtime!;
+const onMessage = extRuntime.onMessage!;
 
-    const msg = message as { type?: string; command?: string };
-    if (msg.type !== 'menu-command') return;
+onMessage.addListener((message: unknown, sender: ChromeMessageSender) => {
+  // Defense-in-depth: reject messages not from this extension.
+  if (sender.id !== extRuntime.id) return;
 
-    // Runtime type guard: only accept known command values.
-    if (msg.command !== 'reset-settings' && msg.command !== 'reload-overlay') return;
+  const msg = message as { type?: string; command?: string };
+  if (msg.type !== 'menu-command') return;
 
-    const app = (window as { __ytChatOverlay?: ContentScriptYtChatOverlayHandle }).__ytChatOverlay;
-    if (!app) return;
+  // Runtime type guard: only accept known command values.
+  if (msg.command !== 'reset-settings' && msg.command !== 'reload-overlay') return;
 
-    switch (msg.command) {
-      case 'reset-settings':
-        app.resetSettings();
-        break;
-      case 'reload-overlay':
-        void app.restartRuntime();
-        break;
-    }
-  }
-);
+  window.postMessage(
+    {
+      source: 'yt-chat-overlay-extension',
+      command: msg.command,
+    },
+    window.location.origin,
+  );
+});
