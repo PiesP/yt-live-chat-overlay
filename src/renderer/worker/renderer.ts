@@ -1352,6 +1352,28 @@ export class WorkerRenderer {
         pendingQueueDepth: this.pendingQueue.length,
       });
     }
+
+    // ── Live region mirror: send visible text snippets to main thread ──
+    // Runs every 30 frames (~500ms at 60fps) to keep the aria-live region
+    // updated with current visible messages for screen reader access.
+    // Mirrors the main-thread renderer's mirrorVisibleMessages() behaviour.
+    if (this.statsFrameCounter % 30 === 0) {
+      const maxSnippets = 10;
+      const count = Math.min(this.activeMessages.length, maxSnippets);
+      if (count > 0) {
+        const snippets: string[] = [];
+        const start = this.activeMessages.length - count;
+        for (let i = start; i < this.activeMessages.length; i++) {
+          const msg = this.activeMessages[i];
+          if (msg?.text) {
+            snippets.push(msg.text.slice(0, 80));
+          }
+        }
+        if (snippets.length > 0) {
+          self.postMessage({ type: 'liveRegionSnippets', snippets });
+        }
+      }
+    }
   }
 
   private checkCollision(

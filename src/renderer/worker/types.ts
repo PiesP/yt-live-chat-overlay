@@ -221,3 +221,10 @@ export interface ActiveMessage {
   /** Transient previous-frame Y position for temporal frame blending. */
   _prevY?: number;
 }
+
+// ── Worker → Main protocol messages ───────────────────────────────────
+
+export interface WorkerToMainLiveRegionSnippets {
+  type: 'liveRegionSnippets';
+  snippets: string[];
+}

@@ -377,6 +377,13 @@ export class CanvasRenderer extends RendererBase {
     });
     const useWorker = this.workerManager.init(canvas, settings, overlay);
 
+    // Wire the Worker's live-region text snippets to the overlay's
+    // aria-live region so screen readers can access chat content when
+    // rendering via the Worker path.
+    if (useWorker) {
+      this.workerManager.setLiveRegionCallback((snippets) => overlay.updateLiveRegion(snippets));
+    }
+
     // ── Phase 3: main-thread fallback setup (only when Worker failed) ──
 
     const dims = overlay.getDimensions();

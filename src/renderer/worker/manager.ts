@@ -120,6 +120,9 @@ export class RenderWorkerManager {
   /** Unsubscribe function for overlay dimension changes, stored for cleanup. */
   private dimensionsUnsubscribe: (() => void) | null = null;
 
+  /** Callback to push text snippets to the overlay's aria-live region. */
+  private _liveRegionCallback: ((snippets: string[]) => void) | null = null;
+
   /** Ping/pong health check for detecting crashed or unresponsive workers. */
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private lastPongTime = 0;
@@ -151,6 +154,14 @@ export class RenderWorkerManager {
 
   get queueDepth(): number {
     return this._queueDepth;
+  }
+
+  /**
+   * Set the callback used to forward Worker live-region text snippets
+   * to the overlay's aria-live region for screen reader access.
+   */
+  setLiveRegionCallback(callback: (snippets: string[]) => void): void {
+    this._liveRegionCallback = callback;
   }
 
   /**
@@ -315,6 +326,13 @@ export class RenderWorkerManager {
           case 'contextLost':
             log.warn('renderer.worker.context-lost');
             this._contextLost = true;
+            break;
+          case 'liveRegionSnippets':
+            if (this._liveRegionCallback) {
+              this._liveRegionCallback(
+                ((data as Record<string, unknown>).snippets as string[]) ?? []
+              );
+            }
             break;
         }
       };
