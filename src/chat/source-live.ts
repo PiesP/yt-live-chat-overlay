@@ -33,6 +33,10 @@ const LIVE_BOOTSTRAP_REFRESH_BASE = 5;
 /** Maximum multiplier for bootstrap refresh interval. */
 const LIVE_BOOTSTRAP_REFRESH_MAX = 50;
 
+/** Maximum poll request timeout (ms) — prevents hung API calls from
+ *  stalling the live-chat poll loop indefinitely. */
+const LIVE_POLL_TIMEOUT_MS = 20_000;
+
 export class LiveChatSource extends ChatSource {
   private liveContinuation: InnertubeContinuationData | null = null;
   protected consecutiveErrors = 0;
@@ -293,11 +297,24 @@ export class LiveChatSource extends ChatSource {
     }
   }
 
-  private requestLivePayload(
+  private async requestLivePayload(
     continuation: InnertubeContinuationData,
     signal?: AbortSignal
   ): Promise<LiveChatPayload | null> {
-    return this.requestPayload(fetchLiveChat, continuation, signal);
+    // Wrap with a 20 s timeout so hung Innertube API calls don't stall the
+    // poll loop indefinitely. Merge with the caller's abort signal so either
+    // timeout or external abort (dispose, restart) cancels the request.
+    const timeoutSignal = AbortSignal.timeout(LIVE_POLL_TIMEOUT_MS);
+    const mergedSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+
+    try {
+      return await this.requestPayload(fetchLiveChat, continuation, mergedSignal);
+    } catch (error: unknown) {
+      if (isAbortError(error) && timeoutSignal.aborted && !signal?.aborted) {
+        log.warn('chat.live.poll-timeout', { timeoutMs: LIVE_POLL_TIMEOUT_MS });
+      }
+      throw error;
+    }
   }
 
   private async handleLivePayload(

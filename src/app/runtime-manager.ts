@@ -9,7 +9,7 @@ import {
 import { OVERLAY_SELECTOR, Overlay } from '@app/overlay';
 import { StandbyController } from '@app/standby-controller';
 import { VideoPauseController } from '@app/video-pause-controller';
-import type { ChatMessage, OverlaySettings, Pauseable } from '@app-types';
+import type { ChatMessage, OverlayDimensions, OverlaySettings, Pauseable } from '@app-types';
 import type { DomWatcherUnsubscribe } from '@chat/dom-watcher';
 import { installDomChatWatcher } from '@chat/dom-watcher';
 import type { InterceptorUnsubscribe } from '@chat/fetch-interceptor';
@@ -93,13 +93,37 @@ const RENDERER_STUCK_THRESHOLD_MS = 10_000;
 /** Maximum consecutive overlay refreshes before escalating to a full session restart. */
 const MAX_CONSECUTIVE_REFRESHES = 2;
 
+/** Backoff delays for consecutive watchdog restarts: 5 s → 15 s → 30 s → 60 s. */
+const RESTART_BACKOFF_DELAYS_MS = [5_000, 15_000, 30_000, 60_000] as const;
+
+/** Maximum consecutive watchdog restarts before auto-restart is disabled. */
+const MAX_WATCHDOG_RESTARTS = 4;
+
+/** Rolling window for recent restart timestamp tracking (ms). */
+const RESTART_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
+
+/** Grace period (ms) before treating 0×0 dimensions as a failure.
+ *  YouTube SPA transitions and player layout init can briefly yield 0×0. */
+const DIMENSIONS_NULL_GRACE_MS = 5_000;
+
 export type RuntimeSessionRestartReason = 'foreground-return' | 'watchdog' | 'standby-resolved';
+
+/** Root-cause classification for watchdog-triggered health failures. */
+type HealthFailureReason =
+  | 'chat-source-stopped'
+  | 'chat-source-stale'
+  | 'overlay-not-renderable'
+  | 'renderer-stuck'
+  | 'very-long-idle';
 
 interface RuntimeHealth {
   idleDurationMs: number;
   renderable: boolean;
+  dimensions: OverlayDimensions | null;
   chat: ChatHealthSnapshot | null;
   shouldRestart: boolean;
+  /** The root-cause classification when shouldRestart is true. null when healthy. */
+  reason: HealthFailureReason | null;
   /** True when the renderer has queued messages but hasn't placed any for RENDERER_STUCK_THRESHOLD_MS. */
   isRendererStuck: boolean;
 }
@@ -201,6 +225,19 @@ export class RuntimeManager {
    *  After MAX_CONSECUTIVE_REFRESHES, escalate to a full session restart. */
   private consecutiveRefreshFailures = 0;
 
+  /** Timestamps (epoch ms) of recent watchdog-triggered restarts. Rolling window. */
+  private recentRestartTimestamps: number[] = [];
+
+  /** Consecutive watchdog restarts without a stable session. Reset on successful start. */
+  private consecutiveWatchdogRestarts = 0;
+
+  /** Timer handle for deferred (cooldown) restart. null when no deferred restart is pending. */
+  private restartTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** Timestamp when dimensions were first observed as null (epoch ms).
+   *  Reset when dimensions become non-null. Used for overlay-not-renderable grace period. */
+  private dimensionsNullSince: number | null = null;
+
   private get isDisposedState(): boolean {
     return this.state === 'disposed' || this.state === 'restarting' || this.state === 'destroyed';
   }
@@ -265,6 +302,12 @@ export class RuntimeManager {
   destroy(): void {
     if (this.state === 'destroyed') {
       return;
+    }
+
+    // Cancel any deferred restart timer
+    if (this.restartTimer !== null) {
+      clearTimeout(this.restartTimer);
+      this.restartTimer = null;
     }
 
     this.clearScheduledReconcile();
@@ -410,7 +453,12 @@ export class RuntimeManager {
     }
 
     this.resetStartFailures();
-    log.info('runtime.session.started');
+    // Reset watchdog restart counter on successful session start so cooldown
+    // does not ratchet across unrelated page navigations or manual restarts.
+    this.consecutiveWatchdogRestarts = 0;
+    // session.started is logged by the respective restart path:
+    // - startSession line ~658 for full restarts
+    // - handleSessionRestart for chat-only restarts
   }
 
   private handleSessionRestart(reason: RuntimeSessionRestartReason): void {
@@ -426,12 +474,40 @@ export class RuntimeManager {
     // Exit standby mode if active — prevents standby leak after stream detected.
     this.standbyController?.exit();
 
-    // Soft restart: keep Overlay + Canvas + BacklogController alive,
-    // restart only the chat source chain. This avoids visible UI flicker
-    // and duplicates the lightweight retry that replay sources already use.
-    this.restartChatSourceSoft();
-    this.resetStartFailures();
-    this.requestReconcile('session-restart');
+    // Determine if the renderer/overlay need recreation.
+    // Chat-only failures can use the lightweight restartChatOnly path
+    // that preserves the overlay, renderer, and backup controller.
+    const health = reason === 'watchdog' ? this.getRuntimeHealthSnapshot() : null;
+    const isRendererStuck = health?.isRendererStuck ?? false;
+
+    if (!isRendererStuck && this.overlay != null && this.renderer != null) {
+      // Lightweight: only restart the chat source chain.
+      // Preserve overlay, renderer, backlog controller.
+      this.state = 'restarting';
+      this.stopChatWatchdog();
+      this.abortController?.abort();
+      this.abortController = new AbortController();
+      this.resetStartFailures();
+
+      void this.restartChatOnly(reason).then((status) => {
+        if (this.isDisposedState) return;
+        if (status === 'started') {
+          this.state = 'active';
+          this.consecutiveWatchdogRestarts = 0;
+          log.info('runtime.session.started');
+        } else {
+          // Chat-only restart failed — escalate to full restart.
+          log.warn('runtime.chat.restart-only-failed', { status });
+          this.disposeActiveSession();
+          this.requestReconcile('session-restart');
+        }
+      });
+    } else {
+      // Full restart: renderer/overlay need recreation.
+      this.restartChatSourceSoft();
+      this.resetStartFailures();
+      this.requestReconcile('session-restart');
+    }
   }
 
   /**
@@ -837,6 +913,55 @@ export class RuntimeManager {
   }
 
   /**
+   * Restart only the chat source chain — preserves overlay, renderer,
+   * and backlog controller.  For chat-only failures (chat-source-stopped,
+   * chat-source-stale) where the renderer and DOM are still healthy.
+   *
+   * Unlike restartChatSourceSoft + reconcileOnce + startSession, this does
+   * NOT destroy or recreate the overlay or renderer.
+   */
+  private async restartChatOnly(reason: string): Promise<ChatSourceStartStatus> {
+    const signal = this.abortController.signal;
+    log.info('runtime.chat.restart-only', { reason });
+
+    // Stop the old chat source chain
+    this.fetchInterceptorUnsubscribe?.();
+    this.fetchInterceptorUnsubscribe = null;
+
+    this.domWatcherUnsubscribe?.();
+    this.domWatcherUnsubscribe = null;
+
+    this.chatSource?.stop();
+    this.chatSource = null;
+
+    // Clear session dedup so messages from the new polling aren't filtered
+    this.sessionDedup.clear();
+
+    // Clear the message bus so the new chat source starts fresh
+    this.messageBus?.destroy();
+    this.messageBus = null;
+
+    // Start a fresh chat source using the existing overlay/renderer
+    const chatStarted = await this.startChatSource(signal);
+    throwIfAborted(signal);
+
+    if (chatStarted !== 'started') {
+      return chatStarted;
+    }
+
+    // Resume renderer if it was paused
+    this.renderer?.resume();
+    this.renderer?.resumeRenderLoop();
+
+    // Restart watchdog + foreground listeners
+    this.stopChatWatchdog();
+    this.startChatWatchdog();
+
+    log.info('runtime.chat.restart-only-done');
+    return 'started';
+  }
+
+  /**
    * Route a batch of chat messages through dedup, backlog controller,
    * and renderer.  Subscribed to the MessageBus in startSession().
    */
@@ -1036,6 +1161,16 @@ export class RuntimeManager {
     const dimensions = this.overlay?.getDimensions();
     const renderable = (container?.isConnected ?? false) && dimensions != null;
 
+    // Track when dimensions first became null for the grace period.
+    // Reset when dimensions return to non-null (e.g. SPA layout settle).
+    if (!renderable && container?.isConnected) {
+      if (this.dimensionsNullSince === null) {
+        this.dimensionsNullSince = now;
+      }
+    } else {
+      this.dimensionsNullSince = null;
+    }
+
     // ── Renderer stuck detection ──
     // Detects the case where the chat source is healthy (messages arriving)
     // but the renderer has silently stopped rendering them (queue growing,
@@ -1056,7 +1191,15 @@ export class RuntimeManager {
 
     // Pre-live standby has no chat source — never restart from health checks.
     if (this.standbyController.isStandby()) {
-      return { idleDurationMs: 0, renderable, chat: null, shouldRestart: false, isRendererStuck };
+      return {
+        idleDurationMs: 0,
+        renderable,
+        dimensions: dimensions ?? null,
+        reason: null,
+        chat: null,
+        shouldRestart: false,
+        isRendererStuck,
+      };
     }
 
     // When the video is paused, chat is intentionally idle — don't treat
@@ -1074,17 +1217,47 @@ export class RuntimeManager {
     const isChatInBackoff = chat?.isInBackoff ?? false;
 
     const isVeryLongIdle = idleDurationMs >= ABSOLUTE_MAX_IDLE_RESTART_MS;
-    const shouldRestart =
-      isVeryLongIdle ||
-      (!isVideoPaused &&
-        !isChatInBackoff &&
-        (!renderable ||
-          idleDurationMs >= LONG_IDLE_RESTART_MS ||
-          (this.state === 'active' &&
-            chat != null &&
-            (!chat.observerAlive || !chat.recentlyActive))));
+    const isLongIdle = idleDurationMs >= LONG_IDLE_RESTART_MS;
+    const isNormalIdle =
+      this.state === 'active' && chat != null && (!chat.observerAlive || !chat.recentlyActive);
 
-    return { idleDurationMs, renderable, chat, shouldRestart, isRendererStuck };
+    // Classify the root cause for later diagnostic logging.
+    let reason: HealthFailureReason | null = null;
+
+    if (isVeryLongIdle) {
+      reason = 'very-long-idle';
+    } else if (!isVideoPaused && !isChatInBackoff) {
+      if (!renderable) {
+        reason = 'overlay-not-renderable';
+      } else if (isLongIdle) {
+        reason = 'chat-source-stale';
+      } else if (isNormalIdle) {
+        reason = chat?.observerAlive ? 'chat-source-stale' : 'chat-source-stopped';
+      }
+    }
+
+    // Grace period for 0×0 dimensions: suppress overlay-not-renderable
+    // until DIMENSIONS_NULL_GRACE_MS has elapsed. YouTube SPA transitions
+    // and player layout init can briefly yield 0×0 — the ResizeObserver
+    // will detect layout settle and fire an update without a restart.
+    if (reason === 'overlay-not-renderable' && this.dimensionsNullSince !== null) {
+      const nullDuration = now - this.dimensionsNullSince;
+      if (nullDuration < DIMENSIONS_NULL_GRACE_MS) {
+        reason = null;
+      }
+    }
+
+    const shouldRestart = reason !== null;
+
+    return {
+      idleDurationMs,
+      renderable,
+      dimensions: dimensions ?? null,
+      reason,
+      chat,
+      shouldRestart,
+      isRendererStuck,
+    };
   }
 
   private requestManagedRestart(reason: RuntimeSessionRestartReason): void {
@@ -1092,14 +1265,71 @@ export class RuntimeManager {
       return;
     }
 
+    const now = Date.now();
+
+    // Clean stale entries from the rolling window
+    this.recentRestartTimestamps = this.recentRestartTimestamps.filter(
+      (t) => now - t < RESTART_WINDOW_MS
+    );
+
+    const recentCount = this.recentRestartTimestamps.length;
+    this.recentRestartTimestamps.push(now);
+
+    // First restart: immediate
+    if (recentCount === 0) {
+      this.consecutiveWatchdogRestarts = 1;
+    } else {
+      this.consecutiveWatchdogRestarts++;
+    }
+
+    // Hard cap: stop auto-restart, leave session in current state.
+    // The user can manually restart via the status bar click handler.
+    if (this.consecutiveWatchdogRestarts > MAX_WATCHDOG_RESTARTS) {
+      log.warn('runtime.restart.max-reached', {
+        consecutiveRestarts: this.consecutiveWatchdogRestarts - 1,
+      });
+      return;
+    }
+
+    // Compute the cooldown delay for this restart attempt
+    const backoffIndex = Math.min(
+      this.consecutiveWatchdogRestarts - 1,
+      RESTART_BACKOFF_DELAYS_MS.length - 1
+    );
+    // Clamped by Math.min above; safe non-null assertion.
+    const delayMs = RESTART_BACKOFF_DELAYS_MS[backoffIndex]!;
+
+    log.info('runtime.restart.scheduled', {
+      reason,
+      attempt: this.consecutiveWatchdogRestarts,
+      delayMs,
+    });
+
     // Clear watchdog synchronously before state transition so the interval
     // callback cannot fire after we've moved to 'restarting' and trigger
     // a double restart.
     this.stopChatWatchdog();
 
     this.state = 'restarting';
-    log.info('runtime.restart.requested', { reason });
-    this.handleSessionRestart(reason);
+
+    if (delayMs > 0) {
+      // Clear any previously deferred restart timer
+      if (this.restartTimer !== null) {
+        clearTimeout(this.restartTimer);
+      }
+      this.restartTimer = setTimeout(() => {
+        this.restartTimer = null;
+        if (this.isDisposedState) return;
+        log.info('runtime.restart.requested', {
+          reason,
+          attempt: this.consecutiveWatchdogRestarts,
+        });
+        this.handleSessionRestart(reason);
+      }, delayMs);
+    } else {
+      log.info('runtime.restart.requested', { reason });
+      this.handleSessionRestart(reason);
+    }
   }
 
   private startForegroundListeners(): void {
@@ -1315,7 +1545,11 @@ export class RuntimeManager {
           // refresh clears state but can't help — the canvas is
           // unrecoverable.  Trigger a fallback to main-thread rendering.
           if (this.renderer != null && !this.renderer.isWorkerAlive()) {
-            log.warn('runtime.worker.dead');
+            log.warn('runtime.worker.dead', {
+              queueLength: this.renderer.getQueueLength(),
+              activeMessageCount: this.renderer.getActiveMessageCount(),
+              msSinceLastRenderActivity: this.renderer.getMsSinceLastRenderActivity(),
+            });
             this.renderer.fallbackToMainThread('worker-dead');
             this.consecutiveRefreshFailures = 0;
             return;
@@ -1342,7 +1576,22 @@ export class RuntimeManager {
         this.consecutiveRefreshFailures = 0;
 
         if (health.shouldRestart) {
-          log.info('runtime.health.failed');
+          log.info('runtime.health.failed', {
+            reason: health.reason,
+            state: this.state,
+            idleDurationMs: health.idleDurationMs,
+            renderable: health.renderable,
+            dimensions: health.dimensions,
+            chat: health.chat
+              ? {
+                  observerAlive: health.chat.observerAlive,
+                  recentlyActive: health.chat.recentlyActive,
+                  consecutiveErrors: health.chat.consecutiveErrors,
+                  isInBackoff: health.chat.isInBackoff,
+                }
+              : null,
+            isRendererStuck: health.isRendererStuck,
+          });
           this.requestManagedRestart('watchdog');
           return;
         }
