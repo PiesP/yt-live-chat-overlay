@@ -215,6 +215,22 @@ export class TranslationService {
             });
           },
         })) ?? null;
+
+      // Guard: if configure() was called with enabled=false during the
+      // async create(), destroy the translator to prevent instance leaks.
+      // A disable concurrent with create() would leave this.translator
+      // non-null while this.enabled is false, leaking a Chrome Translator
+      // slot (10-instance limit per browsing context).
+      if (!this.enabled) {
+        this.translator?.destroy();
+        this.translator = null;
+        this.currentTarget = null;
+        this.currentSource = null;
+        this.pendingSource = null;
+        this.pendingTarget = null;
+        return;
+      }
+
       this.currentTarget = targetLanguage;
       this.currentSource = sourceLanguage;
       this.pendingSource = null;
