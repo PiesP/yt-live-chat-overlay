@@ -54,3 +54,5 @@ preferFrozenLockfile: true
 autoInstallPeers: true
 strictPeerDependencies: false
 preferOffline: true
+allowBuilds:
+  canvas: true

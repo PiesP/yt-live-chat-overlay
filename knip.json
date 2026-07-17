@@ -14,7 +14,7 @@
     "@app-types": ["src/types/index"],
     "@platform/*": ["src/platform/*"]
   },
-  "ignore": ["test/**", "extension/**", "dist*/**"],
+  "ignore": ["extension/**", "dist*/**", "test/**"],
   "ignoreBinaries": ["e2e"],
   "ignoreExportsUsedInFile": true
 }

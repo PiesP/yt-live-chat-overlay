@@ -1,0 +1,13 @@
+# Dependencies
+node_modules/
+
+# TypeScript
+*.tsbuildinfo
+.tsbuildinfo.test
+
+# Coverage
+coverage/
+
+# Test artifacts
+test-results/
+.stryker-tmp/
