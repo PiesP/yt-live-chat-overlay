@@ -278,21 +278,28 @@ export class CanvasRenderer extends RendererBase {
     this.invFadeDuration = computeInvFadeDuration(settings.fadeDurationMs);
     this.translationBatchSize = settings.translationBatchSize;
     this.translationService = new TranslationService();
-    // Initialize language detection pipeline for 'auto' source
-    this.languageDetector = new LanguageDetectorService();
-    this.channelMemory = new ChannelLanguageMemory();
-    void this.languageDetector.initialize().catch((err: unknown) => {
-      log.debug('renderer.translation.init-failed', {
-        reason: 'language-detector',
-        error: String(err),
+    // Initialize language detection pipeline for 'auto' source.
+    // Skip entirely when translation is disabled — avoids the
+    // translation.detector.api-mismatch warning spam from the watchdog loop.
+    if (settings.translationEnabled) {
+      this.languageDetector = new LanguageDetectorService();
+      this.channelMemory = new ChannelLanguageMemory();
+      void this.languageDetector.initialize().catch((err: unknown) => {
+        log.debug('renderer.translation.init-failed', {
+          reason: 'language-detector',
+          error: String(err),
+        });
+        // Set to null so performSourceDetection() can retry later
+        this.languageDetector = null;
       });
-      // Set to null so performSourceDetection() can retry later
+    } else {
       this.languageDetector = null;
-    });
+      this.channelMemory = null;
+    }
 
     // Check channel memory for cached language
     const channelKey = ChannelLanguageMemory.keyFromUrl(location.href);
-    const cachedSource = channelKey ? this.channelMemory.get(channelKey) : undefined;
+    const cachedSource = channelKey ? this.channelMemory?.get(channelKey) : undefined;
 
     void this.translationService
       .configure({
