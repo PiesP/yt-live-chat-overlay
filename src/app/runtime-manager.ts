@@ -1481,11 +1481,28 @@ export class RuntimeManager {
         return;
       }
 
-      // After a hidden period, check if the renderer became stuck while
-      // we were away (e.g., Worker crashed during OffscreenCanvas freeze).
-      // The watchdog would also catch this, but only on its 15-second
-      // interval — users see a blank screen until the next tick.
-      // Detect and recover immediately.
+      // After a hidden period, log renderer and chat state for diagnostics.
+      // Helps identify which component is slow to recover on tab return.
+      if (this.renderer != null) {
+        log.debug('runtime.foreground.renderer-state', {
+          activeMessages: this.renderer.getActiveMessageCount(),
+          queueLength: this.renderer.getQueueLength(),
+          msSinceLastRender: this.renderer.getMsSinceLastRenderActivity(),
+          workerAlive: this.renderer.isWorkerAlive(),
+          videoPaused: this.renderer.isVideoPaused,
+        });
+      }
+      if (this.chatSource != null) {
+        const csHealth = this.chatSource.getHealthSnapshot({
+          activeTimeoutMs: CHAT_STALL_TIMEOUT_MS,
+        });
+        log.debug('runtime.foreground.chat-state', {
+          observerAlive: csHealth.observerAlive,
+          recentlyActive: csHealth.recentlyActive,
+          consecutiveErrors: csHealth.consecutiveErrors,
+          isInBackoff: csHealth.isInBackoff,
+        });
+      }
       const health = this.getRuntimeHealthSnapshot();
       if (health.isRendererStuck) {
         if (this.renderer != null && !this.renderer.isWorkerAlive()) {
