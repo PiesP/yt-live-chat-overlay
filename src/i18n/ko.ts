@@ -10,6 +10,7 @@ export const KO: Record<string, string> = {
 
   // ── Aria labels / misc ──
   'Live chat overlay': 'Live chat overlay',
+  Paused: '일시정지',
   'Interface language changed to': '인터페이스 언어가 변경되었습니다: ',
 
   // ── Canvas connection status ──

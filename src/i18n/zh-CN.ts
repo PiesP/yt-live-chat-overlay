@@ -10,6 +10,7 @@ export const ZH_CN: Record<string, string> = {
 
   // ── Aria labels / misc ──
   'Live chat overlay': 'Live chat overlay',
+  Paused: '已暂停',
   'Interface language changed to': '界面语言已更改为：',
 
   // ── Canvas connection status ──

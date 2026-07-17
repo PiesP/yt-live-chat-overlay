@@ -10,6 +10,7 @@ export const ES: Record<string, string> = {
 
   // ── Aria labels / misc ──
   'Live chat overlay': 'Live chat overlay',
+  Paused: 'Pausado',
   'Interface language changed to': 'Idioma de interfaz cambiado a: ',
 
   // ── Canvas connection status ──

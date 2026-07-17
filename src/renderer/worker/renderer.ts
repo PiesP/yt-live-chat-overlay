@@ -408,6 +408,7 @@ export class WorkerRenderer {
   private animFrameId: number | null = null;
   private isDestroyed = false;
   private isPaused = false;
+  private isUserPaused = false;
   private pauseStartTime = 0;
   private antiBlockStartTime = 0;
   private invFadeMs = 0;
@@ -608,6 +609,15 @@ export class WorkerRenderer {
             }
             break;
           }
+          case 'setUserPaused':
+            this.isUserPaused = (data.paused as boolean) ?? false;
+            // Restart render loop if unpausing while not otherwise paused
+            if (!this.isUserPaused && !this.isPaused && !this.isDestroyed) {
+              if (this.animFrameId === null) {
+                this.startRenderLoop();
+              }
+            }
+            break;
           case 'destroy':
             this.handleDestroy();
             break;
@@ -1034,7 +1044,7 @@ export class WorkerRenderer {
   }
 
   private renderFrame(): void {
-    if (!this.ctx || !this.canvas || !this.config || this.isPaused) return;
+    if (!this.ctx || !this.canvas || !this.config || this.isPaused || this.isUserPaused) return;
 
     // Detect OffscreenCanvas context loss (GPU driver reset, etc.).
     // Signal the main thread so it can fall back to main-thread rendering.

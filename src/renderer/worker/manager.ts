@@ -551,6 +551,11 @@ export class RenderWorkerManager {
     sendSetPausedToWorker({ worker: this.worker }, paused);
   }
 
+  /** Inform the render worker of a user-initiated pause (Space key). */
+  setUserPaused(paused: boolean): void {
+    this.worker?.postMessage({ type: 'setUserPaused', paused });
+  }
+
   /** Send replay mode state to the worker. */
   sendReplayModeToWorker(isReplayMode: boolean): void {
     if (!this.worker) return;

@@ -77,6 +77,12 @@ export class Overlay {
   private static readonly LIVE_REGION_DEBOUNCE_MS = 500;
   private static readonly SEEN_SNIPPET_MAX = 200;
 
+  /** User-initiated pause (Space key toggle). Independent from tab/video pause. */
+  private isUserPaused = false;
+  private readonly userPauseCallbacks = new Set<(paused: boolean) => void>();
+  private pauseIndicatorEl: HTMLDivElement | null = null;
+  private keyboardHandler: ((e: KeyboardEvent) => void) | null = null;
+
   /**
    * Find player container
    */
@@ -272,6 +278,9 @@ export class Overlay {
     this.liveRegion.style.cssText = SCREEN_READER_CSS;
     this.container.appendChild(this.liveRegion);
 
+    // Attach keyboard handler for Space-key pause toggle
+    this.attachKeyboardHandler();
+
     log.info('app.overlay.created');
     return true;
   }
@@ -379,6 +388,66 @@ export class Overlay {
     return this.dimensions;
   }
 
+  /**
+   * Toggle user-initiated pause. Returns new state.
+   * Press Space to pause/resume overlay scrolling.
+   * Independent from tab visibility and video pause.
+   */
+  toggleUserPause(): boolean {
+    this.isUserPaused = !this.isUserPaused;
+    for (const cb of this.userPauseCallbacks) {
+      try {
+        cb(this.isUserPaused);
+      } catch {
+        // Ignore errors in individual callbacks
+      }
+    }
+    this.showPauseIndicator(this.isUserPaused);
+    return this.isUserPaused;
+  }
+
+  /** Subscribe to user-pause state changes. Returns unsubscribe function. */
+  onUserPauseChanged(callback: (paused: boolean) => void): () => void {
+    this.userPauseCallbacks.add(callback);
+    return () => {
+      this.userPauseCallbacks.delete(callback);
+    };
+  }
+
+  /** Show/hide the pause indicator in the overlay corner. */
+  private showPauseIndicator(show: boolean): void {
+    if (!this.container) return;
+    if (show) {
+      if (!this.pauseIndicatorEl) {
+        const el = document.createElement('div');
+        el.textContent = t('Paused');
+        el.style.cssText =
+          'position:absolute;top:8px;right:8px;z-index:100;background:rgba(0,0,0,0.7);color:#fff;font:14px/1.4 sans-serif;padding:4px 10px;border-radius:4px;pointer-events:none';
+        this.container.appendChild(el);
+        this.pauseIndicatorEl = el;
+      }
+      this.pauseIndicatorEl.style.display = 'block';
+    } else if (this.pauseIndicatorEl) {
+      this.pauseIndicatorEl.style.display = 'none';
+    }
+  }
+
+  /** Attach keyboard handler for Space key pause toggle. */
+  private attachKeyboardHandler(): void {
+    this.keyboardHandler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if ((e.target as HTMLElement)?.isContentEditable) return;
+
+      if (e.code === 'Space' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        this.toggleUserPause();
+      }
+    };
+    document.addEventListener('keydown', this.keyboardHandler);
+  }
+
   onDimensionsChanged(callback: OverlayDimensionsChangeCallback): () => void {
     this.dimensionChangeCallbacks.add(callback);
     return () => {
@@ -435,6 +504,18 @@ export class Overlay {
 
     // Clear dedup set to free memory
     this.seenSnippetKeys.clear();
+
+    // Detach keyboard handler
+    if (this.keyboardHandler) {
+      document.removeEventListener('keydown', this.keyboardHandler);
+      this.keyboardHandler = null;
+    }
+
+    // Remove pause indicator
+    if (this.pauseIndicatorEl) {
+      this.pauseIndicatorEl.remove();
+      this.pauseIndicatorEl = null;
+    }
 
     log.debug('app.overlay.destroyed');
   }

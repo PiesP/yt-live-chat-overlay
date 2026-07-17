@@ -54,6 +54,8 @@ export abstract class RendererBase {
 
   protected isPaused = false;
   protected videoPaused = false;
+  /** User-initiated pause (Space key). Blocks rendering independently. */
+  protected isUserPaused = false;
 
   /** Currently active lane density factor — cached to detect burst-driven changes. */
   protected currentLaneDensityFactor = 1.0;
@@ -162,6 +164,11 @@ export abstract class RendererBase {
   /** Set by RuntimeManager when the session uses ReplayChatSource. */
   setReplayMode(enabled: boolean): void {
     this.replayMode = enabled;
+  }
+
+  /** Set user-initiated pause state (Space key toggle). */
+  setUserPaused(paused: boolean): void {
+    this.isUserPaused = paused;
   }
 
   // ── Shared state machine ──────────────────────────────────────────────

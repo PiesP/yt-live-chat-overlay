@@ -120,6 +120,7 @@ export class CanvasRenderer extends RendererBase {
   /** Pre-computed 1/fadeDurationMs — corrected in constructor from settings. */
   private invFadeDuration = 0;
   private overlayDimensionsUnsubscribe: (() => void) | null = null;
+  private overlayUserPauseUnsubscribe: (() => void) | null = null;
   /** Debounce flag for emoji-load-triggered rAF restarts. */
   private needsRerender = false;
   /** Image fetch manager for loading and caching emoji, author photos, and stickers. */
@@ -424,6 +425,14 @@ export class CanvasRenderer extends RendererBase {
       if (d && this.canvas) {
         this.applyDevicePixelRatio(d);
         this.laneAllocator.reset(d);
+      }
+    });
+
+    // Forward user-pause toggle to both main-thread and worker renderers
+    this.overlayUserPauseUnsubscribe = overlay.onUserPauseChanged((paused) => {
+      this.setUserPaused(paused);
+      if (this.workerManager.isActive) {
+        this.workerManager.setUserPaused(paused);
       }
     });
 
@@ -821,6 +830,7 @@ export class CanvasRenderer extends RendererBase {
     if (!canvas.isConnected) return;
     if (this.isPaused) return;
     if (this.isVideoPaused) return;
+    if (this.isUserPaused) return;
     // When Worker mode is active (OffscreenCanvas transferred to worker),
     // the main-thread ctx is still a non-null reference but is detached.
     // Canvas operations on a detached context would throw silently.
@@ -1883,6 +1893,7 @@ export class CanvasRenderer extends RendererBase {
     this.workerManager.destroy();
     this.imageFetchManager.destroy();
     this.overlayDimensionsUnsubscribe?.();
+    this.overlayUserPauseUnsubscribe?.();
     // Clean up prefers-reduced-motion listener
     if (this.reducedMotionQuery && this.reducedMotionListener) {
       this.reducedMotionQuery.removeEventListener('change', this.reducedMotionListener);

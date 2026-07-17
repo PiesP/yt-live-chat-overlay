@@ -10,6 +10,7 @@ export const JA: Record<string, string> = {
 
   // ── Aria labels / misc ──
   'Live chat overlay': 'Live chat overlay',
+  Paused: '一時停止',
   'Interface language changed to': 'インターフェース言語が変更されました: ',
 
   // ── Canvas connection status ──
