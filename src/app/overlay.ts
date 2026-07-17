@@ -72,7 +72,10 @@ export class Overlay {
   private liveRegion: HTMLDivElement | null = null;
   /** Debounce timer for live region updates. */
   private liveRegionTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Set of recently-seen snippet hashes to prevent re-announcing duplicates. */
+  private seenSnippetKeys = new Set<string>();
   private static readonly LIVE_REGION_DEBOUNCE_MS = 500;
+  private static readonly SEEN_SNIPPET_MAX = 200;
 
   /**
    * Find player container
@@ -309,9 +312,14 @@ export class Overlay {
   /**
    * Update the aria-live region with snippets from visible canvas messages.
    * Called by the renderer so screen readers, find-in-page, and translation
-   * tools can discover canvas-rendered text content. Debounced to avoid
-   * flooding the accessibility tree during rapid chat.
-   * Mirrors the last N visible messages as a simple text list.
+   * tools can discover canvas-rendered text content.
+   *
+   * Appends only new (previously unseen) snippets as individual DOM
+   * elements so screen readers announce only fresh content instead of
+   * re-reading the entire visible-message list every cycle.
+   *
+   * Debounced to 500ms to avoid flooding the accessibility tree during
+   * rapid chat.
    */
   updateLiveRegion(snippets: string[]): void {
     if (!this.liveRegion) return;
@@ -320,12 +328,47 @@ export class Overlay {
     }
     this.liveRegionTimer = setTimeout(() => {
       this.liveRegionTimer = null;
-      // Update text content with pipe-separated snippets.
-      // Defend against TOCTOU: liveRegion may have been set to null by
-      // destroy() between the outer null check and this callback.
-      if (this.liveRegion) {
-        this.liveRegion.textContent = snippets.join(' | ');
+      if (!this.liveRegion) return;
+
+      // Filter to only new snippets (not previously announced).
+      const newSnippets: string[] = [];
+      for (const snippet of snippets) {
+        // Use first 40 chars as lightweight dedup key.
+        const key = snippet.slice(0, 40);
+        if (!this.seenSnippetKeys.has(key)) {
+          newSnippets.push(snippet);
+          this.seenSnippetKeys.add(key);
+          // Trim oldest entries when set grows too large.
+          if (this.seenSnippetKeys.size > Overlay.SEEN_SNIPPET_MAX) {
+            let removed = 0;
+            for (const v of this.seenSnippetKeys) {
+              this.seenSnippetKeys.delete(v);
+              if (++removed >= 50) break;
+            }
+          }
+        }
       }
+
+      if (newSnippets.length === 0) return;
+
+      // Append new snippets as individual <p> elements so screen readers
+      // announce only the new content, not the entire list.
+      const frag = document.createDocumentFragment();
+      for (const snippet of newSnippets) {
+        const p = document.createElement('p');
+        p.textContent = snippet;
+        frag.appendChild(p);
+      }
+
+      // Keep the live region manageable: remove old children if too many.
+      const maxChildren = 30;
+      while (this.liveRegion.children.length >= maxChildren) {
+        const first = this.liveRegion.firstElementChild;
+        if (first) first.remove();
+        else break;
+      }
+
+      this.liveRegion.appendChild(frag);
     }, Overlay.LIVE_REGION_DEBOUNCE_MS);
   }
 
@@ -389,6 +432,9 @@ export class Overlay {
       clearTimeout(this.liveRegionTimer);
       this.liveRegionTimer = null;
     }
+
+    // Clear dedup set to free memory
+    this.seenSnippetKeys.clear();
 
     log.debug('app.overlay.destroyed');
   }
