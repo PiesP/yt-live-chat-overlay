@@ -213,6 +213,11 @@ export class LiveChatSource extends ChatSource {
 
       throwIfAborted(signal);
 
+      // Re-check pause state after sleep — the tab may have been hidden
+      // during the delay. Without this guard, the next fetch+emitBatch
+      // would deliver messages while the renderer is paused.
+      await this.waitWhilePaused(signal);
+
       const continuation = this.liveContinuation;
       if (!continuation) {
         await this.refreshLiveContinuation(signal);
