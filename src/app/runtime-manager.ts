@@ -9,7 +9,7 @@ import {
 import { OVERLAY_SELECTOR, Overlay } from '@app/overlay';
 import { StandbyController } from '@app/standby-controller';
 import { VideoPauseController } from '@app/video-pause-controller';
-import type { ChatMessage, OverlaySettings, Pauseable } from '@app-types';
+import type { ChatMessage, OverlayDimensions, OverlaySettings, Pauseable } from '@app-types';
 import type { DomWatcherUnsubscribe } from '@chat/dom-watcher';
 import { installDomChatWatcher } from '@chat/dom-watcher';
 import type { InterceptorUnsubscribe } from '@chat/fetch-interceptor';
@@ -95,11 +95,22 @@ const MAX_CONSECUTIVE_REFRESHES = 2;
 
 export type RuntimeSessionRestartReason = 'foreground-return' | 'watchdog' | 'standby-resolved';
 
+/** Root-cause classification for watchdog-triggered health failures. */
+type HealthFailureReason =
+  | 'chat-source-stopped'
+  | 'chat-source-stale'
+  | 'overlay-not-renderable'
+  | 'renderer-stuck'
+  | 'very-long-idle';
+
 interface RuntimeHealth {
   idleDurationMs: number;
   renderable: boolean;
+  dimensions: OverlayDimensions | null;
   chat: ChatHealthSnapshot | null;
   shouldRestart: boolean;
+  /** The root-cause classification when shouldRestart is true. null when healthy. */
+  reason: HealthFailureReason | null;
   /** True when the renderer has queued messages but hasn't placed any for RENDERER_STUCK_THRESHOLD_MS. */
   isRendererStuck: boolean;
 }
@@ -1056,7 +1067,15 @@ export class RuntimeManager {
 
     // Pre-live standby has no chat source — never restart from health checks.
     if (this.standbyController.isStandby()) {
-      return { idleDurationMs: 0, renderable, chat: null, shouldRestart: false, isRendererStuck };
+      return {
+        idleDurationMs: 0,
+        renderable,
+        dimensions: dimensions ?? null,
+        reason: null,
+        chat: null,
+        shouldRestart: false,
+        isRendererStuck,
+      };
     }
 
     // When the video is paused, chat is intentionally idle — don't treat
@@ -1074,17 +1093,38 @@ export class RuntimeManager {
     const isChatInBackoff = chat?.isInBackoff ?? false;
 
     const isVeryLongIdle = idleDurationMs >= ABSOLUTE_MAX_IDLE_RESTART_MS;
-    const shouldRestart =
-      isVeryLongIdle ||
-      (!isVideoPaused &&
-        !isChatInBackoff &&
-        (!renderable ||
-          idleDurationMs >= LONG_IDLE_RESTART_MS ||
-          (this.state === 'active' &&
-            chat != null &&
-            (!chat.observerAlive || !chat.recentlyActive))));
+    const isLongIdle = idleDurationMs >= LONG_IDLE_RESTART_MS;
+    const isNormalIdle =
+      this.state === 'active' &&
+      chat != null &&
+      (!chat.observerAlive || !chat.recentlyActive);
 
-    return { idleDurationMs, renderable, chat, shouldRestart, isRendererStuck };
+    // Classify the root cause for later diagnostic logging.
+    let reason: HealthFailureReason | null = null;
+
+    if (isVeryLongIdle) {
+      reason = 'very-long-idle';
+    } else if (!isVideoPaused && !isChatInBackoff) {
+      if (!renderable) {
+        reason = 'overlay-not-renderable';
+      } else if (isLongIdle) {
+        reason = 'chat-source-stale';
+      } else if (isNormalIdle) {
+        reason = chat?.observerAlive ? 'chat-source-stale' : 'chat-source-stopped';
+      }
+    }
+
+    const shouldRestart = reason !== null;
+
+    return {
+      idleDurationMs,
+      renderable,
+      dimensions: dimensions ?? null,
+      reason,
+      chat,
+      shouldRestart,
+      isRendererStuck,
+    };
   }
 
   private requestManagedRestart(reason: RuntimeSessionRestartReason): void {
