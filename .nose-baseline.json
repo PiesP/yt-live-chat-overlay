@@ -4,26 +4,26 @@
   "baseline_kind": "accepted-duplication",
   "families": [
     {
-      "id": "7cfb0da3d530d0de",
-      "note": "local duplication — extract a method from the repeated block",
+      "id": "1d60fa5efc9ca926",
+      "note": "local duplication — extract a method from the repeated block (drainQueueAsync vs drainQueueSync)",
       "members": [
         {
-          "id": "3b1e788c96d75567",
+          "id": "b14bd593f7a777a3",
           "source_digest": "fnv1a64:c847a62cff4b91c6",
           "file": "src/renderer/canvas-renderer.ts",
           "lang": "typescript",
-          "start_line": 1139,
-          "end_line": 1195,
+          "start_line": 1141,
+          "end_line": 1197,
           "kind": "Block",
           "is_fragment": false
         },
         {
-          "id": "553637ed286dd3cc",
+          "id": "c361bac04690aad8",
           "source_digest": "fnv1a64:ecdeb99d330cdde2",
           "file": "src/renderer/canvas-renderer.ts",
           "lang": "typescript",
-          "start_line": 1026,
-          "end_line": 1079,
+          "start_line": 1028,
+          "end_line": 1081,
           "kind": "Block",
           "is_fragment": false
         }
