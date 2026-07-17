@@ -1712,8 +1712,12 @@ export class RuntimeManager {
   private replayLatestMessages(renderer: RendererBase, limit = RECENT_MESSAGE_REPLAY_LIMIT): void {
     const latestMessages = this.chatSource?.getLatestMessages(limit) ?? [];
     for (const message of latestMessages) {
-      // sessionDedup check prevents re-rendering messages already shown
-      // before the renderer was reset — their ids survive renderer-level clear operations.
+      // When the video is paused, skip replay without marking the message
+      // id in sessionDedup. Messages will arrive through the normal
+      // addMessage → pause-buffer → onResumeFromVideoPause flow when the
+      // video eventually resumes. Marking the id here would permanently
+      // block re-injection when the renderer is reset during video pause.
+      if (renderer.isVideoPaused) continue;
       if (!this.acceptForRenderer(message)) continue;
       renderer.replayMessage(message);
     }
