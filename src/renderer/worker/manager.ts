@@ -48,6 +48,9 @@ export class RenderWorkerManager {
   static readonly WORKER_CONFIG_KEYS: (keyof OverlaySettings)[] = [
     'speedPxPerSec',
     'fontSize',
+    'fontBaseViewportHeight',
+    'fontMinSize',
+    'fontMaxSize',
     'fontWeight',
     'fontFamily',
     'opacity',

@@ -26,6 +26,9 @@ type NumericSettingLimit = Readonly<{ min: number; max: number; step: number }>;
 const SETTINGS_LIMITS = {
   speedPxPerSec: { min: 50, max: 500, step: 10 },
   fontSize: { min: 14, max: 50, step: 2 },
+  fontBaseViewportHeight: { min: 360, max: 2160, step: 1 },
+  fontMinSize: { min: 10, max: 32, step: 1 },
+  fontMaxSize: { min: 24, max: 72, step: 1 },
   opacity: { min: 0.5, max: 1, step: 0.05 },
   superChatOpacity: { min: 0.35, max: 1, step: 0.05 },
   safeTop: { min: 0, max: 0.25, step: 0.01 },

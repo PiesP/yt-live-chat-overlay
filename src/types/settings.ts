@@ -34,6 +34,9 @@ export interface OverlaySettings {
   danmakuMode: DanmakuMode;
   speedPxPerSec: number;
   fontSize: number;
+  fontBaseViewportHeight: number;
+  fontMinSize: number;
+  fontMaxSize: number;
   opacity: number;
   superChatOpacity: number;
   safeTop: number;
