@@ -72,6 +72,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.4",
+    "@piesp/browser-core": "file:packages/core",
     "@types/node": "^26.1.1",
     "jsdom": "^29.1.1",
     "knip": "^6.26.0",
@@ -79,7 +80,6 @@
     "typescript": "7.0.2",
     "vite": "^8.1.4",
     "vite-plugin-monkey": "^8.0.6",
-    "vitest": "^4.1.10",
-    "@piesp/browser-core": "file:./packages/core"
+    "vitest": "^4.1.10"
   }
 }

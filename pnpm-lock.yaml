@@ -16,7 +16,7 @@ importers:
         specifier: ^2.5.4
         version: 2.5.4
       '@piesp/browser-core':
-        specifier: file:./packages/core
+        specifier: file:packages/core
         version: file:packages/core
       '@types/node':
         specifier: ^26.1.1
