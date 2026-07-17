@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1280">
+  <title>YT Chat Overlay — Visual Settings Test</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0f0f0f;
+      color: #fff;
+      font-family: 'Inter', system-ui, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 24px;
+    }
+    .test-header {
+      text-align: center;
+      margin-bottom: 24px;
+    }
+    .test-header h1 {
+      font-size: 20px;
+      color: #ff4444;
+      margin-bottom: 4px;
+    }
+    .test-header p {
+      font-size: 13px;
+      color: #888;
+    }
+    #movie_player {
+      width: 800px;
+      height: 450px;
+      background: #1a1a1a;
+      border: 2px solid #333;
+      border-radius: 8px;
+      position: relative;
+    }
+    .note {
+      margin-top: 16px;
+      font-size: 12px;
+      color: #555;
+      max-width: 800px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="test-header">
+    <h1>YT Chat Overlay — Settings UI Test</h1>
+    <p>Inject userscript, then click the gear icon (⚙) on the player to open settings</p>
+  </div>
+  <div id="movie_player" class="html5-video-player"></div>
+  <p class="note">This test page overrides location.hostname to trigger the app. The settings panel should load after injecting the bundle.</p>
+<script src="gm-mocks.js"></script>
+<script>
+  // Override location for app detection
+  Object.defineProperty(window, 'location', {
+    value: {
+      hostname: 'www.youtube.com',
+      pathname: '/watch',
+      search: '?v=visual-test',
+      origin: location.origin,
+      href: location.origin + '/watch?v=visual-test',
+    },
+    writable: true,
+    configurable: true,
+  });
+
+  console.log('[Test] Location overridden: www.youtube.com/watch');
+  console.log('[Test] Ready for userscript injection.');
+</script>
+<script src="http://127.0.0.1:8765/dist/yt-live-chat-overlay.dev.user.js"></script>
+</body>
+</html>

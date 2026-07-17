@@ -70,5 +70,3 @@ TESTING.md
 .github/prompts/
 .editorconfig
 
-# Local tests
-test/

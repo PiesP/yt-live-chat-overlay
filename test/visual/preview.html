@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1280">
+  <title>YT Chat Overlay — Settings UI Preview</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0f0f0f;
+      color: #e0e0e0;
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      min-height: 100vh;
+      padding: 32px 24px;
+    }
+    .page-header {
+      text-align: center;
+      margin-bottom: 32px;
+      max-width: 860px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    .page-header h1 {
+      font-size: 22px;
+      font-weight: 600;
+      color: #fff;
+      margin-bottom: 8px;
+    }
+    .page-header .subtitle {
+      font-size: 13px;
+      color: #9aa0a6;
+      max-width: 600px;
+      margin: 0 auto;
+      line-height: 1.5;
+    }
+    .player-wrapper {
+      max-width: 860px;
+      margin: 0 auto;
+    }
+    #movie_player {
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      background: #111;
+      border: 1px solid #333;
+      border-radius: 8px;
+      position: relative;
+      overflow: hidden;
+    }
+    .player-inner {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #555;
+      font-size: 14px;
+    }
+    .steps {
+      max-width: 860px;
+      margin: 32px auto 0;
+      padding: 20px 24px;
+      background: #161616;
+      border: 1px solid #2a2a2a;
+      border-radius: 8px;
+    }
+    .steps h2 {
+      font-size: 15px;
+      margin-bottom: 12px;
+      color: #fff;
+    }
+    .steps ol {
+      padding-left: 20px;
+      font-size: 13px;
+      color: #aaa;
+      line-height: 1.8;
+    }
+    .steps code {
+      background: #222;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-family: 'SF Mono', 'Consolas', monospace;
+      color: #7ec8e3;
+    }
+    .steps .note {
+      margin-top: 12px;
+      padding: 10px 14px;
+      background: #1a1a2e;
+      border-left: 3px solid #5e6ad2;
+      border-radius: 0 4px 4px 0;
+      font-size: 12px;
+      color: #9aa0a6;
+    }
+  </style>
+</head>
+<body>
+  <div class="page-header">
+    <h1>YouTube Live Chat Overlay — Settings UI Preview</h1>
+    <p class="subtitle">
+      Test page for visual inspection of the Settings panel, gear button placement,
+      and chat overlay components. Use in your local environment to verify UI changes.
+    </p>
+  </div>
+
+  <div class="player-wrapper">
+    <div id="movie_player" class="html5-video-player">
+      <div class="player-inner">Video Player Placeholder</div>
+    </div>
+  </div>
+
+  <div class="steps">
+    <h2>How to Preview Settings UI</h2>
+    <ol>
+      <li>Build the project: <code>cd yt-live-chat-overlay &amp;&amp; pnpm build:dev</code></li>
+      <li>Open the project in Chrome as unpacked extension, OR inject via Tampermonkey:</li>
+    </ol>
+    <ul style="padding-left: 20px; font-size: 13px; color: #aaa; margin-top: 8px; line-height: 1.8;">
+      <li><strong>Chrome Extension</strong>: Copy <code>manifest.json</code> and built bundle to an extension folder, then load unpacked in Chrome.</li>
+      <li><strong>Tampermonkey</strong>: From your browser where bundle is accessible, install a userscript that reads the dev bundle and injects it.</li>
+    </ul>
+    <p class="note">
+      <strong>Note:</strong> Live preview on a real YouTube page is required because the bundle must detect
+      the actual youtube.com hostname to initialize. This HTML page provides the DOM structure but cannot
+      fully simulate YouTube&apos;s live chat data.
+    </p>
+    <p class="note" style="margin-top: 8px;">
+      ✨ <strong>Quick test with Playwright:</strong> Navigate to this page, addInitScript with the bundle
+      and location override, then use an existing settings button selector to open the panel.
+    </p>
+    <p class="note" style="margin-top: 8px;">
+      For visual regression tests, run the test file:
+      <code>test/e2e/specs/settings-visual.spec.ts</code> (requires a real YouTube environment or mock).
+    </p>
+  </div>
+</body>
+</html>
