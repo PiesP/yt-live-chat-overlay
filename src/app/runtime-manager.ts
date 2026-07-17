@@ -238,6 +238,11 @@ export class RuntimeManager {
    *  Reset when dimensions become non-null. Used for overlay-not-renderable grace period. */
   private dimensionsNullSince: number | null = null;
 
+  /** Re-entrant guard for handleVisibility(). Both pageshow (non-bfcache) and
+   *  visibilitychange fire on tab return; the second call is a no-op that wastes
+   *  CPU. This flag prevents duplicate execution within the same event cycle. */
+  private visibilityHandled = false;
+
   private get isDisposedState(): boolean {
     return this.state === 'disposed' || this.state === 'restarting' || this.state === 'destroyed';
   }
@@ -547,12 +552,26 @@ export class RuntimeManager {
     //    Worker in off-main-thread mode.
     renderer.resume();
 
-    // 5. Unpause chat source — clear all pause reasons for fresh start
+    // 5. Unpause chat source — clear only visibility pause reason.
+    //    Video pause is owned by VideoPauseController; clearing it here
+    //    would incorrectly mark the chat source as active while the video
+    //    is still paused (user paused → hid tab ≥30s → returned).
     this.chatSource?.setPauseReason('visibility', false);
-    this.chatSource?.setPauseReason('video', false);
 
     // 6. Clear session dedup so re-injected messages aren't blocked
     this.sessionDedup.clear();
+
+    // 6a. Drain accumulated ReplayBuffer messages (BUG-4 fix).
+    //     performOverlayRefresh was only re-injecting getLatestMessages(20)
+    //     from the messageBuffer — ReplayBuffer messages accumulated during
+    //     the hidden period were silently lost for long-hidden (≥30s) tabs.
+    if (this.renderer && this.chatSource instanceof ReplayChatSource) {
+      const pending = this.chatSource.drainPendingMessages();
+      if (pending.length > 0) {
+        this.ensureBacklogController(this.renderer);
+        this.backlogController?.startBacklogInjection(pending);
+      }
+    }
 
     // 7. Re-inject recent messages through backlog controller for smooth restart
     const recentMessages = this.chatSource?.getLatestMessages(20) ?? [];
@@ -1342,6 +1361,7 @@ export class RuntimeManager {
 
     const handleVisibility = (): void => {
       if (document.visibilityState !== 'visible') {
+        this.visibilityHandled = false;
         this.noteHidden();
         this.renderer?.pause();
         this.renderer?.trimBackgroundQueue();
@@ -1349,6 +1369,12 @@ export class RuntimeManager {
         this.chatPanelObserver.pause();
         return;
       }
+
+      // Re-entrant guard: both pageshow (non-bfcache) and visibilitychange
+      // fire on tab return. The second call wastes CPU doing nothing since
+      // the first already performed the full resume sequence.
+      if (this.visibilityHandled) return;
+      this.visibilityHandled = true;
 
       if (this.isDisposedState) {
         return;
@@ -1464,6 +1490,19 @@ export class RuntimeManager {
     };
     window.addEventListener('pageshow', handlePageShow);
     cleanups.push(() => window.removeEventListener('pageshow', handlePageShow));
+
+    // Page Lifecycle 'resume': Chrome may freeze hidden tabs to conserve
+    // memory. When the tab thaws, 'resume' fires but 'visibilitychange'
+    // may not. Treat it the same as a visibility return — validate the
+    // session state and resume if needed.
+    const handleResume = (): void => {
+      if (document.visibilityState === 'visible') {
+        log.info('runtime.page.resume');
+        handleVisibility();
+      }
+    };
+    document.addEventListener('resume', handleResume);
+    cleanups.push(() => document.removeEventListener('resume', handleResume));
 
     this.foregroundCleanup = () => {
       for (const fn of cleanups) {
