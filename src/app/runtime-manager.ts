@@ -1468,6 +1468,26 @@ export class RuntimeManager {
         this.requestManagedRestart('foreground-return');
         return;
       }
+
+      // After a hidden period, check if the renderer became stuck while
+      // we were away (e.g., Worker crashed during OffscreenCanvas freeze).
+      // The watchdog would also catch this, but only on its 15-second
+      // interval — users see a blank screen until the next tick.
+      // Detect and recover immediately.
+      const health = this.getRuntimeHealthSnapshot();
+      if (health.isRendererStuck) {
+        if (this.renderer != null && !this.renderer.isWorkerAlive()) {
+          log.warn('runtime.foreground.worker-dead', {
+            queueLength: this.renderer.getQueueLength(),
+            activeMessageCount: this.renderer.getActiveMessageCount(),
+          });
+          this.renderer.fallbackToMainThread('worker-dead');
+        } else {
+          log.info('runtime.foreground.renderer-stuck');
+          this.performOverlayRefresh('renderer-stuck-foreground');
+        }
+        return;
+      }
     };
 
     // Single handler for both visibilitychange and pageshow — handles
