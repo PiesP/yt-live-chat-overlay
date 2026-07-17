@@ -131,6 +131,49 @@ export class ReplayBuffer {
   }
 
   /**
+   * Drain buffered messages up to (and including) the given offset.
+   * Messages with offsetMs > maxOffsetMs remain in the buffer for later
+   * emission via the normal flushUpTo() path. When maxOffsetMs is omitted,
+   * all messages are drained (equivalent to the old drainAll()).
+   *
+   * Used when returning from a hidden tab state with a replay source.
+   * Draining only messages at or near the current playback position
+   * prevents future messages (e.g., from prefetch) from appearing
+   * before past messages, preserving time ordering.
+   */
+  drainUpTo(maxOffsetMs?: number): ChatMessage[] {
+    if (maxOffsetMs == null) {
+      return this.drainAll();
+    }
+
+    const messages: ChatMessage[] = [];
+    let drainEnd = this.bufferOffset;
+
+    for (let i = this.bufferOffset; i < this.buffer.length; i++) {
+      const item = this.buffer[i];
+      if (!item) continue;
+      if (item.offsetMs > maxOffsetMs) {
+        break; // Buffer is offsetMs-sorted — stop at first future message
+      }
+      messages.push(item.message);
+      drainEnd = i + 1;
+    }
+
+    if (messages.length === 0) return [];
+
+    // Advance offset past drained region, keeping future messages in buffer.
+    this.bufferOffset = drainEnd;
+
+    // Remove drained message IDs from seenIds so they can be re-inserted
+    // if re-fetched (e.g., after a seek during the hidden period).
+    for (const msg of messages) {
+      if (msg.id) this.seenIds.delete(msg.id);
+    }
+
+    return messages;
+  }
+
+  /**
    * Drain all buffered messages regardless of their offsetMs.
    *
    * Returns every unconsumed message currently in the buffer (sorted by

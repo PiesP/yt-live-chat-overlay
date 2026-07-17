@@ -77,7 +77,14 @@ export class ReplayChatSource extends ChatSource {
    * Returns an empty array when the buffer has no pending messages.
    */
   drainPendingMessages(): ChatMessage[] {
-    return this.replayBuffer.drainAll();
+    // Drain messages at or near current playback position + a small
+    // forward buffer (5s). Future messages remain in the buffer for
+    // normal flushUpTo() emission when their offset arrives, preserving
+    // time ordering instead of dumping all prefetched messages at once.
+    const playback = this.getPlaybackSnapshot();
+    const currentOffsetMs = playback?.offsetMs;
+    const maxOffsetMs = currentOffsetMs != null ? currentOffsetMs + 5000 : undefined;
+    return this.replayBuffer.drainUpTo(maxOffsetMs);
   }
 
   protected seedCurrentSession(signal?: AbortSignal): Promise<boolean> {

@@ -801,9 +801,11 @@ export class CanvasRenderer extends RendererBase {
         this.startOffscreenPoll(canvas);
       },
       () => {
-        // Canvas is back on screen — stop poll, resume if paused
+        // Canvas is back on screen — stop poll, resume if paused.
+        // Guard against resuming while the tab is still hidden (rare race
+        // with IntersectionObserver firing during tab transitions).
         this.stopOffscreenPoll();
-        if (this.isPaused) {
+        if (this.isPaused && document.visibilityState !== 'hidden') {
           this.resume();
         }
       }
@@ -819,7 +821,7 @@ export class CanvasRenderer extends RendererBase {
   private startOffscreenPoll(canvas: HTMLCanvasElement): void {
     if (this.offscreenPollCleanup !== null) return;
     this.offscreenPollCleanup = startOffscreenPoll(canvas, () => {
-      if (this.isPaused) {
+      if (this.isPaused && document.visibilityState !== 'hidden') {
         this.resume();
       }
     });
