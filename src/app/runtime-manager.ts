@@ -1095,9 +1095,7 @@ export class RuntimeManager {
     const isVeryLongIdle = idleDurationMs >= ABSOLUTE_MAX_IDLE_RESTART_MS;
     const isLongIdle = idleDurationMs >= LONG_IDLE_RESTART_MS;
     const isNormalIdle =
-      this.state === 'active' &&
-      chat != null &&
-      (!chat.observerAlive || !chat.recentlyActive);
+      this.state === 'active' && chat != null && (!chat.observerAlive || !chat.recentlyActive);
 
     // Classify the root cause for later diagnostic logging.
     let reason: HealthFailureReason | null = null;
@@ -1355,7 +1353,11 @@ export class RuntimeManager {
           // refresh clears state but can't help — the canvas is
           // unrecoverable.  Trigger a fallback to main-thread rendering.
           if (this.renderer != null && !this.renderer.isWorkerAlive()) {
-            log.warn('runtime.worker.dead');
+            log.warn('runtime.worker.dead', {
+              queueLength: this.renderer.getQueueLength(),
+              activeMessageCount: this.renderer.getActiveMessageCount(),
+              msSinceLastRenderActivity: this.renderer.getMsSinceLastRenderActivity(),
+            });
             this.renderer.fallbackToMainThread('worker-dead');
             this.consecutiveRefreshFailures = 0;
             return;
@@ -1382,7 +1384,22 @@ export class RuntimeManager {
         this.consecutiveRefreshFailures = 0;
 
         if (health.shouldRestart) {
-          log.info('runtime.health.failed');
+          log.info('runtime.health.failed', {
+            reason: health.reason,
+            state: this.state,
+            idleDurationMs: health.idleDurationMs,
+            renderable: health.renderable,
+            dimensions: health.dimensions,
+            chat: health.chat
+              ? {
+                  observerAlive: health.chat.observerAlive,
+                  recentlyActive: health.chat.recentlyActive,
+                  consecutiveErrors: health.chat.consecutiveErrors,
+                  isInBackoff: health.chat.isInBackoff,
+                }
+              : null,
+            isRendererStuck: health.isRendererStuck,
+          });
           this.requestManagedRestart('watchdog');
           return;
         }
