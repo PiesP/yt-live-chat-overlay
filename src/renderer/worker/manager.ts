@@ -61,6 +61,8 @@ export class RenderWorkerManager {
     'depthFarSpeedMul',
     'depthNearSpeedMul',
     'depthFarOpacityMul',
+    'motionBlurEnabled',
+    'motionBlurAlpha',
     'backlogOpacityMultiplier',
     'fadeDurationMs',
     'modOwnerDurationMultiplier',

@@ -56,6 +56,8 @@ export const DEFAULT_SETTINGS = {
   depthNearSpeedMul: 1.4,
   depthFarSpeedMul: 0.8,
   depthFarOpacityMul: 0.75,
+  motionBlurEnabled: false,
+  motionBlurAlpha: 0.03,
   modOwnerDurationMultiplier: 1.5,
   showSuperChatAmount: true,
   fontWeight: 'bold',

@@ -60,6 +60,10 @@ export interface OverlaySettings {
   depthNearSpeedMul: number;
   depthFarSpeedMul: number;
   depthFarOpacityMul: number;
+  /** Enable motion blur (ghost rendering) for FAR-tier messages. */
+  motionBlurEnabled: boolean;
+  /** Motion blur ghost alpha (0.01–0.05). Only used when motionBlurEnabled is true. */
+  motionBlurAlpha: number;
   modOwnerDurationMultiplier: number;
   showSuperChatAmount: boolean;
   preserveUserColor: boolean;

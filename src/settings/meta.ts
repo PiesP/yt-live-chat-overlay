@@ -86,6 +86,8 @@ const ROOT_SETTING_META = {
     displayScale: 100,
     displayPrecision: 0,
   },
+  motionBlurEnabled: { type: 'boolean', visual: true },
+  motionBlurAlpha: { type: 'number', visual: true, displayScale: 100, displayPrecision: 0 },
   fontWeight: { type: 'string', visual: true },
   fontFamily: { type: 'string', visual: true },
   preserveUserColor: { type: 'boolean', visual: true },

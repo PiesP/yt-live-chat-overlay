@@ -65,7 +65,6 @@ import {
   STAGGER_EXP_SCALE,
   STAGGER_QUEUE_HIGH,
   STAGGER_QUEUE_MED,
-  TEMPORAL_BLEND_ALPHA,
   TIER_NEAR_THRESHOLD,
   TRANSLATION_FONT_SCALE,
   TRANSLATION_GAP_PX,
@@ -1212,12 +1211,14 @@ export class WorkerRenderer {
 
             // Temporal frame blending: render ghost at previous position for FAR-tier
             if (
+              this.config.motionBlurEnabled &&
+              !(this.config.reducedMotion && !this.config.ignoreReducedMotion) &&
               msg.speedTier === SPEED_TIER.FAR &&
               !msg.cardConfigWorker &&
               msg._prevX !== undefined &&
               msg._prevY !== undefined
             ) {
-              const ghostAlpha = this.ctx.globalAlpha * TEMPORAL_BLEND_ALPHA;
+              const ghostAlpha = this.ctx.globalAlpha * this.config.motionBlurAlpha;
               if (ghostAlpha > 0.001) {
                 this.ctx.save();
                 this.ctx.globalAlpha = ghostAlpha;

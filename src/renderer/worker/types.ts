@@ -44,6 +44,10 @@ export interface WorkerConfig {
   depthNearSpeedMul: number;
   /** Far-layer opacity multiplier. */
   depthFarOpacityMul: number;
+  /** Motion blur ghost rendering enabled. */
+  motionBlurEnabled: boolean;
+  /** Motion blur ghost alpha (0.01–0.05). */
+  motionBlurAlpha: number;
   /** Backlog opacity multiplier. */
   backlogOpacityMultiplier: number;
   /** Fade-out duration in ms. */
