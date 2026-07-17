@@ -1024,7 +1024,11 @@ export class CanvasRenderer extends RendererBase {
 
         // Pre-warm text bitmap cache so the render loop never pays
         // the cost of cache-miss bitmap generation during drawStage.
-        if (this.settings.outline.widthPx > 0 && this.settings.outline.opacity > 0) {
+        if (
+          this.settings.outline.enabled &&
+          this.settings.outline.widthPx > 0 &&
+          this.settings.outline.opacity > 0
+        ) {
           const warmColor =
             this.settings.preserveUserColor && msg.userColor
               ? msg.userColor
@@ -1128,7 +1132,11 @@ export class CanvasRenderer extends RendererBase {
 
         // Pre-warm text bitmap cache so the render loop never pays
         // the cost of cache-miss bitmap generation during drawStage.
-        if (this.settings.outline.widthPx > 0 && this.settings.outline.opacity > 0) {
+        if (
+          this.settings.outline.enabled &&
+          this.settings.outline.widthPx > 0 &&
+          this.settings.outline.opacity > 0
+        ) {
           const warmColor =
             this.settings.preserveUserColor && msg.userColor
               ? msg.userColor

@@ -410,8 +410,8 @@ export function drawStage(
               fontSize: ctx.settings.fontSize,
               fontWeight: ctx.settings.fontWeight,
               fontFamily: ctx.settings.fontFamily,
-              outlineWidthPx: ctx.settings.outline.widthPx,
-              outlineOpacity: ctx.settings.outline.opacity,
+              outlineWidthPx: ctx.settings.outline.enabled ? ctx.settings.outline.widthPx : 0,
+              outlineOpacity: ctx.settings.outline.enabled ? ctx.settings.outline.opacity : 0,
               showAuthor: ctx.settings.showAuthor[renderMessage.authorType],
               color:
                 ctx.settings.preserveUserColor && renderMessage.userColor
