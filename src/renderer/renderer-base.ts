@@ -550,6 +550,17 @@ export abstract class RendererBase {
     // Subclasses override to call startRenderLoop()
   }
 
+  /**
+   * Clear the paused-at timestamp so the next resume() does not apply a
+   * time-jump. Use when returning from a long-enough hidden period that
+   * all active messages would be expired anyway — the time-jump would
+   * advance them past their lifespan, making them disappear instantly.
+   * Backlog injection handles new messages while existing ones fade out.
+   */
+  clearPausedDuration(): void {
+    this.pausedAt = null;
+  }
+
   /** Drain pending queue messages. Subclasses override. */
   drainPendingQueue(): ChatMessage[] {
     return [];

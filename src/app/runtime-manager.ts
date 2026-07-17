@@ -57,8 +57,11 @@ const MAX_START_ATTEMPTS = 3;
 
 const RECENT_MESSAGE_REPLAY_LIMIT = 20;
 const CHAT_WATCHDOG_INTERVAL_MS = 15_000;
-/** Hidden duration threshold for switching from time-jump to overlay refresh. */
-const OVERLAY_REFRESH_THRESHOLD_MS = 30_000; // 30 seconds
+/** Hidden duration ≤ this: time-jump preserves visual continuity. */
+const SHORT_HIDDEN_TIMEJUMP_MS = 20_000;
+/** Hidden duration > SHORT_HIDDEN_TIMEJUMP_MS but ≤ this: backlog-only drain
+ *  (no time-jump since messages would all be expired, but no full clear). */
+const LONG_HIDDEN_FULL_REFRESH_MS = 60_000;
 
 async function createChatSource(
   getSettings: () => Readonly<OverlaySettings>,
@@ -1406,24 +1409,24 @@ export class RuntimeManager {
         return;
       }
 
-      // F-1: Long-hidden tab → full overlay refresh (clear + restart from history)
-      // rather than time-jumping expired messages via paused-duration shift.
-      // Capture hidden duration BEFORE clearing so F-1 threshold check works.
+      // Capture hidden duration BEFORE clearing so threshold checks work.
       const hiddenDuration = this.getIdleDurationMs(Date.now());
 
       // Clear idle markers so the health snapshot reflects current state.
       this.clearHidden();
 
-      if (hiddenDuration >= OVERLAY_REFRESH_THRESHOLD_MS) {
+      // ── Three-tier tab return ──────────────────────────────────────
+      // Tier 3 (>60s): Full overlay refresh — clear + 20 recent messages.
+      // Tier 2 (20–60s): Backlog-only drain — no time-jump (all messages
+      //   would be expired), no clear (current messages fade naturally).
+      // Tier 1 (≤20s): Time-jump — messages shift by hidden duration for
+      //   visual continuity; backlog injection for accumulated messages.
+      if (hiddenDuration >= LONG_HIDDEN_FULL_REFRESH_MS) {
         this.performOverlayRefresh(`hidden-${Math.round(hiddenDuration / 1000)}s`);
         return;
       }
 
-      // Short hidden: existing time-jump logic using paused-duration shift.
-
-      // P-1: Drain pending queue through backlog controller instead of trimming.
-      // This preserves messages accumulated during the hidden period for gradual
-      // emission rather than silently dropping them.
+      // Tiers 1 & 2: Drain pending queue through backlog controller.
       const pendingMessages = this.renderer?.drainPendingQueue();
       if (pendingMessages && pendingMessages.length > 0 && this.renderer) {
         this.ensureBacklogController(this.renderer);
@@ -1434,9 +1437,7 @@ export class RuntimeManager {
 
       this.chatSource?.setPauseReason('visibility', false);
 
-      // If the chat source accumulated messages during the hidden period
-      // (ReplayChatSource buffers them), drain through the backlog controller
-      // for gradual emission instead of letting them burst out directly.
+      // Replay source: drain accumulated buffer messages through backlog.
       if (this.renderer && this.chatSource instanceof ReplayChatSource) {
         const messages = this.chatSource.drainPendingMessages();
         if (messages.length > 0) {
@@ -1445,7 +1446,18 @@ export class RuntimeManager {
         }
       }
 
-      this.renderer?.resume();
+      if (hiddenDuration < SHORT_HIDDEN_TIMEJUMP_MS) {
+        // Tier 1: Normal resume with time-jump (pausedAt shift).
+        this.renderer?.resume();
+      } else {
+        // Tier 2: Skip time-jump — paused duration is large enough that
+        // all active messages would be expired. Setting pausedAt=null
+        // before resume() makes applyPausedDuration() a no-op (0ms shift),
+        // and laneAllocator.shiftAll(0) is also harmless. The render loop
+        // starts fresh while existing messages fade out naturally.
+        this.renderer?.clearPausedDuration();
+        this.renderer?.resume();
+      }
 
       // After a hidden period, verify the chat source is still alive.
       // During hidden time the poll loop was paused, so observerAlive may
