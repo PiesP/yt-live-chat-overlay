@@ -408,6 +408,7 @@ export class WorkerRenderer {
   private animFrameId: number | null = null;
   private isDestroyed = false;
   private isPaused = false;
+  private isUserPaused = false;
   private pauseStartTime = 0;
   private antiBlockStartTime = 0;
   private invFadeMs = 0;
@@ -415,6 +416,15 @@ export class WorkerRenderer {
   private opacityConfig: OpacityConfig | null = null;
   private boundGetFont: (fontSize: number) => string = (fs: number) =>
     getFontString(fs, 'bold' as FontWeight, DEFAULT_FONT_FAMILY);
+
+  /** Compute effective font size scaled to current viewport height. */
+  private getEffectiveFontSize(): number {
+    if (!this.config || this.logicalHeight <= 0) return this.config?.fontSize ?? 32;
+    const { fontSize, fontBaseViewportHeight, fontMinSize, fontMaxSize } = this.config;
+    const scaled = Math.round(fontSize * (this.logicalHeight / fontBaseViewportHeight));
+    return Math.max(fontMinSize, Math.min(fontMaxSize, scaled));
+  }
+
   private static TEXT_MEASURE_CACHE_MAX = 500;
   /** Pre-computed exponential distribution table for stagger delay (256 entries).
    *  Each entry = -ln(1 - (i+0.5)/256), yielding a positive exponential sample.
@@ -608,6 +618,15 @@ export class WorkerRenderer {
             }
             break;
           }
+          case 'setUserPaused':
+            this.isUserPaused = (data.paused as boolean) ?? false;
+            // Restart render loop if unpausing while not otherwise paused
+            if (!this.isUserPaused && !this.isPaused && !this.isDestroyed) {
+              if (this.animFrameId === null) {
+                this.startRenderLoop();
+              }
+            }
+            break;
           case 'destroy':
             this.handleDestroy();
             break;
@@ -797,7 +816,7 @@ export class WorkerRenderer {
   private initLanes(_width: number, height: number): void {
     if (!this.config || !this.ctx) return;
     const totalPaddingV = rendererLayout.paddingV * 2;
-    const textHeight = this.measureTextHeight(this.config.fontSize);
+    const textHeight = this.measureTextHeight(this.getEffectiveFontSize());
     const rawLaneHeight = Math.max(1, textHeight + totalPaddingV + this.config.laneSpacing);
     this.laneHeight = Math.max(1, Math.round(rawLaneHeight * this.laneDensityFactor));
     const usableHeight = height * (1 - this.config.safeTop - this.config.safeBottom);
@@ -1034,7 +1053,7 @@ export class WorkerRenderer {
   }
 
   private renderFrame(): void {
-    if (!this.ctx || !this.canvas || !this.config || this.isPaused) return;
+    if (!this.ctx || !this.canvas || !this.config || this.isPaused || this.isUserPaused) return;
 
     // Detect OffscreenCanvas context loss (GPU driver reset, etc.).
     // Signal the main thread so it can fall back to main-thread rendering.
@@ -1222,7 +1241,7 @@ export class WorkerRenderer {
               if (ghostAlpha > 0.001) {
                 this.ctx.save();
                 this.ctx.globalAlpha = ghostAlpha;
-                const ghostFont = getFont(this.config.fontSize);
+                const ghostFont = getFont(this.getEffectiveFontSize());
                 this.ctx.font = ghostFont;
                 this.ctx.textRendering = 'optimizeSpeed';
                 this.ctx.fontKerning = 'none';
@@ -1352,6 +1371,28 @@ export class WorkerRenderer {
         pendingQueueDepth: this.pendingQueue.length,
       });
     }
+
+    // ── Live region mirror: send visible text snippets to main thread ──
+    // Runs every 30 frames (~500ms at 60fps) to keep the aria-live region
+    // updated with current visible messages for screen reader access.
+    // Mirrors the main-thread renderer's mirrorVisibleMessages() behaviour.
+    if (this.statsFrameCounter % 30 === 0) {
+      const maxSnippets = 10;
+      const count = Math.min(this.activeMessages.length, maxSnippets);
+      if (count > 0) {
+        const snippets: string[] = [];
+        const start = this.activeMessages.length - count;
+        for (let i = start; i < this.activeMessages.length; i++) {
+          const msg = this.activeMessages[i];
+          if (msg?.text) {
+            snippets.push(msg.text.slice(0, 80));
+          }
+        }
+        if (snippets.length > 0) {
+          self.postMessage({ type: 'liveRegionSnippets', snippets });
+        }
+      }
+    }
   }
 
   private checkCollision(
@@ -1395,7 +1436,7 @@ export class WorkerRenderer {
       if (active.y + active.height <= newTop || active.y >= newBottom) continue;
       if (isScrolling) {
         let headwayPx = computeBaseHeadwayPx(active.width, this.config.headwayGapRatio);
-        if (newSpeedTier > active.speedTier)
+        if (active.speedTier === SPEED_TIER.BACKLOG && newSpeedTier > active.speedTier)
           headwayPx = Math.round(headwayPx * this.config.backlogSpeedMultiplier);
         const activeProgress = Math.min(1, Math.max(0, activeElapsed * active.invDuration));
         if (mode === 'scroll') {
@@ -1496,7 +1537,7 @@ export class WorkerRenderer {
         const farSpacing = speedTier === SPEED_TIER.FAR ? '1px' : undefined;
         warmTextBitmapCache(
           entry.content,
-          this.config.fontSize,
+          this.getEffectiveFontSize(),
           this.config.fontWeight,
           this.config.fontFamily,
           warmColor,

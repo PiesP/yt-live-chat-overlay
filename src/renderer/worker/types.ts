@@ -18,6 +18,12 @@ export interface WorkerConfig {
   speedPxPerSec: number;
   /** Font size in logical pixels. */
   fontSize: number;
+  /** Base viewport height for font size reference (px). */
+  fontBaseViewportHeight: number;
+  /** Minimum effective font size (px). */
+  fontMinSize: number;
+  /** Maximum effective font size (px). */
+  fontMaxSize: number;
   /** Font weight: 'normal' | 'bold'. */
   fontWeight: FontWeight;
   /** CSS font-family value. */
@@ -220,4 +226,11 @@ export interface ActiveMessage {
   _prevX?: number;
   /** Transient previous-frame Y position for temporal frame blending. */
   _prevY?: number;
+}
+
+// ── Worker → Main protocol messages ───────────────────────────────────
+
+export interface WorkerToMainLiveRegionSnippets {
+  type: 'liveRegionSnippets';
+  snippets: string[];
 }

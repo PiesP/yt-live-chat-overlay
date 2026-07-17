@@ -54,6 +54,8 @@ export abstract class RendererBase {
 
   protected isPaused = false;
   protected videoPaused = false;
+  /** User-initiated pause (Space key). Blocks rendering independently. */
+  protected isUserPaused = false;
 
   /** Currently active lane density factor — cached to detect burst-driven changes. */
   protected currentLaneDensityFactor = 1.0;
@@ -110,7 +112,7 @@ export abstract class RendererBase {
     this.laneAllocator = new LaneAllocator({
       safeTop: this.settings.safeTop,
       safeBottom: this.settings.safeBottom,
-      fontSize: this.settings.fontSize,
+      fontSize: this.getEffectiveFontSize(),
       fontWeight: this.settings.fontWeight,
       fontFamily: this.settings.fontFamily,
       laneSpacing: this.settings.laneSpacing,
@@ -162,6 +164,24 @@ export abstract class RendererBase {
   /** Set by RuntimeManager when the session uses ReplayChatSource. */
   setReplayMode(enabled: boolean): void {
     this.replayMode = enabled;
+  }
+
+  /**
+   * Compute the effective font size scaled to the current viewport height.
+   * Linear scaling: fontSize × (viewportHeight / fontBaseViewportHeight),
+   * clamped to [fontMinSize, fontMaxSize].
+   */
+  protected getEffectiveFontSize(): number {
+    const dims = this.overlay.getDimensions();
+    if (!dims || dims.height <= 0) return this.settings.fontSize;
+    const { fontSize, fontBaseViewportHeight, fontMinSize, fontMaxSize } = this.settings;
+    const scaled = Math.round(fontSize * (dims.height / fontBaseViewportHeight));
+    return Math.max(fontMinSize, Math.min(fontMaxSize, scaled));
+  }
+
+  /** Set user-initiated pause state (Space key toggle). */
+  setUserPaused(paused: boolean): void {
+    this.isUserPaused = paused;
   }
 
   // ── Shared state machine ──────────────────────────────────────────────
@@ -300,7 +320,7 @@ export abstract class RendererBase {
 
     if (fontChanged || laneSpacingChanged) {
       this.laneAllocator.updateFontMetrics(
-        settings.fontSize,
+        this.getEffectiveFontSize(),
         settings.fontWeight,
         settings.fontFamily,
         settings.laneSpacing

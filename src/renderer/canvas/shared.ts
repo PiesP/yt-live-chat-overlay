@@ -173,8 +173,20 @@ export function splitGraphemeClusters(text: string): string[] {
  * Canvas2D does not support bidirectional text: Arabic rendered via
  * fillText() appears LTR with isolated glyph forms.  By reversing the
  * character sequence we at least restore correct reading order.
- * Contextual Arabic shaping (cursive connections) still requires a
- * dedicated shaping engine and is not addressed here.
+ *
+ * ## Known Limitations
+ *
+ * - **Contextual Arabic shaping** (cursive letter connections) is NOT
+ *   supported — this requires a dedicated shaping engine (e.g. HarfBuzz).
+ *   Ligatures, diacritic placement, and complex script features are
+ *   approximated at best.
+ * - **Why not use a shaping engine?** HarfBuzz WASM adds ~2MB to the
+ *   bundle, and Canvas2D's fillText() cannot render shaped glyph sequences
+ *   anyway (it renders individual code points in order).
+ * - **Recommended path for accurate RTL text:** the DOM-based accessibility
+ *   pipeline (aria-live region in overlay.ts) leverages the browser's native
+ *   bidirectional text rendering. Users needing full Arabic/Hebrew text
+ *   fidelity should use screen readers or the planned read panel.
  */
 function reverseRtlText(text: string): string {
   // Quick scan: is the first strong character RTL?
@@ -195,6 +207,46 @@ function reverseRtlText(text: string): string {
 
   // Reverse grapheme clusters so the rightmost glyph appears first on screen.
   return splitGraphemeClusters(text).reverse().join('');
+}
+
+/**
+ * Truncate text to fit within maxWidth pixels on the given canvas context.
+ * Uses grapheme-cluster iteration + binary search for O(log n) measureText
+ * calls. Appends ellipsis (…) when truncation occurs.
+ *
+ * @param text      The text to potentially clip.
+ * @param maxWidth  Maximum pixel width allowed.
+ * @param ctx       Canvas 2D context (HTML or Offscreen).
+ * @returns The original text if it fits, or a grapheme-cluster-accurate
+ *          truncated version ending with an ellipsis character.
+ */
+export function clipTextToWidth(
+  text: string,
+  maxWidth: number,
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
+): string {
+  if (!text || maxWidth <= 0) return '';
+
+  const fullWidth = ctx.measureText(text).width;
+  if (fullWidth <= maxWidth) return text;
+
+  const graphemes = splitGraphemeClusters(text);
+  // Binary search for max grapheme count fitting maxWidth.
+  let lo = 0;
+  let hi = graphemes.length;
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi + 1) / 2);
+    const candidate = graphemes.slice(0, mid).join('');
+    if (ctx.measureText(candidate).width <= maxWidth) {
+      lo = mid;
+    } else {
+      hi = mid - 1;
+    }
+  }
+
+  if (lo === 0) return '';
+  if (lo === graphemes.length) return text;
+  return `${graphemes.slice(0, lo).join('').trimEnd()}\u2026`;
 }
 
 /**

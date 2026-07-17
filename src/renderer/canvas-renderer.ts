@@ -86,6 +86,7 @@ import { ChannelLanguageMemory } from '@translation/channel-memory';
 import { LanguageDetectorService } from '@translation/language-detector';
 import { TranslationService } from '@translation/service';
 import { ByteLimitedCache } from '@util/byte-limited-cache';
+import { DensityIndicator } from '@util/density-indicator';
 import { computeScrollDuration, statusBarLayout } from '@util/design-tokens';
 import { clearSafeAnimationFrame, forEachSlot, SCREEN_READER_CSS } from '@util/dom';
 import { createLogger } from '@util/logging';
@@ -120,6 +121,9 @@ export class CanvasRenderer extends RendererBase {
   /** Pre-computed 1/fadeDurationMs — corrected in constructor from settings. */
   private invFadeDuration = 0;
   private overlayDimensionsUnsubscribe: (() => void) | null = null;
+  private overlayUserPauseUnsubscribe: (() => void) | null = null;
+  /** Density indicator for high-chat feedback. */
+  private readonly densityIndicator = new DensityIndicator();
   /** Debounce flag for emoji-load-triggered rAF restarts. */
   private needsRerender = false;
   /** Image fetch manager for loading and caching emoji, author photos, and stickers. */
@@ -325,6 +329,11 @@ export class CanvasRenderer extends RendererBase {
     if (container) container.appendChild(canvas);
     this.canvas = canvas;
 
+    // Wire density indicator into the overlay container
+    if (container) {
+      this.densityIndicator.create(container);
+    }
+
     // ── Phase 1: setup that does NOT depend on canvas context ──────
     //
     // IntersectionObserver for offscreen detection. When the canvas is
@@ -377,6 +386,13 @@ export class CanvasRenderer extends RendererBase {
     });
     const useWorker = this.workerManager.init(canvas, settings, overlay);
 
+    // Wire the Worker's live-region text snippets to the overlay's
+    // aria-live region so screen readers can access chat content when
+    // rendering via the Worker path.
+    if (useWorker) {
+      this.workerManager.setLiveRegionCallback((snippets) => overlay.updateLiveRegion(snippets));
+    }
+
     // ── Phase 3: main-thread fallback setup (only when Worker failed) ──
 
     const dims = overlay.getDimensions();
@@ -420,6 +436,14 @@ export class CanvasRenderer extends RendererBase {
       }
     });
 
+    // Forward user-pause toggle to both main-thread and worker renderers
+    this.overlayUserPauseUnsubscribe = overlay.onUserPauseChanged((paused) => {
+      this.setUserPaused(paused);
+      if (this.workerManager.isActive) {
+        this.workerManager.setUserPaused(paused);
+      }
+    });
+
     this.startRenderLoop();
     this.imageFetchManager.updateConfig(settings, this.workerManager.workerRef);
     this.imageFetchManager.setOnImageReady(() => {
@@ -443,6 +467,7 @@ export class CanvasRenderer extends RendererBase {
       }
     };
     this.reducedMotionQuery.addEventListener('change', this.reducedMotionListener);
+
     log.info('renderer.created', {
       mode: 'canvas2d',
     });
@@ -814,6 +839,7 @@ export class CanvasRenderer extends RendererBase {
     if (!canvas.isConnected) return;
     if (this.isPaused) return;
     if (this.isVideoPaused) return;
+    if (this.isUserPaused) return;
     // When Worker mode is active (OffscreenCanvas transferred to worker),
     // the main-thread ctx is still a non-null reference but is detached.
     // Canvas operations on a detached context would throw silently.
@@ -857,6 +883,9 @@ export class CanvasRenderer extends RendererBase {
 
     this.observability.updateLaneUtilization(this.laneAllocator.getUtilization());
     this.observability.tick();
+
+    // Update density indicator based on active message count
+    this.densityIndicator.update(this.activeMessages.length, this.settings.maxConcurrentMessages);
 
     // Early exit for empty frames — nothing to render.
     if (!hasContent) return;
@@ -1876,6 +1905,8 @@ export class CanvasRenderer extends RendererBase {
     this.workerManager.destroy();
     this.imageFetchManager.destroy();
     this.overlayDimensionsUnsubscribe?.();
+    this.overlayUserPauseUnsubscribe?.();
+    this.densityIndicator.destroy();
     // Clean up prefers-reduced-motion listener
     if (this.reducedMotionQuery && this.reducedMotionListener) {
       this.reducedMotionQuery.removeEventListener('change', this.reducedMotionListener);
