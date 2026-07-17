@@ -4,7 +4,7 @@ import { fileURLToPath } from "url";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const testDir = resolve(__dirname, ".");
-const srcDir = resolve(__dirname, "../src");
+const srcDir = resolve(__dirname, "src");
 
 export default defineConfig({
   define: { __DEV__: true },
@@ -12,7 +12,7 @@ export default defineConfig({
     globals: true,
     environment: "jsdom",
     setupFiles: ["./test/setup.ts"],
-    include: ["test/unit/**/*.test.ts", "consistency/**/*.test.ts"],
+    include: ["test/unit/**/*.test.ts", "test/consistency/**/*.test.ts"],
     exclude: ["node_modules", "dist"],
     passWithNoTests: false,
     slowTestThreshold: 500,
