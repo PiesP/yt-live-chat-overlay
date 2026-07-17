@@ -23,7 +23,6 @@ import {
   SIN_LUT_SCALE,
   SIN_TABLE,
   SPEED_TIER,
-  TEMPORAL_BLEND_ALPHA,
   TRANSLATION_FONT_SCALE,
   TRANSLATION_GAP_PX,
   TRANSLATION_OPACITY_SCALE,
@@ -362,11 +361,12 @@ export function drawStage(
 
         // Temporal frame blending: render ghost at previous position for FAR-tier
         if (
+          ctx.settings.motionBlurEnabled &&
           msg.speedTier === SPEED_TIER.FAR &&
           msg._prevX !== undefined &&
           msg._prevY !== undefined
         ) {
-          const ghostAlpha = renderCtx.globalAlpha * TEMPORAL_BLEND_ALPHA;
+          const ghostAlpha = renderCtx.globalAlpha * ctx.settings.motionBlurAlpha;
           if (ghostAlpha > 0.001) {
             renderCtx.save();
             renderCtx.globalAlpha = ghostAlpha;
@@ -410,8 +410,8 @@ export function drawStage(
               fontSize: ctx.settings.fontSize,
               fontWeight: ctx.settings.fontWeight,
               fontFamily: ctx.settings.fontFamily,
-              outlineWidthPx: ctx.settings.outline.widthPx,
-              outlineOpacity: ctx.settings.outline.opacity,
+              outlineWidthPx: ctx.settings.outline.enabled ? ctx.settings.outline.widthPx : 0,
+              outlineOpacity: ctx.settings.outline.enabled ? ctx.settings.outline.opacity : 0,
               showAuthor: ctx.settings.showAuthor[renderMessage.authorType],
               color:
                 ctx.settings.preserveUserColor && renderMessage.userColor

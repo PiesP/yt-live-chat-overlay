@@ -61,6 +61,8 @@ export class RenderWorkerManager {
     'depthFarSpeedMul',
     'depthNearSpeedMul',
     'depthFarOpacityMul',
+    'motionBlurEnabled',
+    'motionBlurAlpha',
     'backlogOpacityMultiplier',
     'fadeDurationMs',
     'modOwnerDurationMultiplier',
@@ -101,8 +103,8 @@ export class RenderWorkerManager {
     for (const key of RenderWorkerManager.WORKER_CONFIG_KEYS) {
       config[key] = settings[key];
     }
-    config.outlineWidthPx = settings.outline.widthPx;
-    config.outlineOpacity = settings.outline.opacity;
+    config.outlineWidthPx = settings.outline.enabled ? settings.outline.widthPx : 0;
+    config.outlineOpacity = settings.outline.enabled ? settings.outline.opacity : 0;
     config.authorColors = { ...settings.colors };
     config.color = settings.colors.normal;
     // Workers cannot access matchMedia — main thread relays the OS preference.
@@ -517,8 +519,8 @@ export class RenderWorkerManager {
       settings,
       RenderWorkerManager.WORKER_CONFIG_KEYS
     ) as Record<string, unknown>;
-    config.outlineWidthPx = settings.outline.widthPx;
-    config.outlineOpacity = settings.outline.opacity;
+    config.outlineWidthPx = settings.outline.enabled ? settings.outline.widthPx : 0;
+    config.outlineOpacity = settings.outline.enabled ? settings.outline.opacity : 0;
     config.authorColors = { ...settings.colors };
     config.color = settings.colors.normal;
     config.reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;

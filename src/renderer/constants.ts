@@ -114,7 +114,7 @@ export const FAR_LAYER_DESATURATION_FACTOR = 0.3;
  *  message.text.  message.text includes emoji fallbackText (e.g.
  *  "PiesP Smile") which would render as faint unrelated text
  *  alongside emoji images.  See ChatMessage.text documentation. */
-export const TEMPORAL_BLEND_ALPHA = 0.12;
+export const TEMPORAL_BLEND_ALPHA = 0;
 
 // ── Text rendering (canvas-rendering-shared.ts) ──────────────────────────────
 
