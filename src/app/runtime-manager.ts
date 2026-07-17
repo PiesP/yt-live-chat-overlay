@@ -1404,8 +1404,8 @@ export class RuntimeManager {
           this.ensureBacklogController(this.renderer);
           this.backlogController?.startBacklogInjection(pendingMessages);
         }
-        // Don't return — still need to set chat source unpaused for poll loop wake.
         this.chatSource?.setPauseReason('visibility', false);
+        this.clearHidden();
         return;
       }
 

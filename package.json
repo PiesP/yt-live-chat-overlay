@@ -41,7 +41,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:cov": "vitest run --coverage",
-    "test:e2e": "playwright test",
+    "test:e2e": "playwright test --config test/e2e/playwright.config.ts",
     "test:e2e:headed": "playwright test --headed",
     "clean:all": "rimraf dist dist-extension dist-extension-firefox"
   },

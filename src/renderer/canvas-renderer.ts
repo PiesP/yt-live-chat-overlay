@@ -116,8 +116,6 @@ export class CanvasRenderer extends RendererBase {
   private _destroyed = false;
   private ctx: CanvasRenderingContext2D | null = null;
   private animFrameId: number | null = null;
-  /** Pre-computed 1/maxMessageAgeMs to avoid per-frame division in opacity calc. */
-  private readonly ageFadeRate = computeAgeFadeRate(this.settings.maxMessageAgeMs);
   /** Pre-computed 1/fadeDurationMs — corrected in constructor from settings. */
   private invFadeDuration = 0;
   private overlayDimensionsUnsubscribe: (() => void) | null = null;
@@ -528,7 +526,7 @@ export class CanvasRenderer extends RendererBase {
   }
 
   override getActiveMessageCount(): number {
-    return this.activeMessages.length;
+    return this.activeMessages.length + this.workerManager.activeMessageCount;
   }
 
   override isWorkerAlive(): boolean {
@@ -1613,7 +1611,7 @@ export class CanvasRenderer extends RendererBase {
       backlogOpacityMultiplier: this.settings.backlogOpacityMultiplier,
       depthLayersEnabled: this.settings.depthLayersEnabled,
       depthFarOpacityMul: this.settings.depthFarOpacityMul,
-      ageFadeRate: this.ageFadeRate,
+      ageFadeRate: computeAgeFadeRate(this.settings.maxMessageAgeMs),
     };
   }
 
