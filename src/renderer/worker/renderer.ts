@@ -1436,7 +1436,7 @@ export class WorkerRenderer {
       if (active.y + active.height <= newTop || active.y >= newBottom) continue;
       if (isScrolling) {
         let headwayPx = computeBaseHeadwayPx(active.width, this.config.headwayGapRatio);
-        if (newSpeedTier > active.speedTier)
+        if (active.speedTier === SPEED_TIER.BACKLOG && newSpeedTier > active.speedTier)
           headwayPx = Math.round(headwayPx * this.config.backlogSpeedMultiplier);
         const activeProgress = Math.min(1, Math.max(0, activeElapsed * active.invDuration));
         if (mode === 'scroll') {

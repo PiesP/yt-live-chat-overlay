@@ -86,6 +86,7 @@ import { ChannelLanguageMemory } from '@translation/channel-memory';
 import { LanguageDetectorService } from '@translation/language-detector';
 import { TranslationService } from '@translation/service';
 import { ByteLimitedCache } from '@util/byte-limited-cache';
+import { DensityIndicator } from '@util/density-indicator';
 import { computeScrollDuration, statusBarLayout } from '@util/design-tokens';
 import { clearSafeAnimationFrame, forEachSlot, SCREEN_READER_CSS } from '@util/dom';
 import { createLogger } from '@util/logging';
@@ -121,6 +122,8 @@ export class CanvasRenderer extends RendererBase {
   private invFadeDuration = 0;
   private overlayDimensionsUnsubscribe: (() => void) | null = null;
   private overlayUserPauseUnsubscribe: (() => void) | null = null;
+  /** Density indicator for high-chat feedback. */
+  private readonly densityIndicator = new DensityIndicator();
   /** Debounce flag for emoji-load-triggered rAF restarts. */
   private needsRerender = false;
   /** Image fetch manager for loading and caching emoji, author photos, and stickers. */
@@ -326,6 +329,11 @@ export class CanvasRenderer extends RendererBase {
     if (container) container.appendChild(canvas);
     this.canvas = canvas;
 
+    // Wire density indicator into the overlay container
+    if (container) {
+      this.densityIndicator.create(container);
+    }
+
     // ── Phase 1: setup that does NOT depend on canvas context ──────
     //
     // IntersectionObserver for offscreen detection. When the canvas is
@@ -459,6 +467,7 @@ export class CanvasRenderer extends RendererBase {
       }
     };
     this.reducedMotionQuery.addEventListener('change', this.reducedMotionListener);
+
     log.info('renderer.created', {
       mode: 'canvas2d',
     });
@@ -874,6 +883,9 @@ export class CanvasRenderer extends RendererBase {
 
     this.observability.updateLaneUtilization(this.laneAllocator.getUtilization());
     this.observability.tick();
+
+    // Update density indicator based on active message count
+    this.densityIndicator.update(this.activeMessages.length, this.settings.maxConcurrentMessages);
 
     // Early exit for empty frames — nothing to render.
     if (!hasContent) return;
@@ -1894,6 +1906,7 @@ export class CanvasRenderer extends RendererBase {
     this.imageFetchManager.destroy();
     this.overlayDimensionsUnsubscribe?.();
     this.overlayUserPauseUnsubscribe?.();
+    this.densityIndicator.destroy();
     // Clean up prefers-reduced-motion listener
     if (this.reducedMotionQuery && this.reducedMotionListener) {
       this.reducedMotionQuery.removeEventListener('change', this.reducedMotionListener);
