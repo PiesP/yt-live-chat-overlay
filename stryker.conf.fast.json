@@ -1,0 +1,49 @@
+{
+  "$schema": "https://raw.githubusercontent.com/stryker-mutator/stryker/master/packages/core/schema/stryker-schema.json",
+  "mutate": [
+    "src/**/*.ts",
+    "!src/**/*.d.ts",
+    "!src/types/**",
+    "!src/main.ts",
+    "!src/renderer/**",
+    "!src/chat/**"
+  ],
+  "testRunner": "vitest",
+  "vitest": {
+    "configFile": "vitest.config.ts",
+    "related": false
+  },
+  "reporters": ["progress"],
+  "coverageAnalysis": "all",
+  "inPlace": true,
+  "concurrency": 2,
+  "timeoutMS": 60000,
+  "plugins": ["@stryker-mutator/vitest-runner"],
+  "mutators": {
+    "excludedMutations": [
+      "StringLiteral",
+      "ArrayDeclaration",
+      "ObjectLiteral",
+      "ArrowFunction",
+      "BlockStatement",
+      "ConditionalExpression",
+      "Regex",
+      "UnaryOperator",
+      "UpdateOperator",
+      "OptionalChaining",
+      "AssignmentOperator",
+      "PrefixDecrementOperator",
+      "PrefixIncrementOperator",
+      "PostfixDecrementOperator",
+      "PostfixIncrementOperator",
+      "MethodExpression",
+      "NonNullAssertion",
+      "CheckedStatement",
+      "SwitchCase",
+      "WhileStatement",
+      "ForStatement",
+      "EqualityOperator",
+      "BooleanLiteral"
+    ]
+  }
+}

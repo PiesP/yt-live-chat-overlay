@@ -71,6 +71,15 @@ class App {
     log.debug('app.initialized');
   }
 
+  /**
+   * Start the overlay: initialize settings, register cross-tab sync,
+   * attach the settings UI button, and boot the runtime manager.
+   *
+   * **Lifecycle contract:** This instance is one-shot. After {@link stop}
+   * is called, calling `start()` again is a no-op — the sub-components
+   * (RuntimeManager, PageWatcher, SettingsUi, Settings store) are destroyed
+   * and cannot be re-used. To restart, create a new `App` instance.
+   */
   async start(): Promise<void> {
     await this.settings.initialize();
     resolveActiveLanguage(this.settings.get().language);
@@ -96,6 +105,12 @@ class App {
     await this.runtimeManager.start();
   }
 
+  /**
+   * Permanently destroy the overlay instance — stops the runtime, tears
+   * down DOM observers, removes the settings UI button, and persists
+   * settings. This is a terminal operation; the instance **cannot** be
+   * restarted. See {@link start} for the one-shot lifecycle contract.
+   */
   async stop(): Promise<void> {
     this.runtimeManager.destroy();
     this.pageWatcher.destroy();
@@ -277,9 +292,12 @@ async function initApp(): Promise<void> {
     await app.start();
     setupMenuCommands();
 
-    // Expose a debug handle for menu commands.  Object.freeze prevents extending
-    // or mutating the value object itself, while a plain property assignment
-    // allows stopPreviousAppInstance() to clear it for re-injection.
+    // Expose a debug handle for menu commands and E2E tests.
+    // The App instance follows a one-shot lifecycle contract:
+    // after stop() is called, calling start() again is a no-op
+    // because all sub-components have been destroyed.
+    // To restart, the userscript/extension must re-inject a new
+    // App instance (handled by the re-injection guard in main()).
     window.__ytChatOverlay = Object.freeze({
       start: () => app.start(),
       stop: () => app.stop(),

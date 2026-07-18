@@ -9,7 +9,7 @@ All processing is local — chat content is never stored or sent anywhere.
 - **Four display modes** — RTL scroll (classic), LTR reverse, top-fixed, bottom-fixed
 - **Rich content** — text, emoji, Super Chats (with stickers), membership messages
 - **Chat translation** — real-time in-browser translation with dual/subtitle or replace mode (Chrome 138+)
-- **Multi-language UI** — English, 한국어, 日本語, Español, 中文 (auto-detect or manual)
+- **Multi-language UI** — English, 한국어, 日本語, Español, 中文, العربية (auto-detect or manual)
 - **Backlog injection** — past messages fill the screen on entry (4 modes: playback-based, recent, full, none)
 - **Depth layers** — speed-based near/far perception with configurable speed and opacity
 - **Author badges** — owner, moderator, member visibility & colors
