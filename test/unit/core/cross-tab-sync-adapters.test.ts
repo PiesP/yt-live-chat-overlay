@@ -1,7 +1,53 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { CrossTabSyncAdapter } from '@platform/types';
 import { getCrossTabSyncAdapter } from '@platform/cross-tab-sync-adapters';
 
-const STORAGE_KEY = 'cross-tab-sync-test-key';
+type ChromeChangeListener = (changes: Record<string, unknown>, areaName: string) => void;
+type GmChangeListener = (
+  key: string,
+  oldValue: unknown,
+  newValue: unknown,
+  remote: boolean
+) => void;
+
+let keyCounter = 0;
+let activeAdapter: CrossTabSyncAdapter | null = null;
+
+function getTestAdapter(): { adapter: CrossTabSyncAdapter; storageKey: string } {
+  const storageKey = `cross-tab-sync-test-key-${++keyCounter}`;
+  const adapter = getCrossTabSyncAdapter(storageKey);
+  activeAdapter = adapter;
+  return { adapter, storageKey };
+}
+
+function enableExtensionBridge(): void {
+  window.__ytExtensionBridge = {
+    workerSupported: true,
+    workerUrl: 'chrome-extension://test/workers/renderer.js',
+    storageType: 'chrome.storage.local',
+  };
+}
+
+function installGmMock(): {
+  addListener: ReturnType<typeof vi.fn>;
+  listeners: Map<number, GmChangeListener>;
+  removeListener: ReturnType<typeof vi.fn>;
+} {
+  let nextListenerId = 0;
+  const listeners = new Map<number, GmChangeListener>();
+  const addListener = vi.fn((_key: string, callback: GmChangeListener): number => {
+    const listenerId = ++nextListenerId;
+    listeners.set(listenerId, callback);
+    return listenerId;
+  });
+  const removeListener = vi.fn((listenerId: number): void => {
+    listeners.delete(listenerId);
+  });
+
+  vi.stubGlobal('GM_addValueChangeListener', addListener);
+  vi.stubGlobal('GM_removeValueChangeListener', removeListener);
+  return { addListener, listeners, removeListener };
+}
 
 function dispatchStorageChanged(
   data: Record<string, unknown>,
@@ -20,84 +66,170 @@ function dispatchStorageChanged(
 describe('cross-tab sync adapters', () => {
   beforeEach(() => {
     delete (globalThis as Record<string, unknown>).chrome;
-    window.__ytExtensionBridge = {
-      workerSupported: true,
-      workerUrl: 'chrome-extension://test/workers/renderer.js',
-      storageType: 'chrome.storage.local',
-    };
-  });
-
-  afterEach(() => {
-    getCrossTabSyncAdapter(STORAGE_KEY).removeListener();
+    delete (globalThis as Record<string, unknown>).GM_addValueChangeListener;
+    delete (globalThis as Record<string, unknown>).GM_removeValueChangeListener;
     delete window.__ytExtensionBridge;
   });
 
+  afterEach(() => {
+    activeAdapter?.removeListener();
+    activeAdapter = null;
+    delete window.__ytExtensionBridge;
+    vi.unstubAllGlobals();
+  });
+
   it('selects the storage relay when only the extension bridge is available', () => {
+    enableExtensionBridge();
     const callback = vi.fn();
-    const adapter = getCrossTabSyncAdapter(STORAGE_KEY);
+    const { adapter, storageKey } = getTestAdapter();
     adapter.addListener(callback);
 
     dispatchStorageChanged({
       source: 'yt-storage-changed',
-      key: STORAGE_KEY,
+      key: storageKey,
       newValue: { enabled: true },
     });
 
     expect(callback).toHaveBeenCalledOnce();
-    expect(callback).toHaveBeenCalledWith(STORAGE_KEY, { enabled: true });
+    expect(callback).toHaveBeenCalledWith(storageKey, { enabled: true });
   });
 
   it('filters relay events by source, origin, and storage key', () => {
+    enableExtensionBridge();
     const callback = vi.fn();
-    const adapter = getCrossTabSyncAdapter(STORAGE_KEY);
+    const { adapter, storageKey } = getTestAdapter();
     adapter.addListener(callback);
 
     dispatchStorageChanged(
-      { source: 'yt-storage-changed', key: STORAGE_KEY, newValue: 'wrong-source' },
+      { source: 'yt-storage-changed', key: storageKey, newValue: 'wrong-source' },
       null
     );
     dispatchStorageChanged(
-      { source: 'yt-storage-changed', key: STORAGE_KEY, newValue: 'wrong-origin' },
+      { source: 'yt-storage-changed', key: storageKey, newValue: 'wrong-origin' },
       window,
       'https://other.example'
     );
-    dispatchStorageChanged({ source: 'other-source', key: STORAGE_KEY, newValue: 'wrong-source' });
+    dispatchStorageChanged({ source: 'other-source', key: storageKey, newValue: 'wrong-source' });
     dispatchStorageChanged({ source: 'yt-storage-changed', key: 'other-key', newValue: 'wrong-key' });
 
     expect(callback).not.toHaveBeenCalled();
 
     dispatchStorageChanged({
       source: 'yt-storage-changed',
-      key: STORAGE_KEY,
+      key: storageKey,
       newValue: 'accepted',
     });
 
     expect(callback).toHaveBeenCalledOnce();
-    expect(callback).toHaveBeenCalledWith(STORAGE_KEY, 'accepted');
+    expect(callback).toHaveBeenCalledWith(storageKey, 'accepted');
   });
 
   it('supports add, remove, and re-add on the cached relay adapter', () => {
+    enableExtensionBridge();
     const firstCallback = vi.fn();
     const secondCallback = vi.fn();
     const thirdCallback = vi.fn();
-    const adapter = getCrossTabSyncAdapter(STORAGE_KEY);
+    const { adapter, storageKey } = getTestAdapter();
 
     adapter.addListener(firstCallback);
-    dispatchStorageChanged({ source: 'yt-storage-changed', key: STORAGE_KEY, newValue: 1 });
+    dispatchStorageChanged({ source: 'yt-storage-changed', key: storageKey, newValue: 1 });
     adapter.removeListener();
-    dispatchStorageChanged({ source: 'yt-storage-changed', key: STORAGE_KEY, newValue: 2 });
+    dispatchStorageChanged({ source: 'yt-storage-changed', key: storageKey, newValue: 2 });
 
     adapter.addListener(secondCallback);
-    dispatchStorageChanged({ source: 'yt-storage-changed', key: STORAGE_KEY, newValue: 3 });
+    dispatchStorageChanged({ source: 'yt-storage-changed', key: storageKey, newValue: 3 });
     adapter.removeListener();
     adapter.addListener(thirdCallback);
-    dispatchStorageChanged({ source: 'yt-storage-changed', key: STORAGE_KEY, newValue: 4 });
+    dispatchStorageChanged({ source: 'yt-storage-changed', key: storageKey, newValue: 4 });
 
     expect(firstCallback).toHaveBeenCalledOnce();
     expect(secondCallback).toHaveBeenCalledOnce();
     expect(thirdCallback).toHaveBeenCalledOnce();
-    expect(firstCallback).toHaveBeenCalledWith(STORAGE_KEY, 1);
-    expect(secondCallback).toHaveBeenCalledWith(STORAGE_KEY, 3);
-    expect(thirdCallback).toHaveBeenCalledWith(STORAGE_KEY, 4);
+    expect(firstCallback).toHaveBeenCalledWith(storageKey, 1);
+    expect(secondCallback).toHaveBeenCalledWith(storageKey, 3);
+    expect(thirdCallback).toHaveBeenCalledWith(storageKey, 4);
+  });
+
+  it('prioritizes direct Chrome storage over GM sync when both are available', () => {
+    let chromeListener: ChromeChangeListener | null = null;
+    const onChanged = {
+      addListener: vi.fn((listener: ChromeChangeListener): void => {
+        chromeListener = listener;
+      }),
+      removeListener: vi.fn(),
+    };
+    const gm = installGmMock();
+    vi.stubGlobal('chrome', { storage: { onChanged } });
+
+    const callback = vi.fn();
+    const { adapter, storageKey } = getTestAdapter();
+    adapter.addListener(callback);
+
+    expect(onChanged.addListener).toHaveBeenCalledOnce();
+    expect(gm.addListener).not.toHaveBeenCalled();
+
+    if (!chromeListener) throw new Error('Chrome listener was not registered');
+    chromeListener({ [storageKey]: { newValue: 'chrome-value' } }, 'local');
+
+    expect(callback).toHaveBeenCalledWith(storageKey, 'chrome-value');
+  });
+
+  it('falls back to GM sync when chrome storage is only partially available', () => {
+    const gm = installGmMock();
+    vi.stubGlobal('chrome', {
+      storage: {
+        onChanged: { removeListener: vi.fn() },
+      },
+    });
+
+    const callback = vi.fn();
+    const { adapter, storageKey } = getTestAdapter();
+    adapter.addListener(callback);
+
+    expect(gm.addListener).toHaveBeenCalledOnce();
+    const gmListener = gm.listeners.values().next().value;
+    if (!gmListener) throw new Error('GM listener was not registered');
+    gmListener(storageKey, undefined, 'gm-value', true);
+
+    expect(callback).toHaveBeenCalledWith(storageKey, 'gm-value');
+  });
+
+  it('replaces the previous GM listener when addListener is called again', () => {
+    const gm = installGmMock();
+    const firstCallback = vi.fn();
+    const secondCallback = vi.fn();
+    const { adapter, storageKey } = getTestAdapter();
+
+    adapter.addListener(firstCallback);
+    adapter.addListener(secondCallback);
+
+    expect(gm.addListener).toHaveBeenCalledTimes(2);
+    expect(gm.removeListener).toHaveBeenCalledOnce();
+    expect(gm.removeListener).toHaveBeenCalledWith(1);
+    expect(gm.listeners.size).toBe(1);
+
+    const gmListener = gm.listeners.values().next().value;
+    if (!gmListener) throw new Error('GM listener was not registered');
+    gmListener(storageKey, undefined, 'replacement-value', true);
+
+    expect(firstCallback).not.toHaveBeenCalled();
+    expect(secondCallback).toHaveBeenCalledOnce();
+    expect(secondCallback).toHaveBeenCalledWith(storageKey, 'replacement-value');
+  });
+
+  it('falls back to the window storage event when GM sync is unavailable', () => {
+    const callback = vi.fn();
+    const { adapter, storageKey } = getTestAdapter();
+    adapter.addListener(callback);
+
+    window.dispatchEvent(
+      new StorageEvent('storage', {
+        key: storageKey,
+        newValue: 'local-storage-value',
+      })
+    );
+
+    expect(callback).toHaveBeenCalledOnce();
+    expect(callback).toHaveBeenCalledWith(storageKey, 'local-storage-value');
   });
 });

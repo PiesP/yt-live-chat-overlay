@@ -75,18 +75,6 @@ function isChromeSyncAvailableDirect(): boolean {
   }
 }
 
-function isChromeSyncAvailable(): boolean {
-  try {
-    return (
-      typeof chrome !== 'undefined' &&
-      chrome.storage !== undefined &&
-      chrome.storage.onChanged !== undefined
-    );
-  } catch (_error: unknown) {
-    return false;
-  }
-}
-
 // ── GM value-change sync ──────────────────────────────────────────────────
 
 function createGmSyncAdapter(storageKey: string): CrossTabSyncAdapter {
@@ -95,6 +83,10 @@ function createGmSyncAdapter(storageKey: string): CrossTabSyncAdapter {
 
   return {
     addListener(callback: (key: string, newValue: unknown) => void): void {
+      if (listenerId !== null && typeof GM_removeValueChangeListener !== 'undefined') {
+        GM_removeValueChangeListener(listenerId);
+        listenerId = null;
+      }
       currentCallback = callback;
       listenerId = GM_addValueChangeListener(
         storageKey,
@@ -163,7 +155,7 @@ export function getCrossTabSyncAdapter(storageKey: string): CrossTabSyncAdapter 
   }
 
   if (
-    isChromeSyncAvailable() ||
+    isChromeSyncAvailableDirect() ||
     window.__ytExtensionBridge?.storageType === 'chrome.storage.local'
   ) {
     cachedAdapter = createChromeSyncAdapter(storageKey);
