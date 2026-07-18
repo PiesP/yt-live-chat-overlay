@@ -553,24 +553,9 @@ export class CanvasRenderer extends RendererBase {
       const msgId = message.id ?? `${message.timestamp}-${++fallbackMessageIdCounter}`;
       this.workerManager.sendToWorker(message, msgId);
 
-      this.imageFetchManager.prefetchImages(message);
+      this.prefetchAndTranslateForWorker(message, msgId);
       this.lastRenderActivity = performance.now();
 
-      // Pre-emptively trigger translation and forward to worker.
-      // The worker needs translated text for rendering; we send it
-      // asynchronously so it arrives before or shortly after the
-      // placed-message batch.
-      const translatableText = getTranslatableText(message);
-      if (this.translationService.isEnabled && translatableText) {
-        this.translationService
-          .translate(translatableText)
-          .then((translated) => {
-            this.workerManager.sendTranslation(msgId, translated);
-          })
-          .catch(() => {
-            // Silently ignore individual translation failures
-          });
-      }
       return;
     }
 
@@ -592,6 +577,7 @@ export class CanvasRenderer extends RendererBase {
     if (this.workerManager.isActive) {
       const msgId = message.id ?? `${message.timestamp}-${++fallbackMessageIdCounter}`;
       this.workerManager.sendToWorker(message, msgId);
+      this.prefetchAndTranslateForWorker(message, msgId);
       return;
     }
     this.enqueueMessage(message, false);
@@ -607,6 +593,7 @@ export class CanvasRenderer extends RendererBase {
       if (this.workerManager.isActive) {
         const msgId = message.id ?? `${message.timestamp}-${++fallbackMessageIdCounter}`;
         this.workerManager.sendToWorker(message, msgId);
+        this.prefetchAndTranslateForWorker(message, msgId);
       } else {
         this.enqueueMessage(message, false);
       }
@@ -1645,6 +1632,27 @@ export class CanvasRenderer extends RendererBase {
   }
 
   // ── Backlog pause ────────────────────────────────────────────────────
+
+  /**
+   * Prefetch images and trigger translation for a message destined for the
+   * worker renderer.  Shared by addMessage, replayMessage, and
+   * onResumeFromVideoPause so replayed and video-unpaused messages receive
+   * the same pre-processing as live messages.
+   */
+  private prefetchAndTranslateForWorker(message: ChatMessage, msgId: string): void {
+    this.imageFetchManager.prefetchImages(message);
+    const translatableText = getTranslatableText(message);
+    if (this.translationService.isEnabled && translatableText) {
+      this.translationService
+        .translate(translatableText)
+        .then((translated) => {
+          this.workerManager.sendTranslation(msgId, translated);
+        })
+        .catch(() => {
+          // Silently ignore individual translation failures
+        });
+    }
+  }
 
   private getEffectiveBacklogSpeed(): number {
     const speed = this.settings.speedPxPerSec * Math.max(1, this.settings.backlogSpeedMultiplier);

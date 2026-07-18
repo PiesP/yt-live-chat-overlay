@@ -466,7 +466,10 @@ export class RenderWorkerManager {
       if (!bitmap) return;
       transferList.push(bitmap);
       transferredImages.push({ url, bitmap, target });
-      this.deps.imageFetchManager.workerBitmapCache.delete(url); // bitmap is detached on transfer
+      // Suppress onEvict (bitmap.close()): the bitmap is being transferred
+      // via postMessage, not evicted from cache.  Calling close() before
+      // transfer causes DataCloneError or transfers an empty bitmap.
+      this.deps.imageFetchManager.workerBitmapCache.delete(url, true);
     };
 
     for (const seg of content) {

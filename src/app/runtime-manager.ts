@@ -1352,7 +1352,10 @@ export class RuntimeManager {
       }
       this.restartTimer = setTimeout(() => {
         this.restartTimer = null;
-        if (this.isDisposedState) return;
+        // isDisposedState includes 'restarting', but we are intentionally in
+        // 'restarting' state during deferred restart.  Check only for terminal
+        // states where the instance has been torn down and cannot be reused.
+        if (this.state === 'disposed' || this.state === 'destroyed') return;
         log.info('runtime.restart.requested', {
           reason,
           attempt: this.consecutiveWatchdogRestarts,
