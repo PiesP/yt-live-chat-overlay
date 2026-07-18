@@ -57,10 +57,19 @@ export const MOCK_HTML = `<!DOCTYPE html>
 // ─── Actual Default Settings (from the app) ──────────────────────────────────
 
 /**
- * OverlaySettings default values as produced by the running app.
- * Captured via debug-settings debug test so tests use accurate values.
+ * OverlaySettings default values imported directly from the source code.
+ * This eliminates the maintenance burden of keeping test fixtures in sync
+ * with src/settings/defaults.ts — any production default changes
+ * automatically propagate to E2E tests.
  */
+import { DEFAULT_SETTINGS as SRC_DEFAULTS } from '../../../src/settings/defaults';
 export const DEFAULT_SETTINGS: Record<string, unknown> = {
+  ...SRC_DEFAULTS,
+  // Deep-copy nested objects so tests can mutate without side effects
+  showAuthor: { ...SRC_DEFAULTS.showAuthor },
+  colors: { ...SRC_DEFAULTS.colors },
+  outline: { ...SRC_DEFAULTS.outline },
+};
   enabled: true,
   danmakuMode: 'scroll',
   speedPxPerSec: 250,

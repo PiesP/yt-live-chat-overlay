@@ -131,7 +131,7 @@ test.describe('YT Live Chat Overlay E2E', () => {
       const w = window as unknown as Record<string, unknown>;
       // The App class exposes window.__ytChatOverlay for debugging
       // Even if undefined (not a watch page), the script ran without error
-      return w.__ytChatOverlay !== undefined || true; // Trust addInitScript ran
+      return w.__ytChatOverlay !== undefined;
     });
 
     expect(scriptRan).toBe(true);
