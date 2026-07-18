@@ -16,11 +16,11 @@ declare const URLPattern: {
 const hasURLPattern = typeof URLPattern !== 'undefined';
 
 const watchPattern = hasURLPattern
-  ? new URLPattern({ hostname: '(www.)?youtube.com', pathname: '/watch' })
+  ? new URLPattern({ hostname: 'www.youtube.com', pathname: '/watch' })
   : null;
 
 const livePattern = hasURLPattern
-  ? new URLPattern({ hostname: '(www.)?youtube.com', pathname: '/live/*' })
+  ? new URLPattern({ hostname: 'www.youtube.com', pathname: '/live/*' })
   : null;
 
 export function isYouTubeWatch(url: string): boolean {
@@ -28,7 +28,7 @@ export function isYouTubeWatch(url: string): boolean {
   try {
     const u = new URL(url);
     return (
-      (u.hostname === 'www.youtube.com' || u.hostname === 'youtube.com') && u.pathname === '/watch'
+      u.hostname === 'www.youtube.com' && u.pathname === '/watch'
     );
   } catch {
     return false;
@@ -40,7 +40,7 @@ export function isYouTubeLive(url: string): boolean {
   try {
     const u = new URL(url);
     return (
-      (u.hostname === 'www.youtube.com' || u.hostname === 'youtube.com') &&
+      u.hostname === 'www.youtube.com' &&
       u.pathname.startsWith('/live/')
     );
   } catch {
