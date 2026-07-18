@@ -31,7 +31,7 @@ import { DEFAULT_TEXT_COLOR, rendererLayout, spacing } from '@util/design-tokens
  * right-side curves. Useful for accent bars and similar left-edge-only
  * decorative elements.
  */
-function drawLeftRoundedRect(
+export function drawLeftRoundedRect(
   ctx: CanvasRenderingContext2D,
   x: number,
   y: number,
