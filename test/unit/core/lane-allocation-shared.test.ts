@@ -9,6 +9,9 @@ import {
   heapGetSlotAvailableAt,
   heapUpdateLane,
   buildLaneHeap,
+  resetBatchShared,
+  commitPlacementShared,
+  shiftLaneTimersShared,
   allocateSingleLaneShared,
   findPlacementShared,
   HEADWAY_GAP_MAX_PX,
@@ -360,5 +363,127 @@ describe('findPlacementShared', () => {
     } finally {
       vi.restoreAllMocks();
     }
+  });
+});
+
+// ── resetBatchShared ─────────────────────────────────────────────
+
+describe('resetBatchShared', () => {
+  it('clears collided lanes', () => {
+    const state = makeState(4);
+    state.collidedLanes.add(0);
+    state.collidedLanes.add(2);
+    expect(state.collidedLanes.size).toBe(2);
+
+    resetBatchShared(state);
+    expect(state.collidedLanes.size).toBe(0);
+  });
+
+  it('prunes expired speed tier entries', () => {
+    vi.spyOn(performance, 'now').mockReturnValue(5000);
+    try {
+      const state = makeState(4);
+      state.speedTierLanes.set(0, { tier: 2, until: 3000 });
+      state.speedTierLanes.set(1, { tier: 1, until: 7000 });
+
+      resetBatchShared(state);
+      expect(state.speedTierLanes.has(0)).toBe(false);
+      expect(state.speedTierLanes.has(1)).toBe(true);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('prunes speed tier entries that expire exactly at now', () => {
+    vi.spyOn(performance, 'now').mockReturnValue(5000);
+    try {
+      const state = makeState(4);
+      state.speedTierLanes.set(0, { tier: 2, until: 5000 });
+
+      resetBatchShared(state);
+      expect(state.speedTierLanes.has(0)).toBe(false);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+});
+
+// ── commitPlacementShared ────────────────────────────────────────
+
+describe('commitPlacementShared', () => {
+  it('updates single-slot placement', () => {
+    const state = makeState(4);
+    commitPlacementShared(state, 1, 1, 1000, 600, 3000, 1);
+
+    expect(state.collidedLanes.has(1)).toBe(true);
+    expect(state.speedTierLanes.get(1)).toEqual({ tier: 1, until: 4000 });
+    const avail = heapGetSlotAvailableAt(state.heap, state.indexMap, 1);
+    expect(avail).toBe(1600);
+  });
+
+  it('updates multi-slot placement', () => {
+    const state = makeState(8);
+    commitPlacementShared(state, 2, 3, 2000, 1000, 5000, 2);
+
+    expect(state.collidedLanes.has(2)).toBe(true);
+    expect(state.collidedLanes.has(3)).toBe(true);
+    expect(state.collidedLanes.has(4)).toBe(true);
+    expect(state.collidedLanes.has(5)).toBe(false);
+
+    expect(state.speedTierLanes.get(2)!.tier).toBe(2);
+    expect(state.speedTierLanes.get(3)!.tier).toBe(2);
+    expect(state.speedTierLanes.get(4)!.tier).toBe(2);
+
+    expect(heapGetSlotAvailableAt(state.heap, state.indexMap, 2)).toBe(3000);
+    expect(heapGetSlotAvailableAt(state.heap, state.indexMap, 3)).toBe(3000);
+    expect(heapGetSlotAvailableAt(state.heap, state.indexMap, 4)).toBe(3000);
+  });
+});
+
+// ── shiftLaneTimersShared ────────────────────────────────────────
+
+describe('shiftLaneTimersShared', () => {
+  it('shifts all lane available times forward', () => {
+    const state = makeState(4, 1000);
+    shiftLaneTimersShared(state, 500);
+
+    for (let i = 0; i < 4; i++) {
+      const avail = heapGetSlotAvailableAt(state.heap, state.indexMap, i);
+      expect(avail).toBe(1500);
+    }
+  });
+
+  it('shifts speed tier tracking', () => {
+    const state = makeState(4, 1000);
+    state.speedTierLanes.set(0, { tier: 1, until: 2000 });
+    state.speedTierLanes.set(1, { tier: 2, until: 3000 });
+
+    shiftLaneTimersShared(state, 500);
+
+    expect(state.speedTierLanes.get(0)!.until).toBe(2500);
+    expect(state.speedTierLanes.get(1)!.until).toBe(3500);
+  });
+
+  it('handles negative shift', () => {
+    const state = makeState(4, 1000);
+    shiftLaneTimersShared(state, -300);
+
+    for (let i = 0; i < 4; i++) {
+      const avail = heapGetSlotAvailableAt(state.heap, state.indexMap, i);
+      expect(avail).toBe(700);
+    }
+  });
+
+  it('handles zero shift (no-op)', () => {
+    const state = makeState(4, 1000);
+    state.speedTierLanes.set(0, { tier: 1, until: 2000 });
+
+    shiftLaneTimersShared(state, 0);
+
+    for (let i = 0; i < 4; i++) {
+      const avail = heapGetSlotAvailableAt(state.heap, state.indexMap, i);
+      expect(avail).toBe(1000);
+    }
+    expect(state.speedTierLanes.get(0)!.until).toBe(2000);
   });
 });
