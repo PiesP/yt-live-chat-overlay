@@ -40,6 +40,7 @@ import {
   renderRegularMessage,
   renderSegment,
   renderWrappedContentSegments,
+  splitGraphemeClusters,
   strokeTextOutline,
   type TextBitmapCache,
   toSharedContentSegments,
@@ -118,18 +119,6 @@ function measureTextHeight(
     if (ascent > 0 && descent > 0) return Math.ceil(ascent + descent);
   }
   return Math.ceil(fontSize * 1.1);
-}
-
-/** Split text into grapheme clusters for safe truncation.
- *  Uses Intl.Segmenter when available, falling back to Array.from
- *  which handles most multi-byte (but not all combined) characters. */
-function splitGraphemeClusters(text: string): string[] {
-  try {
-    const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
-    return [...segmenter.segment(text)].map((s) => s.segment);
-  } catch {
-    return Array.from(text);
-  }
 }
 
 // ── Config-driven paid card renderer (worker variant) ────────────────────────

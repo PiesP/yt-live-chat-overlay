@@ -48,12 +48,12 @@ import {
   toSharedContentSegments,
   warmTextBitmapCache,
 } from '@renderer/canvas/shared';
+import { computeHeadwayPx, getSpeedTier } from '@renderer/canvas/speed-tier';
 import {
   type CanvasMessage,
   GRADIENT_CACHE_MAX,
   HORIZONTAL_STAGGER_MAX,
   HORIZONTAL_STAGGER_PER_STEP,
-  hashStringForTier,
   IDLE_GRACE_PERIOD_MS,
   OPACITY_BUCKET_COUNT,
   SPEED_TIER,
@@ -61,12 +61,10 @@ import {
   STAGGER_EXP_SCALE,
   STAGGER_QUEUE_HIGH,
   STAGGER_QUEUE_MED,
-  TIER_NEAR_THRESHOLD,
   TRANSLATION_FONT_SCALE,
   TRANSLATION_GAP_PX,
 } from '@renderer/constants';
 import type { LanePlacement } from '@renderer/layout/lane-allocator';
-import { computeBaseHeadwayPx } from '@renderer/layout/lane-shared';
 import type { ConnectionStatus } from '@renderer/renderer-base';
 import { RendererBase } from '@renderer/renderer-base';
 import {
@@ -1637,15 +1635,13 @@ export class CanvasRenderer extends RendererBase {
     activeSpeedTier: number,
     newSpeedTier: number
   ): number {
-    const base = computeBaseHeadwayPx(activeWidth, this.settings.headwayGapRatio);
-    // Only apply the backlog multiplier when the active message is in BACKLOG
-    // tier — the multiplier gives backlog messages more lead time so faster
-    // chasers don't visually cross through them.  A plain new-taller-than-active
-    // check would spuriously scale headway for normal tier transitions.
-    if (activeSpeedTier === SPEED_TIER.BACKLOG && newSpeedTier > activeSpeedTier) {
-      return Math.round(base * this.settings.backlogSpeedMultiplier);
-    }
-    return base;
+    return computeHeadwayPx(
+      activeWidth,
+      activeSpeedTier,
+      newSpeedTier,
+      this.settings.headwayGapRatio,
+      this.settings.backlogSpeedMultiplier
+    );
   }
 
   // ── Backlog pause ────────────────────────────────────────────────────
@@ -1672,21 +1668,14 @@ export class CanvasRenderer extends RendererBase {
 
   /**
    * Compute the speed tier for a message based on settings and message properties.
-   * Speed tiers: 0=Far, 1=Mid, 2=Near, 3=Backlog.
+   * Delegates to the pure {@link getSpeedTier} function in {@link @renderer/canvas/speed-tier}.
    */
   private getSpeedTier(message: ChatMessage): number {
-    if (message.isBacklog) return SPEED_TIER.BACKLOG;
-    if (!this.settings.depthLayersEnabled) return SPEED_TIER.MID;
-    const mode = this.settings.danmakuMode;
-    if (mode !== 'scroll' && mode !== 'reverse') return SPEED_TIER.MID;
-    // SuperChat/Membership → Near tier
-    if (message.kind === 'superchat' || message.kind === 'membership') return SPEED_TIER.NEAR;
-    // Regular messages: deterministic assignment via message id hash
-    const hash = hashStringForTier(message.id ?? String(message.timestamp));
-    return hash < TIER_NEAR_THRESHOLD ? SPEED_TIER.NEAR : SPEED_TIER.FAR;
+    return getSpeedTier(message, {
+      depthLayersEnabled: this.settings.depthLayersEnabled,
+      danmakuMode: this.settings.danmakuMode,
+    });
   }
-
-  // hashStringForTier imported from @renderer/constants
 
   // ── Opacity ──────────────────────────────────────────────────────────
 
