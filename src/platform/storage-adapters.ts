@@ -58,8 +58,13 @@ function setupStorageRelay(): StorageAdapter | null {
 
   // Listen for relay responses from the ISOLATED content script.
   const relayListener = (event: MessageEvent): void => {
+    // Verify the message comes from our own window and origin
+    if (event.source !== window) return;
+    if (event.origin !== window.location.origin) return;
+
     const data = event.data;
-    if (data?.source !== 'yt-storage-relay-response') return;
+    if (!data || typeof data !== 'object') return;
+    if (data.source !== 'yt-storage-relay-response') return;
     const entry = pending.get(data.requestId as number);
     if (!entry) return;
     pending.delete(data.requestId as number);
