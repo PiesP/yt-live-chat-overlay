@@ -10,8 +10,6 @@
 import type { RgbColor, SuperChatInfo } from '@app-types';
 import { MS_TO_S } from '@renderer/constants';
 
-export { resolveSuperChatRgb } from '@renderer/color-utils';
-
 /**
  * Compute DLIOS animation duration from total travel distance and velocity.
  *
