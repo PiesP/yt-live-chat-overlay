@@ -156,4 +156,65 @@ test.describe('Renderer Lifecycle', () => {
     });
     await expect(canvas).toBeAttached({ timeout: 3000 });
   });
+
+  test('rapid mode switching does not crash renderer', async ({ page }) => {
+    await setupOverlayPage(page);
+
+    const canvas = page.locator(`#${OVERLAY_ID} canvas`);
+
+    const modes = ['scroll', 'reverse', 'top', 'bottom'];
+    for (let i = 0; i < 3; i++) {
+      for (const mode of modes) {
+        await applySettings(page, { danmakuMode: mode });
+        await expect(canvas).toBeAttached({ timeout: 3000 });
+      }
+    }
+  });
+
+  test('rapid settings toggling does not crash renderer', async ({ page }) => {
+    await setupOverlayPage(page);
+
+    const canvas = page.locator(`#${OVERLAY_ID} canvas`);
+
+    // Toggle depth layers on/off rapidly
+    for (let i = 0; i < 4; i++) {
+      await applySettings(page, { depthLayersEnabled: i % 2 === 0 });
+      await expect(canvas).toBeAttached({ timeout: 2000 });
+    }
+
+    // Toggle outline on/off rapidly
+    for (let i = 0; i < 4; i++) {
+      await applySettings(page, {
+        outline: { enabled: i % 2 === 0, widthPx: 2, opacity: 0.7 },
+      });
+      await expect(canvas).toBeAttached({ timeout: 2000 });
+    }
+
+    // Toggle motion blur on/off rapidly
+    for (let i = 0; i < 4; i++) {
+      await applySettings(page, { motionBlurEnabled: i % 2 === 0 });
+      await expect(canvas).toBeAttached({ timeout: 2000 });
+    }
+  });
+
+  test('overlay survives disable/re-enable via settings', async ({ page }) => {
+    await setupOverlayPage(page);
+
+    const canvas = page.locator(`#${OVERLAY_ID} canvas`);
+    await expect(canvas).toBeAttached({ timeout: 5000 });
+
+    // Disable
+    await applySettings(page, { enabled: false });
+    await page.waitForTimeout(1000);
+
+    // Re-enable
+    await applySettings(page, { enabled: true });
+    await page.waitForTimeout(2000);
+
+    // Canvas should be recreated
+    await expect(canvas).toBeAttached({ timeout: 5000 });
+    const box = await canvas.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.width).toBeGreaterThan(0);
+  });
 });
