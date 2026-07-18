@@ -2,7 +2,7 @@
 // Copyright (c) 2026 PiesP
 
 import { describe, it, expect } from 'vitest';
-import { getFontString } from '@renderer/text-measure';
+import { getFontString, measureBoundingBoxWidth } from '@renderer/text-measure';
 import { DEFAULT_FONT_FAMILY } from '@util/design-tokens';
 
 describe('getFontString', () => {
@@ -41,5 +41,87 @@ describe('getFontString', () => {
   it('builds string with spaces between weight, size, and family', () => {
     const result = getFontString(24, 'bold', '"Inter", sans-serif');
     expect(result).toBe('bold 24px "Inter", sans-serif');
+  });
+});
+
+// ── measureBoundingBoxWidth ──────────────────────────────────────────
+
+describe('measureBoundingBoxWidth', () => {
+  it('uses bounding box when it is positive', () => {
+    const m = {
+      actualBoundingBoxLeft: 2,
+      actualBoundingBoxRight: 48,
+      width: 55,
+    };
+    // 2 + 48 = 50, ceil → 50
+    expect(measureBoundingBoxWidth(m)).toBe(50);
+  });
+
+  it('uses bounding box when left is negative', () => {
+    const m = {
+      actualBoundingBoxLeft: -2,
+      actualBoundingBoxRight: 48,
+      width: 55,
+    };
+    // |−2| + 48 = 50, ceil → 50
+    expect(measureBoundingBoxWidth(m)).toBe(50);
+  });
+
+  it('uses bounding box when right is negative', () => {
+    const m = {
+      actualBoundingBoxLeft: 2,
+      actualBoundingBoxRight: -1,
+      width: 55,
+    };
+    // 2 + |−1| = 3, ceil → 3
+    expect(measureBoundingBoxWidth(m)).toBe(3);
+  });
+
+  it('falls back to width when bounding box sum is zero', () => {
+    const m = {
+      actualBoundingBoxLeft: 0,
+      actualBoundingBoxRight: 0,
+      width: 55,
+    };
+    // 0 + 0 = 0 → fallback to Math.ceil(55) = 55
+    expect(measureBoundingBoxWidth(m)).toBe(55);
+  });
+
+  it('falls back to width when bounding box sum is negative (should not happen)', () => {
+    const m = {
+      actualBoundingBoxLeft: -10,
+      actualBoundingBoxRight: 9,
+      width: 55,
+    };
+    // |−10| + 9 = 19, ceil → 19 (positive, uses bb)
+    expect(measureBoundingBoxWidth(m)).toBe(19);
+  });
+
+  it('ceils the width fallback', () => {
+    const m = {
+      actualBoundingBoxLeft: 0,
+      actualBoundingBoxRight: 0,
+      width: 12.3,
+    };
+    expect(measureBoundingBoxWidth(m)).toBe(13);
+  });
+
+  it('ceils the bounding box value', () => {
+    const m = {
+      actualBoundingBoxLeft: 1.2,
+      actualBoundingBoxRight: 3.8,
+      width: 10,
+    };
+    // 1.2 + 3.8 = 5.0, ceil → 5
+    expect(measureBoundingBoxWidth(m)).toBe(5);
+  });
+
+  it('handles large TextMetrics values', () => {
+    const m = {
+      actualBoundingBoxLeft: 123,
+      actualBoundingBoxRight: 456,
+      width: 600,
+    };
+    expect(measureBoundingBoxWidth(m)).toBe(579);
   });
 });
