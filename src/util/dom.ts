@@ -106,6 +106,11 @@ export async function findPlayerContainerElement(
     return immediate.element;
   }
 
+  // Guard against already-aborted signals before setting up the
+  // MutationObserver + fallback timer (which can take up to
+  // intervalMs * attempts before detecting the abort).
+  throwIfAborted(signal);
+
   // Use MutationObserver for instant detection when the player element
   // appears in the DOM (SPA navigation, slow rendering). Falls back to
   // polling if MutationObserver is not available or times out.
