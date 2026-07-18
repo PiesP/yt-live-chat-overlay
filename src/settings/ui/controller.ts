@@ -94,6 +94,10 @@ export class SettingsUi {
   private previewTimer: ReturnType<typeof setTimeout> | null = null;
   private static readonly PREVIEW_DEBOUNCE_MS = 100;
 
+  /** Abort controller for async attach(). Aborted on destroy() to prevent
+   *  stale UI creation after SPA navigation cancels the pending player lookup. */
+  private attachAbortController: AbortController | null = null;
+
   private queuePreview(): void {
     this.previewTimer = clearSafeTimeout(this.previewTimer);
     this.previewTimer = setTimeout(() => {
@@ -106,7 +110,15 @@ export class SettingsUi {
   }
 
   async attach(): Promise<void> {
+    // Cancel any in-flight player lookup from a previous attach() that
+    // hasn't resolved yet (SPA navigation during await).
+    this.attachAbortController?.abort();
+    this.attachAbortController = new AbortController();
+    const { signal } = this.attachAbortController;
+
     const player = await this.findPlayerContainer();
+    if (signal.aborted) return;
+    this.attachAbortController = null;
     if (!player) return;
 
     if (
@@ -693,6 +705,11 @@ export class SettingsUi {
   }
 
   destroy(): void {
+    // Abort any in-flight player lookup so an already-cancelled attach()
+    // doesn't create stale UI on a page that has already navigated away.
+    this.attachAbortController?.abort();
+    this.attachAbortController = null;
+
     // Close dialog first to persist settings and restore scroll lock
     // if it was open (e.g., SPA navigation while dialog is visible).
     if (this.isDialogOpen()) {

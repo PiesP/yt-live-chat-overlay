@@ -30,6 +30,7 @@
 /// <reference lib="webworker" />
 
 import type { ChatMessage, FontWeight } from '@app-types';
+import { isAllowedImageUrl } from '@media/image-url-validation';
 import { getCachedGradient } from '@renderer/canvas/gradient-utils';
 import { computePulseAlpha } from '@renderer/canvas/lut-helpers';
 import { fastRandom } from '@renderer/canvas/pipeline-utils';
@@ -1562,6 +1563,10 @@ export class WorkerRenderer {
           while (idx < toFetch.length) {
             const url = toFetch[idx++];
             if (url === undefined) break;
+            if (!isAllowedImageUrl(url)) {
+              this.fetching.delete(url);
+              continue;
+            }
             this.fetching.add(url);
             let timer: ReturnType<typeof setTimeout> | undefined;
             try {
