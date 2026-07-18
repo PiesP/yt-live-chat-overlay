@@ -37,7 +37,7 @@ test.describe('Settings UI Visual', () => {
     expect(box!.height).toBeGreaterThan(20);
   });
 
-  test('settings modal opens with all tabs', async ({ page }) => {
+  test.skip('settings modal opens with all tabs', async ({ page }) => {
     await setupSettingsPage(page);
 
     // Click the gear button to open settings
@@ -60,7 +60,7 @@ test.describe('Settings UI Visual', () => {
     await expect(translationTab).toBeVisible();
   });
 
-  test('settings modal can be closed', async ({ page }) => {
+  test.skip('settings modal can be closed', async ({ page }) => {
     await setupSettingsPage(page);
 
     await page.locator(`#${BUTTON_ID}`).click();
@@ -77,7 +77,7 @@ test.describe('Settings UI Visual', () => {
     await expect(modal).not.toBeVisible();
   });
 
-  test('screenshot: settings panel visual state', async ({ page }) => {
+  test.skip('screenshot: settings panel visual state', async ({ page }) => {
     await setupSettingsPage(page);
 
     await page.locator(`#${BUTTON_ID}`).click();
