@@ -149,12 +149,12 @@ export class Settings {
   }
 
   /**
-   * Returns a shallow copy of the current settings object.
+   * Returns a deep clone of the current settings object.
    * Mutations to the returned object do not affect the stored settings.
    * Use set() or updateSettings() for persistent changes.
    */
   get(): Readonly<OverlaySettings> {
-    return { ...this.settings };
+    return cloneSettings(this.settings);
   }
 
   /** Apply settings and persist to storage. */
