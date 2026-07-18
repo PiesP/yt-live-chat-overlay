@@ -573,9 +573,8 @@ export class TranslationService {
    * translator.
    *
    * When the translator instance dies (destroyed after consecutive failures),
-   * the next call automatically attempts recovery by recreating it via
-   * doConfigure() with the preserved language pair. This means translations
-   * resume without requiring user interaction (settings change, click).
+   * the language pair is preserved for a later retry. Recovery requires
+   * onUserActivation() or an explicit configure() / settings action.
    *
    * @param text The text to translate.
    */
