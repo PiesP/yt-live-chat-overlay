@@ -300,7 +300,7 @@ export class CanvasRenderer extends RendererBase {
     }
 
     // Check channel memory for cached language
-    const channelKey = ChannelLanguageMemory.keyFromUrl(location.href);
+    const channelKey = ChannelLanguageMemory.resolveKey(location.href, document);
     const cachedSource = channelKey ? this.channelMemory?.get(channelKey) : undefined;
 
     void this.translationService
@@ -1884,7 +1884,7 @@ export class CanvasRenderer extends RendererBase {
     try {
       const detected = await this.languageDetector.detectFromSamples(this.sourceSampleBuffer);
       if (detected) {
-        const channelKey = ChannelLanguageMemory.keyFromUrl(location.href);
+        const channelKey = ChannelLanguageMemory.resolveKey(location.href, document);
         if (channelKey && this.channelMemory) {
           this.channelMemory.set(channelKey, detected);
         }

@@ -85,8 +85,8 @@ export class PerAuthorRateLimiter {
     const burstLevel = this.getBurstLevel();
     const burstLimit = BURST_LIMITS[burstLevel];
 
-    if (burstLimit !== null) return burstLimit;
-    return this.maxPerWindow;
+    if (burstLimit === null) return this.maxPerWindow;
+    return Math.min(this.maxPerWindow, burstLimit);
   }
 
   private pruneStaleEntries(now: number = Date.now()): void {

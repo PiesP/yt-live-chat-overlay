@@ -44,9 +44,66 @@ export class ChannelLanguageMemory {
     }
   }
 
+  /**
+   * Extract a stable channel identifier from the page DOM.
+   *
+   * For watch pages, the URL only contains the video ID — not the channel.
+   * This method reads channel metadata from the page to return a per-channel key
+   * (e.g. `@handle` or `UC…` channel ID) so that different streams from the same
+   * channel share language memory.
+   *
+   * @returns Channel key (`@handle` or `UC…`), or null if not found.
+   */
+  static keyFromDocument(doc: Document): string | null {
+    // 1. <meta itemprop="channelId" content="UC..."> — most reliable
+    const metaChannelId = doc.querySelector<HTMLMetaElement>('meta[itemprop="channelId"]');
+    if (metaChannelId?.content) {
+      return metaChannelId.content;
+    }
+
+    // 2. #owner ytd-channel-name a → /@handle or /channel/UC...
+    const ownerLink = doc.querySelector<HTMLAnchorElement>('#owner ytd-channel-name a');
+    if (ownerLink) {
+      const path = ownerLink.getAttribute('href');
+      if (path) {
+        return ChannelLanguageMemory.keyFromUrl(`https://www.youtube.com${path}`);
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Resolve the best channel key for a YouTube page.
+   *
+   * Watch pages (`/watch?v=…`) use DOM-based channel ID when available,
+   * falling back to the video ID from the URL. Channel pages (`/@handle`,
+   * `/channel/UC…`) use the URL-based key directly.
+   *
+   * @returns Channel/video key, or null for non-YouTube pages.
+   */
+  static resolveKey(url: string, doc?: Document): string | null {
+    const urlKey = ChannelLanguageMemory.keyFromUrl(url);
+    if (!urlKey) return null;
+
+    // Watch pages: prefer channel ID from DOM so same-channel streams share memory
+    if (doc && url.includes('/watch')) {
+      const channelKey = ChannelLanguageMemory.keyFromDocument(doc);
+      if (channelKey) return channelKey;
+    }
+
+    return urlKey;
+  }
+
   /** Get the cached language for a channel key, or undefined if not cached. */
   get(key: string): TranslationLanguage | undefined {
-    return this.map.get(key);
+    const language = this.map.get(key);
+    if (language === undefined) return undefined;
+
+    // LRU: move a read entry to the most recently used position.
+    this.map.delete(key);
+    this.map.set(key, language);
+    return language;
   }
 
   /**

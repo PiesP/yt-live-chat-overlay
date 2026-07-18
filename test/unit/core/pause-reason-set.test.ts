@@ -1,11 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import type { OverlaySettings } from '@app-types';
 import { ChatSource } from '@chat/source-base';
+import type { ChatBootstrapData } from '@chat/youtube/api';
 import { DEFAULT_SETTINGS } from '@settings/schema';
 
 // ── Minimal concrete ChatSource for testing pause reason set ────────
 
 class TestChatSource extends ChatSource {
+  lastLaunchedSignal: AbortSignal | undefined;
+
   constructor(getSettings: () => Readonly<OverlaySettings>) {
     super(getSettings);
   }
@@ -14,8 +17,8 @@ class TestChatSource extends ChatSource {
     return true;
   }
 
-  protected launchCurrentPollLoop(): void {
-    // no-op for testing
+  protected launchCurrentPollLoop(signal?: AbortSignal): void {
+    this.lastLaunchedSignal = signal;
   }
 }
 
@@ -106,6 +109,30 @@ describe('ChatSource pause reason set', () => {
     source.injectExternalMessages([]);
     source.injectExternalMessages([]);
 
+    source.stop();
+  });
+
+  it('stop aborts the polling signal even when start receives an external signal', async () => {
+    const source = createSource();
+    source.setInitialBootstrap({} as ChatBootstrapData);
+    const externalController = new AbortController();
+
+    const status = await source.start(() => {}, externalController.signal);
+
+    expect(status).toBe('started');
+    expect(source.lastLaunchedSignal?.aborted).toBe(false);
+    source.stop();
+    expect(source.lastLaunchedSignal?.aborted).toBe(true);
+    expect(externalController.signal.aborted).toBe(false);
+  });
+
+  it('does not reuse consumed bootstrap data on a later start', async () => {
+    const source = createSource();
+    source.setInitialBootstrap({} as ChatBootstrapData);
+
+    await expect(source.start(() => {})).resolves.toBe('started');
+
+    await expect(source.start(() => {})).resolves.toBe('unavailable');
     source.stop();
   });
 });

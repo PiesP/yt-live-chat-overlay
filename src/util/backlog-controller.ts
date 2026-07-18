@@ -315,7 +315,10 @@ export class BacklogInjectionController implements Pauseable {
     this.realTimeActivityCount = updatedActivityCount;
 
     const message = this.dequeueBacklog();
-    if (!message) return;
+    if (!message) {
+      this.finishBacklogInjection();
+      return;
+    }
     message.isBacklog = true;
     this.processedBacklog++;
 
