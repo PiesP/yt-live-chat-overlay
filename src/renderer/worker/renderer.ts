@@ -492,9 +492,11 @@ export class WorkerRenderer {
               (canvas) => canvas.width * canvas.height * 4
             );
             this.recomputeConfigDerived();
-            this.initLanes(data.width as number, data.height as number);
+            // Set logical dimensions BEFORE initLanes so that
+            // getEffectiveFontSize() can scale the font to the viewport.
             this.logicalWidth = data.width as number;
             this.logicalHeight = data.height as number;
+            this.initLanes(data.width as number, data.height as number);
             this.startRenderLoop();
             self.postMessage({ type: 'ready' });
             break;
@@ -1391,7 +1393,7 @@ export class WorkerRenderer {
       verticalOffset: number;
     },
     newMsgHeight: number,
-    newSpeedTier: number,
+    _newSpeedTier: number,
     now: number,
     screenWidth: number
   ): boolean {
@@ -1422,9 +1424,7 @@ export class WorkerRenderer {
       if (activeElapsed < 0) continue;
       if (active.y + active.height <= newTop || active.y >= newBottom) continue;
       if (isScrolling) {
-        let headwayPx = computeBaseHeadwayPx(active.width, this.config.headwayGapRatio);
-        if (active.speedTier === SPEED_TIER.BACKLOG && newSpeedTier > active.speedTier)
-          headwayPx = Math.round(headwayPx * this.config.backlogSpeedMultiplier);
+        const headwayPx = computeBaseHeadwayPx(active.width, this.config.headwayGapRatio);
         const activeProgress = Math.min(1, Math.max(0, activeElapsed * active.invDuration));
         if (mode === 'scroll') {
           if (
