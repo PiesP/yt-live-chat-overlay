@@ -420,12 +420,15 @@ export abstract class ChatSource implements Pauseable {
   private filterNewMessages(messages: ChatMessage[]): ChatMessage[] {
     const result: ChatMessage[] = [];
     for (const msg of messages) {
-      // H4: For messages without an id, use a content-based hash as fallback key.
-      // This prevents duplicate display when the fetch interceptor and poll loop
-      // both process the same API response for id-less messages.
-      const dedupKey = msg.id ?? this.computeContentHash(msg);
-      if (this.seenMessageIds.has(dedupKey)) continue;
-      this.seenMessageIds.mark(dedupKey);
+      // replaceChatItemAction messages carry the same ID as the original
+      // message they replace (e.g. SuperChat amount update, deletion).
+      // They must bypass dedup so the renderer can apply the update.
+      // Only track 'add' (or untagged) messages in seenMessageIds.
+      if (msg.actionType !== 'replace') {
+        const dedupKey = msg.id ?? this.computeContentHash(msg);
+        if (this.seenMessageIds.has(dedupKey)) continue;
+        this.seenMessageIds.mark(dedupKey);
+      }
       result.push(msg);
     }
     return result;
