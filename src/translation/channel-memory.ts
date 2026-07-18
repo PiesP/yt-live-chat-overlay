@@ -27,7 +27,7 @@ export class ChannelLanguageMemory {
   static keyFromUrl(url: string): string | null {
     try {
       const u = new URL(url);
-      if (u.hostname !== 'www.youtube.com' && u.hostname !== 'youtube.com') {
+      if (u.hostname !== 'www.youtube.com') {
         return null;
       }
       // Live stream or regular video: /watch?v=VIDEO_ID
