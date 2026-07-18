@@ -6,10 +6,10 @@
  * injecting the MAIN-world page script.
  *
  * In MV3 extensions, the MAIN world has no access to chrome.runtime or
- * chrome.storage. The ISOLATED content script resolves these values at
- * injection time and bakes them into an inline <script> that runs in the
- * MAIN world. Core platform adapters check this bridge first, falling
- * back to GM_* / localStorage if absent.
+ * chrome.storage. The ISOLATED content script resolves the worker URL and
+ * places it on the external page-script element. The page bundle initializes
+ * this object before the application starts. Core platform adapters check
+ * this bridge first, falling back to GM_* / localStorage if absent.
  */
 interface ExtensionBridge {
   /** Whether chrome.runtime.getURL is available (always true when bridge exists). */

@@ -5,7 +5,7 @@
  * Extension Content Script — runs in the ISOLATED world.
  *
  * Responsibilities:
- * 1. Inject the MAIN-world page script as a <script> element.
+ * 1. Inject the MAIN-world page script as an external <script> element.
  * 2. Relay menu commands from the background service worker to the
  *    page script via window.postMessage (strict origin validation).
  * 3. Relay chrome.storage.local requests from the MAIN-world page script
@@ -21,30 +21,21 @@
  * to load entirely.
  */
 
-// ── Inject extension bridge (MAIN world) ───────────────────────────────
-// In MV3, MAIN-world scripts cannot access chrome.runtime or chrome.storage.
-// We inject a small inline bridge that bakes in the resolved values so the
-// page script can discover extension capabilities without chrome.* APIs.
-
 const cr = (chrome as ChromeNamespace).runtime!;
 
-const bridgeScript = document.createElement('script');
-bridgeScript.type = 'text/javascript';
 const workerBundleUrl = cr.getURL('workers/renderer.js');
-bridgeScript.textContent =
-  'window.__ytExtensionBridge={' +
-  'workerSupported:true,' +
-  `workerUrl:${JSON.stringify(workerBundleUrl)},` +
-  `storageType:${JSON.stringify('chrome.storage.local')},` +
-  '};';
-(document.head || document.documentElement).appendChild(bridgeScript);
-
 // ── Inject page script ─────────────────────────────────────────────────
+//
+// Do not use script.textContent here. YouTube's CSP blocks inline script
+// execution, even when the element was created by an extension content script.
+// The page script reads these non-secret values from its own data attributes
+// before the application bundle is initialized.
 
 const pageScript = document.createElement('script');
 // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
 pageScript.src = cr.getURL('page-script.js');
 pageScript.type = 'text/javascript';
+pageScript.dataset.ytExtensionWorkerUrl = workerBundleUrl;
 (document.head || document.documentElement).appendChild(pageScript);
 
 // ── Storage relay (MAIN world → ISOLATED → chrome.storage.local) ─────

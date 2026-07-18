@@ -2,13 +2,19 @@
 // Copyright (c) 2026 PiesP
 
 /**
- * Extension Page Script — runs in the MAIN world, injected as a <script> tag
- * by the ISOLATED-world content script.
+ * Extension Page Script — runs in the MAIN world, injected as an external
+ * <script> tag by the ISOLATED-world content script.
  *
  * Has full access to the page's window (for app bootstrap) but NO access to
  * chrome.runtime. Menu commands are forwarded from the ISOLATED content script
  * via window.postMessage with strict origin validation.
  */
+
+// Initialize the extension bridge before importing main.ts. Static imports are
+// evaluated in dependency order, so the bridge is available while platform
+// adapters are initialized. This is deliberately an external-bundle path;
+// injecting inline JavaScript would violate YouTube's CSP.
+import './page-bridge';
 
 // Side-effect import: triggers application bootstrap in main.ts.
 // Vite bundles this as a self-executing IIFE with no module syntax.
