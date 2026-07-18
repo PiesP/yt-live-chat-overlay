@@ -334,13 +334,15 @@ export class ReplayChatSource extends ChatSource {
       void (async () => {
         try {
           if (gen !== this.seekGeneration) return;
-          await this.fetchReplayPlayerSeek(offsetMs, seekSignal);
+          const seekSuccess = await this.fetchReplayPlayerSeek(offsetMs, seekSignal);
           // Guard: if seekGeneration was incremented by a subsequent seek
           // during the fetch, discard stale data to avoid emitting messages
           // from an outdated seek position.
           if (gen !== this.seekGeneration) return;
           this.flushReplayBuffer(offsetMs);
-          this.startPrefetch();
+          if (seekSuccess) {
+            this.startPrefetch();
+          }
         } catch (error: unknown) {
           if (!isAbortError(error)) {
             log.debug('chat.replay.seek-fetch-failed', { error: String(error) });
@@ -351,9 +353,11 @@ export class ReplayChatSource extends ChatSource {
       void (async () => {
         try {
           if (gen !== this.seekGeneration) return;
-          await this.pollContinuationReplay(offsetMs, seekSignal);
+          const pollSuccess = await this.pollContinuationReplay(offsetMs, seekSignal);
           if (gen !== this.seekGeneration) return;
-          this.startPrefetch();
+          if (pollSuccess) {
+            this.startPrefetch();
+          }
         } catch (error: unknown) {
           if (!isAbortError(error)) {
             log.debug('chat.replay.continuation-failed', { error: String(error) });

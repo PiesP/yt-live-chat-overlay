@@ -26,9 +26,11 @@
 // We inject a small inline bridge that bakes in the resolved values so the
 // page script can discover extension capabilities without chrome.* APIs.
 
+const cr = (chrome as ChromeNamespace).runtime!;
+
 const bridgeScript = document.createElement('script');
 bridgeScript.type = 'text/javascript';
-const workerBundleUrl = chrome!.runtime!.getURL('workers/renderer.js');
+const workerBundleUrl = cr.getURL('workers/renderer.js');
 bridgeScript.textContent =
   'window.__ytExtensionBridge={' +
   'workerSupported:true,' +
@@ -41,7 +43,7 @@ bridgeScript.textContent =
 
 const pageScript = document.createElement('script');
 // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-pageScript.src = chrome!.runtime!.getURL('page-script.js');
+pageScript.src = cr.getURL('page-script.js');
 pageScript.type = 'text/javascript';
 (document.head || document.documentElement).appendChild(pageScript);
 

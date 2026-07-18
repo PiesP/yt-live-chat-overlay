@@ -60,9 +60,11 @@ pnpm build:extension:firefox
 
 ## Key Design Decisions
 
-- **MAIN world content script**: The extension uses `"world": "MAIN"` so that
-  `window.fetch` interception works identically to the userscript. This means
-  the content script runs in the same JavaScript context as the YouTube page.
+- **ISOLATED world content script**: The extension uses `"world": "ISOLATED"`.
+  A small page script is injected into MAIN world via a `<script>` element for
+  `window.fetch` interception, identical to the userscript. The content script
+  relays messages between the ISOLATED world (chrome.* API access) and the
+  MAIN world (YouTube page context).
 
 - **No webextension-polyfill dependency**: Chrome and Firefox use slightly
   different API namespaces (`chrome.*` vs `browser.*`), but the core code
