@@ -38,29 +38,7 @@ export function getSpeedTier(message: ChatMessage, config: SpeedTierConfig): num
   return hash < TIER_NEAR_THRESHOLD ? SPEED_TIER.NEAR : SPEED_TIER.FAR;
 }
 
-// ── Headway computation ────────────────────────────────────────────────────
-
-/**
- * Compute headway (minimum gap) in pixels between an active message
- * and a new message attempting to enter the same lane.
- *
- * @param activeWidth          — Width (px) of the active message already in the lane
- * @param activeSpeedTier      — Speed tier of the active message
- * @param newSpeedTier         — Speed tier of the new message
- * @param headwayGapRatio       — Gap ratio from settings (0-1)
- * @param backlogSpeedMultiplier — Multiplier applied when active message is in BACKLOG tier
- * @returns Minimum headway in whole pixels
- */
-export function computeHeadwayPx(
-  activeWidth: number,
-  activeSpeedTier: number,
-  newSpeedTier: number,
-  headwayGapRatio: number,
-  backlogSpeedMultiplier: number
-): number {
-  const base = Math.round(activeWidth * headwayGapRatio);
-  if (activeSpeedTier === SPEED_TIER.BACKLOG && newSpeedTier > activeSpeedTier) {
-    return Math.round(base * backlogSpeedMultiplier);
-  }
-  return base;
-}
+// ── Headway computation is now in @renderer/layout/lane-shared ──
+// computeBaseHeadwayPx() provides clamping to [16, 60] px and is shared
+// between the main-thread canvas renderer and the offscreen worker
+// renderer for parity.

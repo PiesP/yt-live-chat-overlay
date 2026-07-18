@@ -2,7 +2,8 @@
 // Copyright (c) 2026 PiesP
 
 import { describe, it, expect } from 'vitest';
-import { getSpeedTier, computeHeadwayPx, type SpeedTierConfig } from '@renderer/canvas/speed-tier';
+import { getSpeedTier, type SpeedTierConfig } from '@renderer/canvas/speed-tier';
+import { computeBaseHeadwayPx } from '@renderer/layout/lane-shared';
 import { SPEED_TIER } from '@renderer/constants';
 import type { ChatMessage } from '@app-types';
 
@@ -117,49 +118,34 @@ describe('getSpeedTier', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// computeHeadwayPx
+// computeBaseHeadwayPx (shared between main-thread and worker renderer)
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe('computeHeadwayPx', () => {
-  it('returns activeWidth × headwayGapRatio for normal tiers', () => {
-    const result = computeHeadwayPx(200, SPEED_TIER.MID, SPEED_TIER.NEAR, 0.08, 2);
-    expect(result).toBe(Math.round(200 * 0.08)); // 16
+describe('computeBaseHeadwayPx', () => {
+  it('returns clamped value (min 16, max 60)', () => {
+    // 200 × 0.08 = 16 → exactly at min
+    expect(computeBaseHeadwayPx(200, 0.08)).toBe(16);
+    // 800 × 0.08 = 64 → clamped to 60
+    expect(computeBaseHeadwayPx(800, 0.08)).toBe(60);
+    // 500 × 0.08 = 40 → within range
+    expect(computeBaseHeadwayPx(500, 0.08)).toBe(40);
   });
 
-  it('does NOT apply multiplier when active is BACKLOG (NEAR < BACKLOG numerically)', () => {
-    // SPEED_TIER: FAR=0, MID=1, NEAR=2, BACKLOG=3
-    // No tier is > BACKLOG, so the multiplier branch is unreachable
-    // with the current tier values. Test verifies the base value is returned.
-    const base = Math.round(200 * 0.08); // 16
-    const result = computeHeadwayPx(200, SPEED_TIER.BACKLOG, SPEED_TIER.NEAR, 0.08, 2);
-    expect(result).toBe(base); // 16 — NEAR (2) is NOT > BACKLOG (3)
+  it('returns HEADWAY_GAP_MIN_PX for NaN or Infinity inputs', () => {
+    expect(computeBaseHeadwayPx(NaN, 0.08)).toBe(16);
+    expect(computeBaseHeadwayPx(200, Infinity)).toBe(16);
+    expect(computeBaseHeadwayPx(200, NaN)).toBe(16);
   });
 
-  it('does NOT apply multiplier when active is BACKLOG but new is same tier', () => {
-    const result = computeHeadwayPx(200, SPEED_TIER.BACKLOG, SPEED_TIER.BACKLOG, 0.08, 2);
-    expect(result).toBe(Math.round(200 * 0.08)); // 16 — no multiplier
-  });
-
-  it('does NOT apply multiplier when active is not BACKLOG', () => {
-    const result = computeHeadwayPx(200, SPEED_TIER.MID, SPEED_TIER.NEAR, 0.08, 3);
-    expect(result).toBe(Math.round(200 * 0.08)); // 16 — no multiplier
-  });
-
-  it('returns 0 for zero width', () => {
-    const result = computeHeadwayPx(0, SPEED_TIER.MID, SPEED_TIER.NEAR, 0.08, 2);
-    expect(result).toBe(0);
-  });
-
-  it('handles extreme multiplier values (branch unreachable, returns base)', () => {
-    // With current SPEED_TIER values, no tier is > BACKLOG (3),
-    // so the multiplier branch never triggers.
-    const base = Math.round(100 * 0.1); // 10
-    const result = computeHeadwayPx(100, SPEED_TIER.BACKLOG, SPEED_TIER.NEAR, 0.1, 10);
-    expect(result).toBe(base); // 10
+  it('clamps below minimum', () => {
+    // 50 × 0.08 = 4 → clamped to 16
+    expect(computeBaseHeadwayPx(50, 0.08)).toBe(16);
+    // 0 × anything = 0 → clamped to 16
+    expect(computeBaseHeadwayPx(0, 0.08)).toBe(16);
   });
 
   it('handles ratio of zero', () => {
-    const result = computeHeadwayPx(500, SPEED_TIER.MID, SPEED_TIER.NEAR, 0, 2);
-    expect(result).toBe(0);
+    // 500 × 0 = 0 → clamped to 16 (min)
+    expect(computeBaseHeadwayPx(500, 0)).toBe(16);
   });
 });

@@ -48,7 +48,7 @@ import {
   toSharedContentSegments,
   warmTextBitmapCache,
 } from '@renderer/canvas/shared';
-import { computeHeadwayPx, getSpeedTier } from '@renderer/canvas/speed-tier';
+import { getSpeedTier } from '@renderer/canvas/speed-tier';
 import {
   type CanvasMessage,
   GRADIENT_CACHE_MAX,
@@ -65,6 +65,7 @@ import {
   TRANSLATION_GAP_PX,
 } from '@renderer/constants';
 import type { LanePlacement } from '@renderer/layout/lane-allocator';
+import { computeBaseHeadwayPx } from '@renderer/layout/lane-shared';
 import type { ConnectionStatus } from '@renderer/renderer-base';
 import { RendererBase } from '@renderer/renderer-base';
 import {
@@ -1601,34 +1602,24 @@ export class CanvasRenderer extends RendererBase {
   }
 
   /**
-   * Compute the headway gap (px) between a new message and an active one
-   * on the same lane, accounting for speed differences.
+   * Compute minimum headway (gap) in pixels between an active message
+   * and an incoming message attempting to enter the same lane.
    *
-   * When the new message is faster than the active one (higher speedTier),
-   * the headway is scaled up by the backlog speed multiplier so the active
-   * message has more lead time — preventing the faster chaser from catching
-   * up and visually crossing through.
-   *
-   * Same-tier messages use the standard adaptive formula:
-   *   headwayPx = clamp(msgWidth × 0.08, 16, 60)
+   * Delegates to the shared {@link computeBaseHeadwayPx} which clamps
+   * to {@link HEADWAY_GAP_MIN_PX}–{@link HEADWAY_GAP_MAX_PX} for parity
+   * with the worker renderer.
    *
    * @param activeWidth    Width of the active message on the lane (px)
-   * @param activeSpeedTier Speed tier of the active message
-   * @param newSpeedTier   Speed tier of the incoming message
-   * @returns Headway gap in px (always ≥ 16)
+   * @param _activeSpeedTier Speed tier of the active message (unused — kept for call-site compatibility)
+   * @param _newSpeedTier   Speed tier of the incoming message (unused — kept for call-site compatibility)
+   * @returns Headway gap in px, clamped to [16, 60]
    */
   private computeHeadwayPx(
     activeWidth: number,
-    activeSpeedTier: number,
-    newSpeedTier: number
+    _activeSpeedTier: number,
+    _newSpeedTier: number
   ): number {
-    return computeHeadwayPx(
-      activeWidth,
-      activeSpeedTier,
-      newSpeedTier,
-      this.settings.headwayGapRatio,
-      this.settings.backlogSpeedMultiplier
-    );
+    return computeBaseHeadwayPx(activeWidth, this.settings.headwayGapRatio);
   }
 
   // ── Backlog pause ────────────────────────────────────────────────────
