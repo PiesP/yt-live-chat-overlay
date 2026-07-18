@@ -219,8 +219,8 @@ export async function setupOverlayPage(page: Page): Promise<void> {
   // 4. Navigate to mock YouTube watch page
   await page.goto(MOCK_WATCH_URL, { waitUntil: 'domcontentloaded', timeout: 30_000 });
 
-  // 5. Wait for the overlay to initialize
-  await page.waitForTimeout(5000);
+  // 5. Wait for the real overlay container to initialize
+  await page.locator(`#${OVERLAY_ID}`).waitFor({ state: 'attached', timeout: 15_000 });
 }
 
 // ─── Debug Handle Helpers ────────────────────────────────────────────────────
