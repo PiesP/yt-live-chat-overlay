@@ -21,11 +21,14 @@ function createChromeSyncAdapter(storageKey: string): CrossTabSyncAdapter {
     currentCallback(storageKey, change.newValue);
   };
 
+  const directChangeEvent = getChromeSyncChangeEvent();
+  let directListenerRegistered = false;
+
   // In MAIN-world page scripts (MV3 extension), chrome.storage.onChanged
   // is not directly available. The ISOLATED content script relays changes
   // via window.postMessage with source='yt-storage-changed'.
   let messageListener: ((event: MessageEvent) => void) | null = null;
-  if (!isChromeSyncAvailableDirect()) {
+  if (!directChangeEvent) {
     messageListener = (event: MessageEvent) => {
       if (event.source !== window) return;
       if (event.origin !== window.location.origin) return;
@@ -38,19 +41,33 @@ function createChromeSyncAdapter(storageKey: string): CrossTabSyncAdapter {
 
   return {
     addListener(callback: (key: string, newValue: unknown) => void): void {
+      if (directChangeEvent) {
+        if (directListenerRegistered) {
+          directChangeEvent.removeListener(listener);
+        }
+        currentCallback = callback;
+        directChangeEvent.addListener(listener);
+        directListenerRegistered = true;
+        return;
+      }
+
       currentCallback = callback;
       if (messageListener) {
         window.addEventListener('message', messageListener);
-      } else {
-        chrome?.storage?.onChanged?.addListener(listener);
       }
     },
     removeListener(): void {
       currentCallback = null;
+      if (directChangeEvent) {
+        if (directListenerRegistered) {
+          directChangeEvent.removeListener(listener);
+          directListenerRegistered = false;
+        }
+        return;
+      }
+
       if (messageListener) {
         window.removeEventListener('message', messageListener);
-      } else {
-        chrome?.storage?.onChanged?.removeListener(listener);
       }
     },
   };
@@ -63,15 +80,19 @@ function createChromeSyncAdapter(storageKey: string): CrossTabSyncAdapter {
  * (as a stub by the browser for fingerprinting protection).
  */
 function isChromeSyncAvailableDirect(): boolean {
+  return getChromeSyncChangeEvent() !== null;
+}
+
+function getChromeSyncChangeEvent(): ChromeStorageChangedEvent | null {
   try {
-    return (
-      typeof chrome !== 'undefined' &&
-      chrome.storage !== undefined &&
-      typeof chrome.storage.onChanged !== 'undefined' &&
-      typeof chrome.storage.onChanged.addListener === 'function'
-    );
+    if (typeof chrome === 'undefined') return null;
+    const changeEvent = chrome?.storage?.onChanged;
+    if (!changeEvent) return null;
+    if (typeof changeEvent.addListener !== 'function') return null;
+    if (typeof changeEvent.removeListener !== 'function') return null;
+    return changeEvent;
   } catch (_error: unknown) {
-    return false;
+    return null;
   }
 }
 
@@ -80,15 +101,17 @@ function isChromeSyncAvailableDirect(): boolean {
 function createGmSyncAdapter(storageKey: string): CrossTabSyncAdapter {
   let listenerId: number | null = null;
   let currentCallback: ((key: string, newValue: unknown) => void) | null = null;
+  const addValueChangeListener = GM_addValueChangeListener;
+  const removeValueChangeListener = GM_removeValueChangeListener;
 
   return {
     addListener(callback: (key: string, newValue: unknown) => void): void {
-      if (listenerId !== null && typeof GM_removeValueChangeListener !== 'undefined') {
-        GM_removeValueChangeListener(listenerId);
+      if (listenerId !== null) {
+        removeValueChangeListener(listenerId);
         listenerId = null;
       }
       currentCallback = callback;
-      listenerId = GM_addValueChangeListener(
+      listenerId = addValueChangeListener(
         storageKey,
         (_key: string, _oldValue: unknown, newValue: unknown, _remote: boolean) => {
           if (currentCallback) {
@@ -98,8 +121,8 @@ function createGmSyncAdapter(storageKey: string): CrossTabSyncAdapter {
       );
     },
     removeListener(): void {
-      if (listenerId !== null && typeof GM_removeValueChangeListener !== 'undefined') {
-        GM_removeValueChangeListener(listenerId);
+      if (listenerId !== null) {
+        removeValueChangeListener(listenerId);
         listenerId = null;
       }
       currentCallback = null;
@@ -108,7 +131,10 @@ function createGmSyncAdapter(storageKey: string): CrossTabSyncAdapter {
 }
 
 function isGmSyncAvailable(): boolean {
-  return typeof GM_addValueChangeListener !== 'undefined';
+  return (
+    typeof GM_addValueChangeListener === 'function' &&
+    typeof GM_removeValueChangeListener === 'function'
+  );
 }
 
 // ── localStorage sync ─────────────────────────────────────────────────────

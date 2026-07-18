@@ -151,10 +151,10 @@ describe('cross-tab sync adapters', () => {
   });
 
   it('prioritizes direct Chrome storage over GM sync when both are available', () => {
-    let chromeListener: ChromeChangeListener | null = null;
+    const chromeState: { listener: ChromeChangeListener | null } = { listener: null };
     const onChanged = {
       addListener: vi.fn((listener: ChromeChangeListener): void => {
-        chromeListener = listener;
+        chromeState.listener = listener;
       }),
       removeListener: vi.fn(),
     };
@@ -168,10 +168,62 @@ describe('cross-tab sync adapters', () => {
     expect(onChanged.addListener).toHaveBeenCalledOnce();
     expect(gm.addListener).not.toHaveBeenCalled();
 
-    if (!chromeListener) throw new Error('Chrome listener was not registered');
-    chromeListener({ [storageKey]: { newValue: 'chrome-value' } }, 'local');
+    const registeredChromeListener = chromeState.listener;
+    if (registeredChromeListener === null) {
+      throw new Error('Chrome listener was not registered');
+    }
+    registeredChromeListener({ [storageKey]: { newValue: 'chrome-value' } }, 'local');
 
     expect(callback).toHaveBeenCalledWith(storageKey, 'chrome-value');
+  });
+
+  it('replaces and removes the direct Chrome listener without leaking registrations', () => {
+    const chromeState: {
+      listener: ChromeChangeListener | null;
+      listeners: Set<ChromeChangeListener>;
+    } = { listener: null, listeners: new Set() };
+    const onChanged = {
+      addListener: vi.fn((listener: ChromeChangeListener): void => {
+        chromeState.listener = listener;
+        chromeState.listeners.add(listener);
+      }),
+      removeListener: vi.fn((listener: ChromeChangeListener): void => {
+        chromeState.listeners.delete(listener);
+      }),
+    };
+    vi.stubGlobal('chrome', { storage: { onChanged } });
+
+    const firstCallback = vi.fn();
+    const secondCallback = vi.fn();
+    const { adapter, storageKey } = getTestAdapter();
+
+    adapter.addListener(firstCallback);
+    const firstChromeListener = chromeState.listener;
+    if (firstChromeListener === null) {
+      throw new Error('First Chrome listener was not registered');
+    }
+
+    adapter.addListener(secondCallback);
+    const secondChromeListener = chromeState.listener;
+    if (secondChromeListener === null) {
+      throw new Error('Second Chrome listener was not registered');
+    }
+
+    expect(onChanged.addListener).toHaveBeenCalledTimes(2);
+    expect(onChanged.removeListener).toHaveBeenCalledOnce();
+    expect(onChanged.removeListener).toHaveBeenCalledWith(firstChromeListener);
+    expect(chromeState.listeners.size).toBe(1);
+
+    secondChromeListener({ [storageKey]: { newValue: 'replacement-value' } }, 'local');
+    expect(firstCallback).not.toHaveBeenCalled();
+    expect(secondCallback).toHaveBeenCalledOnce();
+
+    adapter.removeListener();
+    adapter.removeListener();
+
+    expect(onChanged.removeListener).toHaveBeenCalledTimes(2);
+    expect(onChanged.removeListener).toHaveBeenLastCalledWith(secondChromeListener);
+    expect(chromeState.listeners.size).toBe(0);
   });
 
   it('falls back to GM sync when chrome storage is only partially available', () => {
@@ -215,6 +267,33 @@ describe('cross-tab sync adapters', () => {
     expect(firstCallback).not.toHaveBeenCalled();
     expect(secondCallback).toHaveBeenCalledOnce();
     expect(secondCallback).toHaveBeenCalledWith(storageKey, 'replacement-value');
+
+    adapter.removeListener();
+    expect(gm.removeListener).toHaveBeenCalledTimes(2);
+    expect(gm.removeListener).toHaveBeenLastCalledWith(2);
+    expect(gm.listeners.size).toBe(0);
+  });
+
+  it('falls back to localStorage when the GM removal API is not callable', () => {
+    const addListener = vi.fn();
+    vi.stubGlobal('GM_addValueChangeListener', addListener);
+    vi.stubGlobal('GM_removeValueChangeListener', { remove: vi.fn() });
+
+    const callback = vi.fn();
+    const { adapter, storageKey } = getTestAdapter();
+    adapter.addListener(callback);
+
+    expect(addListener).not.toHaveBeenCalled();
+
+    window.dispatchEvent(
+      new StorageEvent('storage', {
+        key: storageKey,
+        newValue: 'local-storage-after-malformed-gm',
+      })
+    );
+
+    expect(callback).toHaveBeenCalledOnce();
+    expect(callback).toHaveBeenCalledWith(storageKey, 'local-storage-after-malformed-gm');
   });
 
   it('falls back to the window storage event when GM sync is unavailable', () => {
