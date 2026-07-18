@@ -62,7 +62,7 @@
     "url": "git+https://github.com/PiesP/yt-live-chat-overlay.git"
   },
   "engines": {
-    "node": ">=22.0.0",
+    "node": ">=26.0.0",
     "pnpm": ">=11.2.2"
   },
   "packageManager": "pnpm@11.2.2",
