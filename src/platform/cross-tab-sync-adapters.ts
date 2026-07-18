@@ -4,7 +4,8 @@
 /**
  * Platform cross-tab sync adapters — inline implementations.
  *
- * Priority: chrome.storage.onChanged > GM_addValueChangeListener > window 'storage' event.
+ * Priority: chrome.storage.onChanged / extension relay > GM_addValueChangeListener >
+ * window 'storage' event.
  */
 
 import type { CrossTabSyncAdapter } from '@platform/types';
@@ -29,7 +30,7 @@ function createChromeSyncAdapter(storageKey: string): CrossTabSyncAdapter {
       if (event.source !== window) return;
       if (event.origin !== window.location.origin) return;
       const data = event.data;
-      if (!data || data.source !== 'yt-storage-changed') return;
+      if (data?.source !== 'yt-storage-changed') return;
       if (data.key !== storageKey) return;
       if (currentCallback) currentCallback(storageKey, data.newValue);
     };
@@ -48,7 +49,6 @@ function createChromeSyncAdapter(storageKey: string): CrossTabSyncAdapter {
       currentCallback = null;
       if (messageListener) {
         window.removeEventListener('message', messageListener);
-        messageListener = null;
       } else {
         chrome?.storage?.onChanged?.removeListener(listener);
       }
@@ -149,7 +149,8 @@ let cachedKey: string | null = null;
 
 /**
  * Returns the best available cross-tab sync adapter for the current environment.
- * Priority: chrome.storage.onChanged > GM_addValueChangeListener > window 'storage' event.
+ * Priority: chrome.storage.onChanged / extension relay > GM_addValueChangeListener >
+ * window 'storage' event.
  *
  * @param storageKey The storage key to listen for changes on.
  */
@@ -161,7 +162,10 @@ export function getCrossTabSyncAdapter(storageKey: string): CrossTabSyncAdapter 
     cachedAdapter.removeListener();
   }
 
-  if (isChromeSyncAvailable()) {
+  if (
+    isChromeSyncAvailable() ||
+    window.__ytExtensionBridge?.storageType === 'chrome.storage.local'
+  ) {
     cachedAdapter = createChromeSyncAdapter(storageKey);
   } else if (isGmSyncAvailable()) {
     cachedAdapter = createGmSyncAdapter(storageKey);
