@@ -62,7 +62,6 @@ jobs:
 
       - name: 🎭 Run E2E tests
         run: |
-          pnpm build:dev
           pnpm exec playwright install --with-deps chromium
           pnpm test:e2e
 

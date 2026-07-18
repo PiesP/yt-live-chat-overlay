@@ -42,8 +42,8 @@
     "test:watch": "vitest",
     "test:cov": "vitest run --coverage",
     "test:e2e": "playwright test --config test/e2e/playwright.config.ts",
-    "test:e2e:headed": "playwright test --headed",
-    "pretest:e2e": "node -e \"const fs=require('fs');if(!fs.existsSync('dist/yt-live-chat-overlay.dev.user.js')){console.error('ERROR: Run pnpm build:dev first');process.exit(1)}\"",
+    "test:e2e:headed": "pnpm test:e2e -- --headed",
+    "pretest:e2e": "pnpm build:dev && node -e \"const fs=require('fs');if(!fs.existsSync('dist/yt-live-chat-overlay.dev.user.js')){console.error('ERROR: E2E userscript bundle was not produced at dist/yt-live-chat-overlay.dev.user.js');process.exit(1)}\"",
     "clean:all": "rimraf dist dist-extension dist-extension-firefox"
   },
   "keywords": [

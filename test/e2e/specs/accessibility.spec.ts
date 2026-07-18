@@ -14,7 +14,7 @@
  * 7. Canvas click handler supports reconnect when disconnected
  *
  * Test approach:
- * - Build the userscript first (pnpm build)
+ * - Build the development userscript first (pnpm test:e2e does this automatically)
  * - Navigate to about:blank and inject the bundle via addInitScript
  * - Create the necessary DOM structure (#movie_player) and mock location
  * - Verify accessibility attributes on the overlay/canvas elements
@@ -27,11 +27,8 @@
 import { test, expect, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
 
-import { DIST_DIR } from '../fixtures/test-utils';
-
-const USERSCRIPT_PATH = resolve(DIST_DIR, 'yt-live-chat-overlay.user.js');
+import { USERSCRIPT_PATH } from '../fixtures/test-utils';
 
 const OVERLAY_ID = 'yt-live-chat-overlay';
 const BUTTON_ID = 'yt-chat-overlay-settings-button';
@@ -229,7 +226,7 @@ test.describe('YT Live Chat Overlay Accessibility', () => {
   test.beforeAll(() => {
     if (!existsSync(USERSCRIPT_PATH)) {
       throw new Error(
-        `Userscript bundle not found at ${USERSCRIPT_PATH}. Run 'pnpm build' first.`,
+        `Development userscript bundle not found at ${USERSCRIPT_PATH}. Run 'pnpm test:e2e' first.`,
       );
     }
   });
