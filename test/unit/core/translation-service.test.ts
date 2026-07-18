@@ -240,6 +240,77 @@ describe('TranslationService translator lifecycle', () => {
     service.destroy();
   });
 
+  it('cancels a never-resolving create so the latest configure can proceed', async () => {
+    const staleCreation = deferred<TranslatorInstance>();
+    const latestTranslator = makeTranslator('latest');
+    const staleCreateStarted = deferred<void>();
+    const create = vi.fn().mockImplementationOnce(() => {
+      staleCreateStarted.resolve(undefined);
+      return staleCreation.promise;
+    }).mockResolvedValueOnce(latestTranslator);
+    const availability = vi.fn().mockResolvedValue('available');
+    stubTranslator(create, availability);
+
+    const service = new TranslationService();
+    const stale = service.configure({
+      enabled: true,
+      service: 'auto',
+      source: 'en',
+      target: 'ja',
+    });
+    await staleCreateStarted.promise;
+
+    const latest = service.configure({
+      enabled: true,
+      service: 'auto',
+      source: 'en',
+      target: 'ko',
+    });
+
+    await expect(latest).resolves.toBeUndefined();
+    await expect(stale).resolves.toBeUndefined();
+    await expect(service.translate('hello')).resolves.toBe('latest:hello');
+    service.destroy();
+  });
+
+  it('disposes a translator that resolves after its create was cancelled', async () => {
+    const staleTranslator = makeTranslator('stale');
+    const staleCreation = deferred<TranslatorInstance>();
+    const latestTranslator = makeTranslator('latest');
+    const staleCreateStarted = deferred<void>();
+    const create = vi.fn().mockImplementationOnce(() => {
+      staleCreateStarted.resolve(undefined);
+      return staleCreation.promise;
+    }).mockResolvedValueOnce(latestTranslator);
+    const availability = vi.fn().mockResolvedValue('available');
+    stubTranslator(create, availability);
+
+    const service = new TranslationService();
+    const stale = service.configure({
+      enabled: true,
+      service: 'auto',
+      source: 'en',
+      target: 'ja',
+    });
+    await staleCreateStarted.promise;
+
+    const latest = service.configure({
+      enabled: true,
+      service: 'auto',
+      source: 'en',
+      target: 'ko',
+    });
+    await latest;
+
+    staleCreation.resolve(staleTranslator);
+    await stale;
+    await Promise.resolve();
+
+    expect(staleTranslator.destroy).toHaveBeenCalledTimes(1);
+    expect(latestTranslator.destroy).not.toHaveBeenCalled();
+    service.destroy();
+  });
+
   it('cancels a never-settling translation so a later generation can drain', async () => {
     const oldTranslator = makeTranslator('old');
     const staleTranslation = deferred<string>();
@@ -467,6 +538,54 @@ describe('TranslationService translator lifecycle', () => {
     await Promise.resolve();
     expect((service as unknown as { translateQueue: unknown[] }).translateQueue).toHaveLength(0);
     await expect(secondAfterCap).resolves.toBeNull();
+    service.destroy();
+  });
+
+  it('refuses capped automatic activation retries but lets explicit configure reset recovery', async () => {
+    const translators = [
+      makeTranslator('first'),
+      makeTranslator('second'),
+      makeTranslator('third'),
+      makeTranslator('explicit'),
+      makeTranslator('after-reset'),
+    ];
+    for (const translator of translators.slice(0, 4)) {
+      translator.translate.mockRejectedValue(new Error('translator failed'));
+    }
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce(translators[0])
+      .mockResolvedValueOnce(translators[1])
+      .mockResolvedValueOnce(translators[2])
+      .mockResolvedValueOnce(translators[3])
+      .mockResolvedValueOnce(translators[4]);
+    const availability = vi.fn().mockResolvedValue('available');
+    stubTranslator(create, availability);
+
+    const service = new TranslationService();
+    await service.configure({ enabled: true, service: 'auto', source: 'en', target: 'ja' });
+
+    for (let cycle = 0; cycle < 3; cycle++) {
+      for (let attempt = 0; attempt < 6; attempt++) {
+        await expect(service.translate(`failure-${cycle}-${attempt}`)).resolves.toBeNull();
+      }
+      if (cycle < 2) {
+        await service.onUserActivation();
+      }
+    }
+
+    await service.onUserActivation();
+    expect(create).toHaveBeenCalledTimes(3);
+
+    await service.configure({ enabled: true, service: 'auto', source: 'en', target: 'ja' });
+    expect(create).toHaveBeenCalledTimes(4);
+
+    for (let attempt = 0; attempt < 6; attempt++) {
+      await expect(service.translate(`post-reset-failure-${attempt}`)).resolves.toBeNull();
+    }
+    await service.onUserActivation();
+
+    expect(create).toHaveBeenCalledTimes(5);
     service.destroy();
   });
 
