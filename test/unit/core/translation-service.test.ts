@@ -5,16 +5,23 @@ import { TranslationService } from '@translation/service';
 function deferred<T>(): {
   promise: Promise<T>;
   resolve: (value: T) => void;
+  reject: (reason?: unknown) => void;
 } {
   let resolve: ((value: T) => void) | undefined;
-  const promise = new Promise<T>((promiseResolve) => {
+  let reject: ((reason?: unknown) => void) | undefined;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
     resolve = promiseResolve;
+    reject = promiseReject;
   });
   return {
     promise,
     resolve: (value: T) => {
       if (!resolve) throw new Error('Deferred resolver was not initialized');
       resolve(value);
+    },
+    reject: (reason?: unknown) => {
+      if (!reject) throw new Error('Deferred rejecter was not initialized');
+      reject(reason);
     },
   };
 }
@@ -112,6 +119,100 @@ describe('TranslationService translator lifecycle', () => {
     service.destroy();
     expect(oldTranslator.destroy).toHaveBeenCalledTimes(1);
     expect(newTranslator.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not let the old translator process entries from a pending generation', async () => {
+    const oldTranslator = makeTranslator('old');
+    const newTranslator = makeTranslator('new');
+    const newCreation = deferred<TranslatorInstance>();
+    const newCreationStarted = deferred<void>();
+    const create = vi.fn().mockResolvedValueOnce(oldTranslator).mockImplementationOnce(() => {
+      newCreationStarted.resolve(undefined);
+      return newCreation.promise;
+    });
+    const availability = vi.fn().mockResolvedValue('available');
+    stubTranslator(create, availability);
+
+    const service = new TranslationService();
+    await service.configure({ enabled: true, service: 'auto', source: 'en', target: 'ja' });
+
+    const replacement = service.configure({
+      enabled: true,
+      service: 'auto',
+      source: 'en',
+      target: 'ko',
+    });
+    await newCreationStarted.promise;
+
+    const queued = service.translate('queued');
+    expect(oldTranslator.translate).not.toHaveBeenCalled();
+
+    newCreation.resolve(newTranslator);
+    await replacement;
+    await expect(queued).resolves.toBe('new:queued');
+    expect(oldTranslator.translate).not.toHaveBeenCalled();
+    service.destroy();
+  });
+
+  it('resolves entries for a failed pending generation without using the old translator', async () => {
+    const oldTranslator = makeTranslator('old');
+    const newCreation = deferred<TranslatorInstance>();
+    const newCreationStarted = deferred<void>();
+    const create = vi.fn().mockResolvedValueOnce(oldTranslator).mockImplementationOnce(() => {
+      newCreationStarted.resolve(undefined);
+      return newCreation.promise;
+    });
+    const availability = vi.fn().mockResolvedValue('available');
+    stubTranslator(create, availability);
+
+    const service = new TranslationService();
+    await service.configure({ enabled: true, service: 'auto', source: 'en', target: 'ja' });
+
+    const replacement = service.configure({
+      enabled: true,
+      service: 'auto',
+      source: 'en',
+      target: 'ko',
+    });
+    await newCreationStarted.promise;
+
+    const queued = service.translate('queued');
+    expect(oldTranslator.translate).not.toHaveBeenCalled();
+
+    newCreation.reject(new Error('download failed'));
+    await replacement;
+    await expect(queued).resolves.toBeNull();
+    expect(oldTranslator.translate).not.toHaveBeenCalled();
+    service.destroy();
+  });
+
+  it('cancels a never-settling translation so a later generation can drain', async () => {
+    const oldTranslator = makeTranslator('old');
+    const staleTranslation = deferred<string>();
+    oldTranslator.translate.mockImplementationOnce(() => staleTranslation.promise);
+    const newTranslator = makeTranslator('new');
+    const newTranslationStarted = deferred<void>();
+    newTranslator.translate.mockImplementationOnce((text: string) => {
+      newTranslationStarted.resolve(undefined);
+      return Promise.resolve(`new:${text}`);
+    });
+    const create = vi.fn().mockResolvedValueOnce(oldTranslator).mockResolvedValueOnce(newTranslator);
+    const availability = vi.fn().mockResolvedValue('available');
+    stubTranslator(create, availability);
+
+    const service = new TranslationService();
+    await service.configure({ enabled: true, service: 'auto', source: 'en', target: 'ja' });
+
+    const inFlight = service.translate('never-settles');
+    expect(oldTranslator.translate).toHaveBeenCalledWith('never-settles');
+
+    await service.configure({ enabled: true, service: 'auto', source: 'en', target: 'ko' });
+    const later = service.translate('later');
+    await newTranslationStarted.promise;
+
+    await expect(inFlight).resolves.toBeNull();
+    await expect(later).resolves.toBe('new:later');
+    service.destroy();
   });
 
   it('resolves stale queued and in-flight work as null after a generation change', async () => {
@@ -217,15 +318,10 @@ describe('TranslationService translator lifecycle', () => {
     expect(oldTranslator.translate).toHaveBeenCalledWith('in-flight');
 
     service.destroy();
-    const settledAfterDestroy = await Promise.race([
-      inFlight,
-      new Promise<'pending'>((resolve) => setTimeout(() => resolve('pending'), 0)),
-    ]);
-    expect(settledAfterDestroy).toBeNull();
+    await expect(inFlight).resolves.toBeNull();
 
     await service.configure({ enabled: true, service: 'auto', source: 'en', target: 'ja' });
     const first = service.translate('first');
-    staleTranslation.resolve('stale');
     await newTranslateStarted.promise;
 
     const second = service.translate('second');
@@ -240,6 +336,7 @@ describe('TranslationService translator lifecycle', () => {
     secondTranslation.resolve('new:second');
     await expect(second).resolves.toBe('new:second');
     await expect(inFlight).resolves.toBeNull();
+    staleTranslation.resolve('stale');
     service.destroy();
   });
 
@@ -332,6 +429,48 @@ describe('TranslationService translator lifecycle', () => {
     await secondCreateStarted.promise;
     secondCreation.resolve(secondTranslator);
     await second;
+    service.destroy();
+  });
+
+  it('serializes configure after an in-flight source detection', async () => {
+    const oldTranslator = makeTranslator('old');
+    const detectedTranslator = makeTranslator('detected');
+    const configuredTranslator = makeTranslator('configured');
+    const detectionCreation = deferred<TranslatorInstance>();
+    const detectionCreateStarted = deferred<void>();
+    const configureCreateStarted = deferred<void>();
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce(oldTranslator)
+      .mockImplementationOnce(() => {
+        detectionCreateStarted.resolve(undefined);
+        return detectionCreation.promise;
+      })
+      .mockImplementationOnce(() => {
+        configureCreateStarted.resolve(undefined);
+        return Promise.resolve(configuredTranslator);
+      });
+    const availability = vi.fn().mockResolvedValue('available');
+    stubTranslator(create, availability);
+
+    const service = new TranslationService();
+    await service.configure({ enabled: true, service: 'auto', source: 'en', target: 'ja' });
+
+    const detection = service.setDetectedSource('ko');
+    await detectionCreateStarted.promise;
+    const configure = service.configure({
+      enabled: true,
+      service: 'auto',
+      source: 'en',
+      target: 'ko',
+    });
+    expect(create).toHaveBeenCalledTimes(2);
+
+    detectionCreation.resolve(detectedTranslator);
+    await detection;
+    await configureCreateStarted.promise;
+    await configure;
+    expect(create).toHaveBeenCalledTimes(3);
     service.destroy();
   });
 });
