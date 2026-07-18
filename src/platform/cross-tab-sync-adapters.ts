@@ -20,16 +20,59 @@ function createChromeSyncAdapter(storageKey: string): CrossTabSyncAdapter {
     currentCallback(storageKey, change.newValue);
   };
 
+  // In MAIN-world page scripts (MV3 extension), chrome.storage.onChanged
+  // is not directly available. The ISOLATED content script relays changes
+  // via window.postMessage with source='yt-storage-changed'.
+  let messageListener: ((event: MessageEvent) => void) | null = null;
+  if (!isChromeSyncAvailableDirect()) {
+    messageListener = (event: MessageEvent) => {
+      if (event.source !== window) return;
+      if (event.origin !== window.location.origin) return;
+      const data = event.data;
+      if (!data || data.source !== 'yt-storage-changed') return;
+      if (data.key !== storageKey) return;
+      if (currentCallback) currentCallback(storageKey, data.newValue);
+    };
+  }
+
   return {
     addListener(callback: (key: string, newValue: unknown) => void): void {
       currentCallback = callback;
-      chrome?.storage?.onChanged?.addListener(listener);
+      if (messageListener) {
+        window.addEventListener('message', messageListener);
+      } else {
+        chrome?.storage?.onChanged?.addListener(listener);
+      }
     },
     removeListener(): void {
       currentCallback = null;
-      chrome?.storage?.onChanged?.removeListener(listener);
+      if (messageListener) {
+        window.removeEventListener('message', messageListener);
+        messageListener = null;
+      } else {
+        chrome?.storage?.onChanged?.removeListener(listener);
+      }
     },
   };
+}
+
+/**
+ * Check whether chrome.storage.onChanged is directly available.
+ * In MV3 MAIN-world content scripts (injected as <script> tags),
+ * chrome.* APIs are NOT accessible even though `typeof chrome` is defined
+ * (as a stub by the browser for fingerprinting protection).
+ */
+function isChromeSyncAvailableDirect(): boolean {
+  try {
+    return (
+      typeof chrome !== 'undefined' &&
+      chrome.storage !== undefined &&
+      typeof chrome.storage.onChanged !== 'undefined' &&
+      typeof chrome.storage.onChanged.addListener === 'function'
+    );
+  } catch (_error: unknown) {
+    return false;
+  }
 }
 
 function isChromeSyncAvailable(): boolean {

@@ -362,19 +362,21 @@ test.describe('YT Live Chat Overlay Accessibility', () => {
 
     const bundle = readFileSync(USERSCRIPT_PATH, 'utf8');
 
-    // Verify the confirmation dialog sets aria-labelledby
-    expect(bundle).toContain('yt-chat-overlay-settings-confirm-title');
-    expect(bundle).toContain("role");
-    expect(bundle).toContain('alertdialog');
+    // Verify the confirmation dialog uses a native <dialog> element.
+    // The browser handles role and focus management natively; no explicit
+    // role="alertdialog" is needed.
+    expect(bundle).toContain('yt-chat-overlay-confirm-msg');
+    expect(bundle).toContain('dialog');
+    expect(bundle).toContain('showModal');
   });
 
-  test('reduceMotion setting exists in settings panel as checkbox', async ({ page }) => {
+  test('ignoreReducedMotion setting exists in settings panel as checkbox', async ({ page }) => {
     await setupOverlayPage(page);
 
     const bundle = readFileSync(USERSCRIPT_PATH, 'utf8');
 
-    // Verify the bundle contains the reduceMotion setting
-    expect(bundle).toContain('reduceMotion');
+    // Verify the bundle contains the ignoreReducedMotion setting
+    expect(bundle).toContain('ignoreReducedMotion');
 
     // Try to find the checkbox in the actual DOM if settings is openable
     const settingsBtn = page.locator(`#${BUTTON_ID}`);
@@ -384,7 +386,7 @@ test.describe('YT Live Chat Overlay Accessibility', () => {
       await settingsBtn.click();
       await page.waitForTimeout(1000);
 
-      const reduceMotionCheckbox = page.locator('input[name="reduceMotion"]');
+      const reduceMotionCheckbox = page.locator('input[name="ignoreReducedMotion"]');
       const checkboxCount = await reduceMotionCheckbox.count();
 
       if (checkboxCount > 0) {

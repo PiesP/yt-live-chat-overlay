@@ -124,6 +124,30 @@ window.addEventListener('message', (event: MessageEvent) => {
   }
 });
 
+// ── Storage-change relay (ISOLATED → MAIN world) ────────────────────
+// In MV3 extensions, chrome.storage.onChanged fires only in ISOLATED world.
+// MAIN-world scripts (page-script.ts) cannot listen for it directly.
+// We relay change events to MAIN world via window.postMessage so that
+// cross-tab settings sync works in extension context.
+chrome!.storage!.onChanged!.addListener(
+  (changes: Record<string, unknown>, areaName: string) => {
+    if (areaName !== 'local') return;
+    for (const key of Object.keys(changes)) {
+      if (!ALLOWED_STORAGE_KEYS.has(key)) continue;
+      const change = changes[key] as { newValue?: unknown } | undefined;
+      if (!change) continue;
+      window.postMessage(
+        {
+          source: 'yt-storage-changed',
+          key,
+          newValue: change.newValue,
+        },
+        window.location.origin,
+      );
+    }
+  },
+);
+
 // ── Background message relay ───────────────────────────────────────────
 
 interface ChromeMessageSender {
