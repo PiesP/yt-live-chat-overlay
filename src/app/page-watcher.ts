@@ -86,8 +86,11 @@ export class PageWatcher {
     PageWatcher.wrapperToOwner.set(patched as (...args: unknown[]) => unknown, this);
     history[methodName] = patched;
     return () => {
-      // Only restore if no newer patch has been applied since us.
-      if (this.patchGeneration === myGeneration) {
+      // Only restore if no newer patch has been applied since us AND
+      // the current history function is still our wrapper.
+      // Without the identity check, a destroyed old watcher could
+      // overwrite a newer watcher's wrapper with the original function.
+      if (this.patchGeneration === myGeneration && history[methodName] === patched) {
         history[methodName] = original;
         PageWatcher.wrapperToOwner.delete(patched as (...args: unknown[]) => unknown);
       }

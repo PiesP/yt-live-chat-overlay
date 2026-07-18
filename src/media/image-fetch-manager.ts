@@ -212,7 +212,6 @@ export class ImageFetchManager {
       const img = new Image();
       this.inFlightImages.add(img);
       img.crossOrigin = 'anonymous';
-      img.src = url;
       img.onload = () => {
         if (this.isDestroyed) return;
         this.inFlightImages.delete(img);
@@ -240,6 +239,7 @@ export class ImageFetchManager {
           }
         }
       };
+      img.src = url;
     }
 
     if (message.authorPhotoUrl) {

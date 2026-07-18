@@ -5,7 +5,7 @@ import { defineConfig, devices } from '@playwright/test';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const DIST_DIR = resolve(import.meta.dirname, '../../../dist');
+const DIST_DIR = resolve(import.meta.dirname, '../../dist');
 const EXTENSION_DIR = resolve(import.meta.dirname, '../../../dist-extension');
 
 export default defineConfig({

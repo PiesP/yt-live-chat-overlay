@@ -8,6 +8,8 @@
  * 1. Inject the MAIN-world page script as a <script> element.
  * 2. Relay menu commands from the background service worker to the
  *    page script via window.postMessage (strict origin validation).
+ * 3. Relay chrome.storage.local requests from the MAIN-world page script
+ *    (which cannot access chrome.* APIs directly in MV3).
  *
  * ISOLATED world has full access to chrome.runtime APIs, unlike MAIN world
  * where chrome.runtime is undefined. The previous MAIN-world content script
@@ -19,6 +21,22 @@
  * to load entirely.
  */
 
+// ── Inject extension bridge (MAIN world) ───────────────────────────────
+// In MV3, MAIN-world scripts cannot access chrome.runtime or chrome.storage.
+// We inject a small inline bridge that bakes in the resolved values so the
+// page script can discover extension capabilities without chrome.* APIs.
+
+const bridgeScript = document.createElement('script');
+bridgeScript.type = 'text/javascript';
+const workerBundleUrl = chrome!.runtime!.getURL('workers/renderer.js');
+bridgeScript.textContent =
+  'window.__ytExtensionBridge={' +
+  'workerSupported:true,' +
+  `workerUrl:${JSON.stringify(workerBundleUrl)},` +
+  `storageType:${JSON.stringify('chrome.storage.local')},` +
+  '};';
+(document.head || document.documentElement).appendChild(bridgeScript);
+
 // ── Inject page script ─────────────────────────────────────────────────
 
 const pageScript = document.createElement('script');
@@ -26,6 +44,60 @@ const pageScript = document.createElement('script');
 pageScript.src = chrome!.runtime!.getURL('page-script.js');
 pageScript.type = 'text/javascript';
 (document.head || document.documentElement).appendChild(pageScript);
+
+// ── Storage relay (MAIN world → ISOLATED → chrome.storage.local) ─────
+// MAIN-world page script posts { source: 'yt-storage-relay', ... } when
+// the bridge indicates extension context. We forward to chrome.storage.local
+// and post the response back via window.postMessage.
+
+window.addEventListener('message', (event: MessageEvent) => {
+  const data = event.data;
+  if (!data || data.source !== 'yt-storage-relay') return;
+  if (event.origin !== window.location.origin) return;
+
+  const requestId = data.requestId as number;
+  const method = data.method as string;
+
+  if (method === 'get') {
+    const key = data.key as string;
+    chrome!.storage!.local!.get(key)
+      .then((result) => {
+        const value = result?.[key];
+        window.postMessage(
+          {
+            source: 'yt-storage-relay-response',
+            requestId,
+            value: value === undefined || value === null
+              ? null
+              : typeof value === 'string' ? value : JSON.stringify(value),
+          },
+          window.location.origin,
+        );
+      })
+      .catch((error: Error) => {
+        window.postMessage(
+          { source: 'yt-storage-relay-response', requestId, error: error.message },
+          window.location.origin,
+        );
+      });
+  } else if (method === 'set') {
+    const key = data.key as string;
+    const value = data.value as string;
+    chrome!.storage!.local!.set({ [key]: value })
+      .then(() => {
+        window.postMessage(
+          { source: 'yt-storage-relay-response', requestId, value: null },
+          window.location.origin,
+        );
+      })
+      .catch((error: Error) => {
+        window.postMessage(
+          { source: 'yt-storage-relay-response', requestId, error: error.message },
+          window.location.origin,
+        );
+      });
+  }
+});
 
 // ── Background message relay ───────────────────────────────────────────
 

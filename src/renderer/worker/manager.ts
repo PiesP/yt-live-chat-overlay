@@ -601,10 +601,13 @@ export class RenderWorkerManager {
     this.dimensionsUnsubscribe = null;
     this.stopPingPong();
     if (!this.worker) return;
+    // Capture the target worker so that if init() creates a new worker
+    // before the ack/timeout fires, we still terminate the correct instance.
+    const workerToDestroy = this.worker;
     // Send a destroy message so the worker can flush in-flight work
     // (pending ImageBitmap transfers) before terminate() severs the connection.
     // Without this, bitmaps mid-transfer may not be closed properly.
-    this.worker.postMessage({ type: 'destroy' });
+    workerToDestroy.postMessage({ type: 'destroy' });
 
     // Listen for the worker's 'ack' before terminating, so in-flight
     // ImageBitmap transfers have time to complete.  A 500 ms safety
@@ -613,23 +616,25 @@ export class RenderWorkerManager {
     const messageHandler = (event: MessageEvent): void => {
       if (event.data?.type === 'ack' && !terminated) {
         terminated = true;
-        this.worker?.removeEventListener('message', messageHandler);
-        this.worker?.terminate();
-        this.worker = null;
+        workerToDestroy.removeEventListener('message', messageHandler);
+        workerToDestroy.terminate();
+        if (this.worker === workerToDestroy) {
+          this.worker = null;
+        }
         // Close any remaining pre-converted bitmaps (not yet transferred).
         // ByteLimitedCache.clear() calls onEvict (bitmap.close()) for each entry.
         this.deps.imageFetchManager.workerBitmapCache.clear();
       }
     };
-    this.worker.addEventListener('message', messageHandler);
+    workerToDestroy.addEventListener('message', messageHandler);
 
     // Safety timeout: if the ack never arrives, force-terminate after 500ms.
     setTimeout(() => {
       if (terminated) return;
       terminated = true;
-      this.worker?.removeEventListener('message', messageHandler);
-      if (this.worker) {
-        this.worker.terminate();
+      workerToDestroy.removeEventListener('message', messageHandler);
+      workerToDestroy.terminate();
+      if (this.worker === workerToDestroy) {
         this.worker = null;
       }
       this.deps.imageFetchManager.workerBitmapCache.clear();

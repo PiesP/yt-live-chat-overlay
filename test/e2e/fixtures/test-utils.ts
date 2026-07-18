@@ -19,7 +19,7 @@ import { resolve } from 'node:path';
 
 // ─── Paths ───────────────────────────────────────────────────────────────────
 
-const DIST_DIR = resolve(process.cwd(), '../dist');
+const DIST_DIR = resolve(process.cwd(), 'dist');
 const USERSCRIPT_PATH = resolve(DIST_DIR, 'yt-live-chat-overlay.dev.user.js');
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -68,8 +68,8 @@ export const DEFAULT_SETTINGS: Record<string, unknown> = {
   superChatOpacity: 0.95,
   safeTop: 0,
   safeBottom: 0,
-  maxConcurrentMessages: 100,
-  allowShortTextMessages: true,
+  maxConcurrentMessages: 300,
+  allowShortTextMessages: false,
   minTextLength: 1,
   logLevel: 'warn',
   showAuthor: {
@@ -103,8 +103,8 @@ export const DEFAULT_SETTINGS: Record<string, unknown> = {
   depthFarOpacityMul: 0.6,
   modOwnerDurationMultiplier: 1.5,
   showSuperChatAmount: true,
-  fontWeight: 'normal',
-  fontFamily: '',
+  fontWeight: 'bold',
+  fontFamily: "'YouTube Sans', 'Roboto', 'Arial', sans-serif",
   preserveUserColor: true,
   superChatMaxBodyLines: 3,
   membershipMaxBodyLines: 2,
