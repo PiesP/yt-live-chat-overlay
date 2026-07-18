@@ -11,7 +11,7 @@
  * 4. Confirmation dialog has aria-labelledby attribute
  * 5. Canvas element has tabindex='0' and is focusable
  * 6. reduceMotion setting exists in settings panel (checkbox)
- * 7. Canvas touchend handler triggers reconnect when disconnected
+ * 7. Canvas click handler supports reconnect when disconnected
  *
  * Test approach:
  * - Build the userscript first (pnpm build)
@@ -397,13 +397,16 @@ test.describe('YT Live Chat Overlay Accessibility', () => {
     // If checkbox not found, bundle check confirms it's compiled in
   });
 
-  test('canvas touchend handler triggers reconnect when disconnected', async ({ page }) => {
+  test('canvas click-to-reload affordance is compiled when disconnected', async ({ page }) => {
     await setupOverlayPage(page);
 
     const bundle = readFileSync(USERSCRIPT_PATH, 'utf8');
 
-    // Verify the bundle contains the touchend handler logic
-    expect(bundle).toContain("touchend");
+    // Verify the bundle contains the click-to-reload handler and its status text.
+    // A tap produces a click event on the canvas, so a touchend-specific
+    // assertion would require an implementation detail the product does not use.
+    expect(bundle).toContain('addEventListener("click"');
+    expect(bundle).toContain('Click to reload');
     expect(bundle).toContain('tabindex');
 
     // If the canvas exists in the DOM, verify it's properly configured
