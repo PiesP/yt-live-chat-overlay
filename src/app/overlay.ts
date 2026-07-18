@@ -432,14 +432,21 @@ export class Overlay {
     }
   }
 
-  /** Attach keyboard handler for Space key pause toggle. */
+  /**
+   * Attach keyboard handler for Ctrl+Space overlay pause toggle.
+   *
+   * Plain Space is intentionally NOT intercepted — that would block
+   * YouTube's native play/pause shortcut.  Ctrl+Space is the overlay-only
+   * gesture that pauses/resumes chat scrolling without affecting the video.
+   */
   private attachKeyboardHandler(): void {
     this.keyboardHandler = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       if ((e.target as HTMLElement)?.isContentEditable) return;
 
-      if (e.code === 'Space' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      // Require Ctrl modifier to avoid intercepting YouTube's Space shortcut
+      if (e.code === 'Space' && e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
         e.stopPropagation();
         this.toggleUserPause();
