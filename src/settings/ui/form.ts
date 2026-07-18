@@ -466,13 +466,25 @@ export class SettingsUiForm {
    * readers are notified of validation state changes.
    */
   private bindAriaInvalidSync(modal: HTMLElement): void {
+    // Feature-detect :user-invalid support to avoid SyntaxError in
+    // older browsers (Chrome < 119). CSS.supports('selector(...)')
+    // is the standard way to check pseudo-class availability.
+    const supportsUserInvalid = ((): boolean => {
+      try {
+        return CSS.supports('selector(:user-invalid)');
+      } catch {
+        return false;
+      }
+    })();
+
     const sync = (input: HTMLInputElement | HTMLSelectElement): void => {
       if (input.willValidate) {
-        // Use :user-invalid check: after user interaction,
-        // the pseudo-class reflects validation state.
-        // Cast to any because CSS :user-invalid may not be in
-        // older TS lib types for matches().
-        const isInvalid = (input as HTMLElement).matches(':user-invalid') || !input.checkValidity();
+        // Prefer :user-invalid (only flags after user interaction),
+        // fall back to :invalid + checkValidity() in older browsers
+        // where :user-invalid is not supported.
+        const isInvalid = supportsUserInvalid
+          ? input.matches(':user-invalid')
+          : (input.matches(':invalid') || !input.checkValidity());
         input.setAttribute('aria-invalid', String(isInvalid));
       }
     };
