@@ -8,7 +8,7 @@ All notable changes to this project will be documented in this file.
 
 - **Playwright E2E fixture parsing** — Restored fixture parsing for Playwright end-to-end tests.
 - **MV3 extension bridge lifecycle** — Hardened cross-tab storage relay and adapter lifecycle handling.
-- **Translator lifecycle** — Hardened translator instance disposal, generation/cancellation lifecycle, stale queue/cache ownership, and recovery lifecycle.
+- **Translation lifecycle** — Prevented stale translations and released old translator resources when language settings change or sessions restart.
 - **Fast Stryker mutation command** — Corrected the command to use positional config.
 
 ### Compatibility
