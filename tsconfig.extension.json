@@ -26,6 +26,11 @@
       "@platform/*": ["./src/platform/*"]
     }
   },
-  "include": ["extension/**/*.ts", "src/types/globals.d.ts", "src/platform/chrome-types.d.ts"],
+  "include": [
+    "extension/**/*.ts",
+    "src/types/globals.d.ts",
+    "src/platform/chrome-types.d.ts",
+    "src/platform/extension-bridge.d.ts"
+  ],
   "exclude": ["node_modules", "dist", "dist-extension", "dist-extension-firefox", ".vscode"]
 }

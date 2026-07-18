@@ -203,6 +203,25 @@ const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings
     );
   }
 
+  // ── Cross-field pair constraints ──────────────────────────────────────────
+  // Individual clamping does not guarantee min ≤ max for related settings.
+  // Swap inverted pairs so consumers (Math.min/max guards, threshold checks)
+  // always see a valid min-max relationship.
+  const PAIR_CONSTRAINTS = [
+    ['fontMinSize', 'fontMaxSize'],
+    ['minPollIntervalMs', 'maxPollIntervalMs'],
+    ['scrollDurationMinMs', 'scrollDurationMaxMs'],
+  ] as const;
+
+  for (const [minKey, maxKey] of PAIR_CONSTRAINTS) {
+    const minVal = (out as unknown as Record<string, number>)[minKey];
+    const maxVal = (out as unknown as Record<string, number>)[maxKey];
+    if (typeof minVal === 'number' && typeof maxVal === 'number' && minVal > maxVal) {
+      (out as unknown as Record<string, number>)[minKey] = maxVal;
+      (out as unknown as Record<string, number>)[maxKey] = minVal;
+    }
+  }
+
   return out;
 };
 

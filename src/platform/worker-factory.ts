@@ -13,6 +13,10 @@
 
 /** Check whether Web Workers can be spawned in this environment. */
 export function workerSupported(): boolean {
+  // Extension bridge: ISOLATED content script injects a bridge object
+  // before the MAIN-world page script loads, indicating extension context.
+  if (window.__ytExtensionBridge?.workerSupported) return true;
+
   // Extension context has chrome.runtime.getURL for worker bundles.
   const chromeApi =
     (typeof chrome !== 'undefined' ? chrome : undefined) ??
@@ -39,6 +43,12 @@ export function workerSupported(): boolean {
  * for bundled/Vite environments.
  */
 export function createWorkerUrl(relativePath: string): string | URL {
+  // Extension bridge provides a pre-resolved worker URL from the ISOLATED
+  // content script, where chrome.runtime.getURL is actually available.
+  if (window.__ytExtensionBridge?.workerUrl) {
+    return window.__ytExtensionBridge.workerUrl;
+  }
+
   const chromeApi =
     (typeof chrome !== 'undefined' ? chrome : undefined) ??
     (typeof browser !== 'undefined' ? browser : undefined);

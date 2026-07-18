@@ -33,6 +33,91 @@ function isQuotaExceededError(error: unknown): boolean {
   return false;
 }
 
+// ── Storage relay for MV3 MAIN world ────────────────────────────────────────
+
+/**
+ * Set up a postMessage-based relay to chrome.storage.local for MV3 extensions
+ * where the MAIN-world page script cannot access chrome.* APIs directly.
+ *
+ * The ISOLATED content script listens for 'yt-storage-relay' messages and
+ * forwards them to chrome.storage.local. Returns null if the relay cannot
+ * be established (e.g. not in an extension context).
+ */
+function setupStorageRelay(): StorageAdapter | null {
+  // Only attempt relay setup if the bridge indicates extension context.
+  if (!window.__ytExtensionBridge?.storageType) return null;
+
+  let requestId = 0;
+  const pending = new Map<
+    number,
+    {
+      resolve: (value: string | null) => void;
+      reject: (error: Error) => void;
+    }
+  >();
+
+  // Listen for relay responses from the ISOLATED content script.
+  const relayListener = (event: MessageEvent): void => {
+    const data = event.data;
+    if (data?.source !== 'yt-storage-relay-response') return;
+    const entry = pending.get(data.requestId as number);
+    if (!entry) return;
+    pending.delete(data.requestId as number);
+    if (data.error) {
+      entry.reject(new Error(data.error as string));
+    } else {
+      entry.resolve(data.value as string | null);
+    }
+  };
+
+  window.addEventListener('message', relayListener);
+
+  return {
+    async getItem(key: string): Promise<string | null> {
+      return new Promise<string | null>((resolve, reject) => {
+        const id = ++requestId;
+        pending.set(id, { resolve, reject });
+        const timeout = setTimeout(() => {
+          pending.delete(id);
+          resolve(null); // Timeout → null (safe fallback)
+        }, 2000);
+        // Wrap resolve to clear timeout.
+        const wrappedResolve = (value: string | null) => {
+          clearTimeout(timeout);
+          resolve(value);
+        };
+        pending.set(id, { resolve: wrappedResolve, reject });
+        window.postMessage(
+          { source: 'yt-storage-relay', requestId: id, method: 'get', key },
+          window.location.origin
+        );
+      });
+    },
+
+    async setItem(key: string, value: string): Promise<void> {
+      return new Promise<void>((resolve) => {
+        const id = ++requestId;
+        const timeout = setTimeout(() => {
+          pending.delete(id);
+          resolve(); // Timeout → silent (best-effort write)
+        }, 2000);
+        const wrappedResolve = () => {
+          clearTimeout(timeout);
+          resolve();
+        };
+        pending.set(id, {
+          resolve: wrappedResolve as (v: string | null) => void,
+          reject: () => {},
+        });
+        window.postMessage(
+          { source: 'yt-storage-relay', requestId: id, method: 'set', key, value },
+          window.location.origin
+        );
+      });
+    },
+  };
+}
+
 // ── Factory ────────────────────────────────────────────────────────────────
 
 let cachedAdapter: StorageAdapter | null = null;
@@ -41,7 +126,27 @@ let cachedAdapter: StorageAdapter | null = null;
 export function getStorageAdapter(): StorageAdapter {
   if (cachedAdapter) return cachedAdapter;
 
-  // chrome.storage.local (extension)
+  // Extension bridge: the ISOLATED content script sets storageType before
+  // the MAIN-world page script loads. Check this first so extension users
+  // always get chrome.storage.local persistence, even though chrome.* APIs
+  // are not directly available in MAIN world.
+  const bridgeStorageType = window.__ytExtensionBridge?.storageType;
+  if (bridgeStorageType === 'chrome.storage.local') {
+    // In extension context, chrome.storage.local is accessible from the
+    // background service worker via message relay. For reads/writes in
+    // MAIN world, we use postMessage to the content script, which forwards
+    // to chrome.storage.local. Fall back to localStorage if the relay
+    // is unavailable (e.g. during early initialization before the content
+    // script listener is registered).
+    const relay = setupStorageRelay();
+    if (relay) {
+      cachedAdapter = relay;
+      return cachedAdapter;
+    }
+    // Fall through to localStorage as a safe default.
+  }
+
+  // chrome.storage.local (extension — ISOLATED world or non-MV3)
   if (typeof chrome !== 'undefined' && chrome.storage?.local !== undefined) {
     const storage = chrome.storage.local;
     cachedAdapter = {
