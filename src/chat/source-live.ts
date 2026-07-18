@@ -8,6 +8,11 @@
  */
 
 import type { ChatMessage } from '@app-types';
+import {
+  calculateAdaptiveDelay,
+  DENSITY_WINDOW_SIZE,
+  recordDensitySample,
+} from '@chat/live-poll-math';
 import { extractChatEvents } from '@chat/message-parser';
 import type { ChatHealthSnapshot } from '@chat/source-base';
 import { ChatSource } from '@chat/source-base';
@@ -40,15 +45,10 @@ const LIVE_POLL_TIMEOUT_MS = 20_000;
 export class LiveChatSource extends ChatSource {
   private liveContinuation: InnertubeContinuationData | null = null;
   protected consecutiveErrors = 0;
-  private static readonly DENSITY_WINDOW_SIZE = 5;
   /** Fixed-size circular buffer for moving-window density tracking. */
-  private readonly densityRing = new Uint16Array(5);
+  private readonly densityRing = new Uint16Array(DENSITY_WINDOW_SIZE);
   private densityRingWrite = 0;
   private densityRingFilled = 0;
-  private static readonly DENSITY_HIGH_THRESHOLD = 10;
-  private static readonly DENSITY_LOW_THRESHOLD = 1;
-  /** When avg messages per poll exceeds this, skip sleep entirely (chained polling). */
-  private static readonly EXTREME_DENSITY_THRESHOLD = 30;
 
   protected seedCurrentSession(signal?: AbortSignal): Promise<boolean> {
     return this.initializeLiveSession(signal);
@@ -97,95 +97,32 @@ export class LiveChatSource extends ChatSource {
   }
 
   private recordMessageCount(count: number): void {
-    this.densityRing[this.densityRingWrite] = count;
-    this.densityRingWrite = (this.densityRingWrite + 1) % LiveChatSource.DENSITY_WINDOW_SIZE;
-    if (this.densityRingFilled < LiveChatSource.DENSITY_WINDOW_SIZE) {
-      this.densityRingFilled++;
-    }
-  }
-
-  /**
-   * Exponential backoff when consecutive errors have occurred.
-   * Returns `null` if no errors are active.
-   */
-  private computeErrorBackoffMs(fallbackMs: number): number | null {
-    if (this.consecutiveErrors === 0) return null;
-
-    const settings = this.getSettings();
-    const delayed = fallbackMs * 2 ** this.consecutiveErrors;
-    return Math.min(settings.maxPollIntervalMs, Math.max(settings.minPollIntervalMs, delayed));
-  }
-
-  /**
-   * Sub-poll-interval burst reactivity via EMA rate.
-   * Returns `null` if the EMA provider is not wired or the rate is below any threshold.
-   */
-  private computeBurstAdjustedMs(fallbackMs: number): number | null {
-    const emaRate = this.burstRateProvider?.();
-    if (emaRate === undefined) return null;
-
-    const settings = this.getSettings();
-    if (emaRate >= LiveChatSource.EXTREME_DENSITY_THRESHOLD) return 0;
-    if (emaRate >= LiveChatSource.DENSITY_HIGH_THRESHOLD) {
-      return Math.max(
-        settings.minPollIntervalMs,
-        Math.round(Math.min(settings.maxPollIntervalMs, fallbackMs) * 0.3)
-      );
-    }
-    return null;
-  }
-
-  /**
-   * Moving-window density adaptation using circular buffer.
-   */
-  private computeDensityAdjustedMs(fallbackMs: number): number {
-    const settings = this.getSettings();
-
-    if (this.densityRingFilled < 2) {
-      // Not enough data points — return clamped fallback as-is.
-      return Math.max(settings.minPollIntervalMs, Math.min(settings.maxPollIntervalMs, fallbackMs));
-    }
-
-    // Iterate only filled elements — no Array.reduce required
-    let sum = 0;
-    for (let i = 0; i < this.densityRingFilled; i++) {
-      sum += this.densityRing[i]!;
-    }
-    const avgCount = sum / this.densityRingFilled;
-
-    // Extreme density: skip sleep entirely (chained polling).
-    if (avgCount >= LiveChatSource.EXTREME_DENSITY_THRESHOLD) return 0;
-
-    // Base adaptive delay within bounds
-    let base = Math.max(
-      settings.minPollIntervalMs,
-      Math.min(settings.maxPollIntervalMs, fallbackMs)
+    const next = recordDensitySample(
+      this.densityRing,
+      this.densityRingWrite,
+      this.densityRingFilled,
+      count
     );
+    this.densityRingWrite = next.write;
+    this.densityRingFilled = next.filled;
+  }
 
-    if (avgCount >= LiveChatSource.DENSITY_HIGH_THRESHOLD) {
-      base = Math.max(settings.minPollIntervalMs, Math.round(base * 0.3));
-    }
-    if (avgCount <= LiveChatSource.DENSITY_LOW_THRESHOLD) {
-      base = Math.min(settings.maxPollIntervalMs, Math.round(base * 1.2));
-    }
-
-    return Math.max(settings.minPollIntervalMs, Math.min(settings.maxPollIntervalMs, base));
+  private getLimits(): { minPollIntervalMs: number; maxPollIntervalMs: number } {
+    const s = this.getSettings();
+    return { minPollIntervalMs: s.minPollIntervalMs, maxPollIntervalMs: s.maxPollIntervalMs };
   }
 
   private calculateAdaptiveDelay(timeoutMs: number): number {
     const settings = this.getSettings();
-    const fallback = timeoutMs > 0 ? timeoutMs : settings.livePollFallbackMs;
-
-    // 1. Error exponential backoff — takes priority when recovering
-    const errorBackoff = this.computeErrorBackoffMs(fallback);
-    if (errorBackoff !== null) return errorBackoff;
-
-    // 2. Burst detection via EMA rate — sub-poll-interval reactivity
-    const burstAdjusted = this.computeBurstAdjustedMs(fallback);
-    if (burstAdjusted !== null) return burstAdjusted;
-
-    // 3. Moving-window density adaptation — full history consideration
-    return this.computeDensityAdjustedMs(fallback);
+    return calculateAdaptiveDelay(
+      timeoutMs,
+      settings.livePollFallbackMs,
+      this.consecutiveErrors,
+      this.burstRateProvider?.(),
+      this.densityRing,
+      this.densityRingFilled,
+      this.getLimits()
+    );
   }
 
   private async runLiveLoop(signal?: AbortSignal): Promise<void> {
