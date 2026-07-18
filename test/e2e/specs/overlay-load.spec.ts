@@ -15,8 +15,8 @@ import { test, expect, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { DIST_DIR } from '../fixtures/test-utils';
 
-const DIST_DIR = resolve(import.meta.dirname, '../../../dist');
 const USERSCRIPT_PATH = resolve(DIST_DIR, 'yt-live-chat-overlay.user.js');
 
 /**

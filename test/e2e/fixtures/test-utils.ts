@@ -19,8 +19,9 @@ import { resolve } from 'node:path';
 
 // ─── Paths ───────────────────────────────────────────────────────────────────
 
-const DIST_DIR = resolve(process.cwd(), 'dist');
-const USERSCRIPT_PATH = resolve(DIST_DIR, 'yt-live-chat-overlay.dev.user.js');
+export const DIST_DIR = resolve(process.cwd(), 'dist');
+export const USERSCRIPT_PATH = resolve(DIST_DIR, 'yt-live-chat-overlay.dev.user.js');
+export const EXTENSION_DIR = resolve(process.cwd(), 'dist-extension');
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 

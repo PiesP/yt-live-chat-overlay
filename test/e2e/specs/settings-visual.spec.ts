@@ -17,10 +17,8 @@
 import { test, expect, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { DIST_DIR, USERSCRIPT_PATH } from '../fixtures/test-utils';
 
-const DIST_DIR = resolve(process.cwd(), '../dist');
-const USERSCRIPT_PATH = resolve(DIST_DIR, 'yt-live-chat-overlay.dev.user.js');
 
 const OVERLAY_ID = 'yt-live-chat-overlay';
 const BUTTON_ID = 'yt-chat-overlay-settings-button';
