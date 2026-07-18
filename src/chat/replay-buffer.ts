@@ -206,6 +206,14 @@ export class ReplayBuffer {
     const overflow = effectiveLength - maxSize;
     this.bufferOffset += overflow;
 
+    // When the offset grows large, release the backing array memory
+    // by discarding entries before the offset.  Without this, the array
+    // grows monotonically during long hidden-tab sessions.
+    if (this.bufferOffset > 500) {
+      this.buffer = this.buffer.slice(this.bufferOffset);
+      this.bufferOffset = 0;
+    }
+
     // Prune seenIds to match buffer range — IDs no longer in the
     // active window would otherwise accumulate forever during long replays.
     const idSet = new Set<string>();

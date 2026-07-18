@@ -40,6 +40,8 @@ export class ImageFetchManager {
   readonly imageLoading = new Set<string>();
   /** In-flight Image objects for teardown neutering. */
   private readonly inFlightImages = new Set<HTMLImageElement>();
+  /** Maps emoji URLs to in-flight Image objects for timeout cleanup. */
+  private readonly emojiUrlToImage = new Map<string, HTMLImageElement>();
 
   /** Generation counter per URL — prevents stale createImageBitmap results
    * from overwriting newer bitmaps when the same URL is loaded concurrently. */
@@ -211,10 +213,12 @@ export class ImageFetchManager {
       const url = emojiUrl;
       const img = new Image();
       this.inFlightImages.add(img);
+      this.emojiUrlToImage.set(url, img);
       img.crossOrigin = 'anonymous';
       img.onload = () => {
         if (this.isDestroyed) return;
         this.inFlightImages.delete(img);
+        this.emojiUrlToImage.delete(url);
         this.emojiFetching.delete(url);
         this.emojiFetchingStarted.delete(url);
         this.emojiCache.set(url, img);
@@ -227,6 +231,7 @@ export class ImageFetchManager {
       img.onerror = () => {
         if (this.isDestroyed) return;
         this.inFlightImages.delete(img);
+        this.emojiUrlToImage.delete(url);
         this.emojiFetching.delete(url);
         this.emojiFetchingStarted.delete(url);
         this.failedEmojiFetches.set(url, Date.now());
@@ -279,6 +284,15 @@ export class ImageFetchManager {
       if (now - startedAt > this.emojiFetchTimeoutMs) {
         this.emojiFetching.delete(url);
         this.emojiFetchingStarted.delete(url);
+        // Release the stalled Image to prevent resource leak.
+        const img = this.emojiUrlToImage.get(url);
+        if (img) {
+          img.onload = null;
+          img.onerror = null;
+          img.src = '';
+          this.inFlightImages.delete(img);
+          this.emojiUrlToImage.delete(url);
+        }
       }
     }
 
@@ -331,6 +345,7 @@ export class ImageFetchManager {
       img.src = '';
     }
     this.inFlightImages.clear();
+    this.emojiUrlToImage.clear();
 
     // ByteLimitedCache.clear() calls onEvict (bitmap.close()) for each entry.
     this.workerBitmapCache.clear();
