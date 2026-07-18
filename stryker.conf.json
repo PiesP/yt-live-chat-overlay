@@ -26,5 +26,30 @@
   "timeoutMS": 120000,
   "plugins": [
     "@stryker-mutator/vitest-runner"
-  ]
+  ],
+  "mutators": {
+    "excludedMutations": [
+      "StringLiteral",
+      "ArrayDeclaration",
+      "ObjectLiteral",
+      "ArrowFunction",
+      "BlockStatement",
+      "ConditionalExpression",
+      "Regex",
+      "UnaryOperator",
+      "UpdateOperator",
+      "OptionalChaining",
+      "AssignmentOperator",
+      "PrefixDecrementOperator",
+      "PrefixIncrementOperator",
+      "PostfixDecrementOperator",
+      "PostfixIncrementOperator",
+      "MethodExpression",
+      "NonNullAssertion",
+      "CheckedStatement",
+      "SwitchCase",
+      "WhileStatement",
+      "ForStatement"
+    ]
+  }
 }

@@ -8,9 +8,9 @@
  * persists across reload, and supports both increase and decrease.
  *
  * The fontSize setting is a number. Based on actual app behavior:
- * - Default: 24
+ * - Default: 32
  * - Max clamped: 50
- * - Min clamped: ~8
+ * - Min clamped: 14
  */
 
 import { test, expect } from '@playwright/test';
@@ -34,7 +34,7 @@ test.describe('Font Size Changes', () => {
     }
   });
 
-  test('default font size is 24', async ({ page }) => {
+  test('default font size is 32', async ({ page }) => {
     await setupOverlayPage(page);
 
     const settings = await getSettings(page);
@@ -63,7 +63,7 @@ test.describe('Font Size Changes', () => {
     await applySettings(page, { fontSize: 0 });
     const settings = await getSettings(page);
     // Should be clamped to a minimum value (likely 8 or higher)
-    expect(settings.fontSize).toBeGreaterThanOrEqual(8);
+    expect(settings.fontSize).toBeGreaterThanOrEqual(14);
   });
 
   test('large font size is clamped to maximum', async ({ page }) => {
