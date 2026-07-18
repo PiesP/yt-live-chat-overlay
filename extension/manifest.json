@@ -5,7 +5,7 @@
   "description": "Nico-nico style comment overlay for YouTube live chat. 100% local processing.",
   "author": "PiesP",
   "homepage_url": "https://github.com/PiesP/yt-live-chat-overlay",
-  "minimum_chrome_version": "102",
+  "minimum_chrome_version": "116",
   "permissions": [
     "storage",
     "contextMenus"
