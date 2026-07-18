@@ -183,11 +183,12 @@ export class ReplayChatSource extends ChatSource {
       //    — there's no point collecting data that won't be consumed until
       //    the user manually resumes.
       if (isPlaying) {
+        let mainPollSucceeded = false;
         try {
           if (this.replayMode === 'playerSeek') {
-            await this.pollPlayerSeekReplay(playback, signal);
+            mainPollSucceeded = await this.pollPlayerSeekReplay(playback, signal);
           } else if (this.replayMode === 'continuation') {
-            await this.pollContinuationReplay(playback.offsetMs, signal);
+            mainPollSucceeded = await this.pollContinuationReplay(playback.offsetMs, signal);
           }
         } catch (error: unknown) {
           if (!isAbortError(error)) {
@@ -195,10 +196,10 @@ export class ReplayChatSource extends ChatSource {
           }
         }
 
-        // Seed prefetch after the first successful main poll — replayContinuation
-        // has now advanced past the page the poll just fetched, so prefetch
-        // won't duplicate it.
-        if (!this.prefetchMode) {
+        // Seed prefetch only after a successful main poll. If the poll
+        // failed, the continuation wasn't advanced and prefetch would
+        // re-request the same stale continuation.
+        if (!this.prefetchMode && mainPollSucceeded) {
           this.startPrefetch();
         }
       }
@@ -573,23 +574,23 @@ export class ReplayChatSource extends ChatSource {
   private async pollPlayerSeekReplay(
     playback: PlaybackSnapshot,
     signal?: AbortSignal
-  ): Promise<void> {
+  ): Promise<boolean> {
     if (playback.paused || !this.shouldFetchReplayAtOffset(playback.offsetMs)) {
-      return;
+      return false;
     }
 
     const fetched = await this.fetchReplayPlayerSeek(playback.offsetMs, signal);
     // Flush is handled by the rAF loop — no explicit flush call here.
 
     if (fetched) {
-      return;
+      return true;
     }
 
     // Re-initialize only after persistent failures across multiple
     // backoff cycles (REPLAY_TOTAL_FAILURE_LIMIT). Transient errors
     // are handled by recordReplayFailure's consecutive-failure backoff.
     if (!this.needsReplaySessionRecovery()) {
-      return;
+      return false;
     }
 
     log.warn(
@@ -599,9 +600,9 @@ export class ReplayChatSource extends ChatSource {
 
     const bootstrap = await this.refreshBootstrap(signal);
     if (!bootstrap?.isReplay) {
-      return;
+      return false;
     }
-    await this.initializeReplaySession(signal);
+    return await this.initializeReplaySession(signal);
   }
 
   private shouldFetchReplayAtOffset(currentOffsetMs: number): boolean {
@@ -619,9 +620,9 @@ export class ReplayChatSource extends ChatSource {
   private async pollContinuationReplay(
     currentOffsetMs: number,
     signal?: AbortSignal
-  ): Promise<void> {
+  ): Promise<boolean> {
     if (Date.now() < this.replayNextAllowedFetchAt) {
-      return;
+      return false;
     }
 
     const minimumOffsetMs = Math.max(0, currentOffsetMs - REPLAY_PREFETCH_WINDOW_MS);
@@ -663,5 +664,6 @@ export class ReplayChatSource extends ChatSource {
     }
 
     // Flush is handled by the rAF loop — no explicit flush call here.
+    return batches > 0;
   }
 }

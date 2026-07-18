@@ -29,11 +29,8 @@ import { readFileSync } from 'node:fs';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-// Resolve dist directory relative to the test/ working directory.
-// Playwright copies spec files to .stryker-tmp/ sandbox dirs, so we cannot
-// rely on import.meta.dirname. Instead, we resolve from process.cwd()
-// which is the test/ directory when running `cd test && npx playwright test`.
-const DIST_DIR = resolve(process.cwd(), '../dist');
+import { DIST_DIR } from '../fixtures/test-utils';
+
 const USERSCRIPT_PATH = resolve(DIST_DIR, 'yt-live-chat-overlay.user.js');
 
 const OVERLAY_ID = 'yt-live-chat-overlay';

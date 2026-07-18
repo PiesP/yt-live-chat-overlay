@@ -149,11 +149,12 @@ export class Settings {
   }
 
   /**
-   * Returns the current settings object. Do NOT modify the returned object
-   * directly — use updateSettings() for mutations.
+   * Returns a shallow copy of the current settings object.
+   * Mutations to the returned object do not affect the stored settings.
+   * Use set() or updateSettings() for persistent changes.
    */
   get(): Readonly<OverlaySettings> {
-    return this.settings;
+    return { ...this.settings };
   }
 
   /** Apply settings and persist to storage. */

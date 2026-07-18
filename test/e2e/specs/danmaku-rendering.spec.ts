@@ -11,15 +11,14 @@
 
 import { test, expect } from '@playwright/test';
 import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
 import {
   setupOverlayPage,
   OVERLAY_ID,
   getSettings,
+  DIST_DIR,
+  USERSCRIPT_PATH,
 } from '../fixtures/test-utils';
 
-const DIST_DIR = resolve(process.cwd(), '../dist');
-const USERSCRIPT_PATH = resolve(DIST_DIR, 'yt-live-chat-overlay.dev.user.js');
 
 test.describe('Danmaku Rendering', () => {
   test.beforeAll(() => {
