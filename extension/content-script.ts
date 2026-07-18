@@ -49,6 +49,14 @@ pageScript.type = 'text/javascript';
 // MAIN-world page script posts { source: 'yt-storage-relay', ... } when
 // the bridge indicates extension context. We forward to chrome.storage.local
 // and post the response back via window.postMessage.
+//
+// Only explicitly allowed keys are accepted — same-origin scripts on the
+// YouTube page (ads, other extensions' content scripts) could otherwise
+// read or overwrite arbitrary chrome.storage.local keys.
+
+const ALLOWED_STORAGE_KEYS = new Set([
+  'yt-live-chat-overlay-settings',
+]);
 
 window.addEventListener('message', (event: MessageEvent) => {
   const data = event.data;
@@ -57,9 +65,23 @@ window.addEventListener('message', (event: MessageEvent) => {
 
   const requestId = data.requestId as number;
   const method = data.method as string;
+  const key = data.key as string;
+
+  // Reject keys outside the allowlist — same-origin scripts could
+  // otherwise read/write arbitrary extension storage via postMessage.
+  if (!ALLOWED_STORAGE_KEYS.has(key)) {
+    window.postMessage(
+      {
+        source: 'yt-storage-relay-response',
+        requestId,
+        error: `Key "${key}" is not in the storage relay allowlist`,
+      },
+      window.location.origin,
+    );
+    return;
+  }
 
   if (method === 'get') {
-    const key = data.key as string;
     chrome!.storage!.local!.get(key)
       .then((result) => {
         const value = result?.[key];
@@ -81,7 +103,6 @@ window.addEventListener('message', (event: MessageEvent) => {
         );
       });
   } else if (method === 'set') {
-    const key = data.key as string;
     const value = data.value as string;
     chrome!.storage!.local!.set({ [key]: value })
       .then(() => {
