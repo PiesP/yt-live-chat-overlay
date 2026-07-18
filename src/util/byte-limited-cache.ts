@@ -3,7 +3,7 @@
 
 /**
  * ByteLimitedCache — a Map wrapper that keeps total estimated byte usage
- * under a configurable limit by FIFO-evicting the oldest entries.
+ * under a configurable limit by evicting the least recently used entries.
  *
  * Useful for image and canvas bitmap caches where the number of entries
  * is a poor proxy for actual memory pressure (a 200×200 canvas vs a

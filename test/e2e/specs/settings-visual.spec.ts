@@ -26,6 +26,14 @@ async function setupSettingsPage(page: Page): Promise<void> {
   await page.waitForSelector(`#${BUTTON_ID}`, { timeout: 10_000 });
 }
 
+async function openSettingsModal(page: Page): Promise<void> {
+  await setupSettingsPage(page);
+  // The mocked player video can intercept pointer events even though the
+  // overlay button is visible; force the click to exercise the button handler.
+  await page.locator(`#${BUTTON_ID}`).click({ force: true });
+  await page.waitForTimeout(500);
+}
+
 test.describe('Settings UI Visual', () => {
   test('gear button appears on player', async ({ page }) => {
     await setupSettingsPage(page);
@@ -37,12 +45,8 @@ test.describe('Settings UI Visual', () => {
     expect(box!.height).toBeGreaterThan(20);
   });
 
-  test.skip('settings modal opens with all tabs', async ({ page }) => {
-    await setupSettingsPage(page);
-
-    // Click the gear button to open settings
-    await page.locator(`#${BUTTON_ID}`).click();
-    await page.waitForTimeout(500);
+  test('settings modal opens with all tabs', async ({ page }) => {
+    await openSettingsModal(page);
 
     // Verify settings modal is visible
     const modal = page.locator('#yt-chat-overlay-settings-backdrop');
@@ -60,11 +64,8 @@ test.describe('Settings UI Visual', () => {
     await expect(translationTab).toBeVisible();
   });
 
-  test.skip('settings modal can be closed', async ({ page }) => {
-    await setupSettingsPage(page);
-
-    await page.locator(`#${BUTTON_ID}`).click();
-    await page.waitForTimeout(500);
+  test('settings modal can be closed', async ({ page }) => {
+    await openSettingsModal(page);
 
     const modal = page.locator('#yt-chat-overlay-settings-backdrop');
     await expect(modal).toBeVisible({ timeout: 5000 });
@@ -77,11 +78,8 @@ test.describe('Settings UI Visual', () => {
     await expect(modal).not.toBeVisible();
   });
 
-  test.skip('screenshot: settings panel visual state', async ({ page }) => {
-    await setupSettingsPage(page);
-
-    await page.locator(`#${BUTTON_ID}`).click();
-    await page.waitForTimeout(500);
+  test('screenshot: settings panel visual state', async ({ page }) => {
+    await openSettingsModal(page);
 
     // Wait for modal to fully render
     await page.waitForSelector('#tab-comments', { timeout: 5000 });

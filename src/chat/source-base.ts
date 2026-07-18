@@ -126,6 +126,7 @@ export abstract class ChatSource implements Pauseable {
   private pauseAbortController: AbortController | null = null;
   private lastActivityTime = 0;
   protected bootstrap: ChatBootstrapData | null = null;
+  private bootstrapPreseeded = false;
   private readonly messageBuffer = new MessageBuffer();
 
   /**
@@ -157,17 +158,27 @@ export abstract class ChatSource implements Pauseable {
    */
   setInitialBootstrap(data: ChatBootstrapData): void {
     this.bootstrap = data;
+    this.bootstrapPreseeded = true;
   }
 
   async start(callback: MessageCallback, signal?: AbortSignal): Promise<ChatSourceStartStatus> {
     this.pollController?.abort();
     this.pollLoopManager.stop();
 
-    this.pollController = new AbortController();
+    const initialBootstrap = this.bootstrapPreseeded ? this.bootstrap : null;
+    this.bootstrapPreseeded = false;
+    const pollController = new AbortController();
+    this.pollController = pollController;
     this.callback = callback;
     this.resetSessionState();
+    // Concrete resetSessionState() implementations clear transient session
+    // state. Preserve factory-provided bootstrap data across that reset so the
+    // preseed optimization can actually skip the duplicate watch-page fetch.
+    this.bootstrap = initialBootstrap;
 
-    const combinedSignal = signal ?? this.pollController.signal;
+    const combinedSignal = signal
+      ? AbortSignal.any([pollController.signal, signal])
+      : pollController.signal;
 
     try {
       return await this.bootstrapAndLaunchPolling(combinedSignal);

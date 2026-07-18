@@ -64,34 +64,33 @@ export function installDomChatWatcher(onMessages: DomMessageCallback): DomWatche
       if (!node || node.nodeType !== Node.ELEMENT_NODE) continue;
       const el = node as HTMLElement;
 
-      // Check if this element itself is a text-message renderer
-      const textRenderer = el.matches(TEXT_MESSAGE_RENDERER_SELECTOR)
-        ? el
-        : el.querySelector(TEXT_MESSAGE_RENDERER_SELECTOR);
+      const textRenderers = el.matches(TEXT_MESSAGE_RENDERER_SELECTOR)
+        ? [el]
+        : Array.from(el.querySelectorAll<HTMLElement>(TEXT_MESSAGE_RENDERER_SELECTOR));
 
-      if (!textRenderer) continue;
+      for (const textRenderer of textRenderers) {
+        const authorEl = textRenderer.querySelector(AUTHOR_NAME_SELECTOR);
+        const messageEl = textRenderer.querySelector(MESSAGE_SELECTOR);
 
-      const authorEl = textRenderer.querySelector(AUTHOR_NAME_SELECTOR);
-      const messageEl = textRenderer.querySelector(MESSAGE_SELECTOR);
+        const author = authorEl?.textContent?.trim() ?? '';
+        const text = messageEl?.textContent?.trim() ?? '';
 
-      const author = authorEl?.textContent?.trim() ?? '';
-      const text = messageEl?.textContent?.trim() ?? '';
+        if (!text) continue;
 
-      if (!text) continue;
+        const rawId = textRenderer.id;
 
-      const rawId = textRenderer.id;
+        const message: ChatMessage = {
+          ...(rawId ? { id: rawId } : {}),
+          text,
+          content: [{ type: 'text', content: text }],
+          kind: 'text',
+          timestamp: now,
+          author,
+          authorType: 'normal',
+        };
 
-      const message: ChatMessage = {
-        ...(rawId ? { id: rawId } : {}),
-        text,
-        content: [{ type: 'text', content: text }],
-        kind: 'text',
-        timestamp: now,
-        author,
-        authorType: 'normal',
-      };
-
-      messages.push(message);
+        messages.push(message);
+      }
     }
 
     return messages;

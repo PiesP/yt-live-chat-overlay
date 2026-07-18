@@ -81,4 +81,33 @@ describe('RuntimeManager', () => {
     const b = new RuntimeManager(createOpts({ valid: false }));
     expect(a).not.toBe(b);
   });
+
+  it('does not apply visibility side effects after disposal has started', () => {
+    type RuntimeManagerInternals = {
+      state: string;
+      hiddenSince: number | null;
+      startForegroundListeners: () => void;
+      stopForegroundListeners: () => void;
+    };
+
+    const rm = new RuntimeManager(createOpts());
+    const internals = rm as unknown as RuntimeManagerInternals;
+    internals.state = 'destroyed';
+    internals.startForegroundListeners();
+
+    const originalVisibilityState = document.visibilityState;
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'hidden',
+    });
+    document.dispatchEvent(new Event('visibilitychange'));
+
+    expect(internals.hiddenSince).toBeNull();
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: originalVisibilityState,
+    });
+    internals.stopForegroundListeners();
+  });
 });

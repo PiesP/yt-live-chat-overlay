@@ -201,8 +201,8 @@ export const AR: Record<string, string> = {
 
   // ── New tooltips (added 2026-05-28) ──
   'Text size in pixels (14-50)': 'حجم النص بالبكسل (14-50)',
-  'Text outline stroke width in pixels (0-8)': 'عرض شroke حد النص بالبكسل (0-8)',
-  'Text outline stroke opacity (0-100%)': 'شفافية stroke حد النص (0-100%)',
+  'Text outline stroke width in pixels (0-8)': 'عرض حد محيط النص بالبكسل (0-8)',
+  'Text outline stroke opacity (0-100%)': 'شفافية حد النص (0-100%)',
 
   // ── New tooltips (added 2026-05-29) ──
   'Globally enable or disable the chat overlay on YouTube live streams':
@@ -225,13 +225,13 @@ export const AR: Record<string, string> = {
   'Emoji Fetch Limit': 'حد جلب الرموز التعبيرية',
   'Failed Emoji Retry (min)': 'إعادة محاولة الرموز التعبيرية الفاشلة (دقائق)',
   'Max memory for emoji image cache (1-20 MB, default 3)':
-    'الحد الأقصى لللذاكرة المؤقتة لصور الرموز التعبيرية (1-20 MB، الافتراضي 3)',
+    'الحد الأقصى للذاكرة المؤقتة لصور الرموز التعبيرية (1-20 MB، الافتراضي 3)',
   'Max memory for author photo cache (1-20 MB, default 2)':
-    'الحد الأقصى لللذاكرة المؤقتة لصور المؤلفين (1-20 MB، الافتراضي 2)',
+    'الحد الأقصى للذاكرة المؤقتة لصور المؤلفين (1-20 MB، الافتراضي 2)',
   'Max memory for sticker image cache (1-20 MB, default 1)':
-    'الحد الأقصى لللذاكرة المؤقتة لصور الملصقات (1-20 MB، الافتراضي 1)',
+    'الحد الأقصى للذاكرة المؤقتة لصور الملصقات (1-20 MB، الافتراضي 1)',
   'Max memory for text bitmap cache (1-20 MB, default 4)':
-    'الحد الأقصى لللذاكرة المؤقتة للنصوص النقطية (1-20 MB، الافتراضي 4)',
+    'الحد الأقصى للذاكرة المؤقتة للنصوص النقطية (1-20 MB، الافتراضي 4)',
   'Max translations applied per frame to avoid spikes (1-20, default 5)':
     'الحد الأقصى للترجمات المطبقة لكل إطار لتجنب الارتفاعات الحادة (1-20، الافتراضي 5)',
   'Max concurrent emoji fetch operations (1-20, default 6)':

@@ -248,6 +248,28 @@ describe("BacklogInjectionController", () => {
     });
   });
 
+  describe("injection recovery", () => {
+    it("finishes when the queue has no message at the current offset", () => {
+      type ControllerInternals = {
+        backlogQueue: Array<import("@app-types").ChatMessage | undefined>;
+        backlogQueueOffset: number;
+        isActive: boolean;
+        isInjecting: boolean;
+        processTick: () => void;
+      };
+
+      const internals = controller as unknown as ControllerInternals;
+      internals.backlogQueue = [undefined];
+      internals.backlogQueueOffset = 0;
+      internals.isActive = true;
+      internals.isInjecting = true;
+
+      internals.processTick();
+
+      expect(controller.isBacklogActive).toBe(false);
+    });
+  });
+
   // ═══════════════════════════════════════════════════════
   // Injection timing (with fake timers)
   // ═══════════════════════════════════════════════════════

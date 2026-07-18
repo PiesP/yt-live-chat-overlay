@@ -1363,6 +1363,10 @@ export class RuntimeManager {
     const cleanups: (() => void)[] = [];
 
     const handleVisibility = (): void => {
+      if (this.isDisposedState) {
+        return;
+      }
+
       if (document.visibilityState !== 'visible') {
         this.visibilityHandled = false;
         this.noteHidden();
@@ -1378,10 +1382,6 @@ export class RuntimeManager {
       // the first already performed the full resume sequence.
       if (this.visibilityHandled) return;
       this.visibilityHandled = true;
-
-      if (this.isDisposedState) {
-        return;
-      }
 
       // Resume chat panel observer — it was paused when the tab was hidden.
       this.chatPanelObserver.resume();
