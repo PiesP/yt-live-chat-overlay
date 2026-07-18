@@ -5,7 +5,7 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "preinstall": "test -f packages/core/package.json || { echo '\u26a0\ufe0f  Submodule not initialized. Run: git submodule update --init'; exit 1; }",
+    "preinstall": "test -f packages/core/package.json || { echo '⚠️  Submodule not initialized. Run: git submodule update --init'; exit 1; }",
     "build": "vite build",
     "build:dev": "vite build --mode development",
     "dev": "vite build --mode development --watch",
@@ -23,7 +23,7 @@
     "quality": "pnpm -s fmt && pnpm -s lint && pnpm -s check && pnpm -s check:extension && pnpm -s circular && pnpm -s knip && pnpm -s quality:nose",
     "quality:ci": "pnpm -s fmt && pnpm -s lint && pnpm -s check && pnpm -s check:extension && pnpm -s circular && pnpm -s knip && pnpm -s quality:nose",
     "quality:fix": "pnpm -s fmt:fix && pnpm -s lint:fix && pnpm -s check && pnpm -s circular && pnpm -s knip",
-    "quality:nose": "bash -c 'if command -v nose &>/dev/null; then nose query src --baseline .nose-baseline.json --fail-on new; else echo \"[nose] not installed \u2014 skipping\"; fi'",
+    "quality:nose": "bash -c 'if command -v nose &>/dev/null; then nose query src --baseline .nose-baseline.json --fail-on new; else echo \"[nose] not installed — skipping\"; fi'",
     "verify": "pnpm -s quality && pnpm build && pnpm build:extension && pnpm build:extension:firefox",
     "clean": "rimraf dist",
     "validate:consistency": "cd test && npx vitest run consistency/",
@@ -72,17 +72,17 @@
   "devDependencies": {
     "@biomejs/biome": "^2.5.4",
     "@piesp/browser-core": "file:packages/core",
+    "@playwright/test": "^1.61.1",
+    "@stryker-mutator/core": "^9.6.1",
+    "@stryker-mutator/vitest-runner": "^9.6.1",
     "@types/node": "^26.1.1",
+    "canvas": "^3.2.3",
     "jsdom": "^29.1.1",
     "knip": "^6.26.0",
     "rimraf": "^6.1.3",
     "typescript": "7.0.2",
-    "vite": "^8.1.4",
+    "vite": "^8.1.5",
     "vite-plugin-monkey": "^8.0.6",
-    "vitest": "^4.1.10",
-    "@playwright/test": "^1.61.0",
-    "@stryker-mutator/core": "^9.6.1",
-    "@stryker-mutator/vitest-runner": "^9.6.1",
-    "canvas": "^3.2.3"
+    "vitest": "^4.1.10"
   }
 }
