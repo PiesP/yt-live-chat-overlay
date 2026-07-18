@@ -121,6 +121,29 @@ describe('TranslationService translator lifecycle', () => {
     expect(newTranslator.destroy).toHaveBeenCalledTimes(1);
   });
 
+  it('resolves non-empty translations immediately after disable and destroy', async () => {
+    const firstTranslator = makeTranslator('first');
+    const secondTranslator = makeTranslator('second');
+    const create = vi.fn().mockResolvedValueOnce(firstTranslator).mockResolvedValueOnce(secondTranslator);
+    const availability = vi.fn().mockResolvedValue('available');
+    stubTranslator(create, availability);
+
+    const service = new TranslationService();
+    await service.configure({ enabled: true, service: 'auto', source: 'en', target: 'ja' });
+
+    await service.configure({ enabled: false, service: 'auto', source: 'en', target: 'ja' });
+    await expect(
+      Promise.race([service.translate('after-disable'), Promise.resolve<'pending'>('pending')])
+    ).resolves.toBeNull();
+
+    service.destroy();
+    await service.configure({ enabled: true, service: 'auto', source: 'en', target: 'ja' });
+    service.destroy();
+    await expect(
+      Promise.race([service.translate('after-destroy'), Promise.resolve<'pending'>('pending')])
+    ).resolves.toBeNull();
+  });
+
   it('does not let the old translator process entries from a pending generation', async () => {
     const oldTranslator = makeTranslator('old');
     const newTranslator = makeTranslator('new');
@@ -151,6 +174,37 @@ describe('TranslationService translator lifecycle', () => {
     await replacement;
     await expect(queued).resolves.toBe('new:queued');
     expect(oldTranslator.translate).not.toHaveBeenCalled();
+    service.destroy();
+  });
+
+  it('uses the pending generation for a synchronous translate after configure starts', async () => {
+    const oldTranslator = makeTranslator('old');
+    const newTranslator = makeTranslator('new');
+    const newCreation = deferred<TranslatorInstance>();
+    const newCreationStarted = deferred<void>();
+    const create = vi.fn().mockResolvedValueOnce(oldTranslator).mockImplementationOnce(() => {
+      newCreationStarted.resolve(undefined);
+      return newCreation.promise;
+    });
+    const availability = vi.fn().mockResolvedValue('available');
+    stubTranslator(create, availability);
+
+    const service = new TranslationService();
+    await service.configure({ enabled: true, service: 'auto', source: 'en', target: 'ja' });
+
+    const replacement = service.configure({
+      enabled: true,
+      service: 'auto',
+      source: 'en',
+      target: 'ko',
+    });
+    const synchronous = service.translate('synchronous');
+
+    expect(oldTranslator.translate).not.toHaveBeenCalled();
+    await newCreationStarted.promise;
+    newCreation.resolve(newTranslator);
+    await replacement;
+    await expect(synchronous).resolves.toBe('new:synchronous');
     service.destroy();
   });
 
@@ -380,6 +434,39 @@ describe('TranslationService translator lifecycle', () => {
 
     expect(create).toHaveBeenCalledTimes(3);
     await expect(service.translate('hello')).resolves.toBe('latest:hello');
+    service.destroy();
+  });
+
+  it('settles translations after the recovery cycle cap is reached', async () => {
+    const translators = [makeTranslator('first'), makeTranslator('second'), makeTranslator('third')];
+    for (const translator of translators) {
+      translator.translate.mockRejectedValue(new Error('translator failed'));
+    }
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce(translators[0])
+      .mockResolvedValueOnce(translators[1])
+      .mockResolvedValueOnce(translators[2]);
+    const availability = vi.fn().mockResolvedValue('available');
+    stubTranslator(create, availability);
+
+    const service = new TranslationService();
+    await service.configure({ enabled: true, service: 'auto', source: 'en', target: 'ja' });
+
+    for (let cycle = 0; cycle < 3; cycle++) {
+      for (let attempt = 0; attempt < 6; attempt++) {
+        await expect(service.translate(`failure-${cycle}-${attempt}`)).resolves.toBeNull();
+      }
+      if (cycle < 2) {
+        await service.onUserActivation();
+      }
+    }
+
+    await expect(service.translate('first-after-cap')).resolves.toBeNull();
+    const secondAfterCap = service.translate('second-after-cap');
+    await Promise.resolve();
+    expect((service as unknown as { translateQueue: unknown[] }).translateQueue).toHaveLength(0);
+    await expect(secondAfterCap).resolves.toBeNull();
     service.destroy();
   });
 

@@ -118,8 +118,11 @@ export class TranslationService {
       return;
     }
 
+    const generation = this.reserveConfiguration(resolvedSource, resolvedTarget);
+    if (generation === null) return;
+
     await this.enqueueLifecycleOperation(async () => {
-      if (!this.enabled) return;
+      if (!this.enabled || generation !== this.configurationGeneration) return;
       if (!getTranslator()) {
         log.warn('translation.service.api-unavailable');
         this.disableTranslation();
@@ -132,7 +135,7 @@ export class TranslationService {
       ) {
         return;
       }
-      await this.doConfigure(resolvedSource, resolvedTarget);
+      await this.doConfigure(resolvedSource, resolvedTarget, generation);
     });
   }
 
@@ -144,11 +147,25 @@ export class TranslationService {
    */
   async onUserActivation(): Promise<void> {
     if (!this.enabled) return;
+    const source = this.pendingSource;
+    const target = this.pendingTarget;
+    if (!source || !target) return;
+
+    const generation = this.reserveConfiguration(source, target);
+    if (generation === null) return;
+
     await this.enqueueLifecycleOperation(async () => {
-      if (!this.enabled || !this.pendingSource || !this.pendingTarget) return;
+      if (
+        !this.enabled ||
+        generation !== this.configurationGeneration ||
+        this.pendingSource !== source ||
+        this.pendingTarget !== target
+      ) {
+        return;
+      }
 
       log.info('translation.service.retry-user-activation');
-      await this.doConfigure(this.pendingSource, this.pendingTarget);
+      await this.doConfigure(source, target, generation, true);
     });
   }
 
@@ -161,11 +178,24 @@ export class TranslationService {
   async setDetectedSource(source: TranslationLanguage): Promise<void> {
     if (!this.enabled) return;
 
-    await this.enqueueLifecycleOperation(async () => {
-      if (!this.enabled || !this.currentTarget || source === this.currentSource) return;
+    const target = this.pendingTarget ?? this.currentTarget;
+    const configuredSource = this.pendingSource ?? this.currentSource;
+    if (!target || source === configuredSource) return;
 
-      const target = this.currentTarget;
-      await this.doConfigure(source, target);
+    const generation = this.reserveConfiguration(source, target);
+    if (generation === null) return;
+
+    await this.enqueueLifecycleOperation(async () => {
+      if (
+        !this.enabled ||
+        generation !== this.configurationGeneration ||
+        this.pendingSource !== source ||
+        this.pendingTarget !== target
+      ) {
+        return;
+      }
+
+      await this.doConfigure(source, target, generation);
     });
   }
 
@@ -173,6 +203,34 @@ export class TranslationService {
     const operationPromise = this.lifecyclePromise.then(operation);
     this.lifecyclePromise = operationPromise.catch(() => undefined);
     return operationPromise;
+  }
+
+  private reserveConfiguration(sourceLanguage: string, targetLanguage: string): number | null {
+    if (
+      sourceLanguage === this.currentSource &&
+      targetLanguage === this.currentTarget &&
+      this.translator !== null &&
+      this.translatorGeneration === this.configurationGeneration
+    ) {
+      return null;
+    }
+    if (
+      sourceLanguage === this.pendingSource &&
+      targetLanguage === this.pendingTarget &&
+      this.configuringGeneration === this.configurationGeneration
+    ) {
+      return this.configurationGeneration;
+    }
+
+    const generation = this.configurationGeneration + 1;
+    this.configurationGeneration = generation;
+    this.translatorGeneration = null;
+    this.configuringGeneration = generation;
+    this.cancelActiveTranslation();
+    this.resolveStaleQueueEntries(generation);
+    this.pendingSource = sourceLanguage;
+    this.pendingTarget = targetLanguage;
+    return generation;
   }
 
   private resolveQueueEntry(entry: TranslateQueueEntry, result: string | null): void {
@@ -285,8 +343,12 @@ export class TranslationService {
     }
   }
 
-  private async doConfigure(sourceLanguage: string, targetLanguage: string): Promise<void> {
-    const generation = ++this.configurationGeneration;
+  private async doConfigure(
+    sourceLanguage: string,
+    targetLanguage: string,
+    generation: number,
+    preserveRecoveryCount = false
+  ): Promise<void> {
     this.translatorGeneration = null;
     this.configuringGeneration = generation;
     this.cancelActiveTranslation();
@@ -365,7 +427,9 @@ export class TranslationService {
       this.pendingSource = null;
       this.pendingTarget = null;
       this.consecutiveFailures = 0;
-      this.recoveryCycleCount = 0;
+      if (!preserveRecoveryCount) {
+        this.recoveryCycleCount = 0;
+      }
       this.lastSuccessTimestamp = 0;
       if (previousTranslator && previousTranslator !== newTranslator) {
         this.disposeTranslator(previousTranslator);
@@ -428,6 +492,9 @@ export class TranslationService {
     if (!text.trim()) {
       return text;
     }
+    if (!this.enabled) {
+      return null;
+    }
 
     // Include language pair in cache key so stale translations from a
     // previous target language aren't returned after settings change.
@@ -480,6 +547,15 @@ export class TranslationService {
         // replacement is being created, but it must not process new work.
         // Hold the current generation until its translator is ready.
         if (!this.isGenerationReady(queuedEntry.generation)) {
+          const recoveryCapped =
+            !this.translator &&
+            this.recoveryCycleCount >= TranslationService.MAX_RECOVERY_CYCLES &&
+            !this.pendingSource &&
+            !this.pendingTarget;
+          if (!this.enabled || recoveryCapped) {
+            this.resolveQueueEntriesForGeneration(queuedEntry.generation);
+            continue;
+          }
           if (
             !this.translator &&
             this.enabled &&
