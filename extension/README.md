@@ -6,19 +6,26 @@ Chrome, Edge, Brave, Vivaldi, and Firefox (MV3).
 ## Architecture
 
 ```
-packages?
-  src/
-    core/          ← Shared business logic (renderers, lane allocator, chat parser)
-    platform/      ← Abstraction layer (StorageAdapter, WorkerFactory, MenuAdapter)
+src/
+  app/            ← Application entry, overlay manager
+  chat/           ← Chat source abstraction (live/replay/YouTube parsing)
+  i18n/           ← Internationalization (6 languages)
+  media/          ← Media utilities
+  platform/       ← Platform abstraction layer (userscript/extension adapters)
+  renderer/       ← Canvas renderers (Canvas2D, OffscreenCanvas Worker, layout)
+  settings/       ← Settings UI (DOM controller, form builder)
+  translation/    ← Machine translation integration
+  types/          ← Shared TypeScript types
+  util/           ← Utility functions
 
-  extension/
-    background.ts   ← Service Worker (context menu, message routing)
-    content-script.ts ← MAIN world content script entry point
-    manifest.json    ← Chrome MV3 manifest
-    manifest.firefox.json ← Firefox MV3 manifest
+extension/
+  background.ts   ← Service Worker (context menu, message routing)
+  content-script.ts ← ISOLATED world content script entry point
+  manifest.json    ← Chrome MV3 manifest
+  manifest.firefox.json ← Firefox MV3 manifest
 
-  dist-extension/         ← Chrome extension output (gitignored)
-  dist-extension-firefox/ ← Firefox extension output (gitignored)
+dist-extension/         ← Chrome extension output (gitignored)
+dist-extension-firefox/ ← Firefox extension output (gitignored)
 ```
 
 ## Platform Abstraction

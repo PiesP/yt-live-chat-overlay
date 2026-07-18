@@ -390,7 +390,7 @@ export class Overlay {
 
   /**
    * Toggle user-initiated pause. Returns new state.
-   * Press Space to pause/resume overlay scrolling.
+   * Press Ctrl+Space to pause/resume overlay scrolling.
    * Independent from tab visibility and video pause.
    */
   toggleUserPause(): boolean {
