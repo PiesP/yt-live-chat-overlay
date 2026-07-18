@@ -239,3 +239,45 @@ describe('resolveSuperChatRgb', () => {
     expect(result).toEqual({ r: 0, g: 255, b: 0 });
   });
 });
+
+// ── desaturateColor ────────────────────────────────────────────────────
+
+import { desaturateColor } from '@renderer/color-utils';
+
+describe('desaturateColor', () => {
+  it('factor 0 returns original color (hex)', () => {
+    expect(desaturateColor('#FF0000', 0)).toBe('rgb(255,0,0)');
+    expect(desaturateColor('#00FF00', 0)).toBe('rgb(0,255,0)');
+  });
+
+  it('factor 1 returns full grayscale (hex)', () => {
+    // 0.299*255 + 0.587*0 + 0.114*0 = 76.245 → gray ≈ 76
+    const gray = desaturateColor('#FF0000', 1);
+    expect(gray).toBe('rgb(76,76,76)');
+  });
+
+  it('factor 0.5 on mid-gray returns same gray (already neutral)', () => {
+    const result = desaturateColor('#808080', 0.5);
+    expect(result).toBe('rgb(128,128,128)');
+  });
+
+  it('handles 3-digit short hex', () => {
+    expect(desaturateColor('#F00', 0)).toBe('rgb(255,0,0)');
+  });
+
+  it('handles rgb() format', () => {
+    expect(desaturateColor('rgb(255, 0, 0)', 0)).toBe('rgb(255,0,0)');
+  });
+
+  it('handles rgba() format', () => {
+    expect(desaturateColor('rgba(0, 255, 0, 0.5)', 0)).toBe('rgb(0,255,0)');
+  });
+
+  it('returns original for unparseable colors', () => {
+    expect(desaturateColor('not-a-color', 0.5)).toBe('not-a-color');
+  });
+
+  it('full desaturation of pure white is still white', () => {
+    expect(desaturateColor('#FFFFFF', 1)).toBe('rgb(255,255,255)');
+  });
+});

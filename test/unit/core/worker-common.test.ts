@@ -1,8 +1,13 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { describe, it, expect } from 'vitest';
-import { buildPartialWorkerConfig } from '@renderer/worker/common';
+import { describe, it, expect, vi } from 'vitest';
+import {
+  buildPartialWorkerConfig,
+  sendUpdateConfigToWorker,
+  sendSetPausedToWorker,
+  sendClearStateToWorker,
+} from '@renderer/worker/common';
 import type { OverlaySettings } from '@app-types';
 
 // Minimal settings shape for testing — all fields the worker config picks from
@@ -99,5 +104,80 @@ describe('buildPartialWorkerConfig', () => {
     const config = buildPartialWorkerConfig(mockSettings, ['fontSize']);
     // buildPartialWorkerConfig returns Record<string, unknown>
     expect(typeof config.fontSize).toBe('number');
+  });
+});
+
+// ── sendUpdateConfigToWorker ────────────────────────────────────────────
+
+describe('sendUpdateConfigToWorker', () => {
+  it('posts updateConfig message with config', () => {
+    const postMessage = vi.fn();
+    const manager = { worker: { postMessage } as unknown as Worker };
+
+    sendUpdateConfigToWorker(manager, { speedPxPerSec: 150, opacity: 0.8 });
+
+    expect(postMessage).toHaveBeenCalledTimes(1);
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'updateConfig',
+      config: { speedPxPerSec: 150, opacity: 0.8 },
+    });
+  });
+
+  it('no-ops when worker is null', () => {
+    const manager = { worker: null };
+    expect(() => sendUpdateConfigToWorker(manager, {})).not.toThrow();
+  });
+});
+
+// ── sendSetPausedToWorker ───────────────────────────────────────────────
+
+describe('sendSetPausedToWorker', () => {
+  it('posts setPaused message with paused flag and no videoPaused', () => {
+    const postMessage = vi.fn();
+    const manager = { worker: { postMessage } as unknown as Worker };
+
+    sendSetPausedToWorker(manager, true);
+
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'setPaused',
+      paused: true,
+      videoPaused: undefined,
+    });
+  });
+
+  it('includes videoPaused when provided', () => {
+    const postMessage = vi.fn();
+    const manager = { worker: { postMessage } as unknown as Worker };
+
+    sendSetPausedToWorker(manager, false, true);
+
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'setPaused',
+      paused: false,
+      videoPaused: true,
+    });
+  });
+
+  it('no-ops when worker is null', () => {
+    const manager = { worker: null };
+    expect(() => sendSetPausedToWorker(manager, true)).not.toThrow();
+  });
+});
+
+// ── sendClearStateToWorker ──────────────────────────────────────────────
+
+describe('sendClearStateToWorker', () => {
+  it('posts clearState message', () => {
+    const postMessage = vi.fn();
+    const manager = { worker: { postMessage } as unknown as Worker };
+
+    sendClearStateToWorker(manager);
+
+    expect(postMessage).toHaveBeenCalledWith({ type: 'clearState' });
+  });
+
+  it('no-ops when worker is null', () => {
+    const manager = { worker: null };
+    expect(() => sendClearStateToWorker(manager)).not.toThrow();
   });
 });

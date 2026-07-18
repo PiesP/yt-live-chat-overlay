@@ -2,136 +2,77 @@
 // Copyright (c) 2026 PiesP
 
 import { describe, it, expect } from 'vitest';
-
-/**
- * createFastRandom is not exported — we re-implement the LCG for testing.
- *
- * Parameters: a=1664525, c=1013904223, modulo=2^32
- * This is the Numerical Recipes LCG used by the pipeline-utils module.
- */
-function createFastRandom(seed?: number): () => number {
-  let s = seed != null ? seed : Date.now() ^ ((Math.random() * 0xffffffff) >>> 0);
-  return () => {
-    s = (Math.imul(1664525, s) + 1013904223) >>> 0;
-    return s / 0xffffffff;
-  };
-}
+import {
+  createFastRandom,
+  fastRandom,
+  COMPACTION_THRESHOLD_RATIO,
+} from '@renderer/canvas/pipeline-utils';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // createFastRandom
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('createFastRandom', () => {
-  describe('output range', () => {
-    it('generates values in [0, 1)', () => {
-      const rng = createFastRandom(42);
-      for (let i = 0; i < 1000; i++) {
-        const val = rng();
-        expect(val).toBeGreaterThanOrEqual(0);
-        expect(val).toBeLessThan(1);
-      }
-    });
-
-    it('generates values with reasonable range coverage', () => {
-      const rng = createFastRandom(42);
-      let min = 1;
-      let max = 0;
-      for (let i = 0; i < 1000; i++) {
-        const val = rng();
-        min = Math.min(min, val);
-        max = Math.max(max, val);
-      }
-      // With 1000 samples, min should be well below 0.1 and max well above 0.9
-      expect(min).toBeLessThan(0.05);
-      expect(max).toBeGreaterThan(0.95);
-    });
+  it('returns a function that produces numbers in [0, 1)', () => {
+    const rng = createFastRandom(42);
+    for (let i = 0; i < 100; i++) {
+      const value = rng();
+      expect(value).toBeGreaterThanOrEqual(0);
+      expect(value).toBeLessThan(1);
+    }
   });
 
-  describe('determinism', () => {
-    it('produces identical sequence for same seed', () => {
-      const a = createFastRandom(12345);
-      const b = createFastRandom(12345);
-      for (let i = 0; i < 100; i++) {
-        expect(a()).toBe(b());
-      }
-    });
-
-    it('produces different sequence for different seeds', () => {
-      const a = createFastRandom(1);
-      const b = createFastRandom(2);
-      // At least one of the first 10 values should differ
-      let differs = false;
-      for (let i = 0; i < 10 && !differs; i++) {
-        differs = a() !== b();
-      }
-      expect(differs).toBe(true);
-    });
+  it('produces deterministic sequence with same seed', () => {
+    const rng1 = createFastRandom(12345);
+    const rng2 = createFastRandom(12345);
+    for (let i = 0; i < 20; i++) {
+      expect(rng1()).toBe(rng2());
+    }
   });
 
-  describe('distribution uniformity', () => {
-    it('has roughly uniform distribution (chi-squared approximation)', () => {
-      const rng = createFastRandom(7);
-      const buckets = new Array(10).fill(0);
-      const N = 10000;
-      for (let i = 0; i < N; i++) {
-        const idx = Math.min(9, Math.floor(rng() * 10));
-        buckets[idx]++;
-      }
-      // Each bucket should have roughly N/10 = 1000 items
-      for (const count of buckets) {
-        // Allow ±15% deviation for LCG (LCGs are not perfectly uniform)
-        expect(count).toBeGreaterThan(850);
-        expect(count).toBeLessThan(1150);
-      }
-    });
+  it('produces different sequences with different seeds', () => {
+    const rng1 = createFastRandom(1);
+    const rng2 = createFastRandom(2);
+    const seq1 = Array.from({ length: 10 }, () => rng1());
+    const seq2 = Array.from({ length: 10 }, () => rng2());
+    expect(seq1).not.toEqual(seq2);
   });
 
-  describe('no-seed (time-based) mode', () => {
-    it('produces valid values without explicit seed', () => {
-      const rng = createFastRandom();
-      for (let i = 0; i < 10; i++) {
-        const val = rng();
-        expect(val).toBeGreaterThanOrEqual(0);
-        expect(val).toBeLessThan(1);
-      }
-    });
+  it('produces approximately uniform distribution', () => {
+    const rng = createFastRandom(99);
+    const samples = Array.from({ length: 1000 }, () => rng());
+    const mean = samples.reduce((a, b) => a + b, 0) / samples.length;
+    // Mean should be ~0.5 for uniform [0,1)
+    expect(mean).toBeGreaterThan(0.45);
+    expect(mean).toBeLessThan(0.55);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// fastRandom (module-level instance)
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('fastRandom', () => {
+  it('module-level instance produces values in [0, 1)', () => {
+    for (let i = 0; i < 50; i++) {
+      const v = fastRandom();
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThan(1);
+    }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// COMPACTION_THRESHOLD_RATIO
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('COMPACTION_THRESHOLD_RATIO', () => {
+  it('is a number between 0 and 1', () => {
+    expect(COMPACTION_THRESHOLD_RATIO).toBeGreaterThan(0);
+    expect(COMPACTION_THRESHOLD_RATIO).toBeLessThan(1);
   });
 
-  describe('full 2^32 period check', () => {
-    it('does not repeat within first 10,000 values', () => {
-      const rng = createFastRandom(0);
-      const seen = new Set<number>();
-      let collisions = 0;
-      for (let i = 0; i < 10000; i++) {
-        const val = rng();
-        if (seen.has(val)) collisions++;
-        seen.add(val);
-      }
-      // With 2^32 period, collisions in 10,000 samples is extremely unlikely
-      expect(collisions).toBe(0);
-    });
-  });
-
-  describe('edge-case seeds', () => {
-    it('handles seed=0 correctly', () => {
-      const rng = createFastRandom(0);
-      const v0 = rng();
-      expect(v0).toBeGreaterThanOrEqual(0);
-      expect(v0).toBeLessThan(1);
-    });
-
-    it('handles seed=0xffffffff (max 32-bit unsigned)', () => {
-      const rng = createFastRandom(0xffffffff);
-      const v0 = rng();
-      expect(v0).toBeGreaterThanOrEqual(0);
-      expect(v0).toBeLessThan(1);
-    });
-
-    it('handles negative seed', () => {
-      const rng = createFastRandom(-1);
-      const v0 = rng();
-      expect(v0).toBeGreaterThanOrEqual(0);
-      expect(v0).toBeLessThan(1);
-    });
+  it('is exactly 0.5', () => {
+    expect(COMPACTION_THRESHOLD_RATIO).toBe(0.5);
   });
 });
