@@ -22,7 +22,7 @@ import {
   applySettings,
   readGmStorage,
 } from '../fixtures/test-utils';
-const DIST_DIR = resolve(process.cwd(), '../dist');
+const DIST_DIR = resolve(process.cwd(), 'dist');
 const USERSCRIPT_PATH = resolve(DIST_DIR, 'yt-live-chat-overlay.dev.user.js');
 
 test.describe('Font Size Changes', () => {

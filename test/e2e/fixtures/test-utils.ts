@@ -19,7 +19,7 @@ import { resolve } from 'node:path';
 
 // ─── Paths ───────────────────────────────────────────────────────────────────
 
-const DIST_DIR = resolve(process.cwd(), '../dist');
+const DIST_DIR = resolve(process.cwd(), 'dist');
 const USERSCRIPT_PATH = resolve(DIST_DIR, 'yt-live-chat-overlay.dev.user.js');
 
 // ─── Constants ───────────────────────────────────────────────────────────────

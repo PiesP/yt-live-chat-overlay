@@ -17,6 +17,11 @@ export default defineConfig({
     passWithNoTests: false,
     slowTestThreshold: 500,
     testTimeout: 10000,
+    coverage: {
+      provider: "v8",
+      include: ["src/**/*.ts"],
+      exclude: ["src/types/**", "src/main.ts"],
+    },
   },
   resolve: {
     alias: {
