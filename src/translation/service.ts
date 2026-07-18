@@ -29,6 +29,14 @@ const log = createLogger('TranslationService');
 import type { TranslatorDownloadEvent, TranslatorInstance } from '@platform/translation-adapter';
 import { getTranslator, isTranslationSupported } from '@platform/translation-adapter';
 
+type TranslateQueueEntry = {
+  text: string;
+  cacheKey: string;
+  generation: number;
+  resolve: (result: string | null) => void;
+  settled: boolean;
+};
+
 // ── Public API ────────────────────────────────────────────────────────────
 
 /**
@@ -45,12 +53,9 @@ export class TranslationService {
   /** Invalidates queued work and async configuration results from older owners. */
   private configurationGeneration = 0;
   /** FIFO translation queue. */
-  private translateQueue: Array<{
-    text: string;
-    cacheKey: string;
-    generation: number;
-    resolve: (result: string | null) => void;
-  }> = [];
+  private translateQueue: TranslateQueueEntry[] = [];
+  /** Entry currently awaited by the drain loop, if any. */
+  private activeEntry: TranslateQueueEntry | null = null;
   /** Whether the drain loop is currently running. */
   private drainActive = false;
   /** Pending source/target from the most recent configure() for retry. */
@@ -115,16 +120,15 @@ export class TranslationService {
       return;
     }
 
-    if (resolvedTarget === this.currentTarget && resolvedSource === this.currentSource) return;
-
     // Serialize: wait for any in-flight configure before starting a new one.
     if (this.configurePromise) {
       const requestedGeneration = this.configurationGeneration;
       await this.configurePromise;
       // Re-check no-op after the previous call completed.
       if (!this.enabled || requestedGeneration !== this.configurationGeneration) return;
-      if (resolvedTarget === this.currentTarget && resolvedSource === this.currentSource) return;
     }
+
+    if (resolvedTarget === this.currentTarget && resolvedSource === this.currentSource) return;
 
     this.configurePromise = this.doConfigure(resolvedSource, resolvedTarget);
     try {
@@ -167,21 +171,38 @@ export class TranslationService {
    */
   async setDetectedSource(source: TranslationLanguage): Promise<void> {
     if (!this.enabled) return;
-    if (!this.currentTarget) return;
-    if (source === this.currentSource) return;
 
     // Serialize with configure() to avoid overlapping translator creation.
     if (this.configurePromise) {
       await this.configurePromise;
-      if (source === this.currentSource) return;
     }
 
-    this.sourceDetectionPromise = this.doConfigure(source, this.currentTarget);
-    try {
+    if (!this.enabled || !this.currentTarget) return;
+
+    // Serialize overlapping detections as well. Re-check the current target
+    // and source only after the previous detection has completed.
+    if (this.sourceDetectionPromise) {
       await this.sourceDetectionPromise;
-    } finally {
-      this.sourceDetectionPromise = null;
     }
+
+    if (!this.enabled || !this.currentTarget || source === this.currentSource) return;
+
+    const target = this.currentTarget;
+    const detectionPromise = this.doConfigure(source, target);
+    this.sourceDetectionPromise = detectionPromise;
+    try {
+      await detectionPromise;
+    } finally {
+      if (this.sourceDetectionPromise === detectionPromise) {
+        this.sourceDetectionPromise = null;
+      }
+    }
+  }
+
+  private resolveQueueEntry(entry: TranslateQueueEntry, result: string | null): void {
+    if (entry.settled) return;
+    entry.settled = true;
+    entry.resolve(result);
   }
 
   private disposeTranslator(
@@ -330,7 +351,7 @@ export class TranslationService {
       // Drop oldest entry if the queue is at capacity.
       if (this.translateQueue.length >= TranslationService.MAX_TRANSLATE_QUEUE_SIZE) {
         const dropped = this.translateQueue.shift();
-        if (dropped) dropped.resolve(null);
+        if (dropped) this.resolveQueueEntry(dropped, null);
         log.debug(
           `Translate queue at capacity (${TranslationService.MAX_TRANSLATE_QUEUE_SIZE}) — dropped oldest entry`
         );
@@ -340,6 +361,7 @@ export class TranslationService {
         cacheKey,
         generation: this.configurationGeneration,
         resolve,
+        settled: false,
       });
       if (!this.drainActive) {
         this.drainActive = true;
@@ -358,114 +380,119 @@ export class TranslationService {
         const entry = this.translateQueue.shift();
         if (!entry) break;
 
-        if (entry.generation !== this.configurationGeneration) {
-          entry.resolve(null);
-          continue;
-        }
-
-        // Re-check cache after dequeue — another caller may have translated this text
-        const reCached = this.translationCache.get(entry.cacheKey);
-        if (reCached !== undefined) {
-          entry.resolve(reCached);
-          continue;
-        }
-
-        // ── Auto-recovery: translator died, but Translator.create() requires
-        // user activation (click/keypress within 5s).  We cannot recover here —
-        // drainQueue() runs in the background without user interaction.
-        // Instead, resolve all pending translations immediately with null and
-        // preserve pendingSource/pendingTarget so onUserActivation() (called
-        // from click handlers) can recover when the user next interacts.
-        if (!this.translator && this.enabled && this.pendingSource && this.pendingTarget) {
-          // Time-based reset: if translations were working recently, allow fresh recovery attempts.
-          if (
-            this.lastSuccessTimestamp > 0 &&
-            Date.now() - this.lastSuccessTimestamp > TranslationService.RECOVERY_RESET_MS
-          ) {
-            log.debug('translation.service.recovery-reset');
-            this.recoveryCycleCount = 0;
-          }
-          if (this.recoveryCycleCount >= TranslationService.MAX_RECOVERY_CYCLES) {
-            log.warn(
-              `Translator died ${this.recoveryCycleCount} times — disabling auto-recovery for this session. Open settings and click Save to retry.`
-            );
-            this.pendingSource = null;
-            this.pendingTarget = null;
-          }
-          // Resolve all remaining queue entries — translator is dead and can't be
-          // recreated without user activation.  The queue drain loop will exit
-          // naturally after resolving these.
-          entry.resolve(null);
-          // Fast-drain remaining queue items (they'll all resolve null)
-          while (this.translateQueue.length > 0) {
-            const next = this.translateQueue.shift();
-            if (next) next.resolve(null);
-          }
-          return;
-        }
-
-        const translator = this.translator;
-        if (!translator) {
-          entry.resolve(null);
-          continue;
-        }
-
-        // ── Execute translation ───────────────────────────────────────────
-
+        this.activeEntry = entry;
         try {
-          const result = await translator.translate(entry.text);
-          if (
-            entry.generation !== this.configurationGeneration ||
-            this.translator !== translator ||
-            !this.enabled
-          ) {
-            entry.resolve(null);
+          if (entry.generation !== this.configurationGeneration) {
+            this.resolveQueueEntry(entry, null);
             continue;
           }
-          this.consecutiveFailures = 0;
-          this.lastSuccessTimestamp = Date.now();
-          this.translationCache.set(entry.cacheKey, result);
-          entry.resolve(result);
-        } catch (err: unknown) {
-          if (
-            entry.generation !== this.configurationGeneration ||
-            this.translator !== translator ||
-            !this.enabled
-          ) {
-            entry.resolve(null);
+
+          // Re-check cache after dequeue — another caller may have translated this text
+          const reCached = this.translationCache.get(entry.cacheKey);
+          if (reCached !== undefined) {
+            this.resolveQueueEntry(entry, reCached);
             continue;
           }
-          this.consecutiveFailures++;
-          const errName = err instanceof DOMException ? err.name : 'Unknown';
-          if (this.consecutiveFailures >= TranslationService.MAX_CONSECUTIVE_FAILURES) {
-            this.recoveryCycleCount++;
-            if (this.recoveryCycleCount === 1) {
+
+          // ── Auto-recovery: translator died, but Translator.create() requires
+          // user activation (click/keypress within 5s).  We cannot recover here —
+          // drainQueue() runs in the background without user interaction.
+          // Instead, resolve all pending translations immediately with null and
+          // preserve pendingSource/pendingTarget so onUserActivation() (called
+          // from click handlers) can recover when the user next interacts.
+          if (!this.translator && this.enabled && this.pendingSource && this.pendingTarget) {
+            // Time-based reset: if translations were working recently, allow fresh recovery attempts.
+            if (
+              this.lastSuccessTimestamp > 0 &&
+              Date.now() - this.lastSuccessTimestamp > TranslationService.RECOVERY_RESET_MS
+            ) {
+              log.debug('translation.service.recovery-reset');
+              this.recoveryCycleCount = 0;
+            }
+            if (this.recoveryCycleCount >= TranslationService.MAX_RECOVERY_CYCLES) {
               log.warn(
-                `Translator failed ${this.consecutiveFailures} times consecutively (last: ${errName}) — invalidating instance for recovery`
+                `Translator died ${this.recoveryCycleCount} times — disabling auto-recovery for this session. Open settings and click Save to retry.`
               );
-            } else {
-              log.debug(
-                `Translator failed again (cycle #${this.recoveryCycleCount}, last: ${errName}) — invalidating instance`
-              );
+              this.pendingSource = null;
+              this.pendingTarget = null;
             }
-            if (!this.pendingSource && this.currentSource) {
-              this.pendingSource = this.currentSource;
+            // Resolve all remaining queue entries — translator is dead and can't be
+            // recreated without user activation.  The queue drain loop will exit
+            // naturally after resolving these.
+            this.resolveQueueEntry(entry, null);
+            // Fast-drain remaining queue items (they'll all resolve null)
+            while (this.translateQueue.length > 0) {
+              const next = this.translateQueue.shift();
+              if (next) this.resolveQueueEntry(next, null);
             }
-            if (!this.pendingTarget && this.currentTarget) {
-              this.pendingTarget = this.currentTarget;
-            }
-            this.disposeTranslator(translator);
-            this.translator = null;
-            this.currentTarget = null;
-            this.currentSource = null;
-            this.consecutiveFailures = 0;
-          } else {
-            log.debug('translation.service.translate-failed', {
-              errorName: errName,
-              error: String(err),
-            });
+            return;
           }
-          entry.resolve(null);
+
+          const translator = this.translator;
+          if (!translator) {
+            this.resolveQueueEntry(entry, null);
+            continue;
+          }
+
+          // ── Execute translation ───────────────────────────────────────────
+
+          try {
+            const result = await translator.translate(entry.text);
+            if (
+              entry.generation !== this.configurationGeneration ||
+              this.translator !== translator ||
+              !this.enabled
+            ) {
+              this.resolveQueueEntry(entry, null);
+              continue;
+            }
+            this.consecutiveFailures = 0;
+            this.lastSuccessTimestamp = Date.now();
+            this.translationCache.set(entry.cacheKey, result);
+            this.resolveQueueEntry(entry, result);
+          } catch (err: unknown) {
+            if (
+              entry.generation !== this.configurationGeneration ||
+              this.translator !== translator ||
+              !this.enabled
+            ) {
+              this.resolveQueueEntry(entry, null);
+              continue;
+            }
+            this.consecutiveFailures++;
+            const errName = err instanceof DOMException ? err.name : 'Unknown';
+            if (this.consecutiveFailures >= TranslationService.MAX_CONSECUTIVE_FAILURES) {
+              this.recoveryCycleCount++;
+              if (this.recoveryCycleCount === 1) {
+                log.warn(
+                  `Translator failed ${this.consecutiveFailures} times consecutively (last: ${errName}) — invalidating instance for recovery`
+                );
+              } else {
+                log.debug(
+                  `Translator failed again (cycle #${this.recoveryCycleCount}, last: ${errName}) — invalidating instance`
+                );
+              }
+              if (!this.pendingSource && this.currentSource) {
+                this.pendingSource = this.currentSource;
+              }
+              if (!this.pendingTarget && this.currentTarget) {
+                this.pendingTarget = this.currentTarget;
+              }
+              this.disposeTranslator(translator);
+              this.translator = null;
+              this.currentTarget = null;
+              this.currentSource = null;
+              this.consecutiveFailures = 0;
+            } else {
+              log.debug('translation.service.translate-failed', {
+                errorName: errName,
+                error: String(err),
+              });
+            }
+            this.resolveQueueEntry(entry, null);
+          }
+        } finally {
+          if (this.activeEntry === entry) this.activeEntry = null;
         }
       }
     } finally {
@@ -494,14 +521,18 @@ export class TranslationService {
     this.consecutiveFailures = 0;
     this.recoveryCycleCount = 0;
     this.lastSuccessTimestamp = 0;
-    // Resolve all pending translate() callers with null before clearing the queue.
+    // Resolve the active caller as well as pending translate() callers with null
+    // before clearing the queue. The drain loop remains active until its current
+    // translator operation settles, so a second drain cannot race its finally.
+    if (this.activeEntry) {
+      this.resolveQueueEntry(this.activeEntry, null);
+    }
     // Without this, any caller awaiting translate() has a Promise that never settles,
     // causing a Promise leak that retains closures and their entire scope chain.
     for (const entry of this.translateQueue) {
-      entry.resolve(null);
+      this.resolveQueueEntry(entry, null);
     }
     this.translateQueue = [];
-    this.drainActive = false;
     this.translationCache.clear();
   }
 }
