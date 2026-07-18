@@ -42,10 +42,13 @@ export class TranslationService {
   private enabled = false;
   /** Serializes configure() calls to prevent overlapping translator creation. */
   private configurePromise: Promise<void> | null = null;
+  /** Invalidates queued work and async configuration results from older owners. */
+  private configurationGeneration = 0;
   /** FIFO translation queue. */
   private translateQueue: Array<{
     text: string;
     cacheKey: string;
+    generation: number;
     resolve: (result: string | null) => void;
   }> = [];
   /** Whether the drain loop is currently running. */
@@ -91,7 +94,8 @@ export class TranslationService {
 
     this.enabled = settings.enabled && settings.service === 'auto';
     if (!this.enabled) {
-      this.translator?.destroy();
+      this.configurationGeneration++;
+      this.disposeTranslator(this.translator);
       this.translator = null;
       this.currentTarget = null;
       this.currentSource = null;
@@ -103,6 +107,11 @@ export class TranslationService {
     if (!getTranslator()) {
       log.warn('translation.service.api-unavailable');
       this.enabled = false;
+      this.configurationGeneration++;
+      this.disposeTranslator(this.translator);
+      this.translator = null;
+      this.currentTarget = null;
+      this.currentSource = null;
       return;
     }
 
@@ -110,8 +119,10 @@ export class TranslationService {
 
     // Serialize: wait for any in-flight configure before starting a new one.
     if (this.configurePromise) {
+      const requestedGeneration = this.configurationGeneration;
       await this.configurePromise;
       // Re-check no-op after the previous call completed.
+      if (!this.enabled || requestedGeneration !== this.configurationGeneration) return;
       if (resolvedTarget === this.currentTarget && resolvedSource === this.currentSource) return;
     }
 
@@ -173,7 +184,20 @@ export class TranslationService {
     }
   }
 
+  private disposeTranslator(
+    translator: TranslatorInstance | null,
+    logMessage = 'translation.service.destroy-failed'
+  ): void {
+    if (!translator) return;
+    try {
+      translator.destroy();
+    } catch {
+      log.debug(logMessage);
+    }
+  }
+
   private async doConfigure(sourceLanguage: string, targetLanguage: string): Promise<void> {
+    const generation = ++this.configurationGeneration;
     this.pendingSource = sourceLanguage;
     this.pendingTarget = targetLanguage;
 
@@ -183,13 +207,15 @@ export class TranslationService {
         targetLanguage,
       });
 
+      if (generation !== this.configurationGeneration || !this.enabled) return;
+
       // 'unavailable' means the language pair is not supported at all.
       // Don't attempt to create — it would fail immediately.
       if (availability === 'unavailable') {
         log.warn(
           `Translator not available for ${sourceLanguage}→${targetLanguage} (unsupported language pair).`
         );
-        this.translator?.destroy();
+        this.disposeTranslator(this.translator);
         this.translator = null;
         this.currentTarget = null;
         this.currentSource = null;
@@ -200,7 +226,7 @@ export class TranslationService {
       // When 'downloadable', Translator.create() triggers the model download
       // (requires user activation within 5 seconds). The Promise resolves once
       // the download completes and the translator is ready.
-      this.translator =
+      const newTranslator =
         (await getTranslator()?.create({
           sourceLanguage,
           targetLanguage,
@@ -216,21 +242,16 @@ export class TranslationService {
           },
         })) ?? null;
 
-      // Guard: if configure() was called with enabled=false during the
-      // async create(), destroy the translator to prevent instance leaks.
-      // A disable concurrent with create() would leave this.translator
-      // non-null while this.enabled is false, leaking a Chrome Translator
-      // slot (10-instance limit per browsing context).
-      if (!this.enabled) {
-        this.translator?.destroy();
-        this.translator = null;
-        this.currentTarget = null;
-        this.currentSource = null;
-        this.pendingSource = null;
-        this.pendingTarget = null;
+      // A newer configuration or disable may have taken ownership while
+      // create() was pending. This result belongs to the old operation and
+      // must be disposed without touching the active translator.
+      if (generation !== this.configurationGeneration || !this.enabled) {
+        this.disposeTranslator(newTranslator);
         return;
       }
 
+      const previousTranslator = this.translator;
+      this.translator = newTranslator;
       this.currentTarget = targetLanguage;
       this.currentSource = sourceLanguage;
       this.pendingSource = null;
@@ -238,6 +259,9 @@ export class TranslationService {
       this.consecutiveFailures = 0;
       this.recoveryCycleCount = 0;
       this.lastSuccessTimestamp = 0;
+      if (previousTranslator && previousTranslator !== newTranslator) {
+        this.disposeTranslator(previousTranslator);
+      }
       log.info('translation.service.ready', { source: sourceLanguage, target: targetLanguage });
     } catch (err: unknown) {
       // create() may fail if user activation was missing (NotAllowedError)
@@ -246,8 +270,9 @@ export class TranslationService {
       // onUserActivation() call.
       // Clear currentTarget/currentSource so the next configure() with
       // the same language pair does not incorrectly no-op (see line 94).
+      if (generation !== this.configurationGeneration) return;
       log.warn('translation.service.create-failed', { error: String(err) });
-      this.translator?.destroy();
+      this.disposeTranslator(this.translator);
       this.translator = null;
       this.currentTarget = null;
       this.currentSource = null;
@@ -310,7 +335,12 @@ export class TranslationService {
           `Translate queue at capacity (${TranslationService.MAX_TRANSLATE_QUEUE_SIZE}) — dropped oldest entry`
         );
       }
-      this.translateQueue.push({ text, cacheKey, resolve });
+      this.translateQueue.push({
+        text,
+        cacheKey,
+        generation: this.configurationGeneration,
+        resolve,
+      });
       if (!this.drainActive) {
         this.drainActive = true;
         this.drainQueue();
@@ -327,6 +357,11 @@ export class TranslationService {
       while (this.translateQueue.length > 0) {
         const entry = this.translateQueue.shift();
         if (!entry) break;
+
+        if (entry.generation !== this.configurationGeneration) {
+          entry.resolve(null);
+          continue;
+        }
 
         // Re-check cache after dequeue — another caller may have translated this text
         const reCached = this.translationCache.get(entry.cacheKey);
@@ -369,7 +404,8 @@ export class TranslationService {
           return;
         }
 
-        if (!this.translator) {
+        const translator = this.translator;
+        if (!translator) {
           entry.resolve(null);
           continue;
         }
@@ -377,12 +413,28 @@ export class TranslationService {
         // ── Execute translation ───────────────────────────────────────────
 
         try {
-          const result = await this.translator.translate(entry.text);
+          const result = await translator.translate(entry.text);
+          if (
+            entry.generation !== this.configurationGeneration ||
+            this.translator !== translator ||
+            !this.enabled
+          ) {
+            entry.resolve(null);
+            continue;
+          }
           this.consecutiveFailures = 0;
           this.lastSuccessTimestamp = Date.now();
           this.translationCache.set(entry.cacheKey, result);
           entry.resolve(result);
         } catch (err: unknown) {
+          if (
+            entry.generation !== this.configurationGeneration ||
+            this.translator !== translator ||
+            !this.enabled
+          ) {
+            entry.resolve(null);
+            continue;
+          }
           this.consecutiveFailures++;
           const errName = err instanceof DOMException ? err.name : 'Unknown';
           if (this.consecutiveFailures >= TranslationService.MAX_CONSECUTIVE_FAILURES) {
@@ -402,13 +454,7 @@ export class TranslationService {
             if (!this.pendingTarget && this.currentTarget) {
               this.pendingTarget = this.currentTarget;
             }
-            if (this.translator) {
-              try {
-                this.translator.destroy();
-              } catch {
-                log.debug('translation.service.destroy-failed');
-              }
-            }
+            this.disposeTranslator(translator);
             this.translator = null;
             this.currentTarget = null;
             this.currentSource = null;
@@ -437,13 +483,8 @@ export class TranslationService {
     // Without this call, every RuntimeSession restart leaks one slot, and after
     // ~10 restarts (watchdog, foreground-return, standby-resolved, settings
     // changes) Translator.create() fails permanently.
-    if (this.translator) {
-      try {
-        this.translator.destroy();
-      } catch {
-        log.debug('translation.service.shutdown-destroy-failed');
-      }
-    }
+    this.configurationGeneration++;
+    this.disposeTranslator(this.translator, 'translation.service.shutdown-destroy-failed');
     this.translator = null;
     this.currentTarget = null;
     this.currentSource = null;
