@@ -484,7 +484,7 @@ export class SettingsUiForm {
         // where :user-invalid is not supported.
         const isInvalid = supportsUserInvalid
           ? input.matches(':user-invalid')
-          : (input.matches(':invalid') || !input.checkValidity());
+          : input.matches(':invalid') || !input.checkValidity();
         input.setAttribute('aria-invalid', String(isInvalid));
       }
     };
