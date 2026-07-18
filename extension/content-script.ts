@@ -61,6 +61,8 @@ const ALLOWED_STORAGE_KEYS = new Set([
 ]);
 
 window.addEventListener('message', (event: MessageEvent) => {
+  if (event.source !== window) return;
+
   const data = event.data;
   if (!data || data.source !== 'yt-storage-relay') return;
   if (event.origin !== window.location.origin) return;

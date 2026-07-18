@@ -52,14 +52,12 @@ describe('ChannelLanguageMemory.keyFromUrl', () => {
   });
 
   describe('youtube.com without www', () => {
-    it('still extracts key from youtube.com (no www)', () => {
-      expect(ChannelLanguageMemory.keyFromUrl('https://youtube.com/watch?v=test123')).toBe(
-        'test123',
-      );
+    it('returns null for youtube.com apex (not supported)', () => {
+      expect(ChannelLanguageMemory.keyFromUrl('https://youtube.com/watch?v=test123')).toBeNull();
     });
 
-    it('still extracts @handle from youtube.com (no www)', () => {
-      expect(ChannelLanguageMemory.keyFromUrl('https://youtube.com/@Handle')).toBe('@Handle');
+    it('returns null for @handle from youtube.com apex (not supported)', () => {
+      expect(ChannelLanguageMemory.keyFromUrl('https://youtube.com/@Handle')).toBeNull();
     });
   });
 

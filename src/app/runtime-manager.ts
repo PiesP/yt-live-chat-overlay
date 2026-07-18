@@ -266,11 +266,22 @@ export class RuntimeManager {
   }
 
   async start(): Promise<void> {
+    if (this.state === 'destroyed') {
+      log.warn('runtime.start', {
+        reason: 'already-destroyed',
+        hint: 'create a new RuntimeManager instance; destroyed instances cannot be reused',
+      });
+      return;
+    }
     await this.reconcileNow('startup');
   }
 
   requestReconcile(reason: ReconcileReason): void {
     if (this.state === 'destroyed') {
+      log.debug('runtime.reconcile', {
+        reason,
+        outcome: 'ignored-destroyed',
+      });
       return;
     }
 

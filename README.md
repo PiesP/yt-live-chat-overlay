@@ -72,12 +72,20 @@ pnpm quality              # fmt + lint + check + circular + knip
 
 ```
 src/
-  core/          Shared business logic (renderers, lane allocator, chat parser)
-  platform/      Platform abstraction layer (storage, worker URLs, menus)
+  app/           Runtime lifecycle, overlay, video pause, standby
+  chat/          YouTube chat source, DOM watcher, poll loop, API
+  i18n/          Locale files (en, ko, ja, zh-CN, es, ar)
+  media/         Author rate limiter
+  platform/      Platform abstraction (storage, workers, cross-tab)
+  renderer/      Canvas2D renderer + OffscreenCanvas Worker
+  settings/      Settings schema, limits, UI, store
+  translation/   In-browser chat translation
+  types/         Shared TypeScript types
+  util/          Utilities (logging, DOM, LRU, message bus, etc.)
 extension/
-  background.ts  Service worker — context menu registration
-  content-script.ts  MAIN world entry point for extension
-  manifest.json  Chrome MV3 manifest
+  content-script.ts  ISOLATED world entry point + storage relay
+  background.ts   Service worker — context menu registration
+  manifest.json   Chrome MV3 manifest
   manifest.firefox.json  Firefox MV3 manifest
 ```
 

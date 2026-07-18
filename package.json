@@ -19,7 +19,7 @@
     "fmt": "biome check --linter-enabled=false .",
     "fmt:fix": "biome check --write --linter-enabled=false .",
     "fmt:check": "pnpm -s fmt",
-    "circular": "pnpm dlx madge --ts-config tsconfig.json --circular src/**/*.ts",
+    "circular": "dpdm --tsconfig tsconfig.json --circular --no-tree --no-warning src/**/*.ts",
     "quality": "pnpm -s fmt && pnpm -s lint && pnpm -s check && pnpm -s check:extension && pnpm -s circular && pnpm -s knip && pnpm -s quality:nose",
     "quality:ci": "pnpm -s fmt && pnpm -s lint && pnpm -s check && pnpm -s check:extension && pnpm -s circular && pnpm -s knip && pnpm -s quality:nose",
     "quality:fix": "pnpm -s fmt:fix && pnpm -s lint:fix && pnpm -s check && pnpm -s circular && pnpm -s knip",
@@ -62,7 +62,7 @@
     "url": "git+https://github.com/PiesP/yt-live-chat-overlay.git"
   },
   "engines": {
-    "node": ">=22.0.0",
+    "node": ">=26.0.0",
     "pnpm": ">=11.2.2"
   },
   "packageManager": "pnpm@11.2.2",
@@ -79,6 +79,7 @@
     "@types/node": "^26.1.1",
     "@vitest/coverage-v8": "^4.1.10",
     "canvas": "^3.2.3",
+    "dpdm": "^4.2.0",
     "jsdom": "^29.1.1",
     "knip": "^6.27.0",
     "rimraf": "^6.1.3",

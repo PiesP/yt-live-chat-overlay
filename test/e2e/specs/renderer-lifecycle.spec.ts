@@ -95,28 +95,34 @@ test.describe('Renderer Lifecycle', () => {
     expect(settings.speedPxPerSec).toBe(100);
   });
 
-  test('renderer survives rapid stop/start cycle', async ({ page }) => {
+  test('stop is one-shot — start after stop is a no-op', async ({ page }) => {
     await setupOverlayPage(page);
 
-    for (let i = 0; i < 3; i++) {
-      await page.evaluate(() => {
-        const w = (window as unknown) as Record<string, unknown>;
-        const handle = w.__ytChatOverlay as { stop?: () => Promise<void> } | undefined;
-        return handle?.stop?.();
-      });
-      await page.waitForTimeout(1000);
+    // Step 1: overlay starts normally, canvas is present
+    const canvas = page.locator(`#${OVERLAY_ID} canvas`);
+    await expect(canvas).toBeAttached({ timeout: 5000 });
 
-      await page.evaluate(() => {
-        const w = (window as unknown) as Record<string, unknown>;
-        const handle = w.__ytChatOverlay as { start?: () => Promise<void> } | undefined;
-        return handle?.start?.();
-      });
-      await page.waitForTimeout(2000);
+    // Step 2: stop the overlay
+    await page.evaluate(() => {
+      const w = (window as unknown) as Record<string, unknown>;
+      const handle = w.__ytChatOverlay as { stop?: () => Promise<void> } | undefined;
+      return handle?.stop?.();
+    });
+    await page.waitForTimeout(1000);
 
-      // Canvas should be present after each restart
-      const canvas = page.locator(`#${OVERLAY_ID} canvas`);
-      await expect(canvas).toBeAttached({ timeout: 5000 });
-    }
+    // Step 3: canvas should be gone after stop
+    await expect(canvas).not.toBeAttached({ timeout: 3000 });
+
+    // Step 4: start() after stop() is a no-op — runtime was destroyed
+    await page.evaluate(() => {
+      const w = (window as unknown) as Record<string, unknown>;
+      const handle = w.__ytChatOverlay as { start?: () => Promise<void> } | undefined;
+      return handle?.start?.();
+    });
+    await page.waitForTimeout(2000);
+
+    // Canvas should NOT reappear — destroyed instances cannot be reused
+    await expect(canvas).not.toBeAttached({ timeout: 3000 });
   });
 
   test('renderer handles min and max settings extremes', async ({ page }) => {

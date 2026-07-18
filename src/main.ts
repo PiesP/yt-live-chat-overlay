@@ -216,7 +216,7 @@ function setupSpaBootstrap(): void {
 }
 
 function main(): void {
-  if (location.hostname !== 'www.youtube.com' && location.hostname !== 'youtube.com') {
+  if (location.hostname !== 'www.youtube.com') {
     return;
   }
 
