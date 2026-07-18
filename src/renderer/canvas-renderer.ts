@@ -48,6 +48,7 @@ import {
   toSharedContentSegments,
   warmTextBitmapCache,
 } from '@renderer/canvas/shared';
+import { computeHeadwayPx, getSpeedTier } from '@renderer/canvas/speed-tier';
 import {
   type CanvasMessage,
   GRADIENT_CACHE_MAX,
@@ -66,7 +67,6 @@ import {
 import type { LanePlacement } from '@renderer/layout/lane-allocator';
 import type { ConnectionStatus } from '@renderer/renderer-base';
 import { RendererBase } from '@renderer/renderer-base';
-import { getSpeedTier, computeHeadwayPx } from '@renderer/canvas/speed-tier';
 import {
   computeAgeFadeRate,
   computeInvFadeDuration,
@@ -1676,7 +1676,6 @@ export class CanvasRenderer extends RendererBase {
       danmakuMode: this.settings.danmakuMode,
     });
   }
-
 
   // ── Opacity ──────────────────────────────────────────────────────────
 
