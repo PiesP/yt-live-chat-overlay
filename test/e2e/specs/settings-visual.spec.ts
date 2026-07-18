@@ -15,80 +15,13 @@
  */
 
 import { test, expect, type Page } from '@playwright/test';
-import { readFileSync } from 'node:fs';
-import { existsSync } from 'node:fs';
-import { DIST_DIR, USERSCRIPT_PATH } from '../fixtures/test-utils';
-
+import { setupOverlayPage } from '../fixtures/test-utils';
 
 const OVERLAY_ID = 'yt-live-chat-overlay';
 const BUTTON_ID = 'yt-chat-overlay-settings-button';
 
-async function installMocks(page: Page): Promise<void> {
-  await page.addInitScript(() => {
-    const storage = new Map<string, unknown>();
-    const listeners = new Map<number, { key: string; callback: (...args: unknown[]) => void }>();
-    let listenerId = 0;
-
-    window.GM_setValue = (key: string, value: unknown) => {
-      const oldVal = storage.get(key);
-      storage.set(key, value);
-      for (const [, { key: k, callback }] of listeners) {
-        if (k === key) callback(key, oldVal, value, false);
-      }
-    };
-    window.GM_getValue = <T = unknown>(key: string, defaultValue?: T): T | undefined =>
-      storage.has(key) ? (storage.get(key) as T) : defaultValue;
-    window.GM_deleteValue = (key: string) => { storage.delete(key); };
-    window.GM_listValues = () => Array.from(storage.keys());
-    window.GM_addValueChangeListener = (
-      key: string,
-      cb: (key: string, oldVal: unknown, newVal: unknown, remote: boolean) => void,
-    ) => {
-      const id = ++listenerId;
-      listeners.set(id, { key, callback: cb });
-      return id;
-    };
-    window.GM_removeValueChangeListener = (id: number) => { listeners.delete(id); };
-    window.GM_registerMenuCommand = () => {};
-    window.GM_openInTab = (url: string) => { window.open(url, '_blank'); };
-  });
-}
-
 async function setupSettingsPage(page: Page): Promise<void> {
-  // Create DOM structure with a visible player on about:blank
-  await page.goto('about:blank');
-
-  await page.addInitScript(() => {
-    // Create the player element that the app looks for
-    const player = document.createElement('div');
-    player.id = 'movie_player';
-    player.className = 'html5-video-player';
-    player.style.width = '800px';
-    player.style.height = '450px';
-    player.style.position = 'relative';
-    player.style.margin = '0 auto';
-    document.body.appendChild(player);
-
-    // Live chat panel marker — signals this is a live stream (not VOD)
-    const chat = document.createElement('div');
-    chat.id = 'chat';
-    chat.style.display = 'none';
-    document.body.appendChild(chat);
-  });
-
-  // Install GM mocks
-  await installMocks(page);
-
-  // Read and inject the dev userscript bundle
-  if (!existsSync(USERSCRIPT_PATH)) {
-    throw new Error(`Bundle not found: ${USERSCRIPT_PATH}\nRun: pnpm build:dev`);
-  }
-  const bundle = readFileSync(USERSCRIPT_PATH, 'utf8');
-  await page.addInitScript({ content: bundle });
-
-  // Re-navigate to execute the initScripts
-  await page.goto('about:blank');
-
+  await setupOverlayPage(page);
   // Wait for settings button to appear
   await page.waitForSelector(`#${BUTTON_ID}`, { timeout: 10_000 });
 }
