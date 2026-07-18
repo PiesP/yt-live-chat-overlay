@@ -4,7 +4,10 @@ import {
   computeOutlineColor,
   toRgba,
   computeReadableTextColor,
+  resolveSuperChatRgb,
 } from '@renderer/color-utils';
+import type { SuperChatTier } from '@app-types';
+import type { RgbColor } from '@app-types';
 
 // ── parseAnyColor ─────────────────────────────────────────────────────
 
@@ -154,5 +157,85 @@ describe('computeReadableTextColor', () => {
     // Mid-gray ~128,128,128 → luminance ≈ 0.215 → dark → white text
     const result = computeReadableTextColor('#808080');
     expect(result).toBe('#ffffff');
+  });
+});
+
+// ── resolveSuperChatRgb ───────────────────────────────────────────────
+
+describe('resolveSuperChatRgb', () => {
+  const makeColors = (): Record<SuperChatTier, RgbColor> => ({
+    blue: { r: 0, g: 0, b: 255 },
+    cyan: { r: 0, g: 255, b: 255 },
+    green: { r: 0, g: 255, b: 0 },
+    yellow: { r: 255, g: 255, b: 0 },
+    orange: { r: 255, g: 165, b: 0 },
+    magenta: { r: 255, g: 0, b: 255 },
+    red: { r: 255, g: 0, b: 0 },
+  });
+
+  it('uses headerBackgroundColor when available', () => {
+    const result = resolveSuperChatRgb(
+      { headerBackgroundColor: '#FF0000', tier: 'blue' },
+      makeColors()
+    );
+    expect(result).toEqual({ r: 255, g: 0, b: 0 });
+  });
+
+  it('falls back to backgroundColor when headerBackgroundColor is absent', () => {
+    const result = resolveSuperChatRgb(
+      { backgroundColor: '#00FF00', tier: 'blue' },
+      makeColors()
+    );
+    expect(result).toEqual({ r: 0, g: 255, b: 0 });
+  });
+
+  it('prefers headerBackgroundColor over backgroundColor when both are present', () => {
+    const result = resolveSuperChatRgb(
+      { headerBackgroundColor: '#FF0000', backgroundColor: '#0000FF', tier: 'green' },
+      makeColors()
+    );
+    expect(result).toEqual({ r: 255, g: 0, b: 0 });
+  });
+
+  it('falls back to tier color when no source color is available', () => {
+    const result = resolveSuperChatRgb(
+      { tier: 'yellow' },
+      makeColors()
+    );
+    expect(result).toEqual({ r: 255, g: 255, b: 0 });
+  });
+
+  it('falls back to blue tier color when tier key is missing from colors', () => {
+    const colors = makeColors();
+    delete colors.orange;
+    const result = resolveSuperChatRgb(
+      { tier: 'orange' },
+      colors
+    );
+    expect(result).toEqual(colors.blue!);
+  });
+
+  it('handles unparseable color strings (falls back to tier)', () => {
+    const result = resolveSuperChatRgb(
+      { headerBackgroundColor: 'invalid-color', tier: 'red' },
+      makeColors()
+    );
+    expect(result).toEqual({ r: 255, g: 0, b: 0 });
+  });
+
+  it('handles rgba() color format', () => {
+    const result = resolveSuperChatRgb(
+      { headerBackgroundColor: 'rgba(100, 150, 200, 0.8)', tier: 'blue' },
+      makeColors()
+    );
+    expect(result).toEqual({ r: 100, g: 150, b: 200 });
+  });
+
+  it('handles empty string colors (falls back to tier)', () => {
+    const result = resolveSuperChatRgb(
+      { headerBackgroundColor: '', tier: 'green' },
+      makeColors()
+    );
+    expect(result).toEqual({ r: 0, g: 255, b: 0 });
   });
 });
