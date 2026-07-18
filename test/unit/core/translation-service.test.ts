@@ -140,6 +140,55 @@ describe('TranslationService translator lifecycle', () => {
     service.destroy();
   });
 
+  it('scopes queued translations to the pending language pair', async () => {
+    const oldTranslator = makeTranslator('old');
+    const oldTranslation = deferred<string>();
+    oldTranslator.translate.mockImplementationOnce(() => oldTranslation.promise);
+    const replacementTranslator = makeTranslator('replacement');
+    const restoredTranslator = makeTranslator('restored');
+    const replacementCreation = deferred<TranslatorInstance>();
+    const replacementCreateStarted = deferred<void>();
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce(oldTranslator)
+      .mockImplementationOnce(() => {
+        replacementCreateStarted.resolve(undefined);
+        return replacementCreation.promise;
+      })
+      .mockResolvedValueOnce(restoredTranslator);
+    const availability = vi.fn().mockResolvedValue('available');
+    stubTranslator(create, availability);
+
+    const service = new TranslationService();
+    await service.configure({ enabled: true, service: 'auto', source: 'en', target: 'ja' });
+
+    const inFlight = service.translate('blocker');
+    expect(oldTranslator.translate).toHaveBeenCalledWith('blocker');
+
+    const replacement = service.configure({
+      enabled: true,
+      service: 'auto',
+      source: 'en',
+      target: 'ko',
+    });
+    await replacementCreateStarted.promise;
+
+    const queued = service.translate('same text');
+    replacementCreation.resolve(replacementTranslator);
+    await replacement;
+    oldTranslation.resolve('old:blocker');
+
+    await expect(inFlight).resolves.toBeNull();
+    await expect(queued).resolves.toBe('replacement:same text');
+    await expect(service.translate('same text')).resolves.toBe('replacement:same text');
+    expect(replacementTranslator.translate).toHaveBeenCalledTimes(1);
+
+    await service.configure({ enabled: true, service: 'auto', source: 'en', target: 'ja' });
+    await expect(service.translate('same text')).resolves.toBe('restored:same text');
+    expect(restoredTranslator.translate).toHaveBeenCalledWith('same text');
+    service.destroy();
+  });
+
   it('resolves a destroyed in-flight caller without racing a later queue drain', async () => {
     const oldTranslator = makeTranslator('old');
     const staleTranslation = deferred<string>();

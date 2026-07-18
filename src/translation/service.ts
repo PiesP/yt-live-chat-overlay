@@ -340,7 +340,9 @@ export class TranslationService {
 
     // Include language pair in cache key so stale translations from a
     // previous target language aren't returned after settings change.
-    const cacheKey = `${this.currentSource ?? 'auto'}:${this.currentTarget}:${text}`;
+    const cacheSource = this.pendingSource ?? this.currentSource ?? 'auto';
+    const cacheTarget = this.pendingTarget ?? this.currentTarget;
+    const cacheKey = `${cacheSource}:${cacheTarget}:${text}`;
     const cached = this.translationCache.get(cacheKey);
     if (cached !== undefined) {
       return cached;
