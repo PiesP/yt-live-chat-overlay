@@ -1038,7 +1038,11 @@ export class SettingsUiForm {
               const slider = this.modal.querySelector<HTMLInputElement>(
                 `input[type="range"][name="${el.name}-slider"]`
               );
-              if (slider) slider.value = el.value;
+              if (slider) {
+                slider.value = el.value;
+                // Sync ARIA attributes on programmatic update (cross-tab sync / reopen).
+                slider.setAttribute('aria-valuenow', slider.value);
+              }
             }
           }
         }
@@ -1078,7 +1082,10 @@ export class SettingsUiForm {
         const slider = this.modal.querySelector<HTMLInputElement>(
           `input[type="range"][name="${el.name}-slider"]`
         );
-        if (slider) slider.value = el.value;
+        if (slider) {
+          slider.value = el.value;
+          slider.setAttribute('aria-valuenow', slider.value);
+        }
       }
     }
 
