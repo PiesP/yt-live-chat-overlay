@@ -9,6 +9,7 @@
  */
 import type { ChatMessage, OverlaySettings } from '@app-types';
 import { getCachedGradient } from '@renderer/canvas/gradient-utils';
+import { computePulseAlpha } from '@renderer/canvas/lut-helpers';
 import {
   drawAuthorSection,
   drawRoundRect,
@@ -18,7 +19,6 @@ import {
 } from '@renderer/canvas/shared';
 import type { CardConfig } from '@renderer/card-config';
 import { computeReadableTextColor } from '@renderer/color-utils';
-import { SIN_LUT_SCALE, SIN_TABLE } from '@renderer/constants';
 import { measureTextHeight } from '@renderer/text-measure';
 import type { ByteLimitedCache } from '@util/byte-limited-cache';
 import { DEFAULT_TEXT_COLOR, rendererLayout, spacing } from '@util/design-tokens';
@@ -129,8 +129,7 @@ function renderCardDecoration(
     ctx.fill();
   } else if (config.decoration === 'pulsingBorder' && config.pulsingBorder) {
     const pb = config.pulsingBorder;
-    const sinIndex = ((elapsed * SIN_LUT_SCALE) | 0) & 255;
-    const pulse = SIN_TABLE[sinIndex]! * pb.amplitude + pb.baseAlpha;
+    const pulse = computePulseAlpha(elapsed, pb.baseAlpha, pb.amplitude);
     ctx.save();
     drawRoundRect(ctx, x, y, w, h, config.cardRadius);
     ctx.strokeStyle = `rgba(${pb.borderRgb.r}, ${pb.borderRgb.g}, ${pb.borderRgb.b}, ${pulse})`;

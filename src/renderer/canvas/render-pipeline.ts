@@ -12,6 +12,7 @@
 
 import type { OverlayDimensions, OverlaySettings } from '@app-types';
 import { renderPaidCard } from '@renderer/canvas/card-renderers';
+import { computePulseAlpha } from '@renderer/canvas/lut-helpers';
 import { COMPACTION_THRESHOLD_RATIO } from '@renderer/canvas/pipeline-utils';
 import { getDisplayText, renderRegularMessage, renderSegment } from '@renderer/canvas/shared';
 import { MEMBERSHIP_CARD_CONFIG, SUPERCHAT_CARD_CONFIG } from '@renderer/card-config';
@@ -20,8 +21,6 @@ import {
   ANTI_BLOCK_PRIORITY_THRESHOLD,
   type CanvasMessage,
   OPACITY_BUCKET_COUNT,
-  SIN_LUT_SCALE,
-  SIN_TABLE,
   SPEED_TIER,
   TRANSLATION_FONT_SCALE,
   TRANSLATION_GAP_PX,
@@ -516,8 +515,7 @@ export function drawGlowStage(
       if (!pb) continue;
 
       const elapsed = msg._frameElapsed ?? 0;
-      const sinIndex = ((elapsed * SIN_LUT_SCALE) | 0) & 255;
-      const pulse = SIN_TABLE[sinIndex]! * pb.amplitude + pb.baseAlpha;
+      const pulse = computePulseAlpha(elapsed, pb.baseAlpha, pb.amplitude);
       if (pulse <= 0.01) continue;
 
       const alpha = Math.min(1, pulse * 0.3);

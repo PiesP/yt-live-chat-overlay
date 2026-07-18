@@ -31,6 +31,7 @@
 
 import type { ChatMessage, FontWeight } from '@app-types';
 import { getCachedGradient } from '@renderer/canvas/gradient-utils';
+import { computePulseAlpha } from '@renderer/canvas/lut-helpers';
 import { fastRandom } from '@renderer/canvas/pipeline-utils';
 import {
   drawAuthorSection,
@@ -58,8 +59,6 @@ import {
   hashStringForTier as hashForTier,
   IDLE_GRACE_PERIOD_MS,
   OPACITY_BUCKET_COUNT as OPACITY_BUCKETS,
-  SIN_LUT_SCALE,
-  SIN_TABLE,
   SPEED_TIER,
   STAGGER_BATCH_MAX,
   STAGGER_EXP_SCALE,
@@ -243,8 +242,7 @@ function renderPaidCardWorker(
     ctx.restore();
   } else if (card.decoration === 'pulsingBorder' && card.pulsingBorder) {
     const pb = card.pulsingBorder;
-    const sinIndex = ((elapsed * SIN_LUT_SCALE) | 0) & 255;
-    const pulse = SIN_TABLE[sinIndex]! * pb.amplitude + pb.baseAlpha;
+    const pulse = computePulseAlpha(elapsed, pb.baseAlpha, pb.amplitude);
     ctx.save();
     drawRoundRect(ctx, x, y, w, h, card.cardRadius);
     ctx.strokeStyle = `rgba(${pb.borderRgb.r}, ${pb.borderRgb.g}, ${pb.borderRgb.b}, ${pulse})`;
