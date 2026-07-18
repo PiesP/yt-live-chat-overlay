@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- **Playwright E2E fixture parsing** — Restored fixture parsing for Playwright end-to-end tests.
+- **MV3 extension bridge lifecycle** — Hardened cross-tab storage relay and adapter lifecycle handling.
+- **Translator lifecycle** — Hardened translator instance disposal, generation/cancellation lifecycle, stale queue/cache ownership, and recovery lifecycle.
+- **Fast Stryker mutation command** — Corrected the command to use positional config.
+
+### Compatibility
+
+- Current builds intentionally target and support `www.youtube.com`; the apex `youtube.com` is not currently supported.
+
 ## [0.42.3] - 2026-07-14
 
 ### Fixed
