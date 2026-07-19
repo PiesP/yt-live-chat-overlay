@@ -69,7 +69,7 @@ export const MOCK_NON_WATCH_HTML = `<!DOCTYPE html>
  * with src/settings/defaults.ts — any production default changes
  * automatically propagate to E2E tests.
  */
-import { DEFAULT_SETTINGS as SRC_DEFAULTS } from '../../../src/settings/defaults';
+import { DEFAULT_SETTINGS as SRC_DEFAULTS } from '@settings/defaults';
 export const DEFAULT_SETTINGS: Record<string, unknown> = {
   ...SRC_DEFAULTS,
   // Deep-copy nested objects so tests can mutate without side effects
