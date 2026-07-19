@@ -6,6 +6,9 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **Renderer test settings fixture** — Kept the RendererBase test fixture aligned with the complete settings schema, including viewport-responsive font scaling fields.
+- **Settings E2E synchronization** — Made mock-player settings interactions resilient to video hit-testing and added condition-based waits for debounced storage persistence.
+- **Text measurement cache lifecycle** — Cleared cached space widths together with the other text measurement caches when font settings change.
 - **Playwright E2E fixture parsing** — Restored fixture parsing for Playwright end-to-end tests.
 - **MV3 extension bridge lifecycle** — Hardened cross-tab storage relay and adapter lifecycle handling.
 - **Translation lifecycle** — Prevented stale translations and released old translator resources when language settings change or sessions restart.
