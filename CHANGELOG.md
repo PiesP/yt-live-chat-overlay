@@ -18,6 +18,7 @@ All notable changes to this project will be documented in this file.
 
 - **Renderer test settings fixture** — Kept the RendererBase test fixture aligned with the complete settings schema, including viewport-responsive font scaling fields.
 - **Settings E2E synchronization** — Made mock-player settings interactions resilient to video hit-testing and added condition-based waits for debounced storage persistence.
+- **E2E storage backend assertions** — Made settings persistence checks follow the active Chrome storage adapter before falling back to GM_* storage.
 - **Text measurement cache lifecycle** — Cleared cached space widths together with the other text measurement caches when font settings change.
 - **Translation lifecycle** — Cancelled superseded translator setup and released replaced translator resources without allowing stale results to update comments.
 - **Replay and tab-return stability** — Prevented replay data loss, burst emission, restart deadlocks, and renderer stalls after visibility changes.
