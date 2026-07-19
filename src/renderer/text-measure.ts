@@ -99,6 +99,7 @@ function getCtx(): CanvasRenderingContext2D | null {
  */
 export function clearTextMeasurementCaches(): void {
   widthCache.clear();
+  spaceWidthCache.clear();
   totalCacheEntries = 0;
   fontMetricsCache.clear();
 }

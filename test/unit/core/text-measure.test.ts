@@ -1,8 +1,13 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { describe, it, expect } from 'vitest';
-import { getFontString, measureBoundingBoxWidth } from '@renderer/text-measure';
+import { describe, it, expect, vi } from 'vitest';
+import {
+  clearTextMeasurementCaches,
+  getFontString,
+  measureBoundingBoxWidth,
+  measureTextWidth,
+} from '@renderer/text-measure';
 import { DEFAULT_FONT_FAMILY } from '@util/design-tokens';
 
 describe('getFontString', () => {
@@ -123,5 +128,35 @@ describe('measureBoundingBoxWidth', () => {
       width: 600,
     };
     expect(measureBoundingBoxWidth(m)).toBe(579);
+  });
+});
+
+describe('text measurement caches', () => {
+  it('clears cached space widths when measurement caches are cleared', () => {
+    const measureText = vi.fn(() => ({
+      actualBoundingBoxLeft: 0,
+      actualBoundingBoxRight: 0,
+      width: 5,
+    }));
+    const context = { measureText } as unknown as CanvasRenderingContext2D;
+    const getContext = vi
+      .spyOn(HTMLCanvasElement.prototype, 'getContext')
+      .mockReturnValue(context);
+    const font = '16px sans-serif';
+
+    clearTextMeasurementCaches();
+    expect(measureTextWidth(' ', font)).toBe(5);
+
+    measureText.mockReturnValue({
+      actualBoundingBoxLeft: 0,
+      actualBoundingBoxRight: 0,
+      width: 9,
+    });
+    clearTextMeasurementCaches();
+
+    expect(measureTextWidth(' ', font)).toBe(9);
+    expect(measureText).toHaveBeenCalledTimes(2);
+
+    getContext.mockRestore();
   });
 });
