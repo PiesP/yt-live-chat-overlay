@@ -28,7 +28,10 @@ async function setupSettingsPage(page: Page): Promise<void> {
 
 async function openSettingsModal(page: Page): Promise<void> {
   await setupSettingsPage(page);
-  await page.locator(`#${BUTTON_ID}`).click();
+  // The mock video can win hit-testing even while the overlay button is visible.
+  // Force only this synthetic interaction; real pointer hit-testing is outside
+  // the mock page's contract.
+  await page.locator(`#${BUTTON_ID}`).click({ force: true });
 }
 
 test.describe('Settings UI Visual', () => {

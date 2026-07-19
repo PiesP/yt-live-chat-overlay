@@ -19,6 +19,7 @@ import {
   getSettings,
   applySettings,
   readGmStorage,
+  waitForStoredSettings,
   DIST_DIR,
   USERSCRIPT_PATH,
 } from '../fixtures/test-utils';
@@ -113,6 +114,7 @@ test.describe('Settings Persistence', () => {
     expect(afterReset.opacity).toBe(1);
 
     // Verify in storage
+    await waitForStoredSettings(page, { opacity: 1 });
     const raw = await readGmStorage(page);
     const parsed = JSON.parse(raw!) as Record<string, unknown>;
     expect(parsed.opacity).toBe(1);

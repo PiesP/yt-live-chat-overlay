@@ -275,6 +275,13 @@ export async function applySettings(page: Page, partial: Record<string, unknown>
     const handle = w.__ytChatOverlay as { applySettings?: (s: Record<string, unknown>) => void } | undefined;
     handle?.applySettings?.(settings);
   }, partial);
+  await waitForStoredSettings(page, partial);
+}
+
+/**
+ * Wait for the debounced settings write to contain the expected values.
+ */
+export async function waitForStoredSettings(page: Page, expected: Record<string, unknown>): Promise<void> {
   // Wait for the debounced storage write instead of sleeping for a fixed
   // duration; this keeps the test fast and stable on slow CI runners.
   await page.waitForFunction(
@@ -295,7 +302,7 @@ export async function applySettings(page: Page, partial: Record<string, unknown>
         return false;
       }
     },
-    partial,
+    expected,
     { timeout: 5000 },
   );
 }
