@@ -271,50 +271,78 @@ export async function getSettings(page: Page): Promise<Record<string, unknown>> 
  * Apply settings via the debug handle.
  */
 export async function applySettings(page: Page, partial: Record<string, unknown>): Promise<void> {
-  await page.evaluate((settings) => {
+  const applied = await page.evaluate((settings) => {
     const w = (window as unknown) as Record<string, unknown>;
-    const handle = w.__ytChatOverlay as { applySettings?: (s: Record<string, unknown>) => void } | undefined;
-    handle?.applySettings?.(settings);
+    const handle = w.__ytChatOverlay as {
+      applySettings?: (s: Record<string, unknown>) => void;
+      getSettings?: () => Record<string, unknown>;
+    } | undefined;
+    if (typeof handle?.applySettings !== 'function' || typeof handle.getSettings !== 'function') {
+      throw new Error('Overlay settings debug handle is not ready');
+    }
+    handle.applySettings(settings);
+    const current = handle.getSettings();
+    return Object.fromEntries(Object.keys(settings).map((key) => [key, current[key]]));
   }, partial);
-  await waitForStoredSettings(page, partial);
+  await waitForStoredSettings(page, applied);
 }
 
 /**
  * Wait for the debounced settings write to contain the expected values.
  */
 export async function waitForStoredSettings(page: Page, expected: Record<string, unknown>): Promise<void> {
-  // Wait for the debounced storage write instead of sleeping for a fixed
-  // duration; this keeps the test fast and stable on slow CI runners.
-  await page.waitForFunction(
-    async ({ expected, storageKey }: { expected: Record<string, unknown>; storageKey: string }) => {
-      const chromeStorage = (window as unknown as {
-        chrome?: { storage?: { local?: { get: (key: string) => Promise<Record<string, unknown>> } } };
-      }).chrome?.storage?.local;
-      let raw: unknown;
-      if (chromeStorage) {
-        const stored = await chromeStorage?.get(storageKey);
-        const chromeValue = stored?.[storageKey];
-        raw = typeof chromeValue === 'string' ? chromeValue : undefined;
-      }
-      if (typeof raw !== 'string') raw = window.GM_getValue?.(storageKey);
-      if (typeof raw !== 'string') return false;
-      try {
-        const saved = JSON.parse(raw) as Record<string, unknown>;
-        const handle = (window as unknown as Record<string, unknown>).__ytChatOverlay as
-          | { getSettings?: () => Record<string, unknown> }
-          | undefined;
-        const current = handle?.getSettings?.();
-        if (!current) return false;
-        return Object.keys(expected as Record<string, unknown>).every(
-          (key) => JSON.stringify(saved[key]) === JSON.stringify(current[key]),
-        );
-      } catch {
-        return false;
-      }
-    },
-    { expected, storageKey: SETTINGS_STORAGE_KEY },
-    { timeout: 5000 },
-  );
+  // Storage APIs are asynchronous, so poll from the test runner. Passing an
+  // async page function to waitForFunction can treat its Promise as truthy
+  // before the storage read resolves.
+  const timeoutMs = 5000;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const matched = await page.evaluate(
+      async ({ expected, storageKey }: { expected: Record<string, unknown>; storageKey: string }) => {
+        const chromeStorage = (window as unknown as {
+          chrome?: { storage?: { local?: { get: (key: string) => Promise<Record<string, unknown>> } } };
+        }).chrome?.storage?.local;
+        let raw: unknown;
+        if (chromeStorage) {
+          const stored = await chromeStorage?.get(storageKey);
+          const chromeValue = stored?.[storageKey];
+          raw = typeof chromeValue === 'string' ? chromeValue : undefined;
+        }
+        if (typeof raw !== 'string') raw = window.GM_getValue?.(storageKey);
+        if (typeof raw !== 'string') return false;
+        try {
+          const saved = JSON.parse(raw) as Record<string, unknown>;
+          const handle = (window as unknown as Record<string, unknown>).__ytChatOverlay as
+            | { getSettings?: () => Record<string, unknown> }
+            | undefined;
+          const current = handle?.getSettings?.();
+          if (!current) return false;
+          const matchesExpected = (actual: unknown, wanted: unknown): boolean => {
+            if (
+              wanted !== null &&
+              typeof wanted === 'object' &&
+              !Array.isArray(wanted)
+            ) {
+              if (actual === null || typeof actual !== 'object' || Array.isArray(actual)) return false;
+              return Object.entries(wanted as Record<string, unknown>).every(([key, value]) =>
+                matchesExpected((actual as Record<string, unknown>)[key], value),
+              );
+            }
+            return JSON.stringify(actual) === JSON.stringify(wanted);
+          };
+          return Object.entries(expected as Record<string, unknown>).every(([key, value]) =>
+            matchesExpected(saved[key], value) && matchesExpected(current[key], value),
+          );
+        } catch {
+          return false;
+        }
+      },
+      { expected, storageKey: SETTINGS_STORAGE_KEY },
+    );
+    if (matched) return;
+    await page.waitForTimeout(Math.min(50, Math.max(1, deadline - Date.now())));
+  }
+  throw new Error(`Timed out waiting for stored settings: ${JSON.stringify(expected)}`);
 }
 
 /**
