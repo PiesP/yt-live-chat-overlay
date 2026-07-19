@@ -214,6 +214,8 @@ export class RuntimeManager {
   private domWatcherUnsubscribe: DomWatcherUnsubscribe = null;
   /** Observer that tracks when YouTube's chat panel opens or closes. */
   private chatPanelObserver: ChatPanelObserver = new ChatPanelObserver();
+  /** Element identity used by the current DOM fallback watcher. */
+  private domWatcherPanelElement: HTMLElement | null = null;
   /** Backlog messages preserved across soft restarts for re-injection. */
   private _pendingBacklogMessages: ChatMessage[] = [];
 
@@ -248,6 +250,10 @@ export class RuntimeManager {
 
   private get isDisposedState(): boolean {
     return this.state === 'disposed' || this.state === 'restarting' || this.state === 'destroyed';
+  }
+
+  private get isTerminalState(): boolean {
+    return this.state === 'disposed' || this.state === 'destroyed';
   }
 
   private get isActiveState(): boolean {
@@ -508,19 +514,29 @@ export class RuntimeManager {
       this.abortController = new AbortController();
       this.resetStartFailures();
 
-      void this.restartChatOnly(reason).then((status) => {
-        if (this.isDisposedState) return;
-        if (status === 'started') {
-          this.state = 'active';
-          this.consecutiveWatchdogRestarts = 0;
-          log.info('runtime.session.started');
-        } else {
-          // Chat-only restart failed — escalate to full restart.
-          log.warn('runtime.chat.restart-only-failed', { status });
+      void this.restartChatOnly(reason)
+        .then((status) => {
+          if (this.isTerminalState) return;
+          if (status === 'started') {
+            this.state = 'active';
+            this.consecutiveWatchdogRestarts = 0;
+            log.info('runtime.session.started');
+          } else {
+            // Chat-only restart failed — escalate to full restart.
+            log.warn('runtime.chat.restart-only-failed', { status });
+            this.disposeActiveSession();
+            this.requestReconcile('session-restart');
+          }
+        })
+        .catch((error: unknown) => {
+          // Aborting a chat-only restart is expected during destroy/navigation.
+          // Handle it explicitly so the fire-and-forget promise never becomes
+          // an unhandled rejection when the runtime is torn down mid-restart.
+          if (this.isTerminalState || isAbortError(error)) return;
+          log.warn('runtime.chat.restart-only-error', { error: String(error) });
           this.disposeActiveSession();
           this.requestReconcile('session-restart');
-        }
-      });
+        });
     } else {
       // Full restart: renderer/overlay need recreation.
       this.restartChatSourceSoft();
@@ -846,7 +862,7 @@ export class RuntimeManager {
   }
 
   private disposeSession(): void {
-    if (this.isDisposedState) {
+    if (this.isTerminalState) {
       return;
     }
 
@@ -876,6 +892,7 @@ export class RuntimeManager {
 
     this.domWatcherUnsubscribe?.();
     this.domWatcherUnsubscribe = null;
+    this.domWatcherPanelElement = null;
 
     this.chatPanelObserver.stop();
 
@@ -982,6 +999,12 @@ export class RuntimeManager {
       return chatStarted;
     }
 
+    // The panel callback closes over its ChatSource. Rebind it after the
+    // source replacement so DOM fallback messages cannot reach the stopped
+    // source from the previous chat-only session.
+    this.chatPanelObserver.stop();
+    this.startChatPanelMonitor(this.chatSource!);
+
     // Resume renderer if it was paused
     this.renderer?.resume();
     this.renderer?.resumeRenderLoop();
@@ -1082,6 +1105,13 @@ export class RuntimeManager {
       this.renderer?.setChatPanelOpen(state.isOpen);
 
       if (state.isOpen) {
+        // YouTube can replace the panel element without closing it. Rebind
+        // the DOM fallback watcher when the observed element identity changes.
+        if (this.domWatcherPanelElement !== state.element) {
+          this.domWatcherUnsubscribe?.();
+          this.domWatcherUnsubscribe = null;
+          this.domWatcherPanelElement = null;
+        }
         // Panel opened — try to install DOM watcher if not already active
         if (!this.domWatcherUnsubscribe) {
           try {
@@ -1091,6 +1121,7 @@ export class RuntimeManager {
             });
             if (unsub) {
               this.domWatcherUnsubscribe = unsub;
+              this.domWatcherPanelElement = state.element;
               log.info('runtime.dom-watcher.installed');
             }
             // If unsub is null, the container was not found — this is
@@ -1104,6 +1135,7 @@ export class RuntimeManager {
         // Panel closed — uninstall DOM watcher (target DOM is gone)
         this.domWatcherUnsubscribe?.();
         this.domWatcherUnsubscribe = null;
+        this.domWatcherPanelElement = null;
       }
     });
   }

@@ -27,6 +27,18 @@ describe('ChannelLanguageMemory.keyFromUrl', () => {
     });
   });
 
+  describe('live video URLs', () => {
+    it('extracts video ID from /live/ URL', () => {
+      expect(
+        ChannelLanguageMemory.keyFromUrl('https://www.youtube.com/live/liveVideo123'),
+      ).toBe('liveVideo123');
+    });
+
+    it('returns null for /live URL without a video ID', () => {
+      expect(ChannelLanguageMemory.keyFromUrl('https://www.youtube.com/live')).toBeNull();
+    });
+  });
+
   describe('channel handle URLs', () => {
     it('extracts @handle from /@handle URL', () => {
       expect(

@@ -34,8 +34,11 @@ export class ChannelLanguageMemory {
       if (isYouTubeWatch(url)) {
         return u.searchParams.get('v');
       }
-      // Channel page: /@handle or /channel/UC...
+      // Live video page: /live/VIDEO_ID
       const segments = u.pathname.split('/').filter(Boolean);
+      if (segments[0] === 'live' && segments[1]) return segments[1];
+
+      // Channel page: /@handle or /channel/UC...
       if (segments[0]?.startsWith('@')) return segments[0];
       if (segments[0] === 'channel' && segments[1]) return segments[1];
       return null;

@@ -42,7 +42,7 @@ describe("ObservabilityReporter", () => {
   it("tracks dropped messages", () => {
     reporter.onMessageReceived();
     reporter.onMessageReceived();
-    reporter.onMessageDropped("queue_full");
+    reporter.onMessageDropped("queue_priority");
 
     const metrics = reporter.getMetrics();
     expect(metrics.totalReceived).toBe(2);
@@ -51,7 +51,7 @@ describe("ObservabilityReporter", () => {
   });
 
   it("computes zero drop rate when no messages received", () => {
-    reporter.onMessageDropped("queue_full");
+    reporter.onMessageDropped("queue_priority");
     const metrics = reporter.getMetrics();
     expect(metrics.totalDropped).toBe(1);
     // 0 received → dropRate = 0 (avoids division by zero)

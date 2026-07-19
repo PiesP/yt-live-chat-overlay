@@ -52,7 +52,8 @@ export abstract class RendererBase {
   protected burstDetector: BurstDetector;
   protected authorRateLimiter: PerAuthorRateLimiter;
 
-  protected isPaused = false;
+  /** Whether tab-visibility pause is active; exposed for renderer diagnostics. */
+  public isPaused = false;
   protected videoPaused = false;
   /** User-initiated pause (Space key). Blocks rendering independently. */
   protected isUserPaused = false;

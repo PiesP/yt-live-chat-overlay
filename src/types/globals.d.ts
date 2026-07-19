@@ -28,6 +28,13 @@ declare global {
   interface Window {
     /** Debug handle exposed by the overlay script (available in DevTools). */
     __ytChatOverlay: YtChatOverlayDebugHandle | undefined;
+    GM_listValues?: () => string[];
+    GM_openInTab?: (url: string) => void;
+    GM_cookie?: {
+      list(): Array<{ name: string; value: string }>;
+      set(cookie: { name: string; value: string }): void;
+      delete(name: string): void;
+    };
     /** YouTube initial page data (available on watch pages). */
     ytInitialData?: Record<string, unknown>;
     /** YouTube page configuration object (available on YouTube pages). */

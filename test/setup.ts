@@ -79,7 +79,7 @@ const gmStorage = new Map<string, unknown>();
 
 // requestAnimationFrame
 if (typeof globalThis.requestAnimationFrame !== "function") {
-  (globalThis as typeof globalThis & {
+  (globalThis as unknown as {
     requestAnimationFrame: typeof requestAnimationFrame;
   }).requestAnimationFrame = (cb: FrameRequestCallback) => {
     return setTimeout(
@@ -90,7 +90,7 @@ if (typeof globalThis.requestAnimationFrame !== "function") {
 }
 
 if (typeof globalThis.cancelAnimationFrame !== "function") {
-  (globalThis as typeof globalThis & {
+  (globalThis as unknown as {
     cancelAnimationFrame: typeof cancelAnimationFrame;
   }).cancelAnimationFrame = (id: number) => {
     clearTimeout(id as unknown as ReturnType<typeof setTimeout>);
@@ -104,9 +104,9 @@ if (typeof globalThis.ResizeObserver !== "function") {
     unobserve() {}
     disconnect() {}
   }
-  (globalThis as typeof globalThis & {
+  (globalThis as unknown as {
     ResizeObserver: typeof ResizeObserverMock;
-  }).ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
+  }).ResizeObserver = ResizeObserverMock;
 }
 
 // IntersectionObserver

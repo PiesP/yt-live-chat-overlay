@@ -148,7 +148,7 @@ describe('ReplayBuffer', () => {
 
     it('skips events where offsetMs cannot be determined', () => {
       const msg = makeMsg('no-offset', 0);
-      delete (msg as Record<string, unknown>).videoOffsetMs;
+      delete (msg as unknown as Record<string, unknown>).videoOffsetMs;
       const events: ChatEvent[] = [{ message: msg } as unknown as ChatEvent];
       expect(() => buf.appendEvents(events)).not.toThrow();
       expect(buf.isEmpty).toBe(true);

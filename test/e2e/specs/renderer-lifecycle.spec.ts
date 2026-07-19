@@ -63,8 +63,6 @@ test.describe('Renderer Lifecycle', () => {
       const handle = w.__ytChatOverlay as { restartRuntime?: () => Promise<void> } | undefined;
       return handle?.restartRuntime?.();
     });
-    await page.waitForTimeout(3000);
-
     // Canvas should still exist after restart
     await expect(canvas).toBeAttached({ timeout: 5000 });
     const box = await canvas.boundingBox();
@@ -108,8 +106,6 @@ test.describe('Renderer Lifecycle', () => {
       const handle = w.__ytChatOverlay as { stop?: () => Promise<void> } | undefined;
       return handle?.stop?.();
     });
-    await page.waitForTimeout(1000);
-
     // Step 3: canvas should be gone after stop
     await expect(canvas).not.toBeAttached({ timeout: 3000 });
 
@@ -119,8 +115,6 @@ test.describe('Renderer Lifecycle', () => {
       const handle = w.__ytChatOverlay as { start?: () => Promise<void> } | undefined;
       return handle?.start?.();
     });
-    await page.waitForTimeout(2000);
-
     // Canvas should NOT reappear — destroyed instances cannot be reused
     await expect(canvas).not.toBeAttached({ timeout: 3000 });
   });
@@ -205,11 +199,10 @@ test.describe('Renderer Lifecycle', () => {
 
     // Disable
     await applySettings(page, { enabled: false });
-    await page.waitForTimeout(1000);
+    await expect(canvas).not.toBeAttached({ timeout: 5000 });
 
     // Re-enable
     await applySettings(page, { enabled: true });
-    await page.waitForTimeout(2000);
 
     // Canvas should be recreated
     await expect(canvas).toBeAttached({ timeout: 5000 });

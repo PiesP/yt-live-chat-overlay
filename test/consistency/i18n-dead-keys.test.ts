@@ -32,6 +32,12 @@ function collectAllUsedKeys(): Set<string> {
     'Color', 'Show', 'Loading chat history...',
     'Short messages shown regardless of length',
     'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.',
+    // Runtime status strings and indirect form labels are not represented by
+    // PANES metadata, but are referenced by overlay/canvas/form code.
+    'Paused', 'Connecting…', 'Connection unstable', 'Disconnected — Click to reload',
+    'Waiting for live stream…', 'Bold', 'Custom font stack…', 'Regular',
+    'CSS font-family value. Type to filter suggestions, or enter a custom font stack.',
+    'Done', 'Changes are saved automatically', 'Chat messages',
   ].forEach(k => keys.add(k));
   return keys;
 }
@@ -49,12 +55,6 @@ describe('i18n dead key detection', () => {
       if (key.startsWith('//') || key.startsWith('──')) continue;
       if (!usedKeys.has(key)) dead.push(key);
     }
-    // Not a hard failure — dead keys are wasteful but harmless
-    if (dead.length > 0) {
-      console.warn(`⚠ ${dead.length} potentially unused translation keys in KO:\n` +
-        dead.map(k => `  - "${k}"`).join('\n'));
-    }
-    // Mark as todo/skip rather than fail
-    expect(dead.length).toBeLessThanOrEqual(dead.length); // always passes
+    expect(dead).toEqual([]);
   });
 });

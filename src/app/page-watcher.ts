@@ -16,6 +16,17 @@ const log = createLogger('PageWatcher');
 type PageChangeCallback = () => void;
 
 type NavigationSignalSource = 'pushState' | 'replaceState' | 'popstate' | 'yt-navigate-finish';
+type HistoryMethodName = 'pushState' | 'replaceState';
+type HistoryMethod = typeof history.pushState;
+
+interface HistoryPatchState {
+  readonly methodName: HistoryMethodName;
+  readonly owner: PageWatcher;
+  readonly previous: HistoryMethod;
+  wrapper: HistoryMethod;
+  readonly generation: number;
+  active: boolean;
+}
 
 const YT_NAVIGATE_FINISH_EVENT = 'yt-navigate-finish';
 
@@ -24,21 +35,17 @@ export class PageWatcher {
   private callbacks: Set<PageChangeCallback> = new Set();
   private restorePushState?: () => void;
   private restoreReplaceState?: () => void;
-  /**
-   * Generation counter for history-patching guard.
-   *
-   * Each call to `patchHistoryMethod()` bumps this counter so we can detect
-   * when a previous patch was already applied (e.g. if PageWatcher is
-   * constructed multiple times during a SPA session). The restore function
-   * checks the generation it was created at and refuses to roll back a
-   * newer patch.
-   */
-  private patchGeneration = 0;
+  /** Per-method generation counters prevent one history method's patch from
+   * affecting the other method's cleanup. */
+  private readonly patchGenerations: Record<HistoryMethodName, number> = {
+    pushState: 0,
+    replaceState: 0,
+  };
 
   /** Per-instance marker for wrapper identity — avoids the static-marker
    *  problem where a second PageWatcher skips patching because the first
    *  watcher's marker is still on history.pushState/replaceState. */
-  private static wrapperToOwner = new WeakMap<(...args: unknown[]) => unknown, PageWatcher>();
+  private static wrapperToState = new WeakMap<HistoryMethod, HistoryPatchState>();
 
   private readonly handleUrlMutation = (): void => {
     this.handlePotentialUrlChange('popstate');
@@ -62,38 +69,64 @@ export class PageWatcher {
     window.addEventListener(YT_NAVIGATE_FINISH_EVENT, this.handleYouTubeNavigateFinish);
   }
 
-  private patchHistoryMethod(methodName: 'pushState' | 'replaceState'): () => void {
-    const original = history[methodName];
-    // Check whether the current history method is a wrapper from THIS instance.
-    // WeakMap lookup is per-instance — a second PageWatcher will NOT see the
-    // first watcher's wrapper as its own and will install a fresh patch.
-    const currentFn = history[methodName] as (...args: unknown[]) => unknown;
-    const currentOwner = PageWatcher.wrapperToOwner.get(currentFn);
-    if (currentOwner === this) {
+  private patchHistoryMethod(methodName: HistoryMethodName): () => void {
+    const previous = history[methodName] as HistoryMethod;
+    const currentState = PageWatcher.wrapperToState.get(previous);
+    // A watcher can only install one wrapper for each method. A different
+    // watcher must still be allowed to wrap the current method.
+    if (currentState?.owner === this && currentState.active) {
       return () => {
         /* no-op: already patched by this instance */
       };
     }
 
-    this.patchGeneration++;
-    const myGeneration = this.patchGeneration;
-    const patched = (...args: Parameters<typeof history.pushState>) => {
-      const result = original.apply(history, args);
-      this.handlePotentialUrlChange(methodName);
+    const generation = ++this.patchGenerations[methodName];
+    const state: HistoryPatchState = {
+      methodName,
+      owner: this,
+      previous,
+      wrapper: undefined as unknown as HistoryMethod,
+      generation,
+      active: true,
+    } satisfies HistoryPatchState;
+    const patched: HistoryMethod = (...args: Parameters<HistoryMethod>) => {
+      const result = state.previous.apply(history, args);
+      if (state.active) {
+        this.handlePotentialUrlChange(methodName);
+      }
       return result;
     };
-    // Register in WeakMap so future PageWatcher instances can check ownership.
-    PageWatcher.wrapperToOwner.set(patched as (...args: unknown[]) => unknown, this);
+    state.wrapper = patched;
+    PageWatcher.wrapperToState.set(patched, state);
     history[methodName] = patched;
+
     return () => {
-      // Only restore if no newer patch has been applied since us AND
-      // the current history function is still our wrapper.
-      // Without the identity check, a destroyed old watcher could
-      // overwrite a newer watcher's wrapper with the original function.
-      if (this.patchGeneration === myGeneration && history[methodName] === patched) {
-        history[methodName] = original;
-        PageWatcher.wrapperToOwner.delete(patched as (...args: unknown[]) => unknown);
+      if (!state.active) {
+        return;
       }
+      // An older watcher may be destroyed while a newer wrapper is active.
+      // Marking this state inactive prevents the newer wrapper from invoking
+      // the old watcher's callback, but does not overwrite the newer method.
+      state.active = false;
+      if (
+        history[methodName] !== state.wrapper ||
+        this.patchGenerations[methodName] !== state.generation
+      ) {
+        return;
+      }
+
+      // Skip inactive wrappers when unwrapping. This lets the newest watcher
+      // restore the native method even if an older nested watcher was already
+      // destroyed.
+      let restored = state.previous;
+      while (true) {
+        const previousState = PageWatcher.wrapperToState.get(restored);
+        if (!previousState || previousState.active) {
+          break;
+        }
+        restored = previousState.previous;
+      }
+      history[methodName] = restored;
     };
   }
 

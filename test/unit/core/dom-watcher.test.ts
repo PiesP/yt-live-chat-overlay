@@ -66,8 +66,8 @@ describe('installDomChatWatcher', () => {
 
     expect(onMessages).toHaveBeenCalledTimes(1);
     const messages = onMessages.mock.calls[0]?.[0];
-    expect(messages?.map((message) => message.id)).toEqual(['message-1', 'message-2']);
-    expect(messages?.map((message) => message.text)).toEqual(['first message', 'second message']);
+    expect(messages?.map((message: { id: string }) => message.id)).toEqual(['message-1', 'message-2']);
+    expect(messages?.map((message: { text: string }) => message.text)).toEqual(['first message', 'second message']);
 
     unsubscribe?.();
   });

@@ -49,6 +49,14 @@ export class SettingsUi {
   private confirmPreviousFocus: HTMLElement | null = null;
   /** Guard against re-entrant close() calls from the native dialog 'close' event. */
   private closing = false;
+  /** Native reset confirmation owned by this controller. */
+  private confirmDialog: HTMLDialogElement | null = null;
+  /** FileReader owned by the current settings import operation. */
+  private importReader: FileReader | null = null;
+  /** Invalidates callbacks from dialogs/readers after destroy(). */
+  private lifecycleGeneration = 0;
+  /** Suppresses confirm close handling while destroy() removes the dialog. */
+  private suppressConfirmClose = false;
 
   private get defaultTabId(): string {
     const first = PANES[0];
@@ -116,7 +124,7 @@ export class SettingsUi {
     this.attachAbortController = new AbortController();
     const { signal } = this.attachAbortController;
 
-    const player = await this.findPlayerContainer();
+    const player = await this.findPlayerContainer(signal);
     if (signal.aborted) return;
     this.attachAbortController = null;
     if (!player) return;
@@ -176,9 +184,10 @@ export class SettingsUi {
     this.closing = false;
   }
 
-  private findPlayerContainer(): Promise<HTMLElement | null> {
+  private findPlayerContainer(signal?: AbortSignal): Promise<HTMLElement | null> {
     return findPlayerContainerElement({
       intervalMs: PLAYER_LOOKUP_INTERVAL_MS,
+      signal,
     });
   }
 
@@ -292,7 +301,12 @@ export class SettingsUi {
       }
     }, RELOAD_FEEDBACK_DURATION_MS);
 
-    void this.onReload?.();
+    const reloadPromise = this.onReload?.();
+    if (reloadPromise) {
+      void reloadPromise.catch((error: unknown) => {
+        log.warn('settings.reload-failed', { error: String(error) });
+      });
+    }
   }
 
   private ensureStyles(): void {
@@ -517,6 +531,7 @@ export class SettingsUi {
     confirmLabel: string;
     onConfirm: () => void;
   }): HTMLDialogElement {
+    const generation = this.lifecycleGeneration;
     const dialog = document.createElement('dialog');
     dialog.className = 'yt-chat-overlay-settings-confirm';
     dialog.setAttribute('aria-label', t(options.message));
@@ -549,9 +564,13 @@ export class SettingsUi {
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
     this.confirmPreviousFocus = previouslyFocused;
 
+    let closed = false;
     const closeDialog = () => {
-      dialog.close();
+      if (closed) return;
+      closed = true;
+      if (dialog.open) dialog.close();
       dialog.remove();
+      if (this.confirmDialog === dialog) this.confirmDialog = null;
       // Restore focus to element that was active before confirm opened
       if (this.confirmPreviousFocus?.isConnected) {
         this.confirmPreviousFocus.focus();
@@ -562,12 +581,14 @@ export class SettingsUi {
     // Native dialog handles ESC and focus trap automatically.
     // Clean up on close (covers ESC, backdrop click, and manual close).
     dialog.addEventListener('close', () => {
+      if (this.suppressConfirmClose) return;
       closeDialog();
     });
 
     cancelBtn.addEventListener('click', () => closeDialog());
     okBtn.addEventListener('click', () => {
       closeDialog();
+      if (generation !== this.lifecycleGeneration) return;
       options.onConfirm();
     });
 
@@ -586,6 +607,8 @@ export class SettingsUi {
         this.form.populateForm(this.getSettings());
       },
     });
+
+    this.confirmDialog = dialog;
 
     // Append to body and use showModal() so it stacks on top of the
     // settings dialog in the top layer.
@@ -608,6 +631,7 @@ export class SettingsUi {
   }
 
   private handleImport(): void {
+    const generation = this.lifecycleGeneration;
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = '.json';
@@ -617,9 +641,12 @@ export class SettingsUi {
       // Clean up the transient <input> element now that we have the file handle.
       // It was never appended to the DOM but keeping it alive in memory leaks.
       input.remove();
-      if (!file) return;
+      if (!file || generation !== this.lifecycleGeneration) return;
       const reader = new FileReader();
+      this.importReader = reader;
       reader.addEventListener('load', () => {
+        if (generation !== this.lifecycleGeneration || this.importReader !== reader) return;
+        this.importReader = null;
         try {
           const text = reader.result;
           if (typeof text !== 'string') return;
@@ -647,6 +674,9 @@ export class SettingsUi {
           this.showToast(t('Import failed: invalid JSON'));
           log.warn('settings.import.invalid-json', { error: String(error) });
         }
+      });
+      reader.addEventListener('error', () => {
+        if (this.importReader === reader) this.importReader = null;
       });
       reader.readAsText(file);
     });
@@ -705,6 +735,19 @@ export class SettingsUi {
   }
 
   destroy(): void {
+    this.lifecycleGeneration++;
+    this.importReader?.abort();
+    this.importReader = null;
+    this.suppressConfirmClose = true;
+    const confirmDialog = this.confirmDialog;
+    this.confirmDialog = null;
+    if (confirmDialog) {
+      if (confirmDialog.open) confirmDialog.close();
+      confirmDialog.remove();
+    }
+    this.confirmPreviousFocus = null;
+    this.suppressConfirmClose = false;
+
     // Abort any in-flight player lookup so an already-cancelled attach()
     // doesn't create stale UI on a page that has already navigated away.
     this.attachAbortController?.abort();

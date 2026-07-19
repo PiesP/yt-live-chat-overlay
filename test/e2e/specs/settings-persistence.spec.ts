@@ -100,7 +100,7 @@ test.describe('Settings Persistence', () => {
     await setupOverlayPage(page);
 
     // First change a setting
-    await applySettings(page, { opacity: 0.2 });
+    await applySettings(page, { opacity: 0.5 });
 
     // Then reset to defaults
     await page.evaluate(() => {
@@ -108,8 +108,6 @@ test.describe('Settings Persistence', () => {
       const handle = w.__ytChatOverlay as { resetSettings?: () => void } | undefined;
       handle?.resetSettings?.();
     });
-    await page.waitForTimeout(500);
-
     // Verify in memory
     const afterReset = await getSettings(page);
     expect(afterReset.opacity).toBe(1);

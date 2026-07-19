@@ -28,10 +28,7 @@ async function setupSettingsPage(page: Page): Promise<void> {
 
 async function openSettingsModal(page: Page): Promise<void> {
   await setupSettingsPage(page);
-  // The mocked player video can intercept pointer events even though the
-  // overlay button is visible; force the click to exercise the button handler.
-  await page.locator(`#${BUTTON_ID}`).click({ force: true });
-  await page.waitForTimeout(500);
+  await page.locator(`#${BUTTON_ID}`).click();
 }
 
 test.describe('Settings UI Visual', () => {
@@ -72,23 +69,22 @@ test.describe('Settings UI Visual', () => {
 
     // Click outside or press Escape to close
     await page.keyboard.press('Escape');
-    await page.waitForTimeout(300);
-
     // Modal should be dismissed
     await expect(modal).not.toBeVisible();
   });
 
-  test('screenshot: settings panel visual state', async ({ page }) => {
+  test('settings panel exposes a stable layout contract', async ({ page }) => {
     await openSettingsModal(page);
 
-    // Wait for modal to fully render
-    await page.waitForSelector('#tab-comments', { timeout: 5000 });
-    await page.waitForTimeout(500);
+    const modal = page.locator('#yt-chat-overlay-settings-backdrop');
+    await expect(modal).toHaveRole('dialog');
+    await expect(modal).toHaveAttribute('aria-modal', 'true');
+    await expect(modal.locator('.yt-chat-overlay-settings-close')).toBeVisible();
+    await expect(modal.locator('.yt-chat-overlay-settings-tabs')).toBeVisible();
 
-    // Capture screenshot for visual verification
-    await page.screenshot({
-      path: 'test-results/settings-panel-screenshot.png',
-      fullPage: false,
-    });
+    const box = await modal.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.width).toBeGreaterThan(280);
+    expect(box!.height).toBeGreaterThan(180);
   });
 });

@@ -121,11 +121,22 @@ export class RenderWorkerManager {
   private _queueDepth = 0;
   private _activeMessageCount = 0;
   private readonly deps: WorkerManagerDeps;
+  /** Original messages retained while the Worker owns their render state. */
+  private readonly sentMessages = new Map<string, ChatMessage>();
+  private snapshotSequence = 0;
+  private messageSnapshotRequest: {
+    requestId: number;
+    knownMessages: Map<string, ChatMessage>;
+    resolve: (messages: ChatMessage[]) => void;
+    timer: ReturnType<typeof setTimeout>;
+  } | null = null;
   /** Unsubscribe function for overlay dimension changes, stored for cleanup. */
   private dimensionsUnsubscribe: (() => void) | null = null;
 
   /** Callback to push text snippets to the overlay's aria-live region. */
   private _liveRegionCallback: ((snippets: string[]) => void) | null = null;
+  /** Callback invoked when the worker reaches an unrecoverable message-error state. */
+  private _fatalErrorCallback: ((reason: string) => void) | null = null;
 
   /** Ping/pong health check for detecting crashed or unresponsive workers. */
   private pingTimer: ReturnType<typeof setInterval> | null = null;
@@ -170,6 +181,11 @@ export class RenderWorkerManager {
    */
   setLiveRegionCallback(callback: (snippets: string[]) => void): void {
     this._liveRegionCallback = callback;
+  }
+
+  /** Set the callback used to recover from an unrecoverable worker failure. */
+  setFatalErrorCallback(callback: (reason: string) => void): void {
+    this._fatalErrorCallback = callback;
   }
 
   /**
@@ -322,7 +338,23 @@ export class RenderWorkerManager {
               ((data as Record<string, unknown>).activeMessages as number) ?? 0;
             this.deps.observability.updateActiveMessages(this._activeMessageCount);
             this._queueDepth = ((data as Record<string, unknown>).pendingQueueDepth as number) ?? 0;
+            this.pruneSentMessages(
+              (data as Record<string, unknown>).activeMessageIds,
+              (data as Record<string, unknown>).pendingMessageIds
+            );
             break;
+          case 'messageSnapshot': {
+            const request = this.messageSnapshotRequest;
+            const requestId = (data as Record<string, unknown>).requestId;
+            if (!request || request.requestId !== requestId) break;
+            clearTimeout(request.timer);
+            this.messageSnapshotRequest = null;
+            const ids = Array.isArray((data as Record<string, unknown>).messageIds)
+              ? ((data as Record<string, unknown>).messageIds as unknown[])
+              : [];
+            request.resolve(this.takeSentMessages(ids));
+            break;
+          }
           case 'error':
             log.warn('renderer.worker.error', {
               error: String((data as Record<string, unknown>).error),
@@ -353,8 +385,10 @@ export class RenderWorkerManager {
 
       // Structured clone deserialization failures (malformed messages)
       // indicate a corrupted worker state. After N consecutive failures,
-      // destroy the worker and let the renderer fall back to main thread.
+      // notify the renderer so it can replace the transferred canvas. If no
+      // recovery callback is registered, destroy the worker directly.
       let messageErrorCount = 0;
+      let fatalErrorHandled = false;
       const MAX_MESSAGE_ERRORS = 3;
       w.onmessageerror = () => {
         messageErrorCount++;
@@ -362,11 +396,16 @@ export class RenderWorkerManager {
           attempt: messageErrorCount,
           max: MAX_MESSAGE_ERRORS,
         });
-        if (messageErrorCount >= MAX_MESSAGE_ERRORS) {
+        if (messageErrorCount === MAX_MESSAGE_ERRORS && !fatalErrorHandled) {
+          fatalErrorHandled = true;
           log.error('renderer.worker.max-message-errors', {
             limit: MAX_MESSAGE_ERRORS,
           });
-          this.destroy();
+          if (this._fatalErrorCallback) {
+            this._fatalErrorCallback('worker-messageerror');
+          } else {
+            this.destroy();
+          }
         }
       };
 
@@ -520,6 +559,10 @@ export class RenderWorkerManager {
       ],
     };
 
+    const workerMessageId = workerMessage.messages as Array<{ id: string }>;
+    const id = workerMessageId[0]?.id;
+    if (id) this.sentMessages.set(id, message);
+
     if (transferredImages.length > 0) {
       workerMessage.imageData = transferredImages;
       this.worker.postMessage(workerMessage, transferList);
@@ -598,15 +641,53 @@ export class RenderWorkerManager {
     this.worker?.postMessage({ type: 'laneDensity', factor });
   }
 
+  /**
+   * Request all messages still owned by the Worker.
+   *
+   * The response is used during Worker recovery so messages waiting in the
+   * Worker queue, as well as messages already on screen, are not lost when
+   * the transferred canvas has to be replaced.
+   */
+  snapshotMessages(timeoutMs = 250): Promise<ChatMessage[]> {
+    const worker = this.worker;
+    if (!worker) return Promise.resolve([]);
+    if (this.messageSnapshotRequest) return Promise.resolve([]);
+
+    const requestId = ++this.snapshotSequence;
+    const knownMessages = new Map(this.sentMessages);
+    return new Promise<ChatMessage[]>((resolve) => {
+      const timer = setTimeout(() => {
+        const request = this.messageSnapshotRequest;
+        if (!request || request.requestId !== requestId) return;
+        this.messageSnapshotRequest = null;
+        resolve(this.takeKnownMessages(request.knownMessages));
+      }, timeoutMs);
+      this.messageSnapshotRequest = { requestId, knownMessages, resolve, timer };
+      try {
+        worker.postMessage({ type: 'snapshotMessages', requestId });
+      } catch {
+        clearTimeout(timer);
+        this.messageSnapshotRequest = null;
+        resolve(this.takeKnownMessages(knownMessages));
+      }
+    });
+  }
+
   /** Destroy the render worker. */
   destroy(): void {
     this.dimensionsUnsubscribe?.();
     this.dimensionsUnsubscribe = null;
     this.stopPingPong();
-    if (!this.worker) return;
+    if (!this.worker) {
+      this.sentMessages.clear();
+      return;
+    }
     // Capture the target worker so that if init() creates a new worker
     // before the ack/timeout fires, we still terminate the correct instance.
     const workerToDestroy = this.worker;
+    // Detach synchronously. Settings/fallback paths must not treat a worker
+    // waiting for its destroy ACK as active or post new work to it.
+    this.worker = null;
     // Send a destroy message so the worker can flush in-flight work
     // (pending ImageBitmap transfers) before terminate() severs the connection.
     // Without this, bitmaps mid-transfer may not be closed properly.
@@ -644,6 +725,42 @@ export class RenderWorkerManager {
     }, 500);
 
     this.active = false;
+    this.sentMessages.clear();
+  }
+
+  private pruneSentMessages(activeIds: unknown, pendingIds: unknown): void {
+    if (!Array.isArray(activeIds) && !Array.isArray(pendingIds)) return;
+    const currentIds = new Set<string>();
+    for (const id of [
+      ...(Array.isArray(activeIds) ? activeIds : []),
+      ...(Array.isArray(pendingIds) ? pendingIds : []),
+    ]) {
+      if (typeof id === 'string') currentIds.add(id);
+    }
+    for (const id of this.sentMessages.keys()) {
+      if (!currentIds.has(id)) this.sentMessages.delete(id);
+    }
+  }
+
+  private takeSentMessages(ids: unknown[]): ChatMessage[] {
+    const messages: ChatMessage[] = [];
+    for (const id of ids) {
+      if (typeof id !== 'string') continue;
+      const message = this.sentMessages.get(id);
+      if (message) {
+        messages.push(message);
+        this.sentMessages.delete(id);
+      }
+    }
+    return messages;
+  }
+
+  private takeKnownMessages(knownMessages: Map<string, ChatMessage>): ChatMessage[] {
+    const messages = [...knownMessages.values()];
+    for (const [id, message] of knownMessages) {
+      if (this.sentMessages.get(id) === message) this.sentMessages.delete(id);
+    }
+    return messages;
   }
 
   /**

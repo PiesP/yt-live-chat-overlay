@@ -113,6 +113,8 @@ export class CanvasRenderer extends RendererBase {
   private canvasClickHandler: ((e: MouseEvent) => void) | null = null;
   /** Set to true during onDestroy() — checked after async awaits in drainQueueAsync. */
   private _destroyed = false;
+  /** Prevent concurrent Worker recovery attempts from replacing the canvas twice. */
+  private fallbackInProgress = false;
   private ctx: CanvasRenderingContext2D | null = null;
   private animFrameId: number | null = null;
   /** Pre-computed 1/fadeDurationMs — corrected in constructor from settings. */
@@ -381,6 +383,7 @@ export class CanvasRenderer extends RendererBase {
       getMessagePriority: CanvasRenderer.getMessagePriority,
       getEffectiveSpeedPxPerSec: () => this.getEffectiveSpeedPxPerSec(),
     });
+    this.workerManager.setFatalErrorCallback((reason) => this.fallbackToMainThread(reason));
     const useWorker = this.workerManager.init(canvas, settings, overlay);
 
     // Wire the Worker's live-region text snippets to the overlay's
@@ -430,6 +433,7 @@ export class CanvasRenderer extends RendererBase {
       if (d && this.canvas) {
         this.applyDevicePixelRatio(d);
         this.laneAllocator.reset(d);
+        this.reflowActiveMessages(d);
       }
     });
 
@@ -468,6 +472,75 @@ export class CanvasRenderer extends RendererBase {
     log.info('renderer.created', {
       mode: 'canvas2d',
     });
+  }
+
+  /** Reflow visible messages and restore lane reservations after a resize. */
+  private reflowActiveMessages(dimensions: OverlayDimensions): void {
+    const laneCount = this.laneAllocator.getLaneCount();
+    const laneHeight = this.laneAllocator.getLaneHeight();
+    if (laneCount <= 0 || laneHeight <= 0) return;
+
+    const now = performance.now();
+    const isScrolling =
+      this.settings.danmakuMode === 'scroll' || this.settings.danmakuMode === 'reverse';
+    this.activeMessagesByLane.clear();
+
+    for (const message of this.activeMessages) {
+      const requestedSlots = Math.max(1, message.slotCount ?? 1);
+      const slotCount = Math.min(requestedSlots, laneCount);
+      const laneIndex = Math.min(message.laneIndex, Math.max(0, laneCount - slotCount));
+      message.laneIndex = laneIndex;
+      message.slotCount = slotCount;
+      message.y =
+        this.laneAllocator.getLaneY(laneIndex, dimensions.height) +
+        Math.floor((slotCount * laneHeight - message.height) / 2);
+      message.laneArrayIndices = new Array(slotCount);
+
+      const elapsed = Math.max(0, now - message.startTime - message.pausedDuration);
+      const progress = Math.min(1, elapsed * message.invDuration);
+      if (isScrolling) {
+        if (this.settings.danmakuMode === 'scroll') {
+          message.startX = dimensions.width;
+          message.x =
+            message.startX -
+            progress * (message.startX + message.width + this.settings.exitPaddingPx);
+        } else {
+          message.startX = -message.width;
+          message.x =
+            message.startX +
+            progress * (dimensions.width - message.startX + this.settings.exitPaddingPx);
+        }
+      } else {
+        message.x = (dimensions.width - message.width) / 2;
+      }
+
+      for (let slot = 0; slot < slotCount; slot++) {
+        const lane = laneIndex + slot;
+        let laneList = this.activeMessagesByLane.get(lane);
+        if (!laneList) {
+          laneList = [];
+          this.activeMessagesByLane.set(lane, laneList);
+        }
+        message.laneArrayIndices[slot] = laneList.length;
+        laneList.push(message);
+      }
+
+      const remainingDuration = Math.max(1, message.duration - elapsed);
+      this.laneAllocator.commitPlacement(
+        {
+          laneIndex,
+          waitMs: 0,
+          laneY: this.laneAllocator.getLaneY(laneIndex, dimensions.height),
+          slotCount,
+          verticalOffset: 0,
+        },
+        now,
+        remainingDuration,
+        isScrolling ? message.width : undefined,
+        isScrolling ? dimensions.width : undefined,
+        message.speedTier
+      );
+    }
   }
 
   /** Effective reduced-motion: OS preference AND-ed with user override. */
@@ -537,6 +610,9 @@ export class CanvasRenderer extends RendererBase {
     const changed = super.applyLaneDensityIfChanged();
     if (changed && this.workerManager.isActive) {
       this.workerManager.sendLaneDensity(this.currentLaneDensityFactor);
+    } else if (changed) {
+      const dimensions = this.overlay.getDimensions();
+      if (dimensions) this.reflowActiveMessages(dimensions);
     }
     return changed;
   }
@@ -984,6 +1060,55 @@ export class CanvasRenderer extends RendererBase {
    */
   // ── renderFrame stages ─────────────────────────────────────────────────
 
+  /** Try one queued message and warm its text bitmap when placement succeeds. */
+  private placeQueuedMessage(
+    message: ChatMessage,
+    now: number,
+    dimensions: OverlayDimensions,
+    batchIndex: number
+  ): { placed: boolean; oversized: boolean } {
+    const result = this.checkPlacement(message, now, dimensions);
+    if (!result.ok) {
+      return { placed: false, oversized: result.reason === 'oversized' };
+    }
+
+    this.enqueueMessageWithPlacement(
+      message,
+      now,
+      result.placement,
+      batchIndex,
+      result.dimensions,
+      result.speedTier,
+      dimensions
+    );
+
+    if (
+      this.settings.outline.enabled &&
+      this.settings.outline.widthPx > 0 &&
+      this.settings.outline.opacity > 0
+    ) {
+      const warmColor =
+        this.settings.preserveUserColor && message.userColor
+          ? message.userColor
+          : (this.settings.colors[message.authorType] ?? this.settings.colors.normal);
+      const farSpacing = result.speedTier === SPEED_TIER.FAR ? '1px' : undefined;
+      warmTextBitmapCache(
+        toSharedContentSegments(message.content),
+        this.settings.fontSize,
+        this.settings.fontWeight,
+        this.settings.fontFamily,
+        warmColor,
+        this.settings.outline.widthPx,
+        this.settings.outline.opacity,
+        this.textBitmapCache,
+        this.ctx!,
+        farSpacing
+      );
+    }
+
+    return { placed: true, oversized: false };
+  }
+
   private drainQueue(now: number): void {
     if (this.drainLocked) return;
     this.drainLocked = true;
@@ -1012,56 +1137,11 @@ export class CanvasRenderer extends RendererBase {
       for (const msg of candidates) {
         if (this.activeMessages.length >= this.settings.maxConcurrentMessages) break;
 
-        const result = this.checkPlacement(msg, now, dims);
-        if (!result.ok) {
-          // 'collision' → transient lane conflict; message stays for retry.
-          // 'temporarily_unavailable' → all lanes saturated (burst); retry next frame.
-          // 'oversized'          → requiredSlots > totalLanes; will NEVER fit —
-          //                        drop permanently to prevent watchdog restart loop.
-          if (result.reason === 'oversized') {
-            unplaceable.push(msg);
-          }
-          // checkPlacement() already called markCollision() for feedback.
-          continue;
-        }
-
-        this.enqueueMessageWithPlacement(
-          msg,
-          now,
-          result.placement,
-          batchIndex,
-          result.dimensions,
-          result.speedTier,
-          dims
-        );
+        const result = this.placeQueuedMessage(msg, now, dims, batchIndex);
+        if (result.oversized) unplaceable.push(msg);
+        if (!result.placed) continue;
         batchIndex++;
         committed.push(msg);
-
-        // Pre-warm text bitmap cache so the render loop never pays
-        // the cost of cache-miss bitmap generation during drawStage.
-        if (
-          this.settings.outline.enabled &&
-          this.settings.outline.widthPx > 0 &&
-          this.settings.outline.opacity > 0
-        ) {
-          const warmColor =
-            this.settings.preserveUserColor && msg.userColor
-              ? msg.userColor
-              : (this.settings.colors[msg.authorType] ?? this.settings.colors.normal);
-          const farSpacing = result.speedTier === SPEED_TIER.FAR ? '1px' : undefined;
-          warmTextBitmapCache(
-            toSharedContentSegments(msg.content),
-            this.settings.fontSize,
-            this.settings.fontWeight,
-            this.settings.fontFamily,
-            warmColor,
-            this.settings.outline.widthPx,
-            this.settings.outline.opacity,
-            this.textBitmapCache,
-            this.ctx!,
-            farSpacing
-          );
-        }
       }
 
       // Atomically remove successfully placed messages from the queue.
@@ -1125,51 +1205,11 @@ export class CanvasRenderer extends RendererBase {
       for (const msg of candidates) {
         if (this.activeMessages.length >= this.settings.maxConcurrentMessages) break;
 
-        const result = this.checkPlacement(msg, now, dims);
-        if (!result.ok) {
-          if (result.reason === 'oversized') {
-            unplaceable.push(msg);
-          }
-          continue;
-        }
-
-        this.enqueueMessageWithPlacement(
-          msg,
-          now,
-          result.placement,
-          batchIndex,
-          result.dimensions,
-          result.speedTier,
-          dims
-        );
+        const result = this.placeQueuedMessage(msg, now, dims, batchIndex);
+        if (result.oversized) unplaceable.push(msg);
+        if (!result.placed) continue;
         batchIndex++;
         committed.push(msg);
-
-        // Pre-warm text bitmap cache so the render loop never pays
-        // the cost of cache-miss bitmap generation during drawStage.
-        if (
-          this.settings.outline.enabled &&
-          this.settings.outline.widthPx > 0 &&
-          this.settings.outline.opacity > 0
-        ) {
-          const warmColor =
-            this.settings.preserveUserColor && msg.userColor
-              ? msg.userColor
-              : (this.settings.colors[msg.authorType] ?? this.settings.colors.normal);
-          const farSpacing = result.speedTier === SPEED_TIER.FAR ? '1px' : undefined;
-          warmTextBitmapCache(
-            toSharedContentSegments(msg.content),
-            this.settings.fontSize,
-            this.settings.fontWeight,
-            this.settings.fontFamily,
-            warmColor,
-            this.settings.outline.widthPx,
-            this.settings.outline.opacity,
-            this.textBitmapCache,
-            this.ctx!,
-            farSpacing
-          );
-        }
 
         // Yield every 50ms to keep the main thread responsive during bursts.
         deadline = await yieldIfOverBudget(deadline);
@@ -1698,6 +1738,13 @@ export class CanvasRenderer extends RendererBase {
     const wasTranslationEnabled = this.settings.translationEnabled;
     const prevSource = this.settings.translationSource;
     const prevDanmakuMode = this.settings.danmakuMode;
+    const laneGeometryChanged =
+      settings.fontSize !== this.settings.fontSize ||
+      settings.fontWeight !== this.settings.fontWeight ||
+      settings.fontFamily !== this.settings.fontFamily ||
+      settings.laneSpacing !== this.settings.laneSpacing ||
+      settings.safeTop !== this.settings.safeTop ||
+      settings.safeBottom !== this.settings.safeBottom;
     super.updateSettings(settings, options);
 
     // When settings change, cached dimensions become stale
@@ -1711,6 +1758,14 @@ export class CanvasRenderer extends RendererBase {
 
     // Sync settings to render worker when off-main-thread mode is active
     this.workerManager.updateSettings(settings);
+    this.imageFetchManager.updateConfig(settings, this.workerManager.workerRef);
+    if (laneGeometryChanged && !options?.resetState && !this.workerManager.isActive) {
+      const dimensions = this.overlay.getDimensions();
+      if (dimensions) {
+        this.laneAllocator.reset(dimensions);
+        this.reflowActiveMessages(dimensions);
+      }
+    }
 
     // When translation is disabled, clear translated text from all active
     // messages so they revert to showing only the original text on the next frame.
@@ -1971,6 +2026,9 @@ export class CanvasRenderer extends RendererBase {
       });
     });
     newCanvas.addEventListener('contextrestored', () => this.handleContextRestored());
+    if (this.canvasClickHandler) {
+      newCanvas.addEventListener('click', this.canvasClickHandler);
+    }
 
     this.canvas = newCanvas;
     this.ctx = ctx;
@@ -1992,39 +2050,58 @@ export class CanvasRenderer extends RendererBase {
    * Called when the Worker is unrecoverable (dead or canvas context lost).
    */
   override fallbackToMainThread(reason: string): void {
+    if (this._destroyed || this.fallbackInProgress) return;
+    this.fallbackInProgress = true;
     log.info('renderer.fallback.started', { reason });
 
-    this.workerManager.destroy();
-    this.workerManager.setActive(false);
+    void this.workerManager
+      .snapshotMessages()
+      .then((messages) => {
+        if (this._destroyed) return;
 
-    if (!this.replaceCanvas()) {
-      log.warn('renderer.fallback.failed', {
-        reason: 'could-not-replace-canvas',
+        this.workerManager.destroy();
+        this.workerManager.setActive(false);
+        this.imageFetchManager.updateConfig(this.settings, null);
+
+        if (!this.replaceCanvas()) {
+          log.warn('renderer.fallback.failed', {
+            reason: 'could-not-replace-canvas',
+          });
+          return;
+        }
+
+        this.activeMessages.length = 0;
+        this.activeMessagesByLane.clear();
+        this.pendingQueue.clear();
+        this.backlogPaused = false;
+        clearTextMeasurementCaches();
+        this.textBitmapCache.clear();
+        this.dimensionCache.clear();
+        for (const bucket of this.farOpacityBuckets) bucket.length = 0;
+        for (const bucket of this.midOpacityBuckets) bucket.length = 0;
+        for (const bucket of this.nearOpacityBuckets) bucket.length = 0;
+
+        const dims = this.overlay.getDimensions();
+        if (dims) {
+          this.laneAllocator.reset(dims);
+        }
+        this.laneAllocator.resetBatch();
+
+        for (const message of messages) this.enqueueMessage(message, false);
+        this.idleSince = null;
+        this.startRenderLoop();
+
+        log.info('renderer.fallback.complete', { restoredMessages: messages.length });
+      })
+      .catch((error: unknown) => {
+        log.warn('renderer.fallback.failed', {
+          reason: 'message-snapshot-failed',
+          error: String(error),
+        });
+      })
+      .finally(() => {
+        this.fallbackInProgress = false;
       });
-      return;
-    }
-
-    this.activeMessages.length = 0;
-    this.activeMessagesByLane.clear();
-    this.pendingQueue.clear();
-    this.backlogPaused = false;
-    clearTextMeasurementCaches();
-    this.textBitmapCache.clear();
-    this.dimensionCache.clear();
-    for (const bucket of this.farOpacityBuckets) bucket.length = 0;
-    for (const bucket of this.midOpacityBuckets) bucket.length = 0;
-    for (const bucket of this.nearOpacityBuckets) bucket.length = 0;
-
-    const dims = this.overlay.getDimensions();
-    if (dims) {
-      this.laneAllocator.reset(dims);
-    }
-    this.laneAllocator.resetBatch();
-
-    this.idleSince = null;
-    this.startRenderLoop();
-
-    log.info('renderer.fallback.complete');
   }
 
   // ── Canvas context loss / restoration ───────────────────────────────────

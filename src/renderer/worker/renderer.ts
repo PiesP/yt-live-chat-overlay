@@ -16,6 +16,7 @@
  *   { type: 'addMessages', messages: WorkerMessage[] }
  *   { type: 'updateConfig', config: Partial<WorkerConfig> }
  *   { type: 'setPaused', paused: boolean }
+ *   { type: 'snapshotMessages', requestId: number }
  *   { type: 'destroy' }
  *
  * Worker → Main:
@@ -513,6 +514,7 @@ export class WorkerRenderer {
             this.logicalWidth = cssW;
             this.logicalHeight = cssH;
             this.initLanes(cssW, cssH);
+            this.reflowActiveMessages();
             break;
           }
           case 'addMessages': {
@@ -530,9 +532,6 @@ export class WorkerRenderer {
                     : target === 'sticker'
                       ? this.stickerCache
                       : this.emojiCache;
-                // Close prior bitmap if one exists for this URL to prevent
-                // GPU-side resource leak from orphaned ImageBitmaps.
-                cache.get(url)?.close();
                 cache.set(url, bitmap);
               }
             }
@@ -542,14 +541,46 @@ export class WorkerRenderer {
           case 'updateConfig':
             if (this.config) {
               const prevMode = this.config.danmakuMode;
-              Object.assign(this.config, data.config as Partial<WorkerConfig>);
+              const nextConfig = data.config as Partial<WorkerConfig>;
+              const geometryChanged =
+                (nextConfig.fontSize !== undefined &&
+                  nextConfig.fontSize !== this.config.fontSize) ||
+                (nextConfig.fontWeight !== undefined &&
+                  nextConfig.fontWeight !== this.config.fontWeight) ||
+                (nextConfig.fontFamily !== undefined &&
+                  nextConfig.fontFamily !== this.config.fontFamily) ||
+                (nextConfig.laneSpacing !== undefined &&
+                  nextConfig.laneSpacing !== this.config.laneSpacing) ||
+                (nextConfig.safeTop !== undefined && nextConfig.safeTop !== this.config.safeTop) ||
+                (nextConfig.safeBottom !== undefined &&
+                  nextConfig.safeBottom !== this.config.safeBottom);
+              Object.assign(this.config, nextConfig);
               this.recomputeConfigDerived();
               this.textMeasureCache.clear();
+              this.fontMetricsCache.clear();
               this.textBitmapCache.clear();
-              this.emojiCache.clear();
-              this.authorPhotoCache.clear();
-              this.stickerCache.clear();
+              // Preserve decoded image caches across ordinary settings
+              // updates. Clearing them for opacity/translation/timing changes
+              // makes visible emoji, avatars, and stickers disappear until a
+              // new fetch completes. resize() still evicts when a cache limit
+              // is actually reduced.
+              if (nextConfig && 'emojiCacheMb' in nextConfig) {
+                this.emojiCache.resize((this.config.emojiCacheMb ?? 4) * 1_000_000);
+              }
+              if (nextConfig && 'photoCacheMb' in nextConfig) {
+                this.authorPhotoCache.resize((this.config.photoCacheMb ?? 4) * 1_000_000);
+              }
+              if (nextConfig && 'stickerCacheMb' in nextConfig) {
+                this.stickerCache.resize((this.config.stickerCacheMb ?? 4) * 1_000_000);
+              }
+              if (nextConfig && 'textCacheMb' in nextConfig) {
+                this.textBitmapCache.resize((this.config.textCacheMb ?? 4) * 1_000_000);
+              }
               this.superChatGradientCache.clear();
+              if (geometryChanged && this.canvas) {
+                this.initLanes(this.logicalWidth, this.logicalHeight);
+                this.reflowActiveMessages();
+              }
               // Issue 4: When danmakuMode changes, active messages have positions
               // computed for the old mode — clear state to avoid rendering artifacts.
               // The main thread recalculates positions for its own messages; clearing
@@ -617,6 +648,13 @@ export class WorkerRenderer {
               }
             }
             break;
+          case 'snapshotMessages':
+            self.postMessage({
+              type: 'messageSnapshot',
+              requestId: data.requestId,
+              messageIds: [...this.messageById.keys()],
+            });
+            break;
           case 'destroy':
             this.handleDestroy();
             break;
@@ -627,6 +665,7 @@ export class WorkerRenderer {
             this.laneDensityFactor = (data as { factor: number }).factor;
             if (this.canvas && this.config) {
               this.initLanes(this.logicalWidth, this.logicalHeight);
+              this.reflowActiveMessages();
             }
             break;
           case 'ping':
@@ -803,6 +842,61 @@ export class WorkerRenderer {
     };
   }
 
+  /** Reposition active messages and restore their lane reservations after resize. */
+  private reflowActiveMessages(): void {
+    if (!this.config || this.numLanes <= 0) return;
+    const now = performance.now();
+    this.activeMessagesByLane.clear();
+
+    for (const msg of this.activeMessages) {
+      const requestedSlots = Math.max(1, msg.laneSlotCount ?? 1);
+      const slotCount = Math.min(requestedSlots, this.numLanes);
+      const laneIndex = Math.min(msg.laneIndex, Math.max(0, this.numLanes - slotCount));
+      msg.laneIndex = laneIndex;
+      msg.laneSlotCount = slotCount;
+      msg.y =
+        computeLaneY(laneIndex, this.logicalHeight, this.config.safeTop ?? 0, this.laneHeight) +
+        Math.floor((slotCount * this.laneHeight - msg.height) / 2);
+
+      const elapsed = Math.max(0, now - msg.startTime - msg.pausedDuration);
+      const progress = Math.min(1, elapsed * msg.invDuration);
+      const isScrolling =
+        this.config.danmakuMode === 'scroll' || this.config.danmakuMode === 'reverse';
+      if (isScrolling) {
+        if (this.config.danmakuMode === 'scroll') {
+          msg.startX = this.logicalWidth;
+          msg.x = msg.startX - progress * (msg.startX + msg.width + this.config.exitPaddingPx);
+        } else {
+          msg.startX = -msg.width;
+          msg.x =
+            msg.startX + progress * (this.logicalWidth - msg.startX + this.config.exitPaddingPx);
+        }
+      } else {
+        msg.x = (this.logicalWidth - msg.width) / 2;
+      }
+
+      for (let slot = 0; slot < slotCount; slot++) {
+        const lane = laneIndex + slot;
+        let laneList = this.activeMessagesByLane.get(lane);
+        if (!laneList) {
+          laneList = [];
+          this.activeMessagesByLane.set(lane, laneList);
+        }
+        laneList.push(msg);
+      }
+
+      const remainingDuration = Math.max(1, msg.duration - elapsed);
+      this.commitPlacement(
+        laneIndex,
+        slotCount,
+        now,
+        remainingDuration,
+        msg.speedTier,
+        isScrolling ? msg.width : undefined
+      );
+    }
+  }
+
   private initLanes(_width: number, height: number): void {
     if (!this.config || !this.ctx) return;
     const totalPaddingV = rendererLayout.paddingV * 2;
@@ -976,6 +1070,7 @@ export class WorkerRenderer {
       duration *= this.config.modOwnerDurationMultiplier;
     const slotCount = placement.slotCount;
     const laneY = placement.laneY + placement.verticalOffset;
+    const effectiveStartTime = now + staggerDelay + placement.waitMs;
     const authorColor =
       this.config.preserveUserColor && msg.userColor
         ? msg.userColor
@@ -989,8 +1084,8 @@ export class WorkerRenderer {
       startX,
       width: msg.width,
       height: msg.height,
-      fadeStartTime: now + staggerDelay,
-      startTime: now + staggerDelay,
+      fadeStartTime: effectiveStartTime,
+      startTime: effectiveStartTime,
       duration,
       invDuration: 1 / Math.max(1, duration),
       pausedDuration: 0,
@@ -1013,7 +1108,7 @@ export class WorkerRenderer {
     this.commitPlacement(
       placement.laneIndex,
       slotCount,
-      now + staggerDelay,
+      effectiveStartTime,
       duration,
       speedTier,
       isScrolling ? msg.width : undefined
@@ -1194,6 +1289,8 @@ export class WorkerRenderer {
           activeMessages: 0,
           drops: this.totalDrops,
           pendingQueueDepth: this.pendingQueue.length,
+          activeMessageIds: [],
+          pendingMessageIds: [],
         });
       }
       return;
@@ -1359,6 +1456,8 @@ export class WorkerRenderer {
         activeMessages: this.activeMessages.length,
         drops: this.totalDrops,
         pendingQueueDepth: this.pendingQueue.length,
+        activeMessageIds: this.activeMessages.map((msg) => msg.id),
+        pendingMessageIds: this.pendingQueue.slice(this.pendingQueueOffset).map((msg) => msg.id),
       });
     }
 
@@ -1497,6 +1596,16 @@ export class WorkerRenderer {
       } else {
         speedTier = hashForTier(entry.id) < TIER_NEAR_THRESHOLD ? SPEED_TIER.NEAR : SPEED_TIER.FAR;
       }
+      const requiredSlots = Math.max(1, Math.ceil(entry.height / this.laneHeight));
+      if (requiredSlots > this.numLanes) {
+        // A message taller than the viewport can never obtain a contiguous
+        // block. Treat it as a permanent drop instead of retrying it every
+        // frame and keeping the Worker render loop alive indefinitely.
+        this.totalDrops++;
+        this.messageById.delete(entry.id);
+        committed.add(entry);
+        continue;
+      }
       const placement = this.findPlacement(entry.height, speedTier);
       if (!placement) {
         this.totalDrops++;
@@ -1553,7 +1662,7 @@ export class WorkerRenderer {
     urls: string[],
     cache: ByteLimitedCache<ImageBitmap>
   ): Promise<void> {
-    const toFetch = urls.filter((u) => !cache.has(u) && !this.fetching.has(u));
+    const toFetch = [...new Set(urls)].filter((u) => !cache.has(u) && !this.fetching.has(u));
     if (toFetch.length === 0) return;
     let idx = 0;
     const workers: Promise<void>[] = [];

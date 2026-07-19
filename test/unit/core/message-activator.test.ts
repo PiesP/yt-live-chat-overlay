@@ -3,10 +3,11 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import type { ChatMessage, OverlaySettings } from '@app-types';
+import type { ChatMessage } from '@app-types';
 import { MessageActivator } from '@util/message-activator';
 import type { ActivationCallbacks, MessageActivatorConfig } from '@util/message-activator';
 import { EMPTY_CHAT_MESSAGE } from '@renderer/constants';
+import type { TranslationService } from '@translation/service';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -38,7 +39,9 @@ function makeConfig(overrides: Partial<MessageActivatorConfig> = {}): MessageAct
   };
 }
 
-function makeMockTranslationService(enabled = false) {
+function makeMockTranslationService(enabled = false): TranslationService & {
+  translate: ReturnType<typeof vi.fn>;
+} {
   return {
     isEnabled: enabled,
     isActive: false,
@@ -47,7 +50,7 @@ function makeMockTranslationService(enabled = false) {
     setOverride: vi.fn(),
     destroy: vi.fn(),
     onLifecycle: vi.fn(),
-  };
+  } as unknown as TranslationService & { translate: ReturnType<typeof vi.fn> };
 }
 
 // ── Construction ───────────────────────────────────────────────────────────
@@ -99,14 +102,14 @@ describe('MessageActivator', () => {
       cm.message = makeChatMessage({ id: 'test' });
       cm.renderMessage = makeChatMessage({ id: 'render-test' });
       cm.translatedText = '번역된 텍스트';
-      (cm as Record<string, unknown>).desaturatedUserColor = '#aaa';
+      (cm as unknown as Record<string, unknown>).desaturatedUserColor = '#aaa';
 
       activator.releaseMessage(cm);
 
       expect(cm.message).toBe(EMPTY_CHAT_MESSAGE);
       expect(cm.renderMessage).toBe(EMPTY_CHAT_MESSAGE);
       expect(cm.translatedText).toBeNull();
-      expect((cm as Record<string, unknown>).desaturatedUserColor).toBeUndefined();
+      expect((cm as unknown as Record<string, unknown>).desaturatedUserColor).toBeUndefined();
     });
 
     it('recycles same object back into pool', () => {

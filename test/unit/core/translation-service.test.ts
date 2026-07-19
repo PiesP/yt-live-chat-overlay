@@ -33,6 +33,9 @@ function makeTranslator(name: string): TranslatorInstance & {
   return {
     translate: vi.fn(async (text: string) => `${name}:${text}`),
     destroy: vi.fn(),
+  } as unknown as TranslatorInstance & {
+    destroy: ReturnType<typeof vi.fn>;
+    translate: ReturnType<typeof vi.fn>;
   };
 }
 

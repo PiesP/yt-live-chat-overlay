@@ -136,7 +136,11 @@ describe('estimateMessageDimensions — superchat', () => {
       kind: 'superchat',
       text: 'With sticker!',
       author: 'Donor',
-      superChat: { amount: '$10.00', tier: 'red', sticker: '🎉' },
+      superChat: {
+        amount: '$10.00',
+        tier: 'red',
+        sticker: { url: 'https://yt3.ggpht.com/sticker', alt: '🎉' },
+      },
     });
     const dims = estimateMessageDimensions(msg, 16, true);
     expect(dims.height).toBeGreaterThan(0);

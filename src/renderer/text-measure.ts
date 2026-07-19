@@ -60,7 +60,9 @@ const fontMetricsCache = new Map<string, { ascent: number; descent: number }>();
  * Shared between main-thread (text-measure.ts) and worker (renderer-worker.ts)
  * to ensure consistent measurement across both contexts.
  */
-export function measureBoundingBoxWidth(m: TextMetrics): number {
+export function measureBoundingBoxWidth(
+  m: Pick<TextMetrics, 'actualBoundingBoxLeft' | 'actualBoundingBoxRight' | 'width'>
+): number {
   const bbWidth = Math.abs(m.actualBoundingBoxLeft) + Math.abs(m.actualBoundingBoxRight);
   return bbWidth > 0 ? Math.ceil(bbWidth) : Math.ceil(m.width);
 }

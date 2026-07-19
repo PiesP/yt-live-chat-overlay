@@ -9,7 +9,7 @@ const defaultOptions: LaneAllocatorOptions = {
   safeTop: 0.05,
   safeBottom: 0.05,
   fontSize: 16,
-  fontWeight: 400,
+  fontWeight: 'normal',
   fontFamily: 'sans-serif',
   laneSpacing: 4,
   headwayGapRatio: 0.08,

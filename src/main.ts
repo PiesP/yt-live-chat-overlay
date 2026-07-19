@@ -338,7 +338,9 @@ function setupMenuCommands(): void {
       action: () => {
         const app = window.__ytChatOverlay;
         if (app?.restartRuntime) {
-          void app.restartRuntime();
+          void app.restartRuntime().catch((error: unknown) => {
+            log.warn('app.menu-reload-failed', { error: String(error) });
+          });
         }
       },
     },

@@ -16,7 +16,6 @@ import { existsSync } from 'node:fs';
 import {
   USERSCRIPT_PATH,
   setupOverlayPage,
-  installYTMock,
   injectUserscript,
   MOCK_WATCH_URL,
 } from '../fixtures/test-utils';
@@ -114,7 +113,9 @@ test.describe('YT Live Chat Overlay E2E', () => {
 
     await setupOverlayPage(page);
     await page.goto('https://www.youtube.com/feed/trending', { waitUntil: 'domcontentloaded' });
-    await page.waitForTimeout(2000);
+
+    await expect(page.locator('#yt-live-chat-overlay')).toHaveCount(0);
+    await expect.poll(() => page.evaluate(() => window.__ytChatOverlay)).toBeUndefined();
 
     const overlayErrors = errors.filter((e) =>
       e.includes('ytco') || e.includes('overlay') || e.includes('chat-overlay')
@@ -130,7 +131,6 @@ test.describe('YT Live Chat Overlay E2E', () => {
     const scriptRan = await page.evaluate(() => {
       const w = window as unknown as Record<string, unknown>;
       // The App class exposes window.__ytChatOverlay for debugging
-      // Even if undefined (not a watch page), the script ran without error
       return w.__ytChatOverlay !== undefined;
     });
 
@@ -146,8 +146,6 @@ test.describe('YT Live Chat Overlay E2E', () => {
       return typeof w.__ytChatOverlay === 'object';
     });
 
-    // Note: This may be false if the app didn't initialize (e.g., not a watch page)
-    // We just verify the script ran without crashing
-    expect(typeof hasDebugHandle).toBe('boolean');
+    expect(hasDebugHandle).toBe(true);
   });
 });

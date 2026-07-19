@@ -24,15 +24,21 @@ export class Settings {
   private saving = false;
   /** Debounce flag: true while a save is scheduled via requestIdleCallback. */
   private savePending = false;
+  /** Monotonic local revision used to reject stale async cross-tab reloads. */
+  private localRevision = 0;
   /** requestIdleCallback handle — stored so we can cancel on flush/destroy. */
   private saveIdleHandle = 0;
   /** setTimeout handle — used when requestIdleCallback is unavailable. */
   private saveTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
+  /** Save currently awaiting an async storage adapter write. */
+  private savePromise: Promise<void> | null = null;
   /** Cross-tab sync adapter for the current environment. */
   private crossTabSyncAdapter = getCrossTabSyncAdapter(STORAGE_KEY);
   /** Bound callback reference for cross-tab sync adapter removeListener. */
   private readonly onCrossTabChange = (_key: string): void => {
-    if (this.saving) return;
+    // A remote event must never replace a local edit that is waiting for its
+    // debounced save. The event may be delivered before our write completes.
+    if (this.saving || this.savePending) return;
     log.debug('settings.store.cross-tab-change');
     void this.reloadFromStorage();
   };
@@ -81,6 +87,10 @@ export class Settings {
       this.saveTimeoutHandle = null;
     }
     await this.flushSave();
+    // flushSave() is a no-op when the write already started and cleared the
+    // pending flag. Wait for that in-flight write before another Settings
+    // instance can read or overwrite the same storage key.
+    if (this.savePromise) await this.savePromise;
   }
 
   private startCrossTabSync(): void {
@@ -93,10 +103,17 @@ export class Settings {
 
   /** Reload settings from storage and notify subscribers. */
   private async reloadFromStorage(): Promise<void> {
+    const revisionAtStart = this.localRevision;
     try {
       const adapter = getStorageAdapter();
       const raw = await adapter.getItem(STORAGE_KEY);
       if (!raw) return;
+      // A local set/preview/reset may have happened while storage I/O was in
+      // flight. Preserve that newer in-memory state instead of applying a
+      // stale remote snapshot after the await.
+      if (revisionAtStart !== this.localRevision || this.savePending || this.saving) {
+        return;
+      }
       const loaded = normalizeStoredSettings(JSON.parse(raw) as Record<string, unknown>);
       this.settings = loaded;
       for (const cb of this.onChangeCallbacks) cb();
@@ -145,7 +162,13 @@ export class Settings {
       clearTimeout(this.saveTimeoutHandle);
       this.saveTimeoutHandle = null;
     }
-    await this.save();
+    const savePromise = this.save();
+    this.savePromise = savePromise;
+    try {
+      await savePromise;
+    } finally {
+      if (this.savePromise === savePromise) this.savePromise = null;
+    }
   }
 
   /**
@@ -159,17 +182,20 @@ export class Settings {
 
   /** Apply settings and persist to storage. */
   set(partial: Partial<OverlaySettings>): void {
+    this.localRevision++;
     this.settings = applySettingsPatch(this.settings, partial);
     this.scheduleSave();
   }
 
   /** Apply settings to memory only (no storage write). Used for live preview. */
   preview(partial: Partial<OverlaySettings>): void {
+    this.localRevision++;
     this.settings = applySettingsPatch(this.settings, partial);
   }
 
   /** Reset settings to factory defaults and persist. */
   reset(): void {
+    this.localRevision++;
     this.settings = cloneSettings(DEFAULT_SETTINGS);
     this.scheduleSave();
     // Notify local subscribers (e.g., live UI) of the reset.

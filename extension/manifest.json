@@ -29,8 +29,7 @@
     {
       "resources": [
         "workers/*.js",
-        "page-script.js",
-        "chunks/*.js"
+        "page-script.js"
       ],
       "matches": [
         "https://www.youtube.com/*"

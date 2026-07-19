@@ -63,6 +63,7 @@ export class ByteLimitedCache<V> {
     if (existing !== undefined) {
       this.totalBytes -= this.estimateSize(existing);
       this.map.delete(key); // re-insert below to refresh insertion order
+      this.onEvict?.(existing);
     }
 
     // Evict oldest entries until under maxBytes
@@ -76,6 +77,7 @@ export class ByteLimitedCache<V> {
     }
     // Re-check after eviction — if value itself exceeds maxBytes, don't cache
     if (this.totalBytes + bytes > this._maxBytes && this.map.size === 0) {
+      this.onEvict?.(value);
       return; // single item too large for cache
     }
     this.map.set(key, value);

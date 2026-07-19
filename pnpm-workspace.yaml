@@ -2,8 +2,10 @@ overrides:
   minimatch@<3.1.3: '>=3.1.3'
   minimatch@<3.1.4: '>=3.1.4'
 
-# Dependabot cooldown (7 days) handles supply-chain cooling;
-# minimumReleaseAge removed to avoid pnpm --no-save conflicts with Dependabot.
+# Keep every newly resolved package outside the immediate supply-chain window.
+# Dependabot's cooldown is useful but does not cover manual lockfile changes or
+# other update sources.
+minimumReleaseAge: 10080
 
 # Security-critical packages that bypass the 7-day cooling period:
 #   - minimatch: known supply-chain attack target (CVE-2022-3517)

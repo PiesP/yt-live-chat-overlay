@@ -37,10 +37,6 @@ export const LANE_COOLDOWN_MIN_MS = 500;
  *  Used only for top/bottom (non-scrolling) modes. */
 export const SAFETY_MARGIN_RATIO = 0.15;
 
-/** Epsilon-greedy selection probability (0-1).
- *  5% chance to skip the strict topmost zero-wait lane. */
-export const EPSILON = 0.05;
-
 /** Free ratio for anti-block gate: utilization above (1 - this) triggers
  *  probabilistic blocking of new message placements. */
 export const ANTI_BLOCK_FREE_RATIO = 0.05;
@@ -104,17 +100,6 @@ export const TIER_NEAR_THRESHOLD = 0.3;
 
 /** Desaturation factor for Far-tier depth layer user colors. */
 export const FAR_LAYER_DESATURATION_FACTOR = 0.3;
-
-/** Ghost alpha for temporal frame blending on FAR-tier messages.
- *  Renders a faint previous-frame copy before the current frame to
- *  create perceived motion blur, smoothing fast-scrolling text.
- *  Keep low (0.08–0.15) to avoid visible ghosting artifacts.
- *
- *  IMPORTANT: Ghost text MUST use text-only content segments, NOT
- *  message.text.  message.text includes emoji fallbackText (e.g.
- *  "PiesP Smile") which would render as faint unrelated text
- *  alongside emoji images.  See ChatMessage.text documentation. */
-export const TEMPORAL_BLEND_ALPHA = 0;
 
 // ── Text rendering (canvas-rendering-shared.ts) ──────────────────────────────
 

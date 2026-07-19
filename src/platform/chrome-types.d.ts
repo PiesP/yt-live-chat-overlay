@@ -15,6 +15,7 @@
 interface ChromeStorageArea {
   get(keys: string | string[] | null): Promise<Record<string, unknown>>;
   set(items: Record<string, unknown>): Promise<void>;
+  remove(keys: string | string[]): Promise<void>;
 }
 
 interface ChromeStorageChangedEvent {
@@ -101,18 +102,18 @@ interface ChromeI18nNamespace {
 // ── Top-level namespace ────────────────────────────────────────────────────
 
 interface ChromeNamespace {
-  storage?: ChromeStorageNamespace;
-  runtime?: ChromeRuntimeNamespace;
-  contextMenus?: ChromeContextMenusNamespace;
-  tabs?: ChromeTabsNamespace;
-  i18n?: ChromeI18nNamespace;
+  storage: ChromeStorageNamespace;
+  runtime: ChromeRuntimeNamespace;
+  contextMenus: ChromeContextMenusNamespace;
+  tabs: ChromeTabsNamespace;
+  i18n: ChromeI18nNamespace;
 }
 
-declare const chrome: ChromeNamespace | undefined;
+declare const chrome: ChromeNamespace;
 
 /**
  * Firefox MV3 exposes browser.* as the canonical API namespace.
  * It mirrors chrome.* closely; we declare it with the same type so the
  * factory can fall back to it when chrome is absent.
  */
-declare const browser: ChromeNamespace | undefined;
+declare const browser: ChromeNamespace;

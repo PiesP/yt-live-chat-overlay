@@ -54,7 +54,9 @@ window.addEventListener('message', (event: MessageEvent) => {
       app.resetSettings();
       break;
     case 'reload-overlay':
-      void app.restartRuntime();
+      void app.restartRuntime().catch((error: unknown) => {
+        console.error('[yt-chat-overlay] extension reload failed', error);
+      });
       break;
   }
 });

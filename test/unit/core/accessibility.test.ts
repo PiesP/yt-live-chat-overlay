@@ -312,7 +312,10 @@ describe('Form labels (settings-ui-form.ts)', () => {
 
     // Find showSuperChatAmount checkbox (in colors pane area)
     const checkboxes = content
-      .filter((el) => el instanceof HTMLDivElement && el.getAttribute('role') === 'tabpanel')
+      .filter(
+        (el): el is HTMLDivElement =>
+          el instanceof HTMLDivElement && el.getAttribute('role') === 'tabpanel'
+      )
       .flatMap((el) =>
         Array.from(el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))
       )
@@ -542,12 +545,12 @@ vi.mock('@util/dom', async (importOriginal) => {
 // ════════════════════════════════════════════════════════════════════
 
 describe('Tab keyboard navigation (settings-ui-form.ts)', () => {
-  let modal: HTMLDivElement;
+  let modal: HTMLDialogElement;
   let form: SettingsUiForm;
 
   beforeEach(() => {
     document.body.innerHTML = '';
-    modal = document.createElement('div');
+    modal = document.createElement('dialog');
     document.body.appendChild(modal);
 
     form = new SettingsUiForm(getDefaultSettings);

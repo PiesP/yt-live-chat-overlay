@@ -17,6 +17,7 @@ import {
   findPlayerContainerElement,
   PLAYER_LOOKUP_INTERVAL_MS,
   SCREEN_READER_CSS,
+  throwIfAborted,
 } from '@util/dom';
 import { createLogger } from '@util/logging';
 
@@ -251,6 +252,7 @@ export class Overlay {
 
     // Find player
     this.playerElement = await this.findPlayerContainer(signal);
+    throwIfAborted(signal);
     this.settings = settings;
 
     if (!this.playerElement) {

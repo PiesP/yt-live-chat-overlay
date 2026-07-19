@@ -84,3 +84,42 @@ describe('PageWatcher.isValidPage', () => {
     watcher.destroy();
   });
 });
+
+describe('PageWatcher history patching', () => {
+  it('restores both history methods after destroy', () => {
+    const originalPushState = history.pushState;
+    const originalReplaceState = history.replaceState;
+    const watcher = new PageWatcher();
+
+    expect(history.pushState).not.toBe(originalPushState);
+    expect(history.replaceState).not.toBe(originalReplaceState);
+
+    watcher.destroy();
+
+    expect(history.pushState).toBe(originalPushState);
+    expect(history.replaceState).toBe(originalReplaceState);
+  });
+
+  it('does not let an older nested watcher overwrite a newer wrapper', () => {
+    const originalPushState = history.pushState;
+    const originalReplaceState = history.replaceState;
+    const firstWatcher = new PageWatcher();
+    const firstPushState = history.pushState;
+    const firstReplaceState = history.replaceState;
+    const secondWatcher = new PageWatcher();
+    const secondPushState = history.pushState;
+    const secondReplaceState = history.replaceState;
+
+    firstWatcher.destroy();
+
+    expect(history.pushState).toBe(secondPushState);
+    expect(history.replaceState).toBe(secondReplaceState);
+
+    secondWatcher.destroy();
+
+    expect(history.pushState).toBe(originalPushState);
+    expect(history.replaceState).toBe(originalReplaceState);
+    expect(firstPushState).not.toBe(originalPushState);
+    expect(firstReplaceState).not.toBe(originalReplaceState);
+  });
+});

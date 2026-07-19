@@ -27,7 +27,7 @@
   "plugins": [
     "@stryker-mutator/vitest-runner"
   ],
-  "mutators": {
+  "mutator": {
     "excludedMutations": [
       "StringLiteral",
       "ArrayDeclaration",
