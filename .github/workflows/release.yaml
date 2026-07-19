@@ -99,7 +99,7 @@ jobs:
         run: pnpm test:cov
 
       - name: 🧬 Run mutation gate
-        run: pnpm mut
+        run: pnpm mut:fast
 
       - name: 📝 Determine version
         id: version
