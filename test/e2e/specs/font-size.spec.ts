@@ -20,7 +20,7 @@ import {
   setupOverlayPage,
   getSettings,
   applySettings,
-  readGmStorage,
+  readStoredSettings,
   DIST_DIR,
   USERSCRIPT_PATH,
 } from '../fixtures/test-utils';
@@ -77,13 +77,13 @@ test.describe('Font Size Changes', () => {
     expect(settings.fontSize).toBeGreaterThanOrEqual(40);
   });
 
-  test('font size change is written to GM storage', async ({ page }) => {
+  test('font size change is written to storage', async ({ page }) => {
     await setupOverlayPage(page);
 
     await applySettings(page, { fontSize: 42 });
     expect((await getSettings(page)).fontSize).toBe(42);
 
-    const raw = await readGmStorage(page);
+    const raw = await readStoredSettings(page);
     const parsed = JSON.parse(raw!) as Record<string, unknown>;
     expect(parsed.fontSize).toBe(42);
   });

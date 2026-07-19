@@ -323,7 +323,7 @@ export async function waitForStoredSettings(page: Page, expected: Record<string,
  * The E2E fixture exposes both browser APIs, so the adapter's priority order
  * must be mirrored here: Chrome storage first, then GM_* fallback.
  */
-export async function readGmStorage(page: Page): Promise<string | undefined> {
+export async function readStoredSettings(page: Page): Promise<string | undefined> {
   return page.evaluate(async (storageKey) => {
     const chromeStorage = (window as unknown as {
       chrome?: { storage?: { local?: { get: (key: string) => Promise<Record<string, unknown>> } } };
