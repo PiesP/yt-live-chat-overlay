@@ -30,6 +30,7 @@ export const BUTTON_ID = 'yt-chat-overlay-settings-button';
 
 export const MOCK_WATCH_URL = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
 export const MOCK_NON_WATCH_URL = 'https://www.youtube.com/feed/trending';
+export const SETTINGS_STORAGE_KEY = 'yt-live-chat-overlay-settings';
 
 /**
  * Minimal mock YouTube watch page HTML.
@@ -285,8 +286,17 @@ export async function waitForStoredSettings(page: Page, expected: Record<string,
   // Wait for the debounced storage write instead of sleeping for a fixed
   // duration; this keeps the test fast and stable on slow CI runners.
   await page.waitForFunction(
-    (expected) => {
-      const raw = window.GM_getValue?.('yt-live-chat-overlay-settings');
+    async ({ expected, storageKey }: { expected: Record<string, unknown>; storageKey: string }) => {
+      const chromeStorage = (window as unknown as {
+        chrome?: { storage?: { local?: { get: (key: string) => Promise<Record<string, unknown>> } } };
+      }).chrome?.storage?.local;
+      let raw: unknown;
+      if (chromeStorage) {
+        const stored = await chromeStorage?.get(storageKey);
+        const chromeValue = stored?.[storageKey];
+        raw = typeof chromeValue === 'string' ? chromeValue : undefined;
+      }
+      if (typeof raw !== 'string') raw = window.GM_getValue?.(storageKey);
       if (typeof raw !== 'string') return false;
       try {
         const saved = JSON.parse(raw) as Record<string, unknown>;
@@ -302,16 +312,28 @@ export async function waitForStoredSettings(page: Page, expected: Record<string,
         return false;
       }
     },
-    expected,
+    { expected, storageKey: SETTINGS_STORAGE_KEY },
     { timeout: 5000 },
   );
 }
 
 /**
- * Read raw settings from GM storage.
+ * Read raw settings from the active storage backend.
+ *
+ * The E2E fixture exposes both browser APIs, so the adapter's priority order
+ * must be mirrored here: Chrome storage first, then GM_* fallback.
  */
 export async function readGmStorage(page: Page): Promise<string | undefined> {
-  return page.evaluate(() => {
-    return window.GM_getValue?.('yt-live-chat-overlay-settings');
-  });
+  return page.evaluate(async (storageKey) => {
+    const chromeStorage = (window as unknown as {
+      chrome?: { storage?: { local?: { get: (key: string) => Promise<Record<string, unknown>> } } };
+    }).chrome?.storage?.local;
+    if (chromeStorage) {
+      const stored = await chromeStorage.get(storageKey);
+      const chromeValue = stored?.[storageKey];
+      if (typeof chromeValue === 'string') return chromeValue;
+    }
+    const gmValue = window.GM_getValue?.(storageKey);
+    return typeof gmValue === 'string' ? gmValue : undefined;
+  }, SETTINGS_STORAGE_KEY);
 }
