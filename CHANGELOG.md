@@ -4,14 +4,27 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.43.0] - 2026-07-19
+
+### Added
+
+- **Viewport-responsive font size** — Scale overlay text to the viewport height while respecting configured minimum and maximum sizes.
+- **Pause/read mode** — Pause scrolling comments with the Ctrl+Space shortcut for reading.
+- **Canvas accessibility mirroring** — Expose visible Worker-rendered comment snippets through an `aria-live` region.
+- **Renderer resilience and diagnostics** — Add adaptive lane density, runtime health diagnostics, Worker recovery, and tab-return stability improvements.
+- **MV3 extension bridge** — Support isolated content scripts with a secure page-script bridge for storage and Worker URLs in Chrome and Firefox.
+
 ### Fixed
 
 - **Renderer test settings fixture** — Kept the RendererBase test fixture aligned with the complete settings schema, including viewport-responsive font scaling fields.
 - **Settings E2E synchronization** — Made mock-player settings interactions resilient to video hit-testing and added condition-based waits for debounced storage persistence.
 - **Text measurement cache lifecycle** — Cleared cached space widths together with the other text measurement caches when font settings change.
+- **Translation lifecycle** — Cancelled superseded translator setup and released replaced translator resources without allowing stale results to update comments.
+- **Replay and tab-return stability** — Prevented replay data loss, burst emission, restart deadlocks, and renderer stalls after visibility changes.
+- **Worker/main-thread parity** — Unified lane initialization, headway calculation, queue guards, image handling, and fatal-worker recovery paths.
+- **Settings and extension release gates** — Added coverage thresholds, E2E critical paths, extension artifact validation, version parity checks, and i18n parity checks.
 - **Playwright E2E fixture parsing** — Restored fixture parsing for Playwright end-to-end tests.
 - **MV3 extension bridge lifecycle** — Hardened cross-tab storage relay and adapter lifecycle handling.
-- **Translation lifecycle** — Prevented stale translations and released old translator resources when language settings change or sessions restart.
 - **Fast Stryker mutation command** — Corrected the command to use positional config.
 
 ### Compatibility
