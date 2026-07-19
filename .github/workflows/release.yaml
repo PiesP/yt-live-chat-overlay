@@ -276,6 +276,7 @@ jobs:
           force_orphan: true
 
       - name: 🔄 Purge jsDelivr CDN cache
+        continue-on-error: true
         run: |
           set -euo pipefail
           echo "🔄 Purging jsDelivr CDN cache..."
