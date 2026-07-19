@@ -90,10 +90,10 @@ function estimateRegularMessageDimensions(
 ): MessageDimensions {
   const textWidth = measureContentWidth(message, font, fontSize);
   const textHeight = measureTextHeight(font, fontSize);
-  const { paddingH, paddingV } = rendererLayout;
+  const { paddingH } = rendererLayout;
 
   if (!showAuthor || !message.author) {
-    return { width: textWidth + paddingH * 2, height: textHeight + paddingV * 2 };
+    return { width: textWidth + paddingH * 2, height: textHeight };
   }
 
   const authorFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
@@ -107,7 +107,7 @@ function estimateRegularMessageDimensions(
 
   return {
     width: totalWidth,
-    height: authorSectionHeight + spacing.xs + textHeight + paddingV * 2,
+    height: authorSectionHeight + spacing.xs + textHeight,
   };
 }
 

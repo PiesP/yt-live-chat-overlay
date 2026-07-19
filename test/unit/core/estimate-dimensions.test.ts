@@ -61,6 +61,9 @@ describe('estimateMessageDimensions — regular text', () => {
     expect(dims.height).toBeGreaterThan(0);
     expect(typeof dims.width).toBe('number');
     expect(typeof dims.height).toBe('number');
+    // Regular comment rows have no fixed vertical padding; laneSpacing is
+    // the sole control over the distance between adjacent rows.
+    expect(dims.height).toBe(19);
   });
 
   it('includes author section when showAuthor is true and author present', () => {

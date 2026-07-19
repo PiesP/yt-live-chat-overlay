@@ -1104,7 +1104,7 @@ export function renderRegularMessage(
   const { showAuthor, fontSize, fontWeight, fontFamily, color, outlineWidthPx, outlineOpacity } =
     config;
   const textX = x + rendererLayout.paddingH;
-  let textY = y + rendererLayout.paddingV;
+  let textY = y;
 
   if (showAuthor && message.author) {
     const authorFontSize = Math.round(fontSize * rendererLayout.authorFontScale);

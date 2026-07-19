@@ -124,8 +124,8 @@ export const ES: Record<string, string> = {
   'Replace (translation only)': 'Reemplazar (solo traducción)',
 
   // ── Tooltips ──
-  'Vertical gap between comment rows (negative = overlap)':
-    'Espacio vertical entre filas (negativo = superposición)',
+  'Vertical gap between comment rows (0 = adjacent rows)':
+    'Espacio vertical entre filas (0 = filas adyacentes)',
   'Bold is more readable, Regular uses less GPU memory':
     'Negrita es más legible, Normal usa menos memoria de GPU',
   'Font family for comment text': 'Familia tipográfica del texto',

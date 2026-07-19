@@ -30,6 +30,7 @@ import type { LaneAllocator } from '@renderer/layout/lane-allocator';
 import { computeMessageOpacity } from '@renderer/shared';
 import { getFontString } from '@renderer/text-measure';
 import type { ByteLimitedCache } from '@util/byte-limited-cache';
+import { rendererLayout } from '@util/design-tokens';
 import type { LruMap } from '@util/lru-map';
 import type { MessageActivator } from '@util/message-activator';
 import type { ObservabilityReporter } from '@util/observability';
@@ -384,11 +385,10 @@ export function drawStage(
               renderCtx.fillStyle = ghostColor;
               const ghostText = getDisplayText(msg.renderMessage.content);
               if (ghostText) {
-                const { paddingH, paddingV } = { paddingH: 8, paddingV: 4 }; // rendererLayout values inlined
                 renderCtx.fillText(
                   ghostText,
-                  Math.floor(msg._prevX) + paddingH,
-                  Math.floor(msg._prevY) + paddingV
+                  Math.floor(msg._prevX) + rendererLayout.paddingH,
+                  Math.floor(msg._prevY)
                 );
               }
             }

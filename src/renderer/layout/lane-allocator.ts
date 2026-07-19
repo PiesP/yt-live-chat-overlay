@@ -12,7 +12,6 @@ import {
   heapUpdateLane,
 } from '@renderer/layout/lane-shared';
 import { getFontString, measureTextHeight } from '@renderer/text-measure';
-import { rendererLayout } from '@util/design-tokens';
 import { createLogger } from '@util/logging';
 
 const log = createLogger('LaneAllocator');
@@ -160,8 +159,9 @@ export class LaneAllocator {
       return;
     }
 
-    // Formula: laneHeight = textHeight + paddingV*2 + laneSpacing
-    const totalPaddingV = rendererLayout.paddingV * 2;
+    // Lane spacing is the only vertical spacing control for regular comments.
+    // Regular messages have no separate vertical padding, so a value of 0
+    // places the next lane exactly one text row below the previous one.
     const font = getFontString(
       this.options.fontSize,
       this.options.fontWeight,
@@ -169,7 +169,7 @@ export class LaneAllocator {
     );
     const textHeight = measureTextHeight(font, this.options.fontSize);
 
-    const rawLaneHeight = Math.max(1, textHeight + totalPaddingV + this.options.laneSpacing);
+    const rawLaneHeight = Math.max(1, textHeight + this.options.laneSpacing);
     this.laneHeight = Math.max(1, Math.round(rawLaneHeight * this.options.laneDensityFactor));
 
     const usableHeight = dimensions.height * (1 - this.options.safeTop - this.options.safeBottom);

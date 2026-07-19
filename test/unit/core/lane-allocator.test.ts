@@ -94,6 +94,16 @@ describe('LaneAllocator', () => {
       expect(halfHeight).toBeLessThanOrEqual(fullHeight);
     });
 
+    it('uses laneSpacing as the direct gap between regular comment rows', () => {
+      const adjacent = new LaneAllocator({ ...defaultOptions, laneSpacing: 0 });
+      adjacent.reset(defaultDimensions);
+
+      const spaced = new LaneAllocator({ ...defaultOptions, laneSpacing: 6 });
+      spaced.reset(defaultDimensions);
+
+      expect(spaced.getLaneHeight()).toBe(adjacent.getLaneHeight() + 6);
+    });
+
     it('handles zero height gracefully', () => {
       const tiny = new LaneAllocator(defaultOptions);
       tiny.reset({ width: 1, height: 1 });

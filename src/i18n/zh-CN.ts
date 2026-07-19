@@ -123,7 +123,7 @@ export const ZH_CN: Record<string, string> = {
   'Replace (translation only)': '仅翻译',
 
   // ── Tooltips ──
-  'Vertical gap between comment rows (negative = overlap)': '弹幕行之间的垂直间距 (负值 = 重叠)',
+  'Vertical gap between comment rows (0 = adjacent rows)': '弹幕行之间的垂直间距 (0 = 行紧邻)',
   'Bold is more readable, Regular uses less GPU memory': '粗体更易阅读，常规使用更少GPU内存',
   'Font family for comment text': '评论文字字体',
   'CSS font-family value. Type to filter suggestions, or enter a custom font stack.':

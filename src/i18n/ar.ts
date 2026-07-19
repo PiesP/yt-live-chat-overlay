@@ -123,8 +123,8 @@ export const AR: Record<string, string> = {
   'Replace (translation only)': 'استبدال (الترجمة فقط)',
 
   // ── Tooltips ──
-  'Vertical gap between comment rows (negative = overlap)':
-    'الفجوة الرأسية بين صفوف التعليقات (سالب = تداخل)',
+  'Vertical gap between comment rows (0 = adjacent rows)':
+    'الفجوة الرأسية بين صفوف التعليقات (0 = صفوف متجاورة)',
   'Bold is more readable, Regular uses less GPU memory':
     'العريض أكثر قابلية للقراءة، العادي يستخدم ذاكرة GPU أقل',
   'Font family for comment text': 'خط نص التعليق',

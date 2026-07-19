@@ -107,7 +107,8 @@ export const KO: Record<string, string> = {
   'Replace (translation only)': '번역만 표시',
 
   // ── Tooltips ──
-  'Vertical gap between comment rows (negative = overlap)': '댓글 행 사이 간격 (음수 = 겹침)',
+  'Vertical gap between comment rows (0 = adjacent rows)':
+    '댓글 행 사이 간격 (0 = 바로 이어지는 행)',
   'CSS font-family value. Type to filter suggestions, or enter a custom font stack.':
     'CSS font-family 값. 예: "Noto Sans KR", sans-serif. 글꼴이 없으면 시스템 기본값을 사용합니다.',
   'Background opacity of Super Chat cards': '슈퍼챗 카드의 배경 불투명도',

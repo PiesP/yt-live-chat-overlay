@@ -215,7 +215,7 @@ export const PANES: PaneDef[] = [
           range(
             'Lane Gap (px)',
             'laneSpacing',
-            'Vertical gap between comment rows (negative = overlap)'
+            'Vertical gap between comment rows (0 = adjacent rows)'
           ),
           num(
             'Exit Padding (px)',

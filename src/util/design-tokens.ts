@@ -130,11 +130,9 @@ export const rendererLayout = {
     high: 1.2,
     extreme: 1.35,
   } as const,
-  // ── Message padding ──
+  // ── Message layout ──
   /** Message padding: horizontal (px) */
   paddingH: 12,
-  /** Message padding: vertical (px) */
-  paddingV: 8,
   /** SuperChat card min width (px) */
   superchatMinWidth: 280,
   /** SuperChat card max width (px) */

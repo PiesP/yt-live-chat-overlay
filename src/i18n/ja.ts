@@ -124,8 +124,7 @@ export const JA: Record<string, string> = {
   'Replace (translation only)': '翻訳のみ表示',
 
   // ── Tooltips ──
-  'Vertical gap between comment rows (negative = overlap)':
-    'コメント行の間隔 (マイナス値 = 重なり)',
+  'Vertical gap between comment rows (0 = adjacent rows)': 'コメント行の間隔 (0 = 行が隣接)',
   'Bold is more readable, Regular uses less GPU memory':
     'ボールドはより読みやすく、レギュラーはGPUメモリ消費が少なくなります',
   'Font family for comment text': 'コメントテキストのフォント',

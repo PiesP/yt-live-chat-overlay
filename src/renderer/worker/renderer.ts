@@ -899,9 +899,8 @@ export class WorkerRenderer {
 
   private initLanes(_width: number, height: number): void {
     if (!this.config || !this.ctx) return;
-    const totalPaddingV = rendererLayout.paddingV * 2;
     const textHeight = this.measureTextHeight(this.getEffectiveFontSize());
-    const rawLaneHeight = Math.max(1, textHeight + totalPaddingV + this.config.laneSpacing);
+    const rawLaneHeight = Math.max(1, textHeight + this.config.laneSpacing);
     this.laneHeight = Math.max(1, Math.round(rawLaneHeight * this.laneDensityFactor));
     const usableHeight = height * (1 - this.config.safeTop - this.config.safeBottom);
     this.numLanes = Math.max(1, Math.floor(usableHeight / this.laneHeight));
@@ -1339,7 +1338,7 @@ export class WorkerRenderer {
                   this.ctx.fillText(
                     ghostText,
                     Math.floor(msg._prevX) + rendererLayout.paddingH,
-                    Math.floor(msg._prevY) + rendererLayout.paddingV
+                    Math.floor(msg._prevY)
                   );
                 }
                 this.ctx.restore();
