@@ -126,6 +126,8 @@ export class RenderWorkerManager {
 
   /** Callback to push text snippets to the overlay's aria-live region. */
   private _liveRegionCallback: ((snippets: string[]) => void) | null = null;
+  /** Callback invoked when the worker reaches an unrecoverable message-error state. */
+  private _fatalErrorCallback: ((reason: string) => void) | null = null;
 
   /** Ping/pong health check for detecting crashed or unresponsive workers. */
   private pingTimer: ReturnType<typeof setInterval> | null = null;
@@ -170,6 +172,11 @@ export class RenderWorkerManager {
    */
   setLiveRegionCallback(callback: (snippets: string[]) => void): void {
     this._liveRegionCallback = callback;
+  }
+
+  /** Set the callback used to recover from an unrecoverable worker failure. */
+  setFatalErrorCallback(callback: (reason: string) => void): void {
+    this._fatalErrorCallback = callback;
   }
 
   /**
@@ -353,8 +360,10 @@ export class RenderWorkerManager {
 
       // Structured clone deserialization failures (malformed messages)
       // indicate a corrupted worker state. After N consecutive failures,
-      // destroy the worker and let the renderer fall back to main thread.
+      // notify the renderer so it can replace the transferred canvas. If no
+      // recovery callback is registered, destroy the worker directly.
       let messageErrorCount = 0;
+      let fatalErrorHandled = false;
       const MAX_MESSAGE_ERRORS = 3;
       w.onmessageerror = () => {
         messageErrorCount++;
@@ -362,11 +371,16 @@ export class RenderWorkerManager {
           attempt: messageErrorCount,
           max: MAX_MESSAGE_ERRORS,
         });
-        if (messageErrorCount >= MAX_MESSAGE_ERRORS) {
+        if (messageErrorCount === MAX_MESSAGE_ERRORS && !fatalErrorHandled) {
+          fatalErrorHandled = true;
           log.error('renderer.worker.max-message-errors', {
             limit: MAX_MESSAGE_ERRORS,
           });
-          this.destroy();
+          if (this._fatalErrorCallback) {
+            this._fatalErrorCallback('worker-messageerror');
+          } else {
+            this.destroy();
+          }
         }
       };
 

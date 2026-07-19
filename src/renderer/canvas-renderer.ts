@@ -381,6 +381,7 @@ export class CanvasRenderer extends RendererBase {
       getMessagePriority: CanvasRenderer.getMessagePriority,
       getEffectiveSpeedPxPerSec: () => this.getEffectiveSpeedPxPerSec(),
     });
+    this.workerManager.setFatalErrorCallback((reason) => this.fallbackToMainThread(reason));
     const useWorker = this.workerManager.init(canvas, settings, overlay);
 
     // Wire the Worker's live-region text snippets to the overlay's
