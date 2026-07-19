@@ -3,6 +3,7 @@ import { RendererBase } from '@renderer/renderer-base';
 import type { ConnectionStatus } from '@renderer/renderer-base';
 import type { Overlay } from '@app/overlay';
 import type { ChatMessage, OverlayDimensions, OverlaySettings, BurstLevel } from '@app-types';
+import { DEFAULT_SETTINGS } from '@settings/schema';
 
 // ── Test subclass ─────────────────────────────────────────────────────────
 
@@ -58,10 +59,11 @@ class TestRenderer extends RendererBase {
 // ── Helpers ───────────────────────────────────────────────────────────────
 
 const defaultSettings: OverlaySettings = {
+  ...DEFAULT_SETTINGS,
   safeTop: 0.05,
   safeBottom: 0.05,
   fontSize: 16,
-  fontWeight: 400,
+  fontWeight: 'normal',
   fontFamily: 'sans-serif',
   laneSpacing: 4,
   headwayGapRatio: 0.08,
@@ -82,8 +84,7 @@ const defaultSettings: OverlaySettings = {
   backlogPauseThreshold: 0.9,
   backlogResumeThreshold: 0.5,
   queueMaxSize: 500,
-  // Remaining fields needed for partial mock
-} as unknown as OverlaySettings;
+};
 
 function makeOverlayMock(): Overlay {
   return {
