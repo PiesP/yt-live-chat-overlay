@@ -207,7 +207,7 @@ describe('resolveSuperChatRgb', () => {
 
   it('falls back to blue tier color when tier key is missing from colors', () => {
     const colors = makeColors();
-    delete colors.orange;
+    delete (colors as Partial<typeof colors>).orange;
     const result = resolveSuperChatRgb(
       { tier: 'orange' },
       colors

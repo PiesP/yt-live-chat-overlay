@@ -53,7 +53,8 @@ vi.spyOn(performance, 'now').mockReturnValue(10000);
 // Import module — it sets self.onmessage at module scope
 // ═══════════════════════════════════════════════════════════════════════════
 
-import { resetWorkerForTests } from '@renderer/worker/renderer';
+import { resetWorkerForTests, WorkerRenderer } from '@renderer/worker/renderer';
+import type { WorkerMessage } from '@renderer/worker/types';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -88,7 +89,7 @@ function makeMinimalConfig(): Record<string, unknown> {
 
 function getHandler(): (e: MessageEvent) => void {
   // Module sets self.onmessage at import time
-  const handler = (self as Record<string, unknown>).onmessage;
+  const handler = (self as unknown as Record<string, unknown>).onmessage;
   if (typeof handler !== 'function') {
     throw new Error(
       `self.onmessage not set — type=${typeof handler}, keys: ${Object.keys(self).slice(0, 5).join(',')}`
@@ -99,6 +100,33 @@ function getHandler(): (e: MessageEvent) => void {
 
 function makeEvent(data: Record<string, unknown>): MessageEvent {
   return { data } as MessageEvent;
+}
+
+function makeWorkerMessage(overrides: Partial<WorkerMessage> = {}): WorkerMessage {
+  return {
+    id: 'worker-message',
+    text: 'hello',
+    width: 100,
+    height: 20,
+    priority: 0,
+    isBacklog: false,
+    ...overrides,
+  };
+}
+
+function initializeRenderer(): WorkerRenderer {
+  const renderer = new WorkerRenderer();
+  renderer.handleMessage(
+    makeEvent({
+      type: 'init',
+      config: makeMinimalConfig(),
+      canvas: new MockOffscreenCanvas(),
+      dpr: 1,
+      width: 640,
+      height: 360,
+    })
+  );
+  return renderer;
 }
 
 beforeEach(() => {
@@ -161,7 +189,79 @@ describe('Worker message protocol', () => {
     });
   });
 
+  describe('renderer parity safeguards', () => {
+    it('includes placement wait time in Worker activation timestamps', () => {
+      const renderer = initializeRenderer();
+      const internals = renderer as unknown as {
+        activateMessage: (...args: unknown[]) => void;
+        activeMessages: Array<{ startTime: number; fadeStartTime: number }>;
+      };
+
+      internals.activateMessage(
+        makeWorkerMessage(),
+        10_000,
+        { laneIndex: 0, waitMs: 125, laneY: 0, slotCount: 1, verticalOffset: 0 },
+        0,
+        640,
+        360
+      );
+
+      expect(internals.activeMessages[0]?.startTime).toBe(10_125);
+      expect(internals.activeMessages[0]?.fadeStartTime).toBe(10_125);
+    });
+
+    it('drops messages that require more lanes than the viewport has', () => {
+      const renderer = initializeRenderer();
+      const internals = renderer as unknown as {
+        drainQueue: (now: number, width: number, height: number) => void;
+        pendingQueue: WorkerMessage[];
+        totalDrops: number;
+      };
+      const oversized = makeWorkerMessage({ height: 10_000 });
+
+      renderer.handleMessage(makeEvent({ type: 'addMessages', messages: [oversized] }));
+      internals.drainQueue(10_000, 640, 360);
+
+      expect(internals.pendingQueue).toHaveLength(0);
+      expect(internals.totalDrops).toBe(1);
+    });
+
+    it('preserves decoded image caches across ordinary config updates', () => {
+      const renderer = initializeRenderer();
+      const internals = renderer as unknown as {
+        emojiCache: { size: number };
+      };
+      const bitmap = { width: 10, height: 10, close: vi.fn() };
+
+      renderer.handleMessage(
+        makeEvent({
+          type: 'addMessages',
+          messages: [],
+          imageData: [{ url: 'https://yt3.ggpht.com/emoji', bitmap, target: 'emoji' }],
+        })
+      );
+      renderer.handleMessage(makeEvent({ type: 'updateConfig', config: { opacity: 0.5 } }));
+
+      expect(internals.emojiCache.size).toBe(1);
+    });
+  });
+
   describe('robustness', () => {
+    it('snapshots messages that are still pending in the Worker', () => {
+      const renderer = initializeRenderer();
+      const message = makeWorkerMessage({ id: 'pending-message' });
+
+      renderer.handleMessage(makeEvent({ type: 'addMessages', messages: [message] }));
+      postMessageSpy.mockClear();
+      renderer.handleMessage(makeEvent({ type: 'snapshotMessages', requestId: 7 }));
+
+      expect(postMessageSpy).toHaveBeenCalledWith({
+        type: 'messageSnapshot',
+        requestId: 7,
+        messageIds: ['pending-message'],
+      });
+    });
+
     it('does not throw for unknown message type', () => {
       expect(() => getHandler()(makeEvent({ type: 'nonexistent' }))).not.toThrow();
     });
@@ -184,7 +284,7 @@ describe('Worker message protocol', () => {
 // Worker types — compile-time verification
 // ═══════════════════════════════════════════════════════════════════════════
 
-import type { WorkerConfig, WorkerMessage, ActiveMessage } from '@renderer/worker/types';
+import type { WorkerConfig, ActiveMessage } from '@renderer/worker/types';
 
 describe('Worker types', () => {
   it('WorkerConfig type is importable (compile-time check)', () => {

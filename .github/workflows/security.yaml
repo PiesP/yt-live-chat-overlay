@@ -55,9 +55,10 @@ jobs:
         -r
         --lockfile=pnpm-lock.yaml
         ./
-      # Full-repo scans publish SARIF and remain non-blocking so newly disclosed
-      # advisories don't retroactively break unrelated work.
-      fail-on-vuln: false
+      # A scheduled/manual full scan is a release/security gate as well as a
+      # reporting job. Keep newly disclosed advisories from being silently
+      # accepted until a dependency update is prepared.
+      fail-on-vuln: true
 
   semgrep:
     name: 🔍 Static Analysis (Semgrep)
@@ -84,6 +85,7 @@ jobs:
               --config=p/javascript \
               --config=p/security-audit \
               --config=p/secrets \
+              --error \
               --sarif \
               --output=semgrep.sarif
           else
@@ -93,6 +95,7 @@ jobs:
               --config=p/javascript \
               --config=p/security-audit \
               --config=p/secrets \
+              --error \
               --sarif \
               --output=semgrep.sarif
           fi

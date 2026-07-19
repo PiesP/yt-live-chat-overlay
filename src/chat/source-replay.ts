@@ -196,6 +196,11 @@ export class ReplayChatSource extends ChatSource {
           }
         }
 
+        // stopCooperativeLoop() invalidates the generation while an async
+        // poll is in flight. Do not let its completion mutate prefetch state
+        // or the next replay session.
+        if (signal?.aborted || gen !== this.cooperativeLoopGeneration) return;
+
         // Seed prefetch only after a successful main poll. If the poll
         // failed, the continuation wasn't advanced and prefetch would
         // re-request the same stale continuation.
@@ -214,6 +219,7 @@ export class ReplayChatSource extends ChatSource {
         try {
           const payload = await this.requestReplayPayload(this.prefetchContinuation, signal);
           if (payload) {
+            if (signal?.aborted || gen !== this.cooperativeLoopGeneration) return;
             const events = extractChatEvents(payload.actions, this.getSettings);
             this.replayBuffer.appendEvents(events, -1);
             this.markActivity();
@@ -370,6 +376,11 @@ export class ReplayChatSource extends ChatSource {
   // ── State management ────────────────────────────────────────────────────
 
   private resetReplayState(): void {
+    // Invalidate every in-flight seek callback before aborting its request.
+    // Abort is cooperative, so a promise may still settle after reset; the
+    // generation guard must reject that late result even when the next
+    // session starts with generation zero state.
+    this.seekGeneration++;
     this.replayMode = null;
     this.replayPlayerSeekContinuation = null;
     this.replayContinuation = null;

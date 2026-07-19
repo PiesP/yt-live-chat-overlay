@@ -29,6 +29,7 @@ export const OVERLAY_ID = 'yt-live-chat-overlay';
 export const BUTTON_ID = 'yt-chat-overlay-settings-button';
 
 export const MOCK_WATCH_URL = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+export const MOCK_NON_WATCH_URL = 'https://www.youtube.com/feed/trending';
 
 /**
  * Minimal mock YouTube watch page HTML.
@@ -52,6 +53,12 @@ export const MOCK_HTML = `<!DOCTYPE html>
   </div>
   <div id="chat" style="display:none"></div>
 </body>
+</html>`;
+
+/** Minimal non-video page used to prove the app's page gating. */
+export const MOCK_NON_WATCH_HTML = `<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><title>YouTube</title></head>
+<body><div id="page-manager"><div id="content"><h1>Trending</h1></div></div></body>
 </html>`;
 
 // ─── Actual Default Settings (from the app) ──────────────────────────────────
@@ -79,9 +86,16 @@ export const DEFAULT_SETTINGS: Record<string, unknown> = {
  * If preSeedSettings is provided, those settings are stored in the mock
  * storage before any page scripts run (useful for cross-reload persistence).
  */
-export function installYTMock(preSeedSettings?: string): void {
+export function installYTMock(init: {
+  preSeedSettings?: string;
+  defaults: Record<string, unknown>;
+}): void {
+  const { preSeedSettings, defaults } = init;
   const storage = new Map<string, unknown>();
-  const listeners = new Map<number, { key: string; callback: (...args: unknown[]) => void }>();
+  const listeners = new Map<number, {
+    key: string;
+    callback: (key: string, oldVal: unknown, newVal: unknown, remote: boolean) => void;
+  }>();
   let listenerId = 0;
 
   // Pre-seed settings if provided (for cross-reload persistence)
@@ -110,7 +124,7 @@ export function installYTMock(preSeedSettings?: string): void {
     return id;
   };
   window.GM_removeValueChangeListener = (id: number) => { listeners.delete(id); };
-  window.GM_registerMenuCommand = () => {};
+  window.GM_registerMenuCommand = () => 0;
   window.GM_openInTab = (url: string) => { window.open(url, '_blank'); };
   window.GM_cookie = {
     list: () => document.cookie.split(';').filter(Boolean).map((c) => {
@@ -158,7 +172,7 @@ export function installYTMock(preSeedSettings?: string): void {
 
   // If no pre-seed, seed with defaults
   if (!preSeedSettings) {
-    storage.set('yt-live-chat-overlay-settings', JSON.stringify(DEFAULT_SETTINGS));
+    storage.set('yt-live-chat-overlay-settings', JSON.stringify(defaults));
   }
 }
 
@@ -173,10 +187,13 @@ export async function setupMockPageRoute(page: Page): Promise<void> {
   await page.route('https://www.youtube.com/**', async (route: Route) => {
     const request = route.request();
     if (request.resourceType() === 'document') {
+      const url = new URL(request.url());
       await route.fulfill({
         status: 200,
         contentType: 'text/html',
-        body: MOCK_HTML,
+        body: url.pathname === '/watch' || url.pathname.startsWith('/live/')
+          ? MOCK_HTML
+          : MOCK_NON_WATCH_HTML,
       });
     } else {
       // Abort JS, CSS, image, font, etc. requests — we don't need real YouTube resources
@@ -211,7 +228,7 @@ export async function setupOverlayPage(page: Page): Promise<void> {
   await setupMockPageRoute(page);
 
   // 2. Install GM + chrome mocks with default settings
-  await page.addInitScript(installYTMock);
+  await page.addInitScript(installYTMock, { defaults: DEFAULT_SETTINGS });
 
   // 3. Inject userscript
   await injectUserscript(page);
@@ -221,6 +238,19 @@ export async function setupOverlayPage(page: Page): Promise<void> {
 
   // 5. Wait for the real overlay container to initialize
   await page.locator(`#${OVERLAY_ID}`).waitFor({ state: 'attached', timeout: 15_000 });
+
+  // The runtime creates the container before initApp() exposes its debug
+  // handle. Wait for both signals so tests that inspect or mutate settings do
+  // not race the final part of application startup.
+  await page.waitForFunction(
+    () => {
+      const w = window as unknown as Record<string, unknown>;
+      const handle = w.__ytChatOverlay;
+      return typeof handle === 'object' && handle !== null;
+    },
+    undefined,
+    { timeout: 15_000 },
+  );
 }
 
 // ─── Debug Handle Helpers ────────────────────────────────────────────────────
@@ -245,8 +275,29 @@ export async function applySettings(page: Page, partial: Record<string, unknown>
     const handle = w.__ytChatOverlay as { applySettings?: (s: Record<string, unknown>) => void } | undefined;
     handle?.applySettings?.(settings);
   }, partial);
-  // Give the settings debounce time to persist to storage
-  await page.waitForTimeout(1000);
+  // Wait for the debounced storage write instead of sleeping for a fixed
+  // duration; this keeps the test fast and stable on slow CI runners.
+  await page.waitForFunction(
+    (expected) => {
+      const raw = window.GM_getValue?.('yt-live-chat-overlay-settings');
+      if (typeof raw !== 'string') return false;
+      try {
+        const saved = JSON.parse(raw) as Record<string, unknown>;
+        const handle = (window as unknown as Record<string, unknown>).__ytChatOverlay as
+          | { getSettings?: () => Record<string, unknown> }
+          | undefined;
+        const current = handle?.getSettings?.();
+        if (!current) return false;
+        return Object.keys(expected as Record<string, unknown>).every(
+          (key) => JSON.stringify(saved[key]) === JSON.stringify(current[key]),
+        );
+      } catch {
+        return false;
+      }
+    },
+    partial,
+    { timeout: 5000 },
+  );
 }
 
 /**

@@ -29,7 +29,7 @@ jobs:
   release:
     name: 🚀 Publish Release
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: 📥 Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -57,6 +57,36 @@ jobs:
       - name: 📦 Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: 🔧 Install nose duplication checker
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          nose_version="0.17.0"
+          installer="${RUNNER_TEMP}/nose-cli-installer.sh"
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+            "https://github.com/corca-ai/nose/releases/download/v${nose_version}/nose-cli-installer.sh" \
+            --output "$installer"
+
+          # Compare the downloaded installer with GitHub's recorded SHA-256
+          # digest for the exact pinned release asset. Fail closed if the
+          # release metadata does not expose a digest.
+          expected_digest="$(gh api \
+            "repos/corca-ai/nose/releases/tags/v${nose_version}" \
+            --jq '.assets[] | select(.name == "nose-cli-installer.sh") | .digest' \
+            | sed 's/^sha256://')"
+          if [[ ! "$expected_digest" =~ ^[0-9a-fA-F]{64}$ ]]; then
+            echo "❌ Missing or invalid SHA-256 digest for nose installer"
+            exit 1
+          fi
+          printf '%s  %s\n' "$expected_digest" "$installer" | sha256sum --check --status
+
+          sh "$installer"
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: 🔎 Check for new duplication
+        run: nose query src --baseline .nose-baseline.json --fail-on new
+
       - name: 🧪 Run unit tests
         run: pnpm test
 
@@ -68,6 +98,9 @@ jobs:
       - name: 📊 Check coverage thresholds
         run: pnpm test:cov
 
+      - name: 🧬 Run mutation gate
+        run: pnpm mut
+
       - name: 📝 Determine version
         id: version
         run: |
@@ -77,6 +110,11 @@ jobs:
           # unexpected behavior in jq, changelog parsing, or env vars.
           if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "❌ Invalid version from tag: $VERSION (expected X.Y.Z)"
+            exit 1
+          fi
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+          if [[ "$PACKAGE_VERSION" != "$VERSION" ]]; then
+            echo "❌ Tag version $VERSION does not match package.json $PACKAGE_VERSION"
             exit 1
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
@@ -98,6 +136,7 @@ jobs:
           BUILD_VERSION=$VERSION pnpm build
           BUILD_VERSION=$VERSION pnpm build:extension
           BUILD_VERSION=$VERSION pnpm build:extension:firefox
+          pnpm -s check:extension-artifacts
 
           # Backup all dists for later steps
           mkdir -p /tmp/dist-backup/dist
@@ -163,6 +202,10 @@ jobs:
               }
               found { print }
             ' CHANGELOG.md)
+          fi
+          if [[ -z "${CHANGELOG_CONTENT//[[:space:]]/}" ]]; then
+            echo "❌ CHANGELOG.md has no entry for version ${{ steps.version.outputs.version }}"
+            exit 1
           fi
 
           # Compute previous version for compare URL
@@ -240,12 +283,16 @@ jobs:
           # Purge main userscript file
           PURGE_URL_USER="https://purge.jsdelivr.net/gh/${{ github.repository }}@release/yt-live-chat-overlay.user.js"
           echo "Purging: $PURGE_URL_USER"
-          curl -s "$PURGE_URL_USER" | jq '.' || echo "Purge request sent"
+          purge_response="$(curl --fail --silent --show-error --location \
+            --proto '=https' --tlsv1.2 "$PURGE_URL_USER")"
+          echo "$purge_response" | jq -e '.success == true' >/dev/null
 
           # Purge meta.js file
           PURGE_URL_META="https://purge.jsdelivr.net/gh/${{ github.repository }}@release/yt-live-chat-overlay.meta.js"
           echo "Purging: $PURGE_URL_META"
-          curl -s "$PURGE_URL_META" | jq '.' || echo "Purge request sent"
+          purge_response="$(curl --fail --silent --show-error --location \
+            --proto '=https' --tlsv1.2 "$PURGE_URL_META")"
+          echo "$purge_response" | jq -e '.success == true' >/dev/null
 
           echo "✅ jsDelivr cache purge completed"
 

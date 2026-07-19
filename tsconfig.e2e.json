@@ -1,9 +1,6 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "types": [
-      "vitest/globals"
-    ],
     "strict": true,
     "strictNullChecks": true,
     "exactOptionalPropertyTypes": false,
@@ -12,14 +9,17 @@
     "noImplicitReturns": false,
     "noFallthroughCasesInSwitch": false,
     "noUnusedLocals": false,
-    "noUnusedParameters": false
+    "noUnusedParameters": false,
+    "types": ["node"]
   },
   "include": [
     "src/**/*.d.ts",
-    "test/**/*.ts"
+    "test/e2e/**/*.ts"
   ],
   "exclude": [
-    "test/e2e",
-    "test/node_modules"
+    "node_modules",
+    "dist",
+    "dist-extension",
+    "dist-extension-firefox"
   ]
 }

@@ -1,9 +1,0 @@
-lockfileVersion: 3
-autoInstallPeers: true
-strictPeerDependencies: false
-preferOffline: true
-allowBuilds:
-  canvas: true
-minimumReleaseAgeExclude:
-  - qs@6.15.2
-  - vite@8.0.16

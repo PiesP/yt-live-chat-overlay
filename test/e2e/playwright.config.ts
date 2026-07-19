@@ -8,7 +8,8 @@ export default defineConfig({
   testDir: resolve(import.meta.dirname, 'specs'),
   timeout: 60_000,
   expect: { timeout: 15_000 },
-  retries: 0,
+  retries: process.env.CI ? 1 : 0,
+  failOnFlakyTests: true,
   workers: 1,
   reporter: [['list']],
   use: {
@@ -20,7 +21,7 @@ export default defineConfig({
     trace: 'on-first-retry',
     viewport: { width: 1280, height: 800 },
     launchOptions: {
-      slowMo: 300,
+      slowMo: 0,
       args: [
         '--disable-blink-features=AutomationControlled',
         '--disable-infobars',

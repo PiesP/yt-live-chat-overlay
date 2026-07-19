@@ -40,6 +40,8 @@ export class ImageFetchManager {
   readonly imageLoading = new Set<string>();
   /** In-flight Image objects for teardown neutering. */
   private readonly inFlightImages = new Set<HTMLImageElement>();
+  /** Timeout handles for author/sticker image loads. */
+  private readonly imageLoadTimeouts = new Map<HTMLImageElement, ReturnType<typeof setTimeout>>();
   /** Maps emoji URLs to in-flight Image objects for timeout cleanup. */
   private readonly emojiUrlToImage = new Map<string, HTMLImageElement>();
 
@@ -92,11 +94,20 @@ export class ImageFetchManager {
    * Resizes caches, updates fetch limits, and starts/stops the cleanup interval.
    */
   updateConfig(settings: OverlaySettings, worker: Worker | null): void {
+    const wasWorkerMode = this.useWorkerMode;
     this.emojiFetchLimit = settings.emojiFetchLimit;
     this.failedEmojiRetryMins = settings.failedEmojiRetryMins;
     this.emojiFetchTimeoutMs = settings.emojiFetchTimeoutMs;
     this.renderWorker = worker;
     this.useWorkerMode = worker !== null;
+
+    // A renderer fallback can happen while an image conversion promise is
+    // still settling. Detach the old Worker path immediately and release any
+    // converted bitmaps that no longer have a consumer.
+    if (wasWorkerMode && !this.useWorkerMode) {
+      this.workerBitmapCache.clear();
+      this.bitmapGeneration.clear();
+    }
 
     // Resize caches in-place instead of recreating + copying all entries.
     this.emojiCache.resize(settings.emojiCacheMb * 1_000_000);
@@ -133,11 +144,17 @@ export class ImageFetchManager {
     this.imageLoading.add(url);
     const img = new Image();
     this.inFlightImages.add(img);
+    const clearLoadTimeout = (): void => {
+      const timeout = this.imageLoadTimeouts.get(img);
+      if (timeout !== undefined) clearTimeout(timeout);
+      this.imageLoadTimeouts.delete(img);
+    };
     img.crossOrigin = 'anonymous';
     // Assign onload/onerror BEFORE setting src to avoid a race where
     // a cached image fires the load event synchronously before the
     // handler is attached.
     img.onload = () => {
+      clearLoadTimeout();
       this.imageLoading.delete(url);
       this.inFlightImages.delete(img);
       if (this.isDestroyed) return;
@@ -145,10 +162,22 @@ export class ImageFetchManager {
       this.preConvertForWorker(url, img);
     };
     img.onerror = () => {
+      clearLoadTimeout();
       this.imageLoading.delete(url);
       this.inFlightImages.delete(img);
       if (this.isDestroyed) return;
     };
+    this.imageLoadTimeouts.set(
+      img,
+      setTimeout(() => {
+        this.imageLoadTimeouts.delete(img);
+        img.onload = null;
+        img.onerror = null;
+        img.src = '';
+        this.imageLoading.delete(url);
+        this.inFlightImages.delete(img);
+      }, this.emojiFetchTimeoutMs)
+    );
     img.src = url;
   }
 
@@ -174,6 +203,10 @@ export class ImageFetchManager {
     this.bitmapGeneration.set(url, generation);
     createImageBitmap(img)
       .then((bitmap) => {
+        if (this.isDestroyed || !this.useWorkerMode || !this.renderWorker) {
+          bitmap.close();
+          return;
+        }
         // Discard if a newer createImageBitmap for the same URL has been issued.
         if (generation !== this.bitmapGeneration.get(url)) {
           bitmap.close();
@@ -340,10 +373,13 @@ export class ImageFetchManager {
 
     // Neuter in-flight Image objects so callbacks don't fire after teardown.
     for (const img of this.inFlightImages) {
+      const timeout = this.imageLoadTimeouts.get(img);
+      if (timeout !== undefined) clearTimeout(timeout);
       img.onload = null;
       img.onerror = null;
       img.src = '';
     }
+    this.imageLoadTimeouts.clear();
     this.inFlightImages.clear();
     this.emojiUrlToImage.clear();
 

@@ -82,6 +82,8 @@ function detectByUnicodeRange(text: string): TranslationLanguage | null {
 export class LanguageDetectorService {
   private detector: LanguageDetectorInstance | null = null;
   private initPromise: Promise<void> | null = null;
+  /** Incremented whenever this service lifecycle is invalidated. */
+  private lifecycleGeneration = 0;
 
   /** Check if the browser supports the Language Detector API. */
   static isSupported(): boolean {
@@ -102,15 +104,19 @@ export class LanguageDetectorService {
       return;
     }
 
-    this.initPromise = this.doInit();
+    const generation = this.lifecycleGeneration;
+    const initPromise = this.doInit(generation);
+    this.initPromise = initPromise;
     try {
-      await this.initPromise;
+      await initPromise;
     } finally {
-      this.initPromise = null;
+      if (this.initPromise === initPromise) {
+        this.initPromise = null;
+      }
     }
   }
 
-  private async doInit(): Promise<void> {
+  private async doInit(generation: number): Promise<void> {
     if (typeof LanguageDetector?.capabilities !== 'function') {
       log.info('translation.detector.api-mismatch');
       return;
@@ -122,7 +128,14 @@ export class LanguageDetectorService {
         return;
       }
       if (typeof LanguageDetector.create === 'function') {
-        this.detector = await LanguageDetector.create();
+        const detector = await LanguageDetector.create();
+        if (generation !== this.lifecycleGeneration) {
+          // Creation is asynchronous and cannot always be cancelled. Make
+          // sure a detector that finishes after destroy() is not retained.
+          detector.destroy();
+          return;
+        }
+        this.detector = detector;
       }
       log.info('translation.detector.ready');
     } catch (err: unknown) {
@@ -188,6 +201,7 @@ export class LanguageDetectorService {
   }
 
   destroy(): void {
+    this.lifecycleGeneration++;
     if (this.detector) {
       try {
         this.detector.destroy();

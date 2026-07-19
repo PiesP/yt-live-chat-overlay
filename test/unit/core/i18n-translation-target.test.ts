@@ -33,7 +33,7 @@ describe('resolveTranslationTarget', () => {
   });
 
   it('handles all supported languages', () => {
-    for (const lang of ['en', 'ko', 'ja', 'es', 'zh'] as const) {
+    for (const lang of ['en', 'ko', 'ja', 'es', 'zh-CN', 'ar'] as const) {
       expect(resolveTranslationTarget(lang)).toBe(lang);
     }
   });

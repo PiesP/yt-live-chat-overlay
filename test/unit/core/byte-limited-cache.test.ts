@@ -33,6 +33,14 @@ describe('ByteLimitedCache', () => {
       cache.set('key1', 'world');
       expect(cache.get('key1')).toBe('world');
     });
+
+    it('evicts the previous value when replacing an entry', () => {
+      const evicted: string[] = [];
+      const c = new ByteLimitedCache<string>(100, estimateSize, (value) => evicted.push(value));
+      c.set('key1', 'hello');
+      c.set('key1', 'world');
+      expect(evicted).toEqual(['hello']);
+    });
   });
 
   // ── has ─────────────────────────────────────────────────────────────────
@@ -83,8 +91,11 @@ describe('ByteLimitedCache', () => {
     });
 
     it('does not cache single items that exceed maxBytes', () => {
-      cache.set('large', 'x'.repeat(200)); // 200 bytes > 100
-      expect(cache.has('large')).toBe(false);
+      const evicted: string[] = [];
+      const c = new ByteLimitedCache<string>(100, estimateSize, (value) => evicted.push(value));
+      c.set('large', 'x'.repeat(200)); // 200 bytes > 100
+      expect(c.has('large')).toBe(false);
+      expect(evicted).toEqual(['x'.repeat(200)]);
     });
   });
 

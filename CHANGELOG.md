@@ -162,7 +162,7 @@ All notable changes to this project will be documented in this file.
 - **Dead code removal** — Removed unused `bootstrap.ts`, cleaned unused exports.
 - **Firefox manifest** — Cleaned and synchronized with Chrome manifest.
 
-## [0.39.1] - 2026-07-28
+## [0.39.1] - 2026-06-20
 
 ### Fixed
 
@@ -483,7 +483,7 @@ All notable changes to this project will be documented in this file.
 - **String concatenation modernized** — Replaced `+`-concatenated strings in `chat-source-live.ts` and `observability.ts` with template literals and `.join()` array literals. ([`0a2e674`](https://github.com/PiesP/yt-live-chat-overlay/commit/0a2e674))
 - **`PREVIEW_DEBOUNCE_MS` made static** — Changed from `private readonly` to `private static readonly`, matching all other class-level constants in the project. ([`0a2e674`](https://github.com/PiesP/yt-live-chat-overlay/commit/0a2e674))
 
-## [0.31.0] - 2026-07-20
+## [0.31.0] - 2026-05-23
 
 ### Added
 

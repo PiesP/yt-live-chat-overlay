@@ -33,7 +33,7 @@ jobs:
   verify:
     name: ✅ Verify
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: 📥 Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -73,6 +73,9 @@ jobs:
 
       - name: 📊 Check coverage thresholds
         run: pnpm test:cov
+
+      - name: 🧬 Run mutation gate
+        run: pnpm mut
 
       - name: 📊 Upload userscript artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -116,8 +119,27 @@ jobs:
           submodules: true
 
       - name: 🔧 Install nose
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          curl --proto '=https' --tlsv1.2 -LsSf https://github.com/corca-ai/nose/releases/latest/download/nose-cli-installer.sh | sh
+          set -euo pipefail
+          nose_version="0.17.0"
+          installer="${RUNNER_TEMP}/nose-cli-installer.sh"
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+            "https://github.com/corca-ai/nose/releases/download/v${nose_version}/nose-cli-installer.sh" \
+            --output "$installer"
+
+          expected_digest="$(gh api \
+            "repos/corca-ai/nose/releases/tags/v${nose_version}" \
+            --jq '.assets[] | select(.name == "nose-cli-installer.sh") | .digest' \
+            | sed 's/^sha256://')"
+          if [[ ! "$expected_digest" =~ ^[0-9a-fA-F]{64}$ ]]; then
+            echo "❌ Missing or invalid SHA-256 digest for nose installer"
+            exit 1
+          fi
+          printf '%s  %s\n' "$expected_digest" "$installer" | sha256sum --check --status
+
+          sh "$installer"
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
       - name: 🔎 Check for new duplication
