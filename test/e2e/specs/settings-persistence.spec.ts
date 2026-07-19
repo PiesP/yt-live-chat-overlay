@@ -4,11 +4,11 @@
 /**
  * @fileoverview E2E tests: Settings persistence.
  *
- * Verifies that overlay settings changes are written to GM storage
+ * Verifies that overlay settings changes are written to the active storage backend
  * and can be read back. Tests the storage round-trip mechanism.
  *
  * Note: Cross-reload persistence tests require real persistent storage
- * (not in-memory mocks). The GM storage round-trip tests verify the
+ * (not in-memory mocks). The storage round-trip tests verify the
  * save/load mechanism works correctly.
  */
 
@@ -18,7 +18,7 @@ import {
   setupOverlayPage,
   getSettings,
   applySettings,
-  readGmStorage,
+  readStoredSettings,
   waitForStoredSettings,
   DIST_DIR,
   USERSCRIPT_PATH,
@@ -34,7 +34,7 @@ test.describe('Settings Persistence', () => {
     }
   });
 
-  test('opacity change is reflected in settings and GM storage', async ({ page }) => {
+  test('opacity change is reflected in settings and storage', async ({ page }) => {
     await setupOverlayPage(page);
 
     // Change opacity from default (0.9) to 0.5
@@ -44,29 +44,29 @@ test.describe('Settings Persistence', () => {
     const settings = await getSettings(page);
     expect(settings.opacity).toBe(0.5);
 
-    // Verify in GM storage
-    const raw = await readGmStorage(page);
+    // Verify in the active storage backend
+    const raw = await readStoredSettings(page);
     expect(raw).toBeTruthy();
     const parsed = JSON.parse(raw!) as Record<string, unknown>;
     expect(parsed.opacity).toBe(0.5);
   });
 
-  test('scroll speed change is written to GM storage', async ({ page }) => {
+  test('scroll speed change is written to storage', async ({ page }) => {
     await setupOverlayPage(page);
 
     await applySettings(page, { speedPxPerSec: 250 });
 
-    const raw = await readGmStorage(page);
+    const raw = await readStoredSettings(page);
     const parsed = JSON.parse(raw!) as Record<string, unknown>;
     expect(parsed.speedPxPerSec).toBe(250);
   });
 
-  test('font size change is written to GM storage', async ({ page }) => {
+  test('font size change is written to storage', async ({ page }) => {
     await setupOverlayPage(page);
 
     await applySettings(page, { fontSize: 36 });
 
-    const raw = await readGmStorage(page);
+    const raw = await readStoredSettings(page);
     const parsed = JSON.parse(raw!) as Record<string, unknown>;
     expect(parsed.fontSize).toBe(36);
   });
@@ -80,19 +80,19 @@ test.describe('Settings Persistence', () => {
       fontSize: 32,
     });
 
-    const raw = await readGmStorage(page);
+    const raw = await readStoredSettings(page);
     const parsed = JSON.parse(raw!) as Record<string, unknown>;
     expect(parsed.opacity).toBe(0.5);
     expect(parsed.speedPxPerSec).toBe(200);
     expect(parsed.fontSize).toBe(32);
   });
 
-  test('enabled setting change is written to GM storage', async ({ page }) => {
+  test('enabled setting change is written to storage', async ({ page }) => {
     await setupOverlayPage(page);
 
     await applySettings(page, { enabled: false });
 
-    const raw = await readGmStorage(page);
+    const raw = await readStoredSettings(page);
     const parsed = JSON.parse(raw!) as Record<string, unknown>;
     expect(parsed.enabled).toBe(false);
   });
@@ -115,12 +115,12 @@ test.describe('Settings Persistence', () => {
 
     // Verify in storage
     await waitForStoredSettings(page, { opacity: 1 });
-    const raw = await readGmStorage(page);
+    const raw = await readStoredSettings(page);
     const parsed = JSON.parse(raw!) as Record<string, unknown>;
     expect(parsed.opacity).toBe(1);
   });
 
-  test('colors change is written to GM storage', async ({ page }) => {
+  test('colors change is written to storage', async ({ page }) => {
     await setupOverlayPage(page);
 
     const newColors = {
@@ -132,7 +132,7 @@ test.describe('Settings Persistence', () => {
     };
     await applySettings(page, { colors: newColors });
 
-    const raw = await readGmStorage(page);
+    const raw = await readStoredSettings(page);
     const parsed = JSON.parse(raw!) as Record<string, unknown>;
     const storedColors = parsed.colors as Record<string, string>;
     expect(storedColors.normal).toBe('#ffaa00');

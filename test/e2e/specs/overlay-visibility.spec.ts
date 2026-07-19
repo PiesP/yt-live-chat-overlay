@@ -5,7 +5,7 @@
  * @fileoverview E2E tests: Overlay visibility toggle.
  *
  * Verifies that toggling the `enabled` setting is reflected in the
- * settings object and the GM storage.
+ * settings object and the active storage backend.
  */
 
 import { test, expect } from '@playwright/test';
@@ -16,7 +16,7 @@ import {
   BUTTON_ID,
   getSettings,
   applySettings,
-  readGmStorage,
+  readStoredSettings,
   DIST_DIR,
   USERSCRIPT_PATH,
 } from '../fixtures/test-utils';
@@ -58,12 +58,12 @@ test.describe('Overlay Visibility Toggle', () => {
     expect(settings.enabled).toBe(false);
   });
 
-  test('disabling overlay writes to GM storage', async ({ page }) => {
+  test('disabling overlay writes to storage', async ({ page }) => {
     await setupOverlayPage(page);
 
     await applySettings(page, { enabled: false });
 
-    const raw = await readGmStorage(page);
+    const raw = await readStoredSettings(page);
     const parsed = JSON.parse(raw!) as Record<string, unknown>;
     expect(parsed.enabled).toBe(false);
   });

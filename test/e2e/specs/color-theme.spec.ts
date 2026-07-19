@@ -17,7 +17,7 @@ import {
   setupOverlayPage,
   getSettings,
   applySettings,
-  readGmStorage,
+  readStoredSettings,
   DIST_DIR,
   USERSCRIPT_PATH,
 } from '../fixtures/test-utils';
@@ -84,7 +84,7 @@ test.describe('Color Theme Switching', () => {
     expect(colors.member).toBe('#66ffff');
   });
 
-  test('color theme is written to GM storage', async ({ page }) => {
+  test('color theme is written to storage', async ({ page }) => {
     await setupOverlayPage(page);
 
     const newPalette = {
@@ -105,8 +105,8 @@ test.describe('Color Theme Switching', () => {
     expect(colors.verified).toBe('#dddddd');
     expect(colors.member).toBe('#eeeeee');
 
-    // Verify in GM storage
-    const raw = await readGmStorage(page);
+    // Verify in the active storage backend
+    const raw = await readStoredSettings(page);
     const parsed = JSON.parse(raw!) as Record<string, unknown>;
     const storedColors = parsed.colors as Record<string, string>;
     expect(storedColors.normal).toBe('#aaaaaa');
