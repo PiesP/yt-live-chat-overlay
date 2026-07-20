@@ -25,6 +25,11 @@ updates:
 
     rebase-strategy: "auto"
 
+    # Keep normal updates to direct dependencies; security updates remain
+    # governed by the OSV and Dependabot security-update paths.
+    allow:
+      - dependency-type: "direct"
+
     groups:
       build:
         patterns:
