@@ -2,10 +2,17 @@
 // Copyright (c) 2026 PiesP
 
 import { sleep } from '@piesp/browser-core/async';
+import { throwIfAborted as throwIfAbortedFn } from '@piesp/browser-core/error';
 import { createLogger } from '@util/logging';
 
 export { sleep } from '@piesp/browser-core/async';
 export { isAbortError } from '@piesp/browser-core/error';
+
+/** @deprecated Import from @piesp/browser-core/error instead. */
+export { throwIfAborted as throwIfAborted } from '@piesp/browser-core/error';
+
+// Re-export for internal module use
+const throwIfAborted = throwIfAbortedFn;
 
 const log = createLogger('Dom');
 
@@ -32,18 +39,6 @@ export const PLAYER_LOOKUP_INTERVAL_MS = 1000;
 export const PLAYER_CONTAINER_SELECTORS = ['#movie_player', '.html5-video-player'] as const;
 
 export const VIDEO_SELECTORS = ['#movie_player video', 'video.html5-main-video'] as const;
-
-const createAbortError = (reason?: unknown): DOMException => {
-  if (reason instanceof DOMException) return reason;
-  const message = reason instanceof Error ? reason.message : 'The operation was aborted.';
-  return new DOMException(message, 'AbortError');
-};
-
-export function throwIfAborted(signal?: AbortSignal): void {
-  if (signal?.aborted) {
-    throw createAbortError(signal.reason);
-  }
-}
 
 export const isVisibleElement = (element: HTMLElement): boolean =>
   element.offsetWidth > 0 && element.offsetHeight > 0;
