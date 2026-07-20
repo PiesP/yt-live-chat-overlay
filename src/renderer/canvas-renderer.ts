@@ -2225,7 +2225,7 @@ export class CanvasRenderer extends RendererBase {
       case 'connecting':
         return t('Connecting\u2026');
       case 'degraded':
-        return t('Connection unstable');
+        return t('status.unstable');
       case 'disconnected':
         return t('Disconnected \u2014 Click to reload');
       case 'standby':

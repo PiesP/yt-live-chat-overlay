@@ -23,14 +23,14 @@ interface DensityConfig {
 }
 
 const DENSITY_CONFIG: Record<Exclude<DensityLevel, 'normal'>, DensityConfig> = {
-  elevated: { label: t('Chat busy'), bg: 'rgba(255,193,7,0.8)', color: '#000' },
+  elevated: { label: t('indicator.busy'), bg: 'rgba(255,193,7,0.8)', color: '#000' },
   high: {
-    label: t('Chat heavy — some messages omitted'),
+    label: t('indicator.heavy'),
     bg: 'rgba(255,87,34,0.85)',
     color: '#fff',
   },
   extreme: {
-    label: t('Chat overload — skipping messages'),
+    label: t('indicator.overload'),
     bg: 'rgba(244,67,54,0.9)',
     color: '#fff',
   },

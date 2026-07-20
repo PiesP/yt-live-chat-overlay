@@ -111,7 +111,7 @@ export class Overlay {
     container.style.zIndex = rendererLayout.overlayZIndex;
     container.style.contain = 'layout style paint';
     container.setAttribute('role', 'region');
-    container.setAttribute('aria-label', t('Chat Overlay'));
+    container.setAttribute('aria-label', t('app.title'));
     // Set lang attribute to match active language for screen readers
     const initialLang = getActiveLanguage();
     container.lang = initialLang;
@@ -275,7 +275,7 @@ export class Overlay {
     this.liveRegion = document.createElement('div');
     this.liveRegion.setAttribute('role', 'log');
     this.liveRegion.setAttribute('aria-live', 'polite');
-    this.liveRegion.setAttribute('aria-label', t('Chat messages'));
+    this.liveRegion.setAttribute('aria-label', t('chat.messages'));
     this.liveRegion.className = 'yt-live-chat-overlay-live-region';
     this.liveRegion.style.cssText = SCREEN_READER_CSS;
     this.container.appendChild(this.liveRegion);
@@ -303,10 +303,7 @@ export class Overlay {
       const lang = getActiveLanguage();
       this.container.lang = lang;
       this.container.dir = lang === 'ar' ? 'rtl' : 'ltr';
-      this.container.setAttribute(
-        'aria-label',
-        `${t('Live chat overlay')} — ${getLocalizedName(lang)}`
-      );
+      this.container.setAttribute('aria-label', `${t('app.name')} — ${getLocalizedName(lang)}`);
       this.announceLanguageChange(lang);
     }
   }
@@ -317,7 +314,7 @@ export class Overlay {
   private announceLanguageChange(lang: string): void {
     if (!this.liveRegion) return;
     const langName = getLocalizedName(lang);
-    this.liveRegion.textContent = `${t('Interface language changed to')}${langName}`;
+    this.liveRegion.textContent = `${t('app.langChanged')}${langName}`;
   }
 
   /**
@@ -422,7 +419,7 @@ export class Overlay {
     if (show) {
       if (!this.pauseIndicatorEl) {
         const el = document.createElement('div');
-        el.textContent = t('Paused');
+        el.textContent = t('app.paused');
         el.style.cssText =
           'position:absolute;top:8px;right:8px;z-index:100;background:rgba(0,0,0,0.7);color:#fff;font:14px/1.4 sans-serif;padding:4px 10px;border-radius:4px;pointer-events:none';
         this.container.appendChild(el);

@@ -157,12 +157,12 @@ function createHeader(): HTMLDivElement {
   const title = document.createElement('h2');
   title.id = TITLE_ID;
   title.className = 'yt-chat-overlay-settings-title';
-  title.textContent = t('Chat Overlay');
+  title.textContent = t('app.title');
   const closeButton = document.createElement('button');
   closeButton.type = 'button';
   closeButton.className = 'yt-chat-overlay-settings-close';
   closeButton.setAttribute('data-action', 'close');
-  closeButton.setAttribute('aria-label', t('Close settings'));
+  closeButton.setAttribute('aria-label', t('app.close'));
   // command Invoker Commands (Chrome 134+) as progressive enhancement.
   // Declaratively closes the native dialog without JavaScript.
   closeButton.setAttribute('command', 'close');
@@ -176,7 +176,7 @@ function createTabs(): HTMLElement {
   nav.className = 'yt-chat-overlay-settings-tabs';
   nav.setAttribute('role', 'tablist');
   nav.setAttribute('aria-orientation', 'horizontal');
-  nav.setAttribute('aria-label', t('Settings categories'));
+  nav.setAttribute('aria-label', t('app.settingsCategories'));
 
   for (const [index, pane] of PANES.entries()) {
     const tabId = `tab-${pane.id}`;
@@ -214,7 +214,7 @@ function createActions(): HTMLDivElement {
     button.type = 'button';
     button.dataset.action = action;
     // Use "Done" for the close action to avoid user confusion
-    button.textContent = action === 'close' ? t('Done') : t(label);
+    button.textContent = action === 'close' ? t('app.done') : t(label);
     actions.appendChild(button);
   }
   wrapper.appendChild(actions);
@@ -222,7 +222,7 @@ function createActions(): HTMLDivElement {
   // Subtle auto-save indicator — reassures users their changes are persisted
   const autoSaveHint = document.createElement('p');
   autoSaveHint.className = 'yt-chat-overlay-settings-autosave-hint';
-  autoSaveHint.textContent = t('Changes are saved automatically');
+  autoSaveHint.textContent = t('app.autoSave');
   wrapper.appendChild(autoSaveHint);
 
   return wrapper;
@@ -234,7 +234,7 @@ function createEnabledField(title?: string): HTMLLabelElement {
   label.className = 'yt-chat-overlay-settings-enabled';
   // Label wraps the input below — implicit association, no htmlFor needed.
   const text = document.createElement('span');
-  text.textContent = t('Overlay Enabled');
+  text.textContent = t('app.enabled');
   const input = domInput({ type: 'checkbox', name: 'enabled' });
   input.id = id;
   if (title) input.title = t(title);
@@ -848,7 +848,7 @@ export class SettingsUiForm {
     customInput.id = customInputId;
     customInput.autocomplete = 'off';
     customInput.className = 'yt-chat-overlay-settings-font-custom-input';
-    customInput.placeholder = t('Custom font stack…');
+    customInput.placeholder = t('danmaku.fontCustom');
     customInput.addEventListener('input', () => {
       // Deactivate all chips when custom input is used
       chipsContainer.querySelectorAll('.yt-chat-overlay-settings-font-chip').forEach((c) => {
@@ -914,7 +914,7 @@ export class SettingsUiForm {
     const section = domDiv('yt-chat-overlay-settings-section');
     const heading = document.createElement('h3');
     heading.className = 'yt-chat-overlay-settings-section-title';
-    heading.textContent = t('Author Colors & Visibility');
+    heading.textContent = t('appearance.authors');
     section.appendChild(heading);
 
     const fieldset = document.createElement('fieldset');
@@ -922,7 +922,7 @@ export class SettingsUiForm {
 
     const grid = domDiv('yt-chat-overlay-author-grid');
     grid.setAttribute('role', 'grid');
-    grid.setAttribute('aria-label', t('Author Colors & Visibility'));
+    grid.setAttribute('aria-label', t('appearance.authors'));
 
     // Header row
     const headerRow = document.createElement('div');
@@ -934,13 +934,13 @@ export class SettingsUiForm {
     nameColorHeader.setAttribute('role', 'gridcell');
     nameColorHeader.setAttribute('scope', 'col');
     nameColorHeader.className = 'yt-chat-overlay-author-grid-header';
-    nameColorHeader.textContent = t('Name Color');
+    nameColorHeader.textContent = t('appearance.authorsNameColor');
     headerRow.appendChild(nameColorHeader);
     const showNameHeader = document.createElement('span');
     showNameHeader.setAttribute('role', 'gridcell');
     showNameHeader.setAttribute('scope', 'col');
     showNameHeader.className = 'yt-chat-overlay-author-grid-header';
-    showNameHeader.textContent = t('Show Name');
+    showNameHeader.textContent = t('appearance.authorsShowName');
     headerRow.appendChild(showNameHeader);
     grid.appendChild(headerRow);
 
@@ -953,11 +953,11 @@ export class SettingsUiForm {
       });
       colorInput.id = colorId;
       const labelKey = key.charAt(0).toUpperCase() + key.slice(1);
-      colorInput.setAttribute('aria-label', `${t(labelKey)} ${t('Color')}`);
+      colorInput.setAttribute('aria-label', `${t(labelKey)} ${t('appearance.authorsColor')}`);
 
       const checkboxId = nextFieldId(`showAuthor-${key}`);
       const checkbox = domGridCheckbox(`showAuthor-${key}`, checkboxId);
-      checkbox.setAttribute('aria-label', `${t('Show')} ${t(labelKey)}`);
+      checkbox.setAttribute('aria-label', `${t('appearance.authorsShow')} ${t(labelKey)}`);
 
       const label = document.createElement('label');
       label.className = 'yt-chat-overlay-author-grid-label';
@@ -982,12 +982,15 @@ export class SettingsUiForm {
     // SuperChat row
     const superChatCheckboxId = nextFieldId('showAuthor-superChat');
     const superChatCheckbox = domGridCheckbox('showAuthor-superChat', superChatCheckboxId);
-    superChatCheckbox.setAttribute('aria-label', `${t('Show')} ${t('SuperChat')}`);
+    superChatCheckbox.setAttribute(
+      'aria-label',
+      `${t('appearance.authorsShow')} ${t('appearance.authorsSuperchat')}`
+    );
 
     const superChatLabel = document.createElement('label');
     superChatLabel.className = 'yt-chat-overlay-author-grid-label';
     superChatLabel.htmlFor = superChatCheckboxId;
-    superChatLabel.textContent = t('SuperChat');
+    superChatLabel.textContent = t('appearance.authorsSuperchat');
 
     const superChatRow = document.createElement('div');
     superChatRow.setAttribute('role', 'row');
@@ -1192,7 +1195,7 @@ export class SettingsUiForm {
           const hint = document.createElement('span');
           hint.className = 'yt-chat-overlay-settings-field-hint';
           if (minText.name) hint.dataset.for = minText.name;
-          hint.textContent = t('Short messages shown regardless of length');
+          hint.textContent = t('format.shortMessagesShown');
           minText.insertAdjacentElement('afterend', hint);
         }
       } else {
@@ -1265,9 +1268,9 @@ export class SettingsUiForm {
           if (Number.isFinite(rawNum)) {
             const { min, max } = getNumericInputAttributes(scalarKey as RootScalarSettingKey);
             if (rawNum < min) {
-              this.showFieldError(el, `${t('Value adjusted to')} ${min}`);
+              this.showFieldError(el, `${t('format.valueAdjusted')} ${min}`);
             } else if (rawNum > max) {
-              this.showFieldError(el, `${t('Value adjusted to')} ${max}`);
+              this.showFieldError(el, `${t('format.valueAdjusted')} ${max}`);
             }
           }
         } else {

@@ -9,60 +9,59 @@ export const ES: Record<string, string> = {
   Translation: 'Traducción',
 
   // ── Aria labels / misc ──
-  'Live chat overlay': 'Live chat overlay',
+  'app.name': 'Live chat overlay',
   Paused: 'Pausado',
-  'Interface language changed to': 'Idioma de interfaz cambiado a: ',
+  'app.langChanged': 'Idioma de interfaz cambiado a: ',
 
   // ── Canvas connection status ──
-  'Connecting…': 'Conectando…',
-  'Connection unstable': 'Conexión inestable',
-  'Disconnected — Click to reload': 'Desconectado — Haz clic para recargar',
-  'Waiting for live stream…': 'Esperando transmisión en vivo…',
+  'status.connecting': 'Conectando…',
+  'status.unstable': 'Conexión inestable',
+  'status.disconnected': 'Desconectado — Haz clic para recargar',
+  'status.waiting': 'Esperando transmisión en vivo…',
 
   // ── Section titles ──
   Cards: 'Tarjetas',
-  'Text Outline': 'Contorno de texto',
-  'Safe Zone': 'Zona segura',
-  'Message Rate': 'Frecuencia de mensajes',
-  'Depth Layers': 'Capas de profundidad',
+  'appearance.outline': 'Contorno de texto',
+  'danmaku.safeZone': 'Zona segura',
+  'advanced.messageRate': 'Frecuencia de mensajes',
+  'advanced.depthLayers': 'Capas de profundidad',
   Font: 'Fuente',
   Backlog: 'Historial',
   Timing: 'Temporización',
   Tuning: 'Ajustes',
-  'Burst Detection': 'Detección de ráfagas',
+  'advanced.burst': 'Detección de ráfagas',
   Cache: 'Caché',
-  'Author Colors & Visibility': 'Colores y visibilidad',
+  'appearance.authors': 'Colores y visibilidad',
   Interface: 'Interfaz',
-  'Chat Translation': 'Traducción de chat',
-  'Translation backend service for processing messages':
-    'Servicio de traducción para procesar mensajes',
+  'translation.chat': 'Traducción de chat',
+  'translation.serviceDesc': 'Servicio de traducción para procesar mensajes',
 
   // ── Field labels ──
-  'Author Rate Limit': 'Límite por autor',
-  'Backlog Mode': 'Modo de historial',
-  'Backlog Opacity (%)': 'Opacidad historial (%)',
+  'advanced.authorRateLimit': 'Límite por autor',
+  'advanced.backlogMode': 'Modo de historial',
+  'advanced.backlogOpacity': 'Opacidad historial (%)',
   Bold: 'Negrita',
-  'Bottom Clear Zone (%)': 'Margen inferior (%)',
-  'Custom font stack…': 'Fuente personalizada…',
-  'Danmaku Mode': 'Modo Danmaku',
+  'danmaku.bottomClearZone': 'Margen inferior (%)',
+  'danmaku.fontCustom': 'Fuente personalizada…',
+  'danmaku.mode': 'Modo Danmaku',
   Enabled: 'Activado',
   Family: 'Familia',
-  'Ignore Min Length': 'Ignorar long. mínima',
-  'Lane Gap (px)': 'Espacio entre líneas (px)',
+  'advanced.ignoreMinLength': 'Ignorar long. mínima',
+  'danmaku.laneGap': 'Espacio entre líneas (px)',
   Language: 'Idioma',
-  'Membership Max Lines': 'Líneas máx. membresía',
-  'Min Length (chars)': 'Longitud mínima (caracteres)',
-  'Outline Opacity (%)': 'Opacidad del contorno (%)',
-  'Outline Width (px)': 'Ancho del contorno (px)',
-  'Preserve User Colors': 'Conservar colores de usuario',
+  'appearance.membershipMaxLines': 'Líneas máx. membresía',
+  'advanced.minLength': 'Longitud mínima (caracteres)',
+  'appearance.outlineOpacity': 'Opacidad del contorno (%)',
+  'appearance.outlineWidth': 'Ancho del contorno (px)',
+  'appearance.preserveUserColors': 'Conservar colores de usuario',
   Regular: 'Normal',
-  'Scroll Speed (px/s)': 'Velocidad (px/s)',
-  'Show SuperChat Amount': 'Mostrar monto SuperChat',
-  'Size (px)': 'Tamaño (px)',
-  'SuperChat Max Lines': 'Líneas máx. SuperChat',
-  'SuperChat Opacity (%)': 'Opacidad SuperChat (%)',
-  'Text Opacity (%)': 'Opacidad del texto (%)',
-  'Top Clear Zone (%)': 'Margen superior (%)',
+  'danmaku.scrollSpeed': 'Velocidad (px/s)',
+  'appearance.showSuperchatAmount': 'Mostrar monto SuperChat',
+  'danmaku.fontSize': 'Tamaño (px)',
+  'appearance.superchatMaxLines': 'Líneas máx. SuperChat',
+  'appearance.superchatOpacity': 'Opacidad SuperChat (%)',
+  'danmaku.textOpacity': 'Opacidad del texto (%)',
+  'danmaku.topClearZone': 'Margen superior (%)',
   Weight: 'Peso',
   // ── Language names ──
   English: 'Inglés',
@@ -71,99 +70,94 @@ export const ES: Record<string, string> = {
   Español: 'Español',
   中文: 'Chino',
   العربية: 'Árabe',
-  'Duration Multiplier (×)': 'Multiplicador de duración (×)',
-  'Exit Padding (px)': 'Margen de salida (px)',
-  'Min Scroll Duration (ms)': 'Duración mín. desplazamiento (ms)',
-  'Max Scroll Duration (ms)': 'Duración máx. desplazamiento (ms)',
-  'Top/Bottom Duration (ms)': 'Duración superior/inferior (ms)',
-  'Max Queue Depth': 'Tamaño máx. de cola',
-  'Tab Trim Target': 'Cola en segundo plano máx.',
-  'Max Message Age (ms)': 'Edad máx. de mensaje (ms)',
-  'Message Spacing (%)': 'Espacio entre mensajes (%)',
-  'Extra pixels a message scrolls past the screen edge before being removed (20-400, default 100)':
+  'danmaku.durationMul': 'Multiplicador de duración (×)',
+  'danmaku.exitPadding': 'Margen de salida (px)',
+  'danmaku.minScrollDuration': 'Duración mín. desplazamiento (ms)',
+  'danmaku.maxScrollDuration': 'Duración máx. desplazamiento (ms)',
+  'danmaku.topBottomDuration': 'Duración superior/inferior (ms)',
+  'advanced.maxQueueDepth': 'Tamaño máx. de cola',
+  'advanced.tabTrimTarget': 'Cola en segundo plano máx.',
+  'advanced.maxMessageAge': 'Edad máx. de mensaje (ms)',
+  'danmaku.messageSpacing': 'Espacio entre mensajes (%)',
+  'danmaku.exitPaddingDesc':
     'Píxeles extra que un mensaje se desplaza más allá del borde antes de eliminarse (20-400, predeterminado 100)',
-  'Minimum scroll animation duration — prevents very short messages from zipping across (1000-15000ms, default 5000)':
+  'danmaku.minScrollDurationDesc':
     'Duración mínima de animación de desplazamiento — evita que mensajes cortos pasen demasiado rápido (1000-15000ms, predet. 5000)',
-  'Maximum scroll animation duration — prevents very long messages from crawling (5-120s, default 30000ms)':
+  'danmaku.maxScrollDurationDesc':
     'Duración máxima de animación de desplazamiento — evita que mensajes largos vayan muy lento (5-120s, predet. 30000ms)',
-  'Fixed display duration for top/bottom mode messages (1000-30000ms, default 4000)':
+  'danmaku.topBottomDurationDesc':
     'Duración fija de visualización para mensajes en modo superior/inferior (1000-30000ms, predet. 4000)',
-  'Maximum pending queue depth before messages are dropped (50-1000, default 200)':
+  'advanced.maxQueueDepthDesc':
     'Profundidad máxima de cola pendiente antes de descartar mensajes (50-1000, predet. 200)',
-  'Target active message count when trimming background tab (10-500, default 50)':
+  'advanced.tabTrimTargetDesc':
     'Objetivo de mensajes activos al recortar pestaña en segundo plano (10-500, predet. 50)',
-  'Maximum message age before fade-out removal (10-300s, default 60000ms)':
+  'advanced.maxMessageAgeDesc':
     'Edad máxima del mensaje antes de eliminación por desvanecimiento (10-300s, predet. 60000ms)',
-  'Gap between consecutive messages as percentage of message width (2-30%, default 8)':
+  'danmaku.messageSpacingDesc':
     'Espacio entre mensajes consecutivos como porcentaje del ancho (2-30%, predet. 8)',
-  'Enable Translation': 'Activar traducción',
+  'translation.enable': 'Activar traducción',
   Service: 'Servicio',
-  'Source Language': 'Idioma de origen',
-  'Target Language': 'Idioma de destino',
-  'Display Mode': 'Modo de visualización',
-  'Near Speed (%)': 'Velocidad cerca (%)',
-  'Far Speed (%)': 'Velocidad lejos (%)',
-  'Far Opacity (%)': 'Opacidad lejos (%)',
+  'translation.source': 'Idioma de origen',
+  'translation.target': 'Idioma de destino',
+  'translation.displayMode': 'Modo de visualización',
+  'advanced.depthNearSpeed': 'Velocidad cerca (%)',
+  'advanced.depthFarSpeed': 'Velocidad lejos (%)',
+  'advanced.depthFarOpacity': 'Opacidad lejos (%)',
 
   // ── Select options ──
-  'Scroll (RTL)': 'Desplazar (der.→izq.)',
-  'Reverse (LTR)': 'Inverso (izq.→der.)',
-  'Top Fixed': 'Fijo arriba',
-  'Bottom Fixed': 'Fijo abajo',
-  'Playback-based (recommended)': 'Basado en reproducción (recomendado)',
-  'Recent only': 'Solo recientes',
-  'Full (show all)': 'Completo (mostrar todo)',
-  'None (skip backlog)': 'Ninguno (omitir historial)',
+  'danmaku.scroll': 'Desplazar (der.→izq.)',
+  'danmaku.reverse': 'Inverso (izq.→der.)',
+  'danmaku.top': 'Fijo arriba',
+  'danmaku.bottom': 'Fijo abajo',
+  'advanced.backlogPlayback': 'Basado en reproducción (recomendado)',
+  'advanced.backlogRecent': 'Solo recientes',
+  'advanced.backlogFull': 'Completo (mostrar todo)',
+  'advanced.backlogNone': 'Ninguno (omitir historial)',
   Off: 'Apagado',
-  'Normal (5 msg / 5s)': 'Normal (5 msg / 5s)',
-  'Strict (2 msg / 5s)': 'Estricto (2 msg / 5s)',
-  'Auto (Browser)': 'Automático (Navegador)',
-  'Auto-detect': 'Detección automática',
-  'Auto (Chrome built-in)': 'Automático (integrado en Chrome)',
-  'Dual (original + translation)': 'Dual (original + traducción)',
-  'Replace (translation only)': 'Reemplazar (solo traducción)',
+  'advanced.authorRateLimitNormal': 'Normal (5 msg / 5s)',
+  'advanced.authorRateLimitStrict': 'Estricto (2 msg / 5s)',
+  'translation.languageAuto': 'Automático (Navegador)',
+  'translation.sourceAuto': 'Detección automática',
+  'translation.serviceAuto': 'Automático (integrado en Chrome)',
+  'translation.displayModeDual': 'Dual (original + traducción)',
+  'translation.displayModeReplace': 'Reemplazar (solo traducción)',
 
   // ── Tooltips ──
-  'Vertical gap between comment rows (0 = adjacent rows)':
-    'Espacio vertical entre filas (0 = filas adyacentes)',
-  'Bold is more readable, Regular uses less GPU memory':
-    'Negrita es más legible, Normal usa menos memoria de GPU',
-  'Font family for comment text': 'Familia tipográfica del texto',
-  'CSS font-family value. Type to filter suggestions, or enter a custom font stack.':
+  'danmaku.laneGapDesc': 'Espacio vertical entre filas (0 = filas adyacentes)',
+  'danmaku.fontWeightDesc': 'Negrita es más legible, Normal usa menos memoria de GPU',
+  'danmaku.fontFamilyDesc': 'Familia tipográfica del texto',
+  'danmaku.fontCustomDesc':
     'Valor CSS font-family, ej. "Noto Sans KR", sans-serif. Si no se encuentra, usa la fuente del sistema.',
-  'Background opacity of Super Chat cards': 'Opacidad del fondo de tarjetas Super Chat',
-  'Max body text lines before truncation (2-10)': 'Máximo de líneas antes de truncar (2-10)',
-  'Max body text lines for membership messages (1-5)':
-    'Máximo de líneas para mensajes de membresía (1-5)',
-  'Display the purchase amount badge on Super Chat cards':
+  'appearance.superchatOpacityDesc': 'Opacidad del fondo de tarjetas Super Chat',
+  'appearance.superchatMaxLinesDesc': 'Máximo de líneas antes de truncar (2-10)',
+  'appearance.membershipMaxLinesDesc': 'Máximo de líneas para mensajes de membresía (1-5)',
+  'appearance.showSuperchatAmountDesc':
     'Mostrar la insignia de monto de compra en tarjetas Super Chat',
   "Use author's chosen text color from YouTube chat instead of overlay defaults":
     'Usar el color de texto del autor en lugar del predeterminado',
-  'Keep top N% of video free of comments': 'Mantener el N% superior del video sin comentarios',
-  'Keep bottom N% of video free of comments': 'Mantener el N% inferior del video sin comentarios',
-  'Show all messages regardless of minimum character length':
-    'Mostrar todos los mensajes sin importar la longitud mínima',
-  'Minimum character count': 'Cantidad mínima de caracteres',
-  'Opacity of past messages relative to real-time messages':
-    'Opacidad de mensajes pasados respecto a los actuales',
-  'How much longer moderator and owner messages stay visible (1.0 = same as regular, 2.0 = twice as long)':
+  'danmaku.topClearZoneDesc': 'Mantener el N% superior del video sin comentarios',
+  'danmaku.bottomClearZoneDesc': 'Mantener el N% inferior del video sin comentarios',
+  'advanced.ignoreMinLengthDesc': 'Mostrar todos los mensajes sin importar la longitud mínima',
+  'advanced.minLengthDesc': 'Cantidad mínima de caracteres',
+  'advanced.backlogOpacityDesc': 'Opacidad de mensajes pasados respecto a los actuales',
+  'danmaku.durationMulDesc':
     'Cuánto más tiempo permanecen visibles los mensajes de moderador y propietario (1.0 = igual, 2.0 = el doble)',
-  'Translate chat messages in real-time (requires Chrome 138+ for built-in translation)':
+  'translation.enableDesc':
     'Traduce mensajes de chat en tiempo real (requiere Chrome 138+ con traducción integrada)',
-  'Speed-based depth perception: fast messages appear near, slow messages appear far':
+  'advanced.depthLayersDesc':
     'Percepción de profundidad por velocidad: mensajes rápidos cerca, lentos lejos',
-  'Speed boost for near-layer messages': 'Aumento de velocidad para mensajes cercanos',
-  'Speed reduction for far-layer messages': 'Reducción de velocidad para mensajes lejanos',
-  'Opacity dimming for far-layer messages': 'Reducción de opacidad para mensajes lejanos',
-  'How fast comments scroll across the screen in pixels per second':
+  'advanced.depthNearSpeedDesc': 'Aumento de velocidad para mensajes cercanos',
+  'advanced.depthFarSpeedDesc': 'Reducción de velocidad para mensajes lejanos',
+  'advanced.depthFarOpacityDesc': 'Reducción de opacidad para mensajes lejanos',
+  'danmaku.scrollSpeedDesc':
     'Velocidad a la que los comentarios cruzan la pantalla (píxeles/segundo)',
   "Language of the incoming chat messages. Auto-detect uses Chrome's built-in language detection.":
     'Idioma de los mensajes de chat entrantes. La detección automática usa la detección de idioma integrada de Chrome.',
-  'Language to translate chat messages into. Auto detects from browser settings.':
+  'translation.sourceDesc':
     'Idioma al que traducir los mensajes. Auto detecta desde la configuración del navegador.',
-  'Limits how frequently messages from the same author appear':
+  'advanced.authorRateLimitDesc':
     'Limita la frecuencia con la que aparecen mensajes del mismo autor',
-  'Sets the overlay user interface language (does not filter comments by language)':
+  'translation.languageDesc':
     'Establece el idioma de la interfaz (no filtra comentarios por idioma)',
 
   // ── New Performance / Developer section titles ──
@@ -171,193 +165,177 @@ export const ES: Record<string, string> = {
   Developer: 'Desarrollador',
 
   // ── New field labels ──
-  'Max Concurrent Messages': 'Máx. mensajes',
-  'Fade Duration (ms)': 'Duración fundido (ms)',
-  'Min Poll Interval (ms)': 'Intervalo mín. sondeo (ms)',
-  'Max Poll Interval (ms)': 'Intervalo máx. sondeo (ms)',
-  'Max Injection Rate (msg/s)': 'Velocidad máx. (msg/s)',
-  'Backlog Speed (×)': 'Multiplicador velocidad',
-  'Recent Window (min)': 'Ventana (min)',
-  'Log Level': 'Nivel de registro',
-  'Debug Overlay': 'Superposición depuración',
+  'advanced.maxConcurrent': 'Máx. mensajes',
+  'advanced.fadeDuration': 'Duración fundido (ms)',
+  'advanced.minPollInterval': 'Intervalo mín. sondeo (ms)',
+  'advanced.maxPollInterval': 'Intervalo máx. sondeo (ms)',
+  'advanced.backlogInjectionRate': 'Velocidad máx. (msg/s)',
+  'advanced.backlogSpeed': 'Multiplicador velocidad',
+  'advanced.backlogRecentWindow': 'Ventana (min)',
+  'advanced.logLevel': 'Nivel de registro',
+  'advanced.debugOverlay': 'Superposición depuración',
 
   // ── New select options ──
-  'Warnings only': 'Solo avisos',
+  'advanced.logLevelWarn': 'Solo avisos',
   Info: 'Información',
-  'Debug (verbose)': 'Depuración (detallado)',
+  'advanced.logLevelDebug': 'Depuración (detallado)',
 
   // ── New tooltips ──
-  'Maximum number of messages visible on screen at once (30-300)':
-    'Número máximo de mensajes visibles en pantalla a la vez (30-300)',
-  'How long messages take to fade out (0 = instant, 50-1000)':
+  'advanced.maxConcurrentDesc': 'Número máximo de mensajes visibles en pantalla a la vez (30-300)',
+  'advanced.fadeDurationDesc':
     'Tiempo de desvanecimiento de los mensajes (0 = instantáneo, 50-1000)',
-  'Minimum chat polling interval in milliseconds (50-5000)':
-    'Intervalo mínimo de sondeo del chat en milisegundos (50-5000)',
-  'Maximum chat polling interval in milliseconds (1000-30000)':
+  'advanced.minPollIntervalDesc': 'Intervalo mínimo de sondeo del chat en milisegundos (50-5000)',
+  'advanced.maxPollIntervalDesc':
     'Intervalo máximo de sondeo del chat en milisegundos (1000-30000)',
-  'Maximum backlog message injection rate per second (0-50)':
+  'advanced.backlogInjectionRateDesc':
     'Velocidad máxima de inyección de mensajes del historial por segundo (0-50)',
-  'Animation speed multiplier for backlog messages (1-5)':
+  'advanced.backlogSpeedDesc':
     'Multiplicador de velocidad de animación para mensajes del historial (1-5)',
-  'Time window in minutes for recent-only backlog mode (1-30)':
+  'advanced.backlogRecentWindowDesc':
     'Ventana de tiempo en minutos para el modo de solo recientes (1-30)',
-  'Console diagnostic output verbosity': 'Verbosidad de la salida de diagnóstico',
-  'Show performance debug overlay on the video player':
+  'advanced.logLevelDesc': 'Verbosidad de la salida de diagnóstico',
+  'advanced.debugOverlayDesc':
     'Mostrar superposición de depuración de rendimiento en el reproductor de video',
 
   // ── New tooltips (added 2026-05-28) ──
-  'Text size in pixels (14-50)': 'Tamaño del texto en píxeles (14-50)',
-  'Text outline stroke width in pixels (0-8)': 'Ancho del contorno de texto en píxeles (0-8)',
-  'Text outline stroke opacity (0-100%)': 'Opacidad del contorno de texto (0-100%)',
+  'danmaku.fontSizeDesc': 'Tamaño del texto en píxeles (14-50)',
+  'appearance.outlineWidthDesc': 'Ancho del contorno de texto en píxeles (0-8)',
+  'appearance.outlineOpacityDesc': 'Opacidad del contorno de texto (0-100%)',
 
   // ── New tooltips (added 2026-05-29) ──
-  'Globally enable or disable the chat overlay on YouTube live streams':
+  'app.enabledDesc':
     'Activa o desactiva la superposición de chat en las transmisiones en vivo de YouTube',
-  'Comment display direction and behavior': 'Dirección y comportamiento de los comentarios',
-  'Overall opacity of comment text (50-100%)':
-    'Opacidad general del texto de comentarios (50-100%)',
-  'Add a dark outline stroke around text for better readability':
+  'danmaku.modeDesc': 'Dirección y comportamiento de los comentarios',
+  'danmaku.textOpacityDesc': 'Opacidad general del texto de comentarios (50-100%)',
+  'appearance.outlineEnabledDesc':
     'Añade un contorno oscuro alrededor del texto para mejorar la legibilidad',
-  'How past chat messages are displayed relative to live playback':
+  'advanced.backlogModeDesc':
     'Cómo se muestran los mensajes antiguos en relación con la reproducción en vivo',
-  'Dual shows original above translation, Replace shows translation only':
+  'translation.displayModeDesc':
     'Dual muestra el original encima de la traducción, Reemplazar muestra solo la traducción',
 
   // ── New cache/performance field labels (added 2026-06-01) ──
-  'Emoji Cache (MB)': 'Caché de emojis (MB)',
-  'Photo Cache (MB)': 'Caché de fotos (MB)',
-  'Sticker Cache (MB)': 'Caché de stickers (MB)',
-  'Text Cache (MB)': 'Caché de texto (MB)',
-  'Translation Batch Size': 'Tamaño de lote de traducción',
-  'Emoji Fetch Limit': 'Límite de obtención de emojis',
-  'Failed Emoji Retry (min)': 'Reintento de emoji fallido (min)',
-  'Max memory for emoji image cache (1-20 MB, default 3)':
-    'Memoria máxima para caché de emojis (1-20 MB, predet. 3)',
-  'Max memory for author photo cache (1-20 MB, default 2)':
-    'Memoria máxima para caché de fotos (1-20 MB, predet. 2)',
-  'Max memory for sticker image cache (1-20 MB, default 1)':
-    'Memoria máxima para caché de stickers (1-20 MB, predet. 1)',
-  'Max memory for text bitmap cache (1-20 MB, default 4)':
-    'Memoria máxima para caché de texto (1-20 MB, predet. 4)',
-  'Max translations applied per frame to avoid spikes (1-20, default 5)':
-    'Traducciones máximas por fotograma (1-20, predet. 5)',
-  'Max concurrent emoji fetch operations (1-20, default 6)':
-    'Operaciones simultáneas máximas de emojis (1-20, predet. 6)',
-  'How long to wait before retrying failed emoji fetches (1-60 min, default 5)':
+  'advanced.emojiCache': 'Caché de emojis (MB)',
+  'advanced.photoCache': 'Caché de fotos (MB)',
+  'advanced.stickerCache': 'Caché de stickers (MB)',
+  'advanced.textCache': 'Caché de texto (MB)',
+  'advanced.translationBatchSize': 'Tamaño de lote de traducción',
+  'advanced.emojiFetchLimit': 'Límite de obtención de emojis',
+  'advanced.emojiRetryMin': 'Reintento de emoji fallido (min)',
+  'advanced.emojiCacheDesc': 'Memoria máxima para caché de emojis (1-20 MB, predet. 3)',
+  'advanced.photoCacheDesc': 'Memoria máxima para caché de fotos (1-20 MB, predet. 2)',
+  'advanced.stickerCacheDesc': 'Memoria máxima para caché de stickers (1-20 MB, predet. 1)',
+  'advanced.textCacheDesc': 'Memoria máxima para caché de texto (1-20 MB, predet. 4)',
+  'advanced.translationBatchSizeDesc': 'Traducciones máximas por fotograma (1-20, predet. 5)',
+  'advanced.emojiFetchLimitDesc': 'Operaciones simultáneas máximas de emojis (1-20, predet. 6)',
+  'advanced.emojiRetryMinDesc':
     'Tiempo de espera antes de reintentar emojis fallidos (1-60 min, predet. 5)',
 
   // ── New threshold field labels (added 2026-06-01) ──
-  'Burst Sample Window': 'Ventana de muestra de ráfaga',
-  'Elevated Burst (msg/s)': 'Ráfaga elevada (msg/s)',
-  'High Burst (msg/s)': 'Ráfaga alta (msg/s)',
-  'Extreme Burst (msg/s)': 'Ráfaga extrema (msg/s)',
-  'Backlog Injection Max': 'Inyección máx. historial',
-  'Backlog Density Ramp (ms)': 'Rampa de densidad historial (ms)',
-  'Live Poll Fallback (ms)': 'Sondeo alternativo (ms)',
-  'Poll Failure Limit': 'Límite fallos sondeo',
-  'Speed Boost Threshold': 'Umbral aumento velocidad',
-  'Backlog Pause (%)': 'Pausar historial (%)',
-  'Backlog Resume (%)': 'Reanudar historial (%)',
-  'Activity Timeout (ms)': 'Tiempo de espera (ms)',
+  'advanced.burstSampleWindow': 'Ventana de muestra de ráfaga',
+  'advanced.burstElevated': 'Ráfaga elevada (msg/s)',
+  'advanced.burstHigh': 'Ráfaga alta (msg/s)',
+  'advanced.burstExtreme': 'Ráfaga extrema (msg/s)',
+  'advanced.tuningBacklogInjectionMax': 'Inyección máx. historial',
+  'advanced.tuningDensityRamp': 'Rampa de densidad historial (ms)',
+  'advanced.tuningPollFallback': 'Sondeo alternativo (ms)',
+  'advanced.tuningPollFailureLimit': 'Límite fallos sondeo',
+  'advanced.tuningSpeedBoostThreshold': 'Umbral aumento velocidad',
+  'advanced.tuningBacklogPause': 'Pausar historial (%)',
+  'advanced.tuningBacklogResume': 'Reanudar historial (%)',
+  'advanced.tuningActivityTimeout': 'Tiempo de espera (ms)',
 
   // ── New threshold tooltips (added 2026-06-01) ──
-  'Burst rate sample window size': 'Tamaño de la ventana de muestreo de la tasa de ráfaga',
-  'Messages per second threshold for elevated burst level':
-    'Umbral de mensajes por segundo para el nivel de ráfaga elevado',
-  'Messages per second threshold for high burst level':
-    'Umbral de mensajes por segundo para el nivel de ráfaga alto',
-  'Messages per second threshold for extreme burst level':
-    'Umbral de mensajes por segundo para el nivel de ráfaga extremo',
-  'Maximum backlog injection rate cap': 'Límite máximo de velocidad de inyección del historial',
-  'Density ramp duration for backlog injection in milliseconds':
+  'advanced.burstSampleWindowDesc': 'Tamaño de la ventana de muestreo de la tasa de ráfaga',
+  'advanced.burstElevatedDesc': 'Umbral de mensajes por segundo para el nivel de ráfaga elevado',
+  'advanced.burstHighDesc': 'Umbral de mensajes por segundo para el nivel de ráfaga alto',
+  'advanced.burstExtremeDesc': 'Umbral de mensajes por segundo para el nivel de ráfaga extremo',
+  'advanced.tuningBacklogInjectionMaxDesc': 'Límite máximo de velocidad de inyección del historial',
+  'advanced.tuningDensityRampDesc':
     'Duración de la rampa de densidad para la inyección del historial en milisegundos',
-  'Live poll fallback delay in milliseconds':
-    'Retraso alternativo del sondeo en vivo en milisegundos',
-  'Consecutive poll failures before circuit breaker trips':
+  'advanced.tuningPollFallbackDesc': 'Retraso alternativo del sondeo en vivo en milisegundos',
+  'advanced.tuningPollFailureLimitDesc':
     'Fallos consecutivos de sondeo antes de que se active el interruptor',
-  'Pending messages to trigger speed boost':
+  'advanced.tuningSpeedBoostThresholdDesc':
     'Mensajes pendientes para activar el aumento de velocidad',
-  'Lane utilization ratio to pause backlog injection':
+  'advanced.tuningBacklogPauseDesc':
     'Relación de uso de carril para pausar la inyección del historial',
-  'Lane utilization ratio to resume backlog injection':
+  'advanced.tuningBacklogResumeDesc':
     'Relación de uso de carril para reanudar la inyección del historial',
-  'Chat activity timeout in milliseconds': 'Tiempo de espera de actividad del chat en milisegundos',
+  'advanced.tuningActivityTimeoutDesc': 'Tiempo de espera de actividad del chat en milisegundos',
 
   // ── New stagger/tuning field labels (added 2026-06-01) ──
-  'Stagger Max Delay (ms)': 'Retardo máx. escalonado (ms)',
-  'Stagger Medium Delay (ms)': 'Retardo escalonado medio (ms)',
-  'Emoji Fetch Timeout (ms)': 'Tiempo de espera de emoji (ms)',
-  'Backlog Density Ramp Max (ms)': 'Rampa densidad historial máx. (ms)',
-  'Backlog Injection Rate Min (msg/s)': 'Inyección historial mín.',
-  'Speed Boost Max': 'Aumento velocidad máx.',
-  'Speed Boost Denominator': 'Denom. aumento velocidad',
-  'Backlog Toggle Cooldown (ms)': 'Enfriamiento alternar historial (ms)',
-  'Replay Prefetch Pages': 'Páginas precarga repetición',
-  'Replay Batch Limit': 'Límite lotes repetición',
+  'advanced.tuningStaggerMax': 'Retardo máx. escalonado (ms)',
+  'advanced.tuningStaggerMedium': 'Retardo escalonado medio (ms)',
+  'advanced.tuningEmojiTimeout': 'Tiempo de espera de emoji (ms)',
+  'advanced.tuningDensityRampMax': 'Rampa densidad historial máx. (ms)',
+  'advanced.tuningInjectionRateMin': 'Inyección historial mín.',
+  'advanced.tuningSpeedBoostMax': 'Aumento velocidad máx.',
+  'advanced.tuningSpeedBoostDenom': 'Denom. aumento velocidad',
+  'advanced.tuningToggleCooldown': 'Enfriamiento alternar historial (ms)',
+  'advanced.replayPrefetchPages': 'Páginas precarga repetición',
+  'advanced.replayBatchLimit': 'Límite lotes repetición',
 
   // ── New stagger/tuning tooltips (added 2026-06-01) ──
-  'Max stagger delay for messages in same batch':
-    'Retardo máximo escalonado para mensajes en el mismo lote',
-  'Medium stagger delay when queue depth is medium':
+  'advanced.tuningStaggerMaxDesc': 'Retardo máximo escalonado para mensajes en el mismo lote',
+  'advanced.tuningStaggerMediumDesc':
     'Retardo escalonado medio cuando la cola está a media capacidad',
-  'Timeout for emoji fetch operations': 'Tiempo de espera para operaciones de obtención de emojis',
-  'Max density ramp duration for backlog injection':
+  'advanced.tuningEmojiTimeoutDesc': 'Tiempo de espera para operaciones de obtención de emojis',
+  'advanced.tuningDensityRampMaxDesc':
     'Duración máxima de la rampa de densidad para la inyección del historial',
-  'Minimum backlog injection rate (msg/s)': 'Tasa mínima de inyección del historial (msg/s)',
-  'Max speed boost factor for burst compensation':
+  'advanced.tuningInjectionRateMinDesc': 'Tasa mínima de inyección del historial (msg/s)',
+  'advanced.tuningSpeedBoostMaxDesc':
     'Factor máximo de aumento de velocidad para compensación de ráfagas',
-  'Speed boost denominator for EMA rate scaling':
+  'advanced.tuningSpeedBoostDenomDesc':
     'Denominador de aumento de velocidad para escalado de tasa EMA',
-  'Cooldown between backlog pause toggles': 'Enfriamiento entre cambios de pausa del historial',
-  'Max pages to prefetch in replay mode': 'Máximo de páginas a precargar en modo repetición',
-  'Max batches to fetch in replay initialization':
-    'Máximo de lotes a obtener en la inicialización de repetición',
+  'advanced.tuningToggleCooldownDesc': 'Enfriamiento entre cambios de pausa del historial',
+  'advanced.replayPrefetchPagesDesc': 'Máximo de páginas a precargar en modo repetición',
+  'advanced.replayBatchLimitDesc': 'Máximo de lotes a obtener en la inicialización de repetición',
 
   // ── Modal chrome ──
-  'Chat Overlay': 'Superposición de Chat',
-  'Close settings': 'Cerrar configuración',
-  'Settings categories': 'Categorías',
-  'Overlay Enabled': 'Superposición activada',
-  'Value adjusted to': 'Valor ajustado a ',
+  'app.title': 'Superposición de Chat',
+  'app.close': 'Cerrar configuración',
+  'app.settingsCategories': 'Categorías',
+  'app.enabled': 'Superposición activada',
+  'format.valueAdjusted': 'Valor ajustado a ',
   Reset: 'Restablecer',
   Export: 'Exportar',
   Import: 'Importar',
   Close: 'Cerrar',
   Done: 'Listo',
-  'Changes are saved automatically': 'Los cambios se guardan automáticamente',
-  'Reset all settings to defaults?':
-    '¿Restablecer todas las opciones a los valores predeterminados?',
+  'app.autoSave': 'Los cambios se guardan automáticamente',
+  'reset.confirm': '¿Restablecer todas las opciones a los valores predeterminados?',
   Cancel: 'Cancelar',
-  'Import failed: invalid settings format': 'Error de importación: formato no válido',
-  'Settings imported successfully': 'Configuración importada correctamente',
-  'Import failed: invalid JSON': 'Error de importación: JSON no válido',
-  'Chat overlay settings': 'Configuración de superposición de chat',
-  'Reset overlay settings': 'Restablecer superposición',
-  'Reload overlay': 'Recargar superposición',
+  'import.invalidFormat': 'Error de importación: formato no válido',
+  'import.success': 'Configuración importada correctamente',
+  'import.invalidJson': 'Error de importación: JSON no válido',
+  'app.settings': 'Configuración de superposición de chat',
+  'reset.confirmDesc': 'Restablecer superposición',
+  'app.reload': 'Recargar superposición',
 
   // ── Author grid ──
   Color: 'Color',
-  'Name Color': 'Color del nombre',
+  'appearance.authorsNameColor': 'Color del nombre',
   Show: 'Mostrar',
-  'Show Name': 'Mostrar nombre',
+  'appearance.authorsShowName': 'Mostrar nombre',
   Normal: 'Normal',
   Member: 'Miembro',
   Moderator: 'Moderador',
   Owner: 'Propietario',
   Verified: 'Verificado',
   SuperChat: 'SuperChat',
-  'Loading chat history...': 'Cargando historial de chat...',
-  'Short messages shown regardless of length': 'Mostrar mensajes cortos sin importar la longitud',
+  'indicator.loading': 'Cargando historial de chat...',
+  'format.shortMessagesShown': 'Mostrar mensajes cortos sin importar la longitud',
 
   // ── Toast / sync messages ──
 
   // ── Translation unsupported ──
-  'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.':
+  'translation.unsupported':
     'La traducción requiere un navegador con IA integrada. Usa Chrome 138+ o Edge 143+ Canary.',
 
   // ── Added 2026-07-04 ──
-  'Chat messages': 'Mensajes del chat',
-  'Ignore Reduced Motion': 'Ignorar movimiento reducido',
-  'Force scroll animations even when OS reduced-motion is enabled (requires page refresh)':
+  'chat.messages': 'Mensajes del chat',
+  'advanced.ignoreReducedMotion': 'Ignorar movimiento reducido',
+  'advanced.ignoreReducedMotionDesc':
     'Forzar animaciones de desplazamiento incluso con movimiento reducido del SO activado (requiere recargar)',
 };
