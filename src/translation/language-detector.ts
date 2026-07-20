@@ -57,6 +57,7 @@ const UNICODE_HINTS: ReadonlyArray<[TranslationLanguage, [number, number]]> = [
   ['ko', [0xac00, 0xd7af]], // Hangul Syllables
   ['zh-CN', [0x4e00, 0x9fff]], // CJK Unified Ideographs
   ['es', [0x00c0, 0x00ff]], // Latin-1 Supplement (ñ, á, é, í, ó, ú, ü, ¿, ¡)
+  ['ar', [0x0600, 0x06ff]], // Arabic
 ];
 
 function detectByUnicodeRange(text: string): TranslationLanguage | null {
@@ -195,6 +196,8 @@ export class LanguageDetectorService {
         return 'zh-CN';
       case 'zh-CN':
         return 'zh-CN';
+      case 'ar':
+        return 'ar';
       default:
         return null;
     }
