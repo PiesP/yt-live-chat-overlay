@@ -207,14 +207,12 @@ export type ActionType = (typeof ACTIONS)[number];
 function createActions(): HTMLDivElement {
   const wrapper = domDiv('yt-chat-overlay-settings-actions-wrapper');
   const actions = domDiv('yt-chat-overlay-settings-actions');
-  for (const [action, label] of ACTIONS.map(
-    (a) => [a, a.charAt(0).toUpperCase() + a.slice(1)] as const
-  )) {
+  for (const action of ACTIONS) {
     const button = document.createElement('button');
     button.type = 'button';
     button.dataset.action = action;
     // Use "Done" for the close action to avoid user confusion
-    button.textContent = action === 'close' ? t('app.done') : t(label);
+    button.textContent = action === 'close' ? t('app.done') : t(`actions.${action}`);
     actions.appendChild(button);
   }
   wrapper.appendChild(actions);

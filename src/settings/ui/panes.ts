@@ -188,7 +188,7 @@ export const PANES: PaneDef[] = [
         fields: [
           {
             type: 'enabled',
-            title: 'Globally enable or disable the chat overlay on YouTube live streams',
+            title: 'app.enabledDesc',
           },
         ],
       },
@@ -199,72 +199,40 @@ export const PANES: PaneDef[] = [
             'danmaku.mode',
             'danmakuMode',
             [
-              ['scroll', 'Scroll (RTL)'],
-              ['reverse', 'Reverse (LTR)'],
-              ['top', 'Top Fixed'],
-              ['bottom', 'Bottom Fixed'],
+              ['scroll', 'danmaku.scroll'],
+              ['reverse', 'danmaku.reverse'],
+              ['top', 'danmaku.top'],
+              ['bottom', 'danmaku.bottom'],
             ],
             'danmaku.modeDesc'
           ),
-          num(
-            'danmaku.scrollSpeed',
-            'speedPxPerSec',
-            'How fast comments scroll across the screen in pixels per second'
-          ),
-          range('danmaku.textOpacity', 'opacity', 'Overall opacity of comment text (50-100%)'),
-          range(
-            'danmaku.laneGap',
-            'laneSpacing',
-            'Vertical gap between comment rows (0 = adjacent rows)'
-          ),
-          num(
-            'danmaku.exitPadding',
-            'exitPaddingPx',
-            'Extra pixels a message scrolls past the screen edge before being removed (20-400, default 100)'
-          ),
-          num(
-            'danmaku.durationMul',
-            'modOwnerDurationMultiplier',
-            'How much longer moderator and owner messages stay visible (1.0 = same as regular, 2.0 = twice as long)'
-          ),
+          num('danmaku.scrollSpeed', 'speedPxPerSec', 'danmaku.scrollSpeedDesc'),
+          range('danmaku.textOpacity', 'opacity', 'danmaku.textOpacityDesc'),
+          range('danmaku.laneGap', 'laneSpacing', 'danmaku.laneGapDesc'),
+          num('danmaku.exitPadding', 'exitPaddingPx', 'danmaku.exitPaddingDesc'),
+          num('danmaku.durationMul', 'modOwnerDurationMultiplier', 'danmaku.durationMulDesc'),
         ],
       },
       {
         title: 'danmaku.timing',
         fields: [
-          num(
-            'danmaku.minScrollDuration',
-            'scrollDurationMinMs',
-            'Minimum scroll animation duration — prevents very short messages from zipping across (1000-15000ms, default 5000)'
-          ),
-          num(
-            'danmaku.maxScrollDuration',
-            'scrollDurationMaxMs',
-            'Maximum scroll animation duration — prevents very long messages from crawling (5-120s, default 30000ms)'
-          ),
-          num(
-            'danmaku.topBottomDuration',
-            'topBottomDurationMs',
-            'Fixed display duration for top/bottom mode messages (1000-30000ms, default 4000)'
-          ),
+          num('danmaku.minScrollDuration', 'scrollDurationMinMs', 'danmaku.minScrollDurationDesc'),
+          num('danmaku.maxScrollDuration', 'scrollDurationMaxMs', 'danmaku.maxScrollDurationDesc'),
+          num('danmaku.topBottomDuration', 'topBottomDurationMs', 'danmaku.topBottomDurationDesc'),
         ],
       },
       {
         title: 'danmaku.safeZone',
         fields: [
-          range('danmaku.topClearZone', 'safeTop', 'Keep top N% of video free of comments'),
-          range(
-            'danmaku.bottomClearZone',
-            'safeBottom',
-            'Keep bottom N% of video free of comments'
-          ),
+          range('danmaku.topClearZone', 'safeTop', 'danmaku.topClearZoneDesc'),
+          range('danmaku.bottomClearZone', 'safeBottom', 'danmaku.bottomClearZoneDesc'),
         ],
       },
       {
         title: 'danmaku.font',
         fields: [
           fontPreview(),
-          num('danmaku.fontSize', 'fontSize', 'Text size in pixels (14-50)'),
+          num('danmaku.fontSize', 'fontSize', 'danmaku.fontSizeDesc'),
           weightToggle(
             'Weight',
             'fontWeight',
@@ -272,9 +240,9 @@ export const PANES: PaneDef[] = [
               ['bold', 'Bold'],
               ['normal', 'Regular'],
             ],
-            'Bold is more readable, Regular uses less GPU memory'
+            'danmaku.fontWeightDesc'
           ),
-          fontChips('Family', 'fontFamily', FONT_SUGGESTIONS, 'Font family for comment text'),
+          fontChips('Family', 'fontFamily', FONT_SUGGESTIONS, 'danmaku.fontFamilyDesc'),
         ],
       },
     ],
@@ -289,26 +257,26 @@ export const PANES: PaneDef[] = [
           range(
             'appearance.superchatOpacity',
             'superChatOpacity',
-            'Background opacity of Super Chat cards'
+            'appearance.superchatOpacityDesc'
           ),
           num(
             'appearance.superchatMaxLines',
             'superChatMaxBodyLines',
-            'Max body text lines before truncation (2-10)'
+            'appearance.superchatMaxLinesDesc'
           ),
           num(
             'appearance.membershipMaxLines',
             'membershipMaxBodyLines',
-            'Max body text lines for membership messages (1-5)'
+            'appearance.membershipMaxLinesDesc'
           ),
           chk(
             'appearance.showSuperchatAmount',
             'showSuperChatAmount',
-            'Display the purchase amount badge on Super Chat cards'
+            'appearance.showSuperchatAmountDesc'
           ),
           chk(
-            'appearance.preserveUserappearance.authorsColors',
-            'preserveUserappearance.authorsColor',
+            'appearance.preserveUserColors',
+            'preserveUserColors',
             "Use author's chosen text color from YouTube chat instead of overlay defaults"
           ),
         ],
@@ -316,24 +284,9 @@ export const PANES: PaneDef[] = [
       {
         title: 'appearance.outline',
         fields: [
-          chk(
-            'appearance.outlineEnabled',
-            'enabled',
-            'Add a dark outline stroke around text for better readability',
-            'outline'
-          ),
-          num(
-            'appearance.outlineWidth',
-            'widthPx',
-            'Text outline stroke width in pixels (0-8)',
-            'outline'
-          ),
-          range(
-            'appearance.outlineOpacity',
-            'opacity',
-            'Text outline stroke opacity (0-100%)',
-            'outline'
-          ),
+          chk('appearance.outlineEnabled', 'enabled', 'appearance.outlineEnabledDesc', 'outline'),
+          num('appearance.outlineWidth', 'widthPx', 'appearance.outlineWidthDesc', 'outline'),
+          range('appearance.outlineOpacity', 'opacity', 'appearance.outlineOpacityDesc', 'outline'),
         ],
       },
       { title: 'appearance.authors', fields: [{ type: 'author-grid' as const }] },
@@ -346,21 +299,17 @@ export const PANES: PaneDef[] = [
       {
         title: 'advanced.messageRate',
         fields: [
-          chk(
-            'advanced.ignoreMinLength',
-            'allowShortTextMessages',
-            'Show all messages regardless of minimum character length'
-          ),
-          num('advanced.minLength', 'minTextLength', 'Minimum character count'),
+          chk('advanced.ignoreMinLength', 'allowShortTextMessages', 'advanced.ignoreMinLengthDesc'),
+          num('advanced.minLength', 'minTextLength', 'advanced.minLengthDesc'),
           sel(
             'advanced.authorRateLimit',
             'authorRateLimit',
             [
-              ['off', 'Off'],
-              ['normal', 'Normal (5 msg / 5s)'],
-              ['strict', 'Strict (2 msg / 5s)'],
+              ['off', 'advanced.authorRateLimitOff'],
+              ['normal', 'advanced.authorRateLimitNormal'],
+              ['strict', 'advanced.authorRateLimitStrict'],
             ],
-            'Limits how frequently messages from the same author appear'
+            'advanced.authorRateLimitDesc'
           ),
         ],
       },
@@ -371,164 +320,76 @@ export const PANES: PaneDef[] = [
             'advanced.backlogMode',
             'backlogMode',
             [
-              ['playback', 'Playback-based (recommended)'],
-              ['recent', 'Recent only'],
-              ['full', 'Full (show all)'],
-              ['none', 'None (skip backlog)'],
+              ['playback', 'advanced.backlogPlayback'],
+              ['recent', 'advanced.backlogRecent'],
+              ['full', 'advanced.backlogFull'],
+              ['none', 'advanced.backlogNone'],
             ],
-            'How past chat messages are displayed relative to live playback'
+            'advanced.backlogModeDesc'
           ),
           range(
             'advanced.backlogOpacity',
             'backlogOpacityMultiplier',
-            'Opacity of past messages relative to real-time messages'
+            'advanced.backlogOpacityDesc'
           ),
           num(
             'advanced.backlogInjectionRate',
             'backlogMaxRate',
-            'Maximum backlog message injection rate per second (0-50)'
+            'advanced.backlogInjectionRateDesc'
           ),
-          num(
-            'advanced.backlogSpeed',
-            'backlogSpeedMultiplier',
-            'Animation speed multiplier for backlog messages (1-5)'
-          ),
+          num('advanced.backlogSpeed', 'backlogSpeedMultiplier', 'advanced.backlogSpeedDesc'),
           num(
             'advanced.backlogRecentWindow',
             'backlogRecentMinutes',
-            'Time window in minutes for recent-only backlog mode (1-30)'
+            'advanced.backlogRecentWindowDesc'
           ),
         ],
       },
       {
         title: 'advanced.depthLayers',
         fields: [
-          chk(
-            'appearance.outlineEnabled',
-            'depthLayersEnabled',
-            'Speed-based depth perception: fast messages appear near, slow messages appear far'
-          ),
-          range(
-            'advanced.depthNearSpeed',
-            'depthNearSpeedMul',
-            'Speed boost for near-layer messages'
-          ),
-          range(
-            'advanced.depthFarSpeed',
-            'depthFarSpeedMul',
-            'Speed reduction for far-layer messages'
-          ),
-          range(
-            'advanced.depthFarOpacity',
-            'depthFarOpacityMul',
-            'Opacity dimming for far-layer messages'
-          ),
+          chk('appearance.outlineEnabled', 'depthLayersEnabled', 'advanced.depthLayersDesc'),
+          range('advanced.depthNearSpeed', 'depthNearSpeedMul', 'advanced.depthNearSpeedDesc'),
+          range('advanced.depthFarSpeed', 'depthFarSpeedMul', 'advanced.depthFarSpeedDesc'),
+          range('advanced.depthFarOpacity', 'depthFarOpacityMul', 'advanced.depthFarOpacityDesc'),
         ],
       },
       {
         title: 'advanced.performance',
         fields: [
-          num(
-            'advanced.maxConcurrent',
-            'maxConcurrentMessages',
-            'Maximum number of messages visible on screen at once (30-300)'
-          ),
-          num(
-            'advanced.fadeDuration',
-            'fadeDurationMs',
-            'How long messages take to fade out (0 = instant, 50-1000)'
-          ),
-          num(
-            'advanced.minPollInterval',
-            'minPollIntervalMs',
-            'Minimum chat polling interval in milliseconds (50-5000)'
-          ),
-          num(
-            'advanced.maxPollInterval',
-            'maxPollIntervalMs',
-            'Maximum chat polling interval in milliseconds (1000-30000)'
-          ),
-          num(
-            'advanced.maxQueueDepth',
-            'queueMaxSize',
-            'Maximum pending queue depth before messages are dropped (50-1000, default 200)'
-          ),
-          num(
-            'advanced.tabTrimTarget',
-            'backgroundQueueMax',
-            'Target active message count when trimming background tab (10-500, default 50)'
-          ),
-          num(
-            'advanced.maxMessageAge',
-            'maxMessageAgeMs',
-            'Maximum message age before fade-out removal (10-300s, default 60000ms)'
-          ),
-          range(
-            'danmaku.messageSpacing',
-            'headwayGapRatio',
-            'Gap between consecutive messages as percentage of message width (2-30%, default 8)'
-          ),
+          num('advanced.maxConcurrent', 'maxConcurrentMessages', 'advanced.maxConcurrentDesc'),
+          num('advanced.fadeDuration', 'fadeDurationMs', 'advanced.fadeDurationDesc'),
+          num('advanced.minPollInterval', 'minPollIntervalMs', 'advanced.minPollIntervalDesc'),
+          num('advanced.maxPollInterval', 'maxPollIntervalMs', 'advanced.maxPollIntervalDesc'),
+          num('advanced.maxQueueDepth', 'queueMaxSize', 'advanced.maxQueueDepthDesc'),
+          num('advanced.tabTrimTarget', 'backgroundQueueMax', 'advanced.tabTrimTargetDesc'),
+          num('advanced.maxMessageAge', 'maxMessageAgeMs', 'advanced.maxMessageAgeDesc'),
+          range('danmaku.messageSpacing', 'headwayGapRatio', 'danmaku.messageSpacingDesc'),
           num(
             'advanced.translationBatchSize',
             'translationBatchSize',
-            'Max translations applied per frame to avoid spikes (1-20, default 5)'
+            'advanced.translationBatchSizeDesc'
           ),
         ],
       },
       {
         title: 'advanced.cache',
         fields: [
-          num(
-            'advanced.emojiCache',
-            'emojiCacheMb',
-            'Max memory for emoji image cache (1-20 MB, default 3)'
-          ),
-          num(
-            'advanced.photoCache',
-            'photoCacheMb',
-            'Max memory for author photo cache (1-20 MB, default 2)'
-          ),
-          num(
-            'advanced.stickerCache',
-            'stickerCacheMb',
-            'Max memory for sticker image cache (1-20 MB, default 1)'
-          ),
-          num(
-            'advanced.textCache',
-            'textCacheMb',
-            'Max memory for text bitmap cache (1-20 MB, default 4)'
-          ),
-          num(
-            'advanced.emojiFetchLimit',
-            'emojiFetchLimit',
-            'Max concurrent emoji fetch operations (1-20, default 6)'
-          ),
-          num(
-            'advanced.emojiRetryMin',
-            'failedEmojiRetryMins',
-            'How long to wait before retrying failed emoji fetches (1-60 min, default 5)'
-          ),
+          num('advanced.emojiCache', 'emojiCacheMb', 'advanced.emojiCacheDesc'),
+          num('advanced.photoCache', 'photoCacheMb', 'advanced.photoCacheDesc'),
+          num('advanced.stickerCache', 'stickerCacheMb', 'advanced.stickerCacheDesc'),
+          num('advanced.textCache', 'textCacheMb', 'advanced.textCacheDesc'),
+          num('advanced.emojiFetchLimit', 'emojiFetchLimit', 'advanced.emojiFetchLimitDesc'),
+          num('advanced.emojiRetryMin', 'failedEmojiRetryMins', 'advanced.emojiRetryMinDesc'),
         ],
       },
       {
         title: 'advanced.burst',
         fields: [
-          num('advanced.burstSampleWindow', 'burstSampleWindow', 'Burst rate sample window size'),
-          num(
-            'advanced.burstElevated',
-            'burstElevatedThreshold',
-            'Messages per second threshold for elevated burst level'
-          ),
-          num(
-            'advanced.burstHigh',
-            'burstHighThreshold',
-            'Messages per second threshold for high burst level'
-          ),
-          num(
-            'advanced.burstExtreme',
-            'burstExtremeThreshold',
-            'Messages per second threshold for extreme burst level'
-          ),
+          num('advanced.burstSampleWindow', 'burstSampleWindow', 'advanced.burstSampleWindowDesc'),
+          num('advanced.burstElevated', 'burstElevatedThreshold', 'advanced.burstElevatedDesc'),
+          num('advanced.burstHigh', 'burstHighThreshold', 'advanced.burstHighDesc'),
+          num('advanced.burstExtreme', 'burstExtremeThreshold', 'advanced.burstExtremeDesc'),
         ],
       },
       {
@@ -537,93 +398,81 @@ export const PANES: PaneDef[] = [
           num(
             'advanced.tuningBacklogInjectionMax',
             'backlogInjectionMax',
-            'Maximum backlog injection rate cap'
+            'advanced.tuningBacklogInjectionMaxDesc'
           ),
           num(
             'advanced.tuningDensityRamp',
             'backlogDensityRampMs',
-            'Density ramp duration for backlog injection in milliseconds'
+            'advanced.tuningDensityRampDesc'
           ),
           num(
             'advanced.tuningPollFallback',
             'livePollFallbackMs',
-            'Live poll fallback delay in milliseconds'
+            'advanced.tuningPollFallbackDesc'
           ),
           num(
             'advanced.tuningPollFailureLimit',
             'livePollFailureLimit',
-            'Consecutive poll failures before circuit breaker trips'
+            'advanced.tuningPollFailureLimitDesc'
           ),
           num(
             'advanced.tuningSpeedBoostThreshold',
             'speedBoostThreshold',
-            'Pending messages to trigger speed boost'
+            'advanced.tuningSpeedBoostThresholdDesc'
           ),
           range(
             'advanced.tuningBacklogPause',
             'backlogPauseThreshold',
-            'Lane utilization ratio to pause backlog injection'
+            'advanced.tuningBacklogPauseDesc'
           ),
           range(
             'advanced.tuningBacklogResume',
             'backlogResumeThreshold',
-            'Lane utilization ratio to resume backlog injection'
+            'advanced.tuningBacklogResumeDesc'
           ),
           num(
             'advanced.tuningActivityTimeout',
             'activityTimeoutMs',
-            'Chat activity timeout in milliseconds'
+            'advanced.tuningActivityTimeoutDesc'
           ),
-          num(
-            'advanced.tuningStaggerMax',
-            'staggerMaxDelayMs',
-            'Max stagger delay for messages in same batch'
-          ),
+          num('advanced.tuningStaggerMax', 'staggerMaxDelayMs', 'advanced.tuningStaggerMaxDesc'),
           num(
             'advanced.tuningStaggerMedium',
             'staggerMediumDelayMs',
-            'Medium stagger delay when queue depth is medium'
+            'advanced.tuningStaggerMediumDesc'
           ),
           num(
             'advanced.tuningEmojiTimeout',
             'emojiFetchTimeoutMs',
-            'Timeout for emoji fetch operations'
+            'advanced.tuningEmojiTimeoutDesc'
           ),
           num(
             'advanced.tuningDensityRampMax',
             'backlogDensityRampMaxMs',
-            'Max density ramp duration for backlog injection'
+            'advanced.tuningDensityRampMaxDesc'
           ),
           num(
             'advanced.tuningInjectionRateMin',
             'backlogInjectionRateMin',
-            'Minimum backlog injection rate (msg/s)'
+            'advanced.tuningInjectionRateMinDesc'
           ),
-          num(
-            'advanced.tuningSpeedBoostMax',
-            'speedBoostMax',
-            'Max speed boost factor for burst compensation'
-          ),
+          num('advanced.tuningSpeedBoostMax', 'speedBoostMax', 'advanced.tuningSpeedBoostMaxDesc'),
           num(
             'advanced.tuningSpeedBoostDenom',
             'speedBoostDenom',
-            'Speed boost denominator for EMA rate scaling'
+            'advanced.tuningSpeedBoostDenomDesc'
           ),
           num(
             'advanced.tuningToggleCooldown',
             'backlogToggleCooldownMs',
-            'Cooldown between backlog pause toggles'
+            'advanced.tuningToggleCooldownDesc'
           ),
           num(
             'advanced.replayPrefetchPages',
             'replayPrefetchPages',
-            'Max pages to prefetch in replay mode'
+            'advanced.replayPrefetchPagesDesc'
           ),
-          num(
-            'advanced.replayBatchLimit',
-            'replayBatchLimit',
-            'Max batches to fetch in replay initialization'
-          ),
+          num('advanced.replayBatchLimit', 'replayBatchLimit', 'advanced.replayBatchLimitDesc'),
         ],
       },
       {
@@ -633,21 +482,17 @@ export const PANES: PaneDef[] = [
             'advanced.logLevel',
             'logLevel',
             [
-              ['warn', 'Warnings only'],
-              ['info', 'Info'],
-              ['debug', 'Debug (verbose)'],
+              ['warn', 'advanced.logLevelWarn'],
+              ['info', 'advanced.logLevelInfo'],
+              ['debug', 'advanced.logLevelDebug'],
             ],
-            'Console diagnostic output verbosity'
+            'advanced.logLevelDesc'
           ),
-          chk(
-            'advanced.debugOverlay',
-            'showDebugOverlay',
-            'Show performance debug overlay on the video player'
-          ),
+          chk('advanced.debugOverlay', 'showDebugOverlay', 'advanced.debugOverlayDesc'),
           chk(
             'advanced.ignoreReducedMotion',
             'ignoreReducedMotion',
-            'Force scroll animations even when OS reduced-motion is enabled (requires page refresh)'
+            'advanced.ignoreReducedMotionDesc'
           ),
         ],
       },
@@ -664,7 +509,7 @@ export const PANES: PaneDef[] = [
             'translation.language',
             'language',
             [
-              ['auto', 'Auto (Browser)'],
+              ['auto', 'translation.languageAuto'],
               ['en', 'English'],
               ['ko', '한국어'],
               ['ja', '日本語'],
@@ -683,14 +528,14 @@ export const PANES: PaneDef[] = [
           sel(
             'translation.service',
             'translationService',
-            [['auto', 'Auto (Chrome built-in)']],
+            [['auto', 'translation.serviceAuto']],
             'translation.serviceDesc'
           ),
           sel(
             'translation.source',
             'translationSource',
             [
-              ['auto', 'Auto-detect'],
+              ['auto', 'translation.sourceAuto'],
               ['en', 'English'],
               ['ko', '한국어'],
               ['ja', '日本語'],
@@ -704,7 +549,7 @@ export const PANES: PaneDef[] = [
             'translation.target',
             'translationTarget',
             [
-              ['auto', 'Auto (Browser)'],
+              ['auto', 'translation.languageAuto'],
               ['ko', '한국어'],
               ['en', 'English'],
               ['ja', '日本語'],
@@ -718,8 +563,8 @@ export const PANES: PaneDef[] = [
             'translation.displayMode',
             'translationMode',
             [
-              ['dual', 'Dual (original + translation)'],
-              ['replace', 'Replace (translation only)'],
+              ['dual', 'translation.displayModeDual'],
+              ['replace', 'translation.displayModeReplace'],
             ],
             'translation.displayModeDesc'
           ),
