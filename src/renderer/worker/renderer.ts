@@ -582,15 +582,17 @@ export class WorkerRenderer {
                 this.reflowActiveMessages();
               }
               // Issue 4: When danmakuMode changes, active messages have positions
-              // computed for the old mode — clear state to avoid rendering artifacts.
-              // The main thread recalculates positions for its own messages; clearing
-              // the worker state ensures consistency on the next message batch.
+              // computed for the old mode — reflow them into the new mode layout
+              // instead of clearing state (which loses all active messages).
+              // The worker's reflowActiveMessages() recomputes startX, x, and
+              // duration based on this.config.danmakuMode, matching the main
+              // thread Canvas2D behavior.
               if (
                 data.config &&
                 (data.config as WorkerConfig).danmakuMode !== undefined &&
                 (data.config as WorkerConfig).danmakuMode !== prevMode
               ) {
-                this.handleClearState();
+                this.reflowActiveMessages();
               }
             }
             break;
