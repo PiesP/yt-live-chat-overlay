@@ -2223,13 +2223,13 @@ export class CanvasRenderer extends RendererBase {
   private getStatusMessage(status: ConnectionStatus): string {
     switch (status) {
       case 'connecting':
-        return t('Connecting\u2026');
+        return t('status.connecting');
       case 'degraded':
         return t('status.unstable');
       case 'disconnected':
-        return t('Disconnected \u2014 Click to reload');
+        return t('status.disconnected');
       case 'standby':
-        return t('Waiting for live stream\u2026');
+        return t('status.waiting');
       default:
         return '';
     }
