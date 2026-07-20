@@ -401,9 +401,18 @@ export abstract class ChatSource implements Pauseable {
         );
         // Abort any pending pause listeners before force-unpausing,
         // otherwise the orphaned pauseAbortController signal lingers.
-        this.pauseAbortController?.abort();
-        this.pauseAbortController = null;
-        this.pauseReasons.clear();
+        // Only clear 'general' (from deprecated setPaused path),
+        // keep 'visibility', 'video' — managed by their own controllers.
+        // Using clear() would also wipe the video pause reason set during
+        // buffering (waiting event), allowing chat to render mid-buffer.
+        this.pauseReasons.delete('general');
+        if (this.pauseReasons.size === 0) {
+          // General was the last reason — wake up any waitWhilePaused
+          // loop and mark as active for the health watchdog.
+          this.pauseAbortController?.abort();
+          this.pauseAbortController = null;
+          this.markActivity();
+        }
       }
     }
 
