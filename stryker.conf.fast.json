@@ -16,6 +16,11 @@
   "reporters": ["progress"],
   "coverageAnalysis": "all",
   "inPlace": true,
+  "thresholds": {
+    "high": 60,
+    "low": 40,
+    "break": 30
+  },
   "concurrency": 2,
   "timeoutMS": 60000,
   "plugins": ["@stryker-mutator/vitest-runner"],

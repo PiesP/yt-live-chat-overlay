@@ -14,7 +14,7 @@ branches:
       required_status_checks:
         strict: true
         contexts:
-          - "✅ Verify"
+          - "✅ Quality"
           - "🛡️ OSV Vulnerability Scan (PR Diff)"
 
       enforce_admins: false

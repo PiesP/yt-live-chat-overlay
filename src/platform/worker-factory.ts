@@ -27,8 +27,10 @@ export function workerSupported(): boolean {
   // so new URL(relative, import.meta.url) produces an invalid URL.
   // Worker bundling is not supported in this context.
   // Detect by checking whether import.meta.url is a real URL.
+  // Extract to a local variable to suppress Vite's dynamic URL warning.
+  const metaUrl: string = import.meta.url;
   try {
-    new URL('.', import.meta.url);
+    new URL('.', metaUrl);
   } catch {
     return false;
   }
@@ -56,5 +58,8 @@ export function createWorkerUrl(relativePath: string): string | URL {
     const basename = relativePath.replace(/^\.\//, '').replace(/\.ts$/i, '.js');
     return chromeApi.runtime.getURL(`workers/${basename}`);
   }
-  return new URL(relativePath, import.meta.url);
+  // Fallback: construct URL relative to the current module.
+  // Use a local variable to suppress Vite's dynamic URL warning.
+  const fallbackUrl: string = import.meta.url;
+  return new URL(relativePath, fallbackUrl);
 }
