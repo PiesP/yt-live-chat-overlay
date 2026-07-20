@@ -45,7 +45,7 @@ export class BacklogIndicator {
       border-radius: 4px; pointer-events: none; user-select: none;
       opacity: 0; transition: opacity 0.3s ease;
     `;
-    el.textContent = t('Loading chat history...');
+    el.textContent = t('indicator.loading');
     document.body.appendChild(el);
     this.indicatorEl = el;
 
@@ -63,7 +63,7 @@ export class BacklogIndicator {
   update(processed: number, total: number): void {
     if (!this.indicatorEl) return;
     const pct = Math.round((total > 0 ? processed / total : 1) * 100);
-    this.indicatorEl.textContent = `${t('Loading chat history...')} ${processed}/${total} (${pct}%)`;
+    this.indicatorEl.textContent = `${t('indicator.loading')} ${processed}/${total} (${pct}%)`;
   }
 
   /** Begin fade-out; auto-removes after HIDE_DELAY_MS. */

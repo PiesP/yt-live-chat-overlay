@@ -13,15 +13,17 @@
  * Usage:
  *   import { t, resolveActiveLanguage } from '@i18n/index';
  *   resolveActiveLanguage('auto');          // at startup
- *   element.textContent = t('Chat Overlay'); // in DOM construction
+ *   element.textContent = t('app.title'); // in DOM construction
  */
 
 import type { LanguageSetting, TranslationLanguage, TranslationTarget } from '@app-types';
 import { AR } from '@i18n/ar';
+import { EN } from '@i18n/en';
 import { ES } from '@i18n/es';
 import { JA } from '@i18n/ja';
 import { KO } from '@i18n/ko';
 import { ZH_CN } from '@i18n/zh-CN';
+import { detectLocale } from '@piesp/browser-core/locale';
 import { getUILanguage as getPlatformUILanguage } from '@platform/language-adapter';
 
 /** Language codes with actual translations (excluding 'auto'). Reuses TranslationLanguage from app-types. */
@@ -66,27 +68,6 @@ export function resetActiveLanguage(): void {
 
 // ── Browser language detection ────────────────────────────────────────────
 
-const LANGUAGE_PATTERNS: ReadonlyArray<[SupportedLanguage, RegExp]> = [
-  ['en', /^en\b/i],
-  ['ko', /^ko\b/i],
-  ['ja', /^ja\b/i],
-  ['es', /^es\b/i],
-  ['zh-CN', /^(?:zh-TW|zh-HK|zh)\b/i],
-  ['ar', /^ar\b/i],
-];
-
-/**
- * Iterate over an array of language codes and return the first supported match.
- */
-function matchLanguages(languages: string[]): SupportedLanguage {
-  for (const lang of languages) {
-    for (const [code, re] of LANGUAGE_PATTERNS) {
-      if (re.test(lang)) return code;
-    }
-  }
-  return 'en';
-}
-
 /**
  * Detect the best supported language from the browser environment.
  *
@@ -106,30 +87,11 @@ export function detectBrowserLanguage(
   languages?: readonly string[]
 ): SupportedLanguage {
   try {
-    // 1. Platform-provided UI language (extension context only)
     const uiLanguage = (getUILang ?? getPlatformUILanguage)();
     if (uiLanguage) {
-      return matchLanguages([uiLanguage]);
+      return detectLocale({ platformUILanguage: uiLanguage });
     }
-
-    // 2. Navigator languages array (user preference order)
-    const navLanguages =
-      languages ??
-      (typeof navigator !== 'undefined'
-        ? (navigator.languages as readonly string[] | undefined)
-        : undefined);
-    if (navLanguages && navLanguages.length > 0) {
-      return matchLanguages([...navLanguages]);
-    }
-
-    // 3. Single-language fallback
-    const navLanguage =
-      languages?.[0] ?? (typeof navigator !== 'undefined' ? navigator.language : undefined);
-    if (navLanguage) {
-      return matchLanguages([navLanguage]);
-    }
-
-    return 'en';
+    return detectLocale(languages ? { languages } : {});
   } catch {
     return 'en';
   }
@@ -151,7 +113,8 @@ export function resolveTranslationTarget(target: TranslationTarget): SupportedLa
 type TranslationMap = Record<string, string>;
 
 export const TRANSLATION_MAPS: Record<SupportedLanguage, TranslationMap> = {
-  en: {}, // English: no translation needed (strings are the keys)
+  en: EN,
+
   ko: KO,
   ja: JA,
   es: ES,

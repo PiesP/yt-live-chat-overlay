@@ -325,7 +325,7 @@ main();
 function setupMenuCommands(): void {
   registerMenuCommands([
     {
-      name: t('Reset overlay settings'),
+      name: t('reset.confirmDesc'),
       action: () => {
         const app = window.__ytChatOverlay;
         if (app) {
@@ -334,7 +334,7 @@ function setupMenuCommands(): void {
       },
     },
     {
-      name: t('Reload overlay'),
+      name: t('app.reload'),
       action: () => {
         const app = window.__ytChatOverlay;
         if (app?.restartRuntime) {

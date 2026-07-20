@@ -198,13 +198,13 @@ export class SettingsUi {
       this.button.type = 'button';
       this.button.className = 'yt-chat-overlay-settings-button';
       this.button.textContent = '\u2699';
-      this.button.setAttribute('aria-label', t('Chat overlay settings'));
+      this.button.setAttribute('aria-label', t('app.settings'));
       // Native Popover API tooltip with interestfor (Chrome 133+).
       // Falls back to traditional title attribute on unsupported browsers.
       if (SettingsUi.supportsHints) {
         this.button.setAttribute('interestfor', SettingsUi.SETTINGS_TOOLTIP_ID);
       } else {
-        this.button.title = t('Chat overlay settings');
+        this.button.title = t('app.settings');
       }
       this.button.addEventListener('click', () => this.open());
       // commandfor Invoker Commands (Chrome 134+) as progressive enhancement.
@@ -226,13 +226,13 @@ export class SettingsUi {
       this.reloadButton.type = 'button';
       this.reloadButton.className = 'yt-chat-overlay-reload-button';
       this.reloadButton.textContent = '\u21BB';
-      this.reloadButton.setAttribute('aria-label', t('Reload overlay'));
+      this.reloadButton.setAttribute('aria-label', t('app.reload'));
       // Native Popover API tooltip with interestfor (Chrome 133+).
       // Falls back to traditional title attribute on unsupported browsers.
       if (SettingsUi.supportsHints) {
         this.reloadButton.setAttribute('interestfor', SettingsUi.RELOAD_TOOLTIP_ID);
       } else {
-        this.reloadButton.title = t('Reload overlay');
+        this.reloadButton.title = t('app.reload');
       }
       this.reloadButton.addEventListener('click', () => {
         this.handleReloadClick();
@@ -262,7 +262,7 @@ export class SettingsUi {
       settingsTip.id = SettingsUi.SETTINGS_TOOLTIP_ID;
       settingsTip.className = 'yt-chat-overlay-tooltip';
       settingsTip.setAttribute('popover', 'hint');
-      settingsTip.textContent = t('Chat overlay settings');
+      settingsTip.textContent = t('app.settings');
       container.appendChild(settingsTip);
     }
 
@@ -272,7 +272,7 @@ export class SettingsUi {
       reloadTip.id = SettingsUi.RELOAD_TOOLTIP_ID;
       reloadTip.className = 'yt-chat-overlay-tooltip';
       reloadTip.setAttribute('popover', 'hint');
-      reloadTip.textContent = t('Reload overlay');
+      reloadTip.textContent = t('app.reload');
       container.appendChild(reloadTip);
     }
   }
@@ -549,7 +549,7 @@ export class SettingsUi {
     const cancelBtn = document.createElement('button');
     cancelBtn.type = 'button';
     cancelBtn.className = 'yt-chat-overlay-settings-confirm-cancel';
-    cancelBtn.textContent = t('Cancel');
+    cancelBtn.textContent = t('app.cancel');
 
     const okBtn = document.createElement('button');
     okBtn.type = 'button';
@@ -652,7 +652,7 @@ export class SettingsUi {
           if (typeof text !== 'string') return;
           const parsed = JSON.parse(text) as Record<string, unknown>;
           if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-            this.showToast(t('Import failed: invalid settings format'));
+            this.showToast(t('import.invalidFormat'));
             log.warn('settings.import.invalid-format');
             return;
           }
@@ -669,9 +669,9 @@ export class SettingsUi {
           this.form.populateForm(this.getSettings());
           const persist = this.onPersist ?? this.onChange;
           persist(settings);
-          this.showToast(t('Settings imported successfully'));
+          this.showToast(t('import.success'));
         } catch (error: unknown) {
-          this.showToast(t('Import failed: invalid JSON'));
+          this.showToast(t('import.invalidJson'));
           log.warn('settings.import.invalid-json', { error: String(error) });
         }
       });
