@@ -6,10 +6,8 @@ import { throwIfAborted as throwIfAbortedFn } from '@piesp/browser-core/error';
 import { createLogger } from '@util/logging';
 
 export { sleep } from '@piesp/browser-core/async';
-export { isAbortError } from '@piesp/browser-core/error';
-
 /** @deprecated Import from @piesp/browser-core/error instead. */
-export { throwIfAborted as throwIfAborted } from '@piesp/browser-core/error';
+export { isAbortError, throwIfAborted as throwIfAborted } from '@piesp/browser-core/error';
 
 // Re-export for internal module use
 const throwIfAborted = throwIfAbortedFn;

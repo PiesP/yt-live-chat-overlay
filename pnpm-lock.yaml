@@ -10,13 +10,14 @@ overrides:
 importers:
 
   .:
+    dependencies:
+      '@piesp/browser-core':
+        specifier: file:packages/core
+        version: file:packages/core
     devDependencies:
       '@biomejs/biome':
         specifier: ^2.5.4
         version: 2.5.4
-      '@piesp/browser-core':
-        specifier: file:packages/core
-        version: file:packages/core
       '@playwright/test':
         specifier: ^1.61.1
         version: 1.61.1
