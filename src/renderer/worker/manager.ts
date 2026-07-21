@@ -29,6 +29,7 @@ import {
   sendSetPausedToWorker,
   sendUpdateConfigToWorker,
 } from './common';
+import type { WorkerMessage } from './types';
 
 type DimensionResult = { width: number; height: number };
 
@@ -137,6 +138,23 @@ export class RenderWorkerManager {
   private _liveRegionCallback: ((snippets: string[]) => void) | null = null;
   /** Callback invoked when the worker reaches an unrecoverable message-error state. */
   private _fatalErrorCallback: ((reason: string) => void) | null = null;
+
+  /**
+   * Batch of pending Worker messages collected in the current microtask turn.
+   * Flushed atomically via queueMicrotask to reduce postMessage overhead
+   * during chat bursts. ImageBitmaps are deduplicated by URL on flush.
+   */
+  private pendingBatch: Array<{
+    /** The actual WorkerMessage (extracted from the {type, messages} wrapper). */
+    msg: WorkerMessage;
+    transferredImages: Array<{
+      url: string;
+      bitmap: ImageBitmap;
+      target: 'emoji' | 'author' | 'sticker';
+    }>;
+    transferList: ImageBitmap[];
+  }> = [];
+  private batchFlushScheduled = false;
 
   /** Ping/pong health check for detecting crashed or unresponsive workers. */
   private pingTimer: ReturnType<typeof setInterval> | null = null;
@@ -563,9 +581,69 @@ export class RenderWorkerManager {
     const id = workerMessageId[0]?.id;
     if (id) this.sentMessages.set(id, message);
 
-    if (transferredImages.length > 0) {
-      workerMessage.imageData = transferredImages;
-      this.worker.postMessage(workerMessage, transferList);
+    // ── Batch instead of immediate postMessage ──────────────────────
+    // During chat bursts, multiple sendToWorker calls arrive in the same
+    // microtask turn. Batching them into a single postMessage reduces
+    // cross-thread overhead while keeping display latency to one microtask.
+    const innerMsg = (workerMessage.messages as WorkerMessage[])[0]!;
+    this.pendingBatch.push({ msg: innerMsg, transferredImages, transferList });
+    this.scheduleBatchFlush();
+  }
+
+  /**
+   * Schedule an atomic flush of all pending batch messages.
+   * Uses queueMicrotask so messages collected in the current sync execution
+   * context are dispatched together in one postMessage call.
+   */
+  private scheduleBatchFlush(): void {
+    if (this.batchFlushScheduled || !this.worker) return;
+    this.batchFlushScheduled = true;
+    queueMicrotask(() => this.flushBatch());
+  }
+
+  /**
+   * Flush all pending batch messages to the Worker in a single postMessage.
+   * ImageBitmaps are deduplicated by URL to avoid DataCloneError when the
+   * same bitmap (e.g. same emoji in two consecutive messages) is referenced
+   * by multiple entries in the same batch.
+   */
+  private flushBatch(): void {
+    this.batchFlushScheduled = false;
+    const batch = this.pendingBatch.splice(0);
+    if (batch.length === 0 || !this.worker) return;
+
+    const messages: WorkerMessage[] = [];
+    const seenUrls = new Set<string>();
+    const allTransferredImages: Array<{
+      url: string;
+      bitmap: ImageBitmap;
+      target: 'emoji' | 'author' | 'sticker';
+    }> = [];
+    const allTransferList: ImageBitmap[] = [];
+
+    for (const entry of batch) {
+      messages.push(entry.msg);
+
+      // Deduplicate ImageBitmaps by URL across the batch
+      for (const img of entry.transferredImages) {
+        if (!seenUrls.has(img.url)) {
+          seenUrls.add(img.url);
+          allTransferredImages.push(img);
+          allTransferList.push(img.bitmap);
+        }
+      }
+    }
+
+    if (messages.length === 0) return;
+
+    const workerMessage: Record<string, unknown> = {
+      type: 'addMessages',
+      messages,
+    };
+
+    if (allTransferredImages.length > 0) {
+      workerMessage.imageData = allTransferredImages;
+      this.worker.postMessage(workerMessage, allTransferList);
     } else {
       this.worker.postMessage(workerMessage);
     }
