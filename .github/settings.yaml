@@ -19,7 +19,7 @@ branches:
           - "pr-gate/unit"
           - "pr-gate/e2e"
           - "pr-gate/duplication"
-          - "pr-gate/osv"
+          - "pr-gate/osv / osv-scan"
           - "pr-gate/semgrep"
 
       enforce_admins: false
