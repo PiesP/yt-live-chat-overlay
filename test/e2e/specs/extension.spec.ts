@@ -5,7 +5,7 @@
  * @fileoverview E2E tests for the Chrome extension deployment path.
  *
  * These tests load the built Chrome extension (dist-extension/) and verify
- * that the content script injects the overlay on a real youtube.com page,
+ * that the content script injects the page script on a real youtube.com page,
  * exercising the actual extension manifest + service worker + content
  * script + MAIN-world bridge pipeline.
  *
@@ -15,12 +15,11 @@
  * chrome.* APIs — this file tests the real extension path.
  */
 
-import { test, expect } from '@playwright/test';
+import { chromium, test, expect } from '@playwright/test';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const EXTENSION_PATH = resolve(process.cwd(), 'dist-extension');
-const OVERLAY_ID = 'yt-live-chat-overlay';
 
 test.describe('Chrome Extension', () => {
   test('extension directory exists and contains manifest.json', () => {
@@ -31,26 +30,44 @@ test.describe('Chrome Extension', () => {
     expect(manifest.content_scripts).toBeDefined();
   });
 
-  test('extension loads content script on youtube.com', async ({ browser }) => {
+  test('extension injects page script on youtube.com', async () => {
     test.skip(!existsSync(EXTENSION_PATH), `Extension not found at ${EXTENSION_PATH}. Run pnpm build:extension first.`);
 
-    // Chrome extension loading requires a persistent context with
-    // extension-specific launch arguments. This pattern loads the
-    // extension at the browser level, not per-context.
-    const context = await browser.newContext({
+    // Extensions are loaded at browser launch time. A normal browser fixture
+    // context cannot load an unpacked MV3 extension after the browser starts.
+    const context = await chromium.launchPersistentContext('', {
+      // The default Playwright headless shell does not support extensions.
+      // The full Chromium channel does, including under xvfb in CI.
+      channel: 'chromium',
       viewport: { width: 1280, height: 720 },
-    });
-    const page = await context.newPage();
-    await page.goto('https://www.youtube.com/watch?v=dQw4w9WgXcQ', {
-      waitUntil: 'domcontentloaded',
-      timeout: 30_000,
-    });
-
-    // The content script should inject the overlay container
-    await expect(page.locator(`#${OVERLAY_ID}`)).toBeAttached({
-      timeout: 10_000,
+      args: [
+        '--disable-blink-features=AutomationControlled',
+        '--disable-infobars',
+        '--no-sandbox',
+        `--disable-extensions-except=${EXTENSION_PATH}`,
+        `--load-extension=${EXTENSION_PATH}`,
+      ],
     });
 
-    await context.close();
+    try {
+      const page = await context.newPage();
+      await page.goto('https://www.youtube.com/watch?v=dQw4w9WgXcQ', {
+        waitUntil: 'domcontentloaded',
+        timeout: 30_000,
+      });
+
+      // A normal VOD does not have a live-chat panel, so the application
+      // intentionally does not create its overlay runtime there. The
+      // exposed handle and extension-owned page script prove that the full
+      // content-script → MAIN-world bootstrap path ran successfully.
+      await expect.poll(
+        () => page.evaluate(() => typeof window.__ytChatOverlay === 'object'),
+        { timeout: 10_000 },
+      ).toBe(true);
+      await expect(page.locator('script[src^="chrome-extension://"][src$="/page-script.js"]'))
+        .toHaveCount(1);
+    } finally {
+      await context.close();
+    }
   });
 });

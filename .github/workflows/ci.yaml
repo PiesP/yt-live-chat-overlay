@@ -120,7 +120,7 @@ jobs:
       - name: 🎭 Run E2E tests
         run: |
           pnpm exec playwright install --with-deps chromium
-          pnpm test:e2e
+          xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" pnpm test:e2e
 
   build:
     name: 🏗️ Build all targets
