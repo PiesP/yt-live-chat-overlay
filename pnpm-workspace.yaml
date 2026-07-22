@@ -5,3 +5,11 @@ overrides:
 # the jsdom-based unit and Playwright test environment.
 allowBuilds:
   canvas: true
+
+strictDepBuilds: true
+blockExoticSubdeps: true
+engineStrict: true
+preferFrozenLockfile: true
+autoInstallPeers: true
+strictPeerDependencies: false
+preferOffline: true
