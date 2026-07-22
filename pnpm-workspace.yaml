@@ -1,2 +1,7 @@
 overrides:
   qs@>=6.11.1: ">=6.15.2"
+
+# pnpm 11 blocks dependency build scripts by default. canvas is required by
+# the jsdom-based unit and Playwright test environment.
+allowBuilds:
+  canvas: true
