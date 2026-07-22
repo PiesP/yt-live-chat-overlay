@@ -71,7 +71,6 @@ updates:
     commit-message:
       prefix: "ci(deps)"
     labels:
-      - "ci"
       - "dependencies"
       - "automated"
     reviewers:
