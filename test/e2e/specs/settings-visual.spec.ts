@@ -15,6 +15,7 @@
  */
 
 import { test, expect, type Page } from '@playwright/test';
+import { readFileSync } from 'node:fs';
 import { setupOverlayPage } from '../fixtures/test-utils';
 
 const OVERLAY_ID = 'yt-live-chat-overlay';
@@ -89,5 +90,46 @@ test.describe('Settings UI Visual', () => {
     expect(box).not.toBeNull();
     expect(box!.width).toBeGreaterThan(280);
     expect(box!.height).toBeGreaterThan(180);
+  });
+
+  test('exports the current settings as a versioned JSON download', async ({ page }) => {
+    await openSettingsModal(page);
+
+    const downloadPromise = page.waitForEvent('download');
+    await page.locator('#yt-chat-overlay-settings-backdrop button[data-action="export"]').click();
+    const download = await downloadPromise;
+
+    expect(download.suggestedFilename()).toBe('yt-chat-overlay-settings.json');
+    const path = await download.path();
+    expect(path).toBeTruthy();
+
+    const exported = JSON.parse(readFileSync(path!, 'utf8')) as Record<string, unknown>;
+    expect(exported._version).toBe(1);
+    expect(exported.enabled).toBe(true);
+    expect(exported.colors).toBeTruthy();
+  });
+
+  test('imports valid JSON and applies the settings to the running overlay', async ({ page }) => {
+    await openSettingsModal(page);
+
+    const fileChooserPromise = page.waitForEvent('filechooser');
+    await page.locator('#yt-chat-overlay-settings-backdrop button[data-action="import"]').click();
+    const fileChooser = await fileChooserPromise;
+    await fileChooser.setFiles({
+      name: 'overlay-settings.json',
+      mimeType: 'application/json',
+      buffer: Buffer.from(JSON.stringify({ fontSize: 44, opacity: 0.6 })),
+    });
+
+    const toast = page.locator('#yt-chat-overlay-settings-backdrop [role="status"]');
+    await expect(toast).toContainText(/Settings imported successfully/i);
+
+    const settings = await page.evaluate(() => {
+      const handle = (window as unknown as { __ytChatOverlay?: { getSettings: () => Record<string, unknown> } })
+        .__ytChatOverlay;
+      return handle?.getSettings();
+    });
+    expect(settings?.fontSize).toBe(44);
+    expect(settings?.opacity).toBe(0.6);
   });
 });
