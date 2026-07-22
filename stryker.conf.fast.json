@@ -6,7 +6,21 @@
     "!src/types/**",
     "!src/main.ts",
     "!src/renderer/**",
-    "!src/chat/**"
+    "!src/chat/**",
+    "!src/app/chat-availability-preflight.ts",
+    "!src/app/overlay.ts",
+    "!src/app/runtime-manager.ts",
+    "!src/app/standby-controller.ts",
+    "!src/app/video-pause-controller.ts",
+    "!src/media/image-fetch-manager.ts",
+    "!src/platform/menu-adapters.ts",
+    "!src/platform/storage-adapters.ts",
+    "!src/platform/worker-factory.ts",
+    "!src/settings/store.ts",
+    "!src/settings/ui/controller.ts",
+    "!src/settings/ui/styles.ts",
+    "!src/translation/language-detector.ts",
+    "!src/util/backlog-sampler.ts"
   ],
   "testRunner": "vitest",
   "vitest": {
