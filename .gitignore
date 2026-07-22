@@ -59,6 +59,7 @@ plans/
 
 # AI Instructions (not shared to remote)
 AGENTS.md
+CODEX_WORKFLOW.md
 CLAUDE.md
 GEMINI.md
 CODE_STANDARDS.md
@@ -69,4 +70,3 @@ TESTING.md
 .github/copilot-instructions.md
 .github/prompts/
 .editorconfig
-
