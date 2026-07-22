@@ -610,7 +610,12 @@ export class RenderWorkerManager {
   private flushBatch(): void {
     this.batchFlushScheduled = false;
     const batch = this.pendingBatch.splice(0);
-    if (batch.length === 0 || !this.worker) return;
+    if (batch.length === 0) return;
+    const worker = this.worker;
+    if (!worker) {
+      this.discardPendingBatch(batch);
+      return;
+    }
 
     const messages: WorkerMessage[] = [];
     const seenUrls = new Set<string>();
@@ -643,10 +648,40 @@ export class RenderWorkerManager {
 
     if (allTransferredImages.length > 0) {
       workerMessage.imageData = allTransferredImages;
-      this.worker.postMessage(workerMessage, allTransferList);
+      try {
+        worker.postMessage(workerMessage, allTransferList);
+      } catch (error) {
+        this.discardPendingBatch(batch);
+        log.warn('renderer.worker.batch-send-failed', { error: String(error) });
+      }
     } else {
-      this.worker.postMessage(workerMessage);
+      try {
+        worker.postMessage(workerMessage);
+      } catch (error) {
+        this.discardPendingBatch(batch);
+        log.warn('renderer.worker.batch-send-failed', { error: String(error) });
+      }
     }
+  }
+
+  /** Release ImageBitmaps that were removed from the cache but never transferred. */
+  private discardPendingBatch(
+    batch: Array<{
+      msg: WorkerMessage;
+      transferredImages: Array<{
+        url: string;
+        bitmap: ImageBitmap;
+        target: 'emoji' | 'author' | 'sticker';
+      }>;
+      transferList: ImageBitmap[];
+    }>
+  ): void {
+    const bitmaps = new Set<ImageBitmap>();
+    for (const entry of batch) {
+      this.sentMessages.delete(entry.msg.id);
+      for (const image of entry.transferredImages) bitmaps.add(image.bitmap);
+    }
+    for (const bitmap of bitmaps) bitmap.close();
   }
 
   /** Send a translation result to the render worker. */
@@ -753,6 +788,9 @@ export class RenderWorkerManager {
 
   /** Destroy the render worker. */
   destroy(): void {
+    this.batchFlushScheduled = false;
+    const pendingBatch = this.pendingBatch.splice(0);
+    if (pendingBatch.length > 0) this.discardPendingBatch(pendingBatch);
     this.dimensionsUnsubscribe?.();
     this.dimensionsUnsubscribe = null;
     this.stopPingPong();
