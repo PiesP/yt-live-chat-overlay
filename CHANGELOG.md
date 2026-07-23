@@ -4,7 +4,39 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-## [0.43.0] - 2026-07-19
+## [0.44.0] - 2026-07-23
+
+### Added
+
+- **Arabic locale** — Auto-detection support for Arabic language.
+- **i18n dot-notation keys** — Migrated locale detection to @piesp/browser-core/locale and converted gettext calls to structured dot-notation keys.
+- **Release validation pipeline** — Parallel quality, unit, E2E, duplication, and mutation gates before publish.
+- **Chrome extension E2E skeleton** — Initial end-to-end test infrastructure for extension runtime.
+
+### Fixed
+
+- **i18n completeness** — Translated 25 untranslated keys across all 5 non-English locales; fixed corrupted keys and escaped-unicode gettext calls.
+- **Settings race conditions** — Serialized settings writes and shared live channel memory to prevent corruption.
+- **Chat video-pause sync** — Synchronized video pause state and replay timeouts correctly.
+- **Session restart deadlocks** — Guarded session restarts and refreshed chat settings atomically.
+- **Worker danmaku mode switch** — Preserved active messages during renderer mode transitions.
+- **Drift recovery and buffering** — Prevented drift recovery from clearing legitimate buffering pause reasons.
+- **Font chip keyboard inaccessibility** — (carried from 0.42.3 cycle).
+- **Renderer test alignment** — Kept test fixtures aligned with the complete settings schema.
+- **Dependency security** — Patched moderate DoS advisory in qs; updated postcss and fast-uri.
+
+### Changed
+
+- **CI structure** — Split fast and deep verification workflows; normalized dependency and security workflows.
+- **Worker postMessage batching** — Batched Worker postMessage calls via queueMicrotask flush for performance.
+- **Extension release gates** — Added version parity and i18n parity checks to the release workflow.
+- **Mutation gate** — Corrected fast Stryker command to use positional config.
+- **Dependencies** — Updated @biomejs/biome to ^2.5.5; bumped browser-core submodule.
+
+### Removed
+
+- **Repeated quality checks** — Build pipeline no longer re-runs quality steps that prebuild already covers.
+ - 2026-07-19
 
 ### Added
 
