@@ -108,6 +108,9 @@ jobs:
       - name: 📦 Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: 🏗️ Build dev bundle for E2E
+        run: pnpm build:dev
+
       - name: 🎭 Run E2E tests
         run: |
           pnpm exec playwright install --with-deps chromium
