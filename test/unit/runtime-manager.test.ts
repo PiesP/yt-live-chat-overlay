@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // @vitest-environment jsdom
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { RuntimeManager } from '@app/runtime-manager';
 import type { OverlaySettings } from '@app-types';
 
@@ -43,6 +43,10 @@ function makeDefaults(overrides: Partial<OverlaySettings> = {}): OverlaySettings
 }
 
 describe('RuntimeManager', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   const createOpts = (overrides: { url?: string; settings?: OverlaySettings; valid?: boolean } = {}) => ({
     getCurrentUrl: () => overrides.url ?? 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
     getSettings: () => overrides.settings ?? makeDefaults(),
@@ -57,6 +61,23 @@ describe('RuntimeManager', () => {
     const s = makeDefaults({ fontSize: 64 });
     const rm = new RuntimeManager(createOpts({ settings: s }));
     expect(rm).toBeDefined();
+  });
+
+  it('provides current session settings to ChatSource providers', () => {
+    const initial = makeDefaults({ minTextLength: 2 });
+    const next = makeDefaults({ minTextLength: 5 });
+    const rm = new RuntimeManager(createOpts({ settings: initial }));
+    const internals = rm as unknown as {
+      settings: OverlaySettings | null;
+      getSessionSettings: () => Readonly<OverlaySettings>;
+    };
+
+    internals.settings = initial;
+    const getSessionSettings = internals.getSessionSettings.bind(rm);
+    expect(getSessionSettings()).toBe(initial);
+
+    internals.settings = next;
+    expect(getSessionSettings()).toBe(next);
   });
 
   it('accepts invalid page callback', () => {
@@ -109,5 +130,80 @@ describe('RuntimeManager', () => {
       value: originalVisibilityState,
     });
     internals.stopForegroundListeners();
+  });
+
+  it('cancels a deferred restart when the active session is disposed', () => {
+    vi.useFakeTimers();
+    const rm = new RuntimeManager(createOpts());
+    const internals = rm as unknown as {
+      state: string;
+      targetUrl: string | null;
+      sessionGeneration: number;
+      restartTimer: ReturnType<typeof setTimeout> | null;
+      requestManagedRestart: (reason: 'watchdog') => void;
+      disposeActiveSession: () => void;
+      handleSessionRestart: (reason: 'watchdog') => void;
+    };
+    const restartSpy = vi.spyOn(internals, 'handleSessionRestart');
+
+    internals.state = 'active';
+    internals.targetUrl = 'https://www.youtube.com/watch?v=old';
+    internals.sessionGeneration = 1;
+    internals.requestManagedRestart('watchdog');
+    expect(internals.restartTimer).not.toBeNull();
+
+    internals.disposeActiveSession();
+    internals.targetUrl = 'https://www.youtube.com/watch?v=new';
+    internals.state = 'active';
+    vi.advanceTimersByTime(5_000);
+
+    expect(restartSpy).not.toHaveBeenCalled();
+  });
+
+  it('ignores a deferred restart whose session generation changed', () => {
+    vi.useFakeTimers();
+    const rm = new RuntimeManager(createOpts());
+    const internals = rm as unknown as {
+      state: string;
+      targetUrl: string | null;
+      sessionGeneration: number;
+      requestManagedRestart: (reason: 'watchdog') => void;
+      handleSessionRestart: (reason: 'watchdog') => void;
+    };
+    const restartSpy = vi.spyOn(internals, 'handleSessionRestart');
+
+    internals.state = 'active';
+    internals.targetUrl = 'https://www.youtube.com/watch?v=old';
+    internals.sessionGeneration = 1;
+    internals.requestManagedRestart('watchdog');
+
+    // Simulate a missed cleanup to exercise the callback's identity guard.
+    internals.sessionGeneration = 2;
+    internals.targetUrl = 'https://www.youtube.com/watch?v=new';
+    internals.state = 'active';
+    vi.advanceTimersByTime(5_000);
+
+    expect(restartSpy).not.toHaveBeenCalled();
+  });
+
+  it('does not start a second session while a deferred restart is pending', async () => {
+    vi.useFakeTimers();
+    const rm = new RuntimeManager(createOpts());
+    const internals = rm as unknown as {
+      state: string;
+      targetUrl: string | null;
+      restartTimer: ReturnType<typeof setTimeout> | null;
+      startSession: () => Promise<'started'>;
+    };
+
+    internals.state = 'restarting';
+    internals.targetUrl = 'https://www.youtube.com/watch?v=current';
+    internals.restartTimer = setTimeout(() => {}, 5_000);
+    const startSpy = vi.spyOn(internals, 'startSession').mockResolvedValue('started');
+
+    await rm.reconcileNow('settings-change');
+
+    expect(startSpy).not.toHaveBeenCalled();
+    clearTimeout(internals.restartTimer);
   });
 });

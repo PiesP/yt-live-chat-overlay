@@ -205,6 +205,20 @@ describe('ChannelLanguageMemory.resolveKey', () => {
     });
   });
 
+  describe('live pages with DOM', () => {
+    it('returns channel ID from DOM instead of video ID', () => {
+      const doc = createDoc(
+        '<html><head><meta itemprop="channelId" content="UC-live-channel"></head></html>',
+      );
+      expect(
+        ChannelLanguageMemory.resolveKey(
+          'https://www.youtube.com/live/live-video123',
+          doc,
+        ),
+      ).toBe('UC-live-channel');
+    });
+  });
+
   describe('watch pages without DOM', () => {
     it('falls back to video ID when no document is provided', () => {
       expect(

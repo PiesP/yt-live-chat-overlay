@@ -10,7 +10,7 @@
  */
 
 import type { TranslationLanguage } from '@app-types';
-import { isYouTubeWatch } from '@chat/youtube/url-pattern';
+import { isYouTubeLive, isYouTubeWatch } from '@chat/youtube/url-pattern';
 
 const MAX_ENTRIES = 20;
 
@@ -89,8 +89,8 @@ export class ChannelLanguageMemory {
     const urlKey = ChannelLanguageMemory.keyFromUrl(url);
     if (!urlKey) return null;
 
-    // Watch pages: prefer channel ID from DOM so same-channel streams share memory
-    if (doc && url.includes('/watch')) {
+    // Video pages: prefer channel ID from DOM so same-channel streams share memory
+    if (doc && (isYouTubeWatch(url) || isYouTubeLive(url))) {
       const channelKey = ChannelLanguageMemory.keyFromDocument(doc);
       if (channelKey) return channelKey;
     }

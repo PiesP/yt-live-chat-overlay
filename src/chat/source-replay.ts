@@ -39,6 +39,8 @@ const REPLAY_TOTAL_FAILURE_LIMIT = 15; // 3 backoff cycles before re-initializat
 const REPLAY_PREFETCH_WINDOW_MS = 5000;
 const BACKGROUND_FETCH_INTERVAL_MS = 1000;
 const RAF_FLUSH_BATCH_SIZE = 5;
+/** Maximum replay request duration before the cooperative loop can recover. */
+const REPLAY_FETCH_TIMEOUT_MS = 20_000;
 // replayPrefetchPages — read from this.getSettings()
 
 type ReplayMode = 'playerSeek' | 'continuation';
@@ -470,7 +472,17 @@ export class ReplayChatSource extends ChatSource {
     signal?: AbortSignal,
     playerOffsetMs?: number
   ): Promise<LiveChatPayload | null> {
-    return this.requestPayload(fetchReplayChat, continuation, playerOffsetMs, signal);
+    const timeoutSignal = AbortSignal.timeout(REPLAY_FETCH_TIMEOUT_MS);
+    const mergedSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+
+    return this.requestPayload(fetchReplayChat, continuation, playerOffsetMs, mergedSignal).catch(
+      (error: unknown) => {
+        if (isAbortError(error) && timeoutSignal.aborted && !signal?.aborted) {
+          log.warn('chat.replay.fetch-timeout', { timeoutMs: REPLAY_FETCH_TIMEOUT_MS });
+        }
+        throw error;
+      }
+    );
   }
 
   /**
