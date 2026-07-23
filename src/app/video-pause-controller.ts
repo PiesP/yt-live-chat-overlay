@@ -84,6 +84,14 @@ export class VideoPauseController {
       video.addEventListener('playing', handlePlay);
       video.addEventListener('enterpictureinpicture', handleEnterPiP);
       video.addEventListener('leavepictureinpicture', handleLeavePiP);
+
+      // A video can already be paused before the controller binds (initial
+      // page load, SPA video replacement, or an autoplay-blocked player).
+      // The pause event may have fired before the listener existed, so sync
+      // the current state explicitly.
+      if (video.paused) {
+        handlePause();
+      }
     };
 
     const detachListeners = (video: HTMLVideoElement | undefined): void => {

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 // @vitest-environment jsdom
-import { describe, it, expect, beforeEach } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { ReplayChatSource } from '@chat/source-replay';
+import type { InnertubeContinuationData } from '@chat/youtube/continuation';
 import { DEFAULT_SETTINGS } from '@settings/schema';
 
 /**
@@ -18,6 +19,11 @@ describe('ReplayChatSource', () => {
 
   beforeEach(() => {
     source = new ReplayChatSource(() => DEFAULT_SETTINGS);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   it('constructs without error', () => {
@@ -62,5 +68,37 @@ describe('ReplayChatSource', () => {
   it('stop() is idempotent', () => {
     expect(() => source.stop()).not.toThrow();
     expect(() => source.stop()).not.toThrow();
+  });
+
+  it('aborts a hung replay request after the fetch timeout', async () => {
+    const timeoutController = new AbortController();
+    const timeoutSpy = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(timeoutController.signal);
+
+    const internals = source as unknown as {
+      requestReplayPayload: (
+        continuation: InnertubeContinuationData,
+        signal?: AbortSignal
+      ) => Promise<unknown>;
+      requestPayload: (...args: unknown[]) => Promise<unknown>;
+    };
+    const requestPayload = vi
+      .spyOn(internals, 'requestPayload')
+      .mockImplementation((_fetchFn, _continuation, ...fetchArgs) => {
+        const signal = fetchArgs.at(-1) as AbortSignal;
+        return new Promise((_resolve, reject) => {
+          signal.addEventListener(
+            'abort',
+            () => reject(new DOMException('Aborted', 'AbortError')),
+            { once: true }
+          );
+        });
+      });
+    const request = internals.requestReplayPayload({ continuation: 'test' });
+
+    expect(timeoutSpy).toHaveBeenCalledWith(20_000);
+    expect(requestPayload).toHaveBeenCalledTimes(1);
+    timeoutController.abort();
+
+    await expect(request).rejects.toMatchObject({ name: 'AbortError' });
   });
 });
