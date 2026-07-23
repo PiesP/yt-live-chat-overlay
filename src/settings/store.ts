@@ -38,7 +38,7 @@ export class Settings {
   private readonly onCrossTabChange = (_key: string): void => {
     // A remote event must never replace a local edit that is waiting for its
     // debounced save. The event may be delivered before our write completes.
-    if (this.saving || this.savePending) return;
+    if (this.saving || this.savePending || this.savePromise) return;
     log.debug('settings.store.cross-tab-change');
     void this.reloadFromStorage();
   };
@@ -111,7 +111,12 @@ export class Settings {
       // A local set/preview/reset may have happened while storage I/O was in
       // flight. Preserve that newer in-memory state instead of applying a
       // stale remote snapshot after the await.
-      if (revisionAtStart !== this.localRevision || this.savePending || this.saving) {
+      if (
+        revisionAtStart !== this.localRevision ||
+        this.savePending ||
+        this.saving ||
+        this.savePromise
+      ) {
         return;
       }
       const loaded = normalizeStoredSettings(JSON.parse(raw) as Record<string, unknown>);
@@ -162,7 +167,11 @@ export class Settings {
       clearTimeout(this.saveTimeoutHandle);
       this.saveTimeoutHandle = null;
     }
-    const savePromise = this.save();
+    // A new save may be scheduled while an async adapter write is still in
+    // flight. Chain it behind the previous write so an older snapshot can
+    // never complete after the newer one and overwrite it.
+    const previousSave = this.savePromise;
+    const savePromise = previousSave ? previousSave.then(() => this.save()) : this.save();
     this.savePromise = savePromise;
     try {
       await savePromise;
