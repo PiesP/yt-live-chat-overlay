@@ -239,6 +239,12 @@ export class RuntimeManager {
   /** Timer handle for deferred (cooldown) restart. null when no deferred restart is pending. */
   private restartTimer: ReturnType<typeof setTimeout> | null = null;
 
+  /** Logical session generation used to invalidate delayed and async restarts. */
+  private sessionGeneration = 0;
+
+  /** Active lightweight chat-only restart, if one is in flight. */
+  private chatRestartPromise: Promise<ChatSourceStartStatus> | null = null;
+
   /** Timestamp when dimensions were first observed as null (epoch ms).
    *  Reset when dimensions become non-null. Used for overlay-not-renderable grace period. */
   private dimensionsNullSince: number | null = null;
@@ -330,10 +336,7 @@ export class RuntimeManager {
     }
 
     // Cancel any deferred restart timer
-    if (this.restartTimer !== null) {
-      clearTimeout(this.restartTimer);
-      this.restartTimer = null;
-    }
+    this.clearRestartTimer();
 
     this.clearScheduledReconcile();
     this.disposeActiveSession();
@@ -368,6 +371,18 @@ export class RuntimeManager {
   private async reconcileOnce(): Promise<void> {
     const desired = this.getDesiredState();
     const hasActiveSession = this.targetUrl !== null && !this.isDisposedState;
+
+    // A deferred watchdog restart or a lightweight chat-only restart owns the
+    // current session transition. Settings/page notifications are coalesced
+    // and handled after that transition instead of starting a second source
+    // chain concurrently.
+    if (
+      this.state === 'restarting' &&
+      this.targetUrl !== null &&
+      (this.restartTimer !== null || this.chatRestartPromise !== null)
+    ) {
+      return;
+    }
 
     if (
       hasActiveSession &&
@@ -445,6 +460,7 @@ export class RuntimeManager {
     // Initialize session state from desired state
     this.targetUrl = desired.url;
     this.settings = desired.settings;
+    this.sessionGeneration += 1;
 
     // Set restarting state BEFORE aborting so that async operations
     // checking isDisposedState (e.g., visibility handler) see the
@@ -486,11 +502,14 @@ export class RuntimeManager {
     // - handleSessionRestart for chat-only restarts
   }
 
-  private handleSessionRestart(reason: RuntimeSessionRestartReason): void {
+  private handleSessionRestart(
+    reason: RuntimeSessionRestartReason,
+    expectedGeneration = this.sessionGeneration
+  ): void {
     // The 'restarting' state is set by requestManagedRestart() before calling
     // this method — do NOT guard against it here.  isDisposedState (checked in
     // requestManagedRestart) prevents double-entry before the state transition.
-    if (this.state === 'destroyed') {
+    if (this.state === 'destroyed' || this.sessionGeneration !== expectedGeneration) {
       return;
     }
 
@@ -514,13 +533,21 @@ export class RuntimeManager {
       this.abortController = new AbortController();
       this.resetStartFailures();
 
-      void this.restartChatOnly(reason)
+      const generation = this.sessionGeneration;
+      const restartPromise = this.restartChatOnly(reason);
+      this.chatRestartPromise = restartPromise;
+
+      void restartPromise
         .then((status) => {
-          if (this.isTerminalState) return;
+          if (this.isTerminalState || this.sessionGeneration !== generation) return;
           if (status === 'started') {
             this.state = 'active';
             this.consecutiveWatchdogRestarts = 0;
             log.info('runtime.session.started');
+            // Apply settings that arrived while the chat-only restart was in
+            // flight. The source provider is dynamic, but the renderer and
+            // backlog controller still need their normal reconcile update.
+            this.requestReconcile('settings-change');
           } else {
             // Chat-only restart failed — escalate to full restart.
             log.warn('runtime.chat.restart-only-failed', { status });
@@ -532,10 +559,21 @@ export class RuntimeManager {
           // Aborting a chat-only restart is expected during destroy/navigation.
           // Handle it explicitly so the fire-and-forget promise never becomes
           // an unhandled rejection when the runtime is torn down mid-restart.
-          if (this.isTerminalState || isAbortError(error)) return;
+          if (
+            this.isTerminalState ||
+            this.sessionGeneration !== generation ||
+            isAbortError(error)
+          ) {
+            return;
+          }
           log.warn('runtime.chat.restart-only-error', { error: String(error) });
           this.disposeActiveSession();
           this.requestReconcile('session-restart');
+        })
+        .finally(() => {
+          if (this.chatRestartPromise === restartPromise) {
+            this.chatRestartPromise = null;
+          }
         });
     } else {
       // Full restart: renderer/overlay need recreation.
@@ -666,6 +704,8 @@ export class RuntimeManager {
    * page changes or explicit shutdown.
    */
   private restartChatSourceSoft(): void {
+    this.sessionGeneration += 1;
+
     this.stopForegroundListeners();
     this.stopVideoPauseListeners();
     this.stopChatWatchdog();
@@ -911,8 +951,10 @@ export class RuntimeManager {
   }
 
   private async startChatSource(signal: AbortSignal): Promise<ChatSourceStartStatus> {
-    const settings = this.settings as OverlaySettings;
-    const { chatSource, bootstrapResult } = await createChatSource(() => settings, signal);
+    const { chatSource, bootstrapResult } = await createChatSource(
+      () => this.getSessionSettings(),
+      signal
+    );
     this.chatSource = chatSource;
 
     // Notify renderer of replay mode so it disables burst-driven speed
@@ -1377,22 +1419,30 @@ export class RuntimeManager {
 
     this.state = 'restarting';
 
+    const generation = this.sessionGeneration;
+    const targetUrl = this.targetUrl;
+
     if (delayMs > 0) {
       // Clear any previously deferred restart timer
-      if (this.restartTimer !== null) {
-        clearTimeout(this.restartTimer);
-      }
+      this.clearRestartTimer();
       this.restartTimer = setTimeout(() => {
         this.restartTimer = null;
         // isDisposedState includes 'restarting', but we are intentionally in
-        // 'restarting' state during deferred restart.  Check only for terminal
-        // states where the instance has been torn down and cannot be reused.
-        if (this.state === 'disposed' || this.state === 'destroyed') return;
+        // 'restarting' state during deferred restart. Validate the session
+        // identity so a stale timer cannot restart a replacement session.
+        if (
+          this.state === 'disposed' ||
+          this.state === 'destroyed' ||
+          this.sessionGeneration !== generation ||
+          this.targetUrl !== targetUrl
+        ) {
+          return;
+        }
         log.info('runtime.restart.requested', {
           reason,
           attempt: this.consecutiveWatchdogRestarts,
         });
-        this.handleSessionRestart(reason);
+        this.handleSessionRestart(reason, generation);
       }, delayMs);
     } else {
       log.info('runtime.restart.requested', { reason });
@@ -1794,6 +1844,10 @@ export class RuntimeManager {
     };
   }
 
+  private getSessionSettings(): Readonly<OverlaySettings> {
+    return this.settings ?? this.getSettings();
+  }
+
   private getRemainingSettleDelay(): number {
     if (this.lastPageChangeAt === 0) {
       return 0;
@@ -1820,11 +1874,20 @@ export class RuntimeManager {
     this.scheduledReconcileTimer = clearSafeTimeout(this.scheduledReconcileTimer);
   }
 
+  private clearRestartTimer(): void {
+    if (this.restartTimer !== null) {
+      clearTimeout(this.restartTimer);
+      this.restartTimer = null;
+    }
+  }
+
   private disposeActiveSession(): void {
     // Capture targetUrl before nulling — the act of reading + nulling is the
     // re-entrant guard. If disposeSession re-enters disposeActiveSession,
     // targetUrl is already null and the second call becomes a no-op.
     const _url = this.targetUrl;
+    this.clearRestartTimer();
+    this.sessionGeneration += 1;
     this.targetUrl = null;
     this.settings = null;
     void _url;
