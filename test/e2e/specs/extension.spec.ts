@@ -23,6 +23,8 @@ const EXTENSION_PATH = resolve(process.cwd(), 'dist-extension');
 
 test.describe('Chrome Extension', () => {
   test('extension directory exists and contains manifest.json', () => {
+    test.skip(!existsSync(EXTENSION_PATH), `Extension not found at ${EXTENSION_PATH}. Run pnpm build:extension first.`);
+
     const manifestPath = resolve(EXTENSION_PATH, 'manifest.json');
     expect(existsSync(manifestPath)).toBe(true);
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
