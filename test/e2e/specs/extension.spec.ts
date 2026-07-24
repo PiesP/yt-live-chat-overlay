@@ -58,13 +58,16 @@ test.describe('Chrome Extension', () => {
         timeout: 30_000,
       });
 
-      // A normal VOD does not have a live-chat panel, so the application
-      // intentionally does not create its overlay runtime there. The
-      // exposed handle and extension-owned page script prove that the full
-      // content-script → MAIN-world bootstrap path ran successfully.
+      // Give the extension content script time to inject the page script
+      // and run the full bootstrap (main() → initApp() → App.start() →
+      // runtimeManager.start() → reconcileOnce() → scheduleReconcile(2000ms)).
+      // The chat preflight settles in ~2s, then the deferred reconcile
+      // completes and App.start() returns, setting window.__ytChatOverlay.
+      await page.waitForTimeout(3_000);
+
       await expect.poll(
         () => page.evaluate(() => typeof window.__ytChatOverlay === 'object'),
-        { timeout: 10_000 },
+        { timeout: 15_000 },
       ).toBe(true);
       await expect(page.locator('script[src^="chrome-extension://"][src$="/page-script.js"]'))
         .toHaveCount(1);
