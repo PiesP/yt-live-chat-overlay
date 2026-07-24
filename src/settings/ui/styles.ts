@@ -52,17 +52,18 @@ const uiColors = {
   border: '#5a5a5a',
   text: '#ffffff',
   textMuted: '#c8c8c8',
-  primary: '#1e88e5',
-  primaryHover: '#1976d2',
-  danger: '#e53935',
-  dangerHover: '#c62828',
+  primary: '#1565c0',
+  primaryHover: '#0d47a1',
+  danger: '#c62828',
+  dangerHover: '#b71c1c',
   warning: '#ffc107',
-  success: '#4ade80',
+  success: '#2e7d32',
+  info: '#1976d2',
 } as const;
 
 const uiColorsAlpha = {
-  primaryBg: 'rgba(30, 136, 229, 0.25)',
-  primaryBgLight: 'rgba(30, 136, 229, 0.20)',
+  primaryBg: 'rgba(21, 101, 192, 0.25)',
+  primaryBgLight: 'rgba(21, 101, 192, 0.20)',
 } as const;
 
 // export { uiColors }; // removed — was only used internally
@@ -330,14 +331,13 @@ export const SETTINGS_UI_STYLES = `
       .yt-chat-overlay-settings-tab {
         flex: 1;
         padding: ${spacing.sm + 2}px ${spacing.sm}px;
-        min-height: 40px;
+        min-height: 44px;
         border: none;
         border-bottom: 2px solid transparent;
         background: transparent;
         color: ${uiColors.textMuted};
         font-size: ${typography.fontSize.xs};
-        font-weight: ${typography.fontWeight.semibold};
-        text-transform: uppercase;
+        font-weight: ${typography.fontWeight.bold};
         letter-spacing: 0.05em;
         cursor: pointer;
         margin-bottom: -1px;
@@ -817,7 +817,7 @@ export const SETTINGS_UI_STYLES = `
         cursor: pointer;
         transition: background 0.15s, color 0.15s;
         border-right: 1px solid ${uiColors.border};
-        min-height: 30px;
+        min-height: 44px;
       }
       .yt-chat-overlay-settings-weight-toggle-btn:last-child {
         border-right: none;
@@ -825,7 +825,7 @@ export const SETTINGS_UI_STYLES = `
       .yt-chat-overlay-settings-weight-toggle-btn.active {
         background: ${uiColorsAlpha.primaryBg};
         color: ${uiColors.text};
-        font-weight: ${typography.fontWeight.semibold};
+        font-weight: ${typography.fontWeight.bold};
       }
       .yt-chat-overlay-settings-weight-toggle-btn:hover:not(.active) {
         color: ${uiColors.text};
@@ -850,7 +850,7 @@ export const SETTINGS_UI_STYLES = `
         -webkit-appearance: none;
         font-family: inherit;
         padding: ${spacing.sm - 1}px ${spacing.md}px;
-        min-height: 36px;
+        min-height: 44px;
         line-height: 1.3;
         border-radius: ${borderRadius.pill};
         border: 1px solid ${uiColors.border};
@@ -871,7 +871,7 @@ export const SETTINGS_UI_STYLES = `
         background: ${uiColorsAlpha.primaryBgLight};
         border-color: ${uiColors.primary};
         color: ${uiColors.text};
-        font-weight: ${typography.fontWeight.semibold};
+        font-weight: ${typography.fontWeight.bold};
       }
       .yt-chat-overlay-settings-font-chip:focus-visible {
         outline: 2px solid ${uiColors.primary};
