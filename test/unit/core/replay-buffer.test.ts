@@ -114,6 +114,19 @@ describe('ReplayBuffer', () => {
       expect(result).toHaveLength(70);
       expect(buf.isEmpty).toBe(true);
     });
+
+    it('removes consumed message IDs from seenIds allowing re-insertion', () => {
+      const msg = makeMsg('a', 1000);
+      buf.insert(msg, 1000);
+      // flushUpTo should consume the message AND free its ID
+      const flushed = buf.flushUpTo(3000, 10);
+      expect(flushed).toHaveLength(1);
+      // Re-insert with same ID — should succeed because seenIds was cleaned
+      buf.insert(msg, 1000);
+      const result = buf.flushUpTo(3000, 10);
+      expect(result).toHaveLength(1);
+      expect(result[0]!.id).toBe('a');
+    });
   });
 
   describe('appendEvents()', () => {
