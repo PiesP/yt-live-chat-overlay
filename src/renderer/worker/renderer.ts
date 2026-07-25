@@ -100,6 +100,7 @@ import {
   spacing,
 } from '@util/design-tokens';
 import { LruMap } from '@util/lru-map';
+import { isValidControlMessage } from './protocol-guards';
 
 import type { ActiveMessage, WorkerConfig, WorkerContentSegment, WorkerMessage } from './types';
 
@@ -460,6 +461,11 @@ export class WorkerRenderer {
 
   handleMessage(e: MessageEvent): void {
     try {
+      // Runtime guard: validate control message before any state mutation.
+      // Malformed messages (null, arrays, primitives, unknown discriminants,
+      // missing required fields) are silently ignored.
+      if (!isValidControlMessage(e.data)) return;
+
       try {
         const data = e.data as Record<string, unknown>;
         const type = data.type as string;
