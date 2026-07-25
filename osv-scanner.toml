@@ -1,0 +1,6 @@
+# OSV-Scanner configuration for yt-live-chat-overlay
+# Ignored vulnerabilities are tracked here with reasons.
+
+[[IgnoredVulns]]
+id = "GHSA-mh99-v99m-4gvg"
+reason = "Transitive dev dependency: vite-plugin-monkey → postcss-url → minimatch@3.1.5 → brace-expansion@1.1.16. The DoS regex vulnerability has no practical attack vector in a browser userscript project. The upstream minimatch@3.1.x is pinned by postcss-url and cannot be upgraded without breaking changes."
