@@ -22,10 +22,12 @@ const mockReadyData = {
     screenData: '',
     clickTrackingParams: '',
     apiKey: 'test-key',
-    clientContext: {},
+
+        clientContext: {},
     clientNameHeader: '',
     ytcfg: {},
-  } as import('@chat/youtube/api').ChatBootstrapData,
+  } as unknown as import('@chat/youtube/api').ChatBootstrapData,
+
 };
 const mockRetryable = (reason: string) => ({ status: 'retryable' as const, reason });
 const mockWaiting = (reason: string) => ({ status: 'waiting' as const, reason });
