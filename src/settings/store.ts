@@ -52,7 +52,12 @@ export class Settings {
       const adapter = getStorageAdapter();
       const raw = await adapter.getItem(STORAGE_KEY);
       if (raw) {
-        this.settings = normalizeStoredSettings(JSON.parse(raw) as Record<string, unknown>);
+        const parsed: unknown = JSON.parse(raw);
+        // Guard: JSON.parse("null") → null, "42" → 42, "true" → true — none
+        // are records. Only proceed if parsed is a non-null object.
+        if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+          this.settings = normalizeStoredSettings(parsed as Record<string, unknown>);
+        }
       }
     } catch (error: unknown) {
       log.warn('settings.store.load-failed', { error: String(error) });
@@ -119,9 +124,12 @@ export class Settings {
       ) {
         return;
       }
-      const loaded = normalizeStoredSettings(JSON.parse(raw) as Record<string, unknown>);
-      this.settings = loaded;
-      for (const cb of this.onChangeCallbacks) cb();
+      const parsed: unknown = JSON.parse(raw);
+      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+        const loaded = normalizeStoredSettings(parsed as Record<string, unknown>);
+        this.settings = loaded;
+        for (const cb of this.onChangeCallbacks) cb();
+      }
     } catch (error: unknown) {
       log.warn('settings.store.reload-failed', { error: String(error) });
     }
