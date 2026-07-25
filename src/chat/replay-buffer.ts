@@ -112,6 +112,10 @@ export class ReplayBuffer {
       }
 
       batch.push(next.message);
+      // Remove consumed message ID from seenIds so it doesn't accumulate
+      if (next.message.id) {
+        this.seenIds.delete(next.message.id);
+      }
     }
 
     // Compact when offset grows large

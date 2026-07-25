@@ -788,6 +788,11 @@ export class RenderWorkerManager {
 
   /** Destroy the render worker. */
   destroy(): void {
+    // Cancel pending message snapshot timeout
+    if (this.messageSnapshotRequest) {
+      clearTimeout(this.messageSnapshotRequest.timer);
+      this.messageSnapshotRequest = null;
+    }
     this.batchFlushScheduled = false;
     const pendingBatch = this.pendingBatch.splice(0);
     if (pendingBatch.length > 0) this.discardPendingBatch(pendingBatch);
