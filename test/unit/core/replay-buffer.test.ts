@@ -97,6 +97,15 @@ describe('ReplayBuffer', () => {
       expect(result.map((m) => m.id)).toEqual(['current']);
     });
 
+    it('allows a late-dropped message ID to be inserted again', () => {
+      buf.insert(makeMsg('late', 1000), 1000);
+      expect(buf.flushUpTo(4000, 10)).toEqual([]);
+
+      buf.insert(makeMsg('late', 4000), 4000);
+
+      expect(buf.flushUpTo(4000, 10).map((message) => message.id)).toEqual(['late']);
+    });
+
     it('stops at future messages beyond tolerance', () => {
       buf.insert(makeMsg('now', 1000), 1000);
       buf.insert(makeMsg('future', 5000), 5000);
