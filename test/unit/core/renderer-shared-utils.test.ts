@@ -7,7 +7,7 @@ import {
   computeInvFadeDuration,
   enqueueWithOverflow,
 } from '@renderer/shared';
-import { PriorityBucketQueue } from '@util/priority-bucket-queue';
+import { HighFirstPriorityBucketQueue } from '@util/priority-bucket-queue';
 import type { ChatMessage } from '@app-types';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -90,7 +90,7 @@ function makeMessage(
 describe('enqueueWithOverflow', () => {
   describe('when queue is not full', () => {
     it('enqueues the message and returns "enqueued"', () => {
-      const queue = new PriorityBucketQueue<ChatMessage>();
+      const queue = new HighFirstPriorityBucketQueue<ChatMessage>();
       const msg = makeMessage();
       const onDrop = vi.fn();
 
@@ -103,7 +103,7 @@ describe('enqueueWithOverflow', () => {
 
   describe('when queue is at capacity', () => {
     it('replaces when new message has higher priority', () => {
-      const queue = new PriorityBucketQueue<ChatMessage>();
+      const queue = new HighFirstPriorityBucketQueue<ChatMessage>();
       const onDrop = vi.fn();
 
       // Fill queue with low-priority text messages
@@ -120,7 +120,7 @@ describe('enqueueWithOverflow', () => {
     });
 
     it('drops when new message has equal or lower priority', () => {
-      const queue = new PriorityBucketQueue<ChatMessage>();
+      const queue = new HighFirstPriorityBucketQueue<ChatMessage>();
       const onDrop = vi.fn();
 
       // Fill queue with high-priority superchat messages
@@ -139,7 +139,7 @@ describe('enqueueWithOverflow', () => {
 
   describe('with different max sizes', () => {
     it('fills up to small max before overflow', () => {
-      const queue = new PriorityBucketQueue<ChatMessage>();
+      const queue = new HighFirstPriorityBucketQueue<ChatMessage>();
       const onDrop = vi.fn();
 
       // maxSize=3: first 3 enqueue, 4th should overflow
@@ -157,7 +157,7 @@ describe('enqueueWithOverflow', () => {
 
   describe('edge cases', () => {
     it('handles maxSize=1 correctly', () => {
-      const queue = new PriorityBucketQueue<ChatMessage>();
+      const queue = new HighFirstPriorityBucketQueue<ChatMessage>();
       const onDrop = vi.fn();
 
       // First message enqueues
@@ -172,7 +172,7 @@ describe('enqueueWithOverflow', () => {
 
     it('handles empty queue with size at max (impossible but defensive)', () => {
       // This is a defensive test — queue should never report size >= max when empty
-      const queue = new PriorityBucketQueue<ChatMessage>();
+      const queue = new HighFirstPriorityBucketQueue<ChatMessage>();
       const onDrop = vi.fn();
 
       // With maxSize=0, every call would overflow, but peekLowest returns undefined

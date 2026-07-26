@@ -4,13 +4,17 @@
 import type { ChatMessage } from '@app-types';
 
 /**
- * Priority-bucketed message queue for O(1) enqueue.
+ * Overlay priority-bucketed message queue for O(1) enqueue.
  *
  * Priority values are small discrete integers (6 known levels:
  * 200/150/100/50/0/-50). Messages are stored in priority-level
  * buckets. Enqueue is O(1) push to bucket. Dequeue scans buckets
  * from highest to lowest priority (O(k) where k ≤ number of
  * distinct priority levels, typically 6).
+ *
+ * The overlay protocol defines larger numbers as higher priority and also
+ * needs lowest-item eviction, trimming, and batch removal. That contract is
+ * intentionally distinct from browser-core's low-number-first queue.
  *
  * Replaces the previous binary-search + splice() approach which
  * was O(n) per insert due to splice's array element shifting.
@@ -19,7 +23,7 @@ import type { ChatMessage } from '@app-types';
  * Buckets are compacted when the offset exceeds half the array
  * length, preventing unbounded memory growth.
  */
-export class PriorityBucketQueue<T = ChatMessage> {
+export class HighFirstPriorityBucketQueue<T = ChatMessage> {
   /** Priority → { messages array, read offset } */
   private readonly buckets = new Map<number, { msgs: T[]; offset: number }>();
   /** Known priority levels sorted descending for efficient dequeue scan. */

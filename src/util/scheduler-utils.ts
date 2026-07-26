@@ -54,7 +54,7 @@ async function schedulerYield(): Promise<void> {
 // ── scheduler.postTask() wrapper ─────────────────────────────────────────
 
 /** Priority levels matching the Prioritized Task Scheduling API. */
-export type TaskPriority = 'user-blocking' | 'user-visible' | 'background';
+export type OverlayTaskPriority = 'user-blocking' | 'user-visible' | 'background';
 
 /**
  * Schedule a callback to run with the specified priority.
@@ -71,9 +71,9 @@ export type TaskPriority = 'user-blocking' | 'user-visible' | 'background';
  * (Safari, older browsers).  For 'background' priority in the fallback path,
  * uses a slightly longer delay to avoid interfering with more urgent work.
  */
-export function schedulerPostTask<T>(
+export function scheduleOverlayTask<T>(
   fn: () => T,
-  options?: { priority?: TaskPriority }
+  options?: { priority?: OverlayTaskPriority }
 ): Promise<T> {
   if (hasPostTask) {
     try {
@@ -128,14 +128,14 @@ export function schedulerPostTask<T>(
  *   let deadline = performance.now() + YIELD_BUDGET_MS;
  *   for (const item of items) {
  *     process(item);
- *     deadline = await yieldIfOverBudget(deadline);
+ *     deadline = await yieldAtDeadline(deadline);
  *   }
  *
  * @param deadline  The performance.now() threshold at which to yield.
  * @param budgetMs  Budget per slice (default 50ms, the long task boundary).
  * @returns A new deadline if yielded, or the original deadline unchanged.
  */
-export async function yieldIfOverBudget(
+export async function yieldAtDeadline(
   deadline: number,
   budgetMs = YIELD_BUDGET_MS
 ): Promise<number> {

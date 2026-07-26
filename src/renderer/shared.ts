@@ -15,7 +15,7 @@ import { RendererBase } from '@renderer/renderer-base';
 import { getFontString, measureTextHeight, measureTextWidth } from '@renderer/text-measure';
 import { DEFAULT_SETTINGS } from '@settings/schema';
 import { DEFAULT_FONT_FAMILY, rendererLayout, spacing } from '@util/design-tokens';
-import type { PriorityBucketQueue } from '@util/priority-bucket-queue';
+import type { HighFirstPriorityBucketQueue } from '@util/priority-bucket-queue';
 
 // ── Text measurement ────────────────────────────────────────────────────────
 
@@ -334,7 +334,7 @@ export function computeMessageOpacity(
  * or 'replaced' if the new message displaced a lower-priority entry.
  */
 export function enqueueWithOverflow(
-  queue: PriorityBucketQueue<ChatMessage>,
+  queue: HighFirstPriorityBucketQueue<ChatMessage>,
   message: ChatMessage,
   priority: number,
   onDrop: (reason: 'queue_priority' | 'queue_replaced') => void,

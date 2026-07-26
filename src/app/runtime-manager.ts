@@ -34,7 +34,7 @@ import {
   VIDEO_SELECTORS,
 } from '@util/dom';
 import { createLogger } from '@util/logging';
-import { MessageBus } from '@util/message-bus';
+import { BatchMessageBus } from '@util/message-bus';
 import { createMessageIdRegistry } from '@util/message-id-registry';
 
 /** Runtime lifecycle state machine — replaces ad-hoc boolean flags. */
@@ -202,7 +202,7 @@ export class RuntimeManager {
   private readonly standbyController: StandbyController;
   private backlogController: BacklogInjectionController | null = null;
   /** Pub/sub bus decoupling ChatSource message production from Renderer consumption. */
-  private messageBus: MessageBus<ChatMessage> | null = null;
+  private messageBus: BatchMessageBus<ChatMessage> | null = null;
   private chatWatchdogTimer: ReturnType<typeof setInterval> | null = null;
   private state: RuntimeState = 'init';
   private hiddenSince: number | null = null;
@@ -995,7 +995,7 @@ export class RuntimeManager {
 
     // ── Message bus: decouples ChatSource (producer) from Renderer (consumer) ──
     this.messageBus?.destroy();
-    this.messageBus = new MessageBus<ChatMessage>();
+    this.messageBus = new BatchMessageBus<ChatMessage>();
     this.messageBus.subscribe((msgs) => this.routeMessages(msgs));
 
     return chatSource.start((messages, _isInitialSeed) => {

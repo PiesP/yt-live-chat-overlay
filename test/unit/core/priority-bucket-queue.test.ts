@@ -1,13 +1,13 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { PriorityBucketQueue } from '@util/priority-bucket-queue';
+import { HighFirstPriorityBucketQueue } from '@util/priority-bucket-queue';
 
-// ── PriorityBucketQueue ──────────────────────────────────────────
+// ── HighFirstPriorityBucketQueue ─────────────────────────────────
 
-describe('PriorityBucketQueue', () => {
-  let queue: PriorityBucketQueue<string>;
+describe('HighFirstPriorityBucketQueue', () => {
+  let queue: HighFirstPriorityBucketQueue<string>;
 
   beforeEach(() => {
-    queue = new PriorityBucketQueue<string>();
+    queue = new HighFirstPriorityBucketQueue<string>();
   });
 
   describe('basic operations', () => {

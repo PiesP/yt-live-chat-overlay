@@ -84,15 +84,15 @@ import { RenderWorkerManager } from '@renderer/worker/manager';
 import { ChannelLanguageMemory } from '@translation/channel-memory';
 import { LanguageDetectorService } from '@translation/language-detector';
 import { TranslationService } from '@translation/service';
-import { ByteLimitedCache } from '@util/byte-limited-cache';
+import { ResizableByteLimitedCache } from '@util/byte-limited-cache';
 import { DensityIndicator } from '@util/density-indicator';
 import { computeScrollDuration, statusBarLayout } from '@util/design-tokens';
 import { clearSafeAnimationFrame, forEachSlot, SCREEN_READER_CSS } from '@util/dom';
 import { createLogger } from '@util/logging';
-import { LruMap } from '@util/lru-map';
+import { MapCompatibleLruMap } from '@util/lru-map';
 import { MessageActivator } from '@util/message-activator';
-import { PriorityBucketQueue } from '@util/priority-bucket-queue';
-import { schedulerPostTask, yieldIfOverBudget } from '@util/scheduler-utils';
+import { HighFirstPriorityBucketQueue } from '@util/priority-bucket-queue';
+import { scheduleOverlayTask, yieldAtDeadline } from '@util/scheduler-utils';
 
 const log = createLogger('RendererCanvas');
 
@@ -131,7 +131,7 @@ export class CanvasRenderer extends RendererBase {
   private readonly activeMessages: CanvasMessage[] = [];
   /** Lane-indexed active messages for O(1) lane-scoped collision checks. */
   private readonly activeMessagesByLane = new Map<number, CanvasMessage[]>();
-  private readonly pendingQueue = new PriorityBucketQueue();
+  private readonly pendingQueue = new HighFirstPriorityBucketQueue();
 
   /** Cached prefers-reduced-motion media query result. */
   private reducedMotionQuery: MediaQueryList | null = null;
@@ -205,11 +205,13 @@ export class CanvasRenderer extends RendererBase {
    * Bounded to 200 entries (FIFO eviction with LRU touch on re-insert) to prevent unbounded memory growth
    * in long-running streams.
    */
-  private readonly textBitmapCache = new ByteLimitedCache<HTMLCanvasElement>(
+  private readonly textBitmapCache = new ResizableByteLimitedCache<HTMLCanvasElement>(
     this.settings.textCacheMb * 1_000_000, // configurable MB
     (c) => c.width * c.height * 4 // RGBA bytes
   );
-  private readonly superChatGradientCache = new LruMap<string, CanvasGradient>(GRADIENT_CACHE_MAX);
+  private readonly superChatGradientCache = new MapCompatibleLruMap<string, CanvasGradient>(
+    GRADIENT_CACHE_MAX
+  );
 
   /** Cached message dimensions by message ID. Cleared on settings change. */
   private readonly dimensionCache = new Map<string, { width: number; height: number }>();
@@ -695,7 +697,7 @@ export class CanvasRenderer extends RendererBase {
     if (this.pendingQueue.size <= this.settings.backgroundQueueMax) return;
     // Defer trimming to a background task so it doesn't compete with
     // frame-critical rendering or message processing.
-    schedulerPostTask(
+    scheduleOverlayTask(
       () => {
         this.pendingQueue.trim(this.settings.backgroundQueueMax);
       },
@@ -1197,7 +1199,7 @@ export class CanvasRenderer extends RendererBase {
         committed.push(msg);
 
         // Yield every 50ms to keep the main thread responsive during bursts.
-        deadline = await yieldIfOverBudget(deadline);
+        deadline = await yieldAtDeadline(deadline);
 
         // Session may have been destroyed during the yield — abort drain
         // to avoid accessing null canvas/ctx or injecting messages into

@@ -29,12 +29,12 @@ import {
 import type { LaneAllocator } from '@renderer/layout/lane-allocator';
 import { computeMessageOpacity } from '@renderer/shared';
 import { getFontString } from '@renderer/text-measure';
-import type { ByteLimitedCache } from '@util/byte-limited-cache';
+import type { ResizableByteLimitedCache } from '@util/byte-limited-cache';
 import { rendererLayout } from '@util/design-tokens';
-import type { LruMap } from '@util/lru-map';
+import type { MapCompatibleLruMap } from '@util/lru-map';
 import type { MessageActivator } from '@util/message-activator';
 import type { ObservabilityReporter } from '@util/observability';
-import type { PriorityBucketQueue } from '@util/priority-bucket-queue';
+import type { HighFirstPriorityBucketQueue } from '@util/priority-bucket-queue';
 
 // ── Context interface ───────────────────────────────────────────────────
 
@@ -49,13 +49,13 @@ import type { PriorityBucketQueue } from '@util/priority-bucket-queue';
 export interface CanvasRenderContext {
   settings: OverlaySettings;
 
-  textBitmapCache: ByteLimitedCache<HTMLCanvasElement>;
-  superChatGradientCache: LruMap<string, CanvasGradient>;
+  textBitmapCache: ResizableByteLimitedCache<HTMLCanvasElement>;
+  superChatGradientCache: MapCompatibleLruMap<string, CanvasGradient>;
 
   imageFetchManager: {
-    emojiCache: ByteLimitedCache<HTMLImageElement>;
-    authorPhotoCache: ByteLimitedCache<HTMLImageElement>;
-    stickerCache: ByteLimitedCache<HTMLImageElement>;
+    emojiCache: ResizableByteLimitedCache<HTMLImageElement>;
+    authorPhotoCache: ResizableByteLimitedCache<HTMLImageElement>;
+    stickerCache: ResizableByteLimitedCache<HTMLImageElement>;
   };
 
   boundGetFont: (fontSize: number) => string;
@@ -89,7 +89,7 @@ export interface CanvasRenderContext {
   /** Anti-block state — mutable reference wrapper so pipeline writes propagate back. */
   antiBlockSince: { value: number | null };
 
-  pendingQueue: PriorityBucketQueue;
+  pendingQueue: HighFirstPriorityBucketQueue;
   laneAllocator: LaneAllocator;
 
   observability: ObservabilityReporter;

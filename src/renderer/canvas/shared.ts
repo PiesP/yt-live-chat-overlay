@@ -14,7 +14,7 @@ import { EMOJI_ALIAS_PATTERN } from '@chat/message-helpers';
 import { computeOutlineColor } from '@renderer/color-utils';
 import { OUTLINE_STROKE_SCALE } from '@renderer/constants';
 import { getFontString, measureTextHeight, measureTextWidth } from '@renderer/text-measure';
-import type { ByteLimitedCache } from '@util/byte-limited-cache';
+import type { ResizableByteLimitedCache } from '@util/byte-limited-cache';
 import { AUTHOR_PHOTO_SHADOW, rendererLayout, spacing } from '@util/design-tokens';
 
 /** A char-wrap segment with pre-computed width. */
@@ -1190,7 +1190,7 @@ export function renderRegularMessage(
  */
 export function renderWrappedContentSegments<
   TTextBitmapCache extends TextBitmapCache,
-  TEmojiCache extends ByteLimitedCache<CanvasImageSource>,
+  TEmojiCache extends ResizableByteLimitedCache<CanvasImageSource>,
 >(
   ctx: AnyCanvasContext,
   segments: readonly SharedContentSegment[],

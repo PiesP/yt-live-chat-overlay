@@ -2,7 +2,7 @@
 // Copyright (c) 2026 PiesP
 
 import { describe, it, expect, vi } from 'vitest';
-import { PriorityBucketQueue } from '@util/priority-bucket-queue';
+import { HighFirstPriorityBucketQueue } from '@util/priority-bucket-queue';
 import { drainStage, compactRemovedMessages, mirrorVisibleMessages } from '@renderer/canvas/render-pipeline';
 import { COMPACTION_THRESHOLD_RATIO } from '@renderer/canvas/pipeline-utils';
 import type { CanvasRenderContext } from '@renderer/canvas/render-pipeline';
@@ -14,7 +14,7 @@ function makeDrainCtx(overrides?: Partial<CanvasRenderContext>): CanvasRenderCon
     isReplayMode: false,
     isAntiBlockActive: () => false,
     antiBlockSince: { value: null },
-    pendingQueue: new PriorityBucketQueue(),
+    pendingQueue: new HighFirstPriorityBucketQueue(),
     laneAllocator: { resetBatch: vi.fn() } as unknown as CanvasRenderContext['laneAllocator'],
     drainQueue: vi.fn(),
     // Stubs for fields not exercised by drainStage
@@ -136,7 +136,7 @@ function makeCompactCtx(overrides?: Partial<CanvasRenderContext>): CanvasRenderC
     activeMessages: [],
     activeMessagesByLane: new Map(),
     expiredMessagesScratch: [],
-    pendingQueue: new PriorityBucketQueue(),
+    pendingQueue: new HighFirstPriorityBucketQueue(),
     observability: { updateActiveMessages: vi.fn(), updateQueueDepth: vi.fn() } as unknown as CanvasRenderContext['observability'],
     // Stubs
     settings: {} as CanvasRenderContext['settings'],

@@ -3,7 +3,7 @@
 
 import type { ChatMessage, OverlaySettings } from '@app-types';
 import { isAllowedImageUrl } from '@media/image-url-validation';
-import { ByteLimitedCache } from '@util/byte-limited-cache';
+import { ResizableByteLimitedCache } from '@util/byte-limited-cache';
 import { clearSafeInterval } from '@util/dom';
 import { createLogger } from '@util/logging';
 
@@ -24,11 +24,11 @@ const FAILED_EMOJI_FETCH_EVICT_COUNT = 250;
 export class ImageFetchManager {
   private static readonly log = createLogger('ImageFetchManager');
   /** Emoji image cache (byte-limited LRU). */
-  emojiCache: ByteLimitedCache<HTMLImageElement>;
+  emojiCache: ResizableByteLimitedCache<HTMLImageElement>;
   /** Author photo cache (byte-limited LRU). */
-  authorPhotoCache: ByteLimitedCache<HTMLImageElement>;
+  authorPhotoCache: ResizableByteLimitedCache<HTMLImageElement>;
   /** Sticker image cache (byte-limited LRU). */
-  stickerCache: ByteLimitedCache<HTMLImageElement>;
+  stickerCache: ResizableByteLimitedCache<HTMLImageElement>;
 
   /** Set of emoji URLs currently being fetched. */
   readonly emojiFetching = new Set<string>();
@@ -57,7 +57,7 @@ export class ImageFetchManager {
    * Byte-limited to prevent unbounded growth during long sessions with many
    * unique emoji/sticker URLs.
    */
-  readonly workerBitmapCache = new ByteLimitedCache<ImageBitmap>(
+  readonly workerBitmapCache = new ResizableByteLimitedCache<ImageBitmap>(
     10_000_000, // 10 MB — enough for ~500 emoji at 200×200 RGBA
     (bitmap) => bitmap.width * bitmap.height * 4,
     (bitmap) => bitmap.close()
@@ -75,15 +75,15 @@ export class ImageFetchManager {
 
   constructor() {
     // Initialize caches with 0 MB — will be properly configured via updateConfig
-    this.emojiCache = new ByteLimitedCache<HTMLImageElement>(
+    this.emojiCache = new ResizableByteLimitedCache<HTMLImageElement>(
       0,
       (img) => img.naturalWidth * img.naturalHeight * 4
     );
-    this.authorPhotoCache = new ByteLimitedCache<HTMLImageElement>(
+    this.authorPhotoCache = new ResizableByteLimitedCache<HTMLImageElement>(
       0,
       (img) => img.naturalWidth * img.naturalHeight * 4
     );
-    this.stickerCache = new ByteLimitedCache<HTMLImageElement>(
+    this.stickerCache = new ResizableByteLimitedCache<HTMLImageElement>(
       0,
       (img) => img.naturalWidth * img.naturalHeight * 4
     );
@@ -132,9 +132,9 @@ export class ImageFetchManager {
 
   // ── Image loading ─────────────────────────────────────────────────────
 
-  /** Load an image and store it in the given ByteLimitedCache on success.
+  /** Load an image and store it in the given resizable cache on success.
    *  URLs are validated against the YouTube CDN whitelist. */
-  loadImage(url: string, cache: ByteLimitedCache<HTMLImageElement>): void {
+  loadImage(url: string, cache: ResizableByteLimitedCache<HTMLImageElement>): void {
     if (cache.has(url)) return;
     if (this.imageLoading.has(url)) return;
     if (!isAllowedImageUrl(url)) {
@@ -383,7 +383,7 @@ export class ImageFetchManager {
     this.inFlightImages.clear();
     this.emojiUrlToImage.clear();
 
-    // ByteLimitedCache.clear() calls onEvict (bitmap.close()) for each entry.
+    // ResizableByteLimitedCache.clear() calls onEvict (bitmap.close()) for each entry.
     this.workerBitmapCache.clear();
     this.bitmapGeneration.clear();
 

@@ -2,7 +2,7 @@
 // Copyright (c) 2026 PiesP
 
 /**
- * Lightweight typed publish/subscribe event bus.
+ * Overlay-specific typed publish/subscribe event bus for message batches.
  *
  * Provides a decoupling layer between message producers (ChatSource)
  * and consumers (RuntimeManager → Renderer).  Multiple subscribers
@@ -10,8 +10,11 @@
  * debugging, logging, and future cross-cutting concerns.
  *
  * Thread-safe for serial access only (single-threaded browser event loop).
+ *
+ * Unlike browser-core's single-payload MessageBus, this bus suppresses empty
+ * batches and tracks delivery counters used by RuntimeManager diagnostics.
  */
-export class MessageBus<T> {
+export class BatchMessageBus<T> {
   private readonly subscribers = new Set<(messages: T[]) => void>();
   private _publishedCount = 0;
   private _lastPublishTime = 0;

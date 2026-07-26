@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { ByteLimitedCache } from '@util/byte-limited-cache';
+import { ResizableByteLimitedCache } from '@util/byte-limited-cache';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -7,13 +7,13 @@ function estimateSize(v: string): number {
   return v.length;
 }
 
-// ── ByteLimitedCache ──────────────────────────────────────────────────────
+// ── ResizableByteLimitedCache ─────────────────────────────────────────────
 
-describe('ByteLimitedCache', () => {
-  let cache: ByteLimitedCache<string>;
+describe('ResizableByteLimitedCache', () => {
+  let cache: ResizableByteLimitedCache<string>;
 
   beforeEach(() => {
-    cache = new ByteLimitedCache<string>(100, estimateSize);
+    cache = new ResizableByteLimitedCache<string>(100, estimateSize);
   });
 
   // ── set / get ──────────────────────────────────────────────────────────
@@ -36,7 +36,9 @@ describe('ByteLimitedCache', () => {
 
     it('evicts the previous value when replacing an entry', () => {
       const evicted: string[] = [];
-      const c = new ByteLimitedCache<string>(100, estimateSize, (value) => evicted.push(value));
+      const c = new ResizableByteLimitedCache<string>(100, estimateSize, (value) =>
+        evicted.push(value)
+      );
       c.set('key1', 'hello');
       c.set('key1', 'world');
       expect(evicted).toEqual(['hello']);
@@ -92,7 +94,9 @@ describe('ByteLimitedCache', () => {
 
     it('does not cache single items that exceed maxBytes', () => {
       const evicted: string[] = [];
-      const c = new ByteLimitedCache<string>(100, estimateSize, (value) => evicted.push(value));
+      const c = new ResizableByteLimitedCache<string>(100, estimateSize, (value) =>
+        evicted.push(value)
+      );
       c.set('large', 'x'.repeat(200)); // 200 bytes > 100
       expect(c.has('large')).toBe(false);
       expect(evicted).toEqual(['x'.repeat(200)]);
@@ -201,7 +205,7 @@ describe('ByteLimitedCache', () => {
     it('calls onEvict when entries are evicted', () => {
       const evicted: string[] = [];
       const cb = (v: string) => evicted.push(v);
-      const c = new ByteLimitedCache<string>(30, estimateSize, cb);
+      const c = new ResizableByteLimitedCache<string>(30, estimateSize, cb);
 
       c.set('a', 'x'.repeat(12)); // 12 bytes
       c.set('b', 'y'.repeat(12)); // 12 bytes, total 24
@@ -212,7 +216,7 @@ describe('ByteLimitedCache', () => {
     it('calls onEvict on manual delete', () => {
       const evicted: string[] = [];
       const cb = (v: string) => evicted.push(v);
-      const c = new ByteLimitedCache<string>(100, estimateSize, cb);
+      const c = new ResizableByteLimitedCache<string>(100, estimateSize, cb);
 
       c.set('a', 'AAA');
       c.delete('a');
@@ -223,7 +227,7 @@ describe('ByteLimitedCache', () => {
     it('calls onEvict on clear', () => {
       const evicted: string[] = [];
       const cb = (v: string) => evicted.push(v);
-      const c = new ByteLimitedCache<string>(100, estimateSize, cb);
+      const c = new ResizableByteLimitedCache<string>(100, estimateSize, cb);
 
       c.set('a', 'AAA');
       c.set('b', 'BBB');

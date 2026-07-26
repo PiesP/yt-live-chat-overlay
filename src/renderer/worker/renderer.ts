@@ -91,7 +91,7 @@ import {
 } from '@renderer/shared';
 import { getFontString, measureBoundingBoxWidth } from '@renderer/text-measure';
 import { DEFAULT_SETTINGS } from '@settings/defaults';
-import { ByteLimitedCache } from '@util/byte-limited-cache';
+import { ResizableByteLimitedCache } from '@util/byte-limited-cache';
 import {
   computeScrollDuration,
   DEFAULT_FONT_FAMILY,
@@ -99,7 +99,7 @@ import {
   rendererLayout,
   spacing,
 } from '@util/design-tokens';
-import { LruMap } from '@util/lru-map';
+import { MapCompatibleLruMap } from '@util/lru-map';
 import { isValidControlMessage } from './protocol-guards';
 
 import type { ActiveMessage, WorkerConfig, WorkerContentSegment, WorkerMessage } from './types';
@@ -107,7 +107,7 @@ import type { ActiveMessage, WorkerConfig, WorkerContentSegment, WorkerMessage }
 // ── Worker-specific constants ──────────────────────────────────────────────
 
 /** Sticker image cache — lazily initialized during worker init. */
-let stickerCache: ByteLimitedCache<ImageBitmap> | null = null;
+let stickerCache: ResizableByteLimitedCache<ImageBitmap> | null = null;
 
 function measureTextHeight(
   fontSize: number,
@@ -129,7 +129,7 @@ function measureTextHeight(
 /**
  * Render a paid card (SuperChat or Membership) driven entirely by a
  * CardConfigWorker. Mirrors the main-thread renderPaidCard but uses worker-safe
- * types (OffscreenCanvasRenderingContext2D, ByteLimitedCache<ImageBitmap>).
+ * types (OffscreenCanvasRenderingContext2D, ResizableByteLimitedCache<ImageBitmap>).
  *
  * All colours, dimensions, and flags are pre-resolved in the CardConfigWorker
  * — no callbacks or settings lookups needed.
@@ -159,8 +159,8 @@ function renderPaidCardWorker(
   outlineWidthPx: number,
   outlineOpacity: number,
   textBitmapCache: TextBitmapCache,
-  authorPhotoCache: ByteLimitedCache<ImageBitmap>,
-  emojiCache: ByteLimitedCache<ImageBitmap>,
+  authorPhotoCache: ResizableByteLimitedCache<ImageBitmap>,
+  emojiCache: ResizableByteLimitedCache<ImageBitmap>,
   getFontFn: (fontSize: number) => string,
   gradientCache: Map<string, CanvasGradient>,
   /** Configurable SuperChat opacity from settings, clamped to [0.35, 1]. */
@@ -369,7 +369,7 @@ function renderPaidCardWorker(
       outlineWidthPx,
       outlineOpacity,
       textBitmapCache,
-      emojiCache as ByteLimitedCache<CanvasImageSource>,
+      emojiCache as ResizableByteLimitedCache<CanvasImageSource>,
       getFontFn
     );
   }
@@ -442,11 +442,13 @@ export class WorkerRenderer {
   private speedTierLanes = new Map<number, { tier: number; until: number }>();
   private collidedLanes = new Set<number>();
   private totalDrops = 0;
-  private textBitmapCache!: ByteLimitedCache<OffscreenCanvas>;
-  private emojiCache!: ByteLimitedCache<ImageBitmap>;
-  private authorPhotoCache!: ByteLimitedCache<ImageBitmap>;
-  private stickerCache!: ByteLimitedCache<ImageBitmap>;
-  private superChatGradientCache = new LruMap<string, CanvasGradient>(GRADIENT_CACHE_MAX);
+  private textBitmapCache!: ResizableByteLimitedCache<OffscreenCanvas>;
+  private emojiCache!: ResizableByteLimitedCache<ImageBitmap>;
+  private authorPhotoCache!: ResizableByteLimitedCache<ImageBitmap>;
+  private stickerCache!: ResizableByteLimitedCache<ImageBitmap>;
+  private superChatGradientCache = new MapCompatibleLruMap<string, CanvasGradient>(
+    GRADIENT_CACHE_MAX
+  );
   private readonly messageById = new Map<string, WorkerMessage | ActiveMessage>();
   private fetching = new Set<string>();
   private farOpacityBuckets: ActiveMessage[][] = Array.from({ length: OPACITY_BUCKETS }, () => []);
@@ -480,22 +482,22 @@ export class WorkerRenderer {
             }
             const dpr = (data.dpr as number) || 1;
             this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-            this.emojiCache = new ByteLimitedCache<ImageBitmap>(
+            this.emojiCache = new ResizableByteLimitedCache<ImageBitmap>(
               (this.config.emojiCacheMb ?? 4) * 1_000_000,
               WorkerRenderer.estimateBitmapBytes,
               (b) => b.close()
             );
-            this.authorPhotoCache = new ByteLimitedCache<ImageBitmap>(
+            this.authorPhotoCache = new ResizableByteLimitedCache<ImageBitmap>(
               (this.config.photoCacheMb ?? 4) * 1_000_000,
               WorkerRenderer.estimateBitmapBytes,
               (b) => b.close()
             );
-            stickerCache = this.stickerCache = new ByteLimitedCache<ImageBitmap>(
+            stickerCache = this.stickerCache = new ResizableByteLimitedCache<ImageBitmap>(
               (this.config.stickerCacheMb ?? 4) * 1_000_000,
               WorkerRenderer.estimateBitmapBytes,
               (b) => b.close()
             );
-            this.textBitmapCache = new ByteLimitedCache<OffscreenCanvas>(
+            this.textBitmapCache = new ResizableByteLimitedCache<OffscreenCanvas>(
               (this.config.textCacheMb ?? 4) * 1_000_000,
               (canvas) => canvas.width * canvas.height * 4
             );
@@ -1667,7 +1669,7 @@ export class WorkerRenderer {
 
   private async prefetchImages(
     urls: string[],
-    cache: ByteLimitedCache<ImageBitmap>
+    cache: ResizableByteLimitedCache<ImageBitmap>
   ): Promise<void> {
     const toFetch = [...new Set(urls)].filter((u) => !cache.has(u) && !this.fetching.has(u));
     if (toFetch.length === 0) return;
