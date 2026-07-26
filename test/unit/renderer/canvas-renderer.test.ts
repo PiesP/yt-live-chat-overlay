@@ -3,7 +3,7 @@
 import { afterEach, describe, it, expect, vi, beforeEach } from 'vitest';
 import { CanvasRenderer } from '@renderer/canvas-renderer';
 import { Overlay } from '@app/overlay';
-import type { OverlaySettings } from '@app-types';
+import type { ChatMessage, OverlaySettings } from '@app-types';
 
 // Mock OffscreenCanvas
 vi.stubGlobal('OffscreenCanvas', class {
@@ -47,6 +47,17 @@ function makeSettings(overrides: Partial<OverlaySettings> = {}): OverlaySettings
     replayPrefetchPages: 50, replayBatchLimit: 50,
     ...overrides,
   } as OverlaySettings;
+}
+
+function makeMessage(id: string, text: string): ChatMessage {
+  return {
+    id,
+    text,
+    content: [{ type: 'text', content: text }],
+    kind: 'text',
+    timestamp: Date.now(),
+    authorType: 'normal',
+  };
 }
 
 describe('CanvasRenderer', () => {
@@ -100,6 +111,38 @@ describe('CanvasRenderer', () => {
     const settings = makeSettings();
     const renderer = new CanvasRenderer(overlay, settings);
     expect(() => renderer.updateSettings(makeSettings({ fontSize: 64 }))).not.toThrow();
+    renderer.destroy();
+  });
+
+  it('collects auto source-language samples on the Worker path', () => {
+    const settings = makeSettings({ translationEnabled: true, translationSource: 'auto' });
+    const renderer = new CanvasRenderer(overlay, settings);
+    const internals = renderer as unknown as {
+      workerManager: { setActive(active: boolean): void };
+      sourceSampleBuffer: string[];
+    };
+    internals.workerManager.setActive(true);
+
+    renderer.addMessage(makeMessage('worker-language-sample', 'hello from worker rendering'));
+
+    expect(internals.sourceSampleBuffer).toEqual(['hello from worker rendering']);
+    renderer.destroy();
+  });
+
+  it('lazily initializes source detection when translation is enabled later', () => {
+    const settings = makeSettings({ translationEnabled: false, translationSource: 'auto' });
+    const renderer = new CanvasRenderer(overlay, settings);
+    const internals = renderer as unknown as {
+      languageDetector: unknown;
+      channelMemory: unknown;
+    };
+    expect(internals.languageDetector).toBeNull();
+    expect(internals.channelMemory).toBeNull();
+
+    renderer.updateSettings(makeSettings({ translationEnabled: true, translationSource: 'auto' }));
+
+    expect(internals.languageDetector).not.toBeNull();
+    expect(internals.channelMemory).not.toBeNull();
     renderer.destroy();
   });
 

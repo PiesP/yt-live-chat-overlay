@@ -281,23 +281,8 @@ export class CanvasRenderer extends RendererBase {
     this.invFadeDuration = computeInvFadeDuration(settings.fadeDurationMs);
     this.translationBatchSize = settings.translationBatchSize;
     this.translationService = new TranslationService();
-    // Initialize language detection pipeline for 'auto' source.
-    // Skip entirely when translation is disabled — avoids the
-    // translation.detector.api-mismatch warning spam from the watchdog loop.
     if (settings.translationEnabled) {
-      this.languageDetector = new LanguageDetectorService();
-      this.channelMemory = new ChannelLanguageMemory();
-      void this.languageDetector.initialize().catch((err: unknown) => {
-        log.debug('renderer.translation.init-failed', {
-          reason: 'language-detector',
-          error: String(err),
-        });
-        // Set to null so performSourceDetection() can retry later
-        this.languageDetector = null;
-      });
-    } else {
-      this.languageDetector = null;
-      this.channelMemory = null;
+      this.initializeSourceDetectionPipeline();
     }
 
     // Check channel memory for cached language
@@ -1533,17 +1518,7 @@ export class CanvasRenderer extends RendererBase {
       speedTier
     );
 
-    // Auto-detect source language from message samples
-    if (
-      this.settings.translationSource === 'auto' &&
-      !this.sourceDetectionDone &&
-      message.text.trim()
-    ) {
-      this.sourceSampleBuffer.push(message.text);
-      if (this.sourceSampleBuffer.length >= CanvasRenderer.SOURCE_SAMPLE_COUNT) {
-        void this.performSourceDetection();
-      }
-    }
+    this.collectSourceLanguageSample(message);
 
     // Update render activity heartbeat — signals to the watchdog that
     // the renderer is healthy (successfully enqueuing messages).
@@ -1672,6 +1647,7 @@ export class CanvasRenderer extends RendererBase {
    */
   private prefetchAndTranslateForWorker(message: ChatMessage, msgId: string): void {
     this.imageFetchManager.prefetchImages(message);
+    this.collectSourceLanguageSample(message);
     const translatableText = getTranslatableText(message);
     if (this.translationService.isEnabled && translatableText) {
       this.translationService
@@ -1785,6 +1761,9 @@ export class CanvasRenderer extends RendererBase {
     if (sourceChanged) {
       this.sourceDetectionDone = false;
       this.sourceSampleBuffer = [];
+    }
+    if (settings.translationEnabled) {
+      this.initializeSourceDetectionPipeline();
     }
 
     void this.translationService
@@ -1920,6 +1899,39 @@ export class CanvasRenderer extends RendererBase {
     clearTextMeasurementCaches();
     this.textBitmapCache.clear();
     this.dimensionCache.clear();
+  }
+
+  private initializeSourceDetectionPipeline(): void {
+    this.channelMemory ??= new ChannelLanguageMemory();
+    if (this.languageDetector) return;
+
+    const detector = new LanguageDetectorService();
+    this.languageDetector = detector;
+    void detector.initialize().catch((err: unknown) => {
+      log.debug('renderer.translation.init-failed', {
+        reason: 'language-detector',
+        error: String(err),
+      });
+      if (this.languageDetector === detector) {
+        this.languageDetector = null;
+      }
+    });
+  }
+
+  private collectSourceLanguageSample(message: ChatMessage): void {
+    if (
+      !this.settings.translationEnabled ||
+      this.settings.translationSource !== 'auto' ||
+      this.sourceDetectionDone ||
+      !message.text.trim()
+    ) {
+      return;
+    }
+
+    this.sourceSampleBuffer.push(message.text);
+    if (this.sourceSampleBuffer.length >= CanvasRenderer.SOURCE_SAMPLE_COUNT) {
+      void this.performSourceDetection();
+    }
   }
 
   private async performSourceDetection(): Promise<void> {

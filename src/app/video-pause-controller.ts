@@ -89,9 +89,8 @@ export class VideoPauseController {
       // page load, SPA video replacement, or an autoplay-blocked player).
       // The pause event may have fired before the listener existed, so sync
       // the current state explicitly.
-      if (video.paused) {
-        handlePause();
-      }
+      if (video.paused) handlePause();
+      else handlePlay();
     };
 
     const detachListeners = (video: HTMLVideoElement | undefined): void => {
