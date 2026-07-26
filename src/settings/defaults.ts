@@ -2,6 +2,7 @@
 // Copyright (c) 2026 PiesP
 
 import type { OutlineSettings, OverlaySettings } from '@app-types';
+import { isRecord } from '@chat/youtube/request';
 import { DEFAULT_FONT_FAMILY, colors as designColors, rendererLayout } from '@util/design-tokens';
 
 const DEFAULT_SHOW_AUTHOR = {
@@ -147,7 +148,17 @@ export const SETTINGS_VERSION = 1;
  * Each step receives the output of the previous step.
  */
 export function migrateSettings(raw: Record<string, unknown>): Record<string, unknown> {
-  let version = (raw._version as number) ?? 0;
+  // Guard: reject non-record input (null, arrays, primitives parsed by callers
+  // that bypass store.ts validation). Return version-stamped defaults.
+  if (!isRecord(raw)) {
+    return { _version: SETTINGS_VERSION };
+  }
+
+  // Clamp version: NaN passes `?? 0` (NaN is not null/undefined), and -Infinity
+  // would cause an infinite loop (v++ on -Infinity stays -Infinity).
+  const rawVersion = raw._version as number;
+  let version =
+    Number.isFinite(rawVersion) && rawVersion >= 0 ? Math.min(rawVersion, SETTINGS_VERSION) : 0;
 
   // Copy so we don't mutate the argument
   let migrated: Record<string, unknown> = { ...raw };

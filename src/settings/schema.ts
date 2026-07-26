@@ -242,7 +242,8 @@ export function applySettingsPatch(
 export function normalizeStoredSettings(
   stored: Record<string, unknown> | null | undefined
 ): OverlaySettings {
-  if (!stored) return cloneSettings(DEFAULT_SETTINGS);
+  // Reject null, undefined, and arrays (arrays pass !stored as false)
+  if (!stored || Array.isArray(stored)) return cloneSettings(DEFAULT_SETTINGS);
   const migrated = migrateSettings(stored);
   return applySettingsPatch(cloneSettings(DEFAULT_SETTINGS), migrated as Partial<OverlaySettings>);
 }
