@@ -11,6 +11,9 @@
 export class MapCompatibleLruMap<K, V> extends Map<K, V> {
   constructor(private readonly maxSize: number) {
     super();
+    if (!Number.isSafeInteger(maxSize) || maxSize < 1) {
+      throw new RangeError('maxSize must be a positive safe integer');
+    }
   }
 
   override set(key: K, value: V): this {

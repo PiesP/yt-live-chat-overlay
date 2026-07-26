@@ -169,6 +169,8 @@ export class CanvasRenderer extends RendererBase {
   private channelMemory: ChannelLanguageMemory | null = null;
   private sourceDetectionDone = false;
   private sourceSampleBuffer: string[] = [];
+  private sourceDetectionRun: symbol | null = null;
+  private sourceDetectionGeneration = 0;
   private static readonly SOURCE_SAMPLE_COUNT = 8;
 
   /** Max translations to apply per frame to avoid single-frame spikes during chat bursts. */
@@ -1758,11 +1760,10 @@ export class CanvasRenderer extends RendererBase {
     // serializes behind configurePromise so they don't race.
     this.translationService.onUserActivation();
 
-    // Reset detection state when source changes to 'auto'
+    // Invalidate pending detection when its enabled/source configuration changes.
     const sourceChanged = settings.translationSource !== prevSource;
-    if (sourceChanged) {
-      this.sourceDetectionDone = false;
-      this.sourceSampleBuffer = [];
+    if (sourceChanged || wasTranslationEnabled !== settings.translationEnabled) {
+      this.resetSourceDetection();
     }
     if (settings.translationEnabled) {
       this.initializeSourceDetectionPipeline();
@@ -1925,6 +1926,7 @@ export class CanvasRenderer extends RendererBase {
       !this.settings.translationEnabled ||
       this.settings.translationSource !== 'auto' ||
       this.sourceDetectionDone ||
+      this.sourceDetectionRun !== null ||
       !message.text.trim()
     ) {
       return;
@@ -1937,9 +1939,23 @@ export class CanvasRenderer extends RendererBase {
   }
 
   private async performSourceDetection(): Promise<void> {
-    if (!this.languageDetector) return;
+    const detector = this.languageDetector;
+    if (!detector || this.sourceDetectionRun !== null) return;
+
+    const run = Symbol('source-detection-run');
+    const generation = this.sourceDetectionGeneration;
+    const samples = this.sourceSampleBuffer.slice(0, CanvasRenderer.SOURCE_SAMPLE_COUNT);
+    this.sourceDetectionRun = run;
     try {
-      const detected = await this.languageDetector.detectFromSamples(this.sourceSampleBuffer);
+      const detected = await detector.detectFromSamples(samples);
+      if (
+        this.sourceDetectionRun !== run ||
+        this.sourceDetectionGeneration !== generation ||
+        !this.settings.translationEnabled ||
+        this.settings.translationSource !== 'auto'
+      ) {
+        return;
+      }
       if (detected) {
         const channelKey = ChannelLanguageMemory.resolveKey(location.href, document);
         if (channelKey && this.channelMemory) {
@@ -1951,8 +1967,21 @@ export class CanvasRenderer extends RendererBase {
       log.debug('renderer.translation.source-detection-failed', {
         error: String(err),
       });
+    } finally {
+      if (this.sourceDetectionRun === run) {
+        this.sourceDetectionRun = null;
+        if (this.sourceDetectionGeneration === generation) {
+          this.sourceDetectionDone = true;
+          this.sourceSampleBuffer = [];
+        }
+      }
     }
-    this.sourceDetectionDone = true;
+  }
+
+  private resetSourceDetection(): void {
+    this.sourceDetectionGeneration++;
+    this.sourceDetectionRun = null;
+    this.sourceDetectionDone = false;
     this.sourceSampleBuffer = [];
   }
 
@@ -1990,6 +2019,7 @@ export class CanvasRenderer extends RendererBase {
     this.onBacklogPauseChange = null;
     this.onStatusBarClick = null;
     this.translationService.destroy();
+    this.resetSourceDetection();
     this.languageDetector?.destroy();
     this.languageDetector = null;
     this.channelMemory = null;

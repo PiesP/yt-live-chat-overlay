@@ -2,6 +2,13 @@ import { describe, it, expect } from 'vitest';
 import { MapCompatibleLruMap } from '../../../src/util/lru-map';
 
 describe('MapCompatibleLruMap', () => {
+  it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])(
+    'rejects an invalid max size: %s',
+    (maxSize) => {
+      expect(() => new MapCompatibleLruMap(maxSize)).toThrow(RangeError);
+    }
+  );
+
   it('preserves the native Map contract required by renderer helpers', () => {
     expect(new MapCompatibleLruMap(1)).toBeInstanceOf(Map);
   });

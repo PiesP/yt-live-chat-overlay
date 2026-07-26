@@ -146,6 +146,71 @@ describe('CanvasRenderer', () => {
     renderer.destroy();
   });
 
+  it('runs only one source-language detection from a bounded sample snapshot', async () => {
+    const renderer = new CanvasRenderer(
+      overlay,
+      makeSettings({ translationEnabled: true, translationSource: 'auto' })
+    );
+    let resolveDetection!: (language: 'ja') => void;
+    const detection = new Promise<'ja'>((resolve) => {
+      resolveDetection = resolve;
+    });
+    const detectFromSamples = vi.fn(() => detection);
+    const internals = renderer as unknown as {
+      languageDetector: {
+        detectFromSamples(samples: string[]): Promise<'ja'>;
+        destroy(): void;
+      };
+      sourceSampleBuffer: string[];
+      performSourceDetection(): Promise<void>;
+    };
+    internals.languageDetector = { detectFromSamples, destroy: vi.fn() };
+    internals.sourceSampleBuffer = Array.from({ length: 10 }, (_, index) => `sample-${index}`);
+
+    const first = internals.performSourceDetection();
+    const second = internals.performSourceDetection();
+
+    expect(detectFromSamples).toHaveBeenCalledTimes(1);
+    expect(detectFromSamples).toHaveBeenCalledWith(internals.sourceSampleBuffer.slice(0, 8));
+
+    resolveDetection('ja');
+    await Promise.all([first, second]);
+    renderer.destroy();
+  });
+
+  it('ignores a source-language result after translation is disabled', async () => {
+    const renderer = new CanvasRenderer(
+      overlay,
+      makeSettings({ translationEnabled: true, translationSource: 'auto' })
+    );
+    let resolveDetection!: (language: 'ja') => void;
+    const detection = new Promise<'ja'>((resolve) => {
+      resolveDetection = resolve;
+    });
+    const internals = renderer as unknown as {
+      languageDetector: {
+        detectFromSamples(samples: string[]): Promise<'ja'>;
+        destroy(): void;
+      };
+      sourceSampleBuffer: string[];
+      translationService: { setDetectedSource(language: 'ja'): Promise<void> };
+      performSourceDetection(): Promise<void>;
+    };
+    internals.languageDetector = { detectFromSamples: () => detection, destroy: vi.fn() };
+    internals.sourceSampleBuffer = Array.from({ length: 8 }, (_, index) => `sample-${index}`);
+    const setDetectedSource = vi
+      .spyOn(internals.translationService, 'setDetectedSource')
+      .mockResolvedValue();
+
+    const pending = internals.performSourceDetection();
+    renderer.updateSettings(makeSettings({ translationEnabled: false, translationSource: 'auto' }));
+    resolveDetection('ja');
+    await pending;
+
+    expect(setDetectedSource).not.toHaveBeenCalled();
+    renderer.destroy();
+  });
+
   it('setConnectionStatus accepts all status values', () => {
     const settings = makeSettings();
     const renderer = new CanvasRenderer(overlay, settings);
