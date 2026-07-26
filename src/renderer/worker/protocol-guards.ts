@@ -19,6 +19,10 @@ function isFiniteNonNegative(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0;
 }
 
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
 // ── Worker control message guard ──────────────────────────────────────────
 
 /**
@@ -53,6 +57,14 @@ export function isValidControlMessage(value: unknown): boolean {
       return isRecord(value.config);
     case 'setPaused':
       return value.paused === true || value.paused === false;
+    case 'setUserPaused':
+      return value.paused === true || value.paused === false;
+    case 'updateTranslation':
+      return (
+        typeof value.id === 'string' &&
+        value.id.length > 0 &&
+        (typeof value.translatedText === 'string' || value.translatedText === null)
+      );
     case 'laneDensity':
       // laneDensity is optional; accept any message with the discriminant
       return true;
@@ -88,7 +100,7 @@ function validateAddMessages(data: Record<string, unknown>): boolean {
     if (typeof msg.text !== 'string') return false;
     if (!isFiniteNonNegative(msg.width)) return false;
     if (!isFiniteNonNegative(msg.height)) return false;
-    if (!isFiniteNonNegative(msg.priority)) return false;
+    if (!isFiniteNumber(msg.priority)) return false;
   }
 
   return true;
