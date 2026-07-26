@@ -89,31 +89,18 @@ export function scheduleOverlayTask<T>(
 
   // Safari / fallback path
   const priority = options?.priority ?? 'user-visible';
-  return new Promise<T>((resolve) => {
-    switch (priority) {
-      case 'background':
-        // Defer more aggressively so urgent work runs first.
-        // Using setTimeout(4) adds ~4ms of slack to let higher-priority tasks
-        // scheduled via setTimeout(0) execute first.
-        setTimeout(() => resolve(fn()), 4);
-        break;
-      case 'user-blocking':
-        // Use a microtask-style schedule: requestAnimationFrame would align
-        // with the next frame boundary which defeats the purpose of being
-        // 'user-blocking'.  setTimeout(0) runs after the current macrotask
-        // but before the next rendering frame in most browsers.
-        //
-        // For truly blocking work, a MessageChannel-based scheduler would be
-        // faster, but setTimeout(0) is universally supported and the
-        // performance difference is negligible for our use case.
-        setTimeout(() => resolve(fn()), 0);
-        break;
-      default:
-        // Default priority; runs promptly but allows user-blocking work to
-        // be queued first when both are pending in the same macrotask.
-        setTimeout(() => resolve(fn()), 0);
-        break;
-    }
+  return new Promise<T>((resolve, reject) => {
+    // Background work gets extra slack; visible and blocking work run in the
+    // next macrotask. The wrapper converts synchronous callback failures into
+    // promise rejections and also assimilates promise-returning callbacks.
+    const delay = priority === 'background' ? 4 : 0;
+    setTimeout(() => {
+      try {
+        resolve(fn());
+      } catch (error) {
+        reject(error);
+      }
+    }, delay);
   });
 }
 

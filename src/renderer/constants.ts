@@ -18,7 +18,7 @@ import type { ChatMessage } from '@app-types';
 // ── Card rendering ──────────────────────────────────────────────────────
 
 /** Max cached linear-gradient entries (SuperChat/Membership card backgrounds).
- *  Used by both main thread (LruMap) and worker (Map with manual eviction)
+ *  Used by both main thread (MapCompatibleLruMap) and worker (Map with manual eviction)
  *  to keep gradient memory bounded during long streams. */
 export const GRADIENT_CACHE_MAX = 64;
 

@@ -66,6 +66,20 @@ describe('scheduleOverlayTask', () => {
     const result = await promise;
     expect(result).toBe(obj);
   });
+
+  it('rejects when a fallback task throws', async () => {
+    const taskError = new Error('scheduled task failed');
+    const promise = scheduleOverlayTask(() => {
+      throw taskError;
+    });
+    const outcome = promise.then(
+      () => ({ status: 'resolved' as const }),
+      (reason: unknown) => ({ status: 'rejected' as const, reason })
+    );
+
+    expect(() => vi.advanceTimersByTime(0)).not.toThrow();
+    await expect(outcome).resolves.toEqual({ status: 'rejected', reason: taskError });
+  });
 });
 
 describe('yieldAtDeadline', () => {

@@ -55,9 +55,9 @@ class MockOffscreenCanvas {
   }
 }
 
-function makeMessage(): ChatMessage {
+function makeMessage(id = 'backlog-message'): ChatMessage {
   return {
-    id: 'backlog-message',
+    id,
     text: 'hello',
     content: [{ type: 'text', content: 'hello' }],
     kind: 'text',
@@ -125,7 +125,8 @@ describe('renderer worker protocol guards', () => {
     const renderer = initializeRenderer();
     const manager = createManager(renderer);
 
-    manager.sendToWorker(makeMessage(), 'backlog-message');
+    manager.sendToWorker(makeMessage('backlog-message'), 'backlog-message');
+    manager.sendToWorker(makeMessage('second-message'), 'second-message');
     await Promise.resolve();
 
     const internals = renderer as unknown as {
@@ -135,6 +136,7 @@ describe('renderer worker protocol guards', () => {
     };
     expect(internals.pendingQueue).toMatchObject([
       { id: 'backlog-message', priority: -1 },
+      { id: 'second-message', priority: -1 },
     ]);
 
     manager.sendTranslation('backlog-message', 'translated');

@@ -1061,7 +1061,7 @@ export class RuntimeManager {
 
   /**
    * Route a batch of chat messages through dedup, backlog controller,
-   * and renderer.  Subscribed to the MessageBus in startSession().
+   * and renderer. Subscribed to the BatchMessageBus in startSession().
    */
   private routeMessages(msgs: ChatMessage[]): void {
     if (this.isDisposedState) return;

@@ -1915,9 +1915,8 @@ export class CanvasRenderer extends RendererBase {
         reason: 'language-detector',
         error: String(err),
       });
-      if (this.languageDetector === detector) {
-        this.languageDetector = null;
-      }
+      // Keep the service instance: detectFromSamples() still provides the
+      // bounded Unicode fallback when native detector initialization fails.
     });
   }
 
@@ -1980,7 +1979,6 @@ export class CanvasRenderer extends RendererBase {
 
   private resetSourceDetection(): void {
     this.sourceDetectionGeneration++;
-    this.sourceDetectionRun = null;
     this.sourceDetectionDone = false;
     this.sourceSampleBuffer = [];
   }
