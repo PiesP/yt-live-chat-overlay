@@ -17,7 +17,7 @@ All processing is local — chat content is never stored or sent anywhere.
 - **Settings import/export** — share config across browsers or backup
 - **Cross-tab sync** — settings sync instantly across YouTube tabs
 - **Settings panel** — click the ⚙ button on the player to configure everything
-- **100% local** — no external dependencies, no data collection, no tracking
+- **100% local** — no runtime-loaded external code, no data collection, no tracking
 
 ## Install
 
@@ -57,7 +57,8 @@ No data is stored (beyond saved settings) or transmitted to any third party.
 
 ## Development
 
-Requires Node.js `>=26.0.0` and pnpm `>=11.2.2`.
+Use the Volta versions in `package.json` (currently Node.js `26.5.0` and pnpm
+`11.17.0`), or engines-compatible Node.js `>=22.13.0` and pnpm `>=11.17.0`.
 
 ```bash
 pnpm install
