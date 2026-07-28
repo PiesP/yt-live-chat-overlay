@@ -872,6 +872,31 @@ export class WorkerRenderer {
       const progress = Math.min(1, elapsed * msg.invDuration);
       const isScrolling =
         this.config.danmakuMode === 'scroll' || this.config.danmakuMode === 'reverse';
+      let duration = this.config.topBottomDurationMs;
+      if (isScrolling) {
+        let speed = this.config.speedPxPerSec;
+        if (msg.speedTier === SPEED_TIER.FAR) {
+          speed = Math.max(30, speed * this.config.depthFarSpeedMul);
+        } else if (msg.speedTier === SPEED_TIER.NEAR) {
+          speed *= this.config.depthNearSpeedMul;
+        } else if (msg.speedTier === SPEED_TIER.BACKLOG) {
+          speed *= this.config.backlogSpeedMultiplier;
+        }
+        const totalDistance = this.logicalWidth + msg.width + this.config.exitPaddingPx;
+        duration = computeScrollDuration(
+          totalDistance,
+          speed,
+          this.config.scrollDurationMinMs,
+          this.config.scrollDurationMaxMs,
+          this.config.exitPaddingPx
+        );
+      }
+      if (msg.authorType === 'moderator' || msg.authorType === 'owner') {
+        duration *= this.config.modOwnerDurationMultiplier;
+      }
+      msg.duration = duration;
+      msg.invDuration = 1 / Math.max(1, duration);
+      msg.startTime = now - msg.pausedDuration - progress * duration;
       if (isScrolling) {
         if (this.config.danmakuMode === 'scroll') {
           msg.startX = this.logicalWidth;
@@ -895,7 +920,7 @@ export class WorkerRenderer {
         laneList.push(msg);
       }
 
-      const remainingDuration = Math.max(1, msg.duration - elapsed);
+      const remainingDuration = Math.max(1, duration * (1 - progress));
       this.commitPlacement(
         laneIndex,
         slotCount,

@@ -170,6 +170,7 @@ export class ReplayChatSource extends ChatSource {
 
       const playback = this.getPlaybackSnapshot();
       const isPlaying = playback && !playback.paused;
+      const mayFetchWhilePaused = !this.isPaused || this.isVisibilityOnlyPause();
 
       // 2. Flush: emit messages whose video time has arrived.
       //    Skip when visibility-paused (tab hidden) — messages accumulate
@@ -184,7 +185,7 @@ export class ReplayChatSource extends ChatSource {
       //    hidden intervals. When the video itself is paused, skip fetching
       //    — there's no point collecting data that won't be consumed until
       //    the user manually resumes.
-      if (isPlaying) {
+      if (isPlaying && mayFetchWhilePaused) {
         let mainPollSucceeded = false;
         try {
           if (this.replayMode === 'playerSeek') {
@@ -654,6 +655,7 @@ export class ReplayChatSource extends ChatSource {
 
     const minimumOffsetMs = Math.max(0, currentOffsetMs - REPLAY_PREFETCH_WINDOW_MS);
     let batches = 0;
+    let keepAheadFetched = false;
 
     // M4: Track last offset to detect stalled progress. If the offset doesn't
     // advance after a fetch, the remaining pages have no messages — stop early
@@ -687,10 +689,10 @@ export class ReplayChatSource extends ChatSource {
       this.replayNextAllowedFetchAt <= Date.now() &&
       this.replayFallbackLastOffsetMs < currentOffsetMs + REPLAY_PREFETCH_WINDOW_MS
     ) {
-      await this.fetchNextReplayFallbackBatch(minimumOffsetMs, signal);
+      keepAheadFetched = await this.fetchNextReplayFallbackBatch(minimumOffsetMs, signal);
     }
 
     // Flush is handled by the rAF loop — no explicit flush call here.
-    return batches > 0;
+    return batches > 0 || keepAheadFetched;
   }
 }

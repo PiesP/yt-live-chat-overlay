@@ -790,8 +790,10 @@ export class RenderWorkerManager {
   destroy(): void {
     // Cancel pending message snapshot timeout
     if (this.messageSnapshotRequest) {
-      clearTimeout(this.messageSnapshotRequest.timer);
+      const request = this.messageSnapshotRequest;
+      clearTimeout(request.timer);
       this.messageSnapshotRequest = null;
+      request.resolve(this.takeKnownMessages(request.knownMessages));
     }
     this.batchFlushScheduled = false;
     const pendingBatch = this.pendingBatch.splice(0);

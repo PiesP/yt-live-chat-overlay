@@ -358,6 +358,11 @@ export abstract class ChatSource implements Pauseable {
     }
   }
 
+  /** Whether visibility is the sole reason this source is currently paused. */
+  protected isVisibilityOnlyPause(): boolean {
+    return this.pauseReasons.size === 1 && this.pauseReasons.has('visibility');
+  }
+
   /**
    * @deprecated Use setPauseReason(reason, paused) with a specific reason key.
    * Kept for backward compatibility with the Pauseable interface.
