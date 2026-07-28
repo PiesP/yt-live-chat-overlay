@@ -18,6 +18,8 @@ interface ExtensionBridge {
   workerUrl: string;
   /** Storage backend type — signals that chrome.storage.local is preferred. */
   storageType: 'chrome.storage.local';
+  /** Per-injection capability required by messages crossing the isolated-world boundary. */
+  nonce: string;
 }
 
 declare global {

@@ -28,6 +28,7 @@ interface ContentScriptYtChatOverlayHandle {
 }
 
 const COMMAND_ORIGIN = window.location.origin;
+const COMMAND_NONCE = window.__ytExtensionBridge?.nonce;
 
 window.addEventListener('message', (event: MessageEvent) => {
   // Strict origin check: reject messages from any other origin.
@@ -37,7 +38,9 @@ window.addEventListener('message', (event: MessageEvent) => {
   if (
     !data ||
     typeof data !== 'object' ||
-    (data as Record<string, unknown>).source !== 'yt-chat-overlay-extension'
+    (data as Record<string, unknown>).source !== 'yt-chat-overlay-extension' ||
+    !COMMAND_NONCE ||
+    (data as Record<string, unknown>).nonce !== COMMAND_NONCE
   ) {
     return;
   }

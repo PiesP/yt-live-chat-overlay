@@ -25,6 +25,7 @@ function enableExtensionBridge(): void {
     workerSupported: true,
     workerUrl: 'chrome-extension://test/workers/renderer.js',
     storageType: 'chrome.storage.local',
+    nonce: 'test-bridge-nonce',
   };
 }
 
@@ -56,7 +57,7 @@ function dispatchStorageChanged(
 ): void {
   window.dispatchEvent(
     new MessageEvent('message', {
-      data,
+      data: { nonce: window.__ytExtensionBridge?.nonce, ...data },
       origin,
       source,
     })
