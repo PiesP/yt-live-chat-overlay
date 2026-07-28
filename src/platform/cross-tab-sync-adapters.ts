@@ -13,6 +13,7 @@ import type { CrossTabSyncAdapter } from '@platform/types';
 // ── Chrome storage sync ────────────────────────────────────────────────────
 
 function createChromeSyncAdapter(storageKey: string): CrossTabSyncAdapter {
+  const bridgeNonce = window.__ytExtensionBridge?.nonce;
   let currentCallback: ((key: string, newValue: unknown) => void) | null = null;
   const listener = (changes: Record<string, unknown>, areaName: string) => {
     if (areaName !== 'local') return;
@@ -34,6 +35,7 @@ function createChromeSyncAdapter(storageKey: string): CrossTabSyncAdapter {
       if (event.origin !== window.location.origin) return;
       const data = event.data;
       if (data?.source !== 'yt-storage-changed') return;
+      if (!bridgeNonce || data.nonce !== bridgeNonce) return;
       if (data.key !== storageKey) return;
       if (currentCallback) currentCallback(storageKey, data.newValue);
     };

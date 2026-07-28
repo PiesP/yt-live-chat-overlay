@@ -45,7 +45,8 @@ function isQuotaExceededError(error: unknown): boolean {
  */
 function setupStorageRelay(): StorageAdapter | null {
   // Only attempt relay setup if the bridge indicates extension context.
-  if (!window.__ytExtensionBridge?.storageType) return null;
+  const nonce = window.__ytExtensionBridge?.nonce;
+  if (!window.__ytExtensionBridge?.storageType || !nonce) return null;
 
   let requestId = 0;
   const pending = new Map<
@@ -65,6 +66,7 @@ function setupStorageRelay(): StorageAdapter | null {
     const data = event.data;
     if (!data || typeof data !== 'object') return;
     if (data.source !== 'yt-storage-relay-response') return;
+    if (data.nonce !== nonce) return;
     const entry = pending.get(data.requestId as number);
     if (!entry) return;
     pending.delete(data.requestId as number);
@@ -93,7 +95,7 @@ function setupStorageRelay(): StorageAdapter | null {
         };
         pending.set(id, { resolve: wrappedResolve, reject });
         window.postMessage(
-          { source: 'yt-storage-relay', requestId: id, method: 'get', key },
+          { source: 'yt-storage-relay', nonce, requestId: id, method: 'get', key },
           window.location.origin
         );
       });
@@ -115,7 +117,7 @@ function setupStorageRelay(): StorageAdapter | null {
           reject: () => {},
         });
         window.postMessage(
-          { source: 'yt-storage-relay', requestId: id, method: 'set', key, value },
+          { source: 'yt-storage-relay', nonce, requestId: id, method: 'set', key, value },
           window.location.origin
         );
       });

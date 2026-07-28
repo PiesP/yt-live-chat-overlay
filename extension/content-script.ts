@@ -21,9 +21,12 @@
  * to load entirely.
  */
 
+export {};
+
 const cr = (chrome as ChromeNamespace).runtime!;
 
 const workerBundleUrl = cr.getURL('workers/renderer.js');
+const bridgeNonce = crypto.randomUUID();
 // ── Inject page script ─────────────────────────────────────────────────
 //
 // Do not use script.textContent here. YouTube's CSP blocks inline script
@@ -36,6 +39,7 @@ const pageScript = document.createElement('script');
 pageScript.src = cr.getURL('page-script.js');
 pageScript.type = 'text/javascript';
 pageScript.dataset.ytExtensionWorkerUrl = workerBundleUrl;
+pageScript.dataset.ytExtensionBridgeNonce = bridgeNonce;
 (document.head || document.documentElement).appendChild(pageScript);
 
 // ── Storage relay (MAIN world → ISOLATED → chrome.storage.local) ─────
@@ -57,6 +61,7 @@ window.addEventListener('message', (event: MessageEvent) => {
   const data = event.data;
   if (!data || data.source !== 'yt-storage-relay') return;
   if (event.origin !== window.location.origin) return;
+  if (data.nonce !== bridgeNonce) return;
 
   const requestId = data.requestId as number;
   const method = data.method as string;
@@ -68,6 +73,7 @@ window.addEventListener('message', (event: MessageEvent) => {
     window.postMessage(
       {
         source: 'yt-storage-relay-response',
+        nonce: bridgeNonce,
         requestId,
         error: `Key "${key}" is not in the storage relay allowlist`,
       },
@@ -83,6 +89,7 @@ window.addEventListener('message', (event: MessageEvent) => {
         window.postMessage(
           {
             source: 'yt-storage-relay-response',
+            nonce: bridgeNonce,
             requestId,
             value: value === undefined || value === null
               ? null
@@ -93,7 +100,7 @@ window.addEventListener('message', (event: MessageEvent) => {
       })
       .catch((error: Error) => {
         window.postMessage(
-          { source: 'yt-storage-relay-response', requestId, error: error.message },
+          { source: 'yt-storage-relay-response', nonce: bridgeNonce, requestId, error: error.message },
           window.location.origin,
         );
       });
@@ -102,13 +109,13 @@ window.addEventListener('message', (event: MessageEvent) => {
     chrome!.storage!.local!.set({ [key]: value })
       .then(() => {
         window.postMessage(
-          { source: 'yt-storage-relay-response', requestId, value: null },
+          { source: 'yt-storage-relay-response', nonce: bridgeNonce, requestId, value: null },
           window.location.origin,
         );
       })
       .catch((error: Error) => {
         window.postMessage(
-          { source: 'yt-storage-relay-response', requestId, error: error.message },
+          { source: 'yt-storage-relay-response', nonce: bridgeNonce, requestId, error: error.message },
           window.location.origin,
         );
       });
@@ -130,6 +137,7 @@ chrome!.storage!.onChanged!.addListener(
       window.postMessage(
         {
           source: 'yt-storage-changed',
+          nonce: bridgeNonce,
           key,
           newValue: change.newValue,
         },
@@ -163,6 +171,7 @@ onMessage.addListener((message: unknown, sender: ChromeMessageSender) => {
   window.postMessage(
     {
       source: 'yt-chat-overlay-extension',
+      nonce: bridgeNonce,
       command: msg.command,
     },
     window.location.origin,

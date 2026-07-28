@@ -75,7 +75,12 @@ describe('RenderWorkerManager isAlive after destroy', () => {
     vi.stubGlobal('OffscreenCanvas', class {});
     Object.defineProperty(window, '__ytExtensionBridge', {
       configurable: true,
-      value: { workerSupported: true, workerUrl: 'worker.js' },
+      value: {
+        workerSupported: true,
+        workerUrl: 'worker.js',
+        storageType: 'chrome.storage.local',
+        nonce: 'test-bridge-nonce',
+      },
     });
   }
 

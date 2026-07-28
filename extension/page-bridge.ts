@@ -17,13 +17,17 @@ const pageScript =
     ? currentScript
     : document.querySelector<HTMLScriptElement>('script[data-yt-extension-worker-url]');
 const workerUrl = pageScript?.dataset.ytExtensionWorkerUrl;
+const nonce = pageScript?.dataset.ytExtensionBridgeNonce;
 
-if (workerUrl) {
+if (workerUrl && nonce) {
   window.__ytExtensionBridge = {
     workerSupported: true,
     workerUrl,
     storageType: 'chrome.storage.local',
+    nonce,
   };
+  pageScript?.removeAttribute('data-yt-extension-worker-url');
+  pageScript?.removeAttribute('data-yt-extension-bridge-nonce');
 }
 
 export {};
