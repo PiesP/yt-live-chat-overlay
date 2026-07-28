@@ -113,22 +113,6 @@ export class ReplayChatSource extends ChatSource {
     };
   }
 
-  /**
-   * Override setPaused to flag backlog drain on unpause.
-   *
-   * When the tab is hidden, the cooperative loop skips flush work but
-   * continues fetching into the ReplayBuffer. On unpause, accumulated
-   * messages must be drained through the backlog controller for gradual
-   * emission — see the cooperative loop's backlog drain logic.
-   *
-   * Note: we intentionally do NOT reset fetch throttles here. The last
-   * fetch offset is preserved so the cooperative loop continues from
-   * where it left off without re-fetching already-fetched data ranges.
-   */
-  override setPaused(paused: boolean): void {
-    super.setPaused(paused);
-  }
-
   protected override resetSessionState(): void {
     super.resetSessionState();
     this.resetReplayState();
@@ -266,7 +250,15 @@ export class ReplayChatSource extends ChatSource {
     this.cooperativeLoopGeneration++;
     this.cooperativeLoopTimer = clearSafeTimeout(this.cooperativeLoopTimer);
     this.cooperativeLoopRunning = false;
-    this.seekListenerCleanup?.();
+    this.clearSeekListener();
+  }
+
+  /** Release the listener closure and session signal after detaching. */
+  private clearSeekListener(): void {
+    const cleanup = this.seekListenerCleanup;
+    this.seekListenerCleanup = null;
+    this.seekSignal = null;
+    cleanup?.();
   }
 
   /** Reset prefetch state — cooperative loop will skip the prefetch step. */
@@ -297,10 +289,10 @@ export class ReplayChatSource extends ChatSource {
   // ── Seek listeners ──────────────────────────────────────────────────────
 
   private installSeekListeners(signal?: AbortSignal): void {
-    this.seekListenerCleanup?.();
-    this.seekSignal = signal ?? null;
+    this.clearSeekListener();
     const el = findElementMatch<HTMLVideoElement>(VIDEO_SELECTORS);
     if (!el) return;
+    this.seekSignal = signal ?? null;
     const v = el.element;
     const onSeeked = (): void => {
       if (signal?.aborted) return;
@@ -393,8 +385,6 @@ export class ReplayChatSource extends ChatSource {
     this.replayTotalFailuresSinceSuccess = 0;
     this.replayNextAllowedFetchAt = 0;
     this.replayBuffer.clear();
-    this.seekListenerCleanup?.();
-    this.seekListenerCleanup = null;
     this.seekAbortController?.abort();
     this.seekAbortController = null;
     this.stopCooperativeLoop();

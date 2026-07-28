@@ -70,6 +70,43 @@ describe('ReplayChatSource', () => {
     expect(() => source.stop()).not.toThrow();
   });
 
+  it('releases seek listener and signal references when the loop stops', () => {
+    const cleanup = vi.fn();
+    const signal = new AbortController().signal;
+    const internals = source as unknown as {
+      seekListenerCleanup: (() => void) | null;
+      seekSignal: AbortSignal | null;
+      stopCooperativeLoop: () => void;
+    };
+    internals.seekListenerCleanup = cleanup;
+    internals.seekSignal = signal;
+
+    internals.stopCooperativeLoop();
+    internals.stopCooperativeLoop();
+
+    expect(cleanup).toHaveBeenCalledOnce();
+    expect(internals.seekListenerCleanup).toBeNull();
+    expect(internals.seekSignal).toBeNull();
+  });
+
+  it('clears a prior seek listener when no replacement video exists', () => {
+    const cleanup = vi.fn();
+    const signal = new AbortController().signal;
+    const internals = source as unknown as {
+      seekListenerCleanup: (() => void) | null;
+      seekSignal: AbortSignal | null;
+      installSeekListeners: (signal?: AbortSignal) => void;
+    };
+    internals.seekListenerCleanup = cleanup;
+    internals.seekSignal = signal;
+
+    internals.installSeekListeners(signal);
+
+    expect(cleanup).toHaveBeenCalledOnce();
+    expect(internals.seekListenerCleanup).toBeNull();
+    expect(internals.seekSignal).toBeNull();
+  });
+
   it('aborts a hung replay request after the fetch timeout', async () => {
     const timeoutController = new AbortController();
     const timeoutSpy = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(timeoutController.signal);
