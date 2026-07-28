@@ -4,9 +4,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const globals = globalThis as Record<string, unknown>;
-const originalGMGetValue = globals.GM_getValue;
-const originalGMSetValue = globals.GM_setValue;
-const originalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+const originalDescriptors = {
+  chrome: Object.getOwnPropertyDescriptor(globalThis, 'chrome'),
+  GM_getValue: Object.getOwnPropertyDescriptor(globalThis, 'GM_getValue'),
+  GM_setValue: Object.getOwnPropertyDescriptor(globalThis, 'GM_setValue'),
+  localStorage: Object.getOwnPropertyDescriptor(globalThis, 'localStorage'),
+  extensionBridge: Object.getOwnPropertyDescriptor(window, '__ytExtensionBridge'),
+};
 const storageValues = new Map<string, string>();
 const memoryStorage: Storage = {
   get length() {
@@ -21,6 +25,18 @@ const memoryStorage: Storage = {
 
 async function loadAdapter() {
   return (await import('@platform/storage-adapters')).getStorageAdapter();
+}
+
+function restoreProperty(
+  target: object,
+  property: PropertyKey,
+  descriptor: PropertyDescriptor | undefined
+): void {
+  if (descriptor) {
+    Object.defineProperty(target, property, descriptor);
+    return;
+  }
+  Reflect.deleteProperty(target, property);
 }
 
 describe('platform storage adapters', () => {
@@ -39,15 +55,11 @@ describe('platform storage adapters', () => {
   });
 
   afterEach(() => {
-    globals.GM_getValue = originalGMGetValue;
-    globals.GM_setValue = originalGMSetValue;
-    if (originalLocalStorage) {
-      Object.defineProperty(globalThis, 'localStorage', originalLocalStorage);
-    } else {
-      delete globals.localStorage;
-    }
-    delete globals.chrome;
-    delete window.__ytExtensionBridge;
+    restoreProperty(globalThis, 'chrome', originalDescriptors.chrome);
+    restoreProperty(globalThis, 'GM_getValue', originalDescriptors.GM_getValue);
+    restoreProperty(globalThis, 'GM_setValue', originalDescriptors.GM_setValue);
+    restoreProperty(globalThis, 'localStorage', originalDescriptors.localStorage);
+    restoreProperty(window, '__ytExtensionBridge', originalDescriptors.extensionBridge);
     vi.restoreAllMocks();
   });
 
