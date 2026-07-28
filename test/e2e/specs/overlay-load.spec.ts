@@ -11,13 +11,11 @@
  * 4. Verifying overlay initialization and state
  */
 
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 import { existsSync } from 'node:fs';
 import {
   USERSCRIPT_PATH,
   setupOverlayPage,
-  injectUserscript,
-  MOCK_WATCH_URL,
 } from '../fixtures/test-utils';
 
 test.describe('YT Live Chat Overlay E2E', () => {

@@ -284,11 +284,11 @@ describe('Worker message protocol', () => {
 // Worker types — compile-time verification
 // ═══════════════════════════════════════════════════════════════════════════
 
-import type { WorkerConfig, ActiveMessage } from '@renderer/worker/types';
+import type { WorkerConfig } from '@renderer/worker/types';
 
 describe('Worker types', () => {
   it('WorkerConfig type is importable (compile-time check)', () => {
-    const _c: WorkerConfig = makeMinimalConfig() as unknown as WorkerConfig;
-    expect(true).toBe(true);
+    const config: WorkerConfig = makeMinimalConfig() as unknown as WorkerConfig;
+    expect(config).toBeDefined();
   });
 });

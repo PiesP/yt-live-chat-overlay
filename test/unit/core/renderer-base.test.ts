@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { RendererBase } from '@renderer/renderer-base';
 import type { ConnectionStatus } from '@renderer/renderer-base';
 import type { Overlay } from '@app/overlay';
-import type { ChatMessage, OverlayDimensions, OverlaySettings, BurstLevel } from '@app-types';
+import type { ChatMessage, OverlaySettings } from '@app-types';
 import { DEFAULT_SETTINGS } from '@settings/schema';
 
 // ── Test subclass ─────────────────────────────────────────────────────────
@@ -51,7 +51,7 @@ class TestRenderer extends RendererBase {
     this.destroyed = true;
   }
 
-  protected onResumeFromVideoPause(messages: ChatMessage[]): void {
+  protected override onResumeFromVideoPause(messages: ChatMessage[]): void {
     this.messages.push(...messages);
   }
 }

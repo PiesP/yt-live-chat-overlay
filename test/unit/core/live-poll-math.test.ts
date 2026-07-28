@@ -8,7 +8,6 @@ import {
   computeDensityAdjustedMs,
   computeErrorBackoffMs,
   DENSITY_HIGH_THRESHOLD,
-  DENSITY_LOW_THRESHOLD,
   DENSITY_WINDOW_SIZE,
   EXTREME_DENSITY_THRESHOLD,
   recordDensitySample,

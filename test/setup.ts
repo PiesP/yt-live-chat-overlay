@@ -5,7 +5,7 @@
  * Canvas2D API support for renderer tests via the `canvas` package.
  */
 
-import { afterAll, afterEach, beforeEach, vi } from "vitest";
+import { afterAll, beforeEach, vi } from "vitest";
 
 // ═══════════════════════════════════════════════════════════
 // GM_* API Mocks
@@ -35,7 +35,7 @@ const gmStorage = new Map<string, unknown>();
   return Array.from(gmStorage.keys());
 };
 
-(globalThis as Record<string, unknown>).GM_xmlhttpRequest = (details: {
+(globalThis as Record<string, unknown>).GM_xmlhttpRequest = (_details: {
   url: string;
   method?: string;
   onload?: (response: { status: number; responseText: string }) => void;
@@ -45,14 +45,14 @@ const gmStorage = new Map<string, unknown>();
 };
 
 (globalThis as Record<string, unknown>).GM_download = (
-  arg1: string | { url: string; name: string },
+  _arg1: string | { url: string; name: string },
   _name?: string
 ) => {
   return { abort: (): void => {} };
 };
 
 (globalThis as Record<string, unknown>).GM_notification = (
-  details: { title?: string; text?: string },
+  _details: { title?: string; text?: string },
   _ondone?: () => void
 ): void => {};
 

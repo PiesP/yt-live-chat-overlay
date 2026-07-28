@@ -2,7 +2,7 @@
  * Tests for DensityIndicator — density level computation and DOM operations.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 
 // ── Pure function extracted for testing ─────────────────────────────────
 

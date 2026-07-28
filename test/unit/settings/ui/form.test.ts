@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { SettingsUiForm, STYLE_ID, BACKDROP_ID } from '@settings/ui/form';
+import { SettingsUiForm, BACKDROP_ID } from '@settings/ui/form';
 import type { OverlaySettings } from '@app-types';
 
 function makeDefaults(overrides: Partial<OverlaySettings> = {}): OverlaySettings {

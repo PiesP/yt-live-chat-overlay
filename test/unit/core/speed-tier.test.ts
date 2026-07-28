@@ -105,7 +105,7 @@ describe('getSpeedTier', () => {
   });
 
   it('falls back to timestamp hash when id is missing', () => {
-    const msg = makeMessage({ id: undefined, timestamp: 999999 });
+    const msg = makeMessage({ timestamp: 999999 });
     const tier = getSpeedTier(msg, scrollConfig);
     expect([SPEED_TIER.NEAR, SPEED_TIER.FAR]).toContain(tier);
   });

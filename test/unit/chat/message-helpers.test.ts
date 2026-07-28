@@ -7,7 +7,6 @@ import {
   normalizeInlineText,
   truncateForKind,
   hasEmojiContent,
-  getTranslatableText,
   AUTHOR_TYPE_PRIORITY,
   EMOJI_ALIAS_PATTERN,
 } from '@chat/message-helpers';

@@ -4,7 +4,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { HighFirstPriorityBucketQueue } from '@util/priority-bucket-queue';
 import { drainStage, compactRemovedMessages, mirrorVisibleMessages } from '@renderer/canvas/render-pipeline';
-import { COMPACTION_THRESHOLD_RATIO } from '@renderer/canvas/pipeline-utils';
 import type { CanvasRenderContext } from '@renderer/canvas/render-pipeline';
 
 // ── Mock factory — minimal context for drainStage ─────────────────────────
@@ -214,7 +213,7 @@ describe('compactRemovedMessages', () => {
     const ctx = makeCompactCtx({
       activeMessages,
       activeMessagesByLane: laneMap,
-      expiredMessagesScratch: [laneMsgs[0]],
+      expiredMessagesScratch: [laneMsgs[0]!],
     });
 
     compactRemovedMessages(ctx, 2, 3);

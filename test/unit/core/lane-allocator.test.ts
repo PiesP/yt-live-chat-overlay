@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { LaneAllocator } from '@renderer/layout/lane-allocator';
-import type { LaneAllocatorOptions, LanePlacement } from '@renderer/layout/lane-allocator';
+import type { LaneAllocatorOptions } from '@renderer/layout/lane-allocator';
 import type { OverlayDimensions } from '@app-types';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
@@ -72,7 +72,6 @@ describe('LaneAllocator', () => {
     it('calculates lane count based on safe zone', () => {
       const tight = new LaneAllocator({ ...defaultOptions, safeTop: 0.15, safeBottom: 0.15 });
       tight.reset(defaultDimensions); // 1080 * (1-0.3) = 756px usable
-      const laneHeight = tight.getLaneHeight();
       const lanesTight = tight.getLaneCount();
 
       const loose = new LaneAllocator({ ...defaultOptions, safeTop: 0.01, safeBottom: 0.01 });

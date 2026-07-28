@@ -17,7 +17,6 @@ import {
   getSettings,
   applySettings,
   readStoredSettings,
-  DIST_DIR,
   USERSCRIPT_PATH,
 } from '../fixtures/test-utils';
 
