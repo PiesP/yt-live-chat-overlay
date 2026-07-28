@@ -3,16 +3,12 @@ updates:
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "daily"
       time: "09:00"
       timezone: "Asia/Seoul"
-    # Cooldown: wait 7 days after a package is released before creating a PR.
-    # This mitigates supply-chain attacks where malicious packages are typically
-    # detected and removed within days of publication.
+    # Keep only a short supply-chain cooling window for this fast-moving project.
     cooldown:
-      default-days: 7
-      semver-patch-days: 3
+      default-days: 1
     open-pull-requests-limit: 5
     commit-message:
       prefix: "chore(deps)"
@@ -50,22 +46,15 @@ updates:
           - "minor"
           - "patch"
 
-    ignore:
-      - dependency-name: "vite"
-        update-types: ["version-update:semver-major"]
-
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "daily"
       time: "09:00"
       timezone: "Asia/Seoul"
-    # Cooldown: wait 7 days after a package is released before creating a PR.
-    # This mitigates supply-chain attacks where malicious packages are typically
-    # detected and removed within days of publication.
+    # Keep only a short supply-chain cooling window for this fast-moving project.
     cooldown:
-      default-days: 7
+      default-days: 1
     open-pull-requests-limit: 3
     commit-message:
       prefix: "ci(deps)"
@@ -78,9 +67,3 @@ updates:
       actions:
         patterns:
           - "*"
-    # pnpm/action-setup@v6 has a known bug (pnpm/action-setup#225) that always
-    # installs pnpm v11 beta, ignoring the packageManager field. Skip major
-    # upgrades until the bug is resolved upstream.
-    ignore:
-      - dependency-name: "pnpm/action-setup"
-        update-types: ["version-update:semver-major"]

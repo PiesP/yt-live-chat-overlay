@@ -12,7 +12,8 @@ Include: browser + version, OS + userscript manager, stream type (live/premiere/
 
 ### Prerequisites
 
-- Node.js `>=26.0.0`, pnpm `>=11.2.2`
+- Use the Volta versions in `package.json` (currently Node.js `26.5.0` and pnpm
+  `11.17.0`), or engines-compatible Node.js `>=22.13.0` and pnpm `>=11.17.0`.
 
 ### Commands
 
@@ -26,7 +27,7 @@ pnpm quality:fix     # auto-fix then check
 pnpm check           # tsc --noEmit
 pnpm lint            # Biome lint
 pnpm fmt             # Biome format
-pnpm circular        # madge circular dependency detection
+pnpm circular        # dpdm circular dependency detection
 pnpm knip            # unused dependencies scan
 pnpm knip:full       # full unused files/exports/deps scan
 ```
@@ -41,11 +42,25 @@ pnpm knip:full       # full unused files/exports/deps scan
 
 ## Project constraints
 
-- **Zero runtime dependencies** — no external libs, no code splitting.
+- **No runtime-loaded external code** — dependencies, including the pinned
+  `@piesp/browser-core` submodule, are bundled; preserve the single-file userscript.
 - **All processing stays in-browser** — no server-side data fetching.
 - **Greasy Fork rules** — no minification or obfuscation.
 - **DOM-safe rendering** — `textContent`, sanitized attributes; no raw HTML injection.
 - **SSOT principle** — single source of truth for settings, dedup, measurement.
+
+### Dependency update policy
+
+- Prefer current stable libraries and tools; this personal project intentionally
+  adopts modern platform and ecosystem capabilities quickly.
+- pnpm and Dependabot enforce a 24-hour cooling window for newly published
+  packages. Do not bypass it for routine updates.
+- Dependabot checks npm packages and GitHub Actions daily. Passing patch/minor
+  tooling updates may auto-merge; major and runtime behavior changes require
+  manual review.
+- pnpm also rejects recent trust-level downgrades, unapproved dependency build
+  scripts, and exotic transitive sources. The daily security workflow checks
+  pinned Nose, OSV Scanner, and Semgrep releases after the cooling window.
 
 ## Code style
 
@@ -60,7 +75,7 @@ See [CODE_STANDARDS.md](./CODE_STANDARDS.md) for detailed conventions. Key point
 
 - Clear title + explanation of **what** and **why**
 - Small, focused commits with descriptive messages
-- Validation note: `pnpm quality` + `pnpm build` passed, or why a smaller set was sufficient
+- Validation note: `pnpm verify:full` passed, or why a smaller set was sufficient
 - Update README / CHANGELOG if user-visible behavior changed
 
 Thanks for helping improve **YouTube Live Chat Overlay**!

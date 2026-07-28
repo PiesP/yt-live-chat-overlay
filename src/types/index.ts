@@ -10,23 +10,19 @@
 
 export type { ChatMessage, SuperChatInfo } from './chat';
 export type {
-  AuthorDisplayKey,
   AuthorRateLimitPreset,
   AuthorType,
   BacklogMode,
   BurstLevel,
-  ChatMessageKind,
   ContentSegment,
   DanmakuMode,
   DropReason,
-  EmojiContentSegment,
   FontWeight,
   ImageAsset,
   LanguageSetting,
   LogLevel,
   RgbColor,
   SuperChatTier,
-  TextContentSegment,
   TranslationLanguage,
   TranslationMode,
   TranslationService,
@@ -34,10 +30,4 @@ export type {
   TranslationTarget,
 } from './common';
 export type { FrameTimings, Pauseable, SessionMetrics } from './renderer';
-export type {
-  AuthorDisplaySettings,
-  ColorSettings,
-  OutlineSettings,
-  OverlayDimensions,
-  OverlaySettings,
-} from './settings';
+export type { OutlineSettings, OverlayDimensions, OverlaySettings } from './settings';
