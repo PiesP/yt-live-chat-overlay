@@ -362,6 +362,7 @@ export function drawStage(
         // Temporal frame blending: render ghost at previous position for FAR-tier
         if (
           ctx.settings.motionBlurEnabled &&
+          !ctx.isReducedMotionActive &&
           msg.speedTier === SPEED_TIER.FAR &&
           msg._prevX !== undefined &&
           msg._prevY !== undefined

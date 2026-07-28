@@ -36,7 +36,7 @@ All notable changes to this project will be documented in this file.
 ### Removed
 
 - **Repeated quality checks** — Build pipeline no longer re-runs quality steps that prebuild already covers.
- - 2026-07-19
+## [0.43.0] - 2026-07-19
 
 ### Added
 
