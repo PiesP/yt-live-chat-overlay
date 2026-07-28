@@ -7,6 +7,12 @@ import {
   createChatPreflight,
 } from '@app/chat-availability-preflight';
 import { OVERLAY_SELECTOR, Overlay } from '@app/overlay';
+import {
+  classifyRuntimeHealthFailure,
+  getWatchdogRestartDelay,
+  type HealthFailureReason,
+  RESTART_WINDOW_MS,
+} from '@app/runtime-watchdog-policy';
 import { StandbyController } from '@app/standby-controller';
 import { VideoPauseController } from '@app/video-pause-controller';
 import type { ChatMessage, OverlayDimensions, OverlaySettings, Pauseable } from '@app-types';
@@ -83,8 +89,6 @@ function seedBootstrapIfReady(chatSource: ChatSource, result: ChatBootstrapResul
 }
 
 const CHAT_STALL_TIMEOUT_MS = 30_000;
-const LONG_IDLE_RESTART_MS = 60_000;
-const ABSOLUTE_MAX_IDLE_RESTART_MS = 30 * 60 * 1000; // 30 minutes
 /**
  * Maximum time (ms) the renderer can have a non-empty pending queue
  * with zero active messages before the watchdog triggers a recovery.
@@ -96,28 +100,7 @@ const RENDERER_STUCK_THRESHOLD_MS = 10_000;
 /** Maximum consecutive overlay refreshes before escalating to a full session restart. */
 const MAX_CONSECUTIVE_REFRESHES = 2;
 
-/** Backoff delays for consecutive watchdog restarts: 5 s → 15 s → 30 s → 60 s. */
-const RESTART_BACKOFF_DELAYS_MS = [5_000, 15_000, 30_000, 60_000] as const;
-
-/** Maximum consecutive watchdog restarts before auto-restart is disabled. */
-const MAX_WATCHDOG_RESTARTS = 4;
-
-/** Rolling window for recent restart timestamp tracking (ms). */
-const RESTART_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
-
-/** Grace period (ms) before treating 0×0 dimensions as a failure.
- *  YouTube SPA transitions and player layout init can briefly yield 0×0. */
-const DIMENSIONS_NULL_GRACE_MS = 5_000;
-
 export type RuntimeSessionRestartReason = 'foreground-return' | 'watchdog' | 'standby-resolved';
-
-/** Root-cause classification for watchdog-triggered health failures. */
-type HealthFailureReason =
-  | 'chat-source-stopped'
-  | 'chat-source-stale'
-  | 'overlay-not-renderable'
-  | 'renderer-stuck'
-  | 'very-long-idle';
 
 interface RuntimeHealth {
   idleDurationMs: number;
@@ -1323,36 +1306,16 @@ export class RuntimeManager {
     // override its own recovery with a full runtime restart.
     const isChatInBackoff = chat?.isInBackoff ?? false;
 
-    const isVeryLongIdle = idleDurationMs >= ABSOLUTE_MAX_IDLE_RESTART_MS;
-    const isLongIdle = idleDurationMs >= LONG_IDLE_RESTART_MS;
-    const isNormalIdle =
-      this.state === 'active' && chat != null && (!chat.observerAlive || !chat.recentlyActive);
-
-    // Classify the root cause for later diagnostic logging.
-    let reason: HealthFailureReason | null = null;
-
-    if (isVeryLongIdle) {
-      reason = 'very-long-idle';
-    } else if (!isVideoPaused && !isChatInBackoff) {
-      if (!renderable) {
-        reason = 'overlay-not-renderable';
-      } else if (isLongIdle) {
-        reason = 'chat-source-stale';
-      } else if (isNormalIdle) {
-        reason = chat?.observerAlive ? 'chat-source-stale' : 'chat-source-stopped';
-      }
-    }
-
-    // Grace period for 0×0 dimensions: suppress overlay-not-renderable
-    // until DIMENSIONS_NULL_GRACE_MS has elapsed. YouTube SPA transitions
-    // and player layout init can briefly yield 0×0 — the ResizeObserver
-    // will detect layout settle and fire an update without a restart.
-    if (reason === 'overlay-not-renderable' && this.dimensionsNullSince !== null) {
-      const nullDuration = now - this.dimensionsNullSince;
-      if (nullDuration < DIMENSIONS_NULL_GRACE_MS) {
-        reason = null;
-      }
-    }
+    const reason = classifyRuntimeHealthFailure({
+      idleDurationMs,
+      renderable,
+      chat,
+      runtimeActive: this.state === 'active',
+      videoPaused: isVideoPaused,
+      chatInBackoff: isChatInBackoff,
+      dimensionsNullSince: this.dimensionsNullSince,
+      now,
+    });
 
     const shouldRestart = reason !== null;
 
@@ -1389,22 +1352,15 @@ export class RuntimeManager {
       this.consecutiveWatchdogRestarts++;
     }
 
+    const delayMs = getWatchdogRestartDelay(this.consecutiveWatchdogRestarts);
     // Hard cap: stop auto-restart, leave session in current state.
     // The user can manually restart via the status bar click handler.
-    if (this.consecutiveWatchdogRestarts > MAX_WATCHDOG_RESTARTS) {
+    if (delayMs === null) {
       log.warn('runtime.restart.max-reached', {
         consecutiveRestarts: this.consecutiveWatchdogRestarts - 1,
       });
       return;
     }
-
-    // Compute the cooldown delay for this restart attempt
-    const backoffIndex = Math.min(
-      this.consecutiveWatchdogRestarts - 1,
-      RESTART_BACKOFF_DELAYS_MS.length - 1
-    );
-    // Clamped by Math.min above; safe non-null assertion.
-    const delayMs = RESTART_BACKOFF_DELAYS_MS[backoffIndex]!;
 
     log.info('runtime.restart.scheduled', {
       reason,
