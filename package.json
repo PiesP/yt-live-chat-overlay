@@ -49,7 +49,7 @@
     "test:cov": "vitest run --coverage",
     "test:e2e": "playwright test --config test/e2e/playwright.config.ts",
     "test:e2e:headed": "pnpm test:e2e -- --headed",
-    "pretest:e2e": "pnpm build:dev && node -e \"const fs=require('fs');if(!fs.existsSync('dist/yt-live-chat-overlay.dev.user.js')){console.error('ERROR: E2E userscript bundle was not produced at dist/yt-live-chat-overlay.dev.user.js');process.exit(1)}\"",
+    "pretest:e2e": "pnpm build:dev && pnpm build:extension:ci && node -e \"const fs=require('fs');const required=['dist/yt-live-chat-overlay.dev.user.js','dist-extension/manifest.json'];for(const file of required){if(!fs.existsSync(file)){console.error('ERROR: E2E artifact was not produced at '+file);process.exit(1)}}\"",
     "clean:all": "rimraf dist dist-extension dist-extension-firefox",
     "check:i18n": "node scripts/check-i18n.mjs"
   },
