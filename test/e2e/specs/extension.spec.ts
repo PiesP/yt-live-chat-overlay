@@ -58,17 +58,16 @@ test.describe('Chrome Extension', () => {
         timeout: 30_000,
       });
 
-      // Give the extension content script time to inject the page script
-      // and run the full bootstrap (main() → initApp() → App.start() →
-      // runtimeManager.start() → reconcileOnce() → scheduleReconcile(2000ms)).
-      // The chat preflight settles in ~2s, then the deferred reconcile
-      // completes and App.start() returns, setting window.__ytChatOverlay.
-      await page.waitForTimeout(3_000);
-
       await expect.poll(
-        () => page.evaluate(() => typeof window.__ytChatOverlay === 'object'),
+        () => page.evaluate(() => typeof window.__ytExtensionBridge === 'object'),
         { timeout: 15_000 },
       ).toBe(true);
+      const bridge = await page.evaluate(() => window.__ytExtensionBridge);
+      expect(bridge).toMatchObject({
+        workerSupported: true,
+        storageType: 'chrome.storage.local',
+      });
+      expect(bridge?.workerUrl).toMatch(/^chrome-extension:\/\/.*\/workers\/renderer\.js$/);
       await expect(page.locator('script[src^="chrome-extension://"][src$="/page-script.js"]'))
         .toHaveCount(1);
     } finally {

@@ -94,6 +94,8 @@ export class ImageFetchManager {
    * Resizes caches, updates fetch limits, and starts/stops the cleanup interval.
    */
   updateConfig(settings: OverlaySettings, worker: Worker | null): void {
+    if (this.isDestroyed) return;
+
     const wasWorkerMode = this.useWorkerMode;
     this.emojiFetchLimit = settings.emojiFetchLimit;
     this.failedEmojiRetryMins = settings.failedEmojiRetryMins;
@@ -127,6 +129,7 @@ export class ImageFetchManager {
 
   /** Register a callback for when an image finishes loading (triggers rAF restart). */
   setOnImageReady(cb: (url: string, cacheKey: string) => void): void {
+    if (this.isDestroyed) return;
     this.onImageReadyCallback = cb;
   }
 
@@ -135,6 +138,7 @@ export class ImageFetchManager {
   /** Load an image and store it in the given resizable cache on success.
    *  URLs are validated against the YouTube CDN whitelist. */
   loadImage(url: string, cache: ResizableByteLimitedCache<HTMLImageElement>): void {
+    if (this.isDestroyed) return;
     if (cache.has(url)) return;
     if (this.imageLoading.has(url)) return;
     if (!isAllowedImageUrl(url)) {
@@ -227,6 +231,8 @@ export class ImageFetchManager {
    * emoji, author photo, and sticker (SuperChat).
    */
   prefetchImages(message: ChatMessage): void {
+    if (this.isDestroyed) return;
+
     for (const seg of message.content) {
       if (seg.type !== 'emoji') continue;
       const emojiUrl = seg.emoji.url;
@@ -312,6 +318,8 @@ export class ImageFetchManager {
    * future retries.
    */
   cleanupStaleEmojiFetching(): void {
+    if (this.isDestroyed) return;
+
     const now = performance.now();
     for (const [url, startedAt] of this.emojiFetchingStarted) {
       if (now - startedAt > this.emojiFetchTimeoutMs) {
@@ -366,7 +374,7 @@ export class ImageFetchManager {
     }
   }
 
-  /** Clean up interval, in-flight images, and worker bitmaps. Caches are cleared by the caller. */
+  /** Permanently stop image work and release timers, in-flight images, and caches. */
   destroy(): void {
     this.isDestroyed = true;
     this.emojiCleanupIntervalId = clearSafeInterval(this.emojiCleanupIntervalId);
@@ -382,6 +390,10 @@ export class ImageFetchManager {
     this.imageLoadTimeouts.clear();
     this.inFlightImages.clear();
     this.emojiUrlToImage.clear();
+    this.emojiFetching.clear();
+    this.emojiFetchingStarted.clear();
+    this.failedEmojiFetches.clear();
+    this.imageLoading.clear();
 
     // ResizableByteLimitedCache.clear() calls onEvict (bitmap.close()) for each entry.
     this.workerBitmapCache.clear();
