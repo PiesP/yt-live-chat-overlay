@@ -59,4 +59,29 @@ describe('VideoPauseController', () => {
     expect(setPaused).toHaveBeenCalledWith(true);
     controller.stop();
   });
+
+  it('synchronizes the playing state after replacing a paused video', async () => {
+    vi.useFakeTimers();
+    const player = document.createElement('div');
+    player.id = 'movie_player';
+    const firstVideo = createVideo(true);
+    player.append(firstVideo);
+    document.body.append(player);
+
+    const setPaused = vi.fn();
+    const controller = new VideoPauseController();
+    controller.start({
+      pauseable: { setPaused },
+      isDisposed: () => false,
+    });
+    setPaused.mockClear();
+
+    firstVideo.remove();
+    player.append(createVideo(false));
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(setPaused).toHaveBeenCalledWith(false);
+    controller.stop();
+  });
 });

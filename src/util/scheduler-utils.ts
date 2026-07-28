@@ -54,7 +54,7 @@ async function schedulerYield(): Promise<void> {
 // ── scheduler.postTask() wrapper ─────────────────────────────────────────
 
 /** Priority levels matching the Prioritized Task Scheduling API. */
-export type TaskPriority = 'user-blocking' | 'user-visible' | 'background';
+export type OverlayTaskPriority = 'user-blocking' | 'user-visible' | 'background';
 
 /**
  * Schedule a callback to run with the specified priority.
@@ -71,9 +71,9 @@ export type TaskPriority = 'user-blocking' | 'user-visible' | 'background';
  * (Safari, older browsers).  For 'background' priority in the fallback path,
  * uses a slightly longer delay to avoid interfering with more urgent work.
  */
-export function schedulerPostTask<T>(
+export function scheduleOverlayTask<T>(
   fn: () => T,
-  options?: { priority?: TaskPriority }
+  options?: { priority?: OverlayTaskPriority }
 ): Promise<T> {
   if (hasPostTask) {
     try {
@@ -89,31 +89,18 @@ export function schedulerPostTask<T>(
 
   // Safari / fallback path
   const priority = options?.priority ?? 'user-visible';
-  return new Promise<T>((resolve) => {
-    switch (priority) {
-      case 'background':
-        // Defer more aggressively so urgent work runs first.
-        // Using setTimeout(4) adds ~4ms of slack to let higher-priority tasks
-        // scheduled via setTimeout(0) execute first.
-        setTimeout(() => resolve(fn()), 4);
-        break;
-      case 'user-blocking':
-        // Use a microtask-style schedule: requestAnimationFrame would align
-        // with the next frame boundary which defeats the purpose of being
-        // 'user-blocking'.  setTimeout(0) runs after the current macrotask
-        // but before the next rendering frame in most browsers.
-        //
-        // For truly blocking work, a MessageChannel-based scheduler would be
-        // faster, but setTimeout(0) is universally supported and the
-        // performance difference is negligible for our use case.
-        setTimeout(() => resolve(fn()), 0);
-        break;
-      default:
-        // Default priority; runs promptly but allows user-blocking work to
-        // be queued first when both are pending in the same macrotask.
-        setTimeout(() => resolve(fn()), 0);
-        break;
-    }
+  return new Promise<T>((resolve, reject) => {
+    // Background work gets extra slack; visible and blocking work run in the
+    // next macrotask. The wrapper converts synchronous callback failures into
+    // promise rejections and also assimilates promise-returning callbacks.
+    const delay = priority === 'background' ? 4 : 0;
+    setTimeout(() => {
+      try {
+        resolve(fn());
+      } catch (error) {
+        reject(error);
+      }
+    }, delay);
   });
 }
 
@@ -128,14 +115,14 @@ export function schedulerPostTask<T>(
  *   let deadline = performance.now() + YIELD_BUDGET_MS;
  *   for (const item of items) {
  *     process(item);
- *     deadline = await yieldIfOverBudget(deadline);
+ *     deadline = await yieldAtDeadline(deadline);
  *   }
  *
  * @param deadline  The performance.now() threshold at which to yield.
  * @param budgetMs  Budget per slice (default 50ms, the long task boundary).
  * @returns A new deadline if yielded, or the original deadline unchanged.
  */
-export async function yieldIfOverBudget(
+export async function yieldAtDeadline(
   deadline: number,
   budgetMs = YIELD_BUDGET_MS
 ): Promise<number> {

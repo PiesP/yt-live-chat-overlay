@@ -84,15 +84,15 @@ import { RenderWorkerManager } from '@renderer/worker/manager';
 import { ChannelLanguageMemory } from '@translation/channel-memory';
 import { LanguageDetectorService } from '@translation/language-detector';
 import { TranslationService } from '@translation/service';
-import { ByteLimitedCache } from '@util/byte-limited-cache';
+import { ResizableByteLimitedCache } from '@util/byte-limited-cache';
 import { DensityIndicator } from '@util/density-indicator';
 import { computeScrollDuration, statusBarLayout } from '@util/design-tokens';
 import { clearSafeAnimationFrame, forEachSlot, SCREEN_READER_CSS } from '@util/dom';
 import { createLogger } from '@util/logging';
-import { LruMap } from '@util/lru-map';
+import { MapCompatibleLruMap } from '@util/lru-map';
 import { MessageActivator } from '@util/message-activator';
-import { PriorityBucketQueue } from '@util/priority-bucket-queue';
-import { schedulerPostTask, yieldIfOverBudget } from '@util/scheduler-utils';
+import { HighFirstPriorityBucketQueue } from '@util/priority-bucket-queue';
+import { scheduleOverlayTask, yieldAtDeadline } from '@util/scheduler-utils';
 
 const log = createLogger('RendererCanvas');
 
@@ -131,7 +131,7 @@ export class CanvasRenderer extends RendererBase {
   private readonly activeMessages: CanvasMessage[] = [];
   /** Lane-indexed active messages for O(1) lane-scoped collision checks. */
   private readonly activeMessagesByLane = new Map<number, CanvasMessage[]>();
-  private readonly pendingQueue = new PriorityBucketQueue();
+  private readonly pendingQueue = new HighFirstPriorityBucketQueue();
 
   /** Cached prefers-reduced-motion media query result. */
   private reducedMotionQuery: MediaQueryList | null = null;
@@ -169,6 +169,8 @@ export class CanvasRenderer extends RendererBase {
   private channelMemory: ChannelLanguageMemory | null = null;
   private sourceDetectionDone = false;
   private sourceSampleBuffer: string[] = [];
+  private sourceDetectionRun: symbol | null = null;
+  private sourceDetectionGeneration = 0;
   private static readonly SOURCE_SAMPLE_COUNT = 8;
 
   /** Max translations to apply per frame to avoid single-frame spikes during chat bursts. */
@@ -205,11 +207,13 @@ export class CanvasRenderer extends RendererBase {
    * Bounded to 200 entries (FIFO eviction with LRU touch on re-insert) to prevent unbounded memory growth
    * in long-running streams.
    */
-  private readonly textBitmapCache = new ByteLimitedCache<HTMLCanvasElement>(
+  private readonly textBitmapCache = new ResizableByteLimitedCache<HTMLCanvasElement>(
     this.settings.textCacheMb * 1_000_000, // configurable MB
     (c) => c.width * c.height * 4 // RGBA bytes
   );
-  private readonly superChatGradientCache = new LruMap<string, CanvasGradient>(GRADIENT_CACHE_MAX);
+  private readonly superChatGradientCache = new MapCompatibleLruMap<string, CanvasGradient>(
+    GRADIENT_CACHE_MAX
+  );
 
   /** Cached message dimensions by message ID. Cleared on settings change. */
   private readonly dimensionCache = new Map<string, { width: number; height: number }>();
@@ -281,23 +285,8 @@ export class CanvasRenderer extends RendererBase {
     this.invFadeDuration = computeInvFadeDuration(settings.fadeDurationMs);
     this.translationBatchSize = settings.translationBatchSize;
     this.translationService = new TranslationService();
-    // Initialize language detection pipeline for 'auto' source.
-    // Skip entirely when translation is disabled — avoids the
-    // translation.detector.api-mismatch warning spam from the watchdog loop.
     if (settings.translationEnabled) {
-      this.languageDetector = new LanguageDetectorService();
-      this.channelMemory = new ChannelLanguageMemory();
-      void this.languageDetector.initialize().catch((err: unknown) => {
-        log.debug('renderer.translation.init-failed', {
-          reason: 'language-detector',
-          error: String(err),
-        });
-        // Set to null so performSourceDetection() can retry later
-        this.languageDetector = null;
-      });
-    } else {
-      this.languageDetector = null;
-      this.channelMemory = null;
+      this.initializeSourceDetectionPipeline();
     }
 
     // Check channel memory for cached language
@@ -710,7 +699,7 @@ export class CanvasRenderer extends RendererBase {
     if (this.pendingQueue.size <= this.settings.backgroundQueueMax) return;
     // Defer trimming to a background task so it doesn't compete with
     // frame-critical rendering or message processing.
-    schedulerPostTask(
+    scheduleOverlayTask(
       () => {
         this.pendingQueue.trim(this.settings.backgroundQueueMax);
       },
@@ -1212,7 +1201,7 @@ export class CanvasRenderer extends RendererBase {
         committed.push(msg);
 
         // Yield every 50ms to keep the main thread responsive during bursts.
-        deadline = await yieldIfOverBudget(deadline);
+        deadline = await yieldAtDeadline(deadline);
 
         // Session may have been destroyed during the yield — abort drain
         // to avoid accessing null canvas/ctx or injecting messages into
@@ -1533,17 +1522,7 @@ export class CanvasRenderer extends RendererBase {
       speedTier
     );
 
-    // Auto-detect source language from message samples
-    if (
-      this.settings.translationSource === 'auto' &&
-      !this.sourceDetectionDone &&
-      message.text.trim()
-    ) {
-      this.sourceSampleBuffer.push(message.text);
-      if (this.sourceSampleBuffer.length >= CanvasRenderer.SOURCE_SAMPLE_COUNT) {
-        void this.performSourceDetection();
-      }
-    }
+    this.collectSourceLanguageSample(message);
 
     // Update render activity heartbeat — signals to the watchdog that
     // the renderer is healthy (successfully enqueuing messages).
@@ -1672,6 +1651,7 @@ export class CanvasRenderer extends RendererBase {
    */
   private prefetchAndTranslateForWorker(message: ChatMessage, msgId: string): void {
     this.imageFetchManager.prefetchImages(message);
+    this.collectSourceLanguageSample(message);
     const translatableText = getTranslatableText(message);
     if (this.translationService.isEnabled && translatableText) {
       this.translationService
@@ -1780,11 +1760,13 @@ export class CanvasRenderer extends RendererBase {
     // serializes behind configurePromise so they don't race.
     this.translationService.onUserActivation();
 
-    // Reset detection state when source changes to 'auto'
+    // Invalidate pending detection when its enabled/source configuration changes.
     const sourceChanged = settings.translationSource !== prevSource;
-    if (sourceChanged) {
-      this.sourceDetectionDone = false;
-      this.sourceSampleBuffer = [];
+    if (sourceChanged || wasTranslationEnabled !== settings.translationEnabled) {
+      this.resetSourceDetection();
+    }
+    if (settings.translationEnabled) {
+      this.initializeSourceDetectionPipeline();
     }
 
     void this.translationService
@@ -1922,10 +1904,57 @@ export class CanvasRenderer extends RendererBase {
     this.dimensionCache.clear();
   }
 
+  private initializeSourceDetectionPipeline(): void {
+    this.channelMemory ??= new ChannelLanguageMemory();
+    if (this.languageDetector) return;
+
+    const detector = new LanguageDetectorService();
+    this.languageDetector = detector;
+    void detector.initialize().catch((err: unknown) => {
+      log.debug('renderer.translation.init-failed', {
+        reason: 'language-detector',
+        error: String(err),
+      });
+      // Keep the service instance: detectFromSamples() still provides the
+      // bounded Unicode fallback when native detector initialization fails.
+    });
+  }
+
+  private collectSourceLanguageSample(message: ChatMessage): void {
+    if (
+      !this.settings.translationEnabled ||
+      this.settings.translationSource !== 'auto' ||
+      this.sourceDetectionDone ||
+      this.sourceDetectionRun !== null ||
+      !message.text.trim()
+    ) {
+      return;
+    }
+
+    this.sourceSampleBuffer.push(message.text);
+    if (this.sourceSampleBuffer.length >= CanvasRenderer.SOURCE_SAMPLE_COUNT) {
+      void this.performSourceDetection();
+    }
+  }
+
   private async performSourceDetection(): Promise<void> {
-    if (!this.languageDetector) return;
+    const detector = this.languageDetector;
+    if (!detector || this.sourceDetectionRun !== null) return;
+
+    const run = Symbol('source-detection-run');
+    const generation = this.sourceDetectionGeneration;
+    const samples = this.sourceSampleBuffer.slice(0, CanvasRenderer.SOURCE_SAMPLE_COUNT);
+    this.sourceDetectionRun = run;
     try {
-      const detected = await this.languageDetector.detectFromSamples(this.sourceSampleBuffer);
+      const detected = await detector.detectFromSamples(samples);
+      if (
+        this.sourceDetectionRun !== run ||
+        this.sourceDetectionGeneration !== generation ||
+        !this.settings.translationEnabled ||
+        this.settings.translationSource !== 'auto'
+      ) {
+        return;
+      }
       if (detected) {
         const channelKey = ChannelLanguageMemory.resolveKey(location.href, document);
         if (channelKey && this.channelMemory) {
@@ -1937,8 +1966,20 @@ export class CanvasRenderer extends RendererBase {
       log.debug('renderer.translation.source-detection-failed', {
         error: String(err),
       });
+    } finally {
+      if (this.sourceDetectionRun === run) {
+        this.sourceDetectionRun = null;
+        if (this.sourceDetectionGeneration === generation) {
+          this.sourceDetectionDone = true;
+          this.sourceSampleBuffer = [];
+        }
+      }
     }
-    this.sourceDetectionDone = true;
+  }
+
+  private resetSourceDetection(): void {
+    this.sourceDetectionGeneration++;
+    this.sourceDetectionDone = false;
     this.sourceSampleBuffer = [];
   }
 
@@ -1976,6 +2017,7 @@ export class CanvasRenderer extends RendererBase {
     this.onBacklogPauseChange = null;
     this.onStatusBarClick = null;
     this.translationService.destroy();
+    this.resetSourceDetection();
     this.languageDetector?.destroy();
     this.languageDetector = null;
     this.channelMemory = null;

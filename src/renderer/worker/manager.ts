@@ -827,7 +827,7 @@ export class RenderWorkerManager {
           this.worker = null;
         }
         // Close any remaining pre-converted bitmaps (not yet transferred).
-        // ByteLimitedCache.clear() calls onEvict (bitmap.close()) for each entry.
+        // ResizableByteLimitedCache.clear() calls onEvict (bitmap.close()) for each entry.
         this.deps.imageFetchManager.workerBitmapCache.clear();
       }
     };

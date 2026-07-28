@@ -2,33 +2,36 @@
 // Copyright (c) 2026 PiesP
 
 /**
- * Simple LRU Map with a max-size cap.
- * When size exceeds maxSize, the least-recently-used entry is evicted.
- * Getting a value promotes it to most-recently-used.
+ * Map-compatible LRU cache used by renderer APIs that require a real `Map`.
+ *
+ * browser-core's `LruMap` intentionally exposes a smaller map-like surface;
+ * this overlay implementation extends `Map` so it can be passed directly to
+ * canvas rendering helpers that accept `Map<K, V>`.
  */
-export class LruMap<K, V> extends Map<K, V> {
+export class MapCompatibleLruMap<K, V> extends Map<K, V> {
   constructor(private readonly maxSize: number) {
     super();
+    if (!Number.isSafeInteger(maxSize) || maxSize < 1) {
+      throw new RangeError('maxSize must be a positive safe integer');
+    }
   }
 
   override set(key: K, value: V): this {
     if (this.has(key)) {
-      this.delete(key); // Re-insert to mark as most-recently-used
+      this.delete(key);
     } else if (this.size >= this.maxSize) {
-      // Evict least-recently-used (first key in insertion order)
-      const oldest = this.keys().next().value;
-      if (oldest !== undefined) this.delete(oldest);
+      const oldest = this.keys().next();
+      if (!oldest.done) this.delete(oldest.value);
     }
     return super.set(key, value);
   }
 
   override get(key: K): V | undefined {
-    const value = super.get(key);
-    if (value !== undefined) {
-      // Re-insert to mark as most-recently-used
-      this.delete(key);
-      super.set(key, value);
-    }
+    if (!this.has(key)) return undefined;
+
+    const value = super.get(key) as V;
+    this.delete(key);
+    super.set(key, value);
     return value;
   }
 }

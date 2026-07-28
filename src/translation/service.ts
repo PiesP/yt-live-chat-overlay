@@ -17,7 +17,7 @@
  */
 import type { TranslationLanguage } from '@app-types';
 import { resolveTranslationTarget } from '@i18n/index';
-import { ByteLimitedCache } from '@util/byte-limited-cache';
+import { ResizableByteLimitedCache } from '@util/byte-limited-cache';
 import { createLogger } from '@util/logging';
 
 const log = createLogger('TranslationService');
@@ -96,7 +96,7 @@ export class TranslationService {
   /** If more than this many ms have passed since last success, reset recoveryCycleCount. */
   private static readonly RECOVERY_RESET_MS = 300_000; // 5 minutes
   /** Translation result cache with LRU eviction to keep frequently repeated short text (e.g. "LOL", "ㅋㅋㅋ"). */
-  private readonly translationCache = new ByteLimitedCache<string>(
+  private readonly translationCache = new ResizableByteLimitedCache<string>(
     50_000, // ~50KB (equivalent to ~2500 average chat messages)
     (text) => text.length * 2 // UTF-16 byte estimate
   );

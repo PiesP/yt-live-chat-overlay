@@ -14,7 +14,7 @@ import { EMOJI_ALIAS_PATTERN } from '@chat/message-helpers';
 import { computeOutlineColor } from '@renderer/color-utils';
 import { OUTLINE_STROKE_SCALE } from '@renderer/constants';
 import { getFontString, measureTextHeight, measureTextWidth } from '@renderer/text-measure';
-import type { ByteLimitedCache } from '@util/byte-limited-cache';
+import type { ResizableByteLimitedCache } from '@util/byte-limited-cache';
 import { AUTHOR_PHOTO_SHADOW, rendererLayout, spacing } from '@util/design-tokens';
 
 /** A char-wrap segment with pre-computed width. */
@@ -597,7 +597,7 @@ function drawBitmapAtCssSize(
  *
  * @param outlineWidthPx  Outline width in pixels (0 = no outline)
  * @param outlineOpacity  Outline opacity (0-1)
- * @param textBitmapCache Generic bitmap cache (Map or ByteLimitedCache)
+ * @param textBitmapCache Generic bitmap cache (Map or ResizableByteLimitedCache)
  */
 export function renderSegment(
   ctx: AnyCanvasContext,
@@ -765,7 +765,7 @@ function resolveEmojiFields(seg: SharedContentSegment): {
  * @param fontSize        Font size in px
  * @param outlineWidthPx  Outline width in pixels
  * @param outlineOpacity  Outline opacity (0-1)
- * @param textBitmapCache Text bitmap cache (Map or ByteLimitedCache)
+ * @param textBitmapCache Text bitmap cache (Map or ResizableByteLimitedCache)
  * @param emojiCache      Emoji image cache (stores CanvasImageSource)
  * @param getFontFn       Function to resolve font string from fontSize
  * @param measureTextFn   Function to measure single-line text width (cached in worker, measureTextWidth in main)
@@ -851,7 +851,7 @@ function renderContentSegments(
  *  `ctx.shadowBlur` (expensive GPU blur pass, may fall back to software
  *  rasterization) is only paid once per unique photo.  Keyed by the photo
  *  object itself so cleanup is automatic when the image is evicted from
- *  the caller's ByteLimitedCache. */
+ *  the caller's ResizableByteLimitedCache. */
 const _photoShadowCache = new WeakMap<object, OffscreenCanvas>();
 
 /** Pad around the photo for shadow overflow (blur=4 + offset=1 ≈ 5px). */
@@ -1190,7 +1190,7 @@ export function renderRegularMessage(
  */
 export function renderWrappedContentSegments<
   TTextBitmapCache extends TextBitmapCache,
-  TEmojiCache extends ByteLimitedCache<CanvasImageSource>,
+  TEmojiCache extends ResizableByteLimitedCache<CanvasImageSource>,
 >(
   ctx: AnyCanvasContext,
   segments: readonly SharedContentSegment[],

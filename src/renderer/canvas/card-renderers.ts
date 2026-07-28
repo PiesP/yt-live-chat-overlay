@@ -20,7 +20,7 @@ import {
 import type { CardConfig } from '@renderer/card-config';
 import { computeReadableTextColor } from '@renderer/color-utils';
 import { measureTextHeight } from '@renderer/text-measure';
-import type { ByteLimitedCache } from '@util/byte-limited-cache';
+import type { ResizableByteLimitedCache } from '@util/byte-limited-cache';
 import { DEFAULT_TEXT_COLOR, rendererLayout, spacing } from '@util/design-tokens';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -152,7 +152,7 @@ function renderCardHeaderTag(
   maxWidth: number,
   config: CardConfig,
   settings: OverlaySettings,
-  _textBitmapCache: ByteLimitedCache<HTMLCanvasElement>,
+  _textBitmapCache: ResizableByteLimitedCache<HTMLCanvasElement>,
   getFontFn: (fontSize: number) => string
 ): number {
   if (!config.headerTag) return y;
@@ -209,7 +209,7 @@ function renderCardBadge(
   fontSize: number,
   config: CardConfig,
   settings: OverlaySettings,
-  _textBitmapCache2: ByteLimitedCache<HTMLCanvasElement>,
+  _textBitmapCache2: ResizableByteLimitedCache<HTMLCanvasElement>,
   getFontFn: (fontSize: number) => string
 ): number {
   if (!config.badge) return y;
@@ -271,10 +271,10 @@ export function renderPaidCard(
   elapsed: number,
   config: CardConfig,
   settings: OverlaySettings,
-  textBitmapCache: ByteLimitedCache<HTMLCanvasElement>,
-  authorPhotoCache: ByteLimitedCache<HTMLImageElement>,
-  stickerCache: ByteLimitedCache<HTMLImageElement>,
-  emojiCache: ByteLimitedCache<HTMLImageElement>,
+  textBitmapCache: ResizableByteLimitedCache<HTMLCanvasElement>,
+  authorPhotoCache: ResizableByteLimitedCache<HTMLImageElement>,
+  stickerCache: ResizableByteLimitedCache<HTMLImageElement>,
+  emojiCache: ResizableByteLimitedCache<HTMLImageElement>,
   getFontFn: (fontSize: number) => string,
   gradientCache: Map<string, CanvasGradient>
 ): void {
@@ -409,7 +409,7 @@ export function renderPaidCard(
       settings.outline.widthPx,
       settings.outline.opacity,
       textBitmapCache,
-      emojiCache as ByteLimitedCache<CanvasImageSource>,
+      emojiCache as ResizableByteLimitedCache<CanvasImageSource>,
       getFontFn
     );
   }

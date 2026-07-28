@@ -2,15 +2,18 @@
 // Copyright (c) 2026 PiesP
 
 /**
- * ByteLimitedCache — a Map wrapper that keeps total estimated byte usage
+ * ResizableByteLimitedCache — an overlay-owned cache that keeps total estimated byte usage
  * under a configurable limit by evicting the least recently used entries.
  *
  * Useful for image and canvas bitmap caches where the number of entries
  * is a poor proxy for actual memory pressure (a 200×200 canvas vs a
  * 2000×2000 canvas both count as 1 entry).
+ *
+ * This intentionally differs from browser-core's fixed-size ByteLimitedCache:
+ * limits can be changed at runtime, and manual delete/clear invokes the
+ * value-only eviction callback so canvas and bitmap resources are released.
  */
-
-export class ByteLimitedCache<V> {
+export class ResizableByteLimitedCache<V> {
   private readonly map = new Map<string, V>();
   private totalBytes = 0;
   private _maxBytes: number;

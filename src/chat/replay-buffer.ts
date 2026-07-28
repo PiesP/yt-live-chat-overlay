@@ -106,16 +106,19 @@ export class ReplayBuffer {
       // Advance offset instead of shift()
       this.bufferOffset++;
 
+      // The message has left the active buffer whether it is emitted or
+      // dropped as too late. Allow overlapping continuation chains to
+      // insert the same ID again if it reappears at a relevant offset.
+      if (next.message.id) {
+        this.seenIds.delete(next.message.id);
+      }
+
       // Too far in the past — drop silently
       if (next.offsetMs < currentOffsetMs - REPLAY_EMIT_TOLERANCE_MS) {
         continue;
       }
 
       batch.push(next.message);
-      // Remove consumed message ID from seenIds so it doesn't accumulate
-      if (next.message.id) {
-        this.seenIds.delete(next.message.id);
-      }
     }
 
     // Compact when offset grows large

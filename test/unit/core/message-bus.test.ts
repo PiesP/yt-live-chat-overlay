@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { MessageBus } from '@util/message-bus';
+import { BatchMessageBus } from '@util/message-bus';
 
-describe('MessageBus', () => {
-  let bus: MessageBus<string>;
+describe('BatchMessageBus', () => {
+  let bus: BatchMessageBus<string>;
 
   beforeEach(() => {
-    bus = new MessageBus<string>();
+    bus = new BatchMessageBus<string>();
   });
 
   // ── publish / subscribe ────────────────────────────────────────────────

@@ -276,7 +276,7 @@ export const PANES: PaneDef[] = [
           ),
           chk(
             'appearance.preserveUserColors',
-            'preserveUserColors',
+            'preserveUserColor',
             "Use author's chosen text color from YouTube chat instead of overlay defaults"
           ),
         ],

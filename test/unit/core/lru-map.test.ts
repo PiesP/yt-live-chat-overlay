@@ -1,9 +1,20 @@
 import { describe, it, expect } from 'vitest';
-import { LruMap } from '../../../src/util/lru-map';
+import { MapCompatibleLruMap } from '../../../src/util/lru-map';
 
-describe('LruMap', () => {
+describe('MapCompatibleLruMap', () => {
+  it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])(
+    'rejects an invalid max size: %s',
+    (maxSize) => {
+      expect(() => new MapCompatibleLruMap(maxSize)).toThrow(RangeError);
+    }
+  );
+
+  it('preserves the native Map contract required by renderer helpers', () => {
+    expect(new MapCompatibleLruMap(1)).toBeInstanceOf(Map);
+  });
+
   it('evicts least-recently-used when exceeding maxSize', () => {
-    const map = new LruMap<string, number>(3);
+    const map = new MapCompatibleLruMap<string, number>(3);
     map.set('a', 1);
     map.set('b', 2);
     map.set('c', 3);
@@ -15,7 +26,7 @@ describe('LruMap', () => {
   });
 
   it('get promotes to most-recently-used', () => {
-    const map = new LruMap<string, number>(3);
+    const map = new MapCompatibleLruMap<string, number>(3);
     map.set('a', 1);
     map.set('b', 2);
     map.set('c', 3);
@@ -28,7 +39,7 @@ describe('LruMap', () => {
   });
 
   it('set on existing key updates value and promotes', () => {
-    const map = new LruMap<string, number>(3);
+    const map = new MapCompatibleLruMap<string, number>(3);
     map.set('a', 1);
     map.set('b', 2);
     map.set('c', 3);
@@ -39,7 +50,7 @@ describe('LruMap', () => {
   });
 
   it('never exceeds maxSize', () => {
-    const map = new LruMap<string, number>(2);
+    const map = new MapCompatibleLruMap<string, number>(2);
     for (let i = 0; i < 100; i++) {
       map.set(`key-${i}`, i);
     }

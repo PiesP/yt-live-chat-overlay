@@ -3,6 +3,8 @@
 import { describe, it, expect } from 'vitest';
 import { PANES } from '@settings/ui/panes';
 import type { PaneDef, FieldDef } from '@settings/ui/panes';
+import { ROOT_SETTING_META } from '@settings/meta';
+import { DEFAULT_SETTINGS } from '@settings/schema';
 
 describe('SettingsPanes', () => {
   it('PANES is a non-empty array', () => {
@@ -92,6 +94,24 @@ describe('SettingsPanes', () => {
             const f = field as { type: 'select'; options: ReadonlyArray<[string, string]> };
             expect(Array.isArray(f.options)).toBe(true);
             expect(f.options.length).toBeGreaterThan(0);
+          }
+        }
+      }
+    }
+  });
+
+  it('every keyed pane field exists in the settings metadata schema', () => {
+    for (const pane of PANES) {
+      for (const section of pane.sections) {
+        for (const field of section.fields) {
+          if (!('key' in field)) continue;
+
+          if (field.modifier) {
+            const nestedSettings = DEFAULT_SETTINGS[field.modifier as keyof typeof DEFAULT_SETTINGS];
+            expect(nestedSettings, `${field.modifier}.${field.key}`).toBeTypeOf('object');
+            expect(field.key in (nestedSettings as unknown as Record<string, unknown>)).toBe(true);
+          } else {
+            expect(field.key in ROOT_SETTING_META, field.key).toBe(true);
           }
         }
       }
