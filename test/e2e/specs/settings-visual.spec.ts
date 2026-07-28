@@ -18,7 +18,6 @@ import { test, expect, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { setupOverlayPage } from '../fixtures/test-utils';
 
-const OVERLAY_ID = 'yt-live-chat-overlay';
 const BUTTON_ID = 'yt-chat-overlay-settings-button';
 
 async function setupSettingsPage(page: Page): Promise<void> {

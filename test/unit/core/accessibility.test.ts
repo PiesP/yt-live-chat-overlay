@@ -4,10 +4,9 @@
  * Verifies all ARIA, keyboard navigation, and screen reader support features.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { SettingsUiForm, BUTTON_ID, BACKDROP_ID, STYLE_ID } from '@settings/ui/form';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { SettingsUiForm, BACKDROP_ID } from '@settings/ui/form';
 import { PANES } from '@settings/ui/panes';
-import { Overlay } from '@app/overlay';
 import type { OverlaySettings } from '@app-types';
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -161,10 +160,10 @@ describe('Dialog element (settings-ui.ts)', () => {
     expect(tabs.length).toBe(PANES.length);
 
     // First tab should be selected by default
-    expect(tabs[0].getAttribute('aria-selected')).toBe('true');
+    expect(tabs[0]!.getAttribute('aria-selected')).toBe('true');
     // Other tabs should not be selected
     if (tabs.length > 1) {
-      expect(tabs[1].getAttribute('aria-selected')).toBe('false');
+      expect(tabs[1]!.getAttribute('aria-selected')).toBe('false');
     }
 
     // Each tab should have aria-controls
@@ -322,7 +321,7 @@ describe('Form labels (settings-ui-form.ts)', () => {
       .filter((el) => el.name === 'showSuperChatAmount');
 
     expect(checkboxes.length).toBeGreaterThan(0);
-    const checkbox = checkboxes[0];
+    const checkbox = checkboxes[0]!;
     expect(checkbox.id).toBeTruthy();
 
     const label = checkbox.closest('label') as HTMLLabelElement;
@@ -492,7 +491,7 @@ describe('Range slider ARIA (settings-ui-form.ts)', () => {
     );
 
     if (rangeInputs.length === 0) return;
-    const slider = rangeInputs[0];
+    const slider = rangeInputs[0]!;
 
     // Set to min
     slider.value = slider.min;
@@ -570,7 +569,7 @@ describe('Tab keyboard navigation (settings-ui-form.ts)', () => {
     const tablist = modal.querySelector('[role="tablist"]')!;
     const tabs = Array.from(tablist.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
     // Focus first tab
-    tabs[0].focus();
+    tabs[0]!.focus();
     expect(document.activeElement).toBe(tabs[0]);
 
     // Simulate ArrowLeft (wraps to last)
@@ -585,7 +584,7 @@ describe('Tab keyboard navigation (settings-ui-form.ts)', () => {
   it('ArrowRight moves focus to next tab', () => {
     const tablist = modal.querySelector('[role="tablist"]')!;
     const tabs = Array.from(tablist.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
-    tabs[0].focus();
+    tabs[0]!.focus();
 
     const event = new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true });
     tablist.dispatchEvent(event);
@@ -597,7 +596,7 @@ describe('Tab keyboard navigation (settings-ui-form.ts)', () => {
     const tablist = modal.querySelector('[role="tablist"]')!;
     const tabs = Array.from(tablist.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
     // Focus last tab
-    tabs[tabs.length - 1].focus();
+    tabs[tabs.length - 1]!.focus();
 
     const event = new KeyboardEvent('keydown', { key: 'Home', bubbles: true });
     tablist.dispatchEvent(event);
@@ -608,7 +607,7 @@ describe('Tab keyboard navigation (settings-ui-form.ts)', () => {
   it('End moves focus to last tab', () => {
     const tablist = modal.querySelector('[role="tablist"]')!;
     const tabs = Array.from(tablist.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
-    tabs[0].focus();
+    tabs[0]!.focus();
 
     const event = new KeyboardEvent('keydown', { key: 'End', bubbles: true });
     tablist.dispatchEvent(event);
@@ -621,23 +620,23 @@ describe('Tab keyboard navigation (settings-ui-form.ts)', () => {
     const tabs = Array.from(tablist.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
 
     // Initial state from createTabs(): first tab has aria-selected="true"
-    expect(tabs[0].getAttribute('aria-selected')).toBe('true');
+    expect(tabs[0]!.getAttribute('aria-selected')).toBe('true');
     if (tabs.length > 1) {
-      expect(tabs[1].getAttribute('aria-selected')).toBe('false');
+      expect(tabs[1]!.getAttribute('aria-selected')).toBe('false');
     }
   });
 
   it('roving tabindex updates when navigating with keyboard', () => {
     const tablist = modal.querySelector('[role="tablist"]')!;
     const tabs = Array.from(tablist.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
-    tabs[0].focus();
+    tabs[0]!.focus();
 
     // ArrowRight moves to next tab and updates tabindex
     const event = new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true });
     tablist.dispatchEvent(event);
 
     // Now the new active tab should have tabindex="0"
-    const activeTab = tabs[1];
+    const activeTab = tabs[1]!;
     expect(activeTab.getAttribute('tabindex')).toBe('0');
   });
 
@@ -646,12 +645,12 @@ describe('Tab keyboard navigation (settings-ui-form.ts)', () => {
     const tabs = Array.from(tablist.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
 
     // Focus first tab (already active), press Enter — aria-selected stays 'true'
-    tabs[0].focus();
+    tabs[0]!.focus();
     const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true });
     tablist.dispatchEvent(event);
 
     // aria-selected should be 'true' for the active tab
-    expect(tabs[0].getAttribute('aria-selected')).toBe('true');
+    expect(tabs[0]!.getAttribute('aria-selected')).toBe('true');
   });
 });
 

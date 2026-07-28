@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // @vitest-environment jsdom
-import { afterEach, describe, it, expect, vi, beforeEach } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { RuntimeManager } from '@app/runtime-manager';
 import type { OverlaySettings } from '@app-types';
 

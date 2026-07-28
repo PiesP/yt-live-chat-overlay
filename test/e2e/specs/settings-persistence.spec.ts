@@ -20,7 +20,6 @@ import {
   applySettings,
   readStoredSettings,
   waitForStoredSettings,
-  DIST_DIR,
   USERSCRIPT_PATH,
 } from '../fixtures/test-utils';
 

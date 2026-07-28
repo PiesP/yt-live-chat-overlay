@@ -78,7 +78,7 @@ describe('estimateMessageDimensions — regular text', () => {
   });
 
   it('same height with and without author when author absent', () => {
-    const msg = makeMessage({ text: 'msg', author: undefined });
+    const msg = makeMessage({ text: 'msg' });
     const withAuthor = estimateMessageDimensions(msg, 16, true);
     const withoutAuthor = estimateMessageDimensions(msg, 16, false);
     expect(withAuthor.height).toBe(withoutAuthor.height);

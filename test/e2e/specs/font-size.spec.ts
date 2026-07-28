@@ -15,13 +15,11 @@
 
 import { test, expect } from '@playwright/test';
 import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
 import {
   setupOverlayPage,
   getSettings,
   applySettings,
   readStoredSettings,
-  DIST_DIR,
   USERSCRIPT_PATH,
 } from '../fixtures/test-utils';
 

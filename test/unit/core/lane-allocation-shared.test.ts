@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   computeBaseHeadwayPx,
   areSpeedTiersCompatible,
@@ -16,7 +16,7 @@ import {
   findPlacementShared,
   HEADWAY_GAP_MAX_PX,
 } from '@renderer/layout/lane-shared';
-import type { LaneAllocationState, HeapEntry } from '@renderer/layout/lane-shared';
+import type { LaneAllocationState } from '@renderer/layout/lane-shared';
 
 // ── Helper: create a minimal LaneAllocationState ────────────────
 
@@ -145,7 +145,6 @@ describe('computeOccupancyMs', () => {
     });
 
     it('handles zero total distance safely', () => {
-      const result = computeOccupancyMs(4000, 100, 0.08, 300, 0);
       // totalDistance = 0 + 300 + 100 = 400... actually screenWidth=0
       // totalDistance = 0 + 300 + 100 = 400, which is > 0
       // Let me test: msgWidthPx=0, screenWidth=0, exitPadding=0

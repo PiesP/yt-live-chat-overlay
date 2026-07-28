@@ -33,30 +33,6 @@ const MENU_COMMANDS = [
   { id: 'reload-overlay', title: 'Reload overlay' },
 ] as const;
 
-// ── Context menu helpers ───────────────────────────────────────────────────
-
-/** Idempotent menu registration: creates only missing items. */
-function ensureMenuCommands(): void {
-  contextMenus.getAll((existing) => {
-    const existingIds = new Set(existing.map((item) => item.id));
-    for (const cmd of MENU_COMMANDS) {
-      if (existingIds.has(cmd.id)) continue;
-      contextMenus.create(
-        {
-          id: cmd.id,
-          title: cmd.title,
-          contexts: ['action'],
-        },
-        () => {
-          if (runtime.lastError) {
-            // Menu may have been created by a concurrent call — safe to ignore.
-          }
-        }
-      );
-    }
-  });
-}
-
 // ── Installation ───────────────────────────────────────────────────────────
 
 runtime.onInstalled.addListener((details) => {
@@ -83,10 +59,12 @@ contextMenus.onClicked.addListener((info, tab) => {
   if (!command) return;
 
   // Forward to content script
-  tabs.sendMessage(tab.id, {
+tabs.sendMessage(tab.id, {
     type: 'menu-command',
     command: command.id,
   }).catch(() => {
     // Content script may not be loaded (not a YouTube page)
   });
 });
+
+export {};

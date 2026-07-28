@@ -39,7 +39,7 @@ describe('toSharedContentSegments', () => {
       ]);
       expect(result).toHaveLength(1);
       expect(result[0]).toEqual({ type: 'text' });
-      expect(result[0].content).toBeUndefined();
+      expect(result[0]!.content).toBeUndefined();
     });
   });
 

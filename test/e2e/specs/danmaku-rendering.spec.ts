@@ -15,7 +15,6 @@ import {
   setupOverlayPage,
   OVERLAY_ID,
   getSettings,
-  DIST_DIR,
   USERSCRIPT_PATH,
 } from '../fixtures/test-utils';
 

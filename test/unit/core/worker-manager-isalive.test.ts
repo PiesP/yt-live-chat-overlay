@@ -119,7 +119,7 @@ describe('RenderWorkerManager isAlive after destroy', () => {
     expect(manager.init(canvas, settings, overlay as never, 'worker.js')).toBe(true);
 
     const destroySpy = vi.spyOn(manager, 'destroy');
-    const fatalCallback = vi.fn((reason: string) => manager.destroy());
+    const fatalCallback = vi.fn((_reason: string) => manager.destroy());
     manager.setFatalErrorCallback(fatalCallback);
 
     worker._fireMessageError();
