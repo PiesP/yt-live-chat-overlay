@@ -54,6 +54,7 @@ function setupStorageRelay(): StorageAdapter | null {
     {
       resolve: (value: string | null) => void;
       reject: (error: Error) => void;
+      timeout: ReturnType<typeof setTimeout>;
     }
   >();
 
@@ -67,11 +68,14 @@ function setupStorageRelay(): StorageAdapter | null {
     if (!data || typeof data !== 'object') return;
     if (data.source !== 'yt-storage-relay-response') return;
     if (data.nonce !== nonce) return;
-    const entry = pending.get(data.requestId as number);
+    const responseRequestId = data.requestId;
+    if (typeof responseRequestId !== 'number') return;
+    const entry = pending.get(responseRequestId);
     if (!entry) return;
-    pending.delete(data.requestId as number);
+    pending.delete(responseRequestId);
+    clearTimeout(entry.timeout);
     if (data.error) {
-      entry.reject(new Error(data.error as string));
+      entry.reject(new Error(String(data.error)));
     } else {
       entry.resolve(data.value as string | null);
     }
@@ -83,43 +87,46 @@ function setupStorageRelay(): StorageAdapter | null {
     async getItem(key: string): Promise<string | null> {
       return new Promise<string | null>((resolve, reject) => {
         const id = ++requestId;
-        pending.set(id, { resolve, reject });
         const timeout = setTimeout(() => {
           pending.delete(id);
-          resolve(null); // Timeout → null (safe fallback)
+          reject(new Error(`Storage relay get request timed out for key "${key}"`));
         }, 2000);
-        // Wrap resolve to clear timeout.
-        const wrappedResolve = (value: string | null) => {
+        pending.set(id, { resolve, reject, timeout });
+        try {
+          window.postMessage(
+            { source: 'yt-storage-relay', nonce, requestId: id, method: 'get', key },
+            window.location.origin
+          );
+        } catch (error: unknown) {
           clearTimeout(timeout);
-          resolve(value);
-        };
-        pending.set(id, { resolve: wrappedResolve, reject });
-        window.postMessage(
-          { source: 'yt-storage-relay', nonce, requestId: id, method: 'get', key },
-          window.location.origin
-        );
+          pending.delete(id);
+          reject(error instanceof Error ? error : new Error(String(error)));
+        }
       });
     },
 
     async setItem(key: string, value: string): Promise<void> {
-      return new Promise<void>((resolve) => {
+      return new Promise<void>((resolve, reject) => {
         const id = ++requestId;
         const timeout = setTimeout(() => {
           pending.delete(id);
-          resolve(); // Timeout → silent (best-effort write)
+          reject(new Error(`Storage relay set request timed out for key "${key}"`));
         }, 2000);
-        const wrappedResolve = () => {
-          clearTimeout(timeout);
-          resolve();
-        };
         pending.set(id, {
-          resolve: wrappedResolve as (v: string | null) => void,
-          reject: () => {},
+          resolve: () => resolve(),
+          reject,
+          timeout,
         });
-        window.postMessage(
-          { source: 'yt-storage-relay', nonce, requestId: id, method: 'set', key, value },
-          window.location.origin
-        );
+        try {
+          window.postMessage(
+            { source: 'yt-storage-relay', nonce, requestId: id, method: 'set', key, value },
+            window.location.origin
+          );
+        } catch (error: unknown) {
+          clearTimeout(timeout);
+          pending.delete(id);
+          reject(error instanceof Error ? error : new Error(String(error)));
+        }
       });
     },
   };

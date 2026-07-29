@@ -268,9 +268,14 @@ describe('mirrorVisibleMessages', () => {
 
     mirrorVisibleMessages(ctx);
     expect(updateLiveRegion).toHaveBeenCalled();
-    const snippets = updateLiveRegion.mock.calls[0]![0] as string[];
-    expect(snippets).toContain('first message');
-    expect(snippets).toContain('second message');
+    const messages = updateLiveRegion.mock.calls[0]![0] as Array<{
+      id: string;
+      text: string;
+    }>;
+    expect(messages.map((message) => message.text)).toEqual([
+      'first message',
+      'second message',
+    ]);
   });
 
   it('skips when there are no active messages', () => {

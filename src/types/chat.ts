@@ -25,6 +25,18 @@ export interface SuperChatInfo {
   sticker?: ImageAsset;
 }
 
+/** Serializable text alternative for one canvas-rendered chat message. */
+export interface AccessibleChatMessage {
+  /** Stable message identity used to avoid re-announcing the same rendered item. */
+  id: string;
+  /** Full, untruncated message body. */
+  text: string;
+  kind: ChatMessageKind;
+  author?: string;
+  superChatAmount?: string;
+  membershipHeader?: string;
+}
+
 /**
  * Chat message structure (normalized)
  *

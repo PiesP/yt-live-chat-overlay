@@ -338,6 +338,8 @@ export const ES: Record<string, string> = {
 
   // ── Added 2026-07-04 ──
   'chat.messages': 'Mensajes del chat',
+  'chat.membership': 'Membresía',
+  'chat.superChat': 'Super Chat',
   'advanced.ignoreReducedMotion': 'Ignorar movimiento reducido',
   'advanced.ignoreReducedMotionDesc':
     'Forzar animaciones de desplazamiento incluso con movimiento reducido del SO activado (requiere recargar)',

@@ -303,6 +303,8 @@ export const ZH_CN: Record<string, string> = {
 
   // ── Added 2026-07-04 ──
   'chat.messages': '聊天消息',
+  'chat.membership': '会员',
+  'chat.superChat': '超级留言',
   'advanced.ignoreReducedMotion': '忽略减少动态效果',
   'advanced.ignoreReducedMotionDesc':
     '即使操作系统开启了减少动态效果，也强制使用滚动动画（需要刷新页面）',

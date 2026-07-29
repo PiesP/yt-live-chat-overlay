@@ -316,6 +316,8 @@ export const JA: Record<string, string> = {
 
   // ── Added 2026-07-04 ──
   'chat.messages': 'チャットメッセージ',
+  'chat.membership': 'メンバーシップ',
+  'chat.superChat': 'スーパーチャット',
   'advanced.ignoreReducedMotion': 'モーション低減を無視',
   'advanced.ignoreReducedMotionDesc':
     'OSのモーション低減設定が有効でもスクロールアニメーションを強制します（ページ再読み込みが必要）',

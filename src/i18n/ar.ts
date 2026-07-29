@@ -316,6 +316,8 @@ export const AR: Record<string, string> = {
 
   // ── Added 2026-07-04 ──
   'chat.messages': 'رسائل الدردشة',
+  'chat.membership': 'عضوية',
+  'chat.superChat': 'رسالة مميزة',
   'advanced.ignoreReducedMotion': 'تجاهل تقليل الحركة',
   'advanced.ignoreReducedMotionDesc':
     'فرض رسوم التمرير المتحركة حتى عند تمكين تقليل الحركة في النظام (يتطلب تحديث الصفحة)',

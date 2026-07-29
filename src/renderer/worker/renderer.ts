@@ -1495,7 +1495,7 @@ export class WorkerRenderer {
       });
     }
 
-    // ── Live region mirror: send visible text snippets to main thread ──
+    // ── Live region mirror: send structured text alternatives to main thread ──
     // Runs every 30 frames (~500ms at 60fps) to keep the aria-live region
     // updated with current visible messages for screen reader access.
     // Mirrors the main-thread renderer's mirrorVisibleMessages() behaviour.
@@ -1503,16 +1503,35 @@ export class WorkerRenderer {
       const maxSnippets = 10;
       const count = Math.min(this.activeMessages.length, maxSnippets);
       if (count > 0) {
-        const snippets: string[] = [];
+        const messages: Array<{
+          id: string;
+          text: string;
+          kind: 'text' | 'superchat' | 'membership';
+          author?: string;
+          superChatAmount?: string;
+          membershipHeader?: string;
+        }> = [];
         const start = this.activeMessages.length - count;
         for (let i = start; i < this.activeMessages.length; i++) {
           const msg = this.activeMessages[i];
-          if (msg?.text) {
-            snippets.push(msg.text.slice(0, 80));
-          }
+          if (!msg || (!msg.text && !msg.author)) continue;
+          const kind =
+            msg.kind === 'superchat' || msg.kind === 'membership' ? msg.kind : 'text';
+          messages.push({
+            id: msg.id,
+            text: msg.text,
+            kind,
+            ...(msg.author !== undefined ? { author: msg.author } : {}),
+            ...(msg.superChatAmount !== undefined
+              ? { superChatAmount: msg.superChatAmount }
+              : {}),
+            ...(msg.membershipHeader !== undefined
+              ? { membershipHeader: msg.membershipHeader }
+              : {}),
+          });
         }
-        if (snippets.length > 0) {
-          self.postMessage({ type: 'liveRegionSnippets', snippets });
+        if (messages.length > 0) {
+          self.postMessage({ type: 'liveRegionSnippets', messages });
         }
       }
     }
