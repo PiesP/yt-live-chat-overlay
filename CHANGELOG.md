@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.44.1] - 2026-07-29
+
+### Fixed
+
+- **Settings accessibility** — Restored WCAG AA contrast for active tabs and improved settings typography, touch targets, and keyboard-visible controls.
+- **Renderer and Worker contracts** — Validated runtime protocol messages, synchronized preprocessing state, completed scheduling contracts, and made image teardown terminal.
+- **Replay lifecycle** — Released consumed and late-dropped message IDs and cleaned up replay seek listeners deterministically.
+- **Translation concurrency** — Serialized source-language detection to prevent overlapping detection work from racing.
+- **Extension reliability** — Authenticated bridge messages, hardened storage relays, used supported menu APIs, and made extension startup deterministic in browser tests.
+- **Security boundaries** — Hardened settings, renderer protocols, accessible rendering, and extension message validation found during security review.
+
+### Changed
+
+- **Build and release tooling** — Centralized Vite target configuration and consolidated project checks and TypeScript release preparation.
+- **Verification** — Expanded Canvas, runtime manager, overlay, settings UI, Worker, platform-global, accessibility, and coverage tests.
+
 ## [0.44.0] - 2026-07-23
 
 ### Added
