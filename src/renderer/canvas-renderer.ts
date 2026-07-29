@@ -110,7 +110,7 @@ let fallbackMessageIdCounter = 0;
 
 export class CanvasRenderer extends RendererBase {
   private canvas: HTMLCanvasElement | null = null;
-  private canvasClickHandler: ((e: MouseEvent) => void) | null = null;
+  private statusActionButton: HTMLButtonElement | null = null;
   /** Set to true during onDestroy() — checked after async awaits in drainQueueAsync. */
   private _destroyed = false;
   /** Prevent concurrent Worker recovery attempts from replacing the canvas twice. */
@@ -159,8 +159,6 @@ export class CanvasRenderer extends RendererBase {
   private offscreenObserver: IntersectionObserver | null = null;
   /** Current connection health status for overlay feedback. */
   private connectionStatus: ConnectionStatus = 'connected';
-  /** Bounding box of the last-rendered status bar pill, for click hit testing. */
-  private statusBarHitRegion: { x: number; y: number; w: number; h: number } | null = null;
   /** Visually-hidden live region for connection status announcements. */
   private statusRegion: HTMLDivElement | null = null;
   private translationService: TranslationService;
@@ -337,16 +335,24 @@ export class CanvasRenderer extends RendererBase {
     if (container) container.appendChild(statusRegion);
     this.statusRegion = statusRegion;
 
-    // Click handler for status bar (click-to-reload on DISCONNECTED)
-    this.canvasClickHandler = (e: MouseEvent) => {
-      if (this.connectionStatus !== 'disconnected') return;
-      if (!this.statusBarHitRegion || !this.onStatusBarClick) return;
-      const { x, y, w, h } = this.statusBarHitRegion;
-      if (e.offsetX >= x && e.offsetX <= x + w && e.offsetY >= y && e.offsetY <= y + h) {
-        this.onStatusBarClick();
-      }
-    };
-    canvas.addEventListener('click', this.canvasClickHandler);
+    if (container) {
+      const colors = statusBarLayout.colors.disconnected;
+      const statusActionButton = document.createElement('button');
+      statusActionButton.id = 'yt-chat-overlay-status-action';
+      statusActionButton.type = 'button';
+      statusActionButton.style.cssText =
+        `position:absolute;left:50%;bottom:${statusBarLayout.bottomOffset}px;` +
+        'transform:translateX(-50%);display:none;align-items:center;pointer-events:auto;' +
+        `z-index:1;cursor:pointer;border:0;border-radius:${statusBarLayout.pillRadius}px;` +
+        `padding:${statusBarLayout.paddingY}px ${statusBarLayout.paddingX}px;` +
+        `background:${colors.bg};color:${colors.text};` +
+        `font:${statusBarLayout.fontSize}px/1.5 ${this.settings.fontFamily}`;
+      statusActionButton.addEventListener('click', () => {
+        if (this.connectionStatus === 'disconnected') this.onStatusBarClick?.();
+      });
+      container.appendChild(statusActionButton);
+      this.statusActionButton = statusActionButton;
+    }
 
     // Note: ImageFetchManager cleanup is handled by onDestroy(), which is
     // called by RuntimeManager.disposeSession() before a new renderer is
@@ -566,9 +572,17 @@ export class CanvasRenderer extends RendererBase {
     if (this.statusRegion) {
       this.statusRegion.textContent = this.getStatusMessage(status);
     }
-    // Enable pointer events on canvas when disconnected so click-to-reload works
+    // Keep the full-size canvas non-interactive. Only the dedicated status
+    // action button should receive pointer events while disconnected.
     if (this.canvas) {
-      this.canvas.style.pointerEvents = status === 'disconnected' ? 'auto' : 'none';
+      this.canvas.style.pointerEvents = 'none';
+    }
+    if (this.statusActionButton) {
+      const isDisconnected = status === 'disconnected';
+      const statusMessage = this.getStatusMessage(status);
+      this.statusActionButton.style.display = isDisconnected ? 'flex' : 'none';
+      this.statusActionButton.textContent = statusMessage;
+      this.statusActionButton.setAttribute('aria-label', statusMessage);
     }
     // Ensure render loop runs when status needs to be displayed (all non-CONNECTED states)
     if (status !== 'connected' && this.animFrameId === null) {
@@ -1999,10 +2013,8 @@ export class CanvasRenderer extends RendererBase {
     }
     this.reducedMotionListener = null;
     this.reducedMotionQuery = null;
-    if (this.canvas && this.canvasClickHandler) {
-      this.canvas.removeEventListener('click', this.canvasClickHandler);
-    }
-    this.canvasClickHandler = null;
+    this.statusActionButton?.remove();
+    this.statusActionButton = null;
     this.canvas?.remove();
     this.canvas = null;
     this.ctx = null;
@@ -2070,10 +2082,6 @@ export class CanvasRenderer extends RendererBase {
       });
     });
     newCanvas.addEventListener('contextrestored', () => this.handleContextRestored());
-    if (this.canvasClickHandler) {
-      newCanvas.addEventListener('click', this.canvasClickHandler);
-    }
-
     this.canvas = newCanvas;
     this.ctx = ctx;
     const dpr = window.devicePixelRatio || 1;
@@ -2201,6 +2209,9 @@ export class CanvasRenderer extends RendererBase {
       this.renderStatusDot(ctx, dims);
       return;
     }
+    // DISCONNECTED is rendered as a real button so only the action itself,
+    // not the full-size canvas, can intercept pointer and keyboard input.
+    if (status === 'disconnected') return;
 
     // All other states: pill with dot + text
     const colors = statusBarLayout.colors[status];
@@ -2237,9 +2248,6 @@ export class CanvasRenderer extends RendererBase {
     // Text
     ctx.fillStyle = colors.text;
     ctx.fillText(message, dotX + dotRadius + dotGap, boxY + boxH / 2);
-
-    // Store hit region for click-to-reload in DISCONNECTED state
-    this.statusBarHitRegion = { x: boxX, y: boxY, w: boxW, h: boxH };
 
     ctx.restore();
   }

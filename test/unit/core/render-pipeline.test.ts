@@ -149,7 +149,7 @@ describe('drawStage', () => {
       text: 'Original',
       content: [{ type: 'text', content: 'Original' }],
       timestamp: 1,
-      authorType: 'superChat',
+      authorType: 'normal',
       superChat: { amount: '$5.00', tier: 'blue' },
     };
     const message = {

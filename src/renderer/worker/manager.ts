@@ -286,7 +286,7 @@ export class RenderWorkerManager {
       const config = RenderWorkerManager.buildWorkerConfig(settings);
 
       // Resolve worker URL via platform-specific factory
-      const workerUrl = overrideWorkerUrl ?? createWorkerUrl('./renderer.ts');
+      const workerUrl = overrideWorkerUrl ?? createWorkerUrl();
 
       // ── Create Worker BEFORE touching the canvas ─────────────────
       // If Worker creation fails (CSP, network, etc.), the canvas must

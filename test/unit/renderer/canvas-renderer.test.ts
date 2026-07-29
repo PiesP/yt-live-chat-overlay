@@ -308,6 +308,28 @@ describe('CanvasRenderer', () => {
     renderer.destroy();
   });
 
+  it('limits disconnected pointer handling to a dedicated reload button', () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    (overlay as unknown as { container: HTMLDivElement }).container = container;
+    const renderer = new CanvasRenderer(overlay, makeSettings());
+    const onStatusBarClick = vi.fn();
+    renderer.onStatusBarClick = onStatusBarClick;
+
+    renderer.setConnectionStatus('disconnected');
+
+    const canvas = container.querySelector('canvas');
+    const button = container.querySelector<HTMLButtonElement>('#yt-chat-overlay-status-action');
+    expect(canvas?.style.pointerEvents).toBe('none');
+    expect(button?.style.display).toBe('flex');
+    button?.click();
+    expect(onStatusBarClick).toHaveBeenCalledOnce();
+
+    renderer.setConnectionStatus('connected');
+    expect(button?.style.display).toBe('none');
+    renderer.destroy();
+  });
+
   it('setReplayMode works', () => {
     const settings = makeSettings();
     const renderer = new CanvasRenderer(overlay, settings);
