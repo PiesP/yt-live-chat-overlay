@@ -70,6 +70,7 @@ export class ReplayChatSource extends ChatSource {
   private prefetchMode: ReplayMode | null = null;
   private prefetchBackoffUntil = 0;
   private prefetchNextAllowedAt = 0;
+  private prefetchGeneration = 0;
   /**
    * Drain all buffered replay messages regardless of their offset.
    *
@@ -202,11 +203,14 @@ export class ReplayChatSource extends ChatSource {
       const now = Date.now();
       const prefetchContinuation = this.prefetchContinuation;
       if (prefetchContinuation && this.shouldPrefetch(now, signal)) {
+        const prefetchGeneration = this.prefetchGeneration;
         this.prefetchNextAllowedAt = now + REPLAY_PREFETCH_MIN_INTERVAL_MS;
         try {
           const payload = await this.requestReplayPayload(prefetchContinuation, signal);
-          if (payload) {
-            if (signal?.aborted || gen !== this.cooperativeLoopGeneration) return;
+          if (signal?.aborted || gen !== this.cooperativeLoopGeneration) return;
+          if (!this.isPrefetchGenerationCurrent(prefetchGeneration)) {
+            // A seek or session reset invalidated this request while it was in flight.
+          } else if (payload) {
             const events = extractChatEvents(payload.actions, this.getSettings);
             this.replayBuffer.appendEvents(events, -1);
             this.markActivity();
@@ -219,7 +223,9 @@ export class ReplayChatSource extends ChatSource {
             this.prefetchContinuation = null;
           }
         } catch (error: unknown) {
-          if (isAbortError(error)) {
+          if (!this.isPrefetchGenerationCurrent(prefetchGeneration)) {
+            // Ignore failures from an invalidated prefetch request.
+          } else if (isAbortError(error)) {
             this.prefetchContinuation = null;
           } else {
             log.debug('chat.replay.prefetch-failed', { error: String(error) });
@@ -256,6 +262,10 @@ export class ReplayChatSource extends ChatSource {
     );
   }
 
+  private isPrefetchGenerationCurrent(generation: number): boolean {
+    return generation === this.prefetchGeneration;
+  }
+
   private stopCooperativeLoop(): void {
     this.cooperativeLoopGeneration++;
     this.cooperativeLoopTimer = clearSafeTimeout(this.cooperativeLoopTimer);
@@ -273,6 +283,7 @@ export class ReplayChatSource extends ChatSource {
 
   /** Reset prefetch state — cooperative loop will skip the prefetch step. */
   private stopPrefetch(): void {
+    this.prefetchGeneration++;
     this.prefetchContinuation = null;
     this.prefetchPagesFetched = 0;
     this.prefetchMode = null;
@@ -631,7 +642,12 @@ export class ReplayChatSource extends ChatSource {
     if (!bootstrap) {
       return false;
     }
-    return await this.initializeReplaySession(signal);
+    const initialized = await this.initializeReplaySession(signal);
+    if (initialized) {
+      this.startCooperativeLoop(signal);
+      this.installSeekListeners(signal);
+    }
+    return initialized;
   }
 
   private shouldFetchReplayAtOffset(currentOffsetMs: number): boolean {
