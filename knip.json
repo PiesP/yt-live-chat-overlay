@@ -16,5 +16,6 @@
   },
   "ignore": ["extension/**", "dist*/**", "test/**"],
   "ignoreBinaries": [],
+  "ignoreDependencies": ["@axe-core/playwright"],
   "ignoreExportsUsedInFile": true
 }
