@@ -31,7 +31,9 @@ const COMMAND_ORIGIN = window.location.origin;
 const COMMAND_NONCE = window.__ytExtensionBridge?.nonce;
 
 window.addEventListener('message', (event: MessageEvent) => {
-  // Strict origin check: reject messages from any other origin.
+  // Accept only messages posted by this browsing context. The nonce is
+  // defense-in-depth routing data, not a secret boundary from same-page code.
+  if (event.source !== window) return;
   if (event.origin !== COMMAND_ORIGIN) return;
 
   const data = event.data;

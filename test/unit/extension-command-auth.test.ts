@@ -25,6 +25,19 @@ describe('extension command bridge authentication', () => {
     });
     await import('../../extension/page-script');
 
+    const foreignFrame = document.createElement('iframe');
+    document.body.appendChild(foreignFrame);
+    window.dispatchEvent(new MessageEvent('message', {
+      origin: window.location.origin,
+      source: foreignFrame.contentWindow,
+      data: {
+        source: 'yt-chat-overlay-extension',
+        nonce: 'test-bridge-nonce',
+        command: 'reset-settings',
+      },
+    }));
+    expect(resetSettings).not.toHaveBeenCalled();
+
     window.dispatchEvent(new MessageEvent('message', {
       origin: window.location.origin,
       source: window,

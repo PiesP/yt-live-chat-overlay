@@ -13,7 +13,7 @@
  */
 
 import type { Overlay } from '@app/overlay';
-import type { ChatMessage, OverlaySettings } from '@app-types';
+import type { AccessibleChatMessage, ChatMessage, OverlaySettings } from '@app-types';
 import type { ImageFetchManager } from '@media/image-fetch-manager';
 import { createWorkerUrl, workerSupported } from '@platform/worker-factory';
 import {
@@ -134,8 +134,8 @@ export class RenderWorkerManager {
   /** Unsubscribe function for overlay dimension changes, stored for cleanup. */
   private dimensionsUnsubscribe: (() => void) | null = null;
 
-  /** Callback to push text snippets to the overlay's aria-live region. */
-  private _liveRegionCallback: ((snippets: string[]) => void) | null = null;
+  /** Callback to push structured text alternatives to the overlay's aria-live region. */
+  private _liveRegionCallback: ((messages: AccessibleChatMessage[]) => void) | null = null;
   /** Callback invoked when the worker reaches an unrecoverable message-error state. */
   private _fatalErrorCallback: ((reason: string) => void) | null = null;
 
@@ -197,7 +197,7 @@ export class RenderWorkerManager {
    * Set the callback used to forward Worker live-region text snippets
    * to the overlay's aria-live region for screen reader access.
    */
-  setLiveRegionCallback(callback: (snippets: string[]) => void): void {
+  setLiveRegionCallback(callback: (messages: AccessibleChatMessage[]) => void): void {
     this._liveRegionCallback = callback;
   }
 
@@ -388,7 +388,7 @@ export class RenderWorkerManager {
           case 'liveRegionSnippets':
             if (this._liveRegionCallback) {
               this._liveRegionCallback(
-                ((data as Record<string, unknown>).snippets as string[]) ?? []
+                ((data as Record<string, unknown>).messages as AccessibleChatMessage[]) ?? []
               );
             }
             break;

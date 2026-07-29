@@ -55,6 +55,7 @@ describe('platform storage adapters', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     restoreProperty(globalThis, 'chrome', originalDescriptors.chrome);
     restoreProperty(globalThis, 'GM_getValue', originalDescriptors.GM_getValue);
     restoreProperty(globalThis, 'GM_setValue', originalDescriptors.GM_setValue);
@@ -147,5 +148,29 @@ describe('platform storage adapters', () => {
       }),
       window.location.origin
     );
+  });
+
+  it('rejects relay reads and writes when the content-script relay times out', async () => {
+    vi.useFakeTimers();
+    window.__ytExtensionBridge = {
+      workerSupported: true,
+      workerUrl: 'chrome-extension://test/workers/renderer.js',
+      storageType: 'chrome.storage.local',
+      nonce: 'timeout-nonce',
+    };
+    vi.spyOn(window, 'postMessage').mockImplementation(() => {});
+    const adapter = await loadAdapter();
+
+    const readExpectation = expect(adapter.getItem('key')).rejects.toThrow(
+      'Storage relay get request timed out'
+    );
+    await vi.advanceTimersByTimeAsync(2000);
+    await readExpectation;
+
+    const writeExpectation = expect(adapter.setItem('key', 'value')).rejects.toThrow(
+      'Storage relay set request timed out'
+    );
+    await vi.advanceTimersByTimeAsync(2000);
+    await writeExpectation;
   });
 });

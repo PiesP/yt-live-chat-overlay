@@ -8,7 +8,7 @@
  * Re-exported here so consumers can always `import { ... } from '@app-types'`.
  */
 
-export type { ChatMessage, SuperChatInfo } from './chat';
+export type { AccessibleChatMessage, ChatMessage, SuperChatInfo } from './chat';
 export type {
   AuthorRateLimitPreset,
   AuthorType,

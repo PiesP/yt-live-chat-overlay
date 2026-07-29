@@ -198,6 +198,8 @@ export const EN: Record<string, string> = {
   'appearance.superchatOpacity': 'SuperChat Opacity (%)',
   'appearance.superchatOpacityDesc': 'Background opacity of Super Chat cards',
   'chat.messages': 'Chat messages',
+  'chat.membership': 'Membership',
+  'chat.superChat': 'Super Chat',
   'danmaku.bottom': 'Bottom Fixed',
   'danmaku.bottomClearZone': 'Bottom Clear Zone (%)',
   'danmaku.bottomClearZoneDesc': 'Keep bottom N% of video free of comments',

@@ -10,7 +10,7 @@
  * single orchestrator that calls these in sequence.
  */
 
-import type { OverlayDimensions, OverlaySettings } from '@app-types';
+import type { AccessibleChatMessage, OverlayDimensions, OverlaySettings } from '@app-types';
 import { renderPaidCard } from '@renderer/canvas/card-renderers';
 import { computePulseAlpha } from '@renderer/canvas/lut-helpers';
 import { COMPACTION_THRESHOLD_RATIO } from '@renderer/canvas/pipeline-utils';
@@ -108,8 +108,8 @@ export interface CanvasRenderContext {
 
   /** Last timestamp (performance.now) when the live region was updated. Mutable ref. */
   lastLiveRegionUpdate: { value: number };
-  /** Callback to push snippets to the overlay's aria-live region. */
-  updateLiveRegion: (snippets: string[]) => void;
+  /** Callback to push structured text alternatives to the overlay's aria-live region. */
+  updateLiveRegion: (messages: AccessibleChatMessage[]) => void;
 }
 
 // ── Constants hoisted from CanvasRenderer static fields ─────────────────
@@ -538,7 +538,7 @@ export function drawGlowStage(
 // ── mirrorVisibleMessages ───────────────────────────────────────────────
 
 /**
- * Mirror snippets from visible canvas messages to an offscreen aria-live
+ * Mirror structured alternatives from visible canvas messages to an offscreen aria-live
  * region so screen readers, find-in-page, and translation tools can
  * discover canvas-rendered text content.
  *
@@ -551,16 +551,30 @@ export function mirrorVisibleMessages(ctx: CanvasRenderContext): void {
   ctx.lastLiveRegionUpdate.value = now;
   const count = Math.min(ctx.activeMessages.length, LIVE_REGION_MAX_MESSAGES);
   if (count === 0) return;
-  const snippets: string[] = [];
+  const messages: AccessibleChatMessage[] = [];
   const start = ctx.activeMessages.length - count;
   for (let i = start; i < ctx.activeMessages.length; i++) {
     const msg = ctx.activeMessages[i];
     if (!msg) continue;
-    const text = msg.message.text;
-    if (text) snippets.push(text.slice(0, 80));
+    const message = msg.message;
+    if (!message.text && !message.author) continue;
+    messages.push({
+      id:
+        message.id ??
+        `${message.timestamp}:${message.author ?? ''}:${message.kind}:${message.text}`,
+      text: message.text,
+      kind: message.kind,
+      ...(message.author !== undefined ? { author: message.author } : {}),
+      ...(message.superChat?.amount !== undefined
+        ? { superChatAmount: message.superChat.amount }
+        : {}),
+      ...(message.membershipHeader !== undefined
+        ? { membershipHeader: message.membershipHeader }
+        : {}),
+    });
   }
-  if (snippets.length > 0) {
-    ctx.updateLiveRegion(snippets);
+  if (messages.length > 0) {
+    ctx.updateLiveRegion(messages);
   }
 }
 

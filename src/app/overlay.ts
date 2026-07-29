@@ -8,7 +8,7 @@
  * Handles resizing and fullscreen changes.
  */
 
-import type { OverlayDimensions, OverlaySettings } from '@app-types';
+import type { AccessibleChatMessage, OverlayDimensions, OverlaySettings } from '@app-types';
 import { getActiveLanguage, t } from '@i18n/index';
 import { rendererLayout } from '@util/design-tokens';
 import {
@@ -73,8 +73,8 @@ export class Overlay {
   private liveRegion: HTMLDivElement | null = null;
   /** Debounce timer for live region updates. */
   private liveRegionTimer: ReturnType<typeof setTimeout> | null = null;
-  /** Set of recently-seen snippet hashes to prevent re-announcing duplicates. */
-  private seenSnippetKeys = new Set<string>();
+  /** Stable identities of recently announced messages. */
+  private seenMessageIds = new Set<string>();
   private static readonly LIVE_REGION_DEBOUNCE_MS = 500;
   private static readonly SEEN_SNIPPET_MAX = 200;
 
@@ -318,18 +318,18 @@ export class Overlay {
   }
 
   /**
-   * Update the aria-live region with snippets from visible canvas messages.
+   * Update the aria-live region with structured alternatives for visible canvas messages.
    * Called by the renderer so screen readers, find-in-page, and translation
    * tools can discover canvas-rendered text content.
    *
-   * Appends only new (previously unseen) snippets as individual DOM
+   * Appends only new (previously unseen) messages as individual DOM
    * elements so screen readers announce only fresh content instead of
    * re-reading the entire visible-message list every cycle.
    *
    * Debounced to 500ms to avoid flooding the accessibility tree during
    * rapid chat.
    */
-  updateLiveRegion(snippets: string[]): void {
+  updateLiveRegion(messages: AccessibleChatMessage[]): void {
     if (!this.liveRegion) return;
     if (this.liveRegionTimer !== null) {
       clearTimeout(this.liveRegionTimer);
@@ -338,33 +338,33 @@ export class Overlay {
       this.liveRegionTimer = null;
       if (!this.liveRegion) return;
 
-      // Filter to only new snippets (not previously announced).
-      const newSnippets: string[] = [];
-      for (const snippet of snippets) {
-        // Use first 40 chars as lightweight dedup key.
-        const key = snippet.slice(0, 40);
-        if (!this.seenSnippetKeys.has(key)) {
-          newSnippets.push(snippet);
-          this.seenSnippetKeys.add(key);
+      // Filter by stable message identity so repeated text from different
+      // chat messages remains available to assistive technology.
+      const newMessages: AccessibleChatMessage[] = [];
+      for (const message of messages) {
+        if (!this.seenMessageIds.has(message.id)) {
+          newMessages.push(message);
+          this.seenMessageIds.add(message.id);
           // Trim oldest entries when set grows too large.
-          if (this.seenSnippetKeys.size > Overlay.SEEN_SNIPPET_MAX) {
+          if (this.seenMessageIds.size > Overlay.SEEN_SNIPPET_MAX) {
             let removed = 0;
-            for (const v of this.seenSnippetKeys) {
-              this.seenSnippetKeys.delete(v);
+            for (const id of this.seenMessageIds) {
+              this.seenMessageIds.delete(id);
               if (++removed >= 50) break;
             }
           }
         }
       }
 
-      if (newSnippets.length === 0) return;
+      if (newMessages.length === 0) return;
 
       // Append new snippets as individual <p> elements so screen readers
       // announce only the new content, not the entire list.
       const frag = document.createDocumentFragment();
-      for (const snippet of newSnippets) {
+      for (const message of newMessages) {
         const p = document.createElement('p');
-        p.textContent = snippet;
+        p.dataset.messageId = message.id;
+        p.textContent = this.formatAccessibleMessage(message);
         frag.appendChild(p);
       }
 
@@ -378,6 +378,20 @@ export class Overlay {
 
       this.liveRegion.appendChild(frag);
     }, Overlay.LIVE_REGION_DEBOUNCE_MS);
+  }
+
+  private formatAccessibleMessage(message: AccessibleChatMessage): string {
+    const parts: string[] = [];
+    if (message.kind === 'superchat') {
+      parts.push(t('chat.superChat'));
+      if (message.superChatAmount) parts.push(message.superChatAmount);
+    } else if (message.kind === 'membership') {
+      parts.push(t('chat.membership'));
+      if (message.membershipHeader) parts.push(message.membershipHeader);
+    }
+    if (message.author) parts.push(message.author);
+    if (message.text) parts.push(message.text);
+    return parts.join(' — ');
   }
 
   /**
@@ -509,7 +523,7 @@ export class Overlay {
     }
 
     // Clear dedup set to free memory
-    this.seenSnippetKeys.clear();
+    this.seenMessageIds.clear();
 
     // Detach keyboard handler
     if (this.keyboardHandler) {

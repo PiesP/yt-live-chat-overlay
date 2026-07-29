@@ -310,6 +310,8 @@ export const KO: Record<string, string> = {
 
   // ── Added 2026-07-04 ──
   'chat.messages': '채팅 메시지',
+  'chat.membership': '멤버십',
+  'chat.superChat': '슈퍼챗',
   'advanced.ignoreReducedMotion': '접근성 모션 무시',
   'advanced.ignoreReducedMotionDesc':
     'OS 모션 감소 설정이 켜져 있어도 스크롤 애니메이션을 강제로 사용합니다 (페이지 새로고침 필요)',

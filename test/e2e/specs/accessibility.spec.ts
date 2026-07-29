@@ -19,6 +19,7 @@
  * - Verify accessibility attributes on the overlay/canvas elements
  */
 
+import AxeBuilder from '@axe-core/playwright';
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { existsSync } from 'node:fs';
@@ -67,6 +68,18 @@ test.describe('YT Live Chat Overlay Accessibility', () => {
 
     const ariaLabel = await container.getAttribute('aria-label');
     expect(ariaLabel?.trim()).toBeTruthy();
+  });
+
+  test('settings dialog has no automated WCAG A/AA violations', async ({ page }) => {
+    await setupOverlayPage(page);
+    const modal = await openSettingsModal(page);
+    const modalResults = await new AxeBuilder({ page })
+      .include('.yt-chat-overlay-settings-modal')
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'])
+      .analyze();
+    expect(modalResults.violations).toEqual([]);
+
+    await closeSettingsModal(page, modal);
   });
 
   test('renderer canvas is attached and hidden from the accessibility tree', async ({ page }) => {

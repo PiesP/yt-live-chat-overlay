@@ -91,7 +91,50 @@ describe('Overlay', () => {
 
   it('updateLiveRegion does not throw when liveRegion is null', () => {
     const overlay = new Overlay();
-    expect(() => overlay.updateLiveRegion(['test message'])).not.toThrow();
+    expect(() =>
+      overlay.updateLiveRegion([{ id: '1', text: 'test message', kind: 'text' }])
+    ).not.toThrow();
+  });
+
+  it('preserves repeated full messages with distinct IDs and announces paid context', async () => {
+    const player = document.createElement('div');
+    player.id = 'movie_player';
+    Object.defineProperties(player, {
+      offsetWidth: { configurable: true, value: 1280 },
+      offsetHeight: { configurable: true, value: 720 },
+    });
+    player.getBoundingClientRect = () =>
+      ({ width: 1280, height: 720, top: 0, left: 0, right: 1280, bottom: 720 }) as DOMRect;
+    document.body.appendChild(player);
+
+    const overlay = new Overlay();
+    await expect(overlay.create(makeSettings())).resolves.toBe(true);
+    vi.useFakeTimers();
+    const repeatedText =
+      'A full repeated message that must not be truncated at eighty characters '.repeat(2);
+    overlay.updateLiveRegion([
+      { id: 'one', text: repeatedText, kind: 'text', author: 'First author' },
+      {
+        id: 'two',
+        text: repeatedText,
+        kind: 'superchat',
+        author: 'Second author',
+        superChatAmount: '$5.00',
+      },
+    ]);
+    vi.advanceTimersByTime(500);
+
+    const announcements = Array.from(
+      document.querySelectorAll<HTMLParagraphElement>('.yt-live-chat-overlay-live-region p')
+    );
+    expect(announcements).toHaveLength(2);
+    expect(announcements[0]?.textContent).toContain(`First author — ${repeatedText}`);
+    expect(announcements[1]?.textContent).toContain(
+      `Super Chat — $5.00 — Second author — ${repeatedText}`
+    );
+    expect(announcements[1]?.dataset.messageId).toBe('two');
+
+    overlay.destroy();
   });
 
   it('updateLanguage does not throw when container is null', () => {
