@@ -53,6 +53,13 @@ function checkExtension(relativeDirectory: string): void {
     if (resource.includes('*')) assertGlobHasMatch(directory, resource);
     else assertExists(directory, resource);
   }
+
+  for (const script of ['content-script.js', 'page-script.js']) {
+    const source = readFileSync(join(directory, script), 'utf8');
+    if (!source.trimStart().startsWith('(function(') || /^\s*(?:import|export)\s/m.test(source)) {
+      throw new Error(`${relativeDirectory}/${script} is not a self-contained IIFE bundle.`);
+    }
+  }
 }
 
 if (process.argv.includes('--e2e')) {

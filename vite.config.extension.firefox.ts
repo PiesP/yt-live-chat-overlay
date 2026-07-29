@@ -1,9 +1,3 @@
-/**
- * Vite Configuration for Firefox MV3 Extension — Background + Workers (ES modules).
- *
- * Usage: pnpm build:extension:firefox:sw
- */
+import { createExtensionBackgroundConfig } from './tooling/vite/configs/extension-background';
 
-import { createExtensionConfig } from './vite.config.extension.shared';
-
-export default createExtensionConfig('dist-extension-firefox');
+export default createExtensionBackgroundConfig('firefox');
