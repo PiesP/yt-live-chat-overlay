@@ -32,6 +32,7 @@ class PendingImage {
 
 const EMOJI_URL = 'https://yt3.ggpht.com/emoji.png';
 const AUTHOR_URL = 'https://yt4.ggpht.com/author.png';
+const STICKER_URL = 'https://yt3.ggpht.com/sticker.png';
 
 function message(): ChatMessage {
   return {
@@ -96,5 +97,22 @@ describe('ImageFetchManager terminal lifecycle', () => {
     expect(manager.emojiFetching.size).toBe(0);
     expect(manager.imageLoading.size).toBe(0);
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('caches a standard 512px sticker at the minimum configured budget', () => {
+    const manager = new ImageFetchManager();
+    manager.updateConfig({ ...DEFAULT_SETTINGS, stickerCacheMb: 1 } as OverlaySettings, null);
+
+    manager.loadImage(STICKER_URL, manager.stickerCache);
+    const image = PendingImage.instances[0];
+    if (!image) throw new Error('Expected pending sticker image');
+    image.naturalWidth = 512;
+    image.naturalHeight = 512;
+    image.onload?.();
+
+    expect(manager.stickerCache.has(STICKER_URL)).toBe(true);
+    manager.loadImage(STICKER_URL, manager.stickerCache);
+    expect(PendingImage.instances).toHaveLength(1);
+    manager.destroy();
   });
 });

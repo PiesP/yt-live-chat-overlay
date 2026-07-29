@@ -5,7 +5,7 @@
  * Platform storage adapter — inline implementations.
  *
  * Returns a StorageAdapter object matching the current environment:
- *   chrome.storage.local (extension) > GM_* (userscript) > localStorage (fallback).
+ *   authenticated extension relay > GM_* (userscript) > chrome.storage.local > localStorage.
  */
 
 import type { StorageAdapter } from '@platform/types';
@@ -160,6 +160,33 @@ export function getStorageAdapter(): StorageAdapter {
     // Fall through to localStorage as a safe default.
   }
 
+  // GM_* must win over ambient page globals in userscript mode. A page can
+  // define window.chrome before document-end; it cannot forge the userscript
+  // manager's sandbox-injected GM capabilities.
+  if (typeof GM_getValue !== 'undefined' && typeof GM_setValue !== 'undefined') {
+    cachedAdapter = {
+      async getItem(key: string): Promise<string | null> {
+        try {
+          const rawValue: unknown = GM_getValue(key);
+          if (rawValue === undefined || rawValue === null) return null;
+          if (typeof rawValue === 'object') return JSON.stringify(rawValue);
+          return String(rawValue);
+        } catch (_error: unknown) {
+          return null;
+        }
+      },
+      async setItem(key: string, value: string): Promise<void> {
+        if (typeof GM_setValue === 'undefined') return;
+        try {
+          GM_setValue(key, value);
+        } catch (error: unknown) {
+          log.warn('platform.storage.set-failed', { error: String(error) });
+        }
+      },
+    };
+    return cachedAdapter;
+  }
+
   // chrome.storage.local (extension — ISOLATED world or non-MV3)
   if (typeof chrome !== 'undefined' && chrome.storage?.local !== undefined) {
     const storage = chrome.storage.local;
@@ -185,31 +212,6 @@ export function getStorageAdapter(): StorageAdapter {
                 'Consider reducing settings data or clearing unused entries.'
             );
           }
-        }
-      },
-    };
-    return cachedAdapter;
-  }
-
-  // GM_* (userscript)
-  if (typeof GM_getValue !== 'undefined' && typeof GM_setValue !== 'undefined') {
-    cachedAdapter = {
-      async getItem(key: string): Promise<string | null> {
-        try {
-          const rawValue: unknown = GM_getValue(key);
-          if (rawValue === undefined || rawValue === null) return null;
-          if (typeof rawValue === 'object') return JSON.stringify(rawValue);
-          return String(rawValue);
-        } catch (_error: unknown) {
-          return null;
-        }
-      },
-      async setItem(key: string, value: string): Promise<void> {
-        if (typeof GM_setValue === 'undefined') return;
-        try {
-          GM_setValue(key, value);
-        } catch (error: unknown) {
-          log.warn('platform.storage.set-failed', { error: String(error) });
         }
       },
     };

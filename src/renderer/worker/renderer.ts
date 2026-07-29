@@ -31,6 +31,7 @@
 /// <reference lib="webworker" />
 
 import type { ChatMessage, FontWeight } from '@app-types';
+import { EMOJI_CACHE_MAX_ENTRIES, getStickerCacheBytes } from '@media/cache-limits';
 import { isAllowedImageUrl } from '@media/image-url-validation';
 import { getCachedGradient } from '@renderer/canvas/gradient-utils';
 import { computePulseAlpha } from '@renderer/canvas/lut-helpers';
@@ -39,6 +40,7 @@ import {
   drawAuthorSection,
   drawRoundRect,
   getDisplayText,
+  getSafeTextHeight,
   renderRegularMessage,
   renderSegment,
   renderWrappedContentSegments,
@@ -485,7 +487,8 @@ export class WorkerRenderer {
             this.emojiCache = new ResizableByteLimitedCache<ImageBitmap>(
               (this.config.emojiCacheMb ?? 4) * 1_000_000,
               WorkerRenderer.estimateBitmapBytes,
-              (b) => b.close()
+              (b) => b.close(),
+              EMOJI_CACHE_MAX_ENTRIES
             );
             this.authorPhotoCache = new ResizableByteLimitedCache<ImageBitmap>(
               (this.config.photoCacheMb ?? 4) * 1_000_000,
@@ -493,7 +496,7 @@ export class WorkerRenderer {
               (b) => b.close()
             );
             stickerCache = this.stickerCache = new ResizableByteLimitedCache<ImageBitmap>(
-              (this.config.stickerCacheMb ?? 4) * 1_000_000,
+              getStickerCacheBytes(this.config.stickerCacheMb ?? 4),
               WorkerRenderer.estimateBitmapBytes,
               (b) => b.close()
             );
@@ -579,7 +582,7 @@ export class WorkerRenderer {
                 this.authorPhotoCache.resize((this.config.photoCacheMb ?? 4) * 1_000_000);
               }
               if (nextConfig && 'stickerCacheMb' in nextConfig) {
-                this.stickerCache.resize((this.config.stickerCacheMb ?? 4) * 1_000_000);
+                this.stickerCache.resize(getStickerCacheBytes(this.config.stickerCacheMb ?? 4));
               }
               if (nextConfig && 'textCacheMb' in nextConfig) {
                 this.textBitmapCache.resize((this.config.textCacheMb ?? 4) * 1_000_000);
@@ -738,9 +741,7 @@ export class WorkerRenderer {
     if (!metrics) {
       this.ctx.font = font;
       const m = this.ctx.measureText('Mg');
-      const ascent = Math.max(0, m.actualBoundingBoxAscent);
-      const descent = Math.max(0, m.actualBoundingBoxDescent);
-      metrics = { height: Math.ceil(ascent + descent) };
+      metrics = { height: getSafeTextHeight(m, fontSize) };
       this.fontMetricsCache.set(font, metrics);
     }
     return metrics.height;

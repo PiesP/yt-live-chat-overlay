@@ -2,6 +2,7 @@
 // Copyright (c) 2026 PiesP
 
 import type { ChatMessage, OverlaySettings } from '@app-types';
+import { EMOJI_CACHE_MAX_ENTRIES, getStickerCacheBytes } from '@media/cache-limits';
 import { isAllowedImageUrl } from '@media/image-url-validation';
 import { ResizableByteLimitedCache } from '@util/byte-limited-cache';
 import { clearSafeInterval } from '@util/dom';
@@ -38,6 +39,8 @@ export class ImageFetchManager {
   readonly failedEmojiFetches = new Map<string, number>();
   /** In-flight image load guard to prevent duplicate Image objects. */
   readonly imageLoading = new Set<string>();
+  /** URLs whose decoded images cannot fit any configured cache. */
+  private readonly uncacheableImageUrls = new Set<string>();
   /** In-flight Image objects for teardown neutering. */
   private readonly inFlightImages = new Set<HTMLImageElement>();
   /** Timeout handles for author/sticker image loads. */
@@ -77,7 +80,9 @@ export class ImageFetchManager {
     // Initialize caches with 0 MB — will be properly configured via updateConfig
     this.emojiCache = new ResizableByteLimitedCache<HTMLImageElement>(
       0,
-      (img) => img.naturalWidth * img.naturalHeight * 4
+      (img) => img.naturalWidth * img.naturalHeight * 4,
+      undefined,
+      EMOJI_CACHE_MAX_ENTRIES
     );
     this.authorPhotoCache = new ResizableByteLimitedCache<HTMLImageElement>(
       0,
@@ -114,7 +119,7 @@ export class ImageFetchManager {
     // Resize caches in-place instead of recreating + copying all entries.
     this.emojiCache.resize(settings.emojiCacheMb * 1_000_000);
     this.authorPhotoCache.resize(settings.photoCacheMb * 1_000_000);
-    this.stickerCache.resize(settings.stickerCacheMb * 1_000_000);
+    this.stickerCache.resize(getStickerCacheBytes(settings.stickerCacheMb));
 
     // Start cleanup interval only if not already running.
     // Re-creating the interval on every updateConfig() causes unnecessary
@@ -141,6 +146,7 @@ export class ImageFetchManager {
     if (this.isDestroyed) return;
     if (cache.has(url)) return;
     if (this.imageLoading.has(url)) return;
+    if (this.uncacheableImageUrls.has(url)) return;
     if (!isAllowedImageUrl(url)) {
       ImageFetchManager.log.debug('media.image.blocked', { reason: 'not-in-cdn-whitelist', url });
       return;
@@ -162,7 +168,10 @@ export class ImageFetchManager {
       this.imageLoading.delete(url);
       this.inFlightImages.delete(img);
       if (this.isDestroyed) return;
-      cache.set(url, img);
+      if (!cache.set(url, img)) {
+        this.recordUncacheableImage(url);
+        return;
+      }
       this.preConvertForWorker(url, img);
     };
     img.onerror = () => {
@@ -183,6 +192,13 @@ export class ImageFetchManager {
       }, this.emojiFetchTimeoutMs)
     );
     img.src = url;
+  }
+
+  private recordUncacheableImage(url: string): void {
+    this.uncacheableImageUrls.add(url);
+    if (this.uncacheableImageUrls.size <= EMOJI_CACHE_MAX_ENTRIES) return;
+    const oldest = this.uncacheableImageUrls.values().next().value;
+    if (oldest !== undefined) this.uncacheableImageUrls.delete(oldest);
   }
 
   /**
@@ -394,6 +410,7 @@ export class ImageFetchManager {
     this.emojiFetchingStarted.clear();
     this.failedEmojiFetches.clear();
     this.imageLoading.clear();
+    this.uncacheableImageUrls.clear();
 
     // ResizableByteLimitedCache.clear() calls onEvict (bitmap.close()) for each entry.
     this.workerBitmapCache.clear();

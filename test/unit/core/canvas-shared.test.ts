@@ -3,11 +3,30 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  canCacheTextBitmap,
   getDisplayText,
+  getSafeTextHeight,
   splitGraphemeClusters,
   toSharedContentSegments,
 } from '@renderer/canvas/shared';
 import type { SharedContentSegment } from '@renderer/canvas/shared';
+
+describe('canvas bitmap allocation guards', () => {
+  it('rejects oversized dimensions and cache budgets before allocation', () => {
+    expect(canCacheTextBitmap(8193, 10, 10_000_000)).toBe(false);
+    expect(canCacheTextBitmap(100, 100, 39_999)).toBe(false);
+    expect(canCacheTextBitmap(100, 100, 40_000)).toBe(true);
+  });
+
+  it('falls back when browsers omit text bounding-box metrics', () => {
+    const metrics = {
+      actualBoundingBoxAscent: Number.NaN,
+      actualBoundingBoxDescent: undefined,
+    } as unknown as TextMetrics;
+
+    expect(getSafeTextHeight(metrics, 20)).toBe(20);
+  });
+});
 
 // ═══════════════════════════════════════════════════════════════════════════
 // toSharedContentSegments

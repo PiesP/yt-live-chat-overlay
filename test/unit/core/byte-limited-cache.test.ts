@@ -97,9 +97,19 @@ describe('ResizableByteLimitedCache', () => {
       const c = new ResizableByteLimitedCache<string>(100, estimateSize, (value) =>
         evicted.push(value)
       );
-      c.set('large', 'x'.repeat(200)); // 200 bytes > 100
+      expect(c.set('large', 'x'.repeat(200))).toBe(false); // 200 bytes > 100
       expect(c.has('large')).toBe(false);
       expect(evicted).toEqual(['x'.repeat(200)]);
+    });
+
+    it('bounds tiny entries independently of their byte size', () => {
+      const c = new ResizableByteLimitedCache<string>(100, estimateSize, undefined, 2);
+      c.set('a', '1');
+      c.set('b', '2');
+      c.set('c', '3');
+
+      expect(c.size).toBe(2);
+      expect(c.has('a')).toBe(false);
     });
   });
 
@@ -153,6 +163,20 @@ describe('ResizableByteLimitedCache', () => {
     });
   });
 
+  describe('take', () => {
+    it('transfers ownership without invoking eviction cleanup', () => {
+      const evicted: string[] = [];
+      const c = new ResizableByteLimitedCache<string>(100, estimateSize, (value) =>
+        evicted.push(value)
+      );
+      c.set('key', 'value');
+
+      expect(c.take('key')).toBe('value');
+      expect(c.has('key')).toBe(false);
+      expect(evicted).toEqual([]);
+    });
+  });
+
   // ── clear ───────────────────────────────────────────────────────────────
 
   describe('clear', () => {
@@ -202,6 +226,26 @@ describe('ResizableByteLimitedCache', () => {
   // ── eviction callback ───────────────────────────────────────────────────
 
   describe('eviction callback', () => {
+    it('accounts bytes before an eviction callback mutates the value', () => {
+      const first = { bytes: 60 };
+      const second = { bytes: 60 };
+      const third = { bytes: 40 };
+      const c = new ResizableByteLimitedCache<{ bytes: number }>(
+        100,
+        (value) => value.bytes,
+        (value) => {
+          value.bytes = 0;
+        }
+      );
+
+      c.set('first', first);
+      c.set('second', second);
+      c.set('third', third);
+
+      expect(c.has('second')).toBe(true);
+      expect(c.has('third')).toBe(true);
+    });
+
     it('calls onEvict when entries are evicted', () => {
       const evicted: string[] = [];
       const cb = (v: string) => evicted.push(v);
