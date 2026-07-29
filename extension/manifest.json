@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "YouTube Live Chat Overlay",
   "version": "0.44.0",
-  "description": "Nico-nico style comment overlay for YouTube live chat. 100% local processing.",
+  "description": "In-browser NicoNico-style comment overlay for YouTube live chat.",
   "author": "PiesP",
   "homepage_url": "https://github.com/PiesP/yt-live-chat-overlay",
   "minimum_chrome_version": "116",

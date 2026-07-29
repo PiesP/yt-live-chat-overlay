@@ -1,112 +1,71 @@
-# Browser Extension (MV3)
+# Browser extension
 
-The YouTube Live Chat Overlay is also available as a browser extension for
-Chrome, Edge, Brave, Vivaldi, and Firefox (MV3).
+The project builds Manifest V3 packages for Chromium and Firefox from the same
+application source as the userscript. Release archives are developer builds,
+not browser-store installations.
 
 ## Architecture
 
-```
-src/
-  app/            ← Application entry, overlay manager
-  chat/           ← Chat source abstraction (live/replay/YouTube parsing)
-  i18n/           ← Internationalization (6 languages)
-  media/          ← Media utilities
-  platform/       ← Platform abstraction layer (userscript/extension adapters)
-  renderer/       ← Canvas renderers (Canvas2D, OffscreenCanvas Worker, layout)
-  settings/       ← Settings UI (DOM controller, form builder)
-  translation/    ← Machine translation integration
-  types/          ← Shared TypeScript types
-  util/           ← Utility functions
+- `manifest.json`: Chromium manifest
+- `manifest.firefox.json`: Firefox manifest and minimum version
+- `content-script.ts`: isolated-world entry point and storage relay
+- `page-bridge.ts`: typed bridge shared with the injected page script
+- `background.ts`: context menu and extension lifecycle handling
+- `src/platform/`: storage, menu, worker, cross-tab, language, and translation adapters
 
-extension/
-  background.ts   ← Service Worker (context menu, message routing)
-  content-script.ts ← ISOLATED world content script entry point
-  manifest.json    ← Chrome MV3 manifest
-  manifest.firefox.json ← Firefox MV3 manifest
+The isolated content script injects a small `page-script.js` bridge into the
+YouTube page's main world. Messages crossing that boundary use the versioned
+bridge protocol; extension APIs remain in the isolated or background context.
 
-dist-extension/         ← Chrome extension output (gitignored)
-dist-extension-firefox/ ← Firefox extension output (gitignored)
-```
+| Capability | Userscript | Chromium extension | Firefox extension |
+| --- | --- | --- | --- |
+| Storage | Userscript manager `GM_*` storage | Extension local storage | Extension local storage |
+| Cross-tab sync | Userscript value-change listener | Extension storage events | Extension storage events |
+| Menu | Userscript menu command | Context menu | Context menu |
+| Worker URL | Bundled userscript URL | `runtime.getURL()` | `runtime.getURL()` |
+| Translation | When the browser exposes Translator | When Chromium exposes Translator | Unavailable |
 
-## Platform Abstraction
-
-The application logic is organized into domain-specific directories under `src/`: `app/`, `chat/`, `renderer/`, `settings/`, `i18n/`, `translation/`, `media/`, `util/`. Platform differences
-are isolated behind adapter interfaces in `src/platform/`:
-
-| Capability | Userscript | Chrome Extension | Firefox Extension |
-|---|---|---|---|
-| Storage | `GM_getValue`/`GM_setValue` | `chrome.storage.local` | `browser.storage.local` |
-| Worker URL | `new URL(..., import.meta.url)` | `chrome.runtime.getURL(...)` | `browser.runtime.getURL(...)` |
-| Menu | `GM_registerMenuCommand` | `chrome.contextMenus` | `browser.menus` |
-| Cross-tab sync | `GM_addValueChangeListener` | `chrome.storage.onChanged` | `browser.storage.onChanged` |
-| Translation | `self.Translator` (Chrome 138+) | `self.Translator` | Not supported |
-
-## Build Commands
+## Build
 
 ```bash
-# Userscript (output: dist/)
-pnpm build
-
-# Chrome/Edge/Brave Extension (output: dist-extension/)
 pnpm build:extension
-
-# Firefox Extension (output: dist-extension-firefox/)
 pnpm build:extension:firefox
+pnpm build:all:ci
 ```
 
-## Loading the Extension During Development
+Outputs are written to `dist-extension/` and `dist-extension-firefox/`. The
+all-target CI build also validates expected files through `check:artifacts`.
 
-### Chrome
-1. Navigate to `chrome://extensions`
-2. Enable "Developer mode"
-3. Click "Load unpacked" → select `dist-extension/`
+## Load during development
+
+### Chrome, Edge, or Brave
+
+1. Run `pnpm build:extension`.
+2. Open `chrome://extensions` and enable **Developer mode**.
+3. Select **Load unpacked** and choose `dist-extension/`.
 
 ### Firefox
-1. Navigate to `about:debugging#/runtime/this-firefox`
-2. Click "Load Temporary Add-on" → select `dist-extension-firefox/manifest.json`
 
-## Key Design Decisions
+1. Run `pnpm build:extension:firefox`.
+2. Open `about:debugging#/runtime/this-firefox`.
+3. Select **Load Temporary Add-on** and choose
+   `dist-extension-firefox/manifest.json`.
 
-- **ISOLATED world content script**: The extension uses `"world": "ISOLATED"`.
-  A small page script is injected into MAIN world via a `<script>` element for
-  `window.fetch` interception, identical to the userscript. The content script
-  relays messages between the ISOLATED world (chrome.* API access) and the
-  MAIN world (YouTube page context).
+The Firefox installation is removed when the browser restarts.
 
-- **No webextension-polyfill dependency**: Chrome and Firefox use slightly
-  different API namespaces (`chrome.*` vs `browser.*`), but the core code
-  never calls these directly. The platform adapter layer handles the mapping.
+## Rendering and translation
 
-- **Worker bundles in web_accessible_resources**: The render worker
-  (`workers/renderer.js`) must be listed in
-  `web_accessible_resources` so the content script can spawn them via
-  `chrome.runtime.getURL()`.
+The implemented renderer uses Canvas2D. It prefers an OffscreenCanvas worker and
+falls back to main-thread Canvas2D if transfer, initialization, or worker health
+checks fail. There is no WebGL renderer.
 
-- **Zero runtime dependencies**: Same as the userscript — no npm packages
-  are loaded at runtime. All processing is local.
+Translation is enabled only when the browser exposes the built-in Translator
+API and supports the selected language pair. Firefox currently runs without
+translation. The browser may download language models before first use.
 
-## Firefox Limitations
+## Release packaging
 
-- **No built-in translation**: Firefox does not support the `self.Translator`
-  API (Chrome 138+). The translation feature is automatically disabled in
-  Firefox — `TranslationService.isSupported()` returns `false`.
-
-- **OffscreenCanvas + WebGL2 Worker**: Firefox has partial support. The
-  renderer already falls back to main-thread Canvas2D when OffscreenCanvas
-  is unavailable.
-
-## Publishing
-
-### Chrome Web Store
-1. Run `pnpm build:extension`
-2. Zip `dist-extension/`
-3. Upload to Chrome Developer Dashboard
-
-### Firefox Add-ons (AMO)
-1. Run `pnpm build:extension:firefox`
-2. Zip `dist-extension-firefox/`
-3. Upload to Firefox Add-on Developer Hub
-
-### Greasy Fork (Userscript)
-1. Run `pnpm build`
-2. Upload `dist/yt-live-chat-overlay.user.js`
+The versioned release workflow builds and packages both extension directories,
+generates checksums and metadata, and attaches the ZIP files to GitHub Releases.
+Keep the manifests, package version, release script, and artifact checks aligned
+instead of preparing store packages manually.

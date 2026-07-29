@@ -1,81 +1,96 @@
-# Contributing to YouTube Live Chat Overlay
+# Contributing
 
-Thanks for improving **YouTube Live Chat Overlay** — a single-file userscript that renders YouTube live chat as a Nico-nico style overlay with 100% local processing.
+Thanks for improving **YouTube Live Chat Overlay**. Source, comments,
+documentation, commit messages, and issue content should be written in English.
 
-> **Language policy**: Code, comments, commits, and docs — English only.
+## Report an issue
 
-## Before opening an issue
+Use the repository issue templates and include:
 
-Include: browser + version, OS + userscript manager, stream type (live/premiere/replay), repro steps, script version, and console output (prefixed with module names like `[App]`, `[Renderer]`).
+- Distribution: userscript, Chromium extension, or Firefox extension
+- Release version, browser, OS, and userscript manager when applicable
+- Stream type: live, premiere, or replay
+- Exact reproduction steps and expected versus actual behavior
+- Relevant module-prefixed console output with private data removed
+
+Do not report vulnerability details publicly. Follow the
+[security policy](./.github/SECURITY.md).
 
 ## Development setup
 
-### Prerequisites
-
-- Use the Volta versions in `package.json` (currently Node.js `26.5.0` and pnpm
-  `11.17.0`), or engines-compatible Node.js `>=22.13.0` and pnpm `>=11.17.0`.
-
-### Commands
+Use the toolchain pinned in `package.json`, or versions that satisfy its
+`engines` fields.
 
 ```bash
+git clone --recurse-submodules https://github.com/PiesP/yt-live-chat-overlay.git
+cd yt-live-chat-overlay
+git submodule sync --recursive
+git submodule update --init --recursive
 pnpm install
-pnpm build           # prod bundle (quality gate via prebuild)
-pnpm build:dev       # dev bundle with source maps
-pnpm dev             # dev watch mode
-pnpm quality         # fmt + lint + check + circular + knip
-pnpm quality:fix     # auto-fix then check
-pnpm check           # tsc --noEmit
-pnpm lint            # Biome lint
-pnpm fmt             # Biome format
-pnpm circular        # dpdm circular dependency detection
-pnpm knip            # unused dependencies scan
-pnpm knip:full       # full unused files/exports/deps scan
 ```
 
-`pnpm build` runs the quality gate via `prebuild` before producing `dist/yt-live-chat-overlay.user.js`.
+`packages/core` is a pinned Git submodule. Restore the recorded revision with
+`git submodule update --init --recursive`; do not pull inside the detached
+submodule. Shared changes belong in `PiesP/browser-core` and must be integrated
+here as a reviewed gitlink update.
 
-### Testing
+## Commands
 
-1. Install `dist/yt-live-chat-overlay.dev.user.js` in Violentmonkey with "Track local file".
-2. Run `pnpm dev` — auto-rebuilds on changes; Violentmonkey picks up the update.
-3. Reload YouTube to see changes.
+| Command | Purpose |
+| --- | --- |
+| `pnpm build:dev` | Build a development userscript with source maps |
+| `pnpm build:all:ci` | Build userscript, Chrome, and Firefox outputs |
+| `pnpm test` | Run the Vitest suite |
+| `pnpm test:cov` | Run tests with coverage thresholds |
+| `pnpm test:e2e` | Run userscript and extension browser flows |
+| `pnpm validate:consistency` | Run focused schema and consistency tests |
+| `pnpm quality` | Run formatting, lint, type, i18n, dependency, and source checks |
+| `pnpm verify` | Run quality, all production builds, and artifact checks |
+| `pnpm verify:full` | Add coverage and browser tests to `verify` |
+
+Run the narrowest relevant check while working. Use `pnpm verify` before a pull
+request and `pnpm verify:full` for publication-level or browser behavior changes.
 
 ## Project constraints
 
-- **No runtime-loaded external code** — dependencies, including the pinned
-  `@piesp/browser-core` submodule, are bundled; preserve the single-file userscript.
-- **All processing stays in-browser** — no server-side data fetching.
-- **Greasy Fork rules** — no minification or obfuscation.
-- **DOM-safe rendering** — `textContent`, sanitized attributes; no raw HTML injection.
-- **SSOT principle** — single source of truth for settings, dedup, measurement.
+- Bundle runtime dependencies; do not add remotely loaded runtime code.
+- Preserve the single-file, readable userscript required by userscript hosts.
+- Keep userscript and extension differences behind `src/platform/` adapters.
+- Use safe DOM APIs for chat content; do not use unsanitized `innerHTML`, `eval`,
+  `new Function`, or string timers.
+- Use strict TypeScript, project aliases, type-only imports, and explicit guards.
+- Use `createLogger('[ModuleName]')` for runtime diagnostics and avoid logging
+  private chat or account data.
+- Keep App and RuntimeManager lifecycle ownership deterministic across YouTube
+  single-page navigation.
+- Keep renderer and worker state instance-owned, bounded, DPR-aware, and
+  cleanup-safe. Canvas2D is the implemented rendering path.
 
-### Dependency update policy
+## Browser validation
 
-- Prefer current stable libraries and tools; this personal project intentionally
-  adopts modern platform and ecosystem capabilities quickly.
-- pnpm and Dependabot enforce a 24-hour cooling window for newly published
-  packages. Do not bypass it for routine updates.
-- Dependabot checks npm packages and GitHub Actions daily. Passing patch/minor
-  tooling updates may auto-merge; major and runtime behavior changes require
-  manual review.
-- pnpm also rejects recent trust-level downgrades, unapproved dependency build
-  scripts, and exotic transitive sources. The daily security workflow checks
-  pinned Nose, OSV Scanner, and Semgrep releases after the cooling window.
+For user-visible changes, verify the affected distribution on a real YouTube
+flow and check:
 
-## Code style
+1. Live or replay chat acquisition and overlay startup
+2. Settings interaction and persistence
+3. Pause, resume, tab visibility, and YouTube navigation cleanup
+4. Console health and extension content-script injection
+5. Main-thread fallback when worker rendering is unavailable
 
-See [CODE_STANDARDS.md](./CODE_STANDARDS.md) for detailed conventions. Key points:
+Explain any browser or extension lane that could not be run.
 
-- Path aliases: `@util/*`, `@app/*`, `@renderer/*`, `@chat/*`, `@settings/*`, `@i18n/*`, `@app-types` (see tsconfig.json)
-- Use `createLogger('[ModuleName]')` from `@util/logging`
-- Non-null assertions (`!`) and `any` are forbidden
-- Prefer Canvas2D renderer for new rendering features
+## Dependency updates
+
+The repository intentionally follows current stable tools after a 24-hour
+cooling window. Keep pnpm trust, build-script, and transitive-source controls
+enabled. `package.json`, `pnpm-workspace.yaml`, the lockfile, and pinned workflow
+references are authoritative.
 
 ## Pull requests
 
-- Clear title + explanation of **what** and **why**
-- Small, focused commits with descriptive messages
-- Validation note: `pnpm verify:full` passed, or why a smaller set was sufficient
-- Update README / CHANGELOG if user-visible behavior changed
+Keep changes focused and describe what changed, why it changed, and how it was
+validated. Update README or CHANGELOG content when user-visible behavior or
+release notes change.
 
-Thanks for helping improve **YouTube Live Chat Overlay**!
+By contributing, you agree that your changes are licensed under the
+[project license](./LICENSE).

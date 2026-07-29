@@ -2,21 +2,16 @@
 // Copyright (c) 2026 PiesP
 
 /**
- * Shared worker-manager protocol — common message-dispatch methods shared by
- * RenderWorkerManager (Canvas2D) and RenderWorkerManagerWebGL2.
+ * Shared worker-manager protocol — common Canvas2D worker message-dispatch methods.
  *
- * Both managers wrap a Worker reference and expose an identical public API
- * for message ingress, settings sync, and lifecycle control. This module
- * defines the protocol as a set of free functions so both managers can
- * delegate to shared logic without inheritance coupling.
+ * The manager wraps a Worker reference and delegates settings sync and
+ * lifecycle commands to these small helpers.
  */
 
 import type { OverlaySettings } from '@app-types';
 
 /**
- * Minimal worker manager shape that both RenderWorkerManager and
- * RenderWorkerManagerWebGL2 satisfy. Used as the parameter type for
- * shared dispatch functions.
+ * Minimal worker manager shape used by the shared dispatch functions.
  */
 export interface WorkerManagerLike {
   worker: Worker | null;
@@ -24,7 +19,7 @@ export interface WorkerManagerLike {
 
 /**
  * Send updated settings to the worker as an 'updateConfig' command.
- * The config object is manager-specific (different keys for Canvas2D vs WebGL2).
+ * The config object contains the Canvas2D worker settings selected by the caller.
  */
 export function sendUpdateConfigToWorker(
   manager: WorkerManagerLike,
@@ -56,7 +51,7 @@ export function sendClearStateToWorker(manager: WorkerManagerLike): void {
 /**
  * Build a partial OverlaySettings config for the worker by picking
  * the subset of keys the worker needs. Shared helper used by both
- * managers' updateSettings() implementations.
+ * the manager's updateSettings() implementation.
  */
 export function buildPartialWorkerConfig(
   settings: OverlaySettings,

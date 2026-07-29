@@ -55,16 +55,10 @@ temp/
 # Local-only (AI instructions, testing, docs)
 # ──────────────────────────────────────────────
 
-# Documentation (keep essential files tracked)
-docs/
+# Local plans and historical audit snapshots
 plans/
-*.md
-!README.md
-!LICENSE
-!CHANGELOG.md
-!PRIVACY.md
-!.github/pull_request_template.md
-!.github/SECURITY.md
+audit-report.md
+audit-report-opencode.md
 
 # AI Instructions (not shared to remote)
 AGENTS.md
