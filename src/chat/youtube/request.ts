@@ -107,15 +107,26 @@ const findFirstNestedByKey = <T>(
       return result;
     }
 
-    for (const value of Object.values(current)) {
+    const entries = Object.entries(current);
+    const pushValue = (value: unknown): void => {
       if (Array.isArray(value)) {
-        for (const item of value) {
-          stack.push(item);
+        for (let index = value.length - 1; index >= 0; index--) {
+          stack.push(value[index]);
         }
-        continue;
+      } else {
+        stack.push(value);
       }
+    };
 
-      stack.push(value);
+    // Preserve object insertion order despite the LIFO stack, while always
+    // visiting YouTube's primary `contents` subtree before unrelated metadata.
+    for (let index = entries.length - 1; index >= 0; index--) {
+      const entry = entries[index];
+      if (entry?.[0] !== 'contents') pushValue(entry?.[1]);
+    }
+    const contents = current.contents;
+    if (contents !== undefined) {
+      pushValue(contents);
     }
   }
 

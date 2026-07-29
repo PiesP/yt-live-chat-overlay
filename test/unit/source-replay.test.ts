@@ -65,6 +65,23 @@ describe('ReplayChatSource', () => {
     expect(pending).toEqual([]);
   });
 
+  it('throttles continuation prefetches independently of fast render ticks', () => {
+    const internals = source as unknown as {
+      prefetchContinuation: InnertubeContinuationData | null;
+      prefetchPagesFetched: number;
+      prefetchBackoffUntil: number;
+      prefetchNextAllowedAt: number;
+      shouldPrefetch: (now: number, signal?: AbortSignal) => boolean;
+    };
+    internals.prefetchContinuation = { continuation: 'next' };
+    internals.prefetchPagesFetched = 0;
+    internals.prefetchBackoffUntil = 0;
+    internals.prefetchNextAllowedAt = 1250;
+
+    expect(internals.shouldPrefetch(1249)).toBe(false);
+    expect(internals.shouldPrefetch(1250)).toBe(true);
+  });
+
   it('stop() is idempotent', () => {
     expect(() => source.stop()).not.toThrow();
     expect(() => source.stop()).not.toThrow();
