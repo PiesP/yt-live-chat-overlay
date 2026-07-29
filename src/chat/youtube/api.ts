@@ -246,16 +246,22 @@ export function findLiveChatRenderer(initialData: JsonObject): JsonObject | null
     return directRenderer;
   }
 
-  // Recursive search: find liveChatRenderer with continuations (legacy layout)
-  // or actions array (newer YouTube layout experiments). A single DFS pass
-  // with a relaxed predicate covers both cases without redundant traversal.
-  const recursive = findFirstNestedRecordByKey(
+  // Continuations are required to bootstrap polling. Prefer them over an
+  // earlier actions-only renderer from an unrelated response subtree.
+  const withContinuations = findFirstNestedRecordByKey(
     initialData,
     'liveChatRenderer',
-    (value) =>
-      isRecord(value) && (Array.isArray(value.continuations) || Array.isArray(value.actions))
+    (value) => isRecord(value) && Array.isArray(value.continuations)
   );
-  if (recursive) return recursive;
+  if (withContinuations) return withContinuations;
+
+  // Newer layout experiments may expose actions before a continuation exists.
+  const withActions = findFirstNestedRecordByKey(
+    initialData,
+    'liveChatRenderer',
+    (value) => isRecord(value) && Array.isArray(value.actions)
+  );
+  if (withActions) return withActions;
 
   // Diagnostic: log page structure to help identify YouTube layout changes
   log.debug('Chat renderer not found — page structure:', {

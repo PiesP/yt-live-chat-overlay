@@ -306,6 +306,12 @@ export abstract class RendererBase {
 
     this.settings = settings;
     this.observability.setShowDebug(settings.showDebugOverlay);
+    this.burstDetector.updateThresholds({
+      burstSampleWindow: settings.burstSampleWindow,
+      burstElevatedThreshold: settings.burstElevatedThreshold,
+      burstHighThreshold: settings.burstHighThreshold,
+      burstExtremeThreshold: settings.burstExtremeThreshold,
+    });
     this.authorRateLimiter.updateConfig({
       preset: settings.authorRateLimit,
     });

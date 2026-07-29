@@ -21,8 +21,15 @@ export class ResizableByteLimitedCache<V> {
   constructor(
     maxBytes: number,
     private estimateSize: (value: V) => number,
-    private onEvict?: (value: V) => void
+    private onEvict?: (value: V) => void,
+    private readonly maxEntries = Number.POSITIVE_INFINITY
   ) {
+    if (
+      maxEntries !== Number.POSITIVE_INFINITY &&
+      (!Number.isInteger(maxEntries) || maxEntries < 0)
+    ) {
+      throw new RangeError('maxEntries must be a non-negative integer');
+    }
     this._maxBytes = maxBytes;
   }
 
@@ -39,9 +46,7 @@ export class ResizableByteLimitedCache<V> {
     while (this.totalBytes > this._maxBytes && this.map.size > 0) {
       const oldestKey = this.map.keys().next().value;
       if (oldestKey !== undefined) {
-        const oldestVal = this.map.get(oldestKey);
-        if (oldestVal !== undefined) this.onEvict?.(oldestVal);
-        this.delete(oldestKey, true);
+        this.delete(oldestKey);
       }
     }
   }
@@ -56,7 +61,7 @@ export class ResizableByteLimitedCache<V> {
     return val;
   }
 
-  set(key: string, value: V): void {
+  set(key: string, value: V): boolean {
     const bytes = this.estimateSize(value);
 
     // Subtract previous entry's bytes before overwrite to prevent ghost
@@ -70,29 +75,41 @@ export class ResizableByteLimitedCache<V> {
     }
 
     // Evict oldest entries until under maxBytes
-    while (this.totalBytes + bytes > this._maxBytes && this.map.size > 0) {
+    while (
+      (this.totalBytes + bytes > this._maxBytes || this.map.size >= this.maxEntries) &&
+      this.map.size > 0
+    ) {
       const oldestKey = this.map.keys().next().value;
       if (oldestKey !== undefined) {
-        const oldestVal = this.map.get(oldestKey);
-        if (oldestVal !== undefined) this.onEvict?.(oldestVal);
-        this.delete(oldestKey, true);
+        this.delete(oldestKey);
       }
     }
     // Re-check after eviction — if value itself exceeds maxBytes, don't cache
-    if (this.totalBytes + bytes > this._maxBytes && this.map.size === 0) {
+    if (this.totalBytes + bytes > this._maxBytes || this.maxEntries < 1) {
       this.onEvict?.(value);
-      return; // single item too large for cache
+      return false; // single item too large for cache
     }
     this.map.set(key, value);
     this.totalBytes += bytes;
+    return true;
   }
 
-  delete(key: string, suppressEvict = false): boolean {
+  delete(key: string): boolean {
     const val = this.map.get(key);
     if (val === undefined) return false;
+    this.map.delete(key);
     this.totalBytes -= this.estimateSize(val);
-    if (!suppressEvict) this.onEvict?.(val);
-    return this.map.delete(key);
+    this.onEvict?.(val);
+    return true;
+  }
+
+  /** Remove an entry without eviction cleanup when ownership transfers to another subsystem. */
+  take(key: string): V | undefined {
+    const val = this.map.get(key);
+    if (val === undefined) return undefined;
+    this.totalBytes -= this.estimateSize(val);
+    this.map.delete(key);
+    return val;
   }
 
   has(key: string): boolean {
@@ -100,11 +117,10 @@ export class ResizableByteLimitedCache<V> {
   }
 
   clear(): void {
-    if (this.onEvict) {
-      for (const val of this.map.values()) this.onEvict(val);
-    }
+    const values = this.onEvict ? [...this.map.values()] : [];
     this.map.clear();
     this.totalBytes = 0;
+    for (const val of values) this.onEvict?.(val);
   }
 
   get size(): number {

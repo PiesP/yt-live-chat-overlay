@@ -95,6 +95,25 @@ describe('platform storage adapters', () => {
     expect(setValue).toHaveBeenCalledWith('key', 'value');
   });
 
+  it('prefers sandboxed GM storage over a page-provided chrome lookalike', async () => {
+    const chromeGet = vi.fn(async () => ({ key: 'forged' }));
+    const chromeSet = vi.fn(async () => undefined);
+    globals.chrome = { storage: { local: { get: chromeGet, set: chromeSet } } };
+    const getValue = vi.fn(() => 'trusted');
+    const setValue = vi.fn();
+    globals.GM_getValue = getValue;
+    globals.GM_setValue = setValue;
+
+    const adapter = await loadAdapter();
+
+    await expect(adapter.getItem('key')).resolves.toBe('trusted');
+    await adapter.setItem('key', 'next');
+    expect(getValue).toHaveBeenCalledWith('key');
+    expect(setValue).toHaveBeenCalledWith('key', 'next');
+    expect(chromeGet).not.toHaveBeenCalled();
+    expect(chromeSet).not.toHaveBeenCalled();
+  });
+
   it('falls back to localStorage when platform APIs are absent', async () => {
     localStorage.setItem('existing', 'stored');
     const adapter = await loadAdapter();

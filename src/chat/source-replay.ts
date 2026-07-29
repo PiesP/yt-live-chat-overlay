@@ -38,6 +38,7 @@ const REPLAY_FAILURE_BACKOFF_MS = 5000;
 const REPLAY_TOTAL_FAILURE_LIMIT = 15; // 3 backoff cycles before re-initialization
 const REPLAY_PREFETCH_WINDOW_MS = 5000;
 const BACKGROUND_FETCH_INTERVAL_MS = 1000;
+const REPLAY_PREFETCH_MIN_INTERVAL_MS = 250;
 const RAF_FLUSH_BATCH_SIZE = 5;
 /** Maximum replay request duration before the cooperative loop can recover. */
 const REPLAY_FETCH_TIMEOUT_MS = 20_000;
@@ -68,6 +69,8 @@ export class ReplayChatSource extends ChatSource {
   private prefetchPagesFetched = 0;
   private prefetchMode: ReplayMode | null = null;
   private prefetchBackoffUntil = 0;
+  private prefetchNextAllowedAt = 0;
+  private prefetchGeneration = 0;
   /**
    * Drain all buffered replay messages regardless of their offset.
    *
@@ -197,16 +200,17 @@ export class ReplayChatSource extends ChatSource {
       }
 
       // 4. Prefetch: walk the continuation chain, one page per tick
-      if (
-        this.prefetchContinuation &&
-        this.prefetchPagesFetched < this.getSettings().replayPrefetchPages &&
-        !signal?.aborted &&
-        Date.now() >= this.prefetchBackoffUntil
-      ) {
+      const now = Date.now();
+      const prefetchContinuation = this.prefetchContinuation;
+      if (prefetchContinuation && this.shouldPrefetch(now, signal)) {
+        const prefetchGeneration = this.prefetchGeneration;
+        this.prefetchNextAllowedAt = now + REPLAY_PREFETCH_MIN_INTERVAL_MS;
         try {
-          const payload = await this.requestReplayPayload(this.prefetchContinuation, signal);
-          if (payload) {
-            if (signal?.aborted || gen !== this.cooperativeLoopGeneration) return;
+          const payload = await this.requestReplayPayload(prefetchContinuation, signal);
+          if (signal?.aborted || gen !== this.cooperativeLoopGeneration) return;
+          if (!this.isPrefetchGenerationCurrent(prefetchGeneration)) {
+            // A seek or session reset invalidated this request while it was in flight.
+          } else if (payload) {
             const events = extractChatEvents(payload.actions, this.getSettings);
             this.replayBuffer.appendEvents(events, -1);
             this.markActivity();
@@ -219,7 +223,9 @@ export class ReplayChatSource extends ChatSource {
             this.prefetchContinuation = null;
           }
         } catch (error: unknown) {
-          if (isAbortError(error)) {
+          if (!this.isPrefetchGenerationCurrent(prefetchGeneration)) {
+            // Ignore failures from an invalidated prefetch request.
+          } else if (isAbortError(error)) {
             this.prefetchContinuation = null;
           } else {
             log.debug('chat.replay.prefetch-failed', { error: String(error) });
@@ -246,6 +252,20 @@ export class ReplayChatSource extends ChatSource {
     this.cooperativeLoopTimer = setTimeout(tick, 0);
   }
 
+  private shouldPrefetch(now: number, signal?: AbortSignal): boolean {
+    return Boolean(
+      this.prefetchContinuation &&
+        this.prefetchPagesFetched < this.getSettings().replayPrefetchPages &&
+        !signal?.aborted &&
+        now >= this.prefetchBackoffUntil &&
+        now >= this.prefetchNextAllowedAt
+    );
+  }
+
+  private isPrefetchGenerationCurrent(generation: number): boolean {
+    return generation === this.prefetchGeneration;
+  }
+
   private stopCooperativeLoop(): void {
     this.cooperativeLoopGeneration++;
     this.cooperativeLoopTimer = clearSafeTimeout(this.cooperativeLoopTimer);
@@ -263,10 +283,12 @@ export class ReplayChatSource extends ChatSource {
 
   /** Reset prefetch state — cooperative loop will skip the prefetch step. */
   private stopPrefetch(): void {
+    this.prefetchGeneration++;
     this.prefetchContinuation = null;
     this.prefetchPagesFetched = 0;
     this.prefetchMode = null;
     this.prefetchBackoffUntil = 0;
+    this.prefetchNextAllowedAt = 0;
   }
 
   /**
@@ -616,11 +638,16 @@ export class ReplayChatSource extends ChatSource {
         're-initializing replay session'
     );
 
-    const bootstrap = await this.refreshBootstrap(signal);
-    if (!bootstrap?.isReplay) {
+    const bootstrap = await this.refreshBootstrap(signal, (candidate) => candidate.isReplay);
+    if (!bootstrap) {
       return false;
     }
-    return await this.initializeReplaySession(signal);
+    const initialized = await this.initializeReplaySession(signal);
+    if (initialized) {
+      this.startCooperativeLoop(signal);
+      this.installSeekListeners(signal);
+    }
+    return initialized;
   }
 
   private shouldFetchReplayAtOffset(currentOffsetMs: number): boolean {

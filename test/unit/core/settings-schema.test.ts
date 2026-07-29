@@ -262,6 +262,10 @@ describe('getRootDisplayMeta', () => {
     expect(getRootDisplayMeta('laneSpacing')).toEqual({ scale: 1, precision: 0 });
   });
 
+  it('preserves hundredths for speedBoostMax', () => {
+    expect(getRootDisplayMeta('speedBoostMax')).toEqual({ scale: 1, precision: 2 });
+  });
+
   it('returns { scale: 1, precision: 1 } for modOwnerDurationMultiplier', () => {
     expect(getRootDisplayMeta('modOwnerDurationMultiplier')).toEqual({
       scale: 1,

@@ -286,7 +286,7 @@ export class RenderWorkerManager {
       const config = RenderWorkerManager.buildWorkerConfig(settings);
 
       // Resolve worker URL via platform-specific factory
-      const workerUrl = overrideWorkerUrl ?? createWorkerUrl('./renderer.ts');
+      const workerUrl = overrideWorkerUrl ?? createWorkerUrl();
 
       // ── Create Worker BEFORE touching the canvas ─────────────────
       // If Worker creation fails (CSP, network, etc.), the canvas must
@@ -519,14 +519,12 @@ export class RenderWorkerManager {
       target: 'emoji' | 'author' | 'sticker'
     ): void => {
       if (!url) return;
-      const bitmap = this.deps.imageFetchManager.workerBitmapCache.get(url);
+      const bitmap = this.deps.imageFetchManager.workerBitmapCache.take(url);
       if (!bitmap) return;
       transferList.push(bitmap);
       transferredImages.push({ url, bitmap, target });
-      // Suppress onEvict (bitmap.close()): the bitmap is being transferred
-      // via postMessage, not evicted from cache.  Calling close() before
-      // transfer causes DataCloneError or transfers an empty bitmap.
-      this.deps.imageFetchManager.workerBitmapCache.delete(url, true);
+      // take() transfers ownership without invoking bitmap.close(). Closing
+      // before postMessage would cause DataCloneError or an empty bitmap.
     };
 
     for (const seg of content) {

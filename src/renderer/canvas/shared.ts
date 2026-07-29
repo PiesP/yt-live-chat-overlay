@@ -31,7 +31,31 @@ export type AnyCanvasContext = CanvasRenderingContext2D | OffscreenCanvasRenderi
 /** Minimal cache interface for text bitmaps (HTMLCanvasElement or OffscreenCanvas). */
 export interface TextBitmapCache {
   get(key: string): CanvasImageSource | undefined;
-  set(key: string, value: CanvasImageSource): void;
+  set(key: string, value: CanvasImageSource): void | boolean;
+  readonly maxBytes?: number;
+}
+
+const MAX_TEXT_BITMAP_DIMENSION = 8192;
+
+export function getSafeTextHeight(metrics: TextMetrics, fontSize: number): number {
+  const rawAscent = metrics.actualBoundingBoxAscent;
+  const rawDescent = metrics.actualBoundingBoxDescent;
+  const ascent = Number.isFinite(rawAscent) ? Math.max(0, rawAscent) : Math.ceil(fontSize * 0.8);
+  const descent = Number.isFinite(rawDescent) ? Math.max(0, rawDescent) : Math.ceil(fontSize * 0.2);
+  return Math.max(1, Math.ceil(ascent + descent));
+}
+
+export function canCacheTextBitmap(
+  pixelWidth: number,
+  pixelHeight: number,
+  maxBytes?: number
+): boolean {
+  if (!Number.isFinite(pixelWidth) || !Number.isFinite(pixelHeight)) return false;
+  if (pixelWidth <= 0 || pixelHeight <= 0) return false;
+  if (pixelWidth > MAX_TEXT_BITMAP_DIMENSION || pixelHeight > MAX_TEXT_BITMAP_DIMENSION)
+    return false;
+  const requiredBytes = pixelWidth * pixelHeight * 4;
+  return maxBytes === undefined || requiredBytes <= maxBytes;
 }
 
 /**
@@ -504,9 +528,11 @@ function cacheTextBitmap(
   ctx.save();
   ctx.font = font;
   const metrics = ctx.measureText(text);
-  const bbWidth =
+  const rawBbWidth =
     Math.abs(metrics.actualBoundingBoxLeft) + Math.abs(metrics.actualBoundingBoxRight);
-  const textWidth = bbWidth > 0 ? Math.ceil(bbWidth) : Math.ceil(metrics.width);
+  const bbWidth = Number.isFinite(rawBbWidth) ? rawBbWidth : 0;
+  const measuredWidth = Number.isFinite(metrics.width) ? metrics.width : 0;
+  const textWidth = bbWidth > 0 ? Math.ceil(bbWidth) : Math.ceil(measuredWidth);
   // Canvas2D measureText() does NOT account for letterSpacing, wordSpacing,
   // or textRendering — it measures based on font + text content only.
   // When letterSpacing > 0, the actual rendered text is wider by
@@ -515,23 +541,25 @@ function cacheTextBitmap(
   const lsPx = parseFloat(letterSpacing) || 0;
   const lsExtraWidth = lsPx > 0 ? Math.ceil(Math.max(0, [...text].length - 1) * lsPx) : 0;
   const width = textWidth + Math.ceil(strokeWidth) + 2 + lsExtraWidth;
-  const ascent = Math.abs(metrics.actualBoundingBoxAscent) || Math.ceil(fontSize * 0.8);
-  const descent = Math.abs(metrics.actualBoundingBoxDescent) || Math.ceil(fontSize * 0.2);
-  const height = ascent + descent + Math.ceil(strokeWidth) + 2;
+  const height = getSafeTextHeight(metrics, fontSize) + Math.ceil(strokeWidth) + 2;
   ctx.restore();
 
   // Detect DPR from context transform so bitmap resolution matches the
   // canvas backing store. Without this, a 1x bitmap drawn on a 2x canvas
   // via drawImage() gets browser-upscaled → blurry cached text.
-  const dpr = ctx.getTransform().a || 1;
+  const rawDpr = ctx.getTransform().a;
+  const dpr = Number.isFinite(rawDpr) && rawDpr > 0 ? rawDpr : 1;
+  const pixelWidth = Math.ceil(width * dpr);
+  const pixelHeight = Math.ceil(height * dpr);
+  if (!canCacheTextBitmap(pixelWidth, pixelHeight, textBitmapCache.maxBytes)) return;
 
   const offscreen: HTMLCanvasElement | OffscreenCanvas =
     typeof OffscreenCanvas !== 'undefined'
-      ? new OffscreenCanvas(Math.ceil(width * dpr), Math.ceil(height * dpr))
+      ? new OffscreenCanvas(pixelWidth, pixelHeight)
       : (() => {
           const canvas = document.createElement('canvas');
-          canvas.width = Math.ceil(width * dpr);
-          canvas.height = Math.ceil(height * dpr);
+          canvas.width = pixelWidth;
+          canvas.height = pixelHeight;
           return canvas;
         })();
   const offCtx = offscreen.getContext('2d');
@@ -983,9 +1011,7 @@ export function drawAuthorSection<T>(
   // Measure text height directly from the context (compatible with both
   // CanvasRenderingContext2D and OffscreenCanvasRenderingContext2D).
   const nameMetrics = ctx.measureText('Mg');
-  const ascent = Math.max(0, nameMetrics.actualBoundingBoxAscent);
-  const descent = Math.max(0, nameMetrics.actualBoundingBoxDescent);
-  const nameHeight = Math.ceil(ascent + descent);
+  const nameHeight = getSafeTextHeight(nameMetrics, authorFontSize);
   const sectionHeight = Math.max(rendererLayout.authorPhotoSize, nameHeight);
 
   // Author photo (if available and valid)

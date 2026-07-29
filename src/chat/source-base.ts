@@ -264,9 +264,12 @@ export abstract class ChatSource implements Pauseable {
    * Re-fetch bootstrap data from the resolver. Updates this.bootstrap on success.
    * Returns the fresh bootstrap or null on failure.
    */
-  protected async refreshBootstrap(signal?: AbortSignal): Promise<ChatBootstrapData | null> {
+  protected async refreshBootstrap(
+    signal?: AbortSignal,
+    accept: (data: ChatBootstrapData) => boolean = () => true
+  ): Promise<ChatBootstrapData | null> {
     const result = await refreshBootstrap(signal);
-    if (!result) return null;
+    if (!result || !accept(result)) return null;
     this.bootstrap = result;
     return result;
   }
