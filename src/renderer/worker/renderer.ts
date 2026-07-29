@@ -1515,16 +1515,13 @@ export class WorkerRenderer {
         for (let i = start; i < this.activeMessages.length; i++) {
           const msg = this.activeMessages[i];
           if (!msg || (!msg.text && !msg.author)) continue;
-          const kind =
-            msg.kind === 'superchat' || msg.kind === 'membership' ? msg.kind : 'text';
+          const kind = msg.kind === 'superchat' || msg.kind === 'membership' ? msg.kind : 'text';
           messages.push({
             id: msg.id,
             text: msg.text,
             kind,
             ...(msg.author !== undefined ? { author: msg.author } : {}),
-            ...(msg.superChatAmount !== undefined
-              ? { superChatAmount: msg.superChatAmount }
-              : {}),
+            ...(msg.superChatAmount !== undefined ? { superChatAmount: msg.superChatAmount } : {}),
             ...(msg.membershipHeader !== undefined
               ? { membershipHeader: msg.membershipHeader }
               : {}),
