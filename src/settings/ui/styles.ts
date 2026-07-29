@@ -53,6 +53,7 @@ const uiColors = {
   text: '#ffffff',
   textMuted: '#c8c8c8',
   primary: '#1565c0',
+  primaryOnDark: '#42a5f5',
   primaryHover: '#0d47a1',
   danger: '#c62828',
   dangerHover: '#b71c1c',
@@ -351,8 +352,8 @@ export const SETTINGS_UI_STYLES = `
         outline-offset: -1px;
       }
       .yt-chat-overlay-settings-tab.active {
-        color: ${uiColors.primary};
-        border-bottom-color: ${uiColors.primary};
+        color: ${uiColors.primaryOnDark};
+        border-bottom-color: ${uiColors.primaryOnDark};
       }
       /* Tab panes */
       .yt-chat-overlay-settings-pane {
