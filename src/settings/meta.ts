@@ -144,7 +144,7 @@ const ROOT_SETTING_META = {
   emojiFetchTimeoutMs: { type: 'number', visual: false },
   backlogDensityRampMaxMs: { type: 'number', visual: false },
   backlogInjectionRateMin: { type: 'number', visual: false },
-  speedBoostMax: { type: 'number', visual: false },
+  speedBoostMax: { type: 'number', visual: false, displayPrecision: 2 },
   speedBoostDenom: { type: 'number', visual: false },
   backlogToggleCooldownMs: { type: 'number', visual: false },
   replayPrefetchPages: { type: 'number', visual: false },
@@ -167,8 +167,8 @@ export function getRootDisplayMeta(key: RootScalarSettingKey): {
   precision: number;
 } {
   const meta: SettingMeta = ROOT_SETTING_META[key];
-  if (meta?.displayScale !== undefined) {
-    return { scale: meta.displayScale, precision: meta.displayPrecision ?? 0 };
-  }
-  return { scale: 1, precision: 0 };
+  return {
+    scale: meta.displayScale ?? 1,
+    precision: meta.displayPrecision ?? 0,
+  };
 }

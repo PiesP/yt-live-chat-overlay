@@ -115,6 +115,20 @@ describe('CanvasRenderer', () => {
     renderer.destroy();
   });
 
+  it('applies text-cache and translation-batch limits without a reload', () => {
+    const renderer = new CanvasRenderer(overlay, makeSettings());
+    const internals = renderer as unknown as {
+      translationBatchSize: number;
+      textBitmapCache: { maxBytes: number };
+    };
+
+    renderer.updateSettings(makeSettings({ textCacheMb: 3, translationBatchSize: 11 }));
+
+    expect(internals.translationBatchSize).toBe(11);
+    expect(internals.textBitmapCache.maxBytes).toBe(3_000_000);
+    renderer.destroy();
+  });
+
   it('collects auto source-language samples on the Worker path', () => {
     const settings = makeSettings({ translationEnabled: true, translationSource: 'auto' });
     const renderer = new CanvasRenderer(overlay, settings);
@@ -291,6 +305,28 @@ describe('CanvasRenderer', () => {
     expect(() => renderer.setConnectionStatus('degraded')).not.toThrow();
     expect(() => renderer.setConnectionStatus('standby')).not.toThrow();
     expect(() => renderer.setConnectionStatus('connecting')).not.toThrow();
+    renderer.destroy();
+  });
+
+  it('limits disconnected pointer handling to a dedicated reload button', () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    (overlay as unknown as { container: HTMLDivElement }).container = container;
+    const renderer = new CanvasRenderer(overlay, makeSettings());
+    const onStatusBarClick = vi.fn();
+    renderer.onStatusBarClick = onStatusBarClick;
+
+    renderer.setConnectionStatus('disconnected');
+
+    const canvas = container.querySelector('canvas');
+    const button = container.querySelector<HTMLButtonElement>('#yt-chat-overlay-status-action');
+    expect(canvas?.style.pointerEvents).toBe('none');
+    expect(button?.style.display).toBe('flex');
+    button?.click();
+    expect(onStatusBarClick).toHaveBeenCalledOnce();
+
+    renderer.setConnectionStatus('connected');
+    expect(button?.style.display).toBe('none');
     renderer.destroy();
   });
 

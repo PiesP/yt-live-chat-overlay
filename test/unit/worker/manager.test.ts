@@ -31,7 +31,7 @@ function createMinimalDeps() {
     } as any,
     imageFetchManager: {
       workerBitmapCache: {
-        get: vi.fn(),
+        take: vi.fn(),
         delete: vi.fn(),
       },
     } as any,
@@ -77,7 +77,7 @@ describe('RenderWorkerManager', () => {
     it('closes transferred bitmaps when the worker is destroyed before flush', async () => {
       vi.useFakeTimers();
       const bitmap = { close: vi.fn() } as unknown as ImageBitmap;
-      deps.imageFetchManager.workerBitmapCache.get.mockReturnValue(bitmap);
+      deps.imageFetchManager.workerBitmapCache.take.mockReturnValue(bitmap);
       deps.imageFetchManager.workerBitmapCache.clear = vi.fn();
       const worker = {
         postMessage: vi.fn(),
@@ -109,7 +109,7 @@ describe('RenderWorkerManager', () => {
 
     it('disposes transferred bitmaps when batch postMessage fails', async () => {
       const bitmap = { close: vi.fn() } as unknown as ImageBitmap;
-      deps.imageFetchManager.workerBitmapCache.get.mockReturnValue(bitmap);
+      deps.imageFetchManager.workerBitmapCache.take.mockReturnValue(bitmap);
       const postMessage = vi
         .fn()
         .mockImplementationOnce(() => {

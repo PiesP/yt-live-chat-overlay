@@ -3,6 +3,7 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { ReplayChatSource } from '@chat/source-replay';
 import type { InnertubeContinuationData } from '@chat/youtube/continuation';
+import type { ChatBootstrapData } from '@chat/youtube/api';
 import { DEFAULT_SETTINGS } from '@settings/schema';
 
 /**
@@ -63,6 +64,72 @@ describe('ReplayChatSource', () => {
     const pending = source.drainPendingMessages();
     expect(Array.isArray(pending)).toBe(true);
     expect(pending).toEqual([]);
+  });
+
+  it('throttles continuation prefetches independently of fast render ticks', () => {
+    const internals = source as unknown as {
+      prefetchContinuation: InnertubeContinuationData | null;
+      prefetchPagesFetched: number;
+      prefetchBackoffUntil: number;
+      prefetchNextAllowedAt: number;
+      shouldPrefetch: (now: number, signal?: AbortSignal) => boolean;
+    };
+    internals.prefetchContinuation = { continuation: 'next' };
+    internals.prefetchPagesFetched = 0;
+    internals.prefetchBackoffUntil = 0;
+    internals.prefetchNextAllowedAt = 1250;
+
+    expect(internals.shouldPrefetch(1249)).toBe(false);
+    expect(internals.shouldPrefetch(1250)).toBe(true);
+  });
+
+  it('invalidates in-flight prefetch work when prefetch state resets', () => {
+    const internals = source as unknown as {
+      prefetchGeneration: number;
+      stopPrefetch: () => void;
+      isPrefetchGenerationCurrent: (generation: number) => boolean;
+    };
+    const generation = internals.prefetchGeneration;
+
+    internals.stopPrefetch();
+
+    expect(internals.isPrefetchGenerationCurrent(generation)).toBe(false);
+  });
+
+  it('restarts the cooperative loop after successful replay-session recovery', async () => {
+    const internals = source as unknown as {
+      pollPlayerSeekReplay: (
+        playback: { offsetMs: number; paused: boolean },
+        signal?: AbortSignal
+      ) => Promise<boolean>;
+      shouldFetchReplayAtOffset: (offsetMs: number) => boolean;
+      fetchReplayPlayerSeek: (offsetMs: number, signal?: AbortSignal) => Promise<boolean>;
+      needsReplaySessionRecovery: () => boolean;
+      refreshBootstrap: (
+        signal?: AbortSignal,
+        accept?: (candidate: ChatBootstrapData) => boolean
+      ) => Promise<ChatBootstrapData | null>;
+      initializeReplaySession: (signal?: AbortSignal) => Promise<boolean>;
+      startCooperativeLoop: (signal?: AbortSignal) => void;
+      installSeekListeners: (signal?: AbortSignal) => void;
+    };
+    vi.spyOn(internals, 'shouldFetchReplayAtOffset').mockReturnValue(true);
+    vi.spyOn(internals, 'fetchReplayPlayerSeek').mockResolvedValue(false);
+    vi.spyOn(internals, 'needsReplaySessionRecovery').mockReturnValue(true);
+    vi.spyOn(internals, 'refreshBootstrap').mockResolvedValue({
+      isReplay: true,
+    } as ChatBootstrapData);
+    vi.spyOn(internals, 'initializeReplaySession').mockResolvedValue(true);
+    const startLoop = vi.spyOn(internals, 'startCooperativeLoop').mockImplementation(() => {});
+    const installSeekListeners = vi
+      .spyOn(internals, 'installSeekListeners')
+      .mockImplementation(() => {});
+
+    await expect(
+      internals.pollPlayerSeekReplay({ offsetMs: 1000, paused: false })
+    ).resolves.toBe(true);
+    expect(startLoop).toHaveBeenCalledOnce();
+    expect(installSeekListeners).toHaveBeenCalledOnce();
   });
 
   it('stop() is idempotent', () => {

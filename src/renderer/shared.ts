@@ -195,7 +195,11 @@ function estimateSuperChatDimensions(
     stickerHeight = Math.round(fontSize * rendererLayout.superchatStickerSize) + spacing.xs;
   }
 
-  const badgeSectionHeight = showSuperChatAmount ? spacing.xs + badgeHeight + spacing.xs : 0;
+  const badgeSectionHeight = showSuperChatAmount
+    ? spacing.xs + badgeHeight + spacing.xs
+    : lineCount > 0
+      ? spacing.xs
+      : 0;
   const contentHeight = authorSectionHeight + badgeSectionHeight + textHeight + stickerHeight;
 
   return { width, height: contentHeight + paddingV * 2 };

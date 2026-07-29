@@ -97,9 +97,37 @@ describe('ResizableByteLimitedCache', () => {
       const c = new ResizableByteLimitedCache<string>(100, estimateSize, (value) =>
         evicted.push(value)
       );
-      c.set('large', 'x'.repeat(200)); // 200 bytes > 100
+      expect(c.set('large', 'x'.repeat(200))).toBe(false); // 200 bytes > 100
       expect(c.has('large')).toBe(false);
       expect(evicted).toEqual(['x'.repeat(200)]);
+    });
+
+    it('bounds tiny entries independently of their byte size', () => {
+      const c = new ResizableByteLimitedCache<string>(100, estimateSize, undefined, 2);
+      c.set('a', '1');
+      c.set('b', '2');
+      c.set('c', '3');
+
+      expect(c.size).toBe(2);
+      expect(c.has('a')).toBe(false);
+    });
+
+    it('rejects invalid finite entry limits', () => {
+      for (const maxEntries of [Number.NaN, -1, 1.5]) {
+        expect(
+          () =>
+            new ResizableByteLimitedCache<string>(100, estimateSize, undefined, maxEntries)
+        ).toThrow(RangeError);
+      }
+      expect(
+        () =>
+          new ResizableByteLimitedCache<string>(
+            100,
+            estimateSize,
+            undefined,
+            Number.POSITIVE_INFINITY
+          )
+      ).not.toThrow();
     });
   });
 
@@ -150,6 +178,41 @@ describe('ResizableByteLimitedCache', () => {
       // Now only 'b' is stored, space for more
       cache.set('c', 'z'.repeat(70)); // 70 < 100, should fit
       expect(cache.has('c')).toBe(true);
+    });
+
+    it('removes state before invoking a re-entrant eviction callback', () => {
+      let c!: ResizableByteLimitedCache<string>;
+      c = new ResizableByteLimitedCache<string>(100, estimateSize, () => {
+        expect(c.has('key')).toBe(false);
+      });
+      c.set('key', 'value');
+
+      expect(c.delete('key')).toBe(true);
+    });
+
+    it('keeps accounting consistent when an eviction callback throws', () => {
+      const c = new ResizableByteLimitedCache<string>(5, estimateSize, () => {
+        throw new Error('cleanup failed');
+      });
+      c.set('key', 'value');
+
+      expect(() => c.delete('key')).toThrow('cleanup failed');
+      expect(c.has('key')).toBe(false);
+      expect(c.set('next', '12345')).toBe(true);
+    });
+  });
+
+  describe('take', () => {
+    it('transfers ownership without invoking eviction cleanup', () => {
+      const evicted: string[] = [];
+      const c = new ResizableByteLimitedCache<string>(100, estimateSize, (value) =>
+        evicted.push(value)
+      );
+      c.set('key', 'value');
+
+      expect(c.take('key')).toBe('value');
+      expect(c.has('key')).toBe(false);
+      expect(evicted).toEqual([]);
     });
   });
 
@@ -202,6 +265,26 @@ describe('ResizableByteLimitedCache', () => {
   // ── eviction callback ───────────────────────────────────────────────────
 
   describe('eviction callback', () => {
+    it('accounts bytes before an eviction callback mutates the value', () => {
+      const first = { bytes: 60 };
+      const second = { bytes: 60 };
+      const third = { bytes: 40 };
+      const c = new ResizableByteLimitedCache<{ bytes: number }>(
+        100,
+        (value) => value.bytes,
+        (value) => {
+          value.bytes = 0;
+        }
+      );
+
+      c.set('first', first);
+      c.set('second', second);
+      c.set('third', third);
+
+      expect(c.has('second')).toBe(true);
+      expect(c.has('third')).toBe(true);
+    });
+
     it('calls onEvict when entries are evicted', () => {
       const evicted: string[] = [];
       const cb = (v: string) => evicted.push(v);

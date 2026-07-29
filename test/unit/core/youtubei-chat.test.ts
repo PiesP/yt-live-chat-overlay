@@ -199,6 +199,39 @@ describe('findLiveChatRenderer', () => {
     expect(findLiveChatRenderer(data)).toBe(renderer);
   });
 
+  it('prefers a continuation renderer over an earlier actions-only match', () => {
+    const actionsOnly = { actions: [{ addChatItemAction: {} }] };
+    const withContinuations = {
+      continuations: [{ reloadContinuationData: { continuation: 'token' } }],
+    };
+    const data = {
+      contents: {
+        first: { liveChatRenderer: actionsOnly },
+        second: { liveChatRenderer: withContinuations },
+      },
+    };
+
+    expect(findLiveChatRenderer(data)).toBe(withContinuations);
+  });
+
+  it('prioritizes contents before a traversal-budget-sized distractor', () => {
+    const renderer = {
+      continuations: [{ reloadContinuationData: { continuation: 'token' } }],
+    };
+    const distractor: Record<string, unknown> = {};
+    let current = distractor;
+    for (let index = 0; index < 3100; index++) {
+      current.child = {};
+      current = current.child as Record<string, unknown>;
+    }
+    const data = {
+      contents: { liveChatRenderer: renderer },
+      distractor,
+    };
+
+    expect(findLiveChatRenderer(data)).toBe(renderer);
+  });
+
   it('returns null when recursive search finds no match', () => {
     const data = {
       a: { b: { c: 1 } },

@@ -35,6 +35,7 @@ vi.mock('@renderer/canvas/shared', () => ({
 
 import { estimateMessageDimensions } from '@renderer/shared';
 import type { ChatMessage } from '@app-types';
+import { rendererLayout, spacing } from '@util/design-tokens';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -147,6 +148,39 @@ describe('estimateMessageDimensions — superchat', () => {
     });
     const dims = estimateMessageDimensions(msg, 16, true);
     expect(dims.height).toBeGreaterThan(0);
+  });
+
+  it('reserves the body margin when the amount badge is hidden', () => {
+    const message = makeMessage({
+      kind: 'superchat',
+      text: 'Thanks!',
+      content: [{ type: 'text', content: 'Thanks!' }],
+      superChat: { amount: '$5.00', tier: 'blue' },
+    });
+
+    const withBadge = estimateMessageDimensions(
+      message,
+      16,
+      false,
+      'bold',
+      undefined,
+      undefined,
+      true
+    );
+    const withoutBadge = estimateMessageDimensions(
+      message,
+      16,
+      false,
+      'bold',
+      undefined,
+      undefined,
+      false
+    );
+    const badgeHeight =
+      Math.round(16 * rendererLayout.authorFontScale) +
+      rendererLayout.superchatBadge.paddingV * 2;
+
+    expect(withBadge.height - withoutBadge.height).toBe(badgeHeight + spacing.xs);
   });
 });
 
