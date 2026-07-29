@@ -13,7 +13,8 @@ dist-extension-firefox/
 extension-chrome-*/
 extension-firefox-*/
 userscript-*/
-release/
+/release/
+/release-bundle/
 release-manual-*/
 
 # TypeScript

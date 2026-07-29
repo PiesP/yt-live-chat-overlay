@@ -1,9 +1,3 @@
-/**
- * Vite Configuration for Chrome MV3 Extension — Background + Workers (ES modules).
- *
- * Usage: pnpm build:extension:sw
- */
+import { createExtensionBackgroundConfig } from './tooling/vite/configs/extension-background';
 
-import { createExtensionConfig } from './vite.config.extension.shared';
-
-export default createExtensionConfig('dist-extension');
+export default createExtensionBackgroundConfig('chrome');
