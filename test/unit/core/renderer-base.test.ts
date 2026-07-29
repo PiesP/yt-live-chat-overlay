@@ -105,6 +105,7 @@ function makeMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
 
 let now = 1000;
 let overlay: Overlay;
+const renderers = new Set<TestRenderer>();
 
 beforeEach(() => {
   now = 1000;
@@ -118,11 +119,17 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  for (const renderer of renderers) {
+    if (!renderer.destroyed) renderer.destroy();
+  }
+  renderers.clear();
   vi.restoreAllMocks();
 });
 
 function createRenderer(settings = defaultSettings): TestRenderer {
-  return new TestRenderer(overlay, settings);
+  const renderer = new TestRenderer(overlay, settings);
+  renderers.add(renderer);
+  return renderer;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

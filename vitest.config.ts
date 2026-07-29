@@ -15,6 +15,7 @@ export default defineConfig({
     include: ["test/unit/**/*.test.ts", "test/consistency/**/*.test.ts"],
     exclude: ["node_modules", "dist"],
     passWithNoTests: false,
+    maxWorkers: 8,
     slowTestThreshold: 500,
     testTimeout: 10000,
     coverage: {
