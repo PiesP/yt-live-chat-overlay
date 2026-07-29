@@ -111,6 +111,24 @@ describe('ResizableByteLimitedCache', () => {
       expect(c.size).toBe(2);
       expect(c.has('a')).toBe(false);
     });
+
+    it('rejects invalid finite entry limits', () => {
+      for (const maxEntries of [Number.NaN, -1, 1.5]) {
+        expect(
+          () =>
+            new ResizableByteLimitedCache<string>(100, estimateSize, undefined, maxEntries)
+        ).toThrow(RangeError);
+      }
+      expect(
+        () =>
+          new ResizableByteLimitedCache<string>(
+            100,
+            estimateSize,
+            undefined,
+            Number.POSITIVE_INFINITY
+          )
+      ).not.toThrow();
+    });
   });
 
   // ── LRU behavior ───────────────────────────────────────────────────────
@@ -160,6 +178,27 @@ describe('ResizableByteLimitedCache', () => {
       // Now only 'b' is stored, space for more
       cache.set('c', 'z'.repeat(70)); // 70 < 100, should fit
       expect(cache.has('c')).toBe(true);
+    });
+
+    it('removes state before invoking a re-entrant eviction callback', () => {
+      let c!: ResizableByteLimitedCache<string>;
+      c = new ResizableByteLimitedCache<string>(100, estimateSize, () => {
+        expect(c.has('key')).toBe(false);
+      });
+      c.set('key', 'value');
+
+      expect(c.delete('key')).toBe(true);
+    });
+
+    it('keeps accounting consistent when an eviction callback throws', () => {
+      const c = new ResizableByteLimitedCache<string>(5, estimateSize, () => {
+        throw new Error('cleanup failed');
+      });
+      c.set('key', 'value');
+
+      expect(() => c.delete('key')).toThrow('cleanup failed');
+      expect(c.has('key')).toBe(false);
+      expect(c.set('next', '12345')).toBe(true);
     });
   });
 

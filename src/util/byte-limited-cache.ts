@@ -24,6 +24,12 @@ export class ResizableByteLimitedCache<V> {
     private onEvict?: (value: V) => void,
     private readonly maxEntries = Number.POSITIVE_INFINITY
   ) {
+    if (
+      maxEntries !== Number.POSITIVE_INFINITY &&
+      (!Number.isInteger(maxEntries) || maxEntries < 0)
+    ) {
+      throw new RangeError('maxEntries must be a non-negative integer');
+    }
     this._maxBytes = maxBytes;
   }
 
@@ -91,9 +97,10 @@ export class ResizableByteLimitedCache<V> {
   delete(key: string): boolean {
     const val = this.map.get(key);
     if (val === undefined) return false;
+    this.map.delete(key);
     this.totalBytes -= this.estimateSize(val);
     this.onEvict?.(val);
-    return this.map.delete(key);
+    return true;
   }
 
   /** Remove an entry without eviction cleanup when ownership transfers to another subsystem. */
@@ -110,11 +117,10 @@ export class ResizableByteLimitedCache<V> {
   }
 
   clear(): void {
-    if (this.onEvict) {
-      for (const val of this.map.values()) this.onEvict(val);
-    }
+    const values = this.onEvict ? [...this.map.values()] : [];
     this.map.clear();
     this.totalBytes = 0;
+    for (const val of values) this.onEvict?.(val);
   }
 
   get size(): number {

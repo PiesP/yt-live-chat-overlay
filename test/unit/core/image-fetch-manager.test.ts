@@ -115,4 +115,70 @@ describe('ImageFetchManager terminal lifecycle', () => {
     expect(PendingImage.instances).toHaveLength(1);
     manager.destroy();
   });
+
+  it('does not repeatedly fetch emoji that cannot fit the emoji cache', () => {
+    const manager = new ImageFetchManager();
+    manager.updateConfig({ ...DEFAULT_SETTINGS, emojiCacheMb: 1 } as OverlaySettings, null);
+    const emojiMessage = message();
+    delete emojiMessage.authorPhotoUrl;
+
+    manager.prefetchImages(emojiMessage);
+    const image = PendingImage.instances[0];
+    if (!image) throw new Error('Expected pending emoji image');
+    image.naturalWidth = 1000;
+    image.naturalHeight = 1000;
+    image.onload?.();
+    manager.prefetchImages(emojiMessage);
+
+    expect(PendingImage.instances).toHaveLength(1);
+    manager.destroy();
+  });
+
+  it('scopes uncacheable URLs to the cache that rejected them', () => {
+    const manager = new ImageFetchManager();
+    manager.updateConfig(
+      { ...DEFAULT_SETTINGS, photoCacheMb: 10, stickerCacheMb: 1 } as OverlaySettings,
+      null
+    );
+
+    manager.loadImage(STICKER_URL, manager.stickerCache);
+    const sticker = PendingImage.instances[0];
+    if (!sticker) throw new Error('Expected pending sticker image');
+    sticker.naturalWidth = 600;
+    sticker.naturalHeight = 600;
+    sticker.onload?.();
+
+    manager.loadImage(STICKER_URL, manager.authorPhotoCache);
+    const authorPhoto = PendingImage.instances[1];
+    if (!authorPhoto) throw new Error('Expected pending author image');
+    authorPhoto.naturalWidth = 600;
+    authorPhoto.naturalHeight = 600;
+    authorPhoto.onload?.();
+
+    expect(manager.authorPhotoCache.has(STICKER_URL)).toBe(true);
+    manager.destroy();
+  });
+
+  it('retries a rejected image after its cache capacity changes', () => {
+    const manager = new ImageFetchManager();
+    manager.updateConfig({ ...DEFAULT_SETTINGS, stickerCacheMb: 1 } as OverlaySettings, null);
+
+    manager.loadImage(STICKER_URL, manager.stickerCache);
+    const first = PendingImage.instances[0];
+    if (!first) throw new Error('Expected pending sticker image');
+    first.naturalWidth = 600;
+    first.naturalHeight = 600;
+    first.onload?.();
+
+    manager.updateConfig({ ...DEFAULT_SETTINGS, stickerCacheMb: 2 } as OverlaySettings, null);
+    manager.loadImage(STICKER_URL, manager.stickerCache);
+    const second = PendingImage.instances[1];
+    if (!second) throw new Error('Expected retried sticker image');
+    second.naturalWidth = 600;
+    second.naturalHeight = 600;
+    second.onload?.();
+
+    expect(manager.stickerCache.has(STICKER_URL)).toBe(true);
+    manager.destroy();
+  });
 });

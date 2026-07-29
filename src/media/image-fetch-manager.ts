@@ -39,8 +39,11 @@ export class ImageFetchManager {
   readonly failedEmojiFetches = new Map<string, number>();
   /** In-flight image load guard to prevent duplicate Image objects. */
   readonly imageLoading = new Set<string>();
-  /** URLs whose decoded images cannot fit any configured cache. */
-  private readonly uncacheableImageUrls = new Set<string>();
+  /** URLs whose decoded images cannot fit a specific configured cache. */
+  private readonly uncacheableImageUrlsByCache = new Map<
+    ResizableByteLimitedCache<HTMLImageElement>,
+    Set<string>
+  >();
   /** In-flight Image objects for teardown neutering. */
   private readonly inFlightImages = new Set<HTMLImageElement>();
   /** Timeout handles for author/sticker image loads. */
@@ -117,9 +120,9 @@ export class ImageFetchManager {
     }
 
     // Resize caches in-place instead of recreating + copying all entries.
-    this.emojiCache.resize(settings.emojiCacheMb * 1_000_000);
-    this.authorPhotoCache.resize(settings.photoCacheMb * 1_000_000);
-    this.stickerCache.resize(getStickerCacheBytes(settings.stickerCacheMb));
+    this.resizeImageCache(this.emojiCache, settings.emojiCacheMb * 1_000_000);
+    this.resizeImageCache(this.authorPhotoCache, settings.photoCacheMb * 1_000_000);
+    this.resizeImageCache(this.stickerCache, getStickerCacheBytes(settings.stickerCacheMb));
 
     // Start cleanup interval only if not already running.
     // Re-creating the interval on every updateConfig() causes unnecessary
@@ -146,7 +149,7 @@ export class ImageFetchManager {
     if (this.isDestroyed) return;
     if (cache.has(url)) return;
     if (this.imageLoading.has(url)) return;
-    if (this.uncacheableImageUrls.has(url)) return;
+    if (this.isImageUncacheable(url, cache)) return;
     if (!isAllowedImageUrl(url)) {
       ImageFetchManager.log.debug('media.image.blocked', { reason: 'not-in-cdn-whitelist', url });
       return;
@@ -169,7 +172,7 @@ export class ImageFetchManager {
       this.inFlightImages.delete(img);
       if (this.isDestroyed) return;
       if (!cache.set(url, img)) {
-        this.recordUncacheableImage(url);
+        this.recordUncacheableImage(url, cache);
         return;
       }
       this.preConvertForWorker(url, img);
@@ -194,11 +197,36 @@ export class ImageFetchManager {
     img.src = url;
   }
 
-  private recordUncacheableImage(url: string): void {
-    this.uncacheableImageUrls.add(url);
-    if (this.uncacheableImageUrls.size <= EMOJI_CACHE_MAX_ENTRIES) return;
-    const oldest = this.uncacheableImageUrls.values().next().value;
-    if (oldest !== undefined) this.uncacheableImageUrls.delete(oldest);
+  private resizeImageCache(
+    cache: ResizableByteLimitedCache<HTMLImageElement>,
+    maxBytes: number
+  ): void {
+    if (cache.maxBytes !== maxBytes) {
+      this.uncacheableImageUrlsByCache.delete(cache);
+    }
+    cache.resize(maxBytes);
+  }
+
+  private isImageUncacheable(
+    url: string,
+    cache: ResizableByteLimitedCache<HTMLImageElement>
+  ): boolean {
+    return this.uncacheableImageUrlsByCache.get(cache)?.has(url) ?? false;
+  }
+
+  private recordUncacheableImage(
+    url: string,
+    cache: ResizableByteLimitedCache<HTMLImageElement>
+  ): void {
+    let urls = this.uncacheableImageUrlsByCache.get(cache);
+    if (!urls) {
+      urls = new Set<string>();
+      this.uncacheableImageUrlsByCache.set(cache, urls);
+    }
+    urls.add(url);
+    if (urls.size <= EMOJI_CACHE_MAX_ENTRIES) return;
+    const oldest = urls.values().next().value;
+    if (oldest !== undefined) urls.delete(oldest);
   }
 
   /**
@@ -261,6 +289,7 @@ export class ImageFetchManager {
       }
       if (this.emojiFetching.has(emojiUrl)) continue;
       if (this.emojiCache.has(emojiUrl)) continue;
+      if (this.isImageUncacheable(emojiUrl, this.emojiCache)) continue;
       if (this.isEmojiFetchFailed(emojiUrl)) continue;
       if (this.emojiFetching.size >= this.emojiFetchLimit) continue;
       this.emojiFetching.add(emojiUrl);
@@ -276,7 +305,10 @@ export class ImageFetchManager {
         this.emojiUrlToImage.delete(url);
         this.emojiFetching.delete(url);
         this.emojiFetchingStarted.delete(url);
-        this.emojiCache.set(url, img);
+        if (!this.emojiCache.set(url, img)) {
+          this.recordUncacheableImage(url, this.emojiCache);
+          return;
+        }
         this.preConvertForWorker(url, img);
 
         // Notify CanvasRenderer to restart the render loop so the emoji
@@ -410,7 +442,7 @@ export class ImageFetchManager {
     this.emojiFetchingStarted.clear();
     this.failedEmojiFetches.clear();
     this.imageLoading.clear();
-    this.uncacheableImageUrls.clear();
+    this.uncacheableImageUrlsByCache.clear();
 
     // ResizableByteLimitedCache.clear() calls onEvict (bitmap.close()) for each entry.
     this.workerBitmapCache.clear();
