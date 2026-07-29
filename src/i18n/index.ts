@@ -33,7 +33,6 @@ type SupportedLanguage = TranslationLanguage;
 // Module-level mutable state is intentional here — the active language is
 // a singleton that affects all t() calls. This is not a pure function, but
 // the pattern is appropriate for a global i18n context.
-// Use resetActiveLanguage() for test isolation.
 
 let activeLanguage: SupportedLanguage = 'en';
 
@@ -59,11 +58,6 @@ export function t(text: string): string {
 /** Return the currently active language code. */
 export function getActiveLanguage(): SupportedLanguage {
   return activeLanguage;
-}
-
-/** Reset active language to default for test isolation. */
-export function resetActiveLanguage(): void {
-  activeLanguage = 'en';
 }
 
 // ── Browser language detection ────────────────────────────────────────────

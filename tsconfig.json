@@ -47,6 +47,12 @@
     "forceConsistentCasingInFileNames": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["src/**/*", "vite.config.ts"],
+  "include": [
+    "src/**/*",
+    "scripts/**/*.ts",
+    "tooling/**/*.ts",
+    "vite.config.ts",
+    "vite.config.*.ts"
+  ],
   "exclude": ["node_modules", "dist", "extension", ".vscode"]
 }

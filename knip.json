@@ -1,7 +1,7 @@
 {
   "$schema": "./node_modules/knip/schema.json",
-  "entry": ["src/main.ts"],
-  "project": ["src/**/*.ts"],
+  "entry": ["src/main.ts", "scripts/**/*.ts", "vite.config.*.ts"],
+  "project": ["src/**/*.ts", "scripts/**/*.ts", "tooling/**/*.ts", "vite*.ts"],
   "paths": {
     "@app/*": ["src/app/*"],
     "@chat/*": ["src/chat/*"],

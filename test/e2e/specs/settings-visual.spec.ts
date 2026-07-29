@@ -11,7 +11,7 @@
  * 4. Settings can be read/written through the GM_setValue/GM_getValue mock
  *
  * Prerequisite: pnpm build:dev (dist/yt-live-chat-overlay.dev.user.js)
- * Run: cd test && npx playwright test e2e/specs/settings-visual.spec.ts --headed
+ * Run: pnpm exec playwright test --config test/e2e/playwright.config.ts settings-visual --headed
  */
 
 import { test, expect, type Page } from '@playwright/test';
