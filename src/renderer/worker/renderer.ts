@@ -1381,34 +1381,43 @@ export class WorkerRenderer {
               }
             }
             if (msg.cardConfigWorker) {
-              renderPaidCardWorker(
-                this.ctx,
-                {
-                  author: msg.author,
-                  authorPhotoUrl: msg.authorPhotoUrl,
-                  content: msg.content ?? [],
-                  badgeText: msg.superChatAmount,
-                  headerTagText: msg.membershipHeader,
-                  stickerUrl: msg.superChatStickerUrl,
-                },
-                msg.width,
-                msg.height,
-                sx,
-                sy,
-                msg._frameElapsed!,
-                msg.cardConfigWorker,
-                cfg.fontSize,
-                cfg.fontWeight,
-                cfg.fontFamily,
-                strokeWidth,
-                cfg.outlineOpacity,
-                this.textBitmapCache,
-                this.authorPhotoCache,
-                this.emojiCache,
-                getFont,
-                this.superChatGradientCache,
-                cfg.superChatOpacity
-              );
+              const paidContent =
+                cfg.translationEnabled && cfg.translationMode === 'replace' && msg.translatedText
+                  ? [{ type: 'text' as const, content: msg.translatedText }]
+                  : (msg.content ?? []);
+              this.ctx.save();
+              try {
+                renderPaidCardWorker(
+                  this.ctx,
+                  {
+                    author: msg.author,
+                    authorPhotoUrl: msg.authorPhotoUrl,
+                    content: paidContent,
+                    badgeText: msg.superChatAmount,
+                    headerTagText: msg.membershipHeader,
+                    stickerUrl: msg.superChatStickerUrl,
+                  },
+                  msg.width,
+                  msg.height,
+                  sx,
+                  sy,
+                  msg._frameElapsed!,
+                  msg.cardConfigWorker,
+                  cfg.fontSize,
+                  cfg.fontWeight,
+                  cfg.fontFamily,
+                  strokeWidth,
+                  cfg.outlineOpacity,
+                  this.textBitmapCache,
+                  this.authorPhotoCache,
+                  this.emojiCache,
+                  getFont,
+                  this.superChatGradientCache,
+                  cfg.superChatOpacity
+                );
+              } finally {
+                this.ctx.restore();
+              }
             } else {
               const overrideText =
                 cfg.translationEnabled && cfg.translationMode === 'replace' && msg.translatedText

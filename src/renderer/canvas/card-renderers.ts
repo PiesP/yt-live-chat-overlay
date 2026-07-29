@@ -186,8 +186,8 @@ function renderCardHeaderTag(
     tagY,
     config.headerTag.color,
     headerFontSize,
-    settings.outline.widthPx,
-    settings.outline.opacity,
+    settings.outline.enabled ? settings.outline.widthPx : 0,
+    settings.outline.enabled ? settings.outline.opacity : 0,
     _textBitmapCache,
     getFontFn
   );
@@ -241,8 +241,8 @@ function renderCardBadge(
     textY,
     DEFAULT_TEXT_COLOR,
     badgeFontSize,
-    settings.outline.widthPx,
-    settings.outline.opacity,
+    settings.outline.enabled ? settings.outline.widthPx : 0,
+    settings.outline.enabled ? settings.outline.opacity : 0,
     _textBitmapCache2,
     getFontFn
   );
@@ -339,8 +339,8 @@ export function renderPaidCard(
       Math.round(settings.fontSize * rendererLayout.authorFontScale),
       settings.fontWeight,
       settings.fontFamily,
-      settings.outline.widthPx,
-      settings.outline.opacity,
+      settings.outline.enabled ? settings.outline.widthPx : 0,
+      settings.outline.enabled ? settings.outline.opacity : 0,
       (url: string) => authorPhotoCache.get(url),
       (photo: unknown) =>
         (photo as HTMLImageElement)?.complete === true &&
@@ -406,8 +406,8 @@ export function renderPaidCard(
       bodyMaxLines,
       textColor,
       fontSize,
-      settings.outline.widthPx,
-      settings.outline.opacity,
+      settings.outline.enabled ? settings.outline.widthPx : 0,
+      settings.outline.enabled ? settings.outline.opacity : 0,
       textBitmapCache,
       emojiCache as ResizableByteLimitedCache<CanvasImageSource>,
       getFontFn

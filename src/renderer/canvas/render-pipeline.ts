@@ -431,23 +431,39 @@ export function drawStage(
         } else {
           const cardConfig =
             msg.message.kind === 'superchat' ? SUPERCHAT_CARD_CONFIG : MEMBERSHIP_CARD_CONFIG;
-          renderPaidCard(
-            renderCtx,
-            renderMessage,
-            msg.width,
-            msg.height,
-            snappedX,
-            snappedY,
-            elapsed,
-            cardConfig,
-            ctx.settings,
-            ctx.textBitmapCache,
-            ctx.imageFetchManager.authorPhotoCache,
-            ctx.imageFetchManager.stickerCache,
-            ctx.imageFetchManager.emojiCache,
-            ctx.boundGetFont,
-            ctx.superChatGradientCache
-          );
+          const replaceTranslation =
+            ctx.settings.translationEnabled && ctx.settings.translationMode === 'replace'
+              ? msg.translatedText
+              : undefined;
+          const paidRenderMessage = replaceTranslation
+            ? {
+                ...renderMessage,
+                text: replaceTranslation,
+                content: [{ type: 'text' as const, content: replaceTranslation }],
+              }
+            : renderMessage;
+          renderCtx.save();
+          try {
+            renderPaidCard(
+              renderCtx,
+              paidRenderMessage,
+              msg.width,
+              msg.height,
+              snappedX,
+              snappedY,
+              elapsed,
+              cardConfig,
+              ctx.settings,
+              ctx.textBitmapCache,
+              ctx.imageFetchManager.authorPhotoCache,
+              ctx.imageFetchManager.stickerCache,
+              ctx.imageFetchManager.emojiCache,
+              ctx.boundGetFont,
+              ctx.superChatGradientCache
+            );
+          } finally {
+            renderCtx.restore();
+          }
         }
 
         // Render translation in dual mode
@@ -471,8 +487,8 @@ export function drawStage(
               transY,
               transColor,
               fontSize,
-              ctx.settings.outline.widthPx,
-              ctx.settings.outline.opacity,
+              ctx.settings.outline.enabled ? ctx.settings.outline.widthPx : 0,
+              ctx.settings.outline.enabled ? ctx.settings.outline.opacity : 0,
               ctx.textBitmapCache,
               (_fs: number) => transFont
             );

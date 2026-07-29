@@ -3,8 +3,23 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { HighFirstPriorityBucketQueue } from '@util/priority-bucket-queue';
-import { drainStage, compactRemovedMessages, mirrorVisibleMessages } from '@renderer/canvas/render-pipeline';
+import {
+  compactRemovedMessages,
+  drainStage,
+  drawStage,
+  mirrorVisibleMessages,
+} from '@renderer/canvas/render-pipeline';
 import type { CanvasRenderContext } from '@renderer/canvas/render-pipeline';
+import type { ChatMessage } from '@app-types';
+import { DEFAULT_SETTINGS } from '@settings/schema';
+
+const mocks = vi.hoisted(() => ({
+  renderPaidCard: vi.fn(),
+}));
+
+vi.mock('@renderer/canvas/card-renderers', () => ({
+  renderPaidCard: mocks.renderPaidCard,
+}));
 
 // ── Mock factory — minimal context for drainStage ─────────────────────────
 
@@ -123,6 +138,66 @@ describe('drainStage', () => {
     });
     drainStage(ctx, now, dims);
     expect(drainQueue).toHaveBeenCalledWith(now);
+  });
+});
+
+describe('drawStage', () => {
+  it('isolates paid-card canvas state and replaces its body with translated text', () => {
+    const original: ChatMessage = {
+      id: 'paid-message',
+      kind: 'superchat',
+      text: 'Original',
+      content: [{ type: 'text', content: 'Original' }],
+      timestamp: 1,
+      authorType: 'superChat',
+      superChat: { amount: '$5.00', tier: 'blue' },
+    };
+    const message = {
+      message: original,
+      renderMessage: original,
+      startTime: 0,
+      fadeStartTime: 0,
+      duration: 1000,
+      invDuration: 0.001,
+      width: 200,
+      height: 80,
+      startX: 0,
+      x: 10,
+      y: 20,
+      pausedDuration: 0,
+      laneIndex: 0,
+      staggerDelay: 0,
+      speedTier: 1,
+      translatedText: 'Translated',
+      _frameElapsed: 100,
+    };
+    const ctx = makeDrainCtx({
+      settings: {
+        ...DEFAULT_SETTINGS,
+        translationEnabled: true,
+        translationMode: 'replace',
+      },
+      imageFetchManager: {
+        emojiCache: { get: vi.fn() },
+        authorPhotoCache: { get: vi.fn() },
+        stickerCache: { get: vi.fn() },
+      } as unknown as CanvasRenderContext['imageFetchManager'],
+    });
+    const renderCtx = {
+      globalAlpha: 1,
+      save: vi.fn(),
+      restore: vi.fn(),
+    } as unknown as CanvasRenderingContext2D;
+    const buckets = Array.from({ length: 21 }, () => [] as typeof message[]);
+    buckets[20]!.push(message);
+
+    drawStage(ctx, renderCtx, buckets as never);
+
+    const paidMessage = mocks.renderPaidCard.mock.calls[0]?.[1] as ChatMessage;
+    expect(paidMessage.text).toBe('Translated');
+    expect(paidMessage.content).toEqual([{ type: 'text', content: 'Translated' }]);
+    expect(renderCtx.save).toHaveBeenCalledOnce();
+    expect(renderCtx.restore).toHaveBeenCalledOnce();
   });
 });
 
