@@ -1,107 +1,110 @@
 # YouTube Live Chat Overlay
 
-A userscript and browser extension that shows YouTube live chat as Nico-nico style flowing comments over the video.
-All processing is local — chat content is never stored or sent anywhere.
+Display YouTube live chat as NicoNico-style flowing comments over live streams,
+premieres, and replays. The project is available as a userscript and as unpacked
+Chrome and temporary Firefox extension builds.
 
 ## Features
 
-- **Live chat overlay** — comments flow over the video player in real-time
-- **Four display modes** — RTL scroll (classic), LTR reverse, top-fixed, bottom-fixed
-- **Rich content** — text, emoji, Super Chats (with stickers), membership messages
-- **Chat translation** — real-time in-browser translation with dual/subtitle or replace mode (Chrome 138+)
-- **Multi-language UI** — English, 한국어, 日本語, Español, 中文, العربية (auto-detect or manual)
-- **Backlog injection** — past messages fill the screen on entry (4 modes: playback-based, recent, full, none)
-- **Depth layers** — speed-based near/far perception with configurable speed and opacity
-- **Author badges** — owner, moderator, member visibility & colors
-- **Full customization** — speed, font, size, opacity, colors, text outline, safe zones, lane spacing
-- **Settings import/export** — share config across browsers or backup
-- **Cross-tab sync** — settings sync instantly across YouTube tabs
-- **Settings panel** — click the ⚙ button on the player to configure everything
-- **100% local** — no runtime-loaded external code, no data collection, no tracking
+- Right-to-left, left-to-right, top-fixed, and bottom-fixed comment modes
+- Text, emoji, Super Chat, sticker, membership, and author badge rendering
+- Backlog injection for recent or replayed messages
+- Speed, font, opacity, outline, safe-zone, lane, and depth controls
+- Six interface languages with automatic or manual selection
+- Optional in-browser chat translation when the browser provides the Translator API
+- Settings import, export, and cross-tab synchronization
+- Main-thread Canvas2D rendering with an OffscreenCanvas worker when available
 
 ## Install
 
 ### Userscript
 
-1. Install [Tampermonkey](https://www.tampermonkey.net/) or [Violentmonkey](https://violentmonkey.github.io/)
-2. Open the latest release in your browser to install:
-   - [yt-live-chat-overlay.user.js](https://cdn.jsdelivr.net/gh/PiesP/yt-live-chat-overlay@release/yt-live-chat-overlay.user.js)
-3. The userscript manager will auto-update when new releases are published.
+Install [Tampermonkey](https://www.tampermonkey.net/) or
+[Violentmonkey](https://violentmonkey.github.io/), then install the
+[latest userscript](https://cdn.jsdelivr.net/gh/PiesP/yt-live-chat-overlay@release/yt-live-chat-overlay.user.js).
 
-### Browser Extension
+The userscript manager checks the metadata URL embedded in the script for
+updates.
 
-#### Chrome / Edge / Brave
+### Chrome, Edge, or Brave extension
 
-1. Download `yt-live-chat-overlay-chrome.zip` from the [latest release](https://github.com/PiesP/yt-live-chat-overlay/releases/latest)
-2. Navigate to `chrome://extensions`
-3. Enable **Developer mode** (toggle in top-right)
-4. Drag and drop the ZIP file onto the page
+The release archive is an unpacked developer build; it is not installed from a
+browser store and does not update automatically.
 
-#### Firefox
+1. Download `yt-live-chat-overlay-chrome.zip` from the
+   [latest release](https://github.com/PiesP/yt-live-chat-overlay/releases/latest).
+2. Extract the archive to a permanent directory.
+3. Open `chrome://extensions` and enable **Developer mode**.
+4. Select **Load unpacked** and choose the extracted directory.
 
-1. Download `yt-live-chat-overlay-firefox.zip` from the [latest release](https://github.com/PiesP/yt-live-chat-overlay/releases/latest)
-2. Navigate to `about:debugging#/runtime/this-firefox`
-3. Click **Load Temporary Add-on** → select the ZIP file
+### Firefox extension
 
-> **Note:** Firefox does not support the built-in translation API (Chrome 138+). Translation is automatically disabled on Firefox.
+1. Download `yt-live-chat-overlay-firefox.zip` from the
+   [latest release](https://github.com/PiesP/yt-live-chat-overlay/releases/latest).
+2. Open `about:debugging#/runtime/this-firefox`.
+3. Select **Load Temporary Add-on** and choose the ZIP.
 
-## Usage
+This development installation is removed when Firefox restarts. Use the
+userscript for a persistent installation.
 
-Open a YouTube live stream, premiere, or replay with chat. The overlay starts automatically.
-Click the ⚙ button in the top-right of the player to adjust settings.
+## Use
 
-## Privacy
+Open a YouTube live stream, premiere, or replay with chat. The overlay starts
+automatically. Select the gear button added to the player to configure display,
+backlog, translation, performance, and accessibility options.
 
-All chat fetching, parsing, rendering, and translation happens locally in your browser.
-No data is stored (beyond saved settings) or transmitted to any third party.
+## Browser support
+
+| Distribution | Support |
+| --- | --- |
+| Userscript | Current desktop browsers supported by Tampermonkey or Violentmonkey |
+| Chromium extension | Chrome/Chromium 116+ developer mode |
+| Firefox extension | Firefox 128+ temporary developer installation |
+
+Translation is capability-detected separately. Chrome 138+ provides the built-in
+Translator API, but availability still depends on the browser, device, and
+language pair. Required language models may be downloaded by the browser.
+Firefox currently runs the overlay without built-in translation.
+
+## Privacy and security
+
+Chat parsing and rendering happen in the browser. The project does not operate
+an analytics, telemetry, translation, or chat-processing server; normal YouTube
+and Google media requests still occur. See [Privacy](./PRIVACY.md) for storage
+and network details and [Security](./.github/SECURITY.md) for vulnerability
+reports.
 
 ## Development
 
-Use the Volta versions in `package.json` (currently Node.js `26.5.0` and pnpm
-`11.17.0`), or engines-compatible Node.js `>=22.13.0` and pnpm `>=11.17.0`.
+Use the toolchain pinned in `package.json`, initialize the shared browser-core
+submodule, and install dependencies:
 
 ```bash
+git submodule update --init --recursive
 pnpm install
-pnpm build:dev            # dev userscript bundle with source maps
-pnpm build                # prod userscript bundle (runs quality gate via prebuild)
-pnpm build:extension      # Chrome extension build (output: dist-extension/)
-pnpm build:extension:firefox  # Firefox extension build (output: dist-extension-firefox/)
-pnpm quality              # fmt + lint + check + circular + knip
 ```
 
-### Project Structure
+| Command | Purpose |
+| --- | --- |
+| `pnpm dev` | Watch and rebuild the development userscript |
+| `pnpm test` | Run the Vitest suite |
+| `pnpm test:cov` | Run tests with coverage thresholds |
+| `pnpm test:e2e` | Run userscript and extension Playwright flows |
+| `pnpm quality` | Run static, type, i18n, dependency, and source checks |
+| `pnpm verify` | Run quality, all builds, and artifact validation |
+| `pnpm verify:full` | Add coverage and browser tests to `verify` |
 
-```
-src/
-  app/           Runtime lifecycle, overlay, video pause, standby
-  chat/          YouTube chat source, DOM watcher, poll loop, API
-  i18n/          Locale files (en, ko, ja, zh-CN, es, ar)
-  media/         Author rate limiter
-  platform/      Platform abstraction (storage, workers, cross-tab)
-  renderer/      Canvas2D renderer + OffscreenCanvas Worker
-  settings/      Settings schema, limits, UI, store
-  translation/   In-browser chat translation
-  types/         Shared TypeScript types
-  util/          Utilities (logging, DOM, LRU, message bus, etc.)
-extension/
-  content-script.ts  ISOLATED world entry point + storage relay
-  background.ts   Service worker — context menu registration
-  manifest.json   Chrome MV3 manifest
-  manifest.firefox.json  Firefox MV3 manifest
-```
+See [Contributing](./CONTRIBUTING.md) for project constraints and validation
+expectations. Extension-specific architecture and loading details are in the
+[extension guide](./extension/README.md).
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full contributor workflow.
+## Support
+
+- Usage and troubleshooting: [Support](./SUPPORT.md)
+- Bugs and feature requests: [GitHub Issues](https://github.com/PiesP/yt-live-chat-overlay/issues)
+- Release history: [Changelog](./CHANGELOG.md)
+- Vulnerabilities: [Security policy](./.github/SECURITY.md)
 
 ## License
 
-MIT — see [LICENSE](./LICENSE).
-
----
-
-<div align="center">
-
-**🌟 If you find this project useful, please give it a Star! 🌟**
-
-**Made with ❤️ and GitHub Copilot by [PiesP](https://github.com/PiesP)**
-
-</div>
+MIT. See [LICENSE](./LICENSE).

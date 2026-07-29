@@ -332,6 +332,8 @@ All notable changes to this project will be documented in this file.
 - **Dead `rendererLayout` fields** — Removed `exitPaddingMin`, `durationMin`, `durationMax`, `topBottomDurationMs` (superseded by settings system).
 - **`computeSuperChatOpacities`** — Dead export with zero consumers, removed from `color-utils.ts` and `design-tokens.ts`.
 
+## [0.35.3] - 2026-06-02
+
 ### Fixed
 
 - **OffscreenCanvas fallback** — `cacheTextBitmap()` now guards `new OffscreenCanvas()` with a `typeof` check and falls back to `document.createElement('canvas')` for environments without `OffscreenCanvas` support (e.g. Firefox ESR, old Chromium).
@@ -908,6 +910,11 @@ Video playback synchronization (pause/resume), message queuing, playback rate sy
 ## [0.2.0] - 2026-02-08
 
 Emoji support with advanced rendering, XSS security validation, enhanced text sanitization, Dependabot/GitHub workflow automation.
+
+## [0.1.2] - 2026-02-07
+
+Fixed userscript metadata generation so the published `.meta.js` header is
+created reliably.
 
 ## [0.1.1] - 2026-02-07
 

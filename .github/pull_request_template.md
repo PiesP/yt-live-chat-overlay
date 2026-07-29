@@ -14,8 +14,8 @@ Explain **what** this pull request changes and **why**.
 Describe how reviewers can verify the change, including relevant npm scripts:
 
 ```bash
-pnpm quality
-pnpm build
+pnpm verify
+pnpm test
 ```
 
 If tests are not required, briefly explain why.
@@ -27,9 +27,9 @@ If tests are not required, briefly explain why.
 - [ ] I used configured **path aliases** (no new long relative import chains)
 - [ ] I avoided dynamic code execution (`eval`, `new Function`, string-based
       `setTimeout`/`setInterval`)
-- [ ] I ran the relevant local checks (`pnpm quality`, `pnpm build`, or explained why not)
+- [ ] I ran the relevant local checks (`pnpm verify`, focused tests, or explained why not)
 - [ ] I ran appropriate local tests for my changes (and explained in this PR
       if I could not)
 - [ ] I updated `README.md` if user-visible behavior changed
-- [ ] I reviewed the [Security Policy](.github/SECURITY.md) for any
+- [ ] I reviewed the [Security Policy](SECURITY.md) for any
       security-impacting changes

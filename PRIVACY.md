@@ -1,56 +1,56 @@
-# Privacy Policy for YouTube Live Chat Overlay
+# Privacy
 
-**Last updated:** June 3, 2026
+Last updated: 2026-07-29
 
-## Overview
+YouTube Live Chat Overlay is distributed as a userscript and as Chrome and
+Firefox extension builds. It does not use a developer-operated backend,
+analytics, telemetry, advertising, or crash-reporting service.
 
-YouTube Live Chat Overlay is a browser extension that displays YouTube live chat comments as flowing text over the video player. This policy explains what data the extension handles and how.
+## Data handled in the browser
 
-## Data Collection
+The application reads the current YouTube page and same-origin YouTube chat
+responses to identify live and replay messages. Message text, author details,
+badges, emoji, stickers, and related video or channel identifiers are held in
+memory only as needed to render and deduplicate the overlay.
 
-**The extension does not collect, transmit, or store any personal information.**
+Chat content and media are not sent to a server operated by this project and are
+not written to persistent storage.
 
-- No user accounts or authentication are required
-- No analytics, telemetry, or crash reporting is implemented
-- No usage data is tracked or sent to any server
-- No chat content, video metadata, or browsing history is recorded or transmitted
+## Storage
 
-## Local Storage
+Persistent storage contains settings such as display, backlog, translation,
+language, performance, and accessibility preferences.
 
-The extension stores only your UI preferences locally in your browser's built-in storage (`chrome.storage.local`). This includes settings such as:
+- Extension builds prefer the browser extension's local storage.
+- The userscript prefers the installed userscript manager's `GM_*` storage.
+- `localStorage` is used as a fallback when neither integration is available.
+- Per-channel language detection memory is bounded and session-only.
 
-- Font family, size, and color preferences
-- Comment display speed and direction
-- Opacity, outline, and safe zone configuration
-- Language preference for the settings UI
+Removing the userscript or extension may not remove its settings automatically.
+Use the userscript manager or browser extension storage controls when a complete
+reset is required.
 
-This data never leaves your device. It is used solely to persist your customization choices between browser sessions.
+## Network access
 
-## Network Requests
+The application makes same-origin requests to `www.youtube.com` when page data
+or chat continuations are not already available. It also loads YouTube-hosted
+author images, emoji, and stickers from allowlisted Google media domains such as
+`ggpht.com`, `googleusercontent.com`, `gstatic.com`, and `ytimg.com`.
 
-The extension makes network requests only to:
-
-- **`youtube.com` and related Google domains** — to read live chat data from the YouTube page you are viewing
-
-No data is sent to any third-party servers. All chat processing (parsing, rendering, translation) happens entirely within your browser.
+The userscript manager may separately check jsDelivr URLs embedded in the
+userscript header for updates. YouTube, Google, browser vendors, and installed
+userscript managers have their own privacy policies.
 
 ## Translation
 
-When translation is enabled, the extension uses Chrome's built-in Translator API (`self.Translator`). Translation requests are processed by Chrome's native translation service. The extension does not use any external translation API or service.
-
-## Third-Party Services
-
-This extension does not integrate with or transmit data to any third-party analytics, advertising, or tracking services.
-
-## Children's Privacy
-
-This extension does not knowingly collect personal information from anyone, including children under the age of 13.
-
-## Changes to This Policy
-
-If this policy changes, the updated version will be posted on the extension's GitHub repository. Continued use of the extension after changes constitutes acceptance of the updated policy.
+When enabled, translation uses the browser's built-in Translator and Language
+Detector APIs. The project does not send chat text to an external translation
+API. The browser may download language models or language packs and controls
+their storage and processing. Feature and language-pair availability varies by
+browser and device.
 
 ## Contact
 
-For questions about this privacy policy, please open an issue on GitHub:
-[https://github.com/PiesP/yt-live-chat-overlay/issues](https://github.com/PiesP/yt-live-chat-overlay/issues)
+Use [GitHub Issues](https://github.com/PiesP/yt-live-chat-overlay/issues) for
+privacy questions that do not expose sensitive information. Report suspected
+vulnerabilities through the [security policy](./.github/SECURITY.md).

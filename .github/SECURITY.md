@@ -1,84 +1,62 @@
-# Security Policy
+# Security policy
 
-This document describes how security is handled for **YouTube Live Chat Overlay** and how to responsibly report vulnerabilities.
+This policy covers the userscript and the Chrome and Firefox extension builds
+of **YouTube Live Chat Overlay**.
 
----
+## Supported versions
 
-## Supported Versions
+Security support is provided for the latest release on
+[GitHub Releases](https://github.com/PiesP/yt-live-chat-overlay/releases).
+Older releases and unpacked extension builds copied from older releases are not
+maintained.
 
-We only provide security support for the **latest released version** of the userscript on [GitHub Releases](https://github.com/PiesP/yt-live-chat-overlay/releases).
+Userscript managers can update the userscript automatically. Unpacked Chromium
+and temporary Firefox installations must be replaced manually when a new
+release is published.
 
-| Version | Supported          |
-| ------- | ------------------ |
-| Latest  | :white_check_mark: |
-| Older   | :x:                |
+## Report a vulnerability
 
-Userscript managers (Tampermonkey, Violentmonkey, etc.) can auto-update the script; we recommend keeping auto-update enabled.
+Do not disclose vulnerabilities in a public issue.
 
----
+1. Prefer a [private GitHub Security Advisory](https://github.com/PiesP/yt-live-chat-overlay/security/advisories/new).
+2. If advisories are unavailable, open a minimal issue requesting a private
+   contact channel without including technical details.
 
-## Reporting a Vulnerability
+Include the impact, reproduction steps, distribution, release version, browser,
+and OS when available. We aim to respond within seven business days and
+coordinate disclosure after a fix is available.
 
-If you discover a security vulnerability, **do not** disclose it publicly.
+## Security and privacy model
 
-1. **Preferred**: Use [GitHub Security Advisories](https://github.com/PiesP/yt-live-chat-overlay/security/advisories/new).
-2. If that is not available, open a minimal GitHub issue asking for a private channel **without** sharing technical details.
+- Application logic runs in the browser on YouTube pages.
+- The project does not operate an analytics, telemetry, translation, or chat
+  processing server.
+- Runtime requests use YouTube and Google media hosts required to acquire and
+  render chat content.
+- Extension permissions are declared in the versioned manifests.
+- The application does not use `eval()` or equivalent dynamic code execution.
 
-Please include, where possible:
+See [PRIVACY.md](../PRIVACY.md) for data, storage, network, and translation
+details.
 
-- A short description and impact
-- Steps to reproduce
-- Browser, OS, and userscript manager versions
-- Script version (from the userscript header)
+## Development security
 
-We aim to respond within **7 business days** and coordinate disclosure once a fix is available.
+CI combines strict TypeScript, Biome, i18n and consistency checks, unit coverage,
+userscript and extension Playwright tests, production builds, artifact checks,
+duplication analysis, mutation testing, CodeQL, OSV Scanner, and Semgrep. The
+workflow files and package scripts are authoritative for the exact checks.
 
----
-
-## Security Model & Privacy
-
-**YouTube Live Chat Overlay** is a client-side userscript that runs entirely in your browser on YouTube.
-
-- All logic executes locally in the browser.
-- We do **not** collect, store, or transmit personal data or chat content.
-- The script does not use `eval()` or similar dynamic code execution.
-
----
-
-## Development Security
-
-We use several mechanisms to keep the codebase secure:
-
-- **GitHub Security Suite** (`.github/workflows/security.yaml`)
-  - CodeQL for JavaScript/TypeScript and GitHub Actions
-  - Dependency scanning with OSV Scanner (PR diff + daily full scans)
-  - Static analysis with Semgrep on PR, daily, and manual runs
-  - Daily freshness checks for pinned Nose, OSV Scanner, and Semgrep releases
-- **Dependabot** (`.github/dependabot.yaml`)
-  - Daily grouped updates for npm packages and GitHub Actions after a 24-hour cooldown
-- **Quality & Testing**
-  - pnpm enforces the same cooling window, recent trust-level non-downgrade,
-    reviewed install scripts, and registry-only transitive dependencies
-  - TypeScript strict mode, Biome, Knip, circular-dependency checks, duplication,
-    tracked unit tests, browser/extension Playwright E2E, and mutation tests
-
-These checks run in pull requests, the merge queue, and scheduled/manual workflows; local development uses the same toolchain via `pnpm` commands.
-
----
+Dependencies retain the repository's cooling window, trust policy, approved
+build-script list, and registry-source restrictions. Do not weaken those
+controls to accept an update.
 
 ## Scope
 
-In scope for this policy:
-
-- Vulnerabilities in this userscript (XSS, injection, logic flaws, privacy leaks)
-- Vulnerabilities introduced by this repository’s dependencies
-
-Out of scope:
-
-- Issues in YouTube itself (report via Google/YouTube security channels)
-- Bugs in userscript managers (Tampermonkey, Violentmonkey, etc.)
-
----
+In scope are vulnerabilities introduced by this repository, including
+injection, unsafe URL or message handling, permission misuse, privacy leaks, and
+supply-chain issues. Vulnerabilities in YouTube, browsers, and userscript
+managers should be reported to their respective vendors unless this project's
+integration causes the issue.
 
 ## License
 
