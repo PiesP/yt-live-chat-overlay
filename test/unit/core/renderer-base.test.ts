@@ -154,6 +154,32 @@ describe('RendererBase', () => {
       const r = createRenderer();
       expect(r.getLaneCount()).toBeGreaterThan(0);
     });
+
+    it('applies updated burst thresholds without recreating the renderer', () => {
+      const r = createRenderer();
+      r.updateSettings({
+        ...defaultSettings,
+        burstSampleWindow: 24,
+        burstElevatedThreshold: 7,
+        burstHighThreshold: 19,
+        burstExtremeThreshold: 41,
+      });
+      const detector = (r as unknown as {
+        burstDetector: {
+          rateSampleWindow: number;
+          elevatedThreshold: number;
+          highThreshold: number;
+          extremeThreshold: number;
+        };
+      }).burstDetector;
+
+      expect(detector).toMatchObject({
+        rateSampleWindow: 24,
+        elevatedThreshold: 7,
+        highThreshold: 19,
+        extremeThreshold: 41,
+      });
+    });
   });
 
   // ── Pause / Resume state machine ─────────────────────────────────────

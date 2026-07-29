@@ -174,7 +174,7 @@ export class CanvasRenderer extends RendererBase {
   private static readonly SOURCE_SAMPLE_COUNT = 8;
 
   /** Max translations to apply per frame to avoid single-frame spikes during chat bursts. */
-  private readonly translationBatchSize: number;
+  private translationBatchSize: number;
 
   /**
    * Pending translation results collected between frames.
@@ -1726,12 +1726,14 @@ export class CanvasRenderer extends RendererBase {
       settings.safeTop !== this.settings.safeTop ||
       settings.safeBottom !== this.settings.safeBottom;
     super.updateSettings(settings, options);
+    this.translationBatchSize = settings.translationBatchSize;
 
     // When settings change, cached dimensions become stale
     // (font, size, weight, family, maxBodyLines all affect dimension calculation).
     this.dimensionCache.clear();
     // Text bitmap cache also depends on font/size/color settings — clear to
     // avoid stale pre-rendered canvases being reused with the wrong style.
+    this.textBitmapCache.resize(settings.textCacheMb * 1_000_000);
     this.textBitmapCache.clear();
     // Pre-compute 1/fadeDurationMs to avoid per-frame divisions in opacity calc
     this.invFadeDuration = computeInvFadeDuration(settings.fadeDurationMs);

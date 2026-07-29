@@ -115,6 +115,20 @@ describe('CanvasRenderer', () => {
     renderer.destroy();
   });
 
+  it('applies text-cache and translation-batch limits without a reload', () => {
+    const renderer = new CanvasRenderer(overlay, makeSettings());
+    const internals = renderer as unknown as {
+      translationBatchSize: number;
+      textBitmapCache: { maxBytes: number };
+    };
+
+    renderer.updateSettings(makeSettings({ textCacheMb: 3, translationBatchSize: 11 }));
+
+    expect(internals.translationBatchSize).toBe(11);
+    expect(internals.textBitmapCache.maxBytes).toBe(3_000_000);
+    renderer.destroy();
+  });
+
   it('collects auto source-language samples on the Worker path', () => {
     const settings = makeSettings({ translationEnabled: true, translationSource: 'auto' });
     const renderer = new CanvasRenderer(overlay, settings);
