@@ -276,7 +276,10 @@ jobs:
             echo "Purging: $purge_url"
             purge_response="$(curl --fail --silent --show-error --location \
               --proto '=https' --tlsv1.2 "$purge_url")"
-            echo "$purge_response" | jq -e '.success == true' >/dev/null
+            echo "$purge_response" | jq -e '
+              (.success == true) or
+              (.status == "finished" and ([.paths[].providers[]] | all))
+            ' >/dev/null
           done
 
           echo "✅ jsDelivr cache purge completed"
