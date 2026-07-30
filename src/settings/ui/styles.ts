@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
+import { SETTINGS_UI_DESIGN } from '@settings/ui/design-adapter';
 import { DEFAULT_FONT_FAMILY, spacing } from '@util/design-tokens';
 
 /**
@@ -45,29 +46,29 @@ import { DEFAULT_FONT_FAMILY, spacing } from '@util/design-tokens';
  *   under our control (i.e. not injected into YouTube's modal DOM).
  */
 
-// ── UI color palette (settings UI only, not renderer) ──
+// ── Quiet Instruments adapter (settings UI only, not renderer) ──
 const uiColors = {
-  background: '#1a1a1a',
-  backgroundLight: '#222222',
-  border: '#5a5a5a',
-  text: '#ffffff',
-  textMuted: '#c8c8c8',
-  primary: '#1565c0',
-  primaryOnDark: '#42a5f5',
-  primaryHover: '#0d47a1',
-  danger: '#c62828',
-  dangerHover: '#b71c1c',
-  warning: '#ffc107',
-  success: '#2e7d32',
-  info: '#1976d2',
+  background: SETTINGS_UI_DESIGN.colors.surface,
+  backgroundLight: SETTINGS_UI_DESIGN.colors.raised,
+  border: SETTINGS_UI_DESIGN.colors.border,
+  text: SETTINGS_UI_DESIGN.colors.text,
+  textMuted: SETTINGS_UI_DESIGN.colors.textMuted,
+  accent: SETTINGS_UI_DESIGN.colors.accent,
+  accentHover: `color-mix(in srgb, ${SETTINGS_UI_DESIGN.colors.accent} 84%, black)`,
+  onAccent: SETTINGS_UI_DESIGN.colors.onAccent,
+  focus: SETTINGS_UI_DESIGN.colors.focus,
+  danger: SETTINGS_UI_DESIGN.colors.danger,
+  dangerFill: `color-mix(in srgb, ${SETTINGS_UI_DESIGN.colors.danger} 55%, black)`,
+  dangerFillHover: `color-mix(in srgb, ${SETTINGS_UI_DESIGN.colors.danger} 65%, black)`,
+  warning: SETTINGS_UI_DESIGN.colors.warning,
+  success: SETTINGS_UI_DESIGN.colors.success,
+  info: SETTINGS_UI_DESIGN.colors.info,
 } as const;
 
 const uiColorsAlpha = {
-  primaryBg: 'rgba(21, 101, 192, 0.25)',
-  primaryBgLight: 'rgba(21, 101, 192, 0.20)',
+  accentBg: `color-mix(in srgb, ${SETTINGS_UI_DESIGN.colors.accent} 25%, transparent)`,
+  accentBgLight: `color-mix(in srgb, ${SETTINGS_UI_DESIGN.colors.accent} 20%, transparent)`,
 } as const;
-
-// export { uiColors }; // removed — was only used internally
 
 const typography = {
   fontSize: {
@@ -91,16 +92,16 @@ const shadows = {
   box: {
     sm: '0 2px 8px rgba(0, 0, 0, 0.6)',
     md: '0 4px 16px rgba(0, 0, 0, 0.8)',
-    lg: '0 8px 24px rgba(0, 0, 0, 0.9)',
+    lg: SETTINGS_UI_DESIGN.shadow.floating,
   },
 } as const;
 
 const borderRadius = {
-  sm: '6px',
-  md: '8px',
-  lg: '12px',
-  pill: '14px',
-  full: '50%',
+  sm: SETTINGS_UI_DESIGN.radius.control,
+  md: SETTINGS_UI_DESIGN.radius.panel,
+  lg: SETTINGS_UI_DESIGN.radius.panel,
+  pill: SETTINGS_UI_DESIGN.radius.full,
+  full: SETTINGS_UI_DESIGN.radius.full,
 } as const;
 
 const zIndex = {
@@ -109,8 +110,10 @@ const zIndex = {
 
 // ── UI sizing tokens (settings panel layout) ──
 const uiSizing = {
-  buttonSize: 44,
-  buttonFontSize: 18,
+  buttonSize: SETTINGS_UI_DESIGN.target.minimum,
+  buttonFontSize: SETTINGS_UI_DESIGN.icon.size,
+  targetMinimum: SETTINGS_UI_DESIGN.target.minimum,
+  compactControlHeight: SETTINGS_UI_DESIGN.target.compactControlHeight,
   inputWidth: 86,
   colorSwatch: 44,
   colorSwatchHeight: 26,
@@ -126,20 +129,20 @@ const uiSizing = {
 } as const;
 
 const tooltip = {
-  bg: 'rgba(0, 0, 0, 0.9)',
-  border: 'rgba(255, 255, 255, 0.15)',
-  text: '#ffffff',
+  bg: SETTINGS_UI_DESIGN.colors.canvas,
+  border: SETTINGS_UI_DESIGN.colors.border,
+  text: SETTINGS_UI_DESIGN.colors.text,
 } as const;
 
 // ── Animation durations (settings panel) ──
 const animDuration = {
-  fast: '0.1s',
-  normal: '0.15s',
-  slow: '0.18s',
+  fast: SETTINGS_UI_DESIGN.motion.fast,
+  normal: SETTINGS_UI_DESIGN.motion.standard,
+  slow: SETTINGS_UI_DESIGN.motion.deliberate,
   transitions: {
-    button: 'opacity 0.15s, background 0.15s, transform 0.1s',
-    action: 'background 0.15s, color 0.15s, border-color 0.15s',
-    tab: 'color 0.1s',
+    button: `opacity ${SETTINGS_UI_DESIGN.motion.standard} ${SETTINGS_UI_DESIGN.motion.easing}, background ${SETTINGS_UI_DESIGN.motion.standard} ${SETTINGS_UI_DESIGN.motion.easing}, transform ${SETTINGS_UI_DESIGN.motion.fast} ${SETTINGS_UI_DESIGN.motion.easing}`,
+    action: `background ${SETTINGS_UI_DESIGN.motion.standard} ${SETTINGS_UI_DESIGN.motion.easing}, color ${SETTINGS_UI_DESIGN.motion.standard} ${SETTINGS_UI_DESIGN.motion.easing}, border-color ${SETTINGS_UI_DESIGN.motion.standard} ${SETTINGS_UI_DESIGN.motion.easing}`,
+    tab: `color ${SETTINGS_UI_DESIGN.motion.fast} ${SETTINGS_UI_DESIGN.motion.easing}`,
   },
 } as const;
 
@@ -150,12 +153,12 @@ const CONFIRM_BACKDROP_ALPHA = 0.5;
 const scrollbar = {
   width: '6px',
   track: 'transparent',
-  thumb: 'rgba(255, 255, 255, 0.12)',
-  thumbHover: 'rgba(255, 255, 255, 0.28)',
+  thumb: `color-mix(in srgb, ${SETTINGS_UI_DESIGN.colors.border} 70%, transparent)`,
+  thumbHover: `color-mix(in srgb, ${SETTINGS_UI_DESIGN.colors.textMuted} 45%, transparent)`,
 } as const;
 
 // ── Toast notification ──
-const TOAST_BG = 'rgba(0, 0, 0, 0.85)';
+const TOAST_BG = SETTINGS_UI_DESIGN.colors.canvas;
 const TOAST_FONT = `12px/1.4 ${DEFAULT_FONT_FAMILY}`;
 const TOAST_PADDING = '6px 14px';
 
@@ -163,20 +166,20 @@ export const SETTINGS_UI_STYLES = `
       .yt-chat-overlay-settings-modal,
       .yt-chat-overlay-settings-confirm,
       #yt-chat-overlay-settings-backdrop {
-        color-scheme: dark;
+        color-scheme: ${SETTINGS_UI_DESIGN.colorScheme};
       }
       .yt-chat-overlay-settings-button {
         position: absolute;
         top: ${spacing.sm}px;
         inset-inline-start: ${spacing.sm}px;
-        width: ${uiSizing.buttonSize}px;
-        height: ${uiSizing.buttonSize}px;
+        width: ${uiSizing.buttonSize};
+        height: ${uiSizing.buttonSize};
         border-radius: ${borderRadius.full};
         border: 1px solid rgba(255, 255, 255, ${uiSizing.borderAlpha});
         background: rgba(0, 0, 0, ${uiSizing.scrimAlpha});
         backdrop-filter: blur(4px);
         color: ${uiColors.text};
-        font-size: ${uiSizing.buttonFontSize}px;
+        font-size: ${uiSizing.buttonFontSize};
         line-height: 1;
         cursor: pointer;
         z-index: ${zIndex.settingsButton};
@@ -190,8 +193,8 @@ export const SETTINGS_UI_STYLES = `
         scale: 1.1;
       }
       .yt-chat-overlay-settings-button:focus-visible {
-        outline: 2px solid ${uiColors.primary};
-        outline-offset: 2px;
+        outline: ${SETTINGS_UI_DESIGN.focus.ringWidth} solid ${uiColors.focus};
+        outline-offset: ${SETTINGS_UI_DESIGN.focus.ringOffset};
         opacity: 1;
         pointer-events: auto;
       }
@@ -203,15 +206,15 @@ export const SETTINGS_UI_STYLES = `
       .yt-chat-overlay-reload-button {
         position: absolute;
         top: ${spacing.sm}px;
-        inset-inline-start: ${spacing.sm + uiSizing.buttonSize + spacing.xs}px;
-        width: ${uiSizing.buttonSize}px;
-        height: ${uiSizing.buttonSize}px;
+        inset-inline-start: calc(${spacing.sm}px + ${uiSizing.buttonSize} + ${spacing.xs}px);
+        width: ${uiSizing.buttonSize};
+        height: ${uiSizing.buttonSize};
         border-radius: ${borderRadius.full};
         border: 1px solid rgba(255, 255, 255, ${uiSizing.borderAlpha});
         background: rgba(0, 0, 0, ${uiSizing.scrimAlpha});
         backdrop-filter: blur(4px);
         color: ${uiColors.text};
-        font-size: ${uiSizing.buttonFontSize}px;
+        font-size: ${uiSizing.buttonFontSize};
         line-height: 1;
         cursor: pointer;
         z-index: ${zIndex.settingsButton};
@@ -225,8 +228,8 @@ export const SETTINGS_UI_STYLES = `
         scale: 1.1;
       }
       .yt-chat-overlay-reload-button:focus-visible {
-        outline: 2px solid ${uiColors.primary};
-        outline-offset: 2px;
+        outline: ${SETTINGS_UI_DESIGN.focus.ringWidth} solid ${uiColors.focus};
+        outline-offset: ${SETTINGS_UI_DESIGN.focus.ringOffset};
         opacity: 1;
         pointer-events: auto;
       }
@@ -309,8 +312,8 @@ export const SETTINGS_UI_STYLES = `
         cursor: pointer;
         padding: ${spacing.sm}px;
         line-height: ${typography.lineHeight.tight};
-        min-width: ${uiSizing.colorSwatch}px;
-        min-height: ${uiSizing.colorSwatch}px;
+        min-width: ${uiSizing.targetMinimum};
+        min-height: ${uiSizing.targetMinimum};
         display: flex;
         align-items: center;
         justify-content: center;
@@ -320,8 +323,8 @@ export const SETTINGS_UI_STYLES = `
         color: ${uiColors.text};
       }
       .yt-chat-overlay-settings-close:focus-visible {
-        outline: 2px solid ${uiColors.primary};
-        outline-offset: 2px;
+        outline: ${SETTINGS_UI_DESIGN.focus.ringWidth} solid ${uiColors.focus};
+        outline-offset: ${SETTINGS_UI_DESIGN.focus.ringOffset};
       }
       /* Tab bar */
       .yt-chat-overlay-settings-tabs {
@@ -332,7 +335,7 @@ export const SETTINGS_UI_STYLES = `
       .yt-chat-overlay-settings-tab {
         flex: 1;
         padding: ${spacing.sm + 2}px ${spacing.sm}px;
-        min-height: 44px;
+        min-height: ${uiSizing.targetMinimum};
         border: none;
         border-bottom: 2px solid transparent;
         background: transparent;
@@ -348,12 +351,12 @@ export const SETTINGS_UI_STYLES = `
         color: ${uiColors.text};
       }
       .yt-chat-overlay-settings-tab:focus-visible {
-        outline: 2px solid ${uiColors.primary};
-        outline-offset: -1px;
+        outline: ${SETTINGS_UI_DESIGN.focus.ringWidth} solid ${uiColors.focus};
+        outline-offset: calc(${SETTINGS_UI_DESIGN.focus.ringOffset} * -1);
       }
       .yt-chat-overlay-settings-tab.active {
-        color: ${uiColors.primaryOnDark};
-        border-bottom-color: ${uiColors.primaryOnDark};
+        color: ${uiColors.accent};
+        border-bottom-color: ${uiColors.accent};
       }
       /* Tab panes */
       .yt-chat-overlay-settings-pane {
@@ -436,8 +439,8 @@ export const SETTINGS_UI_STYLES = `
         font-size: ${typography.fontSize.sm};
       }
       .yt-chat-overlay-settings-field input[type="text"]:focus-visible {
-        outline: 2px solid ${uiColors.primary};
-        outline-offset: 1px;
+        outline: ${SETTINGS_UI_DESIGN.focus.ringWidth} solid ${uiColors.focus};
+        outline-offset: ${SETTINGS_UI_DESIGN.focus.ringOffset};
       }
       .yt-chat-overlay-settings-field input[type="color"] {
         width: ${uiSizing.colorSwatch}px;
@@ -451,11 +454,11 @@ export const SETTINGS_UI_STYLES = `
         width: ${uiSizing.checkboxSize}px;
         height: ${uiSizing.checkboxSize}px;
         cursor: pointer;
-        accent-color: ${uiColors.primary};
+        accent-color: ${uiColors.accent};
       }
       .yt-chat-overlay-settings-field input[type="checkbox"]:focus-visible {
-        outline: 2px solid ${uiColors.primary};
-        outline-offset: 1px;
+        outline: ${SETTINGS_UI_DESIGN.focus.ringWidth} solid ${uiColors.focus};
+        outline-offset: ${SETTINGS_UI_DESIGN.focus.ringOffset};
       }
       .yt-chat-overlay-settings-field select {
         padding: ${spacing.xs}px ${spacing.sm}px;
@@ -466,8 +469,8 @@ export const SETTINGS_UI_STYLES = `
         cursor: pointer;
       }
       .yt-chat-overlay-settings-field select:focus-visible {
-        outline: 2px solid ${uiColors.primary};
-        outline-offset: 1px;
+        outline: ${SETTINGS_UI_DESIGN.focus.ringWidth} solid ${uiColors.focus};
+        outline-offset: ${SETTINGS_UI_DESIGN.focus.ringOffset};
       }
       /* ── :user-invalid validation styles ── */
       .yt-chat-overlay-settings-field input:user-invalid,
@@ -485,12 +488,12 @@ export const SETTINGS_UI_STYLES = `
         max-inline-size: 200px;
       }
       .yt-chat-overlay-settings-field input[type="number"]:focus-visible {
-        outline: 2px solid ${uiColors.primary};
-        outline-offset: 1px;
+        outline: ${SETTINGS_UI_DESIGN.focus.ringWidth} solid ${uiColors.focus};
+        outline-offset: ${SETTINGS_UI_DESIGN.focus.ringOffset};
       }
       .yt-chat-overlay-settings-field input[type="text"]:focus-visible {
-        outline: 2px solid ${uiColors.primary};
-        outline-offset: 1px;
+        outline: ${SETTINGS_UI_DESIGN.focus.ringWidth} solid ${uiColors.focus};
+        outline-offset: ${SETTINGS_UI_DESIGN.focus.ringOffset};
       }
       .yt-chat-overlay-settings-field input[type="number"]:disabled {
         opacity: 0.4;
@@ -512,11 +515,11 @@ export const SETTINGS_UI_STYLES = `
         width: ${uiSizing.checkboxSize}px;
         height: ${uiSizing.checkboxSize}px;
         cursor: pointer;
-        accent-color: ${uiColors.primary};
+        accent-color: ${uiColors.accent};
       }
       .yt-chat-overlay-settings-enabled input[type="checkbox"]:focus-visible {
-        outline: 2px solid ${uiColors.primary};
-        outline-offset: 1px;
+        outline: ${SETTINGS_UI_DESIGN.focus.ringWidth} solid ${uiColors.focus};
+        outline-offset: ${SETTINGS_UI_DESIGN.focus.ringOffset};
       }
       /* Authors grid — role="row" wrappers use display:contents so children
          become direct grid items (immune to wrapper insertion/removal) */
@@ -544,8 +547,8 @@ export const SETTINGS_UI_STYLES = `
         cursor: pointer;
       }
       .yt-chat-overlay-author-grid-color:focus-visible {
-        outline: 2px solid ${uiColors.primary};
-        outline-offset: 1px;
+        outline: ${SETTINGS_UI_DESIGN.focus.ringWidth} solid ${uiColors.focus};
+        outline-offset: ${SETTINGS_UI_DESIGN.focus.ringOffset};
       }
       .yt-chat-overlay-author-grid [role="gridcell"]:has(> .yt-chat-overlay-author-grid-color) {
         justify-self: center;
@@ -554,11 +557,11 @@ export const SETTINGS_UI_STYLES = `
         width: ${uiSizing.checkboxSize}px;
         height: ${uiSizing.checkboxSize}px;
         cursor: pointer;
-        accent-color: ${uiColors.primary};
+        accent-color: ${uiColors.accent};
       }
       .yt-chat-overlay-author-grid-checkbox:focus-visible {
-        outline: 2px solid ${uiColors.primary};
-        outline-offset: 1px;
+        outline: ${SETTINGS_UI_DESIGN.focus.ringWidth} solid ${uiColors.focus};
+        outline-offset: ${SETTINGS_UI_DESIGN.focus.ringOffset};
       }
       .yt-chat-overlay-author-grid [role="gridcell"]:has(> .yt-chat-overlay-author-grid-checkbox) {
         justify-self: center;
@@ -582,6 +585,7 @@ export const SETTINGS_UI_STYLES = `
         border: none;
         border-radius: ${borderRadius.sm};
         padding: ${spacing.sm}px ${spacing.md}px;
+        min-height: ${uiSizing.compactControlHeight};
         cursor: pointer;
         font-weight: ${typography.fontWeight.semibold};
         font-size: ${typography.fontSize.sm};
@@ -603,7 +607,7 @@ export const SETTINGS_UI_STYLES = `
       }
       .yt-chat-overlay-settings-actions button[data-action="export"]:hover {
         color: ${uiColors.text};
-        border-color: ${uiColors.primary};
+        border-color: ${uiColors.accent};
       }
       .yt-chat-overlay-settings-actions button[data-action="import"] {
         background: transparent;
@@ -615,15 +619,15 @@ export const SETTINGS_UI_STYLES = `
         border-color: ${uiColors.warning};
       }
       .yt-chat-overlay-settings-actions button:focus-visible {
-        outline: 2px solid ${uiColors.primary};
-        outline-offset: 1px;
+        outline: ${SETTINGS_UI_DESIGN.focus.ringWidth} solid ${uiColors.focus};
+        outline-offset: ${SETTINGS_UI_DESIGN.focus.ringOffset};
       }
       .yt-chat-overlay-settings-actions button[data-action="close"] {
-        background: ${uiColors.primary};
-        color: ${uiColors.text};
+        background: ${uiColors.accent};
+        color: ${uiColors.onAccent};
       }
       .yt-chat-overlay-settings-actions button[data-action="close"]:hover {
-        background: ${uiColors.primaryHover};
+        background: ${uiColors.accentHover};
       }
       .yt-chat-overlay-settings-autosave-hint {
         margin: ${spacing.xs}px 0 0;
@@ -666,6 +670,7 @@ export const SETTINGS_UI_STYLES = `
         border: none;
         border-radius: ${borderRadius.sm};
         padding: ${spacing.sm}px ${spacing.md}px;
+        min-height: ${uiSizing.compactControlHeight};
         cursor: pointer;
         font-weight: ${typography.fontWeight.semibold};
         font-size: ${typography.fontSize.sm};
@@ -680,19 +685,19 @@ export const SETTINGS_UI_STYLES = `
         color: ${uiColors.text};
       }
       .yt-chat-overlay-settings-confirm-cancel:focus-visible {
-        outline: 2px solid ${uiColors.primary};
-        outline-offset: 1px;
+        outline: ${SETTINGS_UI_DESIGN.focus.ringWidth} solid ${uiColors.focus};
+        outline-offset: ${SETTINGS_UI_DESIGN.focus.ringOffset};
       }
       .yt-chat-overlay-settings-confirm-ok {
-        background: ${uiColors.danger};
+        background: ${uiColors.dangerFill};
         color: ${uiColors.text};
       }
       .yt-chat-overlay-settings-confirm-ok:hover {
-        background: ${uiColors.dangerHover};
+        background: ${uiColors.dangerFillHover};
       }
       .yt-chat-overlay-settings-confirm-ok:focus-visible {
-        outline: 2px solid ${uiColors.primary};
-        outline-offset: 1px;
+        outline: ${SETTINGS_UI_DESIGN.focus.ringWidth} solid ${uiColors.focus};
+        outline-offset: ${SETTINGS_UI_DESIGN.focus.ringOffset};
       }
       /* Toast notification */
       .yt-chat-overlay-settings-toast {
@@ -733,13 +738,13 @@ export const SETTINGS_UI_STYLES = `
       .yt-chat-overlay-settings-range-slider {
         flex: 2;
         height: ${spacing.sm}px;
-        accent-color: ${uiColors.primary};
+        accent-color: ${uiColors.accent};
         cursor: pointer;
         margin: 0;
       }
       .yt-chat-overlay-settings-range-slider:focus-visible {
-        outline: 2px solid ${uiColors.primary};
-        outline-offset: 2px;
+        outline: ${SETTINGS_UI_DESIGN.focus.ringWidth} solid ${uiColors.focus};
+        outline-offset: ${SETTINGS_UI_DESIGN.focus.ringOffset};
       }
       .yt-chat-overlay-settings-range-number {
         width: ${uiSizing.inputWidth}px;
@@ -753,8 +758,8 @@ export const SETTINGS_UI_STYLES = `
         -moz-appearance: textfield;
       }
       .yt-chat-overlay-settings-range-number:focus-visible {
-        outline: 2px solid ${uiColors.primary};
-        outline-offset: 1px;
+        outline: ${SETTINGS_UI_DESIGN.focus.ringWidth} solid ${uiColors.focus};
+        outline-offset: ${SETTINGS_UI_DESIGN.focus.ringOffset};
       }
       .yt-chat-overlay-settings-range-number::-webkit-inner-spin-button,
       .yt-chat-overlay-settings-range-number::-webkit-outer-spin-button {
@@ -796,7 +801,7 @@ export const SETTINGS_UI_STYLES = `
       }
       .yt-chat-overlay-settings-font-preview-text {
         color: ${uiColors.text};
-        transition: font-size 0.1s, font-weight 0.1s;
+        transition: font-size ${animDuration.fast} ${SETTINGS_UI_DESIGN.motion.easing}, font-weight ${animDuration.fast} ${SETTINGS_UI_DESIGN.motion.easing};
         line-height: 1.3;
       }
 
@@ -816,15 +821,15 @@ export const SETTINGS_UI_STYLES = `
         color: ${uiColors.textMuted};
         font-size: ${typography.fontSize.sm};
         cursor: pointer;
-        transition: background 0.15s, color 0.15s;
+        transition: ${animDuration.transitions.action};
         border-right: 1px solid ${uiColors.border};
-        min-height: 44px;
+        min-height: ${uiSizing.targetMinimum};
       }
       .yt-chat-overlay-settings-weight-toggle-btn:last-child {
         border-right: none;
       }
       .yt-chat-overlay-settings-weight-toggle-btn.active {
-        background: ${uiColorsAlpha.primaryBg};
+        background: ${uiColorsAlpha.accentBg};
         color: ${uiColors.text};
         font-weight: ${typography.fontWeight.bold};
       }
@@ -832,8 +837,8 @@ export const SETTINGS_UI_STYLES = `
         color: ${uiColors.text};
       }
       .yt-chat-overlay-settings-weight-toggle-btn:focus-visible {
-        outline: 2px solid ${uiColors.primary};
-        outline-offset: -2px;
+        outline: ${SETTINGS_UI_DESIGN.focus.ringWidth} solid ${uiColors.focus};
+        outline-offset: calc(${SETTINGS_UI_DESIGN.focus.ringOffset} * -1);
       }
 
       /* ── Font family chips ── */
@@ -851,7 +856,7 @@ export const SETTINGS_UI_STYLES = `
         -webkit-appearance: none;
         font-family: inherit;
         padding: ${spacing.sm - 1}px ${spacing.md}px;
-        min-height: 44px;
+        min-height: ${uiSizing.targetMinimum};
         line-height: 1.3;
         border-radius: ${borderRadius.pill};
         border: 1px solid ${uiColors.border};
@@ -859,24 +864,24 @@ export const SETTINGS_UI_STYLES = `
         color: ${uiColors.textMuted};
         font-size: ${typography.fontSize.xs};
         cursor: pointer;
-        transition: all ${animDuration.normal};
+        transition: all ${animDuration.normal} ${SETTINGS_UI_DESIGN.motion.easing};
         white-space: nowrap;
         text-wrap: nowrap;
         user-select: none;
       }
       .yt-chat-overlay-settings-font-chip:hover {
-        border-color: ${uiColors.primary};
+        border-color: ${uiColors.accent};
         color: ${uiColors.text};
       }
       .yt-chat-overlay-settings-font-chip.active {
-        background: ${uiColorsAlpha.primaryBgLight};
-        border-color: ${uiColors.primary};
+        background: ${uiColorsAlpha.accentBgLight};
+        border-color: ${uiColors.accent};
         color: ${uiColors.text};
         font-weight: ${typography.fontWeight.bold};
       }
       .yt-chat-overlay-settings-font-chip:focus-visible {
-        outline: 2px solid ${uiColors.primary};
-        outline-offset: 1px;
+        outline: ${SETTINGS_UI_DESIGN.focus.ringWidth} solid ${uiColors.focus};
+        outline-offset: ${SETTINGS_UI_DESIGN.focus.ringOffset};
       }
 
       /* ── Custom font input row ── */
@@ -895,8 +900,8 @@ export const SETTINGS_UI_STYLES = `
         font-size: ${typography.fontSize.xs};
       }
       .yt-chat-overlay-settings-font-custom-input:focus-visible {
-        outline: 2px solid ${uiColors.primary};
-        outline-offset: 1px;
+        outline: ${SETTINGS_UI_DESIGN.focus.ringWidth} solid ${uiColors.focus};
+        outline-offset: ${SETTINGS_UI_DESIGN.focus.ringOffset};
       }
 
       /* Font panel label override — vertical alignment for chip/weight containers */
@@ -983,7 +988,7 @@ export const SETTINGS_UI_STYLES = `
         pointer-events: none;
         white-space: nowrap;
         opacity: 0;
-        transition: opacity 0.15s ease-out;
+        transition: opacity ${animDuration.normal} ${SETTINGS_UI_DESIGN.motion.easing};
       }
       @starting-style {
         .yt-chat-overlay-tooltip:popover-open {
