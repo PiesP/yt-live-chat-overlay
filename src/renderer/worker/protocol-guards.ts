@@ -9,11 +9,9 @@
  * renderer state.
  */
 
-// ── Helpers ───────────────────────────────────────────────────────────────
+import { isRecord } from '@piesp/browser-core/util';
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
+// ── Helpers ───────────────────────────────────────────────────────────────
 
 function isFiniteNonNegative(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0;

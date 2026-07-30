@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
+import type { Locale, SettingLocale } from '@piesp/browser-core/locale';
+
 /** Author type classification */
 export type AuthorType = 'normal' | 'member' | 'moderator' | 'owner' | 'verified';
 /** Console log level for overlay diagnostics */
@@ -30,17 +32,17 @@ export type DropReason =
 /** Backlog injection modes */
 export type BacklogMode = 'playback' | 'recent' | 'full' | 'none';
 /** Language setting: auto-detect or explicit locale */
-export type LanguageSetting = 'auto' | 'en' | 'ko' | 'ja' | 'es' | 'zh-CN' | 'ar';
+export type LanguageSetting = SettingLocale;
 /** Translation service provider */
 export type TranslationService = 'auto' | 'off';
 /** Translation display mode */
 export type TranslationMode = 'dual' | 'replace';
 /** Valid source/target languages for translation (excludes 'auto') */
-export type TranslationLanguage = 'en' | 'ko' | 'ja' | 'es' | 'zh-CN' | 'ar';
+export type TranslationLanguage = Locale;
 /** Target language for translation — 'auto' resolves to browser language via navigator.language */
-export type TranslationTarget = TranslationLanguage | 'auto';
+export type TranslationTarget = SettingLocale;
 /** Source language for translation — 'auto' uses Chrome Language Detector API or Unicode heuristics */
-export type TranslationSource = TranslationLanguage | 'auto';
+export type TranslationSource = SettingLocale;
 
 /** RGB color representation (readonly, immutable). */
 export interface RgbColor {

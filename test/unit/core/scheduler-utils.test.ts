@@ -96,11 +96,6 @@ describe('yieldAtDeadline', () => {
     vi.restoreAllMocks();
   });
 
-  function advanceTime(ms: number) {
-    now += ms;
-    vi.advanceTimersByTime(ms);
-  }
-
   it('returns same deadline when not exceeded', async () => {
     const deadline = now + 50; // budget remaining
     const result = await yieldAtDeadline(deadline);
@@ -111,7 +106,7 @@ describe('yieldAtDeadline', () => {
     const deadline = now - 1; // already exceeded
     const resultPromise = yieldAtDeadline(deadline);
     // The function should yield (setTimeout(0)) and return new deadline
-    advanceTime(0);
+    await vi.runAllTimersAsync();
     const result = await resultPromise;
     expect(result).toBeGreaterThan(deadline);
     expect(result).toBeGreaterThan(now - 50); // new deadline is now + budgetMs
@@ -120,7 +115,7 @@ describe('yieldAtDeadline', () => {
   it('defaults to 50ms budget when not specified', async () => {
     const deadline = now - 1; // exceeded
     const resultPromise = yieldAtDeadline(deadline);
-    advanceTime(0);
+    await vi.runAllTimersAsync();
     const result = await resultPromise;
     // new deadline = now + 50 (default budget)
     expect(result).toBe(now + 50);
@@ -129,7 +124,7 @@ describe('yieldAtDeadline', () => {
   it('uses custom budget when specified', async () => {
     const deadline = now - 1; // exceeded
     const resultPromise = yieldAtDeadline(deadline, 100);
-    advanceTime(0);
+    await vi.runAllTimersAsync();
     const result = await resultPromise;
     expect(result).toBe(now + 100);
   });
