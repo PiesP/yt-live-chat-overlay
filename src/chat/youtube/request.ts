@@ -5,7 +5,8 @@ export type JsonObject = Record<string, unknown>;
 
 /**
  * Type guard that checks whether a value is a non-null, non-array object.
- * Used to safely narrow `unknown` values parsed from YouTube API JSON responses.
+ * Kept local because E2E fixtures execute this source module directly in Node,
+ * while browser-core intentionally exports TypeScript source for bundlers.
  *
  * @param value - The value to check
  * @returns `true` if the value is a plain object record

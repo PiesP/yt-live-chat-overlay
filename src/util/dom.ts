@@ -5,7 +5,13 @@ import { sleep } from '@piesp/browser-core/async';
 import { throwIfAborted as throwIfAbortedFn } from '@piesp/browser-core/error';
 import { createLogger } from '@util/logging';
 
-export { sleep } from '@piesp/browser-core/async';
+/** @deprecated Import from @piesp/browser-core/async instead. */
+export {
+  clearSafeAnimationFrame,
+  clearSafeInterval,
+  clearSafeTimeout,
+  sleep,
+} from '@piesp/browser-core/async';
 /** @deprecated Import from @piesp/browser-core/error instead. */
 export { isAbortError, throwIfAborted } from '@piesp/browser-core/error';
 
@@ -155,23 +161,6 @@ export async function findPlayerContainerElement(
 
   return pollForPlayerContainer(attempts, intervalMs, signal);
 }
-
-const clearSafe = <T>(value: T | null, clearFn: (v: T) => void): null => {
-  if (value !== null) clearFn(value);
-  return null;
-};
-
-/** Clear a timeout timer and null the reference. Idempotent if already null. */
-export const clearSafeTimeout = (timer: ReturnType<typeof setTimeout> | null): null =>
-  clearSafe(timer, clearTimeout);
-
-/** Clear an interval timer and null the reference. Idempotent if already null. */
-export const clearSafeInterval = (timer: ReturnType<typeof setInterval> | null): null =>
-  clearSafe(timer, clearInterval);
-
-/** Cancel an animation frame handle and null the reference. */
-export const clearSafeAnimationFrame = (handle: number | null): null =>
-  clearSafe(handle, cancelAnimationFrame);
 
 /** Iterate over slot indices for a multi-slot placement. */
 export function forEachSlot(
