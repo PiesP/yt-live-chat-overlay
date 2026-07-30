@@ -2,6 +2,9 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SettingsUi } from '@settings/ui/controller';
+import { SETTINGS_UI_DESIGN } from '@settings/ui/design-adapter';
+import { STYLE_ID } from '@settings/ui/form';
+import { SETTINGS_UI_STYLES } from '@settings/ui/styles';
 import type { OverlaySettings } from '@app-types';
 
 // Mock findPlayerContainerElement so it returns our player element
@@ -132,6 +135,11 @@ describe('SettingsUi', () => {
     const modal = document.getElementById('yt-chat-overlay-settings-backdrop');
     expect(modal).not.toBeNull();
     expect(modal).toBeInstanceOf(HTMLDialogElement);
+
+    const style = document.getElementById(STYLE_ID);
+    expect(style?.tagName).toBe('STYLE');
+    expect(style?.textContent).toBe(SETTINGS_UI_STYLES);
+    expect(style?.textContent).toContain(SETTINGS_UI_DESIGN.colors.accent);
 
     c.destroy();
 
