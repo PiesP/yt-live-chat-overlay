@@ -18,38 +18,17 @@
  *   Falls back to setTimeout(0) or Promise microtask.
  */
 
+import { schedulerYield } from '@piesp/browser-core/util';
+
 /** Default budget per yield slice (50ms = long task boundary per RAIL). */
 const YIELD_BUDGET_MS = 50;
 
 // ── Feature detection (computed once at module load) ──────────────────────
 
-const hasSchedulerYield: boolean =
-  typeof globalThis !== 'undefined' &&
-  globalThis.scheduler !== undefined &&
-  typeof (globalThis.scheduler as { yield?: unknown }).yield === 'function';
-
 const hasPostTask: boolean =
   typeof globalThis !== 'undefined' &&
   globalThis.scheduler !== undefined &&
   typeof (globalThis.scheduler as { postTask?: unknown }).postTask === 'function';
-
-// ── scheduler.yield() wrapper ────────────────────────────────────────────
-
-/**
- * Yield control back to the browser's main thread so it can process pending
- * user input, rendering, or other high-priority work.
- *
- * Uses the native scheduler.yield() when available (more efficient — avoids
- * the ~4ms minimum setTimeout delay), otherwise falls back to
- * new Promise(resolve => setTimeout(resolve, 0)).
- */
-async function schedulerYield(): Promise<void> {
-  if (hasSchedulerYield) {
-    await (globalThis.scheduler as unknown as { yield(): Promise<void> }).yield();
-  } else {
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
-  }
-}
 
 // ── scheduler.postTask() wrapper ─────────────────────────────────────────
 

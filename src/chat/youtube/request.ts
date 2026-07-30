@@ -1,17 +1,11 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-export type JsonObject = Record<string, unknown>;
+import { isRecord } from '@piesp/browser-core/util';
 
-/**
- * Type guard that checks whether a value is a non-null, non-array object.
- * Used to safely narrow `unknown` values parsed from YouTube API JSON responses.
- *
- * @param value - The value to check
- * @returns `true` if the value is a plain object record
- */
-export const isRecord = (value: unknown): value is JsonObject =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
+export { isRecord };
+
+export type JsonObject = Record<string, unknown>;
 
 /**
  * Safely casts a value to a {@link JsonObject} if it is a record, otherwise
