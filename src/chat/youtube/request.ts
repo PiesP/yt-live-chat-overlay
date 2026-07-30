@@ -1,11 +1,18 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { isRecord } from '@piesp/browser-core/util';
-
-export { isRecord };
-
 export type JsonObject = Record<string, unknown>;
+
+/**
+ * Type guard that checks whether a value is a non-null, non-array object.
+ * Kept local because E2E fixtures execute this source module directly in Node,
+ * while browser-core intentionally exports TypeScript source for bundlers.
+ *
+ * @param value - The value to check
+ * @returns `true` if the value is a plain object record
+ */
+export const isRecord = (value: unknown): value is JsonObject =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /**
  * Safely casts a value to a {@link JsonObject} if it is a record, otherwise
