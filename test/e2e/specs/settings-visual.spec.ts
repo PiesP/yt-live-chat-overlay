@@ -16,7 +16,7 @@
 
 import { test, expect, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
-import { setupOverlayPage } from '../fixtures/test-utils';
+import { setupOverlayPage, waitForStoredSettings } from '../fixtures/test-utils';
 
 const BUTTON_ID = 'yt-chat-overlay-settings-button';
 
@@ -89,6 +89,35 @@ test.describe('Settings UI Visual', () => {
     expect(box).not.toBeNull();
     expect(box!.width).toBeGreaterThan(280);
     expect(box!.height).toBeGreaterThan(180);
+  });
+
+  test('author background controls expose defaults and persist a selected color', async ({
+    page,
+  }) => {
+    await openSettingsModal(page);
+    await page.locator('#tab-colors').click();
+
+    const normalToggle = page.locator('input[name="backgroundEnabled-normal"]');
+    const moderatorToggle = page.locator('input[name="backgroundEnabled-moderator"]');
+    const ownerToggle = page.locator('input[name="backgroundEnabled-owner"]');
+    const normalColor = page.locator('input[name="backgroundColor-normal"]');
+
+    await expect(normalToggle).not.toBeChecked();
+    await expect(moderatorToggle).toBeChecked();
+    await expect(ownerToggle).toBeChecked();
+    await expect(page.locator('input[name="backgroundColor-moderator"]')).toHaveValue('#1b3a6f');
+    await expect(page.locator('input[name="backgroundColor-owner"]')).toHaveValue('#6b4f00');
+
+    await normalColor.evaluate((input: HTMLInputElement) => {
+      input.value = '#123456';
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await expect(normalToggle).toBeChecked();
+
+    await page.keyboard.press('Escape');
+    await waitForStoredSettings(page, {
+      backgroundColors: { normal: '#12345659' },
+    });
   });
 
   test('exports the current settings as a versioned JSON download', async ({ page }) => {

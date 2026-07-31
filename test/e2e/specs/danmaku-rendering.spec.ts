@@ -110,6 +110,71 @@ test.describe('Danmaku Rendering', () => {
     await expect(receivedAndRendered).toHaveText('Rcvd: 1 | Rndr: 1');
   });
 
+  test('renders a user-selected solid translucent background on a regular message', async ({
+    page,
+  }, testInfo) => {
+    const runtimeErrors: string[] = [];
+    page.on('pageerror', (error) => runtimeErrors.push(error.message));
+    page.on('console', (message) => {
+      if (message.type() === 'error') runtimeErrors.push(message.text());
+    });
+
+    await setupOverlayPage(page);
+    await applySettings(page, {
+      allowShortTextMessages: true,
+      backgroundColors: { normal: '#FF000059' },
+      danmakuMode: 'top',
+      showDebugOverlay: true,
+    });
+
+    await page.evaluate(() => {
+      const items = document.querySelector('yt-live-chat-item-list-renderer #items');
+      if (!items) throw new Error('Mock live chat items container is missing');
+
+      const renderer = document.createElement('yt-live-chat-text-message-renderer');
+      renderer.id = 'e2e-background-message';
+      const author = document.createElement('span');
+      author.id = 'author-name';
+      author.textContent = 'Background Author';
+      const message = document.createElement('span');
+      message.id = 'message';
+      message.textContent = 'Solid translucent background verification';
+      renderer.append(author, message);
+      items.append(renderer);
+    });
+
+    await expect(page.locator('#yt-chat-overlay-debug > div').first()).toHaveText(
+      'Rcvd: 1 | Rndr: 1'
+    );
+
+    const canvas = page.locator(`#${OVERLAY_ID} canvas`);
+    await expect
+      .poll(
+        () =>
+          canvas.evaluate((element: HTMLCanvasElement) => {
+            const context = element.getContext('2d');
+            if (!context) return 0;
+            const pixels = context.getImageData(0, 0, element.width, element.height).data;
+            let redPixels = 0;
+            for (let i = 0; i < pixels.length; i += 4) {
+              if (pixels[i]! > 180 && pixels[i + 1]! < 80 && pixels[i + 2]! < 80 && pixels[i + 3]! > 20) {
+                redPixels++;
+              }
+            }
+            return redPixels;
+          }),
+        { timeout: 5000 }
+      )
+      .toBeGreaterThan(200);
+
+    await canvas.screenshot({ path: testInfo.outputPath('regular-message-background.png') });
+
+    const overlayErrors = runtimeErrors.filter((error) =>
+      /yt-live-chat-overlay|danmaku|renderer|worker/i.test(error)
+    );
+    expect(overlayErrors).toEqual([]);
+  });
+
   test('overlay does not throw errors during initialization', async ({ page }) => {
     const errors: string[] = [];
     page.on('pageerror', (err) => errors.push(err.message));
