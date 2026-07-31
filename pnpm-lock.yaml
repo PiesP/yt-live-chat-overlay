@@ -40,8 +40,8 @@ importers:
         specifier: ^3.2.3
         version: 3.2.3
       dpdm:
-        specifier: 4.2.0
-        version: 4.2.0
+        specifier: 4.3.0
+        version: 4.3.0
       jsdom:
         specifier: ^30.0.0
         version: 30.0.0(canvas@3.2.3)
@@ -1400,8 +1400,8 @@ packages:
     resolution: {integrity: sha512-qI4JLRKnSzqFqr7hAlS5xQDusBCjKSEG4t4+7aNrIQMHBcsC2TGEhuyABJdYkgSewL57PNLYEiibY2iPKhKpaA==}
     engines: {node: '>=20.19.0'}
 
-  dpdm@4.2.0:
-    resolution: {integrity: sha512-Vq862fZ9UE66rlr2VcMhU8ZstTH3ItqmniLSCtAeg6T2AYeB2oD3Z6lGjiFDjyUvxLbfLyBBNWagCLMehpmo5g==}
+  dpdm@4.3.0:
+    resolution: {integrity: sha512-2ZrP5B3MHHo7mXWgNxntU5DhJIvXNP4hcMBdCJsuxEWenKMdf4h6XouuKMf3Sj2SAUNBy/ajcWAVIyiOZly6rw==}
     hasBin: true
 
   dunder-proto@1.0.1:
@@ -3562,7 +3562,7 @@ snapshots:
       domelementtype: 3.0.0
       domhandler: 6.0.1
 
-  dpdm@4.2.0:
+  dpdm@4.3.0:
     dependencies:
       chalk: 5.6.2
       fs-extra: 11.4.0
