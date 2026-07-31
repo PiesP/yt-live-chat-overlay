@@ -148,7 +148,7 @@ const MIGRATIONS: Readonly<Record<number, MigrationFn>> = {
   // v1 → v2: add configurable backgrounds for regular messages.
   1: (s: Record<string, unknown>): Record<string, unknown> => ({
     ...s,
-    backgroundColors: s.backgroundColors ?? DEFAULT_SETTINGS.backgroundColors,
+    backgroundColors: s.backgroundColors ?? { ...DEFAULT_SETTINGS.backgroundColors },
     _version: 2,
   }),
 };

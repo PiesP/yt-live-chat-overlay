@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { migrateSettings, SETTINGS_VERSION, STORAGE_KEY } from '@settings/defaults';
+import {
+  DEFAULT_SETTINGS,
+  migrateSettings,
+  SETTINGS_VERSION,
+  STORAGE_KEY,
+} from '@settings/defaults';
 
 // ── migrateSettings ─────────────────────────────────────────────
 
@@ -36,6 +41,14 @@ describe('migrateSettings', () => {
       owner: '#6B4F0059',
       verified: '#00000000',
     });
+  });
+
+  it('does not expose the shared background color defaults through migration results', () => {
+    const result = migrateSettings({ _version: 1 });
+
+    expect(result.backgroundColors).not.toBe(DEFAULT_SETTINGS.backgroundColors);
+    (result.backgroundColors as Record<string, string>).normal = '#12345659';
+    expect(DEFAULT_SETTINGS.backgroundColors.normal).toBe('#00000000');
   });
 
   it('preserves all original keys', () => {
