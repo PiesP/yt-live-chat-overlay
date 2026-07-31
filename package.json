@@ -79,7 +79,7 @@
   },
   "packageManager": "pnpm@11.17.0",
   "volta": {
-    "node": "26.5.0",
+    "node": "26.5.1",
     "pnpm": "11.17.0"
   },
   "dependencies": {
@@ -94,8 +94,8 @@
     "@types/node": "^26.1.2",
     "@vitest/coverage-v8": "^4.1.10",
     "canvas": "^3.2.3",
-    "dpdm": "4.2.0",
-    "jsdom": "^30.0.0",
+    "dpdm": "4.3.0",
+    "jsdom": "^30.0.1",
     "knip": "^6.29.0",
     "typescript": "7.0.2",
     "vite": "^8.1.5",
