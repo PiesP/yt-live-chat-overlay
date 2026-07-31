@@ -74,6 +74,7 @@ export class RenderWorkerManager {
     'superChatMaxBodyLines',
     'membershipMaxBodyLines',
     'showAuthor',
+    'backgroundColors',
     'showSuperChatAmount',
     'translationEnabled',
     'translationMode',
@@ -110,6 +111,7 @@ export class RenderWorkerManager {
     config.outlineWidthPx = settings.outline.enabled ? settings.outline.widthPx : 0;
     config.outlineOpacity = settings.outline.enabled ? settings.outline.opacity : 0;
     config.authorColors = { ...settings.colors };
+    config.backgroundColors = { ...settings.backgroundColors };
     config.color = settings.colors.normal;
     // Workers cannot access matchMedia — main thread relays the OS preference.
     config.reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -705,6 +707,7 @@ export class RenderWorkerManager {
     config.outlineWidthPx = settings.outline.enabled ? settings.outline.widthPx : 0;
     config.outlineOpacity = settings.outline.enabled ? settings.outline.opacity : 0;
     config.authorColors = { ...settings.colors };
+    config.backgroundColors = { ...settings.backgroundColors };
     config.color = settings.colors.normal;
     config.reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     sendUpdateConfigToWorker({ worker: this.worker }, config);

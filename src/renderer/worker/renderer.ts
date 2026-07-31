@@ -1443,6 +1443,9 @@ export class WorkerRenderer {
                   color: renderColor,
                   outlineWidthPx: strokeWidth,
                   outlineOpacity: cfg.outlineOpacity,
+                  backgroundColor: cfg.backgroundColors[msg.authorType ?? 'normal'] ?? '#00000000',
+                  messageWidth: msg.width,
+                  messageHeight: msg.height,
                 },
                 this.textBitmapCache,
                 (url: string) => this.emojiCache.get(url),
@@ -1473,7 +1476,7 @@ export class WorkerRenderer {
                 renderSegment(
                   this.ctx,
                   msg.translatedText,
-                  sx,
+                  sx + (msg.cardConfigWorker ? 0 : rendererLayout.paddingH),
                   Math.floor(translationY),
                   translationColor,
                   translationFontSize,

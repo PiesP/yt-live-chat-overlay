@@ -417,6 +417,9 @@ export function drawStage(
                 ctx.settings.preserveUserColor && renderMessage.userColor
                   ? renderMessage.userColor
                   : ctx.settings.colors[renderMessage.authorType],
+              backgroundColor: ctx.settings.backgroundColors[renderMessage.authorType],
+              messageWidth: msg.width,
+              messageHeight: msg.height,
             },
             ctx.textBitmapCache,
             (url: string) => ctx.imageFetchManager.emojiCache.get(url),
@@ -483,7 +486,7 @@ export function drawStage(
             renderSegment(
               renderCtx,
               msg.translatedText,
-              snappedX,
+              snappedX + (msg.message.kind === 'text' ? rendererLayout.paddingH : 0),
               transY,
               transColor,
               fontSize,

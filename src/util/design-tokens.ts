@@ -141,6 +141,8 @@ export const rendererLayout = {
   // ── Message layout ──
   /** Message padding: horizontal (px) */
   paddingH: 12,
+  /** Regular message background border radius (px) */
+  messageBackgroundRadius: 6,
   /** SuperChat card min width (px) */
   superchatMinWidth: 280,
   /** SuperChat card max width (px) */
