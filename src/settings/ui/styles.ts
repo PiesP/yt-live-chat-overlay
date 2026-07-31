@@ -525,7 +525,7 @@ export const SETTINGS_UI_STYLES = `
          become direct grid items (immune to wrapper insertion/removal) */
       .yt-chat-overlay-author-grid {
         display: grid;
-        grid-template-columns: 1fr auto auto;
+        grid-template-columns: 1fr auto auto auto;
         gap: ${spacing.sm}px ${spacing.md}px;
         align-items: center;
       }
@@ -565,6 +565,16 @@ export const SETTINGS_UI_STYLES = `
       }
       .yt-chat-overlay-author-grid [role="gridcell"]:has(> .yt-chat-overlay-author-grid-checkbox) {
         justify-self: center;
+      }
+      .yt-chat-overlay-author-grid-background {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: ${spacing.xs}px;
+      }
+      .yt-chat-overlay-author-grid-background-toggle {
+        width: ${uiSizing.checkboxSize}px;
+        height: ${uiSizing.checkboxSize}px;
       }
       .yt-chat-overlay-author-grid-color-superchat {
         width: ${uiSizing.colorSwatch}px;

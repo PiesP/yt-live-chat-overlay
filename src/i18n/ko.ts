@@ -291,6 +291,7 @@ export const KO: Record<string, string> = {
   // ── Author grid ──
   Color: '색상',
   'appearance.authorsNameColor': '이름 색상',
+  'appearance.authorsBackground': '배경',
   Show: '표시',
   'appearance.authorsShowName': '이름 표시',
   Normal: '일반',

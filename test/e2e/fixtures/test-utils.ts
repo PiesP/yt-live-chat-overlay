@@ -80,6 +80,7 @@ export const DEFAULT_SETTINGS: Record<string, unknown> = {
   // Deep-copy nested objects so tests can mutate without side effects
   showAuthor: { ...SRC_DEFAULTS.showAuthor },
   colors: { ...SRC_DEFAULTS.colors },
+  backgroundColors: { ...SRC_DEFAULTS.backgroundColors },
   outline: { ...SRC_DEFAULTS.outline },
 };
 

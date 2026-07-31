@@ -14,7 +14,7 @@ import type {
   TranslationSource,
   TranslationTarget,
 } from '@app-types';
-import { DEFAULT_SETTINGS, migrateSettings } from '@settings/defaults';
+import { AUTHOR_BACKGROUND_ALPHA_HEX, DEFAULT_SETTINGS, migrateSettings } from '@settings/defaults';
 import { resolveLimits } from '@settings/limits';
 import {
   AUTHOR_COLOR_KEYS,
@@ -25,6 +25,7 @@ import {
 
 // ── Re-exports for backward compatibility ───────────────────────────────────────
 export {
+  AUTHOR_BACKGROUND_ALPHA_HEX,
   DEFAULT_SETTINGS,
   migrateSettings,
   SETTINGS_VERSION,
@@ -120,8 +121,32 @@ export const cloneSettings = (settings: Readonly<OverlaySettings>): OverlaySetti
   ...settings,
   showAuthor: { ...settings.showAuthor },
   colors: { ...settings.colors },
+  backgroundColors: { ...settings.backgroundColors },
   outline: { ...settings.outline },
 });
+
+/**
+ * Canonicalize a background color to #RRGGBBAA. RGB inputs receive the
+ * product's fixed translucent alpha. Only fully transparent alpha is preserved.
+ */
+export function normalizeBackgroundColor(value: unknown, fallback: string): string {
+  if (!isColorValue(value)) return fallback;
+
+  const hex = value.slice(1);
+  let rgba: string;
+  if (hex.length === 3) {
+    rgba = `${hex[0]}${hex[0]}${hex[1]}${hex[1]}${hex[2]}${hex[2]}${AUTHOR_BACKGROUND_ALPHA_HEX}`;
+  } else if (hex.length === 4) {
+    const alpha = `${hex[3]}${hex[3]}`.toUpperCase() === '00' ? '00' : AUTHOR_BACKGROUND_ALPHA_HEX;
+    rgba = `${hex[0]}${hex[0]}${hex[1]}${hex[1]}${hex[2]}${hex[2]}${alpha}`;
+  } else if (hex.length === 6) {
+    rgba = `${hex}${AUTHOR_BACKGROUND_ALPHA_HEX}`;
+  } else {
+    const alpha = hex.slice(6).toUpperCase() === '00' ? '00' : AUTHOR_BACKGROUND_ALPHA_HEX;
+    rgba = `${hex.slice(0, 6)}${alpha}`;
+  }
+  return `#${rgba.toUpperCase()}`;
+}
 
 // ── Normalization ───────────────────────────────────────────────────────────────
 
@@ -192,6 +217,10 @@ const normalizeSettings = (settings: Readonly<OverlaySettings>): OverlaySettings
 
   for (const key of AUTHOR_COLOR_KEYS) {
     out.colors[key] = isColorValue(settings.colors[key]) ? settings.colors[key] : d.colors[key];
+    out.backgroundColors[key] = normalizeBackgroundColor(
+      settings.backgroundColors[key],
+      d.backgroundColors[key]
+    );
   }
 
   out.outline.enabled = pickBool(settings.outline.enabled, d.outline.enabled);
@@ -234,6 +263,7 @@ export function applySettingsPatch(
     ...partial,
     showAuthor: { ...base.showAuthor, ...partial.showAuthor },
     colors: { ...base.colors, ...partial.colors },
+    backgroundColors: { ...base.backgroundColors, ...partial.backgroundColors },
     outline: { ...base.outline, ...partial.outline },
   };
   return normalizeSettings(merged);

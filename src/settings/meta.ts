@@ -34,7 +34,10 @@ type SettingMeta = {
   displayPrecision?: number;
 };
 
-type RootScalarSettingKey = Exclude<keyof OverlaySettings, 'showAuthor' | 'colors' | 'outline'>;
+type RootScalarSettingKey = Exclude<
+  keyof OverlaySettings,
+  'showAuthor' | 'colors' | 'backgroundColors' | 'outline'
+>;
 
 export type { RootScalarSettingKey };
 

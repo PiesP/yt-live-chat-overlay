@@ -22,8 +22,8 @@ import type { OverlaySettings } from '@app-types';
 // ═══════════════════════════════════════════════════════════
 
 describe('SETTINGS_VERSION', () => {
-  it('is 1', () => {
-    expect(SETTINGS_VERSION).toBe(1);
+  it('is 2', () => {
+    expect(SETTINGS_VERSION).toBe(2);
   });
 });
 
@@ -66,6 +66,16 @@ describe('DEFAULT_SETTINGS', () => {
     }
   });
 
+  it('defaults regular author backgrounds to transparent and highlights moderators and owners', () => {
+    expect(DEFAULT_SETTINGS.backgroundColors).toEqual({
+      normal: '#00000000',
+      member: '#00000000',
+      moderator: '#1B3A6F59',
+      owner: '#6B4F0059',
+      verified: '#00000000',
+    });
+  });
+
   it('has translation defaults (translationTarget was covered in dedicated test)', () => {
     expect(DEFAULT_SETTINGS.translationEnabled).toBe(false);
     expect(DEFAULT_SETTINGS.translationService).toBe('auto');
@@ -99,6 +109,12 @@ describe('cloneSettings', () => {
     expect(cloned.colors).toEqual(DEFAULT_SETTINGS.colors);
   });
 
+  it('deep-clones backgroundColors', () => {
+    const cloned = cloneSettings(DEFAULT_SETTINGS);
+    expect(cloned.backgroundColors).not.toBe(DEFAULT_SETTINGS.backgroundColors);
+    expect(cloned.backgroundColors).toEqual(DEFAULT_SETTINGS.backgroundColors);
+  });
+
   it('deep-clones outline', () => {
     const cloned = cloneSettings(DEFAULT_SETTINGS);
     expect(cloned.outline).not.toBe(DEFAULT_SETTINGS.outline);
@@ -111,10 +127,12 @@ describe('cloneSettings', () => {
 
     clone.showAuthor.normal = true;
     clone.colors.normal = '#000000';
+    clone.backgroundColors.normal = '#11223359';
     clone.outline.widthPx = 99;
 
     expect(original.showAuthor.normal).toBe(DEFAULT_SETTINGS.showAuthor.normal);
     expect(original.colors.normal).toBe(DEFAULT_SETTINGS.colors.normal);
+    expect(original.backgroundColors.normal).toBe(DEFAULT_SETTINGS.backgroundColors.normal);
     expect(original.outline.widthPx).toBe(DEFAULT_SETTINGS.outline.widthPx);
   });
 
@@ -338,6 +356,13 @@ describe('shouldResetRendererForSettingsChange', () => {
     expect(shouldResetRendererForSettingsChange(a, b)).toBe(true);
   });
 
+  it('returns false when only backgroundColors change because they are paint-only', () => {
+    const a = cloneSettings(DEFAULT_SETTINGS);
+    const b = cloneSettings(DEFAULT_SETTINGS);
+    b.backgroundColors.normal = '#11223359';
+    expect(shouldResetRendererForSettingsChange(a, b)).toBe(false);
+  });
+
   it('returns true when outline.enabled changes', () => {
     const a = cloneSettings(DEFAULT_SETTINGS);
     const b = cloneSettings(DEFAULT_SETTINGS);
@@ -459,6 +484,22 @@ describe('applySettingsPatch', () => {
     expect(result.colors.normal).toBe(DEFAULT_SETTINGS.colors.normal);
   });
 
+  it('merges and canonicalizes background colors to translucent RGBA hex', () => {
+    const result = applySettingsPatch(DEFAULT_SETTINGS, {
+      backgroundColors: { normal: '#123456' },
+    } as Partial<OverlaySettings>);
+    expect(result.backgroundColors.normal).toBe('#12345659');
+    expect(result.backgroundColors.owner).toBe(DEFAULT_SETTINGS.backgroundColors.owner);
+  });
+
+  it('normalizes explicit nonzero alpha and rejects invalid background colors', () => {
+    const result = applySettingsPatch(DEFAULT_SETTINGS, {
+      backgroundColors: { normal: '#1234', member: 'transparent' },
+    } as Partial<OverlaySettings>);
+    expect(result.backgroundColors.normal).toBe('#11223359');
+    expect(result.backgroundColors.member).toBe(DEFAULT_SETTINGS.backgroundColors.member);
+  });
+
   it('merges outline partial', () => {
     const result = applySettingsPatch(DEFAULT_SETTINGS, {
       outline: { widthPx: 8 },
@@ -542,6 +583,7 @@ describe('normalizeStoredSettings', () => {
     expect(result).not.toBe(DEFAULT_SETTINGS);
     expect(result.showAuthor).not.toBe(DEFAULT_SETTINGS.showAuthor);
     expect(result.colors).not.toBe(DEFAULT_SETTINGS.colors);
+    expect(result.backgroundColors).not.toBe(DEFAULT_SETTINGS.backgroundColors);
     expect(result.outline).not.toBe(DEFAULT_SETTINGS.outline);
   });
 
@@ -616,6 +658,15 @@ describe('normalizeStoredSettings', () => {
       colors: { normal: 'red' },
     });
     expect(result.colors.normal).toBe(DEFAULT_SETTINGS.colors.normal);
+  });
+
+  it('accepts and canonicalizes stored background colors', () => {
+    const result = normalizeStoredSettings({
+      backgroundColors: { normal: '#ABC', moderator: '#10203040' },
+      _version: 2,
+    });
+    expect(result.backgroundColors.normal).toBe('#AABBCC59');
+    expect(result.backgroundColors.moderator).toBe('#10203059');
   });
 
   it('accepts valid outline partial from storage', () => {
@@ -824,16 +875,26 @@ describe('clampNumber', () => {
 // ═══════════════════════════════════════════════════════════
 
 describe('migrateSettings', () => {
-  it('empty object → stamps _version:1', () => {
-    expect(migrateSettings({})).toEqual({ _version: 1 });
+  it('empty object → stamps the current version and adds background defaults', () => {
+    expect(migrateSettings({})).toEqual({
+      _version: 2,
+      backgroundColors: DEFAULT_SETTINGS.backgroundColors,
+    });
   });
 
-  it('object without _version → adds _version:1', () => {
-    expect(migrateSettings({ foo: 'bar' })).toEqual({ foo: 'bar', _version: 1 });
+  it('object without _version → migrates to the current version', () => {
+    expect(migrateSettings({ foo: 'bar' })).toEqual({
+      foo: 'bar',
+      _version: 2,
+      backgroundColors: DEFAULT_SETTINGS.backgroundColors,
+    });
   });
 
-  it('object with _version:0 → sets _version:1', () => {
-    expect(migrateSettings({ _version: 0 })).toEqual({ _version: 1 });
+  it('object with _version:0 → migrates through both versions', () => {
+    expect(migrateSettings({ _version: 0 })).toEqual({
+      _version: 2,
+      backgroundColors: DEFAULT_SETTINGS.backgroundColors,
+    });
   });
 
   it('object with _version:2 → preserves _version:2', () => {
@@ -842,10 +903,18 @@ describe('migrateSettings', () => {
 
   it('preserves other keys', () => {
     const input = { fontSize: 32, speedPxPerSec: 250 };
-    expect(migrateSettings(input)).toEqual({ fontSize: 32, speedPxPerSec: 250, _version: 1 });
+    expect(migrateSettings(input)).toEqual({
+      fontSize: 32,
+      speedPxPerSec: 250,
+      _version: 2,
+      backgroundColors: DEFAULT_SETTINGS.backgroundColors,
+    });
   });
 
-  it('object with _version:1 → preserves _version:1', () => {
-    expect(migrateSettings({ _version: 1 })).toEqual({ _version: 1 });
+  it('object with _version:1 → adds background defaults and upgrades to v2', () => {
+    expect(migrateSettings({ _version: 1 })).toEqual({
+      _version: 2,
+      backgroundColors: DEFAULT_SETTINGS.backgroundColors,
+    });
   });
 });

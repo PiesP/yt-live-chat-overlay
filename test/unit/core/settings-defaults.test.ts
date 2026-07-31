@@ -16,13 +16,26 @@ describe('migrateSettings', () => {
 
   it('upgrades _version when lower than current', () => {
     const result = migrateSettings({ _version: 0, enabled: true });
-    expect(result._version).toBe(1);
+    expect(result._version).toBe(2);
   });
 
-  it('migrates from 0 to 1 (upgrades lower version)', () => {
+  it('migrates from 0 to the current version', () => {
     const result = migrateSettings({ _version: 0, fontSize: 24 });
-    expect(result._version).toBe(1);
+    expect(result._version).toBe(2);
     expect(result.fontSize).toBe(24);
+  });
+
+  it('adds author background colors when migrating v1 settings', () => {
+    const result = migrateSettings({ _version: 1, fontSize: 24 });
+
+    expect(result._version).toBe(2);
+    expect(result.backgroundColors).toEqual({
+      normal: '#00000000',
+      member: '#00000000',
+      moderator: '#1B3A6F59',
+      owner: '#6B4F0059',
+      verified: '#00000000',
+    });
   });
 
   it('preserves all original keys', () => {
@@ -46,7 +59,7 @@ describe('migrateSettings', () => {
   });
 
   it('exports SETTINGS_VERSION and STORAGE_KEY as constants', () => {
-    expect(SETTINGS_VERSION).toBe(1);
+    expect(SETTINGS_VERSION).toBe(2);
     expect(STORAGE_KEY).toBe('yt-live-chat-overlay-settings');
   });
 });

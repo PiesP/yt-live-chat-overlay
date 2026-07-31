@@ -30,7 +30,7 @@ function collectI18nKeys(): string[] {
     'reset.confirm', 'import.invalidFormat', 'import.success',
     'import.invalidJson', 'app.settings', 'reset.confirmDesc',
     'format.valueAdjusted', 'format.shortMessagesShown',
-    'app.autoSave', 'app.reload',
+    'app.autoSave', 'app.reload', 'appearance.authorsBackground',
   );
 
   return [...new Set(keys)];

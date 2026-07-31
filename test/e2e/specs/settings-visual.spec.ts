@@ -103,7 +103,7 @@ test.describe('Settings UI Visual', () => {
     expect(path).toBeTruthy();
 
     const exported = JSON.parse(readFileSync(path!, 'utf8')) as Record<string, unknown>;
-    expect(exported._version).toBe(1);
+    expect(exported._version).toBe(2);
     expect(exported.enabled).toBe(true);
     expect(exported.colors).toBeTruthy();
   });
