@@ -15,6 +15,7 @@ import {
   setupOverlayPage,
   OVERLAY_ID,
   getSettings,
+  applySettings,
   USERSCRIPT_PATH,
 } from '../fixtures/test-utils';
 
@@ -69,6 +70,44 @@ test.describe('Danmaku Rendering', () => {
     expect(typeof settings.opacity).toBe('number');
     expect(typeof settings.speedPxPerSec).toBe('number');
     expect(typeof settings.colors).toBe('object');
+  });
+
+  test('renders a real DOM chat message exactly once', async ({ page }) => {
+    await setupOverlayPage(page);
+    await applySettings(page, {
+      showDebugOverlay: true,
+      allowShortTextMessages: true,
+    });
+
+    const chatItems = page.locator('yt-live-chat-item-list-renderer #items');
+    await expect(chatItems).toBeAttached();
+
+    await page.evaluate(() => {
+      const items = document.querySelector('yt-live-chat-item-list-renderer #items');
+      if (!items) throw new Error('Mock live chat items container is missing');
+
+      const appendMessage = (): void => {
+        const renderer = document.createElement('yt-live-chat-text-message-renderer');
+        renderer.id = 'e2e-message-1';
+
+        const author = document.createElement('span');
+        author.id = 'author-name';
+        author.textContent = 'E2E Author';
+
+        const message = document.createElement('span');
+        message.id = 'message';
+        message.textContent = 'Deterministic overlay rendering message';
+
+        renderer.append(author, message);
+        items.append(renderer);
+      };
+
+      appendMessage();
+      appendMessage();
+    });
+
+    const receivedAndRendered = page.locator('#yt-chat-overlay-debug > div').first();
+    await expect(receivedAndRendered).toHaveText('Rcvd: 1 | Rndr: 1');
   });
 
   test('overlay does not throw errors during initialization', async ({ page }) => {
