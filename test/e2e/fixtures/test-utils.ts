@@ -52,7 +52,11 @@ export const MOCK_HTML = `<!DOCTYPE html>
       </div>
     </div>
   </div>
-  <div id="chat" style="display:none"></div>
+  <div id="chat" style="display:none">
+    <yt-live-chat-item-list-renderer>
+      <div id="items"></div>
+    </yt-live-chat-item-list-renderer>
+  </div>
 </body>
 </html>`;
 
