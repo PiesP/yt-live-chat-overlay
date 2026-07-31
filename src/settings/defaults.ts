@@ -22,6 +22,13 @@ const DEFAULT_COLORS = {
   verified: designColors.authorVerified,
 } as const satisfies OverlaySettings['colors'];
 
+const DEFAULT_BACKGROUND_COLORS = {
+  ...designColors.authorBackground,
+} as const satisfies OverlaySettings['backgroundColors'];
+
+/** Alpha appended when the settings UI enables a regular-message background. */
+export const AUTHOR_BACKGROUND_ALPHA_HEX = '59';
+
 const DEFAULT_OUTLINE = {
   enabled: true,
   widthPx: 2,
@@ -46,6 +53,7 @@ export const DEFAULT_SETTINGS = {
   logLevel: 'warn',
   showAuthor: DEFAULT_SHOW_AUTHOR,
   colors: DEFAULT_COLORS,
+  backgroundColors: DEFAULT_BACKGROUND_COLORS,
   outline: DEFAULT_OUTLINE,
   laneSpacing: 0,
   showDebugOverlay: false,
@@ -137,10 +145,16 @@ type MigrationFn = (settings: Record<string, unknown>) => Record<string, unknown
 const MIGRATIONS: Readonly<Record<number, MigrationFn>> = {
   // v0 → v1: initial version stamp (no schema changes)
   0: (s: Record<string, unknown>): Record<string, unknown> => ({ ...s, _version: 1 }),
+  // v1 → v2: add configurable backgrounds for regular messages.
+  1: (s: Record<string, unknown>): Record<string, unknown> => ({
+    ...s,
+    backgroundColors: s.backgroundColors ?? { ...DEFAULT_SETTINGS.backgroundColors },
+    _version: 2,
+  }),
 };
 
 /** Current settings schema version. Must match the highest key in MIGRATIONS + 1. */
-export const SETTINGS_VERSION = 1;
+export const SETTINGS_VERSION = 2;
 
 /**
  * Apply all pending migrations to raw stored settings.

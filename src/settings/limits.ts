@@ -16,6 +16,7 @@ type RootNumericSettingKey = Exclude<
   | 'authorRateLimit'
   | 'showAuthor'
   | 'colors'
+  | 'backgroundColors'
   | 'outline'
 >;
 

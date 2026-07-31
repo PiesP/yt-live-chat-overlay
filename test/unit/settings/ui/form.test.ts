@@ -12,6 +12,7 @@ function makeDefaults(overrides: Partial<OverlaySettings> = {}): OverlaySettings
     logLevel: 'warn' as const,
     showAuthor: { normal: false, member: true, moderator: true, owner: true, verified: true, superChat: true },
     colors: { normal: '#FFFFFF', member: '#0F9D58', moderator: '#5E84F1', owner: '#FFD600', verified: '#AAAAAA' },
+    backgroundColors: { normal: '#00000000', member: '#00000000', moderator: '#1B3A6F59', owner: '#6B4F0059', verified: '#00000000' },
     outline: { enabled: true, widthPx: 2, opacity: 0.7 },
     laneSpacing: 1, showDebugOverlay: false, ignoreReducedMotion: false,
     authorRateLimit: 'normal' as const, backlogMaxRate: 10, backlogSpeedMultiplier: 1,
@@ -200,6 +201,48 @@ describe('SettingsUiForm', () => {
     expect(typeof collected.opacity).toBe('number');
     // fontSize should be preserved
     expect(collected.fontSize).toBe(48);
+
+    form.destroy();
+    modal.remove();
+  });
+
+  it('populates and collects author background color controls', () => {
+    const form = new SettingsUiForm(getSettings, onPreview);
+    const modal = document.createElement('dialog');
+    modal.id = BACKDROP_ID;
+    document.body.appendChild(modal);
+    modal.append(...form.createModalContent());
+    form.setModal(modal);
+    form.populateForm(getSettings());
+
+    const normalColor = modal.querySelector<HTMLInputElement>(
+      'input[name="backgroundColor-normal"]'
+    );
+    const normalEnabled = modal.querySelector<HTMLInputElement>(
+      'input[name="backgroundEnabled-normal"]'
+    );
+    const moderatorColor = modal.querySelector<HTMLInputElement>(
+      'input[name="backgroundColor-moderator"]'
+    );
+    const moderatorEnabled = modal.querySelector<HTMLInputElement>(
+      'input[name="backgroundEnabled-moderator"]'
+    );
+
+    expect(normalColor?.value).toBe('#000000');
+    expect(normalEnabled?.checked).toBe(false);
+    expect(normalColor?.getAttribute('aria-label')).toBe('Normal Background');
+    expect(normalEnabled?.getAttribute('aria-label')).toBe('Show Normal Background');
+    expect(moderatorColor?.value).toBe('#1b3a6f');
+    expect(moderatorEnabled?.checked).toBe(true);
+
+    normalColor!.value = '#112233';
+    normalColor!.dispatchEvent(new Event('change'));
+    expect(normalEnabled?.checked).toBe(true);
+    moderatorEnabled!.checked = false;
+
+    const collected = form.collectSettings();
+    expect(collected.backgroundColors.normal).toBe('#11223359');
+    expect(collected.backgroundColors.moderator).toBe('#1B3A6F00');
 
     form.destroy();
     modal.remove();

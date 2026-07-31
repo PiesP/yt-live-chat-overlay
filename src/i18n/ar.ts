@@ -297,6 +297,7 @@ export const AR: Record<string, string> = {
   // ── Author grid ──
   Color: 'اللون',
   'appearance.authorsNameColor': 'لون الاسم',
+  'appearance.authorsBackground': 'الخلفية',
   Show: 'إظهار',
   'appearance.authorsShowName': 'إظهار الاسم',
   Normal: 'عادي',

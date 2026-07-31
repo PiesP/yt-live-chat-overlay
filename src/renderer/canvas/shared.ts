@@ -502,6 +502,29 @@ export function drawRoundRect(
   ctx.closePath();
 }
 
+/**
+ * Fill the existing bounds of a regular message with a single solid color.
+ *
+ * The caller owns globalAlpha, so the configured RGBA alpha composes with the
+ * renderer's opacity bucket without extra state changes. Fully transparent
+ * colors are skipped to preserve the previous rendering fast path.
+ */
+export function renderRegularMessageBackground(
+  ctx: AnyCanvasContext,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  color: string
+): void {
+  if (width <= 0 || height <= 0 || color.endsWith('00')) return;
+
+  const radius = Math.min(rendererLayout.messageBackgroundRadius, width / 2, height / 2);
+  ctx.fillStyle = color;
+  drawRoundRect(ctx, x, y, width, height, radius);
+  ctx.fill();
+}
+
 // ── Text bitmap cache ──────────────────────────────────────────────────────
 
 /**
@@ -1099,6 +1122,9 @@ export interface RegularMessageRenderConfig {
   color: string;
   outlineWidthPx: number;
   outlineOpacity: number;
+  backgroundColor: string;
+  messageWidth: number;
+  messageHeight: number;
 }
 
 /**
@@ -1127,8 +1153,19 @@ export function renderRegularMessage(
   overrideText?: string | null,
   letterSpacing = '0px'
 ): void {
-  const { showAuthor, fontSize, fontWeight, fontFamily, color, outlineWidthPx, outlineOpacity } =
-    config;
+  const {
+    showAuthor,
+    fontSize,
+    fontWeight,
+    fontFamily,
+    color,
+    outlineWidthPx,
+    outlineOpacity,
+    backgroundColor,
+    messageWidth,
+    messageHeight,
+  } = config;
+  renderRegularMessageBackground(ctx, x, y, messageWidth, messageHeight, backgroundColor);
   const textX = x + rendererLayout.paddingH;
   let textY = y;
 

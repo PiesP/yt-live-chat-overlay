@@ -20,6 +20,7 @@ vi.stubGlobal('queueMicrotask', (fn: () => void) => {
 // ══════════════════════════════════════════════════════════════════════
 
 import { RenderWorkerManager } from '@renderer/worker/manager';
+import { DEFAULT_SETTINGS } from '@settings/schema';
 
 function createMinimalDeps() {
   return {
@@ -52,6 +53,37 @@ describe('RenderWorkerManager', () => {
 
   afterEach(() => {
     manager.destroy();
+  });
+
+  describe('worker configuration', () => {
+    it('copies author background colors into the worker config snapshot', () => {
+      const config = RenderWorkerManager.buildWorkerConfig(DEFAULT_SETTINGS);
+
+      expect(config.backgroundColors).toEqual(DEFAULT_SETTINGS.backgroundColors);
+      expect(config.backgroundColors).not.toBe(DEFAULT_SETTINGS.backgroundColors);
+    });
+
+    it('copies author background colors into live worker updates', () => {
+      const postMessage = vi.fn();
+      const worker = {
+        postMessage,
+        terminate: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      } as unknown as Worker;
+      (manager as any).worker = worker;
+
+      manager.updateSettings(DEFAULT_SETTINGS);
+
+      expect(postMessage).toHaveBeenCalledWith({
+        type: 'updateConfig',
+        config: expect.objectContaining({
+          backgroundColors: DEFAULT_SETTINGS.backgroundColors,
+        }),
+      });
+      const postedConfig = postMessage.mock.calls[0]?.[0].config as Record<string, unknown>;
+      expect(postedConfig.backgroundColors).not.toBe(DEFAULT_SETTINGS.backgroundColors);
+    });
   });
 
   describe('constructor', () => {

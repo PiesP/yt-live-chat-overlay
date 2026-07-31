@@ -181,6 +181,7 @@ export const EN: Record<string, string> = {
   'app.title': 'Chat Overlay',
   'appearance.authors': 'Author Colors & Visibility',
   'appearance.authorsNameColor': 'Name Color',
+  'appearance.authorsBackground': 'Background',
   'appearance.authorsShowName': 'Show Name',
   'appearance.membershipMaxLines': 'Membership Max Lines',
   'appearance.membershipMaxLinesDesc': 'Max body text lines for membership messages (1-5)',

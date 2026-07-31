@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { describe, it, expect, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HighFirstPriorityBucketQueue } from '@util/priority-bucket-queue';
 import {
   compactRemovedMessages,
@@ -15,10 +15,18 @@ import { DEFAULT_SETTINGS } from '@settings/schema';
 
 const mocks = vi.hoisted(() => ({
   renderPaidCard: vi.fn(),
+  renderRegularMessage: vi.fn(),
+  renderSegment: vi.fn(),
 }));
 
 vi.mock('@renderer/canvas/card-renderers', () => ({
   renderPaidCard: mocks.renderPaidCard,
+}));
+
+vi.mock('@renderer/canvas/shared', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@renderer/canvas/shared')>()),
+  renderRegularMessage: mocks.renderRegularMessage,
+  renderSegment: mocks.renderSegment,
 }));
 
 // ── Mock factory — minimal context for drainStage ─────────────────────────
@@ -142,6 +150,129 @@ describe('drainStage', () => {
 });
 
 describe('drawStage', () => {
+  beforeEach(() => {
+    mocks.renderPaidCard.mockClear();
+    mocks.renderRegularMessage.mockClear();
+    mocks.renderSegment.mockClear();
+  });
+
+  it('passes author background color and unchanged bounds to regular message rendering', () => {
+    const original: ChatMessage = {
+      id: 'moderator-message',
+      kind: 'text',
+      text: 'Original',
+      content: [{ type: 'text', content: 'Original' }],
+      timestamp: 1,
+      authorType: 'moderator',
+    };
+    const message = {
+      message: original,
+      renderMessage: original,
+      startTime: 0,
+      fadeStartTime: 0,
+      duration: 1000,
+      invDuration: 0.001,
+      width: 200,
+      height: 40,
+      startX: 0,
+      x: 10.9,
+      y: 20.8,
+      pausedDuration: 0,
+      laneIndex: 0,
+      staggerDelay: 0,
+      speedTier: 1,
+      _frameElapsed: 100,
+    };
+    const ctx = makeDrainCtx({
+      settings: DEFAULT_SETTINGS,
+      imageFetchManager: {
+        emojiCache: { get: vi.fn() },
+        authorPhotoCache: { get: vi.fn() },
+        stickerCache: { get: vi.fn() },
+      } as unknown as CanvasRenderContext['imageFetchManager'],
+    });
+    const renderCtx = { globalAlpha: 1 } as CanvasRenderingContext2D;
+    const buckets = Array.from({ length: 21 }, () => [] as typeof message[]);
+    buckets[20]!.push(message);
+
+    drawStage(ctx, renderCtx, buckets as never);
+
+    expect(mocks.renderRegularMessage).toHaveBeenCalledOnce();
+    expect(mocks.renderRegularMessage).toHaveBeenCalledWith(
+      renderCtx,
+      original,
+      10,
+      20,
+      expect.objectContaining({
+        backgroundColor: DEFAULT_SETTINGS.backgroundColors.moderator,
+        messageWidth: 200,
+        messageHeight: 40,
+      }),
+      expect.anything(),
+      expect.any(Function),
+      expect.any(Function),
+      expect.anything(),
+      expect.any(Function),
+      expect.any(Function),
+      expect.any(Function),
+      undefined,
+      undefined
+    );
+  });
+
+  it('keeps dual translations inside the regular message horizontal padding', () => {
+    const original: ChatMessage = {
+      id: 'translated-message',
+      kind: 'text',
+      text: 'Original',
+      content: [{ type: 'text', content: 'Original' }],
+      timestamp: 1,
+      authorType: 'normal',
+    };
+    const message = {
+      message: original,
+      renderMessage: original,
+      startTime: 0,
+      fadeStartTime: 0,
+      duration: 1000,
+      invDuration: 0.001,
+      width: 200,
+      height: 40,
+      startX: 0,
+      x: 10.9,
+      y: 20.8,
+      pausedDuration: 0,
+      laneIndex: 0,
+      staggerDelay: 0,
+      speedTier: 1,
+      translatedText: 'Translated',
+      _frameElapsed: 100,
+    };
+    const ctx = makeDrainCtx({
+      settings: {
+        ...DEFAULT_SETTINGS,
+        translationEnabled: true,
+        translationMode: 'dual',
+      },
+      imageFetchManager: {
+        emojiCache: { get: vi.fn() },
+        authorPhotoCache: { get: vi.fn() },
+        stickerCache: { get: vi.fn() },
+      } as unknown as CanvasRenderContext['imageFetchManager'],
+    });
+    const renderCtx = {
+      globalAlpha: 1,
+      save: vi.fn(),
+      restore: vi.fn(),
+    } as unknown as CanvasRenderingContext2D;
+    const buckets = Array.from({ length: 21 }, () => [] as typeof message[]);
+    buckets[20]!.push(message);
+
+    drawStage(ctx, renderCtx, buckets as never);
+
+    expect(mocks.renderSegment.mock.calls[0]?.[2]).toBe(22);
+  });
+
   it('isolates paid-card canvas state and replaces its body with translated text', () => {
     const original: ChatMessage = {
       id: 'paid-message',

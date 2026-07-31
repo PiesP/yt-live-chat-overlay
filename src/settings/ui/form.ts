@@ -9,10 +9,12 @@ import type {
   RootScalarSettingKey,
 } from '@settings/schema';
 import {
+  AUTHOR_BACKGROUND_ALPHA_HEX,
   AUTHOR_COLOR_KEYS,
   cloneSettings,
   getOutlineDisplayScale,
   getRootDisplayMeta,
+  normalizeBackgroundColor,
   OUTLINE_NUMERIC_KEYS,
   resolveLimits,
   resolveOutlineLimits,
@@ -939,7 +941,12 @@ export class SettingsUiForm {
     showNameHeader.setAttribute('scope', 'col');
     showNameHeader.className = 'yt-chat-overlay-author-grid-header';
     showNameHeader.textContent = t('appearance.authorsShowName');
-    headerRow.appendChild(showNameHeader);
+    const backgroundHeader = document.createElement('span');
+    backgroundHeader.setAttribute('role', 'gridcell');
+    backgroundHeader.setAttribute('scope', 'col');
+    backgroundHeader.className = 'yt-chat-overlay-author-grid-header';
+    backgroundHeader.textContent = t('appearance.authorsBackground');
+    headerRow.append(backgroundHeader, showNameHeader);
     grid.appendChild(headerRow);
 
     for (const key of AUTHOR_COLOR_KEYS) {
@@ -951,11 +958,34 @@ export class SettingsUiForm {
       });
       colorInput.id = colorId;
       const labelKey = key.charAt(0).toUpperCase() + key.slice(1);
-      colorInput.setAttribute('aria-label', `${t(labelKey)} ${t('appearance.authorsColor')}`);
+      colorInput.setAttribute('aria-label', `${t(labelKey)} ${t('Color')}`);
+
+      const backgroundColorId = nextFieldId(`backgroundColor-${key}`);
+      const backgroundColorInput = domInput({
+        type: 'color',
+        name: `backgroundColor-${key}`,
+        className: 'yt-chat-overlay-author-grid-color',
+      });
+      backgroundColorInput.id = backgroundColorId;
+      backgroundColorInput.setAttribute(
+        'aria-label',
+        `${t(labelKey)} ${t('appearance.authorsBackground')}`
+      );
+
+      const backgroundEnabledId = nextFieldId(`backgroundEnabled-${key}`);
+      const backgroundEnabled = domGridCheckbox(`backgroundEnabled-${key}`, backgroundEnabledId);
+      backgroundEnabled.classList.add('yt-chat-overlay-author-grid-background-toggle');
+      backgroundEnabled.setAttribute(
+        'aria-label',
+        `${t('Show')} ${t(labelKey)} ${t('appearance.authorsBackground')}`
+      );
+      backgroundColorInput.addEventListener('change', () => {
+        backgroundEnabled.checked = true;
+      });
 
       const checkboxId = nextFieldId(`showAuthor-${key}`);
       const checkbox = domGridCheckbox(`showAuthor-${key}`, checkboxId);
-      checkbox.setAttribute('aria-label', `${t('appearance.authorsShow')} ${t(labelKey)}`);
+      checkbox.setAttribute('aria-label', `${t('Show')} ${t(labelKey)}`);
 
       const label = document.createElement('label');
       label.className = 'yt-chat-overlay-author-grid-label';
@@ -973,7 +1003,11 @@ export class SettingsUiForm {
       const checkboxCell = document.createElement('span');
       checkboxCell.setAttribute('role', 'gridcell');
       checkboxCell.appendChild(checkbox);
-      row.append(labelCell, colorCell, checkboxCell);
+      const backgroundCell = document.createElement('span');
+      backgroundCell.setAttribute('role', 'gridcell');
+      backgroundCell.className = 'yt-chat-overlay-author-grid-background';
+      backgroundCell.append(backgroundEnabled, backgroundColorInput);
+      row.append(labelCell, colorCell, backgroundCell, checkboxCell);
       grid.appendChild(row);
     }
 
@@ -982,7 +1016,7 @@ export class SettingsUiForm {
     const superChatCheckbox = domGridCheckbox('showAuthor-superChat', superChatCheckboxId);
     superChatCheckbox.setAttribute(
       'aria-label',
-      `${t('appearance.authorsShow')} ${t('appearance.authorsSuperchat')}`
+      `${t('Show')} ${t('appearance.authorsSuperchat')}`
     );
 
     const superChatLabel = document.createElement('label');
@@ -1000,6 +1034,10 @@ export class SettingsUiForm {
     superChatPlaceholder.className = 'yt-chat-overlay-author-grid-color-superchat';
     superChatRow.appendChild(superChatLabelCell);
     superChatRow.appendChild(superChatPlaceholder);
+    const superChatBackgroundPlaceholder = document.createElement('span');
+    superChatBackgroundPlaceholder.setAttribute('role', 'gridcell');
+    superChatBackgroundPlaceholder.className = 'yt-chat-overlay-author-grid-color-superchat';
+    superChatRow.appendChild(superChatBackgroundPlaceholder);
     const superChatCheckboxCell = document.createElement('span');
     superChatCheckboxCell.setAttribute('role', 'gridcell');
     superChatCheckboxCell.appendChild(superChatCheckbox);
@@ -1054,6 +1092,26 @@ export class SettingsUiForm {
       if (el.name.startsWith('color-')) {
         const key = el.name.slice('color-'.length) as keyof typeof settings.colors;
         el.value = settings.colors[key];
+        continue;
+      }
+
+      if (el.name.startsWith('backgroundColor-')) {
+        const key = el.name.slice(
+          'backgroundColor-'.length
+        ) as keyof typeof settings.backgroundColors;
+        const background = normalizeBackgroundColor(settings.backgroundColors[key], '#00000000');
+        el.value = background.slice(0, 7);
+        continue;
+      }
+
+      if (el.name.startsWith('backgroundEnabled-')) {
+        const key = el.name.slice(
+          'backgroundEnabled-'.length
+        ) as keyof typeof settings.backgroundColors;
+        if (el instanceof HTMLInputElement && el.type === 'checkbox') {
+          const background = normalizeBackgroundColor(settings.backgroundColors[key], '#00000000');
+          el.checked = !background.endsWith('00');
+        }
         continue;
       }
 
@@ -1241,6 +1299,21 @@ export class SettingsUiForm {
         (partial.colors as Record<string, string>)[el.name.slice('color-'.length)] = el.value;
         continue;
       }
+
+      if (el.name.startsWith('backgroundColor-')) {
+        const key = el.name.slice('backgroundColor-'.length);
+        const enabled = this.modal.querySelector<HTMLInputElement>(
+          `input[name="backgroundEnabled-${key}"]`
+        );
+        if (!partial.backgroundColors) partial.backgroundColors = {};
+        (partial.backgroundColors as Record<string, string>)[key] = normalizeBackgroundColor(
+          `${el.value}${enabled?.checked ? AUTHOR_BACKGROUND_ALPHA_HEX : '00'}`,
+          '#00000000'
+        );
+        continue;
+      }
+
+      if (el.name.startsWith('backgroundEnabled-')) continue;
 
       if (el.name.startsWith('showAuthor-')) {
         if (!partial.showAuthor) partial.showAuthor = {};

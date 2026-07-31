@@ -67,6 +67,14 @@ export const colors = {
   authorModerator: '#5E84F1',
   authorOwner: '#FFD600',
   authorVerified: '#AAAAAA',
+  /** Regular-message backgrounds. Alpha 0x59 is approximately 35% opacity. */
+  authorBackground: {
+    normal: '#00000000',
+    member: '#00000000',
+    moderator: '#1B3A6F59',
+    owner: '#6B4F0059',
+    verified: '#00000000',
+  },
   superChat: superChatColors,
   membership: {
     background: { r: 15, g: 157, b: 88 },
@@ -133,6 +141,8 @@ export const rendererLayout = {
   // ── Message layout ──
   /** Message padding: horizontal (px) */
   paddingH: 12,
+  /** Regular message background border radius (px) */
+  messageBackgroundRadius: 6,
   /** SuperChat card min width (px) */
   superchatMinWidth: 280,
   /** SuperChat card max width (px) */

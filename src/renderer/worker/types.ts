@@ -64,6 +64,8 @@ export interface WorkerConfig {
   color: string;
   /** Per-author-type color map (CSS strings). */
   authorColors: Record<string, string>;
+  /** Per-author-type regular message background colors (RGBA strings). */
+  backgroundColors: Record<string, string>;
   /** Duration multiplier for moderator/owner messages. */
   modOwnerDurationMultiplier: number;
   /** Outline width in px. */

@@ -297,6 +297,7 @@ export const JA: Record<string, string> = {
   // ── Author grid ──
   Color: '色',
   'appearance.authorsNameColor': '名前の色',
+  'appearance.authorsBackground': '背景',
   Show: '表示',
   'appearance.authorsShowName': '名前を表示',
   Normal: '一般',

@@ -9,7 +9,13 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { drawRoundRect, strokeTextOutline, clipTextToWidth, buildWrappedLines } from '@renderer/canvas/shared';
+import {
+  buildWrappedLines,
+  clipTextToWidth,
+  drawRoundRect,
+  renderRegularMessageBackground,
+  strokeTextOutline,
+} from '@renderer/canvas/shared';
 import type { AnyCanvasContext } from '@renderer/canvas/shared';
 
 // ═══════════════════════════════════════════════════════════════════
@@ -123,6 +129,45 @@ describe('drawRoundRect', () => {
     expect(state.moveToCalled).toBe(true);
     expect(state.lineToCalled).toBe(true);
     expect(state.closePathCalled).toBe(true);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// renderRegularMessageBackground
+// ═══════════════════════════════════════════════════════════════════
+
+describe('renderRegularMessageBackground', () => {
+  it('fills one rounded rectangle using the existing message bounds', () => {
+    const { ctx, state } = createMockContext();
+
+    renderRegularMessageBackground(ctx, 10, 20, 100, 50, '#1B3A6F59');
+
+    expect(state.fillStyle).toBe('#1B3A6F59');
+    expect(state.ops).toEqual(['fillStyle', 'beginPath', 'roundRect', 'fill']);
+    expect((ctx as CanvasRenderingContext2D).roundRect).toHaveBeenCalledWith(
+      10,
+      20,
+      100,
+      50,
+      6
+    );
+    expect(state.globalAlpha).toBe(1);
+  });
+
+  it('skips fully transparent backgrounds', () => {
+    const { ctx, state } = createMockContext();
+
+    renderRegularMessageBackground(ctx, 10, 20, 100, 50, '#00000000');
+
+    expect(state.ops).toEqual([]);
+  });
+
+  it('skips invalid message bounds', () => {
+    const { ctx, state } = createMockContext();
+
+    renderRegularMessageBackground(ctx, 10, 20, 0, 50, '#6B4F0059');
+
+    expect(state.ops).toEqual([]);
   });
 });
 

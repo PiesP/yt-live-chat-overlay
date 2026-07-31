@@ -67,7 +67,7 @@ function makeMinimalConfig(): Record<string, unknown> {
     depthFarSpeedMul: 1, depthNearSpeedMul: 1, depthFarOpacityMul: 0.6,
     motionBlurEnabled: false, motionBlurAlpha: 0.03,
     backlogOpacityMultiplier: 0.5, fadeDurationMs: 300,
-    maxMessageAgeMs: 30000, color: '#fff', authorColors: {},
+    maxMessageAgeMs: 30000, color: '#fff', authorColors: {}, backgroundColors: {},
     modOwnerDurationMultiplier: 1.5, outlineWidthPx: 2, outlineOpacity: 0.8,
     superChatOpacity: 0.85, superChatMaxBodyLines: 2,
     membershipMaxBodyLines: 2, showAuthor: {},

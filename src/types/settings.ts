@@ -47,6 +47,8 @@ export interface OverlaySettings {
   logLevel: LogLevel;
   showAuthor: AuthorDisplaySettings;
   colors: ColorSettings;
+  /** Solid RGBA background colors for regular messages, keyed by author type. */
+  backgroundColors: ColorSettings;
   outline: OutlineSettings;
   laneSpacing: number;
   fontWeight: FontWeight;
