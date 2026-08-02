@@ -131,7 +131,7 @@ export function drainStage(ctx: CanvasRenderContext, now: number, _dims: Overlay
   // lane-allocator batch-advance cost when anti-block suppresses all
   // new placements on this frame.
   if (!ctx.isReplayMode && ctx.isAntiBlockActive()) {
-    const currentNow = performance.now();
+    const currentNow = now;
     if (ctx.antiBlockSince.value === null) {
       ctx.antiBlockSince.value = currentNow;
     }
@@ -150,12 +150,12 @@ export function drainStage(ctx: CanvasRenderContext, now: number, _dims: Overlay
       }
       // Only call resetBatch() + drainQueue() when the anti-block gate
       // actually passes — saves lane-allocator overhead on suppressed frames.
-      ctx.laneAllocator.resetBatch();
+      ctx.laneAllocator.resetBatch(now);
       ctx.drainQueue(now);
     }
   } else {
     ctx.antiBlockSince.value = null;
-    ctx.laneAllocator.resetBatch();
+    ctx.laneAllocator.resetBatch(now);
     ctx.drainQueue(now);
   }
 }

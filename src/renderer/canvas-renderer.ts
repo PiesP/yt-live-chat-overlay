@@ -1295,7 +1295,7 @@ export class CanvasRenderer extends RendererBase {
 
     // Find the target lane Y position via the allocator (without committing).
     const speedTier = this.getSpeedTier(message);
-    const placement = this.laneAllocator.findPlacement(msgHeight, dims, speedTier);
+    const placement = this.laneAllocator.findPlacement(msgHeight, dims, speedTier, now);
     if (!placement) {
       this.observability.recordCollisionCheck(performance.now() - t0);
       return { ok: false, reason: 'temporarily_unavailable' };
@@ -1878,10 +1878,11 @@ export class CanvasRenderer extends RendererBase {
 
   protected onResume(): void {
     this.startRenderLoop();
-    this.laneAllocator.resetBatch();
+    const now = performance.now();
+    this.laneAllocator.resetBatch(now);
     // Use async drain for non-rAF context — allows yielding during
     // backlog processing to keep the main thread responsive.
-    void this.drainQueueAsync(performance.now());
+    void this.drainQueueAsync(now);
     this.workerManager.setPaused(false);
     this.imageFetchManager.resume();
   }

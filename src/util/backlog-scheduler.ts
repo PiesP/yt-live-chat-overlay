@@ -23,14 +23,46 @@ export interface SchedulerConfig {
   backlogDensityRampMaxMs: number;
 }
 
+const REAL_TIME_FACTOR_MIN = 0.25;
+const REAL_TIME_FACTOR_STEP = 0.2;
+const UTILIZATION_FACTOR_MIN = 0.1;
+const UTILIZATION_FACTOR_SLOPE = 0.9;
+const REAL_TIME_DECAY_MS = 2000;
+
+export function computeDensityRampFactor(elapsedMs: number, densityRampMs: number): number {
+  if (elapsedMs >= densityRampMs) return 1;
+  return 0.25 + 0.75 * (elapsedMs / densityRampMs);
+}
+
+export function decayActivityCount(count: number, elapsedMs: number): number {
+  if (elapsedMs > REAL_TIME_DECAY_MS) return 0;
+  if (count <= 0) return count;
+  const decayProgress = elapsedMs / REAL_TIME_DECAY_MS;
+  return Math.max(Math.ceil(count * (1 - decayProgress)), 0);
+}
+
+export function computeAdaptiveMeanInterval(
+  maxRate: number,
+  minRate: number,
+  activityCount: number,
+  utilizationFactor: number,
+  rampFactor: number
+): number {
+  const realTimeFactor = Math.max(REAL_TIME_FACTOR_MIN, 1 - activityCount * REAL_TIME_FACTOR_STEP);
+  const congestionFactor = Math.min(realTimeFactor, utilizationFactor);
+  const rawRate = Math.round(maxRate * congestionFactor * rampFactor);
+  const adaptiveRate = Math.min(maxRate, Math.max(minRate, rawRate));
+  return Math.round(1000 / adaptiveRate);
+}
+
 export class BacklogScheduler {
   // ── Rate constants ──────────────────────────────────────────
   static readonly REAL_TIME_ACTIVITY_CAP = 5;
-  static readonly REAL_TIME_FACTOR_MIN = 0.25;
-  static readonly REAL_TIME_FACTOR_STEP = 0.2;
-  static readonly UTILIZATION_FACTOR_MIN = 0.1;
-  static readonly UTILIZATION_FACTOR_SLOPE = 0.9;
-  static readonly REAL_TIME_DECAY_MS = 2000;
+  static readonly REAL_TIME_FACTOR_MIN = REAL_TIME_FACTOR_MIN;
+  static readonly REAL_TIME_FACTOR_STEP = REAL_TIME_FACTOR_STEP;
+  static readonly UTILIZATION_FACTOR_MIN = UTILIZATION_FACTOR_MIN;
+  static readonly UTILIZATION_FACTOR_SLOPE = UTILIZATION_FACTOR_SLOPE;
+  static readonly REAL_TIME_DECAY_MS = REAL_TIME_DECAY_MS;
 
   private config: SchedulerConfig;
   private lanes: number;
@@ -73,10 +105,8 @@ export class BacklogScheduler {
    * Linearly interpolates from 0.25 to 1.0 over the adaptive density ramp window.
    * After the ramp window, returns 1.0 (full rate).
    */
-  getDensityRampFactor(injectionStartTime: number): number {
-    const elapsed = Date.now() - injectionStartTime;
-    if (elapsed >= this.densityRampMs) return 1;
-    return 0.25 + 0.75 * (elapsed / this.densityRampMs);
+  getDensityRampFactor(injectionStartTime: number, now: number = Date.now()): number {
+    return computeDensityRampFactor(now - injectionStartTime, this.densityRampMs);
   }
 
   /**
@@ -98,16 +128,6 @@ export class BacklogScheduler {
    * real-time message. Fully resets after REAL_TIME_DECAY_MS of inactivity;
    * gentle linear decay during the decay window.
    */
-  private decayActivityCount(count: number, lastActivityAt: number): number {
-    const msSince = Date.now() - lastActivityAt;
-    if (msSince > BacklogScheduler.REAL_TIME_DECAY_MS) return 0;
-    if (count > 0) {
-      const decayProgress = msSince / BacklogScheduler.REAL_TIME_DECAY_MS;
-      return Math.max(Math.ceil(count * (1 - decayProgress)), 0);
-    }
-    return count;
-  }
-
   /**
    * Full rate computation including utilization query, congestion factors,
    * and density ramp. Used by the orchestrator's processTick.
@@ -119,29 +139,28 @@ export class BacklogScheduler {
     realTimeActivityCount: number,
     lastRealTimeActivityAt: number,
     injectionStartTime: number,
-    onUtilizationQuery: (() => number) | null
+    onUtilizationQuery: (() => number) | null,
+    now: number = Date.now()
   ): { meanInterval: number; updatedActivityCount: number } {
     const maxRate = Math.max(
       this.config.backlogInjectionRateMin,
       Math.min(this.config.backlogInjectionMax, this.config.backlogMaxRate, this.lanes * 2)
     );
 
-    const updatedCount = this.decayActivityCount(realTimeActivityCount, lastRealTimeActivityAt);
-
-    const realTimeFactor = Math.max(
-      BacklogScheduler.REAL_TIME_FACTOR_MIN,
-      1 - updatedCount * BacklogScheduler.REAL_TIME_FACTOR_STEP
-    );
+    const updatedCount = decayActivityCount(realTimeActivityCount, now - lastRealTimeActivityAt);
     const utilizationFactor = this.getUtilizationFactor(onUtilizationQuery);
-    const congestionFactor = Math.min(realTimeFactor, utilizationFactor);
-    const rampFactor = this.getDensityRampFactor(injectionStartTime);
+    const rampFactor = this.getDensityRampFactor(injectionStartTime, now);
 
     const minRate = Math.max(this.lanes + 1, 2);
-    const rawRate = Math.round(maxRate * congestionFactor * rampFactor);
-    const adaptiveRate = Math.min(maxRate, Math.max(minRate, rawRate));
 
     return {
-      meanInterval: Math.round(1000 / adaptiveRate),
+      meanInterval: computeAdaptiveMeanInterval(
+        maxRate,
+        minRate,
+        updatedCount,
+        utilizationFactor,
+        rampFactor
+      ),
       updatedActivityCount: updatedCount,
     };
   }
@@ -151,11 +170,15 @@ export class BacklogScheduler {
    *
    * Returns the timer handle.
    */
-  scheduleNextTick(processTick: () => void, meanInterval: number): ReturnType<typeof setTimeout> {
+  scheduleNextTick(
+    processTick: () => void,
+    meanInterval: number,
+    random: () => number = Math.random
+  ): ReturnType<typeof setTimeout> {
     const floorMs = Math.max(32, Math.round(meanInterval * 0.6));
     const poissonDelay = Math.max(
       floorMs,
-      Math.min(meanInterval * 2, sampleExponential(meanInterval))
+      Math.min(meanInterval * 2, sampleExponential(meanInterval, random))
     );
     return setTimeout(() => processTick(), poissonDelay);
   }

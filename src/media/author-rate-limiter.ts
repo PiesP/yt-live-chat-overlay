@@ -22,6 +22,21 @@ const BURST_LIMITS: Record<BurstLevel, number | null> = {
   extreme: 2,
 };
 
+/** Return the first index whose timestamp is strictly newer than the cutoff. */
+export function findFirstTimestampAfterCutoff(
+  timestamps: readonly number[],
+  cutoff: number
+): number {
+  let lo = 0;
+  let hi = timestamps.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if ((timestamps[mid] ?? 0) <= cutoff) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
 export class PerAuthorRateLimiter {
   private authorTimestamps: Map<string, number[]> = new Map();
   private windowMs: number = DEFAULT_WINDOW_MS;
@@ -53,14 +68,7 @@ export class PerAuthorRateLimiter {
     let timestamps = this.authorTimestamps.get(authorId);
 
     if (timestamps) {
-      // Binary search for first timestamp > cutoff (timestamps are sorted ascending)
-      let lo = 0,
-        hi = timestamps.length;
-      while (lo < hi) {
-        const mid = (lo + hi) >>> 1;
-        if ((timestamps[mid] ?? 0) <= cutoff) lo = mid + 1;
-        else hi = mid;
-      }
+      const lo = findFirstTimestampAfterCutoff(timestamps, cutoff);
       if (lo > 0) {
         timestamps.splice(0, lo);
       }
@@ -89,20 +97,13 @@ export class PerAuthorRateLimiter {
     return Math.min(this.maxPerWindow, burstLimit);
   }
 
-  private pruneStaleEntries(now: number = Date.now()): void {
+  private pruneStaleEntries(now: number): void {
     if (now - this.lastPruneTime < PRUNE_INTERVAL_MS) return;
     this.lastPruneTime = now;
 
     const cutoff = now - this.windowMs;
     for (const [authorId, timestamps] of this.authorTimestamps) {
-      // Binary search for first timestamp > cutoff (timestamps are sorted ascending)
-      let lo = 0,
-        hi = timestamps.length;
-      while (lo < hi) {
-        const mid = (lo + hi) >>> 1;
-        if ((timestamps[mid] ?? 0) <= cutoff) lo = mid + 1;
-        else hi = mid;
-      }
+      const lo = findFirstTimestampAfterCutoff(timestamps, cutoff);
       if (lo > 0) timestamps.splice(0, lo);
       if (timestamps.length === 0) {
         this.authorTimestamps.delete(authorId);

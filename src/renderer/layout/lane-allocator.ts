@@ -10,6 +10,7 @@ import {
   findPlacementShared,
   heapSiftDown,
   heapUpdateLane,
+  resetBatchShared,
 } from '@renderer/layout/lane-shared';
 import { getFontString, measureTextHeight } from '@renderer/text-measure';
 import { createLogger } from '@util/logging';
@@ -255,9 +256,10 @@ export class LaneAllocator {
   findPlacement(
     messageHeight: number,
     dimensions: OverlayDimensions,
-    speedTier: number = SPEED_TIER.MID
+    speedTier: number = SPEED_TIER.MID,
+    now: number = performance.now(),
+    random: () => number = Math.random
   ): LanePlacement | null {
-    const now = performance.now();
     const totalLanes = this.numLanes;
     if (totalLanes <= 0) return null;
 
@@ -271,7 +273,8 @@ export class LaneAllocator {
       messageHeight,
       this.laneHeight,
       this.options.scrollDurationMaxMs,
-      speedTier
+      speedTier,
+      random
     );
     if (!result) return null;
 
@@ -337,7 +340,7 @@ export class LaneAllocator {
    * Called at the start of each drainQueue batch. Clears per-frame collision
    * tracking so lanes can be retried on the next frame.
    */
-  resetBatch(): void {
+  resetBatch(now: number = performance.now()): void {
     // Heap integrity guard: heap length must match index map size.
     // A mismatch indicates a corrupted laneIndexToHeapIndex mapping
     // (duplicate or missing lane entries).
@@ -360,11 +363,8 @@ export class LaneAllocator {
     }
 
     // Prune expired speed-tier entries and clear collision set.
-    const now = performance.now();
-    for (const [laneIdx, entry] of this.speedTierLanes) {
-      if (entry.until <= now) this.speedTierLanes.delete(laneIdx);
-    }
-    this.collidedLanes.clear();
+    const state = this as unknown as import('@renderer/layout/lane-shared').LaneAllocationState;
+    resetBatchShared(state, now);
 
     // Amortized utilization recount: scan the heap every N frames instead of
     // every frame. Between recounts, the cached value is slightly stale but

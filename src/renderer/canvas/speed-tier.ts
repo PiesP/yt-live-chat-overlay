@@ -8,7 +8,6 @@
  * without DOM, canvas, or class-instantiation dependencies.
  */
 
-import type { ChatMessage } from '@app-types';
 import { hashStringForTier, SPEED_TIER, TIER_NEAR_THRESHOLD } from '@renderer/constants';
 
 // ── Speed tier classification ─────────────────────────────────────────────
@@ -16,6 +15,14 @@ import { hashStringForTier, SPEED_TIER, TIER_NEAR_THRESHOLD } from '@renderer/co
 export interface SpeedTierConfig {
   depthLayersEnabled: boolean;
   danmakuMode: string;
+}
+
+/** Minimal message shape shared by the main-thread and Worker renderers. */
+export interface SpeedTierMessage {
+  id?: string;
+  timestamp?: number;
+  kind?: string;
+  isBacklog?: boolean;
 }
 
 /**
@@ -26,7 +33,7 @@ export interface SpeedTierConfig {
  * @param config  — Subset of OverlaySettings relevant to tier determination
  * @returns SPEED_TIER value (0-3)
  */
-export function getSpeedTier(message: ChatMessage, config: SpeedTierConfig): number {
+export function getSpeedTier(message: SpeedTierMessage, config: SpeedTierConfig): number {
   if (message.isBacklog) return SPEED_TIER.BACKLOG;
   if (!config.depthLayersEnabled) return SPEED_TIER.MID;
   const mode = config.danmakuMode;
