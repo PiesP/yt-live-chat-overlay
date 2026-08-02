@@ -67,6 +67,24 @@ describe('ReplayBuffer', () => {
       const result = buf.flushUpTo(3000, 10);
       expect(result).toHaveLength(3);
     });
+
+    it('prunes evicted IDs without rebuilding the deduplication set', () => {
+      const internals = buf as unknown as { seenIds: Set<string> };
+      const seenIds = internals.seenIds;
+
+      for (let i = 0; i <= 3000; i++) {
+        buf.insert(makeMsg(`msg${i}`, i), i);
+      }
+
+      expect(internals.seenIds).toBe(seenIds);
+
+      buf.insert(makeMsg('msg0', 4000), 4000);
+      buf.insert(makeMsg('msg3000', 4001), 4001);
+      const ids = buf.drainAll().map((message) => message.id);
+
+      expect(ids.filter((id) => id === 'msg0')).toHaveLength(1);
+      expect(ids.filter((id) => id === 'msg3000')).toHaveLength(1);
+    });
   });
 
   describe('flushUpTo()', () => {

@@ -211,7 +211,16 @@ export class ReplayBuffer {
     if (effectiveLength <= maxSize) return;
 
     const overflow = effectiveLength - maxSize;
-    this.bufferOffset += overflow;
+    const trimEnd = this.bufferOffset + overflow;
+
+    // Remove only the IDs that leave the active range. Rebuilding the full
+    // set here makes every over-capacity insertion O(maxSize) during long
+    // hidden-tab sessions.
+    for (let i = this.bufferOffset; i < trimEnd; i++) {
+      const id = this.buffer[i]?.message.id;
+      if (id) this.seenIds.delete(id);
+    }
+    this.bufferOffset = trimEnd;
 
     // When the offset grows large, release the backing array memory
     // by discarding entries before the offset.  Without this, the array
@@ -220,14 +229,5 @@ export class ReplayBuffer {
       this.buffer = this.buffer.slice(this.bufferOffset);
       this.bufferOffset = 0;
     }
-
-    // Prune seenIds to match buffer range — IDs no longer in the
-    // active window would otherwise accumulate forever during long replays.
-    const idSet = new Set<string>();
-    for (let i = this.bufferOffset; i < this.buffer.length; i++) {
-      const id = this.buffer[i]?.message.id;
-      if (id) idSet.add(id);
-    }
-    this.seenIds = idSet;
   }
 }

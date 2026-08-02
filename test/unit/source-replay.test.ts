@@ -132,6 +132,38 @@ describe('ReplayChatSource', () => {
     expect(installSeekListeners).toHaveBeenCalledOnce();
   });
 
+  it('does not poll player-seek replay while fetch backoff is active', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-02T00:00:00Z'));
+
+    const internals = source as unknown as {
+      replayNextAllowedFetchAt: number;
+      pollPlayerSeekReplay: (playback: {
+        offsetMs: number;
+        paused: boolean;
+      }) => Promise<boolean>;
+      shouldFetchReplayAtOffset: (offsetMs: number) => boolean;
+      fetchReplayPlayerSeek: (offsetMs: number) => Promise<boolean>;
+    };
+    internals.replayNextAllowedFetchAt = Date.now() + 5000;
+    const shouldFetch = vi
+      .spyOn(internals, 'shouldFetchReplayAtOffset')
+      .mockReturnValue(true);
+    const fetchReplay = vi.spyOn(internals, 'fetchReplayPlayerSeek').mockResolvedValue(true);
+
+    await expect(
+      internals.pollPlayerSeekReplay({ offsetMs: 1000, paused: false })
+    ).resolves.toBe(false);
+    expect(shouldFetch).not.toHaveBeenCalled();
+    expect(fetchReplay).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(5000);
+    await expect(
+      internals.pollPlayerSeekReplay({ offsetMs: 1000, paused: false })
+    ).resolves.toBe(true);
+    expect(fetchReplay).toHaveBeenCalledOnce();
+  });
+
   it('stop() is idempotent', () => {
     expect(() => source.stop()).not.toThrow();
     expect(() => source.stop()).not.toThrow();
