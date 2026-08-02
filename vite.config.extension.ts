@@ -1,3 +1,3 @@
-import { createExtensionBackgroundConfig } from './tooling/vite/configs/extension-background';
+import { createExtensionBackgroundConfig } from './tooling/vite/configs/extension-background.ts';
 
 export default createExtensionBackgroundConfig('chrome');

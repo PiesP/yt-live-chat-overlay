@@ -19,7 +19,7 @@
     "fmt": "biome check --linter-enabled=false .",
     "fmt:fix": "biome check --write --linter-enabled=false .",
     "fmt:check": "pnpm -s fmt",
-    "circular": "dpdm --tsconfig tsconfig.json --circular --no-tree --no-warning src/**/*.ts",
+    "circular": "dpdm --tsconfig tsconfig.json --circular --no-tree --no-warning --exit-code circular:1 src/**/*.ts",
     "check:test": "tsc -p tsconfig.test.json --noEmit",
     "check:e2e": "tsc -p tsconfig.e2e.json --noEmit",
     "quality": "pnpm -s fmt && pnpm -s lint && pnpm -s check && pnpm -s check:extension && pnpm -s check:test && pnpm -s check:e2e && pnpm -s check:i18n && pnpm -s circular && pnpm -s knip && pnpm -s quality:nose",
