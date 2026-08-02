@@ -1,10 +1,10 @@
 import { resolve } from 'node:path';
 import { defineConfig, mergeConfig, type UserConfig } from 'vite';
-import pkg from '../../../package.json';
-import { copyExtensionAssetsPlugin } from '../plugins/copy-extension-assets';
-import { basePreset } from '../presets/base';
-import { extensionSwPreset } from '../presets/extension-sw';
-import { type ExtensionBrowser, extensionTarget } from './extension-target';
+import pkg from '../../../package.json' with { type: 'json' };
+import { copyExtensionAssetsPlugin } from '../plugins/copy-extension-assets.ts';
+import { basePreset } from '../presets/base.ts';
+import { extensionSwPreset } from '../presets/extension-sw.ts';
+import { type ExtensionBrowser, extensionTarget } from './extension-target.ts';
 
 export function createExtensionBackgroundConfig(browser: ExtensionBrowser) {
   const target = extensionTarget(browser);

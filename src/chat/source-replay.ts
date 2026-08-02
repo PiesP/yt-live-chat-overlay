@@ -615,7 +615,11 @@ export class ReplayChatSource extends ChatSource {
     playback: PlaybackSnapshot,
     signal?: AbortSignal
   ): Promise<boolean> {
-    if (playback.paused || !this.shouldFetchReplayAtOffset(playback.offsetMs)) {
+    if (
+      playback.paused ||
+      Date.now() < this.replayNextAllowedFetchAt ||
+      !this.shouldFetchReplayAtOffset(playback.offsetMs)
+    ) {
       return false;
     }
 

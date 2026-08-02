@@ -979,11 +979,12 @@ export const SETTINGS_UI_STYLES = `
           color: HighlightText;
         }
       }
-      // Black overlay opacity scale — documented rationale:
-      // - 0.90: Tooltip bg (highest contrast, over white/dark content)
-      // - 0.85: Toast bg (floating notification, slightly less opaque)
-      // - 0.80: Debug overlay (dev-only, unobtrusive)
-      // - 0.75: Backlog indicator (small pill, less intrusive)
+      /* Black overlay opacity scale — documented rationale:
+       * - 0.90: Tooltip bg (highest contrast, over white/dark content)
+       * - 0.85: Toast bg (floating notification, slightly less opaque)
+       * - 0.80: Debug overlay (dev-only, unobtrusive)
+       * - 0.75: Backlog indicator (small pill, less intrusive)
+       */
       /* Native Popover API tooltips */
       .yt-chat-overlay-tooltip {
         font-family: ${DEFAULT_FONT_FAMILY};

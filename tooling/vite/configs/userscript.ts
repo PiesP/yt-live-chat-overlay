@@ -2,8 +2,8 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { mergeConfig, type ConfigEnv, type UserConfig } from 'vite';
 import monkeyPlugin from 'vite-plugin-monkey';
-import { basePreset } from '../presets/base';
-import { userscriptPreset } from '../presets/userscript';
+import { basePreset } from '../presets/base.ts';
+import { userscriptPreset } from '../presets/userscript.ts';
 
 interface PackageMeta {
   author: string;
