@@ -34,6 +34,12 @@ import {
   startOffscreenPoll,
   updateCanvasDpr,
 } from '@renderer/canvas/canvas-setup';
+import {
+  commitDrainBatch,
+  createDrainBatch,
+  type DrainBatch,
+  recordDrainResult,
+} from '@renderer/canvas/drain-batch';
 import { fastRandom } from '@renderer/canvas/pipeline-utils';
 import {
   cleanupAndBucketStage,
@@ -1132,49 +1138,16 @@ export class CanvasRenderer extends RendererBase {
       // and only remove (removeAll) those that were successfully placed.
       // Messages that fail placement stay in the queue for the next frame.
       // This guarantees zero message loss from internal queue management.
-      const candidates = this.pendingQueue.toArray();
-      let batchIndex = 0;
-      const committed: ChatMessage[] = [];
-      const unplaceable: ChatMessage[] = []; // Messages that can never be placed (oversized)
+      const batch = createDrainBatch(this.pendingQueue.toArray());
 
-      for (const msg of candidates) {
+      for (const msg of batch.candidates) {
         if (this.activeMessages.length >= this.settings.maxConcurrentMessages) break;
 
-        const result = this.placeQueuedMessage(msg, now, dims, batchIndex);
-        if (result.oversized) unplaceable.push(msg);
-        if (!result.placed) continue;
-        batchIndex++;
-        committed.push(msg);
+        const result = this.placeQueuedMessage(msg, now, dims, batch.batchIndex);
+        recordDrainResult(batch, msg, result);
       }
 
-      // Atomically remove successfully placed messages from the queue.
-      if (committed.length > 0) {
-        this.pendingQueue.removeAll(committed);
-      }
-
-      // Drop oversized messages to prevent the infinite watchdog restart loop.
-      // These messages have heights exceeding total available lanes — no amount
-      // of waiting or retry will place them.
-      if (unplaceable.length > 0) {
-        this.pendingQueue.removeAll(unplaceable);
-        // Update render activity so the watchdog doesn't flag a stuck renderer
-        // for messages that were intentionally dropped as oversized.
-        this.lastRenderActivity = performance.now();
-        const first = unplaceable[0]!;
-        const firstEstHeight = Math.round(this.estimateDimensions(first).height);
-        const laneCount = this.laneAllocator.getLaneCount();
-        const requiredSlots = Math.ceil(
-          firstEstHeight / Math.round(this.laneAllocator.getLaneHeight())
-        );
-        log.warn('renderer.message.drop', {
-          reason: 'oversized',
-          dropped: unplaceable.length,
-          requiredSlots,
-          laneCount,
-          sampleKind: first.kind,
-        });
-        this.observability.onMessageDropped('oversized');
-      }
+      this.finalizeDrainBatch(batch, true);
 
       this.observability.recordDrainQueue(performance.now() - t0);
     } finally {
@@ -1199,20 +1172,14 @@ export class CanvasRenderer extends RendererBase {
       const dims = this.overlay.getDimensions();
       if (!dims) return;
 
-      const candidates = this.pendingQueue.toArray();
-      let batchIndex = 0;
-      const committed: ChatMessage[] = [];
-      const unplaceable: ChatMessage[] = [];
+      const batch = createDrainBatch(this.pendingQueue.toArray());
       let deadline = performance.now() + 50; // 50ms budget
 
-      for (const msg of candidates) {
+      for (const msg of batch.candidates) {
         if (this.activeMessages.length >= this.settings.maxConcurrentMessages) break;
 
-        const result = this.placeQueuedMessage(msg, now, dims, batchIndex);
-        if (result.oversized) unplaceable.push(msg);
-        if (!result.placed) continue;
-        batchIndex++;
-        committed.push(msg);
+        const result = this.placeQueuedMessage(msg, now, dims, batch.batchIndex);
+        if (!recordDrainResult(batch, msg, result)) continue;
 
         // Yield every 50ms to keep the main thread responsive during bursts.
         deadline = await yieldAtDeadline(deadline);
@@ -1223,18 +1190,35 @@ export class CanvasRenderer extends RendererBase {
         if (this._destroyed) return;
       }
 
-      if (committed.length > 0) {
-        this.pendingQueue.removeAll(committed);
-      }
-
-      // Drop unplaceable messages — same rationale as drainQueue.
-      if (unplaceable.length > 0) {
-        this.pendingQueue.removeAll(unplaceable);
-        this.lastRenderActivity = performance.now();
-      }
+      this.finalizeDrainBatch(batch, false);
     } finally {
       this.drainLocked = false;
     }
+  }
+
+  private finalizeDrainBatch(batch: DrainBatch<ChatMessage>, reportOversized: boolean): void {
+    commitDrainBatch(this.pendingQueue, batch);
+    if (batch.unplaceable.length === 0) return;
+
+    // Update render activity so the watchdog doesn't flag a stuck renderer
+    // for messages that were intentionally dropped as oversized.
+    this.lastRenderActivity = performance.now();
+    if (!reportOversized) return;
+
+    const first = batch.unplaceable[0]!;
+    const firstEstHeight = Math.round(this.estimateDimensions(first).height);
+    const laneCount = this.laneAllocator.getLaneCount();
+    const requiredSlots = Math.ceil(
+      firstEstHeight / Math.round(this.laneAllocator.getLaneHeight())
+    );
+    log.warn('renderer.message.drop', {
+      reason: 'oversized',
+      dropped: batch.unplaceable.length,
+      requiredSlots,
+      laneCount,
+      sampleKind: first.kind,
+    });
+    this.observability.onMessageDropped('oversized');
   }
 
   /**
