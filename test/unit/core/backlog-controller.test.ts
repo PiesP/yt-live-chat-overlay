@@ -147,6 +147,21 @@ describe("BacklogInjectionController", () => {
       controller.startBacklogInjection([makeMsg({ id: "a" })]);
       expect(controller.isBacklogActive).toBe(true);
     });
+
+    it("appends unique messages in arrival order during active injection", () => {
+      controller.startBacklogInjection([makeMsg({ id: "a" }), makeMsg({ id: "b" })]);
+      controller.startBacklogInjection([makeMsg({ id: "b" }), makeMsg({ id: "c" })]);
+
+      expect(controller.drainPending().map((message) => message.id)).toEqual(["b", "c"]);
+    });
+
+    it("preserves unique pending order when paused batches are merged", () => {
+      controller.startBacklogInjection([makeMsg({ id: "a" }), makeMsg({ id: "b" })]);
+      controller.setPaused(true);
+      controller.startBacklogInjection([makeMsg({ id: "b" }), makeMsg({ id: "c" })]);
+
+      expect(controller.drainPending().map((message) => message.id)).toEqual(["b", "c"]);
+    });
   });
 
   // ═══════════════════════════════════════════════════════

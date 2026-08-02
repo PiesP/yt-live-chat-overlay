@@ -19,6 +19,7 @@ import {
   resolveLimits,
   resolveOutlineLimits,
 } from '@settings/schema';
+import { parseSettingsControlName } from '@settings/ui/control-codec';
 import type {
   AuthorGridField,
   FieldDef,
@@ -1058,94 +1059,64 @@ export class SettingsUiForm {
     const els = this.modal.querySelectorAll<HTMLInputElement | HTMLSelectElement>('input, select');
     for (const el of els) {
       if (!el.name) continue;
+      const target = parseSettingsControlName(el.name);
+      if (!target) continue;
 
-      // Outline fields
-      if (el.name.startsWith('outline-')) {
-        const rawKey = el.name.slice('outline-'.length);
-        const key = rawKey as keyof typeof settings.outline;
-        const value = settings.outline[key];
-        if (el instanceof HTMLInputElement && el.type === 'checkbox') {
+      if (target.group === 'outline') {
+        const value = settings.outline[target.key];
+        if (target.key === 'enabled' && el instanceof HTMLInputElement) {
           el.checked = Boolean(value);
-        } else {
-          const numericKey = isOutlineNumericKey(rawKey) ? rawKey : null;
-          if (numericKey) {
-            const scale = getOutlineDisplayScale(numericKey);
-            const displayValue = (value as number) * scale;
-            el.value = String(scale > 1 ? Math.round(displayValue) : displayValue);
-            // Sync the companion range slider for outline fields
-            if (el.name) {
-              const slider = this.modal.querySelector<HTMLInputElement>(
-                `input[type="range"][name="${el.name}-slider"]`
-              );
-              if (slider) {
-                slider.value = el.value;
-                // Sync ARIA attributes on programmatic update (cross-tab sync / reopen).
-                slider.setAttribute('aria-valuenow', slider.value);
-              }
-            }
-          }
+        } else if (isOutlineNumericKey(target.key)) {
+          const scale = getOutlineDisplayScale(target.key);
+          const displayValue = (value as number) * scale;
+          el.value = String(scale > 1 ? Math.round(displayValue) : displayValue);
+          this.syncCompanionRange(el);
         }
         continue;
       }
 
-      // Color fields
-      if (el.name.startsWith('color-')) {
-        const key = el.name.slice('color-'.length) as keyof typeof settings.colors;
-        el.value = settings.colors[key];
+      if (target.group === 'color') {
+        el.value = settings.colors[target.key];
         continue;
       }
 
-      if (el.name.startsWith('backgroundColor-')) {
-        const key = el.name.slice(
-          'backgroundColor-'.length
-        ) as keyof typeof settings.backgroundColors;
-        const background = normalizeBackgroundColor(settings.backgroundColors[key], '#00000000');
+      if (target.group === 'backgroundColor') {
+        const background = normalizeBackgroundColor(
+          settings.backgroundColors[target.key],
+          '#00000000'
+        );
         el.value = background.slice(0, 7);
         continue;
       }
 
-      if (el.name.startsWith('backgroundEnabled-')) {
-        const key = el.name.slice(
-          'backgroundEnabled-'.length
-        ) as keyof typeof settings.backgroundColors;
+      if (target.group === 'backgroundEnabled') {
         if (el instanceof HTMLInputElement && el.type === 'checkbox') {
-          const background = normalizeBackgroundColor(settings.backgroundColors[key], '#00000000');
+          const background = normalizeBackgroundColor(
+            settings.backgroundColors[target.key],
+            '#00000000'
+          );
           el.checked = !background.endsWith('00');
         }
         continue;
       }
 
-      // Author visibility fields
-      if (el.name.startsWith('showAuthor-')) {
-        const key = el.name.slice('showAuthor-'.length) as keyof typeof settings.showAuthor;
+      if (target.group === 'showAuthor') {
         if (el instanceof HTMLInputElement && el.type === 'checkbox') {
-          el.checked = settings.showAuthor[key];
+          el.checked = settings.showAuthor[target.key];
         }
         continue;
       }
 
-      // Root scalar fields
-      const scalarKey = el.name as RootScalarSettingKey;
-      const value = settings[scalarKey];
+      const value = settings[target.key];
       if (el instanceof HTMLInputElement && el.type === 'checkbox') {
         el.checked = Boolean(value);
       } else {
         el.value =
           typeof value === 'number'
-            ? String(formatRootNumericSettingForInput(scalarKey, value))
+            ? String(formatRootNumericSettingForInput(target.key, value))
             : String(value);
       }
-
-      // Also sync range slider if present
-      if (el.name) {
-        const slider = this.modal.querySelector<HTMLInputElement>(
-          `input[type="range"][name="${el.name}-slider"]`
-        );
-        if (slider) {
-          slider.value = el.value;
-          slider.setAttribute('aria-valuenow', slider.value);
-        }
-      }
+      this.syncCompanionRange(el);
     }
 
     this.syncMinTextLengthState();
@@ -1153,6 +1124,16 @@ export class SettingsUiForm {
     this.populateWeightToggle(settings);
     this.populateFontChips(settings);
     this.isUpdating = false;
+  }
+
+  private syncCompanionRange(el: HTMLInputElement | HTMLSelectElement): void {
+    if (!this.modal || !el.name) return;
+    const slider = this.modal.querySelector<HTMLInputElement>(
+      `input[type="range"][name="${el.name}-slider"]`
+    );
+    if (!slider) return;
+    slider.value = el.value;
+    slider.setAttribute('aria-valuenow', slider.value);
   }
 
   private populateFontPreview(settings: Readonly<OverlaySettings>): void {
@@ -1272,58 +1253,57 @@ export class SettingsUiForm {
     );
     for (const el of els) {
       if (!el.name) continue;
+      const target = parseSettingsControlName(el.name);
+      if (!target) continue;
 
-      if (el.name.startsWith('outline-')) {
-        const rawKey = el.name.slice('outline-'.length);
-        const key = rawKey as OutlineSettingKey;
-        if (key === 'enabled') {
+      if (target.group === 'outline') {
+        if (target.key === 'enabled') {
           patchOutline(partial as Record<string, unknown>, {
             enabled: (el as HTMLInputElement).checked,
           });
         } else {
-          const numericKey = isOutlineNumericKey(rawKey) ? rawKey : null;
+          const numericKey = isOutlineNumericKey(target.key) ? target.key : null;
           if (!numericKey) continue;
           patchOutline(partial as Record<string, unknown>, {
-            [key]: normalizeOutlineNumericInputValue(
+            [target.key]: normalizeOutlineNumericInputValue(
               numericKey,
               el.value,
-              this.getSettings().outline[key]
+              this.getSettings().outline[target.key]
             ),
           });
         }
         continue;
       }
 
-      if (el.name.startsWith('color-')) {
+      if (target.group === 'color') {
         if (!partial.colors) partial.colors = {};
-        (partial.colors as Record<string, string>)[el.name.slice('color-'.length)] = el.value;
+        (partial.colors as Record<string, string>)[target.key] = el.value;
         continue;
       }
 
-      if (el.name.startsWith('backgroundColor-')) {
-        const key = el.name.slice('backgroundColor-'.length);
+      if (target.group === 'backgroundColor') {
         const enabled = this.modal.querySelector<HTMLInputElement>(
-          `input[name="backgroundEnabled-${key}"]`
+          `input[name="backgroundEnabled-${target.key}"]`
         );
         if (!partial.backgroundColors) partial.backgroundColors = {};
-        (partial.backgroundColors as Record<string, string>)[key] = normalizeBackgroundColor(
+        (partial.backgroundColors as Record<string, string>)[target.key] = normalizeBackgroundColor(
           `${el.value}${enabled?.checked ? AUTHOR_BACKGROUND_ALPHA_HEX : '00'}`,
           '#00000000'
         );
         continue;
       }
 
-      if (el.name.startsWith('backgroundEnabled-')) continue;
+      if (target.group === 'backgroundEnabled') continue;
 
-      if (el.name.startsWith('showAuthor-')) {
+      if (target.group === 'showAuthor') {
         if (!partial.showAuthor) partial.showAuthor = {};
-        (partial.showAuthor as Record<string, boolean>)[el.name.slice('showAuthor-'.length)] = (
+        (partial.showAuthor as Record<string, boolean>)[target.key] = (
           el as HTMLInputElement
         ).checked;
         continue;
       }
 
-      const scalarKey = el.name as keyof OverlaySettings;
+      const scalarKey = target.key;
       if (el instanceof HTMLInputElement) {
         if (el.type === 'checkbox') {
           partial[scalarKey] = el.checked;

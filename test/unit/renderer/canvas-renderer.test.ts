@@ -444,4 +444,90 @@ describe('CanvasRenderer', () => {
     expect(renderer.onBacklogPauseChange).toBe(cb);
     renderer.destroy();
   });
+
+  it('keeps sync and async drain queue bookkeeping in parity', async () => {
+    const runDrain = async (asyncMode: boolean) => {
+      const localOverlay = new Overlay();
+      (localOverlay as unknown as { dimensions: { width: number; height: number } }).dimensions = {
+        width: 1280,
+        height: 720,
+      };
+      const renderer = new CanvasRenderer(localOverlay, makeSettings());
+      const messages = [
+        makeMessage('placed-a', 'a'),
+        makeMessage('transient', 'b'),
+        makeMessage('placed-b', 'c'),
+      ];
+      type DrainInternals = {
+        pendingQueue: {
+          enqueue(message: ChatMessage, priority: number): void;
+          toArray(): ChatMessage[];
+        };
+        placeQueuedMessage: ReturnType<typeof vi.fn>;
+        drainQueue(now: number): void;
+        drainQueueAsync(now: number): Promise<void>;
+      };
+      const internals = renderer as unknown as DrainInternals;
+      for (const message of messages) internals.pendingQueue.enqueue(message, 0);
+      internals.placeQueuedMessage = vi.fn((message: ChatMessage) => ({
+        placed: message.id !== 'transient',
+        oversized: false,
+      }));
+
+      if (asyncMode) await internals.drainQueueAsync(100);
+      else internals.drainQueue(100);
+
+      const result = {
+        pendingIds: internals.pendingQueue.toArray().map((message) => message.id),
+        placements: internals.placeQueuedMessage.mock.calls.map(
+          ([message, _now, _dimensions, batchIndex]) => [
+            (message as ChatMessage).id,
+            batchIndex as number,
+          ]
+        ),
+      };
+      renderer.destroy();
+      return result;
+    };
+
+    expect(await runDrain(true)).toEqual(await runDrain(false));
+  });
+
+  it('aborts async drain after destruction during a scheduler yield', async () => {
+    (overlay as unknown as { dimensions: { width: number; height: number } }).dimensions = {
+      width: 1280,
+      height: 720,
+    };
+    const renderer = new CanvasRenderer(overlay, makeSettings());
+    type DrainInternals = {
+      pendingQueue: { enqueue(message: ChatMessage, priority: number): void };
+      placeQueuedMessage: ReturnType<typeof vi.fn>;
+      drainQueueAsync(now: number): Promise<void>;
+      drainLocked: boolean;
+    };
+    const internals = renderer as unknown as DrainInternals;
+    internals.pendingQueue.enqueue(makeMessage('first', 'a'), 0);
+    internals.pendingQueue.enqueue(makeMessage('second', 'b'), 0);
+    internals.placeQueuedMessage = vi.fn(() => ({ placed: true, oversized: false }));
+
+    const originalScheduler = Object.getOwnPropertyDescriptor(globalThis, 'scheduler');
+    Object.defineProperty(globalThis, 'scheduler', {
+      configurable: true,
+      value: { yield: vi.fn(async () => renderer.destroy()) },
+    });
+    vi.spyOn(performance, 'now').mockReturnValueOnce(0).mockReturnValue(100);
+
+    try {
+      await internals.drainQueueAsync(100);
+    } finally {
+      if (originalScheduler) {
+        Object.defineProperty(globalThis, 'scheduler', originalScheduler);
+      } else {
+        Reflect.deleteProperty(globalThis, 'scheduler');
+      }
+    }
+
+    expect(internals.placeQueuedMessage).toHaveBeenCalledOnce();
+    expect(internals.drainLocked).toBe(false);
+  });
 });

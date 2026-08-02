@@ -192,4 +192,22 @@ describe('platform storage adapters', () => {
     await vi.advanceTimersByTimeAsync(2000);
     await writeExpectation;
   });
+
+  it('cleans up relay timeouts when posting fails synchronously', async () => {
+    vi.useFakeTimers();
+    window.__ytExtensionBridge = {
+      workerSupported: true,
+      workerUrl: 'chrome-extension://test/workers/renderer.js',
+      storageType: 'chrome.storage.local',
+      nonce: 'failure-nonce',
+    };
+    vi.spyOn(window, 'postMessage').mockImplementation(() => {
+      throw new Error('post failed');
+    });
+    const adapter = await loadAdapter();
+
+    await expect(adapter.getItem('read-key')).rejects.toThrow('post failed');
+    await expect(adapter.setItem('write-key', 'value')).rejects.toThrow('post failed');
+    expect(vi.getTimerCount()).toBe(0);
+  });
 });

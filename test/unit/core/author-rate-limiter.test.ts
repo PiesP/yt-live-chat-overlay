@@ -1,5 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { PerAuthorRateLimiter } from '@media/author-rate-limiter';
+import {
+  findFirstTimestampAfterCutoff,
+  PerAuthorRateLimiter,
+} from '@media/author-rate-limiter';
+
+describe('findFirstTimestampAfterCutoff', () => {
+  it.each([
+    { timestamps: [], cutoff: 5, expected: 0 },
+    { timestamps: [1, 2, 3], cutoff: 0, expected: 0 },
+    { timestamps: [1, 2, 3], cutoff: 2, expected: 2 },
+    { timestamps: [1, 2, 3], cutoff: 3, expected: 3 },
+    { timestamps: [1, 2, 2, 3], cutoff: 2, expected: 3 },
+  ])('returns $expected for cutoff $cutoff', ({ timestamps, cutoff, expected }) => {
+    expect(findFirstTimestampAfterCutoff(timestamps, cutoff)).toBe(expected);
+  });
+});
 
 describe('PerAuthorRateLimiter', () => {
   it('does not let high burst mode loosen the strict preset', () => {

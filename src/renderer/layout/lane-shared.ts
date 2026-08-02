@@ -241,8 +241,7 @@ export function buildLaneHeap(
  * Prune expired speed-tier entries and clear collision set.
  * Call at the start of each batch.
  */
-export function resetBatchShared(state: LaneAllocationState): void {
-  const now = performance.now();
+export function resetBatchShared(state: LaneAllocationState, now: number): void {
   for (const [k, v] of state.speedTierLanes) {
     if (v.until <= now) state.speedTierLanes.delete(k);
   }
@@ -304,7 +303,8 @@ export function findPlacementShared(
   msgHeight: number,
   laneHeight: number,
   maxWaitMs: number,
-  speedTier: number
+  speedTier: number,
+  random: () => number = Math.random
 ): { laneIndex: number; waitMs: number } | null {
   if (state.heap.length === 0) return null;
   const slotCount = Math.max(1, Math.ceil(msgHeight / laneHeight));
@@ -312,7 +312,7 @@ export function findPlacementShared(
   if (numLanes <= 0) return null;
 
   if (slotCount <= 1) {
-    return allocateSingleLaneShared(state, now, 0, numLanes, maxWaitMs, speedTier);
+    return allocateSingleLaneShared(state, now, 0, numLanes, maxWaitMs, speedTier, random);
   }
 
   // Multi-slot: scan for contiguous block
@@ -427,7 +427,7 @@ export function findPlacementShared(
   }
 
   // Single-slot fallback
-  return allocateSingleLaneShared(state, now, 0, numLanes, maxWaitMs, speedTier);
+  return allocateSingleLaneShared(state, now, 0, numLanes, maxWaitMs, speedTier, random);
 }
 
 /**
@@ -440,7 +440,8 @@ export function allocateSingleLaneShared(
   laneStart: number,
   laneEnd: number,
   maxWaitMs: number,
-  speedTier: number
+  speedTier: number,
+  random: () => number = Math.random
 ): { laneIndex: number; waitMs: number } | null {
   if (state.heap.length === 0) return null;
 
@@ -486,7 +487,7 @@ export function allocateSingleLaneShared(
   // Random selection distributes burst messages across lanes instead
   // of funneling them all through the topmost lane.
   if (zeroWaitCandidates && zeroWaitCandidates.length > 0) {
-    const idx = Math.floor(Math.random() * zeroWaitCandidates.length) % zeroWaitCandidates.length;
+    const idx = Math.floor(random() * zeroWaitCandidates.length) % zeroWaitCandidates.length;
     return { laneIndex: zeroWaitCandidates[idx]!, waitMs: 0 };
   }
 

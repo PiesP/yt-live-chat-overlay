@@ -118,6 +118,18 @@ export class BacklogInjectionController implements Pauseable {
     return msg;
   }
 
+  /** Append messages in arrival order while filtering IDs already queued. */
+  private appendUniqueMessages(messages: readonly ChatMessage[]): number {
+    let added = 0;
+    for (const msg of messages) {
+      if (msg.id && this.backlogSeenIds.has(msg.id)) continue;
+      this.backlogQueue.push(msg);
+      if (msg.id) this.backlogSeenIds.add(msg.id);
+      added++;
+    }
+    return added;
+  }
+
   // ── Public API ───────────────────────────────────────────
 
   /** Called when initial seed messages arrive */
@@ -127,14 +139,7 @@ export class BacklogInjectionController implements Pauseable {
     // If already injecting, queue additional messages into the existing
     // injection rather than resetting state and losing progress.
     if (this.isInjecting) {
-      let added = 0;
-      for (const msg of messages) {
-        if (!msg.id || !this.backlogSeenIds.has(msg.id)) {
-          this.backlogQueue.push(msg);
-          if (msg.id) this.backlogSeenIds.add(msg.id);
-          added++;
-        }
-      }
+      const added = this.appendUniqueMessages(messages);
       if (added > 0) {
         this.totalBacklog += added;
         log.debug('backlog.injection-queued', { added, total: this.totalBacklog });
@@ -146,14 +151,7 @@ export class BacklogInjectionController implements Pauseable {
     // messages into the existing backlog rather than replacing the queue
     // and silently discarding pending messages.
     if (this.paused && this.backlogQueue.length > 0) {
-      let added = 0;
-      for (const msg of messages) {
-        if (!msg.id || !this.backlogSeenIds.has(msg.id)) {
-          this.backlogQueue.push(msg);
-          if (msg.id) this.backlogSeenIds.add(msg.id);
-          added++;
-        }
-      }
+      const added = this.appendUniqueMessages(messages);
       if (added > 0) {
         this.totalBacklog += added;
         log.debug('backlog.paused-merge', { added, total: this.totalBacklog });

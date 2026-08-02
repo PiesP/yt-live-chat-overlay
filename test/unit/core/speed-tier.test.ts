@@ -104,6 +104,11 @@ describe('getSpeedTier', () => {
     expect(t1).toBe(t2);
   });
 
+  it('accepts the minimal Worker message contract', () => {
+    const workerMessage = { id: 'worker-id', kind: 'superchat', isBacklog: false };
+    expect(getSpeedTier(workerMessage, scrollConfig)).toBe(SPEED_TIER.NEAR);
+  });
+
   it('falls back to timestamp hash when id is missing', () => {
     const msg = makeMessage({ timestamp: 999999 });
     const tier = getSpeedTier(msg, scrollConfig);

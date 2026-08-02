@@ -50,6 +50,7 @@ import {
   toSharedContentSegments,
   warmTextBitmapCache,
 } from '@renderer/canvas/shared';
+import { getSpeedTier } from '@renderer/canvas/speed-tier';
 import type { CardConfigWorker } from '@renderer/card-config';
 import { desaturateColor } from '@renderer/color-utils';
 import {
@@ -61,7 +62,6 @@ import {
   GRADIENT_CACHE_MAX,
   HORIZONTAL_STAGGER_MAX,
   HORIZONTAL_STAGGER_PER_STEP,
-  hashStringForTier as hashForTier,
   IDLE_GRACE_PERIOD_MS,
   OPACITY_BUCKET_COUNT as OPACITY_BUCKETS,
   SPEED_TIER,
@@ -69,7 +69,6 @@ import {
   STAGGER_EXP_SCALE,
   STAGGER_QUEUE_HIGH,
   STAGGER_QUEUE_MED,
-  TIER_NEAR_THRESHOLD,
   TRANSLATION_FONT_SCALE,
   TRANSLATION_GAP_PX,
   TRANSLATION_OPACITY_SCALE,
@@ -945,13 +944,14 @@ export class WorkerRenderer {
     this.speedTierLanes.clear();
   }
 
-  private static resetBatch(state: LaneAllocationState): void {
-    resetBatchShared(state);
+  private static resetBatch(state: LaneAllocationState, now: number): void {
+    resetBatchShared(state, now);
   }
 
   private findPlacement(
     msgHeight: number,
-    speedTier: number
+    speedTier: number,
+    now: number
   ): {
     laneIndex: number;
     waitMs: number;
@@ -960,7 +960,6 @@ export class WorkerRenderer {
     verticalOffset: number;
   } | null {
     if (this.laneHeap.length === 0) return null;
-    const now = performance.now();
     const maxWaitMs = this.config?.scrollDurationMaxMs ?? DEFAULT_SETTINGS.scrollDurationMaxMs;
     const result = findPlacementShared(
       this.laneState,
@@ -1025,25 +1024,13 @@ export class WorkerRenderer {
       verticalOffset: number;
     },
     batchIndex: number,
+    speedTier: number,
     screenWidth: number,
     _screenHeight: number
   ): void {
     if (!this.config) return;
     const mode = this.config.danmakuMode;
     const isScrolling = mode === 'scroll' || mode === 'reverse';
-    let speedTier: number;
-    if (msg.isBacklog) {
-      speedTier = SPEED_TIER.BACKLOG;
-    } else if (!this.config.depthLayersEnabled) {
-      speedTier = SPEED_TIER.MID;
-    } else if (!isScrolling) {
-      speedTier = SPEED_TIER.MID;
-    } else if (msg.kind === 'superchat' || msg.kind === 'membership') {
-      speedTier = SPEED_TIER.NEAR;
-    } else {
-      const hash = hashForTier(msg.id);
-      speedTier = hash < TIER_NEAR_THRESHOLD ? SPEED_TIER.NEAR : SPEED_TIER.FAR;
-    }
     let speed = this.config.speedPxPerSec;
     if (msg.burstSpeedMultiplier && msg.burstSpeedMultiplier > 1) speed *= msg.burstSpeedMultiplier;
     switch (speedTier) {
@@ -1222,7 +1209,7 @@ export class WorkerRenderer {
       }
     }
     if (shouldDrain) {
-      WorkerRenderer.resetBatch(this.laneState);
+      WorkerRenderer.resetBatch(this.laneState, now);
       this.drainQueue(now, width, height);
     }
     // ── Merged cleanup + pre-scan (single pass) ──────────────────────
@@ -1647,18 +1634,7 @@ export class WorkerRenderer {
       const entry = this.pendingQueue[i];
       if (!entry) continue;
       if (this.activeMessages.length >= this.config.maxConcurrentMessages) break;
-      let speedTier: number;
-      if (entry.isBacklog) {
-        speedTier = SPEED_TIER.BACKLOG;
-      } else if (!this.config.depthLayersEnabled) {
-        speedTier = SPEED_TIER.MID;
-      } else if (this.config.danmakuMode !== 'scroll' && this.config.danmakuMode !== 'reverse') {
-        speedTier = SPEED_TIER.MID;
-      } else if (entry.kind === 'superchat' || entry.kind === 'membership') {
-        speedTier = SPEED_TIER.NEAR;
-      } else {
-        speedTier = hashForTier(entry.id) < TIER_NEAR_THRESHOLD ? SPEED_TIER.NEAR : SPEED_TIER.FAR;
-      }
+      const speedTier = getSpeedTier(entry, this.config);
       const requiredSlots = Math.max(1, Math.ceil(entry.height / this.laneHeight));
       if (requiredSlots > this.numLanes) {
         // A message taller than the viewport can never obtain a contiguous
@@ -1669,7 +1645,7 @@ export class WorkerRenderer {
         committed.add(entry);
         continue;
       }
-      const placement = this.findPlacement(entry.height, speedTier);
+      const placement = this.findPlacement(entry.height, speedTier, now);
       if (!placement) {
         this.totalDrops++;
         skipCount++;
@@ -1682,7 +1658,7 @@ export class WorkerRenderer {
         continue;
       }
       skipCount = 0;
-      this.activateMessage(entry, now, placement, batchIndex, width, height);
+      this.activateMessage(entry, now, placement, batchIndex, speedTier, width, height);
       batchIndex++;
       committed.add(entry);
 

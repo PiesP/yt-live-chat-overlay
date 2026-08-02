@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import {
   computeBaseHeadwayPx,
   areSpeedTiersCompatible,
@@ -293,32 +293,21 @@ describe('allocateSingleLaneShared', () => {
   });
 
   it('returns zero-wait lane when available', () => {
-    // Mock Math.random to always return 1 (never epsilon-skip)
-    vi.spyOn(Math, 'random').mockReturnValue(1);
-    try {
-      const state = makeState(8);
-      const result = allocateSingleLaneShared(state, 0, 0, 8, 100, 1);
-      expect(result).not.toBeNull();
-      expect(result!.waitMs).toBe(0);
-    } finally {
-      vi.restoreAllMocks();
-    }
+    const state = makeState(8);
+    const result = allocateSingleLaneShared(state, 0, 0, 8, 100, 1, () => 0.75);
+    expect(result).not.toBeNull();
+    expect(result!.waitMs).toBe(0);
   });
 
   it('skips collided lanes', () => {
-    vi.spyOn(Math, 'random').mockReturnValue(1);
-    try {
-      const state = makeState(4);
-      state.collidedLanes.add(0);
-      state.collidedLanes.add(1);
+    const state = makeState(4);
+    state.collidedLanes.add(0);
+    state.collidedLanes.add(1);
 
-      const result = allocateSingleLaneShared(state, 0, 0, 4, 100, 1);
-      expect(result).not.toBeNull();
-      // Should not be lane 0 or 1
-      expect(result!.laneIndex).toBeGreaterThanOrEqual(2);
-    } finally {
-      vi.restoreAllMocks();
-    }
+    const result = allocateSingleLaneShared(state, 0, 0, 4, 100, 1, () => 0);
+    expect(result).not.toBeNull();
+    // Should not be lane 0 or 1
+    expect(result!.laneIndex).toBeGreaterThanOrEqual(2);
   });
 });
 
@@ -337,31 +326,21 @@ describe('findPlacementShared', () => {
   });
 
   it('returns placement when lanes are available', () => {
-    vi.spyOn(Math, 'random').mockReturnValue(1);
-    try {
-      const state = makeState(8);
-      const result = findPlacementShared(state, 0, 40, 40, 100, 1);
-      expect(result).not.toBeNull();
-      expect(result!.waitMs).toBe(0);
-      expect(result!.laneIndex).toBeGreaterThanOrEqual(0);
-      expect(result!.laneIndex).toBeLessThan(8);
-    } finally {
-      vi.restoreAllMocks();
-    }
+    const state = makeState(8);
+    const result = findPlacementShared(state, 0, 40, 40, 100, 1, () => 0.5);
+    expect(result).not.toBeNull();
+    expect(result!.waitMs).toBe(0);
+    expect(result!.laneIndex).toBeGreaterThanOrEqual(0);
+    expect(result!.laneIndex).toBeLessThan(8);
   });
 
   it('handles multi-slot messages (ceil division)', () => {
-    vi.spyOn(Math, 'random').mockReturnValue(1);
-    try {
-      const state = makeState(8);
-      // msgHeight=100, laneHeight=40 → slotCount=3
-      const result = findPlacementShared(state, 0, 100, 40, 100, 1);
-      expect(result).not.toBeNull();
-      expect(result!.laneIndex).toBeGreaterThanOrEqual(0);
-      expect(result!.laneIndex).toBeLessThanOrEqual(5); // maxStartLane = 8-3 = 5
-    } finally {
-      vi.restoreAllMocks();
-    }
+    const state = makeState(8);
+    // msgHeight=100, laneHeight=40 → slotCount=3
+    const result = findPlacementShared(state, 0, 100, 40, 100, 1, () => 0.5);
+    expect(result).not.toBeNull();
+    expect(result!.laneIndex).toBeGreaterThanOrEqual(0);
+    expect(result!.laneIndex).toBeLessThanOrEqual(5); // maxStartLane = 8-3 = 5
   });
 });
 
@@ -374,36 +353,26 @@ describe('resetBatchShared', () => {
     state.collidedLanes.add(2);
     expect(state.collidedLanes.size).toBe(2);
 
-    resetBatchShared(state);
+    resetBatchShared(state, 0);
     expect(state.collidedLanes.size).toBe(0);
   });
 
   it('prunes expired speed tier entries', () => {
-    vi.spyOn(performance, 'now').mockReturnValue(5000);
-    try {
-      const state = makeState(4);
-      state.speedTierLanes.set(0, { tier: 2, until: 3000 });
-      state.speedTierLanes.set(1, { tier: 1, until: 7000 });
+    const state = makeState(4);
+    state.speedTierLanes.set(0, { tier: 2, until: 3000 });
+    state.speedTierLanes.set(1, { tier: 1, until: 7000 });
 
-      resetBatchShared(state);
-      expect(state.speedTierLanes.has(0)).toBe(false);
-      expect(state.speedTierLanes.has(1)).toBe(true);
-    } finally {
-      vi.restoreAllMocks();
-    }
+    resetBatchShared(state, 5000);
+    expect(state.speedTierLanes.has(0)).toBe(false);
+    expect(state.speedTierLanes.has(1)).toBe(true);
   });
 
   it('prunes speed tier entries that expire exactly at now', () => {
-    vi.spyOn(performance, 'now').mockReturnValue(5000);
-    try {
-      const state = makeState(4);
-      state.speedTierLanes.set(0, { tier: 2, until: 5000 });
+    const state = makeState(4);
+    state.speedTierLanes.set(0, { tier: 2, until: 5000 });
 
-      resetBatchShared(state);
-      expect(state.speedTierLanes.has(0)).toBe(false);
-    } finally {
-      vi.restoreAllMocks();
-    }
+    resetBatchShared(state, 5000);
+    expect(state.speedTierLanes.has(0)).toBe(false);
   });
 });
 
