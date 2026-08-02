@@ -248,6 +248,31 @@ describe('SettingsUiForm', () => {
     modal.remove();
   });
 
+  it('round-trips outline, author color, and visibility control groups', () => {
+    const settings = makeDefaults({
+      outline: { enabled: false, widthPx: 3.5, opacity: 0.4 },
+      colors: { ...makeDefaults().colors, member: '#123456' },
+      showAuthor: { ...makeDefaults().showAuthor, normal: true, superChat: false },
+    });
+    const form = new SettingsUiForm(() => settings, onPreview);
+    const modal = document.createElement('dialog');
+    modal.id = BACKDROP_ID;
+    document.body.appendChild(modal);
+    modal.append(...form.createModalContent());
+    form.setModal(modal);
+
+    form.populateForm(settings);
+    const collected = form.collectSettings();
+
+    expect(collected.outline).toEqual(settings.outline);
+    expect(collected.colors.member).toBe('#123456');
+    expect(collected.showAuthor.normal).toBe(true);
+    expect(collected.showAuthor.superChat).toBe(false);
+
+    form.destroy();
+    modal.remove();
+  });
+
   it('destroy cleans up resources', () => {
     const form = new SettingsUiForm(getSettings, onPreview);
     const modal = document.createElement('dialog');
