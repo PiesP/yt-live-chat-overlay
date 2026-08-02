@@ -40,6 +40,9 @@ async function openSettingsModal(page: Page): Promise<Locator> {
   const modal = page.locator('.yt-chat-overlay-settings-modal');
   await expect(modal).toBeVisible();
   await expect(modal).toHaveAttribute('open', '');
+  // Axe evaluates effective composited colors, so wait until the entrance
+  // animation is fully opaque before measuring contrast.
+  await expect(modal).toHaveCSS('opacity', '1');
   return modal;
 }
 
