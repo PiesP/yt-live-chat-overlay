@@ -77,6 +77,8 @@ describe('ReplayBuffer', () => {
       }
 
       expect(internals.seenIds).toBe(seenIds);
+      expect(seenIds.has('msg0')).toBe(false);
+      expect(seenIds.has('msg3000')).toBe(true);
 
       buf.insert(makeMsg('msg0', 4000), 4000);
       buf.insert(makeMsg('msg3000', 4001), 4001);
