@@ -38,8 +38,16 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
+function isPositiveFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0;
+}
+
 function hasOwn(record: Readonly<Record<string, unknown>>, key: string): boolean {
   return Object.hasOwn(record, key);
+}
+
+function isCanvasLike(value: unknown): boolean {
+  return isRecord(value) && typeof value.getContext === 'function';
 }
 
 function isSafeConfig(value: unknown): value is Record<string, unknown> {
@@ -83,8 +91,13 @@ export function isValidControlMessage(value: unknown): boolean {
 
   switch (type) {
     case 'init':
-      // Content validation is handled by the renderer; just verify discriminant
-      return true;
+      return (
+        isSafeConfig(value.config) &&
+        isCanvasLike(value.canvas) &&
+        isPositiveFiniteNumber(value.width) &&
+        isPositiveFiniteNumber(value.height) &&
+        isPositiveFiniteNumber(value.dpr)
+      );
     case 'resize':
       return (
         typeof value.width === 'number' &&

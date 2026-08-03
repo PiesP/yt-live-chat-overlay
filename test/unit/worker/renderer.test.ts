@@ -44,6 +44,8 @@ describe('WorkerRenderer', () => {
       type: 'init',
       canvas,
       dpr: 1,
+      width: 1920,
+      height: 1080,
       config: {
         fontSize: 32,
         speedPxPerSec: 250,
@@ -145,6 +147,8 @@ describe('WorkerRenderer', () => {
       type: 'init',
       canvas,
       dpr: 1,
+      width: 1920,
+      height: 1080,
       config: {
         fontSize: 32, speedPxPerSec: 250, opacity: 1, superChatOpacity: 0.95,
         outline: { enabled: true, widthPx: 2, opacity: 0.7 },

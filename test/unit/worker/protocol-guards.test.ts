@@ -121,6 +121,65 @@ beforeEach(() => {
 });
 
 describe('renderer worker protocol guards', () => {
+  it('accepts a valid init message with a canvas-like transferable', () => {
+    expect(
+      isValidControlMessage({
+        type: 'init',
+        config: { ...DEFAULT_SETTINGS },
+        canvas: new MockOffscreenCanvas(),
+        width: 640,
+        height: 360,
+        dpr: 2,
+      })
+    ).toBe(true);
+  });
+
+  it('rejects unsafe init cache budgets', () => {
+    const base = {
+      type: 'init',
+      canvas: new MockOffscreenCanvas(),
+      width: 640,
+      height: 360,
+      dpr: 1,
+    };
+
+    expect(
+      isValidControlMessage({
+        ...base,
+        config: { ...DEFAULT_SETTINGS, emojiCacheMb: Number.NaN },
+      })
+    ).toBe(false);
+    expect(
+      isValidControlMessage({
+        ...base,
+        config: { ...DEFAULT_SETTINGS, textCacheMb: 21 },
+      })
+    ).toBe(false);
+  });
+
+  it('rejects malformed init dimensions and non-canvas payloads', () => {
+    const base = {
+      type: 'init',
+      config: { ...DEFAULT_SETTINGS },
+      canvas: new MockOffscreenCanvas(),
+      width: 640,
+      height: 360,
+      dpr: 1,
+    };
+
+    for (const invalid of [
+      { width: 0 },
+      { width: Number.NaN },
+      { height: Number.POSITIVE_INFINITY },
+      { dpr: 0 },
+      { dpr: Number.NaN },
+      { canvas: {} },
+      { canvas: null },
+    ]) {
+      expect(isValidControlMessage({ ...base, ...invalid })).toBe(false);
+    }
+  });
+
   it('accepts manager messages through the guard and renderer', async () => {
     const renderer = initializeRenderer();
     const manager = createManager(renderer);
