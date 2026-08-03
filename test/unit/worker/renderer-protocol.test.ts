@@ -284,6 +284,25 @@ describe('Worker message protocol', () => {
   });
 
   describe('robustness', () => {
+    it('does not mutate renderer config for rejected prototype and resource payloads', () => {
+      const renderer = initializeRenderer();
+      const internals = renderer as unknown as {
+        config: Record<string, unknown>;
+      };
+      const originalPrototype = Object.getPrototypeOf(internals.config);
+      const originalCacheBudget = internals.config.emojiCacheMb;
+      const maliciousConfig = JSON.parse(
+        '{"__proto__":{"polluted":true},"emojiCacheMb":1000000}'
+      ) as Record<string, unknown>;
+
+      renderer.handleMessage(makeEvent({ type: 'updateConfig', config: maliciousConfig }));
+
+      expect(Object.getPrototypeOf(internals.config)).toBe(originalPrototype);
+      expect(Object.hasOwn(internals.config, '__proto__')).toBe(false);
+      expect(internals.config.emojiCacheMb).toBe(originalCacheBudget);
+      expect((internals.config as { polluted?: boolean }).polluted).toBeUndefined();
+    });
+
     it('snapshots messages that are still pending in the Worker', () => {
       const renderer = initializeRenderer();
       const message = makeWorkerMessage({ id: 'pending-message' });
