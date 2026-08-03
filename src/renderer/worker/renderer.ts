@@ -455,6 +455,8 @@ export class WorkerRenderer {
   );
   private readonly messageById = new Map<string, WorkerMessage | ActiveMessage>();
   private fetching = new Set<string>();
+  private readonly fetchControllers = new Set<AbortController>();
+  private fetchGeneration = 0;
   private farOpacityBuckets: ActiveMessage[][] = Array.from({ length: OPACITY_BUCKETS }, () => []);
   private midOpacityBuckets: ActiveMessage[][] = Array.from({ length: OPACITY_BUCKETS }, () => []);
   private nearOpacityBuckets: ActiveMessage[][] = Array.from({ length: OPACITY_BUCKETS }, () => []);
@@ -830,6 +832,10 @@ export class WorkerRenderer {
 
   private handleDestroy(): void {
     this.isDestroyed = true;
+    this.fetchGeneration++;
+    for (const controller of this.fetchControllers) controller.abort();
+    this.fetchControllers.clear();
+    this.fetching.clear();
     if (this.animFrameId !== null) {
       cancelAnimationFrame(this.animFrameId);
       this.animFrameId = null;
@@ -1698,6 +1704,8 @@ export class WorkerRenderer {
     urls: string[],
     cache: ResizableByteLimitedCache<ImageBitmap>
   ): Promise<void> {
+    if (this.isDestroyed) return;
+    const generation = this.fetchGeneration;
     const toFetch = [...new Set(urls)].filter((u) => !cache.has(u) && !this.fetching.has(u));
     if (toFetch.length === 0) return;
     let idx = 0;
@@ -1706,6 +1714,7 @@ export class WorkerRenderer {
       workers.push(
         (async () => {
           while (idx < toFetch.length) {
+            if (this.isDestroyed || generation !== this.fetchGeneration) break;
             const url = toFetch[idx++];
             if (url === undefined) break;
             if (!isAllowedImageUrl(url)) {
@@ -1714,21 +1723,29 @@ export class WorkerRenderer {
             }
             this.fetching.add(url);
             let timer: ReturnType<typeof setTimeout> | undefined;
+            const controller = new AbortController();
+            this.fetchControllers.add(controller);
             try {
-              const controller = new AbortController();
               timer = setTimeout(
                 () => controller.abort(),
                 this.config?.emojiFetchTimeoutMs ?? EMOJI_FETCH_TIMEOUT_DEFAULT_MS
               );
               const response = await fetch(url, { signal: controller.signal });
+              if (this.isPrefetchStale(generation, controller.signal)) continue;
               if (!response.ok) continue;
               const blob = await response.blob();
+              if (this.isPrefetchStale(generation, controller.signal)) continue;
               const bitmap = await createImageBitmap(blob);
+              if (this.isPrefetchStale(generation, controller.signal)) {
+                bitmap.close();
+                continue;
+              }
               cache.set(url, bitmap);
             } catch {
               // silently skip
             } finally {
               clearTimeout(timer);
+              this.fetchControllers.delete(controller);
               this.fetching.delete(url);
             }
           }
@@ -1736,6 +1753,10 @@ export class WorkerRenderer {
       );
     }
     await Promise.all(workers);
+  }
+
+  private isPrefetchStale(generation: number, signal: AbortSignal): boolean {
+    return this.isDestroyed || generation !== this.fetchGeneration || signal.aborted;
   }
 }
 

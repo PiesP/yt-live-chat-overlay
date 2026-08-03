@@ -244,6 +244,43 @@ describe('Worker message protocol', () => {
 
       expect(internals.emojiCache.size).toBe(1);
     });
+
+    it('aborts image prefetch and closes a bitmap that resolves after destroy', async () => {
+      const renderer = initializeRenderer();
+      const internals = renderer as unknown as {
+        emojiCache: { has: (url: string) => boolean };
+        fetchControllers: Set<AbortController>;
+        fetching: Set<string>;
+        prefetchImages: (urls: string[], cache: unknown) => Promise<void>;
+      };
+      const url = 'https://yt3.ggpht.com/late-emoji';
+      const bitmap = { width: 10, height: 10, close: vi.fn() };
+      let resolveBitmap!: (value: typeof bitmap) => void;
+      const bitmapPromise = new Promise<typeof bitmap>((resolve) => {
+        resolveBitmap = resolve;
+      });
+      const createBitmapMock = vi.mocked(createImageBitmap);
+      createBitmapMock.mockImplementationOnce(() => bitmapPromise as Promise<ImageBitmap>);
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+        ok: true,
+        blob: async () => new Blob(['image']),
+      } as Response);
+
+      const prefetch = internals.prefetchImages([url], internals.emojiCache);
+      await vi.waitFor(() => expect(createBitmapMock).toHaveBeenCalled());
+      const signal = fetchSpy.mock.calls[0]?.[1]?.signal;
+
+      renderer.handleMessage(makeEvent({ type: 'destroy' }));
+      expect(signal?.aborted).toBe(true);
+      resolveBitmap(bitmap);
+      await prefetch;
+
+      expect(bitmap.close).toHaveBeenCalledOnce();
+      expect(internals.emojiCache.has(url)).toBe(false);
+      expect(internals.fetchControllers.size).toBe(0);
+      expect(internals.fetching.size).toBe(0);
+      fetchSpy.mockRestore();
+    });
   });
 
   describe('robustness', () => {
