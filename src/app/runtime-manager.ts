@@ -783,6 +783,9 @@ export class RuntimeManager {
         this.startForegroundListeners();
         this.startChatPanelMonitor(this.chatSource!);
         this.standbyController.enter();
+        if (document.visibilityState !== 'visible') {
+          this.standbyController.pause();
+        }
         log.info('runtime.standby.entered');
         return 'started';
       }
@@ -1426,6 +1429,7 @@ export class RuntimeManager {
         this.renderer?.trimBackgroundQueue();
         this.chatSource?.setPauseReason('visibility', true);
         this.chatPanelObserver.pause();
+        this.standbyController.pause();
         return;
       }
 
@@ -1441,6 +1445,7 @@ export class RuntimeManager {
       // In standby mode (pre-live, waiting for stream), just resume the
       // render loop — no chat source or video state to manage.
       if (this.standbyController.isStandby()) {
+        this.standbyController.resume();
         this.renderer?.resume();
         return;
       }

@@ -145,8 +145,6 @@ export abstract class ChatSource implements Pauseable {
    */
   private readonly seenMessageIds = createMessageIdRegistry(ChatSource.SEEN_IDS_MAX);
 
-  private static readonly PAUSE_POLL_INTERVAL_MS = 250;
-
   constructor(getSettings: () => Readonly<OverlaySettings>) {
     this.getSettings = getSettings;
   }
@@ -377,11 +375,17 @@ export abstract class ChatSource implements Pauseable {
   protected async waitWhilePaused(sessionSignal?: AbortSignal): Promise<void> {
     while (this.pauseReasons.size > 0) {
       if (sessionSignal?.aborted) throw new DOMException('Aborted', 'AbortError');
-      if (this.pauseAbortController?.signal.aborted) return;
-      // Sleep briefly; abort of pauseAbortController (via all reasons removed)
-      // will interrupt via the combined abort check above on next iteration.
-      // Use a short sleep so we don't miss the abort by more than 250ms.
-      await sleep(ChatSource.PAUSE_POLL_INTERVAL_MS, sessionSignal);
+      const pauseSignal = this.pauseAbortController?.signal;
+      if (!pauseSignal || pauseSignal.aborted) continue;
+      const wakeSignal = sessionSignal
+        ? AbortSignal.any([pauseSignal, sessionSignal])
+        : pauseSignal;
+      if (!wakeSignal.aborted) {
+        await new Promise<void>((resolve) => {
+          wakeSignal.addEventListener('abort', () => resolve(), { once: true });
+        });
+      }
+      if (sessionSignal?.aborted) throw new DOMException('Aborted', 'AbortError');
     }
   }
 
