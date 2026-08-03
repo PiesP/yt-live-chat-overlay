@@ -284,6 +284,18 @@ export class RenderWorkerManager {
       }
 
       const dims = overlay.getDimensions();
+      if (
+        !dims ||
+        !Number.isFinite(dims.width) ||
+        dims.width <= 0 ||
+        !Number.isFinite(dims.height) ||
+        dims.height <= 0
+      ) {
+        log.debug('renderer.worker.unavailable', {
+          reason: 'invalid-overlay-dimensions',
+        });
+        return false;
+      }
       const dpr = window.devicePixelRatio || 1;
       const config = RenderWorkerManager.buildWorkerConfig(settings);
 
@@ -325,10 +337,8 @@ export class RenderWorkerManager {
       // Apply DPR to canvas backing store BEFORE transferring to offscreen,
       // so the worker's OffscreenCanvas renders at native device resolution
       // instead of being browser-upscaled from CSS-pixel resolution.
-      if (dims) {
-        canvas.width = dims.width * dpr;
-        canvas.height = dims.height * dpr;
-      }
+      canvas.width = dims.width * dpr;
+      canvas.height = dims.height * dpr;
       const offscreen = canvas.transferControlToOffscreen();
 
       w.onmessage = (e: MessageEvent) => {
@@ -434,8 +444,8 @@ export class RenderWorkerManager {
           type: 'init',
           canvas: offscreen,
           config,
-          width: dims?.width ?? 0,
-          height: dims?.height ?? 0,
+          width: dims.width,
+          height: dims.height,
           dpr,
         },
         [offscreen]

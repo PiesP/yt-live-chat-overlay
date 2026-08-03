@@ -12,6 +12,8 @@ vi.stubGlobal('Worker', class {
   removeEventListener = vi.fn();
 });
 
+vi.stubGlobal('OffscreenCanvas', class {});
+
 vi.stubGlobal('queueMicrotask', (fn: () => void) => {
   // Synchronously execute microtask for test determinism
   Promise.resolve().then(fn);
@@ -93,6 +95,46 @@ describe('RenderWorkerManager', () => {
 
     it('accepts deps without worker (no crash)', () => {
       expect(() => new RenderWorkerManager(deps as any)).not.toThrow();
+    });
+  });
+
+  describe('init', () => {
+    it.each([
+      ['missing', null],
+      ['zero-width', { width: 0, height: 360 }],
+      ['zero-height', { width: 640, height: 0 }],
+      ['non-finite', { width: Number.POSITIVE_INFINITY, height: 360 }],
+    ])(
+      'falls back before transferring the canvas for %s initial dimensions',
+      (_label, dimensions) => {
+        const transferControlToOffscreen = vi.fn(() => ({ getContext: vi.fn() }));
+        const canvas = { transferControlToOffscreen } as unknown as HTMLCanvasElement;
+        const onDimensionsChanged = vi.fn(() => vi.fn());
+        const overlay = {
+          getDimensions: vi.fn(() => dimensions),
+          onDimensionsChanged,
+        };
+
+        expect(manager.init(canvas, DEFAULT_SETTINGS, overlay as any, 'worker.js')).toBe(false);
+        expect(manager.isActive).toBe(false);
+        expect(transferControlToOffscreen).not.toHaveBeenCalled();
+        expect(onDimensionsChanged).not.toHaveBeenCalled();
+      }
+    );
+
+    it('starts the worker when initial dimensions are positive', () => {
+      const transferControlToOffscreen = vi.fn(() => ({ getContext: vi.fn() }));
+      const canvas = { transferControlToOffscreen } as unknown as HTMLCanvasElement;
+      const onDimensionsChanged = vi.fn(() => vi.fn());
+      const overlay = {
+        getDimensions: vi.fn(() => ({ width: 640, height: 360 })),
+        onDimensionsChanged,
+      };
+
+      expect(manager.init(canvas, DEFAULT_SETTINGS, overlay as any, 'worker.js')).toBe(true);
+      expect(manager.isActive).toBe(true);
+      expect(transferControlToOffscreen).toHaveBeenCalledOnce();
+      expect(onDimensionsChanged).toHaveBeenCalledOnce();
     });
   });
 
