@@ -2,6 +2,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, it, expect, vi, beforeEach } from 'vitest';
 import { CanvasRenderer } from '@renderer/canvas-renderer';
+import type { CanvasMessage } from '@renderer/constants';
 import { Overlay } from '@app/overlay';
 import type { ChatMessage, OverlaySettings } from '@app-types';
 import { LanguageDetectorService } from '@translation/language-detector';
@@ -158,6 +159,42 @@ describe('CanvasRenderer', () => {
 
     expect(internals.languageDetector).not.toBeNull();
     expect(internals.channelMemory).not.toBeNull();
+    renderer.destroy();
+  });
+
+  it('rejects an in-flight translation result after translation is disabled', () => {
+    const renderer = new CanvasRenderer(
+      overlay,
+      makeSettings({ translationEnabled: true, translationMode: 'replace' })
+    );
+    const message = {
+      translatedText: 'queued translation',
+      translatedRenderMessage: makeMessage('translation-result', 'queued translation'),
+    } as CanvasMessage;
+    const internals = renderer as unknown as {
+      activeMessages: CanvasMessage[];
+      pendingTranslations: Array<{ msg: CanvasMessage; text: string | null }>;
+      translationConfigurationGeneration: number;
+      queueTranslationResult(
+        msg: CanvasMessage,
+        text: string | null,
+        generation: number
+      ): void;
+      applyPendingTranslations(): void;
+    };
+    internals.activeMessages.push(message);
+    internals.pendingTranslations.push({ msg: message, text: 'queued translation' });
+    const generation = internals.translationConfigurationGeneration;
+
+    renderer.updateSettings(
+      makeSettings({ translationEnabled: false, translationMode: 'replace' })
+    );
+    internals.queueTranslationResult(message, 'late translation', generation);
+    internals.applyPendingTranslations();
+
+    expect(internals.pendingTranslations).toEqual([]);
+    expect(message.translatedText).toBeNull();
+    expect(message.translatedRenderMessage).toBeUndefined();
     renderer.destroy();
   });
 

@@ -196,6 +196,8 @@ export class CanvasRenderer extends RendererBase {
   private pendingTranslations: Array<{ msg: CanvasMessage; text: string | null }> = [];
   /** Read index for incremental pendingTranslations drain (avoids splice allocation). */
   private pendingTranslationReadIdx = 0;
+  /** Invalidates in-flight translation callbacks when their configuration changes. */
+  private translationConfigurationGeneration = 0;
 
   /**
    * Scratch array for cleanupExpiredMessages — hoisted to avoid per-frame allocation.
@@ -1087,6 +1089,20 @@ export class CanvasRenderer extends RendererBase {
     }
   }
 
+  private queueTranslationResult(
+    msg: CanvasMessage,
+    text: string | null,
+    generation: number
+  ): void {
+    if (
+      generation !== this.translationConfigurationGeneration ||
+      !this.settings.translationEnabled
+    ) {
+      return;
+    }
+    this.pendingTranslations.push({ msg, text });
+  }
+
   /** Update canvas dimensions when device pixel ratio changes. */
   private updateCanvasDpr(
     canvas: HTMLCanvasElement,
@@ -1520,6 +1536,7 @@ export class CanvasRenderer extends RendererBase {
       speedTier
     );
 
+    const translationGeneration = this.translationConfigurationGeneration;
     this.messageActivator.activate(
       message,
       now,
@@ -1535,7 +1552,7 @@ export class CanvasRenderer extends RendererBase {
         },
         onMessageRendered: () => this.observability.onMessageRendered(),
         onTranslationResult: (cm, text) => {
-          this.pendingTranslations.push({ msg: cm, text });
+          this.queueTranslationResult(cm, text, translationGeneration);
         },
       },
       effectiveDuration,
@@ -1741,6 +1758,12 @@ export class CanvasRenderer extends RendererBase {
     const wasTranslationEnabled = this.settings.translationEnabled;
     const prevSource = this.settings.translationSource;
     const prevDanmakuMode = this.settings.danmakuMode;
+    const translationConfigurationChanged =
+      settings.translationEnabled !== this.settings.translationEnabled ||
+      settings.translationService !== this.settings.translationService ||
+      settings.translationSource !== this.settings.translationSource ||
+      settings.translationTarget !== this.settings.translationTarget ||
+      settings.translationMode !== this.settings.translationMode;
     const laneGeometryChanged =
       settings.fontSize !== this.settings.fontSize ||
       settings.fontWeight !== this.settings.fontWeight ||
@@ -1750,6 +1773,11 @@ export class CanvasRenderer extends RendererBase {
       settings.safeBottom !== this.settings.safeBottom;
     super.updateSettings(settings, options);
     this.translationBatchSize = settings.translationBatchSize;
+    if (translationConfigurationChanged) {
+      this.translationConfigurationGeneration++;
+      this.pendingTranslations.length = 0;
+      this.pendingTranslationReadIdx = 0;
+    }
 
     // When settings change, cached dimensions become stale
     // (font, size, weight, family, maxBodyLines all affect dimension calculation).

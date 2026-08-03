@@ -382,7 +382,8 @@ export function drawStage(
         const renderMessage = msg.renderMessage;
 
         if (msg.message.kind === 'text') {
-          const isReplace = ctx.settings.translationMode === 'replace';
+          const isReplace =
+            ctx.settings.translationEnabled && ctx.settings.translationMode === 'replace';
           const regularConfig = ctx.regularRenderConfig;
           regularConfig.fontSize = ctx.settings.fontSize;
           regularConfig.fontWeight = ctx.settings.fontWeight;
@@ -452,7 +453,11 @@ export function drawStage(
         }
 
         // Render translation in dual mode
-        if (msg.translatedText && ctx.settings.translationMode !== 'replace') {
+        if (
+          ctx.settings.translationEnabled &&
+          msg.translatedText &&
+          ctx.settings.translationMode !== 'replace'
+        ) {
           const fontSize = Math.max(1, Math.round(ctx.settings.fontSize * TRANSLATION_FONT_SCALE));
           const gap = TRANSLATION_GAP_PX;
           const transY = snappedY + msg.height - fontSize - gap;
