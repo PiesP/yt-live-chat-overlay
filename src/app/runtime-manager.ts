@@ -1445,6 +1445,8 @@ export class RuntimeManager {
       // In standby mode (pre-live, waiting for stream), just resume the
       // render loop — no chat source or video state to manage.
       if (this.standbyController.isStandby()) {
+        this.chatSource?.setPauseReason('visibility', false);
+        this.clearHidden();
         this.standbyController.resume();
         this.renderer?.resume();
         return;

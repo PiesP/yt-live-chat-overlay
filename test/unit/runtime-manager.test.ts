@@ -132,6 +132,71 @@ describe('RuntimeManager', () => {
     internals.stopForegroundListeners();
   });
 
+  it('clears visibility state when standby resumes in the foreground', () => {
+    const rm = new RuntimeManager(createOpts());
+    const setPauseReason = vi.fn();
+    const pauseStandby = vi.fn();
+    const resumeStandby = vi.fn();
+    const pauseRenderer = vi.fn();
+    const resumeRenderer = vi.fn();
+    const internals = rm as unknown as {
+      hiddenSince: number | null;
+      chatSource: { setPauseReason(reason: 'visibility', active: boolean): void } | null;
+      renderer: {
+        pause(): void;
+        resume(): void;
+        trimBackgroundQueue(): void;
+      } | null;
+      standbyController: {
+        pause(): void;
+        resume(): void;
+        isStandby(): boolean;
+      };
+      startForegroundListeners(): void;
+      stopForegroundListeners(): void;
+    };
+    internals.chatSource = { setPauseReason };
+    internals.renderer = {
+      pause: pauseRenderer,
+      resume: resumeRenderer,
+      trimBackgroundQueue: vi.fn(),
+    };
+    internals.standbyController = {
+      pause: pauseStandby,
+      resume: resumeStandby,
+      isStandby: () => true,
+    };
+    internals.startForegroundListeners();
+
+    const originalVisibilityState = document.visibilityState;
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'hidden',
+    });
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(internals.hiddenSince).not.toBeNull();
+    expect(setPauseReason).toHaveBeenLastCalledWith('visibility', true);
+    expect(pauseStandby).toHaveBeenCalledOnce();
+    expect(pauseRenderer).toHaveBeenCalledOnce();
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    });
+    document.dispatchEvent(new Event('visibilitychange'));
+
+    expect(internals.hiddenSince).toBeNull();
+    expect(setPauseReason).toHaveBeenLastCalledWith('visibility', false);
+    expect(resumeStandby).toHaveBeenCalledOnce();
+    expect(resumeRenderer).toHaveBeenCalledOnce();
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: originalVisibilityState,
+    });
+    internals.stopForegroundListeners();
+  });
+
   it('cancels a deferred restart when the active session is disposed', () => {
     vi.useFakeTimers();
     const rm = new RuntimeManager(createOpts());
