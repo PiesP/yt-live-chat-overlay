@@ -341,10 +341,8 @@ export function renderPaidCard(
       settings.fontFamily,
       settings.outline.enabled ? settings.outline.widthPx : 0,
       settings.outline.enabled ? settings.outline.opacity : 0,
-      (url: string) => authorPhotoCache.get(url),
-      (photo: unknown) =>
-        (photo as HTMLImageElement)?.complete === true &&
-        (photo as HTMLImageElement).naturalWidth > 0,
+      authorPhotoCache,
+      isReadyHtmlImage,
       textBitmapCache,
       getFontFn
     );
@@ -431,4 +429,8 @@ export function renderPaidCard(
       }
     }
   }
+}
+
+function isReadyHtmlImage(photo: HTMLImageElement): boolean {
+  return photo.complete && photo.naturalWidth > 0;
 }

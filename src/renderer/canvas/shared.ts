@@ -35,6 +35,11 @@ export interface TextBitmapCache {
   readonly maxBytes?: number;
 }
 
+/** Minimal cache lookup contract shared by HTMLImageElement and ImageBitmap caches. */
+export interface ImageCacheLike<T = unknown> {
+  get(url: string): T | undefined | null;
+}
+
 const MAX_TEXT_BITMAP_DIMENSION = 8192;
 
 export function getSafeTextHeight(metrics: TextMetrics, fontSize: number): number {
@@ -834,7 +839,8 @@ function renderContentSegments(
   textBitmapCache: TextBitmapCache,
   getFontFn: (fontSize: number) => string,
   measureTextFn: (text: string) => number,
-  getEmojiImg: (url: string) => CanvasImageSource | null,
+  emojiCache: ImageCacheLike,
+  isValidEmoji: (image: unknown) => boolean,
   letterSpacing = '0px'
 ): void {
   let cursorX = startX;
@@ -861,9 +867,9 @@ function renderContentSegments(
       cursorX += measureTextFn(seg.content);
     } else {
       const { emojiUrl, emojiAlt, emojiFallbackText } = resolveEmojiFields(seg);
-      const img = emojiUrl ? getEmojiImg(emojiUrl) : null;
-      if (img) {
-        ctx.drawImage(img, cursorX, emojiY, emojiSize, emojiSize);
+      const img = emojiUrl ? emojiCache.get(emojiUrl) : null;
+      if (img != null && isValidEmoji(img)) {
+        ctx.drawImage(img as CanvasImageSource, cursorX, emojiY, emojiSize, emojiSize);
       } else if (emojiFallbackText) {
         renderSegment(
           ctx,
@@ -1019,7 +1025,7 @@ export function drawAuthorSection<T>(
   fontFamily: string,
   outlineWidthPx: number,
   outlineOpacity: number,
-  getPhoto: (url: string) => T | undefined | null,
+  photoCache: ImageCacheLike<T>,
   isValidPhoto: (photo: T) => boolean,
   textBitmapCache: TextBitmapCache,
   getFontFn: (fontSize: number) => string
@@ -1041,7 +1047,7 @@ export function drawAuthorSection<T>(
   const authorPhotoUrl = message.authorPhotoUrl;
   let hasPhoto = false;
   if (authorPhotoUrl) {
-    const photo = getPhoto(authorPhotoUrl);
+    const photo = photoCache.get(authorPhotoUrl);
     if (photo != null && isValidPhoto(photo) && isCanvasImageSource(photo)) {
       drawAuthorPhoto(ctx, photo as CanvasImageSource, textX, startY);
       hasPhoto = true;
@@ -1109,7 +1115,7 @@ export function drawAuthorSection<T>(
 export interface RegularMessageLike {
   author?: string;
   authorPhotoUrl?: string;
-  content: readonly unknown[];
+  content: readonly SharedContentSegment[];
   text: string;
 }
 
@@ -1144,9 +1150,9 @@ export function renderRegularMessage(
   y: number,
   config: RegularMessageRenderConfig,
   textBitmapCache: TextBitmapCache,
-  getEmojiImage: (url: string) => unknown,
+  emojiCache: ImageCacheLike,
   isValidEmoji: (img: unknown) => boolean,
-  authorPhotoCache: { get(url: string): unknown },
+  authorPhotoCache: ImageCacheLike,
   isValidAuthorPhoto: (photo: unknown) => boolean,
   getFontFn: (fontSize: number) => string,
   measureTextFn: (text: string) => number,
@@ -1183,7 +1189,7 @@ export function renderRegularMessage(
       fontFamily,
       outlineWidthPx,
       outlineOpacity,
-      (url: string) => authorPhotoCache.get(url),
+      authorPhotoCache,
       isValidAuthorPhoto,
       textBitmapCache,
       getFontFn
@@ -1207,7 +1213,7 @@ export function renderRegularMessage(
   } else if (message.content.length > 0) {
     renderContentSegments(
       ctx,
-      toSharedContentSegments(message.content),
+      message.content,
       textX,
       textY,
       color,
@@ -1217,10 +1223,8 @@ export function renderRegularMessage(
       textBitmapCache,
       getFontFn,
       measureTextFn,
-      (url: string) => {
-        const img = getEmojiImage(url);
-        return img != null && isValidEmoji(img) ? (img as CanvasImageSource) : null;
-      },
+      emojiCache,
+      isValidEmoji,
       letterSpacing
     );
   } else if (message.text.length > 0) {

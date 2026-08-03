@@ -3,6 +3,7 @@
 
 import type { ChatMessage } from '@app-types';
 import { getTranslatableText } from '@chat/message-helpers';
+import { getDisplayText } from '@renderer/canvas/shared';
 import { desaturateColor } from '@renderer/color-utils';
 import {
   type CanvasMessage,
@@ -51,6 +52,7 @@ export class MessageActivator {
         staggerDelay: 0,
         speedTier: 0,
         renderMessage: EMPTY_CHAT_MESSAGE,
+        ghostText: '',
         laneArrayIndices: [],
       }
     );
@@ -62,6 +64,8 @@ export class MessageActivator {
     msg.message = EMPTY_CHAT_MESSAGE;
     msg.renderMessage = EMPTY_CHAT_MESSAGE;
     msg.translatedText = null;
+    msg.ghostText = '';
+    delete msg.translatedRenderMessage;
     delete msg.desaturatedUserColor;
     // Keep numeric fields — they'll be overwritten by Object.assign
     this.messagePool.push(msg);
@@ -102,6 +106,7 @@ export class MessageActivator {
       staggerDelay,
       speedTier: speedTier ?? SPEED_TIER.MID,
       renderMessage: message,
+      ghostText: getDisplayText(message.content),
     });
 
     if (this.config.depthLayersEnabled && speedTier === SPEED_TIER.FAR && message.userColor) {

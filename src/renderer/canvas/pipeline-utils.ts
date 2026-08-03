@@ -13,6 +13,58 @@
 /** Ratio of expired slots above which compaction allocates a fresh array via slice(). */
 export const COMPACTION_THRESHOLD_RATIO = 0.5;
 
+/** Minimal state required to index one active message across occupied lanes. */
+export interface LaneIndexedMessage {
+  laneIndex: number;
+  laneArrayIndices: number[];
+}
+
+/** Register a message in every occupied lane and remember its swap-pop indices. */
+export function addMessageToLaneIndex<T extends LaneIndexedMessage>(
+  lanes: Map<number, T[]>,
+  message: T,
+  slotCount: number
+): void {
+  message.laneArrayIndices.length = slotCount;
+  for (let slot = 0; slot < slotCount; slot++) {
+    const lane = message.laneIndex + slot;
+    let laneMessages = lanes.get(lane);
+    if (!laneMessages) {
+      laneMessages = [];
+      lanes.set(lane, laneMessages);
+    }
+    message.laneArrayIndices[slot] = laneMessages.length;
+    laneMessages.push(message);
+  }
+}
+
+/** Remove a message from occupied lanes in O(slotCount) via indexed swap-pop. */
+export function removeMessageFromLaneIndex<T extends LaneIndexedMessage>(
+  lanes: Map<number, T[]>,
+  message: T,
+  slotCount: number
+): void {
+  for (let slot = 0; slot < slotCount; slot++) {
+    const lane = message.laneIndex + slot;
+    const laneMessages = lanes.get(lane);
+    if (!laneMessages || laneMessages.length === 0) continue;
+
+    const index = message.laneArrayIndices[slot];
+    if (index === undefined || index < 0 || index >= laneMessages.length) continue;
+
+    const lastMessage = laneMessages[laneMessages.length - 1]!;
+    if (lastMessage !== message) {
+      laneMessages[index] = lastMessage;
+      const swappedSlot = lane - lastMessage.laneIndex;
+      if (swappedSlot >= 0 && swappedSlot < lastMessage.laneArrayIndices.length) {
+        lastMessage.laneArrayIndices[swappedSlot] = index;
+      }
+    }
+    laneMessages.pop();
+    if (laneMessages.length === 0) lanes.delete(lane);
+  }
+}
+
 /**
  * Create a deterministic PRNG (LCG) for stagger delay computation.
  * Replaces Math.random() to avoid per-frame Math.random() calls in burst

@@ -179,6 +179,10 @@ export interface CanvasMessage {
   slotCount?: number;
   /** Pre-computed render message (always set — either original or desaturated copy). */
   renderMessage: ChatMessage;
+  /** Text-only content cached once for FAR-tier temporal ghost rendering. */
+  ghostText: string;
+  /** Replace-mode paid-card message prepared when translation completes. */
+  translatedRenderMessage?: ChatMessage;
   /** Transient frame-local elapsed (ms). Set by renderFrame pre-scan, read by
    *  rendering. Not serialized — re-set each frame. */
   _frameElapsed?: number;

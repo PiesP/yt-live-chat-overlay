@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeMessageOpacity } from '@renderer/shared';
+import { computeMessageOpacity as computeMessageOpacityPrimitive } from '@renderer/shared';
 import { SPEED_TIER } from '@renderer/constants';
 import type { OpacityConfig } from '@renderer/shared';
 import type { ChatMessage } from '@app-types';
@@ -28,6 +28,24 @@ function makeConfig(overrides: Partial<OpacityConfig> = {}): OpacityConfig {
     ageFadeRate: 1 / 10000,
     ...overrides,
   };
+}
+
+function computeMessageOpacity(
+  message: ChatMessage,
+  elapsed: number,
+  duration: number,
+  isScrolling: boolean,
+  speedTier: number,
+  config: OpacityConfig
+): number {
+  return computeMessageOpacityPrimitive(
+    message.isBacklog === true,
+    elapsed,
+    duration,
+    isScrolling,
+    speedTier,
+    config
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

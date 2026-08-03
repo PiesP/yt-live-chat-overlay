@@ -3,9 +3,11 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  addMessageToLaneIndex,
   createFastRandom,
   fastRandom,
   COMPACTION_THRESHOLD_RATIO,
+  removeMessageFromLaneIndex,
 } from '@renderer/canvas/pipeline-utils';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -76,3 +78,34 @@ describe('COMPACTION_THRESHOLD_RATIO', () => {
     expect(COMPACTION_THRESHOLD_RATIO).toBe(0.5);
   });
 });
+
+describe('lane index maintenance', () => {
+  it('removes an expired multi-lane message with swap-pop and updates the moved indices', () => {
+    const lanes = new Map<number, LaneMessage[]>();
+    const expired = { laneIndex: 2, laneArrayIndices: [] };
+    const retained = { laneIndex: 2, laneArrayIndices: [] };
+
+    addMessageToLaneIndex(lanes, expired, 2);
+    addMessageToLaneIndex(lanes, retained, 2);
+    removeMessageFromLaneIndex(lanes, expired, 2);
+
+    expect(lanes.get(2)).toEqual([retained]);
+    expect(lanes.get(3)).toEqual([retained]);
+    expect(retained.laneArrayIndices).toEqual([0, 0]);
+  });
+
+  it('deletes lanes after their final indexed message expires', () => {
+    const lanes = new Map<number, LaneMessage[]>();
+    const message = { laneIndex: 4, laneArrayIndices: [] };
+    addMessageToLaneIndex(lanes, message, 1);
+
+    removeMessageFromLaneIndex(lanes, message, 1);
+
+    expect(lanes.has(4)).toBe(false);
+  });
+});
+
+interface LaneMessage {
+  laneIndex: number;
+  laneArrayIndices: number[];
+}

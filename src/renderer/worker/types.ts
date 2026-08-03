@@ -151,7 +151,7 @@ export interface WorkerMessage {
   /** Whether this is a backlog (past chat) message. */
   isBacklog: boolean;
   /** Translated text (if available). */
-  translatedText?: string;
+  translatedText?: string | null;
   /** Author type for color selection: normal, moderator, owner, member, etc. */
   authorType?: string;
   /** Message kind: 'chat', 'superchat', 'membership', etc. */
@@ -194,6 +194,8 @@ export interface ActiveMessage {
   pausedDuration: number;
   laneIndex: number;
   laneSlotCount: number;
+  /** Per-slot positions in activeMessagesByLane for O(1) swap-pop removal. */
+  laneArrayIndices: number[];
   speedTier: number;
   text: string;
   /** Per-author color CSS string. */
@@ -203,11 +205,13 @@ export interface ActiveMessage {
   /** Message kind for speed tiering. */
   kind?: string;
   /** Translated text for dual/replace display. */
-  translatedText?: string;
+  translatedText?: string | null;
   /** Desaturated color for far-depth layer. */
   colorOverride?: string;
-  /** Content segments for emoji/text rendering. */
-  content?: WorkerContentSegment[];
+  /** Content segments for emoji/text rendering. Always present after activation. */
+  content: WorkerContentSegment[];
+  /** Single text segment cached when replace-mode translation arrives. */
+  translatedContent?: WorkerContentSegment[];
   /** Author display name. */
   author?: string;
   /** Author photo URL. */
@@ -220,6 +224,8 @@ export interface ActiveMessage {
   membershipHeader?: string;
   /** Optional CardConfigWorker for config-driven renderPaidCardWorker(). */
   cardConfigWorker?: CardConfigWorker;
+  /** Text-only content cached once for FAR-tier temporal ghost rendering. */
+  ghostText: string;
   /** Transient frame-local elapsed (ms). Set by renderFrame pre-scan, used by
    *  bucket rendering. Not serialized — re-set each frame. */
   _frameElapsed?: number;

@@ -30,12 +30,16 @@
 
 /// <reference lib="webworker" />
 
-import type { ChatMessage, FontWeight } from '@app-types';
+import type { FontWeight } from '@app-types';
 import { EMOJI_CACHE_MAX_ENTRIES, getStickerCacheBytes } from '@media/cache-limits';
 import { isAllowedImageUrl } from '@media/image-url-validation';
 import { getCachedGradient } from '@renderer/canvas/gradient-utils';
 import { computePulseAlpha } from '@renderer/canvas/lut-helpers';
-import { fastRandom } from '@renderer/canvas/pipeline-utils';
+import {
+  addMessageToLaneIndex,
+  fastRandom,
+  removeMessageFromLaneIndex,
+} from '@renderer/canvas/pipeline-utils';
 import {
   drawAuthorSection,
   drawRoundRect,
@@ -46,8 +50,8 @@ import {
   renderWrappedContentSegments,
   splitGraphemeClusters,
   strokeTextOutline,
+  type RegularMessageRenderConfig,
   type TextBitmapCache,
-  toSharedContentSegments,
   warmTextBitmapCache,
 } from '@renderer/canvas/shared';
 import { getSpeedTier } from '@renderer/canvas/speed-tier';
@@ -110,6 +114,10 @@ import type { ActiveMessage, WorkerConfig, WorkerContentSegment, WorkerMessage }
 /** Sticker image cache — lazily initialized during worker init. */
 let stickerCache: ResizableByteLimitedCache<ImageBitmap> | null = null;
 
+function isAvailableImage(image: unknown): boolean {
+  return image != null;
+}
+
 function measureTextHeight(
   fontSize: number,
   font: string,
@@ -137,17 +145,8 @@ function measureTextHeight(
  */
 function renderPaidCardWorker(
   ctx: OffscreenCanvasRenderingContext2D,
-  message: {
-    author: string | undefined;
-    authorPhotoUrl: string | undefined;
-    content: readonly WorkerContentSegment[];
-    /** Amount text for badge (e.g. "$5.00"). */
-    badgeText: string | undefined;
-    /** Header tag text (e.g. membership tier). */
-    headerTagText: string | undefined;
-    /** Sticker image URL. */
-    stickerUrl: string | undefined;
-  },
+  message: ActiveMessage,
+  content: readonly WorkerContentSegment[],
   msgWidth: number,
   msgHeight: number,
   x: number,
@@ -254,11 +253,7 @@ function renderPaidCardWorker(
   if (card.authorShow && message.author) {
     cursorY = drawAuthorSection(
       ctx,
-      // Safe cast: guarded by message.author check above, exactOptionalPropertyTypes compat
-      { author: message.author, authorPhotoUrl: message.authorPhotoUrl } as {
-        author?: string;
-        authorPhotoUrl?: string;
-      },
+      message,
       textX,
       cursorY,
       textColor,
@@ -268,22 +263,22 @@ function renderPaidCardWorker(
       fontFamily,
       outlineWidthPx,
       outlineOpacity,
-      (url: string) => authorPhotoCache.get(url),
-      () => true,
+      authorPhotoCache,
+      isAvailableImage,
       textBitmapCache,
       getFontFn
     );
   }
 
   // ── 6. Header tag (tier name / membership duration)
-  if (card.headerTagEnabled && message.headerTagText) {
+  if (card.headerTagEnabled && message.membershipHeader) {
     const headerFontSize = Math.round(fontSize * card.headerTagFontSizeScale);
     const headerFont = getFontString(headerFontSize, fontWeight as FontWeight, fontFamily);
     ctx.save();
     ctx.font = headerFont;
     ctx.textBaseline = 'top';
     const headerMaxWidth = w - padH * 2;
-    let displayText = message.headerTagText;
+    let displayText = message.membershipHeader;
     if (ctx.measureText(displayText).width > headerMaxWidth) {
       const graphemes = splitGraphemeClusters(displayText);
       let lo = 0,
@@ -315,12 +310,12 @@ function renderPaidCardWorker(
   }
 
   // ── 7. Badge (amount pill) — respects showSuperChatAmount setting
-  if (card.badgeEnabled && card.showBadgeAmount && message.badgeText) {
+  if (card.badgeEnabled && card.showBadgeAmount && message.superChatAmount) {
     cursorY += spacing.xs;
     const badgeFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
     const badgeFont = getFontString(badgeFontSize, 'bold' as FontWeight, fontFamily);
     ctx.font = badgeFont;
-    const badgeTextWidth = Math.ceil(ctx.measureText(message.badgeText).width);
+    const badgeTextWidth = Math.ceil(ctx.measureText(message.superChatAmount).width);
     const badgeWidth = badgeTextWidth + card.badgePaddingH * 2;
     const badgeHeight = badgeFontSize + card.badgePaddingV * 2;
 
@@ -337,7 +332,7 @@ function renderPaidCardWorker(
     ctx.textBaseline = 'middle';
     strokeTextOutline(
       ctx,
-      message.badgeText,
+      message.superChatAmount,
       textX + card.badgePaddingH,
       cursorY + badgeHeight / 2,
       DEFAULT_TEXT_COLOR,
@@ -345,7 +340,7 @@ function renderPaidCardWorker(
       outlineOpacity
     );
     ctx.fillStyle = DEFAULT_TEXT_COLOR;
-    ctx.fillText(message.badgeText, textX + card.badgePaddingH, cursorY + badgeHeight / 2);
+    ctx.fillText(message.superChatAmount, textX + card.badgePaddingH, cursorY + badgeHeight / 2);
     ctx.textBaseline = 'top';
     ctx.fillStyle = prevFillStyle;
     ctx.strokeStyle = prevStrokeStyle;
@@ -356,11 +351,11 @@ function renderPaidCardWorker(
 
   // ── 8. Body text ──────────────────────────────────────────────────────
   let textBottomY = cursorY;
-  if (message.content.length > 0) {
+  if (content.length > 0) {
     const bodyMaxWidth = w - padH * 2;
     textBottomY = renderWrappedContentSegments(
       ctx,
-      toSharedContentSegments(message.content),
+      content,
       textX,
       cursorY + card.bodyMarginTop,
       bodyMaxWidth,
@@ -376,10 +371,10 @@ function renderPaidCardWorker(
   }
 
   // ── 9. Sticker (skip if no URL — worker doesn't have sticker cache) ────
-  if (card.stickerEnabled && message.stickerUrl) {
+  if (card.stickerEnabled && message.superChatStickerUrl) {
     // Sticker images are handled via the main thread's imageData transfer.
     // Render if available in stickerCache.
-    const stickerImg = stickerCache?.get(message.stickerUrl);
+    const stickerImg = stickerCache?.get(message.superChatStickerUrl);
     if (stickerImg) {
       const maxStickerSize = Math.round(fontSize * card.stickerSizeScale);
       const stickerY = textBottomY + (card.stickerMarginTop ?? 0);
@@ -407,6 +402,14 @@ export class WorkerRenderer {
   private opacityConfig: OpacityConfig | null = null;
   private boundGetFont: (fontSize: number) => string = (fs: number) =>
     getFontString(fs, 'bold' as FontWeight, DEFAULT_FONT_FAMILY);
+  private readonly boundMeasureTextCached = (text: string): number => this.measureTextCached(text);
+  private translationFontSize = 1;
+  private readonly boundGetTranslationFont = (): string =>
+    getFontString(
+      this.translationFontSize,
+      'normal',
+      this.config?.fontFamily ?? DEFAULT_FONT_FAMILY
+    );
 
   /** Compute effective font size scaled to current viewport height. */
   private getEffectiveFontSize(): number {
@@ -455,6 +458,24 @@ export class WorkerRenderer {
   private farOpacityBuckets: ActiveMessage[][] = Array.from({ length: OPACITY_BUCKETS }, () => []);
   private midOpacityBuckets: ActiveMessage[][] = Array.from({ length: OPACITY_BUCKETS }, () => []);
   private nearOpacityBuckets: ActiveMessage[][] = Array.from({ length: OPACITY_BUCKETS }, () => []);
+  private readonly tierOpacityBuckets = [
+    this.farOpacityBuckets,
+    this.midOpacityBuckets,
+    this.nearOpacityBuckets,
+  ];
+  private readonly expiredMessagesScratch: ActiveMessage[] = [];
+  private readonly regularRenderConfig: RegularMessageRenderConfig = {
+    showAuthor: true,
+    fontSize: 1,
+    fontWeight: 'bold',
+    fontFamily: DEFAULT_FONT_FAMILY,
+    color: DEFAULT_TEXT_COLOR,
+    outlineWidthPx: 0,
+    outlineOpacity: 0,
+    backgroundColor: '#00000000',
+    messageWidth: 0,
+    messageHeight: 0,
+  };
   private statsFrameCounter = 0;
   private idleSince: number | null = null;
 
@@ -644,10 +665,17 @@ export class WorkerRenderer {
           }
           case 'updateTranslation': {
             const msgId = data.id as string;
-            const translatedText = data.translatedText as string;
+            const translatedText = data.translatedText as string | null;
             const msg = this.messageById.get(msgId);
             if (msg) {
               msg.translatedText = translatedText;
+              if ('laneArrayIndices' in msg) {
+                if (translatedText) {
+                  msg.translatedContent = [{ type: 'text', content: translatedText }];
+                } else {
+                  delete msg.translatedContent;
+                }
+              }
             }
             break;
           }
@@ -864,6 +892,7 @@ export class WorkerRenderer {
       const laneIndex = Math.min(msg.laneIndex, Math.max(0, this.numLanes - slotCount));
       msg.laneIndex = laneIndex;
       msg.laneSlotCount = slotCount;
+      msg.laneArrayIndices.length = 0;
       msg.y =
         computeLaneY(laneIndex, this.logicalHeight, this.config.safeTop ?? 0, this.laneHeight) +
         Math.floor((slotCount * this.laneHeight - msg.height) / 2);
@@ -910,15 +939,7 @@ export class WorkerRenderer {
         msg.x = (this.logicalWidth - msg.width) / 2;
       }
 
-      for (let slot = 0; slot < slotCount; slot++) {
-        const lane = laneIndex + slot;
-        let laneList = this.activeMessagesByLane.get(lane);
-        if (!laneList) {
-          laneList = [];
-          this.activeMessagesByLane.set(lane, laneList);
-        }
-        laneList.push(msg);
-      }
+      addMessageToLaneIndex(this.activeMessagesByLane, msg, slotCount);
 
       const remainingDuration = Math.max(1, duration * (1 - progress));
       this.commitPlacement(
@@ -1113,14 +1134,21 @@ export class WorkerRenderer {
       pausedDuration: 0,
       laneIndex: placement.laneIndex,
       laneSlotCount: slotCount,
+      laneArrayIndices: [],
       speedTier,
       text: msg.text,
       color: authorColor,
+      ghostText: getDisplayText(msg.content ?? []),
+      content: msg.content ?? [],
     };
     if (msg.authorType !== undefined) am.authorType = msg.authorType;
     if (msg.kind !== undefined) am.kind = msg.kind;
-    if (msg.translatedText !== undefined) am.translatedText = msg.translatedText;
-    if (msg.content !== undefined) am.content = msg.content;
+    if (msg.translatedText !== undefined) {
+      am.translatedText = msg.translatedText;
+      if (msg.translatedText) {
+        am.translatedContent = [{ type: 'text', content: msg.translatedText }];
+      }
+    }
     if (msg.author !== undefined) am.author = msg.author;
     if (msg.authorPhotoUrl !== undefined) am.authorPhotoUrl = msg.authorPhotoUrl;
     if (msg.superChatAmount !== undefined) am.superChatAmount = msg.superChatAmount;
@@ -1137,15 +1165,7 @@ export class WorkerRenderer {
     );
     this.activeMessages.push(am);
     // Register in per-lane index for O(lanes) collision checks (Issue 7).
-    for (let slot = 0; slot < slotCount; slot++) {
-      const lane = placement.laneIndex + slot;
-      let laneList = this.activeMessagesByLane.get(lane);
-      if (!laneList) {
-        laneList = [];
-        this.activeMessagesByLane.set(lane, laneList);
-      }
-      laneList.push(am);
-    }
+    addMessageToLaneIndex(this.activeMessagesByLane, am, slotCount);
     this.messageById.set(msg.id, am);
     if (msg.content) {
       const emojiUrls: string[] = [];
@@ -1223,6 +1243,7 @@ export class WorkerRenderer {
         ? this.config.outlineWidthPx
         : 0;
     let writeIdx = 0;
+    this.expiredMessagesScratch.length = 0;
     for (let i = 0; i < this.activeMessages.length; i++) {
       const msg = this.activeMessages[i];
       if (!msg) continue;
@@ -1230,6 +1251,7 @@ export class WorkerRenderer {
       // Expired: remove via skip (don't write to writeIdx position)
       if (elapsed >= msg.duration) {
         this.messageById.delete(msg.id);
+        this.expiredMessagesScratch.push(msg);
         continue;
       }
       // Keep message (in-place compaction)
@@ -1261,7 +1283,7 @@ export class WorkerRenderer {
       const fadeElapsed = now - msg.fadeStartTime - msg.pausedDuration;
       const opacity = this.opacityConfig
         ? computeMessageOpacity(
-            { isBacklog: msg.speedTier === SPEED_TIER.BACKLOG } as ChatMessage,
+            msg.speedTier === SPEED_TIER.BACKLOG,
             fadeElapsed,
             msg.duration,
             isScrolling,
@@ -1285,20 +1307,8 @@ export class WorkerRenderer {
       }
     }
     this.activeMessages.length = writeIdx;
-    // Rebuild per-lane index after compaction removes expired messages.
-    this.activeMessagesByLane.clear();
-    for (let i = 0; i < writeIdx; i++) {
-      const msg = this.activeMessages[i]!;
-      const slotCount = msg.laneSlotCount ?? 1;
-      for (let slot = 0; slot < slotCount; slot++) {
-        const lane = msg.laneIndex + slot;
-        let laneList = this.activeMessagesByLane.get(lane);
-        if (!laneList) {
-          laneList = [];
-          this.activeMessagesByLane.set(lane, laneList);
-        }
-        laneList.push(msg);
-      }
+    for (const expired of this.expiredMessagesScratch) {
+      removeMessageFromLaneIndex(this.activeMessagesByLane, expired, expired.laneSlotCount);
     }
     // ── Clear canvas ────────────────────────────────────────────────
     this.ctx.clearRect(0, 0, this.logicalWidth, this.logicalHeight);
@@ -1320,8 +1330,7 @@ export class WorkerRenderer {
     this.ctx.textBaseline = 'top';
     const getFont = this.boundGetFont;
     // Render FAR → MID → NEAR for correct z-order
-    const tierBuckets = [this.farOpacityBuckets, this.midOpacityBuckets, this.nearOpacityBuckets];
-    for (const tierBucket of tierBuckets) {
+    for (const tierBucket of this.tierOpacityBuckets) {
       for (let bucketIndex = 0; bucketIndex < OPACITY_BUCKETS; bucketIndex++) {
         const entries = tierBucket[bucketIndex];
         if (!entries || entries.length === 0) continue;
@@ -1356,10 +1365,9 @@ export class WorkerRenderer {
                 this.ctx.fontKerning = 'none';
                 this.ctx.fillStyle = renderColor;
                 // Build ghost text from text segments only — skip emoji fallbackText
-                const ghostText = getDisplayText(msg.content ?? []);
-                if (ghostText) {
+                if (msg.ghostText) {
                   this.ctx.fillText(
-                    ghostText,
+                    msg.ghostText,
                     Math.floor(msg._prevX) + rendererLayout.paddingH,
                     Math.floor(msg._prevY)
                   );
@@ -1370,20 +1378,14 @@ export class WorkerRenderer {
             if (msg.cardConfigWorker) {
               const paidContent =
                 cfg.translationEnabled && cfg.translationMode === 'replace' && msg.translatedText
-                  ? [{ type: 'text' as const, content: msg.translatedText }]
-                  : (msg.content ?? []);
+                  ? (msg.translatedContent ?? msg.content)
+                  : msg.content;
               this.ctx.save();
               try {
                 renderPaidCardWorker(
                   this.ctx,
-                  {
-                    author: msg.author,
-                    authorPhotoUrl: msg.authorPhotoUrl,
-                    content: paidContent,
-                    badgeText: msg.superChatAmount,
-                    headerTagText: msg.membershipHeader,
-                    stickerUrl: msg.superChatStickerUrl,
-                  },
+                  msg,
+                  paidContent,
                   msg.width,
                   msg.height,
                   sx,
@@ -1410,37 +1412,31 @@ export class WorkerRenderer {
                 cfg.translationEnabled && cfg.translationMode === 'replace' && msg.translatedText
                   ? msg.translatedText
                   : null;
+              const regularConfig = this.regularRenderConfig;
+              regularConfig.showAuthor = cfg.showAuthor[msg.authorType ?? 'normal'] ?? true;
+              regularConfig.fontSize = cfg.fontSize;
+              regularConfig.fontWeight = cfg.fontWeight;
+              regularConfig.fontFamily = cfg.fontFamily;
+              regularConfig.color = renderColor;
+              regularConfig.outlineWidthPx = strokeWidth;
+              regularConfig.outlineOpacity = cfg.outlineOpacity;
+              regularConfig.backgroundColor =
+                cfg.backgroundColors[msg.authorType ?? 'normal'] ?? '#00000000';
+              regularConfig.messageWidth = msg.width;
+              regularConfig.messageHeight = msg.height;
               renderRegularMessage(
                 this.ctx,
-                {
-                  ...(msg.author !== undefined ? { author: msg.author } : {}),
-                  ...(msg.authorPhotoUrl !== undefined
-                    ? { authorPhotoUrl: msg.authorPhotoUrl }
-                    : {}),
-                  content: msg.content ?? [],
-                  text: msg.text,
-                },
+                msg,
                 sx,
                 sy,
-                {
-                  showAuthor: cfg.showAuthor[msg.authorType ?? 'normal'] ?? true,
-                  fontSize: cfg.fontSize,
-                  fontWeight: cfg.fontWeight,
-                  fontFamily: cfg.fontFamily,
-                  color: renderColor,
-                  outlineWidthPx: strokeWidth,
-                  outlineOpacity: cfg.outlineOpacity,
-                  backgroundColor: cfg.backgroundColors[msg.authorType ?? 'normal'] ?? '#00000000',
-                  messageWidth: msg.width,
-                  messageHeight: msg.height,
-                },
+                regularConfig,
                 this.textBitmapCache,
-                (url: string) => this.emojiCache.get(url),
-                () => true,
-                { get: (url: string) => this.authorPhotoCache.get(url) },
-                () => true,
+                this.emojiCache,
+                isAvailableImage,
+                this.authorPhotoCache,
+                isAvailableImage,
                 getFont,
-                this.measureTextCached.bind(this),
+                this.boundMeasureTextCached,
                 overrideText,
                 msg.speedTier === SPEED_TIER.FAR ? '1px' : undefined
               );
@@ -1452,6 +1448,7 @@ export class WorkerRenderer {
               msg.translatedText !== msg.text
             ) {
               const translationFontSize = Math.round(cfg.fontSize * TRANSLATION_FONT_SCALE);
+              this.translationFontSize = translationFontSize;
               const translationColor = msg.authorType
                 ? cfg.authorColors[msg.authorType] || renderColor
                 : renderColor;
@@ -1470,7 +1467,7 @@ export class WorkerRenderer {
                   strokeWidth,
                   cfg.outlineOpacity,
                   this.textBitmapCache,
-                  (_fs: number) => getFontString(translationFontSize, 'normal', cfg.fontFamily)
+                  this.boundGetTranslationFont
                 );
               } finally {
                 this.ctx.restore();
