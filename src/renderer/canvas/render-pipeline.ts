@@ -18,9 +18,9 @@ import {
   removeMessageFromLaneIndex,
 } from '@renderer/canvas/pipeline-utils';
 import {
+  type RegularMessageRenderConfig,
   renderRegularMessage,
   renderSegment,
-  type RegularMessageRenderConfig,
 } from '@renderer/canvas/shared';
 import { MEMBERSHIP_CARD_CONFIG, SUPERCHAT_CARD_CONFIG } from '@renderer/card-config';
 import {

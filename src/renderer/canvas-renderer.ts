@@ -48,9 +48,9 @@ import {
 } from '@renderer/canvas/drain-batch';
 import { addMessageToLaneIndex, fastRandom } from '@renderer/canvas/pipeline-utils';
 import {
+  type CanvasRenderContext,
   cleanupAndBucketStage,
   compactRemovedMessages,
-  type CanvasRenderContext,
   drainStage,
   drawGlowStage,
   drawStage,

@@ -45,12 +45,12 @@ import {
   drawRoundRect,
   getDisplayText,
   getSafeTextHeight,
+  type RegularMessageRenderConfig,
   renderRegularMessage,
   renderSegment,
   renderWrappedContentSegments,
   splitGraphemeClusters,
   strokeTextOutline,
-  type RegularMessageRenderConfig,
   type TextBitmapCache,
   warmTextBitmapCache,
 } from '@renderer/canvas/shared';
