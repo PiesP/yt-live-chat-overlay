@@ -291,7 +291,7 @@ export interface OpacityConfig {
  *  6. Age fade-out (gradual fade toward maxMessageAgeMs)
  */
 export function computeMessageOpacity(
-  message: ChatMessage,
+  isBacklog: boolean,
   elapsed: number,
   duration: number,
   isScrolling: boolean,
@@ -316,7 +316,7 @@ export function computeMessageOpacity(
     }
   }
 
-  if (message.isBacklog) opacity *= config.backlogOpacityMultiplier;
+  if (isBacklog) opacity *= config.backlogOpacityMultiplier;
 
   if (config.depthLayersEnabled && speedTier === SPEED_TIER.FAR) {
     opacity *= config.depthFarOpacityMul;

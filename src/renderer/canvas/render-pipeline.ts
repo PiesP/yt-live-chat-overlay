@@ -13,8 +13,15 @@
 import type { AccessibleChatMessage, OverlayDimensions, OverlaySettings } from '@app-types';
 import { renderPaidCard } from '@renderer/canvas/card-renderers';
 import { computePulseAlpha } from '@renderer/canvas/lut-helpers';
-import { COMPACTION_THRESHOLD_RATIO } from '@renderer/canvas/pipeline-utils';
-import { getDisplayText, renderRegularMessage, renderSegment } from '@renderer/canvas/shared';
+import {
+  COMPACTION_THRESHOLD_RATIO,
+  removeMessageFromLaneIndex,
+} from '@renderer/canvas/pipeline-utils';
+import {
+  type RegularMessageRenderConfig,
+  renderRegularMessage,
+  renderSegment,
+} from '@renderer/canvas/shared';
 import { MEMBERSHIP_CARD_CONFIG, SUPERCHAT_CARD_CONFIG } from '@renderer/card-config';
 import {
   ANTI_BLOCK_MAX_DURATION_MS,
@@ -60,6 +67,7 @@ export interface CanvasRenderContext {
 
   boundGetFont: (fontSize: number) => string;
   boundMeasureTextWidth: (text: string) => number;
+  regularRenderConfig: RegularMessageRenderConfig;
 
   /** Mutable reference — pipeline stages push/compact this array. */
   activeMessages: CanvasMessage[];
@@ -248,7 +256,7 @@ export function cleanupAndBucketStage(
     // Fade-in starts from fadeStartTime, independent of position timeline.
     const fadeElapsed = now - msg.fadeStartTime - msg.pausedDuration;
     const opacity = computeMessageOpacity(
-      msg.message,
+      msg.message.isBacklog === true,
       fadeElapsed,
       msg.duration,
       isScrolling,
@@ -287,32 +295,7 @@ export function compactRemovedMessages(
 ): void {
   // Remove only expired messages from the lane map using O(1) swap-pop
   for (const msg of ctx.expiredMessagesScratch) {
-    const slotCount = msg.slotCount ?? 1;
-    const indices = msg.laneArrayIndices;
-    for (let slot = 0; slot < slotCount; slot++) {
-      const lane = msg.laneIndex + slot;
-      const list = ctx.activeMessagesByLane.get(lane);
-      if (!list || list.length === 0) continue;
-
-      const idx = indices?.[slot] ?? list.indexOf(msg);
-      if (idx < 0 || idx >= list.length) continue;
-
-      const lastMsg = list[list.length - 1]!;
-      if (lastMsg !== msg) {
-        list[idx] = lastMsg;
-        // Update the swapped message's laneArrayIndices entry for this lane
-        if (lastMsg.laneArrayIndices) {
-          for (let ss = 0; ss < (lastMsg.slotCount ?? 1); ss++) {
-            if (lastMsg.laneIndex + ss === lane) {
-              lastMsg.laneArrayIndices[ss] = idx;
-              break;
-            }
-          }
-        }
-      }
-      list.pop();
-      if (list.length === 0) ctx.activeMessagesByLane.delete(lane);
-    }
+    removeMessageFromLaneIndex(ctx.activeMessagesByLane, msg, msg.slotCount ?? 1);
   }
 
   // Array compaction: when >50% slots expired, allocate fresh array
@@ -384,10 +367,9 @@ export function drawStage(
                       ctx.settings.colors[msg.renderMessage.authorType]) ||
                     ctx.settings.colors.normal;
               renderCtx.fillStyle = ghostColor;
-              const ghostText = getDisplayText(msg.renderMessage.content);
-              if (ghostText) {
+              if (msg.ghostText) {
                 renderCtx.fillText(
-                  ghostText,
+                  msg.ghostText,
                   Math.floor(msg._prevX) + rendererLayout.paddingH,
                   Math.floor(msg._prevY)
                 );
@@ -400,29 +382,34 @@ export function drawStage(
         const renderMessage = msg.renderMessage;
 
         if (msg.message.kind === 'text') {
-          const isReplace = ctx.settings.translationMode === 'replace';
+          const isReplace =
+            ctx.settings.translationEnabled && ctx.settings.translationMode === 'replace';
+          const regularConfig = ctx.regularRenderConfig;
+          regularConfig.fontSize = ctx.settings.fontSize;
+          regularConfig.fontWeight = ctx.settings.fontWeight;
+          regularConfig.fontFamily = ctx.settings.fontFamily;
+          regularConfig.outlineWidthPx = ctx.settings.outline.enabled
+            ? ctx.settings.outline.widthPx
+            : 0;
+          regularConfig.outlineOpacity = ctx.settings.outline.enabled
+            ? ctx.settings.outline.opacity
+            : 0;
+          regularConfig.showAuthor = ctx.settings.showAuthor[renderMessage.authorType];
+          regularConfig.color =
+            ctx.settings.preserveUserColor && renderMessage.userColor
+              ? renderMessage.userColor
+              : ctx.settings.colors[renderMessage.authorType];
+          regularConfig.backgroundColor = ctx.settings.backgroundColors[renderMessage.authorType];
+          regularConfig.messageWidth = msg.width;
+          regularConfig.messageHeight = msg.height;
           renderRegularMessage(
             renderCtx,
             renderMessage,
             snappedX,
             snappedY,
-            {
-              fontSize: ctx.settings.fontSize,
-              fontWeight: ctx.settings.fontWeight,
-              fontFamily: ctx.settings.fontFamily,
-              outlineWidthPx: ctx.settings.outline.enabled ? ctx.settings.outline.widthPx : 0,
-              outlineOpacity: ctx.settings.outline.enabled ? ctx.settings.outline.opacity : 0,
-              showAuthor: ctx.settings.showAuthor[renderMessage.authorType],
-              color:
-                ctx.settings.preserveUserColor && renderMessage.userColor
-                  ? renderMessage.userColor
-                  : ctx.settings.colors[renderMessage.authorType],
-              backgroundColor: ctx.settings.backgroundColors[renderMessage.authorType],
-              messageWidth: msg.width,
-              messageHeight: msg.height,
-            },
+            regularConfig,
             ctx.textBitmapCache,
-            (url: string) => ctx.imageFetchManager.emojiCache.get(url),
+            ctx.imageFetchManager.emojiCache,
             isImageReady,
             ctx.imageFetchManager.authorPhotoCache,
             isImageReady,
@@ -439,11 +426,7 @@ export function drawStage(
               ? msg.translatedText
               : undefined;
           const paidRenderMessage = replaceTranslation
-            ? {
-                ...renderMessage,
-                text: replaceTranslation,
-                content: [{ type: 'text' as const, content: replaceTranslation }],
-              }
+            ? (msg.translatedRenderMessage ?? renderMessage)
             : renderMessage;
           renderCtx.save();
           try {
@@ -470,7 +453,11 @@ export function drawStage(
         }
 
         // Render translation in dual mode
-        if (msg.translatedText && ctx.settings.translationMode !== 'replace') {
+        if (
+          ctx.settings.translationEnabled &&
+          msg.translatedText &&
+          ctx.settings.translationMode !== 'replace'
+        ) {
           const fontSize = Math.max(1, Math.round(ctx.settings.fontSize * TRANSLATION_FONT_SCALE));
           const gap = TRANSLATION_GAP_PX;
           const transY = snappedY + msg.height - fontSize - gap;

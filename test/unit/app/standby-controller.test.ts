@@ -1,6 +1,15 @@
 // SPDX-License-Identifier: MIT
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const mocks = vi.hoisted(() => ({
+  bootstrapChatSession: vi.fn(),
+}));
+
+vi.mock('@chat/youtube/api', () => ({
+  bootstrapChatSession: mocks.bootstrapChatSession,
+}));
+
 import { StandbyController } from '@app/standby-controller';
 
 describe('StandbyController', () => {
@@ -16,6 +25,11 @@ describe('StandbyController', () => {
       opts?.onStreamDetected ?? vi.fn(),
     );
   }
+
+  beforeEach(() => {
+    mocks.bootstrapChatSession.mockReset();
+    mocks.bootstrapChatSession.mockResolvedValue({ status: 'waiting', reason: 'not-live' });
+  });
 
   afterEach(() => {
     vi.useRealTimers();
@@ -122,5 +136,50 @@ describe('StandbyController', () => {
     // After exit, polling should be stopped
     vi.advanceTimersByTime(60_000);
     expect(c.isStandby()).toBe(false);
+  });
+
+  it('does not poll while paused and checks immediately when resumed', async () => {
+    vi.useFakeTimers();
+    const c = makeController();
+    c.enter();
+    c.pause();
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(mocks.bootstrapChatSession).not.toHaveBeenCalled();
+
+    c.resume();
+    expect(mocks.bootstrapChatSession).toHaveBeenCalledOnce();
+    await Promise.resolve();
+    c.exit();
+  });
+
+  it('aborts an in-flight poll and ignores its stale completion after resume', async () => {
+    vi.useFakeTimers();
+    const onStreamDetected = vi.fn();
+    let resolveFirst!: (value: unknown) => void;
+    mocks.bootstrapChatSession
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve;
+          })
+      )
+      .mockResolvedValue({ status: 'waiting', reason: 'not-live' });
+    const c = makeController({ onStreamDetected });
+    c.enter();
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    const firstSignal = mocks.bootstrapChatSession.mock.calls[0]?.[0] as AbortSignal;
+    expect(firstSignal.aborted).toBe(false);
+
+    c.pause();
+    expect(firstSignal.aborted).toBe(true);
+    c.resume();
+    expect(mocks.bootstrapChatSession).toHaveBeenCalledTimes(2);
+
+    resolveFirst({ status: 'ready', data: {} });
+    await Promise.resolve();
+    expect(onStreamDetected).not.toHaveBeenCalled();
+    c.exit();
   });
 });

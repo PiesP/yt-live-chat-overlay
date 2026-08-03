@@ -23,7 +23,13 @@
  */
 
 import type { Overlay } from '@app/overlay';
-import type { ChatMessage, DropReason, OverlayDimensions, OverlaySettings } from '@app-types';
+import type {
+  AccessibleChatMessage,
+  ChatMessage,
+  DropReason,
+  OverlayDimensions,
+  OverlaySettings,
+} from '@app-types';
 import { getTranslatableText } from '@chat/message-helpers';
 import { t } from '@i18n/index';
 import { ImageFetchManager } from '@media/image-fetch-manager';
@@ -40,8 +46,9 @@ import {
   type DrainBatch,
   recordDrainResult,
 } from '@renderer/canvas/drain-batch';
-import { fastRandom } from '@renderer/canvas/pipeline-utils';
+import { addMessageToLaneIndex, fastRandom } from '@renderer/canvas/pipeline-utils';
 import {
+  type CanvasRenderContext,
   cleanupAndBucketStage,
   compactRemovedMessages,
   drainStage,
@@ -189,6 +196,8 @@ export class CanvasRenderer extends RendererBase {
   private pendingTranslations: Array<{ msg: CanvasMessage; text: string | null }> = [];
   /** Read index for incremental pendingTranslations drain (avoids splice allocation). */
   private pendingTranslationReadIdx = 0;
+  /** Invalidates in-flight translation callbacks when their configuration changes. */
+  private translationConfigurationGeneration = 0;
 
   /**
    * Scratch array for cleanupExpiredMessages — hoisted to avoid per-frame allocation.
@@ -261,6 +270,23 @@ export class CanvasRenderer extends RendererBase {
   /** Pre-bound measureTextWidth to avoid per-call arrow function allocation. */
   private readonly boundMeasureTextWidth = (text: string): number =>
     measureTextWidth(text, this.boundGetFont(this.settings.fontSize));
+  private readonly regularRenderConfig = {
+    showAuthor: true,
+    fontSize: 1,
+    fontWeight: 'bold',
+    fontFamily: '',
+    color: '',
+    outlineWidthPx: 0,
+    outlineOpacity: 0,
+    backgroundColor: '#00000000',
+    messageWidth: 0,
+    messageHeight: 0,
+  };
+  private renderContext: CanvasRenderContext | null = null;
+  private readonly boundIsAntiBlockActive = (): boolean => this.isAntiBlockActive();
+  private readonly boundDrainQueue = (now: number): void => this.drainQueue(now);
+  private readonly boundUpdateLiveRegion = (messages: AccessibleChatMessage[]): void =>
+    this.overlay.updateLiveRegion(messages);
 
   /** Pre-computed exponential distribution table for stagger delay (256 entries).
    *  Each entry = -ln(1 - (i+0.5)/256), yielding a positive exponential sample.
@@ -495,7 +521,7 @@ export class CanvasRenderer extends RendererBase {
       message.y =
         this.laneAllocator.getLaneY(laneIndex, dimensions.height) +
         Math.floor((slotCount * laneHeight - message.height) / 2);
-      message.laneArrayIndices = new Array(slotCount);
+      message.laneArrayIndices.length = 0;
 
       const elapsed = Math.max(0, now - message.startTime - message.pausedDuration);
       const progress = Math.min(1, elapsed * message.invDuration);
@@ -515,16 +541,7 @@ export class CanvasRenderer extends RendererBase {
         message.x = (dimensions.width - message.width) / 2;
       }
 
-      for (let slot = 0; slot < slotCount; slot++) {
-        const lane = laneIndex + slot;
-        let laneList = this.activeMessagesByLane.get(lane);
-        if (!laneList) {
-          laneList = [];
-          this.activeMessagesByLane.set(lane, laneList);
-        }
-        message.laneArrayIndices[slot] = laneList.length;
-        laneList.push(message);
-      }
+      addMessageToLaneIndex(this.activeMessagesByLane, message, slotCount);
 
       const remainingDuration = Math.max(1, message.duration - elapsed);
       this.laneAllocator.commitPlacement(
@@ -997,14 +1014,24 @@ export class CanvasRenderer extends RendererBase {
    * The context is a lightweight object with references — no allocations
    * of complex data structures.
    */
-  private buildRenderContext(): import('@renderer/canvas/render-pipeline').CanvasRenderContext {
-    return {
+  private buildRenderContext(): CanvasRenderContext {
+    if (this.renderContext) {
+      this.renderContext.settings = this.settings;
+      this.renderContext.messageActivator = this.messageActivator;
+      this.renderContext.cachedOpacityConfig = this.cachedOpacityConfig;
+      this.renderContext.isReplayMode = this.isReplayMode;
+      this.renderContext.isReducedMotionActive = this.isReducedMotionActive;
+      return this.renderContext;
+    }
+
+    this.renderContext = {
       settings: this.settings,
       textBitmapCache: this.textBitmapCache,
       superChatGradientCache: this.superChatGradientCache,
       imageFetchManager: this.imageFetchManager,
       boundGetFont: this.boundGetFont,
       boundMeasureTextWidth: this.boundMeasureTextWidth,
+      regularRenderConfig: this.regularRenderConfig,
       activeMessages: this.activeMessages,
       activeMessagesByLane: this.activeMessagesByLane,
       farOpacityBuckets: this.farOpacityBuckets,
@@ -1019,11 +1046,12 @@ export class CanvasRenderer extends RendererBase {
       observability: this.observability,
       isReplayMode: this.isReplayMode,
       isReducedMotionActive: this.isReducedMotionActive,
-      isAntiBlockActive: () => this.isAntiBlockActive(),
-      drainQueue: (n: number) => this.drainQueue(n),
+      isAntiBlockActive: this.boundIsAntiBlockActive,
+      drainQueue: this.boundDrainQueue,
       lastLiveRegionUpdate: this.lastLiveRegionUpdateRef,
-      updateLiveRegion: (s) => this.overlay.updateLiveRegion(s),
+      updateLiveRegion: this.boundUpdateLiveRegion,
     };
+    return this.renderContext;
   }
 
   // ── renderFrame stages ─────────────────────────────────────────────────
@@ -1039,6 +1067,15 @@ export class CanvasRenderer extends RendererBase {
       const entry = this.pendingTranslations[i];
       if (!entry) continue;
       entry.msg.translatedText = entry.text;
+      if (entry.text) {
+        entry.msg.translatedRenderMessage = {
+          ...entry.msg.renderMessage,
+          text: entry.text,
+          content: [{ type: 'text', content: entry.text }],
+        };
+      } else {
+        delete entry.msg.translatedRenderMessage;
+      }
     }
     this.pendingTranslationReadIdx = end;
     if (this.pendingTranslationReadIdx >= this.pendingTranslations.length) {
@@ -1050,6 +1087,20 @@ export class CanvasRenderer extends RendererBase {
       this.pendingTranslations.splice(0, this.pendingTranslationReadIdx);
       this.pendingTranslationReadIdx = 0;
     }
+  }
+
+  private queueTranslationResult(
+    msg: CanvasMessage,
+    text: string | null,
+    generation: number
+  ): void {
+    if (
+      generation !== this.translationConfigurationGeneration ||
+      !this.settings.translationEnabled
+    ) {
+      return;
+    }
+    this.pendingTranslations.push({ msg, text });
   }
 
   /** Update canvas dimensions when device pixel ratio changes. */
@@ -1485,6 +1536,7 @@ export class CanvasRenderer extends RendererBase {
       speedTier
     );
 
+    const translationGeneration = this.translationConfigurationGeneration;
     this.messageActivator.activate(
       message,
       now,
@@ -1496,21 +1548,11 @@ export class CanvasRenderer extends RendererBase {
           this.activeMessages.push(cm);
           const slotCount = placement.slotCount;
           cm.slotCount = slotCount;
-          cm.laneArrayIndices = new Array(slotCount);
-          for (let slot = 0; slot < slotCount; slot++) {
-            const occupiedLane = cm.laneIndex + slot;
-            let laneList = this.activeMessagesByLane.get(occupiedLane);
-            if (!laneList) {
-              laneList = [];
-              this.activeMessagesByLane.set(occupiedLane, laneList);
-            }
-            cm.laneArrayIndices[slot] = laneList.length;
-            laneList.push(cm);
-          }
+          addMessageToLaneIndex(this.activeMessagesByLane, cm, slotCount);
         },
         onMessageRendered: () => this.observability.onMessageRendered(),
         onTranslationResult: (cm, text) => {
-          this.pendingTranslations.push({ msg: cm, text });
+          this.queueTranslationResult(cm, text, translationGeneration);
         },
       },
       effectiveDuration,
@@ -1716,6 +1758,12 @@ export class CanvasRenderer extends RendererBase {
     const wasTranslationEnabled = this.settings.translationEnabled;
     const prevSource = this.settings.translationSource;
     const prevDanmakuMode = this.settings.danmakuMode;
+    const translationConfigurationChanged =
+      settings.translationEnabled !== this.settings.translationEnabled ||
+      settings.translationService !== this.settings.translationService ||
+      settings.translationSource !== this.settings.translationSource ||
+      settings.translationTarget !== this.settings.translationTarget ||
+      settings.translationMode !== this.settings.translationMode;
     const laneGeometryChanged =
       settings.fontSize !== this.settings.fontSize ||
       settings.fontWeight !== this.settings.fontWeight ||
@@ -1725,6 +1773,11 @@ export class CanvasRenderer extends RendererBase {
       settings.safeBottom !== this.settings.safeBottom;
     super.updateSettings(settings, options);
     this.translationBatchSize = settings.translationBatchSize;
+    if (translationConfigurationChanged) {
+      this.translationConfigurationGeneration++;
+      this.pendingTranslations.length = 0;
+      this.pendingTranslationReadIdx = 0;
+    }
 
     // When settings change, cached dimensions become stale
     // (font, size, weight, family, maxBodyLines all affect dimension calculation).
@@ -1752,6 +1805,7 @@ export class CanvasRenderer extends RendererBase {
     if (wasTranslationEnabled && !settings.translationEnabled) {
       for (const msg of this.activeMessages) {
         msg.translatedText = null;
+        delete msg.translatedRenderMessage;
       }
     }
 

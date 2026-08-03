@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { OverlaySettings } from '@app-types';
 import { ChatSource } from '@chat/source-base';
 import type { ChatBootstrapData } from '@chat/youtube/api';
@@ -19,6 +19,10 @@ class TestChatSource extends ChatSource {
 
   protected launchCurrentPollLoop(signal?: AbortSignal): void {
     this.lastLaunchedSignal = signal;
+  }
+
+  waitForResume(signal?: AbortSignal): Promise<void> {
+    return this.waitWhilePaused(signal);
   }
 }
 
@@ -91,6 +95,40 @@ describe('ChatSource pause reason set', () => {
     source.setPauseReason('visibility', false);
     source.setPauseReason('video', false);
     source.setPauseReason('buffering', false);
+  });
+
+  it('waits for every pause reason without scheduling polling timers', async () => {
+    const source = createSource();
+    const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+    source.setPauseReason('visibility', true);
+    source.setPauseReason('video', true);
+
+    let resumed = false;
+    const waiting = source.waitForResume().then(() => {
+      resumed = true;
+    });
+    await Promise.resolve();
+    expect(setTimeoutSpy).not.toHaveBeenCalled();
+
+    source.setPauseReason('visibility', false);
+    await Promise.resolve();
+    expect(resumed).toBe(false);
+
+    source.setPauseReason('video', false);
+    await waiting;
+    expect(resumed).toBe(true);
+    setTimeoutSpy.mockRestore();
+  });
+
+  it('rejects the event-driven pause wait when the session aborts', async () => {
+    const source = createSource();
+    const controller = new AbortController();
+    source.setPauseReason('visibility', true);
+
+    const waiting = source.waitForResume(controller.signal);
+    controller.abort();
+
+    await expect(waiting).rejects.toMatchObject({ name: 'AbortError' });
   });
 
   it('injectExternalMessages ignores duplicates when callback is registered', () => {

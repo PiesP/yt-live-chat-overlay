@@ -46,6 +46,7 @@ function makeDrainCtx(overrides?: Partial<CanvasRenderContext>): CanvasRenderCon
     imageFetchManager: {} as CanvasRenderContext['imageFetchManager'],
     boundGetFont: () => '',
     boundMeasureTextWidth: () => 0,
+    regularRenderConfig: {} as CanvasRenderContext['regularRenderConfig'],
     activeMessages: [],
     activeMessagesByLane: new Map(),
     farOpacityBuckets: [],
@@ -209,9 +210,9 @@ describe('drawStage', () => {
         messageHeight: 40,
       }),
       expect.anything(),
+      expect.objectContaining({ get: expect.any(Function) }),
       expect.any(Function),
-      expect.any(Function),
-      expect.anything(),
+      expect.objectContaining({ get: expect.any(Function) }),
       expect.any(Function),
       expect.any(Function),
       expect.any(Function),
@@ -246,6 +247,11 @@ describe('drawStage', () => {
       staggerDelay: 0,
       speedTier: 1,
       translatedText: 'Translated',
+      translatedRenderMessage: {
+        ...original,
+        text: 'Translated',
+        content: [{ type: 'text' as const, content: 'Translated' }],
+      },
       _frameElapsed: 100,
     };
     const ctx = makeDrainCtx({
@@ -300,6 +306,11 @@ describe('drawStage', () => {
       staggerDelay: 0,
       speedTier: 1,
       translatedText: 'Translated',
+      translatedRenderMessage: {
+        ...original,
+        text: 'Translated',
+        content: [{ type: 'text' as const, content: 'Translated' }],
+      },
       _frameElapsed: 100,
     };
     const ctx = makeDrainCtx({
@@ -350,6 +361,7 @@ function makeCompactCtx(overrides?: Partial<CanvasRenderContext>): CanvasRenderC
     imageFetchManager: {} as CanvasRenderContext['imageFetchManager'],
     boundGetFont: () => '',
     boundMeasureTextWidth: () => 0,
+    regularRenderConfig: {} as CanvasRenderContext['regularRenderConfig'],
     farOpacityBuckets: [],
     midOpacityBuckets: [],
     nearOpacityBuckets: [],
