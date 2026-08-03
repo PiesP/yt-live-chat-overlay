@@ -79,7 +79,7 @@ function makeMinimalConfig(): Record<string, unknown> {
     photoCacheMb: 2, stickerCacheMb: 2, textCacheMb: 4,
     translationBatchSize: 5, emojiFetchLimit: 10,
     failedEmojiRetryMins: 5, staggerMaxDelayMs: 200,
-    staggerMediumDelayMs: 100, emojiFetchTimeoutMs: 3000,
+    staggerMediumDelayMs: 100, emojiFetchTimeoutMs: 5000,
     ignoreReducedMotion: false, reducedMotion: false,
     preserveUserColor: false, isReplayMode: false,
     fontBaseViewportHeight: 1080, fontMinSize: 10, fontMaxSize: 120,
@@ -161,6 +161,8 @@ describe('Worker message protocol', () => {
         config: makeMinimalConfig(),
         canvas: new BadCanvas(),
         dpr: 1,
+        width: 640,
+        height: 360,
       }));
 
       expect(postMessageSpy).toHaveBeenCalledWith({
@@ -177,6 +179,8 @@ describe('Worker message protocol', () => {
         config: makeMinimalConfig(),
         canvas: new MockOffscreenCanvas(),
         dpr: 1,
+        width: 640,
+        height: 360,
       }));
       postMessageSpy.mockClear();
 
@@ -284,6 +288,60 @@ describe('Worker message protocol', () => {
   });
 
   describe('robustness', () => {
+    it('rejects malformed init before context access or renderer state mutation', () => {
+      const unsafePayloads = [
+        { config: { ...makeMinimalConfig(), emojiCacheMb: Number.NaN } },
+        { config: { ...makeMinimalConfig(), textCacheMb: 21 } },
+        { width: Number.NaN },
+        { height: 0 },
+        { dpr: Number.POSITIVE_INFINITY },
+      ];
+
+      for (const unsafePayload of unsafePayloads) {
+        const getContext = vi.fn(() => mockCtx);
+        const renderer = new WorkerRenderer();
+        const internals = renderer as unknown as {
+          config: Record<string, unknown> | null;
+          canvas: OffscreenCanvas | null;
+        };
+
+        renderer.handleMessage(
+          makeEvent({
+            type: 'init',
+            config: makeMinimalConfig(),
+            canvas: { getContext },
+            width: 640,
+            height: 360,
+            dpr: 1,
+            ...unsafePayload,
+          })
+        );
+
+        expect(getContext).not.toHaveBeenCalled();
+        expect(internals.config).toBeNull();
+        expect(internals.canvas).toBeNull();
+      }
+    });
+
+    it('does not mutate renderer config for rejected prototype and resource payloads', () => {
+      const renderer = initializeRenderer();
+      const internals = renderer as unknown as {
+        config: Record<string, unknown>;
+      };
+      const originalPrototype = Object.getPrototypeOf(internals.config);
+      const originalCacheBudget = internals.config.emojiCacheMb;
+      const maliciousConfig = JSON.parse(
+        '{"__proto__":{"polluted":true},"emojiCacheMb":1000000}'
+      ) as Record<string, unknown>;
+
+      renderer.handleMessage(makeEvent({ type: 'updateConfig', config: maliciousConfig }));
+
+      expect(Object.getPrototypeOf(internals.config)).toBe(originalPrototype);
+      expect(Object.hasOwn(internals.config, '__proto__')).toBe(false);
+      expect(internals.config.emojiCacheMb).toBe(originalCacheBudget);
+      expect((internals.config as { polluted?: boolean }).polluted).toBeUndefined();
+    });
+
     it('snapshots messages that are still pending in the Worker', () => {
       const renderer = initializeRenderer();
       const message = makeWorkerMessage({ id: 'pending-message' });

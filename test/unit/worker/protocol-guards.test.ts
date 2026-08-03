@@ -121,6 +121,65 @@ beforeEach(() => {
 });
 
 describe('renderer worker protocol guards', () => {
+  it('accepts a valid init message with a canvas-like transferable', () => {
+    expect(
+      isValidControlMessage({
+        type: 'init',
+        config: { ...DEFAULT_SETTINGS },
+        canvas: new MockOffscreenCanvas(),
+        width: 640,
+        height: 360,
+        dpr: 2,
+      })
+    ).toBe(true);
+  });
+
+  it('rejects unsafe init cache budgets', () => {
+    const base = {
+      type: 'init',
+      canvas: new MockOffscreenCanvas(),
+      width: 640,
+      height: 360,
+      dpr: 1,
+    };
+
+    expect(
+      isValidControlMessage({
+        ...base,
+        config: { ...DEFAULT_SETTINGS, emojiCacheMb: Number.NaN },
+      })
+    ).toBe(false);
+    expect(
+      isValidControlMessage({
+        ...base,
+        config: { ...DEFAULT_SETTINGS, textCacheMb: 21 },
+      })
+    ).toBe(false);
+  });
+
+  it('rejects malformed init dimensions and non-canvas payloads', () => {
+    const base = {
+      type: 'init',
+      config: { ...DEFAULT_SETTINGS },
+      canvas: new MockOffscreenCanvas(),
+      width: 640,
+      height: 360,
+      dpr: 1,
+    };
+
+    for (const invalid of [
+      { width: 0 },
+      { width: Number.NaN },
+      { height: Number.POSITIVE_INFINITY },
+      { dpr: 0 },
+      { dpr: Number.NaN },
+      { canvas: {} },
+      { canvas: null },
+    ]) {
+      expect(isValidControlMessage({ ...base, ...invalid })).toBe(false);
+    }
+  });
+
   it('accepts manager messages through the guard and renderer', async () => {
     const renderer = initializeRenderer();
     const manager = createManager(renderer);
@@ -184,5 +243,71 @@ describe('renderer worker protocol guards', () => {
     expect(isValidControlMessage({ type: 'setUserPaused', paused: false })).toBe(true);
     expect(isValidControlMessage({ type: 'setUserPaused', paused: 'false' })).toBe(false);
     expect(isValidControlMessage({ type: 'setUserPaused' })).toBe(false);
+  });
+
+  it('rejects prototype-like keys in config updates', () => {
+    const prototypePayload = JSON.parse('{"__proto__":{"polluted":true}}') as Record<
+      string,
+      unknown
+    >;
+
+    expect(isValidControlMessage({ type: 'updateConfig', config: prototypePayload })).toBe(false);
+    expect(
+      isValidControlMessage({
+        type: 'updateConfig',
+        config: { constructor: { prototype: { polluted: true } } },
+      })
+    ).toBe(false);
+    expect(isValidControlMessage({ type: 'updateConfig', config: { prototype: {} } })).toBe(false);
+  });
+
+  it('rejects non-finite and out-of-policy resource settings', () => {
+    expect(isValidControlMessage({ type: 'updateConfig', config: { opacity: 0.75 } })).toBe(true);
+    expect(
+      isValidControlMessage({
+        type: 'updateConfig',
+        config: { emojiCacheMb: Number.POSITIVE_INFINITY },
+      })
+    ).toBe(false);
+    expect(isValidControlMessage({ type: 'updateConfig', config: { textCacheMb: 21 } })).toBe(
+      false
+    );
+    expect(isValidControlMessage({ type: 'updateConfig', config: { queueMaxSize: 1001 } })).toBe(
+      false
+    );
+  });
+
+  it('accepts only finite supported lane-density factors', () => {
+    for (const factor of [0.5, 0.75, 1]) {
+      expect(isValidControlMessage({ type: 'laneDensity', factor })).toBe(true);
+    }
+    for (const factor of [Number.NaN, Number.POSITIVE_INFINITY, 0, 0.49, 1.01, '0.5']) {
+      expect(isValidControlMessage({ type: 'laneDensity', factor })).toBe(false);
+    }
+  });
+
+  it('requires snapshot request IDs to be non-negative safe integers', () => {
+    expect(isValidControlMessage({ type: 'snapshotMessages', requestId: 0 })).toBe(true);
+    expect(isValidControlMessage({ type: 'snapshotMessages', requestId: 42 })).toBe(true);
+    for (const requestId of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(isValidControlMessage({ type: 'snapshotMessages', requestId })).toBe(false);
+    }
+  });
+
+  it('bounds addMessages batches before the renderer iterates them', () => {
+    const message = {
+      id: 'bounded-message',
+      text: 'hello',
+      width: 100,
+      height: 20,
+      priority: 0,
+    };
+
+    expect(
+      isValidControlMessage({ type: 'addMessages', messages: Array(1000).fill(message) })
+    ).toBe(true);
+    expect(
+      isValidControlMessage({ type: 'addMessages', messages: Array(1001).fill(message) })
+    ).toBe(false);
   });
 });
