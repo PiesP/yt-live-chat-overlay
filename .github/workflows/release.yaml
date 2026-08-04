@@ -38,14 +38,12 @@ jobs:
         with:
           submodules: true
 
-      - name: 📦 Setup pnpm
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
-
-      - name: 🟢 Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - name: 📦 Setup pnpm and Node.js
+        uses: pnpm/setup@5d160c5bc68a09337ad0d5654e237e03253b5879 # v1.0.0
         with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: "pnpm"
+          runtime: "node@${{ env.NODE_VERSION }}"
+          cache: true
+          install: false
 
       - name: 📦 Install dependencies
         run: pnpm install --frozen-lockfile
@@ -63,14 +61,12 @@ jobs:
         with:
           submodules: true
 
-      - name: 📦 Setup pnpm
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
-
-      - name: 🟢 Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - name: 📦 Setup pnpm and Node.js
+        uses: pnpm/setup@5d160c5bc68a09337ad0d5654e237e03253b5879 # v1.0.0
         with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: "pnpm"
+          runtime: "node@${{ env.NODE_VERSION }}"
+          cache: true
+          install: false
 
       - name: 📦 Install dependencies
         run: pnpm install --frozen-lockfile
@@ -88,14 +84,12 @@ jobs:
         with:
           submodules: true
 
-      - name: 📦 Setup pnpm
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
-
-      - name: 🟢 Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - name: 📦 Setup pnpm and Node.js
+        uses: pnpm/setup@5d160c5bc68a09337ad0d5654e237e03253b5879 # v1.0.0
         with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: "pnpm"
+          runtime: "node@${{ env.NODE_VERSION }}"
+          cache: true
+          install: false
 
       - name: 🎭 Cache Playwright browsers
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -110,7 +104,7 @@ jobs:
 
       - name: 🎭 Run E2E tests
         run: |
-          pnpm exec playwright install --with-deps chromium
+          pnpm exec playwright install --with-deps chromium firefox
           pnpm test:e2e
 
   duplication:
@@ -141,14 +135,12 @@ jobs:
         with:
           submodules: true
 
-      - name: 📦 Setup pnpm
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
-
-      - name: 🟢 Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - name: 📦 Setup pnpm and Node.js
+        uses: pnpm/setup@5d160c5bc68a09337ad0d5654e237e03253b5879 # v1.0.0
         with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: "pnpm"
+          runtime: "node@${{ env.NODE_VERSION }}"
+          cache: true
+          install: false
 
       - name: 📦 Install dependencies
         run: pnpm install --frozen-lockfile
@@ -169,14 +161,12 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      - name: 📦 Setup pnpm
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
-
-      - name: 🟢 Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - name: 📦 Setup pnpm and Node.js
+        uses: pnpm/setup@5d160c5bc68a09337ad0d5654e237e03253b5879 # v1.0.0
         with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: "pnpm"
+          runtime: "node@${{ env.NODE_VERSION }}"
+          cache: true
+          install: false
 
       - name: 📦 Install dependencies
         run: pnpm install --frozen-lockfile

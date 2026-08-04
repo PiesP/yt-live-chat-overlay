@@ -1,47 +1,33 @@
 {
   "$schema": "https://raw.githubusercontent.com/stryker-mutator/stryker/master/packages/core/schema/stryker-schema.json",
   "mutate": [
-    "src/**/*.ts",
-    "!src/**/*.d.ts",
-    "!src/types/**",
-    "!src/main.ts",
-    "!src/renderer/**",
-    "!src/chat/**",
-    "!src/app/chat-availability-preflight.ts",
-    "!src/app/overlay.ts",
-    "!src/app/runtime-manager.ts",
-    "!src/app/standby-controller.ts",
-    "!src/app/video-pause-controller.ts",
-    "!src/media/image-fetch-manager.ts",
-    "!src/platform/menu-adapters.ts",
-    "!src/platform/storage-adapters.ts",
-    "!src/platform/worker-factory.ts",
-    "!src/settings/store.ts",
-    "!src/settings/ui/controller.ts",
-    "!src/settings/ui/styles.ts",
-    "!src/translation/language-detector.ts",
-    "!src/util/backlog-sampler.ts"
+    "src/renderer/canvas/shared.ts:540-620",
+    "src/renderer/canvas/pipeline-utils.ts",
+    "src/renderer/color-utils.ts",
+    "src/renderer/worker/protocol-guards.ts"
   ],
   "testRunner": "vitest",
   "vitest": {
     "configFile": "vitest.config.ts",
     "related": false
   },
-  "reporters": ["progress"],
+  "reporters": ["progress", "json"],
+  "jsonReporter": {
+    "fileName": "reports/mutation/renderer.json"
+  },
   "coverageAnalysis": "perTest",
   "inPlace": true,
   "ignoreStatic": true,
   "thresholds": {
-    "high": 65,
-    "low": 50,
-    "break": 40
+    "high": 70,
+    "low": 60,
+    "break": 60
   },
   "concurrency": 2,
   "timeoutMS": 60000,
   "plugins": ["@stryker-mutator/vitest-runner"],
   "mutator": {
     "excludedMutations": [
-      "StringLiteral",
       "ArrayDeclaration",
       "ObjectLiteral",
       "ArrowFunction",
@@ -51,7 +37,6 @@
       "UnaryOperator",
       "UpdateOperator",
       "OptionalChaining",
-      "AssignmentOperator",
       "PrefixDecrementOperator",
       "PrefixIncrementOperator",
       "PostfixDecrementOperator",
@@ -61,9 +46,7 @@
       "CheckedStatement",
       "SwitchCase",
       "WhileStatement",
-      "ForStatement",
-      "EqualityOperator",
-      "BooleanLiteral"
+      "ForStatement"
     ]
   }
 }

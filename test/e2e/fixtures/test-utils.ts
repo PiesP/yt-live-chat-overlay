@@ -6,7 +6,7 @@
  *
  * Provides helpers to:
  * - Set up a mock YouTube watch page via page.route()
- * - Install GM_* + chrome.* mocks via addInitScript
+ * - Install platform-appropriate GM_* / chrome.* mocks via addInitScript
  * - Inject the userscript bundle
  * - Reload with preserved settings
  * - Access the debug handle (window.__ytChatOverlay)
@@ -87,7 +87,7 @@ export const DEFAULT_SETTINGS: Record<string, unknown> = {
 // ─── Mock Setup ──────────────────────────────────────────────────────────────
 
 /**
- * Install GM_* and chrome.* mock APIs on the page.
+ * Install GM_* and optional chrome.* mock APIs on the page.
  * Must be called via page.addInitScript() before navigation.
  * If preSeedSettings is provided, those settings are stored in the mock
  * storage before any page scripts run (useful for cross-reload persistence).
@@ -95,8 +95,9 @@ export const DEFAULT_SETTINGS: Record<string, unknown> = {
 export function installYTMock(init: {
   preSeedSettings?: string;
   defaults: Record<string, unknown>;
+  platform?: 'hybrid' | 'userscript';
 }): void {
-  const { preSeedSettings, defaults } = init;
+  const { preSeedSettings, defaults, platform = 'hybrid' } = init;
   const storage = new Map<string, unknown>();
   const listeners = new Map<number, {
     key: string;
@@ -141,40 +142,42 @@ export function installYTMock(init: {
     delete: (name: string) => { document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT`; },
   };
 
-  // chrome.* API mocks (extension path)
-  (window as unknown as Record<string, unknown>).chrome = {
-    runtime: {
-      id: 'test-extension-id',
-      getURL: (path: string) => `chrome-extension://test-extension-id/${path}`,
-      onMessage: { addListener: () => {}, removeListener: () => {} },
-      sendMessage: () => {},
-      lastError: undefined,
-    },
-    storage: {
-      local: {
-        get: async (keys: string | string[]) => {
-          const result: Record<string, unknown> = {};
-          const keyList = Array.isArray(keys) ? keys : [keys];
-          for (const k of keyList) { if (storage.has(k)) result[k] = storage.get(k); }
-          return result;
-        },
-        set: async (items: Record<string, unknown>) => {
-          for (const [k, v] of Object.entries(items)) storage.set(k, v);
-        },
-        remove: async (keys: string | string[]) => {
-          const keyList = Array.isArray(keys) ? keys : [keys];
-          for (const k of keyList) storage.delete(k);
-        },
+  if (platform === 'hybrid') {
+    // chrome.* API mocks (extension-compatible path)
+    (window as unknown as Record<string, unknown>).chrome = {
+      runtime: {
+        id: 'test-extension-id',
+        getURL: (path: string) => `chrome-extension://test-extension-id/${path}`,
+        onMessage: { addListener: () => {}, removeListener: () => {} },
+        sendMessage: () => {},
+        lastError: undefined,
       },
-      onChanged: { addListener: () => {}, removeListener: () => {} },
-    },
-    i18n: {
-      getUILanguage: () => 'en',
-      getAcceptLanguages: async () => ['en', 'en-US'],
-    },
-    contextMenus: { create: () => {}, removeAll: () => {}, onClicked: { addListener: () => {} } },
-    menus: { create: () => {}, removeAll: () => {}, onClicked: { addListener: () => {} } },
-  };
+      storage: {
+        local: {
+          get: async (keys: string | string[]) => {
+            const result: Record<string, unknown> = {};
+            const keyList = Array.isArray(keys) ? keys : [keys];
+            for (const k of keyList) { if (storage.has(k)) result[k] = storage.get(k); }
+            return result;
+          },
+          set: async (items: Record<string, unknown>) => {
+            for (const [k, v] of Object.entries(items)) storage.set(k, v);
+          },
+          remove: async (keys: string | string[]) => {
+            const keyList = Array.isArray(keys) ? keys : [keys];
+            for (const k of keyList) storage.delete(k);
+          },
+        },
+        onChanged: { addListener: () => {}, removeListener: () => {} },
+      },
+      i18n: {
+        getUILanguage: () => 'en',
+        getAcceptLanguages: async () => ['en', 'en-US'],
+      },
+      contextMenus: { create: () => {}, removeAll: () => {}, onClicked: { addListener: () => {} } },
+      menus: { create: () => {}, removeAll: () => {}, onClicked: { addListener: () => {} } },
+    };
+  }
 
   // If no pre-seed, seed with defaults
   if (!preSeedSettings) {
@@ -229,12 +232,18 @@ export async function injectUserscript(page: Page): Promise<void> {
  * Complete E2E setup: route mocks → install GM mocks → inject userscript → navigate.
  * Uses pre-seeded settings from DEFAULT_SETTINGS.
  */
-export async function setupOverlayPage(page: Page): Promise<void> {
+export async function setupOverlayPage(
+  page: Page,
+  options: { platform?: 'hybrid' | 'userscript' } = {}
+): Promise<void> {
   // 1. Register mock route (must be before navigation)
   await setupMockPageRoute(page);
 
-  // 2. Install GM + chrome mocks with default settings
-  await page.addInitScript(installYTMock, { defaults: DEFAULT_SETTINGS });
+  // 2. Install the requested platform mocks with default settings.
+  await page.addInitScript(installYTMock, {
+    defaults: DEFAULT_SETTINGS,
+    platform: options.platform ?? 'hybrid',
+  });
 
   // 3. Inject userscript
   await injectUserscript(page);
