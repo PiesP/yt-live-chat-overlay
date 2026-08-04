@@ -13,14 +13,17 @@ export default defineConfig({
   // Keep local runs deterministic while allowing the isolated CI fixtures to
   // share the browser workload. Each test owns its own page and mock storage.
   workers: process.env.CI ? 2 : 1,
-  reporter: [['list']],
+  reporter: process.env.CI
+    ? [['github'], ['html', { open: 'never' }]]
+    : [['list'], ['html', { open: 'never' }]],
   use: {
     baseURL: 'https://www.youtube.com',
     headless: true,
     actionTimeout: 15_000,
     navigationTimeout: 30_000,
     screenshot: 'only-on-failure',
-    trace: 'on-first-retry',
+    trace: 'retain-on-failure',
+    video: process.env.CI ? 'retain-on-failure' : 'off',
     viewport: { width: 1280, height: 800 },
   },
   projects: [

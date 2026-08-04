@@ -107,6 +107,17 @@ jobs:
           pnpm exec playwright install --with-deps chromium firefox
           xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" pnpm test:e2e
 
+      - name: 📤 Upload Playwright diagnostics
+        if: ${{ failure() && !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-diagnostics-${{ github.sha }}
+          path: |
+            test-results/
+            playwright-report/
+          if-no-files-found: warn
+          retention-days: 7
+
   build:
     name: pr-gate/build
     needs: quality
