@@ -555,6 +555,10 @@ function cacheTextBitmap(
 
   ctx.save();
   ctx.font = font;
+  // Canvas resize/reset leaves the source context on the default alphabetic
+  // baseline. Measure with the same baseline used by the cached bitmap so
+  // Latin glyphs with little or no descent still receive their full height.
+  ctx.textBaseline = 'top';
   const metrics = ctx.measureText(text);
   const rawBbWidth =
     Math.abs(metrics.actualBoundingBoxLeft) + Math.abs(metrics.actualBoundingBoxRight);

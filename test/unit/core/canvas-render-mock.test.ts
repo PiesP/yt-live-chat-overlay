@@ -8,15 +8,16 @@
  * without requiring a real browser canvas.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import {
   buildWrappedLines,
   clipTextToWidth,
   drawRoundRect,
+  renderSegment,
   renderRegularMessageBackground,
   strokeTextOutline,
 } from '@renderer/canvas/shared';
-import type { AnyCanvasContext } from '@renderer/canvas/shared';
+import type { AnyCanvasContext, TextBitmapCache } from '@renderer/canvas/shared';
 
 // ═══════════════════════════════════════════════════════════════════
 // Mock Canvas context (mirrors test/setup.ts pattern)
@@ -41,7 +42,9 @@ interface MockContextState {
   arcToCalled: boolean;
 }
 
-function createMockContext(): { ctx: AnyCanvasContext; state: MockContextState } {
+function createMockContext(
+  measureTextImpl?: (text: string, state: MockContextState) => TextMetrics
+): { ctx: AnyCanvasContext; state: MockContextState } {
   const state: MockContextState = {
     fillStyle: '#000',
     strokeStyle: '#000',
@@ -77,12 +80,15 @@ function createMockContext(): { ctx: AnyCanvasContext; state: MockContextState }
 
     measureText: vi.fn((text: string) => {
       state.measuredTexts.push(text);
+      if (measureTextImpl) return measureTextImpl(text, state);
       const fontSize = parseFloat(state.font) || 10;
       return { width: text.length * fontSize * 0.6 } as TextMetrics;
     }),
 
     fillText: vi.fn((_text, _x, _y, _maxWidth?) => { state.filledTexts.push('text'); state.ops.push('fillText'); }),
     strokeText: vi.fn((_text, _x, _y, _maxWidth?) => { state.strokedTexts.push('text'); state.ops.push('strokeText'); }),
+    drawImage: vi.fn(() => { state.ops.push('drawImage'); }),
+    getTransform: vi.fn(() => ({ a: 1 })),
     roundRect: vi.fn(() => { state.roundRectCalled = true; state.ops.push('roundRect'); }),
     beginPath: vi.fn(() => { state.beginPathCalled = true; state.ops.push('beginPath'); }),
     closePath: vi.fn(() => { state.closePathCalled = true; state.ops.push('closePath'); }),
@@ -97,6 +103,64 @@ function createMockContext(): { ctx: AnyCanvasContext; state: MockContextState }
 
   return { ctx, state };
 }
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// renderSegment bitmap cache
+// ═══════════════════════════════════════════════════════════════════
+
+describe('renderSegment bitmap cache', () => {
+  it('measures Latin text with the same top baseline used to draw the bitmap', () => {
+    const measuredBaselines: string[] = [];
+    const { ctx } = createMockContext((_text, state) => {
+      measuredBaselines.push(state.textBaseline);
+      return {
+        width: 80,
+        actualBoundingBoxLeft: 0,
+        actualBoundingBoxRight: 80,
+        actualBoundingBoxAscent: state.textBaseline === 'top' ? -2 : 18,
+        actualBoundingBoxDescent: state.textBaseline === 'top' ? 22 : 0,
+      } as TextMetrics;
+    });
+
+    class MockOffscreenCanvas {
+      readonly context = {
+        scale: vi.fn(),
+        strokeText: vi.fn(),
+        fillText: vi.fn(),
+      };
+
+      constructor(
+        readonly width: number,
+        readonly height: number
+      ) {}
+
+      getContext(): OffscreenCanvasRenderingContext2D {
+        return this.context as unknown as OffscreenCanvasRenderingContext2D;
+      }
+    }
+
+    vi.stubGlobal('OffscreenCanvas', MockOffscreenCanvas);
+    const bitmaps = new Map<string, CanvasImageSource>();
+    const cache: TextBitmapCache = {
+      get: (key) => bitmaps.get(key),
+      set: (key, value) => {
+        bitmaps.set(key, value);
+      },
+    };
+
+    renderSegment(ctx, 'HELLO', 0, 0, '#ffffff', 32, 2, 0.7, cache, () =>
+      'bold 32px sans-serif'
+    );
+
+    expect(measuredBaselines).toEqual(['top']);
+    const bitmap = [...bitmaps.values()][0] as unknown as MockOffscreenCanvas;
+    expect(bitmap.height).toBe(26);
+  });
+});
 
 // ═══════════════════════════════════════════════════════════════════
 // drawRoundRect
