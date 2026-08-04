@@ -214,6 +214,39 @@ describe('Worker message protocol', () => {
       expect(internals.activeMessages[0]?.fadeStartTime).toBe(10_125);
     });
 
+    it('keeps original content active for an empty translated string', () => {
+      const renderer = initializeRenderer();
+      const internals = renderer as unknown as {
+        activateMessage: (...args: unknown[]) => void;
+        activeMessages: Array<{
+          text: string;
+          content: Array<{ type: string; content: string }>;
+          translatedText?: string | null;
+          translatedContent?: Array<{ type: string; content: string }>;
+        }>;
+      };
+
+      internals.activateMessage(
+        makeWorkerMessage({
+          text: 'hello',
+          content: [{ type: 'text', content: 'hello' }],
+          translatedText: '',
+        }),
+        10_000,
+        { laneIndex: 0, waitMs: 0, laneY: 0, slotCount: 1, verticalOffset: 0 },
+        0,
+        640,
+        360
+      );
+
+      expect(internals.activeMessages[0]).toMatchObject({
+        text: 'hello',
+        content: [{ type: 'text', content: 'hello' }],
+        translatedText: '',
+      });
+      expect(internals.activeMessages[0]?.translatedContent).toBeUndefined();
+    });
+
     it('drops messages that require more lanes than the viewport has', () => {
       const renderer = initializeRenderer();
       const internals = renderer as unknown as {
