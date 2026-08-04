@@ -44,6 +44,7 @@
     "build:extension:firefox:ci": "vite build --config vite.config.extension.firefox.ts && vite build --config vite.config.extension.cs.firefox.ts && vite build --config vite.config.extension.page.firefox.ts",
     "mut": "stryker run --reporters=progress",
     "mut:fast": "stryker run stryker.conf.fast.json --reporters=progress",
+    "mut:renderer": "stryker run stryker.conf.renderer.json",
     "build:extension:firefox": "vite build --config vite.config.extension.firefox.ts && vite build --config vite.config.extension.cs.firefox.ts && vite build --config vite.config.extension.page.firefox.ts",
     "build:all": "pnpm -s build:ci && pnpm -s build:extension:ci && pnpm -s build:extension:firefox:ci && pnpm -s check:artifacts",
     "build:all:ci": "pnpm -s check:versions && pnpm -s check:i18n && pnpm -s build:ci && pnpm -s build:extension:ci && pnpm -s build:extension:firefox:ci && pnpm -s check:artifacts",

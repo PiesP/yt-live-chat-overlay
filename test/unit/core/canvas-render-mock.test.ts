@@ -159,6 +159,7 @@ describe('renderSegment bitmap cache', () => {
     expect(measuredBaselines).toEqual(['top']);
     const bitmap = [...bitmaps.values()][0] as unknown as MockOffscreenCanvas;
     expect(bitmap.height).toBe(26);
+    expect((bitmap.context as { textBaseline?: string }).textBaseline).toBe('top');
   });
 });
 
