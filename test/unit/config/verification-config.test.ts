@@ -32,6 +32,7 @@ describe('Verification configuration', () => {
     expect(config.mutator?.excludedMutations).not.toContain('EqualityOperator');
     expect(config.mutator?.excludedMutations).not.toContain('BooleanLiteral');
     expect(packageJson.scripts?.['mut:fast']).toBe('stryker run stryker.conf.fast.json');
+    expect(workflow).toContain('timeout-minutes: 35');
     expect(workflow).toContain('path: reports/mutation/');
     expect(workflow).toContain('if-no-files-found: error');
   });
