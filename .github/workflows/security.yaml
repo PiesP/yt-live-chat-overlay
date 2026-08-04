@@ -1,10 +1,10 @@
 name: 🔒 Security Scanning
 
 # Responsibility: Security analysis for Node.js + pnpm project
-# - Default branch/PR/merge queue: CodeQL for Actions and JavaScript/TypeScript
+# - Default branch: pinned-tool freshness + OSV full scan + CodeQL + Semgrep
+# - PR/merge queue: OSV gate + CodeQL + Semgrep
 # - PR gate: OSV diff scan
 # - Merge queue/manual gate: OSV full scan
-# - Scheduled/manual depth: pinned-tool freshness + OSV full scan + Semgrep SARIF
 #
 # Trigger: Push/PR to master + merge queue + daily schedule + manual
 
@@ -37,7 +37,7 @@ env:
 jobs:
   pinned-tools:
     name: 🔄 Pinned tool freshness
-    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -140,7 +140,7 @@ jobs:
 
   osv-scan-dispatch:
     name: pr-gate/osv / osv-scan
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'merge_group' || github.event_name == 'schedule' }}
+    if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event_name == 'merge_group' || github.event_name == 'schedule' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -218,14 +218,14 @@ jobs:
     name: pr-gate/semgrep
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
+    if: ${{ github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
     permissions:
       contents: read
       security-events: write
-    # semgrep/semgrep:1.171.0 — last checked: 2026-07-28
+    # semgrep/semgrep:1.172.0 — last checked: 2026-08-04
     # Check for updates: https://github.com/semgrep/semgrep/releases
     container:
-      image: semgrep/semgrep:1.171.0@sha256:296fc4912420833abfcf5090ec49a81bf1330bb61fc193cd09255f88b8267ba9
+      image: semgrep/semgrep:1.172.0@sha256:a8298d1c09c84b9a0bbc75ec915e37023fc4657360b6dbfa645261d2353a366c
     steps:
       - name: 📥 Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -289,3 +289,74 @@ jobs:
 
           publish_status "pr-gate/osv / osv-scan" "$OSV_RESULT"
           publish_status "pr-gate/semgrep" "$SEMGREP_RESULT"
+
+  security-summary:
+    name: Security scan summary
+    if: ${{ always() }}
+    needs:
+      [pinned-tools, osv-scan-pr, osv-scan-dispatch, codeql, semgrep, report-pr-gate-statuses]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Summarize and validate event-specific scans
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PINNED_TOOLS_RESULT: ${{ needs.pinned-tools.result }}
+          OSV_PR_RESULT: ${{ needs.osv-scan-pr.result }}
+          OSV_FULL_RESULT: ${{ needs.osv-scan-dispatch.result }}
+          CODEQL_RESULT: ${{ needs.codeql.result }}
+          SEMGREP_RESULT: ${{ needs.semgrep.result }}
+          STATUS_REPORT_RESULT: ${{ needs.report-pr-gate-statuses.result }}
+        run: |
+          set -euo pipefail
+
+          {
+            echo "## Security scan results"
+            echo
+            echo "| Check | Result |"
+            echo "| --- | --- |"
+            echo "| Pinned tool freshness | $PINNED_TOOLS_RESULT |"
+            echo "| OSV PR diff | $OSV_PR_RESULT |"
+            echo "| OSV full | $OSV_FULL_RESULT |"
+            echo "| CodeQL | $CODEQL_RESULT |"
+            echo "| Semgrep | $SEMGREP_RESULT |"
+            echo "| Manual status report | $STATUS_REPORT_RESULT |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          failed=0
+          expect_success() {
+            local label="$1"
+            local result="$2"
+            if [[ "$result" != "success" ]]; then
+              echo "Expected $label to succeed for $EVENT_NAME, got: $result" >&2
+              failed=1
+            fi
+          }
+
+          expect_success "CodeQL" "$CODEQL_RESULT"
+          expect_success "Semgrep" "$SEMGREP_RESULT"
+          case "$EVENT_NAME" in
+            pull_request)
+              expect_success "OSV PR diff" "$OSV_PR_RESULT"
+              ;;
+            merge_group)
+              expect_success "OSV full" "$OSV_FULL_RESULT"
+              ;;
+            push|schedule)
+              expect_success "pinned tool freshness" "$PINNED_TOOLS_RESULT"
+              expect_success "OSV full" "$OSV_FULL_RESULT"
+              ;;
+            workflow_dispatch)
+              expect_success "pinned tool freshness" "$PINNED_TOOLS_RESULT"
+              expect_success "OSV full" "$OSV_FULL_RESULT"
+              expect_success "manual status report" "$STATUS_REPORT_RESULT"
+              ;;
+            *)
+              echo "Unsupported security workflow event: $EVENT_NAME" >&2
+              failed=1
+              ;;
+          esac
+
+          exit "$failed"

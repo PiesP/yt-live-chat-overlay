@@ -9,18 +9,24 @@ cutoff_epoch="$(date -u -d "$cooling_hours hours ago" +%s)"
 
 latest_mature_release() {
   local repository="$1"
-  local tag published published_epoch
+  local release_rows tag published published_epoch
+
+  if ! release_rows="$(
+    gh api "repos/$repository/releases?per_page=100" \
+      --jq '.[] | select(.draft == false and .prerelease == false) | [.tag_name, .published_at] | @tsv'
+  )"; then
+    printf 'Failed to query stable releases for %s.\n' "$repository" >&2
+    return 1
+  fi
 
   while IFS=$'\t' read -r tag published; do
+    [[ -n "$tag" && -n "$published" ]] || continue
     published_epoch="$(date -u -d "$published" +%s)"
     if ((published_epoch <= cutoff_epoch)); then
       printf '%s\n' "${tag#v}"
       return 0
     fi
-  done < <(
-    gh api "repos/$repository/releases?per_page=100" \
-      --jq '.[] | select(.draft == false and .prerelease == false) | [.tag_name, .published_at] | @tsv'
-  )
+  done <<< "$release_rows"
 
   printf 'No stable %s release older than %s hours was found.\n' \
     "$repository" "$cooling_hours" >&2
@@ -33,7 +39,11 @@ check_release() {
   local repository="$3"
   local expected
 
-  expected="$(latest_mature_release "$repository")"
+  if ! expected="$(latest_mature_release "$repository")"; then
+    printf '::error title=%s freshness check failed::Unable to resolve a mature upstream release.\n' \
+      "$name"
+    return 1
+  fi
   if [[ "$current" != "$expected" ]]; then
     printf '::error title=%s update available::Pinned %s; latest stable release older than %sh is %s.\n' \
       "$name" "$current" "$cooling_hours" "$expected"
