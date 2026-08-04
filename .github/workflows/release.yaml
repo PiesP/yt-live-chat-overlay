@@ -39,11 +39,9 @@ jobs:
           submodules: true
 
       - name: 📦 Setup pnpm and Node.js
-        uses: pnpm/setup@5d160c5bc68a09337ad0d5654e237e03253b5879 # v1.0.0
+        uses: ./.github/actions/setup-toolchain
         with:
-          runtime: "node@${{ env.NODE_VERSION }}"
-          cache: true
-          install: false
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: 📦 Install dependencies
         run: pnpm install --frozen-lockfile
@@ -62,11 +60,9 @@ jobs:
           submodules: true
 
       - name: 📦 Setup pnpm and Node.js
-        uses: pnpm/setup@5d160c5bc68a09337ad0d5654e237e03253b5879 # v1.0.0
+        uses: ./.github/actions/setup-toolchain
         with:
-          runtime: "node@${{ env.NODE_VERSION }}"
-          cache: true
-          install: false
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: 📦 Install dependencies
         run: pnpm install --frozen-lockfile
@@ -85,11 +81,9 @@ jobs:
           submodules: true
 
       - name: 📦 Setup pnpm and Node.js
-        uses: pnpm/setup@5d160c5bc68a09337ad0d5654e237e03253b5879 # v1.0.0
+        uses: ./.github/actions/setup-toolchain
         with:
-          runtime: "node@${{ env.NODE_VERSION }}"
-          cache: true
-          install: false
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: 🎭 Cache Playwright browsers
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -136,11 +130,9 @@ jobs:
           submodules: true
 
       - name: 📦 Setup pnpm and Node.js
-        uses: pnpm/setup@5d160c5bc68a09337ad0d5654e237e03253b5879 # v1.0.0
+        uses: ./.github/actions/setup-toolchain
         with:
-          runtime: "node@${{ env.NODE_VERSION }}"
-          cache: true
-          install: false
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: 📦 Install dependencies
         run: pnpm install --frozen-lockfile
@@ -162,11 +154,9 @@ jobs:
           fetch-tags: true
 
       - name: 📦 Setup pnpm and Node.js
-        uses: pnpm/setup@5d160c5bc68a09337ad0d5654e237e03253b5879 # v1.0.0
+        uses: ./.github/actions/setup-toolchain
         with:
-          runtime: "node@${{ env.NODE_VERSION }}"
-          cache: true
-          install: false
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: 📦 Install dependencies
         run: pnpm install --frozen-lockfile
