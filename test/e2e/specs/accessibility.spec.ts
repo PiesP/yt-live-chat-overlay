@@ -9,9 +9,9 @@
  * 2. Canvas is hidden from the accessibility tree
  * 3. aria-live region exists for connection status announcements
  * 4. Settings modal exposes the native dialog accessibility contract
- * 5. Confirmation dialog has aria-labelledby attribute
+ * 5. Reset confirmation uses a native dialog with a real accessible description
  * 6. ignoreReducedMotion setting exists in settings panel (checkbox)
- * 7. Compiled click-to-reload affordance/code contract is present
+ * 7. Reload affordance remains operable and restarts the runtime
  *
  * Test approach:
  * - Build the development userscript first (pnpm test:e2e does this automatically)
@@ -21,7 +21,6 @@
 
 import AxeBuilder from '@axe-core/playwright';
 import { test, expect, type Locator, type Page } from '@playwright/test';
-import { readFileSync } from 'node:fs';
 import { existsSync } from 'node:fs';
 
 import { setupOverlayPage, USERSCRIPT_PATH } from '../fixtures/test-utils';
@@ -119,26 +118,32 @@ test.describe('YT Live Chat Overlay Accessibility', () => {
     await closeSettingsModal(page, modal);
   });
 
-  test('confirmation dialog markup exists in bundle', async ({ page }) => {
+  test('reset confirmation exposes its native dialog contract and restores focus', async ({
+    page,
+  }) => {
     await setupOverlayPage(page);
+    const modal = await openSettingsModal(page);
+    const resetButton = modal.locator('button[data-action="reset"]');
 
-    const bundle = readFileSync(USERSCRIPT_PATH, 'utf8');
+    await resetButton.click();
 
-    // Verify the confirmation dialog uses a native <dialog> element.
-    // The browser handles role and focus management natively; no explicit
-    // role="alertdialog" is needed.
-    expect(bundle).toContain('yt-chat-overlay-confirm-msg');
-    expect(bundle).toContain('dialog');
-    expect(bundle).toContain('showModal');
+    const confirmation = page.locator('dialog.yt-chat-overlay-settings-confirm');
+    const cancelButton = confirmation.locator('.yt-chat-overlay-settings-confirm-cancel');
+    await expect(confirmation).toBeVisible();
+    await expect(confirmation).toHaveAttribute('open', '');
+    await expect(confirmation).toHaveAttribute('aria-describedby', 'yt-chat-overlay-confirm-msg');
+    await expect(page.locator('#yt-chat-overlay-confirm-msg')).not.toBeEmpty();
+    await expect(cancelButton).toBeFocused();
+
+    await cancelButton.click();
+
+    await expect(confirmation).toHaveCount(0);
+    await expect(resetButton).toBeFocused();
+    await closeSettingsModal(page, modal);
   });
 
   test('ignoreReducedMotion setting exists in settings panel as checkbox', async ({ page }) => {
     await setupOverlayPage(page);
-
-    const bundle = readFileSync(USERSCRIPT_PATH, 'utf8');
-
-    // Supplement the real DOM assertion with a compiled-setting check.
-    expect(bundle).toContain('ignoreReducedMotion');
 
     const modal = await openSettingsModal(page);
     const reduceMotionCheckbox = modal.locator('input[name="ignoreReducedMotion"]');
@@ -148,19 +153,26 @@ test.describe('YT Live Chat Overlay Accessibility', () => {
     await closeSettingsModal(page, modal);
   });
 
-  test('compiled click-to-reload affordance/code contract is present', async ({ page }) => {
+  test('reload button exposes an accessible control and restarts the runtime', async ({ page }) => {
     await setupOverlayPage(page);
+    await page.locator('#movie_player').hover();
 
-    const bundle = readFileSync(USERSCRIPT_PATH, 'utf8');
+    const reloadButton = page.locator('#yt-chat-overlay-reload-button');
+    await expect(reloadButton).toBeVisible();
+    await expect(reloadButton).toHaveAttribute('type', 'button');
+    const accessibleName = await reloadButton.getAttribute('aria-label');
+    expect(accessibleName?.trim()).toBeTruthy();
 
-    // Verify the compiled bundle contains the click-to-reload code contract and status text.
-    expect(bundle).toContain('addEventListener("click"');
-    expect(bundle).toContain('Click to reload');
-    expect(bundle).toContain('tabindex');
+    await reloadButton.click();
 
-    // Verify the real renderer canvas is attached and properly configured
+    await expect(reloadButton).toHaveText('✓');
+    await expect(reloadButton).toHaveClass(/yt-chat-overlay-reload-button--done/);
+
     const canvas = page.locator(`#${OVERLAY_ID} canvas`);
     await expect(canvas).toBeAttached();
     await expect(canvas).toHaveAttribute('aria-hidden', 'true');
+    await expect
+      .poll(() => page.evaluate(() => typeof window.__ytChatOverlay?.getSettings === 'function'))
+      .toBe(true);
   });
 });
