@@ -65,7 +65,7 @@ export function serializeWorkerMessage({
           )
         : undefined,
     burstSpeedMultiplier,
-    translatedText: translatedText || undefined,
+    ...(translatedText !== undefined ? { translatedText } : {}),
     content,
     author: message.author,
     authorPhotoUrl: message.authorPhotoUrl,

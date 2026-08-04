@@ -139,4 +139,33 @@ describe('serializeWorkerMessage', () => {
       }).translatedText
     ).toBe('안녕하세요');
   });
+
+  it('preserves an empty translated result', () => {
+    const message = textMessage() as ChatMessage & { translatedText?: string };
+    message.translatedText = '';
+
+    expect(
+      serializeWorkerMessage({
+        message,
+        id: 'empty-translation-id',
+        dimensions,
+        priority: 0,
+        burstSpeedMultiplier: 1,
+        settings,
+      }).translatedText
+    ).toBe('');
+  });
+
+  it('omits the optional translated field when no result is present', () => {
+    const serialized = serializeWorkerMessage({
+      message: textMessage(),
+      id: 'untranslated-id',
+      dimensions,
+      priority: 0,
+      burstSpeedMultiplier: 1,
+      settings,
+    });
+
+    expect(Object.hasOwn(serialized, 'translatedText')).toBe(false);
+  });
 });
