@@ -16,11 +16,6 @@ import type { Overlay } from '@app/overlay';
 import type { AccessibleChatMessage, ChatMessage, OverlaySettings } from '@app-types';
 import type { ImageFetchManager } from '@media/image-fetch-manager';
 import { createWorkerUrl, workerSupported } from '@platform/worker-factory';
-import {
-  MEMBERSHIP_CARD_CONFIG,
-  SUPERCHAT_CARD_CONFIG,
-  toWorkerConfig,
-} from '@renderer/card-config';
 import { createLogger } from '@util/logging';
 import type { ObservabilityReporter } from '@util/observability';
 import {
@@ -29,6 +24,7 @@ import {
   sendSetPausedToWorker,
   sendUpdateConfigToWorker,
 } from './common';
+import { serializeWorkerMessage } from './message-serializer';
 import type { WorkerMessage } from './types';
 
 type DimensionResult = { width: number; height: number };
@@ -489,10 +485,11 @@ export class RenderWorkerManager {
   sendToWorker(message: ChatMessage, msgId?: string): void {
     if (!this.worker) return;
 
+    const priority = this.deps.getMessagePriority(message);
+
     // Backpressure: drop low-priority messages when worker queue is backed up
     const maxWorkerQueue = this.deps.settings.queueMaxSize * 2;
     if (this._queueDepth > maxWorkerQueue) {
-      const priority = this.deps.getMessagePriority(message);
       if (priority < 40) {
         this.deps.observability.onMessageDropped('worker_backpressure');
         return;
@@ -500,20 +497,14 @@ export class RenderWorkerManager {
     }
 
     const dims = this.deps.estimateDimensions(message);
-
-    const text = message.content.map((s) => (s.type === 'text' ? s.content : s.emoji.alt)).join('');
-
-    const content = message.content.map((s) => {
-      if (s.type === 'text') {
-        return { type: 'text', content: s.content };
-      }
-      return {
-        type: 'emoji',
-        content: s.emoji.alt,
-        emojiUrl: s.emoji.url,
-        emojiAlt: s.emoji.alt,
-        emojiFallbackText: s.emoji.fallbackText,
-      };
+    const id = msgId ?? message.id ?? `${message.timestamp}-${Math.random()}`;
+    const workerMessage = serializeWorkerMessage({
+      message,
+      id,
+      dimensions: dims,
+      priority,
+      burstSpeedMultiplier: this.computeBurstSpeedMultiplier(),
+      settings: this.deps.settings,
     });
 
     // ── Collect ImageBitmap transfers ──────────────────────────────────
@@ -539,7 +530,7 @@ export class RenderWorkerManager {
       // before postMessage would cause DataCloneError or an empty bitmap.
     };
 
-    for (const seg of content) {
+    for (const seg of workerMessage.content ?? []) {
       if (seg.type === 'emoji') collectBitmap(seg.emojiUrl, 'emoji');
     }
     collectBitmap(message.authorPhotoUrl, 'author');
@@ -547,56 +538,13 @@ export class RenderWorkerManager {
       collectBitmap(message.superChat.sticker.url, 'sticker');
     }
 
-    const workerMessage: Record<string, unknown> = {
-      type: 'addMessages',
-      messages: [
-        {
-          id: msgId ?? message.id ?? `${message.timestamp}-${Math.random()}`,
-          text,
-          width: dims.width,
-          height: dims.height,
-          priority: this.deps.getMessagePriority(message),
-          isBacklog: message.isBacklog ?? false,
-          authorType: message.authorType,
-          kind: message.kind,
-          userColor: message.userColor,
-          cardConfigWorker:
-            message.kind === 'superchat' || message.kind === 'membership'
-              ? toWorkerConfig(
-                  message.kind === 'superchat' ? SUPERCHAT_CARD_CONFIG : MEMBERSHIP_CARD_CONFIG,
-                  message,
-                  this.deps.settings
-                )
-              : undefined,
-          burstSpeedMultiplier: this.computeBurstSpeedMultiplier(),
-          translatedText: (message as { translatedText?: string }).translatedText || undefined,
-          // NEW:
-          content,
-          author: message.author,
-          authorPhotoUrl: message.authorPhotoUrl,
-          // SuperChat (if applicable)
-          ...(message.kind === 'superchat' && message.superChat
-            ? {
-                superChatAmount: message.superChat.amount,
-                superChatStickerUrl: message.superChat.sticker?.url,
-              }
-            : {}),
-          // Membership header (if applicable)
-          ...(message.kind === 'membership' ? { membershipHeader: message.membershipHeader } : {}),
-        },
-      ],
-    };
-
-    const workerMessageId = workerMessage.messages as Array<{ id: string }>;
-    const id = workerMessageId[0]?.id;
-    if (id) this.sentMessages.set(id, message);
+    this.sentMessages.set(id, message);
 
     // ── Batch instead of immediate postMessage ──────────────────────
     // During chat bursts, multiple sendToWorker calls arrive in the same
     // microtask turn. Batching them into a single postMessage reduces
     // cross-thread overhead while keeping display latency to one microtask.
-    const innerMsg = (workerMessage.messages as WorkerMessage[])[0]!;
-    this.pendingBatch.push({ msg: innerMsg, transferredImages, transferList });
+    this.pendingBatch.push({ msg: workerMessage, transferredImages, transferList });
     this.scheduleBatchFlush();
   }
 

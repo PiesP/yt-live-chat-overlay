@@ -136,6 +136,8 @@ export interface WorkerContentSegment {
   emojiUrl?: string;
   /** Emoji alt text fallback (only for type='emoji'). */
   emojiAlt?: string;
+  /** Visible fallback text used when the emoji bitmap is unavailable. */
+  emojiFallbackText?: string;
 }
 
 export interface WorkerMessage {
