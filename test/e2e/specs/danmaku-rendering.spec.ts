@@ -110,6 +110,130 @@ test.describe('Danmaku Rendering', () => {
     await expect(receivedAndRendered).toHaveText('Rcvd: 1 | Rndr: 1');
   });
 
+  test('renders the full height of cached Latin glyphs', async ({ page }) => {
+    await setupOverlayPage(page, { platform: 'userscript' });
+    await applySettings(page, {
+      allowShortTextMessages: true,
+      danmakuMode: 'top',
+      showDebugOverlay: true,
+      backgroundColors: { normal: '#00000000' },
+      showAuthor: { normal: false },
+      outline: { enabled: true, widthPx: 2, opacity: 0.7 },
+    });
+
+    await page.evaluate(() => {
+      const items = document.querySelector('yt-live-chat-item-list-renderer #items');
+      if (!items) throw new Error('Mock live chat items container is missing');
+
+      const renderer = document.createElement('yt-live-chat-text-message-renderer');
+      renderer.id = 'e2e-latin-height-message';
+      const author = document.createElement('span');
+      author.id = 'author-name';
+      author.textContent = 'Latin Height Author';
+      const message = document.createElement('span');
+      message.id = 'message';
+      message.textContent = 'HELLO';
+      renderer.append(author, message);
+      items.append(renderer);
+    });
+
+    await expect(page.locator('#yt-chat-overlay-debug > div').first()).toHaveText(
+      'Rcvd: 1 | Rndr: 1'
+    );
+
+    const canvas = page.locator(`#${OVERLAY_ID} canvas`);
+    const measureGlyphHeights = () =>
+      canvas.evaluate((element: HTMLCanvasElement) => {
+        const context = element.getContext('2d');
+        if (!context) return null;
+
+        const findInkHeight = (pixels: Uint8ClampedArray, width: number): number => {
+          let minY = Number.POSITIVE_INFINITY;
+          let maxY = Number.NEGATIVE_INFINITY;
+          for (let i = 3; i < pixels.length; i += 4) {
+            if (pixels[i]! <= 8) continue;
+            const y = Math.floor((i - 3) / 4 / width);
+            minY = Math.min(minY, y);
+            maxY = Math.max(maxY, y);
+          }
+          return Number.isFinite(minY) ? maxY - minY + 1 : 0;
+        };
+
+        const renderedPixels = context.getImageData(
+          0,
+          0,
+          element.width,
+          Math.floor(element.height / 2)
+        ).data;
+        const renderedHeight = findInkHeight(renderedPixels, element.width);
+        const renderedAlpha = renderedPixels.reduce(
+          (total, value, index) => total + (index % 4 === 3 ? value : 0),
+          0
+        );
+        if (renderedHeight === 0) return null;
+
+        const handle = (window as unknown as Record<string, unknown>).__ytChatOverlay as
+          | { getSettings?: () => Record<string, unknown> }
+          | undefined;
+        const settings = handle?.getSettings?.();
+        if (!settings) return null;
+
+        const baseFontSize = Number(settings.fontSize);
+        const fontWeight = String(settings.fontWeight);
+        const fontFamily = String(settings.fontFamily);
+
+        const reference = document.createElement('canvas');
+        reference.width = 256;
+        reference.height = 128;
+        const referenceContext = reference.getContext('2d');
+        if (!referenceContext) return null;
+        referenceContext.font = `${fontWeight} ${baseFontSize}px ${fontFamily}`;
+        referenceContext.textBaseline = 'top';
+        referenceContext.lineWidth = 1.7;
+        referenceContext.lineJoin = 'round';
+        referenceContext.lineCap = 'round';
+        referenceContext.strokeStyle = 'rgba(0, 0, 0, 0.7)';
+        referenceContext.fillStyle = '#ffffff';
+        referenceContext.strokeText('HELLO', 8, 8);
+        referenceContext.fillText('HELLO', 8, 8);
+        const referencePixels = referenceContext.getImageData(
+          0,
+          0,
+          reference.width,
+          reference.height
+        ).data;
+
+        return {
+          rendered: renderedHeight,
+          renderedAlpha,
+          reference: findInkHeight(referencePixels, reference.width),
+          referenceAlpha: referencePixels.reduce(
+            (total, value, index) => total + (index % 4 === 3 ? value : 0),
+            0
+          ),
+        };
+      });
+
+    await expect.poll(measureGlyphHeights, { timeout: 5000 }).not.toBeNull();
+    await expect
+      .poll(
+        async () => {
+          const measurements = await measureGlyphHeights();
+          if (!measurements || measurements.referenceAlpha === 0) return 0;
+          return measurements.renderedAlpha / measurements.referenceAlpha;
+        },
+        { timeout: 5000 }
+      )
+      .toBeGreaterThanOrEqual(0.95);
+    const glyphHeights = await measureGlyphHeights();
+
+    expect(glyphHeights).not.toBeNull();
+    expect(glyphHeights!.rendered).toBeGreaterThanOrEqual(glyphHeights!.reference - 1);
+    expect(glyphHeights!.renderedAlpha / glyphHeights!.referenceAlpha).toBeGreaterThanOrEqual(
+      0.95
+    );
+  });
+
   test('renders a user-selected solid translucent background on a regular message', async ({
     page,
   }, testInfo) => {
