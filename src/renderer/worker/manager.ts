@@ -831,32 +831,30 @@ export class RenderWorkerManager {
     // ImageBitmap transfers have time to complete.  A 500 ms safety
     // timeout prevents indefinite hangs if the ack never arrives.
     let terminated = false;
-    const messageHandler = (event: MessageEvent): void => {
-      if (event.data?.type === 'ack' && !terminated) {
-        terminated = true;
-        workerToDestroy.removeEventListener('message', messageHandler);
-        workerToDestroy.terminate();
-        if (this.worker === workerToDestroy) {
-          this.worker = null;
-        }
-        // Close any remaining pre-converted bitmaps (not yet transferred).
-        // ResizableByteLimitedCache.clear() calls onEvict (bitmap.close()) for each entry.
-        this.deps.imageFetchManager.workerBitmapCache.clear();
-      }
-    };
-    workerToDestroy.addEventListener('message', messageHandler);
-
-    // Safety timeout: if the ack never arrives, force-terminate after 500ms.
-    setTimeout(() => {
+    let terminationTimeout: ReturnType<typeof setTimeout> | null = null;
+    const finalizeWorkerTermination = (): void => {
       if (terminated) return;
       terminated = true;
+      if (terminationTimeout !== null) {
+        clearTimeout(terminationTimeout);
+        terminationTimeout = null;
+      }
       workerToDestroy.removeEventListener('message', messageHandler);
       workerToDestroy.terminate();
       if (this.worker === workerToDestroy) {
         this.worker = null;
       }
+      // Close any remaining pre-converted bitmaps (not yet transferred).
+      // ResizableByteLimitedCache.clear() calls onEvict (bitmap.close()) for each entry.
       this.deps.imageFetchManager.workerBitmapCache.clear();
-    }, 500);
+    };
+    const messageHandler = (event: MessageEvent): void => {
+      if (event.data?.type === 'ack') finalizeWorkerTermination();
+    };
+    workerToDestroy.addEventListener('message', messageHandler);
+
+    // Safety timeout: if the ack never arrives, force-terminate after 500ms.
+    terminationTimeout = setTimeout(finalizeWorkerTermination, 500);
 
     this.active = false;
     this.sentMessages.clear();
