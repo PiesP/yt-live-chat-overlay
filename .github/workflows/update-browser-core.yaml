@@ -98,10 +98,19 @@ jobs:
 
           OPEN_PR="$(gh pr list --state open --head "$GITHUB_REPOSITORY_OWNER:$BRANCH" --json number --jq '.[0].number // empty')"
           if git diff --quiet -- packages/core; then
+            STALE_PR_RESULT="No stale update PR was open."
             if [[ -n "$OPEN_PR" ]]; then
               gh pr close "$OPEN_PR" --comment "Closing this stale update PR because master already contains browser-core $SHORT_SHA."
+              STALE_PR_RESULT="Closed stale update PR #$OPEN_PR."
             fi
             echo "browser-core is already at $SHORT_SHA."
+            {
+              echo "## browser-core update"
+              echo
+              echo "- Result: no update required"
+              echo "- Resolved commit: $CORE_SHA"
+              echo "- PR action: $STALE_PR_RESULT"
+            } >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
 
@@ -163,3 +172,11 @@ jobs:
 
           gh pr merge --auto --squash "$PR_NUMBER"
           echo "✅ Auto-merge queued for PR #$PR_NUMBER."
+          {
+            echo "## browser-core update"
+            echo
+            echo "- Result: update proposed"
+            echo "- Resolved commit: $CORE_SHA"
+            echo "- Pull request: #$PR_NUMBER"
+            echo "- Auto-merge: queued"
+          } >> "$GITHUB_STEP_SUMMARY"
