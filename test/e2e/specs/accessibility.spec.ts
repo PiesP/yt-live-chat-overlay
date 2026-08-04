@@ -163,13 +163,17 @@ test.describe('YT Live Chat Overlay Accessibility', () => {
     const accessibleName = await reloadButton.getAttribute('aria-label');
     expect(accessibleName?.trim()).toBeTruthy();
 
+    const canvas = page.locator(`#${OVERLAY_ID} canvas`);
+    await expect(canvas).toBeAttached();
+    await canvas.evaluate((element) => element.setAttribute('data-e2e-before-restart', 'true'));
+
     await reloadButton.click();
 
     await expect(reloadButton).toHaveText('✓');
     await expect(reloadButton).toHaveClass(/yt-chat-overlay-reload-button--done/);
 
-    const canvas = page.locator(`#${OVERLAY_ID} canvas`);
     await expect(canvas).toBeAttached();
+    await expect(canvas).not.toHaveAttribute('data-e2e-before-restart', 'true');
     await expect(canvas).toHaveAttribute('aria-hidden', 'true');
     await expect
       .poll(() => page.evaluate(() => typeof window.__ytChatOverlay?.getSettings === 'function'))

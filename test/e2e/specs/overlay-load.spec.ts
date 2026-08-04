@@ -47,6 +47,7 @@ test.describe('YT Live Chat Overlay E2E', () => {
     page.on('pageerror', (err) => errors.push(err.message));
 
     await setupOverlayPage(page);
+    await expect(page.locator('#yt-live-chat-overlay canvas')).toBeAttached();
     await page.goto('https://www.youtube.com/feed/trending', { waitUntil: 'domcontentloaded' });
 
     await expect(page.locator('#yt-live-chat-overlay')).toHaveCount(0);
