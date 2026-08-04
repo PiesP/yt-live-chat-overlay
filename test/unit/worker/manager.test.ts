@@ -36,6 +36,7 @@ function createMinimalDeps() {
       workerBitmapCache: {
         take: vi.fn(),
         delete: vi.fn(),
+        clear: vi.fn(),
       },
     } as any,
     estimateDimensions: vi.fn(() => ({ width: 100, height: 20 })),
@@ -229,6 +230,36 @@ describe('RenderWorkerManager', () => {
       // Access private sentMessages via any cast for testing
       const sentMap = (manager as any).sentMessages;
       expect(sentMap.size).toBe(0);
+    });
+
+    it('cancels the safety timeout when the worker acknowledges destruction', () => {
+      vi.useFakeTimers();
+      const listeners = new Map<string, EventListener>();
+      const worker = {
+        postMessage: vi.fn(),
+        terminate: vi.fn(),
+        addEventListener: vi.fn((type: string, listener: EventListener) => {
+          listeners.set(type, listener);
+        }),
+        removeEventListener: vi.fn((type: string, listener: EventListener) => {
+          if (listeners.get(type) === listener) listeners.delete(type);
+        }),
+      } as unknown as Worker;
+      (manager as any).worker = worker;
+
+      manager.destroy();
+      expect(vi.getTimerCount()).toBe(1);
+
+      listeners.get('message')?.({ data: { type: 'ack' } } as MessageEvent);
+
+      expect(worker.terminate).toHaveBeenCalledOnce();
+      expect(deps.imageFetchManager.workerBitmapCache.clear).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+
+      vi.advanceTimersByTime(500);
+      expect(worker.terminate).toHaveBeenCalledOnce();
+      expect(deps.imageFetchManager.workerBitmapCache.clear).toHaveBeenCalledOnce();
+      vi.useRealTimers();
     });
   });
 });

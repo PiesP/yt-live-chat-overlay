@@ -124,15 +124,18 @@ export class ImageFetchManager {
     this.resizeImageCache(this.authorPhotoCache, settings.photoCacheMb * 1_000_000);
     this.resizeImageCache(this.stickerCache, getStickerCacheBytes(settings.stickerCacheMb));
 
-    // Start cleanup interval only if not already running.
-    // Re-creating the interval on every updateConfig() causes unnecessary
-    // timer churn — the 5s tick only reads current instance properties.
-    if (this.emojiCleanupIntervalId === null) {
-      this.emojiCleanupIntervalId = setInterval(() => {
-        if (this.isDestroyed) return;
-        this.cleanupStaleEmojiFetching();
-      }, 5_000);
+    this.startEmojiCleanupInterval();
+  }
+
+  /** Start the cleanup timer only while this manager is active and unpaused. */
+  private startEmojiCleanupInterval(): void {
+    if (this.isDestroyed || this.isEmojiCleanupPaused || this.emojiCleanupIntervalId !== null) {
+      return;
     }
+    this.emojiCleanupIntervalId = setInterval(() => {
+      if (this.isDestroyed || this.isEmojiCleanupPaused) return;
+      this.cleanupStaleEmojiFetching();
+    }, 5_000);
   }
 
   /** Register a callback for when an image finishes loading (triggers rAF restart). */
@@ -413,13 +416,7 @@ export class ImageFetchManager {
   resume(): void {
     if (!this.isEmojiCleanupPaused) return;
     this.isEmojiCleanupPaused = false;
-    if (this.isDestroyed) return;
-    if (this.emojiCleanupIntervalId === null) {
-      this.emojiCleanupIntervalId = setInterval(() => {
-        if (this.isDestroyed || this.isEmojiCleanupPaused) return;
-        this.cleanupStaleEmojiFetching();
-      }, 5_000);
-    }
+    this.startEmojiCleanupInterval();
   }
 
   /** Permanently stop image work and release timers, in-flight images, and caches. */
