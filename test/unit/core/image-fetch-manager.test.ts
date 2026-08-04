@@ -99,6 +99,28 @@ describe('ImageFetchManager terminal lifecycle', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it('keeps cleanup paused across config updates and restarts it once on resume', () => {
+    const manager = new ImageFetchManager();
+    manager.updateConfig(DEFAULT_SETTINGS as OverlaySettings, null);
+    expect(vi.getTimerCount()).toBe(1);
+
+    manager.pause();
+    expect(vi.getTimerCount()).toBe(0);
+
+    manager.updateConfig(
+      { ...DEFAULT_SETTINGS, failedEmojiRetryMins: 10 } as OverlaySettings,
+      null
+    );
+    expect(vi.getTimerCount()).toBe(0);
+
+    manager.resume();
+    manager.resume();
+    expect(vi.getTimerCount()).toBe(1);
+
+    manager.destroy();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('caches a standard 512px sticker at the minimum configured budget', () => {
     const manager = new ImageFetchManager();
     manager.updateConfig({ ...DEFAULT_SETTINGS, stickerCacheMb: 1 } as OverlaySettings, null);
