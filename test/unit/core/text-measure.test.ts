@@ -52,14 +52,22 @@ describe('getFontString', () => {
 // ── measureBoundingBoxWidth ──────────────────────────────────────────
 
 describe('measureBoundingBoxWidth', () => {
-  it('uses bounding box when it is positive', () => {
+  it('reserves the wider advance width when it exceeds the ink bounding box', () => {
     const m = {
       actualBoundingBoxLeft: 2,
       actualBoundingBoxRight: 48,
       width: 55,
     };
-    // 2 + 48 = 50, ceil → 50
-    expect(measureBoundingBoxWidth(m)).toBe(50);
+    expect(measureBoundingBoxWidth(m)).toBe(55);
+  });
+
+  it('reserves wider glyph ink when it exceeds the advance width', () => {
+    const m = {
+      actualBoundingBoxLeft: 4,
+      actualBoundingBoxRight: 56,
+      width: 55,
+    };
+    expect(measureBoundingBoxWidth(m)).toBe(60);
   });
 
   it('uses bounding box when left is negative', () => {
@@ -68,8 +76,7 @@ describe('measureBoundingBoxWidth', () => {
       actualBoundingBoxRight: 48,
       width: 55,
     };
-    // |−2| + 48 = 50, ceil → 50
-    expect(measureBoundingBoxWidth(m)).toBe(50);
+    expect(measureBoundingBoxWidth(m)).toBe(55);
   });
 
   it('uses bounding box when right is negative', () => {
@@ -78,8 +85,7 @@ describe('measureBoundingBoxWidth', () => {
       actualBoundingBoxRight: -1,
       width: 55,
     };
-    // 2 + |−1| = 3, ceil → 3
-    expect(measureBoundingBoxWidth(m)).toBe(3);
+    expect(measureBoundingBoxWidth(m)).toBe(55);
   });
 
   it('falls back to width when bounding box sum is zero', () => {
@@ -98,8 +104,7 @@ describe('measureBoundingBoxWidth', () => {
       actualBoundingBoxRight: 9,
       width: 55,
     };
-    // |−10| + 9 = 19, ceil → 19 (positive, uses bb)
-    expect(measureBoundingBoxWidth(m)).toBe(19);
+    expect(measureBoundingBoxWidth(m)).toBe(55);
   });
 
   it('ceils the width fallback', () => {
@@ -117,8 +122,7 @@ describe('measureBoundingBoxWidth', () => {
       actualBoundingBoxRight: 3.8,
       width: 10,
     };
-    // 1.2 + 3.8 = 5.0, ceil → 5
-    expect(measureBoundingBoxWidth(m)).toBe(5);
+    expect(measureBoundingBoxWidth(m)).toBe(10);
   });
 
   it('handles large TextMetrics values', () => {
@@ -127,7 +131,7 @@ describe('measureBoundingBoxWidth', () => {
       actualBoundingBoxRight: 456,
       width: 600,
     };
-    expect(measureBoundingBoxWidth(m)).toBe(579);
+    expect(measureBoundingBoxWidth(m)).toBe(600);
   });
 });
 

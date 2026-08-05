@@ -9,7 +9,12 @@
  */
 
 import type { ChatMessage, FontWeight } from '@app-types';
-import { buildWrappedLines, toSharedContentSegments } from '@renderer/canvas/shared';
+import {
+  buildWrappedLines,
+  measureEmojiAdvanceWidth,
+  measureTextAdvanceWidth,
+  toSharedContentSegments,
+} from '@renderer/canvas/shared';
 import { SPEED_TIER } from '@renderer/constants';
 import { RendererBase } from '@renderer/renderer-base';
 import { getFontString, measureTextHeight, measureTextWidth } from '@renderer/text-measure';
@@ -20,20 +25,26 @@ import type { HighFirstPriorityBucketQueue } from '@util/priority-bucket-queue';
 // ── Text measurement ────────────────────────────────────────────────────────
 
 /** Measure pixel width of all text + emoji content segments. */
-function measureContentWidth(message: ChatMessage, font: string, fontSize: number): number {
+function measureContentWidth(
+  message: ChatMessage,
+  font: string,
+  fontSize: number,
+  letterSpacing: string
+): number {
   let width = 0;
-  const emojiWidth = Math.round(fontSize * rendererLayout.emojiSize) + spacing.xs;
+  const emojiSize = Math.round(fontSize * rendererLayout.emojiSize);
+  const measureText = (text: string): number => measureTextWidth(text, font);
 
   if (message.content.length > 0) {
     for (const seg of message.content) {
       if (seg.type === 'text') {
-        width += measureTextWidth(seg.content, font);
+        width += measureTextAdvanceWidth(seg.content, measureText, letterSpacing);
       } else {
-        width += emojiWidth;
+        width += measureEmojiAdvanceWidth(seg, emojiSize, measureText, letterSpacing);
       }
     }
   } else if (message.text) {
-    width += measureTextWidth(message.text, font);
+    width += measureTextAdvanceWidth(message.text, measureText, letterSpacing);
   }
 
   return Math.ceil(width);
@@ -54,7 +65,8 @@ export function estimateMessageDimensions(
   fontWeight: FontWeight = 'bold',
   fontFamily: string = DEFAULT_FONT_FAMILY,
   maxBodyLines?: { superchat?: number; membership?: number },
-  showSuperChatAmount?: boolean
+  showSuperChatAmount?: boolean,
+  letterSpacing = '0px'
 ): MessageDimensions {
   const font = getFontString(fontSize, fontWeight, fontFamily);
 
@@ -78,7 +90,14 @@ export function estimateMessageDimensions(
       maxBodyLines?.membership ?? DEFAULT_SETTINGS.membershipMaxBodyLines
     );
   }
-  return estimateRegularMessageDimensions(message, font, fontSize, showAuthor, fontFamily);
+  return estimateRegularMessageDimensions(
+    message,
+    font,
+    fontSize,
+    showAuthor,
+    fontFamily,
+    letterSpacing
+  );
 }
 
 function estimateRegularMessageDimensions(
@@ -86,9 +105,10 @@ function estimateRegularMessageDimensions(
   font: string,
   fontSize: number,
   showAuthor: boolean,
-  fontFamily: string
+  fontFamily: string,
+  letterSpacing: string
 ): MessageDimensions {
-  const textWidth = measureContentWidth(message, font, fontSize);
+  const textWidth = measureContentWidth(message, font, fontSize, letterSpacing);
   const textHeight = measureTextHeight(font, fontSize);
   const { paddingH } = rendererLayout;
 
@@ -211,7 +231,7 @@ function estimateMembershipDimensions(
   fontSize: number,
   maxBodyLines: number
 ): MessageDimensions {
-  const textWidth = measureContentWidth(message, font, fontSize);
+  const textWidth = measureContentWidth(message, font, fontSize, '0px');
   const { paddingH, paddingV } = rendererLayout.membership;
   const nameHeight = measureTextHeight(font, fontSize);
   const bodyLineHeight = measureTextHeight(font, fontSize);

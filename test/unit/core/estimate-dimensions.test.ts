@@ -30,6 +30,20 @@ vi.mock('@renderer/canvas/shared', () => ({
       };
     }
   ),
+  measureEmojiAdvanceWidth: vi.fn(
+    (
+      segment: { emojiFallbackText?: string; emoji?: { fallbackText?: string } },
+      emojiSize: number,
+      measureText: (text: string) => number
+    ) => {
+      const fallbackText = segment.emojiFallbackText ?? segment.emoji?.fallbackText ?? '';
+      return Math.max(emojiSize, fallbackText ? measureText(fallbackText) : 0) + 4;
+    }
+  ),
+  measureTextAdvanceWidth: vi.fn(
+    (text: string, measureText: (value: string) => number, letterSpacing = '0px') =>
+      measureText(text) + Math.max(0, text.length - 1) * (Number.parseFloat(letterSpacing) || 0)
+  ),
   toSharedContentSegments: vi.fn((c: unknown) => c),
 }));
 
@@ -104,6 +118,47 @@ describe('estimateMessageDimensions — regular text', () => {
     const dims = estimateMessageDimensions(msg, 120, false);
     expect(dims.width).toBeGreaterThan(0);
     expect(dims.height).toBeGreaterThan(0);
+  });
+
+  it('includes letter spacing in the reserved width for depth-layer text', () => {
+    const msg = makeMessage({
+      text: 'MIXED CONTENT',
+      content: [{ type: 'text', content: 'MIXED CONTENT' }],
+    });
+    const normal = estimateMessageDimensions(msg, 16, false);
+    const spaced = estimateMessageDimensions(
+      msg,
+      16,
+      false,
+      'bold',
+      undefined,
+      undefined,
+      undefined,
+      '1px'
+    );
+
+    expect(spaced.width - normal.width).toBe(12);
+  });
+
+  it('reserves a missing emoji fallback when it is wider than the image slot', () => {
+    const msg = makeMessage({
+      text: '웃는 얼굴NEXT',
+      content: [
+        {
+          type: 'emoji',
+          emoji: {
+            url: 'https://yt3.ggpht.com/missing',
+            alt: ':smile:',
+            fallbackText: '웃는 얼굴',
+          },
+        },
+        { type: 'text', content: 'NEXT' },
+      ],
+    });
+    const dims = estimateMessageDimensions(msg, 16, false);
+    const expectedContentWidth = '웃는 얼굴'.length * 8 + spacing.xs + 'NEXT'.length * 8;
+
+    expect(dims.width).toBe(expectedContentWidth + rendererLayout.paddingH * 2);
   });
 });
 

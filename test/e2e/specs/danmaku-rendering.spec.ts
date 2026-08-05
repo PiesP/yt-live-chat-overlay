@@ -234,6 +234,171 @@ test.describe('Danmaku Rendering', () => {
     );
   });
 
+  test('keeps letter-spaced text and a missing emoji fallback from overlapping neighbors', async ({
+    page,
+  }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(HTMLCanvasElement.prototype, 'transferControlToOffscreen', {
+        configurable: true,
+        value: () => {
+          throw new Error('Force the main-thread renderer for Canvas call inspection');
+        },
+      });
+
+      const calls: Array<{
+        text: string;
+        x: number;
+        y: number;
+        font: string;
+        letterSpacing: string;
+      }> = [];
+      const originalFillText = CanvasRenderingContext2D.prototype.fillText;
+      CanvasRenderingContext2D.prototype.fillText = function (
+        text: string,
+        x: number,
+        y: number,
+        maxWidth?: number
+      ): void {
+        calls.push({
+          text,
+          x,
+          y,
+          font: this.font,
+          letterSpacing: this.letterSpacing,
+        });
+        if (maxWidth === undefined) {
+          originalFillText.call(this, text, x, y);
+        } else {
+          originalFillText.call(this, text, x, y, maxWidth);
+        }
+      };
+      (window as unknown as Record<string, unknown>).__mixedContentFillTextCalls = calls;
+    });
+
+    await setupOverlayPage(page, { platform: 'userscript' });
+    await applySettings(page, {
+      allowShortTextMessages: true,
+      danmakuMode: 'scroll',
+      depthLayersEnabled: true,
+      showDebugOverlay: true,
+      backgroundColors: { normal: '#00000000' },
+      showAuthor: { normal: false },
+      outline: { enabled: false, widthPx: 0, opacity: 0 },
+    });
+
+    await page.route('https://www.youtube.com/youtubei/v1/live_chat/get_live_chat**', (route) =>
+      route.fulfill({
+        json: {
+          continuationContents: {
+            liveChatContinuation: {
+              actions: [
+                {
+                  addChatItemAction: {
+                    item: {
+                      liveChatTextMessageRenderer: {
+                        id: 'e2e-mixed-0',
+                        authorName: { simpleText: 'Mixed Content Author' },
+                        message: {
+                          runs: [
+                            { text: 'MIXED CONTENT' },
+                            {
+                              emoji: {
+                                shortcuts: ['웃는 얼굴'],
+                                image: {
+                                  accessibility: {
+                                    accessibilityData: { label: '웃는 얼굴' },
+                                  },
+                                  thumbnails: [
+                                    {
+                                      url: 'https://yt3.ggpht.com/e2e-missing-emoji=s32',
+                                      width: 32,
+                                      height: 32,
+                                    },
+                                  ],
+                                },
+                              },
+                            },
+                            { text: 'NEXT' },
+                          ],
+                        },
+                      },
+                    },
+                  },
+                },
+              ],
+              continuations: [],
+            },
+          },
+        },
+      })
+    );
+    await page.evaluate(() =>
+      fetch('https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?key=e2e')
+    );
+
+    await expect(page.locator('#yt-chat-overlay-debug > div').first()).toHaveText(
+      'Rcvd: 1 | Rndr: 1'
+    );
+
+    const readLayout = () =>
+      page.evaluate(() => {
+        const calls = (window as unknown as Record<string, unknown>)
+          .__mixedContentFillTextCalls as Array<{
+          text: string;
+          x: number;
+          y: number;
+          font: string;
+          letterSpacing: string;
+        }>;
+        for (let index = calls.length - 3; index >= 0; index--) {
+          const text = calls[index];
+          const fallback = calls[index + 1];
+          const next = calls[index + 2];
+          if (
+            text?.text !== 'MIXED CONTENT' ||
+            fallback?.text !== '웃는 얼굴' ||
+            next?.text !== 'NEXT' ||
+            text.y !== fallback.y ||
+            fallback.y !== next.y
+          ) {
+            continue;
+          }
+
+          const reference = document.createElement('canvas');
+          const context = reference.getContext('2d');
+          if (!context) return null;
+          context.font = text.font;
+          const measureLayoutWidth = (value: string): number => {
+            const metrics = context.measureText(value);
+            const inkWidth =
+              Math.abs(metrics.actualBoundingBoxLeft) +
+              Math.abs(metrics.actualBoundingBoxRight);
+            return Math.ceil(Math.max(metrics.width, inkWidth));
+          };
+
+          return {
+            textAdvance: fallback.x - text.x,
+            minimumTextAdvance: measureLayoutWidth(text.text) + 12,
+            fallbackAdvance: next.x - fallback.x,
+            minimumFallbackAdvance:
+              measureLayoutWidth(fallback.text) +
+              Math.max(0, Array.from(fallback.text).length - 1) *
+                (Number.parseFloat(fallback.letterSpacing) || 0) +
+              4,
+            letterSpacing: text.letterSpacing,
+          };
+        }
+        return null;
+      });
+
+    await expect.poll(readLayout, { timeout: 5000 }).not.toBeNull();
+    const layout = await readLayout();
+    expect(layout).not.toBeNull();
+    expect(layout!.letterSpacing).toBe('1px');
+    expect(layout!.textAdvance).toBeGreaterThanOrEqual(layout!.minimumTextAdvance);
+    expect(layout!.fallbackAdvance).toBeGreaterThanOrEqual(layout!.minimumFallbackAdvance);
+  });
+
   test('renders a user-selected solid translucent background on a regular message', async ({
     page,
   }, testInfo) => {

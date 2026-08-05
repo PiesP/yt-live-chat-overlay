@@ -85,6 +85,25 @@ export interface SharedContentSegment {
   };
 }
 
+/** Normalize emoji fields from either the main-thread or Worker shape. */
+function resolveEmojiFields(seg: SharedContentSegment): {
+  emojiUrl: string;
+  emojiAlt: string | undefined;
+  emojiFallbackText: string | undefined;
+} {
+  const emojiUrl = seg.emojiUrl || seg.emoji?.url || '';
+  const emojiAlt = seg.emojiAlt || seg.emoji?.alt;
+  const emojiFallbackText = seg.emojiFallbackText || seg.emoji?.fallbackText;
+  return { emojiUrl, emojiAlt, emojiFallbackText };
+}
+
+/** Return only fallback text that the renderer will actually draw. */
+function getRenderableEmojiFallbackText(seg: SharedContentSegment): string {
+  const { emojiAlt, emojiFallbackText } = resolveEmojiFields(seg);
+  if (emojiFallbackText) return emojiFallbackText;
+  return emojiAlt && !EMOJI_ALIAS_PATTERN.test(emojiAlt) ? emojiAlt : '';
+}
+
 /**
  * Convert a ContentSegment (from @app-types) to a SharedContentSegment.
  * This is a structural transformation — the nested `emoji` object is flattened
@@ -192,6 +211,41 @@ export function splitGraphemeClusters(text: string): string[] {
     return Array.from(seg.segment(text), (s) => s.segment);
   }
   return Array.from(text); // code-point fallback
+}
+
+/**
+ * Measure the horizontal advance used by a separately rendered text segment.
+ * Canvas TextMetrics excludes `letterSpacing`, so account for the gaps between
+ * grapheme clusters explicitly before positioning the next segment.
+ */
+export function measureTextAdvanceWidth(
+  text: string,
+  measureTextFn: (value: string) => number,
+  letterSpacing = '0px'
+): number {
+  const measuredWidth = measureTextFn(text);
+  const baseWidth = Number.isFinite(measuredWidth) ? Math.max(0, measuredWidth) : 0;
+  const parsedSpacing = Number.parseFloat(letterSpacing);
+  const spacingPx = Number.isFinite(parsedSpacing) ? Math.max(0, parsedSpacing) : 0;
+  if (spacingPx === 0) return baseWidth;
+  return baseWidth + Math.max(0, splitGraphemeClusters(text).length - 1) * spacingPx;
+}
+
+/**
+ * Reserve enough horizontal space for either the emoji image or its visible
+ * text fallback, plus the standard gap before the next content segment.
+ */
+export function measureEmojiAdvanceWidth(
+  segment: SharedContentSegment,
+  emojiSize: number,
+  measureTextFn: (value: string) => number,
+  letterSpacing = '0px'
+): number {
+  const fallbackText = getRenderableEmojiFallbackText(segment);
+  const fallbackWidth = fallbackText
+    ? measureTextAdvanceWidth(fallbackText, measureTextFn, letterSpacing)
+    : 0;
+  return Math.max(emojiSize, fallbackWidth) + spacing.xs;
 }
 
 /**
@@ -347,13 +401,13 @@ export function buildWrappedLines(
       const url = seg.emojiUrl ?? seg.emoji?.url ?? '';
       const alt = seg.emojiAlt ?? seg.emoji?.alt;
       const fallbackText = seg.emojiFallbackText ?? seg.emoji?.fallbackText;
-      if (url) {
+      if (url || getRenderableEmojiFallbackText(seg)) {
         pieces.push({
           type: 'emoji',
           emojiUrl: url,
           ...(alt ? { emojiAlt: alt } : {}),
           ...(fallbackText ? { emojiFallbackText: fallbackText } : {}),
-          width: emojiSize + spacing.xs,
+          width: measureEmojiAdvanceWidth(seg, emojiSize, measureTextFn),
         });
       }
     }
@@ -801,20 +855,6 @@ export function warmTextBitmapCache(
 // ── Content segments (text + emoji) — single-line ────────────────────────────
 
 /**
- * Normalize emoji fields from a SharedContentSegment.
- */
-function resolveEmojiFields(seg: SharedContentSegment): {
-  emojiUrl: string;
-  emojiAlt: string | undefined;
-  emojiFallbackText: string | undefined;
-} {
-  const emojiUrl = seg.emojiUrl || seg.emoji?.url || '';
-  const emojiAlt = seg.emojiAlt || seg.emoji?.alt;
-  const emojiFallbackText = seg.emojiFallbackText || seg.emoji?.fallbackText;
-  return { emojiUrl, emojiAlt, emojiFallbackText };
-}
-
-/**
  * Render content segments (text + emoji) in a single line.
  *
  * @param ctx             Canvas context (main thread or worker)
@@ -868,16 +908,18 @@ function renderContentSegments(
         getFontFn,
         letterSpacing
       );
-      cursorX += measureTextFn(seg.content);
+      cursorX += measureTextAdvanceWidth(seg.content, measureTextFn, letterSpacing);
     } else {
-      const { emojiUrl, emojiAlt, emojiFallbackText } = resolveEmojiFields(seg);
+      const { emojiUrl } = resolveEmojiFields(seg);
+      const fallbackText = getRenderableEmojiFallbackText(seg);
       const img = emojiUrl ? emojiCache.get(emojiUrl) : null;
+      let advanceWidth = emojiSize + spacing.xs;
       if (img != null && isValidEmoji(img)) {
         ctx.drawImage(img as CanvasImageSource, cursorX, emojiY, emojiSize, emojiSize);
-      } else if (emojiFallbackText) {
+      } else if (fallbackText) {
         renderSegment(
           ctx,
-          emojiFallbackText,
+          fallbackText,
           cursorX,
           y,
           color,
@@ -885,23 +927,12 @@ function renderContentSegments(
           outlineWidthPx,
           outlineOpacity,
           textBitmapCache,
-          getFontFn
+          getFontFn,
+          letterSpacing
         );
-      } else if (emojiAlt && !EMOJI_ALIAS_PATTERN.test(emojiAlt)) {
-        renderSegment(
-          ctx,
-          emojiAlt,
-          cursorX,
-          y,
-          color,
-          fontSize,
-          outlineWidthPx,
-          outlineOpacity,
-          textBitmapCache,
-          getFontFn
-        );
+        advanceWidth = measureEmojiAdvanceWidth(seg, emojiSize, measureTextFn, letterSpacing);
       }
-      cursorX += emojiSize + spacing.xs;
+      cursorX += advanceWidth;
     }
   }
 }
@@ -1333,6 +1364,7 @@ export function renderWrappedContentSegments<
             ('width' in cached && (cached as { width: number }).width > 0))
             ? cached
             : null;
+        let advanceWidth = emojiSize + spacing.xs;
         if (img) {
           ctx.drawImage(img, cursorX, emojiLineY, emojiSize, emojiSize);
         } else if (piece.emojiFallbackText) {
@@ -1348,6 +1380,7 @@ export function renderWrappedContentSegments<
             textBitmapCache,
             getFontFn
           );
+          advanceWidth = piece.width;
         } else if (piece.emojiAlt && !EMOJI_ALIAS_PATTERN.test(piece.emojiAlt)) {
           renderSegment(
             ctx,
@@ -1361,8 +1394,9 @@ export function renderWrappedContentSegments<
             textBitmapCache,
             getFontFn
           );
+          advanceWidth = piece.width;
         }
-        cursorX += piece.width;
+        cursorX += advanceWidth;
       }
     }
 
