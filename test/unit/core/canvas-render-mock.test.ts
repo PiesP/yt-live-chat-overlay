@@ -13,11 +13,13 @@ import {
   buildWrappedLines,
   clipTextToWidth,
   drawRoundRect,
+  renderRegularMessage,
   renderSegment,
   renderRegularMessageBackground,
   strokeTextOutline,
 } from '@renderer/canvas/shared';
 import type { AnyCanvasContext, TextBitmapCache } from '@renderer/canvas/shared';
+import { rendererLayout, spacing } from '@util/design-tokens';
 
 // ═══════════════════════════════════════════════════════════════════
 // Mock Canvas context (mirrors test/setup.ts pattern)
@@ -160,6 +162,185 @@ describe('renderSegment bitmap cache', () => {
     const bitmap = [...bitmaps.values()][0] as unknown as MockOffscreenCanvas;
     expect(bitmap.height).toBe(26);
     expect((bitmap.context as { textBaseline?: string }).textBaseline).toBe('top');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// renderRegularMessage mixed content layout
+// ═══════════════════════════════════════════════════════════════════
+
+describe('renderRegularMessage mixed content layout', () => {
+  const config = {
+    showAuthor: false,
+    fontSize: 32,
+    fontWeight: 'bold',
+    fontFamily: 'system-ui',
+    color: '#ffffff',
+    outlineWidthPx: 0,
+    outlineOpacity: 0,
+    backgroundColor: '#00000000',
+    messageWidth: 600,
+    messageHeight: 40,
+  };
+  const startX = 10;
+  const contentX = startX + rendererLayout.paddingH;
+  const textBitmaps = new Map<string, CanvasImageSource>();
+  const textBitmapCache: TextBitmapCache = {
+    get: (key) => textBitmaps.get(key),
+    set: (key, value) => {
+      textBitmaps.set(key, value);
+    },
+  };
+  const noAuthorPhotos = new Map<string, CanvasImageSource>();
+
+  it('places a loaded emoji after the rendered letter-spaced text extent', () => {
+    const { ctx } = createMockContext();
+    const image = {} as CanvasImageSource;
+    const emojiCache = new Map<string, CanvasImageSource>([['emoji://loaded', image]]);
+    const text = 'MIXED CONTENT';
+    const fallbackText = 'very wide accessibility fallback';
+    const measuredTextWidth = 130;
+
+    renderRegularMessage(
+      ctx,
+      {
+        text: `${text}🙂NEXT`,
+        content: [
+          { type: 'text', content: text },
+          {
+            type: 'emoji',
+            emojiUrl: 'emoji://loaded',
+            emojiAlt: ':loaded:',
+            emojiFallbackText: fallbackText,
+          },
+          { type: 'text', content: 'NEXT' },
+        ],
+      },
+      startX,
+      20,
+      config,
+      textBitmapCache,
+      emojiCache,
+      (candidate) => candidate === image,
+      noAuthorPhotos,
+      () => false,
+      () => 'bold 32px system-ui',
+      (value) => (value === fallbackText ? 300 : measuredTextWidth),
+      undefined,
+      '1px'
+    );
+
+    const drawImage = ctx.drawImage as ReturnType<typeof vi.fn>;
+    const emojiX = drawImage.mock.calls[0]?.[1] as number | undefined;
+    expect(emojiX).toBe(contentX + measuredTextWidth + 12);
+    const fillText = ctx.fillText as ReturnType<typeof vi.fn>;
+    const nextCall = fillText.mock.calls.find(([value]) => value === 'NEXT');
+    const emojiSize = Math.round(config.fontSize * rendererLayout.emojiSize);
+    expect(nextCall?.[1]).toBe(emojiX! + emojiSize + spacing.xs);
+  });
+
+  it('reserves the measured width of a missing emoji fallback before following text', () => {
+    const { ctx } = createMockContext();
+    const fallbackText = '웃는 얼굴';
+    const fallbackWidth = 140;
+
+    renderRegularMessage(
+      ctx,
+      {
+        text: `${fallbackText}NEXT`,
+        content: [
+          {
+            type: 'emoji',
+            emojiUrl: 'emoji://missing',
+            emojiAlt: ':smile:',
+            emojiFallbackText: fallbackText,
+          },
+          { type: 'text', content: 'NEXT' },
+        ],
+      },
+      startX,
+      20,
+      config,
+      textBitmapCache,
+      new Map(),
+      () => false,
+      noAuthorPhotos,
+      () => false,
+      () => 'bold 32px system-ui',
+      (text) => (text === fallbackText ? fallbackWidth : 40)
+    );
+
+    const fillText = ctx.fillText as ReturnType<typeof vi.fn>;
+    const nextCall = fillText.mock.calls.find(([text]) => text === 'NEXT');
+    expect(nextCall?.[1]).toBe(contentX + fallbackWidth + spacing.xs);
+  });
+
+  it('keeps alias-only missing emoji invisible while preserving one emoji slot', () => {
+    const { ctx } = createMockContext();
+
+    renderRegularMessage(
+      ctx,
+      {
+        text: '\u200BNEXT',
+        content: [
+          { type: 'emoji', emojiUrl: 'emoji://missing', emojiAlt: ':custom:' },
+          { type: 'text', content: 'NEXT' },
+        ],
+      },
+      startX,
+      20,
+      config,
+      textBitmapCache,
+      new Map(),
+      () => false,
+      noAuthorPhotos,
+      () => false,
+      () => 'bold 32px system-ui',
+      () => 40
+    );
+
+    const fillText = ctx.fillText as ReturnType<typeof vi.fn>;
+    expect(fillText.mock.calls.some(([text]) => text === ':custom:')).toBe(false);
+    const nextCall = fillText.mock.calls.find(([text]) => text === 'NEXT');
+    const emojiSize = Math.round(config.fontSize * rendererLayout.emojiSize);
+    expect(nextCall?.[1]).toBe(contentX + emojiSize + spacing.xs);
+  });
+
+  it('advances loaded adjacent emoji by distinct fixed slots', () => {
+    const { ctx } = createMockContext();
+    const first = {} as CanvasImageSource;
+    const second = {} as CanvasImageSource;
+    const emojiCache = new Map<string, CanvasImageSource>([
+      ['emoji://first', first],
+      ['emoji://second', second],
+    ]);
+
+    renderRegularMessage(
+      ctx,
+      {
+        text: '🙂🙂',
+        content: [
+          { type: 'emoji', emojiUrl: 'emoji://first', emojiAlt: ':first:' },
+          { type: 'emoji', emojiUrl: 'emoji://second', emojiAlt: ':second:' },
+        ],
+      },
+      startX,
+      20,
+      config,
+      textBitmapCache,
+      emojiCache,
+      (candidate) => candidate === first || candidate === second,
+      noAuthorPhotos,
+      () => false,
+      () => 'bold 32px system-ui',
+      () => 0
+    );
+
+    const drawImage = ctx.drawImage as ReturnType<typeof vi.fn>;
+    const firstX = drawImage.mock.calls[0]?.[1] as number | undefined;
+    const secondX = drawImage.mock.calls[1]?.[1] as number | undefined;
+    const emojiSize = Math.round(config.fontSize * rendererLayout.emojiSize);
+    expect(secondX! - firstX!).toBe(emojiSize + spacing.xs);
   });
 });
 
@@ -334,5 +515,27 @@ describe('buildWrappedLines', () => {
       const lineWidth = line.reduce((sum, seg) => sum + (seg.width ?? 0), 0);
       expect(lineWidth).toBeLessThanOrEqual(60);
     }
+  });
+
+  it('wraps after a wide emoji fallback instead of using only the image slot', () => {
+    const fallbackText = '웃는 얼굴';
+    const segments = [
+      {
+        type: 'emoji' as const,
+        emojiUrl: 'emoji://missing',
+        emojiAlt: ':smile:',
+        emojiFallbackText: fallbackText,
+      },
+      { type: 'text' as const, content: 'NEXT' },
+    ];
+    const result = buildWrappedLines(segments, 110, 16, (text) => {
+      if (text === fallbackText) return 80;
+      if (text === 'NEXT') return 32;
+      return 4;
+    });
+
+    expect(result.lines).toHaveLength(2);
+    expect(result.lines[0]?.[0]?.width).toBe(80 + spacing.xs);
+    expect(result.lines[1]?.[0]?.type).toBe('text');
   });
 });

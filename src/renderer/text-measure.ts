@@ -7,11 +7,10 @@
  * Uses a single hidden canvas context so callers can measure text without
  * DOM reflow or creating their own context.
  *
- * Width measurement uses `actualBoundingBoxLeft + actualBoundingBoxRight`
- * instead of `TextMetrics.width` (advance width) to capture glyph
- * overshoot (e.g. italic fonts, CJK characters that extend beyond the
- * advance width). Height uses `actualBoundingBoxAscent + Descent` for
- * the tightest fit around rendered glyphs.
+ * Width measurement reserves the larger of the visual ink bounds and advance
+ * width so adjacent mixed-content segments cannot overlap either glyph ink or
+ * the next typographic origin. Height uses `actualBoundingBoxAscent + Descent`
+ * for the tightest fit around rendered glyphs.
  */
 
 import type { FontWeight } from '@app-types';
@@ -52,10 +51,9 @@ const fontMetricsCache = new Map<string, { ascent: number; descent: number }>();
 /**
  * Compute the bounding-box width from a TextMetrics object.
  *
- * Uses `actualBoundingBoxLeft + actualBoundingBoxRight` so that glyph
- * overshoot (common with italic fonts and some CJK glyphs) is included.
- * Falls back to `TextMetrics.width` when the bounding-box API returns
- * zeros (empty or whitespace-only strings).
+ * Uses the larger of `actualBoundingBoxLeft + actualBoundingBoxRight` and
+ * `width`. The ink bounds include glyph overshoot, while the advance width is
+ * the minimum safe distance to the next segment origin.
  *
  * Shared between main-thread (text-measure.ts) and worker (renderer-worker.ts)
  * to ensure consistent measurement across both contexts.
@@ -64,7 +62,8 @@ export function measureBoundingBoxWidth(
   m: Pick<TextMetrics, 'actualBoundingBoxLeft' | 'actualBoundingBoxRight' | 'width'>
 ): number {
   const bbWidth = Math.abs(m.actualBoundingBoxLeft) + Math.abs(m.actualBoundingBoxRight);
-  return bbWidth > 0 ? Math.ceil(bbWidth) : Math.ceil(m.width);
+  const advanceWidth = Number.isFinite(m.width) ? Math.max(0, m.width) : 0;
+  return Math.ceil(Math.max(bbWidth, advanceWidth));
 }
 
 /** Character-width estimate multiplier for CSP-restricted environments (no canvas). */
@@ -107,10 +106,8 @@ export function clearTextMeasurementCaches(): void {
 /**
  * Measure the full bounding-box width of a text string.
  *
- * Uses `actualBoundingBoxLeft + actualBoundingBoxRight` so that glyph
- * overshoot (common with italic fonts and some CJK glyphs) is included.
- * Falls back to `TextMetrics.width` when the bounding-box API returns
- * zeros (empty or whitespace-only strings).
+ * Reserves both glyph overshoot (common with italic and CJK fonts) and the
+ * typographic advance needed before an adjacent segment starts.
  *
  * Results are cached in an LRU cache (max 500 entries) for performance
  * in hot paths like the Canvas2D render loop.

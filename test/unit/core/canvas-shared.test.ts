@@ -6,10 +6,13 @@ import {
   canCacheTextBitmap,
   getDisplayText,
   getSafeTextHeight,
+  measureEmojiAdvanceWidth,
+  measureTextAdvanceWidth,
   splitGraphemeClusters,
   toSharedContentSegments,
 } from '@renderer/canvas/shared';
 import type { SharedContentSegment } from '@renderer/canvas/shared';
+import { spacing } from '@util/design-tokens';
 
 describe('canvas bitmap allocation guards', () => {
   it('rejects oversized dimensions and cache budgets before allocation', () => {
@@ -210,6 +213,39 @@ describe('getDisplayText', () => {
       { type: 'text', content: '' },
       { type: 'text', content: '' },
     ])).toBe('');
+  });
+});
+
+describe('mixed-content advance measurement', () => {
+  it('counts letter spacing between grapheme clusters instead of code points', () => {
+    const text = 'A👨‍👩‍👧‍👦B';
+    expect(measureTextAdvanceWidth(text, () => 100, '1px')).toBe(102);
+  });
+
+  it('uses the visible fallback width when it exceeds the emoji image', () => {
+    const fallbackText = '웃는 얼굴';
+    const width = measureEmojiAdvanceWidth(
+      {
+        type: 'emoji',
+        emojiUrl: 'emoji://missing',
+        emojiAlt: ':smile:',
+        emojiFallbackText: fallbackText,
+      },
+      32,
+      (text) => (text === fallbackText ? 96 : 0)
+    );
+
+    expect(width).toBe(96 + spacing.xs);
+  });
+
+  it('keeps alias-only emoji fallbacks at the fixed image slot width', () => {
+    const width = measureEmojiAdvanceWidth(
+      { type: 'emoji', emojiUrl: 'emoji://missing', emojiAlt: ':custom:' },
+      32,
+      () => 200
+    );
+
+    expect(width).toBe(32 + spacing.xs);
   });
 });
 
