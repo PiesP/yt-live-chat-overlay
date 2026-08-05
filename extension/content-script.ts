@@ -51,15 +51,13 @@ pageScript.dataset.ytExtensionBridgeNonce = bridgeNonce;
 // YouTube page (ads, other extensions' content scripts) could otherwise
 // read or overwrite arbitrary chrome.storage.local keys.
 
-const ALLOWED_STORAGE_KEYS = new Set([
-  'yt-live-chat-overlay-settings',
-]);
+const ALLOWED_STORAGE_KEYS = new Set(['yt-live-chat-overlay-settings']);
 
 window.addEventListener('message', (event: MessageEvent) => {
   if (event.source !== window) return;
 
   const data = event.data;
-  if (!data || data.source !== 'yt-storage-relay') return;
+  if (data?.source !== 'yt-storage-relay') return;
   if (event.origin !== window.location.origin) return;
   if (data.nonce !== bridgeNonce) return;
 
@@ -77,13 +75,14 @@ window.addEventListener('message', (event: MessageEvent) => {
         requestId,
         error: `Key "${key}" is not in the storage relay allowlist`,
       },
-      window.location.origin,
+      window.location.origin
     );
     return;
   }
 
   if (method === 'get') {
-    chrome!.storage!.local!.get(key)
+    chrome!
+      .storage!.local!.get(key)
       .then((result) => {
         const value = result?.[key];
         window.postMessage(
@@ -91,32 +90,46 @@ window.addEventListener('message', (event: MessageEvent) => {
             source: 'yt-storage-relay-response',
             nonce: bridgeNonce,
             requestId,
-            value: value === undefined || value === null
-              ? null
-              : typeof value === 'string' ? value : JSON.stringify(value),
+            value:
+              value === undefined || value === null
+                ? null
+                : typeof value === 'string'
+                  ? value
+                  : JSON.stringify(value),
           },
-          window.location.origin,
+          window.location.origin
         );
       })
       .catch((error: Error) => {
         window.postMessage(
-          { source: 'yt-storage-relay-response', nonce: bridgeNonce, requestId, error: error.message },
-          window.location.origin,
+          {
+            source: 'yt-storage-relay-response',
+            nonce: bridgeNonce,
+            requestId,
+            error: error.message,
+          },
+          window.location.origin
         );
       });
   } else if (method === 'set') {
     const value = data.value as string;
-    chrome!.storage!.local!.set({ [key]: value })
+    chrome!
+      .storage!.local!.set({ [key]: value })
       .then(() => {
         window.postMessage(
           { source: 'yt-storage-relay-response', nonce: bridgeNonce, requestId, value: null },
-          window.location.origin,
+          window.location.origin
         );
       })
       .catch((error: Error) => {
         window.postMessage(
-          { source: 'yt-storage-relay-response', nonce: bridgeNonce, requestId, error: error.message },
-          window.location.origin,
+          {
+            source: 'yt-storage-relay-response',
+            nonce: bridgeNonce,
+            requestId,
+            error: error.message,
+          },
+          window.location.origin
         );
       });
   }
@@ -127,25 +140,23 @@ window.addEventListener('message', (event: MessageEvent) => {
 // MAIN-world scripts (page-script.ts) cannot listen for it directly.
 // We relay change events to MAIN world via window.postMessage so that
 // cross-tab settings sync works in extension context.
-chrome!.storage!.onChanged!.addListener(
-  (changes: Record<string, unknown>, areaName: string) => {
-    if (areaName !== 'local') return;
-    for (const key of Object.keys(changes)) {
-      if (!ALLOWED_STORAGE_KEYS.has(key)) continue;
-      const change = changes[key] as { newValue?: unknown } | undefined;
-      if (!change) continue;
-      window.postMessage(
-        {
-          source: 'yt-storage-changed',
-          nonce: bridgeNonce,
-          key,
-          newValue: change.newValue,
-        },
-        window.location.origin,
-      );
-    }
-  },
-);
+chrome!.storage!.onChanged!.addListener((changes: Record<string, unknown>, areaName: string) => {
+  if (areaName !== 'local') return;
+  for (const key of Object.keys(changes)) {
+    if (!ALLOWED_STORAGE_KEYS.has(key)) continue;
+    const change = changes[key] as { newValue?: unknown } | undefined;
+    if (!change) continue;
+    window.postMessage(
+      {
+        source: 'yt-storage-changed',
+        nonce: bridgeNonce,
+        key,
+        newValue: change.newValue,
+      },
+      window.location.origin
+    );
+  }
+});
 
 // ── Background message relay ───────────────────────────────────────────
 
@@ -174,6 +185,6 @@ onMessage.addListener((message: unknown, sender: ChromeMessageSender) => {
       nonce: bridgeNonce,
       command: msg.command,
     },
-    window.location.origin,
+    window.location.origin
   );
 });
