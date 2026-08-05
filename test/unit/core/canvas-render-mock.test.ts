@@ -115,6 +115,50 @@ afterEach(() => {
 // ═══════════════════════════════════════════════════════════════════
 
 describe('renderSegment bitmap cache', () => {
+  it('keeps normal and far-tier letter spacing in separate bitmap entries', () => {
+    const { ctx } = createMockContext();
+
+    class MockOffscreenCanvas {
+      readonly context = {
+        scale: vi.fn(),
+        strokeText: vi.fn(),
+        fillText: vi.fn(),
+      };
+
+      constructor(
+        readonly width: number,
+        readonly height: number
+      ) {}
+
+      getContext(): OffscreenCanvasRenderingContext2D {
+        return this.context as unknown as OffscreenCanvasRenderingContext2D;
+      }
+    }
+
+    vi.stubGlobal('OffscreenCanvas', MockOffscreenCanvas);
+    const bitmaps = new Map<string, CanvasImageSource>();
+    const cache: TextBitmapCache = {
+      get: (key) => bitmaps.get(key),
+      set: (key, value) => {
+        bitmaps.set(key, value);
+      },
+    };
+    const getFont = (): string => 'bold 32px sans-serif';
+
+    renderSegment(ctx, 'HELLO', 0, 0, '#ffffff', 32, 2, 0.7, cache, getFont, '0px');
+    renderSegment(ctx, 'HELLO', 0, 0, '#ffffff', 32, 2, 0.7, cache, getFont, '1px');
+
+    expect(bitmaps.size).toBe(2);
+    expect([...bitmaps.keys()].some((key) => key.endsWith('|0px'))).toBe(true);
+    expect([...bitmaps.keys()].some((key) => key.endsWith('|1px'))).toBe(true);
+
+    const [normalBitmap, farBitmap] = [...bitmaps.values()] as unknown as [
+      MockOffscreenCanvas,
+      MockOffscreenCanvas,
+    ];
+    expect(farBitmap.width - normalBitmap.width).toBe(4);
+  });
+
   it('measures Latin text with the same top baseline used to draw the bitmap', () => {
     const measuredBaselines: string[] = [];
     const { ctx } = createMockContext((_text, state) => {
