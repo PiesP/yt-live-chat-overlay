@@ -59,12 +59,14 @@ contextMenus.onClicked.addListener((info, tab) => {
   if (!command) return;
 
   // Forward to content script
-tabs.sendMessage(tab.id, {
-    type: 'menu-command',
-    command: command.id,
-  }).catch(() => {
-    // Content script may not be loaded (not a YouTube page)
-  });
+  tabs
+    .sendMessage(tab.id, {
+      type: 'menu-command',
+      command: command.id,
+    })
+    .catch(() => {
+      // Content script may not be loaded (not a YouTube page)
+    });
 });
 
 export {};

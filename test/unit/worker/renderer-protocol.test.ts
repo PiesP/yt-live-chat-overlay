@@ -184,7 +184,7 @@ describe('Worker message protocol', () => {
       }));
       postMessageSpy.mockClear();
 
-      getHandler()(makeEvent({ type: 'resize', width: 640, height: 360 }));
+      getHandler()(makeEvent({ type: 'resize', width: 640, height: 360, dpr: 1 }));
 
       const errors = postMessageSpy.mock.calls.filter(
         (c) => (c[0] as Record<string, unknown>)?.type === 'error'
@@ -387,6 +387,23 @@ describe('Worker message protocol', () => {
         type: 'messageSnapshot',
         requestId: 7,
         messageIds: ['pending-message'],
+      });
+    });
+
+    it('uses the pending array as the single queue cursor while preserving every snapshot id', () => {
+      const renderer = initializeRenderer();
+      const first = makeWorkerMessage({ id: 'pending-first', priority: 10 });
+      const second = makeWorkerMessage({ id: 'pending-second', priority: 20 });
+
+      renderer.handleMessage(makeEvent({ type: 'addMessages', messages: [first, second] }));
+      postMessageSpy.mockClear();
+      renderer.handleMessage(makeEvent({ type: 'snapshotMessages', requestId: 8 }));
+
+      expect(renderer).not.toHaveProperty('pendingQueueOffset');
+      expect(postMessageSpy).toHaveBeenCalledWith({
+        type: 'messageSnapshot',
+        requestId: 8,
+        messageIds: ['pending-first', 'pending-second'],
       });
     });
 

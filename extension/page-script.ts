@@ -50,8 +50,7 @@ window.addEventListener('message', (event: MessageEvent) => {
   const command = (data as Record<string, unknown>).command as string | undefined;
   if (command !== 'reset-settings' && command !== 'reload-overlay') return;
 
-  const app = (window as { __ytChatOverlay?: ContentScriptYtChatOverlayHandle })
-    .__ytChatOverlay;
+  const app = (window as { __ytChatOverlay?: ContentScriptYtChatOverlayHandle }).__ytChatOverlay;
   if (!app) return;
 
   switch (command) {

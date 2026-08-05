@@ -51,9 +51,9 @@ export class ImageFetchManager {
   /** Maps emoji URLs to in-flight Image objects for timeout cleanup. */
   private readonly emojiUrlToImage = new Map<string, HTMLImageElement>();
 
-  /** Generation counter per URL — prevents stale createImageBitmap results
-   * from overwriting newer bitmaps when the same URL is loaded concurrently. */
-  private readonly bitmapGeneration = new Map<string, number>();
+  /** Unique in-flight token per URL — prevents stale createImageBitmap results
+   * from overwriting newer bitmaps without retaining completed URL history. */
+  private readonly bitmapGeneration = new Map<string, symbol>();
 
   /**
    * Pre-converted ImageBitmaps for transfer to the render worker.
@@ -250,11 +250,14 @@ export class ImageFetchManager {
   private preConvertForWorker(url: string, img: HTMLImageElement): void {
     if (!this.useWorkerMode || !this.renderWorker) return;
     if (!img.complete || img.naturalWidth === 0) return;
-    const generation = (this.bitmapGeneration.get(url) ?? 0) + 1;
+    const generation = Symbol(url);
     this.bitmapGeneration.set(url, generation);
     createImageBitmap(img)
       .then((bitmap) => {
         if (this.isDestroyed || !this.useWorkerMode || !this.renderWorker) {
+          if (generation === this.bitmapGeneration.get(url)) {
+            this.bitmapGeneration.delete(url);
+          }
           bitmap.close();
           return;
         }
@@ -263,7 +266,10 @@ export class ImageFetchManager {
           bitmap.close();
           return;
         }
-        this.workerBitmapCache.set(url, bitmap);
+        this.bitmapGeneration.delete(url);
+        if (!this.workerBitmapCache.set(url, bitmap)) {
+          bitmap.close();
+        }
       })
       .catch(() => {
         // On failure, clear the generation so a retry doesn't appear stale.

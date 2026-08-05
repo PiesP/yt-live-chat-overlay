@@ -955,7 +955,7 @@ export class CanvasRenderer extends RendererBase {
     // ── Clear + status bar ──
     // Always clear canvas first — prevents stale status bar from persisting
     // when connection transitions to 'connected' with no active messages.
-    // Mirrors renderer-worker.ts renderFrame unconditional clearRect.
+    // Mirrors the Worker renderFrame unconditional clearRect.
     ctx.clearRect(0, 0, dims.width, dims.height);
 
     const hasContent = this.activeMessages.length > 0 || this.connectionStatus !== 'connected';
@@ -984,11 +984,6 @@ export class CanvasRenderer extends RendererBase {
     // Post-cleanup: compact array + clean lane map for expired messages
     if (cleanupResult.anyRemoved) {
       compactRemovedMessages(rctx, cleanupResult.writeIdx, cleanupResult.oldLength);
-    }
-
-    // Don't clear when status bar is showing — it was drawn above and would be wiped.
-    if (this.connectionStatus === 'connected') {
-      ctx.clearRect(0, 0, dims.width, dims.height);
     }
 
     // ── Glow stage: membership card pulsing borders ──

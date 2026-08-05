@@ -168,4 +168,31 @@ describe('serializeWorkerMessage', () => {
 
     expect(Object.hasOwn(serialized, 'translatedText')).toBe(false);
   });
+
+  it('preserves the parser canonical text when emoji alt and fallback text differ', () => {
+    const serialized = serializeWorkerMessage({
+      message: textMessage({
+        text: 'hello 👋',
+        content: [
+          { type: 'text', content: 'hello ' },
+          {
+            type: 'emoji',
+            emoji: {
+              url: 'https://yt3.ggpht.com/wave.png',
+              alt: ':wave:',
+              fallbackText: '👋',
+            },
+          },
+        ],
+      }),
+      id: 'emoji-fallback-id',
+      dimensions,
+      priority: 0,
+      burstSpeedMultiplier: 1,
+      settings,
+    });
+
+    expect(serialized.text).toBe('hello 👋');
+    expect(serialized.content).toHaveLength(2);
+  });
 });

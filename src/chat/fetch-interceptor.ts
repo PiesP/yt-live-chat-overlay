@@ -21,14 +21,37 @@ import { createLogger } from '@util/logging';
 
 const log = createLogger('FetchInterceptor');
 
+/** Maximum number of compact response identities retained per installation. */
+const MAX_RESPONSE_IDENTITY_CACHE_SIZE = 64;
+
 /**
- * Cache of response body texts already parsed by the interceptor.
- * Prevents duplicate JSON.parse when the same response body is intercepted
- * multiple times (e.g. when the poll loop and YouTube's own client both
- * fetch the same continuation).  Cleared when full to bound memory growth.
+ * Produce a compact, deterministic identity without retaining the response body.
+ * Two independently mixed 32-bit hashes plus the UTF-16 length make accidental
+ * collisions vanishingly unlikely for duplicate-suppression purposes.
  */
-const responseTextCache = new Set<string>();
-const MAX_RESPONSE_CACHE_SIZE = 16;
+export function createResponseIdentity(text: string): string {
+  let first = 0x811c9dc5;
+  let second = 0x9e3779b9;
+  for (let index = 0; index < text.length; index++) {
+    const codeUnit = text.charCodeAt(index);
+    first = Math.imul(first ^ codeUnit, 0x01000193);
+    second = Math.imul(second ^ codeUnit, 0x85ebca6b);
+    second = (second << 13) | (second >>> 19);
+  }
+  return `${text.length}:${(first >>> 0).toString(36)}:${(second >>> 0).toString(36)}`;
+}
+
+function rememberResponseIdentity(cache: Set<string>, text: string): boolean {
+  const identity = createResponseIdentity(text);
+  if (cache.has(identity)) return false;
+
+  if (cache.size >= MAX_RESPONSE_IDENTITY_CACHE_SIZE) {
+    const oldest = cache.values().next().value;
+    if (oldest !== undefined) cache.delete(oldest);
+  }
+  cache.add(identity);
+  return true;
+}
 
 /**
  * Matches YouTube Innertube live-chat fetch URLs.
@@ -58,10 +81,6 @@ export function installFetchInterceptor(
   getSettings: () => Readonly<OverlaySettings>,
   onMessages: InterceptorCallback
 ): InterceptorUnsubscribe {
-  // Clear any stale response text cache from a previous session to prevent
-  // the new interceptor from skipping responses that should be processed.
-  responseTextCache.clear();
-
   // Remove any previously installed interceptor first.
   if (activeInterceptor) {
     activeInterceptor.restore();
@@ -70,6 +89,8 @@ export function installFetchInterceptor(
 
   // Capture the current fetch at install time so we chain properly with other patches.
   const originalFetch = window.fetch;
+  const responseIdentityCache = new Set<string>();
+  let isActive = true;
 
   function interceptedFetch(
     this: typeof window,
@@ -99,20 +120,17 @@ export function installFetchInterceptor(
     void (async () => {
       try {
         const res = await response;
+        if (!isActive) return;
         const cloned = res.clone();
 
-        // Read as text so we can cache the raw body and avoid re-parsing
-        // the same response seen by both the interceptor and the poll loop.
+        // Read once for JSON parsing, but retain only a compact identity after
+        // this asynchronous scope completes.
         const text = await cloned.text();
-        if (responseTextCache.has(text)) {
+        if (!isActive) return;
+        if (!rememberResponseIdentity(responseIdentityCache, text)) {
           log.debug('chat.interceptor.skip-duplicate');
           return;
         }
-        // Evict oldest entries when cache is full
-        if (responseTextCache.size >= MAX_RESPONSE_CACHE_SIZE) {
-          responseTextCache.clear();
-        }
-        responseTextCache.add(text);
 
         const data = JSON.parse(text) as unknown;
 
@@ -122,7 +140,7 @@ export function installFetchInterceptor(
           if (events.length > 0) {
             const messages = events.map((e) => e.message);
             log.debug('chat.interceptor.messages-received', { count: messages.length });
-            onMessages(messages);
+            if (isActive) onMessages(messages);
           }
         }
       } catch (error: unknown) {
@@ -137,6 +155,8 @@ export function installFetchInterceptor(
   window.fetch = interceptedFetch as typeof window.fetch;
 
   const restore = (): void => {
+    isActive = false;
+    responseIdentityCache.clear();
     if (window.fetch === interceptedFetch) {
       window.fetch = originalFetch;
     }

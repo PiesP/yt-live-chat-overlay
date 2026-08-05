@@ -367,6 +367,64 @@ describe('CanvasRenderer', () => {
     renderer.destroy();
   });
 
+  it('clears exactly once for a connected active frame', () => {
+    const renderer = new CanvasRenderer(overlay, makeSettings());
+    const canvas = document.createElement('canvas');
+    document.body.appendChild(canvas);
+    const clearRect = vi.fn();
+    const message = makeMessage('active-frame', 'active');
+    const internals = renderer as unknown as {
+      canvas: HTMLCanvasElement;
+      ctx: CanvasRenderingContext2D;
+      activeMessages: CanvasMessage[];
+      workerManager: { setActive(active: boolean): void };
+      laneAllocator: { resetBatch(now?: number): void; getUtilization(): number };
+      drainQueue(now: number): void;
+      applyPendingTranslations(): void;
+      updateCanvasDpr(
+        canvas: HTMLCanvasElement,
+        ctx: CanvasRenderingContext2D,
+        dims: { width: number; height: number }
+      ): void;
+      applyLaneDensityIfChanged(): void;
+      renderFrame(): void;
+    };
+    internals.canvas = canvas;
+    internals.ctx = { clearRect } as unknown as CanvasRenderingContext2D;
+    internals.workerManager.setActive(false);
+    internals.laneAllocator = { resetBatch: vi.fn(), getUtilization: () => 0 };
+    internals.drainQueue = vi.fn();
+    internals.applyPendingTranslations = vi.fn();
+    internals.updateCanvasDpr = vi.fn();
+    internals.applyLaneDensityIfChanged = vi.fn();
+    vi.spyOn(overlay, 'getDimensions').mockReturnValue({ width: 640, height: 360 });
+    internals.activeMessages.push({
+      message,
+      renderMessage: message,
+      ghostText: message.text,
+      startTime: performance.now() + 1_000,
+      fadeStartTime: performance.now() + 1_000,
+      duration: 5_000,
+      invDuration: 1 / 5_000,
+      width: 100,
+      height: 20,
+      startX: 640,
+      x: 640,
+      y: 0,
+      pausedDuration: 0,
+      laneIndex: 0,
+      laneArrayIndices: [],
+      staggerDelay: 1_000,
+      speedTier: 1,
+    });
+
+    internals.renderFrame();
+
+    expect(clearRect).toHaveBeenCalledOnce();
+    expect(clearRect).toHaveBeenCalledWith(0, 0, 640, 360);
+    renderer.destroy();
+  });
+
   it('setReplayMode works', () => {
     const settings = makeSettings();
     const renderer = new CanvasRenderer(overlay, settings);

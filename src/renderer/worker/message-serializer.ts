@@ -41,14 +41,11 @@ export function serializeWorkerMessage({
         : {}),
     };
   });
-  const text = message.content
-    .map((segment) => (segment.type === 'text' ? segment.content : segment.emoji.alt))
-    .join('');
   const translatedText = (message as ChatMessage & { translatedText?: string }).translatedText;
 
   return {
     id,
-    text,
+    text: message.text,
     width: dimensions.width,
     height: dimensions.height,
     priority,

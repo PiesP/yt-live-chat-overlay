@@ -46,4 +46,14 @@ describe('Verification configuration', () => {
     expect(workflow).toContain('test-results/');
     expect(workflow).toContain('playwright-report/');
   });
+
+  it('runs Biome over every published extension TypeScript entrypoint', () => {
+    const config = JSON.parse(readFileSync(resolve(root, 'biome.json'), 'utf8')) as {
+      files?: { includes?: string[] };
+    };
+    const includes = config.files?.includes ?? [];
+
+    expect(includes).toContain('extension/**/*.ts');
+    expect(includes.some((pattern) => pattern.includes('!!**/extension/'))).toBe(false);
+  });
 });

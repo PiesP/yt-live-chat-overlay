@@ -172,11 +172,23 @@ describe('renderer worker protocol guards', () => {
       { width: Number.NaN },
       { height: Number.POSITIVE_INFINITY },
       { dpr: 0 },
+      { dpr: -1 },
       { dpr: Number.NaN },
+      { dpr: Number.POSITIVE_INFINITY },
+      { dpr: '2' },
       { canvas: {} },
       { canvas: null },
     ]) {
       expect(isValidControlMessage({ ...base, ...invalid })).toBe(false);
+    }
+  });
+
+  it('requires a finite positive numeric DPR for resize messages', () => {
+    const base = { type: 'resize', width: 640, height: 360, dpr: 2 };
+
+    expect(isValidControlMessage(base)).toBe(true);
+    for (const dpr of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, '2']) {
+      expect(isValidControlMessage({ ...base, dpr })).toBe(false);
     }
   });
 

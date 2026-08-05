@@ -7,6 +7,7 @@ import {
   classifyAuthorBadge,
   getVisibleContentLength,
   isSubstantialMessage,
+  extractChatEvents,
 } from '@chat/message-parser';
 import type { ParsedMessageBody } from '@chat/message-parser';
 import type { ContentSegment, OverlaySettings } from '@app-types';
@@ -461,5 +462,108 @@ describe('isSubstantialMessage', () => {
   it('returns false for empty body with minTextLength=0 and visibleLength=0', () => {
     const s = mkSettings({ minTextLength: 0 });
     expect(isSubstantialMessage(makeBody({ visibleLength: 0 }), 'normal', s)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractChatEvents message-boundary normalization
+// ---------------------------------------------------------------------------
+
+describe('extractChatEvents message-boundary normalization', () => {
+  const parseRenderer = (rendererKey: string, renderer: Record<string, unknown>) =>
+    extractChatEvents(
+      [
+        {
+          addChatItemAction: {
+            item: { [rendererKey]: renderer },
+          },
+        },
+      ],
+      () => mkSettings({ allowShortTextMessages: true })
+    )[0]?.message;
+
+  it('normalizes and truncates long regular simpleText in both text and rich content', () => {
+    const message = parseRenderer('liveChatTextMessageRenderer', {
+      id: 'long-simple',
+      authorName: { simpleText: 'Viewer' },
+      message: { simpleText: `  ${'a'.repeat(90)}  ` },
+    });
+
+    const expected = `${'a'.repeat(79)}\u2026`;
+    expect(message).toMatchObject({
+      text: expected,
+      content: [{ type: 'text', content: expected }],
+      kind: 'text',
+    });
+    expect(getVisibleContentLength(message?.content ?? [])).toBe(80);
+  });
+
+  it('keeps mixed text and emoji segments within the same regular-message boundary', () => {
+    const message = parseRenderer('liveChatTextMessageRenderer', {
+      id: 'long-rich',
+      authorName: { simpleText: 'Viewer' },
+      message: {
+        runs: [
+          { text: 'a'.repeat(70) },
+          {
+            emoji: {
+              shortcuts: [':wave:', '👋'],
+              image: {
+                thumbnails: [{ url: 'https://yt3.ggpht.com/wave.png' }],
+              },
+            },
+          },
+          { text: 'b'.repeat(20) },
+        ],
+      },
+    });
+
+    expect(message?.text).toBe(`${'a'.repeat(70)}👋${'b'.repeat(8)}\u2026`);
+    expect(message?.content).toEqual([
+      { type: 'text', content: 'a'.repeat(70) },
+      {
+        type: 'emoji',
+        emoji: expect.objectContaining({
+          alt: ':wave:',
+          fallbackText: '👋',
+          url: 'https://yt3.ggpht.com/wave.png',
+        }),
+      },
+      { type: 'text', content: `${'b'.repeat(8)}\u2026` },
+    ]);
+    expect(getVisibleContentLength(message?.content ?? [])).toBe(80);
+  });
+
+  it.each([
+    {
+      label: 'Super Chat',
+      rendererKey: 'liveChatPaidMessageRenderer',
+      renderer: {
+        id: 'paid-long',
+        authorName: { simpleText: 'Supporter' },
+        purchaseAmountText: { simpleText: '$5.00' },
+        message: { simpleText: 'p'.repeat(120) },
+      },
+      kind: 'superchat',
+    },
+    {
+      label: 'membership',
+      rendererKey: 'liveChatMembershipItemRenderer',
+      renderer: {
+        id: 'member-long',
+        authorName: { simpleText: 'Member' },
+        message: { simpleText: 'm'.repeat(120) },
+      },
+      kind: 'membership',
+    },
+  ])('preserves the full normalized $label body for paid-card wrapping', ({ rendererKey, renderer, kind }) => {
+    const message = parseRenderer(rendererKey, renderer);
+    const expected = kind === 'superchat' ? 'p'.repeat(120) : 'm'.repeat(120);
+
+    expect(message).toMatchObject({
+      text: expected,
+      content: [{ type: 'text', content: expected }],
+      kind,
+    });
   });
 });
