@@ -100,12 +100,9 @@ export function isValidControlMessage(value: unknown): boolean {
       );
     case 'resize':
       return (
-        typeof value.width === 'number' &&
-        Number.isFinite(value.width) &&
-        value.width > 0 &&
-        typeof value.height === 'number' &&
-        Number.isFinite(value.height) &&
-        value.height > 0
+        isPositiveFiniteNumber(value.width) &&
+        isPositiveFiniteNumber(value.height) &&
+        isPositiveFiniteNumber(value.dpr)
       );
     case 'updateConfig':
       return isSafeConfig(value.config);

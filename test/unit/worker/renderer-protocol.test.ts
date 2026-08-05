@@ -184,7 +184,7 @@ describe('Worker message protocol', () => {
       }));
       postMessageSpy.mockClear();
 
-      getHandler()(makeEvent({ type: 'resize', width: 640, height: 360 }));
+      getHandler()(makeEvent({ type: 'resize', width: 640, height: 360, dpr: 1 }));
 
       const errors = postMessageSpy.mock.calls.filter(
         (c) => (c[0] as Record<string, unknown>)?.type === 'error'

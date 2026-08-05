@@ -12,7 +12,7 @@
  *
  * Main → Worker:
  *   { type: 'init', canvas: OffscreenCanvas, config: WorkerConfig }
- *   { type: 'resize', width: number, height: number }
+ *   { type: 'resize', width: number, height: number, dpr: number }
  *   { type: 'addMessages', messages: WorkerMessage[] }
  *   { type: 'updateConfig', config: Partial<WorkerConfig> }
  *   { type: 'setPaused', paused: boolean }
@@ -504,7 +504,7 @@ export class WorkerRenderer {
               self.postMessage({ type: 'error', error: 'Failed to get 2D context' });
               return;
             }
-            const dpr = (data.dpr as number) || 1;
+            const dpr = data.dpr as number;
             this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
             this.emojiCache = new ResizableByteLimitedCache<ImageBitmap>(
               (this.config.emojiCacheMb ?? 4) * 1_000_000,
@@ -538,7 +538,7 @@ export class WorkerRenderer {
           }
           case 'resize': {
             if (!this.canvas || !this.ctx) break;
-            const newDpr = (data.dpr as number) || 1;
+            const newDpr = data.dpr as number;
             const cssW = data.width as number;
             const cssH = data.height as number;
             this.canvas.width = cssW * newDpr;
