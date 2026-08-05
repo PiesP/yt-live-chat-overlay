@@ -61,7 +61,8 @@ const fontMetricsCache = new Map<string, { ascent: number; descent: number }>();
 export function measureBoundingBoxWidth(
   m: Pick<TextMetrics, 'actualBoundingBoxLeft' | 'actualBoundingBoxRight' | 'width'>
 ): number {
-  const bbWidth = Math.abs(m.actualBoundingBoxLeft) + Math.abs(m.actualBoundingBoxRight);
+  const rawBbWidth = Math.abs(m.actualBoundingBoxLeft) + Math.abs(m.actualBoundingBoxRight);
+  const bbWidth = Number.isFinite(rawBbWidth) ? rawBbWidth : 0;
   const advanceWidth = Number.isFinite(m.width) ? Math.max(0, m.width) : 0;
   return Math.ceil(Math.max(bbWidth, advanceWidth));
 }

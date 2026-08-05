@@ -133,6 +133,28 @@ describe('measureBoundingBoxWidth', () => {
     };
     expect(measureBoundingBoxWidth(m)).toBe(600);
   });
+
+  it.each([
+    ['missing', { width: 42 }],
+    [
+      'NaN',
+      {
+        actualBoundingBoxLeft: Number.NaN,
+        actualBoundingBoxRight: 40,
+        width: 42,
+      },
+    ],
+    [
+      'infinite',
+      {
+        actualBoundingBoxLeft: 2,
+        actualBoundingBoxRight: Number.POSITIVE_INFINITY,
+        width: 42,
+      },
+    ],
+  ])('falls back to the finite advance width when ink bounds are %s', (_label, metrics) => {
+    expect(measureBoundingBoxWidth(metrics as TextMetrics)).toBe(42);
+  });
 });
 
 describe('text measurement caches', () => {
@@ -162,5 +184,26 @@ describe('text measurement caches', () => {
     expect(measureText).toHaveBeenCalledTimes(2);
 
     getContext.mockRestore();
+  });
+
+  it('returns and caches a finite width when Canvas omits ink bounds', async () => {
+    const measureText = vi.fn(() => ({ width: 42 }) as TextMetrics);
+    const context = { measureText } as unknown as CanvasRenderingContext2D;
+    const getContext = vi
+      .spyOn(HTMLCanvasElement.prototype, 'getContext')
+      .mockReturnValue(context);
+
+    try {
+      vi.resetModules();
+      const isolatedTextMeasure = await import('@renderer/text-measure');
+      isolatedTextMeasure.clearTextMeasurementCaches();
+
+      expect(isolatedTextMeasure.measureTextWidth('hello', '16px sans-serif')).toBe(42);
+      expect(isolatedTextMeasure.measureTextWidth('hello', '16px sans-serif')).toBe(42);
+      expect(measureText).toHaveBeenCalledTimes(1);
+    } finally {
+      getContext.mockRestore();
+      vi.resetModules();
+    }
   });
 });
