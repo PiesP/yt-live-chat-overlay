@@ -46,8 +46,8 @@ export function normalizeInlineText(text: string): string {
     .trim();
 }
 
-/** Maximum allowed message text length before truncation. */
-const MAX_MESSAGE_TEXT_LENGTH = 80;
+/** Maximum rendered text length for regular chat messages. */
+export const MAX_REGULAR_MESSAGE_TEXT_LENGTH = 80;
 
 /** Length of the truncation ellipsis placeholder (U+2026 = 1 code unit). */
 const TRUNCATION_ELLIPSIS_LENGTH = 1;
@@ -63,8 +63,11 @@ const NEAR_BLACK_THRESHOLD = 15;
 
 function truncateText(text: string): string {
   const normalized = normalizeInlineText(text);
-  if (normalized.length > MAX_MESSAGE_TEXT_LENGTH) {
-    return `${normalized.slice(0, MAX_MESSAGE_TEXT_LENGTH - TRUNCATION_ELLIPSIS_LENGTH)}\u2026`;
+  const codePoints = Array.from(normalized);
+  if (codePoints.length > MAX_REGULAR_MESSAGE_TEXT_LENGTH) {
+    return `${codePoints
+      .slice(0, MAX_REGULAR_MESSAGE_TEXT_LENGTH - TRUNCATION_ELLIPSIS_LENGTH)
+      .join('')}\u2026`;
   }
   return normalized;
 }

@@ -22,6 +22,7 @@ import {
   extractAccessibilityLabel,
   extractUserColor,
   hasEmojiContent,
+  MAX_REGULAR_MESSAGE_TEXT_LENGTH,
   stripControlCharacters,
   truncateForKind,
 } from '@chat/message-helpers';
@@ -337,10 +338,10 @@ export function extractSupportedRenderer(item: JsonObject): SupportedRenderer | 
 }
 
 function parseMembershipBody(renderer: JsonObject): ParsedMessageBody {
-  const messageBody = parseMessageContent(renderer.message);
+  const messageBody = parseMessageContent(renderer.message, 'membership');
   return messageBody.visibleLength > 0 || messageBody.text.length > 0
     ? messageBody
-    : parseMessageContent(renderer.headerSubtext);
+    : parseMessageContent(renderer.headerSubtext, 'membership');
 }
 
 /**
@@ -395,11 +396,7 @@ function parseMessageContent(
   if (simpleText !== undefined) {
     const content: ContentSegment[] =
       simpleText.length > 0 ? [{ type: 'text', content: simpleText }] : [];
-    return {
-      text: truncateForKind(simpleText, kind),
-      content,
-      visibleLength: getVisibleContentLength(content),
-    };
+    return finalizeMessageBody(simpleText, content, kind);
   }
 
   const runs = Array.isArray(value.runs) ? value.runs : [];
@@ -437,11 +434,111 @@ function parseMessageContent(
     plainText += fallbackText;
   }
 
+  return finalizeMessageBody(plainText, segments, kind);
+}
+
+function finalizeMessageBody(
+  plainText: string,
+  segments: readonly ContentSegment[],
+  kind: ChatMessage['kind']
+): ParsedMessageBody {
+  if (kind !== 'text') {
+    const content = [...segments];
+    return {
+      text: truncateForKind(plainText, kind),
+      content,
+      visibleLength: getVisibleContentLength(content),
+    };
+  }
+
+  const content = normalizeAndTruncateRegularContent(segments);
   return {
-    text: truncateForKind(plainText, kind),
-    content: segments,
-    visibleLength: getVisibleContentLength(segments),
+    text: projectContentText(content),
+    content,
+    visibleLength: getVisibleContentLength(content),
   };
+}
+
+/** Normalize a rich regular-message body while preserving retained emoji assets. */
+function normalizeAndTruncateRegularContent(segments: readonly ContentSegment[]): ContentSegment[] {
+  const normalized = normalizeRegularContentSegments(segments);
+  if (countCodePoints(projectContentText(normalized)) <= MAX_REGULAR_MESSAGE_TEXT_LENGTH) {
+    return normalized;
+  }
+
+  const truncated: ContentSegment[] = [];
+  const payloadLimit = MAX_REGULAR_MESSAGE_TEXT_LENGTH - 1;
+  let projectedLength = 0;
+
+  for (const segment of normalized) {
+    const remaining = payloadLimit - projectedLength;
+    if (remaining <= 0) break;
+
+    if (segment.type === 'text') {
+      const codePoints = Array.from(segment.content);
+      const retained = codePoints.slice(0, remaining).join('');
+      appendTextSegment(truncated, retained);
+      projectedLength += Math.min(codePoints.length, remaining);
+      if (codePoints.length > remaining) break;
+      continue;
+    }
+
+    const fallbackLength = countCodePoints(getEmojiProjection(segment));
+    if (fallbackLength > remaining) break;
+    truncated.push(segment);
+    projectedLength += fallbackLength;
+  }
+
+  appendTextSegment(truncated, '\u2026');
+  return truncated;
+}
+
+function normalizeRegularContentSegments(segments: readonly ContentSegment[]): ContentSegment[] {
+  const normalized: ContentSegment[] = [];
+  let hasContent = false;
+  let pendingSpace = false;
+
+  for (const segment of segments) {
+    if (segment.type === 'emoji') {
+      if (pendingSpace && hasContent) appendTextSegment(normalized, ' ');
+      normalized.push(segment);
+      hasContent = true;
+      pendingSpace = false;
+      continue;
+    }
+
+    for (const codePoint of stripControlCharacters(segment.content)) {
+      if (/\s/u.test(codePoint)) {
+        pendingSpace = hasContent;
+        continue;
+      }
+      if (pendingSpace) appendTextSegment(normalized, ' ');
+      appendTextSegment(normalized, codePoint);
+      hasContent = true;
+      pendingSpace = false;
+    }
+  }
+
+  removeTrailingYouTubeEllipsis(normalized);
+  return normalized;
+}
+
+function removeTrailingYouTubeEllipsis(segments: ContentSegment[]): void {
+  const last = segments.at(-1);
+  if (last?.type !== 'text') return;
+
+  last.content = last.content.replace(/[\u2026]+$/u, '');
+  if (last.content.length === 0) segments.pop();
+}
+
+function getEmojiProjection(segment: Extract<ContentSegment, { type: 'emoji' }>): string {
+  return segment.emoji.fallbackText || '\u200B';
+}
+
+function projectContentText(segments: readonly ContentSegment[]): string {
+  return segments
+    .map((segment) => (segment.type === 'text' ? segment.content : getEmojiProjection(segment)))
+    .join('');
 }
 
 function appendTextSegment(segments: ContentSegment[], content: string): void {
