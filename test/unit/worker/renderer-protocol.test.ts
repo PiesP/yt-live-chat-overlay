@@ -390,6 +390,23 @@ describe('Worker message protocol', () => {
       });
     });
 
+    it('uses the pending array as the single queue cursor while preserving every snapshot id', () => {
+      const renderer = initializeRenderer();
+      const first = makeWorkerMessage({ id: 'pending-first', priority: 10 });
+      const second = makeWorkerMessage({ id: 'pending-second', priority: 20 });
+
+      renderer.handleMessage(makeEvent({ type: 'addMessages', messages: [first, second] }));
+      postMessageSpy.mockClear();
+      renderer.handleMessage(makeEvent({ type: 'snapshotMessages', requestId: 8 }));
+
+      expect(renderer).not.toHaveProperty('pendingQueueOffset');
+      expect(postMessageSpy).toHaveBeenCalledWith({
+        type: 'messageSnapshot',
+        requestId: 8,
+        messageIds: ['pending-first', 'pending-second'],
+      });
+    });
+
     it('does not throw for unknown message type', () => {
       expect(() => getHandler()(makeEvent({ type: 'nonexistent' }))).not.toThrow();
     });

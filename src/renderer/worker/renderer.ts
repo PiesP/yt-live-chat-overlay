@@ -436,7 +436,6 @@ export class WorkerRenderer {
   private activeMessagesByLane = new Map<number, ActiveMessage[]>();
   private pendingQueue: WorkerMessage[] = [];
   private pendingQueueSortNeeded = false;
-  private pendingQueueOffset = 0;
   private laneHeap: [number, number][] = [];
   private laneIndexToHeapIndex = new Map<number, number>();
   private laneHeight = 0;
@@ -783,8 +782,8 @@ export class WorkerRenderer {
   private enqueueMessage(msg: WorkerMessage): void {
     const maxSize = this.config?.queueMaxSize ?? 200;
     if (this.pendingQueue.length >= maxSize) {
-      let minIdx = this.pendingQueueOffset;
-      for (let i = this.pendingQueueOffset + 1; i < this.pendingQueue.length; i++) {
+      let minIdx = 0;
+      for (let i = 1; i < this.pendingQueue.length; i++) {
         if ((this.pendingQueue[i]?.priority ?? 0) < (this.pendingQueue[minIdx]?.priority ?? 0)) {
           minIdx = i;
         }
@@ -845,7 +844,6 @@ export class WorkerRenderer {
     this.activeMessages.length = 0;
     this.activeMessagesByLane.clear();
     this.pendingQueue.length = 0;
-    this.pendingQueueOffset = 0;
     this.textBitmapCache.clear();
     this.emojiCache.clear();
     this.authorPhotoCache.clear();
@@ -866,7 +864,6 @@ export class WorkerRenderer {
     this.activeMessages.length = 0;
     this.activeMessagesByLane.clear();
     this.pendingQueue.length = 0;
-    this.pendingQueueOffset = 0;
     this.messageById.clear();
     // Rebuild lane allocator from existing dimensions (numLanes/laneHeight
     // are preserved from the last initLanes/resize call).
@@ -1220,7 +1217,7 @@ export class WorkerRenderer {
           if (this.antiBlockStartTime === 0) {
             this.antiBlockStartTime = now;
           }
-          const front = this.pendingQueue[this.pendingQueueOffset];
+          const front = this.pendingQueue[0];
           const forceDrain = now - this.antiBlockStartTime >= ANTI_BLOCK_MAX_DURATION_MS;
           if (forceDrain) {
             this.antiBlockStartTime = now;
@@ -1494,7 +1491,7 @@ export class WorkerRenderer {
         drops: this.totalDrops,
         pendingQueueDepth: this.pendingQueue.length,
         activeMessageIds: this.activeMessages.map((msg) => msg.id),
-        pendingMessageIds: this.pendingQueue.slice(this.pendingQueueOffset).map((msg) => msg.id),
+        pendingMessageIds: this.pendingQueue.map((msg) => msg.id),
       });
     }
 
@@ -1625,15 +1622,11 @@ export class WorkerRenderer {
       this.pendingQueue.sort((a, b) => b.priority - a.priority);
       this.pendingQueueSortNeeded = false;
     }
-    if (this.pendingQueueOffset > 64) {
-      this.pendingQueue.splice(0, this.pendingQueueOffset);
-      this.pendingQueueOffset = 0;
-    }
     let batchIndex = 0;
     const committed = new Set<WorkerMessage>();
     let skipCount = 0;
     const MAX_CONSECUTIVE_SKIPS = 16;
-    for (let i = this.pendingQueueOffset; i < this.pendingQueue.length; i++) {
+    for (let i = 0; i < this.pendingQueue.length; i++) {
       const entry = this.pendingQueue[i];
       if (!entry) continue;
       if (this.activeMessages.length >= this.config.maxConcurrentMessages) break;
@@ -1689,8 +1682,8 @@ export class WorkerRenderer {
       }
     }
     if (committed.size > 0) {
-      let writeIdx = this.pendingQueueOffset;
-      for (let i = this.pendingQueueOffset; i < this.pendingQueue.length; i++) {
+      let writeIdx = 0;
+      for (let i = 0; i < this.pendingQueue.length; i++) {
         const entry = this.pendingQueue[i];
         if (entry !== undefined && !committed.has(entry)) {
           this.pendingQueue[writeIdx++] = entry;
