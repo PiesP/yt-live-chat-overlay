@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.45.0] - 2026-08-06
+
+### Added
+
+- **Role-specific message backgrounds** — Added configurable translucent backgrounds for regular messages from owners, moderators, members, and other authors with synchronized Canvas and Worker rendering.
+- **Renderer verification profiles** — Added dedicated renderer mutation coverage, real-message browser scenarios, metric regressions, and Firefox userscript smoke tests.
+
+### Changed
+
+- **Render scheduling** — Refactored backlog scheduling, drain batching, speed tiers, and shared pipeline policies to keep main-thread and Worker behavior aligned under burst traffic.
+- **Settings interface** — Adopted the shared Quiet Instruments design foundation and tightened schema, control encoding, storage, accessibility, and responsive visual contracts.
+- **Shared runtime and tooling** — Updated browser-core and switched CI to the checksum-verified `pnpm/setup` v2 runtime installer.
+
+### Fixed
+
+- **Text layout correctness** — Prevented Latin glyph clipping, mixed text/image overlap, and invalid Canvas metrics from producing clipped, overlapping, or non-finite layouts.
+- **Worker startup and protocol safety** — Rejected malformed renderer messages, preserved empty translated text, and fell back safely when overlay dimensions are missing, zero, or non-finite.
+- **Renderer and media lifecycle** — Released image fetches, caches, bitmaps, listeners, Worker state, and replay resources deterministically across restart, recovery, cancellation, and teardown paths.
+- **Replay and backlog stability** — Preserved message ordering and pause reasons while avoiding duplicate activation, burst replay, and stale source refreshes.
+- **Extension and storage boundaries** — Hardened bridge authentication, settings relays, request parsing, and platform storage serialization.
+
 ## [0.44.1] - 2026-07-29
 
 ### Fixed
