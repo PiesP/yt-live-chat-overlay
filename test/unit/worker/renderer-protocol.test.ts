@@ -371,7 +371,7 @@ describe('Worker message protocol', () => {
       const internals = renderer as unknown as {
         activeMessagesByLane: Map<number, unknown[]>;
         checkCollision(
-          placement: typeof placement,
+          candidatePlacement: typeof placement,
           entry: WorkerMessage,
           speedTier: number,
           batchIndex: number,
