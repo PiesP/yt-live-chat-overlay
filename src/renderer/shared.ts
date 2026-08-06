@@ -15,6 +15,7 @@ import {
   measureTextAdvanceWidth,
   toSharedContentSegments,
 } from '@renderer/canvas/shared';
+import { MEMBERSHIP_CARD_CONFIG, SUPERCHAT_CARD_CONFIG } from '@renderer/card-config';
 import { SPEED_TIER, TRANSLATION_FONT_SCALE, TRANSLATION_GAP_PX } from '@renderer/constants';
 import {
   getAuthorPhotoSlotWidth,
@@ -248,11 +249,13 @@ function estimateSuperChatDimensions(
 
   let stickerHeight = 0;
   if (message.superChat?.sticker) {
-    stickerHeight = Math.round(fontSize * rendererLayout.superchatStickerSize) + spacing.xs;
+    stickerHeight =
+      Math.round(fontSize * rendererLayout.superchatStickerSize) +
+      (SUPERCHAT_CARD_CONFIG.sticker?.marginTop ?? 0);
   }
 
   const badgeSectionHeight = badgeHeight > 0 ? spacing.xs + badgeHeight : 0;
-  const bodySectionHeight = lineCount > 0 ? spacing.xs + textHeight : 0;
+  const bodySectionHeight = lineCount > 0 ? SUPERCHAT_CARD_CONFIG.body.marginTop + textHeight : 0;
   const contentHeight =
     authorSectionHeight + badgeSectionHeight + bodySectionHeight + stickerHeight;
 
@@ -331,8 +334,14 @@ function estimateMembershipDimensions(
   const textHeight = Math.ceil(bodyLineHeight) * bodyLineCount;
 
   // Include author-to-body gap when author section is present (matching renderMembership)
-  const headerSectionHeight = headerHeight > 0 ? headerHeight + spacing.xs : 0;
-  const bodySectionHeight = bodyLineCount > 0 ? spacing.xs + textHeight : 0;
+  const headerSectionHeight =
+    headerHeight > 0
+      ? (MEMBERSHIP_CARD_CONFIG.headerTag?.marginTop ?? 0) +
+        headerHeight +
+        (MEMBERSHIP_CARD_CONFIG.headerTag?.marginBottom ?? 0)
+      : 0;
+  const bodySectionHeight =
+    bodyLineCount > 0 ? MEMBERSHIP_CARD_CONFIG.body.marginTop + textHeight : 0;
 
   return {
     width,

@@ -455,6 +455,9 @@ export class CanvasRenderer extends RendererBase {
     }
 
     this.overlayDimensionsUnsubscribe = overlay.onDimensionsChanged((d) => {
+      // Paid-card width bounds depend on the current viewport width.
+      // Queued messages must be remeasured after every resize.
+      this.dimensionCache.clear();
       if (d && this.canvas) {
         this.applyDevicePixelRatio(d);
         this.laneAllocator.reset(d);

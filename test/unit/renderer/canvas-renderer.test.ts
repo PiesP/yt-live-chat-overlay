@@ -130,6 +130,24 @@ describe('CanvasRenderer', () => {
     renderer.destroy();
   });
 
+  it('invalidates cached card dimensions when the overlay size changes', () => {
+    const callbacks: Array<Parameters<Overlay['onDimensionsChanged']>[0]> = [];
+    vi.spyOn(overlay, 'onDimensionsChanged').mockImplementation((callback) => {
+      callbacks.push(callback);
+      return vi.fn();
+    });
+    const renderer = new CanvasRenderer(overlay, makeSettings());
+    const internals = renderer as unknown as {
+      dimensionCache: Map<string, { width: number; height: number }>;
+    };
+    internals.dimensionCache.set('paid-card', { width: 320, height: 80 });
+
+    for (const callback of callbacks) callback({ width: 240, height: 180 });
+
+    expect(internals.dimensionCache.size).toBe(0);
+    renderer.destroy();
+  });
+
   it('collects auto source-language samples on the Worker path', () => {
     const settings = makeSettings({ translationEnabled: true, translationSource: 'auto' });
     const renderer = new CanvasRenderer(overlay, settings);

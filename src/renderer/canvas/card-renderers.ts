@@ -214,6 +214,7 @@ function renderCardBadge(
 ): number {
   if (!config.badge) return y;
   const badge = config.badge;
+  ctx.save();
   const badgeFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
   const badgeFont = getFontString(badgeFontSize, 'bold', settings.fontFamily);
   ctx.font = badgeFont;
@@ -222,7 +223,6 @@ function renderCardBadge(
   const badgeHeight = badgeFontSize + badge.paddingV * 2;
 
   drawRoundRect(ctx, x, y, badgeWidth, badgeHeight, badge.radius);
-  ctx.save();
   ctx.fillStyle = badge.fillColor;
   ctx.fill();
   ctx.strokeStyle = badge.strokeColor;

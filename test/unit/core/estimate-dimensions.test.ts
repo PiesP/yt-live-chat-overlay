@@ -51,6 +51,7 @@ import {
   estimateMessageDimensions,
   estimateTranslatedMessageDimensions,
 } from '@renderer/shared';
+import { MEMBERSHIP_CARD_CONFIG, SUPERCHAT_CARD_CONFIG } from '@renderer/card-config';
 import { getRegularCardInsets } from '@renderer/layout/card-layout';
 import type { ChatMessage } from '@app-types';
 import { rendererLayout, spacing } from '@util/design-tokens';
@@ -299,6 +300,11 @@ describe('estimateMessageDimensions — superchat', () => {
       rendererLayout.superchatBadge.paddingV * 2;
 
     expect(withBadge.height - withoutBadge.height).toBe(badgeHeight + spacing.xs);
+    expect(withoutBadge.height).toBe(
+      rendererLayout.superchat.paddingV * 2 +
+        SUPERCHAT_CARD_CONFIG.body.marginTop +
+        Math.round(16 * 1.2)
+    );
   });
 });
 
@@ -346,6 +352,27 @@ describe('estimateMessageDimensions — membership', () => {
 
     expect(dims.width).toBeGreaterThan(rendererLayout.superchatMinWidth);
     expect(dims.width).toBeLessThanOrEqual(rendererLayout.superchatMaxWidth);
+  });
+
+  it('uses the configured header and body margins in membership height', () => {
+    const msg = makeMessage({
+      kind: 'membership',
+      text: 'x',
+      content: [{ type: 'text', content: 'x' }],
+      membershipHeader: 'Member',
+    });
+
+    const dims = estimateMessageDimensions(msg, 16, false);
+    const headerFontSize = Math.round(16 * MEMBERSHIP_CARD_CONFIG.headerTag!.fontSizeScale);
+
+    expect(dims.height).toBe(
+      rendererLayout.membership.paddingV * 2 +
+        MEMBERSHIP_CARD_CONFIG.headerTag!.marginTop +
+        Math.round(headerFontSize * 1.2) +
+        MEMBERSHIP_CARD_CONFIG.headerTag!.marginBottom +
+        MEMBERSHIP_CARD_CONFIG.body.marginTop +
+        Math.round(16 * 1.2)
+    );
   });
 
   it('handles membership with author', () => {
