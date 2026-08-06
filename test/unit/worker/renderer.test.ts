@@ -38,6 +38,28 @@ describe('WorkerRenderer', () => {
     expect(() => new WorkerRenderer()).not.toThrow();
   });
 
+  it('caches a finite advance width when Worker ink bounds are invalid', () => {
+    const measureText = vi.fn(
+      () =>
+        ({
+          width: 42,
+          actualBoundingBoxLeft: Number.NaN,
+          actualBoundingBoxRight: Number.POSITIVE_INFINITY,
+        }) as TextMetrics
+    );
+    const internals = wr as unknown as {
+      ctx: OffscreenCanvasRenderingContext2D;
+      measureTextCached(text: string): number;
+      textMeasureCache: Map<string, number>;
+    };
+    internals.ctx = { measureText } as unknown as OffscreenCanvasRenderingContext2D;
+
+    expect(internals.measureTextCached('hello')).toBe(42);
+    expect(internals.measureTextCached('hello')).toBe(42);
+    expect(internals.textMeasureCache.get('hello')).toBe(42);
+    expect(measureText).toHaveBeenCalledOnce();
+  });
+
   it('handleMessage processes init message', () => {
     const canvas = new OffscreenCanvas(1920, 1080);
     const event = makePostMessageEvent({
