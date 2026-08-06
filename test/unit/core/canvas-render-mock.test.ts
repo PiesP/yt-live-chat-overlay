@@ -419,6 +419,15 @@ describe('drawRoundRect', () => {
     expect(state.moveToCalled).toBe(true);
     expect(state.lineToCalled).toBe(true);
     expect(state.closePathCalled).toBe(true);
+    expect(ctxNoRoundRect.moveTo).toHaveBeenCalledWith(18, 20);
+    expect(ctxNoRoundRect.lineTo).toHaveBeenNthCalledWith(1, 102, 20);
+    expect(ctxNoRoundRect.arcTo).toHaveBeenNthCalledWith(1, 110, 20, 110, 28, 8);
+    expect(ctxNoRoundRect.lineTo).toHaveBeenNthCalledWith(2, 110, 62);
+    expect(ctxNoRoundRect.arcTo).toHaveBeenNthCalledWith(2, 110, 70, 102, 70, 8);
+    expect(ctxNoRoundRect.lineTo).toHaveBeenNthCalledWith(3, 18, 70);
+    expect(ctxNoRoundRect.arcTo).toHaveBeenNthCalledWith(3, 10, 70, 10, 62, 8);
+    expect(ctxNoRoundRect.lineTo).toHaveBeenNthCalledWith(4, 10, 28);
+    expect(ctxNoRoundRect.arcTo).toHaveBeenNthCalledWith(4, 10, 20, 18, 20, 8);
   });
 });
 
@@ -458,6 +467,31 @@ describe('renderRegularMessageBackground', () => {
     renderRegularMessageBackground(ctx, 10, 20, 0, 50, '#6B4F0059');
 
     expect(state.ops).toEqual([]);
+
+    renderRegularMessageBackground(ctx, 10, 20, 100, 0, '#6B4F0059');
+    expect(state.ops).toEqual([]);
+  });
+
+  it('clamps the background radius independently to narrow width and height', () => {
+    const narrowWidth = createMockContext();
+    renderRegularMessageBackground(narrowWidth.ctx, 10, 20, 8, 50, '#1B3A6F59');
+    expect((narrowWidth.ctx as CanvasRenderingContext2D).roundRect).toHaveBeenCalledWith(
+      10,
+      20,
+      8,
+      50,
+      4
+    );
+
+    const narrowHeight = createMockContext();
+    renderRegularMessageBackground(narrowHeight.ctx, 10, 20, 100, 4, '#1B3A6F59');
+    expect((narrowHeight.ctx as CanvasRenderingContext2D).roundRect).toHaveBeenCalledWith(
+      10,
+      20,
+      100,
+      4,
+      2
+    );
   });
 });
 

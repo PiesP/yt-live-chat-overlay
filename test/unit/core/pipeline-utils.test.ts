@@ -32,6 +32,12 @@ describe('createFastRandom', () => {
     }
   });
 
+  it('matches the documented LCG transition for an explicit zero seed', () => {
+    const rng = createFastRandom(0);
+
+    expect(rng()).toBe(1013904223 / 0xffffffff);
+  });
+
   it('produces different sequences with different seeds', () => {
     const rng1 = createFastRandom(1);
     const rng2 = createFastRandom(2);
@@ -102,6 +108,54 @@ describe('lane index maintenance', () => {
     removeMessageFromLaneIndex(lanes, message, 1);
 
     expect(lanes.has(4)).toBe(false);
+  });
+
+  it('does not touch the lane immediately after the occupied slot range', () => {
+    const lanes = new Map<number, LaneMessage[]>();
+    const expired: LaneMessage = { laneIndex: 2, laneArrayIndices: [] };
+    const adjacent: LaneMessage = { laneIndex: 3, laneArrayIndices: [] };
+    addMessageToLaneIndex(lanes, expired, 1);
+    addMessageToLaneIndex(lanes, adjacent, 1);
+    expired.laneArrayIndices[1] = 0;
+
+    removeMessageFromLaneIndex(lanes, expired, 1);
+
+    expect(lanes.get(3)).toEqual([adjacent]);
+  });
+
+  it('ignores missing lanes and stale lane-array indices', () => {
+    const retained: LaneMessage = { laneIndex: 1, laneArrayIndices: [] };
+
+    expect(() =>
+      removeMessageFromLaneIndex(
+        new Map(),
+        { laneIndex: 1, laneArrayIndices: [0] },
+        1
+      )
+    ).not.toThrow();
+
+    for (const index of [-1, 1]) {
+      const lanes = new Map<number, LaneMessage[]>([[1, [retained]]]);
+      removeMessageFromLaneIndex(lanes, { laneIndex: 1, laneArrayIndices: [index] }, 1);
+      expect(lanes.get(1)).toEqual([retained]);
+    }
+
+    const lanes = new Map<number, LaneMessage[]>([[1, [retained]]]);
+    const missingIndex: LaneMessage = { laneIndex: 1, laneArrayIndices: [] };
+    missingIndex.laneArrayIndices.length = 1;
+    removeMessageFromLaneIndex(lanes, missingIndex, 1);
+    expect(lanes.get(1)).toEqual([retained]);
+  });
+
+  it('does not write swap metadata outside the moved message slot range', () => {
+    const expired: LaneMessage = { laneIndex: 2, laneArrayIndices: [0] };
+    const retained: LaneMessage = { laneIndex: 10, laneArrayIndices: [] };
+    const lanes = new Map<number, LaneMessage[]>([[2, [expired, retained]]]);
+
+    removeMessageFromLaneIndex(lanes, expired, 1);
+
+    expect(lanes.get(2)).toEqual([retained]);
+    expect(Object.keys(retained.laneArrayIndices)).toEqual([]);
   });
 });
 
