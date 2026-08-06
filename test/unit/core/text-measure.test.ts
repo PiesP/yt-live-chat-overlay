@@ -2,13 +2,14 @@
 // Copyright (c) 2026 PiesP
 
 import { describe, it, expect, vi } from 'vitest';
+import type { ChatMessage } from '@app-types';
 import {
   clearTextMeasurementCaches,
   getFontString,
   measureBoundingBoxWidth,
   measureTextWidth,
 } from '@renderer/text-measure';
-import { DEFAULT_FONT_FAMILY } from '@util/design-tokens';
+import { DEFAULT_FONT_FAMILY, rendererLayout } from '@util/design-tokens';
 
 describe('getFontString', () => {
   const defaultFamily = DEFAULT_FONT_FAMILY;
@@ -201,6 +202,57 @@ describe('text measurement caches', () => {
       expect(isolatedTextMeasure.measureTextWidth('hello', '16px sans-serif')).toBe(42);
       expect(isolatedTextMeasure.measureTextWidth('hello', '16px sans-serif')).toBe(42);
       expect(measureText).toHaveBeenCalledTimes(1);
+    } finally {
+      getContext.mockRestore();
+      vi.resetModules();
+    }
+  });
+
+  it('keeps renderer dimensions finite and cached when Canvas ink bounds are invalid', async () => {
+    const measureText = vi.fn((text: string) => {
+      if (text === 'Mg') {
+        return {
+          width: 20,
+          actualBoundingBoxAscent: 0,
+          actualBoundingBoxDescent: 0,
+        } as TextMetrics;
+      }
+      return {
+        width: 42,
+        actualBoundingBoxLeft: Number.NaN,
+        actualBoundingBoxRight: Number.POSITIVE_INFINITY,
+      } as TextMetrics;
+    });
+    const context = { measureText } as unknown as CanvasRenderingContext2D;
+    const getContext = vi
+      .spyOn(HTMLCanvasElement.prototype, 'getContext')
+      .mockReturnValue(context);
+    const message = {
+      text: 'hello',
+      content: [{ type: 'text', content: 'hello' }],
+      kind: 'text',
+      timestamp: Date.now(),
+      authorType: 'normal',
+    } satisfies ChatMessage;
+
+    try {
+      vi.resetModules();
+      const [{ estimateMessageDimensions }, isolatedTextMeasure] = await Promise.all([
+        import('@renderer/shared'),
+        import('@renderer/text-measure'),
+      ]);
+      isolatedTextMeasure.clearTextMeasurementCaches();
+
+      const first = estimateMessageDimensions(message, 16, false);
+      const cached = estimateMessageDimensions(message, 16, false);
+
+      expect(first).toEqual({
+        width: 42 + rendererLayout.paddingH * 2,
+        height: Math.ceil(16 * 1.1),
+      });
+      expect(cached).toEqual(first);
+      expect(Object.values(first).every(Number.isFinite)).toBe(true);
+      expect(measureText.mock.calls.map(([text]) => text)).toEqual(['hello', 'Mg']);
     } finally {
       getContext.mockRestore();
       vi.resetModules();
