@@ -261,5 +261,20 @@ describe('LaneAllocator', () => {
       allocator.reset(defaultDimensions);
       expect(allocator.getUtilization()).toBe(0);
     });
+
+    it('observes expired lane timers without requiring resetBatch', () => {
+      allocator.reset(defaultDimensions);
+      allocator.commitPlacement(
+        { laneIndex: 0, waitMs: 0, laneY: 0, slotCount: 1, verticalOffset: 0 },
+        1_000,
+        4_000,
+        undefined,
+        undefined,
+        1
+      );
+
+      expect(allocator.getUtilization(1_001)).toBeGreaterThan(0);
+      expect(allocator.getUtilization(6_000)).toBe(0);
+    });
   });
 });

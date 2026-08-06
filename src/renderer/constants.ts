@@ -67,10 +67,7 @@ export const HORIZONTAL_STAGGER_PER_STEP = 40;
 /** Maximum horizontal stagger offset (px). */
 export const HORIZONTAL_STAGGER_MAX = 200;
 
-/** Maximum batch index for stagger exponential scale computation. */
-export const STAGGER_BATCH_MAX = 3;
-
-/** Exponential scale factor for stagger delay (negative value = decreasing delay). */
+/** Milliseconds per exponential-distribution sample unit for stagger delay. */
 export const STAGGER_EXP_SCALE = 25;
 
 /** Stagger queue depth thresholds for adaptive stagger. */

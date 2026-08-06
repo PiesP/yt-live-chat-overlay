@@ -4,6 +4,8 @@
 export interface DrainPlacementResult {
   placed: boolean;
   oversized: boolean;
+  /** Cumulative temporal stagger assigned to this committed message. */
+  staggerDelayMs?: number;
 }
 
 export interface DrainBatch<T> {
@@ -11,6 +13,7 @@ export interface DrainBatch<T> {
   readonly committed: T[];
   readonly unplaceable: T[];
   batchIndex: number;
+  staggerCursorMs: number;
 }
 
 interface DrainQueue<T> {
@@ -18,7 +21,7 @@ interface DrainQueue<T> {
 }
 
 export function createDrainBatch<T>(candidates: readonly T[]): DrainBatch<T> {
-  return { candidates, committed: [], unplaceable: [], batchIndex: 0 };
+  return { candidates, committed: [], unplaceable: [], batchIndex: 0, staggerCursorMs: 0 };
 }
 
 /** Record one placement result and return whether the message was committed. */
@@ -29,6 +32,9 @@ export function recordDrainResult<T>(
 ): boolean {
   if (result.oversized) batch.unplaceable.push(message);
   if (!result.placed) return false;
+  if (result.staggerDelayMs !== undefined && Number.isFinite(result.staggerDelayMs)) {
+    batch.staggerCursorMs = Math.max(batch.staggerCursorMs, result.staggerDelayMs);
+  }
   batch.batchIndex++;
   batch.committed.push(message);
   return true;

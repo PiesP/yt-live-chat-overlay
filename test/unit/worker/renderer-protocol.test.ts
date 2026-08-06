@@ -114,12 +114,12 @@ function makeWorkerMessage(overrides: Partial<WorkerMessage> = {}): WorkerMessag
   };
 }
 
-function initializeRenderer(): WorkerRenderer {
+function initializeRenderer(configOverrides: Record<string, unknown> = {}): WorkerRenderer {
   const renderer = new WorkerRenderer();
   renderer.handleMessage(
     makeEvent({
       type: 'init',
-      config: makeMinimalConfig(),
+      config: { ...makeMinimalConfig(), ...configOverrides },
       canvas: new MockOffscreenCanvas(),
       dpr: 1,
       width: 640,
@@ -206,12 +206,37 @@ describe('Worker message protocol', () => {
         10_000,
         { laneIndex: 0, waitMs: 125, laneY: 0, slotCount: 1, verticalOffset: 0 },
         0,
+        0,
+        1,
         640,
         360
       );
 
       expect(internals.activeMessages[0]?.startTime).toBe(10_125);
       expect(internals.activeMessages[0]?.fadeStartTime).toBe(10_125);
+    });
+
+    it('uses the shared fixed-mode stagger and safe centering policy', () => {
+      const renderer = initializeRenderer({ danmakuMode: 'bottom' });
+      const internals = renderer as unknown as {
+        activateMessage: (...args: unknown[]) => number;
+        activeMessages: Array<{ startTime: number; startX: number }>;
+      };
+
+      const staggerDelay = internals.activateMessage(
+        makeWorkerMessage({ width: 800 }),
+        10_000,
+        { laneIndex: 0, waitMs: 0, laneY: 0, slotCount: 1, verticalOffset: 0 },
+        1,
+        0,
+        1,
+        640,
+        360
+      );
+
+      expect(staggerDelay).toBeGreaterThan(0);
+      expect(internals.activeMessages[0]?.startTime).toBe(10_000 + staggerDelay);
+      expect(internals.activeMessages[0]?.startX).toBe(0);
     });
 
     it('keeps original content active for an empty translated string', () => {
@@ -235,6 +260,8 @@ describe('Worker message protocol', () => {
         10_000,
         { laneIndex: 0, waitMs: 0, laneY: 0, slotCount: 1, verticalOffset: 0 },
         0,
+        0,
+        1,
         640,
         360
       );
@@ -261,6 +288,114 @@ describe('Worker message protocol', () => {
 
       expect(internals.pendingQueue).toHaveLength(0);
       expect(internals.totalDrops).toBe(1);
+    });
+
+    it('does not count transient placement failures as drops or starve later candidates', () => {
+      const renderer = initializeRenderer();
+      const messages = Array.from({ length: 17 }, (_, index) =>
+        makeWorkerMessage({ id: `queued-${index}` })
+      );
+      const placement = {
+        laneIndex: 0,
+        waitMs: 0,
+        laneY: 0,
+        slotCount: 1,
+        verticalOffset: 0,
+      };
+      const findPlacement = vi.fn(() =>
+        findPlacement.mock.calls.length === 17 ? placement : null
+      );
+      const activateMessage = vi.fn(() => 0);
+      const internals = renderer as unknown as {
+        drainQueue: (now: number, width: number, height: number) => void;
+        pendingQueue: WorkerMessage[];
+        totalDrops: number;
+        findPlacement: typeof findPlacement;
+        checkCollision: ReturnType<typeof vi.fn>;
+        activateMessage: typeof activateMessage;
+      };
+      internals.pendingQueue.push(...messages);
+      internals.findPlacement = findPlacement;
+      internals.checkCollision = vi.fn(() => true);
+      internals.activateMessage = activateMessage;
+
+      internals.drainQueue(10_000, 640, 360);
+
+      expect(findPlacement).toHaveBeenCalledTimes(17);
+      expect(activateMessage).toHaveBeenCalledOnce();
+      expect(internals.pendingQueue).toHaveLength(16);
+      expect(internals.totalDrops).toBe(0);
+    });
+
+    it('re-sorts the Worker queue after replacing its lowest-priority entry', () => {
+      const renderer = initializeRenderer({ queueMaxSize: 2 });
+      const internals = renderer as unknown as {
+        pendingQueue: WorkerMessage[];
+        pendingQueueSortNeeded: boolean;
+      };
+      internals.pendingQueue.push(
+        makeWorkerMessage({ id: 'low-a', priority: 0 }),
+        makeWorkerMessage({ id: 'low-b', priority: 1 })
+      );
+      internals.pendingQueueSortNeeded = false;
+
+      renderer.handleMessage(
+        makeEvent({
+          type: 'addMessages',
+          messages: [makeWorkerMessage({ id: 'high', priority: 100 })],
+        })
+      );
+
+      expect(internals.pendingQueueSortNeeded).toBe(true);
+    });
+
+    it('blocks a faster follower until it can no longer overtake the active comment', () => {
+      const renderer = initializeRenderer();
+      const placement = {
+        laneIndex: 0,
+        waitMs: 0,
+        laneY: 18,
+        slotCount: 1,
+        verticalOffset: 0,
+      };
+      const active = {
+        y: 18,
+        height: 20,
+        width: 100,
+        startX: 640,
+        startTime: 7_000,
+        pausedDuration: 0,
+        duration: 8_400,
+        invDuration: 1 / 8_400,
+      };
+      const internals = renderer as unknown as {
+        activeMessagesByLane: Map<number, unknown[]>;
+        checkCollision(
+          candidatePlacement: typeof placement,
+          entry: WorkerMessage,
+          speedTier: number,
+          batchIndex: number,
+          previousStaggerDelayMs: number,
+          now: number,
+          width: number
+        ): boolean;
+      };
+      internals.activeMessagesByLane.set(0, [active]);
+
+      expect(
+        internals.checkCollision(placement, makeWorkerMessage(), 1, 0, 0, 10_000, 640)
+      ).toBe(true);
+      expect(
+        internals.checkCollision(
+          placement,
+          makeWorkerMessage({ burstSpeedMultiplier: 3 }),
+          1,
+          0,
+          0,
+          10_000,
+          640
+        )
+      ).toBe(false);
     });
 
     it('preserves decoded image caches across ordinary config updates', () => {

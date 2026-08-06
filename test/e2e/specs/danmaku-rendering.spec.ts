@@ -514,6 +514,125 @@ test.describe('Danmaku Rendering', () => {
     expect(overlayErrors).toEqual([]);
   });
 
+  test('anchors fixed comments to the selected top and bottom safe-zone edges', async ({
+    page,
+  }, testInfo) => {
+    const runtimeErrors: string[] = [];
+    page.on('pageerror', (error) => runtimeErrors.push(error.message));
+    page.on('console', (message) => {
+      if (message.type() === 'error') runtimeErrors.push(message.text());
+    });
+    await page.addInitScript(() => {
+      Object.defineProperty(HTMLCanvasElement.prototype, 'transferControlToOffscreen', {
+        configurable: true,
+        value: () => {
+          throw new Error('Force the main-thread renderer for fixed-position pixel inspection');
+        },
+      });
+    });
+
+    await setupOverlayPage(page, { platform: 'userscript' });
+    await applySettings(page, {
+      allowShortTextMessages: true,
+      backgroundColors: { normal: '#FF0000B3' },
+      danmakuMode: 'top',
+      motionBlurEnabled: false,
+      outline: { enabled: false },
+      safeTop: 0.1,
+      safeBottom: 0.1,
+      showAuthor: { normal: false },
+      showDebugOverlay: true,
+      topBottomDurationMs: 1200,
+    });
+
+    const appendComment = (id: string, text: string): Promise<void> =>
+      page.evaluate(
+        ({ messageId, messageText }) => {
+          const items = document.querySelector('yt-live-chat-item-list-renderer #items');
+          if (!items) throw new Error('Mock live chat items container is missing');
+
+          const renderer = document.createElement('yt-live-chat-text-message-renderer');
+          renderer.id = messageId;
+          const author = document.createElement('span');
+          author.id = 'author-name';
+          author.textContent = 'Position Author';
+          const message = document.createElement('span');
+          message.id = 'message';
+          message.textContent = messageText;
+          renderer.append(author, message);
+          items.append(renderer);
+        },
+        { messageId: id, messageText: text }
+      );
+
+    const canvas = page.locator(`#${OVERLAY_ID} canvas`);
+    const readInkBounds = (): Promise<{
+      minY: number;
+      maxY: number;
+      height: number;
+      count: number;
+    } | null> =>
+      canvas.evaluate((element: HTMLCanvasElement) => {
+        const context = element.getContext('2d');
+        if (!context) return null;
+        const image = context.getImageData(0, 0, element.width, element.height);
+        let minY = image.height;
+        let maxY = -1;
+        let count = 0;
+        for (let offset = 3; offset < image.data.length; offset += 4) {
+          if (image.data[offset]! <= 20) continue;
+          const y = Math.floor((offset - 3) / 4 / image.width);
+          minY = Math.min(minY, y);
+          maxY = Math.max(maxY, y);
+          count++;
+        }
+        return count > 0 ? { minY, maxY, height: image.height, count } : null;
+      });
+
+    await appendComment('e2e-fixed-top', 'TOP SAFE ZONE');
+    await expect(page.locator('#yt-chat-overlay-debug > div').first()).toHaveText(
+      'Rcvd: 1 | Rndr: 1'
+    );
+    await expect.poll(readInkBounds, { timeout: 5000 }).not.toBeNull();
+    const topBounds = await readInkBounds();
+    expect(topBounds).not.toBeNull();
+    expect(topBounds!.count).toBeGreaterThan(100);
+    expect(topBounds!.maxY).toBeLessThan(topBounds!.height / 2);
+    await canvas.screenshot({ path: testInfo.outputPath('fixed-top-position.png') });
+
+    await expect.poll(readInkBounds, { timeout: 7000 }).toBeNull();
+    await applySettings(page, {
+      backgroundColors: { normal: '#0000FFB3' },
+      danmakuMode: 'bottom',
+    });
+    await page.evaluate(async () => {
+      const handle = (window as unknown as Record<string, unknown>).__ytChatOverlay as
+        | { restartRuntime?: () => Promise<void> }
+        | undefined;
+      if (typeof handle?.restartRuntime !== 'function') {
+        throw new Error('Overlay restart handle is not ready');
+      }
+      await handle.restartRuntime();
+    });
+    await expect(canvas).toBeAttached();
+    await appendComment('e2e-fixed-bottom', 'BOTTOM SAFE ZONE');
+    await expect(page.locator('#yt-chat-overlay-debug > div').first()).toHaveText(
+      'Rcvd: 1 | Rndr: 1'
+    );
+    await expect.poll(readInkBounds, { timeout: 5000 }).not.toBeNull();
+    const bottomBounds = await readInkBounds();
+    expect(bottomBounds).not.toBeNull();
+    expect(bottomBounds!.count).toBeGreaterThan(100);
+    expect(bottomBounds!.minY).toBeGreaterThan(bottomBounds!.height / 2);
+    expect(bottomBounds!.minY).toBeGreaterThan(topBounds!.maxY);
+    await canvas.screenshot({ path: testInfo.outputPath('fixed-bottom-position.png') });
+
+    const overlayErrors = runtimeErrors.filter((error) =>
+      /yt-live-chat-overlay|danmaku|renderer|worker/i.test(error)
+    );
+    expect(overlayErrors).toEqual([]);
+  });
+
   test('overlay does not throw errors during initialization', async ({ page }) => {
     const errors: string[] = [];
     page.on('pageerror', (err) => errors.push(err.message));

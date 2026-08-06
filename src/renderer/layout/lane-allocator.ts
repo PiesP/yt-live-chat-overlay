@@ -3,6 +3,7 @@
 
 import type { FontWeight, OverlayDimensions } from '@app-types';
 import { SPEED_TIER } from '@renderer/constants';
+import type { LaneSelectionStrategy } from '@renderer/layout/lane-shared';
 import {
   buildLaneHeap,
   computeLaneY,
@@ -97,10 +98,6 @@ export class LaneAllocator {
   private indexMap: Map<number, number> = new Map();
   private laneHeight = 0;
   private numLanes = 0;
-  /** Cached utilization value, recomputed in resetBatch for O(1) reads. */
-  private cachedUtilization = 0;
-  /** Number of lanes currently occupied (availableAt > now). Maintained incrementally. */
-  private occupiedCount = 0;
 
   /**
    * Set of lane indices that collided with an active message in the current
@@ -151,9 +148,6 @@ export class LaneAllocator {
     this.indexMap = new Map();
     this.collidedLanes.clear();
     this.speedTierLanes.clear();
-    this.cachedUtilization = 0;
-    this.occupiedCount = 0;
-    this.utilizationRecountCounter = 0;
     if (!dimensions) {
       this.laneHeight = 0;
       this.numLanes = 0;
@@ -230,19 +224,20 @@ export class LaneAllocator {
       ])
     );
     this.collidedLanes.clear();
-    this.cachedUtilization = 0;
-    this.occupiedCount = 0;
-    this.utilizationRecountCounter = 0;
   }
 
   getLaneCount(): number {
     return this.numLanes;
   }
 
-  /** Get current lane utilization ratio (0-1): occupied lanes / total lanes. O(1) cached value. */
-  getUtilization(): number {
+  /** Get current lane utilization ratio from live lane timers. */
+  getUtilization(now: number = performance.now()): number {
     if (this.heap.length === 0) return 0;
-    return this.cachedUtilization;
+    let occupied = 0;
+    for (const [, availableAt] of this.heap) {
+      if (availableAt > now) occupied++;
+    }
+    return occupied / this.heap.length;
   }
 
   getLaneHeight(): number {
@@ -258,6 +253,7 @@ export class LaneAllocator {
     dimensions: OverlayDimensions,
     speedTier: number = SPEED_TIER.MID,
     now: number = performance.now(),
+    strategy: LaneSelectionStrategy = 'spread',
     random: () => number = Math.random
   ): LanePlacement | null {
     const totalLanes = this.numLanes;
@@ -274,7 +270,8 @@ export class LaneAllocator {
       this.laneHeight,
       this.options.scrollDurationMaxMs,
       speedTier,
-      random
+      random,
+      strategy
     );
     if (!result) return null;
 
@@ -303,9 +300,10 @@ export class LaneAllocator {
     durationMs: number,
     msgWidth?: number,
     screenWidth?: number,
-    speedTier: number = SPEED_TIER.MID
+    speedTier: number = SPEED_TIER.MID,
+    entryOffsetPx = 0
   ): void {
-    const occupancyMs = this.computeOccupancyMs(durationMs, msgWidth, screenWidth);
+    const occupancyMs = this.computeOccupancyMs(durationMs, msgWidth, screenWidth, entryOffsetPx);
     const nextAvailable = startTime + occupancyMs;
     const startIdx = placement.laneIndex;
 
@@ -326,15 +324,6 @@ export class LaneAllocator {
   }
 
   // ── Batch control ─────────────────────────────────────────────────────
-
-  /** Frames until next utilization recount — amortizes the O(n) scan. */
-  private utilizationRecountCounter = 0;
-  /** Recount interval — recompute utilization every N frames. */
-  // C3: Reduced from 10 to 3 frames. A stale 100% utilization for 10 frames
-  // (167ms) could keep anti-block active after lanes free up, causing backlog
-  // messages to be permanently stuck (they skip Phase 3). 3 frames (~50ms)
-  // is enough amortization without risking backlog deadlock.
-  private static readonly UTILIZATION_RECOUNT_INTERVAL = 3;
 
   /**
    * Called at the start of each drainQueue batch. Clears per-frame collision
@@ -365,21 +354,6 @@ export class LaneAllocator {
     // Prune expired speed-tier entries and clear collision set.
     const state = this as unknown as import('@renderer/layout/lane-shared').LaneAllocationState;
     resetBatchShared(state, now);
-
-    // Amortized utilization recount: scan the heap every N frames instead of
-    // every frame. Between recounts, the cached value is slightly stale but
-    // the anti-block gate uses a gradual probabilistic threshold, so a ~5-frame
-    // staleness is visually indistinguishable.
-    this.utilizationRecountCounter++;
-    if (this.utilizationRecountCounter >= LaneAllocator.UTILIZATION_RECOUNT_INTERVAL) {
-      this.utilizationRecountCounter = 0;
-      let occupied = 0;
-      for (const [, availableAt] of this.heap) {
-        if (availableAt > now) occupied++;
-      }
-      this.occupiedCount = occupied;
-    }
-    this.cachedUtilization = this.heap.length > 0 ? this.occupiedCount / this.heap.length : 0;
   }
 
   /**
@@ -402,14 +376,16 @@ export class LaneAllocator {
   private computeOccupancyMs(
     durationMs: number,
     msgWidthPx?: number,
-    screenWidth?: number
+    screenWidth?: number,
+    entryOffsetPx = 0
   ): number {
     return computeOccupancyMs(
       durationMs,
       this.options.exitPaddingPx,
       this.options.headwayGapRatio,
       msgWidthPx,
-      screenWidth
+      screenWidth,
+      entryOffsetPx
     );
   }
 

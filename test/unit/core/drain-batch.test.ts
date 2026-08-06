@@ -16,8 +16,32 @@ describe('Canvas drain batch bookkeeping', () => {
     expect(recordDrainResult(batch, messages[3]!, { placed: true, oversized: false })).toBe(true);
 
     expect(batch.batchIndex).toBe(2);
+    expect(batch.staggerCursorMs).toBe(0);
     expect(batch.committed).toEqual(['placed-a', 'placed-b']);
     expect(batch.unplaceable).toEqual(['oversized']);
+  });
+
+  it('advances the stagger cursor only for committed placements', () => {
+    const batch = createDrainBatch(['first', 'transient', 'second']);
+
+    recordDrainResult(batch, 'first', {
+      placed: true,
+      oversized: false,
+      staggerDelayMs: 40,
+    });
+    recordDrainResult(batch, 'transient', {
+      placed: false,
+      oversized: false,
+      staggerDelayMs: 80,
+    });
+    recordDrainResult(batch, 'second', {
+      placed: true,
+      oversized: false,
+      staggerDelayMs: 45,
+    });
+
+    expect(batch.batchIndex).toBe(2);
+    expect(batch.staggerCursorMs).toBe(45);
   });
 
   it('commits successful and permanently unplaceable removals separately', () => {

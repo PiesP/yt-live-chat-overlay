@@ -37,6 +37,49 @@ export function computeBaseHeadwayPx(msgWidth: number, headwayGapRatio: number):
   );
 }
 
+export interface EntryHeadwayInput {
+  activeWidthPx: number;
+  headwayGapRatio: number;
+  activeTravelDistancePx: number;
+  activeDurationMs: number;
+  activeElapsedMs: number;
+  incomingTravelDistancePx: number;
+  incomingDurationMs: number;
+}
+
+/**
+ * Compute the entry clearance needed to prevent a faster incoming comment
+ * from catching an active comment before the latter leaves the viewport.
+ */
+export function computeRequiredEntryHeadwayPx(input: EntryHeadwayInput): number {
+  const baseHeadwayPx = computeBaseHeadwayPx(input.activeWidthPx, input.headwayGapRatio);
+  const motionValues = [
+    input.activeTravelDistancePx,
+    input.activeDurationMs,
+    input.activeElapsedMs,
+    input.incomingTravelDistancePx,
+    input.incomingDurationMs,
+  ];
+  if (
+    motionValues.some((value) => !Number.isFinite(value)) ||
+    input.activeTravelDistancePx < 0 ||
+    input.incomingTravelDistancePx < 0 ||
+    input.activeDurationMs <= 0 ||
+    input.incomingDurationMs <= 0
+  ) {
+    return baseHeadwayPx;
+  }
+
+  const activeVelocityPxPerMs = input.activeTravelDistancePx / input.activeDurationMs;
+  const incomingVelocityPxPerMs = input.incomingTravelDistancePx / input.incomingDurationMs;
+  const remainingActiveMs = Math.max(0, input.activeDurationMs - input.activeElapsedMs);
+  const catchUpDistancePx = Math.max(
+    0,
+    (incomingVelocityPxPerMs - activeVelocityPxPerMs) * remainingActiveMs
+  );
+  return Math.ceil(baseHeadwayPx + catchUpDistancePx);
+}
+
 /** Speed tiers within 1 level of each other can share lanes. */
 export function areSpeedTiersCompatible(a: number, b: number): boolean {
   return Math.abs(a - b) <= 1;
@@ -70,13 +113,15 @@ export function computeLaneY(
  * @param headwayGapRatio Headway gap as fraction of message width
  * @param msgWidthPx     Optional message width for scrolling mode
  * @param screenWidth    Optional screen width for scrolling mode
+ * @param entryOffsetPx  Distance beyond the viewport edge at activation
  */
 export function computeOccupancyMs(
   durationMs: number,
   exitPaddingPx: number,
   headwayGapRatio: number,
   msgWidthPx?: number,
-  screenWidth?: number
+  screenWidth?: number,
+  entryOffsetPx = 0
 ): number {
   const safeDuration = Math.max(0, durationMs);
   // Top/bottom mode: full duration + safety cooldown
@@ -86,10 +131,11 @@ export function computeOccupancyMs(
   }
 
   // Scrolling mode: precision exit-time
-  const totalDistance = screenWidth + msgWidthPx + exitPaddingPx;
+  const safeEntryOffset = Number.isFinite(entryOffsetPx) ? Math.max(0, entryOffsetPx) : 0;
+  const totalDistance = screenWidth + msgWidthPx + exitPaddingPx + safeEntryOffset;
   if (totalDistance <= 0) return safeDuration;
   const headwayPx = computeBaseHeadwayPx(msgWidthPx, headwayGapRatio);
-  const rightEdgePassFraction = (msgWidthPx + headwayPx) / totalDistance;
+  const rightEdgePassFraction = (safeEntryOffset + msgWidthPx + headwayPx) / totalDistance;
   return Math.round(rightEdgePassFraction * safeDuration);
 }
 
@@ -109,6 +155,31 @@ export interface LaneAllocationState {
   numLanes: number;
   speedTierLanes: Map<number, { tier: number; until: number }>;
   collidedLanes: Set<number>;
+}
+
+/**
+ * Vertical placement policy for a newly visible comment.
+ *
+ * - spread: distribute scrolling comments across every available lane.
+ * - top: anchor fixed comments at the top and grow downward.
+ * - bottom: anchor fixed comments at the bottom and grow upward.
+ */
+export type LaneSelectionStrategy = 'spread' | 'top' | 'bottom';
+
+function laneAtOffset(offset: number, maxLane: number, strategy: LaneSelectionStrategy): number {
+  return strategy === 'bottom' ? maxLane - offset : offset;
+}
+
+function selectCandidate(
+  candidates: readonly number[],
+  strategy: LaneSelectionStrategy,
+  random: () => number
+): number | undefined {
+  if (candidates.length === 0) return undefined;
+  if (strategy !== 'spread') return candidates[0];
+  const rawIndex = Math.floor(random() * candidates.length);
+  const index = Math.max(0, Math.min(candidates.length - 1, rawIndex));
+  return candidates[index];
 }
 
 /**
@@ -268,7 +339,6 @@ export function commitPlacementShared(
     const idx = laneIndex + s;
     state.speedTierLanes.set(idx, { tier: speedTier, until });
     heapUpdateLane(state.heap, state.indexMap, idx, nextAvailable);
-    state.collidedLanes.add(idx);
   }
 }
 
@@ -304,7 +374,8 @@ export function findPlacementShared(
   laneHeight: number,
   maxWaitMs: number,
   speedTier: number,
-  random: () => number = Math.random
+  random: () => number = Math.random,
+  strategy: LaneSelectionStrategy = 'spread'
 ): { laneIndex: number; waitMs: number } | null {
   if (state.heap.length === 0) return null;
   const slotCount = Math.max(1, Math.ceil(msgHeight / laneHeight));
@@ -312,7 +383,16 @@ export function findPlacementShared(
   if (numLanes <= 0) return null;
 
   if (slotCount <= 1) {
-    return allocateSingleLaneShared(state, now, 0, numLanes, maxWaitMs, speedTier, random);
+    return allocateSingleLaneShared(
+      state,
+      now,
+      0,
+      numLanes,
+      maxWaitMs,
+      speedTier,
+      random,
+      strategy
+    );
   }
 
   // Multi-slot: scan for contiguous block
@@ -325,8 +405,11 @@ export function findPlacementShared(
     return areSpeedTiersCompatible(speedTier, active.tier);
   };
 
-  // Phase 1: zero-wait block
-  for (let startIdx = 0; startIdx <= maxStartLane; startIdx++) {
+  // Phase 1: zero-wait block. Scrolling comments sample uniformly from all
+  // available blocks; fixed comments use the edge matching their mode.
+  const zeroWaitBlocks: number[] = [];
+  for (let offset = 0; offset <= maxStartLane; offset++) {
+    const startIdx = laneAtOffset(offset, maxStartLane, strategy);
     let allZeroWait = true;
     for (let s = 0; s < slotCount; s++) {
       const slotIdx = startIdx + s;
@@ -350,12 +433,20 @@ export function findPlacementShared(
         break;
       }
     }
-    if (allZeroWait) return { laneIndex: startIdx, waitMs: 0 };
+    if (allZeroWait) {
+      zeroWaitBlocks.push(startIdx);
+      if (strategy !== 'spread') break;
+    }
+  }
+  const zeroWaitLane = selectCandidate(zeroWaitBlocks, strategy, random);
+  if (zeroWaitLane !== undefined) {
+    return { laneIndex: zeroWaitLane, waitMs: 0 };
   }
 
   // Phase 2: busy block within maxWaitMs
   let bestBlock: { laneIndex: number; waitMs: number } | null = null;
-  for (let startIdx = 0; startIdx <= maxStartLane; startIdx++) {
+  for (let offset = 0; offset <= maxStartLane; offset++) {
+    const startIdx = laneAtOffset(offset, maxStartLane, strategy);
     let allCompatible = true;
     let blockMaxWait = 0;
     for (let s = 0; s < slotCount; s++) {
@@ -395,7 +486,8 @@ export function findPlacementShared(
   // on a single lane, causing visual overlap.
   if (slotCount > 1) {
     let bestBlock: { laneIndex: number; waitMs: number } | null = null;
-    for (let startIdx = 0; startIdx <= maxStartLane; startIdx++) {
+    for (let offset = 0; offset <= maxStartLane; offset++) {
+      const startIdx = laneAtOffset(offset, maxStartLane, strategy);
       let blockMaxWait = 0;
       let allAvailable = true;
       for (let s = 0; s < slotCount; s++) {
@@ -427,7 +519,7 @@ export function findPlacementShared(
   }
 
   // Single-slot fallback
-  return allocateSingleLaneShared(state, now, 0, numLanes, maxWaitMs, speedTier, random);
+  return allocateSingleLaneShared(state, now, 0, numLanes, maxWaitMs, speedTier, random, strategy);
 }
 
 /**
@@ -441,15 +533,18 @@ export function allocateSingleLaneShared(
   laneEnd: number,
   maxWaitMs: number,
   speedTier: number,
-  random: () => number = Math.random
+  random: () => number = Math.random,
+  strategy: LaneSelectionStrategy = 'spread'
 ): { laneIndex: number; waitMs: number } | null {
   if (state.heap.length === 0) return null;
 
-  let firstBusy: { laneIndex: number; waitMs: number } | null = null;
+  let fastestBusy: { laneIndex: number; waitMs: number } | null = null;
   let speedMatched: { laneIndex: number; waitMs: number } | null = null;
-  let zeroWaitCandidates: number[] | null = null;
+  const zeroWaitCandidates: number[] = [];
 
-  for (let i = laneStart; i < laneEnd; i++) {
+  const maxOffset = laneEnd - laneStart - 1;
+  for (let offset = 0; offset <= maxOffset; offset++) {
+    const i = laneStart + laneAtOffset(offset, maxOffset, strategy);
     if (state.collidedLanes.has(i)) continue;
 
     const active = state.speedTierLanes.get(i);
@@ -461,7 +556,9 @@ export function allocateSingleLaneShared(
     if (avail === undefined) continue;
     const wait = Math.max(0, Math.ceil(avail - now));
     if (wait > 0) {
-      if (!firstBusy) firstBusy = { laneIndex: i, waitMs: wait };
+      if (!fastestBusy || wait < fastestBusy.waitMs) {
+        fastestBusy = { laneIndex: i, waitMs: wait };
+      }
       if (!speedMatched || wait < speedMatched.waitMs) {
         const hasSameTier = active !== undefined && active.until > now && active.tier === speedTier;
         if (hasSameTier) speedMatched = { laneIndex: i, waitMs: wait };
@@ -469,30 +566,19 @@ export function allocateSingleLaneShared(
       continue;
     }
 
-    // Zero-wait lane found: collect candidates for randomized distribution.
-    // Collecting up to 4 candidates instead of returning the first one
-    // prevents diagonal patterns during bursts — where messages would
-    // otherwise always enter lane 0 → lane 1 → lane 2 in strict top-first
-    // order, creating an unnatural visual flow.
-    if (!zeroWaitCandidates) zeroWaitCandidates = [];
+    // Scrolling comments use the entire safe zone instead of only the first
+    // four lanes. Fixed comments stop at their nearest edge lane.
     zeroWaitCandidates.push(i);
-
-    // Collect a small pool of candidates, then randomly pick one below.
-    // Cap at 4 to bound scan cost in high-density modes.
-    if (zeroWaitCandidates.length < 4) continue;
-    break;
+    if (strategy !== 'spread') break;
   }
 
-  // After loop: randomly pick from collected zero-wait candidates.
-  // Random selection distributes burst messages across lanes instead
-  // of funneling them all through the topmost lane.
-  if (zeroWaitCandidates && zeroWaitCandidates.length > 0) {
-    const idx = Math.floor(random() * zeroWaitCandidates.length) % zeroWaitCandidates.length;
-    return { laneIndex: zeroWaitCandidates[idx]!, waitMs: 0 };
+  const zeroWaitLane = selectCandidate(zeroWaitCandidates, strategy, random);
+  if (zeroWaitLane !== undefined) {
+    return { laneIndex: zeroWaitLane, waitMs: 0 };
   }
 
   if (speedMatched && speedMatched.waitMs <= maxWaitMs) return speedMatched;
-  if (firstBusy && firstBusy.waitMs <= maxWaitMs && speedTier !== SPEED_TIER.BACKLOG)
-    return firstBusy;
+  if (fastestBusy && fastestBusy.waitMs <= maxWaitMs && speedTier !== SPEED_TIER.BACKLOG)
+    return fastestBusy;
   return null;
 }

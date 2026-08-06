@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   computeBaseHeadwayPx,
+  computeRequiredEntryHeadwayPx,
   areSpeedTiersCompatible,
   computeLaneY,
   computeOccupancyMs,
@@ -67,6 +68,50 @@ describe('computeBaseHeadwayPx', () => {
 
   it('returns min for Infinity inputs', () => {
     expect(computeBaseHeadwayPx(Infinity, 0.08)).toBeGreaterThanOrEqual(16);
+  });
+});
+
+describe('computeRequiredEntryHeadwayPx', () => {
+  it('uses the base gap when the incoming comment cannot catch the active one', () => {
+    expect(
+      computeRequiredEntryHeadwayPx({
+        activeWidthPx: 300,
+        headwayGapRatio: 0.08,
+        activeTravelDistancePx: 1_600,
+        activeDurationMs: 8_000,
+        activeElapsedMs: 2_000,
+        incomingTravelDistancePx: 1_400,
+        incomingDurationMs: 7_000,
+      })
+    ).toBe(24);
+  });
+
+  it('reserves the full catch-up distance for a faster incoming comment', () => {
+    expect(
+      computeRequiredEntryHeadwayPx({
+        activeWidthPx: 300,
+        headwayGapRatio: 0.08,
+        activeTravelDistancePx: 1_600,
+        activeDurationMs: 8_000,
+        activeElapsedMs: 2_000,
+        incomingTravelDistancePx: 1_800,
+        incomingDurationMs: 6_000,
+      })
+    ).toBe(624);
+  });
+
+  it('falls back to the base gap for invalid motion data', () => {
+    expect(
+      computeRequiredEntryHeadwayPx({
+        activeWidthPx: 300,
+        headwayGapRatio: 0.08,
+        activeTravelDistancePx: Number.NaN,
+        activeDurationMs: 8_000,
+        activeElapsedMs: 2_000,
+        incomingTravelDistancePx: 1_800,
+        incomingDurationMs: 6_000,
+      })
+    ).toBe(24);
   });
 });
 
@@ -159,6 +204,13 @@ describe('computeOccupancyMs', () => {
       // rightEdgePassFraction = (300 + 24) / 2320
       // result = round(0.13966 * 0) = 0
       expect(result).toBe(0);
+    });
+
+    it('holds the lane until a horizontally staggered message clears the entry zone', () => {
+      // total distance = 1000 + 200 + 100 + 80 = 1380px
+      // entry clear distance = 80 + 200 + 16px headway = 296px
+      // duration at 200px/s = 6900ms; occupancy = 296 / 1380 * 6900 = 1480ms
+      expect(computeOccupancyMs(6900, 100, 0.08, 200, 1000, 80)).toBe(1480);
     });
   });
 });
@@ -294,9 +346,32 @@ describe('allocateSingleLaneShared', () => {
 
   it('returns zero-wait lane when available', () => {
     const state = makeState(8);
-    const result = allocateSingleLaneShared(state, 0, 0, 8, 100, 1, () => 0.75);
+    const result = allocateSingleLaneShared(state, 0, 0, 8, 100, 1, () => 0.75, 'spread');
     expect(result).not.toBeNull();
     expect(result!.waitMs).toBe(0);
+    expect(result!.laneIndex).toBe(6);
+  });
+
+  it('uses the full safe-zone lane range for scrolling placement', () => {
+    const state = makeState(8);
+
+    expect(
+      allocateSingleLaneShared(state, 0, 0, 8, 100, 1, () => 0, 'spread')?.laneIndex
+    ).toBe(0);
+    expect(
+      allocateSingleLaneShared(state, 0, 0, 8, 100, 1, () => 0.999, 'spread')?.laneIndex
+    ).toBe(7);
+  });
+
+  it('selects fixed lanes from the edge matching the display mode', () => {
+    const state = makeState(8);
+
+    expect(
+      allocateSingleLaneShared(state, 0, 0, 8, 100, 1, () => 0.5, 'top')?.laneIndex
+    ).toBe(0);
+    expect(
+      allocateSingleLaneShared(state, 0, 0, 8, 100, 1, () => 0.5, 'bottom')?.laneIndex
+    ).toBe(7);
   });
 
   it('skips collided lanes', () => {
@@ -342,6 +417,19 @@ describe('findPlacementShared', () => {
     expect(result!.laneIndex).toBeGreaterThanOrEqual(0);
     expect(result!.laneIndex).toBeLessThanOrEqual(5); // maxStartLane = 8-3 = 5
   });
+
+  it('anchors fixed multi-slot messages to the matching viewport edge', () => {
+    const topState = makeState(8);
+    const bottomState = makeState(8);
+
+    expect(findPlacementShared(topState, 0, 100, 40, 100, 1, () => 0.5, 'top')).toEqual({
+      laneIndex: 0,
+      waitMs: 0,
+    });
+    expect(
+      findPlacementShared(bottomState, 0, 100, 40, 100, 1, () => 0.5, 'bottom')
+    ).toEqual({ laneIndex: 5, waitMs: 0 });
+  });
 });
 
 // ── resetBatchShared ─────────────────────────────────────────────
@@ -383,7 +471,7 @@ describe('commitPlacementShared', () => {
     const state = makeState(4);
     commitPlacementShared(state, 1, 1, 1000, 600, 3000, 1);
 
-    expect(state.collidedLanes.has(1)).toBe(true);
+    expect(state.collidedLanes.has(1)).toBe(false);
     expect(state.speedTierLanes.get(1)).toEqual({ tier: 1, until: 4000 });
     const avail = heapGetSlotAvailableAt(state.heap, state.indexMap, 1);
     expect(avail).toBe(1600);
@@ -393,9 +481,9 @@ describe('commitPlacementShared', () => {
     const state = makeState(8);
     commitPlacementShared(state, 2, 3, 2000, 1000, 5000, 2);
 
-    expect(state.collidedLanes.has(2)).toBe(true);
-    expect(state.collidedLanes.has(3)).toBe(true);
-    expect(state.collidedLanes.has(4)).toBe(true);
+    expect(state.collidedLanes.has(2)).toBe(false);
+    expect(state.collidedLanes.has(3)).toBe(false);
+    expect(state.collidedLanes.has(4)).toBe(false);
     expect(state.collidedLanes.has(5)).toBe(false);
 
     expect(state.speedTierLanes.get(2)!.tier).toBe(2);

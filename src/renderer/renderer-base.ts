@@ -22,6 +22,7 @@ import { PerAuthorRateLimiter } from '@media/author-rate-limiter';
 import { ANTI_BLOCK_FREE_RATIO } from '@renderer/constants';
 import { BurstDetector } from '@renderer/layout/burst-detector';
 import { LaneAllocator } from '@renderer/layout/lane-allocator';
+import { getMessagePriority } from '@renderer/message-priority';
 import { clearTextMeasurementCaches, setTextMeasureCallback } from '@renderer/text-measure';
 import { rendererLayout } from '@util/design-tokens';
 import { createLogger } from '@util/logging';
@@ -90,7 +91,6 @@ export abstract class RendererBase {
   private static readonly PAUSE_BUFFER_MAX = 200;
 
   // speedBoostMax — read from this.settings
-  private static readonly BACKLOG_PRIORITY_OFFSET = 50;
 
   /** Lane density factor per burst level.
    *  1.0 = full-cell (normal/elevated), 0.75 = transitional (high), 0.5 = half-cell (extreme). */
@@ -459,9 +459,7 @@ export abstract class RendererBase {
 
   /** Compute priority score for a chat message (higher = more important, rendered first). */
   public static getMessagePriority(message: ChatMessage): number {
-    let priority = rendererLayout.kindPriority[message.kind];
-    if (message.isBacklog) priority -= RendererBase.BACKLOG_PRIORITY_OFFSET;
-    return priority;
+    return getMessagePriority(message);
   }
 
   destroy(): void {
