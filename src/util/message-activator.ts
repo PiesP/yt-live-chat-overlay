@@ -64,6 +64,7 @@ export class MessageActivator {
     msg.message = EMPTY_CHAT_MESSAGE;
     msg.renderMessage = EMPTY_CHAT_MESSAGE;
     msg.translatedText = null;
+    delete msg.translationHeight;
     msg.ghostText = '';
     delete msg.translatedRenderMessage;
     delete msg.desaturatedUserColor;

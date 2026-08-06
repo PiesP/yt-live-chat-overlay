@@ -74,8 +74,6 @@ import {
   STAGGER_EXP_SCALE,
   STAGGER_QUEUE_HIGH,
   STAGGER_QUEUE_MED,
-  TRANSLATION_FONT_SCALE,
-  TRANSLATION_GAP_PX,
 } from '@renderer/constants';
 import type { LanePlacement } from '@renderer/layout/lane-allocator';
 import { computeBaseHeadwayPx } from '@renderer/layout/lane-shared';
@@ -85,12 +83,12 @@ import {
   computeAgeFadeRate,
   computeInvFadeDuration,
   enqueueWithOverflow,
+  estimateTranslatedMessageDimensions,
   estimateMessageDimensions as sharedEstimateDimensions,
 } from '@renderer/shared';
 import {
   clearTextMeasurementCaches,
   getFontString,
-  measureTextHeight,
   measureTextWidth,
 } from '@renderer/text-measure';
 import { RenderWorkerManager } from '@renderer/worker/manager';
@@ -513,7 +511,7 @@ export class CanvasRenderer extends RendererBase {
     this.activeMessagesByLane.clear();
 
     for (const message of this.activeMessages) {
-      const requestedSlots = Math.max(1, message.slotCount ?? 1);
+      const requestedSlots = Math.max(1, Math.ceil(message.height / laneHeight));
       const slotCount = Math.min(requestedSlots, laneCount);
       const laneIndex = Math.min(message.laneIndex, Math.max(0, laneCount - slotCount));
       message.laneIndex = laneIndex;
@@ -1054,6 +1052,7 @@ export class CanvasRenderer extends RendererBase {
   /** Apply batched translation results to active messages. */
   private applyPendingTranslations(): void {
     if (this.pendingTranslations.length === 0) return;
+    let geometryChanged = false;
     const end = Math.min(
       this.pendingTranslationReadIdx + this.translationBatchSize,
       this.pendingTranslations.length
@@ -1071,6 +1070,8 @@ export class CanvasRenderer extends RendererBase {
       } else {
         delete entry.msg.translatedRenderMessage;
       }
+      const geometry = this.estimateTranslatedDimensions(entry.msg.message, entry.text);
+      geometryChanged = this.applyMessageGeometry(entry.msg, geometry) || geometryChanged;
     }
     this.pendingTranslationReadIdx = end;
     if (this.pendingTranslationReadIdx >= this.pendingTranslations.length) {
@@ -1082,6 +1083,53 @@ export class CanvasRenderer extends RendererBase {
       this.pendingTranslations.splice(0, this.pendingTranslationReadIdx);
       this.pendingTranslationReadIdx = 0;
     }
+    if (geometryChanged) {
+      const dimensions = this.overlay.getDimensions();
+      if (dimensions) {
+        this.laneAllocator.reset(dimensions);
+        this.reflowActiveMessages(dimensions);
+      }
+    }
+  }
+
+  /** Update dimensions while preserving the current scrolling position and speed. */
+  private applyMessageGeometry(
+    message: CanvasMessage,
+    geometry: { width: number; height: number; translationHeight: number }
+  ): boolean {
+    const changed = message.width !== geometry.width || message.height !== geometry.height;
+    if (changed) {
+      const dimensions = this.overlay.getDimensions();
+      const isScrolling =
+        this.settings.danmakuMode === 'scroll' || this.settings.danmakuMode === 'reverse';
+      if (dimensions && isScrolling) {
+        const now = performance.now();
+        const speed = this.getSpeedForTier(message.speedTier);
+        const totalDistance = dimensions.width + geometry.width + this.settings.exitPaddingPx;
+        let duration = computeScrollDuration(
+          totalDistance,
+          speed,
+          this.settings.scrollDurationMinMs,
+          this.settings.scrollDurationMaxMs,
+          this.settings.exitPaddingPx
+        );
+        if (message.message.authorType === 'moderator' || message.message.authorType === 'owner') {
+          duration *= this.settings.modOwnerDurationMultiplier;
+        }
+        const progress =
+          this.settings.danmakuMode === 'scroll'
+            ? (dimensions.width - message.x) / Math.max(1, totalDistance)
+            : (message.x + geometry.width) / Math.max(1, totalDistance);
+        message.duration = duration;
+        message.invDuration = 1 / Math.max(1, duration);
+        message.startTime =
+          now - message.pausedDuration - Math.max(0, Math.min(1, progress)) * duration;
+      }
+      message.width = geometry.width;
+      message.height = geometry.height;
+    }
+    message.translationHeight = geometry.translationHeight;
+    return changed;
   }
 
   private queueTranslationResult(
@@ -1574,31 +1622,7 @@ export class CanvasRenderer extends RendererBase {
       cached = this.dimensionCache.get(message.id);
     }
 
-    // Pre-compute translation font metrics — used in both cache-hit and fresh paths
-    // when dual translation mode is active. Translation state can change between calls,
-    // so this is evaluated each time but only once per invocation.
-    let transHeight = 0;
-    if (
-      this.settings.translationEnabled &&
-      this.translationService.isActive &&
-      this.settings.translationMode === 'dual'
-    ) {
-      const transFontSize = Math.max(
-        1,
-        Math.round(this.settings.fontSize * TRANSLATION_FONT_SCALE)
-      );
-      const transFont = getFontString(transFontSize, 'normal', this.settings.fontFamily);
-      const gap = TRANSLATION_GAP_PX;
-      transHeight = measureTextHeight(transFont, transFontSize) + gap;
-    }
-
-    if (cached) {
-      // Translation height adjustment must be re-applied (translation state can change)
-      if (transHeight > 0) {
-        return { width: cached.width, height: cached.height + transHeight };
-      }
-      return cached;
-    }
+    if (cached) return cached;
 
     // SuperChat rendering uses showAuthor.superChat (canvas-card-renderers.ts:82),
     // not showAuthor[authorType]. Match the rendering's key so that estimation
@@ -1632,13 +1656,37 @@ export class CanvasRenderer extends RendererBase {
       this.dimensionCache.set(message.id, dims);
     }
 
-    // In dual translation mode, add extra height for the translation text
-    // below the original content (all message kinds).
-    if (transHeight > 0) {
-      return { width: dims.width, height: dims.height + transHeight };
-    }
-
     return dims;
+  }
+
+  private estimateTranslatedDimensions(
+    message: ChatMessage,
+    translatedText: string | null
+  ): { width: number; height: number; translationHeight: number } {
+    const showAuthor =
+      message.kind === 'superchat'
+        ? this.settings.showAuthor.superChat
+        : this.settings.showAuthor[message.authorType];
+    const availableWidth = this.overlay.getDimensions()?.width;
+    return estimateTranslatedMessageDimensions(
+      message,
+      translatedText,
+      this.settings.translationMode,
+      {
+        fontSize: this.settings.fontSize,
+        showAuthor,
+        fontWeight: this.settings.fontWeight,
+        fontFamily: this.settings.fontFamily,
+        maxBodyLines: {
+          superchat: this.settings.superChatMaxBodyLines,
+          membership: this.settings.membershipMaxBodyLines,
+        },
+        showSuperChatAmount: this.settings.showSuperChatAmount,
+        letterSpacing: this.getSpeedTier(message) === SPEED_TIER.FAR ? '1px' : '0px',
+        outlineWidthPx: this.settings.outline.enabled ? this.settings.outline.widthPx : 0,
+        ...(availableWidth !== undefined ? { availableWidth } : {}),
+      }
+    );
   }
 
   private getFont(fontSize: number): string {
@@ -1695,7 +1743,11 @@ export class CanvasRenderer extends RendererBase {
       this.translationService
         .translate(translatableText)
         .then((translated) => {
-          this.workerManager.sendTranslation(msgId, translated);
+          this.workerManager.sendTranslation(
+            msgId,
+            translated,
+            this.estimateTranslatedDimensions(message, translated)
+          );
         })
         .catch(() => {
           // Silently ignore individual translation failures
@@ -1790,20 +1842,32 @@ export class CanvasRenderer extends RendererBase {
     // Sync settings to render worker when off-main-thread mode is active
     this.workerManager.updateSettings(settings);
     this.imageFetchManager.updateConfig(settings, this.workerManager.workerRef);
-    if (laneGeometryChanged && !options?.resetState && !this.workerManager.isActive) {
-      const dimensions = this.overlay.getDimensions();
-      if (dimensions) {
-        this.laneAllocator.reset(dimensions);
-        this.reflowActiveMessages(dimensions);
-      }
-    }
 
     // When translation is disabled, clear translated text from all active
-    // messages so they revert to showing only the original text on the next frame.
+    // messages and restore the original card geometry on both render paths.
+    let translationGeometryChanged = false;
     if (wasTranslationEnabled && !settings.translationEnabled) {
       for (const msg of this.activeMessages) {
         msg.translatedText = null;
         delete msg.translatedRenderMessage;
+        translationGeometryChanged =
+          this.applyMessageGeometry(msg, this.estimateTranslatedDimensions(msg.message, null)) ||
+          translationGeometryChanged;
+      }
+      this.workerManager.clearTranslations((message) =>
+        this.estimateTranslatedDimensions(message, null)
+      );
+    }
+
+    if (
+      (laneGeometryChanged || translationGeometryChanged) &&
+      !options?.resetState &&
+      !this.workerManager.isActive
+    ) {
+      const dimensions = this.overlay.getDimensions();
+      if (dimensions) {
+        this.laneAllocator.reset(dimensions);
+        this.reflowActiveMessages(dimensions);
       }
     }
 

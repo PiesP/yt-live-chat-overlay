@@ -252,6 +252,7 @@ describe('drawStage', () => {
         text: 'Translated',
         content: [{ type: 'text' as const, content: 'Translated' }],
       },
+      translationHeight: 15,
       _frameElapsed: 100,
     };
     const ctx = makeDrainCtx({
@@ -277,6 +278,7 @@ describe('drawStage', () => {
     drawStage(ctx, renderCtx, buckets as never);
 
     expect(mocks.renderSegment.mock.calls[0]?.[2]).toBe(22);
+    expect(mocks.renderSegment.mock.calls[0]?.[3]).toBe(39);
   });
 
   it('isolates paid-card canvas state and replaces its body with translated text', () => {

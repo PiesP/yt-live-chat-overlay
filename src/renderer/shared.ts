@@ -8,14 +8,14 @@
  * duplicate text measurement and dimension estimation logic.
  */
 
-import type { ChatMessage, FontWeight } from '@app-types';
+import type { ChatMessage, FontWeight, TranslationMode } from '@app-types';
 import {
   buildWrappedLines,
   measureEmojiAdvanceWidth,
   measureTextAdvanceWidth,
   toSharedContentSegments,
 } from '@renderer/canvas/shared';
-import { SPEED_TIER } from '@renderer/constants';
+import { SPEED_TIER, TRANSLATION_FONT_SCALE, TRANSLATION_GAP_PX } from '@renderer/constants';
 import {
   getAuthorPhotoSlotWidth,
   getAuthorRowHeight,
@@ -74,7 +74,8 @@ export function estimateMessageDimensions(
   showSuperChatAmount?: boolean,
   letterSpacing = '0px',
   outlineWidthPx = 0,
-  availableWidth?: number
+  availableWidth?: number,
+  minimumPaidCardWidth?: number
 ): MessageDimensions {
   const font = getFontString(fontSize, fontWeight, fontFamily);
 
@@ -88,7 +89,8 @@ export function estimateMessageDimensions(
       maxBodyLines?.superchat ?? DEFAULT_SETTINGS.superChatMaxBodyLines,
       fontWeight,
       showSuperChatAmount,
-      availableWidth
+      availableWidth,
+      minimumPaidCardWidth
     );
   }
   if (message.kind === 'membership') {
@@ -99,7 +101,8 @@ export function estimateMessageDimensions(
       maxBodyLines?.membership ?? DEFAULT_SETTINGS.membershipMaxBodyLines,
       fontWeight,
       fontFamily,
-      availableWidth
+      availableWidth,
+      minimumPaidCardWidth
     );
   }
   return estimateRegularMessageDimensions(
@@ -167,7 +170,8 @@ function estimateSuperChatDimensions(
   maxBodyLines: number,
   fontWeight: FontWeight = 'bold',
   showSuperChatAmount: boolean = true,
-  availableWidth?: number
+  availableWidth?: number,
+  minimumWidth?: number
 ): MessageDimensions {
   const { paddingH, paddingV } = rendererLayout.superchat;
   const bodyLineHeight = measureTextHeight(font, fontSize);
@@ -214,7 +218,10 @@ function estimateSuperChatDimensions(
 
   // Determine card width from the widest element
   const contentWidth = Math.max(authorSectionWidth, badgeWidth, maxLineWidth);
-  const width = Math.max(widthBounds.min, Math.min(widthBounds.max, contentWidth + paddingH * 2));
+  const width = Math.min(
+    widthBounds.max,
+    Math.max(widthBounds.min, minimumWidth ?? 0, contentWidth + paddingH * 2)
+  );
 
   // Pass 2: re-wrap at actual card inner width to get line count.
   // Skip when Pass 1 already covers the worst case:
@@ -259,7 +266,8 @@ function estimateMembershipDimensions(
   maxBodyLines: number,
   fontWeight: FontWeight,
   fontFamily: string,
-  availableWidth?: number
+  availableWidth?: number,
+  minimumWidth?: number
 ): MessageDimensions {
   const { paddingH, paddingV } = rendererLayout.membership;
   const bodyLineHeight = measureTextHeight(font, fontSize);
@@ -303,7 +311,10 @@ function estimateMembershipDimensions(
     (text: string) => measureTextWidth(text, font)
   );
   const contentWidth = Math.max(authorSectionWidth, headerWidth, pass1Result.maxLineWidth);
-  const width = Math.max(widthBounds.min, Math.min(widthBounds.max, contentWidth + paddingH * 2));
+  const width = Math.min(
+    widthBounds.max,
+    Math.max(widthBounds.min, minimumWidth ?? 0, contentWidth + paddingH * 2)
+  );
 
   // Re-build wrapped lines at the actual card inner width so line count matches
   // what renderMembership will produce. Uses buildWrappedLines (SSOT with
@@ -326,6 +337,115 @@ function estimateMembershipDimensions(
   return {
     width,
     height: paddingV * 2 + authorSectionHeight + headerSectionHeight + bodySectionHeight,
+  };
+}
+
+export interface MessageDimensionOptions {
+  fontSize: number;
+  showAuthor: boolean;
+  fontWeight?: FontWeight;
+  fontFamily?: string;
+  maxBodyLines?: { superchat?: number; membership?: number };
+  showSuperChatAmount?: boolean;
+  letterSpacing?: string;
+  outlineWidthPx?: number;
+  availableWidth?: number;
+}
+
+export interface TranslatedMessageDimensions extends MessageDimensions {
+  /** Height of the translated text block only; excludes the inter-section gap. */
+  translationHeight: number;
+}
+
+/** Estimate final geometry after an asynchronous translation becomes visible. */
+export function estimateTranslatedMessageDimensions(
+  message: ChatMessage,
+  translatedText: string | null,
+  mode: TranslationMode,
+  options: MessageDimensionOptions
+): TranslatedMessageDimensions {
+  const {
+    fontSize,
+    showAuthor,
+    fontWeight = 'bold',
+    fontFamily = DEFAULT_FONT_FAMILY,
+    maxBodyLines,
+    showSuperChatAmount,
+    letterSpacing = '0px',
+    outlineWidthPx = 0,
+    availableWidth,
+  } = options;
+  const estimate = (candidate: ChatMessage, minimumPaidCardWidth?: number): MessageDimensions =>
+    estimateMessageDimensions(
+      candidate,
+      fontSize,
+      showAuthor,
+      fontWeight,
+      fontFamily,
+      maxBodyLines,
+      showSuperChatAmount,
+      letterSpacing,
+      outlineWidthPx,
+      availableWidth,
+      minimumPaidCardWidth
+    );
+  const base = estimate(message);
+  if (!translatedText || (mode === 'dual' && translatedText === message.text)) {
+    return { ...base, translationHeight: 0 };
+  }
+
+  const translatedMessage: ChatMessage = {
+    ...message,
+    text: translatedText,
+    content: [{ type: 'text', content: translatedText }],
+  };
+  if (mode === 'replace') {
+    return { ...estimate(translatedMessage), translationHeight: 0 };
+  }
+
+  const translationFontSize = Math.max(1, Math.round(fontSize * TRANSLATION_FONT_SCALE));
+  const translationFont = getFontString(translationFontSize, 'normal', fontFamily);
+  const translationLineHeight = Math.ceil(measureTextHeight(translationFont, translationFontSize));
+  const translationTextWidth = measureTextWidth(translatedText, translationFont);
+
+  if (message.kind === 'text') {
+    const insets = getRegularCardInsets(
+      fontSize,
+      outlineWidthPx,
+      showAuthor && !!message.author && !!message.authorPhotoUrl
+    );
+    return {
+      width: Math.max(base.width, Math.ceil(translationTextWidth) + insets.horizontal * 2),
+      height: base.height + TRANSLATION_GAP_PX + translationLineHeight,
+      translationHeight: translationLineHeight,
+    };
+  }
+
+  const padding =
+    message.kind === 'superchat' ? rendererLayout.superchat : rendererLayout.membership;
+  const widthBounds = getPaidCardWidthBounds(fontSize, availableWidth);
+  const desiredWidth = Math.min(
+    widthBounds.max,
+    Math.max(base.width, Math.ceil(translationTextWidth) + padding.paddingH * 2)
+  );
+  const primary = estimate(message, desiredWidth);
+  const innerWidth = Math.max(1, primary.width - padding.paddingH * 2);
+  const wrapped = buildWrappedLines(
+    [{ type: 'text', content: translatedText }],
+    innerWidth,
+    Math.round(translationFontSize * rendererLayout.emojiSize),
+    (text: string) => measureTextWidth(text, translationFont)
+  );
+  const maxLines =
+    message.kind === 'superchat'
+      ? (maxBodyLines?.superchat ?? DEFAULT_SETTINGS.superChatMaxBodyLines)
+      : (maxBodyLines?.membership ?? DEFAULT_SETTINGS.membershipMaxBodyLines);
+  const translationHeight = Math.min(wrapped.lines.length, maxLines) * translationLineHeight;
+
+  return {
+    width: primary.width,
+    height: primary.height + TRANSLATION_GAP_PX + translationHeight,
+    translationHeight,
   };
 }
 

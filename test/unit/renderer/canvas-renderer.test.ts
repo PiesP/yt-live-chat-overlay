@@ -167,9 +167,21 @@ describe('CanvasRenderer', () => {
       overlay,
       makeSettings({ translationEnabled: true, translationMode: 'replace' })
     );
+    const original = makeMessage('translation-result', 'original');
     const message = {
+      message: original,
+      renderMessage: original,
       translatedText: 'queued translation',
       translatedRenderMessage: makeMessage('translation-result', 'queued translation'),
+      width: 180,
+      height: 40,
+      translationHeight: 16,
+      duration: 5000,
+      invDuration: 0.0002,
+      startTime: 0,
+      pausedDuration: 0,
+      x: 500,
+      speedTier: 1,
     } as CanvasMessage;
     const internals = renderer as unknown as {
       activeMessages: CanvasMessage[];
@@ -195,6 +207,96 @@ describe('CanvasRenderer', () => {
     expect(internals.pendingTranslations).toEqual([]);
     expect(message.translatedText).toBeNull();
     expect(message.translatedRenderMessage).toBeUndefined();
+    renderer.destroy();
+  });
+
+  it('recomputes active card geometry when a translation result arrives', () => {
+    const renderer = new CanvasRenderer(
+      overlay,
+      makeSettings({ translationEnabled: true, translationMode: 'dual', fontSize: 16 })
+    );
+    const original = makeMessage('translation-geometry', 'Hi');
+    const message = {
+      message: original,
+      renderMessage: original,
+      startTime: 0,
+      fadeStartTime: 0,
+      duration: 5000,
+      invDuration: 0.0002,
+      width: 28,
+      height: 25,
+      startX: 640,
+      x: 500,
+      y: 20,
+      pausedDuration: 0,
+      laneIndex: 0,
+      staggerDelay: 0,
+      speedTier: 1,
+      ghostText: 'Hi',
+      laneArrayIndices: [],
+    } as CanvasMessage;
+    const internals = renderer as unknown as {
+      activeMessages: CanvasMessage[];
+      pendingTranslations: Array<{ msg: CanvasMessage; text: string | null }>;
+      applyPendingTranslations(): void;
+    };
+    internals.activeMessages.push(message);
+    internals.pendingTranslations.push({
+      msg: message,
+      text: 'A substantially longer translated message',
+    });
+
+    internals.applyPendingTranslations();
+
+    expect(message.width).toBeGreaterThan(28);
+    expect(message.height).toBeGreaterThan(25);
+    expect(message.translationHeight).toBeGreaterThan(0);
+    renderer.destroy();
+  });
+
+  it('restores original card geometry when translation is disabled', () => {
+    const renderer = new CanvasRenderer(
+      overlay,
+      makeSettings({ translationEnabled: true, translationMode: 'dual', fontSize: 16 })
+    );
+    const original = makeMessage('translation-disabled-geometry', 'Hi');
+    const message = {
+      message: original,
+      renderMessage: original,
+      translatedText: 'A substantially longer translated message',
+      translatedRenderMessage: makeMessage(
+        'translation-disabled-geometry',
+        'A substantially longer translated message'
+      ),
+      startTime: 0,
+      fadeStartTime: 0,
+      duration: 5000,
+      invDuration: 0.0002,
+      width: 420,
+      height: 80,
+      translationHeight: 24,
+      startX: 640,
+      x: 500,
+      y: 20,
+      pausedDuration: 0,
+      laneIndex: 0,
+      staggerDelay: 0,
+      speedTier: 1,
+      ghostText: 'Hi',
+      laneArrayIndices: [],
+    } as CanvasMessage;
+    const internals = renderer as unknown as { activeMessages: CanvasMessage[] };
+    internals.activeMessages.push(message);
+
+    renderer.updateSettings(
+      makeSettings({ translationEnabled: false, translationMode: 'dual', fontSize: 16 })
+    );
+
+    expect(message.translatedText).toBeNull();
+    expect(message.translatedRenderMessage).toBeUndefined();
+    expect(message.width).toBeLessThan(420);
+    expect(message.height).toBeLessThan(80);
+    expect(message.translationHeight).toBe(0);
     renderer.destroy();
   });
 

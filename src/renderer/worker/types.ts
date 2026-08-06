@@ -154,6 +154,8 @@ export interface WorkerMessage {
   isBacklog: boolean;
   /** Translated text (if available). */
   translatedText?: string | null;
+  /** Height of the dual-translation text block, excluding its leading gap. */
+  translationHeight?: number;
   /** Author type for color selection: normal, moderator, owner, member, etc. */
   authorType?: string;
   /** Message kind: 'chat', 'superchat', 'membership', etc. */
@@ -208,6 +210,8 @@ export interface ActiveMessage {
   kind?: string;
   /** Translated text for dual/replace display. */
   translatedText?: string | null;
+  /** Height of the dual-translation text block, excluding its leading gap. */
+  translationHeight?: number;
   /** Desaturated color for far-depth layer. */
   colorOverride?: string;
   /** Content segments for emoji/text rendering. Always present after activation. */

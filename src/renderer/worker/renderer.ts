@@ -74,10 +74,9 @@ import {
   STAGGER_QUEUE_HIGH,
   STAGGER_QUEUE_MED,
   TRANSLATION_FONT_SCALE,
-  TRANSLATION_GAP_PX,
   TRANSLATION_OPACITY_SCALE,
 } from '@renderer/constants';
-import { getAuthorNameMaxWidth } from '@renderer/layout/card-layout';
+import { getAuthorNameMaxWidth, getRegularCardInsets } from '@renderer/layout/card-layout';
 import {
   buildLaneHeap,
   commitPlacementShared,
@@ -673,15 +672,24 @@ export class WorkerRenderer {
           case 'updateTranslation': {
             const msgId = data.id as string;
             const translatedText = data.translatedText as string | null;
+            const width = data.width as number;
+            const height = data.height as number;
+            const translationHeight = data.translationHeight as number;
             const msg = this.messageById.get(msgId);
             if (msg) {
               msg.translatedText = translatedText;
+              msg.translationHeight = translationHeight;
               if ('laneArrayIndices' in msg) {
+                this.applyActiveMessageGeometry(msg, width, height);
                 if (translatedText) {
                   msg.translatedContent = [{ type: 'text', content: translatedText }];
                 } else {
                   delete msg.translatedContent;
                 }
+                this.reflowActiveMessages();
+              } else {
+                msg.width = width;
+                msg.height = height;
               }
             }
             break;
@@ -896,7 +904,7 @@ export class WorkerRenderer {
     this.activeMessagesByLane.clear();
 
     for (const msg of this.activeMessages) {
-      const requestedSlots = Math.max(1, msg.laneSlotCount ?? 1);
+      const requestedSlots = Math.max(1, Math.ceil(msg.height / this.laneHeight));
       const slotCount = Math.min(requestedSlots, this.numLanes);
       const laneIndex = Math.min(msg.laneIndex, Math.max(0, this.numLanes - slotCount));
       msg.laneIndex = laneIndex;
@@ -960,6 +968,48 @@ export class WorkerRenderer {
         isScrolling ? msg.width : undefined
       );
     }
+  }
+
+  /** Apply asynchronous geometry without jumping the message along its scroll path. */
+  private applyActiveMessageGeometry(msg: ActiveMessage, width: number, height: number): void {
+    if (!this.config) {
+      msg.width = width;
+      msg.height = height;
+      return;
+    }
+    const isScrolling =
+      this.config.danmakuMode === 'scroll' || this.config.danmakuMode === 'reverse';
+    if (isScrolling) {
+      const now = performance.now();
+      let speed = this.config.speedPxPerSec;
+      if (msg.speedTier === SPEED_TIER.FAR) {
+        speed = Math.max(30, speed * this.config.depthFarSpeedMul);
+      } else if (msg.speedTier === SPEED_TIER.NEAR) {
+        speed *= this.config.depthNearSpeedMul;
+      } else if (msg.speedTier === SPEED_TIER.BACKLOG) {
+        speed *= this.config.backlogSpeedMultiplier;
+      }
+      const totalDistance = this.logicalWidth + width + this.config.exitPaddingPx;
+      let duration = computeScrollDuration(
+        totalDistance,
+        speed,
+        this.config.scrollDurationMinMs,
+        this.config.scrollDurationMaxMs,
+        this.config.exitPaddingPx
+      );
+      if (msg.authorType === 'moderator' || msg.authorType === 'owner') {
+        duration *= this.config.modOwnerDurationMultiplier;
+      }
+      const progress =
+        this.config.danmakuMode === 'scroll'
+          ? (this.logicalWidth - msg.x) / Math.max(1, totalDistance)
+          : (msg.x + width) / Math.max(1, totalDistance);
+      msg.duration = duration;
+      msg.invDuration = 1 / Math.max(1, duration);
+      msg.startTime = now - msg.pausedDuration - Math.max(0, Math.min(1, progress)) * duration;
+    }
+    msg.width = width;
+    msg.height = height;
   }
 
   private initLanes(_width: number, height: number): void {
@@ -1158,6 +1208,7 @@ export class WorkerRenderer {
         am.translatedContent = [{ type: 'text', content: msg.translatedText }];
       }
     }
+    if (msg.translationHeight !== undefined) am.translationHeight = msg.translationHeight;
     if (msg.author !== undefined) am.author = msg.author;
     if (msg.authorPhotoUrl !== undefined) am.authorPhotoUrl = msg.authorPhotoUrl;
     if (msg.superChatAmount !== undefined) am.superChatAmount = msg.superChatAmount;
@@ -1461,23 +1512,57 @@ export class WorkerRenderer {
               const translationColor = msg.authorType
                 ? cfg.authorColors[msg.authorType] || renderColor
                 : renderColor;
-              const translationY = sy + msg.height - translationFontSize - TRANSLATION_GAP_PX;
+              const translationHeight = msg.translationHeight ?? translationFontSize;
+              const paidPadding =
+                msg.kind === 'superchat' ? rendererLayout.superchat : rendererLayout.membership;
+              const regularInsets = getRegularCardInsets(
+                cfg.fontSize,
+                strokeWidth,
+                (cfg.showAuthor[msg.authorType ?? 'normal'] ?? true) &&
+                  !!msg.author &&
+                  !!msg.authorPhotoUrl
+              );
+              const paddingH = msg.cardConfigWorker
+                ? paidPadding.paddingH
+                : regularInsets.horizontal;
+              const paddingV = msg.cardConfigWorker ? paidPadding.paddingV : regularInsets.vertical;
+              const translationY = sy + msg.height - paddingV - translationHeight;
               this.ctx.save();
               try {
                 this.ctx.globalAlpha =
                   (bucketIndex / (OPACITY_BUCKETS - 1)) * TRANSLATION_OPACITY_SCALE;
-                renderSegment(
-                  this.ctx,
-                  msg.translatedText,
-                  sx + (msg.cardConfigWorker ? 0 : rendererLayout.paddingH),
-                  Math.floor(translationY),
-                  translationColor,
-                  translationFontSize,
-                  strokeWidth,
-                  cfg.outlineOpacity,
-                  this.textBitmapCache,
-                  this.boundGetTranslationFont
-                );
+                if (msg.cardConfigWorker) {
+                  renderWrappedContentSegments(
+                    this.ctx,
+                    [{ type: 'text', content: msg.translatedText }],
+                    sx + paddingH,
+                    Math.floor(translationY),
+                    Math.max(1, msg.width - paddingH * 2),
+                    msg.kind === 'superchat'
+                      ? cfg.superChatMaxBodyLines
+                      : cfg.membershipMaxBodyLines,
+                    translationColor,
+                    translationFontSize,
+                    strokeWidth,
+                    cfg.outlineOpacity,
+                    this.textBitmapCache,
+                    this.emojiCache as ResizableByteLimitedCache<CanvasImageSource>,
+                    this.boundGetTranslationFont
+                  );
+                } else {
+                  renderSegment(
+                    this.ctx,
+                    msg.translatedText,
+                    sx + paddingH,
+                    Math.floor(translationY),
+                    translationColor,
+                    translationFontSize,
+                    strokeWidth,
+                    cfg.outlineOpacity,
+                    this.textBitmapCache,
+                    this.boundGetTranslationFont
+                  );
+                }
               } finally {
                 this.ctx.restore();
               }

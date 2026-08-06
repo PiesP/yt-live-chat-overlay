@@ -47,7 +47,10 @@ vi.mock('@renderer/canvas/shared', () => ({
   toSharedContentSegments: vi.fn((c: unknown) => c),
 }));
 
-import { estimateMessageDimensions } from '@renderer/shared';
+import {
+  estimateMessageDimensions,
+  estimateTranslatedMessageDimensions,
+} from '@renderer/shared';
 import { getRegularCardInsets } from '@renderer/layout/card-layout';
 import type { ChatMessage } from '@app-types';
 import { rendererLayout, spacing } from '@util/design-tokens';
@@ -179,6 +182,21 @@ describe('estimateMessageDimensions — regular text', () => {
     const insets = getRegularCardInsets(16);
 
     expect(dims.width).toBe(expectedContentWidth + insets.horizontal * 2);
+  });
+
+  it('expands dual translation geometry from the actual translated text', () => {
+    const msg = makeMessage({ text: 'Hi', content: [{ type: 'text', content: 'Hi' }] });
+    const base = estimateMessageDimensions(msg, 16, false);
+    const translated = estimateTranslatedMessageDimensions(
+      msg,
+      'A substantially longer translated message',
+      'dual',
+      { fontSize: 16, showAuthor: false }
+    );
+
+    expect(translated.width).toBeGreaterThan(base.width);
+    expect(translated.height).toBeGreaterThan(base.height);
+    expect(translated.translationHeight).toBeGreaterThan(0);
   });
 });
 

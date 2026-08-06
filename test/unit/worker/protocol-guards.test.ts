@@ -210,8 +210,25 @@ describe('renderer worker protocol guards', () => {
       { id: 'second-message', priority: -1 },
     ]);
 
-    manager.sendTranslation('backlog-message', 'translated');
+    manager.sendTranslation('backlog-message', 'translated', {
+      width: 180,
+      height: 52,
+      translationHeight: 18,
+    });
     expect(internals.messageById.get('backlog-message')?.translatedText).toBe('translated');
+    expect(internals.messageById.get('backlog-message')).toMatchObject({
+      width: 180,
+      height: 52,
+      translationHeight: 18,
+    });
+
+    manager.clearTranslations(() => ({ width: 96, height: 24, translationHeight: 0 }));
+    expect(internals.messageById.get('backlog-message')).toMatchObject({
+      translatedText: null,
+      width: 96,
+      height: 24,
+      translationHeight: 0,
+    });
 
     manager.setUserPaused(true);
     expect(internals.isUserPaused).toBe(true);
@@ -237,10 +254,24 @@ describe('renderer worker protocol guards', () => {
 
   it('validates updateTranslation fields', () => {
     expect(
-      isValidControlMessage({ type: 'updateTranslation', id: 'message', translatedText: 'text' })
+      isValidControlMessage({
+        type: 'updateTranslation',
+        id: 'message',
+        translatedText: 'text',
+        width: 180,
+        height: 52,
+        translationHeight: 18,
+      })
     ).toBe(true);
     expect(
-      isValidControlMessage({ type: 'updateTranslation', id: 'message', translatedText: null })
+      isValidControlMessage({
+        type: 'updateTranslation',
+        id: 'message',
+        translatedText: null,
+        width: 100,
+        height: 20,
+        translationHeight: 0,
+      })
     ).toBe(true);
     expect(
       isValidControlMessage({ type: 'updateTranslation', id: '', translatedText: 'text' })
@@ -248,6 +279,20 @@ describe('renderer worker protocol guards', () => {
     expect(
       isValidControlMessage({ type: 'updateTranslation', id: 'message', translatedText: 1 })
     ).toBe(false);
+    for (const geometry of [
+      { width: 0, height: 52, translationHeight: 18 },
+      { width: 180, height: Number.NaN, translationHeight: 18 },
+      { width: 180, height: 52, translationHeight: -1 },
+    ]) {
+      expect(
+        isValidControlMessage({
+          type: 'updateTranslation',
+          id: 'message',
+          translatedText: 'text',
+          ...geometry,
+        })
+      ).toBe(false);
+    }
   });
 
   it('validates setUserPaused fields', () => {
