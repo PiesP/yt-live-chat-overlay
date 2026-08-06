@@ -48,12 +48,13 @@ describe('Verification configuration', () => {
     expect(workflow).toContain('if-no-files-found: error');
   });
 
-  it('retains browser failure evidence in CI', () => {
+  it('captures browser failure evidence on the first CI retry', () => {
     const config = readFileSync(resolve(root, 'test/e2e/playwright.config.ts'), 'utf8');
     const workflow = readFileSync(resolve(root, '.github/workflows/ci.yaml'), 'utf8');
 
-    expect(config).toContain("trace: 'retain-on-failure'");
-    expect(config).toContain("video: process.env.CI ? 'retain-on-failure' : 'off'");
+    expect(config).toContain('retries: process.env.CI ? 1 : 0');
+    expect(config).toContain("trace: process.env.CI ? 'on-first-retry' : 'retain-on-failure'");
+    expect(config).toContain("video: process.env.CI ? 'on-first-retry' : 'off'");
     expect(workflow).toContain('test-results/');
     expect(workflow).toContain('playwright-report/');
   });
