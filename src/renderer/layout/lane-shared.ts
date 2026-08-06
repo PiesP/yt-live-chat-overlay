@@ -37,6 +37,49 @@ export function computeBaseHeadwayPx(msgWidth: number, headwayGapRatio: number):
   );
 }
 
+export interface EntryHeadwayInput {
+  activeWidthPx: number;
+  headwayGapRatio: number;
+  activeTravelDistancePx: number;
+  activeDurationMs: number;
+  activeElapsedMs: number;
+  incomingTravelDistancePx: number;
+  incomingDurationMs: number;
+}
+
+/**
+ * Compute the entry clearance needed to prevent a faster incoming comment
+ * from catching an active comment before the latter leaves the viewport.
+ */
+export function computeRequiredEntryHeadwayPx(input: EntryHeadwayInput): number {
+  const baseHeadwayPx = computeBaseHeadwayPx(input.activeWidthPx, input.headwayGapRatio);
+  const motionValues = [
+    input.activeTravelDistancePx,
+    input.activeDurationMs,
+    input.activeElapsedMs,
+    input.incomingTravelDistancePx,
+    input.incomingDurationMs,
+  ];
+  if (
+    motionValues.some((value) => !Number.isFinite(value)) ||
+    input.activeTravelDistancePx < 0 ||
+    input.incomingTravelDistancePx < 0 ||
+    input.activeDurationMs <= 0 ||
+    input.incomingDurationMs <= 0
+  ) {
+    return baseHeadwayPx;
+  }
+
+  const activeVelocityPxPerMs = input.activeTravelDistancePx / input.activeDurationMs;
+  const incomingVelocityPxPerMs = input.incomingTravelDistancePx / input.incomingDurationMs;
+  const remainingActiveMs = Math.max(0, input.activeDurationMs - input.activeElapsedMs);
+  const catchUpDistancePx = Math.max(
+    0,
+    (incomingVelocityPxPerMs - activeVelocityPxPerMs) * remainingActiveMs
+  );
+  return Math.ceil(baseHeadwayPx + catchUpDistancePx);
+}
+
 /** Speed tiers within 1 level of each other can share lanes. */
 export function areSpeedTiersCompatible(a: number, b: number): boolean {
   return Math.abs(a - b) <= 1;
@@ -476,16 +519,7 @@ export function findPlacementShared(
   }
 
   // Single-slot fallback
-  return allocateSingleLaneShared(
-    state,
-    now,
-    0,
-    numLanes,
-    maxWaitMs,
-    speedTier,
-    random,
-    strategy
-  );
+  return allocateSingleLaneShared(state, now, 0, numLanes, maxWaitMs, speedTier, random, strategy);
 }
 
 /**

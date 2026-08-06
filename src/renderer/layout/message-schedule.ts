@@ -55,9 +55,7 @@ export function computeAdaptiveStaggerLimit(
 ): number {
   const depth = Number.isFinite(queueDepth) ? Math.max(0, queueDepth) : STAGGER_QUEUE_HIGH;
   const maximum = Number.isFinite(maxDelayMs) ? Math.max(0, maxDelayMs) : 0;
-  const medium = Number.isFinite(mediumDelayMs)
-    ? Math.max(0, Math.min(maximum, mediumDelayMs))
-    : 0;
+  const medium = Number.isFinite(mediumDelayMs) ? Math.max(0, Math.min(maximum, mediumDelayMs)) : 0;
 
   if (depth >= STAGGER_QUEUE_HIGH) return 0;
   if (depth <= STAGGER_QUEUE_MED) {
@@ -101,9 +99,7 @@ export function computeMessageMotionPlan(input: MessageMotionPlanInput): Message
 
   const screenWidth = Number.isFinite(input.screenWidth) ? Math.max(0, input.screenWidth) : 0;
   const messageWidth = Number.isFinite(input.messageWidth) ? Math.max(0, input.messageWidth) : 0;
-  const exitPaddingPx = Number.isFinite(input.exitPaddingPx)
-    ? Math.max(0, input.exitPaddingPx)
-    : 0;
+  const exitPaddingPx = Number.isFinite(input.exitPaddingPx) ? Math.max(0, input.exitPaddingPx) : 0;
 
   let startX: number;
   if (input.mode === 'scroll') {

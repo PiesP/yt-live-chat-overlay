@@ -35,6 +35,7 @@ import {
 } from '@renderer/constants';
 import { getRegularCardInsets } from '@renderer/layout/card-layout';
 import type { LaneAllocator } from '@renderer/layout/lane-allocator';
+import { getMessagePriority } from '@renderer/message-priority';
 import { computeMessageOpacity } from '@renderer/shared';
 import { getFontString } from '@renderer/text-measure';
 import type { ResizableByteLimitedCache } from '@util/byte-limited-cache';
@@ -141,17 +142,17 @@ export function drainStage(ctx: CanvasRenderContext, now: number, _dims: Overlay
   // new placements on this frame.
   if (!ctx.isReplayMode && ctx.isAntiBlockActive()) {
     const currentNow = now;
+    const peeked = ctx.pendingQueue.peek();
+    if (peeked === undefined) {
+      ctx.antiBlockSince.value = null;
+      return;
+    }
     if (ctx.antiBlockSince.value === null) {
       ctx.antiBlockSince.value = currentNow;
     }
 
-    const peeked = ctx.pendingQueue.peek();
-    // Use shared constants from @renderer/constants
-
-    const forceDrain =
-      peeked !== undefined && currentNow - ctx.antiBlockSince.value >= ANTI_BLOCK_MAX_DURATION_MS;
-    const highPriorityFront =
-      peeked !== undefined && getMessagePriority(peeked) >= ANTI_BLOCK_PRIORITY_THRESHOLD;
+    const forceDrain = currentNow - ctx.antiBlockSince.value >= ANTI_BLOCK_MAX_DURATION_MS;
+    const highPriorityFront = getMessagePriority(peeked) >= ANTI_BLOCK_PRIORITY_THRESHOLD;
 
     if (highPriorityFront || forceDrain) {
       if (forceDrain) {
@@ -623,19 +624,4 @@ export function mirrorVisibleMessages(ctx: CanvasRenderContext): void {
 /** Check if an image element is fully loaded and has valid dimensions. */
 function isImageReady(img: unknown): boolean {
   return (img as HTMLImageElement)?.complete === true && (img as HTMLImageElement).naturalWidth > 0;
-}
-
-/**
- * Get message priority for anti-block gate checks.
- * Mirrors RendererBase.getMessagePriority to avoid circular dependency.
- */
-function getMessagePriority(message: { kind: string; isBacklog?: boolean }): number {
-  const kindPriority: Record<string, number> = {
-    superchat: 100,
-    membership: 90,
-    text: 0,
-  };
-  let priority = kindPriority[message.kind] ?? 0;
-  if (message.isBacklog) priority -= 50; // BACKLOG_PRIORITY_OFFSET
-  return priority;
 }

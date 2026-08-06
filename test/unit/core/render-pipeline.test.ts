@@ -90,7 +90,7 @@ describe('drainStage', () => {
     expect(drainQueue).toHaveBeenCalledWith(now);
   });
 
-  it('skips drainQueue when anti-block is active and conditions not met', () => {
+  it('does not start an anti-block interval when there is no pending message', () => {
     const drainQueue = vi.fn();
     const ctx = makeDrainCtx({
       drainQueue,
@@ -98,8 +98,22 @@ describe('drainStage', () => {
       antiBlockSince: { value: null },
     });
     drainStage(ctx, now, dims);
-    expect(ctx.antiBlockSince.value).not.toBeNull();
+    expect(ctx.antiBlockSince.value).toBeNull();
     expect(drainQueue).not.toHaveBeenCalled();
+  });
+
+  it('lets a backlog Super Chat bypass anti-block using the canonical priority', () => {
+    const drainQueue = vi.fn();
+    const ctx = makeDrainCtx({
+      drainQueue,
+      isAntiBlockActive: () => true,
+      antiBlockSince: { value: now - 100 },
+    });
+    ctx.pendingQueue.enqueue({ kind: 'superchat', isBacklog: true } as never, 150);
+
+    drainStage(ctx, now, dims);
+
+    expect(drainQueue).toHaveBeenCalledWith(now);
   });
 
   it('force-drains when anti-block has persisted beyond max duration', () => {

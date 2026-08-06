@@ -70,7 +70,7 @@ import {
   SPEED_TIER,
 } from '@renderer/constants';
 import type { LanePlacement } from '@renderer/layout/lane-allocator';
-import { computeBaseHeadwayPx } from '@renderer/layout/lane-shared';
+import { computeRequiredEntryHeadwayPx } from '@renderer/layout/lane-shared';
 import { computeMessageMotionPlan } from '@renderer/layout/message-schedule';
 import type { ConnectionStatus } from '@renderer/renderer-base';
 import { RendererBase } from '@renderer/renderer-base';
@@ -924,6 +924,9 @@ export class CanvasRenderer extends RendererBase {
     if (this.isPaused) return;
     if (this.isVideoPaused) return;
     if (this.isUserPaused) return;
+    // Burst-driven lane density also controls the Worker allocator, so update
+    // it before the main-thread canvas path exits for OffscreenCanvas mode.
+    this.applyLaneDensityIfChanged();
     // When Worker mode is active (OffscreenCanvas transferred to worker),
     // the main-thread ctx is still a non-null reference but is detached.
     // Canvas operations on a detached context would throw silently.
@@ -954,7 +957,6 @@ export class CanvasRenderer extends RendererBase {
     // Mirrors the Worker renderFrame unconditional clearRect.
     ctx.clearRect(0, 0, dims.width, dims.height);
 
-    const hasContent = this.activeMessages.length > 0 || this.connectionStatus !== 'connected';
     if (this.connectionStatus !== 'connected') {
       this.renderStatusBar(ctx, dims);
     }
@@ -962,7 +964,6 @@ export class CanvasRenderer extends RendererBase {
     const mode = this.settings.danmakuMode;
 
     // ── Drain stage: anti-block gate + lane allocation ──
-    this.applyLaneDensityIfChanged();
     drainStage(rctx, now, dims);
 
     this.observability.updateLaneUtilization(this.laneAllocator.getUtilization());
@@ -971,7 +972,9 @@ export class CanvasRenderer extends RendererBase {
     // Update density indicator based on active message count
     this.densityIndicator.update(this.activeMessages.length, this.settings.maxConcurrentMessages);
 
-    // Early exit for empty frames — nothing to render.
+    // Evaluate after draining so a message activated on an idle frame is
+    // positioned and drawn without an avoidable extra-rAF delay.
+    const hasContent = this.activeMessages.length > 0 || this.connectionStatus !== 'connected';
     if (!hasContent) return;
 
     // ── Cleanup + opacity buckets (merged single pass) ──
@@ -1169,7 +1172,13 @@ export class CanvasRenderer extends RendererBase {
     batchIndex: number,
     previousStaggerDelayMs: number
   ): { placed: boolean; oversized: boolean; staggerDelayMs?: number } {
-    const result = this.checkPlacement(message, now, dimensions);
+    const result = this.checkPlacement(
+      message,
+      now,
+      dimensions,
+      batchIndex,
+      previousStaggerDelayMs
+    );
     if (!result.ok) {
       return { placed: false, oversized: result.reason === 'oversized' };
     }
@@ -1278,16 +1287,21 @@ export class CanvasRenderer extends RendererBase {
       for (const msg of batch.candidates) {
         if (this.activeMessages.length >= this.settings.maxConcurrentMessages) break;
 
+        const currentDims = this.overlay.getDimensions();
+        if (!currentDims) break;
+        const placementNow = Math.max(now, performance.now());
+
         const result = this.placeQueuedMessage(
           msg,
-          now,
-          dims,
+          placementNow,
+          currentDims,
           batch.batchIndex,
           batch.staggerCursorMs
         );
-        if (!recordDrainResult(batch, msg, result)) continue;
+        recordDrainResult(batch, msg, result);
 
-        // Yield every 50ms to keep the main thread responsive during bursts.
+        // Check the budget after every attempt, including collision failures,
+        // so an unplaceable backlog cannot monopolize the main thread.
         deadline = await yieldAtDeadline(deadline);
 
         // Session may have been destroyed during the yield — abort drain
@@ -1347,7 +1361,9 @@ export class CanvasRenderer extends RendererBase {
   private checkPlacement(
     message: ChatMessage,
     now: number,
-    precomputedDims?: OverlayDimensions
+    precomputedDims?: OverlayDimensions,
+    batchIndex = 0,
+    previousStaggerDelayMs = 0
   ):
     | {
         ok: true;
@@ -1398,6 +1414,30 @@ export class CanvasRenderer extends RendererBase {
       return { ok: false, reason: 'temporarily_unavailable' };
     }
 
+    const durationMultiplier =
+      message.authorType === 'moderator' || message.authorType === 'owner'
+        ? this.settings.modOwnerDurationMultiplier
+        : 1;
+    const incomingMotion = computeMessageMotionPlan({
+      mode,
+      now,
+      batchIndex,
+      previousStaggerDelayMs,
+      queueDepth: this.pendingQueue.size,
+      staggerSample: 0,
+      maxStaggerDelayMs: this.settings.staggerMaxDelayMs,
+      mediumStaggerDelayMs: this.settings.staggerMediumDelayMs,
+      placementWaitMs: placement.waitMs,
+      screenWidth: dims.width,
+      messageWidth: dimensions.width,
+      velocityPxPerSec: this.getSpeedForTier(speedTier),
+      scrollDurationMinMs: this.settings.scrollDurationMinMs,
+      scrollDurationMaxMs: this.settings.scrollDurationMaxMs,
+      exitPaddingPx: this.settings.exitPaddingPx,
+      topBottomDurationMs: this.settings.topBottomDurationMs,
+      durationMultiplier,
+    });
+
     const newLaneY = placement.laneY + placement.verticalOffset;
 
     // Check active messages in the target lane and adjacent lanes (reverse/newest first).
@@ -1436,8 +1476,20 @@ export class CanvasRenderer extends RendererBase {
         // (backlog entering real-time lane), headway scales up by the
         // speed multiplier so the slower message has more lead time,
         // preventing the faster chaser from visually crossing through.
-        const headwayPx = this.computeHeadwayPx(active.width, active.speedTier, speedTier);
         const travelDistance = active.startX + active.width + this.settings.exitPaddingPx;
+        const activeTravelDistance =
+          mode === 'scroll'
+            ? travelDistance
+            : dims.width - active.startX + this.settings.exitPaddingPx;
+        const headwayPx = computeRequiredEntryHeadwayPx({
+          activeWidthPx: active.width,
+          headwayGapRatio: this.settings.headwayGapRatio,
+          activeTravelDistancePx: activeTravelDistance,
+          activeDurationMs: active.duration,
+          activeElapsedMs: activeElapsed,
+          incomingTravelDistancePx: incomingMotion.travelDistancePx,
+          incomingDurationMs: incomingMotion.durationMs,
+        });
         const activeProgress = Math.min(1, activeElapsed * active.invDuration);
         const activeRightEdge = active.startX - activeProgress * travelDistance + active.width;
 
@@ -1673,27 +1725,6 @@ export class CanvasRenderer extends RendererBase {
       depthFarOpacityMul: this.settings.depthFarOpacityMul,
       ageFadeRate: computeAgeFadeRate(this.settings.maxMessageAgeMs),
     };
-  }
-
-  /**
-   * Compute minimum headway (gap) in pixels between an active message
-   * and an incoming message attempting to enter the same lane.
-   *
-   * Delegates to the shared {@link computeBaseHeadwayPx} which clamps
-   * to {@link HEADWAY_GAP_MIN_PX}–{@link HEADWAY_GAP_MAX_PX} for parity
-   * with the worker renderer.
-   *
-   * @param activeWidth    Width of the active message on the lane (px)
-   * @param _activeSpeedTier Speed tier of the active message (unused — kept for call-site compatibility)
-   * @param _newSpeedTier   Speed tier of the incoming message (unused — kept for call-site compatibility)
-   * @returns Headway gap in px, clamped to [16, 60]
-   */
-  private computeHeadwayPx(
-    activeWidth: number,
-    _activeSpeedTier: number,
-    _newSpeedTier: number
-  ): number {
-    return computeBaseHeadwayPx(activeWidth, this.settings.headwayGapRatio);
   }
 
   // ── Backlog pause ────────────────────────────────────────────────────

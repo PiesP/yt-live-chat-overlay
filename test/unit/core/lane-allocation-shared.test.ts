@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   computeBaseHeadwayPx,
+  computeRequiredEntryHeadwayPx,
   areSpeedTiersCompatible,
   computeLaneY,
   computeOccupancyMs,
@@ -67,6 +68,50 @@ describe('computeBaseHeadwayPx', () => {
 
   it('returns min for Infinity inputs', () => {
     expect(computeBaseHeadwayPx(Infinity, 0.08)).toBeGreaterThanOrEqual(16);
+  });
+});
+
+describe('computeRequiredEntryHeadwayPx', () => {
+  it('uses the base gap when the incoming comment cannot catch the active one', () => {
+    expect(
+      computeRequiredEntryHeadwayPx({
+        activeWidthPx: 300,
+        headwayGapRatio: 0.08,
+        activeTravelDistancePx: 1_600,
+        activeDurationMs: 8_000,
+        activeElapsedMs: 2_000,
+        incomingTravelDistancePx: 1_400,
+        incomingDurationMs: 7_000,
+      })
+    ).toBe(24);
+  });
+
+  it('reserves the full catch-up distance for a faster incoming comment', () => {
+    expect(
+      computeRequiredEntryHeadwayPx({
+        activeWidthPx: 300,
+        headwayGapRatio: 0.08,
+        activeTravelDistancePx: 1_600,
+        activeDurationMs: 8_000,
+        activeElapsedMs: 2_000,
+        incomingTravelDistancePx: 1_800,
+        incomingDurationMs: 6_000,
+      })
+    ).toBe(624);
+  });
+
+  it('falls back to the base gap for invalid motion data', () => {
+    expect(
+      computeRequiredEntryHeadwayPx({
+        activeWidthPx: 300,
+        headwayGapRatio: 0.08,
+        activeTravelDistancePx: Number.NaN,
+        activeDurationMs: 8_000,
+        activeElapsedMs: 2_000,
+        incomingTravelDistancePx: 1_800,
+        incomingDurationMs: 6_000,
+      })
+    ).toBe(24);
   });
 });
 

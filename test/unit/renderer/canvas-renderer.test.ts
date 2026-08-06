@@ -545,6 +545,31 @@ describe('CanvasRenderer', () => {
     renderer.destroy();
   });
 
+  it('updates lane density before returning from a Worker-owned frame', () => {
+    const renderer = new CanvasRenderer(overlay, makeSettings());
+    const canvas = document.createElement('canvas');
+    document.body.appendChild(canvas);
+    const internals = renderer as unknown as {
+      canvas: HTMLCanvasElement;
+      ctx: CanvasRenderingContext2D;
+      workerManager: { setActive(active: boolean): void };
+      applyLaneDensityIfChanged(): boolean;
+      renderFrame(): void;
+    };
+    internals.canvas = canvas;
+    internals.ctx = {} as CanvasRenderingContext2D;
+    internals.workerManager.setActive(true);
+    const applyLaneDensity = vi
+      .spyOn(internals, 'applyLaneDensityIfChanged')
+      .mockReturnValue(false);
+
+    internals.renderFrame();
+
+    expect(applyLaneDensity).toHaveBeenCalledOnce();
+    internals.workerManager.setActive(false);
+    renderer.destroy();
+  });
+
   it('setReplayMode works', () => {
     const settings = makeSettings();
     const renderer = new CanvasRenderer(overlay, settings);
