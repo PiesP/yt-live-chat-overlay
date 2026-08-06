@@ -1376,7 +1376,14 @@ export class CanvasRenderer extends RendererBase {
 
     // Find the target lane Y position via the allocator (without committing).
     const speedTier = this.getSpeedTier(message);
-    const placement = this.laneAllocator.findPlacement(msgHeight, dims, speedTier, now);
+    const laneStrategy = mode === 'top' ? 'top' : mode === 'bottom' ? 'bottom' : 'spread';
+    const placement = this.laneAllocator.findPlacement(
+      msgHeight,
+      dims,
+      speedTier,
+      now,
+      laneStrategy
+    );
     if (!placement) {
       this.observability.recordCollisionCheck(performance.now() - t0);
       return { ok: false, reason: 'temporarily_unavailable' };

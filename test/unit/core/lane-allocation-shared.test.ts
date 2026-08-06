@@ -294,9 +294,32 @@ describe('allocateSingleLaneShared', () => {
 
   it('returns zero-wait lane when available', () => {
     const state = makeState(8);
-    const result = allocateSingleLaneShared(state, 0, 0, 8, 100, 1, () => 0.75);
+    const result = allocateSingleLaneShared(state, 0, 0, 8, 100, 1, () => 0.75, 'spread');
     expect(result).not.toBeNull();
     expect(result!.waitMs).toBe(0);
+    expect(result!.laneIndex).toBe(6);
+  });
+
+  it('uses the full safe-zone lane range for scrolling placement', () => {
+    const state = makeState(8);
+
+    expect(
+      allocateSingleLaneShared(state, 0, 0, 8, 100, 1, () => 0, 'spread')?.laneIndex
+    ).toBe(0);
+    expect(
+      allocateSingleLaneShared(state, 0, 0, 8, 100, 1, () => 0.999, 'spread')?.laneIndex
+    ).toBe(7);
+  });
+
+  it('selects fixed lanes from the edge matching the display mode', () => {
+    const state = makeState(8);
+
+    expect(
+      allocateSingleLaneShared(state, 0, 0, 8, 100, 1, () => 0.5, 'top')?.laneIndex
+    ).toBe(0);
+    expect(
+      allocateSingleLaneShared(state, 0, 0, 8, 100, 1, () => 0.5, 'bottom')?.laneIndex
+    ).toBe(7);
   });
 
   it('skips collided lanes', () => {
@@ -342,6 +365,19 @@ describe('findPlacementShared', () => {
     expect(result!.laneIndex).toBeGreaterThanOrEqual(0);
     expect(result!.laneIndex).toBeLessThanOrEqual(5); // maxStartLane = 8-3 = 5
   });
+
+  it('anchors fixed multi-slot messages to the matching viewport edge', () => {
+    const topState = makeState(8);
+    const bottomState = makeState(8);
+
+    expect(findPlacementShared(topState, 0, 100, 40, 100, 1, () => 0.5, 'top')).toEqual({
+      laneIndex: 0,
+      waitMs: 0,
+    });
+    expect(
+      findPlacementShared(bottomState, 0, 100, 40, 100, 1, () => 0.5, 'bottom')
+    ).toEqual({ laneIndex: 5, waitMs: 0 });
+  });
 });
 
 // ── resetBatchShared ─────────────────────────────────────────────
@@ -383,7 +419,7 @@ describe('commitPlacementShared', () => {
     const state = makeState(4);
     commitPlacementShared(state, 1, 1, 1000, 600, 3000, 1);
 
-    expect(state.collidedLanes.has(1)).toBe(true);
+    expect(state.collidedLanes.has(1)).toBe(false);
     expect(state.speedTierLanes.get(1)).toEqual({ tier: 1, until: 4000 });
     const avail = heapGetSlotAvailableAt(state.heap, state.indexMap, 1);
     expect(avail).toBe(1600);
@@ -393,9 +429,9 @@ describe('commitPlacementShared', () => {
     const state = makeState(8);
     commitPlacementShared(state, 2, 3, 2000, 1000, 5000, 2);
 
-    expect(state.collidedLanes.has(2)).toBe(true);
-    expect(state.collidedLanes.has(3)).toBe(true);
-    expect(state.collidedLanes.has(4)).toBe(true);
+    expect(state.collidedLanes.has(2)).toBe(false);
+    expect(state.collidedLanes.has(3)).toBe(false);
+    expect(state.collidedLanes.has(4)).toBe(false);
     expect(state.collidedLanes.has(5)).toBe(false);
 
     expect(state.speedTierLanes.get(2)!.tier).toBe(2);

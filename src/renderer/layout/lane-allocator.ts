@@ -12,6 +12,7 @@ import {
   heapUpdateLane,
   resetBatchShared,
 } from '@renderer/layout/lane-shared';
+import type { LaneSelectionStrategy } from '@renderer/layout/lane-shared';
 import { getFontString, measureTextHeight } from '@renderer/text-measure';
 import { createLogger } from '@util/logging';
 
@@ -258,6 +259,7 @@ export class LaneAllocator {
     dimensions: OverlayDimensions,
     speedTier: number = SPEED_TIER.MID,
     now: number = performance.now(),
+    strategy: LaneSelectionStrategy = 'spread',
     random: () => number = Math.random
   ): LanePlacement | null {
     const totalLanes = this.numLanes;
@@ -274,7 +276,8 @@ export class LaneAllocator {
       this.laneHeight,
       this.options.scrollDurationMaxMs,
       speedTier,
-      random
+      random,
+      strategy
     );
     if (!result) return null;
 

@@ -88,6 +88,7 @@ import {
   resetBatchShared,
   shiftLaneTimersShared,
 } from '@renderer/layout/lane-shared';
+import type { LaneSelectionStrategy } from '@renderer/layout/lane-shared';
 import {
   computeAgeFadeRate,
   computeInvFadeDuration,
@@ -1031,7 +1032,8 @@ export class WorkerRenderer {
   private findPlacement(
     msgHeight: number,
     speedTier: number,
-    now: number
+    now: number,
+    strategy: LaneSelectionStrategy
   ): {
     laneIndex: number;
     waitMs: number;
@@ -1047,7 +1049,9 @@ export class WorkerRenderer {
       msgHeight,
       this.laneHeight,
       maxWaitMs,
-      speedTier
+      speedTier,
+      Math.random,
+      strategy
     );
     if (!result) return null;
     const slotCount = Math.max(1, Math.ceil(msgHeight / this.laneHeight));
@@ -1732,7 +1736,13 @@ export class WorkerRenderer {
         committed.add(entry);
         continue;
       }
-      const placement = this.findPlacement(entry.height, speedTier, now);
+      const laneStrategy =
+        this.config.danmakuMode === 'top'
+          ? 'top'
+          : this.config.danmakuMode === 'bottom'
+            ? 'bottom'
+            : 'spread';
+      const placement = this.findPlacement(entry.height, speedTier, now, laneStrategy);
       if (!placement) {
         this.totalDrops++;
         skipCount++;
