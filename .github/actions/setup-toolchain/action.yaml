@@ -1,5 +1,5 @@
 name: Setup pinned pnpm and Node.js
-description: Install the repository-pinned pnpm in the pnpm v11 home layout
+description: Install the repository-pinned pnpm and Node.js runtime
 
 inputs:
   node-version:
@@ -9,47 +9,10 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Bootstrap pnpm and Node.js
-      id: bootstrap
-      uses: pnpm/setup@5d160c5bc68a09337ad0d5654e237e03253b5879 # v1.0.0
+    - name: Install pnpm and Node.js
+      uses: pnpm/setup@c9883cc79df532ad1a7b81bf9ab944ceb090d65c # v2.0.0
       with:
-        # pnpm/setup v1.0.0 bundles 11.7.0. Keeping the bootstrap version exact
-        # avoids self-updating inside its legacy PNPM_HOME layout.
-        version: "11.7.0"
-        package-json-file: .github/actions/setup-toolchain/bootstrap-package.json
+        package-json-file: package.json
         runtime: "node@${{ inputs.node-version }}"
         cache: false
         install: false
-
-    - name: Activate repository pnpm version
-      shell: bash
-      env:
-        BOOTSTRAP_PNPM: ${{ steps.bootstrap.outputs['bin-dest'] }}/pnpm
-      run: |
-        set -euo pipefail
-
-        TARGET_PNPM_VERSION="$(node - <<'NODE'
-        const packageManager = require(`${process.env.GITHUB_WORKSPACE}/package.json`).packageManager;
-        const match = /^pnpm@([^+]+)(?:\+.*)?$/.exec(packageManager ?? "");
-        if (!match) {
-          throw new Error(`Expected packageManager to pin pnpm, received: ${packageManager}`);
-        }
-        process.stdout.write(match[1]);
-        NODE
-        )"
-        TARGET_PNPM_HOME="$RUNNER_TEMP/pnpm-home"
-        install -d -m 0755 "$TARGET_PNPM_HOME"
-
-        (
-          cd "$RUNNER_TEMP"
-          PNPM_HOME="$TARGET_PNPM_HOME" "$BOOTSTRAP_PNPM" self-update "$TARGET_PNPM_VERSION"
-        )
-
-        echo "$TARGET_PNPM_HOME/bin" >> "$GITHUB_PATH"
-        echo "PNPM_HOME=$TARGET_PNPM_HOME" >> "$GITHUB_ENV"
-
-        ACTUAL_PNPM_VERSION="$("$TARGET_PNPM_HOME/bin/pnpm" --version)"
-        if [[ "$ACTUAL_PNPM_VERSION" != "$TARGET_PNPM_VERSION" ]]; then
-          echo "Expected pnpm $TARGET_PNPM_VERSION, received $ACTUAL_PNPM_VERSION" >&2
-          exit 1
-        fi
