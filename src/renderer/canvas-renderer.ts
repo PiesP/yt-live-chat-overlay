@@ -1618,7 +1618,8 @@ export class CanvasRenderer extends RendererBase {
         membership: this.settings.membershipMaxBodyLines,
       },
       this.settings.showSuperChatAmount,
-      this.getSpeedTier(message) === SPEED_TIER.FAR ? '1px' : '0px'
+      this.getSpeedTier(message) === SPEED_TIER.FAR ? '1px' : '0px',
+      this.settings.outline.enabled ? this.settings.outline.widthPx : 0
     );
 
     if (message.id) {

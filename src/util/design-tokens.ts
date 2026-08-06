@@ -139,6 +139,15 @@ export const rendererLayout = {
     extreme: 1.35,
   } as const,
   // ── Message layout ──
+  /** Font-relative insets for regular message cards. */
+  regularCard: {
+    paddingXScale: 0.375,
+    paddingXMin: 6,
+    paddingXMax: 14,
+    paddingYScale: 0.1875,
+    paddingYMin: 3,
+    paddingYMax: 8,
+  },
   /** Message padding: horizontal (px) */
   paddingH: 12,
   /** Regular message background border radius (px) */

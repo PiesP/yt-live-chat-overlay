@@ -48,6 +48,7 @@ vi.mock('@renderer/canvas/shared', () => ({
 }));
 
 import { estimateMessageDimensions } from '@renderer/shared';
+import { getRegularCardInsets } from '@renderer/layout/card-layout';
 import type { ChatMessage } from '@app-types';
 import { rendererLayout, spacing } from '@util/design-tokens';
 
@@ -76,9 +77,10 @@ describe('estimateMessageDimensions — regular text', () => {
     expect(dims.height).toBeGreaterThan(0);
     expect(typeof dims.width).toBe('number');
     expect(typeof dims.height).toBe('number');
-    // Regular comment rows have no fixed vertical padding; laneSpacing is
-    // the sole control over the distance between adjacent rows.
-    expect(dims.height).toBe(19);
+    // Font-relative insets keep the card compact while ensuring the glyph
+    // ink is contained on all four sides.
+    expect(dims.width).toBe(108);
+    expect(dims.height).toBe(25);
   });
 
   it('includes author section when showAuthor is true and author present', () => {
@@ -90,6 +92,23 @@ describe('estimateMessageDimensions — regular text', () => {
     const noAuthor = estimateMessageDimensions(msg, 16, false);
     const withAuthor = estimateMessageDimensions(msg, 16, true);
     expect(withAuthor.height).toBeGreaterThan(noAuthor.height);
+  });
+
+  it('reserves an author photo slot only when a photo URL exists', () => {
+    const withoutPhoto = makeMessage({
+      text: 'x',
+      content: [{ type: 'text', content: 'x' }],
+      author: 'A',
+    });
+    const withPhoto = { ...withoutPhoto, authorPhotoUrl: 'https://yt3.ggpht.com/avatar' };
+
+    const withoutPhotoDims = estimateMessageDimensions(withoutPhoto, 16, true);
+    const withPhotoDims = estimateMessageDimensions(withPhoto, 16, true);
+
+    expect(withPhotoDims.width - withoutPhotoDims.width).toBe(
+      rendererLayout.authorPhotoSize + spacing.xs
+    );
+    expect(withPhotoDims.height).toBeGreaterThan(withoutPhotoDims.height);
   });
 
   it('same height with and without author when author absent', () => {
@@ -157,8 +176,9 @@ describe('estimateMessageDimensions — regular text', () => {
     });
     const dims = estimateMessageDimensions(msg, 16, false);
     const expectedContentWidth = '웃는 얼굴'.length * 8 + spacing.xs + 'NEXT'.length * 8;
+    const insets = getRegularCardInsets(16);
 
-    expect(dims.width).toBe(expectedContentWidth + rendererLayout.paddingH * 2);
+    expect(dims.width).toBe(expectedContentWidth + insets.horizontal * 2);
   });
 });
 

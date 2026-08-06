@@ -16,6 +16,11 @@ import {
   toSharedContentSegments,
 } from '@renderer/canvas/shared';
 import { SPEED_TIER } from '@renderer/constants';
+import {
+  getAuthorPhotoSlotWidth,
+  getAuthorRowHeight,
+  getRegularCardInsets,
+} from '@renderer/layout/card-layout';
 import { RendererBase } from '@renderer/renderer-base';
 import { getFontString, measureTextHeight, measureTextWidth } from '@renderer/text-measure';
 import { DEFAULT_SETTINGS } from '@settings/schema';
@@ -66,7 +71,8 @@ export function estimateMessageDimensions(
   fontFamily: string = DEFAULT_FONT_FAMILY,
   maxBodyLines?: { superchat?: number; membership?: number },
   showSuperChatAmount?: boolean,
-  letterSpacing = '0px'
+  letterSpacing = '0px',
+  outlineWidthPx = 0
 ): MessageDimensions {
   const font = getFontString(fontSize, fontWeight, fontFamily);
 
@@ -95,8 +101,10 @@ export function estimateMessageDimensions(
     font,
     fontSize,
     showAuthor,
+    fontWeight,
     fontFamily,
-    letterSpacing
+    letterSpacing,
+    outlineWidthPx
   );
 }
 
@@ -105,29 +113,38 @@ function estimateRegularMessageDimensions(
   font: string,
   fontSize: number,
   showAuthor: boolean,
+  fontWeight: FontWeight,
   fontFamily: string,
-  letterSpacing: string
+  letterSpacing: string,
+  outlineWidthPx: number
 ): MessageDimensions {
   const textWidth = measureContentWidth(message, font, fontSize, letterSpacing);
-  const textHeight = measureTextHeight(font, fontSize);
-  const { paddingH } = rendererLayout;
+  const textHeight = Math.max(
+    measureTextHeight(font, fontSize),
+    message.content.some((segment) => segment.type === 'emoji')
+      ? Math.round(fontSize * rendererLayout.emojiSize)
+      : 0
+  );
+  const insets = getRegularCardInsets(fontSize, outlineWidthPx);
 
   if (!showAuthor || !message.author) {
-    return { width: textWidth + paddingH * 2, height: textHeight };
+    return {
+      width: textWidth + insets.horizontal * 2,
+      height: textHeight + insets.vertical * 2,
+    };
   }
 
   const authorFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
-  const authorFont = getFontString(authorFontSize, 'bold', fontFamily);
+  const authorFont = getFontString(authorFontSize, fontWeight, fontFamily);
   const authorNameWidth = measureTextWidth(message.author, authorFont);
-  const authorSectionWidth = rendererLayout.authorPhotoSize + spacing.sm + authorNameWidth;
-  const totalWidth = Math.max(authorSectionWidth + paddingH * 2, textWidth + paddingH * 2);
-  const photoHeight = rendererLayout.authorPhotoSize;
+  const authorSectionWidth = getAuthorPhotoSlotWidth(message.authorPhotoUrl) + authorNameWidth;
+  const totalWidth = Math.max(authorSectionWidth, textWidth) + insets.horizontal * 2;
   const nameHeight = measureTextHeight(authorFont, authorFontSize);
-  const authorSectionHeight = Math.max(photoHeight, nameHeight);
+  const authorSectionHeight = getAuthorRowHeight(nameHeight, message.authorPhotoUrl);
 
   return {
     width: totalWidth,
-    height: authorSectionHeight + spacing.xs + textHeight,
+    height: insets.vertical * 2 + authorSectionHeight + spacing.xs + textHeight,
   };
 }
 

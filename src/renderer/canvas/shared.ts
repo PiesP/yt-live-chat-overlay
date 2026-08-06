@@ -13,6 +13,11 @@ import type { FontWeight } from '@app-types';
 import { EMOJI_ALIAS_PATTERN } from '@chat/message-helpers';
 import { computeOutlineColor } from '@renderer/color-utils';
 import { OUTLINE_STROKE_SCALE } from '@renderer/constants';
+import {
+  getAuthorPhotoSlotWidth,
+  getAuthorRowHeight,
+  getRegularCardInsets,
+} from '@renderer/layout/card-layout';
 import { getFontString, measureTextHeight, measureTextWidth } from '@renderer/text-measure';
 import type { ResizableByteLimitedCache } from '@util/byte-limited-cache';
 import { AUTHOR_PHOTO_SHADOW, rendererLayout, spacing } from '@util/design-tokens';
@@ -1076,19 +1081,17 @@ export function drawAuthorSection<T>(
   // CanvasRenderingContext2D and OffscreenCanvasRenderingContext2D).
   const nameMetrics = ctx.measureText('Mg');
   const nameHeight = getSafeTextHeight(nameMetrics, authorFontSize);
-  const sectionHeight = Math.max(rendererLayout.authorPhotoSize, nameHeight);
+  const sectionHeight = getAuthorRowHeight(nameHeight, message.authorPhotoUrl);
 
   // Author photo (if available and valid)
   const authorPhotoUrl = message.authorPhotoUrl;
-  let hasPhoto = false;
   if (authorPhotoUrl) {
     const photo = photoCache.get(authorPhotoUrl);
     if (photo != null && isValidPhoto(photo) && isCanvasImageSource(photo)) {
       drawAuthorPhoto(ctx, photo as CanvasImageSource, textX, startY);
-      hasPhoto = true;
     }
   }
-  const nameX = textX + (hasPhoto ? rendererLayout.authorPhotoSize + spacing.xs : 0);
+  const nameX = textX + getAuthorPhotoSlotWidth(authorPhotoUrl);
   const nameY = startY + Math.max(0, Math.floor((sectionHeight - nameHeight) / 2));
 
   // Truncate author name with ellipsis if it exceeds the allowed width
@@ -1207,8 +1210,9 @@ export function renderRegularMessage(
     messageHeight,
   } = config;
   renderRegularMessageBackground(ctx, x, y, messageWidth, messageHeight, backgroundColor);
-  const textX = x + rendererLayout.paddingH;
-  let textY = y;
+  const insets = getRegularCardInsets(fontSize, outlineWidthPx);
+  const textX = x + insets.horizontal;
+  let textY = y + insets.vertical;
 
   if (showAuthor && message.author) {
     const authorFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
@@ -1229,6 +1233,7 @@ export function renderRegularMessage(
       textBitmapCache,
       getFontFn
     );
+    textY += spacing.xs;
   }
 
   if (overrideText) {
