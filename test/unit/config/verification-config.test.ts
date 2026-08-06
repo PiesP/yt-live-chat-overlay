@@ -26,8 +26,15 @@ describe('Verification configuration', () => {
     );
     expect(config.jsonReporter?.fileName).toBe('reports/mutation/fast.json');
     expect(config.mutate).toEqual(
-      expect.arrayContaining(['!src/settings/ui/form.ts', '!src/settings/ui/panes.ts'])
+      expect.arrayContaining([
+        '!src/settings/ui/form.ts',
+        '!src/settings/ui/panes.ts',
+        '!src/translation/service.ts',
+        '!src/util/backlog-indicator.ts',
+        '!src/util/observability.ts',
+      ])
     );
+    expect(config.thresholds?.break).toBe(64);
     expect(config.mutator?.excludedMutations).not.toContain('ConditionalExpression');
     expect(config.mutator?.excludedMutations).not.toContain('EqualityOperator');
     expect(config.mutator?.excludedMutations).not.toContain('BooleanLiteral');
