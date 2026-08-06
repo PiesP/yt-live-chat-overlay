@@ -413,6 +413,9 @@ test.describe('Danmaku Rendering', () => {
       allowShortTextMessages: true,
       backgroundColors: { normal: '#FF000059' },
       danmakuMode: 'top',
+      motionBlurEnabled: false,
+      outline: { enabled: false },
+      showAuthor: { normal: false },
       showDebugOverlay: true,
     });
 
@@ -437,24 +440,71 @@ test.describe('Danmaku Rendering', () => {
     );
 
     const canvas = page.locator(`#${OVERLAY_ID} canvas`);
-    await expect
-      .poll(
-        () =>
-          canvas.evaluate((element: HTMLCanvasElement) => {
-            const context = element.getContext('2d');
-            if (!context) return 0;
-            const pixels = context.getImageData(0, 0, element.width, element.height).data;
-            let redPixels = 0;
-            for (let i = 0; i < pixels.length; i += 4) {
-              if (pixels[i]! > 180 && pixels[i + 1]! < 80 && pixels[i + 2]! < 80 && pixels[i + 3]! > 20) {
-                redPixels++;
-              }
+    const readCardBounds = (): Promise<{
+      background: { minX: number; minY: number; maxX: number; maxY: number; count: number } | null;
+      text: { minX: number; minY: number; maxX: number; maxY: number; count: number } | null;
+    }> =>
+      canvas.evaluate((element: HTMLCanvasElement) => {
+        const context = element.getContext('2d');
+        if (!context) return { background: null, text: null };
+        const image = context.getImageData(0, 0, element.width, element.height);
+        type Bounds = {
+          minX: number;
+          minY: number;
+          maxX: number;
+          maxY: number;
+          count: number;
+        };
+        const background: Bounds = {
+          minX: image.width,
+          minY: image.height,
+          maxX: -1,
+          maxY: -1,
+          count: 0,
+        };
+        const text: Bounds = { ...background };
+        const include = (bounds: Bounds, x: number, y: number): void => {
+          bounds.minX = Math.min(bounds.minX, x);
+          bounds.minY = Math.min(bounds.minY, y);
+          bounds.maxX = Math.max(bounds.maxX, x);
+          bounds.maxY = Math.max(bounds.maxY, y);
+          bounds.count++;
+        };
+
+        for (let y = 0; y < image.height; y++) {
+          for (let x = 0; x < image.width; x++) {
+            const offset = (y * image.width + x) * 4;
+            const red = image.data[offset]!;
+            const green = image.data[offset + 1]!;
+            const blue = image.data[offset + 2]!;
+            const alpha = image.data[offset + 3]!;
+            if (red > 180 && green < 80 && blue < 80 && alpha > 20) {
+              include(background, x, y);
             }
-            return redPixels;
-          }),
-        { timeout: 5000 }
-      )
-      .toBeGreaterThan(200);
+            if (red > 200 && green > 200 && blue > 200 && alpha > 100) {
+              include(text, x, y);
+            }
+          }
+        }
+        return {
+          background: background.count > 0 ? background : null,
+          text: text.count > 0 ? text : null,
+        };
+      });
+
+    await expect.poll(readCardBounds, { timeout: 5000 }).toMatchObject({
+      background: { count: expect.any(Number) },
+      text: { count: expect.any(Number) },
+    });
+    const bounds = await readCardBounds();
+    expect(bounds.background).not.toBeNull();
+    expect(bounds.text).not.toBeNull();
+    expect(bounds.background!.count).toBeGreaterThan(200);
+    expect(bounds.text!.count).toBeGreaterThan(20);
+    expect(bounds.background!.minX).toBeLessThan(bounds.text!.minX);
+    expect(bounds.background!.minY).toBeLessThan(bounds.text!.minY);
+    expect(bounds.background!.maxX).toBeGreaterThan(bounds.text!.maxX);
+    expect(bounds.background!.maxY).toBeGreaterThan(bounds.text!.maxY);
 
     await canvas.screenshot({ path: testInfo.outputPath('regular-message-background.png') });
 

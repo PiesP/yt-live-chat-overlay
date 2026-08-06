@@ -3,13 +3,14 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import type { ChatMessage } from '@app-types';
+import { getRegularCardInsets } from '@renderer/layout/card-layout';
 import {
   clearTextMeasurementCaches,
   getFontString,
   measureBoundingBoxWidth,
   measureTextWidth,
 } from '@renderer/text-measure';
-import { DEFAULT_FONT_FAMILY, rendererLayout } from '@util/design-tokens';
+import { DEFAULT_FONT_FAMILY } from '@util/design-tokens';
 
 describe('getFontString', () => {
   const defaultFamily = DEFAULT_FONT_FAMILY;
@@ -245,10 +246,11 @@ describe('text measurement caches', () => {
 
       const first = estimateMessageDimensions(message, 16, false);
       const cached = estimateMessageDimensions(message, 16, false);
+      const insets = getRegularCardInsets(16);
 
       expect(first).toEqual({
-        width: 42 + rendererLayout.paddingH * 2,
-        height: Math.ceil(16 * 1.1),
+        width: 42 + insets.horizontal * 2,
+        height: Math.ceil(16 * 1.1) + insets.vertical * 2,
       });
       expect(cached).toEqual(first);
       expect(Object.values(first).every(Number.isFinite)).toBe(true);
