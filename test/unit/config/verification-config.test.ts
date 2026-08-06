@@ -18,6 +18,9 @@ describe('Verification configuration', () => {
     const packageJson = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as {
       scripts?: Record<string, string>;
     };
+    const rendererConfig = JSON.parse(
+      readFileSync(resolve(root, 'stryker.conf.renderer.json'), 'utf8')
+    ) as { thresholds?: { break?: number | null } };
     const workflow = readFileSync(resolve(root, '.github/workflows/deep-checks.yaml'), 'utf8');
 
     expect(config.thresholds?.break).toBeGreaterThan(0);
@@ -26,8 +29,16 @@ describe('Verification configuration', () => {
     );
     expect(config.jsonReporter?.fileName).toBe('reports/mutation/fast.json');
     expect(config.mutate).toEqual(
-      expect.arrayContaining(['!src/settings/ui/form.ts', '!src/settings/ui/panes.ts'])
+      expect.arrayContaining([
+        '!src/settings/ui/form.ts',
+        '!src/settings/ui/panes.ts',
+        '!src/translation/service.ts',
+        '!src/util/backlog-indicator.ts',
+        '!src/util/observability.ts',
+      ])
     );
+    expect(config.thresholds?.break).toBe(65);
+    expect(rendererConfig.thresholds?.break).toBe(75);
     expect(config.mutator?.excludedMutations).not.toContain('ConditionalExpression');
     expect(config.mutator?.excludedMutations).not.toContain('EqualityOperator');
     expect(config.mutator?.excludedMutations).not.toContain('BooleanLiteral');
