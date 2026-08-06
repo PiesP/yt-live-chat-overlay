@@ -114,12 +114,12 @@ function makeWorkerMessage(overrides: Partial<WorkerMessage> = {}): WorkerMessag
   };
 }
 
-function initializeRenderer(): WorkerRenderer {
+function initializeRenderer(configOverrides: Record<string, unknown> = {}): WorkerRenderer {
   const renderer = new WorkerRenderer();
   renderer.handleMessage(
     makeEvent({
       type: 'init',
-      config: makeMinimalConfig(),
+      config: { ...makeMinimalConfig(), ...configOverrides },
       canvas: new MockOffscreenCanvas(),
       dpr: 1,
       width: 640,
@@ -206,12 +206,37 @@ describe('Worker message protocol', () => {
         10_000,
         { laneIndex: 0, waitMs: 125, laneY: 0, slotCount: 1, verticalOffset: 0 },
         0,
+        0,
+        1,
         640,
         360
       );
 
       expect(internals.activeMessages[0]?.startTime).toBe(10_125);
       expect(internals.activeMessages[0]?.fadeStartTime).toBe(10_125);
+    });
+
+    it('uses the shared fixed-mode stagger and safe centering policy', () => {
+      const renderer = initializeRenderer({ danmakuMode: 'bottom' });
+      const internals = renderer as unknown as {
+        activateMessage: (...args: unknown[]) => number;
+        activeMessages: Array<{ startTime: number; startX: number }>;
+      };
+
+      const staggerDelay = internals.activateMessage(
+        makeWorkerMessage({ width: 800 }),
+        10_000,
+        { laneIndex: 0, waitMs: 0, laneY: 0, slotCount: 1, verticalOffset: 0 },
+        1,
+        0,
+        1,
+        640,
+        360
+      );
+
+      expect(staggerDelay).toBeGreaterThan(0);
+      expect(internals.activeMessages[0]?.startTime).toBe(10_000 + staggerDelay);
+      expect(internals.activeMessages[0]?.startX).toBe(0);
     });
 
     it('keeps original content active for an empty translated string', () => {
@@ -235,6 +260,8 @@ describe('Worker message protocol', () => {
         10_000,
         { laneIndex: 0, waitMs: 0, laneY: 0, slotCount: 1, verticalOffset: 0 },
         0,
+        0,
+        1,
         640,
         360
       );

@@ -65,18 +65,13 @@ import { getSpeedTier } from '@renderer/canvas/speed-tier';
 import {
   type CanvasMessage,
   GRADIENT_CACHE_MAX,
-  HORIZONTAL_STAGGER_MAX,
-  HORIZONTAL_STAGGER_PER_STEP,
   IDLE_GRACE_PERIOD_MS,
   OPACITY_BUCKET_COUNT,
   SPEED_TIER,
-  STAGGER_BATCH_MAX,
-  STAGGER_EXP_SCALE,
-  STAGGER_QUEUE_HIGH,
-  STAGGER_QUEUE_MED,
 } from '@renderer/constants';
 import type { LanePlacement } from '@renderer/layout/lane-allocator';
 import { computeBaseHeadwayPx } from '@renderer/layout/lane-shared';
+import { computeMessageMotionPlan } from '@renderer/layout/message-schedule';
 import type { ConnectionStatus } from '@renderer/renderer-base';
 import { RendererBase } from '@renderer/renderer-base';
 import {
@@ -1171,18 +1166,20 @@ export class CanvasRenderer extends RendererBase {
     message: ChatMessage,
     now: number,
     dimensions: OverlayDimensions,
-    batchIndex: number
-  ): { placed: boolean; oversized: boolean } {
+    batchIndex: number,
+    previousStaggerDelayMs: number
+  ): { placed: boolean; oversized: boolean; staggerDelayMs?: number } {
     const result = this.checkPlacement(message, now, dimensions);
     if (!result.ok) {
       return { placed: false, oversized: result.reason === 'oversized' };
     }
 
-    this.enqueueMessageWithPlacement(
+    const staggerDelayMs = this.enqueueMessageWithPlacement(
       message,
       now,
       result.placement,
       batchIndex,
+      previousStaggerDelayMs,
       result.dimensions,
       result.speedTier,
       dimensions
@@ -1212,7 +1209,7 @@ export class CanvasRenderer extends RendererBase {
       );
     }
 
-    return { placed: true, oversized: false };
+    return { placed: true, oversized: false, staggerDelayMs };
   }
 
   private drainQueue(now: number): void {
@@ -1240,7 +1237,13 @@ export class CanvasRenderer extends RendererBase {
       for (const msg of batch.candidates) {
         if (this.activeMessages.length >= this.settings.maxConcurrentMessages) break;
 
-        const result = this.placeQueuedMessage(msg, now, dims, batch.batchIndex);
+        const result = this.placeQueuedMessage(
+          msg,
+          now,
+          dims,
+          batch.batchIndex,
+          batch.staggerCursorMs
+        );
         recordDrainResult(batch, msg, result);
       }
 
@@ -1275,7 +1278,13 @@ export class CanvasRenderer extends RendererBase {
       for (const msg of batch.candidates) {
         if (this.activeMessages.length >= this.settings.maxConcurrentMessages) break;
 
-        const result = this.placeQueuedMessage(msg, now, dims, batch.batchIndex);
+        const result = this.placeQueuedMessage(
+          msg,
+          now,
+          dims,
+          batch.batchIndex,
+          batch.staggerCursorMs
+        );
         if (!recordDrainResult(batch, msg, result)) continue;
 
         // Yield every 50ms to keep the main thread responsive during bursts.
@@ -1490,103 +1499,52 @@ export class CanvasRenderer extends RendererBase {
     now: number,
     placement: LanePlacement,
     batchIndex = 0,
+    previousStaggerDelayMs = 0,
     precomputedDimensions?: { width: number; height: number },
     precomputedSpeedTier?: number,
     precomputedDims?: OverlayDimensions
-  ): void {
+  ): number {
     const dims = precomputedDims ?? this.overlay.getDimensions();
-    if (!dims) return;
+    if (!dims) return previousStaggerDelayMs;
 
     const mode = this.settings.danmakuMode;
     const { width: msgWidth, height: msgHeight } =
       precomputedDimensions ?? this.estimateDimensions(message);
 
-    const isScrolling = mode === 'scroll' || mode === 'reverse';
     const speedTier = precomputedSpeedTier ?? this.getSpeedTier(message);
 
-    // Horizontal stagger: progressively offset batch messages from the
-    // entry edge so they don't all enter in a vertical column. Each
-    // successive batch message starts further from the entry edge,
-    // spreading them horizontally and breaking the vertical "wall" effect.
-    const horizontalStagger =
-      isScrolling && batchIndex > 0
-        ? Math.min(HORIZONTAL_STAGGER_MAX, batchIndex * HORIZONTAL_STAGGER_PER_STEP)
-        : 0;
-
-    // startX: off-screen entry position for scrolling modes,
-    // horizontal center for top/bottom fixed modes.
-    //   scroll  → dims.width + horizontalStagger  (right edge + stagger)
-    //   reverse → -(msgWidth + horizontalStagger)    (left edge − stagger)
-    //   top/bottom → center of viewport
-    const startX = isScrolling
-      ? mode === 'scroll'
-        ? dims.width + horizontalStagger
-        : -(msgWidth + horizontalStagger)
-      : Math.max(0, Math.floor((dims.width - msgWidth) / 2));
-
-    let effectiveDuration: number;
-    if (isScrolling) {
-      const speed = this.getSpeedForTier(speedTier);
-      // Total travel distance must account for horizontal stagger to maintain
-      // constant velocity — a message starting further from the entry edge
-      // travels farther at the same speed, so duration adjusts proportionally.
-      const totalDistance =
-        mode === 'scroll'
-          ? startX + msgWidth + this.settings.exitPaddingPx
-          : dims.width + msgWidth + this.settings.exitPaddingPx + horizontalStagger;
-      effectiveDuration =
-        speed > 0
-          ? computeScrollDuration(
-              totalDistance,
-              speed,
-              this.settings.scrollDurationMinMs,
-              this.settings.scrollDurationMaxMs,
-              this.settings.exitPaddingPx
-            )
-          : this.settings.scrollDurationMinMs;
-    } else {
-      effectiveDuration = this.settings.topBottomDurationMs;
-    }
-
-    // Moderator and owner messages stay on screen longer.
-    if (message.authorType === 'moderator' || message.authorType === 'owner') {
-      effectiveDuration *= this.settings.modOwnerDurationMultiplier;
-    }
-
     const laneY = placement.laneY + placement.verticalOffset;
-
-    // Stagger delay: spread batch entries across time to prevent vertical
-    // clumping. Computed BEFORE commitPlacement so the allocator accounts
-    // for the effective visual start time, not the raw 'now' timestamp.
-    //
-    // When the pending queue backs up, stagger is reduced to avoid
-    // compounding the delay — deep queue → zero stagger (backlog mode).
-    const maxStagger =
-      this.pendingQueue.size > STAGGER_QUEUE_HIGH
-        ? 0
-        : this.pendingQueue.size > STAGGER_QUEUE_MED
-          ? this.settings.staggerMediumDelayMs
-          : this.settings.staggerMaxDelayMs;
-    const staggerDelay =
-      batchIndex > 0 && maxStagger > 0
-        ? Math.round(
-            Math.min(
-              maxStagger,
-              Math.min(batchIndex, STAGGER_BATCH_MAX) *
-                STAGGER_EXP_SCALE *
-                CanvasRenderer.STAGGER_EXP_TABLE[(fastRandom() * 256) >>> 0]!
-            )
-          )
-        : 0;
-
-    const effectiveStartTime = now + staggerDelay + placement.waitMs;
+    const durationMultiplier =
+      message.authorType === 'moderator' || message.authorType === 'owner'
+        ? this.settings.modOwnerDurationMultiplier
+        : 1;
+    const motion = computeMessageMotionPlan({
+      mode,
+      now,
+      batchIndex,
+      previousStaggerDelayMs,
+      queueDepth: this.pendingQueue.size,
+      staggerSample: CanvasRenderer.STAGGER_EXP_TABLE[(fastRandom() * 256) >>> 0]!,
+      maxStaggerDelayMs: this.settings.staggerMaxDelayMs,
+      mediumStaggerDelayMs: this.settings.staggerMediumDelayMs,
+      placementWaitMs: placement.waitMs,
+      screenWidth: dims.width,
+      messageWidth: msgWidth,
+      velocityPxPerSec: this.getSpeedForTier(speedTier),
+      scrollDurationMinMs: this.settings.scrollDurationMinMs,
+      scrollDurationMaxMs: this.settings.scrollDurationMaxMs,
+      exitPaddingPx: this.settings.exitPaddingPx,
+      topBottomDurationMs: this.settings.topBottomDurationMs,
+      durationMultiplier,
+    });
     this.laneAllocator.commitPlacement(
       placement,
-      effectiveStartTime,
-      effectiveDuration,
-      isScrolling ? msgWidth : undefined,
-      isScrolling ? dims.width : undefined,
-      speedTier
+      motion.startTime,
+      motion.durationMs,
+      motion.isScrolling ? msgWidth : undefined,
+      motion.isScrolling ? dims.width : undefined,
+      speedTier,
+      motion.horizontalStaggerPx
     );
 
     const translationGeneration = this.translationConfigurationGeneration;
@@ -1608,10 +1566,10 @@ export class CanvasRenderer extends RendererBase {
           this.queueTranslationResult(cm, text, translationGeneration);
         },
       },
-      effectiveDuration,
-      startX,
+      motion.durationMs,
+      motion.startX,
       placement.laneIndex,
-      staggerDelay + placement.waitMs,
+      motion.startTime - now,
       speedTier
     );
 
@@ -1620,6 +1578,7 @@ export class CanvasRenderer extends RendererBase {
     // Update render activity heartbeat — signals to the watchdog that
     // the renderer is healthy (successfully enqueuing messages).
     this.lastRenderActivity = performance.now();
+    return motion.staggerDelayMs;
   }
 
   // ── Dimension estimation (delegates to shared functions) ──────────────

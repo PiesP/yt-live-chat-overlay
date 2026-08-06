@@ -70,13 +70,15 @@ export function computeLaneY(
  * @param headwayGapRatio Headway gap as fraction of message width
  * @param msgWidthPx     Optional message width for scrolling mode
  * @param screenWidth    Optional screen width for scrolling mode
+ * @param entryOffsetPx  Distance beyond the viewport edge at activation
  */
 export function computeOccupancyMs(
   durationMs: number,
   exitPaddingPx: number,
   headwayGapRatio: number,
   msgWidthPx?: number,
-  screenWidth?: number
+  screenWidth?: number,
+  entryOffsetPx = 0
 ): number {
   const safeDuration = Math.max(0, durationMs);
   // Top/bottom mode: full duration + safety cooldown
@@ -86,10 +88,11 @@ export function computeOccupancyMs(
   }
 
   // Scrolling mode: precision exit-time
-  const totalDistance = screenWidth + msgWidthPx + exitPaddingPx;
+  const safeEntryOffset = Number.isFinite(entryOffsetPx) ? Math.max(0, entryOffsetPx) : 0;
+  const totalDistance = screenWidth + msgWidthPx + exitPaddingPx + safeEntryOffset;
   if (totalDistance <= 0) return safeDuration;
   const headwayPx = computeBaseHeadwayPx(msgWidthPx, headwayGapRatio);
-  const rightEdgePassFraction = (msgWidthPx + headwayPx) / totalDistance;
+  const rightEdgePassFraction = (safeEntryOffset + msgWidthPx + headwayPx) / totalDistance;
   return Math.round(rightEdgePassFraction * safeDuration);
 }
 

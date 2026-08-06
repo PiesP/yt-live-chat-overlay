@@ -160,6 +160,13 @@ describe('computeOccupancyMs', () => {
       // result = round(0.13966 * 0) = 0
       expect(result).toBe(0);
     });
+
+    it('holds the lane until a horizontally staggered message clears the entry zone', () => {
+      // total distance = 1000 + 200 + 100 + 80 = 1380px
+      // entry clear distance = 80 + 200 + 16px headway = 296px
+      // duration at 200px/s = 6900ms; occupancy = 296 / 1380 * 6900 = 1480ms
+      expect(computeOccupancyMs(6900, 100, 0.08, 200, 1000, 80)).toBe(1480);
+    });
   });
 });
 

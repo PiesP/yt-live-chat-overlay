@@ -306,9 +306,15 @@ export class LaneAllocator {
     durationMs: number,
     msgWidth?: number,
     screenWidth?: number,
-    speedTier: number = SPEED_TIER.MID
+    speedTier: number = SPEED_TIER.MID,
+    entryOffsetPx = 0
   ): void {
-    const occupancyMs = this.computeOccupancyMs(durationMs, msgWidth, screenWidth);
+    const occupancyMs = this.computeOccupancyMs(
+      durationMs,
+      msgWidth,
+      screenWidth,
+      entryOffsetPx
+    );
     const nextAvailable = startTime + occupancyMs;
     const startIdx = placement.laneIndex;
 
@@ -405,14 +411,16 @@ export class LaneAllocator {
   private computeOccupancyMs(
     durationMs: number,
     msgWidthPx?: number,
-    screenWidth?: number
+    screenWidth?: number,
+    entryOffsetPx = 0
   ): number {
     return computeOccupancyMs(
       durationMs,
       this.options.exitPaddingPx,
       this.options.headwayGapRatio,
       msgWidthPx,
-      screenWidth
+      screenWidth,
+      entryOffsetPx
     );
   }
 
