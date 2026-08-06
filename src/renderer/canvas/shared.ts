@@ -952,7 +952,7 @@ function renderContentSegments(
 const _photoShadowCache = new WeakMap<object, OffscreenCanvas>();
 
 /** Pad around the photo for shadow overflow (blur=4 + offset=1 ≈ 5px). */
-const AUTHOR_PHOTO_SHADOW_PAD = 5;
+const AUTHOR_PHOTO_SHADOW_PAD = rendererLayout.authorPhotoShadowOutset;
 
 /** Total canvas size for the shadow-precomposed photo. */
 const AUTHOR_PHOTO_CANVAS_SIZE = rendererLayout.authorPhotoSize + AUTHOR_PHOTO_SHADOW_PAD * 2;
@@ -1210,7 +1210,11 @@ export function renderRegularMessage(
     messageHeight,
   } = config;
   renderRegularMessageBackground(ctx, x, y, messageWidth, messageHeight, backgroundColor);
-  const insets = getRegularCardInsets(fontSize, outlineWidthPx);
+  const insets = getRegularCardInsets(
+    fontSize,
+    outlineWidthPx,
+    showAuthor && !!message.author && !!message.authorPhotoUrl
+  );
   const textX = x + insets.horizontal;
   let textY = y + insets.vertical;
 

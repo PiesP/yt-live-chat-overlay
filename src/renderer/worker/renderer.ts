@@ -77,6 +77,7 @@ import {
   TRANSLATION_GAP_PX,
   TRANSLATION_OPACITY_SCALE,
 } from '@renderer/constants';
+import { getAuthorNameMaxWidth } from '@renderer/layout/card-layout';
 import {
   buildLaneHeap,
   commitPlacementShared,
@@ -251,13 +252,18 @@ function renderPaidCardWorker(
 
   // ── 5. Author section (name + photo) — rendered first so name appears above amount/duration
   if (card.authorShow && message.author) {
+    const authorNameMaxWidth = getAuthorNameMaxWidth(
+      w - padH * 2,
+      card.authorNameMaxWidth,
+      message.authorPhotoUrl
+    );
     cursorY = drawAuthorSection(
       ctx,
       message,
       textX,
       cursorY,
       textColor,
-      card.authorNameMaxWidth,
+      authorNameMaxWidth,
       Math.round(fontSize * rendererLayout.authorFontScale),
       fontWeight,
       fontFamily,

@@ -429,7 +429,13 @@ describe('renderRegularMessage mixed content layout', () => {
     const loadingBody = loadingCalls.find(([text]) => text === 'Body');
 
     expect(loadingAuthor?.[1]).toBe(readyAuthor?.[1]);
-    expect(loadingAuthor?.[1]).toBe(startX + 6 + rendererLayout.authorPhotoSize + spacing.xs);
+    expect(loadingAuthor?.[1]).toBe(
+      startX +
+        6 +
+        rendererLayout.authorPhotoSize +
+        rendererLayout.authorPhotoShadowOutset +
+        spacing.xs
+    );
     expect(loadingBody?.[2]).toBeGreaterThan(loadingAuthor?.[2] as number);
   });
 });

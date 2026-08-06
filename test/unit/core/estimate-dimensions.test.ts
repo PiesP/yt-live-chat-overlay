@@ -106,7 +106,7 @@ describe('estimateMessageDimensions — regular text', () => {
     const withPhotoDims = estimateMessageDimensions(withPhoto, 16, true);
 
     expect(withPhotoDims.width - withoutPhotoDims.width).toBe(
-      rendererLayout.authorPhotoSize + spacing.xs
+      rendererLayout.authorPhotoSize + rendererLayout.authorPhotoShadowOutset + spacing.xs
     );
     expect(withPhotoDims.height).toBeGreaterThan(withoutPhotoDims.height);
   });
@@ -207,7 +207,32 @@ describe('estimateMessageDimensions — superchat', () => {
     });
     const dims = estimateMessageDimensions(msg, 16, false);
     expect(dims.width).toBeGreaterThan(0);
+    expect(dims.width).toBeLessThan(rendererLayout.superchatMinWidth);
     expect(dims.height).toBeGreaterThan(0);
+  });
+
+  it('never exceeds the available viewport width', () => {
+    const msg = makeMessage({
+      kind: 'superchat',
+      text: 'very long paid message '.repeat(20),
+      content: [{ type: 'text', content: 'very long paid message '.repeat(20) }],
+      superChat: { amount: '$50.00', tier: 'red' },
+    });
+
+    const dims = estimateMessageDimensions(
+      msg,
+      32,
+      false,
+      'bold',
+      undefined,
+      undefined,
+      true,
+      '0px',
+      0,
+      240
+    );
+
+    expect(dims.width).toBeLessThanOrEqual(240);
   });
 
   it('handles superchat with sticker', () => {
@@ -274,6 +299,35 @@ describe('estimateMessageDimensions — membership', () => {
     const dims = estimateMessageDimensions(msg, 16, false);
     expect(dims.width).toBeGreaterThan(0);
     expect(dims.height).toBeGreaterThan(0);
+  });
+
+  it('does not reserve a phantom author row when only body text is displayed', () => {
+    const msg = makeMessage({
+      kind: 'membership',
+      text: 'x',
+      content: [{ type: 'text', content: 'x' }],
+    });
+
+    const dims = estimateMessageDimensions(msg, 16, false);
+
+    expect(dims.height).toBe(
+      rendererLayout.membership.paddingV * 2 + spacing.xs + Math.round(16 * 1.2)
+    );
+  });
+
+  it('lets a long membership header determine the card width', () => {
+    const header = 'Membership duration '.repeat(3);
+    const msg = makeMessage({
+      kind: 'membership',
+      text: 'x',
+      content: [{ type: 'text', content: 'x' }],
+      membershipHeader: header,
+    });
+
+    const dims = estimateMessageDimensions(msg, 16, false);
+
+    expect(dims.width).toBeGreaterThan(rendererLayout.superchatMinWidth);
+    expect(dims.width).toBeLessThanOrEqual(rendererLayout.superchatMaxWidth);
   });
 
   it('handles membership with author', () => {

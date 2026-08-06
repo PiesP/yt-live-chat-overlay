@@ -124,6 +124,8 @@ export const BACKLOG_INDICATOR_BG = 'rgba(0, 0, 0, 0.75)';
  */
 export const rendererLayout = {
   authorPhotoSize: 24,
+  /** Visual overflow reserved for the pre-composited author photo shadow. */
+  authorPhotoShadowOutset: 5,
   authorFontScale: 0.85,
   emojiSize: 1.2,
   superchatStickerSize: 2,
@@ -154,6 +156,10 @@ export const rendererLayout = {
   messageBackgroundRadius: 6,
   /** SuperChat card min width (px) */
   superchatMinWidth: 280,
+  /** Compact paid-card minimum width at small/default font sizes (px). */
+  paidCardMinWidthFloor: 196,
+  /** Font-size multiplier used to derive paid-card minimum width. */
+  paidCardMinWidthScale: 7.5,
   /** SuperChat card max width (px) */
   superchatMaxWidth: 640,
   /** SuperChat card padding */
