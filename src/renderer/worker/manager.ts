@@ -643,12 +643,33 @@ export class RenderWorkerManager {
   }
 
   /** Send a translation result to the render worker. */
-  sendTranslation(msgId: string, translatedText: string | null): void {
+  sendTranslation(
+    msgId: string,
+    translatedText: string | null,
+    geometry: { width: number; height: number; translationHeight: number }
+  ): void {
     this.worker?.postMessage({
       type: 'updateTranslation',
       id: msgId,
       translatedText,
+      width: geometry.width,
+      height: geometry.height,
+      translationHeight: geometry.translationHeight,
     });
+  }
+
+  /** Restore Worker-owned messages to their untranslated card geometry. */
+  clearTranslations(
+    estimateGeometry: (message: ChatMessage) => {
+      width: number;
+      height: number;
+      translationHeight: number;
+    }
+  ): void {
+    if (!this.worker) return;
+    for (const [id, message] of this.sentMessages) {
+      this.sendTranslation(id, null, estimateGeometry(message));
+    }
   }
 
   /** Send updated settings to the render worker. */

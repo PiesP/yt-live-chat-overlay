@@ -114,7 +114,10 @@ export function isValidControlMessage(value: unknown): boolean {
       return (
         typeof value.id === 'string' &&
         value.id.length > 0 &&
-        (typeof value.translatedText === 'string' || value.translatedText === null)
+        (typeof value.translatedText === 'string' || value.translatedText === null) &&
+        isPositiveFiniteNumber(value.width) &&
+        isPositiveFiniteNumber(value.height) &&
+        isFiniteNonNegative(value.translationHeight)
       );
     case 'laneDensity':
       return typeof value.factor === 'number' && SUPPORTED_LANE_DENSITY_FACTORS.has(value.factor);

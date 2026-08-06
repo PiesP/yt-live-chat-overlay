@@ -386,6 +386,58 @@ describe('renderRegularMessage mixed content layout', () => {
     const emojiSize = Math.round(config.fontSize * rendererLayout.emojiSize);
     expect(secondX! - firstX!).toBe(emojiSize + spacing.xs);
   });
+
+  it('keeps author and body positions stable while the author photo loads', () => {
+    const authorConfig = { ...config, showAuthor: true, fontSize: 16, messageHeight: 60 };
+    const message = {
+      author: 'Author',
+      authorPhotoUrl: 'photo://author',
+      text: 'Body',
+      content: [{ type: 'text' as const, content: 'Body' }],
+    };
+    const readyPhoto = {} as CanvasImageSource;
+
+    const renderWithPhotoCache = (
+      photoCache: Map<string, CanvasImageSource>,
+      isValidPhoto: (photo: unknown) => boolean
+    ): Array<unknown[]> => {
+      const { ctx } = createMockContext();
+      renderRegularMessage(
+        ctx,
+        message,
+        startX,
+        20,
+        authorConfig,
+        textBitmapCache,
+        new Map(),
+        () => false,
+        photoCache,
+        isValidPhoto,
+        () => 'bold 16px system-ui',
+        (text) => text.length * 10
+      );
+      return (ctx.fillText as ReturnType<typeof vi.fn>).mock.calls;
+    };
+
+    const loadingCalls = renderWithPhotoCache(new Map(), () => false);
+    const readyCalls = renderWithPhotoCache(
+      new Map([['photo://author', readyPhoto]]),
+      (photo) => photo === readyPhoto
+    );
+    const loadingAuthor = loadingCalls.find(([text]) => text === 'Author');
+    const readyAuthor = readyCalls.find(([text]) => text === 'Author');
+    const loadingBody = loadingCalls.find(([text]) => text === 'Body');
+
+    expect(loadingAuthor?.[1]).toBe(readyAuthor?.[1]);
+    expect(loadingAuthor?.[1]).toBe(
+      startX +
+        6 +
+        rendererLayout.authorPhotoSize +
+        rendererLayout.authorPhotoShadowOutset +
+        spacing.xs
+    );
+    expect(loadingBody?.[2]).toBeGreaterThan(loadingAuthor?.[2] as number);
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════

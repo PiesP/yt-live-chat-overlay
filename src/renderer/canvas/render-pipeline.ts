@@ -21,6 +21,7 @@ import {
   type RegularMessageRenderConfig,
   renderRegularMessage,
   renderSegment,
+  renderWrappedContentSegments,
 } from '@renderer/canvas/shared';
 import { MEMBERSHIP_CARD_CONFIG, SUPERCHAT_CARD_CONFIG } from '@renderer/card-config';
 import {
@@ -30,9 +31,9 @@ import {
   OPACITY_BUCKET_COUNT,
   SPEED_TIER,
   TRANSLATION_FONT_SCALE,
-  TRANSLATION_GAP_PX,
   TRANSLATION_OPACITY_SCALE,
 } from '@renderer/constants';
+import { getRegularCardInsets } from '@renderer/layout/card-layout';
 import type { LaneAllocator } from '@renderer/layout/lane-allocator';
 import { computeMessageOpacity } from '@renderer/shared';
 import { getFontString } from '@renderer/text-measure';
@@ -456,11 +457,24 @@ export function drawStage(
         if (
           ctx.settings.translationEnabled &&
           msg.translatedText &&
+          msg.translatedText !== msg.message.text &&
           ctx.settings.translationMode !== 'replace'
         ) {
           const fontSize = Math.max(1, Math.round(ctx.settings.fontSize * TRANSLATION_FONT_SCALE));
-          const gap = TRANSLATION_GAP_PX;
-          const transY = snappedY + msg.height - fontSize - gap;
+          const translationHeight = msg.translationHeight ?? fontSize;
+          const isPaidCard = msg.message.kind !== 'text';
+          const paidPadding =
+            msg.message.kind === 'superchat' ? rendererLayout.superchat : rendererLayout.membership;
+          const regularInsets = getRegularCardInsets(
+            ctx.settings.fontSize,
+            ctx.settings.outline.enabled ? ctx.settings.outline.widthPx : 0,
+            ctx.settings.showAuthor[renderMessage.authorType] &&
+              !!renderMessage.author &&
+              !!renderMessage.authorPhotoUrl
+          );
+          const paddingH = isPaidCard ? paidPadding.paddingH : regularInsets.horizontal;
+          const paddingV = isPaidCard ? paidPadding.paddingV : regularInsets.vertical;
+          const transY = snappedY + msg.height - paddingV - translationHeight;
           const transColor =
             ctx.settings.preserveUserColor && renderMessage.userColor
               ? renderMessage.userColor
@@ -470,18 +484,38 @@ export function drawStage(
           try {
             renderCtx.globalAlpha = bucketOpacity * TRANSLATION_OPACITY_SCALE;
             const transFont = getFontString(fontSize, 'normal', ctx.settings.fontFamily);
-            renderSegment(
-              renderCtx,
-              msg.translatedText,
-              snappedX + (msg.message.kind === 'text' ? rendererLayout.paddingH : 0),
-              transY,
-              transColor,
-              fontSize,
-              ctx.settings.outline.enabled ? ctx.settings.outline.widthPx : 0,
-              ctx.settings.outline.enabled ? ctx.settings.outline.opacity : 0,
-              ctx.textBitmapCache,
-              (_fs: number) => transFont
-            );
+            if (isPaidCard) {
+              renderWrappedContentSegments(
+                renderCtx,
+                [{ type: 'text', content: msg.translatedText }],
+                snappedX + paddingH,
+                transY,
+                Math.max(1, msg.width - paddingH * 2),
+                msg.message.kind === 'superchat'
+                  ? ctx.settings.superChatMaxBodyLines
+                  : ctx.settings.membershipMaxBodyLines,
+                transColor,
+                fontSize,
+                ctx.settings.outline.enabled ? ctx.settings.outline.widthPx : 0,
+                ctx.settings.outline.enabled ? ctx.settings.outline.opacity : 0,
+                ctx.textBitmapCache,
+                ctx.imageFetchManager.emojiCache as ResizableByteLimitedCache<CanvasImageSource>,
+                (_fs: number) => transFont
+              );
+            } else {
+              renderSegment(
+                renderCtx,
+                msg.translatedText,
+                snappedX + paddingH,
+                transY,
+                transColor,
+                fontSize,
+                ctx.settings.outline.enabled ? ctx.settings.outline.widthPx : 0,
+                ctx.settings.outline.enabled ? ctx.settings.outline.opacity : 0,
+                ctx.textBitmapCache,
+                (_fs: number) => transFont
+              );
+            }
           } finally {
             renderCtx.restore();
           }

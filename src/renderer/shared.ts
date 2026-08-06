@@ -8,14 +8,21 @@
  * duplicate text measurement and dimension estimation logic.
  */
 
-import type { ChatMessage, FontWeight } from '@app-types';
+import type { ChatMessage, FontWeight, TranslationMode } from '@app-types';
 import {
   buildWrappedLines,
   measureEmojiAdvanceWidth,
   measureTextAdvanceWidth,
   toSharedContentSegments,
 } from '@renderer/canvas/shared';
-import { SPEED_TIER } from '@renderer/constants';
+import { MEMBERSHIP_CARD_CONFIG, SUPERCHAT_CARD_CONFIG } from '@renderer/card-config';
+import { SPEED_TIER, TRANSLATION_FONT_SCALE, TRANSLATION_GAP_PX } from '@renderer/constants';
+import {
+  getAuthorPhotoSlotWidth,
+  getAuthorRowHeight,
+  getPaidCardWidthBounds,
+  getRegularCardInsets,
+} from '@renderer/layout/card-layout';
 import { RendererBase } from '@renderer/renderer-base';
 import { getFontString, measureTextHeight, measureTextWidth } from '@renderer/text-measure';
 import { DEFAULT_SETTINGS } from '@settings/schema';
@@ -66,7 +73,10 @@ export function estimateMessageDimensions(
   fontFamily: string = DEFAULT_FONT_FAMILY,
   maxBodyLines?: { superchat?: number; membership?: number },
   showSuperChatAmount?: boolean,
-  letterSpacing = '0px'
+  letterSpacing = '0px',
+  outlineWidthPx = 0,
+  availableWidth?: number,
+  minimumPaidCardWidth?: number
 ): MessageDimensions {
   const font = getFontString(fontSize, fontWeight, fontFamily);
 
@@ -79,7 +89,9 @@ export function estimateMessageDimensions(
       fontFamily,
       maxBodyLines?.superchat ?? DEFAULT_SETTINGS.superChatMaxBodyLines,
       fontWeight,
-      showSuperChatAmount
+      showSuperChatAmount,
+      availableWidth,
+      minimumPaidCardWidth
     );
   }
   if (message.kind === 'membership') {
@@ -87,7 +99,11 @@ export function estimateMessageDimensions(
       message,
       font,
       fontSize,
-      maxBodyLines?.membership ?? DEFAULT_SETTINGS.membershipMaxBodyLines
+      maxBodyLines?.membership ?? DEFAULT_SETTINGS.membershipMaxBodyLines,
+      fontWeight,
+      fontFamily,
+      availableWidth,
+      minimumPaidCardWidth
     );
   }
   return estimateRegularMessageDimensions(
@@ -95,8 +111,10 @@ export function estimateMessageDimensions(
     font,
     fontSize,
     showAuthor,
+    fontWeight,
     fontFamily,
-    letterSpacing
+    letterSpacing,
+    outlineWidthPx
   );
 }
 
@@ -105,29 +123,42 @@ function estimateRegularMessageDimensions(
   font: string,
   fontSize: number,
   showAuthor: boolean,
+  fontWeight: FontWeight,
   fontFamily: string,
-  letterSpacing: string
+  letterSpacing: string,
+  outlineWidthPx: number
 ): MessageDimensions {
   const textWidth = measureContentWidth(message, font, fontSize, letterSpacing);
-  const textHeight = measureTextHeight(font, fontSize);
-  const { paddingH } = rendererLayout;
+  const textHeight = Math.max(
+    measureTextHeight(font, fontSize),
+    message.content.some((segment) => segment.type === 'emoji')
+      ? Math.round(fontSize * rendererLayout.emojiSize)
+      : 0
+  );
+  const insets = getRegularCardInsets(
+    fontSize,
+    outlineWidthPx,
+    showAuthor && !!message.author && !!message.authorPhotoUrl
+  );
 
   if (!showAuthor || !message.author) {
-    return { width: textWidth + paddingH * 2, height: textHeight };
+    return {
+      width: textWidth + insets.horizontal * 2,
+      height: textHeight + insets.vertical * 2,
+    };
   }
 
   const authorFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
-  const authorFont = getFontString(authorFontSize, 'bold', fontFamily);
+  const authorFont = getFontString(authorFontSize, fontWeight, fontFamily);
   const authorNameWidth = measureTextWidth(message.author, authorFont);
-  const authorSectionWidth = rendererLayout.authorPhotoSize + spacing.sm + authorNameWidth;
-  const totalWidth = Math.max(authorSectionWidth + paddingH * 2, textWidth + paddingH * 2);
-  const photoHeight = rendererLayout.authorPhotoSize;
+  const authorSectionWidth = getAuthorPhotoSlotWidth(message.authorPhotoUrl) + authorNameWidth;
+  const totalWidth = Math.max(authorSectionWidth, textWidth) + insets.horizontal * 2;
   const nameHeight = measureTextHeight(authorFont, authorFontSize);
-  const authorSectionHeight = Math.max(photoHeight, nameHeight);
+  const authorSectionHeight = getAuthorRowHeight(nameHeight, message.authorPhotoUrl);
 
   return {
     width: totalWidth,
-    height: authorSectionHeight + spacing.xs + textHeight,
+    height: insets.vertical * 2 + authorSectionHeight + spacing.xs + textHeight,
   };
 }
 
@@ -139,10 +170,13 @@ function estimateSuperChatDimensions(
   fontFamily: string,
   maxBodyLines: number,
   fontWeight: FontWeight = 'bold',
-  showSuperChatAmount: boolean = true
+  showSuperChatAmount: boolean = true,
+  availableWidth?: number,
+  minimumWidth?: number
 ): MessageDimensions {
   const { paddingH, paddingV } = rendererLayout.superchat;
   const bodyLineHeight = measureTextHeight(font, fontSize);
+  const widthBounds = getPaidCardWidthBounds(fontSize, availableWidth);
 
   let authorSectionWidth = 0;
   let authorSectionHeight = 0;
@@ -150,18 +184,21 @@ function estimateSuperChatDimensions(
     const authorFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
     const authorFont = getFontString(authorFontSize, fontWeight, fontFamily);
     const rawNameWidth = measureTextWidth(message.author, authorFont);
-    const authorNameWidth = Math.min(rawNameWidth, rendererLayout.authorNameMaxWidth);
-    authorSectionWidth = rendererLayout.authorPhotoSize + spacing.sm + authorNameWidth;
+    const photoSlotWidth = getAuthorPhotoSlotWidth(message.authorPhotoUrl);
+    const maxNameWidth = Math.max(1, widthBounds.max - paddingH * 2 - photoSlotWidth);
+    const authorNameWidth = Math.min(rawNameWidth, rendererLayout.authorNameMaxWidth, maxNameWidth);
+    authorSectionWidth = photoSlotWidth + authorNameWidth;
     const nameHeight = measureTextHeight(authorFont, authorFontSize);
-    authorSectionHeight = Math.max(rendererLayout.authorPhotoSize, nameHeight);
+    authorSectionHeight = getAuthorRowHeight(nameHeight, message.authorPhotoUrl);
   }
 
   let badgeWidth = 0;
   let badgeHeight = 0;
-  if (showSuperChatAmount) {
+  const badgeText = message.superChat?.amount ?? '';
+  if (showSuperChatAmount && badgeText) {
     const badgeFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
     const badgeFont = getFontString(badgeFontSize, 'bold', fontFamily);
-    const badgeTextWidth = measureTextWidth(message.superChat?.amount ?? '', badgeFont);
+    const badgeTextWidth = measureTextWidth(badgeText, badgeFont);
     badgeWidth = badgeTextWidth + rendererLayout.superchatBadge.paddingH * 2;
     badgeHeight = badgeFontSize + rendererLayout.superchatBadge.paddingV * 2;
   }
@@ -171,7 +208,7 @@ function estimateSuperChatDimensions(
   // Pass 1: build wrapped lines at max inner width to determine max line width.
   // Uses buildWrappedLines (SSOT with renderWrappedContentSegments) so that
   // emoji segments are measured with the same piece widths as rendering.
-  const maxInnerWidth = rendererLayout.superchatMaxWidth - paddingH * 2;
+  const maxInnerWidth = Math.max(1, widthBounds.max - paddingH * 2);
   const pass1Result = buildWrappedLines(
     toSharedContentSegments(message.content),
     Math.max(1, maxInnerWidth),
@@ -182,9 +219,9 @@ function estimateSuperChatDimensions(
 
   // Determine card width from the widest element
   const contentWidth = Math.max(authorSectionWidth, badgeWidth, maxLineWidth);
-  const width = Math.max(
-    rendererLayout.superchatMinWidth,
-    Math.min(rendererLayout.superchatMaxWidth, contentWidth + paddingH * 2)
+  const width = Math.min(
+    widthBounds.max,
+    Math.max(widthBounds.min, minimumWidth ?? 0, contentWidth + paddingH * 2)
   );
 
   // Pass 2: re-wrap at actual card inner width to get line count.
@@ -212,15 +249,15 @@ function estimateSuperChatDimensions(
 
   let stickerHeight = 0;
   if (message.superChat?.sticker) {
-    stickerHeight = Math.round(fontSize * rendererLayout.superchatStickerSize) + spacing.xs;
+    stickerHeight =
+      Math.round(fontSize * rendererLayout.superchatStickerSize) +
+      (SUPERCHAT_CARD_CONFIG.sticker?.marginTop ?? 0);
   }
 
-  const badgeSectionHeight = showSuperChatAmount
-    ? spacing.xs + badgeHeight + spacing.xs
-    : lineCount > 0
-      ? spacing.xs
-      : 0;
-  const contentHeight = authorSectionHeight + badgeSectionHeight + textHeight + stickerHeight;
+  const badgeSectionHeight = badgeHeight > 0 ? spacing.xs + badgeHeight : 0;
+  const bodySectionHeight = lineCount > 0 ? SUPERCHAT_CARD_CONFIG.body.marginTop + textHeight : 0;
+  const contentHeight =
+    authorSectionHeight + badgeSectionHeight + bodySectionHeight + stickerHeight;
 
   return { width, height: contentHeight + paddingV * 2 };
 }
@@ -229,33 +266,63 @@ function estimateMembershipDimensions(
   message: ChatMessage,
   font: string,
   fontSize: number,
-  maxBodyLines: number
+  maxBodyLines: number,
+  fontWeight: FontWeight,
+  fontFamily: string,
+  availableWidth?: number,
+  minimumWidth?: number
 ): MessageDimensions {
-  const textWidth = measureContentWidth(message, font, fontSize, '0px');
   const { paddingH, paddingV } = rendererLayout.membership;
-  const nameHeight = measureTextHeight(font, fontSize);
   const bodyLineHeight = measureTextHeight(font, fontSize);
+  const widthBounds = getPaidCardWidthBounds(fontSize, availableWidth);
 
-  const infoHeight = nameHeight;
-
-  // Clamp width to the same bounds as SuperChat for visual consistency
-  const width = Math.max(
-    rendererLayout.superchatMinWidth,
-    Math.min(rendererLayout.superchatMaxWidth, textWidth + paddingH * 2)
-  );
+  let authorSectionWidth = 0;
+  let authorSectionHeight = 0;
+  if (message.author) {
+    const authorFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
+    const authorFont = getFontString(authorFontSize, fontWeight, fontFamily);
+    const photoSlotWidth = getAuthorPhotoSlotWidth(message.authorPhotoUrl);
+    const maxNameWidth = Math.max(1, widthBounds.max - paddingH * 2 - photoSlotWidth);
+    const authorNameWidth = Math.min(
+      measureTextWidth(message.author, authorFont),
+      rendererLayout.authorNameMaxWidth,
+      maxNameWidth
+    );
+    authorSectionWidth = photoSlotWidth + authorNameWidth;
+    authorSectionHeight = getAuthorRowHeight(
+      measureTextHeight(authorFont, authorFontSize),
+      message.authorPhotoUrl
+    );
+  }
 
   // Membership header height (if present)
   let headerHeight = 0;
+  let headerWidth = 0;
   if (message.membershipHeader) {
     const headerFontSize = Math.round(fontSize * 0.8);
-    headerHeight = measureTextHeight(font, headerFontSize) + spacing.xs;
+    const headerFont = getFontString(headerFontSize, fontWeight, fontFamily);
+    headerHeight = measureTextHeight(headerFont, headerFontSize);
+    headerWidth = Math.min(measureTextWidth(message.membershipHeader, headerFont), widthBounds.max);
   }
+
+  const emojiSize = Math.round(fontSize * rendererLayout.emojiSize);
+  const maxInnerWidth = Math.max(1, widthBounds.max - paddingH * 2);
+  const pass1Result = buildWrappedLines(
+    toSharedContentSegments(message.content),
+    maxInnerWidth,
+    emojiSize,
+    (text: string) => measureTextWidth(text, font)
+  );
+  const contentWidth = Math.max(authorSectionWidth, headerWidth, pass1Result.maxLineWidth);
+  const width = Math.min(
+    widthBounds.max,
+    Math.max(widthBounds.min, minimumWidth ?? 0, contentWidth + paddingH * 2)
+  );
 
   // Re-build wrapped lines at the actual card inner width so line count matches
   // what renderMembership will produce. Uses buildWrappedLines (SSOT with
   // renderWrappedContentSegments) for consistent emoji piece widths.
   const actualInnerWidth = Math.max(1, width - paddingH * 2);
-  const emojiSize = Math.round(fontSize * rendererLayout.emojiSize);
   const passResult = buildWrappedLines(
     toSharedContentSegments(message.content),
     actualInnerWidth,
@@ -267,10 +334,128 @@ function estimateMembershipDimensions(
   const textHeight = Math.ceil(bodyLineHeight) * bodyLineCount;
 
   // Include author-to-body gap when author section is present (matching renderMembership)
-  const hasAuthor = message.author !== undefined;
-  const authorBodyGap = hasAuthor ? spacing.xs : 0;
+  const headerSectionHeight =
+    headerHeight > 0
+      ? (MEMBERSHIP_CARD_CONFIG.headerTag?.marginTop ?? 0) +
+        headerHeight +
+        (MEMBERSHIP_CARD_CONFIG.headerTag?.marginBottom ?? 0)
+      : 0;
+  const bodySectionHeight =
+    bodyLineCount > 0 ? MEMBERSHIP_CARD_CONFIG.body.marginTop + textHeight : 0;
 
-  return { width, height: headerHeight + infoHeight + authorBodyGap + textHeight + paddingV * 2 };
+  return {
+    width,
+    height: paddingV * 2 + authorSectionHeight + headerSectionHeight + bodySectionHeight,
+  };
+}
+
+export interface MessageDimensionOptions {
+  fontSize: number;
+  showAuthor: boolean;
+  fontWeight?: FontWeight;
+  fontFamily?: string;
+  maxBodyLines?: { superchat?: number; membership?: number };
+  showSuperChatAmount?: boolean;
+  letterSpacing?: string;
+  outlineWidthPx?: number;
+  availableWidth?: number;
+}
+
+export interface TranslatedMessageDimensions extends MessageDimensions {
+  /** Height of the translated text block only; excludes the inter-section gap. */
+  translationHeight: number;
+}
+
+/** Estimate final geometry after an asynchronous translation becomes visible. */
+export function estimateTranslatedMessageDimensions(
+  message: ChatMessage,
+  translatedText: string | null,
+  mode: TranslationMode,
+  options: MessageDimensionOptions
+): TranslatedMessageDimensions {
+  const {
+    fontSize,
+    showAuthor,
+    fontWeight = 'bold',
+    fontFamily = DEFAULT_FONT_FAMILY,
+    maxBodyLines,
+    showSuperChatAmount,
+    letterSpacing = '0px',
+    outlineWidthPx = 0,
+    availableWidth,
+  } = options;
+  const estimate = (candidate: ChatMessage, minimumPaidCardWidth?: number): MessageDimensions =>
+    estimateMessageDimensions(
+      candidate,
+      fontSize,
+      showAuthor,
+      fontWeight,
+      fontFamily,
+      maxBodyLines,
+      showSuperChatAmount,
+      letterSpacing,
+      outlineWidthPx,
+      availableWidth,
+      minimumPaidCardWidth
+    );
+  const base = estimate(message);
+  if (!translatedText || (mode === 'dual' && translatedText === message.text)) {
+    return { ...base, translationHeight: 0 };
+  }
+
+  const translatedMessage: ChatMessage = {
+    ...message,
+    text: translatedText,
+    content: [{ type: 'text', content: translatedText }],
+  };
+  if (mode === 'replace') {
+    return { ...estimate(translatedMessage), translationHeight: 0 };
+  }
+
+  const translationFontSize = Math.max(1, Math.round(fontSize * TRANSLATION_FONT_SCALE));
+  const translationFont = getFontString(translationFontSize, 'normal', fontFamily);
+  const translationLineHeight = Math.ceil(measureTextHeight(translationFont, translationFontSize));
+  const translationTextWidth = measureTextWidth(translatedText, translationFont);
+
+  if (message.kind === 'text') {
+    const insets = getRegularCardInsets(
+      fontSize,
+      outlineWidthPx,
+      showAuthor && !!message.author && !!message.authorPhotoUrl
+    );
+    return {
+      width: Math.max(base.width, Math.ceil(translationTextWidth) + insets.horizontal * 2),
+      height: base.height + TRANSLATION_GAP_PX + translationLineHeight,
+      translationHeight: translationLineHeight,
+    };
+  }
+
+  const padding =
+    message.kind === 'superchat' ? rendererLayout.superchat : rendererLayout.membership;
+  const widthBounds = getPaidCardWidthBounds(fontSize, availableWidth);
+  const desiredWidth = Math.min(
+    widthBounds.max,
+    Math.max(base.width, Math.ceil(translationTextWidth) + padding.paddingH * 2)
+  );
+  const primary = estimate(message, desiredWidth);
+  const innerWidth = Math.max(1, primary.width - padding.paddingH * 2);
+  const wrapped = buildWrappedLines(
+    [{ type: 'text', content: translatedText }],
+    innerWidth,
+    Math.round(translationFontSize * rendererLayout.emojiSize),
+    (text: string) => measureTextWidth(text, translationFont)
+  );
+  const maxLines =
+    message.kind === 'superchat'
+      ? (maxBodyLines?.superchat ?? DEFAULT_SETTINGS.superChatMaxBodyLines)
+      : (maxBodyLines?.membership ?? DEFAULT_SETTINGS.membershipMaxBodyLines);
+  const translationHeight = Math.min(wrapped.lines.length, maxLines) * translationLineHeight;
+
+  return {
+    width: primary.width,
+    height: primary.height + TRANSLATION_GAP_PX + translationHeight,
+    translationHeight,
+  };
 }
 
 // ── Opacity computation (shared between main-thread and worker renderers) ──

@@ -173,6 +173,8 @@ export interface CanvasMessage {
   speedTier: number;
   /** Translated text (async result). undefined = not requested, null = cleared/unavailable, string = done. */
   translatedText?: string | null;
+  /** Height of the dual-translation text block, excluding its leading gap. */
+  translationHeight?: number;
   /** Pre-computed desaturated color for Far-tier depth layer. */
   desaturatedUserColor?: string;
   /** Number of vertical lanes this message occupies (1 for single-slot, 2+ for multi-slot). */

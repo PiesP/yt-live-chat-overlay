@@ -19,7 +19,8 @@ import {
 } from '@renderer/canvas/shared';
 import type { CardConfig } from '@renderer/card-config';
 import { computeReadableTextColor } from '@renderer/color-utils';
-import { measureTextHeight } from '@renderer/text-measure';
+import { getAuthorNameMaxWidth } from '@renderer/layout/card-layout';
+import { getFontString, measureTextHeight } from '@renderer/text-measure';
 import type { ResizableByteLimitedCache } from '@util/byte-limited-cache';
 import { DEFAULT_TEXT_COLOR, rendererLayout, spacing } from '@util/design-tokens';
 
@@ -209,19 +210,19 @@ function renderCardBadge(
   fontSize: number,
   config: CardConfig,
   settings: OverlaySettings,
-  _textBitmapCache2: ResizableByteLimitedCache<HTMLCanvasElement>,
-  getFontFn: (fontSize: number) => string
+  _textBitmapCache2: ResizableByteLimitedCache<HTMLCanvasElement>
 ): number {
   if (!config.badge) return y;
   const badge = config.badge;
+  ctx.save();
   const badgeFontSize = Math.round(fontSize * rendererLayout.authorFontScale);
-  ctx.font = getFontFn(badgeFontSize);
+  const badgeFont = getFontString(badgeFontSize, 'bold', settings.fontFamily);
+  ctx.font = badgeFont;
   const badgeTextWidth = Math.ceil(ctx.measureText(text).width);
   const badgeWidth = badgeTextWidth + badge.paddingH * 2;
   const badgeHeight = badgeFontSize + badge.paddingV * 2;
 
   drawRoundRect(ctx, x, y, badgeWidth, badgeHeight, badge.radius);
-  ctx.save();
   ctx.fillStyle = badge.fillColor;
   ctx.fill();
   ctx.strokeStyle = badge.strokeColor;
@@ -231,7 +232,6 @@ function renderCardBadge(
   // renderSegment always uses textBaseline='top' (bitmap cache + fallback),
   // so we must compute the Y coordinate for top-aligned text that is
   // visually centered within the badge rectangle.
-  const badgeFont = getFontFn(badgeFontSize);
   const textHeight = measureTextHeight(badgeFont, badgeFontSize);
   const textY = y + (badgeHeight - textHeight) / 2;
   renderSegment(
@@ -244,7 +244,7 @@ function renderCardBadge(
     settings.outline.enabled ? settings.outline.widthPx : 0,
     settings.outline.enabled ? settings.outline.opacity : 0,
     _textBitmapCache2,
-    getFontFn
+    () => badgeFont
   );
   ctx.restore();
 
@@ -329,13 +329,18 @@ export function renderPaidCard(
       ? config.authorSection.show(message, settings)
       : config.authorSection.show;
   if (showAuthor && message.author) {
+    const authorNameMaxWidth = getAuthorNameMaxWidth(
+      w - padH * 2,
+      config.authorSection.nameMaxWidth,
+      message.authorPhotoUrl
+    );
     cursorY = drawAuthorSection(
       ctx,
       message,
       textX,
       cursorY,
       textColor,
-      config.authorSection.nameMaxWidth,
+      authorNameMaxWidth,
       Math.round(settings.fontSize * rendererLayout.authorFontScale),
       settings.fontWeight,
       settings.fontFamily,
@@ -379,8 +384,7 @@ export function renderPaidCard(
         fontSize,
         config,
         settings,
-        textBitmapCache,
-        getFontFn
+        textBitmapCache
       );
     }
   }

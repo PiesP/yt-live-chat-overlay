@@ -1,8 +1,15 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { drawLeftRoundedRect } from '@renderer/canvas/card-renderers';
+import { afterEach, describe, it, expect, vi, beforeEach } from 'vitest';
+import type { ChatMessage } from '@app-types';
+import { drawLeftRoundedRect, renderPaidCard } from '@renderer/canvas/card-renderers';
+import { SUPERCHAT_CARD_CONFIG } from '@renderer/card-config';
+import { DEFAULT_SETTINGS } from '@settings/schema';
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 // ── Mock Canvas ──────────────────────────────────────────────────────
 
@@ -115,5 +122,85 @@ describe('drawLeftRoundedRect', () => {
     expect(m.ops[1]).toEqual({ name: 'moveTo', args: [62, 100] });
     // lineTo right-bottom = (250, 180)
     expect(m.ops[3]).toEqual({ name: 'lineTo', args: [250, 180] });
+  });
+});
+
+describe('renderPaidCard canvas state', () => {
+  it('restores the caller font after rendering an amount badge', () => {
+    class MockOffscreenCanvas {
+      constructor(
+        readonly width: number,
+        readonly height: number
+      ) {}
+    }
+    vi.stubGlobal('OffscreenCanvas', MockOffscreenCanvas);
+    const fontStack: string[] = [];
+    let font = 'italic 12px serif';
+    const gradient = { addColorStop: vi.fn() } as unknown as CanvasGradient;
+    const ctx = {
+      get font() {
+        return font;
+      },
+      set font(value: string) {
+        font = value;
+      },
+      save: vi.fn(() => fontStack.push(font)),
+      restore: vi.fn(() => {
+        font = fontStack.pop() ?? font;
+      }),
+      createLinearGradient: vi.fn(() => gradient),
+      translate: vi.fn(),
+      beginPath: vi.fn(),
+      closePath: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      arcTo: vi.fn(),
+      fill: vi.fn(),
+      stroke: vi.fn(),
+      measureText: vi.fn(() => ({
+        width: 36,
+        actualBoundingBoxAscent: 10,
+        actualBoundingBoxDescent: 3,
+      })),
+      getTransform: vi.fn(() => ({ a: 1 })),
+      drawImage: vi.fn(),
+      fillStyle: '',
+      strokeStyle: '',
+      lineWidth: 1,
+      textBaseline: 'alphabetic',
+    } as unknown as CanvasRenderingContext2D;
+    const message: ChatMessage = {
+      text: '',
+      content: [],
+      kind: 'superchat',
+      timestamp: Date.now(),
+      authorType: 'normal',
+      superChat: { amount: '$5.00', tier: 'blue' },
+    };
+    const cachedBitmap = new MockOffscreenCanvas(1, 1);
+    const cache = {
+      get: vi.fn(() => cachedBitmap),
+      set: vi.fn(),
+    };
+
+    renderPaidCard(
+      ctx,
+      message,
+      180,
+      56,
+      0,
+      0,
+      0,
+      SUPERCHAT_CARD_CONFIG,
+      DEFAULT_SETTINGS,
+      cache as never,
+      cache as never,
+      cache as never,
+      cache as never,
+      () => 'bold 32px sans-serif',
+      new Map()
+    );
+
+    expect(ctx.font).toBe('italic 12px serif');
   });
 });
