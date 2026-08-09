@@ -53,6 +53,27 @@ all-target CI build also validates expected files through `check:artifacts`.
 
 The Firefox installation is removed when the browser restarts.
 
+Firefox 128 is the manifest's technical compatibility floor. It does not mean
+that Firefox 128 is still a serviced ESR; development and release checks should
+use a currently supported Firefox release.
+
+## Browser validation
+
+Playwright loads the real unpacked Chromium extension. Its Firefox project runs
+the shipped userscript bundle in Firefox because Playwright does not provide an
+equivalent fixture for loading a temporary Firefox extension. That lane covers
+Gecko startup, chat ingestion, and Canvas rendering, but it does not validate
+the Firefox manifest, content-script injection, extension storage, or menus in
+an installed extension context.
+
+Before publishing a Firefox archive, load `dist-extension-firefox/manifest.json`
+as a temporary add-on in a currently supported Firefox release and verify:
+
+1. The content script injects the overlay on a YouTube live or replay page.
+2. Settings persist through extension storage and the settings menu opens.
+3. Chat renders without unexpected errors in the page and extension consoles.
+4. Navigation or tab closure cleans up the overlay and renderer.
+
 ## Rendering and translation
 
 The implemented renderer uses Canvas2D. It prefers an OffscreenCanvas worker and

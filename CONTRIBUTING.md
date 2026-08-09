@@ -79,6 +79,12 @@ flow and check:
 
 Explain any browser or extension lane that could not be run.
 
+The automated Firefox Playwright lane exercises the userscript bundle, not an
+installed extension. Before a release, load
+`dist-extension-firefox/manifest.json` through
+`about:debugging#/runtime/this-firefox` in a currently supported Firefox release
+and complete the Firefox extension smoke checklist in the extension guide.
+
 ## Dependency updates
 
 The repository intentionally follows current stable tools after a 24-hour

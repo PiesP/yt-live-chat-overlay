@@ -59,12 +59,16 @@ backlog, translation, performance, and accessibility options.
 | --- | --- |
 | Userscript | Current desktop browsers supported by Tampermonkey or Violentmonkey |
 | Chromium extension | Chrome/Chromium 116+ developer mode |
-| Firefox extension | Firefox 128+ temporary developer installation |
+| Firefox extension | Firefox 128+ technical minimum; temporary developer installation |
 
 Translation is capability-detected separately. Chrome 138+ provides the built-in
 Translator API, but availability still depends on the browser, device, and
 language pair. Required language models may be downloaded by the browser.
 Firefox currently runs the overlay without built-in translation.
+
+Firefox 128 is the extension's technical compatibility floor, not a claim that
+Firefox 128 remains a currently serviced ESR. Use a currently supported Firefox
+release for normal use and release validation.
 
 ## Privacy and security
 
@@ -89,7 +93,7 @@ pnpm install
 | `pnpm dev` | Watch and rebuild the development userscript |
 | `pnpm test` | Run the Vitest suite |
 | `pnpm test:cov` | Run tests with coverage thresholds |
-| `pnpm test:e2e` | Run userscript and extension Playwright flows |
+| `pnpm test:e2e` | Run userscript, Chromium extension, and Firefox userscript Playwright flows |
 | `pnpm quality` | Run static, type, i18n, dependency, and source checks |
 | `pnpm verify` | Run quality, all builds, and artifact validation |
 | `pnpm verify:full` | Add coverage and browser tests to `verify` |
