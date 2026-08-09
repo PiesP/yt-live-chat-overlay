@@ -1810,6 +1810,7 @@ export class RuntimeManager {
 
   /** Discard all state tied to the replay position that was just left. */
   private handleReplaySeek(): void {
+    if (this.isDisposedState) return;
     this.sessionDedup.clear();
     this._recoveringFromError = false;
 

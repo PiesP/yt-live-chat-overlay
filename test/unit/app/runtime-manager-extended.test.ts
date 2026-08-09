@@ -341,6 +341,30 @@ describe('RuntimeManager (extended)', () => {
       expect(renderer.resetBurstDetector).toHaveBeenCalledOnce();
       expect(internals.acceptForRenderer({ id: 'replayed-id' })).toBe(true);
     });
+
+    it('ignores a late replay seek after runtime disposal begins', () => {
+      const rm = new RuntimeManager(createOpts());
+      const internals = internalsOf(rm);
+      const renderer = {
+        prepareForRefresh: vi.fn(),
+        resetAllocator: vi.fn(),
+        resetBurstDetector: vi.fn(),
+      };
+      const backlogController = {
+        destroy: vi.fn(),
+        drainPending: vi.fn(() => []),
+      };
+      internals.renderer = renderer;
+      internals.backlogController = backlogController;
+      expect(internals.acceptForRenderer({ id: 'existing-id' })).toBe(true);
+      internals.state = 'disposed';
+
+      internals.handleReplaySeek();
+
+      expect(backlogController.destroy).not.toHaveBeenCalled();
+      expect(renderer.prepareForRefresh).not.toHaveBeenCalled();
+      expect(internals.acceptForRenderer({ id: 'existing-id' })).toBe(false);
+    });
   });
 
   describe('settle delay', () => {
