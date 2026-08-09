@@ -107,6 +107,10 @@ import type { ActiveMessage, WorkerConfig, WorkerContentSegment, WorkerMessage }
 
 // ── Worker-specific constants ──────────────────────────────────────────────
 
+/** Keep Worker negative image state bounded like the main-thread emoji cache. */
+const FAILED_IMAGE_FETCH_CAP = 500;
+const FAILED_IMAGE_FETCH_EVICT_COUNT = 250;
+
 /** Sticker image cache — lazily initialized during worker init. */
 let stickerCache: ResizableByteLimitedCache<ImageBitmap> | null = null;
 
@@ -455,6 +459,8 @@ export class WorkerRenderer {
   );
   private readonly messageById = new Map<string, WorkerMessage | ActiveMessage>();
   private fetching = new Set<string>();
+  /** URL → Date.now() timestamp for failed Worker self-fetches. */
+  private readonly failedImageFetches = new Map<string, number>();
   private readonly fetchControllers = new Set<AbortController>();
   private fetchGeneration = 0;
   private farOpacityBuckets: ActiveMessage[][] = Array.from({ length: OPACITY_BUCKETS }, () => []);
@@ -588,6 +594,7 @@ export class WorkerRenderer {
                 (nextConfig.safeBottom !== undefined &&
                   nextConfig.safeBottom !== this.config.safeBottom);
               Object.assign(this.config, nextConfig);
+              this.pruneFailedImageFetches();
               this.recomputeConfigDerived();
               this.textMeasureCache.clear();
               this.fontMetricsCache.clear();
@@ -920,6 +927,7 @@ export class WorkerRenderer {
     for (const controller of this.fetchControllers) controller.abort();
     this.fetchControllers.clear();
     this.fetching.clear();
+    this.failedImageFetches.clear();
     if (this.animFrameId !== null) {
       cancelAnimationFrame(this.animFrameId);
       this.animFrameId = null;
@@ -1908,7 +1916,9 @@ export class WorkerRenderer {
   ): Promise<void> {
     if (this.isDestroyed) return;
     const generation = this.fetchGeneration;
-    const toFetch = [...new Set(urls)].filter((u) => !cache.has(u) && !this.fetching.has(u));
+    const toFetch = [...new Set(urls)].filter(
+      (u) => !cache.has(u) && !this.fetching.has(u) && !this.isImageFetchFailed(u)
+    );
     if (toFetch.length === 0) return;
     let idx = 0;
     const workers: Promise<void>[] = [];
@@ -1934,7 +1944,10 @@ export class WorkerRenderer {
               );
               const response = await fetch(url, { signal: controller.signal });
               if (this.isPrefetchStale(generation, controller.signal)) continue;
-              if (!response.ok) continue;
+              if (!response.ok) {
+                this.recordFailedImageFetch(url);
+                continue;
+              }
               const blob = await response.blob();
               if (this.isPrefetchStale(generation, controller.signal)) continue;
               const bitmap = await createImageBitmap(blob);
@@ -1943,8 +1956,13 @@ export class WorkerRenderer {
                 continue;
               }
               cache.set(url, bitmap);
+              this.failedImageFetches.delete(url);
             } catch {
-              // silently skip
+              // AbortController is also used for the configured timeout. Only
+              // teardown/generation aborts should avoid creating failure state.
+              if (!this.isDestroyed && generation === this.fetchGeneration) {
+                this.recordFailedImageFetch(url);
+              }
             } finally {
               clearTimeout(timer);
               this.fetchControllers.delete(controller);
@@ -1955,6 +1973,40 @@ export class WorkerRenderer {
       );
     }
     await Promise.all(workers);
+  }
+
+  private recordFailedImageFetch(url: string): void {
+    this.failedImageFetches.delete(url);
+    this.failedImageFetches.set(url, Date.now());
+    if (this.failedImageFetches.size <= FAILED_IMAGE_FETCH_CAP) return;
+
+    let evicted = 0;
+    for (const key of this.failedImageFetches.keys()) {
+      this.failedImageFetches.delete(key);
+      if (++evicted >= FAILED_IMAGE_FETCH_EVICT_COUNT) break;
+    }
+  }
+
+  private isImageFetchFailed(url: string): boolean {
+    const failedAt = this.failedImageFetches.get(url);
+    if (failedAt === undefined) return false;
+    const retryMs = (this.config?.failedEmojiRetryMins ?? 5) * 60_000;
+    if (Date.now() - failedAt >= retryMs) {
+      this.failedImageFetches.delete(url);
+      return false;
+    }
+    // Refresh insertion order so cap eviction remains least-recently-used.
+    this.failedImageFetches.delete(url);
+    this.failedImageFetches.set(url, failedAt);
+    return true;
+  }
+
+  private pruneFailedImageFetches(): void {
+    if (this.failedImageFetches.size === 0) return;
+    const cutoff = Date.now() - (this.config?.failedEmojiRetryMins ?? 5) * 60_000;
+    for (const [url, failedAt] of this.failedImageFetches) {
+      if (failedAt <= cutoff) this.failedImageFetches.delete(url);
+    }
   }
 
   private isPrefetchStale(generation: number, signal: AbortSignal): boolean {

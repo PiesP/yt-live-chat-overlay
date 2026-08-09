@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ── Mock browser APIs before module import ───────────────────────────────
 
@@ -130,10 +130,15 @@ function initializeRenderer(configOverrides: Record<string, unknown> = {}): Work
 }
 
 beforeEach(() => {
-  postMessageSpy.mockClear();
+  vi.clearAllMocks();
   // Spy on performance.now again (clearAllMocks removes it)
   vi.spyOn(performance, 'now').mockReturnValue(10000);
   resetWorkerForTests();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -473,6 +478,81 @@ describe('Worker message protocol', () => {
       renderer.handleMessage(makeEvent({ type: 'updateConfig', config: { opacity: 0.5 } }));
 
       expect(internals.emojiCache.size).toBe(1);
+    });
+
+    it.each([
+      ['HTTP failure', false],
+      ['decode failure', true],
+    ])('suppresses repeated worker image fetch after %s until TTL expiry', async (_label, ok) => {
+      const renderer = initializeRenderer({ failedEmojiRetryMins: 1 });
+      const internals = renderer as unknown as {
+        emojiCache: unknown;
+        failedImageFetches: Map<string, number>;
+        prefetchImages: (urls: string[], cache: unknown) => Promise<void>;
+      };
+      const url = 'https://yt3.ggpht.com/broken-emoji';
+      const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_000);
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+        ok,
+        blob: async () => new Blob(['image']),
+      } as Response);
+      if (ok) vi.mocked(createImageBitmap).mockRejectedValueOnce(new Error('decode failed'));
+
+      await internals.prefetchImages([url], internals.emojiCache);
+      await internals.prefetchImages([url], internals.emojiCache);
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(internals.failedImageFetches.has(url)).toBe(true);
+
+      nowSpy.mockReturnValue(61_001);
+      await internals.prefetchImages([url], internals.emojiCache);
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it('negative-caches worker image fetch timeouts', async () => {
+      vi.useFakeTimers();
+      const renderer = initializeRenderer({ emojiFetchTimeoutMs: 5_000 });
+      const internals = renderer as unknown as {
+        emojiCache: unknown;
+        failedImageFetches: Map<string, number>;
+        prefetchImages: (urls: string[], cache: unknown) => Promise<void>;
+      };
+      const url = 'https://yt3.ggpht.com/timeout-emoji';
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(
+        (_input, init) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted')));
+          })
+      );
+
+      const prefetch = internals.prefetchImages([url], internals.emojiCache);
+      await vi.advanceTimersByTimeAsync(5_000);
+      await prefetch;
+      await internals.prefetchImages([url], internals.emojiCache);
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(internals.failedImageFetches.has(url)).toBe(true);
+    });
+
+    it('bounds and cleans worker image failure state on config update and destroy', () => {
+      const renderer = initializeRenderer({ failedEmojiRetryMins: 5 });
+      const internals = renderer as unknown as {
+        failedImageFetches: Map<string, number>;
+        recordFailedImageFetch(url: string): void;
+      };
+      vi.spyOn(Date, 'now').mockReturnValue(300_000);
+      for (let i = 0; i <= 500; i++) internals.recordFailedImageFetch(`url-${i}`);
+      expect(internals.failedImageFetches.size).toBeLessThanOrEqual(500);
+
+      internals.failedImageFetches.set('expired', 0);
+      renderer.handleMessage(
+        makeEvent({ type: 'updateConfig', config: { failedEmojiRetryMins: 1 } })
+      );
+      expect(internals.failedImageFetches.has('expired')).toBe(false);
+
+      internals.failedImageFetches.set('destroyed', Date.now());
+      renderer.handleMessage(makeEvent({ type: 'destroy' }));
+      expect(internals.failedImageFetches.size).toBe(0);
     });
 
     it('aborts image prefetch and closes a bitmap that resolves after destroy', async () => {

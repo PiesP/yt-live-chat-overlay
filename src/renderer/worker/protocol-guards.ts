@@ -26,6 +26,7 @@ const RESOURCE_CONFIG_KEYS = [
   'translationBatchSize',
   'emojiFetchLimit',
   'emojiFetchTimeoutMs',
+  'failedEmojiRetryMins',
 ] as const;
 
 // ── Helpers ───────────────────────────────────────────────────────────────
