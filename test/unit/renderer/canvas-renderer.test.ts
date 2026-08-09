@@ -87,16 +87,15 @@ describe('CanvasRenderer', () => {
     document.body.appendChild(container);
     vi.spyOn(overlay, 'getContainer').mockReturnValue(container);
     vi.spyOn(overlay, 'getDimensions').mockReturnValue({ width: 640, height: 360 });
-    let transferredCanvas: HTMLCanvasElement | null = null;
     const transferredGetContext = vi.fn(() => null);
-    vi.spyOn(RenderWorkerManager.prototype, 'init').mockImplementation((canvas) => {
-      transferredCanvas = canvas;
+    const initSpy = vi.spyOn(RenderWorkerManager.prototype, 'init').mockImplementation((canvas) => {
       canvas.getContext = transferredGetContext as typeof canvas.getContext;
       return { started: false, canvasTransferred: true } as never;
     });
 
     const renderer = new CanvasRenderer(overlay, makeSettings());
     const internals = renderer as unknown as { canvas: HTMLCanvasElement | null };
+    const [transferredCanvas] = initSpy.mock.calls[0] ?? [];
 
     expect(internals.canvas).not.toBe(transferredCanvas);
     expect(container.querySelectorAll('canvas')).toHaveLength(1);
