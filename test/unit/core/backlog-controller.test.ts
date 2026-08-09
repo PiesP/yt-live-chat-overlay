@@ -176,6 +176,46 @@ describe("BacklogInjectionController", () => {
       ]);
     });
 
+    it("rejects fresh replacement ids during active backlog injection", () => {
+      controller.startBacklogInjection([
+        makeMsg({ id: "first" }),
+        makeMsg({ id: "last" }),
+      ]);
+
+      controller.startBacklogInjection(
+        Array.from({ length: 300 }, (_, index) =>
+          makeMsg({ id: `fresh-${index}`, actionType: "replace" })
+        )
+      );
+
+      expect(controller.drainPending().map((message) => message.id)).toEqual(["last"]);
+    });
+
+    it("rejects a fresh replacement in an initial backlog batch", () => {
+      const emitted: string[] = [];
+      controller.onBacklogMessage = (message) => emitted.push(message.id ?? "");
+
+      controller.startBacklogInjection([
+        makeMsg({ id: "fresh", actionType: "replace" }),
+        makeMsg({ id: "known" }),
+      ]);
+
+      expect(emitted).toEqual(["known"]);
+      expect(controller.drainPending()).toEqual([]);
+    });
+
+    it("accepts an initial replacement for an id known outside the backlog", () => {
+      const emitted: string[] = [];
+      controller.isKnownMessageId = (id) => id === "visible";
+      controller.onBacklogMessage = (message) => emitted.push(message.id ?? "");
+
+      controller.startBacklogInjection([
+        makeMsg({ id: "visible", actionType: "replace" }),
+      ]);
+
+      expect(emitted).toEqual(["visible"]);
+    });
+
     it("queues a replacement after the original message has already been emitted", () => {
       const emitted: string[] = [];
       controller.onBacklogMessage = (message) => emitted.push(message.text);

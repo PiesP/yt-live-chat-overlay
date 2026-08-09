@@ -1213,8 +1213,9 @@ export class RuntimeManager {
       renderer.observability
     );
 
+    this.backlogController.isKnownMessageId = (id) => this.sessionDedup.has(id);
     this.backlogController.onBacklogMessage = (msg) => {
-      if (!this.acceptForRenderer(msg)) return;
+      if (!this.acceptForRenderer(msg, msg.actionType === 'replace')) return;
       renderer.addMessage(msg);
     };
 
@@ -1790,14 +1791,15 @@ export class RuntimeManager {
    *
    * Messages without an id (rare edge case) are always accepted.
    */
-  private acceptForRenderer(message: ChatMessage): boolean {
+  private acceptForRenderer(message: ChatMessage, knownBacklogReplacement = false): boolean {
     if (!message.id) return true;
-    // Replacement actions are upserts for a message that may already be
-    // pending or visible. Claim an unseen ID so an out-of-order stale add is
-    // suppressed, while allowing every explicit replacement to reach the
-    // renderer's ID-based update path.
+    // Only a replacement for a message already accepted in this session may
+    // bypass normal deduplication. The backlog controller can additionally
+    // attest that it replaced a still-pending entry with the same ID.
     if (message.actionType === 'replace') {
-      if (!this.sessionDedup.has(message.id)) this.sessionDedup.mark(message.id);
+      if (this.sessionDedup.has(message.id)) return true;
+      if (!knownBacklogReplacement) return false;
+      this.sessionDedup.mark(message.id);
       return true;
     }
     if (this.sessionDedup.has(message.id)) return false;
