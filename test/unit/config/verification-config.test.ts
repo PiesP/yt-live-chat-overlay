@@ -14,13 +14,14 @@ describe('Verification configuration', () => {
       jsonReporter?: { fileName?: string };
       thresholds?: { break?: number | null };
       mutator?: { excludedMutations?: string[] };
+      vitest?: { related?: boolean };
     };
     const packageJson = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as {
       scripts?: Record<string, string>;
     };
     const rendererConfig = JSON.parse(
       readFileSync(resolve(root, 'stryker.conf.renderer.json'), 'utf8')
-    ) as { thresholds?: { break?: number | null } };
+    ) as { thresholds?: { break?: number | null }; vitest?: { related?: boolean } };
     const workflow = readFileSync(resolve(root, '.github/workflows/deep-checks.yaml'), 'utf8');
 
     expect(config.thresholds?.break).toBeGreaterThan(0);
@@ -38,7 +39,9 @@ describe('Verification configuration', () => {
       ])
     );
     expect(config.thresholds?.break).toBe(65);
-    expect(rendererConfig.thresholds?.break).toBe(75);
+    expect(rendererConfig.thresholds?.break).toBe(90);
+    expect(config.vitest?.related).toBe(true);
+    expect(rendererConfig.vitest?.related).toBe(true);
     expect(config.mutator?.excludedMutations).not.toContain('ConditionalExpression');
     expect(config.mutator?.excludedMutations).not.toContain('EqualityOperator');
     expect(config.mutator?.excludedMutations).not.toContain('BooleanLiteral');
