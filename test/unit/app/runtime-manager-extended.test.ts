@@ -63,8 +63,12 @@ describe('RuntimeManager (extended)', () => {
     computeConnectionStatus: () => string;
     acceptForRenderer: (msg: { id?: string; actionType?: 'add' | 'replace' }) => boolean;
     routeMessages: (msgs: Array<Record<string, unknown>>) => void;
+    handleReplaySeek: () => void;
     renderer: Record<string, unknown> | null;
-    backlogController: { drainPending(): Array<Record<string, unknown>> } | null;
+    backlogController: {
+      destroy(): void;
+      drainPending(): Array<Record<string, unknown>>;
+    } | null;
     _recoveringFromError: boolean;
   };
 
@@ -310,6 +314,56 @@ describe('RuntimeManager (extended)', () => {
       const internals = internalsOf(rm);
       expect(internals.acceptForRenderer({})).toBe(true);
       expect(internals.acceptForRenderer({})).toBe(true);
+    });
+
+    it('clears replay display state and dedup when playback seeks', () => {
+      const rm = new RuntimeManager(createOpts());
+      const internals = internalsOf(rm);
+      const renderer = {
+        prepareForRefresh: vi.fn(),
+        resetAllocator: vi.fn(),
+        resetBurstDetector: vi.fn(),
+      };
+      const backlogController = {
+        destroy: vi.fn(),
+        drainPending: vi.fn(() => []),
+      };
+      internals.renderer = renderer;
+      internals.backlogController = backlogController;
+      expect(internals.acceptForRenderer({ id: 'replayed-id' })).toBe(true);
+
+      internals.handleReplaySeek();
+
+      expect(backlogController.destroy).toHaveBeenCalledOnce();
+      expect(internals.backlogController).toBeNull();
+      expect(renderer.prepareForRefresh).toHaveBeenCalledOnce();
+      expect(renderer.resetAllocator).toHaveBeenCalledOnce();
+      expect(renderer.resetBurstDetector).toHaveBeenCalledOnce();
+      expect(internals.acceptForRenderer({ id: 'replayed-id' })).toBe(true);
+    });
+
+    it('ignores a late replay seek after runtime disposal begins', () => {
+      const rm = new RuntimeManager(createOpts());
+      const internals = internalsOf(rm);
+      const renderer = {
+        prepareForRefresh: vi.fn(),
+        resetAllocator: vi.fn(),
+        resetBurstDetector: vi.fn(),
+      };
+      const backlogController = {
+        destroy: vi.fn(),
+        drainPending: vi.fn(() => []),
+      };
+      internals.renderer = renderer;
+      internals.backlogController = backlogController;
+      expect(internals.acceptForRenderer({ id: 'existing-id' })).toBe(true);
+      internals.state = 'disposed';
+
+      internals.handleReplaySeek();
+
+      expect(backlogController.destroy).not.toHaveBeenCalled();
+      expect(renderer.prepareForRefresh).not.toHaveBeenCalled();
+      expect(internals.acceptForRenderer({ id: 'existing-id' })).toBe(false);
     });
   });
 

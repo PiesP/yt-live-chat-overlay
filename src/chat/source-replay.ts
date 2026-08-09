@@ -49,6 +49,9 @@ type ReplayMode = 'playerSeek' | 'continuation';
 export class ReplayChatSource extends ChatSource {
   // replayBatchLimit — read from this.getSettings()
 
+  /** Notifies the runtime that all display state belongs to an old timeline. */
+  onSeek?: () => void;
+
   private replayMode: ReplayMode | null = null;
   private replayPlayerSeekContinuation: InnertubeContinuationData | null = null;
   private replayContinuation: InnertubeContinuationData | null = null;
@@ -59,7 +62,9 @@ export class ReplayChatSource extends ChatSource {
   private replayNextAllowedFetchAt = 0;
   private replayBuffer = new ReplayBuffer();
   private seekListenerCleanup: (() => void) | null = null;
+  private seekVideo: HTMLVideoElement | null = null;
   private seekSignal: AbortSignal | null = null;
+  private seekListenerRebindAt = 0;
   private seekAbortController: AbortController | null = null;
   private seekGeneration = 0;
   private cooperativeLoopTimer: ReturnType<typeof setTimeout> | null = null;
@@ -147,6 +152,10 @@ export class ReplayChatSource extends ChatSource {
         this.cooperativeLoopRunning = false;
         this.cooperativeLoopTimer = null;
         return;
+      }
+
+      if (Date.now() >= this.seekListenerRebindAt) {
+        this.installSeekListeners(signal);
       }
 
       // 1. Mark activity even while paused so the health watchdog doesn't
@@ -277,7 +286,9 @@ export class ReplayChatSource extends ChatSource {
   private clearSeekListener(): void {
     const cleanup = this.seekListenerCleanup;
     this.seekListenerCleanup = null;
+    this.seekVideo = null;
     this.seekSignal = null;
+    this.seekListenerRebindAt = 0;
     cleanup?.();
   }
 
@@ -311,19 +322,24 @@ export class ReplayChatSource extends ChatSource {
   // ── Seek listeners ──────────────────────────────────────────────────────
 
   private installSeekListeners(signal?: AbortSignal): void {
-    this.clearSeekListener();
     const el = findElementMatch<HTMLVideoElement>(VIDEO_SELECTORS);
-    if (!el) return;
+    const video = el?.element ?? null;
+    this.seekListenerRebindAt = Date.now() + BACKGROUND_FETCH_INTERVAL_MS;
+    if (video && video === this.seekVideo && this.seekListenerCleanup) return;
+
+    this.clearSeekListener();
+    this.seekListenerRebindAt = Date.now() + BACKGROUND_FETCH_INTERVAL_MS;
+    if (!video) return;
     this.seekSignal = signal ?? null;
-    const v = el.element;
+    this.seekVideo = video;
     const onSeeked = (): void => {
       if (signal?.aborted) return;
-      const offsetMs = Math.max(0, Math.floor(v.currentTime * 1000));
+      const offsetMs = Math.max(0, Math.floor(video.currentTime * 1000));
       this.handleSeeked(offsetMs);
     };
-    v.addEventListener('seeked', onSeeked);
+    video.addEventListener('seeked', onSeeked);
     this.seekListenerCleanup = () => {
-      v.removeEventListener('seeked', onSeeked);
+      video.removeEventListener('seeked', onSeeked);
     };
   }
 
@@ -346,18 +362,20 @@ export class ReplayChatSource extends ChatSource {
       : this.seekAbortController.signal;
 
     this.replayBuffer.clear();
+    this.resetMessageDeliveryState();
     this.lastReplayRequestedOffsetMs = offsetMs;
     this.replayConsecutiveFailures = 0;
     this.replayTotalFailuresSinceSuccess = 0;
 
     // Cancel in-flight prefetch — new one starts from seek position below.
     this.stopPrefetch();
+    this.onSeek?.();
 
     if (this.replayMode === 'playerSeek' && this.replayPlayerSeekContinuation) {
       void (async () => {
         try {
           if (gen !== this.seekGeneration) return;
-          const seekSuccess = await this.fetchReplayPlayerSeek(offsetMs, seekSignal);
+          const seekSuccess = await this.fetchReplayPlayerSeek(offsetMs, seekSignal, gen);
           // Guard: if seekGeneration was incremented by a subsequent seek
           // during the fetch, discard stale data to avoid emitting messages
           // from an outdated seek position.
@@ -516,17 +534,19 @@ export class ReplayChatSource extends ChatSource {
 
   // ── Fetch methods ───────────────────────────────────────────────────────
 
-  private async fetchReplayPlayerSeek(offsetMs: number, signal?: AbortSignal): Promise<boolean> {
-    if (!this.replayPlayerSeekContinuation) {
+  private async fetchReplayPlayerSeek(
+    offsetMs: number,
+    signal?: AbortSignal,
+    generation = this.seekGeneration
+  ): Promise<boolean> {
+    const continuation = this.replayPlayerSeekContinuation;
+    if (!continuation) {
       return false;
     }
 
     try {
-      const payload = await this.requestReplayPayload(
-        this.replayPlayerSeekContinuation,
-        signal,
-        offsetMs
-      );
+      const payload = await this.requestReplayPayload(continuation, signal, offsetMs);
+      if (generation !== this.seekGeneration) return false;
       if (!payload) {
         this.recordReplayFailure();
         return false;
@@ -549,6 +569,7 @@ export class ReplayChatSource extends ChatSource {
       if (isAbortError(error)) {
         throw error;
       }
+      if (generation !== this.seekGeneration) return false;
 
       log.debug('chat.replay.player-seek-failed', { error: String(error) });
       this.recordReplayFailure();
@@ -657,10 +678,6 @@ export class ReplayChatSource extends ChatSource {
   private shouldFetchReplayAtOffset(currentOffsetMs: number): boolean {
     if (this.replayMode !== 'playerSeek' || !this.replayPlayerSeekContinuation) {
       return false;
-    }
-
-    if (this.replayBuffer.isEmpty) {
-      return true;
     }
 
     return currentOffsetMs - this.lastReplayRequestedOffsetMs >= REPLAY_FETCH_MIN_DELTA_MS;

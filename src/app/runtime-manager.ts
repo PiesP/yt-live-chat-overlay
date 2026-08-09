@@ -948,6 +948,7 @@ export class RuntimeManager {
     // all of which distort exact videoOffsetMs-based replay timing.
     if (chatSource instanceof ReplayChatSource && this.renderer) {
       this.renderer.setReplayMode(true);
+      chatSource.onSeek = () => this.handleReplaySeek();
     }
 
     // Seed bootstrap data from factory call to avoid duplicate watch page fetch
@@ -1805,6 +1806,23 @@ export class RuntimeManager {
     if (this.sessionDedup.has(message.id)) return false;
     this.sessionDedup.mark(message.id);
     return true;
+  }
+
+  /** Discard all state tied to the replay position that was just left. */
+  private handleReplaySeek(): void {
+    if (this.isDisposedState) return;
+    this.sessionDedup.clear();
+    this._recoveringFromError = false;
+
+    this.backlogController?.destroy();
+    this.backlogController = null;
+
+    const renderer = this.renderer;
+    if (!renderer) return;
+    renderer.onBacklogPauseChange = null;
+    renderer.prepareForRefresh();
+    renderer.resetAllocator(this.overlay?.getDimensions() ?? null);
+    renderer.resetBurstDetector();
   }
 
   private getDesiredState(): DesiredRuntimeState {

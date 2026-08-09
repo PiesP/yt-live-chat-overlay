@@ -19,6 +19,12 @@ class TestRenderer extends RendererBase {
     this.messages.push(message);
   }
 
+  receiveMessage(message: ChatMessage): void {
+    if (this.isMessageAllowed(message)) {
+      this.messages.push(message);
+    }
+  }
+
   get laneCount(): number {
     return this.laneAllocator.getLaneCount();
   }
@@ -281,15 +287,16 @@ describe('RendererBase', () => {
       const r = createRenderer();
       r.pauseForVideo();
 
-      // Manually trigger isMessageAllowed to buffer messages
       const msg1 = makeMessage({ text: 'buffered1' });
       const msg2 = makeMessage({ text: 'buffered2' });
-      r['addMessage'](msg1); // bypass isMessageAllowed for simplicity
-      r['addMessage'](msg2);
+      r.receiveMessage(msg1);
+      r.receiveMessage(msg2);
+
+      expect(r.messages).toEqual([]);
 
       r.resumeForVideo();
-      // The subclass onResumeFromVideoPause copies to messages array
-      // In our test class, we push directly in onResumeFromVideoPause
+
+      expect(r.messages).toEqual([msg1, msg2]);
     });
 
     it('resumeForVideo does not resume if document is hidden and was not also paused', () => {
