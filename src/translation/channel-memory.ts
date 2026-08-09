@@ -9,13 +9,13 @@
  * Memory is bounded (max 20 entries, LRU eviction) and session-only.
  */
 
-import type { TranslationLanguage } from '@app-types';
+import type { TranslationSourceLanguage } from '@app-types';
 import { isYouTubeLive, isYouTubeWatch } from '@chat/youtube/url-pattern';
 
 const MAX_ENTRIES = 20;
 
 export class ChannelLanguageMemory {
-  private readonly map = new Map<string, TranslationLanguage>();
+  private readonly map = new Map<string, TranslationSourceLanguage>();
 
   /**
    * Extract a stable channel key from a YouTube URL.
@@ -99,7 +99,7 @@ export class ChannelLanguageMemory {
   }
 
   /** Get the cached language for a channel key, or undefined if not cached. */
-  get(key: string): TranslationLanguage | undefined {
+  get(key: string): TranslationSourceLanguage | undefined {
     const language = this.map.get(key);
     if (language === undefined) return undefined;
 
@@ -113,7 +113,7 @@ export class ChannelLanguageMemory {
    * Store a language for a channel key.
    * If the map exceeds MAX_ENTRIES, evicts the least-recently-used entry.
    */
-  set(key: string, lang: TranslationLanguage): void {
+  set(key: string, lang: TranslationSourceLanguage): void {
     // LRU: delete and re-insert to move to end (most recently used position)
     this.map.delete(key);
     if (this.map.size >= MAX_ENTRIES) {

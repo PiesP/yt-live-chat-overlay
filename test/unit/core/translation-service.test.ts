@@ -641,6 +641,27 @@ describe('TranslationService translator lifecycle', () => {
     service.destroy();
   });
 
+  it('passes a detected Traditional Chinese script tag to the Translator API', async () => {
+    const initialTranslator = makeTranslator('initial');
+    const detectedTranslator = makeTranslator('detected');
+    const create = vi.fn().mockResolvedValueOnce(initialTranslator).mockResolvedValueOnce(detectedTranslator);
+    const availability = vi.fn().mockResolvedValue('available');
+    stubTranslator(create, availability);
+
+    const service = new TranslationService();
+    await service.configure({ enabled: true, service: 'auto', source: 'en', target: 'ja' });
+    await service.setDetectedSource('zh-Hant');
+
+    expect(availability).toHaveBeenLastCalledWith({
+      sourceLanguage: 'zh-Hant',
+      targetLanguage: 'ja',
+    });
+    expect(create).toHaveBeenLastCalledWith(
+      expect.objectContaining({ sourceLanguage: 'zh-Hant', targetLanguage: 'ja' })
+    );
+    service.destroy();
+  });
+
   it('serializes configure after an in-flight source detection', async () => {
     const oldTranslator = makeTranslator('old');
     const detectedTranslator = makeTranslator('detected');

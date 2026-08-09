@@ -15,7 +15,7 @@
  * - Sequential translations only — a large text blocks subsequent calls.
  *   For chat (short messages), this is acceptable.
  */
-import type { TranslationLanguage } from '@app-types';
+import type { TranslationSource, TranslationSourceLanguage, TranslationTarget } from '@app-types';
 import { resolveTranslationTarget } from '@i18n/index';
 import { ResizableByteLimitedCache } from '@util/byte-limited-cache';
 import { createLogger } from '@util/logging';
@@ -109,8 +109,8 @@ export class TranslationService {
   async configure(settings: {
     enabled: boolean;
     service: string;
-    source: string;
-    target: string;
+    source: TranslationSource | TranslationSourceLanguage;
+    target: TranslationTarget;
   }): Promise<void> {
     // Resolve 'auto' target to concrete browser language for Chrome Translator API.
     // Chrome Translator requires a BCP 47 language code — it does not accept 'auto'.
@@ -195,7 +195,7 @@ export class TranslationService {
    * the actual chat language. Only creates a new translator if the
    * detected source differs from the current one.
    */
-  async setDetectedSource(source: TranslationLanguage): Promise<void> {
+  async setDetectedSource(source: TranslationSourceLanguage): Promise<void> {
     if (!this.enabled) return;
 
     const target = this.pendingTarget ?? this.currentTarget;

@@ -39,6 +39,8 @@ export type TranslationService = 'auto' | 'off';
 export type TranslationMode = 'dual' | 'replace';
 /** Valid source/target languages for translation (excludes 'auto') */
 export type TranslationLanguage = Locale;
+/** BCP 47 source languages returned by detection, including Chinese script variants. */
+export type TranslationSourceLanguage = TranslationLanguage | 'zh-Hans' | 'zh-Hant';
 /** Target language for translation — 'auto' resolves to browser language via navigator.language */
 export type TranslationTarget = SettingLocale;
 /** Source language for translation — 'auto' uses Chrome Language Detector API or Unicode heuristics */

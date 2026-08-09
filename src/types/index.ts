@@ -27,6 +27,7 @@ export type {
   TranslationMode,
   TranslationService,
   TranslationSource,
+  TranslationSourceLanguage,
   TranslationTarget,
 } from './common';
 export type { FrameTimings, Pauseable, SessionMetrics } from './renderer';

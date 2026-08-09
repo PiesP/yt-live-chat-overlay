@@ -287,6 +287,16 @@ describe('ChannelLanguageMemory.resolveKey', () => {
 });
 
 describe('ChannelLanguageMemory LRU behavior', () => {
+  it('preserves detected Chinese script variants', () => {
+    const memory = new ChannelLanguageMemory();
+
+    memory.set('traditional-channel', 'zh-Hant');
+    memory.set('simplified-channel', 'zh-Hans');
+
+    expect(memory.get('traditional-channel')).toBe('zh-Hant');
+    expect(memory.get('simplified-channel')).toBe('zh-Hans');
+  });
+
   it('refreshes recency when an entry is read', () => {
     const memory = new ChannelLanguageMemory();
 
