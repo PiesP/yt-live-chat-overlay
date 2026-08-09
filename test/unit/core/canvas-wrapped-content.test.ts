@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('@renderer/text-measure', () => ({
   getFontString: (fontSize: number): string => `bold ${fontSize}px sans-serif`,
   measureTextHeight: (): number => 20,
-  measureTextWidth: (text: string): number => text.length * 10,
+  measureTextWidth: (text: string): number => (text === 'i' ? 4 : text.length * 10),
 }));
 
 import { renderWrappedContentSegments } from '@renderer/canvas/shared';
@@ -95,5 +95,32 @@ describe('renderWrappedContentSegments', () => {
     const fillText = ctx.fillText as ReturnType<typeof vi.fn>;
     expect(fillText.mock.calls.map(([text]) => text)).toEqual(['A', '…']);
     expect(fillText.mock.calls.at(-1)?.[1]).toBe(20);
+  });
+
+  it('keeps fitting content when the ellipsis itself is wider than the line', () => {
+    const ctx = createContext();
+    const textBitmapCache: TextBitmapCache = {
+      get: () => undefined,
+      set: vi.fn(),
+    };
+
+    renderWrappedContentSegments(
+      ctx as AnyCanvasContext,
+      [{ type: 'text', content: 'i i' }],
+      10,
+      20,
+      5,
+      1,
+      '#ffffff',
+      20,
+      0,
+      0,
+      textBitmapCache,
+      { get: () => undefined } as never,
+      () => 'bold 20px sans-serif'
+    );
+
+    const fillText = ctx.fillText as ReturnType<typeof vi.fn>;
+    expect(fillText.mock.calls.map(([text]) => text)).toEqual(['i']);
   });
 });

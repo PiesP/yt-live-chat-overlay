@@ -494,13 +494,13 @@ function measureWrappedLineWidth(line: readonly SharedRenderPiece[], spaceWidth:
 }
 
 /**
- * Fit the final visible wrapped line into the width left after reserving an ellipsis.
+ * Fit the final visible wrapped line into the supplied available width.
  *
  * Complete pieces are retained where possible. If the trailing piece is text, its
  * final grapheme-safe prefix is shortened before earlier pieces are removed. Emoji
  * pieces stay atomic because their image/fallback representation cannot be split.
  */
-function fitWrappedLineBeforeEllipsis(
+function fitWrappedLineToWidth(
   line: readonly SharedRenderPiece[],
   availableWidth: number,
   spaceWidth: number,
@@ -1416,9 +1416,9 @@ export function renderWrappedContentSegments<
     const needsEllipsis = isLastLine && isTruncated;
     const canRenderEllipsis = needsEllipsis && ellipsisWidth <= maxWidth;
     const renderLine = needsEllipsis
-      ? fitWrappedLineBeforeEllipsis(
+      ? fitWrappedLineToWidth(
           line,
-          Math.max(0, maxWidth - ellipsisWidth),
+          Math.max(0, maxWidth - (canRenderEllipsis ? ellipsisWidth : 0)),
           spaceWidth,
           (text: string) => measureTextWidth(text, font)
         )
