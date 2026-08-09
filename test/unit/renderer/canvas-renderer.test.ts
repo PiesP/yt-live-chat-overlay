@@ -2,6 +2,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, it, expect, vi, beforeEach } from 'vitest';
 import { CanvasRenderer } from '@renderer/canvas-renderer';
+import { RenderWorkerManager } from '@renderer/worker/manager';
 import type { CanvasMessage } from '@renderer/constants';
 import { Overlay } from '@app/overlay';
 import type { ChatMessage, OverlaySettings } from '@app-types';
@@ -79,6 +80,29 @@ describe('CanvasRenderer', () => {
   it('constructs without throwing', () => {
     const settings = makeSettings();
     expect(() => new CanvasRenderer(overlay, settings)).not.toThrow();
+  });
+
+  it('replaces a transferred canvas before main-thread fallback', () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    vi.spyOn(overlay, 'getContainer').mockReturnValue(container);
+    vi.spyOn(overlay, 'getDimensions').mockReturnValue({ width: 640, height: 360 });
+    let transferredCanvas: HTMLCanvasElement | null = null;
+    const transferredGetContext = vi.fn(() => null);
+    vi.spyOn(RenderWorkerManager.prototype, 'init').mockImplementation((canvas) => {
+      transferredCanvas = canvas;
+      canvas.getContext = transferredGetContext as typeof canvas.getContext;
+      return { started: false, canvasTransferred: true } as never;
+    });
+
+    const renderer = new CanvasRenderer(overlay, makeSettings());
+    const internals = renderer as unknown as { canvas: HTMLCanvasElement | null };
+
+    expect(internals.canvas).not.toBe(transferredCanvas);
+    expect(container.querySelectorAll('canvas')).toHaveLength(1);
+    expect(transferredCanvas?.isConnected).toBe(false);
+    expect(transferredGetContext).not.toHaveBeenCalled();
+    renderer.destroy();
   });
 
   it('destroys without error', () => {

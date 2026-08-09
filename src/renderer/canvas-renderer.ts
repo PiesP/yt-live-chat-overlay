@@ -407,7 +407,14 @@ export class CanvasRenderer extends RendererBase {
       getEffectiveSpeedPxPerSec: () => this.getEffectiveSpeedPxPerSec(),
     });
     this.workerManager.setFatalErrorCallback((reason) => this.fallbackToMainThread(reason));
-    const useWorker = this.workerManager.init(canvas, settings, overlay);
+    const workerInit = this.workerManager.init(canvas, settings, overlay);
+    const useWorker = workerInit.started;
+
+    if (!useWorker && workerInit.canvasTransferred && !this.replaceCanvas()) {
+      log.warn('renderer.canvas.transfer-recovery-failed', {
+        reason: 'could-not-replace-transferred-canvas',
+      });
+    }
 
     // Wire the Worker's live-region text snippets to the overlay's
     // aria-live region so screen readers can access chat content when
@@ -420,12 +427,15 @@ export class CanvasRenderer extends RendererBase {
 
     const dims = overlay.getDimensions();
     if (!useWorker) {
-      this.ctx = canvas.getContext('2d', { desynchronized: true });
-      if (!this.ctx) {
+      const fallbackCanvas = this.canvas;
+      if (!workerInit.canvasTransferred && fallbackCanvas) {
+        this.ctx = fallbackCanvas.getContext('2d', { desynchronized: true });
+      }
+      if (!this.ctx || !fallbackCanvas) {
         log.warn('renderer.canvas.get-context-failed', {
           reason: 'no-2d-context',
         });
-      } else if (!canvas.isConnected) {
+      } else if (!fallbackCanvas.isConnected) {
         log.warn('renderer.canvas.not-connected', {
           reason: 'not-in-dom',
         });
@@ -440,16 +450,18 @@ export class CanvasRenderer extends RendererBase {
       // is added in the future, it must also listen for
       // webglcontextlost/webglcontextrestored with resource re-initialization
       // (shader recompilation, buffer re-upload, texture restore).
-      canvas.addEventListener('contextlost', (e: Event) => {
-        e.preventDefault();
-        this.ctx = null;
-        log.warn('renderer.canvas.context-lost', {
-          reason: 'initial-create',
+      if (!workerInit.canvasTransferred && fallbackCanvas) {
+        fallbackCanvas.addEventListener('contextlost', (e: Event) => {
+          e.preventDefault();
+          this.ctx = null;
+          log.warn('renderer.canvas.context-lost', {
+            reason: 'initial-create',
+          });
         });
-      });
-      canvas.addEventListener('contextrestored', () => this.handleContextRestored());
+        fallbackCanvas.addEventListener('contextrestored', () => this.handleContextRestored());
 
-      this.applyDevicePixelRatio(dims);
+        this.applyDevicePixelRatio(dims);
+      }
     }
 
     this.overlayDimensionsUnsubscribe = overlay.onDimensionsChanged((d) => {
@@ -2262,6 +2274,7 @@ export class CanvasRenderer extends RendererBase {
     newCanvas.style.cssText = CANVAS_CSS;
     newCanvas.setAttribute('aria-hidden', 'true');
     container.appendChild(newCanvas);
+    this.canvas = newCanvas;
 
     const ctx = newCanvas.getContext('2d', { desynchronized: true });
     if (!ctx) return false;
@@ -2274,7 +2287,6 @@ export class CanvasRenderer extends RendererBase {
       });
     });
     newCanvas.addEventListener('contextrestored', () => this.handleContextRestored());
-    this.canvas = newCanvas;
     this.ctx = ctx;
     const dpr = window.devicePixelRatio || 1;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);

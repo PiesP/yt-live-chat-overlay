@@ -116,7 +116,10 @@ describe('RenderWorkerManager isAlive after destroy', () => {
       getDimensions: vi.fn(() => ({ width: 640, height: 360 })),
       onDimensionsChanged: vi.fn(() => vi.fn()),
     };
-    expect(manager.init(canvas, settings, overlay as never, 'worker.js')).toBe(true);
+    expect(manager.init(canvas, settings, overlay as never, 'worker.js')).toEqual({
+      started: true,
+      canvasTransferred: true,
+    });
 
     const destroySpy = vi.spyOn(manager, 'destroy');
     const fatalCallback = vi.fn((_reason: string) => manager.destroy());
@@ -146,7 +149,10 @@ describe('RenderWorkerManager isAlive after destroy', () => {
       getDimensions: vi.fn(() => ({ width: 640, height: 360 })),
       onDimensionsChanged: vi.fn(() => vi.fn()),
     };
-    expect(manager.init(canvas, settings, overlay as never, 'worker.js')).toBe(true);
+    expect(manager.init(canvas, settings, overlay as never, 'worker.js')).toEqual({
+      started: true,
+      canvasTransferred: true,
+    });
 
     const destroySpy = vi.spyOn(manager, 'destroy');
     worker._fireMessageError();

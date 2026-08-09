@@ -116,7 +116,10 @@ describe('RenderWorkerManager', () => {
           onDimensionsChanged,
         };
 
-        expect(manager.init(canvas, DEFAULT_SETTINGS, overlay as any, 'worker.js')).toBe(false);
+        expect(manager.init(canvas, DEFAULT_SETTINGS, overlay as any, 'worker.js')).toEqual({
+          started: false,
+          canvasTransferred: false,
+        });
         expect(manager.isActive).toBe(false);
         expect(transferControlToOffscreen).not.toHaveBeenCalled();
         expect(onDimensionsChanged).not.toHaveBeenCalled();
@@ -132,10 +135,41 @@ describe('RenderWorkerManager', () => {
         onDimensionsChanged,
       };
 
-      expect(manager.init(canvas, DEFAULT_SETTINGS, overlay as any, 'worker.js')).toBe(true);
+      expect(manager.init(canvas, DEFAULT_SETTINGS, overlay as any, 'worker.js')).toEqual({
+        started: true,
+        canvasTransferred: true,
+      });
       expect(manager.isActive).toBe(true);
       expect(transferControlToOffscreen).toHaveBeenCalledOnce();
       expect(onDimensionsChanged).toHaveBeenCalledOnce();
+    });
+
+    it('reports a transferred canvas when the init post fails', () => {
+      const originalWorker = globalThis.Worker;
+      const terminate = vi.fn();
+      vi.stubGlobal(
+        'Worker',
+        class {
+          postMessage = vi.fn(() => {
+            throw new DOMException('clone failed', 'DataCloneError');
+          });
+          terminate = terminate;
+        }
+      );
+      const transferControlToOffscreen = vi.fn(() => ({ getContext: vi.fn() }));
+      const canvas = { transferControlToOffscreen } as unknown as HTMLCanvasElement;
+      const overlay = {
+        getDimensions: vi.fn(() => ({ width: 640, height: 360 })),
+        onDimensionsChanged: vi.fn(() => vi.fn()),
+      };
+
+      expect(manager.init(canvas, DEFAULT_SETTINGS, overlay as any, 'worker.js')).toEqual({
+        started: false,
+        canvasTransferred: true,
+      });
+      expect(transferControlToOffscreen).toHaveBeenCalledOnce();
+      expect(terminate).toHaveBeenCalledOnce();
+      vi.stubGlobal('Worker', originalWorker);
     });
   });
 
