@@ -46,6 +46,32 @@ userscript and extension Playwright tests, production builds, artifact checks,
 duplication analysis, mutation testing, CodeQL, OSV Scanner, and Semgrep. The
 workflow files and package scripts are authoritative for the exact checks.
 
+Codex Security is an advisory, AI-assisted review layer and does not replace
+those deterministic gates or human validation. Local scans use the pinned CLI
+from `.github/workflows/codex-security.yaml` without changing the dependency
+lockfile:
+
+```bash
+pnpm security:codex:dry-run
+pnpm security:codex:working-tree
+pnpm security:codex:branch -- origin/master
+pnpm security:codex:full
+```
+
+Scan results may contain source excerpts and vulnerability details. The wrapper
+stores its state and output outside the repository with private permissions;
+review and remove retained results according to their sensitivity. Treat every
+finding as a candidate until its source-to-sink path, preventive controls,
+runtime reachability, and severity have been validated by a human. Coverage
+marked partial or unknown is not evidence of a complete review.
+
+The GitHub workflow remains disabled unless the repository variable
+`CODEX_SECURITY_ENABLED` is exactly `true` and the `CODEX_SECURITY_API_KEY`
+Actions secret is configured. It runs without a severity failure threshold
+during the advisory rollout. Pull-request scans are limited to trusted
+same-repository, non-Dependabot branches; manual dispatch runs a standard
+full-repository scan.
+
 Dependencies retain the repository's cooling window, trust policy, approved
 build-script list, and registry-source restrictions. Do not weaken those
 controls to accept an update.
