@@ -23,6 +23,7 @@ describe('ReplayChatSource', () => {
   });
 
   afterEach(() => {
+    document.body.replaceChildren();
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
@@ -296,6 +297,36 @@ describe('ReplayChatSource', () => {
     expect(cleanup).toHaveBeenCalledOnce();
     expect(internals.seekListenerCleanup).toBeNull();
     expect(internals.seekSignal).toBeNull();
+  });
+
+  it('rebinds the seek listener when YouTube replaces the video element', async () => {
+    vi.useFakeTimers();
+    const player = document.createElement('div');
+    player.id = 'movie_player';
+    const initialVideo = document.createElement('video');
+    player.append(initialVideo);
+    document.body.append(player);
+
+    const onSeek = vi.fn();
+    const internals = source as unknown as {
+      callback: (() => void) | null;
+      onSeek?: () => void;
+      launchCurrentPollLoop: (signal?: AbortSignal) => void;
+    };
+    internals.callback = () => {};
+    internals.onSeek = onSeek;
+    internals.launchCurrentPollLoop();
+
+    const replacementVideo = document.createElement('video');
+    initialVideo.replaceWith(replacementVideo);
+    await vi.advanceTimersByTimeAsync(1000);
+
+    replacementVideo.dispatchEvent(new Event('seeked'));
+    expect(onSeek).toHaveBeenCalledOnce();
+
+    initialVideo.dispatchEvent(new Event('seeked'));
+    expect(onSeek).toHaveBeenCalledOnce();
+    source.stop();
   });
 
   it('aborts a hung replay request after the fetch timeout', async () => {

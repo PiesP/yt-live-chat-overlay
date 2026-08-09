@@ -62,7 +62,9 @@ export class ReplayChatSource extends ChatSource {
   private replayNextAllowedFetchAt = 0;
   private replayBuffer = new ReplayBuffer();
   private seekListenerCleanup: (() => void) | null = null;
+  private seekVideo: HTMLVideoElement | null = null;
   private seekSignal: AbortSignal | null = null;
+  private seekListenerRebindAt = 0;
   private seekAbortController: AbortController | null = null;
   private seekGeneration = 0;
   private cooperativeLoopTimer: ReturnType<typeof setTimeout> | null = null;
@@ -150,6 +152,10 @@ export class ReplayChatSource extends ChatSource {
         this.cooperativeLoopRunning = false;
         this.cooperativeLoopTimer = null;
         return;
+      }
+
+      if (Date.now() >= this.seekListenerRebindAt) {
+        this.installSeekListeners(signal);
       }
 
       // 1. Mark activity even while paused so the health watchdog doesn't
@@ -280,7 +286,9 @@ export class ReplayChatSource extends ChatSource {
   private clearSeekListener(): void {
     const cleanup = this.seekListenerCleanup;
     this.seekListenerCleanup = null;
+    this.seekVideo = null;
     this.seekSignal = null;
+    this.seekListenerRebindAt = 0;
     cleanup?.();
   }
 
@@ -314,19 +322,24 @@ export class ReplayChatSource extends ChatSource {
   // ── Seek listeners ──────────────────────────────────────────────────────
 
   private installSeekListeners(signal?: AbortSignal): void {
-    this.clearSeekListener();
     const el = findElementMatch<HTMLVideoElement>(VIDEO_SELECTORS);
-    if (!el) return;
+    const video = el?.element ?? null;
+    this.seekListenerRebindAt = Date.now() + BACKGROUND_FETCH_INTERVAL_MS;
+    if (video && video === this.seekVideo && this.seekListenerCleanup) return;
+
+    this.clearSeekListener();
+    this.seekListenerRebindAt = Date.now() + BACKGROUND_FETCH_INTERVAL_MS;
+    if (!video) return;
     this.seekSignal = signal ?? null;
-    const v = el.element;
+    this.seekVideo = video;
     const onSeeked = (): void => {
       if (signal?.aborted) return;
-      const offsetMs = Math.max(0, Math.floor(v.currentTime * 1000));
+      const offsetMs = Math.max(0, Math.floor(video.currentTime * 1000));
       this.handleSeeked(offsetMs);
     };
-    v.addEventListener('seeked', onSeeked);
+    video.addEventListener('seeked', onSeeked);
     this.seekListenerCleanup = () => {
-      v.removeEventListener('seeked', onSeeked);
+      video.removeEventListener('seeked', onSeeked);
     };
   }
 
