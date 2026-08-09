@@ -32,14 +32,10 @@ fi
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 repo_root="$(git -C "$script_dir" rev-parse --show-toplevel)"
 repo_name="$(basename -- "$repo_root")"
-workflow="$repo_root/.github/workflows/codex-security.yaml"
+cli_package="$repo_root/.github/codex-security/package.json"
+cli_lock="$repo_root/.github/codex-security/package-lock.json"
+cli_patcher="$repo_root/scripts/security/patch-codex-security.mjs"
 scan_prompt="$repo_root/.github/codex-security/scan.md"
-
-cli_version="$(sed -nE 's/^[[:space:]]*CODEX_SECURITY_VERSION:[[:space:]]*"([^"[:space:]]+)".*/\1/p' "$workflow")"
-if [[ -z "$cli_version" || "$(printf '%s\n' "$cli_version" | wc -l)" -ne 1 ]]; then
-  printf 'Unable to read one exact CODEX_SECURITY_VERSION from %s.\n' "$workflow" >&2
-  exit 2
-fi
 
 node_version="$(node --version 2>/dev/null || true)"
 if [[ ! "$node_version" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
@@ -48,10 +44,52 @@ if [[ ! "$node_version" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
 fi
 node_major="${BASH_REMATCH[1]}"
 node_minor="${BASH_REMATCH[2]}"
-if ((node_major < 22 || (node_major == 22 && node_minor < 13))); then
-  printf 'Codex Security %s requires Node.js >=22.13.0; found %s.\n' "$cli_version" "$node_version" >&2
-  exit 2
-fi
+case "$node_major" in
+  22)
+    if ((node_minor < 13)); then
+      printf 'Codex Security requires Node.js 22.13+, 24, or 26; found %s.\n' \
+        "$node_version" >&2
+      exit 2
+    fi
+    ;;
+  24 | 26) ;;
+  *)
+    printf 'Codex Security requires Node.js 22.13+, 24, or 26; found %s.\n' \
+      "$node_version" >&2
+    exit 2
+    ;;
+esac
+
+cli_metadata="$(node - "$cli_package" "$cli_lock" "$cli_patcher" <<'NODE'
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+
+const packagePath = process.argv[2];
+const lockPath = process.argv[3];
+const patcherPath = process.argv[4];
+const manifest = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+const lockText = fs.readFileSync(lockPath, 'utf8');
+const patcherText = fs.readFileSync(patcherPath, 'utf8');
+const lock = JSON.parse(lockText);
+const version = manifest.dependencies?.['@openai/codex-security'];
+const rootVersion = lock.packages?.['']?.dependencies?.['@openai/codex-security'];
+const lockedVersion = lock.packages?.['node_modules/@openai/codex-security']?.version;
+
+if (!/^\d+\.\d+\.\d+$/.test(version) || version !== rootVersion || version !== lockedVersion) {
+  throw new Error('Codex Security package and lock versions must be one matching exact version.');
+}
+
+const digest = crypto
+  .createHash('sha256')
+  .update(lockText)
+  .update('\0')
+  .update(patcherText)
+  .digest('hex');
+console.log(`${version} ${digest}`);
+NODE
+)"
+cli_version="${cli_metadata%% *}"
+install_digest="${cli_metadata#* }"
 
 ensure_private_directory() {
   local path="$1"
@@ -93,7 +131,7 @@ NODE
 
 umask 077
 tmp_root="${TMPDIR:-/tmp}"
-cache_dir="${CODEX_SECURITY_CACHE_DIR:-${XDG_CACHE_HOME:-$tmp_root}/codex-security/$repo_name/cli-$cli_version}"
+cache_dir="${CODEX_SECURITY_CACHE_DIR:-${XDG_CACHE_HOME:-$tmp_root}/codex-security/$repo_name/cli-$cli_version-$install_digest}"
 output_root="${CODEX_SECURITY_OUTPUT_ROOT:-$tmp_root/codex-security-results/$repo_name}"
 state_dir="${CODEX_SECURITY_STATE_DIR:-${XDG_STATE_HOME:-$tmp_root}/codex-security/$repo_name/state}"
 
@@ -124,14 +162,21 @@ ensure_private_directory "$cache_dir"
 ensure_private_directory "$output_root"
 ensure_private_directory "$state_dir"
 cli_bin="$cache_dir/node_modules/.bin/codex-security"
-if [[ ! -x "$cli_bin" ]]; then
-  npm install \
+install_marker="$cache_dir/.install-recipe.sha256"
+installed_digest=""
+if [[ -f "$install_marker" ]]; then
+  installed_digest="$(<"$install_marker")"
+fi
+if [[ ! -x "$cli_bin" || "$installed_digest" != "$install_digest" ]]; then
+  install -m 0600 "$cli_package" "$cache_dir/package.json"
+  install -m 0600 "$cli_lock" "$cache_dir/package-lock.json"
+  npm ci \
     --prefix "$cache_dir" \
     --ignore-scripts \
     --no-audit \
-    --no-fund \
-    --package-lock=false \
-    "@openai/codex-security@$cli_version"
+    --no-fund
+  node "$cli_patcher" "$cache_dir"
+  printf '%s\n' "$install_digest" > "$install_marker"
 fi
 
 installed_version="$($cli_bin --version | sed -nE 's/[^0-9]*([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' | head -n 1)"

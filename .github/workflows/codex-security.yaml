@@ -13,7 +13,6 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  CODEX_SECURITY_VERSION: "0.1.8"
   NODE_VERSION: "26"
   PYTHON_VERSION: "3.14"
 
@@ -42,24 +41,33 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Install pinned Codex Security CLI outside the checkout
-        env:
-          CLI_DIR: ${{ runner.temp }}/codex-security-cli/${{ env.CODEX_SECURITY_VERSION }}
+      - name: Check out trusted CLI lock
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+          submodules: false
+
+      - name: Install locked Codex Security
         run: |
           set -euo pipefail
-          install -d -m 0700 "$CLI_DIR"
-          npm install \
-            --prefix "$CLI_DIR" \
+          install -d -m 0700 "$RUNNER_TEMP/codex-security"
+          install -m 0600 \
+            .github/codex-security/package.json \
+            .github/codex-security/package-lock.json \
+            "$RUNNER_TEMP/codex-security/"
+          npm ci \
+            --prefix "$RUNNER_TEMP/codex-security" \
             --ignore-scripts \
             --no-audit \
-            --no-fund \
-            --package-lock=false \
-            "@openai/codex-security@$CODEX_SECURITY_VERSION"
-          CODEX_SECURITY_BIN="$CLI_DIR/node_modules/.bin/codex-security"
+            --no-fund
+          node scripts/security/patch-codex-security.mjs "$RUNNER_TEMP/codex-security"
+          CODEX_SECURITY_BIN="$RUNNER_TEMP/codex-security/node_modules/.bin/codex-security"
           test -x "$CODEX_SECURITY_BIN"
           "$CODEX_SECURITY_BIN" --version
 
-      - name: Check out the exact target revision
+      - name: Check out exact source revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -78,7 +86,7 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.CODEX_SECURITY_API_KEY }}
           CODEX_SECURITY_STATE_DIR: ${{ runner.temp }}/codex-security-state
-          CLI: ${{ runner.temp }}/codex-security-cli/${{ env.CODEX_SECURITY_VERSION }}/node_modules/.bin/codex-security
+          CLI: ${{ runner.temp }}/codex-security/node_modules/.bin/codex-security
           OUTPUT_DIR: ${{ runner.temp }}/codex-security-results
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -116,7 +124,7 @@ jobs:
         id: export
         if: ${{ !cancelled() }}
         env:
-          CLI: ${{ runner.temp }}/codex-security-cli/${{ env.CODEX_SECURITY_VERSION }}/node_modules/.bin/codex-security
+          CLI: ${{ runner.temp }}/codex-security/node_modules/.bin/codex-security
           OUTPUT_DIR: ${{ runner.temp }}/codex-security-results
         run: |
           set -euo pipefail
