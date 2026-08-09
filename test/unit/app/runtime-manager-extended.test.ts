@@ -252,13 +252,14 @@ describe('RuntimeManager (extended)', () => {
       expect(internals.acceptForRenderer({ id: 'msg-1', actionType: 'add' })).toBe(false);
     });
 
-    it('acceptForRenderer lets a replacement claim an unseen id before a stale add', () => {
+    it('acceptForRenderer rejects an unseen replacement without claiming its id', () => {
       const rm = new RuntimeManager(createOpts());
       const internals = internalsOf(rm);
 
+      expect(internals.acceptForRenderer({ id: 'msg-1', actionType: 'replace' })).toBe(false);
+      expect(internals.acceptForRenderer({ id: 'msg-1', actionType: 'add' })).toBe(true);
       expect(internals.acceptForRenderer({ id: 'msg-1', actionType: 'replace' })).toBe(true);
       expect(internals.acceptForRenderer({ id: 'msg-1', actionType: 'add' })).toBe(false);
-      expect(internals.acceptForRenderer({ id: 'msg-1', actionType: 'replace' })).toBe(true);
     });
 
     it.each([

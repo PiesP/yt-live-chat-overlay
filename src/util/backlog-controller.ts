@@ -57,6 +57,7 @@ export class BacklogInjectionController implements Pauseable {
   private backlogQueue: (ChatMessage | undefined)[] = [];
   private backlogQueueOffset = 0;
   private backlogSeenIds = new Set<string>();
+  private backlogPendingIndices = new Map<string, number>();
   private isActive = false;
   private isInjecting = false;
   private paused = false;
@@ -80,6 +81,8 @@ export class BacklogInjectionController implements Pauseable {
    * the screen is — high utilization → slower injection.
    */
   public onUtilizationQuery: (() => number) | null = null;
+  /** Callback for replacement targets already accepted outside this backlog. */
+  public isKnownMessageId: ((id: string) => boolean) | null = null;
   /** Callback to be set by RuntimeSession */
   public onBacklogMessage: ((message: ChatMessage) => void) | null = null;
 
@@ -107,15 +110,30 @@ export class BacklogInjectionController implements Pauseable {
     if (this.backlogQueueOffset >= this.backlogQueue.length) {
       return undefined;
     }
-    const msg = this.backlogQueue[this.backlogQueueOffset];
-    this.backlogQueue[this.backlogQueueOffset] = undefined;
+    const dequeuedIndex = this.backlogQueueOffset;
+    const msg = this.backlogQueue[dequeuedIndex];
+    this.backlogQueue[dequeuedIndex] = undefined;
+    if (msg?.id && this.backlogPendingIndices.get(msg.id) === dequeuedIndex) {
+      this.backlogPendingIndices.delete(msg.id);
+    }
     this.backlogQueueOffset++;
 
     if (this.backlogQueueOffset > BACKLOG_QUEUE_COMPACT_THRESHOLD) {
       this.backlogQueue = this.backlogQueue.slice(this.backlogQueueOffset);
       this.backlogQueueOffset = 0;
+      this.rebuildPendingIndices();
     }
     return msg;
+  }
+
+  private rebuildPendingIndices(): void {
+    this.backlogPendingIndices.clear();
+    for (let index = this.backlogQueueOffset; index < this.backlogQueue.length; index++) {
+      const id = this.backlogQueue[index]?.id;
+      if (id && !this.backlogPendingIndices.has(id)) {
+        this.backlogPendingIndices.set(id, index);
+      }
+    }
   }
 
   /**
@@ -126,20 +144,27 @@ export class BacklogInjectionController implements Pauseable {
   private appendUniqueMessages(messages: readonly ChatMessage[]): number {
     let added = 0;
     for (const msg of messages) {
-      if (msg.id && msg.actionType === 'replace') {
-        let replacedPending = false;
-        for (let i = this.backlogQueueOffset; i < this.backlogQueue.length; i++) {
-          if (this.backlogQueue[i]?.id !== msg.id) continue;
-          this.backlogQueue[i] = msg;
-          replacedPending = true;
-          break;
+      const id = msg.id;
+      if (msg.actionType === 'replace') {
+        if (!id) continue;
+        const pendingIndex = this.backlogPendingIndices.get(id);
+        if (pendingIndex !== undefined) {
+          this.backlogQueue[pendingIndex] = msg;
+          continue;
         }
-        if (replacedPending) continue;
-      } else if (msg.id && this.backlogSeenIds.has(msg.id)) {
+
+        const knownOutsideBacklog = this.isKnownMessageId?.(id) === true;
+        if (!this.backlogSeenIds.has(id) && !knownOutsideBacklog) continue;
+      } else if (id && this.backlogSeenIds.has(id)) {
         continue;
       }
+
+      const pendingIndex = this.backlogQueue.length;
       this.backlogQueue.push(msg);
-      if (msg.id) this.backlogSeenIds.add(msg.id);
+      if (id) {
+        this.backlogSeenIds.add(id);
+        this.backlogPendingIndices.set(id, pendingIndex);
+      }
       added++;
     }
     return added;
@@ -190,10 +215,26 @@ export class BacklogInjectionController implements Pauseable {
       );
     }
 
-    // Statistical sampling + priority extraction
+    // Statistical sampling + replacement-target validation. A replacement
+    // may target a prior session message or an earlier add in this batch, but
+    // a fresh ID cannot create backlog work on its own.
     const sampled = this.sampler.sampleMessages(filtered);
+    const batchKnownIds = new Set<string>();
+    const acceptedSampled = sampled.filter((message) => {
+      const id = message.id;
+      if (message.actionType === 'replace') {
+        return Boolean(id && (batchKnownIds.has(id) || this.isKnownMessageId?.(id) === true));
+      }
+      if (id) batchKnownIds.add(id);
+      return true;
+    });
     const { priority: priorityMessages, regular: normalMessages } =
-      this.sampler.extractPriorityMessages(sampled);
+      this.sampler.extractPriorityMessages(acceptedSampled);
+
+    this.backlogQueue = [];
+    this.backlogQueueOffset = 0;
+    this.backlogSeenIds.clear();
+    this.backlogPendingIndices.clear();
 
     // Priority messages bypass the throttled queue
     let queueMessages: ChatMessage[] = normalMessages;
@@ -203,6 +244,7 @@ export class BacklogInjectionController implements Pauseable {
       } else {
         for (const msg of priorityMessages) {
           msg.isBacklog = true;
+          if (msg.id) this.backlogSeenIds.add(msg.id);
           this.onBacklogMessage?.(msg);
         }
         log.debug('backlog.priority-emitted', { count: priorityMessages.length });
@@ -210,22 +252,17 @@ export class BacklogInjectionController implements Pauseable {
     }
 
     // Setup backlog queue state
-    this.backlogQueue = queueMessages;
-    this.backlogSeenIds = new Set<string>();
-    for (const msg of queueMessages) {
-      if (msg.id) this.backlogSeenIds.add(msg.id);
-    }
-    this.totalBacklog = queueMessages.length;
+    this.totalBacklog = this.appendUniqueMessages(queueMessages);
     this.processedBacklog = 0;
-    this.isActive = queueMessages.length > 0;
+    this.isActive = this.totalBacklog > 0;
     this.injectionStartTime = now;
     this.realTimeActivityCount = 0;
     this.lastRealTimeActivityAt = 0;
 
     // Adapt density ramp duration to backlog size
-    this.scheduler.setDensityRampMs(this.scheduler.computeDensityRampMs(sampled.length));
+    this.scheduler.setDensityRampMs(this.scheduler.computeDensityRampMs(acceptedSampled.length));
 
-    log.debug('backlog.sampled', { total: messages.length, sampled: sampled.length });
+    log.debug('backlog.sampled', { total: messages.length, sampled: acceptedSampled.length });
     this.indicator.show();
     this.observability?.updateBacklogProgress(0);
     this.startInjection();
@@ -293,6 +330,8 @@ export class BacklogInjectionController implements Pauseable {
     this.backlogQueue = [];
     this.backlogQueueOffset = 0;
     this.backlogSeenIds.clear();
+    this.backlogPendingIndices.clear();
+    this.isKnownMessageId = null;
     this.onBacklogMessage = null;
   }
 
@@ -350,6 +389,7 @@ export class BacklogInjectionController implements Pauseable {
     this.backlogQueue = [];
     this.backlogQueueOffset = 0;
     this.backlogSeenIds.clear();
+    this.backlogPendingIndices.clear();
     this.observability?.updateBacklogProgress(1);
     this.indicator.hide();
     log.debug('backlog.injection-complete');

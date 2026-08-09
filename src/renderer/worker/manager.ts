@@ -503,10 +503,12 @@ export class RenderWorkerManager {
     if (!this.worker) return;
 
     const priority = this.deps.getMessagePriority(message);
+    const id = msgId ?? message.id ?? `${message.timestamp}-${Math.random()}`;
+    const isKnownReplacement = message.actionType === 'replace' && this.sentMessages.has(id);
 
     // Backpressure: drop low-priority messages when worker queue is backed up
     const maxWorkerQueue = this.deps.settings.queueMaxSize * 2;
-    if (message.actionType !== 'replace' && this._queueDepth > maxWorkerQueue) {
+    if (!isKnownReplacement && this._queueDepth > maxWorkerQueue) {
       if (priority < 40) {
         this.deps.observability.onMessageDropped('worker_backpressure');
         return;
@@ -514,7 +516,6 @@ export class RenderWorkerManager {
     }
 
     const dims = this.deps.estimateDimensions(message);
-    const id = msgId ?? message.id ?? `${message.timestamp}-${Math.random()}`;
     const workerMessage = serializeWorkerMessage({
       message,
       id,

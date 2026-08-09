@@ -183,7 +183,7 @@ describe('RenderWorkerManager', () => {
       expect(deps.observability.onMessageDropped).not.toHaveBeenCalled();
     });
 
-    it('delivers replacement actions even when worker backpressure drops new messages', async () => {
+    it('delivers known replacement actions even when worker backpressure drops new messages', async () => {
       const postMessage = vi.fn();
       (manager as any).worker = {
         postMessage,
@@ -191,6 +191,19 @@ describe('RenderWorkerManager', () => {
         addEventListener: vi.fn(),
         removeEventListener: vi.fn(),
       } as unknown as Worker;
+
+      manager.sendToWorker(
+        {
+          id: 'replacement',
+          timestamp: Date.now(),
+          content: [{ type: 'text', content: 'original' }],
+          kind: 'chat',
+          authorType: 'normal',
+        } as any,
+        'replacement'
+      );
+      await Promise.resolve();
+      postMessage.mockClear();
       (manager as any)._queueDepth = deps.settings.queueMaxSize * 2 + 1;
 
       manager.sendToWorker(
@@ -213,6 +226,34 @@ describe('RenderWorkerManager', () => {
           messages: [expect.objectContaining({ id: 'replacement', actionType: 'replace' })],
         })
       );
+    });
+
+    it('applies worker backpressure to a replacement with an unseen id', async () => {
+      const postMessage = vi.fn();
+      (manager as any).worker = {
+        postMessage,
+        terminate: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      } as unknown as Worker;
+      (manager as any)._queueDepth = deps.settings.queueMaxSize * 2 + 1;
+
+      manager.sendToWorker(
+        {
+          id: 'fresh-replacement',
+          actionType: 'replace',
+          timestamp: Date.now(),
+          content: [{ type: 'text', content: 'updated' }],
+          kind: 'chat',
+          authorType: 'normal',
+        } as any,
+        'fresh-replacement'
+      );
+      await Promise.resolve();
+
+      expect(deps.observability.onMessageDropped).toHaveBeenCalledWith('worker_backpressure');
+      expect(postMessage).not.toHaveBeenCalled();
+      expect((manager as any).sentMessages.has('fresh-replacement')).toBe(false);
     });
 
     it('closes transferred bitmaps when the worker is destroyed before flush', async () => {
