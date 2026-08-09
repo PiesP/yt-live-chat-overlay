@@ -62,12 +62,12 @@ import {
   toSharedContentSegments,
   warmTextBitmapCache,
 } from '@renderer/canvas/shared';
-import { desaturateColor } from '@renderer/color-utils';
 import { getSpeedTier } from '@renderer/canvas/speed-tier';
+import { desaturateColor } from '@renderer/color-utils';
 import {
   type CanvasMessage,
-  GRADIENT_CACHE_MAX,
   FAR_LAYER_DESATURATION_FACTOR,
+  GRADIENT_CACHE_MAX,
   IDLE_GRACE_PERIOD_MS,
   OPACITY_BUCKET_COUNT,
   SPEED_TIER,
