@@ -481,6 +481,80 @@ export function buildWrappedLines(
   return { lines, maxLineWidth };
 }
 
+/** Measure a wrapped line with the same inter-piece spacing used by the renderer. */
+function measureWrappedLineWidth(line: readonly SharedRenderPiece[], spaceWidth: number): number {
+  let width = 0;
+  let prevIsText = false;
+  for (const piece of line) {
+    if (prevIsText) width += spaceWidth;
+    width += piece.width;
+    prevIsText = piece.type === 'text';
+  }
+  return width;
+}
+
+/**
+ * Fit the final visible wrapped line into the supplied available width.
+ *
+ * Complete pieces are retained where possible. If the trailing piece is text, its
+ * final grapheme-safe prefix is shortened before earlier pieces are removed. Emoji
+ * pieces stay atomic because their image/fallback representation cannot be split.
+ */
+function fitWrappedLineToWidth(
+  line: readonly SharedRenderPiece[],
+  availableWidth: number,
+  spaceWidth: number,
+  measureTextFn: (text: string) => number
+): SharedRenderPiece[] {
+  const fitted = line.map((piece) => ({ ...piece }));
+
+  while (fitted.length > 0) {
+    if (measureWrappedLineWidth(fitted, spaceWidth) <= availableWidth) return fitted;
+
+    const lastIndex = fitted.length - 1;
+    const lastPiece = fitted[lastIndex];
+    if (!lastPiece) break;
+
+    const prefix = fitted.slice(0, lastIndex);
+    const prefixWidth = measureWrappedLineWidth(prefix, spaceWidth);
+    const gap = prefix.at(-1)?.type === 'text' ? spaceWidth : 0;
+    const remainingWidth = availableWidth - prefixWidth - gap;
+
+    if (lastPiece.type === 'text' && remainingWidth > 0) {
+      const graphemes = splitGraphemeClusters(lastPiece.text);
+      let lo = 0;
+      let hi = graphemes.length;
+      let fittedWidth = 0;
+
+      while (lo < hi) {
+        const mid = Math.floor((lo + hi + 1) / 2);
+        const candidate = graphemes.slice(0, mid).join('');
+        const candidateWidth = measureTextFn(candidate);
+        if (candidateWidth <= remainingWidth) {
+          lo = mid;
+          fittedWidth = candidateWidth;
+        } else {
+          hi = mid - 1;
+        }
+      }
+
+      if (lo > 0) {
+        const text = graphemes.slice(0, lo).join('');
+        fitted[lastIndex] = {
+          type: 'text',
+          text,
+          width: fittedWidth || measureTextFn(text),
+        };
+        return fitted;
+      }
+    }
+
+    fitted.pop();
+  }
+
+  return fitted;
+}
+
 // ── Outline stroke ──────────────────────────────────────────────────────────
 
 /**
@@ -1324,6 +1398,7 @@ export function renderWrappedContentSegments<
   const lineHeight = Math.ceil(measureTextHeight(font, fontSize));
   const spaceWidth = measureTextWidth(' ', font);
   const ellipsis = '\u2026';
+  const ellipsisWidth = measureTextWidth(ellipsis, font);
 
   const { lines } = buildWrappedLines(segments, maxWidth, emojiSize, (t: string) =>
     measureTextWidth(t, font)
@@ -1339,11 +1414,20 @@ export function renderWrappedContentSegments<
     if (!line) continue;
     const isLastLine = li === renderLines.length - 1;
     const needsEllipsis = isLastLine && isTruncated;
+    const canRenderEllipsis = needsEllipsis && ellipsisWidth <= maxWidth;
+    const renderLine = needsEllipsis
+      ? fitWrappedLineToWidth(
+          line,
+          Math.max(0, maxWidth - (canRenderEllipsis ? ellipsisWidth : 0)),
+          spaceWidth,
+          (text: string) => measureTextWidth(text, font)
+        )
+      : line;
     let cursorX = x;
     let prevText = false;
     const emojiLineY = cursorY + Math.round((lineHeight - emojiSize) / 2);
 
-    for (const piece of line) {
+    for (const piece of renderLine) {
       if (prevText) {
         cursorX += spaceWidth;
       }
@@ -1410,7 +1494,7 @@ export function renderWrappedContentSegments<
     }
 
     // Append ellipsis if this line was truncated
-    if (needsEllipsis) {
+    if (canRenderEllipsis) {
       renderSegment(
         ctx,
         ellipsis,

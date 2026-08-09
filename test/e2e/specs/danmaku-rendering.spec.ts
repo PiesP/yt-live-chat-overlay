@@ -11,6 +11,7 @@
 
 import { test, expect } from '@playwright/test';
 import { existsSync } from 'node:fs';
+import { rendererLayout } from '@util/design-tokens';
 import {
   setupOverlayPage,
   OVERLAY_ID,
@@ -397,6 +398,137 @@ test.describe('Danmaku Rendering', () => {
     expect(layout!.letterSpacing).toBe('1px');
     expect(layout!.textAdvance).toBeGreaterThanOrEqual(layout!.minimumTextAdvance);
     expect(layout!.fallbackAdvance).toBeGreaterThanOrEqual(layout!.minimumFallbackAdvance);
+  });
+
+  test('keeps a truncated SuperChat ellipsis inside the card', async ({ page }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(HTMLCanvasElement.prototype, 'transferControlToOffscreen', {
+        configurable: true,
+        value: () => {
+          throw new Error('Force the main-thread renderer for SuperChat call inspection');
+        },
+      });
+
+      const calls: Array<{ text: string; x: number; y: number; font: string }> = [];
+      const cardWidths: number[] = [];
+      const originalFillText = CanvasRenderingContext2D.prototype.fillText;
+      const originalRoundRect = CanvasRenderingContext2D.prototype.roundRect;
+      CanvasRenderingContext2D.prototype.fillText = function (
+        text: string,
+        x: number,
+        y: number,
+        maxWidth?: number
+      ): void {
+        calls.push({ text, x, y, font: this.font });
+        if (maxWidth === undefined) {
+          originalFillText.call(this, text, x, y);
+        } else {
+          originalFillText.call(this, text, x, y, maxWidth);
+        }
+      };
+      CanvasRenderingContext2D.prototype.roundRect = function (
+        x: number,
+        y: number,
+        width: number,
+        height: number,
+        radii?: number | DOMPointInit | (number | DOMPointInit)[]
+      ): void {
+        cardWidths.push(width);
+        originalRoundRect.call(this, x, y, width, height, radii);
+      };
+      const state = window as unknown as Record<string, unknown>;
+      state.__paidCardFillTextCalls = calls;
+      state.__paidCardRoundRectWidths = cardWidths;
+    });
+
+    await setupOverlayPage(page, { platform: 'userscript' });
+    await applySettings(page, {
+      allowShortTextMessages: true,
+      danmakuMode: 'top',
+      showDebugOverlay: true,
+      showSuperChatAmount: false,
+      superChatMaxBodyLines: 2,
+      showAuthor: { superChat: false },
+      outline: { enabled: false, widthPx: 0, opacity: 0 },
+    });
+
+    await page.route('https://www.youtube.com/youtubei/v1/live_chat/get_live_chat**', (route) =>
+      route.fulfill({
+        json: {
+          continuationContents: {
+            liveChatContinuation: {
+              actions: [
+                {
+                  addChatItemAction: {
+                    item: {
+                      liveChatPaidMessageRenderer: {
+                        id: 'e2e-long-superchat',
+                        authorName: { simpleText: 'SuperChat Author' },
+                        purchaseAmountText: { simpleText: '$5.00' },
+                        message: { simpleText: ':'.repeat(400) },
+                      },
+                    },
+                  },
+                },
+              ],
+              continuations: [],
+            },
+          },
+        },
+      })
+    );
+    await page.evaluate(() =>
+      fetch('https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?key=e2e-superchat')
+    );
+
+    await expect(page.locator('#yt-chat-overlay-debug > div').first()).toHaveText(
+      'Rcvd: 1 | Rndr: 1'
+    );
+
+    const readContainment = () =>
+      page.evaluate(() => {
+        const state = window as unknown as Record<string, unknown>;
+        const calls = state.__paidCardFillTextCalls as Array<{
+          text: string;
+          x: number;
+          y: number;
+          font: string;
+        }>;
+        const cardWidths = state.__paidCardRoundRectWidths as number[];
+        for (let index = calls.length - 1; index > 0; index--) {
+          const ellipsis = calls[index];
+          const line = calls[index - 1];
+          if (ellipsis?.text !== '…' || !line || !/^:+$/u.test(line.text)) continue;
+          if (line.y !== ellipsis.y) continue;
+
+          const reference = document.createElement('canvas');
+          const context = reference.getContext('2d');
+          if (!context) return null;
+          context.font = ellipsis.font;
+          const metrics = context.measureText(ellipsis.text);
+          const ellipsisWidth = Math.ceil(
+            Math.max(
+              metrics.width,
+              Math.abs(metrics.actualBoundingBoxLeft) + Math.abs(metrics.actualBoundingBoxRight)
+            )
+          );
+          return {
+            cardWidth: Math.max(...cardWidths),
+            ellipsisRight: ellipsis.x + ellipsisWidth,
+            lineStart: line.x,
+          };
+        }
+        return null;
+      });
+
+    await expect.poll(readContainment, { timeout: 5000 }).not.toBeNull();
+    const containment = await readContainment();
+    expect(containment).not.toBeNull();
+    expect(containment!.ellipsisRight).toBeLessThanOrEqual(
+      containment!.lineStart +
+        containment!.cardWidth -
+        rendererLayout.superchat.paddingH * 2
+    );
   });
 
   test('renders a user-selected solid translucent background on a regular message', async ({
