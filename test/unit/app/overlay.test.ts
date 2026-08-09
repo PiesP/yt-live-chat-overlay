@@ -134,6 +134,17 @@ describe('Overlay', () => {
     );
     expect(announcements[1]?.dataset.messageId).toBe('two');
 
+    overlay.updateLiveRegion([
+      { id: 'one', text: 'Replacement text', kind: 'text', author: 'Updated author' },
+    ]);
+    vi.advanceTimersByTime(500);
+
+    const updatedAnnouncements = Array.from(
+      document.querySelectorAll<HTMLParagraphElement>('.yt-live-chat-overlay-live-region p')
+    );
+    expect(updatedAnnouncements).toHaveLength(2);
+    expect(updatedAnnouncements[0]?.textContent).toBe('Updated author — Replacement text');
+
     overlay.destroy();
   });
 

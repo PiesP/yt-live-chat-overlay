@@ -191,6 +191,11 @@ export class RenderWorkerManager {
     return this._activeMessageCount;
   }
 
+  /** Whether a message is still the latest same-ID value owned by the Worker. */
+  isCurrentMessage(id: string, message: ChatMessage): boolean {
+    return this.sentMessages.get(id) === message;
+  }
+
   /**
    * Set the callback used to forward Worker live-region text snippets
    * to the overlay's aria-live region for screen reader access.

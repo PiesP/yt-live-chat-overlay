@@ -151,6 +151,64 @@ describe('Worker module', () => {
 });
 
 describe('Worker message protocol', () => {
+  it('upserts pending and active replacement messages by id', () => {
+    const renderer = initializeRenderer({ outlineWidthPx: 0 });
+    const internals = renderer as unknown as {
+      pendingQueue: WorkerMessage[];
+      activeMessages: Array<{ id: string; text: string; width: number; content: unknown[] }>;
+      drainQueue(now: number, width: number, height: number): void;
+    };
+    const original = makeWorkerMessage({
+      id: 'replacement',
+      text: 'original',
+      content: [{ type: 'text', content: 'original' }],
+    });
+
+    renderer.handleMessage(makeEvent({ type: 'addMessages', messages: [original] }));
+    renderer.handleMessage(
+      makeEvent({
+        type: 'addMessages',
+        messages: [
+          makeWorkerMessage({
+            id: 'replacement',
+            text: 'pending update',
+            width: 180,
+            actionType: 'replace',
+            content: [{ type: 'text', content: 'pending update' }],
+          }),
+        ],
+      })
+    );
+
+    expect(internals.pendingQueue).toHaveLength(1);
+    expect(internals.pendingQueue[0]).toMatchObject({ text: 'pending update', width: 180 });
+
+    internals.drainQueue(10_000, 640, 360);
+    expect(internals.activeMessages).toHaveLength(1);
+
+    renderer.handleMessage(
+      makeEvent({
+        type: 'addMessages',
+        messages: [
+          makeWorkerMessage({
+            id: 'replacement',
+            text: 'active update',
+            width: 220,
+            actionType: 'replace',
+            content: [{ type: 'text', content: 'active update' }],
+          }),
+        ],
+      })
+    );
+
+    expect(internals.activeMessages).toHaveLength(1);
+    expect(internals.activeMessages[0]).toMatchObject({
+      text: 'active update',
+      width: 220,
+      content: [{ type: 'text', content: 'active update' }],
+    });
+  });
+
   describe('init error case', () => {
     it('posts error when canvas getContext returns null', () => {
       const BadCanvas = class { getContext() { return null; } };

@@ -94,6 +94,63 @@ describe('CanvasRenderer', () => {
     renderer.destroy();
   });
 
+  it('replaces a pending message with the same id instead of duplicating it', () => {
+    const renderer = new CanvasRenderer(overlay, makeSettings());
+    const internals = renderer as unknown as {
+      pendingQueue: { toArray(): ChatMessage[] };
+    };
+    renderer.addMessage(makeMessage('replace-pending', 'original'));
+
+    renderer.addMessage({
+      ...makeMessage('replace-pending', 'updated'),
+      actionType: 'replace',
+    });
+
+    expect(internals.pendingQueue.toArray()).toHaveLength(1);
+    expect(internals.pendingQueue.toArray()[0]?.text).toBe('updated');
+    renderer.destroy();
+  });
+
+  it('updates active message content and geometry for a replacement', () => {
+    const renderer = new CanvasRenderer(overlay, makeSettings({ fontSize: 16 }));
+    const original = makeMessage('replace-active', 'old');
+    const active = {
+      message: original,
+      renderMessage: original,
+      startTime: 0,
+      fadeStartTime: 0,
+      duration: 5000,
+      invDuration: 0.0002,
+      width: 24,
+      height: 20,
+      startX: 640,
+      x: 500,
+      y: 20,
+      pausedDuration: 0,
+      laneIndex: 0,
+      staggerDelay: 0,
+      speedTier: 1,
+      ghostText: 'old',
+      laneArrayIndices: [],
+      translatedText: 'stale translation',
+    } as CanvasMessage;
+    const internals = renderer as unknown as { activeMessages: CanvasMessage[] };
+    internals.activeMessages.push(active);
+
+    renderer.addMessage({
+      ...makeMessage('replace-active', 'updated active content'),
+      actionType: 'replace',
+    });
+
+    expect(internals.activeMessages).toHaveLength(1);
+    expect(active.message.text).toBe('updated active content');
+    expect(active.renderMessage.text).toBe('updated active content');
+    expect(active.ghostText).toBe('updated active content');
+    expect(active.translatedText).toBeNull();
+    expect(active.width).toBeGreaterThan(24);
+    renderer.destroy();
+  });
+
   it('pause and resume work', () => {
     const settings = makeSettings();
     const renderer = new CanvasRenderer(overlay, settings);

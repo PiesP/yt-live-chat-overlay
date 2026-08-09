@@ -342,16 +342,29 @@ export class Overlay {
       // chat messages remains available to assistive technology.
       const newMessages: AccessibleChatMessage[] = [];
       for (const message of messages) {
-        if (!this.seenMessageIds.has(message.id)) {
-          newMessages.push(message);
-          this.seenMessageIds.add(message.id);
-          // Trim oldest entries when set grows too large.
-          if (this.seenMessageIds.size > Overlay.SEEN_SNIPPET_MAX) {
-            let removed = 0;
-            for (const id of this.seenMessageIds) {
-              this.seenMessageIds.delete(id);
-              if (++removed >= 50) break;
-            }
+        if (this.seenMessageIds.has(message.id)) {
+          // Replacement actions retain the original ID. Update the existing
+          // accessible node in place so find-in-page and assistive technology
+          // do not retain stale text or append a duplicate announcement.
+          const existing = Array.from(this.liveRegion.children).find(
+            (child) =>
+              child instanceof HTMLParagraphElement && child.dataset.messageId === message.id
+          );
+          if (existing) {
+            const nextText = this.formatAccessibleMessage(message);
+            if (existing.textContent !== nextText) existing.textContent = nextText;
+          }
+          continue;
+        }
+
+        newMessages.push(message);
+        this.seenMessageIds.add(message.id);
+        // Trim oldest entries when set grows too large.
+        if (this.seenMessageIds.size > Overlay.SEEN_SNIPPET_MAX) {
+          let removed = 0;
+          for (const id of this.seenMessageIds) {
+            this.seenMessageIds.delete(id);
+            if (++removed >= 50) break;
           }
         }
       }

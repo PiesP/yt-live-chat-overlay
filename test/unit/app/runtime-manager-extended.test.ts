@@ -61,7 +61,7 @@ describe('RuntimeManager (extended)', () => {
     handleSessionRestart: (reason: 'watchdog' | 'foreground-return' | 'standby-resolved', generation?: number) => void;
     requestManagedRestart: (reason: 'watchdog' | 'foreground-return' | 'standby-resolved') => void;
     computeConnectionStatus: () => string;
-    acceptForRenderer: (msg: { id?: string }) => boolean;
+    acceptForRenderer: (msg: { id?: string; actionType?: 'add' | 'replace' }) => boolean;
   };
 
   function createOpts(overrides: { url?: string; settings?: OverlaySettings; valid?: boolean } = {}) {
@@ -237,6 +237,15 @@ describe('RuntimeManager (extended)', () => {
       internals.acceptForRenderer({ id: 'msg-1' });
       const result = internals.acceptForRenderer({ id: 'msg-1' });
       expect(result).toBe(false);
+    });
+
+    it('acceptForRenderer accepts a replacement for an already rendered id', () => {
+      const rm = new RuntimeManager(createOpts());
+      const internals = internalsOf(rm);
+      internals.acceptForRenderer({ id: 'msg-1', actionType: 'add' });
+
+      expect(internals.acceptForRenderer({ id: 'msg-1', actionType: 'replace' })).toBe(true);
+      expect(internals.acceptForRenderer({ id: 'msg-1', actionType: 'add' })).toBe(false);
     });
 
     it('acceptForRenderer always accepts messages without id', () => {

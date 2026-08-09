@@ -169,6 +169,19 @@ describe('serializeWorkerMessage', () => {
     expect(Object.hasOwn(serialized, 'translatedText')).toBe(false);
   });
 
+  it('preserves replacement action semantics', () => {
+    const serialized = serializeWorkerMessage({
+      message: textMessage({ actionType: 'replace' }),
+      id: 'replacement-id',
+      dimensions,
+      priority: 0,
+      burstSpeedMultiplier: 1,
+      settings,
+    });
+
+    expect(serialized.actionType).toBe('replace');
+  });
+
   it('preserves the parser canonical text when emoji alt and fallback text differ', () => {
     const serialized = serializeWorkerMessage({
       message: textMessage({

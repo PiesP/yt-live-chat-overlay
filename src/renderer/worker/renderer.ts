@@ -790,6 +790,8 @@ export class WorkerRenderer {
   }
 
   private enqueueMessage(msg: WorkerMessage): void {
+    if (msg.actionType === 'replace' && this.replaceMessage(msg)) return;
+
     const maxSize = this.config?.queueMaxSize ?? 200;
     if (this.pendingQueue.length >= maxSize) {
       let minIdx = 0;
@@ -816,6 +818,72 @@ export class WorkerRenderer {
     if (this.animFrameId === null && !this.isDestroyed) {
       this.startRenderLoop();
     }
+  }
+
+  /** Replace pending or active render state without creating a duplicate ID. */
+  private replaceMessage(msg: WorkerMessage): boolean {
+    const existing = this.messageById.get(msg.id);
+    if (!existing) return false;
+
+    if (!('laneArrayIndices' in existing)) {
+      const pendingIndex = this.pendingQueue.indexOf(existing);
+      if (pendingIndex < 0) return false;
+      this.pendingQueue[pendingIndex] = msg;
+      this.messageById.set(msg.id, msg);
+      this.pendingQueueSortNeeded = true;
+      if (this.animFrameId === null && !this.isDestroyed) this.startRenderLoop();
+      return true;
+    }
+
+    existing.text = msg.text;
+    existing.content = msg.content ?? [];
+    existing.ghostText = getDisplayText(existing.content);
+    existing.speedTier = this.config ? getSpeedTier(msg, this.config) : existing.speedTier;
+    existing.translatedText = msg.translatedText ?? null;
+    if (msg.translatedText) {
+      existing.translatedContent = [{ type: 'text', content: msg.translatedText }];
+    } else {
+      delete existing.translatedContent;
+    }
+    if (msg.translationHeight !== undefined) {
+      existing.translationHeight = msg.translationHeight;
+    } else {
+      delete existing.translationHeight;
+    }
+
+    if (msg.authorType !== undefined) existing.authorType = msg.authorType;
+    else delete existing.authorType;
+    if (msg.kind !== undefined) existing.kind = msg.kind;
+    else delete existing.kind;
+    if (msg.author !== undefined) existing.author = msg.author;
+    else delete existing.author;
+    if (msg.authorPhotoUrl !== undefined) existing.authorPhotoUrl = msg.authorPhotoUrl;
+    else delete existing.authorPhotoUrl;
+    if (msg.superChatAmount !== undefined) existing.superChatAmount = msg.superChatAmount;
+    else delete existing.superChatAmount;
+    if (msg.superChatStickerUrl !== undefined) {
+      existing.superChatStickerUrl = msg.superChatStickerUrl;
+    } else {
+      delete existing.superChatStickerUrl;
+    }
+    if (msg.membershipHeader !== undefined) existing.membershipHeader = msg.membershipHeader;
+    else delete existing.membershipHeader;
+    if (msg.cardConfigWorker !== undefined) existing.cardConfigWorker = msg.cardConfigWorker;
+    else delete existing.cardConfigWorker;
+
+    if (this.config) {
+      existing.color =
+        this.config.preserveUserColor && msg.userColor
+          ? msg.userColor
+          : (msg.authorType && this.config.authorColors[msg.authorType]) ||
+            this.config.color ||
+            DEFAULT_TEXT_COLOR;
+    }
+    this.applyActiveMessageGeometry(existing, msg.width, msg.height);
+    this.messageById.set(msg.id, existing);
+    this.prefetchMessageImages(msg);
+    this.reflowActiveMessages();
+    return true;
   }
 
   private sortPendingQueueIfNeeded(): void {
@@ -1200,6 +1268,11 @@ export class WorkerRenderer {
     // Register in per-lane index for O(lanes) collision checks (Issue 7).
     addMessageToLaneIndex(this.activeMessagesByLane, am, slotCount);
     this.messageById.set(msg.id, am);
+    this.prefetchMessageImages(msg);
+    return motion.staggerDelayMs;
+  }
+
+  private prefetchMessageImages(msg: WorkerMessage): void {
     if (msg.content) {
       const emojiUrls: string[] = [];
       for (const seg of msg.content) {
@@ -1208,9 +1281,9 @@ export class WorkerRenderer {
       if (emojiUrls.length > 0) void this.prefetchImages(emojiUrls, this.emojiCache);
     }
     if (msg.authorPhotoUrl) void this.prefetchImages([msg.authorPhotoUrl], this.authorPhotoCache);
-    if (msg.superChatStickerUrl)
+    if (msg.superChatStickerUrl) {
       void this.prefetchImages([msg.superChatStickerUrl], this.stickerCache);
-    return motion.staggerDelayMs;
+    }
   }
 
   private getMessageVelocity(msg: WorkerMessage, speedTier: number): number {
