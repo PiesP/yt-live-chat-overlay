@@ -328,6 +328,11 @@ export abstract class ChatSource implements Pauseable {
   protected resetSessionState(): void {
     this.bootstrap = null;
     this.lastActivityTime = 0;
+    this.resetMessageDeliveryState();
+  }
+
+  /** Start a fresh message-delivery epoch without discarding bootstrap state. */
+  protected resetMessageDeliveryState(): void {
     this.messageBuffer.clear();
     this.seenMessageIds.clear();
   }
@@ -428,7 +433,12 @@ export abstract class ChatSource implements Pauseable {
       }
     }
 
-    if (this.pauseReasons.size > 0) return;
+    // YouTube may complete an already-started chat request while the video is
+    // paused. Let those messages reach RendererBase's bounded pause buffer;
+    // visibility/general pauses still suppress delivery because they do not
+    // have an equivalent renderer buffer.
+    const isVideoOnlyPause = this.pauseReasons.size === 1 && this.pauseReasons.has('video');
+    if (this.pauseReasons.size > 0 && !isVideoOnlyPause) return;
     const deduped = this.filterNewMessages(messages);
     if (deduped.length === 0) return;
     for (const message of deduped) {

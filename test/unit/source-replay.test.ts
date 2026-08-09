@@ -3,7 +3,7 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { ReplayChatSource } from '@chat/source-replay';
 import type { InnertubeContinuationData } from '@chat/youtube/continuation';
-import type { ChatBootstrapData } from '@chat/youtube/api';
+import type { ChatBootstrapData, LiveChatPayload } from '@chat/youtube/api';
 import { DEFAULT_SETTINGS } from '@settings/schema';
 
 /**
@@ -94,6 +94,98 @@ describe('ReplayChatSource', () => {
     internals.stopPrefetch();
 
     expect(internals.isPrefetchGenerationCurrent(generation)).toBe(false);
+  });
+
+  it('starts a new delivery epoch when playback seeks', () => {
+    const received: string[] = [];
+    const onSeek = vi.fn();
+    const internals = source as unknown as {
+      callback: ((messages: Array<{ id?: string }>) => void) | null;
+      handleSeeked: (offsetMs: number) => void;
+      onSeek?: () => void;
+    };
+    internals.callback = (messages) => {
+      received.push(...messages.flatMap((message) => (message.id ? [message.id] : [])));
+    };
+    internals.onSeek = onSeek;
+
+    source.injectExternalMessages([
+      {
+        id: 'same-message',
+        text: 'before seek',
+        content: [{ type: 'text', content: 'before seek' }],
+        kind: 'text',
+        authorType: 'normal',
+        timestamp: 1,
+      },
+    ]);
+    source.injectExternalMessages([
+      {
+        id: 'same-message',
+        text: 'duplicate',
+        content: [{ type: 'text', content: 'duplicate' }],
+        kind: 'text',
+        authorType: 'normal',
+        timestamp: 2,
+      },
+    ]);
+    internals.handleSeeked(0);
+    source.injectExternalMessages([
+      {
+        id: 'same-message',
+        text: 'after seek',
+        content: [{ type: 'text', content: 'after seek' }],
+        kind: 'text',
+        authorType: 'normal',
+        timestamp: 3,
+      },
+    ]);
+
+    expect(onSeek).toHaveBeenCalledOnce();
+    expect(received).toEqual(['same-message', 'same-message']);
+  });
+
+  it('discards an ordinary player-seek response invalidated by a later seek', async () => {
+    let resolvePayload!: (payload: LiveChatPayload) => void;
+    const pendingPayload = new Promise<LiveChatPayload>((resolve) => {
+      resolvePayload = resolve;
+    });
+    const continuation = { continuation: 'current' };
+    const internals = source as unknown as {
+      replayMode: 'playerSeek' | null;
+      replayPlayerSeekContinuation: InnertubeContinuationData | null;
+      lastReplayRequestedOffsetMs: number;
+      seekGeneration: number;
+      requestReplayPayload: () => Promise<LiveChatPayload>;
+      fetchReplayPlayerSeek: (offsetMs: number) => Promise<boolean>;
+    };
+    internals.replayMode = 'playerSeek';
+    internals.replayPlayerSeekContinuation = continuation;
+    vi.spyOn(internals, 'requestReplayPayload').mockReturnValue(pendingPayload);
+
+    const request = internals.fetchReplayPlayerSeek(1000);
+    internals.seekGeneration += 1;
+    resolvePayload({ actions: [], continuations: [] });
+
+    await expect(request).resolves.toBe(false);
+    expect(internals.replayPlayerSeekContinuation).toBe(continuation);
+    expect(internals.lastReplayRequestedOffsetMs).toBe(-1000);
+  });
+
+  it('does not refetch an empty player-seek buffer until playback advances', () => {
+    const internals = source as unknown as {
+      replayMode: 'playerSeek' | null;
+      replayPlayerSeekContinuation: InnertubeContinuationData | null;
+      lastReplayRequestedOffsetMs: number;
+      shouldFetchReplayAtOffset: (offsetMs: number) => boolean;
+    };
+    internals.replayMode = 'playerSeek';
+    internals.replayPlayerSeekContinuation = { continuation: 'next' };
+    internals.lastReplayRequestedOffsetMs = 1000;
+
+    expect(internals.shouldFetchReplayAtOffset(1000)).toBe(false);
+    expect(internals.shouldFetchReplayAtOffset(1999)).toBe(false);
+    expect(internals.shouldFetchReplayAtOffset(2000)).toBe(true);
   });
 
   it('restarts the cooperative loop after successful replay-session recovery', async () => {

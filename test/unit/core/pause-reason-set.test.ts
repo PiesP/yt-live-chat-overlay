@@ -24,6 +24,10 @@ class TestChatSource extends ChatSource {
   waitForResume(signal?: AbortSignal): Promise<void> {
     return this.waitWhilePaused(signal);
   }
+
+  registerCallback(callback: (messages: unknown) => void): void {
+    this.callback = callback;
+  }
 }
 
 // ── Tests ────────────────────────────────────────────────────────────
@@ -148,6 +152,46 @@ describe('ChatSource pause reason set', () => {
     source.injectExternalMessages([]);
 
     source.stop();
+  });
+
+  it('delivers externally observed messages to the renderer pause buffer during video pause', () => {
+    const source = createSource();
+    const received: unknown[] = [];
+    source.registerCallback((messages) => received.push(messages));
+    source.setPauseReason('video', true);
+
+    source.injectExternalMessages([
+      {
+        id: 'paused-message',
+        text: 'arrived while paused',
+        content: [{ type: 'text', content: 'arrived while paused' }],
+        kind: 'text',
+        authorType: 'normal',
+        timestamp: 1,
+      },
+    ]);
+
+    expect(received).toHaveLength(1);
+  });
+
+  it('continues suppressing external messages while visibility is paused', () => {
+    const source = createSource();
+    const received: unknown[] = [];
+    source.registerCallback((messages) => received.push(messages));
+    source.setPauseReason('visibility', true);
+
+    source.injectExternalMessages([
+      {
+        id: 'hidden-message',
+        text: 'arrived while hidden',
+        content: [{ type: 'text', content: 'arrived while hidden' }],
+        kind: 'text',
+        authorType: 'normal',
+        timestamp: 1,
+      },
+    ]);
+
+    expect(received).toEqual([]);
   });
 
   it('stop aborts the polling signal even when start receives an external signal', async () => {
