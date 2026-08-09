@@ -214,6 +214,51 @@ describe('Worker message protocol', () => {
     });
   });
 
+  it('rebuilds lane reservations when an active replacement uses fewer slots', () => {
+    const renderer = initializeRenderer({ outlineWidthPx: 0 });
+    const internals = renderer as unknown as {
+      activeMessages: Array<{ laneIndex: number; laneSlotCount: number }>;
+      speedTierLanes: Map<number, unknown>;
+      laneHeap: Array<[number, number]>;
+      drainQueue(now: number, width: number, height: number): void;
+    };
+    renderer.handleMessage(
+      makeEvent({
+        type: 'addMessages',
+        messages: [makeWorkerMessage({ id: 'resized', height: 60 })],
+      })
+    );
+    internals.drainQueue(10_000, 640, 360);
+    const active = internals.activeMessages[0];
+    expect(active?.laneSlotCount).toBeGreaterThan(1);
+    const oldReservedLanes = Array.from(
+      { length: active?.laneSlotCount ?? 0 },
+      (_, offset) => (active?.laneIndex ?? 0) + offset
+    );
+
+    renderer.handleMessage(
+      makeEvent({
+        type: 'addMessages',
+        messages: [
+          makeWorkerMessage({
+            id: 'resized',
+            height: 20,
+            actionType: 'replace',
+          }),
+        ],
+      })
+    );
+
+    expect(active?.laneSlotCount).toBe(1);
+    expect([...internals.speedTierLanes.keys()]).toEqual([active?.laneIndex]);
+    const availabilityByLane = new Map(
+      internals.laneHeap.map(([laneIndex, availableAt]) => [laneIndex, availableAt])
+    );
+    for (const releasedLane of oldReservedLanes.slice(1)) {
+      expect(availabilityByLane.get(releasedLane)).toBe(10_000);
+    }
+  });
+
   describe('init error case', () => {
     it('posts error when canvas getContext returns null', () => {
       const BadCanvas = class { getContext() { return null; } };

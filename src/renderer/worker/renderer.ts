@@ -980,6 +980,9 @@ export class WorkerRenderer {
   private reflowActiveMessages(): void {
     if (!this.config || this.numLanes <= 0) return;
     const now = performance.now();
+    this.laneHeap = buildLaneHeap(this.numLanes, now, this.laneIndexToHeapIndex);
+    this.speedTierLanes.clear();
+    this.collidedLanes.clear();
     this.activeMessagesByLane.clear();
 
     for (const msg of this.activeMessages) {

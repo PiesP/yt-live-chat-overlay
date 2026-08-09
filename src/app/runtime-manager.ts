@@ -1793,10 +1793,13 @@ export class RuntimeManager {
   private acceptForRenderer(message: ChatMessage): boolean {
     if (!message.id) return true;
     // Replacement actions are upserts for a message that may already be
-    // pending or visible. Preserve the original add marker so later duplicate
-    // add actions remain suppressed, but allow every explicit replacement to
-    // reach the renderer's ID-based update path.
-    if (message.actionType === 'replace') return true;
+    // pending or visible. Claim an unseen ID so an out-of-order stale add is
+    // suppressed, while allowing every explicit replacement to reach the
+    // renderer's ID-based update path.
+    if (message.actionType === 'replace') {
+      if (!this.sessionDedup.has(message.id)) this.sessionDedup.mark(message.id);
+      return true;
+    }
     if (this.sessionDedup.has(message.id)) return false;
     this.sessionDedup.mark(message.id);
     return true;

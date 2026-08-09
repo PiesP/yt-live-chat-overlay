@@ -183,6 +183,38 @@ describe('RenderWorkerManager', () => {
       expect(deps.observability.onMessageDropped).not.toHaveBeenCalled();
     });
 
+    it('delivers replacement actions even when worker backpressure drops new messages', async () => {
+      const postMessage = vi.fn();
+      (manager as any).worker = {
+        postMessage,
+        terminate: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      } as unknown as Worker;
+      (manager as any)._queueDepth = deps.settings.queueMaxSize * 2 + 1;
+
+      manager.sendToWorker(
+        {
+          id: 'replacement',
+          actionType: 'replace',
+          timestamp: Date.now(),
+          content: [{ type: 'text', content: 'updated' }],
+          kind: 'chat',
+          authorType: 'normal',
+        } as any,
+        'replacement'
+      );
+      await Promise.resolve();
+
+      expect(deps.observability.onMessageDropped).not.toHaveBeenCalled();
+      expect(postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'addMessages',
+          messages: [expect.objectContaining({ id: 'replacement', actionType: 'replace' })],
+        })
+      );
+    });
+
     it('closes transferred bitmaps when the worker is destroyed before flush', async () => {
       vi.useFakeTimers();
       const bitmap = { close: vi.fn() } as unknown as ImageBitmap;

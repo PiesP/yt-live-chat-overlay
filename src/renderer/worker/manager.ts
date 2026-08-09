@@ -506,7 +506,7 @@ export class RenderWorkerManager {
 
     // Backpressure: drop low-priority messages when worker queue is backed up
     const maxWorkerQueue = this.deps.settings.queueMaxSize * 2;
-    if (this._queueDepth > maxWorkerQueue) {
+    if (message.actionType !== 'replace' && this._queueDepth > maxWorkerQueue) {
       if (priority < 40) {
         this.deps.observability.onMessageDropped('worker_backpressure');
         return;
