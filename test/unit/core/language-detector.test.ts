@@ -21,21 +21,21 @@ afterEach(() => {
 
 describe('LanguageDetectorService lifecycle', () => {
   it('destroys a detector that finishes creating after destroy()', async () => {
-    const capabilities = deferred<{ available: 'readily' }>();
+    const availability = deferred<'available'>();
     const detector = {
       detect: vi.fn(),
       destroy: vi.fn(),
     };
     const create = vi.fn().mockResolvedValue(detector);
     vi.stubGlobal('LanguageDetector', {
-      capabilities: () => capabilities.promise,
+      availability: () => availability.promise,
       create,
     });
 
     const service = new LanguageDetectorService();
     const initialization = service.initialize();
     service.destroy();
-    capabilities.resolve({ available: 'readily' });
+    availability.resolve('available');
 
     await initialization;
 
@@ -64,7 +64,7 @@ describe('LanguageDetectorService detection', () => {
       destroy: vi.fn(),
     };
     vi.stubGlobal('LanguageDetector', {
-      capabilities: vi.fn().mockResolvedValue({ available: 'readily' }),
+      availability: vi.fn().mockResolvedValue('available'),
       create: vi.fn().mockResolvedValue(detector),
     });
 
@@ -83,7 +83,7 @@ describe('LanguageDetectorService detection', () => {
       destroy: vi.fn(),
     };
     vi.stubGlobal('LanguageDetector', {
-      capabilities: vi.fn().mockResolvedValue({ available: 'readily' }),
+      availability: vi.fn().mockResolvedValue('available'),
       create: vi.fn().mockResolvedValue(detector),
     });
 
@@ -91,6 +91,39 @@ describe('LanguageDetectorService detection', () => {
     await service.initialize();
 
     expect(await service.detect('これは日本語です')).toBe('ja');
+  });
+
+  it.each([
+    ['zh-Hans', 'zh-Hans'],
+    ['zh-Hant', 'zh-Hant'],
+    ['zh_Hant_TW', 'zh-Hant'],
+    ['ZH-hans-CN', 'zh-Hans'],
+  ])('preserves the Chinese script in %s', async (detectedLanguage, expected) => {
+    const detector = {
+      detect: vi.fn().mockResolvedValue([{ detectedLanguage, confidence: 0.95 }]),
+      destroy: vi.fn(),
+    };
+    vi.stubGlobal('LanguageDetector', {
+      availability: vi.fn().mockResolvedValue('available'),
+      create: vi.fn().mockResolvedValue(detector),
+    });
+
+    const service = new LanguageDetectorService();
+    await service.initialize();
+
+    expect(await service.detect('Chinese sample')).toBe(expected);
+  });
+
+  it('does not create a detector when the stable API reports it unavailable', async () => {
+    const create = vi.fn();
+    vi.stubGlobal('LanguageDetector', {
+      availability: vi.fn().mockResolvedValue('unavailable'),
+      create,
+    });
+
+    await new LanguageDetectorService().initialize();
+
+    expect(create).not.toHaveBeenCalled();
   });
 
   it('returns the majority language across samples', async () => {

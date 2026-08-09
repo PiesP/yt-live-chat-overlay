@@ -15,7 +15,7 @@
  * - Unicode fallback covers CJK, Hangul, Hiragana/Katakana, Latin-1 Supplement.
  */
 
-import type { TranslationLanguage } from '@app-types';
+import type { TranslationLanguage, TranslationSourceLanguage } from '@app-types';
 import { createLogger } from '@util/logging';
 
 const log = createLogger('LanguageDetector');
@@ -34,9 +34,7 @@ interface LanguageDetectorInstance {
 
 interface LanguageDetectorStatic {
   create(options?: { monitor?: (monitor: EventTarget) => void }): Promise<LanguageDetectorInstance>;
-  capabilities(): Promise<{
-    available: 'readily' | 'after-download' | 'no';
-  }>;
+  availability(): Promise<'available' | 'downloadable' | 'unavailable'>;
 }
 
 declare global {
@@ -118,13 +116,13 @@ export class LanguageDetectorService {
   }
 
   private async doInit(generation: number): Promise<void> {
-    if (typeof LanguageDetector?.capabilities !== 'function') {
+    if (typeof LanguageDetector?.availability !== 'function') {
       log.info('translation.detector.api-mismatch');
       return;
     }
     try {
-      const caps = await LanguageDetector.capabilities();
-      if (!caps || caps.available === 'no') {
+      const availability = await LanguageDetector.availability();
+      if (availability === 'unavailable') {
         log.warn('translation.detector.device-unavailable');
         return;
       }
@@ -146,9 +144,9 @@ export class LanguageDetectorService {
 
   /**
    * Detect the primary language of a text sample.
-   * Returns the detected TranslationLanguage or 'en' as fallback.
+   * Returns the detected source language or 'en' as fallback.
    */
-  async detect(text: string): Promise<TranslationLanguage> {
+  async detect(text: string): Promise<TranslationSourceLanguage> {
     if (!text.trim()) return 'en';
 
     if (this.detector) {
@@ -170,8 +168,8 @@ export class LanguageDetectorService {
   /**
    * Detect language from multiple text samples using majority vote.
    */
-  async detectFromSamples(samples: string[]): Promise<TranslationLanguage> {
-    const votes = new Map<TranslationLanguage, number>();
+  async detectFromSamples(samples: string[]): Promise<TranslationSourceLanguage> {
+    const votes = new Map<TranslationSourceLanguage, number>();
     for (const sample of samples) {
       const lang = await this.detect(sample);
       votes.set(lang, (votes.get(lang) ?? 0) + 1);
@@ -180,10 +178,16 @@ export class LanguageDetectorService {
     return [...votes.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'en';
   }
 
-  /** Map a BCP 47 language tag to our supported TranslationLanguage set. */
-  private mapBcp47(bcp47: string): TranslationLanguage | null {
-    const lang = bcp47.split('-')[0]?.toLowerCase();
-    switch (lang) {
+  /** Map a BCP 47 language tag to a source language supported by Translator. */
+  private mapBcp47(bcp47: string): TranslationSourceLanguage | null {
+    const subtags = bcp47
+      .trim()
+      .replaceAll('_', '-')
+      .split('-')
+      .filter(Boolean)
+      .map((subtag) => subtag.toLowerCase());
+    const language = subtags[0];
+    switch (language) {
       case 'en':
         return 'en';
       case 'ko':
@@ -193,8 +197,10 @@ export class LanguageDetectorService {
       case 'es':
         return 'es';
       case 'zh':
-        return 'zh-CN';
-      case 'zh-CN':
+        if (subtags.includes('hant')) return 'zh-Hant';
+        if (subtags.includes('hans')) return 'zh-Hans';
+        if (subtags.some((subtag) => ['tw', 'hk', 'mo'].includes(subtag))) return 'zh-Hant';
+        if (subtags.some((subtag) => ['cn', 'sg'].includes(subtag))) return 'zh-Hans';
         return 'zh-CN';
       case 'ar':
         return 'ar';
