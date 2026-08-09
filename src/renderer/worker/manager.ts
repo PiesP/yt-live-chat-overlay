@@ -29,6 +29,12 @@ import type { WorkerMessage } from './types';
 
 type DimensionResult = { width: number; height: number };
 
+export interface WorkerInitResult {
+  started: boolean;
+  /** True once control of the HTML canvas has been permanently transferred. */
+  canvasTransferred: boolean;
+}
+
 interface WorkerManagerDeps {
   settings: OverlaySettings;
   observability: ObservabilityReporter;
@@ -191,6 +197,11 @@ export class RenderWorkerManager {
     return this._activeMessageCount;
   }
 
+  /** Whether a message is still the latest same-ID value owned by the Worker. */
+  isCurrentMessage(id: string, message: ChatMessage): boolean {
+    return this.sentMessages.get(id) === message;
+  }
+
   /**
    * Set the callback used to forward Worker live-region text snippets
    * to the overlay's aria-live region for screen reader access.
@@ -251,15 +262,16 @@ export class RenderWorkerManager {
 
   /**
    * Attempt to create and initialize the OffscreenCanvas render worker.
-   * Returns true if the worker was successfully started.
+   * Reports both startup success and whether canvas control was transferred.
    */
   init(
     canvas: HTMLCanvasElement,
     settings: OverlaySettings,
     overlay: Overlay,
     overrideWorkerUrl?: string | URL
-  ): boolean {
+  ): WorkerInitResult {
     let worker: Worker | null = null;
+    let canvasTransferred = false;
     try {
       // Check Worker support BEFORE attempting URL construction.
       // In userscript IIFE builds, import.meta.url is mangled to {}.url
@@ -269,14 +281,14 @@ export class RenderWorkerManager {
         log.debug('renderer.worker.unavailable', {
           reason: 'worker-unsupported-platform',
         });
-        return false;
+        return { started: false, canvasTransferred };
       }
 
       if (typeof OffscreenCanvas === 'undefined') {
         log.debug('renderer.worker.unavailable', {
           reason: 'no-offscreen-canvas',
         });
-        return false;
+        return { started: false, canvasTransferred };
       }
 
       const dims = overlay.getDimensions();
@@ -290,7 +302,7 @@ export class RenderWorkerManager {
         log.debug('renderer.worker.unavailable', {
           reason: 'invalid-overlay-dimensions',
         });
-        return false;
+        return { started: false, canvasTransferred };
       }
       const dpr = window.devicePixelRatio || 1;
       const config = RenderWorkerManager.buildWorkerConfig(settings);
@@ -322,7 +334,7 @@ export class RenderWorkerManager {
             error: String(workerError),
           });
         }
-        return false;
+        return { started: false, canvasTransferred };
       }
 
       // TS can't infer that worker is non-null here despite inner catch always
@@ -336,6 +348,7 @@ export class RenderWorkerManager {
       canvas.width = dims.width * dpr;
       canvas.height = dims.height * dpr;
       const offscreen = canvas.transferControlToOffscreen();
+      canvasTransferred = true;
 
       w.onmessage = (e: MessageEvent) => {
         // Type guard: validate message shape before dispatch.
@@ -464,17 +477,21 @@ export class RenderWorkerManager {
       this.startPingPong();
 
       log.info('renderer.worker.initialized');
-      return true;
+      return { started: true, canvasTransferred };
     } catch (error: unknown) {
       // Terminate any worker created before the failure to prevent leaks.
-      // The canvas is untouched when Worker creation in the inner try/catch
-      // returns false — the caller can safely use the original canvas for
-      // the main-thread fallback path.
+      // The explicit canvasTransferred result tells the caller whether the
+      // original canvas remains usable for main-thread fallback.
       (worker as Worker)?.terminate();
+      this.worker = null;
+      this.active = false;
+      this.dimensionsUnsubscribe?.();
+      this.dimensionsUnsubscribe = null;
+      this.stopPingPong();
       log.debug('renderer.worker.unavailable', {
         error: String(error),
       });
-      return false;
+      return { started: false, canvasTransferred };
     }
   }
 
@@ -489,7 +506,7 @@ export class RenderWorkerManager {
 
     // Backpressure: drop low-priority messages when worker queue is backed up
     const maxWorkerQueue = this.deps.settings.queueMaxSize * 2;
-    if (this._queueDepth > maxWorkerQueue) {
+    if (message.actionType !== 'replace' && this._queueDepth > maxWorkerQueue) {
       if (priority < 40) {
         this.deps.observability.onMessageDropped('worker_backpressure');
         return;

@@ -143,6 +143,8 @@ export interface WorkerContentSegment {
 export interface WorkerMessage {
   /** Unique message ID. */
   id: string;
+  /** Source action semantics used for ID-based renderer upserts. */
+  actionType?: 'add' | 'replace';
   /** Plain text content (pre-extracted). */
   text: string;
   /** Width/height estimates (computed on main thread). */

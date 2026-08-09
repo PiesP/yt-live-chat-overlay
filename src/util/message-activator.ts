@@ -127,16 +127,16 @@ export class MessageActivator {
     // will recreate it.
     const translatableText = getTranslatableText(message);
     if (this.translationService.isEnabled && translatableText) {
-      // Capture immutable message id — not the pooled CanvasMessage reference.
-      // Pooled messages can be recycled before the async translation completes,
-      // which would corrupt the new message's rendered output.
-      const capturedId = message.id;
+      // Capture the immutable ingress object, not only its ID. A replacement
+      // action deliberately reuses the same ID, so an ID-only guard would let
+      // the original message's late translation overwrite replacement text.
+      const capturedMessage = message;
       this.translationService
         .translate(translatableText)
         .then((translated) => {
           // Guard: only apply translation if the CanvasMessage hasn't been
-          // recycled and repurposed for a different chat message.
-          if (cm.message.id === capturedId) {
+          // recycled, repurposed, or updated by a replacement action.
+          if (cm.message === capturedMessage) {
             callbacks.onTranslationResult(cm, translated);
           }
         })

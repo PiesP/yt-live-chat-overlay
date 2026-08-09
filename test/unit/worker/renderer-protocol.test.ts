@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 PiesP
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ── Mock browser APIs before module import ───────────────────────────────
 
@@ -130,10 +130,15 @@ function initializeRenderer(configOverrides: Record<string, unknown> = {}): Work
 }
 
 beforeEach(() => {
-  postMessageSpy.mockClear();
+  vi.clearAllMocks();
   // Spy on performance.now again (clearAllMocks removes it)
   vi.spyOn(performance, 'now').mockReturnValue(10000);
   resetWorkerForTests();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -151,6 +156,109 @@ describe('Worker module', () => {
 });
 
 describe('Worker message protocol', () => {
+  it('upserts pending and active replacement messages by id', () => {
+    const renderer = initializeRenderer({ outlineWidthPx: 0 });
+    const internals = renderer as unknown as {
+      pendingQueue: WorkerMessage[];
+      activeMessages: Array<{ id: string; text: string; width: number; content: unknown[] }>;
+      drainQueue(now: number, width: number, height: number): void;
+    };
+    const original = makeWorkerMessage({
+      id: 'replacement',
+      text: 'original',
+      content: [{ type: 'text', content: 'original' }],
+    });
+
+    renderer.handleMessage(makeEvent({ type: 'addMessages', messages: [original] }));
+    renderer.handleMessage(
+      makeEvent({
+        type: 'addMessages',
+        messages: [
+          makeWorkerMessage({
+            id: 'replacement',
+            text: 'pending update',
+            width: 180,
+            actionType: 'replace',
+            content: [{ type: 'text', content: 'pending update' }],
+          }),
+        ],
+      })
+    );
+
+    expect(internals.pendingQueue).toHaveLength(1);
+    expect(internals.pendingQueue[0]).toMatchObject({ text: 'pending update', width: 180 });
+
+    internals.drainQueue(10_000, 640, 360);
+    expect(internals.activeMessages).toHaveLength(1);
+
+    renderer.handleMessage(
+      makeEvent({
+        type: 'addMessages',
+        messages: [
+          makeWorkerMessage({
+            id: 'replacement',
+            text: 'active update',
+            width: 220,
+            actionType: 'replace',
+            content: [{ type: 'text', content: 'active update' }],
+          }),
+        ],
+      })
+    );
+
+    expect(internals.activeMessages).toHaveLength(1);
+    expect(internals.activeMessages[0]).toMatchObject({
+      text: 'active update',
+      width: 220,
+      content: [{ type: 'text', content: 'active update' }],
+    });
+  });
+
+  it('rebuilds lane reservations when an active replacement uses fewer slots', () => {
+    const renderer = initializeRenderer({ outlineWidthPx: 0 });
+    const internals = renderer as unknown as {
+      activeMessages: Array<{ laneIndex: number; laneSlotCount: number }>;
+      speedTierLanes: Map<number, unknown>;
+      laneHeap: Array<[number, number]>;
+      drainQueue(now: number, width: number, height: number): void;
+    };
+    renderer.handleMessage(
+      makeEvent({
+        type: 'addMessages',
+        messages: [makeWorkerMessage({ id: 'resized', height: 60 })],
+      })
+    );
+    internals.drainQueue(10_000, 640, 360);
+    const active = internals.activeMessages[0];
+    expect(active?.laneSlotCount).toBeGreaterThan(1);
+    const oldReservedLanes = Array.from(
+      { length: active?.laneSlotCount ?? 0 },
+      (_, offset) => (active?.laneIndex ?? 0) + offset
+    );
+
+    renderer.handleMessage(
+      makeEvent({
+        type: 'addMessages',
+        messages: [
+          makeWorkerMessage({
+            id: 'resized',
+            height: 20,
+            actionType: 'replace',
+          }),
+        ],
+      })
+    );
+
+    expect(active?.laneSlotCount).toBe(1);
+    expect([...internals.speedTierLanes.keys()]).toEqual([active?.laneIndex]);
+    const availabilityByLane = new Map(
+      internals.laneHeap.map(([laneIndex, availableAt]) => [laneIndex, availableAt])
+    );
+    for (const releasedLane of oldReservedLanes.slice(1)) {
+      expect(availabilityByLane.get(releasedLane)).toBe(10_000);
+    }
+  });
+
   describe('init error case', () => {
     it('posts error when canvas getContext returns null', () => {
       const BadCanvas = class { getContext() { return null; } };
@@ -415,6 +523,120 @@ describe('Worker message protocol', () => {
       renderer.handleMessage(makeEvent({ type: 'updateConfig', config: { opacity: 0.5 } }));
 
       expect(internals.emojiCache.size).toBe(1);
+    });
+
+    it('clears a transferred image failure so eviction can self-fetch immediately', async () => {
+      const renderer = initializeRenderer({ failedEmojiRetryMins: 5 });
+      const internals = renderer as unknown as {
+        emojiCache: {
+          has(url: string): boolean;
+          delete(url: string): boolean;
+        };
+        failedImageFetches: Map<string, number>;
+        prefetchImages: (urls: string[], cache: unknown) => Promise<void>;
+      };
+      const url = 'https://yt3.ggpht.com/recovered-emoji';
+      const transferredBitmap = { width: 10, height: 10, close: vi.fn() };
+      internals.failedImageFetches.set(url, Date.now());
+
+      renderer.handleMessage(
+        makeEvent({
+          type: 'addMessages',
+          messages: [],
+          imageData: [{ url, bitmap: transferredBitmap, target: 'emoji' }],
+        })
+      );
+
+      expect(internals.emojiCache.has(url)).toBe(true);
+      expect(internals.failedImageFetches.has(url)).toBe(false);
+
+      expect(internals.emojiCache.delete(url)).toBe(true);
+      const fetchedBitmap = { width: 10, height: 10, close: vi.fn() };
+      vi.mocked(createImageBitmap).mockResolvedValueOnce(fetchedBitmap as unknown as ImageBitmap);
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+        ok: true,
+        blob: async () => new Blob(['image']),
+      } as Response);
+
+      await internals.prefetchImages([url], internals.emojiCache);
+
+      expect(fetchSpy).toHaveBeenCalledOnce();
+      expect(internals.emojiCache.has(url)).toBe(true);
+    });
+
+    it.each([
+      ['HTTP failure', false],
+      ['decode failure', true],
+    ])('suppresses repeated worker image fetch after %s until TTL expiry', async (_label, ok) => {
+      const renderer = initializeRenderer({ failedEmojiRetryMins: 1 });
+      const internals = renderer as unknown as {
+        emojiCache: unknown;
+        failedImageFetches: Map<string, number>;
+        prefetchImages: (urls: string[], cache: unknown) => Promise<void>;
+      };
+      const url = 'https://yt3.ggpht.com/broken-emoji';
+      const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_000);
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+        ok,
+        blob: async () => new Blob(['image']),
+      } as Response);
+      if (ok) vi.mocked(createImageBitmap).mockRejectedValueOnce(new Error('decode failed'));
+
+      await internals.prefetchImages([url], internals.emojiCache);
+      await internals.prefetchImages([url], internals.emojiCache);
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(internals.failedImageFetches.has(url)).toBe(true);
+
+      nowSpy.mockReturnValue(61_001);
+      await internals.prefetchImages([url], internals.emojiCache);
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it('negative-caches worker image fetch timeouts', async () => {
+      vi.useFakeTimers();
+      const renderer = initializeRenderer({ emojiFetchTimeoutMs: 5_000 });
+      const internals = renderer as unknown as {
+        emojiCache: unknown;
+        failedImageFetches: Map<string, number>;
+        prefetchImages: (urls: string[], cache: unknown) => Promise<void>;
+      };
+      const url = 'https://yt3.ggpht.com/timeout-emoji';
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(
+        (_input, init) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted')));
+          })
+      );
+
+      const prefetch = internals.prefetchImages([url], internals.emojiCache);
+      await vi.advanceTimersByTimeAsync(5_000);
+      await prefetch;
+      await internals.prefetchImages([url], internals.emojiCache);
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(internals.failedImageFetches.has(url)).toBe(true);
+    });
+
+    it('bounds and cleans worker image failure state on config update and destroy', () => {
+      const renderer = initializeRenderer({ failedEmojiRetryMins: 5 });
+      const internals = renderer as unknown as {
+        failedImageFetches: Map<string, number>;
+        recordFailedImageFetch(url: string): void;
+      };
+      vi.spyOn(Date, 'now').mockReturnValue(300_000);
+      for (let i = 0; i <= 500; i++) internals.recordFailedImageFetch(`url-${i}`);
+      expect(internals.failedImageFetches.size).toBeLessThanOrEqual(500);
+
+      internals.failedImageFetches.set('expired', 0);
+      renderer.handleMessage(
+        makeEvent({ type: 'updateConfig', config: { failedEmojiRetryMins: 1 } })
+      );
+      expect(internals.failedImageFetches.has('expired')).toBe(false);
+
+      internals.failedImageFetches.set('destroyed', Date.now());
+      renderer.handleMessage(makeEvent({ type: 'destroy' }));
+      expect(internals.failedImageFetches.size).toBe(0);
     });
 
     it('aborts image prefetch and closes a bitmap that resolves after destroy', async () => {

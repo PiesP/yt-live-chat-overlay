@@ -118,11 +118,26 @@ export class BacklogInjectionController implements Pauseable {
     return msg;
   }
 
-  /** Append messages in arrival order while filtering IDs already queued. */
+  /**
+   * Append messages in arrival order while filtering duplicate add actions.
+   * Replacements update an undelivered entry in place, or are appended when
+   * the prior version was already emitted, so ID dedup never discards them.
+   */
   private appendUniqueMessages(messages: readonly ChatMessage[]): number {
     let added = 0;
     for (const msg of messages) {
-      if (msg.id && this.backlogSeenIds.has(msg.id)) continue;
+      if (msg.id && msg.actionType === 'replace') {
+        let replacedPending = false;
+        for (let i = this.backlogQueueOffset; i < this.backlogQueue.length; i++) {
+          if (this.backlogQueue[i]?.id !== msg.id) continue;
+          this.backlogQueue[i] = msg;
+          replacedPending = true;
+          break;
+        }
+        if (replacedPending) continue;
+      } else if (msg.id && this.backlogSeenIds.has(msg.id)) {
+        continue;
+      }
       this.backlogQueue.push(msg);
       if (msg.id) this.backlogSeenIds.add(msg.id);
       added++;

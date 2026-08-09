@@ -161,6 +161,12 @@ describe('renderer worker protocol guards', () => {
         config: { ...DEFAULT_SETTINGS, textCacheMb: 21 },
       })
     ).toBe(false);
+    expect(
+      isValidControlMessage({
+        ...base,
+        config: { ...DEFAULT_SETTINGS, failedEmojiRetryMins: 61 },
+      })
+    ).toBe(false);
   });
 
   it('rejects malformed init dimensions and non-canvas payloads', () => {

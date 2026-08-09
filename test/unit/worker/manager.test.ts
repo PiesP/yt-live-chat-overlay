@@ -116,7 +116,10 @@ describe('RenderWorkerManager', () => {
           onDimensionsChanged,
         };
 
-        expect(manager.init(canvas, DEFAULT_SETTINGS, overlay as any, 'worker.js')).toBe(false);
+        expect(manager.init(canvas, DEFAULT_SETTINGS, overlay as any, 'worker.js')).toEqual({
+          started: false,
+          canvasTransferred: false,
+        });
         expect(manager.isActive).toBe(false);
         expect(transferControlToOffscreen).not.toHaveBeenCalled();
         expect(onDimensionsChanged).not.toHaveBeenCalled();
@@ -132,10 +135,41 @@ describe('RenderWorkerManager', () => {
         onDimensionsChanged,
       };
 
-      expect(manager.init(canvas, DEFAULT_SETTINGS, overlay as any, 'worker.js')).toBe(true);
+      expect(manager.init(canvas, DEFAULT_SETTINGS, overlay as any, 'worker.js')).toEqual({
+        started: true,
+        canvasTransferred: true,
+      });
       expect(manager.isActive).toBe(true);
       expect(transferControlToOffscreen).toHaveBeenCalledOnce();
       expect(onDimensionsChanged).toHaveBeenCalledOnce();
+    });
+
+    it('reports a transferred canvas when the init post fails', () => {
+      const originalWorker = globalThis.Worker;
+      const terminate = vi.fn();
+      vi.stubGlobal(
+        'Worker',
+        class {
+          postMessage = vi.fn(() => {
+            throw new DOMException('clone failed', 'DataCloneError');
+          });
+          terminate = terminate;
+        }
+      );
+      const transferControlToOffscreen = vi.fn(() => ({ getContext: vi.fn() }));
+      const canvas = { transferControlToOffscreen } as unknown as HTMLCanvasElement;
+      const overlay = {
+        getDimensions: vi.fn(() => ({ width: 640, height: 360 })),
+        onDimensionsChanged: vi.fn(() => vi.fn()),
+      };
+
+      expect(manager.init(canvas, DEFAULT_SETTINGS, overlay as any, 'worker.js')).toEqual({
+        started: false,
+        canvasTransferred: true,
+      });
+      expect(transferControlToOffscreen).toHaveBeenCalledOnce();
+      expect(terminate).toHaveBeenCalledOnce();
+      vi.stubGlobal('Worker', originalWorker);
     });
   });
 
@@ -147,6 +181,38 @@ describe('RenderWorkerManager', () => {
       manager.sendToWorker(msg);
       // With no worker, messages are dropped silently
       expect(deps.observability.onMessageDropped).not.toHaveBeenCalled();
+    });
+
+    it('delivers replacement actions even when worker backpressure drops new messages', async () => {
+      const postMessage = vi.fn();
+      (manager as any).worker = {
+        postMessage,
+        terminate: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      } as unknown as Worker;
+      (manager as any)._queueDepth = deps.settings.queueMaxSize * 2 + 1;
+
+      manager.sendToWorker(
+        {
+          id: 'replacement',
+          actionType: 'replace',
+          timestamp: Date.now(),
+          content: [{ type: 'text', content: 'updated' }],
+          kind: 'chat',
+          authorType: 'normal',
+        } as any,
+        'replacement'
+      );
+      await Promise.resolve();
+
+      expect(deps.observability.onMessageDropped).not.toHaveBeenCalled();
+      expect(postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'addMessages',
+          messages: [expect.objectContaining({ id: 'replacement', actionType: 'replace' })],
+        })
+      );
     });
 
     it('closes transferred bitmaps when the worker is destroyed before flush', async () => {

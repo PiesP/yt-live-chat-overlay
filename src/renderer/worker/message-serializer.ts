@@ -45,6 +45,7 @@ export function serializeWorkerMessage({
 
   return {
     id,
+    ...(message.actionType !== undefined ? { actionType: message.actionType } : {}),
     text: message.text,
     width: dimensions.width,
     height: dimensions.height,

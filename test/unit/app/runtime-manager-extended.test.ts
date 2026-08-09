@@ -61,7 +61,11 @@ describe('RuntimeManager (extended)', () => {
     handleSessionRestart: (reason: 'watchdog' | 'foreground-return' | 'standby-resolved', generation?: number) => void;
     requestManagedRestart: (reason: 'watchdog' | 'foreground-return' | 'standby-resolved') => void;
     computeConnectionStatus: () => string;
-    acceptForRenderer: (msg: { id?: string }) => boolean;
+    acceptForRenderer: (msg: { id?: string; actionType?: 'add' | 'replace' }) => boolean;
+    routeMessages: (msgs: Array<Record<string, unknown>>) => void;
+    renderer: Record<string, unknown> | null;
+    backlogController: { drainPending(): Array<Record<string, unknown>> } | null;
+    _recoveringFromError: boolean;
   };
 
   function createOpts(overrides: { url?: string; settings?: OverlaySettings; valid?: boolean } = {}) {
@@ -237,6 +241,67 @@ describe('RuntimeManager (extended)', () => {
       internals.acceptForRenderer({ id: 'msg-1' });
       const result = internals.acceptForRenderer({ id: 'msg-1' });
       expect(result).toBe(false);
+    });
+
+    it('acceptForRenderer accepts a replacement for an already rendered id', () => {
+      const rm = new RuntimeManager(createOpts());
+      const internals = internalsOf(rm);
+      internals.acceptForRenderer({ id: 'msg-1', actionType: 'add' });
+
+      expect(internals.acceptForRenderer({ id: 'msg-1', actionType: 'replace' })).toBe(true);
+      expect(internals.acceptForRenderer({ id: 'msg-1', actionType: 'add' })).toBe(false);
+    });
+
+    it('acceptForRenderer lets a replacement claim an unseen id before a stale add', () => {
+      const rm = new RuntimeManager(createOpts());
+      const internals = internalsOf(rm);
+
+      expect(internals.acceptForRenderer({ id: 'msg-1', actionType: 'replace' })).toBe(true);
+      expect(internals.acceptForRenderer({ id: 'msg-1', actionType: 'add' })).toBe(false);
+      expect(internals.acceptForRenderer({ id: 'msg-1', actionType: 'replace' })).toBe(true);
+    });
+
+    it.each([
+      ['large backlog', 51, false, 0],
+      ['error recovery', 2, true, 0],
+      ['high utilization', 5, false, 1],
+    ])('preserves a queued replacement through the %s route', (_label, batchSize, recovering, utilization) => {
+      vi.useFakeTimers();
+      const rm = new RuntimeManager(createOpts({ settings: makeDefaults({ backlogMode: 'full' }) }));
+      const internals = internalsOf(rm);
+      internals.settings = makeDefaults({ backlogMode: 'full' });
+      const addMessage = vi.fn();
+      internals.renderer = {
+        addMessage,
+        setStandbyStatus: vi.fn(),
+        getLaneUtilization: vi.fn(() => utilization),
+        laneCount: 24,
+        observability: undefined,
+        destroy: vi.fn(),
+      };
+
+      const makeBatch = (replacement: boolean) =>
+        Array.from({ length: batchSize }, (_, index) => ({
+          id: index === 1 ? 'target' : `${replacement ? 'next' : 'initial'}-${index}`,
+          text: index === 1 && replacement ? 'replacement' : `message-${index}`,
+          kind: 'text',
+          timestamp: index,
+          ...(index === 1 && replacement ? { actionType: 'replace' as const } : {}),
+        }));
+
+      internals._recoveringFromError = recovering;
+      internals.routeMessages(makeBatch(false));
+      internals._recoveringFromError = recovering;
+      internals.routeMessages(makeBatch(true));
+
+      const target = internals.backlogController
+        ?.drainPending()
+        .find((message) => message.id === 'target');
+      expect(target).toMatchObject({ text: 'replacement', actionType: 'replace' });
+      expect(addMessage).not.toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'target', text: 'replacement' })
+      );
+      rm.destroy();
     });
 
     it('acceptForRenderer always accepts messages without id', () => {

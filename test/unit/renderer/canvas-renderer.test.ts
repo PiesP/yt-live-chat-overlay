@@ -2,6 +2,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, it, expect, vi, beforeEach } from 'vitest';
 import { CanvasRenderer } from '@renderer/canvas-renderer';
+import { RenderWorkerManager } from '@renderer/worker/manager';
 import type { CanvasMessage } from '@renderer/constants';
 import { Overlay } from '@app/overlay';
 import type { ChatMessage, OverlaySettings } from '@app-types';
@@ -81,6 +82,28 @@ describe('CanvasRenderer', () => {
     expect(() => new CanvasRenderer(overlay, settings)).not.toThrow();
   });
 
+  it('replaces a transferred canvas before main-thread fallback', () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    vi.spyOn(overlay, 'getContainer').mockReturnValue(container);
+    vi.spyOn(overlay, 'getDimensions').mockReturnValue({ width: 640, height: 360 });
+    const transferredGetContext = vi.fn(() => null);
+    const initSpy = vi.spyOn(RenderWorkerManager.prototype, 'init').mockImplementation((canvas) => {
+      canvas.getContext = transferredGetContext as typeof canvas.getContext;
+      return { started: false, canvasTransferred: true } as never;
+    });
+
+    const renderer = new CanvasRenderer(overlay, makeSettings());
+    const internals = renderer as unknown as { canvas: HTMLCanvasElement | null };
+    const [transferredCanvas] = initSpy.mock.calls[0] ?? [];
+
+    expect(internals.canvas).not.toBe(transferredCanvas);
+    expect(container.querySelectorAll('canvas')).toHaveLength(1);
+    expect(transferredCanvas?.isConnected).toBe(false);
+    expect(transferredGetContext).not.toHaveBeenCalled();
+    renderer.destroy();
+  });
+
   it('destroys without error', () => {
     const settings = makeSettings();
     const renderer = new CanvasRenderer(overlay, settings);
@@ -91,6 +114,63 @@ describe('CanvasRenderer', () => {
     const settings = makeSettings();
     const renderer = new CanvasRenderer(overlay, settings);
     expect(typeof renderer.addMessage).toBe('function');
+    renderer.destroy();
+  });
+
+  it('replaces a pending message with the same id instead of duplicating it', () => {
+    const renderer = new CanvasRenderer(overlay, makeSettings());
+    const internals = renderer as unknown as {
+      pendingQueue: { toArray(): ChatMessage[] };
+    };
+    renderer.addMessage(makeMessage('replace-pending', 'original'));
+
+    renderer.addMessage({
+      ...makeMessage('replace-pending', 'updated'),
+      actionType: 'replace',
+    });
+
+    expect(internals.pendingQueue.toArray()).toHaveLength(1);
+    expect(internals.pendingQueue.toArray()[0]?.text).toBe('updated');
+    renderer.destroy();
+  });
+
+  it('updates active message content and geometry for a replacement', () => {
+    const renderer = new CanvasRenderer(overlay, makeSettings({ fontSize: 16 }));
+    const original = makeMessage('replace-active', 'old');
+    const active = {
+      message: original,
+      renderMessage: original,
+      startTime: 0,
+      fadeStartTime: 0,
+      duration: 5000,
+      invDuration: 0.0002,
+      width: 24,
+      height: 20,
+      startX: 640,
+      x: 500,
+      y: 20,
+      pausedDuration: 0,
+      laneIndex: 0,
+      staggerDelay: 0,
+      speedTier: 1,
+      ghostText: 'old',
+      laneArrayIndices: [],
+      translatedText: 'stale translation',
+    } as CanvasMessage;
+    const internals = renderer as unknown as { activeMessages: CanvasMessage[] };
+    internals.activeMessages.push(active);
+
+    renderer.addMessage({
+      ...makeMessage('replace-active', 'updated active content'),
+      actionType: 'replace',
+    });
+
+    expect(internals.activeMessages).toHaveLength(1);
+    expect(active.message.text).toBe('updated active content');
+    expect(active.renderMessage.text).toBe('updated active content');
+    expect(active.ghostText).toBe('updated active content');
+    expect(active.translatedText).toBeNull();
+    expect(active.width).toBeGreaterThan(24);
     renderer.destroy();
   });
 

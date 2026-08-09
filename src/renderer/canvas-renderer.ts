@@ -58,12 +58,15 @@ import {
 } from '@renderer/canvas/render-pipeline';
 import {
   drawRoundRect,
+  getDisplayText,
   toSharedContentSegments,
   warmTextBitmapCache,
 } from '@renderer/canvas/shared';
 import { getSpeedTier } from '@renderer/canvas/speed-tier';
+import { desaturateColor } from '@renderer/color-utils';
 import {
   type CanvasMessage,
+  FAR_LAYER_DESATURATION_FACTOR,
   GRADIENT_CACHE_MAX,
   IDLE_GRACE_PERIOD_MS,
   OPACITY_BUCKET_COUNT,
@@ -404,7 +407,14 @@ export class CanvasRenderer extends RendererBase {
       getEffectiveSpeedPxPerSec: () => this.getEffectiveSpeedPxPerSec(),
     });
     this.workerManager.setFatalErrorCallback((reason) => this.fallbackToMainThread(reason));
-    const useWorker = this.workerManager.init(canvas, settings, overlay);
+    const workerInit = this.workerManager.init(canvas, settings, overlay);
+    const useWorker = workerInit.started;
+
+    if (!useWorker && workerInit.canvasTransferred && !this.replaceCanvas()) {
+      log.warn('renderer.canvas.transfer-recovery-failed', {
+        reason: 'could-not-replace-transferred-canvas',
+      });
+    }
 
     // Wire the Worker's live-region text snippets to the overlay's
     // aria-live region so screen readers can access chat content when
@@ -417,12 +427,15 @@ export class CanvasRenderer extends RendererBase {
 
     const dims = overlay.getDimensions();
     if (!useWorker) {
-      this.ctx = canvas.getContext('2d', { desynchronized: true });
-      if (!this.ctx) {
+      const fallbackCanvas = this.canvas;
+      if (!workerInit.canvasTransferred && fallbackCanvas) {
+        this.ctx = fallbackCanvas.getContext('2d', { desynchronized: true });
+      }
+      if (!this.ctx || !fallbackCanvas) {
         log.warn('renderer.canvas.get-context-failed', {
           reason: 'no-2d-context',
         });
-      } else if (!canvas.isConnected) {
+      } else if (!fallbackCanvas.isConnected) {
         log.warn('renderer.canvas.not-connected', {
           reason: 'not-in-dom',
         });
@@ -437,16 +450,18 @@ export class CanvasRenderer extends RendererBase {
       // is added in the future, it must also listen for
       // webglcontextlost/webglcontextrestored with resource re-initialization
       // (shader recompilation, buffer re-upload, texture restore).
-      canvas.addEventListener('contextlost', (e: Event) => {
-        e.preventDefault();
-        this.ctx = null;
-        log.warn('renderer.canvas.context-lost', {
-          reason: 'initial-create',
+      if (!workerInit.canvasTransferred && fallbackCanvas) {
+        fallbackCanvas.addEventListener('contextlost', (e: Event) => {
+          e.preventDefault();
+          this.ctx = null;
+          log.warn('renderer.canvas.context-lost', {
+            reason: 'initial-create',
+          });
         });
-      });
-      canvas.addEventListener('contextrestored', () => this.handleContextRestored());
+        fallbackCanvas.addEventListener('contextrestored', () => this.handleContextRestored());
 
-      this.applyDevicePixelRatio(dims);
+        this.applyDevicePixelRatio(dims);
+      }
     }
 
     this.overlayDimensionsUnsubscribe = overlay.onDimensionsChanged((d) => {
@@ -642,6 +657,16 @@ export class CanvasRenderer extends RendererBase {
   // ── Message ingress ──────────────────────────────────────────────────
 
   addMessage(message: ChatMessage): void {
+    if (message.actionType === 'replace' && message.id) {
+      if (this.workerManager.isActive) {
+        this.workerManager.sendToWorker(message, message.id);
+        this.prefetchAndTranslateForWorker(message, message.id);
+        this.lastRenderActivity = performance.now();
+        return;
+      }
+      if (this.replaceMainThreadMessage(message)) return;
+    }
+
     if (!this.isMessageAllowed(message)) return;
 
     // When the Worker owns the OffscreenCanvas, forward the message
@@ -664,6 +689,83 @@ export class CanvasRenderer extends RendererBase {
     // collision detection run during renderFrame.  The placed message
     // is drawn by the main-thread canvas pipeline.
     this.enqueueMessage(message, true);
+  }
+
+  /** Upsert a same-ID replacement already owned by the main-thread renderer. */
+  private replaceMainThreadMessage(message: ChatMessage): boolean {
+    const id = message.id;
+    if (!id) return false;
+
+    const pending = this.pendingQueue.toArray().find((entry) => entry.id === id);
+    if (pending) {
+      this.pendingQueue.removeAll([pending]);
+      this.dimensionCache.delete(id);
+      this.enqueueMessage(message, false);
+      return true;
+    }
+
+    const active = this.activeMessages.find((entry) => entry.message.id === id);
+    if (!active) return false;
+
+    this.dimensionCache.delete(id);
+    this.imageFetchManager.prefetchImages(message);
+    this.collectSourceLanguageSample(message);
+    this.pendingTranslations = this.pendingTranslations
+      .slice(this.pendingTranslationReadIdx)
+      .filter((entry) => entry.msg !== active);
+    this.pendingTranslationReadIdx = 0;
+
+    active.message = message;
+    active.renderMessage = message;
+    active.ghostText = getDisplayText(message.content);
+    active.translatedText = null;
+    delete active.translatedRenderMessage;
+    delete active.translationHeight;
+
+    if (
+      this.settings.depthLayersEnabled &&
+      active.speedTier === SPEED_TIER.FAR &&
+      message.userColor
+    ) {
+      active.desaturatedUserColor = desaturateColor(
+        message.userColor,
+        FAR_LAYER_DESATURATION_FACTOR
+      );
+      active.renderMessage = { ...message, userColor: active.desaturatedUserColor };
+    } else {
+      delete active.desaturatedUserColor;
+    }
+
+    const geometry = this.estimateTranslatedDimensions(message, null);
+    const geometryChanged = this.applyMessageGeometry(active, geometry);
+    this.requestReplacementTranslation(active, message);
+    if (geometryChanged) {
+      const dimensions = this.overlay.getDimensions();
+      if (dimensions) {
+        this.laneAllocator.reset(dimensions);
+        this.reflowActiveMessages(dimensions);
+      }
+    }
+    this.lastRenderActivity = performance.now();
+    this.resumeRenderLoop();
+    return true;
+  }
+
+  /** Translate an active replacement while rejecting stale same-ID results. */
+  private requestReplacementTranslation(active: CanvasMessage, message: ChatMessage): void {
+    const translatableText = getTranslatableText(message);
+    if (!this.translationService.isEnabled || !translatableText) return;
+    const generation = this.translationConfigurationGeneration;
+    this.translationService
+      .translate(translatableText)
+      .then((translated) => {
+        if (active.message === message) {
+          this.queueTranslationResult(active, translated, generation);
+        }
+      })
+      .catch(() => {
+        // Silently ignore individual translation failures.
+      });
   }
 
   /**
@@ -1743,6 +1845,7 @@ export class CanvasRenderer extends RendererBase {
       this.translationService
         .translate(translatableText)
         .then((translated) => {
+          if (!this.workerManager.isCurrentMessage(msgId, message)) return;
           this.workerManager.sendTranslation(
             msgId,
             translated,
@@ -2171,6 +2274,7 @@ export class CanvasRenderer extends RendererBase {
     newCanvas.style.cssText = CANVAS_CSS;
     newCanvas.setAttribute('aria-hidden', 'true');
     container.appendChild(newCanvas);
+    this.canvas = newCanvas;
 
     const ctx = newCanvas.getContext('2d', { desynchronized: true });
     if (!ctx) return false;
@@ -2183,7 +2287,6 @@ export class CanvasRenderer extends RendererBase {
       });
     });
     newCanvas.addEventListener('contextrestored', () => this.handleContextRestored());
-    this.canvas = newCanvas;
     this.ctx = ctx;
     const dpr = window.devicePixelRatio || 1;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);

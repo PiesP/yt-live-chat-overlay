@@ -213,7 +213,7 @@ describe('MessageActivator', () => {
 
   // ── Translation ID guard ────────────────────────────────────────────────
 
-  describe('translation callback ID guard', () => {
+  describe('translation callback identity guard', () => {
     it('triggers translate when translationService is enabled', async () => {
       const svc = makeMockTranslationService(true);
       svc.translate.mockResolvedValue('번역됨');
@@ -279,6 +279,21 @@ describe('MessageActivator', () => {
       // onTranslationResult should NOT have been called because cm.message.id
       // now points to msg-2 ('msg-2') !== captured 'msg-1'
       expect(callbacks1.onTranslationResult).not.toHaveBeenCalled();
+    });
+
+    it('rejects a stale translation after a same-ID replacement', async () => {
+      const svc = makeMockTranslationService(true);
+      svc.translate.mockResolvedValue('stale translation');
+      const act = new MessageActivator(svc, makeConfig());
+      const original = makeChatMessage({ id: 'same-id', text: 'Original' });
+      const callbacks = makeCallbacks();
+
+      act.activate(original, 1000, 200, 30, 400, callbacks);
+      const active = (callbacks.onActivated as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+      active.message = makeChatMessage({ id: 'same-id', text: 'Replacement' });
+      await Promise.resolve();
+
+      expect(callbacks.onTranslationResult).not.toHaveBeenCalled();
     });
   });
 });

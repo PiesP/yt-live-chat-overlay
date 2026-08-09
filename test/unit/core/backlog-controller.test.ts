@@ -32,6 +32,7 @@ function makeMsg(
     kind: "text" | "superchat" | "membership";
     text: string;
     timestamp: number;
+    actionType: "add" | "replace";
   }> = {}
 ) {
   return {
@@ -54,6 +55,7 @@ function makeMsg(
     fontSizeScale: 1,
     fontWeight: "normal" as const,
     content: [{ type: "text" as const, text: "hello world" }],
+    actionType: overrides.actionType,
   } as unknown as import("@app-types").ChatMessage;
 }
 
@@ -153,6 +155,44 @@ describe("BacklogInjectionController", () => {
       controller.startBacklogInjection([makeMsg({ id: "b" }), makeMsg({ id: "c" })]);
 
       expect(controller.drainPending().map((message) => message.id)).toEqual(["b", "c"]);
+    });
+
+    it("updates a queued message in place when its replacement arrives", () => {
+      controller.startBacklogInjection([
+        makeMsg({ id: "first" }),
+        makeMsg({ id: "target", text: "original" }),
+        makeMsg({ id: "last" }),
+      ]);
+
+      controller.startBacklogInjection([
+        makeMsg({ id: "target", text: "replacement", actionType: "replace" }),
+      ]);
+
+      expect(
+        controller.drainPending().map((message) => ({ id: message.id, text: message.text }))
+      ).toEqual([
+        { id: "target", text: "replacement" },
+        { id: "last", text: "hello world" },
+      ]);
+    });
+
+    it("queues a replacement after the original message has already been emitted", () => {
+      const emitted: string[] = [];
+      controller.onBacklogMessage = (message) => emitted.push(message.text);
+      controller.startBacklogInjection([
+        makeMsg({ id: "target", text: "original" }),
+        makeMsg({ id: "last" }),
+      ]);
+
+      controller.startBacklogInjection([
+        makeMsg({ id: "target", text: "replacement", actionType: "replace" }),
+      ]);
+
+      expect(emitted).toEqual(["original"]);
+      expect(controller.drainPending().map((message) => message.text)).toEqual([
+        "hello world",
+        "replacement",
+      ]);
     });
 
     it("preserves unique pending order when paused batches are merged", () => {
