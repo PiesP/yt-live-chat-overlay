@@ -28,6 +28,7 @@ describe('parseAnyColor', () => {
     it('parses 4-digit hex (treated as short)', () => {
       // 4-digit hex: expand each char
       expect(parseAnyColor('#F00F')).toEqual({ r: 255, g: 0, b: 0 });
+      expect(parseAnyColor('#1234')).toEqual({ r: 17, g: 34, b: 51 });
     });
 
     it('parses 8-digit hex (treated as long)', () => {
@@ -42,6 +43,12 @@ describe('parseAnyColor', () => {
 
     it('returns null for invalid hex', () => {
       expect(parseAnyColor('#GGGGGG')).toBeNull();
+      expect(parseAnyColor('#G00')).toBeNull();
+      expect(parseAnyColor('#0G0')).toBeNull();
+      expect(parseAnyColor('#00G')).toBeNull();
+      expect(parseAnyColor('#G00F')).toBeNull();
+      expect(parseAnyColor('#0G0F')).toBeNull();
+      expect(parseAnyColor('#00GF')).toBeNull();
     });
 
     it('handles black and white', () => {
@@ -158,6 +165,12 @@ describe('computeReadableTextColor', () => {
     const result = computeReadableTextColor('#808080');
     expect(result).toBe('#ffffff');
   });
+
+  it('uses every RGB channel when classifying colors near the luminance boundary', () => {
+    expect(computeReadableTextColor('#0AD85F')).toBe('#000000');
+    expect(computeReadableTextColor('#D90AFA')).toBe('#ffffff');
+    expect(computeReadableTextColor('#48D70A')).toBe('#000000');
+  });
 });
 
 // ── resolveSuperChatRgb ───────────────────────────────────────────────
@@ -263,6 +276,8 @@ describe('desaturateColor', () => {
 
   it('handles 3-digit short hex', () => {
     expect(desaturateColor('#F00', 0)).toBe('rgb(255,0,0)');
+    expect(desaturateColor('#0F0', 0)).toBe('rgb(0,255,0)');
+    expect(desaturateColor('#00F', 0)).toBe('rgb(0,0,255)');
   });
 
   it('handles rgb() format', () => {

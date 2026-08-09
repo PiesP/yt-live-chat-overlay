@@ -121,6 +121,12 @@ beforeEach(() => {
 });
 
 describe('renderer worker protocol guards', () => {
+  it('rejects non-record, missing, non-string, and unknown message types', () => {
+    for (const value of [null, undefined, [], 'init', {}, { type: 1 }, { type: 'unknown' }]) {
+      expect(isValidControlMessage(value)).toBe(false);
+    }
+  });
+
   it('accepts a valid init message with a canvas-like transferable', () => {
     expect(
       isValidControlMessage({
@@ -190,6 +196,8 @@ describe('renderer worker protocol guards', () => {
     for (const dpr of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, '2']) {
       expect(isValidControlMessage({ ...base, dpr })).toBe(false);
     }
+    expect(isValidControlMessage({ ...base, width: 0 })).toBe(false);
+    expect(isValidControlMessage({ ...base, height: 0 })).toBe(false);
   });
 
   it('accepts manager messages through the guard and renderer', async () => {
@@ -279,6 +287,18 @@ describe('renderer worker protocol guards', () => {
     expect(
       isValidControlMessage({ type: 'updateTranslation', id: 'message', translatedText: 1 })
     ).toBe(false);
+    for (const id of [1, '']) {
+      expect(
+        isValidControlMessage({
+          type: 'updateTranslation',
+          id,
+          translatedText: 'text',
+          width: 180,
+          height: 52,
+          translationHeight: 18,
+        })
+      ).toBe(false);
+    }
     for (const geometry of [
       { width: 0, height: 52, translationHeight: 18 },
       { width: 180, height: Number.NaN, translationHeight: 18 },
@@ -300,6 +320,20 @@ describe('renderer worker protocol guards', () => {
     expect(isValidControlMessage({ type: 'setUserPaused', paused: false })).toBe(true);
     expect(isValidControlMessage({ type: 'setUserPaused', paused: 'false' })).toBe(false);
     expect(isValidControlMessage({ type: 'setUserPaused' })).toBe(false);
+  });
+
+  it('accepts only explicit booleans for renderer pause messages', () => {
+    expect(isValidControlMessage({ type: 'setPaused', paused: true })).toBe(true);
+    expect(isValidControlMessage({ type: 'setPaused', paused: false })).toBe(true);
+    for (const paused of [undefined, null, 0, 1, 'false']) {
+      expect(isValidControlMessage({ type: 'setPaused', paused })).toBe(false);
+    }
+  });
+
+  it('accepts stateless control messages', () => {
+    for (const type of ['clearState', 'destroy', 'ping']) {
+      expect(isValidControlMessage({ type })).toBe(true);
+    }
   });
 
   it('rejects prototype-like keys in config updates', () => {
@@ -332,6 +366,11 @@ describe('renderer worker protocol guards', () => {
     expect(isValidControlMessage({ type: 'updateConfig', config: { queueMaxSize: 1001 } })).toBe(
       false
     );
+    expect(isValidControlMessage({ type: 'updateConfig', config: null })).toBe(false);
+    expect(isValidControlMessage({ type: 'updateConfig', config: { emojiCacheMb: '8' } })).toBe(
+      false
+    );
+    expect(isValidControlMessage({ type: 'updateConfig', config: { opacity: -0.1 } })).toBe(false);
   });
 
   it('accepts only finite supported lane-density factors', () => {
@@ -366,5 +405,34 @@ describe('renderer worker protocol guards', () => {
     expect(
       isValidControlMessage({ type: 'addMessages', messages: Array(1001).fill(message) })
     ).toBe(false);
+  });
+
+  it('rejects malformed addMessages containers and required fields', () => {
+    const message = {
+      id: 'message',
+      text: 'hello',
+      width: 100,
+      height: 20,
+      priority: 0,
+    };
+
+    for (const messages of [undefined, null, {}, 'message']) {
+      expect(isValidControlMessage({ type: 'addMessages', messages })).toBe(false);
+    }
+    for (const invalidMessage of [
+      null,
+      { ...message, id: '' },
+      { ...message, id: 1 },
+      { ...message, text: 1 },
+      { ...message, width: -1 },
+      { ...message, width: Number.NaN },
+      { ...message, height: -1 },
+      { ...message, height: Number.POSITIVE_INFINITY },
+      { ...message, priority: Number.NaN },
+    ]) {
+      expect(isValidControlMessage({ type: 'addMessages', messages: [invalidMessage] })).toBe(
+        false
+      );
+    }
   });
 });
