@@ -525,6 +525,45 @@ describe('Worker message protocol', () => {
       expect(internals.emojiCache.size).toBe(1);
     });
 
+    it('clears a transferred image failure so eviction can self-fetch immediately', async () => {
+      const renderer = initializeRenderer({ failedEmojiRetryMins: 5 });
+      const internals = renderer as unknown as {
+        emojiCache: {
+          has(url: string): boolean;
+          delete(url: string): boolean;
+        };
+        failedImageFetches: Map<string, number>;
+        prefetchImages: (urls: string[], cache: unknown) => Promise<void>;
+      };
+      const url = 'https://yt3.ggpht.com/recovered-emoji';
+      const transferredBitmap = { width: 10, height: 10, close: vi.fn() };
+      internals.failedImageFetches.set(url, Date.now());
+
+      renderer.handleMessage(
+        makeEvent({
+          type: 'addMessages',
+          messages: [],
+          imageData: [{ url, bitmap: transferredBitmap, target: 'emoji' }],
+        })
+      );
+
+      expect(internals.emojiCache.has(url)).toBe(true);
+      expect(internals.failedImageFetches.has(url)).toBe(false);
+
+      expect(internals.emojiCache.delete(url)).toBe(true);
+      const fetchedBitmap = { width: 10, height: 10, close: vi.fn() };
+      vi.mocked(createImageBitmap).mockResolvedValueOnce(fetchedBitmap as unknown as ImageBitmap);
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+        ok: true,
+        blob: async () => new Blob(['image']),
+      } as Response);
+
+      await internals.prefetchImages([url], internals.emojiCache);
+
+      expect(fetchSpy).toHaveBeenCalledOnce();
+      expect(internals.emojiCache.has(url)).toBe(true);
+    });
+
     it.each([
       ['HTTP failure', false],
       ['decode failure', true],

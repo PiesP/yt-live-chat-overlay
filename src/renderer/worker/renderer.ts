@@ -571,7 +571,12 @@ export class WorkerRenderer {
                     : target === 'sticker'
                       ? this.stickerCache
                       : this.emojiCache;
-                cache.set(url, bitmap);
+                if (cache.set(url, bitmap)) {
+                  // A main-thread transfer proves the URL is healthy. Remove
+                  // any earlier Worker self-fetch failure so a later cache
+                  // eviction can retry immediately instead of waiting for TTL.
+                  this.failedImageFetches.delete(url);
+                }
               }
             }
             for (const m of msgs) this.enqueueMessage(m);
