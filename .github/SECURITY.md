@@ -70,7 +70,9 @@ The GitHub workflow remains disabled unless the repository variable
 Actions secret is configured. It runs without a severity failure threshold
 during the advisory rollout. Pull-request scans are limited to trusted
 same-repository, non-Dependabot branches; manual dispatch runs a standard
-full-repository scan.
+full-repository scan. Findings are advisory, while input/runtime errors and
+partial or unknown coverage still fail the job. CI sends findings to GitHub code
+scanning and retains only manifest and coverage metadata for seven days.
 
 Dependencies retain the repository's cooling window, trust policy, approved
 build-script list, and registry-source restrictions. Do not weaken those

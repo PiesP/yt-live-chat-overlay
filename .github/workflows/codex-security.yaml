@@ -140,14 +140,14 @@ jobs:
           sha: ${{ github.event.pull_request.head.sha || github.sha }}
           category: codex-security-advisory
 
-      - name: Upload private scan artifacts
+      - name: Preserve scan metadata
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: codex-security-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            ${{ runner.temp }}/codex-security-results/
-            ${{ runner.temp }}/codex-security-result.json
+            ${{ runner.temp }}/codex-security-results/scan-manifest.json
+            ${{ runner.temp }}/codex-security-results/coverage.json
           if-no-files-found: warn
           retention-days: 7
           compression-level: 9
