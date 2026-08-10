@@ -408,6 +408,7 @@ export const SETTINGS_UI_STYLES = `
       /* Row fields */
       .yt-chat-overlay-settings-field {
         display: flex;
+        flex-wrap: wrap;
         align-items: center;
         justify-content: space-between;
         gap: ${spacing.md}px;
@@ -735,6 +736,7 @@ export const SETTINGS_UI_STYLES = `
       /* Range slider (dual: slider + number) */
       .yt-chat-overlay-settings-range {
         display: flex;
+        flex-wrap: wrap;
         align-items: center;
         gap: ${spacing.sm}px;
         padding: 6px 0;
@@ -779,14 +781,12 @@ export const SETTINGS_UI_STYLES = `
       /* Inline validation error */
       .yt-chat-overlay-settings-field-error {
         display: block;
+        flex-basis: 100%;
+        min-height: 1lh;
         font-size: ${typography.fontSize.xs};
         color: ${uiColors.danger};
         margin-top: ${spacing.xxs}px;
-        animation: yt-overlay-error-fade 3s ease-out forwards;
-      }
-      @keyframes yt-overlay-error-fade {
-        0%, 70% { opacity: 1; }
-        100% { opacity: 0; }
+        text-align: end;
       }
       /* Disabled-field helper hint */
       .yt-chat-overlay-settings-field-hint {
@@ -874,7 +874,7 @@ export const SETTINGS_UI_STYLES = `
         color: ${uiColors.textMuted};
         font-size: ${typography.fontSize.xs};
         cursor: pointer;
-        transition: all ${animDuration.normal} ${SETTINGS_UI_DESIGN.motion.easing};
+        transition: background-color ${animDuration.normal} ${SETTINGS_UI_DESIGN.motion.easing}, border-color ${animDuration.normal} ${SETTINGS_UI_DESIGN.motion.easing}, color ${animDuration.normal} ${SETTINGS_UI_DESIGN.motion.easing};
         white-space: nowrap;
         text-wrap: nowrap;
         user-select: none;
@@ -917,6 +917,24 @@ export const SETTINGS_UI_STYLES = `
       /* Font panel label override — vertical alignment for chip/weight containers */
       .yt-chat-overlay-settings-field--top-align {
         align-items: flex-start;
+      }
+
+      /* Reflow translated controls instead of truncating their labels. */
+      @media (max-width: 480px) {
+        .yt-chat-overlay-settings-tabs {
+          flex-wrap: wrap;
+        }
+        .yt-chat-overlay-settings-tab {
+          flex: 1 1 50%;
+          min-width: 0;
+        }
+        .yt-chat-overlay-settings-actions {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .yt-chat-overlay-settings-actions button {
+          inline-size: 100%;
+        }
       }
 
       /* ── Accessibility: reduced motion ── */

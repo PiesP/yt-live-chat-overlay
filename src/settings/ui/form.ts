@@ -135,6 +135,16 @@ function domField(labelText: string, control: HTMLElement, _id?: string): HTMLLa
   return label;
 }
 
+function createFieldErrorSlot(input: HTMLInputElement): HTMLSpanElement {
+  const error = document.createElement('span');
+  error.className = 'yt-chat-overlay-settings-field-error';
+  error.id = nextFieldId(`error-${input.name}`);
+  error.dataset.for = input.name;
+  error.setAttribute('aria-live', 'polite');
+  error.setAttribute('aria-atomic', 'true');
+  return error;
+}
+
 function domSection(titleText: string): HTMLDivElement {
   const sec = domDiv('yt-chat-overlay-settings-section');
   const title = document.createElement('h3');
@@ -378,7 +388,6 @@ function patchOutline(partial: Record<string, unknown>, patch: Record<string, un
 export class SettingsUiForm {
   private modal: HTMLDialogElement | null = null;
   private isUpdating = false;
-  private errorDismissTimeouts: ReturnType<typeof setTimeout>[] = [];
 
   // Track event listeners added to the modal so they can be removed before
   // re-adding on language change (which calls rebuildModalContent → setModal).
@@ -398,20 +407,12 @@ export class SettingsUiForm {
     if (modal) {
       this.bindNumberInputKeys(modal);
       this.bindAriaInvalidSync(modal);
-    } else {
-      this.clearErrorDismissTimeouts();
     }
     log.debug('Modal set', { attached: modal !== null });
   }
 
   destroy(): void {
-    this.clearErrorDismissTimeouts();
     this.modal = null;
-  }
-
-  private clearErrorDismissTimeouts(): void {
-    for (const t of this.errorDismissTimeouts) clearTimeout(t);
-    this.errorDismissTimeouts = [];
   }
 
   /**
@@ -487,6 +488,9 @@ export class SettingsUiForm {
           ? input.matches(':user-invalid')
           : input.matches(':invalid') || !input.checkValidity();
         input.setAttribute('aria-invalid', String(isInvalid));
+        if (!isInvalid && input instanceof HTMLInputElement) {
+          this.clearFieldError(input);
+        }
       }
     };
     const blurHandler = (event: Event): void => {
@@ -641,7 +645,9 @@ export class SettingsUiForm {
           def.key as RootScalarSettingKey | Exclude<OutlineSettingKey, 'enabled'>
         );
         if (def.title) input.title = t(def.title);
-        return domField(t(def.label), input, inputId);
+        const field = domField(t(def.label), input, inputId);
+        field.appendChild(createFieldErrorSlot(input));
+        return field;
       }
       case 'range': {
         const container = domDiv('yt-chat-overlay-settings-range');
@@ -687,6 +693,7 @@ export class SettingsUiForm {
           slider.setAttribute('aria-valuenow', slider.value);
           slider.setAttribute('aria-valuetext', formatValue(val));
           numberInput.value = slider.value;
+          numberInput.dispatchEvent(new Event('input', { bubbles: true }));
         });
         numberInput.addEventListener('input', () => {
           slider.value = numberInput.value;
@@ -700,6 +707,7 @@ export class SettingsUiForm {
 
         container.appendChild(domField(t(def.label), slider, sliderId));
         container.appendChild(numberInput);
+        container.appendChild(createFieldErrorSlot(numberInput));
         return container;
       }
       case 'select': {
@@ -787,13 +795,16 @@ export class SettingsUiForm {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'yt-chat-overlay-settings-weight-toggle-btn';
+      btn.setAttribute('aria-pressed', 'false');
       btn.dataset.value = value;
       btn.textContent = t(label);
       btn.addEventListener('click', () => {
         container.querySelectorAll('.yt-chat-overlay-settings-weight-toggle-btn').forEach((b) => {
           b.classList.remove('active');
+          b.setAttribute('aria-pressed', 'false');
         });
         btn.classList.add('active');
+        btn.setAttribute('aria-pressed', 'true');
         // Fire change event for live preview
         container.dispatchEvent(new Event('change', { bubbles: true }));
       });
@@ -1159,8 +1170,10 @@ export class SettingsUiForm {
     for (const btn of buttons) {
       if (btn.dataset.value === settings.fontWeight) {
         btn.classList.add('active');
+        btn.setAttribute('aria-pressed', 'true');
       } else {
         btn.classList.remove('active');
+        btn.setAttribute('aria-pressed', 'false');
       }
     }
   }
@@ -1352,40 +1365,22 @@ export class SettingsUiForm {
 
   private showFieldError(input: HTMLInputElement, message: string): void {
     if (!this.modal) return;
-    // Remove any existing error (search by input name, not parentElement)
-    if (input.name) {
-      this.modal
-        .querySelectorAll(`.yt-chat-overlay-settings-field-error[data-for="${input.name}"]`)
-        .forEach((el) => {
-          el.remove();
-        });
-    }
-
-    const errorId = nextFieldId(`error-${input.name}`);
-    const error = document.createElement('span');
-    error.className = 'yt-chat-overlay-settings-field-error';
-    error.id = errorId;
-    error.setAttribute('role', 'alert');
-    error.setAttribute('aria-live', 'polite');
-    if (input.name) error.dataset.for = input.name;
+    const error = this.modal.querySelector<HTMLElement>(
+      `.yt-chat-overlay-settings-field-error[data-for="${input.name}"]`
+    );
+    if (!error) return;
     error.textContent = message;
-    input.insertAdjacentElement('afterend', error);
-    // Link error to input for screen readers
-    input.setAttribute('aria-errormessage', errorId);
+    input.setAttribute('aria-errormessage', error.id);
     input.setAttribute('aria-invalid', 'true');
+  }
 
-    // Auto-dismiss after 3s
-    const ERROR_DISMISS_MS = 3000;
-    const timer = setTimeout(() => {
-      error.remove();
-      // Clear aria-errormessage when error is dismissed
-      if (input.getAttribute('aria-errormessage') === errorId) {
-        input.removeAttribute('aria-errormessage');
-        input.setAttribute('aria-invalid', 'false');
-      }
-      this.errorDismissTimeouts = this.errorDismissTimeouts.filter((t) => t !== timer);
-    }, ERROR_DISMISS_MS);
-    this.errorDismissTimeouts.push(timer);
+  private clearFieldError(input: HTMLInputElement): void {
+    if (!this.modal || !input.name) return;
+    const error = this.modal.querySelector<HTMLElement>(
+      `.yt-chat-overlay-settings-field-error[data-for="${input.name}"]`
+    );
+    if (error) error.textContent = '';
+    input.removeAttribute('aria-errormessage');
   }
 
   getFocusableElements(): HTMLElement[] {

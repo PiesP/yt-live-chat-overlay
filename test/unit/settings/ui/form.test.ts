@@ -2,6 +2,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SettingsUiForm, BACKDROP_ID } from '@settings/ui/form';
+import { SETTINGS_UI_STYLES } from '@settings/ui/styles';
 import type { OverlaySettings } from '@app-types';
 
 function makeDefaults(overrides: Partial<OverlaySettings> = {}): OverlaySettings {
@@ -183,6 +184,101 @@ describe('SettingsUiForm', () => {
     );
     expect(actionsEl).toBeInstanceOf(HTMLElement);
     form.destroy();
+  });
+
+  it('keeps localized tabs and actions reflowable at narrow widths', () => {
+    const form = new SettingsUiForm(getSettings, onPreview);
+    form.createModalContent();
+
+    expect(SETTINGS_UI_STYLES).toContain('@media (max-width: 480px)');
+    expect(SETTINGS_UI_STYLES).toMatch(
+      /\.yt-chat-overlay-settings-tabs\s*\{[^}]*flex-wrap:\s*wrap/s
+    );
+    expect(SETTINGS_UI_STYLES).toMatch(
+      /\.yt-chat-overlay-settings-actions\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/s
+    );
+    form.destroy();
+  });
+
+  it('uses explicit transition properties for font chips', () => {
+    expect(SETTINGS_UI_STYLES).not.toMatch(
+      /\.yt-chat-overlay-settings-font-chip\s*\{[^}]*transition:\s*all/s
+    );
+    expect(SETTINGS_UI_STYLES).toMatch(
+      /\.yt-chat-overlay-settings-font-chip\s*\{[^}]*transition:[^;}]*background-color[^;}]*border-color[^;}]*color/s
+    );
+  });
+
+  it('synchronizes the selected font weight for assistive technology', () => {
+    const form = new SettingsUiForm(getSettings, onPreview);
+    const modal = document.createElement('dialog');
+    modal.id = BACKDROP_ID;
+    document.body.appendChild(modal);
+    modal.append(...form.createModalContent());
+    form.setModal(modal);
+    form.populateForm(makeDefaults({ fontWeight: 'bold' }));
+
+    const normal = modal.querySelector<HTMLButtonElement>(
+      '.yt-chat-overlay-settings-weight-toggle-btn[data-value="normal"]'
+    );
+    const bold = modal.querySelector<HTMLButtonElement>(
+      '.yt-chat-overlay-settings-weight-toggle-btn[data-value="bold"]'
+    );
+    expect(normal?.getAttribute('aria-pressed')).toBe('false');
+    expect(bold?.getAttribute('aria-pressed')).toBe('true');
+
+    normal?.click();
+    expect(normal?.getAttribute('aria-pressed')).toBe('true');
+    expect(bold?.getAttribute('aria-pressed')).toBe('false');
+
+    form.destroy();
+    modal.remove();
+  });
+
+  it('keeps clamping feedback in a stable slot until the value is corrected', () => {
+    vi.useFakeTimers();
+    const form = new SettingsUiForm(getSettings, onPreview);
+    const modal = document.createElement('dialog');
+    modal.id = BACKDROP_ID;
+    document.body.appendChild(modal);
+    modal.append(...form.createModalContent());
+    form.setModal(modal);
+    form.populateForm(getSettings());
+
+    const input = modal.querySelector<HTMLInputElement>('input[name="opacity"]');
+    expect(input).not.toBeNull();
+    const slot = modal.querySelector<HTMLElement>(
+      '.yt-chat-overlay-settings-field-error[data-for="opacity"]'
+    );
+    expect(slot).not.toBeNull();
+    expect(slot?.textContent).toBe('');
+    expect(slot?.hasAttribute('role')).toBe(false);
+    expect(slot?.getAttribute('aria-live')).toBe('polite');
+    expect(slot?.getAttribute('aria-atomic')).toBe('true');
+
+    input!.value = '9999';
+    form.collectSettings();
+    expect(slot?.textContent).not.toBe('');
+    expect(input?.getAttribute('aria-invalid')).toBe('true');
+    expect(input?.getAttribute('aria-errormessage')).toBe(slot?.id);
+
+    vi.advanceTimersByTime(3000);
+    expect(slot?.textContent).not.toBe('');
+
+    const slider = modal.querySelector<HTMLInputElement>(
+      `input[type="range"][aria-describedby="${input!.id}"]`
+    );
+    expect(slider).not.toBeNull();
+    slider!.value = '50';
+    slider!.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(input?.value).toBe('50');
+    expect(slot?.textContent).toBe('');
+    expect(input?.getAttribute('aria-invalid')).toBe('false');
+    expect(input?.hasAttribute('aria-errormessage')).toBe(false);
+
+    form.destroy();
+    modal.remove();
+    vi.useRealTimers();
   });
 
   it('collectSettings from populated modal returns valid settings', () => {
