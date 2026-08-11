@@ -1,18 +1,19 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import {
-  createExtensionIifeConfig,
-  type ExtensionIifeConfigOptions,
-} from '../../../tooling/vite/configs/extension-iife.ts';
+import { createExtensionContentConfig } from '../../../tooling/vite/configs/extension-content.ts';
+import { createExtensionPageConfig } from '../../../tooling/vite/configs/extension-page.ts';
 
 const buildEnv = { command: 'build', isPreview: false, isSsrBuild: false, mode: 'production' } as const;
+const packageJson = JSON.parse(
+  readFileSync(resolve(import.meta.dirname, '../../..', 'package.json'), 'utf8')
+) as { version: string };
 
 type ConfigFactory = (env: typeof buildEnv) => Promise<unknown> | unknown;
+type ExtensionConfigFactory = (browser: 'chrome' | 'firefox') => unknown;
 
-async function resolveIifeConfig(
-  browser: 'chrome' | 'firefox',
-  options: ExtensionIifeConfigOptions
-) {
-  const config = createExtensionIifeConfig(browser, options) as ConfigFactory;
+async function resolveIifeConfig(factory: ExtensionConfigFactory, browser: 'chrome' | 'firefox') {
+  const config = factory(browser) as ConfigFactory;
   return (await config(buildEnv)) as {
     build?: {
       emptyOutDir?: boolean;
@@ -32,6 +33,7 @@ describe('extension IIFE Vite configuration', () => {
     {
       browser: 'chrome' as const,
       entry: 'extension/content-script.ts',
+      factory: createExtensionContentConfig,
       fileName: 'content-script.js',
       name: 'YtChatOverlay',
       outDir: 'dist-extension',
@@ -40,13 +42,14 @@ describe('extension IIFE Vite configuration', () => {
     {
       browser: 'firefox' as const,
       entry: 'extension/page-script.ts',
+      factory: createExtensionPageConfig,
       fileName: 'page-script.js',
       name: 'YtChatOverlayPage',
       outDir: 'dist-extension-firefox',
       target: 'page script',
     },
   ])('preserves the $browser $target artifact contract', async (expected) => {
-    const config = await resolveIifeConfig(expected.browser, expected);
+    const config = await resolveIifeConfig(expected.factory, expected.browser);
 
     expect(config.build).toMatchObject({
       emptyOutDir: false,
@@ -64,7 +67,7 @@ describe('extension IIFE Vite configuration', () => {
     expect(config.define).toMatchObject({
       'import.meta': '{}',
     });
-    expect(config.define?.__VERSION__).toContain('0.45.0');
+    expect(config.define?.__VERSION__).toContain(packageJson.version);
     expect(config.define?.__BUILD_TIME__).toMatch(/^"\d{4}-\d{2}-\d{2}T/);
     expect(config.plugins).toEqual([expect.objectContaining({ name: 'enforce-iife-format' })]);
   });
