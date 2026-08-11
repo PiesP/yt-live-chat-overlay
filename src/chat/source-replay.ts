@@ -437,12 +437,16 @@ export class ReplayChatSource extends ChatSource {
     }
 
     this.resetReplayState();
+    const generation = this.seekGeneration;
 
     try {
       const initialPayload = await this.requestReplayPayload(
         this.bootstrap.initialContinuation,
         signal
       );
+      if (generation !== this.seekGeneration) {
+        return false;
+      }
       if (!initialPayload) {
         return false;
       }
@@ -453,7 +457,10 @@ export class ReplayChatSource extends ChatSource {
         this.replayPlayerSeekContinuation = playerSeekContinuation;
 
         const currentOffsetMs = this.getPlaybackSnapshot()?.offsetMs ?? 0;
-        const seeded = await this.fetchReplayPlayerSeek(currentOffsetMs, signal);
+        const seeded = await this.fetchReplayPlayerSeek(currentOffsetMs, signal, generation);
+        if (generation !== this.seekGeneration) {
+          return false;
+        }
         this.flushReplayBuffer(currentOffsetMs);
         return seeded;
       }
@@ -480,13 +487,23 @@ export class ReplayChatSource extends ChatSource {
         batchesFetched < this.getSettings().replayBatchLimit
       ) {
         throwIfAborted(signal);
-        const fetched = await this.fetchNextReplayFallbackBatch(minimumOffsetMs, signal);
+        const fetched = await this.fetchNextReplayFallbackBatch(
+          minimumOffsetMs,
+          signal,
+          generation
+        );
+        if (generation !== this.seekGeneration) {
+          return false;
+        }
         if (!fetched) break;
         batchesFetched += 1;
       }
       this.flushReplayBuffer(currentOffsetMs);
       return true;
     } catch (error: unknown) {
+      if (generation !== this.seekGeneration) {
+        return false;
+      }
       if (isAbortError(error)) {
         throw error;
       }

@@ -244,6 +244,94 @@ describe('ReplayChatSource', () => {
     expect(source.drainPendingMessages()).toEqual([]);
   });
 
+  it('discards an initialization response invalidated by a newer session', async () => {
+    const pendingResolvers: Array<(payload: LiveChatPayload) => void> = [];
+    const internals = source as unknown as {
+      bootstrap: ChatBootstrapData | null;
+      replayMode: 'continuation' | 'playerSeek' | null;
+      replayContinuation: InnertubeContinuationData | null;
+      replayFallbackLastOffsetMs: number;
+      requestReplayPayload: () => Promise<LiveChatPayload>;
+      initializeReplaySession: () => Promise<boolean>;
+    };
+    internals.bootstrap = {
+      initialContinuation: { continuation: 'initial' },
+      isReplay: true,
+    } as ChatBootstrapData;
+    vi.spyOn(internals, 'requestReplayPayload').mockImplementation(
+      () =>
+        new Promise<LiveChatPayload>((resolve) => {
+          pendingResolvers.push(resolve);
+        })
+    );
+
+    const staleInitialization = internals.initializeReplaySession();
+    await vi.waitFor(() => expect(pendingResolvers).toHaveLength(1));
+    const currentInitialization = internals.initializeReplaySession();
+    await vi.waitFor(() => expect(pendingResolvers).toHaveLength(2));
+
+    pendingResolvers[0]?.({
+      actions: [
+        {
+          replayChatItemAction: {
+            videoOffsetTimeMsec: 0,
+            actions: [
+              {
+                addChatItemAction: {
+                  item: {
+                    liveChatTextMessageRenderer: {
+                      id: 'stale-initialization-message',
+                      authorName: { simpleText: 'Viewer' },
+                      message: { runs: [{ text: 'stale' }] },
+                    },
+                  },
+                },
+              },
+            ],
+          },
+        },
+      ],
+      continuations: [
+        { liveChatReplayContinuationData: { continuation: 'stale-next' } },
+      ],
+    });
+
+    await expect(staleInitialization).resolves.toBe(false);
+    expect(internals.replayMode).toBeNull();
+    expect(internals.replayContinuation).toBeNull();
+    expect(internals.replayFallbackLastOffsetMs).toBe(-1);
+
+    pendingResolvers[1]?.({
+      actions: [
+        {
+          replayChatItemAction: {
+            videoOffsetTimeMsec: 0,
+            actions: [
+              {
+                addChatItemAction: {
+                  item: {
+                    liveChatTextMessageRenderer: {
+                      id: 'current-initialization-message',
+                      authorName: { simpleText: 'Viewer' },
+                      message: { runs: [{ text: 'current' }] },
+                    },
+                  },
+                },
+              },
+            ],
+          },
+        },
+      ],
+      continuations: [
+        { liveChatReplayContinuationData: { continuation: 'current-next' } },
+      ],
+    });
+
+    await expect(currentInitialization).resolves.toBe(true);
+    expect(internals.replayMode).toBe('continuation');
+    expect(internals.replayContinuation).toEqual({ continuation: 'current-next' });
+  });
+
   it('does not refetch an empty player-seek buffer until playback advances', () => {
     const internals = source as unknown as {
       replayMode: 'playerSeek' | null;
