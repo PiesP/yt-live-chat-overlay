@@ -394,7 +394,7 @@ export class ReplayChatSource extends ChatSource {
       void (async () => {
         try {
           if (gen !== this.seekGeneration) return;
-          const pollSuccess = await this.pollContinuationReplay(offsetMs, seekSignal);
+          const pollSuccess = await this.pollContinuationReplay(offsetMs, seekSignal, gen);
           if (gen !== this.seekGeneration) return;
           if (pollSuccess) {
             this.startPrefetch();
@@ -437,12 +437,16 @@ export class ReplayChatSource extends ChatSource {
     }
 
     this.resetReplayState();
+    const generation = this.seekGeneration;
 
     try {
       const initialPayload = await this.requestReplayPayload(
         this.bootstrap.initialContinuation,
         signal
       );
+      if (generation !== this.seekGeneration) {
+        return false;
+      }
       if (!initialPayload) {
         return false;
       }
@@ -453,7 +457,10 @@ export class ReplayChatSource extends ChatSource {
         this.replayPlayerSeekContinuation = playerSeekContinuation;
 
         const currentOffsetMs = this.getPlaybackSnapshot()?.offsetMs ?? 0;
-        const seeded = await this.fetchReplayPlayerSeek(currentOffsetMs, signal);
+        const seeded = await this.fetchReplayPlayerSeek(currentOffsetMs, signal, generation);
+        if (generation !== this.seekGeneration) {
+          return false;
+        }
         this.flushReplayBuffer(currentOffsetMs);
         return seeded;
       }
@@ -480,13 +487,23 @@ export class ReplayChatSource extends ChatSource {
         batchesFetched < this.getSettings().replayBatchLimit
       ) {
         throwIfAborted(signal);
-        const fetched = await this.fetchNextReplayFallbackBatch(minimumOffsetMs, signal);
+        const fetched = await this.fetchNextReplayFallbackBatch(
+          minimumOffsetMs,
+          signal,
+          generation
+        );
+        if (generation !== this.seekGeneration) {
+          return false;
+        }
         if (!fetched) break;
         batchesFetched += 1;
       }
       this.flushReplayBuffer(currentOffsetMs);
       return true;
     } catch (error: unknown) {
+      if (generation !== this.seekGeneration) {
+        return false;
+      }
       if (isAbortError(error)) {
         throw error;
       }
@@ -579,14 +596,19 @@ export class ReplayChatSource extends ChatSource {
 
   private async fetchNextReplayFallbackBatch(
     minimumOffsetMs: number,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    generation = this.seekGeneration
   ): Promise<boolean> {
-    if (!this.replayContinuation) {
+    const continuation = this.replayContinuation;
+    if (!continuation) {
       return false;
     }
 
     try {
-      const payload = await this.requestReplayPayload(this.replayContinuation, signal);
+      const payload = await this.requestReplayPayload(continuation, signal);
+      if (generation !== this.seekGeneration || this.replayContinuation !== continuation) {
+        return false;
+      }
       if (!payload) {
         this.recordReplayFailure();
         return false;
@@ -604,6 +626,9 @@ export class ReplayChatSource extends ChatSource {
     } catch (error: unknown) {
       if (isAbortError(error)) {
         throw error;
+      }
+      if (generation !== this.seekGeneration || this.replayContinuation !== continuation) {
+        return false;
       }
 
       log.debug('chat.replay.continuation-request-failed', { error: String(error) });
@@ -685,7 +710,8 @@ export class ReplayChatSource extends ChatSource {
 
   private async pollContinuationReplay(
     currentOffsetMs: number,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    generation = this.seekGeneration
   ): Promise<boolean> {
     if (Date.now() < this.replayNextAllowedFetchAt) {
       return false;
@@ -708,7 +734,10 @@ export class ReplayChatSource extends ChatSource {
     ) {
       throwIfAborted(signal);
 
-      const fetched = await this.fetchNextReplayFallbackBatch(minimumOffsetMs, signal);
+      const fetched = await this.fetchNextReplayFallbackBatch(minimumOffsetMs, signal, generation);
+      if (generation !== this.seekGeneration) {
+        return false;
+      }
       if (!fetched) {
         break;
       }
@@ -727,7 +756,11 @@ export class ReplayChatSource extends ChatSource {
       this.replayNextAllowedFetchAt <= Date.now() &&
       this.replayFallbackLastOffsetMs < currentOffsetMs + REPLAY_PREFETCH_WINDOW_MS
     ) {
-      keepAheadFetched = await this.fetchNextReplayFallbackBatch(minimumOffsetMs, signal);
+      keepAheadFetched = await this.fetchNextReplayFallbackBatch(
+        minimumOffsetMs,
+        signal,
+        generation
+      );
     }
 
     // Flush is handled by the rAF loop — no explicit flush call here.

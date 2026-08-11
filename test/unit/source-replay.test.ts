@@ -173,6 +173,165 @@ describe('ReplayChatSource', () => {
     expect(internals.lastReplayRequestedOffsetMs).toBe(-1000);
   });
 
+  it('discards a continuation response invalidated by a later seek', async () => {
+    const pendingResolvers: Array<(payload: LiveChatPayload) => void> = [];
+    const currentContinuation = { continuation: 'current' };
+    const internals = source as unknown as {
+      callback: (() => void) | null;
+      replayMode: 'continuation' | null;
+      replayContinuation: InnertubeContinuationData | null;
+      replayFallbackLastOffsetMs: number;
+      replayConsecutiveFailures: number;
+      replayTotalFailuresSinceSuccess: number;
+      replayNextAllowedFetchAt: number;
+      requestReplayPayload: () => Promise<LiveChatPayload>;
+      handleSeeked: (offsetMs: number) => void;
+    };
+    internals.callback = () => {};
+    internals.replayMode = 'continuation';
+    internals.replayContinuation = currentContinuation;
+    internals.replayConsecutiveFailures = 2;
+    internals.replayTotalFailuresSinceSuccess = 3;
+    internals.replayNextAllowedFetchAt = 1234;
+    vi.spyOn(internals, 'requestReplayPayload').mockImplementation(
+      () =>
+        new Promise<LiveChatPayload>((resolve) => {
+          pendingResolvers.push(resolve);
+        })
+    );
+
+    internals.handleSeeked(10_000);
+    await vi.waitFor(() => expect(pendingResolvers).toHaveLength(1));
+    internals.handleSeeked(20_000);
+    await vi.waitFor(() => expect(pendingResolvers).toHaveLength(2));
+    internals.replayConsecutiveFailures = 4;
+    internals.replayTotalFailuresSinceSuccess = 8;
+    internals.replayNextAllowedFetchAt = 5678;
+
+    pendingResolvers[0]?.({
+      actions: [
+        {
+          replayChatItemAction: {
+            videoOffsetTimeMsec: 10_000,
+            actions: [
+              {
+                addChatItemAction: {
+                  item: {
+                    liveChatTextMessageRenderer: {
+                      id: 'stale-message',
+                      authorName: { simpleText: 'Viewer' },
+                      message: { runs: [{ text: 'stale' }] },
+                    },
+                  },
+                },
+              },
+            ],
+          },
+        },
+      ],
+      continuations: [
+        { liveChatReplayContinuationData: { continuation: 'stale-next' } },
+      ],
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(internals.replayContinuation).toBe(currentContinuation);
+    expect(internals.replayFallbackLastOffsetMs).toBe(-1);
+    expect(internals.replayConsecutiveFailures).toBe(4);
+    expect(internals.replayTotalFailuresSinceSuccess).toBe(8);
+    expect(internals.replayNextAllowedFetchAt).toBe(5678);
+    expect(source.drainPendingMessages()).toEqual([]);
+  });
+
+  it('discards an initialization response invalidated by a newer session', async () => {
+    const pendingResolvers: Array<(payload: LiveChatPayload) => void> = [];
+    const internals = source as unknown as {
+      bootstrap: ChatBootstrapData | null;
+      replayMode: 'continuation' | 'playerSeek' | null;
+      replayContinuation: InnertubeContinuationData | null;
+      replayFallbackLastOffsetMs: number;
+      requestReplayPayload: () => Promise<LiveChatPayload>;
+      initializeReplaySession: () => Promise<boolean>;
+    };
+    internals.bootstrap = {
+      initialContinuation: { continuation: 'initial' },
+      isReplay: true,
+    } as ChatBootstrapData;
+    vi.spyOn(internals, 'requestReplayPayload').mockImplementation(
+      () =>
+        new Promise<LiveChatPayload>((resolve) => {
+          pendingResolvers.push(resolve);
+        })
+    );
+
+    const staleInitialization = internals.initializeReplaySession();
+    await vi.waitFor(() => expect(pendingResolvers).toHaveLength(1));
+    const currentInitialization = internals.initializeReplaySession();
+    await vi.waitFor(() => expect(pendingResolvers).toHaveLength(2));
+
+    pendingResolvers[0]?.({
+      actions: [
+        {
+          replayChatItemAction: {
+            videoOffsetTimeMsec: 0,
+            actions: [
+              {
+                addChatItemAction: {
+                  item: {
+                    liveChatTextMessageRenderer: {
+                      id: 'stale-initialization-message',
+                      authorName: { simpleText: 'Viewer' },
+                      message: { runs: [{ text: 'stale' }] },
+                    },
+                  },
+                },
+              },
+            ],
+          },
+        },
+      ],
+      continuations: [
+        { liveChatReplayContinuationData: { continuation: 'stale-next' } },
+      ],
+    });
+
+    await expect(staleInitialization).resolves.toBe(false);
+    expect(internals.replayMode).toBeNull();
+    expect(internals.replayContinuation).toBeNull();
+    expect(internals.replayFallbackLastOffsetMs).toBe(-1);
+
+    pendingResolvers[1]?.({
+      actions: [
+        {
+          replayChatItemAction: {
+            videoOffsetTimeMsec: 0,
+            actions: [
+              {
+                addChatItemAction: {
+                  item: {
+                    liveChatTextMessageRenderer: {
+                      id: 'current-initialization-message',
+                      authorName: { simpleText: 'Viewer' },
+                      message: { runs: [{ text: 'current' }] },
+                    },
+                  },
+                },
+              },
+            ],
+          },
+        },
+      ],
+      continuations: [
+        { liveChatReplayContinuationData: { continuation: 'current-next' } },
+      ],
+    });
+
+    await expect(currentInitialization).resolves.toBe(true);
+    expect(internals.replayMode).toBe('continuation');
+    expect(internals.replayContinuation).toEqual({ continuation: 'current-next' });
+  });
+
   it('does not refetch an empty player-seek buffer until playback advances', () => {
     const internals = source as unknown as {
       replayMode: 'playerSeek' | null;
