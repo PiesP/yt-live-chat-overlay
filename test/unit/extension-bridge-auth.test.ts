@@ -10,6 +10,7 @@ describe('extension storage bridge authentication', () => {
   });
 
   it('rejects storage relay requests without the per-injection nonce', async () => {
+    const storageGet = vi.fn().mockResolvedValue({});
     const storageSet = vi.fn().mockResolvedValue(undefined);
     vi.stubGlobal('chrome', {
       runtime: {
@@ -19,7 +20,7 @@ describe('extension storage bridge authentication', () => {
       },
       storage: {
         local: {
-          get: vi.fn().mockResolvedValue({}),
+          get: storageGet,
           set: storageSet,
         },
         onChanged: { addListener: vi.fn() },
@@ -67,5 +68,53 @@ describe('extension storage bridge authentication', () => {
     await vi.waitFor(() => expect(storageSet).toHaveBeenCalledWith({
       'yt-live-chat-overlay-settings': '{}',
     }));
+
+    storageGet.mockClear();
+    storageSet.mockClear();
+    const hostileMessages = [
+      {
+        source: 'yt-storage-relay',
+        nonce,
+        requestId: 3,
+        method: 'set',
+        key: 'another-extension-key',
+        value: '{}',
+      },
+      {
+        source: 'yt-storage-relay',
+        nonce,
+        requestId: 4,
+        method: 'delete',
+        key: 'yt-live-chat-overlay-settings',
+      },
+      {
+        source: 'yt-storage-relay',
+        nonce,
+        requestId: 5,
+        method: 'set',
+        key: 'yt-live-chat-overlay-settings',
+        value: { injected: true },
+      },
+      {
+        source: 'yt-storage-relay',
+        nonce,
+        requestId: 'not-a-number',
+        method: 'get',
+        key: 'yt-live-chat-overlay-settings',
+      },
+    ];
+    for (const data of hostileMessages) {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          source: window,
+          origin: window.location.origin,
+          data,
+        })
+      );
+    }
+    await Promise.resolve();
+
+    expect(storageGet).not.toHaveBeenCalled();
+    expect(storageSet).not.toHaveBeenCalled();
   });
 });

@@ -57,13 +57,16 @@ window.addEventListener('message', (event: MessageEvent) => {
   if (event.source !== window) return;
 
   const data = event.data;
-  if (data?.source !== 'yt-storage-relay') return;
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return;
+  if (data.source !== 'yt-storage-relay') return;
   if (event.origin !== window.location.origin) return;
   if (data.nonce !== bridgeNonce) return;
 
-  const requestId = data.requestId as number;
-  const method = data.method as string;
-  const key = data.key as string;
+  const { requestId, method, key } = data;
+  if (!Number.isSafeInteger(requestId) || requestId < 0) return;
+  if (method !== 'get' && method !== 'set') return;
+  if (typeof key !== 'string') return;
+  if (method === 'set' && typeof data.value !== 'string') return;
 
   // Reject keys outside the allowlist — same-origin scripts could
   // otherwise read/write arbitrary extension storage via postMessage.
@@ -112,7 +115,7 @@ window.addEventListener('message', (event: MessageEvent) => {
         );
       });
   } else if (method === 'set') {
-    const value = data.value as string;
+    const value = data.value;
     chrome!
       .storage!.local!.set({ [key]: value })
       .then(() => {
