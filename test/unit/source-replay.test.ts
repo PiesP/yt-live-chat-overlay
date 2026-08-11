@@ -173,6 +173,77 @@ describe('ReplayChatSource', () => {
     expect(internals.lastReplayRequestedOffsetMs).toBe(-1000);
   });
 
+  it('discards a continuation response invalidated by a later seek', async () => {
+    const pendingResolvers: Array<(payload: LiveChatPayload) => void> = [];
+    const currentContinuation = { continuation: 'current' };
+    const internals = source as unknown as {
+      callback: (() => void) | null;
+      replayMode: 'continuation' | null;
+      replayContinuation: InnertubeContinuationData | null;
+      replayFallbackLastOffsetMs: number;
+      replayConsecutiveFailures: number;
+      replayTotalFailuresSinceSuccess: number;
+      replayNextAllowedFetchAt: number;
+      requestReplayPayload: () => Promise<LiveChatPayload>;
+      handleSeeked: (offsetMs: number) => void;
+    };
+    internals.callback = () => {};
+    internals.replayMode = 'continuation';
+    internals.replayContinuation = currentContinuation;
+    internals.replayConsecutiveFailures = 2;
+    internals.replayTotalFailuresSinceSuccess = 3;
+    internals.replayNextAllowedFetchAt = 1234;
+    vi.spyOn(internals, 'requestReplayPayload').mockImplementation(
+      () =>
+        new Promise<LiveChatPayload>((resolve) => {
+          pendingResolvers.push(resolve);
+        })
+    );
+
+    internals.handleSeeked(10_000);
+    await vi.waitFor(() => expect(pendingResolvers).toHaveLength(1));
+    internals.handleSeeked(20_000);
+    await vi.waitFor(() => expect(pendingResolvers).toHaveLength(2));
+    internals.replayConsecutiveFailures = 4;
+    internals.replayTotalFailuresSinceSuccess = 8;
+    internals.replayNextAllowedFetchAt = 5678;
+
+    pendingResolvers[0]?.({
+      actions: [
+        {
+          replayChatItemAction: {
+            videoOffsetTimeMsec: 10_000,
+            actions: [
+              {
+                addChatItemAction: {
+                  item: {
+                    liveChatTextMessageRenderer: {
+                      id: 'stale-message',
+                      authorName: { simpleText: 'Viewer' },
+                      message: { runs: [{ text: 'stale' }] },
+                    },
+                  },
+                },
+              },
+            ],
+          },
+        },
+      ],
+      continuations: [
+        { liveChatReplayContinuationData: { continuation: 'stale-next' } },
+      ],
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(internals.replayContinuation).toBe(currentContinuation);
+    expect(internals.replayFallbackLastOffsetMs).toBe(-1);
+    expect(internals.replayConsecutiveFailures).toBe(4);
+    expect(internals.replayTotalFailuresSinceSuccess).toBe(8);
+    expect(internals.replayNextAllowedFetchAt).toBe(5678);
+    expect(source.drainPendingMessages()).toEqual([]);
+  });
+
   it('does not refetch an empty player-seek buffer until playback advances', () => {
     const internals = source as unknown as {
       replayMode: 'playerSeek' | null;
