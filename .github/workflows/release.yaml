@@ -38,8 +38,8 @@ jobs:
         with:
           submodules: true
 
-      - name: 📦 Set up project
-        uses: PiesP/browser-core/automation/actions/setup-project@f630a8f0119dd6b4f1aa011f8510489936c7a7b9
+      - name: 📦 Set up release project
+        uses: ./.github/actions/setup-release
         with:
           node-version: ${{ env.NODE_VERSION }}
 
@@ -56,8 +56,8 @@ jobs:
         with:
           submodules: true
 
-      - name: 📦 Set up project
-        uses: PiesP/browser-core/automation/actions/setup-project@f630a8f0119dd6b4f1aa011f8510489936c7a7b9
+      - name: 📦 Set up release project
+        uses: ./.github/actions/setup-release
         with:
           node-version: ${{ env.NODE_VERSION }}
 
@@ -74,8 +74,8 @@ jobs:
         with:
           submodules: true
 
-      - name: 📦 Set up project
-        uses: PiesP/browser-core/automation/actions/setup-project@f630a8f0119dd6b4f1aa011f8510489936c7a7b9
+      - name: 📦 Set up release project
+        uses: ./.github/actions/setup-release
         with:
           node-version: ${{ env.NODE_VERSION }}
 
@@ -118,8 +118,8 @@ jobs:
         with:
           submodules: true
 
-      - name: 📦 Set up project
-        uses: PiesP/browser-core/automation/actions/setup-project@f630a8f0119dd6b4f1aa011f8510489936c7a7b9
+      - name: 📦 Set up release project
+        uses: ./.github/actions/setup-release
         with:
           node-version: ${{ env.NODE_VERSION }}
 
@@ -139,8 +139,8 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      - name: 📦 Set up project
-        uses: PiesP/browser-core/automation/actions/setup-project@f630a8f0119dd6b4f1aa011f8510489936c7a7b9
+      - name: 📦 Set up release project
+        uses: ./.github/actions/setup-release
         with:
           node-version: ${{ env.NODE_VERSION }}
 
