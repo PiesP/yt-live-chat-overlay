@@ -2,18 +2,25 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const gateWorkflow = readFileSync(
-  resolve(process.cwd(), '.github/workflows/dependabot-auto-merge.yaml'),
-  'utf8'
-);
+const root = resolve(import.meta.dirname, '../../..');
+const gateWorkflow = readFileSync(resolve(root, '.github/workflows/dependabot-auto-merge.yaml'), 'utf8');
 const applyWorkflow = readFileSync(
-  resolve(process.cwd(), '.github/workflows/dependabot-auto-merge-apply.yaml'),
+  resolve(root, '.github/workflows/dependabot-auto-merge-apply.yaml'),
   'utf8'
 );
 
 describe('Dependabot auto-merge security', () => {
   it('evaluates only Dependabot events with read-only permissions', () => {
+    expect(gateWorkflow).toMatch(
+      /on:\n  pull_request_target:[\s\S]*?permissions:\n  contents: read\n  pull-requests: read\n\nconcurrency:/
+    );
     expect(gateWorkflow).toContain("github.event.sender.login == 'dependabot[bot]'");
+    expect(gateWorkflow).toContain("github.event.pull_request.user.login == 'dependabot[bot]'");
+    expect(gateWorkflow).toContain('github.event.pull_request.head.repo.full_name == github.repository');
+    expect(gateWorkflow).toContain(
+      'github.event.pull_request.base.ref == github.event.repository.default_branch'
+    );
+    expect(gateWorkflow).toContain('github.event.pull_request.draft == false');
     expect(gateWorkflow).toContain('contents: read');
     expect(gateWorkflow).toContain('pull-requests: read');
     expect(gateWorkflow).toContain('maintainer-changes');
@@ -27,6 +34,7 @@ describe('Dependabot auto-merge security', () => {
     expect(applyWorkflow).toContain('workflows: ["🤖 Dependabot Auto-Merge Gate"]');
     expect(applyWorkflow).toContain('types: [completed]');
     expect(applyWorkflow).toContain("workflow_run.conclusion == 'success'");
+    expect(applyWorkflow).toContain("workflow_run.event == 'pull_request_target'");
     expect(applyWorkflow).toContain("workflow_run.actor.login == 'dependabot[bot]'");
     expect(applyWorkflow).toContain('run-id: ${{ github.event.workflow_run.id }}');
     expect(applyWorkflow).toContain('digest-mismatch: error');
