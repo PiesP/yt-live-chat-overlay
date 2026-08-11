@@ -71,4 +71,25 @@ describe('Verification configuration', () => {
     expect(includes).toContain('extension/**/*.ts');
     expect(includes.some((pattern) => pattern.includes('!!**/extension/'))).toBe(false);
   });
+
+  it('reuses one artifact build pipeline without duplicating the quality gate', () => {
+    const packageJson = JSON.parse(
+      readFileSync(resolve(root, 'package.json'), 'utf8')
+    ) as { scripts?: Record<string, string> };
+    const scripts = packageJson.scripts ?? {};
+
+    expect(scripts['quality:fix']).toBe(
+      'pnpm -s fmt:fix && pnpm -s lint:fix && pnpm -s quality'
+    );
+    expect(scripts['build:targets:ci']).toBe(
+      'pnpm -s build:ci && pnpm -s build:extension:ci && pnpm -s build:extension:firefox:ci && pnpm -s check:artifacts'
+    );
+    expect(scripts['build:all']).toBe('pnpm -s build:targets:ci');
+    expect(scripts['build:all:ci']).toBe(
+      'pnpm -s check:versions && pnpm -s check:i18n && pnpm -s build:targets:ci'
+    );
+    expect(scripts.verify).toBe(
+      'pnpm -s quality && pnpm -s check:versions && pnpm -s build:targets:ci'
+    );
+  });
 });
