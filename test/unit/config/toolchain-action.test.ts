@@ -5,15 +5,16 @@ import { describe, expect, it } from 'vitest';
 const root = resolve(import.meta.dirname, '../../..');
 const centralAction =
   'PiesP/browser-core/automation/actions/setup-project@f630a8f0119dd6b4f1aa011f8510489936c7a7b9';
-const workflowJobs = {
+const centralWorkflowJobs = {
   'ci.yaml': ['quality', 'unit', 'e2e', 'build'],
   'deep-checks.yaml': ['mutation-fast', 'mutation-renderer'],
-  'release.yaml': ['quality', 'unit', 'e2e', 'mutation', 'build'],
 } as const;
+const releaseJobs = ['quality', 'unit', 'e2e', 'mutation', 'build'];
+const releaseAction = './.github/actions/setup-release';
 
-describe('central setup-project action', () => {
-  it('uses the immutable central action in every dependency-backed job', () => {
-    for (const [filename, jobs] of Object.entries(workflowJobs)) {
+describe('project setup actions', () => {
+  it('keeps CI and deep jobs on the immutable central action', () => {
+    for (const [filename, jobs] of Object.entries(centralWorkflowJobs)) {
       const workflow = readFileSync(
         resolve(root, '.github/workflows', filename),
         'utf8'
@@ -35,7 +36,33 @@ describe('central setup-project action', () => {
     }
   });
 
-  it('does not retain the superseded local setup action', () => {
+  it('uses the release-only action for every release dependency-backed job', () => {
+    const releaseWorkflow = readFileSync(resolve(root, '.github/workflows/release.yaml'), 'utf8');
+
+    for (const job of releaseJobs) {
+      const jobSection = releaseWorkflow.match(
+        new RegExp(`  ${job}:\\n[\\s\\S]*?(?=\\n  [a-z][\\w-]*:|$)`)
+      )?.[0];
+
+      expect(jobSection).toContain(`uses: ${releaseAction}`);
+      expect(jobSection).toContain('node-version: ${{ env.NODE_VERSION }}');
+    }
+    expect(releaseWorkflow.split(releaseAction)).toHaveLength(releaseJobs.length + 1);
+    expect(releaseWorkflow).not.toContain(centralAction);
+    expect(releaseWorkflow).toMatch(/on:\n  push:\n    tags:\n      - "v\*"/);
+  });
+
+  it('keeps the release install recipe local and immutable', () => {
+    const actionPath = resolve(root, '.github/actions/setup-release/action.yaml');
+
+    expect(existsSync(actionPath)).toBe(true);
+    const action = readFileSync(actionPath, 'utf8');
+    expect(action).toContain('uses: pnpm/setup@84cb39b217b10273981911c288cd62326dc7c6d2 # v2.0.2');
+    expect(action).toContain('package-json-file: package.json');
+    expect(action).toContain('runtime: "node@${{ inputs.node-version }}"');
+    expect(action).toContain('cache: true');
+    expect(action).toContain('install: false');
+    expect(action).toContain('pnpm install --frozen-lockfile --no-runtime');
     expect(existsSync(resolve(root, '.github/actions/setup-toolchain/action.yaml'))).toBe(false);
   });
 });
