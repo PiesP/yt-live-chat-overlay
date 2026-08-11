@@ -12,6 +12,16 @@ const centralWorkflowJobs = {
 const releaseJobs = ['quality', 'unit', 'e2e', 'mutation', 'build'];
 const releaseAction = './.github/actions/setup-release';
 
+function topLevelBlock(workflow: string, key: string): string {
+  const marker = `${key}:\n`;
+  const start = workflow.indexOf(marker);
+  if (start === -1) throw new Error(`Workflow key not found: ${key}`);
+
+  const afterMarker = start + marker.length;
+  const nextKey = workflow.slice(afterMarker).search(/\n[A-Za-z][A-Za-z0-9_-]*:\n/);
+  return workflow.slice(start, nextKey === -1 ? undefined : afterMarker + nextKey).trimEnd();
+}
+
 describe('project setup actions', () => {
   it('keeps CI and deep jobs on the immutable central action', () => {
     for (const [filename, jobs] of Object.entries(centralWorkflowJobs)) {
@@ -30,6 +40,7 @@ describe('project setup actions', () => {
       }
       expect(workflow.split(centralAction)).toHaveLength(jobs.length + 1);
       expect(workflow).not.toContain('uses: ./.github/actions/setup-toolchain');
+      expect(workflow).not.toContain(releaseAction);
       expect(workflow).not.toContain('uses: pnpm/action-setup@');
       expect(workflow).not.toContain('uses: actions/setup-node@');
       expect(workflow).not.toContain('run: pnpm install --frozen-lockfile');
@@ -49,7 +60,7 @@ describe('project setup actions', () => {
     }
     expect(releaseWorkflow.split(releaseAction)).toHaveLength(releaseJobs.length + 1);
     expect(releaseWorkflow).not.toContain(centralAction);
-    expect(releaseWorkflow).toMatch(/on:\n  push:\n    tags:\n      - "v\*"/);
+    expect(topLevelBlock(releaseWorkflow, 'on')).toBe('on:\n  push:\n    tags:\n      - "v*"');
   });
 
   it('keeps the release install recipe local and immutable', () => {
