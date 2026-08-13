@@ -29,6 +29,11 @@ describe('Nose installer supply-chain controls', () => {
     expect(installer).not.toContain(': "${GH_TOKEN:?GH_TOKEN is required}"');
   });
 
+  it('bounds retries for transient release-download failures', () => {
+    expect(installer).toContain('--retry 3 --retry-delay 2 --retry-max-time 30');
+    expect(installer).not.toContain('--retry-all-errors');
+  });
+
   it('detects upstream replacement without trusting the live digest for execution', () => {
     expect(pinnedToolsCheck).toContain(
       'nose_installer_sha256="$(sed -nE'

@@ -10,6 +10,7 @@ nose_installer_sha256="1b8c99b810ffc946e861bee0dad3ccb8140751e0f03ed4531da819043
 installer="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/nose-cli-installer.sh"
 
 curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+  --retry 3 --retry-delay 2 --retry-max-time 30 \
   "https://github.com/corca-ai/nose/releases/download/v${nose_version}/nose-cli-installer.sh" \
   --output "$installer"
 
