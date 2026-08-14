@@ -96,7 +96,7 @@ jobs:
           fi
           git -C packages/core checkout --detach "$CORE_SHA"
 
-          OPEN_PR="$(gh pr list --state open --head "$GITHUB_REPOSITORY_OWNER:$BRANCH" --json number --jq '.[0].number // empty')"
+          OPEN_PR="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --head "$BRANCH" --json number --jq '.[0].number // empty')"
           if git diff --quiet -- packages/core; then
             STALE_PR_RESULT="No stale update PR was open."
             if [[ -n "$OPEN_PR" ]]; then
