@@ -222,6 +222,20 @@ describe('workflow scope integration', () => {
     }
   });
 
+  it('executes the change classifier from the trusted base revision for PR-like events', () => {
+    const ci = readFileSync(resolve(root, '.github/workflows/ci.yaml'), 'utf8');
+    const security = readFileSync(resolve(root, '.github/workflows/security.yaml'), 'utf8');
+
+    for (const workflow of [ci, security]) {
+      const changes = jobSection(workflow, 'changes');
+      expect(changes).toContain('pull_request | merge_group');
+      expect(changes).toContain(
+        'git show "$BASE_SHA:scripts/ci/classify-workflow-changes.sh"'
+      );
+      expect(changes).toContain('bash "$classifier"');
+    }
+  });
+
   it('limits non-required PR and push workflows to conservative relevant paths', () => {
     const deep = readFileSync(resolve(root, '.github/workflows/deep-checks.yaml'), 'utf8');
     const codex = readFileSync(resolve(root, '.github/workflows/codex-security.yaml'), 'utf8');

@@ -63,7 +63,18 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
         run: |
-          if [[ "$CHECKOUT_OUTCOME" == "success" ]] && scripts/ci/classify-workflow-changes.sh; then
+          classifier=scripts/ci/classify-workflow-changes.sh
+          case "$EVENT_NAME" in
+            pull_request | merge_group)
+              classifier="$RUNNER_TEMP/trusted-classify-workflow-changes.sh"
+              if [[ ! "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]] || \
+                ! git show "$BASE_SHA:scripts/ci/classify-workflow-changes.sh" > "$classifier"; then
+                classifier=
+              fi
+              ;;
+          esac
+
+          if [[ "$CHECKOUT_OUTCOME" == "success" && -n "$classifier" ]] && bash "$classifier"; then
             exit 0
           fi
 
