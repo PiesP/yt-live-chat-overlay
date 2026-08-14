@@ -1,6 +1,8 @@
 overrides:
   # typed-rest-client still permits qs releases affected by a DoS advisory.
   qs@>=6.11.1: ">=6.15.2"
+  # postcss still permits nanoid releases affected by GHSA-2v37-7h3g-55p8.
+  nanoid@<3.3.18: "3.3.18"
 
 # pnpm 11 blocks dependency build scripts by default. canvas is required by
 # the jsdom-based unit and Playwright test environment.
