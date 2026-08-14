@@ -12,6 +12,20 @@ name: 🔬 Deep Verification
 on:
   push:
     branches: [master]
+    paths:
+      - "src/**"
+      - "test/unit/**"
+      - "test/consistency/**"
+      - "test/setup.ts"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "packages/core"
+      - "tsconfig*.json"
+      - "vitest.config.ts"
+      - "stryker.conf.fast.json"
+      - "scripts/ci/classify-workflow-changes.sh"
+      - ".github/workflows/deep-checks.yaml"
   schedule:
     - cron: "17 2 * * 0"
   workflow_dispatch:
@@ -33,35 +47,71 @@ permissions:
   contents: read
 
 concurrency:
-  group: deep-${{ github.ref }}
+  group: deep-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Classify deep-verification changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      deep_fast: ${{ steps.scope.outputs.deep_fast }}
+    steps:
+      - name: 📥 Checkout change history
+        id: checkout
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: false
+
+      - name: Classify changed paths
+        id: scope
+        if: ${{ always() }}
+        env:
+          CHECKOUT_OUTCOME: ${{ steps.checkout.outcome }}
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          if [[ "$CHECKOUT_OUTCOME" == "success" ]] && scripts/ci/classify-workflow-changes.sh; then
+            exit 0
+          fi
+
+          echo "Change classification failed; enabling fast mutation." >&2
+          echo "deep_fast=true" >> "$GITHUB_OUTPUT"
+
   mutation-fast:
     name: 🧬 Fast mutation
+    needs: changes
     if: >-
-      ${{ github.event_name != 'workflow_dispatch' || inputs.scope == 'all' ||
-      inputs.scope == 'mutation-fast' }}
+      ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.scope == 'all' ||
+      inputs.scope == 'mutation-fast') }}
     runs-on: ubuntu-24.04
     # The semantic fast profile takes ~22 minutes on GitHub-hosted runners.
     # Keep enough headroom for normal runner variance without reducing scope.
     timeout-minutes: 35
     steps:
       - name: 📥 Checkout code
+        if: ${{ needs.changes.result != 'success' || needs.changes.outputs.deep_fast == 'true' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: true
 
       - name: 📦 Set up project
+        if: ${{ needs.changes.result != 'success' || needs.changes.outputs.deep_fast == 'true' }}
         uses: PiesP/browser-core/automation/actions/setup-project@f630a8f0119dd6b4f1aa011f8510489936c7a7b9
         with:
           node-version: ${{ env.NODE_VERSION }}
 
       - name: 🧬 Run fast mutation gate
+        if: ${{ needs.changes.result != 'success' || needs.changes.outputs.deep_fast == 'true' }}
         run: pnpm mut:fast
 
       - name: 📤 Upload fast mutation report
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.changes.result != 'success' || needs.changes.outputs.deep_fast == 'true') && !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: fast-mutation-report-${{ github.sha }}
@@ -70,10 +120,15 @@ jobs:
           retention-days: 14
           compression-level: 9
 
+      - name: No relevant changes
+        if: ${{ needs.changes.result == 'success' && needs.changes.outputs.deep_fast != 'true' }}
+        run: echo "Fast-mutation inputs are unchanged; mutation testing is skipped."
+
   mutation-renderer:
     name: 🎨 Renderer mutation
+    needs: changes
     if: >-
-      ${{ github.event_name != 'push' && (github.event_name != 'workflow_dispatch' ||
+      ${{ !cancelled() && github.event_name != 'push' && (github.event_name != 'workflow_dispatch' ||
       inputs.scope == 'all' || inputs.scope == 'mutation-renderer') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30

@@ -30,62 +30,123 @@ permissions:
   contents: read
 
 concurrency:
-  group: verify-${{ github.ref }}
+  group: verify-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Classify workflow changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      quality: ${{ steps.scope.outputs.quality }}
+      unit: ${{ steps.scope.outputs.unit }}
+      e2e: ${{ steps.scope.outputs.e2e }}
+      build: ${{ steps.scope.outputs.build }}
+      duplication: ${{ steps.scope.outputs.duplication }}
+    steps:
+      - name: 📥 Checkout change history
+        id: checkout
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: false
+
+      - name: Classify changed paths
+        id: scope
+        if: ${{ always() }}
+        env:
+          CHECKOUT_OUTCOME: ${{ steps.checkout.outcome }}
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
+        run: |
+          if [[ "$CHECKOUT_OUTCOME" == "success" ]] && scripts/ci/classify-workflow-changes.sh; then
+            exit 0
+          fi
+
+          echo "Change classification failed; enabling every CI scope." >&2
+          for scope in quality unit e2e build duplication; do
+            echo "$scope=true" >> "$GITHUB_OUTPUT"
+          done
+
   quality:
     name: pr-gate/quality
+    needs: changes
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: 📥 Checkout code
+        if: ${{ needs.changes.result != 'success' || needs.changes.outputs.quality == 'true' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: true
 
       - name: 📦 Set up project
+        if: ${{ needs.changes.result != 'success' || needs.changes.outputs.quality == 'true' }}
         uses: PiesP/browser-core/automation/actions/setup-project@f630a8f0119dd6b4f1aa011f8510489936c7a7b9
         with:
           node-version: ${{ env.NODE_VERSION }}
 
       - name: ✅ Run quality gate
+        if: ${{ needs.changes.result != 'success' || needs.changes.outputs.quality == 'true' }}
         run: pnpm quality
+
+      - name: No relevant changes
+        if: ${{ needs.changes.result == 'success' && needs.changes.outputs.quality != 'true' }}
+        run: echo "Quality inputs are unchanged; the required check succeeds without setup."
 
   unit:
     name: pr-gate/unit
+    needs: changes
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: 📥 Checkout code
+        if: ${{ needs.changes.result != 'success' || needs.changes.outputs.unit == 'true' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: true
 
       - name: 📦 Set up project
+        if: ${{ needs.changes.result != 'success' || needs.changes.outputs.unit == 'true' }}
         uses: PiesP/browser-core/automation/actions/setup-project@f630a8f0119dd6b4f1aa011f8510489936c7a7b9
         with:
           node-version: ${{ env.NODE_VERSION }}
 
       - name: 🧪 Run unit tests and coverage thresholds
+        if: ${{ needs.changes.result != 'success' || needs.changes.outputs.unit == 'true' }}
         run: pnpm test:cov
+
+      - name: No relevant changes
+        if: ${{ needs.changes.result == 'success' && needs.changes.outputs.unit != 'true' }}
+        run: echo "Unit-test inputs are unchanged; the required check succeeds without setup."
 
   e2e:
     name: pr-gate/e2e
+    needs: changes
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: 📥 Checkout code
+        if: ${{ needs.changes.result != 'success' || needs.changes.outputs.e2e == 'true' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: true
 
       - name: 📦 Set up project
+        if: ${{ needs.changes.result != 'success' || needs.changes.outputs.e2e == 'true' }}
         uses: PiesP/browser-core/automation/actions/setup-project@f630a8f0119dd6b4f1aa011f8510489936c7a7b9
         with:
           node-version: ${{ env.NODE_VERSION }}
 
       - name: 🎭 Cache Playwright browsers
+        if: ${{ needs.changes.result != 'success' || needs.changes.outputs.e2e == 'true' }}
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
@@ -94,12 +155,13 @@ jobs:
             playwright-${{ runner.os }}-
 
       - name: 🎭 Run E2E tests
+        if: ${{ needs.changes.result != 'success' || needs.changes.outputs.e2e == 'true' }}
         run: |
           pnpm exec playwright install --with-deps chromium firefox
           xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" pnpm test:e2e
 
       - name: 📤 Upload Playwright diagnostics
-        if: ${{ failure() && !cancelled() }}
+        if: ${{ (needs.changes.result != 'success' || needs.changes.outputs.e2e == 'true') && failure() && !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: playwright-diagnostics-${{ github.sha }}
@@ -109,28 +171,42 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+      - name: No relevant changes
+        if: ${{ needs.changes.result == 'success' && needs.changes.outputs.e2e != 'true' }}
+        run: echo "Browser-flow inputs are unchanged; the required check succeeds without setup."
+
   build:
     name: pr-gate/build
-    needs: quality
+    needs: [changes, quality]
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
+      - name: Enforce quality prerequisite
+        if: ${{ needs.quality.result != 'success' }}
+        run: |
+          echo "The quality prerequisite did not succeed." >&2
+          exit 1
+
       - name: 📥 Checkout code
+        if: ${{ needs.quality.result == 'success' && (needs.changes.result != 'success' || needs.changes.outputs.build == 'true') }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: true
 
       - name: 📦 Set up project
+        if: ${{ needs.quality.result == 'success' && (needs.changes.result != 'success' || needs.changes.outputs.build == 'true') }}
         uses: PiesP/browser-core/automation/actions/setup-project@f630a8f0119dd6b4f1aa011f8510489936c7a7b9
         with:
           node-version: ${{ env.NODE_VERSION }}
 
       - name: 🏗️ Build all targets
+        if: ${{ needs.quality.result == 'success' && (needs.changes.result != 'success' || needs.changes.outputs.build == 'true') }}
         run: pnpm build:all:ci
 
       - name: 📊 Upload userscript artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        if: ${{ needs.quality.result == 'success' && (needs.changes.result != 'success' || needs.changes.outputs.build == 'true') && github.event_name == 'push' && github.ref == 'refs/heads/master' }}
         with:
           name: userscript-${{ github.sha }}
           path: dist/
@@ -140,7 +216,7 @@ jobs:
 
       - name: 📊 Upload Chrome extension artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        if: ${{ needs.quality.result == 'success' && (needs.changes.result != 'success' || needs.changes.outputs.build == 'true') && github.event_name == 'push' && github.ref == 'refs/heads/master' }}
         with:
           name: extension-chrome-${{ github.sha }}
           path: dist-extension/
@@ -150,7 +226,7 @@ jobs:
 
       - name: 📊 Upload Firefox extension artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        if: ${{ needs.quality.result == 'success' && (needs.changes.result != 'success' || needs.changes.outputs.build == 'true') && github.event_name == 'push' && github.ref == 'refs/heads/master' }}
         with:
           name: extension-firefox-${{ github.sha }}
           path: dist-extension-firefox/
@@ -158,21 +234,34 @@ jobs:
           retention-days: 7
           compression-level: 9
 
+      - name: No relevant changes
+        if: ${{ needs.quality.result == 'success' && needs.changes.result == 'success' && needs.changes.outputs.build != 'true' }}
+        run: echo "Build inputs are unchanged; the required check succeeds without setup."
+
   duplication:
     name: pr-gate/duplication
+    needs: changes
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: 📥 Checkout code
+        if: ${{ needs.changes.result != 'success' || needs.changes.outputs.duplication == 'true' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: true
 
       - name: 🔧 Install nose
+        if: ${{ needs.changes.result != 'success' || needs.changes.outputs.duplication == 'true' }}
         run: bash scripts/ci/install-nose.sh
 
       - name: 🔎 Check for new duplication
+        if: ${{ needs.changes.result != 'success' || needs.changes.outputs.duplication == 'true' }}
         run: nose query src --baseline .nose-baseline.json --fail-on new
+
+      - name: No relevant changes
+        if: ${{ needs.changes.result == 'success' && needs.changes.outputs.duplication != 'true' }}
+        run: echo "Duplication inputs are unchanged; the required check succeeds without setup."
 
   report-pr-gate-statuses:
     name: Report PR gate statuses
