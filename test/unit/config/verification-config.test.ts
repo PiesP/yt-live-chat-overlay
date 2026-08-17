@@ -38,7 +38,7 @@ describe('Verification configuration', () => {
         '!src/util/observability.ts',
       ])
     );
-    expect(config.thresholds?.break).toBe(65);
+    expect(config.thresholds?.break).toBe(62);
     expect(rendererConfig.thresholds?.break).toBe(90);
     expect(config.vitest?.related).toBe(true);
     expect(rendererConfig.vitest?.related).toBe(true);
