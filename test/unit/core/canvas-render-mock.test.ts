@@ -559,6 +559,13 @@ describe('strokeTextOutline', () => {
     expect(state.ops).not.toContain('strokeText');
   });
 
+  it('skips stroke when outlineOpacity is 0', () => {
+    const { ctx, state } = createMockContext();
+    // biome-ignore format: this is a test
+    strokeTextOutline(ctx, 'test', 10, 20, '#fff', 2, 0);
+    expect(state.ops).not.toContain('strokeText');
+  });
+
   it('calls strokeText with correct parameters', () => {
     const { ctx, state } = createMockContext();
     // biome-ignore format: this is a test
@@ -573,6 +580,18 @@ describe('strokeTextOutline', () => {
     expect(state.ops).toContain('save');
     expect(state.ops).toContain('restore');
     expect(state.ops).toContain('strokeText');
+  });
+
+  it('clamps opacity and configures a rounded scaled stroke', () => {
+    const { ctx } = createMockContext();
+    // biome-ignore format: this is a test
+    strokeTextOutline(ctx, 'hello', 10, 20, '#ffffff', 2, 2);
+
+    expect(ctx.strokeStyle).toBe('rgba(0, 0, 0, 1)');
+    expect(ctx.lineWidth).toBe(1.7);
+    expect(ctx.lineJoin).toBe('round');
+    expect(ctx.lineCap).toBe('round');
+    expect(ctx.miterLimit).toBe(2);
   });
 });
 

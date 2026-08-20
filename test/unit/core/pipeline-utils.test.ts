@@ -124,7 +124,7 @@ describe('lane index maintenance', () => {
   });
 
   it('ignores missing lanes and stale lane-array indices', () => {
-    const retained: LaneMessage = { laneIndex: 1, laneArrayIndices: [] };
+    const retained: LaneMessage = { laneIndex: 1, laneArrayIndices: [0] };
 
     expect(() =>
       removeMessageFromLaneIndex(
@@ -138,6 +138,7 @@ describe('lane index maintenance', () => {
       const lanes = new Map<number, LaneMessage[]>([[1, [retained]]]);
       removeMessageFromLaneIndex(lanes, { laneIndex: 1, laneArrayIndices: [index] }, 1);
       expect(lanes.get(1)).toEqual([retained]);
+      expect(retained.laneArrayIndices).toEqual([0]);
     }
 
     const lanes = new Map<number, LaneMessage[]>([[1, [retained]]]);
@@ -156,6 +157,17 @@ describe('lane index maintenance', () => {
 
     expect(lanes.get(2)).toEqual([retained]);
     expect(Object.keys(retained.laneArrayIndices)).toEqual([]);
+  });
+
+  it('does not extend moved-message metadata at the exact slot-count boundary', () => {
+    const expired: LaneMessage = { laneIndex: 2, laneArrayIndices: [0] };
+    const retained: LaneMessage = { laneIndex: 1, laneArrayIndices: [0] };
+    const lanes = new Map<number, LaneMessage[]>([[2, [expired, retained]]]);
+
+    removeMessageFromLaneIndex(lanes, expired, 1);
+
+    expect(lanes.get(2)).toEqual([retained]);
+    expect(retained.laneArrayIndices).toEqual([0]);
   });
 });
 
