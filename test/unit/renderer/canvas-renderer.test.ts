@@ -7,6 +7,7 @@ import type { CanvasMessage } from '@renderer/constants';
 import { Overlay } from '@app/overlay';
 import type { ChatMessage, OverlaySettings } from '@app-types';
 import { LanguageDetectorService } from '@translation/language-detector';
+import { ImageFetchManager } from '@media/image-fetch-manager';
 
 // Mock OffscreenCanvas
 vi.stubGlobal('OffscreenCanvas', class {
@@ -82,6 +83,23 @@ describe('CanvasRenderer', () => {
     expect(() => new CanvasRenderer(overlay, settings)).not.toThrow();
   });
 
+  it('confines a bypassed font family to its single style property', () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    vi.spyOn(overlay, 'getContainer').mockReturnValue(container);
+
+    const renderer = new CanvasRenderer(
+      overlay,
+      makeSettings({ fontFamily: 'sans-serif;position:fixed;inset:0' })
+    );
+    const button = container.querySelector<HTMLButtonElement>('#yt-chat-overlay-status-action');
+
+    expect(button?.style.position).toBe('absolute');
+    expect(button?.style.inset).toBe('');
+    expect(button?.style.cssText).not.toContain('position: fixed');
+    renderer.destroy();
+  });
+
   it('replaces a transferred canvas before main-thread fallback', () => {
     const container = document.createElement('div');
     document.body.appendChild(container);
@@ -114,6 +132,26 @@ describe('CanvasRenderer', () => {
     const settings = makeSettings();
     const renderer = new CanvasRenderer(overlay, settings);
     expect(typeof renderer.addMessage).toBe('function');
+    renderer.destroy();
+  });
+
+  it('does not prefetch images for a message rejected by queue admission', () => {
+    const prefetch = vi.spyOn(ImageFetchManager.prototype, 'prefetchImages');
+    const renderer = new CanvasRenderer(overlay, makeSettings({ queueMaxSize: 1 }));
+
+    renderer.addMessage({
+      ...makeMessage('accepted-paid', 'accepted'),
+      kind: 'superchat',
+      superChat: { amount: '$10', tier: 'red' },
+    });
+    prefetch.mockClear();
+
+    renderer.addMessage({
+      ...makeMessage('dropped-image', 'dropped'),
+      authorPhotoUrl: 'https://yt3.ggpht.com/dropped.png',
+    });
+
+    expect(prefetch).not.toHaveBeenCalled();
     renderer.destroy();
   });
 
@@ -232,9 +270,18 @@ describe('CanvasRenderer', () => {
     const settings = makeSettings({ translationEnabled: true, translationSource: 'auto' });
     const renderer = new CanvasRenderer(overlay, settings);
     const internals = renderer as unknown as {
-      workerManager: { setActive(active: boolean): void };
+      workerManager: {
+        setActive(active: boolean): void;
+        worker: Worker | null;
+      };
       sourceSampleBuffer: string[];
     };
+    internals.workerManager.worker = {
+      addEventListener: vi.fn(),
+      postMessage: vi.fn(),
+      removeEventListener: vi.fn(),
+      terminate: vi.fn(),
+    } as unknown as Worker;
     internals.workerManager.setActive(true);
 
     renderer.addMessage(makeMessage('worker-language-sample', 'hello from worker rendering'));

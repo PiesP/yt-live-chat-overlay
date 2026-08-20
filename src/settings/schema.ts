@@ -62,6 +62,25 @@ const VALID_DANMAKU_MODES = [
   'bottom',
 ] as const satisfies readonly DanmakuMode[];
 
+const MAX_FONT_FAMILY_LENGTH = 256;
+const UNSAFE_FONT_FAMILY_CHARS = /[;{}\u0000-\u001f\u007f]/;
+
+export function isSafeFontFamily(value: string): boolean {
+  const trimmed = value.trim();
+  if (
+    trimmed.length === 0 ||
+    trimmed.length > MAX_FONT_FAMILY_LENGTH ||
+    UNSAFE_FONT_FAMILY_CHARS.test(trimmed)
+  ) {
+    return false;
+  }
+  return (
+    typeof CSS === 'undefined' ||
+    typeof CSS.supports !== 'function' ||
+    CSS.supports('font-family', trimmed)
+  );
+}
+
 const AUTHOR_RATE_LIMIT_VALUES = [
   'off',
   'normal',
@@ -155,7 +174,7 @@ const STRING_VALIDATORS: Partial<Record<keyof OverlaySettings, (v: string) => bo
   danmakuMode: (v) => VALID_DANMAKU_MODES.includes(v as (typeof VALID_DANMAKU_MODES)[number]),
   logLevel: (v) => isLogLevel(v),
   fontWeight: (v) => FONT_WEIGHT_VALUES.includes(v as FontWeight),
-  fontFamily: (_v) => true,
+  fontFamily: (v) => isSafeFontFamily(v),
   authorRateLimit: (v) => AUTHOR_RATE_LIMIT_VALUES.includes(v as AuthorRateLimitPreset),
   language: (v) => LANGUAGE_VALUES.includes(v as LanguageSetting),
   translationService: (v) => TRANSLATION_SERVICE_VALUES.includes(v as TranslationService),

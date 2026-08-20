@@ -99,6 +99,31 @@ describe('ImageFetchManager terminal lifecycle', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it('shares one global in-flight cap across emoji, author, and sticker loads', () => {
+    const manager = new ImageFetchManager();
+    manager.updateConfig({ ...DEFAULT_SETTINGS, emojiFetchLimit: 3 } as OverlaySettings, null);
+
+    for (let index = 0; index < 10; index++) {
+      manager.prefetchImages({
+        ...message(),
+        content: [],
+        authorPhotoUrl: `https://yt3.ggpht.com/author-${index}.png`,
+        superChat: {
+          amount: '$1',
+          tier: 'blue',
+          sticker: {
+            alt: 'sticker',
+            url: `https://yt3.ggpht.com/sticker-${index}.png`,
+          },
+        },
+      });
+    }
+
+    expect(PendingImage.instances).toHaveLength(3);
+    expect(manager.imageLoading.size).toBe(3);
+    manager.destroy();
+  });
+
   it('keeps cleanup paused across config updates and restarts it once on resume', () => {
     const manager = new ImageFetchManager();
     manager.updateConfig(DEFAULT_SETTINGS as OverlaySettings, null);

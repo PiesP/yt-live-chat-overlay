@@ -88,6 +88,16 @@ jobs:
           test -x "$CODEX_SECURITY_BIN"
           "$CODEX_SECURITY_BIN" --version
 
+      - name: Preserve trusted scan policy
+        run: |
+          set -euo pipefail
+          policy_dir="$RUNNER_TEMP/codex-security-policy"
+          install -d -m 0700 "$policy_dir"
+          install -m 0600 .github/codex-security/scan.md "$policy_dir/scan.md"
+          install -m 0600 .github/codex-security/threat-model.md "$policy_dir/threat-model.md"
+          install -m 0600 .github/SECURITY.md "$policy_dir/SECURITY.md"
+          install -m 0600 PRIVACY.md "$policy_dir/PRIVACY.md"
+
       - name: Check out exact source revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -109,6 +119,7 @@ jobs:
           CODEX_SECURITY_STATE_DIR: ${{ runner.temp }}/codex-security-state
           CLI: ${{ runner.temp }}/codex-security/node_modules/.bin/codex-security
           OUTPUT_DIR: ${{ runner.temp }}/codex-security-results
+          POLICY_DIR: ${{ runner.temp }}/codex-security-policy
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
@@ -116,10 +127,10 @@ jobs:
           common=(
             scan "$GITHUB_WORKSPACE"
             --output-dir "$OUTPUT_DIR"
-            --knowledge-base "$GITHUB_WORKSPACE/.github/codex-security/threat-model.md"
-            --knowledge-base "$GITHUB_WORKSPACE/.github/SECURITY.md"
-            --knowledge-base "$GITHUB_WORKSPACE/PRIVACY.md"
-            --scan-prompt-file "$GITHUB_WORKSPACE/.github/codex-security/scan.md"
+            --knowledge-base "$POLICY_DIR/threat-model.md"
+            --knowledge-base "$POLICY_DIR/SECURITY.md"
+            --knowledge-base "$POLICY_DIR/PRIVACY.md"
+            --scan-prompt-file "$POLICY_DIR/scan.md"
             --auth api-key
             --headless
             --json

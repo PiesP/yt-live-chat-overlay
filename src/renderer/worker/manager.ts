@@ -499,8 +499,8 @@ export class RenderWorkerManager {
    * Send a message to the render worker for display.
    * Serializes ChatMessage into lightweight cross-thread format.
    */
-  sendToWorker(message: ChatMessage, msgId?: string): void {
-    if (!this.worker) return;
+  sendToWorker(message: ChatMessage, msgId?: string): boolean {
+    if (!this.worker) return false;
 
     const priority = this.deps.getMessagePriority(message);
     const id = msgId ?? message.id ?? `${message.timestamp}-${Math.random()}`;
@@ -511,7 +511,7 @@ export class RenderWorkerManager {
     if (!isKnownReplacement && this._queueDepth > maxWorkerQueue) {
       if (priority < 40) {
         this.deps.observability.onMessageDropped('worker_backpressure');
-        return;
+        return false;
       }
     }
 
@@ -564,6 +564,7 @@ export class RenderWorkerManager {
     // cross-thread overhead while keeping display latency to one microtask.
     this.pendingBatch.push({ msg: workerMessage, transferredImages, transferList });
     this.scheduleBatchFlush();
+    return true;
   }
 
   /**

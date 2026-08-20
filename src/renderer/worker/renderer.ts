@@ -1928,9 +1928,12 @@ export class WorkerRenderer {
       (u) => !cache.has(u) && !this.fetching.has(u) && !this.isImageFetchFailed(u)
     );
     if (toFetch.length === 0) return;
+    const fetchLimit = this.config?.emojiFetchLimit ?? 8;
+    const availableSlots = Math.max(0, fetchLimit - this.fetchControllers.size);
+    if (availableSlots === 0) return;
     let idx = 0;
     const workers: Promise<void>[] = [];
-    for (let i = 0; i < Math.min(this.config?.emojiFetchLimit ?? 8, toFetch.length); i++) {
+    for (let i = 0; i < Math.min(availableSlots, toFetch.length); i++) {
       workers.push(
         (async () => {
           while (idx < toFetch.length) {

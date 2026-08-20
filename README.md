@@ -21,7 +21,7 @@ Chrome and temporary Firefox extension builds.
 
 Install [Tampermonkey](https://www.tampermonkey.net/) or
 [Violentmonkey](https://violentmonkey.github.io/), then install the
-[latest userscript](https://cdn.jsdelivr.net/gh/PiesP/yt-live-chat-overlay@release/yt-live-chat-overlay.user.js).
+[latest userscript](https://github.com/PiesP/yt-live-chat-overlay/releases/latest/download/yt-live-chat-overlay.user.js).
 
 The userscript manager checks the metadata URL embedded in the script for
 updates.

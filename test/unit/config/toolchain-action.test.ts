@@ -11,6 +11,7 @@ const centralWorkflowJobs = {
 } as const;
 const releaseJobs = ['quality', 'unit', 'e2e', 'mutation', 'build'];
 const releaseAction = './.github/actions/setup-release';
+const releasePrepare = readFileSync(resolve(root, 'scripts/release/prepare.ts'), 'utf8');
 
 function topLevelBlock(workflow: string, key: string): string {
   const marker = `${key}:\n`;
@@ -60,7 +61,20 @@ describe('project setup actions', () => {
     }
     expect(releaseWorkflow.split(releaseAction)).toHaveLength(releaseJobs.length + 1);
     expect(releaseWorkflow).not.toContain(centralAction);
-    expect(topLevelBlock(releaseWorkflow, 'on')).toBe('on:\n  push:\n    tags:\n      - "v*"');
+    expect(topLevelBlock(releaseWorkflow, 'on')).toContain('workflow_dispatch:');
+    expect(topLevelBlock(releaseWorkflow, 'on')).toContain('tag:');
+    expect(releaseWorkflow).toContain("github.ref == 'refs/heads/master'");
+    expect(releaseWorkflow).toContain('git merge-base --is-ancestor "$release_sha" "$GITHUB_SHA"');
+    expect(releaseWorkflow).toContain('ref: ${{ needs.provenance.outputs.release-sha }}');
+    expect(releaseWorkflow).not.toContain('publish_branch: release');
+    expect(releaseWorkflow).not.toContain('purge.jsdelivr.net');
+    expect(releaseWorkflow).toContain(
+      'RELEASE_SHA: ${{ needs.provenance.outputs.release-sha }}'
+    );
+    expect(releasePrepare).toContain("execFileSync('git', ['rev-parse', 'HEAD']");
+    expect(releasePrepare).toContain('expectedCommit !== checkedOutCommit');
+    expect(releasePrepare).toContain('const commit = releaseCommit;');
+    expect(releasePrepare).not.toContain('process.env.GITHUB_SHA');
   });
 
   it('keeps the release install recipe local and immutable', () => {

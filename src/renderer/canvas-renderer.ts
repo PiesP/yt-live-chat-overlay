@@ -374,7 +374,10 @@ export class CanvasRenderer extends RendererBase {
         `z-index:1;cursor:pointer;border:0;border-radius:${statusBarLayout.pillRadius}px;` +
         `padding:${statusBarLayout.paddingY}px ${statusBarLayout.paddingX}px;` +
         `background:${colors.bg};color:${colors.text};` +
-        `font:${statusBarLayout.fontSize}px/1.5 ${this.settings.fontFamily}`;
+        `font-size:${statusBarLayout.fontSize}px;line-height:1.5`;
+      // Keep the configurable family inside one CSS property even if a caller
+      // bypasses settings normalization.
+      statusActionButton.style.fontFamily = this.settings.fontFamily;
       statusActionButton.addEventListener('click', () => {
         if (this.connectionStatus === 'disconnected') this.onStatusBarClick?.();
       });
@@ -659,8 +662,9 @@ export class CanvasRenderer extends RendererBase {
   addMessage(message: ChatMessage): void {
     if (message.actionType === 'replace' && message.id) {
       if (this.workerManager.isActive) {
-        this.workerManager.sendToWorker(message, message.id);
-        this.prefetchAndTranslateForWorker(message, message.id);
+        if (this.workerManager.sendToWorker(message, message.id)) {
+          this.prefetchAndTranslateForWorker(message, message.id);
+        }
         this.lastRenderActivity = performance.now();
         return;
       }
@@ -675,9 +679,9 @@ export class CanvasRenderer extends RendererBase {
     // lane heap, collision detection, anti-block logic, and draw.
     if (this.workerManager.isActive) {
       const msgId = message.id ?? `${message.timestamp}-${++fallbackMessageIdCounter}`;
-      this.workerManager.sendToWorker(message, msgId);
-
-      this.prefetchAndTranslateForWorker(message, msgId);
+      if (this.workerManager.sendToWorker(message, msgId)) {
+        this.prefetchAndTranslateForWorker(message, msgId);
+      }
       this.lastRenderActivity = performance.now();
 
       return;
@@ -777,8 +781,9 @@ export class CanvasRenderer extends RendererBase {
     if (this.isVideoPaused) return;
     if (this.workerManager.isActive) {
       const msgId = message.id ?? `${message.timestamp}-${++fallbackMessageIdCounter}`;
-      this.workerManager.sendToWorker(message, msgId);
-      this.prefetchAndTranslateForWorker(message, msgId);
+      if (this.workerManager.sendToWorker(message, msgId)) {
+        this.prefetchAndTranslateForWorker(message, msgId);
+      }
       return;
     }
     this.enqueueMessage(message, false);
@@ -793,8 +798,9 @@ export class CanvasRenderer extends RendererBase {
     for (const message of messages) {
       if (this.workerManager.isActive) {
         const msgId = message.id ?? `${message.timestamp}-${++fallbackMessageIdCounter}`;
-        this.workerManager.sendToWorker(message, msgId);
-        this.prefetchAndTranslateForWorker(message, msgId);
+        if (this.workerManager.sendToWorker(message, msgId)) {
+          this.prefetchAndTranslateForWorker(message, msgId);
+        }
       } else {
         this.enqueueMessage(message, false);
       }
@@ -803,7 +809,6 @@ export class CanvasRenderer extends RendererBase {
 
   private enqueueMessage(message: ChatMessage, trackDrops: boolean): void {
     const priority = CanvasRenderer.getMessagePriority(message);
-    this.imageFetchManager.prefetchImages(message);
 
     const result = enqueueWithOverflow(
       this.pendingQueue,
@@ -815,6 +820,7 @@ export class CanvasRenderer extends RendererBase {
       this.settings.queueMaxSize
     );
     if (result === 'dropped') return;
+    this.imageFetchManager.prefetchImages(message);
 
     this.updateBacklogPause();
 
