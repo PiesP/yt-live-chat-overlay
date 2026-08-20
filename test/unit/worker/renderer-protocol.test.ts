@@ -618,6 +618,31 @@ describe('Worker message protocol', () => {
       expect(internals.failedImageFetches.has(url)).toBe(true);
     });
 
+    it('shares one global fetch limit across concurrent worker prefetch calls', async () => {
+      const renderer = initializeRenderer({ emojiFetchLimit: 2 });
+      const internals = renderer as unknown as {
+        emojiCache: unknown;
+        prefetchImages: (urls: string[], cache: unknown) => Promise<void>;
+      };
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(
+        (_input, init) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted')));
+          })
+      );
+
+      const prefetches = [
+        internals.prefetchImages(['https://yt3.ggpht.com/one'], internals.emojiCache),
+        internals.prefetchImages(['https://yt3.ggpht.com/two'], internals.emojiCache),
+        internals.prefetchImages(['https://yt3.ggpht.com/three'], internals.emojiCache),
+      ];
+      await Promise.resolve();
+
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      renderer.handleMessage(makeEvent({ type: 'destroy' }));
+      await Promise.all(prefetches);
+    });
+
     it('bounds and cleans worker image failure state on config update and destroy', () => {
       const renderer = initializeRenderer({ failedEmojiRetryMins: 5 });
       const internals = renderer as unknown as {

@@ -152,6 +152,7 @@ export class ImageFetchManager {
     if (this.isDestroyed) return;
     if (cache.has(url)) return;
     if (this.imageLoading.has(url)) return;
+    if (!this.hasGlobalFetchSlot()) return;
     if (this.isImageUncacheable(url, cache)) return;
     if (!isAllowedImageUrl(url)) {
       ImageFetchManager.log.debug('media.image.blocked', { reason: 'not-in-cdn-whitelist', url });
@@ -300,7 +301,7 @@ export class ImageFetchManager {
       if (this.emojiCache.has(emojiUrl)) continue;
       if (this.isImageUncacheable(emojiUrl, this.emojiCache)) continue;
       if (this.isEmojiFetchFailed(emojiUrl)) continue;
-      if (this.emojiFetching.size >= this.emojiFetchLimit) continue;
+      if (!this.hasGlobalFetchSlot()) continue;
       this.emojiFetching.add(emojiUrl);
       this.emojiFetchingStarted.set(emojiUrl, performance.now());
       const url = emojiUrl;
@@ -351,6 +352,10 @@ export class ImageFetchManager {
     if (stickerUrl) {
       this.loadImage(stickerUrl, this.stickerCache);
     }
+  }
+
+  private hasGlobalFetchSlot(): boolean {
+    return this.emojiFetching.size + this.imageLoading.size < this.emojiFetchLimit;
   }
 
   /**

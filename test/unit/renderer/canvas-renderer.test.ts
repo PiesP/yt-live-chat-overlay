@@ -7,6 +7,7 @@ import type { CanvasMessage } from '@renderer/constants';
 import { Overlay } from '@app/overlay';
 import type { ChatMessage, OverlaySettings } from '@app-types';
 import { LanguageDetectorService } from '@translation/language-detector';
+import { ImageFetchManager } from '@media/image-fetch-manager';
 
 // Mock OffscreenCanvas
 vi.stubGlobal('OffscreenCanvas', class {
@@ -134,6 +135,26 @@ describe('CanvasRenderer', () => {
     renderer.destroy();
   });
 
+  it('does not prefetch images for a message rejected by queue admission', () => {
+    const prefetch = vi.spyOn(ImageFetchManager.prototype, 'prefetchImages');
+    const renderer = new CanvasRenderer(overlay, makeSettings({ queueMaxSize: 1 }));
+
+    renderer.addMessage({
+      ...makeMessage('accepted-paid', 'accepted'),
+      kind: 'superchat',
+      superChat: { amount: '$10', color: '#ff0000' },
+    });
+    prefetch.mockClear();
+
+    renderer.addMessage({
+      ...makeMessage('dropped-image', 'dropped'),
+      authorPhotoUrl: 'https://yt3.ggpht.com/dropped.png',
+    });
+
+    expect(prefetch).not.toHaveBeenCalled();
+    renderer.destroy();
+  });
+
   it('replaces a pending message with the same id instead of duplicating it', () => {
     const renderer = new CanvasRenderer(overlay, makeSettings());
     const internals = renderer as unknown as {
@@ -249,9 +270,18 @@ describe('CanvasRenderer', () => {
     const settings = makeSettings({ translationEnabled: true, translationSource: 'auto' });
     const renderer = new CanvasRenderer(overlay, settings);
     const internals = renderer as unknown as {
-      workerManager: { setActive(active: boolean): void };
+      workerManager: {
+        setActive(active: boolean): void;
+        worker: Worker | null;
+      };
       sourceSampleBuffer: string[];
     };
+    internals.workerManager.worker = {
+      addEventListener: vi.fn(),
+      postMessage: vi.fn(),
+      removeEventListener: vi.fn(),
+      terminate: vi.fn(),
+    } as unknown as Worker;
     internals.workerManager.setActive(true);
 
     renderer.addMessage(makeMessage('worker-language-sample', 'hello from worker rendering'));

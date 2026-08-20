@@ -178,7 +178,7 @@ describe('RenderWorkerManager', () => {
       // sendToWorker should return early when no worker is set
       // (no crash even without worker)
       const msg = { id: 'test1', content: [{ type: 'text' as const, content: 'hello' }] } as any;
-      manager.sendToWorker(msg);
+      expect(manager.sendToWorker(msg)).toBe(false);
       // With no worker, messages are dropped silently
       expect(deps.observability.onMessageDropped).not.toHaveBeenCalled();
     });
@@ -192,16 +192,18 @@ describe('RenderWorkerManager', () => {
         removeEventListener: vi.fn(),
       } as unknown as Worker;
 
-      manager.sendToWorker(
-        {
-          id: 'replacement',
-          timestamp: Date.now(),
-          content: [{ type: 'text', content: 'original' }],
-          kind: 'chat',
-          authorType: 'normal',
-        } as any,
-        'replacement'
-      );
+      expect(
+        manager.sendToWorker(
+          {
+            id: 'replacement',
+            timestamp: Date.now(),
+            content: [{ type: 'text', content: 'original' }],
+            kind: 'chat',
+            authorType: 'normal',
+          } as any,
+          'replacement'
+        )
+      ).toBe(true);
       await Promise.resolve();
       postMessage.mockClear();
       (manager as any)._queueDepth = deps.settings.queueMaxSize * 2 + 1;
@@ -238,17 +240,19 @@ describe('RenderWorkerManager', () => {
       } as unknown as Worker;
       (manager as any)._queueDepth = deps.settings.queueMaxSize * 2 + 1;
 
-      manager.sendToWorker(
-        {
-          id: 'fresh-replacement',
-          actionType: 'replace',
-          timestamp: Date.now(),
-          content: [{ type: 'text', content: 'updated' }],
-          kind: 'chat',
-          authorType: 'normal',
-        } as any,
-        'fresh-replacement'
-      );
+      expect(
+        manager.sendToWorker(
+          {
+            id: 'fresh-replacement',
+            actionType: 'replace',
+            timestamp: Date.now(),
+            content: [{ type: 'text', content: 'updated' }],
+            kind: 'chat',
+            authorType: 'normal',
+          } as any,
+          'fresh-replacement'
+        )
+      ).toBe(false);
       await Promise.resolve();
 
       expect(deps.observability.onMessageDropped).toHaveBeenCalledWith('worker_backpressure');
