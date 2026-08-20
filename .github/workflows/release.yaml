@@ -213,6 +213,7 @@ jobs:
       - name: 📦 Prepare release metadata
         env:
           RELEASE_VERSION: ${{ needs.provenance.outputs.version }}
+          RELEASE_SHA: ${{ needs.provenance.outputs.release-sha }}
         run: pnpm release:prepare
 
       - name: 📊 Upload release bundle
