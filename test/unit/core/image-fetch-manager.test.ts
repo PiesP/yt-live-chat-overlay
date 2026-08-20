@@ -110,8 +110,11 @@ describe('ImageFetchManager terminal lifecycle', () => {
         authorPhotoUrl: `https://yt3.ggpht.com/author-${index}.png`,
         superChat: {
           amount: '$1',
-          color: '#000000',
-          sticker: { url: `https://yt3.ggpht.com/sticker-${index}.png` },
+          tier: 'blue',
+          sticker: {
+            alt: 'sticker',
+            url: `https://yt3.ggpht.com/sticker-${index}.png`,
+          },
         },
       });
     }

@@ -142,7 +142,7 @@ describe('CanvasRenderer', () => {
     renderer.addMessage({
       ...makeMessage('accepted-paid', 'accepted'),
       kind: 'superchat',
-      superChat: { amount: '$10', color: '#ff0000' },
+      superChat: { amount: '$10', tier: 'red' },
     });
     prefetch.mockClear();
 
