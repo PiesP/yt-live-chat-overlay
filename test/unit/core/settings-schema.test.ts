@@ -725,6 +725,23 @@ describe('normalizeStoredSettings', () => {
     expect(result.fontFamily).toBe('Arial, sans-serif');
   });
 
+  it('rejects font-family declaration escapes from storage', () => {
+    const result = normalizeStoredSettings({
+      fontFamily: 'sans-serif;position:fixed;inset:0',
+    });
+
+    expect(result.fontFamily).toBe(DEFAULT_SETTINGS.fontFamily);
+  });
+
+  it('rejects control characters and oversized font families', () => {
+    expect(normalizeStoredSettings({ fontFamily: 'Arial\nserif' }).fontFamily).toBe(
+      DEFAULT_SETTINGS.fontFamily
+    );
+    expect(normalizeStoredSettings({ fontFamily: 'A'.repeat(257) }).fontFamily).toBe(
+      DEFAULT_SETTINGS.fontFamily
+    );
+  });
+
   it('accepts backlogMode values from storage', () => {
     const result = normalizeStoredSettings({ backlogMode: 'full' });
     expect(result.backlogMode).toBe('full');

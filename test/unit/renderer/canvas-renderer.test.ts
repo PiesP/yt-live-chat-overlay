@@ -82,6 +82,23 @@ describe('CanvasRenderer', () => {
     expect(() => new CanvasRenderer(overlay, settings)).not.toThrow();
   });
 
+  it('confines a bypassed font family to its single style property', () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    vi.spyOn(overlay, 'getContainer').mockReturnValue(container);
+
+    const renderer = new CanvasRenderer(
+      overlay,
+      makeSettings({ fontFamily: 'sans-serif;position:fixed;inset:0' })
+    );
+    const button = container.querySelector<HTMLButtonElement>('#yt-chat-overlay-status-action');
+
+    expect(button?.style.position).toBe('absolute');
+    expect(button?.style.inset).toBe('');
+    expect(button?.style.cssText).not.toContain('position: fixed');
+    renderer.destroy();
+  });
+
   it('replaces a transferred canvas before main-thread fallback', () => {
     const container = document.createElement('div');
     document.body.appendChild(container);

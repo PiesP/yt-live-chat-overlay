@@ -374,7 +374,10 @@ export class CanvasRenderer extends RendererBase {
         `z-index:1;cursor:pointer;border:0;border-radius:${statusBarLayout.pillRadius}px;` +
         `padding:${statusBarLayout.paddingY}px ${statusBarLayout.paddingX}px;` +
         `background:${colors.bg};color:${colors.text};` +
-        `font:${statusBarLayout.fontSize}px/1.5 ${this.settings.fontFamily}`;
+        `font-size:${statusBarLayout.fontSize}px;line-height:1.5`;
+      // Keep the configurable family inside one CSS property even if a caller
+      // bypasses settings normalization.
+      statusActionButton.style.fontFamily = this.settings.fontFamily;
       statusActionButton.addEventListener('click', () => {
         if (this.connectionStatus === 'disconnected') this.onStatusBarClick?.();
       });
