@@ -71,17 +71,34 @@ describe('Codex Security CLI supply-chain controls', () => {
   it('installs the trusted base lock before checking out pull-request source', () => {
     const trustedCheckout = workflow.indexOf('name: Check out trusted CLI lock');
     const lockedInstall = workflow.indexOf('name: Install locked Codex Security');
+    const trustedPolicy = workflow.indexOf('name: Preserve trusted scan policy');
     const sourceCheckout = workflow.indexOf('name: Check out exact source revision');
 
     expect(trustedCheckout).toBeGreaterThan(-1);
     expect(lockedInstall).toBeGreaterThan(trustedCheckout);
-    expect(sourceCheckout).toBeGreaterThan(lockedInstall);
+    expect(trustedPolicy).toBeGreaterThan(lockedInstall);
+    expect(sourceCheckout).toBeGreaterThan(trustedPolicy);
     expect(workflow).toContain(
       "ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.sha }}"
     );
     expect(workflow).toContain('npm ci \\\n');
     expect(workflow).toContain('.github/codex-security/package-lock.json');
     expect(workflow).not.toMatch(/\bnpm install\b/);
+  });
+
+  it('uses trusted-base policy copies as scanner control inputs', () => {
+    expect(workflow).toContain('install -d -m 0700 "$policy_dir"');
+    expect(workflow).toContain(
+      'install -m 0600 .github/codex-security/scan.md "$policy_dir/scan.md"'
+    );
+    expect(workflow).toContain('POLICY_DIR: ${{ runner.temp }}/codex-security-policy');
+    expect(workflow).toContain('--scan-prompt-file "$POLICY_DIR/scan.md"');
+    expect(workflow).toContain('--knowledge-base "$POLICY_DIR/threat-model.md"');
+    expect(workflow).toContain('--knowledge-base "$POLICY_DIR/SECURITY.md"');
+    expect(workflow).toContain('--knowledge-base "$POLICY_DIR/PRIVACY.md"');
+    expect(workflow).not.toContain(
+      '--scan-prompt-file "$GITHUB_WORKSPACE/.github/codex-security/scan.md"'
+    );
   });
 
   it('keys the local cache by the complete install recipe and uses the frozen install', () => {
