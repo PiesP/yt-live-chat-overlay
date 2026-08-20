@@ -43,6 +43,9 @@ describe('parseAnyColor', () => {
 
     it('returns null for invalid hex', () => {
       expect(parseAnyColor('#GGGGGG')).toBeNull();
+      expect(parseAnyColor('#GG00FF')).toBeNull();
+      expect(parseAnyColor('#FFGGFF')).toBeNull();
+      expect(parseAnyColor('#FFFFGG')).toBeNull();
       expect(parseAnyColor('#G00')).toBeNull();
       expect(parseAnyColor('#0G0')).toBeNull();
       expect(parseAnyColor('#00G')).toBeNull();
@@ -170,6 +173,18 @@ describe('computeReadableTextColor', () => {
     expect(computeReadableTextColor('#0AD85F')).toBe('#000000');
     expect(computeReadableTextColor('#D90AFA')).toBe('#ffffff');
     expect(computeReadableTextColor('#48D70A')).toBe('#000000');
+  });
+
+  it.each([
+    // Low- and high-branch transfer cases for red, green, then blue.
+    'rgb(1, 201, 254)',
+    'rgb(11, 206, 231)',
+    'rgb(151, 10, 255)',
+    'rgb(0, 182, 248)',
+    'rgb(0, 211, 10)',
+    'rgb(0, 199, 253)',
+  ])('applies the WCAG transfer curve to every channel for %s', (color) => {
+    expect(computeReadableTextColor(color)).toBe('#ffffff');
   });
 });
 
