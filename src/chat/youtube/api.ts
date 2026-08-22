@@ -14,6 +14,7 @@ import {
   isRecord,
   type JsonObject,
 } from '@chat/youtube/request';
+import { readBoundedChatResponseText } from '@chat/youtube/response-text';
 import { isYouTubeLive, isYouTubeWatch } from '@chat/youtube/url-pattern';
 import { isAbortError, sleep } from '@util/dom';
 import { createLogger } from '@util/logging';
@@ -547,7 +548,7 @@ const fetchChatEndpoint = async (
         );
       }
 
-      return response.json();
+      return JSON.parse(await readBoundedChatResponseText(response)) as unknown;
     } catch (error: unknown) {
       // Don't retry abort errors — propagate immediately
       if (isAbortError(error)) throw error;

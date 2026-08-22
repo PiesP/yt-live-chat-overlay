@@ -567,3 +567,147 @@ describe('extractChatEvents message-boundary normalization', () => {
     });
   });
 });
+
+describe('extractChatEvents hostile batch bounds', () => {
+  const settings = (queueMaxSize: number): OverlaySettings =>
+    mkSettings({ allowShortTextMessages: true, queueMaxSize });
+  const textAction = (id: string, actionType: 'add' | 'replace' = 'add') => ({
+    [`${actionType}ChatItemAction`]: {
+      item: {
+        liveChatTextMessageRenderer: {
+          id,
+          authorName: { simpleText: 'Viewer' },
+          message: { simpleText: `message-${id}` },
+        },
+      },
+    },
+  });
+  const paidAction = (id: string, kind: 'superchat' | 'membership') => ({
+    addChatItemAction: {
+      item:
+        kind === 'superchat'
+          ? {
+              liveChatPaidMessageRenderer: {
+                id,
+                authorName: { simpleText: 'Supporter' },
+                purchaseAmountText: { simpleText: '$5.00' },
+                message: { simpleText: 'paid' },
+              },
+            }
+          : {
+              liveChatMembershipItemRenderer: {
+                id,
+                authorName: { simpleText: 'Member' },
+                message: { simpleText: 'member' },
+              },
+            },
+    },
+  });
+
+  it('caps top-level ordinary actions without capacity scans', () => {
+    let stats: import('@chat/message-parser').ChatEventExtractionStats | undefined;
+    const events = extractChatEvents(
+      Array.from({ length: 2000 }, (_, index) => textAction(`ordinary-${index}`)),
+      () => settings(10_000),
+      (value) => {
+        stats = value;
+      }
+    );
+
+    expect(events).toHaveLength(1000);
+    expect(stats).toMatchObject({ capacity: 1000, ordinaryScanSteps: 0 });
+  });
+
+  it('caps all-priority actions without repeated ordinary scans', () => {
+    let stats: import('@chat/message-parser').ChatEventExtractionStats | undefined;
+    const events = extractChatEvents(
+      Array.from({ length: 500 }, (_, index) => paidAction(`paid-${index}`, 'superchat')),
+      () => settings(20),
+      (value) => {
+        stats = value;
+      }
+    );
+
+    expect(events).toHaveLength(20);
+    expect(stats).toMatchObject({ capacityDrops: 60, ordinaryScanSteps: 0 });
+  });
+
+  it('counts invalid and nested actions against the traversal budget', () => {
+    let invalidStats: import('@chat/message-parser').ChatEventExtractionStats | undefined;
+    expect(
+      extractChatEvents(Array.from({ length: 1000 }), () => settings(5), (value) => {
+        invalidStats = value;
+      })
+    ).toEqual([]);
+    expect(invalidStats).toMatchObject({ traversedActions: 20, budgetExhausted: true });
+
+    let nestedStats: import('@chat/message-parser').ChatEventExtractionStats | undefined;
+    const nested = {
+      replayChatItemAction: {
+        videoOffsetTimeMsec: '1000',
+        actions: Array.from({ length: 1000 }, (_, index) => textAction(`nested-${index}`)),
+      },
+    };
+    const events = extractChatEvents([nested], () => settings(5), (value) => {
+      nestedStats = value;
+    });
+    expect(events).toHaveLength(5);
+    expect(nestedStats).toMatchObject({ traversedActions: 20, budgetExhausted: true });
+  });
+
+  it('updates same-ID replacements and prioritizes protected events at capacity', () => {
+    let stats: import('@chat/message-parser').ChatEventExtractionStats | undefined;
+    const events = extractChatEvents(
+      [
+        textAction('a'),
+        textAction('b'),
+        textAction('c'),
+        textAction('b', 'replace'),
+        paidAction('paid', 'superchat'),
+        paidAction('member', 'membership'),
+        textAction('unseen', 'replace'),
+      ],
+      () => settings(3),
+      (value) => {
+        stats = value;
+      }
+    );
+
+    expect(events.map((event) => [event.message.id, event.message.actionType])).toEqual([
+      ['paid', 'add'],
+      ['b', 'replace'],
+      ['member', 'add'],
+    ]);
+    expect(stats?.ordinaryScanSteps).toBeLessThanOrEqual(3);
+  });
+
+  it('does not let a fresh replacement flood evict admitted ordinary events', () => {
+    const events = extractChatEvents(
+      [
+        textAction('a'),
+        textAction('b'),
+        textAction('c'),
+        ...Array.from({ length: 100 }, (_, index) => textAction(`fresh-${index}`, 'replace')),
+      ],
+      () => settings(3)
+    );
+
+    expect(events.map((event) => event.message.id)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('allows an optional known-target attestation to protect a replacement', () => {
+    const isKnownTarget = (id: string): boolean => id === 'known';
+    const events = extractChatEvents(
+      [textAction('a'), textAction('b'), textAction('c'), textAction('known', 'replace')],
+      () => settings(3),
+      undefined,
+      isKnownTarget
+    );
+
+    expect(events.map((event) => [event.message.id, event.message.actionType])).toEqual([
+      ['known', 'replace'],
+      ['b', 'add'],
+      ['c', 'add'],
+    ]);
+  });
+});

@@ -264,7 +264,12 @@ export class LiveChatSource extends ChatSource {
     isInitialSeed: boolean = false,
     signal?: AbortSignal
   ): Promise<void> {
-    const events = extractChatEvents(payload.actions, this.getSettings);
+    const events = extractChatEvents(
+      payload.actions,
+      this.getSettings,
+      undefined,
+      this.isKnownReplacementTarget
+    );
 
     if (events.length > 0) {
       let messages: ChatMessage[];

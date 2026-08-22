@@ -54,6 +54,109 @@ interface SupportedRenderer {
   renderer: JsonObject;
 }
 
+export interface ChatEventExtractionStats {
+  capacity: number;
+  traversalBudget: number;
+  traversedActions: number;
+  capacityDrops: number;
+  ordinaryScanSteps: number;
+  budgetExhausted: boolean;
+}
+
+const MAX_CHAT_EVENTS = 1000;
+const ACTION_TRAVERSAL_MULTIPLIER = 4;
+
+function resolveEventCapacity(settings: Readonly<OverlaySettings>): number {
+  const configured = Math.floor(settings.queueMaxSize);
+  if (!Number.isFinite(configured)) return 1;
+  return Math.max(1, Math.min(MAX_CHAT_EVENTS, configured));
+}
+
+function isPriorityEvent(event: ChatEvent): boolean {
+  return event.message.kind === 'superchat' || event.message.kind === 'membership';
+}
+
+class BoundedChatEventAccumulator {
+  readonly events: ChatEvent[] = [];
+  capacityDrops = 0;
+  ordinaryScanSteps = 0;
+  private ordinaryCount = 0;
+  private ordinarySearchCursor = 0;
+  private readonly indicesById = new Map<string, number>();
+  private readonly protectedSlots: boolean[] = [];
+
+  constructor(
+    private readonly capacity: number,
+    private readonly isKnownReplacementTarget?: (id: string) => boolean
+  ) {}
+
+  add(event: ChatEvent): void {
+    const id = event.message.id;
+    const existingIndex = id ? this.indicesById.get(id) : undefined;
+    if (existingIndex !== undefined) {
+      if (event.message.actionType !== 'replace') return;
+      if (this.protectedSlots[existingIndex] !== true) this.ordinaryCount--;
+      this.events[existingIndex] = event;
+      this.protectedSlots[existingIndex] = true;
+      return;
+    }
+
+    const protectedEvent =
+      isPriorityEvent(event) ||
+      (event.message.actionType === 'replace' &&
+        id !== undefined &&
+        this.isKnownReplacementTarget?.(id) === true);
+
+    if (this.events.length < this.capacity) {
+      this.append(event, protectedEvent);
+      return;
+    }
+
+    if (!protectedEvent || this.ordinaryCount === 0) {
+      this.capacityDrops++;
+      return;
+    }
+
+    const replacementIndex = this.findOldestOrdinary();
+    if (replacementIndex === null) {
+      this.capacityDrops++;
+      return;
+    }
+    const evicted = this.events[replacementIndex];
+    if (evicted?.message.id && this.indicesById.get(evicted.message.id) === replacementIndex) {
+      this.indicesById.delete(evicted.message.id);
+    }
+    this.events[replacementIndex] = event;
+    this.protectedSlots[replacementIndex] = true;
+    this.ordinaryCount--;
+    if (id) this.indicesById.set(id, replacementIndex);
+    this.capacityDrops++;
+  }
+
+  private append(event: ChatEvent, protectedEvent: boolean): void {
+    const index = this.events.length;
+    this.events.push(event);
+    this.protectedSlots.push(protectedEvent);
+    if (!protectedEvent) this.ordinaryCount++;
+    if (event.message.id) this.indicesById.set(event.message.id, index);
+  }
+
+  private findOldestOrdinary(): number | null {
+    if (this.ordinaryCount === 0) return null;
+    for (let index = this.ordinarySearchCursor; index < this.events.length; index++) {
+      this.ordinaryScanSteps++;
+      const event = this.events[index];
+      if (event && this.protectedSlots[index] !== true) {
+        this.ordinarySearchCursor = index + 1;
+        return index;
+      }
+    }
+    this.ordinaryCount = 0;
+    this.ordinarySearchCursor = this.events.length;
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -66,36 +169,61 @@ interface SupportedRenderer {
  */
 export function extractChatEvents(
   actions: readonly unknown[],
-  getSettings: () => Readonly<OverlaySettings>
+  getSettings: () => Readonly<OverlaySettings>,
+  onStats?: (stats: Readonly<ChatEventExtractionStats>) => void,
+  isKnownReplacementTarget?: (id: string) => boolean
 ): ChatEvent[] {
   const settings = getSettings();
-  const events: ChatEvent[] = [];
+  const capacity = resolveEventCapacity(settings);
+  const traversalBudget = capacity * ACTION_TRAVERSAL_MULTIPLIER;
+  const accumulator = new BoundedChatEventAccumulator(capacity, isKnownReplacementTarget);
+  let traversedActions = 0;
+  let budgetExhausted = false;
 
-  for (const action of actions) {
-    if (!isRecord(action)) {
-      continue;
+  actionLoop: for (const action of actions) {
+    if (traversedActions >= traversalBudget) {
+      budgetExhausted = true;
+      break;
     }
+    traversedActions++;
+    if (!isRecord(action)) continue;
 
     const replayAction = asRecord(action.replayChatItemAction);
     if (replayAction) {
       const offsetMs = getNumber(replayAction.videoOffsetTimeMsec);
       const nestedActions = Array.isArray(replayAction.actions) ? replayAction.actions : [];
       for (const nestedAction of nestedActions) {
-        const event = parseChatEventFromAction(nestedAction, offsetMs, settings);
-        if (event) {
-          events.push(event);
+        if (traversedActions >= traversalBudget) {
+          budgetExhausted = true;
+          break actionLoop;
         }
+        traversedActions++;
+        const event = parseChatEventFromAction(nestedAction, offsetMs, settings);
+        if (event) accumulator.add(event);
       }
       continue;
     }
 
     const event = parseChatEventFromAction(action, undefined, settings);
-    if (event) {
-      events.push(event);
-    }
+    if (event) accumulator.add(event);
   }
 
-  return events;
+  const stats: ChatEventExtractionStats = {
+    capacity,
+    traversalBudget,
+    traversedActions,
+    capacityDrops: accumulator.capacityDrops,
+    ordinaryScanSteps: accumulator.ordinaryScanSteps,
+    budgetExhausted,
+  };
+  onStats?.(stats);
+  if (capacity < actions.length || stats.capacityDrops > 0 || budgetExhausted) {
+    log.debug('chat.parser.batch-bounded', {
+      ...stats,
+      acceptedEvents: accumulator.events.length,
+    });
+  }
+  return accumulator.events;
 }
 
 // ---------------------------------------------------------------------------
