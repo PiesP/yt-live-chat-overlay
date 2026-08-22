@@ -145,6 +145,10 @@ export abstract class ChatSource implements Pauseable {
    */
   private readonly seenMessageIds = createMessageIdRegistry(ChatSource.SEEN_IDS_MAX);
 
+  /** Attest replacement targets already accepted by this source session. */
+  protected readonly isKnownReplacementTarget = (id: string): boolean =>
+    this.seenMessageIds.has(id);
+
   constructor(getSettings: () => Readonly<OverlaySettings>) {
     this.getSettings = getSettings;
   }

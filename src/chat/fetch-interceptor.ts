@@ -17,12 +17,14 @@
 import type { ChatMessage, OverlaySettings } from '@app-types';
 import { extractChatEvents } from '@chat/message-parser';
 import { getLiveChatPayload } from '@chat/youtube/api';
+import { readBoundedChatResponseText } from '@chat/youtube/response-text';
 import { createLogger } from '@util/logging';
 
 const log = createLogger('FetchInterceptor');
 
 /** Maximum number of compact response identities retained per installation. */
 const MAX_RESPONSE_IDENTITY_CACHE_SIZE = 64;
+const MAX_IN_FLIGHT_CLONE_READS = 2;
 
 /**
  * Produce a compact, deterministic identity without retaining the response body.
@@ -91,6 +93,7 @@ export function installFetchInterceptor(
   const originalFetch = window.fetch;
   const responseIdentityCache = new Set<string>();
   let isActive = true;
+  let inFlightCloneReads = 0;
 
   function interceptedFetch(
     this: typeof window,
@@ -115,6 +118,14 @@ export function installFetchInterceptor(
     // Let the original request proceed normally — we only eavesdrop.
     const response = originalFetch.call(this, input, init);
 
+    // Reserve clone/read work synchronously so a burst of unresolved chat
+    // responses cannot retain an unbounded number of response branches.
+    if (inFlightCloneReads >= MAX_IN_FLIGHT_CLONE_READS) {
+      log.debug('chat.interceptor.skip-in-flight-limit');
+      return response;
+    }
+    inFlightCloneReads++;
+
     // Clone the response so the original consumer (YouTube's UI) is unaffected.
     // Read the clone asynchronously; errors here must not propagate.
     void (async () => {
@@ -125,7 +136,7 @@ export function installFetchInterceptor(
 
         // Read once for JSON parsing, but retain only a compact identity after
         // this asynchronous scope completes.
-        const text = await cloned.text();
+        const text = await readBoundedChatResponseText(cloned);
         if (!isActive) return;
         if (!rememberResponseIdentity(responseIdentityCache, text)) {
           log.debug('chat.interceptor.skip-duplicate');
@@ -146,6 +157,8 @@ export function installFetchInterceptor(
       } catch (error: unknown) {
         log.debug('chat.interceptor.parse-failed', { error: String(error) });
         // Silently ignore parse failures — the fallback poll loop handles this.
+      } finally {
+        inFlightCloneReads--;
       }
     })();
 

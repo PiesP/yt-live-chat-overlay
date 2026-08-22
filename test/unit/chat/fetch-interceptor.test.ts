@@ -3,6 +3,7 @@
 
 import type { ChatMessage, OverlaySettings } from '@app-types';
 import { createResponseIdentity, installFetchInterceptor } from '@chat/fetch-interceptor';
+import { MAX_CHAT_RESPONSE_BYTES } from '@chat/youtube/response-text';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -30,8 +31,13 @@ const parsedMessage: ChatMessage = {
 };
 
 function responseWithText(text: string): Response {
+  const clone = {
+    body: null,
+    headers: new Headers(),
+    text: async () => text,
+  } as unknown as Response;
   return {
-    clone: () => ({ text: async () => text }),
+    clone: () => clone,
   } as unknown as Response;
 }
 
@@ -77,6 +83,79 @@ describe('fetch interceptor response identities', () => {
 
     expect(mocks.getLiveChatPayload).toHaveBeenCalledOnce();
     expect(onMessages).toHaveBeenCalledOnce();
+    restore();
+  });
+
+  it('ignores an oversized cloned response without affecting the original fetch', async () => {
+    const cancel = vi.fn();
+    const clone = {
+      body: new ReadableStream<Uint8Array>({ cancel }),
+      headers: new Headers({
+        'content-length': String(MAX_CHAT_RESPONSE_BYTES + 1),
+      }),
+      text: vi.fn(),
+    } as unknown as Response;
+    const originalResponse = { clone: () => clone } as unknown as Response;
+    window.fetch = vi.fn(async () => originalResponse);
+    const onMessages = vi.fn();
+    const restore = installFetchInterceptor(() => settings, onMessages);
+
+    await expect(window.fetch(CHAT_URL)).resolves.toBe(originalResponse);
+    await vi.waitFor(() => expect(cancel).toHaveBeenCalledOnce());
+    expect(mocks.getLiveChatPayload).not.toHaveBeenCalled();
+    expect(onMessages).not.toHaveBeenCalled();
+    restore();
+  });
+
+  it('bounds concurrent clone reads and skips excess matching responses', async () => {
+    const bodies = Array.from({ length: 4 }, () => {
+      let resolve!: (value: string) => void;
+      const promise = new Promise<string>((next) => {
+        resolve = next;
+      });
+      return { promise, resolve };
+    });
+    let activeReads = 0;
+    let maxActiveReads = 0;
+    const cloneSpies = bodies.map((body) =>
+      vi.fn(() => ({
+        body: null,
+        headers: new Headers(),
+        text: async () => {
+          activeReads++;
+          maxActiveReads = Math.max(maxActiveReads, activeReads);
+          try {
+            return await body.promise;
+          } finally {
+            activeReads--;
+          }
+        },
+      }) as unknown as Response)
+    );
+    let responseIndex = 0;
+    window.fetch = vi.fn(async () => {
+      const clone = cloneSpies[responseIndex++];
+      return { clone } as unknown as Response;
+    });
+    const restore = installFetchInterceptor(() => settings, vi.fn());
+
+    await Promise.all([window.fetch(CHAT_URL), window.fetch(CHAT_URL), window.fetch(CHAT_URL)]);
+    await flushInterceptor();
+    expect(cloneSpies[0]).toHaveBeenCalledOnce();
+    expect(cloneSpies[1]).toHaveBeenCalledOnce();
+    expect(cloneSpies[2]).not.toHaveBeenCalled();
+    expect(activeReads).toBe(2);
+    expect(maxActiveReads).toBe(2);
+
+    bodies[0]?.resolve(JSON.stringify({ continuationContents: {} }));
+    bodies[1]?.resolve(JSON.stringify({ continuationContents: {} }));
+    await vi.waitFor(() => expect(activeReads).toBe(0));
+
+    await window.fetch(CHAT_URL);
+    await flushInterceptor();
+    expect(cloneSpies[3]).toHaveBeenCalledOnce();
+    bodies[3]?.resolve(JSON.stringify({ continuationContents: {} }));
+    await vi.waitFor(() => expect(activeReads).toBe(0));
     restore();
   });
 

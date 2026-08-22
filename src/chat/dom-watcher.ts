@@ -19,6 +19,7 @@
  */
 
 import type { ChatMessage } from '@app-types';
+import { MAX_REGULAR_MESSAGE_TEXT_LENGTH } from '@chat/message-helpers';
 import { createLogger } from '@util/logging';
 
 const log = createLogger('DomChatWatcher');
@@ -28,19 +29,31 @@ const log = createLogger('DomChatWatcher');
  * The chat iframe (#chatframe) is cross-origin on some YouTube layouts,
  * so we watch the host-page chat container instead.
  */
-const CHAT_CONTAINER_SELECTORS = [
-  'yt-live-chat-item-list-renderer #items',
-  '#chat-messages yt-live-chat-item-list-renderer #items',
-  'yt-live-chat-item-list-renderer',
-] as const;
+const CHAT_LIST_RENDERER_TAG = 'yt-live-chat-item-list-renderer';
 
 const TEXT_MESSAGE_RENDERER_SELECTOR = 'yt-live-chat-text-message-renderer';
 const AUTHOR_NAME_SELECTOR = '#author-name';
 const MESSAGE_SELECTOR = '#message';
+const DOM_NODE_VISIT_MULTIPLIER = 16;
 
 type DomMessageCallback = (messages: ChatMessage[]) => void;
 
 export type DomWatcherUnsubscribe = (() => void) | null;
+
+function findChatContainer(): HTMLElement | null {
+  const items = document.getElementById('items');
+  if (items instanceof HTMLElement) {
+    let ancestor = items.parentElement;
+    while (ancestor) {
+      if (ancestor.localName === CHAT_LIST_RENDERER_TAG) return items;
+      ancestor = ancestor.parentElement;
+    }
+  }
+
+  const renderers = document.getElementsByTagName(CHAT_LIST_RENDERER_TAG);
+  const renderer = renderers.item(0);
+  return renderer instanceof HTMLElement ? renderer : null;
+}
 
 /**
  * Install a MutationObserver that watches YouTube's chat DOM for new messages.
@@ -48,64 +61,151 @@ export type DomWatcherUnsubscribe = (() => void) | null;
  * @param onMessages Called with parsed ChatMessage[] whenever new chat DOM nodes appear.
  * @returns          Unsubscribe function that disconnects the observer.
  */
-export function installDomChatWatcher(onMessages: DomMessageCallback): DomWatcherUnsubscribe {
+export function installDomChatWatcher(
+  onMessages: DomMessageCallback,
+  getMessageCapacity: () => number = () => 1000,
+  onPendingRecordCount?: (count: number) => void,
+  onNodeVisitCount?: (count: number) => void,
+  onExtractedCharacterCount?: (count: number) => void
+): DomWatcherUnsubscribe {
   let observer: MutationObserver | null = null;
   let mutationBatchPending = false;
   let mutationRafId: number | null = null;
-  let pendingMutations: MutationRecord[][] = [];
+  let pendingMutations: MutationRecord[] = [];
   let isPaused = false;
 
-  const extractMessages = (addedNodes: NodeList): ChatMessage[] => {
-    const messages: ChatMessage[] = [];
-    const now = Date.now();
-
-    for (let i = 0; i < addedNodes.length; i++) {
-      const node = addedNodes[i];
-      if (!node || node.nodeType !== Node.ELEMENT_NODE) continue;
-      const el = node as HTMLElement;
-
-      const textRenderers = el.matches(TEXT_MESSAGE_RENDERER_SELECTOR)
-        ? [el]
-        : Array.from(el.querySelectorAll<HTMLElement>(TEXT_MESSAGE_RENDERER_SELECTOR));
-
-      for (const textRenderer of textRenderers) {
-        const authorEl = textRenderer.querySelector(AUTHOR_NAME_SELECTOR);
-        const messageEl = textRenderer.querySelector(MESSAGE_SELECTOR);
-
-        const author = authorEl?.textContent?.trim() ?? '';
-        const text = messageEl?.textContent?.trim() ?? '';
-
-        if (!text) continue;
-
-        const rawId = textRenderer.id;
-
-        const message: ChatMessage = {
-          ...(rawId ? { id: rawId } : {}),
-          text,
-          content: [{ type: 'text', content: text }],
-          kind: 'text',
-          timestamp: now,
-          author,
-          authorType: 'normal',
-        };
-
-        messages.push(message);
-      }
-    }
-
-    return messages;
+  const resolveCapacity = (): number => {
+    const configuredCapacity = Math.floor(getMessageCapacity());
+    return Number.isFinite(configuredCapacity)
+      ? Math.max(1, Math.min(1000, configuredCapacity))
+      : 1;
   };
 
-  const handleMutations = (mutations: MutationRecord[]): void => {
+  const extractMessages = (
+    addedNodes: NodeList,
+    messages: ChatMessage[],
+    capacity: number,
+    visitBudget: { remaining: number; visited: number },
+    extractedCharacters: { count: number }
+  ): void => {
+    const now = Date.now();
+
+    const chargeVisit = (): boolean => {
+      if (visitBudget.remaining <= 0) return false;
+      visitBudget.remaining--;
+      visitBudget.visited++;
+      return true;
+    };
+
+    const nextDepthFirst = (current: Node, root: Node, descend: boolean): Node | null => {
+      if (descend && current.firstChild) return current.firstChild;
+      let cursor: Node | null = current;
+      while (cursor && cursor !== root && !cursor.nextSibling) {
+        cursor = cursor.parentNode;
+      }
+      return cursor && cursor !== root ? cursor.nextSibling : null;
+    };
+
+    const findRendererFields = (
+      renderer: HTMLElement
+    ): { author: Element | null; message: Element | null } => {
+      let author: Element | null = null;
+      let message: Element | null = null;
+      let current: Node | null = renderer.firstChild;
+      while (current && visitBudget.remaining > 0 && (!author || !message)) {
+        if (!chargeVisit()) break;
+        let descend = true;
+        if (current.nodeType === Node.ELEMENT_NODE) {
+          const element = current as Element;
+          if (!author && element.id === AUTHOR_NAME_SELECTOR.slice(1)) {
+            author = element;
+            descend = false;
+          } else if (!message && element.id === MESSAGE_SELECTOR.slice(1)) {
+            message = element;
+            descend = false;
+          }
+        }
+        current = nextDepthFirst(current, renderer, descend);
+      }
+      return { author, message };
+    };
+
+    const extractBoundedText = (root: Element | null): string => {
+      if (!root) return '';
+      let result = '';
+      let characters = 0;
+      let current: Node | null = root.firstChild;
+      while (current && visitBudget.remaining > 0 && characters < MAX_REGULAR_MESSAGE_TEXT_LENGTH) {
+        if (!chargeVisit()) break;
+        if (current.nodeType === Node.TEXT_NODE) {
+          for (const codePoint of (current as Text).data) {
+            if (characters >= MAX_REGULAR_MESSAGE_TEXT_LENGTH) break;
+            result += codePoint;
+            characters++;
+            extractedCharacters.count++;
+          }
+        }
+        current = nextDepthFirst(current, root, true);
+      }
+      return result.trim();
+    };
+
+    const appendRenderer = (renderer: HTMLElement): void => {
+      if (messages.length >= capacity || visitBudget.remaining <= 0) return;
+      const fields = findRendererFields(renderer);
+      if (!fields.message || visitBudget.remaining <= 0) return;
+      const author = extractBoundedText(fields.author);
+      const text = extractBoundedText(fields.message);
+      if (!text) return;
+
+      const rawId = renderer.id;
+      messages.push({
+        ...(rawId ? { id: rawId } : {}),
+        text,
+        content: [{ type: 'text', content: text }],
+        kind: 'text',
+        timestamp: now,
+        author,
+        authorType: 'normal',
+      });
+    };
+
+    const traverseNode = (root: Node): void => {
+      let current: Node | null = root;
+      while (current && messages.length < capacity && visitBudget.remaining > 0) {
+        if (!chargeVisit()) break;
+        const isRenderer =
+          current.nodeType === Node.ELEMENT_NODE &&
+          (current as Element).localName === TEXT_MESSAGE_RENDERER_SELECTOR;
+        if (isRenderer) appendRenderer(current as HTMLElement);
+        current = nextDepthFirst(current, root, !isRenderer);
+      }
+    };
+
+    for (let i = 0; i < addedNodes.length; i++) {
+      if (messages.length >= capacity || visitBudget.remaining <= 0) break;
+      const node = addedNodes[i];
+      if (!node) continue;
+      traverseNode(node);
+    }
+  };
+
+  const handleMutations = (mutations: readonly MutationRecord[], capacity: number): void => {
     const allMessages: ChatMessage[] = [];
+    const visitBudget = {
+      remaining: capacity * DOM_NODE_VISIT_MULTIPLIER,
+      visited: 0,
+    };
+    const extractedCharacters = { count: 0 };
 
     for (const mutation of mutations) {
+      if (allMessages.length >= capacity || visitBudget.remaining <= 0) break;
       if (mutation.type !== 'childList') continue;
       if (mutation.addedNodes.length === 0) continue;
-
-      const messages = extractMessages(mutation.addedNodes);
-      allMessages.push(...messages);
+      extractMessages(mutation.addedNodes, allMessages, capacity, visitBudget, extractedCharacters);
     }
+    onNodeVisitCount?.(visitBudget.visited);
+    onExtractedCharacterCount?.(extractedCharacters.count);
 
     if (allMessages.length > 0) {
       log.debug('chat.dom-watcher.captured', { count: allMessages.length });
@@ -125,19 +225,20 @@ export function installDomChatWatcher(onMessages: DomMessageCallback): DomWatche
    */
   const onMutation = (mutations: MutationRecord[]): void => {
     if (isPaused) return;
-    pendingMutations.push(mutations);
+    const capacity = resolveCapacity();
+    for (const mutation of mutations) {
+      if (pendingMutations.length >= capacity) break;
+      pendingMutations.push(mutation);
+    }
+    onPendingRecordCount?.(pendingMutations.length);
     if (!mutationBatchPending) {
       mutationBatchPending = true;
       mutationRafId = requestAnimationFrame(() => {
         mutationBatchPending = false;
         mutationRafId = null;
-        // Iterate pendingMutations directly instead of flat() — avoids
-        // allocating a new array each frame during chat bursts.
-        for (const batch of pendingMutations) {
-          handleMutations(batch);
-        }
-        // Reset length instead of reassigning to avoid per-frame allocation.
-        pendingMutations.length = 0;
+        const retainedMutations = pendingMutations;
+        pendingMutations = [];
+        handleMutations(retainedMutations, resolveCapacity());
       });
     }
   };
@@ -148,10 +249,8 @@ export function installDomChatWatcher(onMessages: DomMessageCallback): DomWatche
   // happens, no selector below matches and the DOM watcher silently falls
   // back to the fetch-interceptor primary path — that is the expected
   // degraded mode, not a bug.
-  for (const selector of CHAT_CONTAINER_SELECTORS) {
-    const container = document.querySelector<HTMLElement>(selector);
-    if (!container) continue;
-
+  const container = findChatContainer();
+  if (container) {
     observer = new MutationObserver(onMutation);
     observer.observe(container, { childList: true, subtree: true });
 
@@ -184,13 +283,16 @@ export function installDomChatWatcher(onMessages: DomMessageCallback): DomWatche
     };
     document.addEventListener('visibilitychange', handleVisibility);
 
-    log.info('chat.dom-watcher.installed', { selector });
+    log.info('chat.dom-watcher.installed');
     return () => {
       document.removeEventListener('visibilitychange', handleVisibility);
       if (mutationRafId !== null) {
         cancelAnimationFrame(mutationRafId);
         mutationRafId = null;
       }
+      mutationBatchPending = false;
+      pendingMutations = [];
+      isPaused = true;
       observer?.disconnect();
       observer = null;
       log.info('chat.dom-watcher.removed');

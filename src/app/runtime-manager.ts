@@ -1067,8 +1067,7 @@ export class RuntimeManager {
     //
     // Live chat initial seed batches (> 50 messages) still go through the
     // backlog controller for burst protection.
-    const hasVideoTimestamps = msgs.some((m) => m.videoOffsetMs !== undefined);
-    if (hasVideoTimestamps) {
+    if (this.chatSource instanceof ReplayChatSource) {
       for (const msg of msgs) {
         if (!this.acceptForRenderer(msg)) continue;
         renderer.addMessage(msg);
@@ -1145,10 +1144,13 @@ export class RuntimeManager {
         // Panel opened — try to install DOM watcher if not already active
         if (!this.domWatcherUnsubscribe) {
           try {
-            const unsub = installDomChatWatcher((messages) => {
-              if (this.isDisposedState) return;
-              chatSource.injectExternalMessages(messages);
-            });
+            const unsub = installDomChatWatcher(
+              (messages) => {
+                if (this.isDisposedState) return;
+                chatSource.injectExternalMessages(messages);
+              },
+              () => this.getSessionSettings().queueMaxSize
+            );
             if (unsub) {
               this.domWatcherUnsubscribe = unsub;
               this.domWatcherPanelElement = state.element;
@@ -1187,10 +1189,13 @@ export class RuntimeManager {
     // YouTube's own chat UI rendering, which works even if the fetch
     // interceptor misses a response (URL pattern change, etc.).
     try {
-      this.domWatcherUnsubscribe = installDomChatWatcher((messages) => {
-        if (this.isDisposedState) return;
-        chatSource.injectExternalMessages(messages);
-      });
+      this.domWatcherUnsubscribe = installDomChatWatcher(
+        (messages) => {
+          if (this.isDisposedState) return;
+          chatSource.injectExternalMessages(messages);
+        },
+        () => this.getSessionSettings().queueMaxSize
+      );
     } catch (error: unknown) {
       log.info('runtime.dom-watcher.install-failed', { error: String(error) });
     }

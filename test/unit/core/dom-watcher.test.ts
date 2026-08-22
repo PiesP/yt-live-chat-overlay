@@ -71,4 +71,84 @@ describe('installDomChatWatcher', () => {
 
     unsubscribe?.();
   });
+
+  it('bounds each externally injected DOM batch to the configured capacity', async () => {
+    const container = createChatContainer();
+    const onMessages = vi.fn();
+    const unsubscribe = installDomChatWatcher(onMessages, () => 2);
+
+    const batch = document.createElement('div');
+    batch.append(
+      ...Array.from({ length: 10 }, (_, index) =>
+        createTextRenderer(`author-${index}`, `message-${index}`, `message-${index}`)
+      )
+    );
+    container.append(batch);
+    await vi.runAllTimersAsync();
+
+    expect(onMessages).toHaveBeenCalledOnce();
+    expect(onMessages.mock.calls[0]?.[0]).toHaveLength(2);
+    unsubscribe?.();
+  });
+
+  it('shares one retained-record and message capacity across callbacks before rAF', async () => {
+    const container = createChatContainer();
+    const onMessages = vi.fn();
+    const pendingCounts: number[] = [];
+    const unsubscribe = installDomChatWatcher(onMessages, () => 2, (count) => {
+      pendingCounts.push(count);
+    });
+
+    for (let index = 0; index < 10; index++) {
+      container.append(createTextRenderer('author', `message-${index}`, `message-${index}`));
+      await Promise.resolve();
+    }
+    expect(onMessages).not.toHaveBeenCalled();
+
+    await vi.runAllTimersAsync();
+    expect(Math.max(...pendingCounts)).toBeLessThanOrEqual(2);
+    expect(onMessages).toHaveBeenCalledOnce();
+    expect(onMessages.mock.calls[0]?.[0]).toHaveLength(2);
+    unsubscribe?.();
+  });
+
+  it('bounds non-element visits and huge renderer text extraction', async () => {
+    const container = createChatContainer();
+    const onMessages = vi.fn();
+    const visitCounts: number[] = [];
+    const characterCounts: number[] = [];
+    const unsubscribe = installDomChatWatcher(
+      onMessages,
+      () => 10,
+      undefined,
+      (count) => visitCounts.push(count),
+      (count) => characterCounts.push(count)
+    );
+    const renderer = createTextRenderer('a'.repeat(10_000), 'm'.repeat(10_000), 'bounded');
+    const messageElement = renderer.children.item(1);
+    if (!messageElement) throw new Error('message fixture missing');
+    for (let index = 0; index < 1000; index++) {
+      messageElement.append(document.createComment(`comment-${index}`), document.createTextNode('x'));
+    }
+    const querySelector = vi.spyOn(renderer, 'querySelector');
+    const fragment = document.createDocumentFragment();
+    fragment.append(renderer);
+    for (let index = 0; index < 1000; index++) {
+      fragment.append(document.createTextNode('noise'), document.createComment('noise'));
+    }
+
+    container.append(fragment);
+    await vi.runAllTimersAsync();
+
+    expect(Math.max(...visitCounts)).toBeLessThanOrEqual(160);
+    expect(Math.max(...characterCounts)).toBeLessThanOrEqual(160);
+    expect(querySelector).not.toHaveBeenCalled();
+    expect(onMessages).toHaveBeenCalledOnce();
+    expect(onMessages.mock.calls[0]?.[0][0]).toMatchObject({
+      id: 'bounded',
+      author: 'a'.repeat(80),
+      text: 'm'.repeat(80),
+    });
+    unsubscribe?.();
+  });
 });

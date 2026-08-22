@@ -3,6 +3,8 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import { RuntimeManager } from '@app/runtime-manager';
 import type { OverlaySettings } from '@app-types';
+import { LiveChatSource } from '@chat/source-live';
+import { ReplayChatSource } from '@chat/source-replay';
 
 function makeDefaults(overrides: Partial<OverlaySettings> = {}): OverlaySettings {
   const d = {
@@ -65,6 +67,7 @@ describe('RuntimeManager (extended)', () => {
     routeMessages: (msgs: Array<Record<string, unknown>>) => void;
     handleReplaySeek: () => void;
     renderer: Record<string, unknown> | null;
+    chatSource: LiveChatSource | ReplayChatSource | null;
     backlogController: {
       destroy(): void;
       drainPending(): Array<Record<string, unknown>>;
@@ -264,6 +267,71 @@ describe('RuntimeManager (extended)', () => {
       expect(internals.acceptForRenderer({ id: 'msg-1', actionType: 'add' })).toBe(true);
       expect(internals.acceptForRenderer({ id: 'msg-1', actionType: 'replace' })).toBe(true);
       expect(internals.acceptForRenderer({ id: 'msg-1', actionType: 'add' })).toBe(false);
+    });
+
+    it('routes timestamped LiveChatSource batches through live backlog controls', () => {
+      vi.useFakeTimers();
+      const settings = makeDefaults({ backlogMode: 'none' });
+      const rm = new RuntimeManager(createOpts({ settings }));
+      const internals = internalsOf(rm);
+      const addMessage = vi.fn();
+      internals.settings = settings;
+      internals.chatSource = new LiveChatSource(() => settings);
+      internals.renderer = {
+        addMessage,
+        setStandbyStatus: vi.fn(),
+        getLaneUtilization: vi.fn(() => 0),
+        laneCount: 24,
+        observability: undefined,
+        destroy: vi.fn(),
+      };
+
+      internals.routeMessages(
+        Array.from({ length: 51 }, (_, index) => ({
+          id: `live-${index}`,
+          text: 'message',
+          content: [{ type: 'text', content: 'message' }],
+          kind: 'text',
+          timestamp: index,
+          videoOffsetMs: index,
+        }))
+      );
+
+      expect(internals.backlogController).not.toBeNull();
+      expect(addMessage).not.toHaveBeenCalled();
+      rm.destroy();
+    });
+
+    it('keeps actual ReplayChatSource delivery on the direct timing path', () => {
+      const settings = makeDefaults({ backlogMode: 'none' });
+      const rm = new RuntimeManager(createOpts({ settings }));
+      const internals = internalsOf(rm);
+      const addMessage = vi.fn();
+      internals.settings = settings;
+      internals.chatSource = new ReplayChatSource(() => settings);
+      internals.renderer = {
+        addMessage,
+        setStandbyStatus: vi.fn(),
+        getLaneUtilization: vi.fn(() => 0),
+        laneCount: 24,
+        observability: undefined,
+        destroy: vi.fn(),
+      };
+
+      internals.routeMessages(
+        Array.from({ length: 5 }, (_, index) => ({
+          id: `replay-${index}`,
+          text: 'message',
+          content: [{ type: 'text', content: 'message' }],
+          kind: 'text',
+          timestamp: index,
+          videoOffsetMs: index,
+        }))
+      );
+
+      expect(addMessage).toHaveBeenCalledTimes(5);
+      expect(internals.backlogController).toBeNull();
+      rm.destroy();
     });
 
     it.each([

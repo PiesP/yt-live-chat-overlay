@@ -220,7 +220,12 @@ export class ReplayChatSource extends ChatSource {
           if (!this.isPrefetchGenerationCurrent(prefetchGeneration)) {
             // A seek or session reset invalidated this request while it was in flight.
           } else if (payload) {
-            const events = extractChatEvents(payload.actions, this.getSettings);
+            const events = extractChatEvents(
+              payload.actions,
+              this.getSettings,
+              undefined,
+              this.isKnownReplacementTarget
+            );
             this.replayBuffer.appendEvents(events, -1);
             this.markActivity();
             this.prefetchContinuation =
@@ -477,7 +482,12 @@ export class ReplayChatSource extends ChatSource {
       const currentOffsetMs = this.getPlaybackSnapshot()?.offsetMs ?? 0;
       const minimumOffsetMs = Math.max(0, currentOffsetMs - REPLAY_PREFETCH_WINDOW_MS);
       this.replayFallbackLastOffsetMs = this.replayBuffer.appendEvents(
-        extractChatEvents(initialPayload.actions, this.getSettings),
+        extractChatEvents(
+          initialPayload.actions,
+          this.getSettings,
+          undefined,
+          this.isKnownReplacementTarget
+        ),
         minimumOffsetMs
       );
       let batchesFetched = 0;
@@ -571,7 +581,12 @@ export class ReplayChatSource extends ChatSource {
 
       const nextPlayerSeekContinuation = extractPlayerSeekContinuation(payload.continuations);
       this.replayBuffer.appendEvents(
-        extractChatEvents(payload.actions, this.getSettings),
+        extractChatEvents(
+          payload.actions,
+          this.getSettings,
+          undefined,
+          this.isKnownReplacementTarget
+        ),
         Math.max(0, offsetMs - REPLAY_PREFETCH_WINDOW_MS)
       );
       this.replayPlayerSeekContinuation = nextPlayerSeekContinuation;
@@ -614,7 +629,12 @@ export class ReplayChatSource extends ChatSource {
         return false;
       }
 
-      const events = extractChatEvents(payload.actions, this.getSettings);
+      const events = extractChatEvents(
+        payload.actions,
+        this.getSettings,
+        undefined,
+        this.isKnownReplacementTarget
+      );
       this.replayFallbackLastOffsetMs = this.replayBuffer.appendEvents(events, minimumOffsetMs);
       this.replayContinuation = extractReplayContinuation(payload.continuations);
 
