@@ -65,7 +65,10 @@ describe('project setup actions', () => {
     expect(topLevelBlock(releaseWorkflow, 'on')).toContain('tag:');
     expect(releaseWorkflow).toContain("github.ref == 'refs/heads/master'");
     expect(releaseWorkflow).toContain('git merge-base --is-ancestor "$release_sha" "$GITHUB_SHA"');
-    expect(releaseWorkflow).toContain('ref: ${{ needs.provenance.outputs.release-sha }}');
+    expect(releaseWorkflow).toContain('ref: ${{ github.sha }}');
+    expect(releaseWorkflow).toContain(
+      'git -c advice.detachedHead=false checkout --detach "$RELEASE_SHA"'
+    );
     expect(releaseWorkflow).not.toContain('publish_branch: release');
     expect(releaseWorkflow).not.toContain('purge.jsdelivr.net');
     expect(releaseWorkflow).toContain(
@@ -85,7 +88,7 @@ describe('project setup actions', () => {
     expect(action).toContain('uses: pnpm/setup@84cb39b217b10273981911c288cd62326dc7c6d2 # v2.0.2');
     expect(action).toContain('package-json-file: package.json');
     expect(action).toContain('runtime: "node@${{ inputs.node-version }}"');
-    expect(action).toContain('cache: true');
+    expect(action).toContain('cache: false');
     expect(action).toContain('install: false');
     expect(action).toContain('pnpm install --frozen-lockfile --no-runtime');
     expect(existsSync(resolve(root, '.github/actions/setup-toolchain/action.yaml'))).toBe(false);
