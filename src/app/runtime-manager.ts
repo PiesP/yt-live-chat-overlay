@@ -877,6 +877,7 @@ export class RuntimeManager {
         backlogDensityRampMs: settings.backlogDensityRampMs,
         backlogDensityRampMaxMs: settings.backlogDensityRampMaxMs,
         backlogInjectionRateMin: settings.backlogInjectionRateMin,
+        pendingCapacity: settings.queueMaxSize,
       });
     }
 
@@ -1209,6 +1210,7 @@ export class RuntimeManager {
         backlogDensityRampMs: settings.backlogDensityRampMs,
         backlogDensityRampMaxMs: settings.backlogDensityRampMaxMs,
         backlogInjectionRateMin: settings.backlogInjectionRateMin,
+        pendingCapacity: settings.queueMaxSize,
       },
       renderer.laneCount,
       renderer.observability
