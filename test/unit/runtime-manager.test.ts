@@ -80,6 +80,42 @@ describe('RuntimeManager', () => {
     expect(getSessionSettings()).toBe(next);
   });
 
+  it('derives and updates backlog pending capacity from queueMaxSize', () => {
+    const initial = makeDefaults({ queueMaxSize: 300 });
+    const next = makeDefaults({ queueMaxSize: 75 });
+    const rm = new RuntimeManager(createOpts({ settings: initial }));
+    const fakeRenderer = {
+      addMessage: vi.fn(),
+      destroy: vi.fn(),
+      getLaneUtilization: vi.fn(() => 0),
+      laneCount: 24,
+      observability: undefined,
+      onBacklogPauseChange: null,
+      updateSettings: vi.fn(),
+    };
+    const internals = rm as unknown as {
+      state: string;
+      settings: OverlaySettings | null;
+      renderer: typeof fakeRenderer | null;
+      backlogController: {
+        config: { pendingCapacity: number };
+      } | null;
+      ensureBacklogController: (renderer: typeof fakeRenderer) => void;
+      updateSessionSettings: (settings: OverlaySettings) => void;
+    };
+
+    internals.state = 'active';
+    internals.settings = initial;
+    internals.renderer = fakeRenderer;
+    internals.ensureBacklogController(fakeRenderer);
+    expect(internals.backlogController?.config.pendingCapacity).toBe(300);
+
+    internals.updateSessionSettings(next);
+    expect(internals.backlogController?.config.pendingCapacity).toBe(75);
+
+    rm.destroy();
+  });
+
   it('accepts invalid page callback', () => {
     const rm = new RuntimeManager(createOpts({ valid: false }));
     expect(rm).toBeDefined();

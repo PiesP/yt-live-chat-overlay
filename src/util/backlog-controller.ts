@@ -22,6 +22,7 @@
  */
 
 import type { BacklogMode, ChatMessage, Pauseable } from '@app-types';
+import { isPriorityMessage } from '@util/backlog-helpers';
 import { BacklogIndicator } from '@util/backlog-indicator';
 import { BacklogSampler } from '@util/backlog-sampler';
 import { BacklogScheduler } from '@util/backlog-scheduler';
@@ -33,6 +34,13 @@ import type { ObservabilityReporter } from '@util/observability';
 const BACKLOG_QUEUE_COMPACT_THRESHOLD = 64;
 
 const log = createLogger('Backlog');
+
+type BacklogCapacityDropReason =
+  | 'overflow-ordinary-evicted'
+  | 'ordinary-capacity-full'
+  | 'protected-capacity-full'
+  | 'capacity-reduction-ordinary'
+  | 'capacity-reduction-protected';
 
 export interface BacklogControllerConfig {
   /** How to handle past chat messages */
@@ -51,11 +59,22 @@ export interface BacklogControllerConfig {
   backlogDensityRampMaxMs: number;
   /** Minimum backlog injection rate (msg/s) */
   backlogInjectionRateMin: number;
+  /** Maximum number of messages retained for pending backlog delivery. */
+  pendingCapacity: number;
 }
 
 export class BacklogInjectionController implements Pauseable {
   private backlogQueue: (ChatMessage | undefined)[] = [];
   private backlogQueueOffset = 0;
+  private pendingCount = 0;
+  private ordinaryPendingCount = 0;
+  /** Monotonic cursor makes ordinary-slot searches aggregate O(capacity). */
+  private ordinarySearchCursor = 0;
+  /** Test-visible performance counters; no message data is retained. */
+  // biome-ignore lint/correctness/noUnusedPrivateClassMembers: Security regression tests inspect this counter without widening the production API.
+  private capacityScanSteps = 0;
+  // biome-ignore lint/correctness/noUnusedPrivateClassMembers: Security regression tests inspect this counter without widening the production API.
+  private trackingRebuildCount = 0;
   private backlogSeenIds = new Set<string>();
   private backlogPendingIndices = new Map<string, number>();
   private isActive = false;
@@ -69,6 +88,14 @@ export class BacklogInjectionController implements Pauseable {
   private realTimeActivityCount = 0;
   private lastRealTimeActivityAt = 0;
   private injectionStartTime = 0;
+  /** Fixed-key counters aggregate capacity diagnostics without log flooding. */
+  private readonly capacityDropCounts: Record<BacklogCapacityDropReason, number> = {
+    'overflow-ordinary-evicted': 0,
+    'ordinary-capacity-full': 0,
+    'protected-capacity-full': 0,
+    'capacity-reduction-ordinary': 0,
+    'capacity-reduction-protected': 0,
+  };
 
   /** Delegated modules */
   private readonly scheduler: BacklogScheduler;
@@ -107,32 +134,182 @@ export class BacklogInjectionController implements Pauseable {
    * reclaim memory without splice() overhead on every tick.
    */
   private dequeueBacklog(): ChatMessage | undefined {
-    if (this.backlogQueueOffset >= this.backlogQueue.length) {
-      return undefined;
-    }
-    const dequeuedIndex = this.backlogQueueOffset;
-    const msg = this.backlogQueue[dequeuedIndex];
-    this.backlogQueue[dequeuedIndex] = undefined;
-    if (msg?.id && this.backlogPendingIndices.get(msg.id) === dequeuedIndex) {
-      this.backlogPendingIndices.delete(msg.id);
-    }
-    this.backlogQueueOffset++;
+    while (this.backlogQueueOffset < this.backlogQueue.length) {
+      const dequeuedIndex = this.backlogQueueOffset++;
+      const message = this.backlogQueue[dequeuedIndex];
+      this.backlogQueue[dequeuedIndex] = undefined;
+      this.ordinarySearchCursor = Math.max(this.ordinarySearchCursor, this.backlogQueueOffset);
+      if (!message) continue;
 
-    if (this.backlogQueueOffset > BACKLOG_QUEUE_COMPACT_THRESHOLD) {
-      this.backlogQueue = this.backlogQueue.slice(this.backlogQueueOffset);
-      this.backlogQueueOffset = 0;
-      this.rebuildPendingIndices();
+      this.pendingCount--;
+      if (!BacklogInjectionController.isProtectedPendingMessage(message)) {
+        this.ordinaryPendingCount--;
+      }
+      this.removePendingIdentity(message, dequeuedIndex);
+
+      if (this.backlogQueueOffset > BACKLOG_QUEUE_COMPACT_THRESHOLD) {
+        this.compactPendingQueue();
+      }
+      return message;
     }
-    return msg;
+    return undefined;
   }
 
-  private rebuildPendingIndices(): void {
+  private rebuildPendingTracking(): void {
+    this.trackingRebuildCount++;
     this.backlogPendingIndices.clear();
+    this.backlogSeenIds.clear();
+    this.pendingCount = 0;
+    this.ordinaryPendingCount = 0;
     for (let index = this.backlogQueueOffset; index < this.backlogQueue.length; index++) {
-      const id = this.backlogQueue[index]?.id;
+      const message = this.backlogQueue[index];
+      if (!message) continue;
+      this.pendingCount++;
+      if (!BacklogInjectionController.isProtectedPendingMessage(message)) {
+        this.ordinaryPendingCount++;
+      }
+      const id = message.id;
       if (id && !this.backlogPendingIndices.has(id)) {
         this.backlogPendingIndices.set(id, index);
+        this.backlogSeenIds.add(id);
       }
+    }
+    this.ordinarySearchCursor = this.backlogQueueOffset;
+  }
+
+  private get pendingCapacity(): number {
+    const configured = Math.floor(this.config.pendingCapacity);
+    return Number.isFinite(configured) ? Math.max(1, configured) : 1;
+  }
+
+  private static isProtectedPendingMessage(message: ChatMessage): boolean {
+    return message.actionType === 'replace' || isPriorityMessage(message);
+  }
+
+  private clearPendingState(): void {
+    this.backlogQueue = [];
+    this.backlogQueueOffset = 0;
+    this.pendingCount = 0;
+    this.ordinaryPendingCount = 0;
+    this.ordinarySearchCursor = 0;
+    this.backlogSeenIds.clear();
+    this.backlogPendingIndices.clear();
+  }
+
+  private removePendingIdentity(message: ChatMessage, index: number): void {
+    if (message.id && this.backlogPendingIndices.get(message.id) === index) {
+      this.backlogPendingIndices.delete(message.id);
+      this.backlogSeenIds.delete(message.id);
+    }
+  }
+
+  private addPendingIdentity(message: ChatMessage, index: number): void {
+    if (!message.id) return;
+    this.backlogSeenIds.add(message.id);
+    this.backlogPendingIndices.set(message.id, index);
+  }
+
+  private compactPendingQueue(): void {
+    const compacted: ChatMessage[] = [];
+    for (let index = this.backlogQueueOffset; index < this.backlogQueue.length; index++) {
+      const message = this.backlogQueue[index];
+      if (message) compacted.push(message);
+    }
+    this.backlogQueue = compacted;
+    this.backlogQueueOffset = 0;
+    this.rebuildPendingTracking();
+  }
+
+  private findOldestOrdinaryIndex(): number | null {
+    if (this.ordinaryPendingCount === 0) return null;
+    const start = Math.max(this.backlogQueueOffset, this.ordinarySearchCursor);
+    for (let index = start; index < this.backlogQueue.length; index++) {
+      this.capacityScanSteps++;
+      const message = this.backlogQueue[index];
+      if (!message) continue;
+      if (!BacklogInjectionController.isProtectedPendingMessage(message)) {
+        this.ordinarySearchCursor = index + 1;
+        return index;
+      }
+    }
+    // Defensive invariant recovery: do not repeat a full scan on hostile input.
+    this.ordinaryPendingCount = 0;
+    this.ordinarySearchCursor = this.backlogQueue.length;
+    return null;
+  }
+
+  private recordCapacityDrop(message: ChatMessage, reason: BacklogCapacityDropReason): void {
+    const count = ++this.capacityDropCounts[reason];
+    this.observability?.onMessageReceived();
+    this.observability?.onMessageDropped(
+      reason === 'protected-capacity-full' || reason === 'ordinary-capacity-full'
+        ? 'queue_priority'
+        : 'queue_replaced'
+    );
+
+    const details = {
+      reason,
+      count,
+      capacity: this.pendingCapacity,
+      pending: this.backlogQueueLength,
+      kind: message.kind,
+      actionType: message.actionType ?? 'add',
+    };
+    if (reason === 'protected-capacity-full' || reason === 'capacity-reduction-protected') {
+      // One warning per reason is enough evidence without making a hostile
+      // batch amplify into an unbounded console workload.
+      if (count === 1) log.warn('backlog.capacity.drop', details);
+    } else if (count === 1) {
+      log.debug('backlog.capacity.drop', details);
+    }
+  }
+
+  private trimPendingToCapacity(): void {
+    let toRemove = this.pendingCount - this.pendingCapacity;
+    if (toRemove <= 0) return;
+
+    // One bounded pass removes ordinary work first.
+    for (
+      let index = this.backlogQueueOffset;
+      index < this.backlogQueue.length && toRemove > 0;
+      index++
+    ) {
+      this.capacityScanSteps++;
+      const message = this.backlogQueue[index];
+      if (!message || BacklogInjectionController.isProtectedPendingMessage(message)) continue;
+      this.backlogQueue[index] = undefined;
+      this.pendingCount--;
+      this.ordinaryPendingCount--;
+      this.removePendingIdentity(message, index);
+      this.recordCapacityDrop(message, 'capacity-reduction-ordinary');
+      toRemove--;
+    }
+
+    // A second bounded pass removes protected work only when unavoidable.
+    for (
+      let index = this.backlogQueueOffset;
+      index < this.backlogQueue.length && toRemove > 0;
+      index++
+    ) {
+      this.capacityScanSteps++;
+      const message = this.backlogQueue[index];
+      if (!message) continue;
+      this.backlogQueue[index] = undefined;
+      this.pendingCount--;
+      this.removePendingIdentity(message, index);
+      this.recordCapacityDrop(message, 'capacity-reduction-protected');
+      toRemove--;
+    }
+
+    this.compactPendingQueue();
+  }
+
+  private syncTotalBacklog(): void {
+    this.totalBacklog = this.processedBacklog + this.backlogQueueLength;
+    if (this.isActive) {
+      const progress = this.totalBacklog > 0 ? this.processedBacklog / this.totalBacklog : 1;
+      this.observability?.updateBacklogProgress(progress);
+      this.indicator.update(this.processedBacklog, this.totalBacklog);
     }
   }
 
@@ -141,33 +318,93 @@ export class BacklogInjectionController implements Pauseable {
    * Replacements update an undelivered entry in place, or are appended when
    * the prior version was already emitted, so ID dedup never discards them.
    */
+  private appendMessage(message: ChatMessage): boolean {
+    const id = message.id;
+    if (message.actionType === 'replace') {
+      if (!id) return false;
+      const pendingIndex = this.backlogPendingIndices.get(id);
+      if (pendingIndex !== undefined) {
+        const previous = this.backlogQueue[pendingIndex];
+        if (previous && !BacklogInjectionController.isProtectedPendingMessage(previous)) {
+          this.ordinaryPendingCount--;
+        }
+        this.backlogQueue[pendingIndex] = message;
+        return false;
+      }
+
+      if (this.isKnownMessageId?.(id) !== true) return false;
+    } else if (id && (this.backlogSeenIds.has(id) || this.isKnownMessageId?.(id) === true)) {
+      return false;
+    }
+
+    return this.appendValidatedMessage(message);
+  }
+
+  private appendValidatedMessage(message: ChatMessage): boolean {
+    if (this.pendingCount >= this.pendingCapacity) {
+      if (!BacklogInjectionController.isProtectedPendingMessage(message)) {
+        this.recordCapacityDrop(message, 'ordinary-capacity-full');
+        return false;
+      }
+      if (this.ordinaryPendingCount === 0) {
+        this.recordCapacityDrop(message, 'protected-capacity-full');
+        return false;
+      }
+
+      const replacementIndex = this.findOldestOrdinaryIndex();
+      if (replacementIndex === null) {
+        this.recordCapacityDrop(message, 'protected-capacity-full');
+        return false;
+      }
+      const evicted = this.backlogQueue[replacementIndex];
+      if (!evicted) return false;
+      this.removePendingIdentity(evicted, replacementIndex);
+      this.backlogQueue[replacementIndex] = message;
+      this.ordinaryPendingCount--;
+      this.addPendingIdentity(message, replacementIndex);
+      this.recordCapacityDrop(evicted, 'overflow-ordinary-evicted');
+      return true;
+    }
+
+    const pendingIndex = this.backlogQueue.length;
+    this.backlogQueue.push(message);
+    this.pendingCount++;
+    if (!BacklogInjectionController.isProtectedPendingMessage(message)) {
+      this.ordinaryPendingCount++;
+    }
+    this.addPendingIdentity(message, pendingIndex);
+    return true;
+  }
+
   private appendUniqueMessages(messages: readonly ChatMessage[]): number {
     let added = 0;
-    for (const msg of messages) {
-      const id = msg.id;
-      if (msg.actionType === 'replace') {
-        if (!id) continue;
-        const pendingIndex = this.backlogPendingIndices.get(id);
-        if (pendingIndex !== undefined) {
-          this.backlogQueue[pendingIndex] = msg;
-          continue;
-        }
-
-        const knownOutsideBacklog = this.isKnownMessageId?.(id) === true;
-        if (!this.backlogSeenIds.has(id) && !knownOutsideBacklog) continue;
-      } else if (id && this.backlogSeenIds.has(id)) {
-        continue;
-      }
-
-      const pendingIndex = this.backlogQueue.length;
-      this.backlogQueue.push(msg);
-      if (id) {
-        this.backlogSeenIds.add(id);
-        this.backlogPendingIndices.set(id, pendingIndex);
-      }
-      added++;
+    for (const message of messages) {
+      if (this.appendMessage(message)) added++;
     }
     return added;
+  }
+
+  private isInitialMessageInMode(message: ChatMessage, now: number): boolean {
+    if (this.config.backlogMode !== 'recent') return true;
+    const cutoffMs = this.config.backlogRecentMinutes * 60_000;
+    return now - message.timestamp < cutoffMs;
+  }
+
+  /**
+   * Perform one-pass bounded admission before sampling creates any copies.
+   * The controller's normal pending maps double as the bounded candidate
+   * identity state, then are cleared before the sampled result is enqueued.
+   */
+  private collectInitialCandidates(messages: readonly ChatMessage[], now: number): ChatMessage[] {
+    this.clearPendingState();
+    for (const message of messages) {
+      if (!this.isInitialMessageInMode(message, now)) continue;
+      this.appendMessage(message);
+    }
+
+    const candidates = this.drainPending();
+    this.clearPendingState();
+    return candidates;
   }
 
   // ── Public API ───────────────────────────────────────────
@@ -180,8 +417,8 @@ export class BacklogInjectionController implements Pauseable {
     // injection rather than resetting state and losing progress.
     if (this.isInjecting) {
       const added = this.appendUniqueMessages(messages);
+      this.syncTotalBacklog();
       if (added > 0) {
-        this.totalBacklog += added;
         log.debug('backlog.injection-queued', { added, total: this.totalBacklog });
       }
       return;
@@ -192,8 +429,8 @@ export class BacklogInjectionController implements Pauseable {
     // and silently discarding pending messages.
     if (this.paused && this.backlogQueue.length > 0) {
       const added = this.appendUniqueMessages(messages);
+      this.syncTotalBacklog();
       if (added > 0) {
-        this.totalBacklog += added;
         log.debug('backlog.paused-merge', { added, total: this.totalBacklog });
       }
       return;
@@ -206,63 +443,40 @@ export class BacklogInjectionController implements Pauseable {
     }
 
     const now = Date.now();
-    const filtered = this.sampler.filterByMode(messages, this.config, now);
-
+    const candidates = this.collectInitialCandidates(messages, now);
     if (this.config.backlogMode === 'recent') {
-      log.debug(
-        `Backlog recent mode: ${messages.length} → ${filtered.length} ` +
-          `(last ${this.config.backlogRecentMinutes} min)`
-      );
+      log.debug('backlog.recent-filtered', {
+        total: messages.length,
+        admitted: candidates.length,
+        recentMinutes: this.config.backlogRecentMinutes,
+      });
     }
 
-    // Statistical sampling + replacement-target validation. A replacement
-    // may target a prior session message or an earlier add in this batch, but
-    // a fresh ID cannot create backlog work on its own.
-    const sampled = this.sampler.sampleMessages(filtered);
-    const batchKnownIds = new Set<string>();
-    const acceptedSampled = sampled.filter((message) => {
-      const id = message.id;
-      if (message.actionType === 'replace') {
-        return Boolean(id && (batchKnownIds.has(id) || this.isKnownMessageId?.(id) === true));
-      }
-      if (id) batchKnownIds.add(id);
-      return true;
-    });
+    // Sampling and partitioning operate only on the bounded candidate set.
+    const sampled = this.sampler.sampleMessages(candidates);
     const { priority: priorityMessages, regular: normalMessages } =
-      this.sampler.extractPriorityMessages(acceptedSampled);
+      this.sampler.extractPriorityMessages(sampled);
 
-    this.backlogQueue = [];
-    this.backlogQueueOffset = 0;
-    this.backlogSeenIds.clear();
-    this.backlogPendingIndices.clear();
-
-    // Priority messages bypass the throttled queue
-    let queueMessages: ChatMessage[] = normalMessages;
-    if (priorityMessages.length > 0) {
-      if (this.paused) {
-        queueMessages = [...priorityMessages, ...normalMessages];
-      } else {
-        for (const msg of priorityMessages) {
-          msg.isBacklog = true;
-          if (msg.id) this.backlogSeenIds.add(msg.id);
-          this.onBacklogMessage?.(msg);
-        }
-        log.debug('backlog.priority-emitted', { count: priorityMessages.length });
-      }
-    }
-
-    // Setup backlog queue state
-    this.totalBacklog = this.appendUniqueMessages(queueMessages);
+    this.clearPendingState();
     this.processedBacklog = 0;
+
+    // Priority work remains first, but is metered through the same queue.
+    for (const message of priorityMessages) this.appendValidatedMessage(message);
+    for (const message of normalMessages) this.appendValidatedMessage(message);
+    this.syncTotalBacklog();
     this.isActive = this.totalBacklog > 0;
     this.injectionStartTime = now;
     this.realTimeActivityCount = 0;
     this.lastRealTimeActivityAt = 0;
 
     // Adapt density ramp duration to backlog size
-    this.scheduler.setDensityRampMs(this.scheduler.computeDensityRampMs(acceptedSampled.length));
+    this.scheduler.setDensityRampMs(this.scheduler.computeDensityRampMs(sampled.length));
 
-    log.debug('backlog.sampled', { total: messages.length, sampled: acceptedSampled.length });
+    log.debug('backlog.sampled', {
+      total: messages.length,
+      admitted: candidates.length,
+      sampled: sampled.length,
+    });
     this.indicator.show();
     this.observability?.updateBacklogProgress(0);
     this.startInjection();
@@ -291,6 +505,8 @@ export class BacklogInjectionController implements Pauseable {
   updateConfig(config: Partial<BacklogControllerConfig>): void {
     this.config = { ...this.config, ...config };
     this.scheduler.updateConfig(config);
+    this.trimPendingToCapacity();
+    this.syncTotalBacklog();
   }
 
   /**
@@ -327,10 +543,9 @@ export class BacklogInjectionController implements Pauseable {
     this.isInjecting = false;
     this.injectionTimer = clearSafeTimeout(this.injectionTimer);
     this.indicator.destroy();
-    this.backlogQueue = [];
-    this.backlogQueueOffset = 0;
-    this.backlogSeenIds.clear();
-    this.backlogPendingIndices.clear();
+    this.clearPendingState();
+    this.totalBacklog = 0;
+    this.processedBacklog = 0;
     this.isKnownMessageId = null;
     this.onBacklogMessage = null;
   }
@@ -386,10 +601,9 @@ export class BacklogInjectionController implements Pauseable {
   private finishBacklogInjection(): void {
     this.isActive = false;
     this.isInjecting = false;
-    this.backlogQueue = [];
-    this.backlogQueueOffset = 0;
-    this.backlogSeenIds.clear();
-    this.backlogPendingIndices.clear();
+    this.clearPendingState();
+    this.totalBacklog = 0;
+    this.processedBacklog = 0;
     this.observability?.updateBacklogProgress(1);
     this.indicator.hide();
     log.debug('backlog.injection-complete');
@@ -397,6 +611,6 @@ export class BacklogInjectionController implements Pauseable {
 
   /** Effective length of the backlog queue (excluding consumed offset entries). */
   private get backlogQueueLength(): number {
-    return this.backlogQueue.length - this.backlogQueueOffset;
+    return this.pendingCount;
   }
 }
