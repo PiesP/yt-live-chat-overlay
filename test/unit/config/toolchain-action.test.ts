@@ -10,6 +10,7 @@ const centralWorkflowJobs = {
   'deep-checks.yaml': ['mutation-fast', 'mutation-renderer'],
 } as const;
 const releaseJobs = ['quality', 'unit', 'e2e', 'mutation', 'build'];
+const releaseLocalExecutionJobs = [...releaseJobs, 'duplication'];
 const releaseAction = './.github/actions/setup-release';
 const releasePrepare = readFileSync(resolve(root, 'scripts/release/prepare.ts'), 'utf8');
 
@@ -78,6 +79,33 @@ describe('project setup actions', () => {
     expect(releasePrepare).toContain('expectedCommit !== checkedOutCommit');
     expect(releasePrepare).toContain('const commit = releaseCommit;');
     expect(releasePrepare).not.toContain('process.env.GITHUB_SHA');
+  });
+
+  it('restores the verified release submodule before local execution', () => {
+    const releaseWorkflow = readFileSync(resolve(root, '.github/workflows/release.yaml'), 'utf8');
+
+    for (const job of releaseLocalExecutionJobs) {
+      const jobSection = releaseWorkflow.match(
+        new RegExp(`  ${job}:\\n[\\s\\S]*?(?=\\n  [a-z][\\w-]*:|$)`)
+      )?.[0];
+      const firstLocalExecution =
+        job === 'duplication'
+          ? 'run: bash scripts/ci/install-nose.sh'
+          : `uses: ${releaseAction}`;
+
+      expect(jobSection).toBeDefined();
+      if (!jobSection) throw new Error(`Release job not found: ${job}`);
+      expect(jobSection).toContain(
+        [
+          'git -c advice.detachedHead=false checkout --detach "$RELEASE_SHA"',
+          '          git submodule sync --recursive',
+          '          git submodule update --init --recursive',
+        ].join('\n')
+      );
+      expect(jobSection.indexOf('git submodule update --init --recursive')).toBeLessThan(
+        jobSection.indexOf(firstLocalExecution)
+      );
+    }
   });
 
   it('keeps the release install recipe local and immutable', () => {
