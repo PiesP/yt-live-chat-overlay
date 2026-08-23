@@ -272,6 +272,7 @@ export const ZH_CN: Record<string, string> = {
   'reset.confirm': '将所有设置重置为默认值？',
   Cancel: '取消',
   'import.invalidFormat': '导入失败：设置格式无效',
+  'import.fileTooLarge': '导入失败：设置文件过大',
   'import.success': '设置导入成功',
   'actions.export': '导出',
   'actions.import': '导入',

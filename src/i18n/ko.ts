@@ -279,6 +279,7 @@ export const KO: Record<string, string> = {
   'reset.confirm': '모든 설정을 기본값으로 초기화할까요?',
   Cancel: '취소',
   'import.invalidFormat': '가져오기 실패: 잘못된 설정 형식',
+  'import.fileTooLarge': '가져오기 실패: 설정 파일이 너무 큽니다',
   'import.success': '설정을 성공적으로 가져왔습니다',
   'actions.export': '내보내기',
   'actions.import': '가져오기',

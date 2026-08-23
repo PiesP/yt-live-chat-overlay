@@ -285,6 +285,7 @@ export const AR: Record<string, string> = {
   'reset.confirm': 'إعادة تعيين جميع الإعدادات إلى الافتراضية؟',
   Cancel: 'إلغاء',
   'import.invalidFormat': 'فشل الاستيراد: تنسيق الإعدادات غير صالح',
+  'import.fileTooLarge': 'فشل الاستيراد: ملف الإعدادات كبير جدًا',
   'import.success': 'تم استيراد الإعدادات بنجاح',
   'actions.export': 'تصدير',
   'actions.import': 'استيراد',

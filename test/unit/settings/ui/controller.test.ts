@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { SettingsUi } from '@settings/ui/controller';
+import { MAX_SETTINGS_IMPORT_BYTES, SettingsUi } from '@settings/ui/controller';
 import { SETTINGS_UI_DESIGN } from '@settings/ui/design-adapter';
 import { STYLE_ID } from '@settings/ui/form';
 import { SETTINGS_UI_STYLES } from '@settings/ui/styles';
@@ -212,6 +212,39 @@ describe('SettingsUi', () => {
     const buttons = document.querySelectorAll('#yt-chat-overlay-settings-button');
     expect(buttons.length).toBe(1);
 
+    c.destroy();
+  });
+
+  it('rejects an oversized settings import before constructing a FileReader', async () => {
+    const playerEl = document.createElement('div');
+    playerEl.id = 'movie_player';
+    document.body.appendChild(playerEl);
+    vi.mocked(mockFinder).mockResolvedValue(playerEl);
+    const FileReaderMock = vi.fn();
+    vi.stubGlobal('FileReader', FileReaderMock);
+
+    const c = makeController();
+    await c.attach();
+    document
+      .querySelector<HTMLButtonElement>(
+        '#yt-chat-overlay-settings-backdrop button[data-action="import"]'
+      )
+      ?.click();
+
+    const createElementMock = vi.mocked(document.createElement);
+    const inputResult = createElementMock.mock.results.findLast(
+      (_result, index) => createElementMock.mock.calls[index]?.[0] === 'input'
+    );
+    const input = inputResult?.value as HTMLInputElement | undefined;
+    expect(input).toBeInstanceOf(HTMLInputElement);
+    Object.defineProperty(input, 'files', {
+      configurable: true,
+      value: [{ size: MAX_SETTINGS_IMPORT_BYTES + 1 }],
+    });
+    input?.dispatchEvent(new Event('change'));
+
+    expect(FileReaderMock).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('Import failed: settings file is too large');
     c.destroy();
   });
 });

@@ -285,6 +285,7 @@ export const JA: Record<string, string> = {
   'reset.confirm': 'すべての設定を初期値にリセットしますか？',
   Cancel: 'キャンセル',
   'import.invalidFormat': 'インポート失敗: 設定形式が無効です',
+  'import.fileTooLarge': 'インポート失敗: 設定ファイルが大きすぎます',
   'import.success': '設定を正常にインポートしました',
   'actions.export': 'エクスポート',
   'actions.import': 'インポート',
