@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.45.1] - 2026-08-23
+
+### Fixed
+
+- **Live payload safety** — Bounded chat payload processing and bounded live backlog ingress to reduce malformed-message risk in the renderer and worker paths.
+- **Image and font admission hardening** — Constrained image prefetch acceptance and custom font style inputs to keep renderer behavior stable.
+- **Release integrity** — Restored release provenance handling for tagged releases and aligned release/contracts with trusted checkout sources.
+
+### Changed
+
+- **Security-tooling refresh** — Updated scanner/tooling and dependency pins, including browser-core updates and security workflow controls.
+- **Release/dependency maintenance** — Refreshed lockfiles, build/tooling versions, and release setup behavior for consistency across pipelines.
+
 ## [0.45.0] - 2026-08-06
 
 ### Added
