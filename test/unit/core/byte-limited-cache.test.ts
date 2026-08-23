@@ -191,7 +191,7 @@ describe('ResizableByteLimitedCache', () => {
     });
 
     it('keeps accounting consistent when an eviction callback throws', () => {
-      const c = new ResizableByteLimitedCache<string>(5, estimateSize, () => {
+      const c = new ResizableByteLimitedCache<string>(13, estimateSize, () => {
         throw new Error('cleanup failed');
       });
       c.set('key', 'value');
@@ -270,7 +270,7 @@ describe('ResizableByteLimitedCache', () => {
       const second = { bytes: 60 };
       const third = { bytes: 40 };
       const c = new ResizableByteLimitedCache<{ bytes: number }>(
-        100,
+        122,
         (value) => value.bytes,
         (value) => {
           value.bytes = 0;

@@ -146,7 +146,7 @@ describe('ImageFetchManager terminal lifecycle', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it('caches a standard 512px sticker at the minimum configured budget', () => {
+  it('caches a standard 512px sticker and its URL at the minimum configured budget', () => {
     const manager = new ImageFetchManager();
     manager.updateConfig({ ...DEFAULT_SETTINGS, stickerCacheMb: 1 } as OverlaySettings, null);
 
