@@ -307,6 +307,7 @@ export const ES: Record<string, string> = {
   'reset.confirm': '¿Restablecer todas las opciones a los valores predeterminados?',
   Cancel: 'Cancelar',
   'import.invalidFormat': 'Error de importación: formato no válido',
+  'import.fileTooLarge': 'Error de importación: el archivo de configuración es demasiado grande',
   'import.success': 'Configuración importada correctamente',
   'actions.export': 'Exportar',
   'actions.import': 'Importar',

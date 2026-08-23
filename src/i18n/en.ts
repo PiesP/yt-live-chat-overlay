@@ -246,6 +246,7 @@ export const EN: Record<string, string> = {
   'format.shortMessagesShown': 'Short messages shown regardless of length',
   'format.valueAdjusted': 'Value adjusted to',
   'import.invalidFormat': 'Import failed: invalid settings format',
+  'import.fileTooLarge': 'Import failed: settings file is too large',
   'import.invalidJson': 'Import failed: invalid JSON',
   'import.success': 'Settings imported successfully',
   'indicator.loading': 'Loading chat history...',

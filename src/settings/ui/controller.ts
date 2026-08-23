@@ -22,6 +22,9 @@ import {
 } from '@util/dom';
 import { createLogger } from '@util/logging';
 
+/** Settings exports are small; reject hostile imports before FileReader materializes them. */
+export const MAX_SETTINGS_IMPORT_BYTES = 256 * 1024;
+
 const log = createLogger('SettingsUi');
 
 const TOAST_DURATION_MS = 2500;
@@ -642,6 +645,11 @@ export class SettingsUi {
       // It was never appended to the DOM but keeping it alive in memory leaks.
       input.remove();
       if (!file || generation !== this.lifecycleGeneration) return;
+      if (!Number.isSafeInteger(file.size) || file.size > MAX_SETTINGS_IMPORT_BYTES) {
+        this.showToast(t('import.fileTooLarge'));
+        log.warn('settings.import.file-too-large', { sizeBytes: file.size });
+        return;
+      }
       const reader = new FileReader();
       this.importReader = reader;
       reader.addEventListener('load', () => {
