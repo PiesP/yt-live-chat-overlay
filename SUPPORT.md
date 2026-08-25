@@ -13,7 +13,8 @@ Open a [GitHub issue](https://github.com/PiesP/yt-live-chat-overlay/issues/new).
 - Stream type (live / premiere / replay)
 - Steps to reproduce, expected vs actual behavior
 - Release version (from the userscript header, extension manifest, or release tag)
-- Console output (prefixed module names: `[App]`, `[Renderer]`, etc.)
+- Console output (prefixed module names such as `[App]`, `[RuntimeManager]`, and
+  `[RendererCanvas]`)
 
 ## Feature request
 
