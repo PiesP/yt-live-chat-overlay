@@ -61,10 +61,12 @@ backlog, translation, performance, and accessibility options.
 | Chromium extension | Chrome/Chromium 116+ developer mode |
 | Firefox extension | Firefox 128+ technical minimum; temporary developer installation |
 
-Translation is capability-detected separately. Chrome 138+ provides the built-in
-Translator API, but availability still depends on the browser, device, and
-language pair. Required language models may be downloaded by the browser.
-Firefox currently runs the overlay without built-in translation.
+Translation support is detected at runtime and is independent of these browser
+floors. It requires the browser's built-in Translator API and support for the
+selected language pair. Automatic source-language detection uses the Language
+Detector API when available and otherwise falls back to in-browser Unicode
+heuristics. The browser may download required language models. When Translator
+is unavailable, the overlay continues without translation.
 
 Firefox 128 is the extension's technical compatibility floor, not a claim that
 Firefox 128 remains a currently serviced ESR. Use a currently supported Firefox

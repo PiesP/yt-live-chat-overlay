@@ -9,13 +9,15 @@ not browser-store installations.
 - `manifest.json`: Chromium manifest
 - `manifest.firefox.json`: Firefox manifest and minimum version
 - `content-script.ts`: isolated-world entry point and storage relay
-- `page-bridge.ts`: typed bridge shared with the injected page script
+- `page-bridge.ts`: main-world runtime bridge initialization
+- `page-script.ts`: main-world application entry point
 - `background.ts`: context menu and extension lifecycle handling
 - `src/platform/`: storage, menu, worker, cross-tab, language, and translation adapters
 
-The isolated content script injects a small `page-script.js` bridge into the
-YouTube page's main world. Messages crossing that boundary use the versioned
-bridge protocol; extension APIs remain in the isolated or background context.
+The isolated content script injects `page-script.js` into the YouTube page's
+main world. Messages crossing that boundary are origin- and shape-validated and
+carry a per-injection nonce; extension APIs remain in the isolated or background
+context.
 
 | Capability | Userscript | Chromium extension | Firefox extension |
 | --- | --- | --- | --- |
@@ -23,7 +25,7 @@ bridge protocol; extension APIs remain in the isolated or background context.
 | Cross-tab sync | Userscript value-change listener | Extension storage events | Extension storage events |
 | Menu | Userscript menu command | Context menu | Context menu |
 | Worker URL | Bundled userscript URL | `runtime.getURL()` | `runtime.getURL()` |
-| Translation | When the browser exposes Translator | When Chromium exposes Translator | Unavailable |
+| Translation | Built-in API when available | Built-in API when available | Built-in API when available |
 
 ## Build
 
@@ -53,9 +55,8 @@ all-target CI build also validates expected files through `check:artifacts`.
 
 The Firefox installation is removed when the browser restarts.
 
-Firefox 128 is the manifest's technical compatibility floor. It does not mean
-that Firefox 128 is still a serviced ESR; development and release checks should
-use a currently supported Firefox release.
+See [Browser support](../README.md#browser-support) for compatibility floors.
+Development and release checks should use a currently supported Firefox release.
 
 ## Browser validation
 
@@ -81,8 +82,11 @@ falls back to main-thread Canvas2D if transfer, initialization, or worker health
 checks fail. There is no WebGL renderer.
 
 Translation is enabled only when the browser exposes the built-in Translator
-API and supports the selected language pair. Firefox currently runs without
-translation. The browser may download language models before first use.
+API and supports the selected language pair. Automatic source-language
+detection uses the Language Detector API when available and otherwise falls back
+to in-browser Unicode heuristics. When Translator is unavailable, the overlay
+continues without translation. The browser may download language models before
+first use.
 
 ## Release packaging
 

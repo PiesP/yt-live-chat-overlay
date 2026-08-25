@@ -1,6 +1,6 @@
 # Privacy
 
-Last updated: 2026-07-29
+Last updated: 2026-08-25
 
 YouTube Live Chat Overlay is distributed as a userscript and as Chrome and
 Firefox extension builds. It does not use a developer-operated backend,
@@ -37,17 +37,18 @@ or chat continuations are not already available. It also loads YouTube-hosted
 author images, emoji, and stickers from allowlisted Google media domains such as
 `ggpht.com`, `googleusercontent.com`, `gstatic.com`, and `ytimg.com`.
 
-The userscript manager may separately check jsDelivr URLs embedded in the
-userscript header for updates. YouTube, Google, browser vendors, and installed
-userscript managers have their own privacy policies.
+The userscript manager may separately check GitHub release URLs embedded in the
+userscript header for updates. YouTube, Google, GitHub, browser vendors, and
+installed userscript managers have their own privacy policies.
 
 ## Translation
 
-When enabled, translation uses the browser's built-in Translator and Language
-Detector APIs. The project does not send chat text to an external translation
-API. The browser may download language models or language packs and controls
-their storage and processing. Feature and language-pair availability varies by
-browser and device.
+When enabled, translation uses the browser's built-in Translator API. Automatic
+source-language detection uses the Language Detector API when available and
+otherwise falls back to in-browser Unicode heuristics. The project does not send
+chat text to an external translation API. The browser may download language
+models or language packs and controls their storage and processing. Feature and
+language-pair availability varies by browser and device.
 
 ## Contact
 
