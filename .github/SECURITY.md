@@ -47,9 +47,11 @@ duplication analysis, mutation testing, CodeQL, OSV Scanner, and Semgrep. The
 workflow files and package scripts are authoritative for the exact checks.
 
 Codex Security is an advisory, AI-assisted review layer and does not replace
-those deterministic gates or human validation. Local scans use the pinned CLI
-from `.github/workflows/codex-security.yaml` without changing the dependency
-lockfile:
+those deterministic gates or human validation. Local scans and
+`.github/workflows/codex-security.yaml` install the same pinned CLI without
+changing its dependency lockfile. The integrity-locked CLI package is maintained
+in `scripts/security/codex-security/`; trusted scan instructions and the threat
+model remain in `.github/codex-security/`:
 
 ```bash
 pnpm security:codex:dry-run
