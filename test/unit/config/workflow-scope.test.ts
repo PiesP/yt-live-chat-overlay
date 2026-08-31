@@ -146,6 +146,28 @@ describe('workflow change classification', () => {
     });
   });
 
+  it('keeps Codex Security dependency and policy changes in supply-chain scopes', () => {
+    for (const path of [
+      'scripts/security/codex-security/package-lock.json',
+      '.github/codex-security/scan.md',
+    ]) {
+      expect(classify([path])).toMatchObject({
+        quality: false,
+        unit: true,
+        e2e: false,
+        build: false,
+        duplication: false,
+        osv: true,
+        semgrep: true,
+        codeql_actions: false,
+        codeql_javascript: false,
+        pinned_tools: true,
+        deep_fast: false,
+        codex_security: true,
+      });
+    }
+  });
+
   it('fails closed for unknown paths, manual runs, and unavailable revisions', () => {
     expect(Object.values(classify(['new-config.unknown']))).not.toContain(false);
     expect(
@@ -244,6 +266,7 @@ describe('workflow scope integration', () => {
     expect(deep).toContain('      - "packages/core"');
     expect(deep).toContain('      - ".github/workflows/deep-checks.yaml"');
     expect(codex).toContain('      - ".github/codex-security/**"');
+    expect(codex).toContain('      - "scripts/security/codex-security/**"');
     expect(codex).toContain('      - ".github/workflows/**"');
     expect(codex).not.toContain('      - "README.md"');
   });

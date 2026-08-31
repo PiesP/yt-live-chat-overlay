@@ -128,6 +128,9 @@ classify_path() {
     biome.json | knip.json | tsconfig*.json | vitest.config.ts | stryker.conf*.json)
       mark quality unit e2e build semgrep codeql_javascript deep_fast codex_security
       ;;
+    scripts/security/codex-security/**)
+      mark unit osv semgrep pinned_tools codex_security
+      ;;
     scripts/**)
       mark quality unit build semgrep codeql_javascript codex_security
       case "$path" in
@@ -158,7 +161,7 @@ classify_path() {
       mark quality unit semgrep codeql_actions codex_security
       ;;
     .github/codex-security/**)
-      mark osv semgrep pinned_tools codex_security
+      mark unit osv semgrep pinned_tools codex_security
       ;;
     .github/SECURITY.md | PRIVACY.md)
       mark semgrep codex_security
