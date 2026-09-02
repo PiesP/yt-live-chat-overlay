@@ -87,6 +87,17 @@ describe('ReplayBuffer', () => {
       expect(ids.filter((id) => id === 'msg0')).toHaveLength(1);
       expect(ids.filter((id) => id === 'msg3000')).toHaveLength(1);
     });
+
+    it('bounds backing storage while trimming a long replay', () => {
+      const internals = buf as unknown as { buffer: unknown[]; bufferOffset: number };
+
+      for (let i = 0; i < 50_000; i++) {
+        buf.insert(makeMsg(`msg${i}`, i), i);
+      }
+
+      expect(internals.buffer.length).toBeLessThanOrEqual(3_500);
+      expect(internals.bufferOffset).toBeLessThanOrEqual(500);
+    });
   });
 
   describe('flushUpTo()', () => {
@@ -136,12 +147,16 @@ describe('ReplayBuffer', () => {
     });
 
     it('compacts buffer when offset grows beyond 64', () => {
+      const internals = buf as unknown as { buffer: unknown[]; bufferOffset: number };
+
       for (let i = 0; i < 70; i++) {
         buf.insert(makeMsg(`msg${i}`, 1000), 1000);
       }
       const result = buf.flushUpTo(3000, 70);
       expect(result).toHaveLength(70);
       expect(buf.isEmpty).toBe(true);
+      expect(internals.buffer.length).toBeLessThanOrEqual(64);
+      expect(internals.bufferOffset).toBeLessThanOrEqual(64);
     });
 
     it('removes consumed message IDs from seenIds allowing re-insertion', () => {
@@ -252,6 +267,23 @@ describe('ReplayBuffer', () => {
       buf.insert(msg, 1000);
       const result = buf.flushUpTo(3000, 10);
       expect(result).toHaveLength(1);
+    });
+
+    it('bounds consumed backing storage across repeated partial drains', () => {
+      const internals = buf as unknown as { buffer: unknown[]; bufferOffset: number };
+      buf.insert(makeMsg('future', 10_000), 10_000);
+
+      for (let i = 0; i < 256; i++) {
+        buf.insert(makeMsg(`msg${i}`, i), i);
+        expect(buf.drainUpTo(i).map((message) => message.id)).toEqual([`msg${i}`]);
+      }
+
+      expect(internals.buffer.length).toBeLessThanOrEqual(65);
+      expect(internals.bufferOffset).toBeLessThanOrEqual(64);
+
+      buf.insert(makeMsg('msg0', 1_000), 1_000);
+      expect(buf.drainUpTo(1_000).map((message) => message.id)).toEqual(['msg0']);
+      expect(buf.drainAll().map((message) => message.id)).toEqual(['future']);
     });
   });
 

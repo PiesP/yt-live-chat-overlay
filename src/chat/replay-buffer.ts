@@ -121,11 +121,7 @@ export class ReplayBuffer {
       batch.push(next.message);
     }
 
-    // Compact when offset grows large
-    if (this.bufferOffset > 64) {
-      this.buffer.splice(0, this.bufferOffset);
-      this.bufferOffset = 0;
-    }
+    this.compactConsumedPrefix(64);
 
     return batch;
   }
@@ -177,6 +173,8 @@ export class ReplayBuffer {
       if (msg.id) this.seenIds.delete(msg.id);
     }
 
+    this.compactConsumedPrefix(64);
+
     return messages;
   }
 
@@ -222,12 +220,13 @@ export class ReplayBuffer {
     }
     this.bufferOffset = trimEnd;
 
-    // When the offset grows large, release the backing array memory
-    // by discarding entries before the offset.  Without this, the array
-    // grows monotonically during long hidden-tab sessions.
-    if (this.bufferOffset > 500) {
-      this.buffer = this.buffer.slice(this.bufferOffset);
-      this.bufferOffset = 0;
-    }
+    this.compactConsumedPrefix(500);
+  }
+
+  /** Release consumed entries while preserving the active sorted suffix. */
+  private compactConsumedPrefix(threshold: number): void {
+    if (this.bufferOffset <= threshold) return;
+    this.buffer = this.buffer.slice(this.bufferOffset);
+    this.bufferOffset = 0;
   }
 }
