@@ -151,7 +151,7 @@ export class BacklogScheduler {
     const utilizationFactor = this.getUtilizationFactor(onUtilizationQuery);
     const rampFactor = this.getDensityRampFactor(injectionStartTime, now);
 
-    const minRate = Math.max(this.lanes + 1, 2);
+    const minRate = Math.max(1, Math.min(this.config.backlogInjectionRateMin, maxRate));
 
     return {
       meanInterval: computeAdaptiveMeanInterval(
