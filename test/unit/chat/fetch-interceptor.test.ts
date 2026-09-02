@@ -2,7 +2,11 @@
 // Copyright (c) 2026 PiesP
 
 import type { ChatMessage, OverlaySettings } from '@app-types';
-import { createResponseIdentity, installFetchInterceptor } from '@chat/fetch-interceptor';
+import {
+  createResponseIdentity,
+  installFetchInterceptor,
+  isChatEndpointUrl,
+} from '@chat/fetch-interceptor';
 import { MAX_CHAT_RESPONSE_BYTES } from '@chat/youtube/response-text';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -19,7 +23,7 @@ vi.mock('@chat/youtube/api', () => ({
   getLiveChatPayload: mocks.getLiveChatPayload,
 }));
 
-const CHAT_URL = 'https://www.youtube.com/youtubei/v1/live_chat/get_live_chat';
+const CHAT_URL = `${location.origin}/youtubei/v1/live_chat/get_live_chat`;
 const settings = {} as OverlaySettings;
 const parsedMessage: ChatMessage = {
   id: 'intercepted',
@@ -205,5 +209,24 @@ describe('fetch interceptor response identities', () => {
 
     expect(onMessages).not.toHaveBeenCalled();
     expect(mocks.getLiveChatPayload).not.toHaveBeenCalled();
+  });
+});
+
+describe('isChatEndpointUrl', () => {
+  it.each([
+    '/youtubei/v1/live_chat/get_live_chat',
+    '/youtubei/v1/live_chat/get_live_chat_replay?key=test',
+    `${location.origin}/youtubei/v1/live_chat/get_live_chat`,
+  ])('accepts an exact same-origin chat endpoint: %s', (url) => {
+    expect(isChatEndpointUrl(url)).toBe(true);
+  });
+
+  it.each([
+    'https://attacker.example/youtubei/v1/live_chat/get_live_chat',
+    'https://www.youtube.com/redirect?next=/youtubei/v1/live_chat/get_live_chat',
+    '/youtubei/v1/live_chat/get_live_chat/extra',
+    '/youtubei/v1/live_chat/not_live_chat',
+  ])('rejects a non-endpoint URL: %s', (url) => {
+    expect(isChatEndpointUrl(url)).toBe(false);
   });
 });

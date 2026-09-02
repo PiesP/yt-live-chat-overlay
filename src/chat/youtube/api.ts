@@ -14,7 +14,7 @@ import {
   isRecord,
   type JsonObject,
 } from '@chat/youtube/request';
-import { readBoundedChatResponseText } from '@chat/youtube/response-text';
+import { readBoundedChatResponseText, readBoundedResponseText } from '@chat/youtube/response-text';
 import { isYouTubeLive, isYouTubeWatch } from '@chat/youtube/url-pattern';
 import { isAbortError, sleep } from '@util/dom';
 import { createLogger } from '@util/logging';
@@ -61,6 +61,9 @@ export class YoutubeInnertubeRequestError extends Error {
 
 const ENDPOINT_RETRY_MAX_ATTEMPTS = 4; // 1 initial + 3 retries
 const ENDPOINT_RETRY_BASE_DELAY_MS = 1000; // 1s → 2s → 4s
+
+/** Hard cap for fallback watch-page HTML before parsing page bootstrap data. */
+export const MAX_WATCH_HTML_BYTES = 16 * 1024 * 1024;
 
 /** Retryable: TypeError (network down), 503-504 (server), 429 (rate limit) */
 const isRetryableError = (error: unknown): boolean => {
@@ -117,7 +120,7 @@ const tryGetInitialDataFromWindow = (): JsonObject | null => {
   return null;
 };
 
-const fetchWatchHtml = async (videoId: string, signal?: AbortSignal): Promise<string> => {
+export const fetchWatchHtml = async (videoId: string, signal?: AbortSignal): Promise<string> => {
   const response = await fetch(buildWatchUrl(videoId), {
     credentials: 'include',
     cache: 'no-store',
@@ -136,7 +139,7 @@ const fetchWatchHtml = async (videoId: string, signal?: AbortSignal): Promise<st
     );
   }
 
-  return response.text();
+  return readBoundedResponseText(response, MAX_WATCH_HTML_BYTES, 'Watch page HTML');
 };
 
 const extractJsonObjectFromHtml = (html: string, markers: readonly string[]): JsonObject | null => {

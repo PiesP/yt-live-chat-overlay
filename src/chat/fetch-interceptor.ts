@@ -55,11 +55,20 @@ function rememberResponseIdentity(cache: Set<string>, text: string): boolean {
   return true;
 }
 
-/**
- * Matches YouTube Innertube live-chat fetch URLs.
- * Covers both live and replay endpoints.
- */
-const CHAT_ENDPOINT_RE = /youtubei\/v1\/live_chat\/(get_live_chat|get_live_chat_replay)/;
+const CHAT_ENDPOINT_PATHS = new Set([
+  '/youtubei/v1/live_chat/get_live_chat',
+  '/youtubei/v1/live_chat/get_live_chat_replay',
+]);
+
+/** Match only the exact same-origin YouTube Innertube live-chat endpoints. */
+export function isChatEndpointUrl(value: string): boolean {
+  try {
+    const url = new URL(value, location.href);
+    return url.origin === location.origin && CHAT_ENDPOINT_PATHS.has(url.pathname);
+  } catch {
+    return false;
+  }
+}
 
 type InterceptorCallback = (messages: ChatMessage[]) => void;
 
@@ -109,9 +118,9 @@ export function installFetchInterceptor(
             ? input.url
             : '';
 
-    // Fast-path URL check: skip regex for non-string/URL/Request inputs.
-    // Only chat-related URLs need cloning; all others pass through untouched.
-    if (!url || !CHAT_ENDPOINT_RE.test(url)) {
+    // Only exact same-origin chat endpoints need cloning; all other requests
+    // pass through untouched.
+    if (!url || !isChatEndpointUrl(url)) {
       return originalFetch.call(this, input, init);
     }
 

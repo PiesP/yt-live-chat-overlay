@@ -1,10 +1,17 @@
 // @vitest-environment jsdom
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  MAX_WATCH_HTML_BYTES,
   getVideoIdFromUrl,
   buildWatchUrl,
+  fetchWatchHtml,
   findLiveChatRenderer,
 } from '@chat/youtube/api';
+import { ResponseTooLargeError } from '@chat/youtube/response-text';
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 // ── getVideoIdFromUrl ─────────────────────────────────────────────────
 
@@ -137,6 +144,24 @@ describe('buildWatchUrl', () => {
 
   it('handles empty string videoId', () => {
     expect(buildWatchUrl('')).toBe('https://www.youtube.com/watch?v=');
+  });
+});
+
+describe('fetchWatchHtml', () => {
+  it('rejects a declared response larger than the watch-page byte limit', async () => {
+    const cancel = vi.fn();
+    const body = new ReadableStream<Uint8Array>({ cancel });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(body, {
+          headers: { 'content-length': String(MAX_WATCH_HTML_BYTES + 1) },
+        })
+      )
+    );
+
+    await expect(fetchWatchHtml('video-id')).rejects.toBeInstanceOf(ResponseTooLargeError);
+    expect(cancel).toHaveBeenCalledOnce();
   });
 });
 

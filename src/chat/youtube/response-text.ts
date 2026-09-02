@@ -4,12 +4,21 @@
 /** Hard cap for a single YouTube live-chat response body. */
 export const MAX_CHAT_RESPONSE_BYTES = 8 * 1024 * 1024;
 
-export class ChatResponseTooLargeError extends Error {
+export class ResponseTooLargeError extends Error {
   constructor(
     readonly observedBytes: number,
-    readonly maxBytes: number
+    readonly maxBytes: number,
+    readonly responseLabel = 'Response'
   ) {
-    super(`Chat response exceeded ${maxBytes} bytes.`);
+    super(`${responseLabel} exceeded ${maxBytes} bytes.`);
+    this.name = 'ResponseTooLargeError';
+  }
+}
+
+/** Stable live-chat-specific error contract retained for existing callers. */
+export class ChatResponseTooLargeError extends ResponseTooLargeError {
+  constructor(observedBytes: number, maxBytes: number) {
+    super(observedBytes, maxBytes, 'Chat response');
     this.name = 'ChatResponseTooLargeError';
   }
 }
@@ -21,7 +30,7 @@ function parseDeclaredLength(response: Response): number | null {
   return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
 }
 
-async function cancelBody(response: Response, error: ChatResponseTooLargeError): Promise<void> {
+async function cancelBody(response: Response, error: ResponseTooLargeError): Promise<void> {
   try {
     await response.body?.cancel(error);
   } catch {
@@ -30,9 +39,22 @@ async function cancelBody(response: Response, error: ChatResponseTooLargeError):
 }
 
 /** Read a response as UTF-8 while enforcing a byte limit before materialization. */
-export async function readBoundedChatResponseText(
+export async function readBoundedResponseText(
   response: Response,
-  maxBytes = MAX_CHAT_RESPONSE_BYTES
+  maxBytes: number,
+  responseLabel = 'Response'
+): Promise<string> {
+  return readBoundedResponseTextWithError(
+    response,
+    maxBytes,
+    (observedBytes) => new ResponseTooLargeError(observedBytes, maxBytes, responseLabel)
+  );
+}
+
+async function readBoundedResponseTextWithError(
+  response: Response,
+  maxBytes: number,
+  createTooLargeError: (observedBytes: number) => ResponseTooLargeError
 ): Promise<string> {
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) {
     throw new RangeError('maxBytes must be a positive safe integer.');
@@ -40,7 +62,7 @@ export async function readBoundedChatResponseText(
 
   const declaredLength = parseDeclaredLength(response);
   if (declaredLength !== null && declaredLength > maxBytes) {
-    const error = new ChatResponseTooLargeError(declaredLength, maxBytes);
+    const error = createTooLargeError(declaredLength);
     await cancelBody(response, error);
     throw error;
   }
@@ -49,7 +71,7 @@ export async function readBoundedChatResponseText(
     const text = await response.text();
     const observedBytes = new TextEncoder().encode(text).byteLength;
     if (observedBytes > maxBytes) {
-      throw new ChatResponseTooLargeError(observedBytes, maxBytes);
+      throw createTooLargeError(observedBytes);
     }
     return text;
   }
@@ -65,7 +87,7 @@ export async function readBoundedChatResponseText(
 
       const nextTotal = totalBytes + value.byteLength;
       if (!Number.isSafeInteger(nextTotal) || nextTotal > maxBytes) {
-        const error = new ChatResponseTooLargeError(nextTotal, maxBytes);
+        const error = createTooLargeError(nextTotal);
         try {
           await reader.cancel(error);
         } catch {
@@ -87,4 +109,16 @@ export async function readBoundedChatResponseText(
     offset += chunk.byteLength;
   }
   return new TextDecoder().decode(bytes);
+}
+
+/** Read one live-chat response with the product's default chat-body limit. */
+export function readBoundedChatResponseText(
+  response: Response,
+  maxBytes = MAX_CHAT_RESPONSE_BYTES
+): Promise<string> {
+  return readBoundedResponseTextWithError(
+    response,
+    maxBytes,
+    (observedBytes) => new ChatResponseTooLargeError(observedBytes, maxBytes)
+  );
 }
