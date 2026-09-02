@@ -5,6 +5,20 @@ import {
 } from '@chat/youtube/response-text';
 
 describe('readBoundedChatResponseText', () => {
+  it('preserves the chat-specific error name and message contract', async () => {
+    const response = new Response(null, { headers: { 'content-length': '11' } });
+
+    const error = await readBoundedChatResponseText(response, 10).catch(
+      (reason: unknown) => reason
+    );
+
+    expect(error).toBeInstanceOf(ChatResponseTooLargeError);
+    expect(error).toMatchObject({
+      name: 'ChatResponseTooLargeError',
+      message: 'Chat response exceeded 10 bytes.',
+    });
+  });
+
   it('rejects an oversized declared length and cancels the body', async () => {
     const cancel = vi.fn();
     const body = new ReadableStream<Uint8Array>({ cancel });
