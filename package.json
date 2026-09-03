@@ -97,7 +97,7 @@
     "@playwright/test": "^1.62.1",
     "@stryker-mutator/core": "^10.0.0",
     "@stryker-mutator/vitest-runner": "^10.0.0",
-    "@types/node": "^26.4.0",
+    "@types/node": "^26.4.1",
     "@vitest/coverage-v8": "^4.1.11",
     "canvas": "^3.2.3",
     "dpdm": "4.3.0",
