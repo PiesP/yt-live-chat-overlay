@@ -90,11 +90,19 @@ describe('Codex Security CLI supply-chain controls', () => {
     const cliPackage = JSON.parse(readFileSync(cliPackagePath, 'utf8')) as CliPackage;
     const cliLock = JSON.parse(readFileSync(cliLockPath, 'utf8')) as CliLock;
 
-    expect(cliPackage.overrides).toBeUndefined();
+    expect(cliPackage.overrides?.['pdfjs-dist']).toBeUndefined();
     expect(cliLock.packages['node_modules/pdfjs-dist']?.version).toBe('6.2.108');
     expect(workflow).not.toContain('patch-codex-security.mjs');
     expect(helper).not.toContain('patch-codex-security.mjs');
     expect(existsSync(patcherPath)).toBe(false);
+  });
+
+  it('overrides the vulnerable fast-uri closure with the minimum patched release', () => {
+    const cliPackage = JSON.parse(readFileSync(cliPackagePath, 'utf8')) as CliPackage;
+    const cliLock = JSON.parse(readFileSync(cliLockPath, 'utf8')) as CliLock;
+
+    expect(cliPackage.overrides).toEqual({ 'fast-uri': '3.1.6' });
+    expect(cliLock.packages['node_modules/fast-uri']?.version).toBe('3.1.6');
   });
 
   it('scopes the unpatched extract-zip advisory exception to the CLI lock', () => {
