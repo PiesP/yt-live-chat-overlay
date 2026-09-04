@@ -2,26 +2,15 @@
 // Copyright (c) 2026 PiesP
 
 /**
- * Scheduler utilities wrapping scheduler.yield() and scheduler.postTask()
- * with Safari fallbacks.
+ * Scheduler utility wrapping scheduler.postTask() with Safari fallbacks.
  *
  * Based on GoogleChrome/modern-web-guidance:
- * - https://github.com/GoogleChrome/modern-web-guidance/blob/main/skills/modern-web-guidance/guides/performance/break-up-long-tasks.md
  * - https://github.com/GoogleChrome/modern-web-guidance/blob/main/skills/modern-web-guidance/guides/performance/schedule-tasks-by-priority.md
- *
- * scheduler.yield():
- *   Chrome 129+, Edge 129+, Firefox 142+, Safari — not supported.
- *   Falls back to setTimeout(0) Promise.
  *
  * scheduler.postTask():
  *   Chrome 129+, Edge 129+, Firefox 142+, Safari — not supported.
  *   Falls back to setTimeout(0) or Promise microtask.
  */
-
-import { schedulerYield } from '@piesp/browser-core/util';
-
-/** Default budget per yield slice (50ms = long task boundary per RAIL). */
-const YIELD_BUDGET_MS = 50;
 
 // ── Feature detection (computed once at module load) ──────────────────────
 
@@ -81,33 +70,4 @@ export function scheduleOverlayTask<T>(
       }
     }, delay);
   });
-}
-
-// ── Deadline-based yielding (budget management) ──────────────────────────
-
-/**
- * Check whether the current work slice has exceeded the time budget and yield
- * if needed.
- *
- * Typical usage in an async processing loop:
- *
- *   let deadline = performance.now() + YIELD_BUDGET_MS;
- *   for (const item of items) {
- *     process(item);
- *     deadline = await yieldAtDeadline(deadline);
- *   }
- *
- * @param deadline  The performance.now() threshold at which to yield.
- * @param budgetMs  Budget per slice (default 50ms, the long task boundary).
- * @returns A new deadline if yielded, or the original deadline unchanged.
- */
-export async function yieldAtDeadline(
-  deadline: number,
-  budgetMs = YIELD_BUDGET_MS
-): Promise<number> {
-  if (performance.now() >= deadline) {
-    await schedulerYield();
-    return performance.now() + budgetMs;
-  }
-  return deadline;
 }

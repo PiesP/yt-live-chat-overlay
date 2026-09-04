@@ -33,6 +33,7 @@ import type {
 import { getTranslatableText } from '@chat/message-helpers';
 import { t } from '@i18n/index';
 import { ImageFetchManager } from '@media/image-fetch-manager';
+import { yieldIfOverBudgetAsync } from '@piesp/browser-core/util';
 import {
   applyDevicePixelRatio,
   disconnectObserver,
@@ -101,7 +102,7 @@ import { createLogger } from '@util/logging';
 import { MapCompatibleLruMap } from '@util/lru-map';
 import { MessageActivator } from '@util/message-activator';
 import { HighFirstPriorityBucketQueue } from '@util/priority-bucket-queue';
-import { scheduleOverlayTask, yieldAtDeadline } from '@util/scheduler-utils';
+import { scheduleOverlayTask } from '@util/scheduler-utils';
 
 const log = createLogger('RendererCanvas');
 
@@ -1390,7 +1391,7 @@ export class CanvasRenderer extends RendererBase {
       if (!dims) return;
 
       const batch = createDrainBatch(this.pendingQueue.toArray());
-      let deadline = performance.now() + 50; // 50ms budget
+      let lastYield = performance.now();
 
       for (const msg of batch.candidates) {
         if (this.activeMessages.length >= this.settings.maxConcurrentMessages) break;
@@ -1410,7 +1411,7 @@ export class CanvasRenderer extends RendererBase {
 
         // Check the budget after every attempt, including collision failures,
         // so an unplaceable backlog cannot monopolize the main thread.
-        deadline = await yieldAtDeadline(deadline);
+        lastYield = await yieldIfOverBudgetAsync(performance.now(), lastYield);
 
         // Session may have been destroyed during the yield — abort drain
         // to avoid accessing null canvas/ctx or injecting messages into
