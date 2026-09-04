@@ -860,7 +860,7 @@ describe('CanvasRenderer', () => {
     expect(await runDrain(true)).toEqual(await runDrain(false));
   });
 
-  it('aborts async drain after destruction during a scheduler yield', async () => {
+  it('aborts async drain after destruction when the shared 8ms budget yields', async () => {
     (overlay as unknown as { dimensions: { width: number; height: number } }).dimensions = {
       width: 1280,
       height: 720,
@@ -882,7 +882,7 @@ describe('CanvasRenderer', () => {
       configurable: true,
       value: { yield: vi.fn(async () => renderer.destroy()) },
     });
-    vi.spyOn(performance, 'now').mockReturnValueOnce(0).mockReturnValue(100);
+    vi.spyOn(performance, 'now').mockReturnValueOnce(0).mockReturnValue(9);
 
     try {
       await internals.drainQueueAsync(100);
