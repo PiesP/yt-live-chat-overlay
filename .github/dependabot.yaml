@@ -27,6 +27,21 @@ updates:
       - dependency-type: "direct"
 
     groups:
+      vitest:
+        patterns:
+          - "vitest"
+          - "@vitest/*"
+        update-types:
+          - "minor"
+          - "patch"
+
+      stryker:
+        patterns:
+          - "@stryker-mutator/*"
+        update-types:
+          - "minor"
+          - "patch"
+
       build:
         patterns:
           - "typescript"
@@ -41,7 +56,6 @@ updates:
         patterns:
           - "@biomejs/*"
           - "knip"
-          - "rimraf"
         update-types:
           - "minor"
           - "patch"
