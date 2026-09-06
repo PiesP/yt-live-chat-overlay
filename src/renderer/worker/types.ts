@@ -154,6 +154,8 @@ export interface WorkerMessage {
   priority: number;
   /** Whether this is a backlog (past chat) message. */
   isBacklog: boolean;
+  /** Whether a permanent Worker-side discard contributes to observed drop metrics. */
+  trackDrops?: boolean;
   /** Translated text (if available). */
   translatedText?: string | null;
   /** Height of the dual-translation text block, excluding its leading gap. */
@@ -195,6 +197,18 @@ export interface WorkerStatsMessage {
   laneUtilization: number;
   activeMessageIds: string[];
   pendingMessageIds: string[];
+}
+
+export interface WorkerErrorMessage {
+  type: 'error';
+  error: string;
+}
+
+export interface WorkerMessageSnapshot {
+  type: 'messageSnapshot';
+  requestId: number;
+  messageIds: string[];
+  processedBatchSequence: number;
 }
 
 export interface ActiveMessage {

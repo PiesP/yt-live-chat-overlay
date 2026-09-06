@@ -278,6 +278,31 @@ describe('Worker message protocol', () => {
         error: 'Failed to get 2D context',
       });
     });
+
+    it('posts a validated error when canvas context creation throws', () => {
+      const ThrowingCanvas = class {
+        getContext(): never {
+          throw new Error('context creation failed');
+        }
+      };
+      vi.stubGlobal('OffscreenCanvas', ThrowingCanvas);
+
+      getHandler()(
+        makeEvent({
+          type: 'init',
+          config: makeMinimalConfig(),
+          canvas: new ThrowingCanvas(),
+          dpr: 1,
+          width: 640,
+          height: 360,
+        })
+      );
+
+      expect(postMessageSpy).toHaveBeenCalledWith({
+        type: 'error',
+        error: 'context creation failed',
+      });
+    });
   });
 
   describe('resize', () => {
@@ -769,6 +794,7 @@ describe('Worker message protocol', () => {
         type: 'messageSnapshot',
         requestId: 7,
         messageIds: ['pending-message'],
+        processedBatchSequence: 0,
       });
     });
 
@@ -786,6 +812,7 @@ describe('Worker message protocol', () => {
         type: 'messageSnapshot',
         requestId: 8,
         messageIds: ['pending-first', 'pending-second'],
+        processedBatchSequence: 0,
       });
     });
 
