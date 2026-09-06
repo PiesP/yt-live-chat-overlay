@@ -301,6 +301,11 @@ export async function run({ browser, root, output }) {
     // interaction so the two screenshots capture a stable visual state.
     await page.waitForTimeout(2_250);
     await page.keyboard.press('Control+Space');
+    const pauseIndicator = page
+      .locator('#yt-live-chat-overlay')
+      .getByText('Paused', { exact: true });
+    await pauseIndicator.waitFor({ state: 'visible', timeout: 5_000 });
+    assert.equal(await pauseIndicator.textContent(), 'Paused');
 
     const canvas = page.locator('#yt-live-chat-overlay canvas');
     const canvasBox = await canvas.boundingBox();
@@ -333,6 +338,7 @@ export async function run({ browser, root, output }) {
         chatApiRequests,
         accessibleRenderedMessages: accessibleMessages.length,
         renderingPausedForCapture: true,
+        pauseIndicatorText: 'Paused',
         pageErrors: pageErrors.length,
         consoleErrors: consoleErrors.length,
         customEmojiAssetRequests,

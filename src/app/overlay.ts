@@ -446,7 +446,7 @@ export class Overlay {
     if (show) {
       if (!this.pauseIndicatorEl) {
         const el = document.createElement('div');
-        el.textContent = t('app.paused');
+        el.textContent = t('Paused');
         el.style.cssText =
           'position:absolute;top:8px;right:8px;z-index:100;background:rgba(0,0,0,0.7);color:#fff;font:14px/1.4 sans-serif;padding:4px 10px;border-radius:4px;pointer-events:none';
         this.container.appendChild(el);
