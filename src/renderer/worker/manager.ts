@@ -1055,19 +1055,21 @@ export class RenderWorkerManager {
   ): WorkerRecoveryMessage[] {
     const messages: WorkerRecoveryMessage[] = [];
     for (const [id, retained] of knownMessages) {
+      if (this.sentMessages.get(id) !== retained) continue;
+      const wasActive = this.lastWorkerActiveMessageIds.has(id);
+      const wasPending = this.lastWorkerPendingMessageIds.has(id);
+      const isUnacknowledged = retained.batchSequence > this.lastWorkerProcessedBatchSequence;
+      if (!wasActive && !wasPending && !isUnacknowledged) {
+        this.sentMessages.delete(id);
+        continue;
+      }
       messages.push({
         message: retained.message,
         // A timed-out Worker cannot prove a newer batch was placed. Preserve
         // tracking only for last-known pending or unacknowledged work.
-        trackDrops:
-          retained.trackDrops &&
-          !this.lastWorkerActiveMessageIds.has(id) &&
-          (this.lastWorkerPendingMessageIds.has(id) ||
-            retained.batchSequence > this.lastWorkerProcessedBatchSequence),
+        trackDrops: retained.trackDrops && !wasActive && (wasPending || isUnacknowledged),
       });
-      if (this.sentMessages.get(id) === retained) {
-        this.sentMessages.delete(id);
-      }
+      this.sentMessages.delete(id);
     }
     return messages;
   }
