@@ -861,6 +861,15 @@ describe('CanvasRenderer', () => {
         destroy(): void;
       };
       startRenderLoop(): void;
+      finalizeDrainBatch(
+        batch: {
+          candidates: readonly ChatMessage[];
+          committed: ChatMessage[];
+          unplaceable: ChatMessage[];
+          batchIndex: number;
+          staggerCursorMs: number;
+        }
+      ): void;
     };
     renderer.pause();
     vi.spyOn(internals, 'startRenderLoop').mockImplementation(() => undefined);
@@ -871,6 +880,7 @@ describe('CanvasRenderer', () => {
     const beforeError = makeMessage('before-error', 'before error');
     const duringFallback = makeMessage('during-fallback', 'during fallback');
     const afterSnapshot = makeMessage('after-snapshot', 'after snapshot');
+    const replayDuringFallback = makeMessage('replay-during-fallback', 'replay during fallback');
     const replacementDuringFallback = {
       ...makeMessage('before-error', 'replacement during fallback'),
       actionType: 'replace' as const,
@@ -880,6 +890,7 @@ describe('CanvasRenderer', () => {
     renderer.fallbackToMainThread('worker-load-error');
     renderer.addMessage(duringFallback);
     renderer.addMessage(replacementDuringFallback);
+    renderer.replayMessage(replayDuringFallback);
     resolveSnapshot([beforeError]);
     queueMicrotask(() => renderer.addMessage(afterSnapshot));
     await vi.waitFor(() => expect(internals.fallbackInProgress).toBe(false));
@@ -888,9 +899,23 @@ describe('CanvasRenderer', () => {
     expect(recoveredIds.filter((id) => id === beforeError.id)).toHaveLength(1);
     expect(recoveredIds.filter((id) => id === duringFallback.id)).toHaveLength(1);
     expect(recoveredIds.filter((id) => id === afterSnapshot.id)).toHaveLength(1);
+    expect(recoveredIds.filter((id) => id === replayDuringFallback.id)).toHaveLength(1);
     expect(
       internals.pendingQueue.toArray().find((message) => message.id === beforeError.id)?.text
     ).toBe('replacement during fallback');
+
+    const recoveredMessages = internals.pendingQueue.toArray();
+    const onMessagesDropped = vi.spyOn(renderer.observability, 'onMessagesDropped');
+    internals.finalizeDrainBatch(
+      {
+        candidates: recoveredMessages,
+        committed: [],
+        unplaceable: recoveredMessages,
+        batchIndex: 0,
+        staggerCursorMs: 0,
+      }
+    );
+    expect(onMessagesDropped).toHaveBeenCalledWith(2, 'oversized');
     renderer.destroy();
   });
 

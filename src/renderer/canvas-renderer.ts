@@ -147,6 +147,8 @@ export class CanvasRenderer extends RendererBase {
   /** Lane-indexed active messages for O(1) lane-scoped collision checks. */
   private readonly activeMessagesByLane = new Map<number, CanvasMessage[]>();
   private readonly pendingQueue = new HighFirstPriorityBucketQueue();
+  /** Pending messages whose eventual permanent discard contributes to drop metrics. */
+  private readonly trackedPendingMessages = new WeakSet<ChatMessage>();
   /** Bounded ingress retained while Worker state is being recovered. */
   private readonly fallbackIngressQueue = new HighFirstPriorityBucketQueue<FallbackIngressEntry>();
 
@@ -679,12 +681,12 @@ export class CanvasRenderer extends RendererBase {
   addMessage(message: ChatMessage): void {
     if (message.actionType === 'replace' && message.id) {
       if (this.fallbackInProgress) {
-        this.enqueueFallbackIngress(message, true);
+        this.enqueueFallbackIngress(message, false);
         this.lastRenderActivity = performance.now();
         return;
       }
       if (this.workerManager.isActive) {
-        if (this.workerManager.sendToWorker(message, message.id)) {
+        if (this.workerManager.sendToWorker(message, message.id, false)) {
           this.prefetchAndTranslateForWorker(message, message.id);
         }
         this.lastRenderActivity = performance.now();
@@ -860,6 +862,8 @@ export class CanvasRenderer extends RendererBase {
       this.settings.queueMaxSize
     );
     if (result === 'dropped') return;
+    if (trackDrops) this.trackedPendingMessages.add(message);
+    else this.trackedPendingMessages.delete(message);
     this.imageFetchManager.prefetchImages(message);
 
     this.updateBacklogPause();
@@ -905,30 +909,31 @@ export class CanvasRenderer extends RendererBase {
     this.fallbackIngressQueue.enqueue({ message, trackDrops }, priority);
   }
 
-  private drainFallbackIngress(): ChatMessage[] {
-    const messages: ChatMessage[] = [];
+  private drainFallbackIngress(): FallbackIngressEntry[] {
+    const entries: FallbackIngressEntry[] = [];
     while (!this.fallbackIngressQueue.isEmpty) {
       const entry = this.fallbackIngressQueue.dequeue();
-      if (entry) messages.push(entry.message);
+      if (entry) entries.push(entry);
     }
-    return messages;
+    return entries;
   }
 
   /** Merge Worker snapshot state with later ingress, keeping the newest value per ID. */
   private mergeRecoveredMessages(
     snapshotMessages: readonly ChatMessage[],
-    fallbackIngress: readonly ChatMessage[]
-  ): ChatMessage[] {
-    const merged: ChatMessage[] = [];
+    fallbackIngress: readonly FallbackIngressEntry[]
+  ): FallbackIngressEntry[] {
+    const merged: FallbackIngressEntry[] = [];
     const indexById = new Map<string, number>();
-    for (const message of [...snapshotMessages, ...fallbackIngress]) {
-      const id = message.id;
+    const snapshotEntries = snapshotMessages.map((message) => ({ message, trackDrops: false }));
+    for (const entry of [...snapshotEntries, ...fallbackIngress]) {
+      const id = entry.message.id;
       const existingIndex = id ? indexById.get(id) : undefined;
       if (existingIndex !== undefined) {
-        merged[existingIndex] = message;
+        merged[existingIndex] = entry;
       } else {
         if (id) indexById.set(id, merged.length);
-        merged.push(message);
+        merged.push(entry);
       }
     }
     return merged;
@@ -1463,7 +1468,7 @@ export class CanvasRenderer extends RendererBase {
         recordDrainResult(batch, msg, result);
       }
 
-      this.finalizeDrainBatch(batch, true);
+      this.finalizeDrainBatch(batch);
 
       this.observability.recordDrainQueue(performance.now() - t0);
     } finally {
@@ -1517,22 +1522,28 @@ export class CanvasRenderer extends RendererBase {
         if (this._destroyed) return;
       }
 
-      this.finalizeDrainBatch(batch, false);
+      this.finalizeDrainBatch(batch);
     } finally {
       this.drainLocked = false;
     }
   }
 
-  private finalizeDrainBatch(batch: DrainBatch<ChatMessage>, reportOversized: boolean): void {
+  private finalizeDrainBatch(batch: DrainBatch<ChatMessage>): void {
     commitDrainBatch(this.pendingQueue, batch);
+    const trackedOversized = batch.unplaceable.filter((message) =>
+      this.trackedPendingMessages.has(message)
+    );
+    for (const message of [...batch.committed, ...batch.unplaceable]) {
+      this.trackedPendingMessages.delete(message);
+    }
     if (batch.unplaceable.length === 0) return;
 
     // Update render activity so the watchdog doesn't flag a stuck renderer
     // for messages that were intentionally dropped as oversized.
     this.lastRenderActivity = performance.now();
-    if (!reportOversized) return;
+    if (trackedOversized.length === 0) return;
 
-    const first = batch.unplaceable[0]!;
+    const first = trackedOversized[0]!;
     const firstEstHeight = Math.round(this.estimateDimensions(first).height);
     const laneCount = this.laneAllocator.getLaneCount();
     const requiredSlots = Math.ceil(
@@ -1540,12 +1551,12 @@ export class CanvasRenderer extends RendererBase {
     );
     log.warn('renderer.message.drop', {
       reason: 'oversized',
-      dropped: batch.unplaceable.length,
+      dropped: trackedOversized.length,
       requiredSlots,
       laneCount,
       sampleKind: first.kind,
     });
-    this.observability.onMessageDropped('oversized');
+    this.observability.onMessagesDropped(trackedOversized.length, 'oversized');
   }
 
   /**
@@ -2456,15 +2467,20 @@ export class CanvasRenderer extends RendererBase {
         }
         this.laneAllocator.resetBatch();
 
-        for (const message of this.mergeRecoveredMessages(messages, fallbackIngress)) {
-          this.enqueueMessage(message, false);
+        for (const entry of this.mergeRecoveredMessages(messages, fallbackIngress)) {
+          this.enqueueMessage(entry.message, entry.trackDrops);
         }
         // Close the transition before yielding to another microtask. Any
         // ingress queued after the snapshot continuation will now enter the
         // restored main-thread queue directly instead of a stranded buffer.
-        for (const message of this.drainFallbackIngress()) {
-          if (message.actionType === 'replace' && this.replaceMainThreadMessage(message)) continue;
-          this.enqueueMessage(message, false);
+        for (const entry of this.drainFallbackIngress()) {
+          if (
+            entry.message.actionType === 'replace' &&
+            this.replaceMainThreadMessage(entry.message)
+          ) {
+            continue;
+          }
+          this.enqueueMessage(entry.message, entry.trackDrops);
         }
         this.fallbackInProgress = false;
         this.idleSince = null;
