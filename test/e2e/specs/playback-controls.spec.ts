@@ -203,6 +203,10 @@ async function runReplayScenario(page: Page, renderPath: 'main' | 'worker'): Pro
   if (useWorker) {
     await expect.poll(addedWorkerMessageIds).toEqual(['replay-start']);
     await expect.poll(latestWorkerMessageIds).toEqual(['replay-start']);
+    await expect(counters).toHaveText('Rcvd: 1 | Rndr: 1');
+    await expect(page.locator('#yt-chat-overlay-debug > div').nth(5)).toHaveText(
+      'Render: n/a | Drain: n/a',
+    );
   } else {
     await expect(counters).toHaveText(/^Rcvd: 1 \| Rndr: \d+$/);
   }
@@ -219,6 +223,7 @@ async function runReplayScenario(page: Page, renderPath: 'main' | 'worker'): Pro
   if (useWorker) {
     await expect.poll(async () => (await readWorkerTelemetry()).pausedStates).toEqual([true]);
     await expect.poll(addedWorkerMessageIds).toEqual(['replay-start']);
+    await expect(counters).toHaveText('Rcvd: 1 | Rndr: 1');
   } else {
     await expect(counters).toHaveText(/^Rcvd: 1 \| Rndr: \d+$/);
   }
@@ -232,6 +237,7 @@ async function runReplayScenario(page: Page, renderPath: 'main' | 'worker'): Pro
   if (useWorker) {
     await expect.poll(addedWorkerMessageIds).toEqual(['replay-start', 'replay-later']);
     await expect.poll(latestWorkerMessageIds).toEqual(['replay-later']);
+    await expect(counters).toHaveText('Rcvd: 2 | Rndr: 2');
   } else {
     await expect(counters).toHaveText(/^Rcvd: 2 \| Rndr: \d+$/);
   }
@@ -247,6 +253,7 @@ async function runReplayScenario(page: Page, renderPath: 'main' | 'worker'): Pro
       .poll(addedWorkerMessageIds)
       .toEqual(['replay-start', 'replay-later', 'replay-start']);
     await expect.poll(latestWorkerMessageIds).toEqual(['replay-start']);
+    await expect(counters).toHaveText('Rcvd: 3 | Rndr: 3');
 
     const telemetryBeforeDestroy = await readWorkerTelemetry();
     expect(telemetryBeforeDestroy.pausedStates).toEqual([true, false]);
