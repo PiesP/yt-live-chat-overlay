@@ -732,7 +732,8 @@ export class WorkerRenderer {
             self.postMessage({
               type: 'messageSnapshot',
               requestId: data.requestId,
-              messageIds: [...this.messageById.keys()],
+              activeMessageIds: this.activeMessages.map((message) => message.id),
+              pendingMessageIds: this.pendingQueue.map((message) => message.id),
               processedBatchSequence: this.processedBatchSequence,
             });
             break;

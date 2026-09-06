@@ -90,6 +90,7 @@ import {
   getFontString,
   measureTextWidth,
 } from '@renderer/text-measure';
+import type { WorkerRecoveryMessage } from '@renderer/worker/manager';
 import { RenderWorkerManager } from '@renderer/worker/manager';
 import { ChannelLanguageMemory } from '@translation/channel-memory';
 import { LanguageDetectorService } from '@translation/language-detector';
@@ -925,13 +926,12 @@ export class CanvasRenderer extends RendererBase {
 
   /** Merge Worker snapshot state with later ingress, keeping the newest value per ID. */
   private mergeRecoveredMessages(
-    snapshotMessages: readonly ChatMessage[],
+    snapshotMessages: readonly WorkerRecoveryMessage[],
     fallbackIngress: readonly FallbackIngressEntry[]
   ): FallbackIngressEntry[] {
     const merged: FallbackIngressEntry[] = [];
     const indexById = new Map<string, number>();
-    const snapshotEntries = snapshotMessages.map((message) => ({ message, trackDrops: false }));
-    for (const entry of [...snapshotEntries, ...fallbackIngress]) {
+    for (const entry of [...snapshotMessages, ...fallbackIngress]) {
       const id = entry.message.id;
       const existingIndex = id ? indexById.get(id) : undefined;
       if (existingIndex !== undefined) {

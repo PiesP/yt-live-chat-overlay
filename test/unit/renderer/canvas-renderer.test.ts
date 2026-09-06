@@ -3,6 +3,7 @@
 import { afterEach, describe, it, expect, vi, beforeEach } from 'vitest';
 import { CanvasRenderer } from '@renderer/canvas-renderer';
 import { RenderWorkerManager } from '@renderer/worker/manager';
+import type { WorkerRecoveryMessage } from '@renderer/worker/manager';
 import type { WorkerStatsMessage } from '@renderer/worker/types';
 import type { CanvasMessage } from '@renderer/constants';
 import { Overlay } from '@app/overlay';
@@ -874,8 +875,8 @@ describe('CanvasRenderer', () => {
     vi.spyOn(overlay, 'getContainer').mockReturnValue(container);
     vi.spyOn(overlay, 'getDimensions').mockReturnValue({ width: 640, height: 360 });
     const renderer = new CanvasRenderer(overlay, makeSettings());
-    let resolveSnapshot!: (messages: ChatMessage[]) => void;
-    const snapshot = new Promise<ChatMessage[]>((resolve) => {
+    let resolveSnapshot!: (messages: WorkerRecoveryMessage[]) => void;
+    const snapshot = new Promise<WorkerRecoveryMessage[]>((resolve) => {
       resolveSnapshot = resolve;
     });
     const worker = {
@@ -890,7 +891,7 @@ describe('CanvasRenderer', () => {
       workerManager: {
         worker: Worker | null;
         setActive(active: boolean): void;
-        snapshotMessages(): Promise<ChatMessage[]>;
+        snapshotMessages(): Promise<WorkerRecoveryMessage[]>;
         destroy(): void;
       };
       startRenderLoop(): void;
@@ -914,6 +915,8 @@ describe('CanvasRenderer', () => {
     const duringFallback = makeMessage('during-fallback', 'during fallback');
     const afterSnapshot = makeMessage('after-snapshot', 'after snapshot');
     const replayDuringFallback = makeMessage('replay-during-fallback', 'replay during fallback');
+    const pendingSnapshotMessage = makeMessage('snapshot-pending', 'snapshot pending');
+    const activeSnapshotMessage = makeMessage('snapshot-active', 'snapshot active');
     const replacementDuringFallback = {
       ...makeMessage('before-error', 'replacement during fallback'),
       actionType: 'replace' as const,
@@ -924,7 +927,11 @@ describe('CanvasRenderer', () => {
     renderer.addMessage(duringFallback);
     renderer.addMessage(replacementDuringFallback);
     renderer.replayMessage(replayDuringFallback);
-    resolveSnapshot([beforeError]);
+    resolveSnapshot([
+      { message: beforeError, trackDrops: false },
+      { message: pendingSnapshotMessage, trackDrops: true },
+      { message: activeSnapshotMessage, trackDrops: false },
+    ]);
     queueMicrotask(() => renderer.addMessage(afterSnapshot));
     await vi.waitFor(() => expect(internals.fallbackInProgress).toBe(false));
 
@@ -933,6 +940,8 @@ describe('CanvasRenderer', () => {
     expect(recoveredIds.filter((id) => id === duringFallback.id)).toHaveLength(1);
     expect(recoveredIds.filter((id) => id === afterSnapshot.id)).toHaveLength(1);
     expect(recoveredIds.filter((id) => id === replayDuringFallback.id)).toHaveLength(1);
+    expect(recoveredIds.filter((id) => id === pendingSnapshotMessage.id)).toHaveLength(1);
+    expect(recoveredIds.filter((id) => id === activeSnapshotMessage.id)).toHaveLength(1);
     expect(
       internals.pendingQueue.toArray().find((message) => message.id === beforeError.id)?.text
     ).toBe('replacement during fallback');
@@ -948,7 +957,7 @@ describe('CanvasRenderer', () => {
         staggerCursorMs: 0,
       }
     );
-    expect(onMessagesDropped).toHaveBeenCalledWith(2, 'oversized');
+    expect(onMessagesDropped).toHaveBeenCalledWith(3, 'oversized');
     renderer.destroy();
   });
 
@@ -973,7 +982,7 @@ describe('CanvasRenderer', () => {
       workerManager: {
         worker: Worker | null;
         setActive(active: boolean): void;
-        snapshotMessages(): Promise<ChatMessage[]>;
+        snapshotMessages(): Promise<WorkerRecoveryMessage[]>;
         destroy(): void;
       };
       startRenderLoop(): void;
@@ -985,7 +994,7 @@ describe('CanvasRenderer', () => {
     const duringFailure = makeMessage('retry-during', 'during failed recovery');
     const afterFailure = makeMessage('retry-after', 'after failed recovery');
     vi.spyOn(internals.workerManager, 'snapshotMessages')
-      .mockResolvedValueOnce([beforeFailure])
+      .mockResolvedValueOnce([{ message: beforeFailure, trackDrops: false }])
       .mockResolvedValueOnce([]);
     vi.spyOn(internals.workerManager, 'destroy').mockImplementation(() => undefined);
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext')

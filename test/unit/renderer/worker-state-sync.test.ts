@@ -546,7 +546,9 @@ describe('Worker renderer state synchronization', () => {
     expect(manager.isCurrentMessage(replacement.id, replacement)).toBe(false);
     expect(manager.isCurrentMessage(sameBatchOriginal.id, sameBatchOriginal)).toBe(false);
     expect(manager.isCurrentMessage(sameBatchReplacement.id, sameBatchReplacement)).toBe(false);
-    await expect(manager.snapshotMessages(0)).resolves.toEqual([original]);
+    await expect(manager.snapshotMessages(0)).resolves.toEqual([
+      { message: original, trackDrops: true },
+    ]);
     manager.destroy();
     worker.acknowledgeDestroy();
   });
@@ -570,10 +572,13 @@ describe('Worker renderer state synchronization', () => {
     worker.emitMessage({
       type: 'messageSnapshot',
       requestId: firstRequest?.requestId,
-      messageIds: [],
+      activeMessageIds: [],
+      pendingMessageIds: [],
       processedBatchSequence: 0,
     });
-    await expect(firstSnapshot).resolves.toEqual([unacknowledged]);
+    await expect(firstSnapshot).resolves.toEqual([
+      { message: unacknowledged, trackDrops: true },
+    ]);
 
     const expired = { ...unacknowledged, id: 'acknowledged-expired' };
     expect(manager.sendToWorker(expired, expired.id)).toBe(true);
@@ -585,7 +590,8 @@ describe('Worker renderer state synchronization', () => {
     worker.emitMessage({
       type: 'messageSnapshot',
       requestId: secondRequest?.requestId,
-      messageIds: [],
+      activeMessageIds: [],
+      pendingMessageIds: [],
       processedBatchSequence: 2,
     });
     await expect(secondSnapshot).resolves.toEqual([]);
@@ -593,10 +599,91 @@ describe('Worker renderer state synchronization', () => {
     worker.acknowledgeDestroy();
   });
 
+  it('preserves drop tracking only for pending and unacknowledged live work', async () => {
+    const { manager, worker } = initializedManager();
+    const makeChatMessage = (id: string) => ({
+      id,
+      text: id,
+      content: [{ type: 'text' as const, content: id }],
+      timestamp: 1,
+      kind: 'text' as const,
+      authorType: 'normal' as const,
+    });
+    const pending = makeChatMessage('snapshot-pending');
+    expect(manager.sendToWorker(pending, pending.id, true)).toBe(true);
+    await Promise.resolve();
+    const pendingSnapshot = manager.snapshotMessages(0);
+    const pendingRequest = worker.postMessage.mock.calls
+      .map(([message]) => message as { type?: string; requestId?: number })
+      .findLast((message) => message.type === 'snapshotMessages');
+    worker.emitMessage({
+      type: 'messageSnapshot',
+      requestId: pendingRequest?.requestId,
+      activeMessageIds: [],
+      pendingMessageIds: [pending.id],
+      processedBatchSequence: 1,
+    });
+    await expect(pendingSnapshot).resolves.toEqual([{ message: pending, trackDrops: true }]);
+
+    const active = makeChatMessage('snapshot-active');
+    expect(manager.sendToWorker(active, active.id, true)).toBe(true);
+    await Promise.resolve();
+    const activeSnapshot = manager.snapshotMessages(0);
+    const activeRequest = worker.postMessage.mock.calls
+      .map(([message]) => message as { type?: string; requestId?: number })
+      .findLast((message) => message.type === 'snapshotMessages');
+    worker.emitMessage({
+      type: 'messageSnapshot',
+      requestId: activeRequest?.requestId,
+      activeMessageIds: [active.id],
+      pendingMessageIds: [],
+      processedBatchSequence: 2,
+    });
+    await expect(activeSnapshot).resolves.toEqual([{ message: active, trackDrops: false }]);
+
+    const unacknowledged = makeChatMessage('snapshot-unacknowledged');
+    expect(manager.sendToWorker(unacknowledged, unacknowledged.id, true)).toBe(true);
+    await Promise.resolve();
+    const unacknowledgedSnapshot = manager.snapshotMessages(0);
+    const unacknowledgedRequest = worker.postMessage.mock.calls
+      .map(([message]) => message as { type?: string; requestId?: number })
+      .findLast((message) => message.type === 'snapshotMessages');
+    worker.emitMessage({
+      type: 'messageSnapshot',
+      requestId: unacknowledgedRequest?.requestId,
+      activeMessageIds: [],
+      pendingMessageIds: [],
+      processedBatchSequence: 2,
+    });
+    await expect(unacknowledgedSnapshot).resolves.toEqual([
+      { message: unacknowledged, trackDrops: true },
+    ]);
+
+    const activeAtTimeout = makeChatMessage('snapshot-timeout-active');
+    expect(manager.sendToWorker(activeAtTimeout, activeAtTimeout.id, true)).toBe(true);
+    await Promise.resolve();
+    worker.emitMessage({
+      type: 'stats',
+      activeMessages: 1,
+      pendingQueueDepth: 0,
+      totalRendered: 1,
+      totalDrops: 0,
+      processedBatchSequence: 4,
+      laneUtilization: 0.5,
+      activeMessageIds: [activeAtTimeout.id],
+      pendingMessageIds: [],
+    });
+    await expect(manager.snapshotMessages(0)).resolves.toEqual([
+      { message: activeAtTimeout, trackDrops: false },
+    ]);
+    manager.destroy();
+    worker.acknowledgeDestroy();
+  });
+
   it('escalates one native load error and preserves messages for recovery', async () => {
     const { manager, worker } = initializedManager();
     const onFatalError = vi.fn();
-    let recovery: Promise<Array<{ id?: string }>> | undefined;
+    let recovery: Promise<Array<{ message: { id?: string }; trackDrops: boolean }>> | undefined;
     manager.setFatalErrorCallback((reason) => {
       onFatalError(reason);
       recovery = manager.snapshotMessages(0);
@@ -626,7 +713,12 @@ describe('Worker renderer state synchronization', () => {
     expect(onFatalError).toHaveBeenCalledOnce();
     expect(onFatalError).toHaveBeenCalledWith('worker-load-error');
     expect(error.defaultPrevented).toBe(true);
-    await expect(recovery).resolves.toEqual([expect.objectContaining({ id: 'pending-recovery' })]);
+    await expect(recovery).resolves.toEqual([
+      {
+        message: expect.objectContaining({ id: 'pending-recovery' }),
+        trackDrops: true,
+      },
+    ]);
     manager.destroy();
     worker.acknowledgeDestroy();
   });
