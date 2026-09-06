@@ -733,6 +733,7 @@ export class WorkerRenderer {
               type: 'messageSnapshot',
               requestId: data.requestId,
               messageIds: [...this.messageById.keys()],
+              processedBatchSequence: this.processedBatchSequence,
             });
             break;
           case 'destroy':
@@ -823,9 +824,6 @@ export class WorkerRenderer {
 
     const maxSize = this.config?.queueMaxSize ?? 200;
     if (this.pendingQueue.length >= maxSize) {
-      // Rejecting the incoming entry or displacing the lowest-priority entry
-      // permanently discards exactly one message.
-      this.totalDrops = Math.min(Number.MAX_SAFE_INTEGER, this.totalDrops + 1);
       let minIdx = 0;
       for (let i = 1; i < this.pendingQueue.length; i++) {
         if ((this.pendingQueue[i]?.priority ?? 0) < (this.pendingQueue[minIdx]?.priority ?? 0)) {
@@ -837,10 +835,13 @@ export class WorkerRenderer {
         // entry from messageById and register the new one so
         // translation results can be matched.
         const evicted = this.pendingQueue[minIdx];
+        if (evicted) this.recordDrop(evicted);
         if (evicted) this.messageById.delete(evicted.id);
         this.pendingQueue[minIdx] = msg;
         this.messageById.set(msg.id, msg);
         this.pendingQueueSortNeeded = true;
+      } else {
+        this.recordDrop(msg);
       }
       return;
     }
@@ -850,6 +851,11 @@ export class WorkerRenderer {
     if (this.animFrameId === null && !this.isDestroyed) {
       this.startRenderLoop();
     }
+  }
+
+  private recordDrop(message: WorkerMessage): void {
+    if (message.trackDrops === false) return;
+    this.totalDrops = Math.min(Number.MAX_SAFE_INTEGER, this.totalDrops + 1);
   }
 
   /** Replace pending or active render state without creating a duplicate ID. */
@@ -1882,7 +1888,7 @@ export class WorkerRenderer {
         // A message taller than the viewport can never obtain a contiguous
         // block. Treat it as a permanent drop instead of retrying it every
         // frame and keeping the Worker render loop alive indefinitely.
-        this.totalDrops = Math.min(Number.MAX_SAFE_INTEGER, this.totalDrops + 1);
+        this.recordDrop(entry);
         this.messageById.delete(entry.id);
         committed.add(entry);
         continue;

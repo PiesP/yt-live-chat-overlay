@@ -835,6 +835,90 @@ describe('CanvasRenderer', () => {
     renderer.destroy();
   });
 
+  it('preserves messages accepted while a Worker snapshot is pending', async () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    vi.spyOn(overlay, 'getContainer').mockReturnValue(container);
+    vi.spyOn(overlay, 'getDimensions').mockReturnValue({ width: 640, height: 360 });
+    const renderer = new CanvasRenderer(overlay, makeSettings());
+    let resolveSnapshot!: (messages: ChatMessage[]) => void;
+    const snapshot = new Promise<ChatMessage[]>((resolve) => {
+      resolveSnapshot = resolve;
+    });
+    const worker = {
+      postMessage: vi.fn(),
+      terminate: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    } as unknown as Worker;
+    const internals = renderer as unknown as {
+      fallbackInProgress: boolean;
+      pendingQueue: { toArray(): ChatMessage[] };
+      workerManager: {
+        worker: Worker | null;
+        setActive(active: boolean): void;
+        snapshotMessages(): Promise<ChatMessage[]>;
+        destroy(): void;
+      };
+      startRenderLoop(): void;
+      finalizeDrainBatch(
+        batch: {
+          candidates: readonly ChatMessage[];
+          committed: ChatMessage[];
+          unplaceable: ChatMessage[];
+          batchIndex: number;
+          staggerCursorMs: number;
+        }
+      ): void;
+    };
+    renderer.pause();
+    vi.spyOn(internals, 'startRenderLoop').mockImplementation(() => undefined);
+    internals.workerManager.worker = worker;
+    internals.workerManager.setActive(true);
+    vi.spyOn(internals.workerManager, 'snapshotMessages').mockReturnValue(snapshot);
+    vi.spyOn(internals.workerManager, 'destroy').mockImplementation(() => undefined);
+    const beforeError = makeMessage('before-error', 'before error');
+    const duringFallback = makeMessage('during-fallback', 'during fallback');
+    const afterSnapshot = makeMessage('after-snapshot', 'after snapshot');
+    const replayDuringFallback = makeMessage('replay-during-fallback', 'replay during fallback');
+    const replacementDuringFallback = {
+      ...makeMessage('before-error', 'replacement during fallback'),
+      actionType: 'replace' as const,
+    };
+
+    renderer.addMessage(beforeError);
+    renderer.fallbackToMainThread('worker-load-error');
+    renderer.addMessage(duringFallback);
+    renderer.addMessage(replacementDuringFallback);
+    renderer.replayMessage(replayDuringFallback);
+    resolveSnapshot([beforeError]);
+    queueMicrotask(() => renderer.addMessage(afterSnapshot));
+    await vi.waitFor(() => expect(internals.fallbackInProgress).toBe(false));
+
+    const recoveredIds = internals.pendingQueue.toArray().map((message) => message.id);
+    expect(recoveredIds.filter((id) => id === beforeError.id)).toHaveLength(1);
+    expect(recoveredIds.filter((id) => id === duringFallback.id)).toHaveLength(1);
+    expect(recoveredIds.filter((id) => id === afterSnapshot.id)).toHaveLength(1);
+    expect(recoveredIds.filter((id) => id === replayDuringFallback.id)).toHaveLength(1);
+    expect(
+      internals.pendingQueue.toArray().find((message) => message.id === beforeError.id)?.text
+    ).toBe('replacement during fallback');
+
+    const recoveredMessages = internals.pendingQueue.toArray();
+    const onMessagesDropped = vi.spyOn(renderer.observability, 'onMessagesDropped');
+    internals.finalizeDrainBatch(
+      {
+        candidates: recoveredMessages,
+        committed: [],
+        unplaceable: recoveredMessages,
+        batchIndex: 0,
+        staggerCursorMs: 0,
+      }
+    );
+    expect(onMessagesDropped).toHaveBeenCalledWith(2, 'oversized');
+    renderer.destroy();
+  });
+
   it('setStandbyStatus works', () => {
     const settings = makeSettings();
     const renderer = new CanvasRenderer(overlay, settings);

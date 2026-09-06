@@ -11,7 +11,7 @@
 
 import { isRecord } from '@piesp/browser-core/util';
 import { resolveLimits } from '@settings/limits';
-import type { WorkerStatsMessage } from './types';
+import type { WorkerErrorMessage, WorkerMessageSnapshot, WorkerStatsMessage } from './types';
 
 const MAX_ADD_MESSAGES_PER_BATCH = resolveLimits('queueMaxSize').max;
 const MAX_STATS_MESSAGE_IDS =
@@ -103,6 +103,22 @@ export function isValidWorkerStatsMessage(value: unknown): value is WorkerStatsM
     value.activeMessageIds.length === value.activeMessages &&
     isBoundedMessageIdArray(value.pendingMessageIds) &&
     value.pendingMessageIds.length === value.pendingQueueDepth
+  );
+}
+
+/** Validate a fatal error reported by the renderer Worker. */
+export function isValidWorkerErrorMessage(value: unknown): value is WorkerErrorMessage {
+  return isRecord(value) && value.type === 'error' && typeof value.error === 'string';
+}
+
+/** Validate a requested Worker message snapshot and its processing watermark. */
+export function isValidWorkerMessageSnapshot(value: unknown): value is WorkerMessageSnapshot {
+  return (
+    isRecord(value) &&
+    value.type === 'messageSnapshot' &&
+    isNonNegativeSafeInteger(value.requestId) &&
+    isBoundedMessageIdArray(value.messageIds) &&
+    isNonNegativeSafeInteger(value.processedBatchSequence)
   );
 }
 
@@ -199,6 +215,7 @@ function validateAddMessages(data: Record<string, unknown>): boolean {
     if (!isFiniteNonNegative(msg.width)) return false;
     if (!isFiniteNonNegative(msg.height)) return false;
     if (!isFiniteNumber(msg.priority)) return false;
+    if (hasOwn(msg, 'trackDrops') && typeof msg.trackDrops !== 'boolean') return false;
   }
 
   return true;

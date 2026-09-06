@@ -25,7 +25,11 @@ import {
   sendUpdateConfigToWorker,
 } from './common';
 import { serializeWorkerMessage } from './message-serializer';
-import { isValidWorkerStatsMessage } from './protocol-guards';
+import {
+  isValidWorkerErrorMessage,
+  isValidWorkerMessageSnapshot,
+  isValidWorkerStatsMessage,
+} from './protocol-guards';
 import type { WorkerMessage, WorkerStatsMessage } from './types';
 
 type DimensionResult = { width: number; height: number };
@@ -138,10 +142,16 @@ export class RenderWorkerManager {
   private readonly sentMessageBatchSequences = new Map<string, number>();
   private nextBatchSequence = 0;
   private pendingBatchSequence = 0;
+  /** State to restore if the currently pending batch cannot be posted. */
+  private readonly pendingBatchPreviousStates = new Map<
+    string,
+    { message: ChatMessage; batchSequence: number } | null
+  >();
   private snapshotSequence = 0;
   private messageSnapshotRequest: {
     requestId: number;
     knownMessages: Map<string, ChatMessage>;
+    knownBatchSequences: Map<string, number>;
     resolve: (messages: ChatMessage[]) => void;
     timer: ReturnType<typeof setTimeout>;
   } | null = null;
@@ -409,21 +419,37 @@ export class RenderWorkerManager {
             this.applyWorkerStats(data);
             break;
           case 'messageSnapshot': {
+            if (!isValidWorkerMessageSnapshot(data)) {
+              log.debug('renderer.worker.malformed-message-snapshot');
+              break;
+            }
+            if (data.processedBatchSequence > this.nextBatchSequence) {
+              log.debug('renderer.worker.message-snapshot-ahead');
+              break;
+            }
             const request = this.messageSnapshotRequest;
-            const requestId = (data as Record<string, unknown>).requestId;
-            if (!request || request.requestId !== requestId) break;
+            if (!request || request.requestId !== data.requestId) break;
             clearTimeout(request.timer);
             this.messageSnapshotRequest = null;
-            const ids = Array.isArray((data as Record<string, unknown>).messageIds)
-              ? ((data as Record<string, unknown>).messageIds as unknown[])
-              : [];
-            request.resolve(this.takeSentMessages(ids));
+            request.resolve(
+              this.takeSnapshotMessages(
+                data.messageIds,
+                data.processedBatchSequence,
+                request.knownMessages,
+                request.knownBatchSequences
+              )
+            );
             break;
           }
           case 'error':
+            if (!isValidWorkerErrorMessage(data)) {
+              log.debug('renderer.worker.malformed-error');
+              break;
+            }
             log.warn('renderer.worker.error', {
-              error: String((data as Record<string, unknown>).error),
+              error: data.error,
             });
+            handleFatalError('worker-runtime-error');
             break;
           case 'pong':
             this.lastPongTime = performance.now();
@@ -524,7 +550,7 @@ export class RenderWorkerManager {
    * Send a message to the render worker for display.
    * Serializes ChatMessage into lightweight cross-thread format.
    */
-  sendToWorker(message: ChatMessage, msgId?: string): boolean {
+  sendToWorker(message: ChatMessage, msgId?: string, trackDrops = true): boolean {
     if (!this.worker) return false;
 
     const priority = this.deps.getMessagePriority(message);
@@ -535,7 +561,7 @@ export class RenderWorkerManager {
     const maxWorkerQueue = this.deps.settings.queueMaxSize * 2;
     if (!isKnownReplacement && this._queueDepth > maxWorkerQueue) {
       if (priority < 40) {
-        this.deps.observability.onMessageDropped('worker_backpressure');
+        if (trackDrops) this.deps.observability.onMessageDropped('worker_backpressure');
         return false;
       }
     }
@@ -548,6 +574,7 @@ export class RenderWorkerManager {
       priority,
       burstSpeedMultiplier: this.computeBurstSpeedMultiplier(),
       settings: this.deps.settings,
+      trackDrops,
     });
 
     // ── Collect ImageBitmap transfers ──────────────────────────────────
@@ -581,11 +608,21 @@ export class RenderWorkerManager {
       collectBitmap(message.superChat.sticker.url, 'sticker');
     }
 
-    this.sentMessages.set(id, message);
     if (this.pendingBatchSequence === 0) {
       this.nextBatchSequence = Math.min(Number.MAX_SAFE_INTEGER, this.nextBatchSequence + 1);
       this.pendingBatchSequence = this.nextBatchSequence;
     }
+    if (!this.pendingBatchPreviousStates.has(id)) {
+      const previousMessage = this.sentMessages.get(id);
+      const previousBatchSequence = this.sentMessageBatchSequences.get(id);
+      this.pendingBatchPreviousStates.set(
+        id,
+        previousMessage && previousBatchSequence !== undefined
+          ? { message: previousMessage, batchSequence: previousBatchSequence }
+          : null
+      );
+    }
+    this.sentMessages.set(id, message);
     this.sentMessageBatchSequences.set(id, this.pendingBatchSequence);
 
     // ── Batch instead of immediate postMessage ──────────────────────
@@ -622,11 +659,13 @@ export class RenderWorkerManager {
   private flushBatch(): void {
     this.batchFlushScheduled = false;
     const batch = this.pendingBatch.splice(0);
+    const previousStates = new Map(this.pendingBatchPreviousStates);
+    this.pendingBatchPreviousStates.clear();
     this.pendingBatchSequence = 0;
     if (batch.length === 0) return;
     const worker = this.worker;
     if (!worker) {
-      this.discardPendingBatch(batch);
+      this.discardPendingBatch(batch, previousStates);
       return;
     }
 
@@ -665,14 +704,14 @@ export class RenderWorkerManager {
       try {
         worker.postMessage(workerMessage, allTransferList);
       } catch (error) {
-        this.discardPendingBatch(batch);
+        this.discardPendingBatch(batch, previousStates);
         log.warn('renderer.worker.batch-send-failed', { error: String(error) });
       }
     } else {
       try {
         worker.postMessage(workerMessage);
       } catch (error) {
-        this.discardPendingBatch(batch);
+        this.discardPendingBatch(batch, previousStates);
         log.warn('renderer.worker.batch-send-failed', { error: String(error) });
       }
     }
@@ -689,14 +728,25 @@ export class RenderWorkerManager {
       }>;
       transferList: ImageBitmap[];
       batchSequence: number;
-    }>
+    }>,
+    previousStates: ReadonlyMap<string, { message: ChatMessage; batchSequence: number } | null>
   ): void {
+    const failedBatchSequence = batch[0]?.batchSequence;
+    if (failedBatchSequence !== undefined) {
+      for (const [id, previous] of previousStates) {
+        if (this.sentMessageBatchSequences.get(id) !== failedBatchSequence) continue;
+        if (previous) {
+          this.sentMessages.set(id, previous.message);
+          this.sentMessageBatchSequences.set(id, previous.batchSequence);
+        } else {
+          this.sentMessages.delete(id);
+          this.sentMessageBatchSequences.delete(id);
+        }
+      }
+    }
+
     const bitmaps = new Set<ImageBitmap>();
     for (const entry of batch) {
-      if (this.sentMessageBatchSequences.get(entry.msg.id) === entry.batchSequence) {
-        this.sentMessages.delete(entry.msg.id);
-        this.sentMessageBatchSequences.delete(entry.msg.id);
-      }
       for (const image of entry.transferredImages) bitmaps.add(image.bitmap);
     }
     for (const bitmap of bitmaps) bitmap.close();
@@ -808,6 +858,7 @@ export class RenderWorkerManager {
 
     const requestId = ++this.snapshotSequence;
     const knownMessages = new Map(this.sentMessages);
+    const knownBatchSequences = new Map(this.sentMessageBatchSequences);
     return new Promise<ChatMessage[]>((resolve) => {
       const timer = setTimeout(() => {
         const request = this.messageSnapshotRequest;
@@ -815,7 +866,13 @@ export class RenderWorkerManager {
         this.messageSnapshotRequest = null;
         resolve(this.takeKnownMessages(request.knownMessages));
       }, timeoutMs);
-      this.messageSnapshotRequest = { requestId, knownMessages, resolve, timer };
+      this.messageSnapshotRequest = {
+        requestId,
+        knownMessages,
+        knownBatchSequences,
+        resolve,
+        timer,
+      };
       try {
         worker.postMessage({ type: 'snapshotMessages', requestId });
       } catch {
@@ -840,7 +897,11 @@ export class RenderWorkerManager {
     }
     this.batchFlushScheduled = false;
     const pendingBatch = this.pendingBatch.splice(0);
-    if (pendingBatch.length > 0) this.discardPendingBatch(pendingBatch);
+    const pendingPreviousStates = new Map(this.pendingBatchPreviousStates);
+    this.pendingBatchPreviousStates.clear();
+    if (pendingBatch.length > 0) {
+      this.discardPendingBatch(pendingBatch, pendingPreviousStates);
+    }
     this.dimensionsUnsubscribe?.();
     this.dimensionsUnsubscribe = null;
     this.stopPingPong();
@@ -961,13 +1022,23 @@ export class RenderWorkerManager {
     }
   }
 
-  private takeSentMessages(ids: unknown[]): ChatMessage[] {
+  private takeSnapshotMessages(
+    ids: readonly string[],
+    processedBatchSequence: number,
+    knownMessages: ReadonlyMap<string, ChatMessage>,
+    knownBatchSequences: ReadonlyMap<string, number>
+  ): ChatMessage[] {
     const messages: ChatMessage[] = [];
-    for (const id of ids) {
-      if (typeof id !== 'string') continue;
-      const message = this.sentMessages.get(id);
-      if (message) {
+    const snapshotIds = new Set(ids);
+    for (const [id, message] of knownMessages) {
+      const batchSequence = knownBatchSequences.get(id);
+      if (
+        snapshotIds.has(id) ||
+        (batchSequence !== undefined && batchSequence > processedBatchSequence)
+      ) {
         messages.push(message);
+      }
+      if (this.sentMessages.get(id) === message) {
         this.sentMessages.delete(id);
         this.sentMessageBatchSequences.delete(id);
       }

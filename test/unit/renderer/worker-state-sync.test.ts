@@ -287,6 +287,62 @@ describe('Worker renderer state synchronization', () => {
     expect(latestStats()?.totalDrops).toBe(1);
   });
 
+  it('does not report replay overflow or oversized work as observed drops', () => {
+    const renderer = initializedRenderer();
+    renderer.handleMessage({
+      data: {
+        type: 'addMessages',
+        messages: Array.from({ length: 51 }, (_, index) => ({
+          ...makeWorkerMessage(`replay-${index}`, 10_000),
+          trackDrops: false,
+        })),
+      },
+    } as MessageEvent);
+
+    const internals = renderer as unknown as { renderFrame(): void };
+    for (let frame = 0; frame < 60; frame++) internals.renderFrame();
+
+    expect(latestStats()?.totalDrops).toBe(0);
+  });
+
+  it('attributes queue displacement to the message that was actually discarded', () => {
+    const untrackedQueue = initializedRenderer();
+    untrackedQueue.handleMessage({
+      data: {
+        type: 'addMessages',
+        messages: Array.from({ length: 50 }, (_, index) => ({
+          ...makeWorkerMessage(`untracked-${index}`),
+          trackDrops: false,
+        })),
+      },
+    } as MessageEvent);
+    untrackedQueue.handleMessage({
+      data: {
+        type: 'addMessages',
+        messages: [{ ...makeWorkerMessage('tracked-high'), priority: 100, trackDrops: true }],
+      },
+    } as MessageEvent);
+    expect((untrackedQueue as unknown as { totalDrops: number }).totalDrops).toBe(0);
+
+    const trackedQueue = initializedRenderer();
+    trackedQueue.handleMessage({
+      data: {
+        type: 'addMessages',
+        messages: Array.from({ length: 50 }, (_, index) => ({
+          ...makeWorkerMessage(`tracked-${index}`),
+          trackDrops: true,
+        })),
+      },
+    } as MessageEvent);
+    trackedQueue.handleMessage({
+      data: {
+        type: 'addMessages',
+        messages: [{ ...makeWorkerMessage('untracked-high'), priority: 100, trackDrops: false }],
+      },
+    } as MessageEvent);
+    expect((trackedQueue as unknown as { totalDrops: number }).totalDrops).toBe(1);
+  });
+
   it('publishes a final empty state before its idle render loop stops', () => {
     const renderer = initializedRenderer();
     const internals = renderer as unknown as { idleSince: number | null };
@@ -328,6 +384,35 @@ describe('Worker renderer state synchronization', () => {
     expect(manager.activeMessageCount).toBe(2);
     expect(manager.laneUtilization).toBe(0.75);
 
+    manager.destroy();
+    worker.acknowledgeDestroy();
+  });
+
+  it('preserves untracked replay semantics through serialization and backpressure', async () => {
+    const { manager, observability, worker } = initializedManager();
+    const replay = {
+      id: 'replay-backpressure',
+      text: 'replay',
+      content: [{ type: 'text' as const, content: 'replay' }],
+      timestamp: 1,
+      kind: 'text' as const,
+      authorType: 'normal' as const,
+      isBacklog: true,
+    };
+
+    expect(manager.sendToWorker(replay, replay.id, false)).toBe(true);
+    await Promise.resolve();
+    const sentBatch = worker.postMessage.mock.calls
+      .map(([message]) => message as { type?: string; messages?: WorkerMessage[] })
+      .find((message) => message.type === 'addMessages');
+    expect(sentBatch?.messages?.[0]?.trackDrops).toBe(false);
+
+    (manager as unknown as { _queueDepth: number })._queueDepth =
+      DEFAULT_SETTINGS.queueMaxSize * 2 + 1;
+    expect(manager.sendToWorker({ ...replay, id: 'replay-backpressure-2' }, undefined, false)).toBe(
+      false
+    );
+    expect(observability.onMessageDropped).not.toHaveBeenCalled();
     manager.destroy();
     worker.acknowledgeDestroy();
   });
@@ -425,6 +510,89 @@ describe('Worker renderer state synchronization', () => {
     worker.acknowledgeDestroy();
   });
 
+  it('restores prior sent state when a replacement batch fails atomically', async () => {
+    const { manager, worker } = initializedManager();
+    const original = {
+      id: 'sent-before-failure',
+      text: 'original',
+      content: [{ type: 'text' as const, content: 'original' }],
+      timestamp: 1,
+      kind: 'text' as const,
+      authorType: 'normal' as const,
+    };
+    expect(manager.sendToWorker(original, original.id)).toBe(true);
+    await Promise.resolve();
+
+    const replacement = {
+      ...original,
+      text: 'failed replacement',
+      content: [{ type: 'text' as const, content: 'failed replacement' }],
+      actionType: 'replace' as const,
+    };
+    const sameBatchOriginal = { ...original, id: 'only-in-failed-batch' };
+    const sameBatchReplacement = {
+      ...replacement,
+      id: sameBatchOriginal.id,
+    };
+    worker.postMessage.mockImplementationOnce(() => {
+      throw new Error('postMessage failed');
+    });
+    expect(manager.sendToWorker(replacement, replacement.id)).toBe(true);
+    expect(manager.sendToWorker(sameBatchOriginal, sameBatchOriginal.id)).toBe(true);
+    expect(manager.sendToWorker(sameBatchReplacement, sameBatchReplacement.id)).toBe(true);
+    await Promise.resolve();
+
+    expect(manager.isCurrentMessage(original.id, original)).toBe(true);
+    expect(manager.isCurrentMessage(replacement.id, replacement)).toBe(false);
+    expect(manager.isCurrentMessage(sameBatchOriginal.id, sameBatchOriginal)).toBe(false);
+    expect(manager.isCurrentMessage(sameBatchReplacement.id, sameBatchReplacement)).toBe(false);
+    await expect(manager.snapshotMessages(0)).resolves.toEqual([original]);
+    manager.destroy();
+    worker.acknowledgeDestroy();
+  });
+
+  it('recovers unacknowledged batches without resurrecting acknowledged expired messages', async () => {
+    const { manager, worker } = initializedManager();
+    const unacknowledged = {
+      id: 'unacknowledged',
+      text: 'unacknowledged',
+      content: [{ type: 'text' as const, content: 'unacknowledged' }],
+      timestamp: 1,
+      kind: 'text' as const,
+      authorType: 'normal' as const,
+    };
+    expect(manager.sendToWorker(unacknowledged, unacknowledged.id)).toBe(true);
+    await Promise.resolve();
+    const firstSnapshot = manager.snapshotMessages(1_000);
+    const firstRequest = worker.postMessage.mock.calls
+      .map(([message]) => message as { type?: string; requestId?: number })
+      .findLast((message) => message.type === 'snapshotMessages');
+    worker.emitMessage({
+      type: 'messageSnapshot',
+      requestId: firstRequest?.requestId,
+      messageIds: [],
+      processedBatchSequence: 0,
+    });
+    await expect(firstSnapshot).resolves.toEqual([unacknowledged]);
+
+    const expired = { ...unacknowledged, id: 'acknowledged-expired' };
+    expect(manager.sendToWorker(expired, expired.id)).toBe(true);
+    await Promise.resolve();
+    const secondSnapshot = manager.snapshotMessages(1_000);
+    const secondRequest = worker.postMessage.mock.calls
+      .map(([message]) => message as { type?: string; requestId?: number })
+      .findLast((message) => message.type === 'snapshotMessages');
+    worker.emitMessage({
+      type: 'messageSnapshot',
+      requestId: secondRequest?.requestId,
+      messageIds: [],
+      processedBatchSequence: 2,
+    });
+    await expect(secondSnapshot).resolves.toEqual([]);
+    manager.destroy();
+    worker.acknowledgeDestroy();
+  });
+
   it('escalates one native load error and preserves messages for recovery', async () => {
     const { manager, worker } = initializedManager();
     const onFatalError = vi.fn();
@@ -459,6 +627,22 @@ describe('Worker renderer state synchronization', () => {
     expect(onFatalError).toHaveBeenCalledWith('worker-load-error');
     expect(error.defaultPrevented).toBe(true);
     await expect(recovery).resolves.toEqual([expect.objectContaining({ id: 'pending-recovery' })]);
+    manager.destroy();
+    worker.acknowledgeDestroy();
+  });
+
+  it('escalates one validated Worker protocol error to recovery', () => {
+    const { manager, worker } = initializedManager();
+    const onFatalError = vi.fn();
+    manager.setFatalErrorCallback(onFatalError);
+
+    worker.emitMessage({ type: 'error', error: 42 });
+    expect(onFatalError).not.toHaveBeenCalled();
+    worker.emitMessage({ type: 'error', error: 'Failed to get 2D context' });
+    worker.emitMessage({ type: 'error', error: 'duplicate error' });
+
+    expect(onFatalError).toHaveBeenCalledOnce();
+    expect(onFatalError).toHaveBeenCalledWith('worker-runtime-error');
     manager.destroy();
     worker.acknowledgeDestroy();
   });
