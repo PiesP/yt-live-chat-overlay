@@ -3,6 +3,7 @@
 import { afterEach, describe, it, expect, vi, beforeEach } from 'vitest';
 import { CanvasRenderer } from '@renderer/canvas-renderer';
 import { RenderWorkerManager } from '@renderer/worker/manager';
+import type { WorkerStatsMessage } from '@renderer/worker/types';
 import type { CanvasMessage } from '@renderer/constants';
 import { Overlay } from '@app/overlay';
 import type { ChatMessage, OverlaySettings } from '@app-types';
@@ -713,6 +714,55 @@ describe('CanvasRenderer', () => {
     internals.renderFrame();
 
     expect(applyLaneDensity).toHaveBeenCalledOnce();
+    internals.workerManager.setActive(false);
+    renderer.destroy();
+  });
+
+  it('synchronizes lane density and utilization without a main-thread canvas context', () => {
+    const renderer = new CanvasRenderer(overlay, makeSettings());
+    const worker = {
+      postMessage: vi.fn(),
+      terminate: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    } as unknown as Worker;
+    const internals = renderer as unknown as {
+      ctx: CanvasRenderingContext2D | null;
+      workerManager: {
+        worker: Worker | null;
+        _laneUtilization: number;
+        deps: { onStats?: (stats: WorkerStatsMessage) => void };
+        setActive(active: boolean): void;
+      };
+      burstDetector: { currentLevel: 'normal' | 'elevated' | 'high' | 'extreme' };
+      densityIndicator: { update(activeCount: number, maxConcurrent: number): void };
+    };
+    internals.ctx = null;
+    internals.workerManager.worker = worker;
+    internals.workerManager.setActive(true);
+    const updateIndicator = vi.spyOn(internals.densityIndicator, 'update');
+    internals.burstDetector.currentLevel = 'high';
+
+    renderer.addMessage(makeMessage('worker-density', 'density'));
+    expect(worker.postMessage).toHaveBeenCalledWith({ type: 'laneDensity', factor: 0.75 });
+
+    internals.workerManager._laneUtilization = 0.75;
+    internals.burstDetector.currentLevel = 'extreme';
+    internals.workerManager.deps.onStats?.({
+      type: 'stats',
+      activeMessages: 12,
+      pendingQueueDepth: 3,
+      totalRendered: 12,
+      totalDrops: 0,
+      processedBatchSequence: 0,
+      laneUtilization: 0.75,
+      activeMessageIds: [],
+      pendingMessageIds: [],
+    });
+
+    expect(worker.postMessage).toHaveBeenCalledWith({ type: 'laneDensity', factor: 0.5 });
+    expect(updateIndicator).toHaveBeenCalledWith(12, 300);
+    expect(renderer.getLaneUtilization()).toBe(0.75);
     internals.workerManager.setActive(false);
     renderer.destroy();
   });

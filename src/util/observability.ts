@@ -45,6 +45,7 @@ export class ObservabilityReporter {
   private debugOverlayEl: HTMLElement | null = null;
   private lastWarnTime = 0;
   private showDebug = false;
+  private frameTimingAvailable = true;
   private static readonly WARN_COOLDOWN_MS = 30_000;
   private static readonly METRIC_WINDOW_MS = 60_000;
   /** Number of lines in the debug overlay. */
@@ -96,13 +97,34 @@ export class ObservabilityReporter {
 
   // called when a message is successfully rendered
   onMessageRendered(): void {
-    this.metrics.totalRendered++;
+    this.onMessagesRendered(1);
+  }
+
+  /** Add a validated batch of successfully rendered messages in constant time. */
+  onMessagesRendered(count: number): void {
+    if (!Number.isSafeInteger(count) || count <= 0) return;
+    this.metrics.totalRendered = Math.min(
+      Number.MAX_SAFE_INTEGER,
+      this.metrics.totalRendered + count
+    );
   }
 
   // called when a message is dropped, with optional reason for diagnostics
   onMessageDropped(reason?: DropReason): void {
-    this.metrics.totalDropped++;
-    this.totalDroppedInWindow++;
+    this.onMessagesDropped(1, reason);
+  }
+
+  /** Add a validated batch of dropped messages in constant time. */
+  onMessagesDropped(count: number, reason?: DropReason): void {
+    if (!Number.isSafeInteger(count) || count <= 0) return;
+    this.metrics.totalDropped = Math.min(
+      Number.MAX_SAFE_INTEGER,
+      this.metrics.totalDropped + count
+    );
+    this.totalDroppedInWindow = Math.min(
+      Number.MAX_SAFE_INTEGER,
+      this.totalDroppedInWindow + count
+    );
 
     // Refresh derived metrics for accurate drop rate check
     this.refreshDerivedMetrics();
@@ -212,6 +234,11 @@ export class ObservabilityReporter {
     }
   }
 
+  /** Mark whether frame timings are measured by the current render owner. */
+  setFrameTimingAvailable(available: boolean): void {
+    this.frameTimingAvailable = available;
+  }
+
   /**
    * Update the debug HUD — call from the rAF loop (every frame).
    * Avoids a separate setInterval and visibility-change management.
@@ -268,10 +295,14 @@ export class ObservabilityReporter {
       `Queue: ${m.queueDepth} | Burst: ${m.burstLevel}`,
       `Active: ${m.activeMessages} | Lane: ${(m.laneUtilization * 100).toFixed(0)}%`,
       `Backlog: ${(m.backlogProgress * 100).toFixed(0)}%`,
-      `Render: ${m.frameTimings.renderFrameMs.toFixed(2)}ms` +
-        ` | Drain: ${m.frameTimings.drainQueueMs.toFixed(2)}ms`,
-      `Coll: ${m.frameTimings.collisionCheckMs.toFixed(2)}ms` +
-        ` | Text: ${m.frameTimings.textMeasureMs.toFixed(2)}ms`,
+      this.frameTimingAvailable
+        ? `Render: ${m.frameTimings.renderFrameMs.toFixed(2)}ms` +
+          ` | Drain: ${m.frameTimings.drainQueueMs.toFixed(2)}ms`
+        : 'Render: n/a | Drain: n/a',
+      this.frameTimingAvailable
+        ? `Coll: ${m.frameTimings.collisionCheckMs.toFixed(2)}ms` +
+          ` | Text: ${m.frameTimings.textMeasureMs.toFixed(2)}ms`
+        : 'Coll: n/a | Text: n/a',
     ];
     const children = this.debugOverlayEl.children;
     for (let i = 0; i < lines.length; i++) {

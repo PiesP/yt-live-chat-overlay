@@ -409,10 +409,17 @@ export class CanvasRenderer extends RendererBase {
       estimateDimensions: (msg) => this.estimateDimensions(msg),
       getMessagePriority: CanvasRenderer.getMessagePriority,
       getEffectiveSpeedPxPerSec: () => this.getEffectiveSpeedPxPerSec(),
+      onStats: (stats) => {
+        // The main-thread rAF intentionally idles while the Worker owns the
+        // canvas. Reconcile timer-driven burst changes and UI density here.
+        this.applyLaneDensityIfChanged();
+        this.densityIndicator.update(stats.activeMessages, this.settings.maxConcurrentMessages);
+      },
     });
     this.workerManager.setFatalErrorCallback((reason) => this.fallbackToMainThread(reason));
     const workerInit = this.workerManager.init(canvas, settings, overlay);
     const useWorker = workerInit.started;
+    this.observability.setFrameTimingAvailable(!useWorker);
 
     if (!useWorker && workerInit.canvasTransferred && !this.replaceCanvas()) {
       log.warn('renderer.canvas.transfer-recovery-failed', {
@@ -588,7 +595,9 @@ export class CanvasRenderer extends RendererBase {
 
   /** Get current lane utilization ratio (0–1): occupied lanes / total lanes. */
   override getLaneUtilization(): number {
-    return this.laneAllocator.getUtilization();
+    return this.workerManager.isActive
+      ? this.workerManager.laneUtilization
+      : this.laneAllocator.getUtilization();
   }
 
   /** Update standby status via ConnectionStatus — backward compat. */
@@ -679,6 +688,9 @@ export class CanvasRenderer extends RendererBase {
     // The Worker has its own complete render pipeline: pending queue,
     // lane heap, collision detection, anti-block logic, and draw.
     if (this.workerManager.isActive) {
+      // Keep burst-driven lane density synchronized without keeping a second
+      // main-thread animation loop alive solely for Worker coordination.
+      this.applyLaneDensityIfChanged();
       const msgId = message.id ?? `${message.timestamp}-${++fallbackMessageIdCounter}`;
       if (this.workerManager.sendToWorker(message, msgId)) {
         this.prefetchAndTranslateForWorker(message, msgId);
@@ -796,6 +808,7 @@ export class CanvasRenderer extends RendererBase {
    * Enqueues buffered messages into the pending queue for rendering.
    */
   protected override onResumeFromVideoPause(messages: ChatMessage[]): void {
+    if (this.workerManager.isActive) this.applyLaneDensityIfChanged();
     for (const message of messages) {
       if (this.workerManager.isActive) {
         const msgId = message.id ?? `${message.timestamp}-${++fallbackMessageIdCounter}`;
@@ -2332,6 +2345,7 @@ export class CanvasRenderer extends RendererBase {
           });
           return;
         }
+        this.observability.setFrameTimingAvailable(true);
 
         this.activeMessages.length = 0;
         this.activeMessagesByLane.clear();

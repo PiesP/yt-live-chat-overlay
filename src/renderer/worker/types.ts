@@ -183,6 +183,20 @@ export interface WorkerMessage {
   userColor?: string;
 }
 
+/** Periodic cumulative state reported by the renderer Worker. */
+export interface WorkerStatsMessage {
+  type: 'stats';
+  activeMessages: number;
+  pendingQueueDepth: number;
+  totalRendered: number;
+  totalDrops: number;
+  /** Highest addMessages batch fully admitted by this Worker instance. */
+  processedBatchSequence: number;
+  laneUtilization: number;
+  activeMessageIds: string[];
+  pendingMessageIds: string[];
+}
+
 export interface ActiveMessage {
   id: string;
   x: number;

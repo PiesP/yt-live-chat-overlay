@@ -70,7 +70,15 @@ function makeMessage(id = 'backlog-message'): ChatMessage {
 function createManager(renderer: WorkerRenderer): RenderWorkerManager {
   const manager = new RenderWorkerManager({
     settings: { ...DEFAULT_SETTINGS } as OverlaySettings,
-    observability: { onMessageDropped: vi.fn() } as never,
+    observability: {
+      onMessageDropped: vi.fn(),
+      onMessagesDropped: vi.fn(),
+      onMessagesRendered: vi.fn(),
+      updateActiveMessages: vi.fn(),
+      updateQueueDepth: vi.fn(),
+      updateLaneUtilization: vi.fn(),
+      tick: vi.fn(),
+    } as never,
     imageFetchManager: {
       workerBitmapCache: {
         get: vi.fn(),
