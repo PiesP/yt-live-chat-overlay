@@ -26,6 +26,14 @@ import {
   stripControlCharacters,
   truncateForKind,
 } from '@chat/message-helpers';
+import {
+  getRenderMessageResourceViolation,
+  inspectBoundedRenderText,
+  MAX_RENDER_CONTENT_SEGMENTS,
+  MAX_RENDER_FIELD_CODE_POINTS,
+  type RenderResourceField,
+  type RenderResourceViolation,
+} from '@chat/render-resource-limits';
 import type { JsonObject } from '@chat/youtube/request';
 import { asRecord, getNumber, getString, isRecord } from '@chat/youtube/request';
 import { createLogger } from '@util/logging';
@@ -59,6 +67,7 @@ export interface ChatEventExtractionStats {
   traversalBudget: number;
   traversedActions: number;
   capacityDrops: number;
+  resourceDrops: number;
   ordinaryScanSteps: number;
   budgetExhausted: boolean;
 }
@@ -179,6 +188,11 @@ export function extractChatEvents(
   const accumulator = new BoundedChatEventAccumulator(capacity, isKnownReplacementTarget);
   let traversedActions = 0;
   let budgetExhausted = false;
+  const resourceDropState: { count: number; first?: RenderResourceViolation } = { count: 0 };
+  const recordResourceDrop = (violation: RenderResourceViolation): void => {
+    resourceDropState.count++;
+    resourceDropState.first ??= violation;
+  };
 
   actionLoop: for (const action of actions) {
     if (traversedActions >= traversalBudget) {
@@ -198,13 +212,18 @@ export function extractChatEvents(
           break actionLoop;
         }
         traversedActions++;
-        const event = parseChatEventFromAction(nestedAction, offsetMs, settings);
+        const event = parseChatEventFromAction(
+          nestedAction,
+          offsetMs,
+          settings,
+          recordResourceDrop
+        );
         if (event) accumulator.add(event);
       }
       continue;
     }
 
-    const event = parseChatEventFromAction(action, undefined, settings);
+    const event = parseChatEventFromAction(action, undefined, settings, recordResourceDrop);
     if (event) accumulator.add(event);
   }
 
@@ -213,11 +232,23 @@ export function extractChatEvents(
     traversalBudget,
     traversedActions,
     capacityDrops: accumulator.capacityDrops,
+    resourceDrops: resourceDropState.count,
     ordinaryScanSteps: accumulator.ordinaryScanSteps,
     budgetExhausted,
   };
   onStats?.(stats);
-  if (capacity < actions.length || stats.capacityDrops > 0 || budgetExhausted) {
+  if (resourceDropState.first) {
+    log.warn('chat.parser.message-skip', {
+      reason: 'resource-limit',
+      field: resourceDropState.first.field,
+    });
+  }
+  if (
+    capacity < actions.length ||
+    stats.capacityDrops > 0 ||
+    stats.resourceDrops > 0 ||
+    budgetExhausted
+  ) {
     log.debug('chat.parser.batch-bounded', {
       ...stats,
       acceptedEvents: accumulator.events.length,
@@ -233,7 +264,8 @@ export function extractChatEvents(
 function parseChatEventFromAction(
   action: unknown,
   offsetMs: number | undefined,
-  settings: Readonly<OverlaySettings>
+  settings: Readonly<OverlaySettings>,
+  onResourceDrop: (violation: RenderResourceViolation) => void
 ): ChatEvent | null {
   if (!isRecord(action)) {
     return null;
@@ -258,6 +290,15 @@ function parseChatEventFromAction(
     return null;
   }
 
+  const rawViolation = getRawRendererResourceViolation(
+    supportedRenderer.renderer,
+    supportedRenderer.kind
+  );
+  if (rawViolation) {
+    onResourceDrop(rawViolation);
+    return null;
+  }
+
   const message = parseRendererMessage(
     supportedRenderer.renderer,
     supportedRenderer.kind,
@@ -265,6 +306,11 @@ function parseChatEventFromAction(
     timestampOverride
   );
   if (!message) {
+    return null;
+  }
+  const parsedViolation = getRenderMessageResourceViolation(message);
+  if (parsedViolation) {
+    onResourceDrop(parsedViolation);
     return null;
   }
 
@@ -276,6 +322,86 @@ function parseChatEventFromAction(
     message.videoOffsetMs = offsetMs;
   }
   return { message };
+}
+
+function inspectRawDisplayText(
+  value: unknown,
+  field: RenderResourceField
+): RenderResourceViolation | null {
+  if (!isRecord(value)) return null;
+  const simpleText = getString(value.simpleText);
+  if (simpleText !== undefined) {
+    const inspection = inspectBoundedRenderText(simpleText, field);
+    return 'violation' in inspection ? inspection.violation : null;
+  }
+
+  const runs = Array.isArray(value.runs) ? value.runs : [];
+  if (runs.length > MAX_RENDER_CONTENT_SEGMENTS) {
+    return { field: 'contentSegments', reason: 'segment-count' };
+  }
+  let totalCodePoints = 0;
+  for (const run of runs) {
+    if (!isRecord(run)) continue;
+    const runText = getString(run.text);
+    if (runText !== undefined) {
+      const inspection = inspectBoundedRenderText(runText, field);
+      if ('violation' in inspection) return inspection.violation;
+      totalCodePoints += inspection.codePoints;
+    } else {
+      const emoji = asRecord(run.emoji);
+      if (!emoji) continue;
+      const shortcuts = Array.isArray(emoji.shortcuts) ? emoji.shortcuts : [];
+      if (shortcuts.length > MAX_RENDER_CONTENT_SEGMENTS) {
+        return { field: 'contentSegments', reason: 'segment-count' };
+      }
+      for (const shortcut of shortcuts) {
+        if (typeof shortcut !== 'string') continue;
+        const inspection = inspectBoundedRenderText(shortcut, field);
+        if ('violation' in inspection) return inspection.violation;
+      }
+      for (const candidate of [
+        getString(emoji.emojiId),
+        extractAccessibilityLabel(emoji.image),
+        extractAccessibilityLabel(emoji),
+      ]) {
+        if (!candidate) continue;
+        const inspection = inspectBoundedRenderText(candidate, field);
+        if ('violation' in inspection) return inspection.violation;
+      }
+      const fallback = getEmojiVisibleFallbackText(emoji);
+      const inspection = inspectBoundedRenderText(fallback, field);
+      if ('violation' in inspection) return inspection.violation;
+      totalCodePoints += inspection.codePoints;
+    }
+    if (totalCodePoints > MAX_RENDER_FIELD_CODE_POINTS) {
+      return { field, reason: 'code-point-length' };
+    }
+  }
+  return null;
+}
+
+function getRawRendererResourceViolation(
+  renderer: JsonObject,
+  kind: ChatMessage['kind']
+): RenderResourceViolation | null {
+  const fields: Array<readonly [unknown, RenderResourceField]> = [
+    [renderer.authorName, 'author'],
+    [renderer.message, 'body'],
+    [renderer.purchaseAmountText, 'amount'],
+    [renderer.headerPrimaryText, 'membershipHeader'],
+  ];
+  if (kind === 'membership') fields.push([renderer.headerSubtext, 'body']);
+  for (const [value, field] of fields) {
+    const violation = inspectRawDisplayText(value, field);
+    if (violation) return violation;
+  }
+  for (const sticker of [renderer.sticker, renderer.headerOverlayImage]) {
+    const label = extractAccessibilityLabel(sticker);
+    if (!label) continue;
+    const inspection = inspectBoundedRenderText(label, 'body');
+    if ('violation' in inspection) return inspection.violation;
+  }
+  return null;
 }
 
 function parseRendererMessage(

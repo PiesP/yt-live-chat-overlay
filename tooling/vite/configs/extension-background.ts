@@ -2,6 +2,7 @@ import { resolve } from 'node:path';
 import { defineConfig, mergeConfig, type UserConfig } from 'vite';
 import pkg from '../../../package.json' with { type: 'json' };
 import { copyExtensionAssetsPlugin } from '../plugins/copy-extension-assets.ts';
+import { prependBidiWorkerLicensePlugin } from '../plugins/prepend-bidi-license.ts';
 import { basePreset } from '../presets/base.ts';
 import { extensionSwPreset } from '../presets/extension-sw.ts';
 import { type ExtensionBrowser, extensionTarget } from './extension-target.ts';
@@ -14,6 +15,7 @@ export function createExtensionBackgroundConfig(browser: ExtensionBrowser) {
 
     return mergeConfig(mergeConfig(basePreset, extensionSwPreset), {
       plugins: [
+        prependBidiWorkerLicensePlugin(),
         copyExtensionAssetsPlugin({
           root: target.root,
           outDir: resolve(target.root, target.outDir),

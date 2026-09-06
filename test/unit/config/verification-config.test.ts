@@ -5,6 +5,35 @@ import { describe, expect, it } from 'vitest';
 const root = resolve(import.meta.dirname, '../../..');
 
 describe('Verification configuration', () => {
+  it('keeps the renderer mutation slice on fitting, outlines, and shape detection', () => {
+    const config = JSON.parse(
+      readFileSync(resolve(root, 'stryker.conf.renderer.json'), 'utf8')
+    ) as { mutate: string[] };
+    const target = config.mutate.find((entry) =>
+      entry.startsWith('src/renderer/canvas/shared.ts:')
+    );
+    const range = target?.match(/:(\d+)-(\d+)$/);
+    expect(range).toBeTruthy();
+    const source = readFileSync(resolve(root, 'src/renderer/canvas/shared.ts'), 'utf8');
+    const selected = source
+      .split('\n')
+      .slice(Number(range?.[1]) - 1, Number(range?.[2]))
+      .join('\n');
+
+    for (const marker of [
+      'if (lo > 0)',
+      "const text = graphemes.slice(0, lo).join('')",
+      'export function strokeTextOutline',
+      'ctx.strokeText(text, x, y)',
+      'function hasRoundRect',
+      'export function drawRoundRect',
+      'ctx.beginPath()',
+      'if (hasRoundRect(ctx))',
+    ]) {
+      expect(selected).toContain(marker);
+    }
+  });
+
   it('keeps fast mutation semantic, enforceable, and diagnosable', () => {
     const config = JSON.parse(
       readFileSync(resolve(root, 'stryker.conf.fast.json'), 'utf8')

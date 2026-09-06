@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { mergeConfig, type ConfigEnv, type UserConfig } from 'vite';
 import monkeyPlugin from 'vite-plugin-monkey';
+import { BIDI_LICENSE_BANNER } from '../bidi-license.ts';
 import { basePreset } from '../presets/base.ts';
 import { userscriptPreset } from '../presets/userscript.ts';
 
@@ -63,6 +64,7 @@ export function createUserscriptConfig({ mode }: ConfigEnv): UserConfig {
     ],
     build: {
       sourcemap: isDev ? 'inline' : false,
+      rollupOptions: { output: { banner: BIDI_LICENSE_BANNER } },
     },
     define: {
       __DEV__: JSON.stringify(isDev),

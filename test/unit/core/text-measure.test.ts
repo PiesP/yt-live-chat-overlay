@@ -160,6 +160,38 @@ describe('measureBoundingBoxWidth', () => {
 });
 
 describe('text measurement caches', () => {
+  it('keeps direction-sensitive ink measurements in separate cache entries', async () => {
+    const context = {
+      direction: 'inherit' as CanvasDirection,
+      textAlign: 'start' as CanvasTextAlign,
+      measureText: vi.fn(function (this: CanvasRenderingContext2D) {
+        return {
+          actualBoundingBoxLeft: 0,
+          actualBoundingBoxRight: this.direction === 'rtl' ? 20 : 10,
+          width: 10,
+        } as TextMetrics;
+      }),
+    };
+    const getContext = vi
+      .spyOn(HTMLCanvasElement.prototype, 'getContext')
+      .mockReturnValue(context as unknown as CanvasRenderingContext2D);
+
+    try {
+      vi.resetModules();
+      const isolatedTextMeasure = await import('@renderer/text-measure');
+      expect(isolatedTextMeasure.measureTextWidth('مرحبا — ', '16px sans-serif', 'ltr')).toBe(10);
+      expect(isolatedTextMeasure.measureTextWidth('مرحبا — ', '16px sans-serif', 'rtl')).toBe(20);
+      expect(isolatedTextMeasure.measureTextWidth('مرحبا — ', '16px sans-serif', 'ltr')).toBe(10);
+      expect(isolatedTextMeasure.measureTextWidth('مرحبا — ', '16px sans-serif', 'rtl')).toBe(20);
+      expect(context.measureText).toHaveBeenCalledTimes(2);
+      expect(context.direction).toBe('inherit');
+      expect(context.textAlign).toBe('start');
+    } finally {
+      getContext.mockRestore();
+      vi.resetModules();
+    }
+  });
+
   it('clears cached space widths when measurement caches are cleared', () => {
     const measureText = vi.fn(() => ({
       actualBoundingBoxLeft: 0,

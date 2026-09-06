@@ -9,6 +9,10 @@
  * renderer state.
  */
 
+import {
+  getRenderMessageResourceViolation,
+  inspectBoundedRenderText,
+} from '@chat/render-resource-limits';
 import { isRecord } from '@piesp/browser-core/util';
 import { resolveLimits } from '@settings/limits';
 import type { WorkerErrorMessage, WorkerMessageSnapshot, WorkerStatsMessage } from './types';
@@ -165,7 +169,9 @@ export function isValidControlMessage(value: unknown): boolean {
       return (
         typeof value.id === 'string' &&
         value.id.length > 0 &&
-        (typeof value.translatedText === 'string' || value.translatedText === null) &&
+        (value.translatedText === null ||
+          (typeof value.translatedText === 'string' &&
+            !('violation' in inspectBoundedRenderText(value.translatedText, 'translatedText')))) &&
         isPositiveFiniteNumber(value.width) &&
         isPositiveFiniteNumber(value.height) &&
         isFiniteNonNegative(value.translationHeight)
@@ -217,6 +223,7 @@ function validateAddMessages(data: Record<string, unknown>): boolean {
     if (!isFiniteNonNegative(msg.height)) return false;
     if (!isFiniteNumber(msg.priority)) return false;
     if (hasOwn(msg, 'trackDrops') && typeof msg.trackDrops !== 'boolean') return false;
+    if (getRenderMessageResourceViolation(msg)) return false;
   }
 
   return true;

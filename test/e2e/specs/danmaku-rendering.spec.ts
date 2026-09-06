@@ -9,16 +9,169 @@
  * handle exposes settings correctly.
  */
 
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { rendererLayout } from '@util/design-tokens';
 import {
-  setupOverlayPage,
+  DEFAULT_SETTINGS,
+  injectUserscript,
+  installYTMock,
+  MOCK_WATCH_URL,
   OVERLAY_ID,
-  getSettings,
-  applySettings,
   USERSCRIPT_PATH,
+  applySettings,
+  getSettings,
+  setupMockPageRoute,
+  setupOverlayPage,
 } from '../fixtures/test-utils';
+import {
+  installPlaybackWorkerObserver,
+  PLAYBACK_WORKER_URL,
+  routePlaybackWorker,
+} from '../fixtures/playback-worker';
+
+const BIDI_EMOJI_URL = 'https://yt3.ggpht.com/e2e-bidi-emoji=s32';
+const BIDI_EMOJI_PATH = resolve(process.cwd(), 'extension/icons/icon128.png');
+
+interface BidiCanvasTextEvent {
+  kind: 'text';
+  sequence: number;
+  text: string;
+  x: number;
+  y: number;
+  direction: CanvasDirection;
+  textAlign: CanvasTextAlign;
+}
+
+interface BidiCanvasImageEvent {
+  kind: 'image';
+  sequence: number;
+  x: number;
+  y: number;
+  width: number | null;
+  height: number | null;
+}
+
+type BidiCanvasEvent = BidiCanvasTextEvent | BidiCanvasImageEvent;
+
+function installLiveWorkerSourceMock(): void {
+  Object.defineProperty(HTMLMediaElement.prototype, 'paused', {
+    configurable: true,
+    get: () => false,
+  });
+  const global = window as unknown as Record<string, unknown>;
+  global.ytcfg = {
+    data_: {
+      INNERTUBE_API_KEY: 'bidi-worker-e2e-key',
+      INNERTUBE_CONTEXT_CLIENT_NAME: '1',
+      INNERTUBE_CONTEXT_CLIENT_VERSION: '1.0',
+      INNERTUBE_CONTEXT: { client: { clientName: 'WEB', clientVersion: '1.0' } },
+    },
+  };
+  global.ytInitialData = {
+    currentVideoEndpoint: { watchEndpoint: { videoId: 'dQw4w9WgXcQ' } },
+    contents: {
+      twoColumnWatchNextResults: {
+        conversationBar: {
+          liveChatRenderer: {
+            isReplay: false,
+            continuations: [
+              {
+                timedContinuationData: {
+                  continuation: 'bidi-worker-live',
+                  timeoutMs: 30_000,
+                },
+              },
+            ],
+          },
+        },
+      },
+    },
+  };
+}
+
+async function emitRichBidiMessage(page: Page, requestKey: string): Promise<void> {
+  await page.route(BIDI_EMOJI_URL, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'image/png',
+      headers: { 'access-control-allow-origin': '*' },
+      path: BIDI_EMOJI_PATH,
+    })
+  );
+  await page.route('https://www.youtube.com/youtubei/v1/live_chat/get_live_chat**', (route) =>
+    route.fulfill({
+      json: {
+        continuationContents: {
+          liveChatContinuation: {
+            actions: [
+              {
+                addChatItemAction: {
+                  item: {
+                    liveChatTextMessageRenderer: {
+                      id: `e2e-native-bidi-${requestKey}`,
+                      authorName: { simpleText: 'العربية' },
+                      message: {
+                        runs: [
+                          { text: 'مرحبا Hello ' },
+                          {
+                            emoji: {
+                              shortcuts: [':bidi:'],
+                              image: {
+                                accessibility: {
+                                  accessibilityData: { label: 'bidi emoji' },
+                                },
+                                thumbnails: [
+                                  { url: BIDI_EMOJI_URL, width: 32, height: 32 },
+                                ],
+                              },
+                            },
+                          },
+                          { text: ' World' },
+                        ],
+                      },
+                    },
+                  },
+                },
+              },
+            ],
+            continuations: [],
+          },
+        },
+      },
+    })
+  );
+  await page.evaluate((key) =>
+    fetch(`https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?key=${key}`)
+  , requestKey);
+}
+
+function findBidiSequence(events: readonly BidiCanvasEvent[]): {
+  hello: BidiCanvasTextEvent;
+  emoji: BidiCanvasImageEvent;
+  world: BidiCanvasTextEvent;
+  arabic: BidiCanvasTextEvent;
+} | null {
+  for (let index = 0; index <= events.length - 4; index++) {
+    const hello = events[index];
+    const emoji = events[index + 1];
+    const world = events[index + 2];
+    const arabic = events[index + 3];
+    if (
+      hello?.kind === 'text' &&
+      hello.text === 'Hello ' &&
+      emoji?.kind === 'image' &&
+      world?.kind === 'text' &&
+      world.text === ' World' &&
+      arabic?.kind === 'text' &&
+      arabic.text === 'مرحبا '
+    ) {
+      return { hello, emoji, world, arabic };
+    }
+  }
+  return null;
+}
 
 
 test.describe('Danmaku Rendering', () => {
@@ -116,6 +269,7 @@ test.describe('Danmaku Rendering', () => {
     await applySettings(page, {
       allowShortTextMessages: true,
       danmakuMode: 'top',
+      fontSize: 27,
       showDebugOverlay: true,
       backgroundColors: { normal: '#00000000' },
       showAuthor: { normal: false },
@@ -398,6 +552,236 @@ test.describe('Danmaku Rendering', () => {
     expect(layout!.letterSpacing).toBe('1px');
     expect(layout!.textAdvance).toBeGreaterThanOrEqual(layout!.minimumTextAdvance);
     expect(layout!.fallbackAdvance).toBeGreaterThanOrEqual(layout!.minimumFallbackAdvance);
+  });
+
+  test('renders rich RTL text-object-text through the main Canvas path', async ({
+    page,
+  }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(HTMLCanvasElement.prototype, 'transferControlToOffscreen', {
+        configurable: true,
+        value: () => {
+          throw new Error('Force main-thread rendering for Canvas bidi call inspection');
+        },
+      });
+
+      const events: BidiCanvasEvent[] = [];
+      let sequence = 0;
+      const originalFillText = CanvasRenderingContext2D.prototype.fillText;
+      CanvasRenderingContext2D.prototype.fillText = function (
+        text: string,
+        x: number,
+        y: number,
+        maxWidth?: number
+      ): void {
+        if (events.length < 512) {
+          events.push({
+            kind: 'text',
+            sequence: sequence++,
+            text,
+            x,
+            y,
+            direction: this.direction,
+            textAlign: this.textAlign,
+          });
+        }
+        if (maxWidth === undefined) originalFillText.call(this, text, x, y);
+        else originalFillText.call(this, text, x, y, maxWidth);
+      };
+      const canvasPrototype = CanvasRenderingContext2D.prototype as unknown as {
+        drawImage: (...args: unknown[]) => void;
+      };
+      const originalDrawImage = canvasPrototype.drawImage;
+      canvasPrototype.drawImage = function (
+        this: CanvasRenderingContext2D,
+        ...args: unknown[]
+      ): void {
+        if (events.length < 512) {
+          events.push({
+            kind: 'image',
+            sequence: sequence++,
+            x: Number(args[1]),
+            y: Number(args[2]),
+            width: args.length >= 5 ? Number(args[3]) : null,
+            height: args.length >= 5 ? Number(args[4]) : null,
+          });
+        }
+        Reflect.apply(originalDrawImage, this, args);
+      };
+      (window as unknown as Record<string, unknown>).__rtlCanvasEvents = events;
+    });
+
+    await setupOverlayPage(page, { platform: 'userscript' });
+    await applySettings(page, {
+      allowShortTextMessages: true,
+      danmakuMode: 'top',
+      fontSize: 27,
+      outline: { enabled: false, widthPx: 0, opacity: 0 },
+      showAuthor: { normal: true },
+      showDebugOverlay: true,
+      topBottomDurationMs: 30_000,
+    });
+
+    await emitRichBidiMessage(page, 'main');
+
+    await expect(page.locator('#yt-chat-overlay-debug > div').first()).toHaveText(
+      'Rcvd: 1 | Rndr: 1'
+    );
+    const readSequence = () =>
+      page.evaluate(() =>
+        (window as unknown as Record<string, unknown>).__rtlCanvasEvents as BidiCanvasEvent[]
+      ).then(findBidiSequence);
+    await expect.poll(readSequence, { timeout: 5000 }).not.toBeNull();
+    const sequence = await readSequence();
+
+    expect(sequence).not.toBeNull();
+    expect(sequence!.hello).toMatchObject({ direction: 'ltr', textAlign: 'left' });
+    expect(sequence!.world).toMatchObject({ direction: 'ltr', textAlign: 'left' });
+    expect(sequence!.arabic).toMatchObject({ direction: 'rtl', textAlign: 'left' });
+    expect(sequence!.hello.x).toBeLessThan(sequence!.emoji.x);
+    expect(sequence!.emoji.x).toBeLessThan(sequence!.world.x);
+    expect(sequence!.world.x).toBeLessThan(sequence!.arabic.x);
+    expect(sequence!.emoji).toMatchObject({ width: 32, height: 32 });
+  });
+
+  test('renders rich RTL text-object-text through the actual Canvas Worker', async ({ page }) => {
+    await setupMockPageRoute(page);
+    await routePlaybackWorker(page);
+    await page.route('**/youtubei/v1/live_chat/get_live_chat**', (route) =>
+      route.fulfill({
+        json: {
+          continuationContents: {
+            liveChatContinuation: {
+              actions: [],
+              continuations: [
+                {
+                  timedContinuationData: {
+                    continuation: 'bidi-worker-live',
+                    timeoutMs: 30_000,
+                  },
+                },
+              ],
+            },
+          },
+        },
+      })
+    );
+    await page.addInitScript(installPlaybackWorkerObserver, PLAYBACK_WORKER_URL);
+    await page.addInitScript(installLiveWorkerSourceMock);
+    await page.addInitScript(installYTMock, {
+      defaults: DEFAULT_SETTINGS,
+      platform: 'userscript' as const,
+    });
+    await injectUserscript(page);
+    await page.goto(MOCK_WATCH_URL, { waitUntil: 'domcontentloaded' });
+    await page.locator(`#${OVERLAY_ID}`).waitFor({ state: 'attached', timeout: 15_000 });
+    await page.waitForFunction(
+      () => {
+        const handle = (window as unknown as Record<string, unknown>).__ytChatOverlay;
+        return typeof handle === 'object' && handle !== null;
+      },
+      undefined,
+      { timeout: 15_000 }
+    );
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const telemetry = (window as unknown as Record<string, unknown>)
+            .__playbackWorkerTelemetry as { ready?: number } | undefined;
+          return telemetry?.ready ?? 0;
+        })
+      )
+      .toBe(1);
+    const workerState = {
+      telemetry: await page.evaluate(() =>
+        structuredClone(
+          (window as unknown as Record<string, unknown>).__playbackWorkerTelemetry
+        )
+      ),
+      urls: page.workers().map((worker) => worker.url()),
+    };
+    expect(workerState.telemetry).toMatchObject({ ready: 1, terminated: 0 });
+    const rendererWorker = page.workers().find((worker) => worker.url() === PLAYBACK_WORKER_URL);
+    expect(rendererWorker).toBeDefined();
+    if (!rendererWorker) throw new Error('Renderer Worker is not attached to the page');
+    await rendererWorker.evaluate(() => {
+      const events: BidiCanvasEvent[] = [];
+      let sequence = 0;
+      const prototype = OffscreenCanvasRenderingContext2D.prototype;
+      const originalFillText = prototype.fillText;
+      prototype.fillText = function (
+        text: string,
+        x: number,
+        y: number,
+        maxWidth?: number
+      ): void {
+        if (events.length < 512) {
+          events.push({
+            kind: 'text',
+            sequence: sequence++,
+            text,
+            x,
+            y,
+            direction: this.direction,
+            textAlign: this.textAlign,
+          });
+        }
+        if (maxWidth === undefined) originalFillText.call(this, text, x, y);
+        else originalFillText.call(this, text, x, y, maxWidth);
+      };
+      const canvasPrototype = prototype as unknown as {
+        drawImage: (...args: unknown[]) => void;
+      };
+      const originalDrawImage = canvasPrototype.drawImage;
+      canvasPrototype.drawImage = function (
+        this: OffscreenCanvasRenderingContext2D,
+        ...args: unknown[]
+      ): void {
+        if (events.length < 512) {
+          events.push({
+            kind: 'image',
+            sequence: sequence++,
+            x: Number(args[1]),
+            y: Number(args[2]),
+            width: args.length >= 5 ? Number(args[3]) : null,
+            height: args.length >= 5 ? Number(args[4]) : null,
+          });
+        }
+        Reflect.apply(originalDrawImage, this, args);
+      };
+      (self as unknown as Record<string, unknown>).__rtlCanvasWorkerEvents = events;
+    });
+    await applySettings(page, {
+      allowShortTextMessages: true,
+      danmakuMode: 'top',
+      fontSize: 27,
+      outline: { enabled: false, widthPx: 0, opacity: 0 },
+      showAuthor: { normal: true },
+      showDebugOverlay: true,
+      topBottomDurationMs: 30_000,
+    });
+
+    await emitRichBidiMessage(page, 'worker');
+    await expect(page.locator('#yt-chat-overlay-debug > div').first()).toHaveText(
+      'Rcvd: 1 | Rndr: 1'
+    );
+    const readSequence = () =>
+      rendererWorker
+        .evaluate(() =>
+          (self as unknown as Record<string, unknown>).__rtlCanvasWorkerEvents as BidiCanvasEvent[]
+        )
+        .then(findBidiSequence);
+    await expect.poll(readSequence, { timeout: 5000 }).not.toBeNull();
+    const sequence = await readSequence();
+
+    expect(sequence).not.toBeNull();
+    expect(sequence!.hello).toMatchObject({ direction: 'ltr', textAlign: 'left' });
+    expect(sequence!.world).toMatchObject({ direction: 'ltr', textAlign: 'left' });
+    expect(sequence!.arabic).toMatchObject({ direction: 'rtl', textAlign: 'left' });
+    expect(sequence!.hello.x).toBeLessThan(sequence!.emoji.x);
+    expect(sequence!.emoji.x).toBeLessThan(sequence!.world.x);
+    expect(sequence!.world.x).toBeLessThan(sequence!.arabic.x);
+    expect(sequence!.emoji).toMatchObject({ width: 32, height: 32 });
   });
 
   test('keeps a truncated SuperChat ellipsis inside the card', async ({ page }) => {

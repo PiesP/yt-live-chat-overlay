@@ -13,6 +13,10 @@ import { RenderWorkerManager } from '@renderer/worker/manager';
 import { WorkerRenderer } from '@renderer/worker/renderer';
 import { DEFAULT_SETTINGS } from '@settings/schema';
 import { resolveLimits } from '@settings/limits';
+import {
+  MAX_RENDER_CONTENT_SEGMENTS,
+  MAX_RENDER_FIELD_CODE_POINTS,
+} from '@chat/render-resource-limits';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockContext = {
@@ -328,6 +332,16 @@ describe('renderer worker protocol guards', () => {
       isValidControlMessage({
         type: 'updateTranslation',
         id: 'message',
+        translatedText: '😀'.repeat(MAX_RENDER_FIELD_CODE_POINTS + 1),
+        width: 180,
+        height: 52,
+        translationHeight: 18,
+      })
+    ).toBe(false);
+    expect(
+      isValidControlMessage({
+        type: 'updateTranslation',
+        id: 'message',
         translatedText: null,
         width: 100,
         height: 20,
@@ -487,6 +501,60 @@ describe('renderer worker protocol guards', () => {
         false
       );
     }
+  });
+
+  it('applies the shared text and segment admission limits to Worker messages', () => {
+    const base = {
+      id: 'resource-bounded',
+      width: 100,
+      height: 20,
+      priority: 0,
+    };
+    const exactBody = '😀'.repeat(MAX_RENDER_FIELD_CODE_POINTS);
+    expect(
+      isValidControlMessage({
+        type: 'addMessages',
+        messages: [
+          {
+            ...base,
+            text: exactBody,
+            content: [{ type: 'text', content: exactBody }],
+          },
+        ],
+      })
+    ).toBe(true);
+    expect(
+      isValidControlMessage({
+        type: 'addMessages',
+        messages: [{ ...base, text: `${exactBody}😀` }],
+      })
+    ).toBe(false);
+
+    const segment = { type: 'emoji', content: '', emojiAlt: ':x:' };
+    expect(
+      isValidControlMessage({
+        type: 'addMessages',
+        messages: [
+          {
+            ...base,
+            text: '',
+            content: Array.from({ length: MAX_RENDER_CONTENT_SEGMENTS }, () => segment),
+          },
+        ],
+      })
+    ).toBe(true);
+    expect(
+      isValidControlMessage({
+        type: 'addMessages',
+        messages: [
+          {
+            ...base,
+            text: '',
+            content: Array.from({ length: MAX_RENDER_CONTENT_SEGMENTS + 1 }, () => segment),
+          },
+        ],
+      })
+    ).toBe(false);
   });
 
   it('accepts the exact Worker stats ID limit and rejects one entry beyond it', () => {

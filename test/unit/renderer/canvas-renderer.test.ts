@@ -2,6 +2,10 @@
 // @vitest-environment jsdom
 import { afterEach, describe, it, expect, vi, beforeEach } from 'vitest';
 import { CanvasRenderer } from '@renderer/canvas-renderer';
+import {
+  getBidiLayoutCacheUsage,
+  resolveTextDirection,
+} from '@renderer/canvas/bidi-layout';
 import { RenderWorkerManager } from '@renderer/worker/manager';
 import type { WorkerRecoveryMessage } from '@renderer/worker/manager';
 import type { WorkerStatsMessage } from '@renderer/worker/types';
@@ -11,6 +15,7 @@ import type { ChatMessage, OverlaySettings } from '@app-types';
 import { LanguageDetectorService } from '@translation/language-detector';
 import { ImageFetchManager } from '@media/image-fetch-manager';
 import { applySettingsPatch, normalizeStoredSettings } from '@settings/schema';
+import { MAX_RENDER_FIELD_CODE_POINTS } from '@chat/render-resource-limits';
 
 // Mock OffscreenCanvas
 vi.stubGlobal('OffscreenCanvas', class {
@@ -102,6 +107,31 @@ describe('CanvasRenderer', () => {
     });
 
     expect(() => renderer.updateSettings(updatedSettings)).not.toThrow();
+    renderer.destroy();
+  });
+
+  it('admits the exact shared render budget and rejects one astral code point above it', () => {
+    const renderer = new CanvasRenderer(overlay, makeSettings());
+    const enqueueMessage = vi.fn();
+    const internals = renderer as unknown as {
+      enqueueMessage(message: ChatMessage, trackDrops: boolean): void;
+      isMessageAllowed(message: ChatMessage): boolean;
+    };
+    internals.enqueueMessage = enqueueMessage;
+    internals.isMessageAllowed = () => true;
+    const exactText = '😀'.repeat(MAX_RENDER_FIELD_CODE_POINTS);
+
+    renderer.addMessage({
+      ...makeMessage('exact-resource-limit', exactText),
+      content: [{ type: 'text', content: exactText }],
+    });
+    renderer.addMessage({
+      ...makeMessage('over-resource-limit', `${exactText}😀`),
+      content: [{ type: 'text', content: `${exactText}😀` }],
+    });
+
+    expect(enqueueMessage).toHaveBeenCalledOnce();
+    expect(enqueueMessage).toHaveBeenCalledWith(expect.objectContaining({ id: 'exact-resource-limit' }), true);
     renderer.destroy();
   });
 
@@ -407,6 +437,71 @@ describe('CanvasRenderer', () => {
     expect(internals.pendingTranslations).toEqual([]);
     expect(message.translatedText).toBeNull();
     expect(message.translatedRenderMessage).toBeUndefined();
+    renderer.destroy();
+  });
+
+  it('rejects an oversized main-thread translation before queueing or geometry work', () => {
+    const renderer = new CanvasRenderer(
+      overlay,
+      makeSettings({ translationEnabled: true, translationMode: 'replace' })
+    );
+    const original = makeMessage('translation-resource-limit', 'original');
+    const message = { message: original } as CanvasMessage;
+    const estimateTranslatedDimensions = vi.fn();
+    const internals = renderer as unknown as {
+      pendingTranslations: Array<{ msg: CanvasMessage; text: string | null }>;
+      translationConfigurationGeneration: number;
+      estimateTranslatedDimensions: typeof estimateTranslatedDimensions;
+      queueTranslationResult(
+        msg: CanvasMessage,
+        text: string | null,
+        generation: number
+      ): void;
+    };
+    internals.estimateTranslatedDimensions = estimateTranslatedDimensions;
+
+    internals.queueTranslationResult(
+      message,
+      '😀'.repeat(MAX_RENDER_FIELD_CODE_POINTS + 1),
+      internals.translationConfigurationGeneration
+    );
+
+    expect(internals.pendingTranslations).toEqual([]);
+    expect(estimateTranslatedDimensions).not.toHaveBeenCalled();
+    renderer.destroy();
+  });
+
+  it('rejects an oversized Worker translation before geometry or protocol send', async () => {
+    const renderer = new CanvasRenderer(
+      overlay,
+      makeSettings({ translationEnabled: true, translationMode: 'replace' })
+    );
+    const original = makeMessage('worker-translation-resource-limit', 'original');
+    const sendTranslation = vi.fn();
+    const estimateTranslatedDimensions = vi.fn();
+    const translate = vi.fn().mockResolvedValue('😀'.repeat(MAX_RENDER_FIELD_CODE_POINTS + 1));
+    const internals = renderer as unknown as {
+      translationService: { isEnabled: boolean; translate(text: string): Promise<string> };
+      workerManager: {
+        isCurrentMessage(id: string, message: ChatMessage): boolean;
+        sendTranslation: typeof sendTranslation;
+      };
+      estimateTranslatedDimensions: typeof estimateTranslatedDimensions;
+      prefetchAndTranslateForWorker(message: ChatMessage, id: string): void;
+    };
+    Object.defineProperty(internals.translationService, 'isEnabled', { value: true });
+    internals.translationService.translate = translate;
+    internals.workerManager.isCurrentMessage = () => true;
+    internals.workerManager.sendTranslation = sendTranslation;
+    internals.estimateTranslatedDimensions = estimateTranslatedDimensions;
+
+    internals.prefetchAndTranslateForWorker(original, original.id!);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(translate).toHaveBeenCalledOnce();
+    expect(estimateTranslatedDimensions).not.toHaveBeenCalled();
+    expect(sendTranslation).not.toHaveBeenCalled();
     renderer.destroy();
   });
 
@@ -851,7 +946,10 @@ describe('CanvasRenderer', () => {
   it('prepareForRefresh works', () => {
     const settings = makeSettings();
     const renderer = new CanvasRenderer(overlay, settings);
+    resolveTextDirection('مرحبا');
+    expect(getBidiLayoutCacheUsage().direction.entries).toBe(1);
     expect(() => renderer.prepareForRefresh()).not.toThrow();
+    expect(getBidiLayoutCacheUsage().direction.entries).toBe(0);
     renderer.destroy();
   });
 

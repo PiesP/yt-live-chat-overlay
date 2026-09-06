@@ -13,6 +13,12 @@ interface ExtensionManifest {
 }
 
 const root = resolve(import.meta.dirname, '..', '..');
+const BIDI_LICENSE_MARKERS = [
+  'bidi-js',
+  'Copyright (c) 2021 Jason Johnston',
+  'Permission is hereby granted, free of charge',
+  'THE SOFTWARE IS PROVIDED "AS IS"',
+] as const;
 
 function assertExists(base: string, relativePath: string): void {
   if (!existsSync(join(base, relativePath))) {
@@ -32,6 +38,25 @@ function assertGlobHasMatch(base: string, pattern: string): void {
   if (!entries.some((entry) => entry.isFile() && regex.test(entry.name))) {
     throw new Error(`No artifact matches ${base}/${pattern}`);
   }
+}
+
+function assertBidiLicense(relativePath: string): void {
+  const source = readFileSync(join(root, relativePath), 'utf8');
+  for (const marker of BIDI_LICENSE_MARKERS) {
+    if (!source.includes(marker)) {
+      throw new Error(`${relativePath} is missing the bundled bidi-js MIT license notice.`);
+    }
+  }
+}
+
+function stripExpectedBidiBanner(source: string, relativePath: string): string {
+  const trimmed = source.trimStart();
+  if (!relativePath.endsWith('/page-script.js')) return trimmed;
+  const banner = trimmed.match(/^\/\*![\s\S]*?\*\//u)?.[0];
+  if (!banner || BIDI_LICENSE_MARKERS.some((marker) => !banner.includes(marker))) {
+    throw new Error(`${relativePath} must place the complete bidi-js license before its IIFE.`);
+  }
+  return trimmed.slice(banner.length).trimStart();
 }
 
 function checkExtension(relativeDirectory: string): void {
@@ -58,7 +83,11 @@ function checkExtension(relativeDirectory: string): void {
 
   for (const script of ['content-script.js', 'page-script.js']) {
     const source = readFileSync(join(directory, script), 'utf8');
-    if (!source.trimStart().startsWith('(function(') || /^\s*(?:import|export)\s/m.test(source)) {
+    const executableSource = stripExpectedBidiBanner(source, `${relativeDirectory}/${script}`);
+    if (
+      !executableSource.startsWith('(function(') ||
+      /^\s*(?:import|export)\s/m.test(executableSource)
+    ) {
       throw new Error(`${relativeDirectory}/${script} is not a self-contained IIFE bundle.`);
     }
   }
@@ -99,10 +128,25 @@ function checkFirefoxContract(): void {
   }
 }
 
-if (process.argv.includes('--e2e')) {
+const isE2eBuild = process.argv.includes('--e2e');
+if (isE2eBuild) {
   assertExists(root, 'dist/yt-live-chat-overlay.dev.user.js');
+} else {
+  const userscript = readFileSync(join(root, 'dist/yt-live-chat-overlay.user.js'), 'utf8');
+  if (!userscript.startsWith('// ==UserScript==')) {
+    throw new Error('Production userscript metadata must remain the first bytes of the artifact.');
+  }
+  assertBidiLicense('dist/yt-live-chat-overlay.user.js');
 }
 checkExtension('dist-extension');
 checkExtension('dist-extension-firefox');
 checkFirefoxContract();
+for (const artifact of [
+  'dist-extension/page-script.js',
+  'dist-extension/workers/renderer.js',
+  'dist-extension-firefox/page-script.js',
+  'dist-extension-firefox/workers/renderer.js',
+]) {
+  assertBidiLicense(artifact);
+}
 console.log('Build artifact references are valid.');

@@ -75,8 +75,10 @@ function truncateText(text: string): string {
 /**
  * Truncate text based on message kind.
  * Only regular text messages are truncated to MAX_MESSAGE_TEXT_LENGTH.
- * SuperChat and membership messages preserve their full text — the renderer
- * already limits visible lines via `maxBodyLines` with ellipsis.
+ * Accepted SuperChat and membership messages preserve their full text — the
+ * renderer limits visible lines via `maxBodyLines` with ellipsis. Malformed
+ * input above the shared render-resource admission budget is rejected before
+ * this normalization step.
  */
 export function truncateForKind(text: string, kind: ChatMessage['kind']): string {
   if (kind === 'text') return truncateText(text);
