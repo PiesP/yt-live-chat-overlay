@@ -96,7 +96,7 @@ describe('HighFirstPriorityBucketQueue', () => {
       queue.enqueue('keep-mid', 100);
       queue.enqueue('low-second', 0);
 
-      queue.dropLowest();
+      expect(queue.dropLowest()).toBe('low-first');
       // Should have removed 'low-first' (oldest at lowest priority)
       expect(queue.size).toBe(3);
       const items: string[] = [];
@@ -105,7 +105,7 @@ describe('HighFirstPriorityBucketQueue', () => {
     });
 
     it('does nothing when queue is empty', () => {
-      queue.dropLowest();
+      expect(queue.dropLowest()).toBeUndefined();
       expect(queue.size).toBe(0);
     });
   });
