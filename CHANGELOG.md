@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.45.2] - Unreleased
+
+### Fixed
+
+- **Cache settings recovery** — Normalize imported and saved cache budgets to whole megabytes before renderer initialization and updates.
+- **Worker state and recovery** — Synchronize rendered-message counts, queue utilization, and burst lane density with the main runtime. Recover from Worker load or initialization errors, retain new messages during fallback and retries, and preserve the latest message after failed replacements.
+- **Recovery accounting** — Preserve drop tracking for pending live messages while excluding replayed active messages. Use acknowledged batch state to avoid losing new messages or restoring expired messages from delayed snapshots.
+- **Chat response limits** — Release interception slots promptly when an oversized cloned response is rejected, even while the original response remains open.
+- **Replay and backlog bounds** — Compact consumed replay-buffer entries and preserve configured backlog injection limits on larger lane layouts.
+
+### Changed
+
+- **Input bounds** — Limit watch-page bootstrap responses and settings imports, and restrict chat interception to exact same-origin endpoints.
+- **Main-thread scheduling** — Reduce the chat-drain slice budget to 8 ms.
+- **Browser verification** — Add installed Firefox extension coverage and real OffscreenCanvas Worker replay tests, including settings persistence, fallback, and navigation cleanup. Show unmeasured Worker frame timings as unavailable.
+- **Tooling maintenance** — Refresh dependencies, shared browser-core utilities, and security workflow controls while retaining the Vitest version supported by the mutation runner.
+
 ## [0.45.1] - 2026-08-23
 
 ### Fixed

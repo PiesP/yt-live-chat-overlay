@@ -546,17 +546,17 @@ export function enqueueWithOverflow(
   queue: HighFirstPriorityBucketQueue<ChatMessage>,
   message: ChatMessage,
   priority: number,
-  onDrop: (reason: 'queue_priority' | 'queue_replaced') => void,
+  onDrop: (reason: 'queue_priority' | 'queue_replaced', discarded: ChatMessage) => void,
   maxSize: number
 ): 'enqueued' | 'dropped' | 'replaced' {
   if (queue.size >= maxSize) {
     const lowest = queue.peekLowest();
     if (lowest && priority <= RendererBase.getMessagePriority(lowest)) {
-      onDrop('queue_priority');
+      onDrop('queue_priority', message);
       return 'dropped';
     }
-    queue.dropLowest();
-    onDrop('queue_replaced');
+    const dropped = queue.dropLowest();
+    if (dropped) onDrop('queue_replaced', dropped);
     queue.enqueue(message, priority);
     return 'replaced';
   }

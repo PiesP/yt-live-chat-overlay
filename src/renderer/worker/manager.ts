@@ -25,7 +25,12 @@ import {
   sendUpdateConfigToWorker,
 } from './common';
 import { serializeWorkerMessage } from './message-serializer';
-import type { WorkerMessage } from './types';
+import {
+  isValidWorkerErrorMessage,
+  isValidWorkerMessageSnapshot,
+  isValidWorkerStatsMessage,
+} from './protocol-guards';
+import type { WorkerMessage, WorkerStatsMessage } from './types';
 
 type DimensionResult = { width: number; height: number };
 
@@ -35,6 +40,15 @@ export interface WorkerInitResult {
   canvasTransferred: boolean;
 }
 
+export interface WorkerRecoveryMessage {
+  message: ChatMessage;
+  trackDrops: boolean;
+}
+
+interface RetainedWorkerMessage extends WorkerRecoveryMessage {
+  batchSequence: number;
+}
+
 interface WorkerManagerDeps {
   settings: OverlaySettings;
   observability: ObservabilityReporter;
@@ -42,6 +56,7 @@ interface WorkerManagerDeps {
   estimateDimensions: (msg: ChatMessage) => DimensionResult;
   getMessagePriority: (msg: ChatMessage) => number;
   getEffectiveSpeedPxPerSec: () => number;
+  onStats?: (stats: WorkerStatsMessage) => void;
 }
 
 const log = createLogger('RenderWorkerManager');
@@ -125,14 +140,24 @@ export class RenderWorkerManager {
   private active = false;
   private _queueDepth = 0;
   private _activeMessageCount = 0;
+  private _laneUtilization = 0;
+  private lastWorkerTotalRendered = 0;
+  private lastWorkerTotalDrops = 0;
+  private lastWorkerProcessedBatchSequence = 0;
+  private lastWorkerActiveMessageIds = new Set<string>();
+  private lastWorkerPendingMessageIds = new Set<string>();
   private readonly deps: WorkerManagerDeps;
-  /** Original messages retained while the Worker owns their render state. */
-  private readonly sentMessages = new Map<string, ChatMessage>();
+  /** Original message and accounting state retained while the Worker owns rendering. */
+  private readonly sentMessages = new Map<string, RetainedWorkerMessage>();
+  private nextBatchSequence = 0;
+  private pendingBatchSequence = 0;
+  /** State to restore if the currently pending batch cannot be posted. */
+  private readonly pendingBatchPreviousStates = new Map<string, RetainedWorkerMessage | null>();
   private snapshotSequence = 0;
   private messageSnapshotRequest: {
     requestId: number;
-    knownMessages: Map<string, ChatMessage>;
-    resolve: (messages: ChatMessage[]) => void;
+    knownMessages: Map<string, RetainedWorkerMessage>;
+    resolve: (messages: WorkerRecoveryMessage[]) => void;
     timer: ReturnType<typeof setTimeout>;
   } | null = null;
   /** Unsubscribe function for overlay dimension changes, stored for cleanup. */
@@ -157,6 +182,7 @@ export class RenderWorkerManager {
       target: 'emoji' | 'author' | 'sticker';
     }>;
     transferList: ImageBitmap[];
+    batchSequence: number;
   }> = [];
   private batchFlushScheduled = false;
 
@@ -197,9 +223,13 @@ export class RenderWorkerManager {
     return this._activeMessageCount;
   }
 
+  get laneUtilization(): number {
+    return this._laneUtilization;
+  }
+
   /** Whether a message is still the latest same-ID value owned by the Worker. */
   isCurrentMessage(id: string, message: ChatMessage): boolean {
-    return this.sentMessages.get(id) === message;
+    return this.sentMessages.get(id)?.message === message;
   }
 
   /**
@@ -350,7 +380,21 @@ export class RenderWorkerManager {
       const offscreen = canvas.transferControlToOffscreen();
       canvasTransferred = true;
 
+      let messageErrorCount = 0;
+      let fatalErrorHandled = false;
+      const MAX_MESSAGE_ERRORS = 3;
+      const handleFatalError = (reason: string): void => {
+        if (fatalErrorHandled || this.worker !== w) return;
+        fatalErrorHandled = true;
+        if (this._fatalErrorCallback) {
+          this._fatalErrorCallback(reason);
+        } else {
+          this.destroy();
+        }
+      };
+
       w.onmessage = (e: MessageEvent) => {
+        if (this.worker !== w) return;
         // Type guard: validate message shape before dispatch.
         // Malformed or foreign messages (e.g. from a stale worker after
         // recreation, or injected by a page-level listener) must not
@@ -373,31 +417,44 @@ export class RenderWorkerManager {
             log.info('renderer.worker.started');
             break;
           case 'stats':
-            this._activeMessageCount =
-              ((data as Record<string, unknown>).activeMessages as number) ?? 0;
-            this.deps.observability.updateActiveMessages(this._activeMessageCount);
-            this._queueDepth = ((data as Record<string, unknown>).pendingQueueDepth as number) ?? 0;
-            this.pruneSentMessages(
-              (data as Record<string, unknown>).activeMessageIds,
-              (data as Record<string, unknown>).pendingMessageIds
-            );
+            if (!isValidWorkerStatsMessage(data)) {
+              log.debug('renderer.worker.malformed-stats');
+              break;
+            }
+            this.applyWorkerStats(data);
             break;
           case 'messageSnapshot': {
+            if (!isValidWorkerMessageSnapshot(data)) {
+              log.debug('renderer.worker.malformed-message-snapshot');
+              break;
+            }
+            if (data.processedBatchSequence > this.nextBatchSequence) {
+              log.debug('renderer.worker.message-snapshot-ahead');
+              break;
+            }
             const request = this.messageSnapshotRequest;
-            const requestId = (data as Record<string, unknown>).requestId;
-            if (!request || request.requestId !== requestId) break;
+            if (!request || request.requestId !== data.requestId) break;
             clearTimeout(request.timer);
             this.messageSnapshotRequest = null;
-            const ids = Array.isArray((data as Record<string, unknown>).messageIds)
-              ? ((data as Record<string, unknown>).messageIds as unknown[])
-              : [];
-            request.resolve(this.takeSentMessages(ids));
+            request.resolve(
+              this.takeSnapshotMessages(
+                data.activeMessageIds,
+                data.pendingMessageIds,
+                data.processedBatchSequence,
+                request.knownMessages
+              )
+            );
             break;
           }
           case 'error':
+            if (!isValidWorkerErrorMessage(data)) {
+              log.debug('renderer.worker.malformed-error');
+              break;
+            }
             log.warn('renderer.worker.error', {
-              error: String((data as Record<string, unknown>).error),
+              error: data.error,
             });
+            handleFatalError('worker-runtime-error');
             break;
           case 'pong':
             this.lastPongTime = performance.now();
@@ -417,34 +474,30 @@ export class RenderWorkerManager {
       };
 
       w.onerror = (err) => {
+        if (this.worker !== w) return;
         log.warn('renderer.worker.error', {
-          error: err.message,
+          error: err.message || 'Worker script failed to load or execute',
         });
+        err.preventDefault();
+        handleFatalError('worker-load-error');
       };
 
       // Structured clone deserialization failures (malformed messages)
       // indicate a corrupted worker state. After N consecutive failures,
       // notify the renderer so it can replace the transferred canvas. If no
       // recovery callback is registered, destroy the worker directly.
-      let messageErrorCount = 0;
-      let fatalErrorHandled = false;
-      const MAX_MESSAGE_ERRORS = 3;
       w.onmessageerror = () => {
+        if (this.worker !== w) return;
         messageErrorCount++;
         log.warn('renderer.worker.message-deserialization-failed', {
           attempt: messageErrorCount,
           max: MAX_MESSAGE_ERRORS,
         });
-        if (messageErrorCount === MAX_MESSAGE_ERRORS && !fatalErrorHandled) {
-          fatalErrorHandled = true;
+        if (messageErrorCount === MAX_MESSAGE_ERRORS) {
           log.error('renderer.worker.max-message-errors', {
             limit: MAX_MESSAGE_ERRORS,
           });
-          if (this._fatalErrorCallback) {
-            this._fatalErrorCallback('worker-messageerror');
-          } else {
-            this.destroy();
-          }
+          handleFatalError('worker-messageerror');
         }
       };
 
@@ -474,6 +527,9 @@ export class RenderWorkerManager {
 
       this.worker = w;
       this.active = true;
+      this.nextBatchSequence = 0;
+      this.pendingBatchSequence = 0;
+      this.resetWorkerStats();
       this.startPingPong();
 
       log.info('renderer.worker.initialized');
@@ -499,7 +555,7 @@ export class RenderWorkerManager {
    * Send a message to the render worker for display.
    * Serializes ChatMessage into lightweight cross-thread format.
    */
-  sendToWorker(message: ChatMessage, msgId?: string): boolean {
+  sendToWorker(message: ChatMessage, msgId?: string, trackDrops = true): boolean {
     if (!this.worker) return false;
 
     const priority = this.deps.getMessagePriority(message);
@@ -510,7 +566,7 @@ export class RenderWorkerManager {
     const maxWorkerQueue = this.deps.settings.queueMaxSize * 2;
     if (!isKnownReplacement && this._queueDepth > maxWorkerQueue) {
       if (priority < 40) {
-        this.deps.observability.onMessageDropped('worker_backpressure');
+        if (trackDrops) this.deps.observability.onMessageDropped('worker_backpressure');
         return false;
       }
     }
@@ -523,6 +579,7 @@ export class RenderWorkerManager {
       priority,
       burstSpeedMultiplier: this.computeBurstSpeedMultiplier(),
       settings: this.deps.settings,
+      trackDrops,
     });
 
     // ── Collect ImageBitmap transfers ──────────────────────────────────
@@ -556,13 +613,29 @@ export class RenderWorkerManager {
       collectBitmap(message.superChat.sticker.url, 'sticker');
     }
 
-    this.sentMessages.set(id, message);
+    if (this.pendingBatchSequence === 0) {
+      this.nextBatchSequence = Math.min(Number.MAX_SAFE_INTEGER, this.nextBatchSequence + 1);
+      this.pendingBatchSequence = this.nextBatchSequence;
+    }
+    if (!this.pendingBatchPreviousStates.has(id)) {
+      this.pendingBatchPreviousStates.set(id, this.sentMessages.get(id) ?? null);
+    }
+    this.sentMessages.set(id, {
+      message,
+      batchSequence: this.pendingBatchSequence,
+      trackDrops,
+    });
 
     // ── Batch instead of immediate postMessage ──────────────────────
     // During chat bursts, multiple sendToWorker calls arrive in the same
     // microtask turn. Batching them into a single postMessage reduces
     // cross-thread overhead while keeping display latency to one microtask.
-    this.pendingBatch.push({ msg: workerMessage, transferredImages, transferList });
+    this.pendingBatch.push({
+      msg: workerMessage,
+      transferredImages,
+      transferList,
+      batchSequence: this.pendingBatchSequence,
+    });
     this.scheduleBatchFlush();
     return true;
   }
@@ -587,10 +660,13 @@ export class RenderWorkerManager {
   private flushBatch(): void {
     this.batchFlushScheduled = false;
     const batch = this.pendingBatch.splice(0);
+    const previousStates = new Map(this.pendingBatchPreviousStates);
+    this.pendingBatchPreviousStates.clear();
+    this.pendingBatchSequence = 0;
     if (batch.length === 0) return;
     const worker = this.worker;
     if (!worker) {
-      this.discardPendingBatch(batch);
+      this.discardPendingBatch(batch, previousStates);
       return;
     }
 
@@ -621,6 +697,7 @@ export class RenderWorkerManager {
     const workerMessage: Record<string, unknown> = {
       type: 'addMessages',
       messages,
+      batchSequence: batch[0]?.batchSequence,
     };
 
     if (allTransferredImages.length > 0) {
@@ -628,14 +705,14 @@ export class RenderWorkerManager {
       try {
         worker.postMessage(workerMessage, allTransferList);
       } catch (error) {
-        this.discardPendingBatch(batch);
+        this.discardPendingBatch(batch, previousStates);
         log.warn('renderer.worker.batch-send-failed', { error: String(error) });
       }
     } else {
       try {
         worker.postMessage(workerMessage);
       } catch (error) {
-        this.discardPendingBatch(batch);
+        this.discardPendingBatch(batch, previousStates);
         log.warn('renderer.worker.batch-send-failed', { error: String(error) });
       }
     }
@@ -651,11 +728,24 @@ export class RenderWorkerManager {
         target: 'emoji' | 'author' | 'sticker';
       }>;
       transferList: ImageBitmap[];
-    }>
+      batchSequence: number;
+    }>,
+    previousStates: ReadonlyMap<string, RetainedWorkerMessage | null>
   ): void {
+    const failedBatchSequence = batch[0]?.batchSequence;
+    if (failedBatchSequence !== undefined) {
+      for (const [id, previous] of previousStates) {
+        if (this.sentMessages.get(id)?.batchSequence !== failedBatchSequence) continue;
+        if (previous) {
+          this.sentMessages.set(id, previous);
+        } else {
+          this.sentMessages.delete(id);
+        }
+      }
+    }
+
     const bitmaps = new Set<ImageBitmap>();
     for (const entry of batch) {
-      this.sentMessages.delete(entry.msg.id);
       for (const image of entry.transferredImages) bitmaps.add(image.bitmap);
     }
     for (const bitmap of bitmaps) bitmap.close();
@@ -686,8 +776,8 @@ export class RenderWorkerManager {
     }
   ): void {
     if (!this.worker) return;
-    for (const [id, message] of this.sentMessages) {
-      this.sendTranslation(id, null, estimateGeometry(message));
+    for (const [id, retained] of this.sentMessages) {
+      this.sendTranslation(id, null, estimateGeometry(retained.message));
     }
   }
 
@@ -760,21 +850,26 @@ export class RenderWorkerManager {
    * Worker queue, as well as messages already on screen, are not lost when
    * the transferred canvas has to be replaced.
    */
-  snapshotMessages(timeoutMs = 250): Promise<ChatMessage[]> {
+  snapshotMessages(timeoutMs = 250): Promise<WorkerRecoveryMessage[]> {
     const worker = this.worker;
     if (!worker) return Promise.resolve([]);
     if (this.messageSnapshotRequest) return Promise.resolve([]);
 
     const requestId = ++this.snapshotSequence;
     const knownMessages = new Map(this.sentMessages);
-    return new Promise<ChatMessage[]>((resolve) => {
+    return new Promise<WorkerRecoveryMessage[]>((resolve) => {
       const timer = setTimeout(() => {
         const request = this.messageSnapshotRequest;
         if (!request || request.requestId !== requestId) return;
         this.messageSnapshotRequest = null;
         resolve(this.takeKnownMessages(request.knownMessages));
       }, timeoutMs);
-      this.messageSnapshotRequest = { requestId, knownMessages, resolve, timer };
+      this.messageSnapshotRequest = {
+        requestId,
+        knownMessages,
+        resolve,
+        timer,
+      };
       try {
         worker.postMessage({ type: 'snapshotMessages', requestId });
       } catch {
@@ -787,6 +882,9 @@ export class RenderWorkerManager {
 
   /** Destroy the render worker. */
   destroy(): void {
+    this.active = false;
+    this._contextLost = false;
+    this.resetWorkerStats();
     // Cancel pending message snapshot timeout
     if (this.messageSnapshotRequest) {
       const request = this.messageSnapshotRequest;
@@ -796,12 +894,18 @@ export class RenderWorkerManager {
     }
     this.batchFlushScheduled = false;
     const pendingBatch = this.pendingBatch.splice(0);
-    if (pendingBatch.length > 0) this.discardPendingBatch(pendingBatch);
+    const pendingPreviousStates = new Map(this.pendingBatchPreviousStates);
+    this.pendingBatchPreviousStates.clear();
+    if (pendingBatch.length > 0) {
+      this.discardPendingBatch(pendingBatch, pendingPreviousStates);
+    }
     this.dimensionsUnsubscribe?.();
     this.dimensionsUnsubscribe = null;
     this.stopPingPong();
     if (!this.worker) {
       this.sentMessages.clear();
+      this.nextBatchSequence = 0;
+      this.pendingBatchSequence = 0;
       return;
     }
     // Capture the target worker so that if init() creates a new worker
@@ -844,41 +948,128 @@ export class RenderWorkerManager {
     // Safety timeout: if the ack never arrives, force-terminate after 500ms.
     terminationTimeout = setTimeout(finalizeWorkerTermination, 500);
 
-    this.active = false;
     this.sentMessages.clear();
+    this.nextBatchSequence = 0;
+    this.pendingBatchSequence = 0;
   }
 
-  private pruneSentMessages(activeIds: unknown, pendingIds: unknown): void {
-    if (!Array.isArray(activeIds) && !Array.isArray(pendingIds)) return;
-    const currentIds = new Set<string>();
-    for (const id of [
-      ...(Array.isArray(activeIds) ? activeIds : []),
-      ...(Array.isArray(pendingIds) ? pendingIds : []),
-    ]) {
-      if (typeof id === 'string') currentIds.add(id);
+  private applyWorkerStats(stats: WorkerStatsMessage): void {
+    if (
+      stats.totalRendered < this.lastWorkerTotalRendered ||
+      stats.totalDrops < this.lastWorkerTotalDrops ||
+      stats.processedBatchSequence < this.lastWorkerProcessedBatchSequence ||
+      stats.processedBatchSequence > this.nextBatchSequence
+    ) {
+      log.debug('renderer.worker.stats-regressed-or-ahead');
+      return;
     }
-    for (const id of this.sentMessages.keys()) {
-      if (!currentIds.has(id)) this.sentMessages.delete(id);
+
+    this._activeMessageCount = stats.activeMessages;
+    this._queueDepth = stats.pendingQueueDepth;
+    this._laneUtilization = stats.laneUtilization;
+
+    const renderedDelta = stats.totalRendered - this.lastWorkerTotalRendered;
+    if (renderedDelta > 0) this.deps.observability.onMessagesRendered(renderedDelta);
+    this.lastWorkerTotalRendered = stats.totalRendered;
+
+    const dropDelta = stats.totalDrops - this.lastWorkerTotalDrops;
+    if (dropDelta > 0) {
+      this.deps.observability.onMessagesDropped(dropDelta);
+    }
+    this.lastWorkerTotalDrops = stats.totalDrops;
+    this.lastWorkerProcessedBatchSequence = stats.processedBatchSequence;
+    this.lastWorkerActiveMessageIds = new Set(stats.activeMessageIds);
+    this.lastWorkerPendingMessageIds = new Set(stats.pendingMessageIds);
+
+    this.deps.observability.updateActiveMessages(this._activeMessageCount);
+    this.deps.observability.updateQueueDepth(this._queueDepth);
+    this.deps.observability.updateLaneUtilization(this._laneUtilization);
+    this.pruneSentMessages(
+      stats.activeMessageIds,
+      stats.pendingMessageIds,
+      stats.processedBatchSequence
+    );
+    this.deps.onStats?.(stats);
+    this.deps.observability.tick();
+  }
+
+  private resetWorkerStats(): void {
+    this._activeMessageCount = 0;
+    this._queueDepth = 0;
+    this._laneUtilization = 0;
+    this.lastWorkerTotalRendered = 0;
+    this.lastWorkerTotalDrops = 0;
+    this.lastWorkerProcessedBatchSequence = 0;
+    this.lastWorkerActiveMessageIds.clear();
+    this.lastWorkerPendingMessageIds.clear();
+    this.deps.observability.updateActiveMessages(0);
+    this.deps.observability.updateQueueDepth(0);
+    this.deps.observability.updateLaneUtilization(0);
+  }
+
+  private pruneSentMessages(
+    activeIds: readonly string[],
+    pendingIds: readonly string[],
+    processedBatchSequence: number
+  ): void {
+    const currentIds = new Set([...activeIds, ...pendingIds]);
+    for (const [id, retained] of this.sentMessages) {
+      if (retained.batchSequence <= processedBatchSequence && !currentIds.has(id)) {
+        this.sentMessages.delete(id);
+      }
     }
   }
 
-  private takeSentMessages(ids: unknown[]): ChatMessage[] {
-    const messages: ChatMessage[] = [];
-    for (const id of ids) {
-      if (typeof id !== 'string') continue;
-      const message = this.sentMessages.get(id);
-      if (message) {
-        messages.push(message);
+  private takeSnapshotMessages(
+    activeIds: readonly string[],
+    pendingIds: readonly string[],
+    processedBatchSequence: number,
+    knownMessages: ReadonlyMap<string, RetainedWorkerMessage>
+  ): WorkerRecoveryMessage[] {
+    const messages: WorkerRecoveryMessage[] = [];
+    const activeIdSet = new Set(activeIds);
+    const pendingIdSet = new Set(pendingIds);
+    for (const [id, retained] of knownMessages) {
+      if (
+        activeIdSet.has(id) ||
+        pendingIdSet.has(id) ||
+        retained.batchSequence > processedBatchSequence
+      ) {
+        messages.push({
+          message: retained.message,
+          trackDrops:
+            retained.trackDrops &&
+            !activeIdSet.has(id) &&
+            (pendingIdSet.has(id) || retained.batchSequence > processedBatchSequence),
+        });
+      }
+      if (this.sentMessages.get(id) === retained) {
         this.sentMessages.delete(id);
       }
     }
     return messages;
   }
 
-  private takeKnownMessages(knownMessages: Map<string, ChatMessage>): ChatMessage[] {
-    const messages = [...knownMessages.values()];
-    for (const [id, message] of knownMessages) {
-      if (this.sentMessages.get(id) === message) this.sentMessages.delete(id);
+  private takeKnownMessages(
+    knownMessages: ReadonlyMap<string, RetainedWorkerMessage>
+  ): WorkerRecoveryMessage[] {
+    const messages: WorkerRecoveryMessage[] = [];
+    for (const [id, retained] of knownMessages) {
+      if (this.sentMessages.get(id) !== retained) continue;
+      const wasActive = this.lastWorkerActiveMessageIds.has(id);
+      const wasPending = this.lastWorkerPendingMessageIds.has(id);
+      const isUnacknowledged = retained.batchSequence > this.lastWorkerProcessedBatchSequence;
+      if (!wasActive && !wasPending && !isUnacknowledged) {
+        this.sentMessages.delete(id);
+        continue;
+      }
+      messages.push({
+        message: retained.message,
+        // A timed-out Worker cannot prove a newer batch was placed. Preserve
+        // tracking only for last-known pending or unacknowledged work.
+        trackDrops: retained.trackDrops && !wasActive && (wasPending || isUnacknowledged),
+      });
+      this.sentMessages.delete(id);
     }
     return messages;
   }

@@ -95,7 +95,7 @@ pnpm install
 | `pnpm dev` | Watch and rebuild the development userscript |
 | `pnpm test` | Run the Vitest suite |
 | `pnpm test:cov` | Run tests with coverage thresholds |
-| `pnpm test:e2e` | Run userscript, Chromium extension, and Firefox userscript Playwright flows |
+| `pnpm test:e2e` | Run userscript flows and installed Chromium/Firefox extension tests |
 | `pnpm quality` | Run static, type, i18n, dependency, and source checks |
 | `pnpm verify` | Run quality, all builds, and artifact validation |
 | `pnpm verify:full` | Add coverage and browser tests to `verify` |

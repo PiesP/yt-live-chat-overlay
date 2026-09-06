@@ -29,7 +29,7 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      testIgnore: /firefox-userscript-smoke\.spec\.ts/,
+      testIgnore: /firefox-(?:userscript-smoke|extension)\.spec\.ts/,
       use: {
         ...devices['Desktop Chrome'],
         launchOptions: {
@@ -43,11 +43,18 @@ export default defineConfig({
       },
     },
     {
-      // Firefox extensions cannot be loaded through Playwright's persistent
-      // extension fixture. Exercise the shipped userscript bundle instead so
-      // Gecko still covers startup, DOM ingestion, and Canvas rendering.
+      // Exercise the userscript separately from the installed-extension lane.
       name: 'firefox-userscript',
       testMatch: /firefox-userscript-smoke\.spec\.ts/,
+      use: {
+        ...devices['Desktop Firefox'],
+      },
+    },
+    {
+      // The fixture starts the pinned Firefox binary through its native BiDi
+      // endpoint so the packaged extension runs in a real extension context.
+      name: 'firefox-extension',
+      testMatch: /firefox-extension\.spec\.ts/,
       use: {
         ...devices['Desktop Firefox'],
       },

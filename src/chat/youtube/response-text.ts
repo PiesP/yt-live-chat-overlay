@@ -30,9 +30,14 @@ function parseDeclaredLength(response: Response): number | null {
   return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
 }
 
-async function cancelBody(response: Response, error: ResponseTooLargeError): Promise<void> {
+function cancelBody(response: Response, error: ResponseTooLargeError): void {
   try {
-    await response.body?.cancel(error);
+    // A cloned response body is a tee branch whose cancellation can stay
+    // pending until the original branch completes. Start cleanup without
+    // delaying the size-limit rejection.
+    void response.body?.cancel(error).catch(() => {
+      // Cancellation is best-effort when a platform stream is already closed.
+    });
   } catch {
     // Cancellation is best-effort when a platform stream is already closed.
   }
@@ -63,7 +68,7 @@ async function readBoundedResponseTextWithError(
   const declaredLength = parseDeclaredLength(response);
   if (declaredLength !== null && declaredLength > maxBytes) {
     const error = createTooLargeError(declaredLength);
-    await cancelBody(response, error);
+    cancelBody(response, error);
     throw error;
   }
 
@@ -89,7 +94,11 @@ async function readBoundedResponseTextWithError(
       if (!Number.isSafeInteger(nextTotal) || nextTotal > maxBytes) {
         const error = createTooLargeError(nextTotal);
         try {
-          await reader.cancel(error);
+          // See cancelBody(): awaiting cancellation of a tee branch can block
+          // until the original response consumer finishes.
+          void reader.cancel(error).catch(() => {
+            // Cancellation is best-effort when a platform stream already failed.
+          });
         } catch {
           // Cancellation is best-effort when a platform stream already failed.
         }

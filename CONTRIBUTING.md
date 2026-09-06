@@ -59,7 +59,7 @@ request and `pnpm verify:full` for publication-level or browser behavior changes
 - Use safe DOM APIs for chat content; do not use unsanitized `innerHTML`, `eval`,
   `new Function`, or string timers.
 - Use strict TypeScript, project aliases, type-only imports, and explicit guards.
-- Use `createLogger('[ModuleName]')` for runtime diagnostics and avoid logging
+- Use `createLogger('ModuleName')` for runtime diagnostics and avoid logging
   private chat or account data.
 - Keep App and RuntimeManager lifecycle ownership deterministic across YouTube
   single-page navigation.
@@ -79,11 +79,10 @@ flow and check:
 
 Explain any browser or extension lane that could not be run.
 
-The automated Firefox Playwright lane exercises the userscript bundle, not an
-installed extension. Before a release, load
-`dist-extension-firefox/manifest.json` through
-`about:debugging#/runtime/this-firefox` in a currently supported Firefox release
-and complete the Firefox extension smoke checklist in the extension guide.
+`pnpm test:e2e` covers the Firefox userscript and installed extension on
+deterministic fixtures. Before a release, also complete the
+[Firefox extension checklist](./extension/README.md#browser-validation) on a real
+YouTube page in a currently supported Firefox release.
 
 ## Dependency updates
 

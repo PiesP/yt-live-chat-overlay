@@ -3,10 +3,16 @@
 
 import type { ChatMessage, OverlaySettings } from '@app-types';
 import type { ImageFetchManager } from '@media/image-fetch-manager';
-import { isValidControlMessage } from '@renderer/worker/protocol-guards';
+import {
+  isValidControlMessage,
+  isValidWorkerErrorMessage,
+  isValidWorkerMessageSnapshot,
+  isValidWorkerStatsMessage,
+} from '@renderer/worker/protocol-guards';
 import { RenderWorkerManager } from '@renderer/worker/manager';
 import { WorkerRenderer } from '@renderer/worker/renderer';
 import { DEFAULT_SETTINGS } from '@settings/schema';
+import { resolveLimits } from '@settings/limits';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockContext = {
@@ -67,10 +73,51 @@ function makeMessage(id = 'backlog-message'): ChatMessage {
   };
 }
 
+const MAX_STATS_MESSAGE_IDS =
+  resolveLimits('queueMaxSize').max + resolveLimits('maxConcurrentMessages').max;
+
+function messageIds(count: number): string[] {
+  return Array.from({ length: count }, (_, index) => `message-${index}`);
+}
+
+function validStats(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    type: 'stats',
+    activeMessages: 0,
+    pendingQueueDepth: 0,
+    totalRendered: 0,
+    totalDrops: 0,
+    processedBatchSequence: 0,
+    laneUtilization: 0,
+    activeMessageIds: [],
+    pendingMessageIds: [],
+    ...overrides,
+  };
+}
+
+function validSnapshot(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    type: 'messageSnapshot',
+    requestId: 0,
+    activeMessageIds: [],
+    pendingMessageIds: [],
+    processedBatchSequence: 0,
+    ...overrides,
+  };
+}
+
 function createManager(renderer: WorkerRenderer): RenderWorkerManager {
   const manager = new RenderWorkerManager({
     settings: { ...DEFAULT_SETTINGS } as OverlaySettings,
-    observability: { onMessageDropped: vi.fn() } as never,
+    observability: {
+      onMessageDropped: vi.fn(),
+      onMessagesDropped: vi.fn(),
+      onMessagesRendered: vi.fn(),
+      updateActiveMessages: vi.fn(),
+      updateQueueDepth: vi.fn(),
+      updateLaneUtilization: vi.fn(),
+      tick: vi.fn(),
+    } as never,
     imageFetchManager: {
       workerBitmapCache: {
         get: vi.fn(),
@@ -440,5 +487,105 @@ describe('renderer worker protocol guards', () => {
         false
       );
     }
+  });
+
+  it('accepts the exact Worker stats ID limit and rejects one entry beyond it', () => {
+    const exactLimitIds = messageIds(MAX_STATS_MESSAGE_IDS);
+    expect(
+      isValidWorkerStatsMessage(
+        validStats({
+          activeMessages: exactLimitIds.length,
+          activeMessageIds: exactLimitIds,
+        })
+      )
+    ).toBe(true);
+
+    const overLimitIds = [...exactLimitIds, 'over-limit'];
+    expect(
+      isValidWorkerStatsMessage(
+        validStats({
+          activeMessages: overLimitIds.length,
+          activeMessageIds: overLimitIds,
+        })
+      )
+    ).toBe(false);
+  });
+
+  it('requires Worker stats arrays and non-empty string IDs', () => {
+    expect(isValidWorkerStatsMessage(validStats())).toBe(true);
+    for (const invalid of [
+      validStats({ activeMessageIds: { length: 0, every: () => true } }),
+      validStats({ activeMessages: 1, activeMessageIds: [''] }),
+      validStats({ pendingQueueDepth: 1, pendingMessageIds: [1] }),
+      validStats({ activeMessages: -1 }),
+      validStats({ pendingQueueDepth: -1 }),
+    ]) {
+      expect(isValidWorkerStatsMessage(invalid)).toBe(false);
+    }
+  });
+
+  it('rejects wrong Worker output discriminators', () => {
+    expect(isValidWorkerStatsMessage({ ...validStats(), type: 'messageSnapshot' })).toBe(false);
+    expect(isValidWorkerErrorMessage({ type: 'stats', error: 'failed' })).toBe(false);
+    expect(isValidWorkerErrorMessage(null)).toBe(false);
+    expect(isValidWorkerMessageSnapshot({ ...validSnapshot(), type: 'stats' })).toBe(false);
+  });
+
+  it('bounds snapshot ID arrays and rejects malformed IDs', () => {
+    const exactLimitIds = messageIds(MAX_STATS_MESSAGE_IDS);
+    expect(
+      isValidWorkerMessageSnapshot(validSnapshot({ activeMessageIds: exactLimitIds }))
+    ).toBe(true);
+    expect(
+      isValidWorkerMessageSnapshot(
+        validSnapshot({ activeMessageIds: [...exactLimitIds, 'over-limit'] })
+      )
+    ).toBe(false);
+    expect(isValidWorkerMessageSnapshot(validSnapshot({ pendingMessageIds: [''] }))).toBe(false);
+    expect(isValidWorkerMessageSnapshot(validSnapshot({ pendingMessageIds: [1] }))).toBe(false);
+    expect(
+      isValidWorkerMessageSnapshot(
+        validSnapshot({ pendingMessageIds: { length: 0, every: () => true } })
+      )
+    ).toBe(false);
+  });
+
+  it('requires every snapshot identity field with safe integer counters', () => {
+    for (const invalid of [
+      { ...validSnapshot(), requestId: -1 },
+      { ...validSnapshot(), requestId: 1.5 },
+      { ...validSnapshot(), requestId: Number.NaN },
+      { ...validSnapshot(), processedBatchSequence: -1 },
+      { ...validSnapshot(), processedBatchSequence: 1.5 },
+      { ...validSnapshot(), processedBatchSequence: Number.POSITIVE_INFINITY },
+      { type: 'messageSnapshot', activeMessageIds: [], pendingMessageIds: [], processedBatchSequence: 0 },
+      { type: 'messageSnapshot', requestId: 0, pendingMessageIds: [], processedBatchSequence: 0 },
+      { type: 'messageSnapshot', requestId: 0, activeMessageIds: [], processedBatchSequence: 0 },
+      { type: 'messageSnapshot', requestId: 0, activeMessageIds: [], pendingMessageIds: [] },
+    ]) {
+      expect(isValidWorkerMessageSnapshot(invalid)).toBe(false);
+    }
+  });
+
+  it('accepts boolean drop tracking and rejects non-boolean values', () => {
+    const message = {
+      id: 'drop-tracking',
+      text: 'hello',
+      width: 100,
+      height: 20,
+      priority: 0,
+    };
+    expect(
+      isValidControlMessage({
+        type: 'addMessages',
+        messages: [{ ...message, trackDrops: true }, { ...message, trackDrops: false }],
+      })
+    ).toBe(true);
+    expect(
+      isValidControlMessage({
+        type: 'addMessages',
+        messages: [{ ...message, trackDrops: 'false' }],
+      })
+    ).toBe(false);
   });
 });

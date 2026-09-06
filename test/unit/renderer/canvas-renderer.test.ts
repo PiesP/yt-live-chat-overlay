@@ -3,11 +3,14 @@
 import { afterEach, describe, it, expect, vi, beforeEach } from 'vitest';
 import { CanvasRenderer } from '@renderer/canvas-renderer';
 import { RenderWorkerManager } from '@renderer/worker/manager';
+import type { WorkerRecoveryMessage } from '@renderer/worker/manager';
+import type { WorkerStatsMessage } from '@renderer/worker/types';
 import type { CanvasMessage } from '@renderer/constants';
 import { Overlay } from '@app/overlay';
 import type { ChatMessage, OverlaySettings } from '@app-types';
 import { LanguageDetectorService } from '@translation/language-detector';
 import { ImageFetchManager } from '@media/image-fetch-manager';
+import { applySettingsPatch, normalizeStoredSettings } from '@settings/schema';
 
 // Mock OffscreenCanvas
 vi.stubGlobal('OffscreenCanvas', class {
@@ -83,6 +86,25 @@ describe('CanvasRenderer', () => {
     expect(() => new CanvasRenderer(overlay, settings)).not.toThrow();
   });
 
+  it('constructs and updates from normalized fractional cache budgets', () => {
+    const storedSettings = normalizeStoredSettings({
+      emojiCacheMb: 1.000001,
+      photoCacheMb: 1.000001,
+      stickerCacheMb: 1.000001,
+      textCacheMb: 1.000001,
+    });
+    const renderer = new CanvasRenderer(overlay, storedSettings);
+    const updatedSettings = applySettingsPatch(storedSettings, {
+      emojiCacheMb: 2.000001,
+      photoCacheMb: 2.000001,
+      stickerCacheMb: 2.000001,
+      textCacheMb: 2.000001,
+    });
+
+    expect(() => renderer.updateSettings(updatedSettings)).not.toThrow();
+    renderer.destroy();
+  });
+
   it('confines a bypassed font family to its single style property', () => {
     const container = document.createElement('div');
     document.body.appendChild(container);
@@ -153,6 +175,39 @@ describe('CanvasRenderer', () => {
 
     expect(prefetch).not.toHaveBeenCalled();
     renderer.destroy();
+  });
+
+  it('attributes main queue displacement to the message actually discarded', () => {
+    const highPriority = {
+      ...makeMessage('high-priority', 'high priority'),
+      kind: 'superchat' as const,
+      superChat: { amount: '$10', tier: 'red' as const },
+    };
+
+    const untrackedQueue = new CanvasRenderer(overlay, makeSettings({ queueMaxSize: 2 }));
+    untrackedQueue.pause();
+    const untrackedInternals = untrackedQueue as unknown as {
+      enqueueMessage(message: ChatMessage, trackDrops: boolean): void;
+    };
+    const untrackedDrop = vi.spyOn(untrackedQueue.observability, 'onMessageDropped');
+    untrackedInternals.enqueueMessage(makeMessage('replay-low-oldest', 'replay low oldest'), false);
+    untrackedInternals.enqueueMessage(makeMessage('live-low-newest', 'live low newest'), true);
+    untrackedInternals.enqueueMessage(highPriority, true);
+    expect(untrackedDrop).not.toHaveBeenCalled();
+    untrackedQueue.destroy();
+
+    const trackedQueue = new CanvasRenderer(overlay, makeSettings({ queueMaxSize: 2 }));
+    trackedQueue.pause();
+    const trackedInternals = trackedQueue as unknown as {
+      enqueueMessage(message: ChatMessage, trackDrops: boolean): void;
+    };
+    const trackedDrop = vi.spyOn(trackedQueue.observability, 'onMessageDropped');
+    trackedInternals.enqueueMessage(makeMessage('live-low-oldest', 'live low oldest'), true);
+    trackedInternals.enqueueMessage(makeMessage('replay-low-newest', 'replay low newest'), false);
+    trackedInternals.enqueueMessage({ ...highPriority, id: 'replay-high' }, false);
+    expect(trackedDrop).toHaveBeenCalledOnce();
+    expect(trackedDrop).toHaveBeenCalledWith('queue_replaced');
+    trackedQueue.destroy();
   });
 
   it('replaces a pending message with the same id instead of duplicating it', () => {
@@ -697,6 +752,55 @@ describe('CanvasRenderer', () => {
     renderer.destroy();
   });
 
+  it('synchronizes lane density and utilization without a main-thread canvas context', () => {
+    const renderer = new CanvasRenderer(overlay, makeSettings());
+    const worker = {
+      postMessage: vi.fn(),
+      terminate: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    } as unknown as Worker;
+    const internals = renderer as unknown as {
+      ctx: CanvasRenderingContext2D | null;
+      workerManager: {
+        worker: Worker | null;
+        _laneUtilization: number;
+        deps: { onStats?: (stats: WorkerStatsMessage) => void };
+        setActive(active: boolean): void;
+      };
+      burstDetector: { currentLevel: 'normal' | 'elevated' | 'high' | 'extreme' };
+      densityIndicator: { update(activeCount: number, maxConcurrent: number): void };
+    };
+    internals.ctx = null;
+    internals.workerManager.worker = worker;
+    internals.workerManager.setActive(true);
+    const updateIndicator = vi.spyOn(internals.densityIndicator, 'update');
+    internals.burstDetector.currentLevel = 'high';
+
+    renderer.addMessage(makeMessage('worker-density', 'density'));
+    expect(worker.postMessage).toHaveBeenCalledWith({ type: 'laneDensity', factor: 0.75 });
+
+    internals.workerManager._laneUtilization = 0.75;
+    internals.burstDetector.currentLevel = 'extreme';
+    internals.workerManager.deps.onStats?.({
+      type: 'stats',
+      activeMessages: 12,
+      pendingQueueDepth: 3,
+      totalRendered: 12,
+      totalDrops: 0,
+      processedBatchSequence: 0,
+      laneUtilization: 0.75,
+      activeMessageIds: [],
+      pendingMessageIds: [],
+    });
+
+    expect(worker.postMessage).toHaveBeenCalledWith({ type: 'laneDensity', factor: 0.5 });
+    expect(updateIndicator).toHaveBeenCalledWith(12, 300);
+    expect(renderer.getLaneUtilization()).toBe(0.75);
+    internals.workerManager.setActive(false);
+    renderer.destroy();
+  });
+
   it('setReplayMode works', () => {
     const settings = makeSettings();
     const renderer = new CanvasRenderer(overlay, settings);
@@ -763,6 +867,163 @@ describe('CanvasRenderer', () => {
     const renderer = new CanvasRenderer(overlay, settings);
     expect(() => renderer.fallbackToMainThread('test-reason')).not.toThrow();
     renderer.destroy();
+  });
+
+  it('preserves messages accepted while a Worker snapshot is pending', async () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    vi.spyOn(overlay, 'getContainer').mockReturnValue(container);
+    vi.spyOn(overlay, 'getDimensions').mockReturnValue({ width: 640, height: 360 });
+    const renderer = new CanvasRenderer(overlay, makeSettings());
+    let resolveSnapshot!: (messages: WorkerRecoveryMessage[]) => void;
+    const snapshot = new Promise<WorkerRecoveryMessage[]>((resolve) => {
+      resolveSnapshot = resolve;
+    });
+    const worker = {
+      postMessage: vi.fn(),
+      terminate: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    } as unknown as Worker;
+    const internals = renderer as unknown as {
+      fallbackInProgress: boolean;
+      pendingQueue: { toArray(): ChatMessage[] };
+      workerManager: {
+        worker: Worker | null;
+        setActive(active: boolean): void;
+        snapshotMessages(): Promise<WorkerRecoveryMessage[]>;
+        destroy(): void;
+      };
+      startRenderLoop(): void;
+      finalizeDrainBatch(
+        batch: {
+          candidates: readonly ChatMessage[];
+          committed: ChatMessage[];
+          unplaceable: ChatMessage[];
+          batchIndex: number;
+          staggerCursorMs: number;
+        }
+      ): void;
+    };
+    renderer.pause();
+    vi.spyOn(internals, 'startRenderLoop').mockImplementation(() => undefined);
+    internals.workerManager.worker = worker;
+    internals.workerManager.setActive(true);
+    vi.spyOn(internals.workerManager, 'snapshotMessages').mockReturnValue(snapshot);
+    vi.spyOn(internals.workerManager, 'destroy').mockImplementation(() => undefined);
+    const beforeError = makeMessage('before-error', 'before error');
+    const duringFallback = makeMessage('during-fallback', 'during fallback');
+    const afterSnapshot = makeMessage('after-snapshot', 'after snapshot');
+    const replayDuringFallback = makeMessage('replay-during-fallback', 'replay during fallback');
+    const pendingSnapshotMessage = makeMessage('snapshot-pending', 'snapshot pending');
+    const activeSnapshotMessage = makeMessage('snapshot-active', 'snapshot active');
+    const replacementDuringFallback = {
+      ...makeMessage('before-error', 'replacement during fallback'),
+      actionType: 'replace' as const,
+    };
+
+    renderer.addMessage(beforeError);
+    renderer.fallbackToMainThread('worker-load-error');
+    renderer.addMessage(duringFallback);
+    renderer.addMessage(replacementDuringFallback);
+    renderer.replayMessage(replayDuringFallback);
+    resolveSnapshot([
+      { message: beforeError, trackDrops: false },
+      { message: pendingSnapshotMessage, trackDrops: true },
+      { message: activeSnapshotMessage, trackDrops: false },
+    ]);
+    queueMicrotask(() => renderer.addMessage(afterSnapshot));
+    await vi.waitFor(() => expect(internals.fallbackInProgress).toBe(false));
+
+    const recoveredIds = internals.pendingQueue.toArray().map((message) => message.id);
+    expect(recoveredIds.filter((id) => id === beforeError.id)).toHaveLength(1);
+    expect(recoveredIds.filter((id) => id === duringFallback.id)).toHaveLength(1);
+    expect(recoveredIds.filter((id) => id === afterSnapshot.id)).toHaveLength(1);
+    expect(recoveredIds.filter((id) => id === replayDuringFallback.id)).toHaveLength(1);
+    expect(recoveredIds.filter((id) => id === pendingSnapshotMessage.id)).toHaveLength(1);
+    expect(recoveredIds.filter((id) => id === activeSnapshotMessage.id)).toHaveLength(1);
+    expect(
+      internals.pendingQueue.toArray().find((message) => message.id === beforeError.id)?.text
+    ).toBe('replacement during fallback');
+
+    const recoveredMessages = internals.pendingQueue.toArray();
+    const onMessagesDropped = vi.spyOn(renderer.observability, 'onMessagesDropped');
+    internals.finalizeDrainBatch(
+      {
+        candidates: recoveredMessages,
+        committed: [],
+        unplaceable: recoveredMessages,
+        batchIndex: 0,
+        staggerCursorMs: 0,
+      }
+    );
+    expect(onMessagesDropped).toHaveBeenCalledWith(3, 'oversized');
+    renderer.destroy();
+  });
+
+  it('keeps failed canvas recovery unhealthy and retries without losing buffered ingress', async () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    vi.spyOn(overlay, 'getContainer').mockReturnValue(container);
+    vi.spyOn(overlay, 'getDimensions').mockReturnValue({ width: 640, height: 360 });
+    const renderer = new CanvasRenderer(overlay, makeSettings());
+    renderer.pause();
+    const healthyContext = document.createElement('canvas').getContext('2d');
+    if (!healthyContext) throw new Error('Canvas test context is unavailable');
+    const worker = {
+      postMessage: vi.fn(),
+      terminate: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    } as unknown as Worker;
+    const internals = renderer as unknown as {
+      fallbackInProgress: boolean;
+      pendingQueue: { toArray(): ChatMessage[] };
+      workerManager: {
+        worker: Worker | null;
+        setActive(active: boolean): void;
+        snapshotMessages(): Promise<WorkerRecoveryMessage[]>;
+        destroy(): void;
+      };
+      startRenderLoop(): void;
+    };
+    vi.spyOn(internals, 'startRenderLoop').mockImplementation(() => undefined);
+    internals.workerManager.worker = worker;
+    internals.workerManager.setActive(true);
+    const beforeFailure = makeMessage('retry-before', 'before failed recovery');
+    const duringFailure = makeMessage('retry-during', 'during failed recovery');
+    const afterFailure = makeMessage('retry-after', 'after failed recovery');
+    vi.spyOn(internals.workerManager, 'snapshotMessages')
+      .mockResolvedValueOnce([{ message: beforeFailure, trackDrops: false }])
+      .mockResolvedValueOnce([]);
+    vi.spyOn(internals.workerManager, 'destroy').mockImplementation(() => undefined);
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext')
+      .mockReturnValueOnce(null)
+      .mockReturnValue(healthyContext);
+
+    renderer.addMessage(beforeFailure);
+    renderer.fallbackToMainThread('worker-load-error');
+    renderer.addMessage(duringFailure);
+    await vi.waitFor(() => expect(internals.fallbackInProgress).toBe(false));
+
+    expect(renderer.isWorkerAlive()).toBe(false);
+    expect(renderer.getQueueLength()).toBe(2);
+    expect(container.querySelectorAll('canvas')).toHaveLength(1);
+    renderer.addMessage(afterFailure);
+    expect(renderer.getQueueLength()).toBe(3);
+
+    renderer.fallbackToMainThread('canvas-recovery-retry');
+    await vi.waitFor(() => expect(renderer.isWorkerAlive()).toBe(true));
+
+    const recoveredIds = internals.pendingQueue.toArray().map((message) => message.id);
+    expect(recoveredIds.filter((id) => id === beforeFailure.id)).toHaveLength(1);
+    expect(recoveredIds.filter((id) => id === duringFailure.id)).toHaveLength(1);
+    expect(recoveredIds.filter((id) => id === afterFailure.id)).toHaveLength(1);
+    expect(container.querySelectorAll('canvas')).toHaveLength(1);
+
+    renderer.destroy();
+    expect(renderer.getQueueLength()).toBe(0);
+    expect(container.querySelectorAll('canvas')).toHaveLength(0);
   });
 
   it('setStandbyStatus works', () => {

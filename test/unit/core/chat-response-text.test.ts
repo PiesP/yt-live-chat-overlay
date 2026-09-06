@@ -4,6 +4,22 @@ import {
   readBoundedChatResponseText,
 } from '@chat/youtube/response-text';
 
+const NOT_SETTLED = Symbol('not-settled');
+
+async function settleWithin<T>(promise: Promise<T>): Promise<T | typeof NOT_SETTLED> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<typeof NOT_SETTLED>((resolve) => {
+        timeout = setTimeout(() => resolve(NOT_SETTLED), 50);
+      }),
+    ]);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
+}
+
 describe('readBoundedChatResponseText', () => {
   it('preserves the chat-specific error name and message contract', async () => {
     const response = new Response(null, { headers: { 'content-length': '11' } });
@@ -30,6 +46,30 @@ describe('readBoundedChatResponseText', () => {
     expect(cancel).toHaveBeenCalledOnce();
   });
 
+  it('rejects a cloned response with an oversized declared length while the original stays open', async () => {
+    const original = new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array([1]));
+        },
+      }),
+      { headers: { 'content-length': '11' } }
+    );
+    const clone = original.clone();
+    const read = readBoundedChatResponseText(clone, 10).catch(
+      (reason: unknown) => reason
+    );
+
+    try {
+      await expect(settleWithin(read)).resolves.toBeInstanceOf(ChatResponseTooLargeError);
+      expect(original.bodyUsed).toBe(false);
+      expect(clone.body?.locked).toBe(false);
+    } finally {
+      await original.body?.cancel();
+      await read;
+    }
+  });
+
   it('cancels streamed input as soon as accumulated bytes exceed the limit', async () => {
     const cancel = vi.fn();
     let emitted = false;
@@ -47,6 +87,30 @@ describe('readBoundedChatResponseText', () => {
       readBoundedChatResponseText(new Response(body), 10)
     ).rejects.toBeInstanceOf(ChatResponseTooLargeError);
     expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it('rejects a cloned streamed response over the limit while the original stays open', async () => {
+    const original = new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array(6));
+          controller.enqueue(new Uint8Array(5));
+        },
+      })
+    );
+    const clone = original.clone();
+    const read = readBoundedChatResponseText(clone, 10).catch(
+      (reason: unknown) => reason
+    );
+
+    try {
+      await expect(settleWithin(read)).resolves.toBeInstanceOf(ChatResponseTooLargeError);
+      expect(original.bodyUsed).toBe(false);
+      expect(clone.body?.locked).toBe(false);
+    } finally {
+      await original.body?.cancel();
+      await read;
+    }
   });
 
   it('accepts a response exactly at the byte limit', async () => {

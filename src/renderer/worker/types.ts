@@ -154,6 +154,8 @@ export interface WorkerMessage {
   priority: number;
   /** Whether this is a backlog (past chat) message. */
   isBacklog: boolean;
+  /** Whether a permanent Worker-side discard contributes to observed drop metrics. */
+  trackDrops?: boolean;
   /** Translated text (if available). */
   translatedText?: string | null;
   /** Height of the dual-translation text block, excluding its leading gap. */
@@ -181,6 +183,33 @@ export interface WorkerMessage {
   cardConfigWorker?: CardConfigWorker;
   /** Author-chosen user color from YouTube chat (used when preserveUserColor is enabled). */
   userColor?: string;
+}
+
+/** Periodic cumulative state reported by the renderer Worker. */
+export interface WorkerStatsMessage {
+  type: 'stats';
+  activeMessages: number;
+  pendingQueueDepth: number;
+  totalRendered: number;
+  totalDrops: number;
+  /** Highest addMessages batch fully admitted by this Worker instance. */
+  processedBatchSequence: number;
+  laneUtilization: number;
+  activeMessageIds: string[];
+  pendingMessageIds: string[];
+}
+
+export interface WorkerErrorMessage {
+  type: 'error';
+  error: string;
+}
+
+export interface WorkerMessageSnapshot {
+  type: 'messageSnapshot';
+  requestId: number;
+  activeMessageIds: string[];
+  pendingMessageIds: string[];
+  processedBatchSequence: number;
 }
 
 export interface ActiveMessage {

@@ -20,7 +20,9 @@
  *   { type: 'destroy' }
  *
  * Worker → Main:
- *   { type: 'stats', activeMessages: number, drops: number }
+ *   { type: 'stats', activeMessages, pendingQueueDepth, totalRendered,
+ *     totalDrops, processedBatchSequence, laneUtilization, activeMessageIds,
+ *     pendingMessageIds }
  *
  * ## WorkerConfig
  *
@@ -103,7 +105,13 @@ import {
 import { MapCompatibleLruMap } from '@util/lru-map';
 import { isValidControlMessage } from './protocol-guards';
 
-import type { ActiveMessage, WorkerConfig, WorkerContentSegment, WorkerMessage } from './types';
+import type {
+  ActiveMessage,
+  WorkerConfig,
+  WorkerContentSegment,
+  WorkerMessage,
+  WorkerStatsMessage,
+} from './types';
 
 // ── Worker-specific constants ──────────────────────────────────────────────
 
@@ -449,7 +457,10 @@ export class WorkerRenderer {
   private laneDensityFactor = 1.0;
   private speedTierLanes = new Map<number, { tier: number; until: number }>();
   private collidedLanes = new Set<number>();
+  /** Cumulative messages placed into the active render set for this Worker instance. */
+  private totalRendered = 0;
   private totalDrops = 0;
+  private processedBatchSequence = 0;
   private textBitmapCache!: ResizableByteLimitedCache<OffscreenCanvas>;
   private emojiCache!: ResizableByteLimitedCache<ImageBitmap>;
   private authorPhotoCache!: ResizableByteLimitedCache<ImageBitmap>;
@@ -580,6 +591,12 @@ export class WorkerRenderer {
               }
             }
             for (const m of msgs) this.enqueueMessage(m);
+            if (typeof data.batchSequence === 'number') {
+              this.processedBatchSequence = Math.max(
+                this.processedBatchSequence,
+                data.batchSequence
+              );
+            }
             break;
           }
           case 'updateConfig':
@@ -715,7 +732,9 @@ export class WorkerRenderer {
             self.postMessage({
               type: 'messageSnapshot',
               requestId: data.requestId,
-              messageIds: [...this.messageById.keys()],
+              activeMessageIds: this.activeMessages.map((message) => message.id),
+              pendingMessageIds: this.pendingQueue.map((message) => message.id),
+              processedBatchSequence: this.processedBatchSequence,
             });
             break;
           case 'destroy':
@@ -817,10 +836,13 @@ export class WorkerRenderer {
         // entry from messageById and register the new one so
         // translation results can be matched.
         const evicted = this.pendingQueue[minIdx];
+        if (evicted) this.recordDrop(evicted);
         if (evicted) this.messageById.delete(evicted.id);
         this.pendingQueue[minIdx] = msg;
         this.messageById.set(msg.id, msg);
         this.pendingQueueSortNeeded = true;
+      } else {
+        this.recordDrop(msg);
       }
       return;
     }
@@ -830,6 +852,11 @@ export class WorkerRenderer {
     if (this.animFrameId === null && !this.isDestroyed) {
       this.startRenderLoop();
     }
+  }
+
+  private recordDrop(message: WorkerMessage): void {
+    if (message.trackDrops === false) return;
+    this.totalDrops = Math.min(Number.MAX_SAFE_INTEGER, this.totalDrops + 1);
   }
 
   /** Replace pending or active render state without creating a duplicate ID. */
@@ -914,6 +941,9 @@ export class WorkerRenderer {
         if (this.idleSince === null) {
           this.idleSince = now;
         } else if (now - this.idleSince >= IDLE_GRACE_PERIOD_MS) {
+          // Publish the final empty state even when the regular stats cadence
+          // has not elapsed, otherwise main-thread health state can stay stale.
+          this.postStats(true);
           this.animFrameId = null;
           this.idleSince = null;
           return;
@@ -924,6 +954,35 @@ export class WorkerRenderer {
       this.animFrameId = requestAnimationFrame(frame);
     };
     this.animFrameId = requestAnimationFrame(frame);
+  }
+
+  /** Report cumulative Worker-owned render state at a bounded cadence. */
+  private postStats(force = false): void {
+    if (!force) {
+      this.statsFrameCounter++;
+      if (this.statsFrameCounter < 60) return;
+    }
+    this.statsFrameCounter = 0;
+
+    const now = performance.now();
+    let occupiedLanes = 0;
+    for (const [, availableAt] of this.laneHeap) {
+      if (availableAt > now) occupiedLanes++;
+    }
+    const laneUtilization = this.laneHeap.length > 0 ? occupiedLanes / this.laneHeap.length : 0;
+
+    const stats: WorkerStatsMessage = {
+      type: 'stats',
+      activeMessages: this.activeMessages.length,
+      pendingQueueDepth: this.pendingQueue.length,
+      totalRendered: this.totalRendered,
+      totalDrops: this.totalDrops,
+      processedBatchSequence: this.processedBatchSequence,
+      laneUtilization,
+      activeMessageIds: this.activeMessages.map((msg) => msg.id),
+      pendingMessageIds: this.pendingQueue.map((msg) => msg.id),
+    };
+    self.postMessage(stats);
   }
 
   private handleDestroy(): void {
@@ -969,6 +1028,7 @@ export class WorkerRenderer {
     this.laneHeap = buildLaneHeap(this.numLanes, now, this.laneIndexToHeapIndex);
     this.speedTierLanes.clear();
     this.collidedLanes.clear();
+    this.postStats(true);
   }
 
   private get laneState(): LaneAllocationState {
@@ -1281,6 +1341,7 @@ export class WorkerRenderer {
       motion.horizontalStaggerPx
     );
     this.activeMessages.push(am);
+    this.totalRendered = Math.min(Number.MAX_SAFE_INTEGER, this.totalRendered + 1);
     // Register in per-lane index for O(lanes) collision checks (Issue 7).
     addMessageToLaneIndex(this.activeMessagesByLane, am, slotCount);
     this.messageById.set(msg.id, am);
@@ -1463,18 +1524,7 @@ export class WorkerRenderer {
     // ── Clear canvas ────────────────────────────────────────────────
     this.ctx.clearRect(0, 0, this.logicalWidth, this.logicalHeight);
     if (writeIdx === 0) {
-      this.statsFrameCounter++;
-      if (this.statsFrameCounter >= 60) {
-        this.statsFrameCounter = 0;
-        self.postMessage({
-          type: 'stats',
-          activeMessages: 0,
-          drops: this.totalDrops,
-          pendingQueueDepth: this.pendingQueue.length,
-          activeMessageIds: [],
-          pendingMessageIds: [],
-        });
-      }
+      this.postStats();
       return;
     }
     this.ctx.textBaseline = 'top';
@@ -1663,18 +1713,7 @@ export class WorkerRenderer {
         }
       }
     }
-    this.statsFrameCounter++;
-    if (this.statsFrameCounter >= 60) {
-      this.statsFrameCounter = 0;
-      self.postMessage({
-        type: 'stats',
-        activeMessages: this.activeMessages.length,
-        drops: this.totalDrops,
-        pendingQueueDepth: this.pendingQueue.length,
-        activeMessageIds: this.activeMessages.map((msg) => msg.id),
-        pendingMessageIds: this.pendingQueue.map((msg) => msg.id),
-      });
-    }
+    this.postStats();
 
     // ── Live region mirror: send structured text alternatives to main thread ──
     // Runs every 30 frames (~500ms at 60fps) to keep the aria-live region
@@ -1850,7 +1889,7 @@ export class WorkerRenderer {
         // A message taller than the viewport can never obtain a contiguous
         // block. Treat it as a permanent drop instead of retrying it every
         // frame and keeping the Worker render loop alive indefinitely.
-        this.totalDrops++;
+        this.recordDrop(entry);
         this.messageById.delete(entry.id);
         committed.add(entry);
         continue;

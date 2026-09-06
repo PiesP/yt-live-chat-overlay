@@ -11,8 +11,11 @@
 
 import { isRecord } from '@piesp/browser-core/util';
 import { resolveLimits } from '@settings/limits';
+import type { WorkerErrorMessage, WorkerMessageSnapshot, WorkerStatsMessage } from './types';
 
 const MAX_ADD_MESSAGES_PER_BATCH = resolveLimits('queueMaxSize').max;
+const MAX_STATS_MESSAGE_IDS =
+  resolveLimits('queueMaxSize').max + resolveLimits('maxConcurrentMessages').max;
 const SUPPORTED_LANE_DENSITY_FACTORS = new Set([0.5, 0.75, 1]);
 const BLOCKED_CONFIG_KEYS = ['__proto__', 'constructor', 'prototype'] as const;
 const RESOURCE_CONFIG_KEYS = [
@@ -43,6 +46,18 @@ function isPositiveFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0;
 }
 
+function isNonNegativeSafeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+function isBoundedMessageIdArray(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.length <= MAX_STATS_MESSAGE_IDS &&
+    value.every((id) => typeof id === 'string' && id.length > 0)
+  );
+}
+
 function hasOwn(record: Readonly<Record<string, unknown>>, key: string): boolean {
   return Object.hasOwn(record, key);
 }
@@ -71,6 +86,41 @@ function isSafeConfig(value: unknown): value is Record<string, unknown> {
   }
 
   return true;
+}
+
+/** Validate cumulative state sent from the renderer Worker to the main thread. */
+export function isValidWorkerStatsMessage(value: unknown): value is WorkerStatsMessage {
+  if (!isRecord(value) || value.type !== 'stats') return false;
+  return (
+    isNonNegativeSafeInteger(value.activeMessages) &&
+    isNonNegativeSafeInteger(value.pendingQueueDepth) &&
+    isNonNegativeSafeInteger(value.totalRendered) &&
+    isNonNegativeSafeInteger(value.totalDrops) &&
+    isNonNegativeSafeInteger(value.processedBatchSequence) &&
+    isFiniteNonNegative(value.laneUtilization) &&
+    value.laneUtilization <= 1 &&
+    isBoundedMessageIdArray(value.activeMessageIds) &&
+    value.activeMessageIds.length === value.activeMessages &&
+    isBoundedMessageIdArray(value.pendingMessageIds) &&
+    value.pendingMessageIds.length === value.pendingQueueDepth
+  );
+}
+
+/** Validate a fatal error reported by the renderer Worker. */
+export function isValidWorkerErrorMessage(value: unknown): value is WorkerErrorMessage {
+  return isRecord(value) && value.type === 'error' && typeof value.error === 'string';
+}
+
+/** Validate a requested Worker message snapshot and its processing watermark. */
+export function isValidWorkerMessageSnapshot(value: unknown): value is WorkerMessageSnapshot {
+  return (
+    isRecord(value) &&
+    value.type === 'messageSnapshot' &&
+    isNonNegativeSafeInteger(value.requestId) &&
+    isBoundedMessageIdArray(value.activeMessageIds) &&
+    isBoundedMessageIdArray(value.pendingMessageIds) &&
+    isNonNegativeSafeInteger(value.processedBatchSequence)
+  );
 }
 
 // ── Worker control message guard ──────────────────────────────────────────
@@ -150,6 +200,12 @@ export function isValidControlMessage(value: unknown): boolean {
 function validateAddMessages(data: Record<string, unknown>): boolean {
   if (!Array.isArray(data.messages)) return false;
   if (data.messages.length > MAX_ADD_MESSAGES_PER_BATCH) return false;
+  if (
+    hasOwn(data, 'batchSequence') &&
+    (!isNonNegativeSafeInteger(data.batchSequence) || data.batchSequence < 1)
+  ) {
+    return false;
+  }
 
   // Shallow-check each message's required fields without deeply parsing content.
   // Full validation is done per-message in the renderer
@@ -160,6 +216,7 @@ function validateAddMessages(data: Record<string, unknown>): boolean {
     if (!isFiniteNonNegative(msg.width)) return false;
     if (!isFiniteNonNegative(msg.height)) return false;
     if (!isFiniteNumber(msg.priority)) return false;
+    if (hasOwn(msg, 'trackDrops') && typeof msg.trackDrops !== 'boolean') return false;
   }
 
   return true;

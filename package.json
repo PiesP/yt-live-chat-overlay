@@ -1,6 +1,6 @@
 {
   "name": "yt-live-chat-overlay",
-  "version": "0.45.1",
+  "version": "0.45.2",
   "description": "In-browser NicoNico-style comment overlay for YouTube live chat.",
   "type": "module",
   "private": true,
@@ -59,7 +59,7 @@
     "test:cov": "vitest run --coverage",
     "test:e2e": "playwright test --config test/e2e/playwright.config.ts",
     "test:e2e:headed": "pnpm test:e2e -- --headed",
-    "pretest:e2e": "pnpm build:dev && pnpm build:extension:ci && pnpm -s check:artifacts --e2e",
+    "pretest:e2e": "pnpm build:dev && pnpm build:extension:ci && pnpm build:extension:firefox:ci && pnpm -s check:artifacts --e2e",
     "clean:all": "pnpm -s clean",
     "check:i18n": "node --experimental-strip-types scripts/check/i18n.ts"
   },

@@ -609,6 +609,24 @@ describe('normalizeStoredSettings', () => {
     expect(result.speedPxPerSec).toBe(50);
   });
 
+  it('rounds cache budgets to whole megabytes while preserving other fractional settings', () => {
+    const result = normalizeStoredSettings({
+      emojiCacheMb: 1.000001,
+      photoCacheMb: 2.49,
+      stickerCacheMb: 2.5,
+      textCacheMb: 19.999999,
+      safeTop: 0.123,
+    });
+
+    expect([
+      result.emojiCacheMb,
+      result.photoCacheMb,
+      result.stickerCacheMb,
+      result.textCacheMb,
+    ]).toEqual([1, 2, 3, 20]);
+    expect(result.safeTop).toBe(0.123);
+  });
+
   it('falls back to defaults for invalid typed values', () => {
     const result = normalizeStoredSettings({
       enabled: 'yes',

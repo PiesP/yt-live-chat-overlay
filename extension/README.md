@@ -60,12 +60,16 @@ Development and release checks should use a currently supported Firefox release.
 
 ## Browser validation
 
-Playwright loads the real unpacked Chromium extension. Its Firefox project runs
-the shipped userscript bundle in Firefox because Playwright does not provide an
-equivalent fixture for loading a temporary Firefox extension. That lane covers
-Gecko startup, chat ingestion, and Canvas rendering, but it does not validate
-the Firefox manifest, content-script injection, extension storage, or menus in
-an installed extension context.
+`pnpm test:e2e` builds both extension packages and runs installed-extension tests
+in Chromium and Firefox. The Firefox fixture uses the Firefox binary pinned by
+Playwright and its native WebDriver BiDi endpoint to install the temporary add-on.
+It checks content-script injection, settings storage across reload, API chat
+rendering, Worker failure recovery, and SPA cleanup on a deterministic YouTube
+fixture. A separate Firefox userscript smoke test covers the userscript path.
+
+The browser projects and assertions are defined in
+[`playwright.config.ts`](../test/e2e/playwright.config.ts) and
+[`firefox-extension.spec.ts`](../test/e2e/specs/firefox-extension.spec.ts).
 
 Before publishing a Firefox archive, load `dist-extension-firefox/manifest.json`
 as a temporary add-on in a currently supported Firefox release and verify:

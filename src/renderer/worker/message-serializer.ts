@@ -16,6 +16,7 @@ export interface SerializeWorkerMessageInput {
   priority: number;
   burstSpeedMultiplier: number;
   settings: OverlaySettings;
+  trackDrops?: boolean;
 }
 
 /** Project an ingress chat message into the serializable Worker protocol shape. */
@@ -26,6 +27,7 @@ export function serializeWorkerMessage({
   priority,
   burstSpeedMultiplier,
   settings,
+  trackDrops = true,
 }: SerializeWorkerMessageInput): WorkerMessage {
   const content: WorkerContentSegment[] = message.content.map((segment) => {
     if (segment.type === 'text') {
@@ -51,6 +53,7 @@ export function serializeWorkerMessage({
     height: dimensions.height,
     priority,
     isBacklog: message.isBacklog ?? false,
+    trackDrops,
     authorType: message.authorType,
     kind: message.kind,
     userColor: message.userColor,
