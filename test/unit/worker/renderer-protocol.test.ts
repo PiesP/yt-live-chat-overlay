@@ -793,7 +793,8 @@ describe('Worker message protocol', () => {
       expect(postMessageSpy).toHaveBeenCalledWith({
         type: 'messageSnapshot',
         requestId: 7,
-        messageIds: ['pending-message'],
+        activeMessageIds: [],
+        pendingMessageIds: ['pending-message'],
         processedBatchSequence: 0,
       });
     });
@@ -811,7 +812,8 @@ describe('Worker message protocol', () => {
       expect(postMessageSpy).toHaveBeenCalledWith({
         type: 'messageSnapshot',
         requestId: 8,
-        messageIds: ['pending-first', 'pending-second'],
+        activeMessageIds: [],
+        pendingMessageIds: ['pending-first', 'pending-second'],
         processedBatchSequence: 0,
       });
     });

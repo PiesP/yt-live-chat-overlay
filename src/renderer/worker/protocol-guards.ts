@@ -117,7 +117,8 @@ export function isValidWorkerMessageSnapshot(value: unknown): value is WorkerMes
     isRecord(value) &&
     value.type === 'messageSnapshot' &&
     isNonNegativeSafeInteger(value.requestId) &&
-    isBoundedMessageIdArray(value.messageIds) &&
+    isBoundedMessageIdArray(value.activeMessageIds) &&
+    isBoundedMessageIdArray(value.pendingMessageIds) &&
     isNonNegativeSafeInteger(value.processedBatchSequence)
   );
 }

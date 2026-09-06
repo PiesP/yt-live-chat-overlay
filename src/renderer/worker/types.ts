@@ -207,7 +207,8 @@ export interface WorkerErrorMessage {
 export interface WorkerMessageSnapshot {
   type: 'messageSnapshot';
   requestId: number;
-  messageIds: string[];
+  activeMessageIds: string[];
+  pendingMessageIds: string[];
   processedBatchSequence: number;
 }
 
