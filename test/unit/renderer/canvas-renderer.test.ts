@@ -176,6 +176,39 @@ describe('CanvasRenderer', () => {
     renderer.destroy();
   });
 
+  it('attributes main queue displacement to the message actually discarded', () => {
+    const highPriority = {
+      ...makeMessage('high-priority', 'high priority'),
+      kind: 'superchat' as const,
+      superChat: { amount: '$10', tier: 'red' as const },
+    };
+
+    const untrackedQueue = new CanvasRenderer(overlay, makeSettings({ queueMaxSize: 2 }));
+    untrackedQueue.pause();
+    const untrackedInternals = untrackedQueue as unknown as {
+      enqueueMessage(message: ChatMessage, trackDrops: boolean): void;
+    };
+    const untrackedDrop = vi.spyOn(untrackedQueue.observability, 'onMessageDropped');
+    untrackedInternals.enqueueMessage(makeMessage('replay-low-oldest', 'replay low oldest'), false);
+    untrackedInternals.enqueueMessage(makeMessage('live-low-newest', 'live low newest'), true);
+    untrackedInternals.enqueueMessage(highPriority, true);
+    expect(untrackedDrop).not.toHaveBeenCalled();
+    untrackedQueue.destroy();
+
+    const trackedQueue = new CanvasRenderer(overlay, makeSettings({ queueMaxSize: 2 }));
+    trackedQueue.pause();
+    const trackedInternals = trackedQueue as unknown as {
+      enqueueMessage(message: ChatMessage, trackDrops: boolean): void;
+    };
+    const trackedDrop = vi.spyOn(trackedQueue.observability, 'onMessageDropped');
+    trackedInternals.enqueueMessage(makeMessage('live-low-oldest', 'live low oldest'), true);
+    trackedInternals.enqueueMessage(makeMessage('replay-low-newest', 'replay low newest'), false);
+    trackedInternals.enqueueMessage({ ...highPriority, id: 'replay-high' }, false);
+    expect(trackedDrop).toHaveBeenCalledOnce();
+    expect(trackedDrop).toHaveBeenCalledWith('queue_replaced');
+    trackedQueue.destroy();
+  });
+
   it('replaces a pending message with the same id instead of duplicating it', () => {
     const renderer = new CanvasRenderer(overlay, makeSettings());
     const internals = renderer as unknown as {
@@ -917,6 +950,71 @@ describe('CanvasRenderer', () => {
     );
     expect(onMessagesDropped).toHaveBeenCalledWith(2, 'oversized');
     renderer.destroy();
+  });
+
+  it('keeps failed canvas recovery unhealthy and retries without losing buffered ingress', async () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    vi.spyOn(overlay, 'getContainer').mockReturnValue(container);
+    vi.spyOn(overlay, 'getDimensions').mockReturnValue({ width: 640, height: 360 });
+    const renderer = new CanvasRenderer(overlay, makeSettings());
+    renderer.pause();
+    const healthyContext = document.createElement('canvas').getContext('2d');
+    if (!healthyContext) throw new Error('Canvas test context is unavailable');
+    const worker = {
+      postMessage: vi.fn(),
+      terminate: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    } as unknown as Worker;
+    const internals = renderer as unknown as {
+      fallbackInProgress: boolean;
+      pendingQueue: { toArray(): ChatMessage[] };
+      workerManager: {
+        worker: Worker | null;
+        setActive(active: boolean): void;
+        snapshotMessages(): Promise<ChatMessage[]>;
+        destroy(): void;
+      };
+      startRenderLoop(): void;
+    };
+    vi.spyOn(internals, 'startRenderLoop').mockImplementation(() => undefined);
+    internals.workerManager.worker = worker;
+    internals.workerManager.setActive(true);
+    const beforeFailure = makeMessage('retry-before', 'before failed recovery');
+    const duringFailure = makeMessage('retry-during', 'during failed recovery');
+    const afterFailure = makeMessage('retry-after', 'after failed recovery');
+    vi.spyOn(internals.workerManager, 'snapshotMessages')
+      .mockResolvedValueOnce([beforeFailure])
+      .mockResolvedValueOnce([]);
+    vi.spyOn(internals.workerManager, 'destroy').mockImplementation(() => undefined);
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext')
+      .mockReturnValueOnce(null)
+      .mockReturnValue(healthyContext);
+
+    renderer.addMessage(beforeFailure);
+    renderer.fallbackToMainThread('worker-load-error');
+    renderer.addMessage(duringFailure);
+    await vi.waitFor(() => expect(internals.fallbackInProgress).toBe(false));
+
+    expect(renderer.isWorkerAlive()).toBe(false);
+    expect(renderer.getQueueLength()).toBe(2);
+    expect(container.querySelectorAll('canvas')).toHaveLength(1);
+    renderer.addMessage(afterFailure);
+    expect(renderer.getQueueLength()).toBe(3);
+
+    renderer.fallbackToMainThread('canvas-recovery-retry');
+    await vi.waitFor(() => expect(renderer.isWorkerAlive()).toBe(true));
+
+    const recoveredIds = internals.pendingQueue.toArray().map((message) => message.id);
+    expect(recoveredIds.filter((id) => id === beforeFailure.id)).toHaveLength(1);
+    expect(recoveredIds.filter((id) => id === duringFailure.id)).toHaveLength(1);
+    expect(recoveredIds.filter((id) => id === afterFailure.id)).toHaveLength(1);
+    expect(container.querySelectorAll('canvas')).toHaveLength(1);
+
+    renderer.destroy();
+    expect(renderer.getQueueLength()).toBe(0);
+    expect(container.querySelectorAll('canvas')).toHaveLength(0);
   });
 
   it('setStandbyStatus works', () => {

@@ -130,6 +130,8 @@ export class CanvasRenderer extends RendererBase {
   private _destroyed = false;
   /** Prevent concurrent Worker recovery attempts from replacing the canvas twice. */
   private fallbackInProgress = false;
+  /** A transferred canvas could not yet be replaced with a usable main-thread canvas. */
+  private fallbackRecoveryFailed = false;
   private ctx: CanvasRenderingContext2D | null = null;
   private animFrameId: number | null = null;
   /** Pre-computed 1/fadeDurationMs — corrected in constructor from settings. */
@@ -653,7 +655,7 @@ export class CanvasRenderer extends RendererBase {
   }
 
   getQueueLength(): number {
-    return this.pendingQueue.size + this.workerManager.queueDepth;
+    return this.pendingQueue.size + this.fallbackIngressQueue.size + this.workerManager.queueDepth;
   }
 
   override getActiveMessageCount(): number {
@@ -661,6 +663,7 @@ export class CanvasRenderer extends RendererBase {
   }
 
   override isWorkerAlive(): boolean {
+    if (this.fallbackInProgress || this.fallbackRecoveryFailed) return false;
     return this.workerManager.isActive ? this.workerManager.isAlive() : true;
   }
 
@@ -680,7 +683,7 @@ export class CanvasRenderer extends RendererBase {
 
   addMessage(message: ChatMessage): void {
     if (message.actionType === 'replace' && message.id) {
-      if (this.fallbackInProgress) {
+      if (this.fallbackInProgress || this.fallbackRecoveryFailed) {
         this.enqueueFallbackIngress(message, false);
         this.lastRenderActivity = performance.now();
         return;
@@ -697,7 +700,7 @@ export class CanvasRenderer extends RendererBase {
 
     if (!this.isMessageAllowed(message)) return;
 
-    if (this.fallbackInProgress) {
+    if (this.fallbackInProgress || this.fallbackRecoveryFailed) {
       this.enqueueFallbackIngress(message, true);
       this.lastRenderActivity = performance.now();
       return;
@@ -812,7 +815,7 @@ export class CanvasRenderer extends RendererBase {
    */
   override replayMessage(message: ChatMessage): void {
     if (this.isVideoPaused) return;
-    if (this.fallbackInProgress) {
+    if (this.fallbackInProgress || this.fallbackRecoveryFailed) {
       this.enqueueFallbackIngress(message, false);
       return;
     }
@@ -832,7 +835,7 @@ export class CanvasRenderer extends RendererBase {
    * Enqueues buffered messages into the pending queue for rendering.
    */
   protected override onResumeFromVideoPause(messages: ChatMessage[]): void {
-    if (this.fallbackInProgress) {
+    if (this.fallbackInProgress || this.fallbackRecoveryFailed) {
       for (const message of messages) this.enqueueFallbackIngress(message, false);
       return;
     }
@@ -856,8 +859,11 @@ export class CanvasRenderer extends RendererBase {
       this.pendingQueue,
       message,
       priority,
-      (reason) => {
-        if (trackDrops) this.observability.onMessageDropped(reason);
+      (reason, discarded) => {
+        const discardedWasTracked =
+          reason === 'queue_priority' ? trackDrops : this.trackedPendingMessages.has(discarded);
+        if (discardedWasTracked) this.observability.onMessageDropped(reason);
+        if (reason === 'queue_replaced') this.trackedPendingMessages.delete(discarded);
       },
       this.settings.queueMaxSize
     );
@@ -889,8 +895,7 @@ export class CanvasRenderer extends RendererBase {
         .find((entry) => entry.message.id === message.id);
       if (existing) this.fallbackIngressQueue.removeAll([existing]);
       if (this.fallbackIngressQueue.size >= this.settings.queueMaxSize) {
-        const dropped = this.fallbackIngressQueue.peekLowest();
-        this.fallbackIngressQueue.dropLowest();
+        const dropped = this.fallbackIngressQueue.dropLowest();
         if (dropped?.trackDrops) this.observability.onMessageDropped('queue_replaced');
       }
       this.fallbackIngressQueue.enqueue({ message, trackDrops }, Number.MAX_SAFE_INTEGER);
@@ -903,8 +908,8 @@ export class CanvasRenderer extends RendererBase {
         if (trackDrops) this.observability.onMessageDropped('queue_priority');
         return;
       }
-      this.fallbackIngressQueue.dropLowest();
-      if (lowest?.trackDrops) this.observability.onMessageDropped('queue_replaced');
+      const dropped = this.fallbackIngressQueue.dropLowest();
+      if (dropped?.trackDrops) this.observability.onMessageDropped('queue_replaced');
     }
     this.fallbackIngressQueue.enqueue({ message, trackDrops }, priority);
   }
@@ -2348,7 +2353,9 @@ export class CanvasRenderer extends RendererBase {
     this.superChatGradientCache.clear();
     this.dimensionCache.clear();
     this.activeMessagesByLane.clear();
+    this.pendingQueue.clear();
     this.fallbackIngressQueue.clear();
+    this.fallbackRecoveryFailed = false;
     this.pendingTranslations.length = 0;
     this.onBacklogPauseChange = null;
     this.onStatusBarClick = null;
@@ -2442,11 +2449,20 @@ export class CanvasRenderer extends RendererBase {
         this.imageFetchManager.updateConfig(this.settings, null);
 
         if (!this.replaceCanvas()) {
+          const retainedIngress = this.mergeRecoveredMessages(
+            messages,
+            this.drainFallbackIngress()
+          );
+          for (const entry of retainedIngress) {
+            this.enqueueFallbackIngress(entry.message, entry.trackDrops);
+          }
+          this.fallbackRecoveryFailed = true;
           log.warn('renderer.fallback.failed', {
             reason: 'could-not-replace-canvas',
           });
           return;
         }
+        this.fallbackRecoveryFailed = false;
         this.observability.setFrameTimingAvailable(true);
         const fallbackIngress = this.drainFallbackIngress();
 
@@ -2489,6 +2505,7 @@ export class CanvasRenderer extends RendererBase {
         log.info('renderer.fallback.complete', { restoredMessages: messages.length });
       })
       .catch((error: unknown) => {
+        this.fallbackRecoveryFailed = true;
         log.warn('renderer.fallback.failed', {
           reason: 'message-snapshot-failed',
           error: String(error),

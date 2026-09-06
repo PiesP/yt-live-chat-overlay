@@ -118,22 +118,25 @@ export class HighFirstPriorityBucketQueue<T = ChatMessage> {
    * Drop the lowest-priority message from the queue.
    * Used when queue is at capacity and a higher-priority message
    * needs to displace the least important entry.
+   * Returns the actual FIFO entry removed from the lowest-priority bucket.
    */
-  dropLowest(): void {
+  dropLowest(): T | undefined {
     for (let i = this.priorityLevels.length - 1; i >= 0; i--) {
       const prio = this.priorityLevels[i];
       if (prio === undefined) continue;
       const entry = this.buckets.get(prio);
       if (!entry) continue;
       if (entry.offset < entry.msgs.length) {
+        const dropped = entry.msgs[entry.offset];
         // Remove the oldest unconsumed message at this priority level (FIFO)
         // by advancing the read offset instead of shifting the array,
         // matching dequeue() semantics and avoiding O(n) shift cost.
         entry.offset++;
         this._size--;
-        return;
+        return dropped;
       }
     }
+    return undefined;
   }
 
   /**

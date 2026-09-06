@@ -116,7 +116,7 @@ describe('enqueueWithOverflow', () => {
       const result = enqueueWithOverflow(queue, msg, 100, onDrop, 10);
 
       expect(result).toBe('replaced');
-      expect(onDrop).toHaveBeenCalledWith('queue_replaced');
+      expect(onDrop).toHaveBeenCalledWith('queue_replaced', expect.any(Object));
     });
 
     it('drops when new message has equal or lower priority', () => {
@@ -133,7 +133,7 @@ describe('enqueueWithOverflow', () => {
       const result = enqueueWithOverflow(queue, msg, 10, onDrop, 10);
 
       expect(result).toBe('dropped');
-      expect(onDrop).toHaveBeenCalledWith('queue_priority');
+      expect(onDrop).toHaveBeenCalledWith('queue_priority', msg);
     });
   });
 
