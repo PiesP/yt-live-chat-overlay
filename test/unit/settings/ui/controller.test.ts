@@ -6,6 +6,7 @@ import { SETTINGS_UI_DESIGN } from '@settings/ui/design-adapter';
 import { STYLE_ID } from '@settings/ui/form';
 import { SETTINGS_UI_STYLES } from '@settings/ui/styles';
 import type { OverlaySettings } from '@app-types';
+import { resolveActiveLanguage } from '@i18n/index';
 
 // Mock findPlayerContainerElement so it returns our player element
 vi.mock('@util/dom', async () => {
@@ -75,6 +76,7 @@ describe('SettingsUi', () => {
     vi.useRealTimers();
     vi.restoreAllMocks();
     document.body.innerHTML = '';
+    resolveActiveLanguage('en');
   });
 
   function makeController(overrides?: {
@@ -212,6 +214,31 @@ describe('SettingsUi', () => {
     const buttons = document.querySelectorAll('#yt-chat-overlay-settings-button');
     expect(buttons.length).toBe(1);
 
+    c.destroy();
+  });
+
+  it('localizes the reset confirmation as one coherent Korean dialog', async () => {
+    resolveActiveLanguage('ko');
+    const playerEl = document.createElement('div');
+    playerEl.id = 'movie_player';
+    document.body.appendChild(playerEl);
+    vi.mocked(mockFinder).mockResolvedValue(playerEl);
+
+    const c = makeController();
+    await c.attach();
+    document
+      .querySelector<HTMLButtonElement>(
+        '#yt-chat-overlay-settings-backdrop button[data-action="reset"]'
+      )
+      ?.click();
+
+    const confirmation = document.querySelector('dialog.yt-chat-overlay-settings-confirm');
+    expect(confirmation?.querySelector('#yt-chat-overlay-confirm-msg')?.textContent).toBe(
+      '모든 설정을 기본값으로 초기화할까요?'
+    );
+    expect(
+      Array.from(confirmation?.querySelectorAll('button') ?? [], (button) => button.textContent)
+    ).toEqual(['취소', '초기화']);
     c.destroy();
   });
 

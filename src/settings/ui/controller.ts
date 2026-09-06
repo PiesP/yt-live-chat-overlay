@@ -603,7 +603,7 @@ export class SettingsUi {
     if (!this.modal) return;
 
     const dialog = this.createConfirmDialog({
-      message: 'Reset all settings to defaults?',
+      message: 'reset.confirm',
       confirmLabel: 'Reset',
       onConfirm: () => {
         this.resetSettings();
