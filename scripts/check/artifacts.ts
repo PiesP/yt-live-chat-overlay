@@ -101,10 +101,8 @@ function checkFirefoxContract(): void {
 
 if (process.argv.includes('--e2e')) {
   assertExists(root, 'dist/yt-live-chat-overlay.dev.user.js');
-  checkExtension('dist-extension');
-} else {
-  checkExtension('dist-extension');
-  checkExtension('dist-extension-firefox');
-  checkFirefoxContract();
 }
+checkExtension('dist-extension');
+checkExtension('dist-extension-firefox');
+checkFirefoxContract();
 console.log('Build artifact references are valid.');
