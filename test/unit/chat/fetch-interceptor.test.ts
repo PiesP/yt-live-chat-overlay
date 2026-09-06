@@ -90,25 +90,57 @@ describe('fetch interceptor response identities', () => {
     restore();
   });
 
-  it('ignores an oversized cloned response without affecting the original fetch', async () => {
-    const cancel = vi.fn();
-    const clone = {
-      body: new ReadableStream<Uint8Array>({ cancel }),
-      headers: new Headers({
-        'content-length': String(MAX_CHAT_RESPONSE_BYTES + 1),
+  it('releases clone-read slots after real over-limit branches while originals stay open', async () => {
+    const declaredOverLimit = new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array([1]));
+        },
       }),
-      text: vi.fn(),
-    } as unknown as Response;
-    const originalResponse = { clone: () => clone } as unknown as Response;
-    window.fetch = vi.fn(async () => originalResponse);
+      {
+        headers: {
+          'content-length': String(MAX_CHAT_RESPONSE_BYTES + 1),
+        },
+      }
+    );
+    const streamedOverLimit = new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array(MAX_CHAT_RESPONSE_BYTES));
+          controller.enqueue(new Uint8Array([1]));
+        },
+      })
+    );
+    const normalResponse = new Response(JSON.stringify({ continuationContents: {} }));
+    const responses = [declaredOverLimit, streamedOverLimit, normalResponse];
+    let responseIndex = 0;
+    window.fetch = vi.fn(async () => {
+      const response = responses[responseIndex++];
+      if (!response) throw new Error('Unexpected fetch');
+      return response;
+    });
     const onMessages = vi.fn();
     const restore = installFetchInterceptor(() => settings, onMessages);
 
-    await expect(window.fetch(CHAT_URL)).resolves.toBe(originalResponse);
-    await vi.waitFor(() => expect(cancel).toHaveBeenCalledOnce());
-    expect(mocks.getLiveChatPayload).not.toHaveBeenCalled();
-    expect(onMessages).not.toHaveBeenCalled();
-    restore();
+    try {
+      await expect(window.fetch(CHAT_URL)).resolves.toBe(declaredOverLimit);
+      await expect(window.fetch(CHAT_URL)).resolves.toBe(streamedOverLimit);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+      await expect(window.fetch(CHAT_URL)).resolves.toBe(normalResponse);
+      await vi.waitFor(() => expect(onMessages).toHaveBeenCalledOnce());
+
+      expect(declaredOverLimit.bodyUsed).toBe(false);
+      expect(streamedOverLimit.bodyUsed).toBe(false);
+      expect(mocks.getLiveChatPayload).toHaveBeenCalledOnce();
+    } finally {
+      restore();
+      await Promise.all([
+        declaredOverLimit.body?.cancel(),
+        streamedOverLimit.body?.cancel(),
+        normalResponse.body?.cancel(),
+      ]);
+    }
   });
 
   it('bounds concurrent clone reads and skips excess matching responses', async () => {
