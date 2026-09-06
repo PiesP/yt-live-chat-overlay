@@ -31,6 +31,12 @@ function createMinimalDeps() {
     } as any,
     observability: {
       onMessageDropped: vi.fn(),
+      onMessagesDropped: vi.fn(),
+      onMessagesRendered: vi.fn(),
+      updateActiveMessages: vi.fn(),
+      updateQueueDepth: vi.fn(),
+      updateLaneUtilization: vi.fn(),
+      tick: vi.fn(),
     } as any,
     imageFetchManager: {
       workerBitmapCache: {

@@ -60,6 +60,12 @@ describe('RenderWorkerManager isAlive after destroy', () => {
       } as unknown as ImageFetchManager,
       observability: {
         onMessageDropped: vi.fn(),
+        onMessagesDropped: vi.fn(),
+        onMessagesRendered: vi.fn(),
+        updateActiveMessages: vi.fn(),
+        updateQueueDepth: vi.fn(),
+        updateLaneUtilization: vi.fn(),
+        tick: vi.fn(),
         recordDrainQueue: vi.fn(),
       } as never,
     });

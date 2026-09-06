@@ -50,6 +50,21 @@ describe("ObservabilityReporter", () => {
     expect(metrics.dropRate).toBe(0.5);
   });
 
+  it("adds batched Worker render and drop totals without per-message loops", () => {
+    reporter.onMessageReceived();
+    reporter.onMessageReceived();
+    reporter.onMessageReceived();
+    reporter.onMessageReceived();
+
+    reporter.onMessagesRendered(3);
+    reporter.onMessagesDropped(2, "worker_backpressure");
+
+    const metrics = reporter.getMetrics();
+    expect(metrics.totalRendered).toBe(3);
+    expect(metrics.totalDropped).toBe(2);
+    expect(metrics.dropRate).toBe(0.5);
+  });
+
   it("computes zero drop rate when no messages received", () => {
     reporter.onMessageDropped("queue_priority");
     const metrics = reporter.getMetrics();
@@ -117,6 +132,17 @@ describe("ObservabilityReporter", () => {
     const el = document.getElementById("yt-chat-overlay-debug");
     expect(el?.textContent).toContain("Rcvd:");
     expect(el?.textContent).toContain("1");
+    reporter.destroy();
+  });
+
+  it("labels frame timings unavailable when rendering is Worker-owned", () => {
+    reporter.setShowDebug(true);
+    reporter.setFrameTimingAvailable(false);
+    reporter.tick();
+
+    const el = document.getElementById("yt-chat-overlay-debug");
+    expect(el?.textContent).toContain("Render: n/a | Drain: n/a");
+    expect(el?.textContent).toContain("Coll: n/a | Text: n/a");
     reporter.destroy();
   });
 
