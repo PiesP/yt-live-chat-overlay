@@ -1,0 +1,8 @@
+{
+  "id": "yt-visual",
+  "assets": [
+    "dist/yt-live-chat-overlay.user.js",
+    "test/visual/preview.html",
+    "test/visual/gm-mocks.js"
+  ]
+}

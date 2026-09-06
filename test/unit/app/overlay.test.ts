@@ -81,6 +81,27 @@ describe('Overlay', () => {
     expect(cb).toHaveBeenCalledTimes(2);
   });
 
+  it('shows the translated pause label when the user pauses the overlay', async () => {
+    const player = document.createElement('div');
+    player.id = 'movie_player';
+    Object.defineProperties(player, {
+      offsetWidth: { configurable: true, value: 1280 },
+      offsetHeight: { configurable: true, value: 720 },
+    });
+    player.getBoundingClientRect = () =>
+      ({ width: 1280, height: 720, top: 0, left: 0, right: 1280, bottom: 720 }) as DOMRect;
+    document.body.appendChild(player);
+
+    const overlay = new Overlay();
+    await expect(overlay.create(makeSettings())).resolves.toBe(true);
+
+    overlay.toggleUserPause();
+
+    expect(overlay.getContainer()?.textContent).toContain('Paused');
+    expect(overlay.getContainer()?.textContent).not.toContain('app.paused');
+    overlay.destroy();
+  });
+
   it('onDimensionsChanged returns unsubscribe function that works', () => {
     const overlay = new Overlay();
     const cb = vi.fn();
