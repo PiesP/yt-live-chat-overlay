@@ -11,6 +11,12 @@
 
 import type { FontWeight } from '@app-types';
 import { EMOJI_ALIAS_PATTERN } from '@chat/message-helpers';
+import {
+  resolveTextDirection,
+  resolveVisualInlineLines,
+  resolveVisualInlinePieces,
+  type TextDirection,
+} from '@renderer/canvas/bidi-layout';
 import { computeOutlineColor } from '@renderer/color-utils';
 import { OUTLINE_STROKE_SCALE } from '@renderer/constants';
 import {
@@ -19,6 +25,7 @@ import {
   getRegularCardInsets,
 } from '@renderer/layout/card-layout';
 import { getFontString, measureTextHeight, measureTextWidth } from '@renderer/text-measure';
+import { splitGraphemeClusters as splitGraphemeClustersInternal } from '@renderer/text-segmentation';
 import type { ResizableByteLimitedCache } from '@util/byte-limited-cache';
 import { AUTHOR_PHOTO_SHADOW, rendererLayout, spacing } from '@util/design-tokens';
 
@@ -152,6 +159,7 @@ interface SharedTextPiece {
   type: 'text';
   text: string;
   width: number;
+  spaceBefore: boolean;
 }
 
 interface SharedEmojiPiece {
@@ -160,6 +168,7 @@ interface SharedEmojiPiece {
   emojiAlt?: string;
   emojiFallbackText?: string;
   width: number;
+  spaceBefore: boolean;
 }
 
 export type SharedRenderPiece = SharedTextPiece | SharedEmojiPiece;
@@ -189,20 +198,6 @@ export function getDisplayText(segments: readonly TextSegmentLike[]): string {
 
 // ── Character-level wrapping for oversize words (CJK, URLs, etc.) ──────────
 
-/** Lazy-initialized Intl.Segmenter for grapheme-cluster splitting. */
-let _graphemeSegmenter: Intl.Segmenter | undefined;
-
-function getGraphemeSegmenter(): Intl.Segmenter | undefined {
-  if (_graphemeSegmenter === undefined) {
-    try {
-      _graphemeSegmenter = new Intl.Segmenter('en', { granularity: 'grapheme' });
-    } catch {
-      _graphemeSegmenter = undefined; // runtime without Intl.Segmenter
-    }
-  }
-  return _graphemeSegmenter;
-}
-
 /**
  * Split a string into grapheme clusters for safe per-character processing.
  *
@@ -211,11 +206,7 @@ function getGraphemeSegmenter(): Intl.Segmenter | undefined {
  * iteration) on runtimes without Intl.Segmenter support.
  */
 export function splitGraphemeClusters(text: string): string[] {
-  const seg = getGraphemeSegmenter();
-  if (seg) {
-    return Array.from(seg.segment(text), (s) => s.segment);
-  }
-  return Array.from(text); // code-point fallback
+  return splitGraphemeClustersInternal(text);
 }
 
 /**
@@ -243,58 +234,18 @@ export function measureTextAdvanceWidth(
 export function measureEmojiAdvanceWidth(
   segment: SharedContentSegment,
   emojiSize: number,
-  measureTextFn: (value: string) => number,
+  measureTextFn: (value: string, direction?: TextDirection) => number,
   letterSpacing = '0px'
 ): number {
   const fallbackText = getRenderableEmojiFallbackText(segment);
   const fallbackWidth = fallbackText
-    ? measureTextAdvanceWidth(fallbackText, measureTextFn, letterSpacing)
+    ? measureTextAdvanceWidth(
+        fallbackText,
+        (value) => measureTextFn(value, resolveTextDirection(fallbackText)),
+        letterSpacing
+      )
     : 0;
   return Math.max(emojiSize, fallbackWidth) + spacing.xs;
-}
-
-/**
- * Reverse the visual order of RTL text (Arabic, Hebrew, etc.) so that
- * Canvas2D fillText() — which always renders left-to-right — produces
- * the correct visual reading order.
- *
- * Canvas2D does not support bidirectional text: Arabic rendered via
- * fillText() appears LTR with isolated glyph forms.  By reversing the
- * character sequence we at least restore correct reading order.
- *
- * ## Known Limitations
- *
- * - **Contextual Arabic shaping** (cursive letter connections) is NOT
- *   supported — this requires a dedicated shaping engine (e.g. HarfBuzz).
- *   Ligatures, diacritic placement, and complex script features are
- *   approximated at best.
- * - **Why not use a shaping engine?** HarfBuzz WASM adds ~2MB to the
- *   bundle, and Canvas2D's fillText() cannot render shaped glyph sequences
- *   anyway (it renders individual code points in order).
- * - **Recommended path for accurate RTL text:** the DOM-based accessibility
- *   pipeline (aria-live region in overlay.ts) leverages the browser's native
- *   bidirectional text rendering. Users needing full Arabic/Hebrew text
- *   fidelity should use screen readers or the planned read panel.
- */
-function reverseRtlText(text: string): string {
-  // Quick scan: is the first strong character RTL?
-  let hasRtl = false;
-  for (const ch of text) {
-    const cp = ch.codePointAt(0);
-    if (cp === undefined) continue;
-    // Hebrew block + Arabic blocks + Syriac + Thaana + NKo
-    if ((cp >= 0x0590 && cp <= 0x08ff) || (cp >= 0xfb1d && cp <= 0xfefc)) {
-      hasRtl = true;
-      break;
-    }
-    // Skip neutrals (spaces, punctuation, marks) — keep scanning
-    // for the first character with strong direction.
-    if (/\S/u.test(ch)) break; // first non-space is LTR → bail
-  }
-  if (!hasRtl) return text;
-
-  // Reverse grapheme clusters so the rightmost glyph appears first on screen.
-  return splitGraphemeClusters(text).reverse().join('');
 }
 
 /**
@@ -396,11 +347,18 @@ export function buildWrappedLines(
 ): { lines: SharedRenderPiece[][]; maxLineWidth: number } {
   // ── Step 1: Flatten segments into word/emoji pieces
   const pieces: SharedRenderPiece[] = [];
+  let previousPieceIsText = false;
   for (const seg of segments) {
     if (seg.type === 'text') {
       const words = (seg.content ?? '').split(/\s+/).filter((w) => w.length > 0);
       for (const word of words) {
-        pieces.push({ type: 'text', text: word, width: measureTextFn(word) });
+        pieces.push({
+          type: 'text',
+          text: word,
+          width: measureTextFn(word),
+          spaceBefore: previousPieceIsText,
+        });
+        previousPieceIsText = true;
       }
     } else {
       const url = seg.emojiUrl ?? seg.emoji?.url ?? '';
@@ -413,7 +371,9 @@ export function buildWrappedLines(
           ...(alt ? { emojiAlt: alt } : {}),
           ...(fallbackText ? { emojiFallbackText: fallbackText } : {}),
           width: measureEmojiAdvanceWidth(seg, emojiSize, measureTextFn),
+          spaceBefore: previousPieceIsText,
         });
+        previousPieceIsText = false;
       }
     }
   }
@@ -424,12 +384,11 @@ export function buildWrappedLines(
   // ── Step 2: Greedy line-filling
   let currentLine: SharedRenderPiece[] = [];
   let currentWidth = 0;
-  let prevIsText = false;
   const spaceWidth = measureTextFn(' ');
   let maxLineWidth = 0;
 
   for (const piece of pieces) {
-    const gap = prevIsText ? spaceWidth : 0;
+    const gap = piece.spaceBefore && currentLine.length > 0 ? spaceWidth : 0;
     const needed = gap + piece.width;
 
     // ── Oversize single word — character-level wrap (CJK, URLs, etc.)
@@ -442,18 +401,30 @@ export function buildWrappedLines(
       if (charSegs.length <= 1) {
         currentLine = [piece];
         currentWidth = piece.width;
-        prevIsText = true;
         continue;
       }
       for (let i = 0; i < charSegs.length - 1; i++) {
         const cs = charSegs[i] as CharSegment;
-        lines.push([{ type: 'text', text: cs.text, width: cs.width }]);
+        lines.push([
+          {
+            type: 'text',
+            text: cs.text,
+            width: cs.width,
+            spaceBefore: i === 0 ? piece.spaceBefore : false,
+          },
+        ]);
         maxLineWidth = Math.max(maxLineWidth, cs.width);
       }
       const lastSeg = charSegs[charSegs.length - 1] as CharSegment;
-      currentLine = [{ type: 'text', text: lastSeg.text, width: lastSeg.width }];
+      currentLine = [
+        {
+          type: 'text',
+          text: lastSeg.text,
+          width: lastSeg.width,
+          spaceBefore: false,
+        },
+      ];
       currentWidth = lastSeg.width;
-      prevIsText = true;
       continue;
     }
 
@@ -463,14 +434,12 @@ export function buildWrappedLines(
       lines.push(currentLine);
       currentLine = [piece];
       currentWidth = piece.width;
-      prevIsText = piece.type === 'text';
       continue;
     }
 
     if (gap > 0) currentWidth += gap;
     currentLine.push(piece);
     currentWidth += piece.width;
-    prevIsText = piece.type === 'text';
   }
 
   if (currentLine.length > 0) {
@@ -484,11 +453,9 @@ export function buildWrappedLines(
 /** Measure a wrapped line with the same inter-piece spacing used by the renderer. */
 function measureWrappedLineWidth(line: readonly SharedRenderPiece[], spaceWidth: number): number {
   let width = 0;
-  let prevIsText = false;
-  for (const piece of line) {
-    if (prevIsText) width += spaceWidth;
+  for (const [index, piece] of line.entries()) {
+    if (index > 0 && piece.spaceBefore) width += spaceWidth;
     width += piece.width;
-    prevIsText = piece.type === 'text';
   }
   return width;
 }
@@ -517,7 +484,7 @@ function fitWrappedLineToWidth(
 
     const prefix = fitted.slice(0, lastIndex);
     const prefixWidth = measureWrappedLineWidth(prefix, spaceWidth);
-    const gap = prefix.at(-1)?.type === 'text' ? spaceWidth : 0;
+    const gap = prefix.length > 0 && lastPiece.spaceBefore ? spaceWidth : 0;
     const remainingWidth = availableWidth - prefixWidth - gap;
 
     if (lastPiece.type === 'text' && remainingWidth > 0) {
@@ -544,6 +511,7 @@ function fitWrappedLineToWidth(
           type: 'text',
           text,
           width: fittedWidth || measureTextFn(text),
+          spaceBefore: lastPiece.spaceBefore,
         };
         return fitted;
       }
@@ -682,12 +650,15 @@ function cacheTextBitmap(
   strokeColor: string,
   ctx: AnyCanvasContext,
   textBitmapCache: TextBitmapCache,
-  letterSpacing = '0px'
+  letterSpacing: string,
+  direction: TextDirection
 ): void {
   if (!ctx) return;
 
   ctx.save();
   ctx.font = font;
+  ctx.direction = direction;
+  ctx.textAlign = 'left';
   // Canvas resize/reset leaves the source context on the default alphabetic
   // baseline. Measure with the same baseline used by the cached bitmap so
   // Latin glyphs with little or no descent still receive their full height.
@@ -734,6 +705,8 @@ function cacheTextBitmap(
   offCtx.scale(dpr, dpr);
   offCtx.font = font;
   offCtx.textBaseline = 'top';
+  offCtx.direction = direction;
+  offCtx.textAlign = 'left';
   offCtx.letterSpacing = letterSpacing;
   offCtx.textRendering = 'optimizeLegibility';
   offCtx.fontKerning = 'auto'; // enable kerning for cached bitmap quality
@@ -803,12 +776,9 @@ export function renderSegment(
   outlineOpacity: number,
   textBitmapCache: TextBitmapCache,
   getFontFn: (fontSize: number) => string,
-  letterSpacing = '0px'
+  letterSpacing = '0px',
+  direction: TextDirection = resolveTextDirection(text)
 ): void {
-  // Reverse RTL text so Canvas2D fillText (always LTR) produces correct
-  // visual reading order for Arabic, Hebrew, etc.
-  const displayText = reverseRtlText(text);
-
   const font = getFontFn(fontSize);
   const strokeWidth = Math.max(0.5, outlineWidthPx * OUTLINE_STROKE_SCALE);
   const strokeColor = computeOutlineColor(color, Math.min(1, outlineOpacity));
@@ -819,8 +789,8 @@ export function renderSegment(
   const outlineClass = strokeColor.startsWith('rgba(0, 0, 0') ? 'dark' : 'light';
 
   // Try bitmap cache first (includes outline rendering)
-  if (outlineWidthPx > 0 && outlineOpacity > 0 && displayText.length >= 3) {
-    const key = `${font}|${displayText}|${color}|${Math.round(strokeWidth)}|${outlineClass}|${letterSpacing}`;
+  if (outlineWidthPx > 0 && outlineOpacity > 0 && text.length >= 3) {
+    const key = `${font}|${direction}|${text}|${color}|${Math.round(strokeWidth)}|${outlineClass}|${letterSpacing}`;
     const bitmap = textBitmapCache.get(key);
     if (bitmap) {
       drawBitmapAtCssSize(ctx, bitmap, x, y);
@@ -830,7 +800,7 @@ export function renderSegment(
     // Cache miss — render to offscreen canvas and cache
     cacheTextBitmap(
       key,
-      displayText,
+      text,
       font,
       fontSize,
       color,
@@ -838,7 +808,8 @@ export function renderSegment(
       strokeColor,
       ctx,
       textBitmapCache,
-      letterSpacing
+      letterSpacing,
+      direction
     );
 
     // Immediately use the freshly cached bitmap to avoid fallthrough overhead
@@ -853,12 +824,14 @@ export function renderSegment(
   ctx.save();
   ctx.font = font;
   ctx.textBaseline = 'top';
+  ctx.direction = direction;
+  ctx.textAlign = 'left';
   ctx.textRendering = 'optimizeSpeed';
   ctx.fontKerning = 'none'; // disable kerning for speed
   ctx.letterSpacing = letterSpacing;
-  strokeTextOutline(ctx, displayText, x, y, color, outlineWidthPx, outlineOpacity);
+  strokeTextOutline(ctx, text, x, y, color, outlineWidthPx, outlineOpacity);
   ctx.fillStyle = color;
-  ctx.fillText(displayText, x, y);
+  ctx.fillText(text, x, y);
   ctx.restore();
 }
 
@@ -898,17 +871,16 @@ export function warmTextBitmapCache(
   const strokeColor = computeOutlineColor(color, Math.min(1, outlineOpacity));
   const keyLetterSpacing = letterSpacing ?? '0px';
 
-  const warmSingle = (text: string, ls: string): void => {
-    const displayText = reverseRtlText(text);
-    if (displayText.length < 3) return; // min length for bitmap caching
+  const warmSingle = (text: string, ls: string, direction = resolveTextDirection(text)): void => {
+    if (text.length < 3) return; // min length for bitmap caching
     const font = getFontString(fontSize, fontWeight as FontWeight, fontFamily);
     const outlineClass = strokeColor.startsWith('rgba(0, 0, 0') ? 'dark' : 'light';
-    const key = `${font}|${displayText}|${color}|${Math.round(strokeWidth)}|${outlineClass}|${ls}`;
+    const key = `${font}|${direction}|${text}|${color}|${Math.round(strokeWidth)}|${outlineClass}|${ls}`;
     if (textBitmapCache.get(key)) return; // already cached
 
     cacheTextBitmap(
       key,
-      displayText,
+      text,
       font,
       fontSize,
       color,
@@ -916,17 +888,24 @@ export function warmTextBitmapCache(
       strokeColor,
       ctx,
       textBitmapCache,
-      ls
+      ls,
+      direction
     );
   };
 
   if (typeof segments === 'string') {
     warmSingle(segments, keyLetterSpacing);
   } else {
-    for (const seg of segments) {
-      if (seg.type === 'text' && seg.content) {
-        warmSingle(seg.content, keyLetterSpacing);
-      }
+    const visualPieces = resolveVisualInlinePieces(
+      segments.map((segment) =>
+        segment.type === 'text'
+          ? { type: 'text' as const, text: segment.content ?? '' }
+          : { type: 'object' as const, value: segment, width: 0 }
+      ),
+      () => 0
+    );
+    for (const piece of visualPieces) {
+      if (piece.type === 'text') warmSingle(piece.text, keyLetterSpacing, piece.direction);
     }
   }
 }
@@ -961,7 +940,7 @@ function renderContentSegments(
   outlineOpacity: number,
   textBitmapCache: TextBitmapCache,
   getFontFn: (fontSize: number) => string,
-  measureTextFn: (text: string) => number,
+  measureTextFn: (text: string, direction?: TextDirection) => number,
   emojiCache: ImageCacheLike,
   isValidEmoji: (image: unknown) => boolean,
   letterSpacing = '0px'
@@ -969,14 +948,29 @@ function renderContentSegments(
   let cursorX = startX;
   const emojiSize = Math.round(fontSize * rendererLayout.emojiSize);
   const font = getFontFn(fontSize);
+  ctx.save();
+  ctx.font = font;
   const textHeight = measureTextHeight(font, fontSize);
   const emojiY = y + Math.round((textHeight - emojiSize) / 2);
+  const visualPieces = resolveVisualInlinePieces(
+    segments.map((segment) =>
+      segment.type === 'text'
+        ? { type: 'text' as const, text: segment.content ?? '' }
+        : {
+            type: 'object' as const,
+            value: segment,
+            width: measureEmojiAdvanceWidth(segment, emojiSize, measureTextFn, letterSpacing),
+          }
+    ),
+    (text, direction) =>
+      measureTextAdvanceWidth(text, (value) => measureTextFn(value, direction), letterSpacing)
+  );
 
-  for (const seg of segments) {
-    if (seg.type === 'text' && seg.content) {
+  for (const piece of visualPieces) {
+    if (piece.type === 'text') {
       renderSegment(
         ctx,
-        seg.content,
+        piece.text,
         cursorX,
         y,
         color,
@@ -985,10 +979,12 @@ function renderContentSegments(
         outlineOpacity,
         textBitmapCache,
         getFontFn,
-        letterSpacing
+        letterSpacing,
+        piece.direction
       );
-      cursorX += measureTextAdvanceWidth(seg.content, measureTextFn, letterSpacing);
+      cursorX += piece.width;
     } else {
+      const seg = piece.value;
       const { emojiUrl } = resolveEmojiFields(seg);
       const fallbackText = getRenderableEmojiFallbackText(seg);
       const img = emojiUrl ? emojiCache.get(emojiUrl) : null;
@@ -1009,11 +1005,12 @@ function renderContentSegments(
           getFontFn,
           letterSpacing
         );
-        advanceWidth = measureEmojiAdvanceWidth(seg, emojiSize, measureTextFn, letterSpacing);
+        advanceWidth = piece.width;
       }
       cursorX += advanceWidth;
     }
   }
+  ctx.restore();
 }
 
 // ── Author rendering ────────────────────────────────────────────────────────
@@ -1389,50 +1386,80 @@ export function renderWrappedContentSegments<
   outlineOpacity: number,
   textBitmapCache: TTextBitmapCache,
   emojiCache: TEmojiCache,
-  getFontFn: (fontSize: number) => string
+  getFontFn: (fontSize: number) => string,
+  measureTextFn?: (text: string, direction?: TextDirection) => number
 ): number {
   if (segments.length === 0) return y;
 
   const font = getFontFn(fontSize);
+  ctx.save();
+  ctx.font = font;
+  const measureWrappedText =
+    measureTextFn ??
+    ((text: string, direction: TextDirection = 'ltr') => measureTextWidth(text, font, direction));
   const emojiSize = Math.round(fontSize * rendererLayout.emojiSize);
   const lineHeight = Math.ceil(measureTextHeight(font, fontSize));
-  const spaceWidth = measureTextWidth(' ', font);
+  const spaceWidth = measureWrappedText(' ', 'ltr');
   const ellipsis = '\u2026';
-  const ellipsisWidth = measureTextWidth(ellipsis, font);
+  const ellipsisWidth = measureWrappedText(ellipsis, 'ltr');
 
   const { lines } = buildWrappedLines(segments, maxWidth, emojiSize, (t: string) =>
-    measureTextWidth(t, font)
+    measureWrappedText(t, resolveTextDirection(t))
   );
 
-  // ── Render lines (up to maxLines) ────────────────────────────────────
-  const renderLines = lines.length > maxLines ? lines.slice(0, maxLines) : lines;
-  const isTruncated = lines.length > maxLines;
-  let cursorY = y;
-
-  for (let li = 0; li < renderLines.length; li++) {
-    const line = renderLines[li];
-    if (!line) continue;
-    const isLastLine = li === renderLines.length - 1;
-    const needsEllipsis = isLastLine && isTruncated;
+  // ── Resolve the whole paragraph, then render up to maxLines ──────────
+  const visibleLineCount = Math.min(lines.length, Math.max(0, maxLines));
+  if (visibleLineCount === 0) {
+    ctx.restore();
+    return y;
+  }
+  const isTruncated = lines.length > visibleLineCount;
+  const logicalLines = lines.map((sourceLine, lineIndex) => {
+    const isLastVisibleLine = lineIndex === visibleLineCount - 1;
+    const needsEllipsis = isLastVisibleLine && isTruncated;
     const canRenderEllipsis = needsEllipsis && ellipsisWidth <= maxWidth;
-    const renderLine = needsEllipsis
+    const line = needsEllipsis
       ? fitWrappedLineToWidth(
-          line,
+          sourceLine,
           Math.max(0, maxWidth - (canRenderEllipsis ? ellipsisWidth : 0)),
           spaceWidth,
-          (text: string) => measureTextWidth(text, font)
+          (text: string) => measureWrappedText(text, resolveTextDirection(text))
         )
-      : line;
+      : sourceLine;
+    const pieces: Array<
+      { type: 'text'; text: string } | { type: 'object'; value: SharedEmojiPiece; width: number }
+    > = [];
+    for (const [pieceIndex, piece] of line.entries()) {
+      const prefix = pieceIndex > 0 && piece.spaceBefore ? ' ' : '';
+      if (piece.type === 'text') pieces.push({ type: 'text', text: prefix + piece.text });
+      else {
+        if (prefix) {
+          const previousPiece = pieces.at(-1);
+          if (previousPiece?.type === 'text') previousPiece.text += prefix;
+        }
+        pieces.push({ type: 'object', value: piece, width: piece.width });
+      }
+    }
+    if (canRenderEllipsis) pieces.push({ type: 'text', text: ellipsis });
+    return {
+      pieces,
+      ...(lineIndex > 0 && sourceLine[0]?.spaceBefore ? { separatorBefore: ' ' } : {}),
+    };
+  });
+  const visualLines = resolveVisualInlineLines(
+    logicalLines,
+    (text, direction) => measureWrappedText(text, direction),
+    visibleLineCount
+  );
+  let cursorY = y;
+
+  for (let li = 0; li < visibleLineCount; li++) {
+    const visualPieces = visualLines[li];
+    if (!visualPieces) continue;
     let cursorX = x;
-    let prevText = false;
     const emojiLineY = cursorY + Math.round((lineHeight - emojiSize) / 2);
 
-    for (const piece of renderLine) {
-      if (prevText) {
-        cursorX += spaceWidth;
-      }
-      prevText = piece.type === 'text';
-
+    for (const piece of visualPieces) {
       if (piece.type === 'text') {
         renderSegment(
           ctx,
@@ -1444,13 +1471,16 @@ export function renderWrappedContentSegments<
           outlineWidthPx,
           outlineOpacity,
           textBitmapCache,
-          getFontFn
+          getFontFn,
+          '0px',
+          piece.direction
         );
         cursorX += piece.width;
       } else {
         // Emoji — same rendering logic as renderContentSegments.
         // Dual type check: HTMLImageElement has naturalWidth, ImageBitmap has width.
-        const cached = piece.emojiUrl ? emojiCache.get(piece.emojiUrl) : undefined;
+        const emojiPiece = piece.value;
+        const cached = emojiPiece.emojiUrl ? emojiCache.get(emojiPiece.emojiUrl) : undefined;
         const img =
           cached != null &&
           (('naturalWidth' in cached && cached.naturalWidth > 0) ||
@@ -1460,10 +1490,10 @@ export function renderWrappedContentSegments<
         let advanceWidth = emojiSize + spacing.xs;
         if (img) {
           ctx.drawImage(img, cursorX, emojiLineY, emojiSize, emojiSize);
-        } else if (piece.emojiFallbackText) {
+        } else if (emojiPiece.emojiFallbackText) {
           renderSegment(
             ctx,
-            piece.emojiFallbackText,
+            emojiPiece.emojiFallbackText,
             cursorX,
             cursorY,
             color,
@@ -1474,10 +1504,10 @@ export function renderWrappedContentSegments<
             getFontFn
           );
           advanceWidth = piece.width;
-        } else if (piece.emojiAlt && !EMOJI_ALIAS_PATTERN.test(piece.emojiAlt)) {
+        } else if (emojiPiece.emojiAlt && !EMOJI_ALIAS_PATTERN.test(emojiPiece.emojiAlt)) {
           renderSegment(
             ctx,
-            piece.emojiAlt,
+            emojiPiece.emojiAlt,
             cursorX,
             cursorY,
             color,
@@ -1493,24 +1523,9 @@ export function renderWrappedContentSegments<
       }
     }
 
-    // Append ellipsis if this line was truncated
-    if (canRenderEllipsis) {
-      renderSegment(
-        ctx,
-        ellipsis,
-        cursorX,
-        cursorY,
-        color,
-        fontSize,
-        outlineWidthPx,
-        outlineOpacity,
-        textBitmapCache,
-        getFontFn
-      );
-    }
-
     cursorY += lineHeight;
   }
 
+  ctx.restore();
   return cursorY;
 }

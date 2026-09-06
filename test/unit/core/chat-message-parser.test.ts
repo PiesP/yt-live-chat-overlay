@@ -11,6 +11,10 @@ import {
 } from '@chat/message-parser';
 import type { ParsedMessageBody } from '@chat/message-parser';
 import type { ContentSegment, OverlaySettings } from '@app-types';
+import {
+  MAX_RENDER_CONTENT_SEGMENTS,
+  MAX_RENDER_FIELD_CODE_POINTS,
+} from '@chat/render-resource-limits';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -542,7 +546,7 @@ describe('extractChatEvents message-boundary normalization', () => {
         id: 'paid-long',
         authorName: { simpleText: 'Supporter' },
         purchaseAmountText: { simpleText: '$5.00' },
-        message: { simpleText: 'p'.repeat(120) },
+        message: { simpleText: 'p'.repeat(400) },
       },
       kind: 'superchat',
     },
@@ -552,19 +556,91 @@ describe('extractChatEvents message-boundary normalization', () => {
       renderer: {
         id: 'member-long',
         authorName: { simpleText: 'Member' },
-        message: { simpleText: 'm'.repeat(120) },
+        message: { simpleText: 'm'.repeat(400) },
       },
       kind: 'membership',
     },
   ])('preserves the full normalized $label body for paid-card wrapping', ({ rendererKey, renderer, kind }) => {
     const message = parseRenderer(rendererKey, renderer);
-    const expected = kind === 'superchat' ? 'p'.repeat(120) : 'm'.repeat(120);
+    const expected = kind === 'superchat' ? 'p'.repeat(400) : 'm'.repeat(400);
 
     expect(message).toMatchObject({
       text: expected,
       content: [{ type: 'text', content: expected }],
       kind,
     });
+  });
+
+  it('accepts the exact astral input boundary and rejects one code point above it', () => {
+    let exactStats: import('@chat/message-parser').ChatEventExtractionStats | undefined;
+    const exact = extractChatEvents(
+      [
+        {
+          addChatItemAction: {
+            item: {
+              liveChatTextMessageRenderer: {
+                id: 'exact-astral',
+                message: { simpleText: '😀'.repeat(MAX_RENDER_FIELD_CODE_POINTS) },
+              },
+            },
+          },
+        },
+      ],
+      () => mkSettings({ allowShortTextMessages: true }),
+      (stats) => {
+        exactStats = stats;
+      }
+    );
+    expect(exact).toHaveLength(1);
+    expect(exactStats?.resourceDrops).toBe(0);
+
+    let overStats: import('@chat/message-parser').ChatEventExtractionStats | undefined;
+    const over = extractChatEvents(
+      [
+        {
+          addChatItemAction: {
+            item: {
+              liveChatTextMessageRenderer: {
+                id: 'over-astral',
+                message: { simpleText: '😀'.repeat(MAX_RENDER_FIELD_CODE_POINTS + 1) },
+              },
+            },
+          },
+        },
+      ],
+      () => mkSettings({ allowShortTextMessages: true }),
+      (stats) => {
+        overStats = stats;
+      }
+    );
+    expect(over).toEqual([]);
+    expect(overStats?.resourceDrops).toBe(1);
+  });
+
+  it('accepts 512 rich runs and rejects the next run before segment allocation', () => {
+    const makeAction = (runCount: number) => ({
+      addChatItemAction: {
+        item: {
+          liveChatTextMessageRenderer: {
+            id: `runs-${runCount}`,
+            message: { runs: Array.from({ length: runCount }, () => ({ text: 'a' })) },
+          },
+        },
+      },
+    });
+
+    expect(
+      extractChatEvents(
+        [makeAction(MAX_RENDER_CONTENT_SEGMENTS)],
+        () => mkSettings({ allowShortTextMessages: true })
+      )
+    ).toHaveLength(1);
+    expect(
+      extractChatEvents(
+        [makeAction(MAX_RENDER_CONTENT_SEGMENTS + 1)],
+        () => mkSettings({ allowShortTextMessages: true })
+      )
+    ).toEqual([]);
   });
 });
 

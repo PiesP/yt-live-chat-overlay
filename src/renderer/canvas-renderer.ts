@@ -31,9 +31,11 @@ import type {
   OverlaySettings,
 } from '@app-types';
 import { getTranslatableText } from '@chat/message-helpers';
+import { getRenderMessageResourceViolation } from '@chat/render-resource-limits';
 import { t } from '@i18n/index';
 import { ImageFetchManager } from '@media/image-fetch-manager';
 import { yieldIfOverBudgetAsync } from '@piesp/browser-core/util';
+import { resetBidiLayoutCaches } from '@renderer/canvas/bidi-layout';
 import {
   applyDevicePixelRatio,
   disconnectObserver,
@@ -277,8 +279,10 @@ export class CanvasRenderer extends RendererBase {
   /** Pre-bound getFont to avoid per-call arrow function allocation. */
   private readonly boundGetFont = (fs: number): string => this.getFont(fs);
   /** Pre-bound measureTextWidth to avoid per-call arrow function allocation. */
-  private readonly boundMeasureTextWidth = (text: string): number =>
-    measureTextWidth(text, this.boundGetFont(this.settings.fontSize));
+  private readonly boundMeasureTextWidth = (
+    text: string,
+    direction: CanvasDirection = 'ltr'
+  ): number => measureTextWidth(text, this.boundGetFont(this.settings.fontSize), direction);
   private readonly regularRenderConfig = {
     showAuthor: true,
     fontSize: 1,
@@ -683,6 +687,14 @@ export class CanvasRenderer extends RendererBase {
   // ── Message ingress ──────────────────────────────────────────────────
 
   addMessage(message: ChatMessage): void {
+    const resourceViolation = getRenderMessageResourceViolation(message);
+    if (resourceViolation) {
+      log.debug('renderer.message-skip', {
+        reason: 'resource-limit',
+        field: resourceViolation.field,
+      });
+      return;
+    }
     if (message.actionType === 'replace' && message.id) {
       if (this.fallbackInProgress || this.fallbackRecoveryFailed) {
         this.enqueueFallbackIngress(message, false);
@@ -993,7 +1005,7 @@ export class CanvasRenderer extends RendererBase {
     this.startRenderLoop();
   }
 
-  /** Prepare renderer for a clean restart (overlay refresh). Preserves caches but clears all display state. */
+  /** Prepare for a clean restart while preserving decoded-image and bitmap caches. */
   override prepareForRefresh(): void {
     this.clearActiveMessages();
     this.clearPendingQueue();
@@ -1001,6 +1013,7 @@ export class CanvasRenderer extends RendererBase {
     this.workerManager.clearState();
     this.backlogPaused = false;
     this.dimensionCache.clear();
+    resetBidiLayoutCaches();
     for (const bucket of this.farOpacityBuckets) bucket.length = 0;
     for (const bucket of this.midOpacityBuckets) bucket.length = 0;
     for (const bucket of this.nearOpacityBuckets) bucket.length = 0;
@@ -1361,7 +1374,18 @@ export class CanvasRenderer extends RendererBase {
     ) {
       return;
     }
+    if (text !== null && !this.isTranslationWithinResourceBudget(msg.message, text)) return;
     this.pendingTranslations.push({ msg, text });
+  }
+
+  private isTranslationWithinResourceBudget(message: ChatMessage, text: string): boolean {
+    const violation = getRenderMessageResourceViolation({ ...message, translatedText: text });
+    if (!violation) return true;
+    log.debug('renderer.translation-skip', {
+      reason: 'resource-limit',
+      field: violation.field,
+    });
+    return false;
   }
 
   /** Update canvas dimensions when device pixel ratio changes. */
@@ -1967,11 +1991,11 @@ export class CanvasRenderer extends RendererBase {
         .translate(translatableText)
         .then((translated) => {
           if (!this.workerManager.isCurrentMessage(msgId, message)) return;
-          this.workerManager.sendTranslation(
-            msgId,
-            translated,
-            this.estimateTranslatedDimensions(message, translated)
-          );
+          if (translated !== null && !this.isTranslationWithinResourceBudget(message, translated)) {
+            return;
+          }
+          const geometry = this.estimateTranslatedDimensions(message, translated);
+          this.workerManager.sendTranslation(msgId, translated, geometry);
         })
         .catch(() => {
           // Silently ignore individual translation failures
@@ -2242,6 +2266,7 @@ export class CanvasRenderer extends RendererBase {
     this.backlogPaused = false;
     this.onBacklogPauseChange = null;
     clearTextMeasurementCaches();
+    resetBidiLayoutCaches();
     this.textBitmapCache.clear();
     this.dimensionCache.clear();
   }
@@ -2350,6 +2375,7 @@ export class CanvasRenderer extends RendererBase {
     this.imageFetchManager.authorPhotoCache.clear();
     this.imageFetchManager.stickerCache.clear();
     this.textBitmapCache.clear();
+    resetBidiLayoutCaches();
     this.superChatGradientCache.clear();
     this.dimensionCache.clear();
     this.activeMessagesByLane.clear();

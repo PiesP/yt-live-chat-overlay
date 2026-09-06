@@ -56,7 +56,7 @@ describe('WorkerRenderer', () => {
 
     expect(internals.measureTextCached('hello')).toBe(42);
     expect(internals.measureTextCached('hello')).toBe(42);
-    expect(internals.textMeasureCache.get('hello')).toBe(42);
+    expect([...internals.textMeasureCache.values()]).toEqual([42]);
     expect(measureText).toHaveBeenCalledOnce();
   });
 

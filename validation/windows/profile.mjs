@@ -11,70 +11,72 @@ const PREVIEW_PATH = 'test/visual/preview.html';
 const GM_MOCKS_PATH = 'test/visual/gm-mocks.js';
 const EXPECTED_MESSAGE_COUNT = 6;
 
-const CHAT_RESPONSE = {
-  continuationContents: {
-    liveChatContinuation: {
-      actions: [
-        messageAction('acceptance-korean', '한국어', [{ text: '안녕하세요 Windows 화면 검증입니다 🌙' }]),
-        messageAction('acceptance-japanese', '日本語', [{ text: '日本語の描画を確認します ✨' }]),
-        messageAction('acceptance-rtl', 'العربية', [
-          { text: 'مرحبا بكم — RTL + English 123' },
-        ]),
-        messageAction('acceptance-emoji', 'Emoji', [
-          { text: 'Custom ' },
-          {
-            emoji: {
-              shortcuts: [':party:'],
-              image: {
-                accessibility: { accessibilityData: { label: 'party emoji' } },
-                thumbnails: [
-                  {
-                    url: 'https://yt3.ggpht.com/windows-acceptance-party=s32',
-                    width: 32,
-                    height: 32,
-                  },
-                ],
-              },
+const CHAT_ACTIONS = [
+  messageAction('acceptance-korean', '한국어', [{ text: '안녕하세요 Windows 화면 검증입니다 🌙' }]),
+  messageAction('acceptance-japanese', '日本語', [{ text: '日本語の描画を確認します ✨' }]),
+  messageAction('acceptance-rtl', 'العربية', [{ text: 'مرحبا بكم — RTL + English 123' }]),
+  messageAction('acceptance-emoji', 'Emoji', [
+    { text: 'Custom ' },
+    {
+      emoji: {
+        shortcuts: [':party:'],
+        image: {
+          accessibility: { accessibilityData: { label: 'party emoji' } },
+          thumbnails: [
+            {
+              url: 'https://yt3.ggpht.com/windows-acceptance-party=s32',
+              width: 32,
+              height: 32,
             },
-          },
-          { text: ' emoji 🎉' },
-        ]),
-        {
-          addChatItemAction: {
-            item: {
-              liveChatPaidMessageRenderer: {
-                id: 'acceptance-superchat',
-                authorName: { simpleText: 'Super Chat' },
-                purchaseAmountText: { simpleText: '$5.00' },
-                message: { simpleText: '후원 카드의 긴 본문과 경계가 잘 보이는지 확인합니다.' },
-              },
-            },
-          },
+          ],
         },
-        {
-          addChatItemAction: {
-            item: {
-              liveChatMembershipItemRenderer: {
-                id: 'acceptance-membership',
-                authorName: { simpleText: 'Member' },
-                headerPrimaryText: { simpleText: 'Member for 12 months' },
-                message: { simpleText: 'メンバーシップ 카드 렌더링' },
-              },
-            },
-          },
+      },
+    },
+    { text: ' emoji 🎉' },
+  ]),
+  {
+    addChatItemAction: {
+      item: {
+        liveChatPaidMessageRenderer: {
+          id: 'acceptance-superchat',
+          authorName: { simpleText: 'Super Chat' },
+          purchaseAmountText: { simpleText: '$5.00' },
+          message: { simpleText: '후원 카드의 긴 본문과 경계가 잘 보이는지 확인합니다.' },
         },
-      ],
-      continuations: [
-        {
-          timedContinuationData: {
-            continuation: 'windows-acceptance-next',
-            timeoutMs: 30_000,
-          },
-        },
-      ],
+      },
     },
   },
-};
+  {
+    addChatItemAction: {
+      item: {
+        liveChatMembershipItemRenderer: {
+          id: 'acceptance-membership',
+          authorName: { simpleText: 'Member' },
+          headerPrimaryText: { simpleText: 'Member for 12 months' },
+          message: { simpleText: 'メンバーシップ 카드 렌더링' },
+        },
+      },
+    },
+  },
+];
+
+function chatResponse(actions) {
+  return {
+    continuationContents: {
+      liveChatContinuation: {
+        actions,
+        continuations: [
+          {
+            timedContinuationData: {
+              continuation: 'windows-acceptance-next',
+              timeoutMs: 30_000,
+            },
+          },
+        ],
+      },
+    },
+  };
+}
 
 function messageAction(id, author, runs) {
   return {
@@ -163,6 +165,8 @@ export async function run({ browser, root, output }) {
   const pageErrors = [];
   const consoleErrors = [];
   let chatApiRequests = 0;
+  let explicitChatRequests = 0;
+  let backgroundChatRequests = 0;
   let customEmojiAssetRequests = 0;
   const context = await browser.newContext({
     colorScheme: 'dark',
@@ -184,7 +188,23 @@ export async function run({ browser, root, output }) {
         url.pathname.startsWith('/youtubei/v1/live_chat/get_live_chat')
       ) {
         chatApiRequests++;
-        await route.fulfill({ status: 200, contentType: 'application/json', json: CHAT_RESPONSE });
+        const messageIndex = Number(url.searchParams.get('message'));
+        const action = CHAT_ACTIONS[messageIndex];
+        if (url.searchParams.get('key') === 'windows-acceptance' && action) {
+          explicitChatRequests++;
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            json: chatResponse([action]),
+          });
+        } else {
+          backgroundChatRequests++;
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            json: chatResponse([]),
+          });
+        }
         return;
       }
       if (url.hostname === 'www.youtube.com' && route.request().resourceType() === 'document') {
@@ -255,15 +275,24 @@ export async function run({ browser, root, output }) {
     await page.locator('#yt-live-chat-overlay canvas').waitFor({ state: 'attached' });
     await page.waitForTimeout(500);
 
-    const apiStatus = await page.evaluate(async () => {
-      const response = await fetch(
-        'https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?key=windows-acceptance',
-      );
-      await response.json();
-      return response.status;
-    });
-    assert.equal(apiStatus, 200, 'Deterministic live-chat API fixture did not load');
-    assert(chatApiRequests > 0, 'The deterministic chat API route was not exercised');
+    const apiStatuses = await page.evaluate(async (count) => {
+      const statuses = [];
+      for (let index = 0; index < count; index++) {
+        const response = await fetch(
+          `https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?key=windows-acceptance&message=${index}`,
+        );
+        await response.json();
+        statuses.push(response.status);
+        await new Promise((resolve) => setTimeout(resolve, 75));
+      }
+      return statuses;
+    }, EXPECTED_MESSAGE_COUNT);
+    assert.deepEqual(
+      apiStatuses,
+      Array.from({ length: EXPECTED_MESSAGE_COUNT }, () => 200),
+      'Deterministic live-chat API fixtures did not load',
+    );
+    assert.equal(explicitChatRequests, EXPECTED_MESSAGE_COUNT);
 
     try {
       await page.waitForFunction(
@@ -324,6 +353,7 @@ export async function run({ browser, root, output }) {
 
     assert.deepEqual(pageErrors, [], `Page errors: ${pageErrors.join(' | ')}`);
     assert.deepEqual(consoleErrors, [], `Console errors: ${consoleErrors.join(' | ')}`);
+    assert(backgroundChatRequests <= 4, `Background chat requests flooded: ${backgroundChatRequests}`);
 
     const settings = await page.evaluate(() => window.__ytChatOverlay?.getSettings?.());
     assert.equal(settings?.fontSize, 36);
@@ -336,6 +366,8 @@ export async function run({ browser, root, output }) {
         settingsUiInteraction: true,
         deterministicChatApi: true,
         chatApiRequests,
+        explicitChatRequests,
+        backgroundChatRequests,
         accessibleRenderedMessages: accessibleMessages.length,
         renderingPausedForCapture: true,
         pauseIndicatorText: 'Paused',

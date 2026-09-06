@@ -7,6 +7,7 @@ import { extensionCsPreset } from '../presets/extension-cs.ts';
 import { type ExtensionBrowser, extensionTarget } from './extension-target.ts';
 
 export interface ExtensionIifeConfigOptions {
+  banner?: string;
   entry: string;
   fileName: string;
   name: string;
@@ -31,6 +32,9 @@ export function createExtensionIifeConfig(
             formats: ['iife'],
             fileName: () => options.fileName,
           },
+          ...(options.banner
+            ? { rollupOptions: { output: { banner: options.banner } } }
+            : {}),
         },
         define: {
           __VERSION__: JSON.stringify(process.env.BUILD_VERSION ?? pkg.version),

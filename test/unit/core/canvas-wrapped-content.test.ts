@@ -123,4 +123,120 @@ describe('renderWrappedContentSegments', () => {
     const fillText = ctx.fillText as ReturnType<typeof vi.fn>;
     expect(fillText.mock.calls.map(([text]) => text)).toEqual(['i']);
   });
+
+  it('keeps an embedded LTR text-object-text run ordered in a wrapped RTL line', () => {
+    const ctx = createContext();
+    const image = { width: 20, height: 20 } as CanvasImageSource;
+
+    renderWrappedContentSegments(
+      ctx as AnyCanvasContext,
+      [
+        { type: 'text', content: 'مرحبا Hello' },
+        { type: 'emoji', emojiUrl: 'emoji://loaded' },
+        { type: 'text', content: 'World' },
+      ],
+      10,
+      20,
+      500,
+      1,
+      '#ffffff',
+      20,
+      0,
+      0,
+      { get: () => undefined, set: vi.fn() },
+      { get: () => image } as never,
+      () => 'bold 20px sans-serif'
+    );
+
+    const fillText = ctx.fillText as ReturnType<typeof vi.fn>;
+    const drawImage = ctx.drawImage as ReturnType<typeof vi.fn>;
+    expect(fillText.mock.calls.map(([text]) => text)).toEqual([
+      'Hello ',
+      'World',
+      ' ',
+      'مرحبا',
+    ]);
+    expect(fillText.mock.invocationCallOrder[0]).toBeLessThan(drawImage.mock.invocationCallOrder[0]!);
+    expect(drawImage.mock.invocationCallOrder[0]).toBeLessThan(fillText.mock.invocationCallOrder[1]!);
+  });
+
+  it('places a wrapped inline emoji between two Arabic runs in visual order', () => {
+    const ctx = createContext();
+    const image = { width: 20, height: 20 } as CanvasImageSource;
+
+    renderWrappedContentSegments(
+      ctx as AnyCanvasContext,
+      [
+        { type: 'text', content: 'مرحبا' },
+        { type: 'emoji', emojiUrl: 'emoji://loaded' },
+        { type: 'text', content: 'بكم' },
+      ],
+      10,
+      20,
+      500,
+      1,
+      '#ffffff',
+      20,
+      0,
+      0,
+      { get: () => undefined, set: vi.fn() },
+      { get: () => image } as never,
+      () => 'bold 20px sans-serif'
+    );
+
+    const fillText = ctx.fillText as ReturnType<typeof vi.fn>;
+    const drawImage = ctx.drawImage as ReturnType<typeof vi.fn>;
+    expect(fillText.mock.calls.map(([text]) => text)).toEqual(['بكم', 'مرحبا ']);
+    expect(fillText.mock.invocationCallOrder[0]).toBeLessThan(drawImage.mock.invocationCallOrder[0]!);
+    expect(drawImage.mock.invocationCallOrder[0]).toBeLessThan(fillText.mock.invocationCallOrder[1]!);
+  });
+
+  it('places a truncation ellipsis at the visual left of an RTL line', () => {
+    const ctx = createContext();
+
+    renderWrappedContentSegments(
+      ctx as AnyCanvasContext,
+      [{ type: 'text', content: 'مرحبا بكم عالم' }],
+      10,
+      20,
+      50,
+      1,
+      '#ffffff',
+      20,
+      0,
+      0,
+      { get: () => undefined, set: vi.fn() },
+      { get: () => undefined } as never,
+      () => 'bold 20px sans-serif'
+    );
+
+    const calls = (ctx.fillText as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls.map(([text]) => text)).toEqual(['…', 'مرحب']);
+    expect(calls[0]?.[1]).toBe(10);
+    expect(calls[1]?.[1]).toBe(20);
+  });
+
+  it('keeps the RTL paragraph level when a wrapped line starts with numbers and Latin text', () => {
+    const ctx = createContext();
+
+    renderWrappedContentSegments(
+      ctx as AnyCanvasContext,
+      [{ type: 'text', content: 'مرحبامرحبا 123 English' }],
+      10,
+      20,
+      110,
+      2,
+      '#ffffff',
+      20,
+      0,
+      0,
+      { get: () => undefined, set: vi.fn() },
+      { get: () => undefined } as never,
+      () => 'bold 20px sans-serif'
+    );
+
+    const calls = (ctx.fillText as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls.map(([text]) => text)).toEqual(['مرحبامرحبا', 'English', ' ', '123']);
+    expect(calls.slice(1).map(([, x]) => x)).toEqual([10, 80, 90]);
+  });
 });

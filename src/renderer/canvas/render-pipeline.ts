@@ -68,7 +68,7 @@ export interface CanvasRenderContext {
   };
 
   boundGetFont: (fontSize: number) => string;
-  boundMeasureTextWidth: (text: string) => number;
+  boundMeasureTextWidth: (text: string, direction?: CanvasDirection) => number;
   regularRenderConfig: RegularMessageRenderConfig;
 
   /** Mutable reference — pipeline stages push/compact this array. */

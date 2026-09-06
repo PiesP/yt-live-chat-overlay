@@ -33,8 +33,10 @@
 /// <reference lib="webworker" />
 
 import type { FontWeight } from '@app-types';
+import { getRenderMessageResourceViolation } from '@chat/render-resource-limits';
 import { EMOJI_CACHE_MAX_ENTRIES, getStickerCacheBytes } from '@media/cache-limits';
 import { isAllowedImageUrl } from '@media/image-url-validation';
+import { resetBidiLayoutCaches, type TextDirection } from '@renderer/canvas/bidi-layout';
 import { getCachedGradient } from '@renderer/canvas/gradient-utils';
 import { computePulseAlpha } from '@renderer/canvas/lut-helpers';
 import {
@@ -170,6 +172,7 @@ function renderPaidCardWorker(
   authorPhotoCache: ResizableByteLimitedCache<ImageBitmap>,
   emojiCache: ResizableByteLimitedCache<ImageBitmap>,
   getFontFn: (fontSize: number) => string,
+  measureTextFn: (text: string, direction?: TextDirection) => number,
   gradientCache: Map<string, CanvasGradient>,
   /** Configurable SuperChat opacity from settings, clamped to [0.35, 1]. */
   superChatOpacity: number
@@ -379,7 +382,8 @@ function renderPaidCardWorker(
       outlineOpacity,
       textBitmapCache,
       emojiCache as ResizableByteLimitedCache<CanvasImageSource>,
-      getFontFn
+      getFontFn,
+      measureTextFn
     );
   }
 
@@ -415,7 +419,10 @@ export class WorkerRenderer {
   private opacityConfig: OpacityConfig | null = null;
   private boundGetFont: (fontSize: number) => string = (fs: number) =>
     getFontString(fs, 'bold' as FontWeight, DEFAULT_FONT_FAMILY);
-  private readonly boundMeasureTextCached = (text: string): number => this.measureTextCached(text);
+  private readonly boundMeasureTextCached = (
+    text: string,
+    direction: TextDirection = 'ltr'
+  ): number => this.measureTextCached(text, direction);
   private translationFontSize = 1;
   private readonly boundGetTranslationFont = (): string =>
     getFontString(
@@ -701,7 +708,11 @@ export class WorkerRenderer {
             const height = data.height as number;
             const translationHeight = data.translationHeight as number;
             const msg = this.messageById.get(msgId);
-            if (msg) {
+            if (
+              msg &&
+              (translatedText === null ||
+                !getRenderMessageResourceViolation({ ...msg, translatedText }))
+            ) {
               msg.translatedText = translatedText;
               msg.translationHeight = translationHeight;
               if ('laneArrayIndices' in msg) {
@@ -783,17 +794,28 @@ export class WorkerRenderer {
     };
   }
 
-  private measureTextCached(text: string): number {
+  private measureTextCached(text: string, direction: TextDirection = 'ltr'): number {
     if (!this.ctx) return 0;
-    let w = this.textMeasureCache.get(text);
+    const key = `${this.ctx.font}\u0000${direction}\u0000${text}`;
+    let w = this.textMeasureCache.get(key);
     if (w === undefined) {
-      const m = this.ctx.measureText(text);
+      const previousDirection = this.ctx.direction;
+      const previousTextAlign = this.ctx.textAlign;
+      this.ctx.direction = direction;
+      this.ctx.textAlign = 'left';
+      let m: TextMetrics;
+      try {
+        m = this.ctx.measureText(text);
+      } finally {
+        this.ctx.direction = previousDirection;
+        this.ctx.textAlign = previousTextAlign;
+      }
       w = measureBoundingBoxWidth(m);
       if (this.textMeasureCache.size >= WorkerRenderer.TEXT_MEASURE_CACHE_MAX) {
         const oldestKey = this.textMeasureCache.keys().next().value;
         if (oldestKey !== undefined) this.textMeasureCache.delete(oldestKey);
       }
-      this.textMeasureCache.set(text, w);
+      this.textMeasureCache.set(key, w);
     }
     return w;
   }
@@ -1002,6 +1024,7 @@ export class WorkerRenderer {
     this.activeMessagesByLane.clear();
     this.pendingQueue.length = 0;
     this.textBitmapCache.clear();
+    resetBidiLayoutCaches();
     this.emojiCache.clear();
     this.authorPhotoCache.clear();
     this.stickerCache.clear();
@@ -1015,13 +1038,14 @@ export class WorkerRenderer {
   /**
    * Clear renderer state for a fresh restart (used by performOverlayRefresh).
    * Resets active messages, pending queue, and lane allocator while
-   * preserving caches (text bitmaps, emoji, author photos, etc.).
+   * preserving decoded-image and text-bitmap caches.
    */
   private handleClearState(): void {
     this.activeMessages.length = 0;
     this.activeMessagesByLane.clear();
     this.pendingQueue.length = 0;
     this.messageById.clear();
+    resetBidiLayoutCaches();
     // Rebuild lane allocator from existing dimensions (numLanes/laneHeight
     // are preserved from the last initLanes/resize call).
     const now = performance.now();
@@ -1601,6 +1625,7 @@ export class WorkerRenderer {
                   this.authorPhotoCache,
                   this.emojiCache,
                   getFont,
+                  this.boundMeasureTextCached,
                   this.superChatGradientCache,
                   cfg.superChatOpacity
                 );
@@ -1687,7 +1712,8 @@ export class WorkerRenderer {
                     cfg.outlineOpacity,
                     this.textBitmapCache,
                     this.emojiCache as ResizableByteLimitedCache<CanvasImageSource>,
-                    this.boundGetTranslationFont
+                    this.boundGetTranslationFont,
+                    this.boundMeasureTextCached
                   );
                 } else {
                   renderSegment(
@@ -2073,5 +2099,6 @@ self.onmessage = (e: MessageEvent): void => {
 
 /** Reset worker state for test isolation. */
 export function resetWorkerForTests(): void {
+  resetBidiLayoutCaches();
   renderer = new WorkerRenderer();
 }

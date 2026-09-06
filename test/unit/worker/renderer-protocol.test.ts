@@ -54,7 +54,12 @@ vi.spyOn(performance, 'now').mockReturnValue(10000);
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { resetWorkerForTests, WorkerRenderer } from '@renderer/worker/renderer';
+import {
+  getBidiLayoutCacheUsage,
+  resolveTextDirection,
+} from '@renderer/canvas/bidi-layout';
 import type { WorkerMessage } from '@renderer/worker/types';
+import { MAX_RENDER_FIELD_CODE_POINTS } from '@chat/render-resource-limits';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -156,6 +161,48 @@ describe('Worker module', () => {
 });
 
 describe('Worker message protocol', () => {
+  it('clears its realm-local bidi caches with renderer state', () => {
+    const renderer = initializeRenderer();
+    resolveTextDirection('مرحبا');
+    expect(getBidiLayoutCacheUsage().direction.entries).toBe(1);
+
+    renderer.handleMessage(makeEvent({ type: 'clearState' }));
+
+    expect(getBidiLayoutCacheUsage().direction.entries).toBe(0);
+  });
+
+  it('rejects a translation that would exceed the message aggregate budget', () => {
+    const renderer = initializeRenderer();
+    const originalText = 'a'.repeat(MAX_RENDER_FIELD_CODE_POINTS - 10);
+    renderer.handleMessage(
+      makeEvent({
+        type: 'addMessages',
+        messages: [
+          makeWorkerMessage({
+            id: 'aggregate-translation',
+            text: originalText,
+            content: [{ type: 'text', content: originalText }],
+          }),
+        ],
+      })
+    );
+    renderer.handleMessage(
+      makeEvent({
+        type: 'updateTranslation',
+        id: 'aggregate-translation',
+        translatedText: 'translated text',
+        width: 200,
+        height: 40,
+        translationHeight: 20,
+      })
+    );
+
+    const internals = renderer as unknown as {
+      messageById: Map<string, { translatedText?: string | null }>;
+    };
+    expect(internals.messageById.get('aggregate-translation')?.translatedText).toBeUndefined();
+  });
+
   it('upserts pending and active replacement messages by id', () => {
     const renderer = initializeRenderer({ outlineWidthPx: 0 });
     const internals = renderer as unknown as {

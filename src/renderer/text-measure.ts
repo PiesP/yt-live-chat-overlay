@@ -29,7 +29,7 @@ export function setTextMeasureCallback(cb: ((ms: number) => void) | null): void 
   textMeasureCallback = cb;
 }
 
-/** Two-level LRU cache for measureTextWidth. Outer key: font, inner key: text. */
+/** Two-level LRU cache for measureTextWidth. Outer key: font, inner key: direction + text. */
 const widthCache = new Map<string, Map<string, number>>();
 let totalCacheEntries = 0;
 const WIDTH_CACHE_MAX = 1000;
@@ -113,19 +113,25 @@ export function clearTextMeasurementCaches(): void {
  * Results are cached in an LRU cache (max 500 entries) for performance
  * in hot paths like the Canvas2D render loop.
  */
-/** Width of the space character ' ' for each font (cached). */
+/** Width of the space character ' ' for each font and Canvas direction (cached). */
 const spaceWidthCache = new Map<string, number>();
 
-export function measureTextWidth(text: string, font: string): number {
+export function measureTextWidth(
+  text: string,
+  font: string,
+  direction: CanvasDirection = 'ltr'
+): number {
+  const directionalTextKey = `${direction}\u0000${text}`;
+  const directionalFontKey = `${font}\u0000${direction}`;
   // Fast path for space character (called frequently in wrapLine/buildWrappedLines)
   if (text === ' ') {
-    const cached = spaceWidthCache.get(font);
+    const cached = spaceWidthCache.get(directionalFontKey);
     if (cached !== undefined) return cached;
   }
-  // Two-level lookup: outer key = font, inner key = text
+  // Two-level lookup: outer key = font, inner key = direction + text
   const fontCache = widthCache.get(font);
   if (fontCache) {
-    const cached = fontCache.get(text);
+    const cached = fontCache.get(directionalTextKey);
     if (cached !== undefined) return cached;
   }
 
@@ -138,8 +144,18 @@ export function measureTextWidth(text: string, font: string): number {
     return Math.ceil(text.length * fontSize * CSP_WIDTH_FACTOR);
   }
   ctx.font = font;
+  const previousDirection = ctx.direction;
+  const previousTextAlign = ctx.textAlign;
+  ctx.direction = direction;
+  ctx.textAlign = 'left';
   const t0 = textMeasureCallback ? performance.now() : 0;
-  const m = ctx.measureText(text);
+  let m: TextMetrics;
+  try {
+    m = ctx.measureText(text);
+  } finally {
+    ctx.direction = previousDirection;
+    ctx.textAlign = previousTextAlign;
+  }
   if (textMeasureCallback) {
     textMeasureCallback(performance.now() - t0);
   }
@@ -170,7 +186,7 @@ export function measureTextWidth(text: string, font: string): number {
 
   // Populate space-width cache for this font (avoids repeated measureText calls)
   if (text === ' ') {
-    spaceWidthCache.set(font, width);
+    spaceWidthCache.set(directionalFontKey, width);
     return width;
   }
 
@@ -180,7 +196,7 @@ export function measureTextWidth(text: string, font: string): number {
     innerCache = new Map<string, number>();
     widthCache.set(font, innerCache);
   }
-  innerCache.set(text, width);
+  innerCache.set(directionalTextKey, width);
   totalCacheEntries++;
 
   return width;

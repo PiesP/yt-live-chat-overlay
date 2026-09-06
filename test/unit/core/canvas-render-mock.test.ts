@@ -17,6 +17,7 @@ import {
   renderSegment,
   renderRegularMessageBackground,
   strokeTextOutline,
+  warmTextBitmapCache,
 } from '@renderer/canvas/shared';
 import type { AnyCanvasContext, TextBitmapCache } from '@renderer/canvas/shared';
 import { rendererLayout, spacing } from '@util/design-tokens';
@@ -30,12 +31,20 @@ interface MockContextState {
   strokeStyle: string;
   font: string;
   textBaseline: string;
+  direction: CanvasDirection;
+  textAlign: CanvasTextAlign;
   globalAlpha: number;
   lineWidth: number;
   ops: string[];
   measuredTexts: string[];
   filledTexts: string[];
   strokedTexts: string[];
+  textDraws: Array<{
+    method: 'fill' | 'stroke';
+    text: string;
+    direction: CanvasDirection;
+    textAlign: CanvasTextAlign;
+  }>;
   roundRectCalled: boolean;
   beginPathCalled: boolean;
   closePathCalled: boolean;
@@ -52,12 +61,15 @@ function createMockContext(
     strokeStyle: '#000',
     font: '10px sans-serif',
     textBaseline: 'alphabetic',
+    direction: 'inherit',
+    textAlign: 'start',
     globalAlpha: 1,
     lineWidth: 1,
     ops: [],
     measuredTexts: [],
     filledTexts: [],
     strokedTexts: [],
+    textDraws: [],
     roundRectCalled: false,
     beginPathCalled: false,
     closePathCalled: false,
@@ -65,6 +77,10 @@ function createMockContext(
     lineToCalled: false,
     arcToCalled: false,
   };
+  const savedTextStates: Array<{
+    direction: CanvasDirection;
+    textAlign: CanvasTextAlign;
+  }> = [];
 
   const ctx = {
     get fillStyle() { return state.fillStyle; },
@@ -75,6 +91,10 @@ function createMockContext(
     set font(v: string) { state.font = v; state.ops.push('font'); },
     get textBaseline() { return state.textBaseline; },
     set textBaseline(v: string) { state.textBaseline = v; state.ops.push('textBaseline'); },
+    get direction() { return state.direction; },
+    set direction(v: CanvasDirection) { state.direction = v; state.ops.push('direction'); },
+    get textAlign() { return state.textAlign; },
+    set textAlign(v: CanvasTextAlign) { state.textAlign = v; state.ops.push('textAlign'); },
     get globalAlpha() { return state.globalAlpha; },
     set globalAlpha(v: number) { state.globalAlpha = v; state.ops.push('globalAlpha'); },
     get lineWidth() { return state.lineWidth; },
@@ -87,8 +107,16 @@ function createMockContext(
       return { width: text.length * fontSize * 0.6 } as TextMetrics;
     }),
 
-    fillText: vi.fn((_text, _x, _y, _maxWidth?) => { state.filledTexts.push('text'); state.ops.push('fillText'); }),
-    strokeText: vi.fn((_text, _x, _y, _maxWidth?) => { state.strokedTexts.push('text'); state.ops.push('strokeText'); }),
+    fillText: vi.fn((text: string, _x, _y, _maxWidth?) => {
+      state.filledTexts.push(text);
+      state.textDraws.push({ method: 'fill', text, direction: state.direction, textAlign: state.textAlign });
+      state.ops.push('fillText');
+    }),
+    strokeText: vi.fn((text: string, _x, _y, _maxWidth?) => {
+      state.strokedTexts.push(text);
+      state.textDraws.push({ method: 'stroke', text, direction: state.direction, textAlign: state.textAlign });
+      state.ops.push('strokeText');
+    }),
     drawImage: vi.fn(() => { state.ops.push('drawImage'); }),
     getTransform: vi.fn(() => ({ a: 1 })),
     roundRect: vi.fn(() => { state.roundRectCalled = true; state.ops.push('roundRect'); }),
@@ -97,8 +125,18 @@ function createMockContext(
     moveTo: vi.fn((_x, _y) => { state.moveToCalled = true; state.ops.push('moveTo'); }),
     lineTo: vi.fn((_x, _y) => { state.lineToCalled = true; state.ops.push('lineTo'); }),
     arcTo: vi.fn((_x1, _y1, _x2, _y2, _r) => { state.arcToCalled = true; state.ops.push('arcTo'); }),
-    save: vi.fn(() => { state.ops.push('save'); }),
-    restore: vi.fn(() => { state.ops.push('restore'); }),
+    save: vi.fn(() => {
+      savedTextStates.push({ direction: state.direction, textAlign: state.textAlign });
+      state.ops.push('save');
+    }),
+    restore: vi.fn(() => {
+      const saved = savedTextStates.pop();
+      if (saved) {
+        state.direction = saved.direction;
+        state.textAlign = saved.textAlign;
+      }
+      state.ops.push('restore');
+    }),
     fill: vi.fn(() => { state.ops.push('fill'); }),
     stroke: vi.fn(() => { state.ops.push('stroke'); }),
   } as unknown as AnyCanvasContext;
@@ -110,11 +148,99 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe('renderSegment bidirectional text', () => {
+  it.each([
+    ['مرحبا بكم — RTL + English 123', 'rtl'],
+    ['… — 123 مرحبا بكم', 'rtl'],
+    ['English مرحبا 123', 'ltr'],
+  ] as const)('passes %s to Canvas in logical order with %s base direction', (logicalText, direction) => {
+    const { ctx, state } = createMockContext();
+
+    renderSegment(
+      ctx,
+      logicalText,
+      10,
+      20,
+      '#ffffff',
+      32,
+      0,
+      0,
+      { get: () => undefined, set: vi.fn() },
+      () => 'bold 32px sans-serif'
+    );
+
+    expect(ctx.fillText).toHaveBeenCalledWith(logicalText, 10, 20);
+    expect(state.textDraws).toContainEqual({
+      method: 'fill',
+      text: logicalText,
+      direction,
+      textAlign: 'left',
+    });
+    expect(ctx.direction).toBe('inherit');
+    expect(ctx.textAlign).toBe('start');
+  });
+});
+
 // ═══════════════════════════════════════════════════════════════════
 // renderSegment bitmap cache
 // ═══════════════════════════════════════════════════════════════════
 
 describe('renderSegment bitmap cache', () => {
+  it('caches logical RTL text with direction-scoped native Canvas state', () => {
+    const { ctx } = createMockContext();
+    const instances: MockOffscreenCanvas[] = [];
+
+    class MockOffscreenCanvas {
+      readonly context = {
+        direction: 'inherit' as CanvasDirection,
+        textAlign: 'start' as CanvasTextAlign,
+        scale: vi.fn(),
+        strokeText: vi.fn(),
+        fillText: vi.fn(),
+      };
+
+      constructor(
+        readonly width: number,
+        readonly height: number
+      ) {
+        instances.push(this);
+      }
+
+      getContext(): OffscreenCanvasRenderingContext2D {
+        return this.context as unknown as OffscreenCanvasRenderingContext2D;
+      }
+    }
+
+    vi.stubGlobal('OffscreenCanvas', MockOffscreenCanvas);
+    const bitmaps = new Map<string, CanvasImageSource>();
+    const cache: TextBitmapCache = {
+      get: (key) => bitmaps.get(key),
+      set: (key, value) => {
+        bitmaps.set(key, value);
+      },
+    };
+    const logicalText = 'مرحبا — English 123';
+
+    renderSegment(ctx, logicalText, 10, 20, '#ffffff', 32, 2, 0.7, cache, () =>
+      'bold 32px sans-serif'
+    );
+    renderSegment(ctx, logicalText, 30, 40, '#ffffff', 32, 2, 0.7, cache, () =>
+      'bold 32px sans-serif'
+    );
+
+    expect(instances).toHaveLength(1);
+    expect(instances[0]?.context.direction).toBe('rtl');
+    expect(instances[0]?.context.textAlign).toBe('left');
+    expect(instances[0]?.context.strokeText).toHaveBeenCalledWith(logicalText, 1.85, 1.85);
+    expect(instances[0]?.context.fillText).toHaveBeenCalledWith(logicalText, 1.85, 1.85);
+    expect([...bitmaps.keys()]).toEqual([
+      expect.stringContaining(`|rtl|${logicalText}|`),
+    ]);
+    expect(ctx.drawImage).toHaveBeenCalledTimes(2);
+    expect(ctx.direction).toBe('inherit');
+    expect(ctx.textAlign).toBe('start');
+  });
+
   it('keeps normal and far-tier letter spacing in separate bitmap entries', () => {
     const { ctx } = createMockContext();
 
@@ -206,6 +332,63 @@ describe('renderSegment bitmap cache', () => {
     const bitmap = [...bitmaps.values()][0] as unknown as MockOffscreenCanvas;
     expect(bitmap.height).toBe(26);
     expect((bitmap.context as { textBaseline?: string }).textBaseline).toBe('top');
+  });
+
+  it('prewarms the same direction-scoped logical text keys used by rendering', () => {
+    const { ctx } = createMockContext();
+
+    class MockOffscreenCanvas {
+      readonly context = {
+        direction: 'inherit' as CanvasDirection,
+        textAlign: 'start' as CanvasTextAlign,
+        scale: vi.fn(),
+        strokeText: vi.fn(),
+        fillText: vi.fn(),
+      };
+
+      constructor(
+        readonly width: number,
+        readonly height: number
+      ) {}
+
+      getContext(): OffscreenCanvasRenderingContext2D {
+        return this.context as unknown as OffscreenCanvasRenderingContext2D;
+      }
+    }
+
+    vi.stubGlobal('OffscreenCanvas', MockOffscreenCanvas);
+    const bitmaps = new Map<string, CanvasImageSource>();
+    const cache: TextBitmapCache = {
+      get: (key) => bitmaps.get(key),
+      set: (key, value) => {
+        bitmaps.set(key, value);
+      },
+    };
+    const segments = [
+      { type: 'text' as const, content: 'مرحبا Hello ' },
+      { type: 'emoji' as const, emojiUrl: 'emoji://loaded' },
+      { type: 'text' as const, content: ' World' },
+    ];
+
+    warmTextBitmapCache(
+      segments,
+      32,
+      'bold',
+      'sans-serif',
+      '#ffffff',
+      2,
+      0.7,
+      cache,
+      ctx
+    );
+    const warmedKeys = [...bitmaps.keys()];
+
+    expect(warmedKeys).toEqual([
+      expect.stringContaining('|ltr|Hello |'),
+      expect.stringContaining('|ltr| World|'),
+      expect.stringContaining('|rtl|مرحبا |'),
+    ]);
+    expect(warmedKeys.every((key) => !key.includes('ابحرم'))).toBe(true);
   });
 });
 
@@ -387,6 +570,113 @@ describe('renderRegularMessage mixed content layout', () => {
     expect(secondX! - firstX!).toBe(emojiSize + spacing.xs);
   });
 
+  it('keeps an embedded LTR text-object-text run ordered inside an RTL paragraph', () => {
+    const { ctx } = createMockContext();
+    const image = {} as CanvasImageSource;
+    const emojiCache = new Map<string, CanvasImageSource>([['emoji://loaded', image]]);
+
+    renderRegularMessage(
+      ctx,
+      {
+        text: 'مرحبا Hello 🙂 World',
+        content: [
+          { type: 'text', content: 'مرحبا Hello ' },
+          { type: 'emoji', emojiUrl: 'emoji://loaded', emojiAlt: ':loaded:' },
+          { type: 'text', content: ' World' },
+        ],
+      },
+      startX,
+      20,
+      config,
+      textBitmapCache,
+      emojiCache,
+      (candidate) => candidate === image,
+      noAuthorPhotos,
+      () => false,
+      () => 'bold 32px system-ui',
+      (text) => text.length * 10
+    );
+
+    const fillText = ctx.fillText as ReturnType<typeof vi.fn>;
+    const drawImage = ctx.drawImage as ReturnType<typeof vi.fn>;
+    expect(fillText.mock.calls.map(([text]) => text)).toEqual(['Hello ', ' World', 'مرحبا ']);
+    expect(fillText.mock.invocationCallOrder[0]).toBeLessThan(drawImage.mock.invocationCallOrder[0]!);
+    expect(drawImage.mock.invocationCallOrder[0]).toBeLessThan(fillText.mock.invocationCallOrder[1]!);
+    expect(fillText.mock.calls.map(([, x]) => x)).toEqual([...fillText.mock.calls.map(([, x]) => x)].sort((a, b) => a - b));
+  });
+
+  it('places an inline emoji between two Arabic runs in resolved visual order', () => {
+    const { ctx } = createMockContext();
+    const image = {} as CanvasImageSource;
+    const emojiCache = new Map<string, CanvasImageSource>([['emoji://loaded', image]]);
+
+    renderRegularMessage(
+      ctx,
+      {
+        text: 'مرحبا 🙂 بكم',
+        content: [
+          { type: 'text', content: 'مرحبا ' },
+          { type: 'emoji', emojiUrl: 'emoji://loaded', emojiAlt: ':loaded:' },
+          { type: 'text', content: ' بكم' },
+        ],
+      },
+      startX,
+      20,
+      config,
+      textBitmapCache,
+      emojiCache,
+      (candidate) => candidate === image,
+      noAuthorPhotos,
+      () => false,
+      () => 'bold 32px system-ui',
+      (text) => text.length * 10
+    );
+
+    const fillText = ctx.fillText as ReturnType<typeof vi.fn>;
+    const drawImage = ctx.drawImage as ReturnType<typeof vi.fn>;
+    expect(fillText.mock.calls.map(([text]) => text)).toEqual([' بكم', 'مرحبا ']);
+    expect(fillText.mock.invocationCallOrder[0]).toBeLessThan(drawImage.mock.invocationCallOrder[0]!);
+    expect(drawImage.mock.invocationCallOrder[0]).toBeLessThan(fillText.mock.invocationCallOrder[1]!);
+  });
+
+  it('keeps a missing custom emoji fallback atomic in resolved RTL order', () => {
+    const { ctx } = createMockContext();
+
+    renderRegularMessage(
+      ctx,
+      {
+        text: 'مرحبا Hello smile World',
+        content: [
+          { type: 'text', content: 'مرحبا Hello ' },
+          {
+            type: 'emoji',
+            emojiUrl: 'emoji://missing',
+            emojiAlt: ':smile:',
+            emojiFallbackText: 'smile',
+          },
+          { type: 'text', content: ' World' },
+        ],
+      },
+      startX,
+      20,
+      config,
+      textBitmapCache,
+      new Map(),
+      () => false,
+      noAuthorPhotos,
+      () => false,
+      () => 'bold 32px system-ui',
+      (text) => text.length * 10
+    );
+
+    expect((ctx.fillText as ReturnType<typeof vi.fn>).mock.calls.map(([text]) => text)).toEqual([
+      'Hello ',
+      'smile',
+      ' World',
+      'مرحبا ',
+    ]);
+  });
+
   it('keeps author and body positions stable while the author photo loads', () => {
     const authorConfig = { ...config, showAuthor: true, fontSize: 16, messageHeight: 60 };
     const message = {
@@ -437,6 +727,67 @@ describe('renderRegularMessage mixed content layout', () => {
         spacing.xs
     );
     expect(loadingBody?.[2]).toBeGreaterThan(loadingAuthor?.[2] as number);
+  });
+
+  it('keeps Arabic author and body strings logical through the shared renderer', () => {
+    const { ctx, state } = createMockContext();
+    const authorConfig = { ...config, showAuthor: true, fontSize: 24, messageHeight: 80 };
+    const body = 'مرحبا — English 123';
+
+    renderRegularMessage(
+      ctx,
+      {
+        author: 'العربية',
+        text: body,
+        content: [{ type: 'text', content: body }],
+      },
+      startX,
+      20,
+      authorConfig,
+      textBitmapCache,
+      new Map(),
+      () => false,
+      noAuthorPhotos,
+      () => false,
+      () => 'bold 24px system-ui',
+      (text) => text.length * 10
+    );
+
+    expect(state.textDraws).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ text: 'العربية', direction: 'rtl', textAlign: 'left' }),
+        expect.objectContaining({ text: 'English 123', direction: 'ltr', textAlign: 'left' }),
+        expect.objectContaining({ text: 'مرحبا — ', direction: 'rtl', textAlign: 'left' }),
+      ])
+    );
+    expect(state.textDraws.every(({ text }) => !text.includes('hsilgnE'))).toBe(true);
+  });
+
+  it('never splits astral or ZWJ graphemes while resolving mixed content', () => {
+    const { ctx } = createMockContext();
+    const body = 'مرحبا 👨‍👩‍👧‍👦 English 𐤀';
+
+    renderRegularMessage(
+      ctx,
+      { text: body, content: [{ type: 'text', content: body }] },
+      startX,
+      20,
+      config,
+      textBitmapCache,
+      new Map(),
+      () => false,
+      noAuthorPhotos,
+      () => false,
+      () => 'bold 32px system-ui',
+      (text) => text.length * 10
+    );
+
+    const renderedText = (ctx.fillText as ReturnType<typeof vi.fn>).mock.calls
+      .map(([text]) => text)
+      .join('');
+    expect(renderedText).toContain('👨‍👩‍👧‍👦');
+    expect(renderedText).toContain('𐤀');
+    expect(renderedText).not.toContain('\uFFFD');
   });
 });
 
