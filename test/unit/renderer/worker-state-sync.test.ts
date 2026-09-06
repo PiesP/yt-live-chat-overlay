@@ -680,6 +680,37 @@ describe('Worker renderer state synchronization', () => {
     worker.acknowledgeDestroy();
   });
 
+  it('does not resurrect an entry acknowledged as expired while a snapshot times out', async () => {
+    const { manager, worker } = initializedManager();
+    const expired = {
+      id: 'expired-during-snapshot',
+      text: 'expired during snapshot',
+      content: [{ type: 'text' as const, content: 'expired during snapshot' }],
+      timestamp: 1,
+      kind: 'text' as const,
+      authorType: 'normal' as const,
+    };
+    expect(manager.sendToWorker(expired, expired.id, true)).toBe(true);
+    await Promise.resolve();
+
+    const snapshot = manager.snapshotMessages(0);
+    worker.emitMessage({
+      type: 'stats',
+      activeMessages: 0,
+      pendingQueueDepth: 0,
+      totalRendered: 1,
+      totalDrops: 0,
+      processedBatchSequence: 1,
+      laneUtilization: 0,
+      activeMessageIds: [],
+      pendingMessageIds: [],
+    });
+
+    await expect(snapshot).resolves.toEqual([]);
+    manager.destroy();
+    worker.acknowledgeDestroy();
+  });
+
   it('escalates one native load error and preserves messages for recovery', async () => {
     const { manager, worker } = initializedManager();
     const onFatalError = vi.fn();
