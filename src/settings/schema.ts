@@ -117,6 +117,12 @@ const TRANSLATION_SOURCE_VALUES = [
 const TRANSLATION_MODE_VALUES = ['dual', 'replace'] as const satisfies readonly TranslationMode[];
 const FONT_WEIGHT_VALUES = ['normal', 'bold'] as const satisfies readonly FontWeight[];
 const LOG_LEVEL_VALUES = ['warn', 'info', 'debug'] as const satisfies readonly LogLevel[];
+const WHOLE_MEGABYTE_SETTING_KEYS = new Set<keyof OverlaySettings>([
+  'emojiCacheMb',
+  'photoCacheMb',
+  'stickerCacheMb',
+  'textCacheMb',
+]);
 
 // ── Color validation ────────────────────────────────────────────────────────────
 
@@ -206,7 +212,10 @@ function mutateScalarSettings(
     } else if (meta?.type === 'number') {
       const defaultVal = mutableDefaults[key as string];
       if (typeof defaultVal === 'number') {
-        mutableOut[key as string] = clampNumber(raw, defaultVal, resolveLimits(key as string));
+        const clamped = clampNumber(raw, defaultVal, resolveLimits(key as string));
+        mutableOut[key as string] = WHOLE_MEGABYTE_SETTING_KEYS.has(key)
+          ? Math.round(clamped)
+          : clamped;
       }
     } else {
       const validator = STRING_VALIDATORS[key as keyof OverlaySettings];

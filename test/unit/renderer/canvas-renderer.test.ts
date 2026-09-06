@@ -8,6 +8,7 @@ import { Overlay } from '@app/overlay';
 import type { ChatMessage, OverlaySettings } from '@app-types';
 import { LanguageDetectorService } from '@translation/language-detector';
 import { ImageFetchManager } from '@media/image-fetch-manager';
+import { applySettingsPatch, normalizeStoredSettings } from '@settings/schema';
 
 // Mock OffscreenCanvas
 vi.stubGlobal('OffscreenCanvas', class {
@@ -81,6 +82,25 @@ describe('CanvasRenderer', () => {
   it('constructs without throwing', () => {
     const settings = makeSettings();
     expect(() => new CanvasRenderer(overlay, settings)).not.toThrow();
+  });
+
+  it('constructs and updates from normalized fractional cache budgets', () => {
+    const storedSettings = normalizeStoredSettings({
+      emojiCacheMb: 1.000001,
+      photoCacheMb: 1.000001,
+      stickerCacheMb: 1.000001,
+      textCacheMb: 1.000001,
+    });
+    const renderer = new CanvasRenderer(overlay, storedSettings);
+    const updatedSettings = applySettingsPatch(storedSettings, {
+      emojiCacheMb: 2.000001,
+      photoCacheMb: 2.000001,
+      stickerCacheMb: 2.000001,
+      textCacheMb: 2.000001,
+    });
+
+    expect(() => renderer.updateSettings(updatedSettings)).not.toThrow();
+    renderer.destroy();
   });
 
   it('confines a bypassed font family to its single style property', () => {
