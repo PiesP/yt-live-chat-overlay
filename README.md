@@ -82,6 +82,8 @@ reports.
 
 ## Development
 
+This project is developed with assistance from AI tools.
+
 Use the toolchain pinned in `package.json`, initialize the shared browser-core
 submodule, and install dependencies:
 
