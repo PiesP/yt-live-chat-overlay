@@ -215,7 +215,7 @@ export async function run({ browser, root, output, installedContext, installedEx
           await route.fulfill({
             status: 200,
             contentType: 'application/json',
-            json: chatResponse(actions, installedContext ? 250 : 30_000),
+            json: chatResponse(actions, installedContext ? 1000 : 30_000),
           });
         }
         return;
@@ -237,6 +237,28 @@ export async function run({ browser, root, output, installedContext, installedEx
       await route.fulfill({ status: 403, contentType: 'text/plain', body: 'Blocked by fixture' });
     });
 
+    if (installedContext) await page.addInitScript(() => {
+      const workers = [];
+      window.__ytAcceptanceWorkers = workers;
+      const NativeWorker = window.Worker;
+      window.Worker = new Proxy(NativeWorker, {
+        construct(target, args) {
+          const record = { url: String(args[0]), ready: false };
+          if (workers.length < 16) workers.push(record);
+          try {
+            const worker = Reflect.construct(target, args);
+            worker.addEventListener('message', (event) => {
+              if (event.data?.type === 'ready') record.ready = true;
+            });
+            worker.addEventListener('error', (event) => { record.error = event.message; });
+            return worker;
+          } catch (error) {
+            record.error = String(error);
+            throw error;
+          }
+        },
+      });
+    });
     await page.addInitScript(() => {
       Object.defineProperty(HTMLMediaElement.prototype, 'paused', {
         configurable: true,
@@ -431,6 +453,7 @@ export async function run({ browser, root, output, installedContext, installedEx
     await page?.screenshot({ path: join(output, 'fixture-error.png') }).catch(() => {});
     await writeFile(join(output, 'fixture-error.json'), JSON.stringify({
       pageErrors, consoleErrors, chatApiRequests, installedFixtureDelivered,
+      workers: await page?.evaluate(() => window.__ytAcceptanceWorkers).catch(() => []),
     }, null, 2));
     throw error;
   } finally {
