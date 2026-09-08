@@ -53,7 +53,9 @@ python3 validation/windows/prepare-userscript-manager.py \
 ```
 
 The helper downloads the official Store CRX and verifies its pinned SHA-256 and
-version before extraction. This tests Tampermonkey loaded as an unpacked package,
+version before extraction. Downloads use direct HTTPS to the approved Store
+origins, with at most five redirects; proxy environment variables are not used.
+This tests Tampermonkey loaded as an unpacked package,
 not the Chrome Web Store installation confirmation. It enables Developer Mode
 and Allow User Scripts through Chrome's UI in the isolated profile and imports
 the source-bound `.user.js` through Tampermonkey's
