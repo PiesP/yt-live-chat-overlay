@@ -90,7 +90,7 @@
   },
   "dependencies": {
     "@piesp/browser-core": "file:packages/core",
-    "bidi-js": "1.0.3"
+    "bidi-js": "1.1.0"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
