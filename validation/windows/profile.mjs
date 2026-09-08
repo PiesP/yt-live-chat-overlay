@@ -141,7 +141,7 @@ async function assertForcedColorsDisclosure(page, summary) {
   }
 }
 
-async function configureThroughSettingsUi(page, installed) {
+async function configureThroughSettingsUi(page, installed, output) {
   const button = page.locator('#yt-chat-overlay-settings-button');
   await button.waitFor({ state: 'visible', timeout: 15_000 });
   await button.focus();
@@ -150,6 +150,7 @@ async function configureThroughSettingsUi(page, installed) {
   const modal = page.locator('#yt-chat-overlay-settings-backdrop');
   await modal.waitFor({ state: 'visible', timeout: 5_000 });
   assert.equal(await modal.getAttribute('aria-modal'), 'true');
+  await modal.screenshot({ path: join(output, 'yt-settings-basic.png'), animations: 'disabled' });
 
   const disclosure = modal.locator('.yt-chat-overlay-settings-disclosure');
   assert.equal(await disclosure.getAttribute('open'), null, 'Fine tuning must start collapsed');
@@ -233,6 +234,8 @@ async function configureThroughSettingsUi(page, installed) {
     'Preview text overlaps the bottom safe zone');
   assert(Math.abs(previewState.topFraction - 0.2) < 0.02, 'Top safe-zone mask is inaccurate');
   assert(Math.abs(previewState.bottomFraction - 0.1) < 0.02, 'Bottom safe-zone mask is inaccurate');
+  await modal.locator('.yt-chat-overlay-settings-font-preview').scrollIntoViewIfNeeded();
+  await modal.screenshot({ path: join(output, 'yt-settings-preview.png'), animations: 'disabled' });
 
   await modal.locator('#tab-translation').click();
   const capability = modal.locator('.yt-chat-overlay-settings-capability');
@@ -297,6 +300,7 @@ export async function run({ browser, root, output, installedContext, installedEx
   let chatApiRequests = 0;
   let explicitChatRequests = 0;
   let backgroundChatRequests = 0;
+  const backgroundRequestTimes = [];
   let customEmojiAssetRequests = 0;
   let deliverInstalledFixture = false;
   let installedFixtureDelivered = false;
@@ -337,6 +341,7 @@ export async function run({ browser, root, output, installedContext, installedEx
           });
         } else {
           backgroundChatRequests++;
+          backgroundRequestTimes.push(performance.now());
           const actions = deliverInstalledFixture && !installedFixtureDelivered
             ? [CHAT_ACTIONS[installedFixtureCursor++]]
             : [];
@@ -437,7 +442,7 @@ export async function run({ browser, root, output, installedContext, installedEx
       return Boolean(handle && typeof handle.getSettings === 'function');
     });
 
-    await configureThroughSettingsUi(page, Boolean(installedContext));
+    await configureThroughSettingsUi(page, Boolean(installedContext), output);
     await page.locator('#yt-live-chat-overlay canvas').waitFor({ state: 'attached' });
     await page.waitForTimeout(500);
 
@@ -528,8 +533,23 @@ export async function run({ browser, root, output, installedContext, installedEx
 
     assert.deepEqual(pageErrors, [], `Page errors: ${pageErrors.join(' | ')}`);
     assert.deepEqual(consoleErrors, [], `Console errors: ${consoleErrors.join(' | ')}`);
-    assert(backgroundChatRequests <= (installedContext ? 100 : 4),
-      `Background chat requests flooded: ${backgroundChatRequests}`);
+    const backgroundObservationMs = backgroundRequestTimes.length
+      ? performance.now() - backgroundRequestTimes[0]
+      : 0;
+    const minimumPollInterval = installedContext ? null : await page.evaluate(
+      () => window.__ytChatOverlay?.getSettings?.().minPollIntervalMs,
+    );
+    if (!installedContext) {
+      assert(Number.isFinite(minimumPollInterval) && minimumPollInterval > 0,
+        'The runtime minimum polling interval is unavailable');
+    }
+    // Longer settings interactions permit more polls, but never a faster
+    // average request rate than the configured minimum polling interval.
+    const backgroundRequestBudget = installedContext
+      ? 100
+      : 1 + Math.floor(backgroundObservationMs / minimumPollInterval);
+    assert(backgroundChatRequests <= backgroundRequestBudget,
+      `Background chat requests flooded: ${backgroundChatRequests}/${backgroundRequestBudget}`);
 
     let settings;
     if (installedContext) {
@@ -580,19 +600,24 @@ export async function run({ browser, root, output, installedContext, installedEx
         chatApiRequests,
         explicitChatRequests,
         backgroundChatRequests,
+        backgroundRequestBudget,
         accessibleRenderedMessages: accessibleMessages.length,
         renderingPausedForCapture: true,
         pauseIndicatorText: 'Paused',
         pageErrors: pageErrors.length,
         consoleErrors: consoleErrors.length,
         customEmojiAssetRequests,
-        screenshotsWritten: 2,
+        screenshotsWritten: 4,
       },
       observations: {
         browserVersion: browser.version(),
         canvas: canvasBox,
         fixtureContent: ['Korean', 'Japanese', 'RTL', 'emoji', 'Super Chat', 'membership'],
-        screenshots: ['yt-visual-canvas.png', 'yt-visual-page.png'],
+        screenshots: ['yt-settings-basic.png', 'yt-settings-preview.png', 'yt-visual-canvas.png', 'yt-visual-page.png'],
+        backgroundObservationMs,
+        backgroundRequestIntervalsMs: backgroundRequestTimes.slice(1).map(
+          (time, index) => time - backgroundRequestTimes[index],
+        ),
       },
     };
   } catch (error) {
