@@ -233,6 +233,47 @@ describe('ReplayChatSource', () => {
     source.stop();
   });
 
+  it('idles an empty display loop and wakes it when delayed I/O adds replay data', async () => {
+    vi.useFakeTimers();
+    const received: ChatMessage[] = [];
+    const internals = source as unknown as {
+      callback: ((messages: ChatMessage | ChatMessage[]) => void) | null;
+      replayMode: 'playerSeek' | null;
+      replayPlayerSeekContinuation: InnertubeContinuationData | null;
+      getPlaybackSnapshot: () => { offsetMs: number; paused: boolean };
+      requestReplayPayload: () => Promise<LiveChatPayload>;
+      appendReplayEvents: (
+        events: Array<{ message: ChatMessage; offsetMs: number }>,
+        minimumOffsetMs: number
+      ) => number;
+      startCooperativeLoop: () => void;
+    };
+    internals.callback = (messages) => {
+      received.push(...(Array.isArray(messages) ? messages : [messages]));
+    };
+    internals.replayMode = 'playerSeek';
+    internals.replayPlayerSeekContinuation = { continuation: 'seek' };
+    const getPlaybackSnapshot = vi
+      .spyOn(internals, 'getPlaybackSnapshot')
+      .mockReturnValue({ offsetMs: 1000, paused: false });
+    vi.spyOn(internals, 'requestReplayPayload').mockReturnValue(new Promise(() => {}));
+
+    internals.startCooperativeLoop();
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(getPlaybackSnapshot.mock.calls.length).toBeLessThanOrEqual(3);
+    expect(received).toEqual([]);
+
+    internals.appendReplayEvents(
+      [{ message: makeReplayMessage('newly-buffered', 1000), offsetMs: 1000 }],
+      0
+    );
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(received.map((message) => message.id)).toEqual(['newly-buffered']);
+    source.stop();
+  });
+
   it('does not begin another replay request after playback pauses during delayed I/O', async () => {
     vi.useFakeTimers();
     let resolveRequest!: (payload: LiveChatPayload) => void;
