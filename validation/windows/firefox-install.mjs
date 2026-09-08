@@ -10,8 +10,7 @@ const EXTENSION_ID = 'yt-live-chat-overlay@piesp.github.io';
 const OVERLAY_ID = 'yt-live-chat-overlay';
 const SETTINGS_KEY = 'yt-live-chat-overlay-settings';
 const FIXTURE_URL = 'https://www.youtube.com/watch?v=windowsFirefoxExtension';
-const LIVE_SETTLE_MS = 3_000;
-const MAX_LIVE_URLS = 5;
+const MAX_LIVE_URLS = 3;
 
 const CONTINUATION = {
   timedContinuationData: {
@@ -116,6 +115,9 @@ export function normalizeLiveUrls(liveUrls = []) {
   }
   return liveUrls.map((value, index) => {
     if (typeof value !== 'string') throw new TypeError(`liveUrls[${index}] must be a string`);
+    if (!value.startsWith('https://www.youtube.com/') || /\s/u.test(value) || value.includes('\\')) {
+      throw new Error(`liveUrls[${index}] must be a public https://www.youtube.com URL`);
+    }
     const url = new URL(value);
     if (
       url.protocol !== 'https:' ||
@@ -126,7 +128,10 @@ export function normalizeLiveUrls(liveUrls = []) {
     ) {
       throw new Error(`liveUrls[${index}] must be a public https://www.youtube.com URL`);
     }
-    if (url.pathname !== '/watch' && !url.pathname.startsWith('/live/')) {
+    if (url.hash !== '') {
+      throw new Error(`liveUrls[${index}] must not contain a fragment`);
+    }
+    if (url.pathname !== '/watch' && !/^\/live\/[A-Za-z0-9_-]{1,64}$/u.test(url.pathname)) {
       throw new Error(`liveUrls[${index}] must identify a public watch or live page`);
     }
     const kind = url.pathname === '/watch' ? 'watch' : 'live';
@@ -227,7 +232,7 @@ async function runDeterministicPhase(session, checks) {
       pageScriptCount: document.querySelectorAll('script[src^="moz-extension://"][src$="/page-script.js"]').length,
       storageType: bridge?.storageType ?? null,
       workerSupported: bridge?.workerSupported === true,
-      workerUrlValid: /^moz-extension:\\/\\/[^/]+\\/workers\\/renderer\\.js$/.test(bridge?.workerUrl ?? '')
+      workerUrlValid: /^blob:https:\/\/www\.youtube\.com\//.test(bridge?.workerUrl ?? '')
     };
   })()`);
   assert.deepEqual(startup, {
@@ -369,22 +374,59 @@ async function runLivePhase(session, liveEntries, output) {
   const observations = [];
   for (const [index, entry] of liveEntries.entries()) {
     session.clearPageLogs();
+    let loaded = false;
+    let state;
+    let workerReady = false;
     try {
       await session.navigate(entry.url, { wait: 'interactive', timeoutMs: 45_000 });
-      await delay(LIVE_SETTLE_MS);
-      const state = await session.evaluateJson(`(() => ({
+      loaded = true;
+      await session.waitFor(
+        `Boolean(
+          document.querySelectorAll('#${OVERLAY_ID}').length === 1 &&
+          document.querySelectorAll('#${OVERLAY_ID} canvas').length === 1 &&
+          document.querySelectorAll('#yt-chat-overlay-settings-button').length === 1 &&
+          document.querySelectorAll('#${OVERLAY_ID} .yt-live-chat-overlay-live-region > p').length > 0 &&
+          window.__ytExtensionBridge?.workerSupported === true &&
+          /^blob:https:\\/\\/www\\.youtube\\.com\\//.test(window.__ytExtensionBridge?.workerUrl ?? '')
+        )`,
+        'the installed Firefox extension to render public live chat',
+        30_000
+      );
+      await waitForLog(
+        session,
+        ({ text }) => text.includes('[RenderWorkerManager] renderer.worker.started'),
+        'the public-page render worker'
+      );
+      state = await session.evaluateJson(`(() => ({
         canvasCount: document.querySelectorAll('#${OVERLAY_ID} canvas').length,
         overlayCount: document.querySelectorAll('#${OVERLAY_ID}').length,
         pageScriptCount: document.querySelectorAll('script[src^="moz-extension://"][src$="/page-script.js"]').length,
+        renderedMessageCount: document.querySelectorAll('#${OVERLAY_ID} .yt-live-chat-overlay-live-region > p').length,
         settingsButtonCount: document.querySelectorAll('#yt-chat-overlay-settings-button').length,
         workerBridgeReady: Boolean(window.__ytExtensionBridge?.workerSupported &&
-          /^moz-extension:\\/\\/[^/]+\\/workers\\/renderer\\.js$/.test(window.__ytExtensionBridge?.workerUrl ?? ''))
+          /^blob:https:\\/\\/www\\.youtube\\.com\\//.test(window.__ytExtensionBridge?.workerUrl ?? ''))
       }))()`);
+      workerReady = session.pageLogs.some(
+        ({ text }) => text.includes('[RenderWorkerManager] renderer.worker.started')
+      );
+      if (
+        state.overlayCount !== 1 ||
+        state.canvasCount !== 1 ||
+        state.settingsButtonCount !== 1 ||
+        state.pageScriptCount !== 1 ||
+        state.workerBridgeReady !== true ||
+        state.renderedMessageCount < 1 ||
+        !workerReady
+      ) {
+        throw new Error('The public YouTube page did not prove installed rendering');
+      }
       observations.push({
         index,
         kind: entry.kind,
         loaded: true,
         ...state,
+        workerReady,
+        status: 'passed',
         errorCategories: categorizeErrors(session.pageLogs),
         errorCount: session.pageLogs.filter(({ level }) => level === 'error').length,
       });
@@ -397,8 +439,15 @@ async function runLivePhase(session, liveEntries, output) {
       observations.push({
         index,
         kind: entry.kind,
-        loaded: false,
-        failureCategory: errorMessage(error).includes('timed out') ? 'timeout' : 'navigation',
+        loaded,
+        ...(state ?? {}),
+        workerReady,
+        status: 'unverified',
+        failureCategory: errorMessage(error).includes('timed out')
+          ? 'readiness-timeout'
+          : loaded
+            ? 'installed-render-readiness'
+            : 'navigation',
         errorCategories: categorizeErrors(session.pageLogs),
         errorCount: session.pageLogs.filter(({ level }) => level === 'error').length,
       });
@@ -436,6 +485,7 @@ export async function runFirefoxInstallation(
     spaLifecycle: false,
     deterministicErrorsAbsent: false,
     livePagesLoaded: liveEntries.length === 0,
+    liveRenderingPassed: liveEntries.length === 0,
     extensionUninstalled: false,
     browserClosed: false,
   };
@@ -443,6 +493,7 @@ export async function runFirefoxInstallation(
   let extensionId;
   let stopMock;
   let primaryError;
+  const cleanupErrors = [];
   let deterministic;
   let live = [];
 
@@ -464,15 +515,20 @@ export async function runFirefoxInstallation(
     await stopMock();
     stopMock = undefined;
     live = await runLivePhase(session, liveEntries, output);
-    checks.livePagesLoaded = live.every(({ loaded }) => loaded);
-    assert.equal(checks.livePagesLoaded, true, 'One or more public YouTube pages failed to load');
+    checks.livePagesLoaded = live.length === liveEntries.length && live.every(({ loaded }) => loaded);
+    checks.liveRenderingPassed =
+      live.length === liveEntries.length && live.every(({ status }) => status === 'passed');
+    assert.equal(
+      checks.liveRenderingPassed,
+      true,
+      'A public YouTube page did not prove installed rendering'
+    );
   } catch (error) {
     primaryError = error;
     if (session) {
       await writeFailureScreenshot(session, output, 'firefox-extension-failure.png');
     }
   } finally {
-    const cleanupErrors = [];
     if (stopMock) {
       try {
         await stopMock();
@@ -502,25 +558,16 @@ export async function runFirefoxInstallation(
         );
       }
     }
-    if (primaryError && cleanupErrors.length > 0) {
-      throw new AggregateError(
-        [primaryError, ...cleanupErrors],
-        'Firefox installation validation failed'
-      );
-    }
-    if (primaryError) throw primaryError;
-    if (cleanupErrors.length > 0) {
-      throw new AggregateError(cleanupErrors, 'Firefox installation cleanup failed');
-    }
   }
 
-  return {
+  const result = {
+    status: primaryError || cleanupErrors.length > 0 ? 'failed' : 'passed',
     checks,
     observations: {
       browser: {
-        name: session.browserName,
-        version: session.browserVersion,
-        platform: session.platformName,
+        name: session?.browserName ?? null,
+        version: session?.browserVersion ?? null,
+        platform: session?.platformName ?? null,
       },
       deterministic,
       execution: {
@@ -530,4 +577,23 @@ export async function runFirefoxInstallation(
       live,
     },
   };
+  try {
+    await writeFile(
+      join(output, 'firefox-installation-result.json'),
+      JSON.stringify(result, null, 2)
+    );
+  } catch (error) {
+    cleanupErrors.push(new Error(`Failed to persist Firefox installation result: ${errorMessage(error)}`));
+  }
+  if (primaryError && cleanupErrors.length > 0) {
+    throw new AggregateError(
+      [primaryError, ...cleanupErrors],
+      'Firefox installation validation failed'
+    );
+  }
+  if (primaryError) throw primaryError;
+  if (cleanupErrors.length > 0) {
+    throw new AggregateError(cleanupErrors, 'Firefox installation cleanup failed');
+  }
+  return result;
 }

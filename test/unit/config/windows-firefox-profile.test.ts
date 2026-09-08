@@ -16,8 +16,12 @@ const {
   resolveSystemFirefoxExecutable,
   runFirefoxInstallation,
 } = firefoxInstallModule;
-const { buildFirefoxLaunchArguments, extensionInstallParameters, extensionUninstallParameters } =
-  firefoxBidiModule;
+const {
+  buildFirefoxLaunchArguments,
+  cleanupFirefoxResources,
+  extensionInstallParameters,
+  extensionUninstallParameters,
+} = firefoxBidiModule;
 
 const temporaryDirectories: string[] = [];
 
@@ -30,7 +34,10 @@ async function createBundle(): Promise<{ output: string; root: string }> {
   return { output, root };
 }
 
-function createSession(options: { failStartup?: boolean } = {}) {
+function createSession(options: {
+  failStartup?: boolean;
+  liveState?: Record<string, unknown>;
+} = {}) {
   const calls: string[] = [];
   const pageLogs: Array<{ level: string; text: string; type: string }> = [];
   const pageErrors: Array<{ level: string; text: string; type: string }> = [];
@@ -68,12 +75,14 @@ function createSession(options: { failStartup?: boolean } = {}) {
         case 4:
           return 1;
         case 7:
-          return {
+          return options.liveState ?? {
             canvasCount: 1,
             overlayCount: 1,
             pageScriptCount: 1,
+            renderedMessageCount: 1,
             settingsButtonCount: 1,
             workerBridgeReady: true,
+            workerReady: true,
           };
         default:
           return true;
@@ -85,6 +94,13 @@ function createSession(options: { failStartup?: boolean } = {}) {
     }),
     navigate: vi.fn(async (url: string) => {
       calls.push(url.includes('windowsFirefoxExtension') ? 'navigate-fixture' : 'navigate-live');
+      if (!url.includes('windowsFirefoxExtension')) {
+        pageLogs.push({
+          level: 'info',
+          text: '[RenderWorkerManager] renderer.worker.started',
+          type: 'console',
+        });
+      }
     }),
     reload: vi.fn(async () => {
       calls.push('reload');
@@ -164,6 +180,18 @@ describe('Windows Firefox installation profile', () => {
     expect(() => normalizeLiveUrls(['https://www.youtube.com/account'])).toThrow(
       /public watch or live/u
     );
+    expect(() => normalizeLiveUrls(['https://www.youtube.com/live'])).toThrow(
+      /public watch or live/u
+    );
+    expect(() => normalizeLiveUrls(['https://www.youtube.com/watch?v=x#fragment'])).toThrow(
+      /fragment/u
+    );
+    expect(() => normalizeLiveUrls([
+      'https://www.youtube.com/watch?v=1',
+      'https://www.youtube.com/watch?v=2',
+      'https://www.youtube.com/watch?v=3',
+      'https://www.youtube.com/watch?v=4',
+    ])).toThrow(/at most 3/u);
     expect(
       categorizeErrors([
         { level: 'error', text: 'Content Security Policy blocked data', type: 'console' },
@@ -197,6 +225,7 @@ describe('Windows Firefox installation profile', () => {
     expect(result.checks).toEqual(
       Object.fromEntries(Object.keys(result.checks).map((key) => [key, true]))
     );
+    expect(result.status).toBe('passed');
     expect(result.observations.live).toEqual([
       {
         canvasCount: 1,
@@ -207,14 +236,20 @@ describe('Windows Firefox installation profile', () => {
         loaded: true,
         overlayCount: 1,
         pageScriptCount: 1,
+        renderedMessageCount: 1,
         settingsButtonCount: 1,
         workerBridgeReady: true,
+        workerReady: true,
+        status: 'passed',
       },
     ]);
     expect(JSON.stringify(result)).not.toContain(root);
     expect(JSON.stringify(result)).not.toContain('/test/firefox.exe');
     expect(calls.indexOf('stop-mock')).toBeLessThan(calls.indexOf('navigate-live'));
     expect(calls.slice(-2)).toEqual(['uninstall', 'close']);
+    expect(
+      JSON.parse(await readFile(join(output, 'firefox-installation-result.json'), 'utf8'))
+    ).toEqual(result);
   });
 
   it('retains a flat failure screenshot and still uninstalls and closes', async () => {
@@ -228,10 +263,90 @@ describe('Windows Firefox installation profile', () => {
       )
     ).rejects.toThrow('fixture startup failed');
 
-    expect(await readdir(output)).toEqual(['firefox-extension-failure.png']);
+    expect(await readdir(output)).toEqual([
+      'firefox-extension-failure.png',
+      'firefox-installation-result.json',
+    ]);
     expect(await readFile(join(output, 'firefox-extension-failure.png'), 'utf8')).toBe(
       'screenshot'
     );
     expect(calls.slice(-3)).toEqual(['stop-mock', 'uninstall', 'close']);
+  });
+
+  it('fails a loaded live page without installed render readiness after recording it', async () => {
+    const { output, root } = await createBundle();
+    const { calls, session } = createSession({
+      liveState: {
+        canvasCount: 0,
+        overlayCount: 0,
+        pageScriptCount: 0,
+        renderedMessageCount: 0,
+        settingsButtonCount: 0,
+        workerBridgeReady: false,
+        workerReady: false,
+      },
+    });
+
+    await expect(
+      runFirefoxInstallation(
+        {
+          executablePath: '/test/firefox.exe',
+          liveUrls: ['https://www.youtube.com/watch?v=public'],
+          output,
+          root,
+        },
+        { launch: async () => session }
+      )
+    ).rejects.toThrow('public YouTube page did not prove installed rendering');
+
+    const result = JSON.parse(
+      await readFile(join(output, 'firefox-installation-result.json'), 'utf8')
+    );
+    expect(result.status).toBe('failed');
+    expect(result.observations.live).toEqual([
+      expect.objectContaining({
+        loaded: true,
+        renderedMessageCount: 0,
+        status: 'unverified',
+      }),
+    ]);
+    expect(calls.slice(-2)).toEqual(['uninstall', 'close']);
+  });
+
+  it('attempts process and owned-profile cleanup even when socket close fails', async () => {
+    const calls: string[] = [];
+    await expect(
+      cleanupFirefoxResources(
+        {
+          child: {},
+          detachSocket: () => calls.push('detach'),
+          profileDir: '/task/.firefox-install-profile-test',
+          root: '/task',
+          socket: { close: () => { calls.push('socket-close'); throw new Error('socket failed'); } },
+        },
+        {
+          removeProfile: async () => { calls.push('remove-profile'); },
+          terminateProcessTree: async () => { calls.push('terminate-tree'); },
+        }
+      )
+    ).rejects.toThrow(AggregateError);
+    expect(calls).toEqual(['detach', 'socket-close', 'terminate-tree', 'remove-profile']);
+
+    const removeProfile = vi.fn(async () => {});
+    await expect(
+      cleanupFirefoxResources(
+        {
+          child: {},
+          profileDir: '/task/.firefox-install-profile-test',
+          root: '/task',
+          socket: null,
+        },
+        {
+          removeProfile,
+          terminateProcessTree: async () => { throw new Error('tree remains'); },
+        }
+      )
+    ).rejects.toThrow('Firefox resource cleanup failed');
+    expect(removeProfile).not.toHaveBeenCalled();
   });
 });
