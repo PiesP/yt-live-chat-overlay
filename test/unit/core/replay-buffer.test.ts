@@ -68,7 +68,7 @@ describe('ReplayBuffer', () => {
       expect(result).toHaveLength(3);
     });
 
-    it('prunes evicted IDs without rebuilding the deduplication set', () => {
+    it('keeps the nearest messages when far-future inserts exceed capacity', () => {
       const internals = buf as unknown as { seenIds: Set<string> };
       const seenIds = internals.seenIds;
 
@@ -77,15 +77,15 @@ describe('ReplayBuffer', () => {
       }
 
       expect(internals.seenIds).toBe(seenIds);
-      expect(seenIds.has('msg0')).toBe(false);
-      expect(seenIds.has('msg3000')).toBe(true);
+      expect(seenIds.has('msg0')).toBe(true);
+      expect(seenIds.has('msg3000')).toBe(false);
 
       buf.insert(makeMsg('msg0', 4000), 4000);
       buf.insert(makeMsg('msg3000', 4001), 4001);
       const ids = buf.drainAll().map((message) => message.id);
 
       expect(ids.filter((id) => id === 'msg0')).toHaveLength(1);
-      expect(ids.filter((id) => id === 'msg3000')).toHaveLength(1);
+      expect(ids).not.toContain('msg3000');
     });
 
     it('bounds backing storage while trimming a long replay', () => {
@@ -97,6 +97,20 @@ describe('ReplayBuffer', () => {
 
       expect(internals.buffer.length).toBeLessThanOrEqual(3_500);
       expect(internals.bufferOffset).toBeLessThanOrEqual(500);
+    });
+
+    it('enforces the byte bound by discarding far-future messages first', () => {
+      for (let index = 0; index < 100; index++) {
+        const message = makeMsg(`large-${index}`, index);
+        message.text = 'x'.repeat(25_000);
+        message.content = [{ type: 'text', content: message.text }];
+        buf.insert(message, index);
+      }
+
+      expect(buf.estimatedByteSize).toBeLessThanOrEqual(8 * 1024 * 1024);
+      const ids = buf.drainAll().map((message) => message.id);
+      expect(ids[0]).toBe('large-0');
+      expect(ids).not.toContain('large-99');
     });
   });
 
@@ -213,6 +227,23 @@ describe('ReplayBuffer', () => {
 
     it('returns -1 when all events are skipped', () => {
       expect(buf.appendEvents([])).toBe(-1);
+    });
+
+    it('merges overlapping pages in stable timeline order and removes duplicate IDs', () => {
+      const firstPage = [
+        { message: makeMsg('a', 1000), offsetMs: 1000 },
+        { message: makeMsg('c', 3000), offsetMs: 3000 },
+      ] as ChatEvent[];
+      const overlappingPage = [
+        { message: makeMsg('b', 2000), offsetMs: 2000 },
+        { message: makeMsg('c', 3000), offsetMs: 3000 },
+        { message: makeMsg('d', 3000), offsetMs: 3000 },
+      ] as ChatEvent[];
+
+      buf.appendEvents(firstPage);
+      buf.appendEvents(overlappingPage);
+
+      expect(buf.drainAll().map((message) => message.id)).toEqual(['a', 'b', 'c', 'd']);
     });
   });
 
