@@ -7,6 +7,8 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 // @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
 import * as chromeInstallModule from '../../../validation/windows/chrome-install.mjs';
+// @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
+import * as liveRenderingModule from '../../../validation/windows/live-rendering.mjs';
 
 const { cleanupChromeInstallation, readOwnedBrowserProcessId, requireLiveSuccess } =
   chromeInstallModule;
@@ -28,6 +30,14 @@ async function fixture() {
 }
 
 describe('installed Chrome acceptance outcomes', () => {
+  it('requires an observed page-policy restriction before accepting extension main rendering', () => {
+    const { validateLiveRenderer } = liveRenderingModule;
+    expect(validateLiveRenderer('worker', 'extension', [])).toEqual({ renderer: 'worker', workerPolicyFallback: false });
+    expect(validateLiveRenderer('main', 'extension', [{ text: "This document requires 'TrustedScriptURL' assignment." }]))
+      .toEqual({ renderer: 'main', workerPolicyFallback: true });
+    expect(() => validateLiveRenderer('main', 'extension', [])).toThrow();
+    expect(() => validateLiveRenderer('unknown', 'extension', [{ text: 'require-trusted-types-for' }])).toThrow();
+  });
   it('rejects a loaded page that did not render the installed application', () => {
     expect(() => requireLiveSuccess([{ status: 'unverified', canvasAttached: false }])).toThrow();
     expect(() => requireLiveSuccess([{ status: 'passed', canvasAttached: true, renderedMessages: 0 }])).toThrow();

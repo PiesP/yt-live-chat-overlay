@@ -87,6 +87,11 @@ Screenshots and
 logs remain external and source-bound. Fixture persistence assertions reload the
 page through the actual installation rather than injecting saved settings.
 
+Installed-extension fixtures require a running Worker. Public-page observations
+also accept the application's main-thread fallback when the page reports a
+Trusted Types restriction; the result records `workerPolicyFallback` explicitly.
+Both paths must render real chat into the attached Canvas overlay.
+
 Run VM packaging and local E2E serially: both build into the same distribution
 directories, and production packaging replaces the development userscript that
 E2E requires.

@@ -2,6 +2,7 @@
 // Copyright (c) 2026 PiesP
 
 import assert from 'node:assert/strict';
+import { validateLiveRenderer } from './live-rendering.mjs';
 import { mkdir, stat, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, win32 } from 'node:path';
 import { launchFirefoxBidi } from './firefox-bidi.mjs';
@@ -403,6 +404,26 @@ async function runLivePhase(session, liveEntries, output) {
         void video.play().catch(() => {});
         return { paused: video.paused, readyState: video.readyState };
       })()`);
+      const playPoint = await session.evaluateJson(`(() => {
+        const button = document.querySelector('.ytp-large-play-button');
+        const rect = button?.getBoundingClientRect();
+        return rect && rect.width > 0 && rect.height > 0
+          ? { x: Math.floor(rect.x + rect.width / 2), y: Math.floor(rect.y + rect.height / 2) }
+          : null;
+      })()`);
+      if (playPoint) {
+        try {
+          await session.command('input.performActions', { context: session.context, actions: [{
+            type: 'pointer', id: 'acceptance-player', parameters: { pointerType: 'mouse' },
+            actions: [
+              { type: 'pointerMove', origin: 'viewport', x: playPoint.x, y: playPoint.y },
+              { type: 'pointerDown', button: 0 }, { type: 'pointerUp', button: 0 },
+            ],
+          }] });
+        } finally {
+          await session.command('input.releaseActions', { context: session.context });
+        }
+      }
       await session.waitFor(
         `Boolean(
           document.querySelectorAll('#${OVERLAY_ID}').length === 1 &&
@@ -415,12 +436,10 @@ async function runLivePhase(session, liveEntries, output) {
         'the installed Firefox extension to render public live chat',
         30_000
       );
-      await waitForLog(
-        session,
-        ({ text }) => text.includes('[RenderWorkerManager] renderer.worker.started'),
-        'the public-page render worker'
-      );
       state = await session.evaluateJson(`(() => ({
+        videoPaused: document.querySelector('video')?.paused ?? true,
+        renderer: document.querySelector('#yt-chat-overlay-debug')?.textContent.includes('Render: n/a')
+          ? 'worker' : /Render:\\s*\\d/.test(document.querySelector('#yt-chat-overlay-debug')?.textContent ?? '') ? 'main' : 'unknown',
         canvasCount: document.querySelectorAll('#${OVERLAY_ID} canvas').length,
         overlayCount: document.querySelectorAll('#${OVERLAY_ID}').length,
         pageScriptCount: document.querySelectorAll('script[src^="moz-extension://"][src$="/page-script.js"]').length,
@@ -439,16 +458,21 @@ async function runLivePhase(session, liveEntries, output) {
         state.pageScriptCount !== 1 ||
         state.workerBridgeReady !== true ||
         state.renderedMessageCount < 1 ||
-        !workerReady
+        (state.renderer === 'worker' && !workerReady)
       ) {
         throw new Error('The public YouTube page did not prove installed rendering');
       }
+      const rendererResult = validateLiveRenderer(state.renderer, 'extension', session.pageLogs);
+      const screenshot = `firefox-live-${String(index + 1).padStart(2, '0')}.png`;
+      await writeFile(join(output, screenshot), await session.captureScreenshot());
       observations.push({
         index,
         kind: entry.kind,
         loaded: true,
         player,
         ...state,
+        ...rendererResult,
+        screenshot,
         workerReady,
         status: 'passed',
         errorCategories: categorizeErrors(session.pageLogs),

@@ -9,6 +9,7 @@
     "entry": "validation/windows/install-profile.mjs",
     "assets": [
       "validation/windows/chrome-install.mjs",
+      "validation/windows/live-rendering.mjs",
       "validation/windows/firefox-bidi.mjs",
       "validation/windows/firefox-install.mjs",
       "dist-extension",

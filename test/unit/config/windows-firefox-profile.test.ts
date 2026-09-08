@@ -45,6 +45,8 @@ function createSession(options: {
   const pageErrors: Array<{ level: string; text: string; type: string }> = [];
   let evaluateIndex = 0;
   const session = {
+    context: 'owned-context',
+    command: vi.fn(async () => ({})),
     browserName: 'Firefox',
     browserVersion: '155.0.1',
     platformName: 'windows',
@@ -61,6 +63,7 @@ function createSession(options: {
     evaluateJson: vi.fn(async (expression: string) => {
       new Script(expression);
       if (expression.includes('video.muted = true')) return { paused: false, readyState: 4 };
+      if (expression.includes('getBoundingClientRect')) return { x: 300, y: 200 };
       evaluateIndex++;
       if (options.failStartup && evaluateIndex === 1) throw new Error('fixture startup failed');
       switch (evaluateIndex) {
@@ -80,6 +83,8 @@ function createSession(options: {
           return 1;
         case 7:
           return options.liveState ?? {
+            renderer: 'worker',
+            videoPaused: false,
             canvasCount: 1,
             overlayCount: 1,
             pageScriptCount: 1,
@@ -230,8 +235,22 @@ describe('Windows Firefox installation profile', () => {
       Object.fromEntries(Object.keys(result.checks).map((key) => [key, true]))
     );
     expect(result.status).toBe('passed');
+    expect(session.command).toHaveBeenCalledWith('input.performActions', {
+      context: 'owned-context', actions: [{
+        type: 'pointer', id: 'acceptance-player', parameters: { pointerType: 'mouse' },
+        actions: [
+          { type: 'pointerMove', origin: 'viewport', x: 300, y: 200 },
+          { type: 'pointerDown', button: 0 }, { type: 'pointerUp', button: 0 },
+        ],
+      }],
+    });
+    expect(session.command).toHaveBeenCalledWith('input.releaseActions', { context: 'owned-context' });
     expect(result.observations.live).toEqual([
       {
+        renderer: 'worker',
+        workerPolicyFallback: false,
+        videoPaused: false,
+        screenshot: 'firefox-live-01.png',
         player: { paused: false, readyState: 4 },
         canvasCount: 1,
         errorCategories: {},

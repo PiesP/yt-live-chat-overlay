@@ -6,6 +6,7 @@ import { spawn } from 'node:child_process';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve, win32 } from 'node:path';
 import { run as runFixture } from './profile.mjs';
+import { validateLiveRenderer } from './live-rendering.mjs';
 
 const SCRIPT_NAME = 'YouTube Live Chat Overlay';
 const CHROME_PROFILE_PREFIX = 'chrome-install-';
@@ -215,7 +216,7 @@ async function inspectLivePage(context, url, output, index, installation) {
     observation.canvasAttached = await page.locator('#yt-live-chat-overlay canvas').count() === 1;
     const renderer = await page.locator('#yt-chat-overlay-debug').innerText();
     observation.renderer = renderer.includes('Render: n/a') ? 'worker' : 'main';
-    assert.equal(observation.renderer, installation === 'extension' ? 'worker' : 'main');
+    Object.assign(observation, validateLiveRenderer(observation.renderer, installation, workerDiagnostics));
     observation.status = 'passed';
     observation.phase = 'complete';
   } catch (error) {
