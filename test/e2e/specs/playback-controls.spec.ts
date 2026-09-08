@@ -306,4 +306,95 @@ test.describe('Playback controls', () => {
   }) => {
     await runReplayScenario(page, 'worker');
   });
+
+  for (const renderer of ['main', 'worker'] as const) {
+    test(`flushes buffered replay during delayed network I/O with ${renderer} rendering`, async ({
+      page,
+    }) => {
+      const errors: string[] = [];
+      page.on('pageerror', (error) => errors.push(error.message));
+      await setupMockPageRoute(page);
+      if (renderer === 'worker') {
+        await routePlaybackWorker(page);
+        await page.addInitScript(installPlaybackWorkerObserver, PLAYBACK_WORKER_URL);
+      }
+      let releaseRequest: (() => void) | undefined;
+      const heldResponse = new Promise<void>((resolve) => {
+        releaseRequest = resolve;
+      });
+      let requestWaiting = false;
+      let responseReleased = false;
+      await page.route('**/youtubei/v1/live_chat/get_live_chat_replay**', async (route) => {
+        const body = route.request().postDataJSON() as {
+          currentPlayerState?: { playerOffsetMs?: string };
+        };
+        const offsetMs = Number(body.currentPlayerState?.playerOffsetMs ?? 0);
+        if (offsetMs >= 3000) {
+          requestWaiting = true;
+          await heldResponse;
+        }
+        await route.fulfill({
+          json: {
+            continuationContents: {
+              liveChatContinuation: {
+                actions: [
+                  replayAction(0, 'delay-start', 'initial buffered message'),
+                  replayAction(8000, 'delay-future', 'buffered message independent of network'),
+                ],
+                continuations: [
+                  { playerSeekContinuationData: { continuation: 'delayed-player-seek' } },
+                ],
+              },
+            },
+          },
+        });
+      });
+      await page.addInitScript(installPlaybackMock, { forceMainThread: renderer === 'main' });
+      await page.addInitScript(installYTMock, {
+        defaults: { ...DEFAULT_SETTINGS, allowShortTextMessages: true, showDebugOverlay: true },
+        platform: 'userscript' as const,
+      });
+      await injectUserscript(page);
+      try {
+        await page.goto(MOCK_WATCH_URL, { waitUntil: 'domcontentloaded' });
+        await page.locator(`#${OVERLAY_ID}`).waitFor({ state: 'attached' });
+        await page.evaluate(() => {
+          document.querySelector('video')?.dispatchEvent(new Event('play'));
+        });
+        const messages = page.locator('.yt-live-chat-overlay-live-region');
+        const counters = page.locator('#yt-chat-overlay-debug > div').first();
+        await expect(counters).toHaveText(/^Rcvd: 1 \| Rndr: \d+$/);
+        await page.evaluate(() => {
+          const video = document.querySelector('video');
+          if (!video) throw new Error('Fixture video missing');
+          video.currentTime = 3;
+        });
+        await expect.poll(() => requestWaiting).toBe(true);
+        await page.evaluate(() => {
+          const video = document.querySelector('video');
+          if (!video) throw new Error('Fixture video missing');
+          video.currentTime = 8;
+        });
+        if (renderer === 'worker') {
+          await expect
+            .poll(() => page.evaluate(() => {
+              const telemetry = (window as unknown as Record<string, unknown>)
+                .__playbackWorkerTelemetry as PlaybackWorkerTelemetry;
+              return telemetry.stats.at(-1)?.activeMessageIds ?? [];
+            }), { timeout: 3000 })
+            .toContain('delay-future');
+        } else {
+          await expect(messages).toContainText('buffered message independent of network', {
+            timeout: 3000,
+          });
+        }
+        expect(responseReleased).toBe(false);
+        expect(errors).toEqual([]);
+      } finally {
+        responseReleased = true;
+        releaseRequest?.();
+        await page.unrouteAll({ behavior: 'wait' });
+      }
+    });
+  }
 });
