@@ -9,19 +9,17 @@ from pathlib import Path
 import shutil
 import struct
 import tempfile
-import urllib.parse
 import urllib.request
 import zipfile
 
 VERSION = '5.5.0'
 SHA256 = 'bcaec082c439e11c4df683f43d07e9ac3d4439251d72b91c5b452f977dac15d5'
 EXTENSION_ID = 'dhdgffkkebhmkfjojejmpbldmpobfkfo'
-QUERY = urllib.parse.urlencode({
-    'response': 'redirect', 'prodversion': '152.0.7977.83', 'acceptformat': 'crx3',
-    'prod': 'chromecrx', 'prodchannel': 'stable', 'os': 'win', 'arch': 'x64',
-    'x': f'id={EXTENSION_ID}&uc',
-})
-URL = 'https://clients2.google.com/service/update2/crx?' + QUERY
+URL = (
+    'https://clients2.google.com/service/update2/crx?response=redirect'
+    '&prodversion=152.0.7977.83&acceptformat=crx3&prod=chromecrx&prodchannel=stable'
+    '&os=win&arch=x64&x=id%3Ddhdgffkkebhmkfjojejmpbldmpobfkfo%26uc'
+)
 MAX_ARCHIVE_BYTES = 16 * 1024 * 1024
 
 
@@ -29,7 +27,9 @@ def prepare(output):
     output = output.absolute()
     if output.exists():
         raise ValueError('Choose a new output directory.')
-    with urllib.request.urlopen(URL, timeout=60) as response:
+    # Fixed HTTPS endpoint with no caller-controlled URL. This audit rule also
+    # flags a literal URL when the required timeout keyword is present.
+    with urllib.request.urlopen(URL, timeout=60) as response:  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
         body = response.read(MAX_ARCHIVE_BYTES + 1)
     if len(body) > MAX_ARCHIVE_BYTES or hashlib.sha256(body).hexdigest() != SHA256:
         raise ValueError('The Store package does not match the reviewed pin; review a new version first.')

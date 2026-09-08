@@ -68,8 +68,14 @@ body = package()
 manager.SHA256 = hashlib.sha256(body).hexdigest()
 with tempfile.TemporaryDirectory() as directory:
     output = Path(directory) / 'manager'
-    with patch.object(manager.urllib.request, 'urlopen', return_value=io.BytesIO(body)):
+    with patch.object(manager.urllib.request, 'urlopen', return_value=io.BytesIO(body)) as request:
         result = manager.prepare(output)
+        request.assert_called_once_with(manager.URL, timeout=60)
+    from urllib.parse import parse_qs, urlsplit
+    source = urlsplit(manager.URL)
+    assert source.scheme == 'https' and source.netloc == 'clients2.google.com'
+    assert source.path == '/service/update2/crx'
+    assert parse_qs(source.query)['x'] == ['id=' + manager.EXTENSION_ID + '&uc']
     assert result['version'] == manager.VERSION
     assert (output / 'background.js').read_text() == 'trusted fixture'
     assert not (output / '_metadata').exists()
