@@ -182,6 +182,10 @@ test.describe('Settings UI Visual', () => {
       safeBottom: 0.5,
     });
     await page.locator(`#${BUTTON_ID}`).click({ force: true });
+    // The opening transform scales client rects, but not the declared block-size.
+    await page.locator('dialog.yt-chat-overlay-settings-modal').evaluate(async (element) => {
+      await Promise.allSettled(element.getAnimations().map((animation) => animation.finished));
+    });
 
     const preview = page.locator('.yt-chat-overlay-settings-font-preview');
     await expect
