@@ -166,6 +166,9 @@ export async function run({ browser, root, output, installedContext, installedEx
     readFile(join(root, GM_MOCKS_PATH), 'utf8'),
   ]);
   assert.match(userscript, /==UserScript==/u, 'Production userscript metadata is missing');
+  const installedEmoji = installedContext
+    ? await readFile(join(root, 'dist-extension/icons/icon48.png'))
+    : null;
   const mockWatchHtml = createMockWatchHtml(previewHtml);
   await mkdir(output, { recursive: true });
 
@@ -234,9 +237,9 @@ export async function run({ browser, root, output, installedContext, installedEx
         customEmojiAssetRequests++;
         await route.fulfill({
           status: 200,
-          contentType: 'image/svg+xml',
+          contentType: installedEmoji ? 'image/png' : 'image/svg+xml',
           headers: { 'access-control-allow-origin': '*' },
-          body: '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><circle cx="16" cy="16" r="15" fill="#ffd54f"/><path d="M9 19q7 8 14 0" fill="none" stroke="#382f18" stroke-width="2"/><circle cx="11" cy="12" r="2"/><circle cx="21" cy="12" r="2"/></svg>',
+          body: installedEmoji ?? '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><circle cx="16" cy="16" r="15" fill="#ffd54f"/><path d="M9 19q7 8 14 0" fill="none" stroke="#382f18" stroke-width="2"/><circle cx="11" cy="12" r="2"/><circle cx="21" cy="12" r="2"/></svg>',
         });
         return;
       }
@@ -413,7 +416,8 @@ export async function run({ browser, root, output, installedContext, installedEx
       assert(installedFixtureDelivered, 'The installed application did not consume fixture data');
       // Reload proves persistence through the real extension/userscript manager.
       await page.reload({ waitUntil: 'domcontentloaded' });
-      await page.locator('#yt-chat-overlay-settings-button').click();
+      await page.locator('#yt-chat-overlay-settings-button').focus();
+      await page.keyboard.press('Enter');
       const modal = page.locator('#yt-chat-overlay-settings-backdrop');
       await modal.waitFor({ state: 'visible' });
       settings = {
@@ -436,6 +440,7 @@ export async function run({ browser, root, output, installedContext, installedEx
         persistedAcrossReload: Boolean(installedContext),
         renderer: rendererStatus,
         settingsUiInteraction: true,
+        settingsOpenMethod: 'keyboard',
         deterministicChatApi: true,
         chatApiRequests,
         explicitChatRequests,

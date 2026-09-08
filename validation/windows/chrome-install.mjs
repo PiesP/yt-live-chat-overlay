@@ -62,19 +62,30 @@ async function installUserscript(context, id, root, output) {
 }
 
 /** Observe a real watch page without supplying application code or site responses. */
-async function inspectLivePage(context, url, output, index) {
+async function inspectLivePage(context, url, output, index, installation) {
   const page = await context.newPage();
+  page.setDefaultTimeout(10_000);
   const pageErrors = [];
   page.on('pageerror', (error) => pageErrors.push(error.name));
   const observation = { url, status: 'not-run', mocked: false };
+  let deadlineReached = false;
+  const deadline = setTimeout(() => {
+    deadlineReached = true;
+    void page.close().catch(() => {});
+  }, 60_000);
   try {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45_000 });
     const rejectConsent = page.getByRole('button', { name: 'Reject all', exact: true });
     if (await rejectConsent.isVisible().catch(() => false)) await rejectConsent.click();
     await page.locator('#movie_player').waitFor({ state: 'visible', timeout: 20_000 });
+    await page.locator('video').first().evaluate((video) => {
+      video.muted = true;
+      return video.play().then(() => true, () => false);
+    });
     const settingsButton = page.locator('#yt-chat-overlay-settings-button');
     await settingsButton.waitFor({ state: 'visible', timeout: 20_000 });
-    await settingsButton.click();
+    await settingsButton.focus();
+    await page.keyboard.press('Enter');
     const modal = page.locator('#yt-chat-overlay-settings-backdrop');
     await modal.waitFor({ state: 'visible' });
     const fontSize = modal.locator('input[name="fontSize"]');
@@ -85,17 +96,64 @@ async function inspectLivePage(context, url, output, index) {
       undefined, { timeout: 30_000 });
     observation.renderedMessages = await page.locator('.yt-live-chat-overlay-live-region > p').count();
     observation.canvasAttached = await page.locator('#yt-live-chat-overlay canvas').count() === 1;
+    const renderer = await page.locator('#yt-chat-overlay-debug').innerText();
+    observation.renderer = renderer.includes('Render: n/a') ? 'worker' : 'main';
+    assert.equal(observation.renderer, installation === 'extension' ? 'worker' : 'main');
     observation.status = 'passed';
   } catch (error) {
     observation.status = 'unverified';
-    observation.reason = error.name === 'TimeoutError' ? 'watch-page-or-chat-readiness-timeout' : 'navigation-or-render-error';
+    observation.reason = deadlineReached ? 'live-url-deadline'
+      : error.name === 'TimeoutError' ? 'watch-page-or-chat-readiness-timeout' : 'navigation-or-render-error';
   } finally {
+    clearTimeout(deadline);
     observation.pageErrorTypes = [...new Set(pageErrors)];
-    observation.screenshot = `live-${index}.png`;
-    await page.screenshot({ path: join(output, observation.screenshot) }).catch(() => {});
+    if (!page.isClosed()) {
+      const screenshot = `live-${index}.png`;
+      await page.screenshot({ path: join(output, screenshot) }).then(() => {
+        observation.screenshot = screenshot;
+      }, () => {});
+    }
     await page.close();
   }
   return observation;
+}
+
+export function requireLiveSuccess(observations) {
+  assert(observations.every((item) => item.status === 'passed' && item.canvasAttached && item.renderedMessages > 0),
+    'One or more requested live pages did not prove installed application rendering');
+}
+
+/** Attempt every owned cleanup stage even when an earlier operation fails. */
+export async function cleanupChromeInstallation({ context, cdp, extensionId, profile, output, result }) {
+  const errors = [];
+  if (cdp && extensionId) {
+    try {
+      await cdp.send('Extensions.uninstall', { id: extensionId });
+      result.cleanup.extensionUninstalled = true;
+    } catch (error) { errors.push(error); }
+  }
+  try {
+    await context?.close();
+    result.cleanup.browserClosed = true;
+  } catch (error) {
+    errors.push(error);
+    try {
+      const ownedBrowser = context?.browser();
+      if (!ownedBrowser) throw new Error('Owned browser cleanup handle is unavailable');
+      await ownedBrowser.close();
+      result.cleanup.browserClosed = true;
+    } catch (fallbackError) { errors.push(fallbackError); }
+  }
+  try {
+    await rm(profile, { recursive: true });
+    result.cleanup.profileRemoved = await stat(profile).then(() => false, (error) => {
+      if (error.code === 'ENOENT') return true;
+      throw error;
+    });
+  } catch (error) { errors.push(error); }
+  result.cleanup.errorCount = errors.length;
+  await writeFile(join(output, 'installation-result.json'), JSON.stringify(result, null, 2));
+  if (errors.length) throw new AggregateError(errors, 'Chrome installation cleanup failed');
 }
 
 /** Install real browser packages in an isolated profile and exercise their normal delivery. */
@@ -105,10 +163,13 @@ export async function runChromeInstallation({
 }) {
   assert(['chrome', 'msedge'].includes(browserName), 'Unsupported Chromium channel');
   assert(['extension', 'userscript'].includes(installation), 'Unknown installation mode');
+  assert(Array.isArray(liveUrls) && liveUrls.length <= 3,
+    'At most three live URLs can run within the guest deadline');
   const profile = await mkdtemp(join(root, 'chrome-install-'));
   let context;
   let cdp;
   let extensionId;
+  let primaryError;
   const result = { installation, fixture: null, live: [], cleanup: {} };
   try {
     context = await chromium.launchPersistentContext(profile, {
@@ -140,27 +201,19 @@ export async function runChromeInstallation({
       installedContext: context, installedExtensionId: extensionId,
       expectedRenderer: installation === 'extension' ? 'worker' : 'main' });
     for (const [index, url] of liveUrls.entries()) {
-      result.live.push(await inspectLivePage(context, url, output, index));
+      result.live.push(await inspectLivePage(context, url, output, index, installation));
     }
+    requireLiveSuccess(result.live);
     return result;
+  } catch (error) {
+    primaryError = error;
+    throw error;
   } finally {
     try {
-      if (cdp && extensionId) {
-        await cdp.send('Extensions.uninstall', { id: extensionId });
-        result.cleanup.extensionUninstalled = true;
-      }
-    } finally {
-      try {
-        await context?.close();
-        result.cleanup.browserClosed = true;
-        await rm(profile, { recursive: true });
-        result.cleanup.profileRemoved = await stat(profile).then(() => false, (error) => {
-          if (error.code === 'ENOENT') return true;
-          throw error;
-        });
-      } finally {
-        await writeFile(join(output, 'installation-result.json'), JSON.stringify(result, null, 2));
-      }
+      await cleanupChromeInstallation({ context, cdp, extensionId, profile, output, result });
+    } catch (cleanupError) {
+      if (primaryError) throw new AggregateError([primaryError, cleanupError], 'Installation and cleanup failed');
+      throw cleanupError;
     }
   }
 }
