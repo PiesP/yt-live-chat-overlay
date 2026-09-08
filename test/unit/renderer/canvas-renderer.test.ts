@@ -333,6 +333,33 @@ describe('CanvasRenderer', () => {
     renderer.destroy();
   });
 
+  it('preserves main text caches for opacity changes and invalidates outline geometry', () => {
+    const initial = makeSettings();
+    const renderer = new CanvasRenderer(overlay, initial);
+    const internals = renderer as unknown as {
+      textBitmapCache: { set(key: string, value: HTMLCanvasElement): boolean; size: number };
+      dimensionCache: Map<string, { width: number; height: number }>;
+    };
+    const bitmap = document.createElement('canvas');
+    bitmap.width = 2;
+    bitmap.height = 2;
+    internals.textBitmapCache.set('cached-text', bitmap);
+    internals.dimensionCache.set('cached-dimensions', { width: 100, height: 20 });
+
+    renderer.updateSettings({ ...initial, opacity: 0.75 });
+    expect(internals.textBitmapCache.size).toBe(1);
+    expect(internals.dimensionCache.size).toBe(1);
+
+    renderer.updateSettings({
+      ...initial,
+      opacity: 0.75,
+      outline: { ...initial.outline, widthPx: initial.outline.widthPx + 1 },
+    });
+    expect(internals.textBitmapCache.size).toBe(0);
+    expect(internals.dimensionCache.size).toBe(0);
+    renderer.destroy();
+  });
+
   it('invalidates cached card dimensions when the overlay size changes', () => {
     const callbacks: Array<Parameters<Overlay['onDimensionsChanged']>[0]> = [];
     vi.spyOn(overlay, 'onDimensionsChanged').mockImplementation((callback) => {
@@ -351,7 +378,7 @@ describe('CanvasRenderer', () => {
     renderer.destroy();
   });
 
-  it('collects auto source-language samples on the Worker path', () => {
+  it('collects auto source-language samples after Worker dispatch', async () => {
     const settings = makeSettings({ translationEnabled: true, translationSource: 'auto' });
     const renderer = new CanvasRenderer(overlay, settings);
     const internals = renderer as unknown as {
@@ -370,6 +397,7 @@ describe('CanvasRenderer', () => {
     internals.workerManager.setActive(true);
 
     renderer.addMessage(makeMessage('worker-language-sample', 'hello from worker rendering'));
+    await Promise.resolve();
 
     expect(internals.sourceSampleBuffer).toEqual(['hello from worker rendering']);
     renderer.destroy();
@@ -501,6 +529,42 @@ describe('CanvasRenderer', () => {
 
     expect(translate).toHaveBeenCalledOnce();
     expect(estimateTranslatedDimensions).not.toHaveBeenCalled();
+    expect(sendTranslation).not.toHaveBeenCalled();
+    renderer.destroy();
+  });
+
+  it('rejects a delayed Worker translation after its configuration changes', async () => {
+    const renderer = new CanvasRenderer(
+      overlay,
+      makeSettings({ translationEnabled: true, translationSource: 'en', translationTarget: 'ja' })
+    );
+    const original = makeMessage('stale-worker-translation', 'original');
+    let resolveTranslation: ((value: string | null) => void) | undefined;
+    const translate = vi.fn(
+      () => new Promise<string | null>((resolve) => { resolveTranslation = resolve; })
+    );
+    const sendTranslation = vi.fn();
+    const internals = renderer as unknown as {
+      translationService: { isEnabled: boolean; translate(text: string): Promise<string | null> };
+      workerManager: {
+        isCurrentMessage(id: string, message: ChatMessage): boolean;
+        sendTranslation: typeof sendTranslation;
+      };
+      prefetchAndTranslateForWorker(message: ChatMessage, id: string): void;
+    };
+    Object.defineProperty(internals.translationService, 'isEnabled', { value: true });
+    internals.translationService.translate = translate;
+    internals.workerManager.isCurrentMessage = () => true;
+    internals.workerManager.sendTranslation = sendTranslation;
+
+    internals.prefetchAndTranslateForWorker(original, original.id!);
+    renderer.updateSettings(
+      makeSettings({ translationEnabled: true, translationSource: 'en', translationTarget: 'ko' })
+    );
+    resolveTranslation?.('late old-target translation');
+    await Promise.resolve();
+    await Promise.resolve();
+
     expect(sendTranslation).not.toHaveBeenCalled();
     renderer.destroy();
   });

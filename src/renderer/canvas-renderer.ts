@@ -421,10 +421,10 @@ export class CanvasRenderer extends RendererBase {
     this.workerManager = new RenderWorkerManager({
       settings: this.settings,
       observability: this.observability,
-      imageFetchManager: this.imageFetchManager,
       estimateDimensions: (msg) => this.estimateDimensions(msg),
       getMessagePriority: CanvasRenderer.getMessagePriority,
       getEffectiveSpeedPxPerSec: () => this.getEffectiveSpeedPxPerSec(),
+      onMessageDispatched: (message, id) => this.prefetchAndTranslateForWorker(message, id),
       onStats: (stats) => {
         // The main-thread rAF intentionally idles while the Worker owns the
         // canvas. Reconcile timer-driven burst changes and UI density here.
@@ -702,9 +702,7 @@ export class CanvasRenderer extends RendererBase {
         return;
       }
       if (this.workerManager.isActive) {
-        if (this.workerManager.sendToWorker(message, message.id, false)) {
-          this.prefetchAndTranslateForWorker(message, message.id);
-        }
+        this.workerManager.sendToWorker(message, message.id, false);
         this.lastRenderActivity = performance.now();
         return;
       }
@@ -728,9 +726,7 @@ export class CanvasRenderer extends RendererBase {
       // main-thread animation loop alive solely for Worker coordination.
       this.applyLaneDensityIfChanged();
       const msgId = message.id ?? `${message.timestamp}-${++fallbackMessageIdCounter}`;
-      if (this.workerManager.sendToWorker(message, msgId)) {
-        this.prefetchAndTranslateForWorker(message, msgId);
-      }
+      this.workerManager.sendToWorker(message, msgId);
       this.lastRenderActivity = performance.now();
 
       return;
@@ -834,9 +830,7 @@ export class CanvasRenderer extends RendererBase {
     }
     if (this.workerManager.isActive) {
       const msgId = message.id ?? `${message.timestamp}-${++fallbackMessageIdCounter}`;
-      if (this.workerManager.sendToWorker(message, msgId, false)) {
-        this.prefetchAndTranslateForWorker(message, msgId);
-      }
+      this.workerManager.sendToWorker(message, msgId, false);
       return;
     }
     this.enqueueMessage(message, false);
@@ -856,9 +850,7 @@ export class CanvasRenderer extends RendererBase {
     for (const message of messages) {
       if (this.workerManager.isActive) {
         const msgId = message.id ?? `${message.timestamp}-${++fallbackMessageIdCounter}`;
-        if (this.workerManager.sendToWorker(message, msgId, false)) {
-          this.prefetchAndTranslateForWorker(message, msgId);
-        }
+        this.workerManager.sendToWorker(message, msgId, false);
       } else {
         this.enqueueMessage(message, false);
       }
@@ -1983,19 +1975,20 @@ export class CanvasRenderer extends RendererBase {
    * the same pre-processing as live messages.
    */
   private prefetchAndTranslateForWorker(message: ChatMessage, msgId: string): void {
-    this.imageFetchManager.prefetchImages(message);
     this.collectSourceLanguageSample(message);
     const translatableText = getTranslatableText(message);
     if (this.translationService.isEnabled && translatableText) {
+      const generation = this.translationConfigurationGeneration;
       this.translationService
         .translate(translatableText)
         .then((translated) => {
+          if (generation !== this.translationConfigurationGeneration) return;
           if (!this.workerManager.isCurrentMessage(msgId, message)) return;
           if (translated !== null && !this.isTranslationWithinResourceBudget(message, translated)) {
             return;
           }
           const geometry = this.estimateTranslatedDimensions(message, translated);
-          this.workerManager.sendTranslation(msgId, translated, geometry);
+          this.workerManager.sendTranslation(msgId, translated, geometry, generation);
         })
         .catch(() => {
           // Silently ignore individual translation failures
@@ -2066,9 +2059,33 @@ export class CanvasRenderer extends RendererBase {
       settings.fontSize !== this.settings.fontSize ||
       settings.fontWeight !== this.settings.fontWeight ||
       settings.fontFamily !== this.settings.fontFamily ||
+      settings.outline.enabled !== this.settings.outline.enabled ||
+      settings.outline.widthPx !== this.settings.outline.widthPx ||
       settings.laneSpacing !== this.settings.laneSpacing ||
       settings.safeTop !== this.settings.safeTop ||
-      settings.safeBottom !== this.settings.safeBottom;
+      settings.safeBottom !== this.settings.safeBottom ||
+      settings.superChatMaxBodyLines !== this.settings.superChatMaxBodyLines ||
+      settings.membershipMaxBodyLines !== this.settings.membershipMaxBodyLines ||
+      settings.showSuperChatAmount !== this.settings.showSuperChatAmount ||
+      settings.translationMode !== this.settings.translationMode ||
+      Object.keys(settings.showAuthor).some(
+        (key) =>
+          settings.showAuthor[key as keyof OverlaySettings['showAuthor']] !==
+          this.settings.showAuthor[key as keyof OverlaySettings['showAuthor']]
+      );
+    const textBitmapStyleChanged =
+      settings.fontSize !== this.settings.fontSize ||
+      settings.fontWeight !== this.settings.fontWeight ||
+      settings.fontFamily !== this.settings.fontFamily ||
+      settings.outline.enabled !== this.settings.outline.enabled ||
+      settings.outline.widthPx !== this.settings.outline.widthPx ||
+      settings.outline.opacity !== this.settings.outline.opacity ||
+      settings.preserveUserColor !== this.settings.preserveUserColor ||
+      Object.keys(settings.colors).some(
+        (key) =>
+          settings.colors[key as keyof OverlaySettings['colors']] !==
+          this.settings.colors[key as keyof OverlaySettings['colors']]
+      );
     super.updateSettings(settings, options);
     this.translationBatchSize = settings.translationBatchSize;
     if (translationConfigurationChanged) {
@@ -2077,18 +2094,14 @@ export class CanvasRenderer extends RendererBase {
       this.pendingTranslationReadIdx = 0;
     }
 
-    // When settings change, cached dimensions become stale
-    // (font, size, weight, family, maxBodyLines all affect dimension calculation).
-    this.dimensionCache.clear();
-    // Text bitmap cache also depends on font/size/color settings — clear to
-    // avoid stale pre-rendered canvases being reused with the wrong style.
+    if (laneGeometryChanged) this.dimensionCache.clear();
     this.textBitmapCache.resize(settings.textCacheMb * 1_000_000);
-    this.textBitmapCache.clear();
+    if (textBitmapStyleChanged) this.textBitmapCache.clear();
     // Pre-compute 1/fadeDurationMs to avoid per-frame divisions in opacity calc
     this.invFadeDuration = computeInvFadeDuration(settings.fadeDurationMs);
 
     // Sync settings to render worker when off-main-thread mode is active
-    this.workerManager.updateSettings(settings);
+    this.workerManager.updateSettings(settings, this.translationConfigurationGeneration);
     this.imageFetchManager.updateConfig(settings, this.workerManager.workerRef);
 
     // When translation is disabled, clear translated text from all active
@@ -2102,9 +2115,21 @@ export class CanvasRenderer extends RendererBase {
           this.applyMessageGeometry(msg, this.estimateTranslatedDimensions(msg.message, null)) ||
           translationGeometryChanged;
       }
-      this.workerManager.clearTranslations((message) =>
-        this.estimateTranslatedDimensions(message, null)
+      this.workerManager.clearTranslations(
+        (message) => this.estimateTranslatedDimensions(message, null),
+        this.translationConfigurationGeneration
       );
+    }
+
+    if (laneGeometryChanged && !this.workerManager.isActive) {
+      for (const message of this.activeMessages) {
+        translationGeometryChanged =
+          this.applyMessageGeometry(
+            message,
+            this.estimateTranslatedDimensions(message.message, message.translatedText ?? null)
+          ) || translationGeometryChanged;
+        this.imageFetchManager.prefetchImages(message.message);
+      }
     }
 
     if (

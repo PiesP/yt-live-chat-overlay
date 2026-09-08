@@ -44,8 +44,11 @@ export function sendSetPausedToWorker(
  * Instructs the Worker to reset its renderer state (active messages,
  * pending queue, lane allocator) while preserving caches.
  */
-export function sendClearStateToWorker(manager: WorkerManagerLike): void {
-  manager.worker?.postMessage({ type: 'clearState' });
+export function sendClearStateToWorker(manager: WorkerManagerLike, epoch?: number): void {
+  manager.worker?.postMessage({
+    type: 'clearState',
+    ...(epoch !== undefined ? { epoch } : {}),
+  });
 }
 
 /**

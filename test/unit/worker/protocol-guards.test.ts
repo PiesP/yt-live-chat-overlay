@@ -2,7 +2,6 @@
 // Copyright (c) 2026 PiesP
 
 import type { ChatMessage, OverlaySettings } from '@app-types';
-import type { ImageFetchManager } from '@media/image-fetch-manager';
 import {
   isValidControlMessage,
   isValidWorkerErrorMessage,
@@ -122,12 +121,6 @@ function createManager(renderer: WorkerRenderer): RenderWorkerManager {
       updateLaneUtilization: vi.fn(),
       tick: vi.fn(),
     } as never,
-    imageFetchManager: {
-      workerBitmapCache: {
-        get: vi.fn(),
-        delete: vi.fn(),
-      },
-    } as unknown as ImageFetchManager,
     estimateDimensions: () => ({ width: 100, height: 20 }),
     getMessagePriority: () => -1,
     getEffectiveSpeedPxPerSec: () => 100,
@@ -139,6 +132,7 @@ function createManager(renderer: WorkerRenderer): RenderWorkerManager {
     }),
   } as unknown as Worker;
   (manager as unknown as { worker: Worker }).worker = worker;
+  manager.setActive(true);
   return manager;
 }
 
@@ -269,6 +263,7 @@ describe('renderer worker protocol guards', () => {
       pendingQueue: Array<{ id: string; priority: number }>;
       messageById: Map<string, { translatedText?: string }>;
       isUserPaused: boolean;
+      applyPendingTranslations(): void;
     };
     expect(internals.pendingQueue).toMatchObject([
       { id: 'backlog-message', priority: -1 },
@@ -280,6 +275,7 @@ describe('renderer worker protocol guards', () => {
       height: 52,
       translationHeight: 18,
     });
+    internals.applyPendingTranslations();
     expect(internals.messageById.get('backlog-message')?.translatedText).toBe('translated');
     expect(internals.messageById.get('backlog-message')).toMatchObject({
       width: 180,
@@ -288,6 +284,7 @@ describe('renderer worker protocol guards', () => {
     });
 
     manager.clearTranslations(() => ({ width: 96, height: 24, translationHeight: 0 }));
+    internals.applyPendingTranslations();
     expect(internals.messageById.get('backlog-message')).toMatchObject({
       translatedText: null,
       width: 96,
