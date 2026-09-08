@@ -5,7 +5,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 describe('extension storage bridge authentication', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
-    document.querySelectorAll('script[src^="chrome-extension://"]').forEach((script) => script.remove());
+    document
+      .querySelectorAll('script[src^="chrome-extension://"]')
+      .forEach((script) => script.remove());
     vi.resetModules();
   });
 
@@ -26,14 +28,24 @@ describe('extension storage bridge authentication', () => {
         onChanged: { addListener: vi.fn() },
       },
     });
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(new Response('self.postMessage({ type: "ready" });', { status: 200 }))
+    );
 
     await import('../../extension/content-script');
 
-    const injectedScript = document.querySelector<HTMLScriptElement>(
-      'script[src$="/page-script.js"]'
-    );
+    const injectedScript = await vi.waitFor(() => {
+      const script = document.querySelector<HTMLScriptElement>('script[src$="/page-script.js"]');
+      expect(script).not.toBeNull();
+      return script;
+    });
     const nonce = injectedScript?.dataset.ytExtensionBridgeNonce;
     expect(nonce).toEqual(expect.any(String));
+    expect(injectedScript?.dataset.ytExtensionWorkerSource).toContain('ready');
+    expect(injectedScript?.dataset.ytExtensionWorkerUrl).toBeUndefined();
 
     window.dispatchEvent(
       new MessageEvent('message', {
@@ -65,9 +77,11 @@ describe('extension storage bridge authentication', () => {
         },
       })
     );
-    await vi.waitFor(() => expect(storageSet).toHaveBeenCalledWith({
-      'yt-live-chat-overlay-settings': '{}',
-    }));
+    await vi.waitFor(() =>
+      expect(storageSet).toHaveBeenCalledWith({
+        'yt-live-chat-overlay-settings': '{}',
+      })
+    );
 
     storageGet.mockClear();
     storageSet.mockClear();
