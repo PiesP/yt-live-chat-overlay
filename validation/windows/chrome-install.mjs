@@ -2,11 +2,110 @@
 // Copyright (c) 2026 PiesP
 
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, dirname, join, resolve, win32 } from 'node:path';
 import { run as runFixture } from './profile.mjs';
 
 const SCRIPT_NAME = 'YouTube Live Chat Overlay';
+const CHROME_PROFILE_PREFIX = 'chrome-install-';
+const GRACEFUL_PROCESS_EXIT_MS = 2_000;
+const PROCESS_EXIT_TIMEOUT_MS = 5_000;
+
+function delay(ms) {
+  return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
+}
+
+function assertOwnedProfile(root, profile) {
+  const resolvedRoot = resolve(root);
+  const resolvedProfile = resolve(profile);
+  if (
+    dirname(resolvedProfile) !== resolvedRoot ||
+    !basename(resolvedProfile).startsWith(CHROME_PROFILE_PREFIX)
+  ) {
+    throw new Error('Refusing to remove a Chrome profile outside the task root');
+  }
+}
+
+export function readOwnedBrowserProcessId(response) {
+  const browsers = Array.isArray(response?.processInfo)
+    ? response.processInfo.filter(({ type }) => type === 'browser')
+    : [];
+  if (
+    browsers.length !== 1 ||
+    !Number.isSafeInteger(browsers[0]?.id) ||
+    browsers[0].id <= 0
+  ) {
+    throw new Error('Browser CDP did not expose one task-owned browser process');
+  }
+  return browsers[0].id;
+}
+
+async function isProcessAlive(processId) {
+  try {
+    process.kill(processId, 0);
+    return true;
+  } catch (error) {
+    if (error?.code === 'ESRCH') return false;
+    throw error;
+  }
+}
+
+async function waitForProcessExit(
+  processId,
+  checkAlive = isProcessAlive,
+  timeoutMs = PROCESS_EXIT_TIMEOUT_MS
+) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!(await checkAlive(processId))) return true;
+    await delay(Math.min(100, Math.max(1, deadline - Date.now())));
+  }
+  return !(await checkAlive(processId));
+}
+
+function terminateWindowsProcessTree(processId) {
+  if (!Number.isSafeInteger(processId) || processId <= 0) {
+    return Promise.reject(new Error('Invalid task-owned browser process id'));
+  }
+  return new Promise((resolveTermination, rejectTermination) => {
+    const systemRoot = process.env.SystemRoot ?? 'C:\\Windows';
+    if (!win32.isAbsolute(systemRoot)) {
+      rejectTermination(new Error('Windows did not expose an absolute SystemRoot directory'));
+      return;
+    }
+    const taskkill = spawn(win32.join(systemRoot, 'System32', 'taskkill.exe'), [
+      '/PID', String(processId), '/T', '/F',
+    ], { stdio: 'ignore', windowsHide: true });
+    let settled = false;
+    let timeout;
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      if (error) rejectTermination(error);
+      else resolveTermination();
+    };
+    timeout = setTimeout(() => {
+      try { taskkill.kill(); } catch {}
+      finish(new Error('Timed out terminating the task-owned browser tree'));
+    }, PROCESS_EXIT_TIMEOUT_MS);
+    taskkill.once('error', (error) => finish(error));
+    taskkill.once('exit', (code) => finish(
+      code === 0 ? undefined : new Error(`taskkill failed for the task-owned browser tree (${code})`)
+    ));
+  });
+}
+
+async function removeOwnedProfile(root, profile) {
+  assertOwnedProfile(root, profile);
+  await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+  const removed = await stat(profile).then(() => false, (error) => {
+    if (error.code === 'ENOENT') return true;
+    throw error;
+  });
+  if (!removed) throw new Error('Task-owned Chrome profile remained after bounded cleanup');
+}
 
 async function enableDeveloperMode(context) {
   const page = await context.newPage();
@@ -136,7 +235,14 @@ export function requireLiveSuccess(observations) {
 }
 
 /** Attempt every owned cleanup stage even when an earlier operation fails. */
-export async function cleanupChromeInstallation({ context, cdp, extensionId, profile, output, result }) {
+export async function cleanupChromeInstallation(
+  { browserProcessId, context, cdp, extensionId, profile, output, result, root },
+  {
+    checkProcessAlive = isProcessAlive,
+    terminateProcessTree = terminateWindowsProcessTree,
+    waitForExit,
+  } = {}
+) {
   const errors = [];
   if (cdp && extensionId) {
     try {
@@ -156,13 +262,57 @@ export async function cleanupChromeInstallation({ context, cdp, extensionId, pro
       result.cleanup.browserClosed = true;
     } catch (fallbackError) { errors.push(fallbackError); }
   }
-  try {
-    await rm(profile, { recursive: true });
-    result.cleanup.profileRemoved = await stat(profile).then(() => false, (error) => {
-      if (error.code === 'ENOENT') return true;
-      throw error;
-    });
-  } catch (error) { errors.push(error); }
+  let browserProcessExited = result.cleanup.browserClosed === true;
+  if (browserProcessId !== undefined) {
+    try {
+      if (result.cleanup.browserClosed === true) {
+        browserProcessExited = waitForExit
+          ? await waitForExit(browserProcessId, GRACEFUL_PROCESS_EXIT_MS)
+          : await waitForProcessExit(
+              browserProcessId,
+              checkProcessAlive,
+              GRACEFUL_PROCESS_EXIT_MS
+            );
+      } else {
+        browserProcessExited = !(await checkProcessAlive(browserProcessId));
+      }
+    } catch (error) {
+      browserProcessExited = false;
+      errors.push(error);
+    }
+    if (!browserProcessExited) {
+      let terminationError;
+      try {
+        await terminateProcessTree(browserProcessId);
+      } catch (error) {
+        terminationError = error;
+      }
+      try {
+        browserProcessExited = waitForExit
+          ? await waitForExit(browserProcessId, PROCESS_EXIT_TIMEOUT_MS)
+          : await waitForProcessExit(browserProcessId, checkProcessAlive);
+      } catch (error) {
+        terminationError ??= error;
+        browserProcessExited = false;
+      }
+      if (!browserProcessExited) {
+        errors.push(
+          terminationError ?? new Error('Task-owned browser process tree did not terminate')
+        );
+      }
+    }
+  } else if (!browserProcessExited) {
+    errors.push(new Error('Task-owned browser process identity is unavailable'));
+  }
+  result.cleanup.browserProcessExited = browserProcessExited;
+  if (browserProcessExited) {
+    try {
+      await removeOwnedProfile(root, profile);
+      result.cleanup.profileRemoved = true;
+    } catch (error) { errors.push(error); }
+  } else {
+    result.cleanup.profilePreserved = true;
+  }
   result.cleanup.errorCount = errors.length;
   await writeFile(join(output, 'installation-result.json'), JSON.stringify(result, null, 2));
   if (errors.length) throw new AggregateError(errors, 'Chrome installation cleanup failed');
@@ -181,6 +331,7 @@ export async function runChromeInstallation({
   let context;
   let cdp;
   let extensionId;
+  let browserProcessId;
   let primaryError;
   const result = { installation, fixture: null, live: [], cleanup: {} };
   try {
@@ -193,8 +344,10 @@ export async function runChromeInstallation({
       args: ['--enable-unsafe-extension-debugging'],
     });
     result.browserVersion = context.browser().version();
-    await enableDeveloperMode(context);
     cdp = await context.browser().newBrowserCDPSession();
+    browserProcessId = readOwnedBrowserProcessId(await cdp.send('SystemInfo.getProcessInfo'));
+    result.cleanup.browserProcessIdentified = true;
+    await enableDeveloperMode(context);
     if (installation === 'extension') {
       ({ id: extensionId } = await cdp.send('Extensions.loadUnpacked', {
         path: join(root, 'dist-extension'),
@@ -222,7 +375,16 @@ export async function runChromeInstallation({
     throw error;
   } finally {
     try {
-      await cleanupChromeInstallation({ context, cdp, extensionId, profile, output, result });
+      await cleanupChromeInstallation({
+        browserProcessId,
+        context,
+        cdp,
+        extensionId,
+        profile,
+        output,
+        result,
+        root,
+      });
     } catch (cleanupError) {
       if (primaryError) throw new AggregateError([primaryError, cleanupError], 'Installation and cleanup failed');
       throw cleanupError;

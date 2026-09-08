@@ -6,7 +6,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 // @ts-expect-error Portable Windows acceptance runtime is intentionally plain ESM.
-import { cleanupChromeInstallation, requireLiveSuccess } from '../../../validation/windows/chrome-install.mjs';
+import * as chromeInstallModule from '../../../validation/windows/chrome-install.mjs';
+
+const { cleanupChromeInstallation, readOwnedBrowserProcessId, requireLiveSuccess } =
+  chromeInstallModule;
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -29,6 +32,19 @@ describe('installed Chrome acceptance outcomes', () => {
     expect(() => requireLiveSuccess([{ status: 'unverified', canvasAttached: false }])).toThrow();
     expect(() => requireLiveSuccess([{ status: 'passed', canvasAttached: true, renderedMessages: 0 }])).toThrow();
     expect(() => requireLiveSuccess([{ status: 'passed', canvasAttached: true, renderedMessages: 1 }])).not.toThrow();
+  });
+
+  it('accepts one exact browser process identity from the browser CDP session', () => {
+    expect(readOwnedBrowserProcessId({
+      processInfo: [
+        { id: 123, type: 'renderer' },
+        { id: 456, type: 'browser' },
+      ],
+    })).toBe(456);
+    expect(() => readOwnedBrowserProcessId({ processInfo: [] })).toThrow();
+    expect(() => readOwnedBrowserProcessId({
+      processInfo: [{ id: 1, type: 'browser' }, { id: 2, type: 'browser' }],
+    })).toThrow();
   });
 
   it('still closes the browser and removes its profile when uninstall fails', async () => {
@@ -55,5 +71,64 @@ describe('installed Chrome acceptance outcomes', () => {
     })).rejects.toThrow(AggregateError);
     expect(browserClose).toHaveBeenCalledOnce();
     await expect(stat(paths.profile)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('terminates only the retained browser tree when both Playwright closes fail', async () => {
+    const paths = await fixture();
+    const terminateProcessTree = vi.fn(async () => {});
+    const checkProcessAlive = vi.fn().mockResolvedValue(true);
+    await expect(cleanupChromeInstallation({
+      browserProcessId: 456,
+      context: {
+        close: async () => { throw new Error('context failed'); },
+        browser: () => ({ close: async () => { throw new Error('browser failed'); } }),
+      },
+      cdp: null,
+      extensionId: null,
+      ...paths,
+      result: { cleanup: {} },
+      root: paths.root,
+    }, {
+      checkProcessAlive,
+      terminateProcessTree,
+      waitForExit: vi.fn().mockResolvedValue(true),
+    })).rejects.toThrow(AggregateError);
+
+    expect(terminateProcessTree).toHaveBeenCalledOnce();
+    expect(terminateProcessTree).toHaveBeenCalledWith(456);
+    await expect(stat(paths.profile)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('preserves the owned profile when browser-tree termination cannot be proven', async () => {
+    const paths = await fixture();
+    const terminateProcessTree = vi.fn(async () => { throw new Error('tree remains'); });
+    const result = { cleanup: {} };
+    await expect(cleanupChromeInstallation({
+      browserProcessId: 789,
+      context: {
+        close: async () => { throw new Error('context failed'); },
+        browser: () => ({ close: async () => { throw new Error('browser failed'); } }),
+      },
+      cdp: null,
+      extensionId: null,
+      ...paths,
+      result,
+      root: paths.root,
+    }, {
+      checkProcessAlive: vi.fn().mockResolvedValue(true),
+      terminateProcessTree,
+      waitForExit: vi.fn().mockResolvedValue(false),
+    })).rejects.toThrow(AggregateError);
+
+    expect(terminateProcessTree).toHaveBeenCalledWith(789);
+    expect(await stat(paths.profile)).toBeDefined();
+    expect(result.cleanup).toMatchObject({ profilePreserved: true, browserProcessExited: false });
+    const evidence = JSON.parse(
+      await readFile(join(paths.output, 'installation-result.json'), 'utf8')
+    );
+    expect(evidence.cleanup).toMatchObject({
+      browserProcessExited: false,
+      profilePreserved: true,
+    });
   });
 });
