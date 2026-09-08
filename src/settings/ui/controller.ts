@@ -773,6 +773,7 @@ export class SettingsUi {
     this.reloadButton?.remove();
     this.clearReloadFeedbackTimer();
     this.toastTimer = clearSafeTimeout(this.toastTimer);
+    this.form.destroy();
     this.modal?.close();
     this.modal?.remove();
     this.restoreDocumentLangDir();
