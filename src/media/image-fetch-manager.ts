@@ -4,6 +4,7 @@
 import type { ChatMessage, OverlaySettings } from '@app-types';
 import { EMOJI_CACHE_MAX_ENTRIES, getStickerCacheBytes } from '@media/cache-limits';
 import { isAllowedImageUrl } from '@media/image-url-validation';
+import { resolveRequiredRenderAssets } from '@renderer/render-assets';
 import { ResizableByteLimitedCache } from '@util/byte-limited-cache';
 import { clearSafeInterval } from '@util/dom';
 import { createLogger } from '@util/logging';
@@ -51,32 +52,21 @@ export class ImageFetchManager {
   /** Maps emoji URLs to in-flight Image objects for timeout cleanup. */
   private readonly emojiUrlToImage = new Map<string, HTMLImageElement>();
 
-  /** Unique in-flight token per URL — prevents stale createImageBitmap results
-   * from overwriting newer bitmaps without retaining completed URL history. */
-  private readonly bitmapGeneration = new Map<string, symbol>();
-
-  /**
-   * Pre-converted ImageBitmaps for transfer to the render worker.
-   * Created asynchronously when HTMLImageElements finish loading.
-   * Transferred via postMessage transfer list to avoid duplicate fetch+decode
-   * in the worker. Entries are removed on transfer (bitmap is detached).
-   * Byte-limited to prevent unbounded growth during long sessions with many
-   * unique emoji/sticker URLs.
-   */
-  readonly workerBitmapCache = new ResizableByteLimitedCache<ImageBitmap>(
-    10_000_000, // 10 MB — enough for ~500 emoji at 200×200 RGBA
-    (bitmap) => bitmap.width * bitmap.height * 4,
-    (bitmap) => bitmap.close()
-  );
-
   private emojiCleanupIntervalId: ReturnType<typeof setInterval> | null = null;
   private isEmojiCleanupPaused = false;
   private isDestroyed = false;
   private emojiFetchLimit = 10;
   private failedEmojiRetryMins = 5;
   private emojiFetchTimeoutMs = 10_000;
+  private settingsShowAuthor: OverlaySettings['showAuthor'] = {
+    normal: false,
+    member: false,
+    moderator: true,
+    owner: true,
+    verified: false,
+    superChat: true,
+  };
   private useWorkerMode = false;
-  private renderWorker: Worker | null = null;
   private onImageReadyCallback?: (url: string, cacheKey: string) => void;
 
   constructor() {
@@ -104,20 +94,11 @@ export class ImageFetchManager {
   updateConfig(settings: OverlaySettings, worker: Worker | null): void {
     if (this.isDestroyed) return;
 
-    const wasWorkerMode = this.useWorkerMode;
     this.emojiFetchLimit = settings.emojiFetchLimit;
     this.failedEmojiRetryMins = settings.failedEmojiRetryMins;
     this.emojiFetchTimeoutMs = settings.emojiFetchTimeoutMs;
-    this.renderWorker = worker;
+    this.settingsShowAuthor = settings.showAuthor;
     this.useWorkerMode = worker !== null;
-
-    // A renderer fallback can happen while an image conversion promise is
-    // still settling. Detach the old Worker path immediately and release any
-    // converted bitmaps that no longer have a consumer.
-    if (wasWorkerMode && !this.useWorkerMode) {
-      this.workerBitmapCache.clear();
-      this.bitmapGeneration.clear();
-    }
 
     // Resize caches in-place instead of recreating + copying all entries.
     this.resizeImageCache(this.emojiCache, settings.emojiCacheMb * 1_000_000);
@@ -149,7 +130,7 @@ export class ImageFetchManager {
   /** Load an image and store it in the given resizable cache on success.
    *  URLs are validated against the YouTube CDN whitelist. */
   loadImage(url: string, cache: ResizableByteLimitedCache<HTMLImageElement>): void {
-    if (this.isDestroyed) return;
+    if (this.isDestroyed || this.useWorkerMode) return;
     if (cache.has(url)) return;
     if (this.imageLoading.has(url)) return;
     if (!this.hasGlobalFetchSlot()) return;
@@ -179,7 +160,6 @@ export class ImageFetchManager {
         this.recordUncacheableImage(url, cache);
         return;
       }
-      this.preConvertForWorker(url, img);
     };
     img.onerror = () => {
       clearLoadTimeout();
@@ -234,62 +214,15 @@ export class ImageFetchManager {
   }
 
   /**
-   * Pre-convert a loaded HTMLImageElement to ImageBitmap for worker transfer.
-   * On success, stores in workerBitmapCache. On failure, silently skips —
-   * worker will fetch and decode independently.
-   *
-   * NOTE: createImageBitmap is used instead of WebCodecs ImageDecoder API.
-   * WebCodecs would offer more control (e.g. decode-only-without-render,
-   * color space handling) but is not used here because:
-   *   - createImageBitmap is universally supported (including Firefox 121+)
-   *     while WebCodecs ImageDecoder has spotty support in workers.
-   *   - The current pipeline fetches PNG/JPG blobs from YouTube CDN;
-   *     createImageBitmap handles these formats efficiently.
-   *   - Future consideration: if we need AVIF/WebP-sequential-decode or
-   *     frame-by-frame control, ImageDecoder would be the upgrade path.
-   */
-  private preConvertForWorker(url: string, img: HTMLImageElement): void {
-    if (!this.useWorkerMode || !this.renderWorker) return;
-    if (!img.complete || img.naturalWidth === 0) return;
-    const generation = Symbol(url);
-    this.bitmapGeneration.set(url, generation);
-    createImageBitmap(img)
-      .then((bitmap) => {
-        if (this.isDestroyed || !this.useWorkerMode || !this.renderWorker) {
-          if (generation === this.bitmapGeneration.get(url)) {
-            this.bitmapGeneration.delete(url);
-          }
-          bitmap.close();
-          return;
-        }
-        // Discard if a newer createImageBitmap for the same URL has been issued.
-        if (generation !== this.bitmapGeneration.get(url)) {
-          bitmap.close();
-          return;
-        }
-        this.bitmapGeneration.delete(url);
-        if (!this.workerBitmapCache.set(url, bitmap)) {
-          bitmap.close();
-        }
-      })
-      .catch(() => {
-        // On failure, clear the generation so a retry doesn't appear stale.
-        if (generation === this.bitmapGeneration.get(url)) {
-          this.bitmapGeneration.delete(url);
-        }
-      });
-  }
-
-  /**
    * Pre-fetch all images referenced by a chat message:
    * emoji, author photo, and sticker (SuperChat).
    */
   prefetchImages(message: ChatMessage): void {
-    if (this.isDestroyed) return;
+    if (this.isDestroyed || this.useWorkerMode) return;
 
-    for (const seg of message.content) {
-      if (seg.type !== 'emoji') continue;
-      const emojiUrl = seg.emoji.url;
+    const assets = resolveRequiredRenderAssets(message, this.settingsShowAuthor);
+
+    for (const emojiUrl of assets.emojiUrls) {
       if (!isAllowedImageUrl(emojiUrl)) {
         ImageFetchManager.log.debug('media.image.emoji-blocked', {
           reason: 'not-in-cdn-whitelist',
@@ -319,7 +252,6 @@ export class ImageFetchManager {
           this.recordUncacheableImage(url, this.emojiCache);
           return;
         }
-        this.preConvertForWorker(url, img);
 
         // Notify CanvasRenderer to restart the render loop so the emoji
         // appears within ~1 frame instead of waiting for the next natural rAF tick.
@@ -344,11 +276,11 @@ export class ImageFetchManager {
       img.src = url;
     }
 
-    if (message.authorPhotoUrl) {
-      this.loadImage(message.authorPhotoUrl, this.authorPhotoCache);
+    if (assets.authorPhotoUrl) {
+      this.loadImage(assets.authorPhotoUrl, this.authorPhotoCache);
     }
 
-    const stickerUrl = message.superChat?.sticker?.url;
+    const stickerUrl = assets.stickerUrl;
     if (stickerUrl) {
       this.loadImage(stickerUrl, this.stickerCache);
     }
@@ -452,17 +384,12 @@ export class ImageFetchManager {
     this.imageLoading.clear();
     this.uncacheableImageUrlsByCache.clear();
 
-    // ResizableByteLimitedCache.clear() calls onEvict (bitmap.close()) for each entry.
-    this.workerBitmapCache.clear();
-    this.bitmapGeneration.clear();
-
     // Clear image caches to release cached ImageBitmap/HTMLImageElement references.
     this.emojiCache.clear();
     this.authorPhotoCache.clear();
     this.stickerCache.clear();
 
     // Null references to prevent late callbacks from accessing destroyed subsystems.
-    this.renderWorker = null;
     this.useWorkerMode = false;
     delete this.onImageReadyCallback;
   }

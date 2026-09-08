@@ -5,7 +5,7 @@
  * RenderWorkerManager — manages OffscreenCanvas Web Worker lifecycle
  * for off-main-thread rendering in CanvasRenderer.
  *
- * Handles worker init, message sending (with ImageBitmap transfer),
+ * Handles worker init, bounded message sending,
  * settings sync, translation dispatch, burst speed computation,
  * and worker destruction.
  *
@@ -14,7 +14,6 @@
 
 import type { Overlay } from '@app/overlay';
 import type { AccessibleChatMessage, ChatMessage, OverlaySettings } from '@app-types';
-import type { ImageFetchManager } from '@media/image-fetch-manager';
 import { createWorkerUrl, workerSupported } from '@platform/worker-factory';
 import { createLogger } from '@util/logging';
 import type { ObservabilityReporter } from '@util/observability';
@@ -26,11 +25,14 @@ import {
 } from './common';
 import { serializeWorkerMessage } from './message-serializer';
 import {
+  isValidWorkerBatchReceipt,
+  isValidWorkerClearStateAck,
   isValidWorkerErrorMessage,
   isValidWorkerMessageSnapshot,
   isValidWorkerStatsMessage,
+  MAX_ADD_MESSAGES_PER_BATCH,
 } from './protocol-guards';
-import type { WorkerMessage, WorkerStatsMessage } from './types';
+import type { WorkerBatchReceipt, WorkerStatsMessage } from './types';
 
 type DimensionResult = { width: number; height: number };
 
@@ -47,15 +49,24 @@ export interface WorkerRecoveryMessage {
 
 interface RetainedWorkerMessage extends WorkerRecoveryMessage {
   batchSequence: number;
+  epoch: number;
+  locallyDeferred?: boolean;
+}
+
+interface DeferredWorkerMessage extends WorkerRecoveryMessage {
+  id: string;
+  priority: number;
+  knownReplacement: boolean;
+  epoch: number;
 }
 
 interface WorkerManagerDeps {
   settings: OverlaySettings;
   observability: ObservabilityReporter;
-  imageFetchManager: ImageFetchManager;
   estimateDimensions: (msg: ChatMessage) => DimensionResult;
   getMessagePriority: (msg: ChatMessage) => number;
   getEffectiveSpeedPxPerSec: () => number;
+  onMessageDispatched?: (message: ChatMessage, id: string) => void;
   onStats?: (stats: WorkerStatsMessage) => void;
 }
 
@@ -133,6 +144,7 @@ export class RenderWorkerManager {
     // Workers cannot access matchMedia — main thread relays the OS preference.
     config.reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     config.isReplayMode = false;
+    config.translationGeneration = 0;
     return config;
   }
 
@@ -144,6 +156,10 @@ export class RenderWorkerManager {
   private lastWorkerTotalRendered = 0;
   private lastWorkerTotalDrops = 0;
   private lastWorkerProcessedBatchSequence = 0;
+  private lastWorkerReceiptSequence = 0;
+  private latestWorkerPendingDepth = 0;
+  private minimumWorkerPendingPriority: number | null = null;
+  private currentEpoch = 0;
   private lastWorkerActiveMessageIds = new Set<string>();
   private lastWorkerPendingMessageIds = new Set<string>();
   private readonly deps: WorkerManagerDeps;
@@ -154,6 +170,11 @@ export class RenderWorkerManager {
   /** State to restore if the currently pending batch cannot be posted. */
   private readonly pendingBatchPreviousStates = new Map<string, RetainedWorkerMessage | null>();
   private snapshotSequence = 0;
+  private readonly unacknowledgedBatches = new Map<
+    number,
+    { count: number; epoch: number; saturationProbe: boolean }
+  >();
+  private readonly deferredIngress: DeferredWorkerMessage[] = [];
   private messageSnapshotRequest: {
     requestId: number;
     knownMessages: Map<string, RetainedWorkerMessage>;
@@ -171,18 +192,16 @@ export class RenderWorkerManager {
   /**
    * Batch of pending Worker messages collected in the current microtask turn.
    * Flushed atomically via queueMicrotask to reduce postMessage overhead
-   * during chat bursts. ImageBitmaps are deduplicated by URL on flush.
+   * during chat bursts. Raw same-ID replacements are coalesced before serialization.
    */
   private pendingBatch: Array<{
-    /** The actual WorkerMessage (extracted from the {type, messages} wrapper). */
-    msg: WorkerMessage;
-    transferredImages: Array<{
-      url: string;
-      bitmap: ImageBitmap;
-      target: 'emoji' | 'author' | 'sticker';
-    }>;
-    transferList: ImageBitmap[];
+    sourceMessage: ChatMessage;
+    id: string;
+    priority: number;
+    trackDrops: boolean;
     batchSequence: number;
+    epoch: number;
+    saturationProbe: boolean;
   }> = [];
   private batchFlushScheduled = false;
 
@@ -209,6 +228,10 @@ export class RenderWorkerManager {
   /** Force-set the active state (used by fallback paths after Worker destruction). */
   setActive(active: boolean): void {
     this.active = active;
+    if (active) {
+      if (this.pendingBatch.length > 0) this.scheduleBatchFlush();
+      this.drainDeferredIngress();
+    }
   }
 
   get workerRef(): Worker | null {
@@ -423,6 +446,20 @@ export class RenderWorkerManager {
             }
             this.applyWorkerStats(data);
             break;
+          case 'batchReceipt':
+            if (!isValidWorkerBatchReceipt(data)) {
+              log.debug('renderer.worker.malformed-batch-receipt');
+              break;
+            }
+            this.applyBatchReceipt(data);
+            break;
+          case 'clearStateAck':
+            if (!isValidWorkerClearStateAck(data)) {
+              log.debug('renderer.worker.malformed-clear-state-ack');
+              break;
+            }
+            this.applyClearStateAck(data.epoch);
+            break;
           case 'messageSnapshot': {
             if (!isValidWorkerMessageSnapshot(data)) {
               log.debug('renderer.worker.malformed-message-snapshot');
@@ -527,8 +564,14 @@ export class RenderWorkerManager {
 
       this.worker = w;
       this.active = true;
+      this.currentEpoch = 0;
       this.nextBatchSequence = 0;
       this.pendingBatchSequence = 0;
+      this.lastWorkerReceiptSequence = 0;
+      this.latestWorkerPendingDepth = 0;
+      this.minimumWorkerPendingPriority = null;
+      this.unacknowledgedBatches.clear();
+      this.deferredIngress.length = 0;
       this.resetWorkerStats();
       this.startPingPong();
 
@@ -556,61 +599,62 @@ export class RenderWorkerManager {
    * Serializes ChatMessage into lightweight cross-thread format.
    */
   sendToWorker(message: ChatMessage, msgId?: string, trackDrops = true): boolean {
-    if (!this.worker) return false;
+    if (!this.active || !this.worker) return false;
 
     const priority = this.deps.getMessagePriority(message);
     const id = msgId ?? message.id ?? `${message.timestamp}-${Math.random()}`;
-    const isKnownReplacement = message.actionType === 'replace' && this.sentMessages.has(id);
+    const deferredForId = this.deferredIngress.find((entry) => entry.id === id);
+    const isKnownReplacement =
+      message.actionType === 'replace' &&
+      (this.sentMessages.has(id) || deferredForId !== undefined);
 
-    // Backpressure: drop low-priority messages when worker queue is backed up
-    const maxWorkerQueue = this.deps.settings.queueMaxSize * 2;
-    if (!isKnownReplacement && this._queueDepth > maxWorkerQueue) {
-      if (priority < 40) {
-        if (trackDrops) this.deps.observability.onMessageDropped('worker_backpressure');
-        return false;
+    // A replacement still in the current local batch consumes the same queue
+    // slot. Keep only its latest value before doing another cross-thread send.
+    if (isKnownReplacement) {
+      const localIndex = this.pendingBatch.findIndex((entry) => entry.id === id);
+      if (localIndex >= 0) {
+        return this.prepareMessageForBatch(message, id, priority, trackDrops, false, localIndex);
       }
     }
 
-    const dims = this.deps.estimateDimensions(message);
-    const workerMessage = serializeWorkerMessage({
-      message,
-      id,
-      dimensions: dims,
-      priority,
-      burstSpeedMultiplier: this.computeBurstSpeedMultiplier(),
-      settings: this.deps.settings,
-      trackDrops,
-    });
-
-    // ── Collect ImageBitmap transfers ──────────────────────────────────
-    // Pre-converted bitmaps are transferred via postMessage transfer list,
-    // eliminating duplicate fetch+decode in the worker (zero-copy transfer).
-    const transferList: ImageBitmap[] = [];
-    const transferredImages: Array<{
-      url: string;
-      bitmap: ImageBitmap;
-      target: 'emoji' | 'author' | 'sticker';
-    }> = [];
-
-    const collectBitmap = (
-      url: string | undefined,
-      target: 'emoji' | 'author' | 'sticker'
-    ): void => {
-      if (!url) return;
-      const bitmap = this.deps.imageFetchManager.workerBitmapCache.take(url);
-      if (!bitmap) return;
-      transferList.push(bitmap);
-      transferredImages.push({ url, bitmap, target });
-      // take() transfers ownership without invoking bitmap.close(). Closing
-      // before postMessage would cause DataCloneError or an empty bitmap.
-    };
-
-    for (const seg of workerMessage.content ?? []) {
-      if (seg.type === 'emoji') collectBitmap(seg.emojiUrl, 'emoji');
+    const projectedWork = this.getProjectedWorkerWork();
+    if (projectedWork < this.deps.settings.queueMaxSize) {
+      return this.prepareMessageForBatch(message, id, priority, trackDrops, false);
     }
-    collectBitmap(message.authorPhotoUrl, 'author');
-    if (message.kind === 'superchat' && message.superChat?.sticker?.url) {
-      collectBitmap(message.superChat.sticker.url, 'sticker');
+
+    // Keep paid/high-priority messages and known replacements as bounded raw
+    // ingress. They are serialized only when a receipt proves capacity or the
+    // Worker reports that the next priority can displace a queued entry.
+    if (isKnownReplacement || priority >= 40) {
+      const accepted = this.enqueueDeferredIngress({
+        message,
+        id,
+        priority,
+        knownReplacement: isKnownReplacement,
+        trackDrops,
+        epoch: this.currentEpoch,
+      });
+      this.drainDeferredIngress();
+      return accepted;
+    }
+
+    if (trackDrops) this.deps.observability.onMessageDropped('worker_backpressure');
+    return false;
+  }
+
+  private prepareMessageForBatch(
+    message: ChatMessage,
+    id: string,
+    priority: number,
+    trackDrops: boolean,
+    saturationProbe: boolean,
+    replaceIndex = -1
+  ): boolean {
+    if (!this.active || !this.worker) return false;
+
+    if (replaceIndex < 0 && this.pendingBatch.length >= MAX_ADD_MESSAGES_PER_BATCH) {
+      this.flushBatch();
+      if (!this.active || !this.worker) return false;
     }
 
     if (this.pendingBatchSequence === 0) {
@@ -623,21 +667,131 @@ export class RenderWorkerManager {
     this.sentMessages.set(id, {
       message,
       batchSequence: this.pendingBatchSequence,
+      epoch: this.currentEpoch,
       trackDrops,
     });
+
+    if (replaceIndex >= 0) {
+      const previous = this.pendingBatch[replaceIndex];
+      if (!previous) return false;
+      this.pendingBatch[replaceIndex] = {
+        sourceMessage: message,
+        id,
+        priority,
+        trackDrops,
+        batchSequence: previous.batchSequence,
+        epoch: previous.epoch,
+        saturationProbe: previous.saturationProbe,
+      };
+      return true;
+    }
 
     // ── Batch instead of immediate postMessage ──────────────────────
     // During chat bursts, multiple sendToWorker calls arrive in the same
     // microtask turn. Batching them into a single postMessage reduces
     // cross-thread overhead while keeping display latency to one microtask.
     this.pendingBatch.push({
-      msg: workerMessage,
-      transferredImages,
-      transferList,
+      sourceMessage: message,
+      id,
+      priority,
+      trackDrops,
       batchSequence: this.pendingBatchSequence,
+      epoch: this.currentEpoch,
+      saturationProbe,
     });
-    this.scheduleBatchFlush();
+    if (this.pendingBatch.length >= MAX_ADD_MESSAGES_PER_BATCH) this.flushBatch();
+    else this.scheduleBatchFlush();
     return true;
+  }
+
+  private getProjectedWorkerWork(): number {
+    let unacknowledged = 0;
+    for (const batch of this.unacknowledgedBatches.values()) {
+      if (batch.epoch === this.currentEpoch) unacknowledged += batch.count;
+    }
+    return this.latestWorkerPendingDepth + unacknowledged + this.pendingBatch.length;
+  }
+
+  private hasSaturationProbeInFlight(): boolean {
+    if (this.pendingBatch.some((entry) => entry.saturationProbe)) return true;
+    for (const batch of this.unacknowledgedBatches.values()) {
+      if (batch.epoch === this.currentEpoch && batch.saturationProbe) return true;
+    }
+    return false;
+  }
+
+  private enqueueDeferredIngress(entry: DeferredWorkerMessage): boolean {
+    const existingIndex = this.deferredIngress.findIndex((queued) => queued.id === entry.id);
+    if (entry.knownReplacement && existingIndex >= 0) {
+      this.deferredIngress[existingIndex] = entry;
+      return true;
+    }
+
+    const capacity = Math.max(
+      1,
+      this.deps.settings.queueMaxSize + (this.deps.settings.maxConcurrentMessages ?? 0)
+    );
+    if (this.deferredIngress.length < capacity) {
+      this.deferredIngress.push(entry);
+      return true;
+    }
+
+    const rank = (candidate: DeferredWorkerMessage): number =>
+      candidate.knownReplacement ? Number.MAX_SAFE_INTEGER : candidate.priority;
+    let lowestIndex = 0;
+    for (let index = 1; index < this.deferredIngress.length; index++) {
+      const candidate = this.deferredIngress[index];
+      const lowest = this.deferredIngress[lowestIndex];
+      if (candidate && lowest && rank(candidate) < rank(lowest)) lowestIndex = index;
+    }
+    const lowest = this.deferredIngress[lowestIndex];
+    if (!lowest || rank(entry) <= rank(lowest)) {
+      if (entry.trackDrops) this.deps.observability.onMessageDropped('worker_backpressure');
+      return false;
+    }
+    if (lowest.trackDrops) this.deps.observability.onMessageDropped('worker_backpressure');
+    this.deferredIngress[lowestIndex] = entry;
+    return true;
+  }
+
+  private drainDeferredIngress(): void {
+    if (!this.active || !this.worker || this.deferredIngress.length === 0) return;
+    this.deferredIngress.sort((a, b) => {
+      if (a.knownReplacement !== b.knownReplacement) return a.knownReplacement ? -1 : 1;
+      return b.priority - a.priority;
+    });
+
+    while (this.deferredIngress.length > 0) {
+      const projected = this.getProjectedWorkerWork();
+      const candidate = this.deferredIngress[0];
+      if (!candidate) return;
+      if (projected < this.deps.settings.queueMaxSize) {
+        this.deferredIngress.shift();
+        this.prepareMessageForBatch(
+          candidate.message,
+          candidate.id,
+          candidate.priority,
+          candidate.trackDrops,
+          false
+        );
+        continue;
+      }
+      if (this.hasSaturationProbeInFlight()) return;
+      const canDisplace =
+        candidate.knownReplacement ||
+        this.minimumWorkerPendingPriority === null ||
+        candidate.priority > this.minimumWorkerPendingPriority;
+      if (!canDisplace) return;
+      this.deferredIngress.shift();
+      this.prepareMessageForBatch(
+        candidate.message,
+        candidate.id,
+        candidate.priority,
+        candidate.trackDrops,
+        true
+      );
+      return;
+    }
   }
 
   /**
@@ -652,13 +806,11 @@ export class RenderWorkerManager {
   }
 
   /**
-   * Flush all pending batch messages to the Worker in a single postMessage.
-   * ImageBitmaps are deduplicated by URL to avoid DataCloneError when the
-   * same bitmap (e.g. same emoji in two consecutive messages) is referenced
-   * by multiple entries in the same batch.
+   * Serialize and flush the admitted raw batch in a single postMessage.
    */
   private flushBatch(): void {
     this.batchFlushScheduled = false;
+    if (!this.active) return;
     const batch = this.pendingBatch.splice(0);
     const previousStates = new Map(this.pendingBatchPreviousStates);
     this.pendingBatchPreviousStates.clear();
@@ -670,27 +822,18 @@ export class RenderWorkerManager {
       return;
     }
 
-    const messages: WorkerMessage[] = [];
-    const seenUrls = new Set<string>();
-    const allTransferredImages: Array<{
-      url: string;
-      bitmap: ImageBitmap;
-      target: 'emoji' | 'author' | 'sticker';
-    }> = [];
-    const allTransferList: ImageBitmap[] = [];
-
-    for (const entry of batch) {
-      messages.push(entry.msg);
-
-      // Deduplicate ImageBitmaps by URL across the batch
-      for (const img of entry.transferredImages) {
-        if (!seenUrls.has(img.url)) {
-          seenUrls.add(img.url);
-          allTransferredImages.push(img);
-          allTransferList.push(img.bitmap);
-        }
-      }
-    }
+    const messages = batch.map((entry) => {
+      const dimensions = this.deps.estimateDimensions(entry.sourceMessage);
+      return serializeWorkerMessage({
+        message: entry.sourceMessage,
+        id: entry.id,
+        dimensions,
+        priority: entry.priority,
+        burstSpeedMultiplier: this.computeBurstSpeedMultiplier(),
+        settings: this.deps.settings,
+        trackDrops: entry.trackDrops,
+      });
+    });
 
     if (messages.length === 0) return;
 
@@ -698,37 +841,37 @@ export class RenderWorkerManager {
       type: 'addMessages',
       messages,
       batchSequence: batch[0]?.batchSequence,
+      epoch: batch[0]?.epoch,
     };
-
-    if (allTransferredImages.length > 0) {
-      workerMessage.imageData = allTransferredImages;
-      try {
-        worker.postMessage(workerMessage, allTransferList);
-      } catch (error) {
-        this.discardPendingBatch(batch, previousStates);
-        log.warn('renderer.worker.batch-send-failed', { error: String(error) });
+    const sequence = batch[0]?.batchSequence;
+    if (sequence === undefined) return;
+    this.unacknowledgedBatches.set(sequence, {
+      count: messages.length,
+      epoch: batch[0]?.epoch ?? this.currentEpoch,
+      saturationProbe: batch.some((entry) => entry.saturationProbe),
+    });
+    try {
+      worker.postMessage(workerMessage);
+      for (const entry of batch) {
+        this.deps.onMessageDispatched?.(entry.sourceMessage, entry.id);
       }
-    } else {
-      try {
-        worker.postMessage(workerMessage);
-      } catch (error) {
-        this.discardPendingBatch(batch, previousStates);
-        log.warn('renderer.worker.batch-send-failed', { error: String(error) });
-      }
+    } catch (error) {
+      this.unacknowledgedBatches.delete(sequence);
+      this.discardPendingBatch(batch, previousStates);
+      log.warn('renderer.worker.batch-send-failed', { error: String(error) });
     }
   }
 
-  /** Release ImageBitmaps that were removed from the cache but never transferred. */
+  /** Restore retained ownership when a raw batch cannot be posted. */
   private discardPendingBatch(
     batch: Array<{
-      msg: WorkerMessage;
-      transferredImages: Array<{
-        url: string;
-        bitmap: ImageBitmap;
-        target: 'emoji' | 'author' | 'sticker';
-      }>;
-      transferList: ImageBitmap[];
+      sourceMessage: ChatMessage;
+      id: string;
+      priority: number;
+      trackDrops: boolean;
       batchSequence: number;
+      epoch: number;
+      saturationProbe: boolean;
     }>,
     previousStates: ReadonlyMap<string, RetainedWorkerMessage | null>
   ): void {
@@ -743,19 +886,14 @@ export class RenderWorkerManager {
         }
       }
     }
-
-    const bitmaps = new Set<ImageBitmap>();
-    for (const entry of batch) {
-      for (const image of entry.transferredImages) bitmaps.add(image.bitmap);
-    }
-    for (const bitmap of bitmaps) bitmap.close();
   }
 
   /** Send a translation result to the render worker. */
   sendTranslation(
     msgId: string,
     translatedText: string | null,
-    geometry: { width: number; height: number; translationHeight: number }
+    geometry: { width: number; height: number; translationHeight: number },
+    translationGeneration = 0
   ): void {
     this.worker?.postMessage({
       type: 'updateTranslation',
@@ -764,6 +902,7 @@ export class RenderWorkerManager {
       width: geometry.width,
       height: geometry.height,
       translationHeight: geometry.translationHeight,
+      translationGeneration,
     });
   }
 
@@ -773,20 +912,38 @@ export class RenderWorkerManager {
       width: number;
       height: number;
       translationHeight: number;
-    }
+    },
+    translationGeneration = 0
   ): void {
     if (!this.worker) return;
     for (const [id, retained] of this.sentMessages) {
-      this.sendTranslation(id, null, estimateGeometry(retained.message));
+      this.sendTranslation(id, null, estimateGeometry(retained.message), translationGeneration);
     }
   }
 
   /** Send updated settings to the render worker. */
-  updateSettings(settings: OverlaySettings): void {
+  updateSettings(settings: OverlaySettings, translationGeneration = 0): void {
+    const previous = this.deps.settings;
+    const messageLayoutChanged =
+      settings.fontSize !== previous.fontSize ||
+      settings.fontWeight !== previous.fontWeight ||
+      settings.fontFamily !== previous.fontFamily ||
+      settings.outline.enabled !== previous.outline.enabled ||
+      settings.outline.widthPx !== previous.outline.widthPx ||
+      settings.superChatMaxBodyLines !== previous.superChatMaxBodyLines ||
+      settings.membershipMaxBodyLines !== previous.membershipMaxBodyLines ||
+      settings.showSuperChatAmount !== previous.showSuperChatAmount ||
+      settings.translationMode !== previous.translationMode ||
+      Object.keys(settings.showAuthor).some(
+        (key) =>
+          settings.showAuthor[key as keyof OverlaySettings['showAuthor']] !==
+          previous.showAuthor[key as keyof OverlaySettings['showAuthor']]
+      );
     // Update the live settings reference so internal methods (backpressure
     // check in sendToWorker, burst speed in computeBurstSpeedMultiplier)
     // use current values, not the construction-time snapshot.
     this.deps.settings = settings;
+    if (!this.active || !this.worker) return;
 
     const config = buildPartialWorkerConfig(
       settings,
@@ -798,7 +955,16 @@ export class RenderWorkerManager {
     config.backgroundColors = { ...settings.backgroundColors };
     config.color = settings.colors.normal;
     config.reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    config.translationGeneration = translationGeneration;
     sendUpdateConfigToWorker({ worker: this.worker }, config);
+    if (messageLayoutChanged) {
+      const retained = [...this.sentMessages.entries()].filter(
+        ([, entry]) => entry.epoch === this.currentEpoch
+      );
+      for (const [id, entry] of retained) {
+        this.sendToWorker({ ...entry.message, actionType: 'replace' }, id, false);
+      }
+    }
   }
 
   /** Inform the render worker of a pause/resume state change (tab visibility or video). */
@@ -835,7 +1001,15 @@ export class RenderWorkerManager {
    */
   clearState(): void {
     if (!this.worker) return;
-    sendClearStateToWorker({ worker: this.worker });
+    const pendingBatch = this.pendingBatch.splice(0);
+    const previousStates = new Map(this.pendingBatchPreviousStates);
+    this.pendingBatchPreviousStates.clear();
+    this.pendingBatchSequence = 0;
+    this.batchFlushScheduled = false;
+    if (pendingBatch.length > 0) this.discardPendingBatch(pendingBatch, previousStates);
+    this.deferredIngress.length = 0;
+    this.currentEpoch = Math.min(Number.MAX_SAFE_INTEGER, this.currentEpoch + 1);
+    sendClearStateToWorker({ worker: this.worker }, this.currentEpoch);
   }
 
   /** Notify the render worker of a lane density factor change (burst-driven half-cell mode). */
@@ -856,7 +1030,7 @@ export class RenderWorkerManager {
     if (this.messageSnapshotRequest) return Promise.resolve([]);
 
     const requestId = ++this.snapshotSequence;
-    const knownMessages = new Map(this.sentMessages);
+    const knownMessages = this.captureRecoverableMessages();
     return new Promise<WorkerRecoveryMessage[]>((resolve) => {
       const timer = setTimeout(() => {
         const request = this.messageSnapshotRequest;
@@ -880,6 +1054,24 @@ export class RenderWorkerManager {
     });
   }
 
+  private captureRecoverableMessages(): Map<string, RetainedWorkerMessage> {
+    const messages = new Map<string, RetainedWorkerMessage>();
+    for (const [id, retained] of this.sentMessages) {
+      if (retained.epoch === this.currentEpoch) messages.set(id, retained);
+    }
+    for (const deferred of this.deferredIngress) {
+      if (deferred.epoch !== this.currentEpoch) continue;
+      messages.set(deferred.id, {
+        message: deferred.message,
+        trackDrops: deferred.trackDrops,
+        batchSequence: Math.min(Number.MAX_SAFE_INTEGER, this.nextBatchSequence + 1),
+        epoch: deferred.epoch,
+        locallyDeferred: true,
+      });
+    }
+    return messages;
+  }
+
   /** Destroy the render worker. */
   destroy(): void {
     this.active = false;
@@ -899,6 +1091,8 @@ export class RenderWorkerManager {
     if (pendingBatch.length > 0) {
       this.discardPendingBatch(pendingBatch, pendingPreviousStates);
     }
+    this.deferredIngress.length = 0;
+    this.unacknowledgedBatches.clear();
     this.dimensionsUnsubscribe?.();
     this.dimensionsUnsubscribe = null;
     this.stopPingPong();
@@ -914,13 +1108,10 @@ export class RenderWorkerManager {
     // Detach synchronously. Settings/fallback paths must not treat a worker
     // waiting for its destroy ACK as active or post new work to it.
     this.worker = null;
-    // Send a destroy message so the worker can flush in-flight work
-    // (pending ImageBitmap transfers) before terminate() severs the connection.
-    // Without this, bitmaps mid-transfer may not be closed properly.
+    // Ask the worker to clean up realm-local resources before termination.
     workerToDestroy.postMessage({ type: 'destroy' });
 
-    // Listen for the worker's 'ack' before terminating, so in-flight
-    // ImageBitmap transfers have time to complete.  A 500 ms safety
+    // Listen for the worker's 'ack' before terminating. A 500 ms safety
     // timeout prevents indefinite hangs if the ack never arrives.
     let terminated = false;
     let terminationTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -936,9 +1127,6 @@ export class RenderWorkerManager {
       if (this.worker === workerToDestroy) {
         this.worker = null;
       }
-      // Close any remaining pre-converted bitmaps (not yet transferred).
-      // ResizableByteLimitedCache.clear() calls onEvict (bitmap.close()) for each entry.
-      this.deps.imageFetchManager.workerBitmapCache.clear();
     };
     const messageHandler = (event: MessageEvent): void => {
       if (event.data?.type === 'ack') finalizeWorkerTermination();
@@ -965,7 +1153,16 @@ export class RenderWorkerManager {
     }
 
     this._activeMessageCount = stats.activeMessages;
-    this._queueDepth = stats.pendingQueueDepth;
+    if (stats.processedBatchSequence >= this.lastWorkerReceiptSequence) {
+      this.lastWorkerReceiptSequence = stats.processedBatchSequence;
+      this._queueDepth = stats.pendingQueueDepth;
+      this.latestWorkerPendingDepth = stats.pendingQueueDepth;
+      for (const [sequence, batch] of this.unacknowledgedBatches) {
+        if (batch.epoch === this.currentEpoch && sequence <= stats.processedBatchSequence) {
+          this.unacknowledgedBatches.delete(sequence);
+        }
+      }
+    }
     this._laneUtilization = stats.laneUtilization;
 
     const renderedDelta = stats.totalRendered - this.lastWorkerTotalRendered;
@@ -991,6 +1188,47 @@ export class RenderWorkerManager {
     );
     this.deps.onStats?.(stats);
     this.deps.observability.tick();
+    this.drainDeferredIngress();
+  }
+
+  private applyBatchReceipt(receipt: WorkerBatchReceipt): void {
+    if (
+      receipt.epoch !== this.currentEpoch ||
+      receipt.batchSequence < this.lastWorkerReceiptSequence ||
+      receipt.batchSequence > this.nextBatchSequence
+    ) {
+      return;
+    }
+    this.lastWorkerReceiptSequence = receipt.batchSequence;
+    this.latestWorkerPendingDepth = receipt.pendingQueueDepth;
+    this.minimumWorkerPendingPriority = receipt.minimumPendingPriority;
+    this._queueDepth = receipt.pendingQueueDepth;
+    for (const [sequence, batch] of this.unacknowledgedBatches) {
+      if (batch.epoch === receipt.epoch && sequence <= receipt.batchSequence) {
+        this.unacknowledgedBatches.delete(sequence);
+      }
+    }
+    this.deps.observability.updateQueueDepth(this._queueDepth);
+    this.drainDeferredIngress();
+  }
+
+  private applyClearStateAck(epoch: number): void {
+    if (epoch !== this.currentEpoch) return;
+    this.latestWorkerPendingDepth = 0;
+    this.minimumWorkerPendingPriority = null;
+    this._queueDepth = 0;
+    this._activeMessageCount = 0;
+    this.lastWorkerActiveMessageIds.clear();
+    this.lastWorkerPendingMessageIds.clear();
+    for (const [sequence, batch] of this.unacknowledgedBatches) {
+      if (batch.epoch < epoch) this.unacknowledgedBatches.delete(sequence);
+    }
+    for (const [id, retained] of this.sentMessages) {
+      if (retained.epoch < epoch) this.sentMessages.delete(id);
+    }
+    this.deps.observability.updateActiveMessages(0);
+    this.deps.observability.updateQueueDepth(0);
+    this.drainDeferredIngress();
   }
 
   private resetWorkerStats(): void {
@@ -1000,6 +1238,9 @@ export class RenderWorkerManager {
     this.lastWorkerTotalRendered = 0;
     this.lastWorkerTotalDrops = 0;
     this.lastWorkerProcessedBatchSequence = 0;
+    this.lastWorkerReceiptSequence = 0;
+    this.latestWorkerPendingDepth = 0;
+    this.minimumWorkerPendingPriority = null;
     this.lastWorkerActiveMessageIds.clear();
     this.lastWorkerPendingMessageIds.clear();
     this.deps.observability.updateActiveMessages(0);
@@ -1030,6 +1271,16 @@ export class RenderWorkerManager {
     const activeIdSet = new Set(activeIds);
     const pendingIdSet = new Set(pendingIds);
     for (const [id, retained] of knownMessages) {
+      if (retained.locallyDeferred) {
+        const deferredIndex = this.deferredIngress.findIndex(
+          (entry) => entry.id === id && entry.message === retained.message
+        );
+        if (deferredIndex >= 0) {
+          messages.push({ message: retained.message, trackDrops: retained.trackDrops });
+          this.deferredIngress.splice(deferredIndex, 1);
+        }
+        continue;
+      }
       if (
         activeIdSet.has(id) ||
         pendingIdSet.has(id) ||
@@ -1055,6 +1306,16 @@ export class RenderWorkerManager {
   ): WorkerRecoveryMessage[] {
     const messages: WorkerRecoveryMessage[] = [];
     for (const [id, retained] of knownMessages) {
+      if (retained.locallyDeferred) {
+        const deferredIndex = this.deferredIngress.findIndex(
+          (entry) => entry.id === id && entry.message === retained.message
+        );
+        if (deferredIndex >= 0) {
+          messages.push({ message: retained.message, trackDrops: retained.trackDrops });
+          this.deferredIngress.splice(deferredIndex, 1);
+        }
+        continue;
+      }
       if (this.sentMessages.get(id) !== retained) continue;
       const wasActive = this.lastWorkerActiveMessageIds.has(id);
       const wasPending = this.lastWorkerPendingMessageIds.has(id);

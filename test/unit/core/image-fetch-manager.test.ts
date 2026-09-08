@@ -69,7 +69,7 @@ describe('ImageFetchManager terminal lifecycle', () => {
     manager.failedEmojiFetches.set('https://yt3.ggpht.com/failed.png', Date.now());
 
     expect(manager.emojiFetching).toContain(EMOJI_URL);
-    expect(manager.imageLoading).toContain(AUTHOR_URL);
+    expect(manager.imageLoading).not.toContain(AUTHOR_URL);
     expect(vi.getTimerCount()).toBeGreaterThan(0);
 
     manager.destroy();
@@ -107,6 +107,8 @@ describe('ImageFetchManager terminal lifecycle', () => {
       manager.prefetchImages({
         ...message(),
         content: [],
+        author: `author ${index}`,
+        kind: 'superchat',
         authorPhotoUrl: `https://yt3.ggpht.com/author-${index}.png`,
         superChat: {
           amount: '$1',
@@ -121,6 +123,93 @@ describe('ImageFetchManager terminal lifecycle', () => {
 
     expect(PendingImage.instances).toHaveLength(3);
     expect(manager.imageLoading.size).toBe(3);
+    manager.destroy();
+  });
+
+  it('loads only author photos visible under the renderer card policy', () => {
+    const manager = new ImageFetchManager();
+    manager.updateConfig(DEFAULT_SETTINGS as OverlaySettings, null);
+
+    manager.prefetchImages({ ...message(), author: 'hidden normal' });
+    expect(manager.imageLoading).not.toContain(AUTHOR_URL);
+    expect(PendingImage.instances).toHaveLength(1);
+    PendingImage.instances[0]?.onload?.();
+
+    manager.prefetchImages({
+      ...message(),
+      id: 'visible-superchat',
+      author: 'paid author',
+      kind: 'superchat',
+      content: [],
+      superChat: { amount: '$5', tier: 'blue' },
+    });
+
+    expect(manager.imageLoading).toContain(AUTHOR_URL);
+    expect(PendingImage.instances).toHaveLength(2);
+    expect(PendingImage.instances[1]?.src).toBe(AUTHOR_URL);
+    manager.destroy();
+  });
+
+  it('does not create main-thread image work while the Worker owns rendering', () => {
+    const manager = new ImageFetchManager();
+    manager.updateConfig(DEFAULT_SETTINGS as OverlaySettings, {} as Worker);
+
+    manager.prefetchImages({
+      ...message(),
+      author: 'paid author',
+      kind: 'superchat',
+      superChat: { amount: '$5', tier: 'blue', sticker: { url: STICKER_URL, alt: 'sticker' } },
+    });
+    manager.loadImage(AUTHOR_URL, manager.authorPhotoCache);
+
+    expect(PendingImage.instances).toHaveLength(0);
+    expect(manager.emojiFetching.size).toBe(0);
+    expect(manager.imageLoading.size).toBe(0);
+    manager.destroy();
+  });
+
+  it('follows hidden-shown-hidden author policy for regular and SuperChat cards', () => {
+    const manager = new ImageFetchManager();
+    const regularUrl = 'https://yt3.ggpht.com/regular-toggle.png';
+    const paidUrl = 'https://yt3.ggpht.com/paid-toggle.png';
+    const regular = { ...message(), content: [], author: 'regular', authorPhotoUrl: regularUrl };
+    const paid: ChatMessage = {
+      ...message(), content: [], author: 'paid', authorPhotoUrl: paidUrl,
+      kind: 'superchat', superChat: { amount: '$5', tier: 'blue' },
+    };
+
+    manager.updateConfig(
+      {
+        ...DEFAULT_SETTINGS,
+        showAuthor: { ...DEFAULT_SETTINGS.showAuthor, normal: false, superChat: false },
+      } as OverlaySettings,
+      null
+    );
+    manager.prefetchImages(regular);
+    manager.prefetchImages(paid);
+    expect(PendingImage.instances).toHaveLength(0);
+
+    manager.updateConfig(
+      {
+        ...DEFAULT_SETTINGS,
+        showAuthor: { ...DEFAULT_SETTINGS.showAuthor, normal: true, superChat: true },
+      } as OverlaySettings,
+      null
+    );
+    manager.prefetchImages(regular);
+    manager.prefetchImages(paid);
+    expect(PendingImage.instances.map((image) => image.src)).toEqual([regularUrl, paidUrl]);
+
+    manager.updateConfig(
+      {
+        ...DEFAULT_SETTINGS,
+        showAuthor: { ...DEFAULT_SETTINGS.showAuthor, normal: false, superChat: false },
+      } as OverlaySettings,
+      null
+    );
+    manager.prefetchImages({ ...regular, authorPhotoUrl: `${regularUrl}?hidden-again` });
+    manager.prefetchImages({ ...paid, authorPhotoUrl: `${paidUrl}?hidden-again` });
+    expect(PendingImage.instances).toHaveLength(2);
     manager.destroy();
   });
 
@@ -229,112 +318,4 @@ describe('ImageFetchManager terminal lifecycle', () => {
     manager.destroy();
   });
 
-  it('releases successful bitmap generation bookkeeping for many unique URLs', async () => {
-    const manager = new ImageFetchManager();
-    const created: ImageBitmap[] = [];
-    vi.stubGlobal(
-      'createImageBitmap',
-      vi.fn(async () => {
-        const bitmap = { width: 8, height: 8, close: vi.fn() } as unknown as ImageBitmap;
-        created.push(bitmap);
-        return bitmap;
-      })
-    );
-    manager.updateConfig(DEFAULT_SETTINGS as OverlaySettings, {} as Worker);
-    const internals = manager as unknown as {
-      bitmapGeneration: Map<string, unknown>;
-      preConvertForWorker(url: string, image: HTMLImageElement): void;
-    };
-    const image = new PendingImage() as unknown as HTMLImageElement;
-
-    for (let index = 0; index < 100; index++) {
-      internals.preConvertForWorker(`https://yt3.ggpht.com/emoji-${index}.png`, image);
-    }
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(created).toHaveLength(100);
-    expect(manager.workerBitmapCache.size).toBe(100);
-    expect(internals.bitmapGeneration.size).toBe(0);
-    manager.destroy();
-    expect(created.every((bitmap) => vi.mocked(bitmap.close).mock.calls.length === 1)).toBe(true);
-  });
-
-  it('uses non-repeating generation tokens so late bitmap results cannot replace current work', async () => {
-    const manager = new ImageFetchManager();
-    const resolvers: Array<(bitmap: ImageBitmap) => void> = [];
-    vi.stubGlobal(
-      'createImageBitmap',
-      vi.fn(
-        () =>
-          new Promise<ImageBitmap>((resolve) => {
-            resolvers.push(resolve);
-          })
-      )
-    );
-    manager.updateConfig(DEFAULT_SETTINGS as OverlaySettings, {} as Worker);
-    const internals = manager as unknown as {
-      bitmapGeneration: Map<string, unknown>;
-      preConvertForWorker(url: string, image: HTMLImageElement): void;
-    };
-    const url = 'https://yt3.ggpht.com/raced.png';
-    const image = new PendingImage() as unknown as HTMLImageElement;
-    const first = { width: 8, height: 8, close: vi.fn() } as unknown as ImageBitmap;
-    const second = { width: 8, height: 8, close: vi.fn() } as unknown as ImageBitmap;
-    const third = { width: 8, height: 8, close: vi.fn() } as unknown as ImageBitmap;
-
-    internals.preConvertForWorker(url, image);
-    const firstToken = internals.bitmapGeneration.get(url);
-    internals.preConvertForWorker(url, image);
-    resolvers[1]?.(second);
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(manager.workerBitmapCache.get(url)).toBe(second);
-    expect(internals.bitmapGeneration.has(url)).toBe(false);
-
-    internals.preConvertForWorker(url, image);
-    expect(internals.bitmapGeneration.get(url)).not.toBe(firstToken);
-    resolvers[0]?.(first);
-    await Promise.resolve();
-    expect(first.close).toHaveBeenCalledOnce();
-    expect(manager.workerBitmapCache.get(url)).toBe(second);
-
-    resolvers[2]?.(third);
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(manager.workerBitmapCache.get(url)).toBe(third);
-    expect(internals.bitmapGeneration.size).toBe(0);
-    expect(second.close).toHaveBeenCalledOnce();
-    manager.destroy();
-    expect(third.close).toHaveBeenCalledOnce();
-  });
-
-  it('preserves transferred bitmap ownership while closing evicted and destroyed entries', () => {
-    const manager = new ImageFetchManager();
-    const first = { width: 1_000, height: 1_000, close: vi.fn() } as unknown as ImageBitmap;
-    const transferred = {
-      width: 1_000,
-      height: 1_000,
-      close: vi.fn(),
-    } as unknown as ImageBitmap;
-    const remaining = {
-      width: 1_000,
-      height: 1_000,
-      close: vi.fn(),
-    } as unknown as ImageBitmap;
-
-    manager.workerBitmapCache.set('first', first);
-    manager.workerBitmapCache.set('transferred', transferred);
-    manager.workerBitmapCache.set('remaining', remaining);
-
-    expect(first.close).toHaveBeenCalledOnce();
-    expect(manager.workerBitmapCache.take('transferred')).toBe(transferred);
-    expect(transferred.close).not.toHaveBeenCalled();
-
-    manager.destroy();
-
-    expect(remaining.close).toHaveBeenCalledOnce();
-    expect(transferred.close).not.toHaveBeenCalled();
-  });
 });

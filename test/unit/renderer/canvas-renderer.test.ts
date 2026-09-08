@@ -351,7 +351,7 @@ describe('CanvasRenderer', () => {
     renderer.destroy();
   });
 
-  it('collects auto source-language samples on the Worker path', () => {
+  it('collects auto source-language samples after Worker dispatch', async () => {
     const settings = makeSettings({ translationEnabled: true, translationSource: 'auto' });
     const renderer = new CanvasRenderer(overlay, settings);
     const internals = renderer as unknown as {
@@ -370,6 +370,7 @@ describe('CanvasRenderer', () => {
     internals.workerManager.setActive(true);
 
     renderer.addMessage(makeMessage('worker-language-sample', 'hello from worker rendering'));
+    await Promise.resolve();
 
     expect(internals.sourceSampleBuffer).toEqual(['hello from worker rendering']);
     renderer.destroy();
@@ -501,6 +502,42 @@ describe('CanvasRenderer', () => {
 
     expect(translate).toHaveBeenCalledOnce();
     expect(estimateTranslatedDimensions).not.toHaveBeenCalled();
+    expect(sendTranslation).not.toHaveBeenCalled();
+    renderer.destroy();
+  });
+
+  it('rejects a delayed Worker translation after its configuration changes', async () => {
+    const renderer = new CanvasRenderer(
+      overlay,
+      makeSettings({ translationEnabled: true, translationSource: 'en', translationTarget: 'ja' })
+    );
+    const original = makeMessage('stale-worker-translation', 'original');
+    let resolveTranslation: ((value: string | null) => void) | undefined;
+    const translate = vi.fn(
+      () => new Promise<string | null>((resolve) => { resolveTranslation = resolve; })
+    );
+    const sendTranslation = vi.fn();
+    const internals = renderer as unknown as {
+      translationService: { isEnabled: boolean; translate(text: string): Promise<string | null> };
+      workerManager: {
+        isCurrentMessage(id: string, message: ChatMessage): boolean;
+        sendTranslation: typeof sendTranslation;
+      };
+      prefetchAndTranslateForWorker(message: ChatMessage, id: string): void;
+    };
+    Object.defineProperty(internals.translationService, 'isEnabled', { value: true });
+    internals.translationService.translate = translate;
+    internals.workerManager.isCurrentMessage = () => true;
+    internals.workerManager.sendTranslation = sendTranslation;
+
+    internals.prefetchAndTranslateForWorker(original, original.id!);
+    renderer.updateSettings(
+      makeSettings({ translationEnabled: true, translationSource: 'en', translationTarget: 'ko' })
+    );
+    resolveTranslation?.('late old-target translation');
+    await Promise.resolve();
+    await Promise.resolve();
+
     expect(sendTranslation).not.toHaveBeenCalled();
     renderer.destroy();
   });
