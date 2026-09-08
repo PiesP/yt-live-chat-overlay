@@ -127,6 +127,11 @@ async function configureThroughSettingsUi(page, installed) {
   const topBottomDuration = modal.locator('input[name="topBottomDurationMs"]');
   await topBottomDuration.fill('30000');
   await topBottomDuration.blur();
+  if (installed) {
+    const minimumDuration = modal.locator('input[name="scrollDurationMinMs"]');
+    await minimumDuration.fill('15000');
+    await minimumDuration.blur();
+  }
   await modal.locator('#tab-advanced').click();
   const depthLayers = modal.locator('input[name="depthLayersEnabled"]');
   if (await depthLayers.isChecked()) await depthLayers.uncheck();
@@ -172,6 +177,7 @@ export async function run({ browser, root, output, installedContext, installedEx
   let customEmojiAssetRequests = 0;
   let deliverInstalledFixture = false;
   let installedFixtureDelivered = false;
+  let installedFixtureCursor = 0;
   const context = installedContext ?? await browser.newContext({
     colorScheme: 'dark',
     locale: 'en-US',
@@ -209,9 +215,9 @@ export async function run({ browser, root, output, installedContext, installedEx
         } else {
           backgroundChatRequests++;
           const actions = deliverInstalledFixture && !installedFixtureDelivered
-            ? CHAT_ACTIONS
+            ? [CHAT_ACTIONS[installedFixtureCursor++]]
             : [];
-          if (actions.length) installedFixtureDelivered = true;
+          if (actions.length) installedFixtureDelivered = installedFixtureCursor === CHAT_ACTIONS.length;
           await route.fulfill({
             status: 200,
             contentType: 'application/json',
@@ -312,7 +318,7 @@ export async function run({ browser, root, output, installedContext, installedEx
     await page.locator('#yt-live-chat-overlay canvas').waitFor({ state: 'attached' });
     await page.waitForTimeout(500);
 
-    deliverInstalledFixture = true;
+    deliverInstalledFixture = Boolean(installedContext);
     const apiStatuses = installedContext ? [] : await page.evaluate(async (count) => {
       const statuses = [];
       for (let index = 0; index < count; index++) {
