@@ -4,9 +4,10 @@
 /**
  * ReplayBuffer — time-indexed sorted buffer for replay chat messages.
  *
- * Stores messages sorted by videoOffsetMs with O(log n) binary search
- * insertion and deduplication by message ID. Flush emits messages whose
- * offsetMs has passed, in batches capped per frame to prevent visual clumping.
+ * Stores messages sorted by videoOffsetMs and deduplicated by message ID.
+ * Single inserts use binary search followed by an O(n) array insertion;
+ * pages are sorted and merged in bulk. Flush emits due messages in bounded
+ * batches to prevent visual clumping.
  */
 
 import type { ChatMessage } from '@app-types';
