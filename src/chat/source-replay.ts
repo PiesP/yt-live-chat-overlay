@@ -10,7 +10,7 @@
  */
 
 import type { ChatMessage } from '@app-types';
-import { extractChatEvents } from '@chat/message-parser';
+import { type ChatEvent, extractChatEvents } from '@chat/message-parser';
 import { ReplayBuffer } from '@chat/replay-buffer';
 import type { ChatHealthSnapshot, PlaybackSnapshot } from '@chat/source-base';
 import { ChatSource } from '@chat/source-base';
@@ -78,6 +78,7 @@ export class ReplayChatSource extends ChatSource {
   private seekGeneration = 0;
   private cooperativeLoopTimer: ReturnType<typeof setTimeout> | null = null;
   private displayLoopTimer: ReturnType<typeof setTimeout> | null = null;
+  private wakeDisplayLoop: (() => void) | null = null;
   private cooperativeLoopRunning = false;
   private cooperativeLoopGeneration = 0;
   private replayRequestQueue: Promise<void> | null = null;
@@ -173,12 +174,20 @@ export class ReplayChatSource extends ChatSource {
         this.flushReplayBuffer(playback.offsetMs);
       }
 
+      const hasPendingFlushes = !this.replayBuffer.isEmpty;
       const videoPaused = playback?.paused ?? true;
-      const adaptiveDelay = !this.isPaused && !videoPaused ? 16 : BACKGROUND_FETCH_INTERVAL_MS;
+      const adaptiveDelay =
+        hasPendingFlushes && !this.isPaused && !videoPaused ? 16 : BACKGROUND_FETCH_INTERVAL_MS;
 
       if (!signal?.aborted && gen === this.cooperativeLoopGeneration) {
         this.displayLoopTimer = setTimeout(displayTick, adaptiveDelay);
       }
+    };
+
+    this.wakeDisplayLoop = () => {
+      if (signal?.aborted || gen !== this.cooperativeLoopGeneration) return;
+      this.displayLoopTimer = clearSafeTimeout(this.displayLoopTimer);
+      this.displayLoopTimer = setTimeout(displayTick, 0);
     };
 
     const networkTick = async (): Promise<void> => {
@@ -272,7 +281,7 @@ export class ReplayChatSource extends ChatSource {
         undefined,
         this.isKnownReplacementTarget
       );
-      this.replayBuffer.appendEvents(events, minimumOffsetMs);
+      this.appendReplayEvents(events, minimumOffsetMs);
       this.markActivity();
       this.prefetchContinuation = extractPlayerSeekContinuation(payload.continuations);
       this.prefetchPagesFetched += 1;
@@ -349,6 +358,7 @@ export class ReplayChatSource extends ChatSource {
     this.cooperativeLoopGeneration++;
     this.cooperativeLoopTimer = clearSafeTimeout(this.cooperativeLoopTimer);
     this.displayLoopTimer = clearSafeTimeout(this.displayLoopTimer);
+    this.wakeDisplayLoop = null;
     this.cooperativeLoopRunning = false;
     this.clearSeekListener();
   }
@@ -550,7 +560,7 @@ export class ReplayChatSource extends ChatSource {
 
       const currentOffsetMs = this.getPlaybackSnapshot()?.offsetMs ?? 0;
       const minimumOffsetMs = Math.max(0, currentOffsetMs - REPLAY_PREFETCH_WINDOW_MS);
-      this.replayFallbackLastOffsetMs = this.replayBuffer.appendEvents(
+      this.replayFallbackLastOffsetMs = this.appendReplayEvents(
         extractChatEvents(
           initialPayload.actions,
           this.getSettings,
@@ -667,6 +677,14 @@ export class ReplayChatSource extends ChatSource {
     this.emitBatch(batch, false);
   }
 
+  private appendReplayEvents(events: ChatEvent[], minimumOffsetMs: number): number {
+    const highestOffsetMs = this.replayBuffer.appendEvents(events, minimumOffsetMs);
+    if (!this.replayBuffer.isEmpty) {
+      this.wakeDisplayLoop?.();
+    }
+    return highestOffsetMs;
+  }
+
   // ── Fetch methods ───────────────────────────────────────────────────────
 
   private async fetchReplayPlayerSeek(
@@ -688,7 +706,7 @@ export class ReplayChatSource extends ChatSource {
       }
 
       const nextPlayerSeekContinuation = extractPlayerSeekContinuation(payload.continuations);
-      this.replayBuffer.appendEvents(
+      this.appendReplayEvents(
         extractChatEvents(
           payload.actions,
           this.getSettings,
@@ -743,7 +761,7 @@ export class ReplayChatSource extends ChatSource {
         undefined,
         this.isKnownReplacementTarget
       );
-      this.replayFallbackLastOffsetMs = this.replayBuffer.appendEvents(events, minimumOffsetMs);
+      this.replayFallbackLastOffsetMs = this.appendReplayEvents(events, minimumOffsetMs);
       this.replayContinuation = extractReplayContinuation(payload.continuations);
       this.replayConsecutiveFailures = 0;
       this.replayTotalFailuresSinceSuccess = 0;
