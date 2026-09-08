@@ -11,6 +11,8 @@ const CLOSE_TIMEOUT_MS = 5_000;
 const GRACEFUL_EXIT_TIMEOUT_MS = 2_000;
 const POLL_INTERVAL_MS = 75;
 const PROFILE_PREFIX = '.firefox-install-profile-';
+const PROFILE_REMOVE_MAX_RETRIES = 5;
+const PROFILE_REMOVE_RETRY_DELAY_MS = 200;
 
 function errorMessage(reason) {
   return reason instanceof Error ? reason.message : String(reason);
@@ -46,9 +48,14 @@ function assertOwnedProfile(root, profileDir) {
   }
 }
 
-async function removeOwnedProfile(root, profileDir) {
+export async function removeOwnedProfile(root, profileDir, rmProfile = rm) {
   assertOwnedProfile(root, profileDir);
-  await rm(profileDir, { force: true, recursive: true });
+  await rmProfile(profileDir, {
+    force: true,
+    maxRetries: PROFILE_REMOVE_MAX_RETRIES,
+    recursive: true,
+    retryDelay: PROFILE_REMOVE_RETRY_DELAY_MS,
+  });
 }
 
 function runTaskkillTree(pid) {
