@@ -275,6 +275,60 @@ async function configureThroughSettingsUi(page, installed, output, inspectRender
   });
 }
 
+async function verifyIsolatedPaidCardInk(page, output) {
+  await page.evaluate(async () => {
+    const app = window.__ytChatOverlay;
+    if (!app?.restartRuntime || !app.applySettings) throw new Error('Runtime restart hook is unavailable');
+    app.applySettings({ danmakuMode: 'top' });
+    await app.restartRuntime();
+    if (window.__ytAcceptancePaidCardProbe) window.__ytAcceptancePaidCardProbe.rects.length = 0;
+  });
+  const paused = page.locator('#yt-live-chat-overlay').getByText('Paused', { exact: true });
+  if (await paused.isVisible()) await page.keyboard.press('Control+Space');
+  const previousDraws = await page.evaluate(() => window.__ytAcceptancePaidCardProbe?.cachedBitmapDraws ?? 0);
+  const index = CHAT_ACTIONS.findIndex((action) => action.addChatItemAction?.item?.liveChatPaidMessageRenderer);
+  assert(index >= 0, 'Super Chat fixture is unavailable');
+  await page.evaluate(async (messageIndex) => {
+    const response = await fetch(`https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?key=windows-acceptance&message=${messageIndex}&ink-probe=1`);
+    if (!response.ok) throw new Error('Isolated Super Chat request failed');
+    await response.json();
+  }, index);
+  await page.waitForFunction(() =>
+    document.querySelector('#yt-chat-overlay-debug')?.textContent?.includes('Rcvd: 1 | Rndr: 1'),
+  );
+  const resultHandle = await page.waitForFunction((before) => {
+    const element = document.querySelector('#yt-live-chat-overlay canvas');
+    const probe = window.__ytAcceptancePaidCardProbe;
+    if (!(element instanceof HTMLCanvasElement) || !probe || probe.cachedBitmapDraws <= before) return null;
+    const context = element.getContext('2d');
+    if (!context) return null;
+    const candidates = probe.rects.filter((rect) => {
+      const x = Math.floor((rect.left + rect.right) / 2);
+      const y = Math.floor(rect.top) + 2;
+      if (x < 0 || x >= element.width || y < 0 || y >= element.height) return false;
+      const [red, green, blue, alpha] = context.getImageData(x, y, 1, 1).data;
+      return alpha >= 128 && blue > green + 10 && blue > red + 10;
+    });
+    if (candidates.length !== 1) return null;
+    const rect = candidates[0];
+    const startX = Math.min(element.width, Math.ceil(rect.right) + 1);
+    const startY = Math.max(0, Math.floor(rect.top));
+    const endY = Math.min(element.height, Math.ceil(rect.bottom));
+    if (startX >= element.width || startY >= endY) return null;
+    const pixels = context.getImageData(startX, startY, element.width - startX, endY - startY).data;
+    let outsideAlphaPixels = 0;
+    for (let i = 3; i < pixels.length; i += 4) if (pixels[i] > 8) outsideAlphaPixels++;
+    return { cachedBitmapDraws: probe.cachedBitmapDraws - before, outsideAlphaPixels, rect };
+  }, previousDraws, { timeout: 10_000 });
+  const result = await resultHandle.jsonValue();
+  await resultHandle.dispose();
+  assert.equal(result.outsideAlphaPixels, 0, 'Isolated outlined Super Chat ink escaped the card');
+  await page.locator('#yt-live-chat-overlay canvas').screenshot({
+    path: join(output, 'yt-paid-card-ink.png'), animations: 'disabled',
+  });
+  return result;
+}
+
 export async function run({ browser, root, output, installedContext, installedExtensionId, expectedRenderer = 'main' }) {
   assert(
     browser && typeof browser.newContext === 'function',
@@ -334,10 +388,16 @@ export async function run({ browser, root, output, installedContext, installedEx
         const action = CHAT_ACTIONS[messageIndex];
         if (url.searchParams.get('key') === 'windows-acceptance' && action) {
           explicitChatRequests++;
+          const deliveredAction = url.searchParams.has('ink-probe') ? structuredClone(action) : action;
+          if (url.searchParams.has('ink-probe')) {
+            const paid = deliveredAction.addChatItemAction.item.liveChatPaidMessageRenderer;
+            assert(paid, 'The isolated ink fixture must be a Super Chat');
+            paid.id += '-isolated-ink';
+          }
           await route.fulfill({
             status: 200,
             contentType: 'application/json',
-            json: chatResponse([action]),
+            json: chatResponse([deliveredAction]),
           });
         } else {
           backgroundChatRequests++;
@@ -406,7 +466,13 @@ export async function run({ browser, root, output, installedContext, installedEx
           },
         });
         const rects = [];
+        let paintedCanvas = null;
         let cachedBitmapDraws = 0;
+        const originalClearRect = CanvasRenderingContext2D.prototype.clearRect;
+        CanvasRenderingContext2D.prototype.clearRect = function (x, y, width, height) {
+          if (this.canvas === paintedCanvas && x === 0 && y === 0) rects.length = 0;
+          originalClearRect.call(this, x, y, width, height);
+        };
         const originalRoundRect = CanvasRenderingContext2D.prototype.roundRect;
         CanvasRenderingContext2D.prototype.roundRect = function (x, y, width, height, radii) {
           if (
@@ -414,6 +480,10 @@ export async function run({ browser, root, output, installedContext, installedEx
             typeof this.fillStyle !== 'string' &&
             rects.length < 512
           ) {
+            if (paintedCanvas !== this.canvas) {
+              rects.length = 0;
+              paintedCanvas = this.canvas;
+            }
             const transform = this.getTransform();
             rects.push({
               left: x * transform.a + transform.e,
@@ -573,61 +643,8 @@ export async function run({ browser, root, output, installedContext, installedEx
     assert((await stat(canvasPath)).size > 1_000, 'Canvas screenshot is unexpectedly small');
     assert((await stat(pagePath)).size > 1_000, 'Page screenshot is unexpectedly small');
 
-    const paidCardInkContainment = expectedRenderer === 'main'
-      ? await canvas.evaluate((element) => {
-          const probe = window.__ytAcceptancePaidCardProbe;
-          const rect = probe?.rects.at(-1);
-          const context = element.getContext('2d');
-          if (!probe || !rect || !context) return null;
-          const startX = Math.min(element.width, Math.ceil(rect.right) + 1);
-          const startY = Math.max(0, Math.floor(rect.top));
-          const endY = Math.min(element.height, Math.ceil(rect.bottom));
-          if (startX >= element.width || startY >= endY) return null;
-          const pixels = context.getImageData(
-            startX,
-            startY,
-            element.width - startX,
-            endY - startY,
-          ).data;
-          let outsideAlphaPixels = 0;
-          for (let index = 3; index < pixels.length; index += 4) {
-            if (pixels[index] > 8) outsideAlphaPixels++;
-          }
-          return { cachedBitmapDraws: probe.cachedBitmapDraws, outsideAlphaPixels };
-        })
-      : null;
-    if (expectedRenderer === 'main') {
-      assert(paidCardInkContainment, 'Super Chat card ink probe did not capture a card');
-      assert(
-        paidCardInkContainment.cachedBitmapDraws > 0,
-        'Super Chat fixture did not exercise cached outlined text',
-      );
-      assert.equal(
-        paidCardInkContainment.outsideAlphaPixels,
-        0,
-        'Outlined Super Chat text escaped the card boundary',
-      );
-    }
-
     assert.deepEqual(pageErrors, [], `Page errors: ${pageErrors.join(' | ')}`);
     assert.deepEqual(consoleErrors, [], `Console errors: ${consoleErrors.join(' | ')}`);
-    const backgroundObservationMs = backgroundRequestTimes.length
-      ? performance.now() - backgroundRequestTimes[0]
-      : 0;
-    const minimumPollInterval = installedContext ? null : await page.evaluate(
-      () => window.__ytChatOverlay?.getSettings?.().minPollIntervalMs,
-    );
-    if (!installedContext) {
-      assert(Number.isFinite(minimumPollInterval) && minimumPollInterval > 0,
-        'The runtime minimum polling interval is unavailable');
-    }
-    // Longer settings interactions permit more polls, but never a faster
-    // average request rate than the configured minimum polling interval.
-    const backgroundRequestBudget = installedContext
-      ? 100
-      : 1 + Math.floor(backgroundObservationMs / minimumPollInterval);
-    assert(backgroundChatRequests <= backgroundRequestBudget,
-      `Background chat requests flooded: ${backgroundChatRequests}/${backgroundRequestBudget}`);
 
     let settings;
     if (installedContext) {
@@ -663,6 +680,30 @@ export async function run({ browser, root, output, installedContext, installedEx
     assert.equal(settings?.danmakuMode, 'scroll');
     assert.equal(settings?.depthLayersEnabled, false);
 
+    const paidCardInkContainment = expectedRenderer === 'main' && !installedContext
+      ? await verifyIsolatedPaidCardInk(page, output)
+      : null;
+    assert.deepEqual(pageErrors, [], `Page errors: ${pageErrors.join(' | ')}`);
+    assert.deepEqual(consoleErrors, [], `Console errors: ${consoleErrors.join(' | ')}`);
+    const backgroundObservationMs = backgroundRequestTimes.length
+      ? performance.now() - backgroundRequestTimes[0]
+      : 0;
+    const minimumPollInterval = installedContext ? null : await page.evaluate(
+      () => window.__ytChatOverlay?.getSettings?.().minPollIntervalMs,
+    );
+    if (!installedContext) {
+      assert(Number.isFinite(minimumPollInterval) && minimumPollInterval > 0,
+        'The runtime minimum polling interval is unavailable');
+    }
+    // Longer settings interactions permit more polls, but never a faster
+    // average request rate than the configured minimum polling interval.
+    const backgroundRequestBudget = installedContext
+      ? 100
+      : 1 + Math.floor(backgroundObservationMs / minimumPollInterval);
+    assert(backgroundChatRequests <= backgroundRequestBudget,
+      `Background chat requests flooded: ${backgroundChatRequests}/${backgroundRequestBudget}`);
+
+
     return {
       checks: {
         productionUserscriptInjected: !installedContext,
@@ -686,13 +727,13 @@ export async function run({ browser, root, output, installedContext, installedEx
         consoleErrors: consoleErrors.length,
         customEmojiAssetRequests,
         paidCardInkContained: paidCardInkContainment?.outsideAlphaPixels === 0,
-        screenshotsWritten: 4,
+        screenshotsWritten: paidCardInkContainment ? 5 : 4,
       },
       observations: {
         browserVersion: browser.version(),
         canvas: canvasBox,
         fixtureContent: ['Korean', 'Japanese', 'RTL', 'emoji', 'Super Chat', 'membership'],
-        screenshots: ['yt-settings-basic.png', 'yt-settings-preview.png', 'yt-visual-canvas.png', 'yt-visual-page.png'],
+        screenshots: ['yt-settings-basic.png', 'yt-settings-preview.png', 'yt-visual-canvas.png', 'yt-visual-page.png', ...(paidCardInkContainment ? ['yt-paid-card-ink.png'] : [])],
         backgroundObservationMs,
         paidCardInkContainment,
         backgroundRequestIntervalsMs: backgroundRequestTimes.slice(1).map(

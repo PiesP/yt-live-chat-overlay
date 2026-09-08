@@ -793,8 +793,19 @@ test.describe('Danmaku Rendering', () => {
         },
       });
 
-      const rects: Array<{ left: number; top: number; right: number; bottom: number }> = [];
-      let cachedBitmapDraws = 0;
+      const probe: {
+        latestRect: {
+          left: number;
+          top: number;
+          right: number;
+          bottom: number;
+          dpr: number;
+        } | null;
+        cachedDrawsByDpr: Record<
+          string,
+          { count: number; destinationWidth: number; destinationHeight: number }
+        >;
+      } = { latestRect: null, cachedDrawsByDpr: {} };
       const originalRoundRect = CanvasRenderingContext2D.prototype.roundRect;
       CanvasRenderingContext2D.prototype.roundRect = function (
         x: number,
@@ -803,14 +814,16 @@ test.describe('Danmaku Rendering', () => {
         height: number,
         radii?: number | DOMPointInit | (number | DOMPointInit)[]
       ): void {
-        if (width >= paidCardMinWidth && rects.length < 512) {
+        if (width >= paidCardMinWidth) {
           const transform = this.getTransform();
-          rects.push({
+          const dpr = Number.isFinite(transform.a) && transform.a > 0 ? transform.a : 1;
+          probe.latestRect = {
             left: x * transform.a + transform.e,
             top: y * transform.d + transform.f,
             right: (x + width) * transform.a + transform.e,
             bottom: (y + height) * transform.d + transform.f,
-          });
+            dpr,
+          };
         }
         originalRoundRect.call(this, x, y, width, height, radii);
       };
@@ -825,17 +838,19 @@ test.describe('Danmaku Rendering', () => {
           typeof OffscreenCanvas !== 'undefined' &&
           args[0] instanceof OffscreenCanvas
         ) {
-          cachedBitmapDraws++;
+          const transform = this.getTransform();
+          const dpr = Number.isFinite(transform.a) && transform.a > 0 ? transform.a : 1;
+          const key = String(dpr);
+          probe.cachedDrawsByDpr[key] = {
+            count: (probe.cachedDrawsByDpr[key]?.count ?? 0) + 1,
+            destinationWidth: Number(args[3]),
+            destinationHeight: Number(args[4]),
+          };
         }
         Reflect.apply(originalDrawImage, this, args);
       } as typeof CanvasRenderingContext2D.prototype.drawImage;
 
-      (window as unknown as Record<string, unknown>).__paidCardInkProbe = {
-        rects,
-        get cachedBitmapDraws() {
-          return cachedBitmapDraws;
-        },
-      };
+      (window as unknown as Record<string, unknown>).__paidCardInkProbe = probe;
     }, rendererLayout.paidCardMinWidthFloor);
 
     await setupOverlayPage(page, { platform: 'userscript' });
@@ -886,40 +901,116 @@ test.describe('Danmaku Rendering', () => {
     );
 
     const canvas = page.locator(`#${OVERLAY_ID} canvas`);
-    const readContainment = () =>
-      canvas.evaluate((element: HTMLCanvasElement) => {
+    const readContainment = (expectedDpr: number, minimumDrawCount: number) =>
+      canvas.evaluate((element: HTMLCanvasElement, expected) => {
         const probe = (window as unknown as Record<string, unknown>).__paidCardInkProbe as
           | {
-              rects: Array<{ left: number; top: number; right: number; bottom: number }>;
-              cachedBitmapDraws: number;
+              latestRect: {
+                left: number;
+                top: number;
+                right: number;
+                bottom: number;
+                dpr: number;
+              } | null;
+              cachedDrawsByDpr: Record<
+                string,
+                { count: number; destinationWidth: number; destinationHeight: number }
+              >;
             }
           | undefined;
-        const rect = probe?.rects.at(-1);
+        const rect = probe?.latestRect;
+        const cachedDraw = probe?.cachedDrawsByDpr[String(expected.dpr)];
         const context = element.getContext('2d');
-        if (!probe || !rect || !context) return null;
+        if (
+          !probe ||
+          !rect ||
+          !cachedDraw ||
+          cachedDraw.count <= expected.minimumDrawCount ||
+          !context ||
+          Math.abs(rect.dpr - expected.dpr) > 0.01 ||
+          Math.abs(context.getTransform().a - expected.dpr) > 0.01
+        ) {
+          return null;
+        }
 
         const startX = Math.min(element.width, Math.ceil(rect.right) + 1);
         const startY = Math.max(0, Math.floor(rect.top));
         const endY = Math.min(element.height, Math.ceil(rect.bottom));
         if (startX >= element.width || startY >= endY) return null;
-        const pixels = context.getImageData(
+        const outsidePixels = context.getImageData(
           startX,
           startY,
           element.width - startX,
           endY - startY
         ).data;
+        const insidePixels = context.getImageData(
+          Math.max(0, Math.floor(rect.left)),
+          startY,
+          Math.max(1, Math.ceil(rect.right) - Math.max(0, Math.floor(rect.left))),
+          endY - startY
+        ).data;
         let outsideAlphaPixels = 0;
-        for (let index = 3; index < pixels.length; index += 4) {
-          if (pixels[index]! > 8) outsideAlphaPixels++;
+        let insideAlphaPixels = 0;
+        for (let index = 3; index < outsidePixels.length; index += 4) {
+          if (outsidePixels[index]! > 8) outsideAlphaPixels++;
         }
-        return { cachedBitmapDraws: probe.cachedBitmapDraws, outsideAlphaPixels };
+        for (let index = 3; index < insidePixels.length; index += 4) {
+          if (insidePixels[index]! > 8) insideAlphaPixels++;
+        }
+        return { ...cachedDraw, insideAlphaPixels, outsideAlphaPixels };
+      }, { dpr: expectedDpr, minimumDrawCount });
+    const assertFreshDpr = async (
+      dpr: number,
+      minimumDrawCount: number,
+      referenceSize?: { destinationWidth: number; destinationHeight: number }
+    ): Promise<{ count: number; destinationWidth: number; destinationHeight: number }> => {
+      await expect.poll(() => readContainment(dpr, minimumDrawCount), { timeout: 5000 }).not.toBeNull();
+      const containment = await readContainment(dpr, minimumDrawCount);
+      expect(containment).not.toBeNull();
+      expect(containment!.insideAlphaPixels).toBeGreaterThan(0);
+      expect(containment!.outsideAlphaPixels).toBe(0);
+      if (referenceSize) {
+        expect(containment!.destinationWidth).toBeCloseTo(referenceSize.destinationWidth, 5);
+        expect(containment!.destinationHeight).toBeCloseTo(referenceSize.destinationHeight, 5);
+      }
+      return containment!;
+    };
+    const getDrawCount = (dpr: number): Promise<number> =>
+      page.evaluate((expectedDpr) => {
+        const probe = (window as unknown as Record<string, unknown>).__paidCardInkProbe as
+          | { cachedDrawsByDpr?: Record<string, { count: number }> }
+          | undefined;
+        return probe?.cachedDrawsByDpr?.[String(expectedDpr)]?.count ?? 0;
+      }, dpr);
+    const setDpr = async (
+      session: import('@playwright/test').CDPSession,
+      dpr: number
+    ): Promise<void> => {
+      const viewport = page.viewportSize();
+      if (!viewport) throw new Error('Chromium viewport is unavailable');
+      await session.send('Emulation.setDeviceMetricsOverride', {
+        width: viewport.width,
+        height: viewport.height,
+        deviceScaleFactor: dpr,
+        mobile: false,
       });
+      await page.evaluate(() => window.dispatchEvent(new Event('resize')));
+      await page.waitForFunction((expectedDpr) => window.devicePixelRatio === expectedDpr, dpr);
+    };
 
-    await expect.poll(readContainment, { timeout: 5000 }).not.toBeNull();
-    const containment = await readContainment();
-    expect(containment).not.toBeNull();
-    expect(containment!.cachedBitmapDraws).toBeGreaterThan(0);
-    expect(containment!.outsideAlphaPixels).toBe(0);
+    const initial = await assertFreshDpr(1, -1);
+    const session = await page.context().newCDPSession(page);
+    try {
+      const previous2xDraws = await getDrawCount(2);
+      await setDpr(session, 2);
+      const at2x = await assertFreshDpr(2, previous2xDraws, initial);
+      const previous1xDraws = await getDrawCount(1);
+      await setDpr(session, 1);
+      await assertFreshDpr(1, previous1xDraws, at2x);
+    } finally {
+      await session.send('Emulation.clearDeviceMetricsOverride');
+      await session.detach();
+    }
   });
 
   test('keeps a truncated SuperChat ellipsis inside the card', async ({ page }) => {

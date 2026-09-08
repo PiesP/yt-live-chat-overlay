@@ -54,6 +54,11 @@ export interface ImageCacheLike<T = unknown> {
 
 const MAX_TEXT_BITMAP_DIMENSION = 8192;
 
+function getCanvasDpr(ctx: AnyCanvasContext): number {
+  const dpr = ctx.getTransform().a;
+  return Number.isFinite(dpr) && dpr > 0 ? dpr : 1;
+}
+
 export function getSafeTextHeight(metrics: TextMetrics, fontSize: number): number {
   const rawAscent = metrics.actualBoundingBoxAscent;
   const rawDescent = metrics.actualBoundingBoxDescent;
@@ -649,6 +654,7 @@ function cacheTextBitmap(
   strokeWidth: number,
   strokeColor: string,
   ctx: AnyCanvasContext,
+  dpr: number,
   textBitmapCache: TextBitmapCache,
   letterSpacing: string,
   direction: TextDirection
@@ -681,11 +687,9 @@ function cacheTextBitmap(
   const height = Math.ceil(getSafeTextHeight(metrics, fontSize) + bitmapPadding * 2);
   ctx.restore();
 
-  // Detect DPR from context transform so bitmap resolution matches the
-  // canvas backing store. Without this, a 1x bitmap drawn on a 2x canvas
-  // via drawImage() gets browser-upscaled → blurry cached text.
-  const rawDpr = ctx.getTransform().a;
-  const dpr = Number.isFinite(rawDpr) && rawDpr > 0 ? rawDpr : 1;
+  // Match the current canvas backing-store density. The caller includes this
+  // normalized value in the cache identity so a resize cannot reuse a bitmap
+  // created at another DPR.
   const pixelWidth = Math.ceil(width * dpr);
   const pixelHeight = Math.ceil(height * dpr);
   if (!canCacheTextBitmap(pixelWidth, pixelHeight, textBitmapCache.maxBytes)) return;
@@ -756,7 +760,7 @@ function drawBitmapAtCssSize(
     ctx.drawImage(bitmap, x - originInset, y - originInset); // fallback for non-canvas sources
     return;
   }
-  const dpr = ctx.getTransform().a || 1;
+  const dpr = getCanvasDpr(ctx);
   ctx.drawImage(bitmap, x - originInset, y - originInset, bw / dpr, bh / dpr);
 }
 
@@ -793,7 +797,8 @@ export function renderSegment(
 
   // Try bitmap cache first (includes outline rendering)
   if (outlineWidthPx > 0 && outlineOpacity > 0 && text.length >= 3) {
-    const key = `${font}|${direction}|${text}|${color}|${Math.round(strokeWidth)}|${outlineClass}|${letterSpacing}`;
+    const dpr = getCanvasDpr(ctx);
+    const key = `${font}|dpr:${dpr}|${direction}|${text}|${color}|${Math.round(strokeWidth)}|${outlineClass}|${letterSpacing}`;
     const bitmap = textBitmapCache.get(key);
     if (bitmap) {
       drawBitmapAtCssSize(ctx, bitmap, x, y, bitmapOriginInset);
@@ -810,6 +815,7 @@ export function renderSegment(
       strokeWidth,
       strokeColor,
       ctx,
+      dpr,
       textBitmapCache,
       letterSpacing,
       direction
@@ -873,12 +879,13 @@ export function warmTextBitmapCache(
   const strokeWidth = Math.max(0.5, outlineWidthPx * OUTLINE_STROKE_SCALE);
   const strokeColor = computeOutlineColor(color, Math.min(1, outlineOpacity));
   const keyLetterSpacing = letterSpacing ?? '0px';
+  const dpr = getCanvasDpr(ctx);
 
   const warmSingle = (text: string, ls: string, direction = resolveTextDirection(text)): void => {
     if (text.length < 3) return; // min length for bitmap caching
     const font = getFontString(fontSize, fontWeight as FontWeight, fontFamily);
     const outlineClass = strokeColor.startsWith('rgba(0, 0, 0') ? 'dark' : 'light';
-    const key = `${font}|${direction}|${text}|${color}|${Math.round(strokeWidth)}|${outlineClass}|${ls}`;
+    const key = `${font}|dpr:${dpr}|${direction}|${text}|${color}|${Math.round(strokeWidth)}|${outlineClass}|${ls}`;
     if (textBitmapCache.get(key)) return; // already cached
 
     cacheTextBitmap(
@@ -890,6 +897,7 @@ export function warmTextBitmapCache(
       strokeWidth,
       strokeColor,
       ctx,
+      dpr,
       textBitmapCache,
       ls,
       direction
