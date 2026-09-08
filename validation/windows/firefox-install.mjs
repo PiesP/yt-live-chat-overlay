@@ -391,10 +391,18 @@ async function runLivePhase(session, liveEntries, output) {
     session.clearPageLogs();
     let loaded = false;
     let state;
+    let player;
     let workerReady = false;
     try {
       await session.navigate(entry.url, { wait: 'interactive', timeoutMs: 45_000 });
       loaded = true;
+      await session.waitFor('Boolean(document.querySelector("video"))', 'the public video element');
+      player = await session.evaluateJson(`(() => {
+        const video = document.querySelector('video');
+        video.muted = true;
+        void video.play().catch(() => {});
+        return { paused: video.paused, readyState: video.readyState };
+      })()`);
       await session.waitFor(
         `Boolean(
           document.querySelectorAll('#${OVERLAY_ID}').length === 1 &&
@@ -439,6 +447,7 @@ async function runLivePhase(session, liveEntries, output) {
         index,
         kind: entry.kind,
         loaded: true,
+        player,
         ...state,
         workerReady,
         status: 'passed',
@@ -455,16 +464,21 @@ async function runLivePhase(session, liveEntries, output) {
         index,
         kind: entry.kind,
         loaded,
+        player,
         ...(state ?? {}),
         workerReady,
         status: 'unverified',
-        failureCategory: errorMessage(error).includes('timed out')
+        failureCategory: /timed out/i.test(errorMessage(error))
           ? 'readiness-timeout'
           : loaded
             ? 'installed-render-readiness'
             : 'navigation',
         errorCategories: categorizeErrors(session.pageLogs),
         errorCount: session.pageLogs.filter(({ level }) => level === 'error').length,
+        failure: describeFailure(error),
+        diagnostics: session.pageLogs.filter(({ level, text }) =>
+          level === 'error' || /worker/i.test(text)).slice(0, 20)
+          .map(({ level, text }) => ({ level, text: text.slice(0, 1000) })),
       });
     }
   }

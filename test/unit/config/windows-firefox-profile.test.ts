@@ -60,6 +60,7 @@ function createSession(options: {
     }),
     evaluateJson: vi.fn(async (expression: string) => {
       new Script(expression);
+      if (expression.includes('video.muted = true')) return { paused: false, readyState: 4 };
       evaluateIndex++;
       if (options.failStartup && evaluateIndex === 1) throw new Error('fixture startup failed');
       switch (evaluateIndex) {
