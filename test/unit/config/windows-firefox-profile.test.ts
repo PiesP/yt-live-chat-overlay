@@ -251,7 +251,7 @@ describe('Windows Firefox installation profile', () => {
         workerPolicyFallback: false,
         videoPaused: false,
         screenshot: 'firefox-live-01.png',
-        player: { paused: false, readyState: 4 },
+        player: { paused: false, readyState: 4, inputMethod: 'native-pointer', playbackStarted: true },
         canvasCount: 1,
         errorCategories: {},
         errorCount: 0,

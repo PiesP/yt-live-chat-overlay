@@ -401,10 +401,19 @@ async function runLivePhase(session, liveEntries, output) {
       player = await session.evaluateJson(`(() => {
         const video = document.querySelector('video');
         video.muted = true;
-        void video.play().catch(() => {});
         return { paused: video.paused, readyState: video.readyState };
       })()`);
+      await session.waitFor(`(() => {
+        const video = document.querySelector('video');
+        if (video && !video.paused && video.readyState >= 2) return true;
+        const button = document.querySelector('.ytp-large-play-button');
+        const rect = button?.getBoundingClientRect();
+        return Boolean(rect && rect.width > 0 && rect.height > 0 &&
+          button.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)));
+      })()`, 'public playback or a clickable YouTube play button');
       const playPoint = await session.evaluateJson(`(() => {
+        const video = document.querySelector('video');
+        if (video && !video.paused && video.readyState >= 2) return null;
         const button = document.querySelector('.ytp-large-play-button');
         const rect = button?.getBoundingClientRect();
         return rect && rect.width > 0 && rect.height > 0
@@ -412,6 +421,7 @@ async function runLivePhase(session, liveEntries, output) {
           : null;
       })()`);
       if (playPoint) {
+        player.inputMethod = 'native-pointer';
         try {
           await session.command('input.performActions', { context: session.context, actions: [{
             type: 'pointer', id: 'acceptance-player', parameters: { pointerType: 'mouse' },
@@ -424,6 +434,10 @@ async function runLivePhase(session, liveEntries, output) {
           await session.command('input.releaseActions', { context: session.context });
         }
       }
+      await session.waitFor(`Boolean(document.querySelector('video') &&
+        !document.querySelector('video').paused && document.querySelector('video').readyState >= 2)`,
+        'public video playback to start');
+      player.playbackStarted = true;
       await session.waitFor(
         `Boolean(
           document.querySelectorAll('#${OVERLAY_ID}').length === 1 &&
