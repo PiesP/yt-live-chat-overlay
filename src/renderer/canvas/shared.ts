@@ -676,8 +676,9 @@ function cacheTextBitmap(
   // prevent the rightmost character from being clipped by the bitmap edge.
   const lsPx = parseFloat(letterSpacing) || 0;
   const lsExtraWidth = lsPx > 0 ? Math.ceil(Math.max(0, [...text].length - 1) * lsPx) : 0;
-  const width = textWidth + Math.ceil(strokeWidth) + 2 + lsExtraWidth;
-  const height = getSafeTextHeight(metrics, fontSize) + Math.ceil(strokeWidth) + 2;
+  const bitmapPadding = Math.ceil(strokeWidth / 2) + 1;
+  const width = Math.ceil(textWidth + bitmapPadding * 2 + lsExtraWidth);
+  const height = Math.ceil(getSafeTextHeight(metrics, fontSize) + bitmapPadding * 2);
   ctx.restore();
 
   // Detect DPR from context transform so bitmap resolution matches the
@@ -715,9 +716,9 @@ function cacheTextBitmap(
   offCtx.lineJoin = 'round';
   offCtx.lineCap = 'round';
   offCtx.miterLimit = 2;
-  offCtx.strokeText(text, strokeWidth / 2 + 1, strokeWidth / 2 + 1);
+  offCtx.strokeText(text, bitmapPadding, bitmapPadding);
   offCtx.fillStyle = fillColor;
-  offCtx.fillText(text, strokeWidth / 2 + 1, strokeWidth / 2 + 1);
+  offCtx.fillText(text, bitmapPadding, bitmapPadding);
 
   textBitmapCache.set(key, offscreen);
 }
@@ -739,7 +740,8 @@ function drawBitmapAtCssSize(
   ctx: AnyCanvasContext,
   bitmap: CanvasImageSource,
   x: number,
-  y: number
+  y: number,
+  originInset = 0
 ): void {
   let bw = 0;
   let bh = 0;
@@ -751,11 +753,11 @@ function drawBitmapAtCssSize(
     bh = bitmap.height;
   }
   if (bw <= 0 || bh <= 0) {
-    ctx.drawImage(bitmap, x, y); // fallback for non-canvas sources
+    ctx.drawImage(bitmap, x - originInset, y - originInset); // fallback for non-canvas sources
     return;
   }
   const dpr = ctx.getTransform().a || 1;
-  ctx.drawImage(bitmap, x, y, bw / dpr, bh / dpr);
+  ctx.drawImage(bitmap, x - originInset, y - originInset, bw / dpr, bh / dpr);
 }
 
 /**
@@ -781,6 +783,7 @@ export function renderSegment(
 ): void {
   const font = getFontFn(fontSize);
   const strokeWidth = Math.max(0.5, outlineWidthPx * OUTLINE_STROKE_SCALE);
+  const bitmapOriginInset = Math.ceil(strokeWidth / 2) + 1;
   const strokeColor = computeOutlineColor(color, Math.min(1, outlineOpacity));
   // Normalize to 'dark'/'light' — computeOutlineColor only returns black or
   // white variations.  Using the class instead of the full rgba string prevents
@@ -793,7 +796,7 @@ export function renderSegment(
     const key = `${font}|${direction}|${text}|${color}|${Math.round(strokeWidth)}|${outlineClass}|${letterSpacing}`;
     const bitmap = textBitmapCache.get(key);
     if (bitmap) {
-      drawBitmapAtCssSize(ctx, bitmap, x, y);
+      drawBitmapAtCssSize(ctx, bitmap, x, y, bitmapOriginInset);
       return;
     }
 
@@ -815,7 +818,7 @@ export function renderSegment(
     // Immediately use the freshly cached bitmap to avoid fallthrough overhead
     const freshBitmap = textBitmapCache.get(key);
     if (freshBitmap) {
-      drawBitmapAtCssSize(ctx, freshBitmap, x, y);
+      drawBitmapAtCssSize(ctx, freshBitmap, x, y, bitmapOriginInset);
       return;
     }
   }
@@ -1431,14 +1434,13 @@ export function renderWrappedContentSegments<
     > = [];
     for (const [pieceIndex, piece] of line.entries()) {
       const prefix = pieceIndex > 0 && piece.spaceBefore ? ' ' : '';
-      if (piece.type === 'text') pieces.push({ type: 'text', text: prefix + piece.text });
-      else {
-        if (prefix) {
-          const previousPiece = pieces.at(-1);
-          if (previousPiece?.type === 'text') previousPiece.text += prefix;
-        }
-        pieces.push({ type: 'object', value: piece, width: piece.width });
-      }
+      // Keep the collapsed gap separate so rendering uses the same
+      // measure(' ') + measure(word) contract as buildWrappedLines(). Some
+      // fallback-font runs (notably CJK on Windows) shape " word" wider than
+      // those independently measured pieces and can otherwise escape the line.
+      if (prefix) pieces.push({ type: 'text', text: prefix });
+      if (piece.type === 'text') pieces.push({ type: 'text', text: piece.text });
+      else pieces.push({ type: 'object', value: piece, width: piece.width });
     }
     if (canRenderEllipsis) pieces.push({ type: 'text', text: ellipsis });
     return {

@@ -141,7 +141,7 @@ async function assertForcedColorsDisclosure(page, summary) {
   }
 }
 
-async function configureThroughSettingsUi(page, installed, output) {
+async function configureThroughSettingsUi(page, installed, output, inspectRenderer) {
   const button = page.locator('#yt-chat-overlay-settings-button');
   await button.waitFor({ state: 'visible', timeout: 15_000 });
   await button.focus();
@@ -252,7 +252,7 @@ async function configureThroughSettingsUi(page, installed, output) {
   await modal.locator('#tab-advanced').click();
   const depthLayers = modal.locator('input[name="depthLayersEnabled"]');
   if (await depthLayers.isChecked()) await depthLayers.uncheck();
-  if (installed) await modal.locator('input[name="showDebugOverlay"]').check();
+  if (installed || inspectRenderer) await modal.locator('input[name="showDebugOverlay"]').check();
   await page.keyboard.press('Escape');
   await modal.waitFor({ state: 'hidden', timeout: 5_000 });
 
@@ -275,7 +275,7 @@ async function configureThroughSettingsUi(page, installed, output) {
   });
 }
 
-export async function run({ browser, root, output, installedContext, installedExtensionId, expectedRenderer }) {
+export async function run({ browser, root, output, installedContext, installedExtensionId, expectedRenderer = 'main' }) {
   assert(
     browser && typeof browser.newContext === 'function',
     'A launched Playwright browser is required',
@@ -393,11 +393,53 @@ export async function run({ browser, root, output, installedContext, installedEx
         },
       });
     });
-    await page.addInitScript(() => {
+    await page.addInitScript((inspectPaidCardInk) => {
       Object.defineProperty(HTMLMediaElement.prototype, 'paused', {
         configurable: true,
         get: () => false,
       });
+      if (inspectPaidCardInk) {
+        Object.defineProperty(HTMLCanvasElement.prototype, 'transferControlToOffscreen', {
+          configurable: true,
+          value: () => {
+            throw new Error('Select the main renderer for fixture pixel inspection');
+          },
+        });
+        const rects = [];
+        let cachedBitmapDraws = 0;
+        const originalRoundRect = CanvasRenderingContext2D.prototype.roundRect;
+        CanvasRenderingContext2D.prototype.roundRect = function (x, y, width, height, radii) {
+          if (
+            width > 0 &&
+            typeof this.fillStyle !== 'string' &&
+            rects.length < 512
+          ) {
+            const transform = this.getTransform();
+            rects.push({
+              left: x * transform.a + transform.e,
+              top: y * transform.d + transform.f,
+              right: (x + width) * transform.a + transform.e,
+              bottom: (y + height) * transform.d + transform.f,
+            });
+          }
+          originalRoundRect.call(this, x, y, width, height, radii);
+        };
+        const originalDrawImage = CanvasRenderingContext2D.prototype.drawImage;
+        CanvasRenderingContext2D.prototype.drawImage = function (...args) {
+          if (
+            args.length >= 5 &&
+            typeof OffscreenCanvas !== 'undefined' &&
+            args[0] instanceof OffscreenCanvas
+          ) {
+            cachedBitmapDraws++;
+          }
+          Reflect.apply(originalDrawImage, this, args);
+        };
+        window.__ytAcceptancePaidCardProbe = {
+          rects,
+          get cachedBitmapDraws() { return cachedBitmapDraws; },
+        };
+      }
       window.ytcfg = {
         data_: {
           INNERTUBE_API_KEY: 'windows-acceptance-key',
@@ -426,7 +468,7 @@ export async function run({ browser, root, output, installedContext, installedEx
           },
         },
       };
-    });
+    }, expectedRenderer === 'main');
     if (!installedContext) {
       await page.addInitScript({ content: gmMocks });
       await page.addInitScript({ content: userscript });
@@ -442,7 +484,7 @@ export async function run({ browser, root, output, installedContext, installedEx
       return Boolean(handle && typeof handle.getSettings === 'function');
     });
 
-    await configureThroughSettingsUi(page, Boolean(installedContext), output);
+    await configureThroughSettingsUi(page, Boolean(installedContext), output, Boolean(expectedRenderer));
     await page.locator('#yt-live-chat-overlay canvas').waitFor({ state: 'attached' });
     await page.waitForTimeout(500);
 
@@ -531,6 +573,42 @@ export async function run({ browser, root, output, installedContext, installedEx
     assert((await stat(canvasPath)).size > 1_000, 'Canvas screenshot is unexpectedly small');
     assert((await stat(pagePath)).size > 1_000, 'Page screenshot is unexpectedly small');
 
+    const paidCardInkContainment = expectedRenderer === 'main'
+      ? await canvas.evaluate((element) => {
+          const probe = window.__ytAcceptancePaidCardProbe;
+          const rect = probe?.rects.at(-1);
+          const context = element.getContext('2d');
+          if (!probe || !rect || !context) return null;
+          const startX = Math.min(element.width, Math.ceil(rect.right) + 1);
+          const startY = Math.max(0, Math.floor(rect.top));
+          const endY = Math.min(element.height, Math.ceil(rect.bottom));
+          if (startX >= element.width || startY >= endY) return null;
+          const pixels = context.getImageData(
+            startX,
+            startY,
+            element.width - startX,
+            endY - startY,
+          ).data;
+          let outsideAlphaPixels = 0;
+          for (let index = 3; index < pixels.length; index += 4) {
+            if (pixels[index] > 8) outsideAlphaPixels++;
+          }
+          return { cachedBitmapDraws: probe.cachedBitmapDraws, outsideAlphaPixels };
+        })
+      : null;
+    if (expectedRenderer === 'main') {
+      assert(paidCardInkContainment, 'Super Chat card ink probe did not capture a card');
+      assert(
+        paidCardInkContainment.cachedBitmapDraws > 0,
+        'Super Chat fixture did not exercise cached outlined text',
+      );
+      assert.equal(
+        paidCardInkContainment.outsideAlphaPixels,
+        0,
+        'Outlined Super Chat text escaped the card boundary',
+      );
+    }
+
     assert.deepEqual(pageErrors, [], `Page errors: ${pageErrors.join(' | ')}`);
     assert.deepEqual(consoleErrors, [], `Console errors: ${consoleErrors.join(' | ')}`);
     const backgroundObservationMs = backgroundRequestTimes.length
@@ -607,6 +685,7 @@ export async function run({ browser, root, output, installedContext, installedEx
         pageErrors: pageErrors.length,
         consoleErrors: consoleErrors.length,
         customEmojiAssetRequests,
+        paidCardInkContained: paidCardInkContainment?.outsideAlphaPixels === 0,
         screenshotsWritten: 4,
       },
       observations: {
@@ -615,6 +694,7 @@ export async function run({ browser, root, output, installedContext, installedEx
         fixtureContent: ['Korean', 'Japanese', 'RTL', 'emoji', 'Super Chat', 'membership'],
         screenshots: ['yt-settings-basic.png', 'yt-settings-preview.png', 'yt-visual-canvas.png', 'yt-visual-page.png'],
         backgroundObservationMs,
+        paidCardInkContainment,
         backgroundRequestIntervalsMs: backgroundRequestTimes.slice(1).map(
           (time, index) => time - backgroundRequestTimes[index],
         ),

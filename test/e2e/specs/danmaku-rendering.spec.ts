@@ -784,6 +784,144 @@ test.describe('Danmaku Rendering', () => {
     expect(sequence!.emoji).toMatchObject({ width: 32, height: 32 });
   });
 
+  test('keeps outlined cached CJK ink inside a SuperChat card', async ({ page }) => {
+    await page.addInitScript((paidCardMinWidth: number) => {
+      Object.defineProperty(HTMLCanvasElement.prototype, 'transferControlToOffscreen', {
+        configurable: true,
+        value: () => {
+          throw new Error('Force the main-thread renderer for SuperChat pixel inspection');
+        },
+      });
+
+      const rects: Array<{ left: number; top: number; right: number; bottom: number }> = [];
+      let cachedBitmapDraws = 0;
+      const originalRoundRect = CanvasRenderingContext2D.prototype.roundRect;
+      CanvasRenderingContext2D.prototype.roundRect = function (
+        x: number,
+        y: number,
+        width: number,
+        height: number,
+        radii?: number | DOMPointInit | (number | DOMPointInit)[]
+      ): void {
+        if (width >= paidCardMinWidth && rects.length < 512) {
+          const transform = this.getTransform();
+          rects.push({
+            left: x * transform.a + transform.e,
+            top: y * transform.d + transform.f,
+            right: (x + width) * transform.a + transform.e,
+            bottom: (y + height) * transform.d + transform.f,
+          });
+        }
+        originalRoundRect.call(this, x, y, width, height, radii);
+      };
+
+      const originalDrawImage = CanvasRenderingContext2D.prototype.drawImage;
+      CanvasRenderingContext2D.prototype.drawImage = function (
+        this: CanvasRenderingContext2D,
+        ...args: unknown[]
+      ): void {
+        if (
+          args.length >= 5 &&
+          typeof OffscreenCanvas !== 'undefined' &&
+          args[0] instanceof OffscreenCanvas
+        ) {
+          cachedBitmapDraws++;
+        }
+        Reflect.apply(originalDrawImage, this, args);
+      } as typeof CanvasRenderingContext2D.prototype.drawImage;
+
+      (window as unknown as Record<string, unknown>).__paidCardInkProbe = {
+        rects,
+        get cachedBitmapDraws() {
+          return cachedBitmapDraws;
+        },
+      };
+    }, rendererLayout.paidCardMinWidthFloor);
+
+    await setupOverlayPage(page, { platform: 'userscript' });
+    await applySettings(page, {
+      allowShortTextMessages: true,
+      danmakuMode: 'top',
+      fontSize: 36,
+      showDebugOverlay: true,
+      showSuperChatAmount: false,
+      superChatMaxBodyLines: 3,
+      showAuthor: { superChat: false },
+      outline: { enabled: true, widthPx: 3, opacity: 0.6 },
+      topBottomDurationMs: 30_000,
+    });
+
+    await page.route('https://www.youtube.com/youtubei/v1/live_chat/get_live_chat**', (route) =>
+      route.fulfill({
+        json: {
+          continuationContents: {
+            liveChatContinuation: {
+              actions: [
+                {
+                  addChatItemAction: {
+                    item: {
+                      liveChatPaidMessageRenderer: {
+                        id: 'e2e-outlined-cjk-superchat',
+                        authorName: { simpleText: 'Super Chat' },
+                        purchaseAmountText: { simpleText: '$5.00' },
+                        message: {
+                          simpleText: '후원 카드의 긴 본문과 경계가 잘 보이는지 확인합니다.',
+                        },
+                      },
+                    },
+                  },
+                },
+              ],
+              continuations: [],
+            },
+          },
+        },
+      })
+    );
+    await page.evaluate(() =>
+      fetch('https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?key=e2e-cjk')
+    );
+    await expect(page.locator('#yt-chat-overlay-debug > div').first()).toHaveText(
+      'Rcvd: 1 | Rndr: 1'
+    );
+
+    const canvas = page.locator(`#${OVERLAY_ID} canvas`);
+    const readContainment = () =>
+      canvas.evaluate((element: HTMLCanvasElement) => {
+        const probe = (window as unknown as Record<string, unknown>).__paidCardInkProbe as
+          | {
+              rects: Array<{ left: number; top: number; right: number; bottom: number }>;
+              cachedBitmapDraws: number;
+            }
+          | undefined;
+        const rect = probe?.rects.at(-1);
+        const context = element.getContext('2d');
+        if (!probe || !rect || !context) return null;
+
+        const startX = Math.min(element.width, Math.ceil(rect.right) + 1);
+        const startY = Math.max(0, Math.floor(rect.top));
+        const endY = Math.min(element.height, Math.ceil(rect.bottom));
+        if (startX >= element.width || startY >= endY) return null;
+        const pixels = context.getImageData(
+          startX,
+          startY,
+          element.width - startX,
+          endY - startY
+        ).data;
+        let outsideAlphaPixels = 0;
+        for (let index = 3; index < pixels.length; index += 4) {
+          if (pixels[index]! > 8) outsideAlphaPixels++;
+        }
+        return { cachedBitmapDraws: probe.cachedBitmapDraws, outsideAlphaPixels };
+      });
+
+    await expect.poll(readContainment, { timeout: 5000 }).not.toBeNull();
+    const containment = await readContainment();
+    expect(containment).not.toBeNull();
+    expect(containment!.cachedBitmapDraws).toBeGreaterThan(0);
+    expect(containment!.outsideAlphaPixels).toBe(0);
+  });
+
   test('keeps a truncated SuperChat ellipsis inside the card', async ({ page }) => {
     await page.addInitScript(() => {
       Object.defineProperty(HTMLCanvasElement.prototype, 'transferControlToOffscreen', {
