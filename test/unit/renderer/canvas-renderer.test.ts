@@ -333,6 +333,33 @@ describe('CanvasRenderer', () => {
     renderer.destroy();
   });
 
+  it('preserves main text caches for opacity changes and invalidates outline geometry', () => {
+    const initial = makeSettings();
+    const renderer = new CanvasRenderer(overlay, initial);
+    const internals = renderer as unknown as {
+      textBitmapCache: { set(key: string, value: HTMLCanvasElement): boolean; size: number };
+      dimensionCache: Map<string, { width: number; height: number }>;
+    };
+    const bitmap = document.createElement('canvas');
+    bitmap.width = 2;
+    bitmap.height = 2;
+    internals.textBitmapCache.set('cached-text', bitmap);
+    internals.dimensionCache.set('cached-dimensions', { width: 100, height: 20 });
+
+    renderer.updateSettings({ ...initial, opacity: 0.75 });
+    expect(internals.textBitmapCache.size).toBe(1);
+    expect(internals.dimensionCache.size).toBe(1);
+
+    renderer.updateSettings({
+      ...initial,
+      opacity: 0.75,
+      outline: { ...initial.outline, widthPx: initial.outline.widthPx + 1 },
+    });
+    expect(internals.textBitmapCache.size).toBe(0);
+    expect(internals.dimensionCache.size).toBe(0);
+    renderer.destroy();
+  });
+
   it('invalidates cached card dimensions when the overlay size changes', () => {
     const callbacks: Array<Parameters<Overlay['onDimensionsChanged']>[0]> = [];
     vi.spyOn(overlay, 'onDimensionsChanged').mockImplementation((callback) => {
