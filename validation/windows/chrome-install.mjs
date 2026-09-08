@@ -20,7 +20,12 @@ async function installUserscript(context, id, root, output) {
     assert(await toggle.evaluate((element) => element.checked), 'User scripts permission is disabled');
     const keep = page.getByRole('button', { name: 'Keep', exact: true });
     if (await keep.isVisible()) await keep.click();
+    const restarted = context.waitForEvent('serviceworker', {
+      predicate: (worker) => worker.url().startsWith(`chrome-extension://${id}/`),
+      timeout: 15_000,
+    });
     await page.locator('extensions-detail-view #dev-reload-button').click();
+    await restarted;
     await page.goto(`chrome-extension://${id}/options.html`);
     await page.getByText('Utilities', { exact: true }).click();
     const confirmationPromise = context.waitForEvent('page');
