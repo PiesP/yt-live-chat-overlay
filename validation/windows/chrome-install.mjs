@@ -140,7 +140,7 @@ async function inspectLivePage(context, url, output, index, installation) {
   page.on('console', (message) => {
     const text = message.text();
     if (message.type() === 'error') {
-      if (consoleErrors.length < 32) consoleErrors.push({ type: 'error', text: text.slice(0, 1000) });
+      if (consoleErrors.length < 32) consoleErrors.push({ type: 'error', text: text.slice(0, 1000), url: message.location().url });
       else consoleErrorOverflow++;
     }
     if (/worker|TrustedScriptURL/i.test(text) && workerDiagnostics.length < 20) {
@@ -216,6 +216,13 @@ async function inspectLivePage(context, url, output, index, installation) {
     observation.unexpectedConsoleErrors = consoleErrorOverflow +
       countUnexpectedLiveErrors(consoleErrors, observation.workerPolicyFallback);
     observation.hostConsoleErrors = consoleErrors.filter(isYouTubeHostError).length;
+    observation.consoleErrors = consoleErrors.map(({ type, text, url }) => ({
+      type, text: redactDiagnosticText(text), url: redactDiagnosticText(url),
+    }));
+    if (observation.status === 'passed' && (observation.pageErrorTypes.length > 0 || observation.unexpectedConsoleErrors > 0)) {
+      observation.status = 'unverified';
+      observation.reason = 'unexpected-page-errors';
+    }
   }
   return observation;
 }
