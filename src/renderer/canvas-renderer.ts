@@ -2059,12 +2059,15 @@ export class CanvasRenderer extends RendererBase {
       settings.fontSize !== this.settings.fontSize ||
       settings.fontWeight !== this.settings.fontWeight ||
       settings.fontFamily !== this.settings.fontFamily ||
+      settings.outline.enabled !== this.settings.outline.enabled ||
+      settings.outline.widthPx !== this.settings.outline.widthPx ||
       settings.laneSpacing !== this.settings.laneSpacing ||
       settings.safeTop !== this.settings.safeTop ||
       settings.safeBottom !== this.settings.safeBottom ||
       settings.superChatMaxBodyLines !== this.settings.superChatMaxBodyLines ||
       settings.membershipMaxBodyLines !== this.settings.membershipMaxBodyLines ||
       settings.showSuperChatAmount !== this.settings.showSuperChatAmount ||
+      settings.translationMode !== this.settings.translationMode ||
       Object.keys(settings.showAuthor).some(
         (key) =>
           settings.showAuthor[key as keyof OverlaySettings['showAuthor']] !==
