@@ -60,7 +60,7 @@ const CHAT_ACTIONS = [
   },
 ];
 
-function chatResponse(actions) {
+function chatResponse(actions, timeoutMs = 30_000) {
   return {
     continuationContents: {
       liveChatContinuation: {
@@ -69,7 +69,7 @@ function chatResponse(actions) {
           {
             timedContinuationData: {
               continuation: 'windows-acceptance-next',
-              timeoutMs: 30_000,
+              timeoutMs,
             },
           },
         ],
@@ -110,7 +110,7 @@ function createMockWatchHtml(previewHtml) {
   ).replace('</body>', `${chat}\n</body>`);
 }
 
-async function configureThroughSettingsUi(page) {
+async function configureThroughSettingsUi(page, installed) {
   const button = page.locator('#yt-chat-overlay-settings-button');
   await button.waitFor({ state: 'visible', timeout: 15_000 });
   await button.focus();
@@ -133,6 +133,7 @@ async function configureThroughSettingsUi(page) {
   await page.keyboard.press('Escape');
   await modal.waitFor({ state: 'hidden', timeout: 5_000 });
 
+  if (installed) return;
   await page.waitForFunction(() => {
     const handle = window.__ytChatOverlay;
     const settings = handle?.getSettings?.();
@@ -145,7 +146,7 @@ async function configureThroughSettingsUi(page) {
   });
 }
 
-export async function run({ browser, root, output }) {
+export async function run({ browser, root, output, installedContext }) {
   assert(
     browser && typeof browser.newContext === 'function',
     'A launched Playwright browser is required',
@@ -168,14 +169,17 @@ export async function run({ browser, root, output }) {
   let explicitChatRequests = 0;
   let backgroundChatRequests = 0;
   let customEmojiAssetRequests = 0;
-  const context = await browser.newContext({
+  let deliverInstalledFixture = false;
+  let installedFixtureDelivered = false;
+  const context = installedContext ?? await browser.newContext({
     colorScheme: 'dark',
     locale: 'en-US',
     viewport: { width: 1280, height: 720 },
   });
 
+  let page;
   try {
-    const page = await context.newPage();
+    page = await context.newPage();
     page.on('pageerror', (error) => pageErrors.push(error.message));
     page.on('console', (message) => {
       if (message.type() === 'error') consoleErrors.push(message.text());
@@ -199,10 +203,14 @@ export async function run({ browser, root, output }) {
           });
         } else {
           backgroundChatRequests++;
+          const actions = deliverInstalledFixture && !installedFixtureDelivered
+            ? CHAT_ACTIONS
+            : [];
+          if (actions.length) installedFixtureDelivered = true;
           await route.fulfill({
             status: 200,
             contentType: 'application/json',
-            json: chatResponse([]),
+            json: chatResponse(actions, installedContext ? 250 : 30_000),
           });
         }
         return;
@@ -258,24 +266,27 @@ export async function run({ browser, root, output }) {
         },
       };
     });
-    await page.addInitScript({ content: gmMocks });
-    await page.addInitScript({ content: userscript });
+    if (!installedContext) {
+      await page.addInitScript({ content: gmMocks });
+      await page.addInitScript({ content: userscript });
+    }
     await page.goto(MOCK_WATCH_URL, { waitUntil: 'domcontentloaded', timeout: 30_000 });
 
     await page.locator('#yt-live-chat-overlay canvas').waitFor({
       state: 'attached',
       timeout: 15_000,
     });
-    await page.waitForFunction(() => {
+    if (!installedContext) await page.waitForFunction(() => {
       const handle = window.__ytChatOverlay;
       return Boolean(handle && typeof handle.getSettings === 'function');
     });
 
-    await configureThroughSettingsUi(page);
+    await configureThroughSettingsUi(page, Boolean(installedContext));
     await page.locator('#yt-live-chat-overlay canvas').waitFor({ state: 'attached' });
     await page.waitForTimeout(500);
 
-    const apiStatuses = await page.evaluate(async (count) => {
+    deliverInstalledFixture = true;
+    const apiStatuses = installedContext ? [] : await page.evaluate(async (count) => {
       const statuses = [];
       for (let index = 0; index < count; index++) {
         const response = await fetch(
@@ -287,12 +298,12 @@ export async function run({ browser, root, output }) {
       }
       return statuses;
     }, EXPECTED_MESSAGE_COUNT);
-    assert.deepEqual(
+    if (!installedContext) assert.deepEqual(
       apiStatuses,
       Array.from({ length: EXPECTED_MESSAGE_COUNT }, () => 200),
       'Deterministic live-chat API fixtures did not load',
     );
-    assert.equal(explicitChatRequests, EXPECTED_MESSAGE_COUNT);
+    assert.equal(explicitChatRequests, installedContext ? 0 : EXPECTED_MESSAGE_COUNT);
 
     try {
       await page.waitForFunction(
@@ -353,16 +364,35 @@ export async function run({ browser, root, output }) {
 
     assert.deepEqual(pageErrors, [], `Page errors: ${pageErrors.join(' | ')}`);
     assert.deepEqual(consoleErrors, [], `Console errors: ${consoleErrors.join(' | ')}`);
-    assert(backgroundChatRequests <= 4, `Background chat requests flooded: ${backgroundChatRequests}`);
+    assert(backgroundChatRequests <= (installedContext ? 100 : 4),
+      `Background chat requests flooded: ${backgroundChatRequests}`);
 
-    const settings = await page.evaluate(() => window.__ytChatOverlay?.getSettings?.());
+    let settings;
+    if (installedContext) {
+      assert(installedFixtureDelivered, 'The installed application did not consume fixture data');
+      // Reload proves persistence through the real extension/userscript manager.
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.locator('#yt-chat-overlay-settings-button').click();
+      const modal = page.locator('#yt-chat-overlay-settings-backdrop');
+      await modal.waitFor({ state: 'visible' });
+      settings = {
+        fontSize: Number(await modal.locator('input[name="fontSize"]').inputValue()),
+        danmakuMode: await modal.locator('select[name="danmakuMode"]').inputValue(),
+        depthLayersEnabled: await modal.locator('input[name="depthLayersEnabled"]').isChecked(),
+      };
+      await page.keyboard.press('Escape');
+    } else {
+      settings = await page.evaluate(() => window.__ytChatOverlay?.getSettings?.());
+    }
     assert.equal(settings?.fontSize, 36);
     assert.equal(settings?.danmakuMode, 'scroll');
     assert.equal(settings?.depthLayersEnabled, false);
 
     return {
       checks: {
-        productionUserscriptInjected: true,
+        productionUserscriptInjected: !installedContext,
+        installedApplicationDelivery: Boolean(installedContext),
+        persistedAcrossReload: Boolean(installedContext),
         settingsUiInteraction: true,
         deterministicChatApi: true,
         chatApiRequests,
@@ -384,6 +414,7 @@ export async function run({ browser, root, output }) {
       },
     };
   } finally {
-    await context.close();
+    if (installedContext) await page?.close();
+    else await context.close();
   }
 }

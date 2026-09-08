@@ -74,3 +74,5 @@ TESTING.md
 .github/copilot-instructions.md
 .github/prompts/
 .editorconfig
+# Python validation helpers
+__pycache__/
