@@ -2,11 +2,11 @@
 // Copyright (c) 2026 PiesP
 
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
-import { basename, dirname, join, resolve, win32 } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { run as runFixture } from './profile.mjs';
 import { countUnexpectedLiveErrors, validateLiveRenderer } from './live-rendering.mjs';
+import { captureOwnedChromeProcess, terminateOwnedChromeProcess } from './chrome-process.mjs';
 
 const SCRIPT_NAME = 'YouTube Live Chat Overlay';
 const CHROME_PROFILE_PREFIX = 'chrome-install-';
@@ -63,39 +63,6 @@ async function waitForProcessExit(
     await delay(Math.min(100, Math.max(1, deadline - Date.now())));
   }
   return !(await checkAlive(processId));
-}
-
-function terminateWindowsProcessTree(processId) {
-  if (!Number.isSafeInteger(processId) || processId <= 0) {
-    return Promise.reject(new Error('Invalid task-owned browser process id'));
-  }
-  return new Promise((resolveTermination, rejectTermination) => {
-    const systemRoot = process.env.SystemRoot ?? 'C:\\Windows';
-    if (!win32.isAbsolute(systemRoot)) {
-      rejectTermination(new Error('Windows did not expose an absolute SystemRoot directory'));
-      return;
-    }
-    const taskkill = spawn(win32.join(systemRoot, 'System32', 'taskkill.exe'), [
-      '/PID', String(processId), '/T', '/F',
-    ], { stdio: 'ignore', windowsHide: true });
-    let settled = false;
-    let timeout;
-    const finish = (error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      if (error) rejectTermination(error);
-      else resolveTermination();
-    };
-    timeout = setTimeout(() => {
-      try { taskkill.kill(); } catch {}
-      finish(new Error('Timed out terminating the task-owned browser tree'));
-    }, PROCESS_EXIT_TIMEOUT_MS);
-    taskkill.once('error', (error) => finish(error));
-    taskkill.once('exit', (code) => finish(
-      code === 0 ? undefined : new Error(`taskkill failed for the task-owned browser tree (${code})`)
-    ));
-  });
 }
 
 async function removeOwnedProfile(root, profile) {
@@ -260,10 +227,10 @@ export function requireLiveSuccess(observations) {
 
 /** Attempt every owned cleanup stage even when an earlier operation fails. */
 export async function cleanupChromeInstallation(
-  { browserProcessId, context, cdp, extensionId, profile, output, result, root },
+  { browserProcessId, browserProcessIdentity, context, cdp, extensionId, profile, output, result, root },
   {
     checkProcessAlive = isProcessAlive,
-    terminateProcessTree = terminateWindowsProcessTree,
+    terminateProcessTree = () => terminateOwnedChromeProcess(browserProcessIdentity),
     waitForExit,
   } = {}
 ) {
@@ -356,6 +323,7 @@ export async function runChromeInstallation({
   let cdp;
   let extensionId;
   let browserProcessId;
+  let browserProcessIdentity;
   let primaryError;
   const result = { installation, fixture: null, live: [], cleanup: {} };
   try {
@@ -370,6 +338,7 @@ export async function runChromeInstallation({
     result.browserVersion = context.browser().version();
     cdp = await context.browser().newBrowserCDPSession();
     browserProcessId = readOwnedBrowserProcessId(await cdp.send('SystemInfo.getProcessInfo'));
+    browserProcessIdentity = await captureOwnedChromeProcess(browserProcessId, profile);
     result.cleanup.browserProcessIdentified = true;
     await enableDeveloperMode(context);
     if (installation === 'extension') {
@@ -401,6 +370,7 @@ export async function runChromeInstallation({
     try {
       await cleanupChromeInstallation({
         browserProcessId,
+        browserProcessIdentity,
         context,
         cdp,
         extensionId,
