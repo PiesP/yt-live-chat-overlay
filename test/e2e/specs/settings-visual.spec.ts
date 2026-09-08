@@ -130,11 +130,18 @@ test.describe('Settings UI Visual', () => {
       const top = element.querySelector<HTMLElement>('[data-preview-zone="top"]');
       const bottom = element.querySelector<HTMLElement>('[data-preview-zone="bottom"]');
       if (!stage || !text || !top || !bottom) throw new Error('Settings preview is incomplete');
-      const stageHeight = stage.getBoundingClientRect().height;
+      const previewRect = element.getBoundingClientRect();
+      const stageRect = stage.getBoundingClientRect();
+      const stageHeight = stageRect.height;
       return {
+        declaredStageHeight: stage.style.blockSize,
         message: text.textContent,
         metrics: element.querySelector('[data-preview-metrics]')?.textContent,
         opacity: text.style.opacity,
+        parentHeight: previewRect.height,
+        previewOverflows: element.scrollHeight > element.clientHeight + 1,
+        stageHeight,
+        stageOverflows: stage.scrollHeight > stage.clientHeight + 1,
         stroke: text.style.getPropertyValue('-webkit-text-stroke'),
         textBottom: text.getBoundingClientRect().bottom,
         textTop: text.getBoundingClientRect().top,
@@ -150,6 +157,12 @@ test.describe('Settings UI Visual', () => {
     expect(state.metrics).toContain('3px / 60%');
     expect(state.opacity).toBe('0.65');
     expect(state.stroke).toBe('2.55px rgba(0, 0, 0, 0.6)');
+    expect(state.previewOverflows, JSON.stringify(state)).toBe(false);
+    expect(state.stageOverflows, JSON.stringify(state)).toBe(false);
+    expect(state.stageHeight, JSON.stringify(state)).toBeCloseTo(
+      Number.parseFloat(state.declaredStageHeight),
+      0
+    );
     expect(state.textTop).toBeGreaterThanOrEqual(state.availableTop - 1);
     expect(state.textBottom).toBeLessThanOrEqual(state.availableBottom + 1);
     expect(state.topFraction).toBeCloseTo(0.2, 2);
@@ -177,10 +190,19 @@ test.describe('Settings UI Visual', () => {
           const stage = element.querySelector<HTMLElement>(
             '.yt-chat-overlay-settings-font-preview-stage'
           );
-          return Boolean(stage && stage.scrollHeight <= stage.clientHeight + 1);
+          if (!stage) throw new Error('Settings preview stage is missing');
+          const previewRect = element.getBoundingClientRect();
+          const stageRect = stage.getBoundingClientRect();
+          return {
+            declaredStageHeight: stage.style.blockSize,
+            parentHeight: previewRect.height,
+            previewOverflows: element.scrollHeight > element.clientHeight + 1,
+            stageHeight: stageRect.height,
+            stageOverflows: stage.scrollHeight > stage.clientHeight + 1,
+          };
         })
       )
-      .toBe(true);
+      .toMatchObject({ previewOverflows: false, stageOverflows: false });
     const state = await preview.evaluate((element) => {
       const stage = element.querySelector<HTMLElement>(
         '.yt-chat-overlay-settings-font-preview-stage'
@@ -193,12 +215,17 @@ test.describe('Settings UI Visual', () => {
       if (!stage || !text || !top || !bottom) throw new Error('Settings preview is incomplete');
       const stageRect = stage.getBoundingClientRect();
       const textRect = text.getBoundingClientRect();
+      const previewRect = element.getBoundingClientRect();
       return {
         bottomFraction: bottom.getBoundingClientRect().height / stageRect.height,
         computedFontSize: getComputedStyle(text).fontSize,
+        declaredStageHeight: stage.style.blockSize,
         message: text.textContent,
         opacity: getComputedStyle(text).opacity,
         overflowsHorizontally: text.scrollWidth > text.clientWidth + 1,
+        parentHeight: previewRect.height,
+        previewOverflows: element.scrollHeight > element.clientHeight + 1,
+        stageHeight: stageRect.height,
         stageOverflows: stage.scrollHeight > stage.clientHeight + 1,
         textBottom: textRect.bottom,
         textTop: textRect.top,
@@ -212,7 +239,12 @@ test.describe('Settings UI Visual', () => {
     expect(state.computedFontSize).toBe('50px');
     expect(state.opacity).toBe('0.55');
     expect(state.overflowsHorizontally).toBe(false);
-    expect(state.stageOverflows).toBe(false);
+    expect(state.previewOverflows, JSON.stringify(state)).toBe(false);
+    expect(state.stageOverflows, JSON.stringify(state)).toBe(false);
+    expect(state.stageHeight, JSON.stringify(state)).toBeCloseTo(
+      Number.parseFloat(state.declaredStageHeight),
+      0
+    );
     expect(state.textTop).toBeGreaterThanOrEqual(state.availableTop - 1);
     expect(state.textBottom).toBeLessThanOrEqual(state.availableBottom + 1);
     expect(state.topFraction).toBeCloseTo(0.25, 2);

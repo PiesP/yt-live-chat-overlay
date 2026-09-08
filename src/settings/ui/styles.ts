@@ -840,11 +840,13 @@ export const SETTINGS_UI_STYLES = `
         margin-bottom: ${spacing.md}px;
         display: flex;
         flex-direction: column;
+        flex: none;
         overflow: hidden;
       }
       .yt-chat-overlay-settings-font-preview-stage {
         position: relative;
         display: grid;
+        flex: none;
         grid-template-columns: minmax(0, 1fr);
         grid-template-rows: minmax(0, 0fr) minmax(0, 1fr) minmax(0, 0fr);
         min-height: 144px;

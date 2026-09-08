@@ -433,7 +433,10 @@ describe('SettingsUiForm', () => {
       /\.yt-chat-overlay-settings-disclosure\s*>\s*summary:focus-visible\s*\{[^}]*outline:/s
     );
     expect(SETTINGS_UI_STYLES).toMatch(
-      /\.yt-chat-overlay-settings-font-preview-stage\s*\{[^}]*display:\s*grid/s
+      /\.yt-chat-overlay-settings-font-preview\s*\{[^}]*flex:\s*none/s
+    );
+    expect(SETTINGS_UI_STYLES).toMatch(
+      /\.yt-chat-overlay-settings-font-preview-stage\s*\{[^}]*display:\s*grid[^}]*flex:\s*none/s
     );
     expect(SETTINGS_UI_STYLES).toMatch(
       /\.yt-chat-overlay-settings-font-preview-text\s*\{[^}]*position:\s*relative/s
