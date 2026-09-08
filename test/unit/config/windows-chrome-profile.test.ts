@@ -32,13 +32,14 @@ async function fixture() {
 describe('installed Chrome acceptance outcomes', () => {
   it('requires an observed page-policy restriction before accepting extension main rendering', () => {
     const { validateLiveRenderer, countUnexpectedLiveErrors } = liveRenderingModule;
-    const blocked = { type: 'error', text: "This document requires 'TrustedScriptURL' assignment. The action has been blocked." };
+    const blocked = { type: 'error', text: "This document requires 'TrustedScriptURL' assignment. The action has been blocked.", url: 'chrome-extension://owned/page-script.js' };
     expect(validateLiveRenderer('worker', 'extension', [], true)).toEqual({ renderer: 'worker', workerPolicyFallback: false });
     expect(validateLiveRenderer('main', 'extension', [blocked], true))
       .toEqual({ renderer: 'main', workerPolicyFallback: true });
     expect(() => validateLiveRenderer('main', 'extension', [], true)).toThrow();
     expect(() => validateLiveRenderer('main', 'extension', [blocked], false)).toThrow();
     expect(() => validateLiveRenderer('main', 'extension', [{ ...blocked, type: 'info' }], true)).toThrow();
+    expect(() => validateLiveRenderer('main', 'extension', [{ ...blocked, url: 'https://www.youtube.com/host.js' }], true)).toThrow();
     expect(() => validateLiveRenderer('unknown', 'extension', [blocked], true)).toThrow();
     expect(countUnexpectedLiveErrors([blocked], true)).toBe(0);
     expect(countUnexpectedLiveErrors([blocked], false)).toBe(1);
@@ -56,6 +57,10 @@ describe('installed Chrome acceptance outcomes', () => {
     const prefix = 'Cross-Origin Request Blocked: The Same Origin Policy disallows reading the remote resource at ';
     const host = { level: 'error', text: prefix + 'https://rr1.googlevideo.com/videoplayback?sig=private' };
     expect(isYouTubeHostError(host)).toBe(true);
+    expect(isYouTubeHostError({ type: 'error', text: 'Failed to load resource: net::ERR_NAME_NOT_RESOLVED', url: 'https://rr1.googlevideo.com/videoplayback' })).toBe(true);
+    expect(isYouTubeHostError({ type: 'error', text: 'Failed to load resource: 401', url: 'https://accounts.google.com/ServiceLogin' })).toBe(true);
+    expect(isYouTubeHostError({ type: 'error', text: "Access to fetch at 'https://googleads.g.doubleclick.net/pagead/viewthroughconversion/123/?id=x' from origin 'https://www.youtube.com' has been blocked by CORS policy." })).toBe(true);
+    expect(isYouTubeHostError({ type: 'error', text: 'Failed to load resource: 500', url: 'https://www.youtube.com/youtubei/v1/live_chat/get_live_chat' })).toBe(false);
     expect(isYouTubeHostError({ ...host, text: prefix + 'https://www.youtube.com/youtubei/v1/live_chat/get_live_chat' })).toBe(false);
     expect(isYouTubeHostError({ ...host, text: prefix + 'https://googlevideo.com.attacker.example/videoplayback' })).toBe(false);
     expect(countUnexpectedLiveErrors([host, { level: 'error', text: '[Youtubei] app failed' }], false)).toBe(1);

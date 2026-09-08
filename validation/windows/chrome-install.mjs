@@ -144,7 +144,7 @@ async function inspectLivePage(context, url, output, index, installation) {
       else consoleErrorOverflow++;
     }
     if (/worker|TrustedScriptURL/i.test(text) && workerDiagnostics.length < 20) {
-      workerDiagnostics.push({ type: message.type(), text: redactDiagnosticText(text) });
+      workerDiagnostics.push({ type: message.type(), text: redactDiagnosticText(text), url: redactDiagnosticText(message.location().url) });
     }
   });
   const observation = { url, status: 'not-run', mocked: false };
