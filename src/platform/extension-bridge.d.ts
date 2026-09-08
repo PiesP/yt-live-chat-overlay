@@ -12,10 +12,10 @@
  * this bridge first, falling back to GM_* / localStorage if absent.
  */
 interface ExtensionBridge {
-  /** Whether chrome.runtime.getURL is available (always true when bridge exists). */
-  workerSupported: true;
-  /** Absolute URL to the renderer worker bundle. */
-  workerUrl: string;
+  /** Whether a page-origin worker Blob was prepared from the packaged bundle. */
+  workerSupported: boolean;
+  /** Page-origin Blob URL to the renderer worker bundle, when preparation succeeded. */
+  workerUrl?: string;
   /** Storage backend type — signals that chrome.storage.local is preferred. */
   storageType: 'chrome.storage.local';
   /** Per-injection capability required by messages crossing the isolated-world boundary. */

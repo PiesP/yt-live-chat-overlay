@@ -2,7 +2,7 @@
 // Copyright (c) 2026 PiesP
 
 import assert from 'node:assert/strict';
-import { mkdir, readFile, stat } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 const MOCK_WATCH_URL = 'https://www.youtube.com/watch?v=windowsAcceptance';
@@ -60,7 +60,7 @@ const CHAT_ACTIONS = [
   },
 ];
 
-function chatResponse(actions) {
+function chatResponse(actions, timeoutMs = 30_000) {
   return {
     continuationContents: {
       liveChatContinuation: {
@@ -69,7 +69,7 @@ function chatResponse(actions) {
           {
             timedContinuationData: {
               continuation: 'windows-acceptance-next',
-              timeoutMs: 30_000,
+              timeoutMs,
             },
           },
         ],
@@ -110,7 +110,7 @@ function createMockWatchHtml(previewHtml) {
   ).replace('</body>', `${chat}\n</body>`);
 }
 
-async function configureThroughSettingsUi(page) {
+async function configureThroughSettingsUi(page, installed) {
   const button = page.locator('#yt-chat-overlay-settings-button');
   await button.waitFor({ state: 'visible', timeout: 15_000 });
   await button.focus();
@@ -127,12 +127,19 @@ async function configureThroughSettingsUi(page) {
   const topBottomDuration = modal.locator('input[name="topBottomDurationMs"]');
   await topBottomDuration.fill('30000');
   await topBottomDuration.blur();
+  if (installed) {
+    const minimumDuration = modal.locator('input[name="scrollDurationMinMs"]');
+    await minimumDuration.fill('15000');
+    await minimumDuration.blur();
+  }
   await modal.locator('#tab-advanced').click();
   const depthLayers = modal.locator('input[name="depthLayersEnabled"]');
   if (await depthLayers.isChecked()) await depthLayers.uncheck();
+  if (installed) await modal.locator('input[name="showDebugOverlay"]').check();
   await page.keyboard.press('Escape');
   await modal.waitFor({ state: 'hidden', timeout: 5_000 });
 
+  if (installed) return;
   await page.waitForFunction(() => {
     const handle = window.__ytChatOverlay;
     const settings = handle?.getSettings?.();
@@ -145,7 +152,7 @@ async function configureThroughSettingsUi(page) {
   });
 }
 
-export async function run({ browser, root, output }) {
+export async function run({ browser, root, output, installedContext, installedExtensionId, expectedRenderer }) {
   assert(
     browser && typeof browser.newContext === 'function',
     'A launched Playwright browser is required',
@@ -159,6 +166,9 @@ export async function run({ browser, root, output }) {
     readFile(join(root, GM_MOCKS_PATH), 'utf8'),
   ]);
   assert.match(userscript, /==UserScript==/u, 'Production userscript metadata is missing');
+  const installedEmoji = installedContext
+    ? await readFile(join(root, 'dist-extension/icons/icon48.png'))
+    : null;
   const mockWatchHtml = createMockWatchHtml(previewHtml);
   await mkdir(output, { recursive: true });
 
@@ -168,14 +178,18 @@ export async function run({ browser, root, output }) {
   let explicitChatRequests = 0;
   let backgroundChatRequests = 0;
   let customEmojiAssetRequests = 0;
-  const context = await browser.newContext({
+  let deliverInstalledFixture = false;
+  let installedFixtureDelivered = false;
+  let installedFixtureCursor = 0;
+  const context = installedContext ?? await browser.newContext({
     colorScheme: 'dark',
     locale: 'en-US',
     viewport: { width: 1280, height: 720 },
   });
 
+  let page;
   try {
-    const page = await context.newPage();
+    page = await context.newPage();
     page.on('pageerror', (error) => pageErrors.push(error.message));
     page.on('console', (message) => {
       if (message.type() === 'error') consoleErrors.push(message.text());
@@ -183,6 +197,10 @@ export async function run({ browser, root, output }) {
 
     await page.route('**/*', async (route) => {
       const url = new URL(route.request().url());
+      if (installedContext && url.protocol === 'chrome-extension:' && url.hostname === installedExtensionId) {
+        await route.continue();
+        return;
+      }
       if (
         url.hostname === 'www.youtube.com' &&
         url.pathname.startsWith('/youtubei/v1/live_chat/get_live_chat')
@@ -199,10 +217,14 @@ export async function run({ browser, root, output }) {
           });
         } else {
           backgroundChatRequests++;
+          const actions = deliverInstalledFixture && !installedFixtureDelivered
+            ? [CHAT_ACTIONS[installedFixtureCursor++]]
+            : [];
+          if (actions.length) installedFixtureDelivered = installedFixtureCursor === CHAT_ACTIONS.length;
           await route.fulfill({
             status: 200,
             contentType: 'application/json',
-            json: chatResponse([]),
+            json: chatResponse(actions, installedContext ? 1000 : 30_000),
           });
         }
         return;
@@ -215,15 +237,37 @@ export async function run({ browser, root, output }) {
         customEmojiAssetRequests++;
         await route.fulfill({
           status: 200,
-          contentType: 'image/svg+xml',
+          contentType: installedEmoji ? 'image/png' : 'image/svg+xml',
           headers: { 'access-control-allow-origin': '*' },
-          body: '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><circle cx="16" cy="16" r="15" fill="#ffd54f"/><path d="M9 19q7 8 14 0" fill="none" stroke="#382f18" stroke-width="2"/><circle cx="11" cy="12" r="2"/><circle cx="21" cy="12" r="2"/></svg>',
+          body: installedEmoji ?? '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><circle cx="16" cy="16" r="15" fill="#ffd54f"/><path d="M9 19q7 8 14 0" fill="none" stroke="#382f18" stroke-width="2"/><circle cx="11" cy="12" r="2"/><circle cx="21" cy="12" r="2"/></svg>',
         });
         return;
       }
       await route.fulfill({ status: 403, contentType: 'text/plain', body: 'Blocked by fixture' });
     });
 
+    if (installedContext) await page.addInitScript(() => {
+      const workers = [];
+      window.__ytAcceptanceWorkers = workers;
+      const NativeWorker = window.Worker;
+      window.Worker = new Proxy(NativeWorker, {
+        construct(target, args) {
+          const record = { url: String(args[0]), ready: false };
+          if (workers.length < 16) workers.push(record);
+          try {
+            const worker = Reflect.construct(target, args);
+            worker.addEventListener('message', (event) => {
+              if (event.data?.type === 'ready') record.ready = true;
+            });
+            worker.addEventListener('error', (event) => { record.error = event.message; });
+            return worker;
+          } catch (error) {
+            record.error = String(error);
+            throw error;
+          }
+        },
+      });
+    });
     await page.addInitScript(() => {
       Object.defineProperty(HTMLMediaElement.prototype, 'paused', {
         configurable: true,
@@ -258,24 +302,27 @@ export async function run({ browser, root, output }) {
         },
       };
     });
-    await page.addInitScript({ content: gmMocks });
-    await page.addInitScript({ content: userscript });
+    if (!installedContext) {
+      await page.addInitScript({ content: gmMocks });
+      await page.addInitScript({ content: userscript });
+    }
     await page.goto(MOCK_WATCH_URL, { waitUntil: 'domcontentloaded', timeout: 30_000 });
 
     await page.locator('#yt-live-chat-overlay canvas').waitFor({
       state: 'attached',
       timeout: 15_000,
     });
-    await page.waitForFunction(() => {
+    if (!installedContext) await page.waitForFunction(() => {
       const handle = window.__ytChatOverlay;
       return Boolean(handle && typeof handle.getSettings === 'function');
     });
 
-    await configureThroughSettingsUi(page);
+    await configureThroughSettingsUi(page, Boolean(installedContext));
     await page.locator('#yt-live-chat-overlay canvas').waitFor({ state: 'attached' });
     await page.waitForTimeout(500);
 
-    const apiStatuses = await page.evaluate(async (count) => {
+    deliverInstalledFixture = Boolean(installedContext);
+    const apiStatuses = installedContext ? [] : await page.evaluate(async (count) => {
       const statuses = [];
       for (let index = 0; index < count; index++) {
         const response = await fetch(
@@ -287,12 +334,12 @@ export async function run({ browser, root, output }) {
       }
       return statuses;
     }, EXPECTED_MESSAGE_COUNT);
-    assert.deepEqual(
+    if (!installedContext) assert.deepEqual(
       apiStatuses,
       Array.from({ length: EXPECTED_MESSAGE_COUNT }, () => 200),
       'Deterministic live-chat API fixtures did not load',
     );
-    assert.equal(explicitChatRequests, EXPECTED_MESSAGE_COUNT);
+    assert.equal(explicitChatRequests, installedContext ? 0 : EXPECTED_MESSAGE_COUNT);
 
     try {
       await page.waitForFunction(
@@ -325,6 +372,14 @@ export async function run({ browser, root, output }) {
     assert(accessibleMessages.some((text) => text.includes('Super Chat')));
     assert(accessibleMessages.some((text) => text.includes('Membership')));
     assert(customEmojiAssetRequests > 0, 'The custom emoji asset was not requested');
+    let rendererStatus;
+    if (expectedRenderer) {
+      await page.waitForFunction((worker) => {
+        const status = document.querySelector('#yt-chat-overlay-debug')?.textContent ?? '';
+        return status.includes('Render:') && status.includes('Render: n/a') === worker;
+      }, expectedRenderer === 'worker');
+      rendererStatus = expectedRenderer;
+    }
 
     // Let scrolling messages enter the viewport, then use the product's pause
     // interaction so the two screenshots capture a stable visual state.
@@ -353,17 +408,39 @@ export async function run({ browser, root, output }) {
 
     assert.deepEqual(pageErrors, [], `Page errors: ${pageErrors.join(' | ')}`);
     assert.deepEqual(consoleErrors, [], `Console errors: ${consoleErrors.join(' | ')}`);
-    assert(backgroundChatRequests <= 4, `Background chat requests flooded: ${backgroundChatRequests}`);
+    assert(backgroundChatRequests <= (installedContext ? 100 : 4),
+      `Background chat requests flooded: ${backgroundChatRequests}`);
 
-    const settings = await page.evaluate(() => window.__ytChatOverlay?.getSettings?.());
+    let settings;
+    if (installedContext) {
+      assert(installedFixtureDelivered, 'The installed application did not consume fixture data');
+      // Reload proves persistence through the real extension/userscript manager.
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.locator('#yt-chat-overlay-settings-button').focus();
+      await page.keyboard.press('Enter');
+      const modal = page.locator('#yt-chat-overlay-settings-backdrop');
+      await modal.waitFor({ state: 'visible' });
+      settings = {
+        fontSize: Number(await modal.locator('input[name="fontSize"]').inputValue()),
+        danmakuMode: await modal.locator('select[name="danmakuMode"]').inputValue(),
+        depthLayersEnabled: await modal.locator('input[name="depthLayersEnabled"]').isChecked(),
+      };
+      await page.keyboard.press('Escape');
+    } else {
+      settings = await page.evaluate(() => window.__ytChatOverlay?.getSettings?.());
+    }
     assert.equal(settings?.fontSize, 36);
     assert.equal(settings?.danmakuMode, 'scroll');
     assert.equal(settings?.depthLayersEnabled, false);
 
     return {
       checks: {
-        productionUserscriptInjected: true,
+        productionUserscriptInjected: !installedContext,
+        installedApplicationDelivery: Boolean(installedContext),
+        persistedAcrossReload: Boolean(installedContext),
+        renderer: rendererStatus,
         settingsUiInteraction: true,
+        settingsOpenMethod: 'keyboard',
         deterministicChatApi: true,
         chatApiRequests,
         explicitChatRequests,
@@ -383,7 +460,15 @@ export async function run({ browser, root, output }) {
         screenshots: ['yt-visual-canvas.png', 'yt-visual-page.png'],
       },
     };
+  } catch (error) {
+    await page?.screenshot({ path: join(output, 'fixture-error.png') }).catch(() => {});
+    await writeFile(join(output, 'fixture-error.json'), JSON.stringify({
+      pageErrors, consoleErrors, chatApiRequests, installedFixtureDelivered,
+      workers: await page?.evaluate(() => window.__ytAcceptanceWorkers).catch(() => []),
+    }, null, 2));
+    throw error;
   } finally {
-    await context.close();
+    if (installedContext) await page?.close();
+    else await context.close();
   }
 }

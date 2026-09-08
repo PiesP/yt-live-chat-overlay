@@ -4,5 +4,22 @@
     "dist/yt-live-chat-overlay.user.js",
     "test/visual/preview.html",
     "test/visual/gm-mocks.js"
-  ]
+  ],
+  "installation": {
+    "entry": "validation/windows/install-profile.mjs",
+    "assets": [
+      "validation/windows/chrome-install.mjs",
+      "validation/windows/chrome-process.mjs",
+      "validation/windows/live-rendering.mjs",
+      "validation/windows/firefox-bidi.mjs",
+      "validation/windows/firefox-install.mjs",
+      "dist-extension",
+      "dist-extension-firefox"
+    ],
+    "build_commands": [
+      ["pnpm", "build:ci"],
+      ["pnpm", "build:extension:ci"],
+      ["pnpm", "build:extension:firefox:ci"]
+    ]
+  }
 }
