@@ -165,7 +165,14 @@ async function inspectLivePage(context, url, output, index, installation) {
   const page = await context.newPage();
   page.setDefaultTimeout(10_000);
   const pageErrors = [];
+  const workerDiagnostics = [];
   page.on('pageerror', (error) => pageErrors.push(error.name));
+  page.on('console', (message) => {
+    const text = message.text();
+    if (/worker|TrustedScriptURL/i.test(text) && workerDiagnostics.length < 20) {
+      workerDiagnostics.push({ type: message.type(), text: text.slice(0, 1000) });
+    }
+  });
   const observation = { url, status: 'not-run', mocked: false };
   let deadlineReached = false;
   let deadlineCleanup;
@@ -219,6 +226,7 @@ async function inspectLivePage(context, url, output, index, installation) {
     clearTimeout(deadline);
     if (deadlineCleanup) await deadlineCleanup;
     observation.pageErrorTypes = [...new Set(pageErrors)];
+    observation.workerDiagnostics = workerDiagnostics;
     if (!page.isClosed()) {
       await page.screenshot({ path: join(output, screenshot) }).then(() => {
         observation.screenshot = screenshot;
