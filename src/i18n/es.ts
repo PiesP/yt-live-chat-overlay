@@ -23,6 +23,9 @@ export const ES: Record<string, string> = {
   Cards: 'Tarjetas',
   'appearance.outline': 'Contorno de texto',
   'danmaku.safeZone': 'Zona segura',
+  'danmaku.fineTuning': 'Ajuste fino',
+  'danmaku.preview': 'Vista previa de comentarios',
+  'danmaku.previewMessage': 'Mensaje de chat de ejemplo',
   'advanced.messageRate': 'Frecuencia de mensajes',
   'advanced.depthLayers': 'Capas de profundidad',
   Font: 'Fuente',
@@ -34,6 +37,10 @@ export const ES: Record<string, string> = {
   'appearance.authors': 'Colores y visibilidad',
   Interface: 'Interfaz',
   'translation.chat': 'Traducción de chat',
+  'translation.capabilityDetected':
+    'Este navegador ofrece la API Translator integrada. La disponibilidad del par de idiomas y del modelo se comprobará al iniciar la traducción.',
+  'translation.capabilityUnavailable':
+    'Este navegador no ofrece la API Translator integrada. Se conservará tu preferencia, pero la traducción permanecerá inactiva aquí.',
   'translation.serviceDesc': 'Servicio de traducción para procesar mensajes',
 
   // ── Field labels ──

@@ -23,6 +23,9 @@ export const KO: Record<string, string> = {
   Cards: '카드',
   'appearance.outline': '텍스트 외곽선',
   'danmaku.safeZone': '안전 영역',
+  'danmaku.fineTuning': '세부 조정',
+  'danmaku.preview': '댓글 미리보기',
+  'danmaku.previewMessage': '샘플 채팅 메시지',
   'advanced.messageRate': '메시지 빈도',
   'advanced.depthLayers': '깊이 레이어',
   Font: '글꼴',
@@ -34,6 +37,10 @@ export const KO: Record<string, string> = {
   'appearance.authors': '작성자 색상 및 표시',
   Interface: '인터페이스',
   'translation.chat': '채팅 번역',
+  'translation.capabilityDetected':
+    '이 브라우저에서 내장 Translator API를 사용할 수 있습니다. 언어 조합과 모델의 사용 가능 여부는 번역을 시작할 때 확인합니다.',
+  'translation.capabilityUnavailable':
+    '이 브라우저는 내장 Translator API를 제공하지 않습니다. 설정은 유지되지만 이 브라우저에서는 번역이 비활성 상태로 유지됩니다.',
   'translation.serviceDesc': '메시지 처리를 위한 번역 백엔드 서비스',
 
   // ── Field labels ──

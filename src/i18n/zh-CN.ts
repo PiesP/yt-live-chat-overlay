@@ -23,6 +23,9 @@ export const ZH_CN: Record<string, string> = {
   Cards: '卡片',
   'appearance.outline': '文字描边',
   'danmaku.safeZone': '安全区域',
+  'danmaku.fineTuning': '精细调整',
+  'danmaku.preview': '弹幕预览',
+  'danmaku.previewMessage': '示例聊天消息',
   'advanced.messageRate': '消息频率',
   'advanced.depthLayers': '深度图层',
   Font: '字体',
@@ -34,6 +37,10 @@ export const ZH_CN: Record<string, string> = {
   'appearance.authors': '用户颜色与显示',
   Interface: '界面',
   'translation.chat': '聊天翻译',
+  'translation.capabilityDetected':
+    '此浏览器提供内置 Translator API。语言对和模型是否可用将在开始翻译时检查。',
+  'translation.capabilityUnavailable':
+    '此浏览器未提供内置 Translator API。您的偏好设置会保留，但翻译在此浏览器中将保持未启用状态。',
   'translation.serviceDesc': '用于处理消息的翻译后端服务',
 
   // ── Field labels ──

@@ -1102,15 +1102,5 @@ describe('Color inputs ARIA', () => {
 });
 
 // ════════════════════════════════════════════════════════════════════
-// Additional: Translation unsupported message
+// Translation capability semantics are covered against the production form in form.test.ts.
 // ════════════════════════════════════════════════════════════════════
-
-describe('Translation unsupported message', () => {
-  it('unsupported message has role="note"', () => {
-    const msg = document.createElement('div');
-    msg.className = 'yt-chat-overlay-settings-unsupported';
-    msg.setAttribute('role', 'note');
-
-    expect(msg.getAttribute('role')).toBe('note');
-  });
-});

@@ -91,6 +91,89 @@ test.describe('Settings UI Visual', () => {
     expect(box!.height).toBeGreaterThan(180);
   });
 
+  test('keeps frequent controls prominent and previews normalized fine-tuning values', async ({
+    page,
+  }) => {
+    await openSettingsModal(page);
+
+    const modal = page.locator('#yt-chat-overlay-settings-backdrop');
+    const details = modal.locator('.yt-chat-overlay-settings-disclosure');
+    await expect(details).toBeVisible();
+    await expect(details).not.toHaveAttribute('open', '');
+
+    for (const name of ['fontSize', 'speedPxPerSec', 'opacity']) {
+      await expect(modal.locator(`[name="${name}"]`).first()).toBeVisible();
+      await expect(modal.locator(`details [name="${name}"]`)).toHaveCount(0);
+    }
+
+    await details.locator('summary').click();
+    await expect(details).toHaveAttribute('open', '');
+    await modal.locator('input[name="safeTop"]').fill('20');
+    await modal.locator('input[name="safeBottom"]').fill('10');
+    await modal.locator('input[name="opacity"]').fill('65');
+
+    await modal.locator('#tab-colors').click();
+    const outlineEnabled = modal.locator('input[name="outline-enabled"]');
+    if (!(await outlineEnabled.isChecked())) await outlineEnabled.check();
+    await modal.locator('input[name="outline-widthPx"]').fill('3');
+    await modal.locator('input[name="outline-opacity"]').fill('60');
+    await modal.locator('#tab-comments').click();
+
+    const preview = modal.locator('.yt-chat-overlay-settings-font-preview');
+    const state = await preview.evaluate((element) => {
+      const stage = element.querySelector<HTMLElement>(
+        '.yt-chat-overlay-settings-font-preview-stage'
+      );
+      const text = element.querySelector<HTMLElement>(
+        '.yt-chat-overlay-settings-font-preview-text'
+      );
+      const top = element.querySelector<HTMLElement>('[data-preview-zone="top"]');
+      const bottom = element.querySelector<HTMLElement>('[data-preview-zone="bottom"]');
+      if (!stage || !text || !top || !bottom) throw new Error('Settings preview is incomplete');
+      const stageHeight = stage.getBoundingClientRect().height;
+      return {
+        message: text.textContent,
+        metrics: element.querySelector('[data-preview-metrics]')?.textContent,
+        opacity: text.style.opacity,
+        stroke: text.style.getPropertyValue('-webkit-text-stroke'),
+        textPosition: text.style.insetBlockStart,
+        topFraction: top.getBoundingClientRect().height / stageHeight,
+        bottomFraction: bottom.getBoundingClientRect().height / stageHeight,
+      };
+    });
+
+    expect(state.message?.trim()).toBeTruthy();
+    expect(state.metrics).toContain('65%');
+    expect(state.metrics).toContain('3px / 60%');
+    expect(state.opacity).toBe('0.65');
+    expect(state.stroke).toBe('2.55px rgba(0, 0, 0, 0.6)');
+    expect(state.textPosition).toBe('55%');
+    expect(state.topFraction).toBeCloseTo(0.2, 2);
+    expect(state.bottomFraction).toBeCloseTo(0.1, 2);
+  });
+
+  test('separates translation capability status from editable preferences', async ({
+    page,
+  }) => {
+    await openSettingsModal(page);
+
+    const modal = page.locator('#yt-chat-overlay-settings-backdrop');
+    await modal.locator('#tab-translation').click();
+    const capability = modal.locator('.yt-chat-overlay-settings-capability');
+    await expect(capability).toHaveAttribute('role', 'status');
+    const supported = await capability.getAttribute('data-supported');
+    expect(supported).toMatch(/^(?:true|false)$/);
+    if (supported === 'true') {
+      await expect(capability).toContainText('availability will be checked');
+    } else {
+      await expect(capability).toContainText('preference is kept');
+    }
+    await expect(capability).not.toContainText(/ready/i);
+    await expect(modal.locator('input[name="translationEnabled"]')).toBeVisible();
+    await expect(modal.locator('select[name="translationSource"]')).toBeVisible();
+    await expect(modal.locator('select[name="translationTarget"]')).toBeVisible();
+  });
+
   test('author background controls expose defaults and persist a selected color', async ({
     page,
   }) => {

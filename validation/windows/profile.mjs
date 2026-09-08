@@ -120,10 +120,30 @@ async function configureThroughSettingsUi(page, installed) {
   await modal.waitFor({ state: 'visible', timeout: 5_000 });
   assert.equal(await modal.getAttribute('aria-modal'), 'true');
 
+  const disclosure = modal.locator('.yt-chat-overlay-settings-disclosure');
+  assert.equal(await disclosure.getAttribute('open'), null, 'Fine tuning must start collapsed');
+  assert.equal(
+    await modal.locator('details input[name="fontSize"]').count(),
+    0,
+    'Font size must remain in the primary settings area',
+  );
+  await disclosure.locator('summary').focus();
+  await page.keyboard.press('Enter');
+  assert.equal(await disclosure.getAttribute('open'), '', 'Fine tuning did not open from keyboard');
+
   await modal.locator('select[name="danmakuMode"]').selectOption('scroll');
   const fontSize = modal.locator('input[name="fontSize"]');
   await fontSize.fill('36');
   await fontSize.blur();
+  const opacity = modal.locator('input[name="opacity"]');
+  await opacity.fill('65');
+  await opacity.blur();
+  const safeTop = modal.locator('input[name="safeTop"]');
+  await safeTop.fill('20');
+  await safeTop.blur();
+  const safeBottom = modal.locator('input[name="safeBottom"]');
+  await safeBottom.fill('10');
+  await safeBottom.blur();
   const topBottomDuration = modal.locator('input[name="topBottomDurationMs"]');
   await topBottomDuration.fill('30000');
   await topBottomDuration.blur();
@@ -132,6 +152,55 @@ async function configureThroughSettingsUi(page, installed) {
     await minimumDuration.fill('15000');
     await minimumDuration.blur();
   }
+
+  await modal.locator('#tab-colors').click();
+  const outlineEnabled = modal.locator('input[name="outline-enabled"]');
+  if (!(await outlineEnabled.isChecked())) await outlineEnabled.check();
+  const outlineWidth = modal.locator('input[name="outline-widthPx"]');
+  await outlineWidth.fill('3');
+  await outlineWidth.blur();
+  const outlineOpacity = modal.locator('input[name="outline-opacity"]');
+  await outlineOpacity.fill('60');
+  await outlineOpacity.blur();
+
+  await modal.locator('#tab-comments').click();
+  const previewState = await modal.locator('.yt-chat-overlay-settings-font-preview').evaluate(
+    (element) => {
+      const stage = element.querySelector('.yt-chat-overlay-settings-font-preview-stage');
+      const text = element.querySelector('.yt-chat-overlay-settings-font-preview-text');
+      const top = element.querySelector('[data-preview-zone="top"]');
+      const bottom = element.querySelector('[data-preview-zone="bottom"]');
+      if (!(stage instanceof HTMLElement) || !(text instanceof HTMLElement) ||
+          !(top instanceof HTMLElement) || !(bottom instanceof HTMLElement)) {
+        throw new Error('Settings preview DOM is incomplete');
+      }
+      const stageHeight = stage.getBoundingClientRect().height;
+      return {
+        bottomFraction: bottom.getBoundingClientRect().height / stageHeight,
+        message: text.textContent?.trim() ?? '',
+        metrics: element.querySelector('[data-preview-metrics]')?.textContent ?? '',
+        opacity: text.style.opacity,
+        stroke: text.style.getPropertyValue('-webkit-text-stroke'),
+        textPosition: text.style.insetBlockStart,
+        topFraction: top.getBoundingClientRect().height / stageHeight,
+      };
+    },
+  );
+  assert(previewState.message.length > 0, 'The fixed preview message is missing');
+  assert(previewState.metrics.includes('65%'), 'Preview does not report normalized opacity');
+  assert(previewState.metrics.includes('3px / 60%'), 'Preview does not report outline state');
+  assert.equal(previewState.opacity, '0.65');
+  assert.equal(previewState.stroke, '2.55px rgba(0, 0, 0, 0.6)');
+  assert.equal(previewState.textPosition, '55%');
+  assert(Math.abs(previewState.topFraction - 0.2) < 0.02, 'Top safe-zone mask is inaccurate');
+  assert(Math.abs(previewState.bottomFraction - 0.1) < 0.02, 'Bottom safe-zone mask is inaccurate');
+
+  await modal.locator('#tab-translation').click();
+  const capability = modal.locator('.yt-chat-overlay-settings-capability');
+  assert.match(await capability.getAttribute('data-supported'), /^(?:true|false)$/u);
+  assert((await capability.textContent())?.trim(), 'Translation capability status is empty');
+  assert.equal(await modal.locator('input[name="translationEnabled"]').count(), 1);
+
   await modal.locator('#tab-advanced').click();
   const depthLayers = modal.locator('input[name="depthLayersEnabled"]');
   if (await depthLayers.isChecked()) await depthLayers.uncheck();
@@ -145,6 +214,12 @@ async function configureThroughSettingsUi(page, installed) {
     const settings = handle?.getSettings?.();
     return (
       settings?.fontSize === 36 &&
+      settings?.opacity === 0.65 &&
+      settings?.safeTop === 0.2 &&
+      settings?.safeBottom === 0.1 &&
+      settings?.outline?.enabled === true &&
+      settings?.outline?.widthPx === 3 &&
+      settings?.outline?.opacity === 0.6 &&
       settings?.danmakuMode === 'scroll' &&
       settings?.depthLayersEnabled === false &&
       settings?.topBottomDurationMs === 30_000
@@ -422,6 +497,14 @@ export async function run({ browser, root, output, installedContext, installedEx
       await modal.waitFor({ state: 'visible' });
       settings = {
         fontSize: Number(await modal.locator('input[name="fontSize"]').inputValue()),
+        opacity: Number(await modal.locator('input[name="opacity"]').inputValue()) / 100,
+        safeTop: Number(await modal.locator('input[name="safeTop"]').inputValue()) / 100,
+        safeBottom: Number(await modal.locator('input[name="safeBottom"]').inputValue()) / 100,
+        outline: {
+          enabled: await modal.locator('input[name="outline-enabled"]').isChecked(),
+          widthPx: Number(await modal.locator('input[name="outline-widthPx"]').inputValue()),
+          opacity: Number(await modal.locator('input[name="outline-opacity"]').inputValue()) / 100,
+        },
         danmakuMode: await modal.locator('select[name="danmakuMode"]').inputValue(),
         depthLayersEnabled: await modal.locator('input[name="depthLayersEnabled"]').isChecked(),
       };
@@ -430,6 +513,10 @@ export async function run({ browser, root, output, installedContext, installedEx
       settings = await page.evaluate(() => window.__ytChatOverlay?.getSettings?.());
     }
     assert.equal(settings?.fontSize, 36);
+    assert.equal(settings?.opacity, 0.65);
+    assert.equal(settings?.safeTop, 0.2);
+    assert.equal(settings?.safeBottom, 0.1);
+    assert.deepEqual(settings?.outline, { enabled: true, opacity: 0.6, widthPx: 3 });
     assert.equal(settings?.danmakuMode, 'scroll');
     assert.equal(settings?.depthLayersEnabled, false);
 
@@ -440,6 +527,9 @@ export async function run({ browser, root, output, installedContext, installedEx
         persistedAcrossReload: Boolean(installedContext),
         renderer: rendererStatus,
         settingsUiInteraction: true,
+        settingsDisclosureKeyboardInteraction: true,
+        settingsPreviewState: true,
+        translationCapabilitySeparatedFromPreference: true,
         settingsOpenMethod: 'keyboard',
         deterministicChatApi: true,
         chatApiRequests,

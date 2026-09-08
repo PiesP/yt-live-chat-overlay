@@ -210,6 +210,7 @@ export const EN: Record<string, string> = {
   'danmaku.exitPadding': 'Exit Padding (px)',
   'danmaku.exitPaddingDesc':
     'Extra pixels a message scrolls past the screen edge before being removed (20-400, default 100)',
+  'danmaku.fineTuning': 'Fine tuning',
   'danmaku.fontCustom': 'Custom font stack…',
   'danmaku.fontCustomDesc':
     'CSS font-family value. Type to filter suggestions, or enter a custom font stack.',
@@ -230,6 +231,8 @@ export const EN: Record<string, string> = {
     'Minimum scroll animation duration — prevents very short messages from zipping across (1000-15000ms, default 5000)',
   'danmaku.mode': 'Danmaku Mode',
   'danmaku.modeDesc': 'Comment display direction and behavior',
+  'danmaku.preview': 'Comment preview',
+  'danmaku.previewMessage': 'Sample chat message',
   'danmaku.reverse': 'Reverse (LTR)',
   'danmaku.safeZone': 'Safe Zone',
   'danmaku.scroll': 'Scroll (RTL)',
@@ -257,6 +260,10 @@ export const EN: Record<string, string> = {
   'status.unstable': 'Connection unstable',
   'status.waiting': 'Waiting for live stream…',
   'translation.chat': 'Chat Translation',
+  'translation.capabilityDetected':
+    'This browser exposes the built-in Translator API. Language-pair and model availability will be checked when translation starts.',
+  'translation.capabilityUnavailable':
+    'This browser does not expose the built-in Translator API. Your preference is kept, but translation will stay inactive here.',
   'translation.displayMode': 'Display Mode',
   'translation.displayModeDesc':
     'Dual shows original above translation, Replace shows translation only',

@@ -186,6 +186,173 @@ describe('SettingsUiForm', () => {
     form.destroy();
   });
 
+  it('renders comment fine tuning as an accessible, default-collapsed disclosure', () => {
+    const form = new SettingsUiForm(getSettings, onPreview);
+    const modal = document.createElement('dialog');
+    modal.append(...form.createModalContent());
+    document.body.appendChild(modal);
+    form.setModal(modal);
+    form.populateForm(getSettings());
+
+    const pane = modal.querySelector<HTMLElement>('#pane-comments');
+    const details = pane?.querySelector<HTMLDetailsElement>(
+      '.yt-chat-overlay-settings-disclosure'
+    );
+    expect(details).not.toBeNull();
+    expect(details?.open).toBe(false);
+    expect(details?.querySelector('summary')?.textContent).toBe('Fine tuning');
+
+    for (const name of ['enabled', 'danmakuMode', 'fontSize', 'speedPxPerSec', 'opacity']) {
+      const control = pane?.querySelector<HTMLElement>(`[name="${name}"]`);
+      expect(control, `${name} should remain prominent`).not.toBeNull();
+      expect(control?.closest('details')).toBeNull();
+    }
+    for (const name of ['laneSpacing', 'safeTop', 'safeBottom', 'scrollDurationMinMs']) {
+      const control = details?.querySelector<HTMLInputElement>(`input[name="${name}"]`);
+      expect(control, `${name} should remain directly editable`).not.toBeNull();
+      expect(control?.type).toBe('number');
+    }
+
+    form.destroy();
+    modal.remove();
+  });
+
+  it('previews accepted opacity, outline, safe-zone, and font values without raw invalid input', () => {
+    const settings = makeDefaults({
+      fontSize: 40,
+      opacity: 0.65,
+      safeTop: 0.15,
+      safeBottom: 0.2,
+      colors: { ...makeDefaults().colors, normal: '#101010' },
+      outline: { enabled: true, widthPx: 3, opacity: 0.6 },
+    });
+    const form = new SettingsUiForm(() => settings, onPreview);
+    const modal = document.createElement('dialog');
+    modal.append(...form.createModalContent());
+    document.body.appendChild(modal);
+    form.setModal(modal);
+    form.populateForm(settings);
+
+    const preview = modal.querySelector<HTMLElement>(
+      '.yt-chat-overlay-settings-font-preview'
+    );
+    const text = preview?.querySelector<HTMLElement>(
+      '.yt-chat-overlay-settings-font-preview-text'
+    );
+    expect(preview?.getAttribute('aria-label')).toBe('Comment preview');
+    expect(text?.style.fontSize).toBe('40px');
+    expect(text?.style.color).toBe('rgb(16, 16, 16)');
+    expect(text?.style.opacity).toBe('0.65');
+    expect(text?.style.getPropertyValue('-webkit-text-stroke')).toBe(
+      '2.55px rgba(255, 255, 255, 0.6)'
+    );
+    expect(text?.style.insetBlockStart).toBe('47.5%');
+    expect(
+      preview?.querySelector<HTMLElement>('[data-preview-zone="top"]')?.style.blockSize
+    ).toBe('15%');
+    expect(
+      preview?.querySelector<HTMLElement>('[data-preview-zone="bottom"]')?.style.blockSize
+    ).toBe('20%');
+    expect(preview?.querySelector('[data-preview-metrics]')?.textContent).toContain(
+      'Text Opacity (%): 65%'
+    );
+    expect(preview?.querySelector('[data-preview-metrics]')?.textContent).toContain(
+      'Text Outline: 3px / 60%'
+    );
+    expect(preview?.querySelector('[data-preview-metrics]')?.textContent).toContain(
+      'Top Clear Zone (%): 15%'
+    );
+    expect(preview?.querySelector('[data-preview-metrics]')?.textContent).toContain(
+      'Bottom Clear Zone (%): 20%'
+    );
+
+    const fontSize = modal.querySelector<HTMLInputElement>('input[name="fontSize"]');
+    expect(fontSize).not.toBeNull();
+    fontSize!.value = '9999';
+    fontSize!.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(text?.style.fontSize).toBe('50px');
+    expect(text?.style.fontSize).not.toBe('9999px');
+
+    form.destroy();
+    modal.remove();
+  });
+
+  it('keeps translation preferences visible while describing capability without claiming readiness', () => {
+    const previousTranslator = globalThis.Translator;
+    // @ts-expect-error Exercise the unsupported-browser UI branch.
+    delete globalThis.Translator;
+    try {
+      const form = new SettingsUiForm(getSettings, onPreview);
+      const modal = document.createElement('dialog');
+      modal.append(...form.createModalContent());
+      form.setModal(modal);
+      form.populateForm(getSettings());
+
+      const pane = modal.querySelector<HTMLElement>('#pane-translation');
+      const preference = pane?.querySelector<HTMLInputElement>('[name="translationEnabled"]');
+      expect(preference).not.toBeNull();
+      const capability = pane?.querySelector('.yt-chat-overlay-settings-capability');
+      expect(capability?.getAttribute('role')).toBe('status');
+      expect((capability as HTMLElement | null)?.dataset.supported).toBe('false');
+      expect(capability?.textContent).toBe(
+        'This browser does not expose the built-in Translator API. Your preference is kept, but translation will stay inactive here.'
+      );
+      expect(pane?.textContent).not.toContain('ready');
+      preference!.checked = true;
+      expect(form.collectSettings().translationEnabled).toBe(true);
+
+      form.destroy();
+    } finally {
+      globalThis.Translator = previousTranslator;
+    }
+  });
+
+  it('describes an exposed translation API without claiming language-pair readiness', () => {
+    const previousTranslator = globalThis.Translator;
+    globalThis.Translator = {
+      availability: async () => 'available' as const,
+      create: async () => ({
+        translate: async (text: string) => text,
+        destroy: () => undefined,
+      }),
+    };
+    try {
+      const form = new SettingsUiForm(getSettings, onPreview);
+      const modal = document.createElement('dialog');
+      modal.append(...form.createModalContent());
+
+      const capability = modal.querySelector<HTMLElement>(
+        '#pane-translation .yt-chat-overlay-settings-capability'
+      );
+      expect(capability?.dataset.supported).toBe('true');
+      expect(capability?.textContent).toContain('Language-pair and model availability');
+      expect(capability?.textContent.toLowerCase()).not.toContain('ready');
+      expect(modal.querySelector('#pane-translation [name="translationEnabled"]')).not.toBeNull();
+
+      form.destroy();
+    } finally {
+      globalThis.Translator = previousTranslator;
+    }
+  });
+
+  it('styles the disclosure, preview masks, metrics, and capability states inside the modal', () => {
+    expect(SETTINGS_UI_STYLES).toMatch(
+      /\.yt-chat-overlay-settings-disclosure\s*\{[^}]*border:/s
+    );
+    expect(SETTINGS_UI_STYLES).toMatch(
+      /\.yt-chat-overlay-settings-disclosure\s*>\s*summary:focus-visible\s*\{[^}]*outline:/s
+    );
+    expect(SETTINGS_UI_STYLES).toMatch(
+      /\.yt-chat-overlay-settings-font-preview-zone\s*\{[^}]*position:\s*absolute/s
+    );
+    expect(SETTINGS_UI_STYLES).toMatch(
+      /\.yt-chat-overlay-settings-font-preview-metrics\s*\{[^}]*font-size:/s
+    );
+    expect(SETTINGS_UI_STYLES).toContain(
+      '.yt-chat-overlay-settings-capability[data-supported="false"]'
+    );
+  });
+
   it('keeps localized tabs and actions reflowable at narrow widths', () => {
     const form = new SettingsUiForm(getSettings, onPreview);
     form.createModalContent();

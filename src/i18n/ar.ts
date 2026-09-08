@@ -23,6 +23,9 @@ export const AR: Record<string, string> = {
   Cards: 'البطاقات',
   'appearance.outline': 'حدود النص',
   'danmaku.safeZone': 'المنطقة الآمنة',
+  'danmaku.fineTuning': 'ضبط دقيق',
+  'danmaku.preview': 'معاينة التعليق',
+  'danmaku.previewMessage': 'رسالة دردشة نموذجية',
   'advanced.messageRate': 'معدل الرسائل',
   'advanced.depthLayers': 'طبقات العمق',
   Font: 'الخط',
@@ -34,6 +37,10 @@ export const AR: Record<string, string> = {
   'appearance.authors': 'ألوان المؤلفين والرؤية',
   Interface: 'الواجهة',
   'translation.chat': 'ترجمة الدردشة',
+  'translation.capabilityDetected':
+    'يوفر هذا المتصفح واجهة Translator API المضمنة. سيتم التحقق من توفر زوج اللغات والنموذج عند بدء الترجمة.',
+  'translation.capabilityUnavailable':
+    'لا يوفر هذا المتصفح واجهة Translator API المضمنة. سيتم الاحتفاظ بتفضيلك، لكن الترجمة ستظل غير نشطة هنا.',
   'translation.serviceDesc': 'خدمة الترجمة الخلفية لمعالجة الرسائل',
 
   // ── Field labels ──
