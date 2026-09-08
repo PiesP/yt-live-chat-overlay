@@ -69,19 +69,29 @@ async function inspectLivePage(context, url, output, index, installation) {
   page.on('pageerror', (error) => pageErrors.push(error.name));
   const observation = { url, status: 'not-run', mocked: false };
   let deadlineReached = false;
+  let deadlineCleanup;
+  const screenshot = `live-${index}.png`;
   const deadline = setTimeout(() => {
     deadlineReached = true;
-    void page.close().catch(() => {});
+    deadlineCleanup = page.screenshot({ path: join(output, screenshot), timeout: 3000 })
+      .then(() => { observation.screenshot = screenshot; }, () => {})
+      .finally(() => page.close().catch(() => {}));
   }, 60_000);
   try {
+    observation.phase = 'navigation';
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45_000 });
+    observation.finalUrl = page.url();
+    observation.title = await page.title();
     const rejectConsent = page.getByRole('button', { name: 'Reject all', exact: true });
     if (await rejectConsent.isVisible().catch(() => false)) await rejectConsent.click();
+    observation.phase = 'player';
     await page.locator('#movie_player').waitFor({ state: 'visible', timeout: 20_000 });
-    await page.locator('video').first().evaluate((video) => {
+    observation.video = await page.locator('video').first().evaluate((video) => {
       video.muted = true;
-      return video.play().then(() => true, () => false);
+      void video.play().catch(() => {});
+      return { paused: video.paused, readyState: video.readyState, errorCode: video.error?.code ?? null };
     });
+    observation.phase = 'settings';
     const settingsButton = page.locator('#yt-chat-overlay-settings-button');
     await settingsButton.waitFor({ state: 'visible', timeout: 20_000 });
     await settingsButton.focus();
@@ -91,6 +101,7 @@ async function inspectLivePage(context, url, output, index, installation) {
     const fontSize = modal.locator('input[name="fontSize"]');
     observation.fontSize = Number(await fontSize.inputValue());
     await page.keyboard.press('Escape');
+    observation.phase = 'chat';
     await page.waitForFunction(() =>
       document.querySelectorAll('.yt-live-chat-overlay-live-region > p').length > 0,
       undefined, { timeout: 30_000 });
@@ -100,15 +111,16 @@ async function inspectLivePage(context, url, output, index, installation) {
     observation.renderer = renderer.includes('Render: n/a') ? 'worker' : 'main';
     assert.equal(observation.renderer, installation === 'extension' ? 'worker' : 'main');
     observation.status = 'passed';
+    observation.phase = 'complete';
   } catch (error) {
     observation.status = 'unverified';
     observation.reason = deadlineReached ? 'live-url-deadline'
       : error.name === 'TimeoutError' ? 'watch-page-or-chat-readiness-timeout' : 'navigation-or-render-error';
   } finally {
     clearTimeout(deadline);
+    if (deadlineCleanup) await deadlineCleanup;
     observation.pageErrorTypes = [...new Set(pageErrors)];
     if (!page.isClosed()) {
-      const screenshot = `live-${index}.png`;
       await page.screenshot({ path: join(output, screenshot) }).then(() => {
         observation.screenshot = screenshot;
       }, () => {});
