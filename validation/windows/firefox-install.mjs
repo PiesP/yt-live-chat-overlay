@@ -493,6 +493,19 @@ async function runLivePhase(session, liveEntries, output) {
         errorCount: session.pageLogs.filter(({ level }) => level === 'error').length,
       });
     } catch (error) {
+      if (loaded && player) {
+        player.finalState = await session.evaluateJson(`(() => {
+          const video = document.querySelector('video');
+          return {
+            paused: video?.paused ?? null,
+            readyState: video?.readyState ?? null,
+            networkState: video?.networkState ?? null,
+            mediaErrorCode: video?.error?.code ?? null,
+            playability: window.ytInitialPlayerResponse?.playabilityStatus?.status ?? null,
+            playerError: document.querySelector('.ytp-error-content-wrap')?.textContent?.slice(0, 300) ?? null
+          };
+        })()`).catch(() => null);
+      }
       await writeFailureScreenshot(
         session,
         output,
