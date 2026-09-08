@@ -276,6 +276,7 @@ export const EN: Record<string, string> = {
   'translation.languageDesc':
     'Sets the overlay user interface language (does not filter comments by language)',
   'translation.serviceAuto': 'Auto (Chrome built-in)',
+  'translation.serviceOff': 'Off',
   'translation.serviceDesc': 'Translation backend service for processing messages',
   'translation.source': 'Source Language',
   'translation.sourceAuto': 'Auto-detect',

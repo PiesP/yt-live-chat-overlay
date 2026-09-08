@@ -16,7 +16,7 @@
 
 import { test, expect, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
-import { setupOverlayPage, waitForStoredSettings } from '../fixtures/test-utils';
+import { applySettings, setupOverlayPage, waitForStoredSettings } from '../fixtures/test-utils';
 
 const BUTTON_ID = 'yt-chat-overlay-settings-button';
 
@@ -136,7 +136,10 @@ test.describe('Settings UI Visual', () => {
         metrics: element.querySelector('[data-preview-metrics]')?.textContent,
         opacity: text.style.opacity,
         stroke: text.style.getPropertyValue('-webkit-text-stroke'),
-        textPosition: text.style.insetBlockStart,
+        textBottom: text.getBoundingClientRect().bottom,
+        textTop: text.getBoundingClientRect().top,
+        availableBottom: bottom.getBoundingClientRect().top,
+        availableTop: top.getBoundingClientRect().bottom,
         topFraction: top.getBoundingClientRect().height / stageHeight,
         bottomFraction: bottom.getBoundingClientRect().height / stageHeight,
       };
@@ -147,9 +150,63 @@ test.describe('Settings UI Visual', () => {
     expect(state.metrics).toContain('3px / 60%');
     expect(state.opacity).toBe('0.65');
     expect(state.stroke).toBe('2.55px rgba(0, 0, 0, 0.6)');
-    expect(state.textPosition).toBe('55%');
+    expect(state.textTop).toBeGreaterThanOrEqual(state.availableTop - 1);
+    expect(state.textBottom).toBeLessThanOrEqual(state.availableBottom + 1);
     expect(state.topFraction).toBeCloseTo(0.2, 2);
     expect(state.bottomFraction).toBeCloseTo(0.1, 2);
+  });
+
+  test('keeps the Spanish preview fully readable at 320px with the maximum font size', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 320, height: 800 });
+    await setupSettingsPage(page);
+    await applySettings(page, {
+      language: 'es',
+      fontSize: 50,
+      opacity: 0.55,
+      safeTop: 0.25,
+      safeBottom: 0.5,
+    });
+    await page.locator(`#${BUTTON_ID}`).click({ force: true });
+
+    const preview = page.locator('.yt-chat-overlay-settings-font-preview');
+    const state = await preview.evaluate((element) => {
+      const stage = element.querySelector<HTMLElement>(
+        '.yt-chat-overlay-settings-font-preview-stage'
+      );
+      const text = element.querySelector<HTMLElement>(
+        '.yt-chat-overlay-settings-font-preview-text'
+      );
+      const top = element.querySelector<HTMLElement>('[data-preview-zone="top"]');
+      const bottom = element.querySelector<HTMLElement>('[data-preview-zone="bottom"]');
+      if (!stage || !text || !top || !bottom) throw new Error('Settings preview is incomplete');
+      const stageRect = stage.getBoundingClientRect();
+      const textRect = text.getBoundingClientRect();
+      return {
+        bottomFraction: bottom.getBoundingClientRect().height / stageRect.height,
+        computedFontSize: getComputedStyle(text).fontSize,
+        message: text.textContent,
+        opacity: getComputedStyle(text).opacity,
+        overflowsHorizontally: text.scrollWidth > text.clientWidth + 1,
+        stageOverflows: stage.scrollHeight > stage.clientHeight + 1,
+        textBottom: textRect.bottom,
+        textTop: textRect.top,
+        availableBottom: bottom.getBoundingClientRect().top,
+        availableTop: top.getBoundingClientRect().bottom,
+        topFraction: top.getBoundingClientRect().height / stageRect.height,
+      };
+    });
+
+    expect(state.message).toBe('Mensaje de chat de ejemplo');
+    expect(state.computedFontSize).toBe('50px');
+    expect(state.opacity).toBe('0.55');
+    expect(state.overflowsHorizontally).toBe(false);
+    expect(state.stageOverflows).toBe(false);
+    expect(state.textTop).toBeGreaterThanOrEqual(state.availableTop - 1);
+    expect(state.textBottom).toBeLessThanOrEqual(state.availableBottom + 1);
+    expect(state.topFraction).toBeCloseTo(0.25, 2);
+    expect(state.bottomFraction).toBeCloseTo(0.5, 2);
   });
 
   test('separates translation capability status from editable preferences', async ({
@@ -160,7 +217,7 @@ test.describe('Settings UI Visual', () => {
     const modal = page.locator('#yt-chat-overlay-settings-backdrop');
     await modal.locator('#tab-translation').click();
     const capability = modal.locator('.yt-chat-overlay-settings-capability');
-    await expect(capability).toHaveAttribute('role', 'status');
+    await expect(capability).toHaveAttribute('role', 'note');
     const supported = await capability.getAttribute('data-supported');
     expect(supported).toMatch(/^(?:true|false)$/);
     if (supported === 'true') {
@@ -172,6 +229,15 @@ test.describe('Settings UI Visual', () => {
     await expect(modal.locator('input[name="translationEnabled"]')).toBeVisible();
     await expect(modal.locator('select[name="translationSource"]')).toBeVisible();
     await expect(modal.locator('select[name="translationTarget"]')).toBeVisible();
+    const service = modal.locator('select[name="translationService"]');
+    await expect(service.locator('option[value="off"]')).toHaveText('Off');
+    await service.selectOption('off');
+    await page.keyboard.press('Escape');
+    await waitForStoredSettings(page, { translationService: 'off' });
+
+    await page.locator(`#${BUTTON_ID}`).click({ force: true });
+    await modal.locator('#tab-translation').click();
+    await expect(service).toHaveValue('off');
   });
 
   test('author background controls expose defaults and persist a selected color', async ({
@@ -232,7 +298,9 @@ test.describe('Settings UI Visual', () => {
       buffer: Buffer.from(JSON.stringify({ fontSize: 44, opacity: 0.6 })),
     });
 
-    const toast = page.locator('#yt-chat-overlay-settings-backdrop [role="status"]');
+    const toast = page.locator(
+      '#yt-chat-overlay-settings-backdrop .yt-chat-overlay-settings-toast[role="status"]'
+    );
     await expect(toast).toContainText(/Settings imported successfully/i);
 
     const settings = await page.evaluate(() => {

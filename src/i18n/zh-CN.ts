@@ -118,6 +118,7 @@ export const ZH_CN: Record<string, string> = {
   'translation.languageAuto': '自动 (浏览器)',
   'translation.sourceAuto': '自动检测',
   'translation.serviceAuto': '自动 (Chrome内置)',
+  'translation.serviceOff': '关闭',
   'translation.displayModeDual': '双语 (原文 + 翻译)',
   'translation.displayModeReplace': '仅翻译',
 

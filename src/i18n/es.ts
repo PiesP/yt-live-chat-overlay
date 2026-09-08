@@ -126,6 +126,7 @@ export const ES: Record<string, string> = {
   'translation.languageAuto': 'Automático (Navegador)',
   'translation.sourceAuto': 'Detección automática',
   'translation.serviceAuto': 'Automático (integrado en Chrome)',
+  'translation.serviceOff': 'Desactivado',
   'translation.displayModeDual': 'Dual (original + traducción)',
   'translation.displayModeReplace': 'Reemplazar (solo traducción)',
 

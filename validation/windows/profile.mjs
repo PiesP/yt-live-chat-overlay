@@ -110,6 +110,37 @@ function createMockWatchHtml(previewHtml) {
   ).replace('</body>', `${chat}\n</body>`);
 }
 
+async function assertForcedColorsDisclosure(page, summary) {
+  await page.emulateMedia({ forcedColors: 'active' });
+  try {
+    const colors = await summary.evaluate((element) => {
+      const reference = document.createElement('button');
+      reference.style.backgroundColor = 'ButtonFace';
+      reference.style.color = 'ButtonText';
+      reference.style.forcedColorAdjust = 'none';
+      document.body.appendChild(reference);
+      const referenceStyle = getComputedStyle(reference);
+      const summaryStyle = getComputedStyle(element);
+      const result = {
+        background: summaryStyle.backgroundColor,
+        color: summaryStyle.color,
+        forcedColorAdjust: summaryStyle.forcedColorAdjust,
+        markerColor: getComputedStyle(element, '::marker').color,
+        systemBackground: referenceStyle.backgroundColor,
+        systemText: referenceStyle.color,
+      };
+      reference.remove();
+      return result;
+    });
+    assert.equal(colors.forcedColorAdjust, 'none');
+    assert.equal(colors.background, colors.systemBackground);
+    assert.equal(colors.color, colors.systemText);
+    assert.equal(colors.markerColor, colors.systemText);
+  } finally {
+    await page.emulateMedia({ forcedColors: 'none' });
+  }
+}
+
 async function configureThroughSettingsUi(page, installed) {
   const button = page.locator('#yt-chat-overlay-settings-button');
   await button.waitFor({ state: 'visible', timeout: 15_000 });
@@ -127,9 +158,11 @@ async function configureThroughSettingsUi(page, installed) {
     0,
     'Font size must remain in the primary settings area',
   );
-  await disclosure.locator('summary').focus();
+  const disclosureSummary = disclosure.locator('summary');
+  await disclosureSummary.focus();
   await page.keyboard.press('Enter');
   assert.equal(await disclosure.getAttribute('open'), '', 'Fine tuning did not open from keyboard');
+  await assertForcedColorsDisclosure(page, disclosureSummary);
 
   await modal.locator('select[name="danmakuMode"]').selectOption('scroll');
   const fontSize = modal.locator('input[name="fontSize"]');
@@ -176,12 +209,15 @@ async function configureThroughSettingsUi(page, installed) {
       }
       const stageHeight = stage.getBoundingClientRect().height;
       return {
+        availableBottom: bottom.getBoundingClientRect().top,
+        availableTop: top.getBoundingClientRect().bottom,
         bottomFraction: bottom.getBoundingClientRect().height / stageHeight,
         message: text.textContent?.trim() ?? '',
         metrics: element.querySelector('[data-preview-metrics]')?.textContent ?? '',
         opacity: text.style.opacity,
         stroke: text.style.getPropertyValue('-webkit-text-stroke'),
-        textPosition: text.style.insetBlockStart,
+        textBottom: text.getBoundingClientRect().bottom,
+        textTop: text.getBoundingClientRect().top,
         topFraction: top.getBoundingClientRect().height / stageHeight,
       };
     },
@@ -191,15 +227,24 @@ async function configureThroughSettingsUi(page, installed) {
   assert(previewState.metrics.includes('3px / 60%'), 'Preview does not report outline state');
   assert.equal(previewState.opacity, '0.65');
   assert.equal(previewState.stroke, '2.55px rgba(0, 0, 0, 0.6)');
-  assert.equal(previewState.textPosition, '55%');
+  assert(previewState.textTop >= previewState.availableTop - 1,
+    'Preview text overlaps the top safe zone');
+  assert(previewState.textBottom <= previewState.availableBottom + 1,
+    'Preview text overlaps the bottom safe zone');
   assert(Math.abs(previewState.topFraction - 0.2) < 0.02, 'Top safe-zone mask is inaccurate');
   assert(Math.abs(previewState.bottomFraction - 0.1) < 0.02, 'Bottom safe-zone mask is inaccurate');
 
   await modal.locator('#tab-translation').click();
   const capability = modal.locator('.yt-chat-overlay-settings-capability');
   assert.match(await capability.getAttribute('data-supported'), /^(?:true|false)$/u);
+  assert.equal(await capability.getAttribute('role'), 'note');
   assert((await capability.textContent())?.trim(), 'Translation capability status is empty');
   assert.equal(await modal.locator('input[name="translationEnabled"]').count(), 1);
+  assert.equal(
+    await modal.locator('select[name="translationService"] option[value="off"]').count(),
+    1,
+    'Translation off option is missing',
+  );
 
   await modal.locator('#tab-advanced').click();
   const depthLayers = modal.locator('input[name="depthLayersEnabled"]');

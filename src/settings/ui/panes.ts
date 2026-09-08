@@ -558,7 +558,10 @@ export const PANES: PaneDef[] = [
           sel(
             'translation.service',
             'translationService',
-            [['auto', 'translation.serviceAuto']],
+            [
+              ['auto', 'translation.serviceAuto'],
+              ['off', 'translation.serviceOff'],
+            ],
             'translation.serviceDesc'
           ),
           sel(

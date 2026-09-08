@@ -142,6 +142,21 @@ describe('SettingsPanes', () => {
     }
   });
 
+  it('offers every schema-valid translation service value', () => {
+    const translationPane = PANES.find((pane) => pane.id === 'translation');
+    const service = translationPane?.sections
+      .flatMap((section) => section.fields)
+      .find(
+        (field): field is Extract<FieldDef, { type: 'select' }> =>
+          field.type === 'select' && field.key === 'translationService'
+      );
+
+    expect(service?.options).toEqual([
+      ['auto', 'translation.serviceAuto'],
+      ['off', 'translation.serviceOff'],
+    ]);
+  });
+
   it('every keyed pane field exists in the settings metadata schema', () => {
     for (const pane of PANES) {
       for (const section of allSections(pane)) {

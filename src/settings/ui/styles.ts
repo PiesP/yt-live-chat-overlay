@@ -844,14 +844,17 @@ export const SETTINGS_UI_STYLES = `
       }
       .yt-chat-overlay-settings-font-preview-stage {
         position: relative;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: 0fr minmax(min-content, 1fr) 0fr;
         min-height: 144px;
         overflow: hidden;
         background: linear-gradient(135deg, ${uiColors.background}, ${uiColors.backgroundLight});
         isolation: isolate;
       }
       .yt-chat-overlay-settings-font-preview-zone {
-        position: absolute;
-        inset-inline: 0;
+        position: relative;
+        grid-column: 1;
         z-index: 0;
         box-sizing: border-box;
         background: repeating-linear-gradient(
@@ -862,21 +865,25 @@ export const SETTINGS_UI_STYLES = `
         pointer-events: none;
       }
       .yt-chat-overlay-settings-font-preview-zone[data-preview-zone="top"] {
-        inset-block-start: 0;
+        grid-row: 1;
         border-block-end: 1px dashed ${uiColors.warning};
       }
       .yt-chat-overlay-settings-font-preview-zone[data-preview-zone="bottom"] {
-        inset-block-end: 0;
+        grid-row: 3;
         border-block-start: 1px dashed ${uiColors.warning};
       }
       .yt-chat-overlay-settings-font-preview-text {
-        position: absolute;
-        inset-inline: ${spacing.md}px;
+        position: relative;
+        grid-column: 1;
+        grid-row: 2;
+        align-self: center;
         z-index: 1;
         min-width: 0;
+        max-width: 100%;
+        box-sizing: border-box;
+        padding: ${spacing.md}px;
         overflow-wrap: anywhere;
         text-align: center;
-        transform: translateY(-50%);
         paint-order: stroke fill;
         transition: font-size ${animDuration.fast} ${SETTINGS_UI_DESIGN.motion.easing}, font-weight ${animDuration.fast} ${SETTINGS_UI_DESIGN.motion.easing};
         line-height: 1.3;
@@ -1077,6 +1084,13 @@ export const SETTINGS_UI_STYLES = `
         .yt-chat-overlay-settings-actions button[data-action="close"] {
           background: Highlight;
           color: HighlightText;
+        }
+        .yt-chat-overlay-settings-disclosure > summary {
+          background: ButtonFace;
+          color: ButtonText;
+        }
+        .yt-chat-overlay-settings-disclosure > summary::marker {
+          color: ButtonText;
         }
       }
       /* Black overlay opacity scale — documented rationale:

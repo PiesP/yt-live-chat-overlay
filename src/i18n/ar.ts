@@ -126,6 +126,7 @@ export const AR: Record<string, string> = {
   'translation.languageAuto': 'تلقائي (المتصفح)',
   'translation.sourceAuto': 'كشف تلقائي',
   'translation.serviceAuto': 'تلقائي (مدمج في Chrome)',
+  'translation.serviceOff': 'إيقاف',
   'translation.displayModeDual': 'مزدوج (الأصل + الترجمة)',
   'translation.displayModeReplace': 'استبدال (الترجمة فقط)',
 

@@ -564,7 +564,7 @@ export class SettingsUiForm {
       const supported = TranslationService.isSupported();
       const msg = domDiv('yt-chat-overlay-settings-capability');
       msg.dataset.supported = String(supported);
-      msg.setAttribute('role', 'status');
+      msg.setAttribute('role', 'note');
       msg.textContent = t(
         supported ? 'translation.capabilityDetected' : 'translation.capabilityUnavailable'
       );
@@ -1169,19 +1169,22 @@ export class SettingsUiForm {
 
     const topZone = preview.querySelector<HTMLElement>('[data-preview-zone="top"]');
     const bottomZone = preview.querySelector<HTMLElement>('[data-preview-zone="bottom"]');
-    const safeTopPercent = scaleUiValue(settings.safeTop, 100);
-    const safeBottomPercent = scaleUiValue(settings.safeBottom, 100);
+    const stage = preview.querySelector<HTMLElement>(
+      '.yt-chat-overlay-settings-font-preview-stage'
+    );
     if (topZone) {
-      topZone.style.blockSize = `${safeTopPercent}%`;
       topZone.toggleAttribute('hidden', settings.safeTop === 0);
     }
     if (bottomZone) {
-      bottomZone.style.blockSize = `${safeBottomPercent}%`;
       bottomZone.toggleAttribute('hidden', settings.safeBottom === 0);
     }
-    const availableFraction = Math.max(0, 1 - settings.safeTop - settings.safeBottom);
-    const messagePositionPercent = scaleUiValue(settings.safeTop + availableFraction / 2, 100);
-    previewEl.style.insetBlockStart = `${messagePositionPercent}%`;
+    const availableFraction = scaleUiValue(
+      Math.max(0, 1 - settings.safeTop - settings.safeBottom),
+      1
+    );
+    if (stage) {
+      stage.style.gridTemplateRows = `${settings.safeTop}fr minmax(min-content, ${availableFraction}fr) ${settings.safeBottom}fr`;
+    }
 
     const metrics = preview.querySelector<HTMLElement>('[data-preview-metrics]');
     if (metrics) {

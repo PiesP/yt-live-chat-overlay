@@ -126,6 +126,7 @@ export const JA: Record<string, string> = {
   'translation.languageAuto': '自動 (ブラウザ)',
   'translation.sourceAuto': '自動検出',
   'translation.serviceAuto': '自動 (Chrome内蔵)',
+  'translation.serviceOff': 'オフ',
   'translation.displayModeDual': '二重表示 (原文 + 翻訳)',
   'translation.displayModeReplace': '翻訳のみ表示',
 

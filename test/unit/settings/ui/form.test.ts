@@ -246,13 +246,10 @@ describe('SettingsUiForm', () => {
     expect(text?.style.getPropertyValue('-webkit-text-stroke')).toBe(
       '2.55px rgba(255, 255, 255, 0.6)'
     );
-    expect(text?.style.insetBlockStart).toBe('47.5%');
-    expect(
-      preview?.querySelector<HTMLElement>('[data-preview-zone="top"]')?.style.blockSize
-    ).toBe('15%');
-    expect(
-      preview?.querySelector<HTMLElement>('[data-preview-zone="bottom"]')?.style.blockSize
-    ).toBe('20%');
+    const stage = preview?.querySelector<HTMLElement>(
+      '.yt-chat-overlay-settings-font-preview-stage'
+    );
+    expect(stage?.style.gridTemplateRows).toBe('0.15fr minmax(min-content, 0.65fr) 0.2fr');
     expect(preview?.querySelector('[data-preview-metrics]')?.textContent).toContain(
       'Text Opacity (%): 65%'
     );
@@ -277,29 +274,34 @@ describe('SettingsUiForm', () => {
     modal.remove();
   });
 
-  it('keeps translation preferences visible while describing capability without claiming readiness', () => {
+  it('keeps an unsupported browser translation-off preference through an open form round trip', () => {
     const previousTranslator = globalThis.Translator;
     // @ts-expect-error Exercise the unsupported-browser UI branch.
     delete globalThis.Translator;
     try {
-      const form = new SettingsUiForm(getSettings, onPreview);
+      const settings = makeDefaults({ translationService: 'off' });
+      const form = new SettingsUiForm(() => settings, onPreview);
       const modal = document.createElement('dialog');
       modal.append(...form.createModalContent());
       form.setModal(modal);
-      form.populateForm(getSettings());
+      form.populateForm(settings);
 
       const pane = modal.querySelector<HTMLElement>('#pane-translation');
       const preference = pane?.querySelector<HTMLInputElement>('[name="translationEnabled"]');
       expect(preference).not.toBeNull();
       const capability = pane?.querySelector('.yt-chat-overlay-settings-capability');
-      expect(capability?.getAttribute('role')).toBe('status');
+      expect(capability?.getAttribute('role')).toBe('note');
       expect((capability as HTMLElement | null)?.dataset.supported).toBe('false');
       expect(capability?.textContent).toBe(
         'This browser does not expose the built-in Translator API. Your preference is kept, but translation will stay inactive here.'
       );
       expect(pane?.textContent).not.toContain('ready');
+      const service = pane?.querySelector<HTMLSelectElement>('[name="translationService"]');
+      expect(service?.value).toBe('off');
+      expect(service?.selectedOptions[0]?.textContent).toBe('Off');
       preference!.checked = true;
       expect(form.collectSettings().translationEnabled).toBe(true);
+      expect(form.collectSettings().translationService).toBe('off');
 
       form.destroy();
     } finally {
@@ -343,13 +345,22 @@ describe('SettingsUiForm', () => {
       /\.yt-chat-overlay-settings-disclosure\s*>\s*summary:focus-visible\s*\{[^}]*outline:/s
     );
     expect(SETTINGS_UI_STYLES).toMatch(
-      /\.yt-chat-overlay-settings-font-preview-zone\s*\{[^}]*position:\s*absolute/s
+      /\.yt-chat-overlay-settings-font-preview-stage\s*\{[^}]*display:\s*grid/s
+    );
+    expect(SETTINGS_UI_STYLES).toMatch(
+      /\.yt-chat-overlay-settings-font-preview-text\s*\{[^}]*position:\s*relative/s
     );
     expect(SETTINGS_UI_STYLES).toMatch(
       /\.yt-chat-overlay-settings-font-preview-metrics\s*\{[^}]*font-size:/s
     );
     expect(SETTINGS_UI_STYLES).toContain(
       '.yt-chat-overlay-settings-capability[data-supported="false"]'
+    );
+    expect(SETTINGS_UI_STYLES).toMatch(
+      /@media \(forced-colors: active\)[\s\S]*?\.yt-chat-overlay-settings-disclosure > summary\s*\{[^}]*background:\s*ButtonFace;[^}]*color:\s*ButtonText;/s
+    );
+    expect(SETTINGS_UI_STYLES).toMatch(
+      /@media \(forced-colors: active\)[\s\S]*?\.yt-chat-overlay-settings-disclosure > summary::marker\s*\{[^}]*color:\s*ButtonText;/s
     );
   });
 

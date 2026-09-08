@@ -110,6 +110,7 @@ export const KO: Record<string, string> = {
   'translation.languageAuto': '자동 (브라우저)',
   'translation.sourceAuto': '자동 감지',
   'translation.serviceAuto': '자동 (Chrome 내장)',
+  'translation.serviceOff': '사용 안 함',
   'translation.displayModeDual': '이중 표시 (원문 + 번역)',
   'translation.displayModeReplace': '번역만 표시',
 
