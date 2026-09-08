@@ -15,7 +15,6 @@ const defaultOptions: LaneAllocatorOptions = {
   headwayGapRatio: 0.08,
   exitPaddingPx: 100,
   scrollDurationMaxMs: 15000,
-  maxMessageAgeMs: 30000,
   laneDensityFactor: 1.0,
 };
 

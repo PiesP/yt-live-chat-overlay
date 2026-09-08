@@ -81,14 +81,6 @@ export class PageWatcher {
     }
 
     const generation = ++this.patchGenerations[methodName];
-    const state: HistoryPatchState = {
-      methodName,
-      owner: this,
-      previous,
-      wrapper: undefined as unknown as HistoryMethod,
-      generation,
-      active: true,
-    } satisfies HistoryPatchState;
     const patched: HistoryMethod = (...args: Parameters<HistoryMethod>) => {
       const result = state.previous.apply(history, args);
       if (state.active) {
@@ -96,7 +88,14 @@ export class PageWatcher {
       }
       return result;
     };
-    state.wrapper = patched;
+    const state: HistoryPatchState = {
+      methodName,
+      owner: this,
+      previous,
+      wrapper: patched,
+      generation,
+      active: true,
+    } satisfies HistoryPatchState;
     PageWatcher.wrapperToState.set(patched, state);
     history[methodName] = patched;
 
