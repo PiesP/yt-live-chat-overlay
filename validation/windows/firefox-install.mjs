@@ -79,6 +79,17 @@ const NON_WATCH_HTML = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>Firefox extension fixture</title></head>
 <body><div id="page-manager"><div id="content"><h1>Fixture page</h1></div></div></body></html>`;
 
+function describeFailure(error, depth = 0) {
+  return {
+    name: error?.name ?? 'Error',
+    message: String(error?.message ?? error).slice(0, 2000),
+    ...(depth < 3 && error?.cause ? { cause: describeFailure(error.cause, depth + 1) } : {}),
+    ...(depth < 3 && Array.isArray(error?.errors)
+      ? { errors: error.errors.slice(0, 10).map((entry) => describeFailure(entry, depth + 1)) }
+      : {}),
+  };
+}
+
 function delay(ms) {
   return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
 }
@@ -214,7 +225,7 @@ async function verifyStoredSettings(session) {
   );
 }
 
-async function runDeterministicPhase(session, checks) {
+async function runDeterministicPhase(session, checks, diagnostics) {
   await session.navigate(FIXTURE_URL);
   await session.waitFor(
     `Boolean(
@@ -225,16 +236,20 @@ async function runDeterministicPhase(session, checks) {
     'the installed Firefox extension overlay'
   );
 
-  const startup = await session.evaluateJson(`(() => {
+  const startupResult = await session.evaluateJson(`(() => {
     const bridge = window.__ytExtensionBridge;
     return {
+      workerUrl: bridge?.workerUrl ?? null,
       canvasAriaHidden: document.querySelector('#${OVERLAY_ID} canvas')?.getAttribute('aria-hidden') ?? null,
       pageScriptCount: document.querySelectorAll('script[src^="moz-extension://"][src$="/page-script.js"]').length,
       storageType: bridge?.storageType ?? null,
       workerSupported: bridge?.workerSupported === true,
-      workerUrlValid: /^blob:https:\/\/www\.youtube\.com\//.test(bridge?.workerUrl ?? '')
+      workerUrlValid: typeof bridge?.workerUrl === 'string' && bridge.workerUrl.startsWith('blob:' + location.origin + '/')
     };
   })()`);
+  const { workerUrl, ...startup } = startupResult;
+  diagnostics.startup = startup;
+  diagnostics.workerUrl = workerUrl;
   assert.deepEqual(startup, {
     canvasAriaHidden: 'true',
     pageScriptCount: 1,
@@ -387,7 +402,7 @@ async function runLivePhase(session, liveEntries, output) {
           document.querySelectorAll('#yt-chat-overlay-settings-button').length === 1 &&
           document.querySelectorAll('#${OVERLAY_ID} .yt-live-chat-overlay-live-region > p').length > 0 &&
           window.__ytExtensionBridge?.workerSupported === true &&
-          /^blob:https:\\/\\/www\\.youtube\\.com\\//.test(window.__ytExtensionBridge?.workerUrl ?? '')
+          (window.__ytExtensionBridge?.workerUrl ?? '').startsWith('blob:' + location.origin + '/')
         )`,
         'the installed Firefox extension to render public live chat',
         30_000
@@ -404,7 +419,7 @@ async function runLivePhase(session, liveEntries, output) {
         renderedMessageCount: document.querySelectorAll('#${OVERLAY_ID} .yt-live-chat-overlay-live-region > p').length,
         settingsButtonCount: document.querySelectorAll('#yt-chat-overlay-settings-button').length,
         workerBridgeReady: Boolean(window.__ytExtensionBridge?.workerSupported &&
-          /^blob:https:\\/\\/www\\.youtube\\.com\\//.test(window.__ytExtensionBridge?.workerUrl ?? ''))
+          (window.__ytExtensionBridge?.workerUrl ?? '').startsWith('blob:' + location.origin + '/'))
       }))()`);
       workerReady = session.pageLogs.some(
         ({ text }) => text.includes('[RenderWorkerManager] renderer.worker.started')
@@ -489,6 +504,7 @@ export async function runFirefoxInstallation(
     extensionUninstalled: false,
     browserClosed: false,
   };
+  const diagnostics = {};
   let session;
   let extensionId;
   let stopMock;
@@ -509,7 +525,7 @@ export async function runFirefoxInstallation(
     checks.extensionInstalled = true;
     assert.equal(extensionId, EXTENSION_ID, 'Firefox installed an unexpected extension id');
     checks.extensionIdMatched = true;
-    deterministic = await runDeterministicPhase(session, checks);
+    deterministic = await runDeterministicPhase(session, checks, diagnostics);
     checks.deterministicErrorsAbsent = true;
 
     await stopMock();
@@ -525,6 +541,9 @@ export async function runFirefoxInstallation(
     );
   } catch (error) {
     primaryError = error;
+    if (!checks.deterministicErrorsAbsent && session) diagnostics.errorLogs = session.pageLogs
+      .filter((entry) => entry.level === 'error' || /worker/i.test(entry.text))
+      .slice(0, 20).map((entry) => ({ level: entry.level, text: entry.text.slice(0, 1000) }));
     if (session) {
       await writeFailureScreenshot(session, output, 'firefox-extension-failure.png');
     }
@@ -554,7 +573,7 @@ export async function runFirefoxInstallation(
         checks.browserClosed = true;
       } catch (error) {
         cleanupErrors.push(
-          new Error(`Failed to close the Firefox session: ${errorMessage(error)}`)
+          new Error(`Failed to close the Firefox session: ${errorMessage(error)}`, { cause: error })
         );
       }
     }
@@ -562,6 +581,7 @@ export async function runFirefoxInstallation(
 
   const result = {
     status: primaryError || cleanupErrors.length > 0 ? 'failed' : 'passed',
+    errors: [primaryError, ...cleanupErrors].filter(Boolean).map((error) => describeFailure(error)),
     checks,
     observations: {
       browser: {
@@ -570,6 +590,7 @@ export async function runFirefoxInstallation(
         platform: session?.platformName ?? null,
       },
       deterministic,
+      diagnostics,
       execution: {
         headed: !headless,
         livePageCount: live.length,

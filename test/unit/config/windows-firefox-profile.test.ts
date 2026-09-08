@@ -4,6 +4,7 @@
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Script } from 'node:vm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 // @ts-expect-error The Windows acceptance runtime is intentionally plain ESM for portable Node.
 import * as firefoxInstallModule from '../../../validation/windows/firefox-install.mjs';
@@ -56,7 +57,8 @@ function createSession(options: {
     close: vi.fn(async () => {
       calls.push('close');
     }),
-    evaluateJson: vi.fn(async () => {
+    evaluateJson: vi.fn(async (expression: string) => {
+      new Script(expression);
       evaluateIndex++;
       if (options.failStartup && evaluateIndex === 1) throw new Error('fixture startup failed');
       switch (evaluateIndex) {
