@@ -10,6 +10,7 @@ import shutil
 import struct
 import tempfile
 import urllib.request
+from urllib.parse import urljoin, urlsplit
 import zipfile
 
 VERSION = '5.5.0'
@@ -21,16 +22,43 @@ URL = (
     '&os=win&arch=x64&x=id%3Ddhdgffkkebhmkfjojejmpbldmpobfkfo%26uc'
 )
 MAX_ARCHIVE_BYTES = 16 * 1024 * 1024
+MAX_REDIRECTS = 5
+STORE_HOSTS = frozenset(('clients2.google.com', 'clients2.googleusercontent.com'))
+
+
+def store_url(value, base=URL):
+    if not value or '\\' in value or any(ord(char) <= 32 or ord(char) == 127 for char in value):
+        raise ValueError('Invalid Store download URL.')
+    target = urlsplit(urljoin(base, value))
+    if (target.scheme != 'https' or target.hostname not in STORE_HOSTS
+            or target.username is not None or target.password is not None
+            or target.port not in (None, 443)):
+        raise ValueError('Store downloads require an approved HTTPS origin.')
+    return target
+
+
+def download_package():
+    target = store_url(URL)
+    # Register HTTPS only: no file/FTP/HTTP, proxy, or automatic redirect handlers.
+    opener = urllib.request.OpenerDirector()
+    opener.add_handler(urllib.request.HTTPSHandler())
+    for redirects in range(MAX_REDIRECTS + 1):
+        with opener.open(target.geturl(), timeout=60) as response:
+            if response.status in (301, 302, 303, 307, 308):
+                if redirects == MAX_REDIRECTS:
+                    raise ValueError('Too many Store download redirects.')
+                target = store_url(response.getheader('Location'), target.geturl())
+                continue
+            if response.status != 200:
+                raise ValueError(f'Store download failed with HTTP {response.status}.')
+            return response.read(MAX_ARCHIVE_BYTES + 1)
 
 
 def prepare(output):
     output = output.absolute()
     if output.exists():
         raise ValueError('Choose a new output directory.')
-    # Fixed HTTPS endpoint with no caller-controlled URL. This audit rule also
-    # flags a literal URL when the required timeout keyword is present.
-    with urllib.request.urlopen(URL, timeout=60) as response:  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
-        body = response.read(MAX_ARCHIVE_BYTES + 1)
+    body = download_package()
     if len(body) > MAX_ARCHIVE_BYTES or hashlib.sha256(body).hexdigest() != SHA256:
         raise ValueError('The Store package does not match the reviewed pin; review a new version first.')
     if body[:4] != b'Cr24' or len(body) < 12:
