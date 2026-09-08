@@ -232,6 +232,7 @@ describe('Windows Firefox installation profile', () => {
     expect(result.status).toBe('passed');
     expect(result.observations.live).toEqual([
       {
+        player: { paused: false, readyState: 4 },
         canvasCount: 1,
         errorCategories: {},
         errorCount: 0,
