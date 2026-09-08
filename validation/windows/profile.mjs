@@ -279,7 +279,11 @@ async function verifyIsolatedPaidCardInk(page, output) {
   await page.evaluate(async () => {
     const app = window.__ytChatOverlay;
     if (!app?.restartRuntime || !app.applySettings) throw new Error('Runtime restart hook is unavailable');
-    app.applySettings({ danmakuMode: 'top' });
+    app.applySettings({
+      danmakuMode: 'top',
+      showAuthor: { superChat: false },
+      showSuperChatAmount: false,
+    });
     await app.restartRuntime();
     if (window.__ytAcceptancePaidCardProbe) window.__ytAcceptancePaidCardProbe.rects.length = 0;
   });
@@ -702,7 +706,6 @@ export async function run({ browser, root, output, installedContext, installedEx
       : 1 + Math.floor(backgroundObservationMs / minimumPollInterval);
     assert(backgroundChatRequests <= backgroundRequestBudget,
       `Background chat requests flooded: ${backgroundChatRequests}/${backgroundRequestBudget}`);
-
 
     return {
       checks: {
