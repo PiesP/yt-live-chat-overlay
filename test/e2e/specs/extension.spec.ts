@@ -82,7 +82,7 @@ test.describe('Chrome Extension', () => {
         workerSupported: true,
         storageType: 'chrome.storage.local',
       });
-      expect(bridge?.workerUrl).toMatch(/^chrome-extension:\/\/.*\/workers\/renderer\.js$/);
+      expect(bridge?.workerUrl).toMatch(/^blob:https:\/\/www\.youtube\.com\//);
       await expect(page.locator('script[src^="chrome-extension://"][src$="/page-script.js"]'))
         .toHaveCount(1);
       await expect(page.locator('#yt-live-chat-overlay')).toBeAttached();

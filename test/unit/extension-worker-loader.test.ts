@@ -12,6 +12,7 @@ import {
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe('extension worker source loader', () => {
@@ -31,8 +32,22 @@ describe('extension worker source loader', () => {
       })
     ).resolves.toContain('ready');
     expect(fetchImpl).toHaveBeenCalledWith('chrome-extension://trusted/workers/renderer.js', {
-      signal,
+      signal: expect.any(AbortSignal),
     });
+  });
+
+  it('times out stalled preparation so application fallback can initialize', async () => {
+    vi.useFakeTimers();
+    const fetchImpl = vi.fn<typeof fetch>((_url, init) => new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true });
+    }));
+    const request = loadPackagedWorkerSource('chrome-extension://trusted/workers/renderer.js', {
+      fetchImpl,
+    });
+    const rejected = expect(request).rejects.toThrow('timed out');
+    await vi.advanceTimersByTimeAsync(5000);
+    await rejected;
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('rejects failed, empty, and oversized packaged responses', async () => {

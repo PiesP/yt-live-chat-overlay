@@ -3,6 +3,7 @@
 
 /** The packaged worker is currently under 100 KiB; leave bounded build headroom. */
 export const MAX_PACKAGED_WORKER_BYTES = 512 * 1024;
+const WORKER_SOURCE_TIMEOUT_MS = 5000;
 
 interface WorkerSourceLoadOptions {
   fetchImpl?: typeof fetch;
@@ -26,19 +27,28 @@ export async function loadPackagedWorkerSource(
   options: WorkerSourceLoadOptions = {}
 ): Promise<string> {
   const fetchImpl = options.fetchImpl ?? fetch;
-  const response = await fetchImpl(workerUrl, {
-    ...(options.signal ? { signal: options.signal } : {}),
-  });
-  if (!response.ok) throw new Error('Packaged worker source could not be loaded');
+  const timeoutController = new AbortController();
+  const signal = options.signal
+    ? AbortSignal.any([options.signal, timeoutController.signal])
+    : timeoutController.signal;
+  const timeout = setTimeout(() => {
+    timeoutController.abort(new Error('Packaged worker source timed out'));
+  }, WORKER_SOURCE_TIMEOUT_MS);
+  try {
+    const response = await fetchImpl(workerUrl, { signal });
+    if (!response.ok) throw new Error('Packaged worker source could not be loaded');
 
-  const declaredLength = Number(response.headers.get('content-length'));
-  if (Number.isFinite(declaredLength) && declaredLength > MAX_PACKAGED_WORKER_BYTES) {
-    throw new Error('Packaged worker source exceeds the size limit');
+    const declaredLength = Number(response.headers.get('content-length'));
+    if (Number.isFinite(declaredLength) && declaredLength > MAX_PACKAGED_WORKER_BYTES) {
+      throw new Error('Packaged worker source exceeds the size limit');
+    }
+
+    const source = await response.text();
+    assertBoundedWorkerSource(source);
+    return source;
+  } finally {
+    clearTimeout(timeout);
   }
-
-  const source = await response.text();
-  assertBoundedWorkerSource(source);
-  return source;
 }
 
 /** Create the worker URL in MAIN world so its Blob inherits the page origin. */

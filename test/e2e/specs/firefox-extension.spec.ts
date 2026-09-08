@@ -118,7 +118,7 @@ test.describe('Firefox extension runtime', () => {
         storageType: 'chrome.storage.local',
         workerSupported: true,
       });
-      expect(startup.workerUrl).toMatch(/^moz-extension:\/\/[^/]+\/workers\/renderer\.js$/);
+      expect(startup.workerUrl).toMatch(/^blob:https:\/\/www\.youtube\.com\//);
 
       const settingsInteraction = await browser.evaluateJson<{
         advancedTabSelected: string | null;
