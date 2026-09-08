@@ -3,11 +3,12 @@
 
 import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve, win32 } from 'node:path';
 
 const STARTUP_TIMEOUT_MS = 30_000;
 const COMMAND_TIMEOUT_MS = 20_000;
 const CLOSE_TIMEOUT_MS = 5_000;
+const GRACEFUL_EXIT_TIMEOUT_MS = 2_000;
 const POLL_INTERVAL_MS = 75;
 const PROFILE_PREFIX = '.firefox-install-profile-';
 
@@ -48,6 +49,87 @@ function assertOwnedProfile(root, profileDir) {
 async function removeOwnedProfile(root, profileDir) {
   assertOwnedProfile(root, profileDir);
   await rm(profileDir, { force: true, recursive: true });
+}
+
+function runTaskkillTree(pid) {
+  return new Promise((resolveTaskkill, rejectTaskkill) => {
+    const systemRoot = process.env.SystemRoot ?? 'C:\\Windows';
+    if (!win32.isAbsolute(systemRoot)) {
+      rejectTaskkill(new Error('Windows did not expose an absolute SystemRoot directory'));
+      return;
+    }
+    const taskkill = spawn(win32.join(systemRoot, 'System32', 'taskkill.exe'), [
+      '/PID', String(pid), '/T', '/F',
+    ], { stdio: 'ignore', windowsHide: true });
+    taskkill.once('error', rejectTaskkill);
+    taskkill.once('exit', (code) => {
+      if (code === 0) resolveTaskkill();
+      else rejectTaskkill(new Error(`taskkill failed for the task-owned Firefox tree (${code})`));
+    });
+  });
+}
+
+async function terminateOwnedProcessTree(child) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  if (await waitForProcessExit(child, GRACEFUL_EXIT_TIMEOUT_MS)) return;
+  if (process.platform === 'win32') {
+    if (!Number.isSafeInteger(child.pid) || child.pid <= 0) {
+      throw new Error('Task-owned Firefox process id is unavailable');
+    }
+    let taskkillError;
+    try {
+      await runTaskkillTree(child.pid);
+    } catch (error) {
+      taskkillError = error;
+    }
+    if (await waitForProcessExit(child, CLOSE_TIMEOUT_MS)) return;
+    throw taskkillError ?? new Error('Task-owned Firefox process tree did not terminate');
+  }
+  child.kill('SIGTERM');
+  if (!(await waitForProcessExit(child, CLOSE_TIMEOUT_MS))) {
+    child.kill('SIGKILL');
+    if (!(await waitForProcessExit(child, CLOSE_TIMEOUT_MS))) {
+      throw new Error('Task-owned Firefox process did not terminate');
+    }
+  }
+}
+
+/** Run every cleanup phase and remove the profile only after process termination. */
+export async function cleanupFirefoxResources(
+  { child, detachSocket = () => {}, profileDir, root, socket },
+  {
+    removeProfile = removeOwnedProfile,
+    terminateProcessTree = terminateOwnedProcessTree,
+  } = {}
+) {
+  const errors = [];
+  try {
+    detachSocket();
+  } catch (error) {
+    errors.push(new Error(`Failed to detach Firefox BiDi listeners: ${errorMessage(error)}`));
+  }
+  if (socket) {
+    try {
+      socket.close();
+    } catch (error) {
+      errors.push(new Error(`Failed to close the Firefox BiDi socket: ${errorMessage(error)}`));
+    }
+  }
+  let processTerminated = false;
+  try {
+    await terminateProcessTree(child);
+    processTerminated = true;
+  } catch (error) {
+    errors.push(new Error(`Failed to terminate the task-owned Firefox tree: ${errorMessage(error)}`));
+  }
+  if (processTerminated) {
+    try {
+      await removeProfile(root, profileDir);
+    } catch (error) {
+      errors.push(new Error(`Failed to remove the task-owned Firefox profile: ${errorMessage(error)}`));
+    }
+  }
+  if (errors.length > 0) throw new AggregateError(errors, 'Firefox resource cleanup failed');
 }
 
 export function buildFirefoxLaunchArguments({ profileDir, headless = false }) {
@@ -458,18 +540,16 @@ class FirefoxBidiSession {
     } finally {
       this.#closed = true;
       this.#handleClose();
-      this.#socket.removeEventListener('message', this.#handleMessage);
-      this.#socket.removeEventListener('close', this.#handleClose);
-      this.#socket.close();
-
-      if (this.#child.exitCode === null && this.#child.signalCode === null) {
-        this.#child.kill('SIGTERM');
-        if (!(await waitForProcessExit(this.#child, CLOSE_TIMEOUT_MS))) {
-          this.#child.kill('SIGKILL');
-          await waitForProcessExit(this.#child, CLOSE_TIMEOUT_MS);
-        }
-      }
-      await removeOwnedProfile(this.#root, this.#profileDir);
+      await cleanupFirefoxResources({
+        child: this.#child,
+        detachSocket: () => {
+          this.#socket.removeEventListener('message', this.#handleMessage);
+          this.#socket.removeEventListener('close', this.#handleClose);
+        },
+        profileDir: this.#profileDir,
+        root: this.#root,
+        socket: this.#socket,
+      });
     }
   }
 }
@@ -527,12 +607,7 @@ export async function launchFirefoxBidi({ root, executablePath, headless = false
     if (session) {
       await session.close();
     } else {
-      if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
-      if (!(await waitForProcessExit(child, CLOSE_TIMEOUT_MS))) {
-        child.kill('SIGKILL');
-        await waitForProcessExit(child, CLOSE_TIMEOUT_MS);
-      }
-      await removeOwnedProfile(taskRoot, profileDir);
+      await cleanupFirefoxResources({ child, profileDir, root: taskRoot, socket: null });
     }
     throw error;
   }
