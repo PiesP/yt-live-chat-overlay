@@ -16,7 +16,7 @@
 
 import { test, expect, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
-import { setupOverlayPage, waitForStoredSettings } from '../fixtures/test-utils';
+import { applySettings, setupOverlayPage, waitForStoredSettings } from '../fixtures/test-utils';
 
 const BUTTON_ID = 'yt-chat-overlay-settings-button';
 
@@ -91,6 +91,201 @@ test.describe('Settings UI Visual', () => {
     expect(box!.height).toBeGreaterThan(180);
   });
 
+  test('keeps frequent controls prominent and previews normalized fine-tuning values', async ({
+    page,
+  }) => {
+    await openSettingsModal(page);
+
+    const modal = page.locator('#yt-chat-overlay-settings-backdrop');
+    const details = modal.locator('.yt-chat-overlay-settings-disclosure');
+    await expect(details).toBeVisible();
+    await expect(details).not.toHaveAttribute('open', '');
+
+    for (const name of ['fontSize', 'speedPxPerSec', 'opacity']) {
+      await expect(modal.locator(`[name="${name}"]`).first()).toBeVisible();
+      await expect(modal.locator(`details [name="${name}"]`)).toHaveCount(0);
+    }
+
+    await details.locator('summary').click();
+    await expect(details).toHaveAttribute('open', '');
+    await modal.locator('input[name="safeTop"]').fill('20');
+    await modal.locator('input[name="safeBottom"]').fill('10');
+    await modal.locator('input[name="opacity"]').fill('65');
+
+    await modal.locator('#tab-colors').click();
+    const outlineEnabled = modal.locator('input[name="outline-enabled"]');
+    if (!(await outlineEnabled.isChecked())) await outlineEnabled.check();
+    await modal.locator('input[name="outline-widthPx"]').fill('3');
+    await modal.locator('input[name="outline-opacity"]').fill('60');
+    await modal.locator('#tab-comments').click();
+
+    const preview = modal.locator('.yt-chat-overlay-settings-font-preview');
+    const state = await preview.evaluate((element) => {
+      const stage = element.querySelector<HTMLElement>(
+        '.yt-chat-overlay-settings-font-preview-stage'
+      );
+      const text = element.querySelector<HTMLElement>(
+        '.yt-chat-overlay-settings-font-preview-text'
+      );
+      const top = element.querySelector<HTMLElement>('[data-preview-zone="top"]');
+      const bottom = element.querySelector<HTMLElement>('[data-preview-zone="bottom"]');
+      if (!stage || !text || !top || !bottom) throw new Error('Settings preview is incomplete');
+      const previewRect = element.getBoundingClientRect();
+      const stageRect = stage.getBoundingClientRect();
+      const stageHeight = stageRect.height;
+      return {
+        declaredStageHeight: stage.style.blockSize,
+        message: text.textContent,
+        metrics: element.querySelector('[data-preview-metrics]')?.textContent,
+        opacity: text.style.opacity,
+        parentHeight: previewRect.height,
+        previewOverflows: element.scrollHeight > element.clientHeight + 1,
+        stageHeight,
+        stageOverflows: stage.scrollHeight > stage.clientHeight + 1,
+        stroke: text.style.getPropertyValue('-webkit-text-stroke'),
+        textBottom: text.getBoundingClientRect().bottom,
+        textTop: text.getBoundingClientRect().top,
+        availableBottom: bottom.getBoundingClientRect().top,
+        availableTop: top.getBoundingClientRect().bottom,
+        topFraction: top.getBoundingClientRect().height / stageHeight,
+        bottomFraction: bottom.getBoundingClientRect().height / stageHeight,
+      };
+    });
+
+    expect(state.message?.trim()).toBeTruthy();
+    expect(state.metrics).toContain('65%');
+    expect(state.metrics).toContain('3px / 60%');
+    expect(state.opacity).toBe('0.65');
+    expect(state.stroke).toBe('2.55px rgba(0, 0, 0, 0.6)');
+    expect(state.previewOverflows, JSON.stringify(state)).toBe(false);
+    expect(state.stageOverflows, JSON.stringify(state)).toBe(false);
+    expect(state.stageHeight, JSON.stringify(state)).toBeCloseTo(
+      Number.parseFloat(state.declaredStageHeight),
+      0
+    );
+    expect(state.textTop).toBeGreaterThanOrEqual(state.availableTop - 1);
+    expect(state.textBottom).toBeLessThanOrEqual(state.availableBottom + 1);
+    expect(state.topFraction).toBeCloseTo(0.2, 2);
+    expect(state.bottomFraction).toBeCloseTo(0.1, 2);
+  });
+
+  test('keeps the Spanish preview fully readable at 320px with the maximum font size', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 320, height: 800 });
+    await setupSettingsPage(page);
+    await applySettings(page, {
+      language: 'es',
+      fontSize: 50,
+      opacity: 0.55,
+      safeTop: 0.25,
+      safeBottom: 0.5,
+    });
+    await page.locator(`#${BUTTON_ID}`).click({ force: true });
+    // The opening transform scales client rects, but not the declared block-size.
+    await page.locator('dialog.yt-chat-overlay-settings-modal').evaluate(async (element) => {
+      await Promise.allSettled(element.getAnimations().map((animation) => animation.finished));
+    });
+
+    const preview = page.locator('.yt-chat-overlay-settings-font-preview');
+    await expect
+      .poll(() =>
+        preview.evaluate((element) => {
+          const stage = element.querySelector<HTMLElement>(
+            '.yt-chat-overlay-settings-font-preview-stage'
+          );
+          if (!stage) throw new Error('Settings preview stage is missing');
+          const previewRect = element.getBoundingClientRect();
+          const stageRect = stage.getBoundingClientRect();
+          return {
+            declaredStageHeight: stage.style.blockSize,
+            parentHeight: previewRect.height,
+            previewOverflows: element.scrollHeight > element.clientHeight + 1,
+            stageHeight: stageRect.height,
+            stageOverflows: stage.scrollHeight > stage.clientHeight + 1,
+          };
+        })
+      )
+      .toMatchObject({ previewOverflows: false, stageOverflows: false });
+    const state = await preview.evaluate((element) => {
+      const stage = element.querySelector<HTMLElement>(
+        '.yt-chat-overlay-settings-font-preview-stage'
+      );
+      const text = element.querySelector<HTMLElement>(
+        '.yt-chat-overlay-settings-font-preview-text'
+      );
+      const top = element.querySelector<HTMLElement>('[data-preview-zone="top"]');
+      const bottom = element.querySelector<HTMLElement>('[data-preview-zone="bottom"]');
+      if (!stage || !text || !top || !bottom) throw new Error('Settings preview is incomplete');
+      const stageRect = stage.getBoundingClientRect();
+      const textRect = text.getBoundingClientRect();
+      const previewRect = element.getBoundingClientRect();
+      return {
+        bottomFraction: bottom.getBoundingClientRect().height / stageRect.height,
+        computedFontSize: getComputedStyle(text).fontSize,
+        declaredStageHeight: stage.style.blockSize,
+        message: text.textContent,
+        opacity: getComputedStyle(text).opacity,
+        overflowsHorizontally: text.scrollWidth > text.clientWidth + 1,
+        parentHeight: previewRect.height,
+        previewOverflows: element.scrollHeight > element.clientHeight + 1,
+        stageHeight: stageRect.height,
+        stageOverflows: stage.scrollHeight > stage.clientHeight + 1,
+        textBottom: textRect.bottom,
+        textTop: textRect.top,
+        availableBottom: bottom.getBoundingClientRect().top,
+        availableTop: top.getBoundingClientRect().bottom,
+        topFraction: top.getBoundingClientRect().height / stageRect.height,
+      };
+    });
+
+    expect(state.message).toBe('Mensaje de chat de ejemplo');
+    expect(state.computedFontSize).toBe('50px');
+    expect(state.opacity).toBe('0.55');
+    expect(state.overflowsHorizontally).toBe(false);
+    expect(state.previewOverflows, JSON.stringify(state)).toBe(false);
+    expect(state.stageOverflows, JSON.stringify(state)).toBe(false);
+    expect(state.stageHeight, JSON.stringify(state)).toBeCloseTo(
+      Number.parseFloat(state.declaredStageHeight),
+      0
+    );
+    expect(state.textTop).toBeGreaterThanOrEqual(state.availableTop - 1);
+    expect(state.textBottom).toBeLessThanOrEqual(state.availableBottom + 1);
+    expect(state.topFraction).toBeCloseTo(0.25, 2);
+    expect(state.bottomFraction).toBeCloseTo(0.5, 2);
+  });
+
+  test('separates translation capability status from editable preferences', async ({
+    page,
+  }) => {
+    await openSettingsModal(page);
+
+    const modal = page.locator('#yt-chat-overlay-settings-backdrop');
+    await modal.locator('#tab-translation').click();
+    const capability = modal.locator('.yt-chat-overlay-settings-capability');
+    await expect(capability).toHaveAttribute('role', 'note');
+    const supported = await capability.getAttribute('data-supported');
+    expect(supported).toMatch(/^(?:true|false)$/);
+    if (supported === 'true') {
+      await expect(capability).toContainText('availability will be checked');
+    } else {
+      await expect(capability).toContainText('preference is kept');
+    }
+    await expect(capability).not.toContainText(/ready/i);
+    await expect(modal.locator('input[name="translationEnabled"]')).toBeVisible();
+    await expect(modal.locator('select[name="translationSource"]')).toBeVisible();
+    await expect(modal.locator('select[name="translationTarget"]')).toBeVisible();
+    const service = modal.locator('select[name="translationService"]');
+    await expect(service.locator('option[value="off"]')).toHaveText('Off');
+    await service.selectOption('off');
+    await page.keyboard.press('Escape');
+    await waitForStoredSettings(page, { translationService: 'off' });
+
+    await page.locator(`#${BUTTON_ID}`).click({ force: true });
+    await modal.locator('#tab-translation').click();
+    await expect(service).toHaveValue('off');
+  });
+
   test('author background controls expose defaults and persist a selected color', async ({
     page,
   }) => {
@@ -149,7 +344,9 @@ test.describe('Settings UI Visual', () => {
       buffer: Buffer.from(JSON.stringify({ fontSize: 44, opacity: 0.6 })),
     });
 
-    const toast = page.locator('#yt-chat-overlay-settings-backdrop [role="status"]');
+    const toast = page.locator(
+      '#yt-chat-overlay-settings-backdrop .yt-chat-overlay-settings-toast[role="status"]'
+    );
     await expect(toast).toContainText(/Settings imported successfully/i);
 
     const settings = await page.evaluate(() => {

@@ -23,6 +23,9 @@ export const JA: Record<string, string> = {
   Cards: 'カード',
   'appearance.outline': 'テキスト縁取り',
   'danmaku.safeZone': '安全領域',
+  'danmaku.fineTuning': '詳細調整',
+  'danmaku.preview': 'コメントのプレビュー',
+  'danmaku.previewMessage': 'サンプルチャットメッセージ',
   'advanced.messageRate': 'メッセージ頻度',
   'advanced.depthLayers': '深度レイヤー',
   Font: 'フォント',
@@ -34,6 +37,10 @@ export const JA: Record<string, string> = {
   'appearance.authors': '投稿者の色と表示',
   Interface: 'インターフェース',
   'translation.chat': 'チャット翻訳',
+  'translation.capabilityDetected':
+    'このブラウザでは組み込み Translator API を利用できます。言語ペアとモデルの利用可否は、翻訳開始時に確認されます。',
+  'translation.capabilityUnavailable':
+    'このブラウザでは組み込み Translator API を利用できません。設定は保持されますが、ここでは翻訳は無効のままです。',
   'translation.serviceDesc': 'メッセージ処理用の翻訳バックエンドサービス',
 
   // ── Field labels ──
@@ -119,6 +126,7 @@ export const JA: Record<string, string> = {
   'translation.languageAuto': '自動 (ブラウザ)',
   'translation.sourceAuto': '自動検出',
   'translation.serviceAuto': '自動 (Chrome内蔵)',
+  'translation.serviceOff': 'オフ',
   'translation.displayModeDual': '二重表示 (原文 + 翻訳)',
   'translation.displayModeReplace': '翻訳のみ表示',
 

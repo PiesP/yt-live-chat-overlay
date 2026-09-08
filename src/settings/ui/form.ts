@@ -3,6 +3,8 @@
 
 import type { OverlaySettings } from '@app-types';
 import { t } from '@i18n/index';
+import { computeOutlineColor } from '@renderer/color-utils';
+import { OUTLINE_STROKE_SCALE } from '@renderer/constants';
 import type {
   OutlineSettingKey,
   RootNumericSettingKey,
@@ -22,6 +24,7 @@ import {
 import { parseSettingsControlName } from '@settings/ui/control-codec';
 import type {
   AuthorGridField,
+  DisclosureDef,
   FieldDef,
   FontChipsField,
   FontPreviewField,
@@ -388,6 +391,8 @@ function patchOutline(partial: Record<string, unknown>, patch: Record<string, un
 export class SettingsUiForm {
   private modal: HTMLDialogElement | null = null;
   private isUpdating = false;
+  private previewResizeObserver: ResizeObserver | null = null;
+  private previewLayoutFrame: number | null = null;
 
   // Track event listeners added to the modal so they can be removed before
   // re-adding on language change (which calls rebuildModalContent → setModal).
@@ -402,17 +407,89 @@ export class SettingsUiForm {
     // Remove old listeners before re-binding (handles language change re-attach).
     for (const fn of this._modalCleanupFns) fn();
     this._modalCleanupFns = [];
+    this.clearSettingsPreviewLayout();
 
     this.modal = modal;
     if (modal) {
       this.bindNumberInputKeys(modal);
       this.bindAriaInvalidSync(modal);
+      this.bindSettingsPreviewLayout(modal);
     }
     log.debug('Modal set', { attached: modal !== null });
   }
 
   destroy(): void {
-    this.modal = null;
+    this.setModal(null);
+  }
+
+  private bindSettingsPreviewLayout(modal: HTMLElement): void {
+    if (typeof ResizeObserver === 'function') {
+      const stage = modal.querySelector<HTMLElement>(
+        '.yt-chat-overlay-settings-font-preview-stage'
+      );
+      const text = modal.querySelector<HTMLElement>('.yt-chat-overlay-settings-font-preview-text');
+      if (stage && text) {
+        this.previewResizeObserver = new ResizeObserver(() => {
+          this.scheduleSettingsPreviewLayout();
+        });
+        this.previewResizeObserver.observe(stage);
+        this.previewResizeObserver.observe(text);
+      }
+    }
+    this.scheduleSettingsPreviewLayout();
+  }
+
+  private clearSettingsPreviewLayout(): void {
+    this.previewResizeObserver?.disconnect();
+    this.previewResizeObserver = null;
+    if (this.previewLayoutFrame !== null && typeof cancelAnimationFrame === 'function') {
+      cancelAnimationFrame(this.previewLayoutFrame);
+    }
+    this.previewLayoutFrame = null;
+  }
+
+  private scheduleSettingsPreviewLayout(): void {
+    if (this.previewLayoutFrame !== null) return;
+    if (typeof requestAnimationFrame !== 'function') {
+      this.updateSettingsPreviewLayout();
+      return;
+    }
+    this.previewLayoutFrame = requestAnimationFrame(() => {
+      this.previewLayoutFrame = null;
+      this.updateSettingsPreviewLayout();
+    });
+  }
+
+  private updateSettingsPreviewLayout(): void {
+    if (!this.modal) return;
+    const stage = this.modal.querySelector<HTMLElement>(
+      '.yt-chat-overlay-settings-font-preview-stage'
+    );
+    const text = this.modal.querySelector<HTMLElement>(
+      '.yt-chat-overlay-settings-font-preview-text'
+    );
+    if (!stage || !text || stage.getBoundingClientRect().width <= 0) return;
+
+    const availableFraction = Number(stage.dataset.previewAvailableFraction);
+    const minimumHeight = Number.parseFloat(getComputedStyle(stage).minBlockSize);
+    const textHeight = Math.max(text.scrollHeight, text.getBoundingClientRect().height);
+    if (
+      !Number.isFinite(availableFraction) ||
+      availableFraction <= 0 ||
+      !Number.isFinite(minimumHeight) ||
+      minimumHeight <= 0 ||
+      !Number.isFinite(textHeight) ||
+      textHeight <= 0
+    ) {
+      return;
+    }
+
+    // The middle grid row is exactly availableFraction of the stage. One extra
+    // pixel absorbs fractional track rounding without changing the shown value.
+    const requiredHeight = Math.max(minimumHeight, Math.ceil((textHeight + 1) / availableFraction));
+    const currentHeight = Number.parseFloat(stage.style.blockSize);
+    if (Number.isFinite(currentHeight) && Math.abs(currentHeight - requiredHeight) < 0.5) return;
+    stage.style.blockSize = `${requiredHeight}px`;
   }
 
   /**
@@ -517,6 +594,7 @@ export class SettingsUiForm {
     if (!this.onPreview) return;
     const handler = (): void => {
       if (this.isUpdating) return;
+      this.populateSettingsPreview(this.collectSettings());
       this.onPreview?.();
     };
     const inputs = element.querySelectorAll<HTMLElement>('input, select');
@@ -528,49 +606,12 @@ export class SettingsUiForm {
       }
     }
 
-    // Font-specific handlers: update font preview box on font-related changes
-    const fontPreviewEl = element.querySelector<HTMLElement>(
-      '.yt-chat-overlay-settings-font-preview-text'
-    );
-    if (fontPreviewEl) {
-      // Listen for fontSize number input changes
-      const fontSizeInput = element.querySelector<HTMLInputElement>('input[name="fontSize"]');
-      if (fontSizeInput) {
-        fontSizeInput.addEventListener('input', () => {
-          fontPreviewEl.style.fontSize = `${fontSizeInput.value}px`;
-        });
-      }
-
-      // Listen for weight toggle changes
-      const weightToggle = element.querySelector<HTMLElement>(
-        '.yt-chat-overlay-settings-weight-toggle'
-      );
-      if (weightToggle) {
-        weightToggle.addEventListener('change', () => {
-          const activeBtn = weightToggle.querySelector<HTMLButtonElement>(
-            '.yt-chat-overlay-settings-weight-toggle-btn.active'
-          );
-          if (activeBtn?.dataset.value) {
-            fontPreviewEl.style.fontWeight = activeBtn.dataset.value === 'bold' ? '700' : '400';
-          }
-        });
-      }
-
-      // Listen for font chips changes
-      const chipsWrapper = element.querySelector<HTMLElement>(
-        '.yt-chat-overlay-settings-font-chips-wrapper'
-      );
-      if (chipsWrapper) {
-        chipsWrapper.addEventListener('change', () => {
-          const hiddenInput = chipsWrapper.querySelector<HTMLInputElement>(
-            '.yt-chat-overlay-settings-font-value'
-          );
-          if (hiddenInput?.value) {
-            fontPreviewEl.style.fontFamily = hiddenInput.value;
-          }
-        });
-      }
-    }
+    element
+      .querySelector<HTMLElement>('.yt-chat-overlay-settings-weight-toggle')
+      ?.addEventListener('change', handler);
+    element
+      .querySelector<HTMLElement>('.yt-chat-overlay-settings-font-chips-wrapper')
+      ?.addEventListener('change', handler);
   }
 
   // ── Modal content factory ──────────────────────────────────────────────
@@ -591,22 +632,33 @@ export class SettingsUiForm {
     pane.setAttribute('aria-labelledby', `tab-${def.id}`);
     if (def.id !== 'comments') pane.hidden = true;
 
-    // Translation tab: show unsupported message when browser lacks Translator API.
-    if (def.id === 'translation' && !TranslationService.isSupported()) {
-      const msg = domDiv('yt-chat-overlay-settings-unsupported');
+    // Capability detection does not prove that a selected language pair or its
+    // model is ready. Keep preferences editable and state only what is known.
+    if (def.id === 'translation') {
+      const supported = TranslationService.isSupported();
+      const msg = domDiv('yt-chat-overlay-settings-capability');
+      msg.dataset.supported = String(supported);
+      msg.setAttribute('role', 'note');
       msg.textContent = t(
-        'Translation requires a browser with built-in AI. Use Chrome 138+ or Edge 143+ Canary.'
+        supported ? 'translation.capabilityDetected' : 'translation.capabilityUnavailable'
       );
       pane.appendChild(msg);
-      return pane;
     }
 
-    for (const section of def.sections) {
+    this.appendSections(pane, def.sections);
+    for (const disclosure of def.disclosures ?? []) {
+      pane.appendChild(this.buildDisclosure(disclosure));
+    }
+    return pane;
+  }
+
+  private appendSections(container: HTMLElement, sections: PaneDef['sections']): void {
+    for (const section of sections) {
       const authorGridField = section.fields.find(
         (f): f is AuthorGridField => f.type === 'author-grid'
       );
       if (authorGridField) {
-        pane.appendChild(this.buildAuthorGrid());
+        container.appendChild(this.buildAuthorGrid());
         continue;
       }
       if (section.fields.length === 0) continue;
@@ -616,16 +668,27 @@ export class SettingsUiForm {
         for (const field of section.fields) {
           secEl.appendChild(this.buildField(field));
         }
-        pane.appendChild(secEl);
+        container.appendChild(secEl);
       } else {
         for (const field of section.fields) {
           const el = this.buildField(field);
           if (field.type === 'enabled') el.classList.add('yt-chat-overlay-settings-enabled');
-          pane.appendChild(el);
+          container.appendChild(el);
         }
       }
     }
-    return pane;
+  }
+
+  private buildDisclosure(def: DisclosureDef): HTMLDetailsElement {
+    const details = document.createElement('details');
+    details.className = 'yt-chat-overlay-settings-disclosure';
+    const summary = document.createElement('summary');
+    summary.textContent = t(def.label);
+    details.appendChild(summary);
+    const content = domDiv('yt-chat-overlay-settings-disclosure-content');
+    this.appendSections(content, def.sections);
+    details.appendChild(content);
+    return details;
   }
 
   private buildField(def: FieldDef): HTMLElement {
@@ -777,10 +840,23 @@ export class SettingsUiForm {
 
   private buildFontPreview(_def: FontPreviewField): HTMLDivElement {
     const container = domDiv('yt-chat-overlay-settings-font-preview');
+    container.setAttribute('role', 'group');
+    container.setAttribute('aria-label', t('danmaku.preview'));
+    const stage = domDiv('yt-chat-overlay-settings-font-preview-stage');
+    const topZone = domDiv('yt-chat-overlay-settings-font-preview-zone');
+    topZone.dataset.previewZone = 'top';
+    topZone.setAttribute('aria-hidden', 'true');
+    const bottomZone = domDiv('yt-chat-overlay-settings-font-preview-zone');
+    bottomZone.dataset.previewZone = 'bottom';
+    bottomZone.setAttribute('aria-hidden', 'true');
     const previewText = document.createElement('span');
     previewText.className = 'yt-chat-overlay-settings-font-preview-text';
-    previewText.textContent = 'The quick brown fox jumped over the lazy dog. 안녕하세요 こんにちは';
-    container.appendChild(previewText);
+    previewText.textContent = t('danmaku.previewMessage');
+    const metrics = document.createElement('span');
+    metrics.className = 'yt-chat-overlay-settings-font-preview-metrics';
+    metrics.dataset.previewMetrics = '';
+    stage.append(topZone, bottomZone, previewText);
+    container.append(stage, metrics);
     return container;
   }
 
@@ -1131,7 +1207,7 @@ export class SettingsUiForm {
     }
 
     this.syncMinTextLengthState();
-    this.populateFontPreview(settings);
+    this.populateSettingsPreview(settings);
     this.populateWeightToggle(settings);
     this.populateFontChips(settings);
     this.isUpdating = false;
@@ -1147,15 +1223,54 @@ export class SettingsUiForm {
     slider.setAttribute('aria-valuenow', slider.value);
   }
 
-  private populateFontPreview(settings: Readonly<OverlaySettings>): void {
+  private populateSettingsPreview(settings: Readonly<OverlaySettings>): void {
     if (!this.modal) return;
+    const preview = this.modal.querySelector<HTMLElement>('.yt-chat-overlay-settings-font-preview');
     const previewEl = this.modal.querySelector<HTMLElement>(
       '.yt-chat-overlay-settings-font-preview-text'
     );
-    if (!previewEl) return;
+    if (!preview || !previewEl) return;
     previewEl.style.fontSize = `${settings.fontSize}px`;
     previewEl.style.fontWeight = settings.fontWeight === 'bold' ? '700' : '400';
     previewEl.style.fontFamily = settings.fontFamily;
+    previewEl.style.color = settings.colors.normal;
+    previewEl.style.opacity = String(settings.opacity);
+    const outlineWidth = settings.outline.enabled ? settings.outline.widthPx : 0;
+    const outlineOpacity = settings.outline.enabled ? settings.outline.opacity : 0;
+    const strokeWidth = Math.max(0, outlineWidth * OUTLINE_STROKE_SCALE);
+    const strokeColor = computeOutlineColor(settings.colors.normal, outlineOpacity);
+    previewEl.style.setProperty('-webkit-text-stroke', `${strokeWidth}px ${strokeColor}`);
+
+    const topZone = preview.querySelector<HTMLElement>('[data-preview-zone="top"]');
+    const bottomZone = preview.querySelector<HTMLElement>('[data-preview-zone="bottom"]');
+    const stage = preview.querySelector<HTMLElement>(
+      '.yt-chat-overlay-settings-font-preview-stage'
+    );
+    if (topZone) {
+      topZone.toggleAttribute('hidden', settings.safeTop === 0);
+    }
+    if (bottomZone) {
+      bottomZone.toggleAttribute('hidden', settings.safeBottom === 0);
+    }
+    const availableFraction = scaleUiValue(
+      Math.max(0, 1 - settings.safeTop - settings.safeBottom),
+      1
+    );
+    if (stage) {
+      stage.dataset.previewAvailableFraction = String(availableFraction);
+      stage.style.gridTemplateRows = `minmax(0, ${settings.safeTop}fr) minmax(0, ${availableFraction}fr) minmax(0, ${settings.safeBottom}fr)`;
+      this.scheduleSettingsPreviewLayout();
+    }
+
+    const metrics = preview.querySelector<HTMLElement>('[data-preview-metrics]');
+    if (metrics) {
+      metrics.textContent = [
+        `${t('danmaku.textOpacity')}: ${Math.round(settings.opacity * 100)}%`,
+        `${t('appearance.outline')}: ${outlineWidth}px / ${Math.round(outlineOpacity * 100)}%`,
+        `${t('danmaku.topClearZone')}: ${Math.round(settings.safeTop * 100)}%`,
+        `${t('danmaku.bottomClearZone')}: ${Math.round(settings.safeBottom * 100)}%`,
+      ].join(' · ');
+    }
   }
 
   private populateWeightToggle(settings: Readonly<OverlaySettings>): void {

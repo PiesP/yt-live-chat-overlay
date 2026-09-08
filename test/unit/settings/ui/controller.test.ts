@@ -110,6 +110,39 @@ describe('SettingsUi', () => {
     expect(() => c.destroy()).not.toThrow();
   });
 
+  it('destroy disconnects the mounted preview observer and cancels its pending frame', async () => {
+    const observed: Element[] = [];
+    const disconnect = vi.fn();
+    vi.stubGlobal('ResizeObserver', class {
+      observe(target: Element): void { observed.push(target); }
+      unobserve(): void {}
+      disconnect = disconnect;
+    });
+    vi.spyOn(window, 'requestAnimationFrame').mockReturnValue(73);
+    const cancelFrame = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => {});
+    const player = document.createElement('div');
+    player.id = 'movie_player';
+    document.body.appendChild(player);
+    vi.mocked(mockFinder).mockResolvedValue(player);
+    const controller = makeController();
+
+    try {
+      await controller.attach();
+      const preview = document.querySelector('.yt-chat-overlay-settings-font-preview-stage');
+      expect(preview).not.toBeNull();
+      expect(observed).toContain(preview);
+      controller.destroy();
+      expect(disconnect).toHaveBeenCalledTimes(1);
+      expect(cancelFrame).toHaveBeenCalledWith(73);
+      expect(preview?.isConnected).toBe(false);
+      controller.destroy();
+      expect(disconnect).toHaveBeenCalledTimes(1);
+    } finally {
+      controller.destroy();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('syncForm does not throw when dialog is not open', () => {
     const c = makeController();
     expect(() => c.syncForm()).not.toThrow();

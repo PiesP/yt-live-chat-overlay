@@ -19,14 +19,19 @@ The bundle producer must include every path listed in `profile.json`. The common
 portable Windows Node, `playwright-core`, a launched headed stable browser, and the extracted
 bundle and artifact output paths to `run({ browser, root, output })`.
 
-The profile returns JSON checks and observations and writes `yt-visual-canvas.png` and
-`yt-visual-page.png`. A missing artifact, failed readiness assertion, page error, console error,
-or incomplete render rejects the run.
+The profile returns JSON checks and observations and captures the basic settings, adjusted
+preview, Canvas, and page. The injected userscript fixture selects the main-thread fallback
+and additionally captures `yt-paid-card-ink.png`: an isolated outlined Super Chat body must
+use cached bitmap rendering without ink beyond its right card boundary. Author and amount
+labels are hidden for that check so they cannot satisfy the cached-body assertion.
+A missing artifact, failed readiness assertion, page error, console error, or incomplete
+render rejects the run.
 
 ## Scope
 
 This profile verifies production userscript injection, stable-browser Canvas/font rendering,
-one settings interaction, and deterministic paid and multilingual chat rendering. It does not
+keyboard disclosure interaction, the opacity/outline/safe-zone preview, translation capability
+separate from preference, and deterministic paid and multilingual chat rendering. It does not
 install a userscript manager, install an extension, access live or authenticated YouTube, capture
 native Windows desktop chrome, validate OS DPI/theme matrices, or measure GPU performance. Those
 remain separate acceptance profiles or host-level observations.
@@ -89,7 +94,8 @@ Screenshots and
 logs remain external and source-bound. Fixture persistence assertions reload the
 page through the actual installation rather than injecting saved settings.
 
-Installed-extension fixtures require a running Worker. Public-page observations
+Installed-extension fixtures require a running Worker. Their Canvas screenshots cover the
+shared renderer visually; the main-thread-only pixel probe is not run in the Worker fixture. Public-page observations
 also accept the application's main-thread fallback when the page reports a
 Trusted Types restriction; the result records `workerPolicyFallback` explicitly.
 Both paths must render real chat into the attached Canvas overlay.

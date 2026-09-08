@@ -9,6 +9,7 @@
  */
 
 import { afterEach, describe, it, expect, vi } from 'vitest';
+import { Canvas, createCanvas } from 'canvas';
 import {
   buildWrappedLines,
   clipTextToWidth,
@@ -148,6 +149,30 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+function findCanvasInkBounds(canvas: Canvas): {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+} {
+  const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+  let minX = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  for (let index = 3; index < pixels.length; index += 4) {
+    if (pixels[index]! === 0) continue;
+    const pixelIndex = Math.floor((index - 3) / 4);
+    const x = pixelIndex % canvas.width;
+    const y = Math.floor(pixelIndex / canvas.width);
+    minX = Math.min(minX, x);
+    maxX = Math.max(maxX, x);
+    minY = Math.min(minY, y);
+    maxY = Math.max(maxY, y);
+  }
+  return { minX, maxX, minY, maxY };
+}
+
 describe('renderSegment bidirectional text', () => {
   it.each([
     ['مرحبا بكم — RTL + English 123', 'rtl'],
@@ -186,6 +211,61 @@ describe('renderSegment bidirectional text', () => {
 // ═══════════════════════════════════════════════════════════════════
 
 describe('renderSegment bitmap cache', () => {
+  it('keeps the cached bitmap ink aligned with the requested text origin', () => {
+    class NodeOffscreenCanvas {
+      static [Symbol.hasInstance](value: unknown): boolean {
+        return value instanceof Canvas;
+      }
+
+      constructor(width: number, height: number) {
+        return createCanvas(width, height) as unknown as NodeOffscreenCanvas;
+      }
+    }
+
+    vi.stubGlobal('OffscreenCanvas', NodeOffscreenCanvas);
+    const font = 'bold 32px sans-serif';
+    const text = '한글 경계';
+    const originX = 80;
+    const originY = 20;
+    const cachedCanvas = createCanvas(320, 100);
+    const cachedContext = cachedCanvas.getContext('2d');
+    const bitmaps = new Map<string, CanvasImageSource>();
+
+    renderSegment(
+      cachedContext as unknown as AnyCanvasContext,
+      text,
+      originX,
+      originY,
+      '#ffffff',
+      32,
+      2,
+      0.7,
+      {
+        get: (key) => bitmaps.get(key),
+        set: (key, value) => {
+          bitmaps.set(key, value);
+        },
+      },
+      () => font
+    );
+
+    const directCanvas = createCanvas(320, 100);
+    const directContext = directCanvas.getContext('2d');
+    directContext.font = font;
+    directContext.textBaseline = 'top';
+    directContext.textAlign = 'left';
+    directContext.lineWidth = 1.7;
+    directContext.lineJoin = 'round';
+    directContext.lineCap = 'round';
+    directContext.strokeStyle = 'rgba(0, 0, 0, 0.7)';
+    directContext.fillStyle = '#ffffff';
+    directContext.strokeText(text, originX, originY);
+    directContext.fillText(text, originX, originY);
+
+    expect(bitmaps.size).toBe(1);
+    expect(findCanvasInkBounds(cachedCanvas)).toEqual(findCanvasInkBounds(directCanvas));
+  });
+
   it('caches logical RTL text with direction-scoped native Canvas state', () => {
     const { ctx } = createMockContext();
     const instances: MockOffscreenCanvas[] = [];
@@ -231,8 +311,8 @@ describe('renderSegment bitmap cache', () => {
     expect(instances).toHaveLength(1);
     expect(instances[0]?.context.direction).toBe('rtl');
     expect(instances[0]?.context.textAlign).toBe('left');
-    expect(instances[0]?.context.strokeText).toHaveBeenCalledWith(logicalText, 1.85, 1.85);
-    expect(instances[0]?.context.fillText).toHaveBeenCalledWith(logicalText, 1.85, 1.85);
+    expect(instances[0]?.context.strokeText).toHaveBeenCalledWith(logicalText, 2, 2);
+    expect(instances[0]?.context.fillText).toHaveBeenCalledWith(logicalText, 2, 2);
     expect([...bitmaps.keys()]).toEqual([
       expect.stringContaining(`|rtl|${logicalText}|`),
     ]);
@@ -389,6 +469,133 @@ describe('renderSegment bitmap cache', () => {
       expect.stringContaining('|rtl|مرحبا |'),
     ]);
     expect(warmedKeys.every((key) => !key.includes('ابحرم'))).toBe(true);
+  });
+
+  it('reuses DPR-specific bitmaps when the shared cache moves from 1x to 2x and back', () => {
+    const createdBitmaps: Canvas[] = [];
+    class NodeOffscreenCanvas {
+      static [Symbol.hasInstance](value: unknown): boolean {
+        return value instanceof Canvas;
+      }
+
+      constructor(width: number, height: number) {
+        const canvas = createCanvas(width, height);
+        createdBitmaps.push(canvas);
+        return canvas as unknown as NodeOffscreenCanvas;
+      }
+    }
+
+    vi.stubGlobal('OffscreenCanvas', NodeOffscreenCanvas);
+    const bitmaps = new Map<string, CanvasImageSource>();
+    const cache: TextBitmapCache = {
+      get: (key) => bitmaps.get(key),
+      set: (key, value) => {
+        bitmaps.set(key, value);
+      },
+    };
+    const font = 'bold 32px sans-serif';
+    const text = 'HELLO';
+    const cacheSizes: number[] = [];
+
+    for (const [index, dpr] of [1, 2, 1].entries()) {
+      const cachedCanvas = createCanvas(320 * dpr, 120 * dpr);
+      const cachedContext = cachedCanvas.getContext('2d');
+      cachedContext.setTransform(dpr, 0, 0, dpr, 0, 0);
+      if (index === 0) {
+        warmTextBitmapCache(
+          text,
+          32,
+          'bold',
+          'sans-serif',
+          '#ffffff',
+          2,
+          0.7,
+          cache,
+          cachedContext as unknown as AnyCanvasContext
+        );
+      }
+      renderSegment(
+        cachedContext as unknown as AnyCanvasContext,
+        text,
+        80,
+        20,
+        '#ffffff',
+        32,
+        2,
+        0.7,
+        cache,
+        () => font
+      );
+      cacheSizes.push(bitmaps.size);
+
+      const directCanvas = createCanvas(320 * dpr, 120 * dpr);
+      const directContext = directCanvas.getContext('2d');
+      directContext.setTransform(dpr, 0, 0, dpr, 0, 0);
+      directContext.font = font;
+      directContext.textBaseline = 'top';
+      directContext.textAlign = 'left';
+      directContext.lineWidth = 1.7;
+      directContext.lineJoin = 'round';
+      directContext.lineCap = 'round';
+      directContext.strokeStyle = 'rgba(0, 0, 0, 0.7)';
+      directContext.fillStyle = '#ffffff';
+      directContext.strokeText(text, 80, 20);
+      directContext.fillText(text, 80, 20);
+
+      expect(findCanvasInkBounds(cachedCanvas)).toEqual(findCanvasInkBounds(directCanvas));
+    }
+
+    expect(cacheSizes).toEqual([1, 2, 2]);
+    expect(createdBitmaps).toHaveLength(2);
+    expect(createdBitmaps[1]?.width).toBe((createdBitmaps[0]?.width ?? 0) * 2);
+    expect(createdBitmaps[1]?.height).toBeGreaterThan(createdBitmaps[0]?.height ?? 0);
+  });
+
+  it('normalizes non-finite and non-positive Canvas scale values to 1x', () => {
+    const { ctx } = createMockContext();
+    let rawDpr = Number.NaN;
+    (ctx.getTransform as ReturnType<typeof vi.fn>).mockImplementation(() => ({ a: rawDpr }));
+    const instances: MockOffscreenCanvas[] = [];
+
+    class MockOffscreenCanvas {
+      readonly context = {
+        scale: vi.fn(),
+        strokeText: vi.fn(),
+        fillText: vi.fn(),
+      };
+
+      constructor(
+        readonly width: number,
+        readonly height: number
+      ) {
+        instances.push(this);
+      }
+
+      getContext(): OffscreenCanvasRenderingContext2D {
+        return this.context as unknown as OffscreenCanvasRenderingContext2D;
+      }
+    }
+
+    vi.stubGlobal('OffscreenCanvas', MockOffscreenCanvas);
+    const bitmaps = new Map<string, CanvasImageSource>();
+    const cache: TextBitmapCache = {
+      get: (key) => bitmaps.get(key),
+      set: (key, value) => {
+        bitmaps.set(key, value);
+      },
+    };
+    const render = (): void =>
+      renderSegment(ctx, 'HELLO', 10, 20, '#ffffff', 32, 2, 0.7, cache, () =>
+        'bold 32px sans-serif'
+      );
+
+    for (rawDpr of [Number.NaN, 0, -2, 1]) render();
+
+    expect(instances).toHaveLength(1);
+    expect(bitmaps.size).toBe(1);
+    expect([...bitmaps.keys()][0]).toContain('|dpr:1|');
+    expect(instances[0]?.context.scale).toHaveBeenCalledWith(1, 1);
+    expect(ctx.drawImage).toHaveBeenCalledTimes(4);
   });
 });
 

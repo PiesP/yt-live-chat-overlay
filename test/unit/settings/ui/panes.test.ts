@@ -6,6 +6,13 @@ import type { PaneDef, FieldDef } from '@settings/ui/panes';
 import { ROOT_SETTING_META } from '@settings/meta';
 import { DEFAULT_SETTINGS } from '@settings/schema';
 
+function allSections(pane: PaneDef): PaneDef['sections'] {
+  return [
+    ...pane.sections,
+    ...(pane.disclosures ?? []).flatMap((disclosure) => disclosure.sections),
+  ];
+}
+
 describe('SettingsPanes', () => {
   it('PANES is a non-empty array', () => {
     expect(Array.isArray(PANES)).toBe(true);
@@ -27,7 +34,7 @@ describe('SettingsPanes', () => {
 
   it('each section has a title and fields array', () => {
     for (const pane of PANES) {
-      for (const section of pane.sections) {
+      for (const section of allSections(pane)) {
         expect(typeof section.title).toBe('string');
         expect(Array.isArray(section.fields)).toBe(true);
       }
@@ -41,7 +48,7 @@ describe('SettingsPanes', () => {
     ]);
 
     for (const pane of PANES) {
-      for (const section of pane.sections) {
+      for (const section of allSections(pane)) {
         for (const field of section.fields) {
           expect(validTypes.has(field.type)).toBe(true);
         }
@@ -77,6 +84,41 @@ describe('SettingsPanes', () => {
     expect(hasModeSelect).toBe(true);
   });
 
+  it('keeps frequent comment controls prominent and moves every fine control into one disclosure', () => {
+    const commentsPane = PANES.find((pane) => pane.id === 'comments');
+    expect(commentsPane).toBeDefined();
+
+    const primaryKeys = commentsPane!.sections.flatMap((section) =>
+      section.fields.flatMap((field) => ('key' in field ? [field.key] : [field.type]))
+    );
+    expect(primaryKeys).toEqual([
+      'enabled',
+      'danmakuMode',
+      'fontSize',
+      'speedPxPerSec',
+      'opacity',
+      'font-preview',
+    ]);
+
+    expect(commentsPane!.disclosures).toHaveLength(1);
+    expect(commentsPane!.disclosures?.[0]?.label).toBe('danmaku.fineTuning');
+    const fineKeys = commentsPane!.disclosures?.[0]?.sections.flatMap((section) =>
+      section.fields.flatMap((field) => ('key' in field ? [field.key] : []))
+    );
+    expect(fineKeys).toEqual([
+      'laneSpacing',
+      'exitPaddingPx',
+      'modOwnerDurationMultiplier',
+      'scrollDurationMinMs',
+      'scrollDurationMaxMs',
+      'topBottomDurationMs',
+      'safeTop',
+      'safeBottom',
+      'fontWeight',
+      'fontFamily',
+    ]);
+  });
+
   it('colors pane has author-grid field', () => {
     const colorsPane = PANES.find((p: PaneDef) => p.id === 'colors');
     expect(colorsPane).toBeDefined();
@@ -88,7 +130,7 @@ describe('SettingsPanes', () => {
 
   it('select fields have options array', () => {
     for (const pane of PANES) {
-      for (const section of pane.sections) {
+      for (const section of allSections(pane)) {
         for (const field of section.fields) {
           if (field.type === 'select') {
             const f = field as { type: 'select'; options: ReadonlyArray<[string, string]> };
@@ -100,9 +142,24 @@ describe('SettingsPanes', () => {
     }
   });
 
+  it('offers every schema-valid translation service value', () => {
+    const translationPane = PANES.find((pane) => pane.id === 'translation');
+    const service = translationPane?.sections
+      .flatMap((section) => section.fields)
+      .find(
+        (field): field is Extract<FieldDef, { type: 'select' }> =>
+          field.type === 'select' && field.key === 'translationService'
+      );
+
+    expect(service?.options).toEqual([
+      ['auto', 'translation.serviceAuto'],
+      ['off', 'translation.serviceOff'],
+    ]);
+  });
+
   it('every keyed pane field exists in the settings metadata schema', () => {
     for (const pane of PANES) {
-      for (const section of pane.sections) {
+      for (const section of allSections(pane)) {
         for (const field of section.fields) {
           if (!('key' in field)) continue;
 

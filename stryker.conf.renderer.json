@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/stryker-mutator/stryker/master/packages/core/schema/stryker-schema.json",
   "mutate": [
-    "src/renderer/canvas/shared.ts:507-588",
+    "src/renderer/canvas/shared.ts:512-593",
     "src/renderer/canvas/pipeline-utils.ts",
     "src/renderer/color-utils.ts",
     "src/renderer/worker/protocol-guards.ts"

@@ -29,6 +29,51 @@ function createContext(): CanvasRenderingContext2D {
 }
 
 describe('renderWrappedContentSegments', () => {
+  it('keeps separately measured CJK word gaps inside the wrapped line width', () => {
+    const ctx = createContext();
+    const measureText = (text: string): number => {
+      const widths: Readonly<Record<string, number>> = {
+        ' ': 4,
+        '…': 10,
+        '후원': 20,
+        '카드의': 30,
+        ' 카드의': 42,
+        '긴': 10,
+        ' 긴': 18,
+      };
+      return widths[text] ?? text.length * 10;
+    };
+    const startX = 10;
+    const maxWidth = 54;
+
+    renderWrappedContentSegments(
+      ctx as AnyCanvasContext,
+      [{ type: 'text', content: '후원 카드의 긴' }],
+      startX,
+      20,
+      maxWidth,
+      2,
+      '#ffffff',
+      20,
+      0,
+      0,
+      { get: () => undefined, set: vi.fn() },
+      { get: () => undefined } as never,
+      () => 'bold 20px sans-serif',
+      measureText
+    );
+
+    const firstLineCalls = (ctx.fillText as ReturnType<typeof vi.fn>).mock.calls.filter(
+      ([, , y]) => y === 20
+    );
+    const rightmostInk = Math.max(
+      ...firstLineCalls.map(([text, x]) => Number(x) + measureText(String(text)))
+    );
+
+    expect(firstLineCalls.map(([text]) => text)).toEqual(['후원', ' ', '카드의']);
+    expect(rightmostInk).toBeLessThanOrEqual(startX + maxWidth);
+  });
+
   it('keeps the truncation ellipsis inside the final visible line width', () => {
     const ctx = createContext();
     const textBitmapCache: TextBitmapCache = {
@@ -151,13 +196,14 @@ describe('renderWrappedContentSegments', () => {
     const fillText = ctx.fillText as ReturnType<typeof vi.fn>;
     const drawImage = ctx.drawImage as ReturnType<typeof vi.fn>;
     expect(fillText.mock.calls.map(([text]) => text)).toEqual([
-      'Hello ',
+      'Hello',
+      ' ',
       'World',
       ' ',
       'مرحبا',
     ]);
-    expect(fillText.mock.invocationCallOrder[0]).toBeLessThan(drawImage.mock.invocationCallOrder[0]!);
-    expect(drawImage.mock.invocationCallOrder[0]).toBeLessThan(fillText.mock.invocationCallOrder[1]!);
+    expect(fillText.mock.invocationCallOrder[1]).toBeLessThan(drawImage.mock.invocationCallOrder[0]!);
+    expect(drawImage.mock.invocationCallOrder[0]).toBeLessThan(fillText.mock.invocationCallOrder[2]!);
   });
 
   it('places a wrapped inline emoji between two Arabic runs in visual order', () => {
@@ -186,7 +232,7 @@ describe('renderWrappedContentSegments', () => {
 
     const fillText = ctx.fillText as ReturnType<typeof vi.fn>;
     const drawImage = ctx.drawImage as ReturnType<typeof vi.fn>;
-    expect(fillText.mock.calls.map(([text]) => text)).toEqual(['بكم', 'مرحبا ']);
+    expect(fillText.mock.calls.map(([text]) => text)).toEqual(['بكم', ' ', 'مرحبا']);
     expect(fillText.mock.invocationCallOrder[0]).toBeLessThan(drawImage.mock.invocationCallOrder[0]!);
     expect(drawImage.mock.invocationCallOrder[0]).toBeLessThan(fillText.mock.invocationCallOrder[1]!);
   });

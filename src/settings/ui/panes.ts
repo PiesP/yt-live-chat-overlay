@@ -66,10 +66,16 @@ type SectionDef = {
   fields: FieldDef[];
 };
 
+export interface DisclosureDef {
+  label: string;
+  sections: SectionDef[];
+}
+
 export interface PaneDef {
   id: string;
   label: string;
   sections: SectionDef[];
+  disclosures?: DisclosureDef[];
 }
 
 // ── Shorthand constructors ──────────────────────────────────────────────────
@@ -206,43 +212,67 @@ export const PANES: PaneDef[] = [
             ],
             'danmaku.modeDesc'
           ),
+          num('danmaku.fontSize', 'fontSize', 'danmaku.fontSizeDesc'),
           num('danmaku.scrollSpeed', 'speedPxPerSec', 'danmaku.scrollSpeedDesc'),
           range('danmaku.textOpacity', 'opacity', 'danmaku.textOpacityDesc'),
-          range('danmaku.laneGap', 'laneSpacing', 'danmaku.laneGapDesc'),
-          num('danmaku.exitPadding', 'exitPaddingPx', 'danmaku.exitPaddingDesc'),
-          num('danmaku.durationMul', 'modOwnerDurationMultiplier', 'danmaku.durationMulDesc'),
-        ],
-      },
-      {
-        title: 'danmaku.timing',
-        fields: [
-          num('danmaku.minScrollDuration', 'scrollDurationMinMs', 'danmaku.minScrollDurationDesc'),
-          num('danmaku.maxScrollDuration', 'scrollDurationMaxMs', 'danmaku.maxScrollDurationDesc'),
-          num('danmaku.topBottomDuration', 'topBottomDurationMs', 'danmaku.topBottomDurationDesc'),
-        ],
-      },
-      {
-        title: 'danmaku.safeZone',
-        fields: [
-          range('danmaku.topClearZone', 'safeTop', 'danmaku.topClearZoneDesc'),
-          range('danmaku.bottomClearZone', 'safeBottom', 'danmaku.bottomClearZoneDesc'),
-        ],
-      },
-      {
-        title: 'danmaku.font',
-        fields: [
           fontPreview(),
-          num('danmaku.fontSize', 'fontSize', 'danmaku.fontSizeDesc'),
-          weightToggle(
-            'Weight',
-            'fontWeight',
-            [
-              ['bold', 'Bold'],
-              ['normal', 'Regular'],
+        ],
+      },
+    ],
+    disclosures: [
+      {
+        label: 'danmaku.fineTuning',
+        sections: [
+          {
+            title: '',
+            fields: [
+              range('danmaku.laneGap', 'laneSpacing', 'danmaku.laneGapDesc'),
+              num('danmaku.exitPadding', 'exitPaddingPx', 'danmaku.exitPaddingDesc'),
+              num('danmaku.durationMul', 'modOwnerDurationMultiplier', 'danmaku.durationMulDesc'),
             ],
-            'danmaku.fontWeightDesc'
-          ),
-          fontChips('Family', 'fontFamily', FONT_SUGGESTIONS, 'danmaku.fontFamilyDesc'),
+          },
+          {
+            title: 'danmaku.timing',
+            fields: [
+              num(
+                'danmaku.minScrollDuration',
+                'scrollDurationMinMs',
+                'danmaku.minScrollDurationDesc'
+              ),
+              num(
+                'danmaku.maxScrollDuration',
+                'scrollDurationMaxMs',
+                'danmaku.maxScrollDurationDesc'
+              ),
+              num(
+                'danmaku.topBottomDuration',
+                'topBottomDurationMs',
+                'danmaku.topBottomDurationDesc'
+              ),
+            ],
+          },
+          {
+            title: 'danmaku.safeZone',
+            fields: [
+              range('danmaku.topClearZone', 'safeTop', 'danmaku.topClearZoneDesc'),
+              range('danmaku.bottomClearZone', 'safeBottom', 'danmaku.bottomClearZoneDesc'),
+            ],
+          },
+          {
+            title: 'danmaku.font',
+            fields: [
+              weightToggle(
+                'Weight',
+                'fontWeight',
+                [
+                  ['bold', 'Bold'],
+                  ['normal', 'Regular'],
+                ],
+                'danmaku.fontWeightDesc'
+              ),
+              fontChips('Family', 'fontFamily', FONT_SUGGESTIONS, 'danmaku.fontFamilyDesc'),
+            ],
+          },
         ],
       },
     ],
@@ -528,7 +558,10 @@ export const PANES: PaneDef[] = [
           sel(
             'translation.service',
             'translationService',
-            [['auto', 'translation.serviceAuto']],
+            [
+              ['auto', 'translation.serviceAuto'],
+              ['off', 'translation.serviceOff'],
+            ],
             'translation.serviceDesc'
           ),
           sel(

@@ -5,12 +5,8 @@ import { TRANSLATION_MAPS } from '@i18n/index';
 function collectI18nKeys(): string[] {
   const keys: string[] = [];
 
-  // Pane tabs (dot-notation keys now)
-  for (const pane of PANES) keys.push(pane.label);
-
-  // Section titles, field labels, tooltips, select options
-  for (const pane of PANES) {
-    for (const section of pane.sections) {
+  const collectSectionKeys = (sections: (typeof PANES)[number]['sections']): void => {
+    for (const section of sections) {
       if (section.title) keys.push(section.title);
       for (const field of section.fields) {
         if ('label' in field) keys.push(field.label);
@@ -19,6 +15,18 @@ function collectI18nKeys(): string[] {
           for (const [, label] of field.options) keys.push(label);
         }
       }
+    }
+  };
+
+  // Pane tabs (dot-notation keys now)
+  for (const pane of PANES) keys.push(pane.label);
+
+  // Section titles, field labels, tooltips, select options, and disclosures.
+  for (const pane of PANES) {
+    collectSectionKeys(pane.sections);
+    for (const disclosure of pane.disclosures ?? []) {
+      keys.push(disclosure.label);
+      collectSectionKeys(disclosure.sections);
     }
   }
 
@@ -31,6 +39,8 @@ function collectI18nKeys(): string[] {
     'import.invalidJson', 'app.settings', 'reset.confirmDesc',
     'format.valueAdjusted', 'format.shortMessagesShown',
     'app.autoSave', 'app.reload', 'appearance.authorsBackground',
+    'danmaku.preview', 'danmaku.previewMessage',
+    'translation.capabilityDetected', 'translation.capabilityUnavailable',
   );
 
   return [...new Set(keys)];
